@@ -1,0 +1,51 @@
+# Unreal generated output
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# IDE and local workspace files
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Build and compiler byproducts
+*.obj
+*.pch
+*.pdb
+*.ilk
+*.exp
+*.iobj
+*.ipdb
+*.tlog
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.cache
+
+# CMake byproducts for ThirdParty runtime experiments
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Source/ThirdParty/**/build/
+Source/ThirdParty/**/out/
+Source/ThirdParty/**/.cmake/
+
+# Keep source, metadata, samples, and intentional runtime artifacts tracked.
+!.gitignore
+!AGENTS.md
+!AvidScript.uplugin
+!Source/
+
