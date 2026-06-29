@@ -96,6 +96,15 @@ Plugins/AvidScript/Docs
 Plugins/AvidScript/Source/ThirdParty
 ```
 
+- Current WAMR snapshot: `WAMR-2.4.4`, commit `8c18e3f68b16c4bcaf05996b2636f6ed2b4cf629`.
+- WAMR upstream source lives in `Source/ThirdParty/WAMR/upstream`.
+- Win64 static library lives in `Source/ThirdParty/WAMR/lib/Win64/Release/libiwasm.lib`.
+- Rebuild Win64 WAMR with:
+
+```powershell
+cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
+```
+
 - Keep WAMR source/configuration tracked only when it is intentionally vendored.
 - Keep WAMR build outputs ignored through `.gitignore`.
 - Separate PC Editor support from future Android/iOS support in Build.cs and documentation.
@@ -108,3 +117,4 @@ Plugins/AvidScript/Source/ThirdParty
 - Runtime failures should become deterministic diagnostics, not Editor or packaged-game crashes.
 - Hot reload must use staging load, ABI validation, migration rules, and rollback.
 - High-frequency gameplay APIs should prefer generated typed calls and batching over fine-grained dynamic reflection calls.
+

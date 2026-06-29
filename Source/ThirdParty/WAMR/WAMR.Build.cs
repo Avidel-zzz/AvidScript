@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using UnrealBuildTool;
 
@@ -9,10 +10,10 @@ public class WAMR : ModuleRules
 
 		string UpstreamDir = Path.Combine(ModuleDirectory, "upstream");
 		string IncludeDir = Path.Combine(UpstreamDir, "core", "iwasm", "include");
-		string LibraryPath = GetLibraryPath(Target);
+		string LibraryPath = FindLibraryPath(Target);
 
 		bool bHasHeaders = Directory.Exists(IncludeDir);
-		bool bHasLibrary = File.Exists(LibraryPath);
+		bool bHasLibrary = !string.IsNullOrEmpty(LibraryPath) && File.Exists(LibraryPath);
 		bool bEnableWamr = bHasHeaders && bHasLibrary;
 
 		PublicDefinitions.Add(bEnableWamr ? "AVIDSCRIPT_WITH_WAMR=1" : "AVIDSCRIPT_WITH_WAMR=0");
@@ -24,14 +25,26 @@ public class WAMR : ModuleRules
 		}
 	}
 
-	private string GetLibraryPath(ReadOnlyTargetRules Target)
+	private string FindLibraryPath(ReadOnlyTargetRules Target)
 	{
-		if (Target.Platform == UnrealTargetPlatform.Win64)
+		foreach (string Candidate in GetLibraryCandidates(Target))
 		{
-			return Path.Combine(ModuleDirectory, "lib", "Win64", "Release", "vmlib.lib");
+			if (File.Exists(Candidate))
+			{
+				return Candidate;
+			}
 		}
 
-		return Path.Combine(ModuleDirectory, "lib", Target.Platform.ToString(), "Release", "vmlib.lib");
+		return string.Empty;
+	}
+
+	private IEnumerable<string> GetLibraryCandidates(ReadOnlyTargetRules Target)
+	{
+		string PlatformName = Target.Platform == UnrealTargetPlatform.Win64 ? "Win64" : Target.Platform.ToString();
+		string LibraryDir = Path.Combine(ModuleDirectory, "lib", PlatformName, "Release");
+
+		yield return Path.Combine(LibraryDir, "iwasm.lib");
+		yield return Path.Combine(LibraryDir, "libiwasm.lib");
+		yield return Path.Combine(LibraryDir, "vmlib.lib");
 	}
 }
-
