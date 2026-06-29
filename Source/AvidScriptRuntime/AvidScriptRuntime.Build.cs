@@ -18,9 +18,9 @@ public class AvidScriptRuntime : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
-				"Projects"
+				"Projects",
+				"WAMR"
 			}
 		);
 	}
 }
-
