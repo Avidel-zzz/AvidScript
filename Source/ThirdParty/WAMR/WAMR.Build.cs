@@ -22,6 +22,12 @@ public class WAMR : ModuleRules
 		{
 			PublicIncludePaths.Add(IncludeDir);
 			PublicAdditionalLibraries.Add(LibraryPath);
+			PublicDefinitions.Add("WASM_RUNTIME_API_EXTERN=");
+
+			if (Target.Platform == UnrealTargetPlatform.Win64)
+			{
+				PublicSystemLibraries.Add("ntdll.lib");
+			}
 		}
 	}
 
