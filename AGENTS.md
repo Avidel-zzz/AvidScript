@@ -82,6 +82,24 @@ Plugins/AvidScript/Docs
 & "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
 ```
 
+- Run runtime automation after runtime behavior changes:
+
+```powershell
+& "C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -Unattended -NullRHI -NoSplash -NoSound -NoP4 -NoLiveCoding -stdout -FullStdOutLogOutput -FORCELOGFLUSH -CrashForUAT "-ExecCmds=Automation RunTests AvidScript.Runtime" "-TestExit=Automation Test Queue Empty" "-abslog=C:\tmp\AvidScript_Automation.log"
+```
+
+- For Windows packaged Development smoke on this UE5.8 source build, skip ZenStore during cook to avoid local Zen oplog staging instability:
+
+```powershell
+& "C:\UnrealEngine\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -cook -clean -stage -pak -archive "-archivedirectory=C:\tmp\AvidScript_Package" "-AdditionalCookerOptions=-SkipZenStore" "-ubtargs=-MaxParallelActions=4 -NoUBA" -unattended -utf8output
+```
+
+- Validate the packaged runtime smoke log with:
+
+```powershell
+& "C:\tmp\AvidScript_Package\Windows\AvidTPSTemplate.exe" -NullRHI -NoSplash -NoSound -stdout -FullStdOutLogOutput -FORCELOGFLUSH "-ExecCmds=quit" "-abslog=C:\tmp\AvidScript_Packaged_Run.log"
+```
+
 - Record successful builds in the active phase log.
 - If a build fails before reaching AvidScript files, document it as an environment or project-level blocker.
 - If a build fails inside AvidScript files, fix the plugin code first and rerun the same command.
@@ -117,4 +135,3 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Runtime failures should become deterministic diagnostics, not Editor or packaged-game crashes.
 - Hot reload must use staging load, ABI validation, migration rules, and rollback.
 - High-frequency gameplay APIs should prefer generated typed calls and batching over fine-grained dynamic reflection calls.
-

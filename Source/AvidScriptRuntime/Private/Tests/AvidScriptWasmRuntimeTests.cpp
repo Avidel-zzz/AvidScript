@@ -96,6 +96,35 @@ bool FAvidScriptMinimalWasmSmokeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptPackagedTimingSmokeTest,
+	"AvidScript.Runtime.PackagedTimingSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptPackagedTimingSmokeTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmSmokeResult Result;
+
+	TestTrue(TEXT("Embedded module loads"), Runtime.LoadEmbeddedSmokeModule(Result));
+	TestTrue(TEXT("Runtime init timing is captured"), Result.Metrics.RuntimeInitMs >= 0.0);
+	TestTrue(TEXT("Module load timing is captured"), Result.Metrics.ModuleLoadMs > 0.0);
+	TestTrue(TEXT("Module instantiate timing is captured"), Result.Metrics.ModuleInstantiateMs > 0.0);
+	TestTrue(TEXT("Exec env creation timing is captured"), Result.Metrics.ExecEnvCreateMs >= 0.0);
+
+	TestTrue(TEXT("BeginPlay export succeeds"), Runtime.BeginPlay(Result));
+	TestTrue(TEXT("BeginPlay timing is captured"), Result.Metrics.BeginPlayCallMs >= 0.0);
+
+	TestTrue(TEXT("Tick export succeeds"), Runtime.Tick(1.0f / 60.0f, Result));
+	TestTrue(TEXT("Tick timing is captured"), Result.Metrics.TickCallMs >= 0.0);
+
+	Runtime.Unload(Result);
+	TestTrue(TEXT("Unload reports completed state"), Result.bUnloaded);
+	TestTrue(TEXT("Unload timing is captured"), Result.Metrics.UnloadMs >= 0.0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWasmSessionRestartSmokeTest,
 	"AvidScript.Runtime.SessionRestartSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

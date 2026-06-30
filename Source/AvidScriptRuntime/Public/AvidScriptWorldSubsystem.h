@@ -13,6 +13,7 @@ struct FAvidScriptWorldRuntimeStats
 	bool bEndPlayCalled = false;
 	int32 TickCallCount = 0;
 	FString LastErrorMessage;
+	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
 UCLASS(Transient)
@@ -34,7 +35,7 @@ public:
 
 private:
 	void RecordFailure(const FAvidScriptWasmSmokeResult& Result);
-	void ReleaseRuntime();
+	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> Runtime;
 	FAvidScriptWorldRuntimeStats RuntimeStats;

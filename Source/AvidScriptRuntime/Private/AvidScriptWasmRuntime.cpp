@@ -18,6 +18,7 @@ namespace
 constexpr uint32 AvidScriptWasmStackSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
+constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 
 const uint8 GAvidScriptMinimalWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
@@ -36,10 +37,19 @@ FCriticalSection GWamrRuntimeCriticalSection;
 int32 GWamrRuntimeRefCount = 0;
 #endif
 
-void PrepareResult(FAvidScriptWasmSmokeResult& OutResult, const FString& ModuleId)
+double MeasureElapsedMs(double StartSeconds)
+{
+	return FMath::Max((FPlatformTime::Seconds() - StartSeconds) * 1000.0, AvidScriptMinimumMeasuredMs);
+}
+
+void PrepareResult(
+	FAvidScriptWasmSmokeResult& OutResult,
+	const FString& ModuleId,
+	const FAvidScriptWasmRuntimeMetrics& Metrics)
 {
 	OutResult = FAvidScriptWasmSmokeResult();
 	OutResult.ModuleId = ModuleId;
+	OutResult.Metrics = Metrics;
 }
 
 void SetFailure(
@@ -175,8 +185,9 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	Unload();
+	Metrics = FAvidScriptWasmRuntimeMetrics();
 	ModuleId = InModuleId;
-	PrepareResult(OutResult, ModuleId);
+	PrepareResult(OutResult, ModuleId, Metrics);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -200,20 +211,26 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		return false;
 	}
 
+	const double RuntimeInitStartSeconds = FPlatformTime::Seconds();
 	if (!AcquireWamrRuntime(ModuleId, OutResult))
 	{
 		return false;
 	}
+	Metrics.RuntimeInitMs = MeasureElapsedMs(RuntimeInitStartSeconds);
 
 	bOwnsRuntimeLease = true;
 	OutResult.bRuntimeInitialized = true;
+	OutResult.Metrics = Metrics;
 
 	ModuleBuffer.Reset(BytecodeSize);
 	ModuleBuffer.Append(Bytecode, BytecodeSize);
 
 	char ErrorBuffer[AvidScriptWasmErrorBufferSize] = {};
 
+	const double ModuleLoadStartSeconds = FPlatformTime::Seconds();
 	Module = wasm_runtime_load(ModuleBuffer.GetData(), static_cast<uint32>(ModuleBuffer.Num()), ErrorBuffer, sizeof(ErrorBuffer));
+	Metrics.ModuleLoadMs = MeasureElapsedMs(ModuleLoadStartSeconds);
+	OutResult.Metrics = Metrics;
 	if (Module == nullptr)
 	{
 		SetFailure(
@@ -229,12 +246,15 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 
 	OutResult.bModuleLoaded = true;
 
+	const double ModuleInstantiateStartSeconds = FPlatformTime::Seconds();
 	ModuleInstance = wasm_runtime_instantiate(
 		static_cast<wasm_module_t>(Module),
 		AvidScriptWasmStackSize,
 		AvidScriptWasmHeapSize,
 		ErrorBuffer,
 		sizeof(ErrorBuffer));
+	Metrics.ModuleInstantiateMs = MeasureElapsedMs(ModuleInstantiateStartSeconds);
+	OutResult.Metrics = Metrics;
 	if (ModuleInstance == nullptr)
 	{
 		SetFailure(
@@ -250,7 +270,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 
 	OutResult.bModuleInstantiated = true;
 
+	const double ExecEnvCreateStartSeconds = FPlatformTime::Seconds();
 	ExecEnv = wasm_runtime_create_exec_env(static_cast<wasm_module_inst_t>(ModuleInstance), AvidScriptWasmStackSize);
+	Metrics.ExecEnvCreateMs = MeasureElapsedMs(ExecEnvCreateStartSeconds);
+	OutResult.Metrics = Metrics;
 	if (ExecEnv == nullptr)
 	{
 		SetFailure(
@@ -270,7 +293,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId);
+	PrepareResult(OutResult, ModuleId, Metrics);
 	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
@@ -297,6 +320,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		return false;
 	}
 
+	const double BeginPlayStartSeconds = FPlatformTime::Seconds();
 	if (!CallWamrExport(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
 		static_cast<wasm_exec_env_t>(ExecEnv),
@@ -306,10 +330,14 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		nullptr,
 		OutResult))
 	{
+		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
+		OutResult.Metrics = Metrics;
 		return false;
 	}
 
+	Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 	bHasBegunPlay = true;
+	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
 	return true;
@@ -318,7 +346,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 
 bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId);
+	PrepareResult(OutResult, ModuleId, Metrics);
 	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
@@ -350,6 +378,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	static_assert(sizeof(TickArgs[0]) == sizeof(DeltaSeconds), "WAMR f32 argument must fit in one cell.");
 	FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
 
+	const double TickStartSeconds = FPlatformTime::Seconds();
 	if (!CallWamrExport(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
 		static_cast<wasm_exec_env_t>(ExecEnv),
@@ -359,10 +388,14 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		TickArgs,
 		OutResult))
 	{
+		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		OutResult.Metrics = Metrics;
 		return false;
 	}
 
+	Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 	++TickCallCount;
+	OutResult.Metrics = Metrics;
 	OutResult.bTickCalled = true;
 	OutResult.TickCallCount = TickCallCount;
 	return true;
@@ -371,6 +404,21 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 
 void FAvidScriptWasmRuntimeInstance::Unload()
 {
+	FAvidScriptWasmSmokeResult IgnoredResult;
+	Unload(IgnoredResult);
+}
+
+void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResult)
+{
+	const FString PreviousModuleId = ModuleId;
+	const bool bWasRuntimeInitialized = bOwnsRuntimeLease;
+	const bool bWasModuleLoaded = Module != nullptr;
+	const bool bWasModuleInstantiated = ModuleInstance != nullptr;
+	const bool bHadBegunPlay = bHasBegunPlay;
+	const int32 PreviousTickCallCount = TickCallCount;
+	const bool bHadResources = bWasRuntimeInitialized || bWasModuleLoaded || bWasModuleInstantiated || ExecEnv != nullptr;
+	const double UnloadStartSeconds = FPlatformTime::Seconds();
+
 #if AVIDSCRIPT_WITH_WAMR
 	if (ExecEnv != nullptr)
 	{
@@ -404,6 +452,16 @@ void FAvidScriptWasmRuntimeInstance::Unload()
 	ModuleId.Empty();
 	bHasBegunPlay = false;
 	TickCallCount = 0;
+
+	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
+	PrepareResult(OutResult, PreviousModuleId, Metrics);
+	OutResult.bRuntimeInitialized = bWasRuntimeInitialized;
+	OutResult.bModuleLoaded = bWasModuleLoaded;
+	OutResult.bModuleInstantiated = bWasModuleInstantiated;
+	OutResult.bBeginPlayCalled = bHadBegunPlay;
+	OutResult.bTickCalled = PreviousTickCallCount > 0;
+	OutResult.TickCallCount = PreviousTickCallCount;
+	OutResult.bUnloaded = true;
 }
 
 bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
@@ -429,7 +487,6 @@ bool FAvidScriptWasmRuntime::RunEmbeddedSmokeTest(FAvidScriptWasmSmokeResult& Ou
 		return false;
 	}
 
-	OutResult.bUnloaded = true;
-	Runtime.Unload();
+	Runtime.Unload(OutResult);
 	return true;
 }
