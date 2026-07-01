@@ -9,14 +9,14 @@ public class AvidScriptRuntime : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new[]
 			{
-				"Core"
+				"Core",
+				"CoreUObject"
 			}
 		);
 
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
-				"CoreUObject",
 				"Engine",
 				"Projects",
 				"WAMR"

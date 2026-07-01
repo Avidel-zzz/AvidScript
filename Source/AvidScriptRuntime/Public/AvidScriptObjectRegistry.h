@@ -1,0 +1,91 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/WeakObjectPtr.h"
+
+struct FAvidScriptObjectHandle
+{
+	uint32 Slot = 0;
+	uint32 Generation = 0;
+
+	bool IsValid() const
+	{
+		return Slot != 0 && Generation != 0;
+	}
+
+	uint64 ToUInt64() const
+	{
+		return (static_cast<uint64>(Generation) << 32) | static_cast<uint64>(Slot);
+	}
+};
+
+struct FAvidScriptObjectHandleResult
+{
+	bool bSucceeded = false;
+	FAvidScriptObjectHandle Handle;
+	FString ObjectPath;
+	FString ErrorCategory;
+	FString NextAction;
+	FString ErrorMessage;
+};
+
+class AVIDSCRIPTRUNTIME_API FAvidScriptObjectRegistry
+{
+public:
+	FAvidScriptObjectHandle RegisterObject(UObject* Object, FAvidScriptObjectHandleResult& OutResult);
+	UObject* ResolveObject(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult) const;
+
+	template <typename TObject>
+	TObject* ResolveObject(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult) const
+	{
+		UObject* Object = ResolveObject(Handle, OutResult);
+		if (Object == nullptr)
+		{
+			return nullptr;
+		}
+
+		TObject* TypedObject = Cast<TObject>(Object);
+		if (TypedObject == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				Handle,
+				TEXT("type_mismatch"),
+				Object,
+				TEXT("Use a handle API that matches the registered UObject type."));
+			return nullptr;
+		}
+
+		return TypedObject;
+	}
+
+	bool ReleaseHandle(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult);
+	void Reset();
+
+	int32 NumSlots() const { return Slots.Num(); }
+	int32 NumFreeSlots() const { return FreeSlots.Num(); }
+
+private:
+	struct FSlot
+	{
+		TWeakObjectPtr<UObject> Object;
+		uint32 Generation = 1;
+		bool bOccupied = false;
+	};
+
+	static uint32 AdvanceGeneration(uint32 Generation);
+	static void SetSuccess(
+		FAvidScriptObjectHandleResult& OutResult,
+		const FAvidScriptObjectHandle& Handle,
+		const UObject* Object);
+	static void SetFailure(
+		FAvidScriptObjectHandleResult& OutResult,
+		const FAvidScriptObjectHandle& Handle,
+		const TCHAR* ErrorCategory,
+		const UObject* Object,
+		const TCHAR* NextAction);
+
+	TArray<FSlot> Slots;
+	TArray<int32> FreeSlots;
+	uint32 GenerationDomain = 1;
+};
