@@ -41,6 +41,7 @@ public:
 
 	bool LoadEmbeddedSmokeModule(FAvidScriptWasmSmokeResult& OutResult);
 	bool LoadModule(const uint8* Bytecode, int32 BytecodeSize, const FString& InModuleId, FAvidScriptWasmSmokeResult& OutResult);
+	bool ValidateRequiredExports(const TArray<FString>& RequiredExports, FAvidScriptWasmSmokeResult& OutResult) const;
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	void Unload();

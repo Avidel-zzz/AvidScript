@@ -291,6 +291,73 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 #endif
 }
 
+bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
+	const TArray<FString>& RequiredExports,
+	FAvidScriptWasmSmokeResult& OutResult) const
+{
+	PrepareResult(OutResult, ModuleId, Metrics);
+	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
+	OutResult.bModuleLoaded = Module != nullptr;
+	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.TickCallCount = TickCallCount;
+
+#if !AVIDSCRIPT_WITH_WAMR
+	SetFailure(
+		OutResult,
+		ModuleId,
+		TEXT("<runtime>"),
+		TEXT("backend_unavailable"),
+		TEXT("WAMR backend is not available"),
+		TEXT("build the ThirdParty WAMR static library before validating script exports"));
+	return false;
+#else
+	if (!IsLoaded())
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("<module>"),
+			TEXT("invalid_state"),
+			TEXT("No WASM module is loaded"),
+			TEXT("load a module before validating required exports"));
+		return false;
+	}
+
+	for (const FString& RequiredExport : RequiredExports)
+	{
+		if (RequiredExport.IsEmpty())
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				TEXT("<manifest>"),
+				TEXT("missing_export"),
+				TEXT("Required export name is empty"),
+				TEXT("fix the reload manifest before activating this script"));
+			return false;
+		}
+
+		FTCHARToUTF8 RequiredExportUtf8(*RequiredExport);
+		wasm_function_inst_t Function = wasm_runtime_lookup_function(
+			static_cast<wasm_module_inst_t>(ModuleInstance),
+			RequiredExportUtf8.Get());
+		if (Function == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				RequiredExport,
+				TEXT("missing_export"),
+				FString::Printf(TEXT("Required export '%s' was not found"), *RequiredExport),
+				TEXT("reject this script module and keep the previous live runtime"));
+			return false;
+		}
+	}
+
+	return true;
+#endif
+}
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, Metrics);
