@@ -1,11 +1,20 @@
 #include "AvidScriptRuntimeBenchmark.h"
 
+#include "AvidScriptActorBinding.h"
+#include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmRuntime.h"
+
+#include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeBenchmark, Log, All);
 
 namespace
 {
+constexpr double AvidScriptMinimumBenchmarkMs = 0.0001;
+
 FAvidScriptBenchmarkStats CalculateStats(TArray<double> Samples)
 {
 	FAvidScriptBenchmarkStats Stats;
@@ -34,6 +43,75 @@ FAvidScriptBenchmarkStats CalculateStats(TArray<double> Samples)
 	Stats.P50Ms = Samples[P50Index];
 	Stats.P95Ms = Samples[P95Index];
 	return Stats;
+}
+
+double MeasureElapsedPerIterationMs(double StartSeconds, int32 Iterations)
+{
+	const int32 SafeIterations = FMath::Max(Iterations, 1);
+	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+	return FMath::Max(ElapsedMs / static_cast<double>(SafeIterations), AvidScriptMinimumBenchmarkMs);
+}
+
+bool CreateBenchmarkWorld(UWorld*& OutWorld)
+{
+	OutWorld = nullptr;
+
+	if (GEngine == nullptr)
+	{
+		return false;
+	}
+
+	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptHostBindingBenchmarkWorld"));
+	if (OutWorld == nullptr)
+	{
+		return false;
+	}
+
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(OutWorld);
+	return true;
+}
+
+void DestroyBenchmarkWorld(UWorld*& World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (GEngine != nullptr)
+	{
+		GEngine->DestroyWorldContext(World);
+	}
+
+	World->DestroyWorld(false);
+	World = nullptr;
+}
+
+AActor* SpawnBenchmarkActor(UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return nullptr;
+	}
+
+	AActor* Actor = World->SpawnActor<AActor>();
+	if (Actor == nullptr)
+	{
+		return nullptr;
+	}
+
+	USceneComponent* RootComponent = NewObject<USceneComponent>(Actor, USceneComponent::StaticClass(), TEXT("AvidScriptBenchmarkRoot"));
+	if (RootComponent == nullptr)
+	{
+		return nullptr;
+	}
+
+	Actor->SetRootComponent(RootComponent);
+	Actor->AddInstanceComponent(RootComponent);
+	RootComponent->RegisterComponentWithWorld(World);
+	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0), false, nullptr, ETeleportType::TeleportPhysics);
+	return Actor;
 }
 
 void AppendMetrics(
@@ -66,6 +144,25 @@ void SetFailureFromSmokeResult(
 		TEXT("runtime_microbenchmark_failed | category=%s | message=%s"),
 		OutResult.ErrorCategory.IsEmpty() ? TEXT("<none>") : *OutResult.ErrorCategory,
 		OutResult.ErrorMessage.IsEmpty() ? TEXT("<none>") : *OutResult.ErrorMessage);
+}
+
+void SetHostBindingFailure(
+	FAvidScriptHostBindingBenchmarkResult& OutResult,
+	const FString& ErrorCategory,
+	const FString& Details,
+	const FString& NextAction)
+{
+	OutResult.bSucceeded = false;
+	OutResult.ErrorCategory = ErrorCategory;
+	OutResult.ErrorMessage = FString::Printf(
+		TEXT("AvidScript host binding benchmark error | category=%s | details=%s | next=%s"),
+		ErrorCategory.IsEmpty() ? TEXT("<none>") : *ErrorCategory,
+		Details.IsEmpty() ? TEXT("<none>") : *Details,
+		NextAction.IsEmpty() ? TEXT("<none>") : *NextAction);
+	OutResult.Summary = FString::Printf(
+		TEXT("host_binding_benchmark_failed | category=%s | message=%s"),
+		OutResult.ErrorCategory.IsEmpty() ? TEXT("<none>") : *OutResult.ErrorCategory,
+		*OutResult.ErrorMessage);
 }
 } // namespace
 
@@ -165,5 +262,170 @@ bool FAvidScriptRuntimeBenchmark::RunEmbeddedSmokeBenchmark(
 		OutResult.Unload.AvgMs);
 
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
+	return true;
+}
+
+bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
+	const FAvidScriptHostBindingBenchmarkOptions& Options,
+	FAvidScriptHostBindingBenchmarkResult& OutResult)
+{
+	OutResult = FAvidScriptHostBindingBenchmarkResult();
+	OutResult.WarmupCount = FMath::Max(Options.WarmupCount, 0);
+	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
+	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
+
+	UWorld* World = nullptr;
+	if (!CreateBenchmarkWorld(World))
+	{
+		SetHostBindingFailure(
+			OutResult,
+			TEXT("world_create_failed"),
+			TEXT("Failed to create the host binding benchmark world."),
+			TEXT("Run this benchmark in an initialized editor or commandlet context."));
+		DestroyBenchmarkWorld(World);
+		return false;
+	}
+
+	AActor* Actor = SpawnBenchmarkActor(World);
+	if (Actor == nullptr)
+	{
+		SetHostBindingFailure(
+			OutResult,
+			TEXT("actor_spawn_failed"),
+			TEXT("Failed to spawn the host binding benchmark actor."),
+			TEXT("Verify the benchmark world can spawn actors and register a root component."));
+		DestroyBenchmarkWorld(World);
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!RegisterResult.bSucceeded || !ActorHandle.IsValid())
+	{
+		SetHostBindingFailure(
+			OutResult,
+			RegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("register_failed")) : RegisterResult.ErrorCategory,
+			RegisterResult.ErrorMessage,
+			RegisterResult.NextAction);
+		DestroyBenchmarkWorld(World);
+		return false;
+	}
+
+	TArray<double> DirectGetSamples;
+	TArray<double> RegistryResolveSamples;
+	TArray<double> BindingGetSamples;
+	TArray<double> BindingSetSamples;
+	DirectGetSamples.Reserve(OutResult.SampleCount);
+	RegistryResolveSamples.Reserve(OutResult.SampleCount);
+	BindingGetSamples.Reserve(OutResult.SampleCount);
+	BindingSetSamples.Reserve(OutResult.SampleCount);
+
+	const int32 TotalRuns = OutResult.WarmupCount + OutResult.SampleCount;
+	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
+	{
+		const double DirectStartSeconds = FPlatformTime::Seconds();
+		FVector LastDirectLocation = FVector::ZeroVector;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			LastDirectLocation = Actor->GetActorLocation();
+		}
+		const double DirectGetMs = MeasureElapsedPerIterationMs(DirectStartSeconds, OutResult.IterationsPerSample);
+
+		OutResult.LastReadLocation = LastDirectLocation;
+
+		const double RegistryStartSeconds = FPlatformTime::Seconds();
+		AActor* ResolvedActor = nullptr;
+		FAvidScriptObjectHandleResult ResolveResult;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			ResolvedActor = Registry.ResolveObject<AActor>(ActorHandle, ResolveResult);
+			if (ResolvedActor == nullptr)
+			{
+				SetHostBindingFailure(
+					OutResult,
+					ResolveResult.ErrorCategory.IsEmpty() ? FString(TEXT("resolve_failed")) : ResolveResult.ErrorCategory,
+					ResolveResult.ErrorMessage,
+					ResolveResult.NextAction);
+				DestroyBenchmarkWorld(World);
+				return false;
+			}
+		}
+		const double RegistryResolveMs = MeasureElapsedPerIterationMs(RegistryStartSeconds, OutResult.IterationsPerSample);
+
+		const double BindingGetStartSeconds = FPlatformTime::Seconds();
+		FVector BindingLocation = FVector::ZeroVector;
+		FAvidScriptActorBindingResult BindingGetResult;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			if (!FAvidScriptActorBinding::GetActorLocation(Registry, ActorHandle, BindingLocation, BindingGetResult))
+			{
+				SetHostBindingFailure(
+					OutResult,
+					BindingGetResult.ErrorCategory.IsEmpty() ? FString(TEXT("binding_get_failed")) : BindingGetResult.ErrorCategory,
+					BindingGetResult.ErrorMessage,
+					BindingGetResult.NextAction);
+				DestroyBenchmarkWorld(World);
+				return false;
+			}
+		}
+		const double BindingGetMs = MeasureElapsedPerIterationMs(BindingGetStartSeconds, OutResult.IterationsPerSample);
+
+		const double BindingSetStartSeconds = FPlatformTime::Seconds();
+		FAvidScriptActorBindingResult BindingSetResult;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			const FVector TargetLocation(
+				1000.0 + static_cast<double>(RunIndex * OutResult.IterationsPerSample + IterationIndex),
+				2000.0,
+				3000.0);
+			if (!FAvidScriptActorBinding::SetActorLocation(
+				Registry,
+				ActorHandle,
+				TargetLocation,
+				EAvidScriptActorWritePolicy::AllowWrites,
+				BindingSetResult))
+			{
+				SetHostBindingFailure(
+					OutResult,
+					BindingSetResult.ErrorCategory.IsEmpty() ? FString(TEXT("binding_set_failed")) : BindingSetResult.ErrorCategory,
+					BindingSetResult.ErrorMessage,
+					BindingSetResult.NextAction);
+				DestroyBenchmarkWorld(World);
+				return false;
+			}
+		}
+		const double BindingSetMs = MeasureElapsedPerIterationMs(BindingSetStartSeconds, OutResult.IterationsPerSample);
+
+		OutResult.LastReadLocation = BindingLocation;
+		OutResult.FinalActorLocation = Actor->GetActorLocation();
+
+		if (RunIndex >= OutResult.WarmupCount)
+		{
+			DirectGetSamples.Add(DirectGetMs);
+			RegistryResolveSamples.Add(RegistryResolveMs);
+			BindingGetSamples.Add(BindingGetMs);
+			BindingSetSamples.Add(BindingSetMs);
+		}
+	}
+
+	OutResult.DirectGetActorLocation = CalculateStats(DirectGetSamples);
+	OutResult.RegistryResolveActor = CalculateStats(RegistryResolveSamples);
+	OutResult.BindingGetActorLocation = CalculateStats(BindingGetSamples);
+	OutResult.BindingSetActorLocation = CalculateStats(BindingSetSamples);
+	OutResult.bSucceeded = true;
+	OutResult.Summary = FString::Printf(
+		TEXT("host_binding_benchmark | warmup=%d | samples=%d | iterations=%d | direct_get_avg_ms=%.6f | registry_resolve_avg_ms=%.6f | binding_get_avg_ms=%.6f | binding_set_avg_ms=%.6f | binding_set_p95_ms=%.6f"),
+		OutResult.WarmupCount,
+		OutResult.SampleCount,
+		OutResult.IterationsPerSample,
+		OutResult.DirectGetActorLocation.AvgMs,
+		OutResult.RegistryResolveActor.AvgMs,
+		OutResult.BindingGetActorLocation.AvgMs,
+		OutResult.BindingSetActorLocation.AvgMs,
+		OutResult.BindingSetActorLocation.P95Ms);
+
+	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
+	DestroyBenchmarkWorld(World);
 	return true;
 }
