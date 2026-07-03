@@ -90,6 +90,7 @@ Plugins/AvidScript/Docs
 - In Codex Windows sandbox, if `apply_patch` fails with `windows sandbox failed: helper_unknown_error`, first retry with workspace-relative paths. If the helper still fails, use a controlled PowerShell write only for the intended workspace files, then immediately inspect `git diff` and run the relevant build/automation verification. Do not skip diff review or tests after a fallback write.
 - When editing Markdown through PowerShell, use single-quoted here-strings or explicit line arrays for text containing Markdown backticks. Do not put Markdown backticks inside double-quoted PowerShell strings, because they are escape characters and can corrupt commit hashes or inline code. After writing docs, verify the rendered source with `Get-Content` or `Select-String`.
 - 2026-07-03 P4.2 mistake record: a PowerShell double-quoted Markdown replacement interpreted backticks as escape characters and briefly wrote corrupted inline code/control characters into root docs. Prevention: use literal single-quoted here-strings or line arrays for Markdown edits, then run a control-character scan (`[\x00-\x08\x0B\x0C\x0E-\x1F]`) over touched Markdown before considering docs done.
+- 2026-07-04 P5.1 mistake record: a Chinese plugin Markdown file was first written with ASCII encoding, replacing non-ASCII text with `?`. Prevention: when a Markdown/doc file contains Chinese or other non-ASCII text, write it as UTF-8 without BOM and inspect the rendered source with `Get-Content` before committing; a control-character scan alone is not sufficient.
 - After C++ or Build.cs changes, run the UE5.8 Editor target build:
 
 ```powershell
@@ -118,6 +119,20 @@ Plugins/AvidScript/Docs
 - If a build fails before reaching AvidScript files, document it as an environment or project-level blocker.
 - If a build fails inside AvidScript files, fix the plugin code first and rerun the same command.
 - Generated build outputs must remain ignored by Git.
+
+## D Guest Toolchain Workflow
+
+- P5.1 proved official LDC 1.42.0 Windows x64 can compile the minimal D guest to freestanding wasm32 using LDC's internal LLD. Do not require a standalone `wasm-ld.exe` for this path.
+- If only `ldc2.exe` is present, `BuildDGuestActorSetLocation.ps1` should continue and report `linker=ldc2-internal-lld`.
+- The current verified portable toolchain location is outside the plugin repository:
+
+```text
+C:\tmp\AvidScriptToolchains\ldc2-1.42.0-windows-x64\ldc2-1.42.0-windows-x64\bin\ldc2.exe
+```
+
+- Do not commit downloaded LDC archives, extracted toolchains, or generated D/WASM artifacts under `Saved/`.
+- LDC freestanding `extern(C)` undefined imports currently arrive as `env.<name>`. AvidScript's canonical Host ABI remains `avidscript.<name>`, but runtime must keep the `env` compatibility alias until a cleaner import-module mapping or artifact postprocess is implemented.
+- Before removing the `env` alias, prove D artifacts can import `avidscript.actor_set_location` directly and rerun `AvidScript.Guest.D` plus the full `AvidScript` automation suite.
 
 ## ThirdParty Runtime Workflow
 

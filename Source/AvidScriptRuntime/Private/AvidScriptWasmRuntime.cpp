@@ -51,6 +51,7 @@ const uint8 GAvidScriptHostImportWasmModule[] = {
 
 #if AVIDSCRIPT_WITH_WAMR
 constexpr const char* AvidScriptHostImportModuleName = "avidscript";
+constexpr const char* AvidScriptLdcDefaultImportModuleName = "env";
 constexpr const char* AvidScriptHostAddI32Name = "host_add_i32";
 constexpr const char* AvidScriptHostFailI32Name = "host_fail_i32";
 constexpr const char* AvidScriptActorGetLocationName = "actor_get_location";
@@ -240,19 +241,37 @@ bool RegisterAvidScriptHostImports(const FString& ModuleId, FAvidScriptWasmSmoke
 		return true;
 	}
 
-	if (!wasm_runtime_register_natives(
+	constexpr const char* ModuleNames[] = {
 		AvidScriptHostImportModuleName,
-		GAvidScriptNativeSymbols,
-		static_cast<uint32_t>(UE_ARRAY_COUNT(GAvidScriptNativeSymbols))))
+		AvidScriptLdcDefaultImportModuleName
+	};
+
+	for (const char* ModuleName : ModuleNames)
 	{
-		SetFailure(
-			OutResult,
-			ModuleId,
-			TEXT("<runtime>"),
-			TEXT("host_import_registration_failed"),
-			TEXT("wasm_runtime_register_natives returned false for AvidScript host imports"),
-			TEXT("verify WAMR native-symbol support and AvidScript import signatures"));
-		return false;
+		if (!wasm_runtime_register_natives(
+			ModuleName,
+			GAvidScriptNativeSymbols,
+			static_cast<uint32_t>(UE_ARRAY_COUNT(GAvidScriptNativeSymbols))))
+		{
+			for (const char* RegisteredModuleName : ModuleNames)
+			{
+				if (RegisteredModuleName == ModuleName)
+				{
+					break;
+				}
+
+				wasm_runtime_unregister_natives(RegisteredModuleName, GAvidScriptNativeSymbols);
+			}
+
+			SetFailure(
+				OutResult,
+				ModuleId,
+				TEXT("<runtime>"),
+				TEXT("host_import_registration_failed"),
+				FString::Printf(TEXT("wasm_runtime_register_natives returned false for AvidScript host imports module '%s'"), ANSI_TO_TCHAR(ModuleName)),
+				TEXT("verify WAMR native-symbol support and AvidScript import signatures"));
+			return false;
+		}
 	}
 
 	bAvidScriptNativeSymbolsRegistered = true;
@@ -303,6 +322,7 @@ void ReleaseWamrRuntime()
 	{
 		if (bAvidScriptNativeSymbolsRegistered)
 		{
+			wasm_runtime_unregister_natives(AvidScriptLdcDefaultImportModuleName, GAvidScriptNativeSymbols);
 			wasm_runtime_unregister_natives(AvidScriptHostImportModuleName, GAvidScriptNativeSymbols);
 			bAvidScriptNativeSymbolsRegistered = false;
 		}

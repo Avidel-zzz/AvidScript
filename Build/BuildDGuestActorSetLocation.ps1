@@ -75,10 +75,6 @@ $MissingTools = @()
 if ($null -eq $Ldc2) {
     $MissingTools += "ldc2"
 }
-if ($null -eq $WasmLd) {
-    $MissingTools += "wasm-ld"
-}
-
 if ($MissingTools.Count -gt 0) {
     Write-Output "[AvidScript][DGuest][Build] result=missing_toolchain missing=$($MissingTools -join ',') output=$OutputPath"
     exit 0
@@ -97,7 +93,12 @@ $Arguments = @(
 )
 
 Write-Output "[AvidScript][DGuest][Build] compiler=$($Ldc2.Source)"
-Write-Output "[AvidScript][DGuest][Build] linker=$($WasmLd.Source)"
+if ($null -ne $WasmLd) {
+    Write-Output "[AvidScript][DGuest][Build] linker=$($WasmLd.Source)"
+}
+else {
+    Write-Output "[AvidScript][DGuest][Build] linker=ldc2-internal-lld"
+}
 Write-Output "[AvidScript][DGuest][Build] output=$OutputPath"
 
 $CompilerOutput = & $Ldc2.Source @Arguments 2>&1
