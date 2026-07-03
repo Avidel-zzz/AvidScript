@@ -32,9 +32,39 @@ const uint8 GAvidScriptMinimalWasmModule[] = {
 	0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b
 };
 
+const uint8 GAvidScriptHostImportWasmModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x0d, 0x03, 0x60, 0x01, 0x7f, 0x01, 0x7f,
+	0x60, 0x00, 0x00, 0x60, 0x01, 0x7d, 0x00,
+	0x02, 0x1b, 0x01, 0x0a, 0x61, 0x76, 0x69, 0x64,
+	0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x0c, 0x68,
+	0x6f, 0x73, 0x74, 0x5f, 0x61, 0x64, 0x64, 0x5f,
+	0x69, 0x33, 0x32, 0x00, 0x00, 0x03, 0x03, 0x02,
+	0x01, 0x02, 0x07, 0x25, 0x02, 0x12, 0x61, 0x76,
+	0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65,
+	0x67, 0x69, 0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79,
+	0x00, 0x01, 0x0c, 0x61, 0x76, 0x69, 0x64, 0x5f,
+	0x6f, 0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00,
+	0x02, 0x0a, 0x0c, 0x02, 0x07, 0x00, 0x41, 0x29,
+	0x10, 0x00, 0x1a, 0x0b, 0x02, 0x00, 0x0b
+};
+
 #if AVIDSCRIPT_WITH_WAMR
+constexpr const char* AvidScriptHostImportModuleName = "avidscript";
+constexpr const char* AvidScriptHostAddI32Name = "host_add_i32";
+constexpr const char* AvidScriptHostFailI32Name = "host_fail_i32";
+
+int32_t AvidScriptHostAddI32(wasm_exec_env_t ExecEnv, int32_t Input);
+int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input);
+
+NativeSymbol GAvidScriptNativeSymbols[] = {
+	{ AvidScriptHostAddI32Name, reinterpret_cast<void*>(AvidScriptHostAddI32), "(i)i", nullptr },
+	{ AvidScriptHostFailI32Name, reinterpret_cast<void*>(AvidScriptHostFailI32), "(i)i", nullptr }
+};
+
 FCriticalSection GWamrRuntimeCriticalSection;
 int32 GWamrRuntimeRefCount = 0;
+bool bAvidScriptNativeSymbolsRegistered = false;
 #endif
 
 double MeasureElapsedMs(double StartSeconds)
@@ -58,16 +88,26 @@ void SetFailure(
 	const FString& ExportName,
 	const FString& Category,
 	const FString& Details,
-	const FString& NextAction)
+	const FString& NextAction,
+	const FString& ImportModuleName = FString(),
+	const FString& ImportName = FString())
 {
 	OutResult.ModuleId = ModuleId;
 	OutResult.ExportName = ExportName;
+	OutResult.ImportModuleName = ImportModuleName;
+	OutResult.ImportName = ImportName;
 	OutResult.ErrorCategory = Category;
 	OutResult.NextAction = NextAction;
+
+	const FString ImportText = (!ImportModuleName.IsEmpty() || !ImportName.IsEmpty())
+		? FString::Printf(TEXT(" | import=%s.%s"), ImportModuleName.IsEmpty() ? TEXT("<none>") : *ImportModuleName, ImportName.IsEmpty() ? TEXT("<none>") : *ImportName)
+		: FString();
+
 	OutResult.ErrorMessage = FString::Printf(
-		TEXT("AvidScript WAMR error | backend=WAMR | module=%s | export=%s | category=%s | details=%s | next=%s"),
+		TEXT("AvidScript WAMR error | backend=WAMR | module=%s | export=%s%s | category=%s | details=%s | next=%s"),
 		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
 		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
+		*ImportText,
 		*Category,
 		*Details,
 		*NextAction);
@@ -76,20 +116,102 @@ void SetFailure(
 }
 
 #if AVIDSCRIPT_WITH_WAMR
-bool AcquireWamrRuntime(const FString& ModuleId, FAvidScriptWasmSmokeResult& OutResult)
+FAvidScriptWasmRuntimeInstance* GetRuntimeInstanceFromExecEnv(wasm_exec_env_t ExecEnv)
 {
-	FScopeLock Lock(&GWamrRuntimeCriticalSection);
+	return ExecEnv != nullptr
+		? static_cast<FAvidScriptWasmRuntimeInstance*>(wasm_runtime_get_user_data(ExecEnv))
+		: nullptr;
+}
 
-	if (GWamrRuntimeRefCount == 0 && !wasm_runtime_init())
+void SetHostImportException(wasm_exec_env_t ExecEnv, const char* Details)
+{
+	if (ExecEnv == nullptr)
+	{
+		return;
+	}
+
+	wasm_module_inst_t ModuleInstance = wasm_runtime_get_module_inst(ExecEnv);
+	if (ModuleInstance != nullptr)
+	{
+		wasm_runtime_set_exception(ModuleInstance, Details);
+	}
+}
+
+int32_t AvidScriptHostAddI32(wasm_exec_env_t ExecEnv, int32_t Input)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.host_add_i32");
+		return 0;
+	}
+
+	return RuntimeInstance->HandleHostAddI32Import(static_cast<int32>(Input));
+}
+
+int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.host_fail_i32");
+		return 0;
+	}
+
+	RuntimeInstance->HandleHostFailI32Import(static_cast<int32>(Input));
+	SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.host_fail_i32 returned failure");
+	return 0;
+}
+
+bool RegisterAvidScriptHostImports(const FString& ModuleId, FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (bAvidScriptNativeSymbolsRegistered)
+	{
+		return true;
+	}
+
+	if (!wasm_runtime_register_natives(
+		AvidScriptHostImportModuleName,
+		GAvidScriptNativeSymbols,
+		static_cast<uint32_t>(UE_ARRAY_COUNT(GAvidScriptNativeSymbols))))
 	{
 		SetFailure(
 			OutResult,
 			ModuleId,
 			TEXT("<runtime>"),
-			TEXT("runtime_init_failed"),
-			TEXT("wasm_runtime_init returned false"),
-			TEXT("verify WAMR build artifacts and platform initialization"));
+			TEXT("host_import_registration_failed"),
+			TEXT("wasm_runtime_register_natives returned false for AvidScript host imports"),
+			TEXT("verify WAMR native-symbol support and AvidScript import signatures"));
 		return false;
+	}
+
+	bAvidScriptNativeSymbolsRegistered = true;
+	return true;
+}
+
+bool AcquireWamrRuntime(const FString& ModuleId, FAvidScriptWasmSmokeResult& OutResult)
+{
+	FScopeLock Lock(&GWamrRuntimeCriticalSection);
+
+	if (GWamrRuntimeRefCount == 0)
+	{
+		if (!wasm_runtime_init())
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				TEXT("<runtime>"),
+				TEXT("runtime_init_failed"),
+				TEXT("wasm_runtime_init returned false"),
+				TEXT("verify WAMR build artifacts and platform initialization"));
+			return false;
+		}
+
+		if (!RegisterAvidScriptHostImports(ModuleId, OutResult))
+		{
+			wasm_runtime_destroy();
+			return false;
+		}
 	}
 
 	++GWamrRuntimeRefCount;
@@ -109,6 +231,12 @@ void ReleaseWamrRuntime()
 	--GWamrRuntimeRefCount;
 	if (GWamrRuntimeRefCount == 0)
 	{
+		if (bAvidScriptNativeSymbolsRegistered)
+		{
+			wasm_runtime_unregister_natives(AvidScriptHostImportModuleName, GAvidScriptNativeSymbols);
+			bAvidScriptNativeSymbolsRegistered = false;
+		}
+
 		wasm_runtime_destroy();
 	}
 }
@@ -124,9 +252,59 @@ FString GetWamrException(wasm_module_inst_t InModuleInstance)
 	return Exception != nullptr ? UTF8_TO_TCHAR(Exception) : TEXT("WAMR did not report an exception.");
 }
 
+bool ValidateLinkedImports(
+	wasm_module_t InModule,
+	const FString& ModuleId,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	const int32 ImportCount = static_cast<int32>(wasm_runtime_get_import_count(InModule));
+	if (ImportCount < 0)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("<import>"),
+			TEXT("import_inspection_failed"),
+			TEXT("wasm_runtime_get_import_count returned a negative value"),
+			TEXT("reject this script module and inspect the guest import section"));
+		return false;
+	}
+
+	for (int32 ImportIndex = 0; ImportIndex < ImportCount; ++ImportIndex)
+	{
+		wasm_import_t ImportInfo = {};
+		wasm_runtime_get_import_type(InModule, ImportIndex, &ImportInfo);
+
+		if (ImportInfo.kind != WASM_IMPORT_EXPORT_KIND_FUNC)
+		{
+			continue;
+		}
+
+		const FString ImportModuleName = ImportInfo.module_name != nullptr ? FString(UTF8_TO_TCHAR(ImportInfo.module_name)) : FString();
+		const FString ImportName = ImportInfo.name != nullptr ? FString(UTF8_TO_TCHAR(ImportInfo.name)) : FString();
+		const bool bLinked = ImportInfo.linked;
+		if (!bLinked)
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				TEXT("<import>"),
+				TEXT("missing_import"),
+				FString::Printf(TEXT("Required host import '%s.%s' was not registered"), *ImportModuleName, *ImportName),
+				TEXT("reject this script module and keep the previous live runtime"),
+				ImportModuleName,
+				ImportName);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool CallWamrExport(
 	wasm_module_inst_t InModuleInstance,
 	wasm_exec_env_t InExecEnv,
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance,
 	const FString& ModuleId,
 	const char* ExportName,
 	uint32 ArgCount,
@@ -149,6 +327,23 @@ bool CallWamrExport(
 
 	if (!wasm_runtime_call_wasm(InExecEnv, Function, ArgCount, Args))
 	{
+		FString ImportModuleName;
+		FString ImportName;
+		FString Details;
+		if (RuntimeInstance != nullptr && RuntimeInstance->ConsumePendingHostImportFailure(ImportModuleName, ImportName, Details))
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				ExportNameText,
+				TEXT("host_import_failed"),
+				Details,
+				TEXT("stop this script instance and surface the host import failure"),
+				ImportModuleName,
+				ImportName);
+			return false;
+		}
+
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -178,6 +373,15 @@ bool FAvidScriptWasmRuntimeInstance::LoadEmbeddedSmokeModule(FAvidScriptWasmSmok
 		OutResult);
 }
 
+bool FAvidScriptWasmRuntimeInstance::LoadEmbeddedHostImportModule(FAvidScriptWasmSmokeResult& OutResult)
+{
+	return LoadModule(
+		GAvidScriptHostImportWasmModule,
+		UE_ARRAY_COUNT(GAvidScriptHostImportWasmModule),
+		TEXT("embedded_host_import"),
+		OutResult);
+}
+
 bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	const uint8* Bytecode,
 	int32 BytecodeSize,
@@ -186,8 +390,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 {
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
+	ResetHostImportState();
 	ModuleId = InModuleId;
 	PrepareResult(OutResult, ModuleId, Metrics);
+	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -214,6 +420,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	const double RuntimeInitStartSeconds = FPlatformTime::Seconds();
 	if (!AcquireWamrRuntime(ModuleId, OutResult))
 	{
+		CopyHostImportStateToResult(OutResult);
 		return false;
 	}
 	Metrics.RuntimeInitMs = MeasureElapsedMs(RuntimeInitStartSeconds);
@@ -221,6 +428,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	bOwnsRuntimeLease = true;
 	OutResult.bRuntimeInitialized = true;
 	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
 
 	ModuleBuffer.Reset(BytecodeSize);
 	ModuleBuffer.Append(Bytecode, BytecodeSize);
@@ -231,6 +439,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	Module = wasm_runtime_load(ModuleBuffer.GetData(), static_cast<uint32>(ModuleBuffer.Num()), ErrorBuffer, sizeof(ErrorBuffer));
 	Metrics.ModuleLoadMs = MeasureElapsedMs(ModuleLoadStartSeconds);
 	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
 	if (Module == nullptr)
 	{
 		SetFailure(
@@ -245,6 +454,15 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	}
 
 	OutResult.bModuleLoaded = true;
+	if (!ValidateLinkedImports(static_cast<wasm_module_t>(Module), ModuleId, OutResult))
+	{
+		OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
+		OutResult.bModuleLoaded = true;
+		OutResult.Metrics = Metrics;
+		CopyHostImportStateToResult(OutResult);
+		Unload();
+		return false;
+	}
 
 	const double ModuleInstantiateStartSeconds = FPlatformTime::Seconds();
 	ModuleInstance = wasm_runtime_instantiate(
@@ -255,6 +473,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		sizeof(ErrorBuffer));
 	Metrics.ModuleInstantiateMs = MeasureElapsedMs(ModuleInstantiateStartSeconds);
 	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
 	if (ModuleInstance == nullptr)
 	{
 		SetFailure(
@@ -274,6 +493,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	ExecEnv = wasm_runtime_create_exec_env(static_cast<wasm_module_inst_t>(ModuleInstance), AvidScriptWasmStackSize);
 	Metrics.ExecEnvCreateMs = MeasureElapsedMs(ExecEnvCreateStartSeconds);
 	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
 	if (ExecEnv == nullptr)
 	{
 		SetFailure(
@@ -287,6 +507,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		return false;
 	}
 
+	wasm_runtime_set_user_data(static_cast<wasm_exec_env_t>(ExecEnv), this);
 	return true;
 #endif
 }
@@ -301,6 +522,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -358,12 +580,14 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	return true;
 #endif
 }
+
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, Metrics);
 	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
+	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -391,6 +615,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	if (!CallWamrExport(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
 		static_cast<wasm_exec_env_t>(ExecEnv),
+		this,
 		ModuleId,
 		"avid_on_begin_play",
 		0,
@@ -399,6 +624,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	{
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 		OutResult.Metrics = Metrics;
+		CopyHostImportStateToResult(OutResult);
 		return false;
 	}
 
@@ -407,6 +633,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
 	return true;
 #endif
 }
@@ -418,6 +645,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -449,6 +677,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	if (!CallWamrExport(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
 		static_cast<wasm_exec_env_t>(ExecEnv),
+		this,
 		ModuleId,
 		"avid_on_tick",
 		UE_ARRAY_COUNT(TickArgs),
@@ -457,6 +686,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 		OutResult.Metrics = Metrics;
+		CopyHostImportStateToResult(OutResult);
 		return false;
 	}
 
@@ -465,6 +695,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.Metrics = Metrics;
 	OutResult.bTickCalled = true;
 	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
 	return true;
 #endif
 }
@@ -483,12 +714,16 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	const bool bWasModuleInstantiated = ModuleInstance != nullptr;
 	const bool bHadBegunPlay = bHasBegunPlay;
 	const int32 PreviousTickCallCount = TickCallCount;
+	const int32 PreviousHostImportCallCount = HostImportCallCount;
+	const int32 PreviousHostImportInput = LastHostImportInput;
+	const int32 PreviousHostImportResult = LastHostImportResult;
 	const bool bHadResources = bWasRuntimeInitialized || bWasModuleLoaded || bWasModuleInstantiated || ExecEnv != nullptr;
 	const double UnloadStartSeconds = FPlatformTime::Seconds();
 
 #if AVIDSCRIPT_WITH_WAMR
 	if (ExecEnv != nullptr)
 	{
+		wasm_runtime_set_user_data(static_cast<wasm_exec_env_t>(ExecEnv), nullptr);
 		wasm_runtime_destroy_exec_env(static_cast<wasm_exec_env_t>(ExecEnv));
 		ExecEnv = nullptr;
 	}
@@ -519,6 +754,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	ModuleId.Empty();
 	bHasBegunPlay = false;
 	TickCallCount = 0;
+	ResetHostImportState();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
 	PrepareResult(OutResult, PreviousModuleId, Metrics);
@@ -528,12 +764,78 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	OutResult.bBeginPlayCalled = bHadBegunPlay;
 	OutResult.bTickCalled = PreviousTickCallCount > 0;
 	OutResult.TickCallCount = PreviousTickCallCount;
+	OutResult.HostImportCallCount = PreviousHostImportCallCount;
+	OutResult.LastHostImportInput = PreviousHostImportInput;
+	OutResult.LastHostImportResult = PreviousHostImportResult;
 	OutResult.bUnloaded = true;
 }
 
 bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
 {
 	return Module != nullptr && ModuleInstance != nullptr && ExecEnv != nullptr;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleHostAddI32Import(int32 Input)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Input;
+	LastHostImportResult = Input + 1;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleHostFailI32Import(int32 Input)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Input;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	bHasPendingHostImportFailure = true;
+	PendingHostImportModuleName = TEXT("avidscript");
+	PendingHostImportName = TEXT("host_fail_i32");
+	PendingHostImportDetails = FString::Printf(TEXT("Host import avidscript.host_fail_i32 rejected input %d"), Input);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 0;
+}
+
+bool FAvidScriptWasmRuntimeInstance::ConsumePendingHostImportFailure(
+	FString& OutImportModuleName,
+	FString& OutImportName,
+	FString& OutDetails)
+{
+	if (!bHasPendingHostImportFailure)
+	{
+		return false;
+	}
+
+	OutImportModuleName = PendingHostImportModuleName;
+	OutImportName = PendingHostImportName;
+	OutDetails = PendingHostImportDetails;
+	bHasPendingHostImportFailure = false;
+	PendingHostImportModuleName.Empty();
+	PendingHostImportName.Empty();
+	PendingHostImportDetails.Empty();
+	return true;
+}
+
+void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
+{
+	HostImportCallCount = 0;
+	LastHostImportInput = 0;
+	LastHostImportResult = 0;
+	bHasPendingHostImportFailure = false;
+	PendingHostImportModuleName.Empty();
+	PendingHostImportName.Empty();
+	PendingHostImportDetails.Empty();
+}
+
+void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
+{
+	OutResult.HostImportCallCount = HostImportCallCount;
+	OutResult.LastHostImportInput = LastHostImportInput;
+	OutResult.LastHostImportResult = LastHostImportResult;
+	OutResult.Metrics = Metrics;
 }
 
 bool FAvidScriptWasmRuntime::RunEmbeddedSmokeTest(FAvidScriptWasmSmokeResult& OutResult)
@@ -555,5 +857,21 @@ bool FAvidScriptWasmRuntime::RunEmbeddedSmokeTest(FAvidScriptWasmSmokeResult& Ou
 	}
 
 	Runtime.Unload(OutResult);
+	return true;
+}
+
+bool FAvidScriptWasmRuntime::RunEmbeddedHostImportSmokeTest(FAvidScriptWasmSmokeResult& OutResult)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	if (!Runtime.LoadEmbeddedHostImportModule(OutResult))
+	{
+		return false;
+	}
+
+	if (!Runtime.BeginPlay(OutResult))
+	{
+		return false;
+	}
+
 	return true;
 }
