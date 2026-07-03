@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AvidScriptActorBinding.h"
+
 #include "CoreMinimal.h"
 
 struct FAvidScriptWasmRuntimeMetrics
@@ -36,6 +38,12 @@ struct FAvidScriptWasmSmokeResult
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
+struct FAvidScriptWasmHostContext
+{
+	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
+	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 {
 public:
@@ -59,8 +67,16 @@ public:
 	int32 GetTickCallCount() const { return TickCallCount; }
 	const FString& GetModuleId() const { return ModuleId; }
 	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
+	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
+	void ClearHostContext();
 	int32 HandleHostAddI32Import(int32 Input);
 	int32 HandleHostFailI32Import(int32 Input);
+	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
+	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
+	void SetPendingHostImportFailure(
+		const FString& ImportModuleName,
+		const FString& ImportName,
+		const FString& Details);
 	bool ConsumePendingHostImportFailure(FString& OutImportModuleName, FString& OutImportName, FString& OutDetails);
 
 private:
@@ -82,6 +98,7 @@ private:
 	FString PendingHostImportDetails;
 	FString ModuleId;
 	TArray<uint8> ModuleBuffer;
+	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
