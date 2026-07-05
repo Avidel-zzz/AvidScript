@@ -239,6 +239,25 @@ function Get-Ldc2Version {
     }
 }
 
+function Get-Sha256FileHashLowerInvariant {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $Sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $HashBytes = $Sha256.ComputeHash($Stream)
+            return ([System.BitConverter]::ToString($HashBytes)).Replace("-", "").ToLowerInvariant()
+        }
+        finally {
+            $Sha256.Dispose()
+        }
+    }
+    finally {
+        $Stream.Dispose()
+    }
+}
+
 function Format-FloatLiteral {
     param([Parameter(Mandatory = $true)][double]$Value)
     $Text = $Value.ToString("R", $Culture)
@@ -605,7 +624,7 @@ if (-not (Test-Path -LiteralPath $OutputPath)) {
 }
 
 $Artifact = Get-Item -LiteralPath $OutputPath
-$ArtifactHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $OutputPath).Hash.ToLowerInvariant()
+$ArtifactHash = Get-Sha256FileHashLowerInvariant -Path $OutputPath
 $CompilerVersion = Get-Ldc2Version -Path $Ldc2.Path
 
 $Manifest = [ordered]@{
