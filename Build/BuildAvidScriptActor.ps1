@@ -1,5 +1,6 @@
 param(
     [string]$SourcePath = "",
+    [string]$BindingsPath = "",
     [string]$OutputRoot = "",
     [string]$OutputPath = "",
     [string]$ManifestPath = "",
@@ -176,14 +177,174 @@ function Read-RequiredFloatLiteral {
     return $Parsed
 }
 
+function Test-AvidScriptIdentifier {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return $Value -match '^[A-Za-z_][A-Za-z0-9_]*$'
+}
+
+function Test-AvidScriptType {
+    param([Parameter(Mandatory = $true)][string]$Type)
+    return @("int", "float", "void").Contains($Type)
+}
+
+function Convert-AvidScriptTypeToDType {
+    param([Parameter(Mandatory = $true)][string]$Type)
+
+    switch ($Type) {
+        "int" { return "int" }
+        "float" { return "float" }
+        "void" { return "void" }
+        default { Write-FrontendFailure -Result "binding_manifest_invalid" -Details "type=$Type reason=unsupported_type" }
+    }
+}
+
+function Read-BindingDeclaration {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $ResolvedPath = Resolve-ExistingFilePath -Path $Path
+    if ($null -eq $ResolvedPath) {
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$Path reason=missing"
+    }
+
+    try {
+        $DeclarationText = [System.IO.File]::ReadAllText($ResolvedPath)
+        $Declaration = $DeclarationText | ConvertFrom-Json
+    }
+    catch {
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=json_parse_failed"
+    }
+
+    if ($null -eq $Declaration.schema_version -or [int]$Declaration.schema_version -ne 1) {
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=schema_version"
+    }
+
+    $Bindings = @()
+    if ($null -ne $Declaration.bindings) {
+        $Bindings = @($Declaration.bindings)
+    }
+
+    if ($Bindings.Count -eq 0) {
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=no_bindings"
+    }
+
+    $ByName = [System.Collections.Generic.Dictionary[string,object]]::new()
+
+    foreach ($Binding in $Bindings) {
+        $Name = [string]$Binding.name
+        $ImportModule = [string]$Binding.import_module
+        $ImportName = [string]$Binding.import_name
+        $ReturnType = [string]$Binding.return_type
+
+        if ([string]::IsNullOrWhiteSpace($Name) -or -not (Test-AvidScriptIdentifier -Value $Name)) {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=invalid_binding_name value=$Name"
+        }
+
+        if ($ByName.ContainsKey($Name)) {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=duplicate_binding value=$Name"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ImportModule) -or -not (Test-AvidScriptIdentifier -Value $ImportModule)) {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_module value=$ImportModule"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ImportName) -or -not (Test-AvidScriptIdentifier -Value $ImportName)) {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_name value=$ImportName"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($ReturnType) -or -not (Test-AvidScriptType -Type $ReturnType)) {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_return_type value=$ReturnType"
+        }
+
+        $Parameters = @()
+        if ($null -ne $Binding.parameters) {
+            $Parameters = @($Binding.parameters)
+        }
+
+        $ParameterNames = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($Parameter in $Parameters) {
+            $ParameterName = [string]$Parameter.name
+            $ParameterType = [string]$Parameter.type
+
+            if ([string]::IsNullOrWhiteSpace($ParameterName) -or -not (Test-AvidScriptIdentifier -Value $ParameterName)) {
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_parameter_name value=$ParameterName"
+            }
+
+            if (-not $ParameterNames.Add($ParameterName)) {
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=duplicate_parameter value=$ParameterName"
+            }
+
+            if ([string]::IsNullOrWhiteSpace($ParameterType) -or $ParameterType -eq "void" -or -not (Test-AvidScriptType -Type $ParameterType)) {
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name parameter=$ParameterName reason=invalid_parameter_type value=$ParameterType"
+            }
+        }
+
+        $ByName.Add($Name, $Binding)
+    }
+
+    return [PSCustomObject]@{
+        Path = $ResolvedPath
+        Bindings = $Bindings
+        ByName = $ByName
+    }
+}
+
+function New-DImportSignature {
+    param([Parameter(Mandatory = $true)]$Binding)
+
+    $ReturnType = Convert-AvidScriptTypeToDType -Type ([string]$Binding.return_type)
+    $Parameters = @()
+    if ($null -ne $Binding.parameters) {
+        $Parameters = @($Binding.parameters)
+    }
+
+    $ParameterTexts = @()
+    foreach ($Parameter in $Parameters) {
+        $ParameterType = Convert-AvidScriptTypeToDType -Type ([string]$Parameter.type)
+        $ParameterTexts += "$ParameterType $($Parameter.name)"
+    }
+
+    return "$ReturnType $($Binding.import_name)($($ParameterTexts -join ', '));"
+}
+
+function Convert-ArgumentLiteralToDValue {
+    param(
+        [Parameter(Mandatory = $true)]$Parameter,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    $ParameterName = [string]$Parameter.name
+    $ParameterType = [string]$Parameter.type
+
+    switch ($ParameterType) {
+        "int" {
+            $Parsed = Read-RequiredIntLiteral -Name $ParameterName -Value $Value
+            return $Parsed.ToString($Culture)
+        }
+        "float" {
+            $Parsed = Read-RequiredFloatLiteral -Name $ParameterName -Value $Value
+            return Format-FloatLiteral -Value $Parsed
+        }
+        default {
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "parameter=$ParameterName type=$ParameterType reason=unsupported_parameter_type"
+        }
+    }
+}
+
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectPluginsDir = Split-Path -Parent $PluginRoot
 $ProjectRoot = Split-Path -Parent $ProjectPluginsDir
 
+if ([string]::IsNullOrWhiteSpace($BindingsPath)) {
+    $BindingsPath = Join-Path $PluginRoot "Bindings\ActorHostBindings.avidscript.json"
+}
+
 if ([string]::IsNullOrWhiteSpace($SourcePath) -or -not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
     Write-FrontendFailure -Result "source_missing" -Details "source=$SourcePath"
 }
+
+$BindingDeclaration = Read-BindingDeclaration -Path $BindingsPath
+$BindingsFullPath = $BindingDeclaration.Path
 
 $SourceFullPath = (Resolve-Path -LiteralPath $SourcePath).Path
 $SourceText = [System.IO.File]::ReadAllText($SourceFullPath)
@@ -198,24 +359,34 @@ $ModuleId = $Match.Groups["module"].Value
 $BindingName = $Match.Groups["binding"].Value
 $CallName = $Match.Groups["call"].Value
 
-if ($BindingName -ne "actor_set_location") {
+$SelectedBinding = $null
+if (-not $BindingDeclaration.ByName.TryGetValue($BindingName, [ref]$SelectedBinding)) {
     Write-FrontendFailure -Result "unknown_binding" -Details "binding=$BindingName"
 }
 
-if ($CallName -ne "actor_set_location") {
+if ($CallName -ne $BindingName) {
     Write-FrontendFailure -Result "unknown_binding" -Details "binding=$CallName"
 }
 
-$ArgumentValues = @($Match.Groups["args"].Value.Split(",") | ForEach-Object { $_.Trim() })
-if ($ArgumentValues.Count -ne 5) {
-    Write-FrontendFailure -Result "invalid_argument_count" -Details "binding=actor_set_location expected=5 actual=$($ArgumentValues.Count)"
+$ArgsText = $Match.Groups["args"].Value.Trim()
+$ArgumentValues = @()
+if (-not [string]::IsNullOrWhiteSpace($ArgsText)) {
+    $ArgumentValues = @($ArgsText.Split(",") | ForEach-Object { $_.Trim() })
 }
 
-$SlotValue = Read-RequiredIntLiteral -Name "slot" -Value $ArgumentValues[0]
-$GenerationValue = Read-RequiredIntLiteral -Name "generation" -Value $ArgumentValues[1]
-$XValue = Read-RequiredFloatLiteral -Name "x" -Value $ArgumentValues[2]
-$YValue = Read-RequiredFloatLiteral -Name "y" -Value $ArgumentValues[3]
-$ZValue = Read-RequiredFloatLiteral -Name "z" -Value $ArgumentValues[4]
+$Parameters = @()
+if ($null -ne $SelectedBinding.parameters) {
+    $Parameters = @($SelectedBinding.parameters)
+}
+
+if ($ArgumentValues.Count -ne $Parameters.Count) {
+    Write-FrontendFailure -Result "invalid_argument_count" -Details "binding=$BindingName expected=$($Parameters.Count) actual=$($ArgumentValues.Count)"
+}
+
+$DArgumentValues = @()
+for ($Index = 0; $Index -lt $Parameters.Count; ++$Index) {
+    $DArgumentValues += Convert-ArgumentLiteralToDValue -Parameter $Parameters[$Index] -Value $ArgumentValues[$Index]
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path (Join-Path $ProjectRoot "Saved\AvidScriptGenerated") $ModuleId
@@ -233,20 +404,26 @@ if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
 
 $GeneratedSourcePath = Join-Path $OutputRoot "$ModuleId.generated.d"
 $DModuleName = "${ModuleId}_generated"
-$XLiteral = Format-FloatLiteral -Value $XValue
-$YLiteral = Format-FloatLiteral -Value $YValue
-$ZLiteral = Format-FloatLiteral -Value $ZValue
+$DImportSignature = New-DImportSignature -Binding $SelectedBinding
+$CallArgumentText = $DArgumentValues -join ", "
+$ReturnType = [string]$SelectedBinding.return_type
+if ($ReturnType -eq "void") {
+    $BeginPlayStatement = "$($SelectedBinding.import_name)($CallArgumentText);"
+}
+else {
+    $BeginPlayStatement = "cast(void)$($SelectedBinding.import_name)($CallArgumentText);"
+}
 
 $GeneratedSource = @"
 module $DModuleName;
 
 extern(C) @nogc nothrow
 {
-    int actor_set_location(int slot, int generation, float x, float y, float z);
+    $DImportSignature
 
     export void avid_on_begin_play()
     {
-        cast(void)actor_set_location($SlotValue, $GenerationValue, $XLiteral, $YLiteral, $ZLiteral);
+        $BeginPlayStatement
     }
 
     export void avid_on_tick(float delta_seconds)
@@ -258,6 +435,7 @@ extern(C) @nogc nothrow
 
 Set-Content -LiteralPath $GeneratedSourcePath -Value $GeneratedSource -Encoding ASCII
 Write-Output "[AvidScript][Frontend][Build] source=$SourceFullPath"
+Write-Output "[AvidScript][Frontend][Build] bindings=$BindingsFullPath"
 Write-Output "[AvidScript][Frontend][Build] generated_source=$GeneratedSourcePath"
 
 if ($SkipCompile) {
@@ -333,6 +511,7 @@ $Manifest = [ordered]@{
     language = "avidscript"
     source = [ordered]@{
         file = Convert-ToProjectRelativePath -Path $SourceFullPath
+        bindings = Convert-ToProjectRelativePath -Path $BindingsFullPath
         generated_d = Convert-ToProjectRelativePath -Path $GeneratedSourcePath
     }
     wasm = [ordered]@{
@@ -345,14 +524,15 @@ $Manifest = [ordered]@{
     )
     required_imports = @(
         [ordered]@{
-            module = "env"
-            name = "actor_set_location"
+            module = [string]$SelectedBinding.import_module
+            name = [string]$SelectedBinding.import_name
         }
     )
     frontend = [ordered]@{
         compiler = "BuildAvidScriptActor.ps1"
-        version = "p6.1"
+        version = "p7.1"
         backend = "d"
+        binding_schema_version = 1
     }
     toolchain = [ordered]@{
         compiler = "ldc2"

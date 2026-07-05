@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "name": "actor_host_bindings",
+  "bindings": [
+    {
+      "name": "actor_set_location",
+      "import_module": "env",
+      "import_name": "actor_set_location",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "slot",
+          "type": "int"
+        },
+        {
+          "name": "generation",
+          "type": "int"
+        },
+        {
+          "name": "x",
+          "type": "float"
+        },
+        {
+          "name": "y",
+          "type": "float"
+        },
+        {
+          "name": "z",
+          "type": "float"
+        }
+      ]
+    }
+  ]
+}
