@@ -1,5 +1,6 @@
 #include "AvidScriptEditorModule.h"
 
+#include "AvidScriptEditorSourceConfig.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -114,10 +115,40 @@ bool FAvidScriptEditorModule::MakeSampleCommandConfig(
 	FAvidScriptEditorCommandLaunchConfig& OutConfig,
 	FString& OutErrorMessage)
 {
-	return FAvidScriptEditorCommandLauncher::MakeDefaultConfigForSource(
+	const FAvidScriptEditorToolchainSettings Settings;
+	return MakeCommandConfigForSource(
 		GetSampleCommandSourcePath(),
+		Settings,
 		OutConfig,
 		OutErrorMessage);
+}
+
+bool FAvidScriptEditorModule::MakeCommandConfigForSource(
+	const FString& SourcePath,
+	const FAvidScriptEditorToolchainSettings& Settings,
+	FAvidScriptEditorCommandLaunchConfig& OutConfig,
+	FString& OutErrorMessage)
+{
+	OutConfig = FAvidScriptEditorCommandLaunchConfig();
+	OutErrorMessage.Reset();
+
+	FAvidScriptEditorSourceConfigRequest Request;
+	Request.SourcePath = SourcePath;
+
+	FAvidScriptEditorSourceConfigResult Result;
+	if (!FAvidScriptEditorSourceConfigService::BuildLaunchConfig(Request, Result))
+	{
+		OutErrorMessage = FString::Printf(
+			TEXT("%s: %s next=%s"),
+			*Result.ErrorCategory,
+			*Result.ErrorMessage,
+			*Result.NextAction);
+		return false;
+	}
+
+	OutConfig = Result.LaunchConfig;
+	FAvidScriptEditorSettingsService::ApplySettings(Settings, OutConfig);
+	return true;
 }
 
 FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeSampleMenuEntryConfig(FSimpleDelegate ExecuteAction)

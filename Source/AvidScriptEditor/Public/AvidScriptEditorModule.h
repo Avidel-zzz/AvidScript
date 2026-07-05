@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorCommandLauncher.h"
 #include "AvidScriptEditorMenuRegistrar.h"
+#include "AvidScriptEditorSettingsService.h"
 
 #include "CoreMinimal.h"
 #include "Logging/LogMacros.h"
@@ -22,6 +23,12 @@ public:
 	static FString GetSampleCommandSourcePath();
 
 	static bool MakeSampleCommandConfig(
+		FAvidScriptEditorCommandLaunchConfig& OutConfig,
+		FString& OutErrorMessage);
+
+	static bool MakeCommandConfigForSource(
+		const FString& SourcePath,
+		const FAvidScriptEditorToolchainSettings& Settings,
 		FAvidScriptEditorCommandLaunchConfig& OutConfig,
 		FString& OutErrorMessage);
 
