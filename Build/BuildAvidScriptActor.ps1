@@ -12,15 +12,114 @@ param(
 $ErrorActionPreference = "Stop"
 $Culture = [System.Globalization.CultureInfo]::InvariantCulture
 
+function Write-FrontendDiagnostic {
+    param(
+        [Parameter(Mandatory = $true)][string]$Code,
+        [string]$Severity = "error",
+        [int]$Line = 0,
+        [int]$Column = 0,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    $EscapedMessage = $Message.Replace('"', '\"')
+    Write-Output "[AvidScript][Frontend][Diagnostic] code=$Code severity=$Severity line=$Line column=$Column message=`"$EscapedMessage`""
+}
+
 function Write-FrontendFailure {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
         [Parameter(Mandatory = $true)][string]$Details,
-        [int]$ExitCode = 1
+        [int]$ExitCode = 1,
+        [string]$Code = "",
+        [int]$Line = 0,
+        [int]$Column = 0,
+        [string]$Message = ""
     )
 
-    Write-Output "[AvidScript][Frontend][Build] result=$Result $Details"
+    $BuildDetails = $Details
+    if (-not [string]::IsNullOrWhiteSpace($Code)) {
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            $Message = $Result
+        }
+
+        Write-FrontendDiagnostic -Code $Code -Line $Line -Column $Column -Message $Message
+        $BuildDetails = "code=$Code $Details"
+    }
+
+    Write-Output "[AvidScript][Frontend][Build] result=$Result $BuildDetails"
     exit $ExitCode
+}
+
+function New-SourceLocation {
+    param(
+        [int]$Line,
+        [int]$Column
+    )
+
+    return [PSCustomObject]@{
+        Line = $Line
+        Column = $Column
+    }
+}
+
+function Convert-SourceIndexToLocation {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [int]$Index
+    )
+
+    if ($Index -lt 0) {
+        return New-SourceLocation -Line 0 -Column 0
+    }
+
+    $Line = 1
+    $Column = 1
+    $Limit = [Math]::Min($Index, $Text.Length)
+    for ($Cursor = 0; $Cursor -lt $Limit; ++$Cursor) {
+        $Character = $Text[$Cursor]
+        if ($Character -eq "`n") {
+            ++$Line
+            $Column = 1
+        }
+        elseif ($Character -ne "`r") {
+            ++$Column
+        }
+    }
+
+    return New-SourceLocation -Line $Line -Column $Column
+}
+
+function Split-ArgumentList {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArgsText,
+        [int]$ArgsStartIndex,
+        [Parameter(Mandatory = $true)][string]$SourceText
+    )
+
+    $Tokens = @()
+    if ([string]::IsNullOrWhiteSpace($ArgsText)) {
+        return $Tokens
+    }
+
+    $SegmentStart = 0
+    for ($Index = 0; $Index -le $ArgsText.Length; ++$Index) {
+        if ($Index -eq $ArgsText.Length -or $ArgsText[$Index] -eq ',') {
+            $Raw = $ArgsText.Substring($SegmentStart, $Index - $SegmentStart)
+            $Trimmed = $Raw.Trim()
+            $LeadingWhitespace = $Raw.Length - $Raw.TrimStart().Length
+            $SourceIndex = $ArgsStartIndex + $SegmentStart + $LeadingWhitespace
+            $Location = Convert-SourceIndexToLocation -Text $SourceText -Index $SourceIndex
+            $Tokens += [PSCustomObject]@{
+                Value = $Trimmed
+                SourceIndex = $SourceIndex
+                Line = $Location.Line
+                Column = $Location.Column
+            }
+            $SegmentStart = $Index + 1
+        }
+    }
+
+    return $Tokens
 }
 
 function Get-OptionalTool {
@@ -152,12 +251,14 @@ function Format-FloatLiteral {
 function Read-RequiredIntLiteral {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Value
+        [Parameter(Mandatory = $true)][string]$Value,
+        [int]$Line = 0,
+        [int]$Column = 0
     )
 
     [int]$Parsed = 0
     if (-not [int]::TryParse($Value, [System.Globalization.NumberStyles]::Integer, $Culture, [ref]$Parsed)) {
-        Write-FrontendFailure -Result "invalid_literal" -Details "argument=$Name value=$Value expected=int"
+        Write-FrontendFailure -Result "invalid_literal" -Details "argument=$Name value=$Value expected=int" -Code "ASL1204" -Line $Line -Column $Column -Message "invalid literal for argument '$Name': expected int but got '$Value'"
     }
 
     return $Parsed
@@ -166,12 +267,14 @@ function Read-RequiredIntLiteral {
 function Read-RequiredFloatLiteral {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Value
+        [Parameter(Mandatory = $true)][string]$Value,
+        [int]$Line = 0,
+        [int]$Column = 0
     )
 
     [double]$Parsed = 0.0
     if (-not [double]::TryParse($Value, [System.Globalization.NumberStyles]::Float, $Culture, [ref]$Parsed)) {
-        Write-FrontendFailure -Result "invalid_literal" -Details "argument=$Name value=$Value expected=float"
+        Write-FrontendFailure -Result "invalid_literal" -Details "argument=$Name value=$Value expected=float" -Code "ASL1204" -Line $Line -Column $Column -Message "invalid literal for argument '$Name': expected float but got '$Value'"
     }
 
     return $Parsed
@@ -194,7 +297,7 @@ function Convert-AvidScriptTypeToDType {
         "int" { return "int" }
         "float" { return "float" }
         "void" { return "void" }
-        default { Write-FrontendFailure -Result "binding_manifest_invalid" -Details "type=$Type reason=unsupported_type" }
+        default { Write-FrontendFailure -Result "binding_manifest_invalid" -Details "type=$Type reason=unsupported_type" -Code "ASL1201" -Message "unsupported binding type '$Type'" }
     }
 }
 
@@ -203,7 +306,7 @@ function Read-BindingDeclaration {
 
     $ResolvedPath = Resolve-ExistingFilePath -Path $Path
     if ($null -eq $ResolvedPath) {
-        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$Path reason=missing"
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$Path reason=missing" -Code "ASL1201" -Message "binding declaration missing: $Path"
     }
 
     try {
@@ -211,11 +314,11 @@ function Read-BindingDeclaration {
         $Declaration = $DeclarationText | ConvertFrom-Json
     }
     catch {
-        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=json_parse_failed"
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=json_parse_failed" -Code "ASL1201" -Message "binding declaration is not valid JSON: $ResolvedPath"
     }
 
     if ($null -eq $Declaration.schema_version -or [int]$Declaration.schema_version -ne 1) {
-        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=schema_version"
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=schema_version" -Code "ASL1201" -Message "binding declaration schema_version must be 1"
     }
 
     $Bindings = @()
@@ -224,7 +327,7 @@ function Read-BindingDeclaration {
     }
 
     if ($Bindings.Count -eq 0) {
-        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=no_bindings"
+        Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=no_bindings" -Code "ASL1201" -Message "binding declaration contains no bindings"
     }
 
     $ByName = [System.Collections.Generic.Dictionary[string,object]]::new()
@@ -236,23 +339,23 @@ function Read-BindingDeclaration {
         $ReturnType = [string]$Binding.return_type
 
         if ([string]::IsNullOrWhiteSpace($Name) -or -not (Test-AvidScriptIdentifier -Value $Name)) {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=invalid_binding_name value=$Name"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=invalid_binding_name value=$Name" -Code "ASL1201" -Message "binding declaration has an invalid binding name '$Name'"
         }
 
         if ($ByName.ContainsKey($Name)) {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=duplicate_binding value=$Name"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "path=$ResolvedPath reason=duplicate_binding value=$Name" -Code "ASL1201" -Message "binding declaration has duplicate binding '$Name'"
         }
 
         if ([string]::IsNullOrWhiteSpace($ImportModule) -or -not (Test-AvidScriptIdentifier -Value $ImportModule)) {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_module value=$ImportModule"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_module value=$ImportModule" -Code "ASL1201" -Message "binding '$Name' has invalid import_module '$ImportModule'"
         }
 
         if ([string]::IsNullOrWhiteSpace($ImportName) -or -not (Test-AvidScriptIdentifier -Value $ImportName)) {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_name value=$ImportName"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_import_name value=$ImportName" -Code "ASL1201" -Message "binding '$Name' has invalid import_name '$ImportName'"
         }
 
         if ([string]::IsNullOrWhiteSpace($ReturnType) -or -not (Test-AvidScriptType -Type $ReturnType)) {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_return_type value=$ReturnType"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_return_type value=$ReturnType" -Code "ASL1201" -Message "binding '$Name' has invalid return_type '$ReturnType'"
         }
 
         $Parameters = @()
@@ -266,15 +369,15 @@ function Read-BindingDeclaration {
             $ParameterType = [string]$Parameter.type
 
             if ([string]::IsNullOrWhiteSpace($ParameterName) -or -not (Test-AvidScriptIdentifier -Value $ParameterName)) {
-                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_parameter_name value=$ParameterName"
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=invalid_parameter_name value=$ParameterName" -Code "ASL1201" -Message "binding '$Name' has invalid parameter name '$ParameterName'"
             }
 
             if (-not $ParameterNames.Add($ParameterName)) {
-                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=duplicate_parameter value=$ParameterName"
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name reason=duplicate_parameter value=$ParameterName" -Code "ASL1201" -Message "binding '$Name' has duplicate parameter '$ParameterName'"
             }
 
             if ([string]::IsNullOrWhiteSpace($ParameterType) -or $ParameterType -eq "void" -or -not (Test-AvidScriptType -Type $ParameterType)) {
-                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name parameter=$ParameterName reason=invalid_parameter_type value=$ParameterType"
+                Write-FrontendFailure -Result "binding_manifest_invalid" -Details "binding=$Name parameter=$ParameterName reason=invalid_parameter_type value=$ParameterType" -Code "ASL1201" -Message "binding '$Name' parameter '$ParameterName' has invalid type '$ParameterType'"
             }
         }
 
@@ -309,23 +412,24 @@ function New-DImportSignature {
 function Convert-ArgumentLiteralToDValue {
     param(
         [Parameter(Mandatory = $true)]$Parameter,
-        [Parameter(Mandatory = $true)][string]$Value
+        [Parameter(Mandatory = $true)]$Argument
     )
 
     $ParameterName = [string]$Parameter.name
     $ParameterType = [string]$Parameter.type
+    $Value = [string]$Argument.Value
 
     switch ($ParameterType) {
         "int" {
-            $Parsed = Read-RequiredIntLiteral -Name $ParameterName -Value $Value
+            $Parsed = Read-RequiredIntLiteral -Name $ParameterName -Value $Value -Line $Argument.Line -Column $Argument.Column
             return $Parsed.ToString($Culture)
         }
         "float" {
-            $Parsed = Read-RequiredFloatLiteral -Name $ParameterName -Value $Value
+            $Parsed = Read-RequiredFloatLiteral -Name $ParameterName -Value $Value -Line $Argument.Line -Column $Argument.Column
             return Format-FloatLiteral -Value $Parsed
         }
         default {
-            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "parameter=$ParameterName type=$ParameterType reason=unsupported_parameter_type"
+            Write-FrontendFailure -Result "binding_manifest_invalid" -Details "parameter=$ParameterName type=$ParameterType reason=unsupported_parameter_type" -Code "ASL1201" -Message "unsupported parameter type '$ParameterType'"
         }
     }
 }
@@ -340,7 +444,7 @@ if ([string]::IsNullOrWhiteSpace($BindingsPath)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($SourcePath) -or -not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
-    Write-FrontendFailure -Result "source_missing" -Details "source=$SourcePath"
+    Write-FrontendFailure -Result "source_missing" -Details "source=$SourcePath" -Code "ASL1001" -Message "source file missing: $SourcePath"
 }
 
 $BindingDeclaration = Read-BindingDeclaration -Path $BindingsPath
@@ -352,40 +456,39 @@ $Pattern = '(?s)^\s*module\s+(?<module>[A-Za-z_][A-Za-z0-9_]*)\s+use\s+(?<bindin
 $Match = [regex]::Match($SourceText, $Pattern)
 
 if (-not $Match.Success) {
-    Write-FrontendFailure -Result "parse_failed" -Details "source=$SourceFullPath expected=minimal_actor_set_location_grammar"
+    Write-FrontendFailure -Result "parse_failed" -Details "source=$SourceFullPath expected=minimal_actor_set_location_grammar" -Code "ASL1100" -Line 1 -Column 1 -Message "source does not match the minimal AvidScript actor grammar"
 }
 
 $ModuleId = $Match.Groups["module"].Value
 $BindingName = $Match.Groups["binding"].Value
 $CallName = $Match.Groups["call"].Value
+$BindingLocation = Convert-SourceIndexToLocation -Text $SourceText -Index $Match.Groups["binding"].Index
+$CallLocation = Convert-SourceIndexToLocation -Text $SourceText -Index $Match.Groups["call"].Index
 
 $SelectedBinding = $null
 if (-not $BindingDeclaration.ByName.TryGetValue($BindingName, [ref]$SelectedBinding)) {
-    Write-FrontendFailure -Result "unknown_binding" -Details "binding=$BindingName"
+    Write-FrontendFailure -Result "unknown_binding" -Details "binding=$BindingName" -Code "ASL1202" -Line $BindingLocation.Line -Column $BindingLocation.Column -Message "unknown binding '$BindingName'"
 }
 
 if ($CallName -ne $BindingName) {
-    Write-FrontendFailure -Result "unknown_binding" -Details "binding=$CallName"
+    Write-FrontendFailure -Result "unknown_binding" -Details "binding=$CallName" -Code "ASL1202" -Line $CallLocation.Line -Column $CallLocation.Column -Message "unknown binding '$CallName'"
 }
 
-$ArgsText = $Match.Groups["args"].Value.Trim()
-$ArgumentValues = @()
-if (-not [string]::IsNullOrWhiteSpace($ArgsText)) {
-    $ArgumentValues = @($ArgsText.Split(",") | ForEach-Object { $_.Trim() })
-}
+$ArgsText = $Match.Groups["args"].Value
+$ArgumentTokens = @(Split-ArgumentList -ArgsText $ArgsText -ArgsStartIndex $Match.Groups["args"].Index -SourceText $SourceText)
 
 $Parameters = @()
 if ($null -ne $SelectedBinding.parameters) {
     $Parameters = @($SelectedBinding.parameters)
 }
 
-if ($ArgumentValues.Count -ne $Parameters.Count) {
-    Write-FrontendFailure -Result "invalid_argument_count" -Details "binding=$BindingName expected=$($Parameters.Count) actual=$($ArgumentValues.Count)"
+if ($ArgumentTokens.Count -ne $Parameters.Count) {
+    Write-FrontendFailure -Result "invalid_argument_count" -Details "binding=$BindingName expected=$($Parameters.Count) actual=$($ArgumentTokens.Count)" -Code "ASL1203" -Line $CallLocation.Line -Column $CallLocation.Column -Message "binding '$BindingName' expects $($Parameters.Count) arguments but got $($ArgumentTokens.Count)"
 }
 
 $DArgumentValues = @()
 for ($Index = 0; $Index -lt $Parameters.Count; ++$Index) {
-    $DArgumentValues += Convert-ArgumentLiteralToDValue -Parameter $Parameters[$Index] -Value $ArgumentValues[$Index]
+    $DArgumentValues += Convert-ArgumentLiteralToDValue -Parameter $Parameters[$Index] -Argument $ArgumentTokens[$Index]
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
@@ -455,8 +558,9 @@ $Ldc2 = Resolve-Ldc2Tool
 $WasmLd = Get-OptionalTool -Name "wasm-ld"
 
 if (-not $Ldc2.Found) {
+    Write-FrontendDiagnostic -Code "ASL1301" -Line 0 -Column 0 -Message "ldc2 toolchain not found"
     Write-Output "[AvidScript][Frontend][Toolchain] ldc2=MISSING checked=$($Ldc2.Checked -join ';')"
-    Write-Output "[AvidScript][Frontend][Build] result=missing_toolchain missing=ldc2 output=$OutputPath"
+    Write-Output "[AvidScript][Frontend][Build] result=missing_toolchain code=ASL1301 missing=ldc2 output=$OutputPath"
     exit 0
 }
 
@@ -491,13 +595,13 @@ foreach ($Line in $CompilerOutput) {
 }
 
 if ($ExitCode -ne 0) {
-    Write-Output "[AvidScript][Frontend][Build] result=compiler_failed exit_code=$ExitCode"
+    Write-FrontendDiagnostic -Code "ASL1302" -Line 0 -Column 0 -Message "D backend compiler failed with exit code $ExitCode"
+    Write-Output "[AvidScript][Frontend][Build] result=compiler_failed code=ASL1302 exit_code=$ExitCode"
     exit $ExitCode
 }
 
 if (-not (Test-Path -LiteralPath $OutputPath)) {
-    Write-Output "[AvidScript][Frontend][Build] result=artifact_missing output=$OutputPath"
-    exit 1
+    Write-FrontendFailure -Result "artifact_missing" -Details "output=$OutputPath" -Code "ASL1303" -Message "compiler completed without producing wasm artifact: $OutputPath"
 }
 
 $Artifact = Get-Item -LiteralPath $OutputPath
@@ -530,7 +634,7 @@ $Manifest = [ordered]@{
     )
     frontend = [ordered]@{
         compiler = "BuildAvidScriptActor.ps1"
-        version = "p7.1"
+        version = "p7.2"
         backend = "d"
         binding_schema_version = 1
     }
