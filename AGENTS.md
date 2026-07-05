@@ -91,6 +91,8 @@ Plugins/AvidScript/Docs
 - When editing Markdown through PowerShell, use single-quoted here-strings or explicit line arrays for text containing Markdown backticks. Do not put Markdown backticks inside double-quoted PowerShell strings, because they are escape characters and can corrupt commit hashes or inline code. After writing docs, verify the rendered source with `Get-Content` or `Select-String`.
 - 2026-07-03 P4.2 mistake record: a PowerShell double-quoted Markdown replacement interpreted backticks as escape characters and briefly wrote corrupted inline code/control characters into root docs. Prevention: use literal single-quoted here-strings or line arrays for Markdown edits, then run a control-character scan (`[\x00-\x08\x0B\x0C\x0E-\x1F]`) over touched Markdown before considering docs done.
 - 2026-07-04 P5.1 mistake record: a Chinese plugin Markdown file was first written with ASCII encoding, replacing non-ASCII text with `?`. Prevention: when a Markdown/doc file contains Chinese or other non-ASCII text, write it as UTF-8 without BOM and inspect the rendered source with `Get-Content` before committing; a control-character scan alone is not sufficient.
+- 2026-07-05 P5.2c mistake record: `FPlatformMisc::GetSHA256Signature` asserted with `No SHA256 Platform implementation` during Editor-Cmd automation. Prevention: for runtime manifest hash validation, use OpenSSL SHA256 or another already-proven implementation in UE automation before relying on platform SHA helpers.
+- 2026-07-05 P5.2c mistake record: `FPaths::ProjectSavedDir()` can be relative, for example `../../../../Users/...`, when running under `UnrealEditor-Cmd.exe`. Prevention: normalize test fixture directories to full paths before writing manifests, and keep real manifest wasm paths project-relative such as `Saved/...` so build script output and runtime loader behavior stay aligned.
 - After C++ or Build.cs changes, run the UE5.8 Editor target build:
 
 ```powershell
@@ -131,6 +133,7 @@ C:\tmp\AvidScriptToolchains\ldc2-1.42.0-windows-x64\ldc2-1.42.0-windows-x64\bin\
 ```
 
 - Do not commit downloaded LDC archives, extracted toolchains, or generated D/WASM artifacts under `Saved/`.
+- P5.2 D reload artifacts under `Saved/AvidScriptDGuest/Reload/...` are generated test inputs, not source-controlled assets. Rebuild v1/v2 with `BuildDGuestActorSetLocation.ps1` before relying on `AvidScript.Reload.DGuestActorHostContextSmoke` as a true D reload smoke.
 - LDC freestanding `extern(C)` undefined imports currently arrive as `env.<name>`. AvidScript's canonical Host ABI remains `avidscript.<name>`, but runtime must keep the `env` compatibility alias until a cleaner import-module mapping or artifact postprocess is implemented.
 - Before removing the `env` alias, prove D artifacts can import `avidscript.actor_set_location` directly and rerun `AvidScript.Guest.D` plus the full `AvidScript` automation suite.
 
