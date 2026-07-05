@@ -2,6 +2,12 @@
 
 #include "AvidScriptWasmReload.h"
 
+#include "AvidScriptObjectRegistry.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
+
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -103,6 +109,93 @@ bool WriteReloadManifestFixture(
 		*WasmSha256);
 
 	return FFileHelper::SaveStringToFile(ManifestJson, *ManifestPath);
+}
+
+FString NormalizeReloadTestFullPath(FString Path)
+{
+	Path = FPaths::ConvertRelativePathToFull(Path);
+	FPaths::NormalizeFilename(Path);
+	return Path;
+}
+
+FString GetReloadDGuestManifestPath(const TCHAR* VariantName)
+{
+	return NormalizeReloadTestFullPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptDGuest"),
+		TEXT("Reload"),
+		VariantName,
+		TEXT("actor_set_location_guest.avidscript.json")));
+}
+
+bool AreReloadDGuestArtifactsAvailable(FString& OutMissingPath)
+{
+	const FString ManifestV1Path = GetReloadDGuestManifestPath(TEXT("v1"));
+	if (!FPaths::FileExists(ManifestV1Path))
+	{
+		OutMissingPath = ManifestV1Path;
+		return false;
+	}
+
+	const FString ManifestV2Path = GetReloadDGuestManifestPath(TEXT("v2"));
+	if (!FPaths::FileExists(ManifestV2Path))
+	{
+		OutMissingPath = ManifestV2Path;
+		return false;
+	}
+
+	return true;
+}
+
+bool CreateReloadDGuestWorld(UWorld*& OutWorld)
+{
+	OutWorld = nullptr;
+	if (GEngine == nullptr)
+	{
+		return false;
+	}
+
+	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptReloadDGuestWorld"));
+	if (OutWorld == nullptr)
+	{
+		return false;
+	}
+
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(OutWorld);
+	return true;
+}
+
+void DestroyReloadDGuestWorld(UWorld*& World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (GEngine != nullptr)
+	{
+		GEngine->DestroyWorldContext(World);
+	}
+
+	World->DestroyWorld(false);
+	World = nullptr;
+}
+
+bool WriteReloadDGuestCorruptHashManifest(
+	const FString& SourceManifestPath,
+	const FString& ActualSha256,
+	const FString& CorruptManifestPath)
+{
+	FString ManifestJson;
+	if (!FFileHelper::LoadFileToString(ManifestJson, *SourceManifestPath))
+	{
+		return false;
+	}
+
+	const FString BadSha256(TEXT("0000000000000000000000000000000000000000000000000000000000000000"));
+	ManifestJson = ManifestJson.Replace(*ActualSha256, *BadSha256);
+	return FFileHelper::SaveStringToFile(ManifestJson, *CorruptManifestPath);
 }
 } // namespace
 
@@ -352,6 +445,137 @@ bool FAvidScriptReloadManifestRejectsMissingWasmSmokeTest::RunTest(const FString
 	TestEqual(TEXT("Missing module path"), LoadResult.ModulePath, MissingWasmPath);
 	TestEqual(TEXT("No bytecode returned for missing module"), LoadedBytecode.Num(), 0);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadDGuestActorHostContextSmokeTest,
+	"AvidScript.Reload.DGuestActorHostContextSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadDGuestActorHostContextSmokeTest::RunTest(const FString& Parameters)
+{
+	FString MissingArtifactPath;
+	if (!AreReloadDGuestArtifactsAvailable(MissingArtifactPath))
+	{
+		AddWarning(FString::Printf(
+			TEXT("D reload guest artifact is missing; build v1/v2 with BuildDGuestActorSetLocation.ps1 before running this smoke. missing=%s"),
+			*MissingArtifactPath));
+		return true;
+	}
+
+	const FString ManifestV1Path = GetReloadDGuestManifestPath(TEXT("v1"));
+	const FString ManifestV2Path = GetReloadDGuestManifestPath(TEXT("v2"));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadV1Result;
+	FAvidScriptWasmReloadManifest ManifestV1;
+	TArray<uint8> BytecodeV1;
+	const bool bLoadedV1 = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		ManifestV1Path,
+		ManifestV1,
+		BytecodeV1,
+		LoadV1Result);
+	if (!bLoadedV1)
+	{
+		AddError(LoadV1Result.ErrorMessage);
+		return true;
+	}
+	TestTrue(TEXT("D reload v1 manifest loads"), bLoadedV1);
+
+	FAvidScriptWasmReloadManifestLoadResult LoadV2Result;
+	FAvidScriptWasmReloadManifest ManifestV2;
+	TArray<uint8> BytecodeV2;
+	const bool bLoadedV2 = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		ManifestV2Path,
+		ManifestV2,
+		BytecodeV2,
+		LoadV2Result);
+	if (!bLoadedV2)
+	{
+		AddError(LoadV2Result.ErrorMessage);
+		return true;
+	}
+	TestTrue(TEXT("D reload v2 manifest loads"), bLoadedV2);
+
+	UWorld* World = nullptr;
+	if (!CreateReloadDGuestWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript D reload smoke world."));
+		DestroyReloadDGuestWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyReloadDGuestWorld(World);
+		return true;
+	}
+
+	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers"), RegisterResult.bSucceeded);
+	TestEqual(TEXT("D reload sample slot matches first registry handle"), ActorHandle.Slot, static_cast<uint32>(1));
+	TestEqual(TEXT("D reload sample generation matches first registry handle"), ActorHandle.Generation, static_cast<uint32>(1));
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptWasmReloadSession Session;
+	Session.SetHostContext(HostContext);
+
+	FAvidScriptWasmReloadResult ReloadResult;
+	const bool bInitialLoaded = Session.LoadInitialModule(
+		BytecodeV1.GetData(),
+		BytecodeV1.Num(),
+		ManifestV1,
+		ReloadResult);
+	if (!bInitialLoaded)
+	{
+		AddError(ReloadResult.ErrorMessage);
+		DestroyReloadDGuestWorld(World);
+		return true;
+	}
+	TestTrue(TEXT("D reload v1 initial module loads"), bInitialLoaded);
+	TestEqual(TEXT("Actor moved by D reload v1"), Actor->GetActorLocation(), FVector(123.0, 456.0, 789.0));
+
+	const bool bReloadedV2 = Session.ReloadModule(
+		BytecodeV2.GetData(),
+		BytecodeV2.Num(),
+		ManifestV2,
+		ReloadResult);
+	if (!bReloadedV2)
+	{
+		AddError(ReloadResult.ErrorMessage);
+		DestroyReloadDGuestWorld(World);
+		return true;
+	}
+	TestTrue(TEXT("D reload v2 applies"), bReloadedV2);
+	TestEqual(TEXT("Successful D reload count"), Session.GetSuccessfulReloadCount(), 1);
+	TestEqual(TEXT("Actor moved by D reload v2"), Actor->GetActorLocation(), FVector(321.0, 654.0, 987.0));
+
+	const FString CorruptManifestPath = FPaths::Combine(GetReloadManifestTestRoot(), TEXT("d_guest_reload_bad_hash.avidscript.json"));
+	TestTrue(
+		TEXT("Corrupt D reload manifest writes"),
+		WriteReloadDGuestCorruptHashManifest(ManifestV2Path, ManifestV2.WasmSha256, CorruptManifestPath));
+
+	FAvidScriptWasmReloadManifestLoadResult BadLoadResult;
+	FAvidScriptWasmReloadManifest BadManifest;
+	TArray<uint8> BadBytecode;
+	TestFalse(
+		TEXT("Corrupt D reload manifest rejects before staging"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(CorruptManifestPath, BadManifest, BadBytecode, BadLoadResult));
+	TestEqual(TEXT("Corrupt D reload category"), BadLoadResult.ErrorCategory, FString(TEXT("module_hash_mismatch")));
+	TestEqual(TEXT("Live D reload module remains v2 after bad manifest"), Session.GetLiveModuleId(), ManifestV2.ModuleId);
+	TestEqual(TEXT("Actor remains at D reload v2 location"), Actor->GetActorLocation(), FVector(321.0, 654.0, 987.0));
+
+	IFileManager::Get().Delete(*CorruptManifestPath);
+	DestroyReloadDGuestWorld(World);
 	return true;
 }
 #endif

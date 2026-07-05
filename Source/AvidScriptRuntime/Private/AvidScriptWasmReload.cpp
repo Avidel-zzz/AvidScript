@@ -518,6 +518,24 @@ bool FAvidScriptWasmReloadSession::ReloadModule(
 	return true;
 }
 
+void FAvidScriptWasmReloadSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
+{
+	HostContext = InHostContext;
+	if (LiveRuntime)
+	{
+		LiveRuntime->SetHostContext(HostContext);
+	}
+}
+
+void FAvidScriptWasmReloadSession::ClearHostContext()
+{
+	HostContext = FAvidScriptWasmHostContext();
+	if (LiveRuntime)
+	{
+		LiveRuntime->ClearHostContext();
+	}
+}
+
 bool FAvidScriptWasmReloadSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (!IsLiveLoaded())
@@ -630,6 +648,8 @@ bool FAvidScriptWasmReloadSession::BuildValidatedRuntime(
 		CandidateRuntime->Unload();
 		return false;
 	}
+
+	CandidateRuntime->SetHostContext(HostContext);
 
 	if (!CandidateRuntime->BeginPlay(RuntimeResult))
 	{

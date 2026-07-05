@@ -76,6 +76,8 @@ public:
 		FAvidScriptWasmReloadResult& OutResult);
 
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
+	void ClearHostContext();
 	void UnloadLive();
 
 	bool IsLiveLoaded() const;
@@ -99,6 +101,7 @@ private:
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	FAvidScriptWasmReloadManifest LiveManifest;
+	FAvidScriptWasmHostContext HostContext;
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
 };
