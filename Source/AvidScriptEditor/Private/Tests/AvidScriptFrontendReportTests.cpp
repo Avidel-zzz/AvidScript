@@ -1,0 +1,168 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "AvidScriptFrontendReport.h"
+
+#include "HAL/FileManager.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+
+namespace
+{
+FString GetAvidScriptReportTestRoot()
+{
+	FString TestRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptEditorTests"), TEXT("Reports"));
+	TestRoot = FPaths::ConvertRelativePathToFull(TestRoot);
+	FPaths::NormalizeFilename(TestRoot);
+	return TestRoot;
+}
+
+FString GetAvidScriptReportFixturePath(const TCHAR* FileName)
+{
+	return FPaths::Combine(GetAvidScriptReportTestRoot(), FileName);
+}
+
+bool WriteAvidScriptReportFixture(const FString& ReportPath, const FString& ReportJson)
+{
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportPath), true);
+	return FFileHelper::SaveStringToFile(ReportJson, *ReportPath);
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportSuccessLoadTest,
+	"AvidScript.Editor.Report.SuccessLoadSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportSuccessLoadTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("success.report.json"));
+	const FString ReportJson = TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"source\": \"Samples/ActorSetLocation/actor_set_location.avid\",\n")
+		TEXT("  \"bindings\": \"Bindings/ActorHostBindings.avidscript.json\",\n")
+		TEXT("  \"output_root\": \"Saved/AvidScriptGenerated/actor_set_location\",\n")
+		TEXT("  \"exit_code\": 0,\n")
+		TEXT("  \"succeeded\": true,\n")
+		TEXT("  \"diagnostics\": [],\n")
+		TEXT("  \"build_events\": [\n")
+		TEXT("    { \"result\": \"generated\", \"fields\": { \"source\": \"Saved/AvidScriptGenerated/actor_set_location/actor_set_location.generated.d\" } }\n")
+		TEXT("  ],\n")
+		TEXT("  \"raw_output\": [\"[AvidScript][Frontend][Build] result=generated\"]\n")
+		TEXT("}\n");
+
+	TestTrue(TEXT("Success fixture writes"), WriteAvidScriptReportFixture(ReportPath, ReportJson));
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestTrue(TEXT("Success report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestTrue(TEXT("Load result succeeded"), LoadResult.bSucceeded);
+	TestEqual(TEXT("Schema version"), Report.SchemaVersion, 1);
+	TestEqual(TEXT("Source"), Report.Source, FString(TEXT("Samples/ActorSetLocation/actor_set_location.avid")));
+	TestEqual(TEXT("Bindings"), Report.Bindings, FString(TEXT("Bindings/ActorHostBindings.avidscript.json")));
+	TestEqual(TEXT("Output root"), Report.OutputRoot, FString(TEXT("Saved/AvidScriptGenerated/actor_set_location")));
+	TestEqual(TEXT("Exit code"), Report.ExitCode, 0);
+	TestTrue(TEXT("Report succeeded"), Report.bSucceeded);
+	TestEqual(TEXT("Diagnostic count"), Report.Diagnostics.Num(), 0);
+	TestFalse(TEXT("No error diagnostics"), Report.HasErrorDiagnostics());
+	TestEqual(TEXT("Build event count"), Report.BuildEvents.Num(), 1);
+
+	const FAvidScriptFrontendBuildEvent* LastEvent = Report.GetLastBuildEvent();
+	TestNotNull(TEXT("Last build event exists"), LastEvent);
+	if (LastEvent != nullptr)
+	{
+		TestEqual(TEXT("Last build result"), LastEvent->Result, FString(TEXT("generated")));
+		const FString* GeneratedSource = LastEvent->Fields.Find(TEXT("source"));
+		TestNotNull(TEXT("Generated source field exists"), GeneratedSource);
+		if (GeneratedSource != nullptr)
+		{
+			TestEqual(TEXT("Generated source field"), *GeneratedSource, FString(TEXT("Saved/AvidScriptGenerated/actor_set_location/actor_set_location.generated.d")));
+		}
+	}
+
+	TestEqual(TEXT("Raw output count"), Report.RawOutput.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportDiagnosticLoadTest,
+	"AvidScript.Editor.Report.DiagnosticLoadSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("unknown_binding.report.json"));
+	const FString ReportJson = TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"source\": \"Saved/AvidScriptGenerated/NegativeTests/p9_2_unknown_binding.avid\",\n")
+		TEXT("  \"bindings\": \"Bindings/ActorHostBindings.avidscript.json\",\n")
+		TEXT("  \"output_root\": \"Saved/AvidScriptGenerated\",\n")
+		TEXT("  \"exit_code\": 1,\n")
+		TEXT("  \"succeeded\": false,\n")
+		TEXT("  \"diagnostics\": [\n")
+		TEXT("    { \"code\": \"ASL1202\", \"severity\": \"error\", \"line\": 6, \"column\": 5, \"message\": \"unknown binding 'teleport_actor'\" }\n")
+		TEXT("  ],\n")
+		TEXT("  \"build_events\": [\n")
+		TEXT("    { \"result\": \"unknown_binding\", \"fields\": { \"code\": \"ASL1202\", \"binding\": \"teleport_actor\" } }\n")
+		TEXT("  ],\n")
+		TEXT("  \"raw_output\": [\"[AvidScript][Frontend][Diagnostic] code=ASL1202\"]\n")
+		TEXT("}\n");
+
+	TestTrue(TEXT("Diagnostic fixture writes"), WriteAvidScriptReportFixture(ReportPath, ReportJson));
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestTrue(TEXT("Diagnostic report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestTrue(TEXT("Load result succeeded"), LoadResult.bSucceeded);
+	TestFalse(TEXT("Report did not succeed"), Report.bSucceeded);
+	TestTrue(TEXT("Error diagnostics detected"), Report.HasErrorDiagnostics());
+	TestEqual(TEXT("Diagnostic count"), Report.Diagnostics.Num(), 1);
+
+	if (Report.Diagnostics.Num() == 1)
+	{
+		const FAvidScriptFrontendDiagnostic& Diagnostic = Report.Diagnostics[0];
+		TestEqual(TEXT("Diagnostic code"), Diagnostic.Code, FString(TEXT("ASL1202")));
+		TestEqual(TEXT("Diagnostic severity"), Diagnostic.Severity, FString(TEXT("error")));
+		TestEqual(TEXT("Diagnostic line"), Diagnostic.Line, 6);
+		TestEqual(TEXT("Diagnostic column"), Diagnostic.Column, 5);
+		TestEqual(TEXT("Diagnostic message"), Diagnostic.Message, FString(TEXT("unknown binding 'teleport_actor'")));
+		TestTrue(TEXT("Diagnostic reports error"), Diagnostic.IsError());
+	}
+
+	const FAvidScriptFrontendBuildEvent* LastEvent = Report.GetLastBuildEvent();
+	TestNotNull(TEXT("Last build event exists"), LastEvent);
+	if (LastEvent != nullptr)
+	{
+		TestEqual(TEXT("Last build result"), LastEvent->Result, FString(TEXT("unknown_binding")));
+		const FString* Binding = LastEvent->Fields.Find(TEXT("binding"));
+		TestNotNull(TEXT("Binding field exists"), Binding);
+		if (Binding != nullptr)
+		{
+			TestEqual(TEXT("Binding field"), *Binding, FString(TEXT("teleport_actor")));
+		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportMissingFileTest,
+	"AvidScript.Editor.Report.MissingFileSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportMissingFileTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("missing.report.json"));
+	IFileManager::Get().Delete(*ReportPath);
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestFalse(TEXT("Missing report fails"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestFalse(TEXT("Load result did not succeed"), LoadResult.bSucceeded);
+	TestEqual(TEXT("Missing report category"), LoadResult.ErrorCategory, FString(TEXT("report_missing")));
+	TestEqual(TEXT("Missing report path"), LoadResult.ReportPath, ReportPath);
+
+	return true;
+}
+
+#endif
