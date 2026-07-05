@@ -1,0 +1,10 @@
+module actor_set_location
+
+use actor_set_location
+
+on begin_play {
+    actor_set_location(1, 1, 123.0, 456.0, 789.0)
+}
+
+on tick(delta_seconds) {
+}
