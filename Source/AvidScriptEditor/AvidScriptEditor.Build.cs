@@ -21,7 +21,11 @@ public class AvidScriptEditor : ModuleRules
 			{
 				"Projects",
 				"Json",
-				"UnrealEd"
+				"UnrealEd",
+				"ToolMenus",
+				"Slate",
+				"SlateCore",
+				"LevelEditor"
 			}
 		);
 	}
