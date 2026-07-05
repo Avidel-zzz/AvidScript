@@ -2,15 +2,47 @@
 
 #include "AvidScriptWasmRuntime.h"
 
+struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmRequiredImport
+{
+	FString ModuleName;
+	FString ImportName;
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifest
 {
+	static constexpr int32 SupportedSchemaVersion = 1;
 	static constexpr int32 SupportedAbiVersion = 1;
 
 	FString ModuleId;
 	int32 AbiVersion = SupportedAbiVersion;
+	FString Language;
+	FString WasmFile;
+	FString WasmSha256;
 	TArray<FString> RequiredExports;
+	TArray<FAvidScriptWasmRequiredImport> RequiredImports;
 
 	static FAvidScriptWasmReloadManifest MakeSmoke(const FString& InModuleId);
+};
+
+struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifestLoadResult
+{
+	bool bSucceeded = false;
+	FString ManifestPath;
+	FString ModulePath;
+	int64 ByteSize = 0;
+	FString ErrorCategory;
+	FString NextAction;
+	FString ErrorMessage;
+};
+
+class AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifestLoader
+{
+public:
+	static bool LoadFromFile(
+		const FString& ManifestPath,
+		FAvidScriptWasmReloadManifest& OutManifest,
+		TArray<uint8>& OutBytecode,
+		FAvidScriptWasmReloadManifestLoadResult& OutResult);
 };
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult

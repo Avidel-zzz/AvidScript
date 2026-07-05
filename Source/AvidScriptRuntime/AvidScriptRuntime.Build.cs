@@ -19,8 +19,12 @@ public class AvidScriptRuntime : ModuleRules
 			new[]
 			{
 				"Projects",
+				"Json",
+				"SSL",
 				"WAMR"
 			}
 		);
+
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
 	}
 }

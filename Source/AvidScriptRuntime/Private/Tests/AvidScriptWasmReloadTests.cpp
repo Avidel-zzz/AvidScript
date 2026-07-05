@@ -2,7 +2,15 @@
 
 #include "AvidScriptWasmReload.h"
 
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Ssl.h"
+
+THIRD_PARTY_INCLUDES_START
+#include <openssl/sha.h>
+THIRD_PARTY_INCLUDES_END
 
 namespace
 {
@@ -27,6 +35,75 @@ const uint8 GAvidScriptReloadMissingTickWasmModule[] = {
 	0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x00,
 	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
 };
+
+FString ReloadTestBytesToLowerHex(const uint8* Bytes, int32 ByteCount)
+{
+	FString Hex;
+	Hex.Reserve(ByteCount * 2);
+	for (int32 Index = 0; Index < ByteCount; ++Index)
+	{
+		Hex += FString::Printf(TEXT("%02x"), Bytes[Index]);
+	}
+	return Hex;
+}
+
+FString ComputeReloadTestSha256Hex(const TArray<uint8>& Bytes)
+{
+	uint8 Digest[SHA256_DIGEST_LENGTH] = {};
+	SHA256(Bytes.GetData(), static_cast<size_t>(Bytes.Num()), Digest);
+	return ReloadTestBytesToLowerHex(Digest, UE_ARRAY_COUNT(Digest));
+}
+
+FString GetReloadManifestTestRoot()
+{
+	FString TestRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("AvidScriptReloadManifestTests"));
+	TestRoot = FPaths::ConvertRelativePathToFull(TestRoot);
+	FPaths::NormalizeFilename(TestRoot);
+	return TestRoot;
+}
+
+FString JsonPathForReloadManifestTest(const FString& Path)
+{
+	return Path.Replace(TEXT("\\"), TEXT("/"));
+}
+
+FString ProjectRelativeJsonPathForReloadManifestTest(const FString& Path)
+{
+	FString RelativePath = Path;
+	FString ProjectDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
+	FPaths::NormalizeFilename(ProjectDir);
+	if (FPaths::MakePathRelativeTo(RelativePath, *ProjectDir))
+	{
+		return JsonPathForReloadManifestTest(RelativePath);
+	}
+
+	return JsonPathForReloadManifestTest(Path);
+}
+
+bool WriteReloadManifestFixture(
+	const FString& ManifestPath,
+	const FString& ModuleId,
+	const FString& WasmPath,
+	const FString& WasmSha256)
+{
+	const FString ManifestJson = FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"module_id\": \"%s\",\n")
+		TEXT("  \"abi_version\": 1,\n")
+		TEXT("  \"language\": \"d\",\n")
+		TEXT("  \"source\": { \"file\": \"Generated/manifest_smoke.d\" },\n")
+		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
+		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
+		TEXT("  \"required_imports\": [{ \"module\": \"env\", \"name\": \"actor_set_location\" }],\n")
+		TEXT("  \"toolchain\": { \"compiler\": \"ldc2\", \"version\": \"1.42.0\", \"target\": \"wasm32-unknown-unknown-wasm\", \"linker\": \"ldc2-internal-lld\" }\n")
+		TEXT("}\n"),
+		*ModuleId,
+		*ProjectRelativeJsonPathForReloadManifestTest(WasmPath),
+		*WasmSha256);
+
+	return FFileHelper::SaveStringToFile(ManifestJson, *ManifestPath);
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -154,4 +231,127 @@ bool FAvidScriptReloadAbiMismatchRollbackSmokeTest::RunTest(const FString& Param
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadManifestLoadsWasmSmokeTest,
+	"AvidScript.Reload.ManifestLoadsWasmSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadManifestLoadsWasmSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetReloadManifestTestRoot();
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+
+	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("manifest_smoke.wasm"));
+	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_smoke.avidscript.json"));
+
+	TArray<uint8> WasmBytes;
+	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	TestTrue(TEXT("WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+
+	const FString WasmSha256 = ComputeReloadTestSha256Hex(WasmBytes);
+	TestFalse(TEXT("WASM hash is non-empty"), WasmSha256.IsEmpty());
+	TestTrue(TEXT("Manifest fixture writes"), WriteReloadManifestFixture(ManifestPath, TEXT("manifest_smoke"), WasmPath, WasmSha256));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> LoadedBytecode;
+	const bool bLoadSucceeded = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		ManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult);
+	TestTrue(
+		TEXT("Manifest loads matching WASM"),
+		bLoadSucceeded);
+	if (!bLoadSucceeded)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Module id"), Manifest.ModuleId, FString(TEXT("manifest_smoke")));
+	TestEqual(TEXT("Language"), Manifest.Language, FString(TEXT("d")));
+	TestEqual(TEXT("WASM file"), Manifest.WasmFile, WasmPath);
+	TestEqual(TEXT("WASM SHA256"), Manifest.WasmSha256, WasmSha256);
+	TestEqual(TEXT("Required export count"), Manifest.RequiredExports.Num(), 2);
+	TestEqual(TEXT("Required import count"), Manifest.RequiredImports.Num(), 1);
+	TestEqual(TEXT("Required import module"), Manifest.RequiredImports[0].ModuleName, FString(TEXT("env")));
+	TestEqual(TEXT("Required import name"), Manifest.RequiredImports[0].ImportName, FString(TEXT("actor_set_location")));
+	TestEqual(TEXT("Loaded byte size"), LoadedBytecode.Num(), WasmBytes.Num());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadManifestRejectsHashMismatchSmokeTest,
+	"AvidScript.Reload.ManifestRejectsHashMismatchSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadManifestRejectsHashMismatchSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetReloadManifestTestRoot();
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+
+	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("manifest_hash_mismatch.wasm"));
+	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_hash_mismatch.avidscript.json"));
+
+	TArray<uint8> WasmBytes;
+	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	TestTrue(TEXT("WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+	TestTrue(
+		TEXT("Manifest fixture writes"),
+		WriteReloadManifestFixture(
+			ManifestPath,
+			TEXT("manifest_hash_mismatch"),
+			WasmPath,
+			TEXT("0000000000000000000000000000000000000000000000000000000000000000")));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> LoadedBytecode;
+	TestFalse(
+		TEXT("Manifest rejects mismatched hash"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(ManifestPath, Manifest, LoadedBytecode, LoadResult));
+	TestEqual(TEXT("Hash mismatch category"), LoadResult.ErrorCategory, FString(TEXT("module_hash_mismatch")));
+	TestEqual(TEXT("No bytecode returned on hash mismatch"), LoadedBytecode.Num(), 0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadManifestRejectsMissingWasmSmokeTest,
+	"AvidScript.Reload.ManifestRejectsMissingWasmSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadManifestRejectsMissingWasmSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetReloadManifestTestRoot();
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+
+	const FString MissingWasmPath = FPaths::Combine(TestRoot, TEXT("missing_manifest_wasm.wasm"));
+	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_missing_wasm.avidscript.json"));
+	if (FPaths::FileExists(MissingWasmPath))
+	{
+		IFileManager::Get().Delete(*MissingWasmPath);
+	}
+
+	TestTrue(
+		TEXT("Manifest fixture writes"),
+		WriteReloadManifestFixture(
+			ManifestPath,
+			TEXT("manifest_missing_wasm"),
+			MissingWasmPath,
+			TEXT("0000000000000000000000000000000000000000000000000000000000000000")));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> LoadedBytecode;
+	TestFalse(
+		TEXT("Manifest rejects missing WASM"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(ManifestPath, Manifest, LoadedBytecode, LoadResult));
+	TestEqual(TEXT("Missing module category"), LoadResult.ErrorCategory, FString(TEXT("module_file_missing")));
+	TestEqual(TEXT("Missing module path"), LoadResult.ModulePath, MissingWasmPath);
+	TestEqual(TEXT("No bytecode returned for missing module"), LoadedBytecode.Num(), 0);
+
+	return true;
+}
 #endif
