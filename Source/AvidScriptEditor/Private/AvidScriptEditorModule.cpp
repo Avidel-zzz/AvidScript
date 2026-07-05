@@ -1,5 +1,6 @@
 #include "AvidScriptEditorModule.h"
 
+#include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
@@ -212,15 +213,43 @@ void FAvidScriptEditorModule::RegisterMenus()
 void FAvidScriptEditorModule::HandleRunSampleCommand()
 {
 	FAvidScriptEditorCommandLaunchResult Result;
-	if (ExecuteSampleCommand(Result))
+	ExecuteSampleCommand(Result);
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakePresentation(Result);
+
+	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Info)
 	{
-		UE_LOG(LogAvidScriptEditor, Display, TEXT("AvidScript sample command succeeded: %s"), *Result.Summary);
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("%s: %s\n%s"),
+			*Presentation.Title,
+			*Presentation.Body,
+			*Presentation.Details);
 		return;
 	}
 
-	UE_LOG(LogAvidScriptEditor, Warning, TEXT("AvidScript sample command failed: %s"), *Result.Summary);
-}
+	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Warning)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Warning,
+			TEXT("%s: %s\n%s"),
+			*Presentation.Title,
+			*Presentation.Body,
+			*Presentation.Details);
+		return;
+	}
 
+	UE_LOG(
+		LogAvidScriptEditor,
+		Error,
+		TEXT("%s: %s\n%s"),
+		*Presentation.Title,
+		*Presentation.Body,
+		*Presentation.Details);
+}
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FAvidScriptEditorModule, AvidScriptEditor)
