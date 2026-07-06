@@ -54,6 +54,24 @@ void SetAvidScriptSampleCommandFailure(
 	OutResult.CommandResult.NextAction = NextAction;
 }
 
+void SetAvidScriptCSharpProfileCommandFailure(
+	const FAvidScriptEditorCSharpProfileLoadResult& ProfileResult,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult)
+{
+	OutBuildResult = FAvidScriptEditorCSharpBuildResult();
+	OutBuildResult.bSucceeded = false;
+	OutBuildResult.ErrorCategory = ProfileResult.ErrorCategory;
+	OutBuildResult.ErrorMessage = ProfileResult.ErrorMessage;
+	OutBuildResult.SourcePath = ProfileResult.BuildConfig.SourcePath;
+	OutBuildResult.ProjectPath = ProfileResult.BuildConfig.ProjectPath;
+	OutBuildResult.BuildScriptPath = ProfileResult.BuildConfig.BuildScriptPath;
+	OutBuildResult.OutputRoot = ProfileResult.BuildConfig.OutputRoot;
+	OutBuildResult.ReportPath = ProfileResult.BuildConfig.ReportPath;
+	OutBuildResult.ManifestPath = ProfileResult.BuildConfig.ManifestPath;
+	OutBuildResult.ModuleId = ProfileResult.BuildConfig.ModuleId;
+	OutBuildResult.ArtifactStem = ProfileResult.BuildConfig.ArtifactStem;
+}
+
 void LogAvidScriptMenuRegistrationFailure(const FAvidScriptEditorMenuRegistrationResult& Result)
 {
 	UE_LOG(
@@ -134,6 +152,11 @@ FName FAvidScriptEditorModule::GetCSharpActorLifecycleBuildAndBindEntryName()
 	return TEXT("AvidScript.BuildAndBindCSharpActorLifecycle");
 }
 
+FName FAvidScriptEditorModule::GetCSharpProfileBuildAndBindEntryName()
+{
+	return TEXT("AvidScript.BuildAndBindCSharpProfile");
+}
+
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 {
 	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath();
@@ -142,6 +165,11 @@ FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleBuildScriptPath()
 {
 	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+}
+
+FString FAvidScriptEditorModule::GetDefaultCSharpProfilePath()
+{
+	return FAvidScriptEditorCSharpProfileService::GetDefaultProfilePath();
 }
 
 bool FAvidScriptEditorModule::MakeSampleCommandConfig(
@@ -226,6 +254,20 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpActorLifecyc
 	return Config;
 }
 
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpProfileBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpProfileBuildAndBindEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptBuildAndBindCSharpProfileLabel", "Build And Bind C# Profile Script");
+	Config.ToolTip = LOCTEXT("AvidScriptBuildAndBindCSharpProfileToolTip", "Build the configured C# profile and apply its report to the selected Actor.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
 bool FAvidScriptEditorModule::ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult)
 {
 	if (!CommandLauncher.IsValid())
@@ -280,6 +322,29 @@ bool FAvidScriptEditorModule::ExecuteCSharpActorLifecycleBuildAndBinding(
 	return ExecuteCSharpActorLifecycleBinding(OutBindingResult);
 }
 
+bool FAvidScriptEditorModule::ExecuteCSharpProfileBuildAndBinding(
+	const FString& ProfilePath,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult)
+{
+	OutBindingResult = FAvidScriptEditorComponentBindingResult();
+
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!FAvidScriptEditorCSharpProfileService::LoadProfile(ProfilePath, ProfileResult))
+	{
+		SetAvidScriptCSharpProfileCommandFailure(ProfileResult, OutBuildResult);
+		return false;
+	}
+
+	if (!FAvidScriptEditorCSharpBuildService::BuildProfile(ProfileResult.BuildConfig, OutBuildResult))
+	{
+		return false;
+	}
+
+	return FAvidScriptEditorComponentBindingService::ApplyCSharpReportToSelectedActor(
+		OutBuildResult.ReportPath,
+		OutBindingResult);
+}
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
@@ -297,6 +362,13 @@ void FAvidScriptEditorModule::RegisterMenus()
 		LogAvidScriptMenuRegistrationFailure(Result);
 	}
 
+
+	const FAvidScriptEditorMenuEntryConfig CSharpProfileBuildAndBindMenuConfig = MakeCSharpProfileBuildAndBindMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpProfileBuildAndBindMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
 	const FAvidScriptEditorMenuEntryConfig CSharpBindMenuConfig = MakeCSharpActorLifecycleBindMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBindCSharpActorLifecycleReport));
 	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpBindMenuConfig, Result))
@@ -405,6 +477,48 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpActorLifecycleReport()
 		LogAvidScriptEditor,
 		Warning,
 		TEXT("C# ActorLifecycle build succeeded but binding failed: category=%s message=%s next=%s report=%s"),
+		*BindingResult.ErrorCategory,
+		*BindingResult.ErrorMessage,
+		*BindingResult.NextAction,
+		*BindingResult.ReportPath);
+}
+
+void FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile()
+{
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	if (ExecuteCSharpProfileBuildAndBinding(GetDefaultCSharpProfilePath(), BuildResult, BindingResult))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("C# profile build-and-bind applied: actor=%s module=%s manifest=%s report=%s"),
+			*BindingResult.ActorPath,
+			*BuildResult.ModuleId,
+			*BindingResult.NormalizedManifestPath,
+			*BindingResult.ReportPath);
+		return;
+	}
+
+	if (!BuildResult.bSucceeded)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Warning,
+			TEXT("C# profile build failed: category=%s message=%s exit=%d profile=%s report=%s stderr=%s"),
+			*BuildResult.ErrorCategory,
+			*BuildResult.ErrorMessage,
+			BuildResult.ProcessExitCode,
+			*GetDefaultCSharpProfilePath(),
+			*BuildResult.ReportPath,
+			*BuildResult.Stderr);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Warning,
+		TEXT("C# profile build succeeded but binding failed: category=%s message=%s next=%s report=%s"),
 		*BindingResult.ErrorCategory,
 		*BindingResult.ErrorMessage,
 		*BindingResult.NextAction,

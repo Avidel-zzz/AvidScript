@@ -3,6 +3,7 @@
 #include "AvidScriptEditorCommandLauncher.h"
 #include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 
@@ -25,8 +26,10 @@ public:
 	static FString GetSampleCommandSourcePath();
 	static FName GetCSharpActorLifecycleBindEntryName();
 	static FName GetCSharpActorLifecycleBuildAndBindEntryName();
+	static FName GetCSharpProfileBuildAndBindEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
 	static FString GetCSharpActorLifecycleBuildScriptPath();
+	static FString GetDefaultCSharpProfilePath();
 
 	static bool MakeSampleCommandConfig(
 		FAvidScriptEditorCommandLaunchConfig& OutConfig,
@@ -41,10 +44,15 @@ public:
 	static FAvidScriptEditorMenuEntryConfig MakeSampleMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpProfileBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBuildAndBinding(
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult);
+	bool ExecuteCSharpProfileBuildAndBinding(
+		const FString& ProfilePath,
 		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
 		FAvidScriptEditorComponentBindingResult& OutBindingResult);
 
@@ -53,6 +61,7 @@ private:
 	void HandleRunSampleCommand();
 	void HandleBindCSharpActorLifecycleReport();
 	void HandleBuildAndBindCSharpActorLifecycleReport();
+	void HandleBuildAndBindCSharpProfile();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	FDelegateHandle ToolMenusStartupCallbackHandle;

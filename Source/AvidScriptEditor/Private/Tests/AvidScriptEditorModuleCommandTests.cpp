@@ -10,10 +10,12 @@
 
 #include "Components/SceneComponent.h"
 #include "Editor.h"
+#include "HAL/FileManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 
@@ -59,6 +61,39 @@ void DestroyAvidScriptEditorModuleCSharpBindingWorld(UWorld*& World)
 	World = nullptr;
 }
 
+FString NormalizeAvidScriptEditorModuleCSharpProfilePath(FString Path)
+{
+	Path = FPaths::ConvertRelativePathToFull(Path);
+	FPaths::NormalizeFilename(Path);
+	return Path;
+}
+
+FString GetAvidScriptEditorModuleCSharpProfileTestRoot()
+{
+	return NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptEditorTests"),
+		TEXT("ModuleCSharpProfile")));
+}
+
+FString MakeAvidScriptEditorModuleCSharpProfileSourceText()
+{
+	return TEXT(
+		"using AvidScript;\n"
+		"\n"
+		"public static class ProfileMenuMover\n"
+		"{\n"
+		"    public static void BeginPlay()\n"
+		"    {\n"
+		"        Actor.SetLocation(41.0f, 42.0f, 43.0f);\n"
+		"    }\n"
+		"\n"
+		"    public static void Tick(float deltaSeconds)\n"
+		"    {\n"
+		"        Actor.SetLocation(deltaSeconds * 12.0f, 13.0f, 14.0f);\n"
+		"    }\n"
+		"}\n");
+}
 AActor* SpawnAvidScriptEditorModuleCSharpBindingActor(UWorld& World)
 {
 	AActor* Actor = World.SpawnActor<AActor>();
@@ -137,6 +172,20 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestFalse(TEXT("C# build-and-bind command label is set"), CSharpBuildAndBindMenuConfig.Label.IsEmpty());
 	TestFalse(TEXT("C# build-and-bind command tooltip is set"), CSharpBuildAndBindMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# build-and-bind command execute action is bound"), CSharpBuildAndBindMenuConfig.ExecuteAction.IsBound());
+
+	const FString DefaultCSharpProfilePath = FAvidScriptEditorModule::GetDefaultCSharpProfilePath();
+	TestTrue(TEXT("Default C# profile path uses Saved profile file"), DefaultCSharpProfilePath.EndsWith(TEXT("Saved/AvidScriptCSharpProfiles/default.csharp-profile.json")));
+
+	FAvidScriptEditorMenuEntryConfig CSharpProfileBuildAndBindMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpProfileBuildAndBindMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
+		}));
+	TestEqual(TEXT("C# profile build-and-bind command owner"), CSharpProfileBuildAndBindMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# profile build-and-bind command menu"), CSharpProfileBuildAndBindMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# profile build-and-bind command section"), CSharpProfileBuildAndBindMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# profile build-and-bind command entry"), CSharpProfileBuildAndBindMenuConfig.EntryName, FName(TEXT("AvidScript.BuildAndBindCSharpProfile")));
+	TestFalse(TEXT("C# profile build-and-bind command label is set"), CSharpProfileBuildAndBindMenuConfig.Label.IsEmpty());
+	TestFalse(TEXT("C# profile build-and-bind command tooltip is set"), CSharpProfileBuildAndBindMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# profile build-and-bind command execute action is bound"), CSharpProfileBuildAndBindMenuConfig.ExecuteAction.IsBound());
 
 	return true;
 }
@@ -247,4 +296,83 @@ bool FAvidScriptEditorModuleCSharpBuildAndBindSelectedActorTest::RunTest(const F
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest,
+	"AvidScript.Editor.Module.CSharpProfileBuildAndBindSelectedActorSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest::RunTest(const FString& Parameters)
+{
+	if (GEditor == nullptr)
+	{
+		AddError(TEXT("GEditor is not available for module C# profile build-and-bind smoke."));
+		return true;
+	}
+
+	const FString TestRoot = GetAvidScriptEditorModuleCSharpProfileTestRoot();
+	TestTrue(TEXT("Module C# profile test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString SourcePath = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(TestRoot, TEXT("ProfileMenuMover.cs")));
+	TestTrue(TEXT("Module C# profile source can be written"), FFileHelper::SaveStringToFile(MakeAvidScriptEditorModuleCSharpProfileSourceText(), *SourcePath));
+
+	const FString OutputRoot = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest"),
+		TEXT("ProfileMenuMover")));
+	const FString ProfilePath = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(TestRoot, TEXT("profile_menu_mover.csharp-profile.json")));
+	const FString ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	const FString ProfileText = FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"language\": \"csharp\",\n")
+		TEXT("  \"source_path\": \"%s\",\n")
+		TEXT("  \"project_path\": \"%s\",\n")
+		TEXT("  \"module_id\": \"csharp_profile_menu_mover\",\n")
+		TEXT("  \"artifact_stem\": \"profile_menu_mover\",\n")
+		TEXT("  \"output_root\": \"%s\"\n")
+		TEXT("}\n"),
+		*SourcePath,
+		*ProjectPath,
+		*OutputRoot);
+	TestTrue(TEXT("Module C# profile can be written"), FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+
+	UWorld* World = nullptr;
+	if (!CreateAvidScriptEditorModuleCSharpBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create module C# profile build-and-bind test world."));
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return true;
+	}
+
+	AActor* Actor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
+	TestNotNull(TEXT("Module C# profile build-and-bind test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return true;
+	}
+
+	GEditor->SelectNone(false, true, false);
+	GEditor->SelectActor(Actor, true, false, true, false);
+
+	FAvidScriptEditorModule& Module =
+		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	TestTrue(TEXT("Module C# profile build-and-bind command succeeds"), Module.ExecuteCSharpProfileBuildAndBinding(ProfilePath, BuildResult, BindingResult));
+	TestTrue(TEXT("Module C# profile build result succeeds"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Module C# profile module id"), BuildResult.ModuleId, FString(TEXT("csharp_profile_menu_mover")));
+	TestEqual(TEXT("Module C# profile artifact stem"), BuildResult.ArtifactStem, FString(TEXT("profile_menu_mover")));
+	TestEqual(TEXT("Module C# profile build report path"), BuildResult.ReportPath, FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(OutputRoot, TEXT("profile_menu_mover")));
+	TestTrue(TEXT("Module C# profile build report exists"), FPaths::FileExists(BuildResult.ReportPath));
+	TestTrue(TEXT("Module C# profile build-and-bind result succeeds"), BindingResult.bSucceeded);
+	TestEqual(TEXT("Module C# profile build-and-bind report path"), BindingResult.ReportPath, BuildResult.ReportPath);
+	TestNotNull(TEXT("Module C# profile build-and-bind returns component"), BindingResult.Component);
+	TestEqual(TEXT("Module C# profile component manifest"), BindingResult.Component->GetScriptManifestPath(), BuildResult.ManifestPath);
+	TestEqual(TEXT("Module C# profile actor component"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
+
+	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS
