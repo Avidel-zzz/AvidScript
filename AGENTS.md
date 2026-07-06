@@ -157,6 +157,10 @@ Plugins/AvidScript/Docs
 - P19 profile 化 C# 构建已经接入: `BuildCSharpActorLifecycle.ps1` 与 `FAvidScriptEditorCSharpBuildService::BuildProfile(...)` 接收 `SourcePath`, `ProjectPath`, `ModuleId`, `ArtifactStem`, `OutputRoot`, `ReportPath`, `ManifestPath`; 默认 ActorLifecycle 参数保持兼容。
 - P19 自定义 profile 自动化使用 `csharp_custom_mover` / `custom_mover` 验证 report、manifest、WASM artifact 命名与组件绑定。后续 UI/profile 持久化应复用 `BuildProfile(...)`, 不要再硬编码 ActorLifecycle 文件名。
 - 2026-07-06 P19 workflow note: 新增 `AvidScriptEditor` 测试 `.cpp` 时仍可能遇到 UBT cached source list; 如果模块构建意外 up to date, 先触发 source-list invalidation 并保持 `-Module=AvidScriptEditor` 范围, 不要清 Editor target。
+- P20 C# profile JSON 服务已经接入: `FAvidScriptEditorCSharpProfileService::LoadProfile(...)` 可读取 schema_version 1 / language csharp profile, 并映射到 `FAvidScriptEditorCSharpBuildConfig`。
+- P20 默认 profile 路径为 `Saved/AvidScriptCSharpProfiles/default.csharp-profile.json`; Editor 菜单入口 `Build And Bind C# Profile Script` 当前固定读取该路径, 后续 UI/profile 列表应复用这个默认约定。
+- P20 profile 入口成功路径为: profile JSON -> `BuildProfile(...)` -> C# report -> `FAvidScriptEditorComponentBindingService::ApplyCSharpReportToSelectedActor(...)` -> `UAvidScriptComponent` manifest path。
+- 2026-07-06 P20 mistake record: 用 PowerShell 双引号直接拼复杂 C++ 替换片段时容易被引号、反斜杠或 UE 宏文本打断解析; 本次未写坏文件但浪费了验证时间。Prevention: 复杂 C++/Markdown 替换优先用单引号 here-string、逐行数组或小范围读写函数, 写后立即 `Select-String`/`git diff --check` 核对。
 
 ## D Guest Toolchain Workflow
 
