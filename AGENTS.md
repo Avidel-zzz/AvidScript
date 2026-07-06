@@ -150,6 +150,7 @@ Plugins/AvidScript/Docs
 - 2026-07-06 P14.1 mistake record: returning an empty .NET `List[byte]` from a PowerShell function without a unary comma enumerates the empty collection and assigns `$null`, causing later parameter binding errors such as `Cannot bind argument to parameter 'Bytes' because it is null`. Prevention: return collection objects with `return ,$List` / `return ,$Body`, and use `return ,([byte[]]...)` for byte arrays that must stay intact.
 - P15.2 组件级 C# manifest 路径已经接入 `UAvidScriptComponent`: manifest 路径为空时继续使用 embedded smoke module, 路径非空时通过 manifest loader 加载 WASM, 并在 BeginPlay 前注入组件 owner registry 与 `AllowWrites` actor 写策略。
 - 2026-07-06 P15.2 mistake record: UE5.8 的 `FFilePath` 声明在 `UObject/SoftObjectPath.h`, 不是 `Misc/FilePath.h`; 错误 include 会导致 `fatal error C1083`. Prevention: 新增 UE struct include 前先在 `C:\UnrealEngine\Engine\Source` 搜索声明位置或参考同引擎版本的工作示例。
+- P16.2 Editor 侧 C# report/manifest 组件绑定已经接入 `FAvidScriptEditorComponentBindingService`: 该服务可读取 C# build report 的 `artifacts.manifest_file`, 绑定到显式 Actor 或当前选中 Actor, 并在缺少组件时创建 `UAvidScriptComponent`。
 
 ## D Guest Toolchain Workflow
 
