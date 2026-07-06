@@ -1,0 +1,371 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "AvidScriptObjectRegistry.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
+#include "AvidScriptWasmReload.h"
+
+#include "Dom/JsonObject.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+
+namespace
+{
+void AppendCSharpU32Leb(TArray<uint8>& Bytes, uint32 Value)
+{
+	do
+	{
+		uint8 Byte = static_cast<uint8>(Value & 0x7f);
+		Value >>= 7;
+		if (Value != 0)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	} while (Value != 0);
+}
+
+void AppendCSharpString(TArray<uint8>& Bytes, const char* Text)
+{
+	const int32 Length = static_cast<int32>(FCStringAnsi::Strlen(Text));
+	AppendCSharpU32Leb(Bytes, static_cast<uint32>(Length));
+	for (int32 Index = 0; Index < Length; ++Index)
+	{
+		Bytes.Add(static_cast<uint8>(Text[Index]));
+	}
+}
+
+void AppendCSharpSection(TArray<uint8>& Module, uint8 SectionId, const TArray<uint8>& Payload)
+{
+	Module.Add(SectionId);
+	AppendCSharpU32Leb(Module, static_cast<uint32>(Payload.Num()));
+	Module.Append(Payload);
+}
+
+void AppendCSharpF32(TArray<uint8>& Bytes, float Value)
+{
+	const uint8* RawBytes = reinterpret_cast<const uint8*>(&Value);
+	Bytes.Append(RawBytes, sizeof(Value));
+}
+
+void AppendActorSetLocationCall(
+	TArray<uint8>& Body,
+	const FAvidScriptObjectHandle& ActorHandle,
+	const FVector& TargetLocation)
+{
+	Body.Add(0x41);
+	AppendCSharpU32Leb(Body, ActorHandle.Slot);
+	Body.Add(0x41);
+	AppendCSharpU32Leb(Body, ActorHandle.Generation);
+	Body.Add(0x43);
+	AppendCSharpF32(Body, static_cast<float>(TargetLocation.X));
+	Body.Add(0x43);
+	AppendCSharpF32(Body, static_cast<float>(TargetLocation.Y));
+	Body.Add(0x43);
+	AppendCSharpF32(Body, static_cast<float>(TargetLocation.Z));
+	Body.Add(0x10);
+	AppendCSharpU32Leb(Body, 0);
+	Body.Add(0x1a);
+}
+
+TArray<uint8> BuildCSharpDirectAbiContractFixture(
+	const FAvidScriptObjectHandle& ActorHandle,
+	const FVector& BeginPlayLocation,
+	const FVector& TickLocation)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> TypeSection;
+	AppendCSharpU32Leb(TypeSection, 3);
+	TypeSection.Add(0x60);
+	AppendCSharpU32Leb(TypeSection, 5);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x7d);
+	TypeSection.Add(0x7d);
+	TypeSection.Add(0x7d);
+	AppendCSharpU32Leb(TypeSection, 1);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x60);
+	AppendCSharpU32Leb(TypeSection, 0);
+	AppendCSharpU32Leb(TypeSection, 0);
+	TypeSection.Add(0x60);
+	AppendCSharpU32Leb(TypeSection, 1);
+	TypeSection.Add(0x7d);
+	AppendCSharpU32Leb(TypeSection, 0);
+	AppendCSharpSection(Module, 1, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendCSharpU32Leb(ImportSection, 1);
+	AppendCSharpString(ImportSection, "env");
+	AppendCSharpString(ImportSection, "actor_set_location");
+	ImportSection.Add(0x00);
+	AppendCSharpU32Leb(ImportSection, 0);
+	AppendCSharpSection(Module, 2, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendCSharpU32Leb(FunctionSection, 2);
+	AppendCSharpU32Leb(FunctionSection, 1);
+	AppendCSharpU32Leb(FunctionSection, 2);
+	AppendCSharpSection(Module, 3, FunctionSection);
+
+	TArray<uint8> ExportSection;
+	AppendCSharpU32Leb(ExportSection, 2);
+	AppendCSharpString(ExportSection, "avid_on_begin_play");
+	ExportSection.Add(0x00);
+	AppendCSharpU32Leb(ExportSection, 1);
+	AppendCSharpString(ExportSection, "avid_on_tick");
+	ExportSection.Add(0x00);
+	AppendCSharpU32Leb(ExportSection, 2);
+	AppendCSharpSection(Module, 7, ExportSection);
+
+	TArray<uint8> BeginPlayBody;
+	AppendCSharpU32Leb(BeginPlayBody, 0);
+	AppendActorSetLocationCall(BeginPlayBody, ActorHandle, BeginPlayLocation);
+	BeginPlayBody.Add(0x0b);
+
+	TArray<uint8> TickBody;
+	AppendCSharpU32Leb(TickBody, 0);
+	AppendActorSetLocationCall(TickBody, ActorHandle, TickLocation);
+	TickBody.Add(0x0b);
+
+	TArray<uint8> CodeSection;
+	AppendCSharpU32Leb(CodeSection, 2);
+	AppendCSharpU32Leb(CodeSection, static_cast<uint32>(BeginPlayBody.Num()));
+	CodeSection.Append(BeginPlayBody);
+	AppendCSharpU32Leb(CodeSection, static_cast<uint32>(TickBody.Num()));
+	CodeSection.Append(TickBody);
+	AppendCSharpSection(Module, 10, CodeSection);
+
+	return Module;
+}
+
+FString GetCSharpSampleSourcePath()
+{
+	return FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript"),
+		TEXT("Samples"),
+		TEXT("CSharp"),
+		TEXT("ActorLifecycle"),
+		TEXT("ActorLifecycleScript.cs"));
+}
+
+FString GetCSharpToolchainReportPath()
+{
+	FString ReportPath = FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest"),
+		TEXT("ActorLifecycle"),
+		TEXT("actor_lifecycle.csharp.report.json"));
+	ReportPath = FPaths::ConvertRelativePathToFull(ReportPath);
+	FPaths::NormalizeFilename(ReportPath);
+	return ReportPath;
+}
+
+bool CreateCSharpContractWorld(UWorld*& OutWorld)
+{
+	OutWorld = nullptr;
+	if (GEngine == nullptr)
+	{
+		return false;
+	}
+
+	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptCSharpContractWorld"));
+	if (OutWorld == nullptr)
+	{
+		return false;
+	}
+
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(OutWorld);
+	return true;
+}
+
+void DestroyCSharpContractWorld(UWorld*& World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (GEngine != nullptr)
+	{
+		GEngine->DestroyWorldContext(World);
+	}
+
+	World->DestroyWorld(false);
+	World = nullptr;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpSampleShapeSmokeTest,
+	"AvidScript.Guest.CSharp.SampleShapeSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
+{
+	FString SourceText;
+	const FString SourcePath = GetCSharpSampleSourcePath();
+	if (!FFileHelper::LoadFileToString(SourceText, *SourcePath))
+	{
+		AddError(FString::Printf(TEXT("Failed to load C# sample source: %s"), *SourcePath));
+		return true;
+	}
+
+	TestTrue(TEXT("Sample exports BeginPlay"), SourceText.Contains(TEXT("avid_on_begin_play")));
+	TestTrue(TEXT("Sample exports Tick"), SourceText.Contains(TEXT("avid_on_tick")));
+	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
+	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
+	TestTrue(TEXT("Sample presents Actor.SetLocation facade"), SourceText.Contains(TEXT("Actor.SetLocation")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpDirectAbiContractLifecycleSmokeTest,
+	"AvidScript.Guest.CSharp.DirectAbiContractLifecycleSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpDirectAbiContractLifecycleSmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateCSharpContractWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript C# direct ABI contract world."));
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers"), RegisterResult.bSucceeded);
+
+	const FVector BeginPlayLocation(130.0, 230.0, 330.0);
+	const FVector TickLocation(131.0, 231.0, 331.0);
+	const TArray<uint8> WasmBytes = BuildCSharpDirectAbiContractFixture(ActorHandle, BeginPlayLocation, TickLocation);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptWasmReloadManifest Manifest;
+	Manifest.ModuleId = TEXT("csharp_direct_abi_contract");
+	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+	Manifest.Language = TEXT("csharp");
+	Manifest.RequiredExports = {
+		TEXT("avid_on_begin_play"),
+		TEXT("avid_on_tick")
+	};
+	Manifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("env"), TEXT("actor_set_location") }
+	};
+
+	FAvidScriptWasmReloadSession Session;
+	Session.SetHostContext(HostContext);
+
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!Session.LoadInitialModule(WasmBytes.GetData(), WasmBytes.Num(), Manifest, ReloadResult))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestTrue(TEXT("C# direct ABI contract module loads"), ReloadResult.bSucceeded);
+	TestEqual(TEXT("BeginPlay moves actor through C# ABI contract"), Actor->GetActorLocation(), BeginPlayLocation);
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!Session.TickLive(1.0f / 60.0f, TickResult))
+	{
+		AddError(TickResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestEqual(TEXT("Tick moves actor through C# ABI contract"), Actor->GetActorLocation(), TickLocation);
+	TestEqual(TEXT("Tick count increments"), Session.GetLiveTickCallCount(), 1);
+
+	DestroyCSharpContractWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpToolchainReportSmokeTest,
+	"AvidScript.Guest.CSharp.ToolchainReportSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpToolchainReportSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetCSharpToolchainReportPath();
+	if (!FPaths::FileExists(ReportPath))
+	{
+		AddWarning(FString::Printf(
+			TEXT("C# toolchain report is missing; run BuildCSharpActorLifecycle.ps1 before using this as a true toolchain smoke. report=%s"),
+			*ReportPath));
+		return true;
+	}
+
+	FString ReportJson;
+	if (!FFileHelper::LoadFileToString(ReportJson, *ReportPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read C# toolchain report: %s"), *ReportPath));
+		return true;
+	}
+
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{
+		AddError(FString::Printf(TEXT("C# toolchain report is not valid JSON: %s"), *ReportPath));
+		return true;
+	}
+
+	FString Language;
+	TestTrue(TEXT("Report declares language"), RootObject->TryGetStringField(TEXT("language"), Language));
+	TestEqual(TEXT("Report language"), Language, FString(TEXT("csharp")));
+
+	FString Result;
+	TestTrue(TEXT("Report declares result"), RootObject->TryGetStringField(TEXT("result"), Result));
+	TestTrue(
+		TEXT("Report result is recognized"),
+		Result == TEXT("direct_abi_built") ||
+		Result == TEXT("direct_abi_unsupported") ||
+		Result == TEXT("missing_toolchain") ||
+		Result == TEXT("missing_workload") ||
+		Result == TEXT("publish_failed"));
+
+	bool bDirectAbiSupported = false;
+	TestTrue(TEXT("Report declares direct ABI support"), RootObject->TryGetBoolField(TEXT("direct_abi_supported"), bDirectAbiSupported));
+	if (Result == TEXT("direct_abi_built"))
+	{
+		TestTrue(TEXT("Built result reports direct ABI support"), bDirectAbiSupported);
+	}
+	else
+	{
+		TestFalse(TEXT("Non-built result reports no direct ABI support"), bDirectAbiSupported);
+	}
+
+	return true;
+}
+
+#endif

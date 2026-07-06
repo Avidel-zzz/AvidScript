@@ -132,6 +132,17 @@ Plugins/AvidScript/Docs
 - If a build fails inside AvidScript files, fix the plugin code first and rerun the same command.
 - Generated build outputs must remain ignored by Git.
 
+## C# Guest Toolchain Workflow
+
+- P13.1 verified the user-local .NET 8 SDK at `C:\Users\user0\.dotnet\dotnet.exe` can install and list `wasi-experimental`. Prefer this SDK for C# WASI probes over `C:\Program Files\dotnet\dotnet.exe` on this machine.
+- The Program Files .NET 9.0.306 CLI currently fails workload commands in `Microsoft.DotNet.Installer.Windows.InstallerBase`, and .NET 9 rejects `wasi-wasm` with `The 'wasi-experimental' workload is not supported in .NET 9.` Do not spend Phase time trying to force that path unless the toolchain has been repaired or upgraded.
+- Current .NET 8 `wasi-experimental` output is a Mono/WASI runtime app: generated `dotnet.wasm` exports only `memory` and `_start`. It is not an AvidScript direct ABI module until it exports both `avid_on_begin_play` and `avid_on_tick`.
+- `PublishAot=true` with .NET 8 `wasi-wasm` currently fails with `NETSDK1203`; record this as toolchain unsupported, not as an AvidScript runtime failure.
+- `BuildCSharpActorLifecycle.ps1` must isolate `DOTNET_CLI_HOME`, `APPDATA`, `LOCALAPPDATA`, and local NuGet config into `Saved/AvidScriptCSharpGuest/ActorLifecycle` so Codex sandbox runs do not try to read the user's blocked `%APPDATA%\NuGet\NuGet.Config`.
+- If the user NuGet package cache is readable, it is acceptable for the C# diagnostic script to use `C:\Users\user0\.nuget\packages` as a package cache while keeping config and generated outputs in `Saved/`.
+- 2026-07-06 P13.1 mistake record: passing `BaseOutputPath` or `BaseIntermediateOutputPath` to MSBuild with a trailing Windows backslash inside a quoted argument can break paths with spaces and produce `MSB1008: Only one project can be specified`. Prevention: pass these MSBuild property paths with forward slashes and a trailing `/`.
+- 2026-07-06 P13.1 mistake record: `--configfile` alone did not stop NuGet targets from reading `%APPDATA%\NuGet\NuGet.Config`. Prevention: redirect `APPDATA` and `LOCALAPPDATA` for the script process before invoking `dotnet publish`.
+
 ## D Guest Toolchain Workflow
 
 - P5.1 proved official LDC 1.42.0 Windows x64 can compile the minimal D guest to freestanding wasm32 using LDC's internal LLD. Do not require a standalone `wasm-ld.exe` for this path.
