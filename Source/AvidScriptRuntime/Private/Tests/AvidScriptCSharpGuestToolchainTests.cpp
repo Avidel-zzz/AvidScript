@@ -243,7 +243,9 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample exports Tick"), SourceText.Contains(TEXT("avid_on_tick")));
 	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
+	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
 	TestTrue(TEXT("Sample presents Actor.SetLocation facade"), SourceText.Contains(TEXT("Actor.SetLocation")));
+	TestTrue(TEXT("Sample presents Actor.AddLocationOffset facade"), SourceText.Contains(TEXT("Actor.AddLocationOffset")));
 
 	return true;
 }
@@ -406,6 +408,13 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 
+	const bool bRequiresAddLocationOffset = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_add_location_offset");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires add location offset import"), bRequiresAddLocationOffset);
+
 	UWorld* World = nullptr;
 	if (!CreateCSharpContractWorld(World))
 	{
@@ -467,7 +476,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 
-	TestTrue(TEXT("C# Tick source moves actor"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# Tick source applies add location offset"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
 	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 1);
 
 	DestroyCSharpContractWorld(World);

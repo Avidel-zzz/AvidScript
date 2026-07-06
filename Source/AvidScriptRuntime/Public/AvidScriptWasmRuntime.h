@@ -73,6 +73,7 @@ public:
 	int32 HandleHostFailI32Import(int32 Input);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
 	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
+	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);
 	void SetPendingHostImportFailure(
 		const FString& ImportModuleName,
 		const FString& ImportName,

@@ -60,6 +60,22 @@ bool FAvidScriptActorBinding::SetActorLocation(
 	return true;
 }
 
+bool FAvidScriptActorBinding::AddActorLocationOffset(
+	const FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& ActorHandle,
+	const FVector& Offset,
+	EAvidScriptActorWritePolicy WritePolicy,
+	FAvidScriptActorBindingResult& OutResult)
+{
+	FVector CurrentLocation = FVector::ZeroVector;
+	if (!GetActorLocation(Registry, ActorHandle, CurrentLocation, OutResult))
+	{
+		return false;
+	}
+
+	return SetActorLocation(Registry, ActorHandle, CurrentLocation + Offset, WritePolicy, OutResult);
+}
+
 AActor* FAvidScriptActorBinding::ResolveActor(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,

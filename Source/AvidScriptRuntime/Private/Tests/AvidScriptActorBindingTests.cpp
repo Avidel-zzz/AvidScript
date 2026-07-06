@@ -106,6 +106,56 @@ bool FAvidScriptActorBindingLocationReadWriteSmokeTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptActorBindingAddLocationOffsetSmokeTest,
+	"AvidScript.Binding.ActorBinding.AddLocationOffsetSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptActorBindingAddLocationOffsetSmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateActorBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript actor binding world."));
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	const FVector InitialLocation(10.0, 20.0, 30.0);
+	Actor->SetActorLocation(InitialLocation);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers as handle"), RegisterResult.bSucceeded);
+
+	const FVector Offset(1.5, -2.0, 3.25);
+	const FVector ExpectedLocation = InitialLocation + Offset;
+	FAvidScriptActorBindingResult OffsetResult;
+	TestTrue(
+		TEXT("Actor location offset is writable when policy allows writes"),
+		FAvidScriptActorBinding::AddActorLocationOffset(
+			Registry,
+			ActorHandle,
+			Offset,
+			EAvidScriptActorWritePolicy::AllowWrites,
+			OffsetResult));
+	TestEqual(TEXT("Actor moved by offset"), Actor->GetActorLocation(), ExpectedLocation);
+	TestTrue(TEXT("Offset result is structured success"), OffsetResult.bSucceeded);
+	TestEqual(TEXT("Offset result reports applied location"), OffsetResult.Location, ExpectedLocation);
+
+	DestroyActorBindingWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptActorBindingWritePolicySmokeTest,
 	"AvidScript.Binding.ActorBinding.WritePolicySmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

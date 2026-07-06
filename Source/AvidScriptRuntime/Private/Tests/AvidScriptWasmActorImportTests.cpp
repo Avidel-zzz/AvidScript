@@ -360,6 +360,13 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 		1);
 	TestEqual(TEXT("Actor moved by import handler"), Actor->GetActorLocation(), TargetLocation);
 
+	const FVector Offset(1.5, -2.0, 3.25);
+	const FVector ExpectedOffsetLocation = TargetLocation + Offset;
+	int32 AddOffsetResult = 0;
+	AddOffsetResult = Runtime.HandleActorAddLocationOffsetImport(ActorHandle.Slot, ActorHandle.Generation, Offset);
+	TestEqual(TEXT("Actor add location offset import succeeds"), AddOffsetResult, 1);
+	TestEqual(TEXT("Actor moved by offset import handler"), Actor->GetActorLocation(), ExpectedOffsetLocation);
+
 	DestroyWasmActorImportWorld(World);
 	return true;
 }
@@ -384,6 +391,10 @@ bool FAvidScriptWasmActorImportMissingContextSmokeTest::RunTest(const FString& P
 		TEXT("Missing host context fails closed on set"),
 		Runtime.HandleActorSetLocationImport(1, 1, FVector(1.0, 2.0, 3.0)),
 		0);
+
+	int32 MissingAddOffsetResult = 0;
+	MissingAddOffsetResult = Runtime.HandleActorAddLocationOffsetImport(1, 1, FVector(1.0, 2.0, 3.0));
+	TestEqual(TEXT("Missing host context fails closed on add location offset"), MissingAddOffsetResult, 0);
 
 	return true;
 }

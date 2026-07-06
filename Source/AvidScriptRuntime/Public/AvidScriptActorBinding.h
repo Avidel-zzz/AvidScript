@@ -40,6 +40,13 @@ public:
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult);
 
+	static bool AddActorLocationOffset(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		const FVector& Offset,
+		EAvidScriptActorWritePolicy WritePolicy,
+		FAvidScriptActorBindingResult& OutResult);
+
 private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,

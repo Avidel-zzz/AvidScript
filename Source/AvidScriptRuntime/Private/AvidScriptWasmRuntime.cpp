@@ -56,17 +56,20 @@ constexpr const char* AvidScriptHostAddI32Name = "host_add_i32";
 constexpr const char* AvidScriptHostFailI32Name = "host_fail_i32";
 constexpr const char* AvidScriptActorGetLocationName = "actor_get_location";
 constexpr const char* AvidScriptActorSetLocationName = "actor_set_location";
+constexpr const char* AvidScriptActorAddLocationOffsetName = "actor_add_location_offset";
 
 int32_t AvidScriptHostAddI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptActorGetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutLocationPtr);
 int32_t AvidScriptActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
+int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 
 NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptHostAddI32Name, reinterpret_cast<void*>(AvidScriptHostAddI32), "(i)i", nullptr },
 	{ AvidScriptHostFailI32Name, reinterpret_cast<void*>(AvidScriptHostFailI32), "(i)i", nullptr },
 	{ AvidScriptActorGetLocationName, reinterpret_cast<void*>(AvidScriptActorGetLocation), "(iii)i", nullptr },
-	{ AvidScriptActorSetLocationName, reinterpret_cast<void*>(AvidScriptActorSetLocation), "(iifff)i", nullptr }
+	{ AvidScriptActorSetLocationName, reinterpret_cast<void*>(AvidScriptActorSetLocation), "(iifff)i", nullptr },
+	{ AvidScriptActorAddLocationOffsetName, reinterpret_cast<void*>(AvidScriptActorAddLocationOffset), "(iifff)i", nullptr }
 };
 
 FCriticalSection GWamrRuntimeCriticalSection;
@@ -228,6 +231,25 @@ int32_t AvidScriptActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_
 	if (RuntimeInstance->HandleActorSetLocationImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Location) == 0)
 	{
 		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_set_location returned failure");
+		return 0;
+	}
+
+	return 1;
+}
+
+int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.actor_add_location_offset");
+		return 0;
+	}
+
+	const FVector Offset(static_cast<double>(X), static_cast<double>(Y), static_cast<double>(Z));
+	if (RuntimeInstance->HandleActorAddLocationOffsetImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Offset) == 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_add_location_offset returned failure");
 		return 0;
 	}
 
@@ -964,6 +986,55 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, i
 			TEXT("actor_set_location"),
 			BindingResult.ErrorMessage.IsEmpty()
 				? FString::Printf(TEXT("Actor location write failed for avidscript.actor_set_location | slot=%d | generation=%d"), Slot, Generation)
+				: BindingResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_add_location_offset"),
+			TEXT("Missing host object registry for avidscript.actor_add_location_offset"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	if (Slot <= 0 || Generation <= 0)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_add_location_offset"),
+			FString::Printf(TEXT("Invalid actor handle for avidscript.actor_add_location_offset | slot=%d | generation=%d"), Slot, Generation));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandle ActorHandle;
+	ActorHandle.Slot = static_cast<uint32>(Slot);
+	ActorHandle.Generation = static_cast<uint32>(Generation);
+
+	FAvidScriptActorBindingResult BindingResult;
+	if (!FAvidScriptActorBinding::AddActorLocationOffset(*HostContext.ObjectRegistry, ActorHandle, Offset, HostContext.ActorWritePolicy, BindingResult))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_add_location_offset"),
+			BindingResult.ErrorMessage.IsEmpty()
+				? FString::Printf(TEXT("Actor location offset failed for avidscript.actor_add_location_offset | slot=%d | generation=%d"), Slot, Generation)
 				: BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;

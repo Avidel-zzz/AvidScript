@@ -15,7 +15,7 @@ public static class ActorLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
-        Actor.SetLocation(100.0f + 120.0f * deltaSeconds, 200.0f, 300.0f);
+        Actor.AddLocationOffset(120.0f * deltaSeconds, 0.0f, 0.0f);
     }
 }
 
@@ -29,6 +29,14 @@ public static class Actor
         return ActorSetLocation(OwnerSlot, OwnerGeneration, x, y, z) != 0;
     }
 
+    public static bool AddLocationOffset(float x, float y, float z)
+    {
+        return ActorAddLocationOffset(OwnerSlot, OwnerGeneration, x, y, z) != 0;
+    }
+
     [DllImport("env", EntryPoint = "actor_set_location")]
     private static extern int ActorSetLocation(int slot, int generation, float x, float y, float z);
+
+    [DllImport("env", EntryPoint = "actor_add_location_offset")]
+    private static extern int ActorAddLocationOffset(int slot, int generation, float x, float y, float z);
 }
