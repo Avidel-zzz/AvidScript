@@ -191,6 +191,442 @@ function Get-Sha256Hex {
     }
 }
 
+function New-WasmByteList {
+    $List = [System.Collections.Generic.List[byte]]::new()
+    return ,$List
+}
+
+function Add-WasmByte {
+    param(
+        [Parameter(Mandatory = $true)]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Value
+    )
+
+    [void]$Bytes.Add([byte]($Value -band 0xff))
+}
+
+function Add-WasmBytes {
+    param(
+        [Parameter(Mandatory = $true)]$Bytes,
+        [Parameter(Mandatory = $true)]$Values
+    )
+
+    foreach ($Value in $Values) {
+        Add-WasmByte -Bytes $Bytes -Value ([int]$Value)
+    }
+}
+
+function Add-WasmU32Leb {
+    param(
+        [Parameter(Mandatory = $true)]$Bytes,
+        [Parameter(Mandatory = $true)][uint32]$Value
+    )
+
+    $Remaining = $Value
+    do {
+        $Byte = [int]($Remaining -band 0x7f)
+        $Remaining = $Remaining -shr 7
+        if ($Remaining -ne 0) {
+            $Byte = $Byte -bor 0x80
+        }
+        Add-WasmByte -Bytes $Bytes -Value $Byte
+    } while ($Remaining -ne 0)
+}
+
+function Add-WasmString {
+    param(
+        [Parameter(Mandatory = $true)]$Bytes,
+        [Parameter(Mandatory = $true)][string]$Text
+    )
+
+    $Encoded = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    Add-WasmU32Leb -Bytes $Bytes -Value ([uint32]$Encoded.Length)
+    Add-WasmBytes -Bytes $Bytes -Values $Encoded
+}
+
+function Add-WasmSection {
+    param(
+        [Parameter(Mandatory = $true)]$Module,
+        [Parameter(Mandatory = $true)][int]$SectionId,
+        [Parameter(Mandatory = $true)]$Payload
+    )
+
+    Add-WasmByte -Bytes $Module -Value $SectionId
+    Add-WasmU32Leb -Bytes $Module -Value ([uint32]$Payload.Count)
+    Add-WasmBytes -Bytes $Module -Values $Payload.ToArray()
+}
+
+function Add-WasmF32 {
+    param(
+        [Parameter(Mandatory = $true)]$Bytes,
+        [Parameter(Mandatory = $true)][single]$Value
+    )
+
+    Add-WasmBytes -Bytes $Bytes -Values ([System.BitConverter]::GetBytes($Value))
+}
+
+function Convert-WasmByteListToArray {
+    param([Parameter(Mandatory = $true)]$Bytes)
+
+    $Array = [byte[]]::new($Bytes.Count)
+    $Bytes.CopyTo($Array)
+    return $Array
+}
+
+function Get-CSharpMethodBody {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceText,
+        [Parameter(Mandatory = $true)][string]$MethodName
+    )
+
+    $Pattern = "(?s)\b$([regex]::Escape($MethodName))\s*\([^)]*\)\s*\{"
+    $Match = [regex]::Match($SourceText, $Pattern)
+    if (-not $Match.Success) {
+        throw "C# source adapter could not find method '$MethodName'."
+    }
+
+    $OpenBraceIndex = $SourceText.IndexOf('{', $Match.Index)
+    if ($OpenBraceIndex -lt 0) {
+        throw "C# source adapter could not find method body for '$MethodName'."
+    }
+
+    $Depth = 0
+    for ($Index = $OpenBraceIndex; $Index -lt $SourceText.Length; ++$Index) {
+        $Char = $SourceText[$Index]
+        if ($Char -eq '{') {
+            ++$Depth
+        }
+        elseif ($Char -eq '}') {
+            --$Depth
+            if ($Depth -eq 0) {
+                $Start = $OpenBraceIndex + 1
+                return $SourceText.Substring($Start, $Index - $Start)
+            }
+        }
+    }
+
+    throw "C# source adapter found an unterminated method body for '$MethodName'."
+}
+
+function Convert-CSharpNumericLiteral {
+    param([Parameter(Mandatory = $true)][string]$Expression)
+
+    $Normalized = $Expression.Trim()
+    $Normalized = [regex]::Replace($Normalized, '(?<=[0-9\.])[fFdDmM]$', '')
+    $Value = [single]0
+    if ([single]::TryParse(
+        $Normalized,
+        [System.Globalization.NumberStyles]::Float,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$Value)) {
+        return $Value
+    }
+
+    throw "Unsupported C# numeric expression '$Expression'."
+}
+
+function Convert-CSharpFloatExpression {
+    param([Parameter(Mandatory = $true)][string]$Expression)
+
+    $Trimmed = $Expression.Trim()
+    $AddMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\+\s*(?<right>.+)$')
+    if ($AddMatch.Success) {
+        return [PSCustomObject]@{
+            Kind = 'add'
+            Left = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['left'].Value
+            Right = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['right'].Value
+        }
+    }
+
+    if ($Trimmed -eq 'deltaSeconds') {
+        return [PSCustomObject]@{
+            Kind = 'delta'
+            Value = [single]0
+        }
+    }
+
+    $MultiplyMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\*\s*(?<right>.+)$')
+    if ($MultiplyMatch.Success) {
+        $Left = $MultiplyMatch.Groups['left'].Value.Trim()
+        $Right = $MultiplyMatch.Groups['right'].Value.Trim()
+        if ($Left -eq 'deltaSeconds') {
+            return [PSCustomObject]@{
+                Kind = 'delta_mul'
+                Value = Convert-CSharpNumericLiteral -Expression $Right
+            }
+        }
+        if ($Right -eq 'deltaSeconds') {
+            return [PSCustomObject]@{
+                Kind = 'delta_mul'
+                Value = Convert-CSharpNumericLiteral -Expression $Left
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Kind = 'constant'
+        Value = Convert-CSharpNumericLiteral -Expression $Trimmed
+    }
+}
+
+function Get-CSharpSetLocationCalls {
+    param(
+        [Parameter(Mandatory = $true)][string]$MethodBody,
+        [Parameter(Mandatory = $true)][string]$MethodName
+    )
+
+    $Calls = @()
+    $Pattern = 'Actor\s*\.\s*SetLocation\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)\s*;'
+    foreach ($Match in [regex]::Matches($MethodBody, $Pattern)) {
+        $Calls += [PSCustomObject]@{
+            X = Convert-CSharpFloatExpression -Expression $Match.Groups['x'].Value
+            Y = Convert-CSharpFloatExpression -Expression $Match.Groups['y'].Value
+            Z = Convert-CSharpFloatExpression -Expression $Match.Groups['z'].Value
+        }
+    }
+
+    if ($Calls.Count -eq 0) {
+        throw "C# source adapter found no Actor.SetLocation calls in '$MethodName'."
+    }
+
+    return $Calls
+}
+
+function Add-CSharpFloatExpressionCode {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Expression,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+    )
+
+    if ($Expression.Kind -eq 'constant') {
+        Add-WasmByte -Bytes $Body -Value 0x43
+        Add-WasmF32 -Bytes $Body -Value ([single]$Expression.Value)
+        return
+    }
+
+    if ($Expression.Kind -eq 'add') {
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Left -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Right -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-WasmByte -Bytes $Body -Value 0x92
+        return
+    }
+
+    if (-not $AllowDeltaSeconds) {
+        throw 'deltaSeconds is only available inside Tick(float deltaSeconds).'
+    }
+
+    if ($Expression.Kind -eq 'delta') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 0
+        return
+    }
+
+    if ($Expression.Kind -eq 'delta_mul') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 0
+        Add-WasmByte -Bytes $Body -Value 0x43
+        Add-WasmF32 -Bytes $Body -Value ([single]$Expression.Value)
+        Add-WasmByte -Bytes $Body -Value 0x94
+        return
+    }
+
+    throw "Unsupported C# expression kind '$($Expression.Kind)'."
+}
+
+function Add-CSharpSetLocationCall {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Call,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+    )
+
+    Add-WasmByte -Bytes $Body -Value 0x41
+    Add-WasmU32Leb -Bytes $Body -Value 1
+    Add-WasmByte -Bytes $Body -Value 0x41
+    Add-WasmU32Leb -Bytes $Body -Value 1
+    Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.X -AllowDeltaSeconds $AllowDeltaSeconds
+    Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.Y -AllowDeltaSeconds $AllowDeltaSeconds
+    Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.Z -AllowDeltaSeconds $AllowDeltaSeconds
+    Add-WasmByte -Bytes $Body -Value 0x10
+    Add-WasmU32Leb -Bytes $Body -Value 0
+    Add-WasmByte -Bytes $Body -Value 0x1a
+}
+
+function New-CSharpLifecycleFunctionBody {
+    param(
+        [Parameter(Mandatory = $true)]$Calls,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+    )
+
+    $Body = New-WasmByteList
+    Add-WasmU32Leb -Bytes $Body -Value 0
+    foreach ($Call in $Calls) {
+        Add-CSharpSetLocationCall -Body $Body -Call $Call -AllowDeltaSeconds $AllowDeltaSeconds
+    }
+    Add-WasmByte -Bytes $Body -Value 0x0b
+    return ,$Body
+}
+
+function New-CSharpDirectAbiWasmModule {
+    param(
+        [Parameter(Mandatory = $true)]$BeginPlayCalls,
+        [Parameter(Mandatory = $true)]$TickCalls
+    )
+
+    $Module = New-WasmByteList
+    Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
+
+    $TypeSection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $TypeSection -Value 3
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 5
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7d
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
+
+    $ImportSection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $ImportSection -Value 1
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 0
+    Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
+
+    $FunctionSection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 2
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 1
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 2
+    Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
+
+    $ExportSection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $ExportSection -Value 2
+    Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
+    Add-WasmByte -Bytes $ExportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ExportSection -Value 1
+    Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
+    Add-WasmByte -Bytes $ExportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ExportSection -Value 2
+    Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
+
+    $BeginPlayBody = New-CSharpLifecycleFunctionBody -Calls $BeginPlayCalls -AllowDeltaSeconds $false
+    $TickBody = New-CSharpLifecycleFunctionBody -Calls $TickCalls -AllowDeltaSeconds $true
+
+    $CodeSection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $CodeSection -Value 2
+    Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$BeginPlayBody.Count)
+    Add-WasmBytes -Bytes $CodeSection -Values $BeginPlayBody.ToArray()
+    Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TickBody.Count)
+    Add-WasmBytes -Bytes $CodeSection -Values $TickBody.ToArray()
+    Add-WasmSection -Module $Module -SectionId 10 -Payload $CodeSection
+
+    return ,(Convert-WasmByteListToArray -Bytes $Module)
+}
+
+function Invoke-CSharpSourceAdapter {
+    param([object[]]$Diagnostics = @())
+
+    $AdapterDiagnostics = @($Diagnostics)
+    $AdapterWasmPath = Join-Path $OutputRoot 'actor_lifecycle.csharp_adapter.wasm'
+
+    try {
+        if (-not (Test-Path -LiteralPath $SampleSourcePath -PathType Leaf)) {
+            throw "C# sample source file is missing: $SampleSourcePath"
+        }
+
+        $SourceText = [System.IO.File]::ReadAllText($SampleSourcePath)
+        $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
+        $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
+        $BeginPlayCalls = @(Get-CSharpSetLocationCalls -MethodBody $BeginPlayBody -MethodName 'BeginPlay')
+        $TickCalls = @(Get-CSharpSetLocationCalls -MethodBody $TickBody -MethodName 'Tick')
+        $WasmBytes = New-CSharpDirectAbiWasmModule -BeginPlayCalls $BeginPlayCalls -TickCalls $TickCalls
+
+        [System.IO.File]::WriteAllBytes($AdapterWasmPath, $WasmBytes)
+        $ObservedExports = @(Get-WasmExports -Path $AdapterWasmPath)
+        $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
+        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick')
+        $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
+        if ($MissingExports.Count -gt 0) {
+            throw "C# source adapter produced a WASM file without required exports: $($MissingExports -join ',')"
+        }
+
+        $ArtifactHash = Get-Sha256Hex -Path $AdapterWasmPath
+        $Manifest = [ordered]@{
+            schema_version = 1
+            module_id = 'csharp_actor_lifecycle'
+            abi_version = 1
+            language = 'csharp'
+            source = [ordered]@{
+                file = Convert-ToProjectRelativePath -Path $SampleSourcePath
+                compiler = 'avidscript-csharp-source-adapter'
+                subset = 'actor_lifecycle_v1'
+            }
+            wasm = [ordered]@{
+                file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
+                sha256 = $ArtifactHash
+            }
+            required_exports = $RequiredExports
+            required_imports = @(
+                [ordered]@{
+                    module = 'env'
+                    name = 'actor_set_location'
+                }
+            )
+            toolchain = [ordered]@{
+                compiler = 'avidscript-csharp-source-adapter'
+                target = 'wasm32-direct-abi'
+                direct_abi = $true
+            }
+            adapter_contract = [ordered]@{
+                self_slot = 1
+                self_generation = 1
+                supported_calls = @('Actor.SetLocation(float x, float y, float z)')
+                supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'deltaSeconds * numeric literal', 'addition of supported expressions')
+            }
+        }
+
+        $ManifestJson = $Manifest | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText($ManifestPath, $ManifestJson + [System.Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+
+        $AdapterDiagnostics += [ordered]@{
+            code = 'source_adapter_used'
+            message = 'Built direct ABI WASM from the limited C# ActorLifecycle source subset.'
+        }
+
+        return [PSCustomObject]@{
+            Succeeded = $true
+            WasmPath = $AdapterWasmPath
+            ManifestPath = $ManifestPath
+            ObservedExports = @($ObservedExports)
+            Diagnostics = @($AdapterDiagnostics)
+            Sha256 = $ArtifactHash
+        }
+    }
+    catch {
+        $AdapterDiagnostics += [ordered]@{
+            code = 'source_adapter_failed'
+            message = $_.Exception.Message
+            stack = $_.ScriptStackTrace
+        }
+
+        return [PSCustomObject]@{
+            Succeeded = $false
+            WasmPath = ''
+            ManifestPath = ''
+            ObservedExports = @()
+            Diagnostics = @($AdapterDiagnostics)
+            Sha256 = ''
+        }
+    }
+}
 function Write-Report {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -200,7 +636,8 @@ function Write-Report {
         [string]$WasmPath = "",
         [string]$ManifestPath = "",
         [object[]]$SdkList = @(),
-        [object[]]$WorkloadList = @()
+        [object[]]$WorkloadList = @(),
+        [string]$Compiler = "dotnet-wasi"
     )
 
     $ReportDirectory = Split-Path -Parent $ReportPath
@@ -234,6 +671,7 @@ function Write-Report {
             report_file = Convert-ToProjectRelativePath -Path $ReportPath
         }
         toolchain = [ordered]@{
+            compiler = $Compiler
             dotnet = if ($DotNet.Found) { $DotNet.Path } else { "" }
             dotnet_source = if ($DotNet.Found) { $DotNet.Source } else { "" }
             target_framework = "net8.0"
@@ -310,18 +748,30 @@ $BinaryRootForMsBuild = $BinaryRoot.Replace("\", "/") + "/"
 $IntermediateRootForMsBuild = $IntermediateRoot.Replace("\", "/") + "/"
 
 $DotNet = Resolve-DotNetTool
-if (-not $DotNet.Found) {
+if ($DotNet.Found) {
+    Write-Output "[AvidScript][CSharp][Toolchain] dotnet=FOUND source=$($DotNet.Source) path=$($DotNet.Path)"
+}
+else {
     $Diagnostics += [ordered]@{
         code = "dotnet_missing"
         message = "dotnet was not found"
         checked = @($DotNet.Checked)
     }
+}
+
+$SourceAdapterResult = Invoke-CSharpSourceAdapter -Diagnostics $Diagnostics
+if ($SourceAdapterResult.Succeeded) {
+    Write-Report -Result "direct_abi_built" -DirectAbiSupported $true -Diagnostics $SourceAdapterResult.Diagnostics -ObservedExports $SourceAdapterResult.ObservedExports -WasmPath $SourceAdapterResult.WasmPath -ManifestPath $SourceAdapterResult.ManifestPath -Compiler "avidscript-csharp-source-adapter"
+    Write-Output "[AvidScript][CSharp][Build] result=direct_abi_built compiler=avidscript-csharp-source-adapter manifest=$($SourceAdapterResult.ManifestPath) wasm=$($SourceAdapterResult.WasmPath) sha256=$($SourceAdapterResult.Sha256)"
+    exit 0
+}
+
+$Diagnostics = @($SourceAdapterResult.Diagnostics)
+if (-not $DotNet.Found) {
     Write-Report -Result "missing_toolchain" -DirectAbiSupported $false -Diagnostics $Diagnostics
     Write-Output "[AvidScript][CSharp][Build] result=missing_toolchain missing=dotnet report=$ReportPath"
     exit 0
 }
-
-Write-Output "[AvidScript][CSharp][Toolchain] dotnet=FOUND source=$($DotNet.Source) path=$($DotNet.Path)"
 
 $SdkList = @()
 try {

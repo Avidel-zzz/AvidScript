@@ -170,6 +170,24 @@ FString GetCSharpToolchainReportPath()
 	return ReportPath;
 }
 
+FString ResolveCSharpReportArtifactPath(const FString& ArtifactPath)
+{
+	if (ArtifactPath.IsEmpty())
+	{
+		return FString();
+	}
+
+	FString NormalizedPath = ArtifactPath;
+	FPaths::NormalizeFilename(NormalizedPath);
+
+	if (!FPaths::IsRelative(NormalizedPath))
+	{
+		return FPaths::ConvertRelativePathToFull(NormalizedPath);
+	}
+
+	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), NormalizedPath));
+}
+
 bool CreateCSharpContractWorld(UWorld*& OutWorld)
 {
 	OutWorld = nullptr;
@@ -309,6 +327,152 @@ bool FAvidScriptCSharpDirectAbiContractLifecycleSmokeTest::RunTest(const FString
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest,
+	"AvidScript.Guest.CSharp.SourceAdapterArtifactLifecycleSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetCSharpToolchainReportPath();
+	if (!FPaths::FileExists(ReportPath))
+	{
+		AddError(FString::Printf(
+			TEXT("C# source adapter report is missing; run BuildCSharpActorLifecycle.ps1 before this lifecycle smoke. report=%s"),
+			*ReportPath));
+		return true;
+	}
+
+	FString ReportJson;
+	if (!FFileHelper::LoadFileToString(ReportJson, *ReportPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read C# source adapter report: %s"), *ReportPath));
+		return true;
+	}
+
+	TSharedPtr<FJsonObject> RootObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ReportJson);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{
+		AddError(FString::Printf(TEXT("C# source adapter report is not valid JSON: %s"), *ReportPath));
+		return true;
+	}
+
+	FString Result;
+	if (!RootObject->TryGetStringField(TEXT("result"), Result))
+	{
+		AddError(TEXT("C# source adapter report does not declare a result."));
+		return true;
+	}
+
+	if (!TestEqual(TEXT("C# source adapter builds a direct ABI artifact"), Result, FString(TEXT("direct_abi_built"))))
+	{
+		return true;
+	}
+
+	bool bDirectAbiSupported = false;
+	TestTrue(TEXT("C# source adapter reports direct ABI support"), RootObject->TryGetBoolField(TEXT("direct_abi_supported"), bDirectAbiSupported));
+	if (!TestTrue(TEXT("C# source adapter direct ABI support is true"), bDirectAbiSupported))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FJsonObject>* ArtifactsObjectPtr = nullptr;
+	if (!RootObject->TryGetObjectField(TEXT("artifacts"), ArtifactsObjectPtr) || ArtifactsObjectPtr == nullptr || !ArtifactsObjectPtr->IsValid())
+	{
+		AddError(TEXT("C# source adapter report does not include artifacts."));
+		return true;
+	}
+
+	FString ManifestArtifactPath;
+	FString WasmArtifactPath;
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("manifest_file"), ManifestArtifactPath);
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("wasm_file"), WasmArtifactPath);
+
+	const FString ManifestPath = ResolveCSharpReportArtifactPath(ManifestArtifactPath);
+	const FString WasmPath = ResolveCSharpReportArtifactPath(WasmArtifactPath);
+	if (!TestTrue(TEXT("C# source adapter writes a manifest artifact"), !ManifestPath.IsEmpty() && FPaths::FileExists(ManifestPath)) ||
+		!TestTrue(TEXT("C# source adapter writes a wasm artifact"), !WasmPath.IsEmpty() && FPaths::FileExists(WasmPath)))
+	{
+		return true;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(ManifestPath, Manifest, Bytecode, ManifestLoadResult))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return true;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateCSharpContractWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript C# source adapter lifecycle world."));
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers for source adapter artifact"), RegisterResult.bSucceeded);
+	if (!RegisterResult.bSucceeded)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	if (!TestEqual(TEXT("Source adapter sample uses first per-component actor slot"), ActorHandle.Slot, static_cast<uint32>(1)) ||
+		!TestEqual(TEXT("Source adapter sample uses first per-component actor generation"), ActorHandle.Generation, static_cast<uint32>(1)))
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptWasmReloadSession Session;
+	Session.SetHostContext(HostContext);
+
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!Session.LoadInitialModule(Bytecode.GetData(), Bytecode.Num(), Manifest, ReloadResult))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestTrue(TEXT("C# source adapter artifact loads"), ReloadResult.bSucceeded);
+	TestTrue(TEXT("C# BeginPlay source moves actor"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!Session.TickLive(1.0f / 60.0f, TickResult))
+	{
+		AddError(TickResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestTrue(TEXT("C# Tick source moves actor"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
+	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 1);
+
+	DestroyCSharpContractWorld(World);
+	return true;
+}
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptCSharpToolchainReportSmokeTest,
 	"AvidScript.Guest.CSharp.ToolchainReportSmoke",

@@ -143,6 +143,11 @@ Plugins/AvidScript/Docs
 - 2026-07-06 P13.1 mistake record: passing `BaseOutputPath` or `BaseIntermediateOutputPath` to MSBuild with a trailing Windows backslash inside a quoted argument can break paths with spaces and produce `MSB1008: Only one project can be specified`. Prevention: pass these MSBuild property paths with forward slashes and a trailing `/`.
 - 2026-07-06 P13.1 mistake record: `--configfile` alone did not stop NuGet targets from reading `%APPDATA%\NuGet\NuGet.Config`. Prevention: redirect `APPDATA` and `LOCALAPPDATA` for the script process before invoking `dotnet publish`.
 
+- P14.1 changed the normal C# sample build route: `BuildCSharpActorLifecycle.ps1` now tries `avidscript-csharp-source-adapter` first and exits with `direct_abi_built` when the source is inside the supported subset. The .NET/WASI publish path remains a fallback diagnostic route, not the default success path.
+- Current C# source adapter subset: `BeginPlay()`, `Tick(float deltaSeconds)`, `Actor.SetLocation(float x, float y, float z)`, numeric float literals, `deltaSeconds`, multiplication by numeric literals, and addition of supported expressions.
+- Current adapter self binding assumes the per-script owner actor is registered as slot `1`, generation `1`. Before expanding to multi-object gameplay, replace this with an explicit self/owner host binding or runtime context injection and cover it with automation.
+- 2026-07-06 P14.1 mistake record: returning an empty .NET `List[byte]` from a PowerShell function without a unary comma enumerates the empty collection and assigns `$null`, causing later parameter binding errors such as `Cannot bind argument to parameter 'Bytes' because it is null`. Prevention: return collection objects with `return ,$List` / `return ,$Body`, and use `return ,([byte[]]...)` for byte arrays that must stay intact.
+
 ## D Guest Toolchain Workflow
 
 - P5.1 proved official LDC 1.42.0 Windows x64 can compile the minimal D guest to freestanding wasm32 using LDC's internal LLD. Do not require a standalone `wasm-ld.exe` for this path.
