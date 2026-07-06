@@ -160,6 +160,13 @@ Plugins/AvidScript/Docs
 - P20 C# profile JSON 服务已经接入: `FAvidScriptEditorCSharpProfileService::LoadProfile(...)` 可读取 schema_version 1 / language csharp profile, 并映射到 `FAvidScriptEditorCSharpBuildConfig`。
 - P20 默认 profile 路径为 `Saved/AvidScriptCSharpProfiles/default.csharp-profile.json`; Editor 菜单入口 `Build And Bind C# Profile Script` 当前固定读取该路径, 后续 UI/profile 列表应复用这个默认约定。
 - P20 profile 入口成功路径为: profile JSON -> `BuildProfile(...)` -> C# report -> `FAvidScriptEditorComponentBindingService::ApplyCSharpReportToSelectedActor(...)` -> `UAvidScriptComponent` manifest path。
+- P21 默认 C# profile 模板已经接入: `FAvidScriptEditorCSharpProfileService::WriteDefaultProfileTemplate(...)` 会生成 `Saved/AvidScriptCSharpProfiles/default.csharp-profile.json`, 默认 source 指向 `Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs`, module/artifact 为 `csharp_profile_actor_lifecycle` / `profile_actor_lifecycle`, output root 为 `Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle`。
+- P21 Editor 入口已经接入: `Tools > AvidScript > Create Default C# Profile` 默认只确保 profile 存在, 不覆盖用户已编辑 JSON; 之后继续使用 `Build And Bind C# Profile Script` 走 profile 构建和绑定。
+- 2026-07-06 P21 mistake record: PowerShell 行插入曾把制表符写成字面量 `` `t ``。Prevention: 对包含 PowerShell escape 字符的插入, 使用单引号字符串、显式 `[char]9` 或行数组, 写后用读回检查确认不存在字面量反引号标记。
+- 2026-07-06 P21 mistake record: 重写 `AvidScriptEditorModule.h` 时曾遗漏既有 `CoreMinimal.h`、`Logging/LogMacros.h`、`DECLARE_LOG_CATEGORY_EXTERN` 和 `MakeCommandConfigForSource(...)` overload, 导致后续构建失败。Prevention: 编辑公共头文件时优先做局部 patch, 如需重写, 先读取完整原文件并列出必须保留的 include、宏、既有 public API, 写后立即 diff 检查被删除声明。
+- 2026-07-06 P21 workflow note: C++ 文件行尾可能是 LF, 用 `[Environment]::NewLine` 做多行字符串替换会错过匹配; 常量插入脚本还可能误把第一次使用当作声明位置。Prevention: 对 C++ 插入优先按 `ReadAllLines`/行号/邻近锚点处理, 并用 `Select-String` 验证声明位置。
+- 2026-07-06 P21 mistake record: 更新中文 tracker 时对 `C:\tmp` 路径做了多轮临时替换, 一度把路径写成包含制表符的 `C:` + tab + `mp`。Prevention: Markdown 中的 Windows 路径不要做反斜杠转义占位替换; 用单引号 here-string 直接写字面量, 写后扫描 `[char]9`、控制字符和 `C:` + tab 片段。
+- 2026-07-06 P21 mistake record: commit hash 回填时再次把 Markdown 反引号放进 PowerShell 双引号字符串, 导致 inline code 反引号丢失并写入字面量 `` `r ``。Prevention: 所有包含 Markdown 反引号的文档回填都用单引号模板、行数组直接赋值或 `[char]96`, 写后扫描字面量 `` `r `` / `` `n ``。
 - 2026-07-06 P20 mistake record: 用 PowerShell 双引号直接拼复杂 C++ 替换片段时容易被引号、反斜杠或 UE 宏文本打断解析; 本次未写坏文件但浪费了验证时间。Prevention: 复杂 C++/Markdown 替换优先用单引号 here-string、逐行数组或小范围读写函数, 写后立即 `Select-String`/`git diff --check` 核对。
 
 ## D Guest Toolchain Workflow
