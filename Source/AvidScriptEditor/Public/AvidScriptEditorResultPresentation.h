@@ -4,6 +4,10 @@
 
 #include "CoreMinimal.h"
 
+struct FAvidScriptEditorComponentBindingResult;
+struct FAvidScriptEditorCSharpBuildResult;
+struct FAvidScriptEditorCSharpProfileTemplateResult;
+
 enum class EAvidScriptEditorPresentationSeverity : uint8
 {
 	Info,
@@ -26,4 +30,12 @@ class FAvidScriptEditorResultPresenter
 public:
 	static FAvidScriptEditorCommandPresentation MakePresentation(
 		const FAvidScriptEditorCommandLaunchResult& Result);
+
+	static FAvidScriptEditorCommandPresentation MakeCSharpProfileTemplatePresentation(
+		const FAvidScriptEditorCSharpProfileTemplateResult& Result);
+
+	static FAvidScriptEditorCommandPresentation MakeCSharpProfileBuildAndBindPresentation(
+		const FString& ProfilePath,
+		const FAvidScriptEditorCSharpBuildResult& BuildResult,
+		const FAvidScriptEditorComponentBindingResult& BindingResult);
 };

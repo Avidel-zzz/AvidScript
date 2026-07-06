@@ -217,4 +217,31 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBuildServiceSourceMissingNextActionTest,
+	"AvidScript.Editor.CSharpBuildService.SourceMissingNextActionSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBuildServiceSourceMissingNextActionTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	Config.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	Config.SourcePath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests"),
+		TEXT("CSharpProfiles"),
+		TEXT("MissingSource"),
+		TEXT("MissingMover.cs")));
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	TestFalse(TEXT("Missing C# source build fails"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));
+	TestFalse(TEXT("Missing C# source build result does not succeed"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Missing C# source error category"), BuildResult.ErrorCategory, FString(TEXT("source_missing")));
+	TestFalse(TEXT("Missing C# source next action is set"), BuildResult.NextAction.IsEmpty());
+	TestTrue(TEXT("Missing C# source next action mentions source or profile"), BuildResult.NextAction.Contains(TEXT("source")) || BuildResult.NextAction.Contains(TEXT("profile")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

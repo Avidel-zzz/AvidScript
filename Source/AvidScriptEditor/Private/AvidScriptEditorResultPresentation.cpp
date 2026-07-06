@@ -1,5 +1,9 @@
 #include "AvidScriptEditorResultPresentation.h"
 
+#include "AvidScriptEditorComponentBindingService.h"
+#include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
+
 #include "Misc/Paths.h"
 
 namespace
@@ -56,6 +60,68 @@ FString MakeAvidScriptPresentationDetails(const FAvidScriptEditorCommandLaunchRe
 
 	return FString::Join(Lines, TEXT("\n"));
 }
+
+void AddAvidScriptPresentationDetailLine(TArray<FString>& Lines, const TCHAR* Label, const FString& Value)
+{
+	if (!Value.IsEmpty())
+	{
+		Lines.Add(FString::Printf(TEXT("%s: %s"), Label, *Value));
+	}
+}
+
+FString MakeAvidScriptPresentationErrorBody(
+	const FString& ErrorCategory,
+	const FString& ErrorMessage,
+	const FString& Fallback)
+{
+	if (!ErrorCategory.IsEmpty() || !ErrorMessage.IsEmpty())
+	{
+		return FString::Printf(TEXT("%s: %s"), *ErrorCategory, *ErrorMessage);
+	}
+
+	return Fallback;
+}
+
+FString MakeAvidScriptCSharpProfileTemplateDetails(const FAvidScriptEditorCSharpProfileTemplateResult& Result)
+{
+	TArray<FString> Lines;
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Next action"), Result.NextAction);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Profile"), Result.NormalizedProfilePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Source"), Result.SourcePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Report"), Result.ReportPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Manifest"), Result.ManifestPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Module"), Result.ModuleId);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Artifact"), Result.ArtifactStem);
+	return FString::Join(Lines, TEXT("\n"));
+}
+
+FString MakeAvidScriptCSharpProfileBuildAndBindDetails(
+	const FString& ProfilePath,
+	const FAvidScriptEditorCSharpBuildResult& BuildResult,
+	const FAvidScriptEditorComponentBindingResult& BindingResult)
+{
+	TArray<FString> Lines;
+	const FString ManifestPath = !BuildResult.ManifestPath.IsEmpty()
+		? BuildResult.ManifestPath
+		: BindingResult.NormalizedManifestPath;
+	const FString ReportPath = !BuildResult.ReportPath.IsEmpty()
+		? BuildResult.ReportPath
+		: BindingResult.ReportPath;
+	const FString NextAction = !BuildResult.bSucceeded
+		? BuildResult.NextAction
+		: BindingResult.NextAction;
+
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Next action"), NextAction);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Profile"), ProfilePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Source"), BuildResult.SourcePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Module"), BuildResult.ModuleId);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Report"), ReportPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Manifest"), ManifestPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Actor"), BindingResult.ActorPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Stdout"), BuildResult.Stdout);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Stderr"), BuildResult.Stderr);
+	return FString::Join(Lines, TEXT("\n"));
+}
 } // namespace
 
 FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakePresentation(
@@ -102,5 +168,75 @@ FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakePrese
 		TEXT("Module %s reloaded from %s."),
 		*GetAvidScriptPresentationModuleLabel(Result),
 		*GetAvidScriptPresentationSourceLabel(Result.SourcePath));
+	return Presentation;
+}
+
+FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeCSharpProfileTemplatePresentation(
+	const FAvidScriptEditorCSharpProfileTemplateResult& Result)
+{
+	FAvidScriptEditorCommandPresentation Presentation;
+	Presentation.SourcePath = Result.SourcePath;
+	Presentation.ManifestPath = Result.ManifestPath;
+	Presentation.Details = MakeAvidScriptCSharpProfileTemplateDetails(Result);
+
+	if (!Result.bSucceeded)
+	{
+		Presentation.Severity = EAvidScriptEditorPresentationSeverity::Error;
+		Presentation.Title = TEXT("AvidScript C# profile template failed");
+		Presentation.Body = MakeAvidScriptPresentationErrorBody(
+			Result.ErrorCategory,
+			Result.ErrorMessage,
+			TEXT("C# profile template failed before a detailed diagnostic was produced."));
+		return Presentation;
+	}
+
+	Presentation.Severity = EAvidScriptEditorPresentationSeverity::Info;
+	Presentation.Title = TEXT("AvidScript C# profile ready");
+	Presentation.Body = Result.bCreated
+		? FString::Printf(TEXT("C# profile template created: %s"), *Result.NormalizedProfilePath)
+		: FString::Printf(TEXT("C# profile already exists and was not overwritten: %s"), *Result.NormalizedProfilePath);
+	return Presentation;
+}
+
+FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(
+	const FString& ProfilePath,
+	const FAvidScriptEditorCSharpBuildResult& BuildResult,
+	const FAvidScriptEditorComponentBindingResult& BindingResult)
+{
+	FAvidScriptEditorCommandPresentation Presentation;
+	Presentation.SourcePath = BuildResult.SourcePath;
+	Presentation.ManifestPath = !BuildResult.ManifestPath.IsEmpty()
+		? BuildResult.ManifestPath
+		: BindingResult.NormalizedManifestPath;
+	Presentation.Details = MakeAvidScriptCSharpProfileBuildAndBindDetails(ProfilePath, BuildResult, BindingResult);
+
+	if (!BuildResult.bSucceeded)
+	{
+		Presentation.Severity = EAvidScriptEditorPresentationSeverity::Error;
+		Presentation.Title = TEXT("AvidScript C# profile build failed");
+		Presentation.Body = MakeAvidScriptPresentationErrorBody(
+			BuildResult.ErrorCategory,
+			BuildResult.ErrorMessage,
+			TEXT("C# profile build failed before a detailed diagnostic was produced."));
+		return Presentation;
+	}
+
+	if (!BindingResult.bSucceeded)
+	{
+		Presentation.Severity = EAvidScriptEditorPresentationSeverity::Warning;
+		Presentation.Title = TEXT("AvidScript C# profile binding failed");
+		Presentation.Body = MakeAvidScriptPresentationErrorBody(
+			BindingResult.ErrorCategory,
+			BindingResult.ErrorMessage,
+			TEXT("C# profile build succeeded, but binding to the selected Actor failed."));
+		return Presentation;
+	}
+
+	Presentation.Severity = EAvidScriptEditorPresentationSeverity::Info;
+	Presentation.Title = TEXT("AvidScript C# profile bound");
+	Presentation.Body = FString::Printf(
+		TEXT("Module %s bound to %s."),
+		*BuildResult.ModuleId,
+		*BindingResult.ActorPath);
 	return Presentation;
 }

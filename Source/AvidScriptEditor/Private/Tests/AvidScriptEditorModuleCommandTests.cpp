@@ -414,4 +414,32 @@ bool FAvidScriptEditorModuleCSharpProfileTemplateTest::RunTest(const FString& Pa
 	TestEqual(TEXT("Module C# profile template artifact stem"), LoadResult.BuildConfig.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorModuleCSharpProfileMissingNextActionTest,
+	"AvidScript.Editor.Module.CSharpProfileMissingNextActionSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorModuleCSharpProfileMissingNextActionTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetAvidScriptEditorModuleCSharpProfileTestRoot();
+	TestTrue(TEXT("Module missing C# profile test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString MissingProfilePath = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(TestRoot, TEXT("missing_profile.csharp-profile.json")));
+	IFileManager::Get().Delete(*MissingProfilePath, false, true, true);
+
+	FAvidScriptEditorModule& Module =
+		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	TestFalse(TEXT("Module missing C# profile command fails"), Module.ExecuteCSharpProfileBuildAndBinding(MissingProfilePath, BuildResult, BindingResult));
+	TestFalse(TEXT("Module missing C# profile build result fails"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Module missing C# profile error category"), BuildResult.ErrorCategory, FString(TEXT("profile_missing")));
+	TestFalse(TEXT("Module missing C# profile next action is set"), BuildResult.NextAction.IsEmpty());
+	TestTrue(TEXT("Module missing C# profile next action mentions profile"), BuildResult.NextAction.Contains(TEXT("profile")) || BuildResult.NextAction.Contains(TEXT("Create Default C# Profile")));
+	TestFalse(TEXT("Module missing C# profile binding does not succeed"), BindingResult.bSucceeded);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

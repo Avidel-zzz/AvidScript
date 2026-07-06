@@ -67,11 +67,13 @@ FString MakeAvidScriptCSharpManifestPathForOutputRoot(const FString& OutputRoot,
 void SetAvidScriptCSharpBuildFailure(
 	const FString& ErrorCategory,
 	const FString& ErrorMessage,
+	const FString& NextAction,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
 	OutResult.bSucceeded = false;
 	OutResult.ErrorCategory = ErrorCategory;
 	OutResult.ErrorMessage = ErrorMessage;
+	OutResult.NextAction = NextAction;
 }
 
 FString QuoteAvidScriptCSharpPowerShellArgument(const FString& Value)
@@ -117,6 +119,7 @@ bool MakeAvidScriptCSharpBuildDirectory(const FString& Directory, const FString&
 		SetAvidScriptCSharpBuildFailure(
 			ErrorCategory,
 			FString::Printf(TEXT("C# build directory could not be created: %s"), *Directory),
+			TEXT("choose a writable C# output/report/manifest directory and retry"),
 			OutResult);
 		return false;
 	}
@@ -258,6 +261,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("build_script_missing"),
 			FString::Printf(TEXT("C# build script does not exist: %s"), *NormalizedConfig.BuildScriptPath),
+			TEXT("verify BuildCSharpActorLifecycle.ps1 exists in the plugin Build directory"),
 			OutResult);
 		return false;
 	}
@@ -267,6 +271,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("source_missing"),
 			FString::Printf(TEXT("C# source file does not exist: %s"), *NormalizedConfig.SourcePath),
+			TEXT("choose an existing C# source file or regenerate the default C# profile"),
 			OutResult);
 		return false;
 	}
@@ -276,6 +281,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("project_missing"),
 			FString::Printf(TEXT("C# project file does not exist: %s"), *NormalizedConfig.ProjectPath),
+			TEXT("choose an existing C# project file or update project_path in the C# profile"),
 			OutResult);
 		return false;
 	}
@@ -302,6 +308,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("process_failed"),
 			FString::Printf(TEXT("C# build process could not be launched: %s"), *NormalizedConfig.BuildScriptPath),
+			TEXT("verify powershell.exe can run the C# build script and retry"),
 			OutResult);
 		return false;
 	}
@@ -311,6 +318,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("build_failed"),
 			FString::Printf(TEXT("C# build failed with exit code %d"), OutResult.ProcessExitCode),
+			TEXT("fix unsupported C# syntax or toolchain errors, then rerun Build And Bind C# Profile Script"),
 			OutResult);
 		return false;
 	}
@@ -320,6 +328,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("report_missing"),
 			FString::Printf(TEXT("C# build report was not written: %s"), *NormalizedConfig.ReportPath),
+			TEXT("check C# build stdout/stderr and rerun the build after the report can be written"),
 			OutResult);
 		return false;
 	}
@@ -330,6 +339,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	SetAvidScriptCSharpBuildFailure(
 		TEXT("platform_unsupported"),
 		TEXT("C# build invocation is currently implemented only for Windows Editor hosts."),
+		TEXT("use a Windows Editor host for C# build-and-bind until other platforms are implemented"),
 		OutResult);
 	return false;
 #endif

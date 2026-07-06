@@ -62,6 +62,7 @@ void SetAvidScriptCSharpProfileCommandFailure(
 	OutBuildResult.bSucceeded = false;
 	OutBuildResult.ErrorCategory = ProfileResult.ErrorCategory;
 	OutBuildResult.ErrorMessage = ProfileResult.ErrorMessage;
+	OutBuildResult.NextAction = ProfileResult.NextAction;
 	OutBuildResult.SourcePath = ProfileResult.BuildConfig.SourcePath;
 	OutBuildResult.ProjectPath = ProfileResult.BuildConfig.ProjectPath;
 	OutBuildResult.BuildScriptPath = ProfileResult.BuildConfig.BuildScriptPath;
@@ -82,6 +83,41 @@ void LogAvidScriptMenuRegistrationFailure(const FAvidScriptEditorMenuRegistratio
 		*Result.EntryName.ToString(),
 		*Result.ErrorCategory,
 		*Result.ErrorMessage);
+}
+
+void LogAvidScriptEditorPresentation(const FAvidScriptEditorCommandPresentation& Presentation)
+{
+	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Info)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("%s: %s\n%s"),
+			*Presentation.Title,
+			*Presentation.Body,
+			*Presentation.Details);
+		return;
+	}
+
+	if (Presentation.Severity == EAvidScriptEditorPresentationSeverity::Warning)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Warning,
+			TEXT("%s: %s\n%s"),
+			*Presentation.Title,
+			*Presentation.Body,
+			*Presentation.Details);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Error,
+		TEXT("%s: %s\n%s"),
+		*Presentation.Title,
+		*Presentation.Body,
+		*Presentation.Details);
 }
 } // namespace
 
@@ -517,68 +553,23 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpActorLifecycleReport()
 void FAvidScriptEditorModule::HandleCreateDefaultCSharpProfileTemplate()
 {
 	FAvidScriptEditorCSharpProfileTemplateResult Result;
-	if (FAvidScriptEditorCSharpProfileService::WriteDefaultProfileTemplate(Result, false))
-	{
-		UE_LOG(
-			LogAvidScriptEditor,
-			Display,
-			TEXT("C# profile template ready: created=%s profile=%s source=%s next=%s"),
-			Result.bCreated ? TEXT("true") : TEXT("false"),
-			*Result.NormalizedProfilePath,
-			*Result.SourcePath,
-			*Result.NextAction);
-		return;
-	}
+	FAvidScriptEditorCSharpProfileService::WriteDefaultProfileTemplate(Result, false);
 
-	UE_LOG(
-		LogAvidScriptEditor,
-		Warning,
-		TEXT("C# profile template failed: category=%s message=%s next=%s profile=%s"),
-		*Result.ErrorCategory,
-		*Result.ErrorMessage,
-		*Result.NextAction,
-		*Result.NormalizedProfilePath);
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileTemplatePresentation(Result);
+	LogAvidScriptEditorPresentation(Presentation);
 }
+
 void FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile()
 {
+	const FString ProfilePath = GetDefaultCSharpProfilePath();
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	FAvidScriptEditorComponentBindingResult BindingResult;
-	if (ExecuteCSharpProfileBuildAndBinding(GetDefaultCSharpProfilePath(), BuildResult, BindingResult))
-	{
-		UE_LOG(
-			LogAvidScriptEditor,
-			Display,
-			TEXT("C# profile build-and-bind applied: actor=%s module=%s manifest=%s report=%s"),
-			*BindingResult.ActorPath,
-			*BuildResult.ModuleId,
-			*BindingResult.NormalizedManifestPath,
-			*BindingResult.ReportPath);
-		return;
-	}
+	ExecuteCSharpProfileBuildAndBinding(ProfilePath, BuildResult, BindingResult);
 
-	if (!BuildResult.bSucceeded)
-	{
-		UE_LOG(
-			LogAvidScriptEditor,
-			Warning,
-			TEXT("C# profile build failed: category=%s message=%s exit=%d profile=%s report=%s stderr=%s"),
-			*BuildResult.ErrorCategory,
-			*BuildResult.ErrorMessage,
-			BuildResult.ProcessExitCode,
-			*GetDefaultCSharpProfilePath(),
-			*BuildResult.ReportPath,
-			*BuildResult.Stderr);
-		return;
-	}
-
-	UE_LOG(
-		LogAvidScriptEditor,
-		Warning,
-		TEXT("C# profile build succeeded but binding failed: category=%s message=%s next=%s report=%s"),
-		*BindingResult.ErrorCategory,
-		*BindingResult.ErrorMessage,
-		*BindingResult.NextAction,
-		*BindingResult.ReportPath);
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
+	LogAvidScriptEditorPresentation(Presentation);
 }
 #undef LOCTEXT_NAMESPACE
 

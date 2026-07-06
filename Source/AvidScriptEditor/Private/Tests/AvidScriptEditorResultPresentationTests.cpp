@@ -1,6 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorResultPresentation.h"
+#include "AvidScriptEditorComponentBindingService.h"
+#include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -77,6 +80,162 @@ bool FAvidScriptEditorPresentationFailureTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("Failure body mentions message"), Presentation.Body.Contains(TEXT("does not exist")));
 	TestTrue(TEXT("Failure details include next action"), Presentation.Details.Contains(TEXT("choose an existing")));
 	TestEqual(TEXT("Failure source path copied"), Presentation.SourcePath, Result.SourcePath);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpProfileTemplateCreatedTest,
+	"AvidScript.Editor.Presentation.CSharpProfileTemplateCreatedSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpProfileTemplateCreatedTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCSharpProfileTemplateResult Result;
+	Result.bSucceeded = true;
+	Result.bCreated = true;
+	Result.NormalizedProfilePath = TEXT("C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+	Result.SourcePath = TEXT("C:/Project/Plugins/AvidScript/Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs");
+	Result.ReportPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle/profile_actor_lifecycle.csharp.report.json");
+	Result.ManifestPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle/profile_actor_lifecycle.avidscript.json");
+	Result.ModuleId = TEXT("csharp_profile_actor_lifecycle");
+	Result.NextAction = TEXT("edit source_path if needed, then run Build And Bind C# Profile Script");
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileTemplatePresentation(Result);
+	TestEqual(TEXT("C# profile template created severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
+	TestTrue(TEXT("C# profile template created title"), Presentation.Title.Contains(TEXT("C# profile ready")));
+	TestTrue(TEXT("C# profile template created body mentions created"), Presentation.Body.Contains(TEXT("created")));
+	TestTrue(TEXT("C# profile template created details include profile"), Presentation.Details.Contains(TEXT("default.csharp-profile.json")));
+	TestTrue(TEXT("C# profile template created details include source"), Presentation.Details.Contains(TEXT("ActorLifecycleScript.cs")));
+	TestTrue(TEXT("C# profile template created details include next action"), Presentation.Details.Contains(TEXT("Build And Bind C# Profile Script")));
+	TestEqual(TEXT("C# profile template source copied"), Presentation.SourcePath, Result.SourcePath);
+	TestEqual(TEXT("C# profile template manifest copied"), Presentation.ManifestPath, Result.ManifestPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpProfileTemplateFailureTest,
+	"AvidScript.Editor.Presentation.CSharpProfileTemplateFailureSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpProfileTemplateFailureTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCSharpProfileTemplateResult Result;
+	Result.bSucceeded = false;
+	Result.ErrorCategory = TEXT("profile_write_failed");
+	Result.ErrorMessage = TEXT("C# profile template could not be written: C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+	Result.NextAction = TEXT("verify the destination path is writable and retry");
+	Result.NormalizedProfilePath = TEXT("C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileTemplatePresentation(Result);
+	TestEqual(TEXT("C# profile template failure severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Error);
+	TestTrue(TEXT("C# profile template failure title"), Presentation.Title.Contains(TEXT("failed")));
+	TestTrue(TEXT("C# profile template failure body category"), Presentation.Body.Contains(TEXT("profile_write_failed")));
+	TestTrue(TEXT("C# profile template failure body message"), Presentation.Body.Contains(TEXT("could not be written")));
+	TestTrue(TEXT("C# profile template failure details next action"), Presentation.Details.Contains(TEXT("writable")));
+	TestTrue(TEXT("C# profile template failure details profile"), Presentation.Details.Contains(TEXT("default.csharp-profile.json")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest,
+	"AvidScript.Editor.Presentation.CSharpProfileBuildAndBindSuccessSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest::RunTest(const FString& Parameters)
+{
+	const FString ProfilePath = TEXT("C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	BuildResult.bSucceeded = true;
+	BuildResult.SourcePath = TEXT("C:/Project/Plugins/AvidScript/Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs");
+	BuildResult.ReportPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle/profile_actor_lifecycle.csharp.report.json");
+	BuildResult.ManifestPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle/profile_actor_lifecycle.avidscript.json");
+	BuildResult.ModuleId = TEXT("csharp_profile_actor_lifecycle");
+
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	BindingResult.bSucceeded = true;
+	BindingResult.ActorPath = TEXT("/Temp/AvidScriptProfileActor.AvidScriptProfileActor");
+	BindingResult.NormalizedManifestPath = BuildResult.ManifestPath;
+	BindingResult.ReportPath = BuildResult.ReportPath;
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
+	TestEqual(TEXT("C# profile build-and-bind success severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
+	TestTrue(TEXT("C# profile build-and-bind success title"), Presentation.Title.Contains(TEXT("C# profile bound")));
+	TestTrue(TEXT("C# profile build-and-bind success body module"), Presentation.Body.Contains(TEXT("csharp_profile_actor_lifecycle")));
+	TestTrue(TEXT("C# profile build-and-bind success body actor"), Presentation.Body.Contains(TEXT("AvidScriptProfileActor")));
+	TestTrue(TEXT("C# profile build-and-bind success details profile"), Presentation.Details.Contains(TEXT("default.csharp-profile.json")));
+	TestTrue(TEXT("C# profile build-and-bind success details report"), Presentation.Details.Contains(TEXT("csharp.report.json")));
+	TestEqual(TEXT("C# profile build-and-bind source copied"), Presentation.SourcePath, BuildResult.SourcePath);
+	TestEqual(TEXT("C# profile build-and-bind manifest copied"), Presentation.ManifestPath, BuildResult.ManifestPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpProfileBuildFailureTest,
+	"AvidScript.Editor.Presentation.CSharpProfileBuildFailureSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpProfileBuildFailureTest::RunTest(const FString& Parameters)
+{
+	const FString ProfilePath = TEXT("C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	BuildResult.bSucceeded = false;
+	BuildResult.ErrorCategory = TEXT("source_missing");
+	BuildResult.ErrorMessage = TEXT("C# source file does not exist: C:/Project/Scripts/Missing.cs");
+	BuildResult.NextAction = TEXT("choose an existing C# source file or regenerate the default C# profile");
+	BuildResult.SourcePath = TEXT("C:/Project/Scripts/Missing.cs");
+	BuildResult.ReportPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Missing/missing.csharp.report.json");
+	BuildResult.Stderr = TEXT("source file missing");
+
+	FAvidScriptEditorComponentBindingResult BindingResult;
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
+	TestEqual(TEXT("C# profile build failure severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Error);
+	TestTrue(TEXT("C# profile build failure title"), Presentation.Title.Contains(TEXT("build failed")));
+	TestTrue(TEXT("C# profile build failure body category"), Presentation.Body.Contains(TEXT("source_missing")));
+	TestTrue(TEXT("C# profile build failure details next action"), Presentation.Details.Contains(TEXT("existing C# source")));
+	TestTrue(TEXT("C# profile build failure details stderr"), Presentation.Details.Contains(TEXT("source file missing")));
+	TestEqual(TEXT("C# profile build failure source copied"), Presentation.SourcePath, BuildResult.SourcePath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpProfileBindingFailureTest,
+	"AvidScript.Editor.Presentation.CSharpProfileBindingFailureSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpProfileBindingFailureTest::RunTest(const FString& Parameters)
+{
+	const FString ProfilePath = TEXT("C:/Project/Saved/AvidScriptCSharpProfiles/default.csharp-profile.json");
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	BuildResult.bSucceeded = true;
+	BuildResult.SourcePath = TEXT("C:/Project/Scripts/Mover.cs");
+	BuildResult.ReportPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Mover/mover.csharp.report.json");
+	BuildResult.ManifestPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/Mover/mover.avidscript.json");
+	BuildResult.ModuleId = TEXT("csharp_mover");
+
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	BindingResult.bSucceeded = false;
+	BindingResult.ErrorCategory = TEXT("selection_unavailable");
+	BindingResult.ErrorMessage = TEXT("No Actor is selected.");
+	BindingResult.NextAction = TEXT("select an Actor in the level and rerun Build And Bind C# Profile Script");
+	BindingResult.ReportPath = BuildResult.ReportPath;
+	BindingResult.NormalizedManifestPath = BuildResult.ManifestPath;
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
+	TestEqual(TEXT("C# profile binding failure severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Warning);
+	TestTrue(TEXT("C# profile binding failure title"), Presentation.Title.Contains(TEXT("binding failed")));
+	TestTrue(TEXT("C# profile binding failure body category"), Presentation.Body.Contains(TEXT("selection_unavailable")));
+	TestTrue(TEXT("C# profile binding failure details next action"), Presentation.Details.Contains(TEXT("select an Actor")));
+	TestEqual(TEXT("C# profile binding failure manifest copied"), Presentation.ManifestPath, BuildResult.ManifestPath);
 	return true;
 }
 

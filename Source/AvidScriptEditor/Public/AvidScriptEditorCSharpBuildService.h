@@ -24,6 +24,7 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString Stderr;
 	FString ErrorCategory;
 	FString ErrorMessage;
+	FString NextAction;
 	FString SourcePath;
 	FString ProjectPath;
 	FString BuildScriptPath;
