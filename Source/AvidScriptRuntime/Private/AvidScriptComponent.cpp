@@ -1,13 +1,109 @@
 #include "AvidScriptComponent.h"
 
+#include "AvidScriptWasmReload.h"
+
 #include "GameFramework/Actor.h"
+#include "Misc/Paths.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptComponent, Log, All);
+
+namespace
+{
+void SetComponentManifestLoadFailure(
+	const FAvidScriptWasmReloadManifestLoadResult& LoadResult,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = FAvidScriptWasmSmokeResult();
+	OutResult.ModuleId = TEXT("<component_manifest>");
+	OutResult.ExportName = TEXT("<manifest>");
+	OutResult.ErrorCategory = LoadResult.ErrorCategory;
+	OutResult.NextAction = LoadResult.NextAction;
+	OutResult.ErrorMessage = LoadResult.ErrorMessage.IsEmpty()
+		? FString::Printf(TEXT("Failed to load AvidScript manifest: %s"), *LoadResult.ManifestPath)
+		: LoadResult.ErrorMessage;
+}
+} // namespace
 
 UAvidScriptComponent::UAvidScriptComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
+}
+
+void UAvidScriptComponent::SetScriptManifestPath(const FString& InScriptManifestPath)
+{
+	ScriptManifestFile.FilePath = InScriptManifestPath;
+	FPaths::NormalizeFilename(ScriptManifestFile.FilePath);
+}
+
+FString UAvidScriptComponent::GetScriptManifestPath() const
+{
+	return ScriptManifestFile.FilePath;
+}
+
+FString UAvidScriptComponent::ResolveScriptManifestPath() const
+{
+	FString ManifestPath = ScriptManifestFile.FilePath;
+	if (ManifestPath.IsEmpty())
+	{
+		return FString();
+	}
+
+	FPaths::NormalizeFilename(ManifestPath);
+	if (FPaths::IsRelative(ManifestPath))
+	{
+		ManifestPath = FPaths::Combine(FPaths::ProjectDir(), ManifestPath);
+	}
+
+	ManifestPath = FPaths::ConvertRelativePathToFull(ManifestPath);
+	FPaths::NormalizeFilename(ManifestPath);
+	return ManifestPath;
+}
+
+bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!Runtime.IsValid())
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ErrorCategory = TEXT("invalid_state");
+		OutResult.ErrorMessage = TEXT("AvidScript component runtime has not been allocated.");
+		OutResult.NextAction = TEXT("create a runtime before loading script modules");
+		return false;
+	}
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &ObjectRegistry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	Runtime->SetHostContext(HostContext);
+
+	RuntimeStats.ScriptManifestPath = ResolveScriptManifestPath();
+	if (RuntimeStats.ScriptManifestPath.IsEmpty())
+	{
+		return Runtime->LoadEmbeddedSmokeModule(OutResult);
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(RuntimeStats.ScriptManifestPath, Manifest, Bytecode, LoadResult))
+	{
+		SetComponentManifestLoadFailure(LoadResult, OutResult);
+		return false;
+	}
+
+	if (!Runtime->LoadModule(Bytecode.GetData(), Bytecode.Num(), Manifest.ModuleId, OutResult))
+	{
+		return false;
+	}
+
+	if (!Runtime->ValidateRequiredExports(Manifest.RequiredExports, OutResult))
+	{
+		Runtime->Unload();
+		return false;
+	}
+
+	RuntimeStats.ModuleId = Manifest.ModuleId;
+	return true;
 }
 
 bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const
@@ -32,7 +128,7 @@ void UAvidScriptComponent::BeginPlay()
 	Runtime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
 
 	FAvidScriptWasmSmokeResult Result;
-	if (!Runtime->LoadEmbeddedSmokeModule(Result) || !Runtime->BeginPlay(Result))
+	if (!LoadConfiguredScriptModule(Result) || !Runtime->BeginPlay(Result))
 	{
 		RecordRuntimeFailure(Result);
 		ReleaseRuntime();
@@ -45,6 +141,7 @@ void UAvidScriptComponent::BeginPlay()
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 	RuntimeStats.TickCallCount = Result.TickCallCount;
 	RuntimeStats.Metrics = Result.Metrics;
+	RuntimeStats.ModuleId = Result.ModuleId;
 
 	UE_LOG(
 		LogAvidScriptComponent,
@@ -100,6 +197,7 @@ void UAvidScriptComponent::TickComponent(
 			RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 			RuntimeStats.TickCallCount = Result.TickCallCount;
 			RuntimeStats.Metrics = Result.Metrics;
+			RuntimeStats.ModuleId = Result.ModuleId;
 
 			if (PreviousTickCallCount == 0 && RuntimeStats.TickCallCount > 0)
 			{
@@ -173,6 +271,7 @@ void UAvidScriptComponent::RecordRuntimeFailure(const FAvidScriptWasmSmokeResult
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 	RuntimeStats.TickCallCount = Runtime.IsValid() ? Runtime->GetTickCallCount() : Result.TickCallCount;
 	RuntimeStats.Metrics = Result.Metrics;
+	RuntimeStats.ModuleId = Result.ModuleId;
 
 	UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *Result.ErrorMessage);
 }

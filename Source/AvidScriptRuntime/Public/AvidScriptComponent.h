@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Components/ActorComponent.h"
+#include "UObject/SoftObjectPath.h"
 
 #include "AvidScriptComponent.generated.h"
 
@@ -17,6 +18,8 @@ struct FAvidScriptComponentRuntimeStats
 	int32 TickCallCount = 0;
 	FAvidScriptObjectHandle OwnerHandle;
 	FString OwnerObjectPath;
+	FString ScriptManifestPath;
+	FString ModuleId;
 	FString LastErrorMessage;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
@@ -30,6 +33,8 @@ public:
 	UAvidScriptComponent();
 
 	const FAvidScriptComponentRuntimeStats& GetRuntimeStats() const { return RuntimeStats; }
+	void SetScriptManifestPath(const FString& InScriptManifestPath);
+	FString GetScriptManifestPath() const;
 	bool ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const;
 
 	virtual void BeginPlay() override;
@@ -42,8 +47,13 @@ public:
 private:
 	bool RegisterOwner();
 	void ReleaseOwner();
+	bool LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult);
+	FString ResolveScriptManifestPath() const;
 	void RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
+
+	UPROPERTY(EditAnywhere, Category = "AvidScript", meta = (FilePathFilter = "avidscript.json"))
+	FFilePath ScriptManifestFile;
 
 	FAvidScriptObjectRegistry ObjectRegistry;
 	FAvidScriptObjectHandle OwnerHandle;
