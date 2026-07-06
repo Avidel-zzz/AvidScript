@@ -153,6 +153,7 @@ Plugins/AvidScript/Docs
 - 2026-07-06 P15.2 mistake record: UE5.8 的 `FFilePath` 声明在 `UObject/SoftObjectPath.h`, 不是 `Misc/FilePath.h`; 错误 include 会导致 `fatal error C1083`. Prevention: 新增 UE struct include 前先在 `C:\UnrealEngine\Engine\Source` 搜索声明位置或参考同引擎版本的工作示例。
 - P16.2 Editor 侧 C# report/manifest 组件绑定已经接入 `FAvidScriptEditorComponentBindingService`: 该服务可读取 C# build report 的 `artifacts.manifest_file`, 绑定到显式 Actor 或当前选中 Actor, 并在缺少组件时创建 `UAvidScriptComponent`。
 - P17.2 Editor 菜单入口已经接入 C# ActorLifecycle 绑定: `Tools > AvidScript > Bind C# ActorLifecycle Script` 会读取 `Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.csharp.report.json`, 并调用组件绑定服务绑定到当前选中 Actor。
+- P18.2 Editor 菜单入口已经接入 C# ActorLifecycle 构建并绑定: `Tools > AvidScript > Build And Bind C# ActorLifecycle Script` 会调用 `BuildCSharpActorLifecycle.ps1`, 验证 report 存在, 再复用组件绑定服务绑定到当前选中 Actor。
 
 ## D Guest Toolchain Workflow
 
