@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorCommandLauncher.h"
 #include "AvidScriptEditorComponentBindingService.h"
+#include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 
@@ -23,7 +24,9 @@ public:
 	static FName GetSampleCommandEntryName();
 	static FString GetSampleCommandSourcePath();
 	static FName GetCSharpActorLifecycleBindEntryName();
+	static FName GetCSharpActorLifecycleBuildAndBindEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
+	static FString GetCSharpActorLifecycleBuildScriptPath();
 
 	static bool MakeSampleCommandConfig(
 		FAvidScriptEditorCommandLaunchConfig& OutConfig,
@@ -37,14 +40,19 @@ public:
 
 	static FAvidScriptEditorMenuEntryConfig MakeSampleMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
+	bool ExecuteCSharpActorLifecycleBuildAndBinding(
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult);
 
 private:
 	void RegisterMenus();
 	void HandleRunSampleCommand();
 	void HandleBindCSharpActorLifecycleReport();
+	void HandleBuildAndBindCSharpActorLifecycleReport();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	FDelegateHandle ToolMenusStartupCallbackHandle;

@@ -5,6 +5,7 @@
 #include "AvidScriptComponent.h"
 #include "AvidScriptEditorCommandLauncher.h"
 #include "AvidScriptEditorComponentBindingService.h"
+#include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 
 #include "Components/SceneComponent.h"
@@ -111,6 +112,10 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	const FString CSharpReportPath = FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath();
 	TestTrue(TEXT("C# report path uses ActorLifecycle report"), CSharpReportPath.EndsWith(TEXT("Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.csharp.report.json")));
 
+	const FString CSharpBuildScriptPath = FAvidScriptEditorModule::GetCSharpActorLifecycleBuildScriptPath();
+	TestTrue(TEXT("C# build script path uses ActorLifecycle wrapper"), CSharpBuildScriptPath.EndsWith(TEXT("Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1")));
+	TestTrue(TEXT("C# build script exists"), FPaths::FileExists(CSharpBuildScriptPath));
+
 	FAvidScriptEditorMenuEntryConfig CSharpBindMenuConfig =
 		FAvidScriptEditorModule::MakeCSharpActorLifecycleBindMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
 		}));
@@ -121,6 +126,17 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestFalse(TEXT("C# bind command label is set"), CSharpBindMenuConfig.Label.IsEmpty());
 	TestFalse(TEXT("C# bind command tooltip is set"), CSharpBindMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# bind command execute action is bound"), CSharpBindMenuConfig.ExecuteAction.IsBound());
+
+	FAvidScriptEditorMenuEntryConfig CSharpBuildAndBindMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
+		}));
+	TestEqual(TEXT("C# build-and-bind command owner"), CSharpBuildAndBindMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# build-and-bind command menu"), CSharpBuildAndBindMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# build-and-bind command section"), CSharpBuildAndBindMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# build-and-bind command entry"), CSharpBuildAndBindMenuConfig.EntryName, FName(TEXT("AvidScript.BuildAndBindCSharpActorLifecycle")));
+	TestFalse(TEXT("C# build-and-bind command label is set"), CSharpBuildAndBindMenuConfig.Label.IsEmpty());
+	TestFalse(TEXT("C# build-and-bind command tooltip is set"), CSharpBuildAndBindMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# build-and-bind command execute action is bound"), CSharpBuildAndBindMenuConfig.ExecuteAction.IsBound());
 
 	return true;
 }
@@ -175,6 +191,57 @@ bool FAvidScriptEditorModuleCSharpBindSelectedActorTest::RunTest(const FString& 
 	TestEqual(TEXT("Module C# binding report path"), Result.ReportPath, ReportPath);
 	TestNotNull(TEXT("Module C# binding returns component"), Result.Component);
 	TestEqual(TEXT("Module binding actor component"), Actor->FindComponentByClass<UAvidScriptComponent>(), Result.Component);
+
+	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorModuleCSharpBuildAndBindSelectedActorTest,
+	"AvidScript.Editor.Module.CSharpBuildAndBindSelectedActorSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorModuleCSharpBuildAndBindSelectedActorTest::RunTest(const FString& Parameters)
+{
+	if (GEditor == nullptr)
+	{
+		AddError(TEXT("GEditor is not available for module C# build-and-bind smoke."));
+		return true;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateAvidScriptEditorModuleCSharpBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create module C# build-and-bind test world."));
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return true;
+	}
+
+	AActor* Actor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
+	TestNotNull(TEXT("Module build-and-bind test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return true;
+	}
+
+	GEditor->SelectNone(false, true, false);
+	GEditor->SelectActor(Actor, true, false, true, false);
+
+	FAvidScriptEditorModule& Module =
+		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	TestTrue(TEXT("Module C# build-and-bind command succeeds"), Module.ExecuteCSharpActorLifecycleBuildAndBinding(BuildResult, BindingResult));
+	TestTrue(TEXT("Module C# build result succeeds"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Module C# build process exit"), BuildResult.ProcessExitCode, 0);
+	TestEqual(TEXT("Module C# build report path"), BuildResult.ReportPath, FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath());
+	TestTrue(TEXT("Module C# build report exists"), FPaths::FileExists(BuildResult.ReportPath));
+	TestTrue(TEXT("Module C# build-and-bind result succeeds"), BindingResult.bSucceeded);
+	TestEqual(TEXT("Module C# build-and-bind report path"), BindingResult.ReportPath, BuildResult.ReportPath);
+	TestNotNull(TEXT("Module C# build-and-bind returns component"), BindingResult.Component);
+	TestEqual(TEXT("Module build-and-bind actor component"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
 
 	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 	return true;

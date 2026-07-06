@@ -129,13 +129,19 @@ FName FAvidScriptEditorModule::GetCSharpActorLifecycleBindEntryName()
 	return TEXT("AvidScript.BindCSharpActorLifecycleReport");
 }
 
+FName FAvidScriptEditorModule::GetCSharpActorLifecycleBuildAndBindEntryName()
+{
+	return TEXT("AvidScript.BuildAndBindCSharpActorLifecycle");
+}
+
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 {
-	return NormalizeAvidScriptEditorModulePath(FPaths::Combine(
-		FPaths::ProjectSavedDir(),
-		TEXT("AvidScriptCSharpGuest"),
-		TEXT("ActorLifecycle"),
-		TEXT("actor_lifecycle.csharp.report.json")));
+	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath();
+}
+
+FString FAvidScriptEditorModule::GetCSharpActorLifecycleBuildScriptPath()
+{
+	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
 }
 
 bool FAvidScriptEditorModule::MakeSampleCommandConfig(
@@ -206,6 +212,20 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpActorLifecyc
 	return Config;
 }
 
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpActorLifecycleBuildAndBindEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptBuildAndBindCSharpActorLifecycleLabel", "Build And Bind C# ActorLifecycle Script");
+	Config.ToolTip = LOCTEXT("AvidScriptBuildAndBindCSharpActorLifecycleToolTip", "Build the C# ActorLifecycle sample and apply its report to the selected Actor.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
 bool FAvidScriptEditorModule::ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult)
 {
 	if (!CommandLauncher.IsValid())
@@ -241,12 +261,38 @@ bool FAvidScriptEditorModule::ExecuteCSharpActorLifecycleBinding(
 		OutResult);
 }
 
+bool FAvidScriptEditorModule::ExecuteCSharpActorLifecycleBuildAndBinding(
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult)
+{
+	OutBindingResult = FAvidScriptEditorComponentBindingResult();
+
+	FAvidScriptEditorCSharpBuildConfig BuildConfig;
+	BuildConfig.BuildScriptPath = GetCSharpActorLifecycleBuildScriptPath();
+	BuildConfig.OutputRoot = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleOutputRoot();
+	BuildConfig.ReportPath = GetCSharpActorLifecycleReportPath();
+
+	if (!FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(BuildConfig, OutBuildResult))
+	{
+		return false;
+	}
+
+	return ExecuteCSharpActorLifecycleBinding(OutBindingResult);
+}
+
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
 	const FAvidScriptEditorMenuEntryConfig SampleMenuConfig = MakeSampleMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleRunSampleCommand));
 	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(SampleMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
+
+	const FAvidScriptEditorMenuEntryConfig CSharpBuildAndBindMenuConfig = MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBuildAndBindCSharpActorLifecycleReport));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpBuildAndBindMenuConfig, Result))
 	{
 		LogAvidScriptMenuRegistrationFailure(Result);
 	}
@@ -323,6 +369,46 @@ void FAvidScriptEditorModule::HandleBindCSharpActorLifecycleReport()
 		*Result.ErrorMessage,
 		*Result.NextAction,
 		*Result.ReportPath);
+}
+
+void FAvidScriptEditorModule::HandleBuildAndBindCSharpActorLifecycleReport()
+{
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	if (ExecuteCSharpActorLifecycleBuildAndBinding(BuildResult, BindingResult))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("C# ActorLifecycle build-and-bind applied: actor=%s manifest=%s report=%s"),
+			*BindingResult.ActorPath,
+			*BindingResult.NormalizedManifestPath,
+			*BindingResult.ReportPath);
+		return;
+	}
+
+	if (!BuildResult.bSucceeded)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Warning,
+			TEXT("C# ActorLifecycle build failed: category=%s message=%s exit=%d report=%s stderr=%s"),
+			*BuildResult.ErrorCategory,
+			*BuildResult.ErrorMessage,
+			BuildResult.ProcessExitCode,
+			*BuildResult.ReportPath,
+			*BuildResult.Stderr);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Warning,
+		TEXT("C# ActorLifecycle build succeeded but binding failed: category=%s message=%s next=%s report=%s"),
+		*BindingResult.ErrorCategory,
+		*BindingResult.ErrorMessage,
+		*BindingResult.NextAction,
+		*BindingResult.ReportPath);
 }
 #undef LOCTEXT_NAMESPACE
 
