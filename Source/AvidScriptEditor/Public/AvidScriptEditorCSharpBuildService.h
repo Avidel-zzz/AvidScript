@@ -4,10 +4,15 @@
 
 struct FAvidScriptEditorCSharpBuildConfig
 {
+	FString SourcePath;
+	FString ProjectPath;
 	FString BuildScriptPath;
 	FString OutputRoot;
 	FString ReportPath;
+	FString ManifestPath;
 	FString DotNetPath;
+	FString ModuleId;
+	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
 };
 
@@ -19,17 +24,34 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString Stderr;
 	FString ErrorCategory;
 	FString ErrorMessage;
+	FString SourcePath;
+	FString ProjectPath;
 	FString BuildScriptPath;
 	FString OutputRoot;
 	FString ReportPath;
+	FString ManifestPath;
+	FString ModuleId;
+	FString ArtifactStem;
 };
 
 class FAvidScriptEditorCSharpBuildService
 {
 public:
 	static FString GetDefaultActorLifecycleBuildScriptPath();
+	static FString GetDefaultActorLifecycleSourcePath();
+	static FString GetDefaultActorLifecycleProjectPath();
 	static FString GetDefaultActorLifecycleOutputRoot();
 	static FString GetDefaultActorLifecycleReportPath();
+	static FString GetDefaultActorLifecycleManifestPath();
+	static FString GetDefaultActorLifecycleModuleId();
+	static FString GetDefaultActorLifecycleArtifactStem();
+
+	static FString MakeReportPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem);
+	static FString MakeManifestPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem);
+
+	static bool BuildProfile(
+		const FAvidScriptEditorCSharpBuildConfig& Config,
+		FAvidScriptEditorCSharpBuildResult& OutResult);
 
 	static bool BuildActorLifecycle(
 		const FAvidScriptEditorCSharpBuildConfig& Config,

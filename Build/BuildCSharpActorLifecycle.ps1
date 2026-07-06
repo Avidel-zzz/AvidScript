@@ -1,7 +1,13 @@
 param(
     [string]$DotNetPath = "",
     [string]$OutputRoot = "",
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [string]$SourcePath = "",
+    [string]$ProjectPath = "",
+    [string]$ModuleId = "",
+    [string]$ArtifactStem = "",
+    [string]$ReportPath = "",
+    [string]$ManifestPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -535,14 +541,14 @@ function Invoke-CSharpSourceAdapter {
     param([object[]]$Diagnostics = @())
 
     $AdapterDiagnostics = @($Diagnostics)
-    $AdapterWasmPath = Join-Path $OutputRoot 'actor_lifecycle.csharp_adapter.wasm'
+    $AdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
 
     try {
-        if (-not (Test-Path -LiteralPath $SampleSourcePath -PathType Leaf)) {
-            throw "C# sample source file is missing: $SampleSourcePath"
+        if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+            throw "C# source file is missing: $SourcePath"
         }
 
-        $SourceText = [System.IO.File]::ReadAllText($SampleSourcePath)
+        $SourceText = [System.IO.File]::ReadAllText($SourcePath)
         $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
         $BeginPlayCalls = @(Get-CSharpSetLocationCalls -MethodBody $BeginPlayBody -MethodName 'BeginPlay')
@@ -561,11 +567,11 @@ function Invoke-CSharpSourceAdapter {
         $ArtifactHash = Get-Sha256Hex -Path $AdapterWasmPath
         $Manifest = [ordered]@{
             schema_version = 1
-            module_id = 'csharp_actor_lifecycle'
+            module_id = $ModuleId
             abi_version = 1
             language = 'csharp'
             source = [ordered]@{
-                file = Convert-ToProjectRelativePath -Path $SampleSourcePath
+                file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
                 subset = 'actor_lifecycle_v1'
             }
@@ -646,12 +652,12 @@ function Write-Report {
     $Report = [ordered]@{
         schema_version = 1
         language = "csharp"
-        module_id = "csharp_actor_lifecycle"
+        module_id = $ModuleId
         result = $Result
         direct_abi_supported = $DirectAbiSupported
         source = [ordered]@{
-            project = Convert-ToProjectRelativePath -Path $SampleProjectPath
-            file = Convert-ToProjectRelativePath -Path $SampleSourcePath
+            project = Convert-ToProjectRelativePath -Path $ProjectPath
+            file = Convert-ToProjectRelativePath -Path $SourcePath
         }
         output_root = Convert-ToProjectRelativePath -Path $OutputRoot
         required_exports = @(
@@ -690,15 +696,35 @@ $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginRoot = Split-Path -Parent $BuildDir
 $ProjectPluginsDir = Split-Path -Parent $PluginRoot
 $ProjectRoot = Split-Path -Parent $ProjectPluginsDir
-$SampleProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
-$SampleSourcePath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\ActorLifecycleScript.cs"
+$DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
+$DefaultSourcePath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\ActorLifecycleScript.cs"
+
+if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
+    $ProjectPath = $DefaultProjectPath
+}
+if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+    $SourcePath = $DefaultSourcePath
+}
+if ([string]::IsNullOrWhiteSpace($ModuleId)) {
+    $ModuleId = "csharp_actor_lifecycle"
+}
+if ([string]::IsNullOrWhiteSpace($ArtifactStem)) {
+    $ArtifactStem = "actor_lifecycle"
+}
+if ($ArtifactStem.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+    throw "ArtifactStem contains invalid file name characters: $ArtifactStem"
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $ProjectRoot "Saved\AvidScriptCSharpGuest\ActorLifecycle"
 }
 
-$ReportPath = Join-Path $OutputRoot "actor_lifecycle.csharp.report.json"
-$ManifestPath = Join-Path $OutputRoot "actor_lifecycle.avidscript.json"
+if ([string]::IsNullOrWhiteSpace($ReportPath)) {
+    $ReportPath = Join-Path $OutputRoot "$ArtifactStem.csharp.report.json"
+}
+if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
+    $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json"
+}
 $PublishRoot = Join-Path $OutputRoot "publish"
 $BinaryRoot = Join-Path $OutputRoot "bin"
 $IntermediateRoot = Join-Path $OutputRoot "obj"
@@ -818,7 +844,7 @@ if (($WorkloadList -join "`n") -notmatch "wasi-experimental") {
 $PublishOutput = @()
 $PublishExitCode = 0
 try {
-    $PublishOutput = @(& $DotNet.Path publish $SampleProjectPath -c $Configuration -v:minimal --configfile $NuGetConfigPath --ignore-failed-sources -o $PublishRoot "-p:BaseOutputPath=$BinaryRootForMsBuild" "-p:BaseIntermediateOutputPath=$IntermediateRootForMsBuild" "-p:RestoreIgnoreFailedSources=true" 2>&1)
+    $PublishOutput = @(& $DotNet.Path publish $ProjectPath -c $Configuration -v:minimal --configfile $NuGetConfigPath --ignore-failed-sources -o $PublishRoot "-p:BaseOutputPath=$BinaryRootForMsBuild" "-p:BaseIntermediateOutputPath=$IntermediateRootForMsBuild" "-p:RestoreIgnoreFailedSources=true" 2>&1)
     $PublishExitCode = $LASTEXITCODE
 }
 catch {
@@ -862,7 +888,7 @@ if ([string]::IsNullOrWhiteSpace($WasmPath)) {
     exit 0
 }
 
-$CopiedWasmPath = Join-Path $OutputRoot "actor_lifecycle.dotnet.wasm"
+$CopiedWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 Copy-Item -LiteralPath $WasmPath -Destination $CopiedWasmPath -Force
 
 $ObservedExports = @()
@@ -894,11 +920,11 @@ if ($MissingExports.Count -gt 0) {
 $ArtifactHash = Get-Sha256Hex -Path $CopiedWasmPath
 $Manifest = [ordered]@{
     schema_version = 1
-    module_id = "csharp_actor_lifecycle"
+    module_id = $ModuleId
     abi_version = 1
     language = "csharp"
     source = [ordered]@{
-        file = Convert-ToProjectRelativePath -Path $SampleSourcePath
+        file = Convert-ToProjectRelativePath -Path $SourcePath
     }
     wasm = [ordered]@{
         file = Convert-ToProjectRelativePath -Path $CopiedWasmPath

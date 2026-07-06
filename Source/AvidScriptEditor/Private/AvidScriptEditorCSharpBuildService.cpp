@@ -7,6 +7,9 @@
 
 namespace
 {
+constexpr const TCHAR* AvidScriptDefaultCSharpActorLifecycleModuleId = TEXT("csharp_actor_lifecycle");
+constexpr const TCHAR* AvidScriptDefaultCSharpActorLifecycleArtifactStem = TEXT("actor_lifecycle");
+
 void NormalizeAvidScriptCSharpBuildPath(FString& Path)
 {
 	if (!Path.IsEmpty())
@@ -36,11 +39,29 @@ FString GetAvidScriptCSharpBuildPluginBaseDir()
 		TEXT("AvidScript")));
 }
 
-FString MakeAvidScriptCSharpReportPathForOutputRoot(const FString& OutputRoot)
+FString GetAvidScriptCSharpArtifactStemOrDefault(const FString& ArtifactStem)
 {
-	FString ReportPath = FPaths::Combine(OutputRoot, TEXT("actor_lifecycle.csharp.report.json"));
+	return ArtifactStem.IsEmpty()
+		? FString(AvidScriptDefaultCSharpActorLifecycleArtifactStem)
+		: ArtifactStem;
+}
+
+FString MakeAvidScriptCSharpReportPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+{
+	FString ReportPath = FPaths::Combine(
+		OutputRoot,
+		GetAvidScriptCSharpArtifactStemOrDefault(ArtifactStem) + TEXT(".csharp.report.json"));
 	NormalizeAvidScriptCSharpBuildPath(ReportPath);
 	return ReportPath;
+}
+
+FString MakeAvidScriptCSharpManifestPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+{
+	FString ManifestPath = FPaths::Combine(
+		OutputRoot,
+		GetAvidScriptCSharpArtifactStemOrDefault(ArtifactStem) + TEXT(".avidscript.json"));
+	NormalizeAvidScriptCSharpBuildPath(ManifestPath);
+	return ManifestPath;
 }
 
 void SetAvidScriptCSharpBuildFailure(
@@ -80,7 +101,27 @@ FString BuildAvidScriptCSharpPowerShellParameters(const FAvidScriptEditorCSharpB
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-DotNetPath"), Config.DotNetPath);
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-OutputRoot"), Config.OutputRoot);
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-Configuration"), Config.Configuration);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-SourcePath"), Config.SourcePath);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ProjectPath"), Config.ProjectPath);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ModuleId"), Config.ModuleId);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ArtifactStem"), Config.ArtifactStem);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ReportPath"), Config.ReportPath);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ManifestPath"), Config.ManifestPath);
 	return FString::Join(Arguments, TEXT(" "));
+}
+
+bool MakeAvidScriptCSharpBuildDirectory(const FString& Directory, const FString& ErrorCategory, FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	if (!Directory.IsEmpty() && !IFileManager::Get().MakeDirectory(*Directory, true))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			ErrorCategory,
+			FString::Printf(TEXT("C# build directory could not be created: %s"), *Directory),
+			OutResult);
+		return false;
+	}
+
+	return true;
 }
 } // namespace
 
@@ -90,6 +131,26 @@ FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScript
 		GetAvidScriptCSharpBuildPluginBaseDir(),
 		TEXT("Build"),
 		TEXT("BuildCSharpActorLifecycle.ps1")));
+}
+
+FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath()
+{
+	return NormalizeAvidScriptCSharpBuildPathCopy(FPaths::Combine(
+		GetAvidScriptCSharpBuildPluginBaseDir(),
+		TEXT("Samples"),
+		TEXT("CSharp"),
+		TEXT("ActorLifecycle"),
+		TEXT("ActorLifecycleScript.cs")));
+}
+
+FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath()
+{
+	return NormalizeAvidScriptCSharpBuildPathCopy(FPaths::Combine(
+		GetAvidScriptCSharpBuildPluginBaseDir(),
+		TEXT("Samples"),
+		TEXT("CSharp"),
+		TEXT("ActorLifecycle"),
+		TEXT("AvidScript.ActorLifecycle.csproj")));
 }
 
 FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleOutputRoot()
@@ -102,10 +163,35 @@ FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleOutputRoot(
 
 FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath()
 {
-	return MakeAvidScriptCSharpReportPathForOutputRoot(GetDefaultActorLifecycleOutputRoot());
+	return MakeReportPathForOutputRoot(GetDefaultActorLifecycleOutputRoot(), GetDefaultActorLifecycleArtifactStem());
 }
 
-bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
+FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleManifestPath()
+{
+	return MakeManifestPathForOutputRoot(GetDefaultActorLifecycleOutputRoot(), GetDefaultActorLifecycleArtifactStem());
+}
+
+FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleModuleId()
+{
+	return AvidScriptDefaultCSharpActorLifecycleModuleId;
+}
+
+FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleArtifactStem()
+{
+	return AvidScriptDefaultCSharpActorLifecycleArtifactStem;
+}
+
+FString FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+{
+	return MakeAvidScriptCSharpReportPathForOutputRoot(OutputRoot, ArtifactStem);
+}
+
+FString FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+{
+	return MakeAvidScriptCSharpManifestPathForOutputRoot(OutputRoot, ArtifactStem);
+}
+
+bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	const FAvidScriptEditorCSharpBuildConfig& Config,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
@@ -117,13 +203,33 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 	{
 		NormalizedConfig.BuildScriptPath = GetDefaultActorLifecycleBuildScriptPath();
 	}
+	if (NormalizedConfig.SourcePath.IsEmpty())
+	{
+		NormalizedConfig.SourcePath = GetDefaultActorLifecycleSourcePath();
+	}
+	if (NormalizedConfig.ProjectPath.IsEmpty())
+	{
+		NormalizedConfig.ProjectPath = GetDefaultActorLifecycleProjectPath();
+	}
 	if (NormalizedConfig.OutputRoot.IsEmpty())
 	{
 		NormalizedConfig.OutputRoot = GetDefaultActorLifecycleOutputRoot();
 	}
+	if (NormalizedConfig.ModuleId.IsEmpty())
+	{
+		NormalizedConfig.ModuleId = GetDefaultActorLifecycleModuleId();
+	}
+	if (NormalizedConfig.ArtifactStem.IsEmpty())
+	{
+		NormalizedConfig.ArtifactStem = GetDefaultActorLifecycleArtifactStem();
+	}
 	if (NormalizedConfig.ReportPath.IsEmpty())
 	{
-		NormalizedConfig.ReportPath = MakeAvidScriptCSharpReportPathForOutputRoot(NormalizedConfig.OutputRoot);
+		NormalizedConfig.ReportPath = MakeReportPathForOutputRoot(NormalizedConfig.OutputRoot, NormalizedConfig.ArtifactStem);
+	}
+	if (NormalizedConfig.ManifestPath.IsEmpty())
+	{
+		NormalizedConfig.ManifestPath = MakeManifestPathForOutputRoot(NormalizedConfig.OutputRoot, NormalizedConfig.ArtifactStem);
 	}
 	if (NormalizedConfig.Configuration.IsEmpty())
 	{
@@ -131,29 +237,53 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 	}
 
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.BuildScriptPath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.SourcePath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ProjectPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.OutputRoot);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ReportPath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ManifestPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.DotNetPath);
 
+	OutResult.SourcePath = NormalizedConfig.SourcePath;
+	OutResult.ProjectPath = NormalizedConfig.ProjectPath;
 	OutResult.BuildScriptPath = NormalizedConfig.BuildScriptPath;
 	OutResult.OutputRoot = NormalizedConfig.OutputRoot;
 	OutResult.ReportPath = NormalizedConfig.ReportPath;
+	OutResult.ManifestPath = NormalizedConfig.ManifestPath;
+	OutResult.ModuleId = NormalizedConfig.ModuleId;
+	OutResult.ArtifactStem = NormalizedConfig.ArtifactStem;
 
 	if (NormalizedConfig.BuildScriptPath.IsEmpty() || !FPaths::FileExists(NormalizedConfig.BuildScriptPath))
 	{
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("build_script_missing"),
-			FString::Printf(TEXT("C# ActorLifecycle build script does not exist: %s"), *NormalizedConfig.BuildScriptPath),
+			FString::Printf(TEXT("C# build script does not exist: %s"), *NormalizedConfig.BuildScriptPath),
 			OutResult);
 		return false;
 	}
 
-	if (!IFileManager::Get().MakeDirectory(*NormalizedConfig.OutputRoot, true))
+	if (NormalizedConfig.SourcePath.IsEmpty() || !FPaths::FileExists(NormalizedConfig.SourcePath))
 	{
 		SetAvidScriptCSharpBuildFailure(
-			TEXT("output_directory_failed"),
-			FString::Printf(TEXT("C# ActorLifecycle output directory could not be created: %s"), *NormalizedConfig.OutputRoot),
+			TEXT("source_missing"),
+			FString::Printf(TEXT("C# source file does not exist: %s"), *NormalizedConfig.SourcePath),
 			OutResult);
+		return false;
+	}
+
+	if (!NormalizedConfig.ProjectPath.IsEmpty() && !FPaths::FileExists(NormalizedConfig.ProjectPath))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("project_missing"),
+			FString::Printf(TEXT("C# project file does not exist: %s"), *NormalizedConfig.ProjectPath),
+			OutResult);
+		return false;
+	}
+
+	if (!MakeAvidScriptCSharpBuildDirectory(NormalizedConfig.OutputRoot, TEXT("output_directory_failed"), OutResult) ||
+		!MakeAvidScriptCSharpBuildDirectory(FPaths::GetPath(NormalizedConfig.ReportPath), TEXT("report_directory_failed"), OutResult) ||
+		!MakeAvidScriptCSharpBuildDirectory(FPaths::GetPath(NormalizedConfig.ManifestPath), TEXT("manifest_directory_failed"), OutResult))
+	{
 		return false;
 	}
 
@@ -171,7 +301,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 	{
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("process_failed"),
-			FString::Printf(TEXT("C# ActorLifecycle build process could not be launched: %s"), *NormalizedConfig.BuildScriptPath),
+			FString::Printf(TEXT("C# build process could not be launched: %s"), *NormalizedConfig.BuildScriptPath),
 			OutResult);
 		return false;
 	}
@@ -180,7 +310,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 	{
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("build_failed"),
-			FString::Printf(TEXT("C# ActorLifecycle build failed with exit code %d"), OutResult.ProcessExitCode),
+			FString::Printf(TEXT("C# build failed with exit code %d"), OutResult.ProcessExitCode),
 			OutResult);
 		return false;
 	}
@@ -189,7 +319,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 	{
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("report_missing"),
-			FString::Printf(TEXT("C# ActorLifecycle build report was not written: %s"), *NormalizedConfig.ReportPath),
+			FString::Printf(TEXT("C# build report was not written: %s"), *NormalizedConfig.ReportPath),
 			OutResult);
 		return false;
 	}
@@ -199,8 +329,15 @@ bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
 #else
 	SetAvidScriptCSharpBuildFailure(
 		TEXT("platform_unsupported"),
-		TEXT("C# ActorLifecycle build invocation is currently implemented only for Windows Editor hosts."),
+		TEXT("C# build invocation is currently implemented only for Windows Editor hosts."),
 		OutResult);
 	return false;
 #endif
+}
+
+bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(
+	const FAvidScriptEditorCSharpBuildConfig& Config,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	return BuildProfile(Config, OutResult);
 }
