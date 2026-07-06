@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptEditorCommandLauncher.h"
+#include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 
@@ -21,6 +22,8 @@ public:
 	static FName GetSampleCommandSectionName();
 	static FName GetSampleCommandEntryName();
 	static FString GetSampleCommandSourcePath();
+	static FName GetCSharpActorLifecycleBindEntryName();
+	static FString GetCSharpActorLifecycleReportPath();
 
 	static bool MakeSampleCommandConfig(
 		FAvidScriptEditorCommandLaunchConfig& OutConfig,
@@ -33,12 +36,15 @@ public:
 		FString& OutErrorMessage);
 
 	static FAvidScriptEditorMenuEntryConfig MakeSampleMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
+	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
 
 private:
 	void RegisterMenus();
 	void HandleRunSampleCommand();
+	void HandleBindCSharpActorLifecycleReport();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	FDelegateHandle ToolMenusStartupCallbackHandle;
