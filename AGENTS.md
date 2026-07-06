@@ -65,6 +65,7 @@ C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\Docs
 Plugins/AvidScript/Docs
 ```
 
+- 面向用户或团队阅读的项目文档、阶段文档、实现日志默认使用中文；代码标识符、命令名、文件路径、API 名称和日志原文保持原语言。
 - When a phase group is completed, update the phase tracker and the related implementation log.
 - Each implementation note should include:
   - scope
