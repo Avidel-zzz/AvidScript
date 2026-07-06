@@ -66,6 +66,7 @@ Plugins/AvidScript/Docs
 ```
 
 - 面向用户或团队阅读的项目文档、阶段文档、实现日志默认使用中文；代码标识符、命令名、文件路径、API 名称和日志原文保持原语言。
+- 2026-07-06 用户再次确认: 给人读的文档必须用中文写；后续 phase closeout、使用说明、实现日志和 tracker 默认中文优先。
 - When a phase group is completed, update the phase tracker and the related implementation log.
 - Each implementation note should include:
   - scope
@@ -151,6 +152,7 @@ Plugins/AvidScript/Docs
 - P15.2 组件级 C# manifest 路径已经接入 `UAvidScriptComponent`: manifest 路径为空时继续使用 embedded smoke module, 路径非空时通过 manifest loader 加载 WASM, 并在 BeginPlay 前注入组件 owner registry 与 `AllowWrites` actor 写策略。
 - 2026-07-06 P15.2 mistake record: UE5.8 的 `FFilePath` 声明在 `UObject/SoftObjectPath.h`, 不是 `Misc/FilePath.h`; 错误 include 会导致 `fatal error C1083`. Prevention: 新增 UE struct include 前先在 `C:\UnrealEngine\Engine\Source` 搜索声明位置或参考同引擎版本的工作示例。
 - P16.2 Editor 侧 C# report/manifest 组件绑定已经接入 `FAvidScriptEditorComponentBindingService`: 该服务可读取 C# build report 的 `artifacts.manifest_file`, 绑定到显式 Actor 或当前选中 Actor, 并在缺少组件时创建 `UAvidScriptComponent`。
+- P17.2 Editor 菜单入口已经接入 C# ActorLifecycle 绑定: `Tools > AvidScript > Bind C# ActorLifecycle Script` 会读取 `Saved/AvidScriptCSharpGuest/ActorLifecycle/actor_lifecycle.csharp.report.json`, 并调用组件绑定服务绑定到当前选中 Actor。
 
 ## D Guest Toolchain Workflow
 
