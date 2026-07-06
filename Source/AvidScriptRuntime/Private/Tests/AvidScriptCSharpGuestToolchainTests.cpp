@@ -245,7 +245,11 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
 	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
 	TestTrue(TEXT("Sample presents Actor.SetLocation facade"), SourceText.Contains(TEXT("Actor.SetLocation")));
-	TestTrue(TEXT("Sample presents Actor.AddLocationOffset facade"), SourceText.Contains(TEXT("Actor.AddLocationOffset")));
+	TestTrue(TEXT("Sample presents Actor.AddLocationOffset facade"), SourceText.Contains(TEXT("public static bool AddLocationOffset")));
+	TestTrue(TEXT("Sample declares elapsed seconds state"), SourceText.Contains(TEXT("private static float ElapsedSeconds")));
+	TestTrue(TEXT("Sample resets elapsed seconds in BeginPlay"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
+	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
+	TestTrue(TEXT("Sample uses elapsed seconds in SetLocation"), SourceText.Contains(TEXT("Actor.SetLocation(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f)")));
 
 	return true;
 }
@@ -399,6 +403,16 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 
+	FString ManifestJson;
+	if (!FFileHelper::LoadFileToString(ManifestJson, *ManifestPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
+		return true;
+	}
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v3 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v3")));
+	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
+	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
+
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
@@ -476,8 +490,18 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 
-	TestTrue(TEXT("C# Tick source applies add location offset"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
-	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 1);
+	TestTrue(TEXT("C# first Tick source applies stateful elapsed expression"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
+
+	FAvidScriptWasmSmokeResult SecondTickResult;
+	if (!Session.TickLive(1.0f / 60.0f, SecondTickResult))
+	{
+		AddError(SecondTickResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestTrue(TEXT("C# second Tick source preserves elapsed state"), Actor->GetActorLocation().Equals(FVector(104.0, 200.0, 300.0), 0.01));
+	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 2);
 
 	DestroyCSharpContractWorld(World);
 	return true;

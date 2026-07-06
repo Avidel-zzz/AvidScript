@@ -331,16 +331,71 @@ function Convert-CSharpNumericLiteral {
     throw "Unsupported C# numeric expression '$Expression'."
 }
 
+function Get-CSharpStaticFloatFields {
+    param([Parameter(Mandatory = $true)][string]$SourceText)
+
+    $Fields = @()
+    $Pattern = '(?m)^\s*private\s+static\s+float\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(?<value>[^;]+))?\s*;'
+    foreach ($Match in [regex]::Matches($SourceText, $Pattern)) {
+        $Name = $Match.Groups['name'].Value
+        foreach ($ExistingField in $Fields) {
+            if ($ExistingField.Name -eq $Name) {
+                throw "C# source adapter found duplicate static float field '$Name'."
+            }
+        }
+
+        $InitialValue = [single]0
+        if ($Match.Groups['value'].Success -and -not [string]::IsNullOrWhiteSpace($Match.Groups['value'].Value)) {
+            $InitialValue = Convert-CSharpNumericLiteral -Expression $Match.Groups['value'].Value
+        }
+
+        $Fields += [PSCustomObject]@{
+            Name = $Name
+            InitialValue = $InitialValue
+            Index = $Fields.Count
+        }
+    }
+
+    return ,$Fields
+}
+
+function Find-CSharpStaticFloatField {
+    param(
+        [object[]]$Fields = @(),
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    foreach ($Field in @($Fields)) {
+        if ($Field.Name -eq $Name) {
+            return $Field
+        }
+    }
+
+    return $null
+}
+
 function Convert-CSharpFloatExpression {
-    param([Parameter(Mandatory = $true)][string]$Expression)
+    param(
+        [Parameter(Mandatory = $true)][string]$Expression,
+        [object[]]$Fields = @()
+    )
 
     $Trimmed = $Expression.Trim()
     $AddMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\+\s*(?<right>.+)$')
     if ($AddMatch.Success) {
         return [PSCustomObject]@{
             Kind = 'add'
-            Left = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['left'].Value
-            Right = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['right'].Value
+            Left = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['left'].Value -Fields $Fields
+            Right = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['right'].Value -Fields $Fields
+        }
+    }
+
+    $MultiplyMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\*\s*(?<right>.+)$')
+    if ($MultiplyMatch.Success) {
+        return [PSCustomObject]@{
+            Kind = 'mul'
+            Left = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['left'].Value -Fields $Fields
+            Right = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['right'].Value -Fields $Fields
         }
     }
 
@@ -351,22 +406,17 @@ function Convert-CSharpFloatExpression {
         }
     }
 
-    $MultiplyMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\*\s*(?<right>.+)$')
-    if ($MultiplyMatch.Success) {
-        $Left = $MultiplyMatch.Groups['left'].Value.Trim()
-        $Right = $MultiplyMatch.Groups['right'].Value.Trim()
-        if ($Left -eq 'deltaSeconds') {
+    if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+        $Field = Find-CSharpStaticFloatField -Fields $Fields -Name $Trimmed
+        if ($null -ne $Field) {
             return [PSCustomObject]@{
-                Kind = 'delta_mul'
-                Value = Convert-CSharpNumericLiteral -Expression $Right
+                Kind = 'field'
+                Name = $Field.Name
+                Index = $Field.Index
             }
         }
-        if ($Right -eq 'deltaSeconds') {
-            return [PSCustomObject]@{
-                Kind = 'delta_mul'
-                Value = Convert-CSharpNumericLiteral -Expression $Left
-            }
-        }
+
+        throw "Unsupported C# float identifier '$Trimmed'. Supported identifiers are deltaSeconds and private static float fields."
     }
 
     return [PSCustomObject]@{
@@ -375,29 +425,74 @@ function Convert-CSharpFloatExpression {
     }
 }
 
-function Get-CSharpActorCalls {
+function Get-CSharpLifecycleStatements {
     param(
         [Parameter(Mandatory = $true)][string]$MethodBody,
-        [Parameter(Mandatory = $true)][string]$MethodName
+        [Parameter(Mandatory = $true)][string]$MethodName,
+        [object[]]$Fields = @()
     )
 
-    $Calls = @()
-    $Pattern = 'Actor\s*\.\s*(?<method>SetLocation|AddLocationOffset)\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)\s*;'
-    foreach ($Match in [regex]::Matches($MethodBody, $Pattern)) {
-        $Method = $Match.Groups['method'].Value
-        $Calls += [PSCustomObject]@{
-            Kind = if ($Method -eq 'SetLocation') { 'set_location' } else { 'add_location_offset' }
-            X = Convert-CSharpFloatExpression -Expression $Match.Groups['x'].Value
-            Y = Convert-CSharpFloatExpression -Expression $Match.Groups['y'].Value
-            Z = Convert-CSharpFloatExpression -Expression $Match.Groups['z'].Value
+    $Statements = @()
+    foreach ($Match in [regex]::Matches($MethodBody, '(?s)(?<statement>[^;]+);')) {
+        $StatementText = $Match.Groups['statement'].Value.Trim()
+        if ([string]::IsNullOrWhiteSpace($StatementText)) {
+            continue
         }
+
+        $ActorMatch = [regex]::Match($StatementText, '^Actor\s*\.\s*(?<method>SetLocation|AddLocationOffset)\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)$')
+        if ($ActorMatch.Success) {
+            $Method = $ActorMatch.Groups['method'].Value
+            $Statements += [PSCustomObject]@{
+                Kind = if ($Method -eq 'SetLocation') { 'set_location' } else { 'add_location_offset' }
+                X = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['x'].Value -Fields $Fields
+                Y = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['y'].Value -Fields $Fields
+                Z = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['z'].Value -Fields $Fields
+            }
+            continue
+        }
+
+        $AddAssignMatch = [regex]::Match($StatementText, '^(?<field>[A-Za-z_][A-Za-z0-9_]*)\s*\+=\s*(?<expr>.+)$')
+        if ($AddAssignMatch.Success) {
+            $FieldName = $AddAssignMatch.Groups['field'].Value
+            $Field = Find-CSharpStaticFloatField -Fields $Fields -Name $FieldName
+            if ($null -eq $Field) {
+                throw "C# source adapter found assignment to unsupported field '$FieldName' in '$MethodName'. Declare it as private static float."
+            }
+
+            $Statements += [PSCustomObject]@{
+                Kind = 'field_add_assign'
+                FieldName = $Field.Name
+                FieldIndex = $Field.Index
+                Expression = Convert-CSharpFloatExpression -Expression $AddAssignMatch.Groups['expr'].Value -Fields $Fields
+            }
+            continue
+        }
+
+        $AssignMatch = [regex]::Match($StatementText, '^(?<field>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<expr>.+)$')
+        if ($AssignMatch.Success) {
+            $FieldName = $AssignMatch.Groups['field'].Value
+            $Field = Find-CSharpStaticFloatField -Fields $Fields -Name $FieldName
+            if ($null -eq $Field) {
+                throw "C# source adapter found assignment to unsupported field '$FieldName' in '$MethodName'. Declare it as private static float."
+            }
+
+            $Statements += [PSCustomObject]@{
+                Kind = 'field_assign'
+                FieldName = $Field.Name
+                FieldIndex = $Field.Index
+                Expression = Convert-CSharpFloatExpression -Expression $AssignMatch.Groups['expr'].Value -Fields $Fields
+            }
+            continue
+        }
+
+        throw "Unsupported C# statement in '$MethodName': $StatementText. Supported statements: private static float field assignment, Actor.SetLocation, Actor.AddLocationOffset."
     }
 
-    if ($Calls.Count -eq 0) {
-        throw "C# source adapter found no supported Actor calls in '$MethodName'. Supported calls: Actor.SetLocation and Actor.AddLocationOffset."
+    if ($Statements.Count -eq 0) {
+        throw "C# source adapter found no supported statements in '$MethodName'. Supported statements: field assignment, Actor.SetLocation and Actor.AddLocationOffset."
     }
 
-    return $Calls
+    return $Statements
 }
 
 function Add-CSharpFloatExpressionCode {
@@ -413,10 +508,23 @@ function Add-CSharpFloatExpressionCode {
         return
     }
 
+    if ($Expression.Kind -eq 'field') {
+        Add-WasmByte -Bytes $Body -Value 0x23
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Expression.Index)
+        return
+    }
+
     if ($Expression.Kind -eq 'add') {
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Left -AllowDeltaSeconds $AllowDeltaSeconds
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Right -AllowDeltaSeconds $AllowDeltaSeconds
         Add-WasmByte -Bytes $Body -Value 0x92
+        return
+    }
+
+    if ($Expression.Kind -eq 'mul') {
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Left -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Right -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-WasmByte -Bytes $Body -Value 0x94
         return
     }
 
@@ -427,15 +535,6 @@ function Add-CSharpFloatExpressionCode {
     if ($Expression.Kind -eq 'delta') {
         Add-WasmByte -Bytes $Body -Value 0x20
         Add-WasmU32Leb -Bytes $Body -Value 0
-        return
-    }
-
-    if ($Expression.Kind -eq 'delta_mul') {
-        Add-WasmByte -Bytes $Body -Value 0x20
-        Add-WasmU32Leb -Bytes $Body -Value 0
-        Add-WasmByte -Bytes $Body -Value 0x43
-        Add-WasmF32 -Bytes $Body -Value ([single]$Expression.Value)
-        Add-WasmByte -Bytes $Body -Value 0x94
         return
     }
 
@@ -472,16 +571,43 @@ function Add-CSharpActorCall {
     Add-WasmByte -Bytes $Body -Value 0x1a
 }
 
+function Add-CSharpLifecycleStatementCode {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Statement,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+    )
+
+    if ($Statement.Kind -eq 'field_assign') {
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Statement.Expression -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-WasmByte -Bytes $Body -Value 0x24
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Statement.FieldIndex)
+        return
+    }
+
+    if ($Statement.Kind -eq 'field_add_assign') {
+        Add-WasmByte -Bytes $Body -Value 0x23
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Statement.FieldIndex)
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Statement.Expression -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-WasmByte -Bytes $Body -Value 0x92
+        Add-WasmByte -Bytes $Body -Value 0x24
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Statement.FieldIndex)
+        return
+    }
+
+    Add-CSharpActorCall -Body $Body -Call $Statement -AllowDeltaSeconds $AllowDeltaSeconds
+}
+
 function New-CSharpLifecycleFunctionBody {
     param(
-        [Parameter(Mandatory = $true)]$Calls,
+        [Parameter(Mandatory = $true)]$Statements,
         [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
     )
 
     $Body = New-WasmByteList
     Add-WasmU32Leb -Bytes $Body -Value 0
-    foreach ($Call in $Calls) {
-        Add-CSharpActorCall -Body $Body -Call $Call -AllowDeltaSeconds $AllowDeltaSeconds
+    foreach ($Statement in $Statements) {
+        Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds
     }
     Add-WasmByte -Bytes $Body -Value 0x0b
     return ,$Body
@@ -489,8 +615,9 @@ function New-CSharpLifecycleFunctionBody {
 
 function New-CSharpDirectAbiWasmModule {
     param(
-        [Parameter(Mandatory = $true)]$BeginPlayCalls,
-        [Parameter(Mandatory = $true)]$TickCalls
+        [object[]]$Fields = @(),
+        [Parameter(Mandatory = $true)]$BeginPlayStatements,
+        [Parameter(Mandatory = $true)]$TickStatements
     )
 
     $Module = New-WasmByteList
@@ -530,6 +657,19 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $FunctionSection -Value 2
     Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
 
+    if (@($Fields).Count -gt 0) {
+        $GlobalSection = New-WasmByteList
+        Add-WasmU32Leb -Bytes $GlobalSection -Value ([uint32]@($Fields).Count)
+        foreach ($Field in @($Fields)) {
+            Add-WasmByte -Bytes $GlobalSection -Value 0x7d
+            Add-WasmByte -Bytes $GlobalSection -Value 0x01
+            Add-WasmByte -Bytes $GlobalSection -Value 0x43
+            Add-WasmF32 -Bytes $GlobalSection -Value ([single]$Field.InitialValue)
+            Add-WasmByte -Bytes $GlobalSection -Value 0x0b
+        }
+        Add-WasmSection -Module $Module -SectionId 6 -Payload $GlobalSection
+    }
+
     $ExportSection = New-WasmByteList
     Add-WasmU32Leb -Bytes $ExportSection -Value 2
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
@@ -540,8 +680,8 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
-    $BeginPlayBody = New-CSharpLifecycleFunctionBody -Calls $BeginPlayCalls -AllowDeltaSeconds $false
-    $TickBody = New-CSharpLifecycleFunctionBody -Calls $TickCalls -AllowDeltaSeconds $true
+    $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
+    $TickBody = New-CSharpLifecycleFunctionBody -Statements $TickStatements -AllowDeltaSeconds $true
 
     $CodeSection = New-WasmByteList
     Add-WasmU32Leb -Bytes $CodeSection -Value 2
@@ -553,7 +693,6 @@ function New-CSharpDirectAbiWasmModule {
 
     return ,(Convert-WasmByteListToArray -Bytes $Module)
 }
-
 function Invoke-CSharpSourceAdapter {
     param([object[]]$Diagnostics = @())
 
@@ -566,11 +705,12 @@ function Invoke-CSharpSourceAdapter {
         }
 
         $SourceText = [System.IO.File]::ReadAllText($SourcePath)
+        $Fields = @(Get-CSharpStaticFloatFields -SourceText $SourceText)
         $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
-        $BeginPlayCalls = @(Get-CSharpActorCalls -MethodBody $BeginPlayBody -MethodName 'BeginPlay')
-        $TickCalls = @(Get-CSharpActorCalls -MethodBody $TickBody -MethodName 'Tick')
-        $WasmBytes = New-CSharpDirectAbiWasmModule -BeginPlayCalls $BeginPlayCalls -TickCalls $TickCalls
+        $BeginPlayStatements = @(Get-CSharpLifecycleStatements -MethodBody $BeginPlayBody -MethodName 'BeginPlay' -Fields $Fields)
+        $TickStatements = @(Get-CSharpLifecycleStatements -MethodBody $TickBody -MethodName 'Tick' -Fields $Fields)
+        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements
 
         [System.IO.File]::WriteAllBytes($AdapterWasmPath, $WasmBytes)
         $ObservedExports = @(Get-WasmExports -Path $AdapterWasmPath)
@@ -590,7 +730,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v2'
+                subset = 'actor_lifecycle_v3'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -616,7 +756,9 @@ function Invoke-CSharpSourceAdapter {
                 self_slot = 1
                 self_generation = 1
                 supported_calls = @('Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
-                supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'deltaSeconds * numeric literal', 'addition of supported expressions')
+                supported_state = @('private static float Field', 'Field = expression', 'Field += expression')
+                static_float_fields = @($Fields | ForEach-Object { $_.Name })
+                supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
             }
         }
 
@@ -625,7 +767,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the limited C# ActorLifecycle source subset with Actor.SetLocation and Actor.AddLocationOffset support.'
+            message = 'Built direct ABI WASM from the limited C# ActorLifecycle source subset with static float state, assignments, Actor.SetLocation and Actor.AddLocationOffset support.'
         }
 
         return [PSCustomObject]@{

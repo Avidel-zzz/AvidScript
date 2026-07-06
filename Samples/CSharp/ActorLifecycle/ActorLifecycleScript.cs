@@ -4,18 +4,22 @@ namespace AvidScript;
 
 public static class ActorLifecycleScript
 {
+    private static float ElapsedSeconds;
+
     public static int Main() => 0;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
+        ElapsedSeconds = 0.0f;
         Actor.SetLocation(100.0f, 200.0f, 300.0f);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
-        Actor.AddLocationOffset(120.0f * deltaSeconds, 0.0f, 0.0f);
+        ElapsedSeconds += deltaSeconds;
+        Actor.SetLocation(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f);
     }
 }
 
