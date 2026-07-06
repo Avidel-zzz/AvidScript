@@ -27,6 +27,7 @@ public:
 	static FName GetCSharpActorLifecycleBindEntryName();
 	static FName GetCSharpActorLifecycleBuildAndBindEntryName();
 	static FName GetCSharpProfileBuildAndBindEntryName();
+	static FName GetCSharpProfileTemplateEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
 	static FString GetCSharpActorLifecycleBuildScriptPath();
 	static FString GetDefaultCSharpProfilePath();
@@ -45,6 +46,7 @@ public:
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpActorLifecycleBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpProfileBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpProfileTemplateMenuEntryConfig(FSimpleDelegate ExecuteAction);
 
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
@@ -55,6 +57,10 @@ public:
 		const FString& ProfilePath,
 		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
 		FAvidScriptEditorComponentBindingResult& OutBindingResult);
+	bool ExecuteCreateCSharpProfileTemplate(
+		const FString& ProfilePath,
+		FAvidScriptEditorCSharpProfileTemplateResult& OutResult,
+		bool bOverwrite = false);
 
 private:
 	void RegisterMenus();
@@ -62,6 +68,7 @@ private:
 	void HandleBindCSharpActorLifecycleReport();
 	void HandleBuildAndBindCSharpActorLifecycleReport();
 	void HandleBuildAndBindCSharpProfile();
+	void HandleCreateDefaultCSharpProfileTemplate();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	FDelegateHandle ToolMenusStartupCallbackHandle;

@@ -119,4 +119,51 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest,
+	"AvidScript.Editor.CSharpProfileService.DefaultTemplateSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		GetAvidScriptCSharpProfileServiceTestRoot(),
+		TEXT("DefaultTemplate")));
+	TestTrue(TEXT("C# profile template test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString TemplatePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(TestRoot, TEXT("default_template.csharp-profile.json")));
+	IFileManager::Get().Delete(*TemplatePath, false, true, true);
+
+	FAvidScriptEditorCSharpProfileTemplateResult TemplateResult;
+	TestTrue(TEXT("Default C# profile template writes"), FAvidScriptEditorCSharpProfileService::WriteProfileTemplate(TemplatePath, TemplateResult, false));
+	TestTrue(TEXT("Default C# profile template result succeeds"), TemplateResult.bSucceeded);
+	TestTrue(TEXT("Default C# profile template is created"), TemplateResult.bCreated);
+	TestEqual(TEXT("Default C# profile template path"), TemplateResult.NormalizedProfilePath, TemplatePath);
+	TestEqual(TEXT("Default C# profile template source"), TemplateResult.SourcePath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath());
+	TestEqual(TEXT("Default C# profile template module id"), TemplateResult.ModuleId, FString(TEXT("csharp_profile_actor_lifecycle")));
+	TestEqual(TEXT("Default C# profile template artifact stem"), TemplateResult.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
+	TestTrue(TEXT("Default C# profile template file exists"), FPaths::FileExists(TemplatePath));
+
+	FAvidScriptEditorCSharpProfileLoadResult LoadResult;
+	TestTrue(TEXT("Generated default C# profile loads"), FAvidScriptEditorCSharpProfileService::LoadProfile(TemplatePath, LoadResult));
+	TestTrue(TEXT("Generated default C# profile load succeeds"), LoadResult.bSucceeded);
+	TestEqual(TEXT("Generated default C# profile source"), LoadResult.BuildConfig.SourcePath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath());
+	TestEqual(TEXT("Generated default C# profile project"), LoadResult.BuildConfig.ProjectPath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath());
+	TestEqual(TEXT("Generated default C# profile module"), LoadResult.BuildConfig.ModuleId, FString(TEXT("csharp_profile_actor_lifecycle")));
+	TestEqual(TEXT("Generated default C# profile artifact"), LoadResult.BuildConfig.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
+	TestTrue(TEXT("Generated default C# profile output root uses profile folder"), LoadResult.BuildConfig.OutputRoot.EndsWith(TEXT("Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle")));
+
+	FString OriginalProfileText;
+	TestTrue(TEXT("Generated default C# profile can be read back"), FFileHelper::LoadFileToString(OriginalProfileText, *TemplatePath));
+
+	FAvidScriptEditorCSharpProfileTemplateResult ExistingResult;
+	TestTrue(TEXT("Existing default C# profile template is accepted"), FAvidScriptEditorCSharpProfileService::WriteProfileTemplate(TemplatePath, ExistingResult, false));
+	TestTrue(TEXT("Existing default C# profile template result succeeds"), ExistingResult.bSucceeded);
+	TestFalse(TEXT("Existing default C# profile template is not overwritten"), ExistingResult.bCreated);
+
+	FString ExistingProfileText;
+	TestTrue(TEXT("Existing default C# profile can be read back"), FFileHelper::LoadFileToString(ExistingProfileText, *TemplatePath));
+	TestEqual(TEXT("Existing default C# profile text is unchanged"), ExistingProfileText, OriginalProfileText);
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

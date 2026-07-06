@@ -187,6 +187,17 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestFalse(TEXT("C# profile build-and-bind command tooltip is set"), CSharpProfileBuildAndBindMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# profile build-and-bind command execute action is bound"), CSharpProfileBuildAndBindMenuConfig.ExecuteAction.IsBound());
 
+	FAvidScriptEditorMenuEntryConfig CSharpProfileTemplateMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpProfileTemplateMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
+		}));
+	TestEqual(TEXT("C# profile template command owner"), CSharpProfileTemplateMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# profile template command menu"), CSharpProfileTemplateMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# profile template command section"), CSharpProfileTemplateMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# profile template command entry"), CSharpProfileTemplateMenuConfig.EntryName, FName(TEXT("AvidScript.CreateDefaultCSharpProfile")));
+	TestFalse(TEXT("C# profile template command label is set"), CSharpProfileTemplateMenuConfig.Label.IsEmpty());
+	TestFalse(TEXT("C# profile template command tooltip is set"), CSharpProfileTemplateMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# profile template command execute action is bound"), CSharpProfileTemplateMenuConfig.ExecuteAction.IsBound());
+
 	return true;
 }
 
@@ -373,6 +384,34 @@ bool FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest::RunTest(
 	TestEqual(TEXT("Module C# profile actor component"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
 
 	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorModuleCSharpProfileTemplateTest,
+	"AvidScript.Editor.Module.CSharpProfileTemplateSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorModuleCSharpProfileTemplateTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetAvidScriptEditorModuleCSharpProfileTestRoot();
+	TestTrue(TEXT("Module C# profile template test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString TemplatePath = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(TestRoot, TEXT("module_default_template.csharp-profile.json")));
+	IFileManager::Get().Delete(*TemplatePath, false, true, true);
+
+	FAvidScriptEditorModule& Module =
+		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+
+	FAvidScriptEditorCSharpProfileTemplateResult TemplateResult;
+	TestTrue(TEXT("Module C# profile template command succeeds"), Module.ExecuteCreateCSharpProfileTemplate(TemplatePath, TemplateResult, false));
+	TestTrue(TEXT("Module C# profile template result succeeds"), TemplateResult.bSucceeded);
+	TestTrue(TEXT("Module C# profile template creates file"), TemplateResult.bCreated);
+	TestEqual(TEXT("Module C# profile template path"), TemplateResult.NormalizedProfilePath, TemplatePath);
+
+	FAvidScriptEditorCSharpProfileLoadResult LoadResult;
+	TestTrue(TEXT("Module C# profile template loads"), FAvidScriptEditorCSharpProfileService::LoadProfile(TemplatePath, LoadResult));
+	TestEqual(TEXT("Module C# profile template module id"), LoadResult.BuildConfig.ModuleId, FString(TEXT("csharp_profile_actor_lifecycle")));
+	TestEqual(TEXT("Module C# profile template artifact stem"), LoadResult.BuildConfig.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

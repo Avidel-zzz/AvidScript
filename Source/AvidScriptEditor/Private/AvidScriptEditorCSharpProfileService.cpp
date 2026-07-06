@@ -6,9 +6,13 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
+constexpr const TCHAR* AvidScriptDefaultCSharpProfileTemplateModuleId = TEXT("csharp_profile_actor_lifecycle");
+constexpr const TCHAR* AvidScriptDefaultCSharpProfileTemplateArtifactStem = TEXT("profile_actor_lifecycle");
+
 FString NormalizeAvidScriptCSharpProfilePath(FString Path)
 {
 	if (!Path.IsEmpty())
@@ -93,6 +97,64 @@ FString MakeAvidScriptCSharpProfileSafeToken(const FString& RawValue, const FStr
 	return Token.IsEmpty() ? Fallback : Token;
 }
 
+void SetAvidScriptCSharpProfileTemplateFailure(
+	const FString& ErrorCategory,
+	const FString& ErrorMessage,
+	const FString& NextAction,
+	FAvidScriptEditorCSharpProfileTemplateResult& OutResult)
+{
+	OutResult.bSucceeded = false;
+	OutResult.bCreated = false;
+	OutResult.ErrorCategory = ErrorCategory;
+	OutResult.ErrorMessage = ErrorMessage;
+	OutResult.NextAction = NextAction;
+}
+
+FString GetAvidScriptCSharpProfileTemplateOutputRoot()
+{
+	return NormalizeAvidScriptCSharpProfilePath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest"),
+		TEXT("Profiles"),
+		AvidScriptDefaultCSharpProfileTemplateArtifactStem));
+}
+
+void FillAvidScriptCSharpProfileTemplateResult(
+	const FString& ProfilePath,
+	FAvidScriptEditorCSharpProfileTemplateResult& OutResult)
+{
+	OutResult.NormalizedProfilePath = NormalizeAvidScriptCSharpProfilePath(ProfilePath);
+	OutResult.SourcePath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath();
+	OutResult.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	OutResult.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	OutResult.OutputRoot = GetAvidScriptCSharpProfileTemplateOutputRoot();
+	OutResult.ModuleId = AvidScriptDefaultCSharpProfileTemplateModuleId;
+	OutResult.ArtifactStem = AvidScriptDefaultCSharpProfileTemplateArtifactStem;
+	OutResult.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(OutResult.OutputRoot, OutResult.ArtifactStem);
+	OutResult.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(OutResult.OutputRoot, OutResult.ArtifactStem);
+	OutResult.Configuration = TEXT("Release");
+}
+
+bool SerializeAvidScriptCSharpProfileTemplate(
+	const FAvidScriptEditorCSharpProfileTemplateResult& TemplateResult,
+	FString& OutJsonText)
+{
+	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+	Object->SetNumberField(TEXT("schema_version"), 1.0);
+	Object->SetStringField(TEXT("language"), TEXT("csharp"));
+	Object->SetStringField(TEXT("source_path"), TemplateResult.SourcePath);
+	Object->SetStringField(TEXT("project_path"), TemplateResult.ProjectPath);
+	Object->SetStringField(TEXT("module_id"), TemplateResult.ModuleId);
+	Object->SetStringField(TEXT("artifact_stem"), TemplateResult.ArtifactStem);
+	Object->SetStringField(TEXT("output_root"), TemplateResult.OutputRoot);
+	Object->SetStringField(TEXT("report_path"), TemplateResult.ReportPath);
+	Object->SetStringField(TEXT("manifest_path"), TemplateResult.ManifestPath);
+	Object->SetStringField(TEXT("build_script_path"), TemplateResult.BuildScriptPath);
+	Object->SetStringField(TEXT("configuration"), TemplateResult.Configuration);
+
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJsonText);
+	return FJsonSerializer::Serialize(Object, Writer);
+}
 bool LoadAvidScriptCSharpProfileJson(
 	const FString& ProfilePath,
 	TSharedPtr<FJsonObject>& OutObject,
@@ -132,6 +194,78 @@ FString FAvidScriptEditorCSharpProfileService::GetDefaultProfilePath()
 		TEXT("default.csharp-profile.json")));
 }
 
+bool FAvidScriptEditorCSharpProfileService::WriteDefaultProfileTemplate(
+	FAvidScriptEditorCSharpProfileTemplateResult& OutResult,
+	bool bOverwrite)
+{
+	return WriteProfileTemplate(GetDefaultProfilePath(), OutResult, bOverwrite);
+}
+
+bool FAvidScriptEditorCSharpProfileService::WriteProfileTemplate(
+	const FString& ProfilePath,
+	FAvidScriptEditorCSharpProfileTemplateResult& OutResult,
+	bool bOverwrite)
+{
+	OutResult = FAvidScriptEditorCSharpProfileTemplateResult();
+
+	if (ProfilePath.IsEmpty())
+	{
+		SetAvidScriptCSharpProfileTemplateFailure(
+			TEXT("profile_path_empty"),
+			TEXT("C# profile template path is empty."),
+			TEXT("choose a destination path for the C# profile template"),
+			OutResult);
+		return false;
+	}
+
+	FillAvidScriptCSharpProfileTemplateResult(ProfilePath, OutResult);
+
+	if (FPaths::FileExists(OutResult.NormalizedProfilePath) && !bOverwrite)
+	{
+		OutResult.bSucceeded = true;
+		OutResult.bCreated = false;
+		OutResult.NextAction = TEXT("edit the existing C# profile or rerun with overwrite enabled");
+		return true;
+	}
+
+	const FString ProfileDirectory = FPaths::GetPath(OutResult.NormalizedProfilePath);
+	if (!IFileManager::Get().MakeDirectory(*ProfileDirectory, true))
+	{
+		SetAvidScriptCSharpProfileTemplateFailure(
+			TEXT("profile_directory_failed"),
+			FString::Printf(TEXT("C# profile template directory could not be created: %s"), *ProfileDirectory),
+			TEXT("create the directory manually or choose another profile path"),
+			OutResult);
+		return false;
+	}
+
+	FString JsonText;
+	if (!SerializeAvidScriptCSharpProfileTemplate(OutResult, JsonText))
+	{
+		SetAvidScriptCSharpProfileTemplateFailure(
+			TEXT("profile_json_write_failed"),
+			TEXT("C# profile template JSON could not be serialized."),
+			TEXT("retry template generation after checking the profile fields"),
+			OutResult);
+		return false;
+	}
+
+	JsonText += LINE_TERMINATOR;
+	if (!FFileHelper::SaveStringToFile(JsonText, *OutResult.NormalizedProfilePath))
+	{
+		SetAvidScriptCSharpProfileTemplateFailure(
+			TEXT("profile_write_failed"),
+			FString::Printf(TEXT("C# profile template could not be written: %s"), *OutResult.NormalizedProfilePath),
+			TEXT("verify the destination path is writable and retry"),
+			OutResult);
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.bCreated = true;
+	OutResult.NextAction = TEXT("edit source_path if needed, then run Build And Bind C# Profile Script");
+	return true;
+}
 bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	const FString& ProfilePath,
 	FAvidScriptEditorCSharpProfileLoadResult& OutResult)

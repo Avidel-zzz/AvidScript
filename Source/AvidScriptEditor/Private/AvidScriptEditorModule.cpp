@@ -157,6 +157,11 @@ FName FAvidScriptEditorModule::GetCSharpProfileBuildAndBindEntryName()
 	return TEXT("AvidScript.BuildAndBindCSharpProfile");
 }
 
+FName FAvidScriptEditorModule::GetCSharpProfileTemplateEntryName()
+{
+	return TEXT("AvidScript.CreateDefaultCSharpProfile");
+}
+
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 {
 	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath();
@@ -268,6 +273,19 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpProfileBuild
 	return Config;
 }
 
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpProfileTemplateMenuEntryConfig(FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpProfileTemplateEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptCreateDefaultCSharpProfileLabel", "Create Default C# Profile");
+	Config.ToolTip = LOCTEXT("AvidScriptCreateDefaultCSharpProfileToolTip", "Create the default C# profile JSON if it does not already exist.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
 bool FAvidScriptEditorModule::ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult)
 {
 	if (!CommandLauncher.IsValid())
@@ -345,6 +363,13 @@ bool FAvidScriptEditorModule::ExecuteCSharpProfileBuildAndBinding(
 		OutBuildResult.ReportPath,
 		OutBindingResult);
 }
+bool FAvidScriptEditorModule::ExecuteCreateCSharpProfileTemplate(
+	const FString& ProfilePath,
+	FAvidScriptEditorCSharpProfileTemplateResult& OutResult,
+	bool bOverwrite)
+{
+	return FAvidScriptEditorCSharpProfileService::WriteProfileTemplate(ProfilePath, OutResult, bOverwrite);
+}
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
@@ -363,6 +388,12 @@ void FAvidScriptEditorModule::RegisterMenus()
 	}
 
 
+	const FAvidScriptEditorMenuEntryConfig CSharpProfileTemplateMenuConfig = MakeCSharpProfileTemplateMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleCreateDefaultCSharpProfileTemplate));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpProfileTemplateMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
 	const FAvidScriptEditorMenuEntryConfig CSharpProfileBuildAndBindMenuConfig = MakeCSharpProfileBuildAndBindMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile));
 	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpProfileBuildAndBindMenuConfig, Result))
@@ -483,6 +514,31 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpActorLifecycleReport()
 		*BindingResult.ReportPath);
 }
 
+void FAvidScriptEditorModule::HandleCreateDefaultCSharpProfileTemplate()
+{
+	FAvidScriptEditorCSharpProfileTemplateResult Result;
+	if (FAvidScriptEditorCSharpProfileService::WriteDefaultProfileTemplate(Result, false))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("C# profile template ready: created=%s profile=%s source=%s next=%s"),
+			Result.bCreated ? TEXT("true") : TEXT("false"),
+			*Result.NormalizedProfilePath,
+			*Result.SourcePath,
+			*Result.NextAction);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Warning,
+		TEXT("C# profile template failed: category=%s message=%s next=%s profile=%s"),
+		*Result.ErrorCategory,
+		*Result.ErrorMessage,
+		*Result.NextAction,
+		*Result.NormalizedProfilePath);
+}
 void FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile()
 {
 	FAvidScriptEditorCSharpBuildResult BuildResult;
