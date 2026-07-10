@@ -454,11 +454,38 @@ function Get-CSharpLifecycleStatements {
             continue
         }
 
+        $TypedZeroMatch = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*SetActorLocation\s*\(\s*FVector\s*\.\s*Zero\s*\)$')
+        if ($TypedZeroMatch.Success) {
+            $Zero = [PSCustomObject]@{ Kind = 'constant'; Value = [single]0 }
+            $Statements += [PSCustomObject]@{
+                Kind = 'set_location'
+                UseOwnerHandle = $true
+                X = $Zero
+                Y = $Zero
+                Z = $Zero
+            }
+            continue
+        }
+
+        $TypedActorMatch = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset)\s*\(\s*new\s+FVector\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>.+?)\s*\)\s*\)$')
+        if ($TypedActorMatch.Success) {
+            $Method = $TypedActorMatch.Groups['method'].Value
+            $Statements += [PSCustomObject]@{
+                Kind = if ($Method -eq 'SetActorLocation') { 'set_location' } else { 'add_location_offset' }
+                UseOwnerHandle = $true
+                X = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['x'].Value -Fields $Fields
+                Y = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['y'].Value -Fields $Fields
+                Z = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['z'].Value -Fields $Fields
+            }
+            continue
+        }
+
         $ActorMatch = [regex]::Match($StatementText, '^Actor\s*\.\s*(?<method>SetLocation|AddLocationOffset)\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)$')
         if ($ActorMatch.Success) {
             $Method = $ActorMatch.Groups['method'].Value
             $Statements += [PSCustomObject]@{
                 Kind = if ($Method -eq 'SetLocation') { 'set_location' } else { 'add_location_offset' }
+                UseOwnerHandle = $false
                 X = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['x'].Value -Fields $Fields
                 Y = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['y'].Value -Fields $Fields
                 Z = Convert-CSharpFloatExpression -Expression $ActorMatch.Groups['z'].Value -Fields $Fields
@@ -500,11 +527,11 @@ function Get-CSharpLifecycleStatements {
             continue
         }
 
-        throw "Unsupported C# statement in '$MethodName': $StatementText. Supported statements: private static float field assignment, Actor.SetLocation, Actor.AddLocationOffset."
+        throw "Unsupported C# statement in '$MethodName': $StatementText. Supported statements: private static float field assignment, UE.Self typed Actor calls, Actor.SetLocation, Actor.AddLocationOffset."
     }
 
     if ($Statements.Count -eq 0 -and -not $AllowEmpty) {
-        throw "C# source adapter found no supported statements in '$MethodName'. Supported statements: field assignment, Actor.SetLocation and Actor.AddLocationOffset."
+        throw "C# source adapter found no supported statements in '$MethodName'. Supported statements: field assignment, UE.Self typed Actor calls, Actor.SetLocation and Actor.AddLocationOffset."
     }
 
     return $Statements
@@ -574,10 +601,18 @@ function Add-CSharpActorCall {
         throw "Unsupported C# actor call kind '$($Call.Kind)'."
     }
 
-    Add-WasmByte -Bytes $Body -Value 0x41
-    Add-WasmU32Leb -Bytes $Body -Value 1
-    Add-WasmByte -Bytes $Body -Value 0x41
-    Add-WasmU32Leb -Bytes $Body -Value 1
+    if ($Call.UseOwnerHandle) {
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 2
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 3
+    }
+    else {
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 1
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 1
+    }
     Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.X -AllowDeltaSeconds $AllowDeltaSeconds
     Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.Y -AllowDeltaSeconds $AllowDeltaSeconds
     Add-CSharpFloatExpressionCode -Body $Body -Expression $Call.Z -AllowDeltaSeconds $AllowDeltaSeconds
@@ -640,7 +675,7 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
 
     $TypeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $TypeSection -Value 3
+    Add-WasmU32Leb -Bytes $TypeSection -Value 4
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
@@ -653,10 +688,14 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $TypeSection -Value 1
     Add-WasmByte -Bytes $TypeSection -Value 0x7d
     Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 2
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -665,6 +704,14 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ImportSection -Text 'actor_add_location_offset'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 0
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'owner_get_slot'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 3
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'owner_get_generation'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 3
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
@@ -691,13 +738,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 2
+    Add-WasmU32Leb -Bytes $ExportSection -Value 4
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 3
+    Add-WasmU32Leb -Bytes $ExportSection -Value 5
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 4
+    Add-WasmU32Leb -Bytes $ExportSection -Value 6
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -758,7 +805,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v4'
+                subset = 'actor_lifecycle_v5'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -773,6 +820,14 @@ function Invoke-CSharpSourceAdapter {
                 [ordered]@{
                     module = 'env'
                     name = 'actor_add_location_offset'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'owner_get_slot'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'owner_get_generation'
                 }
             )
             toolchain = [ordered]@{
@@ -781,9 +836,9 @@ function Invoke-CSharpSourceAdapter {
                 direct_abi = $true
             }
             adapter_contract = [ordered]@{
-                self_slot = 1
-                self_generation = 1
-                supported_calls = @('Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                self_binding = 'owner_handle_imports'
+                supported_types = @('FVector', 'AActor', 'UE.Self')
+                supported_calls = @('UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
                 supported_state = @('private static float Field', 'Field = expression', 'Field += expression')
                 supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
@@ -796,7 +851,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v4 source subset with BeginPlay, Tick, EndPlay, static float state, assignments, Actor.SetLocation and Actor.AddLocationOffset support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v5 source subset with FVector, AActor, UE.Self, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -865,6 +920,14 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "actor_add_location_offset"
+            },
+            [ordered]@{
+                module = "env"
+                name = "owner_get_slot"
+            },
+            [ordered]@{
+                module = "env"
+                name = "owner_get_generation"
             }
         )
         observed_exports = @($ObservedExports | ForEach-Object { $_.name })
@@ -1136,6 +1199,14 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "actor_add_location_offset"
+        },
+        [ordered]@{
+            module = "env"
+            name = "owner_get_slot"
+        },
+        [ordered]@{
+            module = "env"
+            name = "owner_get_generation"
         }
     )
     toolchain = [ordered]@{

@@ -43,6 +43,7 @@ struct FAvidScriptWasmSmokeResult
 struct FAvidScriptWasmHostContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
+	FAvidScriptObjectHandle OwnerHandle;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 };
 
@@ -74,6 +75,8 @@ public:
 	void ClearHostContext();
 	int32 HandleHostAddI32Import(int32 Input);
 	int32 HandleHostFailI32Import(int32 Input);
+	int32 HandleOwnerGetSlotImport();
+	int32 HandleOwnerGetGenerationImport();
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
 	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
 	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);

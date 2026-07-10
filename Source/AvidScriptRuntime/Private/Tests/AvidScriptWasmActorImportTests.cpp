@@ -459,9 +459,12 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	HostContext.OwnerHandle = ActorHandle;
 
 	FAvidScriptWasmRuntimeInstance Runtime;
 	Runtime.SetHostContext(HostContext);
+	TestEqual(TEXT("Owner slot import returns the injected handle"), Runtime.HandleOwnerGetSlotImport(), static_cast<int32>(ActorHandle.Slot));
+	TestEqual(TEXT("Owner generation import returns the injected handle"), Runtime.HandleOwnerGetGenerationImport(), static_cast<int32>(ActorHandle.Generation));
 
 	FVector ReadLocation = FVector::ZeroVector;
 	TestEqual(
@@ -483,6 +486,11 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 	AddOffsetResult = Runtime.HandleActorAddLocationOffsetImport(ActorHandle.Slot, ActorHandle.Generation, Offset);
 	TestEqual(TEXT("Actor add location offset import succeeds"), AddOffsetResult, 1);
 	TestEqual(TEXT("Actor moved by offset import handler"), Actor->GetActorLocation(), ExpectedOffsetLocation);
+
+	FAvidScriptObjectHandleResult ReleaseResult;
+	TestTrue(TEXT("Owner handle releases for stale generation coverage"), Registry.ReleaseHandle(ActorHandle, ReleaseResult));
+	TestEqual(TEXT("Stale owner slot import fails closed"), Runtime.HandleOwnerGetSlotImport(), 0);
+	TestEqual(TEXT("Stale owner generation import fails closed"), Runtime.HandleOwnerGetGenerationImport(), 0);
 
 	DestroyWasmActorImportWorld(World);
 	return true;
@@ -512,6 +520,8 @@ bool FAvidScriptWasmActorImportMissingContextSmokeTest::RunTest(const FString& P
 	int32 MissingAddOffsetResult = 0;
 	MissingAddOffsetResult = Runtime.HandleActorAddLocationOffsetImport(1, 1, FVector(1.0, 2.0, 3.0));
 	TestEqual(TEXT("Missing host context fails closed on add location offset"), MissingAddOffsetResult, 0);
+	TestEqual(TEXT("Missing owner context fails closed on slot"), Runtime.HandleOwnerGetSlotImport(), 0);
+	TestEqual(TEXT("Missing owner context fails closed on generation"), Runtime.HandleOwnerGetGenerationImport(), 0);
 
 	return true;
 }

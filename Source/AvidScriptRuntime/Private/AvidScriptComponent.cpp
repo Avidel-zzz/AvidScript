@@ -73,6 +73,7 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &ObjectRegistry;
+	HostContext.OwnerHandle = OwnerHandle;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	Runtime->SetHostContext(HostContext);
 

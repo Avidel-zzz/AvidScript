@@ -57,19 +57,25 @@ constexpr const char* AvidScriptHostFailI32Name = "host_fail_i32";
 constexpr const char* AvidScriptActorGetLocationName = "actor_get_location";
 constexpr const char* AvidScriptActorSetLocationName = "actor_set_location";
 constexpr const char* AvidScriptActorAddLocationOffsetName = "actor_add_location_offset";
+constexpr const char* AvidScriptOwnerGetSlotName = "owner_get_slot";
+constexpr const char* AvidScriptOwnerGetGenerationName = "owner_get_generation";
 
 int32_t AvidScriptHostAddI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptActorGetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutLocationPtr);
 int32_t AvidScriptActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
+int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv);
+int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv);
 
 NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptHostAddI32Name, reinterpret_cast<void*>(AvidScriptHostAddI32), "(i)i", nullptr },
 	{ AvidScriptHostFailI32Name, reinterpret_cast<void*>(AvidScriptHostFailI32), "(i)i", nullptr },
 	{ AvidScriptActorGetLocationName, reinterpret_cast<void*>(AvidScriptActorGetLocation), "(iii)i", nullptr },
 	{ AvidScriptActorSetLocationName, reinterpret_cast<void*>(AvidScriptActorSetLocation), "(iifff)i", nullptr },
-	{ AvidScriptActorAddLocationOffsetName, reinterpret_cast<void*>(AvidScriptActorAddLocationOffset), "(iifff)i", nullptr }
+	{ AvidScriptActorAddLocationOffsetName, reinterpret_cast<void*>(AvidScriptActorAddLocationOffset), "(iifff)i", nullptr },
+	{ AvidScriptOwnerGetSlotName, reinterpret_cast<void*>(AvidScriptOwnerGetSlot), "()i", nullptr },
+	{ AvidScriptOwnerGetGenerationName, reinterpret_cast<void*>(AvidScriptOwnerGetGeneration), "()i", nullptr }
 };
 
 FCriticalSection GWamrRuntimeCriticalSection;
@@ -254,6 +260,44 @@ int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, 
 	}
 
 	return 1;
+}
+
+int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.owner_get_slot");
+		return 0;
+	}
+
+	const int32 Slot = RuntimeInstance->HandleOwnerGetSlotImport();
+	if (Slot <= 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.owner_get_slot returned failure");
+		return 0;
+	}
+
+	return Slot;
+}
+
+int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.owner_get_generation");
+		return 0;
+	}
+
+	const int32 Generation = RuntimeInstance->HandleOwnerGetGenerationImport();
+	if (Generation <= 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.owner_get_generation returned failure");
+		return 0;
+	}
+
+	return Generation;
 }
 
 bool RegisterAvidScriptHostImports(const FString& ModuleId, FAvidScriptWasmSmokeResult& OutResult)
@@ -996,6 +1040,78 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 {
 	HostContext = FAvidScriptWasmHostContext();
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (HostContext.ObjectRegistry == nullptr || !HostContext.OwnerHandle.IsValid())
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("owner_get_slot"),
+			TEXT("Missing valid owner handle context for avidscript.owner_get_slot"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandleResult ResolveResult;
+	if (HostContext.ObjectRegistry->ResolveObject(HostContext.OwnerHandle, ResolveResult) == nullptr ||
+		HostContext.OwnerHandle.Slot > static_cast<uint32>(MAX_int32))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("owner_get_slot"),
+			ResolveResult.ErrorMessage.IsEmpty()
+				? TEXT("Owner handle slot cannot be represented by the i32 host ABI")
+				: ResolveResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Slot);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetGenerationImport()
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (HostContext.ObjectRegistry == nullptr || !HostContext.OwnerHandle.IsValid())
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("owner_get_generation"),
+			TEXT("Missing valid owner handle context for avidscript.owner_get_generation"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandleResult ResolveResult;
+	if (HostContext.ObjectRegistry->ResolveObject(HostContext.OwnerHandle, ResolveResult) == nullptr ||
+		HostContext.OwnerHandle.Generation > static_cast<uint32>(MAX_int32))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("owner_get_generation"),
+			ResolveResult.ErrorMessage.IsEmpty()
+				? TEXT("Owner handle generation cannot be represented by the i32 host ABI")
+				: ResolveResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = static_cast<int32>(HostContext.OwnerHandle.Generation);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation)
