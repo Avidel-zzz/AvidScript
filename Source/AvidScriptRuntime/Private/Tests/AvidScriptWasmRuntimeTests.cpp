@@ -117,6 +117,10 @@ bool FAvidScriptPackagedTimingSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Tick export succeeds"), Runtime.Tick(1.0f / 60.0f, Result));
 	TestTrue(TEXT("Tick timing is captured"), Result.Metrics.TickCallMs >= 0.0);
 
+	TestTrue(TEXT("Missing optional EndPlay export is a successful no-op"), Runtime.EndPlay(Result));
+	TestFalse(TEXT("Missing optional EndPlay export is not marked called"), Result.bEndPlayCalled);
+	TestEqual(TEXT("Missing optional EndPlay export has zero call time"), Result.Metrics.EndPlayCallMs, 0.0);
+
 	Runtime.Unload(Result);
 	TestTrue(TEXT("Unload reports completed state"), Result.bUnloaded);
 	TestTrue(TEXT("Unload timing is captured"), Result.Metrics.UnloadMs >= 0.0);

@@ -11,6 +11,7 @@ struct FAvidScriptWasmRuntimeMetrics
 	double ModuleInstantiateMs = 0.0;
 	double ExecEnvCreateMs = 0.0;
 	double BeginPlayCallMs = 0.0;
+	double EndPlayCallMs = 0.0;
 	double HostImportCallMs = 0.0;
 	double TickCallMs = 0.0;
 	double UnloadMs = 0.0;
@@ -22,6 +23,7 @@ struct FAvidScriptWasmSmokeResult
 	bool bModuleLoaded = false;
 	bool bModuleInstantiated = false;
 	bool bBeginPlayCalled = false;
+	bool bEndPlayCalled = false;
 	bool bTickCalled = false;
 	bool bUnloaded = false;
 	int32 TickCallCount = 0;
@@ -59,6 +61,7 @@ public:
 	bool ValidateRequiredExports(const TArray<FString>& RequiredExports, FAvidScriptWasmSmokeResult& OutResult) const;
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool EndPlay(FAvidScriptWasmSmokeResult& OutResult);
 	void Unload();
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 
@@ -89,6 +92,9 @@ private:
 	void* ExecEnv = nullptr;
 	bool bOwnsRuntimeLease = false;
 	bool bHasBegunPlay = false;
+	bool bHasEndedPlay = false;
+	bool bEndPlayAttempted = false;
+	bool bEndPlaySucceeded = false;
 	int32 TickCallCount = 0;
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
@@ -99,6 +105,7 @@ private:
 	FString PendingHostImportDetails;
 	FString ModuleId;
 	TArray<uint8> ModuleBuffer;
+	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };

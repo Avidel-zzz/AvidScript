@@ -141,7 +141,8 @@ bool FAvidScriptComponentOwnerHandleLifecycleSmokeTest::RunTest(const FString& P
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
 
 	const FAvidScriptComponentRuntimeStats StatsAfterEndPlay = Component->GetRuntimeStats();
-	TestTrue(TEXT("Component records EndPlay cleanup"), StatsAfterEndPlay.bEndPlayCalled);
+	TestTrue(TEXT("Component records receiving EndPlay"), StatsAfterEndPlay.bComponentEndPlayObserved);
+	TestFalse(TEXT("Missing optional guest EndPlay is not marked called"), StatsAfterEndPlay.bEndPlayCalled);
 	TestTrue(TEXT("Component releases owner handle on EndPlay"), StatsAfterEndPlay.bOwnerReleased);
 
 	ResolvedOwner = nullptr;
@@ -259,9 +260,12 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestTrue(TEXT("C# component Tick moves actor"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
 
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
+	TestTrue(TEXT("C# component EndPlay moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
 
 	const FAvidScriptComponentRuntimeStats StatsAfterEndPlay = Component->GetRuntimeStats();
 	TestFalse(TEXT("Component unloads C# runtime on EndPlay"), StatsAfterEndPlay.bRuntimeLoaded);
+	TestTrue(TEXT("Component records receiving C# EndPlay"), StatsAfterEndPlay.bComponentEndPlayObserved);
+	TestTrue(TEXT("Component records the C# guest EndPlay export"), StatsAfterEndPlay.bEndPlayCalled);
 
 	DestroyComponentWorld(World);
 	return true;

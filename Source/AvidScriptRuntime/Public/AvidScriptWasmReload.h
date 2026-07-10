@@ -63,6 +63,8 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadSession
 {
 public:
+	~FAvidScriptWasmReloadSession();
+
 	bool LoadInitialModule(
 		const uint8* Bytecode,
 		int32 BytecodeSize,
@@ -76,6 +78,7 @@ public:
 		FAvidScriptWasmReloadResult& OutResult);
 
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
 	void UnloadLive();
@@ -98,6 +101,10 @@ private:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
+	bool ActivateValidatedRuntime(
+		TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
+		const FAvidScriptWasmReloadManifest& Manifest,
+		FAvidScriptWasmReloadResult& OutResult);
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	FAvidScriptWasmReloadManifest LiveManifest;

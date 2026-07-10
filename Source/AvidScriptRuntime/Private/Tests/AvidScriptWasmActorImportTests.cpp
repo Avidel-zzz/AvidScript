@@ -2,6 +2,7 @@
 
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmModuleLoader.h"
+#include "AvidScriptWasmReload.h"
 #include "AvidScriptWasmRuntime.h"
 
 #include "AvidScriptObjectRegistryTestTypes.h"
@@ -73,6 +74,122 @@ void AppendF32(TArray<uint8>& Bytes, float Value)
 {
 	const uint8* RawBytes = reinterpret_cast<const uint8*>(&Value);
 	Bytes.Append(RawBytes, sizeof(Value));
+}
+
+void AppendActorLocationCall(
+	TArray<uint8>& Body,
+	uint32 FunctionIndex,
+	const FAvidScriptObjectHandle& ActorHandle,
+	const FVector& Value)
+{
+	Body.Add(0x41);
+	AppendU32Leb(Body, ActorHandle.Slot);
+	Body.Add(0x41);
+	AppendU32Leb(Body, ActorHandle.Generation);
+	Body.Add(0x43);
+	AppendF32(Body, static_cast<float>(Value.X));
+	Body.Add(0x43);
+	AppendF32(Body, static_cast<float>(Value.Y));
+	Body.Add(0x43);
+	AppendF32(Body, static_cast<float>(Value.Z));
+	Body.Add(0x10);
+	AppendU32Leb(Body, FunctionIndex);
+	Body.Add(0x1a);
+}
+
+TArray<uint8> BuildActorLifecycleFixture(
+	const FAvidScriptObjectHandle& ActorHandle,
+	uint32 BeginPlayImportIndex,
+	const FVector& BeginPlayValue,
+	uint32 EndPlayImportIndex,
+	const FVector& EndPlayValue,
+	bool bTrapAfterEndPlayCall = false)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> TypeSection;
+	AppendU32Leb(TypeSection, 3);
+	TypeSection.Add(0x60);
+	AppendU32Leb(TypeSection, 5);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x7d);
+	TypeSection.Add(0x7d);
+	TypeSection.Add(0x7d);
+	AppendU32Leb(TypeSection, 1);
+	TypeSection.Add(0x7f);
+	TypeSection.Add(0x60);
+	AppendU32Leb(TypeSection, 0);
+	AppendU32Leb(TypeSection, 0);
+	TypeSection.Add(0x60);
+	AppendU32Leb(TypeSection, 1);
+	TypeSection.Add(0x7d);
+	AppendU32Leb(TypeSection, 0);
+	AppendSection(Module, 1, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendU32Leb(ImportSection, 2);
+	AppendString(ImportSection, "env");
+	AppendString(ImportSection, "actor_set_location");
+	ImportSection.Add(0x00);
+	AppendU32Leb(ImportSection, 0);
+	AppendString(ImportSection, "env");
+	AppendString(ImportSection, "actor_add_location_offset");
+	ImportSection.Add(0x00);
+	AppendU32Leb(ImportSection, 0);
+	AppendSection(Module, 2, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendU32Leb(FunctionSection, 3);
+	AppendU32Leb(FunctionSection, 1);
+	AppendU32Leb(FunctionSection, 2);
+	AppendU32Leb(FunctionSection, 1);
+	AppendSection(Module, 3, FunctionSection);
+
+	TArray<uint8> ExportSection;
+	AppendU32Leb(ExportSection, 3);
+	AppendString(ExportSection, "avid_on_begin_play");
+	ExportSection.Add(0x00);
+	AppendU32Leb(ExportSection, 2);
+	AppendString(ExportSection, "avid_on_tick");
+	ExportSection.Add(0x00);
+	AppendU32Leb(ExportSection, 3);
+	AppendString(ExportSection, "avid_on_end_play");
+	ExportSection.Add(0x00);
+	AppendU32Leb(ExportSection, 4);
+	AppendSection(Module, 7, ExportSection);
+
+	TArray<uint8> BeginPlayBody;
+	AppendU32Leb(BeginPlayBody, 0);
+	AppendActorLocationCall(BeginPlayBody, BeginPlayImportIndex, ActorHandle, BeginPlayValue);
+	BeginPlayBody.Add(0x0b);
+
+	TArray<uint8> TickBody;
+	AppendU32Leb(TickBody, 0);
+	TickBody.Add(0x0b);
+
+	TArray<uint8> EndPlayBody;
+	AppendU32Leb(EndPlayBody, 0);
+	AppendActorLocationCall(EndPlayBody, EndPlayImportIndex, ActorHandle, EndPlayValue);
+	if (bTrapAfterEndPlayCall)
+	{
+		EndPlayBody.Add(0x00);
+	}
+	EndPlayBody.Add(0x0b);
+
+	TArray<uint8> CodeSection;
+	AppendU32Leb(CodeSection, 3);
+	AppendU32Leb(CodeSection, static_cast<uint32>(BeginPlayBody.Num()));
+	CodeSection.Append(BeginPlayBody);
+	AppendU32Leb(CodeSection, static_cast<uint32>(TickBody.Num()));
+	CodeSection.Append(TickBody);
+	AppendU32Leb(CodeSection, static_cast<uint32>(EndPlayBody.Num()));
+	CodeSection.Append(EndPlayBody);
+	AppendSection(Module, 10, CodeSection);
+
+	return Module;
 }
 
 TArray<uint8> BuildActorSetLocationFixture(const FAvidScriptObjectHandle& ActorHandle, const FVector& TargetLocation)
@@ -399,4 +516,142 @@ bool FAvidScriptWasmActorImportMissingContextSmokeTest::RunTest(const FString& P
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmActorEndPlayFailureIdempotencySmokeTest,
+	"AvidScript.Runtime.WasmActor.EndPlayFailureIdempotencySmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmActorEndPlayFailureIdempotencySmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateWasmActorImportWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript EndPlay idempotency test world."));
+		DestroyWasmActorImportWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("EndPlay idempotency actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyWasmActorImportWorld(World);
+		return true;
+	}
+
+	const FVector InitialLocation(10.0, 20.0, 30.0);
+	const FVector EndPlayOffset(1.0, 2.0, 3.0);
+	Actor->SetActorLocation(InitialLocation);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("EndPlay idempotency actor registers"), RegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	const TArray<uint8> WasmBytes = BuildActorLifecycleFixture(
+		ActorHandle,
+		0,
+		InitialLocation,
+		1,
+		EndPlayOffset,
+		true);
+
+	FAvidScriptWasmRuntimeInstance Runtime;
+	Runtime.SetHostContext(HostContext);
+	FAvidScriptWasmSmokeResult Result;
+	TestTrue(TEXT("EndPlay trap fixture loads"), Runtime.LoadModule(
+		WasmBytes.GetData(), WasmBytes.Num(), TEXT("end_play_failure_idempotency"), Result));
+	TestTrue(TEXT("EndPlay trap fixture begins play"), Runtime.BeginPlay(Result));
+
+	FAvidScriptWasmSmokeResult FirstEndPlayResult;
+	TestFalse(TEXT("First EndPlay reports the guest trap"), Runtime.EndPlay(FirstEndPlayResult));
+	TestEqual(TEXT("First EndPlay trap category"), FirstEndPlayResult.ErrorCategory, FString(TEXT("trap")));
+	TestEqual(TEXT("EndPlay side effect executes once"), Actor->GetActorLocation(), InitialLocation + EndPlayOffset);
+
+	FAvidScriptWasmSmokeResult SecondEndPlayResult;
+	TestFalse(TEXT("Repeated EndPlay returns the cached guest failure"), Runtime.EndPlay(SecondEndPlayResult));
+	TestEqual(TEXT("Repeated EndPlay preserves the failure"), SecondEndPlayResult.ErrorMessage, FirstEndPlayResult.ErrorMessage);
+	TestEqual(TEXT("Repeated EndPlay does not repeat the side effect"), Actor->GetActorLocation(), InitialLocation + EndPlayOffset);
+	TestEqual(
+		TEXT("Repeated EndPlay does not call another host import"),
+		SecondEndPlayResult.HostImportCallCount,
+		FirstEndPlayResult.HostImportCallCount);
+
+	Runtime.Unload();
+	DestroyWasmActorImportWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest,
+	"AvidScript.Reload.EndPlayTransitionOrderSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateWasmActorImportWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript reload EndPlay transition test world."));
+		DestroyWasmActorImportWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Reload transition actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyWasmActorImportWorld(World);
+		return true;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Reload transition actor registers"), RegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	const TArray<uint8> OldBytes = BuildActorLifecycleFixture(
+		ActorHandle,
+		0,
+		FVector(100.0, 0.0, 0.0),
+		0,
+		FVector(200.0, 0.0, 0.0));
+	const TArray<uint8> NewBytes = BuildActorLifecycleFixture(
+		ActorHandle,
+		1,
+		FVector(10.0, 0.0, 0.0),
+		0,
+		FVector::ZeroVector);
+
+	FAvidScriptWasmReloadManifest OldManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_end_play_old"));
+	OldManifest.RequiredExports.Add(TEXT("avid_on_end_play"));
+	FAvidScriptWasmReloadManifest NewManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_end_play_new"));
+	NewManifest.RequiredExports.Add(TEXT("avid_on_end_play"));
+
+	FAvidScriptWasmReloadSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(TEXT("Old lifecycle module loads"), Session.LoadInitialModule(
+		OldBytes.GetData(), OldBytes.Num(), OldManifest, ReloadResult));
+	TestEqual(TEXT("Old BeginPlay sets the actor location"), Actor->GetActorLocation(), FVector(100.0, 0.0, 0.0));
+
+	TestTrue(TEXT("New lifecycle module reloads"), Session.ReloadModule(
+		NewBytes.GetData(), NewBytes.Num(), NewManifest, ReloadResult));
+	TestEqual(
+		TEXT("Reload ends the old guest before beginning the new guest"),
+		Actor->GetActorLocation(),
+		FVector(210.0, 0.0, 0.0));
+
+	Session.UnloadLive();
+	DestroyWasmActorImportWorld(World);
+	return true;
+}
 #endif

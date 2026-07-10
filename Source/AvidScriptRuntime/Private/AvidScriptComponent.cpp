@@ -161,10 +161,10 @@ void UAvidScriptComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	FAvidScriptWasmSmokeResult UnloadResult;
 	const bool bHadRuntime = bPlayActive || Runtime.IsValid();
+	RuntimeStats.bComponentEndPlayObserved = true;
 
 	ReleaseRuntime(&UnloadResult);
 	ReleaseOwner();
-	RuntimeStats.bEndPlayCalled = true;
 
 	if (bHadRuntime)
 	{
@@ -283,6 +283,20 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 
 	if (Runtime.IsValid())
 	{
+		if (Runtime->HasBegunPlay())
+		{
+			FAvidScriptWasmSmokeResult EndPlayResult;
+			if (Runtime->EndPlay(EndPlayResult))
+			{
+				RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || EndPlayResult.bEndPlayCalled;
+				RuntimeStats.Metrics = EndPlayResult.Metrics;
+			}
+			else
+			{
+				RecordRuntimeFailure(EndPlayResult);
+			}
+		}
+
 		Runtime->Unload(UnloadResult);
 		Runtime.Reset();
 	}
@@ -292,6 +306,7 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	}
 
 	RuntimeStats.Metrics = UnloadResult.Metrics;
+	RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || UnloadResult.bEndPlayCalled;
 	RuntimeStats.TickCallCount = FMath::Max(RuntimeStats.TickCallCount, UnloadResult.TickCallCount);
 	bPlayActive = false;
 	RuntimeStats.bRuntimeLoaded = false;

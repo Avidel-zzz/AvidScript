@@ -158,6 +158,14 @@ FString GetCSharpSampleSourcePath()
 		TEXT("ActorLifecycleScript.cs"));
 }
 
+FString GetCSharpSourceAdapterPath()
+{
+	return FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript"),
+		TEXT("Build"),
+		TEXT("BuildCSharpActorLifecycle.ps1"));
+}
 FString GetCSharpToolchainReportPath()
 {
 	FString ReportPath = FPaths::Combine(
@@ -239,8 +247,20 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 		return true;
 	}
 
+	FString AdapterText;
+	const FString AdapterPath = GetCSharpSourceAdapterPath();
+	if (!FFileHelper::LoadFileToString(AdapterText, *AdapterPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to load C# source adapter: %s"), *AdapterPath));
+		return true;
+	}
+	TestTrue(
+		TEXT("Source adapter accepts an explicitly empty EndPlay body"),
+		AdapterText.Contains(TEXT("[AllowEmptyString()]")));
 	TestTrue(TEXT("Sample exports BeginPlay"), SourceText.Contains(TEXT("avid_on_begin_play")));
 	TestTrue(TEXT("Sample exports Tick"), SourceText.Contains(TEXT("avid_on_tick")));
+	TestTrue(TEXT("Sample exports EndPlay"), SourceText.Contains(TEXT("avid_on_end_play")));
+	TestTrue(TEXT("Sample declares EndPlay method"), SourceText.Contains(TEXT("public static void EndPlay")));
 	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
 	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
@@ -250,6 +270,7 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample resets elapsed seconds in BeginPlay"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
 	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
 	TestTrue(TEXT("Sample uses elapsed seconds in SetLocation"), SourceText.Contains(TEXT("Actor.SetLocation(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f)")));
+	TestTrue(TEXT("Sample resets actor in EndPlay"), SourceText.Contains(TEXT("Actor.SetLocation(0.0f, 0.0f, 0.0f)")));
 
 	return true;
 }
@@ -409,7 +430,8 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v3 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v3")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v4 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v4")));
+	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
 
@@ -502,6 +524,17 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# second Tick source preserves elapsed state"), Actor->GetActorLocation().Equals(FVector(104.0, 200.0, 300.0), 0.01));
 	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 2);
+
+	FAvidScriptWasmSmokeResult EndPlayResult;
+	if (!Session.EndPlayLive(EndPlayResult))
+	{
+		AddError(EndPlayResult.ErrorMessage);
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	TestTrue(TEXT("C# EndPlay source moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
+	TestTrue(TEXT("C# EndPlay source calls export"), EndPlayResult.bEndPlayCalled);
 
 	DestroyCSharpContractWorld(World);
 	return true;

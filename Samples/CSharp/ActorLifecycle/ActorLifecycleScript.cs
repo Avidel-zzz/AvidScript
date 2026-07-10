@@ -21,6 +21,12 @@ public static class ActorLifecycleScript
         ElapsedSeconds += deltaSeconds;
         Actor.SetLocation(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f);
     }
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+    public static void EndPlay()
+    {
+        Actor.SetLocation(0.0f, 0.0f, 0.0f);
+    }
 }
 
 public static class Actor

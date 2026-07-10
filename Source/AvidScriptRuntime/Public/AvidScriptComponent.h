@@ -14,6 +14,7 @@ struct FAvidScriptComponentRuntimeStats
 	bool bOwnerReleased = false;
 	bool bRuntimeLoaded = false;
 	bool bBeginPlayCalled = false;
+	bool bComponentEndPlayObserved = false;
 	bool bEndPlayCalled = false;
 	int32 TickCallCount = 0;
 	FAvidScriptObjectHandle OwnerHandle;

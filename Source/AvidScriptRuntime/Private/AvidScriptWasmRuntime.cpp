@@ -633,6 +633,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 
@@ -699,6 +700,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
@@ -742,6 +744,10 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 
 	Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 	bHasBegunPlay = true;
+	bHasEndedPlay = false;
+	bEndPlayAttempted = false;
+	bEndPlaySucceeded = false;
+	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
@@ -757,6 +763,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bModuleLoaded = Module != nullptr;
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
@@ -812,6 +819,94 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 #endif
 }
 
+bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
+{
+	PrepareResult(OutResult, ModuleId, Metrics);
+	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
+	OutResult.bModuleLoaded = Module != nullptr;
+	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
+	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
+
+#if !AVIDSCRIPT_WITH_WAMR
+	SetFailure(
+		OutResult,
+		ModuleId,
+		TEXT("avid_on_end_play"),
+		TEXT("backend_unavailable"),
+		TEXT("WAMR backend is not available"),
+		TEXT("build the ThirdParty WAMR static library before running scripts"));
+	return false;
+#else
+	if (!IsLoaded())
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_end_play"),
+			TEXT("invalid_state"),
+			TEXT("No WASM module is loaded"),
+			TEXT("load a module before calling EndPlay"));
+		return false;
+	}
+
+	if (bEndPlayAttempted)
+	{
+		OutResult = CachedEndPlayResult;
+		return bEndPlaySucceeded;
+	}
+
+	bEndPlayAttempted = true;
+	wasm_function_inst_t Function = wasm_runtime_lookup_function(
+		static_cast<wasm_module_inst_t>(ModuleInstance),
+		"avid_on_end_play");
+	if (Function == nullptr)
+	{
+		Metrics.EndPlayCallMs = 0.0;
+		OutResult.Metrics = Metrics;
+		CopyHostImportStateToResult(OutResult);
+		bEndPlaySucceeded = true;
+		CachedEndPlayResult = OutResult;
+		return true;
+	}
+
+	const double EndPlayStartSeconds = FPlatformTime::Seconds();
+	if (!CallWamrExport(
+		static_cast<wasm_module_inst_t>(ModuleInstance),
+		static_cast<wasm_exec_env_t>(ExecEnv),
+		this,
+		ModuleId,
+		"avid_on_end_play",
+		0,
+		nullptr,
+		OutResult))
+	{
+		Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
+		OutResult.Metrics = Metrics;
+		OutResult.bBeginPlayCalled = bHasBegunPlay;
+		OutResult.bEndPlayCalled = false;
+		OutResult.TickCallCount = TickCallCount;
+		CopyHostImportStateToResult(OutResult);
+		bEndPlaySucceeded = false;
+		CachedEndPlayResult = OutResult;
+		return false;
+	}
+
+	Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
+	bHasEndedPlay = true;
+	bEndPlaySucceeded = true;
+	OutResult.Metrics = Metrics;
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = true;
+	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
+	CachedEndPlayResult = OutResult;
+	return true;
+#endif
+}
+
 void FAvidScriptWasmRuntimeInstance::Unload()
 {
 	FAvidScriptWasmSmokeResult IgnoredResult;
@@ -825,6 +920,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	const bool bWasModuleLoaded = Module != nullptr;
 	const bool bWasModuleInstantiated = ModuleInstance != nullptr;
 	const bool bHadBegunPlay = bHasBegunPlay;
+	const bool bHadEndedPlay = bHasEndedPlay;
 	const int32 PreviousTickCallCount = TickCallCount;
 	const int32 PreviousHostImportCallCount = HostImportCallCount;
 	const int32 PreviousHostImportInput = LastHostImportInput;
@@ -865,6 +961,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	ModuleBuffer.Empty();
 	ModuleId.Empty();
 	bHasBegunPlay = false;
+	bHasEndedPlay = false;
+	bEndPlayAttempted = false;
+	bEndPlaySucceeded = false;
+	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
 	TickCallCount = 0;
 	ResetHostImportState();
 
@@ -874,6 +974,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	OutResult.bModuleLoaded = bWasModuleLoaded;
 	OutResult.bModuleInstantiated = bWasModuleInstantiated;
 	OutResult.bBeginPlayCalled = bHadBegunPlay;
+	OutResult.bEndPlayCalled = bHadEndedPlay;
 	OutResult.bTickCalled = PreviousTickCallCount > 0;
 	OutResult.TickCallCount = PreviousTickCallCount;
 	OutResult.HostImportCallCount = PreviousHostImportCallCount;

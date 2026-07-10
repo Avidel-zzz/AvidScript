@@ -455,6 +455,11 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	return true;
 }
 
+FAvidScriptWasmReloadSession::~FAvidScriptWasmReloadSession()
+{
+	UnloadLive();
+}
+
 bool FAvidScriptWasmReloadSession::LoadInitialModule(
 	const uint8* Bytecode,
 	int32 BytecodeSize,
@@ -476,8 +481,11 @@ bool FAvidScriptWasmReloadSession::LoadInitialModule(
 		return false;
 	}
 
-	LiveRuntime = MoveTemp(CandidateRuntime);
-	LiveManifest = Manifest;
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	{
+		OutResult.ActiveModuleId = GetLiveModuleId();
+		return false;
+	}
 
 	OutResult.bSucceeded = true;
 	OutResult.ActiveModuleId = Manifest.ModuleId;
@@ -508,16 +516,20 @@ bool FAvidScriptWasmReloadSession::ReloadModule(
 		return false;
 	}
 
-	LiveRuntime = MoveTemp(CandidateRuntime);
-	LiveManifest = Manifest;
-	++SuccessfulReloadCount;
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	{
+		++RejectedReloadCount;
+		const FString ActiveModuleId = GetLiveModuleId();
+		MarkRejectedReloadWithRollback(ActiveModuleId, OutResult);
+		return false;
+	}
 
+	++SuccessfulReloadCount;
 	OutResult.bSucceeded = true;
 	OutResult.bReloadApplied = true;
 	OutResult.ActiveModuleId = Manifest.ModuleId;
 	return true;
 }
-
 void FAvidScriptWasmReloadSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	HostContext = InHostContext;
@@ -554,10 +566,33 @@ bool FAvidScriptWasmReloadSession::TickLive(float DeltaSeconds, FAvidScriptWasmS
 	return LiveRuntime->Tick(DeltaSeconds, OutResult);
 }
 
+bool FAvidScriptWasmReloadSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!IsLiveLoaded())
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ModuleId = LiveManifest.ModuleId;
+		OutResult.ExportName = TEXT("avid_on_end_play");
+		OutResult.ErrorCategory = TEXT("invalid_state");
+		OutResult.NextAction = TEXT("load a validated WASM module before ending the live script runtime");
+		OutResult.ErrorMessage = FString::Printf(
+			TEXT("AvidScript live runtime EndPlay rejected | module=%s | category=invalid_state | details=no live runtime is loaded"),
+			LiveManifest.ModuleId.IsEmpty() ? TEXT("<none>") : *LiveManifest.ModuleId);
+		return false;
+	}
+
+	return LiveRuntime->EndPlay(OutResult);
+}
+
 void FAvidScriptWasmReloadSession::UnloadLive()
 {
 	if (LiveRuntime)
 	{
+		if (LiveRuntime->HasBegunPlay())
+		{
+			FAvidScriptWasmSmokeResult EndPlayResult;
+			EndPlayLive(EndPlayResult);
+		}
 		LiveRuntime->Unload();
 		LiveRuntime.Reset();
 	}
@@ -650,15 +685,58 @@ bool FAvidScriptWasmReloadSession::BuildValidatedRuntime(
 	}
 
 	CandidateRuntime->SetHostContext(HostContext);
+	OutResult.RuntimeResult = RuntimeResult;
+	OutRuntime = MoveTemp(CandidateRuntime);
+	return true;
+}
 
-	if (!CandidateRuntime->BeginPlay(RuntimeResult))
+bool FAvidScriptWasmReloadSession::ActivateValidatedRuntime(
+	TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
+	const FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	if (!CandidateRuntime)
 	{
-		CopyRuntimeFailure(RuntimeResult, OutResult);
+		SetReloadFailure(
+			OutResult,
+			TEXT("<runtime>"),
+			TEXT("invalid_state"),
+			TEXT("validated candidate runtime is missing"),
+			TEXT("rebuild and validate the candidate before activation"));
+		return false;
+	}
+
+	if (LiveRuntime)
+	{
+		if (LiveRuntime->HasBegunPlay())
+		{
+			FAvidScriptWasmSmokeResult PreviousEndPlayResult;
+			if (!LiveRuntime->EndPlay(PreviousEndPlayResult))
+			{
+				CopyRuntimeFailure(PreviousEndPlayResult, OutResult);
+				LiveRuntime->Unload();
+				LiveRuntime.Reset();
+				LiveManifest = FAvidScriptWasmReloadManifest();
+				CandidateRuntime->Unload();
+				return false;
+			}
+		}
+
+		LiveRuntime->Unload();
+		LiveRuntime.Reset();
+		LiveManifest = FAvidScriptWasmReloadManifest();
+	}
+
+	FAvidScriptWasmSmokeResult BeginPlayResult;
+	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
+	{
+		CopyRuntimeFailure(BeginPlayResult, OutResult);
 		CandidateRuntime->Unload();
 		return false;
 	}
 
-	OutResult.RuntimeResult = RuntimeResult;
-	OutRuntime = MoveTemp(CandidateRuntime);
+	OutResult.RuntimeResult = BeginPlayResult;
+	LiveRuntime = MoveTemp(CandidateRuntime);
+	LiveManifest = Manifest;
 	return true;
 }
