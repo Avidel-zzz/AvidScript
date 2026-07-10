@@ -1,6 +1,6 @@
 # AvidScript C# Gameplay Authoring 指南
 
-> 当前状态: PC / Windows Editor 优先。C# 受限子集可以生成 direct ABI WASM，绑定到 UE Actor，并接入 `BeginPlay` / `Tick` / `EndPlay`。Phase26 已提供首批类型化 UE API：`FVector`、`AActor` 和 `UE.Self`。
+> 当前状态: PC / Windows Editor 优先。C# 受限子集可以生成 direct ABI WASM，绑定到 UE Actor，并接入 `BeginPlay` / `Tick` / `EndPlay`。Phase27 已支持 `FVector`、`AActor`、`UE.Self`、Actor 位置读写和基础向量表达式。
 
 ## 现在可以实现什么
 
@@ -9,11 +9,11 @@
 1. 在 C# 中编写 `BeginPlay()`、`Tick(float deltaSeconds)` 和可选 `EndPlay()`。
 2. 使用 `private static float` 保存累计时间、速度或简单阶段状态。
 3. 通过 `UE.Self` 获取当前 `UAvidScriptComponent` 的 owner Actor。
-4. 使用 `FVector` 调用 `SetActorLocation` 和 `AddActorWorldOffset`。
+4. 使用 `FVector` 调用 `GetActorLocation`、`SetActorLocation` 和 `AddActorWorldOffset`。
 5. 从 Editor 创建 profile、构建 WASM/report/manifest，并绑定到选中 Actor。
-6. 在 PIE 中执行真实 Actor 写入，并在 EndPlay 时先调用 guest 再卸载 runtime 和释放 owner handle。
+6. 在 PIE 中执行真实 Actor 读写，并在 EndPlay 时先调用 guest 再卸载 runtime 和释放 owner handle。
 
-这已经足以编写“初始化 Actor、逐帧更新位置、维护简单状态、结束时清理”的 C# 游戏逻辑。
+这已经足以编写“初始化 Actor、逐帧读取并更新位置、维护简单状态、结束时清理”的 C# 游戏逻辑。
 
 ## 默认示例
 
@@ -39,8 +39,9 @@ public static class ActorLifecycleScript
     public static void Tick(float deltaSeconds)
     {
         ElapsedSeconds += deltaSeconds;
+        FVector currentLocation = UE.Self.GetActorLocation();
         UE.Self.SetActorLocation(
-            new FVector(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f));
+            currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
     }
 
     public static void EndPlay()
@@ -50,7 +51,7 @@ public static class ActorLifecycleScript
 }
 ```
 
-`BeginPlay` 把 Actor 移动到 `(100, 200, 300)`；每个 Tick 根据累计时间更新 X；`EndPlay` 在 runtime 卸载前把位置归零。
+`BeginPlay` 把 Actor 移动到 `(100, 200, 300)`；每个 Tick 读取当前位置并沿 X 移动；`EndPlay` 在 runtime 卸载前把位置归零。
 
 ## 类型化 API
 
@@ -61,15 +62,17 @@ public static class ActorLifecycleScript
 ```csharp
 FVector start = new FVector(100.0f, 200.0f, 300.0f);
 FVector zero = FVector.Zero;
+FVector next = start + new FVector(10.0f, 0.0f, 0.0f);
 ```
 
-当前 adapter 支持在 Actor 调用中直接使用 `new FVector(x, y, z)` 和 `FVector.Zero`。局部变量、返回值和向量运算尚未进入当前 source subset，因此上面的局部变量示例只表示 C# 类型形状，不是当前 adapter 可接受的 lifecycle 语句。
+当前 adapter 支持 `new FVector(x, y, z)`、`FVector.Zero`、从 `GetActorLocation()` 初始化局部向量，以及局部向量与构造向量相加。
 
 ### AActor 与 UE.Self
 
 `AActor` 只保存 object registry 的 slot/generation，不保存 `AActor*` 或宿主地址。`UE.Self` 通过 host imports 获取当前 owner：
 
 ```csharp
+FVector current = UE.Self.GetActorLocation();
 UE.Self.SetActorLocation(new FVector(10.0f, 20.0f, 30.0f));
 UE.Self.AddActorWorldOffset(new FVector(1.0f, 0.0f, 0.0f));
 ```
@@ -87,7 +90,7 @@ Actor.AddLocationOffset(1.0f, 0.0f, 0.0f);
 
 ## 当前 C# 子集
 
-Phase26 的 source adapter subset 为 `actor_lifecycle_v5`：
+Phase27 的 source adapter subset 为 `actor_lifecycle_v6`：
 
 - `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()`。
 - `private static float Field;` 和可选初始值。
@@ -96,11 +99,13 @@ Phase26 的 source adapter subset 为 `actor_lifecycle_v5`：
 - `UE.Self.SetActorLocation(new FVector(x, y, z))`。
 - `UE.Self.SetActorLocation(FVector.Zero)`。
 - `UE.Self.AddActorWorldOffset(new FVector(x, y, z))`。
+- `FVector local = UE.Self.GetActorLocation();`。
+- `local + new FVector(x, y, z)`。
 - 旧 `Actor.SetLocation(...)` 与 `Actor.AddLocationOffset(...)`。
 
 当前不支持：
 
-- `GetActorLocation()` 返回值、局部 `FVector` 变量和向量运算。
+- 通用局部变量赋值、向量减法、整向量标量乘法、成员访问和任意函数组合。
 - 任意 `UFUNCTION`、`UPROPERTY` 或动态反射调用。
 - 任意 Actor/UObject 参数、Spawn、组件查找和组件类型。
 - `FRotator`、`FTransform`、旋转和缩放 API。
@@ -136,11 +141,11 @@ Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle
 | --- | --- | --- |
 | `profile_missing` | profile 不存在 | 先创建默认 C# profile，或检查路径。 |
 | `source_missing` | `source_path` 不存在 | 指向真实 C# 文件。 |
-| `source_adapter_failed` | 源码超出 v5 子集 | 检查 lifecycle、静态 float、表达式和 typed Actor 调用形状。 |
+| `source_adapter_failed` | 源码超出 v6 子集 | 检查 lifecycle、静态 float、FVector 局部值、表达式和 typed Actor 调用形状。 |
 | `missing_import` | WASM 要求的 host import 未注册 | 确认 Runtime 与 manifest 版本一致。 |
-| `host_import_failed` | owner handle 无效、stale 或 Actor 写入失败 | 检查组件 owner、对象生命周期和 UE 日志。 |
+| `host_import_failed` | owner handle 无效、stale 或 Actor 读写失败 | 检查组件 owner、对象生命周期和 UE 日志。 |
 | `selection_unavailable` | 构建成功但没有可绑定 Actor | 在关卡中选中 Actor 后重试。 |
 
 ## 下一步能力
 
-Phase27 将优先增加 `GetActorLocation()`、`FVector` 局部值和基础向量表达式。之后再扩展 `FRotator`、`FTransform`、SceneComponent/Actor 常用 API，并进入 UE 反射元数据与绑定生成器阶段。
+Phase28 将优先扩展 `FRotator` 和 Actor Transform 常用 typed API，并抽取可扩展的值类型 ABI/codegen 结构。之后再推进 SceneComponent、Spawn、输入/Timer/碰撞事件和 UE 反射元数据绑定生成器。
