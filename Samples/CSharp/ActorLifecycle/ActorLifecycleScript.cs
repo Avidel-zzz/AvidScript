@@ -20,7 +20,8 @@ public static class ActorLifecycleScript
     public static void Tick(float deltaSeconds)
     {
         ElapsedSeconds += deltaSeconds;
-        UE.Self.SetActorLocation(new FVector(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f));
+        FVector currentLocation = UE.Self.GetActorLocation();
+        UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
@@ -45,6 +46,10 @@ public readonly struct FVector
     }
 
     public static FVector Zero => new FVector(0.0f, 0.0f, 0.0f);
+    public static FVector operator +(FVector left, FVector right)
+    {
+        return new FVector(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
+    }
 }
 
 public readonly struct AActor
@@ -59,6 +64,12 @@ public readonly struct AActor
     }
 
     public bool IsValid => Slot > 0 && Generation > 0;
+
+    public FVector GetActorLocation()
+    {
+        Native.ActorGetLocation(Slot, Generation, out FVector location);
+        return location;
+    }
 
     public bool SetActorLocation(FVector location)
     {
@@ -91,6 +102,9 @@ public static class Actor
 
 internal static class Native
 {
+    [DllImport("env", EntryPoint = "actor_get_location")]
+    internal static extern int ActorGetLocation(int slot, int generation, out FVector location);
+
     [DllImport("env", EntryPoint = "actor_set_location")]
     internal static extern int ActorSetLocation(int slot, int generation, float x, float y, float z);
 

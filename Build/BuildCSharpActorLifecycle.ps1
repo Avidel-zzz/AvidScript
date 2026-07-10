@@ -439,6 +439,66 @@ function Convert-CSharpFloatExpression {
     }
 }
 
+function Find-CSharpVectorLocal {
+    param(
+        [object[]]$VectorLocals = @(),
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    foreach ($Local in @($VectorLocals)) {
+        if ($Local.Name -eq $Name) {
+            return $Local
+        }
+    }
+
+    return $null
+}
+
+function Convert-CSharpVectorExpression {
+    param(
+        [Parameter(Mandatory = $true)][string]$Expression,
+        [object[]]$Fields = @(),
+        [object[]]$VectorLocals = @()
+    )
+
+    $Trimmed = $Expression.Trim()
+    $AddMatch = [regex]::Match($Trimmed, '^(?<left>[A-Za-z_][A-Za-z0-9_]*)\s*\+\s*(?<right>.+)$')
+    if ($AddMatch.Success) {
+        return [PSCustomObject]@{
+            Kind = 'vector_add'
+            Left = Convert-CSharpVectorExpression -Expression $AddMatch.Groups['left'].Value -Fields $Fields -VectorLocals $VectorLocals
+            Right = Convert-CSharpVectorExpression -Expression $AddMatch.Groups['right'].Value -Fields $Fields -VectorLocals $VectorLocals
+        }
+    }
+
+    if ($Trimmed -match '^FVector\s*\.\s*Zero$') {
+        $Zero = [PSCustomObject]@{ Kind = 'constant'; Value = [single]0 }
+        return [PSCustomObject]@{ Kind = 'vector_construct'; X = $Zero; Y = $Zero; Z = $Zero }
+    }
+
+    $ConstructorMatch = [regex]::Match($Trimmed, '^new\s+FVector\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>.+?)\s*\)$')
+    if ($ConstructorMatch.Success) {
+        return [PSCustomObject]@{
+            Kind = 'vector_construct'
+            X = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['x'].Value -Fields $Fields
+            Y = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['y'].Value -Fields $Fields
+            Z = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['z'].Value -Fields $Fields
+        }
+    }
+
+    if ($Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorLocation\s*\(\s*\)$') {
+        return [PSCustomObject]@{ Kind = 'get_actor_location' }
+    }
+
+    if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+        $Local = Find-CSharpVectorLocal -VectorLocals $VectorLocals -Name $Trimmed
+        if ($null -ne $Local) {
+            return [PSCustomObject]@{ Kind = 'vector_local'; Name = $Local.Name; Ordinal = $Local.Ordinal }
+        }
+    }
+
+    throw "Unsupported C# FVector expression '$Trimmed'."
+}
 function Get-CSharpLifecycleStatements {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$MethodBody,
@@ -448,38 +508,40 @@ function Get-CSharpLifecycleStatements {
     )
 
     $Statements = @()
+    $VectorLocals = @()
     foreach ($Match in [regex]::Matches($MethodBody, '(?s)(?<statement>[^;]+);')) {
         $StatementText = $Match.Groups['statement'].Value.Trim()
         if ([string]::IsNullOrWhiteSpace($StatementText)) {
             continue
         }
 
-        $TypedZeroMatch = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*SetActorLocation\s*\(\s*FVector\s*\.\s*Zero\s*\)$')
-        if ($TypedZeroMatch.Success) {
-            $Zero = [PSCustomObject]@{ Kind = 'constant'; Value = [single]0 }
+        $VectorDeclarationMatch = [regex]::Match($StatementText, '^FVector\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<expr>.+)$')
+        if ($VectorDeclarationMatch.Success) {
+            $LocalName = $VectorDeclarationMatch.Groups['name'].Value
+            if ($null -ne (Find-CSharpVectorLocal -VectorLocals $VectorLocals -Name $LocalName)) {
+                throw "Duplicate C# FVector local '$LocalName' in '$MethodName'."
+            }
+
+            $Expression = Convert-CSharpVectorExpression -Expression $VectorDeclarationMatch.Groups['expr'].Value -Fields $Fields -VectorLocals $VectorLocals
+            $Local = [PSCustomObject]@{ Name = $LocalName; Ordinal = $VectorLocals.Count }
+            $VectorLocals += $Local
             $Statements += [PSCustomObject]@{
-                Kind = 'set_location'
-                UseOwnerHandle = $true
-                X = $Zero
-                Y = $Zero
-                Z = $Zero
+                Kind = 'vector_local_assign'
+                LocalOrdinal = $Local.Ordinal
+                Expression = $Expression
             }
             continue
         }
 
-        $TypedActorMatch = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset)\s*\(\s*new\s+FVector\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>.+?)\s*\)\s*\)$')
-        if ($TypedActorMatch.Success) {
-            $Method = $TypedActorMatch.Groups['method'].Value
+        $TypedVectorCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset)\s*\(\s*(?<expr>.+)\s*\)$')
+        if ($TypedVectorCall.Success) {
+            $Method = $TypedVectorCall.Groups['method'].Value
             $Statements += [PSCustomObject]@{
-                Kind = if ($Method -eq 'SetActorLocation') { 'set_location' } else { 'add_location_offset' }
-                UseOwnerHandle = $true
-                X = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['x'].Value -Fields $Fields
-                Y = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['y'].Value -Fields $Fields
-                Z = Convert-CSharpFloatExpression -Expression $TypedActorMatch.Groups['z'].Value -Fields $Fields
+                Kind = if ($Method -eq 'SetActorLocation') { 'set_location_vector' } else { 'add_location_offset_vector' }
+                VectorExpression = Convert-CSharpVectorExpression -Expression $TypedVectorCall.Groups['expr'].Value -Fields $Fields -VectorLocals $VectorLocals
             }
             continue
         }
-
         $ActorMatch = [regex]::Match($StatementText, '^Actor\s*\.\s*(?<method>SetLocation|AddLocationOffset)\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)$')
         if ($ActorMatch.Success) {
             $Method = $ActorMatch.Groups['method'].Value
@@ -583,6 +645,95 @@ function Add-CSharpFloatExpressionCode {
     throw "Unsupported C# expression kind '$($Expression.Kind)'."
 }
 
+function Add-CSharpVectorComponentCode {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Expression,
+        [Parameter(Mandatory = $true)][int]$ComponentIndex,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
+        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+    )
+
+    if ($Expression.Kind -eq 'vector_construct') {
+        $Components = @($Expression.X, $Expression.Y, $Expression.Z)
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Components[$ComponentIndex] -AllowDeltaSeconds $AllowDeltaSeconds
+        return
+    }
+
+    if ($Expression.Kind -eq 'vector_local') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Expression.Ordinal) + $ComponentIndex))
+        return
+    }
+
+    if ($Expression.Kind -eq 'vector_add') {
+        Add-CSharpVectorComponentCode -Body $Body -Expression $Expression.Left -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-CSharpVectorComponentCode -Body $Body -Expression $Expression.Right -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-WasmByte -Bytes $Body -Value 0x92
+        return
+    }
+
+    throw "Unsupported FVector component expression kind '$($Expression.Kind)'."
+}
+
+function Add-CSharpVectorLocalAssignmentCode {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Statement,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
+        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+    )
+
+    if ($Statement.Expression.Kind -eq 'get_actor_location') {
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 2
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 3
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 16
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 4
+        Add-WasmByte -Bytes $Body -Value 0x1a
+
+        for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
+            Add-WasmByte -Bytes $Body -Value 0x41
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32](16 + (4 * $ComponentIndex)))
+            Add-WasmByte -Bytes $Body -Value 0x2a
+            Add-WasmU32Leb -Bytes $Body -Value 2
+            Add-WasmU32Leb -Bytes $Body -Value 0
+            Add-WasmByte -Bytes $Body -Value 0x21
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
+        }
+        return
+    }
+
+    for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
+        Add-CSharpVectorComponentCode -Body $Body -Expression $Statement.Expression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-WasmByte -Bytes $Body -Value 0x21
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
+    }
+}
+
+function Add-CSharpTypedActorVectorCall {
+    param(
+        [Parameter(Mandatory = $true)]$Body,
+        [Parameter(Mandatory = $true)]$Statement,
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
+        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+    )
+
+    $FunctionIndex = if ($Statement.Kind -eq 'set_location_vector') { 0 } else { 1 }
+    Add-WasmByte -Bytes $Body -Value 0x10
+    Add-WasmU32Leb -Bytes $Body -Value 2
+    Add-WasmByte -Bytes $Body -Value 0x10
+    Add-WasmU32Leb -Bytes $Body -Value 3
+    for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
+        Add-CSharpVectorComponentCode -Body $Body -Expression $Statement.VectorExpression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+    }
+    Add-WasmByte -Bytes $Body -Value 0x10
+    Add-WasmU32Leb -Bytes $Body -Value $FunctionIndex
+    Add-WasmByte -Bytes $Body -Value 0x1a
+}
 function Add-CSharpActorCall {
     param(
         [Parameter(Mandatory = $true)]$Body,
@@ -625,9 +776,19 @@ function Add-CSharpLifecycleStatementCode {
     param(
         [Parameter(Mandatory = $true)]$Body,
         [Parameter(Mandatory = $true)]$Statement,
-        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
+        [Parameter(Mandatory = $true)][int]$VectorLocalBase
     )
 
+    if ($Statement.Kind -eq 'vector_local_assign') {
+        Add-CSharpVectorLocalAssignmentCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        return
+    }
+
+    if ($Statement.Kind -eq 'set_location_vector' -or $Statement.Kind -eq 'add_location_offset_vector') {
+        Add-CSharpTypedActorVectorCall -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        return
+    }
     if ($Statement.Kind -eq 'field_assign') {
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Statement.Expression -AllowDeltaSeconds $AllowDeltaSeconds
         Add-WasmByte -Bytes $Body -Value 0x24
@@ -655,9 +816,18 @@ function New-CSharpLifecycleFunctionBody {
     )
 
     $Body = New-WasmByteList
-    Add-WasmU32Leb -Bytes $Body -Value 0
+    $VectorLocalCount = @($Statements | Where-Object { $_.Kind -eq 'vector_local_assign' }).Count
+    $VectorLocalBase = if ($AllowDeltaSeconds) { 1 } else { 0 }
+    if ($VectorLocalCount -gt 0) {
+        Add-WasmU32Leb -Bytes $Body -Value 1
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32](3 * $VectorLocalCount))
+        Add-WasmByte -Bytes $Body -Value 0x7d
+    }
+    else {
+        Add-WasmU32Leb -Bytes $Body -Value 0
+    }
     foreach ($Statement in $Statements) {
-        Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
     }
     Add-WasmByte -Bytes $Body -Value 0x0b
     return ,$Body
@@ -675,7 +845,7 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
 
     $TypeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $TypeSection -Value 4
+    Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
@@ -692,10 +862,15 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $TypeSection -Value 0
     Add-WasmU32Leb -Bytes $TypeSection -Value 1
     Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 3
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7f))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmU32Leb -Bytes $ImportSection -Value 5
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -712,6 +887,10 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ImportSection -Text 'owner_get_generation'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 3
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_get_location'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
@@ -720,6 +899,11 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $FunctionSection -Value 2
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
+    $MemorySection = New-WasmByteList
+    Add-WasmU32Leb -Bytes $MemorySection -Value 1
+    Add-WasmU32Leb -Bytes $MemorySection -Value 0
+    Add-WasmU32Leb -Bytes $MemorySection -Value 1
+    Add-WasmSection -Module $Module -SectionId 5 -Payload $MemorySection
 
     if (@($Fields).Count -gt 0) {
         $GlobalSection = New-WasmByteList
@@ -738,13 +922,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 4
+    Add-WasmU32Leb -Bytes $ExportSection -Value 5
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 5
+    Add-WasmU32Leb -Bytes $ExportSection -Value 6
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 6
+    Add-WasmU32Leb -Bytes $ExportSection -Value 7
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -805,7 +989,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v5'
+                subset = 'actor_lifecycle_v6'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -820,6 +1004,10 @@ function Invoke-CSharpSourceAdapter {
                 [ordered]@{
                     module = 'env'
                     name = 'actor_add_location_offset'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'actor_get_location'
                 },
                 [ordered]@{
                     module = 'env'
@@ -838,8 +1026,8 @@ function Invoke-CSharpSourceAdapter {
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
                 supported_types = @('FVector', 'AActor', 'UE.Self')
-                supported_calls = @('UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
-                supported_state = @('private static float Field', 'Field = expression', 'Field += expression')
+                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)')
                 supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
@@ -851,7 +1039,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v5 source subset with FVector, AActor, UE.Self, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v6 source subset with typed Actor reads, FVector locals/addition, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -920,6 +1108,10 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "actor_add_location_offset"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_get_location"
             },
             [ordered]@{
                 module = "env"
@@ -1199,6 +1391,10 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "actor_add_location_offset"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_get_location"
         },
         [ordered]@{
             module = "env"

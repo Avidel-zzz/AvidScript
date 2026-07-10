@@ -267,7 +267,9 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample imports env owner_get_slot"), SourceText.Contains(TEXT("owner_get_slot")));
 	TestTrue(TEXT("Sample imports env owner_get_generation"), SourceText.Contains(TEXT("owner_get_generation")));
 	TestTrue(TEXT("Sample declares sequential FVector"), SourceText.Contains(TEXT("[StructLayout(LayoutKind.Sequential)]")) && SourceText.Contains(TEXT("public readonly struct FVector")));
+	TestTrue(TEXT("Sample declares FVector addition"), SourceText.Contains(TEXT("public static FVector operator +")));
 	TestTrue(TEXT("Sample declares handle-backed AActor"), SourceText.Contains(TEXT("public readonly struct AActor")));
+	TestTrue(TEXT("Sample presents typed GetActorLocation"), SourceText.Contains(TEXT("public FVector GetActorLocation()")) && SourceText.Contains(TEXT("actor_get_location")));
 	TestTrue(TEXT("Sample declares UE.Self"), SourceText.Contains(TEXT("public static class UE")) && SourceText.Contains(TEXT("public static AActor Self")));
 	TestTrue(TEXT("Sample uses typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector")));
 	TestTrue(TEXT("Sample uses typed AddActorWorldOffset"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector")));
@@ -277,7 +279,8 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample declares elapsed seconds state"), SourceText.Contains(TEXT("private static float ElapsedSeconds")));
 	TestTrue(TEXT("Sample resets elapsed seconds in BeginPlay"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
 	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
-	TestTrue(TEXT("Sample uses elapsed seconds in typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector(100.0f + 120.0f * ElapsedSeconds, 200.0f, 300.0f))")));
+	TestTrue(TEXT("Sample reads location into a local FVector"), SourceText.Contains(TEXT("FVector currentLocation = UE.Self.GetActorLocation()")));
+	TestTrue(TEXT("Sample uses FVector addition"), SourceText.Contains(TEXT("currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f)")));
 	TestTrue(TEXT("Sample resets actor in typed EndPlay"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(FVector.Zero)")));
 
 	return true;
@@ -438,10 +441,11 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v5 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v5")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v6 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v6")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
 	TestTrue(TEXT("C# source adapter manifest declares AActor"), ManifestJson.Contains(TEXT("AActor")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.Self"), ManifestJson.Contains(TEXT("UE.Self")));
+	TestTrue(TEXT("C# source adapter manifest declares GetActorLocation"), ManifestJson.Contains(TEXT("GetActorLocation")));
 	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
@@ -461,6 +465,12 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_add_location_offset");
 		});
 	TestTrue(TEXT("C# source adapter manifest requires add location offset import"), bRequiresAddLocationOffset);
+	const bool bRequiresGetLocation = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_get_location");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires get location import"), bRequiresGetLocation);
 	const bool bRequiresOwnerSlot = Manifest.RequiredImports.ContainsByPredicate(
 		[](const FAvidScriptWasmRequiredImport& RequiredImport)
 		{
