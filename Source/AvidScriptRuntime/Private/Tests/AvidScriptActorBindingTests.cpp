@@ -172,6 +172,60 @@ bool FAvidScriptActorBindingRotationReadWriteSmokeTest::RunTest(const FString& P
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptActorBindingScaleReadWriteSmokeTest,
+	"AvidScript.Binding.ActorBinding.ScaleReadWriteSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptActorBindingScaleReadWriteSmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateActorBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript actor binding world."));
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	const FVector InitialScale(1.0, 2.0, 3.0);
+	Actor->SetActorScale3D(InitialScale);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers as handle"), RegisterResult.bSucceeded);
+
+	FVector ReadScale = FVector::ZeroVector;
+	FAvidScriptActorBindingResult ReadResult;
+	TestTrue(TEXT("Actor scale is readable through handle"), FAvidScriptActorBinding::GetActorScale3D(Registry, ActorHandle, ReadScale, ReadResult));
+	TestTrue(TEXT("Read scale matches actor"), ReadScale.Equals(InitialScale, 0.01));
+	TestTrue(TEXT("Read result reports scale"), ReadResult.Scale3D.Equals(InitialScale, 0.01));
+
+	const FVector TargetScale(2.0, 3.0, 4.0);
+	FAvidScriptActorBindingResult WriteResult;
+	TestTrue(
+		TEXT("Actor scale is writable when policy allows writes"),
+		FAvidScriptActorBinding::SetActorScale3D(Registry, ActorHandle, TargetScale, EAvidScriptActorWritePolicy::AllowWrites, WriteResult));
+	TestTrue(TEXT("Actor scales to target"), Actor->GetActorScale3D().Equals(TargetScale, 0.01));
+
+	FAvidScriptActorBindingResult DeniedResult;
+	TestFalse(
+		TEXT("Read-only policy denies actor scale writes"),
+		FAvidScriptActorBinding::SetActorScale3D(Registry, ActorHandle, FVector(9.0, 9.0, 9.0), EAvidScriptActorWritePolicy::ReadOnly, DeniedResult));
+	TestEqual(TEXT("Denied scale reports policy category"), DeniedResult.ErrorCategory, FString(TEXT("write_denied")));
+	TestTrue(TEXT("Denied scale keeps actor scale unchanged"), Actor->GetActorScale3D().Equals(TargetScale, 0.01));
+
+	DestroyActorBindingWorld(World);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptActorBindingAddLocationOffsetSmokeTest,
 	"AvidScript.Binding.ActorBinding.AddLocationOffsetSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

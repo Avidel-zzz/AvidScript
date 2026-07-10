@@ -15,6 +15,7 @@ public static class ActorLifecycleScript
         UE.Self.SetActorLocation(new FVector(100.0f, 200.0f, 300.0f));
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 0.0f));
         UE.Self.SetActorRotation(FRotator.Zero);
+        UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -25,6 +26,8 @@ public static class ActorLifecycleScript
         UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
         FRotator currentRotation = UE.Self.GetActorRotation();
         UE.Self.SetActorRotation(currentRotation + new FRotator(0.0f, 90.0f * deltaSeconds, 0.0f));
+        FVector currentScale = UE.Self.GetActorScale3D();
+        UE.Self.SetActorScale3D(currentScale + new FVector(0.0f, 0.0f, 0.6f * deltaSeconds));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
@@ -32,6 +35,7 @@ public static class ActorLifecycleScript
     {
         UE.Self.SetActorLocation(FVector.Zero);
         UE.Self.SetActorRotation(FRotator.Zero);
+        UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
     }
 }
 
@@ -78,6 +82,19 @@ public readonly struct FRotator
     }
 }
 
+public readonly struct FTransform
+{
+    public readonly FVector Translation;
+    public readonly FRotator Rotation;
+    public readonly FVector Scale3D;
+
+    public FTransform(FVector translation, FRotator rotation, FVector scale3D)
+    {
+        Translation = translation;
+        Rotation = rotation;
+        Scale3D = scale3D;
+    }
+}
 public readonly struct AActor
 {
     private readonly int Slot;
@@ -117,6 +134,22 @@ public readonly struct AActor
     {
         return Native.ActorSetRotation(Slot, Generation, rotation.Pitch, rotation.Yaw, rotation.Roll) != 0;
     }
+
+    public FVector GetActorScale3D()
+    {
+        Native.ActorGetScale(Slot, Generation, out FVector scale);
+        return scale;
+    }
+
+    public bool SetActorScale3D(FVector scale)
+    {
+        return Native.ActorSetScale(Slot, Generation, scale.X, scale.Y, scale.Z) != 0;
+    }
+
+    public FTransform GetActorTransform()
+    {
+        return new FTransform(GetActorLocation(), GetActorRotation(), GetActorScale3D());
+    }
 }
 
 public static class UE
@@ -147,6 +180,12 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "actor_set_rotation")]
     internal static extern int ActorSetRotation(int slot, int generation, float pitch, float yaw, float roll);
+
+    [DllImport("env", EntryPoint = "actor_get_scale")]
+    internal static extern int ActorGetScale(int slot, int generation, out FVector scale);
+
+    [DllImport("env", EntryPoint = "actor_set_scale")]
+    internal static extern int ActorSetScale(int slot, int generation, float x, float y, float z);
 
     [DllImport("env", EntryPoint = "actor_set_location")]
     internal static extern int ActorSetLocation(int slot, int generation, float x, float y, float z);

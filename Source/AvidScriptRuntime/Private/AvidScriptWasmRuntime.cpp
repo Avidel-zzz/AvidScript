@@ -59,6 +59,8 @@ constexpr const char* AvidScriptActorSetLocationName = "actor_set_location";
 constexpr const char* AvidScriptActorAddLocationOffsetName = "actor_add_location_offset";
 constexpr const char* AvidScriptActorGetRotationName = "actor_get_rotation";
 constexpr const char* AvidScriptActorSetRotationName = "actor_set_rotation";
+constexpr const char* AvidScriptActorGetScaleName = "actor_get_scale";
+constexpr const char* AvidScriptActorSetScaleName = "actor_set_scale";
 constexpr const char* AvidScriptOwnerGetSlotName = "owner_get_slot";
 constexpr const char* AvidScriptOwnerGetGenerationName = "owner_get_generation";
 
@@ -69,6 +71,8 @@ int32_t AvidScriptActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_
 int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 int32_t AvidScriptActorGetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutRotationPtr);
 int32_t AvidScriptActorSetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float Pitch, float Yaw, float Roll);
+int32_t AvidScriptActorGetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutScalePtr);
+int32_t AvidScriptActorSetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv);
 int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv);
 
@@ -80,6 +84,8 @@ NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptActorAddLocationOffsetName, reinterpret_cast<void*>(AvidScriptActorAddLocationOffset), "(iifff)i", nullptr },
 	{ AvidScriptActorGetRotationName, reinterpret_cast<void*>(AvidScriptActorGetRotation), "(iii)i", nullptr },
 	{ AvidScriptActorSetRotationName, reinterpret_cast<void*>(AvidScriptActorSetRotation), "(iifff)i", nullptr },
+	{ AvidScriptActorGetScaleName, reinterpret_cast<void*>(AvidScriptActorGetScale), "(iii)i", nullptr },
+	{ AvidScriptActorSetScaleName, reinterpret_cast<void*>(AvidScriptActorSetScale), "(iifff)i", nullptr },
 	{ AvidScriptOwnerGetSlotName, reinterpret_cast<void*>(AvidScriptOwnerGetSlot), "()i", nullptr },
 	{ AvidScriptOwnerGetGenerationName, reinterpret_cast<void*>(AvidScriptOwnerGetGeneration), "()i", nullptr }
 };
@@ -332,6 +338,63 @@ int32_t AvidScriptActorSetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_
 	return 1;
 }
 
+int32_t AvidScriptActorGetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutScalePtr)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.actor_get_scale");
+		return 0;
+	}
+
+	wasm_module_inst_t WamrModuleInstance = wasm_runtime_get_module_inst(ExecEnv);
+	if (WamrModuleInstance == nullptr || OutScalePtr <= 0 ||
+		!wasm_runtime_validate_app_addr(WamrModuleInstance, static_cast<uint64_t>(OutScalePtr), sizeof(float) * 3))
+	{
+		RuntimeInstance->SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), FString::Printf(TEXT("Invalid output pointer %d for avidscript.actor_get_scale"), OutScalePtr));
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_scale received invalid output pointer");
+		return 0;
+	}
+
+	FVector Scale3D = FVector::ZeroVector;
+	if (RuntimeInstance->HandleActorGetScaleImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Scale3D) == 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_scale returned failure");
+		return 0;
+	}
+
+	float* OutScale = static_cast<float*>(wasm_runtime_addr_app_to_native(WamrModuleInstance, static_cast<uint64_t>(OutScalePtr)));
+	if (OutScale == nullptr)
+	{
+		RuntimeInstance->SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), FString::Printf(TEXT("Failed to translate output pointer %d for avidscript.actor_get_scale"), OutScalePtr));
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_scale pointer translation failed");
+		return 0;
+	}
+
+	OutScale[0] = static_cast<float>(Scale3D.X);
+	OutScale[1] = static_cast<float>(Scale3D.Y);
+	OutScale[2] = static_cast<float>(Scale3D.Z);
+	return 1;
+}
+
+int32_t AvidScriptActorSetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.actor_set_scale");
+		return 0;
+	}
+
+	const FVector Scale3D(static_cast<double>(X), static_cast<double>(Y), static_cast<double>(Z));
+	if (RuntimeInstance->HandleActorSetScaleImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Scale3D) == 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_set_scale returned failure");
+		return 0;
+	}
+
+	return 1;
+}
 int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv)
 {
 	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
@@ -1431,6 +1494,82 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, i
 	return 1;
 }
 
+int32 FAvidScriptWasmRuntimeInstance::HandleActorGetScaleImport(int32 Slot, int32 Generation, FVector& OutScale3D)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	OutScale3D = FVector::ZeroVector;
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), TEXT("Missing host object registry for avidscript.actor_get_scale"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	if (Slot <= 0 || Generation <= 0)
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), FString::Printf(TEXT("Invalid actor handle for avidscript.actor_get_scale | slot=%d | generation=%d"), Slot, Generation));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandle ActorHandle;
+	ActorHandle.Slot = static_cast<uint32>(Slot);
+	ActorHandle.Generation = static_cast<uint32>(Generation);
+
+	FAvidScriptActorBindingResult BindingResult;
+	if (!FAvidScriptActorBinding::GetActorScale3D(*HostContext.ObjectRegistry, ActorHandle, OutScale3D, BindingResult))
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Actor scale read failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int32 Generation, const FVector& Scale3D)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_set_scale"), TEXT("Missing host object registry for avidscript.actor_set_scale"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	if (Slot <= 0 || Generation <= 0)
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_set_scale"), FString::Printf(TEXT("Invalid actor handle for avidscript.actor_set_scale | slot=%d | generation=%d"), Slot, Generation));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandle ActorHandle;
+	ActorHandle.Slot = static_cast<uint32>(Slot);
+	ActorHandle.Generation = static_cast<uint32>(Generation);
+
+	FAvidScriptActorBindingResult BindingResult;
+	if (!FAvidScriptActorBinding::SetActorScale3D(*HostContext.ObjectRegistry, ActorHandle, Scale3D, HostContext.ActorWritePolicy, BindingResult))
+	{
+		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_set_scale"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Actor scale write failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
 int32 FAvidScriptWasmRuntimeInstance::HandleHostAddI32Import(int32 Input)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();

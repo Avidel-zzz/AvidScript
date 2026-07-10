@@ -274,6 +274,9 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents typed GetActorLocation"), SourceText.Contains(TEXT("public FVector GetActorLocation()")) && SourceText.Contains(TEXT("actor_get_location")));
 	TestTrue(TEXT("Sample presents typed GetActorRotation"), SourceText.Contains(TEXT("public FRotator GetActorRotation()")) && SourceText.Contains(TEXT("actor_get_rotation")));
 	TestTrue(TEXT("Sample presents typed SetActorRotation"), SourceText.Contains(TEXT("public bool SetActorRotation(FRotator rotation)")) && SourceText.Contains(TEXT("actor_set_rotation")));
+	TestTrue(TEXT("Sample presents typed GetActorScale3D"), SourceText.Contains(TEXT("public FVector GetActorScale3D()")) && SourceText.Contains(TEXT("actor_get_scale")));
+	TestTrue(TEXT("Sample presents typed SetActorScale3D"), SourceText.Contains(TEXT("public bool SetActorScale3D(FVector scale)")) && SourceText.Contains(TEXT("actor_set_scale")));
+	TestTrue(TEXT("Sample declares FTransform snapshot"), SourceText.Contains(TEXT("public readonly struct FTransform")) && SourceText.Contains(TEXT("public FTransform GetActorTransform()")));
 	TestTrue(TEXT("Sample declares UE.Self"), SourceText.Contains(TEXT("public static class UE")) && SourceText.Contains(TEXT("public static AActor Self")));
 	TestTrue(TEXT("Sample uses typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector")));
 	TestTrue(TEXT("Sample uses typed AddActorWorldOffset"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector")));
@@ -287,6 +290,8 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample uses FVector addition"), SourceText.Contains(TEXT("currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f)")));
 	TestTrue(TEXT("Sample reads rotation into a local FRotator"), SourceText.Contains(TEXT("FRotator currentRotation = UE.Self.GetActorRotation()")));
 	TestTrue(TEXT("Sample uses FRotator addition"), SourceText.Contains(TEXT("currentRotation + new FRotator(0.0f, 90.0f * deltaSeconds, 0.0f)")));
+	TestTrue(TEXT("Sample reads scale into a local FVector"), SourceText.Contains(TEXT("FVector currentScale = UE.Self.GetActorScale3D()")));
+	TestTrue(TEXT("Sample uses scale FVector addition"), SourceText.Contains(TEXT("currentScale + new FVector(0.0f, 0.0f, 0.6f * deltaSeconds)")));
 	TestTrue(TEXT("Sample resets actor in typed EndPlay"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(FVector.Zero)")));
 
 	return true;
@@ -447,7 +452,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v7 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v7")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v8 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v8")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
 	TestTrue(TEXT("C# source adapter manifest declares AActor"), ManifestJson.Contains(TEXT("AActor")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.Self"), ManifestJson.Contains(TEXT("UE.Self")));
@@ -455,6 +460,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter manifest declares FRotator"), ManifestJson.Contains(TEXT("FRotator")));
 	TestTrue(TEXT("C# source adapter manifest declares GetActorRotation"), ManifestJson.Contains(TEXT("GetActorRotation")));
 	TestTrue(TEXT("C# source adapter manifest declares SetActorRotation"), ManifestJson.Contains(TEXT("SetActorRotation")));
+	TestTrue(TEXT("C# source adapter manifest declares GetActorScale3D"), ManifestJson.Contains(TEXT("GetActorScale3D")));
+	TestTrue(TEXT("C# source adapter manifest declares SetActorScale3D"), ManifestJson.Contains(TEXT("SetActorScale3D")));
+	TestTrue(TEXT("C# source adapter manifest declares FTransform"), ManifestJson.Contains(TEXT("FTransform")));
 	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
@@ -492,6 +500,18 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		});
 	TestTrue(TEXT("C# source adapter manifest requires get rotation import"), bRequiresGetRotation);
 	TestTrue(TEXT("C# source adapter manifest requires set rotation import"), bRequiresSetRotation);
+	const bool bRequiresGetScale = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_get_scale");
+		});
+	const bool bRequiresSetScale = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_set_scale");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires get scale import"), bRequiresGetScale);
+	TestTrue(TEXT("C# source adapter manifest requires set scale import"), bRequiresSetScale);
 	const bool bRequiresOwnerSlot = Manifest.RequiredImports.ContainsByPredicate(
 		[](const FAvidScriptWasmRequiredImport& RequiredImport)
 		{
@@ -523,6 +543,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
 	Actor->SetActorRotation(FRotator(5.0, 10.0, 15.0));
+	Actor->SetActorScale3D(FVector(2.0, 2.0, 2.0));
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult DummyRegisterResult;
@@ -560,6 +581,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter artifact loads"), ReloadResult.bSucceeded);
 	TestTrue(TEXT("C# BeginPlay source moves actor"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# BeginPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
+	TestTrue(TEXT("C# BeginPlay source resets actor scale"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.01));
 
 	FAvidScriptWasmSmokeResult TickResult;
 	if (!Session.TickLive(1.0f / 60.0f, TickResult))
@@ -571,6 +593,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# first Tick source applies stateful elapsed expression"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# first Tick source rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
+	TestTrue(TEXT("C# first Tick source scales actor"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.01), 0.01));
 
 	FAvidScriptWasmSmokeResult SecondTickResult;
 	if (!Session.TickLive(1.0f / 60.0f, SecondTickResult))
@@ -582,6 +605,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# second Tick source preserves elapsed state"), Actor->GetActorLocation().Equals(FVector(104.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# second Tick source preserves rotation state"), Actor->GetActorRotation().Equals(FRotator(0.0, 3.0, 0.0), 0.01));
+	TestTrue(TEXT("C# second Tick source preserves scale state"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.02), 0.01));
 	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 2);
 
 	FAvidScriptWasmSmokeResult EndPlayResult;
@@ -594,6 +618,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# EndPlay source moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
 	TestTrue(TEXT("C# EndPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
+	TestTrue(TEXT("C# EndPlay source resets actor scale"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.01));
 	TestTrue(TEXT("C# EndPlay source calls export"), EndPlayResult.bEndPlayCalled);
 
 	DestroyCSharpContractWorld(World);

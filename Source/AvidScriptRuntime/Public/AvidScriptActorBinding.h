@@ -22,6 +22,7 @@ struct FAvidScriptActorBindingResult
 	FString ErrorMessage;
 	FVector Location = FVector::ZeroVector;
 	FRotator Rotation = FRotator::ZeroRotator;
+	FVector Scale3D = FVector::OneVector;
 	FAvidScriptObjectHandleResult ObjectResult;
 };
 
@@ -61,6 +62,19 @@ public:
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult);
 
+	static bool GetActorScale3D(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		FVector& OutScale3D,
+		FAvidScriptActorBindingResult& OutResult);
+
+	static bool SetActorScale3D(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		const FVector& Scale3D,
+		EAvidScriptActorWritePolicy WritePolicy,
+		FAvidScriptActorBindingResult& OutResult);
+
 private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,
@@ -71,7 +85,8 @@ private:
 		FAvidScriptActorBindingResult& OutResult,
 		const FAvidScriptObjectHandleResult& ObjectResult,
 		const FVector& Location,
-		const FRotator& Rotation);
+		const FRotator& Rotation,
+		const FVector& Scale3D);
 
 	static void SetFailure(
 		FAvidScriptActorBindingResult& OutResult,

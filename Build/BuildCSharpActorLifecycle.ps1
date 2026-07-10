@@ -498,6 +498,10 @@ function Convert-CSharpValueExpression {
         return [PSCustomObject]@{ Kind = 'get_actor_rotation'; ValueType = $ValueType }
     }
 
+    if ($ValueType -eq 'FVector' -and $Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorScale3D\s*\(\s*\)$') {
+        return [PSCustomObject]@{ Kind = 'get_actor_scale'; ValueType = $ValueType }
+    }
+
     if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
         $Local = Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $Trimmed
         if ($null -ne $Local) {
@@ -548,7 +552,7 @@ function Get-CSharpLifecycleStatements {
             continue
         }
 
-        $TypedValueCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset|SetActorRotation)\s*\(\s*(?<expr>.+)\s*\)$')
+        $TypedValueCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset|SetActorRotation|SetActorScale3D)\s*\(\s*(?<expr>.+)\s*\)$')
         if ($TypedValueCall.Success) {
             $Method = $TypedValueCall.Groups['method'].Value
             $ValueType = if ($Method -eq 'SetActorRotation') { 'FRotator' } else { 'FVector' }
@@ -556,6 +560,7 @@ function Get-CSharpLifecycleStatements {
                 'SetActorLocation' { 'set_location_value' }
                 'AddActorWorldOffset' { 'add_location_offset_value' }
                 'SetActorRotation' { 'set_rotation_value' }
+                'SetActorScale3D' { 'set_scale_value' }
             }
             $Statements += [PSCustomObject]@{
                 Kind = $Kind
@@ -707,8 +712,8 @@ function Add-CSharpValueLocalAssignmentCode {
         [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
-    if ($Statement.Expression.Kind -eq 'get_actor_location' -or $Statement.Expression.Kind -eq 'get_actor_rotation') {
-        $FunctionIndex = if ($Statement.Expression.Kind -eq 'get_actor_location') { 4 } else { 6 }
+    if ($Statement.Expression.Kind -eq 'get_actor_location' -or $Statement.Expression.Kind -eq 'get_actor_rotation' -or $Statement.Expression.Kind -eq 'get_actor_scale') {
+        $FunctionIndex = if ($Statement.Expression.Kind -eq 'get_actor_location') { 4 } elseif ($Statement.Expression.Kind -eq 'get_actor_rotation') { 6 } else { 8 }
         Add-WasmByte -Bytes $Body -Value 0x10
         Add-WasmU32Leb -Bytes $Body -Value 2
         Add-WasmByte -Bytes $Body -Value 0x10
@@ -750,6 +755,7 @@ function Add-CSharpTypedActorValueCall {
         'set_location_value' { 0 }
         'add_location_offset_value' { 1 }
         'set_rotation_value' { 5 }
+        'set_scale_value' { 7 }
         default { throw "Unsupported typed Actor value call '$($Statement.Kind)'." }
     }
     Add-WasmByte -Bytes $Body -Value 0x10
@@ -814,7 +820,7 @@ function Add-CSharpLifecycleStatementCode {
         return
     }
 
-    if ($Statement.Kind -eq 'set_location_value' -or $Statement.Kind -eq 'add_location_offset_value' -or $Statement.Kind -eq 'set_rotation_value') {
+    if ($Statement.Kind -eq 'set_location_value' -or $Statement.Kind -eq 'add_location_offset_value' -or $Statement.Kind -eq 'set_rotation_value' -or $Statement.Kind -eq 'set_scale_value') {
         Add-CSharpTypedActorValueCall -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         return
     }
@@ -900,7 +906,7 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 7
+    Add-WasmU32Leb -Bytes $ImportSection -Value 9
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -927,6 +933,14 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ImportSection -Value 0
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_get_rotation'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_set_scale'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 0
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_get_scale'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 4
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
@@ -960,13 +974,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 7
+    Add-WasmU32Leb -Bytes $ExportSection -Value 9
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 8
+    Add-WasmU32Leb -Bytes $ExportSection -Value 10
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 9
+    Add-WasmU32Leb -Bytes $ExportSection -Value 11
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -1027,7 +1041,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v7'
+                subset = 'actor_lifecycle_v8'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1057,6 +1071,14 @@ function Invoke-CSharpSourceAdapter {
                 },
                 [ordered]@{
                     module = 'env'
+                    name = 'actor_set_scale'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'actor_get_scale'
+                },
+                [ordered]@{
+                    module = 'env'
                     name = 'owner_get_slot'
                 },
                 [ordered]@{
@@ -1071,9 +1093,9 @@ function Invoke-CSharpSourceAdapter {
             }
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
-                supported_types = @('FVector', 'FRotator', 'AActor', 'UE.Self')
-                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
-                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)')
+                supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'UE.Self')
+                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()')
                 supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
@@ -1085,7 +1107,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v7 source subset with typed Actor location/rotation reads, shared FVector/FRotator locals and addition, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v8 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -1166,6 +1188,14 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "actor_get_rotation"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_set_scale"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_get_scale"
             },
             [ordered]@{
                 module = "env"
@@ -1457,6 +1487,14 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "actor_get_rotation"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_set_scale"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_get_scale"
         },
         [ordered]@{
             module = "env"

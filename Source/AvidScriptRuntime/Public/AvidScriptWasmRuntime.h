@@ -82,6 +82,8 @@ public:
 	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);
 	int32 HandleActorGetRotationImport(int32 Slot, int32 Generation, FRotator& OutRotation);
 	int32 HandleActorSetRotationImport(int32 Slot, int32 Generation, const FRotator& Rotation);
+	int32 HandleActorGetScaleImport(int32 Slot, int32 Generation, FVector& OutScale3D);
+	int32 HandleActorSetScaleImport(int32 Slot, int32 Generation, const FVector& Scale3D);
 	void SetPendingHostImportFailure(
 		const FString& ImportModuleName,
 		const FString& ImportName,

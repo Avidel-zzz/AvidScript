@@ -503,6 +503,16 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 		1);
 	TestTrue(TEXT("Actor rotated by import handler"), Actor->GetActorRotation().Equals(TargetRotation, 0.01));
 
+	const FVector InitialScale(1.0, 2.0, 3.0);
+	Actor->SetActorScale3D(InitialScale);
+	FVector ReadScale = FVector::ZeroVector;
+	TestEqual(TEXT("Actor get scale import succeeds"), Runtime.HandleActorGetScaleImport(ActorHandle.Slot, ActorHandle.Generation, ReadScale), 1);
+	TestTrue(TEXT("Read scale matches actor"), ReadScale.Equals(InitialScale, 0.01));
+
+	const FVector TargetScale(2.0, 3.0, 4.0);
+	TestEqual(TEXT("Actor set scale import succeeds"), Runtime.HandleActorSetScaleImport(ActorHandle.Slot, ActorHandle.Generation, TargetScale), 1);
+	TestTrue(TEXT("Actor scaled by import handler"), Actor->GetActorScale3D().Equals(TargetScale, 0.01));
+
 	FAvidScriptObjectHandleResult ReleaseResult;
 	TestTrue(TEXT("Owner handle releases for stale generation coverage"), Registry.ReleaseHandle(ActorHandle, ReleaseResult));
 	TestEqual(TEXT("Stale owner slot import fails closed"), Runtime.HandleOwnerGetSlotImport(), 0);
@@ -541,6 +551,10 @@ bool FAvidScriptWasmActorImportMissingContextSmokeTest::RunTest(const FString& P
 	TestEqual(TEXT("Missing host context fails closed on get rotation"), Runtime.HandleActorGetRotationImport(1, 1, ReadRotation), 0);
 	TestTrue(TEXT("Failed rotation get leaves zero rotator"), ReadRotation.Equals(FRotator::ZeroRotator, 0.01));
 	TestEqual(TEXT("Missing host context fails closed on set rotation"), Runtime.HandleActorSetRotationImport(1, 1, FRotator(1.0, 2.0, 3.0)), 0);
+	FVector ReadScale = FVector::ZeroVector;
+	TestEqual(TEXT("Missing host context fails closed on get scale"), Runtime.HandleActorGetScaleImport(1, 1, ReadScale), 0);
+	TestTrue(TEXT("Failed scale get leaves zero vector"), ReadScale.Equals(FVector::ZeroVector, 0.01));
+	TestEqual(TEXT("Missing host context fails closed on set scale"), Runtime.HandleActorSetScaleImport(1, 1, FVector(1.0, 2.0, 3.0)), 0);
 	TestEqual(TEXT("Missing owner context fails closed on slot"), Runtime.HandleOwnerGetSlotImport(), 0);
 	TestEqual(TEXT("Missing owner context fails closed on generation"), Runtime.HandleOwnerGetGenerationImport(), 0);
 
