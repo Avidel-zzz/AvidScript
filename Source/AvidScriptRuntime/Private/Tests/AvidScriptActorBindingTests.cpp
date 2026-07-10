@@ -106,6 +106,72 @@ bool FAvidScriptActorBindingLocationReadWriteSmokeTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptActorBindingRotationReadWriteSmokeTest,
+	"AvidScript.Binding.ActorBinding.RotationReadWriteSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptActorBindingRotationReadWriteSmokeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateActorBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create AvidScript actor binding world."));
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Test actor spawns"), Actor);
+	if (Actor == nullptr)
+	{
+		DestroyActorBindingWorld(World);
+		return true;
+	}
+
+	const FRotator InitialRotation(10.0, 20.0, 30.0);
+	Actor->SetActorRotation(InitialRotation);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Actor registers as handle"), RegisterResult.bSucceeded);
+
+	FRotator ReadRotation = FRotator::ZeroRotator;
+	FAvidScriptActorBindingResult ReadResult;
+	TestTrue(
+		TEXT("Actor rotation is readable through handle"),
+		FAvidScriptActorBinding::GetActorRotation(Registry, ActorHandle, ReadRotation, ReadResult));
+	TestTrue(TEXT("Read rotation matches actor"), ReadRotation.Equals(InitialRotation, 0.01));
+	TestTrue(TEXT("Read result reports rotation"), ReadResult.Rotation.Equals(InitialRotation, 0.01));
+
+	const FRotator TargetRotation(15.0, 75.0, -5.0);
+	FAvidScriptActorBindingResult WriteResult;
+	TestTrue(
+		TEXT("Actor rotation is writable when policy allows writes"),
+		FAvidScriptActorBinding::SetActorRotation(
+			Registry,
+			ActorHandle,
+			TargetRotation,
+			EAvidScriptActorWritePolicy::AllowWrites,
+			WriteResult));
+	TestTrue(TEXT("Actor rotates to target"), Actor->GetActorRotation().Equals(TargetRotation, 0.01));
+
+	FAvidScriptActorBindingResult DeniedResult;
+	TestFalse(
+		TEXT("Read-only policy denies actor rotation writes"),
+		FAvidScriptActorBinding::SetActorRotation(
+			Registry,
+			ActorHandle,
+			FRotator(0.0, 180.0, 0.0),
+			EAvidScriptActorWritePolicy::ReadOnly,
+			DeniedResult));
+	TestEqual(TEXT("Denied rotation reports policy category"), DeniedResult.ErrorCategory, FString(TEXT("write_denied")));
+	TestTrue(TEXT("Denied rotation keeps actor rotation unchanged"), Actor->GetActorRotation().Equals(TargetRotation, 0.01));
+
+	DestroyActorBindingWorld(World);
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptActorBindingAddLocationOffsetSmokeTest,
 	"AvidScript.Binding.ActorBinding.AddLocationOffsetSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -14,6 +14,7 @@ public static class ActorLifecycleScript
         ElapsedSeconds = 0.0f;
         UE.Self.SetActorLocation(new FVector(100.0f, 200.0f, 300.0f));
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 0.0f));
+        UE.Self.SetActorRotation(FRotator.Zero);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -22,12 +23,15 @@ public static class ActorLifecycleScript
         ElapsedSeconds += deltaSeconds;
         FVector currentLocation = UE.Self.GetActorLocation();
         UE.Self.SetActorLocation(currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f));
+        FRotator currentRotation = UE.Self.GetActorRotation();
+        UE.Self.SetActorRotation(currentRotation + new FRotator(0.0f, 90.0f * deltaSeconds, 0.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
         UE.Self.SetActorLocation(FVector.Zero);
+        UE.Self.SetActorRotation(FRotator.Zero);
     }
 }
 
@@ -49,6 +53,28 @@ public readonly struct FVector
     public static FVector operator +(FVector left, FVector right)
     {
         return new FVector(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
+    }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct FRotator
+{
+    public readonly float Pitch;
+    public readonly float Yaw;
+    public readonly float Roll;
+
+    public FRotator(float pitch, float yaw, float roll)
+    {
+        Pitch = pitch;
+        Yaw = yaw;
+        Roll = roll;
+    }
+
+    public static FRotator Zero => new FRotator(0.0f, 0.0f, 0.0f);
+
+    public static FRotator operator +(FRotator left, FRotator right)
+    {
+        return new FRotator(left.Pitch + right.Pitch, left.Yaw + right.Yaw, left.Roll + right.Roll);
     }
 }
 
@@ -80,6 +106,17 @@ public readonly struct AActor
     {
         return Native.ActorAddLocationOffset(Slot, Generation, delta.X, delta.Y, delta.Z) != 0;
     }
+
+    public FRotator GetActorRotation()
+    {
+        Native.ActorGetRotation(Slot, Generation, out FRotator rotation);
+        return rotation;
+    }
+
+    public bool SetActorRotation(FRotator rotation)
+    {
+        return Native.ActorSetRotation(Slot, Generation, rotation.Pitch, rotation.Yaw, rotation.Roll) != 0;
+    }
 }
 
 public static class UE
@@ -104,6 +141,12 @@ internal static class Native
 {
     [DllImport("env", EntryPoint = "actor_get_location")]
     internal static extern int ActorGetLocation(int slot, int generation, out FVector location);
+
+    [DllImport("env", EntryPoint = "actor_get_rotation")]
+    internal static extern int ActorGetRotation(int slot, int generation, out FRotator rotation);
+
+    [DllImport("env", EntryPoint = "actor_set_rotation")]
+    internal static extern int ActorSetRotation(int slot, int generation, float pitch, float yaw, float roll);
 
     [DllImport("env", EntryPoint = "actor_set_location")]
     internal static extern int ActorSetLocation(int slot, int generation, float x, float y, float z);

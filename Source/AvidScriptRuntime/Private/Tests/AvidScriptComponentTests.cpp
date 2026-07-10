@@ -239,6 +239,7 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	}
 
 	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+	Actor->SetActorRotation(FRotator(5.0, 10.0, 15.0));
 
 	UAvidScriptComponent* Component = AddAvidScriptComponent(Actor, ManifestPath);
 	TestNotNull(TEXT("AvidScript component is attachable to an actor with a C# manifest"), Component);
@@ -252,15 +253,18 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestTrue(TEXT("Component loads C# manifest runtime on BeginPlay"), StatsAfterBeginPlay.bRuntimeLoaded);
 	TestTrue(TEXT("Component calls C# avid_on_begin_play"), StatsAfterBeginPlay.bBeginPlayCalled);
 	TestTrue(TEXT("C# component BeginPlay moves actor"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# component BeginPlay resets rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 
 	World->Tick(LEVELTICK_All, 1.0f / 60.0f);
 
 	const FAvidScriptComponentRuntimeStats StatsAfterTick = Component->GetRuntimeStats();
 	TestTrue(TEXT("Component tick calls C# avid_on_tick"), StatsAfterTick.TickCallCount > 0);
 	TestTrue(TEXT("C# component Tick moves actor"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# component Tick rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
 
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
 	TestTrue(TEXT("C# component EndPlay moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
+	TestTrue(TEXT("C# component EndPlay resets rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 
 	const FAvidScriptComponentRuntimeStats StatsAfterEndPlay = Component->GetRuntimeStats();
 	TestFalse(TEXT("Component unloads C# runtime on EndPlay"), StatsAfterEndPlay.bRuntimeLoaded);

@@ -268,8 +268,12 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample imports env owner_get_generation"), SourceText.Contains(TEXT("owner_get_generation")));
 	TestTrue(TEXT("Sample declares sequential FVector"), SourceText.Contains(TEXT("[StructLayout(LayoutKind.Sequential)]")) && SourceText.Contains(TEXT("public readonly struct FVector")));
 	TestTrue(TEXT("Sample declares FVector addition"), SourceText.Contains(TEXT("public static FVector operator +")));
+	TestTrue(TEXT("Sample declares sequential FRotator"), SourceText.Contains(TEXT("public readonly struct FRotator")));
+	TestTrue(TEXT("Sample declares FRotator addition"), SourceText.Contains(TEXT("public static FRotator operator +")));
 	TestTrue(TEXT("Sample declares handle-backed AActor"), SourceText.Contains(TEXT("public readonly struct AActor")));
 	TestTrue(TEXT("Sample presents typed GetActorLocation"), SourceText.Contains(TEXT("public FVector GetActorLocation()")) && SourceText.Contains(TEXT("actor_get_location")));
+	TestTrue(TEXT("Sample presents typed GetActorRotation"), SourceText.Contains(TEXT("public FRotator GetActorRotation()")) && SourceText.Contains(TEXT("actor_get_rotation")));
+	TestTrue(TEXT("Sample presents typed SetActorRotation"), SourceText.Contains(TEXT("public bool SetActorRotation(FRotator rotation)")) && SourceText.Contains(TEXT("actor_set_rotation")));
 	TestTrue(TEXT("Sample declares UE.Self"), SourceText.Contains(TEXT("public static class UE")) && SourceText.Contains(TEXT("public static AActor Self")));
 	TestTrue(TEXT("Sample uses typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector")));
 	TestTrue(TEXT("Sample uses typed AddActorWorldOffset"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector")));
@@ -281,6 +285,8 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
 	TestTrue(TEXT("Sample reads location into a local FVector"), SourceText.Contains(TEXT("FVector currentLocation = UE.Self.GetActorLocation()")));
 	TestTrue(TEXT("Sample uses FVector addition"), SourceText.Contains(TEXT("currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f)")));
+	TestTrue(TEXT("Sample reads rotation into a local FRotator"), SourceText.Contains(TEXT("FRotator currentRotation = UE.Self.GetActorRotation()")));
+	TestTrue(TEXT("Sample uses FRotator addition"), SourceText.Contains(TEXT("currentRotation + new FRotator(0.0f, 90.0f * deltaSeconds, 0.0f)")));
 	TestTrue(TEXT("Sample resets actor in typed EndPlay"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(FVector.Zero)")));
 
 	return true;
@@ -441,11 +447,14 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v6 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v6")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v7 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v7")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
 	TestTrue(TEXT("C# source adapter manifest declares AActor"), ManifestJson.Contains(TEXT("AActor")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.Self"), ManifestJson.Contains(TEXT("UE.Self")));
 	TestTrue(TEXT("C# source adapter manifest declares GetActorLocation"), ManifestJson.Contains(TEXT("GetActorLocation")));
+	TestTrue(TEXT("C# source adapter manifest declares FRotator"), ManifestJson.Contains(TEXT("FRotator")));
+	TestTrue(TEXT("C# source adapter manifest declares GetActorRotation"), ManifestJson.Contains(TEXT("GetActorRotation")));
+	TestTrue(TEXT("C# source adapter manifest declares SetActorRotation"), ManifestJson.Contains(TEXT("SetActorRotation")));
 	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
@@ -471,6 +480,18 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_get_location");
 		});
 	TestTrue(TEXT("C# source adapter manifest requires get location import"), bRequiresGetLocation);
+	const bool bRequiresGetRotation = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_get_rotation");
+		});
+	const bool bRequiresSetRotation = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_set_rotation");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires get rotation import"), bRequiresGetRotation);
+	TestTrue(TEXT("C# source adapter manifest requires set rotation import"), bRequiresSetRotation);
 	const bool bRequiresOwnerSlot = Manifest.RequiredImports.ContainsByPredicate(
 		[](const FAvidScriptWasmRequiredImport& RequiredImport)
 		{
@@ -501,6 +522,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+	Actor->SetActorRotation(FRotator(5.0, 10.0, 15.0));
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult DummyRegisterResult;
@@ -537,6 +559,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# source adapter artifact loads"), ReloadResult.bSucceeded);
 	TestTrue(TEXT("C# BeginPlay source moves actor"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# BeginPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 
 	FAvidScriptWasmSmokeResult TickResult;
 	if (!Session.TickLive(1.0f / 60.0f, TickResult))
@@ -547,6 +570,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	TestTrue(TEXT("C# first Tick source applies stateful elapsed expression"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# first Tick source rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
 
 	FAvidScriptWasmSmokeResult SecondTickResult;
 	if (!Session.TickLive(1.0f / 60.0f, SecondTickResult))
@@ -557,6 +581,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	TestTrue(TEXT("C# second Tick source preserves elapsed state"), Actor->GetActorLocation().Equals(FVector(104.0, 200.0, 300.0), 0.01));
+	TestTrue(TEXT("C# second Tick source preserves rotation state"), Actor->GetActorRotation().Equals(FRotator(0.0, 3.0, 0.0), 0.01));
 	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 2);
 
 	FAvidScriptWasmSmokeResult EndPlayResult;
@@ -568,6 +593,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	TestTrue(TEXT("C# EndPlay source moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
+	TestTrue(TEXT("C# EndPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 	TestTrue(TEXT("C# EndPlay source calls export"), EndPlayResult.bEndPlayCalled);
 
 	DestroyCSharpContractWorld(World);

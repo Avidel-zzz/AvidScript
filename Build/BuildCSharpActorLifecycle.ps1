@@ -439,13 +439,13 @@ function Convert-CSharpFloatExpression {
     }
 }
 
-function Find-CSharpVectorLocal {
+function Find-CSharpValueLocal {
     param(
-        [object[]]$VectorLocals = @(),
+        [object[]]$ValueLocals = @(),
         [Parameter(Mandatory = $true)][string]$Name
     )
 
-    foreach ($Local in @($VectorLocals)) {
+    foreach ($Local in @($ValueLocals)) {
         if ($Local.Name -eq $Name) {
             return $Local
         }
@@ -454,51 +454,64 @@ function Find-CSharpVectorLocal {
     return $null
 }
 
-function Convert-CSharpVectorExpression {
+function Convert-CSharpValueExpression {
     param(
         [Parameter(Mandatory = $true)][string]$Expression,
+        [Parameter(Mandatory = $true)][ValidateSet('FVector', 'FRotator')][string]$ValueType,
         [object[]]$Fields = @(),
-        [object[]]$VectorLocals = @()
+        [object[]]$ValueLocals = @()
     )
 
     $Trimmed = $Expression.Trim()
     $AddMatch = [regex]::Match($Trimmed, '^(?<left>[A-Za-z_][A-Za-z0-9_]*)\s*\+\s*(?<right>.+)$')
     if ($AddMatch.Success) {
         return [PSCustomObject]@{
-            Kind = 'vector_add'
-            Left = Convert-CSharpVectorExpression -Expression $AddMatch.Groups['left'].Value -Fields $Fields -VectorLocals $VectorLocals
-            Right = Convert-CSharpVectorExpression -Expression $AddMatch.Groups['right'].Value -Fields $Fields -VectorLocals $VectorLocals
+            Kind = 'value_add'
+            ValueType = $ValueType
+            Left = Convert-CSharpValueExpression -Expression $AddMatch.Groups['left'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+            Right = Convert-CSharpValueExpression -Expression $AddMatch.Groups['right'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
         }
     }
 
-    if ($Trimmed -match '^FVector\s*\.\s*Zero$') {
+    if ($Trimmed -match ('^' + [regex]::Escape($ValueType) + '\s*\.\s*Zero$')) {
         $Zero = [PSCustomObject]@{ Kind = 'constant'; Value = [single]0 }
-        return [PSCustomObject]@{ Kind = 'vector_construct'; X = $Zero; Y = $Zero; Z = $Zero }
+        return [PSCustomObject]@{ Kind = 'value_construct'; ValueType = $ValueType; A = $Zero; B = $Zero; C = $Zero }
     }
 
-    $ConstructorMatch = [regex]::Match($Trimmed, '^new\s+FVector\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>.+?)\s*\)$')
+    $ConstructorPattern = '^new\s+' + [regex]::Escape($ValueType) + '\s*\(\s*(?<a>[^,]+?)\s*,\s*(?<b>[^,]+?)\s*,\s*(?<c>.+?)\s*\)$'
+    $ConstructorMatch = [regex]::Match($Trimmed, $ConstructorPattern)
     if ($ConstructorMatch.Success) {
         return [PSCustomObject]@{
-            Kind = 'vector_construct'
-            X = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['x'].Value -Fields $Fields
-            Y = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['y'].Value -Fields $Fields
-            Z = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['z'].Value -Fields $Fields
+            Kind = 'value_construct'
+            ValueType = $ValueType
+            A = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['a'].Value -Fields $Fields
+            B = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['b'].Value -Fields $Fields
+            C = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['c'].Value -Fields $Fields
         }
     }
 
-    if ($Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorLocation\s*\(\s*\)$') {
-        return [PSCustomObject]@{ Kind = 'get_actor_location' }
+    if ($ValueType -eq 'FVector' -and $Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorLocation\s*\(\s*\)$') {
+        return [PSCustomObject]@{ Kind = 'get_actor_location'; ValueType = $ValueType }
+    }
+
+    if ($ValueType -eq 'FRotator' -and $Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorRotation\s*\(\s*\)$') {
+        return [PSCustomObject]@{ Kind = 'get_actor_rotation'; ValueType = $ValueType }
     }
 
     if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
-        $Local = Find-CSharpVectorLocal -VectorLocals $VectorLocals -Name $Trimmed
+        $Local = Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $Trimmed
         if ($null -ne $Local) {
-            return [PSCustomObject]@{ Kind = 'vector_local'; Name = $Local.Name; Ordinal = $Local.Ordinal }
+            if ($Local.ValueType -ne $ValueType) {
+                throw "C# value local '$Trimmed' is $($Local.ValueType), not $ValueType."
+            }
+
+            return [PSCustomObject]@{ Kind = 'value_local'; ValueType = $ValueType; Name = $Local.Name; Ordinal = $Local.Ordinal }
         }
     }
 
-    throw "Unsupported C# FVector expression '$Trimmed'."
+    throw "Unsupported C# $ValueType expression '$Trimmed'."
 }
+
 function Get-CSharpLifecycleStatements {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$MethodBody,
@@ -508,40 +521,50 @@ function Get-CSharpLifecycleStatements {
     )
 
     $Statements = @()
-    $VectorLocals = @()
+    $ValueLocals = @()
     foreach ($Match in [regex]::Matches($MethodBody, '(?s)(?<statement>[^;]+);')) {
         $StatementText = $Match.Groups['statement'].Value.Trim()
         if ([string]::IsNullOrWhiteSpace($StatementText)) {
             continue
         }
 
-        $VectorDeclarationMatch = [regex]::Match($StatementText, '^FVector\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<expr>.+)$')
-        if ($VectorDeclarationMatch.Success) {
-            $LocalName = $VectorDeclarationMatch.Groups['name'].Value
-            if ($null -ne (Find-CSharpVectorLocal -VectorLocals $VectorLocals -Name $LocalName)) {
-                throw "Duplicate C# FVector local '$LocalName' in '$MethodName'."
+        $ValueDeclarationMatch = [regex]::Match($StatementText, '^(?<type>FVector|FRotator)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<expr>.+)$')
+        if ($ValueDeclarationMatch.Success) {
+            $ValueType = $ValueDeclarationMatch.Groups['type'].Value
+            $LocalName = $ValueDeclarationMatch.Groups['name'].Value
+            if ($null -ne (Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $LocalName)) {
+                throw "Duplicate C# value local '$LocalName' in '$MethodName'."
             }
 
-            $Expression = Convert-CSharpVectorExpression -Expression $VectorDeclarationMatch.Groups['expr'].Value -Fields $Fields -VectorLocals $VectorLocals
-            $Local = [PSCustomObject]@{ Name = $LocalName; Ordinal = $VectorLocals.Count }
-            $VectorLocals += $Local
+            $Expression = Convert-CSharpValueExpression -Expression $ValueDeclarationMatch.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+            $Local = [PSCustomObject]@{ Name = $LocalName; ValueType = $ValueType; Ordinal = $ValueLocals.Count }
+            $ValueLocals += $Local
             $Statements += [PSCustomObject]@{
-                Kind = 'vector_local_assign'
+                Kind = 'value_local_assign'
+                ValueType = $ValueType
                 LocalOrdinal = $Local.Ordinal
                 Expression = $Expression
             }
             continue
         }
 
-        $TypedVectorCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset)\s*\(\s*(?<expr>.+)\s*\)$')
-        if ($TypedVectorCall.Success) {
-            $Method = $TypedVectorCall.Groups['method'].Value
+        $TypedValueCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset|SetActorRotation)\s*\(\s*(?<expr>.+)\s*\)$')
+        if ($TypedValueCall.Success) {
+            $Method = $TypedValueCall.Groups['method'].Value
+            $ValueType = if ($Method -eq 'SetActorRotation') { 'FRotator' } else { 'FVector' }
+            $Kind = switch ($Method) {
+                'SetActorLocation' { 'set_location_value' }
+                'AddActorWorldOffset' { 'add_location_offset_value' }
+                'SetActorRotation' { 'set_rotation_value' }
+            }
             $Statements += [PSCustomObject]@{
-                Kind = if ($Method -eq 'SetActorLocation') { 'set_location_vector' } else { 'add_location_offset_vector' }
-                VectorExpression = Convert-CSharpVectorExpression -Expression $TypedVectorCall.Groups['expr'].Value -Fields $Fields -VectorLocals $VectorLocals
+                Kind = $Kind
+                ValueType = $ValueType
+                ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
             }
             continue
         }
+
         $ActorMatch = [regex]::Match($StatementText, '^Actor\s*\.\s*(?<method>SetLocation|AddLocationOffset)\s*\(\s*(?<x>[^,]+?)\s*,\s*(?<y>[^,]+?)\s*,\s*(?<z>[^\)]+?)\s*\)$')
         if ($ActorMatch.Success) {
             $Method = $ActorMatch.Groups['method'].Value
@@ -645,46 +668,47 @@ function Add-CSharpFloatExpressionCode {
     throw "Unsupported C# expression kind '$($Expression.Kind)'."
 }
 
-function Add-CSharpVectorComponentCode {
+function Add-CSharpValueComponentCode {
     param(
         [Parameter(Mandatory = $true)]$Body,
         [Parameter(Mandatory = $true)]$Expression,
         [Parameter(Mandatory = $true)][int]$ComponentIndex,
         [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
-        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+        [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
-    if ($Expression.Kind -eq 'vector_construct') {
-        $Components = @($Expression.X, $Expression.Y, $Expression.Z)
+    if ($Expression.Kind -eq 'value_construct') {
+        $Components = @($Expression.A, $Expression.B, $Expression.C)
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Components[$ComponentIndex] -AllowDeltaSeconds $AllowDeltaSeconds
         return
     }
 
-    if ($Expression.Kind -eq 'vector_local') {
+    if ($Expression.Kind -eq 'value_local') {
         Add-WasmByte -Bytes $Body -Value 0x20
-        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Expression.Ordinal) + $ComponentIndex))
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($ValueLocalBase + (3 * $Expression.Ordinal) + $ComponentIndex))
         return
     }
 
-    if ($Expression.Kind -eq 'vector_add') {
-        Add-CSharpVectorComponentCode -Body $Body -Expression $Expression.Left -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
-        Add-CSharpVectorComponentCode -Body $Body -Expression $Expression.Right -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+    if ($Expression.Kind -eq 'value_add') {
+        Add-CSharpValueComponentCode -Body $Body -Expression $Expression.Left -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
+        Add-CSharpValueComponentCode -Body $Body -Expression $Expression.Right -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         Add-WasmByte -Bytes $Body -Value 0x92
         return
     }
 
-    throw "Unsupported FVector component expression kind '$($Expression.Kind)'."
+    throw "Unsupported $($Expression.ValueType) component expression kind '$($Expression.Kind)'."
 }
 
-function Add-CSharpVectorLocalAssignmentCode {
+function Add-CSharpValueLocalAssignmentCode {
     param(
         [Parameter(Mandatory = $true)]$Body,
         [Parameter(Mandatory = $true)]$Statement,
         [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
-        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+        [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
-    if ($Statement.Expression.Kind -eq 'get_actor_location') {
+    if ($Statement.Expression.Kind -eq 'get_actor_location' -or $Statement.Expression.Kind -eq 'get_actor_rotation') {
+        $FunctionIndex = if ($Statement.Expression.Kind -eq 'get_actor_location') { 4 } else { 6 }
         Add-WasmByte -Bytes $Body -Value 0x10
         Add-WasmU32Leb -Bytes $Body -Value 2
         Add-WasmByte -Bytes $Body -Value 0x10
@@ -692,7 +716,7 @@ function Add-CSharpVectorLocalAssignmentCode {
         Add-WasmByte -Bytes $Body -Value 0x41
         Add-WasmU32Leb -Bytes $Body -Value 16
         Add-WasmByte -Bytes $Body -Value 0x10
-        Add-WasmU32Leb -Bytes $Body -Value 4
+        Add-WasmU32Leb -Bytes $Body -Value $FunctionIndex
         Add-WasmByte -Bytes $Body -Value 0x1a
 
         for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
@@ -702,33 +726,38 @@ function Add-CSharpVectorLocalAssignmentCode {
             Add-WasmU32Leb -Bytes $Body -Value 2
             Add-WasmU32Leb -Bytes $Body -Value 0
             Add-WasmByte -Bytes $Body -Value 0x21
-            Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32]($ValueLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
         }
         return
     }
 
     for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
-        Add-CSharpVectorComponentCode -Body $Body -Expression $Statement.Expression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-CSharpValueComponentCode -Body $Body -Expression $Statement.Expression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         Add-WasmByte -Bytes $Body -Value 0x21
-        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($VectorLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]($ValueLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
     }
 }
 
-function Add-CSharpTypedActorVectorCall {
+function Add-CSharpTypedActorValueCall {
     param(
         [Parameter(Mandatory = $true)]$Body,
         [Parameter(Mandatory = $true)]$Statement,
         [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
-        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+        [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
-    $FunctionIndex = if ($Statement.Kind -eq 'set_location_vector') { 0 } else { 1 }
+    $FunctionIndex = switch ($Statement.Kind) {
+        'set_location_value' { 0 }
+        'add_location_offset_value' { 1 }
+        'set_rotation_value' { 5 }
+        default { throw "Unsupported typed Actor value call '$($Statement.Kind)'." }
+    }
     Add-WasmByte -Bytes $Body -Value 0x10
     Add-WasmU32Leb -Bytes $Body -Value 2
     Add-WasmByte -Bytes $Body -Value 0x10
     Add-WasmU32Leb -Bytes $Body -Value 3
     for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
-        Add-CSharpVectorComponentCode -Body $Body -Expression $Statement.VectorExpression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-CSharpValueComponentCode -Body $Body -Expression $Statement.ValueExpression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
     }
     Add-WasmByte -Bytes $Body -Value 0x10
     Add-WasmU32Leb -Bytes $Body -Value $FunctionIndex
@@ -777,18 +806,19 @@ function Add-CSharpLifecycleStatementCode {
         [Parameter(Mandatory = $true)]$Body,
         [Parameter(Mandatory = $true)]$Statement,
         [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
-        [Parameter(Mandatory = $true)][int]$VectorLocalBase
+        [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
-    if ($Statement.Kind -eq 'vector_local_assign') {
-        Add-CSharpVectorLocalAssignmentCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+    if ($Statement.Kind -eq 'value_local_assign') {
+        Add-CSharpValueLocalAssignmentCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         return
     }
 
-    if ($Statement.Kind -eq 'set_location_vector' -or $Statement.Kind -eq 'add_location_offset_vector') {
-        Add-CSharpTypedActorVectorCall -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+    if ($Statement.Kind -eq 'set_location_value' -or $Statement.Kind -eq 'add_location_offset_value' -or $Statement.Kind -eq 'set_rotation_value') {
+        Add-CSharpTypedActorValueCall -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         return
     }
+
     if ($Statement.Kind -eq 'field_assign') {
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Statement.Expression -AllowDeltaSeconds $AllowDeltaSeconds
         Add-WasmByte -Bytes $Body -Value 0x24
@@ -816,18 +846,18 @@ function New-CSharpLifecycleFunctionBody {
     )
 
     $Body = New-WasmByteList
-    $VectorLocalCount = @($Statements | Where-Object { $_.Kind -eq 'vector_local_assign' }).Count
-    $VectorLocalBase = if ($AllowDeltaSeconds) { 1 } else { 0 }
-    if ($VectorLocalCount -gt 0) {
+    $ValueLocalCount = @($Statements | Where-Object { $_.Kind -eq 'value_local_assign' }).Count
+    $ValueLocalBase = if ($AllowDeltaSeconds) { 1 } else { 0 }
+    if ($ValueLocalCount -gt 0) {
         Add-WasmU32Leb -Bytes $Body -Value 1
-        Add-WasmU32Leb -Bytes $Body -Value ([uint32](3 * $VectorLocalCount))
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32](3 * $ValueLocalCount))
         Add-WasmByte -Bytes $Body -Value 0x7d
     }
     else {
         Add-WasmU32Leb -Bytes $Body -Value 0
     }
     foreach ($Statement in $Statements) {
-        Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -VectorLocalBase $VectorLocalBase
+        Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
     }
     Add-WasmByte -Bytes $Body -Value 0x0b
     return ,$Body
@@ -870,7 +900,7 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 5
+    Add-WasmU32Leb -Bytes $ImportSection -Value 7
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -889,6 +919,14 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ImportSection -Value 3
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_get_location'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_set_rotation'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 0
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_get_rotation'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 4
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
@@ -922,13 +960,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 5
+    Add-WasmU32Leb -Bytes $ExportSection -Value 7
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 6
+    Add-WasmU32Leb -Bytes $ExportSection -Value 8
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 7
+    Add-WasmU32Leb -Bytes $ExportSection -Value 9
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -989,7 +1027,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v6'
+                subset = 'actor_lifecycle_v7'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1011,6 +1049,14 @@ function Invoke-CSharpSourceAdapter {
                 },
                 [ordered]@{
                     module = 'env'
+                    name = 'actor_set_rotation'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'actor_get_rotation'
+                },
+                [ordered]@{
+                    module = 'env'
                     name = 'owner_get_slot'
                 },
                 [ordered]@{
@@ -1025,9 +1071,9 @@ function Invoke-CSharpSourceAdapter {
             }
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
-                supported_types = @('FVector', 'AActor', 'UE.Self')
-                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
-                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)')
+                supported_types = @('FVector', 'FRotator', 'AActor', 'UE.Self')
+                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)')
                 supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
@@ -1039,7 +1085,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v6 source subset with typed Actor reads, FVector locals/addition, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v7 source subset with typed Actor location/rotation reads, shared FVector/FRotator locals and addition, BeginPlay, Tick, EndPlay, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -1112,6 +1158,14 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "actor_get_location"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_set_rotation"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_get_rotation"
             },
             [ordered]@{
                 module = "env"
@@ -1395,6 +1449,14 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "actor_get_location"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_set_rotation"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_get_rotation"
         },
         [ordered]@{
             module = "env"

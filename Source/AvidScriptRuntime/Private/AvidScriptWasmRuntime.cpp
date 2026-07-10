@@ -57,6 +57,8 @@ constexpr const char* AvidScriptHostFailI32Name = "host_fail_i32";
 constexpr const char* AvidScriptActorGetLocationName = "actor_get_location";
 constexpr const char* AvidScriptActorSetLocationName = "actor_set_location";
 constexpr const char* AvidScriptActorAddLocationOffsetName = "actor_add_location_offset";
+constexpr const char* AvidScriptActorGetRotationName = "actor_get_rotation";
+constexpr const char* AvidScriptActorSetRotationName = "actor_set_rotation";
 constexpr const char* AvidScriptOwnerGetSlotName = "owner_get_slot";
 constexpr const char* AvidScriptOwnerGetGenerationName = "owner_get_generation";
 
@@ -65,6 +67,8 @@ int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptActorGetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutLocationPtr);
 int32_t AvidScriptActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
+int32_t AvidScriptActorGetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutRotationPtr);
+int32_t AvidScriptActorSetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float Pitch, float Yaw, float Roll);
 int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv);
 int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv);
 
@@ -74,6 +78,8 @@ NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptActorGetLocationName, reinterpret_cast<void*>(AvidScriptActorGetLocation), "(iii)i", nullptr },
 	{ AvidScriptActorSetLocationName, reinterpret_cast<void*>(AvidScriptActorSetLocation), "(iifff)i", nullptr },
 	{ AvidScriptActorAddLocationOffsetName, reinterpret_cast<void*>(AvidScriptActorAddLocationOffset), "(iifff)i", nullptr },
+	{ AvidScriptActorGetRotationName, reinterpret_cast<void*>(AvidScriptActorGetRotation), "(iii)i", nullptr },
+	{ AvidScriptActorSetRotationName, reinterpret_cast<void*>(AvidScriptActorSetRotation), "(iifff)i", nullptr },
 	{ AvidScriptOwnerGetSlotName, reinterpret_cast<void*>(AvidScriptOwnerGetSlot), "()i", nullptr },
 	{ AvidScriptOwnerGetGenerationName, reinterpret_cast<void*>(AvidScriptOwnerGetGeneration), "()i", nullptr }
 };
@@ -256,6 +262,70 @@ int32_t AvidScriptActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, 
 	if (RuntimeInstance->HandleActorAddLocationOffsetImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Offset) == 0)
 	{
 		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_add_location_offset returned failure");
+		return 0;
+	}
+
+	return 1;
+}
+
+int32_t AvidScriptActorGetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutRotationPtr)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.actor_get_rotation");
+		return 0;
+	}
+
+	wasm_module_inst_t WamrModuleInstance = wasm_runtime_get_module_inst(ExecEnv);
+	if (WamrModuleInstance == nullptr || OutRotationPtr <= 0 ||
+		!wasm_runtime_validate_app_addr(WamrModuleInstance, static_cast<uint64_t>(OutRotationPtr), sizeof(float) * 3))
+	{
+		RuntimeInstance->SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_rotation"),
+			FString::Printf(TEXT("Invalid output pointer %d for avidscript.actor_get_rotation"), OutRotationPtr));
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_rotation received invalid output pointer");
+		return 0;
+	}
+
+	FRotator Rotation = FRotator::ZeroRotator;
+	if (RuntimeInstance->HandleActorGetRotationImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Rotation) == 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_rotation returned failure");
+		return 0;
+	}
+
+	float* OutRotation = static_cast<float*>(wasm_runtime_addr_app_to_native(WamrModuleInstance, static_cast<uint64_t>(OutRotationPtr)));
+	if (OutRotation == nullptr)
+	{
+		RuntimeInstance->SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_rotation"),
+			FString::Printf(TEXT("Failed to translate output pointer %d for avidscript.actor_get_rotation"), OutRotationPtr));
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_get_rotation pointer translation failed");
+		return 0;
+	}
+
+	OutRotation[0] = static_cast<float>(Rotation.Pitch);
+	OutRotation[1] = static_cast<float>(Rotation.Yaw);
+	OutRotation[2] = static_cast<float>(Rotation.Roll);
+	return 1;
+}
+
+int32_t AvidScriptActorSetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float Pitch, float Yaw, float Roll)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.actor_set_rotation");
+		return 0;
+	}
+
+	const FRotator Rotation(static_cast<double>(Pitch), static_cast<double>(Yaw), static_cast<double>(Roll));
+	if (RuntimeInstance->HandleActorSetRotationImport(static_cast<int32>(Slot), static_cast<int32>(Generation), Rotation) == 0)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: avidscript.actor_set_rotation returned failure");
 		return 0;
 	}
 
@@ -1252,6 +1322,105 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 S
 			TEXT("actor_add_location_offset"),
 			BindingResult.ErrorMessage.IsEmpty()
 				? FString::Printf(TEXT("Actor location offset failed for avidscript.actor_add_location_offset | slot=%d | generation=%d"), Slot, Generation)
+				: BindingResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRotationImport(int32 Slot, int32 Generation, FRotator& OutRotation)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	OutRotation = FRotator::ZeroRotator;
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_rotation"),
+			TEXT("Missing host object registry for avidscript.actor_get_rotation"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	if (Slot <= 0 || Generation <= 0)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_rotation"),
+			FString::Printf(TEXT("Invalid actor handle for avidscript.actor_get_rotation | slot=%d | generation=%d"), Slot, Generation));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandle ActorHandle;
+	ActorHandle.Slot = static_cast<uint32>(Slot);
+	ActorHandle.Generation = static_cast<uint32>(Generation);
+
+	FAvidScriptActorBindingResult BindingResult;
+	if (!FAvidScriptActorBinding::GetActorRotation(*HostContext.ObjectRegistry, ActorHandle, OutRotation, BindingResult))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_rotation"),
+			BindingResult.ErrorMessage.IsEmpty()
+				? FString::Printf(TEXT("Actor rotation read failed for avidscript.actor_get_rotation | slot=%d | generation=%d"), Slot, Generation)
+				: BindingResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, int32 Generation, const FRotator& Rotation)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Slot;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_set_rotation"),
+			TEXT("Missing host object registry for avidscript.actor_set_rotation"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	if (Slot <= 0 || Generation <= 0)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_set_rotation"),
+			FString::Printf(TEXT("Invalid actor handle for avidscript.actor_set_rotation | slot=%d | generation=%d"), Slot, Generation));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptObjectHandle ActorHandle;
+	ActorHandle.Slot = static_cast<uint32>(Slot);
+	ActorHandle.Generation = static_cast<uint32>(Generation);
+
+	FAvidScriptActorBindingResult BindingResult;
+	if (!FAvidScriptActorBinding::SetActorRotation(*HostContext.ObjectRegistry, ActorHandle, Rotation, HostContext.ActorWritePolicy, BindingResult))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_set_rotation"),
+			BindingResult.ErrorMessage.IsEmpty()
+				? FString::Printf(TEXT("Actor rotation write failed for avidscript.actor_set_rotation | slot=%d | generation=%d"), Slot, Generation)
 				: BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;

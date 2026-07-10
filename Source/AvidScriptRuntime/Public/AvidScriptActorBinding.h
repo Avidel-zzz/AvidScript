@@ -21,6 +21,7 @@ struct FAvidScriptActorBindingResult
 	FString NextAction;
 	FString ErrorMessage;
 	FVector Location = FVector::ZeroVector;
+	FRotator Rotation = FRotator::ZeroRotator;
 	FAvidScriptObjectHandleResult ObjectResult;
 };
 
@@ -47,6 +48,19 @@ public:
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult);
 
+	static bool GetActorRotation(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		FRotator& OutRotation,
+		FAvidScriptActorBindingResult& OutResult);
+
+	static bool SetActorRotation(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		const FRotator& Rotation,
+		EAvidScriptActorWritePolicy WritePolicy,
+		FAvidScriptActorBindingResult& OutResult);
+
 private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,
@@ -56,7 +70,8 @@ private:
 	static void SetSuccess(
 		FAvidScriptActorBindingResult& OutResult,
 		const FAvidScriptObjectHandleResult& ObjectResult,
-		const FVector& Location);
+		const FVector& Location,
+		const FRotator& Rotation);
 
 	static void SetFailure(
 		FAvidScriptActorBindingResult& OutResult,
