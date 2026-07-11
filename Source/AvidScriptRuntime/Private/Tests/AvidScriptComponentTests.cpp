@@ -264,6 +264,13 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestTrue(TEXT("C# component Tick moves actor"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# component Tick rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
 	TestTrue(TEXT("C# component Tick scales actor"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.01), 0.01));
+	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	const FAvidScriptComponentRuntimeStats StatsAfterTimer = Component->GetRuntimeStats();
+	TestTrue(TEXT("C# component Timer callback moves actor"), Actor->GetActorLocation().Equals(FVector(106.0, 200.0, 350.0), 0.01));
+	TestEqual(TEXT("Component records one Timer callback"), StatsAfterTimer.TimerCallbackCount, 1);
+	TestEqual(TEXT("Component records Timer callback id"), StatsAfterTimer.LastTimerCallbackId, 7);
+	TestTrue(TEXT("Component records Timer handle"), StatsAfterTimer.LastTimerHandle > 0);
 
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
 	TestTrue(TEXT("C# component EndPlay moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));

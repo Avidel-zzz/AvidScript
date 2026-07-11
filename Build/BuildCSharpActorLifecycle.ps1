@@ -320,7 +320,7 @@ function Get-OptionalCSharpMethodBody {
         [Parameter(Mandatory = $true)][string]$MethodName
     )
 
-    $Pattern = "(?s)\b(?:public\s+)?static\s+void\s+$([regex]::Escape($MethodName))\s*\(\s*\)\s*\{"
+    $Pattern = "(?s)\b(?:public\s+)?static\s+void\s+$([regex]::Escape($MethodName))\s*\([^)]*\)\s*\{"
     if (-not [regex]::IsMatch($SourceText, $Pattern)) {
         return $null
     }
@@ -551,6 +551,16 @@ function Get-CSharpLifecycleStatements {
                 ValueType = $ValueType
                 LocalOrdinal = $Local.Ordinal
                 Expression = $Expression
+            }
+            continue
+        }
+
+        $TimerSetMatch = [regex]::Match($StatementText, '^UE\s*\.\s*SetTimer\s*\(\s*(?<delay>[^,]+?)\s*,\s*(?<callback>[0-9]+)\s*\)$')
+        if ($TimerSetMatch.Success) {
+            $Statements += [PSCustomObject]@{
+                Kind = 'timer_set_once'
+                Delay = Convert-CSharpFloatExpression -Expression $TimerSetMatch.Groups['delay'].Value -Fields $Fields
+                CallbackId = [int]::Parse($TimerSetMatch.Groups['callback'].Value, [System.Globalization.CultureInfo]::InvariantCulture)
             }
             continue
         }
@@ -861,6 +871,16 @@ function Add-CSharpLifecycleStatementCode {
         [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
+    if ($Statement.Kind -eq 'timer_set_once') {
+        Add-CSharpFloatExpressionCode -Body $Body -Expression $Statement.Delay -AllowDeltaSeconds $AllowDeltaSeconds
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Statement.CallbackId)
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 12
+        Add-WasmByte -Bytes $Body -Value 0x1a
+        return
+    }
+
     if ($Statement.Kind -eq 'value_local_assign') {
         Add-CSharpValueLocalAssignmentCode -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         return
@@ -919,12 +939,13 @@ function Add-CSharpLifecycleStatementCode {
 function New-CSharpLifecycleFunctionBody {
     param(
         [Parameter(Mandatory = $true)]$Statements,
-        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds
+        [Parameter(Mandatory = $true)][bool]$AllowDeltaSeconds,
+        [int]$ParameterCount = 0
     )
 
     $Body = New-WasmByteList
     $ValueLocalCount = @($Statements | Where-Object { $_.Kind -eq 'value_local_assign' }).Count
-    $ValueLocalBase = if ($AllowDeltaSeconds) { 1 } else { 0 }
+    $ValueLocalBase = $ParameterCount
     if ($ValueLocalCount -gt 0) {
         Add-WasmU32Leb -Bytes $Body -Value 1
         Add-WasmU32Leb -Bytes $Body -Value ([uint32](3 * $ValueLocalCount))
@@ -945,14 +966,15 @@ function New-CSharpDirectAbiWasmModule {
         [object[]]$Fields = @(),
         [Parameter(Mandatory = $true)]$BeginPlayStatements,
         [Parameter(Mandatory = $true)]$TickStatements,
-        [object[]]$EndPlayStatements = @()
+        [object[]]$EndPlayStatements = @(),
+        [object[]]$TimerStatements = @()
     )
 
     $Module = New-WasmByteList
     Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
 
     $TypeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $TypeSection -Value 5
+    Add-WasmU32Leb -Bytes $TypeSection -Value 8
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
@@ -974,10 +996,24 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7f))
     Add-WasmU32Leb -Bytes $TypeSection -Value 1
     Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 2
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7d, 0x7f))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmU32Leb -Bytes $TypeSection -Value 1
+    Add-WasmByte -Bytes $TypeSection -Value 0x7f
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 2
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 12
+    Add-WasmU32Leb -Bytes $ImportSection -Value 14
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -1026,13 +1062,22 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ImportSection -Text 'scene_component_set_world_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 0
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'timer_set_once'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 5
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'timer_cancel'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 6
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $FunctionSection -Value 3
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 4
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmU32Leb -Bytes $FunctionSection -Value 2
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 7
     Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
     $MemorySection = New-WasmByteList
     Add-WasmU32Leb -Bytes $MemorySection -Value 1
@@ -1054,30 +1099,36 @@ function New-CSharpDirectAbiWasmModule {
     }
 
     $ExportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ExportSection -Value 3
+    Add-WasmU32Leb -Bytes $ExportSection -Value 4
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 12
+    Add-WasmU32Leb -Bytes $ExportSection -Value 14
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 13
+    Add-WasmU32Leb -Bytes $ExportSection -Value 15
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 14
+    Add-WasmU32Leb -Bytes $ExportSection -Value 16
+    Add-WasmString -Bytes $ExportSection -Text 'avid_on_timer'
+    Add-WasmByte -Bytes $ExportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ExportSection -Value 17
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
-    $TickBody = New-CSharpLifecycleFunctionBody -Statements $TickStatements -AllowDeltaSeconds $true
+    $TickBody = New-CSharpLifecycleFunctionBody -Statements $TickStatements -AllowDeltaSeconds $true -ParameterCount 1
     $EndPlayBody = New-CSharpLifecycleFunctionBody -Statements $EndPlayStatements -AllowDeltaSeconds $false
+    $TimerBody = New-CSharpLifecycleFunctionBody -Statements $TimerStatements -AllowDeltaSeconds $false -ParameterCount 2
 
     $CodeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $CodeSection -Value 3
+    Add-WasmU32Leb -Bytes $CodeSection -Value 4
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$BeginPlayBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $BeginPlayBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TickBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $TickBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$EndPlayBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $EndPlayBody.ToArray()
+    Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TimerBody.Count)
+    Add-WasmBytes -Bytes $CodeSection -Values $TimerBody.ToArray()
     Add-WasmSection -Module $Module -SectionId 10 -Payload $CodeSection
 
     return ,(Convert-WasmByteListToArray -Bytes $Module)
@@ -1098,18 +1149,24 @@ function Invoke-CSharpSourceAdapter {
         $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
         $EndPlayBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'EndPlay'
+        $TimerBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnTimer'
         $BeginPlayStatements = @(Get-CSharpLifecycleStatements -MethodBody $BeginPlayBody -MethodName 'BeginPlay' -Fields $Fields)
         $TickStatements = @(Get-CSharpLifecycleStatements -MethodBody $TickBody -MethodName 'Tick' -Fields $Fields)
         $EndPlayStatements = @()
         if ($null -ne $EndPlayBody) {
             $EndPlayStatements = @(Get-CSharpLifecycleStatements -MethodBody $EndPlayBody -MethodName 'EndPlay' -Fields $Fields -AllowEmpty $true)
         }
-        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements
+        $TimerStatements = @()
+        if ($null -ne $TimerBody) {
+            $TimerStatements = @(Get-CSharpLifecycleStatements -MethodBody $TimerBody -MethodName 'OnTimer' -Fields $Fields -AllowEmpty $true)
+        }
+
+        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements -TimerStatements $TimerStatements
 
         [System.IO.File]::WriteAllBytes($AdapterWasmPath, $WasmBytes)
         $ObservedExports = @(Get-WasmExports -Path $AdapterWasmPath)
         $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play')
+        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play', 'avid_on_timer')
         $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
         if ($MissingExports.Count -gt 0) {
             throw "C# source adapter produced a WASM file without required exports: $($MissingExports -join ',')"
@@ -1124,7 +1181,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v9'
+                subset = 'actor_lifecycle_v10'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1179,6 +1236,14 @@ function Invoke-CSharpSourceAdapter {
                 [ordered]@{
                     module = 'env'
                     name = 'owner_get_generation'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'timer_set_once'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'timer_cancel'
                 }
             )
             toolchain = [ordered]@{
@@ -1189,9 +1254,9 @@ function Invoke-CSharpSourceAdapter {
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
                 supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'USceneComponent', 'UE.Self')
-                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)', 'UE.SetTimer(float delaySeconds, int callbackId)', 'UE.CancelTimer(int timerHandle)')
                 supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()', 'FVector local = UE.Self.GetRootComponent().GetWorldLocation()')
-                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
+                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
             }
@@ -1202,7 +1267,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v9 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle events, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v10 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle and Timer callback events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -1261,7 +1326,8 @@ function Write-Report {
         required_exports = @(
             "avid_on_begin_play",
             "avid_on_tick",
-            "avid_on_end_play"
+            "avid_on_end_play",
+            "avid_on_timer"
         )
         required_imports = @(
             [ordered]@{
@@ -1311,6 +1377,14 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "owner_get_generation"
+            },
+            [ordered]@{
+                module = "env"
+                name = "timer_set_once"
+            },
+            [ordered]@{
+                module = "env"
+                name = "timer_cancel"
             }
         )
         observed_exports = @($ObservedExports | ForEach-Object { $_.name })
@@ -1546,7 +1620,7 @@ catch {
 }
 
 $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play")
+$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play", "avid_on_timer")
 $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
 
 if ($MissingExports.Count -gt 0) {
@@ -1622,6 +1696,14 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "owner_get_generation"
+        },
+        [ordered]@{
+            module = "env"
+            name = "timer_set_once"
+        },
+        [ordered]@{
+            module = "env"
+            name = "timer_cancel"
         }
     )
     toolchain = [ordered]@{

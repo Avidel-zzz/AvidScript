@@ -614,6 +614,16 @@ int32 FAvidScriptWasmReloadSession::GetLiveTickCallCount() const
 	return IsLiveLoaded() ? LiveRuntime->GetTickCallCount() : 0;
 }
 
+int32 FAvidScriptWasmReloadSession::GetLivePendingTimerCount() const
+{
+	return IsLiveLoaded() ? LiveRuntime->GetPendingTimerCount() : 0;
+}
+
+int32 FAvidScriptWasmReloadSession::GetLiveTimerCallbackCount() const
+{
+	return IsLiveLoaded() ? LiveRuntime->GetTimerCallbackCount() : 0;
+}
+
 bool FAvidScriptWasmReloadSession::ValidateManifest(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	const FString& PreviousModuleId,

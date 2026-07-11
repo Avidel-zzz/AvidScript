@@ -18,6 +18,7 @@ public static class ActorLifecycleScript
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
         FVector rootLocation = UE.Self.GetRootComponent().GetWorldLocation();
         UE.Self.GetRootComponent().SetWorldLocation(rootLocation);
+        UE.SetTimer(0.05f, 7);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -30,6 +31,12 @@ public static class ActorLifecycleScript
         UE.Self.SetActorRotation(currentRotation + new FRotator(0.0f, 90.0f * deltaSeconds, 0.0f));
         FVector currentScale = UE.Self.GetActorScale3D();
         UE.Self.SetActorScale3D(currentScale + new FVector(0.0f, 0.0f, 0.6f * deltaSeconds));
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_timer")]
+    public static void OnTimer(int callbackId, int timerHandle)
+    {
+        UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 50.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
@@ -195,6 +202,9 @@ public readonly struct USceneComponent
 public static class UE
 {
     public static AActor Self => new AActor(Native.OwnerGetSlot(), Native.OwnerGetGeneration());
+
+    public static int SetTimer(float delaySeconds, int callbackId) => Native.TimerSetOnce(delaySeconds, callbackId);
+    public static bool CancelTimer(int timerHandle) => Native.TimerCancel(timerHandle) != 0;
 }
 
 public static class Actor
@@ -247,4 +257,10 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "owner_get_generation")]
     internal static extern int OwnerGetGeneration();
+
+    [DllImport("env", EntryPoint = "timer_set_once")]
+    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "timer_cancel")]
+    internal static extern int TimerCancel(int timerHandle);
 }

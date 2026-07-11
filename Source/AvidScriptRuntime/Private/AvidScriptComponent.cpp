@@ -141,6 +141,9 @@ void UAvidScriptComponent::BeginPlay()
 	RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 	RuntimeStats.TickCallCount = Result.TickCallCount;
+	RuntimeStats.TimerCallbackCount = Result.TimerCallbackCount;
+	RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
+	RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
 	RuntimeStats.Metrics = Result.Metrics;
 	RuntimeStats.ModuleId = Result.ModuleId;
 
@@ -197,6 +200,9 @@ void UAvidScriptComponent::TickComponent(
 			RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
 			RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 			RuntimeStats.TickCallCount = Result.TickCallCount;
+	RuntimeStats.TimerCallbackCount = Result.TimerCallbackCount;
+	RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
+	RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
 			RuntimeStats.Metrics = Result.Metrics;
 			RuntimeStats.ModuleId = Result.ModuleId;
 
@@ -271,6 +277,12 @@ void UAvidScriptComponent::RecordRuntimeFailure(const FAvidScriptWasmSmokeResult
 	RuntimeStats.bRuntimeLoaded = Runtime.IsValid() && Runtime->IsLoaded();
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
 	RuntimeStats.TickCallCount = Runtime.IsValid() ? Runtime->GetTickCallCount() : Result.TickCallCount;
+	RuntimeStats.TimerCallbackCount = FMath::Max(RuntimeStats.TimerCallbackCount, Result.TimerCallbackCount);
+	if (Result.LastTimerHandle > 0)
+	{
+		RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
+		RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
+	}
 	RuntimeStats.Metrics = Result.Metrics;
 	RuntimeStats.ModuleId = Result.ModuleId;
 
@@ -309,6 +321,12 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	RuntimeStats.Metrics = UnloadResult.Metrics;
 	RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || UnloadResult.bEndPlayCalled;
 	RuntimeStats.TickCallCount = FMath::Max(RuntimeStats.TickCallCount, UnloadResult.TickCallCount);
+	RuntimeStats.TimerCallbackCount = FMath::Max(RuntimeStats.TimerCallbackCount, UnloadResult.TimerCallbackCount);
+	if (UnloadResult.LastTimerHandle > 0)
+	{
+		RuntimeStats.LastTimerCallbackId = UnloadResult.LastTimerCallbackId;
+		RuntimeStats.LastTimerHandle = UnloadResult.LastTimerHandle;
+	}
 	bPlayActive = false;
 	RuntimeStats.bRuntimeLoaded = false;
 }

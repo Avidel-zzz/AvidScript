@@ -12,6 +12,7 @@ struct FAvidScriptWasmRuntimeMetrics
 	double ExecEnvCreateMs = 0.0;
 	double BeginPlayCallMs = 0.0;
 	double EndPlayCallMs = 0.0;
+	double TimerCallbackCallMs = 0.0;
 	double HostImportCallMs = 0.0;
 	double TickCallMs = 0.0;
 	double UnloadMs = 0.0;
@@ -25,8 +26,12 @@ struct FAvidScriptWasmSmokeResult
 	bool bBeginPlayCalled = false;
 	bool bEndPlayCalled = false;
 	bool bTickCalled = false;
+	bool bTimerCallbackCalled = false;
 	bool bUnloaded = false;
 	int32 TickCallCount = 0;
+	int32 TimerCallbackCount = 0;
+	int32 LastTimerCallbackId = 0;
+	int32 LastTimerHandle = 0;
 	FString ModuleId;
 	FString ExportName;
 	FString ImportModuleName;
@@ -45,6 +50,13 @@ struct FAvidScriptWasmHostContext
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
+};
+
+struct FAvidScriptWasmTimerEntry
+{
+	int32 Handle = 0;
+	int32 CallbackId = 0;
+	float RemainingSeconds = 0.0f;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
@@ -69,6 +81,8 @@ public:
 	bool IsLoaded() const;
 	bool HasBegunPlay() const { return bHasBegunPlay; }
 	int32 GetTickCallCount() const { return TickCallCount; }
+	int32 GetPendingTimerCount() const { return PendingTimers.Num(); }
+	int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
 	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
@@ -77,6 +91,8 @@ public:
 	int32 HandleHostFailI32Import(int32 Input);
 	int32 HandleOwnerGetSlotImport();
 	int32 HandleOwnerGetGenerationImport();
+	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
+	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
 	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
 	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);
@@ -94,6 +110,11 @@ public:
 	bool ConsumePendingHostImportFailure(FString& OutImportModuleName, FString& OutImportName, FString& OutDetails);
 
 private:
+	void CollectDueTimerHandles(float DeltaSeconds, TArray<int32>& OutDueTimerHandles);
+	bool ExecuteDueTimerCallbacks(const TArray<int32>& DueTimerHandles, FAvidScriptWasmSmokeResult& OutResult);
+	int32 AllocateTimerHandle();
+	void ResetTimerState();
+	void CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 
@@ -106,6 +127,11 @@ private:
 	bool bEndPlayAttempted = false;
 	bool bEndPlaySucceeded = false;
 	int32 TickCallCount = 0;
+	int32 NextTimerHandle = 1;
+	int32 TimerCallbackCount = 0;
+	int32 LastTimerCallbackId = 0;
+	int32 LastTimerHandle = 0;
+	TArray<FAvidScriptWasmTimerEntry> PendingTimers;
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;

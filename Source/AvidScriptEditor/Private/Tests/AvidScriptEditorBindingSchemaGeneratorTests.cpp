@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains two host intrinsics"), FirstResult.IntrinsicCount, 2);
+	TestEqual(TEXT("Default schema contains four host intrinsics"), FirstResult.IntrinsicCount, 4);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -45,6 +45,8 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Schema includes FHitResult reflected wrapper context"), FirstJson.Contains(TEXT("FHitResult")));
 	TestTrue(TEXT("Schema includes USceneComponent return type"), FirstJson.Contains(TEXT("USceneComponent")));
 	TestTrue(TEXT("Schema includes owner slot intrinsic"), FirstJson.Contains(TEXT("owner_get_slot")));
+	TestTrue(TEXT("Schema includes set-once Timer intrinsic"), FirstJson.Contains(TEXT("timer_set_once")) && FirstJson.Contains(TEXT("(fi)i")));
+	TestTrue(TEXT("Schema includes Timer cancel intrinsic"), FirstJson.Contains(TEXT("timer_cancel")) && FirstJson.Contains(TEXT("(i)i")));
 
 	return true;
 }
@@ -130,4 +132,3 @@ bool FAvidScriptEditorBindingSchemaManifestContractSmokeTest::RunTest(const FStr
 }
 
 #endif
-

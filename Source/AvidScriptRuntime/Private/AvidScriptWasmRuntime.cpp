@@ -21,6 +21,7 @@ constexpr uint32 AvidScriptWasmStackSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
+constexpr int32 AvidScriptMaximumPendingTimers = 1024;
 
 const uint8 GAvidScriptMinimalWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
@@ -68,6 +69,8 @@ constexpr const char* AvidScriptSceneComponentGetWorldLocationName = "scene_comp
 constexpr const char* AvidScriptSceneComponentSetWorldLocationName = "scene_component_set_world_location";
 constexpr const char* AvidScriptOwnerGetSlotName = "owner_get_slot";
 constexpr const char* AvidScriptOwnerGetGenerationName = "owner_get_generation";
+constexpr const char* AvidScriptTimerSetOnceName = "timer_set_once";
+constexpr const char* AvidScriptTimerCancelName = "timer_cancel";
 
 int32_t AvidScriptHostAddI32(wasm_exec_env_t ExecEnv, int32_t Input);
 int32_t AvidScriptHostFailI32(wasm_exec_env_t ExecEnv, int32_t Input);
@@ -83,6 +86,8 @@ int32_t AvidScriptSceneComponentGetWorldLocation(wasm_exec_env_t ExecEnv, int32_
 int32_t AvidScriptSceneComponentSetWorldLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z);
 int32_t AvidScriptOwnerGetSlot(wasm_exec_env_t ExecEnv);
 int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv);
+int32_t AvidScriptTimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId);
+int32_t AvidScriptTimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle);
 
 NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptHostAddI32Name, reinterpret_cast<void*>(AvidScriptHostAddI32), "(i)i", nullptr },
@@ -98,7 +103,9 @@ NativeSymbol GAvidScriptNativeSymbols[] = {
 	{ AvidScriptSceneComponentGetWorldLocationName, reinterpret_cast<void*>(AvidScriptSceneComponentGetWorldLocation), "(iii)i", nullptr },
 	{ AvidScriptSceneComponentSetWorldLocationName, reinterpret_cast<void*>(AvidScriptSceneComponentSetWorldLocation), "(iifff)i", nullptr },
 	{ AvidScriptOwnerGetSlotName, reinterpret_cast<void*>(AvidScriptOwnerGetSlot), "()i", nullptr },
-	{ AvidScriptOwnerGetGenerationName, reinterpret_cast<void*>(AvidScriptOwnerGetGeneration), "()i", nullptr }
+	{ AvidScriptOwnerGetGenerationName, reinterpret_cast<void*>(AvidScriptOwnerGetGeneration), "()i", nullptr },
+	{ AvidScriptTimerSetOnceName, reinterpret_cast<void*>(AvidScriptTimerSetOnce), "(fi)i", nullptr },
+	{ AvidScriptTimerCancelName, reinterpret_cast<void*>(AvidScriptTimerCancel), "(i)i", nullptr }
 };
 
 FCriticalSection GWamrRuntimeCriticalSection;
@@ -535,6 +542,30 @@ int32_t AvidScriptOwnerGetGeneration(wasm_exec_env_t ExecEnv)
 	}
 
 	return Generation;
+}
+
+int32_t AvidScriptTimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.timer_set_once");
+		return 0;
+	}
+
+	return RuntimeInstance->HandleTimerSetOnceImport(DelaySeconds, static_cast<int32>(CallbackId));
+}
+
+int32_t AvidScriptTimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle)
+{
+	FAvidScriptWasmRuntimeInstance* RuntimeInstance = GetRuntimeInstanceFromExecEnv(ExecEnv);
+	if (RuntimeInstance == nullptr)
+	{
+		SetHostImportException(ExecEnv, "avidscript_host_import_failed: missing runtime instance for avidscript.timer_cancel");
+		return 0;
+	}
+
+	return RuntimeInstance->HandleTimerCancelImport(static_cast<int32>(TimerHandle));
 }
 
 bool RegisterAvidScriptHostImports(const FString& ModuleId, FAvidScriptWasmSmokeResult& OutResult)
@@ -983,6 +1014,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1020,6 +1052,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
 		return false;
 	}
 
@@ -1033,6 +1066,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 	return true;
 #endif
 }
@@ -1046,6 +1080,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1069,6 +1104,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		return false;
 	}
 
+	TArray<int32> DueTimerHandles;
+	CollectDueTimerHandles(DeltaSeconds, DueTimerHandles);
+	Metrics.TimerCallbackCallMs = 0.0;
+
 	uint32 TickArgs[1] = {};
 	static_assert(sizeof(TickArgs[0]) == sizeof(DeltaSeconds), "WAMR f32 argument must fit in one cell.");
 	FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
@@ -1087,6 +1126,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
 		return false;
 	}
 
@@ -1096,10 +1136,24 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bTickCalled = true;
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
+
+	if (!ExecuteDueTimerCallbacks(DueTimerHandles, OutResult))
+	{
+		OutResult.Metrics = Metrics;
+		OutResult.bTickCalled = true;
+		OutResult.TickCallCount = TickCallCount;
+		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
+		return false;
+	}
+
+	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 	return true;
 #endif
 }
-
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, Metrics);
@@ -1110,6 +1164,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1148,6 +1203,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		Metrics.EndPlayCallMs = 0.0;
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
 		bEndPlaySucceeded = true;
 		CachedEndPlayResult = OutResult;
 		return true;
@@ -1170,6 +1226,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		OutResult.bEndPlayCalled = false;
 		OutResult.TickCallCount = TickCallCount;
 		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
 		bEndPlaySucceeded = false;
 		CachedEndPlayResult = OutResult;
 		return false;
@@ -1183,6 +1240,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.bEndPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 	CachedEndPlayResult = OutResult;
 	return true;
 #endif
@@ -1203,6 +1261,9 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	const bool bHadBegunPlay = bHasBegunPlay;
 	const bool bHadEndedPlay = bHasEndedPlay;
 	const int32 PreviousTickCallCount = TickCallCount;
+	const int32 PreviousTimerCallbackCount = TimerCallbackCount;
+	const int32 PreviousLastTimerCallbackId = LastTimerCallbackId;
+	const int32 PreviousLastTimerHandle = LastTimerHandle;
 	const int32 PreviousHostImportCallCount = HostImportCallCount;
 	const int32 PreviousHostImportInput = LastHostImportInput;
 	const int32 PreviousHostImportResult = LastHostImportResult;
@@ -1247,6 +1308,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	bEndPlaySucceeded = false;
 	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
 	TickCallCount = 0;
+	ResetTimerState();
 	ResetHostImportState();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
@@ -1258,6 +1320,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	OutResult.bEndPlayCalled = bHadEndedPlay;
 	OutResult.bTickCalled = PreviousTickCallCount > 0;
 	OutResult.TickCallCount = PreviousTickCallCount;
+	OutResult.bTimerCallbackCalled = PreviousTimerCallbackCount > 0;
+	OutResult.TimerCallbackCount = PreviousTimerCallbackCount;
+	OutResult.LastTimerCallbackId = PreviousLastTimerCallbackId;
+	OutResult.LastTimerHandle = PreviousLastTimerHandle;
 	OutResult.HostImportCallCount = PreviousHostImportCallCount;
 	OutResult.LastHostImportInput = PreviousHostImportInput;
 	OutResult.LastHostImportResult = PreviousHostImportResult;
@@ -1791,6 +1857,163 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 	return 1;
 }
 
+int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = CallbackId;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	if (!IsLoaded()
+		|| !FMath::IsFinite(DelaySeconds)
+		|| DelaySeconds < 0.0f
+		|| CallbackId < 0
+		|| PendingTimers.Num() >= AvidScriptMaximumPendingTimers)
+	{
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	const int32 TimerHandle = AllocateTimerHandle();
+	if (TimerHandle <= 0)
+	{
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FAvidScriptWasmTimerEntry& Timer = PendingTimers.AddDefaulted_GetRef();
+	Timer.Handle = TimerHandle;
+	Timer.CallbackId = CallbackId;
+	Timer.RemainingSeconds = DelaySeconds;
+	LastHostImportResult = TimerHandle;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return TimerHandle;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = TimerHandle;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	const int32 TimerIndex = PendingTimers.IndexOfByPredicate(
+		[TimerHandle](const FAvidScriptWasmTimerEntry& Timer)
+		{
+			return Timer.Handle == TimerHandle;
+		});
+	if (TimerIndex != INDEX_NONE)
+	{
+		PendingTimers.RemoveAtSwap(TimerIndex, 1, EAllowShrinking::No);
+		LastHostImportResult = 1;
+	}
+
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+void FAvidScriptWasmRuntimeInstance::CollectDueTimerHandles(float DeltaSeconds, TArray<int32>& OutDueTimerHandles)
+{
+	OutDueTimerHandles.Reset();
+	const float SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds) && DeltaSeconds > 0.0f
+		? DeltaSeconds
+		: 0.0f;
+	for (FAvidScriptWasmTimerEntry& Timer : PendingTimers)
+	{
+		Timer.RemainingSeconds -= SafeDeltaSeconds;
+		if (Timer.RemainingSeconds <= 0.0f)
+		{
+			OutDueTimerHandles.Add(Timer.Handle);
+		}
+	}
+	OutDueTimerHandles.Sort();
+}
+
+bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
+	const TArray<int32>& DueTimerHandles,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+#if !AVIDSCRIPT_WITH_WAMR
+	return DueTimerHandles.IsEmpty();
+#else
+	for (const int32 TimerHandle : DueTimerHandles)
+	{
+		const int32 TimerIndex = PendingTimers.IndexOfByPredicate(
+			[TimerHandle](const FAvidScriptWasmTimerEntry& Timer)
+			{
+				return Timer.Handle == TimerHandle;
+			});
+		if (TimerIndex == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const FAvidScriptWasmTimerEntry Timer = PendingTimers[TimerIndex];
+		PendingTimers.RemoveAtSwap(TimerIndex, 1, EAllowShrinking::No);
+
+		uint32 TimerArgs[2] = {
+			static_cast<uint32>(Timer.CallbackId),
+			static_cast<uint32>(Timer.Handle)
+		};
+		const double CallbackStartSeconds = FPlatformTime::Seconds();
+		if (!CallWamrExport(
+			static_cast<wasm_module_inst_t>(ModuleInstance),
+			static_cast<wasm_exec_env_t>(ExecEnv),
+			this,
+			ModuleId,
+			"avid_on_timer",
+			UE_ARRAY_COUNT(TimerArgs),
+			TimerArgs,
+			OutResult))
+		{
+			Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
+			return false;
+		}
+
+		Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
+		++TimerCallbackCount;
+		LastTimerCallbackId = Timer.CallbackId;
+		LastTimerHandle = Timer.Handle;
+	}
+	return true;
+#endif
+}
+
+int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()
+{
+	for (int32 Attempt = 0; Attempt <= AvidScriptMaximumPendingTimers; ++Attempt)
+	{
+		const int32 Candidate = NextTimerHandle;
+		NextTimerHandle = NextTimerHandle == MAX_int32 ? 1 : NextTimerHandle + 1;
+		const bool bAlreadyUsed = PendingTimers.ContainsByPredicate(
+			[Candidate](const FAvidScriptWasmTimerEntry& Timer)
+			{
+				return Timer.Handle == Candidate;
+			});
+		if (Candidate > 0 && !bAlreadyUsed)
+		{
+			return Candidate;
+		}
+	}
+	return 0;
+}
+
+void FAvidScriptWasmRuntimeInstance::ResetTimerState()
+{
+	PendingTimers.Reset();
+	NextTimerHandle = 1;
+	TimerCallbackCount = 0;
+	LastTimerCallbackId = 0;
+	LastTimerHandle = 0;
+}
+
+void FAvidScriptWasmRuntimeInstance::CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
+{
+	OutResult.bTimerCallbackCalled = TimerCallbackCount > 0;
+	OutResult.TimerCallbackCount = TimerCallbackCount;
+	OutResult.LastTimerCallbackId = LastTimerCallbackId;
+	OutResult.LastTimerHandle = LastTimerHandle;
+}
 int32 FAvidScriptWasmRuntimeInstance::HandleHostAddI32Import(int32 Input)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();

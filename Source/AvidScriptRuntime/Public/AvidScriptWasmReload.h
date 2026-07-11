@@ -86,6 +86,8 @@ public:
 	bool IsLiveLoaded() const;
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
+	int32 GetLivePendingTimerCount() const;
+	int32 GetLiveTimerCallbackCount() const;
 	int32 GetSuccessfulReloadCount() const { return SuccessfulReloadCount; }
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 

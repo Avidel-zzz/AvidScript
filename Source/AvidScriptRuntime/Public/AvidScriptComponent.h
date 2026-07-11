@@ -17,6 +17,9 @@ struct FAvidScriptComponentRuntimeStats
 	bool bComponentEndPlayObserved = false;
 	bool bEndPlayCalled = false;
 	int32 TickCallCount = 0;
+	int32 TimerCallbackCount = 0;
+	int32 LastTimerCallbackId = 0;
+	int32 LastTimerHandle = 0;
 	FAvidScriptObjectHandle OwnerHandle;
 	FString OwnerObjectPath;
 	FString ScriptManifestPath;

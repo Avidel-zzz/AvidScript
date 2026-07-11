@@ -211,7 +211,10 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(TEXT("Custom C# profile report binds to actor"), FAvidScriptEditorComponentBindingService::ApplyCSharpReportToActor(Config.ReportPath, Actor, BindingResult));
 	TestTrue(TEXT("Custom C# profile binding succeeds"), BindingResult.bSucceeded);
 	TestNotNull(TEXT("Custom C# profile binding returns component"), BindingResult.Component);
-	TestEqual(TEXT("Custom C# profile component manifest"), BindingResult.Component->GetScriptManifestPath(), Config.ManifestPath);
+	if (BindingResult.Component != nullptr)
+	{
+		TestEqual(TEXT("Custom C# profile component manifest"), BindingResult.Component->GetScriptManifestPath(), Config.ManifestPath);
+	}
 
 	DestroyAvidScriptCSharpBuildTestWorld(World);
 	return true;
