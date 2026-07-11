@@ -73,7 +73,7 @@ UE.Self.SetActorScale3D(scale + new FVector(0.0f, 0.0f, 0.1f));
 FTransform snapshot = UE.Self.GetActorTransform();
 ```
 
-当前 adapter v8 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
+当前 adapter v9 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
 
 ### AActor 与 UE.Self
 
@@ -88,23 +88,36 @@ Actor.AddLocationOffset(1.0f, 0.0f, 0.0f);
 
 ## 当前 C# 子集
 
-Phase29 source adapter subset 为 `actor_lifecycle_v8`：
+Phase30 source adapter subset 为 `actor_lifecycle_v9`：
 
 - `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()`。
 - `private static float`、字段赋值/累加。
 - 数字、`deltaSeconds`、静态 float 字段、加法和乘法。
-- location、rotation、scale typed getter/setter。
+- Actor location、rotation、scale typed getter/setter。
 - `AddActorWorldOffset(FVector)`。
 - `FVector.Zero`、`FRotator.Zero`。
 - `FVector` / `FRotator` typed getter local 与同类型加法。
+- `UE.Self.GetRootComponent().GetWorldLocation()`。
+- `UE.Self.GetRootComponent().SetWorldLocation(FVector)`。
 - 旧 `Actor.SetLocation(...)` / `Actor.AddLocationOffset(...)`。
+
+### SceneComponent 示例
+
+```csharp
+FVector rootLocation = UE.Self.GetRootComponent().GetWorldLocation();
+UE.Self.GetRootComponent().SetWorldLocation(
+    rootLocation + new FVector(10.0f, 0.0f, 0.0f));
+```
+
+`USceneComponent` 与 `AActor` 一样只持有 slot/generation。Host 返回组件时向经过验证的 guest 线性内存写入 8 字节句柄；重复取得同一 RootComponent 会复用注册表句柄，不持续增加 slot。
 
 当前不支持：
 
+- `USceneComponent` 局部变量与任意 UObject 数据流。
 - 通用局部变量赋值、减法、整值标量乘法、成员访问和任意函数组合。
 - lifecycle 内的 `FTransform` local 与原子 `SetActorTransform`。
-- 任意 `UFUNCTION`、`UPROPERTY` 或动态反射调用。
-- UObject 参数/返回值、Spawn、组件查找和组件类型。
+- 任意 `UFUNCTION`、`UPROPERTY` 或运行时动态反射调用。
+- Spawn、组件查找、Attach/Detach、相对 Transform 和组件创建。
 - quaternion、sweep、hit result、输入、Timer、Overlap、Hit、委托和异步任务。
 - 分支、循环、集合和完整 C# 语义。
 - Android/iOS 构建验证。
@@ -127,11 +140,11 @@ Phase29 source adapter subset 为 `actor_lifecycle_v8`：
 | --- | --- | --- |
 | `profile_missing` | profile 不存在 | 创建默认 profile 或检查路径。 |
 | `source_missing` | source 不存在 | 指向真实 C# 文件。 |
-| `source_adapter_failed` | 源码超出 v8 子集 | 检查 lifecycle、typed locals、表达式和 Actor 调用。 |
+| `source_adapter_failed` | 源码超出 v9 子集 | 检查 lifecycle、typed locals、表达式和 Actor 调用。 |
 | `missing_import` | host import 未注册 | 确认 Runtime 与 manifest 版本一致。 |
 | `host_import_failed` | handle、write policy 或 UE 调用失败 | 检查 owner 生命周期和 UE 日志。 |
 | `selection_unavailable` | 没有可绑定 Actor | 在关卡中选中 Actor。 |
 
 ## 下一步能力
 
-Phase30 将优先实现 SceneComponent/UObject 句柄返回和 typed component 调用，再把手写 binding contract 过渡到 UE 反射元数据驱动的生成流程。后续继续推进 Spawn、输入/Timer/碰撞事件、调试工具、PC packaging 和移动端。
+Phase31 将把当前手写 binding contract 过渡到 UE 反射元数据驱动的静态生成流程，先生成可审计的类型、函数和 ABI 清单。后续继续推进 Spawn、输入/Timer/碰撞事件、调试工具、PC packaging 和移动端。
