@@ -75,6 +75,12 @@ public:
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult);
 
+	static bool GetRootComponentHandle(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		FAvidScriptObjectHandle& OutComponentHandle,
+		FAvidScriptActorBindingResult& OutResult);
+
 private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,

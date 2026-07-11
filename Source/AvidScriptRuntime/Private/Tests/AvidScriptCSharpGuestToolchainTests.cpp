@@ -277,6 +277,11 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents typed GetActorScale3D"), SourceText.Contains(TEXT("public FVector GetActorScale3D()")) && SourceText.Contains(TEXT("actor_get_scale")));
 	TestTrue(TEXT("Sample presents typed SetActorScale3D"), SourceText.Contains(TEXT("public bool SetActorScale3D(FVector scale)")) && SourceText.Contains(TEXT("actor_set_scale")));
 	TestTrue(TEXT("Sample declares FTransform snapshot"), SourceText.Contains(TEXT("public readonly struct FTransform")) && SourceText.Contains(TEXT("public FTransform GetActorTransform()")));
+	TestTrue(TEXT("Sample declares handle-backed USceneComponent"), SourceText.Contains(TEXT("public readonly struct USceneComponent")));
+	TestTrue(TEXT("Sample presents typed GetRootComponent"), SourceText.Contains(TEXT("public USceneComponent GetRootComponent()")) && SourceText.Contains(TEXT("actor_get_root_component")));
+	TestTrue(TEXT("Sample presents component world location read"), SourceText.Contains(TEXT("public FVector GetWorldLocation()")) && SourceText.Contains(TEXT("scene_component_get_world_location")));
+	TestTrue(TEXT("Sample presents component world location write"), SourceText.Contains(TEXT("public bool SetWorldLocation(FVector location)")) && SourceText.Contains(TEXT("scene_component_set_world_location")));
+	TestTrue(TEXT("Sample uses root component chain"), SourceText.Contains(TEXT("UE.Self.GetRootComponent().GetWorldLocation()")) && SourceText.Contains(TEXT("UE.Self.GetRootComponent().SetWorldLocation(rootLocation)")));
 	TestTrue(TEXT("Sample declares UE.Self"), SourceText.Contains(TEXT("public static class UE")) && SourceText.Contains(TEXT("public static AActor Self")));
 	TestTrue(TEXT("Sample uses typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector")));
 	TestTrue(TEXT("Sample uses typed AddActorWorldOffset"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector")));
@@ -452,7 +457,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v8 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v8")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v9 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v9")));
+	TestTrue(TEXT("C# source adapter manifest declares USceneComponent"), ManifestJson.Contains(TEXT("USceneComponent")));
+	TestTrue(TEXT("C# source adapter manifest declares GetRootComponent"), ManifestJson.Contains(TEXT("GetRootComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
 	TestTrue(TEXT("C# source adapter manifest declares AActor"), ManifestJson.Contains(TEXT("AActor")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.Self"), ManifestJson.Contains(TEXT("UE.Self")));
@@ -524,6 +531,24 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		});
 	TestTrue(TEXT("C# source adapter manifest requires owner slot import"), bRequiresOwnerSlot);
 	TestTrue(TEXT("C# source adapter manifest requires owner generation import"), bRequiresOwnerGeneration);
+	const bool bRequiresGetRootComponent = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("actor_get_root_component");
+		});
+	const bool bRequiresComponentGetWorldLocation = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("scene_component_get_world_location");
+		});
+	const bool bRequiresComponentSetWorldLocation = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("scene_component_set_world_location");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires root component import"), bRequiresGetRootComponent);
+	TestTrue(TEXT("C# source adapter manifest requires component get world location import"), bRequiresComponentGetWorldLocation);
+	TestTrue(TEXT("C# source adapter manifest requires component set world location import"), bRequiresComponentSetWorldLocation);
 
 	UWorld* World = nullptr;
 	if (!CreateCSharpContractWorld(World))

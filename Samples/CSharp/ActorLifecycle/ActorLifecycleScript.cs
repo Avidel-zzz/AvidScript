@@ -16,6 +16,8 @@ public static class ActorLifecycleScript
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 0.0f));
         UE.Self.SetActorRotation(FRotator.Zero);
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
+        FVector rootLocation = UE.Self.GetRootComponent().GetWorldLocation();
+        UE.Self.GetRootComponent().SetWorldLocation(rootLocation);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -150,6 +152,44 @@ public readonly struct AActor
     {
         return new FTransform(GetActorLocation(), GetActorRotation(), GetActorScale3D());
     }
+
+    public USceneComponent GetRootComponent()
+    {
+        Native.ActorGetRootComponent(Slot, Generation, out FObjectHandle handle);
+        return new USceneComponent(handle.Slot, handle.Generation);
+    }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal readonly struct FObjectHandle
+{
+    internal readonly int Slot;
+    internal readonly int Generation;
+}
+
+public readonly struct USceneComponent
+{
+    private readonly int Slot;
+    private readonly int Generation;
+
+    internal USceneComponent(int slot, int generation)
+    {
+        Slot = slot;
+        Generation = generation;
+    }
+
+    public bool IsValid => Slot > 0 && Generation > 0;
+
+    public FVector GetWorldLocation()
+    {
+        Native.SceneComponentGetWorldLocation(Slot, Generation, out FVector location);
+        return location;
+    }
+
+    public bool SetWorldLocation(FVector location)
+    {
+        return Native.SceneComponentSetWorldLocation(Slot, Generation, location.X, location.Y, location.Z) != 0;
+    }
 }
 
 public static class UE
@@ -186,6 +226,15 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "actor_set_scale")]
     internal static extern int ActorSetScale(int slot, int generation, float x, float y, float z);
+
+    [DllImport("env", EntryPoint = "actor_get_root_component")]
+    internal static extern int ActorGetRootComponent(int slot, int generation, out FObjectHandle handle);
+
+    [DllImport("env", EntryPoint = "scene_component_get_world_location")]
+    internal static extern int SceneComponentGetWorldLocation(int slot, int generation, out FVector location);
+
+    [DllImport("env", EntryPoint = "scene_component_set_world_location")]
+    internal static extern int SceneComponentSetWorldLocation(int slot, int generation, float x, float y, float z);
 
     [DllImport("env", EntryPoint = "actor_set_location")]
     internal static extern int ActorSetLocation(int slot, int generation, float x, float y, float z);

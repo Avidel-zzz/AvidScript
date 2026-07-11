@@ -1,5 +1,6 @@
 #include "AvidScriptActorBinding.h"
 
+#include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 
 bool FAvidScriptActorBinding::GetActorLocation(
@@ -194,6 +195,46 @@ bool FAvidScriptActorBinding::SetActorScale3D(
 	SetSuccess(OutResult, OutResult.ObjectResult, Actor->GetActorLocation(), Actor->GetActorRotation(), AppliedScale);
 	return true;
 }
+bool FAvidScriptActorBinding::GetRootComponentHandle(
+	FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& ActorHandle,
+	FAvidScriptObjectHandle& OutComponentHandle,
+	FAvidScriptActorBindingResult& OutResult)
+{
+	OutComponentHandle = FAvidScriptObjectHandle();
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	if (Actor == nullptr)
+	{
+		return false;
+	}
+
+	USceneComponent* RootComponent = Actor->GetRootComponent();
+	if (!IsValid(RootComponent))
+	{
+		SetFailure(
+			OutResult,
+			OutResult.ObjectResult,
+			TEXT("missing_root_component"),
+			TEXT("Assign a live RootComponent before requesting it from the script host."));
+		return false;
+	}
+
+	FAvidScriptObjectHandleResult RegisterResult;
+	OutComponentHandle = Registry.RegisterObject(RootComponent, RegisterResult);
+	if (!RegisterResult.bSucceeded)
+	{
+		SetFailure(
+			OutResult,
+			RegisterResult,
+			RegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("invalid_object")) : RegisterResult.ErrorCategory,
+			RegisterResult.NextAction);
+		return false;
+	}
+
+	SetSuccess(OutResult, OutResult.ObjectResult, Actor->GetActorLocation(), Actor->GetActorRotation(), Actor->GetActorScale3D());
+	return true;
+}
+
 AActor* FAvidScriptActorBinding::ResolveActor(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,

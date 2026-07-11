@@ -501,6 +501,9 @@ function Convert-CSharpValueExpression {
     if ($ValueType -eq 'FVector' -and $Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetActorScale3D\s*\(\s*\)$') {
         return [PSCustomObject]@{ Kind = 'get_actor_scale'; ValueType = $ValueType }
     }
+    if ($ValueType -eq 'FVector' -and $Trimmed -match '^UE\s*\.\s*Self\s*\.\s*GetRootComponent\s*\(\s*\)\s*\.\s*GetWorldLocation\s*\(\s*\)$') {
+        return [PSCustomObject]@{ Kind = 'get_root_component_world_location'; ValueType = $ValueType }
+    }
 
     if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
         $Local = Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $Trimmed
@@ -566,6 +569,16 @@ function Get-CSharpLifecycleStatements {
                 Kind = $Kind
                 ValueType = $ValueType
                 ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+            }
+            continue
+        }
+
+        $SceneComponentCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*GetRootComponent\s*\(\s*\)\s*\.\s*SetWorldLocation\s*\(\s*(?<expr>.+)\s*\)$')
+        if ($SceneComponentCall.Success) {
+            $Statements += [PSCustomObject]@{
+                Kind = 'set_root_component_world_location'
+                ValueType = 'FVector'
+                ValueExpression = Convert-CSharpValueExpression -Expression $SceneComponentCall.Groups['expr'].Value -ValueType 'FVector' -Fields $Fields -ValueLocals $ValueLocals
             }
             continue
         }
@@ -712,6 +725,39 @@ function Add-CSharpValueLocalAssignmentCode {
         [Parameter(Mandatory = $true)][int]$ValueLocalBase
     )
 
+    if ($Statement.Expression.Kind -eq 'get_root_component_world_location') {
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 2
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 3
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 16
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 9
+        Add-WasmByte -Bytes $Body -Value 0x1a
+        foreach ($HandleAddress in @(16, 20)) {
+            Add-WasmByte -Bytes $Body -Value 0x41
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32]$HandleAddress)
+            Add-WasmByte -Bytes $Body -Value 0x28
+            Add-WasmU32Leb -Bytes $Body -Value 2
+            Add-WasmU32Leb -Bytes $Body -Value 0
+        }
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 24
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 10
+        Add-WasmByte -Bytes $Body -Value 0x1a
+        for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
+            Add-WasmByte -Bytes $Body -Value 0x41
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32](24 + (4 * $ComponentIndex)))
+            Add-WasmByte -Bytes $Body -Value 0x2a
+            Add-WasmU32Leb -Bytes $Body -Value 2
+            Add-WasmU32Leb -Bytes $Body -Value 0
+            Add-WasmByte -Bytes $Body -Value 0x21
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32]($ValueLocalBase + (3 * $Statement.LocalOrdinal) + $ComponentIndex))
+        }
+        return
+    }
     if ($Statement.Expression.Kind -eq 'get_actor_location' -or $Statement.Expression.Kind -eq 'get_actor_rotation' -or $Statement.Expression.Kind -eq 'get_actor_scale') {
         $FunctionIndex = if ($Statement.Expression.Kind -eq 'get_actor_location') { 4 } elseif ($Statement.Expression.Kind -eq 'get_actor_rotation') { 6 } else { 8 }
         Add-WasmByte -Bytes $Body -Value 0x10
@@ -820,6 +866,31 @@ function Add-CSharpLifecycleStatementCode {
         return
     }
 
+    if ($Statement.Kind -eq 'set_root_component_world_location') {
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 2
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 3
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value 16
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 9
+        Add-WasmByte -Bytes $Body -Value 0x1a
+        foreach ($HandleAddress in @(16, 20)) {
+            Add-WasmByte -Bytes $Body -Value 0x41
+            Add-WasmU32Leb -Bytes $Body -Value ([uint32]$HandleAddress)
+            Add-WasmByte -Bytes $Body -Value 0x28
+            Add-WasmU32Leb -Bytes $Body -Value 2
+            Add-WasmU32Leb -Bytes $Body -Value 0
+        }
+        for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
+            Add-CSharpValueComponentCode -Body $Body -Expression $Statement.ValueExpression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
+        }
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 11
+        Add-WasmByte -Bytes $Body -Value 0x1a
+        return
+    }
     if ($Statement.Kind -eq 'set_location_value' -or $Statement.Kind -eq 'add_location_offset_value' -or $Statement.Kind -eq 'set_rotation_value' -or $Statement.Kind -eq 'set_scale_value') {
         Add-CSharpTypedActorValueCall -Body $Body -Statement $Statement -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         return
@@ -906,7 +977,7 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
     $ImportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ImportSection -Value 9
+    Add-WasmU32Leb -Bytes $ImportSection -Value 12
     Add-WasmString -Bytes $ImportSection -Text 'env'
     Add-WasmString -Bytes $ImportSection -Text 'actor_set_location'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
@@ -943,6 +1014,18 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ImportSection -Text 'actor_get_scale'
     Add-WasmByte -Bytes $ImportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'actor_get_root_component'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'scene_component_get_world_location'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 4
+    Add-WasmString -Bytes $ImportSection -Text 'env'
+    Add-WasmString -Bytes $ImportSection -Text 'scene_component_set_world_location'
+    Add-WasmByte -Bytes $ImportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ImportSection -Value 0
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
@@ -974,13 +1057,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmU32Leb -Bytes $ExportSection -Value 3
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 9
+    Add-WasmU32Leb -Bytes $ExportSection -Value 12
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_tick'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 10
+    Add-WasmU32Leb -Bytes $ExportSection -Value 13
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_end_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
-    Add-WasmU32Leb -Bytes $ExportSection -Value 11
+    Add-WasmU32Leb -Bytes $ExportSection -Value 14
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -1041,7 +1124,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v8'
+                subset = 'actor_lifecycle_v9'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1079,6 +1162,18 @@ function Invoke-CSharpSourceAdapter {
                 },
                 [ordered]@{
                     module = 'env'
+                    name = 'actor_get_root_component'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'scene_component_get_world_location'
+                },
+                [ordered]@{
+                    module = 'env'
+                    name = 'scene_component_set_world_location'
+                },
+                [ordered]@{
+                    module = 'env'
                     name = 'owner_get_slot'
                 },
                 [ordered]@{
@@ -1093,9 +1188,9 @@ function Invoke-CSharpSourceAdapter {
             }
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
-                supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'UE.Self')
-                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
-                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()')
+                supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'USceneComponent', 'UE.Self')
+                supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)')
+                supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()', 'FVector local = UE.Self.GetRootComponent().GetWorldLocation()')
                 supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
@@ -1107,7 +1202,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v8 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle events, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v9 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -1196,6 +1291,18 @@ function Write-Report {
             [ordered]@{
                 module = "env"
                 name = "actor_get_scale"
+            },
+            [ordered]@{
+                module = "env"
+                name = "actor_get_root_component"
+            },
+            [ordered]@{
+                module = "env"
+                name = "scene_component_get_world_location"
+            },
+            [ordered]@{
+                module = "env"
+                name = "scene_component_set_world_location"
             },
             [ordered]@{
                 module = "env"
@@ -1495,6 +1602,18 @@ $Manifest = [ordered]@{
         [ordered]@{
             module = "env"
             name = "actor_get_scale"
+        },
+        [ordered]@{
+            module = "env"
+            name = "actor_get_root_component"
+        },
+        [ordered]@{
+            module = "env"
+            name = "scene_component_get_world_location"
+        },
+        [ordered]@{
+            module = "env"
+            name = "scene_component_set_world_location"
         },
         [ordered]@{
             module = "env"

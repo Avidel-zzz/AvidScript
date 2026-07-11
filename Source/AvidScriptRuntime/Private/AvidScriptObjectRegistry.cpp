@@ -18,6 +18,19 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 		return InvalidHandle;
 	}
 
+	for (int32 ExistingSlotIndex = 0; ExistingSlotIndex < Slots.Num(); ++ExistingSlotIndex)
+	{
+		const FSlot& ExistingSlot = Slots[ExistingSlotIndex];
+		if (ExistingSlot.bOccupied && ExistingSlot.Object.Get() == Object)
+		{
+			const FAvidScriptObjectHandle ExistingHandle{
+				static_cast<uint32>(ExistingSlotIndex + 1),
+				ExistingSlot.Generation };
+			SetSuccess(OutResult, ExistingHandle, Object);
+			return ExistingHandle;
+		}
+	}
+
 	int32 SlotIndex = INDEX_NONE;
 	if (FreeSlots.Num() > 0)
 	{

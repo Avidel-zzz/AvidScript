@@ -84,6 +84,9 @@ public:
 	int32 HandleActorSetRotationImport(int32 Slot, int32 Generation, const FRotator& Rotation);
 	int32 HandleActorGetScaleImport(int32 Slot, int32 Generation, FVector& OutScale3D);
 	int32 HandleActorSetScaleImport(int32 Slot, int32 Generation, const FVector& Scale3D);
+	int32 HandleActorGetRootComponentImport(int32 Slot, int32 Generation, FAvidScriptObjectHandle& OutComponentHandle);
+	int32 HandleSceneComponentGetWorldLocationImport(int32 Slot, int32 Generation, FVector& OutWorldLocation);
+	int32 HandleSceneComponentSetWorldLocationImport(int32 Slot, int32 Generation, const FVector& WorldLocation);
 	void SetPendingHostImportFailure(
 		const FString& ImportModuleName,
 		const FString& ImportName,

@@ -512,6 +512,27 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 	const FVector TargetScale(2.0, 3.0, 4.0);
 	TestEqual(TEXT("Actor set scale import succeeds"), Runtime.HandleActorSetScaleImport(ActorHandle.Slot, ActorHandle.Generation, TargetScale), 1);
 	TestTrue(TEXT("Actor scaled by import handler"), Actor->GetActorScale3D().Equals(TargetScale, 0.01));
+	FAvidScriptObjectHandle ComponentHandle;
+	TestEqual(
+		TEXT("Actor root component import succeeds"),
+		Runtime.HandleActorGetRootComponentImport(ActorHandle.Slot, ActorHandle.Generation, ComponentHandle),
+		1);
+	TestTrue(TEXT("Root component import returns a valid handle"), ComponentHandle.IsValid());
+	TestNotEqual(TEXT("Root component does not use owner slot"), ComponentHandle.Slot, ActorHandle.Slot);
+
+	FVector ComponentLocation = FVector::ZeroVector;
+	TestEqual(
+		TEXT("Scene component get world location import succeeds"),
+		Runtime.HandleSceneComponentGetWorldLocationImport(ComponentHandle.Slot, ComponentHandle.Generation, ComponentLocation),
+		1);
+	TestTrue(TEXT("Scene component location matches actor root"), ComponentLocation.Equals(Actor->GetRootComponent()->GetComponentLocation(), 0.01));
+
+	const FVector ComponentTargetLocation(321.0, 654.0, 987.0);
+	TestEqual(
+		TEXT("Scene component set world location import succeeds"),
+		Runtime.HandleSceneComponentSetWorldLocationImport(ComponentHandle.Slot, ComponentHandle.Generation, ComponentTargetLocation),
+		1);
+	TestTrue(TEXT("Scene component moves through import handler"), Actor->GetRootComponent()->GetComponentLocation().Equals(ComponentTargetLocation, 0.01));
 
 	FAvidScriptObjectHandleResult ReleaseResult;
 	TestTrue(TEXT("Owner handle releases for stale generation coverage"), Registry.ReleaseHandle(ActorHandle, ReleaseResult));
@@ -555,6 +576,13 @@ bool FAvidScriptWasmActorImportMissingContextSmokeTest::RunTest(const FString& P
 	TestEqual(TEXT("Missing host context fails closed on get scale"), Runtime.HandleActorGetScaleImport(1, 1, ReadScale), 0);
 	TestTrue(TEXT("Failed scale get leaves zero vector"), ReadScale.Equals(FVector::ZeroVector, 0.01));
 	TestEqual(TEXT("Missing host context fails closed on set scale"), Runtime.HandleActorSetScaleImport(1, 1, FVector(1.0, 2.0, 3.0)), 0);
+	FAvidScriptObjectHandle MissingComponentHandle{ 9, 9 };
+	TestEqual(TEXT("Missing host context fails closed on root component"), Runtime.HandleActorGetRootComponentImport(1, 1, MissingComponentHandle), 0);
+	TestFalse(TEXT("Failed root component get zeros handle"), MissingComponentHandle.IsValid());
+	FVector MissingComponentLocation(9.0, 9.0, 9.0);
+	TestEqual(TEXT("Missing host context fails closed on component get"), Runtime.HandleSceneComponentGetWorldLocationImport(1, 1, MissingComponentLocation), 0);
+	TestEqual(TEXT("Failed component get zeros output"), MissingComponentLocation, FVector::ZeroVector);
+	TestEqual(TEXT("Missing host context fails closed on component set"), Runtime.HandleSceneComponentSetWorldLocationImport(1, 1, FVector(1.0, 2.0, 3.0)), 0);
 	TestEqual(TEXT("Missing owner context fails closed on slot"), Runtime.HandleOwnerGetSlotImport(), 0);
 	TestEqual(TEXT("Missing owner context fails closed on generation"), Runtime.HandleOwnerGetGenerationImport(), 0);
 
