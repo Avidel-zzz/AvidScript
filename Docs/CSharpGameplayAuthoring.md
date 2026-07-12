@@ -1,17 +1,19 @@
 # AvidScript C# Gameplay Authoring 指南
 
-> 当前状态: PC / Windows Editor 优先。Phase29 已支持 C# direct ABI WASM、`BeginPlay` / `Tick` / `EndPlay`、`FVector`、`FRotator`、`FTransform` snapshot、handle-backed `AActor` / `UE.Self`，以及 Actor 位置、旋转、缩放 typed read/write。
+> 当前状态: PC / Windows Editor 优先。Phase33 已支持 C# direct ABI WASM、`BeginPlay` / `Tick` / `EndPlay` / Timer / Gameplay Event、`FVector`、`FRotator`、`FTransform` snapshot、handle-backed `AActor` / `UE.Self`，以及 Actor 与 RootComponent typed read/write。
 
 ## 现在可以实现什么
 
-1. 在 C# 中编写 `BeginPlay()`、`Tick(float deltaSeconds)` 和可选 `EndPlay()`。
+1. 在 C# 中编写 `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()`、`OnTimer(...)` 和 `OnEvent(...)`。
 2. 使用 `private static float` 保存累计时间、速度或简单阶段状态。
 3. 通过 `UE.Self` 获取当前 `UAvidScriptComponent` 的 owner Actor。
 4. 读取、设置或增量更新 Actor 位置。
 5. 读取和设置 Actor 旋转。
 6. 读取和设置 Actor scale，并获取 `FTransform` snapshot。
 7. 从 Editor 创建 profile、构建 WASM/report/manifest，并绑定到选中 Actor。
-8. 在 PIE 中执行真实 Actor 读写，在 EndPlay 时先调用 guest，再卸载 runtime 和释放 owner handle。
+8. 用 `UE.SetTimer(...)` 延迟执行脚本逻辑。
+9. 从 Blueprint、Enhanced Input 或其他 UE 系统调用组件的 `DispatchScriptEvent(eventId, value)`，把事件推入 WASM。
+10. 在 PIE 中执行真实 Actor 读写，在 EndPlay 时先调用 guest，再卸载 runtime 和释放 owner handle。
 
 ## 默认示例
 
@@ -45,6 +47,16 @@ public static void Tick(float deltaSeconds)
     UE.Self.SetActorScale3D(
         scale + new FVector(0.0f, 0.0f, 0.6f * deltaSeconds));
 }
+
+public static void OnTimer(int callbackId, int timerHandle)
+{
+    UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 50.0f));
+}
+
+public static void OnEvent(int eventId, float value)
+{
+    UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f));
+}
 ```
 
 默认示例还会在 `EndPlay` 恢复位置、旋转和 scale。
@@ -73,7 +85,7 @@ UE.Self.SetActorScale3D(scale + new FVector(0.0f, 0.0f, 0.1f));
 FTransform snapshot = UE.Self.GetActorTransform();
 ```
 
-当前 adapter v9 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
+当前 adapter v11 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
 
 ### AActor 与 UE.Self
 
@@ -88,9 +100,11 @@ Actor.AddLocationOffset(1.0f, 0.0f, 0.0f);
 
 ## 当前 C# 子集
 
-Phase30 source adapter subset 为 `actor_lifecycle_v9`：
+Phase33 source adapter subset 为 `actor_lifecycle_v11`：
 
-- `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()`。
+- `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()` / `OnTimer(int, int)` / `OnEvent(int, float)`。
+- `UE.SetTimer(delaySeconds, callbackId)` 与 `UE.CancelTimer(timerHandle)` host ABI。
+- `OnEvent` 内可用的 float payload `value`。
 - `private static float`、字段赋值/累加。
 - 数字、`deltaSeconds`、静态 float 字段、加法和乘法。
 - Actor location、rotation、scale typed getter/setter。
@@ -118,7 +132,9 @@ UE.Self.GetRootComponent().SetWorldLocation(
 - lifecycle 内的 `FTransform` local 与原子 `SetActorTransform`。
 - 任意 `UFUNCTION`、`UPROPERTY` 或运行时动态反射调用。
 - Spawn、组件查找、Attach/Detach、相对 Transform 和组件创建。
-- quaternion、sweep、hit result、输入、Timer、Overlap、Hit、委托和异步任务。
+- quaternion、sweep、hit result、自动输入绑定、typed Overlap/Hit payload、委托和异步任务。
+- Timer repeat/pause/resume，以及 source adapter 内保存返回 handle 的完整 `int` 状态语法。
+- 基于 `eventId` 的 if/switch；当前受限 adapter 只能直接使用事件的 float `value`。
 - 分支、循环、集合和完整 C# 语义。
 - Android/iOS 构建验证。
 
@@ -140,11 +156,11 @@ UE.Self.GetRootComponent().SetWorldLocation(
 | --- | --- | --- |
 | `profile_missing` | profile 不存在 | 创建默认 profile 或检查路径。 |
 | `source_missing` | source 不存在 | 指向真实 C# 文件。 |
-| `source_adapter_failed` | 源码超出 v9 子集 | 检查 lifecycle、typed locals、表达式和 Actor 调用。 |
+| `source_adapter_failed` | 源码超出 v11 子集 | 检查 lifecycle、typed locals、Event value、表达式和 Actor 调用。 |
 | `missing_import` | host import 未注册 | 确认 Runtime 与 manifest 版本一致。 |
 | `host_import_failed` | handle、write policy 或 UE 调用失败 | 检查 owner 生命周期和 UE 日志。 |
 | `selection_unavailable` | 没有可绑定 Actor | 在关卡中选中 Actor。 |
 
 ## 下一步能力
 
-Phase31 将把当前手写 binding contract 过渡到 UE 反射元数据驱动的静态生成流程，先生成可审计的类型、函数和 ABI 清单。后续继续推进 Spawn、输入/Timer/碰撞事件、调试工具、PC packaging 和移动端。
+下一步继续推进 typed Overlap/Hit、输入 action 适配、事件分支/整数状态、Spawn、调试工具、PC packaging 和移动端验证。
