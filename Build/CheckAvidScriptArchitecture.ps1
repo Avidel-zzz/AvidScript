@@ -113,6 +113,20 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
     'AVIDSCRIPT_WITH_WAMR'
 )
 
+$RuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
+$RuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+foreach ($RequiredTimerStructure in @('ActiveTimers', 'TimerHeap', 'DueTimerScratch')) {
+    if (-not $RuntimeHeader.Contains($RequiredTimerStructure)) {
+        Add-Violation "Runtime timer scheduler is missing required structure $RequiredTimerStructure"
+    }
+}
+if ($RuntimeHeader -match '\bRemainingSeconds\b') {
+    Add-Violation 'Runtime timers must use absolute deadlines instead of per-frame RemainingSeconds mutation'
+}
+if ($RuntimeSource -match 'PendingTimers\.IndexOfByPredicate') {
+    Add-Violation 'Runtime timer lookup must use the active handle map instead of a linear PendingTimers scan'
+}
+
 $ReloadTypesHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h'
 $RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
 $ReloadUmbrellaHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReload.h'

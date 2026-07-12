@@ -39,7 +39,7 @@ void AppendTimerSection(TArray<uint8>& Module, uint8 SectionId, const TArray<uin
 	Module.Append(Payload);
 }
 
-TArray<uint8> BuildTimerCallbackFixture(bool bTrap)
+TArray<uint8> BuildTimerCallbackFixture(bool bTrap, bool bReschedule = true)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -91,9 +91,13 @@ TArray<uint8> BuildTimerCallbackFixture(bool bTrap)
 	{
 		TimerBody = { 0x00, 0x00, 0x0b };
 	}
-	else
+	else if (bReschedule)
 	{
 		TimerBody = { 0x00, 0x43, 0x00, 0x00, 0x00, 0x00, 0x41, 0x08, 0x10, 0x00, 0x1a, 0x0b };
+	}
+	else
+	{
+		TimerBody = { 0x00, 0x0b };
 	}
 	TArray<uint8> CodeSection;
 	AppendTimerU32Leb(CodeSection, 3);
@@ -143,6 +147,20 @@ bool FAvidScriptWasmTimerRegistrationAndCancellationSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Timer handles are unique at capacity"), TimerHandles.Num(), 1024);
 	TestEqual(TEXT("Pending timer count reaches the documented capacity"), Runtime.GetPendingTimerCount(), 1024);
 	TestEqual(TEXT("Timer registration fails closed above capacity"), Runtime.HandleTimerSetOnceImport(60.0f, 1024), 0);
+
+	for (const int32 CapacityHandle : TimerHandles)
+	{
+		TestEqual(TEXT("Capacity timer cancellation succeeds"), Runtime.HandleTimerCancelImport(CapacityHandle), 1);
+	}
+	TestEqual(TEXT("Cancelling capacity timers clears the active set"), Runtime.GetPendingTimerCount(), 0);
+
+	bool bCapacityReusableAfterCancellation = true;
+	for (int32 TimerIndex = 0; TimerIndex < 1024; ++TimerIndex)
+	{
+		bCapacityReusableAfterCancellation &= Runtime.HandleTimerSetOnceImport(60.0f, TimerIndex) > 0;
+	}
+	TestTrue(TEXT("Timer capacity is reusable after cancellation churn"), bCapacityReusableAfterCancellation);
+	TestEqual(TEXT("Reused timer capacity reaches the limit"), Runtime.GetPendingTimerCount(), 1024);
 	return true;
 }
 
@@ -233,6 +251,32 @@ bool FAvidScriptWasmTimerCallbackRescheduleSmokeTest::RunTest(const FString& Par
 	TestEqual(TEXT("Second Tick executes exactly one additional callback"), Result.TimerCallbackCount, 2);
 	TestEqual(TEXT("Deferred callback id"), Result.LastTimerCallbackId, 8);
 	TestEqual(TEXT("Rescheduled zero-delay timer again waits for the next frame"), Runtime.GetPendingTimerCount(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmTimerDeterministicOrderSmokeTest,
+	"AvidScript.Runtime.Timer.DeterministicDeadlineOrderSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmTimerDeterministicOrderSmokeTest::RunTest(const FString& Parameters)
+{
+	const TArray<uint8> WasmBytes = BuildTimerCallbackFixture(false, false);
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmSmokeResult Result;
+	TestTrue(TEXT("Timer order fixture loads"), Runtime.LoadModule(
+		WasmBytes.GetData(), WasmBytes.Num(), TEXT("timer_deterministic_order"), Result));
+	TestTrue(TEXT("BeginPlay schedules the first timer"), Runtime.BeginPlay(Result));
+	const int32 SecondHandle = Runtime.HandleTimerSetOnceImport(0.0f, 20);
+	const int32 ThirdHandle = Runtime.HandleTimerSetOnceImport(0.0f, 21);
+	TestTrue(TEXT("Second timer handle follows the first"), SecondHandle > 1);
+	TestTrue(TEXT("Third timer handle follows the second"), ThirdHandle > SecondHandle);
+
+	TestTrue(TEXT("Tick executes timers sharing a deadline"), Runtime.Tick(1.0f / 60.0f, Result));
+	TestEqual(TEXT("All same-deadline callbacks execute"), Result.TimerCallbackCount, 3);
+	TestEqual(TEXT("The highest handle executes last"), Result.LastTimerHandle, ThirdHandle);
+	TestEqual(TEXT("The highest-handle callback id executes last"), Result.LastTimerCallbackId, 21);
+	TestEqual(TEXT("All one-shot timers are removed"), Runtime.GetPendingTimerCount(), 0);
 	return true;
 }
 

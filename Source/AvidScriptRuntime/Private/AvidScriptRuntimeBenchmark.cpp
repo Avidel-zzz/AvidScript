@@ -146,6 +146,20 @@ void SetFailureFromSmokeResult(
 		OutResult.ErrorMessage.IsEmpty() ? TEXT("<none>") : *OutResult.ErrorMessage);
 }
 
+void SetTimerSchedulerFailure(
+	FAvidScriptTimerSchedulerBenchmarkResult& OutResult,
+	const FString& ErrorCategory,
+	const FString& ErrorMessage)
+{
+	OutResult.bSucceeded = false;
+	OutResult.ErrorCategory = ErrorCategory;
+	OutResult.ErrorMessage = ErrorMessage;
+	OutResult.Summary = FString::Printf(
+		TEXT("timer_scheduler_benchmark_failed | category=%s | message=%s"),
+		ErrorCategory.IsEmpty() ? TEXT("<none>") : *ErrorCategory,
+		ErrorMessage.IsEmpty() ? TEXT("<none>") : *ErrorMessage);
+}
+
 void SetHostBindingFailure(
 	FAvidScriptHostBindingBenchmarkResult& OutResult,
 	const FString& ErrorCategory,
@@ -260,6 +274,105 @@ bool FAvidScriptRuntimeBenchmark::RunEmbeddedSmokeBenchmark(
 		OutResult.TickCall.AvgMs,
 		OutResult.TickCall.P95Ms,
 		OutResult.Unload.AvgMs);
+
+	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
+	return true;
+}
+
+bool FAvidScriptRuntimeBenchmark::RunTimerSchedulerBenchmark(
+	const FAvidScriptTimerSchedulerBenchmarkOptions& Options,
+	FAvidScriptTimerSchedulerBenchmarkResult& OutResult)
+{
+	OutResult = FAvidScriptTimerSchedulerBenchmarkResult();
+	OutResult.WarmupCount = FMath::Max(Options.WarmupCount, 0);
+	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
+	OutResult.PendingTimerCount = FMath::Clamp(Options.PendingTimerCount, 1, 1023);
+	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
+
+	TArray<double> IdleTickSamples;
+	TArray<double> SetCancelChurnSamples;
+	IdleTickSamples.Reserve(OutResult.SampleCount);
+	SetCancelChurnSamples.Reserve(OutResult.SampleCount);
+
+	const int32 TotalRuns = OutResult.WarmupCount + OutResult.SampleCount;
+	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
+	{
+		FAvidScriptWasmRuntimeInstance Runtime;
+		FAvidScriptWasmSmokeResult SmokeResult;
+		if (!Runtime.LoadEmbeddedSmokeModule(SmokeResult) || !Runtime.BeginPlay(SmokeResult))
+		{
+			SetTimerSchedulerFailure(OutResult, SmokeResult.ErrorCategory, SmokeResult.ErrorMessage);
+			return false;
+		}
+
+		for (int32 TimerIndex = 0; TimerIndex < OutResult.PendingTimerCount; ++TimerIndex)
+		{
+			if (Runtime.HandleTimerSetOnceImport(3600.0f, TimerIndex) <= 0)
+			{
+				SetTimerSchedulerFailure(
+					OutResult,
+					TEXT("timer_setup_failed"),
+					FString::Printf(TEXT("Failed to register pending timer %d of %d."), TimerIndex + 1, OutResult.PendingTimerCount));
+				return false;
+			}
+		}
+
+		const double IdleTickStartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			if (!Runtime.Tick(0.0f, SmokeResult))
+			{
+				SetTimerSchedulerFailure(OutResult, SmokeResult.ErrorCategory, SmokeResult.ErrorMessage);
+				return false;
+			}
+		}
+		const double IdleTickMs = MeasureElapsedPerIterationMs(IdleTickStartSeconds, OutResult.IterationsPerSample);
+
+		const double ChurnStartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			const int32 TimerHandle = Runtime.HandleTimerSetOnceImport(3600.0f, IterationIndex);
+			if (TimerHandle <= 0 || Runtime.HandleTimerCancelImport(TimerHandle) != 1)
+			{
+				SetTimerSchedulerFailure(
+					OutResult,
+					TEXT("timer_churn_failed"),
+					FString::Printf(TEXT("Set/cancel churn failed at iteration %d."), IterationIndex));
+				return false;
+			}
+		}
+		const double SetCancelChurnMs = MeasureElapsedPerIterationMs(ChurnStartSeconds, OutResult.IterationsPerSample);
+
+		Runtime.Unload(SmokeResult);
+		if (!SmokeResult.bUnloaded)
+		{
+			SetTimerSchedulerFailure(
+				OutResult,
+				SmokeResult.ErrorCategory.IsEmpty() ? FString(TEXT("unload_failed")) : SmokeResult.ErrorCategory,
+				SmokeResult.ErrorMessage.IsEmpty() ? FString(TEXT("Timer benchmark runtime did not unload.")) : SmokeResult.ErrorMessage);
+			return false;
+		}
+
+		if (RunIndex >= OutResult.WarmupCount)
+		{
+			IdleTickSamples.Add(IdleTickMs);
+			SetCancelChurnSamples.Add(SetCancelChurnMs);
+		}
+	}
+
+	OutResult.IdleTick = CalculateStats(IdleTickSamples);
+	OutResult.SetCancelChurn = CalculateStats(SetCancelChurnSamples);
+	OutResult.bSucceeded = true;
+	OutResult.Summary = FString::Printf(
+		TEXT("timer_scheduler_benchmark | warmup=%d | samples=%d | pending=%d | iterations=%d | idle_tick_avg_ms=%.6f | idle_tick_p95_ms=%.6f | set_cancel_avg_ms=%.6f | set_cancel_p95_ms=%.6f"),
+		OutResult.WarmupCount,
+		OutResult.SampleCount,
+		OutResult.PendingTimerCount,
+		OutResult.IterationsPerSample,
+		OutResult.IdleTick.AvgMs,
+		OutResult.IdleTick.P95Ms,
+		OutResult.SetCancelChurn.AvgMs,
+		OutResult.SetCancelChurn.P95Ms);
 
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	return true;

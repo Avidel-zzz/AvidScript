@@ -63,7 +63,7 @@ struct FAvidScriptWasmTimerEntry
 {
 	int32 Handle = 0;
 	int32 CallbackId = 0;
-	float RemainingSeconds = 0.0f;
+	double DueTimeSeconds = 0.0;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance : public IAvidScriptHostDispatcher
@@ -90,7 +90,7 @@ public:
 	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
 	bool HasBegunPlay() const { return bHasBegunPlay; }
 	int32 GetTickCallCount() const { return TickCallCount; }
-	int32 GetPendingTimerCount() const { return PendingTimers.Num(); }
+	int32 GetPendingTimerCount() const { return ActiveTimers.Num(); }
 	int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
 	int32 GetEventCallbackCount() const { return EventCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
@@ -122,9 +122,10 @@ public:
 
 
 private:
-	void CollectDueTimerHandles(float DeltaSeconds, TArray<int32>& OutDueTimerHandles);
-	bool ExecuteDueTimerCallbacks(const TArray<int32>& DueTimerHandles, FAvidScriptWasmSmokeResult& OutResult);
+	void CollectDueTimers(float DeltaSeconds);
+	bool ExecuteDueTimerCallbacks(FAvidScriptWasmSmokeResult& OutResult);
 	int32 AllocateTimerHandle();
+	void CompactTimerHeapIfNeeded();
 	void ResetTimerState();
 	void CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void ResetEventState();
@@ -148,7 +149,11 @@ private:
 	int32 TimerCallbackCount = 0;
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
-	TArray<FAvidScriptWasmTimerEntry> PendingTimers;
+	TMap<int32, FAvidScriptWasmTimerEntry> ActiveTimers;
+	TArray<FAvidScriptWasmTimerEntry> TimerHeap;
+	TArray<FAvidScriptWasmTimerEntry> DueTimerScratch;
+	double TimerClockSeconds = 0.0;
+	int32 StaleTimerHeapEntryCount = 0;
 	int32 EventCallbackCount = 0;
 	int32 LastEventId = 0;
 	float LastEventValue = 0.0f;

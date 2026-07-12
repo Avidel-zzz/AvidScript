@@ -199,6 +199,11 @@ Plugins/AvidScript/Docs
 - 2026-07-06 P21 mistake record: commit hash 回填时再次把 Markdown 反引号放进 PowerShell 双引号字符串, 导致 inline code 反引号丢失并写入字面量 `` `r ``。Prevention: 所有包含 Markdown 反引号的文档回填都用单引号模板、行数组直接赋值或 `[char]96`, 写后扫描字面量 `` `r `` / `` `n ``。
 - 2026-07-06 P20 mistake record: 用 PowerShell 双引号直接拼复杂 C++ 替换片段时容易被引号、反斜杠或 UE 宏文本打断解析; 本次未写坏文件但浪费了验证时间。Prevention: 复杂 C++/Markdown 替换优先用单引号 here-string、逐行数组或小范围读写函数, 写后立即 `Select-String`/`git diff --check` 核对。
 
+- 2026-07-12 P37 测试编辑错误记录：受控 PowerShell fallback 用 LF here-string 匹配 CRLF 测试文件，因换行不一致触发 missing anchor；脚本在写盘前停止，文件未损坏。Prevention：fallback 多行替换必须先在内存中把源文本和锚点统一为 LF，完成全部必需锚点检查后才允许一次性写盘。
+
+- 2026-07-12 P37 文档命令错误记录：把含 Markdown 反引号的 PowerShell here-string 直接嵌入 functions.exec JavaScript template literal，导致外层 JavaScript 在命令执行前 SyntaxError；文件未改动。Prevention：通过 functions.exec 发送含反引号的文档时，使用不含 template literal 的安全字符串构造，或先移除/显式转义外层反引号。
+- 2026-07-12 P37 文档路径错误记录：把项目根 Docs 下的 Phase 37 实施计划误按插件相对路径读取，脚本在实现记录写盘后因 FileNotFound 停止。Prevention：项目决策/plan/tracker 使用项目根绝对路径，插件实现记录才从插件仓库使用 Docs 相对路径；多目录文档更新前先逐项 Test-Path。
+
 ## Module Architecture Workflow
 
 - Runtime dependency direction is `AvidScriptCore <- AvidScriptVM/AvidScriptBindings <- AvidScriptRuntime <- AvidScriptEditor`.

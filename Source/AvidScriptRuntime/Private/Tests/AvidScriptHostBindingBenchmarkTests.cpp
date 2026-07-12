@@ -12,9 +12,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptHostBindingOverheadSmokeTest::RunTest(const FString& Parameters)
 {
 	FAvidScriptHostBindingBenchmarkOptions Options;
-	Options.SampleCount = 5;
-	Options.WarmupCount = 1;
-	Options.IterationsPerSample = 100;
+	Options.SampleCount = 20;
+	Options.WarmupCount = 3;
+	Options.IterationsPerSample = 1000;
 
 	FAvidScriptHostBindingBenchmarkResult Result;
 	const bool bSucceeded = FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(Options, Result);

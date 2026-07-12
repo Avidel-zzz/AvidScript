@@ -36,6 +36,28 @@ struct FAvidScriptRuntimeBenchmarkResult
 	FAvidScriptBenchmarkStats Unload;
 };
 
+struct FAvidScriptTimerSchedulerBenchmarkOptions
+{
+	int32 WarmupCount = 3;
+	int32 SampleCount = 20;
+	int32 PendingTimerCount = 512;
+	int32 IterationsPerSample = 1000;
+};
+
+struct FAvidScriptTimerSchedulerBenchmarkResult
+{
+	bool bSucceeded = false;
+	int32 WarmupCount = 0;
+	int32 SampleCount = 0;
+	int32 PendingTimerCount = 0;
+	int32 IterationsPerSample = 0;
+	FString ErrorCategory;
+	FString ErrorMessage;
+	FString Summary;
+	FAvidScriptBenchmarkStats IdleTick;
+	FAvidScriptBenchmarkStats SetCancelChurn;
+};
+
 struct FAvidScriptHostBindingBenchmarkOptions
 {
 	int32 WarmupCount = 2;
@@ -66,6 +88,10 @@ public:
 	static bool RunEmbeddedSmokeBenchmark(
 		const FAvidScriptRuntimeBenchmarkOptions& Options,
 		FAvidScriptRuntimeBenchmarkResult& OutResult);
+
+	static bool RunTimerSchedulerBenchmark(
+		const FAvidScriptTimerSchedulerBenchmarkOptions& Options,
+		FAvidScriptTimerSchedulerBenchmarkResult& OutResult);
 
 	static bool RunHostBindingBenchmark(
 		const FAvidScriptHostBindingBenchmarkOptions& Options,

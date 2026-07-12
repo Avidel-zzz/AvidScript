@@ -12,6 +12,16 @@ constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 constexpr int32 AvidScriptMaximumPendingTimers = 1024;
+constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
+
+struct FAvidScriptTimerDeadlineLess
+{
+	bool operator()(const FAvidScriptWasmTimerEntry& Left, const FAvidScriptWasmTimerEntry& Right) const
+	{
+		return Left.DueTimeSeconds < Right.DueTimeSeconds
+			|| (Left.DueTimeSeconds == Right.DueTimeSeconds && Left.Handle < Right.Handle);
+	}
+};
 
 const uint8 GAvidScriptMinimalWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
@@ -406,8 +416,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		return false;
 	}
 
-	TArray<int32> DueTimerHandles;
-	CollectDueTimerHandles(DeltaSeconds, DueTimerHandles);
+	CollectDueTimers(DeltaSeconds);
 	Metrics.TimerCallbackCallMs = 0.0;
 
 	uint32 TickArgs[1] = {};
@@ -443,7 +452,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	CopyTimerStateToResult(OutResult);
 	CopyEventStateToResult(OutResult);
 
-	if (!ExecuteDueTimerCallbacks(DueTimerHandles, OutResult))
+	if (!ExecuteDueTimerCallbacks(OutResult))
 	{
 		OutResult.Metrics = Metrics;
 		OutResult.bTickCalled = true;
@@ -1258,7 +1267,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySecond
 		|| !FMath::IsFinite(DelaySeconds)
 		|| DelaySeconds < 0.0f
 		|| CallbackId < 0
-		|| PendingTimers.Num() >= AvidScriptMaximumPendingTimers)
+		|| ActiveTimers.Num() >= AvidScriptMaximumPendingTimers)
 	{
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
@@ -1271,10 +1280,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerSetOnceImport(float DelaySecond
 		return 0;
 	}
 
-	FAvidScriptWasmTimerEntry& Timer = PendingTimers.AddDefaulted_GetRef();
-	Timer.Handle = TimerHandle;
-	Timer.CallbackId = CallbackId;
-	Timer.RemainingSeconds = DelaySeconds;
+	const FAvidScriptWasmTimerEntry Timer{
+		TimerHandle,
+		CallbackId,
+		TimerClockSeconds + static_cast<double>(DelaySeconds)
+	};
+	ActiveTimers.Add(TimerHandle, Timer);
+	TimerHeap.HeapPush(Timer, FAvidScriptTimerDeadlineLess());
 	LastHostImportResult = TimerHandle;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return TimerHandle;
@@ -1287,66 +1299,61 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
 	LastHostImportResult = 0;
 	++HostImportCallCount;
 
-	const int32 TimerIndex = PendingTimers.IndexOfByPredicate(
-		[TimerHandle](const FAvidScriptWasmTimerEntry& Timer)
-		{
-			return Timer.Handle == TimerHandle;
-		});
-	if (TimerIndex != INDEX_NONE)
+	if (ActiveTimers.Remove(TimerHandle) > 0)
 	{
-		PendingTimers.RemoveAtSwap(TimerIndex, 1, EAllowShrinking::No);
+		++StaleTimerHeapEntryCount;
 		LastHostImportResult = 1;
+		CompactTimerHeapIfNeeded();
 	}
 
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return LastHostImportResult;
 }
 
-void FAvidScriptWasmRuntimeInstance::CollectDueTimerHandles(float DeltaSeconds, TArray<int32>& OutDueTimerHandles)
+void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 {
-	OutDueTimerHandles.Reset();
-	const float SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds) && DeltaSeconds > 0.0f
-		? DeltaSeconds
-		: 0.0f;
-	for (FAvidScriptWasmTimerEntry& Timer : PendingTimers)
-	{
-		Timer.RemainingSeconds -= SafeDeltaSeconds;
-		if (Timer.RemainingSeconds <= 0.0f)
-		{
-			OutDueTimerHandles.Add(Timer.Handle);
-		}
-	}
-	OutDueTimerHandles.Sort();
-}
+	DueTimerScratch.Reset();
+	const double SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds) && DeltaSeconds > 0.0f
+		? static_cast<double>(DeltaSeconds)
+		: 0.0;
+	TimerClockSeconds += SafeDeltaSeconds;
 
-bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
-	const TArray<int32>& DueTimerHandles,
-	FAvidScriptWasmSmokeResult& OutResult)
-{
-	for (const int32 TimerHandle : DueTimerHandles)
+	const FAvidScriptTimerDeadlineLess DeadlineLess;
+	while (!TimerHeap.IsEmpty() && TimerHeap[0].DueTimeSeconds <= TimerClockSeconds)
 	{
-		const int32 TimerIndex = PendingTimers.IndexOfByPredicate(
-			[TimerHandle](const FAvidScriptWasmTimerEntry& Timer)
-			{
-				return Timer.Handle == TimerHandle;
-			});
-		if (TimerIndex == INDEX_NONE)
+		FAvidScriptWasmTimerEntry HeapTimer;
+		TimerHeap.HeapPop(HeapTimer, DeadlineLess, EAllowShrinking::No);
+
+		const FAvidScriptWasmTimerEntry* ActiveTimer = ActiveTimers.Find(HeapTimer.Handle);
+		const bool bIsActiveEntry = ActiveTimer != nullptr
+			&& ActiveTimer->DueTimeSeconds == HeapTimer.DueTimeSeconds
+			&& ActiveTimer->CallbackId == HeapTimer.CallbackId;
+		if (!bIsActiveEntry)
 		{
+			StaleTimerHeapEntryCount = FMath::Max(0, StaleTimerHeapEntryCount - 1);
 			continue;
 		}
 
-		const FAvidScriptWasmTimerEntry Timer = PendingTimers[TimerIndex];
-		PendingTimers.RemoveAtSwap(TimerIndex, 1, EAllowShrinking::No);
+		DueTimerScratch.Add(*ActiveTimer);
+		ActiveTimers.Remove(HeapTimer.Handle);
+	}
 
+	CompactTimerHeapIfNeeded();
+}
+
+bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmokeResult& OutResult)
+{
+	for (const FAvidScriptWasmTimerEntry& Timer : DueTimerScratch)
+	{
 		uint32 TimerArgs[2] = {
 			static_cast<uint32>(Timer.CallbackId),
 			static_cast<uint32>(Timer.Handle)
 		};
 		const double CallbackStartSeconds = FPlatformTime::Seconds();
 		if (!CallVmExport(
-		VmBackend.Get(),
-		TimerExport,
-		ModuleId,
+			VmBackend.Get(),
+			TimerExport,
+			ModuleId,
 			"avid_on_timer",
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
@@ -1370,12 +1377,7 @@ int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()
 	{
 		const int32 Candidate = NextTimerHandle;
 		NextTimerHandle = NextTimerHandle == MAX_int32 ? 1 : NextTimerHandle + 1;
-		const bool bAlreadyUsed = PendingTimers.ContainsByPredicate(
-			[Candidate](const FAvidScriptWasmTimerEntry& Timer)
-			{
-				return Timer.Handle == Candidate;
-			});
-		if (Candidate > 0 && !bAlreadyUsed)
+		if (Candidate > 0 && !ActiveTimers.Contains(Candidate))
 		{
 			return Candidate;
 		}
@@ -1383,9 +1385,32 @@ int32 FAvidScriptWasmRuntimeInstance::AllocateTimerHandle()
 	return 0;
 }
 
+void FAvidScriptWasmRuntimeInstance::CompactTimerHeapIfNeeded()
+{
+	const bool bHasEnoughStaleEntries = StaleTimerHeapEntryCount >= AvidScriptTimerHeapCompactionThreshold;
+	const bool bStaleEntriesDominate = StaleTimerHeapEntryCount > ActiveTimers.Num();
+	const bool bHeapExceedsBound = TimerHeap.Num() > AvidScriptMaximumPendingTimers * 2;
+	if (!bHasEnoughStaleEntries || (!bStaleEntriesDominate && !bHeapExceedsBound))
+	{
+		return;
+	}
+
+	TimerHeap.Reset(ActiveTimers.Num());
+	for (const TPair<int32, FAvidScriptWasmTimerEntry>& TimerPair : ActiveTimers)
+	{
+		TimerHeap.Add(TimerPair.Value);
+	}
+	TimerHeap.Heapify(FAvidScriptTimerDeadlineLess());
+	StaleTimerHeapEntryCount = 0;
+}
+
 void FAvidScriptWasmRuntimeInstance::ResetTimerState()
 {
-	PendingTimers.Reset();
+	ActiveTimers.Reset();
+	TimerHeap.Reset();
+	DueTimerScratch.Reset();
+	TimerClockSeconds = 0.0;
+	StaleTimerHeapEntryCount = 0;
 	NextTimerHandle = 1;
 	TimerCallbackCount = 0;
 	LastTimerCallbackId = 0;
