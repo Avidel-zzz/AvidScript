@@ -19,7 +19,7 @@ struct FAvidScriptSceneComponentBindingResult
 	FAvidScriptObjectHandleResult ObjectResult;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptSceneComponentBinding
+class AVIDSCRIPTBINDINGS_API FAvidScriptSceneComponentBinding
 {
 public:
 	static bool GetWorldLocation(

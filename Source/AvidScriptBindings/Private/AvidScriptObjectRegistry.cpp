@@ -18,17 +18,20 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 		return InvalidHandle;
 	}
 
-	for (int32 ExistingSlotIndex = 0; ExistingSlotIndex < Slots.Num(); ++ExistingSlotIndex)
+	const TObjectKey<UObject> ObjectKey(Object);
+	if (const int32* ExistingSlotIndex = ObjectToSlot.Find(ObjectKey))
 	{
-		const FSlot& ExistingSlot = Slots[ExistingSlotIndex];
+		const FSlot& ExistingSlot = Slots[*ExistingSlotIndex];
 		if (ExistingSlot.bOccupied && ExistingSlot.Object.Get() == Object)
 		{
 			const FAvidScriptObjectHandle ExistingHandle{
-				static_cast<uint32>(ExistingSlotIndex + 1),
+				static_cast<uint32>(*ExistingSlotIndex + 1),
 				ExistingSlot.Generation };
 			SetSuccess(OutResult, ExistingHandle, Object);
 			return ExistingHandle;
 		}
+
+		ObjectToSlot.Remove(ObjectKey);
 	}
 
 	int32 SlotIndex = INDEX_NONE;
@@ -44,7 +47,10 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 
 	FSlot& Slot = Slots[SlotIndex];
 	Slot.Object = Object;
+	Slot.ObjectKey = ObjectKey;
 	Slot.bOccupied = true;
+	ObjectToSlot.Add(ObjectKey, SlotIndex);
+	++LiveHandleCount;
 
 	const FAvidScriptObjectHandle Handle{ static_cast<uint32>(SlotIndex + 1), Slot.Generation };
 	SetSuccess(OutResult, Handle, Object);
@@ -168,10 +174,14 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 	}
 
 	SetSuccess(OutResult, Handle, Slot.Object.Get());
+	ObjectToSlot.Remove(Slot.ObjectKey);
 	Slot.Object.Reset();
+	Slot.ObjectKey = TObjectKey<UObject>();
 	Slot.bOccupied = false;
 	Slot.Generation = AdvanceGeneration(Slot.Generation);
 	FreeSlots.Add(SlotIndex);
+	check(LiveHandleCount > 0);
+	--LiveHandleCount;
 	return true;
 }
 
@@ -179,6 +189,8 @@ void FAvidScriptObjectRegistry::Reset()
 {
 	Slots.Reset();
 	FreeSlots.Reset();
+	ObjectToSlot.Reset();
+	LiveHandleCount = 0;
 	GenerationDomain = AdvanceGeneration(GenerationDomain);
 }
 

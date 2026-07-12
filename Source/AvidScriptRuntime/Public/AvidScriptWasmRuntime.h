@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptLifecycleState.h"
 #include "AvidScriptActorBinding.h"
 
 #include "CoreMinimal.h"
@@ -85,6 +86,7 @@ public:
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 
 	bool IsLoaded() const;
+	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
 	bool HasBegunPlay() const { return bHasBegunPlay; }
 	int32 GetTickCallCount() const { return TickCallCount; }
 	int32 GetPendingTimerCount() const { return PendingTimers.Num(); }
@@ -155,6 +157,7 @@ private:
 	TArray<uint8> ModuleBuffer;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptLifecycleStateMachine LifecycleState;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 

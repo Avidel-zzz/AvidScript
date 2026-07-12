@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/ObjectKey.h"
 #include "UObject/WeakObjectPtr.h"
 
 struct FAvidScriptObjectHandle
@@ -29,7 +30,7 @@ struct FAvidScriptObjectHandleResult
 	FString ErrorMessage;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptObjectRegistry
+class AVIDSCRIPTBINDINGS_API FAvidScriptObjectRegistry
 {
 public:
 	FAvidScriptObjectHandle RegisterObject(UObject* Object, FAvidScriptObjectHandleResult& OutResult);
@@ -64,11 +65,13 @@ public:
 
 	int32 NumSlots() const { return Slots.Num(); }
 	int32 NumFreeSlots() const { return FreeSlots.Num(); }
+	int32 GetLiveHandleCount() const { return LiveHandleCount; }
 
 private:
 	struct FSlot
 	{
 		TWeakObjectPtr<UObject> Object;
+		TObjectKey<UObject> ObjectKey;
 		uint32 Generation = 1;
 		bool bOccupied = false;
 	};
@@ -87,5 +90,7 @@ private:
 
 	TArray<FSlot> Slots;
 	TArray<int32> FreeSlots;
+	TMap<TObjectKey<UObject>, int32> ObjectToSlot;
+	int32 LiveHandleCount = 0;
 	uint32 GenerationDomain = 1;
 };

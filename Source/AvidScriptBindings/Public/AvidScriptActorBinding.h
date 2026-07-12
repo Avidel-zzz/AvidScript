@@ -26,7 +26,7 @@ struct FAvidScriptActorBindingResult
 	FAvidScriptObjectHandleResult ObjectResult;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptActorBinding
+class AVIDSCRIPTBINDINGS_API FAvidScriptActorBinding
 {
 public:
 	static bool GetActorLocation(

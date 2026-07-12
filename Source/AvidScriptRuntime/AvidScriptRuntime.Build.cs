@@ -9,6 +9,8 @@ public class AvidScriptRuntime : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new[]
 			{
+				"AvidScriptCore",
+				"AvidScriptBindings",
 				"Core",
 				"CoreUObject",
 				"Engine"

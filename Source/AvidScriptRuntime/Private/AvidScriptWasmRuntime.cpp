@@ -932,6 +932,19 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	}
 
 	wasm_runtime_set_user_data(static_cast<wasm_exec_env_t>(ExecEnv), this);
+	FAvidScriptLifecycleTransitionResult LifecycleResult;
+	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Loaded, LifecycleResult))
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("<lifecycle>"),
+			TEXT("invalid_state"),
+			TEXT("The runtime lifecycle rejected the Loaded transition"),
+			TEXT("unload the session and create a fresh runtime instance"));
+		Unload();
+		return false;
+	}
 	return true;
 #endif
 }
@@ -1039,6 +1052,31 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		return false;
 	}
 
+	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Loaded)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_begin_play"),
+			TEXT("invalid_state"),
+			TEXT("BeginPlay requires the Loaded lifecycle state"),
+			TEXT("start each loaded runtime exactly once"));
+		return false;
+	}
+
+	FAvidScriptLifecycleTransitionResult LifecycleResult;
+	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Starting, LifecycleResult))
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_begin_play"),
+			TEXT("invalid_state"),
+			TEXT("BeginPlay lifecycle transition was rejected"),
+			TEXT("unload the session and create a fresh runtime instance"));
+		return false;
+	}
+
 	const double BeginPlayStartSeconds = FPlatformTime::Seconds();
 	if (!CallWamrExport(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
@@ -1055,6 +1093,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
+		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
@@ -1064,6 +1103,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	bEndPlayAttempted = false;
 	bEndPlaySucceeded = false;
 	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
+	LifecycleState.TryTransition(EAvidScriptLifecycleState::Running, LifecycleResult);
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
@@ -1108,6 +1148,18 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		return false;
 	}
 
+	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_tick"),
+			TEXT("invalid_state"),
+			TEXT("Tick requires the Running lifecycle state"),
+			TEXT("call BeginPlay successfully before ticking"));
+		return false;
+	}
+
 	TArray<int32> DueTimerHandles;
 	CollectDueTimerHandles(DeltaSeconds, DueTimerHandles);
 	Metrics.TimerCallbackCallMs = 0.0;
@@ -1132,6 +1184,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
@@ -1152,6 +1206,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
@@ -1233,6 +1289,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
@@ -1289,6 +1347,31 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		return bEndPlaySucceeded;
 	}
 
+	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_end_play"),
+			TEXT("invalid_state"),
+			TEXT("EndPlay requires the Running lifecycle state"),
+			TEXT("call EndPlay only after a successful BeginPlay"));
+		return false;
+	}
+
+	FAvidScriptLifecycleTransitionResult LifecycleResult;
+	if (!LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopping, LifecycleResult))
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_end_play"),
+			TEXT("invalid_state"),
+			TEXT("EndPlay lifecycle transition was rejected"),
+			TEXT("unload the session and create a fresh runtime instance"));
+		return false;
+	}
+
 	bEndPlayAttempted = true;
 	wasm_function_inst_t Function = wasm_runtime_lookup_function(
 		static_cast<wasm_module_inst_t>(ModuleInstance),
@@ -1301,6 +1384,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
 		bEndPlaySucceeded = true;
+		LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
 		CachedEndPlayResult = OutResult;
 		return true;
 	}
@@ -1325,6 +1409,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		CopyTimerStateToResult(OutResult);
 		CopyEventStateToResult(OutResult);
 		bEndPlaySucceeded = false;
+		LifecycleState.MarkFaulted(LifecycleResult);
 		CachedEndPlayResult = OutResult;
 		return false;
 	}
@@ -1332,6 +1417,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
 	bHasEndedPlay = true;
 	bEndPlaySucceeded = true;
+	LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = true;
@@ -1412,6 +1498,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	ResetTimerState();
 	ResetEventState();
 	ResetHostImportState();
+	LifecycleState.Reset();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
 	PrepareResult(OutResult, PreviousModuleId, Metrics);
