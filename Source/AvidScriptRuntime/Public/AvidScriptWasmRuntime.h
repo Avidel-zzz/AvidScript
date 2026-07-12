@@ -110,6 +110,11 @@ public:
 	int32 HandleActorSetRotationImport(int32 Slot, int32 Generation, const FRotator& Rotation);
 	int32 HandleActorGetScaleImport(int32 Slot, int32 Generation, FVector& OutScale3D);
 	int32 HandleActorSetScaleImport(int32 Slot, int32 Generation, const FVector& Scale3D);
+	bool HandleActorGetTransformBatchImport(
+		int32 RequestedCount,
+		TConstArrayView<uint32> InputCells,
+		TArrayView<float> OutputFloats,
+		int32& OutProcessedCount);
 	int32 HandleActorGetRootComponentImport(int32 Slot, int32 Generation, FAvidScriptObjectHandle& OutComponentHandle);
 	int32 HandleSceneComponentGetWorldLocationImport(int32 Slot, int32 Generation, FVector& OutWorldLocation);
 	int32 HandleSceneComponentSetWorldLocationImport(int32 Slot, int32 Generation, const FVector& WorldLocation);
@@ -168,6 +173,9 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
+	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;
+	TArray<float> TransformBatchOutputScratch;
 	FAvidScriptLifecycleStateMachine LifecycleState;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };

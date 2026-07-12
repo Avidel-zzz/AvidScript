@@ -35,6 +35,10 @@ bool FAvidScriptHostBindingOverheadSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Binding set samples are recorded"), Result.BindingSetActorLocation.Count == Options.SampleCount);
 	TestTrue(TEXT("Scalar transform samples are recorded"), Result.ScalarGetActorTransform.Count == Options.SampleCount);
 	TestTrue(TEXT("Batch transform samples are recorded"), Result.BatchGetActorTransforms.Count == Options.SampleCount);
+	TestTrue(TEXT("WASM scalar transform samples are recorded"), Result.WasmScalarGetActorTransforms.Count == Options.SampleCount);
+	TestTrue(TEXT("WASM batch transform samples are recorded"), Result.WasmBatchGetActorTransforms.Count == Options.SampleCount);
+	TestEqual(TEXT("WASM scalar path uses three imports per actor"), Result.WasmScalarImportsPerIteration, Options.TransformBatchSize * 3);
+	TestEqual(TEXT("WASM batch path uses one import"), Result.WasmBatchImportsPerIteration, 1);
 	TestTrue(TEXT("Direct get average is recorded"), Result.DirectGetActorLocation.AvgMs > 0.0);
 	TestTrue(TEXT("Registry resolve average is recorded"), Result.RegistryResolveActor.AvgMs > 0.0);
 	TestTrue(TEXT("Binding get average is recorded"), Result.BindingGetActorLocation.AvgMs > 0.0);
@@ -45,6 +49,8 @@ bool FAvidScriptHostBindingOverheadSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Summary includes benchmark label"), Result.Summary.Contains(TEXT("host_binding_benchmark")));
 	TestTrue(TEXT("Summary includes scalar transform metric"), Result.Summary.Contains(TEXT("scalar_transform_avg_ms")));
 	TestTrue(TEXT("Summary includes batch transform metric"), Result.Summary.Contains(TEXT("batch_transform_avg_ms")));
+	TestTrue(TEXT("Summary includes WASM scalar transform metric"), Result.Summary.Contains(TEXT("wasm_scalar_transform_avg_ms")));
+	TestTrue(TEXT("Summary includes WASM batch transform metric"), Result.Summary.Contains(TEXT("wasm_batch_transform_avg_ms")));
 
 	return true;
 }

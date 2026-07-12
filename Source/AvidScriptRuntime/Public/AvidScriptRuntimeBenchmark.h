@@ -73,6 +73,8 @@ struct FAvidScriptHostBindingBenchmarkResult
 	int32 SampleCount = 0;
 	int32 IterationsPerSample = 0;
 	int32 TransformBatchSize = 0;
+	int32 WasmScalarImportsPerIteration = 0;
+	int32 WasmBatchImportsPerIteration = 0;
 	FString ErrorCategory;
 	FString ErrorMessage;
 	FString Summary;
@@ -84,6 +86,8 @@ struct FAvidScriptHostBindingBenchmarkResult
 	FAvidScriptBenchmarkStats BindingSetActorLocation;
 	FAvidScriptBenchmarkStats ScalarGetActorTransform;
 	FAvidScriptBenchmarkStats BatchGetActorTransforms;
+	FAvidScriptBenchmarkStats WasmScalarGetActorTransforms;
+	FAvidScriptBenchmarkStats WasmBatchGetActorTransforms;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeBenchmark

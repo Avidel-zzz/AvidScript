@@ -178,6 +178,230 @@ void SetHostBindingFailure(
 		OutResult.ErrorCategory.IsEmpty() ? TEXT("<none>") : *OutResult.ErrorCategory,
 		*OutResult.ErrorMessage);
 }
+
+void AppendBenchmarkU32Leb(TArray<uint8>& Bytes, uint32 Value)
+{
+	do
+	{
+		uint8 Byte = static_cast<uint8>(Value & 0x7f);
+		Value >>= 7;
+		if (Value != 0)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	} while (Value != 0);
+}
+
+void AppendBenchmarkI32Leb(TArray<uint8>& Bytes, int32 Value)
+{
+	bool bMore = true;
+	while (bMore)
+	{
+		uint8 Byte = static_cast<uint8>(Value & 0x7f);
+		Value >>= 7;
+		const bool bSignBitSet = (Byte & 0x40) != 0;
+		bMore = !((Value == 0 && !bSignBitSet) || (Value == -1 && bSignBitSet));
+		if (bMore)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	}
+}
+
+void AppendBenchmarkString(TArray<uint8>& Bytes, const char* Value)
+{
+	const int32 Length = FCStringAnsi::Strlen(Value);
+	AppendBenchmarkU32Leb(Bytes, static_cast<uint32>(Length));
+	for (int32 Index = 0; Index < Length; ++Index)
+	{
+		Bytes.Add(static_cast<uint8>(Value[Index]));
+	}
+}
+
+void AppendBenchmarkSection(TArray<uint8>& Module, uint8 SectionId, const TArray<uint8>& Payload)
+{
+	Module.Add(SectionId);
+	AppendBenchmarkU32Leb(Module, static_cast<uint32>(Payload.Num()));
+	Module.Append(Payload);
+}
+
+void AppendBenchmarkI32Const(TArray<uint8>& Body, uint32 Value)
+{
+	Body.Add(0x41);
+	AppendBenchmarkI32Leb(Body, static_cast<int32>(Value));
+}
+
+TArray<uint8> BuildTransformImportBenchmarkModule(
+	TConstArrayView<FAvidScriptObjectHandle> Handles,
+	bool bBatch)
+{
+	constexpr uint32 InputAddress = 64;
+	constexpr uint32 OutputAddress = 4096;
+	const uint32 ImportCount = bBatch ? 1u : 3u;
+
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Types;
+	AppendBenchmarkU32Leb(Types, 3);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 3);
+	Types.Add(0x7f);
+	Types.Add(0x7f);
+	Types.Add(0x7f);
+	AppendBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7f);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 0);
+	AppendBenchmarkU32Leb(Types, 0);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7d);
+	AppendBenchmarkU32Leb(Types, 0);
+	AppendBenchmarkSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendBenchmarkU32Leb(Imports, ImportCount);
+	const char* ImportNames[] = {
+		"actor_get_location",
+		"actor_get_rotation",
+		"actor_get_scale"
+	};
+	if (bBatch)
+	{
+		AppendBenchmarkString(Imports, "avidscript");
+		AppendBenchmarkString(Imports, "actor_get_transform_batch");
+		Imports.Add(0x00);
+		AppendBenchmarkU32Leb(Imports, 0);
+	}
+	else
+	{
+		for (const char* ImportName : ImportNames)
+		{
+			AppendBenchmarkString(Imports, "avidscript");
+			AppendBenchmarkString(Imports, ImportName);
+			Imports.Add(0x00);
+			AppendBenchmarkU32Leb(Imports, 0);
+		}
+	}
+	AppendBenchmarkSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendBenchmarkU32Leb(Functions, 2);
+	AppendBenchmarkU32Leb(Functions, 1);
+	AppendBenchmarkU32Leb(Functions, 2);
+	AppendBenchmarkSection(Module, 3, Functions);
+
+	TArray<uint8> Memory;
+	AppendBenchmarkU32Leb(Memory, 1);
+	Memory.Add(0x00);
+	AppendBenchmarkU32Leb(Memory, 1);
+	AppendBenchmarkSection(Module, 5, Memory);
+
+	TArray<uint8> Exports;
+	AppendBenchmarkU32Leb(Exports, 2);
+	AppendBenchmarkString(Exports, "avid_on_begin_play");
+	Exports.Add(0x00);
+	AppendBenchmarkU32Leb(Exports, ImportCount);
+	AppendBenchmarkString(Exports, "avid_on_tick");
+	Exports.Add(0x00);
+	AppendBenchmarkU32Leb(Exports, ImportCount + 1);
+	AppendBenchmarkSection(Module, 7, Exports);
+
+	TArray<uint8> BeginBody;
+	AppendBenchmarkU32Leb(BeginBody, 0);
+	if (bBatch)
+	{
+		AppendBenchmarkI32Const(BeginBody, InputAddress);
+		AppendBenchmarkI32Const(BeginBody, static_cast<uint32>(Handles.Num()));
+		AppendBenchmarkI32Const(BeginBody, OutputAddress);
+		BeginBody.Add(0x10);
+		AppendBenchmarkU32Leb(BeginBody, 0);
+		BeginBody.Add(0x1a);
+	}
+	else
+	{
+		for (const FAvidScriptObjectHandle& Handle : Handles)
+		{
+			for (uint32 ImportIndex = 0; ImportIndex < ImportCount; ++ImportIndex)
+			{
+				AppendBenchmarkI32Const(BeginBody, Handle.Slot);
+				AppendBenchmarkI32Const(BeginBody, Handle.Generation);
+				AppendBenchmarkI32Const(BeginBody, OutputAddress + ImportIndex * 12u);
+				BeginBody.Add(0x10);
+				AppendBenchmarkU32Leb(BeginBody, ImportIndex);
+				BeginBody.Add(0x1a);
+			}
+		}
+	}
+	BeginBody.Add(0x0b);
+
+	TArray<uint8> TickBody;
+	AppendBenchmarkU32Leb(TickBody, 0);
+	TickBody.Add(0x0b);
+	TArray<uint8> Code;
+	AppendBenchmarkU32Leb(Code, 2);
+	AppendBenchmarkU32Leb(Code, static_cast<uint32>(BeginBody.Num()));
+	Code.Append(BeginBody);
+	AppendBenchmarkU32Leb(Code, static_cast<uint32>(TickBody.Num()));
+	Code.Append(TickBody);
+	AppendBenchmarkSection(Module, 10, Code);
+
+	if (bBatch)
+	{
+		TArray<uint8> HandleBytes;
+		HandleBytes.Reserve(Handles.Num() * 2 * sizeof(uint32));
+		for (const FAvidScriptObjectHandle& Handle : Handles)
+		{
+			HandleBytes.Append(reinterpret_cast<const uint8*>(&Handle.Slot), sizeof(uint32));
+			HandleBytes.Append(reinterpret_cast<const uint8*>(&Handle.Generation), sizeof(uint32));
+		}
+		TArray<uint8> Data;
+		AppendBenchmarkU32Leb(Data, 1);
+		Data.Add(0x00);
+		AppendBenchmarkI32Const(Data, InputAddress);
+		Data.Add(0x0b);
+		AppendBenchmarkU32Leb(Data, static_cast<uint32>(HandleBytes.Num()));
+		Data.Append(HandleBytes);
+		AppendBenchmarkSection(Module, 11, Data);
+	}
+	return Module;
+}
+
+bool MeasureTransformImportModule(
+	TConstArrayView<uint8> Bytecode,
+	const FString& ModuleId,
+	FAvidScriptObjectRegistry& Registry,
+	int32 ExpectedImportCount,
+	double& OutCallMs,
+	FString& OutError)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	Runtime.SetHostContext(HostContext);
+	FAvidScriptWasmSmokeResult SmokeResult;
+	if (!Runtime.LoadModule(Bytecode.GetData(), Bytecode.Num(), ModuleId, SmokeResult) ||
+		!Runtime.BeginPlay(SmokeResult))
+	{
+		OutError = SmokeResult.ErrorMessage;
+		return false;
+	}
+	if (SmokeResult.HostImportCallCount != ExpectedImportCount)
+	{
+		OutError = FString::Printf(
+			TEXT("Unexpected WAMR transform import count | expected=%d | actual=%d"),
+			ExpectedImportCount,
+			SmokeResult.HostImportCallCount);
+		return false;
+	}
+	OutCallMs = SmokeResult.Metrics.BeginPlayCallMs;
+	Runtime.Unload();
+	return true;
+}
 } // namespace
 
 bool FAvidScriptRuntimeBenchmark::RunEmbeddedSmokeBenchmark(
@@ -387,6 +611,8 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
 	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
 	OutResult.TransformBatchSize = FMath::Clamp(Options.TransformBatchSize, 1, AvidScriptMaximumActorTransformBatchSize);
+	OutResult.WasmScalarImportsPerIteration = OutResult.TransformBatchSize * 3;
+	OutResult.WasmBatchImportsPerIteration = 1;
 
 	UWorld* World = nullptr;
 	if (!CreateBenchmarkWorld(World))
@@ -464,13 +690,19 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 	TArray<double> BindingSetSamples;
 	TArray<double> ScalarTransformSamples;
 	TArray<double> BatchTransformSamples;
+	TArray<double> WasmScalarTransformSamples;
+	TArray<double> WasmBatchTransformSamples;
 	DirectGetSamples.Reserve(OutResult.SampleCount);
 	RegistryResolveSamples.Reserve(OutResult.SampleCount);
 	BindingGetSamples.Reserve(OutResult.SampleCount);
 	BindingSetSamples.Reserve(OutResult.SampleCount);
 	ScalarTransformSamples.Reserve(OutResult.SampleCount);
 	BatchTransformSamples.Reserve(OutResult.SampleCount);
+	WasmScalarTransformSamples.Reserve(OutResult.SampleCount);
+	WasmBatchTransformSamples.Reserve(OutResult.SampleCount);
 
+	const TArray<uint8> WasmScalarModule = BuildTransformImportBenchmarkModule(TransformHandles, false);
+	const TArray<uint8> WasmBatchModule = BuildTransformImportBenchmarkModule(TransformHandles, true);
 	const int32 TotalRuns = OutResult.WarmupCount + OutResult.SampleCount;
 	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
 	{
@@ -587,6 +819,33 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		}
 		const double BatchTransformMs = MeasureElapsedPerIterationMs(BatchTransformStartSeconds, TransformOperationCount);
 
+		double WasmScalarTransformMs = 0.0;
+		double WasmBatchTransformMs = 0.0;
+		FString WasmBenchmarkError;
+		if (!MeasureTransformImportModule(
+				WasmScalarModule,
+				TEXT("benchmark_scalar_transform"),
+				Registry,
+				OutResult.WasmScalarImportsPerIteration,
+				WasmScalarTransformMs,
+				WasmBenchmarkError) ||
+			!MeasureTransformImportModule(
+				WasmBatchModule,
+				TEXT("benchmark_batch_transform"),
+				Registry,
+				OutResult.WasmBatchImportsPerIteration,
+				WasmBatchTransformMs,
+				WasmBenchmarkError))
+		{
+			SetHostBindingFailure(
+				OutResult,
+				TEXT("wasm_transform_benchmark_failed"),
+				WasmBenchmarkError,
+				TEXT("Verify generated WAMR benchmark modules and transform host imports."));
+			DestroyBenchmarkWorld(World);
+			return false;
+		}
+
 		OutResult.LastReadLocation = BindingLocation;
 		OutResult.FinalActorLocation = Actor->GetActorLocation();
 
@@ -598,6 +857,8 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 			BindingSetSamples.Add(BindingSetMs);
 			ScalarTransformSamples.Add(ScalarTransformMs);
 			BatchTransformSamples.Add(BatchTransformMs);
+			WasmScalarTransformSamples.Add(WasmScalarTransformMs);
+			WasmBatchTransformSamples.Add(WasmBatchTransformMs);
 		}
 	}
 
@@ -607,9 +868,11 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 	OutResult.BindingSetActorLocation = CalculateStats(BindingSetSamples);
 	OutResult.ScalarGetActorTransform = CalculateStats(ScalarTransformSamples);
 	OutResult.BatchGetActorTransforms = CalculateStats(BatchTransformSamples);
+	OutResult.WasmScalarGetActorTransforms = CalculateStats(WasmScalarTransformSamples);
+	OutResult.WasmBatchGetActorTransforms = CalculateStats(WasmBatchTransformSamples);
 	OutResult.bSucceeded = true;
 	OutResult.Summary = FString::Printf(
-		TEXT("host_binding_benchmark | warmup=%d | samples=%d | iterations=%d | transform_batch=%d | direct_get_avg_ms=%.6f | registry_resolve_avg_ms=%.6f | binding_get_avg_ms=%.6f | binding_set_avg_ms=%.6f | binding_set_p95_ms=%.6f | scalar_transform_avg_ms=%.6f | scalar_transform_p95_ms=%.6f | batch_transform_avg_ms=%.6f | batch_transform_p95_ms=%.6f"),
+		TEXT("host_binding_benchmark | warmup=%d | samples=%d | iterations=%d | transform_batch=%d | direct_get_avg_ms=%.6f | registry_resolve_avg_ms=%.6f | binding_get_avg_ms=%.6f | binding_set_avg_ms=%.6f | binding_set_p95_ms=%.6f | scalar_transform_avg_ms=%.6f | scalar_transform_p95_ms=%.6f | batch_transform_avg_ms=%.6f | batch_transform_p95_ms=%.6f | wasm_scalar_imports=%d | wasm_scalar_transform_avg_ms=%.6f | wasm_batch_imports=%d | wasm_batch_transform_avg_ms=%.6f"),
 		OutResult.WarmupCount,
 		OutResult.SampleCount,
 		OutResult.IterationsPerSample,
@@ -622,7 +885,11 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		OutResult.ScalarGetActorTransform.AvgMs,
 		OutResult.ScalarGetActorTransform.P95Ms,
 		OutResult.BatchGetActorTransforms.AvgMs,
-		OutResult.BatchGetActorTransforms.P95Ms);
+		OutResult.BatchGetActorTransforms.P95Ms,
+		OutResult.WasmScalarImportsPerIteration,
+		OutResult.WasmScalarGetActorTransforms.AvgMs,
+		OutResult.WasmBatchImportsPerIteration,
+		OutResult.WasmBatchGetActorTransforms.AvgMs);
 
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	DestroyBenchmarkWorld(World);

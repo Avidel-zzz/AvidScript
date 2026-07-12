@@ -142,6 +142,19 @@ if ($RuntimeSource -match 'PendingTimers\.IndexOfByPredicate') {
 if (-not $RuntimeHeader.Contains('CopyObservableStateToResult')) {
     Add-Violation 'Runtime result synchronization must use CopyObservableStateToResult at return boundaries'
 }
+foreach ($RequiredBatchRuntimeStructure in @(
+    'HandleActorGetTransformBatchImport',
+    'TransformBatchHandleScratch',
+    'TransformBatchSnapshotScratch',
+    'TransformBatchOutputScratch'
+)) {
+    if (-not $RuntimeHeader.Contains($RequiredBatchRuntimeStructure)) {
+        Add-Violation "Runtime transform batch dispatcher is missing $RequiredBatchRuntimeStructure"
+    }
+}
+if (-not $RuntimeSource.Contains('case EAvidScriptHostBindingId::ActorGetTransformBatch')) {
+    Add-Violation 'Runtime dispatcher does not route ActorGetTransformBatch'
+}
 if ($RuntimeSource -match 'CopyHostImportStateToResult\(OutResult\);\s*CopyTimerStateToResult\(OutResult\);\s*CopyEventStateToResult\(OutResult\);') {
     Add-Violation 'Runtime result synchronization must not repeat the observable-state copy triplet'
 }

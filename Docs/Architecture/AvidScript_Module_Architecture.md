@@ -104,6 +104,6 @@ candidate 在 Load、Validate 或 Start 阶段失败时，active session 保持�
 | Phase 35 | VM backend、WAMR 私有化、export cache | 已完成 |
 | Phase 36 | Runtime Session、Reload、Scheduler/EventRouter 统一所有权 | 已完成 |
 | Phase 37 | 热路径结果、Timer、批量 Binding、性能报告 | 已完成 |
-| Phase 38 | 批量 WASM ABI、typed overlap、Hit、Input、Delegate | 进行中：P38.1 已完成 |
+| Phase 38 | 批量 WASM ABI、typed overlap、Hit、Input、Delegate | 进行中：P38.1-P38.2 已完成 |
 
 Phase 37 已完成成功路径结果、Timer 数据结构和 typed Transform Batch。Phase 38 正在把 Batch 接入真实 WASM ABI，并通过统一 Gameplay Event Contract 接入 Overlap、Hit 和 Input；新的 Gameplay 入口继续进入 Integration/EventRouter，不能回流 VM backend 或绕过 Session。Phase 39 起主线转入正规语言前端，Phase 42 转入 Reflection Binding Generator，禁止以逐个手写 UE API 代替生成式覆盖。

@@ -1110,6 +1110,125 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int3
 	return 1;
 }
 
+bool FAvidScriptWasmRuntimeInstance::HandleActorGetTransformBatchImport(
+	int32 RequestedCount,
+	TConstArrayView<uint32> InputCells,
+	TArrayView<float> OutputFloats,
+	int32& OutProcessedCount)
+{
+	constexpr int32 InputCellsPerTransform = 2;
+	constexpr int32 OutputFloatsPerTransform = 9;
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = RequestedCount;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	OutProcessedCount = 0;
+
+	const int64 ExpectedInputCellCount = static_cast<int64>(RequestedCount) * InputCellsPerTransform;
+	const int64 ExpectedOutputFloatCount = static_cast<int64>(RequestedCount) * OutputFloatsPerTransform;
+	if (RequestedCount < 0 || RequestedCount > AvidScriptMaximumActorTransformBatchSize ||
+		ExpectedInputCellCount != InputCells.Num() || ExpectedOutputFloatCount != OutputFloats.Num())
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_transform_batch"),
+			FString::Printf(
+				TEXT("Invalid transform batch wire shape | count=%d | input_cells=%d | output_floats=%d"),
+				RequestedCount,
+				InputCells.Num(),
+				OutputFloats.Num()));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return false;
+	}
+
+	if (RequestedCount == 0)
+	{
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return true;
+	}
+
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_transform_batch"),
+			TEXT("Missing host object registry for avidscript.actor_get_transform_batch"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return false;
+	}
+
+	TransformBatchHandleScratch.Reset(RequestedCount);
+	for (int32 Index = 0; Index < RequestedCount; ++Index)
+	{
+		const int32 CellIndex = Index * InputCellsPerTransform;
+		TransformBatchHandleScratch.Add(FAvidScriptObjectHandle{
+			InputCells[CellIndex],
+			InputCells[CellIndex + 1]
+		});
+	}
+
+	FAvidScriptActorTransformBatchResult BatchResult;
+	if (!FAvidScriptActorBinding::GetActorTransforms(
+			*HostContext.ObjectRegistry,
+			TransformBatchHandleScratch,
+			TransformBatchSnapshotScratch,
+			BatchResult))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_transform_batch"),
+			BatchResult.ErrorMessage.IsEmpty()
+				? FString::Printf(TEXT("Actor transform batch failed | processed=%d | failed_index=%d"), BatchResult.ProcessedCount, BatchResult.FailedIndex)
+				: BatchResult.ErrorMessage);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return false;
+	}
+
+	TransformBatchOutputScratch.Reset(static_cast<int32>(ExpectedOutputFloatCount));
+	auto AppendWireFloat = [this](double Value) -> bool
+	{
+		if (!FMath::IsFinite(Value) || FMath::Abs(Value) > static_cast<double>(MAX_flt))
+		{
+			return false;
+		}
+		TransformBatchOutputScratch.Add(static_cast<float>(Value));
+		return true;
+	};
+
+	for (int32 Index = 0; Index < TransformBatchSnapshotScratch.Num(); ++Index)
+	{
+		const FAvidScriptActorTransformSnapshot& Snapshot = TransformBatchSnapshotScratch[Index];
+		if (!AppendWireFloat(Snapshot.Location.X) ||
+			!AppendWireFloat(Snapshot.Location.Y) ||
+			!AppendWireFloat(Snapshot.Location.Z) ||
+			!AppendWireFloat(Snapshot.Rotation.Pitch) ||
+			!AppendWireFloat(Snapshot.Rotation.Yaw) ||
+			!AppendWireFloat(Snapshot.Rotation.Roll) ||
+			!AppendWireFloat(Snapshot.Scale3D.X) ||
+			!AppendWireFloat(Snapshot.Scale3D.Y) ||
+			!AppendWireFloat(Snapshot.Scale3D.Z))
+		{
+			TransformBatchOutputScratch.Reset();
+			SetPendingHostImportFailure(
+				TEXT("avidscript"),
+				TEXT("actor_get_transform_batch"),
+				FString::Printf(TEXT("Transform batch contains a non-finite or non-representable value | index=%d"), Index));
+			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+			return false;
+		}
+	}
+
+	check(TransformBatchOutputScratch.Num() == OutputFloats.Num());
+	FMemory::Memcpy(
+		OutputFloats.GetData(),
+		TransformBatchOutputScratch.GetData(),
+		TransformBatchOutputScratch.Num() * sizeof(float));
+	OutProcessedCount = RequestedCount;
+	LastHostImportResult = OutProcessedCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return true;
+}
+
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 	int32 Slot,
 	int32 Generation,
@@ -1559,6 +1678,16 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 ReturnValue = HandleActorSetScaleImport(Call.IntArgs[0], Call.IntArgs[1], FVector(Call.FloatArgs[0], Call.FloatArgs[1], Call.FloatArgs[2]));
 		return Finish(ReturnValue, ReturnValue != 0);
+	}
+	case EAvidScriptHostBindingId::ActorGetTransformBatch:
+	{
+		int32 ProcessedCount = 0;
+		const bool bSucceeded = HandleActorGetTransformBatchImport(
+			Call.IntArgs[0],
+			Call.InputCells,
+			Call.OutputFloats,
+			ProcessedCount);
+		return Finish(ProcessedCount, bSucceeded);
 	}
 	case EAvidScriptHostBindingId::ActorGetRootComponent:
 	{
