@@ -100,9 +100,9 @@ candidate 任一步失败均回滚，live session 保持不变。UE 的 BeginPla
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | Phase 34 | Core、Bindings、状态机、反向索引、模块墙 | 已完成 |
-| Phase 35 | VM backend、WAMR 私有化、export cache | 下一阶段 |
-| Phase 36 | Runtime Session、Reload、Scheduler 统一所有权 | 待实施 |
+| Phase 35 | VM backend、WAMR 私有化、export cache | 已完成 |
+| Phase 36 | Runtime Session、Reload、Scheduler 统一所有权 | 下一阶段 |
 | Phase 37 | 热路径结果、Timer、批量 Binding、性能报告 | 待实施 |
 | Phase 38 | typed overlap、Hit、Input、Delegate | 待实施 |
 
-在 Phase 35/36 完成前，不继续向旧 `AvidScriptWasmRuntime.cpp` 添加 gameplay 功能。
+在 Phase 36 完成前，不继续向 Runtime façade 添加 gameplay 功能；新功能必须进入 Session、Integration 或 Event Router 边界。
