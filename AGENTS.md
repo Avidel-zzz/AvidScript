@@ -199,6 +199,20 @@ Plugins/AvidScript/Docs
 - 2026-07-06 P21 mistake record: commit hash 回填时再次把 Markdown 反引号放进 PowerShell 双引号字符串, 导致 inline code 反引号丢失并写入字面量 `` `r ``。Prevention: 所有包含 Markdown 反引号的文档回填都用单引号模板、行数组直接赋值或 `[char]96`, 写后扫描字面量 `` `r `` / `` `n ``。
 - 2026-07-06 P20 mistake record: 用 PowerShell 双引号直接拼复杂 C++ 替换片段时容易被引号、反斜杠或 UE 宏文本打断解析; 本次未写坏文件但浪费了验证时间。Prevention: 复杂 C++/Markdown 替换优先用单引号 here-string、逐行数组或小范围读写函数, 写后立即 `Select-String`/`git diff --check` 核对。
 
+## Module Architecture Workflow
+
+- Runtime dependency direction is `AvidScriptCore <- AvidScriptVM/AvidScriptBindings <- AvidScriptRuntime <- AvidScriptEditor`.
+- `AvidScriptCore` may depend only on UE `Core`; it must not include Engine, CoreUObject, WAMR, Binding, Runtime, or Editor APIs.
+- `AvidScriptVM` owns backend-specific resources. WAMR headers and libraries must remain private to this module, and VM public contracts must not mention `UObject`, `AActor`, `FVector`, or other gameplay types.
+- `AvidScriptBindings` owns the UObject handle registry and typed UE operations. It may depend on CoreUObject/Engine but must not include WAMR or Runtime.
+- `AvidScriptRuntime` is the composition and session layer; gameplay integration must not be added directly to a VM backend.
+- Run `Build/CheckAvidScriptArchitecture.ps1` after module, Build.cs, descriptor, or ownership changes.
+- Adding a new plugin module and building its DLL does not necessarily update `Binaries/Win64/UnrealEditor.modules`. After adding the module to `AvidScript.uplugin`, run one normal no-clean incremental `AvidTPSTemplateEditor` target build to write target metadata. Verify the action list; Phase 34 required only `WriteMetadata AvidTPSTemplateEditor.target`. Never use this as a reason to clean the target.
+- 2026-07-12 P34 editing mistake record: a PowerShell substring-based insertion briefly produced malformed `""AvidScriptBindings"` text in a Build.cs dependency list. Prevention: use `apply_patch`, structured line arrays, or exact whole-line replacement for Build.cs; immediately read back the dependency block before building.
+- 2026-07-12 P34 test mistake record: the first Bindings fixture called `NewObject<UObject>()`, but `UObject` is abstract and UE automation raised an ensure. Prevention: UObject registry tests must instantiate a concrete test `UCLASS`, and pointer assertions must remain guarded because automation assertions do not short-circuit.
+- 2026-07-12 P34 automation workflow note: `UnrealEditor-Cmd.exe` can exit with code 0 while an automation case reports `Result={Fail}`. Completion requires checking the log for each `Test Completed. Result={Success}`, absence of `Result={Fail}`, and the expected performed-test count; process exit code alone is insufficient.
+- Phase 34 intentionally leaves WAMR resources in Runtime until Phase 35 and some compatibility lifecycle bools until Phase 36. Do not add new gameplay callbacks to the old monolithic runtime while these boundaries are being migrated.
+
 ## D Guest Toolchain Workflow
 
 - P5.1 proved official LDC 1.42.0 Windows x64 can compile the minimal D guest to freestanding wasm32 using LDC's internal LLD. Do not require a standalone `wasm-ld.exe` for this path.
