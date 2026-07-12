@@ -1,19 +1,21 @@
 # AvidScript C# Gameplay Authoring 指南
 
-> 当前状态: PC / Windows Editor 优先。Phase33 已支持 C# direct ABI WASM、`BeginPlay` / `Tick` / `EndPlay` / Timer / Gameplay Event、`FVector`、`FRotator`、`FTransform` snapshot、handle-backed `AActor` / `UE.Self`，以及 Actor 与 RootComponent typed read/write。
+> 当前状态：PC / Windows Editor 优先。Phase 38 已完成 C# direct ABI WASM、`BeginPlay` / `Tick` / `EndPlay` / Timer、统一 Gameplay Event、typed Overlap / Hit / Input、`FVector`、`FRotator`、`FTransform` snapshot、handle-backed `AActor` / `UE.Self`，以及 Actor 与 RootComponent typed read/write。
 
 ## 现在可以实现什么
 
 1. 在 C# 中编写 `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()`、`OnTimer(...)` 和 `OnEvent(...)`。
-2. 使用 `private static float` 保存累计时间、速度或简单阶段状态。
-3. 通过 `UE.Self` 获取当前 `UAvidScriptComponent` 的 owner Actor。
-4. 读取、设置或增量更新 Actor 位置。
-5. 读取和设置 Actor 旋转。
-6. 读取和设置 Actor scale，并获取 `FTransform` snapshot。
+2. 编写 `OnBeginOverlap(AActor, FVector)`、`OnEndOverlap(AActor, FVector)` 和 `OnHit(AActor, FVector)`。
+3. 编写 `OnInput(InputEvent)`，读取 ActionId、TriggerEvent 和三分量 Value。
+4. 使用 `private static float` 保存累计时间、速度或简单阶段状态。
+5. 通过 `UE.Self` 获取当前 `UAvidScriptComponent` 的 owner Actor。
+6. 读取、设置或增量更新 Actor 位置、旋转和 scale，并获取 `FTransform` snapshot。
 7. 从 Editor 创建 profile、构建 WASM/report/manifest，并绑定到选中 Actor。
 8. 用 `UE.SetTimer(...)` 延迟执行脚本逻辑。
-9. 从 Blueprint、Enhanced Input 或其他 UE 系统调用组件的 `DispatchScriptEvent(eventId, value)`，把事件推入 WASM。
-10. 在 PIE 中执行真实 Actor 读写，在 EndPlay 时先调用 guest，再卸载 runtime 和释放 owner handle。
+9. 从 UE 调用 `DispatchScriptEvent(eventId, value)` 推送 legacy event。
+10. 从 Enhanced Input、传统 Input、AI 或网络回放调用 `DispatchScriptInput(actionId, triggerEvent, value)`。
+11. 由组件自动接入 owner Actor 的 BeginOverlap、EndOverlap 和 Hit delegates。
+12. 在 PIE 中执行真实 Actor 读写，在 EndPlay 时先调用 guest，再卸载 runtime 和释放 owner handle。
 
 ## 默认示例
 
@@ -57,6 +59,22 @@ public static void OnEvent(int eventId, float value)
 {
     UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f));
 }
+
+public static void OnBeginOverlap(AActor otherActor, FVector location)
+{
+    otherActor.SetActorLocation(location + new FVector(0.0f, 10.0f, 0.0f));
+}
+
+public static void OnHit(AActor otherActor, FVector normalImpulse)
+{
+    otherActor.AddActorWorldOffset(normalImpulse);
+}
+
+public static void OnInput(InputEvent input)
+{
+    UE.Self.SetActorLocation(
+        input.Value + new FVector(input.ActionId, input.TriggerEvent, 0.0f));
+}
 ```
 
 默认示例还会在 `EndPlay` 恢复位置、旋转和 scale。
@@ -85,7 +103,7 @@ UE.Self.SetActorScale3D(scale + new FVector(0.0f, 0.0f, 0.1f));
 FTransform snapshot = UE.Self.GetActorTransform();
 ```
 
-当前 adapter v11 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
+当前 adapter v12 尚不支持 lifecycle 内的 `FTransform` local，也不提供可能部分成功的非原子 `SetActorTransform`。需要修改时分别调用位置、旋转和 scale API。
 
 ### AActor 与 UE.Self
 
@@ -100,9 +118,11 @@ Actor.AddLocationOffset(1.0f, 0.0f, 0.0f);
 
 ## 当前 C# 子集
 
-Phase33 source adapter subset 为 `actor_lifecycle_v11`：
+Phase 38 source adapter subset 为 `actor_lifecycle_v12`：
 
 - `BeginPlay()`、`Tick(float deltaSeconds)`、可选 `EndPlay()` / `OnTimer(int, int)` / `OnEvent(int, float)`。
+- 生成式 `OnBeginOverlap` / `OnEndOverlap` / `OnHit` / `OnInput`，共用唯一 `avid_on_gameplay_event` 导出。
+- `InputEvent.ActionId`、`InputEvent.TriggerEvent` 与 `InputEvent.Value` 字段读取。
 - `UE.SetTimer(delaySeconds, callbackId)` 与 `UE.CancelTimer(timerHandle)` host ABI。
 - `OnEvent` 内可用的 float payload `value`。
 - `private static float`、字段赋值/累加。
@@ -128,11 +148,11 @@ UE.Self.GetRootComponent().SetWorldLocation(
 当前不支持：
 
 - `USceneComponent` 局部变量与任意 UObject 数据流。
-- 通用局部变量赋值、减法、整值标量乘法、成员访问和任意函数组合。
+- 通用局部变量赋值、减法、整值标量乘法和任意函数组合；成员访问目前只开放已声明的 typed getter 与 InputEvent 三个字段。
 - lifecycle 内的 `FTransform` local 与原子 `SetActorTransform`。
 - 任意 `UFUNCTION`、`UPROPERTY` 或运行时动态反射调用。
 - Spawn、组件查找、Attach/Detach、相对 Transform 和组件创建。
-- quaternion、sweep、hit result、自动输入绑定、typed Overlap/Hit payload、委托和异步任务。
+- quaternion、sweep、完整 `FHitResult`、Overlap component payload、自动生成 Enhanced Input Action 名称/ID 资产和异步任务。
 - Timer repeat/pause/resume，以及 source adapter 内保存返回 handle 的完整 `int` 状态语法。
 - 基于 `eventId` 的 if/switch；当前受限 adapter 只能直接使用事件的 float `value`。
 - 分支、循环、集合和完整 C# 语义。
@@ -156,11 +176,11 @@ UE.Self.GetRootComponent().SetWorldLocation(
 | --- | --- | --- |
 | `profile_missing` | profile 不存在 | 创建默认 profile 或检查路径。 |
 | `source_missing` | source 不存在 | 指向真实 C# 文件。 |
-| `source_adapter_failed` | 源码超出 v11 子集 | 检查 lifecycle、typed locals、Event value、表达式和 Actor 调用。 |
+| `source_adapter_failed` | 源码超出 v12 子集 | 检查 lifecycle、typed locals、Event value、表达式和 Actor 调用。 |
 | `missing_import` | host import 未注册 | 确认 Runtime 与 manifest 版本一致。 |
 | `host_import_failed` | handle、write policy 或 UE 调用失败 | 检查 owner 生命周期和 UE 日志。 |
 | `selection_unavailable` | 没有可绑定 Actor | 在关卡中选中 Actor。 |
 
 ## 下一步能力
 
-下一步继续推进 typed Overlap/Hit、输入 action 适配、事件分支/整数状态、Spawn、调试工具、PC packaging 和移动端验证。
+Phase 39 起主线进入正式语言前端、语义模型和诊断；Phase 42 进入 UE Reflection Binding Generator。后续能力包括事件分支/整数状态、生成式 UE API 覆盖、Spawn、调试工具、PC packaging 和移动端验证，不再通过逐个手写 API 扩张。

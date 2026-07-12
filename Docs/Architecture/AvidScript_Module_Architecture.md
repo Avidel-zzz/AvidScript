@@ -1,7 +1,7 @@
 # AvidScript 模块架构
 
-日期：2026-07-12
-状态：Phase 36 Runtime Session 架构已落地
+日期：2026-07-13
+状态：Phase 38 Gameplay 闭环与生成式 C# callbacks 已落地
 
 ## 1. 架构目标
 
@@ -83,6 +83,10 @@ Load candidate -> Validate ABI -> Start candidate -> Atomic swap -> Unload old
 
 candidate 在 Load、Validate 或 Start 阶段失败时，active session 保持不变。热重载不是 UE EndPlay：成功替换直接卸载旧实例，`avid_on_end_play` 只由真实 Component/World EndPlay 或显式 Stop 触发；后续 reload cleanup/state migration 使用独立协议。UE 的 BeginPlay、Tick、EndPlay、Timer、Input 和 Delegate 只在 Runtime Integration 层转换为稳定调用，VM backend 不直接订阅 UE delegate。
 
+Phase 38 的 Gameplay Event Contract 使用唯一可选导出 `avid_on_gameplay_event`。固定 8-cell 信封依次传递 event type、primary id、secondary id、object slot/generation 与 vector xyz。BeginOverlap、EndOverlap、Hit 和 Input 只是 Schema 条目，不增加独立导出。旧 module 缺少该导出时缓存 no-op；非法 payload 在进入 VM 前失败，trap 进入 Session Faulted 并触发 Integration teardown。
+
+`UAvidScriptComponent` 在 Running 后绑定 owner collision delegates，并在 Stop/Fault/Unload 前解绑。typed input 通过单一 BlueprintCallable ingress 进入相同 EventRouter，不依赖 EnhancedInput module。C# adapter 根据 descriptor table 把 `OnBeginOverlap`、`OnEndOverlap`、`OnHit` 和 `OnInput` 生成到同一通用 dispatcher；后续正式前端与 Reflection Binding Generator 继续复用该 ABI。
+
 ## 5. 性能原则
 
 - Load/Validate 时解析并缓存生命周期和事件 exports，Tick 热路径不得反复按名称查找。
@@ -90,7 +94,7 @@ candidate 在 Load、Validate 或 Start 阶段失败时，active session 保持�
 - 已知 UObject 重复注册使用反向索引，不进行全槽扫描。
 - 高频 struct 使用 guest memory view 或 scratch arena，避免临时堆分配。
 - 跨 WASM 调用按收益提供批量 API，优先减少边界穿越次数。
-- Timer 后续使用 deadline min-heap 或 timing wheel，避免每 Tick 全数组扫描。
+- Timer 已使用 deadline min-heap，空闲 Tick 不扫描全部 pending timers。
 - Shipping 默认关闭逐调用计时，按 session 采样统计。
 - WAMR interpreter、Fast JIT、AOT 与移动端配置属于 VM backend policy，不渗入 Binding。
 
@@ -104,6 +108,6 @@ candidate 在 Load、Validate 或 Start 阶段失败时，active session 保持�
 | Phase 35 | VM backend、WAMR 私有化、export cache | 已完成 |
 | Phase 36 | Runtime Session、Reload、Scheduler/EventRouter 统一所有权 | 已完成 |
 | Phase 37 | 热路径结果、Timer、批量 Binding、性能报告 | 已完成 |
-| Phase 38 | 批量 WASM ABI、typed overlap、Hit、Input、Delegate | 进行中：P38.1-P38.2 已完成 |
+| Phase 38 | 批量 WASM ABI、统一 Gameplay Event、typed Overlap/Hit/Input、C# 生成式 callbacks | 已完成 |
 
-Phase 37 已完成成功路径结果、Timer 数据结构和 typed Transform Batch。Phase 38 正在把 Batch 接入真实 WASM ABI，并通过统一 Gameplay Event Contract 接入 Overlap、Hit 和 Input；新的 Gameplay 入口继续进入 Integration/EventRouter，不能回流 VM backend 或绕过 Session。Phase 39 起主线转入正规语言前端，Phase 42 转入 Reflection Binding Generator，禁止以逐个手写 UE API 代替生成式覆盖。
+Phase 37 已完成成功路径结果、Timer 数据结构和 typed Transform Batch。Phase 38 已把 Batch 接入真实 WASM ABI，并通过统一 Gameplay Event Contract 完成 Overlap、Hit、Input 与 C# authoring 闭环；64 Actor 的真实 WASM transform 读取从 192 次 scalar crossing 的 0.135110 ms 降到 1 次 batch crossing 的 0.029634 ms，约 4.56 倍。新的 Gameplay 入口继续进入 Integration/EventRouter，不能回流 VM backend 或绕过 Session。Phase 39 起主线转入正规语言前端，Phase 42 转入 Reflection Binding Generator，禁止以逐个手写 UE API 代替生成式覆盖。

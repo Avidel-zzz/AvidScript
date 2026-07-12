@@ -307,3 +307,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-13 P38.5 集合返回错误：Get-CSharpStaticFloatFields 使用 return ,$Fields，调用方再次数组化后形成嵌套集合；零字段被误计为一个 global，并产生 [null] 元数据。Prevention：供 @(... ) 调用的集合 helper 直接输出元素，不用一元逗号保护集合；至少覆盖零元素与正常非空元素的结构化契约。
 - 2026-07-13 P38.5 文档命令封装错误复发：Markdown 反引号直接出现在 functions.exec 的 JavaScript template literal 中，外层解析在写盘前失败。Prevention：fallback 文档内容禁止包含字面反引号，统一使用占位符并在 PowerShell 内以 [char]96 还原；优先继续尝试 apply_patch。
 - 2026-07-13 P38.6 生成器命令封装错误复发：为批量构造 PowerShell 源码锚点而在字符串中使用反引号转义美元符号，functions.exec 外层 JavaScript 在执行前失败。Prevention：源码中的变量调用点逐个使用单引号 here-string 替换，禁止用可插值字符串数组生成锚点。
+- 2026-07-13 P38.7 验证汇总脚本错误：带内部 exit 的 foreach 语句被直接连接到 Format-Table 管道，PowerShell 报 empty pipe element，未执行日志检查。Prevention：验证脚本先把结果收集到 rows 数组，循环内完成断言，循环结束后再单独 Format-Table。
+
+## Phase 38 Gameplay Contract
+
+- New gameplay callbacks are Schema/descriptor entries routed through the single optional avid_on_gameplay_event export. Do not add one WASM export per UE callback.
+- The fixed event envelope is type, primary id, secondary id, object slot/generation, and vector xyz. VM public contracts stay POD-only and UE-type-free.
+- Component gameplay ingress must use the shared DispatchGameplayEvent policy so collision, input, invalid arguments, traps, metrics, and teardown remain consistent.
+- AvidScriptRuntime must not depend on EnhancedInput. Project input systems call the typed DispatchScriptInput ingress.
+- C# callback support is generated from descriptors. Phase 39-42 must replace the temporary source adapter with a real frontend and Reflection Binding Generator rather than expanding handwritten APIs.
+- Phase 38 complete automation baseline is 137/137 on UE5.8 Win64 Editor. Recount Success/Fail/performed lines; do not trust process exit code alone.
