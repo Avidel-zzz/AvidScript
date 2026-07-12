@@ -279,53 +279,87 @@ function Convert-WasmByteListToArray {
     return $Array
 }
 
-function Get-CSharpMethodBody {
+function Get-CSharpFrontendScriptTypes {
     param(
-        [Parameter(Mandatory = $true)][string]$SourceText,
-        [Parameter(Mandatory = $true)][string]$MethodName
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Declarations,
+        [object[]]$Results = @()
     )
 
-    $Pattern = "(?s)\b$([regex]::Escape($MethodName))\s*\([^)]*\)\s*\{"
-    $Match = [regex]::Match($SourceText, $Pattern)
-    if (-not $Match.Success) {
-        throw "C# source adapter could not find method '$MethodName'."
-    }
-
-    $OpenBraceIndex = $SourceText.IndexOf('{', $Match.Index)
-    if ($OpenBraceIndex -lt 0) {
-        throw "C# source adapter could not find method body for '$MethodName'."
-    }
-
-    $Depth = 0
-    for ($Index = $OpenBraceIndex; $Index -lt $SourceText.Length; ++$Index) {
-        $Char = $SourceText[$Index]
-        if ($Char -eq '{') {
-            ++$Depth
+    $Collected = @($Results)
+    foreach ($Declaration in @($Declarations)) {
+        if ($Declaration.kind -in @('ClassDeclaration', 'StructDeclaration', 'RecordDeclaration', 'RecordStructDeclaration')) {
+            $Collected += $Declaration
         }
-        elseif ($Char -eq '}') {
-            --$Depth
-            if ($Depth -eq 0) {
-                $Start = $OpenBraceIndex + 1
-                return $SourceText.Substring($Start, $Index - $Start)
-            }
+        if ($null -ne $Declaration.members) {
+            $Collected = @(Get-CSharpFrontendScriptTypes -Declarations @($Declaration.members) -Results $Collected)
         }
     }
 
-    throw "C# source adapter found an unterminated method body for '$MethodName'."
+    return $Collected
 }
 
-function Get-OptionalCSharpMethodBody {
+function Find-CSharpFrontendScriptType {
     param(
-        [Parameter(Mandatory = $true)][string]$SourceText,
-        [Parameter(Mandatory = $true)][string]$MethodName
+        [Parameter(Mandatory = $true)]$FrontendModel,
+        [Parameter(Mandatory = $true)][string]$SourcePath
     )
 
-    $Pattern = "(?s)\b(?:public\s+)?static\s+void\s+$([regex]::Escape($MethodName))\s*\([^)]*\)\s*\{"
-    if (-not [regex]::IsMatch($SourceText, $Pattern)) {
-        return $null
+    $Types = @(Get-CSharpFrontendScriptTypes -Declarations @($FrontendModel.syntax.declarations))
+    $ExpectedName = [System.IO.Path]::GetFileNameWithoutExtension($SourcePath)
+    $NamedMatches = @($Types | Where-Object { $_.name -eq $ExpectedName })
+    if ($NamedMatches.Count -eq 1) {
+        return $NamedMatches[0]
+    }
+    if ($NamedMatches.Count -gt 1) {
+        throw "C# frontend found multiple script types named '$ExpectedName'."
     }
 
-    return Get-CSharpMethodBody -SourceText $SourceText -MethodName $MethodName
+    $LifecycleMatches = @($Types | Where-Object {
+        $MethodNames = @($_.members | Where-Object kind -eq 'MethodDeclaration' | ForEach-Object name)
+        $MethodNames -contains 'BeginPlay' -and $MethodNames -contains 'Tick'
+    })
+    if ($LifecycleMatches.Count -eq 1) {
+        return $LifecycleMatches[0]
+    }
+
+    throw "C# frontend could not select one script type for '$SourcePath'; expected a type named '$ExpectedName' or one unique type containing BeginPlay and Tick."
+}
+
+function Get-CSharpFrontendMethod {
+    param(
+        [Parameter(Mandatory = $true)]$ScriptType,
+        [Parameter(Mandatory = $true)][string]$MethodName,
+        [switch]$Optional
+    )
+
+    $Matches = @($ScriptType.members | Where-Object { $_.kind -eq 'MethodDeclaration' -and $_.name -eq $MethodName })
+    if ($Matches.Count -eq 0 -and $Optional) {
+        return $null
+    }
+    if ($Matches.Count -ne 1) {
+        throw "C# frontend expected exactly one method '$MethodName' on '$($ScriptType.name)', found $($Matches.Count)."
+    }
+
+    return $Matches[0]
+}
+
+function Get-CSharpFrontendMethodBody {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceText,
+        [Parameter(Mandatory = $true)]$Method
+    )
+
+    if ($null -eq $Method.body -or $Method.body.kind -ne 'Block') {
+        throw "C# frontend method '$($Method.name)' must use a block body in the current Guest IR subset."
+    }
+
+    $Start = [int]$Method.body.span.start
+    $Length = [int]$Method.body.span.length
+    if ($Length -lt 2 -or $Start -lt 0 -or ($Start + $Length) -gt $SourceText.Length) {
+        throw "C# frontend method '$($Method.name)' reported an invalid body span."
+    }
+
+    return $SourceText.Substring($Start + 1, $Length - 2)
 }
 
 function Convert-CSharpNumericLiteral {
@@ -345,27 +379,43 @@ function Convert-CSharpNumericLiteral {
     throw "Unsupported C# numeric expression '$Expression'."
 }
 
-function Get-CSharpStaticFloatFields {
-    param([Parameter(Mandatory = $true)][string]$SourceText)
+function Convert-CSharpFrontendFloatInitializer {
+    param($Initializer)
+
+    if ($null -eq $Initializer) {
+        return [single]0
+    }
+    if ($Initializer.kind -eq 'NumericLiteralExpression') {
+        return Convert-CSharpNumericLiteral -Expression ([string]$Initializer.text)
+    }
+    if ($Initializer.kind -eq 'ParenthesizedExpression' -and @($Initializer.children).Count -eq 1) {
+        return Convert-CSharpFrontendFloatInitializer -Initializer $Initializer.children[0]
+    }
+    if ($Initializer.kind -eq 'UnaryMinusExpression' -and $Initializer.operator -eq '-' -and @($Initializer.children).Count -eq 1) {
+        return -1.0f * (Convert-CSharpFrontendFloatInitializer -Initializer $Initializer.children[0])
+    }
+
+    throw "Unsupported static float initializer syntax '$($Initializer.kind)'."
+}
+
+function Get-CSharpFrontendStaticFloatFields {
+    param([Parameter(Mandatory = $true)]$ScriptType)
 
     $Fields = @()
-    $Pattern = '(?m)^\s*private\s+static\s+float\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*(?<value>[^;]+))?\s*;'
-    foreach ($Match in [regex]::Matches($SourceText, $Pattern)) {
-        $Name = $Match.Groups['name'].Value
+    foreach ($Declaration in @($ScriptType.members | Where-Object {
+        $_.kind -eq 'FieldDeclaration' -and $_.type -eq 'float' -and
+        @($_.modifiers) -contains 'private' -and @($_.modifiers) -contains 'static'
+    })) {
+        $Name = [string]$Declaration.name
         foreach ($ExistingField in $Fields) {
             if ($ExistingField.Name -eq $Name) {
-                throw "C# source adapter found duplicate static float field '$Name'."
+                throw "C# frontend found duplicate static float field '$Name'."
             }
-        }
-
-        $InitialValue = [single]0
-        if ($Match.Groups['value'].Success -and -not [string]::IsNullOrWhiteSpace($Match.Groups['value'].Value)) {
-            $InitialValue = Convert-CSharpNumericLiteral -Expression $Match.Groups['value'].Value
         }
 
         $Fields += [PSCustomObject]@{
             Name = $Name
-            InitialValue = $InitialValue
+            InitialValue = Convert-CSharpFrontendFloatInitializer -Initializer $Declaration.initializer
             Index = $Fields.Count
         }
     }
@@ -1276,7 +1326,10 @@ function New-CSharpDirectAbiWasmModule {
     return ,(Convert-WasmByteListToArray -Bytes $Module)
 }
 function Invoke-CSharpSourceAdapter {
-    param([object[]]$Diagnostics = @())
+    param(
+        [object[]]$Diagnostics = @(),
+        [Parameter(Mandatory = $true)]$FrontendModel
+    )
 
     $AdapterDiagnostics = @($Diagnostics)
     $AdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
@@ -1287,18 +1340,23 @@ function Invoke-CSharpSourceAdapter {
         }
 
         $SourceText = [System.IO.File]::ReadAllText($SourcePath)
-        $Fields = @(Get-CSharpStaticFloatFields -SourceText $SourceText)
-        $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
-        $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
+        $ScriptType = Find-CSharpFrontendScriptType -FrontendModel $FrontendModel -SourcePath $SourcePath
+        $script:SelectedScriptTypeName = [string]$ScriptType.name
+        $Fields = @(Get-CSharpFrontendStaticFloatFields -ScriptType $ScriptType)
+        $BeginPlayBody = Get-CSharpFrontendMethodBody -SourceText $SourceText -Method (Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName 'BeginPlay')
+        $TickBody = Get-CSharpFrontendMethodBody -SourceText $SourceText -Method (Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName 'Tick')
         $GameplayCallbackSpecs = @(
             [PSCustomObject]@{ MethodName = 'OnBeginOverlap'; EventType = 1; ActorParameterName = 'otherActor'; VectorParameterName = 'location'; InputParameterName = '' },
             [PSCustomObject]@{ MethodName = 'OnEndOverlap'; EventType = 2; ActorParameterName = 'otherActor'; VectorParameterName = 'location'; InputParameterName = '' },
             [PSCustomObject]@{ MethodName = 'OnHit'; EventType = 3; ActorParameterName = 'otherActor'; VectorParameterName = 'normalImpulse'; InputParameterName = '' },
             [PSCustomObject]@{ MethodName = 'OnInput'; EventType = 4; ActorParameterName = ''; VectorParameterName = 'input.Value'; InputParameterName = 'input' }
         )
-        $EndPlayBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'EndPlay'
-        $TimerBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnTimer'
-        $EventBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnEvent'
+        $EndPlayMethod = Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName 'EndPlay' -Optional
+        $TimerMethod = Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName 'OnTimer' -Optional
+        $EventMethod = Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName 'OnEvent' -Optional
+        $EndPlayBody = if ($null -eq $EndPlayMethod) { $null } else { Get-CSharpFrontendMethodBody -SourceText $SourceText -Method $EndPlayMethod }
+        $TimerBody = if ($null -eq $TimerMethod) { $null } else { Get-CSharpFrontendMethodBody -SourceText $SourceText -Method $TimerMethod }
+        $EventBody = if ($null -eq $EventMethod) { $null } else { Get-CSharpFrontendMethodBody -SourceText $SourceText -Method $EventMethod }
         $BeginPlayStatements = @(Get-CSharpLifecycleStatements -MethodBody $BeginPlayBody -MethodName 'BeginPlay' -Fields $Fields)
         $TickStatements = @(Get-CSharpLifecycleStatements -MethodBody $TickBody -MethodName 'Tick' -Fields $Fields)
         $EndPlayStatements = @()
@@ -1317,10 +1375,11 @@ function Invoke-CSharpSourceAdapter {
 
         $GameplayCallbacks = @()
         foreach ($Spec in $GameplayCallbackSpecs) {
-            $CallbackBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName $Spec.MethodName
-            if ($null -eq $CallbackBody) {
+            $CallbackMethod = Get-CSharpFrontendMethod -ScriptType $ScriptType -MethodName $Spec.MethodName -Optional
+            if ($null -eq $CallbackMethod) {
                 continue
             }
+            $CallbackBody = Get-CSharpFrontendMethodBody -SourceText $SourceText -Method $CallbackMethod
 
             $CallbackStatements = @(Get-CSharpLifecycleStatements -MethodBody $CallbackBody -MethodName $Spec.MethodName -Fields $Fields -AllowEmpty $true -CallbackActorParameterName $Spec.ActorParameterName -CallbackVectorParameterName $Spec.VectorParameterName -CallbackInputParameterName $Spec.InputParameterName)
             $GameplayCallbacks += [PSCustomObject]@{
@@ -1349,8 +1408,12 @@ function Invoke-CSharpSourceAdapter {
             language = 'csharp'
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
-                compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v12'
+                compiler = 'avidscript-csharp-ast-adapter'
+                subset = 'actor_lifecycle_v13'
+                sha256 = [string]$FrontendModel.source.sha256
+                script_type = $SelectedScriptTypeName
+                frontend_file = Convert-ToProjectRelativePath -Path $FrontendArtifactPath
+                frontend_schema_version = [int]$FrontendModel.schema_version
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1416,7 +1479,7 @@ function Invoke-CSharpSourceAdapter {
                 }
             )
             toolchain = [ordered]@{
-                compiler = 'avidscript-csharp-source-adapter'
+                compiler = 'avidscript-csharp-ast-adapter'
                 target = 'wasm32-direct-abi'
                 direct_abi = $true
             }
@@ -1468,6 +1531,31 @@ function Invoke-CSharpSourceAdapter {
         }
     }
 }
+function Convert-CSharpFrontendDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)]$FrontendModel,
+        [Parameter(Mandatory = $true)][string]$SourceId
+    )
+
+    $Result = @()
+    foreach ($Diagnostic in @($FrontendModel.diagnostics)) {
+        $Result += [ordered]@{
+            code = [string]$Diagnostic.code
+            severity = [string]$Diagnostic.severity
+            message = [string]$Diagnostic.message
+            file = $SourceId
+            start = [int]$Diagnostic.span.start
+            length = [int]$Diagnostic.span.length
+            line = [int]$Diagnostic.span.line
+            column = [int]$Diagnostic.span.column
+            end_line = [int]$Diagnostic.span.end_line
+            end_column = [int]$Diagnostic.span.end_column
+        }
+    }
+
+    return $Result
+}
+
 function Write-Report {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -1489,10 +1577,13 @@ function Write-Report {
         language = "csharp"
         module_id = $ModuleId
         result = $Result
+        succeeded = $Result -eq "direct_abi_built"
         direct_abi_supported = $DirectAbiSupported
         source = [ordered]@{
             project = Convert-ToProjectRelativePath -Path $ProjectPath
             file = Convert-ToProjectRelativePath -Path $SourcePath
+            sha256 = if ($null -eq $FrontendModel) { "" } else { [string]$FrontendModel.source.sha256 }
+            script_type = $SelectedScriptTypeName
         }
         output_root = Convert-ToProjectRelativePath -Path $OutputRoot
         required_exports = @(
@@ -1566,6 +1657,11 @@ function Write-Report {
             wasm_file = if ([string]::IsNullOrWhiteSpace($WasmPath)) { "" } else { Convert-ToProjectRelativePath -Path $WasmPath }
             manifest_file = if ([string]::IsNullOrWhiteSpace($ManifestPath)) { "" } else { Convert-ToProjectRelativePath -Path $ManifestPath }
             report_file = Convert-ToProjectRelativePath -Path $ReportPath
+            frontend_file = if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath -Path $FrontendArtifactPath } else { "" }
+        }
+        frontend = [ordered]@{
+            schema_version = if ($null -eq $FrontendModel) { 0 } else { [int]$FrontendModel.schema_version }
+            version = if ($null -eq $FrontendModel) { "" } else { [string]$FrontendModel.frontend_version }
         }
         toolchain = [ordered]@{
             compiler = $Compiler
@@ -1616,6 +1712,11 @@ if ([string]::IsNullOrWhiteSpace($ReportPath)) {
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
     $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json"
 }
+$FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
+$StaleAdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
+$StaleDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
+$FrontendModel = $null
+$SelectedScriptTypeName = ""
 $PublishRoot = Join-Path $OutputRoot "publish"
 $BinaryRoot = Join-Path $OutputRoot "bin"
 $IntermediateRoot = Join-Path $OutputRoot "obj"
@@ -1643,6 +1744,14 @@ if (Test-Path -LiteralPath $ReportPath) {
 }
 if (Test-Path -LiteralPath $ManifestPath) {
     Remove-Item -LiteralPath $ManifestPath -Force
+}
+if (Test-Path -LiteralPath $FrontendArtifactPath) {
+    Remove-Item -LiteralPath $FrontendArtifactPath -Force
+}
+foreach ($StaleWasmPath in @($StaleAdapterWasmPath, $StaleDotNetWasmPath)) {
+    if (Test-Path -LiteralPath $StaleWasmPath -PathType Leaf) {
+        Remove-Item -LiteralPath $StaleWasmPath -Force
+    }
 }
 
 $NuGetConfig = @"
@@ -1676,20 +1785,66 @@ else {
     }
 }
 
-$SourceAdapterResult = Invoke-CSharpSourceAdapter -Diagnostics $Diagnostics
+if (-not $DotNet.Found) {
+    Write-Report -Result "missing_toolchain" -DirectAbiSupported $false -Diagnostics $Diagnostics
+    Write-Output "[AvidScript][CSharp][Frontend] result=missing_toolchain missing=dotnet report=$ReportPath"
+    exit 1
+}
+
+$FrontendScriptPath = Join-Path $BuildDir "InvokeCSharpFrontend.ps1"
+$FrontendSourceId = Convert-ToProjectRelativePath -Path $SourcePath
+$FrontendArguments = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $FrontendScriptPath,
+    "-DotNetPath", $DotNet.Path,
+    "-SourcePath", $SourcePath,
+    "-SourceId", $FrontendSourceId,
+    "-OutputPath", $FrontendArtifactPath,
+    "-Configuration", $Configuration
+)
+$FrontendOutput = @(& powershell.exe @FrontendArguments 2>&1)
+$FrontendExitCode = $LASTEXITCODE
+
+if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) {
+    try {
+        $FrontendModel = Get-Content -Raw -LiteralPath $FrontendArtifactPath | ConvertFrom-Json
+        $Diagnostics += @(Convert-CSharpFrontendDiagnostics -FrontendModel $FrontendModel -SourceId $FrontendSourceId)
+    }
+    catch {
+        $Diagnostics += [ordered]@{
+            code = "frontend_artifact_invalid"
+            severity = "error"
+            message = $_.Exception.Message
+            file = $FrontendSourceId
+        }
+    }
+}
+else {
+    $Diagnostics += [ordered]@{
+        code = "frontend_artifact_missing"
+        severity = "error"
+        message = "C# frontend did not write its artifact."
+        file = $FrontendSourceId
+        process_exit_code = $FrontendExitCode
+        output = @($FrontendOutput)
+    }
+}
+
+if ($FrontendExitCode -ne 0 -or $null -eq $FrontendModel -or -not $FrontendModel.succeeded) {
+    Write-Report -Result "frontend_failed" -DirectAbiSupported $false -Diagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn"
+    Write-Output "[AvidScript][CSharp][Frontend] result=frontend_failed exit_code=$FrontendExitCode artifact=$FrontendArtifactPath report=$ReportPath"
+    exit 1
+}
+
+$SourceAdapterResult = Invoke-CSharpSourceAdapter -Diagnostics $Diagnostics -FrontendModel $FrontendModel
 if ($SourceAdapterResult.Succeeded) {
-    Write-Report -Result "direct_abi_built" -DirectAbiSupported $true -Diagnostics $SourceAdapterResult.Diagnostics -ObservedExports $SourceAdapterResult.ObservedExports -WasmPath $SourceAdapterResult.WasmPath -ManifestPath $SourceAdapterResult.ManifestPath -Compiler "avidscript-csharp-source-adapter"
-    Write-Output "[AvidScript][CSharp][Build] result=direct_abi_built compiler=avidscript-csharp-source-adapter manifest=$($SourceAdapterResult.ManifestPath) wasm=$($SourceAdapterResult.WasmPath) sha256=$($SourceAdapterResult.Sha256)"
+    Write-Report -Result "direct_abi_built" -DirectAbiSupported $true -Diagnostics $SourceAdapterResult.Diagnostics -ObservedExports $SourceAdapterResult.ObservedExports -WasmPath $SourceAdapterResult.WasmPath -ManifestPath $SourceAdapterResult.ManifestPath -Compiler "avidscript-csharp-ast-adapter"
+    Write-Output "[AvidScript][CSharp][Build] result=direct_abi_built compiler=avidscript-csharp-ast-adapter manifest=$($SourceAdapterResult.ManifestPath) wasm=$($SourceAdapterResult.WasmPath) sha256=$($SourceAdapterResult.Sha256)"
     exit 0
 }
 
 $Diagnostics = @($SourceAdapterResult.Diagnostics)
-if (-not $DotNet.Found) {
-    Write-Report -Result "missing_toolchain" -DirectAbiSupported $false -Diagnostics $Diagnostics
-    Write-Output "[AvidScript][CSharp][Build] result=missing_toolchain missing=dotnet report=$ReportPath"
-    exit 0
-}
-
 $SdkList = @()
 try {
     $SdkList = @(& $DotNet.Path --list-sdks 2>&1)
@@ -1816,6 +1971,10 @@ $Manifest = [ordered]@{
     language = "csharp"
     source = [ordered]@{
         file = Convert-ToProjectRelativePath -Path $SourcePath
+        sha256 = [string]$FrontendModel.source.sha256
+        script_type = $SelectedScriptTypeName
+        frontend_file = Convert-ToProjectRelativePath -Path $FrontendArtifactPath
+        frontend_schema_version = [int]$FrontendModel.schema_version
     }
     wasm = [ordered]@{
         file = Convert-ToProjectRelativePath -Path $CopiedWasmPath
