@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptGameplayEvent.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptWasmReload.h"
@@ -265,6 +266,9 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample declares EndPlay method"), SourceText.Contains(TEXT("public static void EndPlay")));
 	TestTrue(TEXT("Sample declares OnTimer method"), SourceText.Contains(TEXT("public static void OnTimer(int callbackId, int timerHandle)")));
 	TestTrue(TEXT("Sample declares OnEvent method"), SourceText.Contains(TEXT("public static void OnEvent(int eventId, float value)")));
+	TestTrue(TEXT("Sample declares typed begin overlap callback"), SourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
+	TestTrue(TEXT("Sample declares typed end overlap callback"), SourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));
+	TestTrue(TEXT("Sample declares typed hit callback"), SourceText.Contains(TEXT("public static void OnHit(AActor otherActor, FVector normalImpulse)")));
 	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
 	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
@@ -468,7 +472,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v11 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v11")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v12 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v12")));
 	TestTrue(TEXT("C# source adapter manifest declares USceneComponent"), ManifestJson.Contains(TEXT("USceneComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares GetRootComponent"), ManifestJson.Contains(TEXT("GetRootComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
@@ -484,6 +488,8 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest requires Timer export"), ManifestJson.Contains(TEXT("avid_on_timer")));
 	TestTrue(TEXT("C# source adapter manifest requires gameplay event export"), ManifestJson.Contains(TEXT("avid_on_event")));
+	TestTrue(TEXT("C# source adapter manifest requires typed gameplay event export"), ManifestJson.Contains(TEXT("avid_on_gameplay_event")));
+	TestTrue(TEXT("C# source adapter manifest declares generated collision callbacks"), ManifestJson.Contains(TEXT("OnBeginOverlap")) && ManifestJson.Contains(TEXT("OnEndOverlap")) && ManifestJson.Contains(TEXT("OnHit")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.SetTimer"), ManifestJson.Contains(TEXT("UE.SetTimer(float delaySeconds, int callbackId)")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
@@ -687,6 +693,36 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("C# gameplay event callback count"), EventResult.EventCallbackCount, 1);
 	TestEqual(TEXT("C# gameplay event id"), EventResult.LastEventId, 3);
 	TestEqual(TEXT("C# gameplay event value"), EventResult.LastEventValue, 25.0f);
+
+	AActor* OtherActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("C# typed callback other Actor spawns"), OtherActor);
+	FAvidScriptObjectHandleResult OtherRegisterResult;
+	const FAvidScriptObjectHandle OtherHandle = Registry.RegisterObject(OtherActor, OtherRegisterResult);
+	TestTrue(TEXT("C# typed callback other Actor registers"), OtherRegisterResult.bSucceeded);
+	if (OtherActor == nullptr || !OtherRegisterResult.bSucceeded)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+
+	OtherActor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+	FAvidScriptGameplayEvent TypedEvent;
+	TypedEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
+	TypedEvent.ObjectHandle = OtherHandle;
+	TypedEvent.VectorValue = FVector3f(10.0f, 20.0f, 30.0f);
+	TestTrue(TEXT("C# begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# begin overlap maps AActor and FVector parameters"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
+
+	TypedEvent.Type = EAvidScriptGameplayEventType::EndOverlap;
+	TypedEvent.VectorValue = FVector3f(10.0f, 30.0f, 30.0f);
+	TestTrue(TEXT("C# end overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# end overlap routes through the generated dispatcher"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 35.0), 0.01));
+
+	TypedEvent.Type = EAvidScriptGameplayEventType::Hit;
+	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
+	TestTrue(TEXT("C# hit dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# hit forwards normal impulse"), OtherActor->GetActorLocation().Equals(FVector(11.0, 32.0, 38.0), 0.01));
+	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 4);
 
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
 	ReloadedManifest.ModuleId = TEXT("csharp_timer_successful_reload");

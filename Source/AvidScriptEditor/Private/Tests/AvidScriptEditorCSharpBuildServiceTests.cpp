@@ -189,12 +189,32 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		FString ManifestModuleId;
 		TestTrue(TEXT("Custom manifest declares module id"), ManifestObject->TryGetStringField(TEXT("module_id"), ManifestModuleId));
 		TestEqual(TEXT("Custom manifest module id"), ManifestModuleId, Config.ModuleId);
+
+		const TSharedPtr<FJsonObject>* AdapterContractObject = nullptr;
+		TestTrue(TEXT("Custom manifest declares adapter contract"), ManifestObject->TryGetObjectField(TEXT("adapter_contract"), AdapterContractObject));
+		if (AdapterContractObject != nullptr && AdapterContractObject->IsValid())
+		{
+			const TArray<TSharedPtr<FJsonValue>>* GeneratedCallbacks = nullptr;
+			TestTrue(TEXT("Custom manifest declares generated callback list"), (*AdapterContractObject)->TryGetArrayField(TEXT("generated_gameplay_callbacks"), GeneratedCallbacks));
+			if (GeneratedCallbacks != nullptr)
+			{
+				TestEqual(TEXT("Custom profile generates no gameplay callback branches"), GeneratedCallbacks->Num(), 0);
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* StaticFloatFields = nullptr;
+			TestTrue(TEXT("Custom manifest declares static float field list"), (*AdapterContractObject)->TryGetArrayField(TEXT("static_float_fields"), StaticFloatFields));
+			if (StaticFloatFields != nullptr)
+			{
+				TestEqual(TEXT("Custom profile emits no null static field metadata"), StaticFloatFields->Num(), 0);
+			}
+		}
 	}
 
 	FString ManifestText;
 	TestTrue(TEXT("Custom manifest text is readable"), FFileHelper::LoadFileToString(ManifestText, *Config.ManifestPath));
-	TestTrue(TEXT("Custom profile without OnEvent uses v11 subset"), ManifestText.Contains(TEXT("actor_lifecycle_v11")));
+	TestTrue(TEXT("Custom profile without gameplay callbacks uses v12 subset"), ManifestText.Contains(TEXT("actor_lifecycle_v12")));
 	TestTrue(TEXT("Custom profile without OnEvent still exports event callback"), ManifestText.Contains(TEXT("avid_on_event")));
+	TestTrue(TEXT("Custom profile without gameplay callbacks still exports generic dispatcher"), ManifestText.Contains(TEXT("avid_on_gameplay_event")));
 
 	UWorld* World = nullptr;
 	if (!CreateAvidScriptCSharpBuildTestWorld(World))

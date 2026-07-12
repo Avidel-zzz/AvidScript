@@ -301,3 +301,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-13 P38.3 fallback 换行错误复发：受控 PowerShell 编辑再次用 LF here-string 直接匹配 CRLF C++ 文件，唯一锚点计数为 0；脚本在写盘前停止。Prevention：所有 fallback 锚点在计数和 Replace 前必须显式转换为目标文件的换行格式。
 - 2026-07-13 P38.3 命令封装错误复发：functions.exec 的 JavaScript template literal 再次包含 PowerShell 反引号，导致外层 SyntaxError 且命令未执行。Prevention：通过 functions.exec 发送 PowerShell fallback 时禁止在命令中使用反引号；换行改用 [char]13/[char]10。
 - 2026-07-13 P38.4 混合换行错误记录：碰撞实现 fallback 把同模块 Header 与 Source 都按 CRLF 转换，但 Source 实际为 LF，导致 source 锚点为 0；事务在写盘前停止。Prevention：多文件 fallback 必须逐文件探测换行，统一到 LF 匹配后再分别恢复，禁止按目录推断。
+- 2026-07-13 P38.5 fallback helper 错误：C# RED 编辑脚本调用 Normalize-Lf 但漏定义该函数，PowerShell 在任何写盘前停止。Prevention：每个自包含 fallback 命令必须在顶部定义并立即使用所需 helper，不能假设前一条 exec 的函数仍存在。
+- 2026-07-13 P38.5 命令封装错误再次复发：functions.exec 的 JavaScript template literal 中出现 PowerShell 反引号，外层解析在执行前失败，未写盘。Prevention：受控 fallback 命令禁止出现 PowerShell 反引号；包含美元符号的替换锚点一律使用单引号 here-string。
+- 2026-07-13 P38.5 测试设计错误：Editor 兼容性测试用精确 JSON 文本匹配断言空数组，因 ConvertTo-Json 的缩进换行产生假失败；读回同时发现空 static_float_fields 被序列化为 [null]。Prevention：JSON 语义必须通过 FJsonObject/FJsonValue 结构化断言，生成器中的可空流水线在序列化前过滤 null，并覆盖空集合契约。
+- 2026-07-13 P38.5 集合返回错误：Get-CSharpStaticFloatFields 使用 return ,$Fields，调用方再次数组化后形成嵌套集合；零字段被误计为一个 global，并产生 [null] 元数据。Prevention：供 @(... ) 调用的集合 helper 直接输出元素，不用一元逗号保护集合；至少覆盖零元素与正常非空元素的结构化契约。
+- 2026-07-13 P38.5 文档命令封装错误复发：Markdown 反引号直接出现在 functions.exec 的 JavaScript template literal 中，外层解析在写盘前失败。Prevention：fallback 文档内容禁止包含字面反引号，统一使用占位符并在 PowerShell 内以 [char]96 还原；优先继续尝试 apply_patch。

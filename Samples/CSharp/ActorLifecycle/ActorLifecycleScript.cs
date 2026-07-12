@@ -45,6 +45,21 @@ public static class ActorLifecycleScript
         UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f));
     }
 
+    public static void OnBeginOverlap(AActor otherActor, FVector location)
+    {
+        otherActor.SetActorLocation(location + new FVector(0.0f, 10.0f, 0.0f));
+    }
+
+    public static void OnEndOverlap(AActor otherActor, FVector location)
+    {
+        otherActor.SetActorLocation(location + new FVector(0.0f, 0.0f, 5.0f));
+    }
+
+    public static void OnHit(AActor otherActor, FVector normalImpulse)
+    {
+        otherActor.AddActorWorldOffset(normalImpulse);
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {

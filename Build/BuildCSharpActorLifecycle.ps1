@@ -370,7 +370,7 @@ function Get-CSharpStaticFloatFields {
         }
     }
 
-    return ,$Fields
+    return $Fields
 }
 
 function Find-CSharpStaticFloatField {
@@ -466,7 +466,8 @@ function Convert-CSharpValueExpression {
         [Parameter(Mandatory = $true)][string]$Expression,
         [Parameter(Mandatory = $true)][ValidateSet('FVector', 'FRotator')][string]$ValueType,
         [object[]]$Fields = @(),
-        [object[]]$ValueLocals = @()
+        [object[]]$ValueLocals = @(),
+        [string]$CallbackVectorParameterName = ''
     )
 
     $Trimmed = $Expression.Trim()
@@ -475,8 +476,8 @@ function Convert-CSharpValueExpression {
         return [PSCustomObject]@{
             Kind = 'value_add'
             ValueType = $ValueType
-            Left = Convert-CSharpValueExpression -Expression $AddMatch.Groups['left'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
-            Right = Convert-CSharpValueExpression -Expression $AddMatch.Groups['right'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+            Left = Convert-CSharpValueExpression -Expression $AddMatch.Groups['left'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+            Right = Convert-CSharpValueExpression -Expression $AddMatch.Groups['right'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
         }
     }
 
@@ -513,6 +514,10 @@ function Convert-CSharpValueExpression {
     }
 
     if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+        if ($ValueType -eq 'FVector' -and -not [string]::IsNullOrWhiteSpace($CallbackVectorParameterName) -and $Trimmed -eq $CallbackVectorParameterName) {
+            return [PSCustomObject]@{ Kind = 'callback_vector'; ValueType = $ValueType }
+        }
+
         $Local = Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $Trimmed
         if ($null -ne $Local) {
             if ($Local.ValueType -ne $ValueType) {
@@ -531,7 +536,9 @@ function Get-CSharpLifecycleStatements {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$MethodBody,
         [Parameter(Mandatory = $true)][string]$MethodName,
         [object[]]$Fields = @(),
-        [bool]$AllowEmpty = $false
+        [bool]$AllowEmpty = $false,
+        [string]$CallbackActorParameterName = '',
+        [string]$CallbackVectorParameterName = ''
     )
 
     if ($MethodName -ne 'OnEvent' -and [regex]::IsMatch($MethodBody, '\bvalue\b')) {
@@ -554,7 +561,7 @@ function Get-CSharpLifecycleStatements {
                 throw "Duplicate C# value local '$LocalName' in '$MethodName'."
             }
 
-            $Expression = Convert-CSharpValueExpression -Expression $ValueDeclarationMatch.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+            $Expression = Convert-CSharpValueExpression -Expression $ValueDeclarationMatch.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
             $Local = [PSCustomObject]@{ Name = $LocalName; ValueType = $ValueType; Ordinal = $ValueLocals.Count }
             $ValueLocals += $Local
             $Statements += [PSCustomObject]@{
@@ -576,6 +583,28 @@ function Get-CSharpLifecycleStatements {
             continue
         }
 
+        if (-not [string]::IsNullOrWhiteSpace($CallbackActorParameterName)) {
+            $CallbackActorPattern = '^' + [regex]::Escape($CallbackActorParameterName) + '\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset|SetActorRotation|SetActorScale3D)\s*\(\s*(?<expr>.+)\s*\)$'
+            $CallbackActorCall = [regex]::Match($StatementText, $CallbackActorPattern)
+            if ($CallbackActorCall.Success) {
+                $Method = $CallbackActorCall.Groups['method'].Value
+                $ValueType = if ($Method -eq 'SetActorRotation') { 'FRotator' } else { 'FVector' }
+                $Kind = switch ($Method) {
+                    'SetActorLocation' { 'set_location_value' }
+                    'AddActorWorldOffset' { 'add_location_offset_value' }
+                    'SetActorRotation' { 'set_rotation_value' }
+                    'SetActorScale3D' { 'set_scale_value' }
+                }
+                $Statements += [PSCustomObject]@{
+                    Kind = $Kind
+                    ValueType = $ValueType
+                    UseGameplayEventHandle = $true
+                    ValueExpression = Convert-CSharpValueExpression -Expression $CallbackActorCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+                }
+                continue
+            }
+        }
+
         $TypedValueCall = [regex]::Match($StatementText, '^UE\s*\.\s*Self\s*\.\s*(?<method>SetActorLocation|AddActorWorldOffset|SetActorRotation|SetActorScale3D)\s*\(\s*(?<expr>.+)\s*\)$')
         if ($TypedValueCall.Success) {
             $Method = $TypedValueCall.Groups['method'].Value
@@ -589,7 +618,8 @@ function Get-CSharpLifecycleStatements {
             $Statements += [PSCustomObject]@{
                 Kind = $Kind
                 ValueType = $ValueType
-                ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals
+                UseGameplayEventHandle = $false
+                ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
             }
             continue
         }
@@ -599,7 +629,7 @@ function Get-CSharpLifecycleStatements {
             $Statements += [PSCustomObject]@{
                 Kind = 'set_root_component_world_location'
                 ValueType = 'FVector'
-                ValueExpression = Convert-CSharpValueExpression -Expression $SceneComponentCall.Groups['expr'].Value -ValueType 'FVector' -Fields $Fields -ValueLocals $ValueLocals
+                ValueExpression = Convert-CSharpValueExpression -Expression $SceneComponentCall.Groups['expr'].Value -ValueType 'FVector' -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
             }
             continue
         }
@@ -734,6 +764,12 @@ function Add-CSharpValueComponentCode {
         return
     }
 
+    if ($Expression.Kind -eq 'callback_vector') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32](5 + $ComponentIndex))
+        return
+    }
+
     if ($Expression.Kind -eq 'value_add') {
         Add-CSharpValueComponentCode -Body $Body -Expression $Expression.Left -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
         Add-CSharpValueComponentCode -Body $Body -Expression $Expression.Right -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
@@ -831,10 +867,18 @@ function Add-CSharpTypedActorValueCall {
         'set_scale_value' { 7 }
         default { throw "Unsupported typed Actor value call '$($Statement.Kind)'." }
     }
-    Add-WasmByte -Bytes $Body -Value 0x10
-    Add-WasmU32Leb -Bytes $Body -Value 2
-    Add-WasmByte -Bytes $Body -Value 0x10
-    Add-WasmU32Leb -Bytes $Body -Value 3
+    if ($Statement.UseGameplayEventHandle) {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 3
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 4
+    }
+    else {
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 2
+        Add-WasmByte -Bytes $Body -Value 0x10
+        Add-WasmU32Leb -Bytes $Body -Value 3
+    }
     for ($ComponentIndex = 0; $ComponentIndex -lt 3; ++$ComponentIndex) {
         Add-CSharpValueComponentCode -Body $Body -Expression $Statement.ValueExpression -ComponentIndex $ComponentIndex -AllowDeltaSeconds $AllowDeltaSeconds -ValueLocalBase $ValueLocalBase
     }
@@ -978,6 +1022,43 @@ function New-CSharpLifecycleFunctionBody {
     return ,$Body
 }
 
+function New-CSharpGameplayEventFunctionBody {
+    param([object[]]$GameplayCallbacks = @())
+
+    $Body = New-WasmByteList
+    $MaxValueLocalCount = 0
+    foreach ($Callback in @($GameplayCallbacks)) {
+        $ValueLocalCount = @($Callback.Statements | Where-Object { $_.Kind -eq 'value_local_assign' }).Count
+        $MaxValueLocalCount = [Math]::Max($MaxValueLocalCount, $ValueLocalCount)
+    }
+
+    if ($MaxValueLocalCount -gt 0) {
+        Add-WasmU32Leb -Bytes $Body -Value 1
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32](3 * $MaxValueLocalCount))
+        Add-WasmByte -Bytes $Body -Value 0x7d
+    }
+    else {
+        Add-WasmU32Leb -Bytes $Body -Value 0
+    }
+
+    foreach ($Callback in @($GameplayCallbacks)) {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 0
+        Add-WasmByte -Bytes $Body -Value 0x41
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$Callback.EventType)
+        Add-WasmByte -Bytes $Body -Value 0x46
+        Add-WasmByte -Bytes $Body -Value 0x04
+        Add-WasmByte -Bytes $Body -Value 0x40
+        foreach ($Statement in @($Callback.Statements)) {
+            Add-CSharpLifecycleStatementCode -Body $Body -Statement $Statement -AllowDeltaSeconds $false -ValueLocalBase 8
+        }
+        Add-WasmByte -Bytes $Body -Value 0x0b
+    }
+
+    Add-WasmByte -Bytes $Body -Value 0x0b
+    return ,$Body
+}
+
 function New-CSharpDirectAbiWasmModule {
     param(
         [object[]]$Fields = @(),
@@ -985,14 +1066,15 @@ function New-CSharpDirectAbiWasmModule {
         [Parameter(Mandatory = $true)]$TickStatements,
         [object[]]$EndPlayStatements = @(),
         [object[]]$TimerStatements = @(),
-        [object[]]$EventStatements = @()
+        [object[]]$EventStatements = @(),
+        [object[]]$GameplayCallbacks = @()
     )
 
     $Module = New-WasmByteList
     Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
 
     $TypeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $TypeSection -Value 9
+    Add-WasmU32Leb -Bytes $TypeSection -Value 10
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
@@ -1031,6 +1113,10 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 2
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7d))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 8
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
     Add-WasmU32Leb -Bytes $TypeSection -Value 0
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
@@ -1095,12 +1181,13 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $FunctionSection -Value 5
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 6
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmU32Leb -Bytes $FunctionSection -Value 2
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmU32Leb -Bytes $FunctionSection -Value 7
     Add-WasmU32Leb -Bytes $FunctionSection -Value 8
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 9
     Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
     $MemorySection = New-WasmByteList
     Add-WasmU32Leb -Bytes $MemorySection -Value 1
@@ -1122,7 +1209,7 @@ function New-CSharpDirectAbiWasmModule {
     }
 
     $ExportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ExportSection -Value 5
+    Add-WasmU32Leb -Bytes $ExportSection -Value 6
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ExportSection -Value 14
@@ -1138,6 +1225,9 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_event'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ExportSection -Value 18
+    Add-WasmString -Bytes $ExportSection -Text 'avid_on_gameplay_event'
+    Add-WasmByte -Bytes $ExportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ExportSection -Value 19
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
@@ -1145,9 +1235,10 @@ function New-CSharpDirectAbiWasmModule {
     $EndPlayBody = New-CSharpLifecycleFunctionBody -Statements $EndPlayStatements -AllowDeltaSeconds $false
     $TimerBody = New-CSharpLifecycleFunctionBody -Statements $TimerStatements -AllowDeltaSeconds $false -ParameterCount 2
     $EventBody = New-CSharpLifecycleFunctionBody -Statements $EventStatements -AllowDeltaSeconds $false -ParameterCount 2
+    $GameplayEventBody = New-CSharpGameplayEventFunctionBody -GameplayCallbacks $GameplayCallbacks
 
     $CodeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $CodeSection -Value 5
+    Add-WasmU32Leb -Bytes $CodeSection -Value 6
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$BeginPlayBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $BeginPlayBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TickBody.Count)
@@ -1158,6 +1249,8 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmBytes -Bytes $CodeSection -Values $TimerBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$EventBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $EventBody.ToArray()
+    Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$GameplayEventBody.Count)
+    Add-WasmBytes -Bytes $CodeSection -Values $GameplayEventBody.ToArray()
     Add-WasmSection -Module $Module -SectionId 10 -Payload $CodeSection
 
     return ,(Convert-WasmByteListToArray -Bytes $Module)
@@ -1177,6 +1270,11 @@ function Invoke-CSharpSourceAdapter {
         $Fields = @(Get-CSharpStaticFloatFields -SourceText $SourceText)
         $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
+        $GameplayCallbackSpecs = @(
+            [PSCustomObject]@{ MethodName = 'OnBeginOverlap'; EventType = 1; ActorParameterName = 'otherActor'; VectorParameterName = 'location' },
+            [PSCustomObject]@{ MethodName = 'OnEndOverlap'; EventType = 2; ActorParameterName = 'otherActor'; VectorParameterName = 'location' },
+            [PSCustomObject]@{ MethodName = 'OnHit'; EventType = 3; ActorParameterName = 'otherActor'; VectorParameterName = 'normalImpulse' }
+        )
         $EndPlayBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'EndPlay'
         $TimerBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnTimer'
         $EventBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnEvent'
@@ -1195,12 +1293,28 @@ function Invoke-CSharpSourceAdapter {
         if ($null -ne $EventBody) {
             $EventStatements = @(Get-CSharpLifecycleStatements -MethodBody $EventBody -MethodName 'OnEvent' -Fields $Fields -AllowEmpty $true)
         }
-        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements -TimerStatements $TimerStatements -EventStatements $EventStatements
+
+        $GameplayCallbacks = @()
+        foreach ($Spec in $GameplayCallbackSpecs) {
+            $CallbackBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName $Spec.MethodName
+            if ($null -eq $CallbackBody) {
+                continue
+            }
+
+            $CallbackStatements = @(Get-CSharpLifecycleStatements -MethodBody $CallbackBody -MethodName $Spec.MethodName -Fields $Fields -AllowEmpty $true -CallbackActorParameterName $Spec.ActorParameterName -CallbackVectorParameterName $Spec.VectorParameterName)
+            $GameplayCallbacks += [PSCustomObject]@{
+                MethodName = $Spec.MethodName
+                EventType = $Spec.EventType
+                Statements = $CallbackStatements
+            }
+        }
+
+        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements -TimerStatements $TimerStatements -EventStatements $EventStatements -GameplayCallbacks $GameplayCallbacks
 
         [System.IO.File]::WriteAllBytes($AdapterWasmPath, $WasmBytes)
         $ObservedExports = @(Get-WasmExports -Path $AdapterWasmPath)
         $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play', 'avid_on_timer', 'avid_on_event')
+        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play', 'avid_on_timer', 'avid_on_event', 'avid_on_gameplay_event')
         $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
         if ($MissingExports.Count -gt 0) {
             throw "C# source adapter produced a WASM file without required exports: $($MissingExports -join ',')"
@@ -1215,7 +1329,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v11'
+                subset = 'actor_lifecycle_v12'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1290,9 +1404,10 @@ function Invoke-CSharpSourceAdapter {
                 supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'USceneComponent', 'UE.Self')
                 supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)', 'UE.SetTimer(float delaySeconds, int callbackId)', 'UE.CancelTimer(int timerHandle)')
                 supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()', 'FVector local = UE.Self.GetRootComponent().GetWorldLocation()')
-                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer', 'Event')
+                generated_gameplay_callbacks = @($GameplayCallbacks | ForEach-Object { $_.MethodName })
+                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer', 'Event', 'BeginOverlap', 'EndOverlap', 'Hit')
                 supported_event_expressions = @('numeric literal', 'value', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
-                static_float_fields = @($Fields | ForEach-Object { $_.Name })
+                static_float_fields = @($Fields | Where-Object { $null -ne $_ } | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
             }
         }
@@ -1302,7 +1417,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v10 source subset with typed Actor location/rotation/scale reads, shared FVector/FRotator locals and addition, FTransform snapshot projection, lifecycle and Timer callback events, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v12 source subset with generated generic gameplay-event dispatch, typed AActor/FVector collision callbacks, lifecycle and Timer events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
@@ -1363,7 +1478,8 @@ function Write-Report {
             "avid_on_tick",
             "avid_on_end_play",
             "avid_on_timer",
-            "avid_on_event"
+            "avid_on_event",
+            "avid_on_gameplay_event"
         )
         required_imports = @(
             [ordered]@{
@@ -1656,7 +1772,7 @@ catch {
 }
 
 $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play", "avid_on_timer", "avid_on_event")
+$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play", "avid_on_timer", "avid_on_event", "avid_on_gameplay_event")
 $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
 
 if ($MissingExports.Count -gt 0) {
