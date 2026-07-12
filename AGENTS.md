@@ -204,6 +204,14 @@ Plugins/AvidScript/Docs
 - 2026-07-12 P37 文档命令错误记录：把含 Markdown 反引号的 PowerShell here-string 直接嵌入 functions.exec JavaScript template literal，导致外层 JavaScript 在命令执行前 SyntaxError；文件未改动。Prevention：通过 functions.exec 发送含反引号的文档时，使用不含 template literal 的安全字符串构造，或先移除/显式转义外层反引号。
 - 2026-07-12 P37 文档路径错误记录：把项目根 Docs 下的 Phase 37 实施计划误按插件相对路径读取，脚本在实现记录写盘后因 FileNotFound 停止。Prevention：项目决策/plan/tracker 使用项目根绝对路径，插件实现记录才从插件仓库使用 Docs 相对路径；多目录文档更新前先逐项 Test-Path。
 
+- 2026-07-13 P37.3 计划自检错误记录：placeholder scan 匹配了自检说明中的占位符单词本身并误报。Prevention：自检说明使用“没有占位项”等自然语言，不在被扫描文档里复述扫描 token。
+- 2026-07-13 P37.3 编辑事务错误记录：多文件 PowerShell fallback 先写 Runtime header，随后 source 锚点失败，留下短暂不可编译中间态。Prevention：多文件编辑必须先在内存完成所有锚点验证，再统一写盘；不能边验证边写。
+- 2026-07-13 P37.3 regex 错误记录：PowerShell replacement 中的捕获组写法被错误生成成字面 1CopyObservableStateToResult；架构脚本通过但源码不可编译。Prevention：复杂缩进迁移优先 ReadAllLines；使用 regex capture 时先在临时字符串断言输出不存在异常 token，并始终以真实编译为最终 gate。
+- 2026-07-13 P37.3 IWYU 重复错误记录：新建 AvidScriptActorTransformBatch.cpp 时首 include 不是同名 header，UBT 给出非致命诊断后仍链接。Prevention：创建每个 UE cpp 时第一行立即写同名 header，并把非致命 UBT diagnostics 视为失败处理。
+- 2026-07-13 P37.3 benchmark 编辑错误记录：对重复字段片段做全局 Replace，把 TransformBatchSize 错加到 Timer result；读回时在构建前修复。Prevention：包含重复结构的 public header 只能用带 struct 名的唯一上下文锚点或逐行范围编辑，禁止无上下文全局 Replace。
+
+- 2026-07-13 P37.3 文档路径错误复发：functions.exec JavaScript template literal 再次把 PowerShell here-string 中的 Windows C colon backslash tmp 路径解释成制表符并移除斜杠。Prevention：经 functions.exec 生成的 Markdown 路径统一写成 C:/tmp/... 正斜杠形式；写后扫描 tab 控制字符。
+
 ## Module Architecture Workflow
 
 - Runtime dependency direction is `AvidScriptCore <- AvidScriptVM/AvidScriptBindings <- AvidScriptRuntime <- AvidScriptEditor`.

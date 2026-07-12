@@ -126,6 +126,12 @@ if ($RuntimeHeader -match '\bRemainingSeconds\b') {
 if ($RuntimeSource -match 'PendingTimers\.IndexOfByPredicate') {
     Add-Violation 'Runtime timer lookup must use the active handle map instead of a linear PendingTimers scan'
 }
+if (-not $RuntimeHeader.Contains('CopyObservableStateToResult')) {
+    Add-Violation 'Runtime result synchronization must use CopyObservableStateToResult at return boundaries'
+}
+if ($RuntimeSource -match 'CopyHostImportStateToResult\(OutResult\);\s*CopyTimerStateToResult\(OutResult\);\s*CopyEventStateToResult\(OutResult\);') {
+    Add-Violation 'Runtime result synchronization must not repeat the observable-state copy triplet'
+}
 
 $ReloadTypesHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h'
 $RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'

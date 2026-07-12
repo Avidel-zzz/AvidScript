@@ -3,6 +3,28 @@
 #include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 
+bool FAvidScriptActorBinding::GetActorTransform(
+	const FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& ActorHandle,
+	FAvidScriptActorTransformSnapshot& OutTransform,
+	FAvidScriptActorBindingResult& OutResult)
+{
+	OutTransform = FAvidScriptActorTransformSnapshot();
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	if (Actor == nullptr)
+	{
+		return false;
+	}
+
+	const FTransform Transform = Actor->GetActorTransform();
+	OutTransform.Handle = ActorHandle;
+	OutTransform.Location = Transform.GetLocation();
+	OutTransform.Rotation = Transform.Rotator();
+	OutTransform.Scale3D = Transform.GetScale3D();
+	SetSuccess(OutResult, OutResult.ObjectResult, OutTransform.Location, OutTransform.Rotation, OutTransform.Scale3D);
+	return true;
+}
+
 bool FAvidScriptActorBinding::GetActorLocation(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
@@ -254,7 +276,10 @@ AActor* FAvidScriptActorBinding::ResolveActor(
 		return nullptr;
 	}
 
-	SetSuccess(OutResult, ObjectResult, Actor->GetActorLocation(), Actor->GetActorRotation(), Actor->GetActorScale3D());
+	OutResult = FAvidScriptActorBindingResult();
+	OutResult.Handle = ObjectResult.Handle;
+	OutResult.ObjectPath = ObjectResult.ObjectPath;
+	OutResult.ObjectResult = ObjectResult;
 	return Actor;
 }
 

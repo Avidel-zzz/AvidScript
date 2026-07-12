@@ -132,6 +132,7 @@ private:
 	void CopyEventStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
+	void CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	FAvidScriptVmExportHandle BeginPlayExport;

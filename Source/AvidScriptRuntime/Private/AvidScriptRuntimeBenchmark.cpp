@@ -386,6 +386,7 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 	OutResult.WarmupCount = FMath::Max(Options.WarmupCount, 0);
 	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
 	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
+	OutResult.TransformBatchSize = FMath::Clamp(Options.TransformBatchSize, 1, AvidScriptMaximumActorTransformBatchSize);
 
 	UWorld* World = nullptr;
 	if (!CreateBenchmarkWorld(World))
@@ -425,14 +426,50 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		return false;
 	}
 
+	TArray<FAvidScriptObjectHandle> TransformHandles;
+	TransformHandles.Reserve(OutResult.TransformBatchSize);
+	TransformHandles.Add(ActorHandle);
+	for (int32 Index = 1; Index < OutResult.TransformBatchSize; ++Index)
+	{
+		AActor* TransformActor = SpawnBenchmarkActor(World);
+		if (TransformActor == nullptr)
+		{
+			SetHostBindingFailure(
+				OutResult,
+				TEXT("transform_actor_spawn_failed"),
+				FString::Printf(TEXT("Failed to spawn transform batch actor %d."), Index),
+				TEXT("Verify the benchmark world can spawn the configured batch size."));
+			DestroyBenchmarkWorld(World);
+			return false;
+		}
+
+		FAvidScriptObjectHandleResult TransformRegisterResult;
+		const FAvidScriptObjectHandle TransformHandle = Registry.RegisterObject(TransformActor, TransformRegisterResult);
+		if (!TransformRegisterResult.bSucceeded || !TransformHandle.IsValid())
+		{
+			SetHostBindingFailure(
+				OutResult,
+				TransformRegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("transform_register_failed")) : TransformRegisterResult.ErrorCategory,
+				TransformRegisterResult.ErrorMessage,
+				TransformRegisterResult.NextAction);
+			DestroyBenchmarkWorld(World);
+			return false;
+		}
+		TransformHandles.Add(TransformHandle);
+	}
+
 	TArray<double> DirectGetSamples;
 	TArray<double> RegistryResolveSamples;
 	TArray<double> BindingGetSamples;
 	TArray<double> BindingSetSamples;
+	TArray<double> ScalarTransformSamples;
+	TArray<double> BatchTransformSamples;
 	DirectGetSamples.Reserve(OutResult.SampleCount);
 	RegistryResolveSamples.Reserve(OutResult.SampleCount);
 	BindingGetSamples.Reserve(OutResult.SampleCount);
 	BindingSetSamples.Reserve(OutResult.SampleCount);
+	ScalarTransformSamples.Reserve(OutResult.SampleCount);
+	BatchTransformSamples.Reserve(OutResult.SampleCount);
 
 	const int32 TotalRuns = OutResult.WarmupCount + OutResult.SampleCount;
 	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
@@ -510,6 +547,46 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		}
 		const double BindingSetMs = MeasureElapsedPerIterationMs(BindingSetStartSeconds, OutResult.IterationsPerSample);
 
+		const int32 TransformOperationCount = OutResult.IterationsPerSample * TransformHandles.Num();
+		const double ScalarTransformStartSeconds = FPlatformTime::Seconds();
+		FAvidScriptActorTransformSnapshot ScalarSnapshot;
+		FAvidScriptActorBindingResult ScalarTransformResult;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			for (const FAvidScriptObjectHandle& TransformHandle : TransformHandles)
+			{
+				if (!FAvidScriptActorBinding::GetActorTransform(Registry, TransformHandle, ScalarSnapshot, ScalarTransformResult))
+				{
+					SetHostBindingFailure(
+						OutResult,
+						ScalarTransformResult.ErrorCategory.IsEmpty() ? FString(TEXT("scalar_transform_failed")) : ScalarTransformResult.ErrorCategory,
+						ScalarTransformResult.ErrorMessage,
+						ScalarTransformResult.NextAction);
+					DestroyBenchmarkWorld(World);
+					return false;
+				}
+			}
+		}
+		const double ScalarTransformMs = MeasureElapsedPerIterationMs(ScalarTransformStartSeconds, TransformOperationCount);
+
+		const double BatchTransformStartSeconds = FPlatformTime::Seconds();
+		TArray<FAvidScriptActorTransformSnapshot> BatchSnapshots;
+		FAvidScriptActorTransformBatchResult BatchTransformResult;
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			if (!FAvidScriptActorBinding::GetActorTransforms(Registry, TransformHandles, BatchSnapshots, BatchTransformResult))
+			{
+				SetHostBindingFailure(
+					OutResult,
+					BatchTransformResult.ErrorCategory.IsEmpty() ? FString(TEXT("batch_transform_failed")) : BatchTransformResult.ErrorCategory,
+					BatchTransformResult.ErrorMessage,
+					BatchTransformResult.NextAction);
+				DestroyBenchmarkWorld(World);
+				return false;
+			}
+		}
+		const double BatchTransformMs = MeasureElapsedPerIterationMs(BatchTransformStartSeconds, TransformOperationCount);
+
 		OutResult.LastReadLocation = BindingLocation;
 		OutResult.FinalActorLocation = Actor->GetActorLocation();
 
@@ -519,6 +596,8 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 			RegistryResolveSamples.Add(RegistryResolveMs);
 			BindingGetSamples.Add(BindingGetMs);
 			BindingSetSamples.Add(BindingSetMs);
+			ScalarTransformSamples.Add(ScalarTransformMs);
+			BatchTransformSamples.Add(BatchTransformMs);
 		}
 	}
 
@@ -526,17 +605,24 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 	OutResult.RegistryResolveActor = CalculateStats(RegistryResolveSamples);
 	OutResult.BindingGetActorLocation = CalculateStats(BindingGetSamples);
 	OutResult.BindingSetActorLocation = CalculateStats(BindingSetSamples);
+	OutResult.ScalarGetActorTransform = CalculateStats(ScalarTransformSamples);
+	OutResult.BatchGetActorTransforms = CalculateStats(BatchTransformSamples);
 	OutResult.bSucceeded = true;
 	OutResult.Summary = FString::Printf(
-		TEXT("host_binding_benchmark | warmup=%d | samples=%d | iterations=%d | direct_get_avg_ms=%.6f | registry_resolve_avg_ms=%.6f | binding_get_avg_ms=%.6f | binding_set_avg_ms=%.6f | binding_set_p95_ms=%.6f"),
+		TEXT("host_binding_benchmark | warmup=%d | samples=%d | iterations=%d | transform_batch=%d | direct_get_avg_ms=%.6f | registry_resolve_avg_ms=%.6f | binding_get_avg_ms=%.6f | binding_set_avg_ms=%.6f | binding_set_p95_ms=%.6f | scalar_transform_avg_ms=%.6f | scalar_transform_p95_ms=%.6f | batch_transform_avg_ms=%.6f | batch_transform_p95_ms=%.6f"),
 		OutResult.WarmupCount,
 		OutResult.SampleCount,
 		OutResult.IterationsPerSample,
+		OutResult.TransformBatchSize,
 		OutResult.DirectGetActorLocation.AvgMs,
 		OutResult.RegistryResolveActor.AvgMs,
 		OutResult.BindingGetActorLocation.AvgMs,
 		OutResult.BindingSetActorLocation.AvgMs,
-		OutResult.BindingSetActorLocation.P95Ms);
+		OutResult.BindingSetActorLocation.P95Ms,
+		OutResult.ScalarGetActorTransform.AvgMs,
+		OutResult.ScalarGetActorTransform.P95Ms,
+		OutResult.BatchGetActorTransforms.AvgMs,
+		OutResult.BatchGetActorTransforms.P95Ms);
 
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	DestroyBenchmarkWorld(World);

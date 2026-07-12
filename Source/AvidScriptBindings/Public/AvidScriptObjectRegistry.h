@@ -9,6 +9,8 @@ struct FAvidScriptObjectHandle
 	uint32 Slot = 0;
 	uint32 Generation = 0;
 
+	bool operator==(const FAvidScriptObjectHandle&) const = default;
+
 	bool IsValid() const
 	{
 		return Slot != 0 && Generation != 0;

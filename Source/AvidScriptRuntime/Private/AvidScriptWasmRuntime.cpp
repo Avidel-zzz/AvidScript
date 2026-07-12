@@ -304,9 +304,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
 	OutResult.bEndPlayCalled = bHasEndedPlay;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 
 	if (!IsLoaded())
 	{
@@ -357,9 +355,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	{
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 		OutResult.Metrics = Metrics;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
@@ -374,9 +370,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.Metrics = Metrics;
 	OutResult.bBeginPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 	return true;
 }
 
@@ -388,9 +382,6 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bModuleInstantiated = IsLoaded();
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = bHasEndedPlay;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
 
 	if (!IsLoaded())
 	{
@@ -401,6 +392,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 			TEXT("invalid_state"),
 			TEXT("No WASM module is loaded"),
 			TEXT("load a module before ticking"));
+		CopyObservableStateToResult(OutResult);
 		return false;
 	}
 
@@ -413,6 +405,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 			TEXT("invalid_state"),
 			TEXT("Tick requires the Running lifecycle state"),
 			TEXT("call BeginPlay successfully before ticking"));
+		CopyObservableStateToResult(OutResult);
 		return false;
 	}
 
@@ -435,9 +428,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 		OutResult.Metrics = Metrics;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
 		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
@@ -448,27 +439,20 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.Metrics = Metrics;
 	OutResult.bTickCalled = true;
 	OutResult.TickCallCount = TickCallCount;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
 
 	if (!ExecuteDueTimerCallbacks(OutResult))
 	{
 		OutResult.Metrics = Metrics;
 		OutResult.bTickCalled = true;
 		OutResult.TickCallCount = TickCallCount;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
 		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
 	}
 
 	OutResult.Metrics = Metrics;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 	return true;
 }
 
@@ -484,9 +468,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	OutResult.TickCallCount = TickCallCount;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
@@ -528,9 +510,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
 		OutResult.Metrics = Metrics;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
 		LifecycleState.MarkFaulted(LifecycleResult);
 		return false;
@@ -541,9 +521,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	LastEventId = EventId;
 	LastEventValue = Value;
 	OutResult.Metrics = Metrics;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 	return true;
 }
 
@@ -556,9 +534,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	OutResult.TickCallCount = TickCallCount;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 
 	if (!IsLoaded())
 	{
@@ -609,9 +585,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	{
 		Metrics.EndPlayCallMs = 0.0;
 		OutResult.Metrics = Metrics;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		bEndPlaySucceeded = true;
 		LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
 		CachedEndPlayResult = OutResult;
@@ -633,9 +607,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		OutResult.bBeginPlayCalled = bHasBegunPlay;
 		OutResult.bEndPlayCalled = false;
 		OutResult.TickCallCount = TickCallCount;
-		CopyHostImportStateToResult(OutResult);
-		CopyTimerStateToResult(OutResult);
-		CopyEventStateToResult(OutResult);
+		CopyObservableStateToResult(OutResult);
 		bEndPlaySucceeded = false;
 		LifecycleState.MarkFaulted(LifecycleResult);
 		CachedEndPlayResult = OutResult;
@@ -650,9 +622,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.bBeginPlayCalled = bHasBegunPlay;
 	OutResult.bEndPlayCalled = true;
 	OutResult.TickCallCount = TickCallCount;
-	CopyHostImportStateToResult(OutResult);
-	CopyTimerStateToResult(OutResult);
-	CopyEventStateToResult(OutResult);
+	CopyObservableStateToResult(OutResult);
 	CachedEndPlayResult = OutResult;
 	return true;
 }
@@ -1634,6 +1604,13 @@ void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasm
 	OutResult.LastHostImportInput = LastHostImportInput;
 	OutResult.LastHostImportResult = LastHostImportResult;
 	OutResult.Metrics = Metrics;
+}
+
+void FAvidScriptWasmRuntimeInstance::CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
+{
+	CopyHostImportStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
 }
 
 bool FAvidScriptWasmRuntime::RunEmbeddedSmokeTest(FAvidScriptWasmSmokeResult& OutResult)

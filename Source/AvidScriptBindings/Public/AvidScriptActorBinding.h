@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptActorTransformBatch.h"
 
 #include "CoreMinimal.h"
 
@@ -29,6 +30,18 @@ struct FAvidScriptActorBindingResult
 class AVIDSCRIPTBINDINGS_API FAvidScriptActorBinding
 {
 public:
+	static bool GetActorTransform(
+		const FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		FAvidScriptActorTransformSnapshot& OutTransform,
+		FAvidScriptActorBindingResult& OutResult);
+
+	static bool GetActorTransforms(
+		const FAvidScriptObjectRegistry& Registry,
+		TConstArrayView<FAvidScriptObjectHandle> ActorHandles,
+		TArray<FAvidScriptActorTransformSnapshot>& OutTransforms,
+		FAvidScriptActorTransformBatchResult& OutResult);
+
 	static bool GetActorLocation(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
