@@ -317,3 +317,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - AvidScriptRuntime must not depend on EnhancedInput. Project input systems call the typed DispatchScriptInput ingress.
 - C# callback support is generated from descriptors. Phase 39-42 must replace the temporary source adapter with a real frontend and Reflection Binding Generator rather than expanding handwritten APIs.
 - Phase 38 complete automation baseline is 137/137 on UE5.8 Win64 Editor. Recount Success/Fail/performed lines; do not trust process exit code alone.
+
+## Phase 39 Language Frontend Rules
+
+- The formal C# frontend uses the Roslyn assemblies shipped with the selected .NET 8 SDK. Keep it offline and package-free; do not add a NuGet dependency for compiler services already present in the SDK.
+- PowerShell may locate tools, orchestrate processes, and merge reports. It must not gain new C# lexical, syntactic, expression, or statement parsing responsibilities.
+- The versioned AvidScript frontend JSON is the boundary consumed by later semantic analysis and Guest IR. Do not serialize Roslyn implementation objects or numeric enum values as the public contract.
+- Frontend spans use UTF-16 offsets and zero-based line/column coordinates. Convert to one-based coordinates only at the Editor presentation boundary.
+- Syntax errors must still produce a deterministic diagnostic artifact and must gate WASM generation. Never fall back to regex parsing after the formal frontend reports an error.
+- 2026-07-13 P39.1 workflow mistake record: the first redirected .NET test command assigned to PowerShell's read-only `$HOME` variable, so the environment variables were never updated and NuGet attempted to read the sandbox-blocked user config. Prevention: use a task-specific name such as `$ToolHome`, set `DOTNET_CLI_HOME`, `APPDATA`, `LOCALAPPDATA`, and `NUGET_PACKAGES` before invoking dotnet, and check assignment errors before interpreting restore output.
+- 2026-07-13 P39.1 edit mistake record: a controlled PowerShell fallback normalized an LF-only C# source anchor to CRLF, so exact validation rejected the intended atomic-writer edit before writing. Prevention: inspect or normalize the target text and anchor to LF before exact matching; preserve the file's existing newline style when writing it back.

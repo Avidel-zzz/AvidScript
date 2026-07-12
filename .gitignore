@@ -3,6 +3,8 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
+Tools/**/bin/
+Tools/**/obj/
 
 # IDE and local workspace files
 .vs/
