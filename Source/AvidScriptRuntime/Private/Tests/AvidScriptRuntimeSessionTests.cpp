@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptRuntimeSession.h"
+#include "Session/AvidScriptRuntimeEventRouter.h"
+#include "Session/AvidScriptRuntimeScheduler.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -73,4 +75,41 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeServicesAttachDetachTest,
+	"AvidScript.Architecture.Session.RuntimeServicesAttachDetach",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeServicesAttachDetachTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmSmokeResult Result;
+	TestTrue(TEXT("service fixture loads"), Runtime.LoadEmbeddedSmokeModule(Result));
+	TestTrue(TEXT("service fixture begins"), Runtime.BeginPlay(Result));
+
+	FAvidScriptRuntimeScheduler Scheduler;
+	FAvidScriptRuntimeEventRouter EventRouter(Scheduler);
+	Scheduler.Attach(Runtime);
+	TestTrue(TEXT("attached scheduler ticks"), Scheduler.Tick(1.0f / 60.0f, Result));
+	TestEqual(TEXT("scheduler exposes tick count"), Scheduler.GetTickCallCount(), 1);
+
+	TestFalse(TEXT("invalid event is rejected"), EventRouter.Dispatch(-1, 1.0f, Result));
+	TestEqual(TEXT("invalid event category"), Result.ErrorCategory, FString(TEXT("invalid_argument")));
+	TestEqual(TEXT("invalid event leaves runtime running"), Scheduler.GetLifecycleState(), EAvidScriptLifecycleState::Running);
+
+	TestTrue(TEXT("attached runtime stops"), Runtime.EndPlay(Result));
+	TestFalse(TEXT("stopped runtime rejects scheduler tick"), Scheduler.Tick(1.0f / 60.0f, Result));
+	TestEqual(TEXT("stopped tick category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
+	TestFalse(TEXT("stopped runtime rejects routed event"), EventRouter.Dispatch(1, 1.0f, Result));
+	TestEqual(TEXT("stopped event category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
+
+	Scheduler.Detach();
+	TestFalse(TEXT("detached scheduler rejects tick"), Scheduler.Tick(1.0f / 60.0f, Result));
+	TestEqual(TEXT("detached tick category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
+	TestFalse(TEXT("detached event router rejects dispatch"), EventRouter.Dispatch(1, 1.0f, Result));
+	TestEqual(TEXT("detached event category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
+
+	Runtime.Unload(Result);
+	return true;
+}
 #endif

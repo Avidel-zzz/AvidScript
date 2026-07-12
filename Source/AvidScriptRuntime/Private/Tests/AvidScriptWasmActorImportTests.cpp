@@ -660,11 +660,11 @@ bool FAvidScriptWasmActorEndPlayFailureIdempotencySmokeTest::RunTest(const FStri
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest,
-	"AvidScript.Reload.EndPlayTransitionOrderSmoke",
+	FAvidScriptWasmReloadSkipsEndPlayTransitionSmokeTest,
+	"AvidScript.Reload.SkipsEndPlayTransitionSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest::RunTest(const FString& Parameters)
+bool FAvidScriptWasmReloadSkipsEndPlayTransitionSmokeTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	if (!CreateWasmActorImportWorld(World))
@@ -719,9 +719,9 @@ bool FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest::RunTest(const FString
 	TestTrue(TEXT("New lifecycle module reloads"), Session.ReloadModule(
 		NewBytes.GetData(), NewBytes.Num(), NewManifest, ReloadResult));
 	TestEqual(
-		TEXT("Reload starts the candidate before ending the old guest"),
+		TEXT("Reload does not emit UE EndPlay for the old guest"),
 		Actor->GetActorLocation(),
-		FVector(200.0, 0.0, 0.0));
+		FVector(110.0, 0.0, 0.0));
 
 	Session.UnloadLive();
 	DestroyWasmActorImportWorld(World);

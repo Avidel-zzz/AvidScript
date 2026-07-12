@@ -1,6 +1,5 @@
 #include "AvidScriptComponent.h"
 
-#include "AvidScriptWasmReload.h"
 
 #include "GameFramework/Actor.h"
 #include "Misc/Paths.h"

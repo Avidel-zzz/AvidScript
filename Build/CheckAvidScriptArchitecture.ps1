@@ -113,6 +113,19 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
     'AVIDSCRIPT_WITH_WAMR'
 )
 
+$ReloadTypesHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h'
+$RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
+$ReloadUmbrellaHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReload.h'
+if ($ReloadTypesHeader -match '\bFAvidScriptRuntimeSession\b') {
+    Add-Violation 'WASM reload types header must not declare RuntimeSession ownership'
+}
+if ($RuntimeSessionHeader -notmatch '\bclass\s+AVIDSCRIPTRUNTIME_API\s+FAvidScriptRuntimeSession\b') {
+    Add-Violation 'AvidScriptRuntimeSession.h must own the RuntimeSession public declaration'
+}
+if ($ReloadUmbrellaHeader -match '\b(class|struct)\s+AVIDSCRIPTRUNTIME_API\b') {
+    Add-Violation 'AvidScriptWasmReload.h must remain a compatibility umbrella without declarations'
+}
+
 $ComponentHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptComponent.h'
 if ($ComponentHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstance\s*>') {
     Add-Violation 'UAvidScriptComponent must own FAvidScriptRuntimeSession instead of a raw runtime instance'
@@ -127,6 +140,24 @@ if ($WorldSubsystemHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstanc
 }
 if ($WorldSubsystemHeader -match '\bbWorldPlayActive\b') {
     Add-Violation 'UAvidScriptWorldSubsystem must derive active state from its RuntimeSession snapshot'
+}
+
+foreach ($RuntimeServicePath in @(
+    'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeScheduler.h',
+    'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeScheduler.cpp',
+    'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeEventRouter.h',
+    'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeEventRouter.cpp'
+)) {
+    [void](Read-RequiredFile $RuntimeServicePath)
+}
+
+$RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
+if ($RuntimeSessionSource -match 'LiveRuntime->(Tick|DispatchEvent)\s*\(') {
+    Add-Violation 'FAvidScriptRuntimeSession must route Tick and Event through Scheduler/EventRouter'
+}
+if (-not $RuntimeSessionSource.Contains('Scheduler->Tick(') -or
+    -not $RuntimeSessionSource.Contains('EventRouter->Dispatch(')) {
+    Add-Violation 'FAvidScriptRuntimeSession is missing Scheduler/EventRouter routing'
 }
 
 foreach ($LegacyBindingPath in @(

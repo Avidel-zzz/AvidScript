@@ -219,6 +219,10 @@ Plugins/AvidScript/Docs
 - Phase 35 moved all WAMR APIs, native symbols, guest memory access, and global lease ownership into `AvidScriptVM` Private. Runtime must remain free of `WAMR`, `wasm_export.h`, `wasm_runtime_*`, and `AVIDSCRIPT_WITH_WAMR`; enforce this with `Build/CheckAvidScriptArchitecture.ps1`.
 - Phase 36 still needs to remove compatibility lifecycle booleans and make `FAvidScriptRuntimeSession` the unique owner. Do not add new gameplay callbacks directly to the Runtime façade during this migration.
 - 2026-07-12 P36.2 编译错误记录：`AvidScriptComponent.cpp` 与 `AvidScriptWorldSubsystem.cpp` 在匿名命名空间中使用了相同的 `CopySessionLoadResult` helper 名；UE unity build 合并两个 `.cpp` 后触发 C2084 重定义。Prevention：Runtime 模块匿名命名空间 helper 使用带所属文件语义的唯一名称（如 `CopyWorldSessionLoadResult`），新增 helper 后必须经过实际 unity 模块编译，不能只依赖单文件阅读。
+- 2026-07-12 P36.3 编辑错误记录：修改架构脚本时把包含 `$ComponentHeader` 的 PowerShell 源码锚点放进双引号字符串，变量被提前插值，短暂生成 `$ComponentHeader$ReloadTypesHeader` ParserError。Prevention：编辑 PowerShell 源码时，凡锚点或替换文本包含 `$`，必须使用单引号字面量或单引号 here-string；写后立即执行脚本语法/结果检查。
+- 2026-07-12 P36.3 IWYU 记录：拆分 reload types 后把 `AvidScriptWasmReload.cpp` 的首 include 改为 types 头，UBT 报 `Expected AvidScriptWasmReload.h to be first header included`，但仍完成链接。Prevention：UE `.cpp` 保持同名 public/private header 为首 include；细分类型通过同名 header 的 umbrella 间接引入，并把非致命 UBT diagnostics 也视为必须修复。
+- 2026-07-12 P36.3 生命周期设计错误记录：事务式 reload 初版在 candidate `BeginPlay` 成功后调用旧实例 `EndPlay`，旧脚本 cleanup 覆盖了 candidate 刚写入的 Actor 状态，完整回归 `SourceAdapterArtifactLifecycleSmoke` 失败。Prevention：UE `BeginPlay/EndPlay` 只对应真实 gameplay 生命周期；热重载成功时替换 owner 并直接卸载旧实例，不伪造 `EndPlay`。未来 cleanup/state migration 使用独立 reload callback/协议，并保留成功 reload 的 C# Timer/Actor 回归。
+- 2026-07-12 P36.3 测试编辑错误记录：修改 reload 最终位置期望值时全局替换 `FVector(200...)`，同时误改了 fixture 的旧 EndPlay 写入值；读回检查在编译前发现并恢复。Prevention：重复测试常量不得用无上下文全局替换，必须以测试名/邻近语句组成唯一锚点，并读回 fixture 与 assertion 两处。
 
 ## D Guest Toolchain Workflow
 
