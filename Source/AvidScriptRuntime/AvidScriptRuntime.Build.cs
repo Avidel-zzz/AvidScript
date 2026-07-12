@@ -11,6 +11,7 @@ public class AvidScriptRuntime : ModuleRules
 			{
 				"AvidScriptCore",
 				"AvidScriptBindings",
+				"AvidScriptVM",
 				"Core",
 				"CoreUObject",
 				"Engine"

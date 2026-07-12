@@ -79,8 +79,26 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptBindings' @(
     '#include\s+["<]AvidScriptWasm(Runtime|Reload|ModuleLoader)\.h'
 )
 
+$VmBuild = Read-RequiredFile 'Source/AvidScriptVM/AvidScriptVM.Build.cs'
+foreach ($RequiredDependency in @('AvidScriptCore', 'Core')) {
+    if (-not $VmBuild.Contains('"' + $RequiredDependency + '"')) {
+        Add-Violation "AvidScriptVM is missing required dependency $RequiredDependency"
+    }
+}
+foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {
+    if ($VmBuild.Contains('"' + $ForbiddenDependency + '"')) {
+        Add-Violation "AvidScriptVM must not depend on $ForbiddenDependency"
+    }
+}
+
+Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
+    'wasm_runtime_|wasm_export\.h',
+    '#include\s+["<](Engine|GameFramework|Components|UObject)/',
+    '\b(UObject|AActor|USceneComponent|FVector|FRotator|FTransform)\b'
+)
+
 $RuntimeBuild = Read-RequiredFile 'Source/AvidScriptRuntime/AvidScriptRuntime.Build.cs'
-foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings')) {
+foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings', 'AvidScriptVM')) {
     if (-not $RuntimeBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptRuntime is missing required dependency $RequiredDependency"
     }
@@ -106,7 +124,7 @@ if (-not [System.IO.File]::Exists($PluginDescriptorPath)) {
 else {
     $Descriptor = [System.IO.File]::ReadAllText($PluginDescriptorPath) | ConvertFrom-Json
     $ModuleNames = @($Descriptor.Modules | ForEach-Object { $_.Name })
-    foreach ($RequiredModule in @('AvidScriptCore', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {
+    foreach ($RequiredModule in @('AvidScriptCore', 'AvidScriptBindings', 'AvidScriptVM', 'AvidScriptRuntime', 'AvidScriptEditor')) {
         if ($ModuleNames -notcontains $RequiredModule) {
             Add-Violation "plugin descriptor is missing module $RequiredModule"
         }
@@ -124,4 +142,6 @@ if ($Violations.Count -gt 0) {
 Write-Host 'AvidScript architecture check passed.'
 Write-Host 'Core: Core-only dependency boundary.'
 Write-Host 'Bindings: UE typed APIs without WAMR dependency.'
-Write-Host 'Runtime: explicit Core + Bindings composition.'
+Write-Host 'VM: Core-only public contract without gameplay types.'
+Write-Host 'Runtime: explicit Core + Bindings + VM composition.'
+exit 0

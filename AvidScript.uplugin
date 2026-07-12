@@ -21,6 +21,11 @@
       "LoadingPhase": "Default"
     },
     {
+      "Name": "AvidScriptVM",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
+    {
       "Name": "AvidScriptRuntime",
       "Type": "Runtime",
       "LoadingPhase": "Default"
