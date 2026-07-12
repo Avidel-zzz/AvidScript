@@ -10,7 +10,9 @@ public sealed record FrontendSource(
 
 public sealed record FrontendSyntax(
     [property: JsonPropertyOrder(0)] string Kind,
-    [property: JsonPropertyOrder(1)] FrontendSpan Span);
+    [property: JsonPropertyOrder(1)] FrontendSpan Span,
+    [property: JsonPropertyOrder(2)] IReadOnlyList<FrontendAstNode> Preamble,
+    [property: JsonPropertyOrder(3)] IReadOnlyList<FrontendDeclaration> Declarations);
 
 public sealed record FrontendToken(
     [property: JsonPropertyOrder(0)] string Kind,

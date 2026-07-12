@@ -16,7 +16,8 @@ internal static class Program
             InvalidSourceReportsPreciseSpan();
             SerializationIsDeterministic();
             CliWritesDeterministicArtifactsAndExitCodes();
-            Console.WriteLine("AvidScript.CSharpFrontend.Tests: 4/4 passed");
+            AstContractTests.Run();
+            Console.WriteLine("AvidScript.CSharpFrontend.Tests: 7/7 passed");
             return 0;
         }
         catch (Exception exception)

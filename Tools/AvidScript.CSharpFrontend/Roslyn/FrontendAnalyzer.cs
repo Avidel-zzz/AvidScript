@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace AvidScript.CSharpFrontend;
@@ -31,21 +32,21 @@ public static class FrontendAnalyzer
             sourceText,
             ParseOptions,
             normalizedSourceId);
-        SyntaxNode root = tree.GetRoot();
+        CompilationUnitSyntax root = tree.GetCompilationUnitRoot();
 
         FrontendToken[] tokens = root.DescendantTokens(descendIntoTrivia: false)
             .Select(token => new FrontendToken(
                 token.Kind().ToString(),
                 token.Text,
                 token.ValueText,
-                CreateSpan(sourceText, token.Span)))
+                FrontendSpanFactory.Create(sourceText, token.Span)))
             .ToArray();
 
         FrontendTrivia[] trivia = root.DescendantTrivia(descendIntoTrivia: false)
             .Select(item => new FrontendTrivia(
                 item.Kind().ToString(),
                 item.ToFullString(),
-                CreateSpan(sourceText, item.Span)))
+                FrontendSpanFactory.Create(sourceText, item.Span)))
             .ToArray();
 
         FrontendDiagnostic[] diagnostics = tree.GetDiagnostics()
@@ -66,7 +67,13 @@ public static class FrontendAnalyzer
                 ComputeSha256(source),
                 source.Length),
             succeeded,
-            new FrontendSyntax(root.Kind().ToString(), CreateSpan(sourceText, root.FullSpan)),
+            new FrontendSyntax(
+                root.Kind().ToString(),
+                FrontendSpanFactory.Create(sourceText, root.FullSpan),
+                FrontendAstNodeMapper.MapMany(
+                    root.Externs.Cast<SyntaxNode?>().Concat(root.Usings).Concat(root.AttributeLists),
+                    sourceText),
+                FrontendDeclarationMapper.MapMembers(root.Members, sourceText)),
             tokens,
             trivia,
             diagnostics);
@@ -82,20 +89,7 @@ public static class FrontendAnalyzer
             diagnostic.Id,
             diagnostic.Severity.ToString().ToLowerInvariant(),
             diagnostic.GetMessage(CultureInfo.InvariantCulture),
-            CreateSpan(sourceText, span));
-    }
-
-    private static FrontendSpan CreateSpan(SourceText sourceText, TextSpan span)
-    {
-        LinePositionSpan lineSpan = sourceText.Lines.GetLinePositionSpan(span);
-        return new FrontendSpan(
-            span.Start,
-            span.Length,
-            span.End,
-            lineSpan.Start.Line,
-            lineSpan.Start.Character,
-            lineSpan.End.Line,
-            lineSpan.End.Character);
+            FrontendSpanFactory.Create(sourceText, span));
     }
 
     private static string ComputeSha256(string source)
