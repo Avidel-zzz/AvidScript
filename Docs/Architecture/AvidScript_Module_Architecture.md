@@ -1,7 +1,7 @@
 # AvidScript 模块架构
 
 日期：2026-07-12
-状态：Phase 34 基线已落地，VM 与 Session 边界继续迁移中
+状态：Phase 36 Runtime Session 架构已落地
 
 ## 1. 架构目标
 
@@ -53,12 +53,13 @@ Empty -> Loaded -> Starting -> Running -> Stopping -> Stopped
 | WAMR 全局 lease | VM backend service | 首个实例到最后实例 |
 | module / instance / exec env | VM instance | Load/Instantiate 到 Unload |
 | export cache | VM instance | ABI resolve 到 Unload |
-| UObject registry | Runtime session | session create 到 destroy |
-| Timer / event queue | Runtime scheduler | Running 到 Stop/Fault |
+| UObject registry | UE Integration（Component） | Component BeginPlay 到 EndPlay |
+| Timer storage | Runtime instance | Load 到 Unload |
+| Tick/Event route | Session Scheduler/EventRouter | active attach 到 detach |
 | UE delegates | Integration adapter | Running 到 Stop/Fault |
 | reload candidate | Reload transaction | prepare 到 commit/rollback |
 
-Phase 34 已建立显式状态机，但旧 Runtime 内仍保留部分兼容 bool。Phase 36 将由 `FAvidScriptRuntimeSession` 统一所有权后删除重复状态来源。
+Phase 36 已由 `FAvidScriptRuntimeSession` 统一 active runtime、manifest、host context、reload transaction 与路由状态。Component/WorldSubsystem 不再持有 direct Runtime，也不再保存兼容 active bool；观测 stats 不参与状态决策。
 
 ## 3. Binding 设计
 
@@ -77,10 +78,10 @@ Phase 34 已建立显式状态机，但旧 Runtime 内仍保留部分兼容 bool
 Reload 使用 candidate transaction：
 
 ```text
-Load candidate -> Validate ABI -> Start candidate -> Atomic swap -> Stop/Unload old
+Load candidate -> Validate ABI -> Start candidate -> Atomic swap -> Unload old
 ```
 
-candidate 任一步失败均回滚，live session 保持不变。UE 的 BeginPlay、Tick、EndPlay、Timer、Input 和 Delegate 只在 Runtime Integration 层转换为稳定调用，VM backend 不直接订阅 UE delegate。
+candidate 在 Load、Validate 或 Start 阶段失败时，active session 保持不变。热重载不是 UE EndPlay：成功替换直接卸载旧实例，`avid_on_end_play` 只由真实 Component/World EndPlay 或显式 Stop 触发；后续 reload cleanup/state migration 使用独立协议。UE 的 BeginPlay、Tick、EndPlay、Timer、Input 和 Delegate 只在 Runtime Integration 层转换为稳定调用，VM backend 不直接订阅 UE delegate。
 
 ## 5. 性能原则
 
@@ -101,8 +102,8 @@ candidate 任一步失败均回滚，live session 保持不变。UE 的 BeginPla
 | --- | --- | --- |
 | Phase 34 | Core、Bindings、状态机、反向索引、模块墙 | 已完成 |
 | Phase 35 | VM backend、WAMR 私有化、export cache | 已完成 |
-| Phase 36 | Runtime Session、Reload、Scheduler 统一所有权 | 下一阶段 |
+| Phase 36 | Runtime Session、Reload、Scheduler/EventRouter 统一所有权 | 已完成 |
 | Phase 37 | 热路径结果、Timer、批量 Binding、性能报告 | 待实施 |
 | Phase 38 | typed overlap、Hit、Input、Delegate | 待实施 |
 
-在 Phase 36 完成前，不继续向 Runtime façade 添加 gameplay 功能；新功能必须进入 Session、Integration 或 Event Router 边界。
+Phase 37 将优化成功路径结果、Timer 数据结构与批量 Binding；新的 gameplay 入口继续进入 Integration/EventRouter，不能回流 VM backend 或绕过 Session。
