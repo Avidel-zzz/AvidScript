@@ -269,6 +269,9 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample declares typed begin overlap callback"), SourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Sample declares typed end overlap callback"), SourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Sample declares typed hit callback"), SourceText.Contains(TEXT("public static void OnHit(AActor otherActor, FVector normalImpulse)")));
+	TestTrue(TEXT("Sample declares typed input callback"), SourceText.Contains(TEXT("public static void OnInput(InputEvent input)")));
+	TestTrue(TEXT("Sample declares InputEvent value type"), SourceText.Contains(TEXT("readonly struct InputEvent")));
+	TestTrue(TEXT("Sample exposes all InputEvent fields"), SourceText.Contains(TEXT("readonly int ActionId")) && SourceText.Contains(TEXT("readonly int TriggerEvent")) && SourceText.Contains(TEXT("readonly FVector Value")));
 	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
 	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
@@ -490,6 +493,8 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter manifest requires gameplay event export"), ManifestJson.Contains(TEXT("avid_on_event")));
 	TestTrue(TEXT("C# source adapter manifest requires typed gameplay event export"), ManifestJson.Contains(TEXT("avid_on_gameplay_event")));
 	TestTrue(TEXT("C# source adapter manifest declares generated collision callbacks"), ManifestJson.Contains(TEXT("OnBeginOverlap")) && ManifestJson.Contains(TEXT("OnEndOverlap")) && ManifestJson.Contains(TEXT("OnHit")));
+	TestTrue(TEXT("C# source adapter manifest declares generated input callback"), ManifestJson.Contains(TEXT("OnInput")) && ManifestJson.Contains(TEXT("InputEvent")));
+	TestTrue(TEXT("C# source adapter manifest declares InputEvent fields"), ManifestJson.Contains(TEXT("input.ActionId")) && ManifestJson.Contains(TEXT("input.TriggerEvent")) && ManifestJson.Contains(TEXT("input.Value")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.SetTimer"), ManifestJson.Contains(TEXT("UE.SetTimer(float delaySeconds, int callbackId)")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
@@ -723,6 +728,15 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# hit dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# hit forwards normal impulse"), OtherActor->GetActorLocation().Equals(FVector(11.0, 32.0, 38.0), 0.01));
 	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 4);
+
+	TypedEvent = FAvidScriptGameplayEvent();
+	TypedEvent.Type = EAvidScriptGameplayEventType::Input;
+	TypedEvent.PrimaryId = 5;
+	TypedEvent.SecondaryId = 2;
+	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
+	TestTrue(TEXT("C# input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# InputEvent maps ActionId TriggerEvent and Value"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
+	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 5);
 
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
 	ReloadedManifest.ModuleId = TEXT("csharp_timer_successful_reload");

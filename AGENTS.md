@@ -306,3 +306,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-13 P38.5 测试设计错误：Editor 兼容性测试用精确 JSON 文本匹配断言空数组，因 ConvertTo-Json 的缩进换行产生假失败；读回同时发现空 static_float_fields 被序列化为 [null]。Prevention：JSON 语义必须通过 FJsonObject/FJsonValue 结构化断言，生成器中的可空流水线在序列化前过滤 null，并覆盖空集合契约。
 - 2026-07-13 P38.5 集合返回错误：Get-CSharpStaticFloatFields 使用 return ,$Fields，调用方再次数组化后形成嵌套集合；零字段被误计为一个 global，并产生 [null] 元数据。Prevention：供 @(... ) 调用的集合 helper 直接输出元素，不用一元逗号保护集合；至少覆盖零元素与正常非空元素的结构化契约。
 - 2026-07-13 P38.5 文档命令封装错误复发：Markdown 反引号直接出现在 functions.exec 的 JavaScript template literal 中，外层解析在写盘前失败。Prevention：fallback 文档内容禁止包含字面反引号，统一使用占位符并在 PowerShell 内以 [char]96 还原；优先继续尝试 apply_patch。
+- 2026-07-13 P38.6 生成器命令封装错误复发：为批量构造 PowerShell 源码锚点而在字符串中使用反引号转义美元符号，functions.exec 外层 JavaScript 在执行前失败。Prevention：源码中的变量调用点逐个使用单引号 here-string 替换，禁止用可插值字符串数组生成锚点。

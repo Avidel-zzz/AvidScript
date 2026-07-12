@@ -175,6 +175,20 @@ bool UAvidScriptComponent::DispatchScriptEvent(int32 EventId, float Value)
 	CopyComponentEventStats(Result, RuntimeStats);
 	return true;
 }
+
+bool UAvidScriptComponent::DispatchScriptInput(int32 ActionId, int32 TriggerEvent, FVector Value)
+{
+	FAvidScriptGameplayEvent Event;
+	Event.Type = EAvidScriptGameplayEventType::Input;
+	Event.PrimaryId = ActionId;
+	Event.SecondaryId = TriggerEvent;
+	Event.VectorValue = FVector3f(
+		static_cast<float>(Value.X),
+		static_cast<float>(Value.Y),
+		static_cast<float>(Value.Z));
+	return DispatchGameplayEvent(Event);
+}
+
 void UAvidScriptComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -360,6 +374,40 @@ void UAvidScriptComponent::UnbindOwnerGameplayDelegates()
 	RuntimeStats.bCollisionDelegatesBound = false;
 }
 
+bool UAvidScriptComponent::DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event)
+{
+	if (!RuntimeSession.IsValid() ||
+		RuntimeSession->GetSnapshot().LifecycleState != EAvidScriptLifecycleState::Running)
+	{
+		RuntimeStats.LastErrorMessage = TEXT("AvidScript typed gameplay event rejected because the component session is not running.");
+		return false;
+	}
+
+	FAvidScriptWasmSmokeResult Result;
+	if (!RuntimeSession->DispatchGameplayEvent(Event, Result))
+	{
+		RecordRuntimeFailure(Result);
+		if (Result.ErrorCategory != TEXT("invalid_argument"))
+		{
+			ReleaseRuntime();
+			SetComponentTickEnabled(false);
+		}
+		return false;
+	}
+
+	RuntimeStats.bRuntimeLoaded = RuntimeSession->GetSnapshot().bHasActiveRuntime;
+	RuntimeStats.Metrics = Result.Metrics;
+	RuntimeStats.ModuleId = Result.ModuleId;
+	CopyComponentEventStats(Result, RuntimeStats);
+	if (Event.Type == EAvidScriptGameplayEventType::Input)
+	{
+		RuntimeStats.LastInputActionId = Event.PrimaryId;
+		RuntimeStats.LastInputTriggerEvent = Event.SecondaryId;
+		RuntimeStats.LastInputValue = FVector(Event.VectorValue);
+	}
+	return true;
+}
+
 bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
 	EAvidScriptGameplayEventType EventType,
 	AActor* OtherActor,
@@ -392,23 +440,7 @@ bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
 		static_cast<float>(VectorValue.Y),
 		static_cast<float>(VectorValue.Z));
 
-	FAvidScriptWasmSmokeResult Result;
-	if (!RuntimeSession->DispatchGameplayEvent(Event, Result))
-	{
-		RecordRuntimeFailure(Result);
-		if (Result.ErrorCategory != TEXT("invalid_argument"))
-		{
-			ReleaseRuntime();
-			SetComponentTickEnabled(false);
-		}
-		return false;
-	}
-
-	RuntimeStats.bRuntimeLoaded = RuntimeSession->GetSnapshot().bHasActiveRuntime;
-	RuntimeStats.Metrics = Result.Metrics;
-	RuntimeStats.ModuleId = Result.ModuleId;
-	CopyComponentEventStats(Result, RuntimeStats);
-	return true;
+	return DispatchGameplayEvent(Event);
 }
 
 void UAvidScriptComponent::HandleOwnerBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)

@@ -24,6 +24,9 @@ struct FAvidScriptComponentRuntimeStats
 	int32 EventCallbackCount = 0;
 	int32 LastEventId = 0;
 	float LastEventValue = 0.0f;
+	int32 LastInputActionId = 0;
+	int32 LastInputTriggerEvent = 0;
+	FVector LastInputValue = FVector::ZeroVector;
 	FAvidScriptObjectHandle OwnerHandle;
 	FString OwnerObjectPath;
 	FString ScriptManifestPath;
@@ -48,6 +51,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Events")
 	bool DispatchScriptEvent(int32 EventId, float Value);
 
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Input")
+	bool DispatchScriptInput(int32 ActionId, int32 TriggerEvent, FVector Value);
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(
@@ -60,6 +66,7 @@ private:
 	void ReleaseOwner();
 	void BindOwnerGameplayDelegates();
 	void UnbindOwnerGameplayDelegates();
+	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event);
 	bool DispatchOwnerGameplayEvent(
 		EAvidScriptGameplayEventType EventType,
 		AActor* OtherActor,

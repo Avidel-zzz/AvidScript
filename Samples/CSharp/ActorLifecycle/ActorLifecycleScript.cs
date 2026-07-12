@@ -60,6 +60,11 @@ public static class ActorLifecycleScript
         otherActor.AddActorWorldOffset(normalImpulse);
     }
 
+    public static void OnInput(InputEvent input)
+    {
+        UE.Self.SetActorLocation(input.Value + new FVector(input.ActionId, input.TriggerEvent, 0.0f));
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
@@ -109,6 +114,20 @@ public readonly struct FRotator
     public static FRotator operator +(FRotator left, FRotator right)
     {
         return new FRotator(left.Pitch + right.Pitch, left.Yaw + right.Yaw, left.Roll + right.Roll);
+    }
+}
+
+public readonly struct InputEvent
+{
+    public readonly int ActionId;
+    public readonly int TriggerEvent;
+    public readonly FVector Value;
+
+    internal InputEvent(int actionId, int triggerEvent, FVector value)
+    {
+        ActionId = actionId;
+        TriggerEvent = triggerEvent;
+        Value = value;
     }
 }
 

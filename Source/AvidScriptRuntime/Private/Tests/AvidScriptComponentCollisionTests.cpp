@@ -237,4 +237,38 @@ bool FAvidScriptComponentCollisionTrapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentInputTrapTest,
+	"AvidScript.Component.Input.TrapUnloads",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentInputTrapTest::RunTest(const FString& Parameters)
+{
+	FString ManifestPath;
+	if (!TestTrue(TEXT("input trap fixture writes"), WriteCollisionFixture(true, ManifestPath)))
+	{
+		return true;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateCollisionWorld(World))
+	{
+		AddError(TEXT("Failed to create input trap world."));
+		return true;
+	}
+	TestTrue(TEXT("input trap world begins"), BeginCollisionWorld(World));
+	AActor* Owner = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	UAvidScriptComponent* Component = Owner != nullptr ? AddCollisionComponent(Owner, ManifestPath) : nullptr;
+	TestNotNull(TEXT("input trap component attaches"), Component);
+	if (Component != nullptr)
+	{
+		TestFalse(TEXT("input guest trap fails closed"), Component->DispatchScriptInput(1, 2, FVector(3.0, 4.0, 5.0)));
+		TestFalse(TEXT("input trap unloads the component session"), Component->GetRuntimeStats().bRuntimeLoaded);
+		TestFalse(TEXT("input trap unbinds gameplay delegates"), Component->GetRuntimeStats().bCollisionDelegatesBound);
+		TestTrue(TEXT("input teardown preserves the guest trap"), Component->GetRuntimeStats().LastErrorMessage.Contains(TEXT("category=trap")));
+	}
+	DestroyCollisionWorld(World);
+	return true;
+}
+
 #endif

@@ -391,16 +391,26 @@ function Find-CSharpStaticFloatField {
 function Convert-CSharpFloatExpression {
     param(
         [Parameter(Mandatory = $true)][string]$Expression,
-        [object[]]$Fields = @()
+        [object[]]$Fields = @(),
+        [string]$CallbackInputParameterName = ''
     )
 
     $Trimmed = $Expression.Trim()
+    if (-not [string]::IsNullOrWhiteSpace($CallbackInputParameterName)) {
+        $InputMemberPattern = '^' + [regex]::Escape($CallbackInputParameterName) + '\s*\.\s*(?<member>ActionId|TriggerEvent)$'
+        $InputMemberMatch = [regex]::Match($Trimmed, $InputMemberPattern)
+        if ($InputMemberMatch.Success) {
+            $Kind = if ($InputMemberMatch.Groups['member'].Value -eq 'ActionId') { 'gameplay_primary_id' } else { 'gameplay_secondary_id' }
+            return [PSCustomObject]@{ Kind = $Kind; Value = [single]0 }
+        }
+    }
+
     $AddMatch = [regex]::Match($Trimmed, '^(?<left>.+?)\s*\+\s*(?<right>.+)$')
     if ($AddMatch.Success) {
         return [PSCustomObject]@{
             Kind = 'add'
-            Left = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['left'].Value -Fields $Fields
-            Right = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['right'].Value -Fields $Fields
+            Left = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['left'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
+            Right = Convert-CSharpFloatExpression -Expression $AddMatch.Groups['right'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
         }
     }
 
@@ -408,8 +418,8 @@ function Convert-CSharpFloatExpression {
     if ($MultiplyMatch.Success) {
         return [PSCustomObject]@{
             Kind = 'mul'
-            Left = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['left'].Value -Fields $Fields
-            Right = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['right'].Value -Fields $Fields
+            Left = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['left'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
+            Right = Convert-CSharpFloatExpression -Expression $MultiplyMatch.Groups['right'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
         }
     }
 
@@ -467,17 +477,18 @@ function Convert-CSharpValueExpression {
         [Parameter(Mandatory = $true)][ValidateSet('FVector', 'FRotator')][string]$ValueType,
         [object[]]$Fields = @(),
         [object[]]$ValueLocals = @(),
-        [string]$CallbackVectorParameterName = ''
+        [string]$CallbackVectorParameterName = '',
+        [string]$CallbackInputParameterName = ''
     )
 
     $Trimmed = $Expression.Trim()
-    $AddMatch = [regex]::Match($Trimmed, '^(?<left>[A-Za-z_][A-Za-z0-9_]*)\s*\+\s*(?<right>.+)$')
+    $AddMatch = [regex]::Match($Trimmed, '^(?<left>[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*Value)?)\s*\+\s*(?<right>.+)$')
     if ($AddMatch.Success) {
         return [PSCustomObject]@{
             Kind = 'value_add'
             ValueType = $ValueType
-            Left = Convert-CSharpValueExpression -Expression $AddMatch.Groups['left'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
-            Right = Convert-CSharpValueExpression -Expression $AddMatch.Groups['right'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+            Left = Convert-CSharpValueExpression -Expression $AddMatch.Groups['left'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
+            Right = Convert-CSharpValueExpression -Expression $AddMatch.Groups['right'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
         }
     }
 
@@ -492,9 +503,9 @@ function Convert-CSharpValueExpression {
         return [PSCustomObject]@{
             Kind = 'value_construct'
             ValueType = $ValueType
-            A = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['a'].Value -Fields $Fields
-            B = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['b'].Value -Fields $Fields
-            C = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['c'].Value -Fields $Fields
+            A = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['a'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
+            B = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['b'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
+            C = Convert-CSharpFloatExpression -Expression $ConstructorMatch.Groups['c'].Value -Fields $Fields -CallbackInputParameterName $CallbackInputParameterName
         }
     }
 
@@ -513,11 +524,11 @@ function Convert-CSharpValueExpression {
         return [PSCustomObject]@{ Kind = 'get_root_component_world_location'; ValueType = $ValueType }
     }
 
-    if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
-        if ($ValueType -eq 'FVector' -and -not [string]::IsNullOrWhiteSpace($CallbackVectorParameterName) -and $Trimmed -eq $CallbackVectorParameterName) {
-            return [PSCustomObject]@{ Kind = 'callback_vector'; ValueType = $ValueType }
-        }
+    if ($ValueType -eq 'FVector' -and -not [string]::IsNullOrWhiteSpace($CallbackVectorParameterName) -and $Trimmed -eq $CallbackVectorParameterName) {
+        return [PSCustomObject]@{ Kind = 'callback_vector'; ValueType = $ValueType }
+    }
 
+    if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
         $Local = Find-CSharpValueLocal -ValueLocals $ValueLocals -Name $Trimmed
         if ($null -ne $Local) {
             if ($Local.ValueType -ne $ValueType) {
@@ -538,7 +549,8 @@ function Get-CSharpLifecycleStatements {
         [object[]]$Fields = @(),
         [bool]$AllowEmpty = $false,
         [string]$CallbackActorParameterName = '',
-        [string]$CallbackVectorParameterName = ''
+        [string]$CallbackVectorParameterName = '',
+        [string]$CallbackInputParameterName = ''
     )
 
     if ($MethodName -ne 'OnEvent' -and [regex]::IsMatch($MethodBody, '\bvalue\b')) {
@@ -561,7 +573,7 @@ function Get-CSharpLifecycleStatements {
                 throw "Duplicate C# value local '$LocalName' in '$MethodName'."
             }
 
-            $Expression = Convert-CSharpValueExpression -Expression $ValueDeclarationMatch.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+            $Expression = Convert-CSharpValueExpression -Expression $ValueDeclarationMatch.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
             $Local = [PSCustomObject]@{ Name = $LocalName; ValueType = $ValueType; Ordinal = $ValueLocals.Count }
             $ValueLocals += $Local
             $Statements += [PSCustomObject]@{
@@ -599,7 +611,7 @@ function Get-CSharpLifecycleStatements {
                     Kind = $Kind
                     ValueType = $ValueType
                     UseGameplayEventHandle = $true
-                    ValueExpression = Convert-CSharpValueExpression -Expression $CallbackActorCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+                    ValueExpression = Convert-CSharpValueExpression -Expression $CallbackActorCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
                 }
                 continue
             }
@@ -619,7 +631,7 @@ function Get-CSharpLifecycleStatements {
                 Kind = $Kind
                 ValueType = $ValueType
                 UseGameplayEventHandle = $false
-                ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+                ValueExpression = Convert-CSharpValueExpression -Expression $TypedValueCall.Groups['expr'].Value -ValueType $ValueType -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
             }
             continue
         }
@@ -629,7 +641,7 @@ function Get-CSharpLifecycleStatements {
             $Statements += [PSCustomObject]@{
                 Kind = 'set_root_component_world_location'
                 ValueType = 'FVector'
-                ValueExpression = Convert-CSharpValueExpression -Expression $SceneComponentCall.Groups['expr'].Value -ValueType 'FVector' -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName
+                ValueExpression = Convert-CSharpValueExpression -Expression $SceneComponentCall.Groups['expr'].Value -ValueType 'FVector' -Fields $Fields -ValueLocals $ValueLocals -CallbackVectorParameterName $CallbackVectorParameterName -CallbackInputParameterName $CallbackInputParameterName
             }
             continue
         }
@@ -721,6 +733,14 @@ function Add-CSharpFloatExpressionCode {
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Left -AllowDeltaSeconds $AllowDeltaSeconds
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Right -AllowDeltaSeconds $AllowDeltaSeconds
         Add-WasmByte -Bytes $Body -Value 0x94
+        return
+    }
+
+    if ($Expression.Kind -eq 'gameplay_primary_id' -or $Expression.Kind -eq 'gameplay_secondary_id') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        $ParameterIndex = if ($Expression.Kind -eq 'gameplay_primary_id') { 1 } else { 2 }
+        Add-WasmU32Leb -Bytes $Body -Value ([uint32]$ParameterIndex)
+        Add-WasmByte -Bytes $Body -Value 0xb2
         return
     }
 
@@ -1271,9 +1291,10 @@ function Invoke-CSharpSourceAdapter {
         $BeginPlayBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'BeginPlay'
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
         $GameplayCallbackSpecs = @(
-            [PSCustomObject]@{ MethodName = 'OnBeginOverlap'; EventType = 1; ActorParameterName = 'otherActor'; VectorParameterName = 'location' },
-            [PSCustomObject]@{ MethodName = 'OnEndOverlap'; EventType = 2; ActorParameterName = 'otherActor'; VectorParameterName = 'location' },
-            [PSCustomObject]@{ MethodName = 'OnHit'; EventType = 3; ActorParameterName = 'otherActor'; VectorParameterName = 'normalImpulse' }
+            [PSCustomObject]@{ MethodName = 'OnBeginOverlap'; EventType = 1; ActorParameterName = 'otherActor'; VectorParameterName = 'location'; InputParameterName = '' },
+            [PSCustomObject]@{ MethodName = 'OnEndOverlap'; EventType = 2; ActorParameterName = 'otherActor'; VectorParameterName = 'location'; InputParameterName = '' },
+            [PSCustomObject]@{ MethodName = 'OnHit'; EventType = 3; ActorParameterName = 'otherActor'; VectorParameterName = 'normalImpulse'; InputParameterName = '' },
+            [PSCustomObject]@{ MethodName = 'OnInput'; EventType = 4; ActorParameterName = ''; VectorParameterName = 'input.Value'; InputParameterName = 'input' }
         )
         $EndPlayBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'EndPlay'
         $TimerBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnTimer'
@@ -1301,7 +1322,7 @@ function Invoke-CSharpSourceAdapter {
                 continue
             }
 
-            $CallbackStatements = @(Get-CSharpLifecycleStatements -MethodBody $CallbackBody -MethodName $Spec.MethodName -Fields $Fields -AllowEmpty $true -CallbackActorParameterName $Spec.ActorParameterName -CallbackVectorParameterName $Spec.VectorParameterName)
+            $CallbackStatements = @(Get-CSharpLifecycleStatements -MethodBody $CallbackBody -MethodName $Spec.MethodName -Fields $Fields -AllowEmpty $true -CallbackActorParameterName $Spec.ActorParameterName -CallbackVectorParameterName $Spec.VectorParameterName -CallbackInputParameterName $Spec.InputParameterName)
             $GameplayCallbacks += [PSCustomObject]@{
                 MethodName = $Spec.MethodName
                 EventType = $Spec.EventType
@@ -1401,11 +1422,12 @@ function Invoke-CSharpSourceAdapter {
             }
             adapter_contract = [ordered]@{
                 self_binding = 'owner_handle_imports'
-                supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'USceneComponent', 'UE.Self')
+                supported_types = @('FVector', 'FRotator', 'FTransform', 'InputEvent', 'AActor', 'USceneComponent', 'UE.Self')
                 supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)', 'UE.SetTimer(float delaySeconds, int callbackId)', 'UE.CancelTimer(int timerHandle)')
                 supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()', 'FVector local = UE.Self.GetRootComponent().GetWorldLocation()')
                 generated_gameplay_callbacks = @($GameplayCallbacks | ForEach-Object { $_.MethodName })
-                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer', 'Event', 'BeginOverlap', 'EndOverlap', 'Hit')
+                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer', 'Event', 'BeginOverlap', 'EndOverlap', 'Hit', 'Input')
+                supported_input_fields = @('input.ActionId', 'input.TriggerEvent', 'input.Value')
                 supported_event_expressions = @('numeric literal', 'value', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
                 static_float_fields = @($Fields | Where-Object { $null -ne $_ } | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
@@ -1417,7 +1439,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v12 source subset with generated generic gameplay-event dispatch, typed AActor/FVector collision callbacks, lifecycle and Timer events, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v12 source subset with generated generic gameplay-event dispatch, typed AActor/FVector collision callbacks, InputEvent field mapping, lifecycle and Timer events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{

@@ -135,6 +135,13 @@ bool FAvidScriptComponentOwnerHandleLifecycleSmokeTest::RunTest(const FString& P
 		TestTrue(TEXT("DispatchScriptEvent is BlueprintCallable"), DispatchEventFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
 	}
 
+	UFunction* DispatchInputFunction = Component->FindFunction(GET_FUNCTION_NAME_CHECKED(UAvidScriptComponent, DispatchScriptInput));
+	TestNotNull(TEXT("DispatchScriptInput is reflected for Blueprint"), DispatchInputFunction);
+	if (DispatchInputFunction != nullptr)
+	{
+		TestTrue(TEXT("DispatchScriptInput is BlueprintCallable"), DispatchInputFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
+	}
+
 	const FAvidScriptComponentRuntimeStats StatsAfterBeginPlay = Component->GetRuntimeStats();
 	TestTrue(TEXT("Component registers owner on BeginPlay"), StatsAfterBeginPlay.bOwnerRegistered);
 	TestTrue(TEXT("Component exposes a valid owner handle"), StatsAfterBeginPlay.OwnerHandle.IsValid());
@@ -287,7 +294,19 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestFalse(TEXT("Component rejects an invalid gameplay event id"), Component->DispatchScriptEvent(-1, 1.0f));
 	TestTrue(TEXT("Invalid host event does not unload a healthy runtime"), Component->GetRuntimeStats().bRuntimeLoaded);
 
+	TestTrue(TEXT("Component dispatches typed input"), Component->DispatchScriptInput(5, 2, FVector(1.0, 2.0, 3.0)));
+	const FAvidScriptComponentRuntimeStats StatsAfterInput = Component->GetRuntimeStats();
+	TestTrue(TEXT("C# input maps ids and vector"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
+	TestEqual(TEXT("Input uses shared event accounting"), StatsAfterInput.EventCallbackCount, 2);
+	TestEqual(TEXT("Component records Input event type"), StatsAfterInput.LastEventId, static_cast<int32>(EAvidScriptGameplayEventType::Input));
+	TestEqual(TEXT("Component records input action id"), StatsAfterInput.LastInputActionId, 5);
+	TestEqual(TEXT("Component records input trigger event"), StatsAfterInput.LastInputTriggerEvent, 2);
+	TestTrue(TEXT("Component records input vector"), StatsAfterInput.LastInputValue.Equals(FVector(1.0, 2.0, 3.0), 0.01));
+	TestFalse(TEXT("Component rejects a negative input action id"), Component->DispatchScriptInput(-1, 2, FVector::ZeroVector));
+	TestTrue(TEXT("Invalid input does not unload a healthy runtime"), Component->GetRuntimeStats().bRuntimeLoaded);
+
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
+	TestFalse(TEXT("Input cannot dispatch after EndPlay"), Component->DispatchScriptInput(5, 2, FVector::ZeroVector));
 	TestTrue(TEXT("C# component EndPlay moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
 	TestTrue(TEXT("C# component EndPlay resets rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 	TestTrue(TEXT("C# component EndPlay resets scale"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.01));
