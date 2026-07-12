@@ -12,6 +12,20 @@ void CopyRuntimeResultToStats(const FAvidScriptWasmSmokeResult& Result, FAvidScr
 	Stats.TickCallCount = Result.TickCallCount;
 	Stats.Metrics = Result.Metrics;
 }
+
+void CopyWorldSessionLoadResult(
+	const FAvidScriptWasmReloadResult& ReloadResult,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = ReloadResult.RuntimeResult;
+	if (!ReloadResult.bSucceeded)
+	{
+		OutResult.ExportName = ReloadResult.ExportName;
+		OutResult.ErrorCategory = ReloadResult.ErrorCategory;
+		OutResult.NextAction = ReloadResult.NextAction;
+		OutResult.ErrorMessage = ReloadResult.ErrorMessage;
+	}
+}
 } // namespace
 
 bool UAvidScriptWorldSubsystem::DoesSupportWorldType(EWorldType::Type WorldType) const
@@ -24,19 +38,23 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	RuntimeStats = FAvidScriptWorldRuntimeStats();
-	Runtime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
+	RuntimeSession = MakeUnique<FAvidScriptRuntimeSession>();
 
-	FAvidScriptWasmSmokeResult Result;
-	if (!Runtime->LoadEmbeddedSmokeModule(Result) || !Runtime->BeginPlay(Result))
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!RuntimeSession->LoadEmbeddedSmoke(ReloadResult))
 	{
+		FAvidScriptWasmSmokeResult Result;
+		CopyWorldSessionLoadResult(ReloadResult, Result);
 		RecordFailure(Result);
 		ReleaseRuntime();
 		return;
 	}
 
-	bWorldPlayActive = true;
-	RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
+	const FAvidScriptWasmSmokeResult& Result = ReloadResult.RuntimeResult;
+	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
+	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 	CopyRuntimeResultToStats(Result, RuntimeStats);
+	RuntimeStats.TickCallCount = Snapshot.TickCallCount;
 
 	UE_LOG(
 		LogAvidScriptWorldSubsystem,
@@ -54,7 +72,7 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 {
 	FAvidScriptWasmSmokeResult UnloadResult;
-	const bool bHadRuntime = bWorldPlayActive || Runtime.IsValid();
+	const bool bHadRuntime = RuntimeSession.IsValid() && RuntimeSession->GetSnapshot().bHasActiveRuntime;
 	ReleaseRuntime(&UnloadResult);
 	RuntimeStats.bEndPlayCalled = true;
 
@@ -73,14 +91,17 @@ void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 
 void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 {
-	if (bWorldPlayActive && Runtime.IsValid())
+	if (RuntimeSession.IsValid() &&
+		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
 	{
 		FAvidScriptWasmSmokeResult Result;
 		const int32 PreviousTickCallCount = RuntimeStats.TickCallCount;
-		if (Runtime->Tick(DeltaTime, Result))
+		if (RuntimeSession->Tick(DeltaTime, Result))
 		{
-			RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
+			const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
+			RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 			CopyRuntimeResultToStats(Result, RuntimeStats);
+			RuntimeStats.TickCallCount = Snapshot.TickCallCount;
 
 			if (PreviousTickCallCount == 0 && RuntimeStats.TickCallCount > 0)
 			{
@@ -106,7 +127,8 @@ void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 
 bool UAvidScriptWorldSubsystem::IsTickable() const
 {
-	return bWorldPlayActive && Runtime.IsValid() && Runtime->IsLoaded();
+	return RuntimeSession.IsValid() &&
+		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running;
 }
 
 TStatId UAvidScriptWorldSubsystem::GetStatId() const
@@ -130,10 +152,13 @@ void UAvidScriptWorldSubsystem::Deinitialize()
 
 void UAvidScriptWorldSubsystem::RecordFailure(const FAvidScriptWasmSmokeResult& Result)
 {
+	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
+		? RuntimeSession->GetSnapshot()
+		: FAvidScriptRuntimeSessionSnapshot();
 	RuntimeStats.LastErrorMessage = Result.ErrorMessage;
-	RuntimeStats.bRuntimeLoaded = Runtime.IsValid() && Runtime->IsLoaded();
+	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 	CopyRuntimeResultToStats(Result, RuntimeStats);
-	RuntimeStats.TickCallCount = Runtime.IsValid() ? Runtime->GetTickCallCount() : Result.TickCallCount;
+	RuntimeStats.TickCallCount = FMath::Max(Snapshot.TickCallCount, Result.TickCallCount);
 
 	UE_LOG(LogAvidScriptWorldSubsystem, Warning, TEXT("%s"), *Result.ErrorMessage);
 }
@@ -143,10 +168,13 @@ void UAvidScriptWorldSubsystem::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUn
 	FAvidScriptWasmSmokeResult LocalUnloadResult;
 	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
 
-	if (Runtime.IsValid())
+	if (RuntimeSession.IsValid())
 	{
-		Runtime->Unload(UnloadResult);
-		Runtime.Reset();
+		if (!RuntimeSession->StopAndUnload(UnloadResult))
+		{
+			RecordFailure(UnloadResult);
+		}
+		RuntimeSession.Reset();
 	}
 	else
 	{
@@ -155,6 +183,5 @@ void UAvidScriptWorldSubsystem::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUn
 
 	RuntimeStats.Metrics = UnloadResult.Metrics;
 	RuntimeStats.TickCallCount = FMath::Max(RuntimeStats.TickCallCount, UnloadResult.TickCallCount);
-	bWorldPlayActive = false;
 	RuntimeStats.bRuntimeLoaded = false;
 }

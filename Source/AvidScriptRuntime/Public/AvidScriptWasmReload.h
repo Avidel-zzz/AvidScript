@@ -60,10 +60,24 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult
 	FAvidScriptWasmSmokeResult RuntimeResult;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadSession
+struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
+{
+	EAvidScriptLifecycleState LifecycleState = EAvidScriptLifecycleState::Empty;
+	bool bHasActiveRuntime = false;
+	FString ModuleId;
+	int32 TickCallCount = 0;
+	int32 PendingTimerCount = 0;
+	int32 TimerCallbackCount = 0;
+	int32 EventCallbackCount = 0;
+	int32 SuccessfulReloadCount = 0;
+	int32 RejectedReloadCount = 0;
+};
+
+class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSession
 {
 public:
-	~FAvidScriptWasmReloadSession();
+	~FAvidScriptRuntimeSession();
+	bool LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult);
 
 	bool LoadInitialModule(
 		const uint8* Bytecode,
@@ -77,6 +91,9 @@ public:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		FAvidScriptWasmReloadResult& OutResult);
 
+	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool StopAndUnload(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEventLive(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
@@ -90,6 +107,7 @@ public:
 	int32 GetLivePendingTimerCount() const;
 	int32 GetLiveTimerCallbackCount() const;
 	int32 GetLiveEventCallbackCount() const;
+	FAvidScriptRuntimeSessionSnapshot GetSnapshot() const;
 	int32 GetSuccessfulReloadCount() const { return SuccessfulReloadCount; }
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 
@@ -116,3 +134,5 @@ private:
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
 };
+
+using FAvidScriptWasmReloadSession = FAvidScriptRuntimeSession;

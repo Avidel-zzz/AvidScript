@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AvidScriptObjectRegistry.h"
-#include "AvidScriptWasmRuntime.h"
+#include "AvidScriptRuntimeSession.h"
 #include "Components/ActorComponent.h"
 #include "UObject/SoftObjectPath.h"
 
@@ -67,7 +67,6 @@ private:
 
 	FAvidScriptObjectRegistry ObjectRegistry;
 	FAvidScriptObjectHandle OwnerHandle;
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> Runtime;
+	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptComponentRuntimeStats RuntimeStats;
-	bool bPlayActive = false;
 };

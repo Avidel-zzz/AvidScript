@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AvidScriptWasmRuntime.h"
+#include "AvidScriptRuntimeSession.h"
 #include "Subsystems/WorldSubsystem.h"
 
 #include "AvidScriptWorldSubsystem.generated.h"
@@ -37,7 +37,6 @@ private:
 	void RecordFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
 
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> Runtime;
+	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptWorldRuntimeStats RuntimeStats;
-	bool bWorldPlayActive = false;
 };

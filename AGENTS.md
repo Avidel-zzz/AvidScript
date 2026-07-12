@@ -218,6 +218,7 @@ Plugins/AvidScript/Docs
 - 2026-07-12 P35 workflow mistake record: a combined Git/build command ran Git from the project root instead of the plugin repository and stopped before compilation. Prevention: never combine plugin Git gates and project-level UE builds in one command; Git runs from `Plugins/AvidScript`, while Build.bat runs from the project root.
 - Phase 35 moved all WAMR APIs, native symbols, guest memory access, and global lease ownership into `AvidScriptVM` Private. Runtime must remain free of `WAMR`, `wasm_export.h`, `wasm_runtime_*`, and `AVIDSCRIPT_WITH_WAMR`; enforce this with `Build/CheckAvidScriptArchitecture.ps1`.
 - Phase 36 still needs to remove compatibility lifecycle booleans and make `FAvidScriptRuntimeSession` the unique owner. Do not add new gameplay callbacks directly to the Runtime façade during this migration.
+- 2026-07-12 P36.2 编译错误记录：`AvidScriptComponent.cpp` 与 `AvidScriptWorldSubsystem.cpp` 在匿名命名空间中使用了相同的 `CopySessionLoadResult` helper 名；UE unity build 合并两个 `.cpp` 后触发 C2084 重定义。Prevention：Runtime 模块匿名命名空间 helper 使用带所属文件语义的唯一名称（如 `CopyWorldSessionLoadResult`），新增 helper 后必须经过实际 unity 模块编译，不能只依赖单文件阅读。
 
 ## D Guest Toolchain Workflow
 

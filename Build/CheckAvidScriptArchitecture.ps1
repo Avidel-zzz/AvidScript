@@ -113,6 +113,22 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
     'AVIDSCRIPT_WITH_WAMR'
 )
 
+$ComponentHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptComponent.h'
+if ($ComponentHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstance\s*>') {
+    Add-Violation 'UAvidScriptComponent must own FAvidScriptRuntimeSession instead of a raw runtime instance'
+}
+if ($ComponentHeader -match '\bbPlayActive\b') {
+    Add-Violation 'UAvidScriptComponent must derive active state from its RuntimeSession snapshot'
+}
+
+$WorldSubsystemHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWorldSubsystem.h'
+if ($WorldSubsystemHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstance\s*>') {
+    Add-Violation 'UAvidScriptWorldSubsystem must own FAvidScriptRuntimeSession instead of a raw runtime instance'
+}
+if ($WorldSubsystemHeader -match '\bbWorldPlayActive\b') {
+    Add-Violation 'UAvidScriptWorldSubsystem must derive active state from its RuntimeSession snapshot'
+}
+
 foreach ($LegacyBindingPath in @(
     'Source/AvidScriptRuntime/Public/AvidScriptObjectRegistry.h',
     'Source/AvidScriptRuntime/Public/AvidScriptActorBinding.h',

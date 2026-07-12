@@ -23,6 +23,24 @@ void SetComponentManifestLoadFailure(
 		: LoadResult.ErrorMessage;
 }
 
+void CopySessionLoadResult(
+	const FAvidScriptWasmReloadResult& ReloadResult,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = ReloadResult.RuntimeResult;
+	if (OutResult.ModuleId.IsEmpty())
+	{
+		OutResult.ModuleId = ReloadResult.CandidateModuleId;
+	}
+
+	if (!ReloadResult.bSucceeded)
+	{
+		OutResult.ExportName = ReloadResult.ExportName;
+		OutResult.ErrorCategory = ReloadResult.ErrorCategory;
+		OutResult.NextAction = ReloadResult.NextAction;
+		OutResult.ErrorMessage = ReloadResult.ErrorMessage;
+	}
+}
 void CopyComponentEventStats(
 	const FAvidScriptWasmSmokeResult& Result,
 	FAvidScriptComponentRuntimeStats& Stats)
@@ -75,12 +93,12 @@ FString UAvidScriptComponent::ResolveScriptManifestPath() const
 
 bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult)
 {
-	if (!Runtime.IsValid())
+	if (!RuntimeSession.IsValid())
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
 		OutResult.ErrorCategory = TEXT("invalid_state");
-		OutResult.ErrorMessage = TEXT("AvidScript component runtime has not been allocated.");
-		OutResult.NextAction = TEXT("create a runtime before loading script modules");
+		OutResult.ErrorMessage = TEXT("AvidScript component session has not been allocated.");
+		OutResult.NextAction = TEXT("create a runtime session before loading script modules");
 		return false;
 	}
 
@@ -88,38 +106,40 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	HostContext.ObjectRegistry = &ObjectRegistry;
 	HostContext.OwnerHandle = OwnerHandle;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
-	Runtime->SetHostContext(HostContext);
+	RuntimeSession->SetHostContext(HostContext);
 
 	RuntimeStats.ScriptManifestPath = ResolveScriptManifestPath();
+	FAvidScriptWasmReloadResult SessionResult;
+	bool bLoaded = false;
 	if (RuntimeStats.ScriptManifestPath.IsEmpty())
 	{
-		return Runtime->LoadEmbeddedSmokeModule(OutResult);
+		bLoaded = RuntimeSession->LoadEmbeddedSmoke(SessionResult);
 	}
-
-	FAvidScriptWasmReloadManifest Manifest;
-	TArray<uint8> Bytecode;
-	FAvidScriptWasmReloadManifestLoadResult LoadResult;
-	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(RuntimeStats.ScriptManifestPath, Manifest, Bytecode, LoadResult))
+	else
 	{
-		SetComponentManifestLoadFailure(LoadResult, OutResult);
-		return false;
+		FAvidScriptWasmReloadManifest Manifest;
+		TArray<uint8> Bytecode;
+		FAvidScriptWasmReloadManifestLoadResult LoadResult;
+		if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(RuntimeStats.ScriptManifestPath, Manifest, Bytecode, LoadResult))
+		{
+			SetComponentManifestLoadFailure(LoadResult, OutResult);
+			return false;
+		}
+
+		bLoaded = RuntimeSession->LoadInitialModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			SessionResult);
 	}
 
-	if (!Runtime->LoadModule(Bytecode.GetData(), Bytecode.Num(), Manifest.ModuleId, OutResult))
+	CopySessionLoadResult(SessionResult, OutResult);
+	if (bLoaded)
 	{
-		return false;
+		RuntimeStats.ModuleId = SessionResult.ActiveModuleId;
 	}
-
-	if (!Runtime->ValidateRequiredExports(Manifest.RequiredExports, OutResult))
-	{
-		Runtime->Unload();
-		return false;
-	}
-
-	RuntimeStats.ModuleId = Manifest.ModuleId;
-	return true;
+	return bLoaded;
 }
-
 bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const
 {
 	OutOwner = ObjectRegistry.ResolveObject<AActor>(OwnerHandle, OutResult);
@@ -128,14 +148,17 @@ bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjec
 
 bool UAvidScriptComponent::DispatchScriptEvent(int32 EventId, float Value)
 {
-	if (!bPlayActive || !Runtime.IsValid())
+	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
+		? RuntimeSession->GetSnapshot()
+		: FAvidScriptRuntimeSessionSnapshot();
+	if (Snapshot.LifecycleState != EAvidScriptLifecycleState::Running)
 	{
-		RuntimeStats.LastErrorMessage = TEXT("AvidScript gameplay event rejected because the component runtime is not active.");
+		RuntimeStats.LastErrorMessage = TEXT("AvidScript gameplay event rejected because the component session is not running.");
 		return false;
 	}
 
 	FAvidScriptWasmSmokeResult Result;
-	if (!Runtime->DispatchEvent(EventId, Value, Result))
+	if (!RuntimeSession->DispatchEvent(EventId, Value, Result))
 	{
 		RecordRuntimeFailure(Result);
 		if (Result.ErrorCategory == TEXT("invalid_argument"))
@@ -147,18 +170,17 @@ bool UAvidScriptComponent::DispatchScriptEvent(int32 EventId, float Value)
 		return false;
 	}
 
+	RuntimeStats.bRuntimeLoaded = RuntimeSession->GetSnapshot().bHasActiveRuntime;
 	RuntimeStats.Metrics = Result.Metrics;
 	RuntimeStats.ModuleId = Result.ModuleId;
 	CopyComponentEventStats(Result, RuntimeStats);
 	return true;
 }
-
 void UAvidScriptComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
 	RuntimeStats = FAvidScriptComponentRuntimeStats();
-	bPlayActive = false;
 
 	if (!RegisterOwner())
 	{
@@ -166,10 +188,10 @@ void UAvidScriptComponent::BeginPlay()
 		return;
 	}
 
-	Runtime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
+	RuntimeSession = MakeUnique<FAvidScriptRuntimeSession>();
 
 	FAvidScriptWasmSmokeResult Result;
-	if (!LoadConfiguredScriptModule(Result) || !Runtime->BeginPlay(Result))
+	if (!LoadConfiguredScriptModule(Result))
 	{
 		RecordRuntimeFailure(Result);
 		ReleaseRuntime();
@@ -177,15 +199,15 @@ void UAvidScriptComponent::BeginPlay()
 		return;
 	}
 
-	bPlayActive = true;
-	RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
+	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
+	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
-	RuntimeStats.TickCallCount = Result.TickCallCount;
+	RuntimeStats.TickCallCount = Snapshot.TickCallCount;
 	RuntimeStats.TimerCallbackCount = Result.TimerCallbackCount;
 	RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
 	RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
 	RuntimeStats.Metrics = Result.Metrics;
-	RuntimeStats.ModuleId = Result.ModuleId;
+	RuntimeStats.ModuleId = Snapshot.ModuleId;
 	CopyComponentEventStats(Result, RuntimeStats);
 
 	UE_LOG(
@@ -201,11 +223,10 @@ void UAvidScriptComponent::BeginPlay()
 		Result.Metrics.ExecEnvCreateMs,
 		Result.Metrics.BeginPlayCallMs);
 }
-
 void UAvidScriptComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	FAvidScriptWasmSmokeResult UnloadResult;
-	const bool bHadRuntime = bPlayActive || Runtime.IsValid();
+	const bool bHadRuntime = RuntimeSession.IsValid() && RuntimeSession->GetSnapshot().bHasActiveRuntime;
 	RuntimeStats.bComponentEndPlayObserved = true;
 
 	ReleaseRuntime(&UnloadResult);
@@ -226,26 +247,27 @@ void UAvidScriptComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	Super::EndPlay(EndPlayReason);
 }
-
 void UAvidScriptComponent::TickComponent(
 	float DeltaTime,
 	ELevelTick TickType,
 	FActorComponentTickFunction* ThisTickFunction)
 {
-	if (bPlayActive && Runtime.IsValid())
+	if (RuntimeSession.IsValid() &&
+		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
 	{
 		FAvidScriptWasmSmokeResult Result;
 		const int32 PreviousTickCallCount = RuntimeStats.TickCallCount;
-		if (Runtime->Tick(DeltaTime, Result))
+		if (RuntimeSession->Tick(DeltaTime, Result))
 		{
-			RuntimeStats.bRuntimeLoaded = Runtime->IsLoaded();
+			const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
+			RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 			RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
-			RuntimeStats.TickCallCount = Result.TickCallCount;
+			RuntimeStats.TickCallCount = Snapshot.TickCallCount;
 			RuntimeStats.TimerCallbackCount = Result.TimerCallbackCount;
 			RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
 			RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
 			RuntimeStats.Metrics = Result.Metrics;
-			RuntimeStats.ModuleId = Result.ModuleId;
+			RuntimeStats.ModuleId = Snapshot.ModuleId;
 			CopyComponentEventStats(Result, RuntimeStats);
 
 			if (PreviousTickCallCount == 0 && RuntimeStats.TickCallCount > 0)
@@ -271,7 +293,6 @@ void UAvidScriptComponent::TickComponent(
 
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 }
-
 bool UAvidScriptComponent::RegisterOwner()
 {
 	AActor* Owner = GetOwner();
@@ -315,10 +336,13 @@ void UAvidScriptComponent::ReleaseOwner()
 
 void UAvidScriptComponent::RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result)
 {
+	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
+		? RuntimeSession->GetSnapshot()
+		: FAvidScriptRuntimeSessionSnapshot();
 	RuntimeStats.LastErrorMessage = Result.ErrorMessage;
-	RuntimeStats.bRuntimeLoaded = Runtime.IsValid() && Runtime->IsLoaded();
+	RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
 	RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
-	RuntimeStats.TickCallCount = Runtime.IsValid() ? Runtime->GetTickCallCount() : Result.TickCallCount;
+	RuntimeStats.TickCallCount = FMath::Max(Snapshot.TickCallCount, Result.TickCallCount);
 	RuntimeStats.TimerCallbackCount = FMath::Max(RuntimeStats.TimerCallbackCount, Result.TimerCallbackCount);
 	if (Result.LastTimerHandle > 0)
 	{
@@ -326,7 +350,7 @@ void UAvidScriptComponent::RecordRuntimeFailure(const FAvidScriptWasmSmokeResult
 		RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
 	}
 	RuntimeStats.Metrics = Result.Metrics;
-	RuntimeStats.ModuleId = Result.ModuleId;
+	RuntimeStats.ModuleId = Result.ModuleId.IsEmpty() ? Snapshot.ModuleId : Result.ModuleId;
 	CopyComponentEventStats(Result, RuntimeStats);
 
 	UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *Result.ErrorMessage);
@@ -337,24 +361,13 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	FAvidScriptWasmSmokeResult LocalUnloadResult;
 	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
 
-	if (Runtime.IsValid())
+	if (RuntimeSession.IsValid())
 	{
-		if (Runtime->HasBegunPlay())
+		if (!RuntimeSession->StopAndUnload(UnloadResult))
 		{
-			FAvidScriptWasmSmokeResult EndPlayResult;
-			if (Runtime->EndPlay(EndPlayResult))
-			{
-				RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || EndPlayResult.bEndPlayCalled;
-				RuntimeStats.Metrics = EndPlayResult.Metrics;
-			}
-			else
-			{
-				RecordRuntimeFailure(EndPlayResult);
-			}
+			RecordRuntimeFailure(UnloadResult);
 		}
-
-		Runtime->Unload(UnloadResult);
-		Runtime.Reset();
+		RuntimeSession.Reset();
 	}
 	else
 	{
@@ -371,6 +384,5 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 		RuntimeStats.LastTimerHandle = UnloadResult.LastTimerHandle;
 	}
 	CopyComponentEventStats(UnloadResult, RuntimeStats);
-	bPlayActive = false;
 	RuntimeStats.bRuntimeLoaded = false;
 }

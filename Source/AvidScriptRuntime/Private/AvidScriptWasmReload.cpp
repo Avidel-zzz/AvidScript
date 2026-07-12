@@ -455,12 +455,41 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	return true;
 }
 
-FAvidScriptWasmReloadSession::~FAvidScriptWasmReloadSession()
+FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 {
 	UnloadLive();
 }
 
-bool FAvidScriptWasmReloadSession::LoadInitialModule(
+bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& OutResult)
+{
+	const FString ModuleId = TEXT("embedded_smoke");
+	const FString PreviousModuleId = GetLiveModuleId();
+	ResetReloadResult(OutResult, PreviousModuleId, ModuleId, PreviousModuleId);
+
+	const FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
+	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
+	FAvidScriptWasmSmokeResult RuntimeResult;
+	if (!CandidateRuntime->LoadEmbeddedSmokeModule(RuntimeResult) ||
+		!CandidateRuntime->ValidateRequiredExports(Manifest.RequiredExports, RuntimeResult))
+	{
+		CopyRuntimeFailure(RuntimeResult, OutResult);
+		CandidateRuntime->Unload();
+		return false;
+	}
+
+	CandidateRuntime->SetHostContext(HostContext);
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	{
+		OutResult.ActiveModuleId = GetLiveModuleId();
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.ActiveModuleId = ModuleId;
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::LoadInitialModule(
 	const uint8* Bytecode,
 	int32 BytecodeSize,
 	const FAvidScriptWasmReloadManifest& Manifest,
@@ -492,7 +521,7 @@ bool FAvidScriptWasmReloadSession::LoadInitialModule(
 	return true;
 }
 
-bool FAvidScriptWasmReloadSession::ReloadModule(
+bool FAvidScriptRuntimeSession::ReloadModule(
 	const uint8* Bytecode,
 	int32 BytecodeSize,
 	const FAvidScriptWasmReloadManifest& Manifest,
@@ -530,7 +559,7 @@ bool FAvidScriptWasmReloadSession::ReloadModule(
 	OutResult.ActiveModuleId = Manifest.ModuleId;
 	return true;
 }
-void FAvidScriptWasmReloadSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
+void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	HostContext = InHostContext;
 	if (LiveRuntime)
@@ -539,7 +568,7 @@ void FAvidScriptWasmReloadSession::SetHostContext(const FAvidScriptWasmHostConte
 	}
 }
 
-void FAvidScriptWasmReloadSession::ClearHostContext()
+void FAvidScriptRuntimeSession::ClearHostContext()
 {
 	HostContext = FAvidScriptWasmHostContext();
 	if (LiveRuntime)
@@ -548,7 +577,19 @@ void FAvidScriptWasmReloadSession::ClearHostContext()
 	}
 }
 
-bool FAvidScriptWasmReloadSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
+bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
+{
+	return TickLive(DeltaSeconds, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::DispatchEvent(
+	int32 EventId,
+	float Value,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return DispatchEventLive(EventId, Value, OutResult);
+}
+bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (!IsLiveLoaded())
 	{
@@ -566,7 +607,7 @@ bool FAvidScriptWasmReloadSession::TickLive(float DeltaSeconds, FAvidScriptWasmS
 	return LiveRuntime->Tick(DeltaSeconds, OutResult);
 }
 
-bool FAvidScriptWasmReloadSession::DispatchEventLive(
+bool FAvidScriptRuntimeSession::DispatchEventLive(
 	int32 EventId,
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
@@ -587,7 +628,7 @@ bool FAvidScriptWasmReloadSession::DispatchEventLive(
 	return LiveRuntime->DispatchEvent(EventId, Value, OutResult);
 }
 
-bool FAvidScriptWasmReloadSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
+bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (!IsLiveLoaded())
 	{
@@ -605,52 +646,82 @@ bool FAvidScriptWasmReloadSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutRe
 	return LiveRuntime->EndPlay(OutResult);
 }
 
-void FAvidScriptWasmReloadSession::UnloadLive()
+bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutResult)
 {
+	bool bSucceeded = true;
+	FAvidScriptWasmSmokeResult EndPlayFailure;
 	if (LiveRuntime)
 	{
-		if (LiveRuntime->HasBegunPlay())
+		if (LiveRuntime->HasBegunPlay() && !LiveRuntime->EndPlay(EndPlayFailure))
 		{
-			FAvidScriptWasmSmokeResult EndPlayResult;
-			EndPlayLive(EndPlayResult);
+			bSucceeded = false;
 		}
-		LiveRuntime->Unload();
+
+		FAvidScriptWasmSmokeResult UnloadResult;
+		LiveRuntime->Unload(UnloadResult);
+		OutResult = bSucceeded ? UnloadResult : EndPlayFailure;
 		LiveRuntime.Reset();
 	}
+	else
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.bUnloaded = true;
+	}
+
 	LiveManifest = FAvidScriptWasmReloadManifest();
+	return bSucceeded;
 }
 
-bool FAvidScriptWasmReloadSession::IsLiveLoaded() const
+void FAvidScriptRuntimeSession::UnloadLive()
+{
+	FAvidScriptWasmSmokeResult IgnoredResult;
+	StopAndUnload(IgnoredResult);
+}
+bool FAvidScriptRuntimeSession::IsLiveLoaded() const
 {
 	return LiveRuntime.IsValid() && LiveRuntime->IsLoaded();
 }
 
-FString FAvidScriptWasmReloadSession::GetLiveModuleId() const
+FString FAvidScriptRuntimeSession::GetLiveModuleId() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetModuleId() : FString();
 }
 
-int32 FAvidScriptWasmReloadSession::GetLiveTickCallCount() const
+int32 FAvidScriptRuntimeSession::GetLiveTickCallCount() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetTickCallCount() : 0;
 }
 
-int32 FAvidScriptWasmReloadSession::GetLivePendingTimerCount() const
+int32 FAvidScriptRuntimeSession::GetLivePendingTimerCount() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetPendingTimerCount() : 0;
 }
 
-int32 FAvidScriptWasmReloadSession::GetLiveTimerCallbackCount() const
+int32 FAvidScriptRuntimeSession::GetLiveTimerCallbackCount() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetTimerCallbackCount() : 0;
 }
 
-int32 FAvidScriptWasmReloadSession::GetLiveEventCallbackCount() const
+int32 FAvidScriptRuntimeSession::GetLiveEventCallbackCount() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetEventCallbackCount() : 0;
 }
+FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
+{
+	FAvidScriptRuntimeSessionSnapshot Snapshot;
+	Snapshot.bHasActiveRuntime = IsLiveLoaded();
+	Snapshot.LifecycleState = LiveRuntime ? LiveRuntime->GetLifecycleState() : EAvidScriptLifecycleState::Empty;
+	Snapshot.ModuleId = GetLiveModuleId();
+	Snapshot.TickCallCount = GetLiveTickCallCount();
+	Snapshot.PendingTimerCount = GetLivePendingTimerCount();
+	Snapshot.TimerCallbackCount = GetLiveTimerCallbackCount();
+	Snapshot.EventCallbackCount = GetLiveEventCallbackCount();
+	Snapshot.SuccessfulReloadCount = SuccessfulReloadCount;
+	Snapshot.RejectedReloadCount = RejectedReloadCount;
+	return Snapshot;
+}
 
-bool FAvidScriptWasmReloadSession::ValidateManifest(
+bool FAvidScriptRuntimeSession::ValidateManifest(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	const FString& PreviousModuleId,
 	FAvidScriptWasmReloadResult& OutResult) const
@@ -697,7 +768,7 @@ bool FAvidScriptWasmReloadSession::ValidateManifest(
 	return true;
 }
 
-bool FAvidScriptWasmReloadSession::BuildValidatedRuntime(
+bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	const uint8* Bytecode,
 	int32 BytecodeSize,
 	const FAvidScriptWasmReloadManifest& Manifest,
@@ -726,7 +797,7 @@ bool FAvidScriptWasmReloadSession::BuildValidatedRuntime(
 	return true;
 }
 
-bool FAvidScriptWasmReloadSession::ActivateValidatedRuntime(
+bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 	const FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadResult& OutResult)
@@ -742,6 +813,14 @@ bool FAvidScriptWasmReloadSession::ActivateValidatedRuntime(
 		return false;
 	}
 
+	FAvidScriptWasmSmokeResult BeginPlayResult;
+	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
+	{
+		CopyRuntimeFailure(BeginPlayResult, OutResult);
+		CandidateRuntime->Unload();
+		return false;
+	}
+
 	if (LiveRuntime)
 	{
 		if (LiveRuntime->HasBegunPlay())
@@ -750,10 +829,12 @@ bool FAvidScriptWasmReloadSession::ActivateValidatedRuntime(
 			if (!LiveRuntime->EndPlay(PreviousEndPlayResult))
 			{
 				CopyRuntimeFailure(PreviousEndPlayResult, OutResult);
+				FAvidScriptWasmSmokeResult CandidateEndPlayResult;
+				CandidateRuntime->EndPlay(CandidateEndPlayResult);
+				CandidateRuntime->Unload();
 				LiveRuntime->Unload();
 				LiveRuntime.Reset();
 				LiveManifest = FAvidScriptWasmReloadManifest();
-				CandidateRuntime->Unload();
 				return false;
 			}
 		}
@@ -761,14 +842,6 @@ bool FAvidScriptWasmReloadSession::ActivateValidatedRuntime(
 		LiveRuntime->Unload();
 		LiveRuntime.Reset();
 		LiveManifest = FAvidScriptWasmReloadManifest();
-	}
-
-	FAvidScriptWasmSmokeResult BeginPlayResult;
-	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
-	{
-		CopyRuntimeFailure(BeginPlayResult, OutResult);
-		CandidateRuntime->Unload();
-		return false;
 	}
 
 	OutResult.RuntimeResult = BeginPlayResult;

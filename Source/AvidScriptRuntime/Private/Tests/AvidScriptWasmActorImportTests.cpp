@@ -719,9 +719,9 @@ bool FAvidScriptWasmReloadEndPlayTransitionOrderSmokeTest::RunTest(const FString
 	TestTrue(TEXT("New lifecycle module reloads"), Session.ReloadModule(
 		NewBytes.GetData(), NewBytes.Num(), NewManifest, ReloadResult));
 	TestEqual(
-		TEXT("Reload ends the old guest before beginning the new guest"),
+		TEXT("Reload starts the candidate before ending the old guest"),
 		Actor->GetActorLocation(),
-		FVector(210.0, 0.0, 0.0));
+		FVector(200.0, 0.0, 0.0));
 
 	Session.UnloadLive();
 	DestroyWasmActorImportWorld(World);
