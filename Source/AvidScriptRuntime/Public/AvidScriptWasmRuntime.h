@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptLifecycleState.h"
+#include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
 
 #include "CoreMinimal.h"
@@ -65,7 +66,7 @@ struct FAvidScriptWasmTimerEntry
 	float RemainingSeconds = 0.0f;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
+class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance : public IAvidScriptHostDispatcher
 {
 public:
 	FAvidScriptWasmRuntimeInstance() = default;
@@ -117,6 +118,8 @@ public:
 		const FString& ImportName,
 		const FString& Details);
 	bool ConsumePendingHostImportFailure(FString& OutImportModuleName, FString& OutImportName, FString& OutDetails);
+	bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) override;
+
 
 private:
 	void CollectDueTimerHandles(float DeltaSeconds, TArray<int32>& OutDueTimerHandles);
@@ -129,10 +132,13 @@ private:
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 
-	void* Module = nullptr;
-	void* ModuleInstance = nullptr;
-	void* ExecEnv = nullptr;
-	bool bOwnsRuntimeLease = false;
+	TUniquePtr<IAvidScriptVmBackend> VmBackend;
+	FAvidScriptVmExportHandle BeginPlayExport;
+	FAvidScriptVmExportHandle TickExport;
+	FAvidScriptVmExportHandle EndPlayExport;
+	FAvidScriptVmExportHandle TimerExport;
+	FAvidScriptVmExportHandle EventExport;
+
 	bool bHasBegunPlay = false;
 	bool bHasEndedPlay = false;
 	bool bEndPlayAttempted = false;
@@ -154,7 +160,6 @@ private:
 	FString PendingHostImportName;
 	FString PendingHostImportDetails;
 	FString ModuleId;
-	TArray<uint8> ModuleBuffer;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
 	FAvidScriptLifecycleStateMachine LifecycleState;

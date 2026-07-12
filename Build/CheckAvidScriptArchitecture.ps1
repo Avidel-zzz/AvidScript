@@ -84,6 +84,8 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'Core')) {
     if (-not $VmBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptVM is missing required dependency $RequiredDependency"
     }
+}if (-not $VmBuild.Contains('"WAMR"')) {
+    Add-Violation 'AvidScriptVM is missing its private WAMR backend dependency'
 }
 foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {
     if ($VmBuild.Contains('"' + $ForbiddenDependency + '"')) {
@@ -102,7 +104,14 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings', 'AvidS
     if (-not $RuntimeBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptRuntime is missing required dependency $RequiredDependency"
     }
+}if ($RuntimeBuild.Contains('"WAMR"')) {
+    Add-Violation 'AvidScriptRuntime must not depend directly on WAMR'
 }
+
+Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
+    'wasm_runtime_|wasm_export\.h',
+    'AVIDSCRIPT_WITH_WAMR'
+)
 
 foreach ($LegacyBindingPath in @(
     'Source/AvidScriptRuntime/Public/AvidScriptObjectRegistry.h',

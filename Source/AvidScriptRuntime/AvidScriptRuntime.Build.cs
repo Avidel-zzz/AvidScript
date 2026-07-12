@@ -23,8 +23,7 @@ public class AvidScriptRuntime : ModuleRules
 			{
 				"Projects",
 				"Json",
-				"SSL",
-				"WAMR"
+				"SSL"
 			}
 		);
 

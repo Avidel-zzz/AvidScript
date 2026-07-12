@@ -13,5 +13,7 @@ public class AvidScriptVM : ModuleRules
 				"Core"
 			}
 		);
+
+		PrivateDependencyModuleNames.Add("WAMR");
 	}
 }

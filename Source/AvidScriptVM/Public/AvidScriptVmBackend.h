@@ -70,7 +70,7 @@ struct FAvidScriptHostCallResult
 {
 	bool bSucceeded = false;
 	int32 ReturnValue = 0;
-	int32 IntValues[2] = {};
+	uint32 IntValues[2] = {};
 	float FloatValues[3] = {};
 	FString Details;
 };
@@ -82,12 +82,22 @@ public:
 	virtual bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) = 0;
 };
 
+struct FAvidScriptVmLoadMetrics
+{
+	double RuntimeInitMs = 0.0;
+	double ModuleLoadMs = 0.0;
+	double ModuleInstantiateMs = 0.0;
+	double ExecEnvCreateMs = 0.0;
+};
+
 struct FAvidScriptVmLoadConfig
 {
 	uint32 StackSize = 64 * 1024;
 	uint32 HeapSize = 64 * 1024;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
 };
+
+AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();
 
 class AVIDSCRIPTVM_API IAvidScriptVmBackend
 {
@@ -110,4 +120,5 @@ public:
 	virtual void Unload() = 0;
 	virtual bool IsLoaded() const = 0;
 	virtual uint32 GetExportLookupCount() const = 0;
+	virtual const FAvidScriptVmLoadMetrics& GetLoadMetrics() const = 0;
 };
