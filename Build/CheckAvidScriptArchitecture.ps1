@@ -205,11 +205,29 @@ if ($ReloadUmbrellaHeader -match '\b(class|struct)\s+AVIDSCRIPTRUNTIME_API\b') {
 }
 
 $ComponentHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptComponent.h'
+$ComponentSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptComponent.cpp'
 if ($ComponentHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstance\s*>') {
     Add-Violation 'UAvidScriptComponent must own FAvidScriptRuntimeSession instead of a raw runtime instance'
 }
 if ($ComponentHeader -match '\bbPlayActive\b') {
     Add-Violation 'UAvidScriptComponent must derive active state from its RuntimeSession snapshot'
+}
+foreach ($RequiredCollisionLifecycle in @(
+    'BindOwnerGameplayDelegates',
+    'UnbindOwnerGameplayDelegates',
+    'HandleOwnerBeginOverlap',
+    'HandleOwnerEndOverlap',
+    'HandleOwnerHit',
+    'GameplayObjectHandleValues'
+)) {
+    if (-not $ComponentHeader.Contains($RequiredCollisionLifecycle) -or
+        -not $ComponentSource.Contains($RequiredCollisionLifecycle)) {
+        Add-Violation "UAvidScriptComponent collision lifecycle is missing $RequiredCollisionLifecycle"
+    }
+}
+if ($ComponentSource.IndexOf('UnbindOwnerGameplayDelegates();') -gt
+    $ComponentSource.IndexOf('RuntimeSession->StopAndUnload(')) {
+    Add-Violation 'UAvidScriptComponent must unbind owner gameplay delegates before stopping the runtime session'
 }
 
 $WorldSubsystemHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWorldSubsystem.h'

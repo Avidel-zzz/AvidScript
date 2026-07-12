@@ -208,6 +208,7 @@ void UAvidScriptComponent::BeginPlay()
 	RuntimeStats.Metrics = Result.Metrics;
 	RuntimeStats.ModuleId = Snapshot.ModuleId;
 	CopyComponentEventStats(Result, RuntimeStats);
+	BindOwnerGameplayDelegates();
 
 	UE_LOG(
 		LogAvidScriptComponent,
@@ -333,6 +334,131 @@ void UAvidScriptComponent::ReleaseOwner()
 	}
 }
 
+void UAvidScriptComponent::BindOwnerGameplayDelegates()
+{
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner) || RuntimeStats.bCollisionDelegatesBound || !RuntimeSession.IsValid() ||
+		RuntimeSession->GetSnapshot().LifecycleState != EAvidScriptLifecycleState::Running)
+	{
+		return;
+	}
+
+	Owner->OnActorBeginOverlap.AddUniqueDynamic(this, &UAvidScriptComponent::HandleOwnerBeginOverlap);
+	Owner->OnActorEndOverlap.AddUniqueDynamic(this, &UAvidScriptComponent::HandleOwnerEndOverlap);
+	Owner->OnActorHit.AddUniqueDynamic(this, &UAvidScriptComponent::HandleOwnerHit);
+	RuntimeStats.bCollisionDelegatesBound = true;
+}
+
+void UAvidScriptComponent::UnbindOwnerGameplayDelegates()
+{
+	if (AActor* Owner = GetOwner(); IsValid(Owner))
+	{
+		Owner->OnActorBeginOverlap.RemoveDynamic(this, &UAvidScriptComponent::HandleOwnerBeginOverlap);
+		Owner->OnActorEndOverlap.RemoveDynamic(this, &UAvidScriptComponent::HandleOwnerEndOverlap);
+		Owner->OnActorHit.RemoveDynamic(this, &UAvidScriptComponent::HandleOwnerHit);
+	}
+	RuntimeStats.bCollisionDelegatesBound = false;
+}
+
+bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
+	EAvidScriptGameplayEventType EventType,
+	AActor* OtherActor,
+	const FVector& VectorValue)
+{
+	if (!IsValid(OtherActor) || OtherActor == GetOwner() || !RuntimeSession.IsValid() ||
+		RuntimeSession->GetSnapshot().LifecycleState != EAvidScriptLifecycleState::Running)
+	{
+		return false;
+	}
+
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle OtherHandle = ObjectRegistry.RegisterObject(OtherActor, RegisterResult);
+	if (!RegisterResult.bSucceeded)
+	{
+		RuntimeStats.LastErrorMessage = RegisterResult.ErrorMessage;
+		UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *RegisterResult.ErrorMessage);
+		return false;
+	}
+	if (!(OtherHandle == OwnerHandle))
+	{
+		GameplayObjectHandleValues.Add(OtherHandle.ToUInt64());
+	}
+
+	FAvidScriptGameplayEvent Event;
+	Event.Type = EventType;
+	Event.ObjectHandle = OtherHandle;
+	Event.VectorValue = FVector3f(
+		static_cast<float>(VectorValue.X),
+		static_cast<float>(VectorValue.Y),
+		static_cast<float>(VectorValue.Z));
+
+	FAvidScriptWasmSmokeResult Result;
+	if (!RuntimeSession->DispatchGameplayEvent(Event, Result))
+	{
+		RecordRuntimeFailure(Result);
+		if (Result.ErrorCategory != TEXT("invalid_argument"))
+		{
+			ReleaseRuntime();
+			SetComponentTickEnabled(false);
+		}
+		return false;
+	}
+
+	RuntimeStats.bRuntimeLoaded = RuntimeSession->GetSnapshot().bHasActiveRuntime;
+	RuntimeStats.Metrics = Result.Metrics;
+	RuntimeStats.ModuleId = Result.ModuleId;
+	CopyComponentEventStats(Result, RuntimeStats);
+	return true;
+}
+
+void UAvidScriptComponent::HandleOwnerBeginOverlap(AActor* OverlappedActor, AActor* OtherActor)
+{
+	if (OverlappedActor == GetOwner() && IsValid(OtherActor))
+	{
+		DispatchOwnerGameplayEvent(
+			EAvidScriptGameplayEventType::BeginOverlap,
+			OtherActor,
+			OtherActor->GetActorLocation());
+	}
+}
+
+void UAvidScriptComponent::HandleOwnerEndOverlap(AActor* OverlappedActor, AActor* OtherActor)
+{
+	if (OverlappedActor == GetOwner() && IsValid(OtherActor))
+	{
+		DispatchOwnerGameplayEvent(
+			EAvidScriptGameplayEventType::EndOverlap,
+			OtherActor,
+			OtherActor->GetActorLocation());
+	}
+}
+
+void UAvidScriptComponent::HandleOwnerHit(
+	AActor* SelfActor,
+	AActor* OtherActor,
+	FVector NormalImpulse,
+	const FHitResult& Hit)
+{
+	static_cast<void>(Hit);
+	if (SelfActor == GetOwner())
+	{
+		DispatchOwnerGameplayEvent(EAvidScriptGameplayEventType::Hit, OtherActor, NormalImpulse);
+	}
+}
+
+void UAvidScriptComponent::ReleaseGameplayObjectHandles()
+{
+	for (const uint64 HandleValue : GameplayObjectHandleValues)
+	{
+		const FAvidScriptObjectHandle Handle{
+			static_cast<uint32>(HandleValue),
+			static_cast<uint32>(HandleValue >> 32) };
+		FAvidScriptObjectHandleResult ReleaseResult;
+		ObjectRegistry.ReleaseHandle(Handle, ReleaseResult);
+	}
+	GameplayObjectHandleValues.Reset();
+}
+
 void UAvidScriptComponent::RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result)
 {
 	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
@@ -360,6 +486,7 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	FAvidScriptWasmSmokeResult LocalUnloadResult;
 	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
 
+	UnbindOwnerGameplayDelegates();
 	if (RuntimeSession.IsValid())
 	{
 		if (!RuntimeSession->StopAndUnload(UnloadResult))
@@ -372,6 +499,7 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	{
 		UnloadResult = FAvidScriptWasmSmokeResult();
 	}
+	ReleaseGameplayObjectHandles();
 
 	RuntimeStats.Metrics = UnloadResult.Metrics;
 	RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || UnloadResult.bEndPlayCalled;

@@ -14,6 +14,7 @@ struct FAvidScriptComponentRuntimeStats
 	bool bOwnerReleased = false;
 	bool bRuntimeLoaded = false;
 	bool bBeginPlayCalled = false;
+	bool bCollisionDelegatesBound = false;
 	bool bComponentEndPlayObserved = false;
 	bool bEndPlayCalled = false;
 	int32 TickCallCount = 0;
@@ -57,6 +58,23 @@ public:
 private:
 	bool RegisterOwner();
 	void ReleaseOwner();
+	void BindOwnerGameplayDelegates();
+	void UnbindOwnerGameplayDelegates();
+	bool DispatchOwnerGameplayEvent(
+		EAvidScriptGameplayEventType EventType,
+		AActor* OtherActor,
+		const FVector& VectorValue);
+	void ReleaseGameplayObjectHandles();
+
+	UFUNCTION()
+	void HandleOwnerBeginOverlap(AActor* OverlappedActor, AActor* OtherActor);
+
+	UFUNCTION()
+	void HandleOwnerEndOverlap(AActor* OverlappedActor, AActor* OtherActor);
+
+	UFUNCTION()
+	void HandleOwnerHit(AActor* SelfActor, AActor* OtherActor, FVector NormalImpulse, const FHitResult& Hit);
+
 	bool LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult& OutResult);
 	FString ResolveScriptManifestPath() const;
 	void RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result);
@@ -67,6 +85,7 @@ private:
 
 	FAvidScriptObjectRegistry ObjectRegistry;
 	FAvidScriptObjectHandle OwnerHandle;
+	TSet<uint64> GameplayObjectHandleValues;
 	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptComponentRuntimeStats RuntimeStats;
 };

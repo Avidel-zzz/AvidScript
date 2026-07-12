@@ -300,3 +300,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - High-frequency gameplay APIs should prefer generated typed calls and batching over fine-grained dynamic reflection calls.
 - 2026-07-13 P38.3 fallback 换行错误复发：受控 PowerShell 编辑再次用 LF here-string 直接匹配 CRLF C++ 文件，唯一锚点计数为 0；脚本在写盘前停止。Prevention：所有 fallback 锚点在计数和 Replace 前必须显式转换为目标文件的换行格式。
 - 2026-07-13 P38.3 命令封装错误复发：functions.exec 的 JavaScript template literal 再次包含 PowerShell 反引号，导致外层 SyntaxError 且命令未执行。Prevention：通过 functions.exec 发送 PowerShell fallback 时禁止在命令中使用反引号；换行改用 [char]13/[char]10。
+- 2026-07-13 P38.4 混合换行错误记录：碰撞实现 fallback 把同模块 Header 与 Source 都按 CRLF 转换，但 Source 实际为 LF，导致 source 锚点为 0；事务在写盘前停止。Prevention：多文件 fallback 必须逐文件探测换行，统一到 LF 匹配后再分别恢复，禁止按目录推断。

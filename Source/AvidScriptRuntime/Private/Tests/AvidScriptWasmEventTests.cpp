@@ -4,6 +4,8 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmRuntime.h"
 
+#include "Fixtures/AvidScriptGameplayEventFixture.h"
+
 #include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -91,80 +93,6 @@ TArray<uint8> BuildEventFixture(bool bTrap)
 		const uint8 SuccessBody[] = { 0x02, 0x00, 0x0b };
 		Code.Append(SuccessBody, UE_ARRAY_COUNT(SuccessBody));
 	}
-	AppendEventSection(Module, 10, Code);
-	return Module;
-}
-
-TArray<uint8> BuildTypedGameplayEventFixture(bool bTrap)
-{
-	TArray<uint8> Module;
-	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
-	Module.Append(Header, UE_ARRAY_COUNT(Header));
-
-	TArray<uint8> Types;
-	const uint8 TypeBytes[] = {
-		0x04,
-		0x60, 0x05, 0x7f, 0x7f, 0x7d, 0x7d, 0x7d, 0x01, 0x7f,
-		0x60, 0x00, 0x00,
-		0x60, 0x01, 0x7d, 0x00,
-		0x60, 0x08, 0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7d, 0x7d, 0x7d, 0x00
-	};
-	Types.Append(TypeBytes, UE_ARRAY_COUNT(TypeBytes));
-	AppendEventSection(Module, 1, Types);
-
-	TArray<uint8> Imports;
-	AppendEventU32Leb(Imports, 1);
-	AppendEventString(Imports, "avidscript");
-	AppendEventString(Imports, "actor_set_location");
-	Imports.Add(0x00);
-	AppendEventU32Leb(Imports, 0);
-	AppendEventSection(Module, 2, Imports);
-
-	TArray<uint8> Functions;
-	const uint8 FunctionBytes[] = { 0x03, 0x01, 0x02, 0x03 };
-	Functions.Append(FunctionBytes, UE_ARRAY_COUNT(FunctionBytes));
-	AppendEventSection(Module, 3, Functions);
-
-	TArray<uint8> Exports;
-	AppendEventU32Leb(Exports, 3);
-	AppendEventString(Exports, "avid_on_begin_play");
-	Exports.Add(0x00);
-	Exports.Add(0x01);
-	AppendEventString(Exports, "avid_on_tick");
-	Exports.Add(0x00);
-	Exports.Add(0x02);
-	AppendEventString(Exports, "avid_on_gameplay_event");
-	Exports.Add(0x00);
-	Exports.Add(0x03);
-	AppendEventSection(Module, 7, Exports);
-
-	TArray<uint8> Code;
-	AppendEventU32Leb(Code, 3);
-	const uint8 EmptyBody[] = { 0x00, 0x0b };
-	AppendEventU32Leb(Code, UE_ARRAY_COUNT(EmptyBody));
-	Code.Append(EmptyBody, UE_ARRAY_COUNT(EmptyBody));
-	AppendEventU32Leb(Code, UE_ARRAY_COUNT(EmptyBody));
-	Code.Append(EmptyBody, UE_ARRAY_COUNT(EmptyBody));
-	TArray<uint8> EventBody;
-	EventBody.Add(0x00);
-	if (bTrap)
-	{
-		EventBody.Add(0x00);
-	}
-	else
-	{
-		for (uint8 LocalIndex = 3; LocalIndex <= 7; ++LocalIndex)
-		{
-			EventBody.Add(0x20);
-			EventBody.Add(LocalIndex);
-		}
-		EventBody.Add(0x10);
-		EventBody.Add(0x00);
-		EventBody.Add(0x1a);
-	}
-	EventBody.Add(0x0b);
-	AppendEventU32Leb(Code, static_cast<uint32>(EventBody.Num()));
-	Code.Append(EventBody);
 	AppendEventSection(Module, 10, Code);
 	return Module;
 }
@@ -314,7 +242,7 @@ bool FAvidScriptTypedGameplayEventPayloadTest::RunTest(const FString& Parameters
 	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
 	TestTrue(TEXT("typed event actor registers"), RegisterResult.bSucceeded);
 
-	const TArray<uint8> WasmBytes = BuildTypedGameplayEventFixture(false);
+	const TArray<uint8> WasmBytes = AvidScriptGameplayEventFixture::Build(false);
 	FAvidScriptWasmRuntimeInstance Runtime;
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &Registry;
@@ -373,7 +301,7 @@ bool FAvidScriptTypedGameplayEventOptionalAndTrapTest::RunTest(const FString& Pa
 	TestEqual(TEXT("missing typed event callback is not counted"), LegacyRuntime.GetEventCallbackCount(), 0);
 	TestEqual(TEXT("legacy runtime remains running"), LegacyRuntime.GetLifecycleState(), EAvidScriptLifecycleState::Running);
 
-	const TArray<uint8> TrapBytes = BuildTypedGameplayEventFixture(true);
+	const TArray<uint8> TrapBytes = AvidScriptGameplayEventFixture::Build(true);
 	FAvidScriptWasmRuntimeInstance TrapRuntime;
 	TestTrue(TEXT("typed event trap fixture loads"), TrapRuntime.LoadModule(TrapBytes.GetData(), TrapBytes.Num(), TEXT("typed_event_trap"), Result));
 	TestTrue(TEXT("typed event trap fixture begins"), TrapRuntime.BeginPlay(Result));

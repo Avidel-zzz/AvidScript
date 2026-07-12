@@ -255,7 +255,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	Scheduler->Detach();
 	if (LiveRuntime)
 	{
-		if (LiveRuntime->HasBegunPlay() && !LiveRuntime->EndPlay(EndPlayFailure))
+		if (LiveRuntime->GetLifecycleState() == EAvidScriptLifecycleState::Running &&
+			!LiveRuntime->EndPlay(EndPlayFailure))
 		{
 			bSucceeded = false;
 		}
