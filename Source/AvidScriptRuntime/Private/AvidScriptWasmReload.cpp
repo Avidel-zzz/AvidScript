@@ -566,6 +566,27 @@ bool FAvidScriptWasmReloadSession::TickLive(float DeltaSeconds, FAvidScriptWasmS
 	return LiveRuntime->Tick(DeltaSeconds, OutResult);
 }
 
+bool FAvidScriptWasmReloadSession::DispatchEventLive(
+	int32 EventId,
+	float Value,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (!IsLiveLoaded())
+	{
+		OutResult = FAvidScriptWasmSmokeResult();
+		OutResult.ModuleId = LiveManifest.ModuleId;
+		OutResult.ExportName = TEXT("avid_on_event");
+		OutResult.ErrorCategory = TEXT("invalid_state");
+		OutResult.NextAction = TEXT("load a validated WASM module before dispatching a gameplay event");
+		OutResult.ErrorMessage = FString::Printf(
+			TEXT("AvidScript live runtime event rejected | module=%s | category=invalid_state | details=no live runtime is loaded"),
+			LiveManifest.ModuleId.IsEmpty() ? TEXT("<none>") : *LiveManifest.ModuleId);
+		return false;
+	}
+
+	return LiveRuntime->DispatchEvent(EventId, Value, OutResult);
+}
+
 bool FAvidScriptWasmReloadSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
 {
 	if (!IsLiveLoaded())
@@ -622,6 +643,11 @@ int32 FAvidScriptWasmReloadSession::GetLivePendingTimerCount() const
 int32 FAvidScriptWasmReloadSession::GetLiveTimerCallbackCount() const
 {
 	return IsLiveLoaded() ? LiveRuntime->GetTimerCallbackCount() : 0;
+}
+
+int32 FAvidScriptWasmReloadSession::GetLiveEventCallbackCount() const
+{
+	return IsLiveLoaded() ? LiveRuntime->GetEventCallbackCount() : 0;
 }
 
 bool FAvidScriptWasmReloadSession::ValidateManifest(

@@ -20,6 +20,9 @@ struct FAvidScriptComponentRuntimeStats
 	int32 TimerCallbackCount = 0;
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
+	int32 EventCallbackCount = 0;
+	int32 LastEventId = 0;
+	float LastEventValue = 0.0f;
 	FAvidScriptObjectHandle OwnerHandle;
 	FString OwnerObjectPath;
 	FString ScriptManifestPath;
@@ -40,6 +43,9 @@ public:
 	void SetScriptManifestPath(const FString& InScriptManifestPath);
 	FString GetScriptManifestPath() const;
 	bool ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Events")
+	bool DispatchScriptEvent(int32 EventId, float Value);
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

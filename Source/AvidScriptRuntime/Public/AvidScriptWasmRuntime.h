@@ -13,6 +13,7 @@ struct FAvidScriptWasmRuntimeMetrics
 	double BeginPlayCallMs = 0.0;
 	double EndPlayCallMs = 0.0;
 	double TimerCallbackCallMs = 0.0;
+	double EventCallbackCallMs = 0.0;
 	double HostImportCallMs = 0.0;
 	double TickCallMs = 0.0;
 	double UnloadMs = 0.0;
@@ -27,11 +28,15 @@ struct FAvidScriptWasmSmokeResult
 	bool bEndPlayCalled = false;
 	bool bTickCalled = false;
 	bool bTimerCallbackCalled = false;
+	bool bEventCallbackCalled = false;
 	bool bUnloaded = false;
 	int32 TickCallCount = 0;
 	int32 TimerCallbackCount = 0;
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
+	int32 EventCallbackCount = 0;
+	int32 LastEventId = 0;
+	float LastEventValue = 0.0f;
 	FString ModuleId;
 	FString ExportName;
 	FString ImportModuleName;
@@ -75,6 +80,7 @@ public:
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool EndPlay(FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	void Unload();
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 
@@ -83,6 +89,7 @@ public:
 	int32 GetTickCallCount() const { return TickCallCount; }
 	int32 GetPendingTimerCount() const { return PendingTimers.Num(); }
 	int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
+	int32 GetEventCallbackCount() const { return EventCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
 	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
@@ -115,6 +122,8 @@ private:
 	int32 AllocateTimerHandle();
 	void ResetTimerState();
 	void CopyTimerStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
+	void ResetEventState();
+	void CopyEventStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 
@@ -132,6 +141,9 @@ private:
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
 	TArray<FAvidScriptWasmTimerEntry> PendingTimers;
+	int32 EventCallbackCount = 0;
+	int32 LastEventId = 0;
+	float LastEventValue = 0.0f;
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;

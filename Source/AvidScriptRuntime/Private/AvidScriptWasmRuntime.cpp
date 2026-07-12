@@ -1015,6 +1015,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1053,6 +1054,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
 		return false;
 	}
 
@@ -1067,6 +1069,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 	return true;
 #endif
 }
@@ -1081,6 +1084,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.bEndPlayCalled = bHasEndedPlay;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1127,6 +1131,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
 		return false;
 	}
 
@@ -1137,6 +1142,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 
 	if (!ExecuteDueTimerCallbacks(DueTimerHandles, OutResult))
 	{
@@ -1145,15 +1151,103 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		OutResult.TickCallCount = TickCallCount;
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
 		return false;
 	}
 
 	OutResult.Metrics = Metrics;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 	return true;
 #endif
 }
+
+bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
+	int32 EventId,
+	float Value,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	PrepareResult(OutResult, ModuleId, Metrics);
+	OutResult.bRuntimeInitialized = bOwnsRuntimeLease;
+	OutResult.bModuleLoaded = Module != nullptr;
+	OutResult.bModuleInstantiated = ModuleInstance != nullptr;
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
+	OutResult.TickCallCount = TickCallCount;
+	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
+
+#if !AVIDSCRIPT_WITH_WAMR
+	SetFailure(
+		OutResult,
+		ModuleId,
+		TEXT("avid_on_event"),
+		TEXT("backend_unavailable"),
+		TEXT("WAMR backend is not available"),
+		TEXT("build the ThirdParty WAMR static library before dispatching events"));
+	return false;
+#else
+	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_event"),
+			TEXT("invalid_state"),
+			TEXT("Gameplay events require an active runtime between BeginPlay and EndPlay"),
+			TEXT("dispatch events only while the AvidScript component is actively playing"));
+		return false;
+	}
+
+	if (EventId < 0 || !FMath::IsFinite(Value))
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			TEXT("avid_on_event"),
+			TEXT("invalid_argument"),
+			FString::Printf(TEXT("Invalid gameplay event payload | id=%d | value=%g"), EventId, Value),
+			TEXT("use a non-negative event id and a finite float value"));
+		return false;
+	}
+
+	uint32 EventArgs[2] = { static_cast<uint32>(EventId), 0 };
+	static_assert(sizeof(EventArgs[1]) == sizeof(Value), "WAMR f32 argument must fit in one cell.");
+	FMemory::Memcpy(&EventArgs[1], &Value, sizeof(Value));
+
+	const double EventStartSeconds = FPlatformTime::Seconds();
+	if (!CallWamrExport(
+		static_cast<wasm_module_inst_t>(ModuleInstance),
+		static_cast<wasm_exec_env_t>(ExecEnv),
+		this,
+		ModuleId,
+		"avid_on_event",
+		UE_ARRAY_COUNT(EventArgs),
+		EventArgs,
+		OutResult))
+	{
+		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		OutResult.Metrics = Metrics;
+		CopyHostImportStateToResult(OutResult);
+		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
+		return false;
+	}
+
+	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+	++EventCallbackCount;
+	LastEventId = EventId;
+	LastEventValue = Value;
+	OutResult.Metrics = Metrics;
+	CopyHostImportStateToResult(OutResult);
+	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
+	return true;
+#endif
+}
+
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, Metrics);
@@ -1165,6 +1259,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 
 #if !AVIDSCRIPT_WITH_WAMR
 	SetFailure(
@@ -1204,6 +1299,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		OutResult.Metrics = Metrics;
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
 		bEndPlaySucceeded = true;
 		CachedEndPlayResult = OutResult;
 		return true;
@@ -1227,6 +1323,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		OutResult.TickCallCount = TickCallCount;
 		CopyHostImportStateToResult(OutResult);
 		CopyTimerStateToResult(OutResult);
+		CopyEventStateToResult(OutResult);
 		bEndPlaySucceeded = false;
 		CachedEndPlayResult = OutResult;
 		return false;
@@ -1241,6 +1338,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	OutResult.TickCallCount = TickCallCount;
 	CopyHostImportStateToResult(OutResult);
 	CopyTimerStateToResult(OutResult);
+	CopyEventStateToResult(OutResult);
 	CachedEndPlayResult = OutResult;
 	return true;
 #endif
@@ -1264,6 +1362,9 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	const int32 PreviousTimerCallbackCount = TimerCallbackCount;
 	const int32 PreviousLastTimerCallbackId = LastTimerCallbackId;
 	const int32 PreviousLastTimerHandle = LastTimerHandle;
+	const int32 PreviousEventCallbackCount = EventCallbackCount;
+	const int32 PreviousLastEventId = LastEventId;
+	const float PreviousLastEventValue = LastEventValue;
 	const int32 PreviousHostImportCallCount = HostImportCallCount;
 	const int32 PreviousHostImportInput = LastHostImportInput;
 	const int32 PreviousHostImportResult = LastHostImportResult;
@@ -1309,6 +1410,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	CachedEndPlayResult = FAvidScriptWasmSmokeResult();
 	TickCallCount = 0;
 	ResetTimerState();
+	ResetEventState();
 	ResetHostImportState();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
@@ -1324,6 +1426,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	OutResult.TimerCallbackCount = PreviousTimerCallbackCount;
 	OutResult.LastTimerCallbackId = PreviousLastTimerCallbackId;
 	OutResult.LastTimerHandle = PreviousLastTimerHandle;
+	OutResult.bEventCallbackCalled = PreviousEventCallbackCount > 0;
+	OutResult.EventCallbackCount = PreviousEventCallbackCount;
+	OutResult.LastEventId = PreviousLastEventId;
+	OutResult.LastEventValue = PreviousLastEventValue;
 	OutResult.HostImportCallCount = PreviousHostImportCallCount;
 	OutResult.LastHostImportInput = PreviousHostImportInput;
 	OutResult.LastHostImportResult = PreviousHostImportResult;
@@ -2014,6 +2120,22 @@ void FAvidScriptWasmRuntimeInstance::CopyTimerStateToResult(FAvidScriptWasmSmoke
 	OutResult.LastTimerCallbackId = LastTimerCallbackId;
 	OutResult.LastTimerHandle = LastTimerHandle;
 }
+
+void FAvidScriptWasmRuntimeInstance::ResetEventState()
+{
+	EventCallbackCount = 0;
+	LastEventId = 0;
+	LastEventValue = 0.0f;
+}
+
+void FAvidScriptWasmRuntimeInstance::CopyEventStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
+{
+	OutResult.bEventCallbackCalled = EventCallbackCount > 0;
+	OutResult.EventCallbackCount = EventCallbackCount;
+	OutResult.LastEventId = LastEventId;
+	OutResult.LastEventValue = LastEventValue;
+}
+
 int32 FAvidScriptWasmRuntimeInstance::HandleHostAddI32Import(int32 Input)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();

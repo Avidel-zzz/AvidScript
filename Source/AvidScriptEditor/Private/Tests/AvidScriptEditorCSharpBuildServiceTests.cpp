@@ -191,6 +191,11 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TestEqual(TEXT("Custom manifest module id"), ManifestModuleId, Config.ModuleId);
 	}
 
+	FString ManifestText;
+	TestTrue(TEXT("Custom manifest text is readable"), FFileHelper::LoadFileToString(ManifestText, *Config.ManifestPath));
+	TestTrue(TEXT("Custom profile without OnEvent uses v11 subset"), ManifestText.Contains(TEXT("actor_lifecycle_v11")));
+	TestTrue(TEXT("Custom profile without OnEvent still exports event callback"), ManifestText.Contains(TEXT("avid_on_event")));
+
 	UWorld* World = nullptr;
 	if (!CreateAvidScriptCSharpBuildTestWorld(World))
 	{

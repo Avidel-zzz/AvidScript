@@ -78,6 +78,7 @@ public:
 		FAvidScriptWasmReloadResult& OutResult);
 
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEventLive(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
@@ -88,6 +89,7 @@ public:
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;
 	int32 GetLiveTimerCallbackCount() const;
+	int32 GetLiveEventCallbackCount() const;
 	int32 GetSuccessfulReloadCount() const { return SuccessfulReloadCount; }
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 

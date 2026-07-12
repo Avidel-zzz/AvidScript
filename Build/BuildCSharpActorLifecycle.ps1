@@ -420,6 +420,13 @@ function Convert-CSharpFloatExpression {
         }
     }
 
+    if ($Trimmed -eq 'value') {
+        return [PSCustomObject]@{
+            Kind = 'event_value'
+            Value = [single]0
+        }
+    }
+
     if ($Trimmed -match '^[A-Za-z_][A-Za-z0-9_]*$') {
         $Field = Find-CSharpStaticFloatField -Fields $Fields -Name $Trimmed
         if ($null -ne $Field) {
@@ -526,6 +533,10 @@ function Get-CSharpLifecycleStatements {
         [object[]]$Fields = @(),
         [bool]$AllowEmpty = $false
     )
+
+    if ($MethodName -ne 'OnEvent' -and [regex]::IsMatch($MethodBody, '\bvalue\b')) {
+        throw "The C# event payload identifier 'value' is only available inside OnEvent(int eventId, float value)."
+    }
 
     $Statements = @()
     $ValueLocals = @()
@@ -680,6 +691,12 @@ function Add-CSharpFloatExpressionCode {
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Left -AllowDeltaSeconds $AllowDeltaSeconds
         Add-CSharpFloatExpressionCode -Body $Body -Expression $Expression.Right -AllowDeltaSeconds $AllowDeltaSeconds
         Add-WasmByte -Bytes $Body -Value 0x94
+        return
+    }
+
+    if ($Expression.Kind -eq 'event_value') {
+        Add-WasmByte -Bytes $Body -Value 0x20
+        Add-WasmU32Leb -Bytes $Body -Value 1
         return
     }
 
@@ -967,14 +984,15 @@ function New-CSharpDirectAbiWasmModule {
         [Parameter(Mandatory = $true)]$BeginPlayStatements,
         [Parameter(Mandatory = $true)]$TickStatements,
         [object[]]$EndPlayStatements = @(),
-        [object[]]$TimerStatements = @()
+        [object[]]$TimerStatements = @(),
+        [object[]]$EventStatements = @()
     )
 
     $Module = New-WasmByteList
     Add-WasmBytes -Bytes $Module -Values ([byte[]](0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00))
 
     $TypeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $TypeSection -Value 8
+    Add-WasmU32Leb -Bytes $TypeSection -Value 9
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 5
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f, 0x7d, 0x7d, 0x7d))
@@ -1009,6 +1027,10 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmByte -Bytes $TypeSection -Value 0x60
     Add-WasmU32Leb -Bytes $TypeSection -Value 2
     Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7f))
+    Add-WasmU32Leb -Bytes $TypeSection -Value 0
+    Add-WasmByte -Bytes $TypeSection -Value 0x60
+    Add-WasmU32Leb -Bytes $TypeSection -Value 2
+    Add-WasmBytes -Bytes $TypeSection -Values ([byte[]](0x7f, 0x7d))
     Add-WasmU32Leb -Bytes $TypeSection -Value 0
     Add-WasmSection -Module $Module -SectionId 1 -Payload $TypeSection
 
@@ -1073,11 +1095,12 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmSection -Module $Module -SectionId 2 -Payload $ImportSection
 
     $FunctionSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $FunctionSection -Value 4
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 5
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmU32Leb -Bytes $FunctionSection -Value 2
     Add-WasmU32Leb -Bytes $FunctionSection -Value 1
     Add-WasmU32Leb -Bytes $FunctionSection -Value 7
+    Add-WasmU32Leb -Bytes $FunctionSection -Value 8
     Add-WasmSection -Module $Module -SectionId 3 -Payload $FunctionSection
     $MemorySection = New-WasmByteList
     Add-WasmU32Leb -Bytes $MemorySection -Value 1
@@ -1099,7 +1122,7 @@ function New-CSharpDirectAbiWasmModule {
     }
 
     $ExportSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $ExportSection -Value 4
+    Add-WasmU32Leb -Bytes $ExportSection -Value 5
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_begin_play'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ExportSection -Value 14
@@ -1112,15 +1135,19 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmString -Bytes $ExportSection -Text 'avid_on_timer'
     Add-WasmByte -Bytes $ExportSection -Value 0x00
     Add-WasmU32Leb -Bytes $ExportSection -Value 17
+    Add-WasmString -Bytes $ExportSection -Text 'avid_on_event'
+    Add-WasmByte -Bytes $ExportSection -Value 0x00
+    Add-WasmU32Leb -Bytes $ExportSection -Value 18
     Add-WasmSection -Module $Module -SectionId 7 -Payload $ExportSection
 
     $BeginPlayBody = New-CSharpLifecycleFunctionBody -Statements $BeginPlayStatements -AllowDeltaSeconds $false
     $TickBody = New-CSharpLifecycleFunctionBody -Statements $TickStatements -AllowDeltaSeconds $true -ParameterCount 1
     $EndPlayBody = New-CSharpLifecycleFunctionBody -Statements $EndPlayStatements -AllowDeltaSeconds $false
     $TimerBody = New-CSharpLifecycleFunctionBody -Statements $TimerStatements -AllowDeltaSeconds $false -ParameterCount 2
+    $EventBody = New-CSharpLifecycleFunctionBody -Statements $EventStatements -AllowDeltaSeconds $false -ParameterCount 2
 
     $CodeSection = New-WasmByteList
-    Add-WasmU32Leb -Bytes $CodeSection -Value 4
+    Add-WasmU32Leb -Bytes $CodeSection -Value 5
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$BeginPlayBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $BeginPlayBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TickBody.Count)
@@ -1129,6 +1156,8 @@ function New-CSharpDirectAbiWasmModule {
     Add-WasmBytes -Bytes $CodeSection -Values $EndPlayBody.ToArray()
     Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$TimerBody.Count)
     Add-WasmBytes -Bytes $CodeSection -Values $TimerBody.ToArray()
+    Add-WasmU32Leb -Bytes $CodeSection -Value ([uint32]$EventBody.Count)
+    Add-WasmBytes -Bytes $CodeSection -Values $EventBody.ToArray()
     Add-WasmSection -Module $Module -SectionId 10 -Payload $CodeSection
 
     return ,(Convert-WasmByteListToArray -Bytes $Module)
@@ -1150,6 +1179,7 @@ function Invoke-CSharpSourceAdapter {
         $TickBody = Get-CSharpMethodBody -SourceText $SourceText -MethodName 'Tick'
         $EndPlayBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'EndPlay'
         $TimerBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnTimer'
+        $EventBody = Get-OptionalCSharpMethodBody -SourceText $SourceText -MethodName 'OnEvent'
         $BeginPlayStatements = @(Get-CSharpLifecycleStatements -MethodBody $BeginPlayBody -MethodName 'BeginPlay' -Fields $Fields)
         $TickStatements = @(Get-CSharpLifecycleStatements -MethodBody $TickBody -MethodName 'Tick' -Fields $Fields)
         $EndPlayStatements = @()
@@ -1161,12 +1191,16 @@ function Invoke-CSharpSourceAdapter {
             $TimerStatements = @(Get-CSharpLifecycleStatements -MethodBody $TimerBody -MethodName 'OnTimer' -Fields $Fields -AllowEmpty $true)
         }
 
-        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements -TimerStatements $TimerStatements
+        $EventStatements = @()
+        if ($null -ne $EventBody) {
+            $EventStatements = @(Get-CSharpLifecycleStatements -MethodBody $EventBody -MethodName 'OnEvent' -Fields $Fields -AllowEmpty $true)
+        }
+        $WasmBytes = New-CSharpDirectAbiWasmModule -Fields $Fields -BeginPlayStatements $BeginPlayStatements -TickStatements $TickStatements -EndPlayStatements $EndPlayStatements -TimerStatements $TimerStatements -EventStatements $EventStatements
 
         [System.IO.File]::WriteAllBytes($AdapterWasmPath, $WasmBytes)
         $ObservedExports = @(Get-WasmExports -Path $AdapterWasmPath)
         $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play', 'avid_on_timer')
+        $RequiredExports = @('avid_on_begin_play', 'avid_on_tick', 'avid_on_end_play', 'avid_on_timer', 'avid_on_event')
         $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
         if ($MissingExports.Count -gt 0) {
             throw "C# source adapter produced a WASM file without required exports: $($MissingExports -join ',')"
@@ -1181,7 +1215,7 @@ function Invoke-CSharpSourceAdapter {
             source = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $SourcePath
                 compiler = 'avidscript-csharp-source-adapter'
-                subset = 'actor_lifecycle_v10'
+                subset = 'actor_lifecycle_v11'
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1256,7 +1290,8 @@ function Invoke-CSharpSourceAdapter {
                 supported_types = @('FVector', 'FRotator', 'FTransform', 'AActor', 'USceneComponent', 'UE.Self')
                 supported_calls = @('UE.Self.GetActorLocation()', 'UE.Self.SetActorLocation(FVector)', 'UE.Self.AddActorWorldOffset(FVector)', 'UE.Self.GetActorRotation()', 'UE.Self.SetActorRotation(FRotator)', 'UE.Self.GetActorScale3D()', 'UE.Self.SetActorScale3D(FVector)', 'UE.Self.GetRootComponent().GetWorldLocation()', 'UE.Self.GetRootComponent().SetWorldLocation(FVector)', 'AActor.GetActorTransform()', 'Actor.SetLocation(float x, float y, float z)', 'Actor.AddLocationOffset(float x, float y, float z)', 'UE.SetTimer(float delaySeconds, int callbackId)', 'UE.CancelTimer(int timerHandle)')
                 supported_state = @('private static float Field', 'Field = expression', 'Field += expression', 'FVector local = UE.Self.GetActorLocation()', 'FVector local + new FVector(...)', 'FRotator local = UE.Self.GetActorRotation()', 'FRotator local + new FRotator(...)', 'FVector local = UE.Self.GetActorScale3D()', 'FVector local = UE.Self.GetRootComponent().GetWorldLocation()')
-                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer')
+                supported_lifecycle_events = @('BeginPlay', 'Tick', 'EndPlay', 'Timer', 'Event')
+                supported_event_expressions = @('numeric literal', 'value', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
                 static_float_fields = @($Fields | ForEach-Object { $_.Name })
                 supported_tick_expressions = @('numeric literal', 'deltaSeconds', 'private static float field', 'multiplication of supported expressions', 'addition of supported expressions')
             }
@@ -1327,7 +1362,8 @@ function Write-Report {
             "avid_on_begin_play",
             "avid_on_tick",
             "avid_on_end_play",
-            "avid_on_timer"
+            "avid_on_timer",
+            "avid_on_event"
         )
         required_imports = @(
             [ordered]@{
@@ -1620,7 +1656,7 @@ catch {
 }
 
 $ObservedNames = @($ObservedExports | ForEach-Object { $_.name })
-$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play", "avid_on_timer")
+$RequiredExports = @("avid_on_begin_play", "avid_on_tick", "avid_on_end_play", "avid_on_timer", "avid_on_event")
 $MissingExports = @($RequiredExports | Where-Object { $ObservedNames -notcontains $_ })
 
 if ($MissingExports.Count -gt 0) {

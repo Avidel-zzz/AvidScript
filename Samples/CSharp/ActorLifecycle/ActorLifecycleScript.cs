@@ -39,6 +39,12 @@ public static class ActorLifecycleScript
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 50.0f));
     }
 
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
+    public static void OnEvent(int eventId, float value)
+    {
+        UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f));
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {

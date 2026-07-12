@@ -128,6 +128,13 @@ bool FAvidScriptComponentOwnerHandleLifecycleSmokeTest::RunTest(const FString& P
 		return true;
 	}
 
+	UFunction* DispatchEventFunction = Component->FindFunction(GET_FUNCTION_NAME_CHECKED(UAvidScriptComponent, DispatchScriptEvent));
+	TestNotNull(TEXT("DispatchScriptEvent is reflected for Blueprint"), DispatchEventFunction);
+	if (DispatchEventFunction != nullptr)
+	{
+		TestTrue(TEXT("DispatchScriptEvent is BlueprintCallable"), DispatchEventFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
+	}
+
 	const FAvidScriptComponentRuntimeStats StatsAfterBeginPlay = Component->GetRuntimeStats();
 	TestTrue(TEXT("Component registers owner on BeginPlay"), StatsAfterBeginPlay.bOwnerRegistered);
 	TestTrue(TEXT("Component exposes a valid owner handle"), StatsAfterBeginPlay.OwnerHandle.IsValid());
@@ -271,6 +278,14 @@ bool FAvidScriptComponentCSharpManifestLifecycleSmokeTest::RunTest(const FString
 	TestEqual(TEXT("Component records one Timer callback"), StatsAfterTimer.TimerCallbackCount, 1);
 	TestEqual(TEXT("Component records Timer callback id"), StatsAfterTimer.LastTimerCallbackId, 7);
 	TestTrue(TEXT("Component records Timer handle"), StatsAfterTimer.LastTimerHandle > 0);
+	TestTrue(TEXT("Component dispatches a gameplay event"), Component->DispatchScriptEvent(3, 25.0f));
+	const FAvidScriptComponentRuntimeStats StatsAfterEvent = Component->GetRuntimeStats();
+	TestTrue(TEXT("C# component event callback moves actor"), Actor->GetActorLocation().Equals(FVector(106.0, 225.0, 350.0), 0.01));
+	TestEqual(TEXT("Component records one gameplay event"), StatsAfterEvent.EventCallbackCount, 1);
+	TestEqual(TEXT("Component records gameplay event id"), StatsAfterEvent.LastEventId, 3);
+	TestEqual(TEXT("Component records gameplay event value"), StatsAfterEvent.LastEventValue, 25.0f);
+	TestFalse(TEXT("Component rejects an invalid gameplay event id"), Component->DispatchScriptEvent(-1, 1.0f));
+	TestTrue(TEXT("Invalid host event does not unload a healthy runtime"), Component->GetRuntimeStats().bRuntimeLoaded);
 
 	TestTrue(TEXT("Smoke world routes EndPlay"), World->EndPlay(EEndPlayReason::Quit));
 	TestTrue(TEXT("C# component EndPlay moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));

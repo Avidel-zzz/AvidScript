@@ -261,8 +261,10 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample exports Tick"), SourceText.Contains(TEXT("avid_on_tick")));
 	TestTrue(TEXT("Sample exports EndPlay"), SourceText.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("Sample exports Timer callback"), SourceText.Contains(TEXT("avid_on_timer")));
+	TestTrue(TEXT("Sample exports gameplay event callback"), SourceText.Contains(TEXT("avid_on_event")));
 	TestTrue(TEXT("Sample declares EndPlay method"), SourceText.Contains(TEXT("public static void EndPlay")));
 	TestTrue(TEXT("Sample declares OnTimer method"), SourceText.Contains(TEXT("public static void OnTimer(int callbackId, int timerHandle)")));
+	TestTrue(TEXT("Sample declares OnEvent method"), SourceText.Contains(TEXT("public static void OnEvent(int eventId, float value)")));
 	TestTrue(TEXT("Sample uses UnmanagedCallersOnly"), SourceText.Contains(TEXT("UnmanagedCallersOnly")));
 	TestTrue(TEXT("Sample imports env actor_set_location"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_set_location")));
 	TestTrue(TEXT("Sample imports env actor_add_location_offset"), SourceText.Contains(TEXT("DllImport(\"env\"")) && SourceText.Contains(TEXT("actor_add_location_offset")));
@@ -291,6 +293,7 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents UE.CancelTimer"), SourceText.Contains(TEXT("public static bool CancelTimer(int timerHandle)")));
 	TestTrue(TEXT("Sample schedules Timer in BeginPlay"), SourceText.Contains(TEXT("UE.SetTimer(0.05f, 7)")));
 	TestTrue(TEXT("Sample timer callback changes Actor"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 50.0f))")));
+	TestTrue(TEXT("Sample event callback uses payload value"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector(0.0f, value, 0.0f))")));
 	TestTrue(TEXT("Sample uses typed SetActorLocation"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(new FVector")));
 	TestTrue(TEXT("Sample uses typed AddActorWorldOffset"), SourceText.Contains(TEXT("UE.Self.AddActorWorldOffset(new FVector")));
 	TestTrue(TEXT("Sample uses FVector.Zero"), SourceText.Contains(TEXT("UE.Self.SetActorLocation(FVector.Zero)")));
@@ -465,7 +468,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v10 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v10")));
+	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v11 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v11")));
 	TestTrue(TEXT("C# source adapter manifest declares USceneComponent"), ManifestJson.Contains(TEXT("USceneComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares GetRootComponent"), ManifestJson.Contains(TEXT("GetRootComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
@@ -480,9 +483,11 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter manifest declares FTransform"), ManifestJson.Contains(TEXT("FTransform")));
 	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("C# source adapter manifest requires Timer export"), ManifestJson.Contains(TEXT("avid_on_timer")));
+	TestTrue(TEXT("C# source adapter manifest requires gameplay event export"), ManifestJson.Contains(TEXT("avid_on_event")));
 	TestTrue(TEXT("C# source adapter manifest declares UE.SetTimer"), ManifestJson.Contains(TEXT("UE.SetTimer(float delaySeconds, int callbackId)")));
 	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
 	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
+	TestTrue(TEXT("C# source adapter manifest declares event value expressions"), ManifestJson.Contains(TEXT("supported_event_expressions")) && ManifestJson.Contains(TEXT("value")));
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -676,11 +681,19 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# Timer callback reports a handle"), ThirdTickResult.LastTimerHandle > 0);
 	TestEqual(TEXT("Fired one-shot Timer leaves no pending Timer"), Session.GetLivePendingTimerCount(), 0);
 
+	FAvidScriptWasmSmokeResult EventResult;
+	TestTrue(TEXT("C# gameplay event dispatch succeeds"), Session.DispatchEventLive(3, 25.0f, EventResult));
+	TestTrue(TEXT("C# gameplay event payload moves actor"), Actor->GetActorLocation().Equals(FVector(106.0, 225.0, 350.0), 0.01));
+	TestEqual(TEXT("C# gameplay event callback count"), EventResult.EventCallbackCount, 1);
+	TestEqual(TEXT("C# gameplay event id"), EventResult.LastEventId, 3);
+	TestEqual(TEXT("C# gameplay event value"), EventResult.LastEventValue, 25.0f);
+
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
 	ReloadedManifest.ModuleId = TEXT("csharp_timer_successful_reload");
 	TestTrue(TEXT("Compatible C# Timer reload applies"), Session.ReloadModule(Bytecode.GetData(), Bytecode.Num(), ReloadedManifest, ReloadResult));
 	TestEqual(TEXT("Reloaded runtime owns one fresh Timer"), Session.GetLivePendingTimerCount(), 1);
 	TestEqual(TEXT("Reloaded runtime callback count starts fresh"), Session.GetLiveTimerCallbackCount(), 0);
+	TestEqual(TEXT("Reloaded runtime event count starts fresh"), Session.GetLiveEventCallbackCount(), 0);
 	FAvidScriptWasmSmokeResult ReloadTickResult;
 	for (int32 TickIndex = 0; TickIndex < 3; ++TickIndex)
 	{
