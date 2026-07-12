@@ -99,6 +99,19 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
     '\b(UObject|AActor|USceneComponent|FVector|FRotator|FTransform)\b'
 )
 
+$VmContractHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
+foreach ($RequiredBatchContract in @('ActorGetTransformBatch', 'InputCells', 'OutputFloats')) {
+    if (-not $VmContractHeader.Contains($RequiredBatchContract)) {
+        Add-Violation "VM batch contract is missing $RequiredBatchContract"
+    }
+}
+$VmHostBindingsSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'
+foreach ($RequiredVmPrimitive in @('TranslateGuestRange', 'actor_get_transform_batch')) {
+    if (-not $VmHostBindingsSource.Contains($RequiredVmPrimitive)) {
+        Add-Violation "VM guest-memory adapter is missing $RequiredVmPrimitive"
+    }
+}
+
 $RuntimeBuild = Read-RequiredFile 'Source/AvidScriptRuntime/AvidScriptRuntime.Build.cs'
 foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings', 'AvidScriptVM')) {
     if (-not $RuntimeBuild.Contains('"' + $RequiredDependency + '"')) {

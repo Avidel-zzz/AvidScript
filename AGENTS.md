@@ -212,6 +212,21 @@ Plugins/AvidScript/Docs
 
 - 2026-07-13 P37.3 文档路径错误复发：functions.exec JavaScript template literal 再次把 PowerShell here-string 中的 Windows C colon backslash tmp 路径解释成制表符并移除斜杠。Prevention：经 functions.exec 生成的 Markdown 路径统一写成 C:/tmp/... 正斜杠形式；写后扫描 tab 控制字符。
 
+## Product Maturity Direction
+
+- The project goal is a production-grade modern UE scripting platform comparable in practical scope to Puerts, UnLua, and Unreal AngelScript, not a collection of isolated demo bindings.
+- From Phase 39 onward, the primary roadmap is a real language frontend, generated reflection bindings, broad typed UE interoperability, debugging, packaging, and cross-platform hardening.
+- Do not expand UE coverage by hand-writing one host import per gameplay method as the default strategy. A manual binding is acceptable only when it establishes or validates a reusable ABI, generator rule, ownership policy, or performance primitive that subsequent APIs can share.
+- Every phase must state how it improves generated coverage, language expressiveness, tooling, runtime guarantees, or production readiness. Reject work that only increases a sample version number without advancing one of those dimensions.
+- Tests must detect a plausible regression at an ownership, ABI, memory-safety, lifecycle, code-generation, or user-workflow boundary. Do not add tests that merely assign fields and immediately read the same fields back, assert implementation text without a behavioral contract, or duplicate coverage without a distinct failure mode.
+- Prefer end-to-end generated artifacts and real WAMR guest-memory/event paths for public behavior. Keep narrow unit tests for algorithms and state machines where isolation provides a meaningful failure signal.
+- Feature parity and production maturity are separate gates: implementation is not mature until it has packaged-build, stress, compatibility, and real-project evidence.
+- 2026-07-13 P38 test edit mistake record: an in-memory insertion required the test file to end with a newline after the final preprocessor directive, so the exact end anchor failed before write. Prevention: end-of-file edits must use LastIndexOf on the directive or structured lines and must not assume a trailing newline; keep all validation before WriteAllText.
+- 2026-07-13 P38 edit validation mistake record: Select-String was used as if pipeline output preserved direct match counting, then the replacement was incorrectly expected to contain three lowercase import-name tokens when it correctly contained two. Both checks stopped before write. Prevention: deterministic validation uses String.Split or regex Matches with a count derived from the actual intended occurrences; compilation remains the final gate.
+- 2026-07-13 P38 PowerShell syntax mistake record: C-style backslash quote escaping was used inside a PowerShell double-quoted edit string, causing ParserError before execution. Prevention: C++ source anchors containing quotes use single-quoted PowerShell here-strings; do not compress them into escaped double-quoted literals.
+- 2026-07-13 P38 WAMR fixture mistake record: the first invalid-output case used address 65532 assuming a fixed one-page memory, but WAMR instance heap growth made that range valid and the dispatcher was called. Prevention: invalid guest-pointer fixtures use a deterministic near-MAX_int32 address or derive the actual memory bound; validation loops should retain distinct case names.
+- 2026-07-13 P38 documentation formatting mistake record: an inserted here-string did not preserve the intended separator before Module Architecture Workflow, joining a note and heading on one line. Prevention: after inserting variable-length notes, assert heading lines start at line boundaries and read back the surrounding section before continuing.
+
 ## Module Architecture Workflow
 
 - Runtime dependency direction is `AvidScriptCore <- AvidScriptVM/AvidScriptBindings <- AvidScriptRuntime <- AvidScriptEditor`.

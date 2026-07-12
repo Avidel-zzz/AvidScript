@@ -45,28 +45,6 @@ bool FAvidScriptVmExportCacheTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptVmHostCallContractTest,
-	"AvidScript.Architecture.VM.HostCallContract",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FAvidScriptVmHostCallContractTest::RunTest(const FString& Parameters)
-{
-	FAvidScriptHostCall Call;
-	Call.BindingId = EAvidScriptHostBindingId::ActorSetLocation;
-	Call.IntArgs[0] = 7;
-	Call.IntArgs[1] = 11;
-	Call.FloatArgs[0] = 1.0f;
-	Call.FloatArgs[1] = 2.0f;
-	Call.FloatArgs[2] = 3.0f;
-
-	TestEqual(TEXT("binding id is POD routed"), Call.BindingId, EAvidScriptHostBindingId::ActorSetLocation);
-	TestEqual(TEXT("slot survives the frame"), Call.IntArgs[0], 7);
-	TestEqual(TEXT("generation survives the frame"), Call.IntArgs[1], 11);
-	TestEqual(TEXT("vector z survives the frame"), Call.FloatArgs[2], 3.0f);
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWamrBackendSmokeTest,
 	"AvidScript.Architecture.VM.WamrBackendSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

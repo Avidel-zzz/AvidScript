@@ -14,6 +14,7 @@ enum class EAvidScriptHostBindingId : uint16
 	ActorSetRotation,
 	ActorGetScale,
 	ActorSetScale,
+	ActorGetTransformBatch,
 	ActorGetRootComponent,
 	SceneComponentGetWorldLocation,
 	SceneComponentSetWorldLocation,
@@ -64,6 +65,10 @@ struct FAvidScriptHostCall
 	int32 IntArgs[4] = {};
 	float FloatArgs[4] = {};
 	uint32 GuestAddress = 0;
+
+	// Views borrow validated guest memory and are valid only during synchronous dispatch.
+	TConstArrayView<uint32> InputCells;
+	TArrayView<float> OutputFloats;
 };
 
 struct FAvidScriptHostCallResult

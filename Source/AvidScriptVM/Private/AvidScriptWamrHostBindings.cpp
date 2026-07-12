@@ -16,6 +16,9 @@ namespace
 #if AVIDSCRIPT_WITH_WAMR
 constexpr const char* CanonicalModuleName = "avidscript";
 constexpr const char* CompatibilityModuleName = "env";
+constexpr int32 MaxTransformBatchCount = 256;
+constexpr uint32 TransformBatchInputCellsPerItem = 2;
+constexpr uint32 TransformBatchOutputFloatsPerItem = 9;
 
 IAvidScriptWamrHostBridge* GetBridge(wasm_exec_env_t ExecEnv)
 {
@@ -67,6 +70,61 @@ bool Dispatch(
 		return Fail(ExecEnv, Bridge, ImportName, Details);
 	}
 
+	return true;
+}
+
+bool TranslateGuestRange(
+	wasm_exec_env_t ExecEnv,
+	const char* ImportName,
+	const TCHAR* ArgumentName,
+	int32 GuestAddress,
+	uint32 ElementCount,
+	uint32 ElementSize,
+	uint32 Alignment,
+	void*& OutNativeAddress)
+{
+	OutNativeAddress = nullptr;
+	if (ElementCount == 0)
+	{
+		return true;
+	}
+
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	wasm_module_inst_t ModuleInstance = ExecEnv != nullptr ? wasm_runtime_get_module_inst(ExecEnv) : nullptr;
+	const uint64 ByteCount64 = static_cast<uint64>(ElementCount) * ElementSize;
+	if (ModuleInstance == nullptr || GuestAddress <= 0 || Alignment == 0 ||
+		(static_cast<uint32>(GuestAddress) % Alignment) != 0 || ByteCount64 > MAX_uint32 ||
+		!wasm_runtime_validate_app_addr(
+			ModuleInstance,
+			static_cast<uint64>(static_cast<uint32>(GuestAddress)),
+			static_cast<uint64>(ByteCount64)))
+	{
+		return Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			FString::Printf(
+				TEXT("Invalid %s range at %d for avidscript.%s."),
+				ArgumentName,
+				GuestAddress,
+				ANSI_TO_TCHAR(ImportName)));
+	}
+
+	OutNativeAddress = wasm_runtime_addr_app_to_native(
+		ModuleInstance,
+		static_cast<uint64>(static_cast<uint32>(GuestAddress)));
+	if (OutNativeAddress == nullptr)
+	{
+		return Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			FString::Printf(
+				TEXT("Failed to translate %s address %d for avidscript.%s."),
+				ArgumentName,
+				GuestAddress,
+				ANSI_TO_TCHAR(ImportName)));
+	}
 	return true;
 }
 
@@ -202,6 +260,63 @@ int32_t ActorSetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation,
 	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetScale, "actor_set_scale", Slot, Generation, X, Y, Z);
 }
 
+int32_t ActorGetTransformBatch(
+	wasm_exec_env_t ExecEnv,
+	int32_t InputAddress,
+	int32_t Count,
+	int32_t OutputAddress)
+{
+	constexpr const char* ImportName = "actor_get_transform_batch";
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (Count < 0 || Count > MaxTransformBatchCount)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			FString::Printf(TEXT("Batch count %d is outside the supported range 0..%d."), Count, MaxTransformBatchCount));
+		return 0;
+	}
+
+	const uint32 ItemCount = static_cast<uint32>(Count);
+	const uint32 InputCellCount = ItemCount * TransformBatchInputCellsPerItem;
+	const uint32 OutputFloatCount = ItemCount * TransformBatchOutputFloatsPerItem;
+	void* InputNativeAddress = nullptr;
+	void* OutputNativeAddress = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("input"),
+			InputAddress,
+			InputCellCount,
+			sizeof(uint32),
+			alignof(uint32),
+			InputNativeAddress) ||
+		!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("output"),
+			OutputAddress,
+			OutputFloatCount,
+			sizeof(float),
+			alignof(float),
+			OutputNativeAddress))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ActorGetTransformBatch;
+	Call.IntArgs[0] = Count;
+	if (InputCellCount > 0)
+	{
+		Call.InputCells = MakeArrayView(static_cast<const uint32*>(InputNativeAddress), static_cast<int32>(InputCellCount));
+		Call.OutputFloats = MakeArrayView(static_cast<float*>(OutputNativeAddress), static_cast<int32>(OutputFloatCount));
+	}
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result) ? Result.ReturnValue : 0;
+}
+
 int32_t ActorGetRootComponent(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutAddress)
 {
 	FAvidScriptHostCall Call;
@@ -275,6 +390,7 @@ NativeSymbol GNativeSymbols[] = {
 	{ "actor_set_rotation", reinterpret_cast<void*>(ActorSetRotation), "(iifff)i", nullptr },
 	{ "actor_get_scale", reinterpret_cast<void*>(ActorGetScale), "(iii)i", nullptr },
 	{ "actor_set_scale", reinterpret_cast<void*>(ActorSetScale), "(iifff)i", nullptr },
+	{ "actor_get_transform_batch", reinterpret_cast<void*>(ActorGetTransformBatch), "(iii)i", nullptr },
 	{ "actor_get_root_component", reinterpret_cast<void*>(ActorGetRootComponent), "(iii)i", nullptr },
 	{ "scene_component_get_world_location", reinterpret_cast<void*>(SceneComponentGetWorldLocation), "(iii)i", nullptr },
 	{ "scene_component_set_world_location", reinterpret_cast<void*>(SceneComponentSetWorldLocation), "(iifff)i", nullptr },
