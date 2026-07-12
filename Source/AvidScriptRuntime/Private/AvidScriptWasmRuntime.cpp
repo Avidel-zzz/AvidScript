@@ -525,6 +525,120 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	constexpr const TCHAR* ExportName = TEXT("avid_on_gameplay_event");
+	PrepareResult(OutResult, ModuleId, Metrics);
+	OutResult.bRuntimeInitialized = IsLoaded();
+	OutResult.bModuleLoaded = IsLoaded();
+	OutResult.bModuleInstantiated = IsLoaded();
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
+	OutResult.TickCallCount = TickCallCount;
+	CopyObservableStateToResult(OutResult);
+
+	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			ExportName,
+			TEXT("invalid_state"),
+			TEXT("Typed gameplay events require an active runtime between BeginPlay and EndPlay"),
+			TEXT("dispatch typed events only while the AvidScript session is Running"));
+		return false;
+	}
+
+	const uint8 EventTypeValue = static_cast<uint8>(Event.Type);
+	const bool bKnownType = EventTypeValue <= static_cast<uint8>(EAvidScriptGameplayEventType::Input);
+	const bool bRequiresObjectHandle =
+		Event.Type == EAvidScriptGameplayEventType::BeginOverlap ||
+		Event.Type == EAvidScriptGameplayEventType::EndOverlap ||
+		Event.Type == EAvidScriptGameplayEventType::Hit;
+	if (!bKnownType || Event.PrimaryId < 0 || Event.SecondaryId < 0 ||
+		(bRequiresObjectHandle && !Event.ObjectHandle.IsValid()) ||
+		!FMath::IsFinite(Event.VectorValue.X) ||
+		!FMath::IsFinite(Event.VectorValue.Y) ||
+		!FMath::IsFinite(Event.VectorValue.Z))
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			ExportName,
+			TEXT("invalid_argument"),
+			FString::Printf(
+				TEXT("Invalid typed gameplay event | type=%u | primary=%d | secondary=%d | slot=%u | generation=%u"),
+				EventTypeValue,
+				Event.PrimaryId,
+				Event.SecondaryId,
+				Event.ObjectHandle.Slot,
+				Event.ObjectHandle.Generation),
+			TEXT("provide a known event type, non-negative ids, finite values, and a valid object handle when required"));
+		return false;
+	}
+
+	if (!bGameplayEventExportLookupAttempted)
+	{
+		bGameplayEventExportLookupAttempted = true;
+		FAvidScriptVmError ResolveError;
+		if (!VmBackend->ResolveExport(ExportName, GameplayEventExport, ResolveError) &&
+			ResolveError.Category != TEXT("missing_export"))
+		{
+			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError);
+			FAvidScriptLifecycleTransitionResult LifecycleResult;
+			LifecycleState.MarkFaulted(LifecycleResult);
+			return false;
+		}
+	}
+
+	if (!GameplayEventExport.IsValid())
+	{
+		return true;
+	}
+
+	uint32 EventArgs[FAvidScriptVmCallFrame::MaxCells] = {
+		static_cast<uint32>(EventTypeValue),
+		static_cast<uint32>(Event.PrimaryId),
+		static_cast<uint32>(Event.SecondaryId),
+		Event.ObjectHandle.Slot,
+		Event.ObjectHandle.Generation,
+		0,
+		0,
+		0
+	};
+	FMemory::Memcpy(&EventArgs[5], &Event.VectorValue.X, sizeof(float));
+	FMemory::Memcpy(&EventArgs[6], &Event.VectorValue.Y, sizeof(float));
+	FMemory::Memcpy(&EventArgs[7], &Event.VectorValue.Z, sizeof(float));
+
+	const double EventStartSeconds = FPlatformTime::Seconds();
+	if (!CallVmExport(
+			VmBackend.Get(),
+			GameplayEventExport,
+			ModuleId,
+			"avid_on_gameplay_event",
+			UE_ARRAY_COUNT(EventArgs),
+			EventArgs,
+			OutResult))
+	{
+		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		OutResult.Metrics = Metrics;
+		CopyObservableStateToResult(OutResult);
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
+		return false;
+	}
+
+	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+	++EventCallbackCount;
+	LastEventId = EventTypeValue;
+	LastEventValue = Event.VectorValue.X;
+	OutResult.Metrics = Metrics;
+	CopyObservableStateToResult(OutResult);
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, Metrics);
@@ -664,6 +778,8 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	EndPlayExport = {};
 	TimerExport = {};
 	EventExport = {};
+	GameplayEventExport = {};
+	bGameplayEventExportLookupAttempted = false;
 	ModuleId.Empty();
 	bHasBegunPlay = false;
 	bHasEndedPlay = false;

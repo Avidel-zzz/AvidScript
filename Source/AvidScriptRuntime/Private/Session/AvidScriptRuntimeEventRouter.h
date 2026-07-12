@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptGameplayEvent.h"
 #include "AvidScriptWasmRuntime.h"
 
 class FAvidScriptRuntimeScheduler;
@@ -13,6 +14,7 @@ public:
 	}
 
 	bool Dispatch(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool Dispatch(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 
 private:
 	FAvidScriptRuntimeScheduler& Scheduler;

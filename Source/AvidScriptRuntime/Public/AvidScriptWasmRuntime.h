@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptGameplayEvent.h"
 #include "AvidScriptLifecycleState.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
@@ -83,6 +84,7 @@ public:
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool EndPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	void Unload();
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 
@@ -145,7 +147,9 @@ private:
 	FAvidScriptVmExportHandle EndPlayExport;
 	FAvidScriptVmExportHandle TimerExport;
 	FAvidScriptVmExportHandle EventExport;
+	FAvidScriptVmExportHandle GameplayEventExport;
 
+	bool bGameplayEventExportLookupAttempted = false;
 	bool bHasBegunPlay = false;
 	bool bHasEndedPlay = false;
 	bool bEndPlayAttempted = false;

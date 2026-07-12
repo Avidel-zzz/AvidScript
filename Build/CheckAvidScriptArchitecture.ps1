@@ -128,6 +128,8 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
 
 $RuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+$GameplayEventHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptGameplayEvent.h'
+$EventRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeEventRouter.cpp'
 foreach ($RequiredTimerStructure in @('ActiveTimers', 'TimerHeap', 'DueTimerScratch')) {
     if (-not $RuntimeHeader.Contains($RequiredTimerStructure)) {
         Add-Violation "Runtime timer scheduler is missing required structure $RequiredTimerStructure"
@@ -154,6 +156,36 @@ foreach ($RequiredBatchRuntimeStructure in @(
 }
 if (-not $RuntimeSource.Contains('case EAvidScriptHostBindingId::ActorGetTransformBatch')) {
     Add-Violation 'Runtime dispatcher does not route ActorGetTransformBatch'
+}
+foreach ($RequiredGameplayEventContract in @(
+    'EAvidScriptGameplayEventType',
+    'FAvidScriptGameplayEvent',
+    'BeginOverlap',
+    'EndOverlap',
+    'Hit',
+    'Input'
+)) {
+    if (-not $GameplayEventHeader.Contains($RequiredGameplayEventContract)) {
+        Add-Violation "Runtime gameplay event schema is missing $RequiredGameplayEventContract"
+    }
+}
+foreach ($RequiredGameplayEventRoute in @('DispatchGameplayEvent', 'avid_on_gameplay_event')) {
+    if (-not $RuntimeSource.Contains($RequiredGameplayEventRoute)) {
+        Add-Violation "Runtime gameplay event dispatcher is missing $RequiredGameplayEventRoute"
+    }
+    if (-not $EventRouterSource.Contains($RequiredGameplayEventRoute)) {
+        Add-Violation "Runtime event router is missing $RequiredGameplayEventRoute"
+    }
+}
+foreach ($ForbiddenPerEventExport in @(
+    'avid_on_begin_overlap',
+    'avid_on_end_overlap',
+    'avid_on_hit',
+    'avid_on_input'
+)) {
+    if ($RuntimeSource.Contains($ForbiddenPerEventExport) -or $EventRouterSource.Contains($ForbiddenPerEventExport)) {
+        Add-Violation "Runtime must route gameplay schemas through avid_on_gameplay_event instead of $ForbiddenPerEventExport"
+    }
 }
 if ($RuntimeSource -match 'CopyHostImportStateToResult\(OutResult\);\s*CopyTimerStateToResult\(OutResult\);\s*CopyEventStateToResult\(OutResult\);') {
     Add-Violation 'Runtime result synchronization must not repeat the observable-state copy triplet'

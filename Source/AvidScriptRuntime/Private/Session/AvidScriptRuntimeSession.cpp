@@ -202,6 +202,14 @@ bool FAvidScriptRuntimeSession::DispatchEvent(
 {
 	return DispatchEventLive(EventId, Value, OutResult);
 }
+
+bool FAvidScriptRuntimeSession::DispatchGameplayEvent(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return DispatchGameplayEventLive(Event, OutResult);
+}
+
 bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
 	return Scheduler->Tick(DeltaSeconds, OutResult);
@@ -213,6 +221,13 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	return EventRouter->Dispatch(EventId, Value, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return EventRouter->Dispatch(Event, OutResult);
 }
 
 bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)

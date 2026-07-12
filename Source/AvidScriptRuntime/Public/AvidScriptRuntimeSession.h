@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptGameplayEvent.h"
 #include "AvidScriptWasmReloadTypes.h"
 
 class FAvidScriptRuntimeEventRouter;
@@ -39,9 +40,11 @@ public:
 
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	bool StopAndUnload(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEventLive(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchGameplayEventLive(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();

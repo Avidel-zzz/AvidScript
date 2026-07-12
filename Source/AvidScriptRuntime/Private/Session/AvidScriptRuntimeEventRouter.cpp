@@ -6,11 +6,12 @@ namespace
 {
 void SetEventRouterStateFailure(
 	const FAvidScriptRuntimeScheduler& Scheduler,
+	const TCHAR* ExportName,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	OutResult = FAvidScriptWasmSmokeResult();
 	OutResult.ModuleId = Scheduler.GetModuleId();
-	OutResult.ExportName = TEXT("avid_on_event");
+	OutResult.ExportName = ExportName;
 	OutResult.ErrorCategory = TEXT("invalid_state");
 	OutResult.NextAction = TEXT("attach a Running runtime to the session scheduler before dispatching events");
 	OutResult.ErrorMessage = TEXT("AvidScript event router rejected dispatch because no Running runtime is attached.");
@@ -25,9 +26,22 @@ bool FAvidScriptRuntimeEventRouter::Dispatch(
 	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();
 	if (Runtime == nullptr)
 	{
-		SetEventRouterStateFailure(Scheduler, OutResult);
+		SetEventRouterStateFailure(Scheduler, TEXT("avid_on_event"), OutResult);
 		return false;
 	}
 
 	return Runtime->DispatchEvent(EventId, Value, OutResult);
+}
+
+bool FAvidScriptRuntimeEventRouter::Dispatch(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();
+	if (Runtime == nullptr)
+	{
+		SetEventRouterStateFailure(Scheduler, TEXT("avid_on_gameplay_event"), OutResult);
+		return false;
+	}
+	return Runtime->DispatchGameplayEvent(Event, OutResult);
 }
