@@ -52,25 +52,29 @@ internal static class SemanticOperationProjector
         ICollection<SemanticDiagnostic>? diagnostics,
         SemanticCaptureRegistry? captureRegistry = null)
     {
-        (string kind, bool isSupported) = DescribeOperation(operation);
+        (string kind, bool hasStableProjection) = DescribeOperation(operation);
+        SemanticSupportDecision support = SemanticSupportPolicy.EvaluateOperation(
+            operation,
+            kind,
+            hasStableProjection);
         ITypeSymbol? type = operation.Type;
         string? typeId = type is null ? null : typeRegistry.Register(type);
         string? symbolId = GetReferencedSymbol(operation) is { } symbol
             ? SemanticSymbolProjector.GetSymbolId(symbol)
             : null;
         SemanticSpan span = SemanticSpanFactory.Create(context.SourceText, operation.Syntax.Span);
-        if (!isSupported && diagnostics is not null)
+        if (!support.IsSupported && diagnostics is not null)
         {
             diagnostics.Add(new SemanticDiagnostic(
-                "ASCS2001",
+                support.DiagnosticCode!,
                 "error",
-                $"The C# operation '{kind}' is not supported by the AvidScript semantic profile.",
+                support.DiagnosticMessage!,
                 span));
         }
 
         return new SemanticOperation(
             kind,
-            isSupported,
+            support.IsSupported,
             GetOperatorKind(operation),
             GetIsChecked(operation),
             GetIsLifted(operation),
@@ -291,6 +295,7 @@ internal static class SemanticOperationProjector
             IObjectCreationOperation creation => creation.Constructor,
             IArgumentOperation argument => argument.Parameter,
             IVariableDeclaratorOperation variable => variable.Symbol,
+            IInstanceReferenceOperation instanceReference when instanceReference.Type is INamedTypeSymbol type => type,
             _ => null,
         };
     }

@@ -11,7 +11,7 @@ namespace AvidScript.CSharpSemantic;
 public static class SemanticAnalyzer
 {
     private const int CurrentSchemaVersion = 3;
-    private const string CurrentSemanticVersion = "1.2";
+    private const string CurrentSemanticVersion = "1.3";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -46,8 +46,19 @@ public static class SemanticAnalyzer
         SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
+        SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
+        IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
+            .Concat(operationProjection.Diagnostics)
+            .GroupBy(diagnostic =>
+                (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
+            .Select(group => group.First())
+            .ToArray();
+        bool hasSupportErrors = supportDiagnostics.Any(diagnostic => diagnostic.Severity == "error");
+        IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs = hasSupportErrors
+            ? Array.Empty<SemanticControlFlowGraph>()
+            : controlFlowProjection.Graphs;
         IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation
             .GetDiagnostics()
             .Where(diagnostic => diagnostic.Location == Location.None || diagnostic.Location.SourceTree == context.SyntaxTree)
@@ -56,7 +67,7 @@ public static class SemanticAnalyzer
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
             .ToArray();
         IReadOnlyList<SemanticDiagnostic> diagnostics = compilerDiagnostics
-            .Concat(operationProjection.Diagnostics)
+            .Concat(supportDiagnostics)
             .Concat(controlFlowProjection.Diagnostics)
             .OrderBy(diagnostic => diagnostic.Span.Start)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
@@ -72,7 +83,7 @@ public static class SemanticAnalyzer
             typeRegistry.Build(),
             symbols,
             operationProjection.Methods,
-            controlFlowProjection.Graphs,
+            controlFlowGraphs,
             diagnostics);
     }
 

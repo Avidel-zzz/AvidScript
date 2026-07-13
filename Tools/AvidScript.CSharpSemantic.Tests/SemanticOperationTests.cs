@@ -253,7 +253,7 @@ internal static class SemanticOperationTests
         SemanticDocument document = Analyze(source, "Scripts/SchemaVersion.cs");
 
         Assert(document.SchemaVersion == 3, "CFG artifacts should use semantic schema v3");
-        Assert(document.SemanticVersion == "1.2", "CFG artifacts should advertise semantic version 1.2");
+        Assert(document.SemanticVersion == "1.3", "instance-policy artifacts should advertise semantic version 1.3");
     }
     private static void ConversionOperationsRetainCastSemantics()
     {
