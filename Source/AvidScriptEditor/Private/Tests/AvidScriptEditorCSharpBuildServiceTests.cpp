@@ -212,7 +212,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 
 	FString ManifestText;
 	TestTrue(TEXT("Custom manifest text is readable"), FFileHelper::LoadFileToString(ManifestText, *Config.ManifestPath));
-	TestTrue(TEXT("Custom profile without gameplay callbacks uses v12 subset"), ManifestText.Contains(TEXT("actor_lifecycle_v12")));
+	TestTrue(TEXT("Custom profile without gameplay callbacks uses v13 AST subset"), ManifestText.Contains(TEXT("actor_lifecycle_v13")));
 	TestTrue(TEXT("Custom profile without OnEvent still exports event callback"), ManifestText.Contains(TEXT("avid_on_event")));
 	TestTrue(TEXT("Custom profile without gameplay callbacks still exports generic dispatcher"), ManifestText.Contains(TEXT("avid_on_gameplay_event")));
 

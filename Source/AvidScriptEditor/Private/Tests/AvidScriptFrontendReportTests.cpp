@@ -100,7 +100,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 		TEXT("  \"exit_code\": 1,\n")
 		TEXT("  \"succeeded\": false,\n")
 		TEXT("  \"diagnostics\": [\n")
-		TEXT("    { \"code\": \"ASL1202\", \"severity\": \"error\", \"line\": 6, \"column\": 5, \"message\": \"unknown binding 'teleport_actor'\" }\n")
+		TEXT("    { \"code\": \"ASL1202\", \"severity\": \"error\", \"file\": \"Scripts/Broken.cs\", \"start\": 29, \"length\": 4, \"line\": 6, \"column\": 5, \"end_line\": 6, \"end_column\": 9, \"message\": \"unknown binding 'teleport_actor'\" }\n")
 		TEXT("  ],\n")
 		TEXT("  \"build_events\": [\n")
 		TEXT("    { \"result\": \"unknown_binding\", \"fields\": { \"code\": \"ASL1202\", \"binding\": \"teleport_actor\" } }\n")
@@ -123,8 +123,13 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 		const FAvidScriptFrontendDiagnostic& Diagnostic = Report.Diagnostics[0];
 		TestEqual(TEXT("Diagnostic code"), Diagnostic.Code, FString(TEXT("ASL1202")));
 		TestEqual(TEXT("Diagnostic severity"), Diagnostic.Severity, FString(TEXT("error")));
+		TestEqual(TEXT("Diagnostic file"), Diagnostic.File, FString(TEXT("Scripts/Broken.cs")));
+		TestEqual(TEXT("Diagnostic start"), Diagnostic.Start, 29);
+		TestEqual(TEXT("Diagnostic length"), Diagnostic.Length, 4);
 		TestEqual(TEXT("Diagnostic line"), Diagnostic.Line, 6);
 		TestEqual(TEXT("Diagnostic column"), Diagnostic.Column, 5);
+		TestEqual(TEXT("Diagnostic end line"), Diagnostic.EndLine, 6);
+		TestEqual(TEXT("Diagnostic end column"), Diagnostic.EndColumn, 9);
 		TestEqual(TEXT("Diagnostic message"), Diagnostic.Message, FString(TEXT("unknown binding 'teleport_actor'")));
 		TestTrue(TEXT("Diagnostic reports error"), Diagnostic.IsError());
 	}
@@ -142,6 +147,38 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 		}
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportCSharpStructuredLoadTest,
+	"AvidScript.Editor.Report.CSharpStructuredLoadSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("csharp_structured.report.json"));
+	const FString ReportJson = TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"source\": { \"file\": \"Scripts/ActorLifecycleScript.cs\", \"sha256\": \"abc123\", \"script_type\": \"ActorLifecycleScript\" },\n")
+		TEXT("  \"output_root\": \"Saved/AvidScriptCSharpGuest\",\n")
+		TEXT("  \"succeeded\": true,\n")
+		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\" },\n")
+		TEXT("  \"frontend\": { \"schema_version\": 1, \"version\": \"1.0\" },\n")
+		TEXT("  \"diagnostics\": []\n")
+		TEXT("}\n");
+
+	TestTrue(TEXT("C# structured fixture writes"), WriteAvidScriptReportFixture(ReportPath, ReportJson));
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestTrue(TEXT("C# structured report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestEqual(TEXT("C# source file"), Report.Source, FString(TEXT("Scripts/ActorLifecycleScript.cs")));
+	TestEqual(TEXT("C# source hash"), Report.SourceSha256, FString(TEXT("abc123")));
+	TestEqual(TEXT("C# script type"), Report.ScriptType, FString(TEXT("ActorLifecycleScript")));
+	TestEqual(TEXT("C# frontend artifact"), Report.FrontendArtifact, FString(TEXT("Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json")));
+	TestEqual(TEXT("C# frontend schema"), Report.FrontendSchemaVersion, 1);
+	TestEqual(TEXT("C# frontend version"), Report.FrontendVersion, FString(TEXT("1.0")));
 	return true;
 }
 

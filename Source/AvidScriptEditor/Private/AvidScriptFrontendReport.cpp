@@ -84,8 +84,13 @@ void LoadAvidScriptDiagnostics(
 		FAvidScriptFrontendDiagnostic Diagnostic;
 		DiagnosticObject->TryGetStringField(TEXT("code"), Diagnostic.Code);
 		DiagnosticObject->TryGetStringField(TEXT("severity"), Diagnostic.Severity);
+		DiagnosticObject->TryGetStringField(TEXT("file"), Diagnostic.File);
+		Diagnostic.Start = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("start"), INDEX_NONE);
+		Diagnostic.Length = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("length"), 0);
 		Diagnostic.Line = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("line"), 0);
 		Diagnostic.Column = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("column"), 0);
+		Diagnostic.EndLine = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("end_line"), Diagnostic.Line);
+		Diagnostic.EndColumn = GetAvidScriptJsonIntField(DiagnosticObject, TEXT("end_column"), Diagnostic.Column);
 		DiagnosticObject->TryGetStringField(TEXT("message"), Diagnostic.Message);
 		OutDiagnostics.Add(MoveTemp(Diagnostic));
 	}
@@ -148,6 +153,37 @@ void LoadAvidScriptRawOutput(
 		}
 	}
 }
+
+void LoadAvidScriptSource(const TSharedPtr<FJsonObject>& RootObject, FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonObject>* SourceObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("source"), SourceObject) && SourceObject != nullptr && SourceObject->IsValid())
+	{
+		(*SourceObject)->TryGetStringField(TEXT("file"), OutReport.Source);
+		(*SourceObject)->TryGetStringField(TEXT("sha256"), OutReport.SourceSha256);
+		(*SourceObject)->TryGetStringField(TEXT("script_type"), OutReport.ScriptType);
+		return;
+	}
+
+	RootObject->TryGetStringField(TEXT("source"), OutReport.Source);
+}
+
+void LoadAvidScriptFrontendMetadata(const TSharedPtr<FJsonObject>& RootObject, FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonObject>* ArtifactsObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("artifacts"), ArtifactsObject) && ArtifactsObject != nullptr && ArtifactsObject->IsValid())
+	{
+		(*ArtifactsObject)->TryGetStringField(TEXT("frontend_file"), OutReport.FrontendArtifact);
+	}
+
+	const TSharedPtr<FJsonObject>* FrontendObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("frontend"), FrontendObject) && FrontendObject != nullptr && FrontendObject->IsValid())
+	{
+		OutReport.FrontendSchemaVersion = GetAvidScriptJsonIntField(*FrontendObject, TEXT("schema_version"), 0);
+		(*FrontendObject)->TryGetStringField(TEXT("version"), OutReport.FrontendVersion);
+	}
+}
+
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -229,7 +265,8 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 		return false;
 	}
 
-	RootObject->TryGetStringField(TEXT("source"), OutReport.Source);
+	LoadAvidScriptSource(RootObject, OutReport);
+	LoadAvidScriptFrontendMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);

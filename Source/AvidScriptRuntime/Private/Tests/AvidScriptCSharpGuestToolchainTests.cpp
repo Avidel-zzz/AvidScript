@@ -475,7 +475,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# source adapter manifest declares actor lifecycle v12 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v12")));
+	TestTrue(TEXT("C# AST adapter manifest declares actor lifecycle v13 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v13")));
 	TestTrue(TEXT("C# source adapter manifest declares USceneComponent"), ManifestJson.Contains(TEXT("USceneComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares GetRootComponent"), ManifestJson.Contains(TEXT("GetRootComponent")));
 	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));

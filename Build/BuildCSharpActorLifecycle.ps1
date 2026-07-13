@@ -1502,7 +1502,7 @@ function Invoke-CSharpSourceAdapter {
 
         $AdapterDiagnostics += [ordered]@{
             code = 'source_adapter_used'
-            message = 'Built direct ABI WASM from the C# ActorLifecycle v12 source subset with generated generic gameplay-event dispatch, typed AActor/FVector collision callbacks, InputEvent field mapping, lifecycle and Timer events, static float state and legacy Actor facade support.'
+            message = 'Built direct ABI WASM from the C# ActorLifecycle v13 AST subset with generated generic gameplay-event dispatch, typed AActor/FVector collision callbacks, InputEvent field mapping, lifecycle and Timer events, static float state and legacy Actor facade support.'
         }
 
         return [PSCustomObject]@{
