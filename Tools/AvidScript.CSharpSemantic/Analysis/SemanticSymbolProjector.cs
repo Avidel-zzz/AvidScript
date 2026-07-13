@@ -46,6 +46,52 @@ internal static class SemanticSymbolProjector
             }
         }
 
+        foreach (AccessorDeclarationSyntax accessorSyntax in root.DescendantNodes().OfType<AccessorDeclarationSyntax>())
+        {
+            IMethodSymbol? accessor = semanticModel.GetDeclaredSymbol(accessorSyntax) as IMethodSymbol;
+            if (accessor is not null)
+            {
+                AddSymbol(symbols, accessor, accessorSyntax, context, typeRegistry);
+            }
+        }
+        foreach (PropertyDeclarationSyntax propertySyntax in root.DescendantNodes()
+            .OfType<PropertyDeclarationSyntax>()
+            .Where(property => property.ExpressionBody is not null))
+        {
+            IPropertySymbol? property = semanticModel.GetDeclaredSymbol(propertySyntax) as IPropertySymbol;
+            if (property?.GetMethod is { } getter)
+            {
+                AddSymbol(symbols, getter, propertySyntax.ExpressionBody!, context, typeRegistry);
+            }
+        }
+        foreach (IndexerDeclarationSyntax indexerSyntax in root.DescendantNodes()
+            .OfType<IndexerDeclarationSyntax>()
+            .Where(indexer => indexer.ExpressionBody is not null))
+        {
+            IPropertySymbol? indexer = semanticModel.GetDeclaredSymbol(indexerSyntax) as IPropertySymbol;
+            if (indexer?.GetMethod is { } getter)
+            {
+                AddSymbol(symbols, getter, indexerSyntax.ExpressionBody!, context, typeRegistry);
+            }
+        }
+        foreach (VariableDeclaratorSyntax variable in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
+        {
+            ILocalSymbol? local = semanticModel.GetDeclaredSymbol(variable) as ILocalSymbol;
+            if (local is not null)
+            {
+                AddSymbol(symbols, local, variable, context, typeRegistry);
+            }
+        }
+
+        foreach (SingleVariableDesignationSyntax designation in root.DescendantNodes().OfType<SingleVariableDesignationSyntax>())
+        {
+            ILocalSymbol? local = semanticModel.GetDeclaredSymbol(designation) as ILocalSymbol;
+            if (local is not null)
+            {
+                AddSymbol(symbols, local, designation, context, typeRegistry);
+            }
+        }
+
         return symbols.Values.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray();
     }
 
@@ -84,10 +130,11 @@ internal static class SemanticSymbolProjector
         return symbol switch
         {
             INamedTypeSymbol type => "symbol:type:" + GetTypeIdentity(type),
-            IFieldSymbol field => $"symbol:field:{GetTypeIdentity(field.ContainingType)}.{field.Name}:{SemanticTypeRegistry.GetCanonicalName(field.Type)}",
-            IPropertySymbol property => $"symbol:property:{GetTypeIdentity(property.ContainingType)}.{property.Name}:{SemanticTypeRegistry.GetCanonicalName(property.Type)}",
-            IMethodSymbol method => $"symbol:method:{GetTypeIdentity(method.ContainingType)}.{GetMethodSignature(method)}",
-            IParameterSymbol parameter => $"symbol:parameter:{GetSymbolId(parameter.ContainingSymbol)}:{parameter.Ordinal}:{parameter.Name}:{SemanticTypeRegistry.GetCanonicalName(parameter.Type)}",
+            IFieldSymbol field => GetFieldId(field),
+            IPropertySymbol property => GetPropertyId(property),
+            IMethodSymbol method => GetMethodId(method),
+            IParameterSymbol parameter => GetParameterId(parameter),
+            ILocalSymbol local => $"symbol:local:{GetSymbolId(local.ContainingSymbol)}.local:{GetSourceStart(local)}:{local.Name}:{SemanticTypeRegistry.GetCanonicalName(local.Type)}",
             _ => $"symbol:{GetKind(symbol)}:{symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}",
         };
     }
@@ -110,6 +157,7 @@ internal static class SemanticSymbolProjector
             IPropertySymbol property => property.Type,
             IMethodSymbol method => method.ReturnType,
             IParameterSymbol parameter => parameter.Type,
+            ILocalSymbol local => local.Type,
             _ => null,
         };
     }
@@ -120,19 +168,65 @@ internal static class SemanticSymbolProjector
         {
             INamedTypeSymbol type => GetTypeIdentity(type),
             IFieldSymbol field => $"{field.Name}:{SemanticTypeRegistry.GetCanonicalName(field.Type)}",
-            IPropertySymbol property => $"{property.Name}:{SemanticTypeRegistry.GetCanonicalName(property.Type)}",
+            IPropertySymbol property => GetPropertySignature(property.OriginalDefinition),
             IMethodSymbol method => GetMethodSignature(method),
             IParameterSymbol parameter => $"{parameter.Name}:{SemanticTypeRegistry.GetCanonicalName(parameter.Type)}",
+            ILocalSymbol local => $"{local.Name}:{SemanticTypeRegistry.GetCanonicalName(local.Type)}",
             _ => symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
         };
     }
 
-    private static string GetMethodSignature(IMethodSymbol method)
+    private static string GetFieldId(IFieldSymbol field)
     {
-        string parameters = string.Join(",", method.Parameters.Select(parameter => SemanticTypeRegistry.GetCanonicalName(parameter.Type)));
-        return $"{method.Name}({parameters}):{SemanticTypeRegistry.GetCanonicalName(method.ReturnType)}";
+        IFieldSymbol definition = field.OriginalDefinition;
+        return $"symbol:field:{GetTypeIdentity(definition.ContainingType)}.{definition.Name}:{SemanticTypeRegistry.GetCanonicalName(definition.Type)}";
     }
 
+    private static string GetMethodId(IMethodSymbol method)
+    {
+        IMethodSymbol definition = method.OriginalDefinition;
+        return $"symbol:method:{GetTypeIdentity(definition.ContainingType)}.{GetMethodSignature(definition)}";
+    }
+
+    private static string GetParameterId(IParameterSymbol parameter)
+    {
+        IParameterSymbol definition = parameter.OriginalDefinition;
+        return $"symbol:parameter:{GetSymbolId(definition.ContainingSymbol)}:{definition.Ordinal}:{definition.Name}:{SemanticTypeRegistry.GetCanonicalName(definition.Type)}";
+    }
+    private static string GetPropertyId(IPropertySymbol property)
+    {
+        IPropertySymbol definition = property.OriginalDefinition;
+        return $"symbol:property:{GetTypeIdentity(definition.ContainingType)}.{GetPropertySignature(definition)}";
+    }
+
+    private static string GetPropertySignature(IPropertySymbol property)
+    {
+        string name = property.IsIndexer
+            ? $"this[{string.Join(",", property.Parameters.Select(GetParameterSignature))}]"
+            : property.Name;
+        return $"{name}:{SemanticTypeRegistry.GetCanonicalName(property.Type)}";
+    }
+    private static string GetMethodSignature(IMethodSymbol method)
+    {
+        IMethodSymbol definition = method.OriginalDefinition;
+        string name = definition.Arity == 0
+            ? definition.Name
+            : $"{definition.Name}`{definition.Arity}";
+        string parameters = string.Join(",", definition.Parameters.Select(GetParameterSignature));
+        return $"{name}({parameters}):{SemanticTypeRegistry.GetCanonicalName(definition.ReturnType)}";
+    }
+
+    private static string GetParameterSignature(IParameterSymbol parameter)
+    {
+        string modifier = parameter.RefKind switch
+        {
+            RefKind.Ref => "ref ",
+            RefKind.Out => "out ",
+            RefKind.In => "in ",
+            _ => string.Empty,
+        };
+        return modifier + SemanticTypeRegistry.GetCanonicalName(parameter.Type);
+    }
     private static string GetTypeIdentity(INamedTypeSymbol type)
     {
         return type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -148,7 +242,13 @@ internal static class SemanticSymbolProjector
             IMethodSymbol method when method.MethodKind == MethodKind.Constructor => "constructor",
             IMethodSymbol => "method",
             IParameterSymbol => "parameter",
+            ILocalSymbol => "local",
             _ => symbol.Kind.ToString().ToLowerInvariant(),
         };
+    }
+
+    private static int GetSourceStart(ISymbol symbol)
+    {
+        return symbol.Locations.FirstOrDefault(location => location.IsInSource)?.SourceSpan.Start ?? -1;
     }
 }

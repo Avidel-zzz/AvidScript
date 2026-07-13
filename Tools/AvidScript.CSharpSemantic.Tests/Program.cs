@@ -6,7 +6,7 @@ internal static class Program
     {
         try
         {
-            int count = SemanticCompilationTests.Run() + SemanticCliTests.Run();
+            int count = SemanticCompilationTests.Run() + SemanticOperationTests.Run() + SemanticCliTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

@@ -11,4 +11,5 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(4)] bool Succeeded,
     [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticType> Types,
     [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticSymbol> Symbols,
-    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticMethodBody> Methods,
+    [property: JsonPropertyOrder(8)] IReadOnlyList<SemanticDiagnostic> Diagnostics);

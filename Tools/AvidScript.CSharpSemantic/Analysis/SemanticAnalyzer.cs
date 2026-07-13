@@ -10,6 +10,9 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
+    private const int CurrentSchemaVersion = 2;
+    private const string CurrentSemanticVersion = "1.1";
+
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -21,13 +24,14 @@ public static class SemanticAnalyzer
         if (!sourceSha256.Equals(frontendSourceSha256, StringComparison.OrdinalIgnoreCase))
         {
             return new SemanticDocument(
-                1,
+                CurrentSchemaVersion,
                 "csharp",
-                "1.0",
+                CurrentSemanticVersion,
                 semanticSource,
                 false,
                 Array.Empty<SemanticType>(),
                 Array.Empty<SemanticSymbol>(),
+                Array.Empty<SemanticMethodBody>(),
                 new[]
                 {
                     new SemanticDiagnostic(
@@ -41,23 +45,30 @@ public static class SemanticAnalyzer
         SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
-        IReadOnlyList<SemanticDiagnostic> diagnostics = context.Compilation
+        SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
+        IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation
             .GetDiagnostics()
             .Where(diagnostic => diagnostic.Location == Location.None || diagnostic.Location.SourceTree == context.SyntaxTree)
             .Select(diagnostic => ProjectDiagnostic(diagnostic, context))
             .OrderBy(diagnostic => diagnostic.Span.Start)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
             .ToArray();
+        IReadOnlyList<SemanticDiagnostic> diagnostics = compilerDiagnostics
+            .Concat(operationProjection.Diagnostics)
+            .OrderBy(diagnostic => diagnostic.Span.Start)
+            .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
+            .ToArray();
         bool succeeded = diagnostics.All(diagnostic => diagnostic.Severity != "error");
 
         return new SemanticDocument(
-            1,
+            CurrentSchemaVersion,
             "csharp",
-            "1.0",
+            CurrentSemanticVersion,
             semanticSource,
             succeeded,
             typeRegistry.Build(),
             symbols,
+            operationProjection.Methods,
             diagnostics);
     }
 
