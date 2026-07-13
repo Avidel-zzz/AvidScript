@@ -343,3 +343,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-13 P39.4 contract mistake record: the AST adapter manifest advanced to `actor_lifecycle_v13`, but Runtime/Editor tests and a report message still asserted v12. Prevention: when a generated artifact contract version changes, search production code, tests, reports, samples, and current docs for the old identifier before considering the migration complete; run both producer integration tests and UE consumers.
 - 2026-07-13 P39.4 fallback newline mistake record: a PowerShell here-string appended after an existing line did not contribute a leading newline, joining two AGENTS bullets. Prevention: when appending a block, concatenate an explicit Environment.NewLine before the block and verify the surrounding lines after write.
 - 2026-07-13 P39.4 verification environment mistake record: the final .NET test reused a C:\tmp CLI-home path whose existing ACL was not writable, so dotnet failed before loading the project. Prevention: create and probe a task-local ignored directory under the writable plugin Saved tree, then redirect DOTNET_CLI_HOME, APPDATA, LOCALAPPDATA, and NUGET_PACKAGES there before invoking dotnet.
+
+## Phase 40 Semantic Analysis Rules
+
+- Use Roslyn Compilation, IOperation, and ControlFlowGraph as the C# semantic truth. Do not hand-write a C# binder or reconstruct control flow from syntax text.
+- Project Roslyn results into versioned AvidScript symbols, canonical types, typed operations, conversions, and CFG records. Public artifacts must not contain numeric Roslyn enums, object identities, SDK paths, or nondeterministic symbol keys.
+- PowerShell remains orchestration only. It must not acquire type inference, overload resolution, conversion, or branch analysis responsibilities.
+- Semantic analysis must verify the source hash recorded by the frontend artifact before consuming it. A mismatch is a hard failure, not a warning.
+- Instance fields and methods may be represented in Phase 40, but guest memory offsets and object layout belong to Phase 41.
+- UE facade/reference assemblies, C# proxies, and host stubs must be generated from reflection schema in Phase 42; do not expand the temporary handwritten sample facade.
+- 2026-07-13 P40.0 fallback newline recurrence: the AGENTS append again relied on a here-string leading blank line and produced only one line break before a heading. Prevention: never infer block separation from here-string layout; construct the boundary with two explicit local newline sequences and inspect the preceding line plus heading.
