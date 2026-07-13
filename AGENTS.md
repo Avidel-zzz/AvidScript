@@ -353,3 +353,6 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Instance fields and methods may be represented in Phase 40, but guest memory offsets and object layout belong to Phase 41.
 - UE facade/reference assemblies, C# proxies, and host stubs must be generated from reflection schema in Phase 42; do not expand the temporary handwritten sample facade.
 - 2026-07-13 P40.0 fallback newline recurrence: the AGENTS append again relied on a here-string leading blank line and produced only one line break before a heading. Prevention: never infer block separation from here-string layout; construct the boundary with two explicit local newline sequences and inspect the preceding line plus heading.
+- Roslyn diagnostic messages written to stable artifacts must use CultureInfo.InvariantCulture; otherwise identical compiler errors differ across developer locales.
+- Semantic CLI exit codes are 0 for success, 1 for semantic failure with an artifact, and 2 for argument/IO/frontend-artifact failure. Output replacement must remain atomic.
+- P40.1 semantic test baseline is 9/9 and Phase 39 frontend regression is 7/7. The real ActorLifecycle semantic artifact currently contains 15 types, 172 symbols, and 0 diagnostics.
