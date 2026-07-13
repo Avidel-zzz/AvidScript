@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace AvidScript.CSharpSemantic;
@@ -18,38 +18,14 @@ internal static class SemanticOperationProjector
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry)
     {
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(context.SyntaxTree, ignoreAccessibility: false);
-        SyntaxNode root = context.SyntaxTree.GetRoot();
         List<SemanticMethodBody> methods = new();
         List<SemanticDiagnostic> diagnostics = new();
 
-        foreach (SyntaxNode declaration in root.DescendantNodes().Where(node =>
-            node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax ||
-            node is PropertyDeclarationSyntax { ExpressionBody: not null } ||
-            node is IndexerDeclarationSyntax { ExpressionBody: not null }))
+        foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
         {
-            IMethodSymbol? method = declaration switch
-            {
-                PropertyDeclarationSyntax property =>
-                    (semanticModel.GetDeclaredSymbol(property) as IPropertySymbol)?.GetMethod,
-                IndexerDeclarationSyntax indexer =>
-                    (semanticModel.GetDeclaredSymbol(indexer) as IPropertySymbol)?.GetMethod,
-                _ => semanticModel.GetDeclaredSymbol(declaration) as IMethodSymbol,
-            };
-            IOperation? operation = declaration switch
-            {
-                PropertyDeclarationSyntax property => semanticModel.GetOperation(property.ExpressionBody!.Expression),
-                IndexerDeclarationSyntax indexer => semanticModel.GetOperation(indexer.ExpressionBody!.Expression),
-                _ => semanticModel.GetOperation(declaration),
-            };
-            if (method is null || operation is null)
-            {
-                continue;
-            }
-
             methods.Add(new SemanticMethodBody(
-                SemanticSymbolProjector.GetSymbolId(method),
-                ProjectOperation(operation, context, typeRegistry, diagnostics)));
+                SemanticSymbolProjector.GetSymbolId(body.Method),
+                ProjectOperation(body.Operation, context, typeRegistry, diagnostics)));
         }
 
         return new SemanticOperationProjection(
@@ -60,11 +36,21 @@ internal static class SemanticOperationProjector
                 .ToArray());
     }
 
+    internal static SemanticOperation ProjectControlFlowOperation(
+        IOperation operation,
+        SemanticCompilationContext context,
+        SemanticTypeRegistry typeRegistry,
+        SemanticCaptureRegistry captureRegistry)
+    {
+        return ProjectOperation(operation, context, typeRegistry, diagnostics: null, captureRegistry);
+    }
+
     private static SemanticOperation ProjectOperation(
         IOperation operation,
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry,
-        ICollection<SemanticDiagnostic> diagnostics)
+        ICollection<SemanticDiagnostic>? diagnostics,
+        SemanticCaptureRegistry? captureRegistry = null)
     {
         (string kind, bool isSupported) = DescribeOperation(operation);
         ITypeSymbol? type = operation.Type;
@@ -73,7 +59,7 @@ internal static class SemanticOperationProjector
             ? SemanticSymbolProjector.GetSymbolId(symbol)
             : null;
         SemanticSpan span = SemanticSpanFactory.Create(context.SourceText, operation.Syntax.Span);
-        if (!isSupported)
+        if (!isSupported && diagnostics is not null)
         {
             diagnostics.Add(new SemanticDiagnostic(
                 "ASCS2001",
@@ -97,9 +83,10 @@ internal static class SemanticOperationProjector
             ProjectConversion(operation),
             ProjectInputConversion(operation),
             ProjectOutputConversion(operation),
+            GetCaptureId(operation, captureRegistry),
             span,
             operation.ChildOperations
-                .Select(child => ProjectOperation(child, context, typeRegistry, diagnostics))
+                .Select(child => ProjectOperation(child, context, typeRegistry, diagnostics, captureRegistry))
                 .ToArray());
     }
 
@@ -135,7 +122,7 @@ internal static class SemanticOperationProjector
             IArgumentOperation => ("argument", true),
             IInstanceReferenceOperation => ("instance_reference", true),
             IIncrementOrDecrementOperation increment => ("increment_or_decrement", IsKnownOperatorKind(increment)),
-            IConditionalOperation conditional => ("conditional", conditional.Syntax is ConditionalExpressionSyntax),
+            IConditionalOperation => ("conditional", true),
             ICoalesceOperation => ("coalesce", false),
             IDefaultValueOperation => ("default_value", true),
             ITypeOfOperation => ("type_of", true),
@@ -146,10 +133,28 @@ internal static class SemanticOperationProjector
             IDeclarationExpressionOperation => ("declaration_expression", true),
             IDiscardOperation => ("discard", true),
             IParenthesizedOperation => ("parenthesized", true),
-            IBranchOperation => ("branch", false),
-            ILoopOperation => ("loop", false),
+            IBranchOperation => ("branch", true),
+            ILoopOperation => ("loop", true),
             IEmptyOperation => ("empty", true),
+            IFlowCaptureOperation => ("flow_capture", true),
+            IFlowCaptureReferenceOperation => ("flow_capture_reference", true),
             _ => ($"roslyn:{operation.Kind}", false),
+        };
+    }
+
+    private static string? GetCaptureId(
+        IOperation operation,
+        SemanticCaptureRegistry? captureRegistry)
+    {
+        return operation switch
+        {
+            IFlowCaptureOperation capture => (captureRegistry ??
+                throw new InvalidOperationException("Flow capture projection requires a capture registry."))
+                .Register(capture.Id),
+            IFlowCaptureReferenceOperation reference => (captureRegistry ??
+                throw new InvalidOperationException("Flow capture projection requires a capture registry."))
+                .Register(reference.Id),
+            _ => null,
         };
     }
 

@@ -30,6 +30,11 @@ internal static class SemanticCompilationTests
         Assert(document.Source.Sha256 == frontend.Source.Sha256, "semantic source hash should match frontend");
         Assert(document.Source.FrontendSha256 == frontend.Source.Sha256, "semantic artifact should retain frontend source hash");
         Assert(document.Diagnostics.All(diagnostic => diagnostic.Severity != "error"), "ActorLifecycle should have no semantic errors");
+        Assert(document.ControlFlowGraphs.Count == document.Methods.Count,
+            "every ActorLifecycle executable method body should have a CFG");
+        Assert(document.ControlFlowGraphs.Select(graph => graph.MethodSymbolId)
+            .SequenceEqual(document.Methods.Select(method => method.MethodSymbolId)),
+            "ActorLifecycle CFGs should align one-to-one with sorted executable method bodies");
 
         SemanticType floatType = FindType(document.Types, "type:float32");
         Assert(floatType.CanonicalName == "float32" && floatType.IsValueType, "float should use canonical float32 identity");

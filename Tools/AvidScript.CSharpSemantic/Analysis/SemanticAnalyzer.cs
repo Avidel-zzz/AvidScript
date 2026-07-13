@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 2;
-    private const string CurrentSemanticVersion = "1.1";
+    private const int CurrentSchemaVersion = 3;
+    private const string CurrentSemanticVersion = "1.2";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -32,6 +32,7 @@ public static class SemanticAnalyzer
                 Array.Empty<SemanticType>(),
                 Array.Empty<SemanticSymbol>(),
                 Array.Empty<SemanticMethodBody>(),
+                Array.Empty<SemanticControlFlowGraph>(),
                 new[]
                 {
                     new SemanticDiagnostic(
@@ -46,6 +47,7 @@ public static class SemanticAnalyzer
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
+        SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
         IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation
             .GetDiagnostics()
             .Where(diagnostic => diagnostic.Location == Location.None || diagnostic.Location.SourceTree == context.SyntaxTree)
@@ -55,6 +57,7 @@ public static class SemanticAnalyzer
             .ToArray();
         IReadOnlyList<SemanticDiagnostic> diagnostics = compilerDiagnostics
             .Concat(operationProjection.Diagnostics)
+            .Concat(controlFlowProjection.Diagnostics)
             .OrderBy(diagnostic => diagnostic.Span.Start)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
             .ToArray();
@@ -69,6 +72,7 @@ public static class SemanticAnalyzer
             typeRegistry.Build(),
             symbols,
             operationProjection.Methods,
+            controlFlowProjection.Graphs,
             diagnostics);
     }
 

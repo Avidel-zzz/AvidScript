@@ -22,8 +22,9 @@ public sealed record SemanticOperation(
     [property: JsonPropertyOrder(11)] SemanticConversion? Conversion,
     [property: JsonPropertyOrder(12)] SemanticConversion? InputConversion,
     [property: JsonPropertyOrder(13)] SemanticConversion? OutputConversion,
-    [property: JsonPropertyOrder(14)] SemanticSpan Span,
-    [property: JsonPropertyOrder(15)] IReadOnlyList<SemanticOperation> Children);
+    [property: JsonPropertyOrder(14)] string? CaptureId,
+    [property: JsonPropertyOrder(15)] SemanticSpan Span,
+    [property: JsonPropertyOrder(16)] IReadOnlyList<SemanticOperation> Children);
 
 public sealed record SemanticConstant(
     [property: JsonPropertyOrder(0)] string Kind,

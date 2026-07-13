@@ -20,7 +20,7 @@ internal static class SemanticOperationTests
         GenericMethodArityRemainsDistinct();
         OperationSchemaVersionIsExplicit();
         ConversionOperationsRetainCastSemantics();
-        ControlFlowOperationsRemainGatedUntilCfgProjection();
+        ControlFlowOperationsAreSupportedWithCfgProjection();
         UnsupportedOperationsArePreservedAndFailClosed();
         return 13;
     }
@@ -252,8 +252,8 @@ internal static class SemanticOperationTests
         const string source = "class Script { int Main() => 0; }";
         SemanticDocument document = Analyze(source, "Scripts/SchemaVersion.cs");
 
-        Assert(document.SchemaVersion == 2, "typed operation artifacts should use semantic schema v2");
-        Assert(document.SemanticVersion == "1.1", "typed operation artifacts should advertise semantic version 1.1");
+        Assert(document.SchemaVersion == 3, "CFG artifacts should use semantic schema v3");
+        Assert(document.SemanticVersion == "1.2", "CFG artifacts should advertise semantic version 1.2");
     }
     private static void ConversionOperationsRetainCastSemantics()
     {
@@ -275,7 +275,7 @@ internal static class SemanticOperationTests
         Assert(operations.Any(operation => operation.TypeId == "type:string" && operation.IsTryCast),
             "as conversions should remain distinguishable from ordinary reference casts");
     }
-    private static void ControlFlowOperationsRemainGatedUntilCfgProjection()
+    private static void ControlFlowOperationsAreSupportedWithCfgProjection()
     {
         const string source = """
             public sealed class Script
@@ -292,13 +292,16 @@ internal static class SemanticOperationTests
             .SelectMany(method => Flatten(method.Root))
             .ToArray();
 
-        Assert(!document.Succeeded, "control-flow operations should remain gated until CFG projection exists");
-        Assert(operations.Any(operation => operation.Kind == "conditional" && !operation.IsSupported),
-            "if operations should remain visible but unsupported until CFG projection exists");
-        Assert(operations.Any(operation => operation.Kind == "loop" && !operation.IsSupported),
-            "loop operations should remain visible but unsupported in P40.2");
-        Assert(operations.Any(operation => operation.Kind == "branch" && !operation.IsSupported),
-            "branch operations should remain visible but unsupported in P40.2");
+        Assert(document.Succeeded, "supported control-flow operations should pass once CFG projection exists");
+        Assert(operations.Any(operation => operation.Kind == "conditional" && operation.IsSupported),
+            "if operations should become supported with stable CFG projection");
+        Assert(operations.Any(operation => operation.Kind == "loop" && operation.IsSupported),
+            "loop operations should become supported with stable CFG projection");
+        Assert(operations.Any(operation => operation.Kind == "branch" && operation.IsSupported),
+            "branch operations should become supported with stable CFG projection");
+        Assert(document.ControlFlowGraphs.Any(graph =>
+            graph.MethodSymbolId == "symbol:method:global::Script.Tick(bool):void"),
+            "supported control flow should expose a CFG for the owning method");
     }
     private static void UnsupportedOperationsArePreservedAndFailClosed()
     {
