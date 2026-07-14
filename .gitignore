@@ -37,6 +37,9 @@ Tools/**/obj/
 *.swp
 *.cache
 
+# Sandboxed NuGet first-use marker
+**/NuGet/Migrations/
+
 # CMake byproducts for ThirdParty runtime experiments
 CMakeFiles/
 CMakeCache.txt
