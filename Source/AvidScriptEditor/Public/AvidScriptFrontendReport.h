@@ -33,6 +33,13 @@ struct FAvidScriptFrontendReport
 	FString FrontendArtifact;
 	int32 FrontendSchemaVersion = 0;
 	FString FrontendVersion;
+	FString SemanticArtifact;
+	int32 SemanticSchemaVersion = 0;
+	FString SemanticVersion;
+	bool bSemanticSucceeded = false;
+	FString SemanticSourceSha256;
+	FString SemanticFrontendSha256;
+	int32 SemanticDiagnosticCount = 0;
 	FString Bindings;
 	FString OutputRoot;
 	int32 ExitCode = 0;

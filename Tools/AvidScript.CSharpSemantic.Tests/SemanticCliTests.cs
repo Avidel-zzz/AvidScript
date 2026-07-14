@@ -10,9 +10,10 @@ internal static class SemanticCliTests
     {
         SuccessfulCliWritesSemanticArtifact();
         SemanticFailureStillWritesArtifact();
+        ReferenceSourceBindsExternalFacade();
         MalformedFrontendReturnsArtifactError();
         InvalidArgumentsReturnUsageExitCode();
-        return 4;
+        return 5;
     }
 
     private static void SuccessfulCliWritesSemanticArtifact()
@@ -40,6 +41,27 @@ internal static class SemanticCliTests
         Assert(File.Exists(workspace.OutputPath), "semantic errors should still write an artifact");
         string json = File.ReadAllText(workspace.OutputPath);
         Assert(json.Contains("CS0029", StringComparison.Ordinal), "semantic error artifact should retain compiler diagnostics");
+    }
+
+    private static void ReferenceSourceBindsExternalFacade()
+    {
+        const string source = "using AvidScript; public static class CustomScript { public static void Tick() { Actor.SetLocation(1.0f, 2.0f, 3.0f); } }";
+        const string referenceSource = "namespace AvidScript { public static class Actor { public static bool SetLocation(float x, float y, float z) => true; } }";
+        using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create(source, "Scripts/CustomScript.cs");
+        string referencePath = Path.Combine(workspace.Root, "AvidScript.Api.cs");
+        File.WriteAllText(referencePath, referenceSource);
+        string[] baseArguments = workspace.CreateArguments();
+        string[] arguments = new string[baseArguments.Length + 2];
+        Array.Copy(baseArguments, arguments, baseArguments.Length);
+        arguments[^2] = "--reference-source";
+        arguments[^1] = referencePath;
+
+        int exitCode = SemanticCommandLine.Run(arguments);
+
+        Assert(exitCode == 0, "reference source should make the external facade available to semantic analysis");
+        string json = File.ReadAllText(workspace.OutputPath);
+        Assert(json.Contains("global::AvidScript.Actor.SetLocation(float32,float32,float32):bool", StringComparison.Ordinal),
+            "reference source invocation should bind its stable facade symbol");
     }
 
     private static void MalformedFrontendReturnsArtifactError()

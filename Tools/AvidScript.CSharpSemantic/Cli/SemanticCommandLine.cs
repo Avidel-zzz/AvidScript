@@ -19,7 +19,7 @@ public static class SemanticCommandLine
     {
         try
         {
-            IReadOnlyDictionary<string, string> options = ParseOptions(args);
+            IReadOnlyDictionary<string, string> options = ParseOptions(args, out List<string> referenceSourcePaths);
             string sourcePath = GetRequiredOption(options, "--source");
             string sourceId = GetRequiredOption(options, "--source-id");
             string frontendPath = GetRequiredOption(options, "--frontend");
@@ -36,7 +36,8 @@ public static class SemanticCommandLine
 
             string source = File.ReadAllText(sourcePath);
             string frontendSourceSha256 = ReadFrontendSourceSha256(frontendPath);
-            SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontendSourceSha256);
+            IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourcePaths);
+            SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontendSourceSha256, referenceSources);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
         }
@@ -62,11 +63,14 @@ public static class SemanticCommandLine
         }
     }
 
-    private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
+    private static IReadOnlyDictionary<string, string> ParseOptions(
+        string[] args,
+        out List<string> referenceSourcePaths)
     {
+        referenceSourcePaths = new List<string>();
         if (args.Length == 0 || args.Length % 2 != 0)
         {
-            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path>");
+            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]...");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -74,6 +78,17 @@ public static class SemanticCommandLine
         {
             string option = args[index];
             string value = args[index + 1];
+            if (option == "--reference-source")
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    throw new ArgumentException("Reference source paths must be non-empty.");
+                }
+
+                referenceSourcePaths.Add(value);
+                continue;
+            }
+
             if (Array.IndexOf(RequiredOptions, option) < 0)
             {
                 throw new ArgumentException($"Unknown option: {option}");
@@ -86,6 +101,24 @@ public static class SemanticCommandLine
         }
 
         return options;
+    }
+
+    private static IReadOnlyList<SemanticReferenceSource> LoadReferenceSources(IReadOnlyList<string> referenceSourcePaths)
+    {
+        List<SemanticReferenceSource> referenceSources = new(referenceSourcePaths.Count);
+        for (int index = 0; index < referenceSourcePaths.Count; index++)
+        {
+            string path = referenceSourcePaths[index];
+            if (!File.Exists(path))
+            {
+                throw new ArgumentException($"Reference source file does not exist: {path}");
+            }
+
+            string sourceId = $"reference:{index}:{Path.GetFileName(path)}";
+            referenceSources.Add(new SemanticReferenceSource(File.ReadAllText(path), sourceId));
+        }
+
+        return referenceSources;
     }
 
     private static string GetRequiredOption(IReadOnlyDictionary<string, string> options, string name)

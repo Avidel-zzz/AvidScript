@@ -1414,6 +1414,9 @@ function Invoke-CSharpSourceAdapter {
                 script_type = $SelectedScriptTypeName
                 frontend_file = Convert-ToProjectRelativePath -Path $FrontendArtifactPath
                 frontend_schema_version = [int]$FrontendModel.schema_version
+                semantic_file = Convert-ToProjectRelativePath -Path $SemanticArtifactPath
+                semantic_schema_version = [int]$SemanticModel.schema_version
+                semantic_version = [string]$SemanticModel.semantic_version
             }
             wasm = [ordered]@{
                 file = Convert-ToProjectRelativePath -Path $AdapterWasmPath
@@ -1556,6 +1559,31 @@ function Convert-CSharpFrontendDiagnostics {
     return $Result
 }
 
+function Convert-CSharpSemanticDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)]$SemanticModel,
+        [Parameter(Mandatory = $true)][string]$SourceId
+    )
+
+    $Result = @()
+    foreach ($Diagnostic in @($SemanticModel.diagnostics)) {
+        $Result += [ordered]@{
+            code = [string]$Diagnostic.code
+            severity = [string]$Diagnostic.severity
+            message = [string]$Diagnostic.message
+            file = $SourceId
+            start = [int]$Diagnostic.span.start
+            length = [int]$Diagnostic.span.length
+            line = [int]$Diagnostic.span.line
+            column = [int]$Diagnostic.span.column
+            end_line = [int]$Diagnostic.span.end_line
+            end_column = [int]$Diagnostic.span.end_column
+        }
+    }
+
+    return $Result
+}
+
 function Write-Report {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -1658,10 +1686,19 @@ function Write-Report {
             manifest_file = if ([string]::IsNullOrWhiteSpace($ManifestPath)) { "" } else { Convert-ToProjectRelativePath -Path $ManifestPath }
             report_file = Convert-ToProjectRelativePath -Path $ReportPath
             frontend_file = if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath -Path $FrontendArtifactPath } else { "" }
+            semantic_file = if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath -Path $SemanticArtifactPath } else { "" }
         }
         frontend = [ordered]@{
             schema_version = if ($null -eq $FrontendModel) { 0 } else { [int]$FrontendModel.schema_version }
             version = if ($null -eq $FrontendModel) { "" } else { [string]$FrontendModel.frontend_version }
+        }
+        semantic = [ordered]@{
+            schema_version = if ($null -eq $SemanticModel) { 0 } else { [int]$SemanticModel.schema_version }
+            version = if ($null -eq $SemanticModel) { "" } else { [string]$SemanticModel.semantic_version }
+            succeeded = if ($null -eq $SemanticModel) { $false } else { [bool]$SemanticModel.succeeded }
+            source_sha256 = if ($null -eq $SemanticModel) { "" } else { [string]$SemanticModel.source.sha256 }
+            frontend_sha256 = if ($null -eq $SemanticModel) { "" } else { [string]$SemanticModel.source.frontend_sha256 }
+            diagnostic_count = if ($null -eq $SemanticModel) { 0 } else { @($SemanticModel.diagnostics).Count }
         }
         toolchain = [ordered]@{
             compiler = $Compiler
@@ -1713,9 +1750,11 @@ if ([string]::IsNullOrWhiteSpace($ManifestPath)) {
     $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json"
 }
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
+$SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $StaleAdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
 $StaleDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
+$SemanticModel = $null
 $SelectedScriptTypeName = ""
 $PublishRoot = Join-Path $OutputRoot "publish"
 $BinaryRoot = Join-Path $OutputRoot "bin"
@@ -1747,6 +1786,9 @@ if (Test-Path -LiteralPath $ManifestPath) {
 }
 if (Test-Path -LiteralPath $FrontendArtifactPath) {
     Remove-Item -LiteralPath $FrontendArtifactPath -Force
+}
+if (Test-Path -LiteralPath $SemanticArtifactPath) {
+    Remove-Item -LiteralPath $SemanticArtifactPath -Force
 }
 foreach ($StaleWasmPath in @($StaleAdapterWasmPath, $StaleDotNetWasmPath)) {
     if (Test-Path -LiteralPath $StaleWasmPath -PathType Leaf) {
@@ -1834,6 +1876,57 @@ else {
 if ($FrontendExitCode -ne 0 -or $null -eq $FrontendModel -or -not $FrontendModel.succeeded) {
     Write-Report -Result "frontend_failed" -DirectAbiSupported $false -Diagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn"
     Write-Output "[AvidScript][CSharp][Frontend] result=frontend_failed exit_code=$FrontendExitCode artifact=$FrontendArtifactPath report=$ReportPath"
+    exit 1
+}
+
+$SemanticScriptPath = Join-Path $BuildDir "InvokeCSharpSemantic.ps1"
+$SemanticArguments = @(
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", $SemanticScriptPath,
+    "-DotNetPath", $DotNet.Path,
+    "-SourcePath", $SourcePath,
+    "-SourceId", $FrontendSourceId,
+    "-FrontendPath", $FrontendArtifactPath,
+    "-OutputPath", $SemanticArtifactPath,
+    "-Configuration", $Configuration
+)
+$ResolvedSourcePath = [System.IO.Path]::GetFullPath($SourcePath)
+$ResolvedDefaultSourcePath = [System.IO.Path]::GetFullPath($DefaultSourcePath)
+if (-not $ResolvedSourcePath.Equals($ResolvedDefaultSourcePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $SemanticArguments += @("-ReferenceSourcePath", $DefaultSourcePath)
+}
+$SemanticOutput = @(& powershell.exe @SemanticArguments 2>&1)
+$SemanticExitCode = $LASTEXITCODE
+
+if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) {
+    try {
+        $SemanticModel = Get-Content -Raw -LiteralPath $SemanticArtifactPath | ConvertFrom-Json
+        $Diagnostics += @(Convert-CSharpSemanticDiagnostics -SemanticModel $SemanticModel -SourceId $FrontendSourceId)
+    }
+    catch {
+        $Diagnostics += [ordered]@{
+            code = "semantic_artifact_invalid"
+            severity = "error"
+            message = $_.Exception.Message
+            file = $FrontendSourceId
+        }
+    }
+}
+else {
+    $Diagnostics += [ordered]@{
+        code = "semantic_artifact_missing"
+        severity = "error"
+        message = "C# semantic analyzer did not write its artifact."
+        file = $FrontendSourceId
+        process_exit_code = $SemanticExitCode
+        output = @($SemanticOutput)
+    }
+}
+
+if ($SemanticExitCode -ne 0 -or $null -eq $SemanticModel -or -not $SemanticModel.succeeded) {
+    Write-Report -Result "semantic_failed" -DirectAbiSupported $false -Diagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn-semantic"
+    Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode artifact=$SemanticArtifactPath report=$ReportPath"
     exit 1
 }
 
@@ -1975,6 +2068,9 @@ $Manifest = [ordered]@{
         script_type = $SelectedScriptTypeName
         frontend_file = Convert-ToProjectRelativePath -Path $FrontendArtifactPath
         frontend_schema_version = [int]$FrontendModel.schema_version
+        semantic_file = Convert-ToProjectRelativePath -Path $SemanticArtifactPath
+        semantic_schema_version = [int]$SemanticModel.schema_version
+        semantic_version = [string]$SemanticModel.semantic_version
     }
     wasm = [ordered]@{
         file = Convert-ToProjectRelativePath -Path $CopiedWasmPath

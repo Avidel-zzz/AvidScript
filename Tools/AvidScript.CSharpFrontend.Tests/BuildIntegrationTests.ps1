@@ -67,6 +67,54 @@ Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $BrokenRoot "broken.cs
 $BrokenFrontendPath = Resolve-ArtifactPath $BrokenJson.artifacts.frontend_file
 Assert-Condition (Test-Path -LiteralPath $BrokenFrontendPath -PathType Leaf) "syntax failure frontend artifact is missing"
 
+$SemanticBrokenRoot = Join-Path $RunRoot "SemanticBroken"
+New-Item -ItemType Directory -Force -Path $SemanticBrokenRoot | Out-Null
+$SemanticBrokenSource = Join-Path $SemanticBrokenRoot "SemanticBrokenScript.cs"
+$SemanticBrokenReport = Join-Path $SemanticBrokenRoot "semantic_broken.csharp.report.json"
+$SemanticBrokenManifest = Join-Path $SemanticBrokenRoot "semantic_broken.avidscript.json"
+$SemanticBrokenWasm = Join-Path $SemanticBrokenRoot "semantic_broken.csharp_adapter.wasm"
+$SemanticBrokenDotNetWasm = Join-Path $SemanticBrokenRoot "semantic_broken.dotnet.wasm"
+$SemanticBrokenText = @"
+public static class SemanticBrokenScript
+{
+    public static void BeginPlay()
+    {
+        int value = "bad";
+    }
+
+    public static void Tick(float deltaSeconds)
+    {
+    }
+}
+"@
+[System.IO.File]::WriteAllText($SemanticBrokenSource, $SemanticBrokenText, $Utf8)
+[System.IO.File]::WriteAllText($SemanticBrokenManifest, "stale", $Utf8)
+[System.IO.File]::WriteAllBytes($SemanticBrokenWasm, [byte[]]@(0, 97, 115, 109))
+[System.IO.File]::WriteAllBytes($SemanticBrokenDotNetWasm, [byte[]]@(0, 97, 115, 109))
+
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $SemanticBrokenRoot `
+    -SourcePath $SemanticBrokenSource `
+    -ModuleId "p40_semantic_broken" `
+    -ArtifactStem "semantic_broken" `
+    -ReportPath $SemanticBrokenReport `
+    -ManifestPath $SemanticBrokenManifest | Out-Null
+$SemanticBrokenExit = $LASTEXITCODE
+Assert-Condition ($SemanticBrokenExit -eq 1) "semantic errors must return exit code 1; actual=$SemanticBrokenExit"
+Assert-Condition (Test-Path -LiteralPath $SemanticBrokenReport -PathType Leaf) "semantic failure report is missing"
+$SemanticBrokenJson = Get-Content -Raw -LiteralPath $SemanticBrokenReport | ConvertFrom-Json
+Assert-Condition ($SemanticBrokenJson.result -eq "semantic_failed") "semantic failure report result is not semantic_failed"
+Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$SemanticBrokenJson.artifacts.semantic_file)) "semantic failure report does not reference a semantic artifact"
+$SemanticBrokenArtifact = Resolve-ArtifactPath $SemanticBrokenJson.artifacts.semantic_file
+Assert-Condition (Test-Path -LiteralPath $SemanticBrokenArtifact -PathType Leaf) "semantic failure artifact is missing"
+$SemanticBrokenArtifactJson = Get-Content -Raw -LiteralPath $SemanticBrokenArtifact | ConvertFrom-Json
+Assert-Condition (-not $SemanticBrokenArtifactJson.succeeded) "semantic failure artifact reports success"
+Assert-Condition (@($SemanticBrokenJson.diagnostics | Where-Object code -eq "CS0029").Count -eq 1) "semantic failure report did not retain CS0029"
+Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenManifest -PathType Leaf)) "semantic failure must remove stale manifest"
+Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenWasm -PathType Leaf)) "semantic failure must remove stale adapter WASM"
+Assert-Condition (-not (Test-Path -LiteralPath $SemanticBrokenDotNetWasm -PathType Leaf)) "semantic failure must remove stale dotnet WASM"
+
 $NormalRoot = Join-Path $RunRoot "Normal"
 $NormalReport = Join-Path $NormalRoot "normal.csharp.report.json"
 $NormalManifest = Join-Path $NormalRoot "normal.avidscript.json"
@@ -89,10 +137,21 @@ $NormalFrontendPath = Resolve-ArtifactPath $NormalJson.artifacts.frontend_file
 Assert-Condition (Test-Path -LiteralPath $NormalFrontendPath -PathType Leaf) "valid source frontend artifact is missing"
 $FrontendJson = Get-Content -Raw -LiteralPath $NormalFrontendPath | ConvertFrom-Json
 Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "report/frontend source hashes differ"
+$NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
+Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
+$SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
+Assert-Condition ($SemanticJson.schema_version -eq 3) "semantic artifact schema version is not 3"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.3") "semantic artifact version is not 1.3"
+Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
+Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
+Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
+Assert-Condition ($NormalJson.semantic.source_sha256 -eq $FrontendJson.source.sha256) "report semantic source hash differs"
+Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.sha256) "report semantic frontend hash differs"
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"
 $ManifestJson = Get-Content -Raw -LiteralPath $NormalManifest | ConvertFrom-Json
 Assert-Condition ($ManifestJson.source.sha256 -eq $FrontendJson.source.sha256) "manifest/frontend source hashes differ"
 Assert-Condition ($ManifestJson.source.script_type -eq "ActorLifecycleScript") "manifest does not identify the AST-selected script type"
 Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.frontend_file)) "manifest does not reference the frontend artifact"
+Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.semantic_file)) "manifest does not reference the semantic artifact"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 2/2 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 3/3 passed"

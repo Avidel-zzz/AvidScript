@@ -179,6 +179,43 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 	TestEqual(TEXT("C# frontend artifact"), Report.FrontendArtifact, FString(TEXT("Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json")));
 	TestEqual(TEXT("C# frontend schema"), Report.FrontendSchemaVersion, 1);
 	TestEqual(TEXT("C# frontend version"), Report.FrontendVersion, FString(TEXT("1.0")));
+	TestTrue(TEXT("Legacy report has no semantic artifact"), Report.SemanticArtifact.IsEmpty());
+	TestEqual(TEXT("Legacy report semantic schema defaults to zero"), Report.SemanticSchemaVersion, 0);
+	TestFalse(TEXT("Legacy report semantic success defaults to false"), Report.bSemanticSucceeded);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportCSharpSemanticLoadTest,
+	"AvidScript.Editor.Report.CSharpSemanticLoadSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("csharp_semantic.report.json"));
+	const FString ReportJson = TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"source\": { \"file\": \"Scripts/ActorLifecycleScript.cs\", \"sha256\": \"abc123\", \"script_type\": \"ActorLifecycleScript\" },\n")
+		TEXT("  \"output_root\": \"Saved/AvidScriptCSharpGuest\",\n")
+		TEXT("  \"succeeded\": true,\n")
+		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\", \"semantic_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json\" },\n")
+		TEXT("  \"frontend\": { \"schema_version\": 1, \"version\": \"1.0\" },\n")
+		TEXT("  \"semantic\": { \"schema_version\": 3, \"version\": \"1.3\", \"succeeded\": true, \"source_sha256\": \"abc123\", \"frontend_sha256\": \"abc123\", \"diagnostic_count\": 0 },\n")
+		TEXT("  \"diagnostics\": []\n")
+		TEXT("}\n");
+
+	TestTrue(TEXT("C# semantic fixture writes"), WriteAvidScriptReportFixture(ReportPath, ReportJson));
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestTrue(TEXT("C# semantic report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestEqual(TEXT("C# semantic artifact"), Report.SemanticArtifact, FString(TEXT("Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json")));
+	TestEqual(TEXT("C# semantic schema"), Report.SemanticSchemaVersion, 3);
+	TestEqual(TEXT("C# semantic version"), Report.SemanticVersion, FString(TEXT("1.3")));
+	TestTrue(TEXT("C# semantic succeeded"), Report.bSemanticSucceeded);
+	TestEqual(TEXT("C# semantic source hash"), Report.SemanticSourceSha256, FString(TEXT("abc123")));
+	TestEqual(TEXT("C# semantic frontend hash"), Report.SemanticFrontendSha256, FString(TEXT("abc123")));
+	TestEqual(TEXT("C# semantic diagnostic count"), Report.SemanticDiagnosticCount, 0);
 	return true;
 }
 

@@ -184,6 +184,26 @@ void LoadAvidScriptFrontendMetadata(const TSharedPtr<FJsonObject>& RootObject, F
 	}
 }
 
+void LoadAvidScriptSemanticMetadata(const TSharedPtr<FJsonObject>& RootObject, FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonObject>* ArtifactsObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("artifacts"), ArtifactsObject) && ArtifactsObject != nullptr && ArtifactsObject->IsValid())
+	{
+		(*ArtifactsObject)->TryGetStringField(TEXT("semantic_file"), OutReport.SemanticArtifact);
+	}
+
+	const TSharedPtr<FJsonObject>* SemanticObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("semantic"), SemanticObject) && SemanticObject != nullptr && SemanticObject->IsValid())
+	{
+		OutReport.SemanticSchemaVersion = GetAvidScriptJsonIntField(*SemanticObject, TEXT("schema_version"), 0);
+		(*SemanticObject)->TryGetStringField(TEXT("version"), OutReport.SemanticVersion);
+		(*SemanticObject)->TryGetBoolField(TEXT("succeeded"), OutReport.bSemanticSucceeded);
+		(*SemanticObject)->TryGetStringField(TEXT("source_sha256"), OutReport.SemanticSourceSha256);
+		(*SemanticObject)->TryGetStringField(TEXT("frontend_sha256"), OutReport.SemanticFrontendSha256);
+		OutReport.SemanticDiagnosticCount = GetAvidScriptJsonIntField(*SemanticObject, TEXT("diagnostic_count"), 0);
+	}
+}
+
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -267,6 +287,7 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 
 	LoadAvidScriptSource(RootObject, OutReport);
 	LoadAvidScriptFrontendMetadata(RootObject, OutReport);
+	LoadAvidScriptSemanticMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);

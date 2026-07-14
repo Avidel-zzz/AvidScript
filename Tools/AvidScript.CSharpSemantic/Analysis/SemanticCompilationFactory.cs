@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -11,7 +13,10 @@ internal sealed record SemanticCompilationContext(
 
 internal static class SemanticCompilationFactory
 {
-    public static SemanticCompilationContext Create(string source, string sourceId)
+    public static SemanticCompilationContext Create(
+        string source,
+        string sourceId,
+        IReadOnlyList<SemanticReferenceSource> referenceSources)
     {
         SourceText sourceText = SourceText.From(source);
         CSharpParseOptions parseOptions = new(
@@ -19,6 +24,9 @@ internal static class SemanticCompilationFactory
             documentationMode: DocumentationMode.Parse,
             kind: SourceCodeKind.Regular);
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, sourceId);
+        List<SyntaxTree> syntaxTrees = new() { syntaxTree };
+        syntaxTrees.AddRange(referenceSources.Select(reference =>
+            CSharpSyntaxTree.ParseText(SourceText.From(reference.Source), parseOptions, reference.SourceId)));
         CSharpCompilationOptions compilationOptions = new(
             OutputKind.DynamicallyLinkedLibrary,
             optimizationLevel: OptimizationLevel.Release,
@@ -27,7 +35,7 @@ internal static class SemanticCompilationFactory
             deterministic: true);
         CSharpCompilation compilation = CSharpCompilation.Create(
             "AvidScript.SemanticAnalysis",
-            new[] { syntaxTree },
+            syntaxTrees,
             SemanticReferenceResolver.ResolveTrustedPlatformAssemblies(),
             compilationOptions);
         return new SemanticCompilationContext(compilation, syntaxTree, sourceText);
