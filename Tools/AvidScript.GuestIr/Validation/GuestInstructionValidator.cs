@@ -33,6 +33,50 @@ internal static class GuestInstructionValidator
             case "call":
                 ValidateCall(context, function, instruction, result, operands);
                 break;
+            case "local_load":
+                GuestStorageInstructionValidator.ValidateLocalLoad(
+                    context, function, instruction, result, operands, values);
+                break;
+            case "local_store":
+                GuestStorageInstructionValidator.ValidateLocalStore(
+                    context, function, instruction, result, operands, values);
+                break;
+            case "global_load":
+                GuestStorageInstructionValidator.ValidateGlobalLoad(
+                    context, function, instruction, result, operands);
+                break;
+            case "global_store":
+                GuestStorageInstructionValidator.ValidateGlobalStore(
+                    context, function, instruction, result, operands);
+                break;
+            case "stack_alloc":
+                GuestAggregateInstructionValidator.ValidateStackAlloc(
+                    context, function, instruction, result, operands);
+                break;
+            case "field_load":
+                GuestAggregateInstructionValidator.ValidateFieldLoad(
+                    context, function, instruction, result, operands);
+                break;
+            case "field_store":
+                GuestAggregateInstructionValidator.ValidateFieldStore(
+                    context, function, instruction, result, operands);
+                break;
+            case "address_of":
+                GuestAggregateInstructionValidator.ValidateAddressOf(
+                    context, function, instruction, result, operands, values);
+                break;
+            case "data_address":
+                GuestDataInstructionValidator.ValidateAddress(
+                    context, function, instruction, result, operands);
+                break;
+            case "indirect_load":
+                GuestPointerInstructionValidator.ValidateLoad(
+                    context, function, instruction, result, operands);
+                break;
+            case "indirect_store":
+                GuestPointerInstructionValidator.ValidateStore(
+                    context, function, instruction, result, operands);
+                break;
             default:
                 context.Add(
                     "ASIR1011",
@@ -169,10 +213,29 @@ internal static class GuestInstructionValidator
             return;
         }
 
-        if ((operands[0] is not null
-                && !string.Equals(result.TypeId, operands[0]!.TypeId, StringComparison.Ordinal))
-            || (operands[1] is not null
-                && !string.Equals(result.TypeId, operands[1]!.TypeId, StringComparison.Ordinal)))
+        if (operands[0] is null || operands[1] is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(operands[0]!.TypeId, operands[1]!.TypeId, StringComparison.Ordinal))
+        {
+            AddTypeMismatch(context, function, instruction);
+            return;
+        }
+
+        bool comparison = instruction.OperatorKind is "equals" or "not_equals"
+            or "less_than" or "less_than_or_equal"
+            or "greater_than" or "greater_than_or_equal";
+        if (comparison)
+        {
+            if (!context.Types.TryGetValue(result.TypeId, out GuestType? resultType)
+                || !string.Equals(resultType.Storage, "i32", StringComparison.Ordinal))
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+        }
+        else if (!string.Equals(result.TypeId, operands[0]!.TypeId, StringComparison.Ordinal))
         {
             AddTypeMismatch(context, function, instruction);
         }

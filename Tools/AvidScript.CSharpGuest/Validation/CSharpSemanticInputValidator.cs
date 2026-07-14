@@ -1,0 +1,199 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using AvidScript.CSharpSemantic;
+
+namespace AvidScript.CSharpGuest;
+
+internal static class CSharpSemanticInputValidator
+{
+    public static bool IsValid(SemanticDocument document)
+    {
+        if (document.Source is null
+            || document.Types is null
+            || document.TypeShapes is null
+            || document.Symbols is null
+            || document.Callables is null
+            || document.Methods is null
+            || document.ControlFlowGraphs is null
+            || document.Diagnostics is null
+            || string.IsNullOrWhiteSpace(document.Language)
+            || string.IsNullOrWhiteSpace(document.SemanticVersion)
+            || string.IsNullOrWhiteSpace(document.Source.SourceId)
+            || document.Source.Sha256 is null
+            || document.Source.FrontendSha256 is null)
+        {
+            return false;
+        }
+
+        return ValidateTypes(document.Types)
+            && ValidateTypeShapes(document.TypeShapes)
+            && ValidateSymbols(document.Symbols)
+            && ValidateCallables(document.Callables)
+            && ValidateMethods(document.Methods)
+            && ValidateGraphs(document.ControlFlowGraphs)
+            && document.Diagnostics.All(diagnostic => diagnostic is not null
+                && !string.IsNullOrWhiteSpace(diagnostic.Code)
+                && !string.IsNullOrWhiteSpace(diagnostic.Severity)
+                && diagnostic.Message is not null
+                && diagnostic.Span is not null);
+    }
+
+    private static bool ValidateTypes(IReadOnlyList<SemanticType> types)
+    {
+        return types.All(type => type is not null
+                && !string.IsNullOrWhiteSpace(type.Id)
+                && !string.IsNullOrWhiteSpace(type.CanonicalName)
+                && !string.IsNullOrWhiteSpace(type.DisplayName)
+                && !string.IsNullOrWhiteSpace(type.Kind))
+            && Unique(types.Select(type => type.Id));
+    }
+
+    private static bool ValidateTypeShapes(IReadOnlyList<SemanticTypeShape> shapes)
+    {
+        return shapes.All(shape => shape is not null && !string.IsNullOrWhiteSpace(shape.TypeId))
+            && Unique(shapes.Select(shape => shape.TypeId));
+    }
+
+    private static bool ValidateSymbols(IReadOnlyList<SemanticSymbol> symbols)
+    {
+        return symbols.All(symbol => symbol is not null
+                && !string.IsNullOrWhiteSpace(symbol.Id)
+                && !string.IsNullOrWhiteSpace(symbol.Kind)
+                && symbol.Name is not null
+                && symbol.Signature is not null
+                && !string.IsNullOrWhiteSpace(symbol.Accessibility)
+                && symbol.Span is not null)
+            && Unique(symbols.Select(symbol => symbol.Id));
+    }
+
+    private static bool ValidateCallables(IReadOnlyList<SemanticCallable> callables)
+    {
+        if (callables.Any(callable => callable is null)
+            || !Unique(callables.Select(callable => callable.MethodSymbolId)))
+        {
+            return false;
+        }
+
+        HashSet<string> exportNames = new(StringComparer.Ordinal);
+        foreach (SemanticCallable callable in callables)
+        {
+            if (callable is null
+                || string.IsNullOrWhiteSpace(callable.MethodSymbolId)
+                || string.IsNullOrWhiteSpace(callable.ContainingTypeId)
+                || string.IsNullOrWhiteSpace(callable.ReturnTypeId)
+                || callable.Parameters is null
+                || callable.Parameters.Any(parameter => parameter is null)
+                || !Unique(callable.Parameters.Select(parameter => parameter.SymbolId))
+                || callable.Parameters.Select(parameter => parameter.Ordinal).Distinct().Count()
+                    != callable.Parameters.Count
+                || callable.Parameters.Any(parameter => parameter is null
+                    || parameter.Ordinal < 0
+                    || string.IsNullOrWhiteSpace(parameter.SymbolId)
+                    || parameter.Name is null
+                    || string.IsNullOrWhiteSpace(parameter.TypeId)
+                    || parameter.RefKind is not ("none" or "ref" or "out" or "in"))
+                || (callable.Import is not null
+                    && (string.IsNullOrWhiteSpace(callable.Import.Module)
+                        || string.IsNullOrWhiteSpace(callable.Import.Name)))
+                || (callable.Export is not null
+                    && (string.IsNullOrWhiteSpace(callable.Export.Name)
+                        || !exportNames.Add(callable.Export.Name))))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ValidateMethods(IReadOnlyList<SemanticMethodBody> methods)
+    {
+        return methods.All(method => method is not null
+                && !string.IsNullOrWhiteSpace(method.MethodSymbolId)
+                && method.Root is not null
+                && ValidateOperation(method.Root))
+            && Unique(methods.Select(method => method.MethodSymbolId));
+    }
+
+    private static bool ValidateGraphs(IReadOnlyList<SemanticControlFlowGraph> graphs)
+    {
+        if (graphs.Any(graph => graph is null)
+            || !Unique(graphs.Select(graph => graph.MethodSymbolId)))
+        {
+            return false;
+        }
+
+        foreach (SemanticControlFlowGraph graph in graphs)
+        {
+            if (graph is null
+                || string.IsNullOrWhiteSpace(graph.MethodSymbolId)
+                || graph.Blocks is null
+                || graph.Blocks.Any(block => block is null)
+                || graph.EntryBlockOrdinal < 0
+                || graph.ExitBlockOrdinal < 0
+                || graph.Blocks.Select(block => block.Ordinal).Distinct().Count() != graph.Blocks.Count)
+            {
+                return false;
+            }
+
+            foreach (SemanticBasicBlock block in graph.Blocks)
+            {
+                if (block is null
+                    || block.Ordinal < 0
+                    || string.IsNullOrWhiteSpace(block.Kind)
+                    || string.IsNullOrWhiteSpace(block.ConditionKind)
+                    || block.Operations is null
+                    || block.Predecessors is null
+                    || block.Successors is null
+                    || !block.Operations.All(ValidateOperation)
+                    || (block.BranchValue is not null && !ValidateOperation(block.BranchValue))
+                    || !block.Predecessors.All(ValidateEdge)
+                    || !block.Successors.All(ValidateEdge))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ValidateOperation(SemanticOperation operation)
+    {
+        return operation is not null
+            && !string.IsNullOrWhiteSpace(operation.Kind)
+            && operation.TypeArgumentIds is not null
+            && operation.TypeArgumentIds.All(typeId => !string.IsNullOrWhiteSpace(typeId))
+            && operation.Span is not null
+            && operation.Children is not null
+            && (operation.Constant is null || !string.IsNullOrWhiteSpace(operation.Constant.Kind))
+            && (operation.Conversion is null || !string.IsNullOrWhiteSpace(operation.Conversion.Kind))
+            && (operation.InputConversion is null || !string.IsNullOrWhiteSpace(operation.InputConversion.Kind))
+            && (operation.OutputConversion is null || !string.IsNullOrWhiteSpace(operation.OutputConversion.Kind))
+            && operation.Children.All(ValidateOperation);
+    }
+
+    private static bool ValidateEdge(SemanticControlFlowEdge edge)
+    {
+        return edge is not null
+            && edge.SourceBlockOrdinal >= 0
+            && edge.DestinationBlockOrdinal >= 0
+            && !string.IsNullOrWhiteSpace(edge.Kind)
+            && !string.IsNullOrWhiteSpace(edge.Semantics);
+    }
+
+    private static bool Unique(IEnumerable<string> values)
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value) || !seen.Add(value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
