@@ -72,7 +72,9 @@ internal static class SemanticCompilationTests
 
         Assert(!document.Succeeded, "frontend hash mismatch should fail semantic analysis");
         Assert(document.Diagnostics.Single().Code == "ASCS1001", "hash mismatch should use the stable ASCS1001 diagnostic");
-        Assert(document.Symbols.Count == 0 && document.Types.Count == 0, "hash mismatch should not expose stale semantic tables");
+        Assert(document.Symbols.Count == 0 && document.Types.Count == 0 &&
+            document.TypeShapes.Count == 0 && document.Callables.Count == 0,
+            "hash mismatch should not expose stale semantic tables");
     }
 
     private static void SemanticSerializationIsDeterministic()

@@ -10,7 +10,9 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(3)] SemanticSource Source,
     [property: JsonPropertyOrder(4)] bool Succeeded,
     [property: JsonPropertyOrder(5)] IReadOnlyList<SemanticType> Types,
-    [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticSymbol> Symbols,
-    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticMethodBody> Methods,
-    [property: JsonPropertyOrder(8)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
-    [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(6)] IReadOnlyList<SemanticTypeShape> TypeShapes,
+    [property: JsonPropertyOrder(7)] IReadOnlyList<SemanticSymbol> Symbols,
+    [property: JsonPropertyOrder(8)] IReadOnlyList<SemanticCallable> Callables,
+    [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticMethodBody> Methods,
+    [property: JsonPropertyOrder(10)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
+    [property: JsonPropertyOrder(11)] IReadOnlyList<SemanticDiagnostic> Diagnostics);

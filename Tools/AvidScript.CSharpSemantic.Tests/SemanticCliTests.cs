@@ -28,6 +28,7 @@ internal static class SemanticCliTests
         using JsonDocument json = JsonDocument.Parse(File.ReadAllBytes(workspace.OutputPath));
         Assert(json.RootElement.GetProperty("succeeded").GetBoolean(), "semantic CLI artifact should report success");
         Assert(json.RootElement.GetProperty("symbols").GetArrayLength() > 0, "semantic CLI artifact should contain symbols");
+        Assert(json.RootElement.GetProperty("callables").GetArrayLength() > 0, "semantic CLI artifact should contain callables");
     }
 
     private static void SemanticFailureStillWritesArtifact()

@@ -200,7 +200,7 @@ bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Par
 		TEXT("  \"succeeded\": true,\n")
 		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\", \"semantic_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json\" },\n")
 		TEXT("  \"frontend\": { \"schema_version\": 1, \"version\": \"1.0\" },\n")
-		TEXT("  \"semantic\": { \"schema_version\": 3, \"version\": \"1.3\", \"succeeded\": true, \"source_sha256\": \"abc123\", \"frontend_sha256\": \"abc123\", \"diagnostic_count\": 0 },\n")
+		TEXT("  \"semantic\": { \"schema_version\": 4, \"version\": \"1.4\", \"succeeded\": true, \"source_sha256\": \"abc123\", \"frontend_sha256\": \"abc123\", \"diagnostic_count\": 0 },\n")
 		TEXT("  \"diagnostics\": []\n")
 		TEXT("}\n");
 
@@ -210,8 +210,8 @@ bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Par
 	FAvidScriptFrontendReportLoadResult LoadResult;
 	TestTrue(TEXT("C# semantic report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
 	TestEqual(TEXT("C# semantic artifact"), Report.SemanticArtifact, FString(TEXT("Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json")));
-	TestEqual(TEXT("C# semantic schema"), Report.SemanticSchemaVersion, 3);
-	TestEqual(TEXT("C# semantic version"), Report.SemanticVersion, FString(TEXT("1.3")));
+	TestEqual(TEXT("C# semantic schema"), Report.SemanticSchemaVersion, 4);
+	TestEqual(TEXT("C# semantic version"), Report.SemanticVersion, FString(TEXT("1.4")));
 	TestTrue(TEXT("C# semantic succeeded"), Report.bSemanticSucceeded);
 	TestEqual(TEXT("C# semantic source hash"), Report.SemanticSourceSha256, FString(TEXT("abc123")));
 	TestEqual(TEXT("C# semantic frontend hash"), Report.SemanticFrontendSha256, FString(TEXT("abc123")));

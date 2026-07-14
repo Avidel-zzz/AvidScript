@@ -140,11 +140,14 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 3) "semantic artifact schema version is not 3"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.3") "semantic artifact version is not 1.3"
+Assert-Condition ($SemanticJson.schema_version -eq 4) "semantic artifact schema version is not 4"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.4") "semantic artifact version is not 1.4"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
+Assert-Condition (@($SemanticJson.callables).Count -eq 52) "ActorLifecycle semantic callable count is not 52"
+Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 14) "ActorLifecycle semantic import count is not 14"
+Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.export }).Count -eq 5) "ActorLifecycle semantic export count is not 5"
 Assert-Condition ($NormalJson.semantic.source_sha256 -eq $FrontendJson.source.sha256) "report semantic source hash differs"
 Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.sha256) "report semantic frontend hash differs"
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"

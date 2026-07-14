@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 3;
-    private const string CurrentSemanticVersion = "1.3";
+    private const int CurrentSchemaVersion = 4;
+    private const string CurrentSemanticVersion = "1.4";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -40,7 +40,9 @@ public static class SemanticAnalyzer
                 semanticSource,
                 false,
                 Array.Empty<SemanticType>(),
+                Array.Empty<SemanticTypeShape>(),
                 Array.Empty<SemanticSymbol>(),
+                Array.Empty<SemanticCallable>(),
                 Array.Empty<SemanticMethodBody>(),
                 Array.Empty<SemanticControlFlowGraph>(),
                 new[]
@@ -56,11 +58,13 @@ public static class SemanticAnalyzer
         SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId, referenceSources);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
+        SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(operationProjection.Diagnostics)
+            .Concat(callableProjection.Diagnostics)
             .GroupBy(diagnostic =>
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
@@ -91,7 +95,9 @@ public static class SemanticAnalyzer
             semanticSource,
             succeeded,
             typeRegistry.Build(),
+            typeRegistry.BuildShapes(),
             symbols,
+            callableProjection.Callables,
             operationProjection.Methods,
             controlFlowGraphs,
             diagnostics);

@@ -8,6 +8,7 @@ namespace AvidScript.CSharpSemantic;
 internal sealed class SemanticTypeRegistry
 {
     private readonly Dictionary<string, SemanticType> types = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SemanticTypeShape> shapes = new(StringComparer.Ordinal);
 
     public string Register(ITypeSymbol type)
     {
@@ -20,6 +21,14 @@ internal sealed class SemanticTypeRegistry
             GetKind(type),
             type.IsValueType,
             type.NullableAnnotation == NullableAnnotation.Annotated));
+        if (type is IArrayTypeSymbol array)
+        {
+            shapes.TryAdd(id, new SemanticTypeShape(id, Register(array.ElementType), null));
+        }
+        else if (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying })
+        {
+            shapes.TryAdd(id, new SemanticTypeShape(id, null, Register(underlying)));
+        }
         return id;
     }
 
@@ -28,8 +37,18 @@ internal sealed class SemanticTypeRegistry
         return types.Values.OrderBy(type => type.Id, StringComparer.Ordinal).ToArray();
     }
 
+    public IReadOnlyList<SemanticTypeShape> BuildShapes()
+    {
+        return shapes.Values.OrderBy(shape => shape.TypeId, StringComparer.Ordinal).ToArray();
+    }
+
     public static string GetCanonicalName(ITypeSymbol type)
     {
+        if (type is IArrayTypeSymbol array)
+        {
+            return GetCanonicalName(array.ElementType) + "[" + new string(',', array.Rank - 1) + "]";
+        }
+
         return type.SpecialType switch
         {
             SpecialType.System_Void => "void",
