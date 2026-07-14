@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 
 namespace AvidScript.GuestIr;
 
@@ -48,50 +47,13 @@ internal static class GuestInstructionValidator
         GuestType targetType,
         string owner)
     {
-        string? expectedStorage = constant.Kind switch
-        {
-            "bool" or "int8" or "uint8" or "int16" or "uint16" or "int32" or "uint32" => "i32",
-            "int64" or "uint64" => "i64",
-            "float32" => "f32",
-            "float64" => "f64",
-            "null" => "i32",
-            _ => null,
-        };
-        if (expectedStorage is null
-            || !string.Equals(targetType.Storage, expectedStorage, StringComparison.Ordinal)
-            || !IsConstantValueValid(constant))
+        if (!GuestConstantCodec.TryEncode(constant, targetType, out _))
         {
             context.Add(
                 "ASIR1008",
                 $"{owner} constant kind '{constant.Kind}' is incompatible with type '{targetType.Id}'.");
         }
     }
-
-    private static bool IsConstantValueValid(GuestConstant constant)
-    {
-        const NumberStyles IntegerStyle = NumberStyles.AllowLeadingSign;
-        const NumberStyles FloatStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint
-            | NumberStyles.AllowExponent;
-        return constant.Kind switch
-        {
-            "bool" => constant.Value is "0" or "1",
-            "int8" => sbyte.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "uint8" => byte.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "int16" => short.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "uint16" => ushort.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "int32" => int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "uint32" => uint.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "int64" => long.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "uint64" => ulong.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out _),
-            "float32" => float.TryParse(constant.Value, FloatStyle, CultureInfo.InvariantCulture, out float value)
-                && float.IsFinite(value),
-            "float64" => double.TryParse(constant.Value, FloatStyle, CultureInfo.InvariantCulture, out double value)
-                && double.IsFinite(value),
-            "null" => constant.Value is null,
-            _ => false,
-        };
-    }
-
     private static GuestRegister? ResolveResult(
         GuestValidationContext context,
         GuestFunction function,

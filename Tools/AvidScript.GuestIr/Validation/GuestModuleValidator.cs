@@ -27,8 +27,10 @@ public static class GuestModuleValidator
         ValidateHeader(context);
         IndexTopLevelIds(context);
         ValidateTypes(context);
+        GuestCanonicalTypeValidator.Validate(context);
         ValidateImports(context);
         ValidateGlobals(context);
+        GuestMemoryLayoutValidator.Validate(context);
         ValidateFunctions(context);
         ValidateExports(context);
         ValidateReportedStatus(context);
@@ -81,6 +83,11 @@ public static class GuestModuleValidator
             AddTopLevelId(context, ids, global.Id, "global");
         }
 
+        foreach (GuestDataSegment segment in context.Module.DataSegments)
+        {
+            AddTopLevelId(context, ids, segment.Id, "data segment");
+        }
+
         foreach (GuestFunction function in context.Module.Functions)
         {
             AddTopLevelId(context, ids, function.Id, "function");
@@ -107,8 +114,8 @@ public static class GuestModuleValidator
             if (string.IsNullOrWhiteSpace(type.Kind)
                 || string.IsNullOrWhiteSpace(type.Storage)
                 || type.Size < 0
-                || type.Alignment <= 0
-                || (type.Alignment & (type.Alignment - 1)) != 0)
+                || !GuestLayoutMath.IsValidAlignment(type.Alignment)
+                || (type.Size > 0 && type.Size % type.Alignment != 0))
             {
                 context.Add("ASIR1008", $"Type '{type.Id}' has an invalid shape or layout.");
             }

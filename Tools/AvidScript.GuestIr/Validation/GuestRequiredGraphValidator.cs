@@ -8,9 +8,11 @@ internal static class GuestRequiredGraphValidator
     public static bool IsValid(GuestModule module)
     {
         if (module.Provenance is null
+            || module.MemoryLayout is null
             || module.Types is null
             || module.Imports is null
             || module.Globals is null
+            || module.DataSegments is null
             || module.Functions is null
             || module.Exports is null
             || module.Diagnostics is null
@@ -30,6 +32,26 @@ internal static class GuestRequiredGraphValidator
             return false;
         }
 
+        if (module.MemoryLayout.StateSlots is null)
+        {
+            return false;
+        }
+
+        foreach (GuestStateSlot? slot in module.MemoryLayout.StateSlots)
+        {
+            if (slot is null || HasNull(slot.GlobalId, slot.TypeId))
+            {
+                return false;
+            }
+        }
+
+        foreach (GuestDataSegment? segment in module.DataSegments)
+        {
+            if (segment?.Bytes is null || HasNull(segment.Id, segment.Kind, segment.TypeId))
+            {
+                return false;
+            }
+        }
         foreach (GuestType? type in module.Types)
         {
             if (type?.Fields is null || HasNull(type.Id, type.Kind, type.Storage))

@@ -292,9 +292,11 @@ internal static class GuestModuleValidationTests
             "csharp",
             new GuestProvenance("Scripts/Minimal.cs", hash, hash, hash, 4, "1.4"),
             true,
+            new GuestMemoryLayout(16, 0, 16, 16, 16, Array.Empty<GuestStateSlot>()),
             new[] { voidType, intType },
             Array.Empty<GuestImport>(),
             Array.Empty<GuestGlobal>(),
+            Array.Empty<GuestDataSegment>(),
             new[] { entry },
             new[] { new GuestExport("avid_entry", entry.Id) },
             Array.Empty<GuestDiagnostic>());

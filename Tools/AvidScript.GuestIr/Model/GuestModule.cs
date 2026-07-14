@@ -10,12 +10,14 @@ public sealed record GuestModule(
     [property: JsonPropertyOrder(3)] string Language,
     [property: JsonPropertyOrder(4)] GuestProvenance Provenance,
     [property: JsonPropertyOrder(5)] bool Succeeded,
-    [property: JsonPropertyOrder(6)] IReadOnlyList<GuestType> Types,
-    [property: JsonPropertyOrder(7)] IReadOnlyList<GuestImport> Imports,
-    [property: JsonPropertyOrder(8)] IReadOnlyList<GuestGlobal> Globals,
-    [property: JsonPropertyOrder(9)] IReadOnlyList<GuestFunction> Functions,
-    [property: JsonPropertyOrder(10)] IReadOnlyList<GuestExport> Exports,
-    [property: JsonPropertyOrder(11)] IReadOnlyList<GuestDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(6)] GuestMemoryLayout MemoryLayout,
+    [property: JsonPropertyOrder(7)] IReadOnlyList<GuestType> Types,
+    [property: JsonPropertyOrder(8)] IReadOnlyList<GuestImport> Imports,
+    [property: JsonPropertyOrder(9)] IReadOnlyList<GuestGlobal> Globals,
+    [property: JsonPropertyOrder(10)] IReadOnlyList<GuestDataSegment> DataSegments,
+    [property: JsonPropertyOrder(11)] IReadOnlyList<GuestFunction> Functions,
+    [property: JsonPropertyOrder(12)] IReadOnlyList<GuestExport> Exports,
+    [property: JsonPropertyOrder(13)] IReadOnlyList<GuestDiagnostic> Diagnostics);
 
 public sealed record GuestProvenance(
     [property: JsonPropertyOrder(0)] string SourceId,
