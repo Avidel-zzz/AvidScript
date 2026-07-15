@@ -19,6 +19,7 @@ public class AvidScriptEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
+				"AvidScriptCore",
 				"AvidScriptBindings",
 				"Projects",
 				"Json",
