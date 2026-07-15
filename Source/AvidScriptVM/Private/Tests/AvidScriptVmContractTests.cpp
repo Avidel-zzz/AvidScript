@@ -4,6 +4,8 @@
 #include "AvidScriptVmExportTable.h"
 
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmExportCacheTest,
@@ -96,6 +98,49 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("backend reports unloaded"), Backend->IsLoaded());
 	TestFalse(TEXT("old export handle is rejected"), Backend->Call(TickHandle, TickFrame, Error));
 	TestEqual(TEXT("old handle category"), Error.Category, FString(TEXT("stale_export")));
+	return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedWasmBackendArtifactSmokeTest,
+	"AvidScript.Architecture.VM.GeneratedWasmBackendArtifactSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedWasmBackendArtifactSmokeTest::RunTest(const FString& Parameters)
+{
+	const FString FixturePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/WasmBackend/P41_5_WamrSmoke.wasm")));
+	TArray<uint8> Bytecode;
+	if (!TestTrue(TEXT("generated backend fixture loads from disk"), FFileHelper::LoadFileToArray(Bytecode, *FixturePath)))
+	{
+		AddError(FString::Printf(TEXT("Missing generated WASM backend fixture: %s"), *FixturePath));
+		return false;
+	}
+
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptWamrBackend();
+	FAvidScriptVmError Error;
+	FAvidScriptVmLoadConfig Config;
+	if (!TestTrue(TEXT("generated backend artifact loads in UE WAMR"), Backend->Load(
+		MakeArrayView(Bytecode),
+		TEXT("p41_5_generated_backend_smoke"),
+		Config,
+		Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+
+	FAvidScriptVmExportHandle ValueHandle;
+	TestTrue(TEXT("generated guest_value export resolves"), Backend->ResolveExport(
+		TEXT("guest_value"),
+		ValueHandle,
+		Error));
+	FAvidScriptVmCallFrame EmptyFrame;
+	TestTrue(TEXT("generated guest_value export executes"), Backend->Call(
+		ValueHandle,
+		EmptyFrame,
+		Error));
+	Backend->Unload();
 	return true;
 }
 namespace

@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace AvidScript.GuestIr;
 
-internal static class GuestConstantCodec
+public static class GuestConstantCodec
 {
     private const NumberStyles IntegerStyle = NumberStyles.AllowLeadingSign;
     private const NumberStyles FloatStyle = NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint

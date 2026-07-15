@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "ir_version": "1.0",
+  "module_id": "p41_5_wamr_smoke",
+  "language": "csharp",
+  "provenance": {
+    "source_id": "Tests/Fixtures/WasmBackend/P41_5_WamrSmoke.guestir.json",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frontend_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "semantic_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "semantic_schema_version": 4,
+    "semantic_version": "1.4"
+  },
+  "succeeded": true,
+  "memory_layout": {
+    "state_start": 16,
+    "state_size": 0,
+    "data_start": 16,
+    "data_end": 16,
+    "heap_start": 16,
+    "state_slots": []
+  },
+  "types": [
+    {
+      "id": "type:void",
+      "kind": "void",
+      "storage": "none",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 0,
+      "alignment": 1
+    },
+    {
+      "id": "type:int32",
+      "kind": "scalar",
+      "storage": "i32",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    }
+  ],
+  "imports": [],
+  "globals": [],
+  "data_segments": [],
+  "functions": [
+    {
+      "id": "function:wamr_smoke",
+      "parameters": [],
+      "locals": [
+        {
+          "id": "value:result",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:int32",
+      "entry_block_id": "block:entry",
+      "blocks": [
+        {
+          "id": "block:entry",
+          "instructions": [
+            {
+              "op": "constant",
+              "result_id": "value:result",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "7"
+              }
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": "value:result"
+          }
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "name": "guest_value",
+      "function_id": "function:wamr_smoke"
+    }
+  ],
+  "diagnostics": []
+}

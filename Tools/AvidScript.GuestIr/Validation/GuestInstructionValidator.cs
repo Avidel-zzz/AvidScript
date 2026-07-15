@@ -69,6 +69,14 @@ internal static class GuestInstructionValidator
                 GuestDataInstructionValidator.ValidateAddress(
                     context, function, instruction, result, operands);
                 break;
+            case "array_load":
+                GuestArrayInstructionValidator.ValidateLoad(
+                    context, function, instruction, result, operands);
+                break;
+            case "array_store":
+                GuestArrayInstructionValidator.ValidateStore(
+                    context, function, instruction, result, operands);
+                break;
             case "indirect_load":
                 GuestPointerInstructionValidator.ValidateLoad(
                     context, function, instruction, result, operands);
