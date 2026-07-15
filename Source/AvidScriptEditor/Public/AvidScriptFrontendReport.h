@@ -27,6 +27,7 @@ struct FAvidScriptFrontendBuildEvent
 struct FAvidScriptFrontendReport
 {
 	int32 SchemaVersion = 0;
+	FString Result;
 	FString Source;
 	FString SourceSha256;
 	FString ScriptType;
@@ -40,6 +41,12 @@ struct FAvidScriptFrontendReport
 	FString SemanticSourceSha256;
 	FString SemanticFrontendSha256;
 	int32 SemanticDiagnosticCount = 0;
+	FString GuestIrArtifact;
+	int32 GuestIrSchemaVersion = 0;
+	FString GuestIrVersion;
+	bool bGuestIrSucceeded = false;
+	FString GuestIrSemanticSha256;
+	FString GuestIrSha256;
 	FString Bindings;
 	FString OutputRoot;
 	int32 ExitCode = 0;

@@ -8,9 +8,26 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--inspect")
+        {
+            try
+            {
+                WasmArtifactInspectionReport.WriteJson(args[1], args[2]);
+                return 0;
+            }
+            catch (Exception exception) when (exception is IOException
+                or InvalidDataException
+                or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 1;
+            }
+        }
+
         if (args.Length != 2)
         {
-            Console.Error.WriteLine("Usage: avidscript-wasm-backend <input.guest.json> <output.wasm>");
+            Console.Error.WriteLine(
+                "Usage: avidscript-wasm-backend <input.guest.json> <output.wasm> | --inspect <input.wasm> <output.json>");
             return 2;
         }
 

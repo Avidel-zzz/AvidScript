@@ -204,6 +204,24 @@ void LoadAvidScriptSemanticMetadata(const TSharedPtr<FJsonObject>& RootObject, F
 	}
 }
 
+void LoadAvidScriptGuestIrMetadata(const TSharedPtr<FJsonObject>& RootObject, FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonObject>* ArtifactsObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("artifacts"), ArtifactsObject) && ArtifactsObject != nullptr && ArtifactsObject->IsValid())
+	{
+		(*ArtifactsObject)->TryGetStringField(TEXT("guest_ir_file"), OutReport.GuestIrArtifact);
+	}
+
+	const TSharedPtr<FJsonObject>* GuestIrObject = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("guest_ir"), GuestIrObject) && GuestIrObject != nullptr && GuestIrObject->IsValid())
+	{
+		OutReport.GuestIrSchemaVersion = GetAvidScriptJsonIntField(*GuestIrObject, TEXT("schema_version"), 0);
+		(*GuestIrObject)->TryGetStringField(TEXT("version"), OutReport.GuestIrVersion);
+		(*GuestIrObject)->TryGetBoolField(TEXT("succeeded"), OutReport.bGuestIrSucceeded);
+		(*GuestIrObject)->TryGetStringField(TEXT("semantic_sha256"), OutReport.GuestIrSemanticSha256);
+		(*GuestIrObject)->TryGetStringField(TEXT("sha256"), OutReport.GuestIrSha256);
+	}
+}
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -285,9 +303,11 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 		return false;
 	}
 
+	RootObject->TryGetStringField(TEXT("result"), OutReport.Result);
 	LoadAvidScriptSource(RootObject, OutReport);
 	LoadAvidScriptFrontendMetadata(RootObject, OutReport);
 	LoadAvidScriptSemanticMetadata(RootObject, OutReport);
+	LoadAvidScriptGuestIrMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);

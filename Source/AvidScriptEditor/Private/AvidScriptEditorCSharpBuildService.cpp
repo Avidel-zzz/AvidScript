@@ -1,5 +1,7 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 
+#include "AvidScriptFrontendReport.h"
+
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
@@ -74,6 +76,43 @@ void SetAvidScriptCSharpBuildFailure(
 	OutResult.ErrorCategory = ErrorCategory;
 	OutResult.ErrorMessage = ErrorMessage;
 	OutResult.NextAction = NextAction;
+}
+
+bool SetAvidScriptCSharpStructuredBuildFailure(
+	const FString& ReportPath,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	if (!FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult) || Report.bSucceeded)
+	{
+		return false;
+	}
+
+	FString ErrorMessage;
+	for (const FAvidScriptFrontendDiagnostic& Diagnostic : Report.Diagnostics)
+	{
+		if (Diagnostic.IsError())
+		{
+			ErrorMessage = Diagnostic.Code.IsEmpty()
+				? Diagnostic.Message
+				: FString::Printf(TEXT("%s: %s"), *Diagnostic.Code, *Diagnostic.Message);
+			break;
+		}
+	}
+	if (ErrorMessage.IsEmpty())
+	{
+		ErrorMessage = TEXT("C# build failed; inspect the structured build report for diagnostics.");
+	}
+
+	const FString ErrorCategory = Report.Result.IsEmpty()
+		? FString(TEXT("build_failed"))
+		: Report.Result;
+	const FString NextAction = ErrorCategory == TEXT("phase42_binding_required")
+		? FString(TEXT("generate the Phase 42 UE facade and binding descriptors before building this custom C# profile"))
+		: FString(TEXT("fix the reported C# compiler diagnostic and rebuild the profile"));
+	SetAvidScriptCSharpBuildFailure(ErrorCategory, ErrorMessage, NextAction, OutResult);
+	return true;
 }
 
 FString QuoteAvidScriptCSharpPowerShellArgument(const FString& Value)
@@ -315,6 +354,12 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 
 	if (OutResult.ProcessExitCode != 0)
 	{
+		if (FPaths::FileExists(NormalizedConfig.ReportPath) &&
+			SetAvidScriptCSharpStructuredBuildFailure(NormalizedConfig.ReportPath, OutResult))
+		{
+			return false;
+		}
+
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("build_failed"),
 			FString::Printf(TEXT("C# build failed with exit code %d"), OutResult.ProcessExitCode),
@@ -329,6 +374,67 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			TEXT("report_missing"),
 			FString::Printf(TEXT("C# build report was not written: %s"), *NormalizedConfig.ReportPath),
 			TEXT("check C# build stdout/stderr and rerun the build after the report can be written"),
+			OutResult);
+		return false;
+	}
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult ReportLoadResult;
+	if (!FAvidScriptFrontendReportReader::LoadFromFile(
+		NormalizedConfig.ReportPath,
+		Report,
+		ReportLoadResult))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			ReportLoadResult.ErrorCategory,
+			ReportLoadResult.ErrorMessage,
+			TEXT("repair the structured C# build report and rerun the profile build"),
+			OutResult);
+		return false;
+	}
+
+	if (!Report.bSucceeded)
+	{
+		if (!SetAvidScriptCSharpStructuredBuildFailure(NormalizedConfig.ReportPath, OutResult))
+		{
+			SetAvidScriptCSharpBuildFailure(
+				TEXT("report_failed"),
+				TEXT("C# build process exited successfully but the structured report records failure."),
+				TEXT("fix the reported C# compiler diagnostic and rebuild the profile"),
+				OutResult);
+		}
+		return false;
+	}
+
+	if (Report.SchemaVersion != 1 || Report.Result != TEXT("direct_abi_built") || Report.HasErrorDiagnostics())
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("report_contract_invalid"),
+			TEXT("C# build process exited successfully but the structured report success contract is invalid."),
+			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
+			OutResult);
+		return false;
+	}
+
+	if (!FPaths::FileExists(NormalizedConfig.ManifestPath))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("manifest_missing"),
+			FString::Printf(TEXT("C# build manifest was not written: %s"), *NormalizedConfig.ManifestPath),
+			TEXT("inspect build publication diagnostics and rebuild the C# profile"),
+			OutResult);
+		return false;
+	}
+
+	const FString WasmPath = NormalizeAvidScriptCSharpBuildPathCopy(FPaths::Combine(
+		NormalizedConfig.OutputRoot,
+		NormalizedConfig.ArtifactStem + TEXT(".wasm")));
+	if (!FPaths::FileExists(WasmPath))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("wasm_missing"),
+			FString::Printf(TEXT("C# build WASM was not written: %s"), *WasmPath),
+			TEXT("inspect Guest IR/backend diagnostics and rebuild the C# profile"),
 			OutResult);
 		return false;
 	}

@@ -12,8 +12,9 @@ internal static class CSharpGuestLoweringTests
     {
         FailedSemanticDocumentIsRejected();
         TypesStateAndCallableAbiAreProjected();
+        VoidFallthroughExitReturnsNormally();
         LoweringIsByteDeterministic();
-        return 3;
+        return 4;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -56,6 +57,34 @@ internal static class CSharpGuestLoweringTests
             && module.Provenance.SourceSha256 == new string('a', 64)
             && module.Provenance.FrontendSha256 == new string('b', 64),
             "lowered module should preserve the complete provenance chain");
+    }
+
+    private static void VoidFallthroughExitReturnsNormally()
+    {
+        SemanticDocument document = CSharpGuestSemanticFixture.Create();
+        SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single();
+        SemanticControlFlowEdge exitEdge = new(1, 2, "fallthrough", "regular");
+        SemanticBasicBlock[] blocks = graph.Blocks
+            .Select(block => block.Ordinal switch
+            {
+                1 => block with { Successors = new[] { exitEdge } },
+                2 => block with { Predecessors = new[] { exitEdge } },
+                _ => block,
+            })
+            .ToArray();
+        document = document with
+        {
+            ControlFlowGraphs = new[] { graph with { Blocks = blocks } },
+        };
+
+        GuestModule module = CSharpGuestLowerer.Lower(document, SemanticHash).Module
+            ?? throw new InvalidOperationException("void fallthrough input produced no Guest module");
+        GuestFunction function = module.Functions.Single(item => item.ReturnTypeId == "type:void");
+        GuestBasicBlock exitBlock = function.Blocks.Single(
+            item => item.Id == $"block:{CSharpGuestSemanticFixture.MainMethodId}:2");
+
+        Assert(exitBlock.Terminator.Kind == "return" && exitBlock.Terminator.ReturnValueId is null,
+            "a reachable void exit block should return normally instead of trapping");
     }
 
     private static void LoweringIsByteDeterministic()

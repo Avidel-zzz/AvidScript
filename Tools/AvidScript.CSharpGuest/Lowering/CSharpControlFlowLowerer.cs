@@ -165,7 +165,13 @@ internal static class CSharpControlFlowLowerer
 
         if (block.Ordinal == graph.ExitBlockOrdinal && block.Successors.Count == 0)
         {
-            return new GuestTerminator("trap", null, null, null, null);
+            string kind = string.Equals(
+                context.Callable.ReturnTypeId,
+                "type:void",
+                StringComparison.Ordinal)
+                ? "return"
+                : "trap";
+            return new GuestTerminator(kind, null, null, null, null);
         }
 
         context.Add("ASCG1004", $"Block {block.Ordinal} has unsupported control flow.");

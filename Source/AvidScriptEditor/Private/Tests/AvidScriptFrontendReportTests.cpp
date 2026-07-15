@@ -94,6 +94,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("unknown_binding.report.json"));
 	const FString ReportJson = TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"result\": \"unknown_binding\",\n")
 		TEXT("  \"source\": \"Saved/AvidScriptGenerated/NegativeTests/p9_2_unknown_binding.avid\",\n")
 		TEXT("  \"bindings\": \"Bindings/ActorHostBindings.avidscript.json\",\n")
 		TEXT("  \"output_root\": \"Saved/AvidScriptGenerated\",\n")
@@ -114,6 +115,7 @@ bool FAvidScriptFrontendReportDiagnosticLoadTest::RunTest(const FString& Paramet
 	FAvidScriptFrontendReportLoadResult LoadResult;
 	TestTrue(TEXT("Diagnostic report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
 	TestTrue(TEXT("Load result succeeded"), LoadResult.bSucceeded);
+	TestEqual(TEXT("Report result"), Report.Result, FString(TEXT("unknown_binding")));
 	TestFalse(TEXT("Report did not succeed"), Report.bSucceeded);
 	TestTrue(TEXT("Error diagnostics detected"), Report.HasErrorDiagnostics());
 	TestEqual(TEXT("Diagnostic count"), Report.Diagnostics.Num(), 1);
@@ -198,9 +200,10 @@ bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Par
 		TEXT("  \"source\": { \"file\": \"Scripts/ActorLifecycleScript.cs\", \"sha256\": \"abc123\", \"script_type\": \"ActorLifecycleScript\" },\n")
 		TEXT("  \"output_root\": \"Saved/AvidScriptCSharpGuest\",\n")
 		TEXT("  \"succeeded\": true,\n")
-		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\", \"semantic_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json\" },\n")
+		TEXT("  \"artifacts\": { \"frontend_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.frontend.json\", \"semantic_file\": \"Saved/AvidScriptCSharpGuest/actor.csharp.semantic.json\", \"guest_ir_file\": \"Saved/AvidScriptCSharpGuest/actor.guestir.json\" },\n")
 		TEXT("  \"frontend\": { \"schema_version\": 1, \"version\": \"1.0\" },\n")
 		TEXT("  \"semantic\": { \"schema_version\": 4, \"version\": \"1.4\", \"succeeded\": true, \"source_sha256\": \"abc123\", \"frontend_sha256\": \"abc123\", \"diagnostic_count\": 0 },\n")
+		TEXT("  \"guest_ir\": { \"schema_version\": 1, \"version\": \"1.0\", \"succeeded\": true, \"semantic_sha256\": \"semantic456\", \"sha256\": \"guest789\" },\n")
 		TEXT("  \"diagnostics\": []\n")
 		TEXT("}\n");
 
@@ -216,6 +219,12 @@ bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Par
 	TestEqual(TEXT("C# semantic source hash"), Report.SemanticSourceSha256, FString(TEXT("abc123")));
 	TestEqual(TEXT("C# semantic frontend hash"), Report.SemanticFrontendSha256, FString(TEXT("abc123")));
 	TestEqual(TEXT("C# semantic diagnostic count"), Report.SemanticDiagnosticCount, 0);
+	TestEqual(TEXT("C# Guest IR artifact"), Report.GuestIrArtifact, FString(TEXT("Saved/AvidScriptCSharpGuest/actor.guestir.json")));
+	TestEqual(TEXT("C# Guest IR schema"), Report.GuestIrSchemaVersion, 1);
+	TestEqual(TEXT("C# Guest IR version"), Report.GuestIrVersion, FString(TEXT("1.0")));
+	TestTrue(TEXT("C# Guest IR succeeded"), Report.bGuestIrSucceeded);
+	TestEqual(TEXT("C# Guest IR semantic hash"), Report.GuestIrSemanticSha256, FString(TEXT("semantic456")));
+	TestEqual(TEXT("C# Guest IR artifact hash"), Report.GuestIrSha256, FString(TEXT("guest789")));
 	return true;
 }
 

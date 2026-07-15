@@ -159,14 +159,7 @@ FString GetCSharpSampleSourcePath()
 		TEXT("ActorLifecycleScript.cs"));
 }
 
-FString GetCSharpSourceAdapterPath()
-{
-	return FPaths::Combine(
-		FPaths::ProjectPluginsDir(),
-		TEXT("AvidScript"),
-		TEXT("Build"),
-		TEXT("BuildCSharpActorLifecycle.ps1"));
-}
+
 FString GetCSharpToolchainReportPath()
 {
 	FString ReportPath = FPaths::Combine(
@@ -248,21 +241,12 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 		return true;
 	}
 
-	FString AdapterText;
-	const FString AdapterPath = GetCSharpSourceAdapterPath();
-	if (!FFileHelper::LoadFileToString(AdapterText, *AdapterPath))
-	{
-		AddError(FString::Printf(TEXT("Failed to load C# source adapter: %s"), *AdapterPath));
-		return true;
-	}
-	TestTrue(
-		TEXT("Source adapter accepts an explicitly empty EndPlay body"),
-		AdapterText.Contains(TEXT("[AllowEmptyString()]")));
 	TestTrue(TEXT("Sample exports BeginPlay"), SourceText.Contains(TEXT("avid_on_begin_play")));
 	TestTrue(TEXT("Sample exports Tick"), SourceText.Contains(TEXT("avid_on_tick")));
 	TestTrue(TEXT("Sample exports EndPlay"), SourceText.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("Sample exports Timer callback"), SourceText.Contains(TEXT("avid_on_timer")));
 	TestTrue(TEXT("Sample exports gameplay event callback"), SourceText.Contains(TEXT("avid_on_event")));
+	TestTrue(TEXT("Sample exports typed gameplay event dispatcher"), SourceText.Contains(TEXT("avid_on_gameplay_event")));
 	TestTrue(TEXT("Sample declares EndPlay method"), SourceText.Contains(TEXT("public static void EndPlay")));
 	TestTrue(TEXT("Sample declares OnTimer method"), SourceText.Contains(TEXT("public static void OnTimer(int callbackId, int timerHandle)")));
 	TestTrue(TEXT("Sample declares OnEvent method"), SourceText.Contains(TEXT("public static void OnEvent(int eventId, float value)")));
@@ -457,48 +441,90 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	FString ManifestArtifactPath;
+	FString GuestIrArtifactPath;
 	FString WasmArtifactPath;
 	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("manifest_file"), ManifestArtifactPath);
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("guest_ir_file"), GuestIrArtifactPath);
 	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("wasm_file"), WasmArtifactPath);
 
 	const FString ManifestPath = ResolveCSharpReportArtifactPath(ManifestArtifactPath);
+	const FString GuestIrPath = ResolveCSharpReportArtifactPath(GuestIrArtifactPath);
 	const FString WasmPath = ResolveCSharpReportArtifactPath(WasmArtifactPath);
-	if (!TestTrue(TEXT("C# source adapter writes a manifest artifact"), !ManifestPath.IsEmpty() && FPaths::FileExists(ManifestPath)) ||
-		!TestTrue(TEXT("C# source adapter writes a wasm artifact"), !WasmPath.IsEmpty() && FPaths::FileExists(WasmPath)))
+	if (!TestTrue(TEXT("Formal C# compiler writes a manifest artifact"), !ManifestPath.IsEmpty() && FPaths::FileExists(ManifestPath)) ||
+		!TestTrue(TEXT("Formal C# compiler writes a Guest IR artifact"), !GuestIrPath.IsEmpty() && FPaths::FileExists(GuestIrPath)) ||
+		!TestTrue(TEXT("Formal C# compiler writes a WASM artifact"), !WasmPath.IsEmpty() && FPaths::FileExists(WasmPath)))
 	{
 		return true;
 	}
+
+	FString GuestIrJson;
+	if (!FFileHelper::LoadFileToString(GuestIrJson, *GuestIrPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read formal C# Guest IR JSON: %s"), *GuestIrPath));
+		return true;
+	}
+	TSharedPtr<FJsonObject> GuestIrRoot;
+	const TSharedRef<TJsonReader<>> GuestIrReader = TJsonReaderFactory<>::Create(GuestIrJson);
+	if (!FJsonSerializer::Deserialize(GuestIrReader, GuestIrRoot) || !GuestIrRoot.IsValid())
+	{
+		AddError(FString::Printf(TEXT("Formal C# Guest IR is not valid JSON: %s"), *GuestIrPath));
+		return true;
+	}
+	TestEqual(TEXT("Guest IR schema version"), GuestIrRoot->GetIntegerField(TEXT("schema_version")), 1);
+	TestEqual(TEXT("Guest IR version"), GuestIrRoot->GetStringField(TEXT("ir_version")), FString(TEXT("1.0")));
+	TestEqual(TEXT("Guest IR language"), GuestIrRoot->GetStringField(TEXT("language")), FString(TEXT("csharp")));
+	TestTrue(TEXT("Guest IR lowering succeeded"), GuestIrRoot->GetBoolField(TEXT("succeeded")));
+
+	const TSharedPtr<FJsonObject>* ReportGuestIrPtr = nullptr;
+	if (!RootObject->TryGetObjectField(TEXT("guest_ir"), ReportGuestIrPtr) || ReportGuestIrPtr == nullptr || !ReportGuestIrPtr->IsValid())
+	{
+		AddError(TEXT("Formal C# report does not include Guest IR metadata."));
+		return true;
+	}
+	const FString ReportGuestIrSha = (*ReportGuestIrPtr)->GetStringField(TEXT("sha256"));
+	const FString ReportSemanticSha = (*ReportGuestIrPtr)->GetStringField(TEXT("semantic_sha256"));
+	TestEqual(TEXT("Report Guest IR SHA-256 shape"), ReportGuestIrSha.Len(), 64);
+
+	const TSharedPtr<FJsonObject>* GuestProvenancePtr = nullptr;
+	if (!GuestIrRoot->TryGetObjectField(TEXT("provenance"), GuestProvenancePtr) || GuestProvenancePtr == nullptr || !GuestProvenancePtr->IsValid())
+	{
+		AddError(TEXT("Formal C# Guest IR does not include provenance."));
+		return true;
+	}
+	TestEqual(
+		TEXT("Guest IR semantic provenance matches the build report"),
+		(*GuestProvenancePtr)->GetStringField(TEXT("semantic_sha256")),
+		ReportSemanticSha);
 
 	FString ManifestJson;
 	if (!FFileHelper::LoadFileToString(ManifestJson, *ManifestPath))
 	{
-		AddError(FString::Printf(TEXT("Failed to read C# source adapter manifest JSON: %s"), *ManifestPath));
+		AddError(FString::Printf(TEXT("Failed to read formal C# manifest JSON: %s"), *ManifestPath));
 		return true;
 	}
-	TestTrue(TEXT("C# AST adapter manifest declares actor lifecycle v13 subset"), ManifestJson.Contains(TEXT("actor_lifecycle_v13")));
-	TestTrue(TEXT("C# source adapter manifest declares USceneComponent"), ManifestJson.Contains(TEXT("USceneComponent")));
-	TestTrue(TEXT("C# source adapter manifest declares GetRootComponent"), ManifestJson.Contains(TEXT("GetRootComponent")));
-	TestTrue(TEXT("C# source adapter manifest declares FVector"), ManifestJson.Contains(TEXT("FVector")));
-	TestTrue(TEXT("C# source adapter manifest declares AActor"), ManifestJson.Contains(TEXT("AActor")));
-	TestTrue(TEXT("C# source adapter manifest declares UE.Self"), ManifestJson.Contains(TEXT("UE.Self")));
-	TestTrue(TEXT("C# source adapter manifest declares GetActorLocation"), ManifestJson.Contains(TEXT("GetActorLocation")));
-	TestTrue(TEXT("C# source adapter manifest declares FRotator"), ManifestJson.Contains(TEXT("FRotator")));
-	TestTrue(TEXT("C# source adapter manifest declares GetActorRotation"), ManifestJson.Contains(TEXT("GetActorRotation")));
-	TestTrue(TEXT("C# source adapter manifest declares SetActorRotation"), ManifestJson.Contains(TEXT("SetActorRotation")));
-	TestTrue(TEXT("C# source adapter manifest declares GetActorScale3D"), ManifestJson.Contains(TEXT("GetActorScale3D")));
-	TestTrue(TEXT("C# source adapter manifest declares SetActorScale3D"), ManifestJson.Contains(TEXT("SetActorScale3D")));
-	TestTrue(TEXT("C# source adapter manifest declares FTransform"), ManifestJson.Contains(TEXT("FTransform")));
-	TestTrue(TEXT("C# source adapter manifest requires EndPlay export"), ManifestJson.Contains(TEXT("avid_on_end_play")));
-	TestTrue(TEXT("C# source adapter manifest requires Timer export"), ManifestJson.Contains(TEXT("avid_on_timer")));
-	TestTrue(TEXT("C# source adapter manifest requires gameplay event export"), ManifestJson.Contains(TEXT("avid_on_event")));
-	TestTrue(TEXT("C# source adapter manifest requires typed gameplay event export"), ManifestJson.Contains(TEXT("avid_on_gameplay_event")));
-	TestTrue(TEXT("C# source adapter manifest declares generated collision callbacks"), ManifestJson.Contains(TEXT("OnBeginOverlap")) && ManifestJson.Contains(TEXT("OnEndOverlap")) && ManifestJson.Contains(TEXT("OnHit")));
-	TestTrue(TEXT("C# source adapter manifest declares generated input callback"), ManifestJson.Contains(TEXT("OnInput")) && ManifestJson.Contains(TEXT("InputEvent")));
-	TestTrue(TEXT("C# source adapter manifest declares InputEvent fields"), ManifestJson.Contains(TEXT("input.ActionId")) && ManifestJson.Contains(TEXT("input.TriggerEvent")) && ManifestJson.Contains(TEXT("input.Value")));
-	TestTrue(TEXT("C# source adapter manifest declares UE.SetTimer"), ManifestJson.Contains(TEXT("UE.SetTimer(float delaySeconds, int callbackId)")));
-	TestTrue(TEXT("C# source adapter manifest declares static float state support"), ManifestJson.Contains(TEXT("private static float")));
-	TestTrue(TEXT("C# source adapter manifest declares field accumulation support"), ManifestJson.Contains(TEXT("Field += expression")));
-	TestTrue(TEXT("C# source adapter manifest declares event value expressions"), ManifestJson.Contains(TEXT("supported_event_expressions")) && ManifestJson.Contains(TEXT("value")));
+	TSharedPtr<FJsonObject> ManifestRoot;
+	const TSharedRef<TJsonReader<>> ManifestReader = TJsonReaderFactory<>::Create(ManifestJson);
+	if (!FJsonSerializer::Deserialize(ManifestReader, ManifestRoot) || !ManifestRoot.IsValid())
+	{
+		AddError(FString::Printf(TEXT("Formal C# manifest is not valid JSON: %s"), *ManifestPath));
+		return true;
+	}
+	const TSharedPtr<FJsonObject>* ManifestGuestIrPtr = nullptr;
+	const TSharedPtr<FJsonObject>* ToolchainPtr = nullptr;
+	if (!ManifestRoot->TryGetObjectField(TEXT("guest_ir"), ManifestGuestIrPtr) || ManifestGuestIrPtr == nullptr || !ManifestGuestIrPtr->IsValid() ||
+		!ManifestRoot->TryGetObjectField(TEXT("toolchain"), ToolchainPtr) || ToolchainPtr == nullptr || !ToolchainPtr->IsValid())
+	{
+		AddError(TEXT("Formal C# manifest is missing Guest IR or toolchain metadata."));
+		return true;
+	}
+	TestEqual(
+		TEXT("Manifest identifies the formal compiler chain"),
+		(*ToolchainPtr)->GetStringField(TEXT("compiler")),
+		FString(TEXT("avidscript-csharp-guest-wasm")));
+	TestEqual(
+		TEXT("Manifest Guest IR hash matches the build report"),
+		(*ManifestGuestIrPtr)->GetStringField(TEXT("sha256")),
+		ReportGuestIrSha);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -507,6 +533,21 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	{
 		AddError(ManifestLoadResult.ErrorMessage);
 		return true;
+	}
+
+	const TArray<FString> ExpectedLifecycleExports = {
+		TEXT("avid_on_begin_play"),
+		TEXT("avid_on_end_play"),
+		TEXT("avid_on_event"),
+		TEXT("avid_on_gameplay_event"),
+		TEXT("avid_on_tick"),
+		TEXT("avid_on_timer")
+	};
+	for (const FString& ExpectedExport : ExpectedLifecycleExports)
+	{
+		TestTrue(
+			*FString::Printf(TEXT("Formal C# manifest requires export %s"), *ExpectedExport),
+			Manifest.RequiredExports.Contains(ExpectedExport));
 	}
 
 	const bool bRequiresAddLocationOffset = Manifest.RequiredImports.ContainsByPredicate(
