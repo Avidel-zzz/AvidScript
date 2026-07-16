@@ -211,6 +211,21 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	const FString& InModuleId,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	return LoadModule(
+		Bytecode,
+		BytecodeSize,
+		InModuleId,
+		TSharedPtr<const FAvidScriptBindingPackage>(),
+		OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::LoadModule(
+	const uint8* Bytecode,
+	int32 BytecodeSize,
+	const FString& InModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
 	ResetHostImportState();
@@ -231,8 +246,19 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		return false;
 	}
 
+	BindingPackage = InBindingPackage;
+	if (BindingPackage.IsValid())
+	{
+		BindingInvocationScratch.SetNumUninitialized(BindingPackage->GetRequiredScratchSize());
+	}
+	else
+	{
+		BindingInvocationScratch.Reset();
+	}
+
 	FAvidScriptVmLoadConfig Config;
 	Config.HostDispatcher = this;
+	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
 	FAvidScriptVmError Error;
 	const bool bLoaded = VmBackend->Load(MakeArrayView(Bytecode, BytecodeSize), ModuleId, Config, Error);
 	const FAvidScriptVmLoadMetrics& LoadMetrics = VmBackend->GetLoadMetrics();
@@ -245,6 +271,8 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	{
 		SetFailureFromVmError(OutResult, ModuleId, TEXT("<module>"), Error);
 		VmBackend.Reset();
+		BindingPackage.Reset();
+		BindingInvocationScratch.Reset();
 		return false;
 	}
 
@@ -773,6 +801,8 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 		VmBackend->Unload();
 		VmBackend.Reset();
 	}
+	BindingPackage.Reset();
+	BindingInvocationScratch.Reset();
 	BeginPlayExport = {};
 	TickExport = {};
 	EndPlayExport = {};
@@ -1698,6 +1728,36 @@ bool FAvidScriptWasmRuntimeInstance::ConsumePendingHostImportFailure(
 	PendingHostImportName.Empty();
 	PendingHostImportDetails.Empty();
 	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
+	const FAvidScriptDynamicHostCall& Call,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	++HostImportCallCount;
+	LastHostImportInput = static_cast<int32>(Call.BindingOrdinal);
+	LastHostImportResult = 0;
+	if (!BindingPackage.IsValid())
+	{
+		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.Details = TEXT("No reflected binding package is attached to this Runtime instance.");
+		Metrics.HostImportCallMs += MeasureElapsedMs(HostImportStartSeconds);
+		return false;
+	}
+
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
+	InvocationContext.OwnerHandle = HostContext.OwnerHandle;
+	InvocationContext.WritePolicy = HostContext.ActorWritePolicy;
+	const bool bSucceeded = BindingPackage->Dispatch(
+		Call,
+		InvocationContext,
+		BindingInvocationScratch,
+		OutResult);
+	LastHostImportResult = OutResult.ReturnValue;
+	Metrics.HostImportCallMs += MeasureElapsedMs(HostImportStartSeconds);
+	return bSucceeded;
 }
 
 bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(

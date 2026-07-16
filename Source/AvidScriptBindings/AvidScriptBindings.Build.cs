@@ -10,10 +10,13 @@ public class AvidScriptBindings : ModuleRules
 			new[]
 			{
 				"AvidScriptCore",
+				"AvidScriptVM",
 				"Core",
 				"CoreUObject",
 				"Engine"
 			}
 		);
+
+		PrivateDependencyModuleNames.Add("Json");
 	}
 }

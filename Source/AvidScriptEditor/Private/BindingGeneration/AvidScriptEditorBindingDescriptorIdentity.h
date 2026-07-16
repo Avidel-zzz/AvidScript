@@ -1,12 +1,6 @@
 #pragma once
 
-#include "CoreMinimal.h"
-
-struct FAvidScriptBindingEnumValue
-{
-	FString Name;
-	int64 Value = 0;
-};
+#include "AvidScriptBindingDescriptor.h"
 
 class FAvidScriptEditorBindingDescriptorIdentity
 {

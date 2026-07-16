@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "ir_version": "1.0",
+  "module_id": "p42_4_reflected_set_actor_scale",
+  "language": "csharp",
+  "provenance": {
+    "source_id": "Tests/Fixtures/WasmBackend/P42_4_ReflectedSetActorScale.guestir.json",
+    "source_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "frontend_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "semantic_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "semantic_schema_version": 4,
+    "semantic_version": "1.4"
+  },
+  "succeeded": true,
+  "memory_layout": {
+    "state_start": 16,
+    "state_size": 0,
+    "data_start": 16,
+    "data_end": 16,
+    "heap_start": 16,
+    "state_slots": []
+  },
+  "types": [
+    {
+      "id": "type:void",
+      "kind": "void",
+      "storage": "none",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 0,
+      "alignment": 1
+    },
+    {
+      "id": "type:int32",
+      "kind": "scalar",
+      "storage": "i32",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    },
+    {
+      "id": "type:float32",
+      "kind": "scalar",
+      "storage": "f32",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    }
+  ],
+  "imports": [
+    {
+      "id": "import:phase42.owner_get_slot",
+      "module": "env",
+      "name": "owner_get_slot",
+      "parameter_type_ids": [],
+      "return_type_id": "type:int32"
+    },
+    {
+      "id": "import:phase42.owner_get_generation",
+      "module": "env",
+      "name": "owner_get_generation",
+      "parameter_type_ids": [],
+      "return_type_id": "type:int32"
+    },
+    {
+      "id": "import:phase42.reflected_set_actor_scale",
+      "module": "avidscript",
+      "name": "avid_ue_e493dae7c6aae6c7",
+      "parameter_type_ids": [
+        "type:int32",
+        "type:int32",
+        "type:float32",
+        "type:float32",
+        "type:float32"
+      ],
+      "return_type_id": "type:int32"
+    }
+  ],
+  "globals": [],
+  "data_segments": [],
+  "functions": [
+    {
+      "id": "function:phase42.reflected_begin_play",
+      "parameters": [],
+      "locals": [
+        {
+          "id": "value:slot",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "value:generation",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "value:scale_x",
+          "type_id": "type:float32"
+        },
+        {
+          "id": "value:scale_y",
+          "type_id": "type:float32"
+        },
+        {
+          "id": "value:scale_z",
+          "type_id": "type:float32"
+        },
+        {
+          "id": "value:status",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:void",
+      "entry_block_id": "block:entry",
+      "blocks": [
+        {
+          "id": "block:entry",
+          "instructions": [
+            {
+              "op": "call",
+              "result_id": "value:slot",
+              "operand_ids": [],
+              "target_id": "import:phase42.owner_get_slot",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "call",
+              "result_id": "value:generation",
+              "operand_ids": [],
+              "target_id": "import:phase42.owner_get_generation",
+              "operator_kind": null,
+              "constant": null
+            },
+            {
+              "op": "constant",
+              "result_id": "value:scale_x",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "float32",
+                "value": "2"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "value:scale_y",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "float32",
+                "value": "3"
+              }
+            },
+            {
+              "op": "constant",
+              "result_id": "value:scale_z",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "float32",
+                "value": "4"
+              }
+            },
+            {
+              "op": "call",
+              "result_id": "value:status",
+              "operand_ids": [
+                "value:slot",
+                "value:generation",
+                "value:scale_x",
+                "value:scale_y",
+                "value:scale_z"
+              ],
+              "target_id": "import:phase42.reflected_set_actor_scale",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": null
+          }
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "name": "avid_on_begin_play",
+      "function_id": "function:phase42.reflected_begin_play"
+    }
+  ],
+  "diagnostics": []
+}

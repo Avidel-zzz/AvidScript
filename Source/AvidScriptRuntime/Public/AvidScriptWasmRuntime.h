@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptGameplayEvent.h"
+#include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
@@ -79,6 +80,12 @@ public:
 	bool LoadEmbeddedSmokeModule(FAvidScriptWasmSmokeResult& OutResult);
 	bool LoadEmbeddedHostImportModule(FAvidScriptWasmSmokeResult& OutResult);
 	bool LoadModule(const uint8* Bytecode, int32 BytecodeSize, const FString& InModuleId, FAvidScriptWasmSmokeResult& OutResult);
+	bool LoadModule(
+		const uint8* Bytecode,
+		int32 BytecodeSize,
+		const FString& InModuleId,
+		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool ValidateRequiredExports(const TArray<FString>& RequiredExports, FAvidScriptWasmSmokeResult& OutResult) const;
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
@@ -126,6 +133,9 @@ public:
 		const FString& Details);
 	bool ConsumePendingHostImportFailure(FString& OutImportModuleName, FString& OutImportName, FString& OutDetails);
 	bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) override;
+	bool DispatchDynamicHostCall(
+		const FAvidScriptDynamicHostCall& Call,
+		FAvidScriptDynamicHostCallResult& OutResult) override;
 
 
 private:
@@ -177,6 +187,8 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
+	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;
 	TArray<float> TransformBatchOutputScratch;
