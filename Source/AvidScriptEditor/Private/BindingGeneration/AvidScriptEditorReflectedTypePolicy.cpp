@@ -31,6 +31,17 @@ FAvidScriptProjectedBindingType MakeEnumType(const FProperty* Property, const UE
 	Type.Size = 4;
 	Type.Alignment = 4;
 	Type.AbiValueTypes.Add(TEXT("i"));
+	for (int32 Index = 0; Index < Enum->NumEnums(); ++Index)
+	{
+		const FString Name = Enum->GetNameStringByIndex(Index);
+		if (Name.IsEmpty()
+			|| Enum->HasMetaData(TEXT("Hidden"), Index)
+			|| Name.EndsWith(TEXT("_MAX"), ESearchCase::CaseSensitive))
+		{
+			continue;
+		}
+		Type.EnumValues.Add({ Name, Enum->GetValueByIndex(Index) });
+	}
 	return Type;
 }
 

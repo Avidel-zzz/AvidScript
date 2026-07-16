@@ -75,7 +75,6 @@ public static class SemanticAnalyzer
             : controlFlowProjection.Graphs;
         IReadOnlyList<SemanticDiagnostic> compilerDiagnostics = context.Compilation
             .GetDiagnostics()
-            .Where(diagnostic => diagnostic.Location == Location.None || diagnostic.Location.SourceTree == context.SyntaxTree)
             .Select(diagnostic => ProjectDiagnostic(diagnostic, context))
             .OrderBy(diagnostic => diagnostic.Span.Start)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
@@ -107,7 +106,9 @@ public static class SemanticAnalyzer
         Diagnostic diagnostic,
         SemanticCompilationContext context)
     {
-        SemanticSpan span = diagnostic.Location.IsInSource
+        bool isPrimarySource = diagnostic.Location.IsInSource
+            && diagnostic.Location.SourceTree == context.SyntaxTree;
+        SemanticSpan span = isPrimarySource
             ? SemanticSpanFactory.Create(context.SourceText, diagnostic.Location.SourceSpan)
             : SemanticSpanFactory.Empty;
         return new SemanticDiagnostic(

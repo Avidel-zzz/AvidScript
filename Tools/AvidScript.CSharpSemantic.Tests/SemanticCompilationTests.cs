@@ -13,9 +13,10 @@ internal static class SemanticCompilationTests
         ActorLifecycleProducesStableSymbolsAndTypes();
         TypeErrorsProduceSemanticDiagnostics();
         FrontendHashMismatchFailsClosed();
+        InvalidReferenceSourceFailsClosed();
         SemanticSerializationIsDeterministic();
         SemanticDiagnosticsAreCultureInvariant();
-        return 5;
+        return 6;
     }
 
     private static void ActorLifecycleProducesStableSymbolsAndTypes()
@@ -75,6 +76,28 @@ internal static class SemanticCompilationTests
         Assert(document.Symbols.Count == 0 && document.Types.Count == 0 &&
             document.TypeShapes.Count == 0 && document.Callables.Count == 0,
             "hash mismatch should not expose stale semantic tables");
+    }
+
+    private static void InvalidReferenceSourceFailsClosed()
+    {
+        const string source = "class Script { void Tick() { } }";
+        const string sourceId = "Scripts/InvalidReference.cs";
+        const string invalidReference = "namespace AvidScript; public static class BrokenFacade { public static int Value => MissingName; }";
+        string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            hash,
+            new[] { new SemanticReferenceSource(invalidReference, "generated://BrokenFacade.cs") });
+
+        Assert(!document.Succeeded, "compiler errors in generated reference sources should fail semantic analysis");
+        SemanticDiagnostic diagnostic = document.Diagnostics.Single(item => item.Code == "CS0103");
+        Assert(diagnostic.Severity == "error", "reference-source compiler diagnostics should remain errors");
+        Assert(diagnostic.Span.Start == 0 && diagnostic.Span.Length == 0,
+            "reference-source diagnostics should not project spans against the primary script");
+        Assert(document.ControlFlowGraphs.Count == 0,
+            "invalid reference compilations should not expose control-flow graphs");
     }
 
     private static void SemanticSerializationIsDeterministic()

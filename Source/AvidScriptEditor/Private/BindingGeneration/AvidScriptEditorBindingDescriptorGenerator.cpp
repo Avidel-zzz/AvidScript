@@ -13,7 +13,7 @@
 
 namespace
 {
-constexpr const TCHAR* GeneratorVersion = TEXT("42.1.0");
+constexpr const TCHAR* GeneratorVersion = TEXT("42.1.1");
 
 struct FResolvedBindingDescriptor
 {
@@ -111,7 +111,9 @@ bool IsFunctionAllowed(const UFunction* Function, FString& OutCategory, FString&
 
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
-	Type.StableId = HashSha256(Type.CanonicalType);
+	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+		Type.CanonicalType,
+		Type.EnumValues);
 }
 
 void WriteStringArray(const TSharedRef<TJsonWriter<>>& Writer, const TCHAR* Name, const TArray<FString>& Values)
@@ -299,7 +301,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 		+ TEXT("|") + SelectionHash;
 	for (const FAvidScriptProjectedBindingType& Type : Types)
 	{
-		PackageIdentity += TEXT("|type:") + Type.CanonicalType + TEXT(":") + FString::Join(Type.AbiValueTypes, TEXT(""));
+		PackageIdentity += TEXT("|type:") + Type.StableId + TEXT(":") + Type.CanonicalType + TEXT(":") + FString::Join(Type.AbiValueTypes, TEXT(""));
 	}
 	for (const FResolvedBindingDescriptor& Binding : Bindings)
 	{
@@ -339,6 +341,18 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 		Writer->WriteValue(TEXT("size"), Type.Size);
 		Writer->WriteValue(TEXT("alignment"), Type.Alignment);
 		WriteStringArray(Writer, TEXT("abi_types"), Type.AbiValueTypes);
+		if (Type.Kind == TEXT("enum"))
+		{
+			Writer->WriteArrayStart(TEXT("enum_values"));
+			for (const FAvidScriptBindingEnumValue& EnumValue : Type.EnumValues)
+			{
+				Writer->WriteObjectStart();
+				Writer->WriteValue(TEXT("name"), EnumValue.Name);
+				Writer->WriteValue(TEXT("value"), EnumValue.Value);
+				Writer->WriteObjectEnd();
+			}
+			Writer->WriteArrayEnd();
+		}
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();

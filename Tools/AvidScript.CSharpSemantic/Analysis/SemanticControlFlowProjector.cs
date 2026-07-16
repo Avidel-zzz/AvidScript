@@ -22,8 +22,6 @@ internal static class SemanticControlFlowProjector
         List<SemanticControlFlowGraph> graphs = new();
         Diagnostic? compilerError = context.Compilation.GetDiagnostics()
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .Where(diagnostic => diagnostic.Location == Location.None ||
-                diagnostic.Location.SourceTree == context.SyntaxTree)
             .OrderBy(diagnostic => diagnostic.Location.IsInSource
                 ? diagnostic.Location.SourceSpan.Start
                 : int.MaxValue)
@@ -34,7 +32,7 @@ internal static class SemanticControlFlowProjector
             diagnostics.Add(CreateDiagnostic(
                 "ASCS3004",
                 "Control-flow projection requires a valid C# compilation.",
-                compilerError.Location.IsInSource
+                compilerError.Location.IsInSource && compilerError.Location.SourceTree == context.SyntaxTree
                     ? SemanticSpanFactory.Create(context.SourceText, compilerError.Location.SourceSpan)
                     : SemanticSpanFactory.Empty));
             return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics);

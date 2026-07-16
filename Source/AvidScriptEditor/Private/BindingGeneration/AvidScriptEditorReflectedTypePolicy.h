@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.h"
 #include "CoreMinimal.h"
 
 class FProperty;
@@ -15,6 +16,7 @@ struct FAvidScriptProjectedBindingType
 	int32 Size = 0;
 	int32 Alignment = 1;
 	TArray<FString> AbiValueTypes;
+	TArray<FAvidScriptBindingEnumValue> EnumValues;
 	bool bVoid = false;
 };
 
