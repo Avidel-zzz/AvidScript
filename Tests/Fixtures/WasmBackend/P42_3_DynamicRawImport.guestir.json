@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "ir_version": "1.0",
+  "module_id": "p42_3_dynamic_raw_import",
+  "language": "csharp",
+  "provenance": {
+    "source_id": "Tests/Fixtures/WasmBackend/P42_3_DynamicRawImport.guestir.json",
+    "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "frontend_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "semantic_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "semantic_schema_version": 4,
+    "semantic_version": "1.4"
+  },
+  "succeeded": true,
+  "memory_layout": {
+    "state_start": 16,
+    "state_size": 0,
+    "data_start": 16,
+    "data_end": 16,
+    "heap_start": 16,
+    "state_slots": []
+  },
+  "types": [
+    {
+      "id": "type:void",
+      "kind": "void",
+      "storage": "none",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 0,
+      "alignment": 1
+    },
+    {
+      "id": "type:int32",
+      "kind": "scalar",
+      "storage": "i32",
+      "fields": [],
+      "element_type_id": null,
+      "underlying_type_id": null,
+      "size": 4,
+      "alignment": 4
+    }
+  ],
+  "imports": [
+    {
+      "id": "import:phase42.dynamic_raw_i32",
+      "module": "avidscript",
+      "name": "avid_ue_1111111111111111",
+      "parameter_type_ids": [
+        "type:int32"
+      ],
+      "return_type_id": "type:int32"
+    }
+  ],
+  "globals": [],
+  "data_segments": [],
+  "functions": [
+    {
+      "id": "function:phase42.dynamic_begin_play",
+      "parameters": [],
+      "locals": [
+        {
+          "id": "value:input",
+          "type_id": "type:int32"
+        },
+        {
+          "id": "value:result",
+          "type_id": "type:int32"
+        }
+      ],
+      "return_type_id": "type:void",
+      "entry_block_id": "block:entry",
+      "blocks": [
+        {
+          "id": "block:entry",
+          "instructions": [
+            {
+              "op": "constant",
+              "result_id": "value:input",
+              "operand_ids": [],
+              "target_id": null,
+              "operator_kind": null,
+              "constant": {
+                "kind": "int32",
+                "value": "41"
+              }
+            },
+            {
+              "op": "call",
+              "result_id": "value:result",
+              "operand_ids": [
+                "value:input"
+              ],
+              "target_id": "import:phase42.dynamic_raw_i32",
+              "operator_kind": null,
+              "constant": null
+            }
+          ],
+          "terminator": {
+            "kind": "return",
+            "condition_value_id": null,
+            "target_block_id": null,
+            "false_target_block_id": null,
+            "return_value_id": null
+          }
+        }
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "name": "avid_on_begin_play",
+      "function_id": "function:phase42.dynamic_begin_play"
+    }
+  ],
+  "diagnostics": []
+}

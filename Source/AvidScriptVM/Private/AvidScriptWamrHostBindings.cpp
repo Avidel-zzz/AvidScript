@@ -402,6 +402,34 @@ NativeSymbol GNativeSymbols[] = {
 #endif
 }
 
+bool IsAvidScriptWamrStaticHostImport(const FString& ModuleName, const FString& ImportName)
+{
+	if (ModuleName != TEXT("avidscript") && ModuleName != TEXT("env"))
+	{
+		return false;
+	}
+	static const TSet<FString> StaticImports = {
+		TEXT("host_add_i32"),
+		TEXT("host_fail_i32"),
+		TEXT("actor_get_location"),
+		TEXT("actor_set_location"),
+		TEXT("actor_add_location_offset"),
+		TEXT("actor_get_rotation"),
+		TEXT("actor_set_rotation"),
+		TEXT("actor_get_scale"),
+		TEXT("actor_set_scale"),
+		TEXT("actor_get_transform_batch"),
+		TEXT("actor_get_root_component"),
+		TEXT("scene_component_get_world_location"),
+		TEXT("scene_component_set_world_location"),
+		TEXT("owner_get_slot"),
+		TEXT("owner_get_generation"),
+		TEXT("timer_set_once"),
+		TEXT("timer_cancel")
+	};
+	return StaticImports.Contains(ImportName);
+}
+
 bool RegisterAvidScriptWamrHostBindings()
 {
 #if !AVIDSCRIPT_WITH_WAMR

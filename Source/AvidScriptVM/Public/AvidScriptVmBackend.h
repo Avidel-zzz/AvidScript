@@ -80,11 +80,47 @@ struct FAvidScriptHostCallResult
 	FString Details;
 };
 
+class AVIDSCRIPTVM_API IAvidScriptVmGuestMemory
+{
+public:
+	virtual ~IAvidScriptVmGuestMemory() = default;
+	virtual bool ReadBytes(
+		uint32 GuestAddress,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) = 0;
+	virtual bool WriteBytes(
+		uint32 GuestAddress,
+		TConstArrayView<uint8> Bytes,
+		FString& OutError) = 0;
+};
+
+struct FAvidScriptDynamicHostCall
+{
+	uint32 BindingOrdinal = MAX_uint32;
+	TConstArrayView<uint64> Arguments;
+	IAvidScriptVmGuestMemory* GuestMemory = nullptr;
+};
+
+struct FAvidScriptDynamicHostCallResult
+{
+	bool bSucceeded = false;
+	int32 ReturnValue = 0;
+	FString Details;
+};
+
 class AVIDSCRIPTVM_API IAvidScriptHostDispatcher
 {
 public:
 	virtual ~IAvidScriptHostDispatcher() = default;
 	virtual bool DispatchHostCall(const FAvidScriptHostCall& Call, FAvidScriptHostCallResult& OutResult) = 0;
+	virtual bool DispatchDynamicHostCall(
+		const FAvidScriptDynamicHostCall& Call,
+		FAvidScriptDynamicHostCallResult& OutResult)
+	{
+		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.Details = TEXT("Dynamic host calls are not supported by this dispatcher.");
+		return false;
+	}
 };
 
 struct FAvidScriptVmLoadMetrics
@@ -95,11 +131,28 @@ struct FAvidScriptVmLoadMetrics
 	double ExecEnvCreateMs = 0.0;
 };
 
+struct FAvidScriptVmDynamicImport
+{
+	FString StableId;
+	uint32 Ordinal = MAX_uint32;
+	FString ModuleName;
+	FString ImportName;
+	FString Signature;
+};
+
+struct FAvidScriptVmBindingPackage
+{
+	FString PackageName;
+	FString PackageHash;
+	TArray<FAvidScriptVmDynamicImport> Imports;
+};
+
 struct FAvidScriptVmLoadConfig
 {
 	uint32 StackSize = 64 * 1024;
 	uint32 HeapSize = 64 * 1024;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	const FAvidScriptVmBindingPackage* BindingPackage = nullptr;
 };
 
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();

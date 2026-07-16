@@ -1,6 +1,7 @@
 #include "AvidScriptVmBackend.h"
 
 #include "AvidScriptVmExportTable.h"
+#include "AvidScriptWamrDynamicRegistry.h"
 #include "AvidScriptWamrHostBindings.h"
 
 #include "HAL/CriticalSection.h"
@@ -84,7 +85,7 @@ FString GetWamrException(wasm_module_inst_t ModuleInstance)
 }
 #endif
 
-class FAvidScriptWamrBackend final : public IAvidScriptVmBackend, public IAvidScriptWamrHostBridge
+class FAvidScriptWamrBackend final : public IAvidScriptVmBackend, public IAvidScriptWamrHostBridge, public IAvidScriptVmGuestMemory
 {
 public:
 	~FAvidScriptWamrBackend() override
@@ -117,6 +118,22 @@ public:
 			SetVmError(OutError, TEXT("invalid_config"), TEXT("VM stack and heap sizes must be non-zero."));
 			return false;
 		}
+		if (Config.BindingPackage != nullptr)
+		{
+			if (Config.HostDispatcher == nullptr)
+			{
+				SetVmError(
+					OutError,
+					TEXT("invalid_config"),
+					TEXT("Dynamic binding packages require a host dispatcher."));
+				return false;
+			}
+			if (!ValidateAvidScriptVmBindingPackage(*Config.BindingPackage, OutError))
+			{
+				return false;
+			}
+			AttachedBindingPackage = *Config.BindingPackage;
+		}
 
 		const double RuntimeInitStartSeconds = FPlatformTime::Seconds();
 		if (!AcquireWamrLease(OutError))
@@ -125,6 +142,21 @@ public:
 		}
 		LoadMetrics.RuntimeInitMs = MeasureElapsedMs(RuntimeInitStartSeconds);
 		bOwnsRuntimeLease = true;
+		if (Config.BindingPackage != nullptr)
+		{
+			if (!AcquireAvidScriptWamrDynamicImports(
+				AttachedBindingPackage,
+				DynamicRegistrations,
+				OutError))
+			{
+				Unload();
+				return false;
+			}
+			for (const FAvidScriptWamrDynamicRegistration& Registration : DynamicRegistrations)
+			{
+				DynamicOrdinals.Add(Registration.Attachment, Registration.Ordinal);
+			}
+		}
 
 		ModuleId = InModuleId;
 		HostDispatcher = Config.HostDispatcher;
@@ -132,11 +164,14 @@ public:
 
 		char ErrorBuffer[ErrorBufferSize] = {};
 		const double ModuleLoadStartSeconds = FPlatformTime::Seconds();
-		Module = wasm_runtime_load(
-			ModuleBuffer.GetData(),
-			static_cast<uint32>(ModuleBuffer.Num()),
-			ErrorBuffer,
-			sizeof(ErrorBuffer));
+		{
+			FAvidScriptWamrNativeRegistryScope RegistryScope;
+			Module = wasm_runtime_load(
+				ModuleBuffer.GetData(),
+				static_cast<uint32>(ModuleBuffer.Num()),
+				ErrorBuffer,
+				sizeof(ErrorBuffer));
+		}
 		LoadMetrics.ModuleLoadMs = MeasureElapsedMs(ModuleLoadStartSeconds);
 		if (Module == nullptr)
 		{
@@ -314,6 +349,10 @@ public:
 			Module = nullptr;
 		}
 
+		ReleaseAvidScriptWamrDynamicImports(DynamicRegistrations);
+		DynamicOrdinals.Reset();
+		AttachedBindingPackage = FAvidScriptVmBindingPackage();
+
 		if (bOwnsRuntimeLease)
 		{
 			ReleaseWamrLease();
@@ -356,6 +395,103 @@ public:
 		return HostDispatcher->DispatchHostCall(Call, OutResult);
 	}
 
+	bool DispatchDynamicHostCall(
+		const FAvidScriptWamrRawImportAttachment& Attachment,
+		TConstArrayView<uint64> Arguments,
+		int32& OutReturnValue,
+		FString& OutFailureDetails) override
+	{
+		OutReturnValue = 0;
+		OutFailureDetails.Reset();
+		const uint32* Ordinal = DynamicOrdinals.Find(&Attachment);
+		if (Ordinal == nullptr)
+		{
+			OutFailureDetails = TEXT("The raw import is not attached to this VM binding package.");
+			return false;
+		}
+		if (HostDispatcher == nullptr)
+		{
+			OutFailureDetails = TEXT("No host dispatcher is attached to the VM instance.");
+			return false;
+		}
+		FAvidScriptDynamicHostCall Call;
+		Call.BindingOrdinal = *Ordinal;
+		Call.Arguments = Arguments;
+		Call.GuestMemory = this;
+		FAvidScriptDynamicHostCallResult Result;
+		if (!HostDispatcher->DispatchDynamicHostCall(Call, Result) || !Result.bSucceeded)
+		{
+			OutFailureDetails = Result.Details.IsEmpty()
+				? FString::Printf(TEXT("Dynamic host dispatcher rejected ordinal %u."), *Ordinal)
+				: Result.Details;
+			return false;
+		}
+		OutReturnValue = Result.ReturnValue;
+		return true;
+	}
+
+	bool ReadBytes(
+		uint32 GuestAddress,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) override
+	{
+		OutError.Reset();
+		if (OutBytes.IsEmpty())
+		{
+			return true;
+		}
+		#if !AVIDSCRIPT_WITH_WAMR
+		OutError = TEXT("WAMR artifacts are unavailable for this target.");
+		return false;
+		#else
+		if (ModuleInstance == nullptr
+			|| !wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, OutBytes.Num()))
+		{
+			OutError = FString::Printf(TEXT("Guest read range is invalid at %u for %d bytes."), GuestAddress, OutBytes.Num());
+			return false;
+		}
+		const void* Source = wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress);
+		if (Source == nullptr)
+		{
+			OutError = TEXT("WAMR could not translate the guest read address.");
+			return false;
+		}
+		FMemory::Memcpy(OutBytes.GetData(), Source, OutBytes.Num());
+		return true;
+		#endif
+	}
+
+	bool WriteBytes(
+		uint32 GuestAddress,
+		TConstArrayView<uint8> Bytes,
+		FString& OutError) override
+	{
+		OutError.Reset();
+		if (Bytes.IsEmpty())
+		{
+			return true;
+		}
+		#if !AVIDSCRIPT_WITH_WAMR
+		OutError = TEXT("WAMR artifacts are unavailable for this target.");
+		return false;
+		#else
+		if (ModuleInstance == nullptr
+			|| !wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, Bytes.Num()))
+		{
+			OutError = FString::Printf(TEXT("Guest write range is invalid at %u for %d bytes."), GuestAddress, Bytes.Num());
+			return false;
+		}
+		void* Destination = wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress);
+		if (Destination == nullptr)
+		{
+			OutError = TEXT("WAMR could not translate the guest write address.");
+			return false;
+		}
+		FMemory::Memcpy(Destination, Bytes.GetData(), Bytes.Num());
+		return true;
+		#endif
+	}
+
 	void RecordHostImportFailure(const char* ImportName, const FString& Details) override
 	{
 		bHasPendingHostImportFailure = true;
@@ -367,6 +503,9 @@ private:
 	TArray<uint8> ModuleBuffer;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	FAvidScriptVmBindingPackage AttachedBindingPackage;
+	TArray<FAvidScriptWamrDynamicRegistration> DynamicRegistrations;
+	TMap<const FAvidScriptWamrRawImportAttachment*, uint32> DynamicOrdinals;
 	FAvidScriptVmExportTable ExportTable;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	bool bOwnsRuntimeLease = false;
