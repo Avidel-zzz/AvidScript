@@ -256,6 +256,36 @@ if (-not $RuntimeSessionSource.Contains('Scheduler->Tick(') -or
     Add-Violation 'FAvidScriptRuntimeSession is missing Scheduler/EventRouter routing'
 }
 
+$BindingSelectionTypes = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionTypes.h'
+$BindingSelectionResolverHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionResolver.h'
+$BindingSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingSelectionResolver.cpp'
+$ReflectedFunctionPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.cpp'
+$BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
+foreach ($RequiredSelectionContract in @(
+    'FAvidScriptBindingSelectionProfile',
+    'FAvidScriptBindingSelectionIssue',
+    'FAvidScriptBindingSelectionResolveResult'
+)) {
+    if (-not $BindingSelectionTypes.Contains($RequiredSelectionContract)) {
+        Add-Violation "binding selection types are missing $RequiredSelectionContract"
+    }
+}
+if ($BindingSelectionTypes -match '\b(UClass|UFunction)\b') {
+    Add-Violation 'binding selection types must remain reflection-free data contracts'
+}
+if (-not $BindingSelectionResolverHeader.Contains('FAvidScriptEditorBindingSelectionResolver') -or
+    -not $BindingSelectionResolverSource.Contains('EFieldIterationFlags::None')) {
+    Add-Violation 'binding selection resolver must own exact-class reflected function discovery'
+}
+if (-not $ReflectedFunctionPolicySource.Contains('FAvidScriptEditorReflectedFunctionPolicy::Evaluate') -or
+    $BindingDescriptorGeneratorSource -match 'bool\s+IsFunctionAllowed\s*\(') {
+    Add-Violation 'reflected function eligibility must remain in the shared function policy'
+}
+foreach ($RequiredProfileGeneratorContract in @('MakeEngineGameplayProfile', 'GenerateFromProfile')) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredProfileGeneratorContract)) {
+        Add-Violation "binding descriptor generator is missing $RequiredProfileGeneratorContract"
+    }
+}
 foreach ($LegacyBindingPath in @(
     'Source/AvidScriptRuntime/Public/AvidScriptObjectRegistry.h',
     'Source/AvidScriptRuntime/Public/AvidScriptActorBinding.h',

@@ -1,12 +1,7 @@
 #pragma once
 
+#include "AvidScriptEditorBindingSelectionTypes.h"
 #include "CoreMinimal.h"
-
-struct FAvidScriptReflectedFunctionSelection
-{
-	FString OwnerClassPath;
-	FName FunctionName;
-};
 
 struct FAvidScriptBindingDescriptorGenerateResult
 {
@@ -27,11 +22,18 @@ class AVIDSCRIPTEDITOR_API FAvidScriptEditorBindingDescriptorGenerator
 public:
 	static const TCHAR* GetDefaultPackageName();
 	static TArray<FAvidScriptReflectedFunctionSelection> MakeDefaultSelections();
+	static FAvidScriptBindingSelectionProfile MakeEngineGameplayProfile();
 
 	static bool Generate(
 		const FString& PackageName,
 		const TArray<FAvidScriptReflectedFunctionSelection>& Selections,
 		FString& OutJson,
+		FAvidScriptBindingDescriptorGenerateResult& OutResult);
+
+	static bool GenerateFromProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		FString& OutJson,
+		FAvidScriptBindingSelectionResolveResult& OutSelectionResult,
 		FAvidScriptBindingDescriptorGenerateResult& OutResult);
 
 	static bool GenerateDefault(

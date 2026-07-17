@@ -1,6 +1,8 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
+#include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
+#include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -90,25 +92,6 @@ FString MakeCanonicalIdentity(
 	return Identity;
 }
 
-bool IsFunctionAllowed(const UFunction* Function, FString& OutCategory, FString& OutSource)
-{
-	if (!Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure))
-	{
-		OutCategory = TEXT("function_not_callable");
-		OutSource = Function->GetPathName();
-		return false;
-	}
-	if (Function->HasAnyFunctionFlags(FUNC_EditorOnly | FUNC_Delegate | FUNC_MulticastDelegate | FUNC_NetRequest | FUNC_NetResponse)
-		|| Function->HasMetaData(TEXT("Latent"))
-		|| Function->HasMetaData(TEXT("CustomThunk")))
-	{
-		OutCategory = TEXT("function_not_allowed");
-		OutSource = Function->GetPathName();
-		return false;
-	}
-	return true;
-}
-
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
 	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
@@ -162,6 +145,15 @@ TArray<FAvidScriptReflectedFunctionSelection> FAvidScriptEditorBindingDescriptor
 		{ TEXT("/Script/Engine.SceneComponent"), TEXT("K2_GetComponentLocation") },
 		{ TEXT("/Script/Engine.SceneComponent"), TEXT("K2_GetComponentRotation") }
 	};
+}
+
+FAvidScriptBindingSelectionProfile FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile()
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.engine.gameplay");
+	Profile.Classes.Add({ TEXT("/Script/Engine.Actor") });
+	Profile.Classes.Add({ TEXT("/Script/Engine.SceneComponent") });
+	return Profile;
 }
 
 bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
@@ -219,7 +211,10 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 
 		FString FunctionPolicyCategory;
 		FString FunctionPolicySource;
-		if (!IsFunctionAllowed(Function, FunctionPolicyCategory, FunctionPolicySource))
+		if (!FAvidScriptEditorReflectedFunctionPolicy::Evaluate(
+			Function,
+			FunctionPolicyCategory,
+			FunctionPolicySource))
 		{
 			SetFailure(OutResult, FunctionPolicyCategory, FunctionPolicySource, TEXT("Select a public script-callable, non-latent runtime UFunction."));
 			return false;
@@ -402,6 +397,30 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 	OutResult.PackageHash = PackageHash;
 	OutResult.SelectionHash = SelectionHash;
 	return true;
+}
+
+bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	FString& OutJson,
+	FAvidScriptBindingSelectionResolveResult& OutSelectionResult,
+	FAvidScriptBindingDescriptorGenerateResult& OutResult)
+{
+	OutJson.Empty();
+	OutResult = FAvidScriptBindingDescriptorGenerateResult();
+	TArray<FAvidScriptReflectedFunctionSelection> Selections;
+	if (!FAvidScriptEditorBindingSelectionResolver::Resolve(
+		Profile,
+		Selections,
+		OutSelectionResult))
+	{
+		SetFailure(
+			OutResult,
+			OutSelectionResult.ErrorCategory,
+			OutSelectionResult.ErrorSource,
+			OutSelectionResult.NextAction);
+		return false;
+	}
+	return Generate(Profile.PackageName, Selections, OutJson, OutResult);
 }
 
 bool FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(
