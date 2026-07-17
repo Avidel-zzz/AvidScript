@@ -391,6 +391,28 @@ FString FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot()
 	return OutputRoot;
 }
 
+bool FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor(
+	const FString& DescriptorJson,
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!Emit(DescriptorJson, Source, Manifest, EmitResult))
+	{
+		OutResult = MoveTemp(EmitResult);
+		return false;
+	}
+	return PublishGeneratedPackage(
+		OutputRoot,
+		DescriptorJson,
+		Source,
+		Manifest,
+		EmitResult,
+		OutResult);
+}
+
 bool FAvidScriptEditorCSharpBindingEmitter::PublishDefault(
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {

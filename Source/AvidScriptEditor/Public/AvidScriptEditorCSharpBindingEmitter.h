@@ -46,6 +46,11 @@ public:
 
 	static FString GetDefaultOutputRoot();
 
+	static bool PublishDescriptor(
+		const FString& DescriptorJson,
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
 	static bool PublishDefault(
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 
