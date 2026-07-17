@@ -63,12 +63,12 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptCore' @(
 )
 
 $BindingsBuild = Read-RequiredFile 'Source/AvidScriptBindings/AvidScriptBindings.Build.cs'
-foreach ($RequiredDependency in @('AvidScriptCore', 'CoreUObject', 'Engine')) {
+foreach ($RequiredDependency in @('AvidScriptCore', 'CoreUObject', 'Engine', 'Json')) {
     if (-not $BindingsBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptBindings is missing required dependency $RequiredDependency"
     }
 }
-foreach ($ForbiddenDependency in @('WAMR', 'Json', 'UnrealEd', 'AvidScriptRuntime', 'AvidScriptEditor')) {
+foreach ($ForbiddenDependency in @('WAMR', 'UnrealEd', 'AvidScriptRuntime', 'AvidScriptEditor')) {
     if ($BindingsBuild.Contains('"' + $ForbiddenDependency + '"')) {
         Add-Violation "AvidScriptBindings must not depend on $ForbiddenDependency"
     }

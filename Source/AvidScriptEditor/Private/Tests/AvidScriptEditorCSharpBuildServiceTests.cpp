@@ -47,16 +47,16 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(TEXT("Custom C# profile test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
 
 	const FString SourcePath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(TestRoot, TEXT("CustomMoverScript.cs")));
-	const FString SourceText = TEXT(
-		"using AvidScript;\n"
-		"\n"
-		"public static class CustomMoverScript\n"
-		"{\n"
-		"    public static void BeginPlay()\n"
-		"    {\n"
-		"        Actor.SetLocation(11.0f, 22.0f, 33.0f);\n"
-		"    }\n"
-		"}\n");
+	const FString GeneratedLifecycleSamplePath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Samples/CSharp/GeneratedBindingLifecycle/GeneratedBindingLifecycleScript.cs")));
+	FString SourceText;
+	if (!TestTrue(
+		TEXT("Generated binding lifecycle sample can be read"),
+		FFileHelper::LoadFileToString(SourceText, *GeneratedLifecycleSamplePath)))
+	{
+		return false;
+	}
 	TestTrue(TEXT("Custom C# source can be written"), FFileHelper::SaveStringToFile(SourceText, *SourcePath));
 
 	FAvidScriptEditorCSharpBuildConfig Config;
@@ -74,22 +74,18 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	const bool bBuildSucceeded = FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult);
-	TestFalse(
-		TEXT("Custom C# profile waits for generated Phase 42 bindings"),
-		bBuildSucceeded);
-	TestFalse(TEXT("Custom C# profile build result does not succeed"), BuildResult.bSucceeded);
-	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 1);
-	TestEqual(
-		TEXT("Custom C# profile exposes the structured failure category"),
-		BuildResult.ErrorCategory,
-		FString(TEXT("phase42_binding_required")));
 	TestTrue(
-		TEXT("Custom C# profile exposes the actionable diagnostic"),
-		BuildResult.ErrorMessage.Contains(TEXT("ASBI4201")));
+		TEXT("Custom C# profile automatically publishes generated Phase 42 bindings"),
+		bBuildSucceeded);
+	TestTrue(TEXT("Custom C# profile build result succeeds"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 0);
+	TestTrue(
+		TEXT("Custom C# profile records a binding package manifest"),
+		FPaths::FileExists(BuildResult.BindingPackagePath));
 	TestTrue(TEXT("Custom C# profile report exists"), FPaths::FileExists(Config.ReportPath));
-	TestFalse(TEXT("Blocked custom profile leaves no manifest"), FPaths::FileExists(Config.ManifestPath));
-	TestFalse(
-		TEXT("Blocked custom profile leaves no formal WASM"),
+	TestTrue(TEXT("Custom C# profile manifest exists"), FPaths::FileExists(Config.ManifestPath));
+	TestTrue(
+		TEXT("Custom C# profile publishes formal WASM"),
 		FPaths::FileExists(FPaths::Combine(Config.OutputRoot, TEXT("custom_mover.wasm"))));
 
 	TSharedPtr<FJsonObject> ReportObject;
@@ -100,22 +96,29 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	}
 
 	TestEqual(
-		TEXT("Custom report declares the Phase 42 binding gate"),
+		TEXT("Custom report declares direct ABI success"),
 		ReportObject->GetStringField(TEXT("result")),
-		FString(TEXT("phase42_binding_required")));
-	TestFalse(TEXT("Custom report records failure"), ReportObject->GetBoolField(TEXT("succeeded")));
-	const TArray<TSharedPtr<FJsonValue>>* Diagnostics = nullptr;
-	if (!TestTrue(TEXT("Custom report declares diagnostics"), ReportObject->TryGetArrayField(TEXT("diagnostics"), Diagnostics)) || Diagnostics == nullptr)
+		FString(TEXT("direct_abi_built")));
+	TestTrue(TEXT("Custom report records success"), ReportObject->GetBoolField(TEXT("succeeded")));
+	const TSharedPtr<FJsonObject>* BindingPackageObject = nullptr;
+	if (!TestTrue(
+		TEXT("Custom report contains binding package provenance"),
+		ReportObject->TryGetObjectField(TEXT("binding_package"), BindingPackageObject))
+		|| BindingPackageObject == nullptr
+		|| !BindingPackageObject->IsValid())
 	{
-		return true;
+		return false;
 	}
-	const bool bHasBindingDiagnostic = Diagnostics->ContainsByPredicate(
-		[](const TSharedPtr<FJsonValue>& Value)
-		{
-			const TSharedPtr<FJsonObject> Diagnostic = Value.IsValid() ? Value->AsObject() : nullptr;
-			return Diagnostic.IsValid() && Diagnostic->GetStringField(TEXT("code")) == TEXT("ASBI4201");
-		});
-	TestTrue(TEXT("Custom report includes ASBI4201"), bHasBindingDiagnostic);
+	TestTrue(
+		TEXT("Custom report marks generated bindings required"),
+		(*BindingPackageObject)->GetBoolField(TEXT("required")));
+	TestEqual(
+		TEXT("Custom report records the default generated package"),
+		(*BindingPackageObject)->GetStringField(TEXT("package_name")),
+		FString(TEXT("avidscript.engine.core")));
+	TestFalse(
+		TEXT("Custom report records a content-addressed package hash"),
+		(*BindingPackageObject)->GetStringField(TEXT("package_hash")).IsEmpty());
 
 	return true;
 }

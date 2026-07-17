@@ -20,6 +20,13 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifest
 	FString WasmSha256;
 	TArray<FString> RequiredExports;
 	TArray<FAvidScriptWasmRequiredImport> RequiredImports;
+	FString BindingPackageName;
+	FString BindingPackageHash;
+	FString BindingPackageManifestFile;
+	FString BindingPackageManifestSha256;
+	FString BindingDescriptorFile;
+	FString BindingDescriptorSha256;
+	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 
 	static FAvidScriptWasmReloadManifest MakeSmoke(const FString& InModuleId);
 };
@@ -29,6 +36,8 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifestLoadResult
 	bool bSucceeded = false;
 	FString ManifestPath;
 	FString ModulePath;
+	FString BindingPackageManifestPath;
+	FString BindingDescriptorPath;
 	int64 ByteSize = 0;
 	FString ErrorCategory;
 	FString NextAction;

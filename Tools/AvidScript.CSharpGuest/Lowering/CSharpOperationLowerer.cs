@@ -75,10 +75,14 @@ internal static class CSharpOperationLowerer
 
         SemanticOperation target = operation.Children[0];
         GuestRegister? value = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
-        return value is not null
-            && StoreValue(context, target, value, blockOrdinal, instructions)
-                ? value
-                : null;
+        if (value is null || target.Kind == "discard")
+        {
+            return value;
+        }
+
+        return StoreValue(context, target, value, blockOrdinal, instructions)
+            ? value
+            : null;
     }
 
     private static GuestRegister? LowerCompoundAssignment(

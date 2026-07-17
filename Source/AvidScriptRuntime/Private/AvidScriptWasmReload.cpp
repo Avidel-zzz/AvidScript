@@ -51,7 +51,7 @@ FString NormalizeFullPath(FString Path)
 	return Path;
 }
 
-FString ResolveWasmPathFromManifest(
+FString ResolveArtifactPathFromManifest(
 	const FString& ManifestPath,
 	const FString& WasmPath)
 {
@@ -116,6 +116,59 @@ FString ComputeSha256Hex(const TArray<uint8>& Bytes)
 	return BytesToLowerHex(Digest, UE_ARRAY_COUNT(Digest));
 }
 
+bool LoadAndVerifyBindingArtifact(
+	const FString& Path,
+	const FString& ExpectedSha256,
+	const FString& Label,
+	TArray<uint8>& OutBytes,
+	FAvidScriptWasmReloadManifestLoadResult& OutResult)
+{
+	OutBytes.Reset();
+	if (!FPaths::FileExists(Path))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_file_missing"),
+			FString::Printf(TEXT("%s file does not exist: %s"), *Label, *Path),
+			TEXT("republish the generated binding package and rebuild the script manifest"));
+		return false;
+	}
+	if (!FFileHelper::LoadFileToArray(OutBytes, *Path))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_file_read_failed"),
+			FString::Printf(TEXT("failed to read %s file: %s"), *Label, *Path),
+			TEXT("verify binding package file permissions and retry after the writer closes it"));
+		return false;
+	}
+	if (OutBytes.IsEmpty())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_file_empty"),
+			FString::Printf(TEXT("%s file is empty: %s"), *Label, *Path),
+			TEXT("republish the generated binding package before loading this script"));
+		return false;
+	}
+
+	const FString ActualSha256 = ComputeSha256Hex(OutBytes);
+	if (ActualSha256.IsEmpty() || ActualSha256 != ExpectedSha256)
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_hash_mismatch"),
+			FString::Printf(
+				TEXT("%s manifest sha256 %s does not match file sha256 %s"),
+				*Label,
+				*ExpectedSha256,
+				ActualSha256.IsEmpty() ? TEXT("<failed>") : *ActualSha256),
+			TEXT("rebuild the script against the current content-addressed binding package"));
+		return false;
+	}
+
+	return true;
+}
 bool RequireStringField(
 	const FJsonObject& Object,
 	const TCHAR* FieldName,
@@ -153,6 +206,186 @@ bool RequireJsonObjectField(
 	}
 
 	OutObject = *ObjectPtr;
+	return true;
+}
+
+bool ValidateBindingPackageManifest(
+	const FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmReloadManifestLoadResult& OutResult)
+{
+	FString PackageManifestJson;
+	if (!FFileHelper::LoadFileToString(PackageManifestJson, *Manifest.BindingPackageManifestFile))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_file_read_failed"),
+			FString::Printf(
+				TEXT("failed to decode binding package manifest: %s"),
+				*Manifest.BindingPackageManifestFile),
+			TEXT("republish package.json as UTF-8 JSON and rebuild the script"));
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> PackageObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PackageManifestJson);
+	if (!FJsonSerializer::Deserialize(Reader, PackageObject) || !PackageObject.IsValid())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("binding package manifest JSON could not be parsed as an object"),
+			TEXT("republish the generated binding package and rebuild the script"));
+		return false;
+	}
+
+	int32 SchemaVersion = 0;
+	int32 DescriptorSchemaVersion = 0;
+	FString PackageName;
+	FString PackageHash;
+	FString DescriptorSha256;
+	if (!PackageObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
+		|| SchemaVersion != 1
+		|| !PackageObject->TryGetNumberField(TEXT("descriptor_schema_version"), DescriptorSchemaVersion)
+		|| DescriptorSchemaVersion != 2
+		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
+		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
+		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("binding package manifest schema or identity fields are invalid"),
+			TEXT("republish the package with the current Phase 42 binding emitter"));
+		return false;
+	}
+
+	PackageHash = PackageHash.ToLower();
+	DescriptorSha256 = DescriptorSha256.ToLower();
+	if (PackageName != Manifest.BindingPackageName
+		|| PackageHash != Manifest.BindingPackageHash
+		|| DescriptorSha256 != Manifest.BindingDescriptorSha256)
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_identity_mismatch"),
+			TEXT("package.json identity does not match the script manifest and descriptor"),
+			TEXT("rebuild the script and binding package as one transaction"));
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* FilesObjectPtr = nullptr;
+	FString DescriptorRelativePath;
+	if (!PackageObject->TryGetObjectField(TEXT("files"), FilesObjectPtr)
+		|| FilesObjectPtr == nullptr
+		|| !FilesObjectPtr->IsValid()
+		|| !(*FilesObjectPtr)->TryGetStringField(TEXT("descriptor"), DescriptorRelativePath)
+		|| DescriptorRelativePath.IsEmpty()
+		|| !FPaths::IsRelative(DescriptorRelativePath))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json files.descriptor must be a package-relative path"),
+			TEXT("republish the generated binding package"));
+		return false;
+	}
+
+	const FString PackageDirectory = NormalizeFullPath(FPaths::GetPath(Manifest.BindingPackageManifestFile));
+	FString PackageDirectoryPrefix = PackageDirectory;
+	if (!PackageDirectoryPrefix.EndsWith(TEXT("/")))
+	{
+		PackageDirectoryPrefix += TEXT("/");
+	}
+	const FString DescriptorFromPackage = NormalizeFullPath(FPaths::Combine(
+		PackageDirectory,
+		DescriptorRelativePath));
+	if (!DescriptorFromPackage.StartsWith(PackageDirectoryPrefix, ESearchCase::IgnoreCase)
+		|| !DescriptorFromPackage.Equals(
+			NormalizeFullPath(Manifest.BindingDescriptorFile),
+			ESearchCase::IgnoreCase))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_path_mismatch"),
+			TEXT("package.json descriptor path escapes or differs from the script manifest"),
+			TEXT("republish the content-addressed package and rebuild the script"));
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* RequiredImportValues = nullptr;
+	if (!PackageObject->TryGetArrayField(TEXT("required_imports"), RequiredImportValues)
+		|| RequiredImportValues == nullptr
+		|| RequiredImportValues->IsEmpty())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json required_imports must not be empty"),
+			TEXT("republish the generated binding package"));
+		return false;
+	}
+
+	TSet<FString> DeclaredImports;
+	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImportValues)
+	{
+		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid()
+			? ImportValue->AsObject()
+			: nullptr;
+		FString ModuleName;
+		FString ImportName;
+		if (!ImportObject.IsValid()
+			|| !ImportObject->TryGetStringField(TEXT("module"), ModuleName)
+			|| !ImportObject->TryGetStringField(TEXT("name"), ImportName)
+			|| ModuleName.IsEmpty()
+			|| ImportName.IsEmpty())
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_invalid"),
+				TEXT("package.json required_imports contains an invalid import"),
+				TEXT("republish the generated binding package"));
+			return false;
+		}
+
+		const FString ImportKey = ModuleName + TEXT("\n") + ImportName;
+		if (DeclaredImports.Contains(ImportKey))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_invalid"),
+				TEXT("package.json required_imports contains a duplicate import"),
+				TEXT("republish the generated binding package"));
+			return false;
+		}
+		DeclaredImports.Add(ImportKey);
+	}
+
+	const TArray<FAvidScriptVmDynamicImport>& RuntimeImports = Manifest.BindingPackage->GetVmPackage().Imports;
+	if (DeclaredImports.Num() != RuntimeImports.Num())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_import_mismatch"),
+			TEXT("package.json and descriptor declare different dynamic import counts"),
+			TEXT("regenerate the binding package from one reflection snapshot"));
+		return false;
+	}
+	for (const FAvidScriptVmDynamicImport& RuntimeImport : RuntimeImports)
+	{
+		if (!DeclaredImports.Contains(RuntimeImport.ModuleName + TEXT("\n") + RuntimeImport.ImportName))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_import_mismatch"),
+				FString::Printf(
+					TEXT("descriptor dynamic import is missing from package.json: %s.%s"),
+					*RuntimeImport.ModuleName,
+					*RuntimeImport.ImportName),
+				TEXT("regenerate the binding package from one reflection snapshot"));
+			return false;
+		}
+	}
+
 	return true;
 }
 } // namespace
@@ -287,7 +520,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	}
 
 	Manifest.WasmSha256 = Manifest.WasmSha256.ToLower();
-	Manifest.WasmFile = ResolveWasmPathFromManifest(ManifestFullPath, WasmPathFromManifest);
+	Manifest.WasmFile = ResolveArtifactPathFromManifest(ManifestFullPath, WasmPathFromManifest);
 	OutResult.ModulePath = Manifest.WasmFile;
 
 	if (!FPaths::FileExists(Manifest.WasmFile))
@@ -335,6 +568,102 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		return false;
 	}
 
+	const TSharedPtr<FJsonObject>* BindingPackageObjectPtr = nullptr;
+	if (RootObject->TryGetObjectField(TEXT("binding_package"), BindingPackageObjectPtr)
+		&& BindingPackageObjectPtr != nullptr
+		&& BindingPackageObjectPtr->IsValid())
+	{
+		const TSharedPtr<FJsonObject> BindingPackageObject = *BindingPackageObjectPtr;
+		FString BindingPackageManifestPathFromManifest;
+		FString BindingDescriptorPathFromManifest;
+		if (!RequireStringField(*BindingPackageObject, TEXT("package_name"), Manifest.BindingPackageName, OutResult)
+			|| !RequireStringField(*BindingPackageObject, TEXT("package_hash"), Manifest.BindingPackageHash, OutResult)
+			|| !RequireStringField(*BindingPackageObject, TEXT("manifest_file"), BindingPackageManifestPathFromManifest, OutResult)
+			|| !RequireStringField(*BindingPackageObject, TEXT("manifest_sha256"), Manifest.BindingPackageManifestSha256, OutResult)
+			|| !RequireStringField(*BindingPackageObject, TEXT("descriptor_file"), BindingDescriptorPathFromManifest, OutResult)
+			|| !RequireStringField(*BindingPackageObject, TEXT("descriptor_sha256"), Manifest.BindingDescriptorSha256, OutResult))
+		{
+			return false;
+		}
+
+		Manifest.BindingPackageManifestSha256 = Manifest.BindingPackageManifestSha256.ToLower();
+		Manifest.BindingDescriptorSha256 = Manifest.BindingDescriptorSha256.ToLower();
+		Manifest.BindingPackageHash = Manifest.BindingPackageHash.ToLower();
+		Manifest.BindingPackageManifestFile = ResolveArtifactPathFromManifest(
+			ManifestFullPath,
+			BindingPackageManifestPathFromManifest);
+		Manifest.BindingDescriptorFile = ResolveArtifactPathFromManifest(
+			ManifestFullPath,
+			BindingDescriptorPathFromManifest);
+		OutResult.BindingPackageManifestPath = Manifest.BindingPackageManifestFile;
+		OutResult.BindingDescriptorPath = Manifest.BindingDescriptorFile;
+
+		TArray<uint8> BindingManifestBytes;
+		if (!LoadAndVerifyBindingArtifact(
+			Manifest.BindingPackageManifestFile,
+			Manifest.BindingPackageManifestSha256,
+			TEXT("binding package manifest"),
+			BindingManifestBytes,
+			OutResult))
+		{
+			return false;
+		}
+
+		TArray<uint8> BindingDescriptorBytes;
+		if (!LoadAndVerifyBindingArtifact(
+			Manifest.BindingDescriptorFile,
+			Manifest.BindingDescriptorSha256,
+			TEXT("binding descriptor"),
+			BindingDescriptorBytes,
+			OutResult))
+		{
+			return false;
+		}
+
+		FString BindingDescriptorJson;
+		if (!FFileHelper::LoadFileToString(BindingDescriptorJson, *Manifest.BindingDescriptorFile))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_file_read_failed"),
+				FString::Printf(TEXT("failed to decode binding descriptor: %s"), *Manifest.BindingDescriptorFile),
+				TEXT("republish the descriptor as UTF-8 JSON and rebuild the script"));
+			return false;
+		}
+
+		FAvidScriptBindingPackageLoadResult BindingLoadResult;
+		if (!FAvidScriptBindingPackage::LoadDescriptor(
+			BindingDescriptorJson,
+			Manifest.BindingPackage,
+			BindingLoadResult))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				BindingLoadResult.ErrorCategory.IsEmpty()
+					? FString(TEXT("binding_package_invalid"))
+					: BindingLoadResult.ErrorCategory,
+				BindingLoadResult.ErrorDetails.IsEmpty()
+					? BindingLoadResult.ErrorSource
+					: BindingLoadResult.ErrorDetails,
+				TEXT("regenerate the binding package from the current UE reflection snapshot"));
+			return false;
+		}
+		if (!Manifest.BindingPackage.IsValid()
+			|| Manifest.BindingPackage->GetPackageName() != Manifest.BindingPackageName
+			|| Manifest.BindingPackage->GetPackageHash() != Manifest.BindingPackageHash)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_identity_mismatch"),
+				TEXT("script manifest package identity does not match the loaded descriptor"),
+				TEXT("rebuild the script and binding package as one transaction"));
+			return false;
+		}
+		if (!ValidateBindingPackageManifest(Manifest, OutResult))
+		{
+			return false;
+		}
+	}
 	if (!RootObject->TryGetStringArrayField(TEXT("required_exports"), Manifest.RequiredExports) ||
 		Manifest.RequiredExports.IsEmpty())
 	{

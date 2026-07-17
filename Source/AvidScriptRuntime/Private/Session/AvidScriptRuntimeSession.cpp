@@ -371,6 +371,23 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 		return false;
 	}
 
+	const bool bRequiresDynamicBindingPackage = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& Import)
+		{
+			return Import.ModuleName == TEXT("avidscript")
+				&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive);
+		});
+	if (bRequiresDynamicBindingPackage && !Manifest.BindingPackage.IsValid())
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<manifest>"),
+			TEXT("binding_package_missing"),
+			TEXT("manifest declares generated UE imports without a loaded binding package"),
+			TEXT("load the script through its verified .avidscript.json manifest"));
+		return false;
+	}
+
 	return true;
 }
 
@@ -384,7 +401,12 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
 	FAvidScriptWasmSmokeResult RuntimeResult;
 
-	if (!CandidateRuntime->LoadModule(Bytecode, BytecodeSize, Manifest.ModuleId, RuntimeResult))
+	if (!CandidateRuntime->LoadModule(
+		Bytecode,
+		BytecodeSize,
+		Manifest.ModuleId,
+		Manifest.BindingPackage,
+		RuntimeResult))
 	{
 		CopyRuntimeFailure(RuntimeResult, OutResult);
 		return false;

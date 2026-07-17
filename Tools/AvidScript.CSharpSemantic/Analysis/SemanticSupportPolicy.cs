@@ -56,63 +56,65 @@ internal static class SemanticSupportPolicy
 
     public static SemanticSupportProjection ProjectDocument(SemanticCompilationContext context)
     {
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(
-            context.SyntaxTree,
-            ignoreAccessibility: false);
-        SyntaxNode root = context.SyntaxTree.GetRoot();
         List<SemanticDiagnostic> diagnostics = new();
-
-        foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes()
-            .OfType<AnonymousFunctionExpressionSyntax>())
+        foreach (SemanticCompilationUnit unit in context.ProjectionUnits)
         {
-            diagnostics.Add(CreateDiagnostic(
-                "ASCS4001",
-                "Lambda and closure syntax is not supported by the current AvidScript semantic profile.",
-                context,
-                lambda.Span));
-        }
-
-        foreach (LocalFunctionStatementSyntax localFunction in root.DescendantNodes()
-            .OfType<LocalFunctionStatementSyntax>())
-        {
-            diagnostics.Add(CreateDiagnostic(
-                "ASCS4001",
-                "Local functions are not supported by the current AvidScript semantic profile.",
-                context,
-                localFunction.Span));
-        }
-
-        foreach (TypeSyntax typeSyntax in root.DescendantNodes().OfType<TypeSyntax>())
-        {
-            if (semanticModel.GetTypeInfo(typeSyntax).Type is IDynamicTypeSymbol)
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(
+                unit.SyntaxTree,
+                ignoreAccessibility: false);
+            SyntaxNode root = unit.SyntaxTree.GetRoot();
+            foreach (AnonymousFunctionExpressionSyntax lambda in root.DescendantNodes()
+                .OfType<AnonymousFunctionExpressionSyntax>())
             {
                 diagnostics.Add(CreateDiagnostic(
-                    "ASCS4002",
-                    "Dynamic types are not supported by the current AvidScript semantic profile.",
-                    context,
-                    typeSyntax.Span));
+                    "ASCS4001",
+                    "Lambda and closure syntax is not supported by the current AvidScript semantic profile.",
+                    unit,
+                    lambda.Span));
             }
-        }
 
-        IEnumerable<SyntaxNode> unsafeSyntax = root.DescendantNodes().Where(node =>
-            node is PointerTypeSyntax or FunctionPointerTypeSyntax or StackAllocArrayCreationExpressionSyntax);
-        foreach (SyntaxNode syntax in unsafeSyntax)
-        {
-            diagnostics.Add(CreateDiagnostic(
-                "ASCS4003",
-                "Unsafe pointer, function-pointer, and stackalloc syntax is not supported by the current AvidScript semantic profile.",
-                context,
-                syntax.Span));
-        }
+            foreach (LocalFunctionStatementSyntax localFunction in root.DescendantNodes()
+                .OfType<LocalFunctionStatementSyntax>())
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    "ASCS4001",
+                    "Local functions are not supported by the current AvidScript semantic profile.",
+                    unit,
+                    localFunction.Span));
+            }
 
-        foreach (SyntaxToken unsafeToken in root.DescendantTokens().Where(token =>
-            token.IsKind(SyntaxKind.UnsafeKeyword)))
-        {
-            diagnostics.Add(CreateDiagnostic(
-                "ASCS4003",
-                "Unsafe declarations and blocks are not supported by the current AvidScript semantic profile.",
-                context,
-                unsafeToken.Span));
+            foreach (TypeSyntax typeSyntax in root.DescendantNodes().OfType<TypeSyntax>())
+            {
+                if (semanticModel.GetTypeInfo(typeSyntax).Type is IDynamicTypeSymbol)
+                {
+                    diagnostics.Add(CreateDiagnostic(
+                        "ASCS4002",
+                        "Dynamic types are not supported by the current AvidScript semantic profile.",
+                        unit,
+                        typeSyntax.Span));
+                }
+            }
+
+            IEnumerable<SyntaxNode> unsafeSyntax = root.DescendantNodes().Where(node =>
+                node is PointerTypeSyntax or FunctionPointerTypeSyntax or StackAllocArrayCreationExpressionSyntax);
+            foreach (SyntaxNode syntax in unsafeSyntax)
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    "ASCS4003",
+                    "Unsafe pointer, function-pointer, and stackalloc syntax is not supported by the current AvidScript semantic profile.",
+                    unit,
+                    syntax.Span));
+            }
+
+            foreach (SyntaxToken unsafeToken in root.DescendantTokens().Where(token =>
+                token.IsKind(SyntaxKind.UnsafeKeyword)))
+            {
+                diagnostics.Add(CreateDiagnostic(
+                    "ASCS4003",
+                    "Unsafe declarations and blocks are not supported by the current AvidScript semantic profile.",
+                    unit,
+                    unsafeToken.Span));
+            }
         }
 
         return new SemanticSupportProjection(diagnostics
@@ -131,13 +133,13 @@ internal static class SemanticSupportPolicy
     private static SemanticDiagnostic CreateDiagnostic(
         string code,
         string message,
-        SemanticCompilationContext context,
+        SemanticCompilationUnit unit,
         Microsoft.CodeAnalysis.Text.TextSpan span)
     {
         return new SemanticDiagnostic(
             code,
             "error",
             message,
-            SemanticSpanFactory.Create(context.SourceText, span));
+            SemanticSpanFactory.Create(unit.SourceText, span));
     }
 }

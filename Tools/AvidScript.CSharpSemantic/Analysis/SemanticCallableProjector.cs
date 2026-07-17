@@ -21,10 +21,6 @@ internal static class SemanticCallableProjector
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry)
     {
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(
-            context.SyntaxTree,
-            ignoreAccessibility: false);
-        SyntaxNode root = context.SyntaxTree.GetRoot();
         HashSet<string> bodyIds = SemanticExecutableBodyResolver.Resolve(context)
             .Select(body => SemanticSymbolProjector.GetSymbolId(body.Method))
             .ToHashSet(StringComparer.Ordinal);
@@ -32,44 +28,51 @@ internal static class SemanticCallableProjector
         Dictionary<string, IMethodSymbol> exportOwners = new(StringComparer.Ordinal);
         List<SemanticDiagnostic> diagnostics = new();
 
-        foreach (IMethodSymbol method in EnumerateDeclaredMethods(root, semanticModel))
+        foreach (SemanticCompilationUnit unit in context.ProjectionUnits)
         {
-            string methodId = SemanticSymbolProjector.GetSymbolId(method);
-            SemanticCallableImport? import = ProjectImport(method, diagnostics, context);
-            SemanticCallableExport? export = ProjectExport(method, diagnostics, context);
-            if (export is not null && !exportOwners.TryAdd(export.Name, method))
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(
+                unit.SyntaxTree,
+                ignoreAccessibility: false);
+            SyntaxNode root = unit.SyntaxTree.GetRoot();
+            foreach (IMethodSymbol method in EnumerateDeclaredMethods(root, semanticModel))
             {
-                diagnostics.Add(CreateDiagnostic(
-                    "ASCS5003",
-                    $"WASM export name '{export.Name}' is declared by more than one callable.",
-                    method,
-                    context));
-            }
+                string methodId = SemanticSymbolProjector.GetSymbolId(method);
+                SemanticCallableImport? import = ProjectImport(method, diagnostics, unit);
+                SemanticCallableExport? export = ProjectExport(method, diagnostics, unit);
+                if (export is not null && !exportOwners.TryAdd(export.Name, method))
+                {
+                    diagnostics.Add(CreateDiagnostic(
+                        "ASCS5003",
+                        $"WASM export name '{export.Name}' is declared by more than one callable.",
+                        method,
+                        unit));
+                }
 
-            SemanticCallable callable = new(
-                methodId,
-                typeRegistry.Register(method.ContainingType),
-                typeRegistry.Register(method.ReturnType),
-                method.Parameters
-                    .OrderBy(parameter => parameter.Ordinal)
-                    .Select(parameter => new SemanticCallableParameter(
-                        parameter.Ordinal,
-                        SemanticSymbolProjector.GetSymbolId(parameter),
-                        parameter.Name,
-                        typeRegistry.Register(parameter.Type),
-                        MapRefKind(parameter.RefKind)))
-                    .ToArray(),
-                method.IsStatic,
-                method.MethodKind == MethodKind.Constructor,
-                bodyIds.Contains(methodId),
-                method.AssociatedSymbol is { } associated
-                    ? SemanticSymbolProjector.GetSymbolId(associated)
-                    : null,
-                import,
-                export);
-            if (!callables.TryAdd(methodId, callable))
-            {
-                throw new InvalidOperationException($"Duplicate semantic callable id: {methodId}");
+                SemanticCallable callable = new(
+                    methodId,
+                    typeRegistry.Register(method.ContainingType),
+                    typeRegistry.Register(method.ReturnType),
+                    method.Parameters
+                        .OrderBy(parameter => parameter.Ordinal)
+                        .Select(parameter => new SemanticCallableParameter(
+                            parameter.Ordinal,
+                            SemanticSymbolProjector.GetSymbolId(parameter),
+                            parameter.Name,
+                            typeRegistry.Register(parameter.Type),
+                            MapRefKind(parameter.RefKind)))
+                        .ToArray(),
+                    method.IsStatic,
+                    method.MethodKind == MethodKind.Constructor,
+                    bodyIds.Contains(methodId),
+                    method.AssociatedSymbol is { } associated
+                        ? SemanticSymbolProjector.GetSymbolId(associated)
+                        : null,
+                    import,
+                    export);
+                if (!callables.TryAdd(methodId, callable))
+                {
+                    throw new InvalidOperationException($"Duplicate semantic callable id: {methodId}");
+                }
             }
         }
 
@@ -127,7 +130,7 @@ internal static class SemanticCallableProjector
     private static SemanticCallableImport? ProjectImport(
         IMethodSymbol method,
         ICollection<SemanticDiagnostic> diagnostics,
-        SemanticCompilationContext context)
+        SemanticCompilationUnit unit)
     {
         AttributeData? attribute = FindAttribute(method, DllImportAttributeName);
         if (attribute is null)
@@ -143,7 +146,7 @@ internal static class SemanticCallableProjector
                 "ASCS5001",
                 "DllImport requires constant non-empty module and entry-point names.",
                 method,
-                context));
+                unit));
             return null;
         }
 
@@ -153,7 +156,7 @@ internal static class SemanticCallableProjector
     private static SemanticCallableExport? ProjectExport(
         IMethodSymbol method,
         ICollection<SemanticDiagnostic> diagnostics,
-        SemanticCompilationContext context)
+        SemanticCompilationUnit unit)
     {
         AttributeData? attribute = FindAttribute(method, UnmanagedCallersOnlyAttributeName);
         if (attribute is null)
@@ -168,7 +171,7 @@ internal static class SemanticCallableProjector
                 "ASCS5002",
                 "UnmanagedCallersOnly requires a constant non-empty EntryPoint for AvidScript exports.",
                 method,
-                context));
+                unit));
             return null;
         }
 
@@ -205,13 +208,13 @@ internal static class SemanticCallableProjector
         string code,
         string message,
         IMethodSymbol method,
-        SemanticCompilationContext context)
+        SemanticCompilationUnit unit)
     {
         Location? location = method.Locations.FirstOrDefault(item =>
-            item.IsInSource && item.SourceTree == context.SyntaxTree);
+            item.IsInSource && item.SourceTree == unit.SyntaxTree);
         SemanticSpan span = location is null
             ? SemanticSpanFactory.Empty
-            : SemanticSpanFactory.Create(context.SourceText, location.SourceSpan);
+            : SemanticSpanFactory.Create(unit.SourceText, location.SourceSpan);
         return new SemanticDiagnostic(code, "error", message, span);
     }
 }

@@ -13,7 +13,8 @@ internal static class CSharpGuestOperationTests
     {
         ScalarStateLocalsCallsAndConditionalsAreLowered();
         LoopBackEdgesArePreserved();
-        return 2;
+        DiscardAssignmentsEvaluateTheirRightHandSide();
+        return 3;
     }
 
     private static void ScalarStateLocalsCallsAndConditionalsAreLowered()
@@ -63,6 +64,43 @@ internal static class CSharpGuestOperationTests
             "loop body should retain its CFG back-edge");
     }
 
+    private static void DiscardAssignmentsEvaluateTheirRightHandSide()
+    {
+        SemanticOperation call = CSharpGuestSemanticFixture.Operation(
+            "invocation",
+            "type:int32",
+            CSharpGuestSemanticFixture.HostMethodId,
+            new[]
+            {
+                Argument(Literal(2)),
+                Argument(Literal(3)),
+            });
+        SemanticOperation discard = CSharpGuestSemanticFixture.Operation("discard", null);
+        SemanticOperation assignment = Assign(discard, call);
+        SemanticControlFlowEdge returned = Edge(0, 1, "fallthrough", "return");
+        SemanticControlFlowGraph graph = new(
+            CSharpGuestSemanticFixture.MainMethodId,
+            0,
+            1,
+            new[]
+            {
+                Block(0, new[] { assignment }, null, "none", Array.Empty<SemanticControlFlowEdge>(), new[] { returned }),
+                Block(1, Array.Empty<SemanticOperation>(), null, "none", new[] { returned }, Array.Empty<SemanticControlFlowEdge>(), "exit"),
+            });
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(WithGraph(graph), SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(FormatDiagnostics(result));
+        GuestInstruction[] instructions = module.Functions
+            .Single(item => item.Id == CSharpGuestIdsForTests.Function(CSharpGuestSemanticFixture.MainMethodId))
+            .Blocks.SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "discard assignment module should lower and validate");
+        Assert(instructions.Count(instruction => instruction.Op == "call") == 1,
+            "discard assignment should evaluate its invocation exactly once");
+    }
     private static SemanticDocument WithGraph(SemanticControlFlowGraph graph)
     {
         SemanticDocument document = CSharpGuestSemanticFixture.Create();

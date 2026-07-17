@@ -8,7 +8,8 @@ param(
     [string]$ArtifactStem = "",
     [string]$ReportPath = "",
     [string]$ManifestPath = "",
-    [string]$GuestCompilerPath = ""
+    [string]$GuestCompilerPath = "",
+    [string]$BindingPackagePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +23,7 @@ $DefaultModuleId = "csharp_actor_lifecycle"
 $DefaultArtifactStem = "actor_lifecycle"
 $DefaultGuestCompilerPath = Join-Path $BuildDir "InvokeCSharpGuestCompiler.ps1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+. (Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1")
 
 function Resolve-ExistingFile {
     param([string]$Path)
@@ -217,6 +219,17 @@ function Write-BuildReport {
             script_type = $SelectedScriptTypeName
         }
         output_root = Convert-ToProjectRelativePath $OutputRoot
+        binding_package = [ordered]@{
+            required = -not $IsDefaultSource
+            package_name = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.PackageName }
+            package_hash = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.PackageHash }
+            manifest_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.ManifestPath }
+            manifest_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.ManifestSha256 }
+            descriptor_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.DescriptorPath }
+            descriptor_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.DescriptorSha256 }
+            reference_source_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath }
+            reference_source_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.ReferenceSourceSha256 }
+        }
         required_exports = @($RequiredExports)
         required_imports = @($RequiredImports)
         observed_exports = @($ObservedExports)
@@ -279,6 +292,9 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 $SourcePath = [System.IO.Path]::GetFullPath($SourcePath)
 $ProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+$IsDefaultSource = $SourcePath.Equals(
+    [System.IO.Path]::GetFullPath($DefaultSourcePath),
+    [System.StringComparison]::OrdinalIgnoreCase)
 if ([string]::IsNullOrWhiteSpace($ReportPath)) { $ReportPath = Join-Path $OutputRoot "$ArtifactStem.csharp.report.json" }
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) { $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json" }
 $ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
@@ -298,6 +314,7 @@ $SelectedScriptTypeName = ""
 $RequiredExports = @()
 $RequiredImports = @()
 $ObservedExports = @()
+$BindingPackageInfo = $null
 $Diagnostics = @()
 $DotNet = [pscustomobject]@{ Found = $false; Source = ""; Path = ""; Checked = @() }
 
@@ -317,6 +334,35 @@ foreach ($Artifact in @(
     }
 }
 
+$SourceId = Convert-ToProjectRelativePath $SourcePath
+if (-not $IsDefaultSource) {
+    if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
+        $Diagnostics += [ordered]@{
+            code = "ASBI4201"
+            severity = "error"
+            message = "Custom C# profiles require an explicit generated binding package manifest."
+            file = $SourceId
+        }
+        Write-BuildReport -Result "phase42_binding_required" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=phase42_binding_required report=$ReportPath"
+        exit 1
+    }
+
+    try {
+        $BindingPackageInfo = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $BindingPackagePath
+    }
+    catch {
+        $Diagnostics += [ordered]@{
+            code = "ASBI4202"
+            severity = "error"
+            message = $_.Exception.Message
+            file = Convert-ToProjectRelativePath $BindingPackagePath
+        }
+        Write-BuildReport -Result "binding_package_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=binding_package_invalid report=$ReportPath"
+        exit 1
+    }
+}
 $DotNet = Resolve-DotNetTool
 if (-not $DotNet.Found) {
     $Diagnostics += [ordered]@{
@@ -330,7 +376,6 @@ if (-not $DotNet.Found) {
     exit 1
 }
 
-$SourceId = Convert-ToProjectRelativePath $SourcePath
 $FrontendArguments = @(
     "-NoProfile", "-ExecutionPolicy", "Bypass",
     "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
@@ -369,11 +414,10 @@ $SemanticArguments = @(
     "-FrontendPath", $FrontendArtifactPath,
     "-OutputPath", $SemanticArtifactPath,
     "-Configuration", $Configuration)
-$IsDefaultSource = $SourcePath.Equals(
-    [System.IO.Path]::GetFullPath($DefaultSourcePath),
-    [System.StringComparison]::OrdinalIgnoreCase)
 if (-not $IsDefaultSource) {
-    $SemanticArguments += @("-ReferenceSourcePath", $DefaultSourcePath)
+    $SemanticArguments += @(
+        "-ExecutableReferenceSourcePath",
+        $BindingPackageInfo.ReferenceSourcePath)
 }
 $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
 $SemanticOutput = @($SemanticInvocation.Output)
@@ -397,17 +441,6 @@ if ($SemanticExitCode -ne 0 -or $null -eq $SemanticModel -or -not $SemanticModel
     exit 1
 }
 
-if (-not $IsDefaultSource) {
-    $Diagnostics += [ordered]@{
-        code = "ASBI4201"
-        severity = "error"
-        message = "Custom C# profiles require Phase 42 generated UE facade and binding descriptors before formal Guest IR lowering."
-        file = $SourceId
-    }
-    Write-BuildReport -Result "phase42_binding_required" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
-    Write-Output "[AvidScript][CSharp][Build] result=phase42_binding_required report=$ReportPath"
-    exit 1
-}
 
 $CompilerArguments = @(
     "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -463,6 +496,40 @@ $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind 
 $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
 })
+if (-not $IsDefaultSource) {
+    $DeclaredBindingImportKeys = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($Import in @($BindingPackageInfo.RequiredImports)) {
+        [void]$DeclaredBindingImportKeys.Add("$($Import.Module)`n$($Import.Name)")
+    }
+
+    $ObservedBindingImportKeys = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    $UnexpectedBindingImports = @()
+    foreach ($Import in @($RequiredImports | Where-Object { [string]$_.module -eq "avidscript" })) {
+        $Key = "$([string]$Import.module)`n$([string]$Import.name)"
+        [void]$ObservedBindingImportKeys.Add($Key)
+        if (-not $DeclaredBindingImportKeys.Contains($Key)) {
+            $UnexpectedBindingImports += "$([string]$Import.module).$([string]$Import.name)"
+        }
+    }
+    $MissingBindingImports = @($BindingPackageInfo.RequiredImports | Where-Object {
+        -not $ObservedBindingImportKeys.Contains("$($_.Module)`n$($_.Name)")
+    } | ForEach-Object { "$($_.Module).$($_.Name)" })
+    if ($UnexpectedBindingImports.Count -gt 0 -or $MissingBindingImports.Count -gt 0) {
+        Remove-LoadableArtifacts
+        $Diagnostics += [ordered]@{
+            code = "ASBI4203"
+            severity = "error"
+            message = "Guest IR dynamic imports do not match the selected binding package."
+            unexpected_imports = @($UnexpectedBindingImports)
+            missing_imports = @($MissingBindingImports)
+        }
+        Write-BuildReport -Result "binding_import_mismatch" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=binding_import_mismatch report=$ReportPath"
+        exit 1
+    }
+}
 $DirectAbiExports = @(
     "avid_on_begin_play",
     "avid_on_tick",
@@ -511,6 +578,18 @@ $Manifest = [ordered]@{
         semantic_schema_version = [int]$SemanticModel.schema_version
         semantic_version = [string]$SemanticModel.semantic_version
         semantic_sha256 = $SemanticSha256
+    }
+    binding_package = if ($null -eq $BindingPackageInfo) { $null } else {
+        [ordered]@{
+            package_name = [string]$BindingPackageInfo.PackageName
+            package_hash = [string]$BindingPackageInfo.PackageHash
+            manifest_file = Convert-ToProjectRelativePath $BindingPackageInfo.ManifestPath
+            manifest_sha256 = [string]$BindingPackageInfo.ManifestSha256
+            descriptor_file = Convert-ToProjectRelativePath $BindingPackageInfo.DescriptorPath
+            descriptor_sha256 = [string]$BindingPackageInfo.DescriptorSha256
+            reference_source_file = Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath
+            reference_source_sha256 = [string]$BindingPackageInfo.ReferenceSourceSha256
+        }
     }
     guest_ir = [ordered]@{
         file = Convert-ToProjectRelativePath $GuestIrArtifactPath

@@ -40,6 +40,9 @@ Tools/**/obj/
 # Sandboxed NuGet first-use marker
 **/NuGet/Migrations/
 
+# PowerShell module analysis cache
+Microsoft/
+
 # CMake byproducts for ThirdParty runtime experiments
 CMakeFiles/
 CMakeCache.txt

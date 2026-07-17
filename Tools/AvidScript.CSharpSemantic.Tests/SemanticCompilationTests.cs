@@ -14,9 +14,10 @@ internal static class SemanticCompilationTests
         TypeErrorsProduceSemanticDiagnostics();
         FrontendHashMismatchFailsClosed();
         InvalidReferenceSourceFailsClosed();
+        ExecutableReferenceSourceProjectsBodiesAndImports();
         SemanticSerializationIsDeterministic();
         SemanticDiagnosticsAreCultureInvariant();
-        return 6;
+        return 7;
     }
 
     private static void ActorLifecycleProducesStableSymbolsAndTypes()
@@ -100,6 +101,69 @@ internal static class SemanticCompilationTests
             "invalid reference compilations should not expose control-flow graphs");
     }
 
+    private static void ExecutableReferenceSourceProjectsBodiesAndImports()
+    {
+        const string source = """
+using System.Runtime.InteropServices;
+
+namespace AvidScript;
+
+public static class Script
+{
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+    public static void BeginPlay()
+    {
+        Actor.SetScale(2.0f);
+    }
+}
+""";
+        const string generatedSource = """
+using System.Runtime.InteropServices;
+
+namespace AvidScript;
+
+public static class Actor
+{
+    public static void SetScale(float value)
+    {
+        Native.SetScale(value);
+    }
+}
+
+internal static class Native
+{
+    [DllImport("avidscript", EntryPoint = "avid_ue_test_scale")]
+    internal static extern void SetScale(float value);
+}
+""";
+        const string sourceId = "Scripts/ExecutableReference.cs";
+        string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            hash,
+            new[]
+            {
+                new SemanticReferenceSource(
+                    generatedSource,
+                    "generated://AvidScript.Bindings.generated.cs",
+                    IsExecutable: true),
+            });
+
+        Assert(document.Succeeded, "executable reference source should pass semantic analysis");
+        SemanticCallable import = document.Callables.Single(callable =>
+            callable.Import?.Name == "avid_ue_test_scale");
+        Assert(import.Import!.Module == "avidscript", "generated DllImport should enter semantic imports");
+        SemanticCallable wrapper = document.Callables.Single(callable =>
+            callable.MethodSymbolId.EndsWith(".SetScale(float32):void", StringComparison.Ordinal)
+            && callable.Import is null);
+        Assert(wrapper.HasBody, "generated facade wrapper should retain an executable body");
+        Assert(document.Methods.Any(method => method.MethodSymbolId == wrapper.MethodSymbolId),
+            "generated facade body should enter semantic method projection");
+        Assert(document.ControlFlowGraphs.Any(graph => graph.MethodSymbolId == wrapper.MethodSymbolId),
+            "generated facade body should enter control-flow projection");
+    }
     private static void SemanticSerializationIsDeterministic()
     {
         const string source = "namespace Game; class Script { float Speed; void Tick(float dt) { Speed = dt; } }";

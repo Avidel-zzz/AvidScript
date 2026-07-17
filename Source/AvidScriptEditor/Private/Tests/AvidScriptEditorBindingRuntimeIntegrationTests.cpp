@@ -2,10 +2,13 @@
 
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
+#include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
 
 #include "Components/SceneComponent.h"
+#include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -13,6 +16,9 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -101,6 +107,29 @@ bool GenerateAvidScriptBindingRuntimePackage(
 			OutDescriptorJson,
 			OutPackage,
 			OutLoadResult);
+}
+
+bool BuildAvidScriptGeneratedBindingLifecycle(
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult)
+{
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	Config.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	Config.SourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Samples/CSharp/GeneratedBindingLifecycle/GeneratedBindingLifecycleScript.cs")));
+	Config.ModuleId = TEXT("csharp_generated_binding_lifecycle");
+	Config.ArtifactStem = TEXT("generated_binding_lifecycle");
+	Config.OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest/GeneratedBindingLifecycle")));
+	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+		Config.OutputRoot,
+		Config.ArtifactStem);
+	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+		Config.OutputRoot,
+		Config.ArtifactStem);
+	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
 } // namespace
 
@@ -291,6 +320,156 @@ bool FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest::RunTest(const FS
 	TestTrue(
 		TEXT("Lifecycle call observed owner imports and the dynamic reflected import"),
 		RuntimeResult.HostImportCallCount >= 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest,
+	"AvidScript.Editor.BindingRuntime.GeneratedCSharpLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+		TEXT("Custom C# lifecycle builds with an automatically published binding package"),
+		BuildAvidScriptGeneratedBindingLifecycle(BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestTrue(
+		TEXT("Editor build records the generated binding package"),
+		FPaths::FileExists(BuildResult.BindingPackagePath));
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+		TEXT("Runtime transaction loads the generated C# manifest and binding package"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			BuildResult.ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(TEXT("Loaded manifest owns an immutable binding package"), Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Generated package exposes eight reflected imports"),
+		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
+		8);
+
+	FString ManifestJson;
+	TSharedPtr<FJsonObject> ManifestObject;
+	const TSharedPtr<FJsonObject>* BindingPackageObject = nullptr;
+	TestTrue(
+		TEXT("Generated C# manifest can be read for tamper validation"),
+		FFileHelper::LoadFileToString(ManifestJson, *BuildResult.ManifestPath));
+	const TSharedRef<TJsonReader<>> ManifestReader = TJsonReaderFactory<>::Create(ManifestJson);
+	TestTrue(
+		TEXT("Generated C# manifest parses for tamper validation"),
+		FJsonSerializer::Deserialize(ManifestReader, ManifestObject));
+	if (!TestTrue(
+		TEXT("Generated C# manifest exposes binding package metadata"),
+		ManifestObject.IsValid()
+			&& ManifestObject->TryGetObjectField(TEXT("binding_package"), BindingPackageObject))
+		|| BindingPackageObject == nullptr
+		|| !BindingPackageObject->IsValid())
+	{
+		return false;
+	}
+	(*BindingPackageObject)->SetStringField(
+		TEXT("descriptor_sha256"),
+		TEXT("0000000000000000000000000000000000000000000000000000000000000000"));
+	FString TamperedManifestJson;
+	const TSharedRef<TJsonWriter<>> ManifestWriter = TJsonWriterFactory<>::Create(&TamperedManifestJson);
+	TestTrue(
+		TEXT("Tampered C# manifest serializes"),
+		FJsonSerializer::Serialize(ManifestObject.ToSharedRef(), ManifestWriter));
+	const FString TamperedManifestPath = FPaths::Combine(
+		FPaths::GetPath(BuildResult.ManifestPath),
+		TEXT("generated_binding_lifecycle.tampered.avidscript.json"));
+	TestTrue(
+		TEXT("Tampered C# manifest writes"),
+		FFileHelper::SaveStringToFile(TamperedManifestJson, *TamperedManifestPath));
+	FAvidScriptWasmReloadManifest TamperedManifest;
+	TArray<uint8> TamperedBytecode;
+	FAvidScriptWasmReloadManifestLoadResult TamperedLoadResult;
+	TestFalse(
+		TEXT("Runtime transaction rejects a tampered binding descriptor hash"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			TamperedManifestPath,
+			TamperedManifest,
+			TamperedBytecode,
+			TamperedLoadResult));
+	TestEqual(
+		TEXT("Tampered binding descriptor hash has a stable category"),
+		TamperedLoadResult.ErrorCategory,
+		FString(TEXT("binding_package_hash_mismatch")));
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Generated C# lifecycle integration world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Generated C# lifecycle actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Generated C# lifecycle owner registers"), RegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!TestTrue(
+		TEXT("C# BeginPlay activates through Runtime Session and WAMR"),
+		Session.LoadInitialModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("C# BeginPlay applies FVector scale through generated UE.Self binding"),
+		Actor->GetActorScale3D().Equals(FVector(2.0, 3.0, 4.0), 0.001));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!TestTrue(TEXT("C# Tick executes through the live scheduler"), Session.TickLive(0.5f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("C# Tick reads and writes FVector through cached reflected imports"),
+		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
+	TestEqual(TEXT("Live scheduler records one C# Tick"), Session.GetLiveTickCallCount(), 1);
 	return true;
 }
 

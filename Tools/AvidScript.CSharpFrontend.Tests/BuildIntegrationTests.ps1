@@ -1,5 +1,6 @@
 param(
-    [string]$DotNetPath = "C:\Users\user0\.dotnet\dotnet.exe"
+    [string]$DotNetPath = "C:\Users\user0\.dotnet\dotnet.exe",
+    [string]$BindingPackagePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +47,21 @@ function Get-Sha256Hex {
 
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
+if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
+    $BindingPackagePath = Get-ChildItem `
+        -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
+        -Filter "package.json" `
+        -File `
+        -Recurse `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+Assert-Condition (
+    -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -and
+    (Test-Path -LiteralPath $BindingPackagePath -PathType Leaf)) `
+    "generated binding package is missing; publish the default Phase 42 package before this integration test"
+
 $BrokenRoot = Join-Path $RunRoot "Broken"
 New-Item -ItemType Directory -Force -Path $BrokenRoot | Out-Null
 $BrokenSource = Join-Path $BrokenRoot "BrokenScript.cs"
@@ -70,6 +86,7 @@ public static class BrokenScript
     -DotNetPath $DotNetPath `
     -OutputRoot $BrokenRoot `
     -SourcePath $BrokenSource `
+    -BindingPackagePath $BindingPackagePath `
     -ModuleId "p39_broken" `
     -ArtifactStem "broken" `
     -ReportPath $BrokenReport `
@@ -118,6 +135,7 @@ public static class SemanticBrokenScript
     -DotNetPath $DotNetPath `
     -OutputRoot $SemanticBrokenRoot `
     -SourcePath $SemanticBrokenSource `
+    -BindingPackagePath $BindingPackagePath `
     -ModuleId "p40_semantic_broken" `
     -ArtifactStem "semantic_broken" `
     -ReportPath $SemanticBrokenReport `

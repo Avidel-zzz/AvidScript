@@ -324,6 +324,35 @@ bool FAvidScriptReloadAbiMismatchRollbackSmokeTest::RunTest(const FString& Param
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadGeneratedImportsRequirePackageTest,
+	"AvidScript.Reload.GeneratedImportsRequirePackage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadGeneratedImportsRequirePackageTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(
+		TEXT("reload_generated_import_without_package"));
+	Manifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("avid_ue_missing_package") }
+	};
+
+	FAvidScriptWasmReloadSession Session;
+	FAvidScriptWasmReloadResult Result;
+	TestFalse(
+		TEXT("Generated UE imports fail closed without a binding package"),
+		Session.LoadInitialModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			Manifest,
+			Result));
+	TestEqual(
+		TEXT("Missing generated binding package has a stable category"),
+		Result.ErrorCategory,
+		FString(TEXT("binding_package_missing")));
+	TestFalse(TEXT("Rejected generated import module is not activated"), Session.IsLiveLoaded());
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptReloadManifestLoadsWasmSmokeTest,

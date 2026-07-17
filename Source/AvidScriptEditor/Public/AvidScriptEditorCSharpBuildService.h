@@ -10,6 +10,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString OutputRoot;
 	FString ReportPath;
 	FString ManifestPath;
+	FString BindingPackagePath;
 	FString DotNetPath;
 	FString ModuleId;
 	FString ArtifactStem;
@@ -31,6 +32,7 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString OutputRoot;
 	FString ReportPath;
 	FString ManifestPath;
+	FString BindingPackagePath;
 	FString ModuleId;
 	FString ArtifactStem;
 };

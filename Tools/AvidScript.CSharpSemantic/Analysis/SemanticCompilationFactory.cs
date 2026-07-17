@@ -1,15 +1,24 @@
 using System.Collections.Generic;
-using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 
 namespace AvidScript.CSharpSemantic;
 
+internal sealed record SemanticCompilationUnit(
+    SyntaxTree SyntaxTree,
+    SourceText SourceText,
+    bool IsPrimary);
+
 internal sealed record SemanticCompilationContext(
     CSharpCompilation Compilation,
-    SyntaxTree SyntaxTree,
-    SourceText SourceText);
+    SemanticCompilationUnit PrimaryUnit,
+    IReadOnlyList<SemanticCompilationUnit> ProjectionUnits)
+{
+    public SyntaxTree SyntaxTree => PrimaryUnit.SyntaxTree;
+
+    public SourceText SourceText => PrimaryUnit.SourceText;
+}
 
 internal static class SemanticCompilationFactory
 {
@@ -24,9 +33,26 @@ internal static class SemanticCompilationFactory
             documentationMode: DocumentationMode.Parse,
             kind: SourceCodeKind.Regular);
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(sourceText, parseOptions, sourceId);
+        SemanticCompilationUnit primaryUnit = new(syntaxTree, sourceText, true);
         List<SyntaxTree> syntaxTrees = new() { syntaxTree };
-        syntaxTrees.AddRange(referenceSources.Select(reference =>
-            CSharpSyntaxTree.ParseText(SourceText.From(reference.Source), parseOptions, reference.SourceId)));
+        List<SemanticCompilationUnit> projectionUnits = new() { primaryUnit };
+        foreach (SemanticReferenceSource reference in referenceSources)
+        {
+            SourceText referenceText = SourceText.From(reference.Source);
+            SyntaxTree referenceTree = CSharpSyntaxTree.ParseText(
+                referenceText,
+                parseOptions,
+                reference.SourceId);
+            syntaxTrees.Add(referenceTree);
+            if (reference.IsExecutable)
+            {
+                projectionUnits.Add(new SemanticCompilationUnit(
+                    referenceTree,
+                    referenceText,
+                    false));
+            }
+        }
+
         CSharpCompilationOptions compilationOptions = new(
             OutputKind.DynamicallyLinkedLibrary,
             optimizationLevel: OptimizationLevel.Release,
@@ -38,6 +64,6 @@ internal static class SemanticCompilationFactory
             syntaxTrees,
             SemanticReferenceResolver.ResolveTrustedPlatformAssemblies(),
             compilationOptions);
-        return new SemanticCompilationContext(compilation, syntaxTree, sourceText);
+        return new SemanticCompilationContext(compilation, primaryUnit, projectionUnits);
     }
 }

@@ -11,9 +11,10 @@ internal static class SemanticCliTests
         SuccessfulCliWritesSemanticArtifact();
         SemanticFailureStillWritesArtifact();
         ReferenceSourceBindsExternalFacade();
+        ExecutableReferenceSourceProjectsFacade();
         MalformedFrontendReturnsArtifactError();
         InvalidArgumentsReturnUsageExitCode();
-        return 5;
+        return 6;
     }
 
     private static void SuccessfulCliWritesSemanticArtifact()
@@ -65,6 +66,50 @@ internal static class SemanticCliTests
             "reference source invocation should bind its stable facade symbol");
     }
 
+    private static void ExecutableReferenceSourceProjectsFacade()
+    {
+        const string source = """
+using System.Runtime.InteropServices;
+namespace AvidScript;
+public static class CustomScript
+{
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+    public static void BeginPlay() => Actor.SetScale(3.0f);
+}
+""";
+        const string referenceSource = """
+using System.Runtime.InteropServices;
+namespace AvidScript;
+public static class Actor
+{
+    public static void SetScale(float value) => Native.SetScale(value);
+}
+internal static class Native
+{
+    [DllImport("avidscript", EntryPoint = "avid_ue_cli_scale")]
+    internal static extern void SetScale(float value);
+}
+""";
+        using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create(
+            source,
+            "Scripts/ExecutableCustomScript.cs");
+        string referencePath = Path.Combine(workspace.Root, "AvidScript.Bindings.generated.cs");
+        File.WriteAllText(referencePath, referenceSource);
+        string[] baseArguments = workspace.CreateArguments();
+        string[] arguments = new string[baseArguments.Length + 2];
+        Array.Copy(baseArguments, arguments, baseArguments.Length);
+        arguments[^2] = "--executable-reference-source";
+        arguments[^1] = referencePath;
+
+        int exitCode = SemanticCommandLine.Run(arguments);
+
+        Assert(exitCode == 0, "executable reference source should pass the semantic CLI");
+        string json = File.ReadAllText(workspace.OutputPath);
+        Assert(json.Contains("avid_ue_cli_scale", StringComparison.Ordinal),
+            "executable reference DllImport should be serialized");
+        Assert(json.Contains("global::AvidScript.Actor.SetScale(float32):void", StringComparison.Ordinal),
+            "executable facade wrapper should be serialized as a callable");
+    }
     private static void MalformedFrontendReturnsArtifactError()
     {
         using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create("class Script { }", "Scripts/Malformed.cs");

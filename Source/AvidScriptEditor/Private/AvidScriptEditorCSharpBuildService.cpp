@@ -1,5 +1,6 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 
+#include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptFrontendReport.h"
 
 #include "HAL/FileManager.h"
@@ -148,6 +149,7 @@ FString BuildAvidScriptCSharpPowerShellParameters(const FAvidScriptEditorCSharpB
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ArtifactStem"), Config.ArtifactStem);
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ReportPath"), Config.ReportPath);
 	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ManifestPath"), Config.ManifestPath);
+	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-BindingPackagePath"), Config.BindingPackagePath);
 	return FString::Join(Arguments, TEXT(" "));
 }
 
@@ -284,6 +286,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.OutputRoot);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ReportPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ManifestPath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.BindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.DotNetPath);
 
 	OutResult.SourcePath = NormalizedConfig.SourcePath;
@@ -292,6 +295,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	OutResult.OutputRoot = NormalizedConfig.OutputRoot;
 	OutResult.ReportPath = NormalizedConfig.ReportPath;
 	OutResult.ManifestPath = NormalizedConfig.ManifestPath;
+	OutResult.BindingPackagePath = NormalizedConfig.BindingPackagePath;
 	OutResult.ModuleId = NormalizedConfig.ModuleId;
 	OutResult.ArtifactStem = NormalizedConfig.ArtifactStem;
 
@@ -321,6 +325,47 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			TEXT("project_missing"),
 			FString::Printf(TEXT("C# project file does not exist: %s"), *NormalizedConfig.ProjectPath),
 			TEXT("choose an existing C# project file or update project_path in the C# profile"),
+			OutResult);
+		return false;
+	}
+
+	const FString DefaultSourcePath = GetDefaultActorLifecycleSourcePath();
+	const bool bRequiresGeneratedBindingPackage = !NormalizedConfig.SourcePath.Equals(
+		DefaultSourcePath,
+		ESearchCase::IgnoreCase);
+	if (bRequiresGeneratedBindingPackage && NormalizedConfig.BindingPackagePath.IsEmpty())
+	{
+		FAvidScriptCSharpBindingEmitResult BindingEmitResult;
+		if (!FAvidScriptEditorCSharpBindingEmitter::PublishDefault(BindingEmitResult))
+		{
+			SetAvidScriptCSharpBuildFailure(
+				BindingEmitResult.ErrorCategory.IsEmpty()
+					? FString(TEXT("binding_package_publish_failed"))
+					: BindingEmitResult.ErrorCategory,
+				BindingEmitResult.ErrorMessage.IsEmpty()
+					? FString(TEXT("Default generated C# binding package could not be published."))
+					: BindingEmitResult.ErrorMessage,
+				BindingEmitResult.NextAction.IsEmpty()
+					? FString(TEXT("repair the reflected binding selection and retry the custom C# build"))
+					: BindingEmitResult.NextAction,
+				OutResult);
+			return false;
+		}
+
+		NormalizedConfig.BindingPackagePath = NormalizeAvidScriptCSharpBuildPathCopy(
+			BindingEmitResult.ManifestPath);
+		OutResult.BindingPackagePath = NormalizedConfig.BindingPackagePath;
+	}
+
+	if (!NormalizedConfig.BindingPackagePath.IsEmpty() &&
+		!FPaths::FileExists(NormalizedConfig.BindingPackagePath))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("binding_package_missing"),
+			FString::Printf(
+				TEXT("C# binding package manifest does not exist: %s"),
+				*NormalizedConfig.BindingPackagePath),
+			TEXT("publish a generated binding package or clear binding_package_path to use the Editor default"),
 			OutResult);
 		return false;
 	}

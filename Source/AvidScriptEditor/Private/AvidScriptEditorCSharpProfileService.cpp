@@ -399,6 +399,12 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		Config.DotNetPath = NormalizeAvidScriptCSharpProfileFieldPath(DotNetPath);
 	}
 
+	FString BindingPackagePath;
+	if (TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("binding_package_path"), BindingPackagePath))
+	{
+		Config.BindingPackagePath = NormalizeAvidScriptCSharpProfileFieldPath(BindingPackagePath);
+	}
+
 	FString Configuration;
 	Config.Configuration = TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("configuration"), Configuration)
 		? Configuration

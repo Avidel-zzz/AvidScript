@@ -38,12 +38,14 @@ internal static class SemanticControlFlowProjector
             return new SemanticControlFlowProjection(Array.Empty<SemanticControlFlowGraph>(), diagnostics);
         }
 
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(
-            context.SyntaxTree,
-            ignoreAccessibility: false);
         foreach (SemanticExecutableBody body in SemanticExecutableBodyResolver.Resolve(context))
         {
-            SemanticSpan bodySpan = SemanticSpanFactory.Create(context.SourceText, body.Declaration.Span);
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(
+                body.Unit.SyntaxTree,
+                ignoreAccessibility: false);
+            SemanticSpan bodySpan = SemanticSpanFactory.Create(
+                body.Unit.SourceText,
+                body.Declaration.Span);
             if (body.Method.IsAsync)
             {
                 diagnostics.Add(CreateDiagnostic(
@@ -90,7 +92,7 @@ internal static class SemanticControlFlowProjector
             SemanticControlFlowGraph projected = ProjectGraph(
                 graph,
                 body.Method,
-                context,
+                body.Unit,
                 typeRegistry);
             IReadOnlyList<string> unsupportedKinds = GetUnsupportedOperationKinds(projected);
             if (unsupportedKinds.Count > 0)
@@ -204,13 +206,13 @@ internal static class SemanticControlFlowProjector
     private static SemanticControlFlowGraph ProjectGraph(
         ControlFlowGraph graph,
         IMethodSymbol method,
-        SemanticCompilationContext context,
+        SemanticCompilationUnit unit,
         SemanticTypeRegistry typeRegistry)
     {
         SemanticCaptureRegistry captureRegistry = new();
         IReadOnlyList<SemanticBasicBlock> blocks = graph.Blocks
             .OrderBy(block => block.Ordinal)
-            .Select(block => ProjectBlock(block, context, typeRegistry, captureRegistry))
+            .Select(block => ProjectBlock(block, unit, typeRegistry, captureRegistry))
             .ToArray();
         return new SemanticControlFlowGraph(
             SemanticSymbolProjector.GetSymbolId(method),
@@ -221,7 +223,7 @@ internal static class SemanticControlFlowProjector
 
     private static SemanticBasicBlock ProjectBlock(
         BasicBlock block,
-        SemanticCompilationContext context,
+        SemanticCompilationUnit unit,
         SemanticTypeRegistry typeRegistry,
         SemanticCaptureRegistry captureRegistry)
     {
@@ -233,14 +235,14 @@ internal static class SemanticControlFlowProjector
             block.Operations
                 .Select(operation => SemanticOperationProjector.ProjectControlFlowOperation(
                     operation,
-                    context,
+                    unit,
                     typeRegistry,
                     captureRegistry))
                 .ToArray(),
             block.BranchValue is { } branchValue
                 ? SemanticOperationProjector.ProjectControlFlowOperation(
                     branchValue,
-                    context,
+                    unit,
                     typeRegistry,
                     captureRegistry)
                 : null,

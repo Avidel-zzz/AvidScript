@@ -7,6 +7,7 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticCommandLine
 {
+    private sealed record ReferenceSourceOption(string Path, bool IsExecutable);
     private static readonly string[] RequiredOptions =
     {
         "--source",
@@ -19,7 +20,7 @@ public static class SemanticCommandLine
     {
         try
         {
-            IReadOnlyDictionary<string, string> options = ParseOptions(args, out List<string> referenceSourcePaths);
+            IReadOnlyDictionary<string, string> options = ParseOptions(args, out List<ReferenceSourceOption> referenceSourceOptions);
             string sourcePath = GetRequiredOption(options, "--source");
             string sourceId = GetRequiredOption(options, "--source-id");
             string frontendPath = GetRequiredOption(options, "--frontend");
@@ -36,7 +37,7 @@ public static class SemanticCommandLine
 
             string source = File.ReadAllText(sourcePath);
             string frontendSourceSha256 = ReadFrontendSourceSha256(frontendPath);
-            IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourcePaths);
+            IReadOnlyList<SemanticReferenceSource> referenceSources = LoadReferenceSources(referenceSourceOptions);
             SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontendSourceSha256, referenceSources);
             SemanticArtifactWriter.WriteAtomic(outputPath, SemanticSerializer.Serialize(document));
             return document.Succeeded ? 0 : 1;
@@ -65,12 +66,12 @@ public static class SemanticCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(
         string[] args,
-        out List<string> referenceSourcePaths)
+        out List<ReferenceSourceOption> referenceSourceOptions)
     {
-        referenceSourcePaths = new List<string>();
+        referenceSourceOptions = new List<ReferenceSourceOption>();
         if (args.Length == 0 || args.Length % 2 != 0)
         {
-            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]...");
+            throw new ArgumentException("Usage: --source <path> --source-id <id> --frontend <path> --output <path> [--reference-source <path>]... [--executable-reference-source <path>]...");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -78,14 +79,16 @@ public static class SemanticCommandLine
         {
             string option = args[index];
             string value = args[index + 1];
-            if (option == "--reference-source")
+            if (option is "--reference-source" or "--executable-reference-source")
             {
                 if (string.IsNullOrWhiteSpace(value))
                 {
                     throw new ArgumentException("Reference source paths must be non-empty.");
                 }
 
-                referenceSourcePaths.Add(value);
+                referenceSourceOptions.Add(new ReferenceSourceOption(
+                    value,
+                    option == "--executable-reference-source"));
                 continue;
             }
 
@@ -103,19 +106,23 @@ public static class SemanticCommandLine
         return options;
     }
 
-    private static IReadOnlyList<SemanticReferenceSource> LoadReferenceSources(IReadOnlyList<string> referenceSourcePaths)
+    private static IReadOnlyList<SemanticReferenceSource> LoadReferenceSources(
+        IReadOnlyList<ReferenceSourceOption> referenceSourceOptions)
     {
-        List<SemanticReferenceSource> referenceSources = new(referenceSourcePaths.Count);
-        for (int index = 0; index < referenceSourcePaths.Count; index++)
+        List<SemanticReferenceSource> referenceSources = new(referenceSourceOptions.Count);
+        for (int index = 0; index < referenceSourceOptions.Count; index++)
         {
-            string path = referenceSourcePaths[index];
-            if (!File.Exists(path))
+            ReferenceSourceOption option = referenceSourceOptions[index];
+            if (!File.Exists(option.Path))
             {
-                throw new ArgumentException($"Reference source file does not exist: {path}");
+                throw new ArgumentException($"Reference source file does not exist: {option.Path}");
             }
 
-            string sourceId = $"reference:{index}:{Path.GetFileName(path)}";
-            referenceSources.Add(new SemanticReferenceSource(File.ReadAllText(path), sourceId));
+            string sourceId = $"reference:{index}:{Path.GetFileName(option.Path)}";
+            referenceSources.Add(new SemanticReferenceSource(
+                File.ReadAllText(option.Path),
+                sourceId,
+                option.IsExecutable));
         }
 
         return referenceSources;

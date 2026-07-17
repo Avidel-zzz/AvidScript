@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace AvidScript.CSharpSemantic;
 
@@ -12,16 +13,31 @@ internal static class SemanticSymbolProjector
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry)
     {
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(context.SyntaxTree, ignoreAccessibility: false);
-        SyntaxNode root = context.SyntaxTree.GetRoot();
         Dictionary<string, SemanticSymbol> symbols = new(StringComparer.Ordinal);
+        foreach (SemanticCompilationUnit unit in context.ProjectionUnits)
+        {
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(
+                unit.SyntaxTree,
+                ignoreAccessibility: false);
+            ProjectUnit(unit.SyntaxTree.GetRoot(), semanticModel, unit.SourceText, symbols, typeRegistry);
+        }
 
+        return symbols.Values.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray();
+    }
+
+    private static void ProjectUnit(
+        SyntaxNode root,
+        SemanticModel semanticModel,
+        SourceText sourceText,
+        IDictionary<string, SemanticSymbol> symbols,
+        SemanticTypeRegistry typeRegistry)
+    {
         foreach (MemberDeclarationSyntax declaration in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
         {
             ISymbol? symbol = semanticModel.GetDeclaredSymbol(declaration);
             if (symbol is not null)
             {
-                AddSymbol(symbols, symbol, declaration, context, typeRegistry);
+                AddSymbol(symbols, symbol, declaration, sourceText, typeRegistry);
             }
 
             if (declaration is FieldDeclarationSyntax fieldDeclaration)
@@ -31,7 +47,7 @@ internal static class SemanticSymbolProjector
                     IFieldSymbol? field = semanticModel.GetDeclaredSymbol(variable) as IFieldSymbol;
                     if (field is not null)
                     {
-                        AddSymbol(symbols, field, variable, context, typeRegistry);
+                        AddSymbol(symbols, field, variable, sourceText, typeRegistry);
                     }
                 }
             }
@@ -42,7 +58,7 @@ internal static class SemanticSymbolProjector
             IParameterSymbol? parameter = semanticModel.GetDeclaredSymbol(parameterSyntax) as IParameterSymbol;
             if (parameter is not null)
             {
-                AddSymbol(symbols, parameter, parameterSyntax, context, typeRegistry);
+                AddSymbol(symbols, parameter, parameterSyntax, sourceText, typeRegistry);
             }
         }
 
@@ -51,7 +67,7 @@ internal static class SemanticSymbolProjector
             IMethodSymbol? accessor = semanticModel.GetDeclaredSymbol(accessorSyntax) as IMethodSymbol;
             if (accessor is not null)
             {
-                AddSymbol(symbols, accessor, accessorSyntax, context, typeRegistry);
+                AddSymbol(symbols, accessor, accessorSyntax, sourceText, typeRegistry);
             }
         }
         foreach (PropertyDeclarationSyntax propertySyntax in root.DescendantNodes()
@@ -61,7 +77,7 @@ internal static class SemanticSymbolProjector
             IPropertySymbol? property = semanticModel.GetDeclaredSymbol(propertySyntax) as IPropertySymbol;
             if (property?.GetMethod is { } getter)
             {
-                AddSymbol(symbols, getter, propertySyntax.ExpressionBody!, context, typeRegistry);
+                AddSymbol(symbols, getter, propertySyntax.ExpressionBody!, sourceText, typeRegistry);
             }
         }
         foreach (IndexerDeclarationSyntax indexerSyntax in root.DescendantNodes()
@@ -71,7 +87,7 @@ internal static class SemanticSymbolProjector
             IPropertySymbol? indexer = semanticModel.GetDeclaredSymbol(indexerSyntax) as IPropertySymbol;
             if (indexer?.GetMethod is { } getter)
             {
-                AddSymbol(symbols, getter, indexerSyntax.ExpressionBody!, context, typeRegistry);
+                AddSymbol(symbols, getter, indexerSyntax.ExpressionBody!, sourceText, typeRegistry);
             }
         }
         foreach (VariableDeclaratorSyntax variable in root.DescendantNodes().OfType<VariableDeclaratorSyntax>())
@@ -79,7 +95,7 @@ internal static class SemanticSymbolProjector
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(variable) as ILocalSymbol;
             if (local is not null)
             {
-                AddSymbol(symbols, local, variable, context, typeRegistry);
+                AddSymbol(symbols, local, variable, sourceText, typeRegistry);
             }
         }
 
@@ -88,18 +104,17 @@ internal static class SemanticSymbolProjector
             ILocalSymbol? local = semanticModel.GetDeclaredSymbol(designation) as ILocalSymbol;
             if (local is not null)
             {
-                AddSymbol(symbols, local, designation, context, typeRegistry);
+                AddSymbol(symbols, local, designation, sourceText, typeRegistry);
             }
         }
 
-        return symbols.Values.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray();
     }
 
     private static void AddSymbol(
         IDictionary<string, SemanticSymbol> symbols,
         ISymbol symbol,
         SyntaxNode syntax,
-        SemanticCompilationContext context,
+        SourceText sourceText,
         SemanticTypeRegistry typeRegistry)
     {
         string id = GetSymbolId(symbol);
@@ -118,9 +133,14 @@ internal static class SemanticSymbolProjector
             GetSignature(symbol),
             symbol.IsStatic,
             symbol.DeclaredAccessibility.ToString().ToLowerInvariant(),
-            SemanticSpanFactory.Create(context.SourceText, syntax.Span));
+            SemanticSpanFactory.Create(sourceText, syntax.Span));
         if (!symbols.TryAdd(id, projected))
         {
+            if (symbol is INamespaceSymbol)
+            {
+                return;
+            }
+
             throw new InvalidOperationException($"Duplicate stable semantic symbol id: {id}");
         }
     }

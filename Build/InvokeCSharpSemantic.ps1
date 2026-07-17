@@ -5,6 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$FrontendPath,
     [Parameter(Mandatory = $true)][string]$OutputPath,
     [string]$ReferenceSourcePath = "",
+    [string]$ExecutableReferenceSourcePath = "",
     [string]$Configuration = "Release"
 )
 
@@ -28,6 +29,10 @@ foreach ($RequiredFile in @($DotNetPath, $SourcePath, $FrontendPath, $SemanticPr
 if (-not [string]::IsNullOrWhiteSpace($ReferenceSourcePath) -and
     -not (Test-Path -LiteralPath $ReferenceSourcePath -PathType Leaf)) {
     throw "C# semantic reference source is missing: $ReferenceSourcePath"
+}
+if (-not [string]::IsNullOrWhiteSpace($ExecutableReferenceSourcePath) -and
+    -not (Test-Path -LiteralPath $ExecutableReferenceSourcePath -PathType Leaf)) {
+    throw "C# semantic executable reference source is missing: $ExecutableReferenceSourcePath"
 }
 
 New-Item -ItemType Directory -Force -Path $NuGetDirectory | Out-Null
@@ -67,6 +72,9 @@ try {
         )
         if (-not [string]::IsNullOrWhiteSpace($ReferenceSourcePath)) {
             $SemanticArguments += @("--reference-source", $ReferenceSourcePath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ExecutableReferenceSourcePath)) {
+            $SemanticArguments += @("--executable-reference-source", $ExecutableReferenceSourcePath)
         }
         & $DotNetPath $SemanticDll @SemanticArguments
         $ExitCode = $LASTEXITCODE

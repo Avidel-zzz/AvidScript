@@ -87,12 +87,14 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 		TEXT("ProfileDriven")));
 	const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(TestRoot, TEXT("profile_driven.csharp-profile.json")));
 	const FString ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	const FString BindingPackagePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(TestRoot, TEXT("bindings/package.json")));
 	const FString ProfileText = FString::Printf(
 		TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
 		TEXT("  \"language\": \"csharp\",\n")
 		TEXT("  \"source_path\": \"%s\",\n")
 		TEXT("  \"project_path\": \"%s\",\n")
+		TEXT("  \"binding_package_path\": \"%s\",\n")
 		TEXT("  \"module_id\": \"csharp_profile_driven\",\n")
 		TEXT("  \"artifact_stem\": \"profile_driven\",\n")
 		TEXT("  \"output_root\": \"%s\",\n")
@@ -100,6 +102,7 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 		TEXT("}\n"),
 		*SourcePath,
 		*ProjectPath,
+		*BindingPackagePath,
 		*OutputRoot);
 	TestTrue(TEXT("C# profile can be written"), FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
 
@@ -109,6 +112,7 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 	TestEqual(TEXT("C# profile path normalized"), Result.NormalizedProfilePath, ProfilePath);
 	TestEqual(TEXT("C# profile source"), Result.BuildConfig.SourcePath, SourcePath);
 	TestEqual(TEXT("C# profile project"), Result.BuildConfig.ProjectPath, ProjectPath);
+	TestEqual(TEXT("C# profile binding package"), Result.BuildConfig.BindingPackagePath, BindingPackagePath);
 	TestEqual(TEXT("C# profile module id"), Result.BuildConfig.ModuleId, FString(TEXT("csharp_profile_driven")));
 	TestEqual(TEXT("C# profile artifact stem"), Result.BuildConfig.ArtifactStem, FString(TEXT("profile_driven")));
 	TestEqual(TEXT("C# profile output root"), Result.BuildConfig.OutputRoot, OutputRoot);

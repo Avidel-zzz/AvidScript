@@ -25,7 +25,7 @@ internal static class SemanticOperationProjector
         {
             methods.Add(new SemanticMethodBody(
                 SemanticSymbolProjector.GetSymbolId(body.Method),
-                ProjectOperation(body.Operation, context, typeRegistry, diagnostics)));
+                ProjectOperation(body.Operation, body.Unit, typeRegistry, diagnostics)));
         }
 
         return new SemanticOperationProjection(
@@ -38,16 +38,16 @@ internal static class SemanticOperationProjector
 
     internal static SemanticOperation ProjectControlFlowOperation(
         IOperation operation,
-        SemanticCompilationContext context,
+        SemanticCompilationUnit unit,
         SemanticTypeRegistry typeRegistry,
         SemanticCaptureRegistry captureRegistry)
     {
-        return ProjectOperation(operation, context, typeRegistry, diagnostics: null, captureRegistry);
+        return ProjectOperation(operation, unit, typeRegistry, diagnostics: null, captureRegistry);
     }
 
     private static SemanticOperation ProjectOperation(
         IOperation operation,
-        SemanticCompilationContext context,
+        SemanticCompilationUnit unit,
         SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic>? diagnostics,
         SemanticCaptureRegistry? captureRegistry = null)
@@ -62,7 +62,7 @@ internal static class SemanticOperationProjector
         string? symbolId = GetReferencedSymbol(operation) is { } symbol
             ? SemanticSymbolProjector.GetSymbolId(symbol)
             : null;
-        SemanticSpan span = SemanticSpanFactory.Create(context.SourceText, operation.Syntax.Span);
+        SemanticSpan span = SemanticSpanFactory.Create(unit.SourceText, operation.Syntax.Span);
         if (!support.IsSupported && diagnostics is not null)
         {
             diagnostics.Add(new SemanticDiagnostic(
@@ -90,7 +90,7 @@ internal static class SemanticOperationProjector
             GetCaptureId(operation, captureRegistry),
             span,
             operation.ChildOperations
-                .Select(child => ProjectOperation(child, context, typeRegistry, diagnostics, captureRegistry))
+                .Select(child => ProjectOperation(child, unit, typeRegistry, diagnostics, captureRegistry))
                 .ToArray());
     }
 

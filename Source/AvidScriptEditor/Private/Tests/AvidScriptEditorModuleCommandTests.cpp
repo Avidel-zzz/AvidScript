@@ -78,21 +78,12 @@ FString GetAvidScriptEditorModuleCSharpProfileTestRoot()
 
 FString MakeAvidScriptEditorModuleCSharpProfileSourceText()
 {
-	return TEXT(
-		"using AvidScript;\n"
-		"\n"
-		"public static class ProfileMenuMover\n"
-		"{\n"
-		"    public static void BeginPlay()\n"
-		"    {\n"
-		"        Actor.SetLocation(41.0f, 42.0f, 43.0f);\n"
-		"    }\n"
-		"\n"
-		"    public static void Tick(float deltaSeconds)\n"
-		"    {\n"
-		"        Actor.SetLocation(deltaSeconds * 12.0f, 13.0f, 14.0f);\n"
-		"    }\n"
-		"}\n");
+	const FString SamplePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Samples/CSharp/GeneratedBindingLifecycle/GeneratedBindingLifecycleScript.cs")));
+	FString SourceText;
+	FFileHelper::LoadFileToString(SourceText, *SamplePath);
+	return SourceText;
 }
 AActor* SpawnAvidScriptEditorModuleCSharpBindingActor(UWorld& World)
 {
@@ -324,7 +315,12 @@ bool FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest::RunTest(
 	TestTrue(TEXT("Module C# profile test root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
 
 	const FString SourcePath = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(TestRoot, TEXT("ProfileMenuMover.cs")));
-	TestTrue(TEXT("Module C# profile source can be written"), FFileHelper::SaveStringToFile(MakeAvidScriptEditorModuleCSharpProfileSourceText(), *SourcePath));
+	const FString SourceText = MakeAvidScriptEditorModuleCSharpProfileSourceText();
+	if (!TestFalse(TEXT("Generated binding lifecycle source is available"), SourceText.IsEmpty()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Module C# profile source can be written"), FFileHelper::SaveStringToFile(SourceText, *SourcePath));
 
 	const FString OutputRoot = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(
 		FPaths::ProjectSavedDir(),
@@ -371,20 +367,29 @@ bool FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest::RunTest(
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	FAvidScriptEditorComponentBindingResult BindingResult;
-	TestFalse(
-		TEXT("Module C# profile build-and-bind waits for generated bindings"),
-		Module.ExecuteCSharpProfileBuildAndBinding(ProfilePath, BuildResult, BindingResult));
-	TestFalse(TEXT("Module C# profile build result does not succeed"), BuildResult.bSucceeded);
-	TestEqual(TEXT("Module C# profile failure category"), BuildResult.ErrorCategory, FString(TEXT("phase42_binding_required")));
-	TestTrue(TEXT("Module C# profile exposes ASBI4201"), BuildResult.ErrorMessage.Contains(TEXT("ASBI4201")));
+	const bool bBuildAndBindSucceeded = Module.ExecuteCSharpProfileBuildAndBinding(
+		ProfilePath,
+		BuildResult,
+		BindingResult);
+	if (!TestTrue(
+		TEXT("Module C# profile builds and binds with generated bindings"),
+		bBuildAndBindSucceeded))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return false;
+	}
+	TestTrue(TEXT("Module C# profile build succeeds"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Module C# profile process exits successfully"), BuildResult.ProcessExitCode, 0);
+	TestTrue(TEXT("Module C# profile binding package exists"), FPaths::FileExists(BuildResult.BindingPackagePath));
 	TestEqual(TEXT("Module C# profile module id"), BuildResult.ModuleId, FString(TEXT("csharp_profile_menu_mover")));
 	TestEqual(TEXT("Module C# profile artifact stem"), BuildResult.ArtifactStem, FString(TEXT("profile_menu_mover")));
 	TestEqual(TEXT("Module C# profile build report path"), BuildResult.ReportPath, FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(OutputRoot, TEXT("profile_menu_mover")));
 	TestTrue(TEXT("Module C# profile build report exists"), FPaths::FileExists(BuildResult.ReportPath));
-	TestFalse(TEXT("Module C# profile binding is not attempted"), BindingResult.bSucceeded);
-	TestNull(TEXT("Module C# profile returns no component before Phase 42"), BindingResult.Component);
-	TestNull(TEXT("Module C# profile leaves the Actor unbound"), Actor->FindComponentByClass<UAvidScriptComponent>());
-	TestFalse(TEXT("Module C# profile leaves no stale manifest"), FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(TEXT("Module C# profile manifest exists"), FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(TEXT("Module C# profile binding succeeds"), BindingResult.bSucceeded);
+	TestNotNull(TEXT("Module C# profile returns the bound component"), BindingResult.Component);
+	TestEqual(TEXT("Module C# profile binds the selected Actor"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
 
 	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 	return true;

@@ -8,31 +8,37 @@ namespace AvidScript.CSharpSemantic;
 internal sealed record SemanticExecutableBody(
     SyntaxNode Declaration,
     IMethodSymbol Method,
-    IOperation Operation);
+    IOperation Operation,
+    SemanticCompilationUnit Unit);
 
 internal static class SemanticExecutableBodyResolver
 {
     public static IReadOnlyList<SemanticExecutableBody> Resolve(SemanticCompilationContext context)
     {
-        SemanticModel semanticModel = context.Compilation.GetSemanticModel(context.SyntaxTree, ignoreAccessibility: false);
-        SyntaxNode root = context.SyntaxTree.GetRoot();
         List<SemanticExecutableBody> bodies = new();
-
-        foreach (SyntaxNode declaration in root.DescendantNodes().Where(IsExecutableDeclaration))
+        foreach (SemanticCompilationUnit unit in context.ProjectionUnits)
         {
-            IMethodSymbol? method = GetMethodSymbol(declaration, semanticModel);
-            IOperation? operation = GetOperation(declaration, semanticModel);
-            if (method is null || operation is null)
-            {
-                continue;
-            }
+            SemanticModel semanticModel = context.Compilation.GetSemanticModel(
+                unit.SyntaxTree,
+                ignoreAccessibility: false);
+            SyntaxNode root = unit.SyntaxTree.GetRoot();
 
-            while (operation.Parent is { } parent)
+            foreach (SyntaxNode declaration in root.DescendantNodes().Where(IsExecutableDeclaration))
             {
-                operation = parent;
-            }
+                IMethodSymbol? method = GetMethodSymbol(declaration, semanticModel);
+                IOperation? operation = GetOperation(declaration, semanticModel);
+                if (method is null || operation is null)
+                {
+                    continue;
+                }
 
-            bodies.Add(new SemanticExecutableBody(declaration, method, operation));
+                while (operation.Parent is { } parent)
+                {
+                    operation = parent;
+                }
+
+                bodies.Add(new SemanticExecutableBody(declaration, method, operation, unit));
+            }
         }
 
         return bodies;
