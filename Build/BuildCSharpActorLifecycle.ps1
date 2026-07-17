@@ -9,7 +9,9 @@ param(
     [string]$ReportPath = "",
     [string]$ManifestPath = "",
     [string]$GuestCompilerPath = "",
-    [string]$BindingPackagePath = ""
+    [string]$BindingPackagePath = "",
+    [string]$RuntimeBindingPackagePath = "",
+    [switch]$OmitRuntimeBindingPackage
 )
 
 $ErrorActionPreference = "Stop"
@@ -197,6 +199,74 @@ function Get-SelectedScriptTypeName {
     return [string]$TypeSymbol[0].name
 }
 
+function New-BindingPackageReportValue {
+    param(
+        [AllowNull()][object]$PackageInfo,
+        [AllowEmptyCollection()][object[]]$UsedImports,
+        [bool]$Required
+    )
+
+    if ($null -eq $PackageInfo) {
+        return $null
+    }
+    return [ordered]@{
+        required = $Required
+        package_name = [string]$PackageInfo.PackageName
+        package_hash = [string]$PackageInfo.PackageHash
+        manifest_file = Convert-ToProjectRelativePath $PackageInfo.ManifestPath
+        manifest_sha256 = [string]$PackageInfo.ManifestSha256
+        descriptor_file = Convert-ToProjectRelativePath $PackageInfo.DescriptorPath
+        descriptor_sha256 = [string]$PackageInfo.DescriptorSha256
+        reference_source_file = Convert-ToProjectRelativePath $PackageInfo.ReferenceSourcePath
+        reference_source_sha256 = [string]$PackageInfo.ReferenceSourceSha256
+        profile_import_count = @($PackageInfo.RequiredImports).Count
+        used_import_count = @($UsedImports).Count
+        used_imports = @($UsedImports)
+    }
+}
+
+function Test-BindingPackageImports {
+    param(
+        [AllowNull()][object]$PackageInfo,
+        [AllowEmptyCollection()][object[]]$GuestImports
+    )
+
+    $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
+        [System.StringComparer]::Ordinal)
+    if ($null -ne $PackageInfo) {
+        foreach ($Import in @($PackageInfo.RequiredImports)) {
+            $DeclaredByKey.Add("$($Import.Module)`n$($Import.Name)", $Import)
+        }
+    }
+
+    $ObservedKeys = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    $UnexpectedImports = @()
+    foreach ($Import in @($GuestImports | Where-Object { [string]$_.module -eq "avidscript" })) {
+        $Key = "$([string]$Import.module)`n$([string]$Import.name)"
+        [void]$ObservedKeys.Add($Key)
+        if (-not $DeclaredByKey.ContainsKey($Key)) {
+            $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
+        }
+    }
+
+    $UsedImports = @($DeclaredByKey.Values | Where-Object {
+        $ObservedKeys.Contains("$($_.Module)`n$($_.Name)")
+    } | Sort-Object Ordinal | ForEach-Object {
+        [ordered]@{
+            stable_id = [string]$_.StableId
+            ordinal = [int]$_.Ordinal
+            module = [string]$_.Module
+            name = [string]$_.Name
+            signature = [string]$_.Signature
+        }
+    })
+    return [pscustomobject]@{
+        UnexpectedImports = @($UnexpectedImports)
+        UsedImports = @($UsedImports)
+    }
+}
+
 function Write-BuildReport {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -219,20 +289,14 @@ function Write-BuildReport {
             script_type = $SelectedScriptTypeName
         }
         output_root = Convert-ToProjectRelativePath $OutputRoot
-        binding_package = [ordered]@{
-            required = -not $IsDefaultSource
-            package_name = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.PackageName }
-            package_hash = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.PackageHash }
-            manifest_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.ManifestPath }
-            manifest_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.ManifestSha256 }
-            descriptor_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.DescriptorPath }
-            descriptor_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.DescriptorSha256 }
-            reference_source_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath }
-            reference_source_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.ReferenceSourceSha256 }
-            profile_import_count = if ($null -eq $BindingPackageInfo) { 0 } else { @($BindingPackageInfo.RequiredImports).Count }
-            used_import_count = @($UsedBindingImports).Count
-            used_imports = @($UsedBindingImports)
-        }
+        binding_authorization = New-BindingPackageReportValue `
+            -PackageInfo $BindingAuthorizationInfo `
+            -UsedImports $UsedAuthorizationBindingImports `
+            -Required (-not $IsDefaultSource)
+        binding_package = New-BindingPackageReportValue `
+            -PackageInfo $BindingPackageInfo `
+            -UsedImports $UsedRuntimeBindingImports `
+            -Required ($null -ne $BindingPackageInfo)
         required_exports = @($RequiredExports)
         required_imports = @($RequiredImports)
         observed_exports = @($ObservedExports)
@@ -321,7 +385,9 @@ $SelectedScriptTypeName = ""
 $RequiredExports = @()
 $RequiredImports = @()
 $ObservedExports = @()
-$UsedBindingImports = @()
+$UsedAuthorizationBindingImports = @()
+$UsedRuntimeBindingImports = @()
+$BindingAuthorizationInfo = $null
 $BindingPackageInfo = $null
 $Diagnostics = @()
 $DotNet = [pscustomobject]@{ Found = $false; Source = ""; Path = ""; Checked = @() }
@@ -357,7 +423,7 @@ if (-not $IsDefaultSource) {
     }
 
     try {
-        $BindingPackageInfo = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $BindingPackagePath
+        $BindingAuthorizationInfo = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $BindingPackagePath
     }
     catch {
         $Diagnostics += [ordered]@{
@@ -369,6 +435,48 @@ if (-not $IsDefaultSource) {
         Write-BuildReport -Result "binding_package_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
         Write-Output "[AvidScript][CSharp][Build] result=binding_package_invalid report=$ReportPath"
         exit 1
+    }
+
+    if ($OmitRuntimeBindingPackage -and -not [string]::IsNullOrWhiteSpace($RuntimeBindingPackagePath)) {
+        $Diagnostics += [ordered]@{
+            code = "ASBI4301"
+            severity = "error"
+            message = "RuntimeBindingPackagePath and OmitRuntimeBindingPackage are mutually exclusive."
+            file = Convert-ToProjectRelativePath $RuntimeBindingPackagePath
+        }
+        Write-BuildReport -Result "runtime_binding_package_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=runtime_binding_package_invalid report=$ReportPath"
+        exit 1
+    }
+    if (-not $OmitRuntimeBindingPackage) {
+        if ([string]::IsNullOrWhiteSpace($RuntimeBindingPackagePath)) {
+            $RuntimeBindingPackagePath = $BindingPackagePath
+        }
+        try {
+            $BindingPackageInfo = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $RuntimeBindingPackagePath
+        }
+        catch {
+            $Diagnostics += [ordered]@{
+                code = "ASBI4302"
+                severity = "error"
+                message = $_.Exception.Message
+                file = Convert-ToProjectRelativePath $RuntimeBindingPackagePath
+            }
+            Write-BuildReport -Result "runtime_binding_package_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+            Write-Output "[AvidScript][CSharp][Build] result=runtime_binding_package_invalid report=$ReportPath"
+            exit 1
+        }
+        if ($BindingPackageInfo.PackageName -cne $BindingAuthorizationInfo.PackageName) {
+            $Diagnostics += [ordered]@{
+                code = "ASBI4302"
+                severity = "error"
+                message = "Runtime and authorization binding packages must have the same package_name capability."
+                file = Convert-ToProjectRelativePath $RuntimeBindingPackagePath
+            }
+            Write-BuildReport -Result "runtime_binding_package_invalid" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+            Write-Output "[AvidScript][CSharp][Build] result=runtime_binding_package_invalid report=$ReportPath"
+            exit 1
+        }
     }
 }
 $DotNet = Resolve-DotNetTool
@@ -425,7 +533,7 @@ $SemanticArguments = @(
 if (-not $IsDefaultSource) {
     $SemanticArguments += @(
         "-ExecutableReferenceSourcePath",
-        $BindingPackageInfo.ReferenceSourcePath)
+        $BindingAuthorizationInfo.ReferenceSourcePath)
 }
 $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
 $SemanticOutput = @($SemanticInvocation.Output)
@@ -505,43 +613,55 @@ $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
 })
 if (-not $IsDefaultSource) {
-    $DeclaredBindingImportsByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
-        [System.StringComparer]::Ordinal)
-    foreach ($Import in @($BindingPackageInfo.RequiredImports)) {
-        $DeclaredBindingImportsByKey.Add("$($Import.Module)`n$($Import.Name)", $Import)
-    }
-
-    $ObservedBindingImportKeys = [System.Collections.Generic.HashSet[string]]::new(
-        [System.StringComparer]::Ordinal)
-    $UnexpectedBindingImports = @()
-    foreach ($Import in @($RequiredImports | Where-Object { [string]$_.module -eq "avidscript" })) {
-        $Key = "$([string]$Import.module)`n$([string]$Import.name)"
-        [void]$ObservedBindingImportKeys.Add($Key)
-        if (-not $DeclaredBindingImportsByKey.ContainsKey($Key)) {
-            $UnexpectedBindingImports += "$([string]$Import.module).$([string]$Import.name)"
-        }
-    }
-    $UsedBindingImports = @($BindingPackageInfo.RequiredImports | Where-Object {
-        $ObservedBindingImportKeys.Contains("$($_.Module)`n$($_.Name)")
-    } | ForEach-Object {
-        [ordered]@{
-            stable_id = [string]$_.StableId
-            ordinal = [int]$_.Ordinal
-            module = [string]$_.Module
-            name = [string]$_.Name
-            signature = [string]$_.Signature
-        }
-    })
-    if ($UnexpectedBindingImports.Count -gt 0) {
+    $AuthorizationValidation = Test-BindingPackageImports `
+        -PackageInfo $BindingAuthorizationInfo `
+        -GuestImports $RequiredImports
+    $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
+    if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
         $Diagnostics += [ordered]@{
             code = "ASBI4203"
             severity = "error"
             message = "Guest IR dynamic imports exceed the selected binding package authorization."
-            unexpected_imports = @($UnexpectedBindingImports)
+            unexpected_imports = @($AuthorizationValidation.UnexpectedImports)
         }
         Write-BuildReport -Result "binding_import_mismatch" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
         Write-Output "[AvidScript][CSharp][Build] result=binding_import_mismatch report=$ReportPath"
+        exit 1
+    }
+
+    $RuntimeValidation = Test-BindingPackageImports `
+        -PackageInfo $BindingPackageInfo `
+        -GuestImports $RequiredImports
+    $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
+    $RuntimeIdentityMismatch = @()
+    $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($Import in $UsedRuntimeBindingImports) {
+        $RuntimeUsedByKey.Add("$($Import.module)`n$($Import.name)", $Import)
+    }
+    foreach ($Import in $UsedAuthorizationBindingImports) {
+        $Key = "$($Import.module)`n$($Import.name)"
+        if ($RuntimeUsedByKey.ContainsKey($Key)) {
+            $RuntimeImport = $RuntimeUsedByKey[$Key]
+            if ([string]$RuntimeImport.stable_id -cne [string]$Import.stable_id -or
+                [string]$RuntimeImport.signature -cne [string]$Import.signature) {
+                $RuntimeIdentityMismatch += "$($Import.module).$($Import.name)"
+            }
+        }
+    }
+    if (@($RuntimeValidation.UnexpectedImports).Count -gt 0 -or $RuntimeIdentityMismatch.Count -gt 0) {
+        Remove-LoadableArtifacts
+        $Diagnostics += [ordered]@{
+            code = "ASBI4303"
+            severity = "error"
+            message = "Guest IR dynamic imports exceed or disagree with the selected runtime binding package."
+            unexpected_imports = @($RuntimeValidation.UnexpectedImports)
+            identity_mismatches = @($RuntimeIdentityMismatch)
+            runtime_package_omitted = [bool]$OmitRuntimeBindingPackage
+        }
+        Write-BuildReport -Result "binding_runtime_import_mismatch" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
+        Write-Output "[AvidScript][CSharp][Build] result=binding_runtime_import_mismatch report=$ReportPath"
         exit 1
     }
 }
@@ -605,8 +725,8 @@ $Manifest = [ordered]@{
             reference_source_file = Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath
             reference_source_sha256 = [string]$BindingPackageInfo.ReferenceSourceSha256
             profile_import_count = @($BindingPackageInfo.RequiredImports).Count
-            used_import_count = @($UsedBindingImports).Count
-            used_imports = @($UsedBindingImports)
+            used_import_count = @($UsedRuntimeBindingImports).Count
+            used_imports = @($UsedRuntimeBindingImports)
         }
     }
     guest_ir = [ordered]@{
@@ -628,6 +748,9 @@ $Manifest = [ordered]@{
         guest = "AvidScript.CSharpGuest"
         backend = "AvidScript.WasmBackend"
     }
+}
+if ($null -eq $BindingPackageInfo) {
+    [void]$Manifest.Remove("binding_package")
 }
 try {
     Write-JsonAtomic -Path $ManifestPath -Value $Manifest

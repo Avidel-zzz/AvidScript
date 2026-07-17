@@ -45,6 +45,87 @@ function Get-Sha256Hex {
     return [System.BitConverter]::ToString($HashBytes).Replace("-", "").ToLowerInvariant()
 }
 
+function New-BindingPackageSubset {
+    param(
+        [Parameter(Mandatory = $true)][string]$AuthorizationManifestPath,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [Parameter(Mandatory = $true)][string[]]$UeFunctions
+    )
+
+    $AuthorizationManifest = Get-Content -Raw -LiteralPath $AuthorizationManifestPath | ConvertFrom-Json
+    $AuthorizationDirectory = Split-Path -Parent $AuthorizationManifestPath
+    $DescriptorSource = Join-Path $AuthorizationDirectory ([string]$AuthorizationManifest.files.descriptor)
+    $ReferenceSource = Join-Path $AuthorizationDirectory ([string]$AuthorizationManifest.files.reference_source)
+    $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
+    $SelectedBindings = @($Descriptor.bindings | Where-Object { $UeFunctions -ccontains [string]$_.ue_function })
+    Assert-Condition ($SelectedBindings.Count -eq $UeFunctions.Count) "binding subset fixture could not resolve every UE function"
+
+    $SelectedStableIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($Binding in $SelectedBindings) {
+        [void]$SelectedStableIds.Add([string]$Binding.stable_id)
+    }
+    $SelectedImports = @($AuthorizationManifest.required_imports | Where-Object {
+        $SelectedStableIds.Contains([string]$_.stable_id)
+    })
+    Assert-Condition ($SelectedImports.Count -eq $UeFunctions.Count) "binding subset fixture could not resolve every package import"
+
+    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+    Copy-Item -LiteralPath $DescriptorSource -Destination (Join-Path $OutputDirectory ([string]$AuthorizationManifest.files.descriptor)) -Force
+    Copy-Item -LiteralPath $ReferenceSource -Destination (Join-Path $OutputDirectory ([string]$AuthorizationManifest.files.reference_source)) -Force
+    $AuthorizationManifest.required_imports = @($SelectedImports)
+    $SubsetManifestPath = Join-Path $OutputDirectory "package.json"
+    [System.IO.File]::WriteAllText(
+        $SubsetManifestPath,
+        ($AuthorizationManifest | ConvertTo-Json -Depth 32),
+        $Utf8)
+    return $SubsetManifestPath
+}
+
+function Write-LifecycleSource {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$BeginPlayBody = "",
+        [string]$TickBody = ""
+    )
+
+    $Text = @"
+using System.Runtime.InteropServices;
+
+namespace AvidScript;
+
+public static class RuntimePackageContractScript
+{
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+    public static void BeginPlay()
+    {
+        $BeginPlayBody
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+    public static void Tick(float deltaSeconds)
+    {
+        $TickBody
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+    public static void EndPlay() {}
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_timer")]
+    public static void OnTimer(int callbackId, int timerHandle) {}
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
+    public static void OnEvent(int eventId, float value) {}
+
+    [UnmanagedCallersOnly(EntryPoint = "avid_on_gameplay_event")]
+    public static void OnGameplayEvent(
+        int eventType, int primaryId, int secondaryId, int objectSlot,
+        int objectGeneration, float x, float y, float z) {}
+}
+"@
+    [System.IO.File]::WriteAllText($Path, $Text, $Utf8)
+}
+
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
@@ -61,6 +142,135 @@ Assert-Condition (
     -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -and
     (Test-Path -LiteralPath $BindingPackagePath -PathType Leaf)) `
     "generated binding package is missing; publish the default Phase 42 package before this integration test"
+
+$RuntimeSetPackagePath = New-BindingPackageSubset `
+    -AuthorizationManifestPath $BindingPackagePath `
+    -OutputDirectory (Join-Path $RunRoot "RuntimeSetPackage") `
+    -UeFunctions @("SetActorScale3D")
+
+$RuntimeAllowedRoot = Join-Path $RunRoot "RuntimeAllowed"
+New-Item -ItemType Directory -Force -Path $RuntimeAllowedRoot | Out-Null
+$RuntimeAllowedSource = Join-Path $RuntimeAllowedRoot "RuntimeAllowedScript.cs"
+$RuntimeAllowedReport = Join-Path $RuntimeAllowedRoot "runtime_allowed.csharp.report.json"
+$RuntimeAllowedManifest = Join-Path $RuntimeAllowedRoot "runtime_allowed.avidscript.json"
+Write-LifecycleSource `
+    -Path $RuntimeAllowedSource `
+    -BeginPlayBody "UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $RuntimeAllowedRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -RuntimeBindingPackagePath $RuntimeSetPackagePath `
+    -ModuleId "p43_runtime_allowed" `
+    -ArtifactStem "runtime_allowed" `
+    -ReportPath $RuntimeAllowedReport `
+    -ManifestPath $RuntimeAllowedManifest | Out-Null
+$RuntimeAllowedExit = $LASTEXITCODE
+Assert-Condition ($RuntimeAllowedExit -eq 0) "runtime subset build failed; actual=$RuntimeAllowedExit"
+$RuntimeAllowedJson = Get-Content -Raw -LiteralPath $RuntimeAllowedReport | ConvertFrom-Json
+Assert-Condition ($RuntimeAllowedJson.binding_authorization.profile_import_count -gt 1) "authorization package was not preserved"
+Assert-Condition ($RuntimeAllowedJson.binding_authorization.used_import_count -eq 1) "authorization usage provenance is not one import"
+Assert-Condition ($RuntimeAllowedJson.binding_package.profile_import_count -eq 1) "runtime package is not the one-import subset"
+Assert-Condition ($RuntimeAllowedJson.binding_package.used_import_count -eq 1) "runtime package usage provenance is not one import"
+Assert-Condition ($RuntimeAllowedJson.binding_authorization.manifest_file -ne $RuntimeAllowedJson.binding_package.manifest_file) "authorization and runtime package paths were collapsed"
+$RuntimeAllowedManifestJson = Get-Content -Raw -LiteralPath $RuntimeAllowedManifest | ConvertFrom-Json
+Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq 1) "final manifest did not publish the runtime package subset"
+
+$LegacyPackageRoot = Join-Path $RunRoot "LegacyPackage"
+New-Item -ItemType Directory -Force -Path $LegacyPackageRoot | Out-Null
+$LegacyPackageReport = Join-Path $LegacyPackageRoot "legacy_package.csharp.report.json"
+$LegacyPackageManifest = Join-Path $LegacyPackageRoot "legacy_package.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $LegacyPackageRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -ModuleId "p43_legacy_package" `
+    -ArtifactStem "legacy_package" `
+    -ReportPath $LegacyPackageReport `
+    -ManifestPath $LegacyPackageManifest | Out-Null
+$LegacyPackageExit = $LASTEXITCODE
+Assert-Condition ($LegacyPackageExit -eq 0) "legacy single-package build failed; actual=$LegacyPackageExit"
+$LegacyPackageJson = Get-Content -Raw -LiteralPath $LegacyPackageReport | ConvertFrom-Json
+Assert-Condition (
+    $LegacyPackageJson.binding_authorization.manifest_file -eq $LegacyPackageJson.binding_package.manifest_file) `
+    "legacy single-package build did not default runtime to authorization"
+Assert-Condition (
+    $LegacyPackageJson.binding_authorization.package_hash -eq $LegacyPackageJson.binding_package.package_hash) `
+    "legacy single-package build changed runtime package identity"
+Assert-Condition ($LegacyPackageJson.binding_package.used_import_count -eq 1) "legacy package did not retain used-import provenance"
+Assert-Condition (Test-Path -LiteralPath $LegacyPackageManifest -PathType Leaf) "legacy package build did not publish a manifest"
+
+$RuntimeMismatchRoot = Join-Path $RunRoot "RuntimeMismatch"
+New-Item -ItemType Directory -Force -Path $RuntimeMismatchRoot | Out-Null
+$RuntimeMismatchSource = Join-Path $RuntimeMismatchRoot "RuntimeMismatchScript.cs"
+$RuntimeMismatchReport = Join-Path $RuntimeMismatchRoot "runtime_mismatch.csharp.report.json"
+$RuntimeMismatchManifest = Join-Path $RuntimeMismatchRoot "runtime_mismatch.avidscript.json"
+Write-LifecycleSource `
+    -Path $RuntimeMismatchSource `
+    -TickBody "FVector scale = UE.Self.GetActorScale3D();`n        UE.Self.SetActorScale3D(scale);"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $RuntimeMismatchRoot `
+    -SourcePath $RuntimeMismatchSource `
+    -BindingPackagePath $BindingPackagePath `
+    -RuntimeBindingPackagePath $RuntimeSetPackagePath `
+    -ModuleId "p43_runtime_mismatch" `
+    -ArtifactStem "runtime_mismatch" `
+    -ReportPath $RuntimeMismatchReport `
+    -ManifestPath $RuntimeMismatchManifest | Out-Null
+$RuntimeMismatchExit = $LASTEXITCODE
+Assert-Condition ($RuntimeMismatchExit -eq 1) "runtime package mismatch must return exit 1; actual=$RuntimeMismatchExit"
+$RuntimeMismatchJson = Get-Content -Raw -LiteralPath $RuntimeMismatchReport | ConvertFrom-Json
+Assert-Condition ($RuntimeMismatchJson.result -eq "binding_runtime_import_mismatch") "runtime package mismatch has the wrong result"
+Assert-Condition (@($RuntimeMismatchJson.diagnostics | Where-Object code -eq "ASBI4303").Count -eq 1) "runtime package mismatch diagnostic is missing"
+Assert-Condition (-not (Test-Path -LiteralPath $RuntimeMismatchManifest -PathType Leaf)) "runtime package mismatch left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $RuntimeMismatchRoot "runtime_mismatch.wasm") -PathType Leaf)) "runtime package mismatch left loadable WASM"
+
+$OmitRuntimeRoot = Join-Path $RunRoot "OmitRuntime"
+New-Item -ItemType Directory -Force -Path $OmitRuntimeRoot | Out-Null
+$OmitRuntimeSource = Join-Path $OmitRuntimeRoot "OmitRuntimeScript.cs"
+$OmitRuntimeReport = Join-Path $OmitRuntimeRoot "omit_runtime.csharp.report.json"
+$OmitRuntimeManifest = Join-Path $OmitRuntimeRoot "omit_runtime.avidscript.json"
+Write-LifecycleSource -Path $OmitRuntimeSource
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $OmitRuntimeRoot `
+    -SourcePath $OmitRuntimeSource `
+    -BindingPackagePath $BindingPackagePath `
+    -OmitRuntimeBindingPackage `
+    -ModuleId "p43_omit_runtime" `
+    -ArtifactStem "omit_runtime" `
+    -ReportPath $OmitRuntimeReport `
+    -ManifestPath $OmitRuntimeManifest | Out-Null
+$OmitRuntimeExit = $LASTEXITCODE
+Assert-Condition ($OmitRuntimeExit -eq 0) "zero-binding build could not omit runtime package; actual=$OmitRuntimeExit"
+$OmitRuntimeJson = Get-Content -Raw -LiteralPath $OmitRuntimeReport | ConvertFrom-Json
+Assert-Condition ($null -ne $OmitRuntimeJson.binding_authorization) "zero-binding build lost authorization provenance"
+Assert-Condition ($null -eq $OmitRuntimeJson.binding_package) "zero-binding report retained a runtime package"
+$OmitRuntimeManifestJson = Get-Content -Raw -LiteralPath $OmitRuntimeManifest | ConvertFrom-Json
+Assert-Condition ($OmitRuntimeManifestJson.PSObject.Properties.Name -notcontains "binding_package") "zero-binding manifest retained binding_package"
+
+$OmitDynamicRoot = Join-Path $RunRoot "OmitDynamic"
+New-Item -ItemType Directory -Force -Path $OmitDynamicRoot | Out-Null
+$OmitDynamicReport = Join-Path $OmitDynamicRoot "omit_dynamic.csharp.report.json"
+$OmitDynamicManifest = Join-Path $OmitDynamicRoot "omit_dynamic.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $OmitDynamicRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -OmitRuntimeBindingPackage `
+    -ModuleId "p43_omit_dynamic" `
+    -ArtifactStem "omit_dynamic" `
+    -ReportPath $OmitDynamicReport `
+    -ManifestPath $OmitDynamicManifest | Out-Null
+$OmitDynamicExit = $LASTEXITCODE
+Assert-Condition ($OmitDynamicExit -eq 1) "dynamic binding build must reject omitted runtime package; actual=$OmitDynamicExit"
+$OmitDynamicJson = Get-Content -Raw -LiteralPath $OmitDynamicReport | ConvertFrom-Json
+Assert-Condition ($OmitDynamicJson.result -eq "binding_runtime_import_mismatch") "omitted dynamic package has the wrong result"
+Assert-Condition (-not (Test-Path -LiteralPath $OmitDynamicManifest -PathType Leaf)) "omitted dynamic package left a manifest"
 
 $BrokenRoot = Join-Path $RunRoot "Broken"
 New-Item -ItemType Directory -Force -Path $BrokenRoot | Out-Null
@@ -224,4 +434,4 @@ Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Gu
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 3/3 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 8/8 passed"

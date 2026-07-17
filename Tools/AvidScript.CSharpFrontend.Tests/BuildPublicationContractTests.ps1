@@ -50,6 +50,10 @@ $SeedManifest = Join-Path $SeedRoot "actor_lifecycle.avidscript.json"
     -ReportPath $SeedReport `
     -ManifestPath $SeedManifest | Out-Null
 Assert-Condition ($LASTEXITCODE -eq 0) "seed ActorLifecycle build failed"
+$SeedReportJson = Get-Content -Raw -LiteralPath $SeedReport | ConvertFrom-Json
+Assert-Condition ($SeedReportJson.PSObject.Properties.Name -contains "binding_authorization") "build report is missing binding_authorization"
+Assert-Condition ($null -eq $SeedReportJson.binding_authorization) "default source unexpectedly published binding authorization"
+Assert-Condition ($null -eq $SeedReportJson.binding_package) "default source unexpectedly published a runtime binding package"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
@@ -149,3 +153,4 @@ Assert-Condition (-not (Test-Path -LiteralPath $PublicationManifest -PathType Le
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $PublicationRoot "actor_lifecycle.wasm") -PathType Leaf)) "report publication failure left WASM"
 
 Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 3/3 passed"
+exit 0
