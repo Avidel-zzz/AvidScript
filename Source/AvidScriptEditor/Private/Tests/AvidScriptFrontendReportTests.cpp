@@ -184,6 +184,8 @@ bool FAvidScriptFrontendReportCSharpStructuredLoadTest::RunTest(const FString& P
 	TestTrue(TEXT("Legacy report has no semantic artifact"), Report.SemanticArtifact.IsEmpty());
 	TestEqual(TEXT("Legacy report semantic schema defaults to zero"), Report.SemanticSchemaVersion, 0);
 	TestFalse(TEXT("Legacy report semantic success defaults to false"), Report.bSemanticSucceeded);
+	TestFalse(TEXT("Legacy report has no binding package provenance"), Report.BindingPackage.bPresent);
+	TestEqual(TEXT("Legacy report has no used binding imports"), Report.BindingPackage.UsedImports.Num(), 0);
 	return true;
 }
 
@@ -225,6 +227,62 @@ bool FAvidScriptFrontendReportCSharpSemanticLoadTest::RunTest(const FString& Par
 	TestTrue(TEXT("C# Guest IR succeeded"), Report.bGuestIrSucceeded);
 	TestEqual(TEXT("C# Guest IR semantic hash"), Report.GuestIrSemanticSha256, FString(TEXT("semantic456")));
 	TestEqual(TEXT("C# Guest IR artifact hash"), Report.GuestIrSha256, FString(TEXT("guest789")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptFrontendReportCSharpBindingProvenanceLoadTest,
+	"AvidScript.Editor.Report.CSharpBindingProvenanceSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptFrontendReportCSharpBindingProvenanceLoadTest::RunTest(const FString& Parameters)
+{
+	const FString ReportPath = GetAvidScriptReportFixturePath(TEXT("csharp_binding_provenance.report.json"));
+	const FString ReportJson = TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"result\": \"direct_abi_built\",\n")
+		TEXT("  \"succeeded\": true,\n")
+		TEXT("  \"binding_package\": {\n")
+		TEXT("    \"required\": true,\n")
+		TEXT("    \"package_manifest\": \"Saved/Bindings/package.json\",\n")
+		TEXT("    \"package_name\": \"avidscript.engine.gameplay\",\n")
+		TEXT("    \"package_hash\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n")
+		TEXT("    \"descriptor_file\": \"Saved/Bindings/descriptor.json\",\n")
+		TEXT("    \"descriptor_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n")
+		TEXT("    \"reference_source_file\": \"Saved/Bindings/AvidScript.Bindings.generated.cs\",\n")
+		TEXT("    \"reference_source_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\n")
+		TEXT("    \"profile_import_count\": 115,\n")
+		TEXT("    \"used_import_count\": 2,\n")
+		TEXT("    \"used_imports\": [\n")
+		TEXT("      { \"stable_id\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"ordinal\": 10, \"module\": \"avidscript\", \"name\": \"avid_ue_1111111111111111\", \"signature\": \"(ii)i\" },\n")
+		TEXT("      { \"stable_id\": \"2222222222222222222222222222222222222222222222222222222222222222\", \"ordinal\": 20, \"module\": \"avidscript\", \"name\": \"avid_ue_2222222222222222\", \"signature\": \"(i)i\" }\n")
+		TEXT("    ]\n")
+		TEXT("  },\n")
+		TEXT("  \"diagnostics\": []\n")
+		TEXT("}\n");
+
+	TestTrue(TEXT("C# binding provenance fixture writes"), WriteAvidScriptReportFixture(ReportPath, ReportJson));
+
+	FAvidScriptFrontendReport Report;
+	FAvidScriptFrontendReportLoadResult LoadResult;
+	TestTrue(TEXT("C# binding provenance report loads"), FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult));
+	TestTrue(TEXT("Binding package provenance is present"), Report.BindingPackage.bPresent);
+	TestEqual(TEXT("Binding package manifest"), Report.BindingPackage.PackageManifest, FString(TEXT("Saved/Bindings/package.json")));
+	TestEqual(TEXT("Binding package name"), Report.BindingPackage.PackageName, FString(TEXT("avidscript.engine.gameplay")));
+	TestEqual(TEXT("Binding package descriptor"), Report.BindingPackage.DescriptorFile, FString(TEXT("Saved/Bindings/descriptor.json")));
+	TestEqual(TEXT("Binding package profile import count"), Report.BindingPackage.ProfileImportCount, 115);
+	TestEqual(TEXT("Binding package declared used import count"), Report.BindingPackage.UsedImportCount, 2);
+	TestEqual(TEXT("Binding package parsed used import count"), Report.BindingPackage.UsedImports.Num(), 2);
+	if (Report.BindingPackage.UsedImports.Num() == 2)
+	{
+		const FAvidScriptFrontendBindingImport& First = Report.BindingPackage.UsedImports[0];
+		const FAvidScriptFrontendBindingImport& Second = Report.BindingPackage.UsedImports[1];
+		TestEqual(TEXT("First used stable ID preserves order"), First.StableId, FString::ChrN(64, TEXT('1')));
+		TestEqual(TEXT("First used ordinal"), First.Ordinal, 10);
+		TestEqual(TEXT("First used import name"), First.Name, FString(TEXT("avid_ue_1111111111111111")));
+		TestEqual(TEXT("Second used stable ID preserves order"), Second.StableId, FString::ChrN(64, TEXT('2')));
+		TestEqual(TEXT("Second used signature"), Second.Signature, FString(TEXT("(i)i")));
+	}
 	return true;
 }
 

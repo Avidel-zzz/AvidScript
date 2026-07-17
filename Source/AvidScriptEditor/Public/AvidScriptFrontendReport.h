@@ -24,6 +24,31 @@ struct FAvidScriptFrontendBuildEvent
 	TMap<FString, FString> Fields;
 };
 
+struct FAvidScriptFrontendBindingImport
+{
+	FString StableId;
+	int32 Ordinal = INDEX_NONE;
+	FString Module;
+	FString Name;
+	FString Signature;
+};
+
+struct FAvidScriptFrontendBindingPackage
+{
+	bool bPresent = false;
+	bool bRequired = false;
+	FString PackageManifest;
+	FString PackageName;
+	FString PackageHash;
+	FString DescriptorFile;
+	FString DescriptorSha256;
+	FString ReferenceSourceFile;
+	FString ReferenceSourceSha256;
+	int32 ProfileImportCount = 0;
+	int32 UsedImportCount = 0;
+	TArray<FAvidScriptFrontendBindingImport> UsedImports;
+};
+
 struct FAvidScriptFrontendReport
 {
 	int32 SchemaVersion = 0;
@@ -49,6 +74,7 @@ struct FAvidScriptFrontendReport
 	FString GuestIrSha256;
 	FString Bindings;
 	FString OutputRoot;
+	FAvidScriptFrontendBindingPackage BindingPackage;
 	int32 ExitCode = 0;
 	bool bSucceeded = false;
 	TArray<FAvidScriptFrontendDiagnostic> Diagnostics;

@@ -222,6 +222,53 @@ void LoadAvidScriptGuestIrMetadata(const TSharedPtr<FJsonObject>& RootObject, FA
 		(*GuestIrObject)->TryGetStringField(TEXT("sha256"), OutReport.GuestIrSha256);
 	}
 }
+
+void LoadAvidScriptBindingPackageMetadata(const TSharedPtr<FJsonObject>& RootObject, FAvidScriptFrontendReport& OutReport)
+{
+	OutReport.BindingPackage = FAvidScriptFrontendBindingPackage();
+	const TSharedPtr<FJsonObject>* PackageObject = nullptr;
+	if (!RootObject->TryGetObjectField(TEXT("binding_package"), PackageObject)
+		|| PackageObject == nullptr
+		|| !PackageObject->IsValid())
+	{
+		return;
+	}
+
+	FAvidScriptFrontendBindingPackage& Package = OutReport.BindingPackage;
+	Package.bPresent = true;
+	(*PackageObject)->TryGetBoolField(TEXT("required"), Package.bRequired);
+	(*PackageObject)->TryGetStringField(TEXT("package_manifest"), Package.PackageManifest);
+	(*PackageObject)->TryGetStringField(TEXT("package_name"), Package.PackageName);
+	(*PackageObject)->TryGetStringField(TEXT("package_hash"), Package.PackageHash);
+	(*PackageObject)->TryGetStringField(TEXT("descriptor_file"), Package.DescriptorFile);
+	(*PackageObject)->TryGetStringField(TEXT("descriptor_sha256"), Package.DescriptorSha256);
+	(*PackageObject)->TryGetStringField(TEXT("reference_source_file"), Package.ReferenceSourceFile);
+	(*PackageObject)->TryGetStringField(TEXT("reference_source_sha256"), Package.ReferenceSourceSha256);
+	Package.ProfileImportCount = GetAvidScriptJsonIntField(*PackageObject, TEXT("profile_import_count"), 0);
+	Package.UsedImportCount = GetAvidScriptJsonIntField(*PackageObject, TEXT("used_import_count"), 0);
+
+	const TArray<TSharedPtr<FJsonValue>>* UsedImports = nullptr;
+	if (!(*PackageObject)->TryGetArrayField(TEXT("used_imports"), UsedImports) || UsedImports == nullptr)
+	{
+		return;
+	}
+	for (const TSharedPtr<FJsonValue>& ImportValue : *UsedImports)
+	{
+		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid() ? ImportValue->AsObject() : nullptr;
+		if (!ImportObject.IsValid())
+		{
+			continue;
+		}
+
+		FAvidScriptFrontendBindingImport Import;
+		ImportObject->TryGetStringField(TEXT("stable_id"), Import.StableId);
+		Import.Ordinal = GetAvidScriptJsonIntField(ImportObject, TEXT("ordinal"), INDEX_NONE);
+		ImportObject->TryGetStringField(TEXT("module"), Import.Module);
+		ImportObject->TryGetStringField(TEXT("name"), Import.Name);
+		ImportObject->TryGetStringField(TEXT("signature"), Import.Signature);
+		Package.UsedImports.Add(MoveTemp(Import));
+	}
+}
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -308,6 +355,7 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 	LoadAvidScriptFrontendMetadata(RootObject, OutReport);
 	LoadAvidScriptSemanticMetadata(RootObject, OutReport);
 	LoadAvidScriptGuestIrMetadata(RootObject, OutReport);
+	LoadAvidScriptBindingPackageMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);
