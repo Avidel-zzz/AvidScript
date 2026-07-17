@@ -119,6 +119,15 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestFalse(
 		TEXT("Custom report records a content-addressed package hash"),
 		(*BindingPackageObject)->GetStringField(TEXT("package_hash")).IsEmpty());
+	TestEqual(
+		TEXT("Custom report keeps the complete gameplay profile as its authorization ceiling"),
+		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
+		115);
+	TestEqual(
+		TEXT("Custom report records only the two generated bindings used by the script"),
+		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
+		2);
+	TestEqual(TEXT("Custom report exposes two used stable identities"), (*BindingPackageObject)->GetArrayField(TEXT("used_imports")).Num(), 2);
 
 	return true;
 }

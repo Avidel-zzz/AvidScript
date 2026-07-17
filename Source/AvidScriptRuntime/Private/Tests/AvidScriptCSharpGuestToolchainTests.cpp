@@ -627,7 +627,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 			return RequiredImport.ModuleName == TEXT("env") && RequiredImport.ImportName == TEXT("timer_cancel");
 		});
 	TestTrue(TEXT("C# source adapter manifest requires set-once Timer import"), bRequiresTimerSetOnce);
-	TestTrue(TEXT("C# source adapter manifest requires Timer cancel import"), bRequiresTimerCancel);
+	TestFalse(TEXT("C# source adapter manifest omits unreachable Timer cancel import"), bRequiresTimerCancel);
 
 	UWorld* World = nullptr;
 	if (!CreateCSharpContractWorld(World))

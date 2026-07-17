@@ -31,6 +31,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateSymbols(document.Symbols)
             && ValidateCallables(document.Callables)
             && ValidateMethods(document.Methods)
+            && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
             && document.Diagnostics.All(diagnostic => diagnostic is not null
                 && !string.IsNullOrWhiteSpace(diagnostic.Code)
@@ -105,6 +106,64 @@ internal static class CSharpSemanticInputValidator
         }
 
         return true;
+    }
+
+    private static bool ValidateReachability(SemanticDocument document)
+    {
+        if (document.SchemaVersion < 5)
+        {
+            return true;
+        }
+
+        SemanticReachability? reachability = document.Reachability;
+        if (reachability is null
+            || reachability.Mode is not ("export_roots" or "all_callables_compatibility")
+            || reachability.RootCallableIds is null
+            || reachability.ReachableCallableIds is null
+            || reachability.ReachableImports is null
+            || !Unique(reachability.RootCallableIds)
+            || !Unique(reachability.ReachableCallableIds)
+            || !IsOrdinalSorted(reachability.RootCallableIds)
+            || !IsOrdinalSorted(reachability.ReachableCallableIds))
+        {
+            return false;
+        }
+
+        Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId,
+            StringComparer.Ordinal);
+        HashSet<string> reachableIds = reachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal);
+        if (reachability.RootCallableIds.Any(id =>
+                !reachableIds.Contains(id)
+                || !callablesById.TryGetValue(id, out SemanticCallable? callable)
+                || callable.Export is null)
+            || reachableIds.Any(id => !callablesById.ContainsKey(id))
+            || (reachability.Mode == "export_roots" && reachability.RootCallableIds.Count == 0)
+            || (reachability.Mode == "all_callables_compatibility"
+                && (reachability.RootCallableIds.Count != 0
+                    || reachableIds.Count != callablesById.Count)))
+        {
+            return false;
+        }
+
+        SemanticReachableImport[] expectedImports = reachability.ReachableCallableIds
+            .Select(id => callablesById[id])
+            .Where(callable => callable.Import is not null)
+            .Select(callable => new SemanticReachableImport(
+                callable.MethodSymbolId,
+                callable.Import!.Module,
+                callable.Import.Name))
+            .OrderBy(import => import.Module, StringComparer.Ordinal)
+            .ThenBy(import => import.Name, StringComparer.Ordinal)
+            .ThenBy(import => import.MethodSymbolId, StringComparer.Ordinal)
+            .ToArray();
+        return reachability.ReachableImports.All(import => import is not null)
+            && reachability.ReachableImports.SequenceEqual(expectedImports);
+    }
+
+    private static bool IsOrdinalSorted(IReadOnlyList<string> values)
+    {
+        return values.SequenceEqual(values.OrderBy(value => value, StringComparer.Ordinal));
     }
 
     private static bool ValidateMethods(IReadOnlyList<SemanticMethodBody> methods)

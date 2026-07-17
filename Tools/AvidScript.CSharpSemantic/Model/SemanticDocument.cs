@@ -15,4 +15,5 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(8)] IReadOnlyList<SemanticCallable> Callables,
     [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticMethodBody> Methods,
     [property: JsonPropertyOrder(10)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
-    [property: JsonPropertyOrder(11)] IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(11)] SemanticReachability? Reachability,
+    [property: JsonPropertyOrder(12)] IReadOnlyList<SemanticDiagnostic> Diagnostics);

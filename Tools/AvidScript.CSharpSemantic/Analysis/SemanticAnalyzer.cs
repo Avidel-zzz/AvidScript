@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 4;
-    private const string CurrentSemanticVersion = "1.4";
+    private const int CurrentSchemaVersion = 5;
+    private const string CurrentSemanticVersion = "1.5";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -45,6 +45,11 @@ public static class SemanticAnalyzer
                 Array.Empty<SemanticCallable>(),
                 Array.Empty<SemanticMethodBody>(),
                 Array.Empty<SemanticControlFlowGraph>(),
+                new SemanticReachability(
+                    "failed",
+                    Array.Empty<string>(),
+                    Array.Empty<string>(),
+                    Array.Empty<SemanticReachableImport>()),
                 new[]
                 {
                     new SemanticDiagnostic(
@@ -86,6 +91,9 @@ public static class SemanticAnalyzer
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
             .ToArray();
         bool succeeded = diagnostics.All(diagnostic => diagnostic.Severity != "error");
+        SemanticReachability reachability = SemanticReachabilityProjector.Project(
+            callableProjection.Callables,
+            controlFlowGraphs);
 
         return new SemanticDocument(
             CurrentSchemaVersion,
@@ -99,6 +107,7 @@ public static class SemanticAnalyzer
             callableProjection.Callables,
             operationProjection.Methods,
             controlFlowGraphs,
+            reachability,
             diagnostics);
     }
 

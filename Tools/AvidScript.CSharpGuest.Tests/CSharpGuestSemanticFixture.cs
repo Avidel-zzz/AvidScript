@@ -106,6 +106,7 @@ internal static class CSharpGuestSemanticFixture
             new[] { main, host },
             new[] { new SemanticMethodBody(MainMethodId, Operation("method_body", null)) },
             new[] { graph },
+            null,
             diagnostics);
     }
 

@@ -364,6 +364,19 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		TEXT("Generated gameplay package exposes every accepted reflected import"),
 		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
 		115);
+	int32 RequiredDynamicImportCount = 0;
+	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
+	{
+		if (Import.ModuleName == TEXT("avidscript")
+			&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+		{
+			++RequiredDynamicImportCount;
+		}
+	}
+	TestEqual(
+		TEXT("Generated C# lifecycle WASM keeps only its two reachable reflected imports"),
+		RequiredDynamicImportCount,
+		2);
 
 	FString ManifestJson;
 	TSharedPtr<FJsonObject> ManifestObject;
@@ -384,6 +397,10 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	{
 		return false;
 	}
+	TestEqual(
+		TEXT("Generated C# manifest records two used binding stable identities"),
+		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
+		2);
 	(*BindingPackageObject)->SetStringField(
 		TEXT("descriptor_sha256"),
 		TEXT("0000000000000000000000000000000000000000000000000000000000000000"));

@@ -229,6 +229,9 @@ function Write-BuildReport {
             descriptor_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.DescriptorSha256 }
             reference_source_file = if ($null -eq $BindingPackageInfo) { "" } else { Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath }
             reference_source_sha256 = if ($null -eq $BindingPackageInfo) { "" } else { [string]$BindingPackageInfo.ReferenceSourceSha256 }
+            profile_import_count = if ($null -eq $BindingPackageInfo) { 0 } else { @($BindingPackageInfo.RequiredImports).Count }
+            used_import_count = @($UsedBindingImports).Count
+            used_imports = @($UsedBindingImports)
         }
         required_exports = @($RequiredExports)
         required_imports = @($RequiredImports)
@@ -254,6 +257,10 @@ function Write-BuildReport {
             frontend_sha256 = if ($null -eq $SemanticModel) { "" } else { [string]$SemanticModel.source.frontend_sha256 }
             artifact_sha256 = Get-Sha256Hex $SemanticArtifactPath
             diagnostic_count = if ($null -eq $SemanticModel) { 0 } else { @($SemanticModel.diagnostics).Count }
+            reachability_mode = if ($null -eq $SemanticModel -or $null -eq $SemanticModel.reachability) { "" } else { [string]$SemanticModel.reachability.mode }
+            root_callable_count = if ($null -eq $SemanticModel -or $null -eq $SemanticModel.reachability) { 0 } else { @($SemanticModel.reachability.root_callable_ids).Count }
+            reachable_callable_count = if ($null -eq $SemanticModel -or $null -eq $SemanticModel.reachability) { 0 } else { @($SemanticModel.reachability.reachable_callable_ids).Count }
+            reachable_import_count = if ($null -eq $SemanticModel -or $null -eq $SemanticModel.reachability) { 0 } else { @($SemanticModel.reachability.reachable_imports).Count }
         }
         guest_ir = [ordered]@{
             schema_version = if ($null -eq $GuestIrModel) { 0 } else { [int]$GuestIrModel.schema_version }
@@ -314,6 +321,7 @@ $SelectedScriptTypeName = ""
 $RequiredExports = @()
 $RequiredImports = @()
 $ObservedExports = @()
+$UsedBindingImports = @()
 $BindingPackageInfo = $null
 $Diagnostics = @()
 $DotNet = [pscustomobject]@{ Found = $false; Source = ""; Path = ""; Checked = @() }
@@ -497,10 +505,10 @@ $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
 })
 if (-not $IsDefaultSource) {
-    $DeclaredBindingImportKeys = [System.Collections.Generic.HashSet[string]]::new(
+    $DeclaredBindingImportsByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
         [System.StringComparer]::Ordinal)
     foreach ($Import in @($BindingPackageInfo.RequiredImports)) {
-        [void]$DeclaredBindingImportKeys.Add("$($Import.Module)`n$($Import.Name)")
+        $DeclaredBindingImportsByKey.Add("$($Import.Module)`n$($Import.Name)", $Import)
     }
 
     $ObservedBindingImportKeys = [System.Collections.Generic.HashSet[string]]::new(
@@ -509,21 +517,28 @@ if (-not $IsDefaultSource) {
     foreach ($Import in @($RequiredImports | Where-Object { [string]$_.module -eq "avidscript" })) {
         $Key = "$([string]$Import.module)`n$([string]$Import.name)"
         [void]$ObservedBindingImportKeys.Add($Key)
-        if (-not $DeclaredBindingImportKeys.Contains($Key)) {
+        if (-not $DeclaredBindingImportsByKey.ContainsKey($Key)) {
             $UnexpectedBindingImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
-    $MissingBindingImports = @($BindingPackageInfo.RequiredImports | Where-Object {
-        -not $ObservedBindingImportKeys.Contains("$($_.Module)`n$($_.Name)")
-    } | ForEach-Object { "$($_.Module).$($_.Name)" })
-    if ($UnexpectedBindingImports.Count -gt 0 -or $MissingBindingImports.Count -gt 0) {
+    $UsedBindingImports = @($BindingPackageInfo.RequiredImports | Where-Object {
+        $ObservedBindingImportKeys.Contains("$($_.Module)`n$($_.Name)")
+    } | ForEach-Object {
+        [ordered]@{
+            stable_id = [string]$_.StableId
+            ordinal = [int]$_.Ordinal
+            module = [string]$_.Module
+            name = [string]$_.Name
+            signature = [string]$_.Signature
+        }
+    })
+    if ($UnexpectedBindingImports.Count -gt 0) {
         Remove-LoadableArtifacts
         $Diagnostics += [ordered]@{
             code = "ASBI4203"
             severity = "error"
-            message = "Guest IR dynamic imports do not match the selected binding package."
+            message = "Guest IR dynamic imports exceed the selected binding package authorization."
             unexpected_imports = @($UnexpectedBindingImports)
-            missing_imports = @($MissingBindingImports)
         }
         Write-BuildReport -Result "binding_import_mismatch" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
         Write-Output "[AvidScript][CSharp][Build] result=binding_import_mismatch report=$ReportPath"
@@ -589,6 +604,9 @@ $Manifest = [ordered]@{
             descriptor_sha256 = [string]$BindingPackageInfo.DescriptorSha256
             reference_source_file = Convert-ToProjectRelativePath $BindingPackageInfo.ReferenceSourcePath
             reference_source_sha256 = [string]$BindingPackageInfo.ReferenceSourceSha256
+            profile_import_count = @($BindingPackageInfo.RequiredImports).Count
+            used_import_count = @($UsedBindingImports).Count
+            used_imports = @($UsedBindingImports)
         }
     }
     guest_ir = [ordered]@{

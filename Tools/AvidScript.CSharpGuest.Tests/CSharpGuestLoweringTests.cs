@@ -14,7 +14,8 @@ internal static class CSharpGuestLoweringTests
         TypesStateAndCallableAbiAreProjected();
         VoidFallthroughExitReturnsNormally();
         LoweringIsByteDeterministic();
-        return 4;
+        ReachabilityPrunesUnusedImports();
+        return 5;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -96,6 +97,28 @@ internal static class CSharpGuestLoweringTests
 
         Assert(GuestIrSerializer.Serialize(first).SequenceEqual(GuestIrSerializer.Serialize(second)),
             "the same semantic artifact should produce identical Guest IR bytes");
+    }
+
+    private static void ReachabilityPrunesUnusedImports()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticCallable main = baseline.Callables.Single(callable => callable.Export is not null);
+        SemanticDocument document = baseline with
+        {
+            SchemaVersion = 5,
+            SemanticVersion = "1.5",
+            Reachability = new SemanticReachability(
+                "export_roots",
+                new[] { main.MethodSymbolId },
+                new[] { main.MethodSymbolId },
+                Array.Empty<SemanticReachableImport>()),
+        };
+
+        GuestModule module = CSharpGuestLowerer.Lower(document, SemanticHash).Module
+            ?? throw new InvalidOperationException("reachable semantic input produced no Guest module");
+
+        Assert(module.Imports.Count == 0,
+            "imports outside the export-root callable closure should not enter Guest IR");
     }
 
     private static void Assert(bool condition, string message)

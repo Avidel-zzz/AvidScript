@@ -29,10 +29,11 @@ public static class CSharpGuestLowerer
         Dictionary<string, GuestType> guestTypes = typeResult.Types.ToDictionary(
             type => type.Id,
             StringComparer.Ordinal);
+        IReadOnlySet<string>? reachableCallableIds = GetReachableCallableIds(document);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
-        GuestImport[] imports = LowerImports(document, guestTypes, diagnostics);
+        GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
         CSharpGuestDataPool dataPool = new(typeResult.Types);
-        GuestFunction[] functions = LowerFunctions(document, guestTypes, dataPool, diagnostics);
+        GuestFunction[] functions = LowerFunctions(document, reachableCallableIds, guestTypes, dataPool, diagnostics);
         GuestExport[] exports = LowerExports(document, functions, diagnostics);
         if (diagnostics.Count != 0)
         {
@@ -147,12 +148,15 @@ public static class CSharpGuestLowerer
 
     private static GuestImport[] LowerImports(
         SemanticDocument document,
+        IReadOnlySet<string>? reachableCallableIds,
         IReadOnlyDictionary<string, GuestType> guestTypes,
         List<GuestDiagnostic> diagnostics)
     {
         List<GuestImport> imports = new();
         foreach (SemanticCallable callable in document.Callables
-            .Where(callable => callable.Import is not null)
+            .Where(callable => callable.Import is not null
+                && (reachableCallableIds is null
+                    || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
         {
             string[] parameterTypeIds = callable.Parameters
@@ -179,6 +183,7 @@ public static class CSharpGuestLowerer
 
     private static GuestFunction[] LowerFunctions(
         SemanticDocument document,
+        IReadOnlySet<string>? reachableCallableIds,
         IReadOnlyDictionary<string, GuestType> guestTypes,
         CSharpGuestDataPool dataPool,
         List<GuestDiagnostic> diagnostics)
@@ -188,7 +193,9 @@ public static class CSharpGuestLowerer
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         List<GuestFunction> functions = new();
         foreach (SemanticCallable callable in document.Callables
-            .Where(callable => callable.HasBody)
+            .Where(callable => callable.HasBody
+                && (reachableCallableIds is null
+                    || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
         {
             if (!graphs.TryGetValue(callable.MethodSymbolId, out SemanticControlFlowGraph? graph))
@@ -230,6 +237,16 @@ public static class CSharpGuestLowerer
         }
 
         return exports.ToArray();
+    }
+
+    private static IReadOnlySet<string>? GetReachableCallableIds(SemanticDocument document)
+    {
+        if (document.SchemaVersion < 5)
+        {
+            return null;
+        }
+
+        return document.Reachability!.ReachableCallableIds.ToHashSet(StringComparer.Ordinal);
     }
 
     private static CSharpGuestLoweringResult Failure(IEnumerable<GuestDiagnostic> diagnostics)

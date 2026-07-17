@@ -125,19 +125,29 @@ function Resolve-AvidScriptCSharpBindingPackage {
     $ImportKeys = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     foreach ($Import in @($Manifest.required_imports)) {
+        $StableId = [string]$Import.stable_id
+        $Ordinal = [int]$Import.ordinal
         $Module = [string]$Import.module
         $Name = [string]$Import.name
-        if ([string]::IsNullOrWhiteSpace($Module) -or
-            [string]::IsNullOrWhiteSpace($Name)) {
-            throw "Binding package required_imports contains an empty module or name."
+        $Signature = [string]$Import.signature
+        if (-not (Test-AvidScriptBindingSha256 $StableId) -or
+            $null -eq $Import.ordinal -or
+            $Ordinal -lt 0 -or
+            [string]::IsNullOrWhiteSpace($Module) -or
+            [string]::IsNullOrWhiteSpace($Name) -or
+            [string]::IsNullOrWhiteSpace($Signature)) {
+            throw "Binding package required_imports contains invalid identity, ordinal, module, name, or signature data."
         }
         $Key = "$Module`n$Name"
         if (-not $ImportKeys.Add($Key)) {
             throw "Binding package required_imports contains duplicate import $Module.$Name."
         }
         $RequiredImports += [pscustomobject]@{
+            StableId = $StableId
+            Ordinal = $Ordinal
             Module = $Module
             Name = $Name
+            Signature = $Signature
         }
     }
     if ($RequiredImports.Count -eq 0) {

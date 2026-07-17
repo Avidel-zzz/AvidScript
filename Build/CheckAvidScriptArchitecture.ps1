@@ -325,6 +325,31 @@ foreach ($RequiredCaptureAddressContract in @(
         Add-Violation "C# Guest lowering is missing flow-captured address contract $RequiredCaptureAddressContract"
     }
 }
+$SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
+$SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
+$CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
+$CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
+foreach ($RequiredReachabilityContract in @(
+    'SemanticReachabilityProjector.Project',
+    'CurrentSchemaVersion = 5',
+    'CurrentSemanticVersion = "1.5"'
+)) {
+    if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
+        Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
+    }
+}
+foreach ($RequiredReachabilityProjection in @('export_roots', 'all_callables_compatibility', 'AssociatedSymbolId')) {
+    if (-not $SemanticReachabilitySource.Contains($RequiredReachabilityProjection)) {
+        Add-Violation "C# Semantic reachability is missing projection contract $RequiredReachabilityProjection"
+    }
+}
+if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
+    -not $CSharpBuildScriptSource.Contains('UsedBindingImports')) {
+    Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
+}
+if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
+    Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
+}
 $PluginDescriptorPath = Join-Path $PluginRoot 'AvidScript.uplugin'
 if (-not [System.IO.File]::Exists($PluginDescriptorPath)) {
     Add-Violation 'missing AvidScript.uplugin'
