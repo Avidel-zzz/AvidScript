@@ -38,12 +38,25 @@ public:
 		FString& OutManifestJson,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 
+	static bool EmitEngineGameplay(
+		FString& OutDescriptorJson,
+		FString& OutReferenceSource,
+		FString& OutManifestJson,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
 	static FString GetDefaultOutputRoot();
 
 	static bool PublishDefault(
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 
 	static bool PublishDefault(
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
+	static bool PublishEngineGameplay(
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
+	static bool PublishEngineGameplay(
 		const FString& OutputRoot,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 };

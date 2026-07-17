@@ -75,7 +75,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	const bool bBuildSucceeded = FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult);
 	TestTrue(
-		TEXT("Custom C# profile automatically publishes generated Phase 42 bindings"),
+		TEXT("Custom C# profile automatically publishes the engine gameplay bindings"),
 		bBuildSucceeded);
 	TestTrue(TEXT("Custom C# profile build result succeeds"), BuildResult.bSucceeded);
 	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 0);
@@ -113,9 +113,9 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Custom report marks generated bindings required"),
 		(*BindingPackageObject)->GetBoolField(TEXT("required")));
 	TestEqual(
-		TEXT("Custom report records the default generated package"),
+		TEXT("Custom report records the engine gameplay package"),
 		(*BindingPackageObject)->GetStringField(TEXT("package_name")),
-		FString(TEXT("avidscript.engine.core")));
+		FString(TEXT("avidscript.engine.gameplay")));
 	TestFalse(
 		TEXT("Custom report records a content-addressed package hash"),
 		(*BindingPackageObject)->GetStringField(TEXT("package_hash")).IsEmpty());

@@ -336,14 +336,14 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	if (bRequiresGeneratedBindingPackage && NormalizedConfig.BindingPackagePath.IsEmpty())
 	{
 		FAvidScriptCSharpBindingEmitResult BindingEmitResult;
-		if (!FAvidScriptEditorCSharpBindingEmitter::PublishDefault(BindingEmitResult))
+		if (!FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(BindingEmitResult))
 		{
 			SetAvidScriptCSharpBuildFailure(
 				BindingEmitResult.ErrorCategory.IsEmpty()
 					? FString(TEXT("binding_package_publish_failed"))
 					: BindingEmitResult.ErrorCategory,
 				BindingEmitResult.ErrorMessage.IsEmpty()
-					? FString(TEXT("Default generated C# binding package could not be published."))
+					? FString(TEXT("Engine gameplay C# binding package could not be published."))
 					: BindingEmitResult.ErrorMessage,
 				BindingEmitResult.NextAction.IsEmpty()
 					? FString(TEXT("repair the reflected binding selection and retry the custom C# build"))

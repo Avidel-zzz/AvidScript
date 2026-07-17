@@ -128,6 +128,130 @@ bool ExistingPackageMatches(
 	OutResult.ManifestPath = ManifestPath;
 	return true;
 }
+
+void SetPublishedPackageResult(
+	const FAvidScriptCSharpBindingEmitResult& EmitResult,
+	const FString& PackageDirectory,
+	const bool bReusedExistingPackage,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	OutResult = EmitResult;
+	OutResult.bReusedExistingPackage = bReusedExistingPackage;
+	OutResult.PackageDirectory = PackageDirectory;
+	OutResult.DescriptorPath = FPaths::Combine(PackageDirectory, BindingArtifact::DescriptorFileName);
+	OutResult.ReferenceSourcePath = FPaths::Combine(PackageDirectory, BindingArtifact::ReferenceSourceFileName);
+	OutResult.ManifestPath = FPaths::Combine(PackageDirectory, BindingArtifact::ManifestFileName);
+}
+
+bool PublishGeneratedPackage(
+	const FString& OutputRoot,
+	const FString& Descriptor,
+	const FString& Source,
+	const FString& Manifest,
+	const FAvidScriptCSharpBindingEmitResult& EmitResult,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	if (OutputRoot.IsEmpty())
+	{
+		SetFailure(
+			OutResult,
+			TEXT("output_root_missing"),
+			OutputRoot,
+			TEXT("Provide a writable generated binding package root."));
+		return false;
+	}
+
+	const FString FullOutputRoot = FPaths::ConvertRelativePathToFull(OutputRoot);
+	const FString PackageParent = FPaths::Combine(FullOutputRoot, EmitResult.PackageName);
+	const FString FinalDirectory = FPaths::Combine(PackageParent, EmitResult.ManifestHash);
+	if (IFileManager::Get().DirectoryExists(*FinalDirectory))
+	{
+		FAvidScriptCSharpBindingEmitResult ValidationResult;
+		if (!ExistingPackageMatches(FinalDirectory, Descriptor, Source, Manifest, ValidationResult))
+		{
+			OutResult = MoveTemp(ValidationResult);
+			return false;
+		}
+		SetPublishedPackageResult(EmitResult, FinalDirectory, true, OutResult);
+		return true;
+	}
+
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.CreateDirectoryTree(*PackageParent))
+	{
+		SetFailure(
+			OutResult,
+			TEXT("publish_directory_failed"),
+			PackageParent,
+			TEXT("Verify that the generated binding output root is writable."));
+		return false;
+	}
+	const FString StagingRoot = FPaths::Combine(FullOutputRoot, TEXT(".staging"));
+	const FString StagingDirectory = FPaths::Combine(
+		StagingRoot,
+		FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	if (!PlatformFile.CreateDirectoryTree(*StagingDirectory))
+	{
+		SetFailure(
+			OutResult,
+			TEXT("publish_directory_failed"),
+			StagingDirectory,
+			TEXT("Verify that the generated binding output root is writable."));
+		return false;
+	}
+
+	const FString StagedDescriptor = FPaths::Combine(StagingDirectory, BindingArtifact::DescriptorFileName);
+	const FString StagedSource = FPaths::Combine(StagingDirectory, BindingArtifact::ReferenceSourceFileName);
+	const FString StagedManifest = FPaths::Combine(StagingDirectory, BindingArtifact::ManifestFileName);
+	const bool bWroteAll = FFileHelper::SaveStringToFile(
+		Descriptor,
+		*StagedDescriptor,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
+		&& FFileHelper::SaveStringToFile(
+			Source,
+			*StagedSource,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
+		&& FFileHelper::SaveStringToFile(
+			Manifest,
+			*StagedManifest,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	if (!bWroteAll)
+	{
+		PlatformFile.DeleteDirectoryRecursively(*StagingDirectory);
+		SetFailure(
+			OutResult,
+			TEXT("publish_write_failed"),
+			StagingDirectory,
+			TEXT("Verify free space and write permissions, then publish again."));
+		return false;
+	}
+
+	// Platform files expose directory renames through MoveFile on supported editor hosts.
+	if (!PlatformFile.MoveFile(*FinalDirectory, *StagingDirectory))
+	{
+		PlatformFile.DeleteDirectoryRecursively(*StagingDirectory);
+		if (PlatformFile.DirectoryExists(*FinalDirectory))
+		{
+			FAvidScriptCSharpBindingEmitResult ValidationResult;
+			if (ExistingPackageMatches(FinalDirectory, Descriptor, Source, Manifest, ValidationResult))
+			{
+				SetPublishedPackageResult(EmitResult, FinalDirectory, true, OutResult);
+				return true;
+			}
+			OutResult = MoveTemp(ValidationResult);
+			return false;
+		}
+		SetFailure(
+			OutResult,
+			TEXT("publish_commit_failed"),
+			FinalDirectory,
+			TEXT("Close package readers and retry the content-addressed directory publish."));
+		return false;
+	}
+
+	SetPublishedPackageResult(EmitResult, FinalDirectory, false, OutResult);
+	return true;
+}
 } // namespace
 
 bool FAvidScriptEditorCSharpBindingEmitter::Emit(
@@ -231,6 +355,33 @@ bool FAvidScriptEditorCSharpBindingEmitter::EmitDefault(
 	return Emit(OutDescriptorJson, OutReferenceSource, OutManifestJson, OutResult);
 }
 
+bool FAvidScriptEditorCSharpBindingEmitter::EmitEngineGameplay(
+	FString& OutDescriptorJson,
+	FString& OutReferenceSource,
+	FString& OutManifestJson,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+		OutDescriptorJson,
+		SelectionResult,
+		DescriptorResult))
+	{
+		OutDescriptorJson.Empty();
+		OutReferenceSource.Empty();
+		OutManifestJson.Empty();
+		SetFailure(
+			OutResult,
+			DescriptorResult.ErrorCategory,
+			DescriptorResult.ErrorSource,
+			DescriptorResult.NextAction);
+		return false;
+	}
+	return Emit(OutDescriptorJson, OutReferenceSource, OutManifestJson, OutResult);
+}
+
 FString FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot()
 {
 	FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
@@ -250,126 +401,36 @@ bool FAvidScriptEditorCSharpBindingEmitter::PublishDefault(
 	const FString& OutputRoot,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
-	if (OutputRoot.IsEmpty())
-	{
-		SetFailure(
-			OutResult,
-			TEXT("output_root_missing"),
-			OutputRoot,
-			TEXT("Provide a writable generated binding package root."));
-		return false;
-	}
-
 	FString Descriptor;
 	FString Source;
 	FString Manifest;
-	if (!EmitDefault(Descriptor, Source, Manifest, OutResult))
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!EmitDefault(Descriptor, Source, Manifest, EmitResult))
 	{
+		OutResult = MoveTemp(EmitResult);
 		return false;
 	}
-	const FAvidScriptCSharpBindingEmitResult EmitResult = OutResult;
-	const FString FullOutputRoot = FPaths::ConvertRelativePathToFull(OutputRoot);
-	const FString PackageParent = FPaths::Combine(FullOutputRoot, EmitResult.PackageName);
-	const FString FinalDirectory = FPaths::Combine(PackageParent, EmitResult.ManifestHash);
-	if (IFileManager::Get().DirectoryExists(*FinalDirectory))
-	{
-		if (!ExistingPackageMatches(FinalDirectory, Descriptor, Source, Manifest, OutResult))
-		{
-			return false;
-		}
-		OutResult.bSucceeded = true;
-		OutResult.BindingCount = EmitResult.BindingCount;
-		OutResult.TypeCount = EmitResult.TypeCount;
-		OutResult.PackageName = EmitResult.PackageName;
-		OutResult.PackageHash = EmitResult.PackageHash;
-		OutResult.DescriptorHash = EmitResult.DescriptorHash;
-		OutResult.SourceHash = EmitResult.SourceHash;
-		OutResult.ManifestHash = EmitResult.ManifestHash;
-		return true;
-	}
+	return PublishGeneratedPackage(OutputRoot, Descriptor, Source, Manifest, EmitResult, OutResult);
+}
 
-	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-	if (!PlatformFile.CreateDirectoryTree(*PackageParent))
-	{
-		SetFailure(
-			OutResult,
-			TEXT("publish_directory_failed"),
-			PackageParent,
-			TEXT("Verify that the generated binding output root is writable."));
-		return false;
-	}
-	const FString StagingRoot = FPaths::Combine(FullOutputRoot, TEXT(".staging"));
-	const FString StagingDirectory = FPaths::Combine(
-		StagingRoot,
-		FGuid::NewGuid().ToString(EGuidFormats::Digits));
-	if (!PlatformFile.CreateDirectoryTree(*StagingDirectory))
-	{
-		SetFailure(
-			OutResult,
-			TEXT("publish_directory_failed"),
-			StagingDirectory,
-			TEXT("Verify that the generated binding output root is writable."));
-		return false;
-	}
+bool FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	return PublishEngineGameplay(GetDefaultOutputRoot(), OutResult);
+}
 
-	const FString StagedDescriptor = FPaths::Combine(StagingDirectory, BindingArtifact::DescriptorFileName);
-	const FString StagedSource = FPaths::Combine(StagingDirectory, BindingArtifact::ReferenceSourceFileName);
-	const FString StagedManifest = FPaths::Combine(StagingDirectory, BindingArtifact::ManifestFileName);
-	const bool bWroteAll = FFileHelper::SaveStringToFile(
-		Descriptor,
-		*StagedDescriptor,
-		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
-		&& FFileHelper::SaveStringToFile(
-			Source,
-			*StagedSource,
-			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
-		&& FFileHelper::SaveStringToFile(
-			Manifest,
-			*StagedManifest,
-			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-	if (!bWroteAll)
+bool FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	FString Descriptor;
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!EmitEngineGameplay(Descriptor, Source, Manifest, EmitResult))
 	{
-		PlatformFile.DeleteDirectoryRecursively(*StagingDirectory);
-		SetFailure(
-			OutResult,
-			TEXT("publish_write_failed"),
-			StagingDirectory,
-			TEXT("Verify free space and write permissions, then publish again."));
+		OutResult = MoveTemp(EmitResult);
 		return false;
 	}
-
-	// Platform files expose directory renames through MoveFile on supported editor hosts.
-	if (!PlatformFile.MoveFile(*FinalDirectory, *StagingDirectory))
-	{
-		PlatformFile.DeleteDirectoryRecursively(*StagingDirectory);
-		if (PlatformFile.DirectoryExists(*FinalDirectory))
-		{
-			if (ExistingPackageMatches(FinalDirectory, Descriptor, Source, Manifest, OutResult))
-			{
-				OutResult.bSucceeded = true;
-				OutResult.BindingCount = EmitResult.BindingCount;
-				OutResult.TypeCount = EmitResult.TypeCount;
-				OutResult.PackageName = EmitResult.PackageName;
-				OutResult.PackageHash = EmitResult.PackageHash;
-				OutResult.DescriptorHash = EmitResult.DescriptorHash;
-				OutResult.SourceHash = EmitResult.SourceHash;
-				OutResult.ManifestHash = EmitResult.ManifestHash;
-				return true;
-			}
-			return false;
-		}
-		SetFailure(
-			OutResult,
-			TEXT("publish_commit_failed"),
-			FinalDirectory,
-			TEXT("Close package readers and retry the content-addressed directory publish."));
-		return false;
-	}
-
-	OutResult = EmitResult;
-	OutResult.PackageDirectory = FinalDirectory;
-	OutResult.DescriptorPath = FPaths::Combine(FinalDirectory, BindingArtifact::DescriptorFileName);
-	OutResult.ReferenceSourcePath = FPaths::Combine(FinalDirectory, BindingArtifact::ReferenceSourceFileName);
-	OutResult.ManifestPath = FPaths::Combine(FinalDirectory, BindingArtifact::ManifestFileName);
-	return true;
+	return PublishGeneratedPackage(OutputRoot, Descriptor, Source, Manifest, EmitResult, OutResult);
 }

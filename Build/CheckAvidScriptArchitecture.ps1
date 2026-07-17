@@ -299,6 +299,32 @@ foreach ($LegacyBindingPath in @(
     }
 }
 
+$CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
+$CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
+foreach ($RequiredGameplayPackageContract in @(
+    'EmitEngineGameplay',
+    'PublishEngineGameplay',
+    'PublishGeneratedPackage'
+)) {
+    if (-not $CSharpBindingEmitterSource.Contains($RequiredGameplayPackageContract)) {
+        Add-Violation "C# binding emitter is missing gameplay package contract $RequiredGameplayPackageContract"
+    }
+}
+if (-not $CSharpBuildServiceSource.Contains('PublishEngineGameplay(BindingEmitResult)')) {
+    Add-Violation 'custom C# builds must default to the generated engine gameplay package'
+}
+$CSharpGuestContext = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpFunctionLoweringContext.cs'
+$CSharpOperationLowerer = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
+foreach ($RequiredCaptureAddressContract in @(
+    'TrackCaptureAddressTarget',
+    'TryGetCaptureAddressTarget',
+    'EmitStorageAddress'
+)) {
+    if (-not $CSharpGuestContext.Contains($RequiredCaptureAddressContract) -and
+        -not $CSharpOperationLowerer.Contains($RequiredCaptureAddressContract)) {
+        Add-Violation "C# Guest lowering is missing flow-captured address contract $RequiredCaptureAddressContract"
+    }
+}
 $PluginDescriptorPath = Join-Path $PluginRoot 'AvidScript.uplugin'
 if (-not [System.IO.File]::Exists($PluginDescriptorPath)) {
     Add-Violation 'missing AvidScript.uplugin'

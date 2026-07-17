@@ -8,12 +8,15 @@ internal static class CSharpGuestReferenceTests
 {
     private const string MethodId = "symbol:method:global::Game.Script.Bump(ref int32):void";
     private const string ParameterId = "symbol:parameter:bump:0";
+    private const string HostOutMethodId = "symbol:method:global::Game.Host.Write(out int32):int32";
+    private const string HostOutParameterId = "symbol:parameter:host-write:0";
     private static readonly string SemanticHash = new('c', 64);
 
     public static int Run()
     {
         ReferenceParameterReadsAndWritesAreIndirect();
-        return 1;
+        FlowCapturedReferenceParameterPreservesItsAddress();
+        return 2;
     }
 
     private static void ReferenceParameterReadsAndWritesAreIndirect()
@@ -69,6 +72,76 @@ internal static class CSharpGuestReferenceTests
             "reference parameter access should preserve its pointee type");
     }
 
+    private static void FlowCapturedReferenceParameterPreservesItsAddress()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticCallable wrapper = new(
+            MethodId,
+            "type:global::Game.Script",
+            "type:void",
+            new[] { new SemanticCallableParameter(0, ParameterId, "value", "type:int32", "ref") },
+            true,
+            false,
+            true,
+            null,
+            null,
+            null);
+        SemanticCallable hostOut = new(
+            HostOutMethodId,
+            "type:global::Game.Host",
+            "type:int32",
+            new[] { new SemanticCallableParameter(0, HostOutParameterId, "value", "type:int32", "out") },
+            true,
+            false,
+            false,
+            null,
+            new SemanticCallableImport("env", "host_write"),
+            null);
+        SemanticOperation parameter = CSharpGuestSemanticFixture.Operation(
+            "parameter_reference", "type:int32", ParameterId);
+        SemanticOperation capture = CSharpGuestSemanticFixture.Operation(
+            "flow_capture",
+            null,
+            children: new[] { parameter },
+            captureId: "capture:ref");
+        SemanticOperation captureReference = CSharpGuestSemanticFixture.Operation(
+            "flow_capture_reference",
+            "type:int32",
+            captureId: "capture:ref");
+        SemanticOperation invocation = CSharpGuestSemanticFixture.Operation(
+            "invocation",
+            "type:int32",
+            HostOutMethodId,
+            new[]
+            {
+                CSharpGuestSemanticFixture.Operation(
+                    "argument",
+                    null,
+                    HostOutParameterId,
+                    new[] { captureReference }),
+            });
+        SemanticDocument document = baseline with
+        {
+            Callables = baseline.Callables.Append(wrapper).Append(hostOut).ToArray(),
+            ControlFlowGraphs = baseline.ControlFlowGraphs.Append(
+                ReturnGraph(new[] { capture, invocation })).ToArray(),
+        };
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestFunction function = module.Functions.Single(item => item.Id == $"function:{MethodId}");
+        GuestInstruction call = function.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(item => item.Op == "call" && item.TargetId == $"import:{HostOutMethodId}");
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "flow-captured ref argument module should lower and validate");
+        Assert(call.OperandIds.Single() == function.Parameters.Single().Id,
+            "flow-captured ref argument should forward the caller address without a value copy");
+    }
     private static SemanticControlFlowGraph ReturnGraph(SemanticOperation[] operations)
     {
         SemanticControlFlowEdge entry = new(0, 1, "fallthrough", "regular");

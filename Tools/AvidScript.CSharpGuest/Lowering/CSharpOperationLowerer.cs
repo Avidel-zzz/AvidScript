@@ -228,6 +228,20 @@ internal static class CSharpOperationLowerer
             && operation.Children.Count == 1
                 ? operation.Children[0]
                 : operation;
+        if (target.Kind == "flow_capture_reference"
+            && context.TryGetCaptureAddressTarget(
+                target.CaptureId,
+                out GuestRegister capturedStorage,
+                out bool capturedStorageIsAddress))
+        {
+            return EmitStorageAddress(
+                context,
+                capturedStorage,
+                capturedStorageIsAddress,
+                blockOrdinal,
+                instructions);
+        }
+
         if (target.Kind is not ("local_reference" or "parameter_reference")
             || !context.TryGetStorage(target.SymbolId, out GuestRegister storage))
         {
@@ -235,9 +249,25 @@ internal static class CSharpOperationLowerer
             return null;
         }
 
-        if (target.Kind == "parameter_reference"
+        bool storageIsAddress = target.Kind == "parameter_reference"
             && context.TryGetParameter(target.SymbolId, out SemanticCallableParameter parameter)
-            && parameter.RefKind != "none")
+            && parameter.RefKind != "none";
+        return EmitStorageAddress(
+            context,
+            storage,
+            storageIsAddress,
+            blockOrdinal,
+            instructions);
+    }
+
+    private static GuestRegister? EmitStorageAddress(
+        CSharpFunctionLoweringContext context,
+        GuestRegister storage,
+        bool storageIsAddress,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (storageIsAddress)
         {
             return storage;
         }
@@ -252,7 +282,6 @@ internal static class CSharpOperationLowerer
             "address_of", address.Id, Array.Empty<string>(), storage.Id, null, null));
         return address;
     }
-
     public static GuestRegister? EmitCall(
         CSharpFunctionLoweringContext context,
         SemanticCallable callable,
@@ -417,6 +446,7 @@ internal static class CSharpOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
+        context.TrackCaptureAddressTarget(operation.CaptureId, operation.Children[0], blockOrdinal);
         GuestRegister? value = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         GuestRegister? capture = context.GetOrCreateCapture(
             operation.CaptureId,

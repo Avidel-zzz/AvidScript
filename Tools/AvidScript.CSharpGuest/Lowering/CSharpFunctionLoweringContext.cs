@@ -14,6 +14,7 @@ internal sealed class CSharpFunctionLoweringContext
     private readonly Dictionary<string, SemanticCallable> callablesBySymbol;
     private readonly Dictionary<string, SemanticCallableParameter> parametersBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, GuestRegister> capturesById = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CaptureAddressTarget> captureAddressTargetsById = new(StringComparer.Ordinal);
     private readonly List<GuestRegister> locals = new();
     private int nextTemporaryOrdinal;
 
@@ -143,6 +144,57 @@ internal sealed class CSharpFunctionLoweringContext
         return false;
     }
 
+    public void TrackCaptureAddressTarget(
+        string? captureId,
+        SemanticOperation source,
+        int blockOrdinal)
+    {
+        if (captureId is null)
+        {
+            return;
+        }
+
+        SemanticOperation target = source.Kind is "argument" or "declaration_expression"
+            && source.Children.Count == 1
+                ? source.Children[0]
+                : source;
+        if (target.Kind is not ("local_reference" or "parameter_reference")
+            || !TryGetStorage(target.SymbolId, out GuestRegister storage))
+        {
+            return;
+        }
+
+        bool isAlreadyAddress = target.Kind == "parameter_reference"
+            && TryGetParameter(target.SymbolId, out SemanticCallableParameter parameter)
+            && parameter.RefKind != "none";
+        CaptureAddressTarget candidate = new(storage, isAlreadyAddress);
+        if (captureAddressTargetsById.TryGetValue(captureId, out CaptureAddressTarget? existing)
+            && existing != candidate)
+        {
+            Add("ASCG1004", $"Block {blockOrdinal} flow capture '{captureId}' changed address target.");
+            return;
+        }
+
+        captureAddressTargetsById.TryAdd(captureId, candidate);
+    }
+
+    public bool TryGetCaptureAddressTarget(
+        string? captureId,
+        out GuestRegister storage,
+        out bool isAlreadyAddress)
+    {
+        if (captureId is not null
+            && captureAddressTargetsById.TryGetValue(captureId, out CaptureAddressTarget? target))
+        {
+            storage = target.Storage;
+            isAlreadyAddress = target.IsAlreadyAddress;
+            return true;
+        }
+
+        storage = null!;
+        isAlreadyAddress = false;
+        return false;
+    }
     public GuestRegister? GetOrCreateCapture(string? captureId, string? typeId, int blockOrdinal)
     {
         if (captureId is null)
@@ -247,6 +299,8 @@ internal sealed class CSharpFunctionLoweringContext
         constant = new GuestConstant(kind, value);
         return true;
     }
+    private sealed record CaptureAddressTarget(GuestRegister Storage, bool IsAlreadyAddress);
+
     public void Add(string code, string message)
     {
         Diagnostics.Add(new GuestDiagnostic(

@@ -361,9 +361,9 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		return false;
 	}
 	TestEqual(
-		TEXT("Generated package exposes eight reflected imports"),
+		TEXT("Generated gameplay package exposes every accepted reflected import"),
 		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
-		8);
+		115);
 
 	FString ManifestJson;
 	TSharedPtr<FJsonObject> ManifestObject;

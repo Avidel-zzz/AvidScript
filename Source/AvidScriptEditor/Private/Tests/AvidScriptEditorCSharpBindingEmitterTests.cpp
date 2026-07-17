@@ -111,6 +111,78 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest,
+	"AvidScript.Editor.CSharpBindingEmitter.GameplayProfile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FString& Parameters)
+{
+	FString DescriptorJson;
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Engine gameplay profile emits a complete C# facade"),
+		FAvidScriptEditorCSharpBindingEmitter::EmitEngineGameplay(
+			DescriptorJson,
+			Source,
+			Manifest,
+			EmitResult));
+	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 115);
+	TestEqual(
+		TEXT("Gameplay profile uses a stable package name"),
+		EmitResult.PackageName,
+		FString(TEXT("avidscript.engine.gameplay")));
+	TestFalse(TEXT("Gameplay profile C# source is not empty"), Source.IsEmpty());
+	TestFalse(TEXT("Gameplay profile manifest is not empty"), Manifest.IsEmpty());
+
+	FString RepeatedDescriptor;
+	FString RepeatedSource;
+	FString RepeatedManifest;
+	FAvidScriptCSharpBindingEmitResult RepeatedResult;
+	TestTrue(
+		TEXT("Repeated gameplay profile emission succeeds"),
+		FAvidScriptEditorCSharpBindingEmitter::EmitEngineGameplay(
+			RepeatedDescriptor,
+			RepeatedSource,
+			RepeatedManifest,
+			RepeatedResult));
+	TestEqual(TEXT("Gameplay descriptor bytes are deterministic"), RepeatedDescriptor, DescriptorJson);
+	TestEqual(TEXT("Gameplay facade bytes are deterministic"), RepeatedSource, Source);
+	TestEqual(TEXT("Gameplay manifest bytes are deterministic"), RepeatedManifest, Manifest);
+
+	TSharedPtr<FJsonObject> ManifestObject;
+	TestTrue(TEXT("Gameplay manifest parses"), ParseJsonObject(Manifest, ManifestObject));
+	if (ManifestObject.IsValid())
+	{
+		TestEqual(
+			TEXT("Gameplay manifest declares all reflected imports"),
+			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
+			115);
+	}
+
+	const FString OutputRoot = MakePackageTestRoot();
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+	FAvidScriptCSharpBindingEmitResult PublishResult;
+	TestTrue(
+		TEXT("Gameplay package publishes atomically"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(OutputRoot, PublishResult));
+	TestTrue(TEXT("Gameplay package descriptor exists"), FPaths::FileExists(PublishResult.DescriptorPath));
+	TestTrue(TEXT("Gameplay package facade exists"), FPaths::FileExists(PublishResult.ReferenceSourcePath));
+	TestTrue(TEXT("Gameplay package manifest exists"), FPaths::FileExists(PublishResult.ManifestPath));
+
+	FAvidScriptCSharpBindingEmitResult ReuseResult;
+	TestTrue(
+		TEXT("Repeated gameplay package publish succeeds"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(OutputRoot, ReuseResult));
+	TestTrue(TEXT("Repeated gameplay publish reuses immutable bytes"), ReuseResult.bReusedExistingPackage);
+	TestEqual(TEXT("Gameplay publish reuses the content address"), ReuseResult.PackageDirectory, PublishResult.PackageDirectory);
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpBindingEmitterProjectionTest,
 	"AvidScript.Editor.CSharpBindingEmitter.Projection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
