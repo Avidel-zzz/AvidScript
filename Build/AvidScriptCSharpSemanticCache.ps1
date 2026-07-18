@@ -924,6 +924,7 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 toolchain_fingerprint = [string]$Context.ToolchainFingerprint
             }
         }
+        $ExpectedEntryReportSha256 = Get-AvidScriptUtf8JsonSha256 $EntryReport
         $StagingEntryReportPath = Join-Path $StagingDirectory "entry.csharp.report.json"
         Write-AvidScriptSemanticCacheJson `
             -Path $StagingEntryReportPath `
@@ -942,7 +943,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -RootPath $ProjectRoot `
             -Path ([string]$StagingValidationReport.artifacts.semantic_file)
         Assert-AvidScriptCSharpSemanticCache `
-            -Condition ([int]$StagingValidationReport.schema_version -eq 1 -and
+            -Condition ((Get-AvidScriptUtf8JsonSha256 $StagingValidationReport) -ceq $ExpectedEntryReportSha256 -and
+                [int]$StagingValidationReport.schema_version -eq 1 -and
                 [string]$StagingValidationReport.language -ceq "csharp" -and
                 [string]$StagingValidationReport.result -ceq "direct_abi_built" -and
                 [bool]$StagingValidationReport.succeeded -and

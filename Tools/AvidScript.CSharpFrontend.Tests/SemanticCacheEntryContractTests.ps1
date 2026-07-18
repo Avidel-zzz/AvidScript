@@ -350,6 +350,57 @@ Assert-Condition ($StagedReportFaultCode -ceq "ASBI4502") `
 Assert-Condition (-not (Test-Path -LiteralPath $Context.EntryDirectory)) `
     "corrupt staged entry report created a content-addressed entry"
 
+$script:TamperedReportMoveCount = 0
+function Write-AvidScriptSemanticCacheJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Value
+    )
+
+    $Directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    if ((Split-Path -Leaf $Path) -ceq "entry.csharp.report.json") {
+        $Tampered = $Value | ConvertTo-Json -Depth 64 | ConvertFrom-Json
+        $Tampered.module_id = "poisoned"
+        $Tampered.artifacts | Add-Member -NotePropertyName "wasm_file" -NotePropertyValue "poisoned.wasm"
+        Write-JsonFile -Path $Path -Value $Tampered
+        return
+    }
+    Write-JsonFile -Path $Path -Value $Value
+}
+function Move-AvidScriptSemanticCacheDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    $script:TamperedReportMoveCount++
+    throw "Tampered staged report reached atomic publication."
+}
+$TamperedReportCode = ""
+try {
+    Publish-AvidScriptCSharpSemanticCacheEntry `
+        -Context $Context `
+        -ProjectRoot $ProjectRoot `
+        -ExpectedSourcePath $SourcePath `
+        -ExpectedAuthorizationPackage $AuthorizationPackage `
+        -SourceReportPath $SeedReportPath | Out-Null
+}
+catch {
+    $TamperedReportCode = [string]$_.Exception.Data["AvidScriptCode"]
+}
+finally {
+    Remove-Item -LiteralPath "Function:\Write-AvidScriptSemanticCacheJson" -Force
+    Remove-Item -LiteralPath "Function:\Move-AvidScriptSemanticCacheDirectory" -Force
+    . $CacheHelperPath
+}
+Assert-Condition ($TamperedReportCode -ceq "ASBI4502") `
+    "well-formed staged entry report tampering was not rejected"
+Assert-Condition ($script:TamperedReportMoveCount -eq 0) `
+    "well-formed staged entry report tampering reached atomic publication"
+Assert-Condition (-not (Test-Path -LiteralPath $Context.EntryDirectory)) `
+    "well-formed staged entry report tampering created a content-addressed entry"
+
 $Published = Publish-AvidScriptCSharpSemanticCacheEntry `
     -Context $Context `
     -ProjectRoot $ProjectRoot `
@@ -724,5 +775,5 @@ foreach ($TransientRoot in $TransientRoots) {
 }
 Assert-Condition ($TransientCachePaths.Count -eq 0) "semantic cache left validation or staging paths"
 
-Write-Output "AvidScript.CSharpFrontend.SemanticCacheEntryContracts: 24/24 passed"
+Write-Output "AvidScript.CSharpFrontend.SemanticCacheEntryContracts: 25/25 passed"
 exit 0
