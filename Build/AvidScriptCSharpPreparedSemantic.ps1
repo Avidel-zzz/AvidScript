@@ -167,7 +167,39 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Message "Prepared semantic report is missing binding_authorization."
 
     if ($null -eq $ExpectedAuthorizationPackage) {
-        $HasEmptyIdentity = -not [bool]$AuthorizationModel.required -and
+        $RequiredDefaultAuthorizationProperties = @(
+            "required",
+            "package_name",
+            "package_hash",
+            "manifest_file",
+            "manifest_sha256",
+            "descriptor_file",
+            "descriptor_sha256",
+            "reference_source_file",
+            "reference_source_sha256",
+            "profile_import_count",
+            "used_import_count",
+            "used_imports")
+        $AuthorizationPropertyNames = @($AuthorizationModel.PSObject.Properties.Name)
+        $HasCompleteShape = $AuthorizationModel -is [System.Management.Automation.PSCustomObject]
+        foreach ($PropertyName in $RequiredDefaultAuthorizationProperties) {
+            $HasCompleteShape = $HasCompleteShape -and ($AuthorizationPropertyNames -ccontains $PropertyName)
+        }
+        $HasExpectedTypes = $HasCompleteShape -and
+            $AuthorizationModel.required -is [bool] -and
+            $AuthorizationModel.package_name -is [string] -and
+            $AuthorizationModel.package_hash -is [string] -and
+            $AuthorizationModel.manifest_file -is [string] -and
+            $AuthorizationModel.manifest_sha256 -is [string] -and
+            $AuthorizationModel.descriptor_file -is [string] -and
+            $AuthorizationModel.descriptor_sha256 -is [string] -and
+            $AuthorizationModel.reference_source_file -is [string] -and
+            $AuthorizationModel.reference_source_sha256 -is [string] -and
+            ($AuthorizationModel.profile_import_count -is [int] -or $AuthorizationModel.profile_import_count -is [long]) -and
+            ($AuthorizationModel.used_import_count -is [int] -or $AuthorizationModel.used_import_count -is [long]) -and
+            $AuthorizationModel.used_imports -is [array]
+        $HasEmptyIdentity = $HasExpectedTypes -and
+            -not [bool]$AuthorizationModel.required -and
             [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.package_name) -and
             [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.package_hash) -and
             [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.manifest_file) -and

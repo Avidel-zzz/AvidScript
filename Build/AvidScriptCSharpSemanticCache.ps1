@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
 $BuildDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$AvidScriptSemanticCachePluginRoot = Split-Path -Parent $BuildDir
 . (Join-Path $BuildDir "AvidScriptCSharpPreparedSemantic.ps1")
 
 function Fail-AvidScriptCSharpSemanticCache {
@@ -281,6 +282,11 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         Enabled = $true
         CacheKey = $CacheKey
         ToolchainFingerprint = [string]$Toolchain.Sha256
+        PluginRoot = $PluginRootFullPath
+        ProjectRoot = $ProjectRootFullPath
+        Configuration = $Configuration
+        SourcePath = $SourceFullPath
+        ProjectPath = $ProjectFullPath
         DotNetSdkVersion = [string]$Toolchain.DotNetSdkVersion
         CacheRoot = $CacheRootFullPath
         EntryDirectory = $EntryDirectory
@@ -388,6 +394,131 @@ function Remove-AvidScriptSemanticCacheDirectory {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
 }
 
+function Test-AvidScriptSemanticCachePathEqualOrContained {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    $RootFullPath = Get-AvidScriptBindingFullPath $RootPath
+    $CandidateFullPath = Get-AvidScriptBindingFullPath $CandidatePath
+    $ContainedPrefix = $RootFullPath.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    return $RootFullPath.Equals($CandidateFullPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $CandidateFullPath.StartsWith($ContainedPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-AvidScriptSemanticCachePathWithoutReparsePoint {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $FullPath = Get-AvidScriptBindingFullPath $Path
+    $PathRoot = [System.IO.Path]::GetPathRoot($FullPath)
+    $CurrentPath = $PathRoot
+    foreach ($Segment in @(($FullPath.Substring($PathRoot.Length)) -split '[\\/]')) {
+        if ([string]::IsNullOrWhiteSpace($Segment)) {
+            continue
+        }
+        $CurrentPath = Join-Path $CurrentPath $Segment
+        if (Test-Path -LiteralPath $CurrentPath) {
+            try {
+                $Attributes = [System.IO.File]::GetAttributes($CurrentPath)
+            }
+            catch {
+                return $false
+            }
+            if (($Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return $false
+            }
+        }
+    }
+    return $true
+}
+
+function Assert-AvidScriptSemanticCacheDestinations {
+    param(
+        [Parameter(Mandatory = $true)][string]$CacheRoot,
+        [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
+        [Parameter(Mandatory = $true)][string]$SemanticDestinationPath
+    )
+
+    $FrontendDestination = Get-AvidScriptBindingFullPath $FrontendDestinationPath
+    $SemanticDestination = Get-AvidScriptBindingFullPath $SemanticDestinationPath
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition (-not $FrontendDestination.Equals(
+                $SemanticDestination,
+                [System.StringComparison]::OrdinalIgnoreCase)) `
+        -Code "ASBI4503" `
+        -Message "Semantic cache Frontend and Semantic destinations must be different files."
+    foreach ($Destination in @($FrontendDestination, $SemanticDestination)) {
+        Assert-AvidScriptCSharpSemanticCache `
+            -Condition (Test-AvidScriptSemanticCachePathWithoutReparsePoint -Path $Destination) `
+            -Code "ASBI4503" `
+            -Message "Semantic cache import destination must not traverse a reparse point."
+        Assert-AvidScriptCSharpSemanticCache `
+            -Condition (-not (Test-AvidScriptSemanticCachePathEqualOrContained `
+                -RootPath $CacheRoot `
+                -CandidatePath $Destination)) `
+            -Code "ASBI4503" `
+            -Message "Semantic cache import destination must not overlap cache ownership."
+    }
+}
+
+function Enter-AvidScriptSemanticCacheKeyLock {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [int]$TimeoutMilliseconds = 15000
+    )
+
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ($TimeoutMilliseconds -ge 0) `
+        -Code "ASBI4504" `
+        -Message "Semantic cache key lock timeout must be non-negative."
+    $CacheRoot = Get-AvidScriptBindingFullPath ([string]$Context.CacheRoot)
+    $LockRoot = Join-Path $CacheRoot "Locks"
+    try {
+        New-Item -ItemType Directory -Force -Path $LockRoot | Out-Null
+    }
+    catch {
+        Fail-AvidScriptCSharpSemanticCache `
+            -Code "ASBI4504" `
+            -Message "Semantic cache key lock directory could not be created: $($_.Exception.Message)"
+    }
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition (Test-AvidScriptBindingPathContained -RootPath $CacheRoot -CandidatePath $LockRoot) `
+        -Code "ASBI4503" `
+        -Message "Semantic cache key lock directory escapes cache ownership."
+    $LockPath = Join-Path $LockRoot ("$($Context.CacheKey).lock")
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ((Test-AvidScriptBindingPathContained -RootPath $CacheRoot -CandidatePath $LockPath) -and
+            (Test-AvidScriptSemanticCachePathWithoutReparsePoint -Path $LockPath)) `
+        -Code "ASBI4503" `
+        -Message "Semantic cache key lock path escapes cache ownership or traverses a reparse point."
+    $Deadline = [System.DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ($true) {
+        try {
+            return [System.IO.File]::Open(
+                $LockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+        }
+        catch [System.IO.IOException] {
+            if ([System.DateTime]::UtcNow -ge $Deadline) {
+                Fail-AvidScriptCSharpSemanticCache `
+                    -Code "ASBI4504" `
+                    -Message "Timed out acquiring semantic cache key lock."
+            }
+            [System.Threading.Thread]::Sleep(25)
+        }
+        catch {
+            Fail-AvidScriptCSharpSemanticCache `
+                -Code "ASBI4504" `
+                -Message "Semantic cache key lock acquisition failed: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Move-AvidScriptCSharpSemanticCacheCorruptEntry {
     param([Parameter(Mandatory = $true)]$Context)
 
@@ -450,12 +581,22 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
         [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
         [AllowNull()][object]$ExpectedAuthorizationPackage,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
-        [Parameter(Mandatory = $true)][string]$SemanticDestinationPath
+        [Parameter(Mandatory = $true)][string]$SemanticDestinationPath,
+        [AllowNull()][object]$CacheLock
     )
 
     $CanIsolate = $false
+    $OwnedCacheLock = $null
     try {
         Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
+        Assert-AvidScriptSemanticCacheDestinations `
+            -CacheRoot ([string]$Context.CacheRoot) `
+            -FrontendDestinationPath $FrontendDestinationPath `
+            -SemanticDestinationPath $SemanticDestinationPath
+        if ($null -eq $CacheLock) {
+            $OwnedCacheLock = Enter-AvidScriptSemanticCacheKeyLock -Context $Context
+            $CacheLock = $OwnedCacheLock
+        }
         $EntryDirectory = Get-AvidScriptBindingFullPath ([string]$Context.EntryDirectory)
         $EntryReportPath = Get-AvidScriptBindingFullPath ([string]$Context.EntryReportPath)
         if (-not (Test-Path -LiteralPath $EntryDirectory)) {
@@ -559,6 +700,89 @@ function Import-AvidScriptCSharpSemanticCacheEntry {
             CorruptEntryPath = [string]$CorruptEntryPath
         }
     }
+    finally {
+        if ($null -ne $OwnedCacheLock) {
+            $OwnedCacheLock.Dispose()
+        }
+    }
+}
+
+function Assert-AvidScriptSemanticCachePublicationContext {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
+        [AllowNull()][object]$ExpectedAuthorizationPackage,
+        [Parameter(Mandatory = $true)][string]$SourceReportPath
+    )
+
+    Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
+    foreach ($RequiredProperty in @(
+        "PluginRoot",
+        "ProjectRoot",
+        "Configuration",
+        "SourcePath",
+        "ProjectPath")) {
+        Assert-AvidScriptCSharpSemanticCache `
+            -Condition (-not [string]::IsNullOrWhiteSpace([string]$Context.$RequiredProperty)) `
+            -Code "ASBI4502" `
+            -Message "Semantic cache publication context is missing $RequiredProperty."
+    }
+
+    $ProjectRootFullPath = Get-AvidScriptBindingFullPath $ProjectRoot
+    $ExpectedSourceFullPath = Get-AvidScriptBindingFullPath $ExpectedSourcePath
+    $ContextPluginRoot = Get-AvidScriptBindingFullPath ([string]$Context.PluginRoot)
+    $ContextProjectRoot = Get-AvidScriptBindingFullPath ([string]$Context.ProjectRoot)
+    $ContextSourcePath = Get-AvidScriptBindingFullPath ([string]$Context.SourcePath)
+    $ContextProjectPath = Get-AvidScriptBindingFullPath ([string]$Context.ProjectPath)
+    $ExpectedPluginRoot = Get-AvidScriptBindingFullPath $AvidScriptSemanticCachePluginRoot
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ($ContextPluginRoot.Equals($ExpectedPluginRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+            $ContextProjectRoot.Equals($ProjectRootFullPath, [System.StringComparison]::OrdinalIgnoreCase) -and
+            $ContextSourcePath.Equals($ExpectedSourceFullPath, [System.StringComparison]::OrdinalIgnoreCase)) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache publication context ownership differs from the active build."
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition (Test-Path -LiteralPath $ContextProjectPath -PathType Leaf) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache publication project file is missing."
+
+    $SourceReport = Read-AvidScriptSemanticCacheJson `
+        -Path $SourceReportPath `
+        -Label "Semantic cache source report"
+    $ReportProjectPath = Resolve-AvidScriptBindingPath `
+        -RootPath $ProjectRootFullPath `
+        -Path ([string]$SourceReport.source.project)
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ($ReportProjectPath.Equals($ContextProjectPath, [System.StringComparison]::OrdinalIgnoreCase)) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache source report project differs from the publication context."
+
+    $RecomputedContext = Get-AvidScriptCSharpSemanticCacheContext `
+        -PluginRoot $ExpectedPluginRoot `
+        -ProjectRoot $ProjectRootFullPath `
+        -CacheRoot ([string]$Context.CacheRoot) `
+        -Configuration ([string]$Context.Configuration) `
+        -SourcePath $ExpectedSourceFullPath `
+        -ProjectPath $ContextProjectPath `
+        -AuthorizationPackage $ExpectedAuthorizationPackage
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ([string]$RecomputedContext.CacheKey -ceq [string]$Context.CacheKey -and
+            [string]$RecomputedContext.ToolchainFingerprint -ceq [string]$Context.ToolchainFingerprint) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache publication context is stale for the current inputs or toolchain."
+
+    $SourceCacheIdentity = $SourceReport.semantic_cache
+    Assert-AvidScriptCSharpSemanticCache `
+        -Condition ($null -ne $SourceCacheIdentity -and
+            [int]$SourceCacheIdentity.schema_version -eq 1 -and
+            (Test-AvidScriptBindingSha256 ([string]$SourceCacheIdentity.key)) -and
+            (Test-AvidScriptBindingSha256 ([string]$SourceCacheIdentity.toolchain_fingerprint)) -and
+            [string]$SourceCacheIdentity.key -ceq [string]$RecomputedContext.CacheKey -and
+            [string]$SourceCacheIdentity.toolchain_fingerprint -ceq [string]$RecomputedContext.ToolchainFingerprint) `
+        -Code "ASBI4502" `
+        -Message "Semantic cache source report identity differs from the recomputed publication context."
+    return $SourceReport
 }
 
 function Publish-AvidScriptCSharpSemanticCacheEntry {
@@ -570,19 +794,35 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
         [Parameter(Mandatory = $true)][string]$SourceReportPath
     )
 
-    Assert-AvidScriptSemanticCacheContext -Context $Context -ProjectRoot $ProjectRoot
+    $PublicationResult = $null
+    $CacheLock = $null
+    $ValidationDirectory = $null
+    $StagingDirectory = $null
     $CacheRoot = Get-AvidScriptBindingFullPath ([string]$Context.CacheRoot)
     $EntryDirectory = Get-AvidScriptBindingFullPath ([string]$Context.EntryDirectory)
     $ShardDirectory = Split-Path -Parent $EntryDirectory
-    New-Item -ItemType Directory -Force -Path $ShardDirectory | Out-Null
     $TransactionId = "$PID.$([System.Guid]::NewGuid().ToString('N'))"
-    $ValidationDirectory = Join-Path $CacheRoot ".validation.$TransactionId"
+    $TransactionRoot = Join-Path `
+        (Get-AvidScriptBindingFullPath $ProjectRoot) `
+        "Intermediate\AvidScript\SemanticCacheTransactions"
+    $ValidationDirectory = Join-Path $TransactionRoot ".validation.$TransactionId"
     $ValidationFrontendPath = Join-Path $ValidationDirectory "source.frontend.json"
     $ValidationSemanticPath = Join-Path $ValidationDirectory "source.semantic.json"
     $StagingDirectory = Join-Path $ShardDirectory ".staging.$TransactionId"
 
-    $PublicationResult = $null
     try {
+        $SourceReport = Assert-AvidScriptSemanticCachePublicationContext `
+            -Context $Context `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+            -SourceReportPath $SourceReportPath
+        $SourceReportSha256 = Get-AvidScriptBindingSha256Hex $SourceReportPath
+        New-Item -ItemType Directory -Force -Path $ShardDirectory | Out-Null
+        Assert-AvidScriptSemanticCacheDestinations `
+            -CacheRoot $CacheRoot `
+            -FrontendDestinationPath $ValidationFrontendPath `
+            -SemanticDestinationPath $ValidationSemanticPath
         try {
             $Prepared = Import-AvidScriptCSharpPreparedSemantic `
                 -PreparedReportPath $SourceReportPath `
@@ -598,6 +838,18 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -Message "Source report is not eligible for semantic cache publication: $($_.Exception.Message)"
         }
 
+        $SourceReport = Assert-AvidScriptSemanticCachePublicationContext `
+            -Context $Context `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+            -SourceReportPath $SourceReportPath
+        Assert-AvidScriptCSharpSemanticCache `
+            -Condition ((Get-AvidScriptBindingSha256Hex $SourceReportPath) -ceq $SourceReportSha256) `
+            -Code "ASBI4502" `
+            -Message "Semantic cache source report changed during publication validation."
+        $CacheLock = Enter-AvidScriptSemanticCacheKeyLock -Context $Context
+
         if (Test-Path -LiteralPath $EntryDirectory) {
             $Winner = Import-AvidScriptCSharpSemanticCacheEntry `
                 -Context $Context `
@@ -605,7 +857,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 -ExpectedSourcePath $ExpectedSourcePath `
                 -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
                 -FrontendDestinationPath (Join-Path $ValidationDirectory "winner.frontend.json") `
-                -SemanticDestinationPath (Join-Path $ValidationDirectory "winner.semantic.json")
+                -SemanticDestinationPath (Join-Path $ValidationDirectory "winner.semantic.json") `
+                -CacheLock $CacheLock
             if ($Winner.Status -ceq "hit") {
                 $PublicationResult = [pscustomobject]@{
                     Published = $false
@@ -630,7 +883,6 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
         $StagingSemanticPath = Join-Path $StagingDirectory "semantic.model.json"
         Copy-Item -LiteralPath $ValidationFrontendPath -Destination $StagingFrontendPath
         Copy-Item -LiteralPath $ValidationSemanticPath -Destination $StagingSemanticPath
-        $SourceReport = Read-AvidScriptSemanticCacheJson -Path $SourceReportPath -Label "Semantic cache source report"
         $EntryReport = [ordered]@{
             schema_version = 1
             language = "csharp"
@@ -672,9 +924,71 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
                 toolchain_fingerprint = [string]$Context.ToolchainFingerprint
             }
         }
+        $StagingEntryReportPath = Join-Path $StagingDirectory "entry.csharp.report.json"
         Write-AvidScriptSemanticCacheJson `
-            -Path (Join-Path $StagingDirectory "entry.csharp.report.json") `
+            -Path $StagingEntryReportPath `
             -Value $EntryReport
+
+        $StagingValidationReport = Read-AvidScriptSemanticCacheJson `
+            -Path $StagingEntryReportPath `
+            -Label "Staged semantic cache entry report"
+        $StagedOutputRoot = Resolve-AvidScriptBindingPath `
+            -RootPath $ProjectRoot `
+            -Path ([string]$StagingValidationReport.output_root)
+        $StagedFrontendReportPath = Resolve-AvidScriptBindingPath `
+            -RootPath $ProjectRoot `
+            -Path ([string]$StagingValidationReport.artifacts.frontend_file)
+        $StagedSemanticReportPath = Resolve-AvidScriptBindingPath `
+            -RootPath $ProjectRoot `
+            -Path ([string]$StagingValidationReport.artifacts.semantic_file)
+        Assert-AvidScriptCSharpSemanticCache `
+            -Condition ([int]$StagingValidationReport.schema_version -eq 1 -and
+                [string]$StagingValidationReport.language -ceq "csharp" -and
+                [string]$StagingValidationReport.result -ceq "direct_abi_built" -and
+                [bool]$StagingValidationReport.succeeded -and
+                $StagedOutputRoot.Equals($EntryDirectory, [System.StringComparison]::OrdinalIgnoreCase) -and
+                $StagedFrontendReportPath.Equals(
+                    (Join-Path $EntryDirectory "semantic.frontend.json"),
+                    [System.StringComparison]::OrdinalIgnoreCase) -and
+                $StagedSemanticReportPath.Equals(
+                    (Join-Path $EntryDirectory "semantic.model.json"),
+                    [System.StringComparison]::OrdinalIgnoreCase) -and
+                (Get-AvidScriptUtf8JsonSha256 $StagingValidationReport.source) -ceq
+                    (Get-AvidScriptUtf8JsonSha256 $SourceReport.source) -and
+                (Get-AvidScriptUtf8JsonSha256 $StagingValidationReport.binding_authorization) -ceq
+                    (Get-AvidScriptUtf8JsonSha256 $SourceReport.binding_authorization) -and
+                [string]$StagingValidationReport.frontend.artifact_sha256 -ceq
+                    (Get-AvidScriptBindingSha256Hex $StagingFrontendPath) -and
+                [string]$StagingValidationReport.semantic.artifact_sha256 -ceq
+                    (Get-AvidScriptBindingSha256Hex $StagingSemanticPath) -and
+                [int]$StagingValidationReport.semantic_cache.schema_version -eq 1 -and
+                [string]$StagingValidationReport.semantic_cache.key -ceq [string]$Context.CacheKey -and
+                [string]$StagingValidationReport.semantic_cache.toolchain_fingerprint -ceq
+                    [string]$Context.ToolchainFingerprint) `
+            -Code "ASBI4502" `
+            -Message "Staged semantic cache entry report bytes failed publication validation."
+        $StagingValidationReport.output_root = Convert-ToAvidScriptSemanticCacheReportPath `
+            -ProjectRoot $ProjectRoot `
+            -Path $StagingDirectory `
+            -FieldName "semantic cache staging output root"
+        $StagingValidationReport.artifacts.frontend_file = Convert-ToAvidScriptSemanticCacheReportPath `
+            -ProjectRoot $ProjectRoot `
+            -Path $StagingFrontendPath `
+            -FieldName "semantic cache staging frontend artifact"
+        $StagingValidationReport.artifacts.semantic_file = Convert-ToAvidScriptSemanticCacheReportPath `
+            -ProjectRoot $ProjectRoot `
+            -Path $StagingSemanticPath `
+            -FieldName "semantic cache staging semantic artifact"
+        $StagingValidationReportPath = Join-Path $StagingDirectory ".staging-validation.csharp.report.json"
+        Write-AvidScriptSemanticCacheJson -Path $StagingValidationReportPath -Value $StagingValidationReport
+        Import-AvidScriptCSharpPreparedSemantic `
+            -PreparedReportPath $StagingValidationReportPath `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $ExpectedSourcePath `
+            -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
+            -FrontendDestinationPath (Join-Path $ValidationDirectory "staging.frontend.json") `
+            -SemanticDestinationPath (Join-Path $ValidationDirectory "staging.semantic.json") | Out-Null
+        Remove-Item -LiteralPath $StagingValidationReportPath -Force -ErrorAction Stop
 
         $WonPublication = $true
         try {
@@ -697,7 +1011,8 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
             -ExpectedSourcePath $ExpectedSourcePath `
             -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage `
             -FrontendDestinationPath (Join-Path $ValidationDirectory "published.frontend.json") `
-            -SemanticDestinationPath (Join-Path $ValidationDirectory "published.semantic.json")
+            -SemanticDestinationPath (Join-Path $ValidationDirectory "published.semantic.json") `
+            -CacheLock $CacheLock
         if ($PublishedEntry.Status -cne "hit") {
             Fail-AvidScriptCSharpSemanticCache `
                 -Code "ASBI4504" `
@@ -713,16 +1028,34 @@ function Publish-AvidScriptCSharpSemanticCacheEntry {
         }
         return $PublicationResult
     }
+    catch {
+        $StructuredCode = [string]$_.Exception.Data["AvidScriptCode"]
+        if ($StructuredCode.StartsWith("ASBI45", [System.StringComparison]::Ordinal)) {
+            throw
+        }
+        Fail-AvidScriptCSharpSemanticCache `
+            -Code "ASBI4504" `
+            -Message "Semantic cache entry publication failed: $($_.Exception.Message)"
+    }
     finally {
         $CleanupFailures = @()
         foreach ($CleanupDirectory in @($ValidationDirectory, $StagingDirectory)) {
-            if (Test-Path -LiteralPath $CleanupDirectory -PathType Container) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$CleanupDirectory) -and
+                (Test-Path -LiteralPath $CleanupDirectory -PathType Container)) {
                 try {
                     Remove-AvidScriptSemanticCacheDirectory -Path $CleanupDirectory
                 }
                 catch {
                     $CleanupFailures += $_.Exception.Message
                 }
+            }
+        }
+        if ($null -ne $CacheLock) {
+            try {
+                $CacheLock.Dispose()
+            }
+            catch {
+                $CleanupFailures += $_.Exception.Message
             }
         }
         if ($CleanupFailures.Count -gt 0) {

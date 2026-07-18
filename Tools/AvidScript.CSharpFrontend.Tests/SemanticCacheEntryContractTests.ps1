@@ -10,6 +10,7 @@ $PreparedHelperPath = Join-Path $PluginRoot "Build\AvidScriptCSharpPreparedSeman
 $RunRoot = Join-Path $PluginRoot "Saved\AvidScriptFrontendDotNet\SemanticCacheEntryContracts"
 $CacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\SemanticCacheEntryContracts\v1"
 $CorruptRoot = Join-Path $CacheRoot "Corrupt"
+$TransactionRoot = Join-Path $ProjectRoot "Intermediate\AvidScript\SemanticCacheTransactions"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 
 function Assert-Condition {
@@ -211,6 +212,96 @@ $Context = Get-AvidScriptCSharpSemanticCacheContext `
     -ProjectPath $ProjectPath `
     -AuthorizationPackage $AuthorizationPackage
 
+$SeedReport.semantic_cache = [ordered]@{
+    schema_version = 1
+    key = [string]$Context.CacheKey
+    toolchain_fingerprint = [string]$Context.ToolchainFingerprint
+}
+Write-JsonFile -Path $SeedReportPath -Value $SeedReport
+
+Assert-Condition ($null -ne (Get-Command "Enter-AvidScriptSemanticCacheKeyLock" -ErrorAction SilentlyContinue)) `
+    "semantic cache key lock helper is missing"
+$FirstKeyLock = Enter-AvidScriptSemanticCacheKeyLock -Context $Context -TimeoutMilliseconds 1000
+$SecondLockCode = ""
+try {
+    try {
+        Enter-AvidScriptSemanticCacheKeyLock -Context $Context -TimeoutMilliseconds 50 | Out-Null
+    }
+    catch {
+        $SecondLockCode = [string]$_.Exception.Data["AvidScriptCode"]
+    }
+}
+finally {
+    $FirstKeyLock.Dispose()
+}
+Assert-Condition ($SecondLockCode -ceq "ASBI4504") "semantic cache key lock did not enforce exclusive ownership"
+
+$LockRoot = Join-Path $CacheRoot "Locks"
+$LockPath = Join-Path $LockRoot "$($Context.CacheKey).lock"
+if (Test-Path -LiteralPath $LockPath) {
+    [System.IO.File]::Delete($LockPath)
+}
+$ExternalLockTarget = Join-Path $RunRoot "LockEscape\external.lock"
+Write-Utf8File -Path $ExternalLockTarget -Text "external-lock-target"
+try {
+    New-Item -ItemType SymbolicLink -Path $LockPath -Target $ExternalLockTarget | Out-Null
+}
+catch {
+    if ([string]$_.FullyQualifiedErrorId -notmatch 'NewItemSymbolicLinkElevationRequired') {
+        throw
+    }
+    New-Item `
+        -ItemType Junction `
+        -Path $LockPath `
+        -Target (Split-Path -Parent $ExternalLockTarget) | Out-Null
+}
+$LockEscapeCode = ""
+try {
+    Enter-AvidScriptSemanticCacheKeyLock -Context $Context -TimeoutMilliseconds 50 | Out-Null
+}
+catch {
+    $LockEscapeCode = [string]$_.Exception.Data["AvidScriptCode"]
+}
+finally {
+    if (Test-Path -LiteralPath $LockPath) {
+        $LockAttributes = [System.IO.File]::GetAttributes($LockPath)
+        if (($LockAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+            [System.IO.Directory]::Delete($LockPath)
+        }
+        else {
+            [System.IO.File]::Delete($LockPath)
+        }
+    }
+}
+Assert-Condition ($LockEscapeCode -ceq "ASBI4503") `
+    "semantic cache key lock accepted a file symlink escape"
+Assert-Condition ((Get-Content -Raw -LiteralPath $ExternalLockTarget) -ceq "external-lock-target") `
+    "semantic cache key lock modified its symlink target"
+
+$MismatchedContext = $Context | ConvertTo-Json -Depth 64 | ConvertFrom-Json
+$MismatchedContext.CacheKey = ("d" * 64)
+$MismatchedContext.EntryDirectory = Join-Path (Join-Path $CacheRoot "dd") $MismatchedContext.CacheKey
+$MismatchedContext.EntryReportPath = Join-Path $MismatchedContext.EntryDirectory "entry.csharp.report.json"
+$MismatchedContextCode = ""
+try {
+    Publish-AvidScriptCSharpSemanticCacheEntry `
+        -Context $MismatchedContext `
+        -ProjectRoot $ProjectRoot `
+        -ExpectedSourcePath $SourcePath `
+        -ExpectedAuthorizationPackage $AuthorizationPackage `
+        -SourceReportPath $SeedReportPath | Out-Null
+}
+catch {
+    $MismatchedContextCode = [string]$_.Exception.Data["AvidScriptCode"]
+}
+finally {
+    if (Test-Path -LiteralPath $MismatchedContext.EntryDirectory) {
+        Remove-Item -LiteralPath $MismatchedContext.EntryDirectory -Recurse -Force
+    }
+}
+Assert-Condition ($MismatchedContextCode -ceq "ASBI4502") `
+    "source report was published under a mismatched cache context"
+
 $MissFrontendPath = Join-Path $RunRoot "Miss\miss.frontend.json"
 $MissSemanticPath = Join-Path $RunRoot "Miss\miss.semantic.json"
 $Miss = Import-AvidScriptCSharpSemanticCacheEntry `
@@ -223,6 +314,41 @@ $Miss = Import-AvidScriptCSharpSemanticCacheEntry `
 Assert-Condition ($Miss.Status -ceq "miss") "missing entry did not return miss"
 Assert-Condition (-not (Test-Path -LiteralPath $MissFrontendPath)) "cache miss copied frontend"
 Assert-Condition (-not (Test-Path -LiteralPath $MissSemanticPath)) "cache miss copied semantic"
+
+function Write-AvidScriptSemanticCacheJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Value
+    )
+
+    $Directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    if ((Split-Path -Leaf $Path) -ceq "entry.csharp.report.json") {
+        [System.IO.File]::WriteAllText($Path, '{"corrupt":', $Utf8)
+        return
+    }
+    Write-JsonFile -Path $Path -Value $Value
+}
+$StagedReportFaultCode = ""
+try {
+    Publish-AvidScriptCSharpSemanticCacheEntry `
+        -Context $Context `
+        -ProjectRoot $ProjectRoot `
+        -ExpectedSourcePath $SourcePath `
+        -ExpectedAuthorizationPackage $AuthorizationPackage `
+        -SourceReportPath $SeedReportPath | Out-Null
+}
+catch {
+    $StagedReportFaultCode = [string]$_.Exception.Data["AvidScriptCode"]
+}
+finally {
+    Remove-Item -LiteralPath "Function:\Write-AvidScriptSemanticCacheJson" -Force
+    . $CacheHelperPath
+}
+Assert-Condition ($StagedReportFaultCode -ceq "ASBI4502") `
+    "corrupt staged entry report bytes reached atomic publication"
+Assert-Condition (-not (Test-Path -LiteralPath $Context.EntryDirectory)) `
+    "corrupt staged entry report created a content-addressed entry"
 
 $Published = Publish-AvidScriptCSharpSemanticCacheEntry `
     -Context $Context `
@@ -256,6 +382,76 @@ Assert-Condition ((Get-AvidScriptBindingSha256Hex $HitFrontendPath) -ceq (Get-Av
     "cache hit frontend bytes differ"
 Assert-Condition ((Get-AvidScriptBindingSha256Hex $HitSemanticPath) -ceq (Get-AvidScriptBindingSha256Hex $SeedSemanticPath)) `
     "cache hit semantic bytes differ"
+
+$ExternalOutputParent = Join-Path ([System.IO.Path]::GetPathRoot($ProjectRoot)) "tmp"
+$ExternalOutputRoot = Join-Path $ExternalOutputParent "AvidScriptSemanticCacheEntryContracts.$PID"
+$ExternalOutputFullPath = [System.IO.Path]::GetFullPath($ExternalOutputRoot)
+Assert-Condition (-not $ExternalOutputFullPath.StartsWith(
+        ([System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd("\") + "\"),
+        [System.StringComparison]::OrdinalIgnoreCase)) `
+    "external output fixture unexpectedly belongs to the Unreal project"
+$ExternalHitFrontendPath = Join-Path $ExternalOutputFullPath "external.frontend.json"
+$ExternalHitSemanticPath = Join-Path $ExternalOutputFullPath "external.semantic.json"
+Assert-AvidScriptSemanticCacheDestinations `
+    -CacheRoot $CacheRoot `
+    -FrontendDestinationPath $ExternalHitFrontendPath `
+    -SemanticDestinationPath $ExternalHitSemanticPath
+$ExternalOutputWritable = $true
+try {
+    New-Item -ItemType Directory -Force -Path $ExternalOutputFullPath | Out-Null
+    $ExternalProbePath = Join-Path $ExternalOutputFullPath ".write-probe"
+    [System.IO.File]::WriteAllText($ExternalProbePath, "probe", $Utf8)
+    Remove-Item -LiteralPath $ExternalProbePath -Force
+}
+catch {
+    $ExternalOutputWritable = $false
+}
+if ($ExternalOutputWritable) {
+    try {
+        $ExternalHit = Import-AvidScriptCSharpSemanticCacheEntry `
+            -Context $Context `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $SourcePath `
+            -ExpectedAuthorizationPackage $AuthorizationPackage `
+            -FrontendDestinationPath $ExternalHitFrontendPath `
+            -SemanticDestinationPath $ExternalHitSemanticPath
+        Assert-Condition ($ExternalHit.Status -ceq "hit") "external output root did not receive a cache hit"
+        Assert-Condition ((Get-AvidScriptBindingSha256Hex $ExternalHitFrontendPath) -ceq (Get-AvidScriptBindingSha256Hex $SeedFrontendPath)) `
+            "external cache hit frontend bytes differ"
+        Assert-Condition ((Get-AvidScriptBindingSha256Hex $ExternalHitSemanticPath) -ceq (Get-AvidScriptBindingSha256Hex $SeedSemanticPath)) `
+            "external cache hit semantic bytes differ"
+    }
+    finally {
+        if (Test-Path -LiteralPath $ExternalOutputFullPath) {
+            Remove-Item -LiteralPath $ExternalOutputFullPath -Recurse -Force
+        }
+    }
+}
+
+$EntryReportTextBeforeOverlap = Get-Content -Raw -LiteralPath $Context.EntryReportPath
+$EntryReportHashBeforeOverlap = Get-AvidScriptBindingSha256Hex $Context.EntryReportPath
+$OverlapSemanticDestination = Join-Path $RunRoot "DestinationOverlap\semantic.json"
+try {
+    $OverlapResult = Import-AvidScriptCSharpSemanticCacheEntry `
+        -Context $Context `
+        -ProjectRoot $ProjectRoot `
+        -ExpectedSourcePath $SourcePath `
+        -ExpectedAuthorizationPackage $AuthorizationPackage `
+        -FrontendDestinationPath $Context.EntryReportPath `
+        -SemanticDestinationPath $OverlapSemanticDestination
+}
+finally {
+    Write-Utf8File -Path $Context.EntryReportPath -Text $EntryReportTextBeforeOverlap
+    if (Test-Path -LiteralPath $OverlapSemanticDestination) {
+        Remove-Item -LiteralPath $OverlapSemanticDestination -Force
+    }
+}
+Assert-Condition (
+    $OverlapResult.Status -ceq "rejected" -and
+    $OverlapResult.DiagnosticCode -ceq "ASBI4503") `
+    "cache-owned destination was not rejected"
+Assert-Condition ((Get-AvidScriptBindingSha256Hex $Context.EntryReportPath) -ceq $EntryReportHashBeforeOverlap) `
+    "cache-owned destination modified the immutable entry report"
 
 $Winner = Publish-AvidScriptCSharpSemanticCacheEntry `
     -Context $Context `
@@ -421,6 +617,51 @@ $DefaultPrepared = Import-AvidScriptCSharpPreparedSemantic `
 Assert-Condition ($null -ne $DefaultPrepared.FrontendModel -and $null -ne $DefaultPrepared.SemanticModel) `
     "default script prepared semantic import did not accept explicit empty authorization"
 
+function Get-DefaultAuthorizationFailureCode {
+    param(
+        [Parameter(Mandatory = $true)]$AuthorizationModel,
+        [Parameter(Mandatory = $true)][string]$CaseName
+    )
+
+    $CaseReport = $DefaultReport | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+    $CaseReport.binding_authorization = $AuthorizationModel
+    $CaseReportPath = Join-Path $SeedOutputRoot "$CaseName.csharp.report.json"
+    $FrontendDestination = Join-Path $RunRoot "$CaseName\frontend.json"
+    $SemanticDestination = Join-Path $RunRoot "$CaseName\semantic.json"
+    Write-JsonFile -Path $CaseReportPath -Value $CaseReport
+    try {
+        Import-AvidScriptCSharpPreparedSemantic `
+            -PreparedReportPath $CaseReportPath `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $SourcePath `
+            -ExpectedAuthorizationPackage $null `
+            -FrontendDestinationPath $FrontendDestination `
+            -SemanticDestinationPath $SemanticDestination | Out-Null
+    }
+    catch {
+        return [string]$_.Exception.Data["AvidScriptCode"]
+    }
+    finally {
+        foreach ($Destination in @($FrontendDestination, $SemanticDestination)) {
+            if (Test-Path -LiteralPath $Destination) {
+                Remove-Item -LiteralPath $Destination -Force
+            }
+        }
+    }
+    return ""
+}
+
+$PartialDefaultCode = Get-DefaultAuthorizationFailureCode `
+    -AuthorizationModel ([pscustomobject]@{ used_imports = @() }) `
+    -CaseName "PartialDefaultAuthorization"
+Assert-Condition ($PartialDefaultCode -ceq "ASBI4402") `
+    "partial default authorization object was accepted"
+$ScalarDefaultCode = Get-DefaultAuthorizationFailureCode `
+    -AuthorizationModel "none" `
+    -CaseName "ScalarDefaultAuthorization"
+Assert-Condition ($ScalarDefaultCode -ceq "ASBI4402") `
+    "scalar default authorization value was accepted"
+
 $InvalidDefaultReport = $DefaultReport | ConvertTo-Json -Depth 32 | ConvertFrom-Json
 $InvalidDefaultReport.binding_authorization.package_name = "unexpected.package"
 $InvalidDefaultReportPath = Join-Path $SeedOutputRoot "invalid_default.csharp.report.json"
@@ -460,16 +701,28 @@ Assert-Condition ($CleanupWarningResult.Reused -and -not $CleanupWarningResult.P
     "cleanup failure changed an already validated winner result"
 Assert-Condition ($CleanupWarningResult.DiagnosticCode -ceq "ASBI4505") `
     "cleanup failure did not return ASBI4505"
-foreach ($TransientDirectory in @(Get-ChildItem -LiteralPath $CacheRoot -Directory -Recurse -Force | Where-Object {
-    $_.Name -match '^\.(?:validation|staging)\.'
-})) {
+$TransientRoots = @($CacheRoot, $TransactionRoot)
+$TransientDirectories = @()
+foreach ($TransientRoot in $TransientRoots) {
+    if (Test-Path -LiteralPath $TransientRoot -PathType Container) {
+        $TransientDirectories += @(Get-ChildItem -LiteralPath $TransientRoot -Directory -Recurse -Force | Where-Object {
+            $_.Name -match '^\.(?:validation|staging)\.'
+        })
+    }
+}
+foreach ($TransientDirectory in $TransientDirectories) {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $TransientDirectory.FullName -Recurse -Force
 }
 
-$TransientCachePaths = @(Get-ChildItem -LiteralPath $CacheRoot -Recurse -Force | Where-Object {
-    $_.Name -match '^\.(?:validation|staging)\.'
-})
+$TransientCachePaths = @()
+foreach ($TransientRoot in $TransientRoots) {
+    if (Test-Path -LiteralPath $TransientRoot -PathType Container) {
+        $TransientCachePaths += @(Get-ChildItem -LiteralPath $TransientRoot -Recurse -Force | Where-Object {
+            $_.Name -match '^\.(?:validation|staging)\.'
+        })
+    }
+}
 Assert-Condition ($TransientCachePaths.Count -eq 0) "semantic cache left validation or staging paths"
 
-Write-Output "AvidScript.CSharpFrontend.SemanticCacheEntryContracts: 16/16 passed"
+Write-Output "AvidScript.CSharpFrontend.SemanticCacheEntryContracts: 24/24 passed"
 exit 0
