@@ -301,6 +301,8 @@ foreach ($LegacyBindingPath in @(
 
 $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
+$CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
+$CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 foreach ($RequiredGameplayPackageContract in @(
     'EmitEngineGameplay',
     'PublishEngineGameplay',
@@ -312,6 +314,35 @@ foreach ($RequiredGameplayPackageContract in @(
 }
 if (-not $CSharpBuildServiceSource.Contains('PublishEngineGameplay(BindingEmitResult)')) {
     Add-Violation 'custom C# builds must default to the generated engine gameplay package'
+}
+foreach ($RequiredBuildOrchestrationContract in @(
+    'FAvidScriptEditorCSharpBuildInvoker::BuildOnce',
+    'FAvidScriptEditorCSharpBindingSliceService::Publish',
+    'CSharpBootstrap'
+)) {
+    if (-not $CSharpBuildServiceSource.Contains($RequiredBuildOrchestrationContract)) {
+        Add-Violation "C# BuildService is missing orchestration contract $RequiredBuildOrchestrationContract"
+    }
+}
+foreach ($ForbiddenBuildServiceConcern in @(
+    'FPlatformProcess::ExecProcess',
+    'FJsonSerializer',
+    'FAvidScriptBindingDescriptorParser::Parse'
+)) {
+    if ($CSharpBuildServiceSource.Contains($ForbiddenBuildServiceConcern)) {
+        Add-Violation "C# BuildService must not own invocation, JSON, or descriptor concern $ForbiddenBuildServiceConcern"
+    }
+}
+if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
+    -not $CSharpBuildInvokerSource.Contains('-RuntimeBindingPackagePath') -or
+    $CSharpBuildInvokerSource.Contains('PublishEngineGameplay') -or
+    $CSharpBuildInvokerSource.Contains('BindingSliceService')) {
+    Add-Violation 'C# BuildInvoker must execute one normalized build without selecting or slicing packages'
+}
+if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorGenerator::Generate') -or
+    -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor') -or
+    $CSharpBindingSliceSource.Contains('FPlatformProcess::ExecProcess')) {
+    Add-Violation 'C# BindingSliceService must reuse the descriptor generator and package publisher without invoking builds'
 }
 $CSharpGuestContext = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpFunctionLoweringContext.cs'
 $CSharpOperationLowerer = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
@@ -344,8 +375,14 @@ foreach ($RequiredReachabilityProjection in @('export_roots', 'all_callables_com
     }
 }
 if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
-    -not $CSharpBuildScriptSource.Contains('UsedBindingImports')) {
+    -not $CSharpBuildScriptSource.Contains('UsedAuthorizationBindingImports') -or
+    -not $CSharpBuildScriptSource.Contains('UsedRuntimeBindingImports')) {
     Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
+}
+foreach ($RequiredDualPackageContract in @('binding_authorization', 'RuntimeBindingPackagePath', 'OmitRuntimeBindingPackage', 'ASBI4303')) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredDualPackageContract)) {
+        Add-Violation "C# build pipeline is missing dual-package contract $RequiredDualPackageContract"
+    }
 }
 if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'

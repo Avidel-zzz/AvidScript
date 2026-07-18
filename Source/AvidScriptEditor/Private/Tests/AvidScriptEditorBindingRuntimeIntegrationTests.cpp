@@ -338,9 +338,17 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
 		return false;
 	}
+	TestEqual(TEXT("Generated lifecycle performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestTrue(
-		TEXT("Editor build records the generated binding package"),
+		TEXT("Editor build records the complete authorization binding package"),
+		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
+	TestTrue(
+		TEXT("Editor build records the minimal runtime binding package"),
 		FPaths::FileExists(BuildResult.BindingPackagePath));
+	TestNotEqual(
+		TEXT("Generated lifecycle separates authorization and runtime packages"),
+		BuildResult.AuthorizationBindingPackagePath,
+		BuildResult.BindingPackagePath);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -361,9 +369,9 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		return false;
 	}
 	TestEqual(
-		TEXT("Generated gameplay package exposes every accepted reflected import"),
+		TEXT("Generated runtime package exposes only two reflected imports and cached plans"),
 		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
-		115);
+		2);
 	int32 RequiredDynamicImportCount = 0;
 	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
 	{
@@ -397,6 +405,10 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	{
 		return false;
 	}
+	TestEqual(
+		TEXT("Generated C# manifest records a two-binding runtime profile"),
+		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
+		2);
 	TestEqual(
 		TEXT("Generated C# manifest records two used binding stable identities"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
