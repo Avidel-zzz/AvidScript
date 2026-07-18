@@ -2,11 +2,13 @@
 
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptFrontendReport.h"
+#include "CSharpBuild/AvidScriptEditorCSharpBindingSliceService.h"
+#include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
 
 #include "HAL/FileManager.h"
-#include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -79,93 +81,85 @@ void SetAvidScriptCSharpBuildFailure(
 	OutResult.NextAction = NextAction;
 }
 
-bool SetAvidScriptCSharpStructuredBuildFailure(
-	const FString& ReportPath,
+void SetAvidScriptCSharpBuildResultMetadata(
+	const FAvidScriptEditorCSharpBuildConfig& Config,
+	const FString& AuthorizationBindingPackagePath,
+	const FString& RuntimeBindingPackagePath,
+	int32 BuildInvocationCount,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
-	FAvidScriptFrontendReport Report;
-	FAvidScriptFrontendReportLoadResult LoadResult;
-	if (!FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult) || Report.bSucceeded)
-	{
-		return false;
-	}
+	OutResult.SourcePath = Config.SourcePath;
+	OutResult.ProjectPath = Config.ProjectPath;
+	OutResult.BuildScriptPath = Config.BuildScriptPath;
+	OutResult.OutputRoot = Config.OutputRoot;
+	OutResult.ReportPath = Config.ReportPath;
+	OutResult.ManifestPath = Config.ManifestPath;
+	OutResult.AuthorizationBindingPackagePath = AuthorizationBindingPackagePath;
+	OutResult.BindingPackagePath = RuntimeBindingPackagePath;
+	OutResult.ModuleId = Config.ModuleId;
+	OutResult.ArtifactStem = Config.ArtifactStem;
+	OutResult.BuildInvocationCount = BuildInvocationCount;
+}
 
-	FString ErrorMessage;
-	for (const FAvidScriptFrontendDiagnostic& Diagnostic : Report.Diagnostics)
+void ApplyAvidScriptCSharpBuildInvocationOutcome(
+	const FAvidScriptEditorCSharpBuildResult& InvocationResult,
+	const FAvidScriptEditorCSharpBuildConfig& FinalConfig,
+	const FString& AuthorizationBindingPackagePath,
+	const FString& RuntimeBindingPackagePath,
+	int32 BuildInvocationCount,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	OutResult = InvocationResult;
+	SetAvidScriptCSharpBuildResultMetadata(
+		FinalConfig,
+		AuthorizationBindingPackagePath,
+		RuntimeBindingPackagePath,
+		BuildInvocationCount,
+		OutResult);
+}
+
+void RemoveAvidScriptCSharpFinalLoadableArtifacts(const FAvidScriptEditorCSharpBuildConfig& Config)
+{
+	const TArray<FString> Artifacts = {
+		Config.ReportPath,
+		Config.ManifestPath,
+		FPaths::Combine(Config.OutputRoot, Config.ArtifactStem + TEXT(".wasm"))
+	};
+	for (const FString& Artifact : Artifacts)
 	{
-		if (Diagnostic.IsError())
+		if (!Artifact.IsEmpty())
 		{
-			ErrorMessage = Diagnostic.Code.IsEmpty()
-				? Diagnostic.Message
-				: FString::Printf(TEXT("%s: %s"), *Diagnostic.Code, *Diagnostic.Message);
-			break;
+			IFileManager::Get().Delete(*Artifact, false, true, true);
 		}
 	}
-	if (ErrorMessage.IsEmpty())
+}
+
+FString MakeAvidScriptCSharpBootstrapRoot()
+{
+	return NormalizeAvidScriptCSharpBuildPathCopy(FPaths::Combine(
+		FPaths::ProjectIntermediateDir(),
+		TEXT("AvidScript"),
+		TEXT("CSharpBootstrap"),
+		FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+}
+
+bool ValidateAvidScriptCSharpBuildPackagePath(
+	const FString& PackagePath,
+	const FString& ErrorCategory,
+	const FString& Description,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	if (PackagePath.IsEmpty() || FPaths::FileExists(PackagePath))
 	{
-		ErrorMessage = TEXT("C# build failed; inspect the structured build report for diagnostics.");
+		return true;
 	}
 
-	const FString ErrorCategory = Report.Result.IsEmpty()
-		? FString(TEXT("build_failed"))
-		: Report.Result;
-	const FString NextAction = ErrorCategory == TEXT("phase42_binding_required")
-		? FString(TEXT("generate the Phase 42 UE facade and binding descriptors before building this custom C# profile"))
-		: FString(TEXT("fix the reported C# compiler diagnostic and rebuild the profile"));
-	SetAvidScriptCSharpBuildFailure(ErrorCategory, ErrorMessage, NextAction, OutResult);
-	return true;
-}
-
-FString QuoteAvidScriptCSharpPowerShellArgument(const FString& Value)
-{
-	FString EscapedValue = Value;
-	EscapedValue.ReplaceInline(TEXT("\""), TEXT("\\\""), ESearchCase::CaseSensitive);
-	return FString::Printf(TEXT("\"%s\""), *EscapedValue);
-}
-
-void AddAvidScriptCSharpPowerShellValueArgument(TArray<FString>& Arguments, const TCHAR* Name, const FString& Value)
-{
-	if (!Value.IsEmpty())
-	{
-		Arguments.Add(Name);
-		Arguments.Add(QuoteAvidScriptCSharpPowerShellArgument(Value));
-	}
-}
-
-FString BuildAvidScriptCSharpPowerShellParameters(const FAvidScriptEditorCSharpBuildConfig& Config)
-{
-	TArray<FString> Arguments;
-	Arguments.Add(TEXT("-NoProfile"));
-	Arguments.Add(TEXT("-ExecutionPolicy"));
-	Arguments.Add(TEXT("Bypass"));
-	Arguments.Add(TEXT("-File"));
-	Arguments.Add(QuoteAvidScriptCSharpPowerShellArgument(Config.BuildScriptPath));
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-DotNetPath"), Config.DotNetPath);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-OutputRoot"), Config.OutputRoot);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-Configuration"), Config.Configuration);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-SourcePath"), Config.SourcePath);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ProjectPath"), Config.ProjectPath);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ModuleId"), Config.ModuleId);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ArtifactStem"), Config.ArtifactStem);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ReportPath"), Config.ReportPath);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-ManifestPath"), Config.ManifestPath);
-	AddAvidScriptCSharpPowerShellValueArgument(Arguments, TEXT("-BindingPackagePath"), Config.BindingPackagePath);
-	return FString::Join(Arguments, TEXT(" "));
-}
-
-bool MakeAvidScriptCSharpBuildDirectory(const FString& Directory, const FString& ErrorCategory, FAvidScriptEditorCSharpBuildResult& OutResult)
-{
-	if (!Directory.IsEmpty() && !IFileManager::Get().MakeDirectory(*Directory, true))
-	{
-		SetAvidScriptCSharpBuildFailure(
-			ErrorCategory,
-			FString::Printf(TEXT("C# build directory could not be created: %s"), *Directory),
-			TEXT("choose a writable C# output/report/manifest directory and retry"),
-			OutResult);
-		return false;
-	}
-
-	return true;
+	SetAvidScriptCSharpBuildFailure(
+		ErrorCategory,
+		FString::Printf(TEXT("%s does not exist: %s"), *Description, *PackagePath),
+		TEXT("publish a generated binding package or update the profile package path"),
+		OutResult);
+	return false;
 }
 } // namespace
 
@@ -225,12 +219,16 @@ FString FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleArtifactSte
 	return AvidScriptDefaultCSharpActorLifecycleArtifactStem;
 }
 
-FString FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+FString FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+	const FString& OutputRoot,
+	const FString& ArtifactStem)
 {
 	return MakeAvidScriptCSharpReportPathForOutputRoot(OutputRoot, ArtifactStem);
 }
 
-FString FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(const FString& OutputRoot, const FString& ArtifactStem)
+FString FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+	const FString& OutputRoot,
+	const FString& ArtifactStem)
 {
 	return MakeAvidScriptCSharpManifestPathForOutputRoot(OutputRoot, ArtifactStem);
 }
@@ -269,11 +267,15 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	}
 	if (NormalizedConfig.ReportPath.IsEmpty())
 	{
-		NormalizedConfig.ReportPath = MakeReportPathForOutputRoot(NormalizedConfig.OutputRoot, NormalizedConfig.ArtifactStem);
+		NormalizedConfig.ReportPath = MakeReportPathForOutputRoot(
+			NormalizedConfig.OutputRoot,
+			NormalizedConfig.ArtifactStem);
 	}
 	if (NormalizedConfig.ManifestPath.IsEmpty())
 	{
-		NormalizedConfig.ManifestPath = MakeManifestPathForOutputRoot(NormalizedConfig.OutputRoot, NormalizedConfig.ArtifactStem);
+		NormalizedConfig.ManifestPath = MakeManifestPathForOutputRoot(
+			NormalizedConfig.OutputRoot,
+			NormalizedConfig.ArtifactStem);
 	}
 	if (NormalizedConfig.Configuration.IsEmpty())
 	{
@@ -287,17 +289,19 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ReportPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ManifestPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.BindingPackagePath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.RuntimeBindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.DotNetPath);
 
-	OutResult.SourcePath = NormalizedConfig.SourcePath;
-	OutResult.ProjectPath = NormalizedConfig.ProjectPath;
-	OutResult.BuildScriptPath = NormalizedConfig.BuildScriptPath;
-	OutResult.OutputRoot = NormalizedConfig.OutputRoot;
-	OutResult.ReportPath = NormalizedConfig.ReportPath;
-	OutResult.ManifestPath = NormalizedConfig.ManifestPath;
-	OutResult.BindingPackagePath = NormalizedConfig.BindingPackagePath;
-	OutResult.ModuleId = NormalizedConfig.ModuleId;
-	OutResult.ArtifactStem = NormalizedConfig.ArtifactStem;
+	FString AuthorizationBindingPackagePath = NormalizedConfig.BindingPackagePath;
+	FString RuntimeBindingPackagePath = NormalizedConfig.bOmitRuntimeBindingPackage
+		? FString()
+		: NormalizedConfig.RuntimeBindingPackagePath;
+	SetAvidScriptCSharpBuildResultMetadata(
+		NormalizedConfig,
+		AuthorizationBindingPackagePath,
+		RuntimeBindingPackagePath,
+		0,
+		OutResult);
 
 	if (NormalizedConfig.BuildScriptPath.IsEmpty() || !FPaths::FileExists(NormalizedConfig.BuildScriptPath))
 	{
@@ -308,7 +312,6 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			OutResult);
 		return false;
 	}
-
 	if (NormalizedConfig.SourcePath.IsEmpty() || !FPaths::FileExists(NormalizedConfig.SourcePath))
 	{
 		SetAvidScriptCSharpBuildFailure(
@@ -318,7 +321,6 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			OutResult);
 		return false;
 	}
-
 	if (!NormalizedConfig.ProjectPath.IsEmpty() && !FPaths::FileExists(NormalizedConfig.ProjectPath))
 	{
 		SetAvidScriptCSharpBuildFailure(
@@ -329,11 +331,24 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		return false;
 	}
 
-	const FString DefaultSourcePath = GetDefaultActorLifecycleSourcePath();
 	const bool bRequiresGeneratedBindingPackage = !NormalizedConfig.SourcePath.Equals(
-		DefaultSourcePath,
+		GetDefaultActorLifecycleSourcePath(),
 		ESearchCase::IgnoreCase);
-	if (bRequiresGeneratedBindingPackage && NormalizedConfig.BindingPackagePath.IsEmpty())
+	const bool bAutomaticBindingSlice = bRequiresGeneratedBindingPackage
+		&& AuthorizationBindingPackagePath.IsEmpty();
+	if (bAutomaticBindingSlice
+		&& (!NormalizedConfig.RuntimeBindingPackagePath.IsEmpty()
+			|| NormalizedConfig.bOmitRuntimeBindingPackage))
+	{
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("binding_package_strategy_invalid"),
+			TEXT("Runtime package overrides require an explicit authorization BindingPackagePath."),
+			TEXT("set BindingPackagePath or clear runtime package overrides to use automatic slicing"),
+			OutResult);
+		return false;
+	}
+
+	if (bAutomaticBindingSlice)
 	{
 		FAvidScriptCSharpBindingEmitResult BindingEmitResult;
 		if (!FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(BindingEmitResult))
@@ -351,141 +366,171 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 				OutResult);
 			return false;
 		}
-
-		NormalizedConfig.BindingPackagePath = NormalizeAvidScriptCSharpBuildPathCopy(
+		AuthorizationBindingPackagePath = NormalizeAvidScriptCSharpBuildPathCopy(
 			BindingEmitResult.ManifestPath);
-		OutResult.BindingPackagePath = NormalizedConfig.BindingPackagePath;
+		NormalizedConfig.BindingPackagePath = AuthorizationBindingPackagePath;
+		SetAvidScriptCSharpBuildResultMetadata(
+			NormalizedConfig,
+			AuthorizationBindingPackagePath,
+			FString(),
+			0,
+			OutResult);
 	}
 
-	if (!NormalizedConfig.BindingPackagePath.IsEmpty() &&
-		!FPaths::FileExists(NormalizedConfig.BindingPackagePath))
-	{
-		SetAvidScriptCSharpBuildFailure(
+	if (!ValidateAvidScriptCSharpBuildPackagePath(
+			AuthorizationBindingPackagePath,
 			TEXT("binding_package_missing"),
-			FString::Printf(
-				TEXT("C# binding package manifest does not exist: %s"),
-				*NormalizedConfig.BindingPackagePath),
-			TEXT("publish a generated binding package or clear binding_package_path to use the Editor default"),
-			OutResult);
-		return false;
-	}
-
-	if (!MakeAvidScriptCSharpBuildDirectory(NormalizedConfig.OutputRoot, TEXT("output_directory_failed"), OutResult) ||
-		!MakeAvidScriptCSharpBuildDirectory(FPaths::GetPath(NormalizedConfig.ReportPath), TEXT("report_directory_failed"), OutResult) ||
-		!MakeAvidScriptCSharpBuildDirectory(FPaths::GetPath(NormalizedConfig.ManifestPath), TEXT("manifest_directory_failed"), OutResult))
+			TEXT("C# authorization binding package manifest"),
+			OutResult)
+		|| !ValidateAvidScriptCSharpBuildPackagePath(
+			NormalizedConfig.RuntimeBindingPackagePath,
+			TEXT("runtime_binding_package_missing"),
+			TEXT("C# runtime binding package manifest"),
+			OutResult))
 	{
 		return false;
 	}
 
-	const FString Parameters = BuildAvidScriptCSharpPowerShellParameters(NormalizedConfig);
-	const FString WorkingDirectory = FPaths::GetPath(NormalizedConfig.BuildScriptPath);
-	const bool bProcessLaunched = FPlatformProcess::ExecProcess(
-		TEXT("powershell.exe"),
-		*Parameters,
-		&OutResult.ProcessExitCode,
-		&OutResult.Stdout,
-		&OutResult.Stderr,
-		*WorkingDirectory);
-
-	if (!bProcessLaunched)
+	if (!bAutomaticBindingSlice)
 	{
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("process_failed"),
-			FString::Printf(TEXT("C# build process could not be launched: %s"), *NormalizedConfig.BuildScriptPath),
-			TEXT("verify powershell.exe can run the C# build script and retry"),
-			OutResult);
-		return false;
-	}
-
-	if (OutResult.ProcessExitCode != 0)
-	{
-		if (FPaths::FileExists(NormalizedConfig.ReportPath) &&
-			SetAvidScriptCSharpStructuredBuildFailure(NormalizedConfig.ReportPath, OutResult))
+		if (!NormalizedConfig.bOmitRuntimeBindingPackage && RuntimeBindingPackagePath.IsEmpty())
 		{
+			RuntimeBindingPackagePath = AuthorizationBindingPackagePath;
+		}
+		FAvidScriptEditorCSharpBuildResult InvocationResult;
+		const bool bBuildSucceeded = FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
+			NormalizedConfig,
+			InvocationResult);
+		ApplyAvidScriptCSharpBuildInvocationOutcome(
+			InvocationResult,
+			NormalizedConfig,
+			AuthorizationBindingPackagePath,
+			RuntimeBindingPackagePath,
+			1,
+			OutResult);
+		return bBuildSucceeded;
+	}
+
+	RemoveAvidScriptCSharpFinalLoadableArtifacts(NormalizedConfig);
+	const FString BootstrapRoot = MakeAvidScriptCSharpBootstrapRoot();
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*BootstrapRoot, false, true);
+	};
+
+	FAvidScriptEditorCSharpBuildConfig BootstrapConfig = NormalizedConfig;
+	BootstrapConfig.OutputRoot = BootstrapRoot;
+	BootstrapConfig.ReportPath = MakeReportPathForOutputRoot(BootstrapRoot, BootstrapConfig.ArtifactStem);
+	BootstrapConfig.ManifestPath = MakeManifestPathForOutputRoot(BootstrapRoot, BootstrapConfig.ArtifactStem);
+	BootstrapConfig.RuntimeBindingPackagePath.Reset();
+	BootstrapConfig.bOmitRuntimeBindingPackage = false;
+
+	FAvidScriptEditorCSharpBuildResult BootstrapResult;
+	if (!FAvidScriptEditorCSharpBuildInvoker::BuildOnce(BootstrapConfig, BootstrapResult))
+	{
+		ApplyAvidScriptCSharpBuildInvocationOutcome(
+			BootstrapResult,
+			NormalizedConfig,
+			AuthorizationBindingPackagePath,
+			FString(),
+			1,
+			OutResult);
+		return false;
+	}
+
+	FAvidScriptFrontendReport BootstrapReport;
+	FAvidScriptFrontendReportLoadResult BootstrapReportLoadResult;
+	if (!FAvidScriptFrontendReportReader::LoadFromFile(
+			BootstrapConfig.ReportPath,
+			BootstrapReport,
+			BootstrapReportLoadResult))
+	{
+		ApplyAvidScriptCSharpBuildInvocationOutcome(
+			BootstrapResult,
+			NormalizedConfig,
+			AuthorizationBindingPackagePath,
+			FString(),
+			1,
+			OutResult);
+		SetAvidScriptCSharpBuildFailure(
+			BootstrapReportLoadResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("bootstrap_report_invalid"))
+				: BootstrapReportLoadResult.ErrorCategory,
+			BootstrapReportLoadResult.ErrorMessage,
+			TEXT("repair bootstrap binding provenance and retry the custom C# build"),
+			OutResult);
+		return false;
+	}
+	if (!BootstrapReport.BindingPackage.bPresent
+		|| BootstrapReport.BindingPackage.UsedImportCount
+			!= BootstrapReport.BindingPackage.UsedImports.Num())
+	{
+		ApplyAvidScriptCSharpBuildInvocationOutcome(
+			BootstrapResult,
+			NormalizedConfig,
+			AuthorizationBindingPackagePath,
+			FString(),
+			1,
+			OutResult);
+		SetAvidScriptCSharpBuildFailure(
+			TEXT("bootstrap_binding_provenance_invalid"),
+			TEXT("Bootstrap report does not contain a complete binding_package.used_imports provenance set."),
+			TEXT("rerun bootstrap with the current semantic and build report toolchain"),
+			OutResult);
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildConfig FinalConfig = NormalizedConfig;
+	if (BootstrapReport.BindingPackage.UsedImports.IsEmpty())
+	{
+		FinalConfig.RuntimeBindingPackagePath.Reset();
+		FinalConfig.bOmitRuntimeBindingPackage = true;
+		RuntimeBindingPackagePath.Reset();
+	}
+	else
+	{
+		FAvidScriptCSharpBindingEmitResult RuntimePackage;
+		FAvidScriptEditorCSharpBindingSliceResult SliceResult;
+		if (!FAvidScriptEditorCSharpBindingSliceService::Publish(
+				BootstrapReport.BindingPackage.DescriptorFile,
+				BootstrapReport.BindingPackage,
+				FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot(),
+				RuntimePackage,
+				SliceResult))
+		{
+			ApplyAvidScriptCSharpBuildInvocationOutcome(
+				BootstrapResult,
+				NormalizedConfig,
+				AuthorizationBindingPackagePath,
+				FString(),
+				1,
+				OutResult);
+			SetAvidScriptCSharpBuildFailure(
+				SliceResult.ErrorCategory.IsEmpty()
+					? FString(TEXT("binding_slice_failed"))
+					: SliceResult.ErrorCategory,
+				SliceResult.ErrorMessage.IsEmpty()
+					? FString(TEXT("Runtime binding package slice could not be published."))
+					: SliceResult.ErrorMessage,
+				SliceResult.NextAction,
+				OutResult);
 			return false;
 		}
-
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("build_failed"),
-			FString::Printf(TEXT("C# build failed with exit code %d"), OutResult.ProcessExitCode),
-			TEXT("fix unsupported C# syntax or toolchain errors, then rerun Build And Bind C# Profile Script"),
-			OutResult);
-		return false;
+		RuntimeBindingPackagePath = NormalizeAvidScriptCSharpBuildPathCopy(RuntimePackage.ManifestPath);
+		FinalConfig.RuntimeBindingPackagePath = RuntimeBindingPackagePath;
+		FinalConfig.bOmitRuntimeBindingPackage = false;
 	}
 
-	if (!FPaths::FileExists(NormalizedConfig.ReportPath))
-	{
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("report_missing"),
-			FString::Printf(TEXT("C# build report was not written: %s"), *NormalizedConfig.ReportPath),
-			TEXT("check C# build stdout/stderr and rerun the build after the report can be written"),
-			OutResult);
-		return false;
-	}
-
-	FAvidScriptFrontendReport Report;
-	FAvidScriptFrontendReportLoadResult ReportLoadResult;
-	if (!FAvidScriptFrontendReportReader::LoadFromFile(
-		NormalizedConfig.ReportPath,
-		Report,
-		ReportLoadResult))
-	{
-		SetAvidScriptCSharpBuildFailure(
-			ReportLoadResult.ErrorCategory,
-			ReportLoadResult.ErrorMessage,
-			TEXT("repair the structured C# build report and rerun the profile build"),
-			OutResult);
-		return false;
-	}
-
-	if (!Report.bSucceeded)
-	{
-		if (!SetAvidScriptCSharpStructuredBuildFailure(NormalizedConfig.ReportPath, OutResult))
-		{
-			SetAvidScriptCSharpBuildFailure(
-				TEXT("report_failed"),
-				TEXT("C# build process exited successfully but the structured report records failure."),
-				TEXT("fix the reported C# compiler diagnostic and rebuild the profile"),
-				OutResult);
-		}
-		return false;
-	}
-
-	if (Report.SchemaVersion != 1 || Report.Result != TEXT("direct_abi_built") || Report.HasErrorDiagnostics())
-	{
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("report_contract_invalid"),
-			TEXT("C# build process exited successfully but the structured report success contract is invalid."),
-			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
-			OutResult);
-		return false;
-	}
-
-	if (!FPaths::FileExists(NormalizedConfig.ManifestPath))
-	{
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("manifest_missing"),
-			FString::Printf(TEXT("C# build manifest was not written: %s"), *NormalizedConfig.ManifestPath),
-			TEXT("inspect build publication diagnostics and rebuild the C# profile"),
-			OutResult);
-		return false;
-	}
-
-	const FString WasmPath = NormalizeAvidScriptCSharpBuildPathCopy(FPaths::Combine(
-		NormalizedConfig.OutputRoot,
-		NormalizedConfig.ArtifactStem + TEXT(".wasm")));
-	if (!FPaths::FileExists(WasmPath))
-	{
-		SetAvidScriptCSharpBuildFailure(
-			TEXT("wasm_missing"),
-			FString::Printf(TEXT("C# build WASM was not written: %s"), *WasmPath),
-			TEXT("inspect Guest IR/backend diagnostics and rebuild the C# profile"),
-			OutResult);
-		return false;
-	}
-
-	OutResult.bSucceeded = true;
-	return true;
+	FAvidScriptEditorCSharpBuildResult FinalResult;
+	const bool bFinalBuildSucceeded = FAvidScriptEditorCSharpBuildInvoker::BuildOnce(FinalConfig, FinalResult);
+	ApplyAvidScriptCSharpBuildInvocationOutcome(
+		FinalResult,
+		NormalizedConfig,
+		AuthorizationBindingPackagePath,
+		RuntimeBindingPackagePath,
+		2,
+		OutResult);
+	return bFinalBuildSucceeded;
 #else
 	SetAvidScriptCSharpBuildFailure(
 		TEXT("platform_unsupported"),

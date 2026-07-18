@@ -11,10 +11,12 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ReportPath;
 	FString ManifestPath;
 	FString BindingPackagePath;
+	FString RuntimeBindingPackagePath;
 	FString DotNetPath;
 	FString ModuleId;
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
+	bool bOmitRuntimeBindingPackage = false;
 };
 
 struct FAvidScriptEditorCSharpBuildResult
@@ -32,9 +34,11 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString OutputRoot;
 	FString ReportPath;
 	FString ManifestPath;
+	FString AuthorizationBindingPackagePath;
 	FString BindingPackagePath;
 	FString ModuleId;
 	FString ArtifactStem;
+	int32 BuildInvocationCount = 0;
 };
 
 class FAvidScriptEditorCSharpBuildService

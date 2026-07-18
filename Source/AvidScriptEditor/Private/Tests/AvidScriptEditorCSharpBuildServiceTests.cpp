@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpBindingEmitter.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -30,6 +31,37 @@ bool LoadAvidScriptCSharpBuildTestJsonObject(const FString& Path, TSharedPtr<FJs
 	return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
 }
 
+FString MakeAvidScriptZeroBindingLifecycleSource()
+{
+	return TEXT(
+		"using System.Runtime.InteropServices;\n"
+		"\n"
+		"namespace AvidScript;\n"
+		"\n"
+		"public static class ZeroBindingLifecycleScript\n"
+		"{\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_begin_play\")]\n"
+		"    public static void BeginPlay() {}\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_tick\")]\n"
+		"    public static void Tick(float deltaSeconds) {}\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_end_play\")]\n"
+		"    public static void EndPlay() {}\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_timer\")]\n"
+		"    public static void OnTimer(int callbackId, int timerHandle) {}\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_event\")]\n"
+		"    public static void OnEvent(int eventId, float value) {}\n"
+		"\n"
+		"    [UnmanagedCallersOnly(EntryPoint = \"avid_on_gameplay_event\")]\n"
+		"    public static void OnGameplayEvent(\n"
+		"        int eventType, int primaryId, int secondaryId, int objectSlot,\n"
+		"        int objectGeneration, float x, float y, float z) {}\n"
+		"}\n");
+}
+
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -57,6 +89,14 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	{
 		return false;
 	}
+	const int32 ClosingBraceIndex = SourceText.Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+	if (!TestTrue(TEXT("Generated binding lifecycle sample has a closing type brace"), ClosingBraceIndex != INDEX_NONE))
+	{
+		return false;
+	}
+	SourceText = SourceText.Left(ClosingBraceIndex)
+		+ TEXT("    private static void UnreachableBindingHelper()\n    {\n        _ = UE.Self.GetActorLocation();\n    }\n")
+		+ SourceText.Mid(ClosingBraceIndex);
 	TestTrue(TEXT("Custom C# source can be written"), FFileHelper::SaveStringToFile(SourceText, *SourcePath));
 
 	FAvidScriptEditorCSharpBuildConfig Config;
@@ -79,9 +119,17 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		bBuildSucceeded);
 	TestTrue(TEXT("Custom C# profile build result succeeds"), BuildResult.bSucceeded);
 	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 0);
+	TestEqual(TEXT("Automatic custom C# profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestTrue(
-		TEXT("Custom C# profile records a binding package manifest"),
+		TEXT("Custom C# profile records an authorization binding package manifest"),
+		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
+	TestTrue(
+		TEXT("Custom C# profile records a runtime binding package manifest"),
 		FPaths::FileExists(BuildResult.BindingPackagePath));
+	TestNotEqual(
+		TEXT("Automatic custom C# profile separates authorization and runtime packages"),
+		BuildResult.AuthorizationBindingPackagePath,
+		BuildResult.BindingPackagePath);
 	TestTrue(TEXT("Custom C# profile report exists"), FPaths::FileExists(Config.ReportPath));
 	TestTrue(TEXT("Custom C# profile manifest exists"), FPaths::FileExists(Config.ManifestPath));
 	TestTrue(
@@ -100,6 +148,27 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		ReportObject->GetStringField(TEXT("result")),
 		FString(TEXT("direct_abi_built")));
 	TestTrue(TEXT("Custom report records success"), ReportObject->GetBoolField(TEXT("succeeded")));
+	const TSharedPtr<FJsonObject>* BindingAuthorizationObject = nullptr;
+	if (!TestTrue(
+		TEXT("Custom report contains binding authorization provenance"),
+		ReportObject->TryGetObjectField(TEXT("binding_authorization"), BindingAuthorizationObject))
+		|| BindingAuthorizationObject == nullptr
+		|| !BindingAuthorizationObject->IsValid())
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Custom report keeps the complete gameplay profile as its authorization ceiling"),
+		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("profile_import_count"))),
+		115);
+	TestEqual(
+		TEXT("Custom authorization records the two reachable generated bindings"),
+		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("used_import_count"))),
+		2);
+	TestEqual(
+		TEXT("Custom authorization exposes two used stable identities"),
+		(*BindingAuthorizationObject)->GetArrayField(TEXT("used_imports")).Num(),
+		2);
 	const TSharedPtr<FJsonObject>* BindingPackageObject = nullptr;
 	if (!TestTrue(
 		TEXT("Custom report contains binding package provenance"),
@@ -109,6 +178,10 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	{
 		return false;
 	}
+	TestNotEqual(
+		TEXT("Custom report separates authorization and runtime manifests"),
+		(*BindingAuthorizationObject)->GetStringField(TEXT("manifest_file")),
+		(*BindingPackageObject)->GetStringField(TEXT("manifest_file")));
 	TestTrue(
 		TEXT("Custom report marks generated bindings required"),
 		(*BindingPackageObject)->GetBoolField(TEXT("required")));
@@ -120,15 +193,94 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Custom report records a content-addressed package hash"),
 		(*BindingPackageObject)->GetStringField(TEXT("package_hash")).IsEmpty());
 	TestEqual(
-		TEXT("Custom report keeps the complete gameplay profile as its authorization ceiling"),
+		TEXT("Custom report publishes only the two-binding runtime package"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
-		115);
+		2);
 	TestEqual(
-		TEXT("Custom report records only the two generated bindings used by the script"),
+		TEXT("Custom runtime package records the two generated bindings used by the script"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
 		2);
 	TestEqual(TEXT("Custom report exposes two used stable identities"), (*BindingPackageObject)->GetArrayField(TEXT("used_imports")).Num(), 2);
 
+	TSharedPtr<FJsonObject> ManifestObject;
+	TestTrue(TEXT("Custom C# profile manifest is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ManifestPath, ManifestObject));
+	if (ManifestObject.IsValid())
+	{
+		const TSharedPtr<FJsonObject>* ManifestBindingPackage = nullptr;
+		if (TestTrue(
+			TEXT("Custom manifest contains runtime binding package provenance"),
+			ManifestObject->TryGetObjectField(TEXT("binding_package"), ManifestBindingPackage))
+			&& ManifestBindingPackage != nullptr
+			&& ManifestBindingPackage->IsValid())
+		{
+			TestEqual(
+				TEXT("Custom manifest publishes two runtime imports"),
+				static_cast<int32>((*ManifestBindingPackage)->GetIntegerField(TEXT("profile_import_count"))),
+				2);
+		}
+	}
+
+	FAvidScriptCSharpBindingEmitResult ExplicitPackage;
+	if (!TestTrue(
+		TEXT("Explicit gameplay binding package publishes"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(ExplicitPackage)))
+	{
+		AddError(ExplicitPackage.ErrorMessage);
+		return false;
+	}
+	FAvidScriptEditorCSharpBuildConfig ExplicitConfig = Config;
+	ExplicitConfig.OutputRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(TestRoot, TEXT("ExplicitPackage")));
+	ExplicitConfig.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(ExplicitConfig.OutputRoot, ExplicitConfig.ArtifactStem);
+	ExplicitConfig.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(ExplicitConfig.OutputRoot, ExplicitConfig.ArtifactStem);
+	ExplicitConfig.BindingPackagePath = ExplicitPackage.ManifestPath;
+	FAvidScriptEditorCSharpBuildResult ExplicitResult;
+	TestTrue(TEXT("Explicit package custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(ExplicitConfig, ExplicitResult));
+	TestEqual(TEXT("Explicit package uses one build invocation"), ExplicitResult.BuildInvocationCount, 1);
+	TestEqual(
+		TEXT("Explicit package remains both authorization and runtime package"),
+		ExplicitResult.AuthorizationBindingPackagePath,
+		ExplicitResult.BindingPackagePath);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest,
+	"AvidScript.Editor.CSharpBuildService.ZeroBindingProfileSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests/CSharpProfiles/ZeroBinding")));
+	TestTrue(TEXT("Zero-binding profile root can be created"), IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = FPaths::Combine(TestRoot, TEXT("ZeroBindingLifecycleScript.cs"));
+	TestTrue(
+		TEXT("Zero-binding C# source can be written"),
+		FFileHelper::SaveStringToFile(MakeAvidScriptZeroBindingLifecycleSource(), *SourcePath));
+
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.SourcePath = SourcePath;
+	Config.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	Config.ModuleId = TEXT("csharp_zero_binding");
+	Config.ArtifactStem = TEXT("zero_binding");
+	Config.OutputRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(TestRoot, TEXT("Output")));
+	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
+	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	TestTrue(TEXT("Zero-binding custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));
+	TestEqual(TEXT("Zero-binding profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestTrue(TEXT("Zero-binding profile keeps authorization package"), FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
+	TestTrue(TEXT("Zero-binding profile omits runtime package path"), BuildResult.BindingPackagePath.IsEmpty());
+
+	TSharedPtr<FJsonObject> ManifestObject;
+	TestTrue(TEXT("Zero-binding manifest is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ManifestPath, ManifestObject));
+	if (ManifestObject.IsValid())
+	{
+		TestFalse(TEXT("Zero-binding manifest omits binding_package"), ManifestObject->HasField(TEXT("binding_package")));
+	}
 	return true;
 }
 
