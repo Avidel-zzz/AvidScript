@@ -619,3 +619,12 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-18 P43.4 `rg` wildcard recurrence record: .NET 验证前再次把 Windows 通配符路径 `Tools\*Tests\*.csproj` 直接交给 `rg`，命令被系统拒绝且未写盘。Prevention：搜索命令只能传字面目录，并通过 `-g "*Tests.csproj"` 过滤；该规则同样适用于一次性核查命令。
 - 2026-07-18 P43.4 long-process session mistake record: 首次 UE 聚焦测试把大量 stdout 与 session id 一起输出，结果 session id 被截断，主流程只看到测试启动片段而无法继续轮询。Prevention：长任务首次调用只输出 `session_id/exit_code/output_tail` 元数据，立即保存 session id，并持续用 `write_stdin` 轮询到退出后再解析完整日志。
 - 2026-07-18 P43.4 rollback-deletion mistake record: 双文件发布回滚曾用 `Remove-Item -ErrorAction SilentlyContinue` 删除已发布 destination；删除失败会被吞掉，随后清理未发布 staged 文件，留下半组合且无恢复材料。Prevention：提交前回滚的每个删除/恢复操作都必须计入 rollback failure；回滚不完整时保留 `.tmp/.bak` 并通过故障注入验证恢复材料。
+
+## Phase 43.5 Content-Addressed Semantic Cache Rules
+
+- P43.5 cache root 固定在项目 `Saved/AvidScript/CSharpSemanticCache/v1`；条目使用 64 位小写 SHA-256 内容地址和首两位分片，不得写入插件源码、Content、bootstrap Intermediate 或最终可加载 artifact 目录。
+- Cache key 必须覆盖 source/project/reference source 实际哈希、authorization identity、configuration、net8.0、SDK 8.0.416 和 Frontend/Semantic 源码闭包指纹；禁止时间、机器名、绝对 cache root 或 output root 进入键。
+- Semantic Cache helper 只拥有 key、指纹、entry lookup/publication 和损坏隔离。禁止解析用户 C# 文本、启动工具进程、解释 Roslyn 语义或决定 binding package 策略。
+- 命中后仍须执行 Guest IR、WASM、authorization/runtime 子集校验和正式发布；Runtime manifest 不得引用 cache entry。
+- Build report 的 `tool_invocations` 是 Editor 调用计数唯一事实来源；BuildInvoker 不得再根据 prepared 参数推断 Frontend/Semantic 次数。
+- 2026-07-18 P43.5 verification-regex mistake record: 首次 Markdown 尾随空格扫描在 PowerShell 单引号 regex 中写了 `[ `t]`，把反引号和字母 `t` 当成普通字符并产生大量假阳性。Prevention：regex tab 使用 `[ \t]`，或在双引号表达式中使用实际 tab；核查失败后先读回命中行，未确认前不得改文件。
