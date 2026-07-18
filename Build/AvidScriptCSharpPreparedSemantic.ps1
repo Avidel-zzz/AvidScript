@@ -113,7 +113,7 @@ function Import-AvidScriptCSharpPreparedSemantic {
         [Parameter(Mandatory = $true)][string]$PreparedReportPath,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$ExpectedSourcePath,
-        [Parameter(Mandatory = $true)]$ExpectedAuthorizationPackage,
+        [AllowNull()][object]$ExpectedAuthorizationPackage,
         [Parameter(Mandatory = $true)][string]$FrontendDestinationPath,
         [Parameter(Mandatory = $true)][string]$SemanticDestinationPath
     )
@@ -165,41 +165,62 @@ function Import-AvidScriptCSharpPreparedSemantic {
         -Condition ($null -ne $AuthorizationModel) `
         -Code "ASBI4402" `
         -Message "Prepared semantic report is missing binding_authorization."
-    Assert-AvidScriptPreparedSemantic `
-        -Condition ([bool]$AuthorizationModel.required) `
-        -Code "ASBI4402" `
-        -Message "Prepared binding_authorization must be required for custom C# builds."
 
-    $AuthorizationManifestPath = Resolve-AvidScriptPreparedSemanticProjectPath `
-        -ProjectRoot $ProjectRootFullPath `
-        -Path ([string]$AuthorizationModel.manifest_file) `
-        -Code "ASBI4402" `
-        -FieldName "Prepared binding_authorization.manifest_file"
-    $AuthorizationDescriptorPath = Resolve-AvidScriptPreparedSemanticProjectPath `
-        -ProjectRoot $ProjectRootFullPath `
-        -Path ([string]$AuthorizationModel.descriptor_file) `
-        -Code "ASBI4402" `
-        -FieldName "Prepared binding_authorization.descriptor_file"
-    $AuthorizationReferenceSourcePath = Resolve-AvidScriptPreparedSemanticProjectPath `
-        -ProjectRoot $ProjectRootFullPath `
-        -Path ([string]$AuthorizationModel.reference_source_file) `
-        -Code "ASBI4402" `
-        -FieldName "Prepared binding_authorization.reference_source_file"
-    Assert-AvidScriptPreparedSemantic `
-        -Condition ([string]$AuthorizationModel.package_name -ceq [string]$ExpectedAuthorizationPackage.PackageName -and
-            [string]$AuthorizationModel.package_hash -ceq [string]$ExpectedAuthorizationPackage.PackageHash -and
-            $AuthorizationManifestPath.Equals([string]$ExpectedAuthorizationPackage.ManifestPath, [System.StringComparison]::OrdinalIgnoreCase) -and
-            [string]$AuthorizationModel.manifest_sha256 -ceq [string]$ExpectedAuthorizationPackage.ManifestSha256 -and
-            $AuthorizationDescriptorPath.Equals([string]$ExpectedAuthorizationPackage.DescriptorPath, [System.StringComparison]::OrdinalIgnoreCase) -and
-            [string]$AuthorizationModel.descriptor_sha256 -ceq [string]$ExpectedAuthorizationPackage.DescriptorSha256 -and
-            $AuthorizationReferenceSourcePath.Equals([string]$ExpectedAuthorizationPackage.ReferenceSourcePath, [System.StringComparison]::OrdinalIgnoreCase) -and
-            [string]$AuthorizationModel.reference_source_sha256 -ceq [string]$ExpectedAuthorizationPackage.ReferenceSourceSha256 -and
-            [int]$AuthorizationModel.profile_import_count -eq @($ExpectedAuthorizationPackage.RequiredImports).Count) `
-        -Code "ASBI4402" `
-        -Message "Prepared binding_authorization identity does not match the current authorization package."
-    Assert-AvidScriptPreparedSemanticUsedImports `
-        -AuthorizationModel $AuthorizationModel `
-        -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage
+    if ($null -eq $ExpectedAuthorizationPackage) {
+        $HasEmptyIdentity = -not [bool]$AuthorizationModel.required -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.package_name) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.package_hash) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.manifest_file) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.manifest_sha256) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.descriptor_file) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.descriptor_sha256) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.reference_source_file) -and
+            [string]::IsNullOrWhiteSpace([string]$AuthorizationModel.reference_source_sha256) -and
+            [int]$AuthorizationModel.profile_import_count -eq 0 -and
+            [int]$AuthorizationModel.used_import_count -eq 0 -and
+            @($AuthorizationModel.used_imports).Count -eq 0
+        Assert-AvidScriptPreparedSemantic `
+            -Condition $HasEmptyIdentity `
+            -Code "ASBI4402" `
+            -Message "Prepared default-script binding_authorization must be explicitly empty and required=false."
+    }
+    else {
+        Assert-AvidScriptPreparedSemantic `
+            -Condition ([bool]$AuthorizationModel.required) `
+            -Code "ASBI4402" `
+            -Message "Prepared binding_authorization must be required for custom C# builds."
+
+        $AuthorizationManifestPath = Resolve-AvidScriptPreparedSemanticProjectPath `
+            -ProjectRoot $ProjectRootFullPath `
+            -Path ([string]$AuthorizationModel.manifest_file) `
+            -Code "ASBI4402" `
+            -FieldName "Prepared binding_authorization.manifest_file"
+        $AuthorizationDescriptorPath = Resolve-AvidScriptPreparedSemanticProjectPath `
+            -ProjectRoot $ProjectRootFullPath `
+            -Path ([string]$AuthorizationModel.descriptor_file) `
+            -Code "ASBI4402" `
+            -FieldName "Prepared binding_authorization.descriptor_file"
+        $AuthorizationReferenceSourcePath = Resolve-AvidScriptPreparedSemanticProjectPath `
+            -ProjectRoot $ProjectRootFullPath `
+            -Path ([string]$AuthorizationModel.reference_source_file) `
+            -Code "ASBI4402" `
+            -FieldName "Prepared binding_authorization.reference_source_file"
+        Assert-AvidScriptPreparedSemantic `
+            -Condition ([string]$AuthorizationModel.package_name -ceq [string]$ExpectedAuthorizationPackage.PackageName -and
+                [string]$AuthorizationModel.package_hash -ceq [string]$ExpectedAuthorizationPackage.PackageHash -and
+                $AuthorizationManifestPath.Equals([string]$ExpectedAuthorizationPackage.ManifestPath, [System.StringComparison]::OrdinalIgnoreCase) -and
+                [string]$AuthorizationModel.manifest_sha256 -ceq [string]$ExpectedAuthorizationPackage.ManifestSha256 -and
+                $AuthorizationDescriptorPath.Equals([string]$ExpectedAuthorizationPackage.DescriptorPath, [System.StringComparison]::OrdinalIgnoreCase) -and
+                [string]$AuthorizationModel.descriptor_sha256 -ceq [string]$ExpectedAuthorizationPackage.DescriptorSha256 -and
+                $AuthorizationReferenceSourcePath.Equals([string]$ExpectedAuthorizationPackage.ReferenceSourcePath, [System.StringComparison]::OrdinalIgnoreCase) -and
+                [string]$AuthorizationModel.reference_source_sha256 -ceq [string]$ExpectedAuthorizationPackage.ReferenceSourceSha256 -and
+                [int]$AuthorizationModel.profile_import_count -eq @($ExpectedAuthorizationPackage.RequiredImports).Count) `
+            -Code "ASBI4402" `
+            -Message "Prepared binding_authorization identity does not match the current authorization package."
+        Assert-AvidScriptPreparedSemanticUsedImports `
+            -AuthorizationModel $AuthorizationModel `
+            -ExpectedAuthorizationPackage $ExpectedAuthorizationPackage
+    }
 
     $PreparedOutputRoot = Resolve-AvidScriptPreparedSemanticProjectPath `
         -ProjectRoot $ProjectRootFullPath `
