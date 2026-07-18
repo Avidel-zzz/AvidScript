@@ -110,6 +110,7 @@ bool GenerateAvidScriptBindingRuntimePackage(
 }
 
 bool BuildAvidScriptGeneratedBindingLifecycle(
+	const FString& SemanticCacheRoot,
 	FAvidScriptEditorCSharpBuildResult& OutBuildResult)
 {
 	FAvidScriptEditorCSharpBuildConfig Config;
@@ -129,6 +130,7 @@ bool BuildAvidScriptGeneratedBindingLifecycle(
 	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
 		Config.OutputRoot,
 		Config.ArtifactStem);
+	Config.SemanticCacheRoot = SemanticCacheRoot;
 	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
 } // namespace
@@ -330,17 +332,43 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const FString& Parameters)
 {
+	FString SemanticCacheRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P43_5/GeneratedBindingLifecycle/CSharpSemanticCache/v1")));
+	FPaths::NormalizeFilename(SemanticCacheRoot);
+	IFileManager::Get().DeleteDirectory(*SemanticCacheRoot, false, true);
+
+	FAvidScriptEditorCSharpBuildResult ColdBuildResult;
+	if (!TestTrue(
+		TEXT("Cold custom C# lifecycle builds and publishes semantic cache state"),
+		BuildAvidScriptGeneratedBindingLifecycle(SemanticCacheRoot, ColdBuildResult)))
+	{
+		AddError(ColdBuildResult.ErrorMessage + TEXT("\n") + ColdBuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Cold lifecycle performs bootstrap and final builds"), ColdBuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Cold lifecycle invokes the C# frontend once"), ColdBuildResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Cold lifecycle invokes C# semantic analysis once"), ColdBuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Cold lifecycle invokes Guest IR twice"), ColdBuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Cold lifecycle invokes WASM backend twice"), ColdBuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Cold lifecycle records semantic cache miss"), ColdBuildResult.SemanticCacheLookup, FString(TEXT("miss")));
+	TestTrue(TEXT("Cold lifecycle publishes semantic cache entry"), ColdBuildResult.bSemanticCachePublished);
+
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!TestTrue(
-		TEXT("Custom C# lifecycle builds with an automatically published binding package"),
-		BuildAvidScriptGeneratedBindingLifecycle(BuildResult)))
+		TEXT("Warm custom C# lifecycle reuses semantic cache and remains loadable"),
+		BuildAvidScriptGeneratedBindingLifecycle(SemanticCacheRoot, BuildResult)))
 	{
 		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
 		return false;
 	}
 	TestEqual(TEXT("Generated lifecycle performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
-	TestEqual(TEXT("Generated lifecycle invokes the C# frontend once"), BuildResult.FrontendInvocationCount, 1);
-	TestEqual(TEXT("Generated lifecycle invokes C# semantic analysis once"), BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Warm lifecycle skips the C# frontend"), BuildResult.FrontendInvocationCount, 0);
+	TestEqual(TEXT("Warm lifecycle skips C# semantic analysis"), BuildResult.SemanticInvocationCount, 0);
+	TestEqual(TEXT("Warm lifecycle still invokes Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Warm lifecycle still invokes WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Warm lifecycle records semantic cache hit"), BuildResult.SemanticCacheLookup, FString(TEXT("hit")));
+	TestFalse(TEXT("Warm lifecycle does not republish semantic cache entry"), BuildResult.bSemanticCachePublished);
 	TestTrue(
 		TEXT("Editor build records the complete authorization binding package"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));

@@ -86,11 +86,19 @@ struct FAvidScriptCSharpBuildInvocationCounts
 	int32 Build = 0;
 	int32 Frontend = 0;
 	int32 Semantic = 0;
+	int32 GuestIr = 0;
+	int32 WasmBackend = 0;
 
 	static FAvidScriptCSharpBuildInvocationCounts FromResult(
 		const FAvidScriptEditorCSharpBuildResult& Result)
 	{
-		return { Result.BuildInvocationCount, Result.FrontendInvocationCount, Result.SemanticInvocationCount };
+		return {
+			Result.BuildInvocationCount,
+			Result.FrontendInvocationCount,
+			Result.SemanticInvocationCount,
+			Result.GuestIrInvocationCount,
+			Result.WasmBackendInvocationCount
+		};
 	}
 };
 
@@ -114,6 +122,8 @@ void SetAvidScriptCSharpBuildResultMetadata(
 	OutResult.BuildInvocationCount = InvocationCounts.Build;
 	OutResult.FrontendInvocationCount = InvocationCounts.Frontend;
 	OutResult.SemanticInvocationCount = InvocationCounts.Semantic;
+	OutResult.GuestIrInvocationCount = InvocationCounts.GuestIr;
+	OutResult.WasmBackendInvocationCount = InvocationCounts.WasmBackend;
 }
 
 void ApplyAvidScriptCSharpBuildInvocationOutcome(
@@ -131,6 +141,22 @@ void ApplyAvidScriptCSharpBuildInvocationOutcome(
 		RuntimeBindingPackagePath,
 		InvocationCounts,
 		OutResult);
+}
+
+void CopyAvidScriptCSharpSemanticCacheAudit(
+	const FAvidScriptEditorCSharpBuildResult& Source,
+	FAvidScriptEditorCSharpBuildResult& Destination)
+{
+	Destination.SemanticCacheSchemaVersion = Source.SemanticCacheSchemaVersion;
+	Destination.bSemanticCacheEnabled = Source.bSemanticCacheEnabled;
+	Destination.SemanticCacheKey = Source.SemanticCacheKey;
+	Destination.SemanticCacheToolchainFingerprint = Source.SemanticCacheToolchainFingerprint;
+	Destination.SemanticCacheLookup = Source.SemanticCacheLookup;
+	Destination.SemanticCacheEntryReport = Source.SemanticCacheEntryReport;
+	Destination.SemanticCacheEntryReportSha256 = Source.SemanticCacheEntryReportSha256;
+	Destination.bSemanticCachePublished = Source.bSemanticCachePublished;
+	Destination.SemanticCacheDiagnosticCode = Source.SemanticCacheDiagnosticCode;
+	Destination.SemanticCacheDiagnosticMessage = Source.SemanticCacheDiagnosticMessage;
 }
 
 void RemoveAvidScriptCSharpFinalLoadableArtifacts(const FAvidScriptEditorCSharpBuildConfig& Config)
@@ -303,6 +329,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.OutputRoot);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ReportPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ManifestPath);
+	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.SemanticCacheRoot);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.BindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.RuntimeBindingPackagePath);
 	NormalizedConfig.PreparedBuildReportPath.Reset();
@@ -541,13 +568,22 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 
 	FAvidScriptEditorCSharpBuildResult FinalResult;
 	const bool bFinalBuildSucceeded = FAvidScriptEditorCSharpBuildInvoker::BuildOnce(FinalConfig, FinalResult);
+	FAvidScriptEditorCSharpBuildResult AggregateResult = FinalResult;
+	if (FinalResult.SemanticCacheLookup == TEXT("disabled")
+		&& BootstrapResult.SemanticCacheLookup != TEXT("disabled")
+		&& !BootstrapResult.SemanticCacheLookup.IsEmpty())
+	{
+		CopyAvidScriptCSharpSemanticCacheAudit(BootstrapResult, AggregateResult);
+	}
 	const FAvidScriptCSharpBuildInvocationCounts TotalInvocationCounts = {
 		BootstrapResult.BuildInvocationCount + FinalResult.BuildInvocationCount,
 		BootstrapResult.FrontendInvocationCount + FinalResult.FrontendInvocationCount,
-		BootstrapResult.SemanticInvocationCount + FinalResult.SemanticInvocationCount
+		BootstrapResult.SemanticInvocationCount + FinalResult.SemanticInvocationCount,
+		BootstrapResult.GuestIrInvocationCount + FinalResult.GuestIrInvocationCount,
+		BootstrapResult.WasmBackendInvocationCount + FinalResult.WasmBackendInvocationCount
 	};
 	ApplyAvidScriptCSharpBuildInvocationOutcome(
-		FinalResult,
+		AggregateResult,
 		NormalizedConfig,
 		AuthorizationBindingPackagePath,
 		RuntimeBindingPackagePath,

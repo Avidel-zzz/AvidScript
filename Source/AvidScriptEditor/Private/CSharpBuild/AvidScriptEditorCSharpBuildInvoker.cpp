@@ -20,6 +20,40 @@ void SetAvidScriptCSharpBuildInvocationFailure(
 	OutResult.NextAction = NextAction;
 }
 
+bool ApplyAvidScriptCSharpBuildReportMetadata(
+	const FAvidScriptFrontendReport& Report,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	if (!Report.bHasToolInvocations
+		|| !Report.bToolInvocationsValid
+		|| !Report.bHasSemanticCache
+		|| !Report.bSemanticCacheValid)
+	{
+		SetAvidScriptCSharpBuildInvocationFailure(
+			TEXT("report_contract_invalid"),
+			TEXT("C# build report is missing valid tool_invocations or semantic_cache metadata."),
+			TEXT("regenerate the C# build report with the current AvidScript toolchain"),
+			OutResult);
+		return false;
+	}
+
+	OutResult.FrontendInvocationCount = Report.FrontendInvocationCount;
+	OutResult.SemanticInvocationCount = Report.SemanticInvocationCount;
+	OutResult.GuestIrInvocationCount = Report.GuestIrInvocationCount;
+	OutResult.WasmBackendInvocationCount = Report.WasmBackendInvocationCount;
+	OutResult.SemanticCacheSchemaVersion = Report.SemanticCacheSchemaVersion;
+	OutResult.bSemanticCacheEnabled = Report.bSemanticCacheEnabled;
+	OutResult.SemanticCacheKey = Report.SemanticCacheKey;
+	OutResult.SemanticCacheToolchainFingerprint = Report.SemanticCacheToolchainFingerprint;
+	OutResult.SemanticCacheLookup = Report.SemanticCacheLookup;
+	OutResult.SemanticCacheEntryReport = Report.SemanticCacheEntryReport;
+	OutResult.SemanticCacheEntryReportSha256 = Report.SemanticCacheEntryReportSha256;
+	OutResult.bSemanticCachePublished = Report.bSemanticCachePublished;
+	OutResult.SemanticCacheDiagnosticCode = Report.SemanticCacheDiagnosticCode;
+	OutResult.SemanticCacheDiagnosticMessage = Report.SemanticCacheDiagnosticMessage;
+	return true;
+}
+
 bool SetAvidScriptCSharpStructuredInvocationFailure(
 	const FString& ReportPath,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
@@ -29,6 +63,11 @@ bool SetAvidScriptCSharpStructuredInvocationFailure(
 	if (!FAvidScriptFrontendReportReader::LoadFromFile(ReportPath, Report, LoadResult) || Report.bSucceeded)
 	{
 		return false;
+	}
+
+	if (!ApplyAvidScriptCSharpBuildReportMetadata(Report, OutResult))
+	{
+		return true;
 	}
 
 	FString ErrorMessage;
@@ -97,6 +136,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 		Arguments,
 		TEXT("-PreparedBuildReportPath"),
 		Config.PreparedBuildReportPath);
+	AddAvidScriptCSharpBuildInvocationValueArgument(
+		Arguments,
+		TEXT("-SemanticCacheRoot"),
+		Config.SemanticCacheRoot);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-BindingPackagePath"), Config.BindingPackagePath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(
 		Arguments,
@@ -105,6 +148,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	if (Config.bOmitRuntimeBindingPackage)
 	{
 		Arguments.Add(TEXT("-OmitRuntimeBindingPackage"));
+	}
+	if (Config.bDisableSemanticCache)
+	{
+		Arguments.Add(TEXT("-DisableSemanticCache"));
 	}
 	return FString::Join(Arguments, TEXT(" "));
 }
@@ -180,9 +227,6 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 		return false;
 	}
 	OutResult.BuildInvocationCount = 1;
-	const bool bUsesPreparedSemantic = !Config.PreparedBuildReportPath.IsEmpty();
-	OutResult.FrontendInvocationCount = bUsesPreparedSemantic ? 0 : 1;
-	OutResult.SemanticInvocationCount = bUsesPreparedSemantic ? 0 : 1;
 
 	if (OutResult.ProcessExitCode != 0)
 	{
@@ -218,6 +262,10 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 			ReportLoadResult.ErrorMessage,
 			TEXT("repair the structured C# build report and rerun the profile build"),
 			OutResult);
+		return false;
+	}
+	if (!ApplyAvidScriptCSharpBuildReportMetadata(Report, OutResult))
+	{
 		return false;
 	}
 	if (!Report.bSucceeded)

@@ -41,6 +41,65 @@ int32 GetAvidScriptJsonIntField(const TSharedPtr<FJsonObject>& Object, const TCH
 	return DefaultValue;
 }
 
+bool TryGetAvidScriptJsonNonNegativeIntField(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* FieldName,
+	int32& OutValue)
+{
+	const TSharedPtr<FJsonValue>* FieldValue = Object.IsValid()
+		? Object->Values.Find(FieldName)
+		: nullptr;
+	if (FieldValue == nullptr || !FieldValue->IsValid() || (*FieldValue)->Type != EJson::Number)
+	{
+		return false;
+	}
+
+	const double NumberValue = (*FieldValue)->AsNumber();
+	if (!FMath::IsFinite(NumberValue)
+		|| NumberValue < 0.0
+		|| NumberValue > static_cast<double>(MAX_int32))
+	{
+		return false;
+	}
+
+	const int32 IntegerValue = static_cast<int32>(NumberValue);
+	if (static_cast<double>(IntegerValue) != NumberValue)
+	{
+		return false;
+	}
+
+	OutValue = IntegerValue;
+	return true;
+}
+
+bool TryGetAvidScriptJsonBoolField(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* FieldName,
+	bool& OutValue)
+{
+	const TSharedPtr<FJsonValue>* FieldValue = Object.IsValid()
+		? Object->Values.Find(FieldName)
+		: nullptr;
+	return FieldValue != nullptr
+		&& FieldValue->IsValid()
+		&& (*FieldValue)->Type == EJson::Boolean
+		&& Object->TryGetBoolField(FieldName, OutValue);
+}
+
+bool TryGetAvidScriptJsonStringField(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* FieldName,
+	FString& OutValue)
+{
+	const TSharedPtr<FJsonValue>* FieldValue = Object.IsValid()
+		? Object->Values.Find(FieldName)
+		: nullptr;
+	return FieldValue != nullptr
+		&& FieldValue->IsValid()
+		&& (*FieldValue)->Type == EJson::String
+		&& Object->TryGetStringField(FieldName, OutValue);
+}
+
 FString GetAvidScriptJsonValueAsString(const TSharedPtr<FJsonValue>& Value)
 {
 	if (!Value.IsValid() || Value->IsNull())
@@ -269,6 +328,81 @@ void LoadAvidScriptBindingPackageMetadata(const TSharedPtr<FJsonObject>& RootObj
 		Package.UsedImports.Add(MoveTemp(Import));
 	}
 }
+
+void LoadAvidScriptToolInvocationMetadata(
+	const TSharedPtr<FJsonObject>& RootObject,
+	FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonValue>* ToolInvocationsValue = RootObject->Values.Find(TEXT("tool_invocations"));
+	if (ToolInvocationsValue == nullptr)
+	{
+		return;
+	}
+
+	OutReport.bHasToolInvocations = true;
+	if (!ToolInvocationsValue->IsValid() || (*ToolInvocationsValue)->Type != EJson::Object)
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> ToolInvocationsObject = (*ToolInvocationsValue)->AsObject();
+	OutReport.bToolInvocationsValid =
+		TryGetAvidScriptJsonNonNegativeIntField(
+			ToolInvocationsObject, TEXT("frontend"), OutReport.FrontendInvocationCount)
+		&& TryGetAvidScriptJsonNonNegativeIntField(
+			ToolInvocationsObject, TEXT("semantic"), OutReport.SemanticInvocationCount)
+		&& TryGetAvidScriptJsonNonNegativeIntField(
+			ToolInvocationsObject, TEXT("guest_ir"), OutReport.GuestIrInvocationCount)
+		&& TryGetAvidScriptJsonNonNegativeIntField(
+			ToolInvocationsObject, TEXT("wasm_backend"), OutReport.WasmBackendInvocationCount);
+}
+
+void LoadAvidScriptSemanticCacheMetadata(
+	const TSharedPtr<FJsonObject>& RootObject,
+	FAvidScriptFrontendReport& OutReport)
+{
+	const TSharedPtr<FJsonValue>* SemanticCacheValue = RootObject->Values.Find(TEXT("semantic_cache"));
+	if (SemanticCacheValue == nullptr)
+	{
+		return;
+	}
+
+	OutReport.bHasSemanticCache = true;
+	if (!SemanticCacheValue->IsValid() || (*SemanticCacheValue)->Type != EJson::Object)
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> SemanticCacheObject = (*SemanticCacheValue)->AsObject();
+	const bool bHasValidFields =
+		TryGetAvidScriptJsonNonNegativeIntField(
+			SemanticCacheObject, TEXT("schema_version"), OutReport.SemanticCacheSchemaVersion)
+		&& TryGetAvidScriptJsonBoolField(
+			SemanticCacheObject, TEXT("enabled"), OutReport.bSemanticCacheEnabled)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("key"), OutReport.SemanticCacheKey)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("toolchain_fingerprint"), OutReport.SemanticCacheToolchainFingerprint)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("lookup"), OutReport.SemanticCacheLookup)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("entry_report_file"), OutReport.SemanticCacheEntryReport)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("entry_report_sha256"), OutReport.SemanticCacheEntryReportSha256)
+		&& TryGetAvidScriptJsonBoolField(
+			SemanticCacheObject, TEXT("published"), OutReport.bSemanticCachePublished)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("diagnostic_code"), OutReport.SemanticCacheDiagnosticCode)
+		&& TryGetAvidScriptJsonStringField(
+			SemanticCacheObject, TEXT("diagnostic_message"), OutReport.SemanticCacheDiagnosticMessage);
+	const bool bLookupValid = OutReport.SemanticCacheLookup == TEXT("disabled")
+		|| OutReport.SemanticCacheLookup == TEXT("miss")
+		|| OutReport.SemanticCacheLookup == TEXT("hit")
+		|| OutReport.SemanticCacheLookup == TEXT("rejected");
+	OutReport.bSemanticCacheValid = bHasValidFields
+		&& OutReport.SemanticCacheSchemaVersion == 1
+		&& bLookupValid;
+}
 } // namespace
 
 bool FAvidScriptFrontendDiagnostic::IsError() const
@@ -356,6 +490,8 @@ bool FAvidScriptFrontendReportReader::LoadFromFile(
 	LoadAvidScriptSemanticMetadata(RootObject, OutReport);
 	LoadAvidScriptGuestIrMetadata(RootObject, OutReport);
 	LoadAvidScriptBindingPackageMetadata(RootObject, OutReport);
+	LoadAvidScriptToolInvocationMetadata(RootObject, OutReport);
+	LoadAvidScriptSemanticCacheMetadata(RootObject, OutReport);
 	RootObject->TryGetStringField(TEXT("bindings"), OutReport.Bindings);
 	RootObject->TryGetStringField(TEXT("output_root"), OutReport.OutputRoot);
 	OutReport.ExitCode = GetAvidScriptJsonIntField(RootObject, TEXT("exit_code"), 0);

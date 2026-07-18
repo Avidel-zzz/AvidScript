@@ -11,6 +11,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ReportPath;
 	FString ManifestPath;
 	FString PreparedBuildReportPath;
+	FString SemanticCacheRoot;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FString DotNetPath;
@@ -18,6 +19,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
 	bool bOmitRuntimeBindingPackage = false;
+	bool bDisableSemanticCache = false;
 };
 
 struct FAvidScriptEditorCSharpBuildResult
@@ -42,6 +44,18 @@ struct FAvidScriptEditorCSharpBuildResult
 	int32 BuildInvocationCount = 0;
 	int32 FrontendInvocationCount = 0;
 	int32 SemanticInvocationCount = 0;
+	int32 GuestIrInvocationCount = 0;
+	int32 WasmBackendInvocationCount = 0;
+	int32 SemanticCacheSchemaVersion = 0;
+	bool bSemanticCacheEnabled = false;
+	FString SemanticCacheKey;
+	FString SemanticCacheToolchainFingerprint;
+	FString SemanticCacheLookup;
+	FString SemanticCacheEntryReport;
+	FString SemanticCacheEntryReportSha256;
+	bool bSemanticCachePublished = false;
+	FString SemanticCacheDiagnosticCode;
+	FString SemanticCacheDiagnosticMessage;
 };
 
 class FAvidScriptEditorCSharpBuildService

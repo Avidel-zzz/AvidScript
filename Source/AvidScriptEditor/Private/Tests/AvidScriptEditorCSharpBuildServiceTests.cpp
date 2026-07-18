@@ -111,6 +111,10 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("CustomMover")));
 	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
 	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
+	Config.SemanticCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P43_5/CustomMover/CSharpSemanticCache/v1")));
+	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	const bool bBuildSucceeded = FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult);
@@ -122,6 +126,11 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(TEXT("Automatic custom C# profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestEqual(TEXT("Automatic custom C# profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
 	TestEqual(TEXT("Automatic custom C# profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Automatic custom C# profile runs Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Automatic custom C# profile runs WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Cold custom C# profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));
+	TestFalse(TEXT("Cold custom C# profile records a semantic cache key"), BuildResult.SemanticCacheKey.IsEmpty());
+	TestTrue(TEXT("Cold custom C# profile publishes a semantic cache entry"), BuildResult.bSemanticCachePublished);
 	TestTrue(
 		TEXT("Custom C# profile records an authorization binding package manifest"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
@@ -239,11 +248,15 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TestRoot,
 		TEXT("CallerOwnedPreparedReport"),
 		TEXT("missing.csharp.report.json")));
+	ExplicitConfig.bDisableSemanticCache = true;
 	FAvidScriptEditorCSharpBuildResult ExplicitResult;
 	TestTrue(TEXT("Explicit package custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(ExplicitConfig, ExplicitResult));
 	TestEqual(TEXT("Explicit package uses one build invocation"), ExplicitResult.BuildInvocationCount, 1);
 	TestEqual(TEXT("Explicit package runs Frontend once"), ExplicitResult.FrontendInvocationCount, 1);
 	TestEqual(TEXT("Explicit package runs Semantic once"), ExplicitResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Explicit package runs Guest IR once"), ExplicitResult.GuestIrInvocationCount, 1);
+	TestEqual(TEXT("Explicit package runs WASM backend once"), ExplicitResult.WasmBackendInvocationCount, 1);
+	TestEqual(TEXT("Explicit diagnostic build disables semantic cache"), ExplicitResult.SemanticCacheLookup, FString(TEXT("disabled")));
 	TestEqual(
 		TEXT("Explicit package remains both authorization and runtime package"),
 		ExplicitResult.AuthorizationBindingPackagePath,
@@ -276,12 +289,19 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	Config.OutputRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(TestRoot, TEXT("Output")));
 	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
 	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(Config.OutputRoot, Config.ArtifactStem);
+	Config.SemanticCacheRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P43_5/ZeroBinding/CSharpSemanticCache/v1")));
+	IFileManager::Get().DeleteDirectory(*Config.SemanticCacheRoot, false, true);
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	TestTrue(TEXT("Zero-binding custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));
 	TestEqual(TEXT("Zero-binding profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestEqual(TEXT("Zero-binding profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
 	TestEqual(TEXT("Zero-binding profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Zero-binding profile runs Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Zero-binding profile runs WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Cold zero-binding profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestTrue(TEXT("Zero-binding profile keeps authorization package"), FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
 	TestTrue(TEXT("Zero-binding profile omits runtime package path"), BuildResult.BindingPackagePath.IsEmpty());
 
@@ -338,6 +358,8 @@ bool FAvidScriptEditorCSharpBuildServiceSourceMissingNextActionTest::RunTest(con
 	TestEqual(TEXT("Blocked output launches no build process"), BlockedResult.BuildInvocationCount, 0);
 	TestEqual(TEXT("Blocked output launches no Frontend"), BlockedResult.FrontendInvocationCount, 0);
 	TestEqual(TEXT("Blocked output launches no Semantic"), BlockedResult.SemanticInvocationCount, 0);
+	TestEqual(TEXT("Blocked output launches no Guest IR"), BlockedResult.GuestIrInvocationCount, 0);
+	TestEqual(TEXT("Blocked output launches no WASM backend"), BlockedResult.WasmBackendInvocationCount, 0);
 	return true;
 }
 
