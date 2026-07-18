@@ -29,6 +29,151 @@ function Test-AvidScriptBindingSha256 {
         $Value -cmatch "^[0-9a-f]{64}$"
 }
 
+function Get-AvidScriptBindingFullPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Test-AvidScriptBindingPathContained {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    $NormalizedRoot = (Get-AvidScriptBindingFullPath $RootPath).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $NormalizedCandidate = Get-AvidScriptBindingFullPath $CandidatePath
+    $ContainedPrefix = $NormalizedRoot + [System.IO.Path]::DirectorySeparatorChar
+    return $NormalizedCandidate.StartsWith(
+        $ContainedPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-AvidScriptBindingPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return Get-AvidScriptBindingFullPath $Path
+    }
+
+    return Get-AvidScriptBindingFullPath (Join-Path $RootPath $Path)
+}
+
+function Publish-AvidScriptBindingFilePairAtomic {
+    param(
+        [Parameter(Mandatory = $true)][string]$FirstSourcePath,
+        [Parameter(Mandatory = $true)][string]$FirstDestinationPath,
+        [Parameter(Mandatory = $true)][string]$SecondSourcePath,
+        [Parameter(Mandatory = $true)][string]$SecondDestinationPath
+    )
+
+    $TransactionId = "$PID.$([System.Guid]::NewGuid().ToString('N'))"
+    $Files = @(
+        [pscustomobject]@{
+            Source = Get-AvidScriptBindingFullPath $FirstSourcePath
+            Destination = Get-AvidScriptBindingFullPath $FirstDestinationPath
+            Temporary = ""
+            Backup = ""
+            HadExisting = $false
+            Published = $false
+        },
+        [pscustomobject]@{
+            Source = Get-AvidScriptBindingFullPath $SecondSourcePath
+            Destination = Get-AvidScriptBindingFullPath $SecondDestinationPath
+            Temporary = ""
+            Backup = ""
+            HadExisting = $false
+            Published = $false
+        })
+
+    foreach ($File in $Files) {
+        if (-not (Test-Path -LiteralPath $File.Source -PathType Leaf)) {
+            throw "Atomic pair source file is missing: $($File.Source)"
+        }
+        if (Test-Path -LiteralPath $File.Destination -PathType Container) {
+            throw "Atomic pair destination path is a directory: $($File.Destination)"
+        }
+
+        $DestinationDirectory = Split-Path -Parent $File.Destination
+        if ([string]::IsNullOrWhiteSpace($DestinationDirectory)) {
+            throw "Atomic pair destination directory is missing: $($File.Destination)"
+        }
+        New-Item -ItemType Directory -Force -Path $DestinationDirectory | Out-Null
+        $DestinationFileName = Split-Path -Leaf $File.Destination
+        $File.Temporary = Join-Path $DestinationDirectory ".$DestinationFileName.$TransactionId.tmp"
+        $File.Backup = Join-Path $DestinationDirectory ".$DestinationFileName.$TransactionId.bak"
+    }
+
+    try {
+        foreach ($File in $Files) {
+            Copy-Item -LiteralPath $File.Source -Destination $File.Temporary -Force
+            if ((Get-AvidScriptBindingSha256Hex $File.Temporary) -cne
+                (Get-AvidScriptBindingSha256Hex $File.Source)) {
+                throw "Atomic pair staging SHA-256 mismatch: $($File.Source)"
+            }
+        }
+
+        foreach ($File in $Files) {
+            if (Test-Path -LiteralPath $File.Destination -PathType Leaf) {
+                Move-Item -LiteralPath $File.Destination -Destination $File.Backup
+                $File.HadExisting = $true
+            }
+        }
+
+        foreach ($File in $Files) {
+            Move-Item -LiteralPath $File.Temporary -Destination $File.Destination
+            $File.Published = $true
+        }
+
+        foreach ($File in $Files) {
+            if ($File.HadExisting -and (Test-Path -LiteralPath $File.Backup -PathType Leaf)) {
+                Remove-Item -LiteralPath $File.Backup -Force
+            }
+        }
+    }
+    catch {
+        $PublishFailure = $_.Exception
+        foreach ($File in $Files) {
+            if ($File.Published -and (Test-Path -LiteralPath $File.Destination -PathType Leaf)) {
+                Remove-Item -LiteralPath $File.Destination -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        $RollbackFailures = @()
+        foreach ($File in @($Files[1], $Files[0])) {
+            if ($File.HadExisting -and (Test-Path -LiteralPath $File.Backup -PathType Leaf)) {
+                try {
+                    Move-Item -LiteralPath $File.Backup -Destination $File.Destination -Force
+                }
+                catch {
+                    $RollbackFailures += $_.Exception.Message
+                }
+            }
+        }
+        if ($RollbackFailures.Count -gt 0) {
+            throw [System.InvalidOperationException]::new(
+                "Atomic pair publication failed and rollback was incomplete: $($RollbackFailures -join '; ')",
+                $PublishFailure)
+        }
+        throw $PublishFailure
+    }
+    finally {
+        foreach ($File in $Files) {
+            foreach ($CleanupPath in @($File.Temporary, $File.Backup)) {
+                if (-not [string]::IsNullOrWhiteSpace($CleanupPath) -and
+                    (Test-Path -LiteralPath $CleanupPath -PathType Leaf)) {
+                    Remove-Item -LiteralPath $CleanupPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+}
+
 function Resolve-AvidScriptBindingPackageFile {
     param(
         [Parameter(Mandatory = $true)][string]$PackageDirectory,
@@ -41,14 +186,11 @@ function Resolve-AvidScriptBindingPackageFile {
         throw "$FieldName must be a non-empty package-relative path."
     }
 
-    $Directory = [System.IO.Path]::GetFullPath($PackageDirectory).TrimEnd(
+    $Directory = (Get-AvidScriptBindingFullPath $PackageDirectory).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
         [System.IO.Path]::AltDirectorySeparatorChar)
-    $Candidate = [System.IO.Path]::GetFullPath((Join-Path $Directory $RelativePath))
-    $ContainedPrefix = $Directory + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $Candidate.StartsWith(
-        $ContainedPrefix,
-        [System.StringComparison]::OrdinalIgnoreCase)) {
+    $Candidate = Resolve-AvidScriptBindingPath -RootPath $Directory -Path $RelativePath
+    if (-not (Test-AvidScriptBindingPathContained -RootPath $Directory -CandidatePath $Candidate)) {
         throw "$FieldName escapes the binding package directory."
     }
     if (-not (Test-Path -LiteralPath $Candidate -PathType Leaf)) {

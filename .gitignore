@@ -10,6 +10,7 @@ Tools/**/obj/
 .vs/
 .idea/
 .vscode/
+.superpowers/
 *.suo
 *.user
 *.userosscache
