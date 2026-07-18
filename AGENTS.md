@@ -591,3 +591,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P43.3B dual-package rule: the complete generated package is the C# authorization ceiling, while only the stable-ID runtime slice enters the final script manifest and immutable Runtime package. Automatic custom builds use bootstrap plus final invocation; explicit packages remain single-pass; zero dynamic imports omit `binding_package` entirely.
 - P43.3B ownership rule: BuildService owns defaults and package strategy, BuildInvoker owns exactly one PowerShell invocation and artifact contract, and BindingSliceService reuses the reflection descriptor generator plus content-addressed publisher. Do not move process execution, C# parsing, descriptor serialization, or package policy across these boundaries.
 - P43.3B UE5.8 baseline is Frontend 7/7, GuestIr 31/31, Semantic 43/43, CSharpGuest 18/18, WasmBackend 11/11, BuildIntegration 8/8, BuildPublicationContracts 3/3, PowerShell parser 4/4, CSharpBindingSlice 1/1, CSharpBuildService 4/4, GeneratedCSharpLifecycle 1/1, authorization 115 / runtime 2 / WASM dynamic imports 2, and full AvidScript automation 163/163 with zero non-success results.
+
+## Phase 43.4 Prepared Semantic Reuse Rules
+
+- 自动自定义 C# 构建继续执行 bootstrap/final 两次 BuildOnce，但 Roslyn Frontend 与 Semantic 各只执行一次；显式 package 保持单遍 `1/1/1`。Guest IR、WASM Backend、runtime slice 子集校验和正式发布仍在 final 重跑。
+- `build_reuse.prepared_report_file` 与 SHA 是一次 BuildService 调用内的审计来源。final report 的 `artifacts.*` 和 manifest 只引用 final output；Runtime 不得依赖结束后删除的 bootstrap 路径。
+- Prepared Semantic helper 只验证 report/source/authorization/artifact provenance 并事务发布 Frontend/Semantic。禁止启动 dotnet/powershell、扫描 C# 源文本或决定 binding package 策略。
+- Prepared 验证失败必须返回 `prepared_semantic_invalid` 和 `ASBI4401` 到 `ASBI4404`，不得静默降级，也不得留下可加载 manifest/WASM。
+- P43.4 UE5.8 baseline is Frontend 7/7, GuestIr 31/31, Semantic 43/43, CSharpGuest 18/18, WasmBackend 11/11, PreparedSemanticContracts 7/7, BuildIntegration 9/9, BuildPublicationContracts 4/4, PowerShell parser 14/14, architecture passed, CSharpBuildService 4/4, GeneratedCSharpLifecycle 1/1, authorization 115 / runtime 2 / WASM dynamic imports 2, and full AvidScript automation 163/163 with zero non-success results.
+- 2026-07-18 P43.4 delegation mistake record: Task 1 的关键阻塞实现交给 worker 后，主流程多次等待而没有推进非重叠工作。Prevention：主流程始终拥有下一步立即依赖的 blocker；只把独立 sidecar 工作交给 subagent，并在其运行时推进本地非重叠任务。
+- 2026-07-18 P43.4 internal-artifact mistake record: worker 曾把 `.superpowers/sdd/task-1-report.md` 纳入提交。Prevention：委派前先把 `.superpowers/` 等内部工作流产物写入 `.gitignore`，暂存后逐项审计文件列表。
+- 2026-07-18 P43.4 RED-fixture mistake record: 首次 Prepared contract RED 在写 fixture 前没有创建根目录。Prevention：测试写盘前显式创建并断言 fixture root，再验证预期失败来自被测契约而不是夹具 IO。
+- 2026-07-18 P43.4 diff-scope mistake record: 一次宽泛 `git diff --check` 扫到用户自有 Phase 42 文档的既有尾随空格。Prevention：工作树有受保护文件时只对本任务路径或 staged diff 运行 whitespace gate，禁止用无范围结果判断本任务质量。
+- 2026-07-18 P43.4 source-engine permission mistake record: 首次 UBT 调用未直接申请源码引擎写权限，在写 Trace 备份前被 sandbox 拒绝。Prevention：`C:\UnrealEngine` 的 UBT/Editor 命令首次执行即使用已限定前缀的 escalation；失败后不通过清理 target 绕过权限问题。
+- 2026-07-18 P43.4 prelaunch-fixture mistake record: 测试曾假设“普通文件作为目录”会让 UE `MakeDirectory` 返回 false，但它返回 true 并启动了 PowerShell。Prevention：启动前失败使用平台明确拒绝的非法路径，并同时断言稳定错误类别与 `Build/Frontend/Semantic=0/0/0`，不能只看总结果失败。
+- 2026-07-18 P43.4 checklist-verification mistake record: 收尾命令按字面搜索 `- [ ]`，误把计划开头的 checkbox 语法说明当成未完成任务。Prevention：计划完成度检查只匹配行首真实 checkbox，使用 `^\s*-\s+\[ \]`，并在失败时先读回命中行再判断阶段状态。
