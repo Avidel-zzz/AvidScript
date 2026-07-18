@@ -4,6 +4,7 @@
 #include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpWorkspaceService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
 
@@ -28,10 +29,13 @@ public:
 	static FName GetCSharpActorLifecycleBuildAndBindEntryName();
 	static FName GetCSharpProfileBuildAndBindEntryName();
 	static FName GetCSharpProfileTemplateEntryName();
+	static FName GetCSharpWorkspaceCreateEntryName();
+	static FName GetCSharpWorkspaceBuildAndBindEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
 	static FString GetCSharpActorLifecycleBuildScriptPath();
 	static FString GetDefaultCSharpProfilePath();
 
+	static FString GetProjectCSharpWorkspaceProfilePath();
 	static bool MakeSampleCommandConfig(
 		FAvidScriptEditorCommandLaunchConfig& OutConfig,
 		FString& OutErrorMessage);
@@ -48,6 +52,8 @@ public:
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpProfileBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpProfileTemplateMenuEntryConfig(FSimpleDelegate ExecuteAction);
 
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceCreateMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBuildAndBinding(
@@ -62,6 +68,18 @@ public:
 		FAvidScriptEditorCSharpProfileTemplateResult& OutResult,
 		bool bOverwrite = false);
 
+	bool ExecuteCreateCSharpWorkspace(
+		FAvidScriptEditorCSharpWorkspaceResult& OutResult,
+		bool bOverwriteUserFiles = false);
+	bool ExecuteCSharpWorkspaceBuildAndBinding(
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult);
+	bool ExecuteCSharpWorkspaceBuildAndBinding(
+		const FAvidScriptEditorCSharpWorkspaceConfig& WorkspaceConfig,
+		FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult);
+
 private:
 	void RegisterMenus();
 	void HandleRunSampleCommand();
@@ -69,6 +87,8 @@ private:
 	void HandleBuildAndBindCSharpActorLifecycleReport();
 	void HandleBuildAndBindCSharpProfile();
 	void HandleCreateDefaultCSharpProfileTemplate();
+	void HandleCreateCSharpWorkspace();
+	void HandleBuildAndBindCSharpWorkspace();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	FDelegateHandle ToolMenusStartupCallbackHandle;

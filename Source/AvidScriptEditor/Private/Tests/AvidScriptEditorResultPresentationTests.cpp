@@ -4,6 +4,7 @@
 #include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpWorkspaceService.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -80,6 +81,57 @@ bool FAvidScriptEditorPresentationFailureTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("Failure body mentions message"), Presentation.Body.Contains(TEXT("does not exist")));
 	TestTrue(TEXT("Failure details include next action"), Presentation.Details.Contains(TEXT("choose an existing")));
 	TestEqual(TEXT("Failure source path copied"), Presentation.SourcePath, Result.SourcePath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationCSharpWorkspaceTest,
+	"AvidScript.Editor.Presentation.CSharpWorkspaceSmoke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationCSharpWorkspaceTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCSharpWorkspaceResult CreatedResult;
+	CreatedResult.bSucceeded = true;
+	CreatedResult.bFacadeRefreshed = true;
+	CreatedResult.CreatedUserFileCount = 4;
+	CreatedResult.WorkspaceRoot = TEXT("C:/Project/Scripts/AvidScript");
+	CreatedResult.SourcePath = TEXT("C:/Project/Scripts/AvidScript/GameplayScript.cs");
+	CreatedResult.ProjectPath = TEXT("C:/Project/Scripts/AvidScript/AvidScript.Gameplay.csproj");
+	CreatedResult.ProfilePath = TEXT("C:/Project/Scripts/AvidScript/default.csharp-profile.json");
+	CreatedResult.FacadePath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/AvidScript.Bindings.generated.cs");
+	CreatedResult.BindingPackageManifestPath = TEXT("C:/Project/Intermediate/AvidScript/CSharpWorkspace/BindingPackages/package.json");
+	CreatedResult.ManifestPath = TEXT("C:/Project/Saved/AvidScriptCSharpGuest/ProjectGameplay/project_gameplay.avidscript.json");
+	CreatedResult.NextAction = TEXT("open GameplayScript.cs, then build and bind");
+
+	const FAvidScriptEditorCommandPresentation CreatedPresentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(CreatedResult);
+	TestEqual(TEXT("C# workspace created severity"), CreatedPresentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
+	TestTrue(TEXT("C# workspace created title"), CreatedPresentation.Title.Contains(TEXT("workspace ready")));
+	TestTrue(TEXT("C# workspace created body count"), CreatedPresentation.Body.Contains(TEXT("created=4")));
+	TestTrue(TEXT("C# workspace details include source"), CreatedPresentation.Details.Contains(TEXT("GameplayScript.cs")));
+	TestTrue(TEXT("C# workspace details include facade"), CreatedPresentation.Details.Contains(TEXT("AvidScript.Bindings.generated.cs")));
+	TestTrue(TEXT("C# workspace details include refreshed state"), CreatedPresentation.Details.Contains(TEXT("facade_refreshed=true")));
+
+	FAvidScriptEditorCSharpWorkspaceResult PreservedResult = CreatedResult;
+	PreservedResult.CreatedUserFileCount = 0;
+	PreservedResult.PreservedUserFileCount = 4;
+	const FAvidScriptEditorCommandPresentation PreservedPresentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(PreservedResult);
+	TestTrue(TEXT("C# workspace preserved body count"), PreservedPresentation.Body.Contains(TEXT("preserved=4")));
+
+	FAvidScriptEditorCSharpWorkspaceResult FailureResult;
+	FailureResult.bSucceeded = false;
+	FailureResult.ErrorCategory = TEXT("workspace_template_missing");
+	FailureResult.ErrorMessage = TEXT("C# workspace template could not be read");
+	FailureResult.NextAction = TEXT("restore the plugin templates and retry");
+	FailureResult.SourcePath = TEXT("C:/Project/Scripts/AvidScript/GameplayScript.cs");
+	const FAvidScriptEditorCommandPresentation FailurePresentation =
+		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(FailureResult);
+	TestEqual(TEXT("C# workspace failure severity"), FailurePresentation.Severity, EAvidScriptEditorPresentationSeverity::Error);
+	TestTrue(TEXT("C# workspace failure title"), FailurePresentation.Title.Contains(TEXT("failed")));
+	TestTrue(TEXT("C# workspace failure category"), FailurePresentation.Body.Contains(TEXT("workspace_template_missing")));
+	TestTrue(TEXT("C# workspace failure next action"), FailurePresentation.Details.Contains(TEXT("restore")));
 	return true;
 }
 
@@ -161,6 +213,12 @@ bool FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest::RunTest(
 	BindingResult.NormalizedManifestPath = BuildResult.ManifestPath;
 	BindingResult.ReportPath = BuildResult.ReportPath;
 
+	BuildResult.BuildInvocationCount = 2;
+	BuildResult.FrontendInvocationCount = 0;
+	BuildResult.SemanticInvocationCount = 0;
+	BuildResult.GuestIrInvocationCount = 2;
+	BuildResult.WasmBackendInvocationCount = 2;
+	BuildResult.SemanticCacheLookup = TEXT("hit");
 	const FAvidScriptEditorCommandPresentation Presentation =
 		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
 	TestEqual(TEXT("C# profile build-and-bind success severity"), Presentation.Severity, EAvidScriptEditorPresentationSeverity::Info);
@@ -169,6 +227,9 @@ bool FAvidScriptEditorPresentationCSharpProfileBuildAndBindSuccessTest::RunTest(
 	TestTrue(TEXT("C# profile build-and-bind success body actor"), Presentation.Body.Contains(TEXT("AvidScriptProfileActor")));
 	TestTrue(TEXT("C# profile build-and-bind success details profile"), Presentation.Details.Contains(TEXT("default.csharp-profile.json")));
 	TestTrue(TEXT("C# profile build-and-bind success details report"), Presentation.Details.Contains(TEXT("csharp.report.json")));
+	TestTrue(TEXT("C# profile build-and-bind details include cache"), Presentation.Details.Contains(TEXT("cache=hit")));
+	TestTrue(TEXT("C# profile build-and-bind details include Frontend count"), Presentation.Details.Contains(TEXT("frontend=0")));
+	TestTrue(TEXT("C# profile build-and-bind details include WASM count"), Presentation.Details.Contains(TEXT("wasm=2")));
 	TestEqual(TEXT("C# profile build-and-bind source copied"), Presentation.SourcePath, BuildResult.SourcePath);
 	TestEqual(TEXT("C# profile build-and-bind manifest copied"), Presentation.ManifestPath, BuildResult.ManifestPath);
 	return true;

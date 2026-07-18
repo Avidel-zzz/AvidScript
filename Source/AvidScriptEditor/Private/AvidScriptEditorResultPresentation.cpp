@@ -3,6 +3,7 @@
 #include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpWorkspaceService.h"
 
 #include "Misc/Paths.h"
 
@@ -95,6 +96,25 @@ FString MakeAvidScriptCSharpProfileTemplateDetails(const FAvidScriptEditorCSharp
 	return FString::Join(Lines, TEXT("\n"));
 }
 
+FString MakeAvidScriptCSharpWorkspaceDetails(const FAvidScriptEditorCSharpWorkspaceResult& Result)
+{
+	TArray<FString> Lines;
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Next action"), Result.NextAction);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Workspace"), Result.WorkspaceRoot);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Source"), Result.SourcePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Project"), Result.ProjectPath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Profile"), Result.ProfilePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("Generated facade"), Result.FacadePath);
+	AddAvidScriptPresentationDetailLine(Lines, TEXT("IDE binding package"), Result.BindingPackageManifestPath);
+	Lines.Add(FString::Printf(
+		TEXT("User files: created=%d updated=%d preserved=%d facade_refreshed=%s"),
+		Result.CreatedUserFileCount,
+		Result.UpdatedUserFileCount,
+		Result.PreservedUserFileCount,
+		Result.bFacadeRefreshed ? TEXT("true") : TEXT("false")));
+	return FString::Join(Lines, TEXT("\n"));
+}
+
 FString MakeAvidScriptCSharpProfileBuildAndBindDetails(
 	const FString& ProfilePath,
 	const FAvidScriptEditorCSharpBuildResult& BuildResult,
@@ -119,6 +139,14 @@ FString MakeAvidScriptCSharpProfileBuildAndBindDetails(
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Manifest"), ManifestPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Actor"), BindingResult.ActorPath);
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Stdout"), BuildResult.Stdout);
+	Lines.Add(FString::Printf(
+		TEXT("Pipeline: cache=%s build=%d frontend=%d semantic=%d guest_ir=%d wasm=%d"),
+		BuildResult.SemanticCacheLookup.IsEmpty() ? TEXT("not-reported") : *BuildResult.SemanticCacheLookup,
+		BuildResult.BuildInvocationCount,
+		BuildResult.FrontendInvocationCount,
+		BuildResult.SemanticInvocationCount,
+		BuildResult.GuestIrInvocationCount,
+		BuildResult.WasmBackendInvocationCount));
 	AddAvidScriptPresentationDetailLine(Lines, TEXT("Stderr"), BuildResult.Stderr);
 	return FString::Join(Lines, TEXT("\n"));
 }
@@ -195,6 +223,35 @@ FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeCShar
 	Presentation.Body = Result.bCreated
 		? FString::Printf(TEXT("C# profile template created: %s"), *Result.NormalizedProfilePath)
 		: FString::Printf(TEXT("C# profile already exists and was not overwritten: %s"), *Result.NormalizedProfilePath);
+	return Presentation;
+}
+
+FAvidScriptEditorCommandPresentation FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(
+	const FAvidScriptEditorCSharpWorkspaceResult& Result)
+{
+	FAvidScriptEditorCommandPresentation Presentation;
+	Presentation.SourcePath = Result.SourcePath;
+	Presentation.ManifestPath = Result.ManifestPath;
+	Presentation.Details = MakeAvidScriptCSharpWorkspaceDetails(Result);
+
+	if (!Result.bSucceeded)
+	{
+		Presentation.Severity = EAvidScriptEditorPresentationSeverity::Error;
+		Presentation.Title = TEXT("AvidScript C# project workspace failed");
+		Presentation.Body = MakeAvidScriptPresentationErrorBody(
+			Result.ErrorCategory,
+			Result.ErrorMessage,
+			TEXT("Project C# gameplay workspace failed before a detailed diagnostic was produced."));
+		return Presentation;
+	}
+
+	Presentation.Severity = EAvidScriptEditorPresentationSeverity::Info;
+	Presentation.Title = TEXT("AvidScript C# project workspace ready");
+	Presentation.Body = FString::Printf(
+		TEXT("Project C# gameplay workspace is ready: created=%d updated=%d preserved=%d."),
+		Result.CreatedUserFileCount,
+		Result.UpdatedUserFileCount,
+		Result.PreservedUserFileCount);
 	return Presentation;
 }
 

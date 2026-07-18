@@ -73,6 +73,25 @@ void SetAvidScriptCSharpProfileCommandFailure(
 	OutBuildResult.ArtifactStem = ProfileResult.BuildConfig.ArtifactStem;
 }
 
+void SetAvidScriptCSharpWorkspaceBuildFailure(
+	const FAvidScriptEditorCSharpWorkspaceResult& WorkspaceResult,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult)
+{
+	OutBuildResult = FAvidScriptEditorCSharpBuildResult();
+	OutBuildResult.bSucceeded = false;
+	OutBuildResult.ErrorCategory = WorkspaceResult.ErrorCategory;
+	OutBuildResult.ErrorMessage = WorkspaceResult.ErrorMessage;
+	OutBuildResult.NextAction = WorkspaceResult.NextAction;
+	OutBuildResult.SourcePath = WorkspaceResult.SourcePath;
+	OutBuildResult.ProjectPath = WorkspaceResult.ProjectPath;
+	OutBuildResult.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	OutBuildResult.OutputRoot = WorkspaceResult.OutputRoot;
+	OutBuildResult.ReportPath = WorkspaceResult.ReportPath;
+	OutBuildResult.ManifestPath = WorkspaceResult.ManifestPath;
+	OutBuildResult.ModuleId = TEXT("csharp_project_gameplay");
+	OutBuildResult.ArtifactStem = TEXT("project_gameplay");
+}
+
 void LogAvidScriptMenuRegistrationFailure(const FAvidScriptEditorMenuRegistrationResult& Result)
 {
 	UE_LOG(
@@ -198,6 +217,16 @@ FName FAvidScriptEditorModule::GetCSharpProfileTemplateEntryName()
 	return TEXT("AvidScript.CreateDefaultCSharpProfile");
 }
 
+FName FAvidScriptEditorModule::GetCSharpWorkspaceCreateEntryName()
+{
+	return TEXT("AvidScript.CreateProjectCSharpGameplayWorkspace");
+}
+
+FName FAvidScriptEditorModule::GetCSharpWorkspaceBuildAndBindEntryName()
+{
+	return TEXT("AvidScript.BuildAndBindProjectCSharpGameplay");
+}
+
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
 {
 	return FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleReportPath();
@@ -211,6 +240,11 @@ FString FAvidScriptEditorModule::GetCSharpActorLifecycleBuildScriptPath()
 FString FAvidScriptEditorModule::GetDefaultCSharpProfilePath()
 {
 	return FAvidScriptEditorCSharpProfileService::GetDefaultProfilePath();
+}
+
+FString FAvidScriptEditorModule::GetProjectCSharpWorkspaceProfilePath()
+{
+	return FAvidScriptEditorCSharpWorkspaceService::GetDefaultProfilePath();
 }
 
 bool FAvidScriptEditorModule::MakeSampleCommandConfig(
@@ -322,6 +356,35 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpProfileTempl
 	Config.ExecuteAction = MoveTemp(ExecuteAction);
 	return Config;
 }
+
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceCreateMenuEntryConfig(FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpWorkspaceCreateEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptCreateProjectCSharpGameplayWorkspaceLabel", "Create Project C# Gameplay Workspace");
+	Config.ToolTip = LOCTEXT("AvidScriptCreateProjectCSharpGameplayWorkspaceToolTip", "Create project-owned C# gameplay files and refresh the generated UE API facade without overwriting existing source.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpWorkspaceBuildAndBindEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT("AvidScriptBuildAndBindProjectCSharpGameplayLabel", "Build And Bind Project C# Gameplay Script");
+	Config.ToolTip = LOCTEXT("AvidScriptBuildAndBindProjectCSharpGameplayToolTip", "Refresh the generated UE API facade, build the project C# gameplay script, and bind it to the selected Actor.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
 bool FAvidScriptEditorModule::ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult)
 {
 	if (!CommandLauncher.IsValid())
@@ -406,6 +469,50 @@ bool FAvidScriptEditorModule::ExecuteCreateCSharpProfileTemplate(
 {
 	return FAvidScriptEditorCSharpProfileService::WriteProfileTemplate(ProfilePath, OutResult, bOverwrite);
 }
+
+bool FAvidScriptEditorModule::ExecuteCreateCSharpWorkspace(
+	FAvidScriptEditorCSharpWorkspaceResult& OutResult,
+	bool bOverwriteUserFiles)
+{
+	FAvidScriptEditorCSharpWorkspaceConfig Config;
+	Config.bOverwriteUserFiles = bOverwriteUserFiles;
+	return FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(Config, OutResult);
+}
+
+bool FAvidScriptEditorModule::ExecuteCSharpWorkspaceBuildAndBinding(
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult)
+{
+	FAvidScriptEditorCSharpWorkspaceConfig WorkspaceConfig;
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	return ExecuteCSharpWorkspaceBuildAndBinding(
+		WorkspaceConfig,
+		WorkspaceResult,
+		OutBuildResult,
+		OutBindingResult);
+}
+
+bool FAvidScriptEditorModule::ExecuteCSharpWorkspaceBuildAndBinding(
+	const FAvidScriptEditorCSharpWorkspaceConfig& WorkspaceConfig,
+	FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult)
+{
+	OutBindingResult = FAvidScriptEditorComponentBindingResult();
+	if (!FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
+			WorkspaceConfig,
+			OutWorkspaceResult))
+	{
+		SetAvidScriptCSharpWorkspaceBuildFailure(OutWorkspaceResult, OutBuildResult);
+		return false;
+	}
+
+	return ExecuteCSharpProfileBuildAndBinding(
+		OutWorkspaceResult.ProfilePath,
+		OutBuildResult,
+		OutBindingResult);
+}
+
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
@@ -423,6 +530,20 @@ void FAvidScriptEditorModule::RegisterMenus()
 		LogAvidScriptMenuRegistrationFailure(Result);
 	}
 
+
+	const FAvidScriptEditorMenuEntryConfig CSharpWorkspaceCreateMenuConfig = MakeCSharpWorkspaceCreateMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleCreateCSharpWorkspace));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpWorkspaceCreateMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
+
+	const FAvidScriptEditorMenuEntryConfig CSharpWorkspaceBuildAndBindMenuConfig = MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(
+		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBuildAndBindCSharpWorkspace));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpWorkspaceBuildAndBindMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
 
 	const FAvidScriptEditorMenuEntryConfig CSharpProfileTemplateMenuConfig = MakeCSharpProfileTemplateMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleCreateDefaultCSharpProfileTemplate));
@@ -571,6 +692,27 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpProfile()
 		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(ProfilePath, BuildResult, BindingResult);
 	LogAvidScriptEditorPresentation(Presentation);
 }
+
+void FAvidScriptEditorModule::HandleCreateCSharpWorkspace()
+{
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	ExecuteCreateCSharpWorkspace(WorkspaceResult, false);
+	LogAvidScriptEditorPresentation(
+		FAvidScriptEditorResultPresenter::MakeCSharpWorkspacePresentation(WorkspaceResult));
+}
+
+void FAvidScriptEditorModule::HandleBuildAndBindCSharpWorkspace()
+{
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	ExecuteCSharpWorkspaceBuildAndBinding(BuildResult, BindingResult);
+	LogAvidScriptEditorPresentation(
+		FAvidScriptEditorResultPresenter::MakeCSharpProfileBuildAndBindPresentation(
+			GetProjectCSharpWorkspaceProfilePath(),
+			BuildResult,
+			BindingResult));
+}
+
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FAvidScriptEditorModule, AvidScriptEditor)

@@ -7,6 +7,7 @@
 struct FAvidScriptEditorComponentBindingResult;
 struct FAvidScriptEditorCSharpBuildResult;
 struct FAvidScriptEditorCSharpProfileTemplateResult;
+struct FAvidScriptEditorCSharpWorkspaceResult;
 
 enum class EAvidScriptEditorPresentationSeverity : uint8
 {
@@ -33,6 +34,9 @@ public:
 
 	static FAvidScriptEditorCommandPresentation MakeCSharpProfileTemplatePresentation(
 		const FAvidScriptEditorCSharpProfileTemplateResult& Result);
+
+	static FAvidScriptEditorCommandPresentation MakeCSharpWorkspacePresentation(
+		const FAvidScriptEditorCSharpWorkspaceResult& Result);
 
 	static FAvidScriptEditorCommandPresentation MakeCSharpProfileBuildAndBindPresentation(
 		const FString& ProfilePath,

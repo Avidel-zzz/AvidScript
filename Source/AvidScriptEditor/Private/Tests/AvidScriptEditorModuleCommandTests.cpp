@@ -189,6 +189,33 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestFalse(TEXT("C# profile template command tooltip is set"), CSharpProfileTemplateMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# profile template command execute action is bound"), CSharpProfileTemplateMenuConfig.ExecuteAction.IsBound());
 
+	const FString ProjectWorkspaceProfilePath = FAvidScriptEditorModule::GetProjectCSharpWorkspaceProfilePath();
+	TestTrue(
+		TEXT("Project C# workspace profile uses project Scripts directory"),
+		ProjectWorkspaceProfilePath.EndsWith(TEXT("Scripts/AvidScript/default.csharp-profile.json")));
+
+	FAvidScriptEditorMenuEntryConfig CSharpWorkspaceCreateMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpWorkspaceCreateMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
+		}));
+	TestEqual(TEXT("C# workspace create command owner"), CSharpWorkspaceCreateMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# workspace create command menu"), CSharpWorkspaceCreateMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# workspace create command section"), CSharpWorkspaceCreateMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# workspace create command entry"), CSharpWorkspaceCreateMenuConfig.EntryName, FName(TEXT("AvidScript.CreateProjectCSharpGameplayWorkspace")));
+	TestTrue(TEXT("C# workspace create command label is explicit"), CSharpWorkspaceCreateMenuConfig.Label.ToString().Contains(TEXT("Project C# Gameplay Workspace")));
+	TestFalse(TEXT("C# workspace create command tooltip is set"), CSharpWorkspaceCreateMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# workspace create command execute action is bound"), CSharpWorkspaceCreateMenuConfig.ExecuteAction.IsBound());
+
+	FAvidScriptEditorMenuEntryConfig CSharpWorkspaceBuildAndBindMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate::CreateLambda([]() {
+		}));
+	TestEqual(TEXT("C# workspace build command owner"), CSharpWorkspaceBuildAndBindMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# workspace build command menu"), CSharpWorkspaceBuildAndBindMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# workspace build command section"), CSharpWorkspaceBuildAndBindMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# workspace build command entry"), CSharpWorkspaceBuildAndBindMenuConfig.EntryName, FName(TEXT("AvidScript.BuildAndBindProjectCSharpGameplay")));
+	TestTrue(TEXT("C# workspace build command label is explicit"), CSharpWorkspaceBuildAndBindMenuConfig.Label.ToString().Contains(TEXT("Build And Bind Project C# Gameplay Script")));
+	TestFalse(TEXT("C# workspace build command tooltip is set"), CSharpWorkspaceBuildAndBindMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# workspace build command execute action is bound"), CSharpWorkspaceBuildAndBindMenuConfig.ExecuteAction.IsBound());
+
 	return true;
 }
 
@@ -394,6 +421,112 @@ bool FAvidScriptEditorModuleCSharpProfileBuildAndBindSelectedActorTest::RunTest(
 	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest,
+	"AvidScript.Editor.Module.CSharpWorkspaceBuildAndBindSelectedActor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTest(const FString& Parameters)
+{
+	if (GEditor == nullptr)
+	{
+		AddError(TEXT("GEditor is not available for project C# workspace build-and-bind."));
+		return false;
+	}
+
+	const FString TestRoot = NormalizeAvidScriptEditorModuleCSharpProfilePath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P44/ModuleWorkspaceCommand")));
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+
+	FAvidScriptEditorCSharpWorkspaceConfig WorkspaceConfig;
+	WorkspaceConfig.WorkspaceRoot = FPaths::Combine(TestRoot, TEXT("Workspace"));
+	WorkspaceConfig.GeneratedRoot = FPaths::Combine(TestRoot, TEXT("Generated"));
+	WorkspaceConfig.BindingPackageRoot = FPaths::Combine(TestRoot, TEXT("BindingPackages"));
+	WorkspaceConfig.OutputRoot = FPaths::Combine(TestRoot, TEXT("Output"));
+
+	UWorld* World = nullptr;
+	if (!CreateAvidScriptEditorModuleCSharpBindingWorld(World))
+	{
+		AddError(TEXT("Failed to create project C# workspace command test world."));
+		return false;
+	}
+
+	AActor* Actor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
+	if (!TestNotNull(TEXT("Project C# workspace command actor spawns"), Actor))
+	{
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return false;
+	}
+	GEditor->SelectNone(false, true, false);
+	GEditor->SelectActor(Actor, true, false, true, false);
+
+	FAvidScriptEditorModule& Module =
+		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	const bool bSucceeded = Module.ExecuteCSharpWorkspaceBuildAndBinding(
+		WorkspaceConfig,
+		WorkspaceResult,
+		BuildResult,
+		BindingResult);
+	if (!TestTrue(TEXT("Project C# workspace command builds and binds"), bSucceeded))
+	{
+		AddError(
+			WorkspaceResult.ErrorMessage
+			+ TEXT("\n")
+			+ BuildResult.ErrorMessage
+			+ TEXT("\n")
+			+ BuildResult.Stderr);
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return false;
+	}
+
+	TestTrue(TEXT("Project C# workspace result succeeds"), WorkspaceResult.bSucceeded);
+	TestEqual(TEXT("Project C# workspace creates four user files"), WorkspaceResult.CreatedUserFileCount, 4);
+	TestTrue(TEXT("Project C# workspace source exists"), FPaths::FileExists(WorkspaceResult.SourcePath));
+	TestTrue(TEXT("Project C# workspace project exists"), FPaths::FileExists(WorkspaceResult.ProjectPath));
+	TestTrue(TEXT("Project C# workspace profile exists"), FPaths::FileExists(WorkspaceResult.ProfilePath));
+	TestTrue(TEXT("Project C# workspace facade exists"), FPaths::FileExists(WorkspaceResult.FacadePath));
+	TestTrue(TEXT("Project C# workspace build succeeds"), BuildResult.bSucceeded);
+	TestEqual(TEXT("Project C# workspace build module"), BuildResult.ModuleId, FString(TEXT("csharp_project_gameplay")));
+	TestEqual(TEXT("Project C# workspace uses its source"), BuildResult.SourcePath, WorkspaceResult.SourcePath);
+	TestEqual(TEXT("Project C# workspace performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestTrue(TEXT("Project C# workspace report exists"), FPaths::FileExists(BuildResult.ReportPath));
+	TestTrue(TEXT("Project C# workspace manifest exists"), FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(TEXT("Project C# workspace runtime package exists"), FPaths::FileExists(BuildResult.BindingPackagePath));
+	TestTrue(TEXT("Project C# workspace binding succeeds"), BindingResult.bSucceeded);
+	TestNotNull(TEXT("Project C# workspace returns component"), BindingResult.Component);
+	TestEqual(TEXT("Project C# workspace binds selected Actor"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
+	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+
+	FAvidScriptEditorCSharpWorkspaceConfig OutsideConfig;
+	OutsideConfig.WorkspaceRoot = FPaths::Combine(
+		FPaths::ProjectDir(),
+		TEXT(".."),
+		TEXT("AvidScriptP44ModuleOutside"));
+	FAvidScriptEditorCSharpWorkspaceResult OutsideWorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult OutsideBuildResult;
+	FAvidScriptEditorComponentBindingResult OutsideBindingResult;
+	TestFalse(
+		TEXT("Project C# workspace command rejects outside workspace"),
+		Module.ExecuteCSharpWorkspaceBuildAndBinding(
+			OutsideConfig,
+			OutsideWorkspaceResult,
+			OutsideBuildResult,
+			OutsideBindingResult));
+	TestEqual(
+		TEXT("Outside workspace category reaches command build result"),
+		OutsideBuildResult.ErrorCategory,
+		FString(TEXT("workspace_path_outside_project")));
+	TestEqual(TEXT("Outside workspace invokes no build process"), OutsideBuildResult.BuildInvocationCount, 0);
+	TestEqual(TEXT("Outside workspace invokes no Frontend"), OutsideBuildResult.FrontendInvocationCount, 0);
+	TestFalse(TEXT("Outside workspace binds no Actor"), OutsideBindingResult.bSucceeded);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorModuleCSharpProfileTemplateTest,
 	"AvidScript.Editor.Module.CSharpProfileTemplateSmoke",
