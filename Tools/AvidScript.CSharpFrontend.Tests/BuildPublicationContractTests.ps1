@@ -51,9 +51,15 @@ $SeedManifest = Join-Path $SeedRoot "actor_lifecycle.avidscript.json"
     -ManifestPath $SeedManifest | Out-Null
 Assert-Condition ($LASTEXITCODE -eq 0) "seed ActorLifecycle build failed"
 $SeedReportJson = Get-Content -Raw -LiteralPath $SeedReport | ConvertFrom-Json
+Assert-Condition ($SeedReportJson.PSObject.Properties.Name -contains "build_reuse") "build report is missing build_reuse"
+Assert-Condition (-not $SeedReportJson.build_reuse.frontend_reused) "ordinary seed build unexpectedly reused frontend"
+Assert-Condition (-not $SeedReportJson.build_reuse.semantic_reused) "ordinary seed build unexpectedly reused semantic"
+Assert-Condition ([string]::IsNullOrWhiteSpace([string]$SeedReportJson.build_reuse.prepared_report_file)) "ordinary seed build retained a prepared report path"
+Assert-Condition ([string]::IsNullOrWhiteSpace([string]$SeedReportJson.build_reuse.prepared_report_sha256)) "ordinary seed build retained a prepared report hash"
 Assert-Condition ($SeedReportJson.PSObject.Properties.Name -contains "binding_authorization") "build report is missing binding_authorization"
 Assert-Condition ($null -eq $SeedReportJson.binding_authorization) "default source unexpectedly published binding authorization"
 Assert-Condition ($null -eq $SeedReportJson.binding_package) "default source unexpectedly published a runtime binding package"
+Assert-Condition ((Get-Content -Raw -LiteralPath $SeedManifest).IndexOf("build_reuse", [System.StringComparison]::Ordinal) -lt 0) "seed manifest leaked build_reuse"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
@@ -152,5 +158,32 @@ Assert-Condition ($PublicationExit -eq 1) "report publication failure must retur
 Assert-Condition (-not (Test-Path -LiteralPath $PublicationManifest -PathType Leaf)) "report publication failure left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $PublicationRoot "actor_lifecycle.wasm") -PathType Leaf)) "report publication failure left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 3/3 passed"
+$PreparedFailureRoot = Join-Path $RunRoot "PreparedFailure"
+$PreparedFailureReport = Join-Path $PreparedFailureRoot "actor_lifecycle.csharp.report.json"
+$PreparedFailureManifest = Join-Path $PreparedFailureRoot "actor_lifecycle.avidscript.json"
+$PreparedFailureWasm = Join-Path $PreparedFailureRoot "actor_lifecycle.wasm"
+$MissingPreparedReport = Join-Path $RunRoot "MissingPrepared\missing.csharp.report.json"
+New-Item -ItemType Directory -Force -Path $PreparedFailureRoot | Out-Null
+[System.IO.File]::WriteAllText($PreparedFailureManifest, "stale-manifest", $Utf8)
+[System.IO.File]::WriteAllText($PreparedFailureWasm, "stale-wasm", $Utf8)
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $PreparedFailureRoot `
+    -SourcePath $SourcePath `
+    -ProjectPath $ProjectPath `
+    -ModuleId "csharp_actor_lifecycle" `
+    -ArtifactStem "actor_lifecycle" `
+    -PreparedBuildReportPath $MissingPreparedReport `
+    -ReportPath $PreparedFailureReport `
+    -ManifestPath $PreparedFailureManifest | Out-Null
+$PreparedFailureExit = $LASTEXITCODE
+Assert-Condition ($PreparedFailureExit -eq 1) "invalid prepared report must return exit 1; actual=$PreparedFailureExit"
+Assert-Condition (Test-Path -LiteralPath $PreparedFailureReport -PathType Leaf) "invalid prepared import did not publish a failure report"
+$PreparedFailureJson = Get-Content -Raw -LiteralPath $PreparedFailureReport | ConvertFrom-Json
+Assert-Condition ($PreparedFailureJson.result -eq "prepared_semantic_invalid") "invalid prepared import has the wrong result"
+Assert-Condition (@($PreparedFailureJson.diagnostics | Where-Object code -eq "ASBI4403").Count -eq 1) "invalid prepared import diagnostic is missing"
+Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
+
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 4/4 passed"
 exit 0

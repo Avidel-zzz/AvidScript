@@ -11,7 +11,8 @@ param(
     [string]$GuestCompilerPath = "",
     [string]$BindingPackagePath = "",
     [string]$RuntimeBindingPackagePath = "",
-    [switch]$OmitRuntimeBindingPackage
+    [switch]$OmitRuntimeBindingPackage,
+    [string]$PreparedBuildReportPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +27,7 @@ $DefaultArtifactStem = "actor_lifecycle"
 $DefaultGuestCompilerPath = Join-Path $BuildDir "InvokeCSharpGuestCompiler.ps1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 . (Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1")
+. (Join-Path $BuildDir "AvidScriptCSharpPreparedSemantic.ps1")
 
 function Resolve-ExistingFile {
     param([string]$Path)
@@ -289,6 +291,7 @@ function Write-BuildReport {
             script_type = $SelectedScriptTypeName
         }
         output_root = Convert-ToProjectRelativePath $OutputRoot
+        build_reuse = $BuildReuse
         binding_authorization = New-BindingPackageReportValue `
             -PackageInfo $BindingAuthorizationInfo `
             -UsedImports $UsedAuthorizationBindingImports `
@@ -370,6 +373,9 @@ if ([string]::IsNullOrWhiteSpace($ReportPath)) { $ReportPath = Join-Path $Output
 if ([string]::IsNullOrWhiteSpace($ManifestPath)) { $ManifestPath = Join-Path $OutputRoot "$ArtifactStem.avidscript.json" }
 $ReportPath = [System.IO.Path]::GetFullPath($ReportPath)
 $ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
+if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
+    $PreparedBuildReportPath = [System.IO.Path]::GetFullPath($PreparedBuildReportPath)
+}
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
@@ -391,6 +397,12 @@ $BindingAuthorizationInfo = $null
 $BindingPackageInfo = $null
 $Diagnostics = @()
 $DotNet = [pscustomobject]@{ Found = $false; Source = ""; Path = ""; Checked = @() }
+$BuildReuse = [ordered]@{
+    prepared_report_file = ""
+    prepared_report_sha256 = ""
+    frontend_reused = $false
+    semantic_reused = $false
+}
 
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 foreach ($Artifact in @(
@@ -492,69 +504,117 @@ if (-not $DotNet.Found) {
     exit 1
 }
 
-$FrontendArguments = @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass",
-    "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
-    "-DotNetPath", $DotNet.Path,
-    "-SourcePath", $SourcePath,
-    "-SourceId", $SourceId,
-    "-OutputPath", $FrontendArtifactPath,
-    "-Configuration", $Configuration)
-$FrontendInvocation = Invoke-AvidScriptPowerShell -Arguments $FrontendArguments
-$FrontendOutput = @($FrontendInvocation.Output)
-$FrontendExitCode = [int]$FrontendInvocation.ExitCode
-if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) {
+if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
     try {
-        $FrontendModel = Get-Content -Raw -LiteralPath $FrontendArtifactPath | ConvertFrom-Json
+        Assert-AvidScriptPreparedSemantic `
+            -Condition (-not $PreparedBuildReportPath.Equals(
+                $ReportPath,
+                [System.StringComparison]::OrdinalIgnoreCase)) `
+            -Code "ASBI4404" `
+            -Message "Prepared and final build report paths must be different."
+        $PreparedSemantic = Import-AvidScriptCSharpPreparedSemantic `
+            -PreparedReportPath $PreparedBuildReportPath `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $SourcePath `
+            -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
+            -FrontendDestinationPath $FrontendArtifactPath `
+            -SemanticDestinationPath $SemanticArtifactPath
+        $FrontendModel = $PreparedSemantic.FrontendModel
+        $SemanticModel = $PreparedSemantic.SemanticModel
         $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
-    }
-    catch {
-        $Diagnostics += [ordered]@{ code = "frontend_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
-    }
-}
-if ($FrontendExitCode -ne 0 -or $null -eq $FrontendModel -or -not $FrontendModel.succeeded) {
-    if ($null -eq $FrontendModel) {
-        $Diagnostics += [ordered]@{ code = "frontend_failed"; severity = "error"; message = "C# frontend did not publish a valid artifact."; output = @($FrontendOutput) }
-    }
-    Write-BuildReport -Result "frontend_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn"
-    Write-Output "[AvidScript][CSharp][Frontend] result=frontend_failed exit_code=$FrontendExitCode report=$ReportPath"
-    exit 1
-}
-
-$SemanticArguments = @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass",
-    "-File", (Join-Path $BuildDir "InvokeCSharpSemantic.ps1"),
-    "-DotNetPath", $DotNet.Path,
-    "-SourcePath", $SourcePath,
-    "-SourceId", $SourceId,
-    "-FrontendPath", $FrontendArtifactPath,
-    "-OutputPath", $SemanticArtifactPath,
-    "-Configuration", $Configuration)
-if (-not $IsDefaultSource) {
-    $SemanticArguments += @(
-        "-ExecutableReferenceSourcePath",
-        $BindingAuthorizationInfo.ReferenceSourcePath)
-}
-$SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
-$SemanticOutput = @($SemanticInvocation.Output)
-$SemanticExitCode = [int]$SemanticInvocation.ExitCode
-if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) {
-    try {
-        $SemanticModel = Get-Content -Raw -LiteralPath $SemanticArtifactPath | ConvertFrom-Json
         $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
         $SelectedScriptTypeName = Get-SelectedScriptTypeName
+        $BuildReuse.prepared_report_file = Convert-ToProjectRelativePath $PreparedSemantic.PreparedReportPath
+        $BuildReuse.prepared_report_sha256 = [string]$PreparedSemantic.PreparedReportSha256
+        $BuildReuse.frontend_reused = $true
+        $BuildReuse.semantic_reused = $true
     }
     catch {
-        $Diagnostics += [ordered]@{ code = "semantic_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
+        $PreparedErrorCode = [string]$_.Exception.Data["AvidScriptCode"]
+        if ([string]::IsNullOrWhiteSpace($PreparedErrorCode)) {
+            $PreparedErrorCode = "ASBI4403"
+        }
+        $Diagnostics += [ordered]@{
+            code = $PreparedErrorCode
+            severity = "error"
+            message = $_.Exception.Message
+            file = Convert-ToProjectRelativePath $PreparedBuildReportPath
+        }
+        Remove-LoadableArtifacts
+        Write-BuildReport `
+            -Result "prepared_semantic_invalid" `
+            -DirectAbiSupported $false `
+            -ReportDiagnostics $Diagnostics `
+            -Compiler "avidscript-csharp-prepared-semantic"
+        Write-Output "[AvidScript][CSharp][PreparedSemantic] result=prepared_semantic_invalid report=$ReportPath"
+        exit 1
     }
 }
-if ($SemanticExitCode -ne 0 -or $null -eq $SemanticModel -or -not $SemanticModel.succeeded) {
-    if ($null -eq $SemanticModel) {
-        $Diagnostics += [ordered]@{ code = "semantic_failed"; severity = "error"; message = "C# semantic analyzer did not publish a valid artifact."; output = @($SemanticOutput) }
+else {
+    $FrontendArguments = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
+        "-DotNetPath", $DotNet.Path,
+        "-SourcePath", $SourcePath,
+        "-SourceId", $SourceId,
+        "-OutputPath", $FrontendArtifactPath,
+        "-Configuration", $Configuration)
+    $FrontendInvocation = Invoke-AvidScriptPowerShell -Arguments $FrontendArguments
+    $FrontendOutput = @($FrontendInvocation.Output)
+    $FrontendExitCode = [int]$FrontendInvocation.ExitCode
+    if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) {
+        try {
+            $FrontendModel = Get-Content -Raw -LiteralPath $FrontendArtifactPath | ConvertFrom-Json
+            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
+        }
+        catch {
+            $Diagnostics += [ordered]@{ code = "frontend_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
+        }
     }
-    Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn-semantic"
-    Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode report=$ReportPath"
-    exit 1
+    if ($FrontendExitCode -ne 0 -or $null -eq $FrontendModel -or -not $FrontendModel.succeeded) {
+        if ($null -eq $FrontendModel) {
+            $Diagnostics += [ordered]@{ code = "frontend_failed"; severity = "error"; message = "C# frontend did not publish a valid artifact."; output = @($FrontendOutput) }
+        }
+        Write-BuildReport -Result "frontend_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn"
+        Write-Output "[AvidScript][CSharp][Frontend] result=frontend_failed exit_code=$FrontendExitCode report=$ReportPath"
+        exit 1
+    }
+
+    $SemanticArguments = @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", (Join-Path $BuildDir "InvokeCSharpSemantic.ps1"),
+        "-DotNetPath", $DotNet.Path,
+        "-SourcePath", $SourcePath,
+        "-SourceId", $SourceId,
+        "-FrontendPath", $FrontendArtifactPath,
+        "-OutputPath", $SemanticArtifactPath,
+        "-Configuration", $Configuration)
+    if (-not $IsDefaultSource) {
+        $SemanticArguments += @(
+            "-ExecutableReferenceSourcePath",
+            $BindingAuthorizationInfo.ReferenceSourcePath)
+    }
+    $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
+    $SemanticOutput = @($SemanticInvocation.Output)
+    $SemanticExitCode = [int]$SemanticInvocation.ExitCode
+    if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) {
+        try {
+            $SemanticModel = Get-Content -Raw -LiteralPath $SemanticArtifactPath | ConvertFrom-Json
+            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
+            $SelectedScriptTypeName = Get-SelectedScriptTypeName
+        }
+        catch {
+            $Diagnostics += [ordered]@{ code = "semantic_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
+        }
+    }
+    if ($SemanticExitCode -ne 0 -or $null -eq $SemanticModel -or -not $SemanticModel.succeeded) {
+        if ($null -eq $SemanticModel) {
+            $Diagnostics += [ordered]@{ code = "semantic_failed"; severity = "error"; message = "C# semantic analyzer did not publish a valid artifact."; output = @($SemanticOutput) }
+        }
+        Write-BuildReport -Result "semantic_failed" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics -Compiler "avidscript-csharp-roslyn-semantic"
+        Write-Output "[AvidScript][CSharp][Semantic] result=semantic_failed exit_code=$SemanticExitCode report=$ReportPath"
+        exit 1
+    }
 }
 
 

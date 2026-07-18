@@ -177,6 +177,58 @@ Assert-Condition ($RuntimeAllowedJson.binding_authorization.manifest_file -ne $R
 $RuntimeAllowedManifestJson = Get-Content -Raw -LiteralPath $RuntimeAllowedManifest | ConvertFrom-Json
 Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq 1) "final manifest did not publish the runtime package subset"
 
+$PreparedBootstrapRoot = Join-Path $RunRoot "PreparedBootstrap"
+$PreparedBootstrapReport = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.csharp.report.json"
+$PreparedBootstrapManifest = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $PreparedBootstrapRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -ModuleId "p44_prepared_bootstrap" `
+    -ArtifactStem "prepared_bootstrap" `
+    -ReportPath $PreparedBootstrapReport `
+    -ManifestPath $PreparedBootstrapManifest | Out-Null
+$PreparedBootstrapExit = $LASTEXITCODE
+Assert-Condition ($PreparedBootstrapExit -eq 0) "prepared bootstrap build failed; actual=$PreparedBootstrapExit"
+
+$PreparedFinalRoot = Join-Path $RunRoot "PreparedFinal"
+$PreparedFinalReport = Join-Path $PreparedFinalRoot "prepared_final.csharp.report.json"
+$PreparedFinalManifest = Join-Path $PreparedFinalRoot "prepared_final.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $PreparedFinalRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -RuntimeBindingPackagePath $RuntimeSetPackagePath `
+    -PreparedBuildReportPath $PreparedBootstrapReport `
+    -ModuleId "p44_prepared_final" `
+    -ArtifactStem "prepared_final" `
+    -ReportPath $PreparedFinalReport `
+    -ManifestPath $PreparedFinalManifest | Out-Null
+$PreparedFinalExit = $LASTEXITCODE
+Assert-Condition ($PreparedFinalExit -eq 0) "prepared final build failed; actual=$PreparedFinalExit"
+$PreparedFinalJson = Get-Content -Raw -LiteralPath $PreparedFinalReport | ConvertFrom-Json
+Assert-Condition ($PreparedFinalJson.build_reuse.frontend_reused) "prepared final report did not mark frontend reuse"
+Assert-Condition ($PreparedFinalJson.build_reuse.semantic_reused) "prepared final report did not mark semantic reuse"
+Assert-Condition ((Resolve-ArtifactPath $PreparedFinalJson.build_reuse.prepared_report_file) -eq [System.IO.Path]::GetFullPath($PreparedBootstrapReport)) "prepared final report path provenance differs"
+Assert-Condition ($PreparedFinalJson.build_reuse.prepared_report_sha256 -eq (Get-Sha256Hex $PreparedBootstrapReport)) "prepared final report hash provenance differs"
+$PreparedBootstrapJson = Get-Content -Raw -LiteralPath $PreparedBootstrapReport | ConvertFrom-Json
+$PreparedBootstrapFrontend = Resolve-ArtifactPath $PreparedBootstrapJson.artifacts.frontend_file
+$PreparedBootstrapSemantic = Resolve-ArtifactPath $PreparedBootstrapJson.artifacts.semantic_file
+$PreparedFinalFrontend = Resolve-ArtifactPath $PreparedFinalJson.artifacts.frontend_file
+$PreparedFinalSemantic = Resolve-ArtifactPath $PreparedFinalJson.artifacts.semantic_file
+Assert-Condition ($PreparedFinalFrontend.StartsWith([System.IO.Path]::GetFullPath($PreparedFinalRoot), [System.StringComparison]::OrdinalIgnoreCase)) "prepared frontend was not published under final output"
+Assert-Condition ($PreparedFinalSemantic.StartsWith([System.IO.Path]::GetFullPath($PreparedFinalRoot), [System.StringComparison]::OrdinalIgnoreCase)) "prepared semantic was not published under final output"
+Assert-Condition ((Get-Sha256Hex $PreparedFinalFrontend) -eq (Get-Sha256Hex $PreparedBootstrapFrontend)) "prepared frontend bytes differ in final output"
+Assert-Condition ((Get-Sha256Hex $PreparedFinalSemantic) -eq (Get-Sha256Hex $PreparedBootstrapSemantic)) "prepared semantic bytes differ in final output"
+Assert-Condition (Test-Path -LiteralPath (Resolve-ArtifactPath $PreparedFinalJson.artifacts.guest_ir_file) -PathType Leaf) "prepared final did not regenerate Guest IR"
+Assert-Condition (Test-Path -LiteralPath (Resolve-ArtifactPath $PreparedFinalJson.artifacts.wasm_file) -PathType Leaf) "prepared final did not regenerate WASM"
+Assert-Condition ($PreparedFinalJson.binding_authorization.profile_import_count -gt 1) "prepared final lost complete authorization"
+Assert-Condition ($PreparedFinalJson.binding_package.profile_import_count -eq 1) "prepared final did not retain minimal runtime package"
+$PreparedFinalManifestRaw = Get-Content -Raw -LiteralPath $PreparedFinalManifest
+Assert-Condition ($PreparedFinalManifestRaw.IndexOf("PreparedBootstrap", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "final manifest retained a bootstrap path"
+
 $LegacyPackageRoot = Join-Path $RunRoot "LegacyPackage"
 New-Item -ItemType Directory -Force -Path $LegacyPackageRoot | Out-Null
 $LegacyPackageReport = Join-Path $LegacyPackageRoot "legacy_package.csharp.report.json"
@@ -434,4 +486,4 @@ Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Gu
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 8/8 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 9/9 passed"
