@@ -88,7 +88,7 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
             -Code "ASBI4501" `
             -Message "Semantic cache toolchain source root is missing: $SourceRoot"
         $SourceFiles += @(Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Where-Object {
-            ($_.Extension -ceq ".cs" -or $_.Extension -ceq ".csproj") -and
+            ($_.Extension -eq ".cs" -or $_.Extension -eq ".csproj") -and
             $_.FullName -notmatch '[\\/](?:bin|obj)[\\/]'
         })
     }
@@ -100,7 +100,7 @@ function Get-AvidScriptSemanticCacheToolchainFiles {
     return @($AllFiles | ForEach-Object {
         $FullPath = Get-AvidScriptBindingFullPath $_.FullName
         Assert-AvidScriptCSharpSemanticCache `
-            -Condition ($FullPath.StartsWith($PluginPrefix, [System.StringComparison]::OrdinalIgnoreCase)) `
+            -Condition (Test-AvidScriptBindingPathContained -RootPath $PluginRootFullPath -CandidatePath $FullPath) `
             -Code "ASBI4501" `
             -Message "Toolchain source file escapes the plugin root: $FullPath"
         [pscustomobject]@{
@@ -247,11 +247,11 @@ function Get-AvidScriptCSharpSemanticCacheContext {
         -Code "ASBI4503" `
         -Message "Semantic cache root must be a directory when it already exists."
 
-    $ProjectSavedRoot = Join-Path $ProjectRootFullPath "Saved"
+    $ProjectCacheNamespace = Join-Path $ProjectRootFullPath "Saved\AvidScript"
     Assert-AvidScriptCSharpSemanticCache `
-        -Condition (Test-AvidScriptBindingPathContained -RootPath $ProjectSavedRoot -CandidatePath $CacheRootFullPath) `
+        -Condition (Test-AvidScriptBindingPathContained -RootPath $ProjectCacheNamespace -CandidatePath $CacheRootFullPath) `
         -Code "ASBI4503" `
-        -Message "Semantic cache root must be physically contained by the project Saved directory."
+        -Message "Semantic cache root must be physically contained by the project Saved/AvidScript namespace."
 
     $Toolchain = Get-AvidScriptCSharpToolchainFingerprint -PluginRoot $PluginRootFullPath
     $ReferenceSources = @(New-AvidScriptSemanticCacheReferenceSources `

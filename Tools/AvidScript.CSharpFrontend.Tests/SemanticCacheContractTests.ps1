@@ -66,6 +66,7 @@ $ProjectPath = Join-Path $RunRoot "Source\CacheContract.csproj"
 $ReferenceSourcePath = Join-Path $RunRoot "References\AvidScript.Bindings.generated.cs"
 $CacheRoot = Join-Path $ProjectCacheRunRoot "CacheA\v1"
 $AlternateCacheRoot = Join-Path $ProjectCacheRunRoot "CacheB\v1"
+$ReservedArtifactCacheRoot = Join-Path $ProjectRoot "Saved\AvidScriptCSharpGuest\ActorLifecycle\SemanticCache\v1"
 $FrontendToolPath = Join-Path $ToolchainRoot "Tools\AvidScript.CSharpFrontend\Frontend.cs"
 $SemanticToolPath = Join-Path $ToolchainRoot "Tools\AvidScript.CSharpSemantic\Semantic.cs"
 $GlobalJsonPath = Join-Path $ToolchainRoot "global.json"
@@ -122,6 +123,13 @@ Assert-CacheContextFailure `
     -Arguments $OutsideRootArguments `
     -ExpectedCode "ASBI4503" `
     -Message "cache root outside project Saved was accepted"
+
+$ReservedRootArguments = $ContextArguments.Clone()
+$ReservedRootArguments.CacheRoot = $ReservedArtifactCacheRoot
+Assert-CacheContextFailure `
+    -Arguments $ReservedRootArguments `
+    -ExpectedCode "ASBI4503" `
+    -Message "cache root overlapping final artifact ownership was accepted"
 
 $CacheRootFile = Join-Path $ProjectCacheRunRoot "CacheRootFile"
 Write-Utf8File -Path $CacheRootFile -Text "not a directory"
@@ -208,11 +216,46 @@ $IgnoredBuildOutput = Get-AvidScriptCSharpSemanticCacheContext @ContextArguments
 Assert-Condition ($IgnoredBuildOutput.CacheKey -ceq $First.CacheKey) `
     "bin or obj content invalidated semantic cache key"
 
+$MixedCaseToolPath = Join-Path $ToolchainRoot "Tools\AvidScript.CSharpFrontend\Injected.CS"
+Write-Utf8File -Path $MixedCaseToolPath -Text "namespace Frontend; public static class Injected {}"
+$MixedCaseToolchain = Get-AvidScriptCSharpSemanticCacheContext @ContextArguments
+Assert-Condition ($MixedCaseToolchain.ToolchainFingerprint -cne $First.ToolchainFingerprint) `
+    "mixed-case toolchain source extension did not invalidate toolchain fingerprint"
+Assert-Condition ($MixedCaseToolchain.CacheKey -cne $First.CacheKey) `
+    "mixed-case toolchain source extension did not invalidate cache key"
+Remove-Item -LiteralPath $MixedCaseToolPath -Force
+
+$EscapedToolchainRoot = Join-Path $RunRoot "EscapedToolchain"
+$ExternalFrontendRoot = Join-Path $RunRoot "ExternalFrontend"
+$LinkedFrontendRoot = Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpFrontend"
+Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "global.json") -Text '{"sdk":{"version":"8.0.416","rollForward":"disable","allowPrerelease":false}}'
+Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Build\InvokeCSharpFrontend.ps1") -Text 'Write-Output "frontend"'
+Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Build\InvokeCSharpSemantic.ps1") -Text 'Write-Output "semantic"'
+Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpSemantic\Semantic.cs") -Text "namespace Semantic; public static class Analyzer {}"
+Write-Utf8File -Path (Join-Path $EscapedToolchainRoot "Tools\AvidScript.CSharpSemantic\Semantic.csproj") -Text '<Project Sdk="Microsoft.NET.Sdk" />'
+Write-Utf8File -Path (Join-Path $ExternalFrontendRoot "Frontend.cs") -Text "namespace External; public static class Escaped {}"
+Write-Utf8File -Path (Join-Path $ExternalFrontendRoot "Frontend.csproj") -Text '<Project Sdk="Microsoft.NET.Sdk" />'
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LinkedFrontendRoot) | Out-Null
+New-Item -ItemType Junction -Path $LinkedFrontendRoot -Target $ExternalFrontendRoot | Out-Null
+try {
+    $EscapedToolchainArguments = $ContextArguments.Clone()
+    $EscapedToolchainArguments.PluginRoot = $EscapedToolchainRoot
+    Assert-CacheContextFailure `
+        -Arguments $EscapedToolchainArguments `
+        -ExpectedCode "ASBI4501" `
+        -Message "toolchain source-root junction escape was accepted"
+}
+finally {
+    if (Test-Path -LiteralPath $LinkedFrontendRoot) {
+        [System.IO.Directory]::Delete($LinkedFrontendRoot)
+    }
+}
+
 Write-Utf8File -Path $SemanticToolPath -Text "namespace Semantic; public static class Analyzer { public const int Version = 2; }"
 $ChangedToolchain = Get-AvidScriptCSharpSemanticCacheContext @ContextArguments
 Assert-Condition ($ChangedToolchain.ToolchainFingerprint -cne $First.ToolchainFingerprint) `
     "toolchain source did not invalidate toolchain fingerprint"
 Assert-Condition ($ChangedToolchain.CacheKey -cne $First.CacheKey) "toolchain source did not invalidate cache key"
 
-Write-Output "AvidScript.CSharpFrontend.SemanticCacheContracts: 13/13 passed"
+Write-Output "AvidScript.CSharpFrontend.SemanticCacheContracts: 16/16 passed"
 exit 0
