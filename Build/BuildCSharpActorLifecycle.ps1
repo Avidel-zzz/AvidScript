@@ -12,7 +12,9 @@ param(
     [string]$BindingPackagePath = "",
     [string]$RuntimeBindingPackagePath = "",
     [switch]$OmitRuntimeBindingPackage,
-    [string]$PreparedBuildReportPath = ""
+    [string]$PreparedBuildReportPath = "",
+    [string]$SemanticCacheRoot = "",
+    [switch]$DisableSemanticCache
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,8 +28,7 @@ $DefaultModuleId = "csharp_actor_lifecycle"
 $DefaultArtifactStem = "actor_lifecycle"
 $DefaultGuestCompilerPath = Join-Path $BuildDir "InvokeCSharpGuestCompiler.ps1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
-. (Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1")
-. (Join-Path $BuildDir "AvidScriptCSharpPreparedSemantic.ps1")
+. (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
 
 function Resolve-ExistingFile {
     param([string]$Path)
@@ -205,10 +206,27 @@ function New-BindingPackageReportValue {
     param(
         [AllowNull()][object]$PackageInfo,
         [AllowEmptyCollection()][object[]]$UsedImports,
-        [bool]$Required
+        [bool]$Required,
+        [switch]$ExplicitEmpty
     )
 
     if ($null -eq $PackageInfo) {
+        if ($ExplicitEmpty) {
+            return [ordered]@{
+                required = $false
+                package_name = ""
+                package_hash = ""
+                manifest_file = ""
+                manifest_sha256 = ""
+                descriptor_file = ""
+                descriptor_sha256 = ""
+                reference_source_file = ""
+                reference_source_sha256 = ""
+                profile_import_count = 0
+                used_import_count = 0
+                used_imports = @()
+            }
+        }
         return $null
     }
     return [ordered]@{
@@ -292,10 +310,13 @@ function Write-BuildReport {
         }
         output_root = Convert-ToProjectRelativePath $OutputRoot
         build_reuse = $BuildReuse
+        semantic_cache = $SemanticCache
+        tool_invocations = $ToolInvocations
         binding_authorization = New-BindingPackageReportValue `
             -PackageInfo $BindingAuthorizationInfo `
             -UsedImports $UsedAuthorizationBindingImports `
-            -Required (-not $IsDefaultSource)
+            -Required (-not $IsDefaultSource) `
+            -ExplicitEmpty
         binding_package = New-BindingPackageReportValue `
             -PackageInfo $BindingPackageInfo `
             -UsedImports $UsedRuntimeBindingImports `
@@ -376,6 +397,10 @@ $ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
 if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
     $PreparedBuildReportPath = [System.IO.Path]::GetFullPath($PreparedBuildReportPath)
 }
+if ([string]::IsNullOrWhiteSpace($SemanticCacheRoot)) {
+    $SemanticCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpSemanticCache\v1"
+}
+$SemanticCacheRoot = [System.IO.Path]::GetFullPath($SemanticCacheRoot)
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
@@ -402,6 +427,24 @@ $BuildReuse = [ordered]@{
     prepared_report_sha256 = ""
     frontend_reused = $false
     semantic_reused = $false
+}
+$SemanticCache = [ordered]@{
+    schema_version = 1
+    enabled = -not [bool]$DisableSemanticCache
+    key = ""
+    toolchain_fingerprint = ""
+    lookup = "disabled"
+    entry_report_file = ""
+    entry_report_sha256 = ""
+    published = $false
+    diagnostic_code = ""
+    diagnostic_message = ""
+}
+$ToolInvocations = [ordered]@{
+    frontend = 0
+    semantic = 0
+    guest_ir = 0
+    wasm_backend = 0
 }
 
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
@@ -504,6 +547,70 @@ if (-not $DotNet.Found) {
     exit 1
 }
 
+$SemanticCacheContext = $null
+$SemanticCacheHit = $false
+if ([string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and -not $DisableSemanticCache) {
+    try {
+        $SemanticCacheContext = Get-AvidScriptCSharpSemanticCacheContext `
+            -PluginRoot $PluginRoot `
+            -ProjectRoot $ProjectRoot `
+            -CacheRoot $SemanticCacheRoot `
+            -Configuration $Configuration `
+            -SourcePath $SourcePath `
+            -ProjectPath $ProjectPath `
+            -AuthorizationPackage $BindingAuthorizationInfo
+        $SemanticCache.key = [string]$SemanticCacheContext.CacheKey
+        $SemanticCache.toolchain_fingerprint = [string]$SemanticCacheContext.ToolchainFingerprint
+        $CacheImport = Import-AvidScriptCSharpSemanticCacheEntry `
+            -Context $SemanticCacheContext `
+            -ProjectRoot $ProjectRoot `
+            -ExpectedSourcePath $SourcePath `
+            -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
+            -FrontendDestinationPath $FrontendArtifactPath `
+            -SemanticDestinationPath $SemanticArtifactPath
+        $SemanticCache.lookup = [string]$CacheImport.Status
+        $SemanticCache.diagnostic_code = [string]$CacheImport.DiagnosticCode
+        $SemanticCache.diagnostic_message = [string]$CacheImport.DiagnosticMessage
+        if ($CacheImport.Status -ceq "rejected" -and
+            -not [string]::IsNullOrWhiteSpace([string]$CacheImport.DiagnosticCode)) {
+            $Diagnostics += [ordered]@{
+                code = [string]$CacheImport.DiagnosticCode
+                severity = "warning"
+                message = [string]$CacheImport.DiagnosticMessage
+                file = Convert-ToProjectRelativePath $SemanticCacheRoot
+            }
+        }
+        if ($CacheImport.Status -ceq "hit") {
+            $SemanticCacheHit = $true
+            $SemanticCache.entry_report_file = Convert-ToProjectRelativePath $CacheImport.EntryReportPath
+            $SemanticCache.entry_report_sha256 = [string]$CacheImport.EntryReportSha256
+            $FrontendModel = $CacheImport.FrontendModel
+            $SemanticModel = $CacheImport.SemanticModel
+            $Diagnostics += @(Convert-CompilerDiagnostics $FrontendModel $SourceId)
+            $Diagnostics += @(Convert-CompilerDiagnostics $SemanticModel $SourceId)
+            $SelectedScriptTypeName = Get-SelectedScriptTypeName
+            $BuildReuse.frontend_reused = $true
+            $BuildReuse.semantic_reused = $true
+        }
+    }
+    catch {
+        $SemanticCacheContext = $null
+        $SemanticCache.lookup = "rejected"
+        $CacheErrorCode = [string]$_.Exception.Data["AvidScriptCode"]
+        if ([string]::IsNullOrWhiteSpace($CacheErrorCode)) {
+            $CacheErrorCode = "ASBI4501"
+        }
+        $SemanticCache.diagnostic_code = $CacheErrorCode
+        $SemanticCache.diagnostic_message = $_.Exception.Message
+        $Diagnostics += [ordered]@{
+            code = $CacheErrorCode
+            severity = "warning"
+            message = $_.Exception.Message
+            file = Convert-ToProjectRelativePath $SemanticCacheRoot
+        }
+    }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
     try {
         Assert-AvidScriptPreparedSemantic `
@@ -550,7 +657,7 @@ if (-not [string]::IsNullOrWhiteSpace($PreparedBuildReportPath)) {
         exit 1
     }
 }
-else {
+elseif (-not $SemanticCacheHit) {
     $FrontendArguments = @(
         "-NoProfile", "-ExecutionPolicy", "Bypass",
         "-File", (Join-Path $BuildDir "InvokeCSharpFrontend.ps1"),
@@ -559,6 +666,7 @@ else {
         "-SourceId", $SourceId,
         "-OutputPath", $FrontendArtifactPath,
         "-Configuration", $Configuration)
+    ++$ToolInvocations.frontend
     $FrontendInvocation = Invoke-AvidScriptPowerShell -Arguments $FrontendArguments
     $FrontendOutput = @($FrontendInvocation.Output)
     $FrontendExitCode = [int]$FrontendInvocation.ExitCode
@@ -594,6 +702,7 @@ else {
             "-ExecutableReferenceSourcePath",
             $BindingAuthorizationInfo.ReferenceSourcePath)
     }
+    ++$ToolInvocations.semantic
     $SemanticInvocation = Invoke-AvidScriptPowerShell -Arguments $SemanticArguments
     $SemanticOutput = @($SemanticInvocation.Output)
     $SemanticExitCode = [int]$SemanticInvocation.ExitCode
@@ -627,6 +736,8 @@ $CompilerArguments = @(
     "-WasmPath", $WasmArtifactPath,
     "-InspectionPath", $WasmInspectionArtifactPath,
     "-Configuration", $Configuration)
+    ++$ToolInvocations.guest_ir
+    ++$ToolInvocations.wasm_backend
 $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
 $CompilerOutput = @($CompilerInvocation.Output)
 $CompilerExitCode = [int]$CompilerInvocation.ExitCode
@@ -815,6 +926,48 @@ if ($null -eq $BindingPackageInfo) {
 try {
     Write-JsonAtomic -Path $ManifestPath -Value $Manifest
     Write-BuildReport -Result "direct_abi_built" -DirectAbiSupported $true -ReportDiagnostics $Diagnostics
+    $ShouldPublishSemanticCache = $null -ne $SemanticCacheContext -and
+        -not $SemanticCacheHit -and
+        [string]::IsNullOrWhiteSpace($PreparedBuildReportPath) -and
+        -not $DisableSemanticCache
+    if ($ShouldPublishSemanticCache) {
+        try {
+            $CachePublication = Publish-AvidScriptCSharpSemanticCacheEntry `
+                -Context $SemanticCacheContext `
+                -ProjectRoot $ProjectRoot `
+                -ExpectedSourcePath $SourcePath `
+                -ExpectedAuthorizationPackage $BindingAuthorizationInfo `
+                -SourceReportPath $ReportPath
+            $SemanticCache.entry_report_file = Convert-ToProjectRelativePath $CachePublication.EntryReportPath
+            $SemanticCache.entry_report_sha256 = [string]$CachePublication.EntryReportSha256
+            $SemanticCache.published = [bool]$CachePublication.Published
+            if (-not [string]::IsNullOrWhiteSpace([string]$CachePublication.DiagnosticCode)) {
+                $SemanticCache.diagnostic_code = [string]$CachePublication.DiagnosticCode
+                $SemanticCache.diagnostic_message = [string]$CachePublication.DiagnosticMessage
+                $Diagnostics += [ordered]@{
+                    code = [string]$CachePublication.DiagnosticCode
+                    severity = "warning"
+                    message = [string]$CachePublication.DiagnosticMessage
+                    file = Convert-ToProjectRelativePath $SemanticCacheRoot
+                }
+            }
+        }
+        catch {
+            $CachePublicationCode = [string]$_.Exception.Data["AvidScriptCode"]
+            if ([string]::IsNullOrWhiteSpace($CachePublicationCode)) {
+                $CachePublicationCode = "ASBI4504"
+            }
+            $SemanticCache.diagnostic_code = $CachePublicationCode
+            $SemanticCache.diagnostic_message = $_.Exception.Message
+            $Diagnostics += [ordered]@{
+                code = $CachePublicationCode
+                severity = "warning"
+                message = $_.Exception.Message
+                file = Convert-ToProjectRelativePath $SemanticCacheRoot
+            }
+        }
+        Write-BuildReport -Result "direct_abi_built" -DirectAbiSupported $true -ReportDiagnostics $Diagnostics
+    }
 }
 catch {
     Remove-LoadableArtifacts

@@ -6,10 +6,13 @@ $ErrorActionPreference = "Stop"
 $TestDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolsRoot = Split-Path -Parent $TestDir
 $PluginRoot = Split-Path -Parent $ToolsRoot
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $BuildScript = Join-Path $PluginRoot "Build\BuildCSharpActorLifecycle.ps1"
 $SourcePath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\ActorLifecycleScript.cs"
 $ProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
 $RunRoot = Join-Path $PluginRoot "Saved\AvidScriptFrontendDotNet\BuildPublicationContracts"
+$CacheParent = Join-Path $ProjectRoot "Saved\AvidScript\BuildPublicationContracts"
+$CacheRoot = Join-Path $CacheParent "v1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 
 function Assert-Condition {
@@ -35,6 +38,11 @@ $ErrorActionPreference = "Stop"
     [System.IO.File]::WriteAllText($Path, $Preamble + [System.Environment]::NewLine + $Body, $Utf8)
 }
 
+foreach ($Directory in @($RunRoot, $CacheParent)) {
+    if (Test-Path -LiteralPath $Directory) {
+        Remove-Item -LiteralPath $Directory -Recurse -Force
+    }
+}
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 $SeedRoot = Join-Path $RunRoot "Seed"
@@ -45,6 +53,7 @@ $SeedManifest = Join-Path $SeedRoot "actor_lifecycle.avidscript.json"
     -OutputRoot $SeedRoot `
     -SourcePath $SourcePath `
     -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
     -ModuleId "csharp_actor_lifecycle" `
     -ArtifactStem "actor_lifecycle" `
     -ReportPath $SeedReport `
@@ -57,8 +66,21 @@ Assert-Condition (-not $SeedReportJson.build_reuse.semantic_reused) "ordinary se
 Assert-Condition ([string]::IsNullOrWhiteSpace([string]$SeedReportJson.build_reuse.prepared_report_file)) "ordinary seed build retained a prepared report path"
 Assert-Condition ([string]::IsNullOrWhiteSpace([string]$SeedReportJson.build_reuse.prepared_report_sha256)) "ordinary seed build retained a prepared report hash"
 Assert-Condition ($SeedReportJson.PSObject.Properties.Name -contains "binding_authorization") "build report is missing binding_authorization"
-Assert-Condition ($null -eq $SeedReportJson.binding_authorization) "default source unexpectedly published binding authorization"
+Assert-Condition (
+    -not [bool]$SeedReportJson.binding_authorization.required -and
+    [string]::IsNullOrWhiteSpace([string]$SeedReportJson.binding_authorization.package_name) -and
+    [int]$SeedReportJson.binding_authorization.profile_import_count -eq 0 -and
+    [int]$SeedReportJson.binding_authorization.used_import_count -eq 0) `
+    "default source did not publish explicit empty binding authorization"
 Assert-Condition ($null -eq $SeedReportJson.binding_package) "default source unexpectedly published a runtime binding package"
+Assert-Condition ($SeedReportJson.semantic_cache.lookup -ceq "miss" -and $SeedReportJson.semantic_cache.published) `
+    "seed build did not publish its semantic cache entry"
+Assert-Condition (
+    [int]$SeedReportJson.tool_invocations.frontend -eq 1 -and
+    [int]$SeedReportJson.tool_invocations.semantic -eq 1 -and
+    [int]$SeedReportJson.tool_invocations.guest_ir -eq 1 -and
+    [int]$SeedReportJson.tool_invocations.wasm_backend -eq 1) `
+    "seed build invocation counts differ"
 Assert-Condition ((Get-Content -Raw -LiteralPath $SeedManifest).IndexOf("build_reuse", [System.StringComparison]::Ordinal) -lt 0) "seed manifest leaked build_reuse"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
@@ -82,6 +104,7 @@ $GuestFailureManifest = Join-Path $GuestFailureRoot "actor_lifecycle.avidscript.
     -OutputRoot $GuestFailureRoot `
     -SourcePath $SourcePath `
     -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
     -ModuleId "csharp_actor_lifecycle" `
     -ArtifactStem "actor_lifecycle" `
     -ReportPath $GuestFailureReport `
@@ -127,6 +150,7 @@ $MissingExportManifest = Join-Path $MissingExportRoot "actor_lifecycle.avidscrip
     -OutputRoot $MissingExportRoot `
     -SourcePath $SourcePath `
     -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
     -ModuleId "csharp_actor_lifecycle" `
     -ArtifactStem "actor_lifecycle" `
     -ReportPath $MissingExportReport `
@@ -149,6 +173,7 @@ New-Item -ItemType Directory -Force -Path $PublicationReportDirectory | Out-Null
     -OutputRoot $PublicationRoot `
     -SourcePath $SourcePath `
     -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
     -ModuleId "csharp_actor_lifecycle" `
     -ArtifactStem "actor_lifecycle" `
     -ReportPath $PublicationReportDirectory `
@@ -171,6 +196,7 @@ New-Item -ItemType Directory -Force -Path $PreparedFailureRoot | Out-Null
     -OutputRoot $PreparedFailureRoot `
     -SourcePath $SourcePath `
     -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
     -ModuleId "csharp_actor_lifecycle" `
     -ArtifactStem "actor_lifecycle" `
     -PreparedBuildReportPath $MissingPreparedReport `
@@ -182,6 +208,12 @@ Assert-Condition (Test-Path -LiteralPath $PreparedFailureReport -PathType Leaf) 
 $PreparedFailureJson = Get-Content -Raw -LiteralPath $PreparedFailureReport | ConvertFrom-Json
 Assert-Condition ($PreparedFailureJson.result -eq "prepared_semantic_invalid") "invalid prepared import has the wrong result"
 Assert-Condition (@($PreparedFailureJson.diagnostics | Where-Object code -eq "ASBI4403").Count -eq 1) "invalid prepared import diagnostic is missing"
+Assert-Condition ($PreparedFailureJson.semantic_cache.lookup -ceq "disabled") `
+    "invalid prepared import unexpectedly performed cache lookup"
+Assert-Condition (
+    [int]$PreparedFailureJson.tool_invocations.frontend -eq 0 -and
+    [int]$PreparedFailureJson.tool_invocations.semantic -eq 0) `
+    "invalid prepared import invocation counts differ"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 

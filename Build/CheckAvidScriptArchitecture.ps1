@@ -367,7 +367,7 @@ $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredPreparedBuildContract in @(
-    'AvidScriptCSharpPreparedSemantic.ps1',
+    'AvidScriptCSharpSemanticCache.ps1',
     'Import-AvidScriptCSharpPreparedSemantic',
     'prepared_semantic_invalid',
     'frontend_reused',
@@ -375,6 +375,24 @@ foreach ($RequiredPreparedBuildContract in @(
 )) {
     if (-not $CSharpBuildScriptSource.Contains($RequiredPreparedBuildContract)) {
         Add-Violation "C# build pipeline is missing prepared semantic contract $RequiredPreparedBuildContract"
+    }
+}
+foreach ($RequiredSemanticCacheBuildContract in @(
+    'SemanticCacheRoot',
+    'DisableSemanticCache',
+    'Get-AvidScriptCSharpSemanticCacheContext',
+    'Import-AvidScriptCSharpSemanticCacheEntry',
+    'Publish-AvidScriptCSharpSemanticCacheEntry',
+    'semantic_cache',
+    'toolchain_fingerprint',
+    'tool_invocations',
+    'frontend',
+    'semantic',
+    'guest_ir',
+    'wasm_backend'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredSemanticCacheBuildContract)) {
+        Add-Violation "C# build pipeline is missing semantic cache contract $RequiredSemanticCacheBuildContract"
     }
 }
 foreach ($RequiredPreparedHelperContract in @(
@@ -423,6 +441,13 @@ if ($CSharpPreparedSemanticSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$
 }
 foreach ($RequiredSemanticCacheContract in @(
     'Get-AvidScriptCSharpSemanticCacheContext',
+    'Import-AvidScriptCSharpSemanticCacheEntry',
+    'Publish-AvidScriptCSharpSemanticCacheEntry',
+    'Assert-AvidScriptSemanticCachePublicationContext',
+    'Enter-AvidScriptSemanticCacheKeyLock',
+    '[System.IO.FileShare]::None',
+    'Corrupt',
+    'semantic_cache',
     'Get-AvidScriptCSharpToolchainFingerprint',
     'global.json',
     'Build\InvokeCSharpFrontend.ps1',
@@ -433,7 +458,10 @@ foreach ($RequiredSemanticCacheContract in @(
     'Sort-Object -Property RelativePath',
     'Test-AvidScriptBindingPathContained',
     'ASBI4501',
-    'ASBI4503'
+    'ASBI4502',
+    'ASBI4503',
+    'ASBI4504',
+    'ASBI4505'
 )) {
     if (-not $CSharpSemanticCacheSource.Contains($RequiredSemanticCacheContract)) {
         Add-Violation "C# semantic cache helper is missing deterministic key contract $RequiredSemanticCacheContract"

@@ -211,6 +211,14 @@ Assert-Condition ($PreparedFinalExit -eq 0) "prepared final build failed; actual
 $PreparedFinalJson = Get-Content -Raw -LiteralPath $PreparedFinalReport | ConvertFrom-Json
 Assert-Condition ($PreparedFinalJson.build_reuse.frontend_reused) "prepared final report did not mark frontend reuse"
 Assert-Condition ($PreparedFinalJson.build_reuse.semantic_reused) "prepared final report did not mark semantic reuse"
+Assert-Condition ($PreparedFinalJson.semantic_cache.lookup -ceq "disabled") `
+    "prepared final unexpectedly performed semantic cache lookup"
+Assert-Condition (
+    [int]$PreparedFinalJson.tool_invocations.frontend -eq 0 -and
+    [int]$PreparedFinalJson.tool_invocations.semantic -eq 0 -and
+    [int]$PreparedFinalJson.tool_invocations.guest_ir -eq 1 -and
+    [int]$PreparedFinalJson.tool_invocations.wasm_backend -eq 1) `
+    "prepared final structured invocation counts differ"
 Assert-Condition ((Resolve-ArtifactPath $PreparedFinalJson.build_reuse.prepared_report_file) -eq [System.IO.Path]::GetFullPath($PreparedBootstrapReport)) "prepared final report path provenance differs"
 Assert-Condition ($PreparedFinalJson.build_reuse.prepared_report_sha256 -eq (Get-Sha256Hex $PreparedBootstrapReport)) "prepared final report hash provenance differs"
 $PreparedBootstrapJson = Get-Content -Raw -LiteralPath $PreparedBootstrapReport | ConvertFrom-Json
@@ -358,6 +366,10 @@ Assert-Condition ($BrokenExit -eq 1) "syntax errors must return exit code 1; act
 Assert-Condition (Test-Path -LiteralPath $BrokenReport -PathType Leaf) "syntax failure report is missing"
 $BrokenJson = Get-Content -Raw -LiteralPath $BrokenReport | ConvertFrom-Json
 Assert-Condition ($BrokenJson.result -eq "frontend_failed") "syntax failure report result is not frontend_failed"
+Assert-Condition (
+    [int]$BrokenJson.tool_invocations.frontend -eq 1 -and
+    [int]$BrokenJson.tool_invocations.semantic -eq 0) `
+    "syntax failure structured invocation counts differ"
 Assert-Condition (@($BrokenJson.diagnostics | Where-Object severity -eq "error").Count -gt 0) "syntax failure report has no error diagnostic"
 Assert-Condition (-not (Test-Path -LiteralPath $BrokenManifest -PathType Leaf)) "syntax failure must not produce a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $BrokenRoot "broken.csharp_adapter.wasm") -PathType Leaf)) "syntax failure must remove stale adapter WASM"
@@ -437,6 +449,17 @@ $NormalExit = $LASTEXITCODE
 Assert-Condition ($NormalExit -eq 0) "valid source build failed; exit=$NormalExit"
 $NormalJson = Get-Content -Raw -LiteralPath $NormalReport | ConvertFrom-Json
 Assert-Condition ($NormalJson.result -eq "direct_abi_built") "valid source did not build direct ABI"
+Assert-Condition (@("miss", "hit", "rejected") -ccontains [string]$NormalJson.semantic_cache.lookup) `
+    "valid source report has an invalid semantic cache lookup state"
+$ExpectedRoslynCount = if ($NormalJson.semantic_cache.lookup -ceq "hit") { 0 } else { 1 }
+Assert-Condition (
+    [int]$NormalJson.tool_invocations.frontend -eq $ExpectedRoslynCount -and
+    [int]$NormalJson.tool_invocations.semantic -eq $ExpectedRoslynCount) `
+    "valid source Roslyn invocation counts disagree with cache lookup"
+Assert-Condition (
+    [int]$NormalJson.tool_invocations.guest_ir -eq 1 -and
+    [int]$NormalJson.tool_invocations.wasm_backend -eq 1) `
+    "valid source did not retain Guest IR and WASM invocation counts"
 $NormalFrontendPath = Resolve-ArtifactPath $NormalJson.artifacts.frontend_file
 Assert-Condition (Test-Path -LiteralPath $NormalFrontendPath -PathType Leaf) "valid source frontend artifact is missing"
 $FrontendJson = Get-Content -Raw -LiteralPath $NormalFrontendPath | ConvertFrom-Json
@@ -486,4 +509,4 @@ Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Gu
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 9/9 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 11/11 passed"
