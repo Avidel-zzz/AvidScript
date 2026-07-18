@@ -304,6 +304,7 @@ $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/A
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
+$CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 foreach ($RequiredGameplayPackageContract in @(
     'EmitEngineGameplay',
     'PublishEngineGameplay',
@@ -383,10 +384,20 @@ foreach ($RequiredPreparedHelperContract in @(
     'ASBI4401',
     'ASBI4402',
     'ASBI4403',
-    'ASBI4404'
+    'ASBI4404',
+    'source.source_id'
 )) {
     if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedHelperContract)) {
         Add-Violation "prepared semantic helper is missing validation contract $RequiredPreparedHelperContract"
+    }
+}
+foreach ($RequiredPreparedPublicationContract in @(
+    '[System.IO.FileAttributes]::ReparsePoint',
+    '$Committed = $false',
+    'Atomic pair publication committed, but backup cleanup failed'
+)) {
+    if (-not $CSharpBindingPackageSource.Contains($RequiredPreparedPublicationContract)) {
+        Add-Violation "prepared semantic publisher is missing trust or transaction contract $RequiredPreparedPublicationContract"
     }
 }
 foreach ($ForbiddenPreparedHelperConcern in @(

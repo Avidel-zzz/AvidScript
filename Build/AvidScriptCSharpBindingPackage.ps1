@@ -46,9 +46,32 @@ function Test-AvidScriptBindingPathContained {
         [System.IO.Path]::AltDirectorySeparatorChar)
     $NormalizedCandidate = Get-AvidScriptBindingFullPath $CandidatePath
     $ContainedPrefix = $NormalizedRoot + [System.IO.Path]::DirectorySeparatorChar
-    return $NormalizedCandidate.StartsWith(
-        $ContainedPrefix,
-        [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $NormalizedCandidate.StartsWith(
+            $ContainedPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    $RelativeCandidate = $NormalizedCandidate.Substring($ContainedPrefix.Length)
+    $CurrentPath = $NormalizedRoot
+    foreach ($Segment in @($RelativeCandidate -split '[\\/]')) {
+        if ([string]::IsNullOrWhiteSpace($Segment)) {
+            continue
+        }
+        $CurrentPath = Join-Path $CurrentPath $Segment
+        if (Test-Path -LiteralPath $CurrentPath) {
+            try {
+                $Attributes = [System.IO.File]::GetAttributes($CurrentPath)
+            }
+            catch {
+                return $false
+            }
+            if (($Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return $false
+            }
+        }
+    }
+    return $true
 }
 
 function Resolve-AvidScriptBindingPath {
@@ -109,6 +132,7 @@ function Publish-AvidScriptBindingFilePairAtomic {
         $File.Backup = Join-Path $DestinationDirectory ".$DestinationFileName.$TransactionId.bak"
     }
 
+    $Committed = $false
     try {
         foreach ($File in $Files) {
             Copy-Item -LiteralPath $File.Source -Destination $File.Temporary -Force
@@ -129,12 +153,7 @@ function Publish-AvidScriptBindingFilePairAtomic {
             Move-Item -LiteralPath $File.Temporary -Destination $File.Destination
             $File.Published = $true
         }
-
-        foreach ($File in $Files) {
-            if ($File.HadExisting -and (Test-Path -LiteralPath $File.Backup -PathType Leaf)) {
-                Remove-Item -LiteralPath $File.Backup -Force
-            }
-        }
+        $Committed = $true
     }
     catch {
         $PublishFailure = $_.Exception
@@ -164,10 +183,23 @@ function Publish-AvidScriptBindingFilePairAtomic {
     }
     finally {
         foreach ($File in $Files) {
-            foreach ($CleanupPath in @($File.Temporary, $File.Backup)) {
-                if (-not [string]::IsNullOrWhiteSpace($CleanupPath) -and
-                    (Test-Path -LiteralPath $CleanupPath -PathType Leaf)) {
-                    Remove-Item -LiteralPath $CleanupPath -Force -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($File.Temporary) -and
+                (Test-Path -LiteralPath $File.Temporary -PathType Leaf)) {
+                Remove-Item -LiteralPath $File.Temporary -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if ($Committed) {
+        foreach ($File in $Files) {
+            if ($File.HadExisting -and (Test-Path -LiteralPath $File.Backup -PathType Leaf)) {
+                try {
+                    Remove-Item -LiteralPath $File.Backup -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-Warning (
+                        "Atomic pair publication committed, but backup cleanup failed: " +
+                        $File.Backup)
                 }
             }
         }

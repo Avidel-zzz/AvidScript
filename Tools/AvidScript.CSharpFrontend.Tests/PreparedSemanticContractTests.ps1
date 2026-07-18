@@ -239,6 +239,29 @@ Assert-PreparedSemanticFailure `
     -FrontendDestinationPath (Join-Path $RunRoot "SourceMismatch\prepared_semantic_contract.csharp.frontend.json") `
     -SemanticDestinationPath (Join-Path $RunRoot "SourceMismatch\prepared_semantic_contract.csharp.semantic.json")
 
+$SameContentSourcePath = Join-Path $RunRoot "SourceIdentity\PreparedSemanticContractScript.cs"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $SameContentSourcePath) | Out-Null
+Copy-Item -LiteralPath $SourcePath -Destination $SameContentSourcePath -Force
+$NormalizedProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar)
+$SameContentSourceId = [System.IO.Path]::GetFullPath($SameContentSourcePath).Substring(
+    $NormalizedProjectRoot.Length + 1).Replace("\", "/")
+$SourceIdentityReportPath = New-MutatedReportPath `
+    -Directory (Join-Path $RunRoot "SourceIdentity") `
+    -FileName "prepared_semantic_contract.csharp.report.json" `
+    -Mutation {
+        param($Report)
+        $Report.source.file = $SameContentSourceId
+    }
+Assert-PreparedSemanticFailure `
+    -PreparedReportPath $SourceIdentityReportPath `
+    -ExpectedSourcePath $SameContentSourcePath `
+    -ExpectedAuthorizationPackage $AuthorizationPackage `
+    -ExpectedCode "ASBI4403" `
+    -FrontendDestinationPath (Join-Path $RunRoot "SourceIdentity\prepared_semantic_contract.csharp.frontend.json") `
+    -SemanticDestinationPath (Join-Path $RunRoot "SourceIdentity\prepared_semantic_contract.csharp.semantic.json")
+
 $AuthorizationMismatch = $AuthorizationPackage | ConvertTo-Json -Depth 32 | ConvertFrom-Json
 $AuthorizationMismatch.PackageHash = ("0" * 64)
 Assert-PreparedSemanticFailure `
@@ -283,6 +306,36 @@ Assert-PreparedSemanticFailure `
     -FrontendDestinationPath (Join-Path $RunRoot "PathEscape\prepared_semantic_contract.csharp.frontend.json") `
     -SemanticDestinationPath (Join-Path $RunRoot "PathEscape\prepared_semantic_contract.csharp.semantic.json")
 
+$JunctionOutsideRoot = Join-Path $RunRoot "JunctionOutside"
+$JunctionPath = Join-Path $FixtureRoot ("PreparedJunction." + [System.Guid]::NewGuid().ToString("N"))
+$JunctionFrontendPath = Join-Path $JunctionOutsideRoot "escaped.csharp.frontend.json"
+New-Item -ItemType Directory -Force -Path $JunctionOutsideRoot | Out-Null
+Copy-Item -LiteralPath $PreparedFrontendPath -Destination $JunctionFrontendPath -Force
+New-Item -ItemType Junction -Path $JunctionPath -Target $JunctionOutsideRoot | Out-Null
+try {
+    $JunctionArtifactPath = Join-Path $JunctionPath "escaped.csharp.frontend.json"
+    $JunctionReportPath = New-MutatedReportPath `
+        -Directory (Join-Path $RunRoot "JunctionEscape") `
+        -FileName "prepared_semantic_contract.csharp.report.json" `
+        -Mutation {
+            param($Report)
+            $Report.artifacts.frontend_file = $JunctionArtifactPath
+            $Report.frontend.artifact_sha256 = Get-Sha256Hex $JunctionArtifactPath
+        }
+    Assert-PreparedSemanticFailure `
+        -PreparedReportPath $JunctionReportPath `
+        -ExpectedSourcePath $SourcePath `
+        -ExpectedAuthorizationPackage $AuthorizationPackage `
+        -ExpectedCode "ASBI4404" `
+        -FrontendDestinationPath (Join-Path $RunRoot "JunctionEscape\prepared_semantic_contract.csharp.frontend.json") `
+        -SemanticDestinationPath (Join-Path $RunRoot "JunctionEscape\prepared_semantic_contract.csharp.semantic.json")
+}
+finally {
+    if (Test-Path -LiteralPath $JunctionPath) {
+        [System.IO.Directory]::Delete($JunctionPath)
+    }
+}
+
 Assert-Condition (
     $null -ne (Get-Command "Publish-AvidScriptBindingFilePairAtomic" -ErrorAction SilentlyContinue)) `
     "transactional binding file pair publisher is missing"
@@ -320,7 +373,7 @@ finally {
 Assert-Condition $PairPublishFailed "locked second destination did not fail transactional pair publication"
 Assert-Condition ((Get-Content -Raw -LiteralPath $PairFrontendDestination) -ceq "old-frontend") "pair rollback did not restore the old frontend"
 Assert-Condition ((Get-Content -Raw -LiteralPath $PairSemanticDestination) -ceq "old-semantic") "pair rollback did not preserve the old semantic"
-Assert-Condition (@(Get-ChildItem -LiteralPath $PairRollbackRoot -File | Where-Object Name -Match '\.(tmp|bak)\.').Count -eq 0) "pair rollback left temporary or backup files"
+Assert-Condition (@(Get-ChildItem -LiteralPath $PairRollbackRoot -File | Where-Object Name -Match '\.(tmp|bak)$').Count -eq 0) "pair rollback left temporary or backup files"
 
 $PublishRollbackRoot = Join-Path $RunRoot "PublishedPairRollback"
 $PublishFrontendSource = Join-Path $PublishRollbackRoot "new.frontend.json"
@@ -375,7 +428,65 @@ Assert-Condition $PublishedPairFailed "injected second publication failure did n
 Assert-Condition $script:PairFaultObservedFirstPublish "fault injection fired before the first new file was published"
 Assert-Condition ((Get-Content -Raw -LiteralPath $PublishFrontendDestination) -ceq "old-published-frontend") "published-pair rollback did not restore the old frontend"
 Assert-Condition ((Get-Content -Raw -LiteralPath $PublishSemanticDestination) -ceq "old-published-semantic") "published-pair rollback did not restore the old semantic"
-Assert-Condition (@(Get-ChildItem -LiteralPath $PublishRollbackRoot -File | Where-Object Name -Match '\.(tmp|bak)\.').Count -eq 0) "published-pair rollback left temporary or backup files"
+Assert-Condition (@(Get-ChildItem -LiteralPath $PublishRollbackRoot -File | Where-Object Name -Match '\.(tmp|bak)$').Count -eq 0) "published-pair rollback left temporary or backup files"
 
-Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 7/7 passed"
+$CleanupFaultRoot = Join-Path $RunRoot "CommittedPairCleanupFailure"
+$CleanupFrontendSource = Join-Path $CleanupFaultRoot "new.frontend.json"
+$CleanupSemanticSource = Join-Path $CleanupFaultRoot "new.semantic.json"
+$CleanupFrontendDestination = Join-Path $CleanupFaultRoot "current.frontend.json"
+$CleanupSemanticDestination = Join-Path $CleanupFaultRoot "current.semantic.json"
+New-Item -ItemType Directory -Force -Path $CleanupFaultRoot | Out-Null
+Copy-Item -LiteralPath $PreparedFrontendPath -Destination $CleanupFrontendSource -Force
+Copy-Item -LiteralPath $PreparedSemanticPath -Destination $CleanupSemanticSource -Force
+[System.IO.File]::WriteAllText($CleanupFrontendDestination, "old-cleanup-frontend", $Utf8)
+[System.IO.File]::WriteAllText($CleanupSemanticDestination, "old-cleanup-semantic", $Utf8)
+$script:BackupCleanupCount = 0
+function Remove-Item {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [switch]$Force,
+        [switch]$Recurse
+    )
+
+    if ($LiteralPath.EndsWith(".bak", [System.StringComparison]::OrdinalIgnoreCase)) {
+        ++$script:BackupCleanupCount
+        if ($script:BackupCleanupCount -eq 2) {
+            throw "Injected second backup cleanup failure."
+        }
+    }
+    Microsoft.PowerShell.Management\Remove-Item @PSBoundParameters
+}
+$CleanupPublishFailed = $false
+try {
+    try {
+        Publish-AvidScriptBindingFilePairAtomic `
+            -FirstSourcePath $CleanupFrontendSource `
+            -FirstDestinationPath $CleanupFrontendDestination `
+            -SecondSourcePath $CleanupSemanticSource `
+            -SecondDestinationPath $CleanupSemanticDestination
+    }
+    catch {
+        $CleanupPublishFailed = $true
+    }
+}
+finally {
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath "Function:\Remove-Item" -Force
+}
+Assert-Condition ($script:BackupCleanupCount -eq 2) "post-commit cleanup fixture did not reach the second backup"
+Assert-Condition (-not $CleanupPublishFailed) "post-commit backup cleanup failure escaped the pair publisher"
+Assert-Condition (
+    (Test-Path -LiteralPath $CleanupFrontendDestination -PathType Leaf) -and
+    (Get-Sha256Hex $CleanupFrontendDestination) -ceq (Get-Sha256Hex $CleanupFrontendSource)) `
+    "post-commit cleanup failure did not preserve the new frontend"
+Assert-Condition (
+    (Test-Path -LiteralPath $CleanupSemanticDestination -PathType Leaf) -and
+    (Get-Sha256Hex $CleanupSemanticDestination) -ceq (Get-Sha256Hex $CleanupSemanticSource)) `
+    "post-commit cleanup failure did not preserve the new semantic"
+$CleanupArtifacts = @(Get-ChildItem -LiteralPath $CleanupFaultRoot -File | Where-Object Name -Match '\.(tmp|bak)$')
+foreach ($CleanupArtifact in $CleanupArtifacts) {
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $CleanupArtifact.FullName -Force
+}
+
+Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 10/10 passed"
 exit 0
