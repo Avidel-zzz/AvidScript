@@ -133,6 +133,160 @@ bool BuildAvidScriptGeneratedBindingLifecycle(
 	Config.SemanticCacheRoot = SemanticCacheRoot;
 	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
+
+bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
+	FAutomationTestBase& Test,
+	const FString& BuildLabel,
+	const FAvidScriptEditorCSharpBuildResult& BuildResult,
+	FAvidScriptWasmReloadManifest& OutManifest,
+	TArray<uint8>& OutBytecode)
+{
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization binding package exists"), *BuildLabel),
+			FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath))
+		|| !Test.TestTrue(
+			*FString::Printf(TEXT("%s runtime binding package exists"), *BuildLabel),
+			FPaths::FileExists(BuildResult.BindingPackagePath)))
+	{
+		return false;
+	}
+	Test.TestNotEqual(
+		*FString::Printf(TEXT("%s separates authorization and runtime packages"), *BuildLabel),
+		BuildResult.AuthorizationBindingPackagePath,
+		BuildResult.BindingPackagePath);
+
+	FString AuthorizationPackageJson;
+	TSharedPtr<FJsonObject> AuthorizationPackageObject;
+	const TArray<TSharedPtr<FJsonValue>>* AuthorizationImports = nullptr;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package can be read"), *BuildLabel),
+			FFileHelper::LoadFileToString(
+				AuthorizationPackageJson,
+				*BuildResult.AuthorizationBindingPackagePath))
+		|| !Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package parses"), *BuildLabel),
+			FJsonSerializer::Deserialize(
+				TJsonReaderFactory<>::Create(AuthorizationPackageJson),
+				AuthorizationPackageObject))
+		|| !Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package exposes required imports"), *BuildLabel),
+			AuthorizationPackageObject.IsValid()
+				&& AuthorizationPackageObject->TryGetArrayField(
+					TEXT("required_imports"),
+					AuthorizationImports))
+		|| AuthorizationImports == nullptr)
+	{
+		return false;
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s authorization ceiling contains 115 generated bindings"), *BuildLabel),
+		AuthorizationImports->Num(),
+		115);
+
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s manifest, WASM, and runtime package load"), *BuildLabel),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				OutManifest,
+				OutBytecode,
+				ManifestLoadResult)))
+	{
+		Test.AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s owns an immutable runtime package"), *BuildLabel),
+			OutManifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s runtime package contains two reachable bindings"), *BuildLabel),
+		OutManifest.BindingPackage->GetVmPackage().Imports.Num(),
+		2);
+	int32 RequiredDynamicImportCount = 0;
+	for (const FAvidScriptWasmRequiredImport& Import : OutManifest.RequiredImports)
+	{
+		if (Import.ModuleName == TEXT("avidscript")
+			&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+		{
+			++RequiredDynamicImportCount;
+		}
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s WASM requires two reachable reflected imports"), *BuildLabel),
+		RequiredDynamicImportCount,
+		2);
+
+	UWorld* World = nullptr;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s integration world is created"), *BuildLabel),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!Test.TestNotNull(
+			*FString::Printf(TEXT("%s lifecycle actor spawns"), *BuildLabel),
+			Actor))
+	{
+		return false;
+	}
+	Actor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s lifecycle owner registers"), *BuildLabel),
+		RegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s BeginPlay activates through Runtime Session and WAMR"), *BuildLabel),
+			Session.LoadInitialModule(
+				OutBytecode.GetData(),
+				OutBytecode.Num(),
+				OutManifest,
+				ReloadResult)))
+	{
+		Test.AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s BeginPlay applies generated FVector binding"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(2.0, 3.0, 4.0), 0.001));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s Tick executes through the live scheduler"), *BuildLabel),
+			Session.TickLive(0.5f, TickResult)))
+	{
+		Test.AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s Tick reads and writes through generated bindings"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s scheduler records one Tick"), *BuildLabel),
+		Session.GetLiveTickCallCount(),
+		1);
+	return true;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -354,6 +508,18 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	TestEqual(TEXT("Cold lifecycle records semantic cache miss"), ColdBuildResult.SemanticCacheLookup, FString(TEXT("miss")));
 	TestTrue(TEXT("Cold lifecycle publishes semantic cache entry"), ColdBuildResult.bSemanticCachePublished);
 
+	FAvidScriptWasmReloadManifest ColdManifest;
+	TArray<uint8> ColdBytecode;
+	if (!AcceptAvidScriptGeneratedBindingLifecycleBuild(
+			*this,
+			TEXT("Cold lifecycle"),
+			ColdBuildResult,
+			ColdManifest,
+			ColdBytecode))
+	{
+		return false;
+	}
+
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!TestTrue(
 		TEXT("Warm custom C# lifecycle reuses semantic cache and remains loadable"),
@@ -369,52 +535,18 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 	TestEqual(TEXT("Warm lifecycle still invokes WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
 	TestEqual(TEXT("Warm lifecycle records semantic cache hit"), BuildResult.SemanticCacheLookup, FString(TEXT("hit")));
 	TestFalse(TEXT("Warm lifecycle does not republish semantic cache entry"), BuildResult.bSemanticCachePublished);
-	TestTrue(
-		TEXT("Editor build records the complete authorization binding package"),
-		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
-	TestTrue(
-		TEXT("Editor build records the minimal runtime binding package"),
-		FPaths::FileExists(BuildResult.BindingPackagePath));
-	TestNotEqual(
-		TEXT("Generated lifecycle separates authorization and runtime packages"),
-		BuildResult.AuthorizationBindingPackagePath,
-		BuildResult.BindingPackagePath);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
-	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
-	if (!TestTrue(
-		TEXT("Runtime transaction loads the generated C# manifest and binding package"),
-		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
-			BuildResult.ManifestPath,
+	if (!AcceptAvidScriptGeneratedBindingLifecycleBuild(
+			*this,
+			TEXT("Warm lifecycle"),
+			BuildResult,
 			Manifest,
-			Bytecode,
-			ManifestLoadResult)))
-	{
-		AddError(ManifestLoadResult.ErrorMessage);
-		return false;
-	}
-	if (!TestTrue(TEXT("Loaded manifest owns an immutable binding package"), Manifest.BindingPackage.IsValid()))
+			Bytecode))
 	{
 		return false;
 	}
-	TestEqual(
-		TEXT("Generated runtime package exposes only two reflected imports and cached plans"),
-		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
-		2);
-	int32 RequiredDynamicImportCount = 0;
-	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
-	{
-		if (Import.ModuleName == TEXT("avidscript")
-			&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
-		{
-			++RequiredDynamicImportCount;
-		}
-	}
-	TestEqual(
-		TEXT("Generated C# lifecycle WASM keeps only its two reachable reflected imports"),
-		RequiredDynamicImportCount,
-		2);
 
 	FString ManifestJson;
 	TSharedPtr<FJsonObject> ManifestObject;
@@ -472,63 +604,6 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		TamperedLoadResult.ErrorCategory,
 		FString(TEXT("binding_package_hash_mismatch")));
 
-	UWorld* World = nullptr;
-	if (!TestTrue(
-		TEXT("Generated C# lifecycle integration world is created"),
-		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
-	{
-		return false;
-	}
-	ON_SCOPE_EXIT
-	{
-		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
-	};
-
-	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
-	if (!TestNotNull(TEXT("Generated C# lifecycle actor spawns"), Actor))
-	{
-		return false;
-	}
-	Actor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
-
-	FAvidScriptObjectRegistry Registry;
-	FAvidScriptObjectHandleResult RegisterResult;
-	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
-	TestTrue(TEXT("Generated C# lifecycle owner registers"), RegisterResult.bSucceeded);
-
-	FAvidScriptWasmHostContext HostContext;
-	HostContext.ObjectRegistry = &Registry;
-	HostContext.OwnerHandle = ActorHandle;
-	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
-
-	FAvidScriptRuntimeSession Session;
-	Session.SetHostContext(HostContext);
-	FAvidScriptWasmReloadResult ReloadResult;
-	if (!TestTrue(
-		TEXT("C# BeginPlay activates through Runtime Session and WAMR"),
-		Session.LoadInitialModule(
-			Bytecode.GetData(),
-			Bytecode.Num(),
-			Manifest,
-			ReloadResult)))
-	{
-		AddError(ReloadResult.ErrorMessage);
-		return false;
-	}
-	TestTrue(
-		TEXT("C# BeginPlay applies FVector scale through generated UE.Self binding"),
-		Actor->GetActorScale3D().Equals(FVector(2.0, 3.0, 4.0), 0.001));
-
-	FAvidScriptWasmSmokeResult TickResult;
-	if (!TestTrue(TEXT("C# Tick executes through the live scheduler"), Session.TickLive(0.5f, TickResult)))
-	{
-		AddError(TickResult.ErrorMessage);
-		return false;
-	}
-	TestTrue(
-		TEXT("C# Tick reads and writes FVector through cached reflected imports"),
-		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
-	TestEqual(TEXT("Live scheduler records one C# Tick"), Session.GetLiveTickCallCount(), 1);
 	return true;
 }
 

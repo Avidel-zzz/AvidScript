@@ -39,6 +39,17 @@ FString GetCSharpContractReportMetadataJson()
 		"\"tool_invocations\":{\"frontend\":1,\"semantic\":1,\"guest_ir\":1,\"wasm_backend\":1},");
 }
 
+FString GetCSharpContractZeroInvocationReportMetadataJson()
+{
+	return TEXT(
+		"\"semantic_cache\":{\"schema_version\":1,\"enabled\":true,"
+		"\"key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+		"\"toolchain_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\","
+		"\"lookup\":\"miss\",\"entry_report_file\":\"\",\"entry_report_sha256\":\"\","
+		"\"published\":false,\"diagnostic_code\":\"\",\"diagnostic_message\":\"\"},"
+		"\"tool_invocations\":{\"frontend\":0,\"semantic\":0,\"guest_ir\":0,\"wasm_backend\":0},");
+}
+
 FAvidScriptEditorCSharpBuildConfig MakeCSharpContractConfig(
 	const FString& TestRoot,
 	const FString& CaseName,
@@ -101,6 +112,24 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 	TestEqual(TEXT("Failed report preserves Guest IR count"), FailedReportResult.GuestIrInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves WASM count"), FailedReportResult.WasmBackendInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves cache lookup"), FailedReportResult.SemanticCacheLookup, FString(TEXT("miss")));
+
+	const FString FrontendNotInvokedBody = FString::Printf(TEXT(
+		"$Json = '{\"schema_version\":1,\"result\":\"frontend_failed\",\"succeeded\":false,%s"
+		"\"diagnostics\":[{\"code\":\"ASCS1001\",\"severity\":\"error\",\"message\":\"frontend was not invoked\"}]}'\n"
+		"[System.IO.File]::WriteAllText($ReportPath, $Json)"),
+		*GetCSharpContractZeroInvocationReportMetadataJson());
+	const FAvidScriptEditorCSharpBuildConfig FrontendNotInvokedConfig = MakeCSharpContractConfig(
+		TestRoot, TEXT("FrontendNotInvoked"), FrontendNotInvokedBody);
+	FAvidScriptEditorCSharpBuildResult FrontendNotInvokedResult;
+	TestFalse(TEXT("Started process can report failure before Frontend invocation"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(FrontendNotInvokedConfig, FrontendNotInvokedResult));
+	TestEqual(TEXT("Pre-Frontend failure category"),
+		FrontendNotInvokedResult.ErrorCategory, FString(TEXT("frontend_failed")));
+	TestEqual(TEXT("Pre-Frontend failure records one build process"), FrontendNotInvokedResult.BuildInvocationCount, 1);
+	TestEqual(TEXT("Pre-Frontend failure does not speculate Frontend"), FrontendNotInvokedResult.FrontendInvocationCount, 0);
+	TestEqual(TEXT("Pre-Frontend failure does not speculate Semantic"), FrontendNotInvokedResult.SemanticInvocationCount, 0);
+	TestEqual(TEXT("Pre-Frontend failure does not speculate Guest IR"), FrontendNotInvokedResult.GuestIrInvocationCount, 0);
+	TestEqual(TEXT("Pre-Frontend failure does not speculate WASM"), FrontendNotInvokedResult.WasmBackendInvocationCount, 0);
 
 	const FString SuccessJson = FString::Printf(TEXT(
 		"{\"schema_version\":1,\"result\":\"direct_abi_built\",\"succeeded\":true,%s\"diagnostics\":[]}"),
