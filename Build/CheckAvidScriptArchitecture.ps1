@@ -303,6 +303,7 @@ $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
+$CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 foreach ($RequiredGameplayPackageContract in @(
     'EmitEngineGameplay',
     'PublishEngineGameplay',
@@ -318,7 +319,9 @@ if (-not $CSharpBuildServiceSource.Contains('PublishEngineGameplay(BindingEmitRe
 foreach ($RequiredBuildOrchestrationContract in @(
     'FAvidScriptEditorCSharpBuildInvoker::BuildOnce',
     'FAvidScriptEditorCSharpBindingSliceService::Publish',
-    'CSharpBootstrap'
+    'CSharpBootstrap',
+    'PreparedBuildReportPath',
+    'FinalConfig.PreparedBuildReportPath = BootstrapConfig.ReportPath'
 )) {
     if (-not $CSharpBuildServiceSource.Contains($RequiredBuildOrchestrationContract)) {
         Add-Violation "C# BuildService is missing orchestration contract $RequiredBuildOrchestrationContract"
@@ -335,6 +338,7 @@ foreach ($ForbiddenBuildServiceConcern in @(
 }
 if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
     -not $CSharpBuildInvokerSource.Contains('-RuntimeBindingPackagePath') -or
+    -not $CSharpBuildInvokerSource.Contains('-PreparedBuildReportPath') -or
     $CSharpBuildInvokerSource.Contains('PublishEngineGameplay') -or
     $CSharpBuildInvokerSource.Contains('BindingSliceService')) {
     Add-Violation 'C# BuildInvoker must execute one normalized build without selecting or slicing packages'
@@ -360,6 +364,49 @@ $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Ana
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
+foreach ($RequiredPreparedBuildContract in @(
+    'AvidScriptCSharpPreparedSemantic.ps1',
+    'Import-AvidScriptCSharpPreparedSemantic',
+    'prepared_semantic_invalid',
+    'frontend_reused',
+    'semantic_reused'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredPreparedBuildContract)) {
+        Add-Violation "C# build pipeline is missing prepared semantic contract $RequiredPreparedBuildContract"
+    }
+}
+foreach ($RequiredPreparedHelperContract in @(
+    'Import-AvidScriptCSharpPreparedSemantic',
+    'ExpectedSourcePath',
+    'ExpectedAuthorizationPackage',
+    'Publish-AvidScriptBindingFilePairAtomic',
+    'ASBI4401',
+    'ASBI4402',
+    'ASBI4403',
+    'ASBI4404'
+)) {
+    if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedHelperContract)) {
+        Add-Violation "prepared semantic helper is missing validation contract $RequiredPreparedHelperContract"
+    }
+}
+foreach ($ForbiddenPreparedHelperConcern in @(
+    '\bdotnet(?:\.exe)?\b',
+    '\bpowershell(?:\.exe)?\b',
+    '\bStart-Process\b',
+    '\bInvoke-AvidScriptPowerShell\b',
+    '\bRuntimeBindingPackagePath\b',
+    '\bOmitRuntimeBindingPackage\b',
+    '\bPublishEngineGameplay\b',
+    '\bBindingSliceService\b'
+)) {
+    if ($CSharpPreparedSemanticSource -match $ForbiddenPreparedHelperConcern) {
+        Add-Violation "prepared semantic helper owns forbidden toolchain, source, or package-policy concern $ForbiddenPreparedHelperConcern"
+    }
+}
+if ($CSharpPreparedSemanticSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$ExpectedSource' -or
+    $CSharpPreparedSemanticSource -match 'ReadAllText\s*\(\s*\$ExpectedSource') {
+    Add-Violation 'prepared semantic helper must hash the C# source without scanning its text'
+}
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'CurrentSchemaVersion = 5',

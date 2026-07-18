@@ -339,6 +339,8 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		return false;
 	}
 	TestEqual(TEXT("Generated lifecycle performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Generated lifecycle invokes the C# frontend once"), BuildResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Generated lifecycle invokes C# semantic analysis once"), BuildResult.SemanticInvocationCount, 1);
 	TestTrue(
 		TEXT("Editor build records the complete authorization binding package"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
