@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "language": "csharp",
+  "source_path": "{{SOURCE_PATH}}",
+  "project_path": "{{PROJECT_PATH}}",
+  "module_id": "csharp_project_gameplay",
+  "artifact_stem": "project_gameplay",
+  "output_root": "{{OUTPUT_ROOT}}",
+  "report_path": "{{REPORT_PATH}}",
+  "manifest_path": "{{MANIFEST_PATH}}",
+  "build_script_path": "{{BUILD_SCRIPT_PATH}}",
+  "configuration": "Release"
+}

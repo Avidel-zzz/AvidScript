@@ -315,6 +315,28 @@ foreach ($RequiredGameplayPackageContract in @(
         Add-Violation "C# binding emitter is missing gameplay package contract $RequiredGameplayPackageContract"
     }
 }
+$CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'
+$CSharpWorkspaceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpWorkspace/AvidScriptEditorCSharpWorkspaceService.cpp'
+foreach ($RequiredWorkspaceTemplate in @(
+    'Templates/CSharp/ProjectWorkspace/GameplayScript.cs',
+    'Templates/CSharp/ProjectWorkspace/AvidScript.Gameplay.csproj.template',
+    'Templates/CSharp/ProjectWorkspace/default.csharp-profile.json.template',
+    'Templates/CSharp/ProjectWorkspace/global.json'
+)) {
+    [void](Read-RequiredFile $RequiredWorkspaceTemplate)
+}
+foreach ($RequiredWorkspaceContract in @('CreateOrRefresh', 'GetDefaultWorkspaceRoot', 'GetDefaultFacadePath')) {
+    if (-not $CSharpWorkspaceHeader.Contains($RequiredWorkspaceContract)) {
+        Add-Violation "C# WorkspaceService is missing contract $RequiredWorkspaceContract"
+    }
+}
+if (-not $CSharpWorkspaceSource.Contains('FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay') -or
+    -not $CSharpWorkspaceSource.Contains('Templates') -or
+    $CSharpWorkspaceSource.Contains('FAvidScriptEditorCSharpBuildService::BuildProfile') -or
+    $CSharpWorkspaceSource.Contains('FAvidScriptEditorComponentBindingService') -or
+    $CSharpWorkspaceSource.Contains('FPlatformProcess')) {
+    Add-Violation 'C# WorkspaceService must own files and IDE facade refresh without build, binding, or process concerns'
+}
 if (-not $CSharpBuildServiceSource.Contains('PublishEngineGameplay(BindingEmitResult)')) {
     Add-Violation 'custom C# builds must default to the generated engine gameplay package'
 }
