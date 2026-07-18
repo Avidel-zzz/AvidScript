@@ -430,6 +430,93 @@ Assert-Condition ((Get-Content -Raw -LiteralPath $PublishFrontendDestination) -c
 Assert-Condition ((Get-Content -Raw -LiteralPath $PublishSemanticDestination) -ceq "old-published-semantic") "published-pair rollback did not restore the old semantic"
 Assert-Condition (@(Get-ChildItem -LiteralPath $PublishRollbackRoot -File | Where-Object Name -Match '\.(tmp|bak)$').Count -eq 0) "published-pair rollback left temporary or backup files"
 
+$RollbackDeleteRoot = Join-Path $RunRoot "RollbackDeletionFailure"
+$RollbackDeleteFrontendSource = Join-Path $RollbackDeleteRoot "new.frontend.json"
+$RollbackDeleteSemanticSource = Join-Path $RollbackDeleteRoot "new.semantic.json"
+$RollbackDeleteFrontendDestination = Join-Path $RollbackDeleteRoot "current.frontend.json"
+$RollbackDeleteSemanticDestination = Join-Path $RollbackDeleteRoot "current.semantic.json"
+New-Item -ItemType Directory -Force -Path $RollbackDeleteRoot | Out-Null
+Copy-Item -LiteralPath $PreparedFrontendPath -Destination $RollbackDeleteFrontendSource -Force
+Copy-Item -LiteralPath $PreparedSemanticPath -Destination $RollbackDeleteSemanticSource -Force
+$script:RollbackDeleteFirstDestination = [System.IO.Path]::GetFullPath($RollbackDeleteFrontendDestination)
+$script:RollbackDeleteSecondDestination = [System.IO.Path]::GetFullPath($RollbackDeleteSemanticDestination)
+$script:RollbackDeleteFirstPublished = $false
+$script:RollbackDeleteAttempted = $false
+function Move-Item {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [switch]$Force
+    )
+
+    $SourceFullPath = [System.IO.Path]::GetFullPath($LiteralPath)
+    $DestinationFullPath = [System.IO.Path]::GetFullPath($Destination)
+    if ($SourceFullPath.EndsWith(".tmp", [System.StringComparison]::OrdinalIgnoreCase)) {
+        if ($DestinationFullPath.Equals($script:RollbackDeleteFirstDestination, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+            $script:RollbackDeleteFirstPublished = $true
+            return
+        }
+        if ($DestinationFullPath.Equals($script:RollbackDeleteSecondDestination, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Injected second publication failure before rollback deletion."
+        }
+    }
+    Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+}
+function Remove-Item {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [switch]$Force,
+        [switch]$Recurse
+    )
+
+    $CandidateFullPath = if ($LiteralPath.StartsWith("Function:", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $LiteralPath
+    }
+    else {
+        [System.IO.Path]::GetFullPath($LiteralPath)
+    }
+    if ($script:RollbackDeleteFirstPublished -and
+        $CandidateFullPath.Equals($script:RollbackDeleteFirstDestination, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $script:RollbackDeleteAttempted = $true
+        throw "Injected rollback destination deletion failure."
+    }
+    Microsoft.PowerShell.Management\Remove-Item @PSBoundParameters
+}
+$RollbackDeleteFailure = $null
+try {
+    try {
+        Publish-AvidScriptBindingFilePairAtomic `
+            -FirstSourcePath $RollbackDeleteFrontendSource `
+            -FirstDestinationPath $RollbackDeleteFrontendDestination `
+            -SecondSourcePath $RollbackDeleteSemanticSource `
+            -SecondDestinationPath $RollbackDeleteSemanticDestination
+    }
+    catch {
+        $RollbackDeleteFailure = $_
+    }
+}
+finally {
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath "Function:\Move-Item" -Force
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath "Function:\Remove-Item" -Force
+}
+Assert-Condition $script:RollbackDeleteAttempted "rollback deletion failure fixture did not reach destination cleanup"
+Assert-Condition ($null -ne $RollbackDeleteFailure) "rollback deletion failure unexpectedly succeeded"
+Assert-Condition ($RollbackDeleteFailure.Exception.Message -like "Atomic pair publication failed and rollback was incomplete:*") `
+    "rollback destination deletion failure was not reported as rollback incomplete"
+Assert-Condition (Test-Path -LiteralPath $RollbackDeleteFrontendDestination -PathType Leaf) `
+    "rollback deletion failure unexpectedly removed the published frontend"
+Assert-Condition (-not (Test-Path -LiteralPath $RollbackDeleteSemanticDestination)) `
+    "rollback deletion failure unexpectedly published the semantic destination"
+$RollbackRecoveryArtifacts = @(Get-ChildItem -LiteralPath $RollbackDeleteRoot -File | Where-Object Name -Match '\.tmp$')
+Assert-Condition ($RollbackRecoveryArtifacts.Count -eq 1) "rollback deletion failure did not preserve exactly one staged recovery artifact"
+Assert-Condition ((Get-Sha256Hex $RollbackRecoveryArtifacts[0].FullName) -ceq (Get-Sha256Hex $RollbackDeleteSemanticSource)) `
+    "rollback staged recovery artifact does not match the unpublished semantic source"
+Microsoft.PowerShell.Management\Remove-Item -LiteralPath $RollbackDeleteFrontendDestination -Force
+Microsoft.PowerShell.Management\Remove-Item -LiteralPath $RollbackRecoveryArtifacts[0].FullName -Force
+
 $CleanupFaultRoot = Join-Path $RunRoot "CommittedPairCleanupFailure"
 $CleanupFrontendSource = Join-Path $CleanupFaultRoot "new.frontend.json"
 $CleanupSemanticSource = Join-Path $CleanupFaultRoot "new.semantic.json"
@@ -488,5 +575,5 @@ foreach ($CleanupArtifact in $CleanupArtifacts) {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $CleanupArtifact.FullName -Force
 }
 
-Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 10/10 passed"
+Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 11/11 passed"
 exit 0

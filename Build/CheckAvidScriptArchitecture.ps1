@@ -394,7 +394,9 @@ foreach ($RequiredPreparedHelperContract in @(
 foreach ($RequiredPreparedPublicationContract in @(
     '[System.IO.FileAttributes]::ReparsePoint',
     '$Committed = $false',
-    'Atomic pair publication committed, but backup cleanup failed'
+    'Atomic pair publication committed, but backup cleanup failed',
+    '$PreserveRecoveryMaterial = $false',
+    'Failed to remove published destination'
 )) {
     if (-not $CSharpBindingPackageSource.Contains($RequiredPreparedPublicationContract)) {
         Add-Violation "prepared semantic publisher is missing trust or transaction contract $RequiredPreparedPublicationContract"

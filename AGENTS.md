@@ -601,7 +601,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Prepared artifact 路径必须同时通过词法包含和物理路径逐段校验；prepared root 下任何目录联接、符号链接或其他 reparse point 一律拒绝。
 - Frontend/Semantic artifact 的 `source.source_id` 必须与 prepared report 的 `source.file` 完全一致，源码哈希相同不能替代源身份校验。
 - 双文件发布在两个 destination 都替换成功后进入提交态。提交前失败必须反向回滚；提交后的备份清理失败只能告警并保留新产物，不得触发回滚。
-- P43.4 UE5.8 baseline is Frontend 7/7, GuestIr 31/31, Semantic 43/43, CSharpGuest 18/18, WasmBackend 11/11, PreparedSemanticContracts 10/10, BuildIntegration 9/9, BuildPublicationContracts 4/4, PowerShell parser 14/14, architecture passed, CSharpBuildService 4/4, GeneratedCSharpLifecycle 1/1, authorization 115 / runtime 2 / WASM dynamic imports 2, and full AvidScript automation 163/163 with zero non-success results.
+- P43.4 UE5.8 baseline is Frontend 7/7, GuestIr 31/31, Semantic 43/43, CSharpGuest 18/18, WasmBackend 11/11, PreparedSemanticContracts 11/11, BuildIntegration 9/9, BuildPublicationContracts 4/4, PowerShell parser 14/14, architecture passed, CSharpBuildService 4/4, GeneratedCSharpLifecycle 1/1, authorization 115 / runtime 2 / WASM dynamic imports 2, and full AvidScript automation 163/163 with zero non-success results.
 - 2026-07-18 P43.4 delegation mistake record: Task 1 的关键阻塞实现交给 worker 后，主流程多次等待而没有推进非重叠工作。Prevention：主流程始终拥有下一步立即依赖的 blocker；只把独立 sidecar 工作交给 subagent，并在其运行时推进本地非重叠任务。
 - 2026-07-18 P43.4 internal-artifact mistake record: worker 曾把 `.superpowers/sdd/task-1-report.md` 纳入提交。Prevention：委派前先把 `.superpowers/` 等内部工作流产物写入 `.gitignore`，暂存后逐项审计文件列表。
 - 2026-07-18 P43.4 RED-fixture mistake record: 首次 Prepared contract RED 在写 fixture 前没有创建根目录。Prevention：测试写盘前显式创建并断言 fixture root，再验证预期失败来自被测契约而不是夹具 IO。
@@ -618,3 +618,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-18 P43.4 Windows-PowerShell compatibility mistake record: 首版路径加固使用 `Path.GetRelativePath`，但 Windows PowerShell 5.1 的 .NET Framework 不提供该 API。Prevention：Build helper 修改后必须由 `powershell.exe -NoProfile` 实跑；已完成词法包含时用兼容的前缀切片计算相对段。
 - 2026-07-18 P43.4 `rg` wildcard recurrence record: .NET 验证前再次把 Windows 通配符路径 `Tools\*Tests\*.csproj` 直接交给 `rg`，命令被系统拒绝且未写盘。Prevention：搜索命令只能传字面目录，并通过 `-g "*Tests.csproj"` 过滤；该规则同样适用于一次性核查命令。
 - 2026-07-18 P43.4 long-process session mistake record: 首次 UE 聚焦测试把大量 stdout 与 session id 一起输出，结果 session id 被截断，主流程只看到测试启动片段而无法继续轮询。Prevention：长任务首次调用只输出 `session_id/exit_code/output_tail` 元数据，立即保存 session id，并持续用 `write_stdin` 轮询到退出后再解析完整日志。
+- 2026-07-18 P43.4 rollback-deletion mistake record: 双文件发布回滚曾用 `Remove-Item -ErrorAction SilentlyContinue` 删除已发布 destination；删除失败会被吞掉，随后清理未发布 staged 文件，留下半组合且无恢复材料。Prevention：提交前回滚的每个删除/恢复操作都必须计入 rollback failure；回滚不完整时保留 `.tmp/.bak` 并通过故障注入验证恢复材料。

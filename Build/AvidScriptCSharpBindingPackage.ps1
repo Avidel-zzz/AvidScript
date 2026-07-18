@@ -133,6 +133,7 @@ function Publish-AvidScriptBindingFilePairAtomic {
     }
 
     $Committed = $false
+    $PreserveRecoveryMaterial = $false
     try {
         foreach ($File in $Files) {
             Copy-Item -LiteralPath $File.Source -Destination $File.Temporary -Force
@@ -157,13 +158,18 @@ function Publish-AvidScriptBindingFilePairAtomic {
     }
     catch {
         $PublishFailure = $_.Exception
+        $RollbackFailures = @()
         foreach ($File in $Files) {
             if ($File.Published -and (Test-Path -LiteralPath $File.Destination -PathType Leaf)) {
-                Remove-Item -LiteralPath $File.Destination -Force -ErrorAction SilentlyContinue
+                try {
+                    Remove-Item -LiteralPath $File.Destination -Force -ErrorAction Stop
+                }
+                catch {
+                    $RollbackFailures += "Failed to remove published destination $($File.Destination): $($_.Exception.Message)"
+                }
             }
         }
 
-        $RollbackFailures = @()
         foreach ($File in @($Files[1], $Files[0])) {
             if ($File.HadExisting -and (Test-Path -LiteralPath $File.Backup -PathType Leaf)) {
                 try {
@@ -175,6 +181,7 @@ function Publish-AvidScriptBindingFilePairAtomic {
             }
         }
         if ($RollbackFailures.Count -gt 0) {
+            $PreserveRecoveryMaterial = $true
             throw [System.InvalidOperationException]::new(
                 "Atomic pair publication failed and rollback was incomplete: $($RollbackFailures -join '; ')",
                 $PublishFailure)
@@ -184,7 +191,8 @@ function Publish-AvidScriptBindingFilePairAtomic {
     finally {
         foreach ($File in $Files) {
             if (-not [string]::IsNullOrWhiteSpace($File.Temporary) -and
-                (Test-Path -LiteralPath $File.Temporary -PathType Leaf)) {
+                (Test-Path -LiteralPath $File.Temporary -PathType Leaf) -and
+                -not $PreserveRecoveryMaterial) {
                 Remove-Item -LiteralPath $File.Temporary -Force -ErrorAction SilentlyContinue
             }
         }
