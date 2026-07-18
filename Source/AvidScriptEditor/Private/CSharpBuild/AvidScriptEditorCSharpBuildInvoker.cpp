@@ -93,6 +93,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ArtifactStem"), Config.ArtifactStem);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ReportPath"), Config.ReportPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ManifestPath"), Config.ManifestPath);
+	AddAvidScriptCSharpBuildInvocationValueArgument(
+		Arguments,
+		TEXT("-PreparedBuildReportPath"),
+		Config.PreparedBuildReportPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-BindingPackagePath"), Config.BindingPackagePath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(
 		Arguments,
@@ -142,7 +146,6 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 			: Config.RuntimeBindingPackagePath);
 	OutResult.ModuleId = Config.ModuleId;
 	OutResult.ArtifactStem = Config.ArtifactStem;
-	OutResult.BuildInvocationCount = 1;
 
 #if PLATFORM_WINDOWS
 	if (!MakeAvidScriptCSharpBuildInvocationDirectory(Config.OutputRoot, TEXT("output_directory_failed"), OutResult)
@@ -176,6 +179,10 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 			OutResult);
 		return false;
 	}
+	OutResult.BuildInvocationCount = 1;
+	const bool bUsesPreparedSemantic = !Config.PreparedBuildReportPath.IsEmpty();
+	OutResult.FrontendInvocationCount = bUsesPreparedSemantic ? 0 : 1;
+	OutResult.SemanticInvocationCount = bUsesPreparedSemantic ? 0 : 1;
 
 	if (OutResult.ProcessExitCode != 0)
 	{

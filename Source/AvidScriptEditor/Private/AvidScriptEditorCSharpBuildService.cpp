@@ -81,11 +81,24 @@ void SetAvidScriptCSharpBuildFailure(
 	OutResult.NextAction = NextAction;
 }
 
+struct FAvidScriptCSharpBuildInvocationCounts
+{
+	int32 Build = 0;
+	int32 Frontend = 0;
+	int32 Semantic = 0;
+
+	static FAvidScriptCSharpBuildInvocationCounts FromResult(
+		const FAvidScriptEditorCSharpBuildResult& Result)
+	{
+		return { Result.BuildInvocationCount, Result.FrontendInvocationCount, Result.SemanticInvocationCount };
+	}
+};
+
 void SetAvidScriptCSharpBuildResultMetadata(
 	const FAvidScriptEditorCSharpBuildConfig& Config,
 	const FString& AuthorizationBindingPackagePath,
 	const FString& RuntimeBindingPackagePath,
-	int32 BuildInvocationCount,
+	const FAvidScriptCSharpBuildInvocationCounts& InvocationCounts,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
 	OutResult.SourcePath = Config.SourcePath;
@@ -98,7 +111,9 @@ void SetAvidScriptCSharpBuildResultMetadata(
 	OutResult.BindingPackagePath = RuntimeBindingPackagePath;
 	OutResult.ModuleId = Config.ModuleId;
 	OutResult.ArtifactStem = Config.ArtifactStem;
-	OutResult.BuildInvocationCount = BuildInvocationCount;
+	OutResult.BuildInvocationCount = InvocationCounts.Build;
+	OutResult.FrontendInvocationCount = InvocationCounts.Frontend;
+	OutResult.SemanticInvocationCount = InvocationCounts.Semantic;
 }
 
 void ApplyAvidScriptCSharpBuildInvocationOutcome(
@@ -106,7 +121,7 @@ void ApplyAvidScriptCSharpBuildInvocationOutcome(
 	const FAvidScriptEditorCSharpBuildConfig& FinalConfig,
 	const FString& AuthorizationBindingPackagePath,
 	const FString& RuntimeBindingPackagePath,
-	int32 BuildInvocationCount,
+	const FAvidScriptCSharpBuildInvocationCounts& InvocationCounts,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
 	OutResult = InvocationResult;
@@ -114,7 +129,7 @@ void ApplyAvidScriptCSharpBuildInvocationOutcome(
 		FinalConfig,
 		AuthorizationBindingPackagePath,
 		RuntimeBindingPackagePath,
-		BuildInvocationCount,
+		InvocationCounts,
 		OutResult);
 }
 
@@ -290,6 +305,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.ManifestPath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.BindingPackagePath);
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.RuntimeBindingPackagePath);
+	NormalizedConfig.PreparedBuildReportPath.Reset();
 	NormalizeAvidScriptCSharpBuildPath(NormalizedConfig.DotNetPath);
 
 	FString AuthorizationBindingPackagePath = NormalizedConfig.BindingPackagePath;
@@ -300,7 +316,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 		NormalizedConfig,
 		AuthorizationBindingPackagePath,
 		RuntimeBindingPackagePath,
-		0,
+		FAvidScriptCSharpBuildInvocationCounts(),
 		OutResult);
 
 	if (NormalizedConfig.BuildScriptPath.IsEmpty() || !FPaths::FileExists(NormalizedConfig.BuildScriptPath))
@@ -373,7 +389,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			NormalizedConfig,
 			AuthorizationBindingPackagePath,
 			FString(),
-			0,
+			FAvidScriptCSharpBuildInvocationCounts(),
 			OutResult);
 	}
 
@@ -406,7 +422,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			NormalizedConfig,
 			AuthorizationBindingPackagePath,
 			RuntimeBindingPackagePath,
-			1,
+			FAvidScriptCSharpBuildInvocationCounts::FromResult(InvocationResult),
 			OutResult);
 		return bBuildSucceeded;
 	}
@@ -423,6 +439,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	BootstrapConfig.ReportPath = MakeReportPathForOutputRoot(BootstrapRoot, BootstrapConfig.ArtifactStem);
 	BootstrapConfig.ManifestPath = MakeManifestPathForOutputRoot(BootstrapRoot, BootstrapConfig.ArtifactStem);
 	BootstrapConfig.RuntimeBindingPackagePath.Reset();
+	BootstrapConfig.PreparedBuildReportPath.Reset();
 	BootstrapConfig.bOmitRuntimeBindingPackage = false;
 
 	FAvidScriptEditorCSharpBuildResult BootstrapResult;
@@ -433,7 +450,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			NormalizedConfig,
 			AuthorizationBindingPackagePath,
 			FString(),
-			1,
+			FAvidScriptCSharpBuildInvocationCounts::FromResult(BootstrapResult),
 			OutResult);
 		return false;
 	}
@@ -450,7 +467,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			NormalizedConfig,
 			AuthorizationBindingPackagePath,
 			FString(),
-			1,
+			FAvidScriptCSharpBuildInvocationCounts::FromResult(BootstrapResult),
 			OutResult);
 		SetAvidScriptCSharpBuildFailure(
 			BootstrapReportLoadResult.ErrorCategory.IsEmpty()
@@ -470,7 +487,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 			NormalizedConfig,
 			AuthorizationBindingPackagePath,
 			FString(),
-			1,
+			FAvidScriptCSharpBuildInvocationCounts::FromResult(BootstrapResult),
 			OutResult);
 		SetAvidScriptCSharpBuildFailure(
 			TEXT("bootstrap_binding_provenance_invalid"),
@@ -481,6 +498,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	}
 
 	FAvidScriptEditorCSharpBuildConfig FinalConfig = NormalizedConfig;
+	FinalConfig.PreparedBuildReportPath = BootstrapConfig.ReportPath;
 	if (BootstrapReport.BindingPackage.UsedImports.IsEmpty())
 	{
 		FinalConfig.RuntimeBindingPackagePath.Reset();
@@ -503,7 +521,7 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 				NormalizedConfig,
 				AuthorizationBindingPackagePath,
 				FString(),
-				1,
+				FAvidScriptCSharpBuildInvocationCounts::FromResult(BootstrapResult),
 				OutResult);
 			SetAvidScriptCSharpBuildFailure(
 				SliceResult.ErrorCategory.IsEmpty()
@@ -523,12 +541,17 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 
 	FAvidScriptEditorCSharpBuildResult FinalResult;
 	const bool bFinalBuildSucceeded = FAvidScriptEditorCSharpBuildInvoker::BuildOnce(FinalConfig, FinalResult);
+	const FAvidScriptCSharpBuildInvocationCounts TotalInvocationCounts = {
+		BootstrapResult.BuildInvocationCount + FinalResult.BuildInvocationCount,
+		BootstrapResult.FrontendInvocationCount + FinalResult.FrontendInvocationCount,
+		BootstrapResult.SemanticInvocationCount + FinalResult.SemanticInvocationCount
+	};
 	ApplyAvidScriptCSharpBuildInvocationOutcome(
 		FinalResult,
 		NormalizedConfig,
 		AuthorizationBindingPackagePath,
 		RuntimeBindingPackagePath,
-		2,
+		TotalInvocationCounts,
 		OutResult);
 	return bFinalBuildSucceeded;
 #else

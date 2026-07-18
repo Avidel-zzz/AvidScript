@@ -120,6 +120,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(TEXT("Custom C# profile build result succeeds"), BuildResult.bSucceeded);
 	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 0);
 	TestEqual(TEXT("Automatic custom C# profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Automatic custom C# profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Automatic custom C# profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
 	TestTrue(
 		TEXT("Custom C# profile records an authorization binding package manifest"),
 		FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
@@ -233,9 +235,15 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	ExplicitConfig.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(ExplicitConfig.OutputRoot, ExplicitConfig.ArtifactStem);
 	ExplicitConfig.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(ExplicitConfig.OutputRoot, ExplicitConfig.ArtifactStem);
 	ExplicitConfig.BindingPackagePath = ExplicitPackage.ManifestPath;
+	ExplicitConfig.PreparedBuildReportPath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		TestRoot,
+		TEXT("CallerOwnedPreparedReport"),
+		TEXT("missing.csharp.report.json")));
 	FAvidScriptEditorCSharpBuildResult ExplicitResult;
 	TestTrue(TEXT("Explicit package custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(ExplicitConfig, ExplicitResult));
 	TestEqual(TEXT("Explicit package uses one build invocation"), ExplicitResult.BuildInvocationCount, 1);
+	TestEqual(TEXT("Explicit package runs Frontend once"), ExplicitResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Explicit package runs Semantic once"), ExplicitResult.SemanticInvocationCount, 1);
 	TestEqual(
 		TEXT("Explicit package remains both authorization and runtime package"),
 		ExplicitResult.AuthorizationBindingPackagePath,
@@ -272,6 +280,8 @@ bool FAvidScriptEditorCSharpBuildServiceZeroBindingProfileTest::RunTest(const FS
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	TestTrue(TEXT("Zero-binding custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(Config, BuildResult));
 	TestEqual(TEXT("Zero-binding profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Zero-binding profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Zero-binding profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
 	TestTrue(TEXT("Zero-binding profile keeps authorization package"), FPaths::FileExists(BuildResult.AuthorizationBindingPackagePath));
 	TestTrue(TEXT("Zero-binding profile omits runtime package path"), BuildResult.BindingPackagePath.IsEmpty());
 
@@ -307,6 +317,27 @@ bool FAvidScriptEditorCSharpBuildServiceSourceMissingNextActionTest::RunTest(con
 	TestEqual(TEXT("Missing C# source error category"), BuildResult.ErrorCategory, FString(TEXT("source_missing")));
 	TestFalse(TEXT("Missing C# source next action is set"), BuildResult.NextAction.IsEmpty());
 	TestTrue(TEXT("Missing C# source next action mentions source or profile"), BuildResult.NextAction.Contains(TEXT("source")) || BuildResult.NextAction.Contains(TEXT("profile")));
+
+	const FString BlockedOutputRoot = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests"),
+		TEXT("CSharpProfiles"),
+		TEXT("Blocked*Output")));
+
+	FAvidScriptEditorCSharpBuildConfig BlockedConfig;
+	BlockedConfig.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	BlockedConfig.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	BlockedConfig.SourcePath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath();
+	BlockedConfig.OutputRoot = BlockedOutputRoot;
+	BlockedConfig.ReportPath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(BlockedOutputRoot, TEXT("blocked.csharp.report.json")));
+	BlockedConfig.ManifestPath = NormalizeAvidScriptCSharpBuildTestPath(FPaths::Combine(BlockedOutputRoot, TEXT("blocked.avidscript.json")));
+
+	FAvidScriptEditorCSharpBuildResult BlockedResult;
+	TestFalse(TEXT("Blocked output prevents process launch"), FAvidScriptEditorCSharpBuildService::BuildProfile(BlockedConfig, BlockedResult));
+	TestEqual(TEXT("Blocked output has stable error category"), BlockedResult.ErrorCategory, FString(TEXT("output_directory_failed")));
+	TestEqual(TEXT("Blocked output launches no build process"), BlockedResult.BuildInvocationCount, 0);
+	TestEqual(TEXT("Blocked output launches no Frontend"), BlockedResult.FrontendInvocationCount, 0);
+	TestEqual(TEXT("Blocked output launches no Semantic"), BlockedResult.SemanticInvocationCount, 0);
 	return true;
 }
 

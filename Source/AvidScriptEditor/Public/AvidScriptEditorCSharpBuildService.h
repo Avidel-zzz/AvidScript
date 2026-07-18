@@ -10,6 +10,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString OutputRoot;
 	FString ReportPath;
 	FString ManifestPath;
+	FString PreparedBuildReportPath;
 	FString BindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FString DotNetPath;
@@ -39,6 +40,8 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString ModuleId;
 	FString ArtifactStem;
 	int32 BuildInvocationCount = 0;
+	int32 FrontendInvocationCount = 0;
+	int32 SemanticInvocationCount = 0;
 };
 
 class FAvidScriptEditorCSharpBuildService
