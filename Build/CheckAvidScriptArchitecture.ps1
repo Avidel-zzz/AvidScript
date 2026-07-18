@@ -305,6 +305,7 @@ $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/C
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
+$CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
 foreach ($RequiredGameplayPackageContract in @(
     'EmitEngineGameplay',
     'PublishEngineGameplay',
@@ -419,6 +420,41 @@ foreach ($ForbiddenPreparedHelperConcern in @(
 if ($CSharpPreparedSemanticSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$ExpectedSource' -or
     $CSharpPreparedSemanticSource -match 'ReadAllText\s*\(\s*\$ExpectedSource') {
     Add-Violation 'prepared semantic helper must hash the C# source without scanning its text'
+}
+foreach ($RequiredSemanticCacheContract in @(
+    'Get-AvidScriptCSharpSemanticCacheContext',
+    'Get-AvidScriptCSharpToolchainFingerprint',
+    'global.json',
+    'Build\InvokeCSharpFrontend.ps1',
+    'Build\InvokeCSharpSemantic.ps1',
+    'AvidScript.CSharpFrontend',
+    'AvidScript.CSharpSemantic',
+    'ConvertTo-Json -Compress -Depth 32',
+    'Sort-Object -Property RelativePath',
+    'Test-AvidScriptBindingPathContained',
+    'ASBI4501',
+    'ASBI4503'
+)) {
+    if (-not $CSharpSemanticCacheSource.Contains($RequiredSemanticCacheContract)) {
+        Add-Violation "C# semantic cache helper is missing deterministic key contract $RequiredSemanticCacheContract"
+    }
+}
+foreach ($ForbiddenSemanticCacheConcern in @(
+    '\bStart-Process\b',
+    '\bInvoke-AvidScriptPowerShell\b',
+    '\bGuestCompilerPath\b',
+    '\bGuestIrArtifactPath\b',
+    '\bWasmArtifactPath\b',
+    '\bRuntimeBindingPackagePath\b',
+    '\bOmitRuntimeBindingPackage\b'
+)) {
+    if ($CSharpSemanticCacheSource -match $ForbiddenSemanticCacheConcern) {
+        Add-Violation "C# semantic cache helper owns forbidden process, backend, or package-policy concern $ForbiddenSemanticCacheConcern"
+    }
+}
+if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Source' -or
+    $CSharpSemanticCacheSource -match 'ReadAllText\s*\(\s*\$Source') {
+    Add-Violation 'C# semantic cache helper must hash user source without parsing its text'
 }
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',

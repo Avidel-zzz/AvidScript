@@ -628,3 +628,5 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 命中后仍须执行 Guest IR、WASM、authorization/runtime 子集校验和正式发布；Runtime manifest 不得引用 cache entry。
 - Build report 的 `tool_invocations` 是 Editor 调用计数唯一事实来源；BuildInvoker 不得再根据 prepared 参数推断 Frontend/Semantic 次数。
 - 2026-07-18 P43.5 verification-regex mistake record: 首次 Markdown 尾随空格扫描在 PowerShell 单引号 regex 中写了 `[ `t]`，把反引号和字母 `t` 当成普通字符并产生大量假阳性。Prevention：regex tab 使用 `[ \t]`，或在双引号表达式中使用实际 tab；核查失败后先读回命中行，未确认前不得改文件。
+- 2026-07-18 P43.5 cache-fixture root mistake record: Task 1 首次 GREEN 把 cache fixture 放在插件 `Saved`，不属于设计规定的项目 `<Project>/Saved`，正确触发 `ASBI4503`。Prevention：cache fixture 与正式 cache 使用项目级 Saved 专属子目录；插件 Saved 只保存被忽略的 source/toolchain 测试输入。
+- 2026-07-18 P43.5 patch-terminator mistake record: 一次生成的 patch 文件把 `*** End Patch` 误加 diff 前缀，apply_patch 校验拒绝且未写盘。Prevention：外层 patch 结束标记必须独占最后一行，创建后仍执行 `git apply --check` 再写生产文件。
