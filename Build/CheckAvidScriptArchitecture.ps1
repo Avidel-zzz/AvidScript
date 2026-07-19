@@ -660,8 +660,9 @@ if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Sou
 }
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
-    'CurrentSchemaVersion = 5',
-    'CurrentSemanticVersion = "1.5"'
+    'SemanticStateContractProjector.Project',
+    'CurrentSchemaVersion = 6',
+    'CurrentSemanticVersion = "1.6"'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"

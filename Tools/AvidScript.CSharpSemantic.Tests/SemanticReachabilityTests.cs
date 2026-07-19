@@ -73,10 +73,10 @@ internal static class SemanticReachabilityTests
             });
 
         Assert(document.Succeeded, "reachable generated facade source should analyze");
-        Assert(document.SchemaVersion == 5 && document.SemanticVersion == "1.5",
+        Assert(document.SchemaVersion == 6 && document.SemanticVersion == "1.6",
             "reachability requires the explicit semantic schema version");
         SemanticReachability reachability = document.Reachability
-            ?? throw new InvalidOperationException("schema 5 semantic output omitted reachability");
+            ?? throw new InvalidOperationException("schema 6 semantic output omitted reachability");
         Assert(reachability.Mode == "export_roots"
             && reachability.RootCallableIds.Count == 1,
             "lifecycle exports should be the only reachability roots");
@@ -111,7 +111,7 @@ internal static class SemanticReachabilityTests
 
         Assert(document.Succeeded, "library-style semantic analysis should remain supported");
         SemanticReachability reachability = document.Reachability
-            ?? throw new InvalidOperationException("schema 5 semantic output omitted reachability");
+            ?? throw new InvalidOperationException("schema 6 semantic output omitted reachability");
         Assert(reachability.Mode == "all_callables_compatibility"
             && reachability.RootCallableIds.Count == 0,
             "inputs without exports should use the explicit compatibility mode");

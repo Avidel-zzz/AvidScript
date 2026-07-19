@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 5;
-    private const string CurrentSemanticVersion = "1.5";
+    private const int CurrentSchemaVersion = 6;
+    private const string CurrentSemanticVersion = "1.6";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -63,6 +63,7 @@ public static class SemanticAnalyzer
         SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId, referenceSources);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
+        SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(context);
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
@@ -70,6 +71,7 @@ public static class SemanticAnalyzer
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(operationProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)
+            .Concat(stateContractProjection.Diagnostics)
             .GroupBy(diagnostic =>
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
@@ -108,7 +110,10 @@ public static class SemanticAnalyzer
             operationProjection.Methods,
             controlFlowGraphs,
             reachability,
-            diagnostics);
+            diagnostics)
+        {
+            StateContracts = stateContractProjection.Contracts,
+        };
     }
 
     private static SemanticDiagnostic ProjectDiagnostic(

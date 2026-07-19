@@ -133,7 +133,11 @@ internal static class SemanticSymbolProjector
             GetSignature(symbol),
             symbol.IsStatic,
             symbol.DeclaredAccessibility.ToString().ToLowerInvariant(),
-            SemanticSpanFactory.Create(sourceText, syntax.Span));
+            SemanticSpanFactory.Create(sourceText, syntax.Span))
+        {
+            IsConst = symbol is IFieldSymbol constField && constField.IsConst,
+            IsReadonly = symbol is IFieldSymbol readonlyField && readonlyField.IsReadOnly,
+        };
         if (!symbols.TryAdd(id, projected))
         {
             if (symbol is INamespaceSymbol)

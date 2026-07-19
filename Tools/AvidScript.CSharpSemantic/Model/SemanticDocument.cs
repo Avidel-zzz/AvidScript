@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -16,4 +17,9 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticMethodBody> Methods,
     [property: JsonPropertyOrder(10)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
     [property: JsonPropertyOrder(11)] SemanticReachability? Reachability,
-    [property: JsonPropertyOrder(12)] IReadOnlyList<SemanticDiagnostic> Diagnostics);
+    [property: JsonPropertyOrder(13)] IReadOnlyList<SemanticDiagnostic> Diagnostics)
+{
+    [JsonPropertyOrder(12)]
+    public IReadOnlyList<SemanticStateContract> StateContracts { get; init; } =
+        Array.Empty<SemanticStateContract>();
+}

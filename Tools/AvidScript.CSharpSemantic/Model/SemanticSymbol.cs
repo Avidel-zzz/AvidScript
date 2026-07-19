@@ -10,5 +10,12 @@ public sealed record SemanticSymbol(
     [property: JsonPropertyOrder(4)] string? TypeId,
     [property: JsonPropertyOrder(5)] string Signature,
     [property: JsonPropertyOrder(6)] bool IsStatic,
-    [property: JsonPropertyOrder(7)] string Accessibility,
-    [property: JsonPropertyOrder(8)] SemanticSpan Span);
+    [property: JsonPropertyOrder(9)] string Accessibility,
+    [property: JsonPropertyOrder(10)] SemanticSpan Span)
+{
+    [JsonPropertyOrder(7)]
+    public bool IsConst { get; init; }
+
+    [JsonPropertyOrder(8)]
+    public bool IsReadonly { get; init; }
+}
