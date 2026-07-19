@@ -300,6 +300,7 @@ foreach ($LegacyBindingPath in @(
 }
 
 $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
+$CSharpStateContractRendererSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
@@ -319,6 +320,23 @@ foreach ($RequiredGameplayPackageContract in @(
 )) {
     if (-not $CSharpBindingEmitterSource.Contains($RequiredGameplayPackageContract)) {
         Add-Violation "C# binding emitter is missing gameplay package contract $RequiredGameplayPackageContract"
+    }
+}
+foreach ($RequiredStateContractFacade in @(
+    'AvidStateMode',
+    'AvidStateContractAttribute',
+    'AvidPersistAttribute',
+    'AvidTransientAttribute',
+    'AvidStateAliasAttribute',
+    'AllowMultiple = true'
+)) {
+    if (-not $CSharpStateContractRendererSource.Contains($RequiredStateContractFacade)) {
+        Add-Violation "C# state contract renderer is missing facade contract $RequiredStateContractFacade"
+    }
+}
+foreach ($ForbiddenStateContractRendererConcern in @('Package.Bindings', 'Package.Types', 'FAvidScriptBindingFunctionModel')) {
+    if ($CSharpStateContractRendererSource.Contains($ForbiddenStateContractRendererConcern)) {
+        Add-Violation "C# state contract renderer must not depend on reflected binding content $ForbiddenStateContractRendererConcern"
     }
 }
 $CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'

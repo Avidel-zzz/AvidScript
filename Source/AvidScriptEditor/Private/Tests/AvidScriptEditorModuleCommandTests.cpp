@@ -778,11 +778,25 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		Actor->GetPathName());
 	TestEqual(TEXT("Repeated start does not rebuild"), RepeatBuildResult.BuildInvocationCount, 0);
 	TestEqual(TEXT("Repeated start does not register another watcher"), FakeWatchHost->StartCount, 1);
-	const FString ReloadedSourceText = OriginalSourceText.Replace(
+	FString ReloadedSourceText = OriginalSourceText.Replace(
+		TEXT("    private static float TotalRotationDegrees;"),
+		TEXT("    [AvidStateAlias(\"TotalRotationDegrees\")]\n    private static float AccumulatedRotationDegrees;"),
+		ESearchCase::CaseSensitive);
+	ReloadedSourceText = ReloadedSourceText.Replace(
+		TEXT("TotalRotationDegrees += RotationSpeedDegreesPerSecond * deltaSeconds;"),
+		TEXT("AccumulatedRotationDegrees += RotationSpeedDegreesPerSecond * deltaSeconds;"),
+		ESearchCase::CaseSensitive);
+	ReloadedSourceText = ReloadedSourceText.Replace(
+		TEXT("TotalRotationDegrees / 1000.0f"),
+		TEXT("AccumulatedRotationDegrees / 1000.0f"),
+		ESearchCase::CaseSensitive);
+	ReloadedSourceText = ReloadedSourceText.Replace(
 		TEXT("90.0f"),
 		TEXT("180.0f"),
 		ESearchCase::CaseSensitive);
 	TestNotEqual(TEXT("Reload source changes gameplay behavior"), ReloadedSourceText, OriginalSourceText);
+	TestTrue(TEXT("Reload source renames the persisted field"), ReloadedSourceText.Contains(TEXT("AccumulatedRotationDegrees")));
+	TestTrue(TEXT("Reload source declares the former field name alias"), ReloadedSourceText.Contains(TEXT("[AvidStateAlias(\"TotalRotationDegrees\")]")));
 	TestTrue(
 		TEXT("Project C# source can be changed for automatic reload"),
 		FFileHelper::SaveStringToFile(ReloadedSourceText, *WorkspaceResult.SourcePath));
@@ -827,6 +841,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		LiveReloadServicePtr->GetLastResult().BuildResult.BindingResult.RuntimeResult;
 	TestTrue(TEXT("Real automatic reload attempts guest state migration"), StateMigrationResult.bStateMigrationAttempted);
 	TestTrue(TEXT("Real automatic reload applies guest state migration"), StateMigrationResult.bStateMigrationApplied);
+	TestTrue(TEXT("Real automatic reload applies a renamed state alias"), StateMigrationResult.StateMigrationAliasedSlotCount >= 1);
 	TestTrue(TEXT("Real automatic reload migrates at least the mutable gameplay field"),
 		StateMigrationResult.StateMigrationMigratedSlotCount >= 1);
 	TestTrue(TEXT("Real automatic reload migrates gameplay state bytes"),

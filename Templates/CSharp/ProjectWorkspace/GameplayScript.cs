@@ -2,9 +2,12 @@ using System.Runtime.InteropServices;
 
 namespace AvidScript;
 
+[AvidStateContract(AvidStateMode.Explicit)]
 public static class GameplayScript
 {
     private const float RotationSpeedDegreesPerSecond = 90.0f;
+
+    [AvidPersist]
     private static float TotalRotationDegrees;
 
     public static int Main() => 0;

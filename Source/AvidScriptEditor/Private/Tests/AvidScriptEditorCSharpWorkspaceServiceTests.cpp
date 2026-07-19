@@ -133,6 +133,7 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         UserMarker);
     const FString RefreshedFacade = ReadAvidScriptWorkspaceTestText(*this, Second.FacadePath);
     TestTrue(TEXT("Generated facade is refreshed"), RefreshedFacade.Contains(TEXT("public static class UE")));
+	TestTrue(TEXT("Generated facade retains state contract authoring surface"), RefreshedFacade.Contains(TEXT("public enum AvidStateMode")));
     TestFalse(TEXT("Stale facade marker is removed"), RefreshedFacade.Contains(TEXT("stale generated facade")));
 
     FAvidScriptEditorCSharpWorkspaceConfig OverwriteConfig = Config;
@@ -146,6 +147,10 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         TEXT("Explicit overwrite restores gameplay starter"),
         ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath)
             .Contains(TEXT("RotationSpeedDegreesPerSecond")));
+	const FString StarterText = ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath);
+	TestTrue(TEXT("Gameplay starter enables explicit state contracts"), StarterText.Contains(TEXT("[AvidStateContract(AvidStateMode.Explicit)]")));
+	TestTrue(TEXT("Gameplay starter persists accumulated rotation"), StarterText.Contains(TEXT("[AvidPersist]\n    private static float TotalRotationDegrees;")));
+	TestFalse(TEXT("Gameplay starter does not persist rotation speed configuration"), StarterText.Contains(TEXT("[AvidPersist]\n    private const float RotationSpeedDegreesPerSecond")));
     return true;
 }
 

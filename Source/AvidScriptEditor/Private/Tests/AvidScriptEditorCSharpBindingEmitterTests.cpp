@@ -4,6 +4,7 @@
 #include "AvidScriptHash.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
+#include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -37,6 +38,19 @@ FString MakePackageTestRoot()
 		TEXT("AvidScriptTests"),
 		TEXT("BindingPackages"),
 		FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+}
+
+FString ExtractStateContractSurface(const FString& Source)
+{
+	const FString StartToken = TEXT("public enum AvidStateMode");
+	const FString EndToken = TEXT("internal static class AvidScriptBindingPackage");
+	const int32 StartIndex = Source.Find(StartToken);
+	const int32 EndIndex = Source.Find(EndToken);
+	if (StartIndex == INDEX_NONE || EndIndex == INDEX_NONE || EndIndex <= StartIndex)
+	{
+		return FString();
+	}
+	return Source.Mid(StartIndex, EndIndex - StartIndex);
 }
 } // namespace
 
@@ -82,6 +96,36 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade provides UE.Self"), FirstSource.Contains(TEXT("public static AActor Self")));
 	TestFalse(TEXT("Raw handle constructor is not public"), FirstSource.Contains(TEXT("public AActor(int slot, int generation)")));
 	TestTrue(TEXT("Native imports use the generated module"), FirstSource.Contains(TEXT("[DllImport(\"avidscript\"")));
+	TestTrue(TEXT("Generated facade declares AvidStateMode"), FirstSource.Contains(TEXT("public enum AvidStateMode")));
+	TestTrue(TEXT("Generated facade declares compatible state mode"), FirstSource.Contains(TEXT("Compatible = 0")));
+	TestTrue(TEXT("Generated facade declares explicit state mode"), FirstSource.Contains(TEXT("Explicit = 1")));
+	TestTrue(TEXT("Generated facade declares state contract attribute"), FirstSource.Contains(TEXT("public sealed class AvidStateContractAttribute : Attribute")));
+	TestTrue(TEXT("State contract attribute targets one class"), FirstSource.Contains(TEXT("[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]")));
+	TestTrue(TEXT("State contract attribute exposes version"), FirstSource.Contains(TEXT("public int Version { get; set; } = 1;")));
+	TestTrue(TEXT("Generated facade declares persist attribute"), FirstSource.Contains(TEXT("public sealed class AvidPersistAttribute : Attribute")));
+	TestTrue(TEXT("Generated facade declares transient attribute"), FirstSource.Contains(TEXT("public sealed class AvidTransientAttribute : Attribute")));
+	TestTrue(TEXT("Generated facade declares repeatable state alias attribute"), FirstSource.Contains(TEXT("public sealed class AvidStateAliasAttribute : Attribute")));
+	TestTrue(TEXT("State alias attribute allows multiple field declarations"), FirstSource.Contains(TEXT("[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = true)]")));
+
+	FAvidScriptBindingPackageModel EmptyPackage;
+	EmptyPackage.PackageName = TEXT("avidscript.empty");
+	EmptyPackage.PackageHash = TEXT("empty-package-hash");
+	FString EmptyPackageSource;
+	FString EmptyPackageErrorCategory;
+	FString EmptyPackageErrorSource;
+	TestTrue(
+		TEXT("Empty binding package emits a C# reference surface"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			EmptyPackage,
+			TEXT("empty-descriptor-hash"),
+			EmptyPackageSource,
+			EmptyPackageErrorCategory,
+			EmptyPackageErrorSource));
+	TestFalse(TEXT("Empty package state contract surface is present"), ExtractStateContractSurface(EmptyPackageSource).IsEmpty());
+	TestEqual(
+		TEXT("Empty and reflected packages emit the identical state contract surface"),
+		ExtractStateContractSurface(EmptyPackageSource),
+		ExtractStateContractSurface(FirstSource));
 
 	TSharedPtr<FJsonObject> Descriptor;
 	TestTrue(TEXT("Descriptor remains parseable"), ParseJsonObject(DescriptorJson, Descriptor));
@@ -136,6 +180,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 		FString(TEXT("avidscript.engine.gameplay")));
 	TestFalse(TEXT("Gameplay profile C# source is not empty"), Source.IsEmpty());
 	TestFalse(TEXT("Gameplay profile manifest is not empty"), Manifest.IsEmpty());
+	TestTrue(TEXT("Gameplay package carries the state contract facade"), Source.Contains(TEXT("public enum AvidStateMode")));
 
 	FString RepeatedDescriptor;
 	FString RepeatedSource;
