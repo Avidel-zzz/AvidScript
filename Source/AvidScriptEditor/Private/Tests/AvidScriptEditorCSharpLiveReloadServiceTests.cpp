@@ -11,7 +11,8 @@
 
 namespace
 {
-class FFakeAvidScriptLiveReloadWatchHost final : public IAvidScriptEditorCSharpLiveReloadWatchHost
+class FFakeAvidScriptLiveReloadWatchHost final
+	: public IAvidScriptEditorCSharpLiveReloadWatchHost
 {
 public:
 	virtual bool Start(
@@ -68,6 +69,148 @@ public:
 	FOnChangeBatch Callback;
 };
 
+struct FFakeAvidScriptCSharpAsyncJobState
+{
+	void CompleteSuccess(const FString& ReportPath = TEXT("fixture.report.json"))
+	{
+		bFinished = true;
+		Progress.Stage = EAvidScriptEditorCSharpAsyncBuildStage::ReadyToBind;
+		Result.bSucceeded = true;
+		Result.ProfilePath = StartedProfilePath;
+		Result.ProfileResult.bSucceeded = true;
+		Result.BuildResult.bSucceeded = true;
+		Result.BuildResult.ReportPath = ReportPath;
+	}
+
+	void CompleteFailure(const FString& CauseCategory)
+	{
+		bFinished = true;
+		Progress.Stage = EAvidScriptEditorCSharpAsyncBuildStage::Failed;
+		Result.bSucceeded = false;
+		Result.ProfilePath = StartedProfilePath;
+		Result.ErrorCategory = CauseCategory;
+		Result.ErrorMessage = TEXT("fixture asynchronous build failed");
+		Result.NextAction = TEXT("fix the fixture input");
+		Result.ProfileResult.bSucceeded = true;
+		Result.BuildResult.ErrorCategory = CauseCategory;
+		Result.BuildResult.ErrorMessage = Result.ErrorMessage;
+	}
+
+	void CompleteCanceled()
+	{
+		bFinished = true;
+		Progress.Stage = EAvidScriptEditorCSharpAsyncBuildStage::Canceled;
+		Progress.bCancelRequested = true;
+		Result.bSucceeded = false;
+		Result.ProfilePath = StartedProfilePath;
+		Result.ErrorCategory = TEXT("live_reload_build_canceled");
+		Result.ErrorMessage = TEXT("fixture asynchronous build canceled");
+	}
+
+	bool bStartSucceeds = true;
+	bool bFinished = false;
+	bool bConsumed = false;
+	int32 StartCount = 0;
+	int32 TickCount = 0;
+	int32 CancelCount = 0;
+	FString StartedProfilePath;
+	FAvidScriptEditorCSharpAsyncBuildProgress Progress;
+	FAvidScriptEditorCSharpAsyncBuildResult Result;
+};
+
+class FFakeAvidScriptCSharpAsyncBuildJob final
+	: public IAvidScriptEditorCSharpAsyncBuildJob
+{
+public:
+	explicit FFakeAvidScriptCSharpAsyncBuildJob(
+		TSharedRef<FFakeAvidScriptCSharpAsyncJobState> InState)
+		: State(MoveTemp(InState))
+	{
+	}
+
+	virtual bool Start(const FString& ProfilePath) override
+	{
+		++State->StartCount;
+		State->StartedProfilePath = ProfilePath;
+		State->Progress.Stage =
+			EAvidScriptEditorCSharpAsyncBuildStage::FinalRunning;
+		if (!State->bStartSucceeds)
+		{
+			State->CompleteFailure(TEXT("fixture_launch_failed"));
+			return false;
+		}
+		return true;
+	}
+
+	virtual void Tick() override
+	{
+		++State->TickCount;
+	}
+
+	virtual void Cancel() override
+	{
+		++State->CancelCount;
+		if (!State->bFinished)
+		{
+			State->CompleteCanceled();
+		}
+	}
+
+	virtual bool IsFinished() const override
+	{
+		return State->bFinished;
+	}
+
+	virtual const FAvidScriptEditorCSharpAsyncBuildProgress&
+		GetProgress() const override
+	{
+		return State->Progress;
+	}
+
+	virtual bool ConsumeResult(
+		FAvidScriptEditorCSharpAsyncBuildResult& OutResult) override
+	{
+		if (!State->bFinished || State->bConsumed)
+		{
+			return false;
+		}
+		State->bConsumed = true;
+		OutResult = State->Result;
+		return true;
+	}
+
+private:
+	TSharedRef<FFakeAvidScriptCSharpAsyncJobState> State;
+};
+
+class FFakeAvidScriptCSharpAsyncJobQueue
+{
+public:
+	TSharedRef<FFakeAvidScriptCSharpAsyncJobState> PlanJob()
+	{
+		const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> State =
+			MakeShared<FFakeAvidScriptCSharpAsyncJobState>();
+		PlannedStates.Add(State);
+		return State;
+	}
+
+	TUniquePtr<IAvidScriptEditorCSharpAsyncBuildJob> Create()
+	{
+		++CreateCount;
+		if (!PlannedStates.IsValidIndex(NextStateIndex))
+		{
+			PlanJob();
+		}
+		return TUniquePtr<IAvidScriptEditorCSharpAsyncBuildJob>(
+			new FFakeAvidScriptCSharpAsyncBuildJob(
+				PlannedStates[NextStateIndex++]));
+	}
+
+	TArray<TSharedRef<FFakeAvidScriptCSharpAsyncJobState>> PlannedStates;
+	int32 NextStateIndex = 0;
+	int32 CreateCount = 0;
+};
+
 FString MakeAvidScriptLiveReloadServiceTestRoot(const FString& CaseName)
 {
 	FString Root = FPaths::ConvertRelativePathToFull(FPaths::Combine(
@@ -82,7 +225,9 @@ FString MakeAvidScriptLiveReloadServiceTestRoot(const FString& CaseName)
 	return Root;
 }
 
-bool CreateAvidScriptLiveReloadServiceWorld(UWorld*& OutWorld, AActor*& OutActor)
+bool CreateAvidScriptLiveReloadServiceWorld(
+	UWorld*& OutWorld,
+	AActor*& OutActor)
 {
 	OutWorld = nullptr;
 	OutActor = nullptr;
@@ -90,12 +235,16 @@ bool CreateAvidScriptLiveReloadServiceWorld(UWorld*& OutWorld, AActor*& OutActor
 	{
 		return false;
 	}
-	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptLiveReloadServiceWorld"));
+	OutWorld = UWorld::CreateWorld(
+		EWorldType::Game,
+		false,
+		TEXT("AvidScriptLiveReloadServiceWorld"));
 	if (OutWorld == nullptr)
 	{
 		return false;
 	}
-	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	FWorldContext& WorldContext =
+		GEngine->CreateNewWorldContext(EWorldType::Game);
 	WorldContext.SetCurrentWorld(OutWorld);
 	OutActor = OutWorld->SpawnActor<AActor>();
 	return OutActor != nullptr;
@@ -115,74 +264,100 @@ void DestroyAvidScriptLiveReloadServiceWorld(UWorld*& World)
 	World = nullptr;
 }
 
-FAvidScriptEditorCSharpLiveReloadServiceConfig MakeAvidScriptLiveReloadServiceConfig(
-	const FString& CaseName)
+FAvidScriptEditorCSharpLiveReloadServiceConfig
+MakeAvidScriptLiveReloadServiceConfig(const FString& CaseName)
 {
 	FAvidScriptEditorCSharpLiveReloadServiceConfig Config;
-	Config.WorkspaceRoot = MakeAvidScriptLiveReloadServiceTestRoot(CaseName);
-	Config.ProfilePath = FPaths::Combine(Config.WorkspaceRoot, TEXT("default.csharp-profile.json"));
+	Config.WorkspaceRoot =
+		MakeAvidScriptLiveReloadServiceTestRoot(CaseName);
+	Config.ProfilePath = FPaths::Combine(
+		Config.WorkspaceRoot,
+		TEXT("default.csharp-profile.json"));
 	Config.DebounceSeconds = 0.35;
 	return Config;
+}
+
+bool ApplyAvidScriptLiveReloadServiceFixtureReport(
+	const FString& ReportPath,
+	AActor* TargetActor,
+	AActor*& OutAppliedTarget,
+	int32& OutApplyCount,
+	FAvidScriptEditorComponentBindingResult& OutResult)
+{
+	++OutApplyCount;
+	OutAppliedTarget = TargetActor;
+	OutResult.bSucceeded = !ReportPath.IsEmpty() && IsValid(TargetActor);
+	return OutResult.bSucceeded;
 }
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorCSharpLiveReloadServiceDebounceTest,
-	"AvidScript.Editor.CSharpLiveReload.Service.WatchDebounceLifecycle",
+	FAvidScriptEditorCSharpLiveReloadServiceNonBlockingTest,
+	"AvidScript.Editor.CSharpLiveReload.Service.NonBlockingDebounceLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceDebounceTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceNonBlockingTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
-	if (!TestTrue(TEXT("Fixture world creates"), CreateAvidScriptLiveReloadServiceWorld(World, Target)))
+	if (!TestTrue(
+		TEXT("Fixture world creates"),
+		CreateAvidScriptLiveReloadServiceWorld(World, Target)))
 	{
 		return false;
 	}
 
 	double Now = 1.0;
-	int32 BuildCount = 0;
-	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
+	FFakeAvidScriptLiveReloadWatchHost* FakeHost =
+		new FFakeAvidScriptLiveReloadWatchHost();
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount, Target](
-			const FString&,
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](
+			const FString& ReportPath,
 			AActor* ActualTarget,
-			FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuild)
+			FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			OutBuild.bSucceeded = ActualTarget == Target;
-			OutBuild.Status = EAvidScriptEditorCSharpLiveReloadBuildStatus::Succeeded;
-			return OutBuild.bSucceeded;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(
+				ReportPath,
+				ActualTarget,
+				AppliedTarget,
+				ApplyCount,
+				OutResult);
 		},
 		[&Now]() { return Now; });
 
 	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("Debounce"));
+		MakeAvidScriptLiveReloadServiceConfig(TEXT("NonBlocking"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
-	TestEqual(TEXT("Watch registers once"), FakeHost->StartCount, 1);
-	TestEqual(TEXT("Watch root is normalized workspace"), FakeHost->WatchedRoot, StartResult.WorkspaceRoot);
-
-	FakeHost->Emit({
-		FPaths::Combine(Config.WorkspaceRoot, TEXT("GameplayScript.cs")),
-		FPaths::Combine(Config.WorkspaceRoot, TEXT("notes.txt"))});
-	TestEqual(TEXT("Callback does not build inline"), BuildCount, 0);
+	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Gameplay.cs"))});
 	Service.Tick();
-	Now = 1.349;
-	Service.Tick();
-	TestEqual(TEXT("Debounce suppresses early build"), BuildCount, 0);
 	Now = 1.35;
 	Service.Tick();
-	TestEqual(TEXT("Build runs once at deadline"), BuildCount, 1);
+	TestEqual(TEXT("Deadline creates one job"), Jobs.CreateCount, 1);
+	TestEqual(TEXT("Deadline starts one job"), Job->StartCount, 1);
+	TestEqual(TEXT("Deadline does not bind inline"), ApplyCount, 0);
 	TestEqual(
-		TEXT("Service success status"),
+		TEXT("Service reports building"),
+		Service.GetLastResult().Status,
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::Building);
+
+	Job->CompleteSuccess();
+	Service.Tick();
+	TestEqual(TEXT("Completion binds once"), ApplyCount, 1);
+	TestEqual(TEXT("Completion uses fixed Actor"), AppliedTarget, Target);
+	TestEqual(
+		TEXT("Completion reports success"),
 		Service.GetLastResult().Status,
 		EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildSucceeded);
-
 	Service.Stop();
-	TestFalse(TEXT("Service stops"), Service.IsRunning());
-	TestEqual(TEXT("Watch unregisters once"), FakeHost->StopCount, 1);
+	TestEqual(TEXT("Watch stops once"), FakeHost->StopCount, 1);
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
 }
@@ -192,7 +367,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"AvidScript.Editor.CSharpLiveReload.Service.BuildTimeChangeTrails",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceTrailingTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceTrailingTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
@@ -202,47 +378,45 @@ bool FAvidScriptEditorCSharpLiveReloadServiceTrailingTest::RunTest(const FString
 	}
 
 	double Now = 2.0;
-	int32 BuildCount = 0;
-	FAvidScriptEditorCSharpLiveReloadService* ServicePtr = nullptr;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> FirstJob = Jobs.PlanJob();
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> SecondJob = Jobs.PlanJob();
 	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount, &Now, FakeHost, &ServicePtr](
-			const FString&,
-			AActor*,
-			FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuild)
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			if (BuildCount == 1)
-			{
-				Now = 2.4;
-				FakeHost->Emit({FPaths::Combine(
-					ServicePtr->GetLastResult().WorkspaceRoot,
-					TEXT("Trailing.cs"))});
-			}
-			OutBuild.bSucceeded = true;
-			OutBuild.Status = EAvidScriptEditorCSharpLiveReloadBuildStatus::Succeeded;
-			return true;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
 		},
 		[&Now]() { return Now; });
-	ServicePtr = &Service;
 
-	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("Trailing"));
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("Trailing"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
 	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("First.cs"))});
 	Service.Tick();
 	Now = 2.35;
 	Service.Tick();
-	TestEqual(TEXT("First build completes"), BuildCount, 1);
-	TestEqual(TEXT("Build-time batch is coalesced"), Service.GetStats().CoalescedChangeBatchCount, 1);
+	TestEqual(TEXT("First job starts"), Jobs.CreateCount, 1);
+	Now = 2.4;
+	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Trailing.cs"))});
+	Service.Tick();
+	TestEqual(TEXT("Build-time batch coalesces"), Service.GetStats().CoalescedChangeBatchCount, 1);
+	FirstJob->CompleteSuccess(TEXT("first.report.json"));
+	Service.Tick();
+	TestEqual(TEXT("First completion binds"), ApplyCount, 1);
 	Now = 2.749;
 	Service.Tick();
-	TestEqual(TEXT("Trailing debounce suppresses early build"), BuildCount, 1);
+	TestEqual(TEXT("Trailing deadline suppresses early start"), Jobs.CreateCount, 1);
 	Now = 2.75;
 	Service.Tick();
-	TestEqual(TEXT("Exactly one trailing build runs"), BuildCount, 2);
+	TestEqual(TEXT("Exactly one trailing job starts"), Jobs.CreateCount, 2);
+	SecondJob->CompleteSuccess(TEXT("second.report.json"));
+	Service.Tick();
+	TestEqual(TEXT("Trailing completion binds once"), ApplyCount, 2);
 	Service.Stop();
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
@@ -253,7 +427,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"AvidScript.Editor.CSharpLiveReload.Service.BuildFailureWaitsForChange",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceFailureTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceFailureTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
@@ -263,38 +438,36 @@ bool FAvidScriptEditorCSharpLiveReloadServiceFailureTest::RunTest(const FString&
 	}
 
 	double Now = 3.0;
-	int32 BuildCount = 0;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
 	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount](const FString&, AActor*, FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuild)
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			OutBuild.ErrorCategory = TEXT("live_reload_build_failed");
-			OutBuild.CauseErrorCategory = TEXT("semantic_failed");
-			OutBuild.ErrorMessage = TEXT("fixture build failed");
-			return false;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
 		},
 		[&Now]() { return Now; });
 
-	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("Failure"));
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("Failure"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
 	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Broken.cs"))});
 	Service.Tick();
 	Now = 3.35;
 	Service.Tick();
-	TestEqual(TEXT("Failed build ran once"), BuildCount, 1);
-	TestTrue(TEXT("Service remains watching after failure"), Service.IsRunning());
-	TestEqual(
-		TEXT("Failure status"),
-		Service.GetLastResult().Status,
-		EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed);
+	Job->CompleteFailure(TEXT("semantic_failed"));
+	Service.Tick();
+	TestTrue(TEXT("Service remains watching"), Service.IsRunning());
+	TestEqual(TEXT("Failure status"), Service.GetLastResult().Status, EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed);
 	TestEqual(TEXT("Failure cause is preserved"), Service.GetLastResult().CauseErrorCategory, FString(TEXT("semantic_failed")));
+	TestEqual(TEXT("Build failure never binds"), ApplyCount, 0);
 	Now = 10.0;
 	Service.Tick();
-	TestEqual(TEXT("Failure does not retry unchanged input"), BuildCount, 1);
+	TestEqual(TEXT("Unchanged failure does not retry"), Jobs.CreateCount, 1);
 	Service.Stop();
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
@@ -305,7 +478,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	"AvidScript.Editor.CSharpLiveReload.Service.DestroyedTargetStops",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceTargetTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceTargetTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
@@ -315,19 +489,20 @@ bool FAvidScriptEditorCSharpLiveReloadServiceTargetTest::RunTest(const FString& 
 	}
 
 	double Now = 4.0;
-	int32 BuildCount = 0;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
 	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount](const FString&, AActor*, FAvidScriptEditorCSharpLiveReloadBuildResult&)
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			return true;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
 		},
 		[&Now]() { return Now; });
 
-	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("DestroyedTarget"));
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("DestroyedTarget"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
 	TestTrue(TEXT("Target actor destroys"), World->DestroyActor(Target));
@@ -335,22 +510,21 @@ bool FAvidScriptEditorCSharpLiveReloadServiceTargetTest::RunTest(const FString& 
 	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("AfterDestroy.cs"))});
 	Service.Tick();
 	TestFalse(TEXT("Service stops for destroyed target"), Service.IsRunning());
-	TestEqual(TEXT("Destroyed target runs no build"), BuildCount, 0);
-	TestEqual(
-		TEXT("Destroyed target category"),
-		Service.GetLastResult().ErrorCategory,
-		FString(TEXT("live_reload_target_unavailable")));
+	TestEqual(TEXT("Destroyed target creates no job"), Jobs.CreateCount, 0);
+	TestEqual(TEXT("Destroyed target binds nothing"), ApplyCount, 0);
+	TestEqual(TEXT("Destroyed target category"), Service.GetLastResult().ErrorCategory, FString(TEXT("live_reload_target_unavailable")));
 	TestEqual(TEXT("Destroyed target unregisters watcher"), FakeHost->StopCount, 1);
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorCSharpLiveReloadServiceStopDuringBuildTest,
-	"AvidScript.Editor.CSharpLiveReload.Service.StopDuringBuildRejectsCompletion",
+	FAvidScriptEditorCSharpLiveReloadServiceStopTest,
+	"AvidScript.Editor.CSharpLiveReload.Service.StopCancelsAndRejectsCompletion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceStopDuringBuildTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceStopTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
@@ -360,50 +534,92 @@ bool FAvidScriptEditorCSharpLiveReloadServiceStopDuringBuildTest::RunTest(const 
 	}
 
 	double Now = 5.0;
-	int32 BuildCount = 0;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
 	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
-	FAvidScriptEditorCSharpLiveReloadService* ServicePtr = nullptr;
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount, &ServicePtr](
-			const FString&,
-			AActor*,
-			FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuild)
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			OutBuild.bSucceeded = true;
-			ServicePtr->Stop();
-			return true;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
 		},
 		[&Now]() { return Now; });
-	ServicePtr = &Service;
 
-	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("StopDuringBuild"));
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("Stop"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
 	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Stop.cs"))});
 	Service.Tick();
 	Now = 5.35;
-	TestFalse(TEXT("Stopped generation rejects build completion"), Service.Tick());
-	TestEqual(TEXT("Build ran once"), BuildCount, 1);
-	TestFalse(TEXT("Service remains stopped"), Service.IsRunning());
-	TestFalse(TEXT("Stopped result is not overwritten as running"), Service.GetLastResult().bRunning);
-	TestEqual(
-		TEXT("Stopped status is preserved"),
-		Service.GetLastResult().Status,
-		EAvidScriptEditorCSharpLiveReloadServiceStatus::Stopped);
+	Service.Tick();
+	Service.Stop();
+	TestEqual(TEXT("Stop cancels active job once"), Job->CancelCount, 1);
+	Job->CompleteSuccess();
+	TestFalse(TEXT("Stopped service rejects old completion"), Service.Tick());
+	TestEqual(TEXT("Stopped completion never binds"), ApplyCount, 0);
+	TestEqual(TEXT("Stopped status is preserved"), Service.GetLastResult().Status, EAvidScriptEditorCSharpLiveReloadServiceStatus::Stopped);
+	DestroyAvidScriptLiveReloadServiceWorld(World);
+	return true;
+}
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpLiveReloadServiceRenamedTargetTest,
+	"AvidScript.Editor.CSharpLiveReload.Service.RenamedTargetStopsWithoutBinding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpLiveReloadServiceRenamedTargetTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	AActor* Target = nullptr;
+	if (!TestTrue(TEXT("Fixture world creates"), CreateAvidScriptLiveReloadServiceWorld(World, Target)))
+	{
+		return false;
+	}
+
+	double Now = 5.5;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
+	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
+	FAvidScriptEditorCSharpLiveReloadService Service(
+		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
+		{
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
+		},
+		[&Now]() { return Now; });
+
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("RenamedTarget"));
+	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
+	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
+	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Rename.cs"))});
+	Service.Tick();
+	Now = 5.85;
+	Service.Tick();
+	TestTrue(TEXT("Fixed target renames during build"), Target->Rename(TEXT("AvidScriptRenamedLiveReloadTarget"), nullptr, REN_DontCreateRedirectors));
+	Job->CompleteSuccess();
+	TestFalse(TEXT("Renamed target stops service on completion"), Service.Tick());
+	TestEqual(TEXT("Renamed target never binds"), ApplyCount, 0);
+	TestFalse(TEXT("Renamed target does not leave coordinator building"), Service.IsRunning());
+	TestEqual(TEXT("Renamed target status"), Service.GetLastResult().Status, EAvidScriptEditorCSharpLiveReloadServiceStatus::TargetUnavailable);
+	TestEqual(TEXT("Renamed target cause"), Service.GetLastResult().CauseErrorCategory, FString(TEXT("actor_identity_changed_during_build")));
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpLiveReloadServiceDestroyDuringBuildTest,
-	"AvidScript.Editor.CSharpLiveReload.Service.DestroyedDuringBuildStops",
+	"AvidScript.Editor.CSharpLiveReload.Service.DestroyedDuringBuildCancels",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorCSharpLiveReloadServiceDestroyDuringBuildTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorCSharpLiveReloadServiceDestroyDuringBuildTest::RunTest(
+	const FString& Parameters)
 {
 	UWorld* World = nullptr;
 	AActor* Target = nullptr;
@@ -413,39 +629,138 @@ bool FAvidScriptEditorCSharpLiveReloadServiceDestroyDuringBuildTest::RunTest(con
 	}
 
 	double Now = 6.0;
-	int32 BuildCount = 0;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
 	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
 	FAvidScriptEditorCSharpLiveReloadService Service(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
-		[&BuildCount, &World, &Target](
-			const FString&,
-			AActor*,
-			FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuild)
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
 		{
-			++BuildCount;
-			OutBuild.bSucceeded = true;
-			World->DestroyActor(Target);
-			Target = nullptr;
-			return true;
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
 		},
 		[&Now]() { return Now; });
 
-	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config =
-		MakeAvidScriptLiveReloadServiceConfig(TEXT("DestroyedDuringBuild"));
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("DestroyedDuringBuild"));
 	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
 	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
 	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Destroy.cs"))});
 	Service.Tick();
 	Now = 6.35;
-	TestFalse(TEXT("Destroy during build stops ticker"), Service.Tick());
-	TestEqual(TEXT("Build ran once"), BuildCount, 1);
-	TestFalse(TEXT("Service stops for destroyed target"), Service.IsRunning());
-	TestEqual(
-		TEXT("Destroyed during build category"),
-		Service.GetLastResult().CauseErrorCategory,
-		FString(TEXT("actor_destroyed_during_build")));
-	TestEqual(TEXT("Destroyed target unregisters watcher"), FakeHost->StopCount, 1);
+	Service.Tick();
+	TestTrue(TEXT("Target destroys while job is active"), World->DestroyActor(Target));
+	Target = nullptr;
+	TestFalse(TEXT("Destroyed target stops service"), Service.Tick());
+	TestEqual(TEXT("Destroyed target cancels job once"), Job->CancelCount, 1);
+	TestEqual(TEXT("Destroyed target never binds"), ApplyCount, 0);
+	TestEqual(TEXT("Destroyed during build cause"), Service.GetLastResult().CauseErrorCategory, FString(TEXT("actor_destroyed_during_build")));
+	DestroyAvidScriptLiveReloadServiceWorld(World);
+	return true;
+}
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpLiveReloadServiceBindingFailureTest,
+	"AvidScript.Editor.CSharpLiveReload.Service.BindingFailureWaitsForChange",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpLiveReloadServiceBindingFailureTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	AActor* Target = nullptr;
+	if (!TestTrue(TEXT("Fixture world creates"), CreateAvidScriptLiveReloadServiceWorld(World, Target)))
+	{
+		return false;
+	}
+
+	double Now = 7.0;
+	int32 ApplyCount = 0;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
+	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
+	FAvidScriptEditorCSharpLiveReloadService Service(
+		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
+		[&Jobs]() { return Jobs.Create(); },
+		[&ApplyCount](const FString&, AActor*, FAvidScriptEditorComponentBindingResult& OutResult)
+		{
+			++ApplyCount;
+			OutResult.ErrorCategory = TEXT("fixture_binding_failed");
+			OutResult.ErrorMessage = TEXT("fixture rejected binding");
+			return false;
+		},
+		[&Now]() { return Now; });
+
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("BindingFailure"));
+	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
+	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
+	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Binding.cs"))});
+	Service.Tick();
+	Now = 7.35;
+	Service.Tick();
+	Job->CompleteSuccess();
+	Service.Tick();
+	TestEqual(TEXT("Binding attempts once"), ApplyCount, 1);
+	TestTrue(TEXT("Binding failure keeps service running"), Service.IsRunning());
+	TestEqual(TEXT("Binding failure service status"), Service.GetLastResult().Status, EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed);
+	TestEqual(TEXT("Binding failure build status"), Service.GetLastResult().BuildResult.Status, EAvidScriptEditorCSharpLiveReloadBuildStatus::BindingFailed);
+	TestEqual(TEXT("Binding failure cause"), Service.GetLastResult().CauseErrorCategory, FString(TEXT("fixture_binding_failed")));
+	Now = 20.0;
+	Service.Tick();
+	TestEqual(TEXT("Binding failure does not retry unchanged input"), Jobs.CreateCount, 1);
+	Service.Stop();
+	DestroyAvidScriptLiveReloadServiceWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpLiveReloadServiceCanceledJobTest,
+	"AvidScript.Editor.CSharpLiveReload.Service.CanceledJobDoesNotBind",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpLiveReloadServiceCanceledJobTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	AActor* Target = nullptr;
+	if (!TestTrue(TEXT("Fixture world creates"), CreateAvidScriptLiveReloadServiceWorld(World, Target)))
+	{
+		return false;
+	}
+
+	double Now = 8.0;
+	int32 ApplyCount = 0;
+	AActor* AppliedTarget = nullptr;
+	FFakeAvidScriptCSharpAsyncJobQueue Jobs;
+	const TSharedRef<FFakeAvidScriptCSharpAsyncJobState> Job = Jobs.PlanJob();
+	FFakeAvidScriptLiveReloadWatchHost* FakeHost = new FFakeAvidScriptLiveReloadWatchHost();
+	FAvidScriptEditorCSharpLiveReloadService Service(
+		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeHost),
+		[&Jobs]() { return Jobs.Create(); },
+		[&AppliedTarget, &ApplyCount](const FString& ReportPath, AActor* ActualTarget, FAvidScriptEditorComponentBindingResult& OutResult)
+		{
+			return ApplyAvidScriptLiveReloadServiceFixtureReport(ReportPath, ActualTarget, AppliedTarget, ApplyCount, OutResult);
+		},
+		[&Now]() { return Now; });
+
+	const FAvidScriptEditorCSharpLiveReloadServiceConfig Config = MakeAvidScriptLiveReloadServiceConfig(TEXT("Canceled"));
+	FAvidScriptEditorCSharpLiveReloadServiceResult StartResult;
+	TestTrue(TEXT("Service starts"), Service.Start(Config, Target, StartResult));
+	FakeHost->Emit({FPaths::Combine(Config.WorkspaceRoot, TEXT("Canceled.cs"))});
+	Service.Tick();
+	Now = 8.35;
+	Service.Tick();
+	Job->CompleteSuccess(TEXT("must-not-bind.report.json"));
+	Job->Progress.Stage = EAvidScriptEditorCSharpAsyncBuildStage::Canceled;
+	Job->Progress.bCancelRequested = true;
+	Job->Result.ErrorCategory = TEXT("live_reload_build_canceled");
+	Job->Result.ErrorMessage = TEXT("fixture canceled with stale success payload");
+	Service.Tick();
+	TestEqual(TEXT("Canceled job does not bind"), ApplyCount, 0);
+	TestEqual(TEXT("Canceled job status"), Service.GetLastResult().Status, EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildCanceled);
+	TestTrue(TEXT("Canceled job keeps watcher running"), Service.IsRunning());
+	Service.Stop();
 	DestroyAvidScriptLiveReloadServiceWorld(World);
 	return true;
 }

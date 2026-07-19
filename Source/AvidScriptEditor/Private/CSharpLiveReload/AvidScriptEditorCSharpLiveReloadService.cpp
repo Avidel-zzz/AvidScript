@@ -1,5 +1,6 @@
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.h"
 
+#include "AvidScriptEditorComponentBindingService.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadDirectoryWatchHost.h"
 
 #include "Containers/Queue.h"
@@ -32,32 +33,45 @@ bool IsAvidScriptLiveReloadTargetValid(AActor* Actor)
 }
 } // namespace
 
-FAvidScriptEditorCSharpLiveReloadService::FAvidScriptEditorCSharpLiveReloadService()
+FAvidScriptEditorCSharpLiveReloadService::
+	FAvidScriptEditorCSharpLiveReloadService()
 	: FAvidScriptEditorCSharpLiveReloadService(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(
 			new FAvidScriptEditorCSharpLiveReloadDirectoryWatchHost()),
-		[Executor = MakeShared<FAvidScriptEditorCSharpLiveReloadBuildExecutor>()](
-			const FString& ProfilePath,
-			AActor* Target,
-			FAvidScriptEditorCSharpLiveReloadBuildResult& OutResult)
+		[]()
 		{
-			return Executor->Execute(ProfilePath, Target, OutResult);
+			return FAvidScriptEditorCSharpAsyncBuildJobFactory::Create();
+		},
+		[](
+			const FString& ReportPath,
+			AActor* Target,
+			FAvidScriptEditorComponentBindingResult& OutResult)
+		{
+			return FAvidScriptEditorComponentBindingService::
+				ApplyCSharpReportToActor(
+					ReportPath,
+					Target,
+					OutResult);
 		},
 		[]() { return FPlatformTime::Seconds(); })
 {
 }
 
-FAvidScriptEditorCSharpLiveReloadService::FAvidScriptEditorCSharpLiveReloadService(
-	TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost> InWatchHost,
-	FExecuteBuild InExecuteBuild,
-	FNowSeconds InNowSeconds)
+FAvidScriptEditorCSharpLiveReloadService::
+	FAvidScriptEditorCSharpLiveReloadService(
+		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost> InWatchHost,
+		FCreateBuildJob InCreateBuildJob,
+		FApplyReport InApplyReport,
+		FNowSeconds InNowSeconds)
 	: WatchHost(MoveTemp(InWatchHost))
-	, ExecuteBuild(MoveTemp(InExecuteBuild))
+	, CreateBuildJob(MoveTemp(InCreateBuildJob))
+	, ApplyReport(MoveTemp(InApplyReport))
 	, NowSeconds(MoveTemp(InNowSeconds))
 {
 }
 
-FAvidScriptEditorCSharpLiveReloadService::~FAvidScriptEditorCSharpLiveReloadService()
+FAvidScriptEditorCSharpLiveReloadService::
+	~FAvidScriptEditorCSharpLiveReloadService()
 {
 	StopInternal(false);
 }
@@ -81,8 +95,10 @@ bool FAvidScriptEditorCSharpLiveReloadService::Start(
 
 	LastResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
 	ActiveConfig = Config;
-	ActiveConfig.WorkspaceRoot = NormalizeAvidScriptLiveReloadServicePath(Config.WorkspaceRoot);
-	ActiveConfig.ProfilePath = NormalizeAvidScriptLiveReloadServicePath(Config.ProfilePath);
+	ActiveConfig.WorkspaceRoot = NormalizeAvidScriptLiveReloadServicePath(
+		Config.WorkspaceRoot);
+	ActiveConfig.ProfilePath = NormalizeAvidScriptLiveReloadServicePath(
+		Config.ProfilePath);
 	TargetActor = InTargetActor;
 	if (!IsAvidScriptLiveReloadTargetValid(TargetActor.Get()))
 	{
@@ -97,7 +113,8 @@ bool FAvidScriptEditorCSharpLiveReloadService::Start(
 		ActiveConfig = FAvidScriptEditorCSharpLiveReloadServiceConfig();
 		return false;
 	}
-	if (!WatchHost || !ExecuteBuild || !NowSeconds)
+	FixedTargetPath = TargetActor->GetPathName();
+	if (!WatchHost || !CreateBuildJob || !ApplyReport || !NowSeconds)
 	{
 		SetFailure(
 			EAvidScriptEditorCSharpLiveReloadServiceStatus::StartFailed,
@@ -107,6 +124,7 @@ bool FAvidScriptEditorCSharpLiveReloadService::Start(
 			TEXT("restart the editor or reload the AvidScriptEditor module"));
 		OutResult = LastResult;
 		TargetActor.Reset();
+		FixedTargetPath.Reset();
 		ActiveConfig = FAvidScriptEditorCSharpLiveReloadServiceConfig();
 		return false;
 	}
@@ -126,20 +144,26 @@ bool FAvidScriptEditorCSharpLiveReloadService::Start(
 			TEXT("repair the project C# workspace and retry"));
 		OutResult = LastResult;
 		TargetActor.Reset();
+		FixedTargetPath.Reset();
 		ActiveConfig = FAvidScriptEditorCSharpLiveReloadServiceConfig();
 		return false;
 	}
 
-	PendingState = MakeShared<FAvidScriptEditorCSharpLiveReloadPendingState, ESPMode::ThreadSafe>();
+	PendingState = MakeShared<
+		FAvidScriptEditorCSharpLiveReloadPendingState,
+		ESPMode::ThreadSafe>();
 	PendingState->bAccepting.Store(true);
-	const TWeakPtr<FAvidScriptEditorCSharpLiveReloadPendingState, ESPMode::ThreadSafe> WeakPendingState =
-		PendingState;
+	const TWeakPtr<
+		FAvidScriptEditorCSharpLiveReloadPendingState,
+		ESPMode::ThreadSafe> WeakPendingState = PendingState;
 	if (!WatchHost->Start(
 			ActiveConfig.WorkspaceRoot,
-			[WeakPendingState](FAvidScriptEditorCSharpLiveReloadChangeBatch&& Batch)
+			[WeakPendingState](
+				FAvidScriptEditorCSharpLiveReloadChangeBatch&& Batch)
 			{
-				const TSharedPtr<FAvidScriptEditorCSharpLiveReloadPendingState, ESPMode::ThreadSafe> State =
-					WeakPendingState.Pin();
+				const TSharedPtr<
+					FAvidScriptEditorCSharpLiveReloadPendingState,
+					ESPMode::ThreadSafe> State = WeakPendingState.Pin();
 				if (State && State->bAccepting.Load())
 				{
 					State->Queue.Enqueue(MoveTemp(Batch));
@@ -153,25 +177,33 @@ bool FAvidScriptEditorCSharpLiveReloadService::Start(
 		Coordinator.Stop();
 		SetFailure(
 			EAvidScriptEditorCSharpLiveReloadServiceStatus::StartFailed,
-			ErrorCategory.IsEmpty() ? FString(TEXT("live_reload_watch_registration_failed")) : ErrorCategory,
+			ErrorCategory.IsEmpty()
+				? FString(TEXT("live_reload_watch_registration_failed"))
+				: ErrorCategory,
 			FString(),
-			ErrorMessage.IsEmpty() ? FString(TEXT("Project C# workspace watch registration failed.")) : ErrorMessage,
+			ErrorMessage.IsEmpty()
+				? FString(TEXT("Project C# workspace watch registration failed."))
+				: ErrorMessage,
 			TEXT("verify DirectoryWatcher support and restart auto live reload"));
 		OutResult = LastResult;
 		TargetActor.Reset();
+		FixedTargetPath.Reset();
 		ActiveConfig = FAvidScriptEditorCSharpLiveReloadServiceConfig();
 		return false;
 	}
 
 	CoreTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateRaw(this, &FAvidScriptEditorCSharpLiveReloadService::HandleCoreTicker));
+		FTickerDelegate::CreateRaw(
+			this,
+			&FAvidScriptEditorCSharpLiveReloadService::HandleCoreTicker));
 	LastResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
 	LastResult.bSucceeded = true;
 	LastResult.bRunning = true;
-	LastResult.Status = EAvidScriptEditorCSharpLiveReloadServiceStatus::Watching;
+	LastResult.Status =
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::Watching;
 	LastResult.WorkspaceRoot = ActiveConfig.WorkspaceRoot;
 	LastResult.ProfilePath = ActiveConfig.ProfilePath;
-	LastResult.TargetActorPath = TargetActor->GetPathName();
+	LastResult.TargetActorPath = FixedTargetPath;
 	LastResult.Stats = Coordinator.GetStats();
 	OutResult = LastResult;
 	return true;
@@ -182,81 +214,11 @@ void FAvidScriptEditorCSharpLiveReloadService::Stop()
 	StopInternal(false);
 }
 
-bool FAvidScriptEditorCSharpLiveReloadService::Tick()
-{
-	if (!IsRunning())
-	{
-		return false;
-	}
-
-	const double BeforeBuildSeconds = NowSeconds();
-	DrainPendingChanges(BeforeBuildSeconds);
-	AActor* FixedTarget = TargetActor.Get();
-	if (!IsAvidScriptLiveReloadTargetValid(FixedTarget))
-	{
-		SetFailure(
-			EAvidScriptEditorCSharpLiveReloadServiceStatus::TargetUnavailable,
-			TEXT("live_reload_target_unavailable"),
-			TEXT("actor_destroyed"),
-			TEXT("The fixed Project C# Auto Live Reload Actor was destroyed."),
-			TEXT("select another Actor and restart Project C# Auto Live Reload"));
-		StopInternal(true);
-		return false;
-	}
-
-	const TOptional<FAvidScriptEditorCSharpLiveReloadBuildRequest> Request =
-		Coordinator.TryBeginBuild(BeforeBuildSeconds);
-	if (!Request.IsSet())
-	{
-		return true;
-	}
-
-	FAvidScriptEditorCSharpLiveReloadBuildResult BuildResult;
-	const FString FixedTargetPath = FixedTarget->GetPathName();
-	const bool bBuildSucceeded = ExecuteBuild(
-		ActiveConfig.ProfilePath,
-		FixedTarget,
-		BuildResult);
-	DrainPendingChanges(NowSeconds());
-	if (!Coordinator.CompleteBuild(*Request, bBuildSucceeded && BuildResult.bSucceeded))
-	{
-		return IsRunning();
-	}
-	if (!IsAvidScriptLiveReloadTargetValid(FixedTarget))
-	{
-		SetFailure(
-			EAvidScriptEditorCSharpLiveReloadServiceStatus::TargetUnavailable,
-			TEXT("live_reload_target_unavailable"),
-			TEXT("actor_destroyed_during_build"),
-			TEXT("The fixed Project C# Auto Live Reload Actor was destroyed during build or binding."),
-			TEXT("select another Actor and restart Project C# Auto Live Reload"));
-		LastResult.TargetActorPath = FixedTargetPath;
-		StopInternal(true);
-		return false;
-	}
-
-	LastResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
-	LastResult.bSucceeded = bBuildSucceeded && BuildResult.bSucceeded;
-	LastResult.bRunning = true;
-	LastResult.Status = LastResult.bSucceeded
-		? EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildSucceeded
-		: EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed;
-	LastResult.ErrorCategory = BuildResult.ErrorCategory;
-	LastResult.CauseErrorCategory = BuildResult.CauseErrorCategory;
-	LastResult.ErrorMessage = BuildResult.ErrorMessage;
-	LastResult.NextAction = BuildResult.NextAction;
-	LastResult.WorkspaceRoot = ActiveConfig.WorkspaceRoot;
-	LastResult.ProfilePath = ActiveConfig.ProfilePath;
-	LastResult.TargetActorPath = FixedTargetPath;
-	LastResult.Request = *Request;
-	LastResult.Stats = Coordinator.GetStats();
-	LastResult.BuildResult = MoveTemp(BuildResult);
-	return true;
-}
-
 bool FAvidScriptEditorCSharpLiveReloadService::IsRunning() const
 {
-	return Coordinator.IsRunning() && WatchHost && WatchHost->IsWatching();
+	return Coordinator.IsRunning()
+		&& WatchHost
+		&& WatchHost->IsWatching();
 }
 
 const FAvidScriptEditorCSharpLiveReloadCoordinatorStats&
@@ -271,12 +233,14 @@ FAvidScriptEditorCSharpLiveReloadService::GetLastResult() const
 	return LastResult;
 }
 
-bool FAvidScriptEditorCSharpLiveReloadService::HandleCoreTicker(const float DeltaSeconds)
+bool FAvidScriptEditorCSharpLiveReloadService::HandleCoreTicker(
+	const float DeltaSeconds)
 {
 	return Tick();
 }
 
-void FAvidScriptEditorCSharpLiveReloadService::DrainPendingChanges(const double CurrentSeconds)
+void FAvidScriptEditorCSharpLiveReloadService::DrainPendingChanges(
+	const double CurrentSeconds)
 {
 	if (!PendingState)
 	{
@@ -292,17 +256,26 @@ void FAvidScriptEditorCSharpLiveReloadService::DrainPendingChanges(const double 
 		}
 		if (!Batch.FilePaths.IsEmpty())
 		{
-			Coordinator.NotifyFileChanges(Batch.FilePaths, CurrentSeconds);
+			Coordinator.NotifyFileChanges(
+				Batch.FilePaths,
+				CurrentSeconds);
 		}
 		Batch = FAvidScriptEditorCSharpLiveReloadChangeBatch();
 	}
 }
 
-void FAvidScriptEditorCSharpLiveReloadService::StopInternal(const bool bPreserveLastResult)
+void FAvidScriptEditorCSharpLiveReloadService::StopInternal(
+	const bool bPreserveLastResult)
 {
-	const FString PreviousWorkspaceRoot = ActiveConfig.WorkspaceRoot;
-	const FString PreviousProfilePath = ActiveConfig.ProfilePath;
-	const FString PreviousTargetPath = LastResult.TargetActorPath;
+	const FString PreviousWorkspaceRoot = ActiveConfig.WorkspaceRoot.IsEmpty()
+		? LastResult.WorkspaceRoot
+		: ActiveConfig.WorkspaceRoot;
+	const FString PreviousProfilePath = ActiveConfig.ProfilePath.IsEmpty()
+		? LastResult.ProfilePath
+		: ActiveConfig.ProfilePath;
+	const FString PreviousTargetPath = FixedTargetPath.IsEmpty()
+		? LastResult.TargetActorPath
+		: FixedTargetPath;
 	if (PendingState)
 	{
 		PendingState->bAccepting.Store(false);
@@ -311,6 +284,11 @@ void FAvidScriptEditorCSharpLiveReloadService::StopInternal(const bool bPreserve
 	{
 		WatchHost->Stop();
 	}
+	if (ActiveBuildJob)
+	{
+		ActiveBuildJob->Cancel();
+	}
+	ResetActiveBuildJob();
 	if (CoreTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(CoreTickerHandle);
@@ -326,6 +304,7 @@ void FAvidScriptEditorCSharpLiveReloadService::StopInternal(const bool bPreserve
 		PendingState.Reset();
 	}
 	TargetActor.Reset();
+	FixedTargetPath.Reset();
 	ActiveConfig = FAvidScriptEditorCSharpLiveReloadServiceConfig();
 
 	if (bPreserveLastResult)
@@ -338,7 +317,8 @@ void FAvidScriptEditorCSharpLiveReloadService::StopInternal(const bool bPreserve
 	LastResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
 	LastResult.bSucceeded = true;
 	LastResult.bRunning = false;
-	LastResult.Status = EAvidScriptEditorCSharpLiveReloadServiceStatus::Stopped;
+	LastResult.Status =
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::Stopped;
 	LastResult.WorkspaceRoot = PreviousWorkspaceRoot;
 	LastResult.ProfilePath = PreviousProfilePath;
 	LastResult.TargetActorPath = PreviousTargetPath;
@@ -362,9 +342,6 @@ void FAvidScriptEditorCSharpLiveReloadService::SetFailure(
 	LastResult.NextAction = NextAction;
 	LastResult.WorkspaceRoot = ActiveConfig.WorkspaceRoot;
 	LastResult.ProfilePath = ActiveConfig.ProfilePath;
-	if (TargetActor.IsValid())
-	{
-		LastResult.TargetActorPath = TargetActor->GetPathName();
-	}
+	LastResult.TargetActorPath = FixedTargetPath;
 	LastResult.Stats = Coordinator.GetStats();
 }

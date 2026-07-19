@@ -211,7 +211,8 @@ void FAvidScriptEditorCSharpAsyncBuildJob::Cancel()
 		return;
 	}
 	if (Process
-		&& IsAvidScriptCSharpAsyncBuildRunningStage(Progress.Stage))
+		&& IsAvidScriptCSharpAsyncBuildRunningStage(Progress.Stage)
+		&& !Progress.bCancelRequested)
 	{
 		Progress.bCancelRequested = true;
 		Process->Cancel();

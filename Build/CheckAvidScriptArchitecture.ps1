@@ -306,6 +306,9 @@ $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
+$CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
+$CSharpLiveReloadBuildStateSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadServiceBuildState.cpp'
+$CSharpLiveReloadCompletionSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadCompletion.cpp'
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
@@ -431,6 +434,67 @@ foreach ($ForbiddenAsyncBuildJobConcern in @(
     if ($CSharpAsyncBuildJobSource.Contains($ForbiddenAsyncBuildJobConcern)) {
         Add-Violation "C# AsyncBuildJob must not own profile, pipeline, process invocation, or Actor binding concern $ForbiddenAsyncBuildJobConcern"
     }
+}
+foreach ($RequiredLiveReloadServiceContract in @(
+    'FAvidScriptEditorCSharpAsyncBuildJobFactory::Create',
+    'FAvidScriptEditorComponentBindingService::',
+    'WatchHost->Start',
+    'AddTicker',
+    'ActiveBuildJob->Cancel',
+    'Coordinator.Stop'
+)) {
+    if (-not $CSharpLiveReloadServiceSource.Contains($RequiredLiveReloadServiceContract)) {
+        Add-Violation "C# LiveReloadService is missing lifecycle contract $RequiredLiveReloadServiceContract"
+    }
+}
+foreach ($ForbiddenLiveReloadServiceConcern in @(
+    'FAvidScriptEditorCSharpBuildService::BuildProfile',
+    'FAvidScriptEditorCSharpBuildPipeline',
+    'FAvidScriptEditorCSharpBuildInvoker',
+    'FMonitoredProcess',
+    'FPlatformProcess::ExecProcess'
+)) {
+    if ($CSharpLiveReloadServiceSource.Contains($ForbiddenLiveReloadServiceConcern)) {
+        Add-Violation "C# LiveReloadService lifecycle must not own build pipeline or process concern $ForbiddenLiveReloadServiceConcern"
+    }
+}
+foreach ($RequiredLiveReloadBuildStateContract in @(
+    'TickingJob',
+    'ExpectedJob',
+    'ExpectedJobSerial',
+    'ActiveBuildJob->Start',
+    'TickingJob->Tick',
+    'ActiveBuildJob->IsFinished',
+    'ActiveBuildJob->ConsumeResult',
+    'IsActiveRequestCurrent',
+    'Coordinator.CompleteBuild',
+    'ApplyReport',
+    'bReadyToBind',
+    'actor_identity_changed_during_build',
+    'StopInternal(true)'
+)) {
+    if (-not $CSharpLiveReloadBuildStateSource.Contains($RequiredLiveReloadBuildStateContract)) {
+        Add-Violation "C# LiveReloadServiceBuildState is missing request/job contract $RequiredLiveReloadBuildStateContract"
+    }
+}
+foreach ($ForbiddenLiveReloadBuildStateConcern in @(
+    'FAvidScriptEditorCSharpProfileService',
+    'FAvidScriptEditorCSharpBuildPipeline',
+    'FAvidScriptEditorCSharpBuildInvoker',
+    'FAvidScriptEditorComponentBindingService',
+    'FMonitoredProcess',
+    'FPlatformProcess::ExecProcess'
+)) {
+    if ($CSharpLiveReloadBuildStateSource.Contains($ForbiddenLiveReloadBuildStateConcern)) {
+        Add-Violation "C# LiveReloadServiceBuildState must not own profile, pipeline, process, or concrete binding concern $ForbiddenLiveReloadBuildStateConcern"
+    }
+}
+if (-not $CSharpLiveReloadCompletionSource.Contains('FromAsyncBuild') -or
+    -not $CSharpLiveReloadCompletionSource.Contains('FromBinding') -or
+    $CSharpLiveReloadCompletionSource.Contains('AActor') -or
+    $CSharpLiveReloadCompletionSource.Contains('Coordinator') -or
+    $CSharpLiveReloadCompletionSource.Contains('FMonitoredProcess')) {
+    Add-Violation 'C# LiveReloadCompletion must only map async build and binding results without Actor, coordinator, or process ownership'
 }
 if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
     -not $CSharpBuildInvokerSource.Contains('-RuntimeBindingPackagePath') -or

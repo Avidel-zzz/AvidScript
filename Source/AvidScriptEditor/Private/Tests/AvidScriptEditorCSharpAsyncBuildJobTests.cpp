@@ -357,6 +357,7 @@ bool FAvidScriptEditorCSharpAsyncBuildJobCancelTest::RunTest(
 	TestTrue(TEXT("Cancelable job starts"), Fixture.Job->Start(TEXT("cancel.json")));
 	FFakeAvidScriptCSharpBuildProcess* Process = Fixture.Processes[0];
 	Fixture.Job->Cancel();
+	Fixture.Job->Cancel();
 	TestEqual(TEXT("Cancel reaches active process once"), Process->CancelCount, 1);
 	Fixture.Job->Tick();
 	TestEqual(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadBuildExecutor.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadCoordinator.h"
 #include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadWatchHost.h"
@@ -15,8 +16,10 @@ enum class EAvidScriptEditorCSharpLiveReloadServiceStatus : uint8
 {
 	Unknown,
 	Watching,
+	Building,
 	BuildSucceeded,
 	BuildFailed,
+	BuildCanceled,
 	TargetUnavailable,
 	StartFailed,
 	Stopped
@@ -44,23 +47,27 @@ struct FAvidScriptEditorCSharpLiveReloadServiceResult
 	FString TargetActorPath;
 	FAvidScriptEditorCSharpLiveReloadBuildRequest Request;
 	FAvidScriptEditorCSharpLiveReloadCoordinatorStats Stats;
+	FAvidScriptEditorCSharpAsyncBuildProgress AsyncProgress;
 	FAvidScriptEditorCSharpLiveReloadBuildResult BuildResult;
 };
 
 class AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpLiveReloadService
 {
 public:
-	using FExecuteBuild = TFunction<bool(
+	using FCreateBuildJob = TFunction<
+		TUniquePtr<IAvidScriptEditorCSharpAsyncBuildJob>()>;
+	using FApplyReport = TFunction<bool(
 		const FString&,
 		AActor*,
-		FAvidScriptEditorCSharpLiveReloadBuildResult&)>;
+		FAvidScriptEditorComponentBindingResult&)>;
 	using FNowSeconds = TFunction<double()>;
 
 	FAvidScriptEditorCSharpLiveReloadService();
 
 	FAvidScriptEditorCSharpLiveReloadService(
 		TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost> InWatchHost,
-		FExecuteBuild InExecuteBuild,
+		FCreateBuildJob InCreateBuildJob,
+		FApplyReport InApplyReport,
 		FNowSeconds InNowSeconds);
 
 	~FAvidScriptEditorCSharpLiveReloadService();
@@ -83,6 +90,13 @@ public:
 private:
 	bool HandleCoreTicker(float DeltaSeconds);
 	void DrainPendingChanges(double NowSeconds);
+	bool TryStartBuildJob(double NowSeconds);
+	bool CompleteActiveBuildJob(
+		AActor* FixedTarget,
+		IAvidScriptEditorCSharpAsyncBuildJob* ExpectedJob,
+		uint64 ExpectedJobSerial);
+	bool IsActiveRequestCurrent() const;
+	void ResetActiveBuildJob();
 	void StopInternal(bool bPreserveLastResult);
 	void SetFailure(
 		EAvidScriptEditorCSharpLiveReloadServiceStatus Status,
@@ -92,12 +106,18 @@ private:
 		const FString& NextAction);
 
 	TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost> WatchHost;
-	FExecuteBuild ExecuteBuild;
+	FCreateBuildJob CreateBuildJob;
+	FApplyReport ApplyReport;
 	FNowSeconds NowSeconds;
 	TSharedPtr<FAvidScriptEditorCSharpLiveReloadPendingState, ESPMode::ThreadSafe> PendingState;
 	FAvidScriptEditorCSharpLiveReloadCoordinator Coordinator;
 	FAvidScriptEditorCSharpLiveReloadServiceConfig ActiveConfig;
 	TWeakObjectPtr<AActor> TargetActor;
+	FString FixedTargetPath;
+	TUniquePtr<IAvidScriptEditorCSharpAsyncBuildJob> ActiveBuildJob;
+	FAvidScriptEditorCSharpLiveReloadBuildRequest ActiveBuildRequest;
+	uint64 ActiveBuildJobSerial = 0;
+	uint64 NextBuildJobSerial = 1;
 	FTSTicker::FDelegateHandle CoreTickerHandle;
 	FAvidScriptEditorCSharpLiveReloadServiceResult LastResult;
 };

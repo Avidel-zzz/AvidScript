@@ -14,6 +14,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -562,24 +564,44 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	double Now = 1.0;
 	AActor* ReloadTarget = nullptr;
 	int32 ReloadBuildCount = 0;
-	const TSharedRef<FAvidScriptEditorCSharpLiveReloadBuildExecutor> ReloadExecutor =
-		MakeShared<FAvidScriptEditorCSharpLiveReloadBuildExecutor>();
 	FFakeAvidScriptEditorModuleLiveReloadWatchHost* FakeWatchHost =
 		new FFakeAvidScriptEditorModuleLiveReloadWatchHost();
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> LiveReloadService(
 		new FAvidScriptEditorCSharpLiveReloadService(
 			TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeWatchHost),
-			[&ReloadTarget, &ReloadBuildCount, ReloadExecutor](
-				const FString& ProfilePath,
+			[&ReloadBuildCount]()
+			{
+				++ReloadBuildCount;
+				return FAvidScriptEditorCSharpAsyncBuildJobFactory::Create();
+			},
+			[&ReloadTarget](
+				const FString& ReportPath,
 				AActor* Target,
-				FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuildResult)
+				FAvidScriptEditorComponentBindingResult& OutBindingResult)
 			{
 				ReloadTarget = Target;
-				++ReloadBuildCount;
-				return ReloadExecutor->Execute(ProfilePath, Target, OutBuildResult);
+				return FAvidScriptEditorComponentBindingService::
+					ApplyCSharpReportToActor(
+						ReportPath,
+						Target,
+						OutBindingResult);
 			},
 			[&Now]() { return Now; }));
 	FAvidScriptEditorCSharpLiveReloadService* LiveReloadServicePtr = LiveReloadService.Get();
+	auto PumpLiveReloadBuild = [LiveReloadServicePtr]()
+	{
+		const double DeadlineSeconds = FPlatformTime::Seconds() + 90.0;
+		while (LiveReloadServicePtr->IsRunning()
+			&& LiveReloadServicePtr->GetLastResult().Status ==
+				EAvidScriptEditorCSharpLiveReloadServiceStatus::Building
+			&& FPlatformTime::Seconds() < DeadlineSeconds)
+		{
+			FPlatformProcess::Sleep(0.01f);
+			LiveReloadServicePtr->Tick();
+		}
+		return LiveReloadServicePtr->GetLastResult().Status !=
+			EAvidScriptEditorCSharpLiveReloadServiceStatus::Building;
+	};
 	FAvidScriptEditorModule Module(MoveTemp(LiveReloadService));
 	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
 	FAvidScriptEditorCSharpBuildResult BuildResult;
@@ -679,6 +701,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	LiveReloadServicePtr->Tick();
 	Now = 1.35;
 	LiveReloadServicePtr->Tick();
+	TestTrue(TEXT("Real automatic reload reaches a terminal state"), PumpLiveReloadBuild());
 	TestEqual(TEXT("Reload keeps the initial bound Actor"), ReloadTarget, Actor);
 	TestEqual(TEXT("Two quick changes trigger one real reload build"), ReloadBuildCount, 1);
 	TestEqual(
@@ -711,6 +734,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	LiveReloadServicePtr->Tick();
 	Now = LiveReloadServicePtr->GetStats().PendingDeadlineSeconds;
 	LiveReloadServicePtr->Tick();
+	TestTrue(TEXT("Bad source reload reaches a terminal state"), PumpLiveReloadBuild());
 	TestEqual(TEXT("Bad source triggers one trailing real build"), ReloadBuildCount, 2);
 	TestEqual(
 		TEXT("Bad source reports automatic build failure"),
