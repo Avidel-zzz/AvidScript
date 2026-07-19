@@ -808,3 +808,10 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-19 P45.3 跨解释器转义错误记录：预检编排把包含 PowerShell 反引号的命令放入 JavaScript template literal，导致外层脚本在 Git 启动前解析失败。Prevention：跨 JavaScript/PowerShell 传递含反引号内容时使用逐行普通字符串或避免 PowerShell 转义字符；执行失败后区分 outer parser、PowerShell parser 和目标命令三层。
 - 2026-07-19 P45.3 PowerShell 条件拼接复发记录：本地 ref 同步脚本尝试在条件表达式中同时执行 `git show-ref` 并读取 `$LASTEXITCODE`，产生解析错误。Prevention：外部命令与退出码读取必须是两个独立语句，禁止把 shell 命令、分号和状态判断塞进同一个 `if` 表达式。
 - 2026-07-19 P45.3 SSH fetch 会话管理错误记录：远端已验证后又启动两个长时间 `git fetch origin`，外层工具等待结束时没有保留首个 session id，造成重复挂起进程。Prevention：长命令首次 yield 必须立即保存并轮询唯一 session；本地已有经过远端回抓验证的 mirror 时，优先从该 mirror 导入对象，禁止并发启动相同 fetch。终止卡住会话前必须按完整命令行核对根进程并只结束其进程树。
+
+## Phase 45.4 Explicit State Contract Rules
+- 2026-07-20 P45.4 审查节奏错误记录：P45.4B 对每个小修复串行启动新的独立审查，并重复运行完整 publication/integration 套件，导致一个 Guest schema task 消耗远超实现本身。Prevention：每个 task 只做一次集中审查并一次列全 findings；批量修复后只跑受影响的聚焦回归，完整套件只在 task 或 phase 收尾运行。Critical 行为问题仍必须修复，但不得用重复全量验证替代工程判断。
+- 2026-07-20 P45.4 跨层反引号错误复发：启动 P45.4C 代理的 JavaScript template literal 含 Markdown inline backtick，外层解析在代理启动前失败。Prevention：`functions.exec` 中的长 prompt 使用普通双引号字符串和显式换行，禁止直接嵌入反引号；需要展示代码标识时使用无 Markdown 的纯文本。
+- 2026-07-20 P45.4 只读命令拼接复发：阶段核对曾再次在单个 `exec_command` 中用分号串联 status/log/diff 或多个文件读取。Prevention：每个 shell 调用只承担一个独立检查；多文件和多 Git gate 拆成独立工具调用，不因只读或输出短而放宽。
+- P45.4 runtime migration rule：candidate primary stable ID 优先于 alias；同一次迁移中一个 candidate slot 只能被一个 previous slot claim。多个旧 ID 汇聚到同一目标必须在写入前 fail closed，禁止按遍历顺序覆盖。
+- P45.4 rollback rule：candidate 写失败后逆序尝试恢复全部已写槽；单个恢复失败不得阻止其余恢复尝试，并以首个恢复失败槽作为诊断主键。candidate 只在完整迁移成功后激活。
