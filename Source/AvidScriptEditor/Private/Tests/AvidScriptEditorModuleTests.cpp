@@ -14,9 +14,14 @@ bool FAvidScriptEditorModuleLoadsSmokeTest::RunTest(const FString& Parameters)
 {
 	const FName ModuleName(TEXT("AvidScriptEditor"));
 	IModuleInterface& Module = FModuleManager::LoadModuleChecked<IModuleInterface>(ModuleName);
+	FAvidScriptEditorModule& AvidScriptEditorModule =
+		FModuleManager::GetModuleChecked<FAvidScriptEditorModule>(ModuleName);
 
 	TestTrue(TEXT("AvidScriptEditor module is loaded"), FModuleManager::Get().IsModuleLoaded(ModuleName));
 	TestTrue(TEXT("AvidScriptEditor module interface is valid"), &Module != nullptr);
+	TestFalse(
+		TEXT("Project C# Auto Live Reload is opt-in at module startup"),
+		AvidScriptEditorModule.IsCSharpWorkspaceLiveReloadRunning());
 
 	return true;
 }

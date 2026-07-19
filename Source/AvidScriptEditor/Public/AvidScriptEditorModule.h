@@ -7,6 +7,7 @@
 #include "AvidScriptEditorCSharpWorkspaceService.h"
 #include "AvidScriptEditorMenuRegistrar.h"
 #include "AvidScriptEditorSettingsService.h"
+#include "CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.h"
 
 #include "CoreMinimal.h"
 #include "Logging/LogMacros.h"
@@ -17,6 +18,10 @@ DECLARE_LOG_CATEGORY_EXTERN(LogAvidScriptEditor, Log, All);
 class FAvidScriptEditorModule final : public IModuleInterface
 {
 public:
+	FAvidScriptEditorModule() = default;
+	explicit FAvidScriptEditorModule(
+		TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> InCSharpLiveReloadService);
+
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 
@@ -31,6 +36,8 @@ public:
 	static FName GetCSharpProfileTemplateEntryName();
 	static FName GetCSharpWorkspaceCreateEntryName();
 	static FName GetCSharpWorkspaceBuildAndBindEntryName();
+	static FName GetCSharpWorkspaceLiveReloadStartEntryName();
+	static FName GetCSharpWorkspaceLiveReloadStopEntryName();
 	static FString GetCSharpActorLifecycleReportPath();
 	static FString GetCSharpActorLifecycleBuildScriptPath();
 	static FString GetDefaultCSharpProfilePath();
@@ -54,6 +61,8 @@ public:
 
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceCreateMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(FSimpleDelegate ExecuteAction);
+	static FAvidScriptEditorMenuEntryConfig MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(FSimpleDelegate ExecuteAction);
 	bool ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBinding(FAvidScriptEditorComponentBindingResult& OutResult);
 	bool ExecuteCSharpActorLifecycleBuildAndBinding(
@@ -79,6 +88,20 @@ public:
 		FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
 		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
 		FAvidScriptEditorComponentBindingResult& OutBindingResult);
+	bool ExecuteStartCSharpWorkspaceLiveReload(
+		FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult,
+		FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult);
+	bool ExecuteStartCSharpWorkspaceLiveReload(
+		const FAvidScriptEditorCSharpWorkspaceConfig& WorkspaceConfig,
+		FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+		FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+		FAvidScriptEditorComponentBindingResult& OutBindingResult,
+		FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult);
+	bool ExecuteStopCSharpWorkspaceLiveReload(
+		FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult);
+	bool IsCSharpWorkspaceLiveReloadRunning() const;
 
 private:
 	void RegisterMenus();
@@ -89,7 +112,10 @@ private:
 	void HandleCreateDefaultCSharpProfileTemplate();
 	void HandleCreateCSharpWorkspace();
 	void HandleBuildAndBindCSharpWorkspace();
+	void HandleStartCSharpWorkspaceLiveReload();
+	void HandleStopCSharpWorkspaceLiveReload();
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
+	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;
 	FDelegateHandle ToolMenusStartupCallbackHandle;
 };

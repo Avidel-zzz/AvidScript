@@ -1,7 +1,9 @@
 #include "AvidScriptEditorModule.h"
 
+#include "AvidScriptComponent.h"
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
+#include "GameFramework/Actor.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -92,6 +94,28 @@ void SetAvidScriptCSharpWorkspaceBuildFailure(
 	OutBuildResult.ArtifactStem = TEXT("project_gameplay");
 }
 
+void SetAvidScriptCSharpLiveReloadStartFailure(
+	const FString& ErrorCategory,
+	const FString& CauseErrorCategory,
+	const FString& ErrorMessage,
+	const FString& NextAction,
+	const FAvidScriptEditorCSharpWorkspaceResult& WorkspaceResult,
+	const FAvidScriptEditorComponentBindingResult& BindingResult,
+	FAvidScriptEditorCSharpLiveReloadServiceResult& OutResult)
+{
+	OutResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
+	OutResult.bSucceeded = false;
+	OutResult.bRunning = false;
+	OutResult.Status = EAvidScriptEditorCSharpLiveReloadServiceStatus::StartFailed;
+	OutResult.ErrorCategory = ErrorCategory;
+	OutResult.CauseErrorCategory = CauseErrorCategory;
+	OutResult.ErrorMessage = ErrorMessage;
+	OutResult.NextAction = NextAction;
+	OutResult.WorkspaceRoot = WorkspaceResult.WorkspaceRoot;
+	OutResult.ProfilePath = WorkspaceResult.ProfilePath;
+	OutResult.TargetActorPath = BindingResult.ActorPath;
+}
+
 void LogAvidScriptMenuRegistrationFailure(const FAvidScriptEditorMenuRegistrationResult& Result)
 {
 	UE_LOG(
@@ -140,9 +164,19 @@ void LogAvidScriptEditorPresentation(const FAvidScriptEditorCommandPresentation&
 }
 } // namespace
 
+FAvidScriptEditorModule::FAvidScriptEditorModule(
+	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> InCSharpLiveReloadService)
+	: CSharpLiveReloadService(MoveTemp(InCSharpLiveReloadService))
+{
+}
+
 void FAvidScriptEditorModule::StartupModule()
 {
 	CommandLauncher = MakeUnique<FAvidScriptEditorCommandLauncher>();
+	if (!CSharpLiveReloadService)
+	{
+		CSharpLiveReloadService = MakeUnique<FAvidScriptEditorCSharpLiveReloadService>();
+	}
 	ToolMenusStartupCallbackHandle = UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FAvidScriptEditorModule::RegisterMenus));
 
@@ -151,6 +185,12 @@ void FAvidScriptEditorModule::StartupModule()
 
 void FAvidScriptEditorModule::ShutdownModule()
 {
+	if (CSharpLiveReloadService)
+	{
+		CSharpLiveReloadService->Stop();
+		CSharpLiveReloadService.Reset();
+	}
+
 	if (ToolMenusStartupCallbackHandle.IsValid())
 	{
 		UToolMenus::UnRegisterStartupCallback(ToolMenusStartupCallbackHandle);
@@ -225,6 +265,16 @@ FName FAvidScriptEditorModule::GetCSharpWorkspaceCreateEntryName()
 FName FAvidScriptEditorModule::GetCSharpWorkspaceBuildAndBindEntryName()
 {
 	return TEXT("AvidScript.BuildAndBindProjectCSharpGameplay");
+}
+
+FName FAvidScriptEditorModule::GetCSharpWorkspaceLiveReloadStartEntryName()
+{
+	return TEXT("AvidScript.StartProjectCSharpLiveReload");
+}
+
+FName FAvidScriptEditorModule::GetCSharpWorkspaceLiveReloadStopEntryName()
+{
+	return TEXT("AvidScript.StopProjectCSharpLiveReload");
 }
 
 FString FAvidScriptEditorModule::GetCSharpActorLifecycleReportPath()
@@ -385,6 +435,44 @@ FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceBui
 	return Config;
 }
 
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(
+	FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpWorkspaceLiveReloadStartEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT(
+		"AvidScriptStartProjectCSharpLiveReloadLabel",
+		"Start Project C# Auto Live Reload");
+	Config.ToolTip = LOCTEXT(
+		"AvidScriptStartProjectCSharpLiveReloadToolTip",
+		"Build and bind the project C# gameplay script, then watch its workspace and reload the fixed Actor after source changes.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
+FAvidScriptEditorMenuEntryConfig FAvidScriptEditorModule::MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(
+	FSimpleDelegate ExecuteAction)
+{
+	FAvidScriptEditorMenuEntryConfig Config;
+	Config.OwnerName = GetToolMenuOwnerName();
+	Config.MenuName = GetSampleCommandMenuName();
+	Config.SectionName = GetSampleCommandSectionName();
+	Config.EntryName = GetCSharpWorkspaceLiveReloadStopEntryName();
+	Config.SectionLabel = LOCTEXT("AvidScriptMenuSection", "AvidScript");
+	Config.Label = LOCTEXT(
+		"AvidScriptStopProjectCSharpLiveReloadLabel",
+		"Stop Project C# Auto Live Reload");
+	Config.ToolTip = LOCTEXT(
+		"AvidScriptStopProjectCSharpLiveReloadToolTip",
+		"Stop watching and automatically rebuilding the project C# gameplay workspace.");
+	Config.ExecuteAction = MoveTemp(ExecuteAction);
+	return Config;
+}
+
 bool FAvidScriptEditorModule::ExecuteSampleCommand(FAvidScriptEditorCommandLaunchResult& OutResult)
 {
 	if (!CommandLauncher.IsValid())
@@ -513,6 +601,118 @@ bool FAvidScriptEditorModule::ExecuteCSharpWorkspaceBuildAndBinding(
 		OutBindingResult);
 }
 
+bool FAvidScriptEditorModule::ExecuteStartCSharpWorkspaceLiveReload(
+	FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult,
+	FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult)
+{
+	const FAvidScriptEditorCSharpWorkspaceConfig WorkspaceConfig;
+	return ExecuteStartCSharpWorkspaceLiveReload(
+		WorkspaceConfig,
+		OutWorkspaceResult,
+		OutBuildResult,
+		OutBindingResult,
+		OutLiveReloadResult);
+}
+
+bool FAvidScriptEditorModule::ExecuteStartCSharpWorkspaceLiveReload(
+	const FAvidScriptEditorCSharpWorkspaceConfig& WorkspaceConfig,
+	FAvidScriptEditorCSharpWorkspaceResult& OutWorkspaceResult,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult,
+	FAvidScriptEditorComponentBindingResult& OutBindingResult,
+	FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult)
+{
+	OutWorkspaceResult = FAvidScriptEditorCSharpWorkspaceResult();
+	OutBuildResult = FAvidScriptEditorCSharpBuildResult();
+	OutBindingResult = FAvidScriptEditorComponentBindingResult();
+	OutLiveReloadResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
+	if (!CSharpLiveReloadService)
+	{
+		CSharpLiveReloadService = MakeUnique<FAvidScriptEditorCSharpLiveReloadService>();
+	}
+	if (CSharpLiveReloadService->IsRunning())
+	{
+		const FAvidScriptEditorCSharpLiveReloadServiceResult ActiveResult =
+			CSharpLiveReloadService->GetLastResult();
+		OutLiveReloadResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
+		OutLiveReloadResult.bSucceeded = false;
+		OutLiveReloadResult.bRunning = true;
+		OutLiveReloadResult.Status = EAvidScriptEditorCSharpLiveReloadServiceStatus::StartFailed;
+		OutLiveReloadResult.WorkspaceRoot = ActiveResult.WorkspaceRoot;
+		OutLiveReloadResult.ProfilePath = ActiveResult.ProfilePath;
+		OutLiveReloadResult.TargetActorPath = ActiveResult.TargetActorPath;
+		OutLiveReloadResult.ErrorCategory = TEXT("live_reload_already_running");
+		OutLiveReloadResult.ErrorMessage = TEXT("Project C# Auto Live Reload is already running.");
+		OutLiveReloadResult.NextAction = TEXT("stop the active watcher before starting it again");
+		return false;
+	}
+
+	if (!ExecuteCSharpWorkspaceBuildAndBinding(
+			WorkspaceConfig,
+			OutWorkspaceResult,
+			OutBuildResult,
+			OutBindingResult))
+	{
+		const bool bBuildFailed = !OutBuildResult.bSucceeded;
+		SetAvidScriptCSharpLiveReloadStartFailure(
+			bBuildFailed
+				? FString(TEXT("live_reload_initial_build_failed"))
+				: FString(TEXT("live_reload_initial_binding_failed")),
+			bBuildFailed ? OutBuildResult.ErrorCategory : OutBindingResult.ErrorCategory,
+			bBuildFailed ? OutBuildResult.ErrorMessage : OutBindingResult.ErrorMessage,
+			bBuildFailed ? OutBuildResult.NextAction : OutBindingResult.NextAction,
+			OutWorkspaceResult,
+			OutBindingResult,
+			OutLiveReloadResult);
+		return false;
+	}
+
+	UAvidScriptComponent* BoundComponent = OutBindingResult.Component;
+	AActor* FixedTarget = BoundComponent != nullptr ? BoundComponent->GetOwner() : nullptr;
+	if (!IsValid(FixedTarget) || FixedTarget->IsActorBeingDestroyed())
+	{
+		SetAvidScriptCSharpLiveReloadStartFailure(
+			TEXT("live_reload_target_unavailable"),
+			TEXT("binding_component_owner_invalid"),
+			TEXT("The initial Project C# binding did not return a valid Actor owner."),
+			TEXT("select a valid Actor and run Project C# Auto Live Reload again"),
+			OutWorkspaceResult,
+			OutBindingResult,
+			OutLiveReloadResult);
+		return false;
+	}
+
+	FAvidScriptEditorCSharpLiveReloadServiceConfig LiveReloadConfig;
+	LiveReloadConfig.WorkspaceRoot = OutWorkspaceResult.WorkspaceRoot;
+	LiveReloadConfig.ProfilePath = OutWorkspaceResult.ProfilePath;
+	return CSharpLiveReloadService->Start(
+		LiveReloadConfig,
+		FixedTarget,
+		OutLiveReloadResult);
+}
+
+bool FAvidScriptEditorModule::ExecuteStopCSharpWorkspaceLiveReload(
+	FAvidScriptEditorCSharpLiveReloadServiceResult& OutLiveReloadResult)
+{
+	if (!CSharpLiveReloadService)
+	{
+		OutLiveReloadResult = FAvidScriptEditorCSharpLiveReloadServiceResult();
+		OutLiveReloadResult.bSucceeded = true;
+		OutLiveReloadResult.Status = EAvidScriptEditorCSharpLiveReloadServiceStatus::Stopped;
+		return true;
+	}
+
+	CSharpLiveReloadService->Stop();
+	OutLiveReloadResult = CSharpLiveReloadService->GetLastResult();
+	return OutLiveReloadResult.bSucceeded;
+}
+
+bool FAvidScriptEditorModule::IsCSharpWorkspaceLiveReloadRunning() const
+{
+	return CSharpLiveReloadService && CSharpLiveReloadService->IsRunning();
+}
+
 void FAvidScriptEditorModule::RegisterMenus()
 {
 	FAvidScriptEditorMenuRegistrationResult Result;
@@ -541,6 +741,26 @@ void FAvidScriptEditorModule::RegisterMenus()
 	const FAvidScriptEditorMenuEntryConfig CSharpWorkspaceBuildAndBindMenuConfig = MakeCSharpWorkspaceBuildAndBindMenuEntryConfig(
 		FSimpleDelegate::CreateRaw(this, &FAvidScriptEditorModule::HandleBuildAndBindCSharpWorkspace));
 	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpWorkspaceBuildAndBindMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
+
+	const FAvidScriptEditorMenuEntryConfig CSharpLiveReloadStartMenuConfig =
+		MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(
+			FSimpleDelegate::CreateRaw(
+				this,
+				&FAvidScriptEditorModule::HandleStartCSharpWorkspaceLiveReload));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpLiveReloadStartMenuConfig, Result))
+	{
+		LogAvidScriptMenuRegistrationFailure(Result);
+	}
+
+	const FAvidScriptEditorMenuEntryConfig CSharpLiveReloadStopMenuConfig =
+		MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(
+			FSimpleDelegate::CreateRaw(
+				this,
+				&FAvidScriptEditorModule::HandleStopCSharpWorkspaceLiveReload));
+	if (!FAvidScriptEditorMenuRegistrar::RegisterMenuEntry(CSharpLiveReloadStopMenuConfig, Result))
 	{
 		LogAvidScriptMenuRegistrationFailure(Result);
 	}
@@ -711,6 +931,50 @@ void FAvidScriptEditorModule::HandleBuildAndBindCSharpWorkspace()
 			GetProjectCSharpWorkspaceProfilePath(),
 			BuildResult,
 			BindingResult));
+}
+
+void FAvidScriptEditorModule::HandleStartCSharpWorkspaceLiveReload()
+{
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	FAvidScriptEditorCSharpLiveReloadServiceResult LiveReloadResult;
+	if (ExecuteStartCSharpWorkspaceLiveReload(
+			WorkspaceResult,
+			BuildResult,
+			BindingResult,
+			LiveReloadResult))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("Project C# Auto Live Reload started: actor=%s workspace=%s profile=%s"),
+			*LiveReloadResult.TargetActorPath,
+			*LiveReloadResult.WorkspaceRoot,
+			*LiveReloadResult.ProfilePath);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Warning,
+		TEXT("Project C# Auto Live Reload start failed: category=%s cause=%s message=%s next=%s"),
+		*LiveReloadResult.ErrorCategory,
+		*LiveReloadResult.CauseErrorCategory,
+		*LiveReloadResult.ErrorMessage,
+		*LiveReloadResult.NextAction);
+}
+
+void FAvidScriptEditorModule::HandleStopCSharpWorkspaceLiveReload()
+{
+	FAvidScriptEditorCSharpLiveReloadServiceResult LiveReloadResult;
+	ExecuteStopCSharpWorkspaceLiveReload(LiveReloadResult);
+	UE_LOG(
+		LogAvidScriptEditor,
+		Display,
+		TEXT("Project C# Auto Live Reload stopped: actor=%s workspace=%s"),
+		*LiveReloadResult.TargetActorPath,
+		*LiveReloadResult.WorkspaceRoot);
 }
 
 #undef LOCTEXT_NAMESPACE

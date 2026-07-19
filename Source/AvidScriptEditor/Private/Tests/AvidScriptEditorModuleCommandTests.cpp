@@ -21,6 +21,56 @@
 
 namespace
 {
+class FFakeAvidScriptEditorModuleLiveReloadWatchHost final
+	: public IAvidScriptEditorCSharpLiveReloadWatchHost
+{
+public:
+	virtual bool Start(
+		const FString& WorkspaceRoot,
+		FOnChangeBatch InOnChangeBatch,
+		FString& OutErrorCategory,
+		FString& OutErrorMessage) override
+	{
+		++StartCount;
+		WatchedRoot = WorkspaceRoot;
+		Callback = MoveTemp(InOnChangeBatch);
+		bWatching = true;
+		return true;
+	}
+
+	virtual void Stop() override
+	{
+		if (bWatching)
+		{
+			++StopCount;
+		}
+		bWatching = false;
+		Callback = FOnChangeBatch();
+	}
+
+	virtual bool IsWatching() const override
+	{
+		return bWatching;
+	}
+
+	void Emit(const FString& FilePath)
+	{
+		if (!bWatching || !Callback)
+		{
+			return;
+		}
+		FAvidScriptEditorCSharpLiveReloadChangeBatch Batch;
+		Batch.FilePaths.Add(FilePath);
+		Callback(MoveTemp(Batch));
+	}
+
+	bool bWatching = false;
+	int32 StartCount = 0;
+	int32 StopCount = 0;
+	FString WatchedRoot;
+	FOnChangeBatch Callback;
+};
+
 bool CreateAvidScriptEditorModuleCSharpBindingWorld(UWorld*& OutWorld)
 {
 	OutWorld = nullptr;
@@ -215,6 +265,28 @@ bool FAvidScriptEditorModuleSampleCommandConfigTest::RunTest(const FString& Para
 	TestTrue(TEXT("C# workspace build command label is explicit"), CSharpWorkspaceBuildAndBindMenuConfig.Label.ToString().Contains(TEXT("Build And Bind Project C# Gameplay Script")));
 	TestFalse(TEXT("C# workspace build command tooltip is set"), CSharpWorkspaceBuildAndBindMenuConfig.ToolTip.IsEmpty());
 	TestTrue(TEXT("C# workspace build command execute action is bound"), CSharpWorkspaceBuildAndBindMenuConfig.ExecuteAction.IsBound());
+
+	FAvidScriptEditorMenuEntryConfig CSharpLiveReloadStartMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpWorkspaceLiveReloadStartMenuEntryConfig(
+			FSimpleDelegate::CreateLambda([]() {
+			}));
+	TestEqual(TEXT("C# live reload start command owner"), CSharpLiveReloadStartMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# live reload start command menu"), CSharpLiveReloadStartMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# live reload start command section"), CSharpLiveReloadStartMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# live reload start command entry"), CSharpLiveReloadStartMenuConfig.EntryName, FName(TEXT("AvidScript.StartProjectCSharpLiveReload")));
+	TestFalse(TEXT("C# live reload start tooltip is set"), CSharpLiveReloadStartMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# live reload start action is bound"), CSharpLiveReloadStartMenuConfig.ExecuteAction.IsBound());
+
+	FAvidScriptEditorMenuEntryConfig CSharpLiveReloadStopMenuConfig =
+		FAvidScriptEditorModule::MakeCSharpWorkspaceLiveReloadStopMenuEntryConfig(
+			FSimpleDelegate::CreateLambda([]() {
+			}));
+	TestEqual(TEXT("C# live reload stop command owner"), CSharpLiveReloadStopMenuConfig.OwnerName, FName(TEXT("AvidScriptEditor")));
+	TestEqual(TEXT("C# live reload stop command menu"), CSharpLiveReloadStopMenuConfig.MenuName, FName(TEXT("LevelEditor.MainMenu.Tools")));
+	TestEqual(TEXT("C# live reload stop command section"), CSharpLiveReloadStopMenuConfig.SectionName, FName(TEXT("AvidScript")));
+	TestEqual(TEXT("C# live reload stop command entry"), CSharpLiveReloadStopMenuConfig.EntryName, FName(TEXT("AvidScript.StopProjectCSharpLiveReload")));
+	TestFalse(TEXT("C# live reload stop tooltip is set"), CSharpLiveReloadStopMenuConfig.ToolTip.IsEmpty());
+	TestTrue(TEXT("C# live reload stop action is bound"), CSharpLiveReloadStopMenuConfig.ExecuteAction.IsBound());
 
 	return true;
 }
@@ -462,16 +534,35 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	GEditor->SelectNone(false, true, false);
 	GEditor->SelectActor(Actor, true, false, true, false);
 
-	FAvidScriptEditorModule& Module =
-		FModuleManager::LoadModuleChecked<FAvidScriptEditorModule>(TEXT("AvidScriptEditor"));
+	double Now = 1.0;
+	AActor* ReloadTarget = nullptr;
+	FFakeAvidScriptEditorModuleLiveReloadWatchHost* FakeWatchHost =
+		new FFakeAvidScriptEditorModuleLiveReloadWatchHost();
+	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> LiveReloadService(
+		new FAvidScriptEditorCSharpLiveReloadService(
+			TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeWatchHost),
+			[&ReloadTarget](
+				const FString&,
+				AActor* Target,
+				FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuildResult)
+			{
+				ReloadTarget = Target;
+				OutBuildResult.bSucceeded = true;
+				return true;
+			},
+			[&Now]() { return Now; }));
+	FAvidScriptEditorCSharpLiveReloadService* LiveReloadServicePtr = LiveReloadService.Get();
+	FAvidScriptEditorModule Module(MoveTemp(LiveReloadService));
 	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	FAvidScriptEditorComponentBindingResult BindingResult;
-	const bool bSucceeded = Module.ExecuteCSharpWorkspaceBuildAndBinding(
+	FAvidScriptEditorCSharpLiveReloadServiceResult LiveReloadResult;
+	const bool bSucceeded = Module.ExecuteStartCSharpWorkspaceLiveReload(
 		WorkspaceConfig,
 		WorkspaceResult,
 		BuildResult,
-		BindingResult);
+		BindingResult,
+		LiveReloadResult);
 	if (!TestTrue(TEXT("Project C# workspace command builds and binds"), bSucceeded))
 	{
 		AddError(
@@ -500,7 +591,111 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestTrue(TEXT("Project C# workspace binding succeeds"), BindingResult.bSucceeded);
 	TestNotNull(TEXT("Project C# workspace returns component"), BindingResult.Component);
 	TestEqual(TEXT("Project C# workspace binds selected Actor"), Actor->FindComponentByClass<UAvidScriptComponent>(), BindingResult.Component);
-	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+	TestTrue(TEXT("Project C# live reload starts"), Module.IsCSharpWorkspaceLiveReloadRunning());
+	TestEqual(TEXT("Project C# live reload registers one watcher"), FakeWatchHost->StartCount, 1);
+	TestEqual(TEXT("Project C# live reload watches workspace"), FakeWatchHost->WatchedRoot, WorkspaceResult.WorkspaceRoot);
+	TestEqual(TEXT("Project C# live reload fixes bound Actor"), LiveReloadResult.TargetActorPath, Actor->GetPathName());
+	FString OriginalSourceText;
+	TestTrue(
+		TEXT("Project C# live reload source can be read for failure recovery"),
+		FFileHelper::LoadFileToString(OriginalSourceText, *WorkspaceResult.SourcePath));
+
+	FAvidScriptEditorCSharpWorkspaceResult RepeatWorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult RepeatBuildResult;
+	FAvidScriptEditorComponentBindingResult RepeatBindingResult;
+	FAvidScriptEditorCSharpLiveReloadServiceResult RepeatLiveReloadResult;
+	TestFalse(
+		TEXT("Project C# live reload rejects repeated start"),
+		Module.ExecuteStartCSharpWorkspaceLiveReload(
+			WorkspaceConfig,
+			RepeatWorkspaceResult,
+			RepeatBuildResult,
+			RepeatBindingResult,
+			RepeatLiveReloadResult));
+	TestTrue(TEXT("Repeated start leaves live reload running"), RepeatLiveReloadResult.bRunning);
+	TestEqual(
+		TEXT("Repeated start returns a fresh start failure status"),
+		RepeatLiveReloadResult.Status,
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::StartFailed);
+	TestEqual(
+		TEXT("Repeated start has a structured category"),
+		RepeatLiveReloadResult.ErrorCategory,
+		FString(TEXT("live_reload_already_running")));
+	TestEqual(
+		TEXT("Repeated start preserves the fixed Actor identity"),
+		RepeatLiveReloadResult.TargetActorPath,
+		Actor->GetPathName());
+	TestEqual(TEXT("Repeated start does not rebuild"), RepeatBuildResult.BuildInvocationCount, 0);
+	TestEqual(TEXT("Repeated start does not register another watcher"), FakeWatchHost->StartCount, 1);
+
+	AActor* OtherActor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
+	if (!TestNotNull(TEXT("Selection drift Actor spawns"), OtherActor))
+	{
+		FAvidScriptEditorCSharpLiveReloadServiceResult StopResult;
+		Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult);
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return false;
+	}
+	GEditor->SelectNone(false, true, false);
+	GEditor->SelectActor(OtherActor, true, false, true, false);
+	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
+	LiveReloadServicePtr->Tick();
+	Now = 1.35;
+	LiveReloadServicePtr->Tick();
+	TestEqual(TEXT("Reload keeps the initial bound Actor"), ReloadTarget, Actor);
+
+	FAvidScriptEditorCSharpLiveReloadServiceResult StopResult;
+	TestTrue(TEXT("Project C# live reload stop is idempotent"), Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult));
+	TestTrue(TEXT("Project C# live reload repeated stop succeeds"), Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult));
+	TestFalse(TEXT("Project C# live reload stops"), Module.IsCSharpWorkspaceLiveReloadRunning());
+	TestEqual(TEXT("Project C# live reload unregisters watcher"), FakeWatchHost->StopCount, 1);
+
+	TestTrue(
+		TEXT("Project C# source can be corrupted for a real build failure"),
+		FFileHelper::SaveStringToFile(TEXT("public class {\n"), *WorkspaceResult.SourcePath));
+	FAvidScriptEditorCSharpWorkspaceResult BuildFailureWorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult BuildFailureBuildResult;
+	FAvidScriptEditorComponentBindingResult BuildFailureBindingResult;
+	FAvidScriptEditorCSharpLiveReloadServiceResult BuildFailureLiveReloadResult;
+	TestFalse(
+		TEXT("Project C# live reload rejects a real initial build failure"),
+		Module.ExecuteStartCSharpWorkspaceLiveReload(
+			WorkspaceConfig,
+			BuildFailureWorkspaceResult,
+			BuildFailureBuildResult,
+			BuildFailureBindingResult,
+			BuildFailureLiveReloadResult));
+	TestFalse(TEXT("Failed initial build returns no successful build"), BuildFailureBuildResult.bSucceeded);
+	TestFalse(TEXT("Failed initial build binds no Actor"), BuildFailureBindingResult.bSucceeded);
+	TestEqual(
+		TEXT("Failed initial build has live reload stage category"),
+		BuildFailureLiveReloadResult.ErrorCategory,
+		FString(TEXT("live_reload_initial_build_failed")));
+	TestEqual(TEXT("Failed initial build starts no watcher"), FakeWatchHost->StartCount, 1);
+
+	TestTrue(
+		TEXT("Project C# source can be restored for a binding failure"),
+		FFileHelper::SaveStringToFile(OriginalSourceText, *WorkspaceResult.SourcePath));
+	GEditor->SelectNone(false, true, false);
+	FAvidScriptEditorCSharpWorkspaceResult BindingFailureWorkspaceResult;
+	FAvidScriptEditorCSharpBuildResult BindingFailureBuildResult;
+	FAvidScriptEditorComponentBindingResult BindingFailureBindingResult;
+	FAvidScriptEditorCSharpLiveReloadServiceResult BindingFailureLiveReloadResult;
+	TestFalse(
+		TEXT("Project C# live reload rejects a real initial binding failure"),
+		Module.ExecuteStartCSharpWorkspaceLiveReload(
+			WorkspaceConfig,
+			BindingFailureWorkspaceResult,
+			BindingFailureBuildResult,
+			BindingFailureBindingResult,
+			BindingFailureLiveReloadResult));
+	TestTrue(TEXT("Binding failure occurs after a successful build"), BindingFailureBuildResult.bSucceeded);
+	TestFalse(TEXT("Binding failure returns no successful binding"), BindingFailureBindingResult.bSucceeded);
+	TestEqual(
+		TEXT("Failed initial binding has live reload stage category"),
+		BindingFailureLiveReloadResult.ErrorCategory,
+		FString(TEXT("live_reload_initial_binding_failed")));
+	TestEqual(TEXT("Failed initial binding starts no watcher"), FakeWatchHost->StartCount, 1);
 
 	FAvidScriptEditorCSharpWorkspaceConfig OutsideConfig;
 	OutsideConfig.WorkspaceRoot = FPaths::Combine(
@@ -510,13 +705,15 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	FAvidScriptEditorCSharpWorkspaceResult OutsideWorkspaceResult;
 	FAvidScriptEditorCSharpBuildResult OutsideBuildResult;
 	FAvidScriptEditorComponentBindingResult OutsideBindingResult;
+	FAvidScriptEditorCSharpLiveReloadServiceResult OutsideLiveReloadResult;
 	TestFalse(
 		TEXT("Project C# workspace command rejects outside workspace"),
-		Module.ExecuteCSharpWorkspaceBuildAndBinding(
+		Module.ExecuteStartCSharpWorkspaceLiveReload(
 			OutsideConfig,
 			OutsideWorkspaceResult,
 			OutsideBuildResult,
-			OutsideBindingResult));
+			OutsideBindingResult,
+			OutsideLiveReloadResult));
 	TestEqual(
 		TEXT("Outside workspace category reaches command build result"),
 		OutsideBuildResult.ErrorCategory,
@@ -524,6 +721,12 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestEqual(TEXT("Outside workspace invokes no build process"), OutsideBuildResult.BuildInvocationCount, 0);
 	TestEqual(TEXT("Outside workspace invokes no Frontend"), OutsideBuildResult.FrontendInvocationCount, 0);
 	TestFalse(TEXT("Outside workspace binds no Actor"), OutsideBindingResult.bSucceeded);
+	TestEqual(TEXT("Failed initialization starts no new watcher"), FakeWatchHost->StartCount, 1);
+	TestEqual(
+		TEXT("Outside workspace reaches live reload cause"),
+		OutsideLiveReloadResult.CauseErrorCategory,
+		FString(TEXT("workspace_path_outside_project")));
+	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 	return true;
 }
 
