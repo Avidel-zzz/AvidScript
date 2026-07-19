@@ -5,6 +5,7 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
+#include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -106,6 +107,15 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade declares transient attribute"), FirstSource.Contains(TEXT("public sealed class AvidTransientAttribute : Attribute")));
 	TestTrue(TEXT("Generated facade declares repeatable state alias attribute"), FirstSource.Contains(TEXT("public sealed class AvidStateAliasAttribute : Attribute")));
 	TestTrue(TEXT("State alias attribute allows multiple field declarations"), FirstSource.Contains(TEXT("[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = true)]")));
+
+	TArray<FString> StateContractLines;
+	FAvidScriptEditorCSharpStateContractRenderer::AppendReferenceSurface(StateContractLines);
+	const FString StateContractSurface = FString::Join(StateContractLines, TEXT("\n"));
+	TestFalse(TEXT("Independent state contract renderer emits a surface"), StateContractSurface.IsEmpty());
+	TestEqual(
+		TEXT("Independent renderer surface matches the composed facade"),
+		StateContractSurface.TrimEnd(),
+		ExtractStateContractSurface(FirstSource).TrimEnd());
 
 	FAvidScriptBindingPackageModel EmptyPackage;
 	EmptyPackage.PackageName = TEXT("avidscript.empty");

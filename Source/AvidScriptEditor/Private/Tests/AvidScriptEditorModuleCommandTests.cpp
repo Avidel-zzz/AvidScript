@@ -590,6 +590,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	if (!CreateAvidScriptEditorModuleCSharpBindingWorld(World))
 	{
 		AddError(TEXT("Failed to create project C# workspace command test world."));
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
 		return false;
 	}
 	if (!TestTrue(
@@ -597,6 +598,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 			BeginAvidScriptEditorModuleCSharpBindingWorld(World)))
 	{
 		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
 		return false;
 	}
 
@@ -604,6 +606,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	if (!TestNotNull(TEXT("Project C# workspace command actor spawns"), Actor))
 	{
 		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
 		return false;
 	}
 	GEditor->SelectNone(false, true, false);
@@ -699,6 +702,30 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 			EAvidScriptEditorCSharpLiveReloadServiceStatus::Building;
 	};
 	FAvidScriptEditorModule Module(MoveTemp(LiveReloadService));
+	FString OriginalSourceText;
+	FString OriginalSourcePath;
+	bool bRestoreOriginalSource = false;
+	bool bCleanupCompleted = false;
+	auto CleanupWorkspaceReloadTest = [&]()
+	{
+		if (bCleanupCompleted)
+		{
+			return;
+		}
+		bCleanupCompleted = true;
+		if (bRestoreOriginalSource)
+		{
+			TestTrue(
+				TEXT("Project C# source is restored during test cleanup"),
+				FFileHelper::SaveStringToFile(
+					OriginalSourceText,
+					*OriginalSourcePath));
+		}
+		FAvidScriptEditorCSharpLiveReloadServiceResult CleanupStopResult;
+		Module.ExecuteStopCSharpWorkspaceLiveReload(CleanupStopResult);
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
 	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	FAvidScriptEditorComponentBindingResult BindingResult;
@@ -717,7 +744,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 			+ BuildResult.ErrorMessage
 			+ TEXT("\n")
 			+ BuildResult.Stderr);
-		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		CleanupWorkspaceReloadTest();
 		return false;
 	}
 
@@ -742,10 +769,24 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestEqual(TEXT("Project C# live reload registers one watcher"), FakeWatchHost->StartCount, 1);
 	TestEqual(TEXT("Project C# live reload watches workspace"), FakeWatchHost->WatchedRoot, WorkspaceResult.WorkspaceRoot);
 	TestEqual(TEXT("Project C# live reload fixes bound Actor"), LiveReloadResult.TargetActorPath, Actor->GetPathName());
-	FString OriginalSourceText;
-	TestTrue(
-		TEXT("Project C# live reload source can be read for failure recovery"),
-		FFileHelper::LoadFileToString(OriginalSourceText, *WorkspaceResult.SourcePath));
+	if (BindingResult.Component == nullptr)
+	{
+		CleanupWorkspaceReloadTest();
+		return false;
+	}
+	OriginalSourcePath = WorkspaceResult.SourcePath;
+	if (!TestTrue(
+			TEXT("Project C# live reload source can be read for failure recovery"),
+			FFileHelper::LoadFileToString(OriginalSourceText, *OriginalSourcePath)))
+	{
+		CleanupWorkspaceReloadTest();
+		return false;
+	}
+	bRestoreOriginalSource = true;
+	ON_SCOPE_EXIT
+	{
+		CleanupWorkspaceReloadTest();
+	};
 	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
 	TestTrue(
 		TEXT("Initial C# runtime accumulates persistent rotation state"),
@@ -778,35 +819,58 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		Actor->GetPathName());
 	TestEqual(TEXT("Repeated start does not rebuild"), RepeatBuildResult.BuildInvocationCount, 0);
 	TestEqual(TEXT("Repeated start does not register another watcher"), FakeWatchHost->StartCount, 1);
-	FString ReloadedSourceText = OriginalSourceText.Replace(
+	FString ReloadedSourceText = OriginalSourceText;
+	const int32 DeclarationReplacementCount = ReloadedSourceText.ReplaceInline(
 		TEXT("    private static float TotalRotationDegrees;"),
 		TEXT("    [AvidStateAlias(\"TotalRotationDegrees\")]\n    private static float AccumulatedRotationDegrees;"),
 		ESearchCase::CaseSensitive);
-	ReloadedSourceText = ReloadedSourceText.Replace(
+	const int32 AccumulationReplacementCount = ReloadedSourceText.ReplaceInline(
 		TEXT("TotalRotationDegrees += RotationSpeedDegreesPerSecond * deltaSeconds;"),
 		TEXT("AccumulatedRotationDegrees += RotationSpeedDegreesPerSecond * deltaSeconds;"),
 		ESearchCase::CaseSensitive);
-	ReloadedSourceText = ReloadedSourceText.Replace(
+	const int32 ReadReplacementCount = ReloadedSourceText.ReplaceInline(
 		TEXT("TotalRotationDegrees / 1000.0f"),
 		TEXT("AccumulatedRotationDegrees / 1000.0f"),
 		ESearchCase::CaseSensitive);
-	ReloadedSourceText = ReloadedSourceText.Replace(
+	const int32 SpeedReplacementCount = ReloadedSourceText.ReplaceInline(
 		TEXT("90.0f"),
 		TEXT("180.0f"),
 		ESearchCase::CaseSensitive);
+	bool bReloadAnchorsValid = true;
+	bReloadAnchorsValid &= TestEqual(
+		TEXT("Reload source declaration anchor matches exactly once"),
+		DeclarationReplacementCount,
+		1);
+	bReloadAnchorsValid &= TestEqual(
+		TEXT("Reload source accumulation anchor matches exactly once"),
+		AccumulationReplacementCount,
+		1);
+	bReloadAnchorsValid &= TestEqual(
+		TEXT("Reload source read anchor matches exactly once"),
+		ReadReplacementCount,
+		1);
+	bReloadAnchorsValid &= TestEqual(
+		TEXT("Reload source speed anchor matches exactly once"),
+		SpeedReplacementCount,
+		1);
+	if (!bReloadAnchorsValid)
+	{
+		AddError(TEXT("Reload source anchors must each match once before the fixture writes candidate source."));
+		return false;
+	}
 	TestNotEqual(TEXT("Reload source changes gameplay behavior"), ReloadedSourceText, OriginalSourceText);
 	TestTrue(TEXT("Reload source renames the persisted field"), ReloadedSourceText.Contains(TEXT("AccumulatedRotationDegrees")));
 	TestTrue(TEXT("Reload source declares the former field name alias"), ReloadedSourceText.Contains(TEXT("[AvidStateAlias(\"TotalRotationDegrees\")]")));
-	TestTrue(
-		TEXT("Project C# source can be changed for automatic reload"),
-		FFileHelper::SaveStringToFile(ReloadedSourceText, *WorkspaceResult.SourcePath));
+	if (!TestTrue(
+			TEXT("Project C# source can be changed for automatic reload"),
+			FFileHelper::SaveStringToFile(ReloadedSourceText, *WorkspaceResult.SourcePath)))
+	{
+		return false;
+	}
 
 	AActor* OtherActor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
 	if (!TestNotNull(TEXT("Selection drift Actor spawns"), OtherActor))
 	{
-		FAvidScriptEditorCSharpLiveReloadServiceResult StopResult;
-		Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult);
-		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 		return false;
 	}
 	GEditor->SelectNone(false, true, false);
@@ -816,7 +880,10 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	LiveReloadServicePtr->Tick();
 	Now = 1.35;
 	LiveReloadServicePtr->Tick();
-	TestTrue(TEXT("Real automatic reload reaches a terminal state"), PumpLiveReloadBuild());
+	if (!TestTrue(TEXT("Real automatic reload reaches a terminal state"), PumpLiveReloadBuild()))
+	{
+		return false;
+	}
 	TestTrue(
 		TEXT("Editor CoreTicker heartbeat advances during the real asynchronous build"),
 		LastBuildHeartbeatCount > 0);
@@ -879,7 +946,10 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	LiveReloadServicePtr->Tick();
 	Now = LiveReloadServicePtr->GetStats().PendingDeadlineSeconds;
 	LiveReloadServicePtr->Tick();
-	TestTrue(TEXT("Bad source reload reaches a terminal state"), PumpLiveReloadBuild());
+	if (!TestTrue(TEXT("Bad source reload reaches a terminal state"), PumpLiveReloadBuild()))
+	{
+		return false;
+	}
 	TestEqual(TEXT("Bad source triggers one trailing real build"), ReloadBuildCount, 2);
 	TestEqual(
 		TEXT("Bad source reports automatic build failure"),
@@ -923,9 +993,12 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	LiveReloadServicePtr->Tick();
 	Now = LiveReloadServicePtr->GetStats().PendingDeadlineSeconds;
 	LiveReloadServicePtr->Tick();
-	TestTrue(
-		TEXT("Rejected candidate reload reaches a terminal state"),
-		PumpLiveReloadBuild());
+	if (!TestTrue(
+			TEXT("Rejected candidate reload reaches a terminal state"),
+			PumpLiveReloadBuild()))
+	{
+		return false;
+	}
 	TestEqual(
 		TEXT("Rejected candidate reports automatic binding failure"),
 		LiveReloadServicePtr->GetLastResult().Status,
@@ -1033,7 +1106,6 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		TEXT("Outside workspace reaches live reload cause"),
 		OutsideLiveReloadResult.CauseErrorCategory,
 		FString(TEXT("workspace_path_outside_project")));
-	DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
 	return true;
 }
 
