@@ -14,7 +14,8 @@ internal static class CSharpGuestOperationTests
         ScalarStateLocalsCallsAndConditionalsAreLowered();
         LoopBackEdgesArePreserved();
         DiscardAssignmentsEvaluateTheirRightHandSide();
-        return 3;
+        ConstantStaticFieldReferencesAreInlined();
+        return 4;
     }
 
     private static void ScalarStateLocalsCallsAndConditionalsAreLowered()
@@ -101,6 +102,53 @@ internal static class CSharpGuestOperationTests
         Assert(instructions.Count(instruction => instruction.Op == "call") == 1,
             "discard assignment should evaluate its invocation exactly once");
     }
+
+    private static void ConstantStaticFieldReferencesAreInlined()
+    {
+        SemanticOperation constantField = CSharpGuestSemanticFixture.Operation(
+            "field_reference",
+            "type:int32",
+            CSharpGuestSemanticFixture.StateFieldId,
+            constant: new SemanticConstant("int32", "90"));
+        SemanticControlFlowEdge returned = Edge(0, 1, "fallthrough", "return");
+        SemanticControlFlowGraph graph = new(
+            CSharpGuestSemanticFixture.MainMethodId,
+            0,
+            1,
+            new[]
+            {
+                Block(
+                    0,
+                    new[] { constantField },
+                    null,
+                    "none",
+                    Array.Empty<SemanticControlFlowEdge>(),
+                    new[] { returned }),
+                Block(
+                    1,
+                    Array.Empty<SemanticOperation>(),
+                    null,
+                    "none",
+                    new[] { returned },
+                    Array.Empty<SemanticControlFlowEdge>(),
+                    "exit"),
+            });
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(WithGraph(graph), SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(FormatDiagnostics(result));
+        GuestInstruction[] instructions = module.Functions
+            .Single(item => item.Id == CSharpGuestIdsForTests.Function(CSharpGuestSemanticFixture.MainMethodId))
+            .Blocks.SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(instructions.Any(instruction => instruction.Op == "constant"
+                && instruction.Constant is { Kind: "int32", Value: "90" }),
+            "compile-time field constants should lower to typed Guest constants");
+        Assert(instructions.All(instruction => instruction.Op != "global_load"),
+            "compile-time field constants should not read zero-initialized Guest globals");
+    }
+
     private static SemanticDocument WithGraph(SemanticControlFlowGraph graph)
     {
         SemanticDocument document = CSharpGuestSemanticFixture.Create();

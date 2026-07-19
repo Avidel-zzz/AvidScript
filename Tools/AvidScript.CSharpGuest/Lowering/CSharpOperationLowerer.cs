@@ -196,6 +196,11 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (operation.Constant is not null)
+        {
+            return LowerLiteral(context, operation, blockOrdinal, instructions);
+        }
+
         if (operation.Children.Count != 0)
         {
             return CSharpAggregateOperationLowerer.LowerFieldLoad(

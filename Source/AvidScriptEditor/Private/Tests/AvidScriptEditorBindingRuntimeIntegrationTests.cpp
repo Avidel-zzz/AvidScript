@@ -1,8 +1,12 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptComponent.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
+#include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpWorkspaceService.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
@@ -30,7 +34,9 @@ uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 	return Bits;
 }
 
-bool CreateAvidScriptBindingRuntimeIntegrationWorld(UWorld*& OutWorld)
+bool CreateAvidScriptBindingRuntimeIntegrationWorld(
+	UWorld*& OutWorld,
+	bool bInitializeForPlay = true)
 {
 	OutWorld = nullptr;
 	if (GEngine == nullptr)
@@ -49,7 +55,10 @@ bool CreateAvidScriptBindingRuntimeIntegrationWorld(UWorld*& OutWorld)
 
 	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
 	WorldContext.SetCurrentWorld(OutWorld);
-	OutWorld->InitializeActorsForPlay(FURL());
+	if (bInitializeForPlay)
+	{
+		OutWorld->InitializeActorsForPlay(FURL());
+	}
 	return true;
 }
 
@@ -60,6 +69,10 @@ void DestroyAvidScriptBindingRuntimeIntegrationWorld(UWorld*& World)
 		return;
 	}
 
+	if (World->HasBegunPlay())
+	{
+		World->EndPlay(EEndPlayReason::Quit);
+	}
 	if (GEngine != nullptr)
 	{
 		GEngine->DestroyWorldContext(World);
@@ -285,6 +298,162 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		*FString::Printf(TEXT("%s scheduler records one Tick"), *BuildLabel),
 		Session.GetLiveTickCallCount(),
 		1);
+	return true;
+}
+
+bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
+	FAutomationTestBase& Test,
+	const FString& BuildLabel,
+	const FAvidScriptEditorCSharpWorkspaceResult& WorkspaceResult,
+	const FAvidScriptEditorCSharpBuildResult& BuildResult)
+{
+	FString AuthorizationPackageJson;
+	TSharedPtr<FJsonObject> AuthorizationPackageObject;
+	const TArray<TSharedPtr<FJsonValue>>* AuthorizationImports = nullptr;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package can be read"), *BuildLabel),
+			FFileHelper::LoadFileToString(
+				AuthorizationPackageJson,
+				*BuildResult.AuthorizationBindingPackagePath))
+		|| !Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package parses"), *BuildLabel),
+			FJsonSerializer::Deserialize(
+				TJsonReaderFactory<>::Create(AuthorizationPackageJson),
+				AuthorizationPackageObject))
+		|| !Test.TestTrue(
+			*FString::Printf(TEXT("%s authorization package exposes required imports"), *BuildLabel),
+			AuthorizationPackageObject.IsValid()
+				&& AuthorizationPackageObject->TryGetArrayField(
+					TEXT("required_imports"),
+					AuthorizationImports))
+		|| AuthorizationImports == nullptr)
+	{
+		return false;
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s authorization ceiling contains 115 gameplay bindings"), *BuildLabel),
+		AuthorizationImports->Num(),
+		115);
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s manifest, WASM, and runtime package load"), *BuildLabel),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				Manifest,
+				Bytecode,
+				ManifestLoadResult)))
+	{
+		Test.AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s owns a runtime binding package"), *BuildLabel),
+			Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s runtime package contains three reachable bindings"), *BuildLabel),
+		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
+		3);
+	int32 DynamicImportCount = 0;
+	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
+	{
+		if (Import.ModuleName == TEXT("avidscript")
+			&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+		{
+			++DynamicImportCount;
+		}
+	}
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s WASM requires three reflected imports"), *BuildLabel),
+		DynamicImportCount,
+		3);
+
+	FString ManifestJson;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s manifest can be read for provenance checks"), *BuildLabel),
+			FFileHelper::LoadFileToString(ManifestJson, *BuildResult.ManifestPath)))
+	{
+		return false;
+	}
+	Test.TestFalse(
+		*FString::Printf(TEXT("%s manifest excludes generated facade path"), *BuildLabel),
+		ManifestJson.Contains(WorkspaceResult.FacadePath, ESearchCase::CaseSensitive));
+
+	UWorld* World = nullptr;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s component lifecycle world is created"), *BuildLabel),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World, false)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	World->InitializeActorsForPlay(FURL());
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!Test.TestNotNull(
+			*FString::Printf(TEXT("%s gameplay actor spawns"), *BuildLabel),
+			Actor))
+	{
+		return false;
+	}
+	Actor->SetActorScale3D(FVector(2.0, 2.0, 2.0));
+	Actor->SetActorRotation(FRotator(0.0, 10.0, 0.0));
+
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s report binds through ComponentBindingService"), *BuildLabel),
+			FAvidScriptEditorComponentBindingService::ApplyCSharpReportToActor(
+				BuildResult.ReportPath,
+				Actor,
+				BindingResult)))
+	{
+		Test.AddError(BindingResult.ErrorMessage);
+		return false;
+	}
+	if (!Test.TestNotNull(
+			*FString::Printf(TEXT("%s binding creates an AvidScript component"), *BuildLabel),
+			BindingResult.Component))
+	{
+		return false;
+	}
+
+	const FAvidScriptComponentRuntimeStats StatsAfterBeginPlay =
+		BindingResult.Component->GetRuntimeStats();
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s component loads the C# WASM runtime"), *BuildLabel),
+			StatsAfterBeginPlay.bRuntimeLoaded))
+	{
+		Test.AddError(StatsAfterBeginPlay.LastErrorMessage);
+		return false;
+	}
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s component calls C# BeginPlay"), *BuildLabel),
+		StatsAfterBeginPlay.bBeginPlayCalled);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s BeginPlay resets Actor scale"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.001));
+
+	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	const FAvidScriptComponentRuntimeStats StatsAfterTick =
+		BindingResult.Component->GetRuntimeStats();
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s component records one Tick"), *BuildLabel),
+		StatsAfterTick.TickCallCount,
+		1);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s Tick rotates Actor yaw by 45 degrees"), *BuildLabel),
+		FMath::IsNearlyEqual(Actor->GetActorRotation().Yaw, 55.0, 0.01));
 	return true;
 }
 } // namespace
@@ -605,6 +774,110 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		FString(TEXT("binding_package_hash_mismatch")));
 
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest,
+	"AvidScript.Editor.BindingRuntime.ProjectCSharpGameplayWorkspace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(const FString& Parameters)
+{
+	FString TestSavedRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P44/GameplayWorkspace")));
+	FString GeneratedRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectIntermediateDir(),
+		TEXT("AvidScript/Tests/P44/GameplayWorkspace/CSharpWorkspace")));
+	FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest/Tests/P44/GameplayWorkspace")));
+	FPaths::NormalizeFilename(TestSavedRoot);
+	FPaths::NormalizeFilename(GeneratedRoot);
+	FPaths::NormalizeFilename(OutputRoot);
+	IFileManager::Get().DeleteDirectory(*TestSavedRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*GeneratedRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+
+	FAvidScriptEditorCSharpWorkspaceConfig WorkspaceConfig;
+	WorkspaceConfig.WorkspaceRoot = FPaths::Combine(TestSavedRoot, TEXT("Workspace"));
+	WorkspaceConfig.GeneratedRoot = GeneratedRoot;
+	WorkspaceConfig.BindingPackageRoot = FPaths::Combine(GeneratedRoot, TEXT("BindingPackages"));
+	WorkspaceConfig.OutputRoot = OutputRoot;
+	FAvidScriptEditorCSharpWorkspaceResult WorkspaceResult;
+	if (!TestTrue(
+			TEXT("Project C# gameplay workspace is created in isolation"),
+			FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(
+				WorkspaceConfig,
+				WorkspaceResult)))
+	{
+		AddError(WorkspaceResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Project C# gameplay workspace creates four user files"), WorkspaceResult.CreatedUserFileCount, 4);
+
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Generated project C# gameplay profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				WorkspaceResult.ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Profile owns the workspace source"), ProfileResult.BuildConfig.SourcePath, WorkspaceResult.SourcePath);
+	TestEqual(TEXT("Profile owns the workspace project"), ProfileResult.BuildConfig.ProjectPath, WorkspaceResult.ProjectPath);
+	ProfileResult.BuildConfig.SemanticCacheRoot = FPaths::Combine(
+		TestSavedRoot,
+		TEXT("CSharpSemanticCache/v1"));
+
+	FAvidScriptEditorCSharpBuildResult ColdBuildResult;
+	if (!TestTrue(
+			TEXT("Cold project C# gameplay build succeeds"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				ProfileResult.BuildConfig,
+				ColdBuildResult)))
+	{
+		AddError(ColdBuildResult.ErrorMessage + TEXT("\n") + ColdBuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Cold gameplay build performs two build passes"), ColdBuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Cold gameplay build invokes Frontend once"), ColdBuildResult.FrontendInvocationCount, 1);
+	TestEqual(TEXT("Cold gameplay build invokes Semantic once"), ColdBuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Cold gameplay build invokes Guest IR twice"), ColdBuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Cold gameplay build invokes WASM twice"), ColdBuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Cold gameplay build records cache miss"), ColdBuildResult.SemanticCacheLookup, FString(TEXT("miss")));
+	if (!AcceptAvidScriptProjectGameplayWorkspaceBuild(
+			*this,
+			TEXT("Cold gameplay workspace"),
+			WorkspaceResult,
+			ColdBuildResult))
+	{
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildResult WarmBuildResult;
+	if (!TestTrue(
+			TEXT("Warm project C# gameplay build succeeds"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				ProfileResult.BuildConfig,
+				WarmBuildResult)))
+	{
+		AddError(WarmBuildResult.ErrorMessage + TEXT("\n") + WarmBuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Warm gameplay build performs two build passes"), WarmBuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Warm gameplay build skips Frontend"), WarmBuildResult.FrontendInvocationCount, 0);
+	TestEqual(TEXT("Warm gameplay build skips Semantic"), WarmBuildResult.SemanticInvocationCount, 0);
+	TestEqual(TEXT("Warm gameplay build still invokes Guest IR twice"), WarmBuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Warm gameplay build still invokes WASM twice"), WarmBuildResult.WasmBackendInvocationCount, 2);
+	TestEqual(TEXT("Warm gameplay build records cache hit"), WarmBuildResult.SemanticCacheLookup, FString(TEXT("hit")));
+	return AcceptAvidScriptProjectGameplayWorkspaceBuild(
+		*this,
+		TEXT("Warm gameplay workspace"),
+		WorkspaceResult,
+		WarmBuildResult);
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -210,6 +210,7 @@ bool FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
 	}
 
 	UAvidScriptComponent* Component = Actor->FindComponentByClass<UAvidScriptComponent>();
+	bool bRegisterNewComponent = false;
 	if (Component == nullptr)
 	{
 		if (!Request.bCreateComponentIfMissing)
@@ -236,14 +237,18 @@ bool FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
 			return false;
 		}
 
-		Actor->AddInstanceComponent(Component);
-		Component->OnComponentCreated();
-		Component->RegisterComponent();
+		bRegisterNewComponent = true;
 		OutResult.bCreatedComponent = true;
 	}
 
 	Component->Modify();
 	Component->SetScriptManifestPath(NormalizedManifestPath);
+	if (bRegisterNewComponent)
+	{
+		Actor->AddInstanceComponent(Component);
+		Component->OnComponentCreated();
+		Component->RegisterComponent();
+	}
 	Actor->MarkPackageDirty();
 
 	OutResult.bSucceeded = true;
