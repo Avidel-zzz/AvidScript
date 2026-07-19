@@ -90,6 +90,20 @@ bool CreateAvidScriptEditorModuleCSharpBindingWorld(UWorld*& OutWorld)
 	return true;
 }
 
+bool BeginAvidScriptEditorModuleCSharpBindingWorld(UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	const FURL Url;
+	World->InitializeActorsForPlay(Url);
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+	return true;
+}
+
 void DestroyAvidScriptEditorModuleCSharpBindingWorld(UWorld*& World)
 {
 	if (GEditor != nullptr)
@@ -100,6 +114,10 @@ void DestroyAvidScriptEditorModuleCSharpBindingWorld(UWorld*& World)
 	if (World == nullptr)
 	{
 		return;
+	}
+	if (World->HasBegunPlay())
+	{
+		World->EndPlay(EEndPlayReason::Quit);
 	}
 
 	if (GEngine != nullptr)
@@ -524,6 +542,13 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		AddError(TEXT("Failed to create project C# workspace command test world."));
 		return false;
 	}
+	if (!TestTrue(
+			TEXT("Project C# workspace command world begins play"),
+			BeginAvidScriptEditorModuleCSharpBindingWorld(World)))
+	{
+		DestroyAvidScriptEditorModuleCSharpBindingWorld(World);
+		return false;
+	}
 
 	AActor* Actor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
 	if (!TestNotNull(TEXT("Project C# workspace command actor spawns"), Actor))
@@ -536,19 +561,22 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 
 	double Now = 1.0;
 	AActor* ReloadTarget = nullptr;
+	int32 ReloadBuildCount = 0;
+	const TSharedRef<FAvidScriptEditorCSharpLiveReloadBuildExecutor> ReloadExecutor =
+		MakeShared<FAvidScriptEditorCSharpLiveReloadBuildExecutor>();
 	FFakeAvidScriptEditorModuleLiveReloadWatchHost* FakeWatchHost =
 		new FFakeAvidScriptEditorModuleLiveReloadWatchHost();
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> LiveReloadService(
 		new FAvidScriptEditorCSharpLiveReloadService(
 			TUniquePtr<IAvidScriptEditorCSharpLiveReloadWatchHost>(FakeWatchHost),
-			[&ReloadTarget](
-				const FString&,
+			[&ReloadTarget, &ReloadBuildCount, ReloadExecutor](
+				const FString& ProfilePath,
 				AActor* Target,
 				FAvidScriptEditorCSharpLiveReloadBuildResult& OutBuildResult)
 			{
 				ReloadTarget = Target;
-				OutBuildResult.bSucceeded = true;
-				return true;
+				++ReloadBuildCount;
+				return ReloadExecutor->Execute(ProfilePath, Target, OutBuildResult);
 			},
 			[&Now]() { return Now; }));
 	FAvidScriptEditorCSharpLiveReloadService* LiveReloadServicePtr = LiveReloadService.Get();
@@ -627,6 +655,14 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		Actor->GetPathName());
 	TestEqual(TEXT("Repeated start does not rebuild"), RepeatBuildResult.BuildInvocationCount, 0);
 	TestEqual(TEXT("Repeated start does not register another watcher"), FakeWatchHost->StartCount, 1);
+	const FString ReloadedSourceText = OriginalSourceText.Replace(
+		TEXT("90.0f"),
+		TEXT("180.0f"),
+		ESearchCase::CaseSensitive);
+	TestNotEqual(TEXT("Reload source changes gameplay behavior"), ReloadedSourceText, OriginalSourceText);
+	TestTrue(
+		TEXT("Project C# source can be changed for automatic reload"),
+		FFileHelper::SaveStringToFile(ReloadedSourceText, *WorkspaceResult.SourcePath));
 
 	AActor* OtherActor = SpawnAvidScriptEditorModuleCSharpBindingActor(*World);
 	if (!TestNotNull(TEXT("Selection drift Actor spawns"), OtherActor))
@@ -639,10 +675,60 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	GEditor->SelectNone(false, true, false);
 	GEditor->SelectActor(OtherActor, true, false, true, false);
 	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
+	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
 	LiveReloadServicePtr->Tick();
 	Now = 1.35;
 	LiveReloadServicePtr->Tick();
 	TestEqual(TEXT("Reload keeps the initial bound Actor"), ReloadTarget, Actor);
+	TestEqual(TEXT("Two quick changes trigger one real reload build"), ReloadBuildCount, 1);
+	TestEqual(
+		TEXT("Real automatic reload succeeds"),
+		LiveReloadServicePtr->GetLastResult().Status,
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildSucceeded);
+	TestEqual(
+		TEXT("Real automatic reload applies to the fixed component"),
+		LiveReloadServicePtr->GetLastResult().BuildResult.BindingResult.Component,
+		BindingResult.Component);
+	TestTrue(
+		TEXT("Real automatic reload keeps runtime loaded"),
+		BindingResult.Component->GetRuntimeStats().bRuntimeLoaded);
+	TestEqual(
+		TEXT("Real automatic reload records one committed reload"),
+		BindingResult.Component->GetRuntimeStats().SuccessfulReloadCount,
+		1);
+	const FString ReloadedManifestPath = BindingResult.Component->GetRuntimeStats().ScriptManifestPath;
+	Actor->SetActorRotation(FRotator::ZeroRotator);
+	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestTrue(
+		TEXT("Reloaded C# module Tick uses the new rotation speed"),
+		FMath::IsNearlyEqual(FMath::Abs(Actor->GetActorRotation().Yaw), 90.0, 0.01));
+
+	TestTrue(
+		TEXT("Project C# source can be corrupted during automatic reload"),
+		FFileHelper::SaveStringToFile(TEXT("public class {\n"), *WorkspaceResult.SourcePath));
+	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
+	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
+	LiveReloadServicePtr->Tick();
+	Now = LiveReloadServicePtr->GetStats().PendingDeadlineSeconds;
+	LiveReloadServicePtr->Tick();
+	TestEqual(TEXT("Bad source triggers one trailing real build"), ReloadBuildCount, 2);
+	TestEqual(
+		TEXT("Bad source reports automatic build failure"),
+		LiveReloadServicePtr->GetLastResult().Status,
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed);
+	TestTrue(TEXT("Bad source leaves live reload watching"), LiveReloadServicePtr->IsRunning());
+	TestEqual(
+		TEXT("Bad source preserves committed runtime manifest"),
+		BindingResult.Component->GetRuntimeStats().ScriptManifestPath,
+		ReloadedManifestPath);
+	Actor->SetActorRotation(FRotator::ZeroRotator);
+	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestTrue(
+		TEXT("Previous C# runtime Tick continues after automatic build failure"),
+		FMath::IsNearlyEqual(FMath::Abs(Actor->GetActorRotation().Yaw), 90.0, 0.01));
+	TestTrue(
+		TEXT("Project C# source can be restored after automatic build failure"),
+		FFileHelper::SaveStringToFile(OriginalSourceText, *WorkspaceResult.SourcePath));
 
 	FAvidScriptEditorCSharpLiveReloadServiceResult StopResult;
 	TestTrue(TEXT("Project C# live reload stop is idempotent"), Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult));
