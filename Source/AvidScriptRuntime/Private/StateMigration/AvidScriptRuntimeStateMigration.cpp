@@ -7,6 +7,8 @@ struct FAvidScriptPendingStateWrite
 	FString StableId;
 	uint32 CandidateOffset = 0;
 	TArray<uint8> Bytes;
+	TArray<uint8> CandidateOriginalBytes;
+	bool bMatchedAlias = false;
 };
 
 bool FailMigration(
@@ -41,20 +43,40 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 	}
 
 	OutResult.bAttempted = true;
-	TMap<FString, const FAvidScriptWasmStateSlot*> CandidateSlots;
+	if (CandidateManifest.StateMigration.ContractVersion < PreviousManifest.StateMigration.ContractVersion)
+	{
+		return FailMigration(
+			OutResult,
+			TEXT("<contract_version>"),
+			TEXT("state_migration_version_regression"),
+			TEXT("candidate state contract version is older than the active runtime state contract"));
+	}
+
+	TMap<FString, const FAvidScriptWasmStateSlot*> CandidatePrimarySlots;
+	TMap<FString, const FAvidScriptWasmStateSlot*> CandidateAliasSlots;
 	for (const FAvidScriptWasmStateSlot& Slot : CandidateManifest.StateMigration.Slots)
 	{
-		CandidateSlots.Add(Slot.StableId, &Slot);
+		CandidatePrimarySlots.Add(Slot.StableId, &Slot);
+		for (const FString& Alias : Slot.Aliases)
+		{
+			CandidateAliasSlots.Add(Alias, &Slot);
+		}
 	}
 
 	TArray<FAvidScriptPendingStateWrite> PendingWrites;
 	PendingWrites.Reserve(FMath::Min(
 		PreviousManifest.StateMigration.Slots.Num(),
 		CandidateManifest.StateMigration.Slots.Num()));
-	TSet<FString> MatchedStableIds;
+	TSet<FString> MatchedCandidateStableIds;
 	for (const FAvidScriptWasmStateSlot& PreviousSlot : PreviousManifest.StateMigration.Slots)
 	{
-		const FAvidScriptWasmStateSlot* const* CandidateSlotPtr = CandidateSlots.Find(PreviousSlot.StableId);
+		const FAvidScriptWasmStateSlot* const* CandidateSlotPtr = CandidatePrimarySlots.Find(PreviousSlot.StableId);
+		bool bMatchedAlias = false;
+		if (CandidateSlotPtr == nullptr)
+		{
+			CandidateSlotPtr = CandidateAliasSlots.Find(PreviousSlot.StableId);
+			bMatchedAlias = CandidateSlotPtr != nullptr;
+		}
 		if (CandidateSlotPtr == nullptr)
 		{
 			++OutResult.SkippedSlotCount;
@@ -62,7 +84,7 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 		}
 
 		const FAvidScriptWasmStateSlot& CandidateSlot = **CandidateSlotPtr;
-		MatchedStableIds.Add(PreviousSlot.StableId);
+		MatchedCandidateStableIds.Add(CandidateSlot.StableId);
 		if (PreviousSlot.TypeFingerprint != CandidateSlot.TypeFingerprint
 			|| PreviousSlot.Size != CandidateSlot.Size)
 		{
@@ -76,6 +98,7 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 		FAvidScriptPendingStateWrite& PendingWrite = PendingWrites.AddDefaulted_GetRef();
 		PendingWrite.StableId = PreviousSlot.StableId;
 		PendingWrite.CandidateOffset = CandidateSlot.Offset;
+		PendingWrite.bMatchedAlias = bMatchedAlias;
 		PendingWrite.Bytes.SetNumUninitialized(static_cast<int32>(PreviousSlot.Size));
 		FString ReadError;
 		if (!PreviousRuntime.ReadStateBytes(PreviousSlot.Offset, PendingWrite.Bytes, ReadError))
@@ -88,7 +111,25 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 		}
 	}
 
-	OutResult.SkippedSlotCount += CandidateManifest.StateMigration.Slots.Num() - MatchedStableIds.Num();
+	OutResult.SkippedSlotCount += CandidateManifest.StateMigration.Slots.Num() - MatchedCandidateStableIds.Num();
+	for (FAvidScriptPendingStateWrite& PendingWrite : PendingWrites)
+	{
+		PendingWrite.CandidateOriginalBytes.SetNumUninitialized(PendingWrite.Bytes.Num());
+		FString ReadError;
+		if (!CandidateRuntime.ReadStateBytes(
+			PendingWrite.CandidateOffset,
+			PendingWrite.CandidateOriginalBytes,
+			ReadError))
+		{
+			return FailMigration(
+				OutResult,
+				PendingWrite.StableId,
+				TEXT("state_migration_read_failed"),
+				ReadError);
+		}
+	}
+
+	int32 AppliedWriteCount = 0;
 	for (const FAvidScriptPendingStateWrite& PendingWrite : PendingWrites)
 	{
 		FString WriteError;
@@ -97,16 +138,37 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 			PendingWrite.Bytes,
 			WriteError))
 		{
+			FString RollbackError;
+			for (int32 RollbackIndex = AppliedWriteCount - 1; RollbackIndex >= 0; --RollbackIndex)
+			{
+				const FAvidScriptPendingStateWrite& AppliedWrite = PendingWrites[RollbackIndex];
+				FString RestoreError;
+				if (!CandidateRuntime.WriteStateBytes(
+					AppliedWrite.CandidateOffset,
+					AppliedWrite.CandidateOriginalBytes,
+					RestoreError))
+				{
+					RollbackError = RestoreError;
+					break;
+				}
+			}
 			return FailMigration(
 				OutResult,
 				PendingWrite.StableId,
 				TEXT("state_migration_write_failed"),
-				WriteError);
+				RollbackError.IsEmpty()
+					? WriteError
+					: FString::Printf(TEXT("%s; candidate restore failed: %s"), *WriteError, *RollbackError));
 		}
-		++OutResult.MigratedSlotCount;
-		OutResult.MigratedByteCount += PendingWrite.Bytes.Num();
+		++AppliedWriteCount;
 	}
 
+	OutResult.MigratedSlotCount = PendingWrites.Num();
+	for (const FAvidScriptPendingStateWrite& PendingWrite : PendingWrites)
+	{
+		OutResult.MigratedByteCount += PendingWrite.Bytes.Num();
+		OutResult.AliasedSlotCount += PendingWrite.bMatchedAlias ? 1 : 0;
+	}
 	OutResult.bSucceeded = true;
 	return true;
 }

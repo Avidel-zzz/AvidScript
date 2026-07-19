@@ -17,6 +17,7 @@ enum class EAvidScriptWasmStateMigrationStrategy : uint8
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmStateSlot
 {
 	FString StableId;
+	TArray<FString> Aliases;
 	FString TypeFingerprint;
 	uint32 Offset = 0;
 	uint32 Size = 0;
@@ -25,12 +26,18 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmStateSlot
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmStateMigrationManifest
 {
-	static constexpr int32 SupportedSchemaVersion = 1;
+	static constexpr int32 LegacySchemaVersion = 1;
+	static constexpr int32 SupportedSchemaVersion = 2;
+	static constexpr int32 MinContractVersion = 1;
+	static constexpr int32 MaxContractVersion = 65535;
 	static constexpr int32 MaxSlotCount = 1024;
 	static constexpr uint32 MaxSlotByteSize = 64 * 1024;
 	static constexpr uint32 MaxTotalByteSize = 1024 * 1024;
 
 	EAvidScriptWasmStateMigrationStrategy Strategy = EAvidScriptWasmStateMigrationStrategy::None;
+	int32 SchemaVersion = LegacySchemaVersion;
+	FString Policy = TEXT("compatible");
+	int32 ContractVersion = MinContractVersion;
 	FString OwnerTypeId;
 	TArray<FAvidScriptWasmStateSlot> Slots;
 
@@ -97,6 +104,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult
 	int32 StateMigrationMigratedSlotCount = 0;
 	int32 StateMigrationMigratedByteCount = 0;
 	int32 StateMigrationSkippedSlotCount = 0;
+	int32 StateMigrationAliasedSlotCount = 0;
 	FString StateMigrationStableId;
 	FString PreviousModuleId;
 	FString CandidateModuleId;

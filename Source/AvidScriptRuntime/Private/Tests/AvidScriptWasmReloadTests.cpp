@@ -193,9 +193,103 @@ bool FAvidScriptReloadStateMigrationManifestContractTest::RunTest(const FString&
 		LoadedBytecode,
 		LoadResult));
 	TestTrue(TEXT("Host snapshot strategy is enabled"), Manifest.StateMigration.IsEnabled());
+	TestEqual(TEXT("V1 schema version defaults to one"), Manifest.StateMigration.SchemaVersion, 1);
+	TestEqual(TEXT("V1 policy defaults to compatible"), Manifest.StateMigration.Policy, FString(TEXT("compatible")));
+	TestEqual(TEXT("V1 contract version defaults to one"), Manifest.StateMigration.ContractVersion, 1);
 	TestEqual(TEXT("Migration owner type"), Manifest.StateMigration.OwnerTypeId, FString(TEXT("type:Game.Script")));
 	TestEqual(TEXT("Migration slot count"), Manifest.StateMigration.Slots.Num(), 2);
 	TestEqual(TEXT("Migration first offset"), Manifest.StateMigration.Slots[0].Offset, 16u);
+	TestEqual(TEXT("V1 slots have no aliases"), Manifest.StateMigration.Slots[0].Aliases.Num(), 0);
+
+	const FString ValidV2Schema = FString::Printf(
+		TEXT("{\"schema_version\":2,\"strategy\":\"host_snapshot\",\"policy\":\"explicit\",\"contract_version\":2,\"owner_type_id\":\"type:Game.Script\",")
+		TEXT("\"slots\":[")
+		TEXT("{\"stable_id\":\"global:score\",\"aliases\":[\"global:old_score\"],\"type_fingerprint\":\"%s\",\"offset\":16,\"size\":4,\"alignment\":4},")
+		TEXT("{\"stable_id\":\"global:timer\",\"aliases\":[\"global:old_timer\"],\"type_fingerprint\":\"%s\",\"offset\":20,\"size\":4,\"alignment\":4}]}"),
+		*FingerprintA,
+		*FingerprintB);
+	const FString ValidV2ManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_v2_valid.avidscript.json"));
+	TestTrue(TEXT("Valid v2 migration manifest writes"), WriteReloadManifestFixture(
+		ValidV2ManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		ValidV2Schema));
+	TestTrue(TEXT("Valid v2 migration manifest loads"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		ValidV2ManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("V2 schema version is retained"), Manifest.StateMigration.SchemaVersion, 2);
+	TestEqual(TEXT("V2 policy is retained"), Manifest.StateMigration.Policy, FString(TEXT("explicit")));
+	TestEqual(TEXT("V2 contract version is retained"), Manifest.StateMigration.ContractVersion, 2);
+	TestEqual(TEXT("V2 alias is retained"), Manifest.StateMigration.Slots[0].Aliases[0], FString(TEXT("global:old_score")));
+
+	const FString UnsortedAliasSchema = ValidV2Schema.Replace(
+		TEXT("[\"global:old_score\"]"),
+		TEXT("[\"global:z_score\",\"global:a_score\"]"));
+	const FString UnsortedAliasManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_v2_unsorted_alias.avidscript.json"));
+	TestTrue(TEXT("Unsorted alias manifest writes"), WriteReloadManifestFixture(
+		UnsortedAliasManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		UnsortedAliasSchema));
+	TestFalse(TEXT("V2 unsorted aliases are rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		UnsortedAliasManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Unsorted alias category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
+
+	const FString DuplicateAliasSchema = ValidV2Schema.Replace(
+		TEXT("[\"global:old_timer\"]"),
+		TEXT("[\"global:old_score\"]"));
+	const FString DuplicateAliasManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_v2_duplicate_alias.avidscript.json"));
+	TestTrue(TEXT("Duplicate alias manifest writes"), WriteReloadManifestFixture(
+		DuplicateAliasManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		DuplicateAliasSchema));
+	TestFalse(TEXT("V2 duplicate aliases are rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		DuplicateAliasManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Duplicate alias category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
+
+	const FString CurrentIdConflictSchema = ValidV2Schema.Replace(
+		TEXT("[\"global:old_timer\"]"),
+		TEXT("[\"global:score\"]"));
+	const FString CurrentIdConflictManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_v2_current_id_conflict.avidscript.json"));
+	TestTrue(TEXT("Current id conflict manifest writes"), WriteReloadManifestFixture(
+		CurrentIdConflictManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		CurrentIdConflictSchema));
+	TestFalse(TEXT("V2 alias conflicts with current id are rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		CurrentIdConflictManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Current id conflict category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
+
+	const FString InvalidPolicySchema = ValidV2Schema.Replace(TEXT("\"explicit\""), TEXT("\"invalid\""));
+	const FString InvalidPolicyManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_v2_invalid_policy.avidscript.json"));
+	TestTrue(TEXT("Invalid policy manifest writes"), WriteReloadManifestFixture(
+		InvalidPolicyManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		InvalidPolicySchema));
+	TestFalse(TEXT("V2 invalid policy is rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		InvalidPolicyManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Invalid policy category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
 
 	const FString DuplicateSchema = ValidSchema.Replace(TEXT("global:timer"), TEXT("global:score"));
 	const FString DuplicateManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_duplicate.avidscript.json"));

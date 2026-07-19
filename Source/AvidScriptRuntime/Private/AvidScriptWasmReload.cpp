@@ -225,15 +225,33 @@ bool IsLowercaseSha256(const FString& Value)
 	return true;
 }
 
+bool TryGetInt32Field(const FJsonObject& Object, const TCHAR* FieldName, int32& OutValue)
+{
+	double Number = 0.0;
+	if (!Object.TryGetNumberField(FieldName, Number)
+		|| !FMath::IsFinite(Number)
+		|| Number < static_cast<double>(MIN_int32)
+		|| Number > static_cast<double>(MAX_int32)
+		|| Number != FMath::TruncToDouble(Number))
+	{
+		return false;
+	}
+
+	OutValue = static_cast<int32>(Number);
+	return true;
+}
+
 bool LoadStateMigrationManifest(
 	const FJsonObject& Object,
 	FAvidScriptWasmStateMigrationManifest& OutManifest,
 	FAvidScriptWasmReloadManifestLoadResult& OutResult)
 {
+	OutManifest = FAvidScriptWasmStateMigrationManifest();
 	int32 SchemaVersion = 0;
 	FString Strategy;
-	if (!Object.TryGetNumberField(TEXT("schema_version"), SchemaVersion)
-		|| SchemaVersion != FAvidScriptWasmStateMigrationManifest::SupportedSchemaVersion
+	if (!TryGetInt32Field(Object, TEXT("schema_version"), SchemaVersion)
+		|| SchemaVersion < FAvidScriptWasmStateMigrationManifest::LegacySchemaVersion
+		|| SchemaVersion > FAvidScriptWasmStateMigrationManifest::SupportedSchemaVersion
 		|| !RequireStringField(Object, TEXT("strategy"), Strategy, OutResult)
 		|| Strategy != TEXT("host_snapshot")
 		|| !RequireStringField(Object, TEXT("owner_type_id"), OutManifest.OwnerTypeId, OutResult))
@@ -247,6 +265,26 @@ bool LoadStateMigrationManifest(
 				TEXT("rebuild the C# script with the current AvidScript guest compiler"));
 		}
 		return false;
+	}
+	OutManifest.SchemaVersion = SchemaVersion;
+	if (SchemaVersion == FAvidScriptWasmStateMigrationManifest::SupportedSchemaVersion)
+	{
+		if (!RequireStringField(Object, TEXT("policy"), OutManifest.Policy, OutResult)
+			|| !TryGetInt32Field(Object, TEXT("contract_version"), OutManifest.ContractVersion)
+			|| (OutManifest.Policy != TEXT("compatible") && OutManifest.Policy != TEXT("explicit"))
+			|| OutManifest.ContractVersion < FAvidScriptWasmStateMigrationManifest::MinContractVersion
+			|| OutManifest.ContractVersion > FAvidScriptWasmStateMigrationManifest::MaxContractVersion)
+		{
+			if (OutResult.ErrorCategory.IsEmpty())
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("manifest_invalid"),
+					TEXT("state_migration v2 policy or contract_version is invalid"),
+					TEXT("rebuild the C# script state schema with a supported policy and contract version"));
+			}
+			return false;
+		}
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* SlotValues = nullptr;
@@ -274,12 +312,13 @@ bool LoadStateMigrationManifest(
 		int32 Offset = 0;
 		int32 Size = 0;
 		int32 Alignment = 0;
+		const TArray<TSharedPtr<FJsonValue>>* AliasValues = nullptr;
 		if (!SlotObject.IsValid()
 			|| !RequireStringField(*SlotObject, TEXT("stable_id"), Slot.StableId, OutResult)
 			|| !RequireStringField(*SlotObject, TEXT("type_fingerprint"), Slot.TypeFingerprint, OutResult)
-			|| !SlotObject->TryGetNumberField(TEXT("offset"), Offset)
-			|| !SlotObject->TryGetNumberField(TEXT("size"), Size)
-			|| !SlotObject->TryGetNumberField(TEXT("alignment"), Alignment))
+			|| !TryGetInt32Field(*SlotObject, TEXT("offset"), Offset)
+			|| !TryGetInt32Field(*SlotObject, TEXT("size"), Size)
+			|| !TryGetInt32Field(*SlotObject, TEXT("alignment"), Alignment))
 		{
 			if (OutResult.ErrorCategory.IsEmpty())
 			{
@@ -289,6 +328,27 @@ bool LoadStateMigrationManifest(
 					TEXT("state_migration slot fields are missing or invalid"),
 					TEXT("rebuild the script state schema"));
 			}
+			return false;
+		}
+		if (SchemaVersion == FAvidScriptWasmStateMigrationManifest::LegacySchemaVersion)
+		{
+			if (SlotObject->HasField(TEXT("aliases")))
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("manifest_invalid"),
+					TEXT("state_migration v1 slots must not declare aliases"),
+					TEXT("remove aliases from v1 artifacts or rebuild the script manifest as schema v2"));
+				return false;
+			}
+		}
+		else if (!SlotObject->TryGetArrayField(TEXT("aliases"), AliasValues) || AliasValues == nullptr)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				TEXT("state_migration v2 slot aliases must be an array"),
+				TEXT("rebuild the script state schema with deterministic aliases"));
 			return false;
 		}
 
@@ -331,8 +391,53 @@ bool LoadStateMigrationManifest(
 		Slot.Offset = static_cast<uint32>(Offset);
 		Slot.Size = static_cast<uint32>(Size);
 		Slot.Alignment = static_cast<uint32>(Alignment);
+		if (AliasValues != nullptr)
+		{
+			FString PreviousAlias;
+			for (const TSharedPtr<FJsonValue>& AliasValue : *AliasValues)
+			{
+				FString Alias;
+				if (!AliasValue.IsValid()
+					|| !AliasValue->TryGetString(Alias)
+					|| Alias.IsEmpty()
+					|| (!PreviousAlias.IsEmpty()
+						&& PreviousAlias.Compare(Alias, ESearchCase::CaseSensitive) >= 0))
+				{
+					SetManifestLoadFailure(
+						OutResult,
+						TEXT("manifest_invalid"),
+						TEXT("state_migration v2 aliases must be non-empty strings in strict ordinal order"),
+						TEXT("rebuild the script state schema with sorted unique aliases"));
+					return false;
+				}
+				PreviousAlias = Alias;
+				Slot.Aliases.Add(MoveTemp(Alias));
+			}
+		}
 		PreviousStableId = Slot.StableId;
 		Slots.Add(MoveTemp(Slot));
+	}
+
+	TSet<FString> StateIds;
+	for (const FAvidScriptWasmStateSlot& Slot : Slots)
+	{
+		StateIds.Add(Slot.StableId);
+	}
+	for (const FAvidScriptWasmStateSlot& Slot : Slots)
+	{
+		for (const FString& Alias : Slot.Aliases)
+		{
+			if (StateIds.Contains(Alias))
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("manifest_invalid"),
+					TEXT("state_migration aliases must be globally unambiguous with current ids and aliases"),
+					TEXT("rename the conflicting state alias and rebuild the script manifest"));
+				return false;
+			}
+			StateIds.Add(Alias);
+		}
 	}
 
 	TArray<const FAvidScriptWasmStateSlot*> SlotsByAddress;

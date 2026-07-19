@@ -96,6 +96,10 @@ public:
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
 	bool WriteStateBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError);
+#if WITH_DEV_AUTOMATION_TESTS
+	void SetStateWriteFailureForTesting(int32 InWriteAttempt);
+	void ClearStateWriteFailureForTesting();
+#endif
 
 	bool IsLoaded() const;
 	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
@@ -163,6 +167,10 @@ private:
 
 	bool bGameplayEventExportLookupAttempted = false;
 	bool bHasBegunPlay = false;
+#if WITH_DEV_AUTOMATION_TESTS
+	int32 StateWriteAttemptCount = 0;
+	int32 StateWriteFailureOnAttempt = INDEX_NONE;
+#endif
 	bool bHasEndedPlay = false;
 	bool bEndPlayAttempted = false;
 	bool bEndPlaySucceeded = false;

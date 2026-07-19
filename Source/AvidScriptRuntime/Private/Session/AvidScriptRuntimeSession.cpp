@@ -189,6 +189,7 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 	OutResult.StateMigrationMigratedSlotCount = MigrationResult.MigratedSlotCount;
 	OutResult.StateMigrationMigratedByteCount = MigrationResult.MigratedByteCount;
 	OutResult.StateMigrationSkippedSlotCount = MigrationResult.SkippedSlotCount;
+	OutResult.StateMigrationAliasedSlotCount = MigrationResult.AliasedSlotCount;
 
 	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
 	{

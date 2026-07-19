@@ -38,10 +38,12 @@ const uint8 GSessionBeginTrapModule[] = {
 FAvidScriptWasmStateSlot MakeSessionStateSlot(
 	const TCHAR* StableId,
 	const TCHAR* Fingerprint,
-	uint32 Offset)
+	uint32 Offset,
+	TArray<FString> Aliases = {})
 {
 	FAvidScriptWasmStateSlot Slot;
 	Slot.StableId = StableId;
+	Slot.Aliases = MoveTemp(Aliases);
 	Slot.TypeFingerprint = Fingerprint;
 	Slot.Offset = Offset;
 	Slot.Size = 4;
@@ -120,6 +122,95 @@ bool FAvidScriptRuntimeStateMigrationServiceTest::RunTest(const FString& Paramet
 		MigrationResult));
 	TestEqual(TEXT("Incompatible state category"), MigrationResult.ErrorCategory, FString(TEXT("state_migration_incompatible")));
 	TestEqual(TEXT("Incompatible state identifies stable id"), MigrationResult.StableId, FString(TEXT("global:score")));
+
+	FAvidScriptWasmReloadManifest ExactPreferredCandidate = CandidateManifest;
+	ExactPreferredCandidate.StateMigration.ContractVersion = 2;
+	ExactPreferredCandidate.StateMigration.Slots = {
+		MakeSessionStateSlot(TEXT("global:score"), FloatFingerprint, 40, { TEXT("global:removed") }),
+		MakeSessionStateSlot(TEXT("global:renamed"), FloatFingerprint, 44, { TEXT("global:score") }),
+	};
+	FAvidScriptWasmReloadManifest ExactPreferredPrevious = PreviousManifest;
+	ExactPreferredPrevious.StateMigration.Slots = {
+		MakeSessionStateSlot(TEXT("global:score"), FloatFingerprint, 16),
+	};
+	TestTrue(TEXT("Exact primary match takes priority over alias"), FAvidScriptRuntimeStateMigration::Migrate(
+		PreviousRuntime,
+		ExactPreferredPrevious,
+		CandidateRuntime,
+		ExactPreferredCandidate,
+		MigrationResult));
+	TestEqual(TEXT("Exact primary does not report alias match"), MigrationResult.AliasedSlotCount, 0);
+	TArray<uint8> ExactBytes;
+	ExactBytes.SetNumZeroed(4);
+	TestTrue(TEXT("Exact primary destination reads"), CandidateRuntime.ReadStateBytes(40, ExactBytes, MemoryError));
+	TestEqual(TEXT("Exact primary destination receives score"), ExactBytes, ScoreBytes);
+
+	FAvidScriptWasmReloadManifest RenameAliasCandidate = CandidateManifest;
+	RenameAliasCandidate.StateMigration.ContractVersion = 2;
+	RenameAliasCandidate.StateMigration.Slots = {
+		MakeSessionStateSlot(TEXT("global:renamed_score"), FloatFingerprint, 48, { TEXT("global:score") }),
+	};
+	TestTrue(TEXT("Rename alias migrates state"), FAvidScriptRuntimeStateMigration::Migrate(
+		PreviousRuntime,
+		PreviousManifest,
+		CandidateRuntime,
+		RenameAliasCandidate,
+		MigrationResult));
+	TestEqual(TEXT("Rename alias count"), MigrationResult.AliasedSlotCount, 1);
+	TArray<uint8> RenamedBytes;
+	RenamedBytes.SetNumZeroed(4);
+	TestTrue(TEXT("Rename alias destination reads"), CandidateRuntime.ReadStateBytes(48, RenamedBytes, MemoryError));
+	TestEqual(TEXT("Rename alias destination receives score"), RenamedBytes, ScoreBytes);
+
+	FAvidScriptWasmReloadManifest VersionRegressionCandidate = CandidateManifest;
+	PreviousManifest.StateMigration.ContractVersion = 2;
+	VersionRegressionCandidate.StateMigration.ContractVersion = 1;
+	TestFalse(TEXT("Candidate contract version regression is rejected"), FAvidScriptRuntimeStateMigration::Migrate(
+		PreviousRuntime,
+		PreviousManifest,
+		CandidateRuntime,
+		VersionRegressionCandidate,
+		MigrationResult));
+	TestEqual(TEXT("Version regression category"), MigrationResult.ErrorCategory, FString(TEXT("state_migration_version_regression")));
+	PreviousManifest.StateMigration.ContractVersion = 1;
+
+	const TArray<uint8> CandidateFirstOriginal = { 0x10, 0x11, 0x12, 0x13 };
+	const TArray<uint8> CandidateSecondOriginal = { 0x20, 0x21, 0x22, 0x23 };
+	const TArray<uint8> PreviousSecondBytes = { 0x30, 0x31, 0x32, 0x33 };
+	TestTrue(TEXT("Previous second state writes"), PreviousRuntime.WriteStateBytes(24, PreviousSecondBytes, MemoryError));
+	TestTrue(TEXT("Candidate first original writes"), CandidateRuntime.WriteStateBytes(52, CandidateFirstOriginal, MemoryError));
+	TestTrue(TEXT("Candidate second original writes"), CandidateRuntime.WriteStateBytes(56, CandidateSecondOriginal, MemoryError));
+	FAvidScriptWasmReloadManifest TransactionPrevious = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("state_service"));
+	TransactionPrevious.StateMigration.Strategy = EAvidScriptWasmStateMigrationStrategy::HostSnapshot;
+	TransactionPrevious.StateMigration.OwnerTypeId = TEXT("type:Game.Script");
+	TransactionPrevious.StateMigration.Slots = {
+		MakeSessionStateSlot(TEXT("global:first"), FloatFingerprint, 16),
+		MakeSessionStateSlot(TEXT("global:second"), FloatFingerprint, 24),
+	};
+	FAvidScriptWasmReloadManifest TransactionCandidate = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("state_service"));
+	TransactionCandidate.StateMigration.Strategy = EAvidScriptWasmStateMigrationStrategy::HostSnapshot;
+	TransactionCandidate.StateMigration.OwnerTypeId = TEXT("type:Game.Script");
+	TransactionCandidate.StateMigration.Slots = {
+		MakeSessionStateSlot(TEXT("global:first"), FloatFingerprint, 52),
+		MakeSessionStateSlot(TEXT("global:second"), FloatFingerprint, 56),
+	};
+	CandidateRuntime.SetStateWriteFailureForTesting(2);
+	TestFalse(TEXT("Second candidate state write fails transaction"), FAvidScriptRuntimeStateMigration::Migrate(
+		PreviousRuntime,
+		TransactionPrevious,
+		CandidateRuntime,
+		TransactionCandidate,
+		MigrationResult));
+	CandidateRuntime.ClearStateWriteFailureForTesting();
+	TestEqual(TEXT("Write failure category"), MigrationResult.ErrorCategory, FString(TEXT("state_migration_write_failed")));
+	TArray<uint8> CandidateFirstAfterFailure;
+	CandidateFirstAfterFailure.SetNumZeroed(4);
+	TestTrue(TEXT("Candidate first state reads after rollback"), CandidateRuntime.ReadStateBytes(52, CandidateFirstAfterFailure, MemoryError));
+	TestEqual(TEXT("Candidate first state is restored after second write failure"), CandidateFirstAfterFailure, CandidateFirstOriginal);
+	TArray<uint8> CandidateSecondAfterFailure;
+	CandidateSecondAfterFailure.SetNumZeroed(4);
+	TestTrue(TEXT("Candidate second state reads after failed write"), CandidateRuntime.ReadStateBytes(56, CandidateSecondAfterFailure, MemoryError));
+	TestEqual(TEXT("Candidate second state remains original after failed write"), CandidateSecondAfterFailure, CandidateSecondOriginal);
 	return true;
 }
 

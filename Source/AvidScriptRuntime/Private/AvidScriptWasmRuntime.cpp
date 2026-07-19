@@ -214,8 +214,30 @@ bool FAvidScriptWasmRuntimeInstance::WriteStateBytes(
 		OutError = TEXT("Loaded VM guest memory is unavailable for state migration.");
 		return false;
 	}
+#if WITH_DEV_AUTOMATION_TESTS
+	++StateWriteAttemptCount;
+	if (StateWriteAttemptCount == StateWriteFailureOnAttempt)
+	{
+		OutError = TEXT("State write failure injected for automation coverage.");
+		return false;
+	}
+#endif
 	return GuestMemory->WriteBytes(GuestAddress, Bytes, OutError);
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FAvidScriptWasmRuntimeInstance::SetStateWriteFailureForTesting(int32 InWriteAttempt)
+{
+	StateWriteAttemptCount = 0;
+	StateWriteFailureOnAttempt = InWriteAttempt;
+}
+
+void FAvidScriptWasmRuntimeInstance::ClearStateWriteFailureForTesting()
+{
+	StateWriteAttemptCount = 0;
+	StateWriteFailureOnAttempt = INDEX_NONE;
+}
+#endif
 
 bool FAvidScriptWasmRuntimeInstance::LoadEmbeddedSmokeModule(FAvidScriptWasmSmokeResult& OutResult)
 {

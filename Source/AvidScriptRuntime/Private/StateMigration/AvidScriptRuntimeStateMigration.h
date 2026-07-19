@@ -9,6 +9,7 @@ struct FAvidScriptRuntimeStateMigrationResult
 	int32 MigratedSlotCount = 0;
 	int32 MigratedByteCount = 0;
 	int32 SkippedSlotCount = 0;
+	int32 AliasedSlotCount = 0;
 	FString StableId;
 	FString ErrorCategory;
 	FString ErrorDetails;

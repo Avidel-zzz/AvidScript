@@ -730,6 +730,10 @@ foreach ($RequiredRuntimeMigrationContract in @(
     'FAvidScriptRuntimeStateMigration::Migrate',
     'ReadStateBytes',
     'WriteStateBytes',
+    'CandidatePrimarySlots',
+    'CandidateAliasSlots',
+    'CandidateOriginalBytes',
+    'state_migration_version_regression',
     'state_migration_incompatible',
     'state_migration_read_failed',
     'state_migration_write_failed'
@@ -741,7 +745,8 @@ foreach ($RequiredRuntimeMigrationContract in @(
 foreach ($RequiredSessionMigrationContract in @(
     'FAvidScriptRuntimeStateMigration::Migrate',
     'bStateMigrationAttempted',
-    'bStateMigrationApplied'
+    'bStateMigrationApplied',
+    'StateMigrationAliasedSlotCount'
 )) {
     if (-not $RuntimeSessionSource.Contains($RequiredSessionMigrationContract)) {
         Add-Violation "RuntimeSession is missing state migration orchestration contract $RequiredSessionMigrationContract"
