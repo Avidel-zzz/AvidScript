@@ -291,6 +291,45 @@ function Test-BindingPackageImports {
     }
 }
 
+function Test-JsonObjectHasProperties {
+    param(
+        [object]$Value,
+        [Parameter(Mandatory = $true)][string[]]$RequiredProperties
+    )
+
+    if ($null -eq $Value -or $Value -isnot [System.Management.Automation.PSCustomObject]) {
+        return $false
+    }
+
+    $PropertyNames = @($Value.PSObject.Properties.Name)
+    foreach ($RequiredProperty in $RequiredProperties) {
+        if ($PropertyNames -notcontains $RequiredProperty) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Test-JsonNonEmptyString {
+    param([object]$Value)
+
+    return $Value -is [string] -and -not [string]::IsNullOrWhiteSpace($Value)
+}
+
+function Try-GetJsonInt32 {
+    param(
+        [object]$Value,
+        [Parameter(Mandatory = $true)][ref]$ParsedValue
+    )
+
+    if ($Value -isnot [int]) {
+        return $false
+    }
+
+    $ParsedValue.Value = $Value
+    return $true
+}
+
 function Write-BuildReport {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -298,6 +337,13 @@ function Write-BuildReport {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ReportDiagnostics,
         [string]$Compiler = "avidscript-csharp-guest-wasm"
     )
+
+    $StateSchemaVersion = 0
+    $StateContractVersion = 0
+    if ($null -ne $StateSchemaModel) {
+        [void](Try-GetJsonInt32 -Value $StateSchemaModel.schema_version -ParsedValue ([ref]$StateSchemaVersion))
+        [void](Try-GetJsonInt32 -Value $StateSchemaModel.contract_version -ParsedValue ([ref]$StateContractVersion))
+    }
 
     $Report = [ordered]@{
         schema_version = 1
@@ -363,12 +409,12 @@ function Write-BuildReport {
             sha256 = Get-Sha256Hex $GuestIrArtifactPath
         }
         state_migration = [ordered]@{
-            schema_version = if ($null -eq $StateSchemaModel) { 0 } else { [int]$StateSchemaModel.schema_version }
-            strategy = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.strategy }
-            policy = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.policy }
-            contract_version = if ($null -eq $StateSchemaModel) { 0 } else { [int]$StateSchemaModel.contract_version }
-            owner_type_id = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.owner_type_id }
-            slot_count = if ($null -eq $StateSchemaModel) { 0 } else { @($StateSchemaModel.slots).Count }
+            schema_version = $StateSchemaVersion
+            strategy = if ($null -ne $StateSchemaModel -and $StateSchemaModel.strategy -is [string]) { $StateSchemaModel.strategy } else { "" }
+            policy = if ($null -ne $StateSchemaModel -and $StateSchemaModel.policy -is [string]) { $StateSchemaModel.policy } else { "" }
+            contract_version = $StateContractVersion
+            owner_type_id = if ($null -ne $StateSchemaModel -and $StateSchemaModel.owner_type_id -is [string]) { $StateSchemaModel.owner_type_id } else { "" }
+            slot_count = if ($null -ne $StateSchemaModel -and $StateSchemaModel.slots -is [System.Array]) { $StateSchemaModel.slots.Count } else { 0 }
             sha256 = Get-Sha256Hex $StateSchemaArtifactPath
         }
         wasm = [ordered]@{
@@ -875,30 +921,57 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
-$StateSchemaContractValid = [int]$StateSchemaModel.schema_version -eq 2 -and
-    [string]$StateSchemaModel.strategy -eq "host_snapshot" -and
-    [string]$StateSchemaModel.policy -in @("compatible", "explicit") -and
-    [int]$StateSchemaModel.contract_version -ge 1 -and
-    [int]$StateSchemaModel.contract_version -le 65535 -and
-    -not [string]::IsNullOrWhiteSpace([string]$StateSchemaModel.owner_type_id) -and
-    $null -ne $StateSchemaModel.slots
+$StateSchemaVersion = 0
+$StateContractVersion = 0
+$StateSchemaContractValid = (Test-JsonObjectHasProperties -Value $StateSchemaModel -RequiredProperties @(
+        "schema_version",
+        "strategy",
+        "policy",
+        "contract_version",
+        "owner_type_id",
+        "slots")) -and
+    (Try-GetJsonInt32 -Value $StateSchemaModel.schema_version -ParsedValue ([ref]$StateSchemaVersion)) -and
+    $StateSchemaVersion -eq 2 -and
+    (Test-JsonNonEmptyString -Value $StateSchemaModel.strategy) -and
+    $StateSchemaModel.strategy -eq "host_snapshot" -and
+    (Test-JsonNonEmptyString -Value $StateSchemaModel.policy) -and
+    $StateSchemaModel.policy -in @("compatible", "explicit") -and
+    (Try-GetJsonInt32 -Value $StateSchemaModel.contract_version -ParsedValue ([ref]$StateContractVersion)) -and
+    $StateContractVersion -ge 1 -and
+    $StateContractVersion -le 65535 -and
+    (Test-JsonNonEmptyString -Value $StateSchemaModel.owner_type_id) -and
+    $StateSchemaModel.slots -is [System.Array]
 if ($StateSchemaContractValid) {
-    $StateSlots = @($StateSchemaModel.slots)
+    $StateSlots = $StateSchemaModel.slots
     $StateIdentities = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $PreviousStableId = $null
     foreach ($Slot in $StateSlots) {
-        $CurrentStableId = [string]$Slot.stable_id
-        if ($null -eq $Slot -or
-            -not ($Slot.PSObject.Properties.Name -contains "stable_id") -or
-            -not ($Slot.PSObject.Properties.Name -contains "aliases") -or
-            -not ($Slot.PSObject.Properties.Name -contains "type_fingerprint") -or
-            [string]::IsNullOrWhiteSpace($CurrentStableId) -or
-            -not $CurrentStableId.StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
+        $Offset = 0
+        $Size = 0
+        $Alignment = 0
+        if (-not (Test-JsonObjectHasProperties -Value $Slot -RequiredProperties @(
+                "stable_id",
+                "aliases",
+                "type_fingerprint",
+                "offset",
+                "size",
+                "alignment")) -or
+            -not (Test-JsonNonEmptyString -Value $Slot.stable_id) -or
+            $Slot.aliases -isnot [System.Array] -or
+            -not (Test-JsonNonEmptyString -Value $Slot.type_fingerprint) -or
+            -not (Try-GetJsonInt32 -Value $Slot.offset -ParsedValue ([ref]$Offset)) -or
+            -not (Try-GetJsonInt32 -Value $Slot.size -ParsedValue ([ref]$Size)) -or
+            -not (Try-GetJsonInt32 -Value $Slot.alignment -ParsedValue ([ref]$Alignment))) {
+            $StateSchemaContractValid = $false
+            break
+        }
+
+        $CurrentStableId = $Slot.stable_id
+        if (-not $CurrentStableId.StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
             ($null -ne $PreviousStableId -and [string]::CompareOrdinal($PreviousStableId, $CurrentStableId) -ge 0) -or
-            [string]::IsNullOrWhiteSpace([string]$Slot.type_fingerprint) -or
-            [int]$Slot.offset -lt 0 -or
-            [int]$Slot.size -le 0 -or
-            [int]$Slot.alignment -le 0 -or
+            $Offset -lt 0 -or
+            $Size -le 0 -or
+            $Alignment -le 0 -or
             -not $StateIdentities.Add($CurrentStableId)) {
             $StateSchemaContractValid = $false
             break
@@ -908,9 +981,8 @@ if ($StateSchemaContractValid) {
     if ($StateSchemaContractValid) {
         foreach ($Slot in $StateSlots) {
             $PreviousAlias = $null
-            foreach ($Alias in @($Slot.aliases)) {
-                $AliasValue = [string]$Alias
-                if ([string]::IsNullOrWhiteSpace($AliasValue) -or
+            foreach ($AliasValue in $Slot.aliases) {
+                if (-not (Test-JsonNonEmptyString -Value $AliasValue) -or
                     -not $AliasValue.StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
                     ($null -ne $PreviousAlias -and [string]::CompareOrdinal($PreviousAlias, $AliasValue) -ge 0) -or
                     -not $StateIdentities.Add($AliasValue)) {

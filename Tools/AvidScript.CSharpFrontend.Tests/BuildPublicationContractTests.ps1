@@ -135,6 +135,8 @@ exit `$LASTEXITCODE
     $CaseReportJson = Get-Content -Raw -LiteralPath $CaseReport | ConvertFrom-Json
     Assert-Condition ($CaseReportJson.result -eq "direct_abi_unsupported") `
         "$Name malformed schema was not classified as direct ABI unsupported"
+    Assert-Condition (@($CaseReportJson.diagnostics | Where-Object { $_.code -eq "direct_abi_contract_invalid" }).Count -eq 1) `
+        "$Name malformed schema did not report direct_abi_contract_invalid"
     foreach ($LoadableArtifact in @(
         $CaseManifest,
         (Join-Path $CaseRoot "actor_lifecycle.guestir.json"),
@@ -163,6 +165,18 @@ $EarlierSlot.stable_id = "state:$($StateSchema.owner_type_id):!Earlier"
 $EarlierSlot.aliases = @()
 $EarlierSlot.offset = [int]$OriginalSlot.offset + [int]$OriginalSlot.size
 $StateSchema.slots = @($OriginalSlot, $EarlierSlot)
+'@
+
+Invoke-MalformedStateSchemaCase -Name "MissingSlotOffset" -Mutation @'
+$StateSchema.slots[0].PSObject.Properties.Remove("offset")
+'@
+
+Invoke-MalformedStateSchemaCase -Name "AliasesScalarString" -Mutation @'
+$StateSchema.slots[0].aliases = "state:$($StateSchema.owner_type_id):FormerValue"
+'@
+
+Invoke-MalformedStateSchemaCase -Name "ContractVersionString" -Mutation @'
+$StateSchema.contract_version = "bad"
 '@
 
 $GuestFailureCompiler = Join-Path $RunRoot "GuestFailureCompiler.ps1"
@@ -299,5 +313,5 @@ Assert-Condition (
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 7/7 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 10/10 passed"
 exit 0
