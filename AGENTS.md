@@ -815,3 +815,6 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-20 P45.4 只读命令拼接复发：阶段核对曾再次在单个 `exec_command` 中用分号串联 status/log/diff 或多个文件读取。Prevention：每个 shell 调用只承担一个独立检查；多文件和多 Git gate 拆成独立工具调用，不因只读或输出短而放宽。
 - P45.4 runtime migration rule：candidate primary stable ID 优先于 alias；同一次迁移中一个 candidate slot 只能被一个 previous slot claim。多个旧 ID 汇聚到同一目标必须在写入前 fail closed，禁止按遍历顺序覆盖。
 - P45.4 rollback rule：candidate 写失败后逆序尝试恢复全部已写槽；单个恢复失败不得阻止其余恢复尝试，并以首个恢复失败槽作为诊断主键。candidate 只在完整迁移成功后激活。
+- 2026-07-20 P45.4 最终夹具版本漂移记录：Semantic schema 升级到 6/1.6 后，`SemanticCacheEntryContractTests.ps1` 的 seed semantic 与 report 仍保留 5/1.5，导致完整 PowerShell contract 首轮失败。Prevention：任何 schema/version 常量升级都必须搜索生产验证器、缓存键、prepared artifact、seed report 和注入式 fixture；阶段收尾继续运行全部 contract，不能仅依赖新功能聚焦组。
+- 2026-07-20 P45.4 PowerShell JSON 数值类型错误记录：`Try-GetJsonInt32` 首版只接受 `[int]`，但 PowerShell 7 的 `ConvertFrom-Json` 会把普通 JSON 整数表示为 `[long]`，使合法 prepared semantic 被拒绝。Prevention：JSON Int32 helper 接受 `[int]` 或 Int32 范围内的 `[long]`，并明确拒绝字符串、浮点数和溢出值；所有数值边界由共享 helper 处理。
+- P45.4 final baseline：.NET 自有测试宿主 129/129、PowerShell contracts 83/83、PowerShell parser 18/18、architecture gate 与普通增量 UE5.8 Editor build 通过；P45.4 聚焦 manifest、migration/session rollback、binding facade、workspace、auto reload 与真实 rename reload 全部通过，完整 AvidScript automation 199/199、非成功 0、Queue Empty、TestExit 与进程退出码 0。

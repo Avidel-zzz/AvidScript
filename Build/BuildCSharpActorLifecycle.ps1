@@ -322,12 +322,19 @@ function Try-GetJsonInt32 {
         [Parameter(Mandatory = $true)][ref]$ParsedValue
     )
 
-    if ($Value -isnot [int]) {
-        return $false
+    if ($Value -is [int]) {
+        $ParsedValue.Value = $Value
+        return $true
     }
 
-    $ParsedValue.Value = $Value
-    return $true
+    if ($Value -is [long] -and
+        $Value -ge [int]::MinValue -and
+        $Value -le [int]::MaxValue) {
+        $ParsedValue.Value = [int]$Value
+        return $true
+    }
+
+    return $false
 }
 
 function Write-BuildReport {
