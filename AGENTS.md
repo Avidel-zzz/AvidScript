@@ -724,3 +724,5 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 ## Phase 45 C# Auto Live Reload Rules
 - 2026-07-19 P45.1 read-command chaining mistake record：Task 1 检查时把 `git diff --stat` 与 `git status --short` 用分号串入同一个 shell 调用，违反独立只读命令并行执行规范。Prevention：多个无依赖读取必须作为独立 `exec_command` 调用交给统一并行编排，不使用 shell separator 拼接。
+- 2026-07-19 P45.1 UBT source-discovery false-RED mistake record：Task 2 在既有 `Private/CSharpLiveReload` 与 `Private/Tests` 目录新增未跟踪 cpp 后，普通增量 UBT 返回 `Target is up to date`；随后 `-NoUBTMakefiles` 仍复用旧 source set 并只重复链接缺符号。Prevention：在已被 UBT 索引的目录新增 cpp 后，第一次增量验证显式使用 UE5.8 `-gather` 重建 makefile；日志必须出现新 cpp 的 compile action，不能把 up-to-date 或旧链接错误当作新代码证据。
+- P45.1 coordinator/build-executor rule：文件变化调度与正式 Profile/Build/Binding 分离；executor 始终接收显式 Actor，阶段 category 与底层 cause category 分字段保存，任一阶段失败在下一阶段前短路。
