@@ -304,6 +304,8 @@ $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/A
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
+$CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
+$CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
@@ -382,6 +384,52 @@ foreach ($ForbiddenBuildPipelineConcern in @(
 )) {
     if ($CSharpBuildPipelineSource.Contains($ForbiddenBuildPipelineConcern)) {
         Add-Violation "C# BuildPipeline must not own process, JSON, descriptor, or Actor binding concern $ForbiddenBuildPipelineConcern"
+    }
+}
+foreach ($RequiredAsyncBuildBackendContract in @(
+    'FAvidScriptEditorCSharpProfileService::LoadProfile',
+    'FAvidScriptEditorCSharpBuildPipeline::Prepare',
+    'FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap',
+    'FAvidScriptEditorCSharpBuildPipeline::CompleteFinal',
+    'FAvidScriptEditorCSharpBuildPipeline::Cleanup',
+    'FAvidScriptEditorCSharpBuildInvoker::Prepare',
+    'FAvidScriptEditorCSharpBuildInvoker::Finalize'
+)) {
+    if (-not $CSharpAsyncBuildBackendSource.Contains($RequiredAsyncBuildBackendContract)) {
+        Add-Violation "C# AsyncBuildBackend is missing orchestration contract $RequiredAsyncBuildBackendContract"
+    }
+}
+foreach ($ForbiddenAsyncBuildBackendConcern in @(
+    'FMonitoredProcess',
+    'IAvidScriptEditorCSharpBuildProcess',
+    'FAvidScriptEditorComponentBindingService',
+    'AActor'
+)) {
+    if ($CSharpAsyncBuildBackendSource.Contains($ForbiddenAsyncBuildBackendConcern)) {
+        Add-Violation "C# AsyncBuildBackend must not own process or Actor binding concern $ForbiddenAsyncBuildBackendConcern"
+    }
+}
+foreach ($RequiredAsyncBuildJobContract in @(
+    'Process->Launch',
+    'Process->Poll',
+    'Process->Cancel',
+    'Backend->CompleteInvocation',
+    'PublishingBindingSlice',
+    'FAvidScriptEditorCSharpMonitoredBuildProcess'
+)) {
+    if (-not $CSharpAsyncBuildJobSource.Contains($RequiredAsyncBuildJobContract)) {
+        Add-Violation "C# AsyncBuildJob is missing process/state contract $RequiredAsyncBuildJobContract"
+    }
+}
+foreach ($ForbiddenAsyncBuildJobConcern in @(
+    'FAvidScriptEditorCSharpProfileService',
+    'FAvidScriptEditorCSharpBuildPipeline',
+    'FAvidScriptEditorComponentBindingService',
+    'FPlatformProcess::ExecProcess',
+    'AActor'
+)) {
+    if ($CSharpAsyncBuildJobSource.Contains($ForbiddenAsyncBuildJobConcern)) {
+        Add-Violation "C# AsyncBuildJob must not own profile, pipeline, process invocation, or Actor binding concern $ForbiddenAsyncBuildJobConcern"
     }
 }
 if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
