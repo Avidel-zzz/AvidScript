@@ -11,6 +11,7 @@ Tools/**/obj/
 .idea/
 .vscode/
 .fleet/
+.worktrees/
 .superpowers/
 *.suo
 *.user
