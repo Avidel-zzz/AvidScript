@@ -302,6 +302,7 @@ foreach ($LegacyBindingPath in @(
 $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
+$CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
@@ -337,27 +338,50 @@ if (-not $CSharpWorkspaceSource.Contains('FAvidScriptEditorCSharpBindingEmitter:
     $CSharpWorkspaceSource.Contains('FPlatformProcess')) {
     Add-Violation 'C# WorkspaceService must own files and IDE facade refresh without build, binding, or process concerns'
 }
-if (-not $CSharpBuildServiceSource.Contains('PublishEngineGameplay(BindingEmitResult)')) {
-    Add-Violation 'custom C# builds must default to the generated engine gameplay package'
-}
-foreach ($RequiredBuildOrchestrationContract in @(
+foreach ($RequiredBuildServiceContract in @(
     'FAvidScriptEditorCSharpBuildInvoker::BuildOnce',
-    'FAvidScriptEditorCSharpBindingSliceService::Publish',
-    'CSharpBootstrap',
-    'PreparedBuildReportPath',
-    'FinalConfig.PreparedBuildReportPath = BootstrapConfig.ReportPath'
+    'FAvidScriptEditorCSharpBuildPipeline::Prepare',
+    'FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap',
+    'FAvidScriptEditorCSharpBuildPipeline::CompleteFinal',
+    'FAvidScriptEditorCSharpBuildPipeline::Cleanup'
 )) {
-    if (-not $CSharpBuildServiceSource.Contains($RequiredBuildOrchestrationContract)) {
-        Add-Violation "C# BuildService is missing orchestration contract $RequiredBuildOrchestrationContract"
+    if (-not $CSharpBuildServiceSource.Contains($RequiredBuildServiceContract)) {
+        Add-Violation "C# BuildService is missing pipeline delegation contract $RequiredBuildServiceContract"
     }
 }
 foreach ($ForbiddenBuildServiceConcern in @(
     'FPlatformProcess::ExecProcess',
     'FJsonSerializer',
-    'FAvidScriptBindingDescriptorParser::Parse'
+    'FAvidScriptBindingDescriptorParser::Parse',
+    'PublishEngineGameplay',
+    'BindingSliceService',
+    'FAvidScriptFrontendReportReader'
 )) {
     if ($CSharpBuildServiceSource.Contains($ForbiddenBuildServiceConcern)) {
-        Add-Violation "C# BuildService must not own invocation, JSON, or descriptor concern $ForbiddenBuildServiceConcern"
+        Add-Violation "C# BuildService must not own invocation, reflection, report, or slicing concern $ForbiddenBuildServiceConcern"
+    }
+}
+foreach ($RequiredBuildPipelineContract in @(
+    'FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay',
+    'FAvidScriptEditorCSharpBindingSliceService::Publish',
+    'CSharpBootstrap',
+    'PreparedBuildReportPath',
+    'Plan.FinalConfig.PreparedBuildReportPath',
+    'FAvidScriptFrontendReportReader::LoadFromFile'
+)) {
+    if (-not $CSharpBuildPipelineSource.Contains($RequiredBuildPipelineContract)) {
+        Add-Violation "C# BuildPipeline is missing orchestration contract $RequiredBuildPipelineContract"
+    }
+}
+foreach ($ForbiddenBuildPipelineConcern in @(
+    'FPlatformProcess::ExecProcess',
+    'FJsonSerializer',
+    'FAvidScriptBindingDescriptorParser::Parse',
+    'FAvidScriptEditorComponentBindingService',
+    'AActor'
+)) {
+    if ($CSharpBuildPipelineSource.Contains($ForbiddenBuildPipelineConcern)) {
+        Add-Violation "C# BuildPipeline must not own process, JSON, descriptor, or Actor binding concern $ForbiddenBuildPipelineConcern"
     }
 }
 if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
