@@ -172,9 +172,8 @@ bool MakeAvidScriptCSharpBuildInvocationDirectory(
 	}
 	return true;
 }
-} // namespace
 
-bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
+void InitializeAvidScriptCSharpBuildInvocationResult(
 	const FAvidScriptEditorCSharpBuildConfig& Config,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
@@ -193,6 +192,16 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 			: Config.RuntimeBindingPackagePath);
 	OutResult.ModuleId = Config.ModuleId;
 	OutResult.ArtifactStem = Config.ArtifactStem;
+}
+} // namespace
+
+bool FAvidScriptEditorCSharpBuildInvoker::Prepare(
+	const FAvidScriptEditorCSharpBuildConfig& Config,
+	FAvidScriptEditorCSharpBuildInvocation& OutInvocation,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	OutInvocation = FAvidScriptEditorCSharpBuildInvocation();
+	InitializeAvidScriptCSharpBuildInvocationResult(Config, OutResult);
 
 #if PLATFORM_WINDOWS
 	if (!MakeAvidScriptCSharpBuildInvocationDirectory(Config.OutputRoot, TEXT("output_directory_failed"), OutResult)
@@ -208,27 +217,36 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 		return false;
 	}
 
-	const FString Parameters = BuildAvidScriptCSharpBuildInvocationParameters(Config);
-	const FString WorkingDirectory = FPaths::GetPath(Config.BuildScriptPath);
-	const bool bProcessLaunched = FPlatformProcess::ExecProcess(
-		TEXT("powershell.exe"),
-		*Parameters,
-		&OutResult.ProcessExitCode,
-		&OutResult.Stdout,
-		&OutResult.Stderr,
-		*WorkingDirectory);
-	if (!bProcessLaunched)
-	{
-		SetAvidScriptCSharpBuildInvocationFailure(
-			TEXT("process_failed"),
-			FString::Printf(TEXT("C# build process could not be launched: %s"), *Config.BuildScriptPath),
-			TEXT("verify powershell.exe can run the C# build script and retry"),
-			OutResult);
-		return false;
-	}
+	OutInvocation.Config = Config;
+	OutInvocation.ExecutablePath = TEXT("powershell.exe");
+	OutInvocation.Parameters = BuildAvidScriptCSharpBuildInvocationParameters(Config);
+	OutInvocation.WorkingDirectory = FPaths::GetPath(Config.BuildScriptPath);
+	return true;
+#else
+	SetAvidScriptCSharpBuildInvocationFailure(
+		TEXT("platform_unsupported"),
+		TEXT("C# build invocation is currently implemented only for Windows Editor hosts."),
+		TEXT("use a Windows Editor host for C# build-and-bind until other platforms are implemented"),
+		OutResult);
+	return false;
+#endif
+}
+
+bool FAvidScriptEditorCSharpBuildInvoker::Finalize(
+	const FAvidScriptEditorCSharpBuildInvocation& Invocation,
+	const int32 ProcessExitCode,
+	const FString& Stdout,
+	const FString& Stderr,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	const FAvidScriptEditorCSharpBuildConfig& Config = Invocation.Config;
+	InitializeAvidScriptCSharpBuildInvocationResult(Config, OutResult);
+	OutResult.ProcessExitCode = ProcessExitCode;
+	OutResult.Stdout = Stdout;
+	OutResult.Stderr = Stderr;
 	OutResult.BuildInvocationCount = 1;
 
-	if (OutResult.ProcessExitCode != 0)
+	if (ProcessExitCode != 0)
 	{
 		if (FPaths::FileExists(Config.ReportPath)
 			&& SetAvidScriptCSharpStructuredInvocationFailure(Config.ReportPath, OutResult))
@@ -237,7 +255,7 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 		}
 		SetAvidScriptCSharpBuildInvocationFailure(
 			TEXT("build_failed"),
-			FString::Printf(TEXT("C# build failed with exit code %d"), OutResult.ProcessExitCode),
+			FString::Printf(TEXT("C# build failed with exit code %d"), ProcessExitCode),
 			TEXT("fix unsupported C# syntax or toolchain errors, then rerun Build And Bind C# Profile Script"),
 			OutResult);
 		return false;
@@ -314,12 +332,36 @@ bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
 
 	OutResult.bSucceeded = true;
 	return true;
-#else
-	SetAvidScriptCSharpBuildInvocationFailure(
-		TEXT("platform_unsupported"),
-		TEXT("C# build invocation is currently implemented only for Windows Editor hosts."),
-		TEXT("use a Windows Editor host for C# build-and-bind until other platforms are implemented"),
-		OutResult);
-	return false;
-#endif
+}
+
+bool FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
+	const FAvidScriptEditorCSharpBuildConfig& Config,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	FAvidScriptEditorCSharpBuildInvocation Invocation;
+	if (!Prepare(Config, Invocation, OutResult))
+	{
+		return false;
+	}
+
+	int32 ProcessExitCode = INDEX_NONE;
+	FString Stdout;
+	FString Stderr;
+	const bool bProcessLaunched = FPlatformProcess::ExecProcess(
+		*Invocation.ExecutablePath,
+		*Invocation.Parameters,
+		&ProcessExitCode,
+		&Stdout,
+		&Stderr,
+		*Invocation.WorkingDirectory);
+	if (!bProcessLaunched)
+	{
+		SetAvidScriptCSharpBuildInvocationFailure(
+			TEXT("process_failed"),
+			FString::Printf(TEXT("C# build process could not be launched: %s"), *Config.BuildScriptPath),
+			TEXT("verify powershell.exe can run the C# build script and retry"),
+			OutResult);
+		return false;
+	}
+	return Finalize(Invocation, ProcessExitCode, Stdout, Stderr, OutResult);
 }

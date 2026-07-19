@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -261,6 +262,34 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Explicit package remains both authorization and runtime package"),
 		ExplicitResult.AuthorizationBindingPackagePath,
 		ExplicitResult.BindingPackagePath);
+
+	FAvidScriptEditorCSharpBuildInvocation Invocation;
+	FAvidScriptEditorCSharpBuildResult PreparedResult;
+	TestTrue(
+		TEXT("Explicit build invocation can be prepared independently"),
+		FAvidScriptEditorCSharpBuildInvoker::Prepare(ExplicitConfig, Invocation, PreparedResult));
+	TestEqual(
+		TEXT("Prepared invocation uses PowerShell"),
+		Invocation.ExecutablePath,
+		FString(TEXT("powershell.exe")));
+	TestFalse(TEXT("Prepared invocation contains parameters"), Invocation.Parameters.IsEmpty());
+
+	FAvidScriptEditorCSharpBuildResult FinalizedResult;
+	TestTrue(
+		TEXT("Existing explicit artifacts finalize through the shared contract"),
+		FAvidScriptEditorCSharpBuildInvoker::Finalize(
+			Invocation,
+			ExplicitResult.ProcessExitCode,
+			ExplicitResult.Stdout,
+			ExplicitResult.Stderr,
+			FinalizedResult));
+	TestEqual(TEXT("Shared finalizer preserves report path"), FinalizedResult.ReportPath, ExplicitResult.ReportPath);
+	TestEqual(TEXT("Shared finalizer preserves manifest path"), FinalizedResult.ManifestPath, ExplicitResult.ManifestPath);
+	TestEqual(TEXT("Shared finalizer preserves Frontend count"), FinalizedResult.FrontendInvocationCount, ExplicitResult.FrontendInvocationCount);
+	TestEqual(TEXT("Shared finalizer preserves Semantic count"), FinalizedResult.SemanticInvocationCount, ExplicitResult.SemanticInvocationCount);
+	TestEqual(TEXT("Shared finalizer preserves Guest IR count"), FinalizedResult.GuestIrInvocationCount, ExplicitResult.GuestIrInvocationCount);
+	TestEqual(TEXT("Shared finalizer preserves WASM backend count"), FinalizedResult.WasmBackendInvocationCount, ExplicitResult.WasmBackendInvocationCount);
+	TestEqual(TEXT("Shared finalizer preserves cache lookup"), FinalizedResult.SemanticCacheLookup, ExplicitResult.SemanticCacheLookup);
 
 	return true;
 }

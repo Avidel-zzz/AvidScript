@@ -748,3 +748,5 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-19 P45.2 implementation-path assumption mistake record：首次读取构建服务实现时根据 invoker 所在目录推断为 `Private/CSharpBuild/AvidScriptEditorCSharpBuildService.cpp`，实际文件位于 `Private/AvidScriptEditorCSharpBuildService.cpp`，造成无效读取。Prevention：读取或修改未确认的实现文件前必须先用 `rg --files` 精确定位，禁止从相邻类型目录推断路径。
 - P45.2 thread-affinity rule：`FMonitoredProcess` 的 output/completed/canceled delegate 在监控线程执行，只能写入独立 thread-safe state；反射授权包生成、bootstrap report 验证、runtime binding slice 发布、Actor 有效性检查和事务 reload 必须由 Editor 主线程 ticker 驱动。
 - P45.2 completion rule：异步进程完成只代表 build invocation 可结算，不代表请求可提交；service 必须先验证 session generation、request id、固定 target 与 active job identity，过期或取消 completion 不得解析为可绑定结果。
+- P45.2 shared-invocation rule：同步 `BuildOnce` 与异步 process 必须共用 `Prepare`/`Finalize`；PowerShell 参数、输出目录、结构化 report、manifest/WASM 与 semantic cache metadata 校验只能有一份实现。
+- P45.2 Task 1 baseline is incremental UE5.8 Editor build passed, architecture gate passed, and CSharpBuildService 4/4 with zero non-success results, Queue Empty, TestExit, and exit status 0.
