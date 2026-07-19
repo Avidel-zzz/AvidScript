@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Linq;
+using System.Text;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
@@ -8,46 +10,30 @@ internal static class CSharpGuestStateSchemaTests
 {
     public static int Run()
     {
-        SchemaIncludesOnlySafeStateOwnedByTheScriptType();
+        LegacyContractsProduceCompatibleSchemaV2();
+        ExplicitContractsRequirePersistedFields();
+        TransientConstAndReadonlyFieldsAreExcluded();
+        AliasesExpandToStableIdsAndSerializeInFixedOrder();
+        AliasAndCurrentStableIdsMustNotConflict();
+        ExplicitUnsafePersistFailsWithAsState1005();
+        CompatibleUnsafeImplicitFieldsAreSkipped();
         TypeFingerprintChangesWithValueLayout();
-        return 2;
+        return 8;
     }
 
-    private static void SchemaIncludesOnlySafeStateOwnedByTheScriptType()
+    private static void LegacyContractsProduceCompatibleSchemaV2()
     {
-        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
-        SemanticSymbol unsafeArray = new(
-            "symbol:field:global::Game.Script.Values:int32[]",
-            "field",
-            "Values",
-            "symbol:type:global::Game.Script",
-            "type:int32[]",
-            "int32[] Values",
-            true,
-            "private",
-            baseline.Symbols[0].Span);
-        SemanticSymbol foreignState = new(
-            "symbol:field:global::Game.Other.Score:int32",
-            "field",
-            "Score",
-            "symbol:type:global::Game.Other",
-            "type:int32",
-            "int32 Score",
-            true,
-            "private",
-            baseline.Symbols[0].Span);
-        SemanticDocument document = baseline with
-        {
-            Symbols = baseline.Symbols.Concat(new[] { unsafeArray, foreignState }).ToArray(),
-        };
-        GuestModule module = CSharpGuestLowerer.Lower(document, new string('c', 64)).Module
-            ?? throw new InvalidOperationException("Fixture should lower.");
+        SemanticDocument document = CSharpGuestSemanticFixture.Create();
+        GuestModule module = Lower(document, 'c');
 
         CSharpGuestStateSchema first = CSharpGuestStateSchemaProjector.Project(document, module);
         CSharpGuestStateSchema second = CSharpGuestStateSchemaProjector.Project(document, module);
 
-        Assert(first.SchemaVersion == 1 && first.Strategy == "host_snapshot",
-            "schema should opt into the versioned host snapshot strategy");
+        Assert(first.SchemaVersion == 2
+            && first.Strategy == "host_snapshot"
+            && first.Policy == "compatible"
+            && first.ContractVersion == 1,
+            "unannotated scripts should publish the compatible version-one schema v2 contract");
         Assert(first.OwnerTypeId == "type:global::Game.Script",
             "schema owner should come from the exported script lifecycle type");
         Assert(first.Slots.Count == 1
@@ -62,11 +48,138 @@ internal static class CSharpGuestStateSchemaTests
             "equivalent semantic and Guest IR input should produce byte-identical schema");
     }
 
+    private static void ExplicitContractsRequirePersistedFields()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol implicitField = Field(baseline, "Implicit", "type:int32");
+        SemanticDocument document = WithContract(
+            baseline with { Symbols = baseline.Symbols.Append(implicitField).ToArray() },
+            "explicit",
+            2,
+            new SemanticStateFieldContract(CSharpGuestSemanticFixture.StateFieldId, "persist", Array.Empty<string>()),
+            new SemanticStateFieldContract(implicitField.Id, "implicit", Array.Empty<string>()));
+
+        CSharpGuestStateSchema schema = CSharpGuestStateSchemaProjector.Project(document, Lower(document, 'd'));
+
+        Assert(schema.Policy == "explicit" && schema.ContractVersion == 2,
+            "explicit contracts should retain semantic policy and version");
+        Assert(schema.Slots.Select(slot => slot.StableId).SequenceEqual(new[]
+            { "state:type:global::Game.Script:Score" }),
+            "explicit contracts should include only persisted fields");
+    }
+
+    private static void TransientConstAndReadonlyFieldsAreExcluded()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol transientField = Field(baseline, "Transient", "type:int32");
+        SemanticSymbol constantField = Field(baseline, "Constant", "type:int32") with { IsConst = true };
+        SemanticSymbol readonlyField = Field(baseline, "Readonly", "type:int32") with { IsReadonly = true };
+        SemanticDocument document = WithContract(
+            baseline with
+            {
+                Symbols = baseline.Symbols.Concat(new[] { transientField, constantField, readonlyField }).ToArray(),
+            },
+            "compatible",
+            1,
+            new SemanticStateFieldContract(CSharpGuestSemanticFixture.StateFieldId, "implicit", Array.Empty<string>()),
+            new SemanticStateFieldContract(transientField.Id, "transient", Array.Empty<string>()),
+            new SemanticStateFieldContract(constantField.Id, "persist", Array.Empty<string>()),
+            new SemanticStateFieldContract(readonlyField.Id, "persist", Array.Empty<string>()));
+
+        CSharpGuestStateSchema schema = CSharpGuestStateSchemaProjector.Project(document, Lower(document, 'e'));
+
+        Assert(schema.Slots.Count == 1 && schema.Slots[0].StableId.EndsWith(":Score", StringComparison.Ordinal),
+            "transient, const, and readonly fields must not enter a state schema");
+    }
+
+    private static void AliasesExpandToStableIdsAndSerializeInFixedOrder()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticDocument document = WithContract(
+            baseline,
+            "explicit",
+            7,
+            new SemanticStateFieldContract(
+                CSharpGuestSemanticFixture.StateFieldId,
+                "persist",
+                new[] { "OldZ", "OldA" }));
+        CSharpGuestStateSchema first = CSharpGuestStateSchemaProjector.Project(document, Lower(document, 'f'));
+        CSharpGuestStateSchema second = CSharpGuestStateSchemaProjector.Project(document, Lower(document, 'f'));
+        string json = Encoding.UTF8.GetString(CSharpGuestStateSchemaSerializer.Serialize(first));
+
+        Assert(first.Slots[0].Aliases.SequenceEqual(new[]
+            {
+                "state:type:global::Game.Script:OldA",
+                "state:type:global::Game.Script:OldZ",
+            }),
+            "aliases should expand to ordinal-sorted stable IDs");
+        Assert(IndexOf(json, "\"schema_version\"", "\"strategy\"", "\"policy\"", "\"contract_version\"", "\"owner_type_id\"", "\"slots\"")
+                && IndexOf(json, "\"stable_id\"", "\"aliases\"", "\"type_fingerprint\"", "\"offset\"", "\"size\"", "\"alignment\""),
+            "schema v2 root and slot fields must serialize in the published order");
+        Assert(CSharpGuestStateSchemaSerializer.Serialize(first).SequenceEqual(CSharpGuestStateSchemaSerializer.Serialize(second)),
+            "alias schema serialization should remain byte-identical");
+    }
+
+    private static void AliasAndCurrentStableIdsMustNotConflict()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol current = Field(baseline, "Current", "type:int32");
+        SemanticDocument document = WithContract(
+            baseline with { Symbols = baseline.Symbols.Append(current).ToArray() },
+            "compatible",
+            1,
+            new SemanticStateFieldContract(
+                CSharpGuestSemanticFixture.StateFieldId,
+                "persist",
+                new[] { "Current" }),
+            new SemanticStateFieldContract(current.Id, "implicit", Array.Empty<string>()));
+
+        InvalidDataException exception = ExpectInvalidData(() =>
+            CSharpGuestStateSchemaProjector.Project(document, Lower(document, '1')));
+
+        Assert(exception.Message.Contains("ASSTATE1002", StringComparison.Ordinal),
+            "alias/current stable ID conflicts should fail with the stable alias diagnostic");
+    }
+
+    private static void ExplicitUnsafePersistFailsWithAsState1005()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol unsafeField = Field(baseline, "Values", "type:int32[]");
+        SemanticDocument document = WithContract(
+            baseline with { Symbols = baseline.Symbols.Append(unsafeField).ToArray() },
+            "explicit",
+            2,
+            new SemanticStateFieldContract(CSharpGuestSemanticFixture.StateFieldId, "persist", Array.Empty<string>()),
+            new SemanticStateFieldContract(unsafeField.Id, "persist", Array.Empty<string>()));
+
+        InvalidDataException exception = ExpectInvalidData(() =>
+            CSharpGuestStateSchemaProjector.Project(document, Lower(document, '2')));
+
+        Assert(exception.Message.Contains("ASSTATE1005", StringComparison.Ordinal),
+            "explicit unsafe persisted fields must fail with ASSTATE1005");
+    }
+
+    private static void CompatibleUnsafeImplicitFieldsAreSkipped()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol unsafeField = Field(baseline, "Values", "type:int32[]");
+        SemanticDocument document = WithContract(
+            baseline with { Symbols = baseline.Symbols.Append(unsafeField).ToArray() },
+            "compatible",
+            1,
+            new SemanticStateFieldContract(CSharpGuestSemanticFixture.StateFieldId, "implicit", Array.Empty<string>()),
+            new SemanticStateFieldContract(unsafeField.Id, "implicit", Array.Empty<string>()));
+
+        CSharpGuestStateSchema schema = CSharpGuestStateSchemaProjector.Project(document, Lower(document, '3'));
+
+        Assert(schema.Slots.Count == 1 && schema.Slots[0].StableId.EndsWith(":Score", StringComparison.Ordinal),
+            "compatible contracts should silently skip unsafe implicit fields");
+    }
+
     private static void TypeFingerprintChangesWithValueLayout()
     {
         SemanticDocument document = CSharpGuestSemanticFixture.Create();
-        GuestModule module = CSharpGuestLowerer.Lower(document, new string('d', 64)).Module
-            ?? throw new InvalidOperationException("Fixture should lower.");
+        GuestModule module = Lower(document, '4');
         CSharpGuestStateSchema baseline = CSharpGuestStateSchemaProjector.Project(document, module);
         GuestModule changedTypeModule = module with
         {
@@ -86,5 +199,71 @@ internal static class CSharpGuestStateSchemaTests
         {
             throw new InvalidOperationException(message);
         }
+    }
+
+    private static SemanticDocument WithContract(
+        SemanticDocument document,
+        string policy,
+        int version,
+        params SemanticStateFieldContract[] fields)
+    {
+        return document with
+        {
+            StateContracts = new[]
+            {
+                new SemanticStateContract("type:global::Game.Script", policy, version, fields),
+            },
+        };
+    }
+
+    private static SemanticSymbol Field(SemanticDocument document, string name, string typeId)
+    {
+        return new SemanticSymbol(
+            $"symbol:field:global::Game.Script.{name}:{typeId[5..]}",
+            "field",
+            name,
+            "symbol:type:global::Game.Script",
+            typeId,
+            $"{typeId[5..]} {name}",
+            true,
+            "private",
+            document.Symbols[0].Span);
+    }
+
+    private static GuestModule Lower(SemanticDocument document, char hashCharacter)
+    {
+        return CSharpGuestLowerer.Lower(document, new string(hashCharacter, 64)).Module
+            ?? throw new InvalidOperationException("Fixture should lower.");
+    }
+
+    private static InvalidDataException ExpectInvalidData(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InvalidDataException exception)
+        {
+            return exception;
+        }
+
+        throw new InvalidOperationException("Expected InvalidDataException.");
+    }
+
+    private static bool IndexOf(string value, params string[] fields)
+    {
+        int previous = -1;
+        foreach (string field in fields)
+        {
+            int current = value.IndexOf(field, previous + 1, StringComparison.Ordinal);
+            if (current <= previous)
+            {
+                return false;
+            }
+
+            previous = current;
+        }
+
+        return true;
     }
 }

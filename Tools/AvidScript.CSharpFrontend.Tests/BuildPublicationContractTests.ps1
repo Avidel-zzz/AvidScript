@@ -89,12 +89,19 @@ $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedStateSchema -PathType Leaf) "seed state schema is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedWasm -PathType Leaf) "seed WASM is missing"
+$SeedStateSchemaJson = Get-Content -Raw -LiteralPath $SeedStateSchema | ConvertFrom-Json
+Assert-Condition ($SeedStateSchemaJson.schema_version -eq 2 -and
+    $SeedStateSchemaJson.policy -eq "compatible" -and
+    $SeedStateSchemaJson.contract_version -eq 1 -and
+    @($SeedStateSchemaJson.slots | Where-Object { $_.PSObject.Properties.Name -contains "aliases" }).Count -eq @($SeedStateSchemaJson.slots).Count) `
+    "seed state schema must use the structured v2 contract"
 
 $GuestFailureCompiler = Join-Path $RunRoot "GuestFailureCompiler.ps1"
 $GuestFailureBody = @"
 `$Model = Get-Content -Raw -LiteralPath '$SeedGuestIr' | ConvertFrom-Json
 `$Model.succeeded = `$false
 `$Model | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$GuestIrPath -Encoding utf8
+Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
 [Console]::Error.WriteLine('guest lowering failed')
 exit 1
 "@
@@ -118,6 +125,8 @@ Assert-Condition ($GuestFailureExit -eq 1) "failed Guest lowering must return ex
 $GuestFailureJson = Get-Content -Raw -LiteralPath $GuestFailureReport | ConvertFrom-Json
 Assert-Condition ($GuestFailureJson.result -eq "guest_ir_failed") "succeeded=false Guest IR was misclassified as backend failure"
 Assert-Condition (-not (Test-Path -LiteralPath $GuestFailureManifest -PathType Leaf)) "Guest failure left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.guestir.json") -PathType Leaf)) "Guest failure left Guest IR"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.state.json") -PathType Leaf)) "Guest failure left state schema"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.wasm") -PathType Leaf)) "Guest failure left WASM"
 
 $MissingExportCompiler = Join-Path $RunRoot "MissingExportCompiler.ps1"

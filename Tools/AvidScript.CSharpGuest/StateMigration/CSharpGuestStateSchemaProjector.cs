@@ -37,9 +37,11 @@ public static class CSharpGuestStateSchemaProjector
         }
 
         string ownerTypeId = ownerTypeIds[0];
-        SemanticType ownerType = document.Types.SingleOrDefault(
-            type => string.Equals(type.Id, ownerTypeId, StringComparison.Ordinal))
-            ?? throw new InvalidDataException($"Exported script owner type is missing: {ownerTypeId}.");
+        CSharpGuestResolvedStateContract contract = CSharpGuestStateContractResolver.Resolve(
+            document,
+            ownerTypeId);
+        SemanticType ownerType = document.Types.Single(type =>
+            string.Equals(type.Id, ownerTypeId, StringComparison.Ordinal));
         string ownerSymbolId = $"symbol:type:{ownerType.CanonicalName}";
         IReadOnlyDictionary<string, GuestType> types = module.Types.ToDictionary(
             type => type.Id,
@@ -59,33 +61,64 @@ public static class CSharpGuestStateSchemaProjector
                 && string.Equals(symbol.ContainingSymbolId, ownerSymbolId, StringComparison.Ordinal))
             .OrderBy(symbol => symbol.Id, StringComparer.Ordinal))
         {
-            if (field.TypeId is null
-                || !TryFingerprintType(
-                    field.TypeId,
-                    types,
-                    fingerprintCache,
-                    new HashSet<string>(StringComparer.Ordinal),
-                    out string typeFingerprint))
+            if (field.IsConst || field.IsReadonly)
+            {
+                continue;
+            }
+
+            if (!contract.Fields.TryGetValue(field.Id, out CSharpGuestResolvedStateField? fieldContract))
+            {
+                throw new InvalidDataException($"ASSTATE1001: State field is missing semantic contract metadata: {field.Id}.");
+            }
+            if (fieldContract.Disposition == "transient"
+                || (contract.Policy == "explicit" && fieldContract.Disposition != "persist"))
             {
                 continue;
             }
 
             string globalId = CSharpGuestIds.Global(field.Id);
-            if (!globals.ContainsKey(globalId) || !slots.TryGetValue(globalId, out GuestStateSlot? slot))
+            string typeFingerprint = string.Empty;
+            GuestStateSlot? slot = null;
+            bool isSafe = field.TypeId is not null
+                && TryFingerprintType(
+                    field.TypeId,
+                    types,
+                    fingerprintCache,
+                    new HashSet<string>(StringComparer.Ordinal),
+                    out typeFingerprint)
+                && globals.ContainsKey(globalId)
+                && slots.TryGetValue(globalId, out slot);
+            if (!isSafe)
             {
-                throw new InvalidDataException($"Safe script state has no Guest state slot: {globalId}.");
+                if (fieldContract.Disposition == "persist")
+                {
+                    throw new InvalidDataException(
+                        $"ASSTATE1005: Persisted field is not a safe Guest value slot: {field.Id}.");
+                }
+
+                continue;
             }
 
             projected.Add(new CSharpGuestStateSlot(
                 $"state:{ownerTypeId}:{field.Name}",
+                fieldContract.FormerNames
+                    .Select(formerName => $"state:{ownerTypeId}:{formerName}")
+                    .OrderBy(alias => alias, StringComparer.Ordinal)
+                    .ToArray(),
                 typeFingerprint,
-                slot.Offset,
+                slot!.Offset,
                 slot.Size,
                 slot.Alignment));
         }
 
         projected.Sort((left, right) => StringComparer.Ordinal.Compare(left.StableId, right.StableId));
-        return new CSharpGuestStateSchema(1, "host_snapshot", ownerTypeId, projected);
+        return new CSharpGuestStateSchema(
+            2,
+            "host_snapshot",
+            contract.Policy,
+            contract.Version,
+            ownerTypeId,
+            projected);
     }
 
     private static bool TryFingerprintType(

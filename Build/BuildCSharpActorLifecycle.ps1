@@ -139,7 +139,11 @@ function Write-JsonAtomic {
 }
 
 function Remove-LoadableArtifacts {
-    foreach ($Artifact in @($ManifestPath, $WasmArtifactPath)) {
+    foreach ($Artifact in @(
+        $ManifestPath,
+        $GuestIrArtifactPath,
+        $StateSchemaArtifactPath,
+        $WasmArtifactPath)) {
         if (Test-Path -LiteralPath $Artifact -PathType Leaf) {
             Remove-Item -LiteralPath $Artifact -Force
         }
@@ -361,6 +365,8 @@ function Write-BuildReport {
         state_migration = [ordered]@{
             schema_version = if ($null -eq $StateSchemaModel) { 0 } else { [int]$StateSchemaModel.schema_version }
             strategy = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.strategy }
+            policy = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.policy }
+            contract_version = if ($null -eq $StateSchemaModel) { 0 } else { [int]$StateSchemaModel.contract_version }
             owner_type_id = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.owner_type_id }
             slot_count = if ($null -eq $StateSchemaModel) { 0 } else { @($StateSchemaModel.slots).Count }
             sha256 = Get-Sha256Hex $StateSchemaArtifactPath
@@ -780,9 +786,7 @@ if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
 if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or $null -eq $StateSchemaModel -or $null -eq $WasmInspectionModel -or
     -not (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf)) {
-    if (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf) {
-        Remove-Item -LiteralPath $WasmArtifactPath -Force
-    }
+    Remove-LoadableArtifacts
     $FailureResult = if (-not $GuestIrSucceeded) { "guest_ir_failed" } else { "wasm_backend_failed" }
     $Diagnostics += [ordered]@{
         code = if (-not $GuestIrSucceeded) { "guest_ir_compile_failed" } else { "wasm_backend_compile_failed" }
@@ -871,10 +875,52 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
-$StateSchemaContractValid = [int]$StateSchemaModel.schema_version -eq 1 -and
+$StateSchemaContractValid = [int]$StateSchemaModel.schema_version -eq 2 -and
     [string]$StateSchemaModel.strategy -eq "host_snapshot" -and
+    [string]$StateSchemaModel.policy -in @("compatible", "explicit") -and
+    [int]$StateSchemaModel.contract_version -ge 1 -and
+    [int]$StateSchemaModel.contract_version -le 65535 -and
     -not [string]::IsNullOrWhiteSpace([string]$StateSchemaModel.owner_type_id) -and
     $null -ne $StateSchemaModel.slots
+if ($StateSchemaContractValid) {
+    $StateSlots = @($StateSchemaModel.slots)
+    $StateIdentities = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($Slot in $StateSlots) {
+        if ($null -eq $Slot -or
+            -not ($Slot.PSObject.Properties.Name -contains "stable_id") -or
+            -not ($Slot.PSObject.Properties.Name -contains "aliases") -or
+            -not ($Slot.PSObject.Properties.Name -contains "type_fingerprint") -or
+            [string]::IsNullOrWhiteSpace([string]$Slot.stable_id) -or
+            -not ([string]$Slot.stable_id).StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
+            [string]::IsNullOrWhiteSpace([string]$Slot.type_fingerprint) -or
+            [int]$Slot.offset -lt 0 -or
+            [int]$Slot.size -le 0 -or
+            [int]$Slot.alignment -le 0 -or
+            -not $StateIdentities.Add([string]$Slot.stable_id)) {
+            $StateSchemaContractValid = $false
+            break
+        }
+    }
+    if ($StateSchemaContractValid) {
+        foreach ($Slot in $StateSlots) {
+            $PreviousAlias = $null
+            foreach ($Alias in @($Slot.aliases)) {
+                $AliasValue = [string]$Alias
+                if ([string]::IsNullOrWhiteSpace($AliasValue) -or
+                    -not $AliasValue.StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
+                    ($null -ne $PreviousAlias -and [string]::CompareOrdinal($PreviousAlias, $AliasValue) -ge 0) -or
+                    -not $StateIdentities.Add($AliasValue)) {
+                    $StateSchemaContractValid = $false
+                    break
+                }
+                $PreviousAlias = $AliasValue
+            }
+            if (-not $StateSchemaContractValid) {
+                break
+            }
+        }
+    }
+}
 $WasmInspectionValid = [int]$WasmInspectionModel.schema_version -eq 1 -and
     [string]$WasmInspectionModel.sha256 -eq $WasmSha256
 if (-not $GuestContractValid -or -not $StateSchemaContractValid -or -not $WasmInspectionValid -or

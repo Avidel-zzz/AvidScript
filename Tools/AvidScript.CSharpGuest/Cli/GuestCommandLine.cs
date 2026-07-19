@@ -37,6 +37,7 @@ public static class GuestCommandLine
                 semanticSha256);
             if (!result.Succeeded || result.Module is null)
             {
+                DeletePublishedArtifacts(outputPath, stateSchemaPath);
                 foreach (GuestDiagnostic diagnostic in result.Diagnostics)
                 {
                     Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");

@@ -90,7 +90,7 @@ internal static class CSharpGuestSemanticFixture
         SemanticDiagnostic[] diagnostics = succeeded
             ? Array.Empty<SemanticDiagnostic>()
             : new[] { new SemanticDiagnostic("ASCS_TEST", "error", "synthetic failure", span) };
-        return new SemanticDocument(
+        SemanticDocument document = new SemanticDocument(
             4,
             "csharp",
             "1.4",
@@ -108,6 +108,23 @@ internal static class CSharpGuestSemanticFixture
             new[] { graph },
             null,
             diagnostics);
+        return document with
+        {
+            StateContracts = new[]
+            {
+                new SemanticStateContract(
+                    scriptType.Id,
+                    "compatible",
+                    1,
+                    new[]
+                    {
+                        new SemanticStateFieldContract(
+                            StateFieldId,
+                            "implicit",
+                            Array.Empty<string>()),
+                    }),
+            },
+        };
     }
 
     public static SemanticOperation Operation(

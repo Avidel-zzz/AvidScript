@@ -498,8 +498,8 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 5) "semantic artifact schema version is not 5"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.5") "semantic artifact version is not 1.5"
+Assert-Condition ($SemanticJson.schema_version -eq 6) "semantic artifact schema version is not 6"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.6") "semantic artifact version is not 1.6"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
@@ -514,10 +514,13 @@ Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"
 Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$NormalJson.artifacts.guest_ir_file)) "report does not reference Guest IR"
 $NormalGuestIrPath = Resolve-ArtifactPath $NormalJson.artifacts.guest_ir_file
+$NormalStateSchemaPath = Resolve-ArtifactPath $NormalJson.artifacts.state_schema_file
 $NormalWasmPath = Resolve-ArtifactPath $NormalJson.artifacts.wasm_file
 Assert-Condition (Test-Path -LiteralPath $NormalGuestIrPath -PathType Leaf) "valid source Guest IR artifact is missing"
+Assert-Condition (Test-Path -LiteralPath $NormalStateSchemaPath -PathType Leaf) "valid source state schema artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $NormalWasmPath -PathType Leaf) "valid source WASM artifact is missing"
 $GuestIrJson = Get-Content -Raw -LiteralPath $NormalGuestIrPath | ConvertFrom-Json
+$StateSchemaJson = Get-Content -Raw -LiteralPath $NormalStateSchemaPath | ConvertFrom-Json
 $SemanticSha256 = Get-Sha256Hex $NormalSemanticPath
 $GuestIrSha256 = Get-Sha256Hex $NormalGuestIrPath
 $WasmSha256 = Get-Sha256Hex $NormalWasmPath
@@ -526,6 +529,16 @@ Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "
 Assert-Condition ($NormalJson.guest_ir.schema_version -eq 1 -and $NormalJson.guest_ir.version -eq "1.0") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"
 Assert-Condition ($NormalJson.guest_ir.sha256 -eq $GuestIrSha256) "report Guest IR artifact hash differs"
+Assert-Condition ($StateSchemaJson.schema_version -eq 2 -and
+    $StateSchemaJson.strategy -eq "host_snapshot" -and
+    $StateSchemaJson.policy -eq "compatible" -and
+    $StateSchemaJson.contract_version -eq 1 -and
+    @($StateSchemaJson.slots | Where-Object { $_.PSObject.Properties.Name -contains "aliases" }).Count -eq @($StateSchemaJson.slots).Count) `
+    "state schema v2 contract is invalid"
+Assert-Condition ($NormalJson.state_migration.schema_version -eq 2 -and
+    $NormalJson.state_migration.policy -eq "compatible" -and
+    $NormalJson.state_migration.contract_version -eq 1) `
+    "report state migration contract is invalid"
 Assert-Condition ($NormalJson.wasm.sha256 -eq $WasmSha256) "report WASM artifact hash differs"
 Assert-Condition (@($NormalJson.observed_exports).Count -eq 6 -and $NormalJson.observed_exports -contains "avid_on_gameplay_event") "report does not expose all six direct ABI exports"
 $ManifestJson = Get-Content -Raw -LiteralPath $NormalManifest | ConvertFrom-Json
@@ -537,6 +550,11 @@ Assert-Condition ($ManifestJson.source.semantic_sha256 -eq $SemanticSha256) "man
 Assert-Condition ($ManifestJson.guest_ir.file -eq $NormalJson.artifacts.guest_ir_file) "manifest Guest IR path differs"
 Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 1 -and $ManifestJson.guest_ir.version -eq "1.0") "manifest Guest IR contract is invalid"
 Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Guest IR hash differs"
+Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and
+    $ManifestJson.state_migration.policy -eq "compatible" -and
+    $ManifestJson.state_migration.contract_version -eq 1 -and
+    @($ManifestJson.state_migration.slots | Where-Object { $_.PSObject.Properties.Name -contains "aliases" }).Count -eq @($ManifestJson.state_migration.slots).Count) `
+    "manifest state migration contract is invalid"
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 

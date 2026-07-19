@@ -687,19 +687,43 @@ if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
 }
 $CSharpStateSchemaProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/StateMigration/CSharpGuestStateSchemaProjector.cs'
+$CSharpStateContractResolverSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/StateMigration/CSharpGuestStateContractResolver.cs'
+$CSharpStateSchemaSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/StateMigration/CSharpGuestStateSchema.cs'
 $RuntimeStateMigrationSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/StateMigration/AvidScriptRuntimeStateMigration.cpp'
 $RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
 $VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
 $WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
 foreach ($RequiredStateSchemaContract in @(
     'CSharpGuestStateSchemaProjector',
+    'CSharpGuestStateContractResolver',
     'TryFingerprintType',
     'host_snapshot',
+    'ASSTATE1005',
     'SemanticDocument',
     'GuestModule'
 )) {
     if (-not $CSharpStateSchemaProjectorSource.Contains($RequiredStateSchemaContract)) {
         Add-Violation "C# state schema projector is missing contract $RequiredStateSchemaContract"
+    }
+}
+foreach ($RequiredStateSchemaRecordContract in @('ContractVersion', 'Aliases', 'JsonPropertyOrder')) {
+    if (-not $CSharpStateSchemaSource.Contains($RequiredStateSchemaRecordContract)) {
+        Add-Violation "C# state schema record is missing v2 field contract $RequiredStateSchemaRecordContract"
+    }
+}
+foreach ($RequiredStateResolverContract in @(
+    'CSharpGuestResolvedStateContract',
+    'StateContracts',
+    'SemanticSymbol',
+    'ASSTATE1002'
+)) {
+    if (-not $CSharpStateContractResolverSource.Contains($RequiredStateResolverContract)) {
+        Add-Violation "C# state contract resolver is missing semantic state contract $RequiredStateResolverContract"
+    }
+}
+foreach ($ForbiddenStateResolverConcern in @('Attribute', 'Syntax', 'Microsoft.CodeAnalysis')) {
+    if ($CSharpStateContractResolverSource.Contains($ForbiddenStateResolverConcern)) {
+        Add-Violation "C# state contract resolver must consume semantic artifacts without C# source or Attribute parsing: $ForbiddenStateResolverConcern"
     }
 }
 foreach ($RequiredRuntimeMigrationContract in @(
