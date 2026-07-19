@@ -750,3 +750,5 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P45.2 completion rule：异步进程完成只代表 build invocation 可结算，不代表请求可提交；service 必须先验证 session generation、request id、固定 target 与 active job identity，过期或取消 completion 不得解析为可绑定结果。
 - P45.2 shared-invocation rule：同步 `BuildOnce` 与异步 process 必须共用 `Prepare`/`Finalize`；PowerShell 参数、输出目录、结构化 report、manifest/WASM 与 semantic cache metadata 校验只能有一份实现。
 - P45.2 Task 1 baseline is incremental UE5.8 Editor build passed, architecture gate passed, and CSharpBuildService 4/4 with zero non-success results, Queue Empty, TestExit, and exit status 0.
+- P45.2 process-adapter rule：`FMonitoredProcess` delegate 只捕获 thread-safe pending state，不捕获 adapter `this` 或 process；主线程 `Poll` 才组合 stdout/progress，`Cancel` 始终使用 kill-tree，并以 Canceled delegate 作为唯一取消终态。
+- P45.2 Task 2 baseline is incremental UE5.8 Editor build passed with new cpp discovery, architecture gate passed, and CSharpBuildProcess 3/3 covering output/success, non-zero exit, and process-tree cancel with zero non-success results, Queue Empty, TestExit, and exit status 0.
