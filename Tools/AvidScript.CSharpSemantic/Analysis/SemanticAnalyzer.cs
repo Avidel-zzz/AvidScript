@@ -63,7 +63,9 @@ public static class SemanticAnalyzer
         SemanticCompilationContext context = SemanticCompilationFactory.Create(source, sourceId, referenceSources);
         SemanticTypeRegistry typeRegistry = new();
         IReadOnlyList<SemanticSymbol> symbols = SemanticSymbolProjector.Project(context, typeRegistry);
-        SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(context);
+        SemanticStateContractProjection stateContractProjection = SemanticStateContractProjector.Project(
+            context,
+            typeRegistry);
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);

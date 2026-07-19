@@ -9,12 +9,13 @@ internal static class SemanticStateContractTests
     public static int Run()
     {
         CompatibleContractsPreserveImplicitPersistAndTransientFields();
+        UnannotatedContractsDefaultToCompatibleVersionOne();
         ExplicitContractsRequirePersistedFields();
         CanonicalFacadeAttributesAreRequired();
         DuplicateAndConflictingAttributesFailClosed();
         InvalidAliasesAndVersionsFailClosed();
         StateContractSerializationIsDeterministic();
-        return 6;
+        return 7;
     }
 
     private static void CompatibleContractsPreserveImplicitPersistAndTransientFields()
@@ -41,6 +42,8 @@ internal static class SemanticStateContractTests
         SemanticStateContract contract = FindContract(document, "global::Game.CompatibleScript");
 
         Assert(document.Succeeded, "compatible state contract should analyze successfully");
+        Assert(document.Types.Any(type => type.Id == contract.OwnerTypeId),
+            "state contract owner should use an identity from the semantic type registry");
         Assert(contract.Policy == "compatible" && contract.Version == 7,
             "compatible contract should retain its policy and version");
         AssertField(contract, "Persisted", "persist", "OldPersist");
@@ -50,6 +53,26 @@ internal static class SemanticStateContractTests
         SemanticSymbol readOnly = FindSymbol(document, "Readonly");
         Assert(constant.IsConst, "const fields should retain is_const");
         Assert(readOnly.IsReadonly, "readonly fields should retain is_readonly");
+    }
+
+    private static void UnannotatedContractsDefaultToCompatibleVersionOne()
+    {
+        const string source = """
+            namespace Game;
+
+            public static class LegacyScript
+            {
+                private static int Score;
+            }
+            """;
+
+        SemanticStateContract contract = FindContract(
+            Analyze(source, "Scripts/LegacyState.cs"),
+            "global::Game.LegacyScript");
+
+        Assert(contract.Policy == "compatible" && contract.Version == 1,
+            "unannotated classes should default to compatible policy and version 1");
+        AssertField(contract, "Score", "implicit");
     }
 
     private static void ExplicitContractsRequirePersistedFields()
@@ -206,8 +229,11 @@ internal static class SemanticStateContractTests
 
     private static SemanticStateContract FindContract(SemanticDocument document, string canonicalTypeName)
     {
-        return document.StateContracts.Single(contract =>
-            contract.OwnerTypeId == "symbol:type:" + canonicalTypeName);
+        string ownerTypeId = "type:" + canonicalTypeName;
+        SemanticStateContract? contract = document.StateContracts.SingleOrDefault(item =>
+            item.OwnerTypeId == ownerTypeId);
+        Assert(contract is not null, $"state contract owner should use semantic type identity {ownerTypeId}");
+        return contract!;
     }
 
     private static SemanticSymbol FindSymbol(SemanticDocument document, string name)

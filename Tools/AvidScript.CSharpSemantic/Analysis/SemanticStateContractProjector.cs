@@ -12,9 +12,12 @@ internal static class SemanticStateContractProjector
     private const string CompatiblePolicy = "compatible";
     private const string ExplicitPolicy = "explicit";
 
-    public static SemanticStateContractProjection Project(SemanticCompilationContext context)
+    public static SemanticStateContractProjection Project(
+        SemanticCompilationContext context,
+        SemanticTypeRegistry typeRegistry)
     {
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(typeRegistry);
 
         StateContractAttributes attributes = StateContractAttributes.Create(context.Compilation);
         SemanticModel semanticModel = context.Compilation.GetSemanticModel(context.PrimaryUnit.SyntaxTree);
@@ -31,7 +34,7 @@ internal static class SemanticStateContractProjector
         List<SemanticDiagnostic> diagnostics = new();
         foreach (INamedTypeSymbol owner in owners)
         {
-            contracts.Add(ProjectOwner(context, owner, attributes, diagnostics));
+            contracts.Add(ProjectOwner(context, owner, attributes, typeRegistry, diagnostics));
         }
 
         return new SemanticStateContractProjection(
@@ -46,6 +49,7 @@ internal static class SemanticStateContractProjector
         SemanticCompilationContext context,
         INamedTypeSymbol owner,
         StateContractAttributes attributes,
+        SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics)
     {
         AttributeData[] contractAttributes = GetAttributes(owner, attributes.Contract);
@@ -139,7 +143,7 @@ internal static class SemanticStateContractProjector
         }
 
         return new SemanticStateContract(
-            SemanticSymbolProjector.GetSymbolId(owner),
+            typeRegistry.Register(owner),
             policy,
             version,
             contracts);
