@@ -97,7 +97,7 @@ public:
 	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
 	bool WriteStateBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError);
 #if WITH_DEV_AUTOMATION_TESTS
-	void SetStateWriteFailureForTesting(int32 InWriteAttempt);
+	void SetStateWriteFailuresForTesting(TConstArrayView<int32> InWriteAttempts);
 	void ClearStateWriteFailureForTesting();
 #endif
 
@@ -169,7 +169,7 @@ private:
 	bool bHasBegunPlay = false;
 #if WITH_DEV_AUTOMATION_TESTS
 	int32 StateWriteAttemptCount = 0;
-	int32 StateWriteFailureOnAttempt = INDEX_NONE;
+	TArray<int32> StateWriteFailureAttempts;
 #endif
 	bool bHasEndedPlay = false;
 	bool bEndPlayAttempted = false;

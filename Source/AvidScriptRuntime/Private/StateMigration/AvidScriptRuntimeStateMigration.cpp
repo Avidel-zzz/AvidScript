@@ -68,6 +68,7 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 		PreviousManifest.StateMigration.Slots.Num(),
 		CandidateManifest.StateMigration.Slots.Num()));
 	TSet<FString> MatchedCandidateStableIds;
+	TSet<FString> ClaimedCandidateStableIds;
 	for (const FAvidScriptWasmStateSlot& PreviousSlot : PreviousManifest.StateMigration.Slots)
 	{
 		const FAvidScriptWasmStateSlot* const* CandidateSlotPtr = CandidatePrimarySlots.Find(PreviousSlot.StableId);
@@ -84,6 +85,17 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 		}
 
 		const FAvidScriptWasmStateSlot& CandidateSlot = **CandidateSlotPtr;
+		if (ClaimedCandidateStableIds.Contains(CandidateSlot.StableId))
+		{
+			return FailMigration(
+				OutResult,
+				PreviousSlot.StableId,
+				TEXT("state_migration_incompatible"),
+				FString::Printf(
+					TEXT("multiple previous state slots resolved to candidate stable_id=%s"),
+					*CandidateSlot.StableId));
+		}
+		ClaimedCandidateStableIds.Add(CandidateSlot.StableId);
 		MatchedCandidateStableIds.Add(CandidateSlot.StableId);
 		if (PreviousSlot.TypeFingerprint != CandidateSlot.TypeFingerprint
 			|| PreviousSlot.Size != CandidateSlot.Size)
@@ -138,7 +150,8 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 			PendingWrite.Bytes,
 			WriteError))
 		{
-			FString RollbackError;
+			FString FirstRestoreFailureStableId;
+			FString FirstRestoreFailureDetails;
 			for (int32 RollbackIndex = AppliedWriteCount - 1; RollbackIndex >= 0; --RollbackIndex)
 			{
 				const FAvidScriptPendingStateWrite& AppliedWrite = PendingWrites[RollbackIndex];
@@ -148,17 +161,31 @@ bool FAvidScriptRuntimeStateMigration::Migrate(
 					AppliedWrite.CandidateOriginalBytes,
 					RestoreError))
 				{
-					RollbackError = RestoreError;
-					break;
+					if (FirstRestoreFailureStableId.IsEmpty())
+					{
+						FirstRestoreFailureStableId = AppliedWrite.StableId;
+						FirstRestoreFailureDetails = RestoreError;
+					}
 				}
+			}
+			if (!FirstRestoreFailureStableId.IsEmpty())
+			{
+				return FailMigration(
+					OutResult,
+					FirstRestoreFailureStableId,
+					TEXT("state_migration_write_failed"),
+					FString::Printf(
+						TEXT("forward write failed for stable_id=%s: %s; candidate restore failed for stable_id=%s: %s"),
+						*PendingWrite.StableId,
+						*WriteError,
+						*FirstRestoreFailureStableId,
+						*FirstRestoreFailureDetails));
 			}
 			return FailMigration(
 				OutResult,
 				PendingWrite.StableId,
 				TEXT("state_migration_write_failed"),
-				RollbackError.IsEmpty()
-					? WriteError
-					: FString::Printf(TEXT("%s; candidate restore failed: %s"), *WriteError, *RollbackError));
+				WriteError);
 		}
 		++AppliedWriteCount;
 	}

@@ -216,7 +216,7 @@ bool FAvidScriptWasmRuntimeInstance::WriteStateBytes(
 	}
 #if WITH_DEV_AUTOMATION_TESTS
 	++StateWriteAttemptCount;
-	if (StateWriteAttemptCount == StateWriteFailureOnAttempt)
+	if (StateWriteFailureAttempts.Contains(StateWriteAttemptCount))
 	{
 		OutError = TEXT("State write failure injected for automation coverage.");
 		return false;
@@ -226,16 +226,23 @@ bool FAvidScriptWasmRuntimeInstance::WriteStateBytes(
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
-void FAvidScriptWasmRuntimeInstance::SetStateWriteFailureForTesting(int32 InWriteAttempt)
+void FAvidScriptWasmRuntimeInstance::SetStateWriteFailuresForTesting(TConstArrayView<int32> InWriteAttempts)
 {
 	StateWriteAttemptCount = 0;
-	StateWriteFailureOnAttempt = InWriteAttempt;
+	StateWriteFailureAttempts.Reset(InWriteAttempts.Num());
+	for (const int32 WriteAttempt : InWriteAttempts)
+	{
+		if (WriteAttempt > 0)
+		{
+			StateWriteFailureAttempts.AddUnique(WriteAttempt);
+		}
+	}
 }
 
 void FAvidScriptWasmRuntimeInstance::ClearStateWriteFailureForTesting()
 {
 	StateWriteAttemptCount = 0;
-	StateWriteFailureOnAttempt = INDEX_NONE;
+	StateWriteFailureAttempts.Reset();
 }
 #endif
 
