@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AvidScriptWasmReloadTypes.h"
 
 class AActor;
 class UAvidScriptComponent;
@@ -16,7 +17,8 @@ enum class EAvidScriptEditorComponentBindingStatus : uint8
 	ReportMissing,
 	ReportInvalid,
 	ComponentMissing,
-	ComponentCreateFailed
+	ComponentCreateFailed,
+	ReloadRejected
 };
 
 struct FAvidScriptEditorComponentBindingRequest
@@ -31,6 +33,8 @@ struct FAvidScriptEditorComponentBindingResult
 {
 	bool bSucceeded = false;
 	bool bCreatedComponent = false;
+	bool bReloadAttempted = false;
+	bool bReloadApplied = false;
 	EAvidScriptEditorComponentBindingStatus Status = EAvidScriptEditorComponentBindingStatus::Unknown;
 	FString ErrorCategory;
 	FString ErrorMessage;
@@ -39,6 +43,7 @@ struct FAvidScriptEditorComponentBindingResult
 	FString ReportPath;
 	FString ActorPath;
 	UAvidScriptComponent* Component = nullptr;
+	FAvidScriptWasmReloadResult RuntimeResult;
 };
 
 class FAvidScriptEditorComponentBindingService

@@ -210,6 +210,10 @@ bool FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
 	}
 
 	UAvidScriptComponent* Component = Actor->FindComponentByClass<UAvidScriptComponent>();
+	const bool bHadLiveRuntime = Component != nullptr && Component->GetRuntimeStats().bRuntimeLoaded;
+	const FString PreviousManifestPath = Component != nullptr
+		? Component->GetScriptManifestPath()
+		: FString();
 	bool bRegisterNewComponent = false;
 	if (Component == nullptr)
 	{
@@ -241,8 +245,37 @@ bool FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
 		OutResult.bCreatedComponent = true;
 	}
 
-	Component->Modify();
+	OutResult.Component = Component;
+	Component->Modify(!bHadLiveRuntime);
 	Component->SetScriptManifestPath(NormalizedManifestPath);
+	if (bHadLiveRuntime)
+	{
+		OutResult.bReloadAttempted = true;
+		if (!Component->ReloadConfiguredScript(OutResult.RuntimeResult))
+		{
+			Component->SetScriptManifestPath(PreviousManifestPath);
+			OutResult.bReloadApplied = false;
+			SetAvidScriptEditorComponentBindingFailure(
+				EAvidScriptEditorComponentBindingStatus::ReloadRejected,
+				TEXT("reload_rejected"),
+				FString::Printf(
+					TEXT("AvidScript live reload was rejected; the previous runtime and manifest binding remain active. category=%s details=%s"),
+					OutResult.RuntimeResult.ErrorCategory.IsEmpty()
+						? TEXT("<none>")
+						: *OutResult.RuntimeResult.ErrorCategory,
+					OutResult.RuntimeResult.ErrorMessage.IsEmpty()
+						? TEXT("<none>")
+						: *OutResult.RuntimeResult.ErrorMessage),
+				OutResult.RuntimeResult.NextAction.IsEmpty()
+					? FString(TEXT("fix the candidate manifest or WASM and retry the binding"))
+					: OutResult.RuntimeResult.NextAction,
+				OutResult);
+			return false;
+		}
+
+		OutResult.bReloadApplied = OutResult.RuntimeResult.bReloadApplied;
+	}
+
 	if (bRegisterNewComponent)
 	{
 		Actor->AddInstanceComponent(Component);
@@ -253,7 +286,6 @@ bool FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
 
 	OutResult.bSucceeded = true;
 	OutResult.Status = EAvidScriptEditorComponentBindingStatus::Bound;
-	OutResult.Component = Component;
 	return true;
 }
 

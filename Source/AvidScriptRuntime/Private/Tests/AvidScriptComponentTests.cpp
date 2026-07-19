@@ -5,11 +5,97 @@
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Ssl.h"
+
+THIRD_PARTY_INCLUDES_START
+#include <openssl/sha.h>
+THIRD_PARTY_INCLUDES_END
 
 namespace
 {
+const uint8 GComponentReloadCompatibleModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
+	0x7d, 0x00, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07,
+	0x25, 0x02, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f,
+	0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69, 0x6e,
+	0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x00, 0x0c,
+	0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f,
+	0x74, 0x69, 0x63, 0x6b, 0x00, 0x01, 0x0a, 0x07,
+	0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b
+};
+
+const uint8 GComponentReloadBeginPlayTrapModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
+	0x7d, 0x00, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07,
+	0x25, 0x02, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f,
+	0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69, 0x6e,
+	0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x00, 0x0c,
+	0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f,
+	0x74, 0x69, 0x63, 0x6b, 0x00, 0x01, 0x0a, 0x08,
+	0x02, 0x03, 0x00, 0x00, 0x0b, 0x02, 0x00, 0x0b
+};
+
+FString ComponentReloadBytesToLowerHex(const uint8* Bytes, int32 ByteCount)
+{
+	FString Hex;
+	Hex.Reserve(ByteCount * 2);
+	for (int32 Index = 0; Index < ByteCount; ++Index)
+	{
+		Hex += FString::Printf(TEXT("%02x"), Bytes[Index]);
+	}
+	return Hex;
+}
+
+FString ComputeComponentReloadSha256(const TArray<uint8>& Bytes)
+{
+	uint8 Digest[SHA256_DIGEST_LENGTH] = {};
+	SHA256(Bytes.GetData(), static_cast<size_t>(Bytes.Num()), Digest);
+	return ComponentReloadBytesToLowerHex(Digest, UE_ARRAY_COUNT(Digest));
+}
+
+bool WriteComponentReloadFixture(
+	const FString& Root,
+	const FString& ModuleId,
+	const uint8* Bytecode,
+	const int32 BytecodeSize,
+	FString& OutManifestPath)
+{
+	if (!IFileManager::Get().MakeDirectory(*Root, true))
+	{
+		return false;
+	}
+
+	const TArray<uint8> WasmBytes(Bytecode, BytecodeSize);
+	const FString WasmFileName = ModuleId + TEXT(".wasm");
+	const FString WasmPath = FPaths::Combine(Root, WasmFileName);
+	OutManifestPath = FPaths::Combine(Root, ModuleId + TEXT(".avidscript.json"));
+	if (!FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath))
+	{
+		return false;
+	}
+
+	const FString ManifestJson = FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 1,\n")
+		TEXT("  \"module_id\": \"%s\",\n")
+		TEXT("  \"abi_version\": 1,\n")
+		TEXT("  \"language\": \"wasm\",\n")
+		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
+		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
+		TEXT("  \"required_imports\": [{ \"module\": \"env\", \"name\": \"actor_set_location\" }]\n")
+		TEXT("}\n"),
+		*ModuleId,
+		*WasmFileName,
+		*ComputeComponentReloadSha256(WasmBytes));
+	return FFileHelper::SaveStringToFile(ManifestJson, *OutManifestPath);
+}
+
 bool CreateComponentWorld(UWorld*& OutWorld)
 {
 	OutWorld = nullptr;
@@ -94,6 +180,112 @@ bool BeginComponentWorld(UWorld* World)
 	return true;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptComponentTransactionalReloadTest,
+	"AvidScript.Component.TransactionalReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptComponentTransactionalReloadTest::RunTest(const FString& Parameters)
+{
+	FString FixtureRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests/Phase44/ComponentReload")));
+	FPaths::NormalizeFilename(FixtureRoot);
+	IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+
+	FString ManifestV1Path;
+	FString ManifestV2Path;
+	FString TrapManifestPath;
+	if (!TestTrue(TEXT("v1 fixture writes"), WriteComponentReloadFixture(
+			FixtureRoot,
+			TEXT("component_reload_v1"),
+			GComponentReloadCompatibleModule,
+			UE_ARRAY_COUNT(GComponentReloadCompatibleModule),
+			ManifestV1Path)) ||
+		!TestTrue(TEXT("v2 fixture writes"), WriteComponentReloadFixture(
+			FixtureRoot,
+			TEXT("component_reload_v2"),
+			GComponentReloadCompatibleModule,
+			UE_ARRAY_COUNT(GComponentReloadCompatibleModule),
+			ManifestV2Path)) ||
+		!TestTrue(TEXT("trap fixture writes"), WriteComponentReloadFixture(
+			FixtureRoot,
+			TEXT("component_reload_trap"),
+			GComponentReloadBeginPlayTrapModule,
+			UE_ARRAY_COUNT(GComponentReloadBeginPlayTrapModule),
+			TrapManifestPath)))
+	{
+		IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+		return true;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateComponentWorld(World))
+	{
+		AddError(TEXT("Failed to create transactional component reload world."));
+		DestroyComponentWorld(World);
+		IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+		return true;
+	}
+
+	TestTrue(TEXT("World BeginPlay succeeds"), BeginComponentWorld(World));
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("Reload test actor spawns"), Actor);
+	UAvidScriptComponent* Component = Actor != nullptr
+		? AddAvidScriptComponent(Actor, ManifestV1Path)
+		: nullptr;
+	TestNotNull(TEXT("Reload component is created"), Component);
+	if (Component == nullptr)
+	{
+		DestroyComponentWorld(World);
+		IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+		return true;
+	}
+
+	TestEqual(
+		TEXT("v1 is initially active"),
+		Component->GetRuntimeStats().ModuleId,
+		FString(TEXT("component_reload_v1")));
+	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("v1 ticks"), Component->GetRuntimeStats().TickCallCount, 1);
+
+	UFunction* ReloadFunction = Component->FindFunction(GET_FUNCTION_NAME_CHECKED(UAvidScriptComponent, ReloadScript));
+	TestNotNull(TEXT("ReloadScript is reflected for Blueprint"), ReloadFunction);
+	if (ReloadFunction != nullptr)
+	{
+		TestTrue(TEXT("ReloadScript is BlueprintCallable"), ReloadFunction->HasAnyFunctionFlags(FUNC_BlueprintCallable));
+	}
+
+	Component->SetScriptManifestPath(ManifestV2Path);
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(TEXT("compatible component reload applies"), Component->ReloadConfiguredScript(ReloadResult));
+	TestTrue(TEXT("component reload result reports applied"), ReloadResult.bReloadApplied);
+	TestEqual(TEXT("v2 becomes active"), Component->GetRuntimeStats().ModuleId, FString(TEXT("component_reload_v2")));
+	TestEqual(TEXT("component records successful reload"), Component->GetRuntimeStats().SuccessfulReloadCount, 1);
+	TestEqual(TEXT("active manifest commits v2"), Component->GetRuntimeStats().ScriptManifestPath, ManifestV2Path);
+	TestTrue(TEXT("component stays loaded after successful reload"), Component->GetRuntimeStats().bRuntimeLoaded);
+
+	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("v2 starts a fresh tick count"), Component->GetRuntimeStats().TickCallCount, 1);
+
+	Component->SetScriptManifestPath(TrapManifestPath);
+	TestFalse(TEXT("BeginPlay trap component reload is rejected"), Component->ReloadConfiguredScript(ReloadResult));
+	TestTrue(TEXT("rejected component reload reports rollback"), ReloadResult.bRollbackPreservedLiveRuntime);
+	TestFalse(TEXT("rejected component reload is not applied"), ReloadResult.bReloadApplied);
+	TestEqual(TEXT("v2 remains active after rejection"), Component->GetRuntimeStats().ModuleId, FString(TEXT("component_reload_v2")));
+	TestEqual(TEXT("component records rejected reload"), Component->GetRuntimeStats().RejectedReloadCount, 1);
+	TestEqual(TEXT("active manifest remains v2"), Component->GetRuntimeStats().ScriptManifestPath, ManifestV2Path);
+	TestTrue(TEXT("component stays loaded after rejected reload"), Component->GetRuntimeStats().bRuntimeLoaded);
+	TestTrue(TEXT("component tick remains enabled after rejected reload"), Component->IsComponentTickEnabled());
+
+	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
+	TestEqual(TEXT("old v2 runtime continues ticking"), Component->GetRuntimeStats().TickCallCount, 2);
+
+	DestroyComponentWorld(World);
+	IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptComponentOwnerHandleLifecycleSmokeTest,

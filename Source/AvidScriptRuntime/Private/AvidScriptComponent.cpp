@@ -40,6 +40,30 @@ void CopySessionLoadResult(
 		OutResult.ErrorMessage = ReloadResult.ErrorMessage;
 	}
 }
+
+void SetComponentReloadManifestLoadFailure(
+	const FAvidScriptWasmReloadManifestLoadResult& LoadResult,
+	const FString& ActiveModuleId,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	OutResult = FAvidScriptWasmReloadResult();
+	OutResult.PreviousModuleId = ActiveModuleId;
+	OutResult.CandidateModuleId = TEXT("<component_manifest>");
+	OutResult.ActiveModuleId = ActiveModuleId;
+	OutResult.ExportName = TEXT("<manifest>");
+	OutResult.ErrorCategory = LoadResult.ErrorCategory;
+	OutResult.NextAction = LoadResult.NextAction;
+	OutResult.ErrorMessage = LoadResult.ErrorMessage.IsEmpty()
+		? FString::Printf(TEXT("Failed to load AvidScript manifest: %s"), *LoadResult.ManifestPath)
+		: LoadResult.ErrorMessage;
+	OutResult.bRollbackPreservedLiveRuntime = !ActiveModuleId.IsEmpty();
+	OutResult.RuntimeResult.ModuleId = ActiveModuleId;
+	OutResult.RuntimeResult.ExportName = OutResult.ExportName;
+	OutResult.RuntimeResult.ErrorCategory = OutResult.ErrorCategory;
+	OutResult.RuntimeResult.NextAction = OutResult.NextAction;
+	OutResult.RuntimeResult.ErrorMessage = OutResult.ErrorMessage;
+}
+
 void CopyComponentEventStats(
 	const FAvidScriptWasmSmokeResult& Result,
 	FAvidScriptComponentRuntimeStats& Stats)
@@ -139,6 +163,115 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	}
 	return bLoaded;
 }
+
+bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& OutResult)
+{
+	OutResult = FAvidScriptWasmReloadResult();
+	const FAvidScriptRuntimeSessionSnapshot PreviousSnapshot = RuntimeSession.IsValid()
+		? RuntimeSession->GetSnapshot()
+		: FAvidScriptRuntimeSessionSnapshot();
+	const FString CandidateManifestPath = ResolveScriptManifestPath();
+
+	if (!RuntimeSession.IsValid() ||
+		PreviousSnapshot.LifecycleState != EAvidScriptLifecycleState::Running ||
+		!PreviousSnapshot.bHasActiveRuntime)
+	{
+		OutResult.PreviousModuleId = PreviousSnapshot.ModuleId;
+		OutResult.ActiveModuleId = PreviousSnapshot.ModuleId;
+		OutResult.ExportName = TEXT("<component>");
+		OutResult.ErrorCategory = TEXT("invalid_state");
+		OutResult.ErrorMessage = TEXT("AvidScript component reload requires a running script runtime.");
+		OutResult.NextAction = TEXT("start the component runtime before requesting a live reload");
+		OutResult.bRollbackPreservedLiveRuntime = PreviousSnapshot.bHasActiveRuntime;
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		return false;
+	}
+
+	if (CandidateManifestPath.IsEmpty())
+	{
+		FAvidScriptWasmReloadManifestLoadResult LoadResult;
+		LoadResult.ManifestPath = CandidateManifestPath;
+		LoadResult.ErrorCategory = TEXT("manifest_path_invalid");
+		LoadResult.ErrorMessage = TEXT("AvidScript component reload requires a non-empty manifest path.");
+		LoadResult.NextAction = TEXT("assign a built .avidscript.json manifest before reloading");
+		SetComponentReloadManifestLoadFailure(LoadResult, PreviousSnapshot.ModuleId, OutResult);
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			CandidateManifestPath,
+			Manifest,
+			Bytecode,
+			LoadResult))
+	{
+		SetComponentReloadManifestLoadFailure(LoadResult, PreviousSnapshot.ModuleId, OutResult);
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		RuntimeStats.bRuntimeLoaded = PreviousSnapshot.bHasActiveRuntime;
+		RuntimeStats.ModuleId = PreviousSnapshot.ModuleId;
+		UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *OutResult.ErrorMessage);
+		return false;
+	}
+
+	if (!RuntimeSession->ReloadModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			OutResult))
+	{
+		const FAvidScriptRuntimeSessionSnapshot RejectedSnapshot = RuntimeSession->GetSnapshot();
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		RuntimeStats.bRuntimeLoaded = RejectedSnapshot.bHasActiveRuntime;
+		RuntimeStats.bBeginPlayCalled = RejectedSnapshot.LifecycleState == EAvidScriptLifecycleState::Running;
+		RuntimeStats.TickCallCount = RejectedSnapshot.TickCallCount;
+		RuntimeStats.ModuleId = RejectedSnapshot.ModuleId;
+		UE_LOG(LogAvidScriptComponent, Warning, TEXT("%s"), *OutResult.ErrorMessage);
+		return false;
+	}
+
+	const FAvidScriptRuntimeSessionSnapshot AppliedSnapshot = RuntimeSession->GetSnapshot();
+	const FAvidScriptWasmSmokeResult& RuntimeResult = OutResult.RuntimeResult;
+	++RuntimeStats.SuccessfulReloadCount;
+	RuntimeStats.bRuntimeLoaded = AppliedSnapshot.bHasActiveRuntime;
+	RuntimeStats.bBeginPlayCalled = RuntimeResult.bBeginPlayCalled;
+	RuntimeStats.TickCallCount = AppliedSnapshot.TickCallCount;
+	RuntimeStats.TimerCallbackCount = RuntimeResult.TimerCallbackCount;
+	RuntimeStats.LastTimerCallbackId = RuntimeResult.LastTimerCallbackId;
+	RuntimeStats.LastTimerHandle = RuntimeResult.LastTimerHandle;
+	RuntimeStats.EventCallbackCount = RuntimeResult.EventCallbackCount;
+	RuntimeStats.LastEventId = RuntimeResult.LastEventId;
+	RuntimeStats.LastEventValue = RuntimeResult.LastEventValue;
+	RuntimeStats.Metrics = RuntimeResult.Metrics;
+	RuntimeStats.ModuleId = AppliedSnapshot.ModuleId;
+	RuntimeStats.ScriptManifestPath = CandidateManifestPath;
+	RuntimeStats.LastErrorMessage.Reset();
+
+	UE_LOG(
+		LogAvidScriptComponent,
+		Log,
+		TEXT("AvidScript component reload | owner=%s | previous=%s | active=%s | manifest=%s | successful=%d | rejected=%d"),
+		RuntimeStats.OwnerObjectPath.IsEmpty() ? TEXT("<none>") : *RuntimeStats.OwnerObjectPath,
+		OutResult.PreviousModuleId.IsEmpty() ? TEXT("<none>") : *OutResult.PreviousModuleId,
+		*RuntimeStats.ModuleId,
+		*RuntimeStats.ScriptManifestPath,
+		RuntimeStats.SuccessfulReloadCount,
+		RuntimeStats.RejectedReloadCount);
+	return true;
+}
+
+bool UAvidScriptComponent::ReloadScript()
+{
+	FAvidScriptWasmReloadResult Result;
+	return ReloadConfiguredScript(Result);
+}
+
 bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const
 {
 	OutOwner = ObjectRegistry.ResolveObject<AActor>(OwnerHandle, OutResult);

@@ -18,6 +18,8 @@ struct FAvidScriptComponentRuntimeStats
 	bool bComponentEndPlayObserved = false;
 	bool bEndPlayCalled = false;
 	int32 TickCallCount = 0;
+	int32 SuccessfulReloadCount = 0;
+	int32 RejectedReloadCount = 0;
 	int32 TimerCallbackCount = 0;
 	int32 LastTimerCallbackId = 0;
 	int32 LastTimerHandle = 0;
@@ -53,6 +55,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Input")
 	bool DispatchScriptInput(int32 ActionId, int32 TriggerEvent, FVector Value);
+
+	bool ReloadConfiguredScript(FAvidScriptWasmReloadResult& OutResult);
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Runtime")
+	bool ReloadScript();
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
