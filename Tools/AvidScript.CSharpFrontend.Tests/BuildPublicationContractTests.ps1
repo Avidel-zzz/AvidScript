@@ -99,15 +99,26 @@ Assert-Condition ($SeedStateSchemaJson.schema_version -eq 2 -and
 function Invoke-MalformedStateSchemaCase {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Mutation
+        [string]$Mutation = "",
+        [switch]$UseRawStateSchema,
+        [string]$RawStateSchema = ""
     )
 
     $CompilerPath = Join-Path $RunRoot "$Name.Compiler.ps1"
-    $CompilerBody = @"
-Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+    $StateSchemaEmission = if ($UseRawStateSchema) {
+        $EscapedStateSchema = $RawStateSchema.Replace("'", "''")
+        "[System.IO.File]::WriteAllText(`$StateSchemaPath, '$EscapedStateSchema', [System.Text.UTF8Encoding]::new(`$false))"
+    }
+    else {
+        @"
 `$StateSchema = Get-Content -Raw -LiteralPath '$SeedStateSchema' | ConvertFrom-Json
 $Mutation
 `$StateSchema | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$StateSchemaPath -Encoding utf8
+"@
+    }
+    $CompilerBody = @"
+Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+$StateSchemaEmission
 Copy-Item -LiteralPath '$SeedWasm' -Destination `$WasmPath -Force
 `$BackendDll = Join-Path '$PluginRoot' 'Tools\AvidScript.WasmBackend\bin\Release\net8.0\AvidScript.WasmBackend.dll'
 & `$DotNetPath `$BackendDll --inspect `$WasmPath `$InspectionPath
@@ -178,6 +189,10 @@ $StateSchema.slots[0].aliases = "state:$($StateSchema.owner_type_id):FormerValue
 Invoke-MalformedStateSchemaCase -Name "ContractVersionString" -Mutation @'
 $StateSchema.contract_version = "bad"
 '@
+
+Invoke-MalformedStateSchemaCase -Name "JsonNullRoot" -UseRawStateSchema -RawStateSchema "null"
+
+Invoke-MalformedStateSchemaCase -Name "UnparseableJson" -UseRawStateSchema -RawStateSchema "{ invalid"
 
 $GuestFailureCompiler = Join-Path $RunRoot "GuestFailureCompiler.ps1"
 $GuestFailureBody = @"
@@ -313,5 +328,5 @@ Assert-Condition (
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 10/10 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 12/12 passed"
 exit 0

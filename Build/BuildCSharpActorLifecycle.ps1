@@ -473,6 +473,7 @@ $FrontendModel = $null
 $SemanticModel = $null
 $GuestIrModel = $null
 $StateSchemaModel = $null
+$StateSchemaArtifactExists = $false
 $WasmInspectionModel = $null
 $SelectedScriptTypeName = ""
 $RequiredExports = @()
@@ -813,7 +814,8 @@ if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) {
         $Diagnostics += [ordered]@{ code = "guest_ir_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
     }
 }
-if (Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf) {
+$StateSchemaArtifactExists = Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf
+if ($StateSchemaArtifactExists) {
     try {
         $StateSchemaModel = Get-Content -Raw -LiteralPath $StateSchemaArtifactPath | ConvertFrom-Json
     }
@@ -830,7 +832,7 @@ if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
     }
 }
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
-if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or $null -eq $StateSchemaModel -or $null -eq $WasmInspectionModel -or
+if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $StateSchemaArtifactExists -or $null -eq $WasmInspectionModel -or
     -not (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf)) {
     Remove-LoadableArtifacts
     $FailureResult = if (-not $GuestIrSucceeded) { "guest_ir_failed" } else { "wasm_backend_failed" }
