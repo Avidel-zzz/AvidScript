@@ -721,3 +721,6 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-19 P44.5 PowerShell patch backtick recurrence：BuildIntegration 修正 patch 再次把 continuation backtick 直接放入 JavaScript template，导致工具调用前解析失败。Prevention：任何修改 `.ps1` 的 patch 默认启用占位符替换，patch source 中不得出现直接 backtick。
 - P44.5 UE5.8 baseline is Frontend 7/7, Semantic 43/43, GuestIr 31/31, CSharpGuest 19/19, WasmBackend 11/11, SemanticCache key/entry/prepared/integration 16/16, 25/25, 11/11, 8/8, BuildIntegration 11/11, BuildPublication 4/4, parser 18/18, architecture passed, focused UE automation 15/15, and full AvidScript automation 170/170 with zero non-success results.
 - Phase 44 closeout rule：当前 C#+WASM 闭环可承载 Actor lifecycle 游戏逻辑与显式事务 reload；自动文件监听、guest state migration、host-write rollback、debug mapping、Cook/Shipping 与移动端仍属于后续阶段，文档和对外状态不得把这些能力表述为已完成。
+
+## Phase 45 C# Auto Live Reload Rules
+- 2026-07-19 P45.1 read-command chaining mistake record：Task 1 检查时把 `git diff --stat` 与 `git status --short` 用分号串入同一个 shell 调用，违反独立只读命令并行执行规范。Prevention：多个无依赖读取必须作为独立 `exec_command` 调用交给统一并行编排，不使用 shell separator 拼接。
