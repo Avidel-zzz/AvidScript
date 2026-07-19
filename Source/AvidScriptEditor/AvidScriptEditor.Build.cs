@@ -21,6 +21,7 @@ public class AvidScriptEditor : ModuleRules
 			{
 				"AvidScriptCore",
 				"AvidScriptBindings",
+				"DirectoryWatcher",
 				"Projects",
 				"Json",
 				"UnrealEd",
