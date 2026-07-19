@@ -743,3 +743,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P45.1 final UE5.8 baseline is Frontend 7/7, Semantic 43/43, GuestIr 31/31, CSharpGuest 19/19, WasmBackend 11/11, SemanticCache key/entry/prepared/integration 16/16, 25/25, 11/11, 8/8, BuildIntegration 11/11, BuildPublication 4/4, PowerShell parser 18/18, incremental UBT and architecture passed, real auto reload 1/1, CSharpLiveReload 12/12, Component 7/7, ComponentBinding 3/3, and full AvidScript automation 182/182 with zero non-success results, Queue Empty, TestExit, and exit status 0.
 - Phase 45.1 closeout rule：当前支持 Win64 Editor 中显式启动的单固定 Actor C# 自动热重载、350ms debounce、single-flight/trailing build 与事务 runtime 保活；同步构建会短暂阻塞 Editor。不得宣称异步取消、guest state migration、host-write rollback、Cook/Shipping 或移动端已经完成；这些属于 P45.2 及后续阶段。
 - 2026-07-19 P45.1 unscoped diff gate mistake record：最终 `git diff --check` 未限定本阶段路径，因受保护的用户 Phase 42 文档中既有尾随空格而返回失败。Prevention：dirty worktree 的 pre-stage 门禁必须传入精确 owned path set；暂存后再以 `git diff --cached --check` 覆盖提交集合，受保护文件只确认未暂存，不代替用户修正。
+
+## Phase 45.2 Async C# Live Reload Rules
+- 2026-07-19 P45.2 implementation-path assumption mistake record：首次读取构建服务实现时根据 invoker 所在目录推断为 `Private/CSharpBuild/AvidScriptEditorCSharpBuildService.cpp`，实际文件位于 `Private/AvidScriptEditorCSharpBuildService.cpp`，造成无效读取。Prevention：读取或修改未确认的实现文件前必须先用 `rg --files` 精确定位，禁止从相邻类型目录推断路径。
+- P45.2 thread-affinity rule：`FMonitoredProcess` 的 output/completed/canceled delegate 在监控线程执行，只能写入独立 thread-safe state；反射授权包生成、bootstrap report 验证、runtime binding slice 发布、Actor 有效性检查和事务 reload 必须由 Editor 主线程 ticker 驱动。
+- P45.2 completion rule：异步进程完成只代表 build invocation 可结算，不代表请求可提交；service 必须先验证 session generation、request id、固定 target 与 active job identity，过期或取消 completion 不得解析为可绑定结果。
