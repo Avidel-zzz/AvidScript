@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using AvidScript.CSharpGuest;
+using AvidScript.CSharpFrontend;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 
@@ -17,8 +18,11 @@ internal static class CSharpGuestStateSchemaTests
         AliasAndCurrentStableIdsMustNotConflict();
         ExplicitUnsafePersistFailsWithAsState1005();
         CompatibleUnsafeImplicitFieldsAreSkipped();
+        ContractVersionBoundsUseAsState1003();
+        SourcePipelineProjectsExplicitStateSchemaV2();
+        CompatiblePersistedUnsafeSourceFailsWithAsState1005();
         TypeFingerprintChangesWithValueLayout();
-        return 8;
+        return 11;
     }
 
     private static void LegacyContractsProduceCompatibleSchemaV2()
@@ -176,6 +180,101 @@ internal static class CSharpGuestStateSchemaTests
             "compatible contracts should silently skip unsafe implicit fields");
     }
 
+    private static void ContractVersionBoundsUseAsState1003()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        GuestModule module = Lower(baseline, '5');
+        foreach (int version in new[] { 0, 65536 })
+        {
+            SemanticDocument document = WithContract(
+                baseline,
+                "compatible",
+                version,
+                new SemanticStateFieldContract(
+                    CSharpGuestSemanticFixture.StateFieldId,
+                    "implicit",
+                    Array.Empty<string>()));
+
+            InvalidDataException exception = ExpectInvalidData(() =>
+                CSharpGuestStateSchemaProjector.Project(document, module));
+
+            Assert(exception.Message.StartsWith("ASSTATE1003:", StringComparison.Ordinal),
+                $"contract version {version} should fail with ASSTATE1003");
+        }
+    }
+
+    private static void SourcePipelineProjectsExplicitStateSchemaV2()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            [AvidStateContract(AvidStateMode.Explicit, Version = 3)]
+            public static class SourceScript
+            {
+                [AvidPersist, AvidStateAlias("OldScore")]
+                private static int Score;
+
+                [AvidTransient]
+                private static int DebugCounter;
+
+                private static int Implicit;
+
+                [UnmanagedCallersOnly(EntryPoint = "guest_main")]
+                public static void Main()
+                {
+                }
+            }
+            """;
+
+        SemanticDocument document = AnalyzeSource(source, "Scripts/SourceStateSchema.cs");
+        GuestModule module = Lower(document, '6');
+        CSharpGuestStateSchema schema = CSharpGuestStateSchemaProjector.Project(document, module);
+
+        Assert(schema.SchemaVersion == 2
+            && schema.Policy == "explicit"
+            && schema.ContractVersion == 3
+            && schema.OwnerTypeId == "type:global::Game.SourceScript",
+            "source pipeline should preserve the explicit state contract in schema v2");
+        Assert(schema.Slots.Count == 1
+            && schema.Slots[0].StableId == "state:type:global::Game.SourceScript:Score"
+            && schema.Slots[0].Aliases.SequenceEqual(new[]
+                { "state:type:global::Game.SourceScript:OldScore" }),
+            "source pipeline should include persisted state and exclude transient or implicit fields");
+    }
+
+    private static void CompatiblePersistedUnsafeSourceFailsWithAsState1005()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            [AvidStateContract(AvidStateMode.Compatible)]
+            public static class UnsafeScript
+            {
+                [AvidPersist]
+                private static int[] Values;
+
+                [UnmanagedCallersOnly(EntryPoint = "guest_main")]
+                public static void Main()
+                {
+                }
+            }
+            """;
+
+        SemanticDocument document = AnalyzeSource(source, "Scripts/CompatibleUnsafeState.cs");
+        GuestModule module = Lower(document, '7');
+        InvalidDataException exception = ExpectInvalidData(() =>
+            CSharpGuestStateSchemaProjector.Project(document, module));
+
+        Assert(exception.Message.StartsWith("ASSTATE1005:", StringComparison.Ordinal),
+            "compatible persisted unsafe source fields must fail with ASSTATE1005");
+    }
+
     private static void TypeFingerprintChangesWithValueLayout()
     {
         SemanticDocument document = CSharpGuestSemanticFixture.Create();
@@ -236,6 +335,25 @@ internal static class CSharpGuestStateSchemaTests
             ?? throw new InvalidOperationException("Fixture should lower.");
     }
 
+    private static SemanticDocument AnalyzeSource(string source, string sourceId)
+    {
+        string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
+        SemanticDocument document = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            hash,
+            new[]
+            {
+                new SemanticReferenceSource(
+                    StateContractFacade,
+                    "generated://AvidScript.StateContracts.cs"),
+            });
+        Assert(document.Succeeded,
+            "source semantic analysis failed: " + string.Join(", ", document.Diagnostics.Select(
+                diagnostic => $"{diagnostic.Code}: {diagnostic.Message}")));
+        return document;
+    }
+
     private static InvalidDataException ExpectInvalidData(Action action)
     {
         try
@@ -266,4 +384,50 @@ internal static class CSharpGuestStateSchemaTests
 
         return true;
     }
+
+    private const string StateContractFacade = """
+        using System;
+
+        namespace AvidScript;
+
+        public enum AvidStateMode
+        {
+            Compatible = 0,
+            Explicit = 1,
+        }
+
+        [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+        public sealed class AvidStateContractAttribute : Attribute
+        {
+            public AvidStateContractAttribute(AvidStateMode mode = AvidStateMode.Compatible)
+            {
+                Mode = mode;
+            }
+
+            public AvidStateMode Mode { get; }
+
+            public int Version { get; set; } = 1;
+        }
+
+        [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
+        public sealed class AvidPersistAttribute : Attribute
+        {
+        }
+
+        [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
+        public sealed class AvidTransientAttribute : Attribute
+        {
+        }
+
+        [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = true)]
+        public sealed class AvidStateAliasAttribute : Attribute
+        {
+            public AvidStateAliasAttribute(string formerName)
+            {
+                FormerName = formerName;
+            }
+
+            public string FormerName { get; }
+        }
+        """;
 }

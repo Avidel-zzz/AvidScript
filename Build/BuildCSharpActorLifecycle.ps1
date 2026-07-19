@@ -885,21 +885,25 @@ $StateSchemaContractValid = [int]$StateSchemaModel.schema_version -eq 2 -and
 if ($StateSchemaContractValid) {
     $StateSlots = @($StateSchemaModel.slots)
     $StateIdentities = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $PreviousStableId = $null
     foreach ($Slot in $StateSlots) {
+        $CurrentStableId = [string]$Slot.stable_id
         if ($null -eq $Slot -or
             -not ($Slot.PSObject.Properties.Name -contains "stable_id") -or
             -not ($Slot.PSObject.Properties.Name -contains "aliases") -or
             -not ($Slot.PSObject.Properties.Name -contains "type_fingerprint") -or
-            [string]::IsNullOrWhiteSpace([string]$Slot.stable_id) -or
-            -not ([string]$Slot.stable_id).StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
+            [string]::IsNullOrWhiteSpace($CurrentStableId) -or
+            -not $CurrentStableId.StartsWith("state:$($StateSchemaModel.owner_type_id):", [System.StringComparison]::Ordinal) -or
+            ($null -ne $PreviousStableId -and [string]::CompareOrdinal($PreviousStableId, $CurrentStableId) -ge 0) -or
             [string]::IsNullOrWhiteSpace([string]$Slot.type_fingerprint) -or
             [int]$Slot.offset -lt 0 -or
             [int]$Slot.size -le 0 -or
             [int]$Slot.alignment -le 0 -or
-            -not $StateIdentities.Add([string]$Slot.stable_id)) {
+            -not $StateIdentities.Add($CurrentStableId)) {
             $StateSchemaContractValid = $false
             break
         }
+        $PreviousStableId = $CurrentStableId
     }
     if ($StateSchemaContractValid) {
         foreach ($Slot in $StateSlots) {

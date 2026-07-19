@@ -34,9 +34,13 @@ internal static class CSharpGuestStateContractResolver
         }
 
         SemanticStateContract contract = matches[0];
-        if (contract.Policy is not ("compatible" or "explicit") || contract.Version is < 1 or > 65535)
+        if (contract.Policy is not ("compatible" or "explicit"))
         {
-            throw Invalid("ASSTATE1001", "Semantic state contract policy or version is invalid.");
+            throw Invalid("ASSTATE1001", "Semantic state contract policy is invalid.");
+        }
+        if (contract.Version is < 1 or > 65535)
+        {
+            throw Invalid("ASSTATE1003", "Semantic state contract version must be within 1..65535.");
         }
 
         SemanticType ownerType = document.Types.SingleOrDefault(type =>

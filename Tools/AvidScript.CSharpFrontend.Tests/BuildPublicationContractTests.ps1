@@ -96,6 +96,75 @@ Assert-Condition ($SeedStateSchemaJson.schema_version -eq 2 -and
     @($SeedStateSchemaJson.slots | Where-Object { $_.PSObject.Properties.Name -contains "aliases" }).Count -eq @($SeedStateSchemaJson.slots).Count) `
     "seed state schema must use the structured v2 contract"
 
+function Invoke-MalformedStateSchemaCase {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Mutation
+    )
+
+    $CompilerPath = Join-Path $RunRoot "$Name.Compiler.ps1"
+    $CompilerBody = @"
+Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+`$StateSchema = Get-Content -Raw -LiteralPath '$SeedStateSchema' | ConvertFrom-Json
+$Mutation
+`$StateSchema | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$StateSchemaPath -Encoding utf8
+Copy-Item -LiteralPath '$SeedWasm' -Destination `$WasmPath -Force
+`$BackendDll = Join-Path '$PluginRoot' 'Tools\AvidScript.WasmBackend\bin\Release\net8.0\AvidScript.WasmBackend.dll'
+& `$DotNetPath `$BackendDll --inspect `$WasmPath `$InspectionPath
+exit `$LASTEXITCODE
+"@
+    Write-FakeCompiler -Path $CompilerPath -Body $CompilerBody
+
+    $CaseRoot = Join-Path $RunRoot $Name
+    $CaseReport = Join-Path $CaseRoot "actor_lifecycle.csharp.report.json"
+    $CaseManifest = Join-Path $CaseRoot "actor_lifecycle.avidscript.json"
+    & $BuildScript `
+        -DotNetPath $DotNetPath `
+        -OutputRoot $CaseRoot `
+        -SourcePath $SourcePath `
+        -ProjectPath $ProjectPath `
+        -SemanticCacheRoot $CacheRoot `
+        -ModuleId "csharp_actor_lifecycle" `
+        -ArtifactStem "actor_lifecycle" `
+        -ReportPath $CaseReport `
+        -ManifestPath $CaseManifest `
+        -GuestCompilerPath $CompilerPath | Out-Null
+    $CaseExit = $LASTEXITCODE
+
+    Assert-Condition ($CaseExit -eq 1) "$Name malformed schema must return exit 1; actual=$CaseExit"
+    $CaseReportJson = Get-Content -Raw -LiteralPath $CaseReport | ConvertFrom-Json
+    Assert-Condition ($CaseReportJson.result -eq "direct_abi_unsupported") `
+        "$Name malformed schema was not classified as direct ABI unsupported"
+    foreach ($LoadableArtifact in @(
+        $CaseManifest,
+        (Join-Path $CaseRoot "actor_lifecycle.guestir.json"),
+        (Join-Path $CaseRoot "actor_lifecycle.state.json"),
+        (Join-Path $CaseRoot "actor_lifecycle.wasm"))) {
+        Assert-Condition (-not (Test-Path -LiteralPath $LoadableArtifact -PathType Leaf)) `
+            "$Name malformed schema left loadable artifact $LoadableArtifact"
+    }
+}
+
+Invoke-MalformedStateSchemaCase -Name "AliasesOutOfOrder" -Mutation @'
+$OwnerPrefix = "state:$($StateSchema.owner_type_id):"
+$StateSchema.slots[0].aliases = @(
+    ($OwnerPrefix + "OldZ"),
+    ($OwnerPrefix + "OldA"))
+'@
+
+Invoke-MalformedStateSchemaCase -Name "AliasIdentityConflict" -Mutation @'
+$StateSchema.slots[0].aliases = @([string]$StateSchema.slots[0].stable_id)
+'@
+
+Invoke-MalformedStateSchemaCase -Name "SlotsOutOfOrder" -Mutation @'
+$OriginalSlot = $StateSchema.slots[0]
+$EarlierSlot = $OriginalSlot.PSObject.Copy()
+$EarlierSlot.stable_id = "state:$($StateSchema.owner_type_id):!Earlier"
+$EarlierSlot.aliases = @()
+$EarlierSlot.offset = [int]$OriginalSlot.offset + [int]$OriginalSlot.size
+$StateSchema.slots = @($OriginalSlot, $EarlierSlot)
+'@
+
 $GuestFailureCompiler = Join-Path $RunRoot "GuestFailureCompiler.ps1"
 $GuestFailureBody = @"
 `$Model = Get-Content -Raw -LiteralPath '$SeedGuestIr' | ConvertFrom-Json
@@ -230,5 +299,5 @@ Assert-Condition (
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 4/4 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 7/7 passed"
 exit 0
