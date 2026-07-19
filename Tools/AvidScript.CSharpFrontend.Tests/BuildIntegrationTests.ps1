@@ -129,14 +129,45 @@ public static class RuntimePackageContractScript
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
-    $BindingPackagePath = Get-ChildItem `
-        -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
-        -Filter "package.json" `
-        -File `
-        -Recurse `
-        -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1 -ExpandProperty FullName
+    $RequiredAuthorizationFunctions = @("GetActorScale3D", "SetActorScale3D")
+    $BindingPackageCandidates = foreach ($Candidate in Get-ChildItem `
+            -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
+            -Filter "package.json" `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue) {
+        try {
+            $CandidateManifest = Get-Content -Raw -LiteralPath $Candidate.FullName | ConvertFrom-Json
+            $CandidateDescriptorPath = Join-Path $Candidate.DirectoryName ([string]$CandidateManifest.files.descriptor)
+            $CandidateDescriptor = Get-Content -Raw -LiteralPath $CandidateDescriptorPath | ConvertFrom-Json
+            $CandidateImportStableIds = @($CandidateManifest.required_imports | ForEach-Object { [string]$_.stable_id })
+            $ContainsRequiredFunctions = $true
+            foreach ($RequiredFunction in $RequiredAuthorizationFunctions) {
+                $AuthorizedBindings = @($CandidateDescriptor.bindings | Where-Object {
+                    [string]$_.ue_function -ceq $RequiredFunction -and
+                    $CandidateImportStableIds -ccontains [string]$_.stable_id
+                })
+                if ($AuthorizedBindings.Count -eq 0) {
+                    $ContainsRequiredFunctions = $false
+                    break
+                }
+            }
+            if ($ContainsRequiredFunctions) {
+                [pscustomobject]@{
+                    Path = $Candidate.FullName
+                    ImportCount = @($CandidateManifest.required_imports).Count
+                    LastWriteTime = $Candidate.LastWriteTime
+                }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+    $BindingPackagePath = $BindingPackageCandidates |
+        Sort-Object -Property @{ Expression = { $_.ImportCount }; Descending = $true },
+            @{ Expression = { $_.LastWriteTime }; Descending = $true } |
+        Select-Object -First 1 -ExpandProperty Path
 }
 Assert-Condition (
     -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -and
