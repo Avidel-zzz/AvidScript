@@ -7,6 +7,11 @@
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 
+DEFINE_LOG_CATEGORY_STATIC(
+	LogAvidScriptCSharpBuildPipeline,
+	Log,
+	All);
+
 namespace
 {
 void NormalizeAvidScriptCSharpBuildPipelinePath(FString& Path)
@@ -112,21 +117,145 @@ void CopyAvidScriptCSharpSemanticCacheAudit(
 	Destination.SemanticCacheDiagnosticMessage = Source.SemanticCacheDiagnosticMessage;
 }
 
-void RemoveAvidScriptCSharpFinalLoadableArtifacts(
+TArray<FString> GetAvidScriptCSharpCommittedArtifactPaths(
 	const FAvidScriptEditorCSharpBuildConfig& Config)
 {
-	const TArray<FString> Artifacts = {
+	return {
 		Config.ReportPath,
 		Config.ManifestPath,
 		FPaths::Combine(Config.OutputRoot, Config.ArtifactStem + TEXT(".wasm"))
 	};
-	for (const FString& Artifact : Artifacts)
+}
+
+bool BeginAvidScriptCSharpArtifactTransaction(
+	FAvidScriptEditorCSharpBuildPlan& Plan,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	Plan.ArtifactBackupRoot =
+		NormalizeAvidScriptCSharpBuildPipelinePathCopy(FPaths::Combine(
+			FPaths::ProjectIntermediateDir(),
+			TEXT("AvidScript"),
+			TEXT("CSharpBuildTransactions"),
+			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	if (!IFileManager::Get().MakeDirectory(
+			*Plan.ArtifactBackupRoot,
+			true))
 	{
-		if (!Artifact.IsEmpty())
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("artifact_backup_directory_failed"),
+			FString::Printf(
+				TEXT("C# committed artifact backup directory could not be created: %s"),
+				*Plan.ArtifactBackupRoot),
+			TEXT("verify the project Intermediate directory is writable and retry"),
+			OutResult);
+		Plan.ArtifactBackupRoot.Reset();
+		return false;
+	}
+
+	const TArray<FString> CommittedPaths =
+		GetAvidScriptCSharpCommittedArtifactPaths(Plan.FinalConfig);
+	for (int32 Index = 0; Index < CommittedPaths.Num(); ++Index)
+	{
+		FAvidScriptEditorCSharpBuildArtifactBackup Backup;
+		Backup.CommittedPath = CommittedPaths[Index];
+		Backup.bExisted =
+			!Backup.CommittedPath.IsEmpty()
+			&& FPaths::FileExists(Backup.CommittedPath);
+		if (Backup.bExisted)
 		{
-			IFileManager::Get().Delete(*Artifact, false, true, true);
+			Backup.BackupPath = FPaths::Combine(
+				Plan.ArtifactBackupRoot,
+				FString::Printf(
+					TEXT("%d_%s"),
+					Index,
+					*FPaths::GetCleanFilename(Backup.CommittedPath)));
+			if (IFileManager::Get().Copy(
+					*Backup.BackupPath,
+					*Backup.CommittedPath,
+					true,
+					true)
+				!= COPY_OK)
+			{
+				SetAvidScriptCSharpBuildPipelineFailure(
+					TEXT("artifact_backup_failed"),
+					FString::Printf(
+						TEXT("C# committed artifact could not be backed up: %s"),
+						*Backup.CommittedPath),
+					TEXT("verify the artifact and Intermediate directories are readable and writable"),
+					OutResult);
+				IFileManager::Get().DeleteDirectory(
+					*Plan.ArtifactBackupRoot,
+					false,
+					true);
+				Plan.ArtifactBackupRoot.Reset();
+				Plan.ArtifactBackups.Reset();
+				return false;
+			}
+		}
+		Plan.ArtifactBackups.Add(MoveTemp(Backup));
+	}
+	Plan.bArtifactTransactionActive = true;
+	return true;
+}
+
+bool FinishAvidScriptCSharpArtifactTransaction(
+	FAvidScriptEditorCSharpBuildPlan& Plan,
+	const bool bCommit,
+	FString& OutErrorMessage)
+{
+	OutErrorMessage.Reset();
+	if (!Plan.bArtifactTransactionActive)
+	{
+		return true;
+	}
+
+	if (!bCommit)
+	{
+		for (const FAvidScriptEditorCSharpBuildArtifactBackup& Backup :
+			Plan.ArtifactBackups)
+		{
+			if (Backup.CommittedPath.IsEmpty())
+			{
+				continue;
+			}
+			if (Backup.bExisted)
+			{
+				if (IFileManager::Get().Copy(
+						*Backup.CommittedPath,
+						*Backup.BackupPath,
+						true,
+						true)
+					!= COPY_OK)
+				{
+					OutErrorMessage = FString::Printf(
+						TEXT("C# committed artifact could not be restored: %s"),
+						*Backup.CommittedPath);
+					return false;
+				}
+			}
+			else if (FPaths::FileExists(Backup.CommittedPath)
+				&& !IFileManager::Get().Delete(
+					*Backup.CommittedPath,
+					false,
+					true,
+					true))
+			{
+				OutErrorMessage = FString::Printf(
+					TEXT("New C# artifact could not be removed during rollback: %s"),
+					*Backup.CommittedPath);
+				return false;
+			}
 		}
 	}
+
+	IFileManager::Get().DeleteDirectory(
+		*Plan.ArtifactBackupRoot,
+		false,
+		true);
+	Plan.ArtifactBackupRoot.Reset();
+	Plan.ArtifactBackups.Reset();
+	Plan.bArtifactTransactionActive = false;
+	return true;
 }
 
 FString MakeAvidScriptCSharpBootstrapRoot()
@@ -342,6 +471,10 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 	{
 		return false;
 	}
+	if (!BeginAvidScriptCSharpArtifactTransaction(OutPlan, OutResult))
+	{
+		return false;
+	}
 
 	if (!OutPlan.bAutomaticBindingSlice)
 	{
@@ -354,7 +487,6 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 		return true;
 	}
 
-	RemoveAvidScriptCSharpFinalLoadableArtifacts(OutPlan.FinalConfig);
 	OutPlan.BootstrapRoot = MakeAvidScriptCSharpBootstrapRoot();
 	OutPlan.BootstrapConfig = OutPlan.FinalConfig;
 	OutPlan.BootstrapConfig.OutputRoot = OutPlan.BootstrapRoot;
@@ -481,10 +613,34 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
 }
 
 bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
-	const FAvidScriptEditorCSharpBuildPlan& Plan,
+	FAvidScriptEditorCSharpBuildPlan& Plan,
 	const FAvidScriptEditorCSharpBuildResult& FinalResult,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
+	auto FinishArtifactTransaction = [&Plan, &OutResult](
+		const bool bCommit)
+	{
+		FString RollbackError;
+		if (FinishAvidScriptCSharpArtifactTransaction(
+				Plan,
+				bCommit,
+				RollbackError))
+		{
+			return bCommit;
+		}
+
+		const FString BuildError = OutResult.ErrorMessage;
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("artifact_rollback_failed"),
+			RollbackError,
+			FString::Printf(
+				TEXT("recover the previous artifacts from %s before rebuilding; original failure: %s"),
+				*Plan.ArtifactBackupRoot,
+				BuildError.IsEmpty() ? TEXT("<none>") : *BuildError),
+			OutResult);
+		return false;
+	};
+
 	if (!Plan.bAutomaticBindingSlice)
 	{
 		ApplyAvidScriptCSharpBuildPipelineOutcome(
@@ -492,7 +648,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 			Plan,
 			FAvidScriptCSharpBuildInvocationCounts::FromResult(FinalResult),
 			OutResult);
-		return FinalResult.bSucceeded;
+		return FinishArtifactTransaction(FinalResult.bSucceeded);
 	}
 
 	FAvidScriptEditorCSharpBuildResult AggregateResult = FinalResult;
@@ -521,12 +677,25 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 		Plan,
 		TotalInvocationCounts,
 		OutResult);
-	return FinalResult.bSucceeded;
+	return FinishArtifactTransaction(FinalResult.bSucceeded);
 }
 
 void FAvidScriptEditorCSharpBuildPipeline::Cleanup(
 	FAvidScriptEditorCSharpBuildPlan& Plan)
 {
+	FString RollbackError;
+	if (!FinishAvidScriptCSharpArtifactTransaction(
+			Plan,
+			false,
+			RollbackError))
+	{
+		UE_LOG(
+			LogAvidScriptCSharpBuildPipeline,
+			Error,
+			TEXT("C# build artifact rollback failed during cleanup. backup=%s error=%s"),
+			*Plan.ArtifactBackupRoot,
+			*RollbackError);
+	}
 	if (!Plan.BootstrapRoot.IsEmpty())
 	{
 		IFileManager::Get().DeleteDirectory(

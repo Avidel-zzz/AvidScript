@@ -4,6 +4,13 @@
 
 #include "CoreMinimal.h"
 
+struct FAvidScriptEditorCSharpBuildArtifactBackup
+{
+	FString CommittedPath;
+	FString BackupPath;
+	bool bExisted = false;
+};
+
 struct FAvidScriptEditorCSharpBuildPlan
 {
 	FAvidScriptEditorCSharpBuildConfig FinalConfig;
@@ -12,8 +19,11 @@ struct FAvidScriptEditorCSharpBuildPlan
 	FString AuthorizationBindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FString BootstrapRoot;
+	FString ArtifactBackupRoot;
+	TArray<FAvidScriptEditorCSharpBuildArtifactBackup> ArtifactBackups;
 	bool bAutomaticBindingSlice = false;
 	bool bBootstrapCompleted = false;
+	bool bArtifactTransactionActive = false;
 };
 
 class FAvidScriptEditorCSharpBuildPipeline
@@ -30,7 +40,7 @@ public:
 		FAvidScriptEditorCSharpBuildResult& OutResult);
 
 	static bool CompleteFinal(
-		const FAvidScriptEditorCSharpBuildPlan& Plan,
+		FAvidScriptEditorCSharpBuildPlan& Plan,
 		const FAvidScriptEditorCSharpBuildResult& FinalResult,
 		FAvidScriptEditorCSharpBuildResult& OutResult);
 

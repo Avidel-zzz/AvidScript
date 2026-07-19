@@ -9,6 +9,8 @@
 #include "AvidScriptEditorMenuRegistrar.h"
 
 #include "Components/SceneComponent.h"
+#include "Containers/Ticker.h"
+#include "Dom/JsonObject.h"
 #include "Editor.h"
 #include "HAL/FileManager.h"
 #include "Engine/Engine.h"
@@ -19,7 +21,11 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -155,6 +161,48 @@ FString MakeAvidScriptEditorModuleCSharpProfileSourceText()
 	FFileHelper::LoadFileToString(SourceText, *SamplePath);
 	return SourceText;
 }
+
+bool WriteAvidScriptRejectedReloadManifestCandidate(
+	const FString& ManifestPath,
+	FString& OutOriginalText)
+{
+	OutOriginalText.Reset();
+	if (!FFileHelper::LoadFileToString(OutOriginalText, *ManifestPath))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> ManifestObject;
+	const TSharedRef<TJsonReader<>> Reader =
+		TJsonReaderFactory<>::Create(OutOriginalText);
+	if (!FJsonSerializer::Deserialize(Reader, ManifestObject)
+		|| !ManifestObject.IsValid())
+	{
+		return false;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> RequiredExports;
+	const TArray<TSharedPtr<FJsonValue>>* ExistingRequiredExports = nullptr;
+	if (ManifestObject->TryGetArrayField(
+			TEXT("required_exports"),
+			ExistingRequiredExports)
+		&& ExistingRequiredExports != nullptr)
+	{
+		RequiredExports = *ExistingRequiredExports;
+	}
+	RequiredExports.Add(MakeShared<FJsonValueString>(
+		TEXT("avid_phase45_missing_reload_export")));
+	ManifestObject->SetArrayField(
+		TEXT("required_exports"),
+		MoveTemp(RequiredExports));
+
+	FString RejectedText;
+	const TSharedRef<TJsonWriter<>> Writer =
+		TJsonWriterFactory<>::Create(&RejectedText);
+	return FJsonSerializer::Serialize(ManifestObject.ToSharedRef(), Writer)
+		&& FFileHelper::SaveStringToFile(RejectedText, *ManifestPath);
+}
+
 AActor* SpawnAvidScriptEditorModuleCSharpBindingActor(UWorld& World)
 {
 	AActor* Actor = World.SpawnActor<AActor>();
@@ -564,6 +612,10 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	double Now = 1.0;
 	AActor* ReloadTarget = nullptr;
 	int32 ReloadBuildCount = 0;
+	int32 EditorHeartbeatCount = 0;
+	int32 LastBuildHeartbeatCount = 0;
+	bool bRejectNextReloadCandidate = false;
+	FString ReloadCandidateManifestPath;
 	FFakeAvidScriptEditorModuleLiveReloadWatchHost* FakeWatchHost =
 		new FFakeAvidScriptEditorModuleLiveReloadWatchHost();
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> LiveReloadService(
@@ -574,22 +626,64 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 				++ReloadBuildCount;
 				return FAvidScriptEditorCSharpAsyncBuildJobFactory::Create();
 			},
-			[&ReloadTarget](
+			[this,
+			 &ReloadTarget,
+			 &bRejectNextReloadCandidate,
+			 &ReloadCandidateManifestPath](
 				const FString& ReportPath,
 				AActor* Target,
 				FAvidScriptEditorComponentBindingResult& OutBindingResult)
 			{
 				ReloadTarget = Target;
-				return FAvidScriptEditorComponentBindingService::
+				FString OriginalManifestText;
+				if (bRejectNextReloadCandidate)
+				{
+					bRejectNextReloadCandidate = false;
+					if (!TestTrue(
+							TEXT("Real reload candidate manifest can be made invalid"),
+							WriteAvidScriptRejectedReloadManifestCandidate(
+								ReloadCandidateManifestPath,
+								OriginalManifestText)))
+					{
+						return false;
+					}
+				}
+
+				const bool bApplied = FAvidScriptEditorComponentBindingService::
 					ApplyCSharpReportToActor(
 						ReportPath,
 						Target,
 						OutBindingResult);
+				if (!OriginalManifestText.IsEmpty())
+				{
+					TestTrue(
+						TEXT("Rejected candidate manifest is restored after binding probe"),
+						FFileHelper::SaveStringToFile(
+							OriginalManifestText,
+							*ReloadCandidateManifestPath));
+				}
+				return bApplied;
 			},
 			[&Now]() { return Now; }));
 	FAvidScriptEditorCSharpLiveReloadService* LiveReloadServicePtr = LiveReloadService.Get();
-	auto PumpLiveReloadBuild = [LiveReloadServicePtr]()
+	const FTSTicker::FDelegateHandle HeartbeatHandle =
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda(
+				[&EditorHeartbeatCount](float)
+				{
+					++EditorHeartbeatCount;
+					return true;
+				}));
+	ON_SCOPE_EXIT
 	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatHandle);
+	};
+	auto PumpLiveReloadBuild = [
+		LiveReloadServicePtr,
+		&EditorHeartbeatCount,
+		&LastBuildHeartbeatCount]()
+	{
+		const int32 InitialHeartbeatCount = EditorHeartbeatCount;
 		const double DeadlineSeconds = FPlatformTime::Seconds() + 90.0;
 		while (LiveReloadServicePtr->IsRunning()
 			&& LiveReloadServicePtr->GetLastResult().Status ==
@@ -597,8 +691,10 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 			&& FPlatformTime::Seconds() < DeadlineSeconds)
 		{
 			FPlatformProcess::Sleep(0.01f);
-			LiveReloadServicePtr->Tick();
+			FTSTicker::GetCoreTicker().Tick(0.01f);
 		}
+		LastBuildHeartbeatCount =
+			EditorHeartbeatCount - InitialHeartbeatCount;
 		return LiveReloadServicePtr->GetLastResult().Status !=
 			EAvidScriptEditorCSharpLiveReloadServiceStatus::Building;
 	};
@@ -637,6 +733,7 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestEqual(TEXT("Project C# workspace performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
 	TestTrue(TEXT("Project C# workspace report exists"), FPaths::FileExists(BuildResult.ReportPath));
 	TestTrue(TEXT("Project C# workspace manifest exists"), FPaths::FileExists(BuildResult.ManifestPath));
+	ReloadCandidateManifestPath = BuildResult.ManifestPath;
 	TestTrue(TEXT("Project C# workspace runtime package exists"), FPaths::FileExists(BuildResult.BindingPackagePath));
 	TestTrue(TEXT("Project C# workspace binding succeeds"), BindingResult.bSucceeded);
 	TestNotNull(TEXT("Project C# workspace returns component"), BindingResult.Component);
@@ -702,6 +799,9 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	Now = 1.35;
 	LiveReloadServicePtr->Tick();
 	TestTrue(TEXT("Real automatic reload reaches a terminal state"), PumpLiveReloadBuild());
+	TestTrue(
+		TEXT("Editor CoreTicker heartbeat advances during the real asynchronous build"),
+		LastBuildHeartbeatCount > 0);
 	TestEqual(TEXT("Reload keeps the initial bound Actor"), ReloadTarget, Actor);
 	TestEqual(TEXT("Two quick changes trigger one real reload build"), ReloadBuildCount, 1);
 	TestEqual(
@@ -720,6 +820,21 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		BindingResult.Component->GetRuntimeStats().SuccessfulReloadCount,
 		1);
 	const FString ReloadedManifestPath = BindingResult.Component->GetRuntimeStats().ScriptManifestPath;
+	const FString ReloadedWasmPath = FPaths::Combine(
+		BuildResult.OutputRoot,
+		BuildResult.ArtifactStem + TEXT(".wasm"));
+	FString CommittedManifestText;
+	TArray<uint8> CommittedWasmBytes;
+	TestTrue(
+		TEXT("Committed reload manifest bytes can be captured"),
+		FFileHelper::LoadFileToString(
+			CommittedManifestText,
+			*ReloadedManifestPath));
+	TestTrue(
+		TEXT("Committed reload WASM bytes can be captured"),
+		FFileHelper::LoadFileToArray(
+			CommittedWasmBytes,
+			*ReloadedWasmPath));
 	Actor->SetActorRotation(FRotator::ZeroRotator);
 	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
 	TestTrue(
@@ -745,6 +860,25 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		TEXT("Bad source preserves committed runtime manifest"),
 		BindingResult.Component->GetRuntimeStats().ScriptManifestPath,
 		ReloadedManifestPath);
+	FString ManifestTextAfterBuildFailure;
+	TArray<uint8> WasmBytesAfterBuildFailure;
+	TestTrue(
+		TEXT("Bad source preserves committed manifest artifact"),
+		FFileHelper::LoadFileToString(
+			ManifestTextAfterBuildFailure,
+			*ReloadedManifestPath));
+	TestEqual(
+		TEXT("Bad source preserves committed manifest bytes"),
+		ManifestTextAfterBuildFailure,
+		CommittedManifestText);
+	TestTrue(
+		TEXT("Bad source preserves committed WASM artifact"),
+		FFileHelper::LoadFileToArray(
+			WasmBytesAfterBuildFailure,
+			*ReloadedWasmPath));
+	TestTrue(
+		TEXT("Bad source preserves committed WASM bytes"),
+		WasmBytesAfterBuildFailure == CommittedWasmBytes);
 	Actor->SetActorRotation(FRotator::ZeroRotator);
 	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
 	TestTrue(
@@ -753,6 +887,39 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestTrue(
 		TEXT("Project C# source can be restored after automatic build failure"),
 		FFileHelper::SaveStringToFile(OriginalSourceText, *WorkspaceResult.SourcePath));
+
+	bRejectNextReloadCandidate = true;
+	FakeWatchHost->Emit(WorkspaceResult.SourcePath);
+	LiveReloadServicePtr->Tick();
+	Now = LiveReloadServicePtr->GetStats().PendingDeadlineSeconds;
+	LiveReloadServicePtr->Tick();
+	TestTrue(
+		TEXT("Rejected candidate reload reaches a terminal state"),
+		PumpLiveReloadBuild());
+	TestEqual(
+		TEXT("Rejected candidate reports automatic binding failure"),
+		LiveReloadServicePtr->GetLastResult().Status,
+		EAvidScriptEditorCSharpLiveReloadServiceStatus::BuildFailed);
+	TestEqual(
+		TEXT("Rejected candidate preserves binding failure cause"),
+		LiveReloadServicePtr->GetLastResult().BuildResult.BindingResult.ErrorCategory,
+		FString(TEXT("reload_rejected")));
+	TestEqual(
+		TEXT("Rejected candidate does not add a successful runtime reload"),
+		BindingResult.Component->GetRuntimeStats().SuccessfulReloadCount,
+		1);
+	TestEqual(
+		TEXT("Rejected candidate records one runtime rejection"),
+		BindingResult.Component->GetRuntimeStats().RejectedReloadCount,
+		1);
+	Actor->SetActorRotation(FRotator::ZeroRotator);
+	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestTrue(
+		TEXT("Previous C# runtime Tick continues after candidate binding rejection"),
+		FMath::IsNearlyEqual(
+			FMath::Abs(Actor->GetActorRotation().Yaw),
+			90.0,
+			0.01));
 
 	FAvidScriptEditorCSharpLiveReloadServiceResult StopResult;
 	TestTrue(TEXT("Project C# live reload stop is idempotent"), Module.ExecuteStopCSharpWorkspaceLiveReload(StopResult));

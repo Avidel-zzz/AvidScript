@@ -10,6 +10,12 @@ class FFakeAvidScriptCSharpBuildProcess final
 	: public IAvidScriptEditorCSharpBuildProcess
 {
 public:
+	explicit FFakeAvidScriptCSharpBuildProcess(
+		int32* InFixtureCancelCount = nullptr)
+		: FixtureCancelCount(InFixtureCancelCount)
+	{
+	}
+
 	virtual bool Launch(
 		const FAvidScriptEditorCSharpBuildInvocation& Invocation,
 		FString& OutErrorMessage) override
@@ -37,6 +43,10 @@ public:
 	virtual void Cancel() override
 	{
 		++CancelCount;
+		if (FixtureCancelCount != nullptr)
+		{
+			++(*FixtureCancelCount);
+		}
 		Snapshot.State =
 			EAvidScriptEditorCSharpBuildProcessState::Canceled;
 		Snapshot.ProcessExitCode = -1;
@@ -71,6 +81,9 @@ public:
 	int32 LaunchCount = 0;
 	int32 CancelCount = 0;
 	FAvidScriptEditorCSharpBuildProcessSnapshot Snapshot;
+
+private:
+	int32* FixtureCancelCount = nullptr;
 };
 
 class FFakeAvidScriptCSharpAsyncBuildBackend final
@@ -167,7 +180,8 @@ struct FAvidScriptCSharpAsyncBuildJobFixture
 			[this, bLaunchSucceeds]()
 			{
 				FFakeAvidScriptCSharpBuildProcess* NewProcess =
-					new FFakeAvidScriptCSharpBuildProcess();
+					new FFakeAvidScriptCSharpBuildProcess(
+						&CancelCount);
 				NewProcess->bLaunchSucceeds = bLaunchSucceeds;
 				Processes.Add(NewProcess);
 				return TUniquePtr<IAvidScriptEditorCSharpBuildProcess>(
@@ -183,6 +197,7 @@ struct FAvidScriptCSharpAsyncBuildJobFixture
 	TArray<FFakeAvidScriptCSharpBuildProcess*> Processes;
 	TUniquePtr<FAvidScriptEditorCSharpAsyncBuildJob> Job;
 	double NowSeconds = 1.0;
+	int32 CancelCount = 0;
 };
 } // namespace
 
@@ -355,13 +370,11 @@ bool FAvidScriptEditorCSharpAsyncBuildJobCancelTest::RunTest(
 {
 	FAvidScriptCSharpAsyncBuildJobFixture Fixture(false);
 	TestTrue(TEXT("Cancelable job starts"), Fixture.Job->Start(TEXT("cancel.json")));
-	FFakeAvidScriptCSharpBuildProcess* Process = Fixture.Processes[0];
 	Fixture.Job->Cancel();
 	Fixture.Job->Cancel();
-	TestEqual(TEXT("Cancel reaches active process once"), Process->CancelCount, 1);
-	Fixture.Job->Tick();
+	TestEqual(TEXT("Cancel reaches active process once"), Fixture.CancelCount, 1);
 	TestEqual(
-		TEXT("Canceled job is terminal"),
+		TEXT("Canceled job is immediately terminal"),
 		Fixture.Job->GetProgress().Stage,
 		EAvidScriptEditorCSharpAsyncBuildStage::Canceled);
 	TestTrue(TEXT("Canceled progress records request"), Fixture.Job->GetProgress().bCancelRequested);

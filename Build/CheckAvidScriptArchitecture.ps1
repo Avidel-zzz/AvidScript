@@ -370,6 +370,9 @@ foreach ($RequiredBuildPipelineContract in @(
     'FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay',
     'FAvidScriptEditorCSharpBindingSliceService::Publish',
     'CSharpBootstrap',
+    'CSharpBuildTransactions',
+    'BeginAvidScriptCSharpArtifactTransaction',
+    'FinishAvidScriptCSharpArtifactTransaction',
     'PreparedBuildReportPath',
     'Plan.FinalConfig.PreparedBuildReportPath',
     'FAvidScriptFrontendReportReader::LoadFromFile'
@@ -387,6 +390,19 @@ foreach ($ForbiddenBuildPipelineConcern in @(
 )) {
     if ($CSharpBuildPipelineSource.Contains($ForbiddenBuildPipelineConcern)) {
         Add-Violation "C# BuildPipeline must not own process, JSON, descriptor, or Actor binding concern $ForbiddenBuildPipelineConcern"
+    }
+}
+foreach ($ForbiddenArtifactTransactionOwner in @(
+    $CSharpBuildServiceSource,
+    $CSharpBuildInvokerSource,
+    $CSharpAsyncBuildJobSource,
+    $CSharpLiveReloadServiceSource,
+    $CSharpLiveReloadBuildStateSource
+)) {
+    if ($ForbiddenArtifactTransactionOwner.Contains('BeginAvidScriptCSharpArtifactTransaction') -or
+        $ForbiddenArtifactTransactionOwner.Contains('FinishAvidScriptCSharpArtifactTransaction') -or
+        $ForbiddenArtifactTransactionOwner.Contains('CSharpBuildTransactions')) {
+        Add-Violation 'C# committed artifact transaction must be owned only by BuildPipeline'
     }
 }
 foreach ($RequiredAsyncBuildBackendContract in @(

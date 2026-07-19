@@ -216,6 +216,17 @@ void FAvidScriptEditorCSharpAsyncBuildJob::Cancel()
 	{
 		Progress.bCancelRequested = true;
 		Process->Cancel();
+		Process.Reset();
+		FAvidScriptEditorCSharpAsyncBuildResult CanceledResult;
+		CanceledResult.ErrorCategory =
+			TEXT("live_reload_build_canceled");
+		CanceledResult.ErrorMessage =
+			TEXT("C# asynchronous build was canceled.");
+		CanceledResult.NextAction =
+			TEXT("save the C# source again to start a new build");
+		SetTerminal(
+			EAvidScriptEditorCSharpAsyncBuildStage::Canceled,
+			MoveTemp(CanceledResult));
 	}
 }
 

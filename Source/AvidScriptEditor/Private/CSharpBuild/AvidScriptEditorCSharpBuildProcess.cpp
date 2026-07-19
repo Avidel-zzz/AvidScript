@@ -178,7 +178,8 @@ void FAvidScriptEditorCSharpMonitoredBuildProcess::Cancel()
 	if (PendingState)
 	{
 		FScopeLock Lock(&PendingState->Mutex);
-		if (PendingState->State == EAvidScriptEditorCSharpBuildProcessState::Running)
+		if (PendingState->State == EAvidScriptEditorCSharpBuildProcessState::Running
+			&& !PendingState->bCancelRequested)
 		{
 			PendingState->bCancelRequested = true;
 			++PendingState->Generation;

@@ -3,8 +3,8 @@
 #include "DirectoryWatcherModule.h"
 #include "HAL/FileManager.h"
 #include "IDirectoryWatcher.h"
-#include "Misc/ScopeLock.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
 #include "Modules/ModuleManager.h"
 
 namespace
