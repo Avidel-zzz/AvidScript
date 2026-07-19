@@ -94,6 +94,8 @@ public:
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	void Unload();
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
+	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
+	bool WriteStateBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError);
 
 	bool IsLoaded() const;
 	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }

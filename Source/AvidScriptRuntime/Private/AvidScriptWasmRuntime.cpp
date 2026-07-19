@@ -187,6 +187,36 @@ FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
 	Unload();
 }
 
+bool FAvidScriptWasmRuntimeInstance::ReadStateBytes(
+	uint32 GuestAddress,
+	TArrayView<uint8> OutBytes,
+	FString& OutError) const
+{
+	OutError.Reset();
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend ? VmBackend->GetGuestMemory() : nullptr;
+	if (!IsLoaded() || GuestMemory == nullptr)
+	{
+		OutError = TEXT("Loaded VM guest memory is unavailable for state migration.");
+		return false;
+	}
+	return GuestMemory->ReadBytes(GuestAddress, OutBytes, OutError);
+}
+
+bool FAvidScriptWasmRuntimeInstance::WriteStateBytes(
+	uint32 GuestAddress,
+	TConstArrayView<uint8> Bytes,
+	FString& OutError)
+{
+	OutError.Reset();
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend ? VmBackend->GetGuestMemory() : nullptr;
+	if (!IsLoaded() || GuestMemory == nullptr)
+	{
+		OutError = TEXT("Loaded VM guest memory is unavailable for state migration.");
+		return false;
+	}
+	return GuestMemory->WriteBytes(GuestAddress, Bytes, OutError);
+}
+
 bool FAvidScriptWasmRuntimeInstance::LoadEmbeddedSmokeModule(FAvidScriptWasmSmokeResult& OutResult)
 {
 	return LoadModule(

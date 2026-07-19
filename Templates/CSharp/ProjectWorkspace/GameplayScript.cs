@@ -5,6 +5,7 @@ namespace AvidScript;
 public static class GameplayScript
 {
     private const float RotationSpeedDegreesPerSecond = 90.0f;
+    private static float TotalRotationDegrees;
 
     public static int Main() => 0;
 
@@ -17,6 +18,7 @@ public static class GameplayScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
+        TotalRotationDegrees += RotationSpeedDegreesPerSecond * deltaSeconds;
         FRotator rotation = UE.Self.GetActorRotation();
         UE.Self.SetActorRotation(
             new FRotator(
@@ -24,6 +26,8 @@ public static class GameplayScript
                 rotation.Yaw + RotationSpeedDegreesPerSecond * deltaSeconds,
                 rotation.Roll),
             false);
+        UE.Self.SetActorScale3D(
+            new FVector(1.0f + TotalRotationDegrees / 1000.0f, 1.0f, 1.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_timer")]

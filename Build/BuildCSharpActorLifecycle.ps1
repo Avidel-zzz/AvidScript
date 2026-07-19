@@ -331,6 +331,7 @@ function Write-BuildReport {
             frontend_file = if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $FrontendArtifactPath } else { "" }
             semantic_file = if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $SemanticArtifactPath } else { "" }
             guest_ir_file = if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $GuestIrArtifactPath } else { "" }
+            state_schema_file = if (Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $StateSchemaArtifactPath } else { "" }
         }
         frontend = [ordered]@{
             schema_version = if ($null -eq $FrontendModel) { 0 } else { [int]$FrontendModel.schema_version }
@@ -356,6 +357,13 @@ function Write-BuildReport {
             succeeded = if ($null -eq $GuestIrModel) { $false } else { [bool]$GuestIrModel.succeeded }
             semantic_sha256 = if ($null -eq $GuestIrModel) { "" } else { [string]$GuestIrModel.provenance.semantic_sha256 }
             sha256 = Get-Sha256Hex $GuestIrArtifactPath
+        }
+        state_migration = [ordered]@{
+            schema_version = if ($null -eq $StateSchemaModel) { 0 } else { [int]$StateSchemaModel.schema_version }
+            strategy = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.strategy }
+            owner_type_id = if ($null -eq $StateSchemaModel) { "" } else { [string]$StateSchemaModel.owner_type_id }
+            slot_count = if ($null -eq $StateSchemaModel) { 0 } else { @($StateSchemaModel.slots).Count }
+            sha256 = Get-Sha256Hex $StateSchemaArtifactPath
         }
         wasm = [ordered]@{
             sha256 = Get-Sha256Hex $WasmArtifactPath
@@ -404,6 +412,7 @@ $SemanticCacheRoot = [System.IO.Path]::GetFullPath($SemanticCacheRoot)
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
+$StateSchemaArtifactPath = Join-Path $OutputRoot "$ArtifactStem.state.json"
 $WasmArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm"
 $WasmInspectionArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm.inspect.json"
 $LegacyAdapterWasmPath = Join-Path $OutputRoot "$ArtifactStem.csharp_adapter.wasm"
@@ -411,6 +420,7 @@ $LegacyDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
 $SemanticModel = $null
 $GuestIrModel = $null
+$StateSchemaModel = $null
 $WasmInspectionModel = $null
 $SelectedScriptTypeName = ""
 $RequiredExports = @()
@@ -454,6 +464,7 @@ foreach ($Artifact in @(
     $FrontendArtifactPath,
     $SemanticArtifactPath,
     $GuestIrArtifactPath,
+    $StateSchemaArtifactPath,
     $WasmArtifactPath,
     $WasmInspectionArtifactPath,
     $LegacyAdapterWasmPath,
@@ -733,6 +744,7 @@ $CompilerArguments = @(
     "-DotNetPath", $DotNet.Path,
     "-SemanticPath", $SemanticArtifactPath,
     "-GuestIrPath", $GuestIrArtifactPath,
+    "-StateSchemaPath", $StateSchemaArtifactPath,
     "-WasmPath", $WasmArtifactPath,
     "-InspectionPath", $WasmInspectionArtifactPath,
     "-Configuration", $Configuration)
@@ -749,6 +761,14 @@ if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) {
         $Diagnostics += [ordered]@{ code = "guest_ir_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
     }
 }
+if (Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf) {
+    try {
+        $StateSchemaModel = Get-Content -Raw -LiteralPath $StateSchemaArtifactPath | ConvertFrom-Json
+    }
+    catch {
+        $Diagnostics += [ordered]@{ code = "state_schema_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
+    }
+}
 if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
     try {
         $WasmInspectionModel = Get-Content -Raw -LiteralPath $WasmInspectionArtifactPath | ConvertFrom-Json
@@ -758,7 +778,7 @@ if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
     }
 }
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
-if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or $null -eq $WasmInspectionModel -or
+if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or $null -eq $StateSchemaModel -or $null -eq $WasmInspectionModel -or
     -not (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf)) {
     if (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf) {
         Remove-Item -LiteralPath $WasmArtifactPath -Force
@@ -777,6 +797,7 @@ if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or $null -eq $WasmInspec
 
 $SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
 $GuestIrSha256 = Get-Sha256Hex $GuestIrArtifactPath
+$StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
 $WasmSha256 = Get-Sha256Hex $WasmArtifactPath
 $RequiredExports = @($GuestIrModel.exports | ForEach-Object { [string]$_.name })
 $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind -eq 0 } | ForEach-Object { [string]$_.name })
@@ -850,9 +871,13 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
+$StateSchemaContractValid = [int]$StateSchemaModel.schema_version -eq 1 -and
+    [string]$StateSchemaModel.strategy -eq "host_snapshot" -and
+    -not [string]::IsNullOrWhiteSpace([string]$StateSchemaModel.owner_type_id) -and
+    $null -ne $StateSchemaModel.slots
 $WasmInspectionValid = [int]$WasmInspectionModel.schema_version -eq 1 -and
     [string]$WasmInspectionModel.sha256 -eq $WasmSha256
-if (-not $GuestContractValid -or -not $WasmInspectionValid -or
+if (-not $GuestContractValid -or -not $StateSchemaContractValid -or -not $WasmInspectionValid -or
     $MissingDeclaredExports.Count -gt 0 -or $MissingObservedExports.Count -gt 0) {
     Remove-LoadableArtifacts
     $Diagnostics += [ordered]@{
@@ -906,6 +931,7 @@ $Manifest = [ordered]@{
         version = [string]$GuestIrModel.ir_version
         sha256 = $GuestIrSha256
     }
+    state_migration = $StateSchemaModel
     wasm = [ordered]@{
         file = Convert-ToProjectRelativePath $WasmArtifactPath
         sha256 = $WasmSha256

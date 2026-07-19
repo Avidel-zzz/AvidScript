@@ -11,7 +11,6 @@ public static class ActorLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        ElapsedSeconds = 0.0f;
         UE.Self.SetActorLocation(new FVector(100.0f, 200.0f, 300.0f));
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 0.0f));
         UE.Self.SetActorRotation(FRotator.Zero);

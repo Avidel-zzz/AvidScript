@@ -2,6 +2,7 @@
 
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
+#include "StateMigration/AvidScriptRuntimeStateMigration.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
@@ -157,6 +158,37 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
 		return false;
 	}
+
+	FAvidScriptRuntimeStateMigrationResult MigrationResult;
+	if (LiveRuntime && !FAvidScriptRuntimeStateMigration::Migrate(
+		*LiveRuntime,
+		LiveManifest,
+		*CandidateRuntime,
+		Manifest,
+		MigrationResult))
+	{
+		OutResult.bStateMigrationAttempted = MigrationResult.bAttempted;
+		OutResult.StateMigrationStableId = MigrationResult.StableId;
+		SetReloadFailure(
+			OutResult,
+			TEXT("<state_migration>"),
+			MigrationResult.ErrorCategory,
+			FString::Printf(
+				TEXT("stable_id=%s; %s"),
+				MigrationResult.StableId.IsEmpty() ? TEXT("<none>") : *MigrationResult.StableId,
+				*MigrationResult.ErrorDetails),
+			TEXT("keep the previous runtime active and make the changed field transient or provide a compatible type"));
+		CandidateRuntime->Unload();
+		++RejectedReloadCount;
+		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
+		return false;
+	}
+
+	OutResult.bStateMigrationAttempted = MigrationResult.bAttempted;
+	OutResult.bStateMigrationApplied = MigrationResult.bAttempted && MigrationResult.bSucceeded;
+	OutResult.StateMigrationMigratedSlotCount = MigrationResult.MigratedSlotCount;
+	OutResult.StateMigrationMigratedByteCount = MigrationResult.MigratedByteCount;
+	OutResult.StateMigrationSkippedSlotCount = MigrationResult.SkippedSlotCount;
 
 	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
 	{

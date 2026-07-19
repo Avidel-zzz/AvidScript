@@ -1,5 +1,5 @@
 param(
-    [string]$DotNetPath = "C:\Users\user0\.dotnet\dotnet.exe"
+    [string]$DotNetPath = (Join-Path $env:USERPROFILE ".dotnet\dotnet.exe")
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +29,7 @@ param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [Parameter(Mandatory = $true)][string]$SemanticPath,
     [Parameter(Mandatory = $true)][string]$GuestIrPath,
+    [Parameter(Mandatory = $true)][string]$StateSchemaPath,
     [Parameter(Mandatory = $true)][string]$WasmPath,
     [Parameter(Mandatory = $true)][string]$InspectionPath,
     [string]$Configuration = "Release"
@@ -83,8 +84,10 @@ Assert-Condition (
     "seed build invocation counts differ"
 Assert-Condition ((Get-Content -Raw -LiteralPath $SeedManifest).IndexOf("build_reuse", [System.StringComparison]::Ordinal) -lt 0) "seed manifest leaked build_reuse"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
+$SeedStateSchema = Join-Path $SeedRoot "actor_lifecycle.state.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
+Assert-Condition (Test-Path -LiteralPath $SeedStateSchema -PathType Leaf) "seed state schema is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedWasm -PathType Leaf) "seed WASM is missing"
 
 $GuestFailureCompiler = Join-Path $RunRoot "GuestFailureCompiler.ps1"
@@ -120,6 +123,7 @@ Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "act
 $MissingExportCompiler = Join-Path $RunRoot "MissingExportCompiler.ps1"
 $MissingExportBody = @"
 Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
 `$Bytes = [System.IO.File]::ReadAllBytes('$SeedWasm')
 `$From = [System.Text.Encoding]::ASCII.GetBytes('avid_on_tick')
 `$To = [System.Text.Encoding]::ASCII.GetBytes('avid_on_tock')

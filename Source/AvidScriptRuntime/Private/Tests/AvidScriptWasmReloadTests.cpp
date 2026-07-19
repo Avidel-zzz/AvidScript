@@ -90,8 +90,12 @@ bool WriteReloadManifestFixture(
 	const FString& ManifestPath,
 	const FString& ModuleId,
 	const FString& WasmPath,
-	const FString& WasmSha256)
+	const FString& WasmSha256,
+	const FString& StateMigrationJson = FString())
 {
+	const FString StateMigrationField = StateMigrationJson.IsEmpty()
+		? FString()
+		: FString::Printf(TEXT("  \"state_migration\": %s,\n"), *StateMigrationJson);
 	const FString ManifestJson = FString::Printf(
 		TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
@@ -99,12 +103,14 @@ bool WriteReloadManifestFixture(
 		TEXT("  \"abi_version\": 1,\n")
 		TEXT("  \"language\": \"d\",\n")
 		TEXT("  \"source\": { \"file\": \"Generated/manifest_smoke.d\" },\n")
+		TEXT("%s")
 		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
 		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
 		TEXT("  \"required_imports\": [{ \"module\": \"env\", \"name\": \"actor_set_location\" }],\n")
 		TEXT("  \"toolchain\": { \"compiler\": \"ldc2\", \"version\": \"1.42.0\", \"target\": \"wasm32-unknown-unknown-wasm\", \"linker\": \"ldc2-internal-lld\" }\n")
 		TEXT("}\n"),
 		*ModuleId,
+		*StateMigrationField,
 		*ProjectRelativeJsonPathForReloadManifestTest(WasmPath),
 		*WasmSha256);
 
@@ -144,6 +150,84 @@ bool AreReloadDGuestArtifactsAvailable(FString& OutMissingPath)
 		return false;
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadStateMigrationManifestContractTest,
+	"AvidScript.Reload.StateMigrationManifestContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadStateMigrationManifestContractTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetReloadManifestTestRoot();
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("state_migration_manifest.wasm"));
+	TArray<uint8> WasmBytes;
+	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	TestTrue(TEXT("State migration WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+	const FString WasmSha256 = ComputeReloadTestSha256Hex(WasmBytes);
+	const FString FingerprintA(TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+	const FString FingerprintB(TEXT("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+	const FString ValidSchema = FString::Printf(
+		TEXT("{\"schema_version\":1,\"strategy\":\"host_snapshot\",\"owner_type_id\":\"type:Game.Script\",")
+		TEXT("\"slots\":[")
+		TEXT("{\"stable_id\":\"global:score\",\"type_fingerprint\":\"%s\",\"offset\":16,\"size\":4,\"alignment\":4},")
+		TEXT("{\"stable_id\":\"global:timer\",\"type_fingerprint\":\"%s\",\"offset\":20,\"size\":4,\"alignment\":4}]}"),
+		*FingerprintA,
+		*FingerprintB);
+	const FString ValidManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_valid.avidscript.json"));
+	TestTrue(TEXT("Valid migration manifest writes"), WriteReloadManifestFixture(
+		ValidManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		ValidSchema));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> LoadedBytecode;
+	TestTrue(TEXT("Valid migration manifest loads"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		ValidManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestTrue(TEXT("Host snapshot strategy is enabled"), Manifest.StateMigration.IsEnabled());
+	TestEqual(TEXT("Migration owner type"), Manifest.StateMigration.OwnerTypeId, FString(TEXT("type:Game.Script")));
+	TestEqual(TEXT("Migration slot count"), Manifest.StateMigration.Slots.Num(), 2);
+	TestEqual(TEXT("Migration first offset"), Manifest.StateMigration.Slots[0].Offset, 16u);
+
+	const FString DuplicateSchema = ValidSchema.Replace(TEXT("global:timer"), TEXT("global:score"));
+	const FString DuplicateManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_duplicate.avidscript.json"));
+	TestTrue(TEXT("Duplicate migration manifest writes"), WriteReloadManifestFixture(
+		DuplicateManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		DuplicateSchema));
+	TestFalse(TEXT("Duplicate migration stable id is rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		DuplicateManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Duplicate migration category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
+
+	const FString OverlapSchema = ValidSchema.Replace(
+		TEXT("\"offset\":16,\"size\":4"),
+		TEXT("\"offset\":16,\"size\":8"));
+	const FString OverlapManifestPath = FPaths::Combine(TestRoot, TEXT("state_migration_overlap.avidscript.json"));
+	TestTrue(TEXT("Overlap migration manifest writes"), WriteReloadManifestFixture(
+		OverlapManifestPath,
+		TEXT("state_migration_contract"),
+		WasmPath,
+		WasmSha256,
+		OverlapSchema));
+	TestFalse(TEXT("Overlapping migration slots are rejected"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+		OverlapManifestPath,
+		Manifest,
+		LoadedBytecode,
+		LoadResult));
+	TestEqual(TEXT("Overlap migration category"), LoadResult.ErrorCategory, FString(TEXT("manifest_invalid")));
 	return true;
 }
 

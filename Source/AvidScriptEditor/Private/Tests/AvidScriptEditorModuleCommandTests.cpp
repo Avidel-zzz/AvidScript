@@ -746,6 +746,10 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestTrue(
 		TEXT("Project C# live reload source can be read for failure recovery"),
 		FFileHelper::LoadFileToString(OriginalSourceText, *WorkspaceResult.SourcePath));
+	BindingResult.Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestTrue(
+		TEXT("Initial C# runtime accumulates persistent rotation state"),
+		FMath::IsNearlyEqual(Actor->GetActorScale3D().X, 1.045, 0.001));
 
 	FAvidScriptEditorCSharpWorkspaceResult RepeatWorkspaceResult;
 	FAvidScriptEditorCSharpBuildResult RepeatBuildResult;
@@ -819,6 +823,14 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 		TEXT("Real automatic reload records one committed reload"),
 		BindingResult.Component->GetRuntimeStats().SuccessfulReloadCount,
 		1);
+	const FAvidScriptWasmReloadResult& StateMigrationResult =
+		LiveReloadServicePtr->GetLastResult().BuildResult.BindingResult.RuntimeResult;
+	TestTrue(TEXT("Real automatic reload attempts guest state migration"), StateMigrationResult.bStateMigrationAttempted);
+	TestTrue(TEXT("Real automatic reload applies guest state migration"), StateMigrationResult.bStateMigrationApplied);
+	TestTrue(TEXT("Real automatic reload migrates at least the mutable gameplay field"),
+		StateMigrationResult.StateMigrationMigratedSlotCount >= 1);
+	TestTrue(TEXT("Real automatic reload migrates gameplay state bytes"),
+		StateMigrationResult.StateMigrationMigratedByteCount >= 4);
 	const FString ReloadedManifestPath = BindingResult.Component->GetRuntimeStats().ScriptManifestPath;
 	const FString ReloadedWasmPath = FPaths::Combine(
 		BuildResult.OutputRoot,
@@ -840,6 +852,9 @@ bool FAvidScriptEditorModuleCSharpWorkspaceBuildAndBindSelectedActorTest::RunTes
 	TestTrue(
 		TEXT("Reloaded C# module Tick uses the new rotation speed"),
 		FMath::IsNearlyEqual(FMath::Abs(Actor->GetActorRotation().Yaw), 90.0, 0.01));
+	TestTrue(
+		TEXT("Reloaded C# module Tick continues pre-reload accumulated state"),
+		FMath::IsNearlyEqual(Actor->GetActorScale3D().X, 1.135, 0.001));
 
 	TestTrue(
 		TEXT("Project C# source can be corrupted during automatic reload"),

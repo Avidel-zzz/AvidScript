@@ -291,7 +291,7 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents Actor.SetLocation facade"), SourceText.Contains(TEXT("public static class Actor")) && SourceText.Contains(TEXT("public static bool SetLocation")));
 	TestTrue(TEXT("Sample presents Actor.AddLocationOffset facade"), SourceText.Contains(TEXT("public static bool AddLocationOffset")));
 	TestTrue(TEXT("Sample declares elapsed seconds state"), SourceText.Contains(TEXT("private static float ElapsedSeconds")));
-	TestTrue(TEXT("Sample resets elapsed seconds in BeginPlay"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
+	TestFalse(TEXT("Sample leaves elapsed seconds available for reload migration"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
 	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
 	TestTrue(TEXT("Sample reads location into a local FVector"), SourceText.Contains(TEXT("FVector currentLocation = UE.Self.GetActorLocation()")));
 	TestTrue(TEXT("Sample uses FVector addition"), SourceText.Contains(TEXT("currentLocation + new FVector(120.0f * deltaSeconds, 0.0f, 0.0f)")));
@@ -510,11 +510,13 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 	const TSharedPtr<FJsonObject>* ManifestGuestIrPtr = nullptr;
+	const TSharedPtr<FJsonObject>* ManifestStateMigrationPtr = nullptr;
 	const TSharedPtr<FJsonObject>* ToolchainPtr = nullptr;
 	if (!ManifestRoot->TryGetObjectField(TEXT("guest_ir"), ManifestGuestIrPtr) || ManifestGuestIrPtr == nullptr || !ManifestGuestIrPtr->IsValid() ||
+		!ManifestRoot->TryGetObjectField(TEXT("state_migration"), ManifestStateMigrationPtr) || ManifestStateMigrationPtr == nullptr || !ManifestStateMigrationPtr->IsValid() ||
 		!ManifestRoot->TryGetObjectField(TEXT("toolchain"), ToolchainPtr) || ToolchainPtr == nullptr || !ToolchainPtr->IsValid())
 	{
-		AddError(TEXT("Formal C# manifest is missing Guest IR or toolchain metadata."));
+		AddError(TEXT("Formal C# manifest is missing Guest IR, state migration, or toolchain metadata."));
 		return true;
 	}
 	TestEqual(
@@ -525,6 +527,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		TEXT("Manifest Guest IR hash matches the build report"),
 		(*ManifestGuestIrPtr)->GetStringField(TEXT("sha256")),
 		ReportGuestIrSha);
+	TestEqual(TEXT("Manifest state migration strategy"),
+		(*ManifestStateMigrationPtr)->GetStringField(TEXT("strategy")),
+		FString(TEXT("host_snapshot")));
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -534,6 +539,8 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(ManifestLoadResult.ErrorMessage);
 		return true;
 	}
+	TestTrue(TEXT("Loaded C# manifest enables host snapshot migration"), Manifest.StateMigration.IsEnabled());
+	TestEqual(TEXT("Loaded C# manifest has one mutable sample state slot"), Manifest.StateMigration.Slots.Num(), 1);
 
 	const TArray<FString> ExpectedLifecycleExports = {
 		TEXT("avid_on_begin_play"),
@@ -780,8 +787,11 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 5);
 
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
-	ReloadedManifest.ModuleId = TEXT("csharp_timer_successful_reload");
 	TestTrue(TEXT("Compatible C# Timer reload applies"), Session.ReloadModule(Bytecode.GetData(), Bytecode.Num(), ReloadedManifest, ReloadResult));
+	TestTrue(TEXT("Compatible C# reload attempts state migration"), ReloadResult.bStateMigrationAttempted);
+	TestTrue(TEXT("Compatible C# reload applies state migration"), ReloadResult.bStateMigrationApplied);
+	TestEqual(TEXT("Compatible C# reload migrates elapsed state slot"), ReloadResult.StateMigrationMigratedSlotCount, 1);
+	TestEqual(TEXT("Compatible C# reload migrates four elapsed bytes"), ReloadResult.StateMigrationMigratedByteCount, 4);
 	TestEqual(TEXT("Reloaded runtime owns one fresh Timer"), Session.GetLivePendingTimerCount(), 1);
 	TestEqual(TEXT("Reloaded runtime callback count starts fresh"), Session.GetLiveTimerCallbackCount(), 0);
 	TestEqual(TEXT("Reloaded runtime event count starts fresh"), Session.GetLiveEventCallbackCount(), 0);

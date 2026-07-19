@@ -5,7 +5,7 @@
 在插件根目录使用固定 .NET 8.0.416 环境后，可执行：
 
 ```powershell
-C:\Users\user0\.dotnet\dotnet.exe run --project Tools\AvidScript.WasmBackend\AvidScript.WasmBackend.csproj -- Tests\Fixtures\WasmBackend\P41_5_WamrSmoke.guestir.json Tests\Fixtures\WasmBackend\P41_5_WamrSmoke.wasm
+<UserProfile>\.dotnet\dotnet.exe run --project Tools\AvidScript.WasmBackend\AvidScript.WasmBackend.csproj -- Tests\Fixtures\WasmBackend\P41_5_WamrSmoke.guestir.json Tests\Fixtures\WasmBackend\P41_5_WamrSmoke.wasm
 ```
 
 当前生成物为 463 字节，SHA-256：`7babb00f52681ba01018774fee1327b7187a3495a39bd422e73c422e77d3f117`。

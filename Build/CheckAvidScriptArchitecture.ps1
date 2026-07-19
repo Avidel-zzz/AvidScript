@@ -685,6 +685,52 @@ foreach ($RequiredDualPackageContract in @('binding_authorization', 'RuntimeBind
 if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
 }
+$CSharpStateSchemaProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/StateMigration/CSharpGuestStateSchemaProjector.cs'
+$RuntimeStateMigrationSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/StateMigration/AvidScriptRuntimeStateMigration.cpp'
+$RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
+$VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
+$WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
+foreach ($RequiredStateSchemaContract in @(
+    'CSharpGuestStateSchemaProjector',
+    'TryFingerprintType',
+    'host_snapshot',
+    'SemanticDocument',
+    'GuestModule'
+)) {
+    if (-not $CSharpStateSchemaProjectorSource.Contains($RequiredStateSchemaContract)) {
+        Add-Violation "C# state schema projector is missing contract $RequiredStateSchemaContract"
+    }
+}
+foreach ($RequiredRuntimeMigrationContract in @(
+    'FAvidScriptRuntimeStateMigration::Migrate',
+    'ReadStateBytes',
+    'WriteStateBytes',
+    'state_migration_incompatible',
+    'state_migration_read_failed',
+    'state_migration_write_failed'
+)) {
+    if (-not $RuntimeStateMigrationSource.Contains($RequiredRuntimeMigrationContract)) {
+        Add-Violation "runtime state migration service is missing contract $RequiredRuntimeMigrationContract"
+    }
+}
+foreach ($RequiredSessionMigrationContract in @(
+    'FAvidScriptRuntimeStateMigration::Migrate',
+    'bStateMigrationAttempted',
+    'bStateMigrationApplied'
+)) {
+    if (-not $RuntimeSessionSource.Contains($RequiredSessionMigrationContract)) {
+        Add-Violation "RuntimeSession is missing state migration orchestration contract $RequiredSessionMigrationContract"
+    }
+}
+foreach ($ForbiddenSessionMigrationConcern in @('ReadStateBytes', 'WriteStateBytes', 'IAvidScriptVmGuestMemory')) {
+    if ($RuntimeSessionSource.Contains($ForbiddenSessionMigrationConcern)) {
+        Add-Violation "RuntimeSession must not own guest memory migration concern $ForbiddenSessionMigrationConcern"
+    }
+}
+if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
+    -not $WamrBackendSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory() override')) {
+    Add-Violation 'VM guest memory must be exposed through an optional backend capability implemented by WAMR'
+}
 $PluginDescriptorPath = Join-Path $PluginRoot 'AvidScript.uplugin'
 if (-not [System.IO.File]::Exists($PluginDescriptorPath)) {
     Add-Violation 'missing AvidScript.uplugin'

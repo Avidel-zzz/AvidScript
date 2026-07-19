@@ -1,5 +1,5 @@
 param(
-    [string]$DotNetPath = "C:\Users\user0\.dotnet\dotnet.exe"
+    [string]$DotNetPath = (Join-Path $env:USERPROFILE ".dotnet\dotnet.exe")
 )
 
 $ErrorActionPreference = "Stop"

@@ -234,5 +234,5 @@ Phase 2 还没有实现以下能力:
 针对所有 Phase 2 API 的完整回归:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -Unattended -NullRHI -NoSplash -NoSound -NoP4 -NoLiveCoding -stdout -FullStdOutLogOutput -FORCELOGFLUSH -CrashForUAT "-ExecCmds=Automation RunTests AvidScript" "-TestExit=Automation Test Queue Empty" "-abslog=C:\tmp\AvidScript_P2_5_All_Automation.log"
+& "C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<ProjectRoot>\AvidTPSTemplate.uproject" -Unattended -NullRHI -NoSplash -NoSound -NoP4 -NoLiveCoding -stdout -FullStdOutLogOutput -FORCELOGFLUSH -CrashForUAT "-ExecCmds=Automation RunTests AvidScript" "-TestExit=Automation Test Queue Empty" "-abslog=C:\tmp\AvidScript_P2_5_All_Automation.log"
 ```

@@ -56,7 +56,8 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	const uint8 MinimalModule[] = {
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 		0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
-		0x7d, 0x00, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07,
+		0x7d, 0x00, 0x03, 0x03, 0x02, 0x00, 0x01,
+		0x05, 0x03, 0x01, 0x00, 0x01, 0x07,
 		0x25, 0x02, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f,
 		0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69, 0x6e,
 		0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x00, 0x0c,
@@ -76,6 +77,22 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	FAvidScriptVmLoadConfig Config;
 	TestTrue(TEXT("minimal module loads"), Backend->Load(MakeArrayView(MinimalModule), TEXT("vm_smoke"), Config, Error));
 	TestTrue(TEXT("backend reports loaded"), Backend->IsLoaded());
+	IAvidScriptVmGuestMemory* GuestMemory = Backend->GetGuestMemory();
+	TestNotNull(TEXT("WAMR exposes language-neutral guest memory"), GuestMemory);
+	if (GuestMemory != nullptr)
+	{
+		const TArray<uint8> WrittenBytes = { 0x11, 0x22, 0x33, 0x44 };
+		TArray<uint8> ReadBytes;
+		ReadBytes.SetNumZeroed(WrittenBytes.Num());
+		FString MemoryError;
+		TestTrue(TEXT("guest memory write succeeds"), GuestMemory->WriteBytes(16, WrittenBytes, MemoryError));
+		TestTrue(TEXT("guest memory read succeeds"), GuestMemory->ReadBytes(16, ReadBytes, MemoryError));
+		TestEqual(TEXT("guest memory bytes round trip"), ReadBytes, WrittenBytes);
+		TestFalse(
+			TEXT("guest memory rejects out of bounds read"),
+			GuestMemory->ReadBytes(MAX_uint32 - 1, ReadBytes, MemoryError));
+		TestFalse(TEXT("out of bounds read reports details"), MemoryError.IsEmpty());
+	}
 
 	FAvidScriptVmExportHandle BeginHandle;
 	FAvidScriptVmExportHandle TickHandle;

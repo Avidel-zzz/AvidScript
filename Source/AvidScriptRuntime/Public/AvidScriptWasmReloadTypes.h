@@ -8,6 +8,38 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmRequiredImport
 	FString ImportName;
 };
 
+enum class EAvidScriptWasmStateMigrationStrategy : uint8
+{
+	None,
+	HostSnapshot
+};
+
+struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmStateSlot
+{
+	FString StableId;
+	FString TypeFingerprint;
+	uint32 Offset = 0;
+	uint32 Size = 0;
+	uint32 Alignment = 1;
+};
+
+struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmStateMigrationManifest
+{
+	static constexpr int32 SupportedSchemaVersion = 1;
+	static constexpr int32 MaxSlotCount = 1024;
+	static constexpr uint32 MaxSlotByteSize = 64 * 1024;
+	static constexpr uint32 MaxTotalByteSize = 1024 * 1024;
+
+	EAvidScriptWasmStateMigrationStrategy Strategy = EAvidScriptWasmStateMigrationStrategy::None;
+	FString OwnerTypeId;
+	TArray<FAvidScriptWasmStateSlot> Slots;
+
+	bool IsEnabled() const
+	{
+		return Strategy == EAvidScriptWasmStateMigrationStrategy::HostSnapshot;
+	}
+};
+
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifest
 {
 	static constexpr int32 SupportedSchemaVersion = 1;
@@ -20,6 +52,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifest
 	FString WasmSha256;
 	TArray<FString> RequiredExports;
 	TArray<FAvidScriptWasmRequiredImport> RequiredImports;
+	FAvidScriptWasmStateMigrationManifest StateMigration;
 	FString BindingPackageName;
 	FString BindingPackageHash;
 	FString BindingPackageManifestFile;
@@ -59,6 +92,12 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult
 	bool bSucceeded = false;
 	bool bReloadApplied = false;
 	bool bRollbackPreservedLiveRuntime = false;
+	bool bStateMigrationAttempted = false;
+	bool bStateMigrationApplied = false;
+	int32 StateMigrationMigratedSlotCount = 0;
+	int32 StateMigrationMigratedByteCount = 0;
+	int32 StateMigrationSkippedSlotCount = 0;
+	FString StateMigrationStableId;
 	FString PreviousModuleId;
 	FString CandidateModuleId;
 	FString ActiveModuleId;

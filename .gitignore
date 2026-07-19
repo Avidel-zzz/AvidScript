@@ -10,9 +10,11 @@ Tools/**/obj/
 .vs/
 .idea/
 .vscode/
+.fleet/
 .superpowers/
 *.suo
 *.user
+*.DotSettings.user
 *.userosscache
 *.sln.docstates
 *.opensdf
@@ -37,6 +39,31 @@ Tools/**/obj/
 *.bak
 *.swp
 *.cache
+*.pid
+
+# Local environment, credentials, and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.snk
+
+# Test, coverage, and package-manager output
+TestResults/
+artifacts/
+coverage/
+.nuget/
+*.coverage
+*.coveragexml
+*.trx
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 # Sandboxed NuGet first-use marker
 **/NuGet/Migrations/
@@ -48,6 +75,10 @@ Microsoft/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
+compile_commands.json
+build.ninja
+.ninja_deps
+.ninja_log
 Source/ThirdParty/**/build/
 Source/ThirdParty/**/out/
 Source/ThirdParty/**/.cmake/

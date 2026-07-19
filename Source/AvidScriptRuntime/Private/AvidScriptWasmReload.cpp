@@ -209,6 +209,163 @@ bool RequireJsonObjectField(
 	return true;
 }
 
+bool IsLowercaseSha256(const FString& Value)
+{
+	if (Value.Len() != 64)
+	{
+		return false;
+	}
+	for (const TCHAR Character : Value)
+	{
+		if (!FChar::IsDigit(Character) && (Character < TEXT('a') || Character > TEXT('f')))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool LoadStateMigrationManifest(
+	const FJsonObject& Object,
+	FAvidScriptWasmStateMigrationManifest& OutManifest,
+	FAvidScriptWasmReloadManifestLoadResult& OutResult)
+{
+	int32 SchemaVersion = 0;
+	FString Strategy;
+	if (!Object.TryGetNumberField(TEXT("schema_version"), SchemaVersion)
+		|| SchemaVersion != FAvidScriptWasmStateMigrationManifest::SupportedSchemaVersion
+		|| !RequireStringField(Object, TEXT("strategy"), Strategy, OutResult)
+		|| Strategy != TEXT("host_snapshot")
+		|| !RequireStringField(Object, TEXT("owner_type_id"), OutManifest.OwnerTypeId, OutResult))
+	{
+		if (OutResult.ErrorCategory.IsEmpty())
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				TEXT("state_migration schema_version or strategy is unsupported"),
+				TEXT("rebuild the C# script with the current AvidScript guest compiler"));
+		}
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* SlotValues = nullptr;
+	if (!Object.TryGetArrayField(TEXT("slots"), SlotValues) || SlotValues == nullptr
+		|| SlotValues->Num() > FAvidScriptWasmStateMigrationManifest::MaxSlotCount)
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("manifest_invalid"),
+			TEXT("state_migration slots are missing or exceed the supported slot count"),
+			TEXT("reduce persistent C# state or rebuild the script manifest"));
+		return false;
+	}
+
+	uint64 TotalByteSize = 0;
+	FString PreviousStableId;
+	TArray<FAvidScriptWasmStateSlot> Slots;
+	Slots.Reserve(SlotValues->Num());
+	for (int32 Index = 0; Index < SlotValues->Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> SlotObject = (*SlotValues)[Index].IsValid()
+			? (*SlotValues)[Index]->AsObject()
+			: nullptr;
+		FAvidScriptWasmStateSlot Slot;
+		int32 Offset = 0;
+		int32 Size = 0;
+		int32 Alignment = 0;
+		if (!SlotObject.IsValid()
+			|| !RequireStringField(*SlotObject, TEXT("stable_id"), Slot.StableId, OutResult)
+			|| !RequireStringField(*SlotObject, TEXT("type_fingerprint"), Slot.TypeFingerprint, OutResult)
+			|| !SlotObject->TryGetNumberField(TEXT("offset"), Offset)
+			|| !SlotObject->TryGetNumberField(TEXT("size"), Size)
+			|| !SlotObject->TryGetNumberField(TEXT("alignment"), Alignment))
+		{
+			if (OutResult.ErrorCategory.IsEmpty())
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("manifest_invalid"),
+					TEXT("state_migration slot fields are missing or invalid"),
+					TEXT("rebuild the script state schema"));
+			}
+			return false;
+		}
+
+		const bool bStableIdOrdered = Index == 0
+			|| PreviousStableId.Compare(Slot.StableId, ESearchCase::CaseSensitive) < 0;
+		const bool bAlignmentValid = Alignment > 0
+			&& (Alignment & (Alignment - 1)) == 0
+			&& Alignment <= static_cast<int32>(FAvidScriptWasmStateMigrationManifest::MaxSlotByteSize);
+		const uint64 End = Offset >= 0 && Size > 0
+			? static_cast<uint64>(Offset) + static_cast<uint64>(Size)
+			: MAX_uint64;
+		if (!bStableIdOrdered
+			|| !IsLowercaseSha256(Slot.TypeFingerprint)
+			|| Offset < 0
+			|| Size <= 0
+			|| Size > static_cast<int32>(FAvidScriptWasmStateMigrationManifest::MaxSlotByteSize)
+			|| !bAlignmentValid
+			|| (Offset % Alignment) != 0
+			|| End > MAX_uint32)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				FString::Printf(TEXT("state_migration slot is unsafe or non-deterministic: %s"), *Slot.StableId),
+				TEXT("rebuild the script state schema with the current guest compiler"));
+			return false;
+		}
+
+		TotalByteSize += static_cast<uint64>(Size);
+		if (TotalByteSize > FAvidScriptWasmStateMigrationManifest::MaxTotalByteSize)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				TEXT("state_migration total byte size exceeds the supported limit"),
+				TEXT("reduce persistent C# state or use a future explicit serializer"));
+			return false;
+		}
+
+		Slot.Offset = static_cast<uint32>(Offset);
+		Slot.Size = static_cast<uint32>(Size);
+		Slot.Alignment = static_cast<uint32>(Alignment);
+		PreviousStableId = Slot.StableId;
+		Slots.Add(MoveTemp(Slot));
+	}
+
+	TArray<const FAvidScriptWasmStateSlot*> SlotsByAddress;
+	SlotsByAddress.Reserve(Slots.Num());
+	for (const FAvidScriptWasmStateSlot& Slot : Slots)
+	{
+		SlotsByAddress.Add(&Slot);
+	}
+	SlotsByAddress.Sort([](const FAvidScriptWasmStateSlot& Left, const FAvidScriptWasmStateSlot& Right)
+	{
+		return Left.Offset < Right.Offset;
+	});
+	for (int32 Index = 1; Index < SlotsByAddress.Num(); ++Index)
+	{
+		const FAvidScriptWasmStateSlot& Previous = *SlotsByAddress[Index - 1];
+		const FAvidScriptWasmStateSlot& Current = *SlotsByAddress[Index];
+		if (static_cast<uint64>(Current.Offset)
+			< static_cast<uint64>(Previous.Offset) + Previous.Size)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				TEXT("state_migration slots overlap"),
+				TEXT("rebuild the script state schema from deterministic Guest IR layout"));
+			return false;
+		}
+	}
+
+	OutManifest.Strategy = EAvidScriptWasmStateMigrationStrategy::HostSnapshot;
+	OutManifest.Slots = MoveTemp(Slots);
+	return true;
+}
+
 bool ValidateBindingPackageManifest(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadManifestLoadResult& OutResult)
@@ -504,6 +661,16 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	if (!RequireStringField(*RootObject, TEXT("language"), Manifest.Language, OutResult))
 	{
 		return false;
+	}
+
+	if (RootObject->HasField(TEXT("state_migration")))
+	{
+		TSharedPtr<FJsonObject> StateMigrationObject;
+		if (!RequireJsonObjectField(*RootObject, TEXT("state_migration"), StateMigrationObject, OutResult)
+			|| !LoadStateMigrationManifest(*StateMigrationObject, Manifest.StateMigration, OutResult))
+		{
+			return false;
+		}
 	}
 
 	TSharedPtr<FJsonObject> WasmObject;

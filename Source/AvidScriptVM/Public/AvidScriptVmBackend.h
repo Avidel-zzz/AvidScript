@@ -177,6 +177,7 @@ public:
 		FAvidScriptVmError& OutError) = 0;
 	virtual void Unload() = 0;
 	virtual bool IsLoaded() const = 0;
+	virtual IAvidScriptVmGuestMemory* GetGuestMemory() { return nullptr; }
 	virtual uint32 GetExportLookupCount() const = 0;
 	virtual const FAvidScriptVmLoadMetrics& GetLoadMetrics() const = 0;
 };

@@ -375,6 +375,11 @@ public:
 #endif
 	}
 
+	IAvidScriptVmGuestMemory* GetGuestMemory() override
+	{
+		return this;
+	}
+
 	uint32 GetExportLookupCount() const override
 	{
 		return ExportTable.GetLookupCount();
@@ -444,10 +449,20 @@ public:
 		OutError = TEXT("WAMR artifacts are unavailable for this target.");
 		return false;
 		#else
-		if (ModuleInstance == nullptr
-			|| !wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, OutBytes.Num()))
+		if (ModuleInstance == nullptr)
 		{
 			OutError = FString::Printf(TEXT("Guest read range is invalid at %u for %d bytes."), GuestAddress, OutBytes.Num());
+			return false;
+		}
+		if (wasm_runtime_get_exception(ModuleInstance) != nullptr)
+		{
+			OutError = TEXT("Guest memory cannot be read while the WAMR instance has a pending exception.");
+			return false;
+		}
+		if (!wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, OutBytes.Num()))
+		{
+			OutError = FString::Printf(TEXT("Guest read range is invalid at %u for %d bytes."), GuestAddress, OutBytes.Num());
+			wasm_runtime_clear_exception(ModuleInstance);
 			return false;
 		}
 		const void* Source = wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress);
@@ -475,10 +490,20 @@ public:
 		OutError = TEXT("WAMR artifacts are unavailable for this target.");
 		return false;
 		#else
-		if (ModuleInstance == nullptr
-			|| !wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, Bytes.Num()))
+		if (ModuleInstance == nullptr)
 		{
 			OutError = FString::Printf(TEXT("Guest write range is invalid at %u for %d bytes."), GuestAddress, Bytes.Num());
+			return false;
+		}
+		if (wasm_runtime_get_exception(ModuleInstance) != nullptr)
+		{
+			OutError = TEXT("Guest memory cannot be written while the WAMR instance has a pending exception.");
+			return false;
+		}
+		if (!wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, Bytes.Num()))
+		{
+			OutError = FString::Printf(TEXT("Guest write range is invalid at %u for %d bytes."), GuestAddress, Bytes.Num());
+			wasm_runtime_clear_exception(ModuleInstance);
 			return false;
 		}
 		void* Destination = wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress);

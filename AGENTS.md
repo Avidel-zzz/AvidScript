@@ -7,7 +7,7 @@
 - Preferred Editor target validation command:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
+& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=<ProjectRoot>\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
 ```
 
 ## Repository Policy
@@ -21,7 +21,7 @@
 - If Git reports dubious ownership in Codex, this plugin path is allowed as a Git safe directory:
 
 ```powershell
-git config --global --add safe.directory "C:/Users/user0/Documents/Unreal Projects/AvidTPSTemplate/Plugins/AvidScript"
+git config --global --add safe.directory "<PluginRoot>"
 ```
 
 ## Git Workflow
@@ -30,7 +30,7 @@ git config --global --add safe.directory "C:/Users/user0/Documents/Unreal Projec
 - Before edits, check status:
 
 ```powershell
-git -C "C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\Plugins\AvidScript" status --short --branch
+git -C "<PluginRoot>" status --short --branch
 ```
 
 - Make small commits aligned to phase groups, for example `P1.1 plugin skeleton` or `P1.2 WAMR third-party layout`.
@@ -56,7 +56,7 @@ P1.2 document WAMR third-party strategy
 - Project-level decision docs live under:
 
 ```text
-C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\Docs
+<ProjectRoot>\Docs
 ```
 
 - Plugin-level implementation docs should live under:
@@ -82,7 +82,7 @@ Plugins/AvidScript/Docs
 - For normal AvidScript C++ iteration, prefer module-scoped validation first:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -Module=AvidScriptRuntime
+& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=<ProjectRoot>\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles -Module=AvidScriptRuntime
 ```
 
 - 如果 Runtime 的公开头文件改变跨模块可见的 struct/class 布局、虚函数表或 inline API，不得只重编 `AvidScriptRuntime` 就启动完整 Editor 自动化。同步对每个直接消费者执行模块级增量构建，当前至少包括 `-Module=AvidScriptEditor`；这不需要也不允许借机 clean Editor Target。
@@ -110,19 +110,19 @@ Plugins/AvidScript/Docs
 - After C++ or Build.cs changes, run the UE5.8 Editor target build:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
+& "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=<ProjectRoot>\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
 ```
 
 - Run runtime automation after runtime behavior changes:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -Unattended -NullRHI -NoSplash -NoSound -NoP4 -NoLiveCoding -stdout -FullStdOutLogOutput -FORCELOGFLUSH -CrashForUAT "-ExecCmds=Automation RunTests AvidScript.Runtime" "-TestExit=Automation Test Queue Empty" "-abslog=C:\tmp\AvidScript_Automation.log"
+& "C:\UnrealEngine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<ProjectRoot>\AvidTPSTemplate.uproject" -Unattended -NullRHI -NoSplash -NoSound -NoP4 -NoLiveCoding -stdout -FullStdOutLogOutput -FORCELOGFLUSH -CrashForUAT "-ExecCmds=Automation RunTests AvidScript.Runtime" "-TestExit=Automation Test Queue Empty" "-abslog=C:\tmp\AvidScript_Automation.log"
 ```
 
 - For Windows packaged Development smoke on this UE5.8 source build, skip ZenStore during cook to avoid local Zen oplog staging instability:
 
 ```powershell
-& "C:\UnrealEngine\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=C:\Users\user0\Documents\Unreal Projects\AvidTPSTemplate\AvidTPSTemplate.uproject" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -cook -clean -stage -pak -archive "-archivedirectory=C:\tmp\AvidScript_Package" "-AdditionalCookerOptions=-SkipZenStore" "-ubtargs=-MaxParallelActions=4 -NoUBA" -unattended -utf8output
+& "C:\UnrealEngine\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=<ProjectRoot>\AvidTPSTemplate.uproject" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -cook -clean -stage -pak -archive "-archivedirectory=C:\tmp\AvidScript_Package" "-AdditionalCookerOptions=-SkipZenStore" "-ubtargs=-MaxParallelActions=4 -NoUBA" -unattended -utf8output
 ```
 
 - Validate the packaged runtime smoke log with:
@@ -138,12 +138,12 @@ Plugins/AvidScript/Docs
 
 ## C# Guest Toolchain Workflow
 
-- P13.1 verified the user-local .NET 8 SDK at `C:\Users\user0\.dotnet\dotnet.exe` can install and list `wasi-experimental`. Prefer this SDK for C# WASI probes over `C:\Program Files\dotnet\dotnet.exe` on this machine.
+- P13.1 verified the user-local .NET 8 SDK at `<UserProfile>\.dotnet\dotnet.exe` can install and list `wasi-experimental`. Prefer this SDK for C# WASI probes over `C:\Program Files\dotnet\dotnet.exe` on this machine.
 - The Program Files .NET 9.0.306 CLI currently fails workload commands in `Microsoft.DotNet.Installer.Windows.InstallerBase`, and .NET 9 rejects `wasi-wasm` with `The 'wasi-experimental' workload is not supported in .NET 9.` Do not spend Phase time trying to force that path unless the toolchain has been repaired or upgraded.
 - Current .NET 8 `wasi-experimental` output is a Mono/WASI runtime app: generated `dotnet.wasm` exports only `memory` and `_start`. It is not an AvidScript direct ABI module until it exports `avid_on_begin_play`, `avid_on_tick`, and `avid_on_end_play`.
 - `PublishAot=true` with .NET 8 `wasi-wasm` currently fails with `NETSDK1203`; record this as toolchain unsupported, not as an AvidScript runtime failure.
 - `BuildCSharpActorLifecycle.ps1` must isolate `DOTNET_CLI_HOME`, `APPDATA`, `LOCALAPPDATA`, and local NuGet config into `Saved/AvidScriptCSharpGuest/ActorLifecycle` so Codex sandbox runs do not try to read the user's blocked `%APPDATA%\NuGet\NuGet.Config`.
-- If the user NuGet package cache is readable, it is acceptable for the C# diagnostic script to use `C:\Users\user0\.nuget\packages` as a package cache while keeping config and generated outputs in `Saved/`.
+- If the user NuGet package cache is readable, it is acceptable for the C# diagnostic script to use `<UserProfile>\.nuget\packages` as a package cache while keeping config and generated outputs in `Saved/`.
 - 2026-07-06 P13.1 mistake record: passing `BaseOutputPath` or `BaseIntermediateOutputPath` to MSBuild with a trailing Windows backslash inside a quoted argument can break paths with spaces and produce `MSB1008: Only one project can be specified`. Prevention: pass these MSBuild property paths with forward slashes and a trailing `/`.
 - 2026-07-06 P13.1 mistake record: `--configfile` alone did not stop NuGet targets from reading `%APPDATA%\NuGet\NuGet.Config`. Prevention: redirect `APPDATA` and `LOCALAPPDATA` for the script process before invoking `dotnet publish`.
 
@@ -363,7 +363,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Conversion operations retain checked and try-cast semantics. Generic invocation/method-reference operations retain concrete type_argument_ids in addition to their OriginalDefinition symbol ID.
 - 2026-07-13 P40.2 schema edit mistake record: a fallback PowerShell command used C-style backslash quote escaping inside a double-quoted string and failed at parse time before writing. Prevention: use literal here-string anchors for multiline PowerShell replacements; do not mix C# escaping rules into PowerShell.
 - Unsupported operations must remain in the semantic tree with kind, span, type, and children, emit a stable ASCS2xxx error, and force succeeded=false.
-- 2026-07-13 P40.2 verification toolchain mistake record: the first RED command used system .NET 9, whose SDK Roslyn targets System.Runtime 9 and cannot compile the net8.0 tools. Prevention: invoke C:\Users\user0\.dotnet\dotnet.exe 8.0.416 explicitly and redirect DOTNET_CLI_HOME, APPDATA, LOCALAPPDATA, and NUGET_PACKAGES to a writable task-local Saved directory before every frontend/semantic build or test.
+- 2026-07-13 P40.2 verification toolchain mistake record: the first RED command used system .NET 9, whose SDK Roslyn targets System.Runtime 9 and cannot compile the net8.0 tools. Prevention: invoke <UserProfile>\.dotnet\dotnet.exe 8.0.416 explicitly and redirect DOTNET_CLI_HOME, APPDATA, LOCALAPPDATA, and NUGET_PACKAGES to a writable task-local Saved directory before every frontend/semantic build or test.
 - 2026-07-13 P40.2 fallback edit mistake record: a PowerShell fallback here-string accidentally retained patch-style plus markers and added a non-constant Replace call to const raw test sources. Readback caught it before RED. Prevention: fallback file content must be plain source without patch markers or cleanup expressions; always read back the exact inserted region before compiling.
 - P40.3 semantic test baseline is 28/28 and Phase 39 frontend regression is 7/7. ActorLifecycle schema v3 contains 38 executable methods, 38 CFGs, 120 blocks, 84 successor edges, and 0 diagnostics.
 - Operation trees and CFGs must share SemanticExecutableBodyResolver. Expression-bodied property/indexer operations must walk Roslyn Parent links to the implicit method/block root before CFG creation; keep the ActorLifecycle method-to-CFG one-to-one test.
@@ -425,7 +425,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Guest IR v1 is the language-neutral contract at schema 1 / IR 1.0. Every lowering producer must pass GuestModuleValidator before publishing; every backend must reject unvalidated or invalid IR.
 - Guest IR artifact writes are validate-first and same-directory atomic replacement. Never let a failed generation overwrite the last known-good artifact.
 - P41.2 baseline is GuestIr 15/15: 13 validator cases plus 2 deterministic serializer/atomic-writer cases.
-- 2026-07-14 P41.2 toolchain mistake recurrence: verification first used the system dotnet host and then guessed an outdated UE-bundled 8.0.416 path, despite the repository rule naming the user-local 8.0.416 host. Prevention: read global.json, run the selected host with --list-sdks, and invoke C:\Users\user0\.dotnet\dotnet.exe explicitly before all Phase 41 .NET commands.
+- 2026-07-14 P41.2 toolchain mistake recurrence: verification first used the system dotnet host and then guessed an outdated UE-bundled 8.0.416 path, despite the repository rule naming the user-local 8.0.416 host. Prevention: read global.json, run the selected host with --list-sdks, and invoke <UserProfile>\.dotnet\dotnet.exe explicitly before all Phase 41 .NET commands.
 - 2026-07-14 P41.2 sandbox mistake recurrence: the first verification omitted the complete task-local environment preamble; NuGet also recreates its zero-byte first-use migration marker under the plugin root in this sandbox even after correct isolation. Prevention: precreate and probe DOTNET_CLI_HOME, APPDATA, LOCALAPPDATA, USERPROFILE, and NUGET_PACKAGES, ignore only NuGet/Migrations rather than the whole NuGet namespace, and confirm git status immediately afterward.
 - 2026-07-14 P41.2 fallback source mistake recurrence: a controlled PowerShell test edit again contained patch-style plus prefixes. The explicit marker scan stopped the transaction before write. Prevention: fallback here-strings must be plain source, and the leading-plus rejection remains mandatory before any temporary file is moved into place.
 - 2026-07-14 P41.2 verification command mistake: comma-separated Join-Path calls inside @() were parsed as extra arguments to one command; the non-terminating error left isolation variables empty and a later --no-restore build failed reading assets. Prevention: assign each isolation path to an explicit named variable, set ErrorActionPreference=Stop for verification scripts, probe all directories, and restore before retrying after any environment setup failure.
@@ -519,7 +519,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-15 P42.2 SDK selection recurrence: `InvokeCSharpFrontend.ps1` invoked dotnet from the UE project root, bypassed the plugin `global.json`, selected SDK 10.0.301, and failed offline net8 targeting-pack restore. Prevention: resolve source/output paths first, push to the plugin root, read the expected SDK from `global.json`, assert the selected version, then build and invoke Roslyn.
 - 2026-07-15 P42.2 nested path escape recurrence: a JavaScript template carrying PowerShell exact anchors consumed single backslashes before PowerShell saw them, so transaction validation reported a false missing anchor. Prevention: avoid backslashes in nested anchors, use forward-slash paths or doubled escaping, and keep unique-anchor validation before every write.
 - 2026-07-15 P42.2 automation command recurrence: intermediate focused tests reused `-log` plus a queued `Quit` despite the P41.1 rule, weakening log-path and completion evidence even though those runs happened to execute. Prevention: final and future automation use absolute `-abslog`, omit `Quit`, terminate only through `-TestExit=Automation Test Queue Empty`, and verify both the discovered count and zero failures.
-- 2026-07-16 P42.2 .NET host recurrence: the first new semantic RED command invoked bare `dotnet` despite the pinned-host rule and selected the incompatible system host. Prevention: every direct .NET command uses `C:\Users\user0\.dotnet\dotnet.exe`, asserts 8.0.416, and sets the complete task-local environment before build or test.
+- 2026-07-16 P42.2 .NET host recurrence: the first new semantic RED command invoked bare `dotnet` despite the pinned-host rule and selected the incompatible system host. Prevention: every direct .NET command uses `<UserProfile>\.dotnet\dotnet.exe`, asserts 8.0.416, and sets the complete task-local environment before build or test.
 - 2026-07-16 P42.2 low-memory build mistake record: the first review build used default 20-action UBA while committed virtual memory was near the machine limit, causing an unproductive compile retry loop. Prevention: inspect free virtual memory before UE builds; below 10 GB use `-MaxParallelActions=1 -NoUBA`, keep the build incremental, and never clean the Editor Target.
 - 2026-07-16 P42.2 fallback transaction recurrence: a two-file PowerShell fallback wrote the first header before discovering that the second file anchor was ambiguous. Prevention: resolve every target and validate every unique anchor for the whole transaction before the first temporary file is written or moved.
 - 2026-07-16 P42.2 automation `Quit` recurrence: the review-focused run again queued `Quit` despite the rule immediately above. Prevention: use only `-TestExit=Automation Test Queue Empty`; the final 149/149 run followed this corrected form and verified discovery, success count, zero failures, and exit code.
@@ -572,7 +572,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-18 P43.2 test-registration mistake record: the flow-captured ref regression method was added but the first edit did not invoke it from the custom suite `Run()`, so the unchanged 16/16 count falsely looked healthy. Prevention: every custom console-test addition must increase the expected count and direct verification must confirm the new count before broader tests.
 - 2026-07-18 P43.2 PowerShell pipeline recurrence record: a log-summary command again piped directly from a bare `foreach` statement and failed parsing. Prevention: every PowerShell loop that feeds a pipeline first assigns its output to a named collection; do not type `foreach (...) { ... } |` in verification commands.
 - 2026-07-18 P43.2 artifact-path mistake record: a new Phase 43 document was initially created relative to the project root instead of the nested plugin repository. Prevention: new plugin files use a `Plugins/AvidScript/...` patch path and are immediately confirmed by plugin-level `git status --short`.
-- 2026-07-18 P43.2 final-format SDK recurrence record: the first final format command incorrectly used the UE5.8-bundled .NET 10 host even though `global.json` pins 8.0.416 and the repository already documents the user-local host. Prevention: before every repository .NET command, invoke `C:/Users/user0/.dotnet/dotnet.exe --version`, require exactly 8.0.416, and only then run the command with the complete task-local environment.
+- 2026-07-18 P43.2 final-format SDK recurrence record: the first final format command incorrectly used the UE5.8-bundled .NET 10 host even though `global.json` pins 8.0.416 and the repository already documents the user-local host. Prevention: before every repository .NET command, invoke `<UserProfile>/.dotnet/dotnet.exe --version`, require exactly 8.0.416, and only then run the command with the complete task-local environment.
 - P43.3A Semantic schema v5 owns export-root call reachability. Guest IR lowers only reachable functions/imports; schema v4 artifacts retain all-callable compatibility.
 - P43.3A complete binding packages are authorization ceilings, not mandatory import sets. Every observed dynamic import must exist in the verified package, while unused package imports remain absent from Guest IR and WASM.
 - P43.3A build provenance records used binding stable ID, ordinal, module, name, and signature. P43.3B must consume this structure instead of scanning C# or generated facade text.
@@ -771,7 +771,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P45.2 显式取消规则：运行中的 AsyncBuildJob 收到 Cancel 后先向 FMonitoredProcess 发送一次 kill-tree，再释放 process 并同步进入 Canceled 终态，随后执行 backend cleanup；Service Stop 即使立即销毁 job，也必须能观察到 Canceled，并且不能等待下一次 Tick 才完成状态结算。
 - 2026-07-19 P45.2 Task 5 路径假设错误记录：执行计划把 `AvidScriptEditorCSharpAutoLiveReloadTests.cpp` 写成“新建或修改”，首次探索却直接按已存在文件读取；随后又从类型名推断 WorkspaceService 与模板目录，产生多次无效读取。Prevention：计划中带“新建或修改”的路径先用 `rg --files` 判定存在性；任何 Workspace/Template 实现都先定位再读取，不从命名或相邻目录推断。
 - 2026-07-19 P45.2 source graph 遗留错误记录：P45.1 把 private watcher header 改名为 `DirectoryWatchHost.h`，但 `.cpp` 仍保留 `LiveReloadWatchHost.cpp`，旧 UBT makefile 未收录该源文件而暂时掩盖了 UE 首头文件检查错误。Prevention：C++ owner 类型或首头文件改名时，header/cpp basename 必须同批重命名；新增 cpp 触发 source graph 重建后必须关注之前未编译文件的诊断。
-- 2026-07-19 P45.2 Task 5 门禁命令错误记录：首次架构检查使用了不存在的 `C:/Users/user0/Documents/WindowsPowerShell/Scripts/pwsh.exe`。Prevention：本仓库门禁直接由当前 PowerShell 执行 `Build/CheckAvidScriptArchitecture.ps1`；仅使用经过 `Test-Path` 验证的显式 shell 路径。
+- 2026-07-19 P45.2 Task 5 门禁命令错误记录：首次架构检查使用了不存在的 `<UserProfile>/Documents/WindowsPowerShell/Scripts/pwsh.exe`。Prevention：本仓库门禁直接由当前 PowerShell 执行 `Build/CheckAvidScriptArchitecture.ps1`；仅使用经过 `Test-Path` 验证的显式 shell 路径。
 - 2026-07-19 P45.2 Task 5 读取编排错误复发：检查 diff 时再次用分号把 `git diff --stat` 与 `git status --short` 串在同一 shell 调用。Prevention：所有无依赖只读命令继续保持独立 `exec_command` 并由统一并行编排，不因命令短小而例外。
 - P45.2 Task 5 focused baseline：真实工作区自动重载 1/1 通过，证明 CoreTicker 在实际双阶段 C# 构建中持续心跳、编译失败保留 manifest/WASM 字节、候选绑定拒绝后旧 Tick 继续；真实取消 1/1 通过，证明 PowerShell -> dotnet MSBuild -> PowerShell 进程树退出、job=Canceled、旧 runtime 与正式三件套均保留；AsyncBuildJob 7/7、增量 UE5.8 Editor 编译与 architecture gate 通过。
 - 2026-07-19 P45.2 并行只读命令拼接错误记录：首次把已逐项加引号的 argv 片段直接拼成 PowerShell command，导致 `'git' 'status'` 等命令在解析阶段失败。Prevention：`exec_command` 接收 shell source，不接收 argv 数组；并行编排仍传独立 command string，复杂参数只在目标 shell 内按其语法引用。
@@ -779,3 +779,27 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P45.2 final baseline：Frontend 7/7、Semantic 43/43、GuestIr 31/31、CSharpGuest 19/19、WasmBackend 11/11、SemanticCache key/entry/prepared/integration 16/16、25/25、11/11、8/8、BuildIntegration 11/11、BuildPublication 4/4、PowerShell parser 18/18、incremental UE5.8 Editor build 与 architecture gate 通过；focused UE automation 为 BuildService 4/4、BuildProcess 3/3、AsyncBuildJob 7/7、CSharpLiveReload 16/16、Component 7/7、ComponentBinding 3/3，完整 AvidScript automation 196/196，非成功 0、Queue Empty、TestExit 与 exit status 0。
 - 2026-07-19 P45.2 process adapter 重复取消终审记录：AsyncBuildJob 已用 `bCancelRequested` 阻止重复转发，但立即释放 process adapter 时其析构再次调用 `Cancel()`，adapter 只检查 Running 而未检查自身 cancel flag，仍可能第二次发送 kill-tree。Prevention：取消幂等必须在真正拥有外部进程的 adapter 层成立；Running 且尚未请求取消时才调用 `FMonitoredProcess::Cancel(true)`，上层门禁只负责业务状态。
 - 2026-07-19 P45.2 收尾补丁 hunk 格式错误记录：多文件 `apply_patch` 在第一个 hunk 后多写了一个孤立的 `@@`，预检拒绝整个补丁。Prevention：每个 `Update File` 只包含完整 hunk，切换文件前不得留下空 hunk header；多文件补丁失败时确认零写入后再拆成稳定上下文重试。
+
+## Phase 45.3 C# Guest State Migration Rules
+- 2026-07-19 P45.3 apply_patch 基准目录误判记录：首次新增阶段文档时使用了相对 `Docs/...`，但工具以 UE 工程根而非插件 Git 根为基准，文件被写到工程根；随后只检查插件路径，又错误判断为零写入。Prevention：本任务所有 `apply_patch` 路径必须显式以 `Plugins/AvidScript/` 开头；任何补丁结果异常都从 workspace root 定位目标文件，确认实际路径和内容后才能判断写入状态。
+- 2026-07-19 P45.3 CLI namespace/catch-order 编译疏漏记录：新增 `SemanticDocument` 局部变量时遗漏 `AvidScript.CSharpSemantic` using，并把派生自 `IOException` 的 `InvalidDataException` catch 放在通用 IO catch 后。Prevention：跨项目模型首次进入文件时同步检查 namespace；新增异常分支按最具体到最通用排序，并在第一次编译前核对继承关系。
+- 2026-07-19 P45.3 Windows 原子发布句柄错误记录：状态 schema writer 首版使用覆盖整个 try 作用域的 using declaration，`File.Move` 执行时临时文件流尚未 Dispose，Windows 返回 file in use。Prevention：WriteThrough 临时流必须使用显式 using block，在退出 block 确认句柄关闭后才能执行同卷原子替换；CLI 回归必须真实重复发布同一路径。
+- 2026-07-19 P45.3 PowerShell parser 门禁插值错误记录：临时语法检查命令在双引号中写 `$File:`，冒号被解析为变量作用域分隔符，命令在读取仓库脚本前失败。Prevention：变量后紧跟冒号时固定使用 `${File}:`，并区分“门禁命令解析失败”和“被测脚本解析失败”。
+- 2026-07-19 P45.3 UE automation 成功格式误判记录：首次汇总聚焦日志时匹配 `Test Completed. Result=Succeeded`，但 UE5.8 controller 实际输出 `Result={Success}`，导致已通过的 1/1 用例被误报为失败。Prevention：自动化成功计数固定匹配 `Test Completed. Result=\{Success\}`，非成功匹配同一大括号格式；同时核对 BeginEvents/EndEvents、Queue Empty、`RequestExitWithStatus(1, 0)` 与进程退出码。
+- 2026-07-19 P45.3 多文件 hunk 归属错误记录：VM capability 补丁末尾的 Reload overlap 测试 hunk 未切换 `Update File`，预检在 VM 测试文件中找不到上下文并拒绝整批写入。Prevention：多模块补丁按 ownership 拆分；每个 hunk 前核对当前 `Update File`，测试修订不得附着到上一个模块文件段。
+- 2026-07-19 P45.3 RuntimeSession 重复上下文插入错误记录：状态迁移块以通用 `BuildValidatedRuntime`/`ActivateValidatedRuntime` 相邻文本定位，首次命中 `LoadInitialModule` 而非目标 `ReloadModule`。Prevention：同文件存在重复调用序列时，patch hunk 必须包含完整函数签名锚点；应用后立即读回两个函数，确认初次加载和 reload 语义未串位。
+- 2026-07-19 P45.3 WAMR memory 上界测试假设错误记录：VM 回归用地址 65535 作为一页 memory 的越界点，但 WAMR instantiate 的 64 KiB heap 会扩展实际线性内存，该地址合法。Prevention：不得用模块 initial page 推断实例化后的 memory 上界；越界回归使用接近 `MAX_uint32` 且长度必然溢出的范围，并继续由 WAMR `validate_app_addr` 判定。
+- P45.3 state migration rule：禁止复制整块 WASM state/linear memory；只迁移 manifest 明确声明、稳定 ID 匹配且类型指纹和尺寸完全一致的安全值槽位。字符串、数组、引用、对象句柄、堆地址、计时器、协程和 VM 栈默认不迁移。
+- P45.3 activation order rule：候选 runtime 必须在旧 runtime 仍存活时完成状态迁移，并在迁移成功后执行候选 BeginPlay；迁移、BeginPlay 或后续候选验证失败都卸载候选并保留旧 runtime、scheduler 和 manifest。
+- 2026-07-19 P45.3 WAMR 校验异常污染记录：`wasm_runtime_validate_app_addr` 越界失败会在实例上留下 sticky exception，导致随后合法的 `BeginPlay`/`Tick` 调用也失败，破坏 reload 回滚后的旧实例可用性。Prevention：宿主侧 guest-memory capability 在校验前拒绝已有脚本异常，只清理由本次宿主范围校验产生的异常；越界回归后必须继续调用合法 export 证明 VM 未被污染。
+- 2026-07-19 P45.3 假编译器契约漂移记录：状态 schema 成为 Guest 编译必填产物后，BuildPublication fixture 未同步 `StateSchemaPath`，使缺失 export 用例提前误分类为 `guest_ir_failed`。Prevention：共享编译 invoker 新增必填参数时，搜索全部注入式 compiler fixture；需要进入后续阶段的 fixture 必须发布结构完整的前置产物，并运行完整 PowerShell 契约组。
+- 2026-07-19 P45.3 WAMR 路径脱敏方案错误记录：首次重建只向 MSVC 传入 `/pathmap`，编译器因缺少 `/experimental:deterministic` 忽略该参数，且 MASM 本来也不会继承 CL 的路径映射。Prevention：第三方静态库公开发布统一从未占用的临时盘符访问 plugin/source/build 根，覆盖 C、C++、ASM 和 CMake；脚本所有退出路径必须解除映射，产物提交前按二进制字节扫描本机用户名和绝对工作区路径。
+- 2026-07-19 P45.3 安全审计读取命令拼接错误记录：检查两个上游 `.env` 时用分号把独立 `Get-Content` 放进同一个 shell 调用，再次违反只读命令独立编排规范。Prevention：即使文件很小，每个无依赖读取仍使用独立工具调用；安全审计不因只读而放宽命令结构。
+- 2026-07-19 P45.3 parser 插值错误复发记录：完整 PowerShell 语法门禁再次在诊断字符串中写 `$File:`，复发已知作用域解析错误。Prevention：脚本变量后接冒号的唯一允许形式为 `${File}:`；门禁命令保存为可复用规范片段，不再临时手写同类插值。
+- 2026-07-19 P45.3 文档占位符破坏 diff 协议记录：阶段成果补丁用 `@@` 表示 Markdown 反引号，随后全局替换同时改坏 unified diff 的 hunk header，预检拒绝且零写入。Prevention：patch 内容占位符必须使用不会出现在工具协议或 diff 语法中的命名 token，并只替换该精确 token；禁止使用 `@@`、`***`、`+++`、`---` 等协议片段。
+- P45.3 final baseline：.NET 113/113、PowerShell contracts 75/75、PowerShell parser 18/18、普通增量 UE5.8 Editor build 与 architecture gate 通过；聚焦 manifest/VM/migration/session/C# artifact/真实工作区热重载均通过，完整 AvidScript automation 199/199、非成功 0、Queue Empty、TestExit 与 exit status 0。
+- P45.3 public publication rule：公开 Git 快照不得包含用户邮箱、用户名、绝对工作区路径、凭据、本地产物或带私有构建路径的二进制。首次公开发布使用无父快照提交；旧本地历史只保留在不推送的 archive ref，WAMR 静态库必须从脱敏盘符构建并执行字节扫描。
+- 2026-07-19 P45.3 最终审阅 stable-ID 设计缺陷记录：首版 schema 直接复用含字段类型的 Guest global ID，字段类型变化会被误判为删除加新增并绕过指纹不兼容拒绝。Prevention：迁移 stable ID 固定为 owner type identity + 字段名且不含类型；Guest global ID 仅用于定位 layout，类型完整性只由递归指纹和尺寸负责，回归显式断言 stable ID 不含 `int32`。
+- 2026-07-19 P45.3 只读命令拼接再次复发：最终审阅状态迁移服务时又用分号串联 header/cpp 两个 `Get-Content`。Prevention：禁止在任何 `exec_command` 中用分号组织多文件读取；每次工具调用提交前先搜索命令 source 是否含 shell separator，多文件只读必须拆成独立调用。
+- 2026-07-19 P45.3 stable-ID 回归夹具名称错误记录：新增测试未先读回 `CSharpGuestSemanticFixture`，把实际字段 `Score` 写成 `Counter`，使实现修复后的首次 GREEN 仍失败。Prevention：断言 fixture identity 前先读取其定义，优先引用现有常量或从 document symbol 取 name，禁止凭印象手写测试身份。
+- 2026-07-19 P45.3 安全扫描自动变量误用复发：staged privacy scan 再次把 PowerShell 自动变量 `$Matches` 当作普通结果集合赋值。Prevention：所有临时扫描结果统一使用带语义前缀的普通变量名（如 `$ScanMatches`）；`$Matches`、`$Error`、`$Args` 等自动变量禁止用于任务状态。
