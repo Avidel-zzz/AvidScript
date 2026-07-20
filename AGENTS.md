@@ -839,3 +839,10 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - P45.5 candidate host-effect rule：reload transaction 只存在于候选 `BeginPlay`；初次加载和 live Tick/Event/Input 不得持有 journal。静态与动态 binding 必须在实际 UE 写入或 `ProcessEvent` 前 prepare effect，未知非 const binding 在候选阶段按 `binding_reload_effect_unsupported` fail closed。
 - P45.5 API 扩展规则：新增 UE 函数继续由 descriptor v3 的中央精确 policy 分类并复用动态 ABI；只有出现新的副作用语义时才新增 effect-domain adapter，禁止回到逐个函数新增 VM enum、Runtime switch 或回滚 import。
 - P45.5 final baseline：.NET 自有测试 129/129、PowerShell contracts 83/83、PowerShell parser 18/18、architecture gate 与普通增量 UE5.8 Editor build 通过；四条指定真实 reflected/C#/workspace 闭环均为 1/1，完整 AvidScript automation 202/202、非成功 0、Queue Empty、TestExit 与进程退出码 0。
+
+## Phase 45.6 Runtime Diagnostic Rules
+
+- 2026-07-21 P45.6 第三方构建路径猜测错误记录：定位 WAMR call-stack 配置时直接传入推测的根级 `CMakeLists.txt`、`cmake`、`Build-Win64.ps1` 与 glob 路径，产生多个 path-not-found；真实入口是 `Build/BuildWAMRWin64.cmd`。Prevention：第三方源码和构建脚本同样先用 `rg --files` 按关键词定位，再读取已确认路径；native command 的 Windows 路径不得依赖未展开 glob。
+- 2026-07-21 P45.6 Markdown 行尾空格错误记录：架构文档用两个行尾空格实现引用块强制换行，`git diff --cached --check` 将其判定为 trailing whitespace。Prevention：仓库 Markdown 的段落换行使用空引用行或独立段落，禁止依赖行尾空格；每次文档暂存前运行 scoped `git diff --check`。
+- P45.6 diagnostic ownership rule：VM 只公开通用 WASM function index/offset frame，不包含 C# 或源码路径；CSharpGuest 生成 debug map，Runtime 验证并映射，Editor 只负责展示。WAMR 文本格式必须封装在 VM Private parser。
+- P45.6 performance rule：调用栈只在 trap 路径采集；健康 BeginPlay/Tick/Event/Timer 不解析 debug map、不抓 frame、不新增 host crossing。v1 只承诺函数声明 span，禁止把未经验证的 fast-interpreter offset 表述为精确 C# 指令行号。
