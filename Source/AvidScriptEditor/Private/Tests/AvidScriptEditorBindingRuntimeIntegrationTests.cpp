@@ -34,6 +34,24 @@ uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 	return Bits;
 }
 
+int32 FindAvidScriptBindingRuntimeBytes(
+	const TConstArrayView<uint8> Bytes,
+	const TConstArrayView<uint8> Sequence)
+{
+	if (Sequence.IsEmpty() || Sequence.Num() > Bytes.Num())
+	{
+		return INDEX_NONE;
+	}
+	for (int32 Index = 0; Index <= Bytes.Num() - Sequence.Num(); ++Index)
+	{
+		if (FMemory::Memcmp(Bytes.GetData() + Index, Sequence.GetData(), Sequence.Num()) == 0)
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+
 bool CreateAvidScriptBindingRuntimeIntegrationWorld(
 	UWorld*& OutWorld,
 	bool bInitializeForPlay = true)
@@ -106,6 +124,68 @@ bool LoadAvidScriptBindingRuntimeFixture(TArray<uint8>& OutBytecode)
 		TEXT("AvidScript/Tests/Fixtures/WasmBackend/P42_4_ReflectedSetActorScale.wasm")));
 	return FFileHelper::LoadFileToArray(OutBytecode, *FixturePath);
 }
+
+bool LoadAvidScriptBindingRuntimeTrapFixture(TArray<uint8>& OutBytecode)
+{
+	if (!LoadAvidScriptBindingRuntimeFixture(OutBytecode))
+	{
+		return false;
+	}
+
+	const TArray<uint8> CodeHeader = { 0x0a, 0x47, 0x01, 0x45 };
+	const TArray<uint8> CallTail = { 0x10, 0x02, 0x21, 0x05, 0x0f };
+	const int32 CodeHeaderIndex = FindAvidScriptBindingRuntimeBytes(OutBytecode, CodeHeader);
+	const int32 CallTailIndex = FindAvidScriptBindingRuntimeBytes(OutBytecode, CallTail);
+	if (CodeHeaderIndex == INDEX_NONE || CallTailIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	// This checked fixture has one small code body, so both encoded sizes remain one-byte LEB128 values.
+	++OutBytecode[CodeHeaderIndex + 1];
+	++OutBytecode[CodeHeaderIndex + 3];
+	OutBytecode.Insert(0x00, CallTailIndex + 4);
+	return true;
+}
+
+class FAvidScriptBindingRuntimeRecordingJournal final : public IAvidScriptBindingHostEffectJournal
+{
+public:
+	explicit FAvidScriptBindingRuntimeRecordingJournal(const bool bInAcceptPrepare)
+		: bAcceptPrepare(bInAcceptPrepare)
+	{
+	}
+
+	bool PrepareEffect(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		const EAvidScriptBindingReloadEffect Effect,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override
+	{
+		++PrepareCallCount;
+		LastRegistry = &Registry;
+		LastHandle = Handle;
+		LastTarget = &Target;
+		LastEffect = Effect;
+		OutResult = FAvidScriptBindingHostEffectPrepareResult();
+		OutResult.bSucceeded = bAcceptPrepare;
+		if (!bAcceptPrepare)
+		{
+			OutResult.ErrorCategory = TEXT("test_host_effect_rejected");
+			OutResult.ErrorSource = Target.GetPathName();
+			OutResult.ErrorDetails = TEXT("The test journal rejected the candidate write.");
+		}
+		return bAcceptPrepare;
+	}
+
+	bool bAcceptPrepare = false;
+	int32 PrepareCallCount = 0;
+	FAvidScriptObjectRegistry* LastRegistry = nullptr;
+	FAvidScriptObjectHandle LastHandle;
+	UObject* LastTarget = nullptr;
+	EAvidScriptBindingReloadEffect LastEffect = EAvidScriptBindingReloadEffect::Unsupported;
+};
 
 bool GenerateAvidScriptBindingRuntimePackage(
 	TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
@@ -298,6 +378,91 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		*FString::Printf(TEXT("%s scheduler records one Tick"), *BuildLabel),
 		Session.GetLiveTickCallCount(),
 		1);
+
+	FAvidScriptWasmReloadManifest CommitManifest = OutManifest;
+	CommitManifest.ModuleId += TEXT("_transaction_commit");
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s C# candidate reload commits"), *BuildLabel),
+			Session.ReloadModule(
+				OutBytecode.GetData(),
+				OutBytecode.Num(),
+				CommitManifest,
+				ReloadResult)))
+	{
+		Test.AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s candidate opens a host effect transaction"), *BuildLabel),
+		ReloadResult.bHostEffectTransactionAttempted);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s candidate commits its host effect transaction"), *BuildLabel),
+		ReloadResult.bHostEffectTransactionCommitted);
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s candidate captures one reflected Actor transform"), *BuildLabel),
+		ReloadResult.HostEffectCapturedObjectCount,
+		1);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s committed C# BeginPlay scale remains applied"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(2.0, 3.0, 4.0), 0.001));
+
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s committed C# runtime ticks"), *BuildLabel),
+			Session.TickLive(0.25f, TickResult)))
+	{
+		Test.AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	const FVector ScaleBeforeRejectedCandidate = Actor->GetActorScale3D();
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s committed C# Tick retains live reflected writes"), *BuildLabel),
+		ScaleBeforeRejectedCandidate.Equals(FVector(2.25, 3.0, 4.0), 0.001));
+
+	TArray<uint8> TrapBytecode;
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s dynamic write-then-trap fixture loads"), *BuildLabel),
+			LoadAvidScriptBindingRuntimeTrapFixture(TrapBytecode)))
+	{
+		return false;
+	}
+	FAvidScriptWasmReloadManifest TrapManifest = OutManifest;
+	TrapManifest.ModuleId += TEXT("_transaction_trap");
+	TrapManifest.RequiredExports = { TEXT("avid_on_begin_play") };
+	TrapManifest.RequiredImports = {
+		{ TEXT("env"), TEXT("owner_get_slot") },
+		{ TEXT("env"), TEXT("owner_get_generation") },
+		{ TEXT("avidscript"), TEXT("avid_ue_e493dae7c6aae6c7") }
+	};
+	Test.TestFalse(
+		*FString::Printf(TEXT("%s reflected write-then-trap candidate is rejected"), *BuildLabel),
+		Session.ReloadModule(
+			TrapBytecode.GetData(),
+			TrapBytecode.Num(),
+			TrapManifest,
+			ReloadResult));
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s rejected candidate attempts rollback"), *BuildLabel),
+		ReloadResult.bHostEffectRollbackAttempted);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s rejected candidate restores reflected host effects"), *BuildLabel),
+		ReloadResult.bHostEffectRollbackSucceeded);
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s rejected candidate restores one Actor transform"), *BuildLabel),
+		ReloadResult.HostEffectRestoredObjectCount,
+		1);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s rejected candidate preserves the committed scale"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(ScaleBeforeRejectedCandidate, 0.001));
+	if (!Test.TestTrue(
+			*FString::Printf(TEXT("%s old C# runtime ticks after candidate rollback"), *BuildLabel),
+			Session.TickLive(0.25f, TickResult)))
+	{
+		Test.AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s old C# Tick continues reflected gameplay after rollback"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
 	return true;
 }
 
@@ -593,6 +758,90 @@ bool FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest::RunTest(const FS
 		TEXT("Direct cached ProcessEvent applies FVector scale"),
 		Actor->GetActorScale3D().Equals(TargetScale, 0.001));
 	Actor->SetActorScale3D(InitialScale);
+
+	FAvidScriptBindingRuntimeRecordingJournal RejectingJournal(false);
+	DirectContext.HostEffectJournal = &RejectingJournal;
+	TestFalse(
+		TEXT("Candidate journal rejection prevents reflected SetActorScale3D"),
+		Package->Dispatch(DirectCall, DirectContext, DirectScratch, DirectResult));
+	TestEqual(TEXT("Candidate journal receives one prepare call"), RejectingJournal.PrepareCallCount, 1);
+	TestEqual(TEXT("Candidate journal receives the invocation registry"), RejectingJournal.LastRegistry, &Registry);
+	TestEqual(TEXT("Candidate journal receives the Actor handle"), RejectingJournal.LastHandle, ActorHandle);
+	TestEqual(TEXT("Candidate journal receives the Actor target"), RejectingJournal.LastTarget, static_cast<UObject*>(Actor));
+	TestEqual(
+		TEXT("Candidate journal receives the generated Actor transform effect"),
+		RejectingJournal.LastEffect,
+		EAvidScriptBindingReloadEffect::ActorTransform);
+	TestTrue(
+		TEXT("Candidate journal rejection preserves Actor scale before ProcessEvent"),
+		Actor->GetActorScale3D().Equals(InitialScale, 0.001));
+	TestTrue(
+		TEXT("Candidate journal failure keeps its stable category"),
+		DirectResult.Details.Contains(TEXT("test_host_effect_rejected"), ESearchCase::CaseSensitive));
+
+	FString UnsupportedDescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult UnsupportedGenerateResult;
+	TSharedPtr<const FAvidScriptBindingPackage> UnsupportedPackage;
+	FAvidScriptBindingPackageLoadResult UnsupportedLoadResult;
+	if (!TestTrue(
+			TEXT("Unsupported SetVisibility descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.reload_unsupported"),
+				{ { TEXT("/Script/Engine.SceneComponent"), TEXT("SetVisibility") } },
+				UnsupportedDescriptorJson,
+				UnsupportedGenerateResult))
+		|| !TestTrue(
+			TEXT("Unsupported SetVisibility package loads"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				UnsupportedDescriptorJson,
+				UnsupportedPackage,
+				UnsupportedLoadResult)))
+	{
+		AddError(UnsupportedGenerateResult.ErrorMessage + TEXT("\n") + UnsupportedLoadResult.ErrorDetails);
+		return false;
+	}
+	const FAvidScriptVmDynamicImport* SetVisibilityImport = UnsupportedPackage->GetVmPackage().Imports.GetData();
+	if (!TestNotNull(TEXT("Unsupported package exposes SetVisibility"), SetVisibilityImport))
+	{
+		return false;
+	}
+	const uint64 VisibilityArguments[] = {
+		RootHandle.Slot,
+		RootHandle.Generation,
+		0,
+		0
+	};
+	FAvidScriptDynamicHostCall VisibilityCall;
+	VisibilityCall.BindingOrdinal = SetVisibilityImport->Ordinal;
+	VisibilityCall.Arguments = MakeArrayView(VisibilityArguments);
+	TArray<uint8> VisibilityScratch;
+	VisibilityScratch.SetNumUninitialized(UnsupportedPackage->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult VisibilityResult;
+	FAvidScriptBindingRuntimeRecordingJournal PermissiveJournal(true);
+	FAvidScriptBindingInvocationContext VisibilityContext = DirectContext;
+	VisibilityContext.OwnerHandle = RootHandle;
+	VisibilityContext.HostEffectJournal = &PermissiveJournal;
+	RootComponent->SetVisibility(true);
+	TestFalse(
+		TEXT("Candidate rejects an unsupported reflected mutation before ProcessEvent"),
+		UnsupportedPackage->Dispatch(
+			VisibilityCall,
+			VisibilityContext,
+			VisibilityScratch,
+			VisibilityResult));
+	TestTrue(TEXT("Rejected unsupported mutation keeps the component visible"), RootComponent->IsVisible());
+	TestTrue(
+		TEXT("Unsupported mutation reports a stable category"),
+		VisibilityResult.Details.Contains(TEXT("binding_reload_effect_unsupported"), ESearchCase::CaseSensitive));
+	VisibilityContext.HostEffectJournal = nullptr;
+	TestTrue(
+		TEXT("Live context preserves existing SetVisibility behavior"),
+		UnsupportedPackage->Dispatch(
+			VisibilityCall,
+			VisibilityContext,
+			VisibilityScratch,
+			VisibilityResult));
+	TestFalse(TEXT("Live SetVisibility reaches ProcessEvent"), RootComponent->IsVisible());
 
 	FAvidScriptWasmHostContext ReadOnlyContext;
 	ReadOnlyContext.ObjectRegistry = &Registry;

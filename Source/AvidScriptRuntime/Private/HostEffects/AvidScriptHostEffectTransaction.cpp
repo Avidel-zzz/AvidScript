@@ -142,6 +142,7 @@ bool FAvidScriptHostEffectTransaction::Rollback(
 	}
 
 	OutResult.CapturedObjectCount = Entries.Num();
+	CopyFirstPrepareFailure(OutResult);
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
 		const FEntry& Entry = Entries[Index];
@@ -220,6 +221,23 @@ void FAvidScriptHostEffectTransaction::SetPrepareFailure(
 	OutResult.ErrorCategory = Category;
 	OutResult.ErrorSource = Source;
 	OutResult.ErrorDetails = Details;
+	if (FirstPrepareErrorCategory.IsEmpty())
+	{
+		FirstPrepareErrorCategory = Category;
+		FirstPrepareErrorSource = Source;
+		FirstPrepareErrorDetails = Details;
+	}
+}
+
+void FAvidScriptHostEffectTransaction::CopyFirstPrepareFailure(
+	FAvidScriptHostEffectTransactionResult& OutResult) const
+{
+	if (!FirstPrepareErrorCategory.IsEmpty())
+	{
+		OutResult.ErrorCategory = FirstPrepareErrorCategory;
+		OutResult.ErrorSource = FirstPrepareErrorSource;
+		OutResult.ErrorDetails = FirstPrepareErrorDetails;
+	}
 }
 
 void FAvidScriptHostEffectTransaction::SetClosedFailure(

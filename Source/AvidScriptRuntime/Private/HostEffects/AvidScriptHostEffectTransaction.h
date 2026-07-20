@@ -65,11 +65,12 @@ private:
 	};
 
 	static FString FormatHandle(const FAvidScriptObjectHandle& Handle);
-	static void SetPrepareFailure(
+	void SetPrepareFailure(
 		FAvidScriptBindingHostEffectPrepareResult& OutResult,
 		const FString& Category,
 		const FString& Source,
 		const FString& Details);
+	void CopyFirstPrepareFailure(FAvidScriptHostEffectTransactionResult& OutResult) const;
 	static void SetClosedFailure(FAvidScriptHostEffectTransactionResult& OutResult);
 	static void RecordRestoreFailure(
 		FAvidScriptHostEffectTransactionResult& OutResult,
@@ -79,4 +80,7 @@ private:
 	EAvidScriptHostEffectTransactionState State = EAvidScriptHostEffectTransactionState::Open;
 	TSet<FEntryKey> CapturedKeys;
 	TArray<FEntry> Entries;
+	FString FirstPrepareErrorCategory;
+	FString FirstPrepareErrorSource;
+	FString FirstPrepareErrorDetails;
 };

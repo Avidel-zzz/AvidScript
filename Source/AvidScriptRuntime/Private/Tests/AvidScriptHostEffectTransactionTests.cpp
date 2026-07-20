@@ -202,6 +202,18 @@ bool FAvidScriptHostEffectTransactionFailureAndCommitTest::RunTest(const FString
 	TestFalse(TEXT("Unsupported effect fails closed"), StalePrepareTransaction.PrepareEffect(
 		Registry, FirstHandle, *FirstActor, EAvidScriptBindingReloadEffect::Unsupported, PrepareResult));
 	TestEqual(TEXT("Unsupported effect has stable category"), PrepareResult.ErrorCategory, FString(TEXT("binding_reload_effect_unsupported")));
+	FAvidScriptHostEffectTransactionResult PrepareFailureRollbackResult;
+	TestTrue(
+		TEXT("Prepare failure still permits an empty rollback"),
+		StalePrepareTransaction.Rollback(Registry, PrepareFailureRollbackResult));
+	TestEqual(
+		TEXT("Rollback preserves the first prepare failure category"),
+		PrepareFailureRollbackResult.ErrorCategory,
+		FString(TEXT("host_effect_handle_invalid")));
+	TestEqual(
+		TEXT("Rollback preserves the first prepare failure source"),
+		PrepareFailureRollbackResult.ErrorSource,
+		FString::Printf(TEXT("%u:%u"), SecondHandle.Slot, SecondHandle.Generation));
 
 	FAvidScriptHostEffectTransaction CommitTransaction;
 	TestTrue(TEXT("Committed entry captures"), CommitTransaction.PrepareEffect(

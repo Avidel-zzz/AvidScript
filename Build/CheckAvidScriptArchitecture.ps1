@@ -695,6 +695,7 @@ $HostEffectTransactionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Priva
 $HostEffectTransactionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/HostEffects/AvidScriptHostEffectTransaction.cpp'
 $WasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
+$BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
 $VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
 $WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
 foreach ($RequiredStateSchemaContract in @(
@@ -766,7 +767,8 @@ foreach ($RequiredHostEffectContract in @(
     'EAvidScriptHostEffectTransactionState',
     'FAvidScriptHostEffectTransactionResult',
     'TWeakObjectPtr<UObject>',
-    'TSet<FEntryKey>'
+    'TSet<FEntryKey>',
+    'FirstPrepareErrorSource'
 )) {
     if (-not $HostEffectTransactionHeader.Contains($RequiredHostEffectContract)) {
         Add-Violation "host effect transaction header is missing contract $RequiredHostEffectContract"
@@ -805,6 +807,17 @@ if ($RuntimeSessionHeader.Contains('FAvidScriptHostEffectTransaction')) {
 }
 if (-not $WasmRuntimeHeader.Contains('IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr')) {
     Add-Violation 'Wasm host context must expose only the non-owning host effect journal interface'
+}
+if (-not $RuntimeSource.Contains('InvocationContext.HostEffectJournal = HostContext.HostEffectJournal')) {
+    Add-Violation 'Wasm dynamic host calls must forward the candidate host effect journal into binding invocation'
+}
+$DynamicPrepareIndex = $BindingInvocationSource.IndexOf('Context.HostEffectJournal->PrepareEffect(')
+$DynamicProcessEventIndex = $BindingInvocationSource.IndexOf('Target->ProcessEvent(Plan.Function, Frame)')
+if (-not $BindingInvocationSource.Contains('binding_reload_effect_unsupported') -or
+    $DynamicPrepareIndex -lt 0 -or
+    $DynamicProcessEventIndex -lt 0 -or
+    $DynamicPrepareIndex -ge $DynamicProcessEventIndex) {
+    Add-Violation 'dynamic binding candidate policy must reject unsupported writes and prepare reversible effects before ProcessEvent'
 }
 if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
     -not $WamrBackendSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory() override')) {

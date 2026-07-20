@@ -1191,6 +1191,56 @@ bool FAvidScriptBindingPackage::Dispatch(
 		}
 	}
 
+	if (Context.HostEffectJournal != nullptr && Plan.bRequiresWriteAccess)
+	{
+		if (Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_reload_effect_unsupported"),
+				Plan.Function->GetPathName(),
+				TEXT("The reflected write has no reversible candidate reload adapter."));
+			return false;
+		}
+		if (Context.ObjectRegistry == nullptr)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_host_effect_registry_missing"),
+				Plan.Function->GetPathName(),
+				TEXT("The candidate host effect journal requires an object registry."));
+			return false;
+		}
+
+		const FAvidScriptObjectHandle EffectHandle = Plan.bStatic
+			? Context.OwnerHandle
+			: FAvidScriptObjectHandle{
+				static_cast<uint32>(Call.Arguments[0]),
+				static_cast<uint32>(Call.Arguments[1])
+			};
+		FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+		if (!Context.HostEffectJournal->PrepareEffect(
+			*Context.ObjectRegistry,
+			EffectHandle,
+			*Target,
+			Plan.ReloadEffect,
+			PrepareResult))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				PrepareResult.ErrorCategory.IsEmpty()
+					? FString(TEXT("binding_host_effect_prepare_failed"))
+					: PrepareResult.ErrorCategory,
+				PrepareResult.ErrorSource.IsEmpty()
+					? Plan.Function->GetPathName()
+					: PrepareResult.ErrorSource,
+				PrepareResult.ErrorDetails.IsEmpty()
+					? FString(TEXT("The candidate host effect could not be prepared."))
+					: PrepareResult.ErrorDetails);
+			return false;
+		}
+	}
+
 	Target->ProcessEvent(Plan.Function, Frame);
 
 	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Plan.Parameters)
