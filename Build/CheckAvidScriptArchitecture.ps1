@@ -691,6 +691,10 @@ $CSharpStateContractResolverSource = Read-RequiredFile 'Tools/AvidScript.CSharpG
 $CSharpStateSchemaSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/StateMigration/CSharpGuestStateSchema.cs'
 $RuntimeStateMigrationSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/StateMigration/AvidScriptRuntimeStateMigration.cpp'
 $RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
+$HostEffectTransactionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/HostEffects/AvidScriptHostEffectTransaction.h'
+$HostEffectTransactionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/HostEffects/AvidScriptHostEffectTransaction.cpp'
+$WasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
+$BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
 $WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
 foreach ($RequiredStateSchemaContract in @(
@@ -755,6 +759,32 @@ foreach ($RequiredSessionMigrationContract in @(
 foreach ($ForbiddenSessionMigrationConcern in @('ReadStateBytes', 'WriteStateBytes', 'IAvidScriptVmGuestMemory')) {
     if ($RuntimeSessionSource.Contains($ForbiddenSessionMigrationConcern)) {
         Add-Violation "RuntimeSession must not own guest memory migration concern $ForbiddenSessionMigrationConcern"
+    }
+}
+foreach ($RequiredHostEffectContract in @(
+    'IAvidScriptBindingHostEffectJournal',
+    'EAvidScriptHostEffectTransactionState',
+    'FAvidScriptHostEffectTransactionResult',
+    'TWeakObjectPtr<UObject>',
+    'TSet<FEntryKey>'
+)) {
+    if (-not $HostEffectTransactionHeader.Contains($RequiredHostEffectContract)) {
+        Add-Violation "host effect transaction header is missing contract $RequiredHostEffectContract"
+    }
+}
+foreach ($RequiredHostEffectBehavior in @(
+    'EAvidScriptBindingReloadEffect::ActorTransform',
+    'EAvidScriptBindingReloadEffect::SceneComponentTransform',
+    'binding_reload_effect_unsupported',
+    'host_effect_restore_failed'
+)) {
+    if (-not $HostEffectTransactionSource.Contains($RequiredHostEffectBehavior)) {
+        Add-Violation "host effect transaction source is missing behavior $RequiredHostEffectBehavior"
+    }
+}
+foreach ($ForbiddenHostEffectOwner in @($WasmRuntimeHeader, $BindingInvocationHeader)) {
+    if ($ForbiddenHostEffectOwner.Contains('FAvidScriptHostEffectTransaction')) {
+        Add-Violation 'WasmRuntime and BindingPackage contracts must not own the host effect transaction service'
     }
 }
 if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
