@@ -12,8 +12,77 @@ internal static class CSharpGuestDebugMapTests
     public static int Run()
     {
         RealSemanticFunctionsProjectToDeterministicWasmIndices();
+        NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations();
         ReversedSameLineSpanFailsClosed();
-        return 2;
+        return 3;
+    }
+
+    private static void NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticCallable mainCallable = baseline.Callables.Single(callable =>
+            callable.MethodSymbolId == CSharpGuestSemanticFixture.MainMethodId);
+        const string constructorId = "symbol:method:global::Game.Script..ctor():void";
+        const string ownerId = "symbol:type:global::Game.Script";
+        SemanticSpan span = new(0, 1, 0, 0, 0, 1);
+        SemanticDocument semantic = baseline with
+        {
+            Callables = baseline.Callables.Concat(new[]
+            {
+                mainCallable with { MethodSymbolId = constructorId },
+            }).ToArray(),
+            Symbols = baseline.Symbols.Concat(new[]
+            {
+                new SemanticSymbol(
+                    ownerId,
+                    "type",
+                    "Script",
+                    null,
+                    "type:global::Game.Script",
+                    "global::Game.Script",
+                    true,
+                    "public",
+                    span),
+                new SemanticSymbol(
+                    CSharpGuestSemanticFixture.MainMethodId,
+                    "method",
+                    "Main",
+                    ownerId,
+                    "type:void",
+                    "Main():void",
+                    true,
+                    "public",
+                    span),
+                new SemanticSymbol(
+                    constructorId,
+                    "constructor",
+                    ".ctor",
+                    ownerId,
+                    "type:void",
+                    ".ctor():void",
+                    false,
+                    "public",
+                    span),
+            }).ToArray(),
+        };
+        GuestModule lowered = CSharpGuestLowerer.Lower(baseline, new string('c', 64)).Module
+            ?? throw new InvalidOperationException("non-method fixture should lower successfully");
+        GuestFunction synthetic = lowered.Functions[0] with { Id = "function:" + constructorId };
+        GuestModule module = lowered with
+        {
+            Functions = lowered.Functions.Concat(new[] { synthetic }).ToArray(),
+        };
+
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            new string('d', 64));
+
+        Assert(debugMap.Functions.Count == lowered.Functions.Count,
+            "non-method backend functions should not publish fake C# source locations");
+        Assert(debugMap.Functions.Select(function => function.WasmFunctionIndex)
+            .SequenceEqual(Enumerable.Range(module.Imports.Count, lowered.Functions.Count)),
+            "skipped non-method functions must not collapse the WASM function index space");
     }
 
     private static void ReversedSameLineSpanFailsClosed()

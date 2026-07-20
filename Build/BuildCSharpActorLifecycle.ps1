@@ -142,6 +142,7 @@ function Remove-LoadableArtifacts {
     foreach ($Artifact in @(
         $ManifestPath,
         $GuestIrArtifactPath,
+        $DebugMapArtifactPath,
         $StateSchemaArtifactPath,
         $WasmArtifactPath)) {
         if (Test-Path -LiteralPath $Artifact -PathType Leaf) {
@@ -337,6 +338,12 @@ function Try-GetJsonInt32 {
     return $false
 }
 
+function Test-JsonLowercaseSha256 {
+    param([object]$Value)
+
+    return $Value -is [string] -and $Value -cmatch '^[0-9a-f]{64}$'
+}
+
 function Write-BuildReport {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -388,6 +395,7 @@ function Write-BuildReport {
             frontend_file = if (Test-Path -LiteralPath $FrontendArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $FrontendArtifactPath } else { "" }
             semantic_file = if (Test-Path -LiteralPath $SemanticArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $SemanticArtifactPath } else { "" }
             guest_ir_file = if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $GuestIrArtifactPath } else { "" }
+            debug_map_file = if (Test-Path -LiteralPath $DebugMapArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $DebugMapArtifactPath } else { "" }
             state_schema_file = if (Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf) { Convert-ToProjectRelativePath $StateSchemaArtifactPath } else { "" }
         }
         frontend = [ordered]@{
@@ -414,6 +422,13 @@ function Write-BuildReport {
             succeeded = if ($null -eq $GuestIrModel) { $false } else { [bool]$GuestIrModel.succeeded }
             semantic_sha256 = if ($null -eq $GuestIrModel) { "" } else { [string]$GuestIrModel.provenance.semantic_sha256 }
             sha256 = Get-Sha256Hex $GuestIrArtifactPath
+        }
+        debug_map = [ordered]@{
+            schema_version = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.schema_version }
+            version = if ($null -eq $DebugMapModel) { "" } else { [string]$DebugMapModel.debug_version }
+            module_id = if ($null -eq $DebugMapModel) { "" } else { [string]$DebugMapModel.module_id }
+            function_count = if ($null -eq $DebugMapModel -or $DebugMapModel.functions -isnot [System.Array]) { 0 } else { $DebugMapModel.functions.Count }
+            sha256 = Get-Sha256Hex $DebugMapArtifactPath
         }
         state_migration = [ordered]@{
             schema_version = $StateSchemaVersion
@@ -471,6 +486,7 @@ $SemanticCacheRoot = [System.IO.Path]::GetFullPath($SemanticCacheRoot)
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
+$DebugMapArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.debug.json"
 $StateSchemaArtifactPath = Join-Path $OutputRoot "$ArtifactStem.state.json"
 $WasmArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm"
 $WasmInspectionArtifactPath = Join-Path $OutputRoot "$ArtifactStem.wasm.inspect.json"
@@ -479,6 +495,7 @@ $LegacyDotNetWasmPath = Join-Path $OutputRoot "$ArtifactStem.dotnet.wasm"
 $FrontendModel = $null
 $SemanticModel = $null
 $GuestIrModel = $null
+$DebugMapModel = $null
 $StateSchemaModel = $null
 $StateSchemaArtifactExists = $false
 $WasmInspectionModel = $null
@@ -524,6 +541,7 @@ foreach ($Artifact in @(
     $FrontendArtifactPath,
     $SemanticArtifactPath,
     $GuestIrArtifactPath,
+    $DebugMapArtifactPath,
     $StateSchemaArtifactPath,
     $WasmArtifactPath,
     $WasmInspectionArtifactPath,
@@ -804,6 +822,7 @@ $CompilerArguments = @(
     "-DotNetPath", $DotNet.Path,
     "-SemanticPath", $SemanticArtifactPath,
     "-GuestIrPath", $GuestIrArtifactPath,
+    "-DebugMapPath", $DebugMapArtifactPath,
     "-StateSchemaPath", $StateSchemaArtifactPath,
     "-WasmPath", $WasmArtifactPath,
     "-InspectionPath", $WasmInspectionArtifactPath,
@@ -819,6 +838,14 @@ if (Test-Path -LiteralPath $GuestIrArtifactPath -PathType Leaf) {
     }
     catch {
         $Diagnostics += [ordered]@{ code = "guest_ir_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
+    }
+}
+if (Test-Path -LiteralPath $DebugMapArtifactPath -PathType Leaf) {
+    try {
+        $DebugMapModel = Get-Content -Raw -LiteralPath $DebugMapArtifactPath | ConvertFrom-Json
+    }
+    catch {
+        $Diagnostics += [ordered]@{ code = "debug_map_artifact_invalid"; severity = "error"; message = $_.Exception.Message; file = $SourceId }
     }
 }
 $StateSchemaArtifactExists = Test-Path -LiteralPath $StateSchemaArtifactPath -PathType Leaf
@@ -839,12 +866,13 @@ if (Test-Path -LiteralPath $WasmInspectionArtifactPath -PathType Leaf) {
     }
 }
 $GuestIrSucceeded = $null -ne $GuestIrModel -and [bool]$GuestIrModel.succeeded
-if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $StateSchemaArtifactExists -or $null -eq $WasmInspectionModel -or
+$DebugMapPublished = $null -ne $DebugMapModel -and (Test-Path -LiteralPath $DebugMapArtifactPath -PathType Leaf)
+if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $DebugMapPublished -or -not $StateSchemaArtifactExists -or $null -eq $WasmInspectionModel -or
     -not (Test-Path -LiteralPath $WasmArtifactPath -PathType Leaf)) {
     Remove-LoadableArtifacts
-    $FailureResult = if (-not $GuestIrSucceeded) { "guest_ir_failed" } else { "wasm_backend_failed" }
+    $FailureResult = if (-not $GuestIrSucceeded) { "guest_ir_failed" } elseif (-not $DebugMapPublished) { "debug_map_failed" } else { "wasm_backend_failed" }
     $Diagnostics += [ordered]@{
-        code = if (-not $GuestIrSucceeded) { "guest_ir_compile_failed" } else { "wasm_backend_compile_failed" }
+        code = if (-not $GuestIrSucceeded) { "guest_ir_compile_failed" } elseif (-not $DebugMapPublished) { "debug_map_compile_failed" } else { "wasm_backend_compile_failed" }
         severity = "error"
         message = "Formal C# guest compiler failed with exit code $CompilerExitCode."
         output = @($CompilerOutput)
@@ -856,6 +884,7 @@ if ($CompilerExitCode -ne 0 -or -not $GuestIrSucceeded -or -not $StateSchemaArti
 
 $SemanticSha256 = Get-Sha256Hex $SemanticArtifactPath
 $GuestIrSha256 = Get-Sha256Hex $GuestIrArtifactPath
+$DebugMapSha256 = Get-Sha256Hex $DebugMapArtifactPath
 $StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
 $WasmSha256 = Get-Sha256Hex $WasmArtifactPath
 $RequiredExports = @($GuestIrModel.exports | ForEach-Object { [string]$_.name })
@@ -930,6 +959,83 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
+$DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -RequiredProperties @(
+        "schema_version",
+        "debug_version",
+        "module_id",
+        "source",
+        "provenance",
+        "functions")) -and
+    [int]$DebugMapModel.schema_version -eq 1 -and
+    [string]$DebugMapModel.debug_version -eq "1.0" -and
+    [string]$DebugMapModel.module_id -ceq [string]$GuestIrModel.module_id -and
+    (Test-JsonObjectHasProperties -Value $DebugMapModel.source -RequiredProperties @("id", "sha256")) -and
+    [string]$DebugMapModel.source.id -ceq $SourceId -and
+    (Test-JsonLowercaseSha256 -Value $DebugMapModel.source.sha256) -and
+    [string]$DebugMapModel.source.sha256 -ceq [string]$FrontendModel.source.sha256 -and
+    (Test-JsonObjectHasProperties -Value $DebugMapModel.provenance -RequiredProperties @(
+        "frontend_sha256",
+        "semantic_sha256",
+        "guest_ir_sha256")) -and
+    (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.frontend_sha256) -and
+    (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.semantic_sha256) -and
+    (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.guest_ir_sha256) -and
+    [string]$DebugMapModel.provenance.frontend_sha256 -ceq [string]$FrontendModel.source.sha256 -and
+    [string]$DebugMapModel.provenance.semantic_sha256 -ceq $SemanticSha256 -and
+    [string]$DebugMapModel.provenance.guest_ir_sha256 -ceq $GuestIrSha256 -and
+    $DebugMapModel.functions -is [System.Array] -and
+    $DebugMapModel.functions.Count -gt 0
+if ($DebugMapContractValid) {
+    $DebugFunctionIndices = [System.Collections.Generic.HashSet[int]]::new()
+    $DebugGuestFunctionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $PreviousDebugFunctionIndex = -1
+    foreach ($Function in $DebugMapModel.functions) {
+        $FunctionIndex = -1
+        $SpanStart = -1
+        $SpanLength = -1
+        $SpanLine = -1
+        $SpanColumn = -1
+        $SpanEndLine = -1
+        $SpanEndColumn = -1
+        if (-not (Test-JsonObjectHasProperties -Value $Function -RequiredProperties @(
+                "wasm_function_index",
+                "guest_function_id",
+                "method_symbol_id",
+                "display_name",
+                "span")) -or
+            -not (Try-GetJsonInt32 -Value $Function.wasm_function_index -ParsedValue ([ref]$FunctionIndex)) -or
+            -not (Test-JsonNonEmptyString -Value $Function.guest_function_id) -or
+            -not (Test-JsonNonEmptyString -Value $Function.method_symbol_id) -or
+            -not (Test-JsonNonEmptyString -Value $Function.display_name) -or
+            -not (Test-JsonObjectHasProperties -Value $Function.span -RequiredProperties @(
+                    "start",
+                    "length",
+                    "line",
+                    "column",
+                    "end_line",
+                    "end_column")) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.start -ParsedValue ([ref]$SpanStart)) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.length -ParsedValue ([ref]$SpanLength)) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.line -ParsedValue ([ref]$SpanLine)) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.column -ParsedValue ([ref]$SpanColumn)) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.end_line -ParsedValue ([ref]$SpanEndLine)) -or
+            -not (Try-GetJsonInt32 -Value $Function.span.end_column -ParsedValue ([ref]$SpanEndColumn)) -or
+            $FunctionIndex -le $PreviousDebugFunctionIndex -or
+            -not $DebugFunctionIndices.Add($FunctionIndex) -or
+            -not $DebugGuestFunctionIds.Add([string]$Function.guest_function_id) -or
+            $SpanStart -lt 0 -or
+            $SpanLength -le 0 -or
+            $SpanLine -lt 0 -or
+            $SpanColumn -lt 0 -or
+            $SpanEndLine -lt $SpanLine -or
+            $SpanEndColumn -lt 0 -or
+            ($SpanEndLine -eq $SpanLine -and $SpanEndColumn -lt $SpanColumn)) {
+            $DebugMapContractValid = $false
+            break
+        }
+        $PreviousDebugFunctionIndex = $FunctionIndex
+    }
+}
 $StateSchemaVersion = 0
 $StateContractVersion = 0
 $StateSchemaContractValid = (Test-JsonObjectHasProperties -Value $StateSchemaModel -RequiredProperties @(
@@ -1008,13 +1114,13 @@ if ($StateSchemaContractValid) {
 }
 $WasmInspectionValid = [int]$WasmInspectionModel.schema_version -eq 1 -and
     [string]$WasmInspectionModel.sha256 -eq $WasmSha256
-if (-not $GuestContractValid -or -not $StateSchemaContractValid -or -not $WasmInspectionValid -or
+if (-not $GuestContractValid -or -not $DebugMapContractValid -or -not $StateSchemaContractValid -or -not $WasmInspectionValid -or
     $MissingDeclaredExports.Count -gt 0 -or $MissingObservedExports.Count -gt 0) {
     Remove-LoadableArtifacts
     $Diagnostics += [ordered]@{
         code = "direct_abi_contract_invalid"
         severity = "error"
-        message = "Guest IR provenance or final WASM direct ABI exports are invalid."
+        message = "Guest IR, C# debug map, state migration, or final WASM direct ABI contract is invalid."
         missing_declared_exports = @($MissingDeclaredExports)
         missing_observed_exports = @($MissingObservedExports)
     }
@@ -1060,7 +1166,15 @@ $Manifest = [ordered]@{
         file = Convert-ToProjectRelativePath $GuestIrArtifactPath
         schema_version = [int]$GuestIrModel.schema_version
         version = [string]$GuestIrModel.ir_version
+        module_id = [string]$GuestIrModel.module_id
         sha256 = $GuestIrSha256
+    }
+    debug_map = [ordered]@{
+        file = Convert-ToProjectRelativePath $DebugMapArtifactPath
+        schema_version = [int]$DebugMapModel.schema_version
+        version = [string]$DebugMapModel.debug_version
+        module_id = [string]$DebugMapModel.module_id
+        sha256 = $DebugMapSha256
     }
     state_migration = $StateSchemaModel
     wasm = [ordered]@{

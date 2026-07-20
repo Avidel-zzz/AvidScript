@@ -29,6 +29,7 @@ param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [Parameter(Mandatory = $true)][string]$SemanticPath,
     [Parameter(Mandatory = $true)][string]$GuestIrPath,
+    [Parameter(Mandatory = $true)][string]$DebugMapPath,
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,
     [Parameter(Mandatory = $true)][string]$WasmPath,
     [Parameter(Mandatory = $true)][string]$InspectionPath,
@@ -84,9 +85,11 @@ Assert-Condition (
     "seed build invocation counts differ"
 Assert-Condition ((Get-Content -Raw -LiteralPath $SeedManifest).IndexOf("build_reuse", [System.StringComparison]::Ordinal) -lt 0) "seed manifest leaked build_reuse"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
+$SeedDebugMap = Join-Path $SeedRoot "actor_lifecycle.csharp.debug.json"
 $SeedStateSchema = Join-Path $SeedRoot "actor_lifecycle.state.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
+Assert-Condition (Test-Path -LiteralPath $SeedDebugMap -PathType Leaf) "seed C# debug map is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedStateSchema -PathType Leaf) "seed state schema is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedWasm -PathType Leaf) "seed WASM is missing"
 $SeedStateSchemaJson = Get-Content -Raw -LiteralPath $SeedStateSchema | ConvertFrom-Json
@@ -118,6 +121,7 @@ $Mutation
     }
     $CompilerBody = @"
 Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+Copy-Item -LiteralPath '$SeedDebugMap' -Destination `$DebugMapPath -Force
 $StateSchemaEmission
 Copy-Item -LiteralPath '$SeedWasm' -Destination `$WasmPath -Force
 `$BackendDll = Join-Path '$PluginRoot' 'Tools\AvidScript.WasmBackend\bin\Release\net8.0\AvidScript.WasmBackend.dll'
@@ -151,6 +155,7 @@ exit `$LASTEXITCODE
     foreach ($LoadableArtifact in @(
         $CaseManifest,
         (Join-Path $CaseRoot "actor_lifecycle.guestir.json"),
+        (Join-Path $CaseRoot "actor_lifecycle.csharp.debug.json"),
         (Join-Path $CaseRoot "actor_lifecycle.state.json"),
         (Join-Path $CaseRoot "actor_lifecycle.wasm"))) {
         Assert-Condition (-not (Test-Path -LiteralPath $LoadableArtifact -PathType Leaf)) `
@@ -199,6 +204,7 @@ $GuestFailureBody = @"
 `$Model = Get-Content -Raw -LiteralPath '$SeedGuestIr' | ConvertFrom-Json
 `$Model.succeeded = `$false
 `$Model | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$GuestIrPath -Encoding utf8
+Copy-Item -LiteralPath '$SeedDebugMap' -Destination `$DebugMapPath -Force
 Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
 [Console]::Error.WriteLine('guest lowering failed')
 exit 1
@@ -224,12 +230,14 @@ $GuestFailureJson = Get-Content -Raw -LiteralPath $GuestFailureReport | ConvertF
 Assert-Condition ($GuestFailureJson.result -eq "guest_ir_failed") "succeeded=false Guest IR was misclassified as backend failure"
 Assert-Condition (-not (Test-Path -LiteralPath $GuestFailureManifest -PathType Leaf)) "Guest failure left a manifest"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.guestir.json") -PathType Leaf)) "Guest failure left Guest IR"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.csharp.debug.json") -PathType Leaf)) "Guest failure left C# debug map"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.state.json") -PathType Leaf)) "Guest failure left state schema"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $GuestFailureRoot "actor_lifecycle.wasm") -PathType Leaf)) "Guest failure left WASM"
 
 $MissingExportCompiler = Join-Path $RunRoot "MissingExportCompiler.ps1"
 $MissingExportBody = @"
 Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+Copy-Item -LiteralPath '$SeedDebugMap' -Destination `$DebugMapPath -Force
 Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
 `$Bytes = [System.IO.File]::ReadAllBytes('$SeedWasm')
 `$From = [System.Text.Encoding]::ASCII.GetBytes('avid_on_tick')
@@ -273,7 +281,49 @@ $MissingExportJson = Get-Content -Raw -LiteralPath $MissingExportReport | Conver
 Assert-Condition ($MissingExportJson.result -eq "direct_abi_unsupported") "missing final WASM export was not rejected"
 Assert-Condition ($MissingExportJson.observed_exports -contains "avid_on_tock") "report did not inspect the mutated final WASM"
 Assert-Condition (-not (Test-Path -LiteralPath $MissingExportManifest -PathType Leaf)) "missing export failure left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $MissingExportRoot "actor_lifecycle.csharp.debug.json") -PathType Leaf)) "missing export failure left C# debug map"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $MissingExportRoot "actor_lifecycle.wasm") -PathType Leaf)) "missing export failure left WASM"
+
+$TamperedDebugCompiler = Join-Path $RunRoot "TamperedDebugCompiler.ps1"
+$TamperedDebugBody = @"
+Copy-Item -LiteralPath '$SeedGuestIr' -Destination `$GuestIrPath -Force
+`$DebugMap = Get-Content -Raw -LiteralPath '$SeedDebugMap' | ConvertFrom-Json
+`$DebugMap.module_id = 'csharp:tampered'
+`$DebugMap | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$DebugMapPath -Encoding utf8
+Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
+Copy-Item -LiteralPath '$SeedWasm' -Destination `$WasmPath -Force
+`$BackendDll = Join-Path '$PluginRoot' 'Tools\AvidScript.WasmBackend\bin\Release\net8.0\AvidScript.WasmBackend.dll'
+& `$DotNetPath `$BackendDll --inspect `$WasmPath `$InspectionPath
+exit `$LASTEXITCODE
+"@
+Write-FakeCompiler -Path $TamperedDebugCompiler -Body $TamperedDebugBody
+$TamperedDebugRoot = Join-Path $RunRoot "TamperedDebug"
+$TamperedDebugReport = Join-Path $TamperedDebugRoot "actor_lifecycle.csharp.report.json"
+$TamperedDebugManifest = Join-Path $TamperedDebugRoot "actor_lifecycle.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $TamperedDebugRoot `
+    -SourcePath $SourcePath `
+    -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
+    -ModuleId "csharp_actor_lifecycle" `
+    -ArtifactStem "actor_lifecycle" `
+    -ReportPath $TamperedDebugReport `
+    -ManifestPath $TamperedDebugManifest `
+    -GuestCompilerPath $TamperedDebugCompiler | Out-Null
+$TamperedDebugExit = $LASTEXITCODE
+Assert-Condition ($TamperedDebugExit -eq 1) "tampered C# debug map must return exit 1; actual=$TamperedDebugExit"
+$TamperedDebugJson = Get-Content -Raw -LiteralPath $TamperedDebugReport | ConvertFrom-Json
+Assert-Condition ($TamperedDebugJson.result -eq "direct_abi_unsupported") "tampered C# debug map was not rejected"
+foreach ($LoadableArtifact in @(
+    $TamperedDebugManifest,
+    (Join-Path $TamperedDebugRoot "actor_lifecycle.guestir.json"),
+    (Join-Path $TamperedDebugRoot "actor_lifecycle.csharp.debug.json"),
+    (Join-Path $TamperedDebugRoot "actor_lifecycle.state.json"),
+    (Join-Path $TamperedDebugRoot "actor_lifecycle.wasm"))) {
+    Assert-Condition (-not (Test-Path -LiteralPath $LoadableArtifact -PathType Leaf)) `
+        "tampered C# debug map left loadable artifact $LoadableArtifact"
+}
 
 $PublicationRoot = Join-Path $RunRoot "PublicationFailure"
 $PublicationReportDirectory = Join-Path $PublicationRoot "ReportIsDirectory"
@@ -292,16 +342,19 @@ New-Item -ItemType Directory -Force -Path $PublicationReportDirectory | Out-Null
 $PublicationExit = $LASTEXITCODE
 Assert-Condition ($PublicationExit -eq 1) "report publication failure must return exit 1; actual=$PublicationExit"
 Assert-Condition (-not (Test-Path -LiteralPath $PublicationManifest -PathType Leaf)) "report publication failure left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $PublicationRoot "actor_lifecycle.csharp.debug.json") -PathType Leaf)) "report publication failure left C# debug map"
 Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $PublicationRoot "actor_lifecycle.wasm") -PathType Leaf)) "report publication failure left WASM"
 
 $PreparedFailureRoot = Join-Path $RunRoot "PreparedFailure"
 $PreparedFailureReport = Join-Path $PreparedFailureRoot "actor_lifecycle.csharp.report.json"
 $PreparedFailureManifest = Join-Path $PreparedFailureRoot "actor_lifecycle.avidscript.json"
 $PreparedFailureWasm = Join-Path $PreparedFailureRoot "actor_lifecycle.wasm"
+$PreparedFailureDebugMap = Join-Path $PreparedFailureRoot "actor_lifecycle.csharp.debug.json"
 $MissingPreparedReport = Join-Path $RunRoot "MissingPrepared\missing.csharp.report.json"
 New-Item -ItemType Directory -Force -Path $PreparedFailureRoot | Out-Null
 [System.IO.File]::WriteAllText($PreparedFailureManifest, "stale-manifest", $Utf8)
 [System.IO.File]::WriteAllText($PreparedFailureWasm, "stale-wasm", $Utf8)
+[System.IO.File]::WriteAllText($PreparedFailureDebugMap, "stale-debug-map", $Utf8)
 & $BuildScript `
     -DotNetPath $DotNetPath `
     -OutputRoot $PreparedFailureRoot `
@@ -326,7 +379,8 @@ Assert-Condition (
     [int]$PreparedFailureJson.tool_invocations.semantic -eq 0) `
     "invalid prepared import invocation counts differ"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathType Leaf)) "invalid prepared import left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureDebugMap -PathType Leaf)) "invalid prepared import left C# debug map"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 12/12 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 13/13 passed"
 exit 0

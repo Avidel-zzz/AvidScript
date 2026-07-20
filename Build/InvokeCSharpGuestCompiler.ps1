@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [Parameter(Mandatory = $true)][string]$SemanticPath,
     [Parameter(Mandatory = $true)][string]$GuestIrPath,
+    [Parameter(Mandatory = $true)][string]$DebugMapPath,
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,
     [Parameter(Mandatory = $true)][string]$WasmPath,
     [Parameter(Mandatory = $true)][string]$InspectionPath,
@@ -35,12 +36,13 @@ foreach ($Directory in @(
     $NuGetPackages,
     $NuGetDirectory,
     (Split-Path -Parent $GuestIrPath),
+    (Split-Path -Parent $DebugMapPath),
     (Split-Path -Parent $StateSchemaPath),
     (Split-Path -Parent $WasmPath))) {
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
 }
 
-foreach ($StaleArtifact in @($GuestIrPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
+foreach ($StaleArtifact in @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
     if (Test-Path -LiteralPath $StaleArtifact -PathType Leaf) {
         Remove-Item -LiteralPath $StaleArtifact -Force
     }
@@ -80,7 +82,8 @@ try {
     & $DotNetPath $GuestDll `
         --semantic $SemanticPath `
         --output $GuestIrPath `
-        --state-schema $StateSchemaPath
+        --state-schema $StateSchemaPath `
+        --debug-map $DebugMapPath
     if ($LASTEXITCODE -ne 0) {
         $ExitCode = $LASTEXITCODE
         throw "C# semantic to Guest IR lowering failed with exit code $ExitCode."
@@ -101,7 +104,7 @@ finally {
 }
 
 if ($ExitCode -eq 0) {
-    foreach ($Artifact in @($GuestIrPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
+    foreach ($Artifact in @($GuestIrPath, $DebugMapPath, $StateSchemaPath, $WasmPath, $InspectionPath)) {
         if (-not (Test-Path -LiteralPath $Artifact -PathType Leaf)) {
             throw "Formal C# guest compiler did not publish expected artifact: $Artifact"
         }

@@ -146,6 +146,33 @@ function Invoke-CacheBuild {
     }
 }
 
+function Assert-DebugArtifact {
+    param(
+        [Parameter(Mandatory = $true)]$Build,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $DebugMapPath = Resolve-ProjectPath ([string]$Build.Report.artifacts.debug_map_file)
+    Assert-Condition (Test-Path -LiteralPath $DebugMapPath -PathType Leaf) "$Label C# debug map is missing"
+    $DebugMap = Get-Content -Raw -LiteralPath $DebugMapPath | ConvertFrom-Json
+    $Manifest = Get-Content -Raw -LiteralPath $Build.ManifestPath | ConvertFrom-Json
+    Assert-Condition (
+        [int]$DebugMap.schema_version -eq 1 -and
+        [string]$DebugMap.debug_version -ceq "1.0" -and
+        [string]$DebugMap.module_id -ceq [string]$Manifest.guest_ir.module_id) `
+        "$Label C# debug map contract differs from Guest IR"
+    Assert-Condition (
+        [string]$DebugMap.source.id -ceq [string]$Build.Report.source.file -and
+        [string]$DebugMap.provenance.semantic_sha256 -ceq [string]$Build.Report.guest_ir.semantic_sha256 -and
+        [string]$DebugMap.provenance.guest_ir_sha256 -ceq [string]$Build.Report.guest_ir.sha256) `
+        "$Label C# debug map provenance differs from report"
+    Assert-Condition (
+        [string]$Manifest.debug_map.file -ceq [string]$Build.Report.artifacts.debug_map_file -and
+        [string]$Manifest.debug_map.sha256 -ceq [string]$Build.Report.debug_map.sha256) `
+        "$Label manifest C# debug map binding differs from report"
+    return $DebugMap
+}
+
 foreach ($Directory in @($RunRoot, $CacheParent)) {
     if (Test-Path -LiteralPath $Directory) {
         Remove-Item -LiteralPath $Directory -Recurse -Force
@@ -190,6 +217,7 @@ Assert-Condition (
     [int]$Cold.Report.tool_invocations.guest_ir -eq 1 -and
     [int]$Cold.Report.tool_invocations.wasm_backend -eq 1) `
     "cold semantic cache invocation counts differ"
+$ColdDebugMap = Assert-DebugArtifact -Build $Cold -Label "cold semantic cache build"
 
 $Warm = Invoke-CacheBuild -Name "Warm" -SourcePath $SourcePath -AuthorizationPath $BindingPackagePath
 Assert-Condition ($Warm.ExitCode -eq 0 -and $Warm.Report.succeeded) "warm semantic cache build failed"
@@ -204,6 +232,11 @@ Assert-Condition (
 Assert-Condition ($Warm.Report.semantic_cache.key -ceq $Cold.Report.semantic_cache.key) "warm cache key differs from cold key"
 Assert-Condition ($Warm.Report.semantic_cache.toolchain_fingerprint -ceq $Cold.Report.semantic_cache.toolchain_fingerprint) `
     "warm cache toolchain fingerprint differs from cold fingerprint"
+$WarmDebugMap = Assert-DebugArtifact -Build $Warm -Label "warm semantic cache build"
+Assert-Condition (
+    [string]$Warm.Report.debug_map.sha256 -ceq [string]$Cold.Report.debug_map.sha256 -and
+    @($WarmDebugMap.functions).Count -eq @($ColdDebugMap.functions).Count) `
+    "warm semantic cache build did not deterministically regenerate the C# debug map"
 $WarmManifestText = Get-Content -Raw -LiteralPath $Warm.ManifestPath
 Assert-Condition ($WarmManifestText.IndexOf("semantic_cache", [System.StringComparison]::Ordinal) -lt 0) `
     "runtime manifest leaked semantic cache metadata"

@@ -57,9 +57,18 @@ public static class CSharpGuestDebugMapProjector
             if (!methodIds.Add(methodId)
                 || !callables.TryGetValue(methodId, out SemanticCallable? callable)
                 || !callable.HasBody
-                || !symbols.TryGetValue(methodId, out SemanticSymbol? methodSymbol)
-                || methodSymbol.Kind != "method"
-                || methodSymbol.ContainingSymbolId is null
+                || !symbols.TryGetValue(methodId, out SemanticSymbol? methodSymbol))
+            {
+                throw new InvalidDataException($"ASDEBUG1003: Guest function '{function.Id}' has no unique source method mapping.");
+            }
+
+            int functionIndex = checked(module.Imports.Count + ordinal);
+            if (methodSymbol.Kind != "method")
+            {
+                continue;
+            }
+
+            if (methodSymbol.ContainingSymbolId is null
                 || !symbols.TryGetValue(methodSymbol.ContainingSymbolId, out SemanticSymbol? ownerSymbol)
                 || ownerSymbol.Kind != "type"
                 || !IsValidSpan(methodSymbol.Span))
@@ -67,7 +76,6 @@ public static class CSharpGuestDebugMapProjector
                 throw new InvalidDataException($"ASDEBUG1003: Guest function '{function.Id}' has no unique source method mapping.");
             }
 
-            int functionIndex = checked(module.Imports.Count + ordinal);
             string ownerName = ownerSymbol.Signature.StartsWith("global::", StringComparison.Ordinal)
                 ? ownerSymbol.Signature[8..]
                 : ownerSymbol.Signature;

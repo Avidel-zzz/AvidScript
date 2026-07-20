@@ -206,8 +206,18 @@ $PreparedReportJson = Get-Content -Raw -LiteralPath $ReportPath | ConvertFrom-Js
 $AuthorizationPackage = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $BindingPackagePath
 $PreparedFrontendPath = Resolve-ProjectArtifactPath ([string]$PreparedReportJson.artifacts.frontend_file)
 $PreparedSemanticPath = Resolve-ProjectArtifactPath ([string]$PreparedReportJson.artifacts.semantic_file)
+$PreparedDebugMapPath = Resolve-ProjectArtifactPath ([string]$PreparedReportJson.artifacts.debug_map_file)
 Assert-Condition (Test-Path -LiteralPath $PreparedFrontendPath -PathType Leaf) "prepared frontend artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $PreparedSemanticPath -PathType Leaf) "prepared semantic artifact is missing"
+Assert-Condition (Test-Path -LiteralPath $PreparedDebugMapPath -PathType Leaf) "prepared C# debug map artifact is missing"
+$PreparedDebugMap = Get-Content -Raw -LiteralPath $PreparedDebugMapPath | ConvertFrom-Json
+$PreparedManifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json
+Assert-Condition ($PreparedDebugMap.module_id -ceq $PreparedManifest.guest_ir.module_id) `
+    "prepared C# debug map module identity differs from Guest IR"
+Assert-Condition ($PreparedManifest.debug_map.file -ceq $PreparedReportJson.artifacts.debug_map_file) `
+    "prepared manifest C# debug map path differs from report"
+Assert-Condition ($PreparedManifest.debug_map.sha256 -ceq $PreparedReportJson.debug_map.sha256) `
+    "prepared manifest C# debug map hash differs from report"
 
 $ValidRoot = Join-Path $RunRoot "Valid"
 $ValidFrontendPath = Join-Path $ValidRoot "prepared_semantic_contract.csharp.frontend.json"

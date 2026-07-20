@@ -514,21 +514,35 @@ Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"
 Assert-Condition (-not [string]::IsNullOrWhiteSpace([string]$NormalJson.artifacts.guest_ir_file)) "report does not reference Guest IR"
 $NormalGuestIrPath = Resolve-ArtifactPath $NormalJson.artifacts.guest_ir_file
+$NormalDebugMapPath = Resolve-ArtifactPath $NormalJson.artifacts.debug_map_file
 $NormalStateSchemaPath = Resolve-ArtifactPath $NormalJson.artifacts.state_schema_file
 $NormalWasmPath = Resolve-ArtifactPath $NormalJson.artifacts.wasm_file
 Assert-Condition (Test-Path -LiteralPath $NormalGuestIrPath -PathType Leaf) "valid source Guest IR artifact is missing"
+Assert-Condition (Test-Path -LiteralPath $NormalDebugMapPath -PathType Leaf) "valid source C# debug map artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $NormalStateSchemaPath -PathType Leaf) "valid source state schema artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $NormalWasmPath -PathType Leaf) "valid source WASM artifact is missing"
 $GuestIrJson = Get-Content -Raw -LiteralPath $NormalGuestIrPath | ConvertFrom-Json
+$DebugMapJson = Get-Content -Raw -LiteralPath $NormalDebugMapPath | ConvertFrom-Json
 $StateSchemaJson = Get-Content -Raw -LiteralPath $NormalStateSchemaPath | ConvertFrom-Json
 $SemanticSha256 = Get-Sha256Hex $NormalSemanticPath
 $GuestIrSha256 = Get-Sha256Hex $NormalGuestIrPath
+$DebugMapSha256 = Get-Sha256Hex $NormalDebugMapPath
 $WasmSha256 = Get-Sha256Hex $NormalWasmPath
 Assert-Condition ($GuestIrJson.schema_version -eq 1 -and $GuestIrJson.ir_version -eq "1.0" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
 Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "Guest IR semantic provenance hash differs"
+Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
+Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
+Assert-Condition ($DebugMapJson.source.id -eq $NormalJson.source.file -and $DebugMapJson.source.sha256 -eq $FrontendJson.source.sha256) "C# debug map source identity differs"
+Assert-Condition ($DebugMapJson.provenance.frontend_sha256 -eq $FrontendJson.source.sha256) "C# debug map frontend provenance hash differs"
+Assert-Condition ($DebugMapJson.provenance.semantic_sha256 -eq $SemanticSha256) "C# debug map semantic provenance hash differs"
+Assert-Condition ($DebugMapJson.provenance.guest_ir_sha256 -eq $GuestIrSha256) "C# debug map Guest IR provenance hash differs"
+Assert-Condition (@($DebugMapJson.functions).Count -gt 0) "C# debug map does not contain generated function symbols"
 Assert-Condition ($NormalJson.guest_ir.schema_version -eq 1 -and $NormalJson.guest_ir.version -eq "1.0") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"
 Assert-Condition ($NormalJson.guest_ir.sha256 -eq $GuestIrSha256) "report Guest IR artifact hash differs"
+Assert-Condition ($NormalJson.debug_map.schema_version -eq 1 -and $NormalJson.debug_map.version -eq "1.0") "report C# debug map contract is invalid"
+Assert-Condition ($NormalJson.debug_map.module_id -eq $GuestIrJson.module_id) "report C# debug map module identity differs"
+Assert-Condition ($NormalJson.debug_map.sha256 -eq $DebugMapSha256) "report C# debug map artifact hash differs"
 Assert-Condition ($StateSchemaJson.schema_version -eq 2 -and
     $StateSchemaJson.strategy -eq "host_snapshot" -and
     $StateSchemaJson.policy -eq "compatible" -and
@@ -549,7 +563,12 @@ Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.semanti
 Assert-Condition ($ManifestJson.source.semantic_sha256 -eq $SemanticSha256) "manifest semantic hash differs"
 Assert-Condition ($ManifestJson.guest_ir.file -eq $NormalJson.artifacts.guest_ir_file) "manifest Guest IR path differs"
 Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 1 -and $ManifestJson.guest_ir.version -eq "1.0") "manifest Guest IR contract is invalid"
+Assert-Condition ($ManifestJson.guest_ir.module_id -eq $GuestIrJson.module_id) "manifest Guest IR module identity differs"
 Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Guest IR hash differs"
+Assert-Condition ($ManifestJson.debug_map.file -eq $NormalJson.artifacts.debug_map_file) "manifest C# debug map path differs"
+Assert-Condition ($ManifestJson.debug_map.schema_version -eq 1 -and $ManifestJson.debug_map.version -eq "1.0") "manifest C# debug map contract is invalid"
+Assert-Condition ($ManifestJson.debug_map.module_id -eq $GuestIrJson.module_id) "manifest C# debug map module identity differs"
+Assert-Condition ($ManifestJson.debug_map.sha256 -eq $DebugMapSha256) "manifest C# debug map hash differs"
 Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and
     $ManifestJson.state_migration.policy -eq "compatible" -and
     $ManifestJson.state_migration.contract_version -eq 1 -and
