@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
+#include "BindingGeneration/AvidScriptEditorBindingReloadEffectPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 #include "Dom/JsonObject.h"
@@ -15,7 +16,7 @@
 
 namespace
 {
-constexpr const TCHAR* GeneratorVersion = TEXT("42.1.1");
+constexpr const TCHAR* GeneratorVersion = TEXT("45.5.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -27,6 +28,7 @@ struct FResolvedBindingDescriptor
 	FString CanonicalIdentity;
 	FString StableId;
 	FString ImportName;
+	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	int32 Ordinal = INDEX_NONE;
 };
 
@@ -248,6 +250,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 		Binding.CanonicalIdentity = MakeCanonicalIdentity(OwnerClass, Function, Binding.Projection);
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		Binding.ReloadEffect = FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
 	}
 
@@ -301,6 +304,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 	for (const FResolvedBindingDescriptor& Binding : Bindings)
 	{
 		PackageIdentity += TEXT("|binding:") + Binding.CanonicalIdentity + TEXT(":") + Binding.Projection.AbiSignature;
+		PackageIdentity += TEXT("|reload_effect:") + FString(LexToString(Binding.ReloadEffect));
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
 		{
 			PackageIdentity += TEXT("|default:") + Parameter.Name + TEXT(":");
@@ -318,7 +322,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
 	Writer->WriteObjectStart();
-	Writer->WriteValue(TEXT("schema_version"), 2);
+	Writer->WriteValue(TEXT("schema_version"), 3);
 	Writer->WriteValue(TEXT("generator_version"), GeneratorVersion);
 	Writer->WriteValue(TEXT("engine_version"), FEngineVersion::Current().ToString(EVersionComponent::Patch));
 	Writer->WriteValue(TEXT("source"), TEXT("ue_reflection"));
@@ -364,6 +368,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::Generate(
 		Writer->WriteValue(TEXT("dispatch_mode"), TEXT("cached_process_event"));
 		Writer->WriteValue(TEXT("is_static"), Binding.Function->HasAnyFunctionFlags(FUNC_Static));
 		Writer->WriteValue(TEXT("is_const"), Binding.Function->HasAnyFunctionFlags(FUNC_Const));
+		Writer->WriteValue(TEXT("reload_effect"), LexToString(Binding.ReloadEffect));
 		Writer->WriteObjectStart(TEXT("return"));
 		WriteProjectedValue(Writer, Binding.Projection.ReturnValue);
 		Writer->WriteObjectEnd();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptBindingReloadEffect.h"
 #include "CoreMinimal.h"
 
 struct FAvidScriptBindingEnumValue
@@ -51,6 +52,7 @@ struct FAvidScriptBindingFunctionModel
 	FString DispatchMode;
 	bool bStatic = false;
 	bool bConst = false;
+	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	FAvidScriptBindingValueModel ReturnValue;
 	TArray<FAvidScriptBindingValueModel> Parameters;
 	FAvidScriptBindingHostImportModel HostImport;

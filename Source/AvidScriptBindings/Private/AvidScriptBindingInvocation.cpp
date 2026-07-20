@@ -59,6 +59,7 @@ struct FAvidScriptRuntimeBindingInvocationPlan
 	UFunction* Function = nullptr;
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
+	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	bool bRequiresGuestMemory = false;
 	int32 FrameSize = 0;
 	int32 FrameAlignment = 1;
@@ -383,6 +384,10 @@ FString MakeAvidScriptRuntimePackageHash(const FAvidScriptBindingPackageModel& P
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		Identity += TEXT("|binding:") + Binding.CanonicalIdentity + TEXT(":") + Binding.HostImport.Signature;
+		if (Package.SchemaVersion >= 3)
+		{
+			Identity += TEXT("|reload_effect:") + FString(LexToString(Binding.ReloadEffect));
+		}
 		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
 		{
 			Identity += TEXT("|default:") + Parameter.Name + TEXT(":");
@@ -886,6 +891,19 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				TEXT("Function flags or ABI signature changed since descriptor generation."));
 			return false;
 		}
+		const bool bRuntimeReadOnly = Function->HasAnyFunctionFlags(FUNC_Const | FUNC_BlueprintPure);
+		if ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::None && !bRuntimeReadOnly)
+			|| ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::ActorTransform
+					|| Binding.ReloadEffect == EAvidScriptBindingReloadEffect::SceneComponentTransform)
+				&& bRuntimeReadOnly))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_reload_effect_mismatch"),
+				Binding.CanonicalIdentity,
+				TEXT("The descriptor reload effect conflicts with the reflected function flags."));
+			return false;
+		}
 
 		TArray<FProperty*> ReflectedParameters;
 		for (TFieldIterator<FProperty> It(Function); It; ++It)
@@ -911,7 +929,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.OwnerClass = OwnerClass;
 		Plan.Function = Function;
 		Plan.bStatic = Binding.bStatic;
-		Plan.bRequiresWriteAccess = !Binding.bConst;
+		Plan.ReloadEffect = Binding.ReloadEffect;
+		Plan.bRequiresWriteAccess = Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
 		Plan.FrameSize = Function->GetStructureSize();
 		Plan.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
 		if (Plan.FrameSize < Function->ParmsSize

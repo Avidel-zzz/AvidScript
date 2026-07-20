@@ -2,10 +2,12 @@
 
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "Dom/JsonObject.h"
 #include "Misc/AutomationTest.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -13,6 +15,13 @@ bool ParseDescriptor(const FString& Json, TSharedPtr<FJsonObject>& OutRoot)
 {
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
 	return FJsonSerializer::Deserialize(Reader, OutRoot) && OutRoot.IsValid();
+}
+
+bool SerializeDescriptor(const TSharedPtr<FJsonObject>& Root, FString& OutJson)
+{
+	OutJson.Empty();
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+	return Root.IsValid() && FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 }
 
 TSharedPtr<FJsonObject> FindBinding(
@@ -51,19 +60,19 @@ bool IsLowerHexSha256(const FString& Value)
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV2DeterminismTest,
-	"AvidScript.Editor.BindingDescriptor.V2Determinism",
+	FAvidScriptEditorBindingDescriptorV3DeterminismTest,
+	"AvidScript.Editor.BindingDescriptor.V3Determinism",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV2DeterminismTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString& Parameters)
 {
 	FString FirstJson;
 	FAvidScriptBindingDescriptorGenerateResult FirstResult;
 	TestTrue(
-		TEXT("Default binding descriptor v2 generates"),
+		TEXT("Default binding descriptor v3 generates"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Default result succeeds"), FirstResult.bSucceeded);
-	TestEqual(TEXT("Default v2 selection contains eight safe functions"), FirstResult.BindingCount, 8);
+	TestEqual(TEXT("Default v3 selection contains eight safe functions"), FirstResult.BindingCount, 8);
 	TestTrue(TEXT("Default descriptor contains projected types"), FirstResult.TypeCount >= 5);
 	TestTrue(TEXT("Package hash is a complete SHA-256"), IsLowerHexSha256(FirstResult.PackageHash));
 	TestTrue(TEXT("Selection hash is a complete SHA-256"), IsLowerHexSha256(FirstResult.SelectionHash));
@@ -71,19 +80,19 @@ bool FAvidScriptEditorBindingDescriptorV2DeterminismTest::RunTest(const FString&
 	FString SecondJson;
 	FAvidScriptBindingDescriptorGenerateResult SecondResult;
 	TestTrue(
-		TEXT("Repeated binding descriptor v2 generation succeeds"),
+		TEXT("Repeated binding descriptor v3 generation succeeds"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(SecondJson, SecondResult));
 	TestEqual(TEXT("Descriptor bytes are deterministic"), SecondJson, FirstJson);
 	TestEqual(TEXT("Repeated package hash is deterministic"), SecondResult.PackageHash, FirstResult.PackageHash);
 
 	TSharedPtr<FJsonObject> Root;
-	TestTrue(TEXT("Descriptor v2 is valid JSON"), ParseDescriptor(FirstJson, Root));
+	TestTrue(TEXT("Descriptor v3 is valid JSON"), ParseDescriptor(FirstJson, Root));
 	if (!Root.IsValid())
 	{
 		return true;
 	}
 
-	TestEqual(TEXT("Descriptor schema is v2"), Root->GetIntegerField(TEXT("schema_version")), 2);
+	TestEqual(TEXT("Descriptor schema is v3"), Root->GetIntegerField(TEXT("schema_version")), 3);
 	TestEqual(TEXT("Descriptor source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	TestEqual(
 		TEXT("Default package name is stable"),
@@ -91,7 +100,7 @@ bool FAvidScriptEditorBindingDescriptorV2DeterminismTest::RunTest(const FString&
 		FString(TEXT("avidscript.engine.core")));
 	TestEqual(TEXT("JSON package hash matches result"), Root->GetStringField(TEXT("package_hash")), FirstResult.PackageHash);
 	TestEqual(TEXT("JSON selection hash matches result"), Root->GetStringField(TEXT("selection_hash")), FirstResult.SelectionHash);
-	TestFalse(TEXT("Descriptor v2 does not expose handwritten projection fields"), FirstJson.Contains(TEXT("\"projection\"")));
+	TestFalse(TEXT("Descriptor v3 does not expose handwritten projection fields"), FirstJson.Contains(TEXT("\"projection\"")));
 
 	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
 	TestEqual(TEXT("Descriptor serializes eight bindings"), Bindings.Num(), 8);
@@ -117,17 +126,53 @@ bool FAvidScriptEditorBindingDescriptorV2DeterminismTest::RunTest(const FString&
 		TestTrue(
 			TEXT("Generated host import names are content addressed"),
 			Binding->GetObjectField(TEXT("host_import"))->GetStringField(TEXT("name")).StartsWith(TEXT("avid_ue_")));
+		TestTrue(TEXT("Every v3 binding declares reload effect policy"), Binding->HasTypedField<EJson::String>(TEXT("reload_effect")));
+	}
+
+	TSharedPtr<FJsonObject> LegacyRoot;
+	TestTrue(TEXT("Generated descriptor can be cloned for v2 compatibility"), ParseDescriptor(FirstJson, LegacyRoot));
+	if (LegacyRoot.IsValid())
+	{
+		LegacyRoot->SetNumberField(TEXT("schema_version"), 2);
+		for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("bindings")))
+		{
+			if (const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr)
+			{
+				Binding->RemoveField(TEXT("reload_effect"));
+			}
+		}
+		FString LegacyJson;
+		FAvidScriptBindingPackageModel LegacyPackage;
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestTrue(TEXT("Descriptor v2 remains parseable"),
+			SerializeDescriptor(LegacyRoot, LegacyJson)
+			&& FAvidScriptBindingDescriptorParser::Parse(LegacyJson, LegacyPackage, ErrorCategory, ErrorSource));
+		const FAvidScriptBindingFunctionModel* LegacyGetScale = LegacyPackage.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding) { return Binding.UeFunction == TEXT("GetActorScale3D"); });
+		const FAvidScriptBindingFunctionModel* LegacySetScale = LegacyPackage.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding) { return Binding.UeFunction == TEXT("SetActorScale3D"); });
+		if (TestNotNull(TEXT("Legacy getter survives normalization"), LegacyGetScale))
+		{
+			TestEqual(TEXT("Legacy const binding normalizes to no effect"),
+				LegacyGetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
+		}
+		if (TestNotNull(TEXT("Legacy setter survives normalization"), LegacySetScale))
+		{
+			TestEqual(TEXT("Legacy mutating binding normalizes to unsupported"),
+				LegacySetScale->ReloadEffect, EAvidScriptBindingReloadEffect::Unsupported);
+		}
 	}
 
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV2ProjectionTest,
-	"AvidScript.Editor.BindingDescriptor.V2Projection",
+	FAvidScriptEditorBindingDescriptorV3ProjectionTest,
+	"AvidScript.Editor.BindingDescriptor.V3Projection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV2ProjectionTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV3ProjectionTest::RunTest(const FString& Parameters)
 {
 	FString Json;
 	FAvidScriptBindingDescriptorGenerateResult Result;
@@ -148,6 +193,8 @@ bool FAvidScriptEditorBindingDescriptorV2ProjectionTest::RunTest(const FString& 
 	TestNotNull(TEXT("Actor location binding exists"), GetLocation.Get());
 	if (GetLocation.IsValid())
 	{
+		TestEqual(TEXT("Actor location read has no reload effect"),
+			GetLocation->GetStringField(TEXT("reload_effect")), FString(TEXT("none")));
 		TestEqual(
 			TEXT("Actor location returns canonical FVector"),
 			GetLocation->GetObjectField(TEXT("return"))->GetStringField(TEXT("canonical_type")),
@@ -169,6 +216,8 @@ bool FAvidScriptEditorBindingDescriptorV2ProjectionTest::RunTest(const FString& 
 	TestNotNull(TEXT("Actor scale write binding exists"), SetScale.Get());
 	if (SetScale.IsValid())
 	{
+		TestEqual(TEXT("Actor scale write declares reversible transform effect"),
+			SetScale->GetStringField(TEXT("reload_effect")), FString(TEXT("actor_transform")));
 		const TArray<TSharedPtr<FJsonValue>>& ReflectedParameters = SetScale->GetArrayField(TEXT("parameters"));
 		TestEqual(TEXT("Actor scale write has one reflected parameter"), ReflectedParameters.Num(), 1);
 		if (ReflectedParameters.Num() == 1)
@@ -195,6 +244,8 @@ bool FAvidScriptEditorBindingDescriptorV2ProjectionTest::RunTest(const FString& 
 	TestNotNull(TEXT("Root component binding exists"), RootComponent.Get());
 	if (RootComponent.IsValid())
 	{
+		TestEqual(TEXT("Root component read has no reload effect"),
+			RootComponent->GetStringField(TEXT("reload_effect")), FString(TEXT("none")));
 		TestEqual(
 			TEXT("Root component return is a UObject handle type"),
 			RootComponent->GetObjectField(TEXT("return"))->GetStringField(TEXT("canonical_type")),
@@ -209,11 +260,11 @@ bool FAvidScriptEditorBindingDescriptorV2ProjectionTest::RunTest(const FString& 
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV2DefaultsTest,
-	"AvidScript.Editor.BindingDescriptor.V2Defaults",
+	FAvidScriptEditorBindingDescriptorV3DefaultsTest,
+	"AvidScript.Editor.BindingDescriptor.V3Defaults",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV2DefaultsTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV3DefaultsTest::RunTest(const FString& Parameters)
 {
 	const FAvidScriptReflectedFunctionSelection Selection{
 		TEXT("/Script/Engine.SceneComponent"),
@@ -242,6 +293,8 @@ bool FAvidScriptEditorBindingDescriptorV2DefaultsTest::RunTest(const FString& Pa
 	{
 		return true;
 	}
+	TestEqual(TEXT("Unclassified SetVisibility is unsafe during candidate reload"),
+		Bindings[0]->AsObject()->GetStringField(TEXT("reload_effect")), FString(TEXT("unsupported")));
 
 	const TArray<TSharedPtr<FJsonValue>>& ReflectedParameters =
 		Bindings[0]->AsObject()->GetArrayField(TEXT("parameters"));
@@ -261,11 +314,11 @@ bool FAvidScriptEditorBindingDescriptorV2DefaultsTest::RunTest(const FString& Pa
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV2FailureTest,
-	"AvidScript.Editor.BindingDescriptor.V2Failure",
+	FAvidScriptEditorBindingDescriptorV3FailureTest,
+	"AvidScript.Editor.BindingDescriptor.V3Failure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV2FailureTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Parameters)
 {
 	TArray<FAvidScriptReflectedFunctionSelection> DuplicateSelections =
 		FAvidScriptEditorBindingDescriptorGenerator::MakeDefaultSelections();

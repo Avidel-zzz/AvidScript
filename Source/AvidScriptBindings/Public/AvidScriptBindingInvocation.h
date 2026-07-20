@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptActorBinding.h"
+#include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptVmBackend.h"
 #include "CoreMinimal.h"
@@ -22,6 +23,7 @@ struct FAvidScriptBindingInvocationContext
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingPackage

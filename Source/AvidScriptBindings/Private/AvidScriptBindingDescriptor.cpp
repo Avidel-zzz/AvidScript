@@ -222,6 +222,7 @@ bool ParseAvidScriptBindingValue(
 
 bool ParseAvidScriptBindingFunction(
 	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
 	FAvidScriptBindingFunctionModel& OutBinding,
 	FString& OutErrorSource)
 {
@@ -237,6 +238,24 @@ bool ParseAvidScriptBindingFunction(
 		|| !IsAvidScriptBindingLowerSha256(OutBinding.StableId))
 	{
 		return false;
+	}
+
+	if (SchemaVersion == 2)
+	{
+		OutBinding.ReloadEffect = OutBinding.bConst
+			? EAvidScriptBindingReloadEffect::None
+			: EAvidScriptBindingReloadEffect::Unsupported;
+	}
+	else
+	{
+		FString ReloadEffect;
+		if (!ReadAvidScriptBindingRequiredString(Object, TEXT("reload_effect"), ReloadEffect, OutErrorSource)
+			|| !TryParseAvidScriptBindingReloadEffect(ReloadEffect, OutBinding.ReloadEffect)
+			|| (OutBinding.bConst && OutBinding.ReloadEffect != EAvidScriptBindingReloadEffect::None))
+		{
+			OutErrorSource = TEXT("reload_effect");
+			return false;
+		}
 	}
 
 	const TSharedPtr<FJsonObject>* ReturnObject = nullptr;
@@ -326,7 +345,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	}
 
 	if (!ReadAvidScriptBindingRequiredInt(Root, TEXT("schema_version"), OutPackage.SchemaVersion, OutErrorSource)
-		|| OutPackage.SchemaVersion != 2
+		|| (OutPackage.SchemaVersion != 2 && OutPackage.SchemaVersion != 3)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -381,6 +400,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		FAvidScriptBindingFunctionModel Binding;
 		if (!ParseAvidScriptBindingFunction(
 				(*Bindings)[Index].IsValid() ? (*Bindings)[Index]->AsObject() : nullptr,
+				OutPackage.SchemaVersion,
 				Binding,
 				OutErrorSource)
 			|| Binding.Ordinal != Index

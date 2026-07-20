@@ -100,6 +100,9 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
+	TestEqual(TEXT("Authorization descriptor is schema v3"), AuthorizationModel.SchemaVersion, 3);
+	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
+	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 
 	const TArray<FAvidScriptFrontendBindingImport> UsedImports = {
 		MakeAvidScriptBindingSliceTestImport(*GetScale),
@@ -138,6 +141,14 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
 	{
 		ActualStableIds.Add(Binding.StableId);
+		if (Binding.UeFunction == TEXT("GetActorScale3D"))
+		{
+			TestEqual(TEXT("Slice preserves getter reload effect"), Binding.ReloadEffect, EAvidScriptBindingReloadEffect::None);
+		}
+		else if (Binding.UeFunction == TEXT("SetActorScale3D"))
+		{
+			TestEqual(TEXT("Slice preserves setter reload effect"), Binding.ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
+		}
 	}
 	bool bStableIdsMatch = ActualStableIds.Num() == ExpectedStableIds.Num();
 	for (const FString& StableId : ExpectedStableIds)
@@ -152,7 +163,16 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 
 	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
 	FAvidScriptBindingPackageLoadResult LoadResult;
-	TestTrue(TEXT("Runtime slice loads invocation package"), FAvidScriptBindingPackage::LoadDescriptor(SliceJson, LoadedSlice, LoadResult));
+	const bool bSliceLoaded = FAvidScriptBindingPackage::LoadDescriptor(SliceJson, LoadedSlice, LoadResult);
+	TestTrue(TEXT("Runtime slice loads invocation package"), bSliceLoaded);
+	if (!bSliceLoaded)
+	{
+		AddError(FString::Printf(
+			TEXT("Slice load failed | category=%s | source=%s | details=%s"),
+			*LoadResult.ErrorCategory,
+			*LoadResult.ErrorSource,
+			*LoadResult.ErrorDetails));
+	}
 	if (LoadedSlice.IsValid())
 	{
 		TestEqual(TEXT("Runtime slice creates two VM imports"), LoadedSlice->GetVmPackage().Imports.Num(), 2);
