@@ -3643,9 +3643,7 @@ call_wasm_with_hw_bound_check(WASMModuleInstance *module_inst,
      * then the stack-frame is already freed inside wasm_interp_call_wasm */
     if (!ret) {
 #if WASM_ENABLE_DUMP_CALL_STACK != 0
-        if (wasm_interp_create_call_stack(exec_env)) {
-            wasm_interp_dump_call_stack(exec_env, true, NULL, 0);
-        }
+        (void)wasm_interp_create_call_stack(exec_env);
 #endif
         /* Restore operand frames */
         wasm_exec_env_set_cur_frame(exec_env, prev_frame);

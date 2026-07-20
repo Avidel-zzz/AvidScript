@@ -1,6 +1,7 @@
 #include "AvidScriptVmBackend.h"
 
 #include "AvidScriptVmExportTable.h"
+#include "AvidScriptWamrCallStack.h"
 #include "AvidScriptWamrDynamicRegistry.h"
 #include "AvidScriptWamrHostBindings.h"
 
@@ -310,6 +311,9 @@ public:
 			Frame.CellCount,
 			Cells))
 		{
+			const FString Exception = GetWamrException(ModuleInstance);
+			TArray<FAvidScriptVmStackFrame> StackFrames;
+			CaptureAvidScriptWamrCallStack(ExecEnv, StackFrames);
 			if (bHasPendingHostImportFailure)
 			{
 				OutError.Reset();
@@ -317,9 +321,11 @@ public:
 				OutError.ImportModuleName = TEXT("avidscript");
 				OutError.ImportName = PendingHostImportName;
 				OutError.Details = PendingHostImportDetails;
+				OutError.StackFrames = MoveTemp(StackFrames);
 				return false;
 			}
-			SetVmError(OutError, TEXT("trap"), GetWamrException(ModuleInstance));
+			SetVmError(OutError, TEXT("trap"), Exception);
+			OutError.StackFrames = MoveTemp(StackFrames);
 			return false;
 		}
 

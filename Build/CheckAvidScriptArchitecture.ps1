@@ -105,6 +105,49 @@ foreach ($RequiredBatchContract in @('ActorGetTransformBatch', 'InputCells', 'Ou
         Add-Violation "VM batch contract is missing $RequiredBatchContract"
     }
 }
+$WamrBuildScript = Read-RequiredFile 'Build/BuildWAMRWin64.cmd'
+$WamrCallStackSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrCallStack.cpp'
+$WamrFastInterpreterSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_interp_fast.c'
+$WamrClassicInterpreterSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_interp_classic.c'
+$WamrInterpreterRuntimeSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_runtime.c'
+foreach ($RequiredVmDiagnosticContract in @(
+    'FAvidScriptVmStackFrame',
+    'TArray<FAvidScriptVmStackFrame> StackFrames',
+    'StackFrames.Reset()'
+)) {
+    if (-not $VmContractHeader.Contains($RequiredVmDiagnosticContract)) {
+        Add-Violation "VM diagnostic contract is missing $RequiredVmDiagnosticContract"
+    }
+}
+foreach ($RequiredWamrDiagnosticPrimitive in @(
+    'MaxCallStackTextLength = 64 * 1024',
+    'MaxCallStackFrames = 128',
+    'wasm_runtime_get_call_stack_buf_size',
+    'wasm_runtime_dump_call_stack_to_buf',
+    'ParseAvidScriptWamrCallStack'
+)) {
+    if (-not $WamrCallStackSource.Contains($RequiredWamrDiagnosticPrimitive)) {
+        Add-Violation "WAMR diagnostic adapter is missing $RequiredWamrDiagnosticPrimitive"
+    }
+}
+if (-not $WamrBuildScript.Contains('-DWAMR_BUILD_DUMP_CALL_STACK=1')) {
+    Add-Violation 'Win64 WAMR build must enable bounded trap call-stack capture'
+}
+foreach ($WamrInterpreterSource in @(
+    $WamrFastInterpreterSource,
+    $WamrClassicInterpreterSource,
+    $WamrInterpreterRuntimeSource
+)) {
+    if (-not $WamrInterpreterSource.Contains('(void)wasm_interp_create_call_stack(exec_env);') -or
+        $WamrInterpreterSource.Contains('wasm_interp_dump_call_stack(exec_env, true, NULL, 0);')) {
+        Add-Violation 'vendored WAMR trap exits must snapshot call stacks without printing upstream text'
+    }
+}
+foreach ($ForbiddenVmDiagnosticConcern in @('CSharp', 'SemanticSpan', 'SourcePath', 'wasm_export.h')) {
+    if ($VmContractHeader.Contains($ForbiddenVmDiagnosticConcern)) {
+        Add-Violation "VM public diagnostics must remain language and WAMR neutral: $ForbiddenVmDiagnosticConcern"
+    }
+}
 $VmHostBindingsSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'
 foreach ($RequiredVmPrimitive in @('TranslateGuestRange', 'actor_get_transform_batch')) {
     if (-not $VmHostBindingsSource.Contains($RequiredVmPrimitive)) {
@@ -122,6 +165,11 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings', 'AvidS
 }
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
+    'wasm_runtime_|wasm_export\.h',
+    'AVIDSCRIPT_WITH_WAMR'
+)
+
+Test-SourceTreeForbiddenPattern 'Source/AvidScriptEditor' @(
     'wasm_runtime_|wasm_export\.h',
     'AVIDSCRIPT_WITH_WAMR'
 )

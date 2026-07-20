@@ -320,6 +320,7 @@ bool FAvidScriptWamrTransformBatchValidationTest::RunTest(const FString& Paramet
 		TestFalse(TEXT("invalid batch arguments fail before dispatch"), Backend->Call(BeginHandle, EmptyFrame, Error));
 		TestEqual(TEXT("invalid batch failure is structured"), Error.Category, FString(TEXT("host_import_failed")));
 		TestEqual(TEXT("invalid batch identifies the import"), Error.ImportName, FString(TEXT("actor_get_transform_batch")));
+		TestTrue(TEXT("invalid batch retains diagnostic stack frames"), !Error.StackFrames.IsEmpty());
 		TestEqual(TEXT("invalid batch never reaches dispatcher"), Dispatcher.CallCount, 0);
 	}
 
@@ -333,6 +334,7 @@ bool FAvidScriptWamrTransformBatchValidationTest::RunTest(const FString& Paramet
 	}
 	FAvidScriptVmCallFrame EmptyFrame;
 	TestTrue(TEXT("empty batch allows null addresses"), EmptyBackend->Call(EmptyBeginHandle, EmptyFrame, EmptyError));
+	TestTrue(TEXT("healthy empty batch has no diagnostic stack frames"), EmptyError.StackFrames.IsEmpty());
 	TestEqual(TEXT("empty batch reaches dispatcher once"), EmptyDispatcher.BatchCallCount, 1);
 	TestTrue(TEXT("empty input view has no cells"), EmptyDispatcher.CapturedInputCells.IsEmpty());
 	TestEqual(TEXT("empty output view has no floats"), EmptyDispatcher.CapturedOutputFloatCount, 0);

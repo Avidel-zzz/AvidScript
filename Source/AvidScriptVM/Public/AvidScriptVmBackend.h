@@ -24,12 +24,20 @@ enum class EAvidScriptHostBindingId : uint16
 	TimerCancel
 };
 
+struct FAvidScriptVmStackFrame
+{
+	uint32 FunctionIndex = MAX_uint32;
+	uint32 FunctionOffset = 0;
+	FString RawFunctionToken;
+};
+
 struct FAvidScriptVmError
 {
 	FString Category;
 	FString Details;
 	FString ImportModuleName;
 	FString ImportName;
+	TArray<FAvidScriptVmStackFrame> StackFrames;
 
 	void Reset()
 	{
@@ -37,6 +45,7 @@ struct FAvidScriptVmError
 		Details.Reset();
 		ImportModuleName.Reset();
 		ImportName.Reset();
+		StackFrames.Reset();
 	}
 };
 

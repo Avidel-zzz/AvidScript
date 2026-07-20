@@ -62,5 +62,12 @@ The script calls Visual Studio `vcvars64.bat`, configures WAMR with CMake + Ninj
 - multi-module: disabled
 - SIMD: disabled
 - mini loader: disabled
+- trap call-stack snapshot: enabled
 
 This is intentionally minimal for the first UE embedding spike.
+
+## AvidScript 本地集成补丁
+
+WAMR 2.4.4 在启用 `WAMR_BUILD_DUMP_CALL_STACK` 后，会在解释器异常出口同时创建快照并直接打印调用栈。AvidScript 将三个解释器异常出口调整为只调用 `wasm_interp_create_call_stack`，随后由 `AvidScriptVM/Private` 通过 bounded buffer API 读取并结构化解析。这样保留上游快照生命周期和 function index/offset，同时避免第三方文本绕过 Runtime/Editor 诊断管线污染游戏日志。
+
+升级 WAMR snapshot 时必须重新核对 `wasm_interp_fast.c`、`wasm_interp_classic.c` 与 `wasm_runtime.c` 的异常出口，并运行 `AvidScript.VM.Diagnostics.TrapCallStack` 证明 trap 有结构化帧且日志中没有原始 `#<ordinal>` dump。
