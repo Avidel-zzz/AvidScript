@@ -44,11 +44,12 @@ bool FAvidScriptActorBinding::GetActorLocation(
 }
 
 bool FAvidScriptActorBinding::SetActorLocation(
-	const FAvidScriptObjectRegistry& Registry,
+	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	const FVector& Location,
 	EAvidScriptActorWritePolicy WritePolicy,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
 {
 	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
 	if (Actor == nullptr)
@@ -63,6 +64,10 @@ bool FAvidScriptActorBinding::SetActorLocation(
 			OutResult.ObjectResult,
 			TEXT("write_denied"),
 			TEXT("Enable the actor write policy only for host-authorized script calls."));
+		return false;
+	}
+	if (!PrepareTransformWrite(Registry, ActorHandle, *Actor, HostEffectJournal, OutResult))
+	{
 		return false;
 	}
 
@@ -84,11 +89,12 @@ bool FAvidScriptActorBinding::SetActorLocation(
 }
 
 bool FAvidScriptActorBinding::AddActorLocationOffset(
-	const FAvidScriptObjectRegistry& Registry,
+	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	const FVector& Offset,
 	EAvidScriptActorWritePolicy WritePolicy,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
 {
 	FVector CurrentLocation = FVector::ZeroVector;
 	if (!GetActorLocation(Registry, ActorHandle, CurrentLocation, OutResult))
@@ -96,7 +102,13 @@ bool FAvidScriptActorBinding::AddActorLocationOffset(
 		return false;
 	}
 
-	return SetActorLocation(Registry, ActorHandle, CurrentLocation + Offset, WritePolicy, OutResult);
+	return SetActorLocation(
+		Registry,
+		ActorHandle,
+		CurrentLocation + Offset,
+		WritePolicy,
+		OutResult,
+		HostEffectJournal);
 }
 
 bool FAvidScriptActorBinding::GetActorRotation(
@@ -118,11 +130,12 @@ bool FAvidScriptActorBinding::GetActorRotation(
 }
 
 bool FAvidScriptActorBinding::SetActorRotation(
-	const FAvidScriptObjectRegistry& Registry,
+	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	const FRotator& Rotation,
 	EAvidScriptActorWritePolicy WritePolicy,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
 {
 	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
 	if (Actor == nullptr)
@@ -137,6 +150,10 @@ bool FAvidScriptActorBinding::SetActorRotation(
 			OutResult.ObjectResult,
 			TEXT("write_denied"),
 			TEXT("Enable the actor write policy only for host-authorized script calls."));
+		return false;
+	}
+	if (!PrepareTransformWrite(Registry, ActorHandle, *Actor, HostEffectJournal, OutResult))
+	{
 		return false;
 	}
 
@@ -177,11 +194,12 @@ bool FAvidScriptActorBinding::GetActorScale3D(
 }
 
 bool FAvidScriptActorBinding::SetActorScale3D(
-	const FAvidScriptObjectRegistry& Registry,
+	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	const FVector& Scale3D,
 	EAvidScriptActorWritePolicy WritePolicy,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
 {
 	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
 	if (Actor == nullptr)
@@ -196,6 +214,10 @@ bool FAvidScriptActorBinding::SetActorScale3D(
 			OutResult.ObjectResult,
 			TEXT("write_denied"),
 			TEXT("Enable the actor write policy only for host-authorized script calls."));
+		return false;
+	}
+	if (!PrepareTransformWrite(Registry, ActorHandle, *Actor, HostEffectJournal, OutResult))
+	{
 		return false;
 	}
 
@@ -281,6 +303,46 @@ AActor* FAvidScriptActorBinding::ResolveActor(
 	OutResult.ObjectPath = ObjectResult.ObjectPath;
 	OutResult.ObjectResult = ObjectResult;
 	return Actor;
+}
+
+bool FAvidScriptActorBinding::PrepareTransformWrite(
+	FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& ActorHandle,
+	AActor& Actor,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	FAvidScriptActorBindingResult& OutResult)
+{
+	if (HostEffectJournal == nullptr)
+	{
+		return true;
+	}
+
+	FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+	if (HostEffectJournal->PrepareEffect(
+		Registry,
+		ActorHandle,
+		Actor,
+		EAvidScriptBindingReloadEffect::ActorTransform,
+		PrepareResult))
+	{
+		return true;
+	}
+
+	SetFailure(
+		OutResult,
+		OutResult.ObjectResult,
+		PrepareResult.ErrorCategory.IsEmpty()
+			? FString(TEXT("host_effect_snapshot_failed"))
+			: PrepareResult.ErrorCategory,
+		TEXT("Reject this candidate reload or add a reversible host effect adapter for the binding."));
+	if (!PrepareResult.ErrorDetails.IsEmpty())
+	{
+		OutResult.ErrorMessage += FString::Printf(
+			TEXT(" | effect_source=%s | details=%s"),
+			PrepareResult.ErrorSource.IsEmpty() ? TEXT("<none>") : *PrepareResult.ErrorSource,
+			*PrepareResult.ErrorDetails);
+	}
+	return false;
 }
 
 void FAvidScriptActorBinding::SetSuccess(

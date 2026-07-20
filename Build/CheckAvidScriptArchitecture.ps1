@@ -787,6 +787,25 @@ foreach ($ForbiddenHostEffectOwner in @($WasmRuntimeHeader, $BindingInvocationHe
         Add-Violation 'WasmRuntime and BindingPackage contracts must not own the host effect transaction service'
     }
 }
+foreach ($RequiredSessionHostEffectContract in @(
+    'TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction',
+    'HostEffectTransaction.Emplace()',
+    'CandidateHostContext.HostEffectJournal = &HostEffectTransaction.GetValue()',
+    'HostEffectTransaction->Rollback(',
+    'HostEffectTransaction->Commit(',
+    'CandidateRuntime->SetHostContext(HostContext)',
+    'HostContext.HostEffectJournal = nullptr'
+)) {
+    if (-not $RuntimeSessionSource.Contains($RequiredSessionHostEffectContract)) {
+        Add-Violation "RuntimeSession is missing candidate host effect transaction contract $RequiredSessionHostEffectContract"
+    }
+}
+if ($RuntimeSessionHeader.Contains('FAvidScriptHostEffectTransaction')) {
+    Add-Violation 'RuntimeSession public contract must not expose the private host effect transaction service'
+}
+if (-not $WasmRuntimeHeader.Contains('IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr')) {
+    Add-Violation 'Wasm host context must expose only the non-owning host effect journal interface'
+}
 if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
     -not $WamrBackendSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory() override')) {
     Add-Violation 'VM guest memory must be exposed through an optional backend capability implemented by WAMR'

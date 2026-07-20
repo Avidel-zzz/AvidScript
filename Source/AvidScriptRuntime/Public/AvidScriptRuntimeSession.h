@@ -75,6 +75,7 @@ private:
 	bool ActivateValidatedRuntime(
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 		const FAvidScriptWasmReloadManifest& Manifest,
+		bool bUseHostEffectTransaction,
 		FAvidScriptWasmReloadResult& OutResult);
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;

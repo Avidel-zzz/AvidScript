@@ -2,6 +2,7 @@
 
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
+#include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
@@ -61,6 +62,16 @@ void MarkRejectedReloadWithRollback(
 	OutResult.ActiveModuleId = ActiveModuleId;
 	OutResult.bRollbackPreservedLiveRuntime = !ActiveModuleId.IsEmpty();
 }
+
+void CopyHostEffectResult(
+	const FAvidScriptHostEffectTransactionResult& HostEffectResult,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	OutResult.HostEffectCapturedObjectCount = HostEffectResult.CapturedObjectCount;
+	OutResult.HostEffectRestoredObjectCount = HostEffectResult.RestoredObjectCount;
+	OutResult.HostEffectFailedObjectCount = HostEffectResult.FailedObjectCount;
+	OutResult.HostEffectErrorSource = HostEffectResult.ErrorSource;
+}
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
@@ -92,7 +103,7 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	}
 
 	CandidateRuntime->SetHostContext(HostContext);
-	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, false, OutResult))
 	{
 		OutResult.ActiveModuleId = GetLiveModuleId();
 		return false;
@@ -124,7 +135,7 @@ bool FAvidScriptRuntimeSession::LoadInitialModule(
 		return false;
 	}
 
-	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, false, OutResult))
 	{
 		OutResult.ActiveModuleId = GetLiveModuleId();
 		return false;
@@ -191,7 +202,7 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 	OutResult.StateMigrationSkippedSlotCount = MigrationResult.SkippedSlotCount;
 	OutResult.StateMigrationAliasedSlotCount = MigrationResult.AliasedSlotCount;
 
-	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, OutResult))
+	if (!ActivateValidatedRuntime(CandidateRuntime, Manifest, true, OutResult))
 	{
 		++RejectedReloadCount;
 		const FString ActiveModuleId = GetLiveModuleId();
@@ -208,6 +219,7 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	HostContext = InHostContext;
+	HostContext.HostEffectJournal = nullptr;
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
@@ -461,6 +473,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 	const FAvidScriptWasmReloadManifest& Manifest,
+	bool bUseHostEffectTransaction,
 	FAvidScriptWasmReloadResult& OutResult)
 {
 	if (!CandidateRuntime)
@@ -474,12 +487,57 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		return false;
 	}
 
+	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
+	if (bUseHostEffectTransaction)
+	{
+		HostEffectTransaction.Emplace();
+		OutResult.bHostEffectTransactionAttempted = true;
+		FAvidScriptWasmHostContext CandidateHostContext = HostContext;
+		CandidateHostContext.HostEffectJournal = &HostEffectTransaction.GetValue();
+		CandidateRuntime->SetHostContext(CandidateHostContext);
+	}
+
 	FAvidScriptWasmSmokeResult BeginPlayResult;
 	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);
+		if (bUseHostEffectTransaction)
+		{
+			OutResult.bHostEffectRollbackAttempted = true;
+			FAvidScriptObjectRegistry EmptyRegistry;
+			FAvidScriptObjectRegistry& RollbackRegistry = HostContext.ObjectRegistry != nullptr
+				? *HostContext.ObjectRegistry
+				: EmptyRegistry;
+			FAvidScriptHostEffectTransactionResult RollbackResult;
+			OutResult.bHostEffectRollbackSucceeded = HostEffectTransaction->Rollback(
+				RollbackRegistry,
+				RollbackResult);
+			CopyHostEffectResult(RollbackResult, OutResult);
+		}
+		CandidateRuntime->SetHostContext(HostContext);
 		CandidateRuntime->Unload();
 		return false;
+	}
+
+	if (bUseHostEffectTransaction)
+	{
+		FAvidScriptHostEffectTransactionResult CommitResult;
+		if (!HostEffectTransaction->Commit(CommitResult))
+		{
+			CopyHostEffectResult(CommitResult, OutResult);
+			SetReloadFailure(
+				OutResult,
+				TEXT("avid_on_begin_play"),
+				TEXT("host_effect_transaction_invalid_state"),
+				CommitResult.ErrorDetails,
+				TEXT("keep the previous runtime active and report the candidate transaction state"));
+			CandidateRuntime->SetHostContext(HostContext);
+			CandidateRuntime->Unload();
+			return false;
+		}
+		OutResult.bHostEffectTransactionCommitted = true;
+		CopyHostEffectResult(CommitResult, OutResult);
+		CandidateRuntime->SetHostContext(HostContext);
 	}
 
 	if (LiveRuntime)

@@ -29,16 +29,23 @@ public:
 		FAvidScriptSceneComponentBindingResult& OutResult);
 
 	static bool SetWorldLocation(
-		const FAvidScriptObjectRegistry& Registry,
+		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ComponentHandle,
 		const FVector& WorldLocation,
 		EAvidScriptActorWritePolicy WritePolicy,
-		FAvidScriptSceneComponentBindingResult& OutResult);
+		FAvidScriptSceneComponentBindingResult& OutResult,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
 
 private:
 	static USceneComponent* ResolveSceneComponent(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ComponentHandle,
+		FAvidScriptSceneComponentBindingResult& OutResult);
+	static bool PrepareTransformWrite(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ComponentHandle,
+		USceneComponent& Component,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal,
 		FAvidScriptSceneComponentBindingResult& OutResult);
 
 	static void SetSuccess(

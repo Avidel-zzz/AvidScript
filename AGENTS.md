@@ -831,3 +831,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-21 P45.5 Windows rg glob 错误记录：把 `Docs/Phase45/P45.5*` 作为普通搜索路径传给 `rg`，Windows 未展开通配符并返回路径语法错误。Prevention：内容过滤使用 `rg -g 'P45.5*'`，文件定位先用 `rg --files` 再筛选；不得依赖 PowerShell 为 native command 展开路径 glob。
 - 2026-07-21 P45.5 依赖读取并行错误记录：同一并行批次一边执行 `rg --files`，一边按尚未验证的猜测读取 Bindings 模块 Actor/SceneComponent 测试文件；真实测试位于 Runtime 模块，两个猜测读取失败。Prevention：用于决定后续路径的定位命令必须先完成，再基于其输出发起下一批读取；有数据依赖的工具调用禁止伪并行。
 - 2026-07-21 P45.5 新增 Runtime cpp 注册规则复发：RED 构建已因新增测试刷新 makefile，随后新增 transaction 实现 cpp 后未先进入 Git index；下一次模块编译只编入测试声明并在链接阶段缺少实现。Prevention：每次新增任意 plugin `.cpp` 后，在首次编译前单独确认该文件已 staged 且 `Intermediate/.../Module.<Module>.cpp` 包含它；同一 task 先后新增多个 cpp 也必须逐次执行该检查。
+- 2026-07-20 P45.5 读取命令拼接错误记录：两个无关的 `Get-Content` 读取被 PowerShell 分号拼在同一命令中，输出截断后文件边界不清晰。Prevention：每次执行只读取一个文件或一个连续范围；已确认相互独立的读取使用分离的并行工具调用，禁止用 shell 分隔符拼接检查命令。

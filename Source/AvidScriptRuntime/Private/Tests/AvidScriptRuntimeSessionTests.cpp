@@ -387,6 +387,11 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("session_trap")),
 			ReloadResult));
 	TestTrue(TEXT("rollback preserves old runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+	TestTrue(TEXT("candidate reload opens host effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
+	TestFalse(TEXT("trapping candidate does not commit host effects"), ReloadResult.bHostEffectTransactionCommitted);
+	TestTrue(TEXT("candidate trap attempts host effect rollback"), ReloadResult.bHostEffectRollbackAttempted);
+	TestTrue(TEXT("empty host effect rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
+	TestEqual(TEXT("empty host effect transaction captures no objects"), ReloadResult.HostEffectCapturedObjectCount, 0);
 	TestEqual(TEXT("old module remains active"), Session.GetSnapshot().ModuleId, FString(TEXT("session_live")));
 	TestEqual(TEXT("one reload is rejected"), Session.GetSnapshot().RejectedReloadCount, 1);
 	TestEqual(TEXT("session remains running"), Session.GetSnapshot().LifecycleState, EAvidScriptLifecycleState::Running);

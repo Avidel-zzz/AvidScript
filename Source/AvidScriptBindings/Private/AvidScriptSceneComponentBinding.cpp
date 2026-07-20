@@ -21,11 +21,12 @@ bool FAvidScriptSceneComponentBinding::GetWorldLocation(
 }
 
 bool FAvidScriptSceneComponentBinding::SetWorldLocation(
-	const FAvidScriptObjectRegistry& Registry,
+	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ComponentHandle,
 	const FVector& WorldLocation,
 	EAvidScriptActorWritePolicy WritePolicy,
-	FAvidScriptSceneComponentBindingResult& OutResult)
+	FAvidScriptSceneComponentBindingResult& OutResult,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
 {
 	USceneComponent* Component = ResolveSceneComponent(Registry, ComponentHandle, OutResult);
 	if (Component == nullptr)
@@ -36,6 +37,10 @@ bool FAvidScriptSceneComponentBinding::SetWorldLocation(
 	if (WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
 	{
 		SetFailure(OutResult, OutResult.ObjectResult, TEXT("write_denied"), TEXT("Enable the component write policy only for host-authorized script calls."));
+		return false;
+	}
+	if (!PrepareTransformWrite(Registry, ComponentHandle, *Component, HostEffectJournal, OutResult))
+	{
 		return false;
 	}
 
@@ -71,6 +76,46 @@ USceneComponent* FAvidScriptSceneComponentBinding::ResolveSceneComponent(
 
 	SetSuccess(OutResult, ObjectResult, Component->GetComponentLocation());
 	return Component;
+}
+
+bool FAvidScriptSceneComponentBinding::PrepareTransformWrite(
+	FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& ComponentHandle,
+	USceneComponent& Component,
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	FAvidScriptSceneComponentBindingResult& OutResult)
+{
+	if (HostEffectJournal == nullptr)
+	{
+		return true;
+	}
+
+	FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+	if (HostEffectJournal->PrepareEffect(
+		Registry,
+		ComponentHandle,
+		Component,
+		EAvidScriptBindingReloadEffect::SceneComponentTransform,
+		PrepareResult))
+	{
+		return true;
+	}
+
+	SetFailure(
+		OutResult,
+		OutResult.ObjectResult,
+		PrepareResult.ErrorCategory.IsEmpty()
+			? FString(TEXT("host_effect_snapshot_failed"))
+			: PrepareResult.ErrorCategory,
+		TEXT("Reject this candidate reload or add a reversible host effect adapter for the binding."));
+	if (!PrepareResult.ErrorDetails.IsEmpty())
+	{
+		OutResult.ErrorMessage += FString::Printf(
+			TEXT(" | effect_source=%s | details=%s"),
+			PrepareResult.ErrorSource.IsEmpty() ? TEXT("<none>") : *PrepareResult.ErrorSource,
+			*PrepareResult.ErrorDetails);
+	}
+	return false;
 }
 
 void FAvidScriptSceneComponentBinding::SetSuccess(

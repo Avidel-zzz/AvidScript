@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptActorTransformBatch.h"
 
@@ -49,18 +50,20 @@ public:
 		FAvidScriptActorBindingResult& OutResult);
 
 	static bool SetActorLocation(
-		const FAvidScriptObjectRegistry& Registry,
+		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		const FVector& Location,
 		EAvidScriptActorWritePolicy WritePolicy,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
 
 	static bool AddActorLocationOffset(
-		const FAvidScriptObjectRegistry& Registry,
+		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		const FVector& Offset,
 		EAvidScriptActorWritePolicy WritePolicy,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
 
 	static bool GetActorRotation(
 		const FAvidScriptObjectRegistry& Registry,
@@ -69,11 +72,12 @@ public:
 		FAvidScriptActorBindingResult& OutResult);
 
 	static bool SetActorRotation(
-		const FAvidScriptObjectRegistry& Registry,
+		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		const FRotator& Rotation,
 		EAvidScriptActorWritePolicy WritePolicy,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
 
 	static bool GetActorScale3D(
 		const FAvidScriptObjectRegistry& Registry,
@@ -82,11 +86,12 @@ public:
 		FAvidScriptActorBindingResult& OutResult);
 
 	static bool SetActorScale3D(
-		const FAvidScriptObjectRegistry& Registry,
+		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		const FVector& Scale3D,
 		EAvidScriptActorWritePolicy WritePolicy,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
 
 	static bool GetRootComponentHandle(
 		FAvidScriptObjectRegistry& Registry,
@@ -98,6 +103,12 @@ private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
+		FAvidScriptActorBindingResult& OutResult);
+	static bool PrepareTransformWrite(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& ActorHandle,
+		AActor& Actor,
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal,
 		FAvidScriptActorBindingResult& OutResult);
 
 	static void SetSuccess(

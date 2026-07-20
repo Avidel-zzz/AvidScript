@@ -59,6 +59,7 @@ struct FAvidScriptWasmHostContext
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 };
 
 struct FAvidScriptWasmTimerEntry

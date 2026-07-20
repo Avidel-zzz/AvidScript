@@ -1073,7 +1073,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, i
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::SetActorLocation(*HostContext.ObjectRegistry, ActorHandle, Location, HostContext.ActorWritePolicy, BindingResult))
+	if (!FAvidScriptActorBinding::SetActorLocation(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		Location,
+		HostContext.ActorWritePolicy,
+		BindingResult,
+		HostContext.HostEffectJournal))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1122,7 +1128,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 S
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::AddActorLocationOffset(*HostContext.ObjectRegistry, ActorHandle, Offset, HostContext.ActorWritePolicy, BindingResult))
+	if (!FAvidScriptActorBinding::AddActorLocationOffset(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		Offset,
+		HostContext.ActorWritePolicy,
+		BindingResult,
+		HostContext.HostEffectJournal))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1221,7 +1233,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, i
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::SetActorRotation(*HostContext.ObjectRegistry, ActorHandle, Rotation, HostContext.ActorWritePolicy, BindingResult))
+	if (!FAvidScriptActorBinding::SetActorRotation(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		Rotation,
+		HostContext.ActorWritePolicy,
+		BindingResult,
+		HostContext.HostEffectJournal))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1303,7 +1321,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int3
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::SetActorScale3D(*HostContext.ObjectRegistry, ActorHandle, Scale3D, HostContext.ActorWritePolicy, BindingResult))
+	if (!FAvidScriptActorBinding::SetActorScale3D(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		Scale3D,
+		HostContext.ActorWritePolicy,
+		BindingResult,
+		HostContext.HostEffectJournal))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_set_scale"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Actor scale write failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -1538,7 +1562,13 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 
 	const FAvidScriptObjectHandle ComponentHandle{ static_cast<uint32>(Slot), static_cast<uint32>(Generation) };
 	FAvidScriptSceneComponentBindingResult BindingResult;
-	if (!FAvidScriptSceneComponentBinding::SetWorldLocation(*HostContext.ObjectRegistry, ComponentHandle, WorldLocation, HostContext.ActorWritePolicy, BindingResult))
+	if (!FAvidScriptSceneComponentBinding::SetWorldLocation(
+		*HostContext.ObjectRegistry,
+		ComponentHandle,
+		WorldLocation,
+		HostContext.ActorWritePolicy,
+		BindingResult,
+		HostContext.HostEffectJournal))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("scene_component_set_world_location"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("SceneComponent location write failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);

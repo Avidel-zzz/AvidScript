@@ -99,6 +99,14 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadResult
 	bool bSucceeded = false;
 	bool bReloadApplied = false;
 	bool bRollbackPreservedLiveRuntime = false;
+	bool bHostEffectTransactionAttempted = false;
+	bool bHostEffectTransactionCommitted = false;
+	bool bHostEffectRollbackAttempted = false;
+	bool bHostEffectRollbackSucceeded = false;
+	int32 HostEffectCapturedObjectCount = 0;
+	int32 HostEffectRestoredObjectCount = 0;
+	int32 HostEffectFailedObjectCount = 0;
+	FString HostEffectErrorSource;
 	bool bStateMigrationAttempted = false;
 	bool bStateMigrationApplied = false;
 	int32 StateMigrationMigratedSlotCount = 0;

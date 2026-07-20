@@ -103,7 +103,11 @@ TArray<uint8> BuildActorLifecycleFixture(
 	const FVector& BeginPlayValue,
 	uint32 EndPlayImportIndex,
 	const FVector& EndPlayValue,
-	bool bTrapAfterEndPlayCall = false)
+	bool bTrapAfterEndPlayCall = false,
+	bool bTrapAfterBeginPlayCall = false,
+	bool bWriteDuringTick = false,
+	uint32 TickImportIndex = 1,
+	const FVector& TickValue = FVector::ZeroVector)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -164,10 +168,18 @@ TArray<uint8> BuildActorLifecycleFixture(
 	TArray<uint8> BeginPlayBody;
 	AppendU32Leb(BeginPlayBody, 0);
 	AppendActorLocationCall(BeginPlayBody, BeginPlayImportIndex, ActorHandle, BeginPlayValue);
+	if (bTrapAfterBeginPlayCall)
+	{
+		BeginPlayBody.Add(0x00);
+	}
 	BeginPlayBody.Add(0x0b);
 
 	TArray<uint8> TickBody;
 	AppendU32Leb(TickBody, 0);
+	if (bWriteDuringTick)
+	{
+		AppendActorLocationCall(TickBody, TickImportIndex, ActorHandle, TickValue);
+	}
 	TickBody.Add(0x0b);
 
 	TArray<uint8> EndPlayBody;
@@ -702,7 +714,12 @@ bool FAvidScriptWasmReloadSkipsEndPlayTransitionSmokeTest::RunTest(const FString
 		1,
 		FVector(10.0, 0.0, 0.0),
 		0,
-		FVector::ZeroVector);
+		FVector::ZeroVector,
+		false,
+		false,
+		true,
+		1,
+		FVector(5.0, 0.0, 0.0));
 
 	FAvidScriptWasmReloadManifest OldManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_end_play_old"));
 	OldManifest.RequiredExports.Add(TEXT("avid_on_end_play"));
@@ -715,13 +732,103 @@ bool FAvidScriptWasmReloadSkipsEndPlayTransitionSmokeTest::RunTest(const FString
 	TestTrue(TEXT("Old lifecycle module loads"), Session.LoadInitialModule(
 		OldBytes.GetData(), OldBytes.Num(), OldManifest, ReloadResult));
 	TestEqual(TEXT("Old BeginPlay sets the actor location"), Actor->GetActorLocation(), FVector(100.0, 0.0, 0.0));
+	TestFalse(TEXT("Initial load does not open a host effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
 
 	TestTrue(TEXT("New lifecycle module reloads"), Session.ReloadModule(
 		NewBytes.GetData(), NewBytes.Num(), NewManifest, ReloadResult));
+	TestTrue(TEXT("Successful reload opens a host effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
+	TestTrue(TEXT("Successful reload commits host effects"), ReloadResult.bHostEffectTransactionCommitted);
+	TestFalse(TEXT("Successful reload does not roll back host effects"), ReloadResult.bHostEffectRollbackAttempted);
+	TestEqual(TEXT("Successful reload captures one host object"), ReloadResult.HostEffectCapturedObjectCount, 1);
 	TestEqual(
 		TEXT("Reload does not emit UE EndPlay for the old guest"),
 		Actor->GetActorLocation(),
 		FVector(110.0, 0.0, 0.0));
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Committed candidate ticks with ordinary live context"), Session.Tick(1.0f / 60.0f, TickResult));
+	TestEqual(TEXT("Live Tick write is not routed into closed candidate transaction"), Actor->GetActorLocation(), FVector(115.0, 0.0, 0.0));
+
+	Session.UnloadLive();
+	DestroyWasmActorImportWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmCandidateHostEffectRollbackTest,
+	"AvidScript.Runtime.WasmActor.CandidateHostEffectRollback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmCandidateHostEffectRollbackTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateWasmActorImportWorld(World))
+	{
+		AddError(TEXT("Failed to create candidate host effect rollback world."));
+		return true;
+	}
+
+	AActor* Actor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	if (!TestNotNull(TEXT("Candidate rollback actor spawns"), Actor))
+	{
+		DestroyWasmActorImportWorld(World);
+		return true;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	TestTrue(TEXT("Candidate rollback actor registers"), RegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	const FVector LiveLocation(125.0, 25.0, 5.0);
+	const FVector RejectedLocation(900.0, 800.0, 700.0);
+	const TArray<uint8> LiveBytes = BuildActorLifecycleFixture(
+		ActorHandle,
+		0,
+		LiveLocation,
+		0,
+		FVector::ZeroVector);
+	const TArray<uint8> CandidateBytes = BuildActorLifecycleFixture(
+		ActorHandle,
+		0,
+		RejectedLocation,
+		0,
+		FVector::ZeroVector,
+		false,
+		true);
+
+	FAvidScriptWasmReloadSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(TEXT("Live host effect fixture loads"), Session.LoadInitialModule(
+		LiveBytes.GetData(),
+		LiveBytes.Num(),
+		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("host_effect_live")),
+		ReloadResult));
+	TestEqual(TEXT("Live fixture establishes actor location"), Actor->GetActorLocation(), LiveLocation);
+
+	TestFalse(TEXT("Write-then-trap candidate is rejected"), Session.ReloadModule(
+		CandidateBytes.GetData(),
+		CandidateBytes.Num(),
+		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("host_effect_candidate_trap")),
+		ReloadResult));
+	TestTrue(TEXT("Host effect transaction is attempted"), ReloadResult.bHostEffectTransactionAttempted);
+	TestFalse(TEXT("Rejected candidate does not commit host effects"), ReloadResult.bHostEffectTransactionCommitted);
+	TestTrue(TEXT("Host effect rollback is attempted"), ReloadResult.bHostEffectRollbackAttempted);
+	TestTrue(TEXT("Host effect rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
+	TestEqual(TEXT("One host object is captured"), ReloadResult.HostEffectCapturedObjectCount, 1);
+	TestEqual(TEXT("One host object is restored"), ReloadResult.HostEffectRestoredObjectCount, 1);
+	TestEqual(TEXT("No host object restore fails"), ReloadResult.HostEffectFailedObjectCount, 0);
+	TestEqual(TEXT("Actor location returns to live value"), Actor->GetActorLocation(), LiveLocation);
+	TestTrue(TEXT("Rejected candidate preserves live runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+	TestEqual(TEXT("Old module remains active"), Session.GetLiveModuleId(), FString(TEXT("host_effect_live")));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Old runtime ticks after host effect rollback"), Session.Tick(1.0f / 60.0f, TickResult));
+	TestEqual(TEXT("Old runtime records continued tick"), Session.GetLiveTickCallCount(), 1);
 
 	Session.UnloadLive();
 	DestroyWasmActorImportWorld(World);

@@ -12,6 +12,32 @@
 
 namespace
 {
+class FRejectingSceneComponentHostEffectJournal final : public IAvidScriptBindingHostEffectJournal
+{
+public:
+	bool PrepareEffect(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		EAvidScriptBindingReloadEffect Effect,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override
+	{
+		++PrepareCount;
+		PreparedHandle = Handle;
+		PreparedTarget = &Target;
+		PreparedEffect = Effect;
+		OutResult.ErrorCategory = TEXT("host_effect_snapshot_failed");
+		OutResult.ErrorSource = Target.GetPathName();
+		OutResult.ErrorDetails = TEXT("Injected journal rejection.");
+		return false;
+	}
+
+	int32 PrepareCount = 0;
+	FAvidScriptObjectHandle PreparedHandle;
+	UObject* PreparedTarget = nullptr;
+	EAvidScriptBindingReloadEffect PreparedEffect = EAvidScriptBindingReloadEffect::Unsupported;
+};
+
 bool CreateSceneComponentBindingWorld(UWorld*& OutWorld)
 {
 	OutWorld = nullptr;
@@ -111,6 +137,24 @@ bool FAvidScriptSceneComponentBindingWorldLocationSmokeTest::RunTest(const FStri
 			EAvidScriptActorWritePolicy::AllowWrites,
 			WriteResult));
 	TestTrue(TEXT("Component moves to target"), Actor->GetRootComponent()->GetComponentLocation().Equals(TargetLocation, 0.01));
+
+	FRejectingSceneComponentHostEffectJournal RejectingJournal;
+	FAvidScriptSceneComponentBindingResult RejectedResult;
+	TestFalse(
+		TEXT("Host effect journal can reject component write before mutation"),
+		FAvidScriptSceneComponentBinding::SetWorldLocation(
+			Registry,
+			ComponentHandle,
+			FVector(900.0, 800.0, 700.0),
+			EAvidScriptActorWritePolicy::AllowWrites,
+			RejectedResult,
+			&RejectingJournal));
+	TestEqual(TEXT("Component journal prepares once"), RejectingJournal.PrepareCount, 1);
+	TestEqual(TEXT("Component journal receives original handle"), RejectingJournal.PreparedHandle.ToUInt64(), ComponentHandle.ToUInt64());
+	TestEqual(TEXT("Component journal receives component target"), RejectingJournal.PreparedTarget, static_cast<UObject*>(Actor->GetRootComponent()));
+	TestEqual(TEXT("Component journal receives transform domain"), RejectingJournal.PreparedEffect, EAvidScriptBindingReloadEffect::SceneComponentTransform);
+	TestEqual(TEXT("Rejected journal category is preserved"), RejectedResult.ErrorCategory, FString(TEXT("host_effect_snapshot_failed")));
+	TestTrue(TEXT("Rejected journal leaves component unchanged"), Actor->GetRootComponent()->GetComponentLocation().Equals(TargetLocation, 0.01));
 
 	FAvidScriptSceneComponentBindingResult DeniedResult;
 	TestFalse(
