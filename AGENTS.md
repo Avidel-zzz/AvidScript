@@ -819,3 +819,9 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-20 P45.4 PowerShell JSON 数值类型错误记录：`Try-GetJsonInt32` 首版只接受 `[int]`，但 PowerShell 7 的 `ConvertFrom-Json` 会把普通 JSON 整数表示为 `[long]`，使合法 prepared semantic 被拒绝。Prevention：JSON Int32 helper 接受 `[int]` 或 Int32 范围内的 `[long]`，并明确拒绝字符串、浮点数和溢出值；所有数值边界由共享 helper 处理。
 - P45.4 final baseline：.NET 自有测试宿主 129/129、PowerShell contracts 83/83、PowerShell parser 18/18、architecture gate 与普通增量 UE5.8 Editor build 通过；P45.4 聚焦 manifest、migration/session rollback、binding facade、workspace、auto reload 与真实 rename reload 全部通过，完整 AvidScript automation 199/199、非成功 0、Queue Empty、TestExit 与进程退出码 0。
 - 2026-07-20 P45.4 发布前历史扫描错误记录：未发布提交中误跟踪 `.superpowers/sdd/task-2-report.md`，且阶段验证文档保留了本机用户绝对路径。Prevention：生成审查文件前确认 `.superpowers/` 已忽略；发布门禁必须扫描 `origin/main..HEAD` 的全部新增文本和 tracked path，而不只扫描最后一次 staged diff。若问题只存在于未发布链，保留提交数量、顺序和说明进行内容清洗，再以普通 fast-forward push 发布。
+
+## Phase 45.5 Transactional Host Effect Rules
+
+- 2026-07-21 P45.5 路径猜测错误记录：探索 binding selection profile 时直接按推断路径读取 `Private/BindingGeneration/AvidScriptEditorBindingSelectionProfile.h`，实际合同位于 `Public/AvidScriptEditorBindingSelectionTypes.h`。Prevention：读取计划或推断出的新路径前先用 `rg --files` 按类型名/关键词定位；不得从相邻模块命名习惯推断文件存在。
+- P45.5 candidate effect rule：只有 descriptor 明确声明且 runtime 已注册 transaction adapter 的宿主写入能在候选 `BeginPlay` 执行；未知非 const reflected binding 必须在 `ProcessEvent` 前以 `binding_reload_effect_unsupported` fail closed。live runtime 调用不受 candidate journal 限制。
+- P45.5 transaction ownership rule：`RuntimeSession` 是候选 HostEffectTransaction 唯一 owner；runtime instance 和 binding package 只持有调用期非 owning journal 指针。候选 commit/rollback 后必须在成为 live runtime 前清除该指针，禁止跨 Tick 或事件保存。
