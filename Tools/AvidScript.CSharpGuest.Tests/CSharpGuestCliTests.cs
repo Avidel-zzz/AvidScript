@@ -31,6 +31,7 @@ internal static class CSharpGuestCliTests
             string outputPath = Path.Combine(directory, "output.guestir.json");
             string stateSchemaPath = Path.Combine(directory, "output.state.json");
             string debugMapPath = Path.Combine(directory, "output.debug.json");
+            string frontendArtifactSha256 = new('f', 64);
             WriteSemantic(semanticPath, CreateDebugDocument());
 
             int firstExitCode = GuestCommandLine.Run(new[]
@@ -38,6 +39,7 @@ internal static class CSharpGuestCliTests
                 "--semantic", semanticPath, "--output", outputPath,
                 "--state-schema", stateSchemaPath,
                 "--debug-map", debugMapPath,
+                "--frontend-artifact-sha256", frontendArtifactSha256,
             });
             Assert(firstExitCode == 0, "valid CLI invocation with debug map should succeed");
             byte[] first = File.ReadAllBytes(outputPath);
@@ -47,6 +49,7 @@ internal static class CSharpGuestCliTests
             {
                 "--state-schema", stateSchemaPath,
                 "--debug-map", debugMapPath,
+                "--frontend-artifact-sha256", frontendArtifactSha256,
                 "--output", outputPath,
                 "--semantic", semanticPath,
             });
@@ -73,6 +76,7 @@ internal static class CSharpGuestCliTests
                 "--output", outputPath,
                 "--state-schema", stateSchemaPath,
                 "--debug-map", debugMapPath,
+                "--frontend-artifact-sha256", frontendArtifactSha256,
             });
 
             Assert(failureExitCode == 1

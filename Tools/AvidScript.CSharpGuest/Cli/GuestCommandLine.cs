@@ -21,6 +21,12 @@ public static class GuestCommandLine
             outputPath = options["--output"];
             options.TryGetValue("--state-schema", out stateSchemaPath);
             options.TryGetValue("--debug-map", out debugMapPath);
+            options.TryGetValue("--frontend-artifact-sha256", out string? frontendArtifactSha256);
+            if ((debugMapPath is null) != (frontendArtifactSha256 is null))
+            {
+                throw new ArgumentException(
+                    "--debug-map and --frontend-artifact-sha256 must be provided together.");
+            }
             if (!File.Exists(semanticPath))
             {
                 throw new ArgumentException($"Semantic artifact does not exist: {semanticPath}");
@@ -67,7 +73,8 @@ public static class GuestCommandLine
                 CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
                     document,
                     result.Module,
-                    guestIrSha256);
+                    guestIrSha256,
+                    frontendArtifactSha256!);
                 CSharpGuestDebugMapSerializer.Write(debugMapPath, debugMap);
             }
             return 0;
@@ -99,10 +106,10 @@ public static class GuestCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
     {
-        if (args.Length != 4 && args.Length != 6 && args.Length != 8)
+        if (args.Length != 4 && args.Length != 6 && args.Length != 8 && args.Length != 10)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path>]");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path> --frontend-artifact-sha256 <sha256>]");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -113,7 +120,8 @@ public static class GuestCommandLine
             if ((name != "--semantic"
                     && name != "--output"
                     && name != "--state-schema"
-                    && name != "--debug-map")
+                    && name != "--debug-map"
+                    && name != "--frontend-artifact-sha256")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {

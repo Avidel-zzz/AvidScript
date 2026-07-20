@@ -246,6 +246,8 @@ $RuntimeDiagnosticsHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/A
 $RuntimeDebugMapHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptWasmDebugMap.h'
 $RuntimeDebugMapSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptWasmDebugMap.cpp'
 $RuntimeReloadSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmReload.cpp'
+$VmModuleLayoutHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptWasmModuleLayout.h'
+$VmModuleLayoutSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmModuleLayout.cpp'
 if ($ReloadTypesHeader -match '\bFAvidScriptRuntimeSession\b') {
     Add-Violation 'WASM reload types header must not declare RuntimeSession ownership'
 }
@@ -262,7 +264,9 @@ foreach ($RequiredRuntimeDiagnosticContract in @(
     'FunctionOffset',
     'RawFunctionToken',
     'bSourceMapped',
-    'ImportedFunctionCount'
+    'FrontendArtifactSha256',
+    'ImportedFunctionCount',
+    'DefinedFunctionCount'
 )) {
     if (-not $RuntimeDiagnosticsHeader.Contains($RequiredRuntimeDiagnosticContract)) {
         Add-Violation "Runtime diagnostic contract is missing $RequiredRuntimeDiagnosticContract"
@@ -271,6 +275,7 @@ foreach ($RequiredRuntimeDiagnosticContract in @(
 foreach ($RequiredDebugMapContract in @(
     'LoadAndValidate',
     'MapFrames',
+    'FunctionIndicesByExportName',
     'TSharedPtr<const FAvidScriptWasmDebugMap>'
 )) {
     if (-not $RuntimeDebugMapHeader.Contains($RequiredDebugMapContract)) {
@@ -285,14 +290,44 @@ foreach ($RequiredDebugMapValidation in @(
     'debug_map_module_mismatch',
     'debug_map_guest_ir_mismatch',
     'debug_map_duplicate_function_index',
-    'debug_map_function_index_range_mismatch'
+    'debug_map_function_index_range_mismatch',
+    'frontend_artifact_sha256',
+    'imported_function_count',
+    'defined_function_count'
 )) {
     if (-not $RuntimeDebugMapSource.Contains($RequiredDebugMapValidation)) {
         Add-Violation "Runtime debug-map validator is missing $RequiredDebugMapValidation"
     }
 }
+foreach ($RequiredWasmLayoutContract in @(
+    'FAvidScriptWasmModuleLayout',
+    'ImportedFunctionCount',
+    'DefinedFunctionCount',
+    'FunctionExports',
+    'InspectAvidScriptWasmModuleLayout'
+)) {
+    if (-not $VmModuleLayoutHeader.Contains($RequiredWasmLayoutContract)) {
+        Add-Violation "VM WASM module-layout interface is missing $RequiredWasmLayoutContract"
+    }
+}
+foreach ($RequiredWasmLayoutParserContract in @(
+    'ReadU32Leb',
+    'ParseWasmImportSection',
+    'ParseWasmFunctionSection',
+    'ParseWasmExportSection',
+    'FunctionIndexLimit'
+)) {
+    if (-not $VmModuleLayoutSource.Contains($RequiredWasmLayoutParserContract)) {
+        Add-Violation "VM WASM module-layout parser is missing $RequiredWasmLayoutParserContract"
+    }
+}
 if (-not $RuntimeReloadSource.Contains('LoadManifestDebugMap') -or
-    -not $RuntimeReloadSource.Contains('TryResolveDebugMapPathFromManifest')) {
+    -not $RuntimeReloadSource.Contains('TryResolveDebugMapPathFromManifest') -or
+    -not $RuntimeReloadSource.Contains('InspectAvidScriptWasmModuleLayout') -or
+    -not $RuntimeReloadSource.Contains('debug_map_wasm_layout_invalid') -or
+    -not $RuntimeReloadSource.Contains('debug_map_wasm_layout_mismatch') -or
+    -not $RuntimeReloadSource.Contains('DebugImportedFunctionCount') -or
+    -not $RuntimeReloadSource.Contains('DebugDefinedFunctionCount')) {
     Add-Violation 'Runtime reload must resolve and validate the immutable debug map before candidate activation'
 }
 if (-not $RuntimeSource.Contains('DebugMap->MapFrames')) {
@@ -662,6 +697,17 @@ foreach ($RequiredSemanticCacheBuildContract in @(
 )) {
     if (-not $CSharpBuildScriptSource.Contains($RequiredSemanticCacheBuildContract)) {
         Add-Violation "C# build pipeline is missing semantic cache contract $RequiredSemanticCacheBuildContract"
+    }
+}
+foreach ($RequiredDebugArtifactBuildContract in @(
+    'imported_function_count',
+    'defined_function_count',
+    'DebugIndexSpaceValid',
+    'DebugImportedFunctionCount',
+    'DebugDefinedFunctionCount'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredDebugArtifactBuildContract)) {
+        Add-Violation "C# build pipeline is missing debug artifact index-space contract $RequiredDebugArtifactBuildContract"
     }
 }
 foreach ($RequiredPreparedHelperContract in @(

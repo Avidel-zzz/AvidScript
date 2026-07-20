@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptWasmModuleLayout.h"
 #include "AvidScriptWasmDiagnostics.h"
 
 class FAvidScriptWasmDebugMap
@@ -10,6 +11,7 @@ public:
 		const FString& DebugMapPath,
 		const FString& ExpectedArtifactSha256,
 		const FAvidScriptWasmDebugProvenance& ExpectedProvenance,
+		TConstArrayView<FAvidScriptWasmFunctionExport> FunctionExports,
 		TSharedPtr<const FAvidScriptWasmDebugMap>& OutMap,
 		FString& OutErrorCategory,
 		FString& OutErrorSource);
@@ -30,4 +32,5 @@ private:
 
 	FString SourceFile;
 	TMap<uint32, FFunction> Functions;
+	TMap<FString, uint32> FunctionIndicesByExportName;
 };

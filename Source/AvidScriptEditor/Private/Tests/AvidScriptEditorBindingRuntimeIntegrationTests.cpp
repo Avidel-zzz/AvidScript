@@ -7,6 +7,7 @@
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
+#include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
@@ -50,6 +51,188 @@ int32 FindAvidScriptBindingRuntimeBytes(
 		}
 	}
 	return INDEX_NONE;
+}
+
+bool ReadAvidScriptBindingRuntimeU32Leb(
+	TConstArrayView<uint8> Bytes,
+	int32 Limit,
+	int32& InOutOffset,
+	uint32& OutValue)
+{
+	OutValue = 0;
+	for (uint32 Shift = 0; Shift <= 28; Shift += 7)
+	{
+		if (InOutOffset < 0 || InOutOffset >= Limit || InOutOffset >= Bytes.Num())
+		{
+			return false;
+		}
+		const uint8 Byte = Bytes[InOutOffset++];
+		if (Shift == 28 && (Byte & 0xf0) != 0)
+		{
+			return false;
+		}
+		OutValue |= static_cast<uint32>(Byte & 0x7f) << Shift;
+		if ((Byte & 0x80) == 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool PatchAvidScriptBindingRuntimeFunctionToTrap(
+	TArray<uint8>& Bytecode,
+	uint32 ImportedFunctionCount,
+	uint32 FunctionIndex)
+{
+	static constexpr uint8 ExpectedHeader[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	if (Bytecode.Num() < UE_ARRAY_COUNT(ExpectedHeader)
+		|| FMemory::Memcmp(Bytecode.GetData(), ExpectedHeader, UE_ARRAY_COUNT(ExpectedHeader)) != 0
+		|| FunctionIndex < ImportedFunctionCount)
+	{
+		return false;
+	}
+
+	const uint32 TargetDefinedOrdinal = FunctionIndex - ImportedFunctionCount;
+	int32 SectionOffset = UE_ARRAY_COUNT(ExpectedHeader);
+	while (SectionOffset < Bytecode.Num())
+	{
+		const uint8 SectionId = Bytecode[SectionOffset++];
+		uint32 SectionSize = 0;
+		if (!ReadAvidScriptBindingRuntimeU32Leb(Bytecode, Bytecode.Num(), SectionOffset, SectionSize)
+			|| SectionSize > static_cast<uint32>(Bytecode.Num() - SectionOffset))
+		{
+			return false;
+		}
+		const int32 SectionEnd = SectionOffset + static_cast<int32>(SectionSize);
+		if (SectionId != 10)
+		{
+			SectionOffset = SectionEnd;
+			continue;
+		}
+
+		int32 BodyOffset = SectionOffset;
+		uint32 BodyCount = 0;
+		if (!ReadAvidScriptBindingRuntimeU32Leb(Bytecode, SectionEnd, BodyOffset, BodyCount)
+			|| TargetDefinedOrdinal >= BodyCount)
+		{
+			return false;
+		}
+		for (uint32 BodyOrdinal = 0; BodyOrdinal < BodyCount; ++BodyOrdinal)
+		{
+			uint32 BodySize = 0;
+			if (!ReadAvidScriptBindingRuntimeU32Leb(Bytecode, SectionEnd, BodyOffset, BodySize)
+				|| BodySize > static_cast<uint32>(SectionEnd - BodyOffset))
+			{
+				return false;
+			}
+			const int32 BodyEnd = BodyOffset + static_cast<int32>(BodySize);
+			if (BodyOrdinal != TargetDefinedOrdinal)
+			{
+				BodyOffset = BodyEnd;
+				continue;
+			}
+
+			int32 InstructionOffset = BodyOffset;
+			uint32 LocalGroupCount = 0;
+			if (!ReadAvidScriptBindingRuntimeU32Leb(Bytecode, BodyEnd, InstructionOffset, LocalGroupCount))
+			{
+				return false;
+			}
+			for (uint32 LocalGroupIndex = 0; LocalGroupIndex < LocalGroupCount; ++LocalGroupIndex)
+			{
+				uint32 LocalCount = 0;
+				if (!ReadAvidScriptBindingRuntimeU32Leb(Bytecode, BodyEnd, InstructionOffset, LocalCount)
+					|| InstructionOffset >= BodyEnd)
+				{
+					return false;
+				}
+				++InstructionOffset;
+			}
+			if (InstructionOffset >= BodyEnd)
+			{
+				return false;
+			}
+			Bytecode[InstructionOffset] = 0x00;
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+bool LoadAvidScriptBindingRuntimeDebugFunction(
+	const FString& DebugMapPath,
+	const FString& DisplayNameFragment,
+	uint32& OutFunctionIndex,
+	FString& OutDisplayName,
+	FString& OutSourceFile,
+	int32& OutLine,
+	int32& OutColumn)
+{
+	OutFunctionIndex = MAX_uint32;
+	OutDisplayName.Reset();
+	OutSourceFile.Reset();
+	OutLine = 0;
+	OutColumn = 0;
+
+	FString Json;
+	TSharedPtr<FJsonObject> Root;
+	if (!FFileHelper::LoadFileToString(Json, *DebugMapPath)
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root)
+		|| !Root.IsValid())
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* SourceObject = nullptr;
+	const TArray<TSharedPtr<FJsonValue>>* Functions = nullptr;
+	if (!Root->TryGetObjectField(TEXT("source"), SourceObject)
+		|| SourceObject == nullptr
+		|| !SourceObject->IsValid()
+		|| !(*SourceObject)->TryGetStringField(TEXT("id"), OutSourceFile)
+		|| !Root->TryGetArrayField(TEXT("functions"), Functions)
+		|| Functions == nullptr)
+	{
+		return false;
+	}
+
+	int32 MatchCount = 0;
+	for (const TSharedPtr<FJsonValue>& FunctionValue : *Functions)
+	{
+		const TSharedPtr<FJsonObject> Function = FunctionValue.IsValid() ? FunctionValue->AsObject() : nullptr;
+		const TSharedPtr<FJsonObject>* Span = nullptr;
+		double FunctionIndex = 0.0;
+		double Line = 0.0;
+		double Column = 0.0;
+		FString DisplayName;
+		if (!Function.IsValid()
+			|| !Function->TryGetStringField(TEXT("display_name"), DisplayName)
+			|| !DisplayName.Contains(DisplayNameFragment, ESearchCase::CaseSensitive)
+			|| !Function->TryGetNumberField(TEXT("wasm_function_index"), FunctionIndex)
+			|| FunctionIndex < 0.0
+			|| FunctionIndex > static_cast<double>(MAX_uint32)
+			|| FunctionIndex != FMath::TruncToDouble(FunctionIndex)
+			|| !Function->TryGetObjectField(TEXT("span"), Span)
+			|| Span == nullptr
+			|| !Span->IsValid()
+			|| !(*Span)->TryGetNumberField(TEXT("line"), Line)
+			|| !(*Span)->TryGetNumberField(TEXT("column"), Column)
+			|| Line < 0.0
+			|| Column < 0.0
+			|| Line > static_cast<double>(MAX_int32 - 1)
+			|| Column > static_cast<double>(MAX_int32 - 1)
+			|| Line != FMath::TruncToDouble(Line)
+			|| Column != FMath::TruncToDouble(Column))
+		{
+			continue;
+		}
+		++MatchCount;
+		OutFunctionIndex = static_cast<uint32>(FunctionIndex);
+		OutDisplayName = MoveTemp(DisplayName);
+		OutLine = static_cast<int32>(Line) + 1;
+		OutColumn = static_cast<int32>(Column) + 1;
+	}
+	return MatchCount == 1 && !OutSourceFile.IsEmpty();
 }
 
 bool CreateAvidScriptBindingRuntimeIntegrationWorld(
@@ -1127,6 +1310,201 @@ bool FAvidScriptEditorBindingRuntimeProjectCSharpGameplayWorkspaceTest::RunTest(
 		TEXT("Warm gameplay workspace"),
 		WorkspaceResult,
 		WarmBuildResult);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedCSharpDiagnosticsTest,
+	"AvidScript.Editor.BindingRuntime.GeneratedCSharpDiagnostics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedCSharpDiagnosticsTest::RunTest(const FString& Parameters)
+{
+	const FString SemanticCacheRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptSemanticCache/P45_6_GeneratedDiagnostics")));
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+		TEXT("real C# gameplay script builds with debug artifacts"),
+		BuildAvidScriptGeneratedBindingLifecycle(SemanticCacheRoot, BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+		TEXT("real C# manifest validates its WASM, bindings, and debug map"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			BuildResult.ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("real C# manifest owns an immutable debug map"), Manifest.DebugMap.IsValid());
+	TestTrue(TEXT("real C# debug map artifact exists"), FPaths::FileExists(Manifest.DebugMapFile));
+
+	uint32 HelperFunctionIndex = MAX_uint32;
+	FString HelperDisplayName;
+	FString DebugSourceFile;
+	int32 HelperLine = 0;
+	int32 HelperColumn = 0;
+	if (!TestTrue(
+		TEXT("real C# debug map identifies the shared SetScale helper"),
+		LoadAvidScriptBindingRuntimeDebugFunction(
+			Manifest.DebugMapFile,
+			TEXT("SetScale"),
+			HelperFunctionIndex,
+			HelperDisplayName,
+			DebugSourceFile,
+			HelperLine,
+			HelperColumn)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("debug source identity is project relative"), FPaths::IsRelative(DebugSourceFile));
+	TestTrue(
+		TEXT("helper index starts after every imported function"),
+		HelperFunctionIndex >= static_cast<uint32>(Manifest.RequiredImports.Num()));
+
+	TArray<uint8> TrapBytecode = Bytecode;
+	if (!TestTrue(
+		TEXT("trap candidate replaces one helper opcode without changing the module index space"),
+		PatchAvidScriptBindingRuntimeFunctionToTrap(
+			TrapBytecode,
+			static_cast<uint32>(Manifest.RequiredImports.Num()),
+			HelperFunctionIndex)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("trap patch preserves WASM byte size"), TrapBytecode.Num(), Bytecode.Num());
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("generated diagnostics integration world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("generated diagnostics Actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("generated diagnostics Actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!TestTrue(
+		TEXT("healthy generated C# runtime enters BeginPlay"),
+		Session.LoadInitialModule(Bytecode.GetData(), Bytecode.Num(), Manifest, ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("healthy C# BeginPlay executes the shared helper"),
+		Actor->GetActorScale3D().Equals(FVector(2.0, 3.0, 4.0), 0.001));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!TestTrue(TEXT("healthy generated C# runtime ticks"), Session.TickLive(0.25f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	const FVector ScaleBeforeRejectedCandidate = Actor->GetActorScale3D();
+	TestTrue(
+		TEXT("healthy C# Tick executes the shared helper"),
+		ScaleBeforeRejectedCandidate.Equals(FVector(2.25, 3.0, 4.0), 0.001));
+
+	FAvidScriptWasmReloadManifest TrapManifest = Manifest;
+	TrapManifest.ModuleId += TEXT("_diagnostic_trap");
+	TestFalse(
+		TEXT("generated C# helper trap rejects the reload candidate"),
+		Session.ReloadModule(
+			TrapBytecode.GetData(),
+			TrapBytecode.Num(),
+			TrapManifest,
+			ReloadResult));
+	TestEqual(TEXT("candidate reports a VM trap"), ReloadResult.ErrorCategory, FString(TEXT("trap")));
+	TestTrue(
+		TEXT("rejected helper trap does not alter live Actor state"),
+		Actor->GetActorScale3D().Equals(ScaleBeforeRejectedCandidate, 0.001));
+
+	const TArray<FAvidScriptWasmDiagnosticFrame>& DiagnosticFrames =
+		ReloadResult.RuntimeResult.DiagnosticFrames;
+	if (!TestTrue(TEXT("candidate trap returns diagnostic frames"), !DiagnosticFrames.IsEmpty()))
+	{
+		return false;
+	}
+	const FAvidScriptWasmDiagnosticFrame& TopFrame = DiagnosticFrames[0];
+	TestTrue(TEXT("top trap frame is source mapped"), TopFrame.bSourceMapped);
+	TestEqual(TEXT("top trap frame identifies the C# helper"), TopFrame.FunctionName, HelperDisplayName);
+	TestEqual(TEXT("top trap frame preserves project-relative source"), TopFrame.SourceFile, DebugSourceFile);
+	TestEqual(TEXT("top trap frame exposes one-based source line"), TopFrame.Line, HelperLine);
+	TestEqual(TEXT("top trap frame exposes one-based source column"), TopFrame.Column, HelperColumn);
+	TestEqual(TEXT("top trap frame preserves function index"), TopFrame.FunctionIndex, HelperFunctionIndex);
+
+	FAvidScriptEditorCommandLaunchResult LaunchResult;
+	LaunchResult.bSucceeded = false;
+	LaunchResult.SourcePath = BuildResult.SourcePath;
+	LaunchResult.ManifestPath = BuildResult.ManifestPath;
+	LaunchResult.Summary = ReloadResult.ErrorMessage;
+	LaunchResult.CommandResult.ErrorCategory = ReloadResult.ErrorCategory;
+	LaunchResult.CommandResult.ErrorMessage = ReloadResult.ErrorMessage;
+	LaunchResult.CommandResult.NextAction = ReloadResult.NextAction;
+	LaunchResult.CommandResult.ReloadApplyResult.RuntimeResult = ReloadResult;
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakePresentation(LaunchResult);
+	const FString ExpectedCSharpFrame = FString::Printf(
+		TEXT("at %s (%s:%d:%d)"),
+		*HelperDisplayName,
+		*DebugSourceFile,
+		HelperLine,
+		HelperColumn);
+	TestTrue(
+		TEXT("Editor presentation renders mapped C# method and source position"),
+		Presentation.Details.Contains(ExpectedCSharpFrame));
+	TestTrue(
+		TEXT("Editor presentation preserves raw WASM function evidence"),
+		Presentation.Details.Contains(FString::Printf(
+			TEXT("wasm frame: function=%u offset=0x"),
+			HelperFunctionIndex)));
+
+	if (!TestTrue(
+		TEXT("old generated C# runtime ticks after candidate rejection"),
+		Session.TickLive(0.25f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("old generated C# gameplay continues after candidate rejection"),
+		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
+	return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

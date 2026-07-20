@@ -494,6 +494,7 @@ Assert-Condition (
 $NormalFrontendPath = Resolve-ArtifactPath $NormalJson.artifacts.frontend_file
 Assert-Condition (Test-Path -LiteralPath $NormalFrontendPath -PathType Leaf) "valid source frontend artifact is missing"
 $FrontendJson = Get-Content -Raw -LiteralPath $NormalFrontendPath | ConvertFrom-Json
+$FrontendArtifactSha256 = Get-Sha256Hex $NormalFrontendPath
 Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "report/frontend source hashes differ"
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
@@ -533,7 +534,7 @@ Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "
 Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
 Assert-Condition ($DebugMapJson.source.id -eq $NormalJson.source.file -and $DebugMapJson.source.sha256 -eq $FrontendJson.source.sha256) "C# debug map source identity differs"
-Assert-Condition ($DebugMapJson.provenance.frontend_sha256 -eq $FrontendJson.source.sha256) "C# debug map frontend provenance hash differs"
+Assert-Condition ($DebugMapJson.provenance.frontend_artifact_sha256 -eq $FrontendArtifactSha256) "C# debug map frontend artifact provenance hash differs"
 Assert-Condition ($DebugMapJson.provenance.semantic_sha256 -eq $SemanticSha256) "C# debug map semantic provenance hash differs"
 Assert-Condition ($DebugMapJson.provenance.guest_ir_sha256 -eq $GuestIrSha256) "C# debug map Guest IR provenance hash differs"
 Assert-Condition (@($DebugMapJson.functions).Count -gt 0) "C# debug map does not contain generated function symbols"

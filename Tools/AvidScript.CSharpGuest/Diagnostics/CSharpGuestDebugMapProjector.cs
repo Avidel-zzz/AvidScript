@@ -14,17 +14,20 @@ public static class CSharpGuestDebugMapProjector
     public static CSharpGuestDebugMap Project(
         SemanticDocument document,
         GuestModule module,
-        string guestIrSha256)
+        string guestIrSha256,
+        string frontendArtifactSha256)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(module);
         ArgumentNullException.ThrowIfNull(guestIrSha256);
+        ArgumentNullException.ThrowIfNull(frontendArtifactSha256);
 
         string sourceId = NormalizeSourceId(document.Source.SourceId);
         if (!IsSha256(document.Source.Sha256)
             || !IsSha256(document.Source.FrontendSha256)
             || !IsSha256(module.Provenance.SemanticSha256)
             || !IsSha256(guestIrSha256)
+            || !IsSha256(frontendArtifactSha256)
             || !string.Equals(module.ModuleId, $"csharp:{document.Source.SourceId}", StringComparison.Ordinal)
             || !string.Equals(module.Provenance.SourceId, document.Source.SourceId, StringComparison.Ordinal)
             || !string.Equals(module.Provenance.SourceSha256, document.Source.Sha256, StringComparison.Ordinal)
@@ -91,9 +94,11 @@ public static class CSharpGuestDebugMapProjector
             1,
             "1.0",
             module.ModuleId,
+            module.Imports.Count,
+            module.Functions.Count,
             new CSharpGuestDebugSource(sourceId, document.Source.Sha256),
             new CSharpGuestDebugProvenance(
-                document.Source.FrontendSha256,
+                frontendArtifactSha256,
                 module.Provenance.SemanticSha256,
                 guestIrSha256),
             functions);

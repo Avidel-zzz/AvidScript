@@ -30,6 +30,40 @@ FString GetAvidScriptPresentationModuleLabel(const FAvidScriptEditorCommandLaunc
 	return GetAvidScriptPresentationSourceLabel(Result.SourcePath);
 }
 
+void AppendAvidScriptRuntimeDiagnosticFrames(
+	TArray<FString>& Lines,
+	TConstArrayView<FAvidScriptWasmDiagnosticFrame> Frames)
+{
+	for (const FAvidScriptWasmDiagnosticFrame& Frame : Frames)
+	{
+		if (Frame.bSourceMapped
+			&& !Frame.FunctionName.IsEmpty()
+			&& !Frame.SourceFile.IsEmpty()
+			&& Frame.Line > 0
+			&& Frame.Column > 0)
+		{
+			Lines.Add(FString::Printf(
+				TEXT("at %s (%s:%d:%d)"),
+				*Frame.FunctionName,
+				*Frame.SourceFile,
+				Frame.Line,
+				Frame.Column));
+		}
+
+		const FString FunctionIdentity = Frame.FunctionIndex == MAX_uint32
+			? FString(TEXT("<unknown>"))
+			: FString::Printf(TEXT("%u"), Frame.FunctionIndex);
+		const FString TokenSuffix = Frame.RawFunctionToken.IsEmpty()
+			? FString()
+			: FString::Printf(TEXT(" token=%s"), *Frame.RawFunctionToken);
+		Lines.Add(FString::Printf(
+			TEXT("wasm frame: function=%s offset=0x%08x%s"),
+			*FunctionIdentity,
+			Frame.FunctionOffset,
+			*TokenSuffix));
+	}
+}
+
 FString MakeAvidScriptPresentationDetails(const FAvidScriptEditorCommandLaunchResult& Result)
 {
 	TArray<FString> Lines;
@@ -38,6 +72,10 @@ FString MakeAvidScriptPresentationDetails(const FAvidScriptEditorCommandLaunchRe
 	{
 		Lines.Add(Result.Summary);
 	}
+
+	AppendAvidScriptRuntimeDiagnosticFrames(
+		Lines,
+		Result.CommandResult.ReloadApplyResult.RuntimeResult.RuntimeResult.DiagnosticFrames);
 
 	if (!Result.CommandResult.NextAction.IsEmpty())
 	{

@@ -162,6 +162,7 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	const FString& DebugMapPath,
 	const FString& ExpectedArtifactSha256,
 	const FAvidScriptWasmDebugProvenance& ExpectedProvenance,
+	TConstArrayView<FAvidScriptWasmFunctionExport> FunctionExports,
 	TSharedPtr<const FAvidScriptWasmDebugMap>& OutMap,
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
@@ -177,7 +178,7 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	}
 	if (!IsDebugMapLowercaseSha256(ExpectedArtifactSha256)
 		|| !IsDebugMapLowercaseSha256(ExpectedProvenance.SourceSha256)
-		|| !IsDebugMapLowercaseSha256(ExpectedProvenance.FrontendSha256)
+		|| !IsDebugMapLowercaseSha256(ExpectedProvenance.FrontendArtifactSha256)
 		|| !IsDebugMapLowercaseSha256(ExpectedProvenance.SemanticSha256)
 		|| !IsDebugMapLowercaseSha256(ExpectedProvenance.GuestIrSha256))
 	{
@@ -225,6 +226,8 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	}
 
 	int32 SchemaVersion = 0;
+	int32 ImportedFunctionCount = 0;
+	int32 DefinedFunctionCount = 0;
 	FString DebugVersion;
 	FString ModuleId;
 	if (!TryGetDebugMapStrictInt32(*Root, TEXT("schema_version"), 1, 1, SchemaVersion)
@@ -232,9 +235,47 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 		|| DebugVersion != TEXT("1.0")
 		|| !Root->TryGetStringField(TEXT("module_id"), ModuleId)
 		|| ModuleId.IsEmpty()
-		|| ModuleId.Len() > MaxIdentityLength)
+		|| ModuleId.Len() > MaxIdentityLength
+		|| !TryGetDebugMapStrictInt32(
+			*Root,
+			TEXT("imported_function_count"),
+			0,
+			MAX_int32,
+			ImportedFunctionCount)
+		|| !TryGetDebugMapStrictInt32(
+			*Root,
+			TEXT("defined_function_count"),
+			1,
+			MaxDebugFunctionCount,
+			DefinedFunctionCount))
 	{
 		SetDebugMapFailure(OutMap, OutErrorCategory, OutErrorSource, TEXT("debug_map_invalid"), DebugMapPath);
+		return false;
+	}
+	if (static_cast<uint32>(ImportedFunctionCount) != ExpectedProvenance.ImportedFunctionCount)
+	{
+		SetDebugMapFailure(
+			OutMap,
+			OutErrorCategory,
+			OutErrorSource,
+			TEXT("debug_map_function_index_range_mismatch"),
+			FString::Printf(
+				TEXT("expected_imports=%u actual_imports=%d"),
+				ExpectedProvenance.ImportedFunctionCount,
+				ImportedFunctionCount));
+		return false;
+	}
+	if (static_cast<uint32>(DefinedFunctionCount) != ExpectedProvenance.DefinedFunctionCount)
+	{
+		SetDebugMapFailure(
+			OutMap,
+			OutErrorCategory,
+			OutErrorSource,
+			TEXT("debug_map_function_index_range_mismatch"),
+			FString::Printf(
+				TEXT("expected_defined=%u actual_defined=%d"),
+				ExpectedProvenance.DefinedFunctionCount,
+				DefinedFunctionCount));
 		return false;
 	}
 	if (ModuleId != ExpectedProvenance.GuestModuleId)
@@ -266,21 +307,21 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	}
 
 	TSharedPtr<FJsonObject> ProvenanceObject;
-	FString FrontendSha256;
+	FString FrontendArtifactSha256;
 	FString SemanticSha256;
 	FString GuestIrSha256;
 	if (!TryGetDebugMapRequiredObject(*Root, TEXT("provenance"), ProvenanceObject)
-		|| !ProvenanceObject->TryGetStringField(TEXT("frontend_sha256"), FrontendSha256)
+		|| !ProvenanceObject->TryGetStringField(TEXT("frontend_artifact_sha256"), FrontendArtifactSha256)
 		|| !ProvenanceObject->TryGetStringField(TEXT("semantic_sha256"), SemanticSha256)
 		|| !ProvenanceObject->TryGetStringField(TEXT("guest_ir_sha256"), GuestIrSha256)
-		|| !IsDebugMapLowercaseSha256(FrontendSha256)
+		|| !IsDebugMapLowercaseSha256(FrontendArtifactSha256)
 		|| !IsDebugMapLowercaseSha256(SemanticSha256)
 		|| !IsDebugMapLowercaseSha256(GuestIrSha256))
 	{
 		SetDebugMapFailure(OutMap, OutErrorCategory, OutErrorSource, TEXT("debug_map_invalid"), DebugMapPath);
 		return false;
 	}
-	if (FrontendSha256 != ExpectedProvenance.FrontendSha256
+	if (FrontendArtifactSha256 != ExpectedProvenance.FrontendArtifactSha256
 		|| SemanticSha256 != ExpectedProvenance.SemanticSha256)
 	{
 		SetDebugMapFailure(OutMap, OutErrorCategory, OutErrorSource, TEXT("debug_map_provenance_mismatch"), DebugMapPath);
@@ -314,9 +355,12 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 	MutableMap->Functions.Reserve(FunctionValues->Num());
 	TSet<FString> GuestFunctionIds;
 	TSet<FString> MethodSymbolIds;
-	for (int32 FunctionOrdinal = 0; FunctionOrdinal < FunctionValues->Num(); ++FunctionOrdinal)
+	uint32 PreviousFunctionIndex = 0;
+	bool bHasPreviousFunctionIndex = false;
+	const uint64 FunctionIndexLimit =
+		static_cast<uint64>(ImportedFunctionCount) + static_cast<uint64>(DefinedFunctionCount);
+	for (const TSharedPtr<FJsonValue>& FunctionValue : *FunctionValues)
 	{
-		const TSharedPtr<FJsonValue>& FunctionValue = (*FunctionValues)[FunctionOrdinal];
 		const TSharedPtr<FJsonObject> FunctionObject = FunctionValue.IsValid() ? FunctionValue->AsObject() : nullptr;
 		uint32 FunctionIndex = 0;
 		FString GuestFunctionId;
@@ -354,18 +398,28 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 			SetDebugMapFailure(OutMap, OutErrorCategory, OutErrorSource, TEXT("debug_map_duplicate_function_identity"), DisplayName);
 			return false;
 		}
-		const uint64 ExpectedFunctionIndex =
-			static_cast<uint64>(ExpectedProvenance.ImportedFunctionCount) + static_cast<uint64>(FunctionOrdinal);
-		if (ExpectedFunctionIndex > MAX_uint32 || FunctionIndex != static_cast<uint32>(ExpectedFunctionIndex))
+		if (FunctionIndex < static_cast<uint32>(ImportedFunctionCount)
+			|| static_cast<uint64>(FunctionIndex) >= FunctionIndexLimit
+			|| (bHasPreviousFunctionIndex && FunctionIndex <= PreviousFunctionIndex))
 		{
+			const FString PreviousFunctionIndexText = bHasPreviousFunctionIndex
+				? FString::Printf(TEXT("%u"), PreviousFunctionIndex)
+				: FString(TEXT("<none>"));
 			SetDebugMapFailure(
 				OutMap,
 				OutErrorCategory,
 				OutErrorSource,
 				TEXT("debug_map_function_index_range_mismatch"),
-				FString::Printf(TEXT("expected=%llu actual=%u"), ExpectedFunctionIndex, FunctionIndex));
+				FString::Printf(
+					TEXT("range=[%d,%llu) previous=%s actual=%u"),
+					ImportedFunctionCount,
+					FunctionIndexLimit,
+					*PreviousFunctionIndexText,
+					FunctionIndex));
 			return false;
 		}
+		PreviousFunctionIndex = FunctionIndex;
+		bHasPreviousFunctionIndex = true;
 
 		int32 Start = 0;
 		int32 Length = 0;
@@ -390,6 +444,25 @@ bool FAvidScriptWasmDebugMap::LoadAndValidate(
 		MethodSymbolIds.Add(MoveTemp(MethodSymbolId));
 	}
 
+	MutableMap->FunctionIndicesByExportName.Reserve(FunctionExports.Num());
+	for (const FAvidScriptWasmFunctionExport& FunctionExport : FunctionExports)
+	{
+		if (FunctionExport.Name.IsEmpty()
+			|| FunctionExport.Name.Len() > MaxIdentityLength
+			|| static_cast<uint64>(FunctionExport.FunctionIndex) >= FunctionIndexLimit
+			|| MutableMap->FunctionIndicesByExportName.Contains(FunctionExport.Name))
+		{
+			SetDebugMapFailure(
+				OutMap,
+				OutErrorCategory,
+				OutErrorSource,
+				TEXT("debug_map_wasm_layout_mismatch"),
+				FunctionExport.Name);
+			return false;
+		}
+		MutableMap->FunctionIndicesByExportName.Add(FunctionExport.Name, FunctionExport.FunctionIndex);
+	}
+
 	OutMap = MutableMap;
 	return true;
 }
@@ -402,12 +475,21 @@ void FAvidScriptWasmDebugMap::MapFrames(
 	for (const FAvidScriptVmStackFrame& VmFrame : VmFrames)
 	{
 		FAvidScriptWasmDiagnosticFrame& Frame = OutFrames.AddDefaulted_GetRef();
-		Frame.FunctionIndex = VmFrame.FunctionIndex;
+		uint32 ResolvedFunctionIndex = VmFrame.FunctionIndex;
+		if (ResolvedFunctionIndex == MAX_uint32)
+		{
+			if (const uint32* ExportFunctionIndex = FunctionIndicesByExportName.Find(VmFrame.RawFunctionToken))
+			{
+				ResolvedFunctionIndex = *ExportFunctionIndex;
+			}
+		}
+
+		Frame.FunctionIndex = ResolvedFunctionIndex;
 		Frame.FunctionOffset = VmFrame.FunctionOffset;
 		Frame.RawFunctionToken = VmFrame.RawFunctionToken;
 		Frame.FunctionName = VmFrame.RawFunctionToken;
 
-		const FFunction* Function = Functions.Find(VmFrame.FunctionIndex);
+		const FFunction* Function = Functions.Find(ResolvedFunctionIndex);
 		if (Function == nullptr)
 		{
 			continue;

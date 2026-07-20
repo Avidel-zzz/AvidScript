@@ -76,10 +76,14 @@ internal static class CSharpGuestDebugMapTests
         CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
             semantic,
             module,
-            new string('d', 64));
+            new string('d', 64),
+            new string('e', 64));
 
         Assert(debugMap.Functions.Count == lowered.Functions.Count,
             "non-method backend functions should not publish fake C# source locations");
+        Assert(debugMap.ImportedFunctionCount == module.Imports.Count
+            && debugMap.DefinedFunctionCount == module.Functions.Count,
+            "debug map should retain the complete WASM function index range despite omitted constructors");
         Assert(debugMap.Functions.Select(function => function.WasmFunctionIndex)
             .SequenceEqual(Enumerable.Range(module.Imports.Count, lowered.Functions.Count)),
             "skipped non-method functions must not collapse the WASM function index space");
@@ -119,7 +123,11 @@ internal static class CSharpGuestDebugMapTests
             ?? throw new InvalidOperationException("malformed-span fixture should lower before debug projection");
 
         InvalidDataException exception = ExpectInvalidData(() =>
-            CSharpGuestDebugMapProjector.Project(semantic, module, new string('e', 64)));
+            CSharpGuestDebugMapProjector.Project(
+                semantic,
+                module,
+                new string('e', 64),
+                new string('f', 64)));
 
         Assert(exception.Message.StartsWith("ASDEBUG1003:", StringComparison.Ordinal),
             "reversed same-line source spans should fail with the source mapping category");
@@ -178,25 +186,29 @@ internal static class CSharpGuestDebugMapTests
         CSharpGuestDebugMap first = CSharpGuestDebugMapProjector.Project(
             semantic,
             module,
-            guestIrSha256);
+            guestIrSha256,
+            new string('e', 64));
         CSharpGuestDebugMap second = CSharpGuestDebugMapProjector.Project(
             semantic,
             module,
-            guestIrSha256);
+            guestIrSha256,
+            new string('e', 64));
 
         Assert(module.Imports.Count == 1 && module.Functions.Count == 2,
             "fixture should retain one reachable import and two defined functions");
         Assert(first.SchemaVersion == 1
             && first.DebugVersion == "1.0"
-            && first.ModuleId == module.ModuleId,
+            && first.ModuleId == module.ModuleId
+            && first.ImportedFunctionCount == module.Imports.Count
+            && first.DefinedFunctionCount == module.Functions.Count,
             "debug map should publish its stable root contract");
         Assert(first.Source.Id == sourceId
             && first.Source.Sha256 == semantic.Source.Sha256,
             "debug map should retain project-relative source provenance");
-        Assert(first.Provenance.FrontendSha256 == semantic.Source.FrontendSha256
+        Assert(first.Provenance.FrontendArtifactSha256 == new string('e', 64)
             && first.Provenance.SemanticSha256 == semanticSha256
             && first.Provenance.GuestIrSha256 == guestIrSha256,
-            "debug map should bind frontend, semantic, and Guest IR provenance");
+            "debug map should bind frontend artifact, semantic artifact, and Guest IR provenance");
         Assert(first.Functions.Select(function => function.WasmFunctionIndex)
             .SequenceEqual(new[] { 1, 2 }),
             "defined function indices should begin after the imported function index space");

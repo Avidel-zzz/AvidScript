@@ -427,6 +427,8 @@ function Write-BuildReport {
             schema_version = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.schema_version }
             version = if ($null -eq $DebugMapModel) { "" } else { [string]$DebugMapModel.debug_version }
             module_id = if ($null -eq $DebugMapModel) { "" } else { [string]$DebugMapModel.module_id }
+            imported_function_count = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.imported_function_count }
+            defined_function_count = if ($null -eq $DebugMapModel) { 0 } else { [int]$DebugMapModel.defined_function_count }
             function_count = if ($null -eq $DebugMapModel -or $DebugMapModel.functions -isnot [System.Array]) { 0 } else { $DebugMapModel.functions.Count }
             sha256 = Get-Sha256Hex $DebugMapArtifactPath
         }
@@ -816,11 +818,13 @@ elseif (-not $SemanticCacheHit) {
 }
 
 
+$FrontendArtifactSha256 = Get-Sha256Hex $FrontendArtifactPath
 $CompilerArguments = @(
     "-NoProfile", "-ExecutionPolicy", "Bypass",
     "-File", $GuestCompilerPath,
     "-DotNetPath", $DotNet.Path,
     "-SemanticPath", $SemanticArtifactPath,
+    "-FrontendArtifactSha256", $FrontendArtifactSha256,
     "-GuestIrPath", $GuestIrArtifactPath,
     "-DebugMapPath", $DebugMapArtifactPath,
     "-StateSchemaPath", $StateSchemaArtifactPath,
@@ -959,28 +963,41 @@ $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256
+$DebugImportedFunctionCount = -1
+$DebugDefinedFunctionCount = -1
+$DebugIndexSpaceValid = (Try-GetJsonInt32 -Value $DebugMapModel.imported_function_count -ParsedValue ([ref]$DebugImportedFunctionCount)) -and
+    (Try-GetJsonInt32 -Value $DebugMapModel.defined_function_count -ParsedValue ([ref]$DebugDefinedFunctionCount)) -and
+    $DebugImportedFunctionCount -ge 0 -and
+    $DebugDefinedFunctionCount -gt 0 -and
+    $DebugDefinedFunctionCount -le 65536 -and
+    $DebugImportedFunctionCount -le ([int]::MaxValue - $DebugDefinedFunctionCount) -and
+    $DebugImportedFunctionCount -eq @($GuestIrModel.imports).Count -and
+    $DebugDefinedFunctionCount -eq @($GuestIrModel.functions).Count
 $DebugMapContractValid = (Test-JsonObjectHasProperties -Value $DebugMapModel -RequiredProperties @(
         "schema_version",
         "debug_version",
         "module_id",
+        "imported_function_count",
+        "defined_function_count",
         "source",
         "provenance",
         "functions")) -and
     [int]$DebugMapModel.schema_version -eq 1 -and
     [string]$DebugMapModel.debug_version -eq "1.0" -and
     [string]$DebugMapModel.module_id -ceq [string]$GuestIrModel.module_id -and
+    $DebugIndexSpaceValid -and
     (Test-JsonObjectHasProperties -Value $DebugMapModel.source -RequiredProperties @("id", "sha256")) -and
     [string]$DebugMapModel.source.id -ceq $SourceId -and
     (Test-JsonLowercaseSha256 -Value $DebugMapModel.source.sha256) -and
     [string]$DebugMapModel.source.sha256 -ceq [string]$FrontendModel.source.sha256 -and
     (Test-JsonObjectHasProperties -Value $DebugMapModel.provenance -RequiredProperties @(
-        "frontend_sha256",
+        "frontend_artifact_sha256",
         "semantic_sha256",
         "guest_ir_sha256")) -and
-    (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.frontend_sha256) -and
+    (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.frontend_artifact_sha256) -and
     (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.semantic_sha256) -and
     (Test-JsonLowercaseSha256 -Value $DebugMapModel.provenance.guest_ir_sha256) -and
-    [string]$DebugMapModel.provenance.frontend_sha256 -ceq [string]$FrontendModel.source.sha256 -and
+    [string]$DebugMapModel.provenance.frontend_artifact_sha256 -ceq $FrontendArtifactSha256 -and
     [string]$DebugMapModel.provenance.semantic_sha256 -ceq $SemanticSha256 -and
     [string]$DebugMapModel.provenance.guest_ir_sha256 -ceq $GuestIrSha256 -and
     $DebugMapModel.functions -is [System.Array] -and
@@ -1020,6 +1037,8 @@ if ($DebugMapContractValid) {
             -not (Try-GetJsonInt32 -Value $Function.span.column -ParsedValue ([ref]$SpanColumn)) -or
             -not (Try-GetJsonInt32 -Value $Function.span.end_line -ParsedValue ([ref]$SpanEndLine)) -or
             -not (Try-GetJsonInt32 -Value $Function.span.end_column -ParsedValue ([ref]$SpanEndColumn)) -or
+            $FunctionIndex -lt $DebugImportedFunctionCount -or
+            $FunctionIndex -ge ($DebugImportedFunctionCount + $DebugDefinedFunctionCount) -or
             $FunctionIndex -le $PreviousDebugFunctionIndex -or
             -not $DebugFunctionIndices.Add($FunctionIndex) -or
             -not $DebugGuestFunctionIds.Add([string]$Function.guest_function_id) -or
@@ -1174,6 +1193,8 @@ $Manifest = [ordered]@{
         schema_version = [int]$DebugMapModel.schema_version
         version = [string]$DebugMapModel.debug_version
         module_id = [string]$DebugMapModel.module_id
+        imported_function_count = $DebugImportedFunctionCount
+        defined_function_count = $DebugDefinedFunctionCount
         sha256 = $DebugMapSha256
     }
     state_migration = $StateSchemaModel

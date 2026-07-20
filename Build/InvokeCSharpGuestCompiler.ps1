@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [Parameter(Mandatory = $true)][string]$SemanticPath,
+    [Parameter(Mandatory = $true)][string]$FrontendArtifactSha256,
     [Parameter(Mandatory = $true)][string]$GuestIrPath,
     [Parameter(Mandatory = $true)][string]$DebugMapPath,
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,
@@ -83,7 +84,8 @@ try {
         --semantic $SemanticPath `
         --output $GuestIrPath `
         --state-schema $StateSchemaPath `
-        --debug-map $DebugMapPath
+        --debug-map $DebugMapPath `
+        --frontend-artifact-sha256 $FrontendArtifactSha256
     if ($LASTEXITCODE -ne 0) {
         $ExitCode = $LASTEXITCODE
         throw "C# semantic to Guest IR lowering failed with exit code $ExitCode."

@@ -85,6 +85,55 @@ bool FAvidScriptEditorPresentationFailureTest::RunTest(const FString& Parameters
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPresentationRuntimeDiagnosticsTest,
+	"AvidScript.Editor.Presentation.RuntimeDiagnostics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPresentationRuntimeDiagnosticsTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptEditorCommandLaunchResult Result;
+	Result.bSucceeded = false;
+	Result.SourcePath = TEXT("C:/Project/Scripts/AvidScript/GameplayScript.cs");
+	Result.CommandResult.ErrorCategory = TEXT("trap");
+	Result.CommandResult.ErrorMessage = TEXT("Exception: unreachable");
+
+	TArray<FAvidScriptWasmDiagnosticFrame>& Frames =
+		Result.CommandResult.ReloadApplyResult.RuntimeResult.RuntimeResult.DiagnosticFrames;
+	FAvidScriptWasmDiagnosticFrame& MappedFrame = Frames.AddDefaulted_GetRef();
+	MappedFrame.FunctionIndex = 7;
+	MappedFrame.FunctionOffset = 0x2a;
+	MappedFrame.RawFunctionToken = TEXT("$f7");
+	MappedFrame.FunctionName = TEXT("AvidScript.GameplayScript.Helper()");
+	MappedFrame.SourceFile = TEXT("Scripts/AvidScript/GameplayScript.cs");
+	MappedFrame.Line = 17;
+	MappedFrame.Column = 5;
+	MappedFrame.EndLine = 19;
+	MappedFrame.EndColumn = 6;
+	MappedFrame.bSourceMapped = true;
+	FAvidScriptWasmDiagnosticFrame& RawFrame = Frames.AddDefaulted_GetRef();
+	RawFrame.FunctionIndex = 8;
+	RawFrame.FunctionOffset = 3;
+	RawFrame.RawFunctionToken = TEXT("$f8");
+
+	const FAvidScriptEditorCommandPresentation Presentation =
+		FAvidScriptEditorResultPresenter::MakePresentation(Result);
+	TestTrue(
+		TEXT("mapped frame renders C# identity and one-based source position"),
+		Presentation.Details.Contains(
+			TEXT("at AvidScript.GameplayScript.Helper() (Scripts/AvidScript/GameplayScript.cs:17:5)")));
+	TestTrue(
+		TEXT("mapped frame preserves raw WASM evidence"),
+		Presentation.Details.Contains(TEXT("wasm frame: function=7 offset=0x0000002a token=$f7")));
+	TestTrue(
+		TEXT("unmapped frame preserves raw WASM evidence"),
+		Presentation.Details.Contains(TEXT("wasm frame: function=8 offset=0x00000003 token=$f8")));
+	TestFalse(
+		TEXT("unmapped frame does not fabricate a source identity"),
+		Presentation.Details.Contains(TEXT("at $f8")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorPresentationCSharpWorkspaceTest,
 	"AvidScript.Editor.Presentation.CSharpWorkspaceSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

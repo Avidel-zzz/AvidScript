@@ -28,6 +28,7 @@ function Write-FakeCompiler {
 param(
     [Parameter(Mandatory = $true)][string]$DotNetPath,
     [Parameter(Mandatory = $true)][string]$SemanticPath,
+    [Parameter(Mandatory = $true)][string]$FrontendArtifactSha256,
     [Parameter(Mandatory = $true)][string]$GuestIrPath,
     [Parameter(Mandatory = $true)][string]$DebugMapPath,
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,

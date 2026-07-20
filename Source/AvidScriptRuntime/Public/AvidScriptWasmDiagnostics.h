@@ -7,10 +7,11 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDebugProvenance
 	FString GuestModuleId;
 	FString SourceFile;
 	FString SourceSha256;
-	FString FrontendSha256;
+	FString FrontendArtifactSha256;
 	FString SemanticSha256;
 	FString GuestIrSha256;
 	uint32 ImportedFunctionCount = 0;
+	uint32 DefinedFunctionCount = 0;
 };
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmDiagnosticFrame

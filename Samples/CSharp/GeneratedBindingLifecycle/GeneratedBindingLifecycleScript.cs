@@ -7,17 +7,22 @@ public static class GeneratedBindingLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        UE.Self.SetActorScale3D(new FVector(2.0f, 3.0f, 4.0f));
+        SetScale(2.0f, 3.0f, 4.0f);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
         FVector scale = UE.Self.GetActorScale3D();
-        UE.Self.SetActorScale3D(new FVector(
+        SetScale(
             scale.X + deltaSeconds,
             scale.Y,
-            scale.Z));
+            scale.Z);
+    }
+
+    private static void SetScale(float x, float y, float z)
+    {
+        UE.Self.SetActorScale3D(new FVector(x, y, z));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]

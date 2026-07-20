@@ -2,6 +2,7 @@
 
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 
+#include "AvidScriptWasmModuleLayout.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -697,6 +698,7 @@ bool ValidateBindingPackageManifest(
 bool LoadManifestDebugMap(
 	const FJsonObject& RootObject,
 	const FString& ManifestFullPath,
+	TConstArrayView<uint8> Bytecode,
 	FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadManifestLoadResult& OutResult)
 {
@@ -723,21 +725,57 @@ bool LoadManifestDebugMap(
 	FString DebugVersion;
 	FString DebugModuleId;
 	int32 DebugSchemaVersion = 0;
+	int32 DebugImportedFunctionCount = 0;
+	int32 DebugDefinedFunctionCount = 0;
 	if (!DebugMapObject.TryGetStringField(TEXT("file"), DebugMapPathFromManifest)
 		|| DebugMapPathFromManifest.IsEmpty()
 		|| !DebugMapObject.TryGetStringField(TEXT("sha256"), Manifest.DebugMapSha256)
 		|| !DebugMapObject.TryGetStringField(TEXT("version"), DebugVersion)
 		|| !DebugMapObject.TryGetStringField(TEXT("module_id"), DebugModuleId)
 		|| !TryGetInt32Field(DebugMapObject, TEXT("schema_version"), DebugSchemaVersion)
+		|| !TryGetInt32Field(DebugMapObject, TEXT("imported_function_count"), DebugImportedFunctionCount)
+		|| !TryGetInt32Field(DebugMapObject, TEXT("defined_function_count"), DebugDefinedFunctionCount)
 		|| DebugSchemaVersion != 1
 		|| DebugVersion != TEXT("1.0")
+		|| DebugImportedFunctionCount < 0
+		|| DebugDefinedFunctionCount <= 0
+		|| DebugDefinedFunctionCount > 65536
 		|| !IsLowercaseSha256(Manifest.DebugMapSha256))
 	{
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("debug_map_manifest_invalid"),
-			TEXT("debug_map file/hash/schema/version/module fields are invalid"),
+			TEXT("debug_map file/hash/schema/version/module/function-range fields are invalid"),
 			TEXT("rebuild the C# script manifest with the current debug map schema"));
+		return false;
+	}
+
+	FAvidScriptWasmModuleLayout WasmLayout;
+	FString WasmLayoutError;
+	if (!InspectAvidScriptWasmModuleLayout(Bytecode, WasmLayout, WasmLayoutError))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_wasm_layout_invalid"),
+			WasmLayoutError,
+			TEXT("rebuild the WASM module and debug artifacts from one supported toolchain"));
+		return false;
+	}
+	if (DebugImportedFunctionCount != static_cast<int32>(WasmLayout.ImportedFunctionCount)
+		|| DebugDefinedFunctionCount != static_cast<int32>(WasmLayout.DefinedFunctionCount)
+		|| Manifest.RequiredImports.Num() != static_cast<int32>(WasmLayout.ImportedFunctionCount))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_wasm_layout_mismatch"),
+			FString::Printf(
+				TEXT("manifest_imports=%d debug_imports=%d wasm_imports=%u debug_defined=%d wasm_defined=%u"),
+				Manifest.RequiredImports.Num(),
+				DebugImportedFunctionCount,
+				WasmLayout.ImportedFunctionCount,
+				DebugDefinedFunctionCount,
+				WasmLayout.DefinedFunctionCount),
+			TEXT("republish manifest, WASM, Guest IR, and debug map as one transaction"));
 		return false;
 	}
 	if (!TryResolveDebugMapPathFromManifest(ManifestFullPath, DebugMapPathFromManifest, Manifest.DebugMapFile))
@@ -790,9 +828,9 @@ bool LoadManifestDebugMap(
 		return false;
 	}
 
-	// Debug schema v1 historically names the frontend-preserved source hash frontend_sha256.
-	Manifest.DebugProvenance.FrontendSha256 = Manifest.DebugProvenance.SourceSha256;
-	Manifest.DebugProvenance.ImportedFunctionCount = static_cast<uint32>(Manifest.RequiredImports.Num());
+	Manifest.DebugProvenance.FrontendArtifactSha256 = FrontendArtifactSha256;
+	Manifest.DebugProvenance.ImportedFunctionCount = static_cast<uint32>(DebugImportedFunctionCount);
+	Manifest.DebugProvenance.DefinedFunctionCount = static_cast<uint32>(DebugDefinedFunctionCount);
 	if (DebugModuleId != Manifest.DebugProvenance.GuestModuleId)
 	{
 		SetManifestLoadFailure(
@@ -809,6 +847,7 @@ bool LoadManifestDebugMap(
 		Manifest.DebugMapFile,
 		Manifest.DebugMapSha256,
 		Manifest.DebugProvenance,
+		MakeArrayView(WasmLayout.FunctionExports),
 		Manifest.DebugMap,
 		DebugMapErrorCategory,
 		DebugMapErrorSource))
@@ -1167,7 +1206,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		Manifest.RequiredImports.Add(MoveTemp(RequiredImport));
 	}
 
-	if (!LoadManifestDebugMap(*RootObject, ManifestFullPath, Manifest, OutResult))
+	if (!LoadManifestDebugMap(*RootObject, ManifestFullPath, MakeArrayView(Bytecode), Manifest, OutResult))
 	{
 		return false;
 	}

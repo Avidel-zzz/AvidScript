@@ -3,6 +3,7 @@
 #include "AvidScriptWamrCallStack.h"
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptWasmModuleLayout.h"
 #include "Misc/AutomationTest.h"
 
 namespace
@@ -123,6 +124,39 @@ bool FAvidScriptVmCallStackParserTest::RunTest(const FString& Parameters)
 		Oversized += FString::Printf(TEXT("#%02d: 0x0000 - $f%d\n"), Index, Index);
 	}
 	TestFalse(TEXT("oversized frame count is rejected"), ParseAvidScriptWamrCallStack(Oversized, Frames));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmModuleLayoutTest,
+	"AvidScript.VM.Diagnostics.ModuleLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmModuleLayoutTest::RunTest(const FString& Parameters)
+{
+	const TArray<uint8> Bytecode = BuildDiagnosticTrapFixture();
+	FAvidScriptWasmModuleLayout Layout;
+	FString Error;
+	TestTrue(
+		TEXT("valid WASM function layout is inspected"),
+		InspectAvidScriptWasmModuleLayout(MakeArrayView(Bytecode), Layout, Error));
+	TestEqual(TEXT("fixture has no function imports"), Layout.ImportedFunctionCount, 0u);
+	TestEqual(TEXT("fixture defined function count"), Layout.DefinedFunctionCount, 3u);
+	TestEqual(TEXT("fixture function export count"), Layout.FunctionExports.Num(), 2);
+	if (Layout.FunctionExports.Num() == 2)
+	{
+		TestEqual(TEXT("BeginPlay export name"), Layout.FunctionExports[0].Name, FString(TEXT("avid_on_begin_play")));
+		TestEqual(TEXT("BeginPlay export index"), Layout.FunctionExports[0].FunctionIndex, 1u);
+		TestEqual(TEXT("Tick export name"), Layout.FunctionExports[1].Name, FString(TEXT("avid_on_tick")));
+		TestEqual(TEXT("Tick export index"), Layout.FunctionExports[1].FunctionIndex, 2u);
+	}
+
+	TArray<uint8> Truncated = Bytecode;
+	Truncated.Pop();
+	TestFalse(
+		TEXT("truncated WASM layout is rejected"),
+		InspectAvidScriptWasmModuleLayout(MakeArrayView(Truncated), Layout, Error));
+	TestTrue(TEXT("layout failure explains its source"), !Error.IsEmpty());
 	return true;
 }
 

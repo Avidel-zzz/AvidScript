@@ -53,7 +53,9 @@ FString MakeDiagnosticsDebugMapJson(
 	bool bDuplicateIndex = false,
 	int32 FirstFunctionIndex = 7,
 	int32 SecondFunctionIndex = 8,
-	int32 ThirdFunctionIndex = INDEX_NONE)
+	int32 ThirdFunctionIndex = INDEX_NONE,
+	int32 ImportedFunctionCount = 7,
+	int32 DefinedFunctionCount = 2)
 {
 	const FString OptionalBeginPlayFunction = ThirdFunctionIndex == INDEX_NONE
 		? FString()
@@ -66,8 +68,10 @@ FString MakeDiagnosticsDebugMapJson(
 		TEXT("  \"schema_version\": 1,\n")
 		TEXT("  \"debug_version\": \"1.0\",\n")
 		TEXT("  \"module_id\": \"%s\",\n")
+		TEXT("  \"imported_function_count\": %d,\n")
+		TEXT("  \"defined_function_count\": %d,\n")
 		TEXT("  \"source\": { \"id\": \"%s\", \"sha256\": \"%s\" },\n")
-		TEXT("  \"provenance\": { \"frontend_sha256\": \"%s\", \"semantic_sha256\": \"%s\", \"guest_ir_sha256\": \"%s\" },\n")
+		TEXT("  \"provenance\": { \"frontend_artifact_sha256\": \"%s\", \"semantic_sha256\": \"%s\", \"guest_ir_sha256\": \"%s\" },\n")
 		TEXT("  \"functions\": [\n")
 		TEXT("    { \"wasm_function_index\": %d, \"guest_function_id\": \"function:symbol:method:Test.Helper()\", \"method_symbol_id\": \"symbol:method:Test.Helper()\", \"display_name\": \"Test.Helper()\", \"span\": { \"start\": 10, \"length\": 20, \"line\": 10, \"column\": 2, \"end_line\": 12, \"end_column\": 3 } },\n")
 		TEXT("%s")
@@ -75,6 +79,8 @@ FString MakeDiagnosticsDebugMapJson(
 		TEXT("  ]\n")
 		TEXT("}\n"),
 		*ModuleId,
+		ImportedFunctionCount,
+		DefinedFunctionCount,
 		*SourceFile,
 		*MapSourceSha,
 		*MapFrontendSha,
@@ -126,7 +132,11 @@ void AppendRuntimeDiagnosticsSection(TArray<uint8>& Module, uint8 SectionId, con
 	Module.Append(Payload);
 }
 
-TArray<uint8> BuildRuntimeDiagnosticsFixture(bool bTrapBeginPlay, bool bTrapTick)
+TArray<uint8> BuildRuntimeDiagnosticsFixture(
+	bool bTrapBeginPlay,
+	bool bTrapTick,
+	bool bDirectTrapBeginPlay = false,
+	uint32 FunctionImportCount = 1)
 {
 	TArray<uint8> Module;
 	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
@@ -143,11 +153,14 @@ TArray<uint8> BuildRuntimeDiagnosticsFixture(bool bTrapBeginPlay, bool bTrapTick
 	AppendRuntimeDiagnosticsSection(Module, 1, Types);
 
 	TArray<uint8> Imports;
-	AppendRuntimeDiagnosticsU32Leb(Imports, 1);
-	AppendRuntimeDiagnosticsString(Imports, "avidscript");
-	AppendRuntimeDiagnosticsString(Imports, "host_add_i32");
-	Imports.Add(0x00);
-	AppendRuntimeDiagnosticsU32Leb(Imports, 2);
+	AppendRuntimeDiagnosticsU32Leb(Imports, FunctionImportCount);
+	for (uint32 ImportIndex = 0; ImportIndex < FunctionImportCount; ++ImportIndex)
+	{
+		AppendRuntimeDiagnosticsString(Imports, "avidscript");
+		AppendRuntimeDiagnosticsString(Imports, "host_add_i32");
+		Imports.Add(0x00);
+		AppendRuntimeDiagnosticsU32Leb(Imports, 2);
+	}
 	AppendRuntimeDiagnosticsSection(Module, 2, Imports);
 
 	TArray<uint8> Functions;
@@ -161,10 +174,10 @@ TArray<uint8> BuildRuntimeDiagnosticsFixture(bool bTrapBeginPlay, bool bTrapTick
 	AppendRuntimeDiagnosticsU32Leb(Exports, 2);
 	AppendRuntimeDiagnosticsString(Exports, "avid_on_begin_play");
 	Exports.Add(0x00);
-	AppendRuntimeDiagnosticsU32Leb(Exports, 2);
+	AppendRuntimeDiagnosticsU32Leb(Exports, FunctionImportCount + 1);
 	AppendRuntimeDiagnosticsString(Exports, "avid_on_tick");
 	Exports.Add(0x00);
-	AppendRuntimeDiagnosticsU32Leb(Exports, 3);
+	AppendRuntimeDiagnosticsU32Leb(Exports, FunctionImportCount + 2);
 	AppendRuntimeDiagnosticsSection(Module, 7, Exports);
 
 	TArray<uint8> Code;
@@ -175,14 +188,25 @@ TArray<uint8> BuildRuntimeDiagnosticsFixture(bool bTrapBeginPlay, bool bTrapTick
 	TArray<uint8> BeginPlay = { 0x00, 0x0b };
 	if (bTrapBeginPlay)
 	{
-		BeginPlay = { 0x00, 0x10, 0x01, 0x0b };
+		if (bDirectTrapBeginPlay)
+		{
+			BeginPlay = { 0x00, 0x00, 0x0b };
+		}
+		else
+		{
+			BeginPlay = { 0x00, 0x10 };
+			AppendRuntimeDiagnosticsU32Leb(BeginPlay, FunctionImportCount);
+			BeginPlay.Add(0x0b);
+		}
 	}
 	AppendRuntimeDiagnosticsU32Leb(Code, static_cast<uint32>(BeginPlay.Num()));
 	Code.Append(BeginPlay);
 	TArray<uint8> Tick = { 0x00, 0x0b };
 	if (bTrapTick)
 	{
-		Tick = { 0x00, 0x10, 0x01, 0x0b };
+		Tick = { 0x00, 0x10 };
+		AppendRuntimeDiagnosticsU32Leb(Tick, FunctionImportCount);
+		Tick.Add(0x0b);
 	}
 	AppendRuntimeDiagnosticsU32Leb(Code, static_cast<uint32>(Tick.Num()));
 	Code.Append(Tick);
@@ -197,13 +221,14 @@ FString MakeRuntimeDiagnosticsManifestJson(
 	const FString& WasmSha256,
 	const FString& DebugMapFile,
 	const FString& DebugMapSha256,
+	int32 DebugImportedFunctionCount,
 	bool bIncludeDebugMap)
 {
 	const FString SourceAndGuest = bIncludeDebugMap
 		? FString::Printf(
 			TEXT("  \"source\": { \"file\": \"Scripts/AvidScript/Test.cs\", \"sha256\": \"%s\", \"frontend_sha256\": \"%s\", \"semantic_sha256\": \"%s\" },\n")
 			TEXT("  \"guest_ir\": { \"module_id\": \"%s\", \"sha256\": \"%s\" },\n")
-			TEXT("  \"debug_map\": { \"file\": \"%s\", \"sha256\": \"%s\", \"schema_version\": 1, \"version\": \"1.0\", \"module_id\": \"%s\" },\n"),
+			TEXT("  \"debug_map\": { \"file\": \"%s\", \"sha256\": \"%s\", \"schema_version\": 1, \"version\": \"1.0\", \"module_id\": \"%s\", \"imported_function_count\": %d, \"defined_function_count\": 3 },\n"),
 			*GDiagnosticsSourceSha,
 			*GDiagnosticsArtifactWrongSha,
 			*GDiagnosticsSemanticSha,
@@ -211,7 +236,8 @@ FString MakeRuntimeDiagnosticsManifestJson(
 			*GDiagnosticsGuestIrSha,
 			*DebugMapFile,
 			*DebugMapSha256,
-			*GuestModuleId)
+			*GuestModuleId,
+			DebugImportedFunctionCount)
 		: FString();
 	return FString::Printf(
 		TEXT("{\n")
@@ -236,6 +262,8 @@ bool WriteRuntimeDiagnosticsFixture(
 	bool bTrapBeginPlay,
 	bool bTrapTick,
 	bool bIncludeDebugMap,
+	bool bDirectTrapBeginPlay,
+	int32 FunctionImportCount,
 	FString& OutManifestPath)
 {
 	const FString RuntimeModuleId = Stem + TEXT("_runtime");
@@ -243,7 +271,11 @@ bool WriteRuntimeDiagnosticsFixture(
 	const FString WasmFileName = Stem + TEXT(".wasm");
 	const FString DebugMapFileName = Stem + TEXT(".csharp.debug.json");
 	const FString WasmPath = FPaths::Combine(Root, WasmFileName);
-	const TArray<uint8> WasmBytes = BuildRuntimeDiagnosticsFixture(bTrapBeginPlay, bTrapTick);
+	const TArray<uint8> WasmBytes = BuildRuntimeDiagnosticsFixture(
+		bTrapBeginPlay,
+		bTrapTick,
+		bDirectTrapBeginPlay,
+		static_cast<uint32>(FunctionImportCount));
 	if (!FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath))
 	{
 		return false;
@@ -258,12 +290,14 @@ bool WriteRuntimeDiagnosticsFixture(
 				GuestModuleId,
 				TEXT("Scripts/AvidScript/Test.cs"),
 				GDiagnosticsSourceSha,
-				GDiagnosticsSourceSha,
+				GDiagnosticsArtifactWrongSha,
 				GDiagnosticsSemanticSha,
 				GDiagnosticsGuestIrSha,
 				false,
-				1,
-				2,
+				FunctionImportCount,
+				FunctionImportCount + 1,
+				FunctionImportCount + 2,
+				FunctionImportCount,
 				3),
 			DebugMapSha256))
 	{
@@ -279,6 +313,7 @@ bool WriteRuntimeDiagnosticsFixture(
 			WasmSha256,
 			DebugMapFileName,
 			DebugMapSha256,
+			FunctionImportCount,
 			bIncludeDebugMap),
 		*OutManifestPath,
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
@@ -304,7 +339,8 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 		GDiagnosticsSourceSha,
 		GDiagnosticsSemanticSha,
 		GDiagnosticsGuestIrSha,
-		7
+		7,
+		2
 	};
 
 	FString ValidSha;
@@ -321,12 +357,17 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	FString ErrorCategory;
 	FString ErrorSource;
+	TArray<FAvidScriptWasmFunctionExport> FunctionExports;
+	FAvidScriptWasmFunctionExport& BeginPlayExport = FunctionExports.AddDefaulted_GetRef();
+	BeginPlayExport.Name = TEXT("avid_on_begin_play");
+	BeginPlayExport.FunctionIndex = 7;
 	TestTrue(
 		TEXT("valid debug map loads"),
 		FAvidScriptWasmDebugMap::LoadAndValidate(
 			ValidPath,
 			ValidSha,
 			Expected,
+			MakeArrayView(FunctionExports),
 			DebugMap,
 			ErrorCategory,
 			ErrorSource));
@@ -343,11 +384,14 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 		UnknownVmFrame.FunctionIndex = 99;
 		UnknownVmFrame.FunctionOffset = 3;
 		UnknownVmFrame.RawFunctionToken = TEXT("$f99");
+		FAvidScriptVmStackFrame& NamedVmFrame = VmFrames.AddDefaulted_GetRef();
+		NamedVmFrame.FunctionOffset = 5;
+		NamedVmFrame.RawFunctionToken = TEXT("avid_on_begin_play");
 
 		TArray<FAvidScriptWasmDiagnosticFrame> Frames;
 		DebugMap->MapFrames(VmFrames, Frames);
-		TestEqual(TEXT("mapping preserves every VM frame"), Frames.Num(), 2);
-		if (Frames.Num() == 2)
+		TestEqual(TEXT("mapping preserves every VM frame"), Frames.Num(), 3);
+		if (Frames.Num() == 3)
 		{
 			TestTrue(TEXT("known function is source mapped"), Frames[0].bSourceMapped);
 			TestEqual(TEXT("known function name"), Frames[0].FunctionName, FString(TEXT("Test.Helper()")));
@@ -359,8 +403,55 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 			TestFalse(TEXT("unknown function remains raw"), Frames[1].bSourceMapped);
 			TestEqual(TEXT("unknown function index survives"), Frames[1].FunctionIndex, 99u);
 			TestEqual(TEXT("unknown raw token survives"), Frames[1].RawFunctionToken, FString(TEXT("$f99")));
+			TestTrue(TEXT("named export frame is source mapped"), Frames[2].bSourceMapped);
+			TestEqual(TEXT("named export resolves actual function index"), Frames[2].FunctionIndex, 7u);
+			TestEqual(TEXT("named export retains raw token"), Frames[2].RawFunctionToken, FString(TEXT("avid_on_begin_play")));
 		}
 	}
+
+	const FString SparsePath = FPaths::Combine(Root, TEXT("sparse.csharp.debug.json"));
+	FString SparseSha;
+	const FAvidScriptWasmDebugProvenance SparseExpected = {
+		ModuleId,
+		SourceFile,
+		GDiagnosticsSourceSha,
+		GDiagnosticsSourceSha,
+		GDiagnosticsSemanticSha,
+		GDiagnosticsGuestIrSha,
+		7,
+		3
+	};
+	TestTrue(
+		TEXT("sparse method map writes"),
+		WriteDiagnosticsArtifact(
+			SparsePath,
+			MakeDiagnosticsDebugMapJson(
+				ModuleId,
+				SourceFile,
+				GDiagnosticsSourceSha,
+				GDiagnosticsSourceSha,
+				GDiagnosticsSemanticSha,
+				GDiagnosticsGuestIrSha,
+				false,
+				7,
+				9,
+				INDEX_NONE,
+				7,
+				3),
+			SparseSha));
+	TSharedPtr<const FAvidScriptWasmDebugMap> SparseMap;
+	ErrorCategory.Reset();
+	ErrorSource.Reset();
+	TestTrue(
+		TEXT("constructors may leave valid holes in the mapped method index set"),
+		FAvidScriptWasmDebugMap::LoadAndValidate(
+			SparsePath,
+			SparseSha,
+			SparseExpected,
+			TConstArrayView<FAvidScriptWasmFunctionExport>(),
+			SparseMap,
+			ErrorCategory,
+			ErrorSource));
 
 	auto ExpectRejected = [this, &Root, &Expected](
 		const TCHAR* Label,
@@ -385,6 +476,7 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 				Path,
 				ExpectedHash != nullptr ? *ExpectedHash : ActualHash,
 				Expected,
+				TConstArrayView<FAvidScriptWasmFunctionExport>(),
 				RejectedMap,
 				Category,
 				Source));
@@ -409,6 +501,11 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 		MakeDiagnosticsDebugMapJson(ModuleId, SourceFile, GDiagnosticsArtifactWrongSha, GDiagnosticsSourceSha, GDiagnosticsSemanticSha, GDiagnosticsGuestIrSha),
 		TEXT("debug_map_source_mismatch"));
 	ExpectRejected(
+		TEXT("frontend artifact hash mismatch is rejected"),
+		TEXT("frontend-artifact-mismatch.json"),
+		MakeDiagnosticsDebugMapJson(ModuleId, SourceFile, GDiagnosticsSourceSha, GDiagnosticsArtifactWrongSha, GDiagnosticsSemanticSha, GDiagnosticsGuestIrSha),
+		TEXT("debug_map_provenance_mismatch"));
+	ExpectRejected(
 		TEXT("Guest IR hash mismatch is rejected"),
 		TEXT("guest-ir-mismatch.json"),
 		MakeDiagnosticsDebugMapJson(ModuleId, SourceFile, GDiagnosticsSourceSha, GDiagnosticsSourceSha, GDiagnosticsSemanticSha, GDiagnosticsArtifactWrongSha),
@@ -424,7 +521,24 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 		MakeDiagnosticsDebugMapJson(ModuleId, SourceFile, GDiagnosticsSourceSha, GDiagnosticsSourceSha, GDiagnosticsSemanticSha, GDiagnosticsGuestIrSha, true),
 		TEXT("debug_map_duplicate_function_index"));
 	ExpectRejected(
-		TEXT("non-contiguous function index is rejected"),
+		TEXT("defined function range mismatch is rejected"),
+		TEXT("defined-count-mismatch.json"),
+		MakeDiagnosticsDebugMapJson(
+			ModuleId,
+			SourceFile,
+			GDiagnosticsSourceSha,
+			GDiagnosticsSourceSha,
+			GDiagnosticsSemanticSha,
+			GDiagnosticsGuestIrSha,
+			false,
+			7,
+			8,
+			INDEX_NONE,
+			7,
+			3),
+		TEXT("debug_map_function_index_range_mismatch"));
+	ExpectRejected(
+		TEXT("out-of-range function index is rejected"),
 		TEXT("function-index-range-mismatch.json"),
 		MakeDiagnosticsDebugMapJson(ModuleId, SourceFile, GDiagnosticsSourceSha, GDiagnosticsSourceSha, GDiagnosticsSemanticSha, GDiagnosticsGuestIrSha, false, 7, 9),
 		TEXT("debug_map_function_index_range_mismatch"));
@@ -438,6 +552,7 @@ bool FAvidScriptWasmDebugMapValidationTest::RunTest(const FString& Parameters)
 			FPaths::Combine(Root, TEXT("missing.json")),
 			ValidSha,
 			Expected,
+			TConstArrayView<FAvidScriptWasmFunctionExport>(),
 			MissingMap,
 			ErrorCategory,
 			ErrorSource));
@@ -458,7 +573,7 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 	FString TickTrapManifestPath;
 	if (!TestTrue(
 		TEXT("mapped Tick trap fixture writes"),
-		WriteRuntimeDiagnosticsFixture(Root, TEXT("tick_trap"), false, true, true, TickTrapManifestPath)))
+		WriteRuntimeDiagnosticsFixture(Root, TEXT("tick_trap"), false, true, true, false, 1, TickTrapManifestPath)))
 	{
 		return false;
 	}
@@ -477,6 +592,33 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 		return false;
 	}
 	TestTrue(TEXT("validated manifest retains immutable debug map"), TickTrapManifest.DebugMap.IsValid());
+
+	FString ImportMismatchManifestPath;
+	TestTrue(
+		TEXT("two-import mismatch fixture writes"),
+		WriteRuntimeDiagnosticsFixture(
+			Root,
+			TEXT("import_mismatch"),
+			false,
+			false,
+			true,
+			false,
+			2,
+			ImportMismatchManifestPath));
+	FAvidScriptWasmReloadManifest ImportMismatchManifest;
+	TArray<uint8> ImportMismatchBytecode;
+	FAvidScriptWasmReloadManifestLoadResult ImportMismatchResult;
+	TestFalse(
+		TEXT("manifest import count cannot disagree with actual WASM function imports"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			ImportMismatchManifestPath,
+			ImportMismatchManifest,
+			ImportMismatchBytecode,
+			ImportMismatchResult));
+	TestEqual(
+		TEXT("WASM layout mismatch category"),
+		ImportMismatchResult.ErrorCategory,
+		FString(TEXT("debug_map_wasm_layout_mismatch")));
 
 	FAvidScriptRuntimeSession TickTrapSession;
 	FAvidScriptWasmReloadResult InitialResult;
@@ -505,7 +647,7 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 	FString LegacyManifestPath;
 	TestTrue(
 		TEXT("legacy manifest fixture writes"),
-		WriteRuntimeDiagnosticsFixture(Root, TEXT("legacy_tick_trap"), false, true, false, LegacyManifestPath));
+		WriteRuntimeDiagnosticsFixture(Root, TEXT("legacy_tick_trap"), false, true, false, false, 1, LegacyManifestPath));
 	FAvidScriptWasmReloadManifest LegacyManifest;
 	TArray<uint8> LegacyBytecode;
 	FAvidScriptWasmReloadManifestLoadResult LegacyLoadResult;
@@ -551,7 +693,7 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 	FString BeginTrapManifestPath;
 	TestTrue(
 		TEXT("mapped BeginPlay trap fixture writes"),
-		WriteRuntimeDiagnosticsFixture(Root, TEXT("begin_trap"), true, false, true, BeginTrapManifestPath));
+		WriteRuntimeDiagnosticsFixture(Root, TEXT("begin_trap"), true, false, true, true, 1, BeginTrapManifestPath));
 	FAvidScriptWasmReloadManifest BeginTrapManifest;
 	TArray<uint8> BeginTrapBytecode;
 	FAvidScriptWasmReloadManifestLoadResult BeginTrapLoadResult;
@@ -573,10 +715,13 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 	TestTrue(TEXT("candidate trap preserves previous runtime"), RejectedReload.bRollbackPreservedLiveRuntime);
 	TestEqual(TEXT("previous runtime remains active"), ReloadSession.GetLiveModuleId(), FString(TEXT("healthy_live")));
 	TestTrue(
-		TEXT("candidate BeginPlay trap is source mapped"),
+		TEXT("direct exported BeginPlay trap is source mapped"),
 		RejectedReload.RuntimeResult.DiagnosticFrames.ContainsByPredicate([](const FAvidScriptWasmDiagnosticFrame& Frame)
 		{
-			return Frame.bSourceMapped && Frame.FunctionName == TEXT("Test.Helper()");
+			return Frame.bSourceMapped
+				&& Frame.FunctionName == TEXT("Test.BeginPlay()")
+				&& Frame.RawFunctionToken == TEXT("avid_on_begin_play")
+				&& Frame.FunctionIndex == 2;
 		}));
 	FAvidScriptWasmSmokeResult PreservedTickResult;
 	TestTrue(TEXT("preserved runtime continues ticking"), ReloadSession.TickLive(1.0f / 60.0f, PreservedTickResult));
