@@ -823,5 +823,6 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 ## Phase 45.5 Transactional Host Effect Rules
 
 - 2026-07-21 P45.5 路径猜测错误记录：探索 binding selection profile 时直接按推断路径读取 `Private/BindingGeneration/AvidScriptEditorBindingSelectionProfile.h`，实际合同位于 `Public/AvidScriptEditorBindingSelectionTypes.h`。Prevention：读取计划或推断出的新路径前先用 `rg --files` 按类型名/关键词定位；不得从相邻模块命名习惯推断文件存在。
+- 2026-07-21 P45.5 只读正则命令错误记录：首次搜索 descriptor schema 写入点时把含嵌套双引号和括号的 `rg` pattern 放进 PowerShell 双引号，shell 在 `rg` 启动前报 `Unexpected token ')'`。Prevention：复杂 `rg` 正则固定使用 PowerShell 单引号；若 pattern 自身含单引号则改用参数数组，不用多层双引号临时转义。
 - P45.5 candidate effect rule：只有 descriptor 明确声明且 runtime 已注册 transaction adapter 的宿主写入能在候选 `BeginPlay` 执行；未知非 const reflected binding 必须在 `ProcessEvent` 前以 `binding_reload_effect_unsupported` fail closed。live runtime 调用不受 candidate journal 限制。
 - P45.5 transaction ownership rule：`RuntimeSession` 是候选 HostEffectTransaction 唯一 owner；runtime instance 和 binding package 只持有调用期非 owning journal 指针。候选 commit/rollback 后必须在成为 live runtime 前清除该指针，禁止跨 Tick 或事件保存。
