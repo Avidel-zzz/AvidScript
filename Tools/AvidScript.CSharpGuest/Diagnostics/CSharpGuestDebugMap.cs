@@ -1,0 +1,29 @@
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
+using AvidScript.CSharpSemantic;
+
+namespace AvidScript.CSharpGuest;
+
+public sealed record CSharpGuestDebugMap(
+    [property: JsonPropertyOrder(0)] int SchemaVersion,
+    [property: JsonPropertyOrder(1)] string DebugVersion,
+    [property: JsonPropertyOrder(2)] string ModuleId,
+    [property: JsonPropertyOrder(3)] CSharpGuestDebugSource Source,
+    [property: JsonPropertyOrder(4)] CSharpGuestDebugProvenance Provenance,
+    [property: JsonPropertyOrder(5)] IReadOnlyList<CSharpGuestDebugFunction> Functions);
+
+public sealed record CSharpGuestDebugSource(
+    [property: JsonPropertyOrder(0)] string Id,
+    [property: JsonPropertyOrder(1)] string Sha256);
+
+public sealed record CSharpGuestDebugProvenance(
+    [property: JsonPropertyOrder(0)] string FrontendSha256,
+    [property: JsonPropertyOrder(1)] string SemanticSha256,
+    [property: JsonPropertyOrder(2)] string GuestIrSha256);
+
+public sealed record CSharpGuestDebugFunction(
+    [property: JsonPropertyOrder(0)] int WasmFunctionIndex,
+    [property: JsonPropertyOrder(1)] string GuestFunctionId,
+    [property: JsonPropertyOrder(2)] string MethodSymbolId,
+    [property: JsonPropertyOrder(3)] string DisplayName,
+    [property: JsonPropertyOrder(4)] SemanticSpan Span);

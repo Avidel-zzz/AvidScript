@@ -1,0 +1,154 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using AvidScript.CSharpFrontend;
+using AvidScript.CSharpGuest;
+using AvidScript.CSharpSemantic;
+using AvidScript.GuestIr;
+
+internal static class CSharpGuestDebugMapTests
+{
+    public static int Run()
+    {
+        RealSemanticFunctionsProjectToDeterministicWasmIndices();
+        ReversedSameLineSpanFailsClosed();
+        return 2;
+    }
+
+    private static void ReversedSameLineSpanFailsClosed()
+    {
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSpan invalidSpan = new(0, 1, 2, 5, 2, 4);
+        SemanticDocument semantic = baseline with
+        {
+            Symbols = baseline.Symbols.Concat(new[]
+            {
+                new SemanticSymbol(
+                    "symbol:type:global::Game.Script",
+                    "type",
+                    "Script",
+                    null,
+                    "type:global::Game.Script",
+                    "global::Game.Script",
+                    true,
+                    "public",
+                    invalidSpan),
+                new SemanticSymbol(
+                    CSharpGuestSemanticFixture.MainMethodId,
+                    "method",
+                    "Main",
+                    "symbol:type:global::Game.Script",
+                    "type:void",
+                    "Main():void",
+                    true,
+                    "public",
+                    invalidSpan),
+            }).ToArray(),
+        };
+        GuestModule module = CSharpGuestLowerer.Lower(semantic, new string('d', 64)).Module
+            ?? throw new InvalidOperationException("malformed-span fixture should lower before debug projection");
+
+        InvalidDataException exception = ExpectInvalidData(() =>
+            CSharpGuestDebugMapProjector.Project(semantic, module, new string('e', 64)));
+
+        Assert(exception.Message.StartsWith("ASDEBUG1003:", StringComparison.Ordinal),
+            "reversed same-line source spans should fail with the source mapping category");
+    }
+
+    private static InvalidDataException ExpectInvalidData(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (InvalidDataException exception)
+        {
+            return exception;
+        }
+
+        throw new InvalidOperationException("Expected InvalidDataException.");
+    }
+
+    private static void RealSemanticFunctionsProjectToDeterministicWasmIndices()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [DllImport("env", EntryPoint = "host_probe")]
+                private static extern int HostProbe(int value);
+
+                private static void Helper()
+                {
+                    HostProbe(41);
+                }
+
+                [UnmanagedCallersOnly(EntryPoint = "guest_main")]
+                public static void Main()
+                {
+                    Helper();
+                }
+            }
+            """;
+        const string sourceId = "Scripts/DebugMap.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded, "debug-map source should analyze successfully");
+
+        string semanticSha256 = new('c', 64);
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, semanticSha256);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException("debug-map source should lower successfully");
+        string guestIrSha256 = Convert.ToHexString(
+            SHA256.HashData(GuestIrSerializer.Serialize(module))).ToLowerInvariant();
+
+        CSharpGuestDebugMap first = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256);
+        CSharpGuestDebugMap second = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256);
+
+        Assert(module.Imports.Count == 1 && module.Functions.Count == 2,
+            "fixture should retain one reachable import and two defined functions");
+        Assert(first.SchemaVersion == 1
+            && first.DebugVersion == "1.0"
+            && first.ModuleId == module.ModuleId,
+            "debug map should publish its stable root contract");
+        Assert(first.Source.Id == sourceId
+            && first.Source.Sha256 == semantic.Source.Sha256,
+            "debug map should retain project-relative source provenance");
+        Assert(first.Provenance.FrontendSha256 == semantic.Source.FrontendSha256
+            && first.Provenance.SemanticSha256 == semanticSha256
+            && first.Provenance.GuestIrSha256 == guestIrSha256,
+            "debug map should bind frontend, semantic, and Guest IR provenance");
+        Assert(first.Functions.Select(function => function.WasmFunctionIndex)
+            .SequenceEqual(new[] { 1, 2 }),
+            "defined function indices should begin after the imported function index space");
+
+        CSharpGuestDebugFunction main = first.Functions.Single(function =>
+            function.DisplayName == "Game.Script.Main():void");
+        SemanticSpan expectedSpan = semantic.Symbols.Single(symbol =>
+            symbol.Id == main.MethodSymbolId).Span;
+        Assert(main.GuestFunctionId == "function:" + main.MethodSymbolId
+            && main.Span == expectedSpan,
+            "method identity and zero-based Roslyn declaration span should be retained");
+        Assert(CSharpGuestDebugMapSerializer.Serialize(first)
+                .SequenceEqual(CSharpGuestDebugMapSerializer.Serialize(second)),
+            "equivalent semantic and Guest IR inputs should produce byte-identical debug maps");
+    }
+
+    private static void Assert(bool condition, string message)
+    {
+        if (!condition)
+        {
+            throw new InvalidOperationException(message);
+        }
+    }
+}

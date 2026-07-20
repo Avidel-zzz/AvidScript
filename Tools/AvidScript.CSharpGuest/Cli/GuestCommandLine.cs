@@ -13,12 +13,14 @@ public static class GuestCommandLine
     {
         string? outputPath = null;
         string? stateSchemaPath = null;
+        string? debugMapPath = null;
         try
         {
             IReadOnlyDictionary<string, string> options = ParseOptions(args);
             string semanticPath = options["--semantic"];
             outputPath = options["--output"];
             options.TryGetValue("--state-schema", out stateSchemaPath);
+            options.TryGetValue("--debug-map", out debugMapPath);
             if (!File.Exists(semanticPath))
             {
                 throw new ArgumentException($"Semantic artifact does not exist: {semanticPath}");
@@ -29,6 +31,10 @@ public static class GuestCommandLine
             {
                 File.Delete(stateSchemaPath);
             }
+            if (debugMapPath is not null)
+            {
+                File.Delete(debugMapPath);
+            }
             byte[] artifact = File.ReadAllBytes(semanticPath);
             string semanticSha256 = Convert.ToHexString(SHA256.HashData(artifact)).ToLowerInvariant();
             SemanticDocument document = SemanticArtifactReader.Deserialize(artifact);
@@ -37,7 +43,7 @@ public static class GuestCommandLine
                 semanticSha256);
             if (!result.Succeeded || result.Module is null)
             {
-                DeletePublishedArtifacts(outputPath, stateSchemaPath);
+                DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
                 foreach (GuestDiagnostic diagnostic in result.Diagnostics)
                 {
                     Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
@@ -54,6 +60,16 @@ public static class GuestCommandLine
             {
                 CSharpGuestStateSchemaSerializer.Write(stateSchemaPath, stateSchema);
             }
+            if (debugMapPath is not null)
+            {
+                string guestIrSha256 = Convert.ToHexString(
+                    SHA256.HashData(File.ReadAllBytes(outputPath))).ToLowerInvariant();
+                CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+                    document,
+                    result.Module,
+                    guestIrSha256);
+                CSharpGuestDebugMapSerializer.Write(debugMapPath, debugMap);
+            }
             return 0;
         }
         catch (ArgumentException exception)
@@ -63,19 +79,19 @@ public static class GuestCommandLine
         }
         catch (InvalidDataException exception)
         {
-            DeletePublishedArtifacts(outputPath, stateSchemaPath);
+            DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
         catch (IOException exception)
         {
-            DeletePublishedArtifacts(outputPath, stateSchemaPath);
+            DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
         catch (UnauthorizedAccessException exception)
         {
-            DeletePublishedArtifacts(outputPath, stateSchemaPath);
+            DeletePublishedArtifacts(outputPath, stateSchemaPath, debugMapPath);
             Console.Error.WriteLine(exception.Message);
             return 2;
         }
@@ -83,10 +99,10 @@ public static class GuestCommandLine
 
     private static IReadOnlyDictionary<string, string> ParseOptions(string[] args)
     {
-        if (args.Length != 4 && args.Length != 6)
+        if (args.Length != 4 && args.Length != 6 && args.Length != 8)
         {
             throw new ArgumentException(
-                "Usage: --semantic <path> --output <path> [--state-schema <path>]");
+                "Usage: --semantic <path> --output <path> [--state-schema <path>] [--debug-map <path>]");
         }
 
         Dictionary<string, string> options = new(StringComparer.Ordinal);
@@ -94,7 +110,10 @@ public static class GuestCommandLine
         {
             string name = args[index];
             string value = args[index + 1];
-            if ((name != "--semantic" && name != "--output" && name != "--state-schema")
+            if ((name != "--semantic"
+                    && name != "--output"
+                    && name != "--state-schema"
+                    && name != "--debug-map")
                 || string.IsNullOrWhiteSpace(value)
                 || !options.TryAdd(name, value))
             {
