@@ -1,6 +1,7 @@
 #include "AvidScriptWasmRuntime.h"
 
 #include "AvidScriptSceneComponentBinding.h"
+#include "Diagnostics/AvidScriptWasmDebugMap.h"
 
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWasmRuntime, Log, All);
@@ -104,7 +105,8 @@ void SetFailureFromVmError(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const FString& ModuleId,
 	const FString& ExportName,
-	const FAvidScriptVmError& Error)
+	const FAvidScriptVmError& Error,
+	const FAvidScriptWasmDebugMap* DebugMap)
 {
 	const FString Category = Error.Category.IsEmpty() ? TEXT("vm_error") : Error.Category;
 	FString NextAction = TEXT("reject this script instance and report the VM failure");
@@ -130,6 +132,23 @@ void SetFailureFromVmError(
 		NextAction,
 		Error.ImportModuleName,
 		Error.ImportName);
+
+	if (DebugMap != nullptr)
+	{
+		DebugMap->MapFrames(Error.StackFrames, OutResult.DiagnosticFrames);
+	}
+	else
+	{
+		OutResult.DiagnosticFrames.Reset(Error.StackFrames.Num());
+		for (const FAvidScriptVmStackFrame& VmFrame : Error.StackFrames)
+		{
+			FAvidScriptWasmDiagnosticFrame& Frame = OutResult.DiagnosticFrames.AddDefaulted_GetRef();
+			Frame.FunctionIndex = VmFrame.FunctionIndex;
+			Frame.FunctionOffset = VmFrame.FunctionOffset;
+			Frame.RawFunctionToken = VmFrame.RawFunctionToken;
+			Frame.FunctionName = VmFrame.RawFunctionToken;
+		}
+	}
 }
 
 bool CallVmExport(
@@ -139,6 +158,7 @@ bool CallVmExport(
 	const char* ExportName,
 	uint32 ArgCount,
 	const uint32* Args,
+	const FAvidScriptWasmDebugMap* DebugMap,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	const FString ExportNameText(UTF8_TO_TCHAR(ExportName));
@@ -147,7 +167,7 @@ bool CallVmExport(
 		FAvidScriptVmError Error;
 		Error.Category = TEXT("backend_unavailable");
 		Error.Details = TEXT("No VM backend is attached to the runtime instance.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error);
+		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
 		return false;
 	}
 
@@ -156,14 +176,14 @@ bool CallVmExport(
 		FAvidScriptVmError Error;
 		Error.Category = TEXT("invalid_arguments");
 		Error.Details = TEXT("The runtime call exceeds the VM fixed cell capacity.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error);
+		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
 		return false;
 	}
 
 	FAvidScriptVmError Error;
 	if (!CachedHandle.IsValid() && !Backend->ResolveExport(ExportNameText, CachedHandle, Error))
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error);
+		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
 		return false;
 	}
 
@@ -175,7 +195,7 @@ bool CallVmExport(
 	}
 	if (!Backend->Call(CachedHandle, Frame, Error))
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error);
+		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
 		return false;
 	}
 	return true;
@@ -275,6 +295,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		BytecodeSize,
 		InModuleId,
 		TSharedPtr<const FAvidScriptBindingPackage>(),
+		TSharedPtr<const FAvidScriptWasmDebugMap>(),
 		OutResult);
 }
 
@@ -283,6 +304,24 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	int32 BytecodeSize,
 	const FString& InModuleId,
 	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+	FAvidScriptWasmSmokeResult& OutResult)
+
+{
+	return LoadModule(
+		Bytecode,
+		BytecodeSize,
+		InModuleId,
+		InBindingPackage,
+		TSharedPtr<const FAvidScriptWasmDebugMap>(),
+		OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::LoadModule(
+	const uint8* Bytecode,
+	int32 BytecodeSize,
+	const FString& InModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	Unload();
@@ -306,6 +345,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	}
 
 	BindingPackage = InBindingPackage;
+	DebugMap = InDebugMap;
 	if (BindingPackage.IsValid())
 	{
 		BindingInvocationScratch.SetNumUninitialized(BindingPackage->GetRequiredScratchSize());
@@ -328,9 +368,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	OutResult.Metrics = Metrics;
 	if (!bLoaded)
 	{
-		SetFailureFromVmError(OutResult, ModuleId, TEXT("<module>"), Error);
+		SetFailureFromVmError(OutResult, ModuleId, TEXT("<module>"), Error, DebugMap.Get());
 		VmBackend.Reset();
 		BindingPackage.Reset();
+		DebugMap.Reset();
 		BindingInvocationScratch.Reset();
 		return false;
 	}
@@ -378,7 +419,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 		FAvidScriptVmExportHandle Handle;
 		if (!VmBackend->ResolveExport(RequiredExport, Handle, Error))
 		{
-			SetFailureFromVmError(OutResult, ModuleId, RequiredExport, Error);
+			SetFailureFromVmError(OutResult, ModuleId, RequiredExport, Error, DebugMap.Get());
 			return false;
 		}
 	}
@@ -438,6 +479,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		"avid_on_begin_play",
 		0,
 		nullptr,
+		DebugMap.Get(),
 		OutResult))
 	{
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
@@ -511,6 +553,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		"avid_on_tick",
 		UE_ARRAY_COUNT(TickArgs),
 		TickArgs,
+		DebugMap.Get(),
 		OutResult))
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
@@ -593,6 +636,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		"avid_on_event",
 		UE_ARRAY_COUNT(EventArgs),
 		EventArgs,
+		DebugMap.Get(),
 		OutResult))
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
@@ -673,7 +717,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		if (!VmBackend->ResolveExport(ExportName, GameplayEventExport, ResolveError) &&
 			ResolveError.Category != TEXT("missing_export"))
 		{
-			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError);
+			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError, DebugMap.Get());
 			FAvidScriptLifecycleTransitionResult LifecycleResult;
 			LifecycleState.MarkFaulted(LifecycleResult);
 			return false;
@@ -707,6 +751,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 			"avid_on_gameplay_event",
 			UE_ARRAY_COUNT(EventArgs),
 			EventArgs,
+			DebugMap.Get(),
 			OutResult))
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
@@ -801,6 +846,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		"avid_on_end_play",
 		0,
 		nullptr,
+		DebugMap.Get(),
 		OutResult))
 	{
 		Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
@@ -861,6 +907,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 		VmBackend.Reset();
 	}
 	BindingPackage.Reset();
+	DebugMap.Reset();
 	BindingInvocationScratch.Reset();
 	BeginPlayExport = {};
 	TickExport = {};
@@ -1681,6 +1728,7 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmo
 			"avid_on_timer",
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
+			DebugMap.Get(),
 			OutResult))
 		{
 			Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);

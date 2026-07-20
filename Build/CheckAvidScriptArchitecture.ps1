@@ -242,6 +242,10 @@ if ($RuntimeSource -match 'CopyHostImportStateToResult\(OutResult\);\s*CopyTimer
 $ReloadTypesHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReloadTypes.h'
 $RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
 $ReloadUmbrellaHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmReload.h'
+$RuntimeDiagnosticsHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmDiagnostics.h'
+$RuntimeDebugMapHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptWasmDebugMap.h'
+$RuntimeDebugMapSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Diagnostics/AvidScriptWasmDebugMap.cpp'
+$RuntimeReloadSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmReload.cpp'
 if ($ReloadTypesHeader -match '\bFAvidScriptRuntimeSession\b') {
     Add-Violation 'WASM reload types header must not declare RuntimeSession ownership'
 }
@@ -250,6 +254,49 @@ if ($RuntimeSessionHeader -notmatch '\bclass\s+AVIDSCRIPTRUNTIME_API\s+FAvidScri
 }
 if ($ReloadUmbrellaHeader -match '\b(class|struct)\s+AVIDSCRIPTRUNTIME_API\b') {
     Add-Violation 'AvidScriptWasmReload.h must remain a compatibility umbrella without declarations'
+}
+foreach ($RequiredRuntimeDiagnosticContract in @(
+    'FAvidScriptWasmDebugProvenance',
+    'FAvidScriptWasmDiagnosticFrame',
+    'FunctionIndex',
+    'FunctionOffset',
+    'RawFunctionToken',
+    'bSourceMapped',
+    'ImportedFunctionCount'
+)) {
+    if (-not $RuntimeDiagnosticsHeader.Contains($RequiredRuntimeDiagnosticContract)) {
+        Add-Violation "Runtime diagnostic contract is missing $RequiredRuntimeDiagnosticContract"
+    }
+}
+foreach ($RequiredDebugMapContract in @(
+    'LoadAndValidate',
+    'MapFrames',
+    'TSharedPtr<const FAvidScriptWasmDebugMap>'
+)) {
+    if (-not $RuntimeDebugMapHeader.Contains($RequiredDebugMapContract)) {
+        Add-Violation "Runtime debug-map interface is missing $RequiredDebugMapContract"
+    }
+}
+foreach ($RequiredDebugMapValidation in @(
+    'MaxDebugMapByteSize = 4 * 1024 * 1024',
+    'MaxDebugFunctionCount = 65536',
+    'IsCanonicalDebugMapSource',
+    'debug_map_hash_mismatch',
+    'debug_map_module_mismatch',
+    'debug_map_guest_ir_mismatch',
+    'debug_map_duplicate_function_index',
+    'debug_map_function_index_range_mismatch'
+)) {
+    if (-not $RuntimeDebugMapSource.Contains($RequiredDebugMapValidation)) {
+        Add-Violation "Runtime debug-map validator is missing $RequiredDebugMapValidation"
+    }
+}
+if (-not $RuntimeReloadSource.Contains('LoadManifestDebugMap') -or
+    -not $RuntimeReloadSource.Contains('TryResolveDebugMapPathFromManifest')) {
+    Add-Violation 'Runtime reload must resolve and validate the immutable debug map before candidate activation'
+}
+if (-not $RuntimeSource.Contains('DebugMap->MapFrames')) {
+    Add-Violation 'Runtime must map VM trap frames through the validated debug map'
 }
 
 $ComponentHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptComponent.h'

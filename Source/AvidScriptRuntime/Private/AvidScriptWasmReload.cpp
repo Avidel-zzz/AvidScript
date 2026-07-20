@@ -1,5 +1,7 @@
 #include "AvidScriptWasmReload.h"
 
+#include "Diagnostics/AvidScriptWasmDebugMap.h"
+
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -91,6 +93,47 @@ FString ResolveArtifactPathFromManifest(
 	}
 
 	return Candidates[0];
+}
+
+bool TryResolveDebugMapPathFromManifest(
+	const FString& ManifestPath,
+	const FString& RelativePath,
+	FString& OutPath)
+{
+	OutPath.Reset();
+	if (RelativePath.IsEmpty()
+		|| !FPaths::IsRelative(RelativePath)
+		|| RelativePath.StartsWith(TEXT("/"))
+		|| RelativePath.Contains(TEXT(":"))
+		|| RelativePath.Contains(TEXT("\\")))
+	{
+		return false;
+	}
+
+	FString Collapsed = RelativePath;
+	FPaths::CollapseRelativeDirectories(Collapsed, true);
+	FPaths::NormalizeFilename(Collapsed);
+	if (Collapsed != RelativePath
+		|| RelativePath.Contains(TEXT("//"))
+		|| RelativePath.StartsWith(TEXT("./"))
+		|| RelativePath.EndsWith(TEXT("/")))
+	{
+		return false;
+	}
+
+	OutPath = ResolveArtifactPathFromManifest(ManifestPath, RelativePath);
+	FString ProjectRoot = NormalizeFullPath(FPaths::ProjectDir());
+	FString ManifestRoot = NormalizeFullPath(FPaths::GetPath(ManifestPath));
+	if (!ProjectRoot.EndsWith(TEXT("/")))
+	{
+		ProjectRoot += TEXT("/");
+	}
+	if (!ManifestRoot.EndsWith(TEXT("/")))
+	{
+		ManifestRoot += TEXT("/");
+	}
+	return OutPath.StartsWith(ProjectRoot, ESearchCase::IgnoreCase)
+		|| OutPath.StartsWith(ManifestRoot, ESearchCase::IgnoreCase);
 }
 
 FString BytesToLowerHex(const uint8* Bytes, int32 ByteCount)
@@ -650,6 +693,135 @@ bool ValidateBindingPackageManifest(
 
 	return true;
 }
+
+bool LoadManifestDebugMap(
+	const FJsonObject& RootObject,
+	const FString& ManifestFullPath,
+	FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmReloadManifestLoadResult& OutResult)
+{
+	if (!RootObject.HasField(TEXT("debug_map")))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FJsonObject>* DebugMapObjectPtr = nullptr;
+	if (!RootObject.TryGetObjectField(TEXT("debug_map"), DebugMapObjectPtr)
+		|| DebugMapObjectPtr == nullptr
+		|| !DebugMapObjectPtr->IsValid())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_manifest_invalid"),
+			TEXT("debug_map must be an object"),
+			TEXT("rebuild the C# script manifest and debug artifacts as one transaction"));
+		return false;
+	}
+
+	const FJsonObject& DebugMapObject = *DebugMapObjectPtr->Get();
+	FString DebugMapPathFromManifest;
+	FString DebugVersion;
+	FString DebugModuleId;
+	int32 DebugSchemaVersion = 0;
+	if (!DebugMapObject.TryGetStringField(TEXT("file"), DebugMapPathFromManifest)
+		|| DebugMapPathFromManifest.IsEmpty()
+		|| !DebugMapObject.TryGetStringField(TEXT("sha256"), Manifest.DebugMapSha256)
+		|| !DebugMapObject.TryGetStringField(TEXT("version"), DebugVersion)
+		|| !DebugMapObject.TryGetStringField(TEXT("module_id"), DebugModuleId)
+		|| !TryGetInt32Field(DebugMapObject, TEXT("schema_version"), DebugSchemaVersion)
+		|| DebugSchemaVersion != 1
+		|| DebugVersion != TEXT("1.0")
+		|| !IsLowercaseSha256(Manifest.DebugMapSha256))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_manifest_invalid"),
+			TEXT("debug_map file/hash/schema/version/module fields are invalid"),
+			TEXT("rebuild the C# script manifest with the current debug map schema"));
+		return false;
+	}
+	if (!TryResolveDebugMapPathFromManifest(ManifestFullPath, DebugMapPathFromManifest, Manifest.DebugMapFile))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_path_invalid"),
+			DebugMapPathFromManifest,
+			TEXT("publish the debug map under the project or beside its manifest using a canonical relative path"));
+		return false;
+	}
+	OutResult.DebugMapPath = Manifest.DebugMapFile;
+
+	const TSharedPtr<FJsonObject>* SourceObjectPtr = nullptr;
+	const TSharedPtr<FJsonObject>* GuestIrObjectPtr = nullptr;
+	if (!RootObject.TryGetObjectField(TEXT("source"), SourceObjectPtr)
+		|| SourceObjectPtr == nullptr
+		|| !SourceObjectPtr->IsValid()
+		|| !RootObject.TryGetObjectField(TEXT("guest_ir"), GuestIrObjectPtr)
+		|| GuestIrObjectPtr == nullptr
+		|| !GuestIrObjectPtr->IsValid())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_manifest_invalid"),
+			TEXT("debug_map requires source and guest_ir manifest provenance"),
+			TEXT("rebuild the C# script manifest and all intermediate artifacts"));
+		return false;
+	}
+
+	const FJsonObject& SourceObject = *SourceObjectPtr->Get();
+	const FJsonObject& GuestIrObject = *GuestIrObjectPtr->Get();
+	FString FrontendArtifactSha256;
+	if (!SourceObject.TryGetStringField(TEXT("file"), Manifest.DebugProvenance.SourceFile)
+		|| !SourceObject.TryGetStringField(TEXT("sha256"), Manifest.DebugProvenance.SourceSha256)
+		|| !SourceObject.TryGetStringField(TEXT("frontend_sha256"), FrontendArtifactSha256)
+		|| !SourceObject.TryGetStringField(TEXT("semantic_sha256"), Manifest.DebugProvenance.SemanticSha256)
+		|| !GuestIrObject.TryGetStringField(TEXT("module_id"), Manifest.DebugProvenance.GuestModuleId)
+		|| !GuestIrObject.TryGetStringField(TEXT("sha256"), Manifest.DebugProvenance.GuestIrSha256)
+		|| !IsLowercaseSha256(Manifest.DebugProvenance.SourceSha256)
+		|| !IsLowercaseSha256(FrontendArtifactSha256)
+		|| !IsLowercaseSha256(Manifest.DebugProvenance.SemanticSha256)
+		|| !IsLowercaseSha256(Manifest.DebugProvenance.GuestIrSha256))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_manifest_invalid"),
+			TEXT("source or guest_ir provenance is incomplete or not lowercase SHA-256"),
+			TEXT("republish frontend, semantic, Guest IR, debug map, and manifest together"));
+		return false;
+	}
+
+	// Debug schema v1 historically names the frontend-preserved source hash frontend_sha256.
+	Manifest.DebugProvenance.FrontendSha256 = Manifest.DebugProvenance.SourceSha256;
+	Manifest.DebugProvenance.ImportedFunctionCount = static_cast<uint32>(Manifest.RequiredImports.Num());
+	if (DebugModuleId != Manifest.DebugProvenance.GuestModuleId)
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("debug_map_module_mismatch"),
+			DebugModuleId,
+			TEXT("rebuild Guest IR and debug map from the same semantic artifact"));
+		return false;
+	}
+
+	FString DebugMapErrorCategory;
+	FString DebugMapErrorSource;
+	if (!FAvidScriptWasmDebugMap::LoadAndValidate(
+		Manifest.DebugMapFile,
+		Manifest.DebugMapSha256,
+		Manifest.DebugProvenance,
+		Manifest.DebugMap,
+		DebugMapErrorCategory,
+		DebugMapErrorSource))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			DebugMapErrorCategory.IsEmpty() ? FString(TEXT("debug_map_invalid")) : DebugMapErrorCategory,
+			DebugMapErrorSource,
+			TEXT("rebuild and republish the C# debug map with its matching manifest provenance"));
+		return false;
+	}
+	return true;
+}
 } // namespace
 
 FAvidScriptWasmReloadManifest FAvidScriptWasmReloadManifest::MakeSmoke(const FString& InModuleId)
@@ -993,6 +1165,11 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		}
 
 		Manifest.RequiredImports.Add(MoveTemp(RequiredImport));
+	}
+
+	if (!LoadManifestDebugMap(*RootObject, ManifestFullPath, Manifest, OutResult))
+	{
+		return false;
 	}
 
 	OutManifest = MoveTemp(Manifest);

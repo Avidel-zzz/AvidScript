@@ -67,6 +67,10 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifest
 	FString BindingDescriptorFile;
 	FString BindingDescriptorSha256;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
+	FString DebugMapFile;
+	FString DebugMapSha256;
+	FAvidScriptWasmDebugProvenance DebugProvenance;
+	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 
 	static FAvidScriptWasmReloadManifest MakeSmoke(const FString& InModuleId);
 };
@@ -78,6 +82,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptWasmReloadManifestLoadResult
 	FString ModulePath;
 	FString BindingPackageManifestPath;
 	FString BindingDescriptorPath;
+	FString DebugMapPath;
 	int64 ByteSize = 0;
 	FString ErrorCategory;
 	FString NextAction;

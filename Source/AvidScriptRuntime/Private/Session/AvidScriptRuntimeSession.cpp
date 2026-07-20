@@ -451,6 +451,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		BytecodeSize,
 		Manifest.ModuleId,
 		Manifest.BindingPackage,
+		Manifest.DebugMap,
 		RuntimeResult))
 	{
 		CopyRuntimeFailure(RuntimeResult, OutResult);

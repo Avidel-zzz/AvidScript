@@ -1,12 +1,15 @@
 #pragma once
 
 #include "AvidScriptGameplayEvent.h"
+#include "AvidScriptWasmDiagnostics.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
 
 #include "CoreMinimal.h"
+
+class FAvidScriptWasmDebugMap;
 
 struct FAvidScriptWasmRuntimeMetrics
 {
@@ -48,6 +51,7 @@ struct FAvidScriptWasmSmokeResult
 	FString ErrorCategory;
 	FString NextAction;
 	FString ErrorMessage;
+	TArray<FAvidScriptWasmDiagnosticFrame> DiagnosticFrames;
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;
@@ -86,6 +90,13 @@ public:
 		int32 BytecodeSize,
 		const FString& InModuleId,
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+		FAvidScriptWasmSmokeResult& OutResult);
+	bool LoadModule(
+		const uint8* Bytecode,
+		int32 BytecodeSize,
+		const FString& InModuleId,
+		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool ValidateRequiredExports(const TArray<FString>& RequiredExports, FAvidScriptWasmSmokeResult& OutResult) const;
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
@@ -199,6 +210,7 @@ private:
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
+	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;
