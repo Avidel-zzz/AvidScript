@@ -113,6 +113,8 @@ Plugins/AvidScript/Docs
 & "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=<ProjectRoot>\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
 ```
 
+- 2026-07-21 Codex transport disconnect 记录：用 `tty=true` 直接流式运行 UE/UBT，并同时启用 `-stdout -FullStdOutLogOutput`，一次命令会向会话传输数万行启动日志和终端控制码，触发 `stream disconnected before completion` / `error decoding response body`。Prevention：Codex 内运行 UE/UBT 时禁止把完整 stdout 持续回传；使用非 TTY 子进程，把 stdout/stderr 重定向到 `C:\tmp` 日志并等待退出，只读取退出码、`Result`、测试发现/完成数、失败行、`Queue Empty` 和 `RequestExitWithStatus` 摘要。含空格的 `-Project` 参数不得交给 `Start-Process -ArgumentList` 重新拼接，首个探针因此把路径截断在 `<UserProfile>\Documents\Unreal`；固定使用 PowerShell call operator 保留参数边界，例如 `& $Executable @Arguments *> $Log`，再读取 `$LASTEXITCODE`。`-abslog` 仍保留作为自动化审计日志。这是执行通道稳定性规则，不得通过减少测试覆盖规避。
+
 - Run runtime automation after runtime behavior changes:
 
 ```powershell
