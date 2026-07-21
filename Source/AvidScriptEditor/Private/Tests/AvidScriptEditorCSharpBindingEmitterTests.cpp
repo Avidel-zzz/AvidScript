@@ -319,22 +319,41 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	TestTrue(TEXT("Gameplay package carries the state contract facade"), Source.Contains(TEXT("public enum AvidStateMode")));
 	TestTrue(TEXT("Gameplay package carries the reflected Actor property"), Source.Contains(TEXT("public float CustomTimeDilation")));
 	TestTrue(TEXT("Gameplay package carries the reflected component handle property"), Source.Contains(TEXT("public USceneComponent RootComponent")));
-	TestTrue(TEXT("Gameplay package declares ActorComponent facade"), Source.Contains(TEXT("public readonly struct UActorComponent")));
-	TestTrue(TEXT("Gameplay package declares PrimitiveComponent facade"), Source.Contains(TEXT("public readonly struct UPrimitiveComponent")));
-	TestTrue(TEXT("Gameplay package declares Pawn facade"), Source.Contains(TEXT("public readonly struct APawn")));
-	TestTrue(TEXT("Gameplay package declares Controller facade"), Source.Contains(TEXT("public readonly struct AController")));
-	TestTrue(TEXT("Gameplay package retains Controller line-of-sight call"), Source.Contains(TEXT("LineOfSightTo(")));
 	TestFalse(TEXT("Empty reflected default is not emitted as a C# optional argument"), Source.Contains(TEXT("ViewPoint =")));
-	const int32 PawnBlockStart = Source.Find(TEXT("public readonly struct APawn"));
-	const int32 PawnBlockEnd = PawnBlockStart == INDEX_NONE
-		? INDEX_NONE
-		: Source.Find(TEXT("\n}\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, PawnBlockStart);
-	TestTrue(TEXT("Pawn facade block is present"), PawnBlockStart != INDEX_NONE && PawnBlockEnd > PawnBlockStart);
-	if (PawnBlockStart != INDEX_NONE && PawnBlockEnd > PawnBlockStart)
+	const auto FindFacadeBlock = [&Source](const TCHAR* Declaration)
 	{
-		const FString PawnBlock = Source.Mid(PawnBlockStart, PawnBlockEnd - PawnBlockStart);
+		const int32 BlockStart = Source.Find(Declaration);
+		const int32 BlockEnd = BlockStart == INDEX_NONE
+			? INDEX_NONE
+			: Source.Find(TEXT("\n}\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, BlockStart);
+		return BlockStart != INDEX_NONE && BlockEnd > BlockStart
+			? Source.Mid(BlockStart, BlockEnd - BlockStart)
+			: FString();
+	};
+	const FString ActorComponentBlock = FindFacadeBlock(TEXT("public readonly struct UActorComponent"));
+	const FString PrimitiveComponentBlock = FindFacadeBlock(TEXT("public readonly struct UPrimitiveComponent"));
+	const FString PawnBlock = FindFacadeBlock(TEXT("public readonly struct APawn"));
+	const FString ControllerBlock = FindFacadeBlock(TEXT("public readonly struct AController"));
+	TestFalse(TEXT("Gameplay package declares ActorComponent facade"), ActorComponentBlock.IsEmpty());
+	TestFalse(TEXT("Gameplay package declares PrimitiveComponent facade"), PrimitiveComponentBlock.IsEmpty());
+	TestFalse(TEXT("Gameplay package declares Pawn facade"), PawnBlock.IsEmpty());
+	TestFalse(TEXT("Gameplay package declares Controller facade"), ControllerBlock.IsEmpty());
+	if (!ActorComponentBlock.IsEmpty())
+	{
+		TestTrue(TEXT("ActorComponent facade contains a declared lifecycle method"), ActorComponentBlock.Contains(TEXT("Deactivate(")));
+	}
+	if (!PrimitiveComponentBlock.IsEmpty())
+	{
+		TestTrue(TEXT("PrimitiveComponent facade contains a declared physics method"), PrimitiveComponentBlock.Contains(TEXT("SetSimulatePhysics(")));
+	}
+	if (!PawnBlock.IsEmpty())
+	{
 		TestTrue(TEXT("Pawn facade contains Pawn-declared movement input"), PawnBlock.Contains(TEXT("AddMovementInput")));
-		TestFalse(TEXT("Pawn facade does not copy Actor location query"), PawnBlock.Contains(TEXT("K2_GetActorLocation")));
+		TestFalse(TEXT("Pawn facade does not copy Actor location query"), PawnBlock.Contains(TEXT("GetActorLocation(")));
+	}
+	if (!ControllerBlock.IsEmpty())
+	{
+		TestTrue(TEXT("Controller facade retains Controller line-of-sight call"), ControllerBlock.Contains(TEXT("LineOfSightTo(")));
 	}
 	TestTrue(TEXT("Gameplay object proxies expose a structural null check"), Source.Contains(TEXT("public bool IsNull => Slot == 0 && Generation == 0;")));
 	TestTrue(TEXT("Gameplay object proxies expose a structural handle check"), Source.Contains(TEXT("public bool HasHandle => Slot > 0 && Generation > 0;")));
