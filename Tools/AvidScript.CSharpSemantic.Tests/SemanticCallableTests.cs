@@ -13,7 +13,85 @@ internal static class SemanticCallableTests
         MissingExportEntryPointFailsClosed();
         GameplayCallbacksAreProjectedAndRooted();
         InvalidGameplayCallbackShapesFailClosed();
-        return 6;
+        GameplayCallbacksAreScopedToTheScriptHost();
+        GameplayCallbacksRequireConcreteNonGenericBodies();
+        return 8;
+    }
+
+    private static void GameplayCallbacksAreScopedToTheScriptHost()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct InputEvent { }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds) { }
+
+                public static void OnInput(InputEvent input) { }
+            }
+
+            public static class UnrelatedHelper
+            {
+                public static int OnInput(int value) => value;
+            }
+            """;
+        const string sourceId = "Scripts/ScopedNaturalGameplayCallbacks.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        Assert(document.Succeeded && document.GameplayEventCallbacks.Count == 1,
+            "reserved callback names outside the exported script host should be ignored");
+        SemanticGameplayEventCallback callback = document.GameplayEventCallbacks.Single();
+        Assert(callback.Name == "OnInput"
+            && callback.MethodSymbolId.Contains("global::AvidScript.Script.OnInput", StringComparison.Ordinal),
+            "the gameplay callback should belong to the exported script host");
+    }
+
+    private static void GameplayCallbacksRequireConcreteNonGenericBodies()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct AActor { }
+            public readonly struct FVector { }
+            public readonly struct InputEvent { }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds) { }
+
+                public static void OnHit<T>(AActor otherActor, FVector normalImpulse) { }
+
+                [DllImport("env", EntryPoint = "host_input")]
+                public static extern void OnInput(InputEvent input);
+            }
+            """;
+        const string sourceId = "Scripts/BodylessNaturalGameplayCallbacks.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        SemanticDiagnostic[] diagnostics = document.Diagnostics
+            .Where(diagnostic => diagnostic.Code == "ASCS5107")
+            .ToArray();
+        Assert(!document.Succeeded && diagnostics.Length == 2,
+            "generic and bodyless gameplay callbacks should fail during semantic analysis");
+        foreach (string name in new[] { "OnHit", "OnInput" })
+        {
+            SemanticDiagnostic diagnostic = diagnostics.Single(item =>
+                item.Span.Start == source.IndexOf(name, StringComparison.Ordinal));
+            Assert(diagnostic.Span.Length == name.Length,
+                $"ASCS5107 should identify the invalid {name} declaration");
+        }
     }
 
     private static void CallableParametersAndAbiAttributesAreProjected()

@@ -903,3 +903,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 ## Phase 48 Natural Gameplay Authoring Rules
 
 - 2026-07-21 P48.2 pinned SDK 复发记录：调试映射修复后的首个聚焦测试再次调用裸 `dotnet`，系统 host 只有 SDK 9.0.306，无法满足仓库锁定的 8.0.416。Prevention：本仓库任何 .NET 命令在构造测试命令前必须先把 host 写成 `$env:USERPROFILE\.dotnet\dotnet.exe`，执行 `--version` 并要求精确等于 `8.0.416`；同时设置任务本地的 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA` 与 `NUGET_PACKAGES`，禁止把裸 `dotnet` 作为可执行命令留到运行阶段才发现。
+- 2026-07-21 P48.2 review gate 变量复发记录：为 hostile semantic artifact 防御补 architecture gate 时，先引用了未在加载区声明的 `$CSharpSemanticInputValidator`。Prevention：任何新 gate owner 必须先在同一加载区用 `Read-RequiredFile` 声明带 `Source` 后缀的变量，再在检查区复用该精确变量名；应用补丁后、运行 gate 前固定用 `rg` 同时确认声明和引用各自存在。

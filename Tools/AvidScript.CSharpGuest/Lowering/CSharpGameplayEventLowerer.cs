@@ -171,6 +171,7 @@ internal static class CSharpGameplayEventLowerer
         {
             return callable.Parameters.Count == 2
                 && TryGetStruct(guestTypes, callable.Parameters[0].TypeId, out GuestType actor)
+                && actor.Fields.Count == 2
                 && HasField(actor, "Slot", int32TypeId)
                 && HasField(actor, "Generation", int32TypeId)
                 && TryGetStruct(guestTypes, callable.Parameters[1].TypeId, out GuestType vector)
@@ -180,6 +181,7 @@ internal static class CSharpGameplayEventLowerer
         if (callback.EventType == 4
             && callable.Parameters.Count == 1
             && TryGetStruct(guestTypes, callable.Parameters[0].TypeId, out GuestType input)
+            && input.Fields.Count == 3
             && HasField(input, "ActionId", int32TypeId)
             && HasField(input, "TriggerEvent", int32TypeId)
             && FindField(input, "Value") is { } valueField
@@ -328,7 +330,8 @@ internal static class CSharpGameplayEventLowerer
 
     private static bool HasVectorFields(GuestType type, string float32TypeId)
     {
-        return HasField(type, "X", float32TypeId)
+        return type.Fields.Count == 3
+            && HasField(type, "X", float32TypeId)
             && HasField(type, "Y", float32TypeId)
             && HasField(type, "Z", float32TypeId);
     }
@@ -341,7 +344,19 @@ internal static class CSharpGameplayEventLowerer
 
     private static GuestField? FindField(GuestType type, string name)
     {
-        return type.Fields.SingleOrDefault(field => string.Equals(field.Name, name, StringComparison.Ordinal));
+        GuestField? result = null;
+        foreach (GuestField field in type.Fields.Where(field =>
+            string.Equals(field.Name, name, StringComparison.Ordinal)))
+        {
+            if (result is not null)
+            {
+                return null;
+            }
+
+            result = field;
+        }
+
+        return result;
     }
 
     private static void Add(List<GuestDiagnostic> diagnostics, string message)

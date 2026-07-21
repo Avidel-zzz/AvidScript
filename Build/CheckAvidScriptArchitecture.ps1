@@ -763,6 +763,7 @@ $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
+$CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredPreparedBuildContract in @(
@@ -999,9 +1000,22 @@ foreach ($ForbiddenSessionMigrationConcern in @('ReadStateBytes', 'WriteStateByt
         Add-Violation "RuntimeSession must not own guest memory migration concern $ForbiddenSessionMigrationConcern"
     }
 }
-foreach ($RequiredGameplayEventContract in @('OnBeginOverlap', 'OnEndOverlap', 'OnHit', 'OnInput', 'ASCS5105')) {
+foreach ($RequiredGameplayEventContract in @(
+    'OnBeginOverlap',
+    'OnEndOverlap',
+    'OnHit',
+    'OnInput',
+    'ASCS5105',
+    'ASCS5107',
+    'exportedOwnerIds'
+)) {
     if (-not $SemanticGameplayEventSource.Contains($RequiredGameplayEventContract)) {
         Add-Violation "C# Semantic gameplay event projector is missing contract $RequiredGameplayEventContract"
+    }
+}
+foreach ($RequiredGameplayArtifactValidation in @('GameplayCallbackContracts', 'IsSupportedContract', 'entrypoint_roots')) {
+    if (-not $CSharpSemanticInputValidatorSource.Contains($RequiredGameplayArtifactValidation)) {
+        Add-Violation "C# semantic input validator is missing gameplay artifact contract $RequiredGameplayArtifactValidation"
     }
 }
 foreach ($RequiredGameplayEventLowering in @('avid_on_gameplay_event', 'stack_alloc', 'field_store', 'ASCG1007')) {

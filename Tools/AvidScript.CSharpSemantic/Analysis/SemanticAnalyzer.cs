@@ -68,7 +68,7 @@ public static class SemanticAnalyzer
             typeRegistry);
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticGameplayEventProjection gameplayEventProjection =
-            SemanticGameplayEventProjector.Project(context);
+            SemanticGameplayEventProjector.Project(context, callableProjection.Callables);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);

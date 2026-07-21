@@ -7,6 +7,31 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpSemanticInputValidator
 {
+    private sealed record GameplayCallbackContract(
+        string Name,
+        IReadOnlyList<string> ParameterTypeIds);
+
+    private static readonly IReadOnlyDictionary<int, GameplayCallbackContract> GameplayCallbackContracts =
+        new Dictionary<int, GameplayCallbackContract>
+        {
+            [1] = new("OnBeginOverlap", new[]
+            {
+                "type:global::AvidScript.AActor",
+                "type:global::AvidScript.FVector",
+            }),
+            [2] = new("OnEndOverlap", new[]
+            {
+                "type:global::AvidScript.AActor",
+                "type:global::AvidScript.FVector",
+            }),
+            [3] = new("OnHit", new[]
+            {
+                "type:global::AvidScript.AActor",
+                "type:global::AvidScript.FVector",
+            }),
+            [4] = new("OnInput", new[] { "type:global::AvidScript.InputEvent" }),
+        };
+
     public static bool IsValid(SemanticDocument document)
     {
         if (document.Source is null
@@ -20,6 +45,7 @@ internal static class CSharpSemanticInputValidator
             || document.Diagnostics is null
             || string.IsNullOrWhiteSpace(document.Language)
             || string.IsNullOrWhiteSpace(document.SemanticVersion)
+            || !IsSupportedContract(document.SchemaVersion, document.SemanticVersion)
             || string.IsNullOrWhiteSpace(document.Source.SourceId)
             || document.Source.Sha256 is null
             || document.Source.FrontendSha256 is null)
@@ -67,7 +93,10 @@ internal static class CSharpSemanticInputValidator
                 && symbol.Signature is not null
                 && !string.IsNullOrWhiteSpace(symbol.Accessibility)
                 && symbol.Span is not null)
-            && Unique(symbols.Select(symbol => symbol.Id));
+            && Unique(symbols.Select(symbol => symbol.Id))
+            && Unique(symbols
+                .Where(symbol => symbol.Kind == "field" && symbol.ContainingSymbolId is not null)
+                .Select(symbol => symbol.ContainingSymbolId + "\n" + symbol.Name));
     }
 
     private static bool ValidateCallables(IReadOnlyList<SemanticCallable> callables)
@@ -144,14 +173,18 @@ internal static class CSharpSemanticInputValidator
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
+        string expectedMode = callbackIds.Count != 0
+            ? "entrypoint_roots"
+            : expectedRootIds.Length != 0
+                ? "export_roots"
+                : "all_callables_compatibility";
         HashSet<string> reachableIds = reachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal);
-        if (reachability.RootCallableIds.Any(id =>
+        if (!string.Equals(reachability.Mode, expectedMode, StringComparison.Ordinal)
+            || reachability.RootCallableIds.Any(id =>
                 !reachableIds.Contains(id)
                 || !callablesById.TryGetValue(id, out SemanticCallable? callable)
                 || (callable.Export is null && !callbackIds.Contains(id)))
             || reachableIds.Any(id => !callablesById.ContainsKey(id))
-            || (reachability.Mode == "export_roots" && reachability.RootCallableIds.Count == 0)
-            || (reachability.Mode == "entrypoint_roots" && callbackIds.Count == 0)
             || (reachability.Mode is "export_roots" or "entrypoint_roots"
                 && !reachability.RootCallableIds.SequenceEqual(expectedRootIds))
             || (reachability.Mode == "all_callables_compatibility"
@@ -183,25 +216,37 @@ internal static class CSharpSemanticInputValidator
             return document.GameplayEventCallbacks.Count == 0;
         }
 
-        IReadOnlyDictionary<int, string> expectedNames = new Dictionary<int, string>
-        {
-            [1] = "OnBeginOverlap",
-            [2] = "OnEndOverlap",
-            [3] = "OnHit",
-            [4] = "OnInput",
-        };
         Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
             callable => callable.MethodSymbolId,
             StringComparer.Ordinal);
+        Dictionary<string, SemanticSymbol> symbolsById = document.Symbols.ToDictionary(
+            symbol => symbol.Id,
+            StringComparer.Ordinal);
         return document.GameplayEventCallbacks.All(callback => callback is not null
-                && expectedNames.TryGetValue(callback.EventType, out string? expectedName)
-                && string.Equals(callback.Name, expectedName, StringComparison.Ordinal)
+                && GameplayCallbackContracts.TryGetValue(
+                    callback.EventType,
+                    out GameplayCallbackContract? contract)
+                && string.Equals(callback.Name, contract.Name, StringComparison.Ordinal)
                 && !string.IsNullOrWhiteSpace(callback.MethodSymbolId)
-                && callback.Span is not null
+                && IsValidCallbackSpan(callback.Span, callback.Name, document.Source.Length)
                 && callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
                 && callable.HasBody
                 && callable.IsStatic
-                && callable.Import is null)
+                && !callable.IsConstructor
+                && callable.Import is null
+                && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
+                && ParametersMatch(callable.Parameters, contract.ParameterTypeIds)
+                && symbolsById.TryGetValue(callback.MethodSymbolId, out SemanticSymbol? symbol)
+                && string.Equals(symbol.Kind, "method", StringComparison.Ordinal)
+                && string.Equals(symbol.Name, callback.Name, StringComparison.Ordinal)
+                && symbol.IsStatic
+                && string.Equals(symbol.Accessibility, "public", StringComparison.Ordinal)
+                && string.Equals(symbol.TypeId, "type:void", StringComparison.Ordinal)
+                && string.Equals(
+                    symbol.ContainingSymbolId,
+                    "symbol:" + callable.ContainingTypeId,
+                    StringComparison.Ordinal)
+                && Contains(symbol.Span, callback.Span))
             && document.GameplayEventCallbacks
                 .Select(callback => callback.EventType)
                 .SequenceEqual(document.GameplayEventCallbacks
@@ -212,6 +257,50 @@ internal static class CSharpSemanticInputValidator
                 .Distinct()
                 .Count() == document.GameplayEventCallbacks.Count
             && Unique(document.GameplayEventCallbacks.Select(callback => callback.MethodSymbolId));
+    }
+
+    private static bool ParametersMatch(
+        IReadOnlyList<SemanticCallableParameter> parameters,
+        IReadOnlyList<string> expectedTypeIds)
+    {
+        return parameters.Count == expectedTypeIds.Count
+            && parameters
+                .OrderBy(parameter => parameter.Ordinal)
+                .Select((parameter, ordinal) => parameter.Ordinal == ordinal
+                    && parameter.RefKind == "none"
+                    && string.Equals(parameter.TypeId, expectedTypeIds[ordinal], StringComparison.Ordinal))
+                .All(matches => matches);
+    }
+
+    private static bool IsValidCallbackSpan(SemanticSpan span, string name, int sourceLength)
+    {
+        return span is not null
+            && span.Start >= 0
+            && span.Length == name.Length
+            && span.End <= sourceLength
+            && span.Line >= 0
+            && span.Column >= 0
+            && span.EndLine >= span.Line
+            && span.EndColumn >= 0;
+    }
+
+    private static bool Contains(SemanticSpan owner, SemanticSpan child)
+    {
+        return owner is not null
+            && child.Start >= owner.Start
+            && child.End <= owner.End;
+    }
+
+    private static bool IsSupportedContract(int schemaVersion, string semanticVersion)
+    {
+        return (schemaVersion, semanticVersion) switch
+        {
+            (4, "1.4") => true,
+            (5, "1.5") => true,
+            (6, "1.6") => true,
+            (7, "1.7") => true,
+            _ => false,
+        };
     }
 
     private static bool IsOrdinalSorted(IReadOnlyList<string> values)
