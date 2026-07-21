@@ -717,6 +717,59 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s old C# Tick continues reflected gameplay after rollback"), *BuildLabel),
 		Actor->GetActorScale3D().Equals(FVector(3.5, 3.0, 4.0), 0.001));
+
+	AActor* RootlessActor = World->SpawnActor<AActor>();
+	if (!Test.TestNotNull(
+		*FString::Printf(TEXT("%s rootless lifecycle actor spawns"), *BuildLabel),
+		RootlessActor))
+	{
+		return false;
+	}
+	Test.TestNull(
+		*FString::Printf(TEXT("%s negative fixture has no root component"), *BuildLabel),
+		RootlessActor->GetRootComponent());
+	RootlessActor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
+
+	FAvidScriptObjectRegistry RootlessRegistry;
+	FAvidScriptObjectHandleResult RootlessRegisterResult;
+	const FAvidScriptObjectHandle RootlessActorHandle =
+		RootlessRegistry.RegisterObject(RootlessActor, RootlessRegisterResult);
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s rootless lifecycle owner registers"), *BuildLabel),
+		RootlessRegisterResult.bSucceeded);
+
+	FAvidScriptWasmHostContext RootlessHostContext;
+	RootlessHostContext.ObjectRegistry = &RootlessRegistry;
+	RootlessHostContext.OwnerHandle = RootlessActorHandle;
+	RootlessHostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptRuntimeSession RootlessSession;
+	RootlessSession.SetHostContext(RootlessHostContext);
+	FAvidScriptWasmReloadResult RootlessReloadResult;
+	Test.TestFalse(
+		*FString::Printf(TEXT("%s null object property receiver rejects BeginPlay"), *BuildLabel),
+		RootlessSession.LoadInitialModule(
+			OutBytecode.GetData(),
+			OutBytecode.Num(),
+			OutManifest,
+			RootlessReloadResult));
+	Test.TestEqual(
+		*FString::Printf(TEXT("%s null receiver surfaces a host import failure"), *BuildLabel),
+		RootlessReloadResult.ErrorCategory,
+		FString(TEXT("host_import_failed")));
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s null receiver identifies the generated import"), *BuildLabel),
+		RootlessReloadResult.RuntimeResult.ImportName.StartsWith(
+			TEXT("avid_ue_"),
+			ESearchCase::CaseSensitive));
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s null receiver preserves the object handle diagnostic"), *BuildLabel),
+		RootlessReloadResult.ErrorMessage.Contains(
+			TEXT("invalid UObject handle"),
+			ESearchCase::CaseSensitive));
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s failed object chain does not continue with default values"), *BuildLabel),
+		RootlessActor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.001));
 	return true;
 }
 
