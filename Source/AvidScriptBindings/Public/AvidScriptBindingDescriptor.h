@@ -47,6 +47,8 @@ struct FAvidScriptBindingFunctionModel
 	FString CanonicalIdentity;
 	int32 Ordinal = INDEX_NONE;
 	FString OwnerClass;
+	FString BindingKind = TEXT("function");
+	FString UeMember;
 	FString UeFunction;
 	FString ScriptName;
 	FString DispatchMode;

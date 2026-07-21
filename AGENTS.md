@@ -866,3 +866,9 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-21 P45.6 架构门禁符号臆测记录：为新 WASM layout inspector 补门禁时，未先读取实现便要求不存在的 `ImportSectionId`、`ReadUnsignedLeb128` 等推测符号，使正确实现被门禁误报。Prevention：架构门禁只能锁定已存在的公共合同和关键实现边界；新增字符串检查前先用源码定位核对真实符号，禁止为了通过门禁反向添加无意义别名。
 - 2026-07-21 P45.6 Markdown 双空格换行复发记录：成果文档首版再次使用两个行尾空格连接引用行，暂存差异门禁正确拒绝。Prevention：中文文档引用块多行固定插入独立的 `>` 空行；新建文档必须在提交前纳入 `git diff --cached --check`，既有错误记录不能替代实际门禁。
 - P45.6 final baseline：.NET 自有测试主机 132/132、PowerShell contracts 84/84、PowerShell parser、architecture gate 与 UE5.8 no-clean 增量 target build 全部通过；完整 `AvidScript` automation 209/209、非成功 0、Queue Empty、TestExit、RequestExit status 0 与进程退出码 0。C# trap 已能通过经过 provenance 和真实 WASM layout 验证的 debug map 映射到函数声明，并由 Editor 展示。
+
+## Phase 46 Reflected Property Binding Rules
+
+- P46 property ownership rule：属性是第一等 reflected member binding，不允许把 `FProperty` 伪装成不存在的 `UFunction`。Selection/Profile 只保存 reflection-free 数据；Editor property policy 负责资格，shared type policy 负责 ABI 类型，Bindings Runtime 后续只消费经过验证的 descriptor。
+- P46 property write rule：首个切片只生成 getter。setter 必须显式处理 BlueprintSetter、replication/OnRep、config/editor-only/instanced policy 与 candidate reload transaction；在这些合同完成前禁止直接用 `FProperty` 写入 UObject。
+- 2026-07-21 P46.1 Unity helper 重名复发记录：property resolver 与 descriptor generator 分别新增同名匿名 `MakePropertySelectionKey`，Unity 合并后 C2084。Prevention：Editor BindingGeneration 下所有匿名 helper 从首次提交起必须带 owner 前缀，例如 `MakeResolved...`、`MakeDescriptor...`；新增 cpp 编译前按目标模块全局搜索候选 helper 名，不能只依赖单文件作用域判断。

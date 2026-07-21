@@ -389,27 +389,49 @@ if (-not $RuntimeSessionSource.Contains('Scheduler->Tick(') -or
 $BindingSelectionTypes = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionTypes.h'
 $BindingSelectionResolverHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionResolver.h'
 $BindingSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingSelectionResolver.cpp'
+$PropertySelectionResolverHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingPropertySelectionResolver.h'
+$PropertySelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingPropertySelectionResolver.cpp'
 $ReflectedFunctionPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.cpp'
+$ReflectedPropertyPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.cpp'
+$ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedTypePolicy.h'
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
+$BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
+$BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
 foreach ($RequiredSelectionContract in @(
     'FAvidScriptBindingSelectionProfile',
     'FAvidScriptBindingSelectionIssue',
-    'FAvidScriptBindingSelectionResolveResult'
+    'FAvidScriptBindingSelectionResolveResult',
+    'FAvidScriptReflectedPropertySelection',
+    'IncludeProperties',
+    'ExcludeProperties',
+    'ExplicitProperties',
+    'CandidatePropertyCount',
+    'AcceptedPropertyCount',
+    'RejectedPropertyCount'
 )) {
     if (-not $BindingSelectionTypes.Contains($RequiredSelectionContract)) {
         Add-Violation "binding selection types are missing $RequiredSelectionContract"
     }
 }
-if ($BindingSelectionTypes -match '\b(UClass|UFunction)\b') {
+if ($BindingSelectionTypes -match '\b(UClass|UFunction|FProperty)\b') {
     Add-Violation 'binding selection types must remain reflection-free data contracts'
 }
 if (-not $BindingSelectionResolverHeader.Contains('FAvidScriptEditorBindingSelectionResolver') -or
     -not $BindingSelectionResolverSource.Contains('EFieldIterationFlags::None')) {
     Add-Violation 'binding selection resolver must own exact-class reflected function discovery'
 }
+if (-not $PropertySelectionResolverHeader.Contains('FAvidScriptEditorBindingPropertySelectionResolver') -or
+    -not $PropertySelectionResolverSource.Contains('EFieldIterationFlags::IncludeSuper') -or
+    -not $PropertySelectionResolverSource.Contains('EvaluateReadable')) {
+    Add-Violation 'property selection resolver must own bounded reflected property discovery and policy evaluation'
+}
 if (-not $ReflectedFunctionPolicySource.Contains('FAvidScriptEditorReflectedFunctionPolicy::Evaluate') -or
     $BindingDescriptorGeneratorSource -match 'bool\s+IsFunctionAllowed\s*\(') {
     Add-Violation 'reflected function eligibility must remain in the shared function policy'
+}
+if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable') -or
+    -not $ReflectedTypePolicyHeader.Contains('ProjectReadableProperty')) {
+    Add-Violation 'reflected property eligibility must reuse the shared reflected type policy'
 }
 foreach ($RequiredProfileGeneratorContract in @('MakeEngineGameplayProfile', 'GenerateFromProfile')) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredProfileGeneratorContract)) {
@@ -449,6 +471,35 @@ foreach ($RequiredGameplayPackageContract in @(
 )) {
     if (-not $CSharpBindingEmitterSource.Contains($RequiredGameplayPackageContract)) {
         Add-Violation "C# binding emitter is missing gameplay package contract $RequiredGameplayPackageContract"
+    }
+}
+foreach ($RequiredPropertyDescriptorContract in @(
+    'BindingKind',
+    'UeMember'
+)) {
+    if (-not $BindingDescriptorHeader.Contains($RequiredPropertyDescriptorContract)) {
+        Add-Violation "binding descriptor model is missing $RequiredPropertyDescriptorContract"
+    }
+}
+foreach ($RequiredPropertyDescriptorParserContract in @(
+    'SchemaVersion != 4',
+    'binding_kind',
+    'ue_member',
+    'property_get',
+    'cached_property_get'
+)) {
+    if (-not $BindingDescriptorSource.Contains($RequiredPropertyDescriptorParserContract)) {
+        Add-Violation "binding descriptor v4 parser is missing $RequiredPropertyDescriptorParserContract"
+    }
+}
+foreach ($RequiredPropertyDescriptorGeneratorContract in @(
+    'GenerateWithReadableProperties',
+    'property_get:',
+    'cached_property_get',
+    'ProjectReadableProperty'
+)) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredPropertyDescriptorGeneratorContract)) {
+        Add-Violation "binding descriptor v4 generator is missing $RequiredPropertyDescriptorGeneratorContract"
     }
 }
 $CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'

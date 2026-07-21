@@ -45,6 +45,10 @@ public:
 		bool bIsStatic,
 		FAvidScriptProjectedFunction& OutProjection,
 		FString& OutErrorSource);
+	static bool ProjectReadableProperty(
+		const FProperty* Property,
+		FAvidScriptProjectedBindingValue& OutValue,
+		FString& OutErrorSource);
 
 private:
 	static bool ProjectProperty(

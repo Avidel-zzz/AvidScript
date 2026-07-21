@@ -29,6 +29,12 @@ public:
 		const TArray<FAvidScriptReflectedFunctionSelection>& Selections,
 		FString& OutJson,
 		FAvidScriptBindingDescriptorGenerateResult& OutResult);
+	static bool GenerateWithReadableProperties(
+		const FString& PackageName,
+		const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
+		const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
+		FString& OutJson,
+		FAvidScriptBindingDescriptorGenerateResult& OutResult);
 
 	static bool GenerateFromProfile(
 		const FAvidScriptBindingSelectionProfile& Profile,

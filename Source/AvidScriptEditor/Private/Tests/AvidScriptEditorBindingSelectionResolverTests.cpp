@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
+#include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
 
 #include "Misc/AutomationTest.h"
@@ -165,6 +166,98 @@ bool FAvidScriptEditorBindingSelectionStrictExplicitFailureTest::RunTest(const F
 		TestTrue(TEXT("Explicit issue is fatal"), Result.Issues[0].bFatal);
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingPropertySelectionCompatibilityTest,
+	"AvidScript.Editor.BindingSelection.PropertyCompatibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingPropertySelectionCompatibilityTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.engine.property_compatibility");
+	FAvidScriptReflectedClassSelection ActorRule;
+	ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+	ActorRule.IncludeProperties = {
+		TEXT("CustomTimeDilation"),
+		TEXT("InitialLifeSpan"),
+		TEXT("Tags")
+	};
+	Profile.Classes.Add(MoveTemp(ActorRule));
+
+	TArray<FAvidScriptReflectedPropertySelection> FirstSelections;
+	FAvidScriptBindingSelectionResolveResult FirstResult;
+	TestTrue(
+		TEXT("Compatible properties survive an unsupported peer"),
+		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			FirstSelections,
+			FirstResult));
+	TestEqual(TEXT("Three reflected properties are considered"), FirstResult.CandidatePropertyCount, 3);
+	TestEqual(TEXT("Two scalar properties are accepted"), FirstResult.AcceptedPropertyCount, 2);
+	TestEqual(TEXT("One array property is rejected"), FirstResult.RejectedPropertyCount, 1);
+	TestEqual(TEXT("Selections are deterministically ordered"), FirstSelections.Num(), 2);
+	if (FirstSelections.Num() == 2)
+	{
+		TestEqual(TEXT("CustomTimeDilation sorts first"), FirstSelections[0].PropertyName, FName(TEXT("CustomTimeDilation")));
+		TestEqual(TEXT("InitialLifeSpan sorts second"), FirstSelections[1].PropertyName, FName(TEXT("InitialLifeSpan")));
+	}
+	if (FirstResult.Issues.Num() == 1)
+	{
+		TestFalse(TEXT("Discovery rejection is non-fatal"), FirstResult.Issues[0].bFatal);
+		TestEqual(TEXT("Issue identifies a property"), FirstResult.Issues[0].MemberKind, FString(TEXT("property")));
+		TestEqual(TEXT("Array rejection identifies Tags"), FirstResult.Issues[0].PropertyName, FName(TEXT("Tags")));
+		TestEqual(
+			TEXT("Unsupported type uses a stable category"),
+			FirstResult.Issues[0].Category,
+			FString(TEXT("unsupported_property_type")));
+	}
+
+	TArray<FAvidScriptReflectedPropertySelection> SecondSelections;
+	FAvidScriptBindingSelectionResolveResult SecondResult;
+	TestTrue(
+		TEXT("Repeated property resolution succeeds"),
+		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			SecondSelections,
+			SecondResult));
+	TestEqual(TEXT("Repeated accepted count is stable"), SecondSelections.Num(), FirstSelections.Num());
+	TestEqual(TEXT("Repeated issue count is stable"), SecondResult.Issues.Num(), FirstResult.Issues.Num());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingPropertySelectionStrictFailureTest,
+	"AvidScript.Editor.BindingSelection.PropertyStrictFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingPropertySelectionStrictFailureTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.engine.property_strict");
+	Profile.ExplicitProperties.Add({
+		TEXT("/Script/Engine.Actor"),
+		TEXT("AvidScriptMissingProperty")
+	});
+
+	TArray<FAvidScriptReflectedPropertySelection> Selections;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestFalse(
+		TEXT("Missing explicit property fails closed"),
+		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			Selections,
+			Result));
+	TestTrue(TEXT("Strict property failure produces no partial selection"), Selections.IsEmpty());
+	TestEqual(TEXT("Missing property has stable category"), Result.ErrorCategory, FString(TEXT("property_missing")));
+	TestEqual(TEXT("Strict property failure records one issue"), Result.Issues.Num(), 1);
+	if (Result.Issues.Num() == 1)
+	{
+		TestTrue(TEXT("Explicit property issue is fatal"), Result.Issues[0].bFatal);
+		TestEqual(TEXT("Issue member kind is property"), Result.Issues[0].MemberKind, FString(TEXT("property")));
+	}
 	return true;
 }
 

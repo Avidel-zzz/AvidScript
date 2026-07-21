@@ -233,6 +233,20 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 	return true;
 }
 
+bool FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
+	const FProperty* Property,
+	FAvidScriptProjectedBindingValue& OutValue,
+	FString& OutErrorSource)
+{
+	if (Property == nullptr || !ProjectProperty(Property, OutValue, OutErrorSource))
+	{
+		return false;
+	}
+	OutValue.Name = TEXT("return");
+	OutValue.Direction = TEXT("return");
+	return true;
+}
+
 bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 	const FProperty* Property,
 	FAvidScriptProjectedBindingValue& OutValue,

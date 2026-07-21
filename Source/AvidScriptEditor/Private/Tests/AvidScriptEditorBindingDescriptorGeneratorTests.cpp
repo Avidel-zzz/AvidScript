@@ -168,6 +168,128 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV4PropertyGetTest,
+	"AvidScript.Editor.BindingDescriptor.V4PropertyGet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") }
+	};
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation") },
+		{ TEXT("/Script/Engine.Actor"), TEXT("InitialLifeSpan") }
+	};
+	FString FirstJson;
+	FAvidScriptBindingDescriptorGenerateResult FirstResult;
+	TestTrue(
+		TEXT("Descriptor v4 combines functions and readable properties"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_get"),
+			Functions,
+			Properties,
+			FirstJson,
+			FirstResult));
+	TestEqual(TEXT("Combined descriptor has three bindings"), FirstResult.BindingCount, 3);
+
+	FString SecondJson;
+	FAvidScriptBindingDescriptorGenerateResult SecondResult;
+	TestTrue(
+		TEXT("Repeated descriptor v4 generation succeeds"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_get"),
+			Functions,
+			Properties,
+			SecondJson,
+			SecondResult));
+	TestEqual(TEXT("Descriptor v4 bytes are deterministic"), SecondJson, FirstJson);
+	TestEqual(TEXT("Descriptor v4 package hash is deterministic"), SecondResult.PackageHash, FirstResult.PackageHash);
+
+	TSharedPtr<FJsonObject> Root;
+	TestTrue(TEXT("Descriptor v4 is valid JSON"), ParseDescriptor(FirstJson, Root));
+	if (!Root.IsValid())
+	{
+		return true;
+	}
+	TestEqual(TEXT("Property descriptor uses schema v4"), Root->GetIntegerField(TEXT("schema_version")), 4);
+	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
+	int32 FunctionCount = 0;
+	int32 PropertyCount = 0;
+	for (const TSharedPtr<FJsonValue>& Value : Bindings)
+	{
+		const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr;
+		if (!Binding.IsValid())
+		{
+			continue;
+		}
+		TestTrue(TEXT("v4 binding has first-class member kind"), Binding->HasTypedField<EJson::String>(TEXT("binding_kind")));
+		TestTrue(TEXT("v4 binding has a reflected UE member"), Binding->HasTypedField<EJson::String>(TEXT("ue_member")));
+		TestFalse(TEXT("v4 binding does not publish legacy ue_function"), Binding->HasField(TEXT("ue_function")));
+		if (Binding->GetStringField(TEXT("binding_kind")) == TEXT("function"))
+		{
+			++FunctionCount;
+			TestEqual(TEXT("Function keeps cached ProcessEvent dispatch"), Binding->GetStringField(TEXT("dispatch_mode")), FString(TEXT("cached_process_event")));
+		}
+		else
+		{
+			++PropertyCount;
+			TestEqual(TEXT("Property uses cached getter dispatch"), Binding->GetStringField(TEXT("dispatch_mode")), FString(TEXT("cached_property_get")));
+			TestEqual(TEXT("Property getter has no parameters"), Binding->GetArrayField(TEXT("parameters")).Num(), 0);
+			TestEqual(TEXT("Property getter ABI uses handle and return address"), Binding->GetObjectField(TEXT("host_import"))->GetStringField(TEXT("signature")), FString(TEXT("(iii)i")));
+		}
+	}
+	TestEqual(TEXT("v4 retains one function"), FunctionCount, 1);
+	TestEqual(TEXT("v4 publishes two property getters"), PropertyCount, 2);
+
+	FAvidScriptBindingPackageModel ParsedPackage;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Shared descriptor parser accepts v4 property bindings"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			FirstJson,
+			ParsedPackage,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Parsed package retains schema v4"), ParsedPackage.SchemaVersion, 4);
+	TestEqual(TEXT("Parsed package retains all bindings"), ParsedPackage.Bindings.Num(), 3);
+	TestEqual(
+		TEXT("Parsed property getter count is stable"),
+		ParsedPackage.Bindings.FilterByPredicate([](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_get");
+		}).Num(),
+		2);
+
+	TSharedPtr<FJsonObject> TamperedRoot;
+	TestTrue(TEXT("v4 descriptor can be cloned for tamper checks"), ParseDescriptor(FirstJson, TamperedRoot));
+	if (TamperedRoot.IsValid())
+	{
+		for (const TSharedPtr<FJsonValue>& Value : TamperedRoot->GetArrayField(TEXT("bindings")))
+		{
+			const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (Binding.IsValid() && Binding->GetStringField(TEXT("binding_kind")) == TEXT("property_get"))
+			{
+				Binding->GetObjectField(TEXT("host_import"))->SetStringField(TEXT("signature"), TEXT("(ii)i"));
+				break;
+			}
+		}
+		FString TamperedJson;
+		TestFalse(
+			TEXT("Property getter ABI tampering fails closed"),
+			SerializeDescriptor(TamperedRoot, TamperedJson)
+			&& FAvidScriptBindingDescriptorParser::Parse(
+				TamperedJson,
+				ParsedPackage,
+				ErrorCategory,
+				ErrorSource));
+		TestEqual(TEXT("Tampered property ABI uses stable category"), ErrorCategory, FString(TEXT("descriptor_contract_invalid")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV3ProjectionTest,
 	"AvidScript.Editor.BindingDescriptor.V3Projection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

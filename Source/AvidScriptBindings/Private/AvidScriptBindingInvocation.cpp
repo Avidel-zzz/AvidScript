@@ -362,7 +362,9 @@ FString MakeAvidScriptRuntimeSelectionHash(const FAvidScriptBindingPackageModel&
 	SelectionKeys.Reserve(Package.Bindings.Num());
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
-		SelectionKeys.Add(Binding.OwnerClass + TEXT(".") + Binding.UeFunction);
+		SelectionKeys.Add(Binding.BindingKind == TEXT("function")
+			? Binding.OwnerClass + TEXT(".") + Binding.UeMember
+			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember);
 	}
 	SelectionKeys.Sort([](const FString& Left, const FString& Right)
 	{
