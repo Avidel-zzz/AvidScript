@@ -209,8 +209,12 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 		const FString DefaultMetadataKey = TEXT("CPP_Default_") + Property->GetName();
 		if (Function->HasMetaData(*DefaultMetadataKey))
 		{
-			Value.bHasDefaultValue = true;
-			Value.DefaultValue = Function->GetMetaData(*DefaultMetadataKey);
+			const FString ReflectedDefaultValue = Function->GetMetaData(*DefaultMetadataKey);
+			if (!ReflectedDefaultValue.IsEmpty())
+			{
+				Value.bHasDefaultValue = true;
+				Value.DefaultValue = ReflectedDefaultValue;
+			}
 		}
 		OutProjection.Parameters.Add(MoveTemp(Value));
 	}

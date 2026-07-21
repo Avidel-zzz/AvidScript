@@ -270,7 +270,46 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 117);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 281);
+	TSharedPtr<FJsonObject> DescriptorObject;
+	TestTrue(TEXT("Gameplay descriptor parses"), ParseJsonObject(DescriptorJson, DescriptorObject));
+	if (DescriptorObject.IsValid())
+	{
+		TSharedPtr<FJsonObject> LineOfSightBinding;
+		for (const TSharedPtr<FJsonValue>& BindingValue : DescriptorObject->GetArrayField(TEXT("bindings")))
+		{
+			const TSharedPtr<FJsonObject> BindingObject = BindingValue.IsValid() ? BindingValue->AsObject() : nullptr;
+			if (BindingObject.IsValid()
+				&& BindingObject->GetStringField(TEXT("owner_class")) == TEXT("/Script/Engine.Controller")
+				&& BindingObject->GetStringField(TEXT("ue_member")) == TEXT("LineOfSightTo"))
+			{
+				LineOfSightBinding = BindingObject;
+				break;
+			}
+		}
+
+		TestNotNull(TEXT("Gameplay descriptor retains Controller line-of-sight binding"), LineOfSightBinding.Get());
+		if (LineOfSightBinding.IsValid())
+		{
+			TSharedPtr<FJsonObject> ViewPointParameter;
+			for (const TSharedPtr<FJsonValue>& ParameterValue : LineOfSightBinding->GetArrayField(TEXT("parameters")))
+			{
+				const TSharedPtr<FJsonObject> ParameterObject = ParameterValue.IsValid() ? ParameterValue->AsObject() : nullptr;
+				if (ParameterObject.IsValid() && ParameterObject->GetStringField(TEXT("name")) == TEXT("ViewPoint"))
+				{
+					ViewPointParameter = ParameterObject;
+					break;
+				}
+			}
+
+			TestNotNull(TEXT("Line-of-sight binding retains ViewPoint parameter"), ViewPointParameter.Get());
+			if (ViewPointParameter.IsValid())
+			{
+				TestFalse(TEXT("Empty reflected default is not published"), ViewPointParameter->GetBoolField(TEXT("has_default")));
+				TestFalse(TEXT("Empty reflected default field is not published"), ViewPointParameter->HasField(TEXT("default_value")));
+			}
+		}
+	}
 	TestEqual(
 		TEXT("Gameplay profile uses a stable package name"),
 		EmitResult.PackageName,
@@ -280,6 +319,23 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	TestTrue(TEXT("Gameplay package carries the state contract facade"), Source.Contains(TEXT("public enum AvidStateMode")));
 	TestTrue(TEXT("Gameplay package carries the reflected Actor property"), Source.Contains(TEXT("public float CustomTimeDilation")));
 	TestTrue(TEXT("Gameplay package carries the reflected component handle property"), Source.Contains(TEXT("public USceneComponent RootComponent")));
+	TestTrue(TEXT("Gameplay package declares ActorComponent facade"), Source.Contains(TEXT("public readonly struct UActorComponent")));
+	TestTrue(TEXT("Gameplay package declares PrimitiveComponent facade"), Source.Contains(TEXT("public readonly struct UPrimitiveComponent")));
+	TestTrue(TEXT("Gameplay package declares Pawn facade"), Source.Contains(TEXT("public readonly struct APawn")));
+	TestTrue(TEXT("Gameplay package declares Controller facade"), Source.Contains(TEXT("public readonly struct AController")));
+	TestTrue(TEXT("Gameplay package retains Controller line-of-sight call"), Source.Contains(TEXT("LineOfSightTo(")));
+	TestFalse(TEXT("Empty reflected default is not emitted as a C# optional argument"), Source.Contains(TEXT("ViewPoint =")));
+	const int32 PawnBlockStart = Source.Find(TEXT("public readonly struct APawn"));
+	const int32 PawnBlockEnd = PawnBlockStart == INDEX_NONE
+		? INDEX_NONE
+		: Source.Find(TEXT("\n}\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, PawnBlockStart);
+	TestTrue(TEXT("Pawn facade block is present"), PawnBlockStart != INDEX_NONE && PawnBlockEnd > PawnBlockStart);
+	if (PawnBlockStart != INDEX_NONE && PawnBlockEnd > PawnBlockStart)
+	{
+		const FString PawnBlock = Source.Mid(PawnBlockStart, PawnBlockEnd - PawnBlockStart);
+		TestTrue(TEXT("Pawn facade contains Pawn-declared movement input"), PawnBlock.Contains(TEXT("AddMovementInput")));
+		TestFalse(TEXT("Pawn facade does not copy Actor location query"), PawnBlock.Contains(TEXT("K2_GetActorLocation")));
+	}
 	TestTrue(TEXT("Gameplay object proxies expose a structural null check"), Source.Contains(TEXT("public bool IsNull => Slot == 0 && Generation == 0;")));
 	TestTrue(TEXT("Gameplay object proxies expose a structural handle check"), Source.Contains(TEXT("public bool HasHandle => Slot > 0 && Generation > 0;")));
 
@@ -305,7 +361,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 		TestEqual(
 			TEXT("Gameplay manifest declares all reflected imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			117);
+			281);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();

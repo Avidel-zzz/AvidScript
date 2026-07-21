@@ -34,7 +34,9 @@ TSharedPtr<FJsonObject> FindBinding(
 		const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr;
 		if (Binding.IsValid()
 			&& Binding->GetStringField(TEXT("owner_class")) == OwnerClass
-			&& Binding->GetStringField(TEXT("ue_function")) == FunctionName)
+			&& (Binding->HasField(TEXT("ue_member"))
+				? Binding->GetStringField(TEXT("ue_member"))
+				: Binding->GetStringField(TEXT("ue_function"))) == FunctionName)
 		{
 			return Binding;
 		}
@@ -449,6 +451,96 @@ bool FAvidScriptEditorBindingDescriptorV3DefaultsTest::RunTest(const FString& Pa
 
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorGameplayProfileOwnerTest,
+	"AvidScript.Editor.BindingDescriptor.GameplayProfileOwner",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorGameplayProfileOwnerTest::RunTest(const FString& Parameters)
+{
+	FString DefaultJson;
+	FAvidScriptBindingDescriptorGenerateResult DefaultResult;
+	TestTrue(
+		TEXT("Default descriptor generates for Actor stable-id comparison"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(DefaultJson, DefaultResult));
+
+	const FAvidScriptBindingSelectionProfile Profile =
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
+	FString GameplayJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GameplayResult;
+	TestTrue(
+		TEXT("Gameplay profile descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			GameplayJson,
+			SelectionResult,
+			GameplayResult));
+
+	TSharedPtr<FJsonObject> DefaultRoot;
+	TSharedPtr<FJsonObject> GameplayRoot;
+	if (TestTrue(TEXT("Default descriptor parses"), ParseDescriptor(DefaultJson, DefaultRoot))
+		&& TestTrue(TEXT("Gameplay descriptor parses"), ParseDescriptor(GameplayJson, GameplayRoot))
+		&& DefaultRoot.IsValid()
+		&& GameplayRoot.IsValid())
+	{
+		const TSharedPtr<FJsonObject> DefaultActorLocation = FindBinding(
+			DefaultRoot->GetArrayField(TEXT("bindings")),
+			TEXT("/Script/Engine.Actor"),
+			TEXT("K2_GetActorLocation"));
+		const TSharedPtr<FJsonObject> GameplayActorLocation = FindBinding(
+			GameplayRoot->GetArrayField(TEXT("bindings")),
+			TEXT("/Script/Engine.Actor"),
+			TEXT("K2_GetActorLocation"));
+		TestNotNull(TEXT("Gameplay descriptor retains Actor location binding"), GameplayActorLocation.Get());
+		if (DefaultActorLocation.IsValid() && GameplayActorLocation.IsValid())
+		{
+			TestEqual(
+				TEXT("Actor location stable id is unchanged by gameplay profile expansion"),
+				GameplayActorLocation->GetStringField(TEXT("stable_id")),
+				DefaultActorLocation->GetStringField(TEXT("stable_id")));
+		}
+
+		const TSharedPtr<FJsonObject> PawnMovementInput = FindBinding(
+			GameplayRoot->GetArrayField(TEXT("bindings")),
+			TEXT("/Script/Engine.Pawn"),
+			TEXT("AddMovementInput"));
+		TestNotNull(TEXT("Gameplay descriptor publishes Pawn movement input"), PawnMovementInput.Get());
+		TestTrue(
+			TEXT("Pawn movement input receiver type is emitted"),
+			GameplayRoot->GetArrayField(TEXT("types")).ContainsByPredicate([](const TSharedPtr<FJsonValue>& Value)
+			{
+				return Value.IsValid()
+					&& Value->AsObject()->GetStringField(TEXT("canonical_type")) == TEXT("object:/Script/Engine.Pawn");
+			}));
+	}
+
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult Result;
+	TestFalse(
+		TEXT("Inherited function cannot be published under a Pawn facade"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.engine.owner_mismatch"),
+			{ { TEXT("/Script/Engine.Pawn"), TEXT("K2_GetActorLocation") } },
+			Json,
+			Result));
+	TestEqual(TEXT("Inherited function reports owner mismatch"), Result.ErrorCategory, FString(TEXT("function_owner_mismatch")));
+	TestTrue(TEXT("Inherited function produces no partial descriptor"), Json.IsEmpty());
+
+	TestFalse(
+		TEXT("Inherited property cannot be published under a Pawn facade"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_owner_mismatch"),
+			{},
+			{ { TEXT("/Script/Engine.Pawn"), TEXT("CustomTimeDilation") } },
+			Json,
+			Result));
+	TestEqual(TEXT("Inherited property reports owner mismatch"), Result.ErrorCategory, FString(TEXT("property_owner_mismatch")));
+	TestTrue(TEXT("Inherited property produces no partial descriptor"), Json.IsEmpty());
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV3FailureTest,
 	"AvidScript.Editor.BindingDescriptor.V3Failure",

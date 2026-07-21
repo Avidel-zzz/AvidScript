@@ -169,7 +169,11 @@ FAvidScriptBindingSelectionProfile FAvidScriptEditorBindingDescriptorGenerator::
 	ActorRule.IncludeProperties.Add(TEXT("CustomTimeDilation"));
 	ActorRule.IncludeProperties.Add(TEXT("RootComponent"));
 	Profile.Classes.Add(MoveTemp(ActorRule));
+	Profile.Classes.Add({ TEXT("/Script/Engine.ActorComponent") });
 	Profile.Classes.Add({ TEXT("/Script/Engine.SceneComponent") });
+	Profile.Classes.Add({ TEXT("/Script/Engine.PrimitiveComponent") });
+	Profile.Classes.Add({ TEXT("/Script/Engine.Pawn") });
+	Profile.Classes.Add({ TEXT("/Script/Engine.Controller") });
 	return Profile;
 }
 
@@ -238,6 +242,15 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		if (Function == nullptr)
 		{
 			SetFailure(OutResult, TEXT("function_missing"), SelectionKey, TEXT("Update the selection to a reflected UFunction available in the active engine version."));
+			return false;
+		}
+		if (Function->GetOwnerClass() != OwnerClass)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("function_owner_mismatch"),
+				SelectionKey,
+				TEXT("Select the reflected declaring class instead of publishing an inherited function under a derived facade."));
 			return false;
 		}
 
@@ -313,6 +326,15 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		if (Property == nullptr)
 		{
 			SetFailure(OutResult, TEXT("property_missing"), SelectionKey, TEXT("Select a reflected property available on the active owner class."));
+			return false;
+		}
+		if (Property->GetOwnerStruct() != OwnerClass)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("property_owner_mismatch"),
+				SelectionKey,
+				TEXT("Select the reflected declaring class instead of publishing an inherited property under a derived facade."));
 			return false;
 		}
 		FString PropertyPolicyCategory;

@@ -34,16 +34,79 @@ bool FAvidScriptEditorBindingSelectionGameplayProfileTest::RunTest(const FString
 {
 	const FAvidScriptBindingSelectionProfile Profile =
 		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
+	TestEqual(TEXT("Gameplay profile declares exactly six facade classes"), Profile.Classes.Num(), 6);
+	const TArray<FString> ExpectedClassPaths = {
+		TEXT("/Script/Engine.Actor"),
+		TEXT("/Script/Engine.ActorComponent"),
+		TEXT("/Script/Engine.SceneComponent"),
+		TEXT("/Script/Engine.PrimitiveComponent"),
+		TEXT("/Script/Engine.Pawn"),
+		TEXT("/Script/Engine.Controller")
+	};
+	for (const FString& ExpectedClassPath : ExpectedClassPaths)
+	{
+		TestTrue(
+			FString::Printf(TEXT("Gameplay profile declares %s"), *ExpectedClassPath),
+			Profile.Classes.ContainsByPredicate([&ExpectedClassPath](const FAvidScriptReflectedClassSelection& Rule)
+			{
+				return Rule.OwnerClassPath == ExpectedClassPath;
+			}));
+	}
 	TArray<FAvidScriptReflectedFunctionSelection> FirstSelections;
 	FAvidScriptBindingSelectionResolveResult FirstResult;
 	TestTrue(
 		TEXT("Engine gameplay profile resolves"),
 		FAvidScriptEditorBindingSelectionResolver::Resolve(Profile, FirstSelections, FirstResult));
 	AddInfo(FString::Printf(
-		TEXT("P43.1 gameplay profile: candidates=%d accepted=%d rejected=%d"),
+		TEXT("P48.1 gameplay profile: candidates=%d accepted=%d rejected=%d"),
 		FirstResult.CandidateFunctionCount,
 		FirstResult.AcceptedFunctionCount,
 		FirstResult.RejectedFunctionCount));
+	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
+	{
+		FAvidScriptBindingSelectionProfile ClassProfile;
+		ClassProfile.PackageName = Profile.PackageName;
+		ClassProfile.Classes.Add(Rule);
+		TArray<FAvidScriptReflectedFunctionSelection> ClassSelections;
+		FAvidScriptBindingSelectionResolveResult ClassResult;
+		if (TestTrue(
+			FString::Printf(TEXT("Gameplay profile class %s resolves"), *Rule.OwnerClassPath),
+			FAvidScriptEditorBindingSelectionResolver::Resolve(ClassProfile, ClassSelections, ClassResult)))
+		{
+			AddInfo(FString::Printf(
+				TEXT("P48.1 class=%s candidates=%d accepted=%d rejected=%d"),
+				*Rule.OwnerClassPath,
+				ClassResult.CandidateFunctionCount,
+				ClassResult.AcceptedFunctionCount,
+				ClassResult.RejectedFunctionCount));
+		}
+	}
+	TMap<FString, int32> RejectedTypeCounts;
+	for (const FAvidScriptBindingSelectionIssue& Issue : FirstResult.Issues)
+	{
+		if (Issue.Category == TEXT("unsupported_property") && !Issue.Source.IsEmpty())
+		{
+			++RejectedTypeCounts.FindOrAdd(Issue.Source);
+		}
+	}
+	TArray<TPair<FString, int32>> RejectedTypes;
+	for (const TPair<FString, int32>& RejectedType : RejectedTypeCounts)
+	{
+		RejectedTypes.Add(RejectedType);
+	}
+	RejectedTypes.Sort([](const TPair<FString, int32>& Left, const TPair<FString, int32>& Right)
+	{
+		return Left.Value == Right.Value
+			? Left.Key.Compare(Right.Key, ESearchCase::CaseSensitive) < 0
+			: Left.Value > Right.Value;
+	});
+	for (int32 Index = 0; Index < FMath::Min(RejectedTypes.Num(), 5); ++Index)
+	{
+		AddInfo(FString::Printf(
+			TEXT("P48.1 rejected_type=%s count=%d"),
+			*RejectedTypes[Index].Key,
+			RejectedTypes[Index].Value));
+	}
 	TestTrue(TEXT("Gameplay profile expands beyond the eight-function baseline"), FirstSelections.Num() > 8);
 	TestEqual(TEXT("Accepted count matches selection array"), FirstResult.AcceptedFunctionCount, FirstSelections.Num());
 	TestTrue(TEXT("Gameplay profile records all reflected candidates"), FirstResult.CandidateFunctionCount >= FirstSelections.Num());
@@ -60,6 +123,20 @@ bool FAvidScriptEditorBindingSelectionGameplayProfileTest::RunTest(const FString
 		{
 			return Selection.OwnerClassPath == TEXT("/Script/Engine.Actor")
 				&& Selection.FunctionName == TEXT("SetActorScale3D");
+		}));
+	TestTrue(
+		TEXT("Pawn facade retains Pawn-declared movement input"),
+		FirstSelections.ContainsByPredicate([](const FAvidScriptReflectedFunctionSelection& Selection)
+		{
+			return Selection.OwnerClassPath == TEXT("/Script/Engine.Pawn")
+				&& Selection.FunctionName == TEXT("AddMovementInput");
+		}));
+	TestFalse(
+		TEXT("Pawn facade does not copy Actor-declared location query"),
+		FirstSelections.ContainsByPredicate([](const FAvidScriptReflectedFunctionSelection& Selection)
+		{
+			return Selection.OwnerClassPath == TEXT("/Script/Engine.Pawn")
+				&& Selection.FunctionName == TEXT("K2_GetActorLocation");
 		}));
 
 	TArray<FAvidScriptReflectedFunctionSelection> SecondSelections;
@@ -280,7 +357,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 115 functions"), FirstSelectionResult.AcceptedFunctionCount, 115);
+	TestEqual(TEXT("Gameplay profile accepts 279 functions"), FirstSelectionResult.AcceptedFunctionCount, 279);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),
