@@ -35,6 +35,72 @@ uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 	return Bits;
 }
 
+class FAvidScriptBindingRuntimeTestGuestMemory final : public IAvidScriptVmGuestMemory
+{
+public:
+	explicit FAvidScriptBindingRuntimeTestGuestMemory(const int32 Size)
+	{
+		Bytes.SetNumZeroed(Size);
+	}
+
+	bool ReadBytes(
+		const uint32 GuestAddress,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) override
+	{
+		if (!IsRangeValid(GuestAddress, OutBytes.Num()))
+		{
+			OutError = TEXT("test guest read is out of bounds");
+			return false;
+		}
+		FMemory::Memcpy(OutBytes.GetData(), Bytes.GetData() + GuestAddress, OutBytes.Num());
+		return true;
+	}
+
+	bool WriteBytes(
+		const uint32 GuestAddress,
+		TConstArrayView<uint8> InBytes,
+		FString& OutError) override
+	{
+		if (!IsRangeValid(GuestAddress, InBytes.Num()))
+		{
+			OutError = TEXT("test guest write is out of bounds");
+			return false;
+		}
+		FMemory::Memcpy(Bytes.GetData() + GuestAddress, InBytes.GetData(), InBytes.Num());
+		return true;
+	}
+
+	template <typename ValueType>
+	ValueType ReadValue(const uint32 GuestAddress) const
+	{
+		ValueType Value{};
+		if (IsRangeValid(GuestAddress, sizeof(ValueType)))
+		{
+			FMemory::Memcpy(&Value, Bytes.GetData() + GuestAddress, sizeof(ValueType));
+		}
+		return Value;
+	}
+
+	template <typename ValueType>
+	void WriteValue(const uint32 GuestAddress, const ValueType& Value)
+	{
+		if (IsRangeValid(GuestAddress, sizeof(ValueType)))
+		{
+			FMemory::Memcpy(Bytes.GetData() + GuestAddress, &Value, sizeof(ValueType));
+		}
+	}
+
+private:
+	bool IsRangeValid(const uint32 GuestAddress, const uint64 Size) const
+	{
+		return GuestAddress <= static_cast<uint64>(Bytes.Num())
+			&& Size <= static_cast<uint64>(Bytes.Num()) - GuestAddress;
+	}
+
+	TArray<uint8> Bytes;
+};
+
 int32 FindAvidScriptBindingRuntimeBytes(
 	const TConstArrayView<uint8> Bytes,
 	const TConstArrayView<uint8> Sequence)
@@ -840,6 +906,104 @@ bool FAvidScriptEditorBindingRuntimeScalarMetadataFailureTest::RunTest(const FSt
 		LoadResult.ErrorCategory,
 		FString(TEXT("binding_return_contract_mismatch")));
 	TestFalse(TEXT("Failed scalar package is not published"), Package.IsValid());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest,
+	"AvidScript.Editor.BindingRuntime.ReflectedPropertyGet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("Readable Actor property generates a schema v4 package"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_runtime"),
+			{},
+			Properties,
+			DescriptorJson,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("Runtime loads the reflected property package"),
+		FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+	TestEqual(TEXT("Property package exposes one cached import"), Package->GetVmPackage().Imports.Num(), 1);
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Property runtime integration world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Property runtime integration actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->CustomTimeDilation = 1.75f;
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("Property owner registers in the object registry"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	static constexpr uint32 ReturnAddress = 16;
+	FAvidScriptBindingRuntimeTestGuestMemory GuestMemory(64);
+	const uint64 Arguments[] = { ActorHandle.Slot, ActorHandle.Generation, ReturnAddress };
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Package->GetVmPackage().Imports[0].Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	Call.GuestMemory = &GuestMemory;
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	TestTrue(
+		TEXT("Cached FProperty getter writes CustomTimeDilation into guest memory"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestTrue(TEXT("Property dispatch reports success"), DispatchResult.bSucceeded);
+	TestEqual(TEXT("Property dispatch returns the host success code"), DispatchResult.ReturnValue, 1);
+	TestTrue(
+		TEXT("Guest memory receives the reflected float value"),
+		FMath::IsNearlyEqual(GuestMemory.ReadValue<float>(ReturnAddress), 1.75f));
+
+	GuestMemory.WriteValue<float>(ReturnAddress, -10.0f);
+	const uint64 StaleArguments[] = { ActorHandle.Slot, ActorHandle.Generation + 1, ReturnAddress };
+	Call.Arguments = MakeArrayView(StaleArguments);
+	TestFalse(
+		TEXT("A stale object generation cannot read a reflected property"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestEqual(
+		TEXT("Rejected handle leaves guest memory untouched"),
+		GuestMemory.ReadValue<float>(ReturnAddress),
+		-10.0f);
 	return true;
 }
 

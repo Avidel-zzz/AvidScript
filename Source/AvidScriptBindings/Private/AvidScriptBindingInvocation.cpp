@@ -57,6 +57,8 @@ struct FAvidScriptRuntimeBindingInvocationPlan
 {
 	UClass* OwnerClass = nullptr;
 	UFunction* Function = nullptr;
+	FProperty* ReflectedProperty = nullptr;
+	FString DebugPath;
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
@@ -107,6 +109,13 @@ bool IsAvidScriptRuntimeFunctionAllowed(const UFunction* Function)
 			| FUNC_NetResponse)
 		&& !Function->HasMetaData(TEXT("Latent"))
 		&& !Function->HasMetaData(TEXT("CustomThunk"));
+}
+
+bool IsAvidScriptRuntimePropertyReadable(const FProperty* Property)
+{
+	return Property != nullptr
+		&& Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
+		&& !Property->HasAnyPropertyFlags(CPF_Parm | CPF_EditorOnly | CPF_Deprecated);
 }
 
 FString GetAvidScriptRuntimePropertyDirection(const FProperty* Property)
@@ -354,6 +363,16 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 	}
 	Identity += TEXT(")");
 	return Identity;
+}
+
+FString MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
+	const UClass* OwnerClass,
+	const FProperty* Property,
+	const FAvidScriptBindingFunctionModel& Binding)
+{
+	return OwnerClass->GetPathName()
+		+ TEXT("::property_get:") + Property->GetName()
+		+ TEXT("(") + Binding.ReturnValue.CanonicalType + TEXT(")");
 }
 
 FString MakeAvidScriptRuntimeSelectionHash(const FAvidScriptBindingPackageModel& Package)
@@ -871,6 +890,66 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 			Package->Impl->LoadedClasses.Emplace(OwnerClass);
 		}
+		if (Binding.BindingKind == TEXT("property_get"))
+		{
+			FProperty* Property = FindFProperty<FProperty>(OwnerClass, FName(*Binding.UeMember));
+			if (!IsAvidScriptRuntimePropertyReadable(Property))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_missing"),
+					Binding.OwnerClass + TEXT(".") + Binding.UeMember,
+					TEXT("The reflected property is missing or no longer satisfies runtime read policy."));
+				return false;
+			}
+
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.OwnerClass = OwnerClass;
+			Plan.ReflectedProperty = Property;
+			Plan.DebugPath = Property->GetPathName();
+			Plan.bRequiresGuestMemory = true;
+			Plan.ExpectedArgumentCount = 3;
+			FString ReturnDetails;
+			if (!BuildAvidScriptRuntimeValuePlan(
+				Property,
+				Binding.ReturnValue,
+				2,
+				Plan.ReturnValue,
+				ReturnDetails))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_contract_mismatch"),
+					Binding.CanonicalIdentity,
+					ReturnDetails);
+				return false;
+			}
+			const FString ExpectedIdentity = MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
+				OwnerClass,
+				Property,
+				Binding);
+			if (Binding.CanonicalIdentity != ExpectedIdentity
+				|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity)
+				|| Binding.HostImport.Signature != TEXT("(iii)i"))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_identity_mismatch"),
+					Binding.CanonicalIdentity,
+					TEXT("The property descriptor no longer matches the active reflection snapshot."));
+				return false;
+			}
+
+			Package->Impl->VmPackage.Imports.Add({
+				Binding.StableId,
+				static_cast<uint32>(Binding.Ordinal),
+				Binding.HostImport.Module,
+				Binding.HostImport.Name,
+				Binding.HostImport.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+			continue;
+		}
 
 		UFunction* Function = OwnerClass->FindFunctionByName(FName(*Binding.UeFunction));
 		if (!IsAvidScriptRuntimeFunctionAllowed(Function))
@@ -930,6 +1009,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		FAvidScriptRuntimeBindingInvocationPlan Plan;
 		Plan.OwnerClass = OwnerClass;
 		Plan.Function = Function;
+		Plan.DebugPath = Function->GetPathName();
 		Plan.bStatic = Binding.bStatic;
 		Plan.ReloadEffect = Binding.ReloadEffect;
 		Plan.bRequiresWriteAccess = Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
@@ -1079,7 +1159,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_frame_mismatch"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			TEXT("The raw argument count or guest memory contract does not match the cached invocation plan."));
 		return false;
 	}
@@ -1088,7 +1168,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_scratch_too_small"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			TEXT("The runtime did not preallocate the package's required invocation scratch size."));
 		return false;
 	}
@@ -1111,7 +1191,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_target_invalid"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			Details);
 		return false;
 	}
@@ -1120,7 +1200,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_target_invalid"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			TEXT("The cached invocation target is null."));
 		return false;
 	}
@@ -1129,9 +1209,30 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_write_denied"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			TEXT("The reflected binding requires an explicitly writable host context."));
 		return false;
+	}
+	if (Plan.ReflectedProperty != nullptr)
+	{
+		if (!WriteAvidScriptRuntimeValueToGuest(
+			Plan.ReturnValue,
+			static_cast<uint32>(Call.Arguments[Plan.ReturnValue.ArgumentOffset]),
+			*Call.GuestMemory,
+			Context,
+			Target,
+			Details))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_property_read_failed"),
+				Plan.DebugPath,
+				Details);
+			return false;
+		}
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		return true;
 	}
 
 	const UPTRINT ScratchAddress = reinterpret_cast<UPTRINT>(InvocationScratch.GetData());
@@ -1142,7 +1243,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_scratch_alignment_failed"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			TEXT("The runtime invocation scratch could not satisfy the cached frame alignment."));
 		return false;
 	}
@@ -1170,7 +1271,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 				SetAvidScriptBindingDispatchFailure(
 					OutResult,
 					TEXT("binding_guest_read_failed"),
-					Plan.Function->GetPathName() + TEXT(":") + Parameter.Name,
+					Plan.DebugPath + TEXT(":") + Parameter.Name,
 					Details);
 				return false;
 			}
@@ -1187,7 +1288,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
 				TEXT("binding_argument_invalid"),
-				Plan.Function->GetPathName() + TEXT(":") + Parameter.Name,
+				Plan.DebugPath + TEXT(":") + Parameter.Name,
 				Details);
 			return false;
 		}
@@ -1200,7 +1301,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
 				TEXT("binding_reload_effect_unsupported"),
-				Plan.Function->GetPathName(),
+				Plan.DebugPath,
 				TEXT("The reflected write has no reversible candidate reload adapter."));
 			return false;
 		}
@@ -1209,7 +1310,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
 				TEXT("binding_host_effect_registry_missing"),
-				Plan.Function->GetPathName(),
+				Plan.DebugPath,
 				TEXT("The candidate host effect journal requires an object registry."));
 			return false;
 		}
@@ -1234,7 +1335,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 					? FString(TEXT("binding_host_effect_prepare_failed"))
 					: PrepareResult.ErrorCategory,
 				PrepareResult.ErrorSource.IsEmpty()
-					? Plan.Function->GetPathName()
+					? Plan.DebugPath
 					: PrepareResult.ErrorSource,
 				PrepareResult.ErrorDetails.IsEmpty()
 					? FString(TEXT("The candidate host effect could not be prepared."))
@@ -1260,7 +1361,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
 				TEXT("binding_guest_write_failed"),
-				Plan.Function->GetPathName() + TEXT(":") + Parameter.Name,
+				Plan.DebugPath + TEXT(":") + Parameter.Name,
 				Details);
 			return false;
 		}
@@ -1278,7 +1379,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		SetAvidScriptBindingDispatchFailure(
 			OutResult,
 			TEXT("binding_return_write_failed"),
-			Plan.Function->GetPathName(),
+			Plan.DebugPath,
 			Details);
 		return false;
 	}

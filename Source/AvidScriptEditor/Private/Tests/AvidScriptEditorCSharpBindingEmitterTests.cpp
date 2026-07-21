@@ -165,6 +165,93 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterPropertyGetTest,
+	"AvidScript.Editor.CSharpBindingEmitter.PropertyGet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterPropertyGetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+		TEXT("Readable property descriptor generates for C# emission"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_facade"),
+			{},
+			Properties,
+			DescriptorJson,
+			DescriptorResult)))
+	{
+		return false;
+	}
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+		TEXT("Schema v4 property descriptor emits through the canonical C# pipeline"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			Source,
+			Manifest,
+			EmitResult)))
+	{
+		AddError(EmitResult.ErrorCategory + TEXT(": ") + EmitResult.ErrorMessage);
+		return false;
+	}
+
+	TestEqual(TEXT("Property facade preserves the package hash"), EmitResult.PackageHash, DescriptorResult.PackageHash);
+	TestEqual(TEXT("Property facade exposes exactly one binding"), EmitResult.BindingCount, 1);
+	TestTrue(
+		TEXT("Generated Actor facade exposes a C# float property"),
+		Source.Contains(TEXT("public float CustomTimeDilation")));
+	TestTrue(
+		TEXT("Generated reflected property is read-only"),
+		Source.Contains(TEXT("public float CustomTimeDilation\n    {\n        get")));
+	TestFalse(
+		TEXT("Generated reflected property is not disguised as a method"),
+		Source.Contains(TEXT("CustomTimeDilation()")));
+
+	TSharedPtr<FJsonObject> DescriptorObject;
+	TSharedPtr<FJsonObject> ManifestObject;
+	if (TestTrue(TEXT("Property descriptor remains parseable"), ParseJsonObject(DescriptorJson, DescriptorObject))
+		&& TestTrue(TEXT("Property package manifest is parseable"), ParseJsonObject(Manifest, ManifestObject))
+		&& DescriptorObject.IsValid()
+		&& ManifestObject.IsValid())
+	{
+		const TSharedPtr<FJsonObject> DescriptorBinding = DescriptorObject->GetArrayField(TEXT("bindings"))[0]->AsObject();
+		const TSharedPtr<FJsonObject> DescriptorImport = DescriptorBinding->GetObjectField(TEXT("host_import"));
+		const TArray<TSharedPtr<FJsonValue>>& ManifestImports = ManifestObject->GetArrayField(TEXT("required_imports"));
+		TestEqual(TEXT("Property manifest declares one required import"), ManifestImports.Num(), 1);
+		if (ManifestImports.Num() == 1)
+		{
+			const TSharedPtr<FJsonObject> ManifestImport = ManifestImports[0]->AsObject();
+			TestTrue(
+				TEXT("Property getter retains the descriptor entry point"),
+				Source.Contains(FString::Printf(
+					TEXT("EntryPoint = \"%s\""),
+					*DescriptorImport->GetStringField(TEXT("name")))));
+			TestEqual(
+				TEXT("Property manifest preserves the stable binding id"),
+				ManifestImport->GetStringField(TEXT("stable_id")),
+				DescriptorBinding->GetStringField(TEXT("stable_id")));
+			TestEqual(
+				TEXT("Property manifest preserves the host import name"),
+				ManifestImport->GetStringField(TEXT("name")),
+				DescriptorImport->GetStringField(TEXT("name")));
+			TestEqual(
+				TEXT("Property manifest preserves the host ABI signature"),
+				ManifestImport->GetStringField(TEXT("signature")),
+				DescriptorImport->GetStringField(TEXT("signature")));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest,
 	"AvidScript.Editor.CSharpBindingEmitter.GameplayProfile",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -143,8 +143,10 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	}
 
 	TSet<FString> RequestedStableIds;
-	TArray<FAvidScriptReflectedFunctionSelection> Selections;
-	Selections.Reserve(Provenance.UsedImports.Num());
+	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
+	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
+	FunctionSelections.Reserve(Provenance.UsedImports.Num());
+	PropertySelections.Reserve(Provenance.UsedImports.Num());
 	for (const FAvidScriptFrontendBindingImport& Import : Provenance.UsedImports)
 	{
 		if (!IsAvidScriptCSharpBindingSliceStableId(Import.StableId))
@@ -189,14 +191,22 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 				TEXT("rerun bootstrap with untampered import provenance"));
 			return false;
 		}
-		Selections.Add({ Binding.OwnerClass, FName(*Binding.UeFunction) });
+		if (Binding.BindingKind == TEXT("property_get"))
+		{
+			PropertySelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+		}
+		else
+		{
+			FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+		}
 	}
 
 	FString SliceDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
-	if (!FAvidScriptEditorBindingDescriptorGenerator::Generate(
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
 			AuthorizationModel.PackageName,
-			Selections,
+			FunctionSelections,
+			PropertySelections,
 			SliceDescriptorJson,
 			GenerateResult))
 	{

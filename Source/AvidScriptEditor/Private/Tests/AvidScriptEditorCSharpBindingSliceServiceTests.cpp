@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptFrontendReport.h"
 
@@ -176,6 +177,105 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	if (LoadedSlice.IsValid())
 	{
 		TestEqual(TEXT("Runtime slice creates two VM imports"), LoadedSlice->GetVmPackage().Imports.Num(), 2);
+	}
+
+	const TArray<FAvidScriptReflectedPropertySelection> PropertySelections = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation") }
+	};
+	FString PropertyAuthorizationJson;
+	FAvidScriptBindingDescriptorGenerateResult PropertyDescriptorResult;
+	if (!TestTrue(
+		TEXT("Property authorization descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.property_slice"),
+			{},
+			PropertySelections,
+			PropertyAuthorizationJson,
+			PropertyDescriptorResult)))
+	{
+		return false;
+	}
+
+	FAvidScriptCSharpBindingEmitResult PropertyAuthorizationPackage;
+	if (!TestTrue(
+		TEXT("Property authorization package publishes"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor(
+			PropertyAuthorizationJson,
+			OutputRoot,
+			PropertyAuthorizationPackage)))
+	{
+		AddError(PropertyAuthorizationPackage.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel PropertyAuthorizationModel;
+	if (!TestTrue(
+		TEXT("Property authorization descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			PropertyAuthorizationJson,
+			PropertyAuthorizationModel,
+			ParseCategory,
+			ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Property authorization uses schema v4"), PropertyAuthorizationModel.SchemaVersion, 4);
+	TestEqual(TEXT("Property authorization contains one binding"), PropertyAuthorizationModel.Bindings.Num(), 1);
+	if (PropertyAuthorizationModel.Bindings.Num() != 1)
+	{
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel& PropertyBinding = PropertyAuthorizationModel.Bindings[0];
+	TestEqual(TEXT("Authorization binding remains a property getter"), PropertyBinding.BindingKind, FString(TEXT("property_get")));
+
+	const FAvidScriptFrontendBindingPackage PropertyProvenance = MakeAvidScriptBindingSliceTestProvenance(
+		PropertyAuthorizationPackage,
+		{ MakeAvidScriptBindingSliceTestImport(PropertyBinding) });
+	FAvidScriptCSharpBindingEmitResult PropertySlicePackage;
+	FAvidScriptEditorCSharpBindingSliceResult PropertySliceResult;
+	if (!TestTrue(
+		TEXT("Used property import publishes a minimal runtime slice"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			PropertyAuthorizationPackage.DescriptorPath,
+			PropertyProvenance,
+			OutputRoot,
+			PropertySlicePackage,
+			PropertySliceResult)))
+	{
+		AddError(PropertySliceResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Property runtime slice contains one binding"), PropertySlicePackage.BindingCount, 1);
+
+	FString PropertySliceJson;
+	FAvidScriptBindingPackageModel PropertySliceModel;
+	if (!TestTrue(
+		TEXT("Property runtime slice descriptor reads"),
+		FFileHelper::LoadFileToString(PropertySliceJson, *PropertySlicePackage.DescriptorPath))
+		|| !TestTrue(
+			TEXT("Property runtime slice descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				PropertySliceJson,
+				PropertySliceModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Property runtime slice preserves schema v4"), PropertySliceModel.SchemaVersion, 4);
+	TestEqual(TEXT("Property runtime slice preserves one binding"), PropertySliceModel.Bindings.Num(), 1);
+	if (PropertySliceModel.Bindings.Num() == 1)
+	{
+		TestEqual(TEXT("Property runtime slice preserves member kind"), PropertySliceModel.Bindings[0].BindingKind, FString(TEXT("property_get")));
+		TestEqual(TEXT("Property runtime slice preserves stable id"), PropertySliceModel.Bindings[0].StableId, PropertyBinding.StableId);
+	}
+	TSharedPtr<const FAvidScriptBindingPackage> LoadedPropertySlice;
+	TestTrue(
+		TEXT("Runtime loads the minimal property slice"),
+		FAvidScriptBindingPackage::LoadDescriptor(PropertySliceJson, LoadedPropertySlice, LoadResult));
+	if (LoadedPropertySlice.IsValid())
+	{
+		TestEqual(TEXT("Property runtime slice creates one VM import"), LoadedPropertySlice->GetVmPackage().Imports.Num(), 1);
 	}
 
 	FAvidScriptFrontendBindingPackage DuplicateProvenance =

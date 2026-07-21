@@ -397,6 +397,7 @@ $ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
+$BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
 foreach ($RequiredSelectionContract in @(
     'FAvidScriptBindingSelectionProfile',
     'FAvidScriptBindingSelectionIssue',
@@ -452,6 +453,7 @@ foreach ($LegacyBindingPath in @(
 }
 
 $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
+$CSharpBindingRendererSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
@@ -501,6 +503,31 @@ foreach ($RequiredPropertyDescriptorGeneratorContract in @(
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredPropertyDescriptorGeneratorContract)) {
         Add-Violation "binding descriptor v4 generator is missing $RequiredPropertyDescriptorGeneratorContract"
     }
+}
+foreach ($RequiredPropertyRuntimeContract in @(
+    'FindFProperty<FProperty>',
+    'Plan.ReflectedProperty',
+    'WriteAvidScriptRuntimeValueToGuest',
+    'binding_property_read_failed'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredPropertyRuntimeContract)) {
+        Add-Violation "cached property runtime is missing $RequiredPropertyRuntimeContract"
+    }
+}
+foreach ($RequiredPropertyFacadeContract in @(
+    'RenderPropertyGetter',
+    'Binding.BindingKind == TEXT("property_get")',
+    'GenerateWithReadableProperties'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredPropertyFacadeContract) -and
+        -not $CSharpBindingEmitterSource.Contains($RequiredPropertyFacadeContract) -and
+        -not $CSharpBindingSliceSource.Contains($RequiredPropertyFacadeContract)) {
+        Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
+    }
+}
+if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
+    $CSharpBindingRendererSource.Contains('CustomTimeDilation')) {
+    Add-Violation 'property runtime and renderer must stay data-driven without per-property API switches'
 }
 $CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'
 $CSharpWorkspaceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpWorkspace/AvidScriptEditorCSharpWorkspaceService.cpp'

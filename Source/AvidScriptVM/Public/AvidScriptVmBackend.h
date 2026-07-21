@@ -92,7 +92,8 @@ struct FAvidScriptHostCallResult
 class AVIDSCRIPTVM_API IAvidScriptVmGuestMemory
 {
 public:
-	virtual ~IAvidScriptVmGuestMemory() = default;
+	IAvidScriptVmGuestMemory();
+	virtual ~IAvidScriptVmGuestMemory();
 	virtual bool ReadBytes(
 		uint32 GuestAddress,
 		TArrayView<uint8> OutBytes,

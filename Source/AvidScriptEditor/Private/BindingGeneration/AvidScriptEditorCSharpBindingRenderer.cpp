@@ -401,6 +401,58 @@ bool RenderMethod(
 	return true;
 }
 
+bool RenderPropertyGetter(
+	const FAvidScriptBindingFunctionModel& Binding,
+	FCSharpRenderedMethod& OutMethod,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	if (Binding.BindingKind != TEXT("property_get")
+		|| Binding.bStatic
+		|| !Binding.Parameters.IsEmpty()
+		|| MakeExpectedAbiSignature(Binding) != Binding.HostImport.Signature)
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = Binding.CanonicalIdentity;
+		return false;
+	}
+	FString PublicType;
+	FString StorageType;
+	if (!ResolveCSharpType(Binding.ReturnValue, PublicType, OutErrorSource)
+		|| !ResolveStorageType(Binding.ReturnValue, StorageType, OutErrorSource))
+	{
+		OutErrorCategory = TEXT("unsupported_csharp_type");
+		return false;
+	}
+
+	const FString PropertyName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding.ScriptName);
+	OutMethod.MethodLines.Append({
+		FString::Printf(TEXT("    public %s %s"), *PublicType, *PropertyName),
+		TEXT("    {"),
+		TEXT("        get"),
+		TEXT("        {"),
+		FString::Printf(TEXT("            %s __returnValue;"), *StorageType),
+		FString::Printf(
+			TEXT("            _ = AvidScriptNative.%s(this.Slot, this.Generation, out __returnValue);"),
+			*MakeNativeMethodName(Binding.Ordinal)),
+		TEXT("            return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"),
+		TEXT("        }"),
+		TEXT("    }")
+	});
+	OutMethod.NativeLines.Append({
+		FString::Printf(
+			TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+			*EscapeCSharpString(Binding.HostImport.Module),
+			*EscapeCSharpString(Binding.HostImport.Name)),
+		FString::Printf(
+			TEXT("    internal static extern int %s(int selfSlot, int selfGeneration, out %s returnValue);"),
+			*MakeNativeMethodName(Binding.Ordinal),
+			*StorageType)
+	});
+	OutMethod.SignatureKey = PropertyName;
+	return true;
+}
+
 void AppendVector(TArray<FString>& Lines)
 {
 	Lines.Append({
@@ -568,7 +620,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 
 		FCSharpRenderedMethod Rendered;
-		if (!RenderMethod(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource))
+		const bool bRendered = Binding.BindingKind == TEXT("property_get")
+			? RenderPropertyGetter(Binding, Rendered, OutErrorCategory, OutErrorSource)
+			: RenderMethod(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource);
+		if (!bRendered)
 		{
 			return false;
 		}

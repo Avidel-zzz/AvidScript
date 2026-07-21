@@ -39,18 +39,28 @@ bool ValidateCanonicalDescriptor(
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
 {
-	TArray<FAvidScriptReflectedFunctionSelection> Selections;
-	Selections.Reserve(Package.Bindings.Num());
+	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
+	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
+	FunctionSelections.Reserve(Package.Bindings.Num());
+	PropertySelections.Reserve(Package.Bindings.Num());
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
-		Selections.Add({ Binding.OwnerClass, FName(*Binding.UeFunction) });
+		if (Binding.BindingKind == TEXT("property_get"))
+		{
+			PropertySelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+		}
+		else
+		{
+			FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+		}
 	}
 
 	FString CanonicalDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult RegenerationResult;
-	if (!FAvidScriptEditorBindingDescriptorGenerator::Generate(
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
 		Package.PackageName,
-		Selections,
+		FunctionSelections,
+		PropertySelections,
 		CanonicalDescriptorJson,
 		RegenerationResult))
 	{
