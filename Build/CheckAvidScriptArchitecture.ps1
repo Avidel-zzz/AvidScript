@@ -454,6 +454,7 @@ foreach ($LegacyBindingPath in @(
 
 $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp'
 $CSharpBindingRendererSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
+$CSharpBindingArtifactHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
@@ -517,13 +518,18 @@ foreach ($RequiredPropertyRuntimeContract in @(
 foreach ($RequiredPropertyFacadeContract in @(
     'RenderPropertyGetter',
     'Binding.BindingKind == TEXT("property_get")',
-    'GenerateWithReadableProperties'
+    'GenerateWithReadableProperties',
+    'public bool IsNull => Slot == 0 && Generation == 0;',
+    'public bool HasHandle => Slot > 0 && Generation > 0;'
 )) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredPropertyFacadeContract) -and
         -not $CSharpBindingEmitterSource.Contains($RequiredPropertyFacadeContract) -and
         -not $CSharpBindingSliceSource.Contains($RequiredPropertyFacadeContract)) {
         Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
     }
+}
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("47.3.0")')) {
+    Add-Violation 'C# binding emitter version must identify the P47.3 object proxy surface'
 }
 if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 4')) {
     Add-Violation 'C# binding package resolver must accept descriptor schema v4 property packages'

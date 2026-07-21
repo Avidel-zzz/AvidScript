@@ -599,6 +599,8 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("Generation"),
 		TEXT("AvidScriptSlot"),
 		TEXT("AvidScriptGeneration"),
+		TEXT("IsNull"),
+		TEXT("HasHandle"),
 		TEXT("IsValid")
 	};
 	TMap<int32, FCSharpRenderedMethod> RenderedMethods;
@@ -762,6 +764,8 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			Lines.Add(TEXT(""));
 			Lines.Add(TEXT("    internal int AvidScriptSlot => Slot;"));
 			Lines.Add(TEXT("    internal int AvidScriptGeneration => Generation;"));
+			Lines.Add(TEXT("    public bool IsNull => Slot == 0 && Generation == 0;"));
+			Lines.Add(TEXT("    public bool HasHandle => Slot > 0 && Generation > 0;"));
 			Lines.Add(TEXT("    public bool IsValid => Slot > 0 && Generation > 0;"));
 		}
 
