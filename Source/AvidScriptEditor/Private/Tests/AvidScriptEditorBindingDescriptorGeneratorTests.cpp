@@ -179,7 +179,8 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 	};
 	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
 		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation") },
-		{ TEXT("/Script/Engine.Actor"), TEXT("InitialLifeSpan") }
+		{ TEXT("/Script/Engine.Actor"), TEXT("InitialLifeSpan") },
+		{ TEXT("/Script/Engine.Actor"), TEXT("RootComponent") }
 	};
 	FString FirstJson;
 	FAvidScriptBindingDescriptorGenerateResult FirstResult;
@@ -191,7 +192,7 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 			Properties,
 			FirstJson,
 			FirstResult));
-	TestEqual(TEXT("Combined descriptor has three bindings"), FirstResult.BindingCount, 3);
+	TestEqual(TEXT("Combined descriptor has four bindings"), FirstResult.BindingCount, 4);
 
 	FString SecondJson;
 	FAvidScriptBindingDescriptorGenerateResult SecondResult;
@@ -216,6 +217,7 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
 	int32 FunctionCount = 0;
 	int32 PropertyCount = 0;
+	bool bFoundObjectProperty = false;
 	for (const TSharedPtr<FJsonValue>& Value : Bindings)
 	{
 		const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr;
@@ -237,10 +239,22 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 			TestEqual(TEXT("Property uses cached getter dispatch"), Binding->GetStringField(TEXT("dispatch_mode")), FString(TEXT("cached_property_get")));
 			TestEqual(TEXT("Property getter has no parameters"), Binding->GetArrayField(TEXT("parameters")).Num(), 0);
 			TestEqual(TEXT("Property getter ABI uses handle and return address"), Binding->GetObjectField(TEXT("host_import"))->GetStringField(TEXT("signature")), FString(TEXT("(iii)i")));
+			if (Binding->GetStringField(TEXT("ue_member")) == TEXT("RootComponent"))
+			{
+				bFoundObjectProperty = true;
+				const TSharedPtr<FJsonObject> ReturnValue = Binding->GetObjectField(TEXT("return"));
+				TestEqual(TEXT("Object property projects to object_handle"), ReturnValue->GetStringField(TEXT("kind")), FString(TEXT("object_handle")));
+				TestEqual(
+					TEXT("Object property preserves the reflected component type"),
+					ReturnValue->GetStringField(TEXT("canonical_type")),
+					FString(TEXT("object:/Script/Engine.SceneComponent")));
+				TestEqual(TEXT("Object property publishes slot and generation ABI"), ReturnValue->GetArrayField(TEXT("abi_types")).Num(), 2);
+			}
 		}
 	}
 	TestEqual(TEXT("v4 retains one function"), FunctionCount, 1);
-	TestEqual(TEXT("v4 publishes two property getters"), PropertyCount, 2);
+	TestEqual(TEXT("v4 publishes three property getters"), PropertyCount, 3);
+	TestTrue(TEXT("v4 publishes the object reference property"), bFoundObjectProperty);
 
 	FAvidScriptBindingPackageModel ParsedPackage;
 	FString ErrorCategory;
@@ -253,14 +267,14 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 			ErrorCategory,
 			ErrorSource));
 	TestEqual(TEXT("Parsed package retains schema v4"), ParsedPackage.SchemaVersion, 4);
-	TestEqual(TEXT("Parsed package retains all bindings"), ParsedPackage.Bindings.Num(), 3);
+	TestEqual(TEXT("Parsed package retains all bindings"), ParsedPackage.Bindings.Num(), 4);
 	TestEqual(
 		TEXT("Parsed property getter count is stable"),
 		ParsedPackage.Bindings.FilterByPredicate([](const FAvidScriptBindingFunctionModel& Binding)
 		{
 			return Binding.BindingKind == TEXT("property_get");
 		}).Num(),
-		2);
+		3);
 
 	TSharedPtr<FJsonObject> TamperedRoot;
 	TestTrue(TEXT("v4 descriptor can be cloned for tamper checks"), ParseDescriptor(FirstJson, TamperedRoot));

@@ -7,7 +7,12 @@ public static class GeneratedBindingLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        SetScale(UE.Self.CustomTimeDilation * 2.0f, 3.0f, 4.0f);
+        USceneComponent root = UE.Self.RootComponent;
+        FVector rootLocation = root.GetWorldLocation();
+        SetScale(
+            UE.Self.CustomTimeDilation * 2.0f + rootLocation.X,
+            3.0f,
+            4.0f);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]

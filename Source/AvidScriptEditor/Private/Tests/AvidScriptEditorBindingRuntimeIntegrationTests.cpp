@@ -521,9 +521,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 116 generated bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 117 generated bindings"), *BuildLabel),
 		AuthorizationImports->Num(),
-		116);
+		117);
 
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
 	if (!Test.TestTrue(
@@ -544,9 +544,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s runtime package contains three reachable bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s runtime package contains five reachable bindings"), *BuildLabel),
 		OutManifest.BindingPackage->GetVmPackage().Imports.Num(),
-		3);
+		5);
 	int32 RequiredDynamicImportCount = 0;
 	for (const FAvidScriptWasmRequiredImport& Import : OutManifest.RequiredImports)
 	{
@@ -557,9 +557,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		}
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s WASM requires three reachable reflected imports"), *BuildLabel),
+		*FString::Printf(TEXT("%s WASM requires five reachable reflected imports"), *BuildLabel),
 		RequiredDynamicImportCount,
-		3);
+		5);
 
 	UWorld* World = nullptr;
 	if (!Test.TestTrue(
@@ -581,7 +581,11 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Actor->SetActorScale3D(FVector(1.0, 1.0, 1.0));
+	Actor->SetActorLocation(FVector(0.5, 0.0, 0.0));
 	Actor->CustomTimeDilation = 1.25f;
+	Test.TestTrue(
+		*FString::Printf(TEXT("%s root component has the scripted world location"), *BuildLabel),
+		Actor->GetRootComponent()->GetComponentLocation().Equals(FVector(0.5, 0.0, 0.0), 0.001));
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult RegisterResult;
@@ -610,8 +614,8 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestTrue(
-		*FString::Printf(TEXT("%s BeginPlay reads CustomTimeDilation and applies generated FVector binding"), *BuildLabel),
-		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
+		*FString::Printf(TEXT("%s BeginPlay composes scalar and object properties with a component call"), *BuildLabel),
+		Actor->GetActorScale3D().Equals(FVector(3.0, 3.0, 4.0), 0.001));
 
 	FAvidScriptWasmSmokeResult TickResult;
 	if (!Test.TestTrue(
@@ -623,7 +627,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	}
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s Tick reads and writes through generated bindings"), *BuildLabel),
-		Actor->GetActorScale3D().Equals(FVector(3.0, 3.0, 4.0), 0.001));
+		Actor->GetActorScale3D().Equals(FVector(3.5, 3.0, 4.0), 0.001));
 	Test.TestEqual(
 		*FString::Printf(TEXT("%s scheduler records one Tick"), *BuildLabel),
 		Session.GetLiveTickCallCount(),
@@ -654,7 +658,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		1);
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s committed C# BeginPlay scale remains applied"), *BuildLabel),
-		Actor->GetActorScale3D().Equals(FVector(2.5, 3.0, 4.0), 0.001));
+		Actor->GetActorScale3D().Equals(FVector(3.0, 3.0, 4.0), 0.001));
 
 	if (!Test.TestTrue(
 			*FString::Printf(TEXT("%s committed C# runtime ticks"), *BuildLabel),
@@ -666,7 +670,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	const FVector ScaleBeforeRejectedCandidate = Actor->GetActorScale3D();
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s committed C# Tick retains live reflected writes"), *BuildLabel),
-		ScaleBeforeRejectedCandidate.Equals(FVector(2.75, 3.0, 4.0), 0.001));
+		ScaleBeforeRejectedCandidate.Equals(FVector(3.25, 3.0, 4.0), 0.001));
 
 	TArray<uint8> TrapBytecode;
 	if (!Test.TestTrue(
@@ -712,7 +716,7 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	}
 	Test.TestTrue(
 		*FString::Printf(TEXT("%s old C# Tick continues reflected gameplay after rollback"), *BuildLabel),
-		Actor->GetActorScale3D().Equals(FVector(3.0, 3.0, 4.0), 0.001));
+		Actor->GetActorScale3D().Equals(FVector(3.5, 3.0, 4.0), 0.001));
 	return true;
 }
 
@@ -746,9 +750,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 116 gameplay bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 117 gameplay bindings"), *BuildLabel),
 		AuthorizationImports->Num(),
-		116);
+		117);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -1334,13 +1338,13 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		return false;
 	}
 	TestEqual(
-		TEXT("Generated C# manifest records a three-binding runtime profile"),
+		TEXT("Generated C# manifest records a five-binding runtime profile"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
-		3);
+		5);
 	TestEqual(
-		TEXT("Generated C# manifest records three used binding stable identities"),
+		TEXT("Generated C# manifest records five used binding stable identities"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
-		3);
+		5);
 	(*BindingPackageObject)->SetStringField(
 		TEXT("descriptor_sha256"),
 		TEXT("0000000000000000000000000000000000000000000000000000000000000000"));

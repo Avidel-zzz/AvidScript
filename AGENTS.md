@@ -880,3 +880,14 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-21 P46.3 gate 变量与搜索插值错误记录：新增 Runtime schema 门禁时未搜索已有定义，臆写 `$WasmReloadSource`，真实变量是 `$RuntimeReloadSource`；随后用 PowerShell 双引号搜索 `$WasmReloadSource` 又被 shell 展开为空并形成残缺正则。Prevention：architecture gate 新检查必须复用已通过 `rg` 确认的现有 owner 变量；搜索包含 `$` 的源码标识符固定使用 PowerShell 单引号或 `-F`，禁止让 shell 展开。
 - 2026-07-21 P46.3 automation 名称搜索 quoting 复发记录：组合搜索多个双引号 C++ 测试名时，在 PowerShell 双引号参数中写 `\"`，shell 提前终止字符串并把 pattern 后半段当作命令。Prevention：`rg` 的 alternation/引号 pattern 固定放在 PowerShell 单引号中；只需要名称片段时不把 C++ 双引号纳入 pattern，复杂搜索先输出最终 argv 或拆成简单关键词。
 - P46 final baseline：EngineGameplay 授权 profile 为 115 个函数加 1 个 `AActor.CustomTimeDilation` getter，真实 C# lifecycle 经过 Roslyn 三 import reachability、schema v4 最小 slice、WASM backend 与 WAMR `BeginPlay`/`Tick` 驱动 Actor；UE5.8 no-clean build、architecture gate、PowerShell parser 18/18、PreparedSemantic 11/11 和完整 AvidScript Automation 214/214 全部通过，非成功 0、TEST COMPLETE 0、RequestExit 0 与进程退出码 0。
+
+## Phase 47 Object Reference Property Rules
+
+- P47 object identity rule：UObject 引用属性只能通过 `FAvidScriptObjectRegistry` 投影为 `(slot, generation)`，禁止把裸指针、地址整数或长期缓存的 UObject 内存暴露给 WASM。
+- P47 composability rule：属性返回的对象包装器必须能直接作为下一条自动生成实例 binding 的 receiver；Selection、descriptor、marshaller、renderer 与 Runtime 都不得出现 `RootComponent` 专用分支。
+- P47 load/hot-path rule：`FObjectPropertyBase` 与目标类型验证在 package load 完成，热路径只读取缓存的 `FProperty*`、注册或复用对象句柄并写 guest memory，不解析 JSON 或按名称查找。
+- 2026-07-21 P47.1 补丁缩进漂移记录：一次多文件补丁在 `GenerateFromProfile` 调用中把最后一个参数少缩进一级，虽然编译前 diff 审查发现并修复，但产生了无意义格式噪声。Prevention：多文件补丁应用后必须先读每个 hunk 的局部上下文，并运行 `git diff --check`，再进入编译。
+- 2026-07-21 P47.1 搜索范围过宽记录：首次硬编码计数搜索未排除 `Source/ThirdParty/WAMR`，导致二进制与图形夹具输出淹没有效结果。Prevention：产品合同搜索默认排除 `Source/ThirdParty`，并使用目标目录白名单；只有审计 vendored 代码时才扩大范围。
+- 2026-07-21 P47.1 空路径搜索复发记录：查找最新生成 descriptor 时文件筛选条件未命中，却仍把空变量传给 `rg`，使工具退化为扫描整个仓库并再次产生巨量输出。Prevention：任何动态路径搜索必须先用 `Test-Path -LiteralPath` 或结构化文件枚举确认唯一结果；路径为空时立即失败，禁止让 `rg` 使用隐式当前目录。
+- P47 error visibility rule：native binding 返回 0 只表示 host 已拒绝调用；在生成 C# 门面统一消费返回状态前，不得把默认 storage 描述为完整 fail-closed。P47.2 必须定义可观察、可源码映射且不增加成功热路径 host crossing 的统一失败合同。
+- P47.1 final baseline：EngineGameplay 为 115 个函数加 `CustomTimeDilation` 与 `RootComponent` 两个只读属性，共 117 个 binding；真实 C# lifecycle 从授权包裁剪 5 个 import，经对象属性句柄继续调用 `USceneComponent.GetWorldLocation()`。UE5.8 scoped no-clean build、architecture gate、对象 schema 聚焦测试与完整 AvidScript Automation 214/214 全部通过，非成功 0、TEST COMPLETE 0、RequestExit 0 与进程退出码 0。

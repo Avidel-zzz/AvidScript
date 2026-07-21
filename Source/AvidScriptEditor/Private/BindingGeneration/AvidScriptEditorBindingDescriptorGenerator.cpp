@@ -167,6 +167,7 @@ FAvidScriptBindingSelectionProfile FAvidScriptEditorBindingDescriptorGenerator::
 	FAvidScriptReflectedClassSelection ActorRule;
 	ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
 	ActorRule.IncludeProperties.Add(TEXT("CustomTimeDilation"));
+	ActorRule.IncludeProperties.Add(TEXT("RootComponent"));
 	Profile.Classes.Add(MoveTemp(ActorRule));
 	Profile.Classes.Add({ TEXT("/Script/Engine.SceneComponent") });
 	return Profile;
