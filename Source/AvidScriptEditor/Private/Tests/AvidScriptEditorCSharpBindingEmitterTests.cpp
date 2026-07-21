@@ -317,6 +317,10 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	TestFalse(TEXT("Gameplay profile C# source is not empty"), Source.IsEmpty());
 	TestFalse(TEXT("Gameplay profile manifest is not empty"), Manifest.IsEmpty());
 	TestTrue(TEXT("Gameplay package carries the state contract facade"), Source.Contains(TEXT("public enum AvidStateMode")));
+	TestTrue(TEXT("Gameplay package carries the typed input event facade"), Source.Contains(TEXT("public readonly struct InputEvent")));
+	TestTrue(TEXT("Input event exposes action and trigger identifiers"), Source.Contains(TEXT("public readonly int ActionId;")) && Source.Contains(TEXT("public readonly int TriggerEvent;")));
+	TestTrue(TEXT("Input event exposes a vector value"), Source.Contains(TEXT("public readonly FVector Value;")));
+	TestTrue(TEXT("Input event constructor remains compiler-owned"), Source.Contains(TEXT("internal InputEvent(int actionId, int triggerEvent, FVector value)")));
 	TestTrue(TEXT("Gameplay package carries the reflected Actor property"), Source.Contains(TEXT("public float CustomTimeDilation")));
 	TestTrue(TEXT("Gameplay package carries the reflected component handle property"), Source.Contains(TEXT("public USceneComponent RootComponent")));
 	TestFalse(TEXT("Empty reflected default is not emitted as a C# optional argument"), Source.Contains(TEXT("ViewPoint =")));

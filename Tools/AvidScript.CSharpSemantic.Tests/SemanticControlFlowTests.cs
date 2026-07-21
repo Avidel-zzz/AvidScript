@@ -57,7 +57,7 @@ internal static class SemanticControlFlowTests
         SemanticDocument document = Analyze(StructuredSource, "Scripts/StructuredControlFlow.cs");
 
         Assert(document.Succeeded, "supported structured control flow should pass semantic analysis");
-        Assert(document.SchemaVersion == 6 && document.SemanticVersion == "1.6",
+        Assert(document.SchemaVersion == 7 && document.SemanticVersion == "1.7",
             "current callable artifacts should advertise semantic schema v6 / version 1.6");
         SemanticControlFlowGraph graph = document.ControlFlowGraphs.Single(item =>
             item.MethodSymbolId == "symbol:method:global::Game.Script.Run(int32):int32");

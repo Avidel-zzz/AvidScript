@@ -16,6 +16,7 @@ internal static class CSharpSemanticInputValidator
             || document.Callables is null
             || document.Methods is null
             || document.ControlFlowGraphs is null
+            || document.GameplayEventCallbacks is null
             || document.Diagnostics is null
             || string.IsNullOrWhiteSpace(document.Language)
             || string.IsNullOrWhiteSpace(document.SemanticVersion)
@@ -30,6 +31,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateTypeShapes(document.TypeShapes)
             && ValidateSymbols(document.Symbols)
             && ValidateCallables(document.Callables)
+            && ValidateGameplayEventCallbacks(document)
             && ValidateMethods(document.Methods)
             && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
@@ -117,7 +119,7 @@ internal static class CSharpSemanticInputValidator
 
         SemanticReachability? reachability = document.Reachability;
         if (reachability is null
-            || reachability.Mode is not ("export_roots" or "all_callables_compatibility")
+            || reachability.Mode is not ("export_roots" or "entrypoint_roots" or "all_callables_compatibility")
             || reachability.RootCallableIds is null
             || reachability.ReachableCallableIds is null
             || reachability.ReachableImports is null
@@ -132,13 +134,26 @@ internal static class CSharpSemanticInputValidator
         Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
             callable => callable.MethodSymbolId,
             StringComparer.Ordinal);
+        HashSet<string> callbackIds = document.GameplayEventCallbacks
+            .Select(callback => callback.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        string[] expectedRootIds = document.Callables
+            .Where(callable => callable.Export is not null)
+            .Select(callable => callable.MethodSymbolId)
+            .Concat(callbackIds)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
         HashSet<string> reachableIds = reachability.ReachableCallableIds.ToHashSet(StringComparer.Ordinal);
         if (reachability.RootCallableIds.Any(id =>
                 !reachableIds.Contains(id)
                 || !callablesById.TryGetValue(id, out SemanticCallable? callable)
-                || callable.Export is null)
+                || (callable.Export is null && !callbackIds.Contains(id)))
             || reachableIds.Any(id => !callablesById.ContainsKey(id))
             || (reachability.Mode == "export_roots" && reachability.RootCallableIds.Count == 0)
+            || (reachability.Mode == "entrypoint_roots" && callbackIds.Count == 0)
+            || (reachability.Mode is "export_roots" or "entrypoint_roots"
+                && !reachability.RootCallableIds.SequenceEqual(expectedRootIds))
             || (reachability.Mode == "all_callables_compatibility"
                 && (reachability.RootCallableIds.Count != 0
                     || reachableIds.Count != callablesById.Count)))
@@ -159,6 +174,44 @@ internal static class CSharpSemanticInputValidator
             .ToArray();
         return reachability.ReachableImports.All(import => import is not null)
             && reachability.ReachableImports.SequenceEqual(expectedImports);
+    }
+
+    private static bool ValidateGameplayEventCallbacks(SemanticDocument document)
+    {
+        if (document.SchemaVersion < 7)
+        {
+            return document.GameplayEventCallbacks.Count == 0;
+        }
+
+        IReadOnlyDictionary<int, string> expectedNames = new Dictionary<int, string>
+        {
+            [1] = "OnBeginOverlap",
+            [2] = "OnEndOverlap",
+            [3] = "OnHit",
+            [4] = "OnInput",
+        };
+        Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId,
+            StringComparer.Ordinal);
+        return document.GameplayEventCallbacks.All(callback => callback is not null
+                && expectedNames.TryGetValue(callback.EventType, out string? expectedName)
+                && string.Equals(callback.Name, expectedName, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(callback.MethodSymbolId)
+                && callback.Span is not null
+                && callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
+                && callable.HasBody
+                && callable.IsStatic
+                && callable.Import is null)
+            && document.GameplayEventCallbacks
+                .Select(callback => callback.EventType)
+                .SequenceEqual(document.GameplayEventCallbacks
+                    .Select(callback => callback.EventType)
+                    .OrderBy(eventType => eventType))
+            && document.GameplayEventCallbacks
+                .Select(callback => callback.EventType)
+                .Distinct()
+                .Count() == document.GameplayEventCallbacks.Count
+            && Unique(document.GameplayEventCallbacks.Select(callback => callback.MethodSymbolId));
     }
 
     private static bool IsOrdinalSorted(IReadOnlyList<string> values)

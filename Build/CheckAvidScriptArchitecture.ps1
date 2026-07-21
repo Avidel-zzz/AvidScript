@@ -760,7 +760,10 @@ foreach ($RequiredCaptureAddressContract in @(
 }
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
+$SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
+$CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
+$CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredPreparedBuildContract in @(
     'AvidScriptCSharpSemanticCache.ps1',
@@ -894,14 +897,15 @@ if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Sou
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'SemanticStateContractProjector.Project',
-    'CurrentSchemaVersion = 6',
-    'CurrentSemanticVersion = "1.6"'
+    'SemanticGameplayEventProjector.Project',
+    'CurrentSchemaVersion = 7',
+    'CurrentSemanticVersion = "1.7"'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
     }
 }
-foreach ($RequiredReachabilityProjection in @('export_roots', 'all_callables_compatibility', 'AssociatedSymbolId')) {
+foreach ($RequiredReachabilityProjection in @('export_roots', 'entrypoint_roots', 'all_callables_compatibility', 'AssociatedSymbolId', 'gameplayEventCallbacks')) {
     if (-not $SemanticReachabilitySource.Contains($RequiredReachabilityProjection)) {
         Add-Violation "C# Semantic reachability is missing projection contract $RequiredReachabilityProjection"
     }
@@ -993,6 +997,21 @@ foreach ($RequiredSessionMigrationContract in @(
 foreach ($ForbiddenSessionMigrationConcern in @('ReadStateBytes', 'WriteStateBytes', 'IAvidScriptVmGuestMemory')) {
     if ($RuntimeSessionSource.Contains($ForbiddenSessionMigrationConcern)) {
         Add-Violation "RuntimeSession must not own guest memory migration concern $ForbiddenSessionMigrationConcern"
+    }
+}
+foreach ($RequiredGameplayEventContract in @('OnBeginOverlap', 'OnEndOverlap', 'OnHit', 'OnInput', 'ASCS5105')) {
+    if (-not $SemanticGameplayEventSource.Contains($RequiredGameplayEventContract)) {
+        Add-Violation "C# Semantic gameplay event projector is missing contract $RequiredGameplayEventContract"
+    }
+}
+foreach ($RequiredGameplayEventLowering in @('avid_on_gameplay_event', 'stack_alloc', 'field_store', 'ASCG1007')) {
+    if (-not $CSharpGameplayEventLowererSource.Contains($RequiredGameplayEventLowering)) {
+        Add-Violation "C# Guest gameplay event lowerer is missing contract $RequiredGameplayEventLowering"
+    }
+}
+foreach ($RequiredGameplayDebugMapContract in @('SourceLessGeneratedFunctionIds', 'CSharpGuestIds.GameplayEventFunctionId')) {
+    if (-not $CSharpGuestDebugMapProjectorSource.Contains($RequiredGameplayDebugMapContract)) {
+        Add-Violation "C# Guest debug map projector is missing generated gameplay router contract $RequiredGameplayDebugMapContract"
     }
 }
 foreach ($RequiredHostEffectContract in @(

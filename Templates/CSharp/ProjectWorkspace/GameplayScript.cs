@@ -43,16 +43,19 @@ public static class GameplayScript
     {
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "avid_on_gameplay_event")]
-    public static void OnGameplayEvent(
-        int eventType,
-        int primaryId,
-        int secondaryId,
-        int objectSlot,
-        int objectGeneration,
-        float x,
-        float y,
-        float z)
+    public static void OnBeginOverlap(AActor otherActor, FVector location)
+    {
+    }
+
+    public static void OnEndOverlap(AActor otherActor, FVector location)
+    {
+    }
+
+    public static void OnHit(AActor otherActor, FVector normalImpulse)
+    {
+    }
+
+    public static void OnInput(InputEvent input)
     {
     }
 

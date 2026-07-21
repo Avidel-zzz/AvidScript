@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
@@ -15,7 +16,10 @@ internal static class CSharpGuestLoweringTests
         VoidFallthroughExitReturnsNormally();
         LoweringIsByteDeterministic();
         ReachabilityPrunesUnusedImports();
-        return 5;
+        NaturalGameplayCallbacksSynthesizeOneRouter();
+        MissingGameplayCallbacksRemainNoOp();
+        ExplicitGameplayRouterConflictFailsClosed();
+        return 8;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -120,6 +124,155 @@ internal static class CSharpGuestLoweringTests
         Assert(module.Imports.Count == 0,
             "imports outside the export-root callable closure should not enter Guest IR");
     }
+
+    private static void NaturalGameplayCallbacksSynthesizeOneRouter()
+    {
+        SemanticDocument document = AnalyzeGameplaySource(AllGameplayCallbacksSource, "Scripts/AllGameplayCallbacks.cs");
+
+        GuestModule module = CSharpGuestLowerer.Lower(document, SemanticHash).Module
+            ?? throw new InvalidOperationException("natural gameplay callbacks produced no Guest module");
+        GuestExport gameplayExport = module.Exports.Single(item => item.Name == "avid_on_gameplay_event");
+        GuestFunction router = module.Functions.Single(item => item.Id == gameplayExport.FunctionId);
+        GuestInstruction[] instructions = router.Blocks.SelectMany(block => block.Instructions).ToArray();
+
+        Assert(router.Parameters.Select(parameter => parameter.TypeId).SequenceEqual(new[]
+            {
+                "type:int32", "type:int32", "type:int32", "type:int32", "type:int32",
+                "type:float32", "type:float32", "type:float32",
+            }),
+            "synthetic gameplay router should preserve the stable runtime ABI");
+        Assert(router.Blocks.Count(block => block.Terminator.Kind == "branch_if") == 4,
+            "synthetic gameplay router should branch once for every declared event type");
+        Assert(instructions.Count(instruction => instruction.Op == "call") == 4,
+            "synthetic gameplay router should call every declared natural callback once");
+        Assert(instructions.Any(instruction => instruction.Op == "field_store"),
+            "synthetic gameplay router should initialize typed aggregate payloads");
+        foreach (SemanticGameplayEventCallback callback in document.GameplayEventCallbacks)
+        {
+            Assert(instructions.Any(instruction => instruction.Op == "call"
+                && instruction.TargetId == "function:" + callback.MethodSymbolId),
+                $"synthetic gameplay router should call {callback.Name}");
+        }
+
+        Assert(GuestModuleValidator.Validate(module).Succeeded,
+            "synthetic gameplay router should pass independent Guest IR validation");
+    }
+
+    private static void MissingGameplayCallbacksRemainNoOp()
+    {
+        const string source = """
+            namespace AvidScript;
+
+            public readonly struct FVector
+            {
+                public readonly float X;
+                public readonly float Y;
+                public readonly float Z;
+            }
+
+            public readonly struct InputEvent
+            {
+                public readonly int ActionId;
+                public readonly int TriggerEvent;
+                public readonly FVector Value;
+            }
+
+            public static class Script
+            {
+                public static void OnInput(InputEvent input) { }
+            }
+            """;
+        SemanticDocument document = AnalyzeGameplaySource(source, "Scripts/InputOnlyGameplayCallback.cs");
+
+        GuestModule module = CSharpGuestLowerer.Lower(document, SemanticHash).Module
+            ?? throw new InvalidOperationException("input-only callback produced no Guest module");
+        GuestFunction router = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(item => item.Name == "avid_on_gameplay_event").FunctionId);
+        GuestInstruction[] instructions = router.Blocks.SelectMany(block => block.Instructions).ToArray();
+
+        Assert(router.Blocks.Count(block => block.Terminator.Kind == "branch_if") == 1,
+            "missing natural callbacks should not generate dead event branches");
+        Assert(instructions.Count(instruction => instruction.Op == "call") == 1,
+            "missing natural callbacks should remain no-op routes");
+        Assert(instructions.Single(instruction => instruction.Op == "call").TargetId ==
+            "function:" + document.GameplayEventCallbacks.Single().MethodSymbolId,
+            "input-only router should call only OnInput");
+    }
+
+    private static void ExplicitGameplayRouterConflictFailsClosed()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct InputEvent { }
+
+            public static class Script
+            {
+                public static void OnInput(InputEvent input) { }
+
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_gameplay_event")]
+                public static void OnGameplayEvent(
+                    int eventType,
+                    int primaryId,
+                    int secondaryId,
+                    int objectSlot,
+                    int objectGeneration,
+                    float x,
+                    float y,
+                    float z) { }
+            }
+            """;
+        SemanticDocument document = AnalyzeGameplaySource(source, "Scripts/ConflictingGameplayRouter.cs");
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+
+        Assert(!result.Succeeded && result.Module is null,
+            "an explicit raw gameplay router should conflict with compiler synthesis");
+        Assert(result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1007"),
+            "an explicit raw gameplay router conflict should report ASCG1007");
+    }
+
+    private static SemanticDocument AnalyzeGameplaySource(string source, string sourceId)
+    {
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(document.Succeeded, $"{sourceId} should produce a valid semantic artifact");
+        return document;
+    }
+
+    private const string AllGameplayCallbacksSource = """
+        namespace AvidScript;
+
+        public readonly struct AActor
+        {
+            public readonly int Slot;
+            public readonly int Generation;
+        }
+
+        public readonly struct FVector
+        {
+            public readonly float X;
+            public readonly float Y;
+            public readonly float Z;
+        }
+
+        public readonly struct InputEvent
+        {
+            public readonly int ActionId;
+            public readonly int TriggerEvent;
+            public readonly FVector Value;
+        }
+
+        public static class Script
+        {
+            public static void OnBeginOverlap(AActor otherActor, FVector location) { }
+            public static void OnEndOverlap(AActor otherActor, FVector location) { }
+            public static void OnHit(AActor otherActor, FVector normalImpulse) { }
+            public static void OnInput(InputEvent input) { }
+        }
+        """;
 
     private static void Assert(bool condition, string message)
     {

@@ -33,8 +33,27 @@ public static class CSharpGuestLowerer
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
         CSharpGuestDataPool dataPool = new(typeResult.Types);
-        GuestFunction[] functions = LowerFunctions(document, reachableCallableIds, guestTypes, dataPool, diagnostics);
-        GuestExport[] exports = LowerExports(document, functions, diagnostics);
+        List<GuestFunction> functions = LowerFunctions(
+            document,
+            reachableCallableIds,
+            guestTypes,
+            dataPool,
+            diagnostics).ToList();
+        CSharpGameplayEventLoweringResult? gameplayEvents = CSharpGameplayEventLowerer.Lower(
+            document,
+            guestTypes,
+            functions,
+            diagnostics);
+        if (gameplayEvents is not null)
+        {
+            functions.Add(gameplayEvents.Function);
+        }
+
+        List<GuestExport> exports = LowerExports(document, functions, diagnostics).ToList();
+        if (gameplayEvents is not null)
+        {
+            exports.Add(gameplayEvents.Export);
+        }
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);

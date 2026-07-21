@@ -94,6 +94,12 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     TestFalse(TEXT("Project has no unresolved tokens"), ProjectText.Contains(TEXT("{{")));
     const FString ProfileText = ReadAvidScriptWorkspaceTestText(*this, First.ProfilePath);
     TestFalse(TEXT("Profile has no unresolved tokens"), ProfileText.Contains(TEXT("{{")));
+	const FString InitialSourceText = ReadAvidScriptWorkspaceTestText(*this, First.SourcePath);
+	TestTrue(TEXT("Gameplay starter declares begin overlap callback"), InitialSourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
+	TestTrue(TEXT("Gameplay starter declares end overlap callback"), InitialSourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));
+	TestTrue(TEXT("Gameplay starter declares hit callback"), InitialSourceText.Contains(TEXT("public static void OnHit(AActor otherActor, FVector normalImpulse)")));
+	TestTrue(TEXT("Gameplay starter declares input callback"), InitialSourceText.Contains(TEXT("public static void OnInput(InputEvent input)")));
+	TestFalse(TEXT("Gameplay starter does not expose the raw event router"), InitialSourceText.Contains(TEXT("OnGameplayEvent(")));
 
     FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
     TestTrue(
@@ -151,6 +157,8 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
 	TestTrue(TEXT("Gameplay starter enables explicit state contracts"), StarterText.Contains(TEXT("[AvidStateContract(AvidStateMode.Explicit)]")));
 	TestTrue(TEXT("Gameplay starter persists accumulated rotation"), StarterText.Contains(TEXT("[AvidPersist]\n    private static float TotalRotationDegrees;")));
 	TestFalse(TEXT("Gameplay starter does not persist rotation speed configuration"), StarterText.Contains(TEXT("[AvidPersist]\n    private const float RotationSpeedDegreesPerSecond")));
+	TestTrue(TEXT("Explicit overwrite restores natural gameplay callbacks"), StarterText.Contains(TEXT("public static void OnInput(InputEvent input)")));
+	TestFalse(TEXT("Explicit overwrite does not restore the raw event router"), StarterText.Contains(TEXT("OnGameplayEvent(")));
     return true;
 }
 

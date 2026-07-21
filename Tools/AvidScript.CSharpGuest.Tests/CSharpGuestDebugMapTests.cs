@@ -13,8 +13,75 @@ internal static class CSharpGuestDebugMapTests
     {
         RealSemanticFunctionsProjectToDeterministicWasmIndices();
         NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations();
+        GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation();
         ReversedSameLineSpanFailsClosed();
-        return 3;
+        return 4;
+    }
+
+    private static void GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation()
+    {
+        const string source = """
+            namespace AvidScript
+            {
+                public readonly struct AActor
+                {
+                    public readonly int Slot;
+                    public readonly int Generation;
+                }
+
+                public readonly struct FVector
+                {
+                    public readonly float X;
+                    public readonly float Y;
+                    public readonly float Z;
+                }
+
+                public readonly struct InputEvent
+                {
+                    public readonly int ActionId;
+                    public readonly int TriggerEvent;
+                    public readonly FVector Value;
+                }
+            }
+
+            namespace Game
+            {
+                public static class Script
+                {
+                    public static void OnInput(AvidScript.InputEvent input)
+                    {
+                    }
+                }
+            }
+            """;
+        const string sourceId = "Scripts/GameplayEvents.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded, "gameplay-event debug-map source should analyze successfully");
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, new string('c', 64));
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException("gameplay-event debug-map source should lower successfully");
+        const string routerId = "function:synthetic:gameplay_event";
+        Assert(module.Functions.Any(function => function.Id == routerId),
+            "natural gameplay callbacks should synthesize the gameplay-event router");
+
+        string guestIrSha256 = Convert.ToHexString(
+            SHA256.HashData(GuestIrSerializer.Serialize(module))).ToLowerInvariant();
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256,
+            new string('e', 64));
+
+        Assert(debugMap.DefinedFunctionCount == module.Functions.Count,
+            "source-less generated functions should retain the complete WASM function index range");
+        Assert(debugMap.Functions.All(function => function.GuestFunctionId != routerId),
+            "the generated gameplay router must not publish a fake C# source location");
+        Assert(debugMap.Functions.Count == module.Functions.Count - 1,
+            "only the generated gameplay router should be omitted from the source map");
+        Assert(debugMap.Functions.Single().WasmFunctionIndex == module.Imports.Count,
+            "omitting the generated router must not renumber source-backed functions");
     }
 
     private static void NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations()

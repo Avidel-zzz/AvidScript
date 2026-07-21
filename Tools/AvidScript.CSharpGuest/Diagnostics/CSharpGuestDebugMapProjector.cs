@@ -10,6 +10,10 @@ namespace AvidScript.CSharpGuest;
 public static class CSharpGuestDebugMapProjector
 {
     private const string FunctionPrefix = "function:";
+    private static readonly HashSet<string> SourceLessGeneratedFunctionIds = new(StringComparer.Ordinal)
+    {
+        CSharpGuestIds.GameplayEventFunctionId,
+    };
 
     public static CSharpGuestDebugMap Project(
         SemanticDocument document,
@@ -54,6 +58,11 @@ public static class CSharpGuestDebugMapProjector
                 || !function.Id.StartsWith(FunctionPrefix, StringComparison.Ordinal))
             {
                 throw new InvalidDataException($"ASDEBUG1002: Guest function identity '{function.Id}' is invalid or duplicated.");
+            }
+
+            if (SourceLessGeneratedFunctionIds.Contains(function.Id))
+            {
+                continue;
             }
 
             string methodId = function.Id[FunctionPrefix.Length..];

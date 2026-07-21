@@ -899,3 +899,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-21 P47.3 manifest 字段路径猜测记录：生成包审计把 `reference_source_sha256` 猜在 `files` 子对象，实际位于 manifest 根部，首次输出为空。Prevention：结构化产物审计先读取 producer 或输出对象键，再写字段访问；空 hash 必须视为验证命令错误并立即核对，不能当成产品成功证据。
 - P47.3 final baseline：所有生成 UObject 代理新增零 host crossing 的 `IsNull` 与 `HasHandle`，保留 `IsValid` 兼容并把 emitter version 升为 47.3.0；新 manifest hash 发布到独立内容寻址目录。scoped no-clean build、architecture gate、facade 与真实 C# build 聚焦测试以及完整 AvidScript Automation 214/214 全部通过，非成功 0、TEST COMPLETE 0、RequestExit 0 与进程退出码 0。
 - P47.1 final baseline：EngineGameplay 为 115 个函数加 `CustomTimeDilation` 与 `RootComponent` 两个只读属性，共 117 个 binding；真实 C# lifecycle 从授权包裁剪 5 个 import，经对象属性句柄继续调用 `USceneComponent.GetWorldLocation()`。UE5.8 scoped no-clean build、architecture gate、对象 schema 聚焦测试与完整 AvidScript Automation 214/214 全部通过，非成功 0、TEST COMPLETE 0、RequestExit 0 与进程退出码 0。
+
+## Phase 48 Natural Gameplay Authoring Rules
+
+- 2026-07-21 P48.2 pinned SDK 复发记录：调试映射修复后的首个聚焦测试再次调用裸 `dotnet`，系统 host 只有 SDK 9.0.306，无法满足仓库锁定的 8.0.416。Prevention：本仓库任何 .NET 命令在构造测试命令前必须先把 host 写成 `$env:USERPROFILE\.dotnet\dotnet.exe`，执行 `--version` 并要求精确等于 `8.0.416`；同时设置任务本地的 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA` 与 `NUGET_PACKAGES`，禁止把裸 `dotnet` 作为可执行命令留到运行阶段才发现。

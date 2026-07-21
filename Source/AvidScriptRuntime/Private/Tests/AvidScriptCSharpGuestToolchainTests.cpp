@@ -246,7 +246,7 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample exports EndPlay"), SourceText.Contains(TEXT("avid_on_end_play")));
 	TestTrue(TEXT("Sample exports Timer callback"), SourceText.Contains(TEXT("avid_on_timer")));
 	TestTrue(TEXT("Sample exports gameplay event callback"), SourceText.Contains(TEXT("avid_on_event")));
-	TestTrue(TEXT("Sample exports typed gameplay event dispatcher"), SourceText.Contains(TEXT("avid_on_gameplay_event")));
+	TestFalse(TEXT("Sample leaves typed gameplay event dispatcher to the compiler"), SourceText.Contains(TEXT("avid_on_gameplay_event")));
 	TestTrue(TEXT("Sample declares EndPlay method"), SourceText.Contains(TEXT("public static void EndPlay")));
 	TestTrue(TEXT("Sample declares OnTimer method"), SourceText.Contains(TEXT("public static void OnTimer(int callbackId, int timerHandle)")));
 	TestTrue(TEXT("Sample declares OnEvent method"), SourceText.Contains(TEXT("public static void OnEvent(int eventId, float value)")));

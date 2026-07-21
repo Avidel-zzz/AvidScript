@@ -11,7 +11,9 @@ internal static class SemanticCallableTests
         ArrayAndEnumTypeShapesAreProjected();
         DuplicateExportNamesFailClosed();
         MissingExportEntryPointFailsClosed();
-        return 4;
+        GameplayCallbacksAreProjectedAndRooted();
+        InvalidGameplayCallbackShapesFailClosed();
+        return 6;
     }
 
     private static void CallableParametersAndAbiAttributesAreProjected()
@@ -136,6 +138,98 @@ internal static class SemanticCallableTests
             "missing export EntryPoint should use ASCS5002");
         Assert(document.ControlFlowGraphs.Count == 0,
             "invalid export metadata should clear every control-flow graph");
+    }
+
+    private static void GameplayCallbacksAreProjectedAndRooted()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct AActor { }
+            public readonly struct FVector { }
+            public readonly struct InputEvent { }
+
+            public static class Script
+            {
+                [DllImport("env", EntryPoint = "host_touch")]
+                private static extern void HostTouch();
+
+                public static void OnBeginOverlap(AActor otherActor, FVector location) => HostTouch();
+                public static void OnEndOverlap(AActor otherActor, FVector location) { }
+                public static void OnHit(AActor otherActor, FVector normalImpulse) { }
+                public static void OnInput(InputEvent input) { }
+            }
+            """;
+        const string sourceId = "Scripts/NaturalGameplayCallbacks.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        Assert(document.Succeeded, "natural gameplay callbacks should analyze successfully");
+        Assert(document.SchemaVersion == 7 && document.SemanticVersion == "1.7",
+            "gameplay callback artifacts should use schema v7 / semantic version 1.7");
+        Assert(document.GameplayEventCallbacks.Select(callback => callback.EventType)
+            .SequenceEqual(new[] { 1, 2, 3, 4 }),
+            "gameplay callbacks should use stable event-type order");
+        foreach (SemanticGameplayEventCallback callback in document.GameplayEventCallbacks)
+        {
+            Assert(callback.Span.Start == source.IndexOf(callback.Name, StringComparison.Ordinal)
+                && callback.Span.Length == callback.Name.Length,
+                $"{callback.Name} should retain its exact identifier span");
+            Assert(document.Reachability!.RootCallableIds.Contains(callback.MethodSymbolId),
+                $"{callback.Name} should become a reachability root");
+        }
+
+        Assert(document.Reachability!.Mode == "entrypoint_roots",
+            "natural callbacks should use the explicit entrypoint-root mode");
+        Assert(document.Reachability.ReachableImports.Single().Name == "host_touch",
+            "callback calls should retain generated host imports");
+    }
+
+    private static void InvalidGameplayCallbackShapesFailClosed()
+    {
+        const string source = """
+            namespace AvidScript;
+
+            public readonly struct AActor { }
+            public readonly struct FVector { }
+            public readonly struct InputEvent { }
+
+            public sealed class Script
+            {
+                public void OnBeginOverlap(AActor otherActor, FVector location) { }
+                public static int OnEndOverlap(AActor otherActor, FVector location) => 0;
+                public static void OnHit(AActor otherActor) { }
+                public static void OnInput(AActor input) { }
+            }
+            """;
+        const string sourceId = "Scripts/InvalidNaturalGameplayCallbacks.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        Assert(!document.Succeeded, "invalid natural callback shapes should fail semantic analysis");
+        (string Code, string Name)[] expected =
+        {
+            ("ASCS5102", "OnBeginOverlap"),
+            ("ASCS5103", "OnEndOverlap"),
+            ("ASCS5104", "OnHit"),
+            ("ASCS5105", "OnInput"),
+        };
+        foreach ((string code, string name) in expected)
+        {
+            SemanticDiagnostic diagnostic = document.Diagnostics.Single(item => item.Code == code);
+            Assert(diagnostic.Span.Start == source.IndexOf(name, StringComparison.Ordinal)
+                && diagnostic.Span.Length == name.Length,
+                $"{code} should identify the invalid {name} declaration");
+        }
+
+        Assert(document.GameplayEventCallbacks.Count == 0,
+            "invalid reserved callbacks should not publish partial descriptors");
+        Assert(document.ControlFlowGraphs.Count == 0,
+            "gameplay callback contract errors should clear every control-flow graph");
     }
 
     private static void Assert(bool condition, string message)

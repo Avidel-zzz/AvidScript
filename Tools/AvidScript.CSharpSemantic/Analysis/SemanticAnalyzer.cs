@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 6;
-    private const string CurrentSemanticVersion = "1.6";
+    private const int CurrentSchemaVersion = 7;
+    private const string CurrentSemanticVersion = "1.7";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
@@ -67,6 +67,8 @@ public static class SemanticAnalyzer
             context,
             typeRegistry);
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
+        SemanticGameplayEventProjection gameplayEventProjection =
+            SemanticGameplayEventProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
@@ -74,6 +76,7 @@ public static class SemanticAnalyzer
             .Concat(operationProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)
             .Concat(stateContractProjection.Diagnostics)
+            .Concat(gameplayEventProjection.Diagnostics)
             .GroupBy(diagnostic =>
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
@@ -97,7 +100,8 @@ public static class SemanticAnalyzer
         bool succeeded = diagnostics.All(diagnostic => diagnostic.Severity != "error");
         SemanticReachability reachability = SemanticReachabilityProjector.Project(
             callableProjection.Callables,
-            controlFlowGraphs);
+            controlFlowGraphs,
+            gameplayEventProjection.Callbacks);
 
         return new SemanticDocument(
             CurrentSchemaVersion,
@@ -115,6 +119,7 @@ public static class SemanticAnalyzer
             diagnostics)
         {
             StateContracts = stateContractProjection.Contracts,
+            GameplayEventCallbacks = gameplayEventProjection.Callbacks,
         };
     }
 

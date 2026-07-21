@@ -64,36 +64,6 @@ public static class ActorLifecycleScript
         UE.Self.SetActorLocation(input.Value + new FVector(input.ActionId, input.TriggerEvent, 0.0f));
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "avid_on_gameplay_event")]
-    public static void OnGameplayEvent(
-        int eventType,
-        int primaryId,
-        int secondaryId,
-        int objectSlot,
-        int objectGeneration,
-        float x,
-        float y,
-        float z)
-    {
-        FVector vectorValue = new FVector(x, y, z);
-        if (eventType == 1)
-        {
-            OnBeginOverlap(new AActor(objectSlot, objectGeneration), vectorValue);
-        }
-        else if (eventType == 2)
-        {
-            OnEndOverlap(new AActor(objectSlot, objectGeneration), vectorValue);
-        }
-        else if (eventType == 3)
-        {
-            OnHit(new AActor(objectSlot, objectGeneration), vectorValue);
-        }
-        else if (eventType == 4)
-        {
-            OnInput(new InputEvent(primaryId, secondaryId, vectorValue));
-        }
-    }
-
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {

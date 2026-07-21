@@ -17,9 +17,13 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticMethodBody> Methods,
     [property: JsonPropertyOrder(10)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
     [property: JsonPropertyOrder(11)] SemanticReachability? Reachability,
-    [property: JsonPropertyOrder(13)] IReadOnlyList<SemanticDiagnostic> Diagnostics)
+    [property: JsonPropertyOrder(14)] IReadOnlyList<SemanticDiagnostic> Diagnostics)
 {
     [JsonPropertyOrder(12)]
     public IReadOnlyList<SemanticStateContract> StateContracts { get; init; } =
         Array.Empty<SemanticStateContract>();
+
+    [JsonPropertyOrder(13)]
+    public IReadOnlyList<SemanticGameplayEventCallback> GameplayEventCallbacks { get; init; } =
+        Array.Empty<SemanticGameplayEventCallback>();
 }
