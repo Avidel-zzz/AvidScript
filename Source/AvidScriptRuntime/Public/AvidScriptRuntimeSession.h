@@ -59,6 +59,9 @@ public:
 	FAvidScriptRuntimeSessionSnapshot GetSnapshot() const;
 	int32 GetSuccessfulReloadCount() const { return SuccessfulReloadCount; }
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
+#if WITH_DEV_AUTOMATION_TESTS
+	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
+#endif
 
 private:
 	bool ValidateManifest(

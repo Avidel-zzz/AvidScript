@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptWasmReload.h"
+#include "AvidScriptWasmRuntime.h"
 
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -291,6 +292,11 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents Actor.SetLocation facade"), SourceText.Contains(TEXT("public static class Actor")) && SourceText.Contains(TEXT("public static bool SetLocation")));
 	TestTrue(TEXT("Sample presents Actor.AddLocationOffset facade"), SourceText.Contains(TEXT("public static bool AddLocationOffset")));
 	TestTrue(TEXT("Sample declares elapsed seconds state"), SourceText.Contains(TEXT("private static float ElapsedSeconds")));
+	TestTrue(TEXT("Sample records the active overlap actor handle"), SourceText.Contains(TEXT("private static AActor ActiveOverlapActor")));
+	TestTrue(TEXT("Sample records whether an input has already arrived"), SourceText.Contains(TEXT("private static bool HasPreviousInput")));
+	TestTrue(TEXT("Sample records the input trigger event"), SourceText.Contains(TEXT("private static int LastInputTriggerEvent")));
+	TestTrue(TEXT("Sample compares active overlap handles"), SourceText.Contains(TEXT("ActiveOverlapActor.Matches(otherActor)")));
+	TestTrue(TEXT("Sample only suppresses an exact duplicate input"), SourceText.Contains(TEXT("HasPreviousInput && input.ActionId == LastInputActionId && input.TriggerEvent == LastInputTriggerEvent")));
 	TestFalse(TEXT("Sample leaves elapsed seconds available for reload migration"), SourceText.Contains(TEXT("ElapsedSeconds = 0.0f")));
 	TestTrue(TEXT("Sample accumulates elapsed seconds in Tick"), SourceText.Contains(TEXT("ElapsedSeconds += deltaSeconds")));
 	TestTrue(TEXT("Sample reads location into a local FVector"), SourceText.Contains(TEXT("FVector currentLocation = UE.Self.GetActorLocation()")));
@@ -540,7 +546,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 	TestTrue(TEXT("Loaded C# manifest enables host snapshot migration"), Manifest.StateMigration.IsEnabled());
-	TestEqual(TEXT("Loaded C# manifest has three mutable sample state slots"), Manifest.StateMigration.Slots.Num(), 3);
+	TestEqual(TEXT("Loaded C# manifest has six mutable sample state slots"), Manifest.StateMigration.Slots.Num(), 6);
 
 	const TArray<FString> ExpectedLifecycleExports = {
 		TEXT("avid_on_begin_play"),
@@ -748,60 +754,147 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("C# gameplay event value"), EventResult.LastEventValue, 25.0f);
 
 	AActor* OtherActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
-	TestNotNull(TEXT("C# typed callback other Actor spawns"), OtherActor);
+	TestNotNull(TEXT("C# typed callback first other Actor spawns"), OtherActor);
 	FAvidScriptObjectHandleResult OtherRegisterResult;
 	const FAvidScriptObjectHandle OtherHandle = Registry.RegisterObject(OtherActor, OtherRegisterResult);
-	TestTrue(TEXT("C# typed callback other Actor registers"), OtherRegisterResult.bSucceeded);
+	TestTrue(TEXT("C# typed callback first other Actor registers"), OtherRegisterResult.bSucceeded);
 	if (OtherActor == nullptr || !OtherRegisterResult.bSucceeded)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+	AActor* SecondOtherActor = World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	TestNotNull(TEXT("C# typed callback second other Actor spawns"), SecondOtherActor);
+	FAvidScriptObjectHandleResult SecondOtherRegisterResult;
+	const FAvidScriptObjectHandle SecondOtherHandle = Registry.RegisterObject(SecondOtherActor, SecondOtherRegisterResult);
+	TestTrue(TEXT("C# typed callback second other Actor registers"), SecondOtherRegisterResult.bSucceeded);
+	if (SecondOtherActor == nullptr || !SecondOtherRegisterResult.bSucceeded)
 	{
 		DestroyCSharpContractWorld(World);
 		return true;
 	}
 
 	OtherActor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+	SecondOtherActor->SetActorLocation(FVector(40.0, 50.0, 60.0));
 	FAvidScriptGameplayEvent TypedEvent;
 	TypedEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
 	TypedEvent.ObjectHandle = OtherHandle;
 	TypedEvent.VectorValue = FVector3f(10.0f, 20.0f, 30.0f);
 	TestTrue(TEXT("C# begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# begin overlap maps AActor and FVector parameters"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
+	TypedEvent.ObjectHandle = SecondOtherHandle;
+	TypedEvent.VectorValue = FVector3f(40.0f, 50.0f, 60.0f);
+	TestTrue(TEXT("C# distinct Actor begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# distinct Actor begin overlap is not suppressed"), SecondOtherActor->GetActorLocation().Equals(FVector(40.0, 60.0, 60.0), 0.01));
+	TypedEvent.Type = EAvidScriptGameplayEventType::EndOverlap;
+	TypedEvent.ObjectHandle = OtherHandle;
+	TypedEvent.VectorValue = FVector3f(10.0f, 30.0f, 30.0f);
+	TestTrue(TEXT("C# stale Actor end overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# stale Actor end overlap does not end a different Actor"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
+	TypedEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
+	TypedEvent.ObjectHandle = SecondOtherHandle;
 	TypedEvent.VectorValue = FVector3f(100.0f, 200.0f, 300.0f);
 	TestTrue(TEXT("C# duplicate begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
-	TestTrue(TEXT("C# gameplay state suppresses duplicate begin overlap"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
-
-	TypedEvent.Type = EAvidScriptGameplayEventType::EndOverlap;
-	TypedEvent.VectorValue = FVector3f(10.0f, 30.0f, 30.0f);
-	TestTrue(TEXT("C# end overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
-	TestTrue(TEXT("C# end overlap routes through the generated dispatcher"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 35.0), 0.01));
+	TestTrue(TEXT("C# gameplay state suppresses same Actor begin overlap"), SecondOtherActor->GetActorLocation().Equals(FVector(40.0, 60.0, 60.0), 0.01));
 
 	TypedEvent.Type = EAvidScriptGameplayEventType::Hit;
 	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
 	TestTrue(TEXT("C# hit dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
-	TestTrue(TEXT("C# hit forwards normal impulse"), OtherActor->GetActorLocation().Equals(FVector(11.0, 32.0, 38.0), 0.01));
-	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 5);
+	TestTrue(TEXT("C# hit forwards normal impulse"), SecondOtherActor->GetActorLocation().Equals(FVector(41.0, 62.0, 63.0), 0.01));
+	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 6);
 
 	TypedEvent = FAvidScriptGameplayEvent();
 	TypedEvent.Type = EAvidScriptGameplayEventType::Input;
+	TypedEvent.PrimaryId = 0;
+	TypedEvent.SecondaryId = 1;
+	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
+	TestTrue(TEXT("C# zero action input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# first zero action input is not mistaken for a duplicate"), Actor->GetActorLocation().Equals(FVector(1.0, 3.0, 3.0), 0.01));
 	TypedEvent.PrimaryId = 5;
 	TypedEvent.SecondaryId = 2;
 	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
 	TestTrue(TEXT("C# input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# InputEvent maps ActionId TriggerEvent and Value"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
-	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 6);
+	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 8);
+	TypedEvent.SecondaryId = 3;
+	TypedEvent.VectorValue = FVector3f(4.0f, 5.0f, 6.0f);
+	TestTrue(TEXT("C# distinct trigger input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# same action with a different trigger is not suppressed"), Actor->GetActorLocation().Equals(FVector(9.0, 8.0, 6.0), 0.01));
 	TypedEvent.VectorValue = FVector3f(100.0f, 200.0f, 300.0f);
 	TestTrue(TEXT("C# duplicate input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
-	TestTrue(TEXT("C# gameplay state suppresses duplicate input action"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
-	TestEqual(TEXT("duplicate input still participates in runtime event accounting"), EventResult.EventCallbackCount, 7);
+	TestTrue(TEXT("C# gameplay state suppresses an exact duplicate input"), Actor->GetActorLocation().Equals(FVector(9.0, 8.0, 6.0), 0.01));
+	TestEqual(TEXT("duplicate input still participates in runtime event accounting"), EventResult.EventCallbackCount, 10);
+
+	FAvidScriptWasmRuntimeInstance* const RuntimeBeforeReload = Session.GetLiveRuntimeForTesting();
+	TestNotNull(TEXT("C# source adapter exposes the live runtime for state verification"), RuntimeBeforeReload);
+	TMap<FString, TArray<uint8>> StateBytesBeforeReload;
+	FString StateReadError;
+	if (RuntimeBeforeReload == nullptr)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+	for (const FAvidScriptWasmStateSlot& StateSlot : Manifest.StateMigration.Slots)
+	{
+		TArray<uint8> StateBytes;
+		StateBytes.SetNumZeroed(StateSlot.Size);
+		TestTrue(FString::Printf(TEXT("C# source adapter reads non-default state slot before reload: %s"), *StateSlot.StableId),
+			RuntimeBeforeReload->ReadStateBytes(StateSlot.Offset, StateBytes, StateReadError));
+		TestTrue(FString::Printf(TEXT("C# source adapter writes a non-default state slot before reload: %s"), *StateSlot.StableId),
+			StateBytes.ContainsByPredicate([](uint8 Value) { return Value != 0; }));
+		StateBytesBeforeReload.Add(StateSlot.StableId, MoveTemp(StateBytes));
+	}
 
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
 	TestTrue(TEXT("Compatible C# Timer reload applies"), Session.ReloadModule(Bytecode.GetData(), Bytecode.Num(), ReloadedManifest, ReloadResult));
 	TestTrue(TEXT("Compatible C# reload attempts state migration"), ReloadResult.bStateMigrationAttempted);
 	TestTrue(TEXT("Compatible C# reload applies state migration"), ReloadResult.bStateMigrationApplied);
-	TestEqual(TEXT("Compatible C# reload migrates gameplay state slots"), ReloadResult.StateMigrationMigratedSlotCount, 3);
-	TestEqual(TEXT("Compatible C# reload migrates gameplay state bytes"), ReloadResult.StateMigrationMigratedByteCount, 9);
+	TestEqual(TEXT("Compatible C# reload migrates gameplay state slots"), ReloadResult.StateMigrationMigratedSlotCount, 6);
+	TestEqual(TEXT("Compatible C# reload migrates gameplay state bytes"), ReloadResult.StateMigrationMigratedByteCount, 22);
+	FAvidScriptWasmRuntimeInstance* const RuntimeAfterReload = Session.GetLiveRuntimeForTesting();
+	TestNotNull(TEXT("C# source adapter exposes the reloaded runtime for state verification"), RuntimeAfterReload);
+	if (RuntimeAfterReload == nullptr)
+	{
+		DestroyCSharpContractWorld(World);
+		return true;
+	}
+	for (const FAvidScriptWasmStateSlot& StateSlot : ReloadedManifest.StateMigration.Slots)
+	{
+		TArray<uint8> StateBytesAfterReload;
+		StateBytesAfterReload.SetNumZeroed(StateSlot.Size);
+		TestTrue(FString::Printf(TEXT("C# source adapter reads migrated state slot after reload: %s"), *StateSlot.StableId),
+			RuntimeAfterReload->ReadStateBytes(StateSlot.Offset, StateBytesAfterReload, StateReadError));
+		const TArray<uint8>* const ExpectedStateBytes = StateBytesBeforeReload.Find(StateSlot.StableId);
+		TestNotNull(FString::Printf(TEXT("C# source adapter retains a pre-reload value for state slot: %s"), *StateSlot.StableId), ExpectedStateBytes);
+		if (ExpectedStateBytes != nullptr)
+		{
+			TestEqual(FString::Printf(TEXT("C# source adapter preserves exact state bytes across reload: %s"), *StateSlot.StableId), StateBytesAfterReload, *ExpectedStateBytes);
+		}
+	}
 	TestEqual(TEXT("Reloaded runtime owns one fresh Timer"), Session.GetLivePendingTimerCount(), 1);
 	TestEqual(TEXT("Reloaded runtime callback count starts fresh"), Session.GetLiveTimerCallbackCount(), 0);
 	TestEqual(TEXT("Reloaded runtime event count starts fresh"), Session.GetLiveEventCallbackCount(), 0);
+	TypedEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
+	TypedEvent.ObjectHandle = SecondOtherHandle;
+	TypedEvent.VectorValue = FVector3f(500.0f, 600.0f, 700.0f);
+	TestTrue(TEXT("C# reloaded duplicate begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# reloaded active overlap suppresses the same Actor"), SecondOtherActor->GetActorLocation().Equals(FVector(41.0, 62.0, 63.0), 0.01));
+	TypedEvent.Type = EAvidScriptGameplayEventType::EndOverlap;
+	TypedEvent.ObjectHandle = OtherHandle;
+	TypedEvent.VectorValue = FVector3f(10.0f, 30.0f, 30.0f);
+	TestTrue(TEXT("C# reloaded stale Actor end overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# reloaded stale Actor end does not end the tracked Actor"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
+	TypedEvent.ObjectHandle = SecondOtherHandle;
+	TypedEvent.VectorValue = FVector3f(40.0f, 60.0f, 60.0f);
+	TestTrue(TEXT("C# reloaded tracked Actor end overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# reloaded tracked Actor end overlap retains its handle identity"), SecondOtherActor->GetActorLocation().Equals(FVector(40.0, 60.0, 65.0), 0.01));
+	TypedEvent = FAvidScriptGameplayEvent();
+	TypedEvent.Type = EAvidScriptGameplayEventType::Input;
+	TypedEvent.PrimaryId = 5;
+	TypedEvent.SecondaryId = 3;
+	TypedEvent.VectorValue = FVector3f(500.0f, 600.0f, 700.0f);
+	TestTrue(TEXT("C# reloaded duplicate input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# reloaded exact input pair remains suppressed after BeginPlay reset"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
 	FAvidScriptWasmSmokeResult ReloadTickResult;
 	for (int32 TickIndex = 0; TickIndex < 3; ++TickIndex)
 	{

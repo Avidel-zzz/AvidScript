@@ -5,8 +5,11 @@ namespace AvidScript;
 public static class ActorLifecycleScript
 {
     private static float ElapsedSeconds;
+    private static AActor ActiveOverlapActor;
     private static bool HasActiveOverlap;
+    private static bool HasPreviousInput;
     private static int LastInputActionId;
+    private static int LastInputTriggerEvent;
 
     public static int Main() => 0;
 
@@ -48,18 +51,24 @@ public static class ActorLifecycleScript
 
     public static void OnBeginOverlap(AActor otherActor, FVector location)
     {
-        if (HasActiveOverlap || !otherActor.IsValid)
+        if (!otherActor.IsValid)
+        {
+            return;
+        }
+
+        if (HasActiveOverlap && ActiveOverlapActor.Matches(otherActor))
         {
             return;
         }
 
         HasActiveOverlap = true;
+        ActiveOverlapActor = otherActor;
         otherActor.SetActorLocation(location + new FVector(0.0f, 10.0f, 0.0f));
     }
 
     public static void OnEndOverlap(AActor otherActor, FVector location)
     {
-        if (!HasActiveOverlap || !otherActor.IsValid)
+        if (!HasActiveOverlap || !otherActor.IsValid || !ActiveOverlapActor.Matches(otherActor))
         {
             return;
         }
@@ -75,12 +84,14 @@ public static class ActorLifecycleScript
 
     public static void OnInput(InputEvent input)
     {
-        if (input.ActionId == LastInputActionId)
+        if (HasPreviousInput && input.ActionId == LastInputActionId && input.TriggerEvent == LastInputTriggerEvent)
         {
             return;
         }
 
+        HasPreviousInput = true;
         LastInputActionId = input.ActionId;
+        LastInputTriggerEvent = input.TriggerEvent;
         UE.Self.SetActorLocation(input.Value + new FVector(input.ActionId, input.TriggerEvent, 0.0f));
     }
 
@@ -175,6 +186,11 @@ public readonly struct AActor
     }
 
     public bool IsValid => Slot > 0 && Generation > 0;
+
+    public bool Matches(AActor other)
+    {
+        return Slot == other.Slot && Generation == other.Generation;
+    }
 
     public FVector GetActorLocation()
     {
