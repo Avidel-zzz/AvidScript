@@ -270,7 +270,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 115);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 116);
 	TestEqual(
 		TEXT("Gameplay profile uses a stable package name"),
 		EmitResult.PackageName,
@@ -278,6 +278,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	TestFalse(TEXT("Gameplay profile C# source is not empty"), Source.IsEmpty());
 	TestFalse(TEXT("Gameplay profile manifest is not empty"), Manifest.IsEmpty());
 	TestTrue(TEXT("Gameplay package carries the state contract facade"), Source.Contains(TEXT("public enum AvidStateMode")));
+	TestTrue(TEXT("Gameplay package carries the reflected Actor property"), Source.Contains(TEXT("public float CustomTimeDilation")));
 
 	FString RepeatedDescriptor;
 	FString RepeatedSource;
@@ -301,7 +302,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 		TestEqual(
 			TEXT("Gameplay manifest declares all reflected imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			115);
+			116);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();

@@ -525,6 +525,12 @@ foreach ($RequiredPropertyFacadeContract in @(
         Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
     }
 }
+if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 4')) {
+    Add-Violation 'C# binding package resolver must accept descriptor schema v4 property packages'
+}
+if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 4')) {
+    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v4 property packages'
+}
 if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
     $CSharpBindingRendererSource.Contains('CustomTimeDilation')) {
     Add-Violation 'property runtime and renderer must stay data-driven without per-property API switches'

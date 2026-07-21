@@ -1,5 +1,6 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
+#include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorBindingReloadEffectPolicy.h"
@@ -163,7 +164,10 @@ FAvidScriptBindingSelectionProfile FAvidScriptEditorBindingDescriptorGenerator::
 {
 	FAvidScriptBindingSelectionProfile Profile;
 	Profile.PackageName = TEXT("avidscript.engine.gameplay");
-	Profile.Classes.Add({ TEXT("/Script/Engine.Actor") });
+	FAvidScriptReflectedClassSelection ActorRule;
+	ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+	ActorRule.IncludeProperties.Add(TEXT("CustomTimeDilation"));
+	Profile.Classes.Add(MoveTemp(ActorRule));
 	Profile.Classes.Add({ TEXT("/Script/Engine.SceneComponent") });
 	return Profile;
 }
@@ -519,10 +523,10 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 {
 	OutJson.Empty();
 	OutResult = FAvidScriptBindingDescriptorGenerateResult();
-	TArray<FAvidScriptReflectedFunctionSelection> Selections;
+	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
 	if (!FAvidScriptEditorBindingSelectionResolver::Resolve(
 		Profile,
-		Selections,
+		FunctionSelections,
 		OutSelectionResult))
 	{
 		SetFailure(
@@ -532,7 +536,49 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 			OutSelectionResult.NextAction);
 		return false;
 	}
-	return Generate(Profile.PackageName, Selections, OutJson, OutResult);
+
+	bool bRequestsReadableProperties = !Profile.ExplicitProperties.IsEmpty();
+	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
+	{
+		bRequestsReadableProperties |= Rule.bDiscoverReadableProperties || !Rule.IncludeProperties.IsEmpty();
+	}
+	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
+	if (bRequestsReadableProperties)
+	{
+		FAvidScriptBindingSelectionResolveResult PropertyResult;
+		if (!FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			PropertySelections,
+			PropertyResult))
+		{
+			OutSelectionResult.bSucceeded = false;
+			OutSelectionResult.CandidatePropertyCount = PropertyResult.CandidatePropertyCount;
+			OutSelectionResult.AcceptedPropertyCount = PropertyResult.AcceptedPropertyCount;
+			OutSelectionResult.RejectedPropertyCount = PropertyResult.RejectedPropertyCount;
+			OutSelectionResult.Issues.Append(PropertyResult.Issues);
+			OutSelectionResult.ErrorCategory = PropertyResult.ErrorCategory;
+			OutSelectionResult.ErrorSource = PropertyResult.ErrorSource;
+			OutSelectionResult.NextAction = PropertyResult.NextAction;
+			OutSelectionResult.ErrorMessage = PropertyResult.ErrorMessage;
+			SetFailure(
+				OutResult,
+				PropertyResult.ErrorCategory,
+				PropertyResult.ErrorSource,
+				PropertyResult.NextAction);
+			return false;
+		}
+		OutSelectionResult.CandidatePropertyCount = PropertyResult.CandidatePropertyCount;
+		OutSelectionResult.AcceptedPropertyCount = PropertyResult.AcceptedPropertyCount;
+		OutSelectionResult.RejectedPropertyCount = PropertyResult.RejectedPropertyCount;
+		OutSelectionResult.Issues.Append(PropertyResult.Issues);
+	}
+	OutSelectionResult.bSucceeded = true;
+	return GenerateWithReadableProperties(
+		Profile.PackageName,
+		FunctionSelections,
+		PropertySelections,
+		OutJson,
+		OutResult);
 }
 
 bool FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(

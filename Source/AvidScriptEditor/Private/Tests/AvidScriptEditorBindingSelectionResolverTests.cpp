@@ -280,10 +280,12 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
+	TestEqual(TEXT("Gameplay profile accepts 115 functions"), FirstSelectionResult.AcceptedFunctionCount, 115);
+	TestEqual(TEXT("Gameplay profile accepts one readable property"), FirstSelectionResult.AcceptedPropertyCount, 1);
 	TestEqual(
-		TEXT("Descriptor binding count matches accepted profile functions"),
+		TEXT("Descriptor binding count matches all accepted reflected members"),
 		FirstDescriptorResult.BindingCount,
-		FirstSelectionResult.AcceptedFunctionCount);
+		FirstSelectionResult.AcceptedFunctionCount + FirstSelectionResult.AcceptedPropertyCount);
 
 	FString SecondJson;
 	FAvidScriptBindingSelectionResolveResult SecondSelectionResult;

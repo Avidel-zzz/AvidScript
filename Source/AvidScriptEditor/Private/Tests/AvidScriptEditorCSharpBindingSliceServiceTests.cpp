@@ -101,7 +101,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Authorization descriptor is schema v3"), AuthorizationModel.SchemaVersion, 3);
+	TestEqual(TEXT("Authorization descriptor is schema v4"), AuthorizationModel.SchemaVersion, 4);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 
