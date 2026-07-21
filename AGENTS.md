@@ -904,3 +904,5 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - 2026-07-21 P48.2 pinned SDK 复发记录：调试映射修复后的首个聚焦测试再次调用裸 `dotnet`，系统 host 只有 SDK 9.0.306，无法满足仓库锁定的 8.0.416。Prevention：本仓库任何 .NET 命令在构造测试命令前必须先把 host 写成 `$env:USERPROFILE\.dotnet\dotnet.exe`，执行 `--version` 并要求精确等于 `8.0.416`；同时设置任务本地的 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA` 与 `NUGET_PACKAGES`，禁止把裸 `dotnet` 作为可执行命令留到运行阶段才发现。
 - 2026-07-21 P48.2 review gate 变量复发记录：为 hostile semantic artifact 防御补 architecture gate 时，先引用了未在加载区声明的 `$CSharpSemanticInputValidator`。Prevention：任何新 gate owner 必须先在同一加载区用 `Read-RequiredFile` 声明带 `Source` 后缀的变量，再在检查区复用该精确变量名；应用补丁后、运行 gate 前固定用 `rg` 同时确认声明和引用各自存在。
+- 2026-07-21 P48.3 bool 状态槽尺寸猜测记录：真实 WAMR 状态迁移 RED 首版把 `bool` 按 4 字节估算，错误期待三个状态槽共 12 字节；正式 Guest layout 中 `float32=4`、`bool=1`、`int32=4`，实际为 9 字节。Prevention：任何状态迁移 byte-count 断言必须先读取生成的 state schema 或 Guest type layout，按每个 slot 的实际 `size` 求和，禁止按 C++ 对齐习惯猜测 C# Guest ABI。
+- 2026-07-21 P48.3 状态槽断言遗漏记录：更新 reload migration 的槽数和字节数后，漏掉同一自动化前半段仍断言 manifest 只有一个槽，导致首轮 GREEN 在旧快照断言失败。Prevention：样例状态字段变化后必须在目标测试文件中全局搜索 `StateMigration`、`Slots.Num`、`MigratedSlotCount`、`MigratedByteCount` 和旧数字文案，统一更新加载、执行、迁移三个观察点后再编译。

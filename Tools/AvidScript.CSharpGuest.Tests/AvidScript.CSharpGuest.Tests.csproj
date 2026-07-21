@@ -12,5 +12,6 @@
     <ProjectReference Include="../AvidScript.CSharpGuest/AvidScript.CSharpGuest.csproj" />
     <ProjectReference Include="../AvidScript.CSharpSemantic/AvidScript.CSharpSemantic.csproj" />
     <ProjectReference Include="../AvidScript.GuestIr/AvidScript.GuestIr.csproj" />
+    <ProjectReference Include="../AvidScript.WasmBackend/AvidScript.WasmBackend.csproj" />
   </ItemGroup>
 </Project>

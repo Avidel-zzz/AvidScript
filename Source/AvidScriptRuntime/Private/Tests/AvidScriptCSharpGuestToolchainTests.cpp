@@ -540,7 +540,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		return true;
 	}
 	TestTrue(TEXT("Loaded C# manifest enables host snapshot migration"), Manifest.StateMigration.IsEnabled());
-	TestEqual(TEXT("Loaded C# manifest has one mutable sample state slot"), Manifest.StateMigration.Slots.Num(), 1);
+	TestEqual(TEXT("Loaded C# manifest has three mutable sample state slots"), Manifest.StateMigration.Slots.Num(), 3);
 
 	const TArray<FString> ExpectedLifecycleExports = {
 		TEXT("avid_on_begin_play"),
@@ -765,6 +765,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TypedEvent.VectorValue = FVector3f(10.0f, 20.0f, 30.0f);
 	TestTrue(TEXT("C# begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# begin overlap maps AActor and FVector parameters"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
+	TypedEvent.VectorValue = FVector3f(100.0f, 200.0f, 300.0f);
+	TestTrue(TEXT("C# duplicate begin overlap dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# gameplay state suppresses duplicate begin overlap"), OtherActor->GetActorLocation().Equals(FVector(10.0, 30.0, 30.0), 0.01));
 
 	TypedEvent.Type = EAvidScriptGameplayEventType::EndOverlap;
 	TypedEvent.VectorValue = FVector3f(10.0f, 30.0f, 30.0f);
@@ -775,7 +778,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
 	TestTrue(TEXT("C# hit dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# hit forwards normal impulse"), OtherActor->GetActorLocation().Equals(FVector(11.0, 32.0, 38.0), 0.01));
-	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 4);
+	TestEqual(TEXT("legacy and typed callbacks share event accounting"), EventResult.EventCallbackCount, 5);
 
 	TypedEvent = FAvidScriptGameplayEvent();
 	TypedEvent.Type = EAvidScriptGameplayEventType::Input;
@@ -784,14 +787,18 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TypedEvent.VectorValue = FVector3f(1.0f, 2.0f, 3.0f);
 	TestTrue(TEXT("C# input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
 	TestTrue(TEXT("C# InputEvent maps ActionId TriggerEvent and Value"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
-	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 5);
+	TestEqual(TEXT("input shares generic event accounting"), EventResult.EventCallbackCount, 6);
+	TypedEvent.VectorValue = FVector3f(100.0f, 200.0f, 300.0f);
+	TestTrue(TEXT("C# duplicate input dispatch succeeds"), Session.DispatchGameplayEventLive(TypedEvent, EventResult));
+	TestTrue(TEXT("C# gameplay state suppresses duplicate input action"), Actor->GetActorLocation().Equals(FVector(6.0, 4.0, 3.0), 0.01));
+	TestEqual(TEXT("duplicate input still participates in runtime event accounting"), EventResult.EventCallbackCount, 7);
 
 	FAvidScriptWasmReloadManifest ReloadedManifest = Manifest;
 	TestTrue(TEXT("Compatible C# Timer reload applies"), Session.ReloadModule(Bytecode.GetData(), Bytecode.Num(), ReloadedManifest, ReloadResult));
 	TestTrue(TEXT("Compatible C# reload attempts state migration"), ReloadResult.bStateMigrationAttempted);
 	TestTrue(TEXT("Compatible C# reload applies state migration"), ReloadResult.bStateMigrationApplied);
-	TestEqual(TEXT("Compatible C# reload migrates elapsed state slot"), ReloadResult.StateMigrationMigratedSlotCount, 1);
-	TestEqual(TEXT("Compatible C# reload migrates four elapsed bytes"), ReloadResult.StateMigrationMigratedByteCount, 4);
+	TestEqual(TEXT("Compatible C# reload migrates gameplay state slots"), ReloadResult.StateMigrationMigratedSlotCount, 3);
+	TestEqual(TEXT("Compatible C# reload migrates gameplay state bytes"), ReloadResult.StateMigrationMigratedByteCount, 9);
 	TestEqual(TEXT("Reloaded runtime owns one fresh Timer"), Session.GetLivePendingTimerCount(), 1);
 	TestEqual(TEXT("Reloaded runtime callback count starts fresh"), Session.GetLiveTimerCallbackCount(), 0);
 	TestEqual(TEXT("Reloaded runtime event count starts fresh"), Session.GetLiveEventCallbackCount(), 0);

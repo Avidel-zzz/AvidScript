@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
+using AvidScript.WasmBackend;
 
 internal static class CSharpGuestAdvancedTests
 {
@@ -22,7 +24,111 @@ internal static class CSharpGuestAdvancedTests
         StructConstructionFieldsAndOutAddressesAreLowered();
         ConversionAndNonVoidReturnAreLowered();
         UnsupportedExternalCallFailsClosed();
-        return 3;
+        GameplaySourceControlFlowAndStateCompileToWasm();
+        return 4;
+    }
+
+    private static void GameplaySourceControlFlowAndStateCompileToWasm()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript
+            {
+                public readonly struct AActor
+                {
+                    public readonly int Slot;
+                    public readonly int Generation;
+                }
+
+                public readonly struct FVector
+                {
+                    public readonly float X;
+                    public readonly float Y;
+                    public readonly float Z;
+                }
+
+                public static class PickupScript
+                {
+                    private static bool Collected;
+                    private static int LastCallbackId;
+                    private static float Elapsed;
+
+                    public static void OnBeginOverlap(AActor otherActor, FVector location)
+                    {
+                        if (!Collected && otherActor.Slot != 0)
+                        {
+                            Collected = true;
+                            LastCallbackId = otherActor.Slot;
+                        }
+                        else if (Collected && location.Z < 0.0f)
+                        {
+                            Elapsed = 0.0f;
+                        }
+                    }
+
+                    [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                    public static void Tick(float deltaSeconds)
+                    {
+                        if (Collected)
+                        {
+                            Elapsed += deltaSeconds;
+                        }
+                    }
+
+                    [UnmanagedCallersOnly(EntryPoint = "avid_on_timer")]
+                    public static void OnTimer(int callbackId, int timerHandle)
+                    {
+                        if (!Collected || callbackId != 7)
+                        {
+                            return;
+                        }
+
+                        Collected = false;
+                        LastCallbackId = callbackId;
+                    }
+                }
+            }
+            """;
+        const string sourceId = "Scripts/PickupScript.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded,
+            "gameplay control-flow source should pass semantic analysis: " + FormatSemanticDiagnostics(semantic));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, new string('c', 64));
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(FormatDiagnostics(lowering));
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        Assert(lowering.Succeeded && validation.Succeeded,
+            "gameplay control-flow source should produce valid Guest IR");
+        Assert(module.Globals.Count == 3
+            && module.Globals.Any(global => global.Id.Contains("Collected", StringComparison.Ordinal))
+            && module.Globals.Any(global => global.Id.Contains("LastCallbackId", StringComparison.Ordinal))
+            && module.Globals.Any(global => global.Id.Contains("Elapsed", StringComparison.Ordinal)),
+            "gameplay state fields should become three stable Guest globals");
+
+        GuestFunction overlap = module.Functions.Single(function =>
+            function.Id.Contains(".OnBeginOverlap(", StringComparison.Ordinal));
+        GuestInstruction[] overlapInstructions = overlap.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        Assert(overlap.Blocks.Count(block => block.Terminator.Kind == "branch_if") >= 3,
+            "short-circuit overlap logic should retain conditional Guest branches");
+        Assert(overlapInstructions.Any(instruction => instruction.Op == "global_store")
+            && overlapInstructions.Any(instruction => instruction.Op == "field_load"),
+            "overlap logic should write state and read actor/vector fields");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Assert(wasm.Succeeded
+            && wasm.Bytes.Length > 8
+            && wasm.Bytes[0] == 0x00
+            && wasm.Bytes[1] == 0x61
+            && wasm.Bytes[2] == 0x73
+            && wasm.Bytes[3] == 0x6d,
+            "gameplay control-flow Guest IR should compile to a WASM module");
+        Assert(module.Exports.Count(export => export.Name == "avid_on_gameplay_event") == 1,
+            "natural gameplay source should publish exactly one generated gameplay router");
     }
 
     private static void StructConstructionFieldsAndOutAddressesAreLowered()
@@ -306,5 +412,11 @@ internal static class CSharpGuestAdvancedTests
         {
             throw new InvalidOperationException(message);
         }
+    }
+
+    private static string FormatSemanticDiagnostics(SemanticDocument document)
+    {
+        return string.Join(" | ", document.Diagnostics.Select(diagnostic =>
+            $"{diagnostic.Code}:{diagnostic.Message}"));
     }
 }

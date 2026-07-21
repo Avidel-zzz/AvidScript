@@ -5,6 +5,8 @@ namespace AvidScript;
 public static class ActorLifecycleScript
 {
     private static float ElapsedSeconds;
+    private static bool HasActiveOverlap;
+    private static int LastInputActionId;
 
     public static int Main() => 0;
 
@@ -46,11 +48,23 @@ public static class ActorLifecycleScript
 
     public static void OnBeginOverlap(AActor otherActor, FVector location)
     {
+        if (HasActiveOverlap || !otherActor.IsValid)
+        {
+            return;
+        }
+
+        HasActiveOverlap = true;
         otherActor.SetActorLocation(location + new FVector(0.0f, 10.0f, 0.0f));
     }
 
     public static void OnEndOverlap(AActor otherActor, FVector location)
     {
+        if (!HasActiveOverlap || !otherActor.IsValid)
+        {
+            return;
+        }
+
+        HasActiveOverlap = false;
         otherActor.SetActorLocation(location + new FVector(0.0f, 0.0f, 5.0f));
     }
 
@@ -61,6 +75,12 @@ public static class ActorLifecycleScript
 
     public static void OnInput(InputEvent input)
     {
+        if (input.ActionId == LastInputActionId)
+        {
+            return;
+        }
+
+        LastInputActionId = input.ActionId;
         UE.Self.SetActorLocation(input.Value + new FVector(input.ActionId, input.TriggerEvent, 0.0f));
     }
 
