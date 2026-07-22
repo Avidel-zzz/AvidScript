@@ -942,3 +942,6 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-22 P48.6 成功热重载覆盖遗漏：PlayablePickup 的首版 `BeginPlay` 无条件清空持久化状态并恢复 Actor 外观，同时用例只验证失败回滚，没有覆盖已拾取状态下的成功 reload，导致候选运行时会覆盖迁移结果且丢失运行时本地计时器。Prevention：持久化脚本的候选 `BeginPlay` 必须在迁移后运行的语义下审计，禁止无条件初始化持久字段；运行时本地资源要按迁移状态重建，并为成功与失败 reload 各保留一条端到端用例。
 - 2026-07-22 P48.7 热重载身份建模错误：成功 reload 回归最初把候选 `ModuleId` 改成 `csharp_playable_pickup_reload`，而状态迁移只适用于前后 `ModuleId` 相同的同一脚本身份，测试因此按设计跳过迁移。Prevention：热重载候选可使用独立输出目录与 artifact stem，但必须保持逻辑 `ModuleId` 不变；测试必须显式断言 migration attempted/applied、迁移槽数以及迁移后 BeginPlay 的资源重建调用。
 - 2026-07-22 P48.7 不存在搜索根复发：查询 architecture/parser 命令时再次把不存在的 `Scripts` 目录交给多根 `rg`，命令在返回有效结果的同时以错误退出，重复了 P48.6 已记录的问题。Prevention：多根检索前固定先用 `rg --files` 或 `Test-Path` 建立真实根列表；若任务只需查插件全树，直接从仓库根使用受限 glob，不再手写推测目录。
+- 2026-07-23 P49 规划期 PowerShell 通配路径误用：首次检索 C# 工具源码时把 `Tools/AvidScript.CSharp*` 直接作为 `rg` 路径参数，Windows 下该通配路径未展开，命令在读取源码前失败。Prevention：`rg` 搜索从已确认存在的字面目录开始，文件范围使用 `-g`；禁止把 shell 通配符放进路径参数。
+- 2026-07-23 P49 规划自审单命令规范复发：恢复工作后把 `git status`、branch 和 HEAD 查询用分号塞进一次 shell 调用，违反每个 shell 调用只执行一个逻辑命令的规则。Prevention：即使查询只读且相关，也必须拆成独立 `shell_command` 并通过并行调度聚合；不得以减少调用为由拼接命令。
+- 2026-07-23 P49 暂存隐私扫描退出码误判：把“无匹配即成功”的 `rg` 隐私扫描直接放进并行检查，`rg` 的正常 no-match 退出码 1 使调度层丢弃了整组展示结果。Prevention：否定式扫描使用无匹配仍返回成功的结构化包装或 `Select-String`，并单独断言匹配集合为空；不能把搜索工具的 no-match 直接当命令失败传播。
