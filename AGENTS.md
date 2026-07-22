@@ -140,13 +140,15 @@ Plugins/AvidScript/Docs
 
 ## Batched Verification Workflow
 
+- `Docs/Workflow/Phase_Development_Workflow_Design.md` 是阶段执行的规范合同。每次开始新 Phase、恢复中断任务或发生上下文压缩后，必须先读取本节、当前 Phase 计划、债务清单和最近一次 Gate 证据，再确定唯一下一步；不得仅依赖聊天记录或记忆判断阶段状态。
 - 默认以一个完整功能组或 60–120 分钟工作量作为开发批次。批次内连续完成相关 production code、测试代码和文档，不在每个小步骤后重复启动 UE、运行完整模块构建或完整 automation。
 - 批次内只使用低成本反馈：源码检索、结构化产物检查、编译器静态诊断、`git diff --check`，以及确实会阻塞后续实现的最小 .NET 测试。不得为了逐个 checklist 制造碎片化 RED/GREEN 循环。
-- 子阶段门禁只执行一次受影响模块的 no-clean 增量构建，并优先运行一个能覆盖该功能组的 broader focused filter。失败后只重跑失败组及其直接依赖，不重复已经有有效证据且未受变更影响的测试。
+- 实现批次中默认不运行 UE/UBT 门禁。只有 Blocker、Critical 或经设计文档风险升级规则判定需要中点集成时，才执行一次受影响模块的 no-clean 增量构建或 broader focused filter；失败后只重跑失败组及其直接依赖。
 - 大 Phase 收尾门禁集中执行：所有相关 .NET 测试宿主与 format、一次四模块 no-clean scoped build、architecture/parser gate、一次完整 `Automation RunTests AvidScript`。完整 automation 默认不在同一大 Phase 中重复运行。
 - 独立代码审查安排在最终全量 automation 之前。审查修复后先运行受影响 focused tests，随后只运行一次最终全量 automation，避免“全量测试 -> 审查修改 -> 再全量测试”的重复成本。
 - 只有 ABI、guest memory、状态迁移、生命周期事务、崩溃或数据损坏风险，以及需要先确认根因的真实回归，才允许在批次中途立即编译或运行聚焦测试。即使属于例外，也应合并同一风险面的修改后再执行。
 - 批量验证不等于把反馈无限推迟到数小时任务末尾。单个批次不得跨越多个相互独立的架构层，也不得以减少测试时间为理由跳过最终门禁、清理 Editor Target 或降低成功判定标准。
+- 在阶段状态机实现前，每个实现批次完成、风险升级、代码冻结和 Gate 结束后，都必须在当前 Phase 计划或债务清单中记录状态与下一步。状态机实现后，必须先运行 `Build/InvokePhaseWorkflow.ps1 status`，并只通过该脚本执行 freeze、gate 和 close；没有验证当前提交的有效 Gate 报告时不得宣布 Phase 完成。
 
 ## C# Guest Toolchain Workflow
 
@@ -934,6 +936,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-22 P48.6 `rg` 搜索根目录猜测复发：查询 Runtime stats 时把不存在的 `Source/AvidScript` 与真实目录一起传给 `rg`，有效结果虽已返回但命令仍以错误退出。Prevention：多根搜索前先用受控文件索引确认每个根目录存在；模块搜索只列真实 owner 目录，不能把插件名当作默认源码模块名。
 - 2026-07-22 P48.6 自然事件与低层导出混用错误：首版 PlayablePickup 同时声明自然 `OnBeginOverlap` 和显式 `avid_on_gameplay_event`，Guest IR 以 `ASCG1007` 拒绝编译器生成路由与手写导出冲突。Prevention：脚本采用自然 gameplay callback 时不得再声明统一 gameplay event export；只有完全自行解码低层事件时才实现 `avid_on_gameplay_event`，两种 authoring 模式必须互斥。
 - 2026-07-22 P48.6 emitter version 门禁漂移：P48.4 已把 artifact emitter version 升为 `48.4.0`，architecture gate 却仍要求 `47.3.0`，直到 P48.6 收尾才暴露。Prevention：任何生成 C# public surface 的变更必须在同一提交同步 `AvidScriptEditorCSharpBindingArtifact.h`、architecture gate 的精确版本与阶段文案，并实际运行 gate；禁止只更新 producer 版本。
+- 2026-07-22 流程设计提交命令封装错误：`functions.exec` 中的 `shell_command` 首次使用转义双引号包裹 Git commit message，外层 JavaScript 在 Git 执行前报 `SyntaxError`。Prevention：经 `functions.exec` 调用 PowerShell 的 Git commit message 固定使用 shell 单引号，避免在 JavaScript 字符串内嵌套转义双引号。
 - 2026-07-22 P48.7 .NET 测试宿主类型误判：看到 `*.Tests.csproj` 后直接运行 `dotnet test`，但五个项目都是自有 `OutputType=Exe` 测试宿主，命令只 restore、执行 0 个测试仍返回 0。Prevention：运行 .NET 测试前先读取 csproj；`Exe` 合同宿主统一用 `dotnet run --project ... -c Release` 并要求输出明确 passed/total，只有引用 Microsoft.NET.Test.Sdk 的项目才使用 `dotnet test`。
 - 2026-07-22 P48.7 workspace 文本断言行尾错误：完整 automation 在 Windows checkout 上仅失败于 `[AvidPersist]\n` 字面匹配，模板实际是正确的 CRLF，测试把行尾形式误当成 authoring 合同。Prevention：跨文件内容断言先将 `\r\n` 规范化为 `\n`；只有专门验证字节产物与编码时才锁定物理行尾，普通语义测试不得依赖 Git checkout 的 EOL 策略。
 - 2026-07-22 P48.6 成功热重载覆盖遗漏：PlayablePickup 的首版 `BeginPlay` 无条件清空持久化状态并恢复 Actor 外观，同时用例只验证失败回滚，没有覆盖已拾取状态下的成功 reload，导致候选运行时会覆盖迁移结果且丢失运行时本地计时器。Prevention：持久化脚本的候选 `BeginPlay` 必须在迁移后运行的语义下审计，禁止无条件初始化持久字段；运行时本地资源要按迁移状态重建，并为成功与失败 reload 各保留一条端到端用例。
