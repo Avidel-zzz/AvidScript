@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/phase-gate-evidence-v1.json",
+  "title": "AvidScript Phase Gate Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "producer",
+    "phase_id",
+    "run_id",
+    "verified",
+    "required_check_ids",
+    "checks",
+    "invocations",
+    "budget_exception_reason",
+    "completed_at_utc"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "AvidScript.PhaseGate" },
+        "version": { "const": "1.0" }
+      }
+    },
+    "phase_id": { "type": "integer", "minimum": 1, "maximum": 9999 },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "verified": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree", "state_path", "state_sha256"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitHash" },
+        "tree": { "$ref": "#/$defs/gitHash" },
+        "state_path": { "$ref": "#/$defs/repositoryPath" },
+        "state_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "required_check_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "passed",
+          "exit_code",
+          "completion_marker",
+          "log_path",
+          "log_sha256",
+          "counts"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+          "category": { "enum": ["Static", "DotNet", "PowerShell", "Build", "Automation", "Performance"] },
+          "passed": { "type": "boolean" },
+          "exit_code": { "type": "integer" },
+          "completion_marker": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "log_path": { "type": "string", "minLength": 1, "maxLength": 32768 },
+          "log_sha256": { "$ref": "#/$defs/sha256" },
+          "counts": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": [
+              "found",
+              "completed",
+              "succeeded",
+              "failed",
+              "not_run",
+              "queue_empty",
+              "test_exit",
+              "request_exit_status",
+              "process_exit_code"
+            ],
+            "properties": {
+              "found": { "type": "integer", "minimum": 0 },
+              "completed": { "type": "integer", "minimum": 0 },
+              "succeeded": { "type": "integer", "minimum": 0 },
+              "failed": { "type": "integer", "minimum": 0 },
+              "not_run": { "type": "integer", "minimum": 0 },
+              "queue_empty": { "type": "boolean" },
+              "test_exit": { "type": "boolean" },
+              "request_exit_status": { "type": "integer" },
+              "process_exit_code": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "invocations": { "$ref": "#/$defs/counters" },
+    "budget_exception_reason": { "type": "string", "maxLength": 4096 },
+    "completed_at_utc": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "gitHash": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ubt", "automation", "full_gate"],
+      "properties": {
+        "ubt": { "type": "integer", "minimum": 0 },
+        "automation": { "type": "integer", "minimum": 0 },
+        "full_gate": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1089,6 +1089,100 @@ if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMe
     -not $WamrBackendSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory() override')) {
     Add-Violation 'VM guest memory must be exposed through an optional backend capability implemented by WAMR'
 }
+
+$PhaseWorkflowCli = Read-RequiredFile 'Build/InvokePhaseWorkflow.ps1'
+$PhaseWorkflowState = Read-RequiredFile 'Build/PhaseWorkflow/AvidScriptPhaseState.ps1'
+$PhaseWorkflowEvidence = Read-RequiredFile 'Build/PhaseWorkflow/AvidScriptPhaseEvidence.ps1'
+$PhaseStateSchemaText = Read-RequiredFile 'Docs/Workflow/Phase_State.schema.json'
+$PhaseGateSchemaText = Read-RequiredFile 'Docs/Workflow/Phase_Gate_Evidence.schema.json'
+$PhaseWorkflowContractTests = Read-RequiredFile 'Tools/AvidScript.CSharpFrontend.Tests/PhaseWorkflowContractTests.ps1'
+foreach ($RequiredWorkflowCliContract in @(
+    'PhaseWorkflow\AvidScriptPhaseState.ps1',
+    'PhaseWorkflow\AvidScriptPhaseEvidence.ps1',
+    "'start'",
+    "'status'",
+    "'freeze'",
+    "'attest'",
+    "'close'",
+    'Write-Output "ERROR $Message"'
+)) {
+    if (-not $PhaseWorkflowCli.Contains($RequiredWorkflowCliContract)) {
+        Add-Violation "phase workflow CLI is missing contract $RequiredWorkflowCliContract"
+    }
+}
+$PhaseWorkflowDotSources = [regex]::Matches($PhaseWorkflowCli, '(?m)^\.\s+\(Join-Path\s+\$PSScriptRoot')
+if ($PhaseWorkflowDotSources.Count -ne 2) {
+    Add-Violation 'phase workflow CLI must dot-source exactly the state and evidence domain helpers'
+}
+foreach ($ForbiddenWorkflowDependency in @('UnrealEditor', 'Build.bat', 'RunUAT', 'BuildCookRun')) {
+    if ($PhaseWorkflowCli.Contains($ForbiddenWorkflowDependency) -or
+        $PhaseWorkflowState.Contains($ForbiddenWorkflowDependency) -or
+        $PhaseWorkflowEvidence.Contains($ForbiddenWorkflowDependency)) {
+        Add-Violation "phase workflow state/evidence layer must not invoke UE: $ForbiddenWorkflowDependency"
+    }
+}
+foreach ($RequiredStateContract in @(
+    'Write-AvidScriptPhaseStateAtomic',
+    'Test-AvidScriptPhaseState',
+    'Get-AvidScriptPhaseNextAction',
+    'File]::Replace',
+    'protected_dirty'
+)) {
+    if (-not $PhaseWorkflowState.Contains($RequiredStateContract)) {
+        Add-Violation "phase workflow state domain is missing contract $RequiredStateContract"
+    }
+}
+foreach ($RequiredEvidenceContract in @(
+    'Test-AvidScriptGateEvidence',
+    'Test-AvidScriptAttestationDiff',
+    'Test-AvidScriptPhasePrivacy',
+    'Invoke-AvidScriptPhaseClose',
+    'attestation commit parent is not the Gate verified commit'
+)) {
+    if (-not $PhaseWorkflowEvidence.Contains($RequiredEvidenceContract)) {
+        Add-Violation "phase workflow evidence domain is missing contract $RequiredEvidenceContract"
+    }
+}
+if (-not $PhaseWorkflowContractTests.Contains('Evidence.ValidAttestAndClose') -or
+    -not $PhaseWorkflowContractTests.Contains('Evidence.AttestationSourceChangeRejected') -or
+    -not $PhaseWorkflowContractTests.Contains('Transitions.ProtectedDirtyBaseline')) {
+    Add-Violation 'phase workflow contract tests do not cover close, source rejection, and protected dirty behavior'
+}
+try {
+    $PhaseStateSchema = $PhaseStateSchemaText | ConvertFrom-Json
+    $PhaseGateSchema = $PhaseGateSchemaText | ConvertFrom-Json
+    if ([int]$PhaseStateSchema.properties.schema_version.const -ne 1 -or
+        [int]$PhaseGateSchema.properties.schema_version.const -ne 1) {
+        Add-Violation 'phase workflow schemas must publish schema version 1'
+    }
+    if ([string]$PhaseStateSchema.title -cne 'AvidScript Phase State v1' -or
+        [string]$PhaseGateSchema.title -cne 'AvidScript Phase Gate Evidence v1') {
+        Add-Violation 'phase workflow schema titles differ from the v1 contract'
+    }
+}
+catch {
+    Add-Violation 'phase workflow schemas must be valid JSON'
+}
+$PhaseStateFiles = [System.IO.Directory]::GetFiles(
+    (Join-Path $PluginRoot 'Docs'),
+    'Phase*_State.json',
+    [System.IO.SearchOption]::AllDirectories)
+foreach ($PhaseStateFile in $PhaseStateFiles) {
+    $PhaseStateText = [System.IO.File]::ReadAllText($PhaseStateFile)
+    if ($PhaseStateText -match '(?i)[A-Z]:[\\/]+Users[\\/]+|-----BEGIN [A-Z ]*PRIVATE KEY-----') {
+        Add-Violation 'tracked phase state contains a private account path or private key marker'
+    }
+    try {
+        $PhaseStateJson = $PhaseStateText | ConvertFrom-Json
+        if ([int]$PhaseStateJson.schema_version -ne 1) {
+            Add-Violation 'tracked phase state does not use schema version 1'
+        }
+    }
+    catch {
+        Add-Violation 'tracked phase state is not valid JSON'
+    }
+}
+
 $PluginDescriptorPath = Join-Path $PluginRoot 'AvidScript.uplugin'
 if (-not [System.IO.File]::Exists($PluginDescriptorPath)) {
     Add-Violation 'missing AvidScript.uplugin'

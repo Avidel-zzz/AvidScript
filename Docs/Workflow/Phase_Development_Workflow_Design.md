@@ -354,16 +354,19 @@ Docs/Phase<Number>/Phase<Number>_State.json
 
 ### 15.3 命令状态机
 
-统一入口计划为：
+统一入口已经实现为：
 
 ```powershell
-./Build/InvokePhaseWorkflow.ps1 start
-./Build/InvokePhaseWorkflow.ps1 status
-./Build/InvokePhaseWorkflow.ps1 batch-complete
-./Build/InvokePhaseWorkflow.ps1 debt-add
-./Build/InvokePhaseWorkflow.ps1 freeze
-./Build/InvokePhaseWorkflow.ps1 gate
-./Build/InvokePhaseWorkflow.ps1 close
+./Build/InvokePhaseWorkflow.ps1 start -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 status -Phase <Number>
+./Build/InvokePhaseWorkflow.ps1 batch-complete -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 debt-add -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 debt-update -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 architecture-revise -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 freeze -Phase <Number> ...
+./Build/InvokePhaseWorkflow.ps1 attest -Phase <Number> -GateReportPath <Path>
+./Build/InvokePhaseWorkflow.ps1 close -Phase <Number>
+./Build/InvokePhaseWorkflow.ps1 reopen -Phase <Number> ...
 ```
 
 状态转换必须满足前置条件。例如：
@@ -371,16 +374,30 @@ Docs/Phase<Number>/Phase<Number>_State.json
 - 未冻结架构时不能进入实现批次。
 - 存在 Blocker 或 Critical 时不能完成当前批次。
 - 计划批次未完成时不能冻结代码。
-- Gate 只能验证冻结提交或其集中修复提交。
-- Close 只能接受验证当前提交的完整 Gate 结果。
+- Gate 只能验证包含 `gate_ready` 状态的冻结候选提交。
+- `attest` 只接受验证当前 `HEAD`、tree 和 state hash 的不可变 Gate 报告。
+- Close 只接受父提交恰好为 Gate verified commit 的单个 attestation commit。
 
 `status` 输出应足以让新的任务或重连后的执行者直接继续，不需要重建完整对话上下文。
 
-### 15.4 关闭门禁
+### 15.4 Gate 与 attestation 两提交模型
+
+Git commit 不能在自身内容中保存自己的 commit hash，因此阶段关闭采用可验证的两提交模型：
+
+1. 所有产品代码、测试和性能实现提交完成后执行 `freeze`，记录冻结前源码提交、tree 和输入 state hash。
+2. 提交 `gate_ready` 状态，形成 Gate candidate commit。
+3. 完整 Gate 只验证该 candidate commit，并把 commit、tree、state SHA-256、日志 hash、计数和退出状态写入仓库外不可变 JSON。
+4. 在 candidate commit 上执行 `attest`，状态记录 Gate identity 和 `attestation_parent`。
+5. 只允许一个 attestation commit 修改当前 Phase state、closeout 和归一化 Gate summary。
+6. Close 从当前 `HEAD` 推导真实 attestation commit，并证明其唯一父提交等于 Gate verified commit。
+
+`freeze.source_commit` 是执行 freeze 前已经提交的产品源码身份；Gate verified commit 是随后包含 `gate_ready` 状态的候选提交。`attestation_parent` 保存可提前知道的 verified commit，真实 attestation commit 只写入仓库外 Close evidence，避免任何提交自引用。
+
+### 15.5 关闭门禁
 
 Close 必须拒绝以下情况：
 
-- Gate 验证提交与当前提交不一致。
+- 当前提交不是 Gate verified commit 的直接 attestation 子提交。
 - 相关源码在验证后发生变化。
 - 仍存在 Blocker、Critical 或 Important 债务。
 - 测试数量、Automation 队列、退出码或完成标记不完整。
@@ -388,14 +405,14 @@ Close 必须拒绝以下情况：
 - 构建和测试调用超过阶段预算且没有风险升级说明。
 - 提交范围包含凭据、本机账户信息、私有路径或非必要生成文件。
 
-只有 Close 成功后，Phase 才能在计划和对外报告中标记为完成。
+Close 成功时只写仓库外不可变关闭证据，不再修改已验证或已确认的 tracked tree。只有 Close 成功后，Phase 才能在计划和对外报告中标记为完成。
 
-### 15.5 恢复协议
+### 15.6 恢复协议
 
 每次任务恢复固定执行：
 
 ```powershell
-./Build/InvokePhaseWorkflow.ps1 status
+./Build/InvokePhaseWorkflow.ps1 status -Phase <Number>
 ```
 
 Runner 比对状态文件、Git tree、检查点和最近报告：
@@ -405,9 +422,15 @@ Runner 比对状态文件、Git tree、检查点和最近报告：
 - 运行被中断时，只恢复具有完整前置证据的下一项。
 - 状态互相矛盾时停止 Close，但允许执行只读诊断和状态修复。
 
-在状态机尚未落地前，使用当前 Phase 计划和债务清单手工记录相同信息。该过渡规则已经写入 `AGENTS.md`。
+Phase 49 使用：
 
-### 15.6 可执行性边界
+```powershell
+./Build/InvokePhaseWorkflow.ps1 status -Phase 49
+```
+
+只有目标 Phase 的状态文件尚不存在时，才允许暂时读取当前计划和债务清单手工恢复；状态创建后不得以聊天记录覆盖机器状态。
+
+### 15.7 可执行性边界
 
 仓库指令约束代理行为，状态机保存事实，Gate Runner 产生证据，Close 阻止错误完成。任何单层都不能独立保证流程：
 

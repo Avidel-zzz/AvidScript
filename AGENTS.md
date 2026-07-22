@@ -148,7 +148,8 @@ Plugins/AvidScript/Docs
 - 独立代码审查安排在最终全量 automation 之前。审查修复后先运行受影响 focused tests，随后只运行一次最终全量 automation，避免“全量测试 -> 审查修改 -> 再全量测试”的重复成本。
 - 只有 ABI、guest memory、状态迁移、生命周期事务、崩溃或数据损坏风险，以及需要先确认根因的真实回归，才允许在批次中途立即编译或运行聚焦测试。即使属于例外，也应合并同一风险面的修改后再执行。
 - 批量验证不等于把反馈无限推迟到数小时任务末尾。单个批次不得跨越多个相互独立的架构层，也不得以减少测试时间为理由跳过最终门禁、清理 Editor Target 或降低成功判定标准。
-- 在阶段状态机实现前，每个实现批次完成、风险升级、代码冻结和 Gate 结束后，都必须在当前 Phase 计划或债务清单中记录状态与下一步。状态机实现后，必须先运行 `Build/InvokePhaseWorkflow.ps1 status`，并只通过该脚本执行 freeze、gate 和 close；没有验证当前提交的有效 Gate 报告时不得宣布 Phase 完成。
+- 每次开始新任务、网络重连或上下文压缩恢复后，第一条仓库命令必须是 `Build/InvokePhaseWorkflow.ps1 status -Phase <当前Phase>`；当前 Phase 49 固定使用 `Build/InvokePhaseWorkflow.ps1 status -Phase 49`。只有对应 state 文件尚不存在时才允许回退到计划/债务文档，并在状态机可用后立即自举。
+- 状态创建后只通过 `Build/InvokePhaseWorkflow.ps1` 执行 batch、debt、architecture revision、freeze、attest、close 和 reopen。完整 Gate 验证 `gate_ready` 候选提交；Gate 后只允许一个受限 attestation commit，没有匹配 commit/tree/state hash 的不可变 Gate 报告时不得宣布 Phase 完成。
 
 ## C# Guest Toolchain Workflow
 
@@ -945,3 +946,15 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-23 P49 规划期 PowerShell 通配路径误用：首次检索 C# 工具源码时把 `Tools/AvidScript.CSharp*` 直接作为 `rg` 路径参数，Windows 下该通配路径未展开，命令在读取源码前失败。Prevention：`rg` 搜索从已确认存在的字面目录开始，文件范围使用 `-g`；禁止把 shell 通配符放进路径参数。
 - 2026-07-23 P49 规划自审单命令规范复发：恢复工作后把 `git status`、branch 和 HEAD 查询用分号塞进一次 shell 调用，违反每个 shell 调用只执行一个逻辑命令的规则。Prevention：即使查询只读且相关，也必须拆成独立 `shell_command` 并通过并行调度聚合；不得以减少调用为由拼接命令。
 - 2026-07-23 P49 暂存隐私扫描退出码误判：把“无匹配即成功”的 `rg` 隐私扫描直接放进并行检查，`rg` 的正常 no-match 退出码 1 使调度层丢弃了整组展示结果。Prevention：否定式扫描使用无匹配仍返回成功的结构化包装或 `Select-String`，并单独断言匹配集合为空；不能把搜索工具的 no-match 直接当命令失败传播。
+- 2026-07-23 P49 PowerShell 5 解析命令变量展开复发：用外层 PowerShell 双引号传递 `powershell.exe -Command` 脚本，`$files`、`$errors` 等变量在子进程启动前被外层展开为空，导致解析器命令自身报语法错误且没有读取目标文件。Prevention：嵌套 PowerShell 脚本整体使用外层单引号参数，或写入受版本管理的测试入口后用 `-File` 调用；包含 `$` 的子脚本禁止放在外层双引号中。
+- 2026-07-23 P49 合同测试变量冒号插值错误：测试失败文案写成 `$ExpectedCode:`，PowerShell 将冒号解释为变量作用域/drive 语法，脚本在执行前解析失败。Prevention：双引号字符串中变量后紧跟冒号或其他可参与变量名解析的字符时固定使用 `${ExpectedCode}:` 形式，并在运行合同前解析全部新增 PowerShell 文件。
+- 2026-07-23 P49 临时 Git 夹具继承换行配置错误：PhaseWorkflow 合同仓库继承本机 `core.autocrlf`，`git add` 的 LF/CRLF 警告在 Windows PowerShell 5 的 `ErrorActionPreference=Stop` 下被升级为终止错误，测试未进入状态机。Prevention：所有自建 Git 合同夹具在写入文件前固定本地 `core.autocrlf=false`，同时配置夹具身份，避免测试结果依赖用户全局 Git 设置。
+- 2026-07-23 P49 CLI 数组与错误输出进程边界误判：合同宿主通过 `powershell.exe -File` 传递多个 `-BatchId` 裸值时，后续值被当作无归属位置参数；同时 `Write-Error` 在父进程中转成格式化 ErrorRecord，截断了稳定诊断。Prevention：跨进程数组参数使用单个逗号分隔值并由 CLI 明确拆分校验；预期业务拒绝输出单行普通文本并用退出码 1 表达，不依赖 PowerShell 错误流格式。
+- 2026-07-23 P49 Windows PowerShell 原子替换重载误判：状态写入首版调用 `.NET File.Replace(temp, destination, $null)`，在 Windows PowerShell 5/.NET Framework 中空 backup 路径被判为非法，首次状态更新失败。Prevention：跨 PowerShell 5/7 的同目录原子替换使用真实随机 backup 路径和四参数重载，成功后删除 backup，`finally` 同时清理 temp/backup；新增文件仍使用同目录原子 move。
+- 2026-07-23 P49 确定性 JSON 行尾遗漏：状态写入首版直接使用 Windows PowerShell 5 `ConvertTo-Json` 输出，内部为 CRLF；Git 提交内容读取按 LF 重组后，verified state SHA-256 与工作区原始字节不一致。Prevention：所有参与哈希、提交和证据验证的 JSON 在 UTF-8 无 BOM 写入前先把 `CRLF/CR` 统一为 LF，哈希必须针对最终落盘字节语义。
+- 2026-07-23 P49 Git porcelain 前导空格破坏：通用 Git 包装器对全部输出调用 `.Trim()`，把 `git status --porcelain` 首条记录的前导索引列空格删除，protected dirty 解析随即拒绝合法的 ` M path`。Prevention：通用进程/Git 适配器不得修剪结构化输出；保留字节/行语义，由 `rev-parse` 等具体消费者在明确协议下处理结尾。
+- 2026-07-23 P49 Git AllowFailure 错误流遗漏：`git show HEAD:<untracked>` 的预期非零本应返回空 head baseline，但 Windows PowerShell 5 在 `ErrorActionPreference=Stop` 下先把 native stderr 升级成异常，绕过了退出码分支。Prevention：native 进程适配器在最小作用域内临时用 `Continue` 捕获合并输出与 `$LASTEXITCODE`，立即恢复调用方策略，再由 `AllowFailure` 合同决定返回或抛出。
+- 2026-07-23 P49 架构门禁补丁上下文误判：首次插入 PhaseWorkflow 门禁时把相邻的双条件 `if` 记成单条件，`apply_patch` 预检未找到锚点并安全拒绝。Prevention：对千行级门禁文件追加区块前先用唯一诊断文案和目标变量执行 `rg -C`，按读取到的完整条件块作为补丁上下文，不依赖先前输出片段。
+- 2026-07-23 P49 否定式 `rg` 并行检查再次复发：P49.0A 暂存前审查又把预期无 TODO 命中的 `rg` 放进并行工具组，使正常退出码 1 再次让调度层丢弃整组输出。Prevention：本仓库所有“应无匹配”的检查固定使用 `Get-ChildItem | Select-String` 并检查空结果；`rg` 只用于预期至少一个结果或单独显式处理退出码的查询。
+- 2026-07-23 P49 Close 状态推导与身份复核遗漏：P49.0A 首轮实现让 `status` 只凭关闭文件存在就报告 closed，并且 Close 只比较报告 hash/run id，没有再次逐项比较 state 中的 verified commit/tree。Prevention：任何终态必须解析并验证完整外部证据、当前 HEAD/tree 和 state identity；文件存在不能代表有效，冗余身份字段必须全部一致后才允许关闭。
+- 2026-07-23 P49 严格字段校验对象模型误判：新增 additional-properties 防御时只读取 `PSObject.Properties`，但初始化阶段的 `[ordered]` 是 `IDictionary`，其键不会作为普通属性枚举，导致所有合法 batch 被误判缺少 `id`。Prevention：跨 JSON/内存对象校验必须同时支持 `IDictionary.Keys` 与 `PSCustomObject.PSObject.Properties`，并用完整 start 合同验证两种表示。
