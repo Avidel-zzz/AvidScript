@@ -1,5 +1,6 @@
 #include "CSharpBuild/AvidScriptEditorCSharpBuildPipeline.h"
 
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptFrontendReport.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBindingSliceService.h"
@@ -99,6 +100,9 @@ void ApplyAvidScriptCSharpBuildPipelineOutcome(
 		Plan.RuntimeBindingPackagePath,
 		InvocationCounts,
 		OutResult);
+	OutResult.BindingSelectionHash = Plan.BindingSelectionHash;
+	OutResult.bReusedAuthorizationBindingPackage =
+		Plan.bReusedAuthorizationBindingPackage;
 }
 
 void CopyAvidScriptCSharpSemanticCacheAudit(
@@ -287,16 +291,20 @@ bool ValidateAvidScriptCSharpBuildPackagePath(
 }
 } // namespace
 
-bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
-	const FAvidScriptEditorCSharpBuildConfig& Config,
+static bool PrepareAvidScriptCSharpBuildPipeline(
+	const FAvidScriptEditorCSharpBuildRequest& Request,
 	FAvidScriptEditorCSharpBuildPlan& OutPlan,
 	FAvidScriptEditorCSharpBuildResult& OutResult)
 {
 	OutPlan = FAvidScriptEditorCSharpBuildPlan();
 	OutResult = FAvidScriptEditorCSharpBuildResult();
+	OutPlan.AuthorizationBindingProfile = Request.AuthorizationBindingProfile;
+	OutPlan.BindingSelectionHash = Request.BindingSelectionHash;
+	OutPlan.bUsesEngineGameplayBindingProfile =
+		Request.bUsesEngineGameplayBindingProfile;
 
 #if PLATFORM_WINDOWS
-	FAvidScriptEditorCSharpBuildConfig NormalizedConfig = Config;
+	FAvidScriptEditorCSharpBuildConfig NormalizedConfig = Request.Config;
 	if (NormalizedConfig.BuildScriptPath.IsEmpty())
 	{
 		NormalizedConfig.BuildScriptPath =
@@ -369,6 +377,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 		OutPlan.RuntimeBindingPackagePath,
 		FAvidScriptCSharpBuildInvocationCounts(),
 		OutResult);
+	OutResult.BindingSelectionHash = OutPlan.BindingSelectionHash;
 
 	if (NormalizedConfig.BuildScriptPath.IsEmpty()
 		|| !FPaths::FileExists(NormalizedConfig.BuildScriptPath))
@@ -408,9 +417,20 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 	}
 
 	const bool bRequiresGeneratedBindingPackage =
-		!NormalizedConfig.SourcePath.Equals(
+		!OutPlan.bUsesEngineGameplayBindingProfile
+		|| !NormalizedConfig.SourcePath.Equals(
 			FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath(),
 			ESearchCase::IgnoreCase);
+	if (!OutPlan.bUsesEngineGameplayBindingProfile
+		&& !OutPlan.AuthorizationBindingPackagePath.IsEmpty())
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("binding_profile_package_override_invalid"),
+			TEXT("Project binding profiles cannot use an unattested explicit authorization package."),
+			TEXT("remove binding_package_path so the profile publishes a content-addressed package"),
+			OutResult);
+		return false;
+	}
 	OutPlan.bAutomaticBindingSlice =
 		bRequiresGeneratedBindingPackage
 		&& OutPlan.AuthorizationBindingPackagePath.IsEmpty();
@@ -429,7 +449,9 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 	if (OutPlan.bAutomaticBindingSlice)
 	{
 		FAvidScriptCSharpBindingEmitResult BindingEmitResult;
-		if (!FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(
+		if (!FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+				OutPlan.AuthorizationBindingProfile,
+				FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot(),
 				BindingEmitResult))
 		{
 			SetAvidScriptCSharpBuildPipelineFailure(
@@ -437,7 +459,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 					? FString(TEXT("binding_package_publish_failed"))
 					: BindingEmitResult.ErrorCategory,
 				BindingEmitResult.ErrorMessage.IsEmpty()
-					? FString(TEXT("Engine gameplay C# binding package could not be published."))
+					? FString(TEXT("C# authorization binding package could not be published."))
 					: BindingEmitResult.ErrorMessage,
 				BindingEmitResult.NextAction.IsEmpty()
 					? FString(TEXT("repair the reflected binding selection and retry the custom C# build"))
@@ -445,6 +467,8 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 				OutResult);
 			return false;
 		}
+		OutPlan.bReusedAuthorizationBindingPackage =
+			BindingEmitResult.bReusedExistingPackage;
 		OutPlan.AuthorizationBindingPackagePath =
 			NormalizeAvidScriptCSharpBuildPipelinePathCopy(
 				BindingEmitResult.ManifestPath);
@@ -456,6 +480,9 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 			FString(),
 			FAvidScriptCSharpBuildInvocationCounts(),
 			OutResult);
+		OutResult.BindingSelectionHash = OutPlan.BindingSelectionHash;
+		OutResult.bReusedAuthorizationBindingPackage =
+			OutPlan.bReusedAuthorizationBindingPackage;
 	}
 
 	if (!ValidateAvidScriptCSharpBuildPackagePath(
@@ -510,6 +537,32 @@ bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
 		OutResult);
 	return false;
 #endif
+}
+
+bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
+	const FAvidScriptEditorCSharpBuildConfig& Config,
+	FAvidScriptEditorCSharpBuildPlan& OutPlan,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	FAvidScriptEditorCSharpBuildRequest Request;
+	Request.Config = Config;
+	Request.AuthorizationBindingProfile =
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
+	return PrepareAvidScriptCSharpBuildPipeline(
+		Request,
+		OutPlan,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBuildPipeline::Prepare(
+	const FAvidScriptEditorCSharpBuildRequest& Request,
+	FAvidScriptEditorCSharpBuildPlan& OutPlan,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	return PrepareAvidScriptCSharpBuildPipeline(
+		Request,
+		OutPlan,
+		OutResult);
 }
 
 bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(

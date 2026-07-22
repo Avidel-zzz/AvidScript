@@ -1,5 +1,7 @@
 #include "AvidScriptEditorCSharpProfileService.h"
 
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
+
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -64,7 +66,234 @@ bool TryGetAvidScriptCSharpProfileStringField(
 		return false;
 	}
 
-	return Object->TryGetStringField(FieldName, OutValue) && !OutValue.IsEmpty();
+	const TSharedPtr<FJsonValue> Value = Object->TryGetField(FieldName);
+	return Value.IsValid()
+		&& Value->Type == EJson::String
+		&& Value->TryGetString(OutValue)
+		&& !OutValue.IsEmpty();
+}
+
+TSharedPtr<FJsonObject> TryGetAvidScriptCSharpProfileObjectValue(
+	const TSharedPtr<FJsonValue>& Value)
+{
+	const TSharedPtr<FJsonObject>* Object = nullptr;
+	return Value.IsValid()
+		&& Value->TryGetObject(Object)
+		&& Object != nullptr
+		? *Object
+		: nullptr;
+}
+
+bool TryGetAvidScriptCSharpProfileStringArray(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* FieldName,
+	TArray<FString>& OutValues,
+	FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+{
+	OutValues.Empty();
+	if (!Object.IsValid() || !Object->HasField(FieldName))
+	{
+		return true;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+	if (!Object->TryGetArrayField(FieldName, Values) || Values == nullptr)
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("binding_profile_array_invalid"),
+			FString::Printf(TEXT("C# binding_profile field %s must be an array."), FieldName),
+			TEXT("replace the field with an array of non-empty strings"),
+			OutResult);
+		return false;
+	}
+	for (const TSharedPtr<FJsonValue>& Value : *Values)
+	{
+		FString Text;
+		if (!Value.IsValid()
+			|| Value->Type != EJson::String
+			|| !Value->TryGetString(Text)
+			|| Text.IsEmpty())
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_array_value_invalid"),
+				FString::Printf(TEXT("C# binding_profile field %s contains a non-string or empty value."), FieldName),
+				TEXT("keep only non-empty string values in the array"),
+				OutResult);
+			return false;
+		}
+		OutValues.Add(MoveTemp(Text));
+	}
+	return true;
+}
+
+bool TryGetAvidScriptCSharpProfileNameArray(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* FieldName,
+	TArray<FName>& OutValues,
+	FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+{
+	TArray<FString> StringValues;
+	if (!TryGetAvidScriptCSharpProfileStringArray(Object, FieldName, StringValues, OutResult))
+	{
+		return false;
+	}
+	OutValues.Empty();
+	for (const FString& Value : StringValues)
+	{
+		OutValues.Add(FName(*Value));
+	}
+	return true;
+}
+
+bool ParseAvidScriptCSharpProjectBindingProfile(
+	const TSharedPtr<FJsonObject>& Object,
+	FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+{
+	if (!Object.IsValid())
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("binding_profile_invalid"),
+			TEXT("C# profile binding_profile must be an object."),
+			TEXT("provide a binding_profile object or remove it to use EngineGameplay"),
+			OutResult);
+		return false;
+	}
+
+	FAvidScriptProjectBindingProfileSpec Spec;
+	if (!TryGetAvidScriptCSharpProfileStringField(Object, TEXT("package_name"), Spec.PackageName))
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("binding_profile_package_missing"),
+			TEXT("C# binding_profile requires package_name."),
+			TEXT("set a stable package_name for generated bindings"),
+			OutResult);
+		return false;
+	}
+	if (!TryGetAvidScriptCSharpProfileStringArray(Object, TEXT("module_paths"), Spec.ModulePaths, OutResult))
+	{
+		return false;
+	}
+
+	if (Object->HasField(TEXT("classes")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Classes = nullptr;
+		if (!Object->TryGetArrayField(TEXT("classes"), Classes) || Classes == nullptr)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_classes_invalid"),
+				TEXT("C# binding_profile classes must be an array."),
+				TEXT("replace classes with an array of class selection objects"),
+				OutResult);
+			return false;
+		}
+		for (const TSharedPtr<FJsonValue>& ClassValue : *Classes)
+		{
+			const TSharedPtr<FJsonObject> ClassObject =
+				TryGetAvidScriptCSharpProfileObjectValue(ClassValue);
+			FAvidScriptReflectedClassSelection ClassSelection;
+			if (!ClassObject.IsValid()
+				|| !TryGetAvidScriptCSharpProfileStringField(ClassObject, TEXT("class_path"), ClassSelection.OwnerClassPath)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_functions"), ClassSelection.IncludeFunctions, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_functions"), ClassSelection.ExcludeFunctions, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_properties"), ClassSelection.IncludeProperties, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_properties"), ClassSelection.ExcludeProperties, OutResult))
+			{
+				if (OutResult.ErrorCategory.IsEmpty())
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_class_invalid"),
+						TEXT("Each C# binding_profile class requires class_path and valid member arrays."),
+						TEXT("fix or remove the invalid class selection object"),
+						OutResult);
+				}
+				return false;
+			}
+			if (ClassObject->HasField(TEXT("discover_readable_properties"))
+				&& !ClassObject->TryGetBoolField(
+					TEXT("discover_readable_properties"),
+					ClassSelection.bDiscoverReadableProperties))
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_discovery_invalid"),
+					TEXT("discover_readable_properties must be true or false."),
+					TEXT("use a JSON boolean for discover_readable_properties"),
+					OutResult);
+				return false;
+			}
+			Spec.Classes.Add(MoveTemp(ClassSelection));
+		}
+	}
+
+	if (Object->HasField(TEXT("class_references")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* ClassReferences = nullptr;
+		if (!Object->TryGetArrayField(TEXT("class_references"), ClassReferences) || ClassReferences == nullptr)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_class_references_invalid"),
+				TEXT("C# binding_profile class_references must be an array."),
+				TEXT("replace class_references with an array of class reference objects"),
+				OutResult);
+			return false;
+		}
+		for (const TSharedPtr<FJsonValue>& ClassReferenceValue : *ClassReferences)
+		{
+			const TSharedPtr<FJsonObject> ClassReferenceObject =
+				TryGetAvidScriptCSharpProfileObjectValue(ClassReferenceValue);
+			FAvidScriptProjectBindingClassSpec ClassReference;
+			if (!ClassReferenceObject.IsValid()
+				|| !TryGetAvidScriptCSharpProfileStringField(ClassReferenceObject, TEXT("script_name"), ClassReference.ScriptName)
+				|| !TryGetAvidScriptCSharpProfileStringField(ClassReferenceObject, TEXT("class_path"), ClassReference.ClassPath)
+				|| !TryGetAvidScriptCSharpProfileStringField(ClassReferenceObject, TEXT("base_class_path"), ClassReference.BaseClassPath))
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_class_reference_invalid"),
+					TEXT("Each class reference requires script_name, class_path, and base_class_path."),
+					TEXT("complete or remove the invalid class reference object"),
+					OutResult);
+				return false;
+			}
+			FString LoadPolicy;
+			if (ClassReferenceObject->HasField(TEXT("load_policy")))
+			{
+				if (!TryGetAvidScriptCSharpProfileStringField(
+						ClassReferenceObject,
+						TEXT("load_policy"),
+						LoadPolicy))
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_class_reference_load_policy_invalid"),
+						TEXT("Class reference load_policy must be a non-empty string."),
+						TEXT("use EditorLoad or CookRequired, or omit load_policy to use EditorLoad"),
+						OutResult);
+					return false;
+				}
+				ClassReference.LoadPolicy = MoveTemp(LoadPolicy);
+			}
+			Spec.ClassReferences.Add(MoveTemp(ClassReference));
+		}
+	}
+
+	FAvidScriptBindingSelectionResolveResult ResolveResult;
+	if (!FAvidScriptEditorProjectBindingProfile::Resolve(
+		Spec,
+		OutResult.ResolvedBindingSelection,
+		OutResult.ResolvedClassReferences,
+		OutResult.BindingSelectionHash,
+		ResolveResult))
+	{
+		SetAvidScriptCSharpProfileFailure(
+			ResolveResult.ErrorCategory,
+			ResolveResult.ErrorMessage,
+			ResolveResult.NextAction,
+			OutResult);
+		return false;
+	}
+
+	OutResult.BindingSelectionValidation = MoveTemp(ResolveResult);
+	OutResult.bUsesEngineGameplayBindingProfile = false;
+	OutResult.ProjectBindingProfile = MoveTemp(Spec);
+	return true;
 }
 
 FString MakeAvidScriptCSharpProfileSafeToken(const FString& RawValue, const FString& Fallback)
@@ -119,6 +348,17 @@ FString GetAvidScriptCSharpProfileTemplateOutputRoot()
 		AvidScriptDefaultCSharpProfileTemplateArtifactStem));
 }
 
+FString MakeAvidScriptCSharpProfileTemplateStoredPath(const FString& Path)
+{
+	FString StoredPath = NormalizeAvidScriptCSharpProfilePath(Path);
+	FString ProjectDirectory = NormalizeAvidScriptCSharpProfilePath(FPaths::ProjectDir());
+	if (FPaths::MakePathRelativeTo(StoredPath, *ProjectDirectory))
+	{
+		FPaths::NormalizeFilename(StoredPath);
+	}
+	return StoredPath;
+}
+
 void FillAvidScriptCSharpProfileTemplateResult(
 	const FString& ProfilePath,
 	FAvidScriptEditorCSharpProfileTemplateResult& OutResult)
@@ -140,16 +380,28 @@ bool SerializeAvidScriptCSharpProfileTemplate(
 	FString& OutJsonText)
 {
 	const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-	Object->SetNumberField(TEXT("schema_version"), 1.0);
+	Object->SetNumberField(TEXT("schema_version"), 2.0);
 	Object->SetStringField(TEXT("language"), TEXT("csharp"));
-	Object->SetStringField(TEXT("source_path"), TemplateResult.SourcePath);
-	Object->SetStringField(TEXT("project_path"), TemplateResult.ProjectPath);
+	Object->SetStringField(
+		TEXT("source_path"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.SourcePath));
+	Object->SetStringField(
+		TEXT("project_path"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.ProjectPath));
 	Object->SetStringField(TEXT("module_id"), TemplateResult.ModuleId);
 	Object->SetStringField(TEXT("artifact_stem"), TemplateResult.ArtifactStem);
-	Object->SetStringField(TEXT("output_root"), TemplateResult.OutputRoot);
-	Object->SetStringField(TEXT("report_path"), TemplateResult.ReportPath);
-	Object->SetStringField(TEXT("manifest_path"), TemplateResult.ManifestPath);
-	Object->SetStringField(TEXT("build_script_path"), TemplateResult.BuildScriptPath);
+	Object->SetStringField(
+		TEXT("output_root"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.OutputRoot));
+	Object->SetStringField(
+		TEXT("report_path"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.ReportPath));
+	Object->SetStringField(
+		TEXT("manifest_path"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.ManifestPath));
+	Object->SetStringField(
+		TEXT("build_script_path"),
+		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.BuildScriptPath));
 	Object->SetStringField(TEXT("configuration"), TemplateResult.Configuration);
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJsonText);
@@ -300,15 +552,17 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	}
 
 	double SchemaVersion = 0.0;
-	if (!ProfileObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion) || static_cast<int32>(SchemaVersion) != 1)
+	if (!ProfileObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
+		|| (SchemaVersion != 1.0 && SchemaVersion != 2.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be 1."),
-			TEXT("update the profile JSON to schema_version 1"),
+			TEXT("C# profile schema_version must be 1 or 2."),
+			TEXT("update the profile JSON to schema_version 2"),
 			OutResult);
 		return false;
 	}
+	OutResult.SchemaVersion = static_cast<int32>(SchemaVersion);
 
 	FString Language;
 	if (!TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("language"), Language) || !Language.Equals(TEXT("csharp"), ESearchCase::IgnoreCase))
@@ -410,7 +664,50 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		? Configuration
 		: FString(TEXT("Release"));
 
+	OutResult.ResolvedBindingSelection =
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
+	if (OutResult.SchemaVersion == 1 && ProfileObject->HasField(TEXT("binding_profile")))
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("binding_profile_schema_unsupported"),
+			TEXT("C# profile schema_version 1 cannot declare binding_profile."),
+			TEXT("upgrade schema_version to 2 or remove binding_profile"),
+			OutResult);
+		return false;
+	}
+	if (OutResult.SchemaVersion == 2 && ProfileObject->HasField(TEXT("binding_profile")))
+	{
+		const TSharedPtr<FJsonObject>* BindingProfileObject = nullptr;
+		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)
+			|| BindingProfileObject == nullptr
+			|| !ParseAvidScriptCSharpProjectBindingProfile(*BindingProfileObject, OutResult))
+		{
+			if (OutResult.ErrorCategory.IsEmpty())
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_invalid"),
+					TEXT("C# profile binding_profile must be a valid object."),
+					TEXT("fix binding_profile or remove it to use EngineGameplay"),
+					OutResult);
+			}
+			return false;
+		}
+	}
+
 	OutResult.BuildConfig = MoveTemp(Config);
 	OutResult.bSucceeded = true;
 	return true;
+}
+
+FAvidScriptEditorCSharpBuildRequest
+FAvidScriptEditorCSharpProfileService::MakeBuildRequest(
+	const FAvidScriptEditorCSharpProfileLoadResult& Profile)
+{
+	FAvidScriptEditorCSharpBuildRequest Request;
+	Request.Config = Profile.BuildConfig;
+	Request.AuthorizationBindingProfile = Profile.ResolvedBindingSelection;
+	Request.BindingSelectionHash = Profile.BindingSelectionHash;
+	Request.bUsesEngineGameplayBindingProfile =
+		Profile.bUsesEngineGameplayBindingProfile;
+	return Request;
 }

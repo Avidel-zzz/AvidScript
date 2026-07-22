@@ -541,7 +541,9 @@ bool FAvidScriptEditorModule::ExecuteCSharpProfileBuildAndBinding(
 		return false;
 	}
 
-	if (!FAvidScriptEditorCSharpBuildService::BuildProfile(ProfileResult.BuildConfig, OutBuildResult))
+	if (!FAvidScriptEditorCSharpBuildService::BuildProfile(
+			FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult),
+			OutBuildResult))
 	{
 		return false;
 	}

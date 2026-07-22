@@ -40,7 +40,7 @@ public:
 		const FString&,
 		FAvidScriptEditorCSharpProfileLoadResult&)>;
 	using FBuildProfile = TFunction<bool(
-		const FAvidScriptEditorCSharpBuildConfig&,
+		const FAvidScriptEditorCSharpBuildRequest&,
 		FAvidScriptEditorCSharpBuildResult&)>;
 	using FApplyReport = TFunction<bool(
 		const FString&,

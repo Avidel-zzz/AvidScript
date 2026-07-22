@@ -18,10 +18,14 @@ struct FAvidScriptEditorCSharpBuildPlan
 	FAvidScriptEditorCSharpBuildResult BootstrapResult;
 	FString AuthorizationBindingPackagePath;
 	FString RuntimeBindingPackagePath;
+	FAvidScriptBindingSelectionProfile AuthorizationBindingProfile;
+	FString BindingSelectionHash;
 	FString BootstrapRoot;
 	FString ArtifactBackupRoot;
 	TArray<FAvidScriptEditorCSharpBuildArtifactBackup> ArtifactBackups;
 	bool bAutomaticBindingSlice = false;
+	bool bUsesEngineGameplayBindingProfile = true;
+	bool bReusedAuthorizationBindingPackage = false;
 	bool bBootstrapCompleted = false;
 	bool bArtifactTransactionActive = false;
 };
@@ -31,6 +35,11 @@ class FAvidScriptEditorCSharpBuildPipeline
 public:
 	static bool Prepare(
 		const FAvidScriptEditorCSharpBuildConfig& Config,
+		FAvidScriptEditorCSharpBuildPlan& OutPlan,
+		FAvidScriptEditorCSharpBuildResult& OutResult);
+
+	static bool Prepare(
+		const FAvidScriptEditorCSharpBuildRequest& Request,
 		FAvidScriptEditorCSharpBuildPlan& OutPlan,
 		FAvidScriptEditorCSharpBuildResult& OutResult);
 

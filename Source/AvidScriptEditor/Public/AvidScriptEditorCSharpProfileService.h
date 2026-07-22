@@ -1,17 +1,25 @@
 #pragma once
 
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorProjectBindingProfile.h"
 
 #include "CoreMinimal.h"
 
 struct FAvidScriptEditorCSharpProfileLoadResult
 {
 	bool bSucceeded = false;
+	int32 SchemaVersion = 0;
+	bool bUsesEngineGameplayBindingProfile = true;
 	FString ErrorCategory;
 	FString ErrorMessage;
 	FString NextAction;
 	FString NormalizedProfilePath;
 	FAvidScriptEditorCSharpBuildConfig BuildConfig;
+	FAvidScriptProjectBindingProfileSpec ProjectBindingProfile;
+	FAvidScriptBindingSelectionProfile ResolvedBindingSelection;
+	FAvidScriptBindingSelectionResolveResult BindingSelectionValidation;
+	TArray<FAvidScriptProjectBindingClassSpec> ResolvedClassReferences;
+	FString BindingSelectionHash;
 };
 
 struct FAvidScriptEditorCSharpProfileTemplateResult
@@ -50,4 +58,7 @@ public:
 	static bool LoadProfile(
 		const FString& ProfilePath,
 		FAvidScriptEditorCSharpProfileLoadResult& OutResult);
+
+	static FAvidScriptEditorCSharpBuildRequest MakeBuildRequest(
+		const FAvidScriptEditorCSharpProfileLoadResult& Profile);
 };

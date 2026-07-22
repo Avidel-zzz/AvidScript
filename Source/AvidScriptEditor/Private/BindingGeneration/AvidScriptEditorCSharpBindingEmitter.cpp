@@ -371,10 +371,25 @@ bool FAvidScriptEditorCSharpBindingEmitter::EmitEngineGameplay(
 	FString& OutManifestJson,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return EmitProfile(
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+		OutDescriptorJson,
+		OutReferenceSource,
+		OutManifestJson,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	FString& OutDescriptorJson,
+	FString& OutReferenceSource,
+	FString& OutManifestJson,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
-		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+		Profile,
 		OutDescriptorJson,
 		SelectionResult,
 		DescriptorResult))
@@ -455,11 +470,22 @@ bool FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(
 	const FString& OutputRoot,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return PublishProfile(
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+		OutputRoot,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FString Descriptor;
 	FString Source;
 	FString Manifest;
 	FAvidScriptCSharpBindingEmitResult EmitResult;
-	if (!EmitEngineGameplay(Descriptor, Source, Manifest, EmitResult))
+	if (!EmitProfile(Profile, Descriptor, Source, Manifest, EmitResult))
 	{
 		OutResult = MoveTemp(EmitResult);
 		return false;

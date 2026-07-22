@@ -1,0 +1,374 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "AvidScriptEditorBindingSelectionResolver.h"
+#include "AvidScriptEditorProjectBindingProfile.h"
+#include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
+
+#include "Algo/Reverse.h"
+#include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
+
+#include <initializer_list>
+
+namespace
+{
+bool IsProjectProfileSha256(const FString& Value)
+{
+	if (Value.Len() != 64)
+	{
+		return false;
+	}
+	for (const TCHAR Character : Value)
+	{
+		if (!FChar::IsDigit(Character) && (Character < TEXT('a') || Character > TEXT('f')))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+FAvidScriptReflectedClassSelection MakeProjectProfileClassRule(
+	const FString& ClassPath,
+	std::initializer_list<const TCHAR*> Functions)
+{
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath = ClassPath;
+	for (const TCHAR* Function : Functions)
+	{
+		Rule.IncludeFunctions.Add(FName(Function));
+	}
+	return Rule;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileStableResolutionTest,
+	"AvidScript.Editor.ProjectBindingProfile.StableResolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileStableResolutionTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec FirstSpec;
+	FirstSpec.PackageName = TEXT("avidscript.project.stable");
+	FirstSpec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Pawn"),
+		{ TEXT("AddMovementInput") }));
+	FirstSpec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("SetActorScale3D"), TEXT("K2_GetActorLocation") }));
+	FirstSpec.Classes[1].ExcludeFunctions.Add(FName(TEXT("K2_SetActorLocation")));
+	FirstSpec.ClassReferences.Add({
+		TEXT("ProjectileClass"),
+		TEXT("/Script/Engine.StaticMeshActor"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+	FirstSpec.ClassReferences.Add({
+		TEXT("LightClass"),
+		TEXT("/Script/Engine.PointLight"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+
+	FAvidScriptBindingSelectionProfile FirstSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> FirstClassReferences;
+	FString FirstHash;
+	FAvidScriptBindingSelectionResolveResult FirstResult;
+	TestTrue(
+		TEXT("Project profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			FirstSpec,
+			FirstSelection,
+			FirstClassReferences,
+			FirstHash,
+			FirstResult));
+	TestTrue(TEXT("Project profile result succeeds"), FirstResult.bSucceeded);
+	TestEqual(TEXT("Project profile keeps two classes"), FirstSelection.Classes.Num(), 2);
+	TestEqual(TEXT("Project profile keeps two class references"), FirstClassReferences.Num(), 2);
+	TestTrue(TEXT("Project profile hash is SHA-256"), IsProjectProfileSha256(FirstHash));
+	if (FirstSelection.Classes.Num() == 2)
+	{
+		TestEqual(
+			TEXT("Actor class sorts first"),
+			FirstSelection.Classes[0].OwnerClassPath,
+			FString(TEXT("/Script/Engine.Actor")));
+		if (FirstSelection.Classes[0].IncludeFunctions.Num() == 2)
+		{
+			TestEqual(
+				TEXT("Actor function names are normalized"),
+				FirstSelection.Classes[0].IncludeFunctions[0],
+				FName(TEXT("K2_GetActorLocation")));
+		}
+		TestEqual(
+			TEXT("Actor exclude filters are retained"),
+			FirstSelection.Classes[0].ExcludeFunctions.Num(),
+			1);
+	}
+
+	FAvidScriptProjectBindingProfileSpec SecondSpec = FirstSpec;
+	Algo::Reverse(SecondSpec.Classes);
+	Algo::Reverse(SecondSpec.Classes[1].IncludeFunctions);
+	Algo::Reverse(SecondSpec.ClassReferences);
+	FAvidScriptBindingSelectionProfile SecondSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> SecondClassReferences;
+	FString SecondHash;
+	FAvidScriptBindingSelectionResolveResult SecondResult;
+	TestTrue(
+		TEXT("Reordered project profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			SecondSpec,
+			SecondSelection,
+			SecondClassReferences,
+			SecondHash,
+			SecondResult));
+	TestEqual(TEXT("Reordered profile hash is stable"), SecondHash, FirstHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileEditorOnlyPolicyBoundaryTest,
+	"AvidScript.Editor.ProjectBindingProfile.EditorOnlyPolicyBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileEditorOnlyPolicyBoundaryTest::RunTest(const FString& Parameters)
+{
+	UFunction* EditorOnlyFunction = NewObject<UFunction>(
+		GetTransientPackage(),
+		TEXT("AvidScriptEditorOnlyProjectBindingFunction"));
+	TestNotNull(TEXT("Editor-only policy fixture can be created"), EditorOnlyFunction);
+	if (EditorOnlyFunction == nullptr)
+	{
+		return false;
+	}
+	EditorOnlyFunction->FunctionFlags = FUNC_BlueprintCallable | FUNC_EditorOnly;
+
+	FString Category;
+	FString Source;
+	TestFalse(
+		TEXT("Project profiles reuse the shared function policy for editor-only members"),
+		FAvidScriptEditorReflectedFunctionPolicy::Evaluate(
+			EditorOnlyFunction,
+			Category,
+			Source));
+	TestEqual(
+		TEXT("Editor-only member rejection category remains stable"),
+		Category,
+		FString(TEXT("function_not_allowed")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileModuleDiscoveryTest,
+	"AvidScript.Editor.ProjectBindingProfile.ModuleDiscovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileModuleDiscoveryTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.runtime_module");
+	Spec.ModulePaths.Add(TEXT("/Script/AvidScriptRuntime"));
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestTrue(
+		TEXT("Runtime module profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestTrue(
+		TEXT("Runtime module discovers AvidScriptComponent"),
+		Selection.Classes.ContainsByPredicate([](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return Rule.OwnerClassPath == TEXT("/Script/AvidScriptRuntime.AvidScriptComponent");
+		}));
+	TestTrue(TEXT("Runtime module discovery is non-empty"), Selection.Classes.Num() >= 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileReusesSelectionPolicyTest,
+	"AvidScript.Editor.ProjectBindingProfile.ReusesSelectionPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileReusesSelectionPolicyTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.policy");
+	Spec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("K2_SetActorLocation"), TEXT("K2_GetActorLocation") }));
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult ProjectResult;
+	TestTrue(
+		TEXT("Project profile resolves before member policy"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			ProjectResult));
+
+	TArray<FAvidScriptReflectedFunctionSelection> Functions;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	TestTrue(
+		TEXT("Existing function selection policy resolves project profile"),
+		FAvidScriptEditorBindingSelectionResolver::Resolve(
+			Selection,
+			Functions,
+			SelectionResult));
+	TestEqual(TEXT("Existing policy retains one compatible function"), Functions.Num(), 1);
+	TestEqual(TEXT("Existing policy rejects one unsupported peer"), SelectionResult.RejectedFunctionCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileClassReferenceValidationTest,
+	"AvidScript.Editor.ProjectBindingProfile.ClassReferenceValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileClassReferenceValidationTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec MissingClassSpec;
+	MissingClassSpec.PackageName = TEXT("avidscript.project.invalid_class");
+	MissingClassSpec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.AvidScriptMissingClass"),
+		{ TEXT("MissingFunction") }));
+	FAvidScriptBindingSelectionProfile MissingClassSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> MissingClassReferences;
+	FString MissingClassHash;
+	FAvidScriptBindingSelectionResolveResult MissingClassResult;
+	TestFalse(
+		TEXT("Missing reflected class fails closed"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			MissingClassSpec,
+			MissingClassSelection,
+			MissingClassReferences,
+			MissingClassHash,
+			MissingClassResult));
+	TestEqual(
+		TEXT("Missing reflected class category is stable"),
+		MissingClassResult.ErrorCategory,
+		FString(TEXT("class_missing")));
+
+	const auto ResolveInvalid = [this](
+		const FAvidScriptProjectBindingClassSpec& InvalidClassReference,
+		const FString& ExpectedCategory)
+	{
+		FAvidScriptProjectBindingProfileSpec Spec;
+		Spec.PackageName = TEXT("avidscript.project.invalid_ref");
+		Spec.Classes.Add(MakeProjectProfileClassRule(
+			TEXT("/Script/Engine.Actor"),
+			{ TEXT("K2_GetActorLocation") }));
+		Spec.ClassReferences.Add(InvalidClassReference);
+		FAvidScriptBindingSelectionProfile Selection;
+		TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+		FString SelectionHash;
+		FAvidScriptBindingSelectionResolveResult Result;
+		TestFalse(
+			FString::Printf(TEXT("Invalid class reference fails: %s"), *ExpectedCategory),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec,
+				Selection,
+				ClassReferences,
+				SelectionHash,
+				Result));
+		TestEqual(TEXT("Invalid class reference category"), Result.ErrorCategory, ExpectedCategory);
+		return true;
+	};
+
+	ResolveInvalid(
+		{ TEXT("Missing"), TEXT("/Script/Engine.AvidScriptMissing"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") },
+		TEXT("class_reference_missing"));
+	ResolveInvalid(
+		{ TEXT("WrongBase"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.SceneComponent"), TEXT("EditorLoad") },
+		TEXT("class_reference_base_mismatch"));
+	ResolveInvalid(
+		{ TEXT("BadPolicy"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("RuntimeSearch") },
+		TEXT("class_reference_load_policy_invalid"));
+	ResolveInvalid(
+		{ TEXT("NotActor"), TEXT("/Script/Engine.StaticMeshComponent"), TEXT("/Script/Engine.SceneComponent"), TEXT("EditorLoad") },
+		TEXT("class_reference_not_actor"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileDuplicateScriptNameTest,
+	"AvidScript.Editor.ProjectBindingProfile.DuplicateScriptName",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileDuplicateScriptNameTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.duplicate_script_name");
+	Spec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("K2_GetActorLocation") }));
+	Spec.ClassReferences.Add({
+		TEXT("SpawnClass"),
+		TEXT("/Script/Engine.StaticMeshActor"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+	Spec.ClassReferences.Add({
+		TEXT("SpawnClass"),
+		TEXT("/Script/Engine.PointLight"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestFalse(
+		TEXT("Duplicate class reference script name fails"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Duplicate script name category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("class_reference_script_name_duplicate")));
+
+	Spec.ClassReferences.Reset();
+	Spec.ClassReferences.Add({
+		TEXT("PrimarySpawnClass"),
+		TEXT("/Script/Engine.StaticMeshActor"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+	Spec.ClassReferences.Add({
+		TEXT("AliasSpawnClass"),
+		TEXT("/Script/Engine.StaticMeshActor"),
+		TEXT("/Script/Engine.Actor"),
+		TEXT("EditorLoad")
+	});
+	TestFalse(
+		TEXT("Duplicate stable class reference identity fails"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Duplicate stable class reference category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("class_reference_duplicate")));
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

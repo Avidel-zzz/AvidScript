@@ -83,7 +83,7 @@ public:
 
 		FAvidScriptEditorCSharpBuildResult PrepareResult;
 		if (!FAvidScriptEditorCSharpBuildPipeline::Prepare(
-				ProfileResult.BuildConfig,
+				FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult),
 				Plan,
 				PrepareResult))
 		{

@@ -1,96 +1,94 @@
 {
-    "schema_version":  1,
-    "phase":  {
-                  "id":  49,
-                  "goal":  "完成项目级 UE API Profile、缓存 Class Reference、可信 World Context 与 C# Spawn/Destroy/IsA 世界对象闭环，并建立 Native 对照性能基线",
-                  "start_commit":  "4d9d5bdf794ae2666be433370a0b64f1b563a5f9"
-              },
-    "declared_stage":  "implementing",
-    "architecture":  {
-                         "path":  "Docs/Phase49/P49.0_World_Object_Performance_Architecture.md",
-                         "version":  1,
-                         "sha256":  "251340ce21765acf3572d7276925c3ca21dd2c6f19ac86c57aa0169acdcdf4b2",
-                         "revision_reason":  "initial architecture freeze"
-                     },
-    "documents":  {
-                      "plan":  "Docs/Phase49/P49.1_World_Object_Creation_Implementation_Plan.md",
-                      "closeout":  "Docs/Phase49/P49_Phase49_Closeout.md"
-                  },
-    "batches":  [
-                    {
-                        "id":  "P49.1",
-                        "status":  "Pending",
-                        "evidence":  "",
-                        "completed_at_utc":  null
-                    },
-                    {
-                        "id":  "P49.2",
-                        "status":  "Pending",
-                        "evidence":  "",
-                        "completed_at_utc":  null
-                    },
-                    {
-                        "id":  "P49.3",
-                        "status":  "Pending",
-                        "evidence":  "",
-                        "completed_at_utc":  null
-                    },
-                    {
-                        "id":  "P49.4",
-                        "status":  "Pending",
-                        "evidence":  "",
-                        "completed_at_utc":  null
-                    }
-                ],
-    "debt":  [
-
-             ],
-    "review":  {
-                   "completed":  false,
-                   "evidence":  "",
-                   "completed_at_utc":  null
-               },
-    "budgets":  {
-                    "ubt":  3,
-                    "automation":  2,
-                    "full_gate":  2
-                },
-    "invocations":  {
-                        "ubt":  0,
-                        "automation":  0,
-                        "full_gate":  0
-                    },
-    "freeze":  {
-                   "source_commit":  "",
-                   "source_tree":  "",
-                   "state_sha256":  "",
-                   "review_evidence":  "",
-                   "at_utc":  null
-               },
-    "gate":  {
-                 "report_path":  "",
-                 "report_sha256":  "",
-                 "run_id":  "",
-                 "verified_commit":  "",
-                 "verified_tree":  "",
-                 "attestation_parent":  "",
-                 "attested_at_utc":  null
-             },
-    "protected_dirty":  [
-                            {
-                                "path":  "Docs/AvidScript_Technical_Status.md",
-                                "status":  "??",
-                                "worktree_sha256":  "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
-                                "head_blob_sha256":  ""
-                            },
-                            {
-                                "path":  "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
-                                "status":  " M",
-                                "worktree_sha256":  "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
-                                "head_blob_sha256":  "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
-                            }
-                        ],
-    "next_action":  "batch-complete -Phase 49 -BatchId P49.1 -Evidence \u003ctext\u003e",
-    "revision":  1,
-    "updated_at_utc":  "2026-07-22T18:28:28.8506804+00:00"
+  "schema_version": 1,
+  "phase": {
+    "id": 49,
+    "goal": "完成项目级 UE API Profile、缓存 Class Reference、可信 World Context 与 C# Spawn/Destroy/IsA 世界对象闭环，并建立 Native 对照性能基线",
+    "start_commit": "4d9d5bdf794ae2666be433370a0b64f1b563a5f9"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase49/P49.0_World_Object_Performance_Architecture.md",
+    "version": 1,
+    "sha256": "251340ce21765acf3572d7276925c3ca21dd2c6f19ac86c57aa0169acdcdf4b2",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase49/P49.1_World_Object_Creation_Implementation_Plan.md",
+    "closeout": "Docs/Phase49/P49_Phase49_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P49.1",
+      "status": "Completed",
+      "evidence": "Project profile schema v2, stable discovery/hash, BuildRequest generation path, content-addressed reuse and fail-closed validation implemented; architecture passed; UE5.8 Editor no-clean module build succeeded; merged Automation 17/17 and post-review profile Automation 4/4 succeeded; Chinese result document added.",
+      "completed_at_utc": "2026-07-22T19:18:19.9850436+00:00"
+    },
+    {
+      "id": "P49.2",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P49.3",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P49.4",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [
+    {
+      "path": "Docs/AvidScript_Technical_Status.md",
+      "status": "??",
+      "worktree_sha256": "3025ef2e274d0373168eea28a25bef6bd1a86a19e887d76ee51c6804d51698c2",
+      "head_blob_sha256": ""
+    },
+    {
+      "path": "Docs/Phase42/P42.0_Reflection_Binding_Generator_Architecture.md",
+      "status": " M",
+      "worktree_sha256": "569cf61960108edd6a4865da796ddf465b2ab6e6cf440dc2ae280b84f94d6655",
+      "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
+    }
+  ],
+  "next_action": "batch-complete -Phase 49 -BatchId P49.2 -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-07-22T19:18:19.9873157+00:00"
 }

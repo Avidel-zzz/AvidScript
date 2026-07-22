@@ -41,9 +41,9 @@ FAvidScriptEditorCSharpLiveReloadBuildExecutor::FAvidScriptEditorCSharpLiveReloa
 		{
 			return FAvidScriptEditorCSharpProfileService::LoadProfile(ProfilePath, OutResult);
 		},
-		[](const FAvidScriptEditorCSharpBuildConfig& Config, FAvidScriptEditorCSharpBuildResult& OutResult)
+		[](const FAvidScriptEditorCSharpBuildRequest& Request, FAvidScriptEditorCSharpBuildResult& OutResult)
 		{
-			return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutResult);
+			return FAvidScriptEditorCSharpBuildService::BuildProfile(Request, OutResult);
 		},
 		[](
 			const FString& ReportPath,
@@ -122,7 +122,8 @@ bool FAvidScriptEditorCSharpLiveReloadBuildExecutor::Execute(
 	}
 
 	const bool bBuildSucceeded = BuildProfile(
-		OutResult.ProfileResult.BuildConfig,
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(
+			OutResult.ProfileResult),
 		OutResult.BuildResult);
 	if (!bBuildSucceeded || !OutResult.BuildResult.bSucceeded)
 	{

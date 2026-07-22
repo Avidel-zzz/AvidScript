@@ -75,6 +75,40 @@ FString MakeAvidScriptCSharpManifestPathForOutputRoot(
 	NormalizeAvidScriptCSharpBuildPath(ManifestPath);
 	return ManifestPath;
 }
+
+bool ExecuteAvidScriptCSharpBuildPlan(
+	FAvidScriptEditorCSharpBuildPlan& Plan,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	ON_SCOPE_EXIT
+	{
+		FAvidScriptEditorCSharpBuildPipeline::Cleanup(Plan);
+	};
+
+	if (Plan.bAutomaticBindingSlice)
+	{
+		FAvidScriptEditorCSharpBuildResult BootstrapResult;
+		FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
+			Plan.BootstrapConfig,
+			BootstrapResult);
+		if (!FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
+				Plan,
+				BootstrapResult,
+				OutResult))
+		{
+			return false;
+		}
+	}
+
+	FAvidScriptEditorCSharpBuildResult FinalResult;
+	FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
+		Plan.FinalConfig,
+		FinalResult);
+	return FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
+		Plan,
+		FinalResult,
+		OutResult);
+}
 } // namespace
 
 FString FAvidScriptEditorCSharpBuildService::
@@ -175,34 +209,22 @@ bool FAvidScriptEditorCSharpBuildService::BuildProfile(
 	{
 		return false;
 	}
-	ON_SCOPE_EXIT
-	{
-		FAvidScriptEditorCSharpBuildPipeline::Cleanup(Plan);
-	};
+	return ExecuteAvidScriptCSharpBuildPlan(Plan, OutResult);
+}
 
-	if (Plan.bAutomaticBindingSlice)
+bool FAvidScriptEditorCSharpBuildService::BuildProfile(
+	const FAvidScriptEditorCSharpBuildRequest& Request,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	FAvidScriptEditorCSharpBuildPlan Plan;
+	if (!FAvidScriptEditorCSharpBuildPipeline::Prepare(
+			Request,
+			Plan,
+			OutResult))
 	{
-		FAvidScriptEditorCSharpBuildResult BootstrapResult;
-		FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
-			Plan.BootstrapConfig,
-			BootstrapResult);
-		if (!FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
-				Plan,
-				BootstrapResult,
-				OutResult))
-		{
-			return false;
-		}
+		return false;
 	}
-
-	FAvidScriptEditorCSharpBuildResult FinalResult;
-	FAvidScriptEditorCSharpBuildInvoker::BuildOnce(
-		Plan.FinalConfig,
-		FinalResult);
-	return FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
-		Plan,
-		FinalResult,
-		OutResult);
+	return ExecuteAvidScriptCSharpBuildPlan(Plan, OutResult);
 }
 
 bool FAvidScriptEditorCSharpBuildService::BuildActorLifecycle(

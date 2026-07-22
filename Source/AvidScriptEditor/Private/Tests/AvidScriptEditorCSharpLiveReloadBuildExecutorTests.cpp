@@ -62,7 +62,7 @@ bool FAvidScriptEditorCSharpLiveReloadBuildExecutorShortCircuitTest::RunTest(con
 			OutProfile.NextAction = TEXT("repair fixture");
 			return false;
 		},
-		[&BuildCount](const FAvidScriptEditorCSharpBuildConfig&, FAvidScriptEditorCSharpBuildResult&)
+		[&BuildCount](const FAvidScriptEditorCSharpBuildRequest&, FAvidScriptEditorCSharpBuildResult&)
 		{
 			++BuildCount;
 			return false;
@@ -135,7 +135,7 @@ bool FAvidScriptEditorCSharpLiveReloadBuildExecutorBuildFailureTest::RunTest(con
 			OutProfile.BuildConfig.ReportPath = TEXT("C:/Reports/live.report.json");
 			return true;
 		},
-		[](const FAvidScriptEditorCSharpBuildConfig&, FAvidScriptEditorCSharpBuildResult& OutBuild)
+		[](const FAvidScriptEditorCSharpBuildRequest&, FAvidScriptEditorCSharpBuildResult& OutBuild)
 		{
 			OutBuild.ErrorCategory = TEXT("semantic_failed");
 			OutBuild.ErrorMessage = TEXT("CS0001 fixture");
@@ -188,7 +188,7 @@ bool FAvidScriptEditorCSharpLiveReloadBuildExecutorFixedTargetTest::RunTest(cons
 			OutProfile.BuildConfig.ReportPath = ReportPath;
 			return true;
 		},
-		[ReportPath](const FAvidScriptEditorCSharpBuildConfig&, FAvidScriptEditorCSharpBuildResult& OutBuild)
+		[ReportPath](const FAvidScriptEditorCSharpBuildRequest&, FAvidScriptEditorCSharpBuildResult& OutBuild)
 		{
 			OutBuild.bSucceeded = true;
 			OutBuild.ReportPath = ReportPath;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AvidScriptEditorBindingSelectionTypes.h"
+
 #include "CoreMinimal.h"
 
 struct FAvidScriptEditorCSharpBuildConfig
@@ -20,6 +22,14 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString Configuration = TEXT("Release");
 	bool bOmitRuntimeBindingPackage = false;
 	bool bDisableSemanticCache = false;
+};
+
+struct FAvidScriptEditorCSharpBuildRequest
+{
+	FAvidScriptEditorCSharpBuildConfig Config;
+	FAvidScriptBindingSelectionProfile AuthorizationBindingProfile;
+	FString BindingSelectionHash;
+	bool bUsesEngineGameplayBindingProfile = true;
 };
 
 struct FAvidScriptEditorCSharpBuildResult
@@ -56,6 +66,8 @@ struct FAvidScriptEditorCSharpBuildResult
 	bool bSemanticCachePublished = false;
 	FString SemanticCacheDiagnosticCode;
 	FString SemanticCacheDiagnosticMessage;
+	FString BindingSelectionHash;
+	bool bReusedAuthorizationBindingPackage = false;
 };
 
 class FAvidScriptEditorCSharpBuildService
@@ -75,6 +87,10 @@ public:
 
 	static bool BuildProfile(
 		const FAvidScriptEditorCSharpBuildConfig& Config,
+		FAvidScriptEditorCSharpBuildResult& OutResult);
+
+	static bool BuildProfile(
+		const FAvidScriptEditorCSharpBuildRequest& Request,
 		FAvidScriptEditorCSharpBuildResult& OutResult);
 
 	static bool BuildActorLifecycle(

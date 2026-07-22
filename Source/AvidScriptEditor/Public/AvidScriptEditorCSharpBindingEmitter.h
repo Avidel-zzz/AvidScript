@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 
+struct FAvidScriptBindingSelectionProfile;
+
 struct FAvidScriptCSharpBindingEmitResult
 {
 	bool bSucceeded = false;
@@ -44,6 +46,13 @@ public:
 		FString& OutManifestJson,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 
+	static bool EmitProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		FString& OutDescriptorJson,
+		FString& OutReferenceSource,
+		FString& OutManifestJson,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
 	static FString GetDefaultOutputRoot();
 
 	static bool PublishDescriptor(
@@ -62,6 +71,11 @@ public:
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 
 	static bool PublishEngineGameplay(
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
+	static bool PublishProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
 		const FString& OutputRoot,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 };

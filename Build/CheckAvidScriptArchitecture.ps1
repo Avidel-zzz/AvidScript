@@ -456,6 +456,10 @@ $CSharpBindingEmitterSource = Read-RequiredFile 'Source/AvidScriptEditor/Private
 $CSharpBindingRendererSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
 $CSharpBindingArtifactHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h'
 $CSharpBuildServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpBuildService.cpp'
+$CSharpProfileServiceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpProfileService.h'
+$CSharpProfileServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/AvidScriptEditorCSharpProfileService.cpp'
+$ProjectBindingProfileHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorProjectBindingProfile.h'
+$ProjectBindingProfileSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorProjectBindingProfile.cpp'
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
@@ -467,6 +471,59 @@ $CSharpLiveReloadCompletionSource = Read-RequiredFile 'Source/AvidScriptEditor/P
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
+foreach ($RequiredProjectProfileContract in @(
+    'FAvidScriptProjectBindingProfileSpec',
+    'FAvidScriptProjectBindingClassSpec',
+    'FAvidScriptEditorProjectBindingProfile::Resolve',
+    'TObjectIterator<UClass>',
+    'Class->GetOutermost()->GetName() != ModulePath',
+    'FModuleManifest::TryRead',
+    'ModuleManifest.BuildId',
+    'FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile',
+    'FAvidScriptHash::Sha256HexUtf8'
+)) {
+    if (-not $ProjectBindingProfileHeader.Contains($RequiredProjectProfileContract) -and
+        -not $ProjectBindingProfileSource.Contains($RequiredProjectProfileContract)) {
+        Add-Violation "project binding profile is missing stable discovery contract $RequiredProjectProfileContract"
+    }
+}
+foreach ($ForbiddenProjectProfileConcern in @(
+    'FAvidScriptEditorReflectedFunctionPolicy',
+    'FAvidScriptEditorReflectedPropertyPolicy',
+    'FBuildVersion',
+    'FEngineVersion::Current',
+    'ProcessEvent',
+    'wasm_runtime_'
+)) {
+    if ($ProjectBindingProfileHeader.Contains($ForbiddenProjectProfileConcern) -or
+        $ProjectBindingProfileSource.Contains($ForbiddenProjectProfileConcern)) {
+        Add-Violation "project binding profile must not own member policy, invocation, or VM concern $ForbiddenProjectProfileConcern"
+    }
+}
+foreach ($RequiredCSharpProfileContract in @(
+    'SchemaVersion == 1',
+    'SchemaVersion == 2',
+    'binding_profile',
+    'FAvidScriptEditorProjectBindingProfile::Resolve',
+    'FAvidScriptEditorCSharpProfileService::MakeBuildRequest',
+    'MakeEngineGameplayProfile',
+    'Value->Type == EJson::String'
+)) {
+    if (-not $CSharpProfileServiceSource.Contains($RequiredCSharpProfileContract)) {
+        Add-Violation "C# profile service is missing schema v2 project binding contract $RequiredCSharpProfileContract"
+    }
+}
+foreach ($RequiredCSharpProfileResult in @(
+    'bUsesEngineGameplayBindingProfile',
+    'ResolvedBindingSelection',
+    'BindingSelectionValidation',
+    'ResolvedClassReferences',
+    'BindingSelectionHash'
+)) {
+    if (-not $CSharpProfileServiceHeader.Contains($RequiredCSharpProfileResult)) {
+        Add-Violation "C# profile result is missing project binding output $RequiredCSharpProfileResult"
+    }
+}
 foreach ($RequiredGameplayPackageContract in @(
     'EmitEngineGameplay',
     'PublishEngineGameplay',
@@ -589,7 +646,9 @@ foreach ($ForbiddenBuildServiceConcern in @(
     }
 }
 foreach ($RequiredBuildPipelineContract in @(
-    'FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay',
+    'FAvidScriptEditorCSharpBindingEmitter::PublishProfile',
+    'Request.AuthorizationBindingProfile',
+    'Request.BindingSelectionHash',
     'FAvidScriptEditorCSharpBindingSliceService::Publish',
     'CSharpBootstrap',
     'CSharpBuildTransactions',
