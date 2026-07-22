@@ -1110,9 +1110,12 @@ foreach ($RequiredWorkflowCliContract in @(
         Add-Violation "phase workflow CLI is missing contract $RequiredWorkflowCliContract"
     }
 }
-$PhaseWorkflowDotSources = [regex]::Matches($PhaseWorkflowCli, '(?m)^\.\s+\(Join-Path\s+\$PSScriptRoot')
+$PhaseWorkflowDotSources = [regex]::Matches($PhaseWorkflowCli, '(?m)^\.\s+\(Join-Path\s+\$ScriptDirectory')
 if ($PhaseWorkflowDotSources.Count -ne 2) {
     Add-Violation 'phase workflow CLI must dot-source exactly the state and evidence domain helpers'
+}
+if (-not $PhaseWorkflowCli.Contains('$ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path')) {
+    Add-Violation 'phase workflow CLI must resolve its default repository root after parameter binding'
 }
 foreach ($ForbiddenWorkflowDependency in @('UnrealEditor', 'Build.bat', 'RunUAT', 'BuildCookRun')) {
     if ($PhaseWorkflowCli.Contains($ForbiddenWorkflowDependency) -or

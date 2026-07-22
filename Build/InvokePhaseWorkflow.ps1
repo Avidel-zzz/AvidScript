@@ -24,13 +24,17 @@ param(
     [int]$AutomationBudget = 2,
     [int]$FullGateBudget = 2,
     [switch]$Json,
-    [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$RepositoryRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$ScriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = Split-Path -Parent $ScriptDirectory
+}
 $RepositoryRoot = [System.IO.Path]::GetFullPath($RepositoryRoot)
-. (Join-Path $PSScriptRoot 'PhaseWorkflow\AvidScriptPhaseState.ps1')
-. (Join-Path $PSScriptRoot 'PhaseWorkflow\AvidScriptPhaseEvidence.ps1')
+. (Join-Path $ScriptDirectory 'PhaseWorkflow\AvidScriptPhaseState.ps1')
+. (Join-Path $ScriptDirectory 'PhaseWorkflow\AvidScriptPhaseEvidence.ps1')
 
 function Assert-AvidScriptCliText {
     param(
