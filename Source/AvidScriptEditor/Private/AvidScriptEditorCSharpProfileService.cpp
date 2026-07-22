@@ -706,6 +706,7 @@ FAvidScriptEditorCSharpProfileService::MakeBuildRequest(
 	FAvidScriptEditorCSharpBuildRequest Request;
 	Request.Config = Profile.BuildConfig;
 	Request.AuthorizationBindingProfile = Profile.ResolvedBindingSelection;
+	Request.AuthorizationClassReferences = Profile.ResolvedClassReferences;
 	Request.BindingSelectionHash = Profile.BindingSelectionHash;
 	Request.bUsesEngineGameplayBindingProfile =
 		Profile.bUsesEngineGameplayBindingProfile;

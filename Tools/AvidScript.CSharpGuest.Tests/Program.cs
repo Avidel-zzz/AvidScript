@@ -16,7 +16,8 @@ internal static class Program
                 + CSharpGuestStateSchemaTests.Run()
                 + CSharpGuestDebugMapTests.Run()
                 + CSharpGuestMalformedTests.Run()
-                + CSharpGuestOperatorTests.Run();
+                + CSharpGuestOperatorTests.Run()
+                + CSharpGuestClassReferenceTests.Run();
             Console.WriteLine($"AvidScript.CSharpGuest.Tests: {count}/{count} passed");
             return 0;
         }

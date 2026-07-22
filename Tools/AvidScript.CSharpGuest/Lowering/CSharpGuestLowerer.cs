@@ -213,6 +213,7 @@ public static class CSharpGuestLowerer
         List<GuestFunction> functions = new();
         foreach (SemanticCallable callable in document.Callables
             .Where(callable => callable.HasBody
+                && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
                 && (reachableCallableIds is null
                     || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))

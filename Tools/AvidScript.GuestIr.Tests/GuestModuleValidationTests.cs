@@ -17,9 +17,10 @@ internal static class GuestModuleValidationTests
         CallSignaturesAreValidated();
         InvalidConstantLiteralIsRejected();
         InstructionTypesMustMatch();
+        ClassReferenceConversionsFailClosed();
         VoidSemanticsUseTypeShape();
         ExportsMustBeUniqueAndTargetFunctions();
-        return 13;
+        return 14;
     }
 
     private static void MinimalModuleIsValid()
@@ -194,6 +195,48 @@ internal static class GuestModuleValidationTests
             module with
             {
                 Types = module.Types.Append(floatType).ToArray(),
+                Functions = new[] { function },
+            },
+            "ASIR1008");
+    }
+    private static void ClassReferenceConversionsFailClosed()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestType classReferenceType = new(
+            "type:global::AvidScript.TSubclassOfAActor",
+            "class_ref",
+            "i32",
+            Array.Empty<GuestField>(),
+            null,
+            null,
+            4,
+            4);
+        GuestFunction function = module.Functions[0] with
+        {
+            Parameters = new[] { new GuestRegister("value:source", "type:int32") },
+            Locals = new[] { new GuestRegister("value:class", classReferenceType.Id) },
+            ReturnTypeId = classReferenceType.Id,
+        };
+        GuestBasicBlock block = function.Blocks[0] with
+        {
+            Instructions = new[]
+            {
+                new GuestInstruction(
+                    "convert",
+                    "value:class",
+                    new[] { "value:source" },
+                    null,
+                    null,
+                    null),
+            },
+            Terminator = new GuestTerminator("return", null, null, null, "value:class"),
+        };
+        function = function with { Blocks = new[] { block } };
+
+        AssertDiagnostic(
+            module with
+            {
+                Types = module.Types.Append(classReferenceType).ToArray(),
                 Functions = new[] { function },
             },
             "ASIR1008");

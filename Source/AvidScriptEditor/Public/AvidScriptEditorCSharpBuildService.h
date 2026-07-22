@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptEditorProjectBindingProfile.h"
 #include "AvidScriptEditorBindingSelectionTypes.h"
 
 #include "CoreMinimal.h"
@@ -28,6 +29,7 @@ struct FAvidScriptEditorCSharpBuildRequest
 {
 	FAvidScriptEditorCSharpBuildConfig Config;
 	FAvidScriptBindingSelectionProfile AuthorizationBindingProfile;
+	TArray<FAvidScriptProjectBindingClassSpec> AuthorizationClassReferences;
 	FString BindingSelectionHash;
 	bool bUsesEngineGameplayBindingProfile = true;
 };

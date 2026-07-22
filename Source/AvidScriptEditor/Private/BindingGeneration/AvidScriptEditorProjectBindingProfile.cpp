@@ -1,5 +1,6 @@
 #include "AvidScriptEditorProjectBindingProfile.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptHash.h"
 #include "GameFramework/Actor.h"
@@ -151,9 +152,10 @@ bool NormalizeClassRule(
 
 FString MakeClassReferenceIdentity(const FAvidScriptProjectBindingClassSpec& Spec)
 {
-	return Spec.ClassPath
-		+ TEXT("|") + Spec.BaseClassPath
-		+ TEXT("|") + Spec.LoadPolicy;
+	return FAvidScriptBindingDescriptorIdentity::MakeClassReferenceIdentity(
+		Spec.ClassPath,
+		Spec.BaseClassPath,
+		Spec.LoadPolicy);
 }
 
 FString MakeClassReferenceDeclarationIdentity(const FAvidScriptProjectBindingClassSpec& Spec)
@@ -433,6 +435,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 			OutSelection,
+			OutClassReferences,
 			DescriptorJson,
 			SelectionResult,
 			DescriptorResult))

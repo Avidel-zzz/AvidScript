@@ -185,6 +185,13 @@ internal static class CSharpOperationLowerer
             return null;
         }
 
+        if (string.Equals(operand.TypeId, result.TypeId, StringComparison.Ordinal))
+        {
+            instructions.Add(new GuestInstruction(
+                "copy", result.Id, new[] { operand.Id }, null, null, null));
+            return result;
+        }
+
         instructions.Add(new GuestInstruction(
             "convert", result.Id, new[] { operand.Id }, null, null, null));
         return result;

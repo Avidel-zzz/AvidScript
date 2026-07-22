@@ -6,10 +6,13 @@
 #include "AvidScriptVmBackend.h"
 #include "CoreMinimal.h"
 
+class UClass;
+
 struct FAvidScriptBindingPackageLoadResult
 {
 	bool bSucceeded = false;
 	int32 BindingCount = 0;
+	int32 ClassReferenceCount = 0;
 	int32 RequiredScratchSize = 0;
 	FString PackageName;
 	FString PackageHash;
@@ -43,6 +46,11 @@ public:
 	const FString& GetPackageHash() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	int32 GetRequiredScratchSize() const;
+	int32 GetClassReferenceCount() const;
+	bool TryResolveClassReference(
+		uint32 Ordinal,
+		UClass*& OutClass,
+		UClass*& OutBaseClass) const;
 
 	bool Dispatch(
 		const FAvidScriptDynamicHostCall& Call,

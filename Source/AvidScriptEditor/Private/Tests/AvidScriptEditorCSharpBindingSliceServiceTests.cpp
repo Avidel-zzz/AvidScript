@@ -61,8 +61,14 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 
 	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
 	if (!TestTrue(
-		TEXT("Complete gameplay authorization package publishes"),
-		FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(OutputRoot, AuthorizationPackage)))
+		TEXT("Complete gameplay authorization package with a class table publishes"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+			FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+			{
+				{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+			},
+			OutputRoot,
+			AuthorizationPackage)))
 	{
 		AddError(AuthorizationPackage.ErrorMessage);
 		return false;
@@ -101,7 +107,8 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Authorization descriptor is schema v4"), AuthorizationModel.SchemaVersion, 4);
+	TestEqual(TEXT("Authorization descriptor is schema v5"), AuthorizationModel.SchemaVersion, 5);
+	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 
@@ -128,6 +135,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 
 	TestEqual(TEXT("Runtime slice reports two requested bindings"), SliceResult.RequestedBindingCount, 2);
 	TestEqual(TEXT("Runtime slice emits two bindings"), SlicePackage.BindingCount, 2);
+	TestEqual(TEXT("Runtime slice preserves one class reference"), SlicePackage.ClassReferenceCount, 1);
 	TestEqual(TEXT("Runtime slice keeps package capability name"), SlicePackage.PackageName, AuthorizationPackage.PackageName);
 	TestNotEqual(TEXT("Runtime slice has a distinct package hash"), SlicePackage.PackageHash, AuthorizationPackage.PackageHash);
 
@@ -151,6 +159,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 			TestEqual(TEXT("Slice preserves setter reload effect"), Binding.ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 		}
 	}
+	TestEqual(TEXT("Slice descriptor preserves the complete class table"), SliceModel.ClassReferences.Num(), 1);
 	bool bStableIdsMatch = ActualStableIds.Num() == ExpectedStableIds.Num();
 	for (const FString& StableId : ExpectedStableIds)
 	{
@@ -177,6 +186,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	if (LoadedSlice.IsValid())
 	{
 		TestEqual(TEXT("Runtime slice creates two VM imports"), LoadedSlice->GetVmPackage().Imports.Num(), 2);
+		TestEqual(TEXT("Runtime slice creates one cached class plan"), LoadedSlice->GetClassReferenceCount(), 1);
 	}
 
 	const TArray<FAvidScriptReflectedPropertySelection> PropertySelections = {
@@ -219,7 +229,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Property authorization uses schema v4"), PropertyAuthorizationModel.SchemaVersion, 4);
+	TestEqual(TEXT("Property authorization uses schema v5"), PropertyAuthorizationModel.SchemaVersion, 5);
 	TestEqual(TEXT("Property authorization contains one binding"), PropertyAuthorizationModel.Bindings.Num(), 1);
 	if (PropertyAuthorizationModel.Bindings.Num() != 1)
 	{
@@ -262,7 +272,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Property runtime slice preserves schema v4"), PropertySliceModel.SchemaVersion, 4);
+	TestEqual(TEXT("Property runtime slice preserves schema v5"), PropertySliceModel.SchemaVersion, 5);
 	TestEqual(TEXT("Property runtime slice preserves one binding"), PropertySliceModel.Bindings.Num(), 1);
 	if (PropertySliceModel.Bindings.Num() == 1)
 	{

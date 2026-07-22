@@ -47,8 +47,8 @@ public sealed class AvidStateAliasAttribute : Attribute
 internal static class AvidScriptBindingPackage
 {
     internal const string PackageName = "avidscript.engine.fname.facade";
-    internal const string PackageHash = "219425b03b7d209d71764c89cb3d30d6c8ac4c2b02a563e586e456e95d5084a2";
-    internal const string DescriptorHash = "42469630f7273430ac0111af63324f107b94ff20dec1042dde1582a144552ba8";
+    internal const string PackageHash = "a9e475d62402c0b4b27b9cbc40e66a82705712d5415b18a20c1c3ba27574df0a";
+    internal const string DescriptorHash = "0a8b740ae15ae386d29b64e7eec1945780c7be2656437b3835bb89ae70aa0cb4";
 }
 
 [StructLayout(LayoutKind.Sequential)]

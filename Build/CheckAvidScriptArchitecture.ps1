@@ -575,7 +575,7 @@ foreach ($RequiredPropertyRuntimeContract in @(
 foreach ($RequiredPropertyFacadeContract in @(
     'RenderPropertyGetter',
     'Binding.BindingKind == TEXT("property_get")',
-    'GenerateWithReadableProperties',
+    'GenerateWithClassReferences',
     'public bool IsNull => Slot == 0 && Generation == 0;',
     'public bool HasHandle => Slot > 0 && Generation > 0;'
 )) {
@@ -585,14 +585,56 @@ foreach ($RequiredPropertyFacadeContract in @(
         Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("48.6.0")')) {
-    Add-Violation 'C# binding emitter version must identify the P48.6 timer facade surface'
+foreach ($RequiredClassReferenceDescriptorContract in @(
+    'FAvidScriptBindingClassReferenceModel',
+    'MakeClassReferenceStableId',
+    'MakeSelectionHash',
+    'MakePackageHash'
+)) {
+    if (-not $BindingDescriptorHeader.Contains($RequiredClassReferenceDescriptorContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredClassReferenceDescriptorContract)) {
+        Add-Violation "binding descriptor v5 class table is missing $RequiredClassReferenceDescriptorContract"
+    }
 }
-if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 4')) {
-    Add-Violation 'C# binding package resolver must accept descriptor schema v4 property packages'
+foreach ($RequiredClassReferenceGeneratorContract in @(
+    'GenerateWithClassReferences',
+    'Package.ClassReferences.Sort',
+    'Writer->WriteArrayStart(TEXT("class_references"))'
+)) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredClassReferenceGeneratorContract)) {
+        Add-Violation "binding descriptor v5 generator is missing $RequiredClassReferenceGeneratorContract"
+    }
 }
-if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 4')) {
-    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v4 property packages'
+foreach ($RequiredClassReferenceRuntimeContract in @(
+    'ClassReferencePlans',
+    'TryResolveClassReference',
+    'binding_class_cook_missing',
+    'CLASS_Abstract | CLASS_NotPlaceable'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredClassReferenceRuntimeContract)) {
+        Add-Violation "cached class reference runtime is missing $RequiredClassReferenceRuntimeContract"
+    }
+}
+foreach ($RequiredClassReferenceFacadeContract in @(
+    'public readonly struct TSubclassOfAActor',
+    'public static class ProjectClasses',
+    'class_reference_count',
+    'AuthorizationModel.ClassReferences'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredClassReferenceFacadeContract) -and
+        -not $CSharpBindingSliceSource.Contains($RequiredClassReferenceFacadeContract)) {
+        Add-Violation "C# class reference facade pipeline is missing $RequiredClassReferenceFacadeContract"
+    }
+}
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.2.0")') -or
+    -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
+    Add-Violation 'C# binding artifact must identify the P49.2 schema-v5 class reference surface'
+}
+if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 5')) {
+    Add-Violation 'C# binding package resolver must accept descriptor schema v5 class reference packages'
+}
+if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5')) {
+    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5 class reference packages'
 }
 if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
     $CSharpBindingRendererSource.Contains('CustomTimeDilation') -or
@@ -807,6 +849,10 @@ if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorG
 }
 $CSharpGuestContext = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpFunctionLoweringContext.cs'
 $CSharpOperationLowerer = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
+$CSharpClassReferencePolicySource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpClassReferencePolicy.cs'
+$CSharpClassReferenceLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpClassReferenceLowerer.cs'
+$CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
+$GuestInstructionValidatorSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Validation/GuestInstructionValidator.cs'
 foreach ($RequiredCaptureAddressContract in @(
     'TrackCaptureAddressTarget',
     'TryGetCaptureAddressTarget',
@@ -815,6 +861,20 @@ foreach ($RequiredCaptureAddressContract in @(
     if (-not $CSharpGuestContext.Contains($RequiredCaptureAddressContract) -and
         -not $CSharpOperationLowerer.Contains($RequiredCaptureAddressContract)) {
         Add-Violation "C# Guest lowering is missing flow-captured address contract $RequiredCaptureAddressContract"
+    }
+}
+foreach ($RequiredClassReferenceGuestContract in @(
+    'CanonicalName = "global::AvidScript.TSubclassOfAActor"',
+    'TryLowerObjectCreation',
+    'new GuestConstant("class_ref"',
+    'type.Kind != "class_ref"',
+    'class_ref_ordinal'
+)) {
+    if (-not $CSharpClassReferencePolicySource.Contains($RequiredClassReferenceGuestContract) -and
+        -not $CSharpClassReferenceLowererSource.Contains($RequiredClassReferenceGuestContract) -and
+        -not $CSharpTypeLowererSource.Contains($RequiredClassReferenceGuestContract) -and
+        -not $GuestInstructionValidatorSource.Contains($RequiredClassReferenceGuestContract)) {
+        Add-Violation "nominal C# Guest class reference lowering is missing $RequiredClassReferenceGuestContract"
     }
 }
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'

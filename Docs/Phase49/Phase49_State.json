@@ -21,13 +21,13 @@
       "id": "P49.1",
       "status": "Completed",
       "evidence": "Project profile schema v2, stable discovery/hash, BuildRequest generation path, content-addressed reuse and fail-closed validation implemented; architecture passed; UE5.8 Editor no-clean module build succeeded; merged Automation 17/17 and post-review profile Automation 4/4 succeeded; Chinese result document added.",
-      "completed_at_utc": "2026-07-22T19:18:19.9850436+00:00"
+      "completed_at_utc": "2026-07-23T03:18:19.9850436+08:00"
     },
     {
       "id": "P49.2",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "schema v5 class table; immutable UClass ordinal plan; generated nominal C# class_ref; GuestIr 32/32; CSharpGuest 45/45; architecture pass; UE5.8 no-clean build pass; UE automation corrected follow-up 3/3 and reserved-name 1/1",
+      "completed_at_utc": "2026-07-22T20:18:17.2223526+00:00"
     },
     {
       "id": "P49.3",
@@ -88,7 +88,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "batch-complete -Phase 49 -BatchId P49.2 -Evidence <text>",
-  "revision": 2,
-  "updated_at_utc": "2026-07-22T19:18:19.9873157+00:00"
+  "next_action": "batch-complete -Phase 49 -BatchId P49.3 -Evidence <text>",
+  "revision": 3,
+  "updated_at_utc": "2026-07-22T20:18:17.2244649+00:00"
 }

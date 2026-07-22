@@ -3,7 +3,10 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
+#include "Algo/Reverse.h"
 #include "Dom/JsonObject.h"
+#include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -62,16 +65,16 @@ bool IsLowerHexSha256(const FString& Value)
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV3DeterminismTest,
-	"AvidScript.Editor.BindingDescriptor.V3Determinism",
+	FAvidScriptEditorBindingDescriptorV5DeterminismTest,
+	"AvidScript.Editor.BindingDescriptor.V5Determinism",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV5DeterminismTest::RunTest(const FString& Parameters)
 {
 	FString FirstJson;
 	FAvidScriptBindingDescriptorGenerateResult FirstResult;
 	TestTrue(
-		TEXT("Default binding descriptor v3 generates"),
+		TEXT("Default binding descriptor v5 generates"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Default result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default v3 selection contains eight safe functions"), FirstResult.BindingCount, 8);
@@ -82,7 +85,7 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 	FString SecondJson;
 	FAvidScriptBindingDescriptorGenerateResult SecondResult;
 	TestTrue(
-		TEXT("Repeated binding descriptor v3 generation succeeds"),
+		TEXT("Repeated binding descriptor v5 generation succeeds"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(SecondJson, SecondResult));
 	TestEqual(TEXT("Descriptor bytes are deterministic"), SecondJson, FirstJson);
 	TestEqual(TEXT("Repeated package hash is deterministic"), SecondResult.PackageHash, FirstResult.PackageHash);
@@ -94,7 +97,7 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 		return true;
 	}
 
-	TestEqual(TEXT("Descriptor schema is v3"), Root->GetIntegerField(TEXT("schema_version")), 3);
+	TestEqual(TEXT("Descriptor schema is v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
 	TestEqual(TEXT("Descriptor source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	TestEqual(
 		TEXT("Default package name is stable"),
@@ -102,7 +105,8 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 		FString(TEXT("avidscript.engine.core")));
 	TestEqual(TEXT("JSON package hash matches result"), Root->GetStringField(TEXT("package_hash")), FirstResult.PackageHash);
 	TestEqual(TEXT("JSON selection hash matches result"), Root->GetStringField(TEXT("selection_hash")), FirstResult.SelectionHash);
-	TestFalse(TEXT("Descriptor v3 does not expose handwritten projection fields"), FirstJson.Contains(TEXT("\"projection\"")));
+	TestFalse(TEXT("Descriptor v5 does not expose handwritten projection fields"), FirstJson.Contains(TEXT("\"projection\"")));
+	TestEqual(TEXT("Descriptor v5 publishes an empty class table by default"), Root->GetArrayField(TEXT("class_references")).Num(), 0);
 
 	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
 	TestEqual(TEXT("Descriptor serializes eight bindings"), Bindings.Num(), 8);
@@ -128,7 +132,7 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 		TestTrue(
 			TEXT("Generated host import names are content addressed"),
 			Binding->GetObjectField(TEXT("host_import"))->GetStringField(TEXT("name")).StartsWith(TEXT("avid_ue_")));
-		TestTrue(TEXT("Every v3 binding declares reload effect policy"), Binding->HasTypedField<EJson::String>(TEXT("reload_effect")));
+		TestTrue(TEXT("Every v5 binding declares reload effect policy"), Binding->HasTypedField<EJson::String>(TEXT("reload_effect")));
 	}
 
 	TSharedPtr<FJsonObject> LegacyRoot;
@@ -136,10 +140,14 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 	if (LegacyRoot.IsValid())
 	{
 		LegacyRoot->SetNumberField(TEXT("schema_version"), 2);
+		LegacyRoot->RemoveField(TEXT("class_references"));
 		for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("bindings")))
 		{
 			if (const TSharedPtr<FJsonObject> Binding = Value.IsValid() ? Value->AsObject() : nullptr)
 			{
+				Binding->SetStringField(TEXT("ue_function"), Binding->GetStringField(TEXT("ue_member")));
+				Binding->RemoveField(TEXT("binding_kind"));
+				Binding->RemoveField(TEXT("ue_member"));
 				Binding->RemoveField(TEXT("reload_effect"));
 			}
 		}
@@ -170,11 +178,11 @@ bool FAvidScriptEditorBindingDescriptorV3DeterminismTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorV4PropertyGetTest,
-	"AvidScript.Editor.BindingDescriptor.V4PropertyGet",
+	FAvidScriptEditorBindingDescriptorV5PropertyGetTest,
+	"AvidScript.Editor.BindingDescriptor.V5PropertyGet",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString& Parameters)
+bool FAvidScriptEditorBindingDescriptorV5PropertyGetTest::RunTest(const FString& Parameters)
 {
 	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
 		{ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") }
@@ -215,7 +223,7 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 	{
 		return true;
 	}
-	TestEqual(TEXT("Property descriptor uses schema v4"), Root->GetIntegerField(TEXT("schema_version")), 4);
+	TestEqual(TEXT("Property descriptor uses schema v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
 	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
 	int32 FunctionCount = 0;
 	int32 PropertyCount = 0;
@@ -268,7 +276,7 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 			ParsedPackage,
 			ErrorCategory,
 			ErrorSource));
-	TestEqual(TEXT("Parsed package retains schema v4"), ParsedPackage.SchemaVersion, 4);
+	TestEqual(TEXT("Parsed package retains schema v5"), ParsedPackage.SchemaVersion, 5);
 	TestEqual(TEXT("Parsed package retains all bindings"), ParsedPackage.Bindings.Num(), 4);
 	TestEqual(
 		TEXT("Parsed property getter count is stable"),
@@ -302,6 +310,242 @@ bool FAvidScriptEditorBindingDescriptorV4PropertyGetTest::RunTest(const FString&
 				ErrorSource));
 		TestEqual(TEXT("Tampered property ABI uses stable category"), ErrorCategory, FString(TEXT("descriptor_contract_invalid")));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV5ClassReferenceTest,
+	"AvidScript.Editor.BindingDescriptor.V5ClassReference",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") }
+	};
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{ TEXT("CameraClass"), TEXT("/Script/Engine.CameraActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") },
+		{ TEXT("StaticMeshClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+	};
+	FString FirstJson;
+	FAvidScriptBindingDescriptorGenerateResult FirstResult;
+	TestTrue(
+		TEXT("Schema v5 descriptor generates with class references"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_refs"),
+			Functions,
+			{},
+			ClassReferences,
+			FirstJson,
+			FirstResult));
+	TestEqual(TEXT("Generator reports two class references"), FirstResult.ClassReferenceCount, 2);
+
+	Algo::Reverse(ClassReferences);
+	FString ReorderedJson;
+	FAvidScriptBindingDescriptorGenerateResult ReorderedResult;
+	TestTrue(
+		TEXT("Reordered class reference input generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_refs"),
+			Functions,
+			{},
+			ClassReferences,
+			ReorderedJson,
+			ReorderedResult));
+	TestEqual(TEXT("Class reference input order does not change descriptor bytes"), ReorderedJson, FirstJson);
+
+	TSharedPtr<FJsonObject> Root;
+	if (!TestTrue(TEXT("Class reference descriptor parses as JSON"), ParseDescriptor(FirstJson, Root))
+		|| !Root.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("Class reference descriptor uses schema v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
+	const TArray<TSharedPtr<FJsonValue>>& ReferenceValues = Root->GetArrayField(TEXT("class_references"));
+	TestEqual(TEXT("Descriptor publishes two class references"), ReferenceValues.Num(), 2);
+	FString PreviousStableId;
+	for (int32 Index = 0; Index < ReferenceValues.Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> Reference = ReferenceValues[Index]->AsObject();
+		TestEqual(TEXT("Class reference ordinal is contiguous"), Reference->GetIntegerField(TEXT("ordinal")), Index);
+		const FString StableId = Reference->GetStringField(TEXT("stable_id"));
+		TestTrue(TEXT("Class references use stable-id order"), PreviousStableId.IsEmpty() || PreviousStableId < StableId);
+		PreviousStableId = StableId;
+	}
+
+	FAvidScriptBindingPackageModel ParsedPackage;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Shared parser accepts the class reference table"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			FirstJson,
+			ParsedPackage,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Shared model retains two class references"), ParsedPackage.ClassReferences.Num(), 2);
+
+	FString ClassOnlyJson;
+	FAvidScriptBindingDescriptorGenerateResult ClassOnlyResult;
+	TestTrue(
+		TEXT("Schema v5 class table can form an independent package"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_refs_only"),
+			{},
+			{},
+			ClassReferences,
+			ClassOnlyJson,
+			ClassOnlyResult));
+	TestEqual(TEXT("Class-only descriptor has no binding imports"), ClassOnlyResult.BindingCount, 0);
+	TestTrue(
+		TEXT("Shared parser accepts a class-only package"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			ClassOnlyJson,
+			ParsedPackage,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Class-only descriptor has an empty type table"), ParsedPackage.Types.Num(), 0);
+	TestEqual(TEXT("Class-only descriptor retains its class table"), ParsedPackage.ClassReferences.Num(), 2);
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (TestTrue(
+		TEXT("Runtime builds the immutable class plan"),
+		FAvidScriptBindingPackage::LoadDescriptor(FirstJson, RuntimePackage, LoadResult))
+		&& RuntimePackage.IsValid())
+	{
+		TestEqual(TEXT("Runtime reports two class plans"), LoadResult.ClassReferenceCount, 2);
+		TestEqual(TEXT("Runtime exposes two class plans"), RuntimePackage->GetClassReferenceCount(), 2);
+		for (uint32 Ordinal = 0; Ordinal < 2; ++Ordinal)
+		{
+			UClass* Class = nullptr;
+			UClass* BaseClass = nullptr;
+			TestTrue(TEXT("Class ordinal resolves without a name lookup"), RuntimePackage->TryResolveClassReference(Ordinal, Class, BaseClass));
+			TestTrue(TEXT("Resolved class satisfies cached base"), Class != nullptr && BaseClass != nullptr && Class->IsChildOf(BaseClass));
+			TestTrue(TEXT("Resolved class is Actor-derived"), Class != nullptr && Class->IsChildOf(AActor::StaticClass()));
+		}
+		UClass* OutOfRangeClass = nullptr;
+		UClass* OutOfRangeBase = nullptr;
+		TestFalse(TEXT("Out-of-range class ordinal fails closed"), RuntimePackage->TryResolveClassReference(2, OutOfRangeClass, OutOfRangeBase));
+	}
+
+	TArray<FAvidScriptProjectBindingClassSpec> AliasReferences = ClassReferences;
+	AliasReferences[0].ScriptName = TEXT("RenamedCameraClass");
+	FString AliasJson;
+	FAvidScriptBindingDescriptorGenerateResult AliasResult;
+	TestTrue(
+		TEXT("Class reference alias change generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_refs"),
+			Functions,
+			{},
+			AliasReferences,
+			AliasJson,
+			AliasResult));
+	TestNotEqual(TEXT("Class reference alias participates in package identity"), AliasResult.PackageHash, FirstResult.PackageHash);
+
+	TArray<FAvidScriptProjectBindingClassSpec> ReservedNameReferences = ClassReferences;
+	ReservedNameReferences[0].ScriptName = TEXT("ProjectClasses");
+	FString ReservedNameJson;
+	FAvidScriptBindingDescriptorGenerateResult ReservedNameResult;
+	TestFalse(
+		TEXT("Generated class container name is reserved"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.reserved_class_ref"),
+			Functions,
+			{},
+			ReservedNameReferences,
+			ReservedNameJson,
+			ReservedNameResult));
+	TestEqual(
+		TEXT("Reserved class container name uses stable diagnostic"),
+		ReservedNameResult.ErrorCategory,
+		FString(TEXT("class_reference_invalid")));
+
+	const auto ParserRejectsMutation = [this, &Root](
+		const TCHAR* Label,
+		const TFunctionRef<void(const TArray<TSharedPtr<FJsonValue>>&)>& Mutate)
+	{
+		TSharedPtr<FJsonObject> MutatedRoot;
+		FString SourceJson;
+		SerializeDescriptor(Root, SourceJson);
+		ParseDescriptor(SourceJson, MutatedRoot);
+		const TArray<TSharedPtr<FJsonValue>>& MutableReferences = MutatedRoot->GetArrayField(TEXT("class_references"));
+		Mutate(MutableReferences);
+		FString MutatedJson;
+		FAvidScriptBindingPackageModel MutatedPackage;
+		FString Category;
+		FString Source;
+		TestFalse(Label,
+			SerializeDescriptor(MutatedRoot, MutatedJson)
+			&& FAvidScriptBindingDescriptorParser::Parse(MutatedJson, MutatedPackage, Category, Source));
+		TestEqual(TEXT("Hostile class table reports descriptor contract failure"), Category, FString(TEXT("descriptor_contract_invalid")));
+	};
+	ParserRejectsMutation(TEXT("Class reference ordinal holes fail closed"), [](const TArray<TSharedPtr<FJsonValue>>& Values)
+	{
+		Values[0]->AsObject()->SetNumberField(TEXT("ordinal"), 1);
+	});
+	ParserRejectsMutation(TEXT("Class reference stable-id drift fails closed"), [](const TArray<TSharedPtr<FJsonValue>>& Values)
+	{
+		Values[0]->AsObject()->SetStringField(TEXT("stable_id"), FString::ChrN(64, TEXT('0')));
+	});
+	ParserRejectsMutation(TEXT("Empty class path fails closed"), [](const TArray<TSharedPtr<FJsonValue>>& Values)
+	{
+		Values[0]->AsObject()->SetStringField(TEXT("class_path"), TEXT(""));
+	});
+	ParserRejectsMutation(TEXT("Unknown load policy fails closed"), [](const TArray<TSharedPtr<FJsonValue>>& Values)
+	{
+		Values[0]->AsObject()->SetStringField(TEXT("load_policy"), TEXT("LazyMaybe"));
+	});
+	ParserRejectsMutation(TEXT("Duplicate class script names fail closed"), [](const TArray<TSharedPtr<FJsonValue>>& Values)
+	{
+		Values[1]->AsObject()->SetStringField(
+			TEXT("script_name"),
+			Values[0]->AsObject()->GetStringField(TEXT("script_name")));
+	});
+
+	TSharedPtr<FJsonObject> HashTamperedRoot;
+	TestTrue(TEXT("Hash tamper descriptor clone parses"), ParseDescriptor(FirstJson, HashTamperedRoot));
+	HashTamperedRoot->GetArrayField(TEXT("class_references"))[0]->AsObject()->SetStringField(
+		TEXT("script_name"),
+		TEXT("HashTamperedClass"));
+	FString HashTamperedJson;
+	TestTrue(TEXT("Hash tamper descriptor serializes"), SerializeDescriptor(HashTamperedRoot, HashTamperedJson));
+	TestTrue(TEXT("Hash tamper remains structurally valid"),
+		FAvidScriptBindingDescriptorParser::Parse(HashTamperedJson, ParsedPackage, ErrorCategory, ErrorSource));
+	TestFalse(TEXT("Runtime rejects a class table omitted from package hash"),
+		FAvidScriptBindingPackage::LoadDescriptor(HashTamperedJson, RuntimePackage, LoadResult));
+	TestEqual(TEXT("Class table hash mismatch has stable category"), LoadResult.ErrorCategory, FString(TEXT("binding_package_hash_mismatch")));
+
+	const auto RuntimeRejectsClass = [this, &Functions](
+		const TCHAR* Label,
+		const FAvidScriptProjectBindingClassSpec& Reference,
+		const TCHAR* ExpectedCategory)
+	{
+		FString Json;
+		FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+		TestTrue(Label,
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+				TEXT("avidscript.project.invalid_class_ref"),
+				Functions,
+				{},
+				{ Reference },
+				Json,
+				GenerateResult));
+		TSharedPtr<const FAvidScriptBindingPackage> Package;
+		FAvidScriptBindingPackageLoadResult Result;
+		TestFalse(TEXT("Invalid class reference runtime load fails closed"),
+			FAvidScriptBindingPackage::LoadDescriptor(Json, Package, Result));
+		TestEqual(TEXT("Invalid class reference uses stable runtime category"), Result.ErrorCategory, FString(ExpectedCategory));
+	};
+	RuntimeRejectsClass(
+		TEXT("Wrong inheritance descriptor generates for runtime validation"),
+		{ TEXT("SceneComponentClass"), TEXT("/Script/Engine.SceneComponent"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") },
+		TEXT("binding_class_inheritance_mismatch"));
+	RuntimeRejectsClass(
+		TEXT("Abstract Actor descriptor generates for runtime validation"),
+		{ TEXT("ControllerClass"), TEXT("/Script/Engine.Controller"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") },
+		TEXT("binding_class_not_spawnable"));
 	return true;
 }
 

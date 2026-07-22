@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 struct FAvidScriptBindingSelectionProfile;
+struct FAvidScriptProjectBindingClassSpec;
 
 struct FAvidScriptCSharpBindingEmitResult
 {
@@ -10,6 +11,7 @@ struct FAvidScriptCSharpBindingEmitResult
 	bool bReusedExistingPackage = false;
 	int32 BindingCount = 0;
 	int32 TypeCount = 0;
+	int32 ClassReferenceCount = 0;
 	FString PackageName;
 	FString PackageHash;
 	FString DescriptorHash;
@@ -52,6 +54,13 @@ public:
 		FString& OutReferenceSource,
 		FString& OutManifestJson,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
+	static bool EmitProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+		FString& OutDescriptorJson,
+		FString& OutReferenceSource,
+		FString& OutManifestJson,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
 
 	static FString GetDefaultOutputRoot();
 
@@ -76,6 +85,11 @@ public:
 
 	static bool PublishProfile(
 		const FAvidScriptBindingSelectionProfile& Profile,
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+	static bool PublishProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 		const FString& OutputRoot,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 };

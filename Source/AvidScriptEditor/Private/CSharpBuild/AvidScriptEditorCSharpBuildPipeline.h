@@ -19,6 +19,7 @@ struct FAvidScriptEditorCSharpBuildPlan
 	FString AuthorizationBindingPackagePath;
 	FString RuntimeBindingPackagePath;
 	FAvidScriptBindingSelectionProfile AuthorizationBindingProfile;
+	TArray<FAvidScriptProjectBindingClassSpec> AuthorizationClassReferences;
 	FString BindingSelectionHash;
 	FString BootstrapRoot;
 	FString ArtifactBackupRoot;

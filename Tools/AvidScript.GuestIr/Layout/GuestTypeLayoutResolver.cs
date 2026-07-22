@@ -80,6 +80,7 @@ internal sealed class GuestTypeLayoutResolver
                 "string" => LayoutReference(declaration, requireElement: false),
                 "array" => LayoutReference(declaration, requireElement: true),
                 "handle" => LayoutHandle(declaration),
+                "class_ref" => LayoutClassReference(declaration),
                 _ => InvalidShape(declaration, $"unsupported kind '{declaration.Kind}'"),
             };
         }
@@ -202,6 +203,18 @@ internal sealed class GuestTypeLayoutResolver
         }
 
         return declaration with { Storage = "i64", Size = 8, Alignment = 8 };
+    }
+
+    private GuestType? LayoutClassReference(GuestType declaration)
+    {
+        if (declaration.Fields.Count != 0
+            || declaration.ElementTypeId is not null
+            || declaration.UnderlyingTypeId is not null)
+        {
+            return InvalidShape(declaration, "class reference type has fields or related type metadata");
+        }
+
+        return declaration with { Storage = "i32", Size = 4, Alignment = 4 };
     }
 
     private GuestType? InvalidShape(GuestType declaration, string reason)

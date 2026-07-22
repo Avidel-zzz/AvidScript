@@ -605,6 +605,14 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			CSharpTypeNames.Add(Name);
 		}
 	}
+	if (!Package.ClassReferences.IsEmpty()
+		&& (CSharpTypeNames.Contains(TEXT("TSubclassOfAActor"))
+			|| CSharpTypeNames.Contains(TEXT("ProjectClasses"))))
+	{
+		OutErrorCategory = TEXT("csharp_type_collision");
+		OutErrorSource = TEXT("TSubclassOfAActor|ProjectClasses");
+		return false;
+	}
 
 	TMap<FString, TArray<const FAvidScriptBindingFunctionModel*>> BindingsByOwner;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
@@ -732,6 +740,34 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	AppendInputEvent(Lines);
 	if (bNeedsRotator) { AppendRotator(Lines); }
 	if (bNeedsTransform) { AppendTransform(Lines); }
+	if (!Package.ClassReferences.IsEmpty())
+	{
+		Lines.Append({
+			TEXT("[StructLayout(LayoutKind.Sequential)]"),
+			TEXT("public readonly struct TSubclassOfAActor"),
+			TEXT("{"),
+			TEXT("    private readonly int Ordinal;"),
+			TEXT(""),
+			TEXT("    internal TSubclassOfAActor(int ordinal)"),
+			TEXT("    {"),
+			TEXT("        Ordinal = ordinal;"),
+			TEXT("    }"),
+			TEXT(""),
+			TEXT("    internal int AvidScriptOrdinal => Ordinal;"),
+			TEXT("}"),
+			TEXT(""),
+			TEXT("public static class ProjectClasses"),
+			TEXT("{")
+		});
+		for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+		{
+			Lines.Add(FString::Printf(
+				TEXT("    public static TSubclassOfAActor %s => new(%d);"),
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Reference.ScriptName),
+				Reference.Ordinal));
+		}
+		Lines.Append({ TEXT("}"), TEXT("") });
+	}
 
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
@@ -899,6 +935,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 	Writer->WriteValue(TEXT("package_name"), Package.PackageName);
 	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
 	Writer->WriteValue(TEXT("descriptor_schema_version"), Package.SchemaVersion);
+	Writer->WriteValue(TEXT("class_reference_count"), Package.ClassReferences.Num());
 	Writer->WriteValue(TEXT("descriptor_sha256"), DescriptorHash);
 	Writer->WriteValue(TEXT("reference_source_sha256"), SourceHash);
 	Writer->WriteObjectStart(TEXT("files"));

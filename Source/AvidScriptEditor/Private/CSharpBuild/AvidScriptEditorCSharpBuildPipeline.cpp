@@ -299,6 +299,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 	OutPlan = FAvidScriptEditorCSharpBuildPlan();
 	OutResult = FAvidScriptEditorCSharpBuildResult();
 	OutPlan.AuthorizationBindingProfile = Request.AuthorizationBindingProfile;
+	OutPlan.AuthorizationClassReferences = Request.AuthorizationClassReferences;
 	OutPlan.BindingSelectionHash = Request.BindingSelectionHash;
 	OutPlan.bUsesEngineGameplayBindingProfile =
 		Request.bUsesEngineGameplayBindingProfile;
@@ -451,6 +452,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 		FAvidScriptCSharpBindingEmitResult BindingEmitResult;
 		if (!FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
 				OutPlan.AuthorizationBindingProfile,
+				OutPlan.AuthorizationClassReferences,
 				FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot(),
 				BindingEmitResult))
 		{

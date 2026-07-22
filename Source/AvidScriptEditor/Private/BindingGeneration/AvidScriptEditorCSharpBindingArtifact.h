@@ -4,8 +4,8 @@
 
 namespace AvidScriptCSharpBindingArtifact
 {
-inline constexpr const TCHAR* EmitterVersion = TEXT("48.6.0");
-inline constexpr const TCHAR* DescriptorFileName = TEXT("bindings.v3.json");
+inline constexpr const TCHAR* EmitterVersion = TEXT("49.2.0");
+inline constexpr const TCHAR* DescriptorFileName = TEXT("bindings.v5.json");
 inline constexpr const TCHAR* ReferenceSourceFileName = TEXT("AvidScript.Bindings.generated.cs");
 inline constexpr const TCHAR* ManifestFileName = TEXT("package.json");
 }

@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptComponent.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
@@ -34,6 +35,31 @@ uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 	uint32 Bits = 0;
 	FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
 	return Bits;
+}
+
+bool RehashAvidScriptBindingRuntimeDescriptor(FString& InOutJson)
+{
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TSharedPtr<FJsonObject> Root;
+	if (!FAvidScriptBindingDescriptorParser::Parse(
+			InOutJson,
+			Package,
+			ErrorCategory,
+			ErrorSource)
+		|| !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(InOutJson), Root)
+		|| !Root.IsValid())
+	{
+		return false;
+	}
+
+	Root->SetStringField(
+		TEXT("package_hash"),
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package));
+	InOutJson.Empty();
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&InOutJson);
+	return FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 }
 
 class FAvidScriptBindingRuntimeTestGuestMemory final : public IAvidScriptVmGuestMemory
@@ -989,11 +1015,14 @@ bool FAvidScriptEditorBindingRuntimeScalarMetadataFailureTest::RunTest(const FSt
 		return false;
 	}
 
-	const FString TamperedJson = DescriptorJson.Replace(
+	FString TamperedJson = DescriptorJson.Replace(
 		TEXT("\"cpp_type\": \"float\""),
 		TEXT("\"cpp_type\": \"int32\""),
 		ESearchCase::CaseSensitive);
 	TestFalse(TEXT("Scalar cpp_type metadata was changed"), TamperedJson == DescriptorJson);
+	TestTrue(
+		TEXT("Scalar metadata tamper is rehashed to exercise the reflected contract gate"),
+		RehashAvidScriptBindingRuntimeDescriptor(TamperedJson));
 
 	TSharedPtr<const FAvidScriptBindingPackage> Package;
 	FAvidScriptBindingPackageLoadResult LoadResult;
@@ -1332,11 +1361,14 @@ bool FAvidScriptEditorBindingRuntimeFNameInputTest::RunTest(const FString& Param
 			TEXT("binding_argument_invalid"));
 	}
 
-	const FString TamperedDescriptorJson = DescriptorJson.Replace(
+	FString TamperedDescriptorJson = DescriptorJson.Replace(
 		TEXT("\"kind\": \"name_utf8\""),
 		TEXT("\"kind\": \"name_utf16\""),
 		ESearchCase::CaseSensitive);
 	TestFalse(TEXT("FName kind metadata was changed"), TamperedDescriptorJson == DescriptorJson);
+	TestTrue(
+		TEXT("FName kind tamper is rehashed to exercise the reflected contract gate"),
+		RehashAvidScriptBindingRuntimeDescriptor(TamperedDescriptorJson));
 	TSharedPtr<const FAvidScriptBindingPackage> TamperedPackage;
 	FAvidScriptBindingPackageLoadResult TamperedLoadResult;
 	TestFalse(
@@ -1350,11 +1382,14 @@ bool FAvidScriptEditorBindingRuntimeFNameInputTest::RunTest(const FString& Param
 		TamperedLoadResult.ErrorCategory == TEXT("binding_property_contract_mismatch"));
 	TestFalse(TEXT("Rejected FName descriptor publishes no package"), TamperedPackage.IsValid());
 
-	const FString TamperedSizeDescriptorJson = DescriptorJson.Replace(
+	FString TamperedSizeDescriptorJson = DescriptorJson.Replace(
 		TEXT("\"size\": 4"),
 		TEXT("\"size\": 8"),
 		ESearchCase::CaseSensitive);
 	TestFalse(TEXT("FName declared size metadata was changed"), TamperedSizeDescriptorJson == DescriptorJson);
+	TestTrue(
+		TEXT("FName size tamper is rehashed to exercise the reflected contract gate"),
+		RehashAvidScriptBindingRuntimeDescriptor(TamperedSizeDescriptorJson));
 	TSharedPtr<const FAvidScriptBindingPackage> TamperedSizePackage;
 	FAvidScriptBindingPackageLoadResult TamperedSizeLoadResult;
 	TestFalse(
@@ -1384,7 +1419,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FStr
 	FString DescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
 	if (!TestTrue(
-		TEXT("Readable Actor property generates a schema v4 package"),
+		TEXT("Readable Actor property generates a schema v5 package"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
 			TEXT("avidscript.engine.property_runtime"),
 			{},

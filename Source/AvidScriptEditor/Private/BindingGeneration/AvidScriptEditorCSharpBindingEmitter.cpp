@@ -54,13 +54,25 @@ bool ValidateCanonicalDescriptor(
 			FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
 		}
 	}
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	ClassReferences.Reserve(Package.ClassReferences.Num());
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+	{
+		ClassReferences.Add({
+			Reference.ScriptName,
+			Reference.ClassPath,
+			Reference.BaseClassPath,
+			Reference.LoadPolicy
+		});
+	}
 
 	FString CanonicalDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult RegenerationResult;
-	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 		Package.PackageName,
 		FunctionSelections,
 		PropertySelections,
+		ClassReferences,
 		CanonicalDescriptorJson,
 		RegenerationResult))
 	{
@@ -335,6 +347,7 @@ bool FAvidScriptEditorCSharpBindingEmitter::Emit(
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Package.Bindings.Num();
 	OutResult.TypeCount = Package.Types.Num();
+	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
 	OutResult.PackageName = Package.PackageName;
 	OutResult.PackageHash = Package.PackageHash;
 	OutResult.DescriptorHash = DescriptorHash;
@@ -386,10 +399,28 @@ bool FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
 	FString& OutManifestJson,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return EmitProfile(
+		Profile,
+		{},
+		OutDescriptorJson,
+		OutReferenceSource,
+		OutManifestJson,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	FString& OutDescriptorJson,
+	FString& OutReferenceSource,
+	FString& OutManifestJson,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		Profile,
+		ClassReferences,
 		OutDescriptorJson,
 		SelectionResult,
 		DescriptorResult))
@@ -481,11 +512,20 @@ bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
 	const FString& OutputRoot,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return PublishProfile(Profile, {}, OutputRoot, OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FString Descriptor;
 	FString Source;
 	FString Manifest;
 	FAvidScriptCSharpBindingEmitResult EmitResult;
-	if (!EmitProfile(Profile, Descriptor, Source, Manifest, EmitResult))
+	if (!EmitProfile(Profile, ClassReferences, Descriptor, Source, Manifest, EmitResult))
 	{
 		OutResult = MoveTemp(EmitResult);
 		return false;

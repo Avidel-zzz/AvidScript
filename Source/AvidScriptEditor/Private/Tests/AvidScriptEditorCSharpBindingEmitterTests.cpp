@@ -170,6 +170,62 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterClassReferenceTest,
+	"AvidScript.Editor.CSharpBindingEmitter.ClassReference",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FString& Parameters)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	TestTrue(
+		TEXT("Class reference descriptor generates for facade emission"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_facade"),
+			{ { TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") } },
+			{},
+			{
+				{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+			},
+			DescriptorJson,
+			DescriptorResult));
+
+	FString Source;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Class reference facade emits"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			Source,
+			ManifestJson,
+			EmitResult));
+	TestEqual(TEXT("Emitter reports one class reference"), EmitResult.ClassReferenceCount, 1);
+	TestTrue(TEXT("Facade declares the nominal Actor class wrapper"),
+		Source.Contains(TEXT("public readonly struct TSubclassOfAActor")));
+	TestTrue(TEXT("Class wrapper stores one private ordinal cell"),
+		Source.Contains(TEXT("private readonly int Ordinal;")));
+	TestTrue(TEXT("Class wrapper exposes only the internal ABI ordinal"),
+		Source.Contains(TEXT("internal int AvidScriptOrdinal => Ordinal;")));
+	TestTrue(TEXT("Facade publishes the project class by descriptor ordinal"),
+		Source.Contains(TEXT("public static TSubclassOfAActor ProjectileClass => new(0);")));
+	TestFalse(TEXT("Class facade does not expose an implicit integer conversion"),
+		Source.Contains(TEXT("implicit operator")));
+	TestFalse(TEXT("Class facade does not create a host import"),
+		Source.Contains(TEXT("ProjectClasses"))
+		&& Source.Contains(TEXT("EntryPoint = \"class")));
+
+	TSharedPtr<FJsonObject> Manifest;
+	TestTrue(TEXT("Class reference manifest parses"), ParseJsonObject(ManifestJson, Manifest));
+	if (Manifest.IsValid())
+	{
+		TestEqual(TEXT("Manifest records one class reference"), Manifest->GetIntegerField(TEXT("class_reference_count")), 1);
+		TestEqual(TEXT("Manifest identifies descriptor schema v5"), Manifest->GetIntegerField(TEXT("descriptor_schema_version")), 5);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpBindingEmitterPropertyGetTest,
 	"AvidScript.Editor.CSharpBindingEmitter.PropertyGet",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -566,6 +622,20 @@ bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Para
 	if (!TestTrue(TEXT("FName generated facade fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
 	{
 		return false;
+	}
+	if (Source != FixtureSource)
+	{
+		const FString ActualPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+			FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptGeneratedBindingsTests/P48_4_FNameActorHasTag.actual.cs")));
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ActualPath), true);
+		TestTrue(
+			TEXT("Changed FName facade is saved for deterministic fixture review"),
+			FFileHelper::SaveStringToFile(
+				Source,
+				*ActualPath,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+		AddInfo(FString::Printf(TEXT("Changed FName facade: %s"), *ActualPath));
 	}
 	TestEqual(TEXT("FName generated facade matches the C# source-to-WASM fixture byte for byte"), Source, FixtureSource);
 

@@ -1,5 +1,6 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
@@ -19,7 +20,7 @@
 
 namespace
 {
-constexpr const TCHAR* GeneratorVersion = TEXT("45.5.0");
+constexpr const TCHAR* GeneratorVersion = TEXT("49.2.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -139,6 +140,22 @@ void WriteProjectedValue(
 	Writer->WriteValue(TEXT("cpp_type"), Value.Type.CppType);
 	WriteStringArray(Writer, TEXT("abi_types"), Value.Type.AbiValueTypes);
 }
+
+FAvidScriptBindingValueModel MakeBindingValueModel(
+	const FAvidScriptProjectedBindingValue& Value)
+{
+	FAvidScriptBindingValueModel Model;
+	Model.Name = Value.Name;
+	Model.Direction = Value.Direction;
+	Model.bHasDefault = Value.bHasDefaultValue;
+	Model.DefaultValue = Value.DefaultValue;
+	Model.CanonicalType = Value.Type.CanonicalType;
+	Model.TypeId = Value.Type.StableId;
+	Model.Kind = Value.Type.Kind;
+	Model.CppType = Value.Type.CppType;
+	Model.AbiTypes = Value.Type.AbiValueTypes;
+	return Model;
+}
 } // namespace
 
 const TCHAR* FAvidScriptEditorBindingDescriptorGenerator::GetDefaultPackageName()
@@ -198,6 +215,23 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 	FString& OutJson,
 	FAvidScriptBindingDescriptorGenerateResult& OutResult)
 {
+	return GenerateWithClassReferences(
+		PackageName,
+		FunctionSelections,
+		PropertySelections,
+		{},
+		OutJson,
+		OutResult);
+}
+
+bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+	const FString& PackageName,
+	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
+	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	FString& OutJson,
+	FAvidScriptBindingDescriptorGenerateResult& OutResult)
+{
 	OutJson.Empty();
 	OutResult = FAvidScriptBindingDescriptorGenerateResult();
 	if (PackageName.IsEmpty())
@@ -205,9 +239,11 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		SetFailure(OutResult, TEXT("package_name_missing"), PackageName, TEXT("Provide a stable non-empty binding package name."));
 		return false;
 	}
-	if (FunctionSelections.IsEmpty() && PropertySelections.IsEmpty())
+	if (FunctionSelections.IsEmpty()
+		&& PropertySelections.IsEmpty()
+		&& ClassReferences.IsEmpty())
 	{
-		SetFailure(OutResult, TEXT("selection_empty"), PackageName, TEXT("Select at least one reflected function or readable property for the binding package."));
+		SetFailure(OutResult, TEXT("selection_empty"), PackageName, TEXT("Select at least one reflected function, readable property, or class reference for the binding package."));
 		return false;
 	}
 
@@ -217,7 +253,6 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		return MakeSelectionKey(Left).Compare(MakeSelectionKey(Right), ESearchCase::CaseSensitive) < 0;
 	});
 
-	TArray<FString> SelectionKeys;
 	TArray<FResolvedBindingDescriptor> Bindings;
 	TSet<FString> SeenSelections;
 	for (const FAvidScriptReflectedFunctionSelection& Selection : SortedSelections)
@@ -229,7 +264,6 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 			return false;
 		}
 		SeenSelections.Add(SelectionKey);
-		SelectionKeys.Add(SelectionKey);
 
 		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
 		if (OwnerClass == nullptr)
@@ -312,7 +346,6 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 			return false;
 		}
 		SeenSelections.Add(SelectionKey);
-		SelectionKeys.Add(SelectionKey);
 
 		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
 		FProperty* Property = OwnerClass == nullptr
@@ -412,44 +445,110 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
 	});
 
-	const int32 SchemaVersion = PropertySelections.IsEmpty() ? 3 : 4;
-	const FString EffectiveGeneratorVersion = PropertySelections.IsEmpty()
-		? FString(GeneratorVersion)
-		: FString(TEXT("46.1.0"));
-	const FString SelectionHash = HashSha256(FString::Join(SelectionKeys, TEXT("\n")));
-	FString PackageIdentity = PackageName
-		+ TEXT("|") + EffectiveGeneratorVersion
-		+ TEXT("|") + FEngineVersion::Current().ToString(EVersionComponent::Patch)
-		+ TEXT("|") + SelectionHash;
+	FAvidScriptBindingPackageModel Package;
+	Package.SchemaVersion = 5;
+	Package.GeneratorVersion = GeneratorVersion;
+	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = PackageName;
 	for (const FAvidScriptProjectedBindingType& Type : Types)
 	{
-		PackageIdentity += TEXT("|type:") + Type.StableId + TEXT(":") + Type.CanonicalType + TEXT(":") + FString::Join(Type.AbiValueTypes, TEXT(""));
+		FAvidScriptBindingTypeModel TypeModel;
+		TypeModel.StableId = Type.StableId;
+		TypeModel.CanonicalType = Type.CanonicalType;
+		TypeModel.Kind = Type.Kind;
+		TypeModel.CppType = Type.CppType;
+		TypeModel.Size = Type.Size;
+		TypeModel.Alignment = Type.Alignment;
+		TypeModel.AbiTypes = Type.AbiValueTypes;
+		TypeModel.EnumValues = Type.EnumValues;
+		Package.Types.Add(MoveTemp(TypeModel));
 	}
 	for (const FResolvedBindingDescriptor& Binding : Bindings)
 	{
-		PackageIdentity += TEXT("|binding:") + Binding.CanonicalIdentity + TEXT(":") + Binding.Projection.AbiSignature;
-		PackageIdentity += TEXT("|reload_effect:") + FString(LexToString(Binding.ReloadEffect));
+		FAvidScriptBindingFunctionModel BindingModel;
+		BindingModel.StableId = Binding.StableId;
+		BindingModel.CanonicalIdentity = Binding.CanonicalIdentity;
+		BindingModel.Ordinal = Binding.Ordinal;
+		BindingModel.OwnerClass = Binding.OwnerClass->GetPathName();
+		BindingModel.BindingKind = Binding.BindingKind;
+		BindingModel.UeMember = Binding.UeMember;
+		BindingModel.UeFunction = Binding.Function == nullptr ? FString() : Binding.Function->GetName();
+		BindingModel.ScriptName = Binding.ScriptName;
+		BindingModel.DispatchMode = Binding.BindingKind == TEXT("function")
+			? TEXT("cached_process_event")
+			: TEXT("cached_property_get");
+		BindingModel.bStatic = Binding.Function != nullptr && Binding.Function->HasAnyFunctionFlags(FUNC_Static);
+		BindingModel.bConst = Binding.Function == nullptr || Binding.Function->HasAnyFunctionFlags(FUNC_Const);
+		BindingModel.ReloadEffect = Binding.ReloadEffect;
+		BindingModel.ReturnValue = MakeBindingValueModel(Binding.Projection.ReturnValue);
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
 		{
-			PackageIdentity += TEXT("|default:") + Parameter.Name + TEXT(":");
-			if (Parameter.bHasDefaultValue)
-			{
-				PackageIdentity += TEXT("1:") + FString::FromInt(Parameter.DefaultValue.Len()) + TEXT(":") + Parameter.DefaultValue;
-			}
-			else
-			{
-				PackageIdentity += TEXT("0");
-			}
+			BindingModel.Parameters.Add(MakeBindingValueModel(Parameter));
 		}
+		BindingModel.HostImport.Module = TEXT("avidscript");
+		BindingModel.HostImport.Name = Binding.ImportName;
+		BindingModel.HostImport.Signature = Binding.Projection.AbiSignature;
+		Package.Bindings.Add(MoveTemp(BindingModel));
 	}
-	const FString PackageHash = HashSha256(PackageIdentity);
+
+	TSet<FString> ClassReferenceStableIds;
+	TSet<FString> ClassReferenceScriptNames;
+	for (const FAvidScriptProjectBindingClassSpec& ClassReference : ClassReferences)
+	{
+		FAvidScriptBindingClassReferenceModel ReferenceModel;
+		ReferenceModel.ScriptName = ClassReference.ScriptName;
+		ReferenceModel.ClassPath = ClassReference.ClassPath;
+		ReferenceModel.BaseClassPath = ClassReference.BaseClassPath;
+		ReferenceModel.LoadPolicy = ClassReference.LoadPolicy;
+		ReferenceModel.StableId = FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+			ReferenceModel.ClassPath,
+			ReferenceModel.BaseClassPath,
+			ReferenceModel.LoadPolicy);
+		if (ReferenceModel.ScriptName.IsEmpty()
+			|| ReferenceModel.ScriptName == TEXT("ProjectClasses")
+			|| ReferenceModel.ClassPath.IsEmpty()
+			|| ReferenceModel.BaseClassPath.IsEmpty()
+			|| (ReferenceModel.LoadPolicy != TEXT("EditorLoad")
+				&& ReferenceModel.LoadPolicy != TEXT("CookRequired"))
+			|| ClassReferenceStableIds.Contains(ReferenceModel.StableId)
+			|| ClassReferenceScriptNames.Contains(ReferenceModel.ScriptName))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("class_reference_invalid"),
+				ReferenceModel.ScriptName,
+				TEXT("Resolve duplicate or invalid class reference declarations before descriptor generation."));
+			return false;
+		}
+		ClassReferenceStableIds.Add(ReferenceModel.StableId);
+		ClassReferenceScriptNames.Add(ReferenceModel.ScriptName);
+		Package.ClassReferences.Add(MoveTemp(ReferenceModel));
+	}
+	Package.ClassReferences.Sort([](
+		const FAvidScriptBindingClassReferenceModel& Left,
+		const FAvidScriptBindingClassReferenceModel& Right)
+	{
+		return Left.StableId.Compare(Right.StableId, ESearchCase::CaseSensitive) < 0;
+	});
+	for (int32 Index = 0; Index < Package.ClassReferences.Num(); ++Index)
+	{
+		Package.ClassReferences[Index].Ordinal = Index;
+	}
+
+	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+	const int32 SchemaVersion = Package.SchemaVersion;
+	const FString& EffectiveGeneratorVersion = Package.GeneratorVersion;
+	const FString& SelectionHash = Package.SelectionHash;
+	const FString& PackageHash = Package.PackageHash;
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
 	Writer->WriteObjectStart();
 	Writer->WriteValue(TEXT("schema_version"), SchemaVersion);
 	Writer->WriteValue(TEXT("generator_version"), EffectiveGeneratorVersion);
-	Writer->WriteValue(TEXT("engine_version"), FEngineVersion::Current().ToString(EVersionComponent::Patch));
-	Writer->WriteValue(TEXT("source"), TEXT("ue_reflection"));
+	Writer->WriteValue(TEXT("engine_version"), Package.EngineVersion);
+	Writer->WriteValue(TEXT("source"), Package.Source);
 	Writer->WriteValue(TEXT("package_name"), PackageName);
 	Writer->WriteValue(TEXT("package_hash"), PackageHash);
 	Writer->WriteValue(TEXT("selection_hash"), SelectionHash);
@@ -476,6 +575,19 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 			}
 			Writer->WriteArrayEnd();
 		}
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("class_references"));
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Reference.StableId);
+		Writer->WriteValue(TEXT("ordinal"), Reference.Ordinal);
+		Writer->WriteValue(TEXT("script_name"), Reference.ScriptName);
+		Writer->WriteValue(TEXT("class_path"), Reference.ClassPath);
+		Writer->WriteValue(TEXT("base_class_path"), Reference.BaseClassPath);
+		Writer->WriteValue(TEXT("load_policy"), Reference.LoadPolicy);
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();
@@ -533,6 +645,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Bindings.Num();
 	OutResult.TypeCount = Types.Num();
+	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
 	OutResult.PackageHash = PackageHash;
 	OutResult.SelectionHash = SelectionHash;
 	return true;
@@ -540,6 +653,21 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 
 bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	const FAvidScriptBindingSelectionProfile& Profile,
+	FString& OutJson,
+	FAvidScriptBindingSelectionResolveResult& OutSelectionResult,
+	FAvidScriptBindingDescriptorGenerateResult& OutResult)
+{
+	return GenerateFromProfile(
+		Profile,
+		{},
+		OutJson,
+		OutSelectionResult,
+		OutResult);
+}
+
+bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 	FString& OutJson,
 	FAvidScriptBindingSelectionResolveResult& OutSelectionResult,
 	FAvidScriptBindingDescriptorGenerateResult& OutResult)
@@ -596,10 +724,11 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
 	OutSelectionResult.bSucceeded = true;
-	return GenerateWithReadableProperties(
+	return GenerateWithClassReferences(
 		Profile.PackageName,
 		FunctionSelections,
 		PropertySelections,
+		ClassReferences,
 		OutJson,
 		OutResult);
 }

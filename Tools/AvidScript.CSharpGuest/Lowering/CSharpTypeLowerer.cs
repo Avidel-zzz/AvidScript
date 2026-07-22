@@ -67,6 +67,25 @@ internal static class CSharpTypeLowerer
             return intrinsic;
         }
 
+        if (CSharpClassReferencePolicy.IsType(type))
+        {
+            if (!CSharpClassReferencePolicy.HasCanonicalField(type, symbols))
+            {
+                Add(diagnostics, "ASCG1003", $"Class reference '{type.Id}' does not match the generated ordinal wrapper contract.");
+                return null;
+            }
+
+            return new GuestType(
+                type.Id,
+                "class_ref",
+                "i32",
+                Array.Empty<GuestField>(),
+                null,
+                null,
+                4,
+                4);
+        }
+
         switch (type.Kind)
         {
             case "struct":

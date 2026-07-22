@@ -42,6 +42,12 @@ public static class GuestConstantCodec
                 && int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out int int32):
                 BinaryPrimitives.WriteInt32LittleEndian(destination, int32);
                 return true;
+            case "class_ref" when targetType.Kind == "class_ref"
+                && targetType.Storage == "i32"
+                && int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out int classOrdinal)
+                && classOrdinal >= 0:
+                BinaryPrimitives.WriteInt32LittleEndian(destination, classOrdinal);
+                return true;
             case "uint32" or "address" when IsIntegerTarget(targetType, 4)
                 && uint.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out uint uint32):
                 BinaryPrimitives.WriteUInt32LittleEndian(destination, uint32);

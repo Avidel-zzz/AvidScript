@@ -203,10 +203,22 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 
 	FString SliceDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
-	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	ClassReferences.Reserve(AuthorizationModel.ClassReferences.Num());
+	for (const FAvidScriptBindingClassReferenceModel& Reference : AuthorizationModel.ClassReferences)
+	{
+		ClassReferences.Add({
+			Reference.ScriptName,
+			Reference.ClassPath,
+			Reference.BaseClassPath,
+			Reference.LoadPolicy
+		});
+	}
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 			AuthorizationModel.PackageName,
 			FunctionSelections,
 			PropertySelections,
+			ClassReferences,
 			SliceDescriptorJson,
 			GenerateResult))
 	{
@@ -239,6 +251,15 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			TEXT("slice_selection_mismatch"),
 			AuthorizationModel.PackageName,
 			TEXT("regenerate the slice from stable reflected selections"));
+		return false;
+	}
+	if (SliceModel.ClassReferences.Num() != AuthorizationModel.ClassReferences.Num())
+	{
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			TEXT("slice_class_reference_mismatch"),
+			AuthorizationModel.PackageName,
+			TEXT("preserve the complete authorization class table in the runtime slice"));
 		return false;
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)

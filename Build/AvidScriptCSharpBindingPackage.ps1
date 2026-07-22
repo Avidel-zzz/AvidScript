@@ -299,7 +299,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
     }
     if (([int]$Descriptor.schema_version -ne 2 -and
         [int]$Descriptor.schema_version -ne 3 -and
-        [int]$Descriptor.schema_version -ne 4) -or
+        [int]$Descriptor.schema_version -ne 4 -and
+        [int]$Descriptor.schema_version -ne 5) -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
         throw "Binding descriptor identity does not match package.json."

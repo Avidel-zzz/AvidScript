@@ -257,9 +257,36 @@ internal static class GuestInstructionValidator
         IReadOnlyList<GuestRegister?> operands)
     {
         if (result is null || operands.Count != 1 || instruction.TargetId is not null
-            || instruction.OperatorKind is not null || instruction.Constant is not null)
+            || instruction.Constant is not null)
         {
             AddMalformedInstruction(context, function, instruction);
+            return;
+        }
+
+        if (operands[0] is null
+            || !context.Types.TryGetValue(operands[0]!.TypeId, out GuestType? sourceType)
+            || !context.Types.TryGetValue(result.TypeId, out GuestType? targetType))
+        {
+            return;
+        }
+
+        if (string.Equals(instruction.OperatorKind, "class_ref_ordinal", StringComparison.Ordinal))
+        {
+            if (sourceType.Kind != "class_ref"
+                || targetType.Kind != "scalar"
+                || targetType.Storage != "i32"
+                || !string.Equals(result.TypeId, "type:int32", StringComparison.Ordinal))
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+            return;
+        }
+
+        if (instruction.OperatorKind is not null
+            || sourceType.Kind == "class_ref"
+            || targetType.Kind == "class_ref")
+        {
+            AddTypeMismatch(context, function, instruction);
         }
     }
 

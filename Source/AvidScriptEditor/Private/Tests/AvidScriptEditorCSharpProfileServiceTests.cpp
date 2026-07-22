@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h"
@@ -264,11 +265,36 @@ bool FAvidScriptEditorCSharpProfileServiceProjectBindingProfileTest::RunTest(con
 		return false;
 	}
 	TestTrue(TEXT("Project binding plan uses automatic authorization generation"), FirstPlan.bAutomaticBindingSlice);
+	TestEqual(TEXT("Project class references reach the build plan"), FirstPlan.AuthorizationClassReferences.Num(), 1);
 	TestEqual(TEXT("Project binding selection hash reaches the build result"), FirstPrepareResult.BindingSelectionHash, Result.BindingSelectionHash);
 	TestTrue(TEXT("Project package name reaches the generated manifest path"), FirstPlan.AuthorizationBindingPackagePath.Contains(Result.ProjectBindingProfile.PackageName));
 	TestTrue(TEXT("Project authorization manifest exists"), FPaths::FileExists(FirstPlan.AuthorizationBindingPackagePath));
 	const FString FirstManifestPath = FirstPlan.AuthorizationBindingPackagePath;
 	const FString PackageDirectory = FPaths::GetPath(FirstManifestPath);
+	FString PublishedDescriptorJson;
+	FAvidScriptBindingPackageModel PublishedPackage;
+	FString PublishedParseCategory;
+	FString PublishedParseSource;
+	TestTrue(
+		TEXT("Project authorization descriptor retains the resolved class table"),
+		FFileHelper::LoadFileToString(
+			PublishedDescriptorJson,
+			*FPaths::Combine(PackageDirectory, AvidScriptCSharpBindingArtifact::DescriptorFileName))
+		&& FAvidScriptBindingDescriptorParser::Parse(
+			PublishedDescriptorJson,
+			PublishedPackage,
+			PublishedParseCategory,
+			PublishedParseSource));
+	TestEqual(TEXT("Published project descriptor contains one class reference"), PublishedPackage.ClassReferences.Num(), 1);
+	FString PublishedReferenceSource;
+	TestTrue(
+		TEXT("Project authorization facade is readable"),
+		FFileHelper::LoadFileToString(
+			PublishedReferenceSource,
+			*FPaths::Combine(PackageDirectory, AvidScriptCSharpBindingArtifact::ReferenceSourceFileName)));
+	TestTrue(
+		TEXT("Project authorization facade exposes ProjectileClass"),
+		PublishedReferenceSource.Contains(TEXT("public static TSubclassOfAActor ProjectileClass => new(0);")));
 	const TArray<FString> ImmutablePackageFiles = {
 		FPaths::Combine(PackageDirectory, AvidScriptCSharpBindingArtifact::DescriptorFileName),
 		FPaths::Combine(PackageDirectory, AvidScriptCSharpBindingArtifact::ReferenceSourceFileName),

@@ -41,6 +41,31 @@ internal static class CSharpAggregateOperationLowerer
             return Malformed(context, operation, blockOrdinal);
         }
 
+        if (context.TryGetGuestType(operation.Children[0].TypeId, out GuestType receiverType)
+            && receiverType.Kind == "class_ref"
+            && CSharpClassReferencePolicy.IsOrdinalField(context.Document, operation.SymbolId))
+        {
+            GuestRegister? classReference = CSharpOperationLowerer.LowerValue(
+                context,
+                operation.Children[0],
+                blockOrdinal,
+                instructions);
+            GuestRegister? ordinal = context.CreateTemporary(operation.TypeId, blockOrdinal);
+            if (classReference is null || ordinal is null)
+            {
+                return null;
+            }
+
+            instructions.Add(new GuestInstruction(
+                "convert",
+                ordinal.Id,
+                new[] { classReference.Id },
+                null,
+                "class_ref_ordinal",
+                null));
+            return ordinal;
+        }
+
         GuestRegister? aggregate = CSharpOperationLowerer.LowerValue(
             context,
             operation.Children[0],

@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "Containers/StringConv.h"
+#include "GameFramework/Actor.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
@@ -401,52 +402,12 @@ FString MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
 
 FString MakeAvidScriptRuntimeSelectionHash(const FAvidScriptBindingPackageModel& Package)
 {
-	TArray<FString> SelectionKeys;
-	SelectionKeys.Reserve(Package.Bindings.Num());
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
-	{
-		SelectionKeys.Add(Binding.BindingKind == TEXT("function")
-			? Binding.OwnerClass + TEXT(".") + Binding.UeMember
-			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember);
-	}
-	SelectionKeys.Sort([](const FString& Left, const FString& Right)
-	{
-		return Left.Compare(Right, ESearchCase::CaseSensitive) < 0;
-	});
-	return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
+	return FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 }
 
 FString MakeAvidScriptRuntimePackageHash(const FAvidScriptBindingPackageModel& Package)
 {
-	FString Identity = Package.PackageName
-		+ TEXT("|") + Package.GeneratorVersion
-		+ TEXT("|") + Package.EngineVersion
-		+ TEXT("|") + Package.SelectionHash;
-	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
-	{
-		Identity += TEXT("|type:") + Type.StableId + TEXT(":") + Type.CanonicalType + TEXT(":") + FString::Join(Type.AbiTypes, TEXT(""));
-	}
-	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
-	{
-		Identity += TEXT("|binding:") + Binding.CanonicalIdentity + TEXT(":") + Binding.HostImport.Signature;
-		if (Package.SchemaVersion >= 3)
-		{
-			Identity += TEXT("|reload_effect:") + FString(LexToString(Binding.ReloadEffect));
-		}
-		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
-		{
-			Identity += TEXT("|default:") + Parameter.Name + TEXT(":");
-			if (Parameter.bHasDefault)
-			{
-				Identity += TEXT("1:") + FString::FromInt(Parameter.DefaultValue.Len()) + TEXT(":") + Parameter.DefaultValue;
-			}
-			else
-			{
-				Identity += TEXT("0");
-			}
-		}
-	}
-	return FAvidScriptHash::Sha256HexUtf8(Identity);
+	return FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 }
 
 bool ReadAvidScriptRuntimeF32(uint64 Cell, float& OutValue)
@@ -951,10 +912,17 @@ bool BuildAvidScriptRuntimeValuePlan(
 
 struct FAvidScriptBindingPackage::FImpl
 {
+	struct FClassReferencePlan
+	{
+		UClass* Class = nullptr;
+		UClass* BaseClass = nullptr;
+	};
+
 	FString PackageName;
 	FString PackageHash;
 	FAvidScriptVmBindingPackage VmPackage;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
+	TArray<FClassReferencePlan> ClassReferencePlans;
 	TArray<TStrongObjectPtr<UClass>> LoadedClasses;
 	int32 RequiredScratchSize = 0;
 };
@@ -1023,25 +991,89 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	Package->Impl->VmPackage.PackageName = Model.PackageName;
 	Package->Impl->VmPackage.PackageHash = Model.PackageHash;
 	Package->Impl->Plans.Reserve(Model.Bindings.Num());
+	Package->Impl->ClassReferencePlans.Reserve(Model.ClassReferences.Num());
 	Package->Impl->VmPackage.Imports.Reserve(Model.Bindings.Num());
 
 	TMap<FString, UClass*> LoadedClassesByPath;
+	const auto LoadClass = [&LoadedClassesByPath, &Package](const FString& ClassPath) -> UClass*
+	{
+		UClass*& LoadedClass = LoadedClassesByPath.FindOrAdd(ClassPath);
+		if (LoadedClass == nullptr)
+		{
+			LoadedClass = LoadObject<UClass>(nullptr, *ClassPath);
+			if (LoadedClass != nullptr && LoadedClass->GetPathName() == ClassPath)
+			{
+				Package->Impl->LoadedClasses.Emplace(LoadedClass);
+			}
+			else
+			{
+				LoadedClass = nullptr;
+			}
+		}
+		return LoadedClass;
+	};
+
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Model.ClassReferences)
+	{
+#if !WITH_EDITOR
+		if (Reference.LoadPolicy == TEXT("EditorLoad"))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_class_editor_only"),
+				Reference.ClassPath,
+				TEXT("EditorLoad class references cannot be activated outside an Editor target."));
+			return false;
+		}
+#endif
+		UClass* Class = LoadClass(Reference.ClassPath);
+		UClass* BaseClass = LoadClass(Reference.BaseClassPath);
+		if (Class == nullptr || BaseClass == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				Reference.LoadPolicy == TEXT("CookRequired")
+					? FString(TEXT("binding_class_cook_missing"))
+					: FString(TEXT("binding_class_missing")),
+				Class == nullptr ? Reference.ClassPath : Reference.BaseClassPath,
+				TEXT("The class reference or its base constraint is unavailable under the declared load policy."));
+			return false;
+		}
+		if (!Class->IsChildOf(BaseClass)
+			|| !Class->IsChildOf(AActor::StaticClass())
+			|| !BaseClass->IsChildOf(AActor::StaticClass()))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_class_inheritance_mismatch"),
+				Reference.ClassPath + TEXT(" -> ") + Reference.BaseClassPath,
+				TEXT("The resolved class must satisfy its AActor-derived base constraint."));
+			return false;
+		}
+		if (Class->HasAnyClassFlags(
+			CLASS_Abstract | CLASS_NotPlaceable | CLASS_Deprecated | CLASS_NewerVersionExists))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_class_not_spawnable"),
+				Reference.ClassPath,
+				TEXT("The resolved class is abstract, deprecated, superseded, or not placeable."));
+			return false;
+		}
+		Package->Impl->ClassReferencePlans.Add({ Class, BaseClass });
+	}
+
 	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
 	{
-		UClass*& OwnerClass = LoadedClassesByPath.FindOrAdd(Binding.OwnerClass);
+		UClass* OwnerClass = LoadClass(Binding.OwnerClass);
 		if (OwnerClass == nullptr)
 		{
-			OwnerClass = LoadObject<UClass>(nullptr, *Binding.OwnerClass);
-			if (OwnerClass == nullptr)
-			{
-				SetAvidScriptBindingLoadFailure(
-					OutResult,
-					TEXT("binding_class_missing"),
-					Binding.OwnerClass,
-					TEXT("The reflected owner class is unavailable in this runtime build."));
-				return false;
-			}
-			Package->Impl->LoadedClasses.Emplace(OwnerClass);
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_class_missing"),
+				Binding.OwnerClass,
+				TEXT("The reflected owner class is unavailable in this runtime build."));
+			return false;
 		}
 		if (Binding.BindingKind == TEXT("property_get"))
 		{
@@ -1266,6 +1298,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Package->Impl->Plans.Num();
+	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
 	OutResult.RequiredScratchSize = Package->Impl->RequiredScratchSize;
 	OutResult.PackageName = Package->Impl->PackageName;
 	OutResult.PackageHash = Package->Impl->PackageHash;
@@ -1291,6 +1324,29 @@ const FAvidScriptVmBindingPackage& FAvidScriptBindingPackage::GetVmPackage() con
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const
 {
 	return Impl->RequiredScratchSize;
+}
+
+int32 FAvidScriptBindingPackage::GetClassReferenceCount() const
+{
+	return Impl->ClassReferencePlans.Num();
+}
+
+bool FAvidScriptBindingPackage::TryResolveClassReference(
+	const uint32 Ordinal,
+	UClass*& OutClass,
+	UClass*& OutBaseClass) const
+{
+	OutClass = nullptr;
+	OutBaseClass = nullptr;
+	if (!Impl->ClassReferencePlans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	const FImpl::FClassReferencePlan& Plan =
+		Impl->ClassReferencePlans[static_cast<int32>(Ordinal)];
+	OutClass = Plan.Class;
+	OutBaseClass = Plan.BaseClass;
+	return OutClass != nullptr && OutBaseClass != nullptr;
 }
 
 bool FAvidScriptBindingPackage::Dispatch(

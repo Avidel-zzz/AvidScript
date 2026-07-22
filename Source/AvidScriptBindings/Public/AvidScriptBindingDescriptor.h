@@ -60,6 +60,16 @@ struct FAvidScriptBindingFunctionModel
 	FAvidScriptBindingHostImportModel HostImport;
 };
 
+struct FAvidScriptBindingClassReferenceModel
+{
+	FString StableId;
+	int32 Ordinal = INDEX_NONE;
+	FString ScriptName;
+	FString ClassPath;
+	FString BaseClassPath;
+	FString LoadPolicy;
+};
+
 struct FAvidScriptBindingPackageModel
 {
 	int32 SchemaVersion = 0;
@@ -71,6 +81,7 @@ struct FAvidScriptBindingPackageModel
 	FString SelectionHash;
 	TArray<FAvidScriptBindingTypeModel> Types;
 	TArray<FAvidScriptBindingFunctionModel> Bindings;
+	TArray<FAvidScriptBindingClassReferenceModel> ClassReferences;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorIdentity
@@ -83,6 +94,19 @@ public:
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+
+	static FString MakeClassReferenceIdentity(
+		const FString& ClassPath,
+		const FString& BaseClassPath,
+		const FString& LoadPolicy);
+
+	static FString MakeClassReferenceStableId(
+		const FString& ClassPath,
+		const FString& BaseClassPath,
+		const FString& LoadPolicy);
+
+	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
+	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorParser

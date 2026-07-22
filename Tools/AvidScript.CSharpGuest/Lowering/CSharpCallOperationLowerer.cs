@@ -65,6 +65,16 @@ internal static class CSharpCallOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (CSharpClassReferenceLowerer.TryLowerObjectCreation(
+                context,
+                operation,
+                blockOrdinal,
+                instructions,
+                out GuestRegister? classReference))
+        {
+            return classReference;
+        }
+
         if (!context.TryGetCallTarget(operation.SymbolId, out SemanticCallable constructor, out string targetId)
             || !constructor.IsConstructor
             || constructor.IsStatic)
