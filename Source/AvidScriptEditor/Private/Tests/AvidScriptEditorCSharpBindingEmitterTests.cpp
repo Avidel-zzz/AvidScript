@@ -96,6 +96,10 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade declares AActor"), FirstSource.Contains(TEXT("public readonly struct AActor")));
 	TestTrue(TEXT("Generated facade declares USceneComponent"), FirstSource.Contains(TEXT("public readonly struct USceneComponent")));
 	TestTrue(TEXT("Generated facade provides UE.Self"), FirstSource.Contains(TEXT("public static AActor Self")));
+	TestTrue(TEXT("Generated facade provides one-shot timers"), FirstSource.Contains(TEXT("public static int SetTimer(float delaySeconds, int callbackId)")));
+	TestTrue(TEXT("Generated facade provides timer cancellation"), FirstSource.Contains(TEXT("public static bool CancelTimer(int timerHandle)")));
+	TestTrue(TEXT("Generated facade imports the timer service"), FirstSource.Contains(TEXT("EntryPoint = \"timer_set_once\"")));
+	TestTrue(TEXT("Generated facade imports timer cancellation"), FirstSource.Contains(TEXT("EntryPoint = \"timer_cancel\"")));
 	TestFalse(TEXT("Raw handle constructor is not public"), FirstSource.Contains(TEXT("public AActor(int slot, int generation)")));
 	TestTrue(TEXT("Native imports use the generated module"), FirstSource.Contains(TEXT("[DllImport(\"avidscript\"")));
 	TestTrue(TEXT("Generated facade declares AvidStateMode"), FirstSource.Contains(TEXT("public enum AvidStateMode")));

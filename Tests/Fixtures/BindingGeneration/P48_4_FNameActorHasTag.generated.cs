@@ -127,6 +127,8 @@ public readonly struct AActor
 public static class UE
 {
     public static AActor Self => new(AvidScriptRuntimeNative.OwnerGetSlot(), AvidScriptRuntimeNative.OwnerGetGeneration());
+    public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);
+    public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;
 }
 
 internal static class AvidScriptRuntimeNative
@@ -136,6 +138,12 @@ internal static class AvidScriptRuntimeNative
 
     [DllImport("env", EntryPoint = "owner_get_generation")]
     internal static extern int OwnerGetGeneration();
+
+    [DllImport("env", EntryPoint = "timer_set_once")]
+    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "timer_cancel")]
+    internal static extern int TimerCancel(int timerHandle);
 }
 
 internal static class AvidScriptNative

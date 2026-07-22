@@ -847,6 +847,8 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			TEXT("public static class UE"),
 			TEXT("{"),
 			TEXT("    public static AActor Self => new(AvidScriptRuntimeNative.OwnerGetSlot(), AvidScriptRuntimeNative.OwnerGetGeneration());"),
+			TEXT("    public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);"),
+			TEXT("    public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;"),
 			TEXT("}"),
 			TEXT(""),
 			TEXT("internal static class AvidScriptRuntimeNative"),
@@ -856,6 +858,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			TEXT(""),
 			TEXT("    [DllImport(\"env\", EntryPoint = \"owner_get_generation\")]"),
 			TEXT("    internal static extern int OwnerGetGeneration();"),
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
+			TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
+			TEXT("    internal static extern int TimerCancel(int timerHandle);"),
 			TEXT("}"),
 			TEXT("")
 		});

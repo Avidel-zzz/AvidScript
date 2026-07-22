@@ -528,8 +528,8 @@ foreach ($RequiredPropertyFacadeContract in @(
         Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("47.3.0")')) {
-    Add-Violation 'C# binding emitter version must identify the P47.3 object proxy surface'
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("48.6.0")')) {
+    Add-Violation 'C# binding emitter version must identify the P48.6 timer facade surface'
 }
 if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 4')) {
     Add-Violation 'C# binding package resolver must accept descriptor schema v4 property packages'

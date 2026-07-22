@@ -492,6 +492,31 @@ bool BuildAvidScriptGeneratedBindingLifecycle(
 	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
 }
 
+bool BuildAvidScriptPlayablePickup(
+	const FString& SourcePath,
+	const FString& OutputRoot,
+	const FString& SemanticCacheRoot,
+	const FString& ModuleId,
+	const FString& ArtifactStem,
+	FAvidScriptEditorCSharpBuildResult& OutBuildResult)
+{
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.BuildScriptPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath();
+	Config.ProjectPath = FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath();
+	Config.SourcePath = SourcePath;
+	Config.ModuleId = ModuleId;
+	Config.ArtifactStem = ArtifactStem;
+	Config.OutputRoot = OutputRoot;
+	Config.ReportPath = FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+		Config.OutputRoot,
+		Config.ArtifactStem);
+	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+		Config.OutputRoot,
+		Config.ArtifactStem);
+	Config.SemanticCacheRoot = SemanticCacheRoot;
+	return FAvidScriptEditorCSharpBuildService::BuildProfile(Config, OutBuildResult);
+}
+
 bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 	FAutomationTestBase& Test,
 	const FString& BuildLabel,
@@ -1806,6 +1831,210 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		TamperedLoadResult.ErrorCategory,
 		FString(TEXT("binding_package_hash_mismatch")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimePlayablePickupTest,
+	"AvidScript.Editor.BindingRuntime.PlayablePickup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& Parameters)
+{
+	const FString SourcePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Samples/CSharp/PlayablePickup/PlayablePickupScript.cs")));
+	const FString TestRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P48_6/PlayablePickup")));
+	const FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest/PlayablePickup")));
+	const FString SemanticCacheRoot = FPaths::Combine(TestRoot, TEXT("CSharpSemanticCache/v1"));
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+		TEXT("Playable pickup builds through the EngineGameplay C# profile"),
+		BuildAvidScriptPlayablePickup(
+			SourcePath,
+			OutputRoot,
+			SemanticCacheRoot,
+			TEXT("csharp_playable_pickup"),
+			TEXT("playable_pickup"),
+			BuildResult)))
+	{
+		AddError(
+			BuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + BuildResult.Stdout
+			+ TEXT("\nstderr:\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Playable pickup performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestTrue(TEXT("Playable pickup publishes a manifest"), FPaths::FileExists(BuildResult.ManifestPath));
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+		TEXT("Playable pickup manifest, WASM, and runtime package load"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			BuildResult.ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(TEXT("Playable pickup owns a reflected runtime package"), Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Playable pickup runtime package contains five reachable reflected bindings"),
+		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
+		5);
+	int32 ReflectedImportCount = 0;
+	int32 TimerImportCount = 0;
+	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
+	{
+		if (Import.ModuleName == TEXT("avidscript")
+			&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+		{
+			++ReflectedImportCount;
+		}
+		if (Import.ModuleName == TEXT("env") && Import.ImportName == TEXT("timer_set_once"))
+		{
+			++TimerImportCount;
+		}
+	}
+	TestEqual(TEXT("Playable pickup requires five dynamic UE imports"), ReflectedImportCount, 5);
+	TestEqual(TEXT("Playable pickup reaches the timer service once"), TimerImportCount, 1);
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Playable pickup integration world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World, false)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	World->InitializeActorsForPlay(FURL());
+	World->BeginPlay();
+	World->SetBegunPlay(true);
+
+	AActor* PickupActor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	AActor* NonPlayerActor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	AActor* PlayerActor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Playable pickup Actor spawns"), PickupActor)
+		|| !TestNotNull(TEXT("Non-player overlap Actor spawns"), NonPlayerActor)
+		|| !TestNotNull(TEXT("Player overlap Actor spawns"), PlayerActor))
+	{
+		return false;
+	}
+	PickupActor->SetActorRotation(FRotator(0.0, 10.0, 0.0));
+	PickupActor->SetActorHiddenInGame(false);
+	PickupActor->SetActorEnableCollision(true);
+	PlayerActor->Tags.Add(TEXT("Player"));
+
+	FAvidScriptEditorComponentBindingResult BindingResult;
+	if (!TestTrue(
+		TEXT("Playable pickup build report binds to the Actor"),
+		FAvidScriptEditorComponentBindingService::ApplyCSharpReportToActor(
+			BuildResult.ReportPath,
+			PickupActor,
+			BindingResult)))
+	{
+		AddError(BindingResult.ErrorMessage);
+		return false;
+	}
+	UAvidScriptComponent* Component = BindingResult.Component;
+	if (!TestNotNull(TEXT("Playable pickup binding creates an AvidScript component"), Component))
+	{
+		return false;
+	}
+	const FAvidScriptComponentRuntimeStats BeginPlayStats = Component->GetRuntimeStats();
+	TestTrue(TEXT("Playable pickup loads the generated WASM runtime"), BeginPlayStats.bRuntimeLoaded);
+	TestTrue(TEXT("Playable pickup enters C# BeginPlay"), BeginPlayStats.bBeginPlayCalled);
+	TestFalse(TEXT("BeginPlay makes the pickup visible"), PickupActor->IsHidden());
+	TestTrue(TEXT("BeginPlay enables pickup collision"), PickupActor->GetActorEnableCollision());
+
+	Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
+	TestTrue(
+		TEXT("C# Tick rotates the pickup by 45 degrees"),
+		FMath::IsNearlyEqual(PickupActor->GetActorRotation().Yaw, 55.0, 0.01));
+
+	PickupActor->OnActorBeginOverlap.Broadcast(PickupActor, NonPlayerActor);
+	TestFalse(TEXT("Actor without Player tag cannot collect the pickup"), PickupActor->IsHidden());
+	TestTrue(TEXT("Rejected overlap preserves pickup collision"), PickupActor->GetActorEnableCollision());
+
+	PickupActor->OnActorBeginOverlap.Broadcast(PickupActor, PlayerActor);
+	TestTrue(TEXT("Player overlap hides the pickup"), PickupActor->IsHidden());
+	TestFalse(TEXT("Player overlap disables pickup collision"), PickupActor->GetActorEnableCollision());
+
+	Component->TickComponent(3.1f, LEVELTICK_All, nullptr);
+	const FAvidScriptComponentRuntimeStats TimerStats = Component->GetRuntimeStats();
+	TestFalse(TEXT("Timer callback makes the pickup visible again"), PickupActor->IsHidden());
+	TestTrue(TEXT("Timer callback restores pickup collision"), PickupActor->GetActorEnableCollision());
+	TestEqual(TEXT("Pickup fires one timer callback"), TimerStats.TimerCallbackCount, 1);
+	TestEqual(TEXT("Pickup timer preserves callback id"), TimerStats.LastTimerCallbackId, 7);
+
+	const FString BadSourcePath = FPaths::Combine(TestRoot, TEXT("BadPlayablePickupScript.cs"));
+	TestTrue(
+		TEXT("Invalid hot-reload source writes"),
+		FFileHelper::SaveStringToFile(
+			TEXT("namespace AvidScript; public static class BadPlayablePickupScript { this is invalid }"),
+			*BadSourcePath));
+	FAvidScriptEditorCSharpBuildResult BadBuildResult;
+	TestFalse(
+		TEXT("Invalid C# hot-reload candidate fails its build"),
+		BuildAvidScriptPlayablePickup(
+			BadSourcePath,
+			FPaths::Combine(TestRoot, TEXT("BadBuild")),
+			FPaths::Combine(TestRoot, TEXT("BadSemanticCache/v1")),
+			TEXT("csharp_playable_pickup_bad"),
+			TEXT("playable_pickup_bad"),
+			BadBuildResult));
+
+	const FString InvalidManifestPath = FPaths::Combine(TestRoot, TEXT("playable_pickup_bad.avidscript.json"));
+	TestTrue(
+		TEXT("Malformed watcher artifact writes"),
+		FFileHelper::SaveStringToFile(TEXT("{"), *InvalidManifestPath));
+	const FString CommittedManifestPath = Component->GetScriptManifestPath();
+	const FString CommittedModuleId = Component->GetRuntimeStats().ModuleId;
+	const float YawBeforeRejectedReload = PickupActor->GetActorRotation().Yaw;
+	FAvidScriptEditorComponentBindingRequest ReloadRequest;
+	ReloadRequest.Actor = PickupActor;
+	ReloadRequest.ManifestPath = InvalidManifestPath;
+	FAvidScriptEditorComponentBindingResult RejectedReloadResult;
+	TestFalse(
+		TEXT("Malformed hot-reload manifest is rejected"),
+		FAvidScriptEditorComponentBindingService::ApplyManifestToActor(
+			ReloadRequest,
+			RejectedReloadResult));
+	TestEqual(
+		TEXT("Rejected pickup reload has the transactional status"),
+		RejectedReloadResult.Status,
+		EAvidScriptEditorComponentBindingStatus::ReloadRejected);
+	TestTrue(
+		TEXT("Rejected pickup reload preserves the live runtime"),
+		RejectedReloadResult.RuntimeResult.bRollbackPreservedLiveRuntime);
+	TestEqual(TEXT("Rejected pickup reload restores its manifest path"), Component->GetScriptManifestPath(), CommittedManifestPath);
+	TestEqual(TEXT("Rejected pickup reload keeps the active module"), Component->GetRuntimeStats().ModuleId, CommittedModuleId);
+
+	Component->TickComponent(0.25f, LEVELTICK_All, nullptr);
+	const float YawAfterRejectedReload = PickupActor->GetActorRotation().Yaw;
+	TestTrue(
+		TEXT("Old pickup WASM keeps ticking after rejected hot reload"),
+		FMath::IsNearlyEqual(
+			FMath::FindDeltaAngleDegrees(YawBeforeRejectedReload, YawAfterRejectedReload),
+			22.5,
+			0.01));
 	return true;
 }
 
