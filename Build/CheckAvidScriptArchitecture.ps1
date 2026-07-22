@@ -1096,6 +1096,7 @@ $PhaseWorkflowEvidence = Read-RequiredFile 'Build/PhaseWorkflow/AvidScriptPhaseE
 $PhaseStateSchemaText = Read-RequiredFile 'Docs/Workflow/Phase_State.schema.json'
 $PhaseGateSchemaText = Read-RequiredFile 'Docs/Workflow/Phase_Gate_Evidence.schema.json'
 $PhaseWorkflowContractTests = Read-RequiredFile 'Tools/AvidScript.CSharpFrontend.Tests/PhaseWorkflowContractTests.ps1'
+$GitAttributes = Read-RequiredFile '.gitattributes'
 foreach ($RequiredWorkflowCliContract in @(
     'PhaseWorkflow\AvidScriptPhaseState.ps1',
     'PhaseWorkflow\AvidScriptPhaseEvidence.ps1',
@@ -1150,6 +1151,14 @@ if (-not $PhaseWorkflowContractTests.Contains('Evidence.ValidAttestAndClose') -o
     -not $PhaseWorkflowContractTests.Contains('Evidence.AttestationSourceChangeRejected') -or
     -not $PhaseWorkflowContractTests.Contains('Transitions.ProtectedDirtyBaseline')) {
     Add-Violation 'phase workflow contract tests do not cover close, source rejection, and protected dirty behavior'
+}
+foreach ($RequiredPhaseEolContract in @(
+    'Docs/Phase*/Phase*_State.json text eol=lf',
+    'Docs/Phase*/P*_Gate_Summary.json text eol=lf'
+)) {
+    if (-not $GitAttributes.Contains($RequiredPhaseEolContract)) {
+        Add-Violation "phase workflow Git attributes are missing $RequiredPhaseEolContract"
+    }
 }
 try {
     $PhaseStateSchema = $PhaseStateSchemaText | ConvertFrom-Json
