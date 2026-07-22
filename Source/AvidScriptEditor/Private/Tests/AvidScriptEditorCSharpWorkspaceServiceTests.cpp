@@ -149,11 +149,11 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
         TEXT("Explicit overwrite refreshes user templates"),
         FAvidScriptEditorCSharpWorkspaceService::CreateOrRefresh(OverwriteConfig, Overwritten));
     TestEqual(TEXT("Explicit overwrite updates four user files"), Overwritten.UpdatedUserFileCount, 4);
+	const FString StarterText = ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath)
+		.Replace(TEXT("\r\n"), TEXT("\n"), ESearchCase::CaseSensitive);
     TestTrue(
         TEXT("Explicit overwrite restores gameplay starter"),
-        ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath)
-            .Contains(TEXT("RotationSpeedDegreesPerSecond")));
-	const FString StarterText = ReadAvidScriptWorkspaceTestText(*this, Overwritten.SourcePath);
+        StarterText.Contains(TEXT("RotationSpeedDegreesPerSecond")));
 	TestTrue(TEXT("Gameplay starter enables explicit state contracts"), StarterText.Contains(TEXT("[AvidStateContract(AvidStateMode.Explicit)]")));
 	TestTrue(TEXT("Gameplay starter persists accumulated rotation"), StarterText.Contains(TEXT("[AvidPersist]\n    private static float TotalRotationDegrees;")));
 	TestFalse(TEXT("Gameplay starter does not persist rotation speed configuration"), StarterText.Contains(TEXT("[AvidPersist]\n    private const float RotationSpeedDegreesPerSecond")));

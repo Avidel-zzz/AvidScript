@@ -1942,6 +1942,70 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 	PickupActor->SetActorEnableCollision(true);
 	PlayerActor->Tags.Add(TEXT("Player"));
 
+	FAvidScriptObjectRegistry MetricsRegistry;
+	FAvidScriptObjectHandleResult PickupRegisterResult;
+	FAvidScriptObjectHandleResult PlayerRegisterResult;
+	const FAvidScriptObjectHandle PickupHandle = MetricsRegistry.RegisterObject(
+		PickupActor,
+		PickupRegisterResult);
+	const FAvidScriptObjectHandle PlayerHandle = MetricsRegistry.RegisterObject(
+		PlayerActor,
+		PlayerRegisterResult);
+	if (!TestTrue(TEXT("Performance pickup Actor registers"), PickupRegisterResult.bSucceeded)
+		|| !TestTrue(TEXT("Performance player Actor registers"), PlayerRegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptWasmHostContext MetricsHostContext;
+	MetricsHostContext.ObjectRegistry = &MetricsRegistry;
+	MetricsHostContext.OwnerHandle = PickupHandle;
+	MetricsHostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	FAvidScriptRuntimeSession MetricsSession;
+	MetricsSession.SetHostContext(MetricsHostContext);
+	FAvidScriptWasmReloadResult MetricsLoadResult;
+	if (!TestTrue(
+		TEXT("Performance session loads the playable pickup"),
+		MetricsSession.LoadInitialModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			MetricsLoadResult)))
+	{
+		AddError(MetricsLoadResult.ErrorMessage);
+		return false;
+	}
+	const int32 HostImportsAfterBeginPlay = MetricsLoadResult.RuntimeResult.HostImportCallCount;
+	FAvidScriptWasmSmokeResult MetricsTickResult;
+	if (!TestTrue(TEXT("Performance session ticks"), MetricsSession.TickLive(0.5f, MetricsTickResult)))
+	{
+		AddError(MetricsTickResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("One playable pickup Tick uses six host crossings"),
+		MetricsTickResult.HostImportCallCount - HostImportsAfterBeginPlay,
+		6);
+	FAvidScriptGameplayEvent MetricsOverlapEvent;
+	MetricsOverlapEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
+	MetricsOverlapEvent.ObjectHandle = PlayerHandle;
+	MetricsOverlapEvent.VectorValue = FVector3f(PlayerActor->GetActorLocation());
+	FAvidScriptWasmSmokeResult MetricsOverlapResult;
+	if (!TestTrue(
+		TEXT("Performance session dispatches a successful player overlap"),
+		MetricsSession.DispatchGameplayEventLive(MetricsOverlapEvent, MetricsOverlapResult)))
+	{
+		AddError(MetricsOverlapResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("One successful pickup overlap uses eight host crossings"),
+		MetricsOverlapResult.HostImportCallCount - MetricsTickResult.HostImportCallCount,
+		8);
+	MetricsSession.UnloadLive();
+	PickupActor->SetActorRotation(FRotator(0.0, 10.0, 0.0));
+	PickupActor->SetActorHiddenInGame(false);
+	PickupActor->SetActorEnableCollision(true);
+
 	FAvidScriptEditorComponentBindingResult BindingResult;
 	if (!TestTrue(
 		TEXT("Playable pickup build report binds to the Actor"),
@@ -1961,8 +2025,8 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 	const FAvidScriptComponentRuntimeStats BeginPlayStats = Component->GetRuntimeStats();
 	TestTrue(TEXT("Playable pickup loads the generated WASM runtime"), BeginPlayStats.bRuntimeLoaded);
 	TestTrue(TEXT("Playable pickup enters C# BeginPlay"), BeginPlayStats.bBeginPlayCalled);
-	TestFalse(TEXT("BeginPlay makes the pickup visible"), PickupActor->IsHidden());
-	TestTrue(TEXT("BeginPlay enables pickup collision"), PickupActor->GetActorEnableCollision());
+	TestFalse(TEXT("Initial BeginPlay preserves configured pickup visibility"), PickupActor->IsHidden());
+	TestTrue(TEXT("Initial BeginPlay preserves configured pickup collision"), PickupActor->GetActorEnableCollision());
 
 	Component->TickComponent(0.5f, LEVELTICK_All, nullptr);
 	TestTrue(
@@ -1976,6 +2040,47 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 	PickupActor->OnActorBeginOverlap.Broadcast(PickupActor, PlayerActor);
 	TestTrue(TEXT("Player overlap hides the pickup"), PickupActor->IsHidden());
 	TestFalse(TEXT("Player overlap disables pickup collision"), PickupActor->GetActorEnableCollision());
+
+	FAvidScriptEditorCSharpBuildResult SuccessfulReloadBuildResult;
+	if (!TestTrue(
+		TEXT("Collected pickup builds a successful hot-reload candidate"),
+		BuildAvidScriptPlayablePickup(
+			SourcePath,
+			FPaths::Combine(TestRoot, TEXT("SuccessfulReload")),
+			FPaths::Combine(TestRoot, TEXT("SuccessfulReloadSemanticCache/v1")),
+			TEXT("csharp_playable_pickup"),
+			TEXT("playable_pickup_reload"),
+			SuccessfulReloadBuildResult)))
+	{
+		AddError(
+			SuccessfulReloadBuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + SuccessfulReloadBuildResult.Stdout
+			+ TEXT("\nstderr:\n") + SuccessfulReloadBuildResult.Stderr);
+		return false;
+	}
+	FAvidScriptEditorComponentBindingResult SuccessfulReloadResult;
+	if (!TestTrue(
+		TEXT("Collected pickup applies a successful hot reload"),
+		FAvidScriptEditorComponentBindingService::ApplyCSharpReportToActor(
+			SuccessfulReloadBuildResult.ReportPath,
+			PickupActor,
+			SuccessfulReloadResult)))
+	{
+		AddError(SuccessfulReloadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("Collected pickup hot reload attempts a live transaction"), SuccessfulReloadResult.bReloadAttempted);
+	TestTrue(TEXT("Collected pickup hot reload commits the candidate"), SuccessfulReloadResult.bReloadApplied);
+	TestEqual(TEXT("Collected pickup hot reload reuses the component"), SuccessfulReloadResult.Component, Component);
+	TestTrue(TEXT("Collected pickup hot reload attempts state migration"), SuccessfulReloadResult.RuntimeResult.bStateMigrationAttempted);
+	TestTrue(TEXT("Collected pickup hot reload applies persisted state"), SuccessfulReloadResult.RuntimeResult.bStateMigrationApplied);
+	TestEqual(TEXT("Collected pickup hot reload migrates one state slot"), SuccessfulReloadResult.RuntimeResult.StateMigrationMigratedSlotCount, 1);
+	TestEqual(TEXT("Reloaded BeginPlay schedules exactly one timer"), SuccessfulReloadResult.RuntimeResult.RuntimeResult.HostImportCallCount, 1);
+	TestEqual(TEXT("Reloaded BeginPlay preserves the timer callback id"), SuccessfulReloadResult.RuntimeResult.RuntimeResult.LastHostImportInput, 7);
+	TestTrue(TEXT("Reloaded BeginPlay receives a timer handle"), SuccessfulReloadResult.RuntimeResult.RuntimeResult.LastHostImportResult > 0);
+	TestTrue(TEXT("Successful reload preserves collected visibility"), PickupActor->IsHidden());
+	TestFalse(TEXT("Successful reload preserves collected collision state"), PickupActor->GetActorEnableCollision());
+	TestEqual(TEXT("Component records one successful pickup reload"), Component->GetRuntimeStats().SuccessfulReloadCount, 1);
 
 	Component->TickComponent(3.1f, LEVELTICK_All, nullptr);
 	const FAvidScriptComponentRuntimeStats TimerStats = Component->GetRuntimeStats();

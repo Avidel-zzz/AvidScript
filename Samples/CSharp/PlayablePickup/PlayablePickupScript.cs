@@ -2,19 +2,22 @@ using System.Runtime.InteropServices;
 
 namespace AvidScript;
 
+[AvidStateContract(AvidStateMode.Explicit)]
 public static class PlayablePickupScript
 {
     private const int RespawnTimerId = 7;
     private const float RotationSpeed = 90.0f;
     private const float RespawnDelay = 3.0f;
+    [AvidPersist]
     private static bool Collected;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        Collected = false;
-        UE.Self.SetActorHiddenInGame(false);
-        UE.Self.SetActorEnableCollision(true);
+        if (Collected)
+        {
+            UE.SetTimer(RespawnDelay, RespawnTimerId);
+        }
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
