@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
@@ -270,7 +271,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 281);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 342);
 	TSharedPtr<FJsonObject> DescriptorObject;
 	TestTrue(TEXT("Gameplay descriptor parses"), ParseJsonObject(DescriptorJson, DescriptorObject));
 	if (DescriptorObject.IsValid())
@@ -384,7 +385,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 		TestEqual(
 			TEXT("Gameplay manifest declares all reflected imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			281);
+			342);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();
@@ -523,6 +524,104 @@ bool FAvidScriptEditorCSharpBindingEmitterProjectionTest::RunTest(const FString&
 			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 	AddInfo(FString::Printf(TEXT("Projection C# reference source: %s"), *ProjectionReferencePath));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterFNameTest,
+	"AvidScript.Editor.CSharpBindingEmitter.FName",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Parameters)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	TestTrue(
+		TEXT("FName facade descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.engine.fname.facade"),
+			{ { TEXT("/Script/Engine.Actor"), TEXT("ActorHasTag") } },
+			DescriptorJson,
+			DescriptorResult));
+	if (!DescriptorResult.bSucceeded)
+	{
+		return false;
+	}
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(TEXT("FName facade emits"), FAvidScriptEditorCSharpBindingEmitter::Emit(DescriptorJson, Source, Manifest, EmitResult));
+	TestTrue(TEXT("FName facade maps the public input to string"), Source.Contains(TEXT("public bool ActorHasTag(string Tag)")));
+	TestTrue(TEXT("FName facade maps native input storage to string"),
+		Source.Contains(TEXT("internal static extern int Invoke0000(int selfSlot, int selfGeneration, string p0, out int returnValue);")));
+	const FString FixturePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/BindingGeneration/P48_4_FNameActorHasTag.generated.cs")));
+	FString FixtureSource;
+	if (!TestTrue(TEXT("FName generated facade fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("FName generated facade matches the C# source-to-WASM fixture byte for byte"), Source, FixtureSource);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ParseErrorCategory;
+	FString ParseErrorSource;
+	if (!TestTrue(TEXT("FName descriptor parses into a renderer package"),
+		FAvidScriptBindingDescriptorParser::Parse(DescriptorJson, Package, ParseErrorCategory, ParseErrorSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("FName renderer package has one binding"), Package.Bindings.Num(), 1);
+	if (Package.Bindings.Num() != 1)
+	{
+		return false;
+	}
+	TestEqual(TEXT("FName renderer binding has one parameter"), Package.Bindings[0].Parameters.Num(), 1);
+	if (Package.Bindings[0].Parameters.Num() != 1)
+	{
+		return false;
+	}
+	for (const FString& Mutation : {
+		TEXT("canonical"), TEXT("kind"), TEXT("cpp_type"), TEXT("size"), TEXT("alignment"), TEXT("abi"),
+		TEXT("direction_ref"), TEXT("direction_out"), TEXT("direction_return") })
+	{
+		FAvidScriptBindingPackageModel Tampered = Package;
+		FAvidScriptBindingTypeModel* FNameType = Tampered.Types.FindByPredicate(
+			[](const FAvidScriptBindingTypeModel& Type) { return Type.CanonicalType == TEXT("name:fname"); });
+		FAvidScriptBindingValueModel* FNameValue = Tampered.Bindings[0].Parameters.FindByPredicate(
+			[](const FAvidScriptBindingValueModel& Value) { return Value.CanonicalType == TEXT("name:fname"); });
+		TestNotNull(TEXT("FName type remains available for tamper"), FNameType);
+		TestNotNull(TEXT("FName value remains available for tamper"), FNameValue);
+		if (FNameType == nullptr || FNameValue == nullptr)
+		{
+			continue;
+		}
+		if (Mutation == TEXT("canonical")) { FNameType->CanonicalType = TEXT("name:other"); FNameValue->CanonicalType = FNameType->CanonicalType; }
+		else if (Mutation == TEXT("kind")) { FNameType->Kind = TEXT("name_utf16"); FNameValue->Kind = FNameType->Kind; }
+		else if (Mutation == TEXT("cpp_type")) { FNameType->CppType = TEXT("FString"); FNameValue->CppType = FNameType->CppType; }
+		else if (Mutation == TEXT("size")) { FNameType->Size = 8; }
+		else if (Mutation == TEXT("alignment")) { FNameType->Alignment = 8; }
+		else if (Mutation == TEXT("abi")) { FNameType->AbiTypes = { TEXT("f") }; FNameValue->AbiTypes = FNameType->AbiTypes; }
+		else if (Mutation == TEXT("direction_ref")) { FNameValue->Direction = TEXT("ref"); }
+		else if (Mutation == TEXT("direction_out")) { FNameValue->Direction = TEXT("out"); }
+		else { FNameValue->Direction = TEXT("return"); }
+
+		FString TamperedSource;
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestFalse(TEXT("Tampered FName metadata fails closed: ") + Mutation,
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				Tampered,
+				TEXT("fName-descriptor-hash"),
+				TamperedSource,
+				ErrorCategory,
+				ErrorSource));
+		TestTrue(TEXT("Tampered FName metadata has a stable rejection category: ") + Mutation,
+			ErrorCategory == TEXT("unsupported_csharp_type") || ErrorCategory == TEXT("abi_signature_mismatch"));
+		TestTrue(TEXT("Tampered FName metadata emits no partial source: ") + Mutation, TamperedSource.IsEmpty());
+	}
 	return true;
 }
 

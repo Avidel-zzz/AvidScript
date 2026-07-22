@@ -398,6 +398,123 @@ bool FAvidScriptEditorBindingDescriptorV3ProjectionTest::RunTest(const FString& 
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorFNameProjectionTest,
+	"AvidScript.Editor.BindingDescriptor.FNameProjection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorFNameProjectionTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptReflectedFunctionSelection ActorHasTag{
+		TEXT("/Script/Engine.Actor"),
+		TEXT("ActorHasTag")
+	};
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult Result;
+	TestTrue(
+		TEXT("ActorHasTag descriptor generates with an FName input"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(TEXT("avidscript.engine.fname"), { ActorHasTag }, Json, Result));
+
+	TSharedPtr<FJsonObject> Root;
+	if (TestTrue(TEXT("ActorHasTag descriptor parses"), ParseDescriptor(Json, Root)) && Root.IsValid())
+	{
+		const TSharedPtr<FJsonObject> Binding = FindBinding(
+			Root->GetArrayField(TEXT("bindings")),
+			TEXT("/Script/Engine.Actor"),
+			TEXT("ActorHasTag"));
+		TestNotNull(TEXT("ActorHasTag binding is present"), Binding.Get());
+		if (Binding.IsValid())
+		{
+			const TArray<TSharedPtr<FJsonValue>>& BindingParameters = Binding->GetArrayField(TEXT("parameters"));
+			TestEqual(TEXT("ActorHasTag has one FName parameter"), BindingParameters.Num(), 1);
+			if (BindingParameters.Num() == 1)
+			{
+				const TSharedPtr<FJsonObject> Parameter = BindingParameters[0]->AsObject();
+				TestEqual(TEXT("FName parameter direction is value"), Parameter->GetStringField(TEXT("direction")), FString(TEXT("value")));
+				TestEqual(TEXT("FName canonical type is exact"), Parameter->GetStringField(TEXT("canonical_type")), FString(TEXT("name:fname")));
+				TestEqual(TEXT("FName kind is exact"), Parameter->GetStringField(TEXT("kind")), FString(TEXT("name_utf8")));
+				TestEqual(TEXT("FName C++ type is exact"), Parameter->GetStringField(TEXT("cpp_type")), FString(TEXT("FName")));
+				const TArray<TSharedPtr<FJsonValue>>& ParameterAbiTypes = Parameter->GetArrayField(TEXT("abi_types"));
+				TestEqual(TEXT("FName parameter ABI has one cell"), ParameterAbiTypes.Num(), 1);
+				if (ParameterAbiTypes.Num() == 1)
+				{
+					TestEqual(TEXT("FName ABI is one data address"), ParameterAbiTypes[0]->AsString(), FString(TEXT("i")));
+				}
+			}
+			TestEqual(TEXT("ActorHasTag ABI carries self, name address, and bool return address"),
+				Binding->GetObjectField(TEXT("host_import"))->GetStringField(TEXT("signature")), FString(TEXT("(iiii)i")));
+		}
+
+		const TSharedPtr<FJsonValue>* FNameTypeValue = Root->GetArrayField(TEXT("types")).FindByPredicate(
+			[](const TSharedPtr<FJsonValue>& Value)
+			{
+				return Value.IsValid() && Value->AsObject()->GetStringField(TEXT("canonical_type")) == TEXT("name:fname");
+			});
+		TestNotNull(TEXT("FName type descriptor is present"), FNameTypeValue);
+		if (FNameTypeValue != nullptr)
+		{
+			const TSharedPtr<FJsonObject> Type = (*FNameTypeValue)->AsObject();
+			TestEqual(TEXT("FName type kind is exact"), Type->GetStringField(TEXT("kind")), FString(TEXT("name_utf8")));
+			TestEqual(TEXT("FName type C++ name is exact"), Type->GetStringField(TEXT("cpp_type")), FString(TEXT("FName")));
+			TestEqual(TEXT("FName type size is exact"), Type->GetIntegerField(TEXT("size")), 4);
+			TestEqual(TEXT("FName type alignment is exact"), Type->GetIntegerField(TEXT("alignment")), 4);
+			const TArray<TSharedPtr<FJsonValue>>& TypeAbiTypes = Type->GetArrayField(TEXT("abi_types"));
+			TestEqual(TEXT("FName type ABI has one cell"), TypeAbiTypes.Num(), 1);
+			if (TypeAbiTypes.Num() == 1)
+			{
+				TestEqual(TEXT("FName type ABI is exact"), TypeAbiTypes[0]->AsString(), FString(TEXT("i")));
+			}
+		}
+	}
+
+	const FString FixtureOwner = TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject");
+	FString PropertyJson;
+	FAvidScriptBindingDescriptorGenerateResult PropertyResult;
+	TestFalse(
+		TEXT("Readable FName property return fails closed"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.fname.property"),
+			{},
+			{ { FixtureOwner, TEXT("ReadableFName") } },
+			PropertyJson,
+			PropertyResult));
+	TestEqual(TEXT("Readable FName property has a type category"),
+		PropertyResult.ErrorCategory, FString(TEXT("unsupported_property_type")));
+	TestTrue(TEXT("Readable FName property identifies the return direction"),
+		PropertyResult.ErrorSource.Contains(TEXT("FName:return")));
+
+	for (const FString& FunctionName : { TEXT("ReturnFName"), TEXT("OutFName"), TEXT("RefFName") })
+	{
+		FString RejectedJson;
+		FAvidScriptBindingDescriptorGenerateResult RejectedResult;
+		TestFalse(
+			TEXT("Unsupported FName direction fails closed: ") + FunctionName,
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.engine.fname.rejected"),
+				{ { FixtureOwner, FName(*FunctionName) } },
+				RejectedJson,
+				RejectedResult));
+		TestEqual(TEXT("Unsupported FName direction has a type category: ") + FunctionName,
+			RejectedResult.ErrorCategory, FString(TEXT("unsupported_property_type")));
+		const FString ExpectedDirection = FunctionName == TEXT("ReturnFName")
+			? TEXT("return")
+			: (FunctionName == TEXT("OutFName") ? TEXT("out") : TEXT("ref"));
+		TestTrue(TEXT("Unsupported FName direction identifies the exact direction: ") + FunctionName,
+			RejectedResult.ErrorSource.EndsWith(TEXT("FName:") + ExpectedDirection));
+	}
+
+	FString ConstRefJson;
+	FAvidScriptBindingDescriptorGenerateResult ConstRefResult;
+	TestTrue(
+		TEXT("Const FName reference input remains supported"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.engine.fname.constref"),
+			{ { FixtureOwner, TEXT("ConstRefFName") } },
+			ConstRefJson,
+			ConstRefResult));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV3DefaultsTest,
 	"AvidScript.Editor.BindingDescriptor.V3Defaults",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

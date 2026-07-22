@@ -247,6 +247,33 @@ bool FAvidScriptEditorBindingSelectionStrictExplicitFailureTest::RunTest(const F
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingSelectionFNameExplicitTest,
+	"AvidScript.Editor.BindingSelection.FNameExplicit",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingSelectionFNameExplicitTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.engine.fname");
+	Profile.ExplicitFunctions.Add({
+		TEXT("/Script/Engine.Actor"),
+		TEXT("ActorHasTag")
+	});
+
+	TArray<FAvidScriptReflectedFunctionSelection> Selections;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestTrue(
+		TEXT("Explicit ActorHasTag FName input is supported"),
+		FAvidScriptEditorBindingSelectionResolver::Resolve(Profile, Selections, Result));
+	TestEqual(TEXT("FName explicit selection produces one function"), Selections.Num(), 1);
+	if (Selections.Num() == 1)
+	{
+		TestEqual(TEXT("FName explicit selection keeps ActorHasTag"), Selections[0].FunctionName, FName(TEXT("ActorHasTag")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingPropertySelectionCompatibilityTest,
 	"AvidScript.Editor.BindingSelection.PropertyCompatibility",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -357,7 +384,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 279 functions"), FirstSelectionResult.AcceptedFunctionCount, 279);
+	TestEqual(TEXT("Gameplay profile accepts 340 functions including FName inputs"), FirstSelectionResult.AcceptedFunctionCount, 340);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),

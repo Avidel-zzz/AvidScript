@@ -242,7 +242,16 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 	FAvidScriptProjectedBindingValue& OutValue,
 	FString& OutErrorSource)
 {
-	if (Property == nullptr || !ProjectProperty(Property, OutValue, OutErrorSource))
+	if (Property == nullptr)
+	{
+		return false;
+	}
+	if (Property->IsA<FNameProperty>())
+	{
+		OutErrorSource = TEXT("FName:return");
+		return false;
+	}
+	if (!ProjectProperty(Property, OutValue, OutErrorSource))
 	{
 		return false;
 	}
@@ -259,6 +268,22 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 	OutValue = FAvidScriptProjectedBindingValue();
 	OutValue.Name = Property->GetName();
 	OutValue.Direction = GetPropertyDirection(Property);
+
+	if (Property->IsA<FNameProperty>())
+	{
+		if (OutValue.Direction != TEXT("value") && OutValue.Direction != TEXT("const_ref"))
+		{
+			OutErrorSource = TEXT("FName:") + OutValue.Direction;
+			return false;
+		}
+		OutValue.Type.CanonicalType = TEXT("name:fname");
+		OutValue.Type.Kind = TEXT("name_utf8");
+		OutValue.Type.CppType = TEXT("FName");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		return true;
+	}
 
 	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 	{

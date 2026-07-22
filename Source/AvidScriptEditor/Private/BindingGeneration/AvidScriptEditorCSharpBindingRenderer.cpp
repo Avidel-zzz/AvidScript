@@ -47,8 +47,28 @@ const FAvidScriptBindingTypeModel* FindRenderedType(
 	return Type == nullptr ? nullptr : *Type;
 }
 
+bool IsExactFNameDescriptor(
+	const FAvidScriptBindingValueModel& Value,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical)
+{
+	const FAvidScriptBindingTypeModel* Type = FindRenderedType(TypesByCanonical, TEXT("name:fname"));
+	return Value.CanonicalType == TEXT("name:fname")
+		&& Value.Kind == TEXT("name_utf8")
+		&& Value.CppType == TEXT("FName")
+		&& (Value.Direction == TEXT("value") || Value.Direction == TEXT("const_ref"))
+		&& Value.AbiTypes == TArray<FString>{ TEXT("i") }
+		&& Type != nullptr
+		&& Type->CanonicalType == TEXT("name:fname")
+		&& Type->Kind == TEXT("name_utf8")
+		&& Type->CppType == TEXT("FName")
+		&& Type->Size == 4
+		&& Type->Alignment == 4
+		&& Type->AbiTypes == TArray<FString>{ TEXT("i") };
+}
+
 bool ResolveCSharpType(
 	const FAvidScriptBindingValueModel& Value,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
 	FString& OutType,
 	FString& OutErrorSource)
 {
@@ -68,6 +88,16 @@ bool ResolveCSharpType(
 	if (Value.CanonicalType == TEXT("scalar:u32")) { OutType = TEXT("uint"); return true; }
 	if (Value.CanonicalType == TEXT("scalar:i64")) { OutType = TEXT("long"); return true; }
 	if (Value.CanonicalType == TEXT("scalar:u64")) { OutType = TEXT("ulong"); return true; }
+	if (Value.CanonicalType == TEXT("name:fname"))
+	{
+		if (!IsExactFNameDescriptor(Value, TypesByCanonical))
+		{
+			OutErrorSource = Value.CanonicalType;
+			return false;
+		}
+		OutType = TEXT("string");
+		return true;
+	}
 	if (Value.Kind == TEXT("enum") || Value.Kind == TEXT("object_handle") || Value.Kind == TEXT("struct"))
 	{
 		OutType = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Value.CppType);
@@ -79,6 +109,7 @@ bool ResolveCSharpType(
 
 bool ResolveStorageType(
 	const FAvidScriptBindingValueModel& Value,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
 	FString& OutType,
 	FString& OutErrorSource)
 {
@@ -92,7 +123,7 @@ bool ResolveStorageType(
 		OutType = TEXT("int");
 		return true;
 	}
-	return ResolveCSharpType(Value, OutType, OutErrorSource);
+	return ResolveCSharpType(Value, TypesByCanonical, OutType, OutErrorSource);
 }
 
 bool ResolveComponents(
@@ -223,7 +254,7 @@ bool RenderMethod(
 	}
 
 	FString ReturnType;
-	if (!ResolveCSharpType(Binding.ReturnValue, ReturnType, OutErrorSource))
+	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, ReturnType, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
@@ -250,7 +281,7 @@ bool RenderMethod(
 	{
 		const FAvidScriptBindingValueModel& Parameter = Binding.Parameters[ParameterIndex];
 		FString PublicType;
-		if (!ResolveCSharpType(Parameter, PublicType, OutErrorSource))
+		if (!ResolveCSharpType(Parameter, TypesByCanonical, PublicType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -272,7 +303,7 @@ bool RenderMethod(
 		if (Parameter.Direction == TEXT("ref") || Parameter.Direction == TEXT("out"))
 		{
 			FString StorageType;
-			if (!ResolveStorageType(Parameter, StorageType, OutErrorSource))
+			if (!ResolveStorageType(Parameter, TypesByCanonical, StorageType, OutErrorSource))
 			{
 				OutErrorCategory = TEXT("unsupported_csharp_type");
 				return false;
@@ -332,7 +363,7 @@ bool RenderMethod(
 		}
 
 		FString StorageType;
-		if (!ResolveStorageType(Parameter, StorageType, OutErrorSource))
+		if (!ResolveStorageType(Parameter, TypesByCanonical, StorageType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -352,7 +383,7 @@ bool RenderMethod(
 	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
 	{
 		FString StorageType;
-		if (!ResolveStorageType(Binding.ReturnValue, StorageType, OutErrorSource))
+		if (!ResolveStorageType(Binding.ReturnValue, TypesByCanonical, StorageType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -403,6 +434,7 @@ bool RenderMethod(
 
 bool RenderPropertyGetter(
 	const FAvidScriptBindingFunctionModel& Binding,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
 	FCSharpRenderedMethod& OutMethod,
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
@@ -418,8 +450,8 @@ bool RenderPropertyGetter(
 	}
 	FString PublicType;
 	FString StorageType;
-	if (!ResolveCSharpType(Binding.ReturnValue, PublicType, OutErrorSource)
-		|| !ResolveStorageType(Binding.ReturnValue, StorageType, OutErrorSource))
+	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, PublicType, OutErrorSource)
+		|| !ResolveStorageType(Binding.ReturnValue, TypesByCanonical, StorageType, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
@@ -644,7 +676,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 
 		FCSharpRenderedMethod Rendered;
 		const bool bRendered = Binding.BindingKind == TEXT("property_get")
-			? RenderPropertyGetter(Binding, Rendered, OutErrorCategory, OutErrorSource)
+			? RenderPropertyGetter(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource)
 			: RenderMethod(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource);
 		if (!bRendered)
 		{

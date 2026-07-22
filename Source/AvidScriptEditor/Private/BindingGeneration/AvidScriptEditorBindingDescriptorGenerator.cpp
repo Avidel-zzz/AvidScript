@@ -279,7 +279,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		{
 			SetFailure(
 				OutResult,
-				TEXT("unsupported_property"),
+				ProjectionErrorSource.StartsWith(TEXT("FName:")) ? TEXT("unsupported_property_type") : TEXT("unsupported_property"),
 				SelectionKey + TEXT(":") + ProjectionErrorSource,
 				TEXT("Add the property type to the shared reflected type policy before selecting this function."));
 			return false;

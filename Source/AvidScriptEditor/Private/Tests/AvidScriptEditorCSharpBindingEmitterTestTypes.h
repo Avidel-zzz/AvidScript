@@ -18,6 +18,9 @@ class UAvidScriptCSharpBindingEmitterTestObject : public UObject
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere)
+	FName ReadableFName = NAME_None;
+
 	UFUNCTION(BlueprintPure)
 	int32 ReservedHandleNames(int32 Slot, int32 Generation) const
 	{
@@ -54,6 +57,29 @@ public:
 	static FTransform StaticTransform(FTransform Input)
 	{
 		return Input;
+	}
+
+	UFUNCTION(BlueprintPure)
+	FName ReturnFName() const
+	{
+		return NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void OutFName(FName& OutName)
+	{
+		OutName = NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void RefFName(UPARAM(ref) FName& InOutName)
+	{
+		InOutName = NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void ConstRefFName(const FName& InName)
+	{
 	}
 };
 

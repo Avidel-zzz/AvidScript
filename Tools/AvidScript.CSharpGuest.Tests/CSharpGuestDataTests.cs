@@ -1,8 +1,12 @@
 using System;
+using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
+using AvidScript.WasmBackend;
 
 internal static class CSharpGuestDataTests
 {
@@ -16,7 +20,8 @@ internal static class CSharpGuestDataTests
     public static int Run()
     {
         StringEnumAndConstantArrayDataAreLowered();
-        return 1;
+        FNameFacadeSourceLowersToUtf8DataAndWasm();
+        return 2;
     }
 
     private static void StringEnumAndConstantArrayDataAreLowered()
@@ -92,6 +97,63 @@ internal static class CSharpGuestDataTests
             && item.Constant?.Kind == "int32"
             && item.Constant.Value == "1"),
             "enum literal should encode through its int32 underlying type");
+    }
+
+    private static void FNameFacadeSourceLowersToUtf8DataAndWasm()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static void BeginPlay()
+                {
+                    UE.Self.ActorHasTag("Player");
+                }
+            }
+            """;
+        string generatedFacadeSource = File.ReadAllText(Path.Combine(
+            Directory.GetCurrentDirectory(),
+            "Tests",
+            "Fixtures",
+            "BindingGeneration",
+            "P48_4_FNameActorHasTag.generated.cs"));
+        const string sourceId = "Scripts/FNameActorHasTag.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            frontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(generatedFacadeSource, "generated://AvidScript.Bindings.generated.cs", true) });
+        Assert(frontend.Succeeded && semantic.Succeeded,
+            "FName facade source should pass frontend and semantic analysis: "
+            + string.Join(" | ", semantic.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(string.Join(" | ", lowering.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestValidationResult validation = GuestModuleValidator.Validate(module);
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        GuestDataSegment segment = module.DataSegments.Single(item => item.Kind == "utf8_string" && item.ElementCount == 6);
+        byte[] expectedBytes = { 6, 0, 0, 0, (byte)'P', (byte)'l', (byte)'a', (byte)'y', (byte)'e', (byte)'r', 0 };
+        GuestImport import = module.Imports.Single(item => item.Module == "avidscript");
+        GuestInstruction[] instructions = module.Functions.SelectMany(item => item.Blocks).SelectMany(item => item.Instructions).ToArray();
+
+        Assert(lowering.Succeeded && validation.Succeeded,
+            "FName facade source should produce valid Guest IR");
+        Assert(segment.Bytes.SequenceEqual(expectedBytes)
+            && instructions.Any(item => item.Op == "data_address" && item.TargetId == segment.Id),
+            "FName string literal should use its placed UTF-8 string data address");
+        Assert(import.ParameterTypeIds.SequenceEqual(new[] { "type:int32", "type:int32", "type:string", "type:address" }),
+            "FName native import should retain one string address parameter between self and return storage");
+        Assert(import.Name.StartsWith("avid_ue_", StringComparison.Ordinal)
+            && generatedFacadeSource.Contains($"EntryPoint = \"{import.Name}\"", StringComparison.Ordinal),
+            "FName WASM import should retain the exact entry point emitted by the renderer fixture");
+        Assert(wasm.Succeeded && wasm.Bytes.Length > 8
+            && wasm.Bytes[0] == 0x00 && wasm.Bytes[1] == 0x61 && wasm.Bytes[2] == 0x73 && wasm.Bytes[3] == 0x6d,
+            "FName facade Guest IR should compile to WASM");
     }
 
     private static SemanticSymbol Local(string id, string name, string typeId)
