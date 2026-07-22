@@ -14,7 +14,8 @@ internal static class CSharpGuestClassReferenceTests
     {
         GeneratedProjectClassLowersToNominalI32();
         ClassReferenceDoesNotImplicitlyConvert();
-        return 2;
+        LifecycleFacadeLowersToSharedImportsAndWasm();
+        return 3;
     }
 
     private static void GeneratedProjectClassLowersToNominalI32()
@@ -111,6 +112,69 @@ internal static class CSharpGuestClassReferenceTests
             "TSubclassOfAActor must not implicitly convert to an object handle");
     }
 
+    private static void LifecycleFacadeLowersToSharedImportsAndWasm()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_lifecycle_probe")]
+                public static int Probe()
+                {
+                    AActor actor = UE.SpawnActor(ProjectClasses.ProjectileClass, FTransform.Identity);
+                    bool matches = UE.IsA(actor, ProjectClasses.ProjectileClass);
+                    bool destroyed = UE.DestroyActor(actor);
+                    return matches && destroyed ? 1 : 0;
+                }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            "generated lifecycle facade should pass semantic analysis: " + FormatSemanticDiagnostics(semantic));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(FormatGuestDiagnostics(lowering));
+        Assert(lowering.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "generated lifecycle facade should lower to valid Guest IR");
+
+        GuestImport spawn = module.Imports.Single(import => import.Name == "avid_object_spawn_actor");
+        GuestImport destroy = module.Imports.Single(import => import.Name == "avid_object_destroy_actor");
+        GuestImport isA = module.Imports.Single(import => import.Name == "avid_object_is_a");
+        Assert(spawn.Module == "avidscript"
+            && spawn.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int32", "type:address", "type:address",
+            })
+            && spawn.ReturnTypeId == "type:int32",
+            "SpawnActor import should use class, transform address, handle out address, and status");
+        Assert(destroy.Module == "avidscript"
+            && destroy.ParameterTypeIds.SequenceEqual(new[] { "type:int32", "type:int32" })
+            && destroy.ReturnTypeId == "type:int32",
+            "DestroyActor import should use slot/generation and return status");
+        Assert(isA.Module == "avidscript"
+            && isA.ParameterTypeIds.SequenceEqual(new[] { "type:int32", "type:int32", "type:int32" })
+            && isA.ReturnTypeId == "type:int32",
+            "IsA import should use slot/generation/class ordinal and return bool storage");
+
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        Assert(instructions.Count(instruction => instruction.Op == "call"
+                && module.Imports.Any(import => import.Id == instruction.TargetId)) >= 3,
+            "public lifecycle wrappers should lower to the three raw host imports");
+        Assert(instructions.Any(instruction => instruction.Op == "address_of"),
+            "SpawnActor should pass one transform address and one handle out address without unsafe conversions");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Assert(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "lifecycle Guest IR should compile to WASM");
+    }
+
     private static SemanticDocument Analyze(string source)
     {
         const string sourceId = "Scripts/ClassReference.cs";
@@ -178,11 +242,114 @@ internal static class CSharpGuestClassReferenceTests
         {
             private readonly int Slot;
             private readonly int Generation;
+
+            internal AActor(int slot, int generation)
+            {
+                Slot = slot;
+                Generation = generation;
+            }
+
+            internal int AvidScriptSlot => Slot;
+            internal int AvidScriptGeneration => Generation;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public readonly struct FVector
+        {
+            public readonly float X;
+            public readonly float Y;
+            public readonly float Z;
+
+            public FVector(float x, float y, float z)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+            }
+
+            public static FVector Zero => new(0.0f, 0.0f, 0.0f);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public readonly struct FRotator
+        {
+            public readonly float Pitch;
+            public readonly float Yaw;
+            public readonly float Roll;
+
+            public FRotator(float pitch, float yaw, float roll)
+            {
+                Pitch = pitch;
+                Yaw = yaw;
+                Roll = roll;
+            }
+
+            public static FRotator Zero => new(0.0f, 0.0f, 0.0f);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public readonly struct FTransform
+        {
+            public readonly FVector Translation;
+            public readonly FRotator Rotation;
+            public readonly FVector Scale3D;
+
+            public FTransform(FVector translation, FRotator rotation, FVector scale3D)
+            {
+                Translation = translation;
+                Rotation = rotation;
+                Scale3D = scale3D;
+            }
+
+            public static FTransform Identity => new(FVector.Zero, FRotator.Zero, new FVector(1.0f, 1.0f, 1.0f));
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal readonly struct FAvidScriptObjectHandle
+        {
+            internal readonly int Slot;
+            internal readonly int Generation;
         }
 
         public static class ProjectClasses
         {
             public static TSubclassOfAActor ProjectileClass => new(0);
+        }
+
+        public static class UE
+        {
+            public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)
+            {
+                AvidScriptNative.SpawnActor(
+                    actorClass.AvidScriptOrdinal,
+                    in transform,
+                    out FAvidScriptObjectHandle actorHandle);
+                return new AActor(actorHandle.Slot, actorHandle.Generation);
+            }
+
+            public static bool DestroyActor(AActor actor)
+                => AvidScriptNative.DestroyActor(actor.AvidScriptSlot, actor.AvidScriptGeneration) != 0;
+
+            public static bool IsA(AActor actor, TSubclassOfAActor actorClass)
+                => AvidScriptNative.IsA(
+                    actor.AvidScriptSlot,
+                    actor.AvidScriptGeneration,
+                    actorClass.AvidScriptOrdinal) != 0;
+        }
+
+        internal static class AvidScriptNative
+        {
+            [DllImport("avidscript", EntryPoint = "avid_object_spawn_actor")]
+            internal static extern int SpawnActor(
+                int classOrdinal,
+                in FTransform transform,
+                out FAvidScriptObjectHandle actorHandle);
+
+            [DllImport("avidscript", EntryPoint = "avid_object_destroy_actor")]
+            internal static extern int DestroyActor(int slot, int generation);
+
+            [DllImport("avidscript", EntryPoint = "avid_object_is_a")]
+            internal static extern int IsA(int slot, int generation, int classOrdinal);
         }
         """;
 }

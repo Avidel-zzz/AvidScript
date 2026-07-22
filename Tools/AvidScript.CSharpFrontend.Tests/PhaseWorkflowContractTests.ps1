@@ -91,10 +91,11 @@ function New-FixtureRepository {
 function Invoke-WorkflowCli {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
-        [Parameter(Mandatory = $true)][string[]]$Arguments
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [string]$PowerShellHost = 'powershell.exe'
     )
 
-    $Output = @(& powershell.exe `
+    $Output = @(& $PowerShellHost `
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File $CliPath `
@@ -299,6 +300,33 @@ Invoke-ContractCase 'State.StartAndStatus' {
     $Status = Invoke-WorkflowCli $Root @('status', '-Phase', '91', '-Json')
     Assert-Condition ($Status.ExitCode -eq 0) "status failed: $($Status.Output)"
     Assert-Condition ($Status.Output.Contains('P91.1')) 'status did not expose next batch'
+}
+
+Invoke-ContractCase 'State.PwshPreservesTimestampStrings' {
+    $Pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    if ($null -eq $Pwsh) {
+        return
+    }
+
+    $Root = New-FixtureRepository 'StatePwshTimestamp'
+    $StatePath = Start-FixturePhase $Root
+    Complete-FixtureBatch $Root 'P91.1'
+    $Before = Get-Content -Raw -LiteralPath $StatePath
+    $Match = [regex]::Match(
+        $Before,
+        '"id":\s*"P91\.1"[\s\S]*?"completed_at_utc":\s*"([^"]+)"')
+    Assert-Condition $Match.Success 'first batch timestamp was not serialized'
+    $FirstTimestamp = $Match.Groups[1].Value
+
+    $Result = Invoke-WorkflowCli `
+        $Root `
+        @('batch-complete', '-Phase', '91', '-BatchId', 'P91.2', '-Evidence', 'P91.2 implementation complete') `
+        -PowerShellHost $Pwsh.Source
+    Assert-Condition ($Result.ExitCode -eq 0) "pwsh batch completion failed: $($Result.Output)"
+    $After = Get-Content -Raw -LiteralPath $StatePath
+    Assert-Condition `
+        ($After.Contains("`"completed_at_utc`": `"$FirstTimestamp`"")) `
+        'pwsh changed an existing ISO timestamp while updating phase state'
 }
 
 Invoke-ContractCase 'State.DuplicateStartPreservesBytes' {

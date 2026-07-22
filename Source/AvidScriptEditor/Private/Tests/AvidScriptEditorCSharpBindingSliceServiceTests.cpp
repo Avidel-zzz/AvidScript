@@ -4,13 +4,17 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptFrontendReport.h"
 
+#include "Dom/JsonObject.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -24,6 +28,66 @@ FAvidScriptFrontendBindingImport MakeAvidScriptBindingSliceTestImport(
 	Import.Name = Binding.HostImport.Name;
 	Import.Signature = Binding.HostImport.Signature;
 	return Import;
+}
+
+FAvidScriptFrontendBindingImport MakeAvidScriptBindingSliceTestLifecycleImport(
+	const FAvidScriptObjectLifecycleBindingSpec& Spec,
+	const int32 Ordinal)
+{
+	FAvidScriptFrontendBindingImport Import;
+	Import.StableId = Spec.StableId;
+	Import.Ordinal = Ordinal;
+	Import.Module = Spec.ModuleName;
+	Import.Name = Spec.ImportName;
+	Import.Signature = Spec.Signature;
+	return Import;
+}
+
+bool ReadAvidScriptBindingSliceTestManifestImports(
+	const FString& ManifestPath,
+	TArray<FAvidScriptFrontendBindingImport>& OutImports)
+{
+	OutImports.Reset();
+	FString ManifestJson;
+	if (!FFileHelper::LoadFileToString(ManifestJson, *ManifestPath))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> ManifestObject;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ManifestJson);
+	if (!FJsonSerializer::Deserialize(Reader, ManifestObject) || !ManifestObject.IsValid())
+	{
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* RequiredImports = nullptr;
+	if (!ManifestObject->TryGetArrayField(TEXT("required_imports"), RequiredImports)
+		|| RequiredImports == nullptr)
+	{
+		return false;
+	}
+
+	OutImports.Reserve(RequiredImports->Num());
+	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImports)
+	{
+		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid()
+			? ImportValue->AsObject()
+			: nullptr;
+		FAvidScriptFrontendBindingImport Import;
+		if (!ImportObject.IsValid()
+			|| !ImportObject->TryGetStringField(TEXT("stable_id"), Import.StableId)
+			|| !ImportObject->TryGetNumberField(TEXT("ordinal"), Import.Ordinal)
+			|| !ImportObject->TryGetStringField(TEXT("module"), Import.Module)
+			|| !ImportObject->TryGetStringField(TEXT("name"), Import.Name)
+			|| !ImportObject->TryGetStringField(TEXT("signature"), Import.Signature))
+		{
+			OutImports.Reset();
+			return false;
+		}
+		OutImports.Add(MoveTemp(Import));
+	}
+	return true;
 }
 
 FAvidScriptFrontendBindingPackage MakeAvidScriptBindingSliceTestProvenance(
@@ -41,6 +105,10 @@ FAvidScriptFrontendBindingPackage MakeAvidScriptBindingSliceTestProvenance(
 	Provenance.ReferenceSourceFile = AuthorizationPackage.ReferenceSourcePath;
 	Provenance.ReferenceSourceSha256 = AuthorizationPackage.SourceHash;
 	Provenance.ProfileImportCount = AuthorizationPackage.BindingCount;
+	if (AuthorizationPackage.ClassReferenceCount > 0)
+	{
+		Provenance.ProfileImportCount += FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
+	}
 	Provenance.UsedImportCount = UsedImports.Num();
 	Provenance.UsedImports = UsedImports;
 	return Provenance;
@@ -112,10 +180,22 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 
-	const TArray<FAvidScriptFrontendBindingImport> UsedImports = {
+	const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
+		FAvidScriptObjectLifecycleBindings::GetSpecs();
+	if (!TestEqual(TEXT("Lifecycle contract publishes three stable capabilities"), LifecycleSpecs.Num(), 3))
+	{
+		return false;
+	}
+	TArray<FAvidScriptFrontendBindingImport> UsedImports = {
 		MakeAvidScriptBindingSliceTestImport(*GetScale),
 		MakeAvidScriptBindingSliceTestImport(*SetScale)
 	};
+	for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+	{
+		UsedImports.Add(MakeAvidScriptBindingSliceTestLifecycleImport(
+			LifecycleSpecs[SpecIndex],
+			AuthorizationModel.Bindings.Num() + SpecIndex));
+	}
 	const FAvidScriptFrontendBindingPackage Provenance =
 		MakeAvidScriptBindingSliceTestProvenance(AuthorizationPackage, UsedImports);
 	FAvidScriptCSharpBindingEmitResult SlicePackage;
@@ -133,7 +213,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		return false;
 	}
 
-	TestEqual(TEXT("Runtime slice reports two requested bindings"), SliceResult.RequestedBindingCount, 2);
+	TestEqual(TEXT("Runtime slice reports every used import"), SliceResult.RequestedBindingCount, 2 + LifecycleSpecs.Num());
 	TestEqual(TEXT("Runtime slice emits two bindings"), SlicePackage.BindingCount, 2);
 	TestEqual(TEXT("Runtime slice preserves one class reference"), SlicePackage.ClassReferenceCount, 1);
 	TestEqual(TEXT("Runtime slice keeps package capability name"), SlicePackage.PackageName, AuthorizationPackage.PackageName);
@@ -171,6 +251,34 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	}
 	TestTrue(TEXT("Runtime slice stable IDs exactly match request"), bStableIdsMatch);
 
+	TArray<FAvidScriptFrontendBindingImport> SliceManifestImports;
+	if (TestTrue(
+		TEXT("Runtime slice manifest imports read"),
+		ReadAvidScriptBindingSliceTestManifestImports(SlicePackage.ManifestPath, SliceManifestImports)))
+	{
+		TestEqual(
+			TEXT("Runtime slice manifest republishes reflected selections and every lifecycle capability"),
+			SliceManifestImports.Num(),
+			SlicePackage.BindingCount + LifecycleSpecs.Num());
+		for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+		{
+			const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+			const int32 ExpectedOrdinal = SlicePackage.BindingCount + SpecIndex;
+			const bool bFoundExactLifecycleImport = SliceManifestImports.ContainsByPredicate(
+				[&Spec, ExpectedOrdinal](const FAvidScriptFrontendBindingImport& Import)
+				{
+					return Import.StableId == Spec.StableId
+						&& Import.Ordinal == ExpectedOrdinal
+						&& Import.Module == Spec.ModuleName
+						&& Import.Name == Spec.ImportName
+						&& Import.Signature == Spec.Signature;
+				});
+			TestTrue(
+				*FString::Printf(TEXT("Runtime slice republishes lifecycle capability %d exactly"), SpecIndex),
+				bFoundExactLifecycleImport);
+		}
+	}
+
 	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	const bool bSliceLoaded = FAvidScriptBindingPackage::LoadDescriptor(SliceJson, LoadedSlice, LoadResult);
@@ -185,7 +293,10 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	}
 	if (LoadedSlice.IsValid())
 	{
-		TestEqual(TEXT("Runtime slice creates two VM imports"), LoadedSlice->GetVmPackage().Imports.Num(), 2);
+		TestEqual(
+			TEXT("Runtime slice creates reflected and lifecycle VM imports"),
+			LoadedSlice->GetVmPackage().Imports.Num(),
+			2 + LifecycleSpecs.Num());
 		TestEqual(TEXT("Runtime slice creates one cached class plan"), LoadedSlice->GetClassReferenceCount(), 1);
 	}
 
@@ -288,6 +399,27 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		TestEqual(TEXT("Property runtime slice creates one VM import"), LoadedPropertySlice->GetVmPackage().Imports.Num(), 1);
 	}
 
+	const FAvidScriptFrontendBindingPackage UnauthorizedLifecycleProvenance =
+		MakeAvidScriptBindingSliceTestProvenance(
+			PropertyAuthorizationPackage,
+			{
+				MakeAvidScriptBindingSliceTestLifecycleImport(
+					LifecycleSpecs[0],
+					PropertyAuthorizationModel.Bindings.Num())
+			});
+	TestFalse(
+		TEXT("Package without class references cannot claim lifecycle imports"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			PropertyAuthorizationPackage.DescriptorPath,
+			UnauthorizedLifecycleProvenance,
+			OutputRoot,
+			PropertySlicePackage,
+			PropertySliceResult));
+	TestEqual(
+		TEXT("Unauthorized lifecycle import category"),
+		PropertySliceResult.ErrorCategory,
+		FString(TEXT("slice_binding_missing")));
+
 	FAvidScriptFrontendBindingPackage DuplicateProvenance =
 		MakeAvidScriptBindingSliceTestProvenance(AuthorizationPackage, { UsedImports[0], UsedImports[0] });
 	TestFalse(
@@ -328,6 +460,55 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 			SlicePackage,
 			SliceResult));
 	TestEqual(TEXT("Unknown stable ID category"), SliceResult.ErrorCategory, FString(TEXT("slice_binding_missing")));
+
+	FAvidScriptFrontendBindingImport ForgedLifecycleOrdinal = UsedImports[2];
+	ForgedLifecycleOrdinal.Ordinal = MIN_int32;
+	FAvidScriptFrontendBindingPackage ForgedLifecycleOrdinalProvenance =
+		MakeAvidScriptBindingSliceTestProvenance(AuthorizationPackage, { ForgedLifecycleOrdinal });
+	TestFalse(
+		TEXT("Forged lifecycle ordinal fails closed"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			AuthorizationPackage.DescriptorPath,
+			ForgedLifecycleOrdinalProvenance,
+			OutputRoot,
+			SlicePackage,
+			SliceResult));
+	TestEqual(
+		TEXT("Forged lifecycle ordinal category"),
+		SliceResult.ErrorCategory,
+		FString(TEXT("slice_binding_missing")));
+
+	FAvidScriptFrontendBindingImport ForgedLifecycleSignature = UsedImports[2];
+	ForgedLifecycleSignature.Signature += TEXT("_forged");
+	FAvidScriptFrontendBindingPackage ForgedLifecycleSignatureProvenance =
+		MakeAvidScriptBindingSliceTestProvenance(AuthorizationPackage, { ForgedLifecycleSignature });
+	TestFalse(
+		TEXT("Forged lifecycle signature fails closed"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			AuthorizationPackage.DescriptorPath,
+			ForgedLifecycleSignatureProvenance,
+			OutputRoot,
+			SlicePackage,
+			SliceResult));
+	TestEqual(
+		TEXT("Forged lifecycle signature category"),
+		SliceResult.ErrorCategory,
+		FString(TEXT("slice_import_identity_mismatch")));
+
+	FAvidScriptFrontendBindingPackage ProfileCountMismatch = Provenance;
+	ProfileCountMismatch.ProfileImportCount = AuthorizationPackage.BindingCount;
+	TestFalse(
+		TEXT("Class-reference package without lifecycle profile count fails closed"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			AuthorizationPackage.DescriptorPath,
+			ProfileCountMismatch,
+			OutputRoot,
+			SlicePackage,
+			SliceResult));
+	TestEqual(
+		TEXT("Lifecycle profile count mismatch category"),
+		SliceResult.ErrorCategory,
+		FString(TEXT("slice_package_identity_mismatch")));
 
 	FAvidScriptFrontendBindingPackage CountMismatch = Provenance;
 	CountMismatch.UsedImportCount = 3;

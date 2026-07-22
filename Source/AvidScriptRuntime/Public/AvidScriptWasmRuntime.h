@@ -10,6 +10,7 @@
 #include "CoreMinimal.h"
 
 class FAvidScriptWasmDebugMap;
+class UWorld;
 
 struct FAvidScriptWasmRuntimeMetrics
 {
@@ -62,6 +63,7 @@ struct FAvidScriptWasmHostContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
+	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 };

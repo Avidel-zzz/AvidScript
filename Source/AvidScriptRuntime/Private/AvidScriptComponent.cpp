@@ -128,6 +128,7 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	FAvidScriptWasmHostContext HostContext;
 	HostContext.ObjectRegistry = &ObjectRegistry;
 	HostContext.OwnerHandle = OwnerHandle;
+	HostContext.World = GetOwner() != nullptr ? GetOwner()->GetWorld() : nullptr;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	RuntimeSession->SetHostContext(HostContext);
 

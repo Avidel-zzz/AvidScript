@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "Containers/StringConv.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/ScopeExit.h"
@@ -58,6 +59,7 @@ struct FAvidScriptRuntimeBindingValuePlan
 
 struct FAvidScriptRuntimeBindingInvocationPlan
 {
+	EAvidScriptBindingInvocationKind Kind = EAvidScriptBindingInvocationKind::ReflectedFunction;
 	UClass* OwnerClass = nullptr;
 	UFunction* Function = nullptr;
 	FProperty* ReflectedProperty = nullptr;
@@ -908,6 +910,304 @@ bool BuildAvidScriptRuntimeValuePlan(
 	OutPlan.GuestStorageSize = GetAvidScriptRuntimeGuestStorageSize(OutPlan.Kind);
 	return OutPlan.ArgumentWidth > 0 || OutPlan.Kind == EAvidScriptRuntimeBindingKind::Void;
 }
+
+bool ResolveAvidScriptLifecycleWorld(
+	const FAvidScriptBindingInvocationContext& Context,
+	const FString& Source,
+	UWorld*& OutWorld,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	OutWorld = Context.World.Get();
+	if (!IsValid(OutWorld) || OutWorld->bIsTearingDown)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_world_invalid"),
+			Source,
+			TEXT("The Runtime Session has no live World for object lifecycle operations."));
+		return false;
+	}
+	return true;
+}
+
+bool ResolveAvidScriptLifecycleClass(
+	const FAvidScriptBindingPackage& Package,
+	const uint64 RawOrdinal,
+	const FString& Source,
+	UClass*& OutClass,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	UClass* BaseClass = nullptr;
+	if (RawOrdinal > MAX_uint32
+		|| !Package.TryResolveClassReference(static_cast<uint32>(RawOrdinal), OutClass, BaseClass))
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_class_ordinal_invalid"),
+			Source,
+			TEXT("The class reference ordinal is outside the immutable package class plan."));
+		return false;
+	}
+	return true;
+}
+
+bool ReadAvidScriptLifecycleTransform(
+	const uint64 RawAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FTransform& OutTransform,
+	FString& OutDetails)
+{
+	constexpr int32 ComponentCount = 9;
+	constexpr int32 ByteCount = ComponentCount * sizeof(float);
+	if (RawAddress > MAX_uint32)
+	{
+		OutDetails = TEXT("The FTransform address exceeds the 32-bit Guest address space.");
+		return false;
+	}
+
+	uint8 Bytes[ByteCount] = {};
+	if (!GuestMemory.ReadBytes(
+		static_cast<uint32>(RawAddress),
+		MakeArrayView(Bytes),
+		OutDetails))
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = TEXT("The fixed 36-byte FTransform is outside Guest memory.");
+		}
+		return false;
+	}
+
+	float Components[ComponentCount] = {};
+	FMemory::Memcpy(Components, Bytes, ByteCount);
+	for (const float Component : Components)
+	{
+		if (!FMath::IsFinite(Component))
+		{
+			OutDetails = TEXT("The Guest FTransform contains a non-finite component.");
+			return false;
+		}
+	}
+
+	OutTransform = FTransform(
+		FRotator(Components[3], Components[4], Components[5]),
+		FVector(Components[0], Components[1], Components[2]),
+		FVector(Components[6], Components[7], Components[8]));
+	return true;
+}
+
+bool WriteAvidScriptLifecycleHandle(
+	const uint64 RawAddress,
+	const FAvidScriptObjectHandle& Handle,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FString& OutDetails)
+{
+	if (RawAddress > MAX_uint32)
+	{
+		OutDetails = TEXT("The object handle output address exceeds the 32-bit Guest address space.");
+		return false;
+	}
+
+	uint8 Bytes[sizeof(uint32) * 2] = {};
+	FMemory::Memcpy(Bytes, &Handle.Slot, sizeof(Handle.Slot));
+	FMemory::Memcpy(Bytes + sizeof(Handle.Slot), &Handle.Generation, sizeof(Handle.Generation));
+	if (!GuestMemory.WriteBytes(static_cast<uint32>(RawAddress), MakeArrayView(Bytes), OutDetails))
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = TEXT("The object handle output is outside Guest memory.");
+		}
+		return false;
+	}
+	return true;
+}
+
+bool DispatchAvidScriptObjectLifecycle(
+	const FAvidScriptBindingPackage& Package,
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan,
+	const FAvidScriptDynamicHostCall& Call,
+	const FAvidScriptBindingInvocationContext& Context,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Plan.bRequiresWriteAccess && Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_write_denied"),
+			Plan.DebugPath,
+			TEXT("The object lifecycle operation requires an explicitly writable host context."));
+		return false;
+	}
+	if (Context.HostEffectJournal != nullptr
+		&& Plan.Kind != EAvidScriptBindingInvocationKind::ObjectIsA)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_reload_effect_unsupported"),
+			Plan.DebugPath,
+			TEXT("Candidate reload cannot roll back SpawnActor or DestroyActor side effects."));
+		return false;
+	}
+	if (Context.ObjectRegistry == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_object_registry_missing"),
+			Plan.DebugPath,
+			TEXT("The Runtime Session has no object registry for lifecycle handles."));
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!ResolveAvidScriptLifecycleWorld(Context, Plan.DebugPath, World, OutResult))
+	{
+		return false;
+	}
+
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectSpawnActor)
+	{
+		UClass* ActorClass = nullptr;
+		if (!ResolveAvidScriptLifecycleClass(Package, Call.Arguments[0], Plan.DebugPath, ActorClass, OutResult))
+		{
+			return false;
+		}
+
+		FTransform Transform = FTransform::Identity;
+		FString Details;
+		if (!ReadAvidScriptLifecycleTransform(Call.Arguments[1], *Call.GuestMemory, Transform, Details))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_guest_read_failed"),
+				Plan.DebugPath,
+				Details);
+			return false;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AActor* Actor = World->SpawnActor<AActor>(ActorClass, Transform, SpawnParameters);
+		if (!IsValid(Actor) || Actor->GetWorld() != World)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_spawn_failed"),
+				Plan.DebugPath,
+				TEXT("UWorld::SpawnActor did not return a live Actor in the injected World."));
+			return false;
+		}
+
+		FAvidScriptObjectHandleResult RegisterResult;
+		const FAvidScriptObjectHandle Handle = Context.ObjectRegistry->RegisterObject(Actor, RegisterResult);
+		if (!RegisterResult.bSucceeded || !Handle.IsValid())
+		{
+			Actor->Destroy();
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_handle_registration_failed"),
+				Plan.DebugPath,
+				RegisterResult.ErrorMessage);
+			return false;
+		}
+
+		if (!WriteAvidScriptLifecycleHandle(Call.Arguments[2], Handle, *Call.GuestMemory, Details))
+		{
+			FAvidScriptObjectHandleResult ReleaseResult;
+			Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult);
+			Actor->Destroy();
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_guest_write_failed"),
+				Plan.DebugPath,
+				Details);
+			return false;
+		}
+
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		return true;
+	}
+
+	if (Call.Arguments[0] > MAX_uint32 || Call.Arguments[1] > MAX_uint32)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_target_invalid"),
+			Plan.DebugPath,
+			TEXT("The object handle cells exceed the 32-bit slot/generation ABI."));
+		return false;
+	}
+	const FAvidScriptObjectHandle Handle{
+		static_cast<uint32>(Call.Arguments[0]),
+		static_cast<uint32>(Call.Arguments[1])
+	};
+	FAvidScriptObjectHandleResult ResolveResult;
+	AActor* Actor = Context.ObjectRegistry->ResolveObject<AActor>(Handle, ResolveResult);
+	if (Actor == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_target_invalid"),
+			Plan.DebugPath,
+			ResolveResult.ErrorMessage);
+		return false;
+	}
+	if (Actor->GetWorld() != World)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_cross_world"),
+			Plan.DebugPath,
+			TEXT("The Actor handle belongs to a different World than the active Runtime Session."));
+		return false;
+	}
+
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectDestroyActor)
+	{
+		if (Handle == Context.OwnerHandle)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_destroy_owner_unsupported"),
+				Plan.DebugPath,
+				TEXT("Destroying the Runtime owner requires a deferred component shutdown path."));
+			return false;
+		}
+		if (!Actor->Destroy())
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_destroy_failed"),
+				Plan.DebugPath,
+				TEXT("AActor::Destroy rejected the lifecycle request; the handle remains live."));
+			return false;
+		}
+
+		FAvidScriptObjectHandleResult ReleaseResult;
+		if (!Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_handle_release_failed"),
+				Plan.DebugPath,
+				ReleaseResult.ErrorMessage);
+			return false;
+		}
+
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		return true;
+	}
+
+	UClass* Class = nullptr;
+	if (!ResolveAvidScriptLifecycleClass(Package, Call.Arguments[2], Plan.DebugPath, Class, OutResult))
+	{
+		return false;
+	}
+	OutResult.bSucceeded = true;
+	OutResult.ReturnValue = Actor->IsA(Class) ? 1 : 0;
+	return true;
+}
 } // namespace
 
 struct FAvidScriptBindingPackage::FImpl
@@ -990,9 +1290,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	Package->Impl->PackageHash = Model.PackageHash;
 	Package->Impl->VmPackage.PackageName = Model.PackageName;
 	Package->Impl->VmPackage.PackageHash = Model.PackageHash;
-	Package->Impl->Plans.Reserve(Model.Bindings.Num());
+	const int32 LifecycleBindingCount = Model.ClassReferences.IsEmpty()
+		? 0
+		: FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
+	Package->Impl->Plans.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
 	Package->Impl->ClassReferencePlans.Reserve(Model.ClassReferences.Num());
-	Package->Impl->VmPackage.Imports.Reserve(Model.Bindings.Num());
+	Package->Impl->VmPackage.Imports.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
 
 	TMap<FString, UClass*> LoadedClassesByPath;
 	const auto LoadClass = [&LoadedClassesByPath, &Package](const FString& ClassPath) -> UClass*
@@ -1089,6 +1392,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 
 			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyRead;
 			Plan.OwnerClass = OwnerClass;
 			Plan.ReflectedProperty = Property;
 			Plan.DebugPath = Property->GetPathName();
@@ -1296,8 +1600,45 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Package->Impl->Plans.Add(MoveTemp(Plan));
 	}
 
+	if (!Package->Impl->ClassReferencePlans.IsEmpty())
+	{
+		for (const FAvidScriptObjectLifecycleBindingSpec& Spec : FAvidScriptObjectLifecycleBindings::GetSpecs())
+		{
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = Spec.Kind;
+			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
+			Plan.bRequiresWriteAccess = Spec.Kind == EAvidScriptBindingInvocationKind::ObjectSpawnActor
+				|| Spec.Kind == EAvidScriptBindingInvocationKind::ObjectDestroyActor;
+			Plan.bRequiresGuestMemory = Spec.Kind == EAvidScriptBindingInvocationKind::ObjectSpawnActor;
+			switch (Spec.Kind)
+			{
+			case EAvidScriptBindingInvocationKind::ObjectSpawnActor:
+				Plan.ExpectedArgumentCount = 3;
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectDestroyActor:
+				Plan.ExpectedArgumentCount = 2;
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectIsA:
+				Plan.ExpectedArgumentCount = 3;
+				break;
+			default:
+				checkNoEntry();
+				break;
+			}
+
+			Package->Impl->VmPackage.Imports.Add({
+				Spec.StableId,
+				static_cast<uint32>(Package->Impl->Plans.Num()),
+				Spec.ModuleName,
+				Spec.ImportName,
+				Spec.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+		}
+	}
+
 	OutResult.bSucceeded = true;
-	OutResult.BindingCount = Package->Impl->Plans.Num();
+	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
 	OutResult.RequiredScratchSize = Package->Impl->RequiredScratchSize;
 	OutResult.PackageName = Package->Impl->PackageName;
@@ -1384,6 +1725,12 @@ bool FAvidScriptBindingPackage::Dispatch(
 			Plan.DebugPath,
 			TEXT("The runtime did not preallocate the package's required invocation scratch size."));
 		return false;
+	}
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectSpawnActor
+		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectDestroyActor
+		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectIsA)
+	{
+		return DispatchAvidScriptObjectLifecycle(*this, Plan, Call, Context, OutResult);
 	}
 
 	UObject* Target = nullptr;

@@ -3,6 +3,7 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
@@ -211,9 +212,65 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 		Source.Contains(TEXT("public static TSubclassOfAActor ProjectileClass => new(0);")));
 	TestFalse(TEXT("Class facade does not expose an implicit integer conversion"),
 		Source.Contains(TEXT("implicit operator")));
-	TestFalse(TEXT("Class facade does not create a host import"),
-		Source.Contains(TEXT("ProjectClasses"))
-		&& Source.Contains(TEXT("EntryPoint = \"class")));
+	TestTrue(TEXT("Lifecycle facade unwraps class and transform values for SpawnActor"),
+		Source.Contains(TEXT("public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)"))
+		&& Source.Contains(TEXT("actorClass.AvidScriptOrdinal, in transform"))
+		&& Source.Contains(TEXT("out FAvidScriptObjectHandle actorHandle"))
+		&& Source.Contains(TEXT("new(actorHandle.Slot, actorHandle.Generation)")));
+	TestTrue(TEXT("Lifecycle facade unwraps Actor handles for DestroyActor"),
+		Source.Contains(TEXT("public static bool DestroyActor(AActor actor)"))
+		&& Source.Contains(TEXT("actor.AvidScriptSlot, actor.AvidScriptGeneration")));
+	TestTrue(TEXT("Lifecycle facade unwraps Actor and class values for IsA"),
+		Source.Contains(TEXT("public static bool IsA(AActor actor, TSubclassOfAActor actorClass)"))
+		&& Source.Contains(TEXT("actorClass.AvidScriptOrdinal")));
+	TestFalse(TEXT("Lifecycle facade exposes no implicit unsafe handle conversion"),
+		Source.Contains(TEXT("implicit operator")) || Source.Contains(TEXT("IntPtr")));
+
+	const auto& LifecycleSpecs = FAvidScriptObjectLifecycleBindings::GetSpecs();
+	for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+	{
+		const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+		TestTrue(
+			TEXT("Every shared lifecycle import is emitted once"),
+			Source.Contains(FString::Printf(
+				TEXT("[DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*Spec.ModuleName,
+				*Spec.ImportName)));
+	}
+
+	FString ClassOnlyDescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult ClassOnlyDescriptorResult;
+	TestTrue(
+		TEXT("Class-only descriptor generates for lifecycle facade emission"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+			TEXT("avidscript.project.class_only_facade"),
+			{},
+			{},
+			{
+				{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+			},
+			ClassOnlyDescriptorJson,
+			ClassOnlyDescriptorResult));
+	FString ClassOnlySource;
+	FString ClassOnlyManifest;
+	FAvidScriptCSharpBindingEmitResult ClassOnlyEmitResult;
+	TestTrue(
+		TEXT("Class-only lifecycle facade emits"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			ClassOnlyDescriptorJson,
+			ClassOnlySource,
+			ClassOnlyManifest,
+			ClassOnlyEmitResult));
+	TestTrue(TEXT("Class-only facade forces FVector support"),
+		ClassOnlySource.Contains(TEXT("public readonly struct FVector")));
+	TestTrue(TEXT("Class-only facade forces FRotator support"),
+		ClassOnlySource.Contains(TEXT("public readonly struct FRotator")));
+	TestTrue(TEXT("Class-only facade forces FTransform support"),
+		ClassOnlySource.Contains(TEXT("public readonly struct FTransform")));
+	TestTrue(TEXT("Class-only facade synthesizes the nominal Actor handle proxy"),
+		ClassOnlySource.Contains(TEXT("public readonly struct AActor"))
+		&& ClassOnlySource.Contains(TEXT("internal int AvidScriptSlot => Slot;"))
+		&& ClassOnlySource.Contains(TEXT("internal int AvidScriptGeneration => Generation;")));
 
 	TSharedPtr<FJsonObject> Manifest;
 	TestTrue(TEXT("Class reference manifest parses"), ParseJsonObject(ManifestJson, Manifest));
@@ -221,6 +278,29 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 	{
 		TestEqual(TEXT("Manifest records one class reference"), Manifest->GetIntegerField(TEXT("class_reference_count")), 1);
 		TestEqual(TEXT("Manifest identifies descriptor schema v5"), Manifest->GetIntegerField(TEXT("descriptor_schema_version")), 5);
+		const TArray<TSharedPtr<FJsonValue>>& RequiredImports = Manifest->GetArrayField(TEXT("required_imports"));
+		TestEqual(
+			TEXT("Manifest appends shared lifecycle imports after reflected imports"),
+			RequiredImports.Num(),
+			DescriptorResult.BindingCount + LifecycleSpecs.Num());
+		for (int32 SpecIndex = 0;
+			SpecIndex < LifecycleSpecs.Num() && DescriptorResult.BindingCount + SpecIndex < RequiredImports.Num();
+			++SpecIndex)
+		{
+			const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+			const int32 ImportOrdinal = DescriptorResult.BindingCount + SpecIndex;
+			const TSharedPtr<FJsonObject> Import = RequiredImports[ImportOrdinal]->AsObject();
+			TestTrue(TEXT("Lifecycle manifest import remains an object"), Import.IsValid());
+			if (!Import.IsValid())
+			{
+				continue;
+			}
+			TestEqual(TEXT("Lifecycle manifest preserves shared stable id"), Import->GetStringField(TEXT("stable_id")), Spec.StableId);
+			TestEqual(TEXT("Lifecycle manifest appends a stable ordinal"), Import->GetIntegerField(TEXT("ordinal")), ImportOrdinal);
+			TestEqual(TEXT("Lifecycle manifest preserves shared module"), Import->GetStringField(TEXT("module")), Spec.ModuleName);
+			TestEqual(TEXT("Lifecycle manifest preserves shared import name"), Import->GetStringField(TEXT("name")), Spec.ImportName);
+			TestEqual(TEXT("Lifecycle manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), Spec.Signature);
+		}
 	}
 	return true;
 }

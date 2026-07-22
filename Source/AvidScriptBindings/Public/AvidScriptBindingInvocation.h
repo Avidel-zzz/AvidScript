@@ -2,11 +2,14 @@
 
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptBindingReloadEffect.h"
+#include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptVmBackend.h"
 #include "CoreMinimal.h"
+#include "UObject/WeakObjectPtr.h"
 
 class UClass;
+class UWorld;
 
 struct FAvidScriptBindingPackageLoadResult
 {
@@ -25,6 +28,7 @@ struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
+	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 };

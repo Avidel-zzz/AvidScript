@@ -397,6 +397,8 @@ $ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
+$ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectLifecycleBinding.h'
+$ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
 foreach ($RequiredSelectionContract in @(
     'FAvidScriptBindingSelectionProfile',
@@ -626,9 +628,47 @@ foreach ($RequiredClassReferenceFacadeContract in @(
         Add-Violation "C# class reference facade pipeline is missing $RequiredClassReferenceFacadeContract"
     }
 }
-if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.2.0")') -or
+foreach ($RequiredLifecycleSpecContract in @(
+    'EAvidScriptBindingInvocationKind',
+    'ObjectSpawnActor',
+    'ObjectDestroyActor',
+    'ObjectIsA',
+    'avid_object_spawn_actor',
+    'avid_object_destroy_actor',
+    'avid_object_is_a',
+    'FAvidScriptHash::Sha256HexUtf8'
+)) {
+    if (-not $ObjectLifecycleBindingHeader.Contains($RequiredLifecycleSpecContract) -and
+        -not $ObjectLifecycleBindingSource.Contains($RequiredLifecycleSpecContract)) {
+        Add-Violation "shared object lifecycle binding specification is missing $RequiredLifecycleSpecContract"
+    }
+}
+foreach ($RequiredLifecycleRuntimeContract in @(
+    'DispatchAvidScriptObjectLifecycle',
+    'Context.World.Get()',
+    'binding_world_invalid',
+    'binding_cross_world',
+    'binding_destroy_owner_unsupported',
+    'FAvidScriptObjectLifecycleBindings::GetSpecs()'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredLifecycleRuntimeContract)) {
+        Add-Violation "object lifecycle runtime is missing $RequiredLifecycleRuntimeContract"
+    }
+}
+foreach ($RequiredLifecycleFacadeContract in @(
+    'public static AActor SpawnActor',
+    'public static bool DestroyActor',
+    'public static bool IsA',
+    'FAvidScriptObjectLifecycleBindings::GetSpecs()'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredLifecycleFacadeContract) -and
+        -not $CSharpBindingSliceSource.Contains($RequiredLifecycleFacadeContract)) {
+        Add-Violation "C# object lifecycle facade pipeline is missing $RequiredLifecycleFacadeContract"
+    }
+}
+if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")') -or
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
-    Add-Violation 'C# binding artifact must identify the P49.2 schema-v5 class reference surface'
+    Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
 if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 5')) {
     Add-Violation 'C# binding package resolver must accept descriptor schema v5 class reference packages'
@@ -1248,6 +1288,8 @@ foreach ($RequiredStateContract in @(
     'Write-AvidScriptPhaseStateAtomic',
     'Test-AvidScriptPhaseState',
     'Get-AvidScriptPhaseNextAction',
+    'ConvertFrom-AvidScriptJson',
+    "ConvertFrom-Json -DateKind String",
     'File]::Replace',
     'protected_dirty'
 )) {
@@ -1268,8 +1310,9 @@ foreach ($RequiredEvidenceContract in @(
 }
 if (-not $PhaseWorkflowContractTests.Contains('Evidence.ValidAttestAndClose') -or
     -not $PhaseWorkflowContractTests.Contains('Evidence.AttestationSourceChangeRejected') -or
-    -not $PhaseWorkflowContractTests.Contains('Transitions.ProtectedDirtyBaseline')) {
-    Add-Violation 'phase workflow contract tests do not cover close, source rejection, and protected dirty behavior'
+    -not $PhaseWorkflowContractTests.Contains('Transitions.ProtectedDirtyBaseline') -or
+    -not $PhaseWorkflowContractTests.Contains('State.PwshPreservesTimestampStrings')) {
+    Add-Violation 'phase workflow contract tests do not cover close, source rejection, protected dirty, and cross-shell timestamp behavior'
 }
 foreach ($RequiredPhaseEolContract in @(
     'Docs/Phase*/Phase*_State.json text eol=lf',

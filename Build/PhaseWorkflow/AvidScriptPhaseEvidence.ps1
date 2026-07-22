@@ -6,7 +6,7 @@ function Read-AvidScriptGateEvidence {
         Throw-AvidScriptPhaseError 'ASPW3001' "gate report does not exist: $Path"
     }
     try {
-        $Evidence = [System.IO.File]::ReadAllText($FullPath) | ConvertFrom-Json
+        $Evidence = ConvertFrom-AvidScriptJson ([System.IO.File]::ReadAllText($FullPath))
     }
     catch {
         Throw-AvidScriptPhaseError 'ASPW3002' 'gate report is not valid JSON'
@@ -100,7 +100,7 @@ function Test-AvidScriptGateEvidence {
         Throw-AvidScriptPhaseError 'ASPW3009' 'gate evidence state hash does not match the verified commit'
     }
     try {
-        $VerifiedState = $CommittedStateText | ConvertFrom-Json
+        $VerifiedState = ConvertFrom-AvidScriptJson $CommittedStateText
     }
     catch {
         Throw-AvidScriptPhaseError 'ASPW3010' 'verified phase state is not valid JSON'
@@ -352,7 +352,7 @@ function Test-AvidScriptPhaseCloseEvidence {
         Throw-AvidScriptPhaseError 'ASPW3041' "close evidence does not exist: $Path"
     }
     try {
-        $Close = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+        $Close = ConvertFrom-AvidScriptJson ([System.IO.File]::ReadAllText($Path))
     }
     catch {
         Throw-AvidScriptPhaseError 'ASPW3042' 'close evidence is not valid JSON'

@@ -1886,6 +1886,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	FAvidScriptBindingInvocationContext InvocationContext;
 	InvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
 	InvocationContext.OwnerHandle = HostContext.OwnerHandle;
+	InvocationContext.World = HostContext.World;
 	InvocationContext.WritePolicy = HostContext.ActorWritePolicy;
 	InvocationContext.HostEffectJournal = HostContext.HostEffectJournal;
 	const bool bSucceeded = BindingPackage->Dispatch(

@@ -1,6 +1,16 @@
 $script:AvidScriptPhaseStateSchemaVersion = 1
 $script:AvidScriptPhaseUtf8 = [System.Text.UTF8Encoding]::new($false)
 
+function ConvertFrom-AvidScriptJson {
+    param([Parameter(Mandatory = $true)][string]$Json)
+
+    $ConvertCommand = Get-Command ConvertFrom-Json -CommandType Cmdlet
+    if ($ConvertCommand.Parameters.ContainsKey('DateKind')) {
+        return $Json | ConvertFrom-Json -DateKind String
+    }
+    return $Json | ConvertFrom-Json
+}
+
 function Throw-AvidScriptPhaseError {
     param(
         [Parameter(Mandatory = $true)][string]$Code,
@@ -608,7 +618,7 @@ function Read-AvidScriptPhaseState {
     }
 
     try {
-        $State = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+        $State = ConvertFrom-AvidScriptJson ([System.IO.File]::ReadAllText($Path))
     }
     catch {
         Throw-AvidScriptPhaseError 'ASPW1025' 'phase state is not valid JSON'

@@ -2,6 +2,7 @@
 
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
+#include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 
@@ -220,6 +221,18 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 {
 	HostContext = InHostContext;
 	HostContext.HostEffectJournal = nullptr;
+	if (!HostContext.World.IsValid()
+		&& HostContext.ObjectRegistry != nullptr
+		&& HostContext.OwnerHandle.IsValid())
+	{
+		FAvidScriptObjectHandleResult ResolveResult;
+		if (const AActor* Owner = HostContext.ObjectRegistry->ResolveObject<AActor>(
+			HostContext.OwnerHandle,
+			ResolveResult))
+		{
+			HostContext.World = Owner->GetWorld();
+		}
+	}
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);

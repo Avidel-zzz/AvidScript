@@ -4,6 +4,7 @@
 #include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
+#include "AvidScriptObjectLifecycleBinding.h"
 #include "Serialization/JsonWriter.h"
 
 namespace BindingArtifact = AvidScriptCSharpBindingArtifact;
@@ -579,6 +580,27 @@ void AppendTransform(TArray<FString>& Lines)
 	});
 }
 
+void AppendObjectHandleProxy(TArray<FString>& Lines, const FString& TypeName)
+{
+	Lines.Add(TEXT("[StructLayout(LayoutKind.Sequential)]"));
+	Lines.Add(TEXT("public readonly struct ") + TypeName);
+	Lines.Add(TEXT("{"));
+	Lines.Add(TEXT("    private readonly int Slot;"));
+	Lines.Add(TEXT("    private readonly int Generation;"));
+	Lines.Add(TEXT(""));
+	Lines.Add(FString::Printf(TEXT("    internal %s(int slot, int generation)"), *TypeName));
+	Lines.Add(TEXT("    {"));
+	Lines.Add(TEXT("        Slot = slot;"));
+	Lines.Add(TEXT("        Generation = generation;"));
+	Lines.Add(TEXT("    }"));
+	Lines.Add(TEXT(""));
+	Lines.Add(TEXT("    internal int AvidScriptSlot => Slot;"));
+	Lines.Add(TEXT("    internal int AvidScriptGeneration => Generation;"));
+	Lines.Add(TEXT("    public bool IsNull => Slot == 0 && Generation == 0;"));
+	Lines.Add(TEXT("    public bool HasHandle => Slot > 0 && Generation > 0;"));
+	Lines.Add(TEXT("    public bool IsValid => Slot > 0 && Generation > 0;"));
+}
+
 } // namespace
 
 bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
@@ -588,8 +610,70 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
 {
+	const bool bHasLifecycleBindings = !Package.ClassReferences.IsEmpty();
+	const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
+		FAvidScriptObjectLifecycleBindings::GetSpecs();
+	FString SpawnNativeMethod;
+	FString DestroyNativeMethod;
+	FString IsANativeMethod;
+	if (bHasLifecycleBindings)
+	{
+		if (LifecycleSpecs.Num() != 3)
+		{
+			OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+			OutErrorSource = FString::FromInt(LifecycleSpecs.Num());
+			return false;
+		}
+		for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+		{
+			const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+			const FString NativeMethod = MakeNativeMethodName(Package.Bindings.Num() + SpecIndex);
+			switch (Spec.Kind)
+			{
+			case EAvidScriptBindingInvocationKind::ObjectSpawnActor:
+				if (!SpawnNativeMethod.IsEmpty() || Spec.Signature != TEXT("(iii)i"))
+				{
+					OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+					OutErrorSource = Spec.StableId;
+					return false;
+				}
+				SpawnNativeMethod = NativeMethod;
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectDestroyActor:
+				if (!DestroyNativeMethod.IsEmpty() || Spec.Signature != TEXT("(ii)i"))
+				{
+					OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+					OutErrorSource = Spec.StableId;
+					return false;
+				}
+				DestroyNativeMethod = NativeMethod;
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectIsA:
+				if (!IsANativeMethod.IsEmpty() || Spec.Signature != TEXT("(iii)i"))
+				{
+					OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+					OutErrorSource = Spec.StableId;
+					return false;
+				}
+				IsANativeMethod = NativeMethod;
+				break;
+			default:
+				OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+				OutErrorSource = Spec.StableId;
+				return false;
+			}
+		}
+		if (SpawnNativeMethod.IsEmpty() || DestroyNativeMethod.IsEmpty() || IsANativeMethod.IsEmpty())
+		{
+			OutErrorCategory = TEXT("lifecycle_binding_contract_invalid");
+			OutErrorSource = TEXT("missing_required_kind");
+			return false;
+		}
+	}
+
 	TMap<FString, const FAvidScriptBindingTypeModel*> TypesByCanonical;
 	TSet<FString> CSharpTypeNames;
+	bool bDescriptorHasActorProxy = false;
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
 		TypesByCanonical.Add(Type.CanonicalType, &Type);
@@ -603,14 +687,16 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				return false;
 			}
 			CSharpTypeNames.Add(Name);
+			bDescriptorHasActorProxy |= Type.Kind == TEXT("object_handle") && Name == TEXT("AActor");
 		}
 	}
-	if (!Package.ClassReferences.IsEmpty()
+	if (bHasLifecycleBindings
 		&& (CSharpTypeNames.Contains(TEXT("TSubclassOfAActor"))
-			|| CSharpTypeNames.Contains(TEXT("ProjectClasses"))))
+			|| CSharpTypeNames.Contains(TEXT("ProjectClasses"))
+			|| (CSharpTypeNames.Contains(TEXT("AActor")) && !bDescriptorHasActorProxy)))
 	{
 		OutErrorCategory = TEXT("csharp_type_collision");
-		OutErrorSource = TEXT("TSubclassOfAActor|ProjectClasses");
+		OutErrorSource = TEXT("TSubclassOfAActor|ProjectClasses|AActor");
 		return false;
 	}
 
@@ -652,7 +738,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			});
 		StaticOnlyOwners.Add(
 			Pair.Key,
-			!bHasInstanceMethod && !ObjectTypesUsedAsValues.Contains(TEXT("object:") + Pair.Key));
+			!bHasInstanceMethod
+				&& !ObjectTypesUsedAsValues.Contains(TEXT("object:") + Pair.Key)
+				&& !(bHasLifecycleBindings && Pair.Key == TEXT("/Script/Engine.Actor")));
 	}
 
 	static const TSet<FString> HandleMemberNames = {
@@ -715,6 +803,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		bNeedsVector = true;
 		bNeedsRotator = true;
 	}
+	if (bHasLifecycleBindings)
+	{
+		bNeedsVector = true;
+		bNeedsRotator = true;
+		bNeedsTransform = true;
+	}
 	bNeedsVector = true;
 
 	TArray<FString> Lines = {
@@ -740,7 +834,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	AppendInputEvent(Lines);
 	if (bNeedsRotator) { AppendRotator(Lines); }
 	if (bNeedsTransform) { AppendTransform(Lines); }
-	if (!Package.ClassReferences.IsEmpty())
+	if (bHasLifecycleBindings)
 	{
 		Lines.Append({
 			TEXT("[StructLayout(LayoutKind.Sequential)]"),
@@ -841,23 +935,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		else
 		{
-			Lines.Add(TEXT("[StructLayout(LayoutKind.Sequential)]"));
-			Lines.Add(TEXT("public readonly struct ") + TypeName);
-			Lines.Add(TEXT("{"));
-			Lines.Add(TEXT("    private readonly int Slot;"));
-			Lines.Add(TEXT("    private readonly int Generation;"));
-			Lines.Add(TEXT(""));
-			Lines.Add(FString::Printf(TEXT("    internal %s(int slot, int generation)"), *TypeName));
-			Lines.Add(TEXT("    {"));
-			Lines.Add(TEXT("        Slot = slot;"));
-			Lines.Add(TEXT("        Generation = generation;"));
-			Lines.Add(TEXT("    }"));
-			Lines.Add(TEXT(""));
-			Lines.Add(TEXT("    internal int AvidScriptSlot => Slot;"));
-			Lines.Add(TEXT("    internal int AvidScriptGeneration => Generation;"));
-			Lines.Add(TEXT("    public bool IsNull => Slot == 0 && Generation == 0;"));
-			Lines.Add(TEXT("    public bool HasHandle => Slot > 0 && Generation > 0;"));
-			Lines.Add(TEXT("    public bool IsValid => Slot > 0 && Generation > 0;"));
+			AppendObjectHandleProxy(Lines, TypeName);
 		}
 
 		if (OwnerBindings != nullptr)
@@ -877,32 +955,74 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		Lines.Add(TEXT(""));
 	}
 
+	const bool bHasReflectedActorProxy = bHasActorProxy;
+	if (bHasLifecycleBindings && !bHasActorProxy)
+	{
+		AppendObjectHandleProxy(Lines, TEXT("AActor"));
+		Lines.Add(TEXT("}"));
+		Lines.Add(TEXT(""));
+		bHasActorProxy = true;
+	}
+
 	if (bHasActorProxy)
 	{
-		Lines.Append({
-			TEXT("public static class UE"),
-			TEXT("{"),
-			TEXT("    public static AActor Self => new(AvidScriptRuntimeNative.OwnerGetSlot(), AvidScriptRuntimeNative.OwnerGetGeneration());"),
-			TEXT("    public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);"),
-			TEXT("    public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;"),
-			TEXT("}"),
-			TEXT(""),
-			TEXT("internal static class AvidScriptRuntimeNative"),
-			TEXT("{"),
-			TEXT("    [DllImport(\"env\", EntryPoint = \"owner_get_slot\")]"),
-			TEXT("    internal static extern int OwnerGetSlot();"),
-			TEXT(""),
-			TEXT("    [DllImport(\"env\", EntryPoint = \"owner_get_generation\")]"),
-			TEXT("    internal static extern int OwnerGetGeneration();"),
-			TEXT(""),
-			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
-			TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
-			TEXT(""),
-			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
-			TEXT("    internal static extern int TimerCancel(int timerHandle);"),
-			TEXT("}"),
-			TEXT("")
-		});
+		Lines.Append({ TEXT("public static class UE"), TEXT("{") });
+		if (bHasReflectedActorProxy)
+		{
+			Lines.Append({
+				TEXT("    public static AActor Self => new(AvidScriptRuntimeNative.OwnerGetSlot(), AvidScriptRuntimeNative.OwnerGetGeneration());"),
+				TEXT("    public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);"),
+				TEXT("    public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;")
+			});
+		}
+		if (bHasLifecycleBindings)
+		{
+			if (bHasReflectedActorProxy)
+			{
+				Lines.Add(TEXT(""));
+			}
+			Lines.Append({
+				TEXT("    public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)"),
+				TEXT("    {"),
+				FString::Printf(TEXT("        AvidScriptNative.%s("), *SpawnNativeMethod),
+				TEXT("            actorClass.AvidScriptOrdinal, in transform,"),
+				TEXT("            out FAvidScriptObjectHandle actorHandle);"),
+				TEXT("        return new(actorHandle.Slot, actorHandle.Generation);"),
+				TEXT("    }"),
+				TEXT(""),
+				TEXT("    public static bool DestroyActor(AActor actor)"),
+				FString::Printf(
+					TEXT("        => AvidScriptNative.%s(actor.AvidScriptSlot, actor.AvidScriptGeneration) != 0;"),
+					*DestroyNativeMethod),
+				TEXT(""),
+				TEXT("    public static bool IsA(AActor actor, TSubclassOfAActor actorClass)"),
+				FString::Printf(TEXT("        => AvidScriptNative.%s("), *IsANativeMethod),
+				TEXT("            actor.AvidScriptSlot, actor.AvidScriptGeneration,"),
+				TEXT("            actorClass.AvidScriptOrdinal) != 0;")
+			});
+		}
+		Lines.Append({ TEXT("}"), TEXT("") });
+
+		if (bHasReflectedActorProxy)
+		{
+			Lines.Append({
+				TEXT("internal static class AvidScriptRuntimeNative"),
+				TEXT("{"),
+				TEXT("    [DllImport(\"env\", EntryPoint = \"owner_get_slot\")]"),
+				TEXT("    internal static extern int OwnerGetSlot();"),
+				TEXT(""),
+				TEXT("    [DllImport(\"env\", EntryPoint = \"owner_get_generation\")]"),
+				TEXT("    internal static extern int OwnerGetGeneration();"),
+				TEXT(""),
+				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
+				TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
+				TEXT("    internal static extern int TimerCancel(int timerHandle);"),
+				TEXT("}"),
+				TEXT("")
+			});
+		}
 	}
 
 	Lines.Add(TEXT("internal static class AvidScriptNative"));
@@ -914,6 +1034,43 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			Lines.Add(TEXT(""));
 		}
 		Lines.Append(RenderedMethods.FindChecked(Binding.Ordinal).NativeLines);
+	}
+	if (bHasLifecycleBindings)
+	{
+		for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+		{
+			if (!Package.Bindings.IsEmpty() || SpecIndex > 0)
+			{
+				Lines.Add(TEXT(""));
+			}
+			const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+			const FString NativeMethod = MakeNativeMethodName(Package.Bindings.Num() + SpecIndex);
+			Lines.Add(FString::Printf(
+				TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*EscapeCSharpString(Spec.ModuleName),
+				*EscapeCSharpString(Spec.ImportName)));
+			switch (Spec.Kind)
+			{
+			case EAvidScriptBindingInvocationKind::ObjectSpawnActor:
+				Lines.Add(FString::Printf(
+					TEXT("    internal static extern int %s(int classOrdinal, in FTransform transform, out FAvidScriptObjectHandle actorHandle);"),
+					*NativeMethod));
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectDestroyActor:
+				Lines.Add(FString::Printf(
+					TEXT("    internal static extern int %s(int slot, int generation);"),
+					*NativeMethod));
+				break;
+			case EAvidScriptBindingInvocationKind::ObjectIsA:
+				Lines.Add(FString::Printf(
+					TEXT("    internal static extern int %s(int slot, int generation, int classOrdinal);"),
+					*NativeMethod));
+				break;
+			default:
+				checkNoEntry();
+				break;
+			}
+		}
 	}
 	Lines.Add(TEXT("}"));
 	Lines.Add(TEXT(""));
@@ -952,6 +1109,22 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 		Writer->WriteValue(TEXT("name"), Binding.HostImport.Name);
 		Writer->WriteValue(TEXT("signature"), Binding.HostImport.Signature);
 		Writer->WriteObjectEnd();
+	}
+	if (!Package.ClassReferences.IsEmpty())
+	{
+		const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
+			FAvidScriptObjectLifecycleBindings::GetSpecs();
+		for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
+		{
+			const FAvidScriptObjectLifecycleBindingSpec& Spec = LifecycleSpecs[SpecIndex];
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
+			Writer->WriteValue(TEXT("ordinal"), Package.Bindings.Num() + SpecIndex);
+			Writer->WriteValue(TEXT("module"), Spec.ModuleName);
+			Writer->WriteValue(TEXT("name"), Spec.ImportName);
+			Writer->WriteValue(TEXT("signature"), Spec.Signature);
+			Writer->WriteObjectEnd();
+		}
 	}
 	Writer->WriteArrayEnd();
 	Writer->WriteObjectEnd();
