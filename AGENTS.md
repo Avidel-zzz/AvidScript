@@ -107,7 +107,7 @@ Plugins/AvidScript/Docs
 - 2026-07-04 P5.1 mistake record: a Chinese plugin Markdown file was first written with ASCII encoding, replacing non-ASCII text with `?`. Prevention: when a Markdown/doc file contains Chinese or other non-ASCII text, write it as UTF-8 without BOM and inspect the rendered source with `Get-Content` before committing; a control-character scan alone is not sufficient.
 - 2026-07-05 P5.2c mistake record: `FPlatformMisc::GetSHA256Signature` asserted with `No SHA256 Platform implementation` during Editor-Cmd automation. Prevention: for runtime manifest hash validation, use OpenSSL SHA256 or another already-proven implementation in UE automation before relying on platform SHA helpers.
 - 2026-07-05 P5.2c mistake record: `FPaths::ProjectSavedDir()` can be relative, for example `../../../../Users/...`, when running under `UnrealEditor-Cmd.exe`. Prevention: normalize test fixture directories to full paths before writing manifests, and keep real manifest wasm paths project-relative such as `Saved/...` so build script output and runtime loader behavior stay aligned.
-- After C++ or Build.cs changes, run the UE5.8 Editor target build:
+- After completing a coherent C++ or Build.cs development batch, run the affected UE5.8 modules. Do not rebuild the Editor target after every individual file edit:
 
 ```powershell
 & "C:\UnrealEngine\Engine\Build\BatchFiles\Build.bat" AvidTPSTemplateEditor Win64 Development "-Project=<ProjectRoot>\AvidTPSTemplate.uproject" -WaitMutex -NoHotReloadFromIDE
@@ -137,6 +137,16 @@ Plugins/AvidScript/Docs
 - If a build fails before reaching AvidScript files, document it as an environment or project-level blocker.
 - If a build fails inside AvidScript files, fix the plugin code first and rerun the same command.
 - Generated build outputs must remain ignored by Git.
+
+## Batched Verification Workflow
+
+- 默认以一个完整功能组或 60–120 分钟工作量作为开发批次。批次内连续完成相关 production code、测试代码和文档，不在每个小步骤后重复启动 UE、运行完整模块构建或完整 automation。
+- 批次内只使用低成本反馈：源码检索、结构化产物检查、编译器静态诊断、`git diff --check`，以及确实会阻塞后续实现的最小 .NET 测试。不得为了逐个 checklist 制造碎片化 RED/GREEN 循环。
+- 子阶段门禁只执行一次受影响模块的 no-clean 增量构建，并优先运行一个能覆盖该功能组的 broader focused filter。失败后只重跑失败组及其直接依赖，不重复已经有有效证据且未受变更影响的测试。
+- 大 Phase 收尾门禁集中执行：所有相关 .NET 测试宿主与 format、一次四模块 no-clean scoped build、architecture/parser gate、一次完整 `Automation RunTests AvidScript`。完整 automation 默认不在同一大 Phase 中重复运行。
+- 独立代码审查安排在最终全量 automation 之前。审查修复后先运行受影响 focused tests，随后只运行一次最终全量 automation，避免“全量测试 -> 审查修改 -> 再全量测试”的重复成本。
+- 只有 ABI、guest memory、状态迁移、生命周期事务、崩溃或数据损坏风险，以及需要先确认根因的真实回归，才允许在批次中途立即编译或运行聚焦测试。即使属于例外，也应合并同一风险面的修改后再执行。
+- 批量验证不等于把反馈无限推迟到数小时任务末尾。单个批次不得跨越多个相互独立的架构层，也不得以减少测试时间为理由跳过最终门禁、清理 Editor Target 或降低成功判定标准。
 
 ## C# Guest Toolchain Workflow
 
