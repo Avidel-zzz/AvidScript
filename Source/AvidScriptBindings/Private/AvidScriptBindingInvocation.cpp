@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "Containers/StringConv.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
@@ -35,6 +36,7 @@ enum class EAvidScriptRuntimeBindingKind : uint8
 	Float,
 	Double,
 	Enum,
+	Name,
 	Object,
 	Vector,
 	Rotator,
@@ -167,8 +169,10 @@ bool MatchesAvidScriptRuntimeScalarModel(
 		&& Model.AbiTypes[0] == AbiType;
 }
 
-bool ResolveAvidScriptRuntimeKind(	const FProperty* Property,
+bool ResolveAvidScriptRuntimeKind(
+	const FProperty* Property,
 	const FAvidScriptBindingValueModel& Model,
+	const FAvidScriptBindingTypeModel* DeclaredType,
 	EAvidScriptRuntimeBindingKind& OutKind,
 	UClass*& OutObjectClass)
 {
@@ -184,6 +188,26 @@ bool ResolveAvidScriptRuntimeKind(	const FProperty* Property,
 	if (Property == nullptr)
 	{
 		return false;
+	}
+	if (Model.CanonicalType == TEXT("name:fname"))
+	{
+		if (!Property->IsA<FNameProperty>()
+			|| (Model.Direction != TEXT("value") && Model.Direction != TEXT("const_ref"))
+			|| Model.Kind != TEXT("name_utf8")
+			|| Model.CppType != TEXT("FName")
+			|| Model.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| DeclaredType == nullptr
+			|| DeclaredType->CanonicalType != TEXT("name:fname")
+			|| DeclaredType->Kind != TEXT("name_utf8")
+			|| DeclaredType->CppType != TEXT("FName")
+			|| DeclaredType->Size != 4
+			|| DeclaredType->Alignment != 4
+			|| DeclaredType->AbiTypes != TArray<FString>({ TEXT("i") }))
+		{
+			return false;
+		}
+		OutKind = EAvidScriptRuntimeBindingKind::Name;
+		return true;
 	}
 
 	if (Model.Kind == TEXT("object_handle"))
@@ -546,9 +570,101 @@ bool SetAvidScriptRuntimeNumericValue(
 	return true;
 }
 
+bool SetAvidScriptRuntimeNameValue(
+	const FAvidScriptRuntimeBindingValuePlan& Plan,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	void* Frame,
+	FString& OutDetails)
+{
+	uint8 LengthBytes[sizeof(int32)] = {};
+	if (GuestAddress > MAX_uint32 - sizeof(LengthBytes)
+		|| !GuestMemory.ReadBytes(GuestAddress, MakeArrayView(LengthBytes), OutDetails))
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = TEXT("The FName length prefix is outside guest memory.");
+		}
+		return false;
+	}
+
+	const uint32 UnsignedLength = static_cast<uint32>(LengthBytes[0])
+		| (static_cast<uint32>(LengthBytes[1]) << 8)
+		| (static_cast<uint32>(LengthBytes[2]) << 16)
+		| (static_cast<uint32>(LengthBytes[3]) << 24);
+	static constexpr int32 MaxUtf8Bytes = NAME_SIZE * 4;
+	if (UnsignedLength > static_cast<uint32>(MaxUtf8Bytes))
+	{
+		OutDetails = FString::Printf(
+			TEXT("The FName UTF-8 byte length must be between 0 and %d."),
+			MaxUtf8Bytes);
+		return false;
+	}
+	const int32 PayloadLength = static_cast<int32>(UnsignedLength);
+
+	const uint32 StoredSize = static_cast<uint32>(PayloadLength) + 1;
+	const uint64 PayloadAddress64 = static_cast<uint64>(GuestAddress) + sizeof(LengthBytes);
+	const uint64 PayloadEnd64 = PayloadAddress64 + StoredSize;
+	if (PayloadEnd64 > static_cast<uint64>(MAX_uint32) + 1)
+	{
+		OutDetails = TEXT("The FName payload address overflows guest memory.");
+		return false;
+	}
+	const uint32 PayloadAddress = static_cast<uint32>(PayloadAddress64);
+	TArray<uint8, TInlineAllocator<256>> Payload;
+	Payload.SetNumUninitialized(StoredSize);
+	if (!GuestMemory.ReadBytes(PayloadAddress, MakeArrayView(Payload), OutDetails))
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = TEXT("The FName payload is outside guest memory.");
+		}
+		return false;
+	}
+	if (Payload[PayloadLength] != 0)
+	{
+		OutDetails = TEXT("The FName payload is not followed by a zero terminator.");
+		return false;
+	}
+	for (int32 Index = 0; Index < PayloadLength; ++Index)
+	{
+		if (Payload[Index] == 0)
+		{
+			OutDetails = TEXT("The FName UTF-8 payload contains an embedded NUL byte.");
+			return false;
+		}
+	}
+
+	const ANSICHAR* Utf8 = reinterpret_cast<const ANSICHAR*>(Payload.GetData());
+	const FUTF8ToTCHAR Converted(Utf8, PayloadLength);
+	if (Converted.Length() >= NAME_SIZE)
+	{
+		OutDetails = FString::Printf(
+			TEXT("The decoded FName must contain fewer than %d TCHAR code units."),
+			NAME_SIZE);
+		return false;
+	}
+	const FTCHARToUTF8 RoundTrip(Converted.Get(), Converted.Length());
+	if (RoundTrip.Length() != PayloadLength
+		|| (PayloadLength > 0
+			&& FMemory::Memcmp(RoundTrip.Get(), Payload.GetData(), PayloadLength) != 0))
+	{
+		OutDetails = TEXT("The FName payload is not canonical valid UTF-8.");
+		return false;
+	}
+
+	void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Frame);
+	const FName Name = Converted.Length() == 0
+		? NAME_None
+		: FName(Converted.Length(), Converted.Get(), FNAME_Add);
+	CastFieldChecked<FNameProperty>(Plan.Property)->SetPropertyValue(Value, Name);
+	return true;
+}
+
 bool SetAvidScriptRuntimeValueFromCells(
 	const FAvidScriptRuntimeBindingValuePlan& Plan,
 	TConstArrayView<uint64> Cells,
+	IAvidScriptVmGuestMemory* GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	void* Frame,
 	FString& OutDetails)
@@ -561,6 +677,25 @@ bool SetAvidScriptRuntimeValueFromCells(
 	if (Plan.Kind <= EAvidScriptRuntimeBindingKind::Enum)
 	{
 		return SetAvidScriptRuntimeNumericValue(Plan, Frame, Cells[0], OutDetails);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name)
+	{
+		if (GuestMemory == nullptr)
+		{
+			OutDetails = TEXT("The FName input requires guest memory.");
+			return false;
+		}
+		if (Cells[0] > MAX_uint32)
+		{
+			OutDetails = TEXT("The FName guest address does not fit the 32-bit guest address space.");
+			return false;
+		}
+		return SetAvidScriptRuntimeNameValue(
+			Plan,
+			static_cast<uint32>(Cells[0]),
+			*GuestMemory,
+			Frame,
+			OutDetails);
 	}
 	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
 	{
@@ -662,7 +797,13 @@ bool SetAvidScriptRuntimeValueFromGuest(
 
 	FAvidScriptRuntimeBindingValuePlan ValuePlan = Plan;
 	ValuePlan.ArgumentWidth = Cells.Num();
-	return SetAvidScriptRuntimeValueFromCells(ValuePlan, Cells, Context, Frame, OutDetails);
+	return SetAvidScriptRuntimeValueFromCells(
+		ValuePlan,
+		Cells,
+		&GuestMemory,
+		Context,
+		Frame,
+		OutDetails);
 }
 
 bool WriteAvidScriptRuntimeValueToGuest(
@@ -779,6 +920,7 @@ bool WriteAvidScriptRuntimeValueToGuest(
 bool BuildAvidScriptRuntimeValuePlan(
 	FProperty* Property,
 	const FAvidScriptBindingValueModel& Model,
+	const FAvidScriptBindingTypeModel* DeclaredType,
 	int32 ArgumentOffset,
 	FAvidScriptRuntimeBindingValuePlan& OutPlan,
 	FString& OutDetails)
@@ -788,7 +930,12 @@ bool BuildAvidScriptRuntimeValuePlan(
 	OutPlan.ArgumentOffset = ArgumentOffset;
 	OutPlan.Name = Model.Name;
 	if (!ParseAvidScriptRuntimeDirection(Model.Direction, OutPlan.Direction)
-		|| !ResolveAvidScriptRuntimeKind(Property, Model, OutPlan.Kind, OutPlan.ObjectClass))
+		|| !ResolveAvidScriptRuntimeKind(
+			Property,
+			Model,
+			DeclaredType,
+			OutPlan.Kind,
+			OutPlan.ObjectClass))
 	{
 		OutDetails = FString::Printf(
 			TEXT("Reflected property '%s' no longer matches descriptor type '%s'."),
@@ -863,6 +1010,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			TEXT("Selection or package identity does not match the descriptor contents."));
 		return false;
 	}
+	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesByCanonical;
+	DeclaredTypesByCanonical.Reserve(Model.Types.Num());
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		DeclaredTypesByCanonical.Add(Type.CanonicalType, &Type);
+	}
 
 	TSharedPtr<FAvidScriptBindingPackage> Package = MakeShareable(new FAvidScriptBindingPackage());
 	Package->Impl->PackageName = Model.PackageName;
@@ -913,6 +1066,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 				Property,
 				Binding.ReturnValue,
+				DeclaredTypesByCanonical.FindRef(Binding.ReturnValue.CanonicalType),
 				2,
 				Plan.ReturnValue,
 				ReturnDetails))
@@ -1047,6 +1201,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 				Property,
 				Parameter,
+				DeclaredTypesByCanonical.FindRef(Parameter.CanonicalType),
 				ArgumentOffset,
 				ValuePlan,
 				Details))
@@ -1060,7 +1215,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 			ArgumentOffset += ValuePlan.ArgumentWidth;
 			Plan.bRequiresGuestMemory |= ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Ref
-				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out;
+				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
 		}
 
@@ -1069,6 +1225,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		if (!BuildAvidScriptRuntimeValuePlan(
 			ReturnProperty,
 			Binding.ReturnValue,
+			DeclaredTypesByCanonical.FindRef(Binding.ReturnValue.CanonicalType),
 			ArgumentOffset,
 			Plan.ReturnValue,
 			ReturnDetails))
@@ -1281,6 +1438,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 		if (!SetAvidScriptRuntimeValueFromCells(
 			Parameter,
 			Call.Arguments.Slice(Parameter.ArgumentOffset, Parameter.ArgumentWidth),
+			Call.GuestMemory,
 			Context,
 			Frame,
 			Details))

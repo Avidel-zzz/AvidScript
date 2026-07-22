@@ -3,6 +3,7 @@
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptComponent.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptEditorComponentBindingService.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
@@ -100,6 +101,21 @@ private:
 
 	TArray<uint8> Bytes;
 };
+
+bool WriteAvidScriptBindingRuntimeUtf8String(
+	FAvidScriptBindingRuntimeTestGuestMemory& GuestMemory,
+	const uint32 GuestAddress,
+	const TConstArrayView<uint8> Payload,
+	const uint8 Terminator = 0)
+{
+	GuestMemory.WriteValue<int32>(GuestAddress, Payload.Num());
+	FString Error;
+	return GuestMemory.WriteBytes(GuestAddress + sizeof(int32), Payload, Error)
+		&& GuestMemory.WriteBytes(
+			GuestAddress + sizeof(int32) + Payload.Num(),
+			MakeArrayView(&Terminator, 1),
+			Error);
+}
 
 int32 FindAvidScriptBindingRuntimeBytes(
 	const TConstArrayView<uint8> Bytes,
@@ -521,9 +537,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 117 generated bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 342 generated bindings"), *BuildLabel),
 		AuthorizationImports->Num(),
-		117);
+		342);
 
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
 	if (!Test.TestTrue(
@@ -803,9 +819,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 117 gameplay bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 342 gameplay bindings"), *BuildLabel),
 		AuthorizationImports->Num(),
-		117);
+		342);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -964,6 +980,369 @@ bool FAvidScriptEditorBindingRuntimeScalarMetadataFailureTest::RunTest(const FSt
 		LoadResult.ErrorCategory,
 		FString(TEXT("binding_return_contract_mismatch")));
 	TestFalse(TEXT("Failed scalar package is not published"), Package.IsValid());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeFNameInputTest,
+	"AvidScript.Editor.BindingRuntime.FNameInput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeFNameInputTest::RunTest(const FString& Parameters)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("ActorHasTag descriptor generates for runtime FName validation"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.engine.fname.runtime"),
+			{ { TEXT("/Script/Engine.Actor"), TEXT("ActorHasTag") } },
+			DescriptorJson,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("Runtime loads the exact FName input package"),
+		FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+	TestEqual(TEXT("FName runtime package exposes one cached import"), Package->GetVmPackage().Imports.Num(), 1);
+	if (Package->GetVmPackage().Imports.Num() != 1)
+	{
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("FName runtime integration world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	AAvidScriptBindingRuntimeProcessEventTestActor* Actor =
+		World->SpawnActor<AAvidScriptBindingRuntimeProcessEventTestActor>();
+	if (!TestNotNull(TEXT("FName runtime test actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->Tags.Add(FName(TEXT("Player")));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("FName runtime actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	const uint32 BindingOrdinal = Package->GetVmPackage().Imports[0].Ordinal;
+	const auto Dispatch = [&Package, &Context, &Scratch, ActorHandle, BindingOrdinal](
+		FAvidScriptBindingRuntimeTestGuestMemory* GuestMemory,
+		const uint64 NameAddress,
+		const uint32 ReturnAddress,
+		FAvidScriptDynamicHostCallResult& OutResult)
+	{
+		const uint64 Arguments[] = {
+			ActorHandle.Slot,
+			ActorHandle.Generation,
+			NameAddress,
+			ReturnAddress
+		};
+		FAvidScriptDynamicHostCall Call;
+		Call.BindingOrdinal = BindingOrdinal;
+		Call.Arguments = MakeArrayView(Arguments);
+		Call.GuestMemory = GuestMemory;
+		return Package->Dispatch(Call, Context, Scratch, OutResult);
+	};
+	const auto TestRejected = [this, Actor, &Dispatch](
+		const TCHAR* Label,
+		FAvidScriptBindingRuntimeTestGuestMemory* GuestMemory,
+		const uint64 NameAddress,
+		const uint32 ReturnAddress,
+		const TCHAR* ExpectedCategory)
+	{
+		static constexpr int32 ReturnSentinel = 0x13572468;
+		if (GuestMemory != nullptr)
+		{
+			GuestMemory->WriteValue<int32>(ReturnAddress, ReturnSentinel);
+		}
+		Actor->ProcessEventCallCount = 0;
+		FAvidScriptDynamicHostCallResult Result;
+		TestFalse(Label, Dispatch(GuestMemory, NameAddress, ReturnAddress, Result));
+		TestTrue(
+			*FString::Printf(TEXT("%s reports %s"), Label, ExpectedCategory),
+			Result.Details.Contains(ExpectedCategory, ESearchCase::CaseSensitive));
+		TestEqual(
+			*FString::Printf(TEXT("%s is rejected before ProcessEvent"), Label),
+			Actor->ProcessEventCallCount,
+			0);
+		if (GuestMemory != nullptr)
+		{
+			TestEqual(
+				*FString::Printf(TEXT("%s leaves return storage untouched"), Label),
+				GuestMemory->ReadValue<int32>(ReturnAddress),
+				ReturnSentinel);
+		}
+	};
+
+	static constexpr uint32 NameAddress = 16;
+	static constexpr uint32 ReturnAddress = 64;
+	const uint8 PlayerUtf8[] = { 'P', 'l', 'a', 'y', 'e', 'r' };
+	FAvidScriptBindingRuntimeTestGuestMemory ValidMemory(128);
+	TestTrue(
+		TEXT("Valid Player string is written into guest memory"),
+		WriteAvidScriptBindingRuntimeUtf8String(ValidMemory, NameAddress, MakeArrayView(PlayerUtf8)));
+	ValidMemory.WriteValue<int32>(ReturnAddress, 0);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult ValidResult;
+	TestTrue(
+		TEXT("ActorHasTag dispatch accepts a valid FName input"),
+		Dispatch(&ValidMemory, NameAddress, ReturnAddress, ValidResult));
+	TestTrue(TEXT("ActorHasTag dispatch reports success"), ValidResult.bSucceeded);
+	TestEqual(TEXT("ActorHasTag writes true into guest memory"), ValidMemory.ReadValue<int32>(ReturnAddress), 1);
+	TestEqual(TEXT("Valid ActorHasTag reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	const TArray<uint8> EmptyPayload;
+	FAvidScriptBindingRuntimeTestGuestMemory EmptyMemory(128);
+	TestTrue(
+		TEXT("Empty FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(EmptyMemory, NameAddress, EmptyPayload));
+	EmptyMemory.WriteValue<int32>(ReturnAddress, -1);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult EmptyResult;
+	TestTrue(
+		TEXT("Empty FName maps to NAME_None and reaches ActorHasTag"),
+		Dispatch(&EmptyMemory, NameAddress, ReturnAddress, EmptyResult));
+	TestEqual(TEXT("ActorHasTag reports false for NAME_None"), EmptyMemory.ReadValue<int32>(ReturnAddress), 0);
+	TestEqual(TEXT("Empty FName reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	const TCHAR ChineseTag[] = { static_cast<TCHAR>(0x73a9), static_cast<TCHAR>(0x5bb6), 0 };
+	Actor->Tags.Add(FName(ChineseTag));
+	const uint8 ChineseUtf8[] = { 0xe7, 0x8e, 0xa9, 0xe5, 0xae, 0xb6 };
+	FAvidScriptBindingRuntimeTestGuestMemory ChineseMemory(128);
+	TestTrue(
+		TEXT("Valid multibyte FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(ChineseMemory, NameAddress, MakeArrayView(ChineseUtf8)));
+	ChineseMemory.WriteValue<int32>(ReturnAddress, 0);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult ChineseResult;
+	TestTrue(
+		TEXT("Valid multibyte UTF-8 reaches ActorHasTag"),
+		Dispatch(&ChineseMemory, NameAddress, ReturnAddress, ChineseResult));
+	TestEqual(TEXT("Multibyte FName retains exact tag identity"), ChineseMemory.ReadValue<int32>(ReturnAddress), 1);
+	TestEqual(TEXT("Multibyte FName reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	const TCHAR SupplementaryTag[] = { static_cast<TCHAR>(0xd83d), static_cast<TCHAR>(0xde00), 0 };
+	Actor->Tags.Add(FName(SupplementaryTag));
+	const uint8 SupplementaryUtf8[] = { 0xf0, 0x9f, 0x98, 0x80 };
+	FAvidScriptBindingRuntimeTestGuestMemory SupplementaryMemory(128);
+	TestTrue(
+		TEXT("Valid four-byte Unicode FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(
+			SupplementaryMemory,
+			NameAddress,
+			MakeArrayView(SupplementaryUtf8)));
+	SupplementaryMemory.WriteValue<int32>(ReturnAddress, 0);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult SupplementaryResult;
+	TestTrue(
+		TEXT("Valid four-byte Unicode reaches ActorHasTag"),
+		Dispatch(&SupplementaryMemory, NameAddress, ReturnAddress, SupplementaryResult));
+	TestEqual(
+		TEXT("Four-byte Unicode FName retains exact tag identity"),
+		SupplementaryMemory.ReadValue<int32>(ReturnAddress),
+		1);
+	TestEqual(TEXT("Four-byte Unicode reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	const TCHAR ReplacementTag[] = { static_cast<TCHAR>(0xfffd), 0 };
+	Actor->Tags.Add(FName(ReplacementTag));
+	const uint8 ReplacementUtf8[] = { 0xef, 0xbf, 0xbd };
+	FAvidScriptBindingRuntimeTestGuestMemory ReplacementMemory(128);
+	TestTrue(
+		TEXT("Valid U+FFFD FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(ReplacementMemory, NameAddress, MakeArrayView(ReplacementUtf8)));
+	ReplacementMemory.WriteValue<int32>(ReturnAddress, 0);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult ReplacementResult;
+	TestTrue(
+		TEXT("Valid U+FFFD is not confused with invalid UTF-8 replacement"),
+		Dispatch(&ReplacementMemory, NameAddress, ReturnAddress, ReplacementResult));
+	TestEqual(TEXT("Valid U+FFFD retains exact tag identity"), ReplacementMemory.ReadValue<int32>(ReturnAddress), 1);
+	TestEqual(TEXT("Valid U+FFFD reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	TArray<uint8> MaximumPayload;
+	MaximumPayload.Init(static_cast<uint8>('M'), NAME_SIZE - 1);
+	FAvidScriptBindingRuntimeTestGuestMemory MaximumMemory(NAME_SIZE + 128);
+	TestTrue(
+		TEXT("Maximum-length FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(MaximumMemory, NameAddress, MaximumPayload));
+	MaximumMemory.WriteValue<int32>(NAME_SIZE + 64, -1);
+	Actor->ProcessEventCallCount = 0;
+	FAvidScriptDynamicHostCallResult MaximumResult;
+	TestTrue(
+		TEXT("A NAME_SIZE minus one ASCII FName is accepted"),
+		Dispatch(&MaximumMemory, NameAddress, NAME_SIZE + 64, MaximumResult));
+	TestEqual(TEXT("Unknown maximum-length tag reports false"), MaximumMemory.ReadValue<int32>(NAME_SIZE + 64), 0);
+	TestEqual(TEXT("Maximum-length FName reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+
+	TestRejected(
+		TEXT("FName input without guest memory fails closed"),
+		nullptr,
+		NameAddress,
+		ReturnAddress,
+		TEXT("binding_frame_mismatch"));
+	TestRejected(
+		TEXT("FName address with non-zero high bits fails closed"),
+		&ValidMemory,
+		(1ull << 32) | NameAddress,
+		ReturnAddress,
+		TEXT("binding_argument_invalid"));
+
+	FAvidScriptBindingRuntimeTestGuestMemory NegativeLengthMemory(128);
+	NegativeLengthMemory.WriteValue<int32>(NameAddress, -1);
+	TestRejected(
+		TEXT("Negative FName byte length fails closed"),
+		&NegativeLengthMemory,
+		NameAddress,
+		ReturnAddress,
+		TEXT("binding_argument_invalid"));
+
+	TArray<uint8> OverlongPayload;
+	OverlongPayload.Init(static_cast<uint8>('A'), NAME_SIZE);
+	FAvidScriptBindingRuntimeTestGuestMemory OverlongMemory(NAME_SIZE + 128);
+	TestTrue(
+		TEXT("Overlong FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(OverlongMemory, NameAddress, OverlongPayload));
+	TestRejected(
+		TEXT("A NAME_SIZE ASCII FName fails closed"),
+		&OverlongMemory,
+		NameAddress,
+		NAME_SIZE + 64,
+		TEXT("binding_argument_invalid"));
+
+	FAvidScriptBindingRuntimeTestGuestMemory ExcessByteLengthMemory(128);
+	ExcessByteLengthMemory.WriteValue<uint32>(NameAddress, NAME_SIZE * 4 + 1);
+	TestRejected(
+		TEXT("FName byte length above the UTF-8 ceiling fails before payload read"),
+		&ExcessByteLengthMemory,
+		NameAddress,
+		ReturnAddress,
+		TEXT("binding_argument_invalid"));
+
+	FAvidScriptBindingRuntimeTestGuestMemory OutOfBoundsMemory(24);
+	OutOfBoundsMemory.WriteValue<int32>(NameAddress, 6);
+	TestRejected(
+		TEXT("Out-of-bounds FName payload fails closed"),
+		&OutOfBoundsMemory,
+		NameAddress,
+		20,
+		TEXT("binding_argument_invalid"));
+
+	const uint8 EmbeddedNullUtf8[] = { 'P', 'l', 0, 'y', 'e', 'r' };
+	FAvidScriptBindingRuntimeTestGuestMemory EmbeddedNullMemory(128);
+	TestTrue(
+		TEXT("Embedded NUL FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(EmbeddedNullMemory, NameAddress, MakeArrayView(EmbeddedNullUtf8)));
+	TestRejected(
+		TEXT("Embedded NUL FName payload fails closed"),
+		&EmbeddedNullMemory,
+		NameAddress,
+		ReturnAddress,
+		TEXT("binding_argument_invalid"));
+
+	FAvidScriptBindingRuntimeTestGuestMemory MissingTerminatorMemory(128);
+	TestTrue(
+		TEXT("Missing terminator FName fixture is written"),
+		WriteAvidScriptBindingRuntimeUtf8String(
+			MissingTerminatorMemory,
+			NameAddress,
+			MakeArrayView(PlayerUtf8),
+			1));
+	TestRejected(
+		TEXT("FName payload without a zero terminator fails closed"),
+		&MissingTerminatorMemory,
+		NameAddress,
+		ReturnAddress,
+		TEXT("binding_argument_invalid"));
+
+	const TArray<TArray<uint8>> InvalidUtf8Payloads = {
+		{ 0xc3, 0x28 },
+		{ 0xe2, 0x82 },
+		{ 0xc0, 0xaf },
+		{ 0xed, 0xa0, 0x80 },
+		{ 0xf4, 0x90, 0x80, 0x80 }
+	};
+	for (int32 Index = 0; Index < InvalidUtf8Payloads.Num(); ++Index)
+	{
+		FAvidScriptBindingRuntimeTestGuestMemory InvalidUtf8Memory(128);
+		TestTrue(
+			*FString::Printf(TEXT("Invalid UTF-8 FName fixture %d is written"), Index),
+			WriteAvidScriptBindingRuntimeUtf8String(
+				InvalidUtf8Memory,
+				NameAddress,
+				InvalidUtf8Payloads[Index]));
+		const FString Label = FString::Printf(TEXT("Invalid UTF-8 FName payload %d fails closed"), Index);
+		TestRejected(
+			*Label,
+			&InvalidUtf8Memory,
+			NameAddress,
+			ReturnAddress,
+			TEXT("binding_argument_invalid"));
+	}
+
+	const FString TamperedDescriptorJson = DescriptorJson.Replace(
+		TEXT("\"kind\": \"name_utf8\""),
+		TEXT("\"kind\": \"name_utf16\""),
+		ESearchCase::CaseSensitive);
+	TestFalse(TEXT("FName kind metadata was changed"), TamperedDescriptorJson == DescriptorJson);
+	TSharedPtr<const FAvidScriptBindingPackage> TamperedPackage;
+	FAvidScriptBindingPackageLoadResult TamperedLoadResult;
+	TestFalse(
+		TEXT("Runtime rejects an FName descriptor kind mismatch"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			TamperedDescriptorJson,
+			TamperedPackage,
+			TamperedLoadResult));
+	TestTrue(
+		TEXT("FName descriptor mismatch has a stable contract category"),
+		TamperedLoadResult.ErrorCategory == TEXT("binding_property_contract_mismatch"));
+	TestFalse(TEXT("Rejected FName descriptor publishes no package"), TamperedPackage.IsValid());
+
+	const FString TamperedSizeDescriptorJson = DescriptorJson.Replace(
+		TEXT("\"size\": 4"),
+		TEXT("\"size\": 8"),
+		ESearchCase::CaseSensitive);
+	TestFalse(TEXT("FName declared size metadata was changed"), TamperedSizeDescriptorJson == DescriptorJson);
+	TSharedPtr<const FAvidScriptBindingPackage> TamperedSizePackage;
+	FAvidScriptBindingPackageLoadResult TamperedSizeLoadResult;
+	TestFalse(
+		TEXT("Runtime exact tuple gate rejects an FName size mismatch"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			TamperedSizeDescriptorJson,
+			TamperedSizePackage,
+			TamperedSizeLoadResult));
+	TestEqual(
+		TEXT("FName size mismatch reaches the runtime property contract gate"),
+		TamperedSizeLoadResult.ErrorCategory,
+		FString(TEXT("binding_property_contract_mismatch")));
+	TestFalse(TEXT("Rejected FName size descriptor publishes no package"), TamperedSizePackage.IsValid());
 	return true;
 }
 

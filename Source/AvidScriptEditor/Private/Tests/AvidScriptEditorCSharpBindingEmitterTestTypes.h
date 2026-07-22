@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "UObject/Object.h"
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
@@ -94,4 +95,19 @@ public:
 	{
 		return Value != nullptr;
 	}
+};
+
+UCLASS()
+class AAvidScriptBindingRuntimeProcessEventTestActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
+	{
+		++ProcessEventCallCount;
+		Super::ProcessEvent(Function, Parameters);
+	}
+
+	int32 ProcessEventCallCount = 0;
 };

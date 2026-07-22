@@ -172,7 +172,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(
 		TEXT("Custom report keeps the complete gameplay profile as its authorization ceiling"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("profile_import_count"))),
-		117);
+		342);
 	TestEqual(
 		TEXT("Custom authorization records the five reachable generated bindings"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("used_import_count"))),
