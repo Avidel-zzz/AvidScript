@@ -5,7 +5,7 @@
     "goal": "完成项目级 UE API Profile、缓存 Class Reference、可信 World Context 与 C# Spawn/Destroy/IsA 世界对象闭环，并建立 Native 对照性能基线",
     "start_commit": "4d9d5bdf794ae2666be433370a0b64f1b563a5f9"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase49/P49.0_World_Object_Performance_Architecture.md",
     "version": 1,
@@ -54,9 +54,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 0,
-    "automation": 0,
-    "full_gate": 0
+    "ubt": 1,
+    "automation": 2,
+    "full_gate": 1
   },
   "freeze": {
     "source_commit": "96eac9691ca85d2e6d6e8219ba96b84081248076",
@@ -66,13 +66,13 @@
     "at_utc": "2026-07-23T01:38:15.2351221+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScriptPhase49Gate-99978a8-r2\\Phase49_Gate.json",
+    "report_sha256": "0cf6655705a902a81035f5837edb1bc5529b9aae11d64d56ce32db4383b6907f",
+    "run_id": "phase49-99978a8-final",
+    "verified_commit": "99978a8f5390b0891ee5066b9dcd5476f64b3d47",
+    "verified_tree": "c4febe0bb36a0ca86842b27b7c059167db672d12",
+    "attestation_parent": "99978a8f5390b0891ee5066b9dcd5476f64b3d47",
+    "attested_at_utc": "2026-07-23T01:59:07.3077930+00:00"
   },
   "protected_dirty": [
     {
@@ -88,7 +88,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "attest -Phase 49 -GateReportPath <path>",
-  "revision": 9,
-  "updated_at_utc": "2026-07-23T01:38:15.2408303+00:00"
+  "next_action": "close -Phase 49",
+  "revision": 10,
+  "updated_at_utc": "2026-07-23T01:59:07.3102910+00:00"
 }

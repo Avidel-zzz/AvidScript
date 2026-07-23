@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "phase_id": 49,
+  "status": "passed",
+  "verified_commit": "99978a8f5390b0891ee5066b9dcd5476f64b3d47",
+  "verified_tree": "c4febe0bb36a0ca86842b27b7c059167db672d12",
+  "verified_state_sha256": "510d5a7777029ce4f8742f1080ef9bd377ef558be0329927ab3eab08a98c8670",
+  "gate_report_sha256": "0cf6655705a902a81035f5837edb1bc5529b9aae11d64d56ce32db4383b6907f",
+  "checks": {
+    "dotnet_tests": {
+      "passed": 150,
+      "total": 150
+    },
+    "dotnet_format": {
+      "passed": 5,
+      "total": 5
+    },
+    "powershell_contracts": {
+      "passed": 105,
+      "total": 105
+    },
+    "powershell_parser": {
+      "passed": 22,
+      "total": 22
+    },
+    "architecture": "passed",
+    "ubt": "passed",
+    "automation": {
+      "found": 232,
+      "completed": 232,
+      "succeeded": 232,
+      "failed": 0,
+      "not_run": 0,
+      "queue_empty": true,
+      "test_exit": true,
+      "request_exit_status": 0,
+      "process_exit_code": 0
+    },
+    "typed_performance_regression_limit_percent": 5.0,
+    "typed_performance": "passed",
+    "object_lifecycle_performance": "passed"
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 2,
+    "full_gate": 1
+  }
+}
