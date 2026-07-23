@@ -43,17 +43,21 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
-		const FString& Signature)
+		const FString& Signature) -> int32
 	{
-		return Intrinsics.CountByPredicate(
-			[&Module, &Name, &Signature](const TSharedPtr<FJsonValue>& Value)
+		int32 Count = 0;
+		for (const TSharedPtr<FJsonValue>& Value : Intrinsics)
+		{
+			const TSharedPtr<FJsonObject> Intrinsic = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (Intrinsic.IsValid()
+				&& Intrinsic->GetStringField(TEXT("import_module")) == Module
+				&& Intrinsic->GetStringField(TEXT("import_name")) == Name
+				&& Intrinsic->GetStringField(TEXT("abi_signature")) == Signature)
 			{
-				const TSharedPtr<FJsonObject> Intrinsic = Value.IsValid() ? Value->AsObject() : nullptr;
-				return Intrinsic.IsValid()
-					&& Intrinsic->GetStringField(TEXT("import_module")) == Module
-					&& Intrinsic->GetStringField(TEXT("import_name")) == Name
-					&& Intrinsic->GetStringField(TEXT("abi_signature")) == Signature;
-			});
+				++Count;
+			}
+		}
+		return Count;
 	};
 	const auto CountText = [&FirstJson](const FString& Token)
 	{

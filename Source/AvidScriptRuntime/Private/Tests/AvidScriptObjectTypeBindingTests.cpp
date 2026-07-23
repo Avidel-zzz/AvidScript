@@ -382,7 +382,7 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 		AddError(Result.Details);
 		return false;
 	}
-	TestEqual(TEXT("Component type match returns one"), Result.ReturnValue, static_cast<uint64>(1));
+	TestEqual(TEXT("Component type match returns one"), Result.ReturnValue, 1);
 
 	const FAvidScriptObjectHandle PlainObjectHandle = Registry.RegisterObject(
 		NewObject<UObject>(),
@@ -400,7 +400,7 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 		AddError(Result.Details);
 		return false;
 	}
-	TestEqual(TEXT("Plain UObject mismatch returns zero"), Result.ReturnValue, static_cast<uint64>(0));
+	TestEqual(TEXT("Plain UObject mismatch returns zero"), Result.ReturnValue, 0);
 
 	FAvidScriptObjectRegistry CrossRegistry;
 	FAvidScriptObjectHandleResult CrossRegistryRegisterResult;
