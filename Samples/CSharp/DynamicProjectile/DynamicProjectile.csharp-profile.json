@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/DynamicProjectile/DynamicProjectileScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_dynamic_projectile",
+  "artifact_stem": "profile_dynamic_projectile",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_dynamic_projectile",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_dynamic_projectile/profile_dynamic_projectile.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_dynamic_projectile/profile_dynamic_projectile.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.dynamic_projectile",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "K2_GetActorLocation",
+          "SetActorScale3D"
+        ]
+      }
+    ],
+    "class_references": [
+      {
+        "script_name": "TwinStickProjectile",
+        "class_path": "/Game/Variant_TwinStick/Blueprints/BP_TwinStickProjectile.BP_TwinStickProjectile_C",
+        "base_class_path": "/Script/AvidTPSTemplate.TwinStickProjectile",
+        "load_policy": "EditorLoad"
+      }
+    ]
+  }
+}

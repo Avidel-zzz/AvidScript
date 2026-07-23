@@ -666,6 +666,57 @@ foreach ($RequiredLifecycleFacadeContract in @(
         Add-Violation "C# object lifecycle facade pipeline is missing $RequiredLifecycleFacadeContract"
     }
 }
+$DynamicProjectileSource = Read-RequiredFile 'Samples/CSharp/DynamicProjectile/DynamicProjectileScript.cs'
+$DynamicProjectileProfile = Read-RequiredFile 'Samples/CSharp/DynamicProjectile/DynamicProjectile.csharp-profile.json'
+$DynamicProjectileReloadFixture = Read-RequiredFile 'Tests/Fixtures/CSharp/P49_4_DynamicProjectileRejectedReload.cs'
+$DynamicProjectileIntegrationTest = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorDynamicProjectileIntegrationTests.cpp'
+foreach ($RequiredDynamicProjectileSourceContract in @(
+    '[AvidStateContract(AvidStateMode.Explicit)]',
+    '[AvidTransient]',
+    'UE.SetTimer(SpawnDelaySeconds, SpawnTimerId)',
+    'UE.SpawnActor(',
+    'ProjectClasses.TwinStickProjectile',
+    'Projectile.GetActorLocation()',
+    'Projectile.SetActorScale3D(',
+    'UE.DestroyActor(Projectile)'
+)) {
+    if (-not $DynamicProjectileSource.Contains($RequiredDynamicProjectileSourceContract)) {
+        Add-Violation "dynamic projectile C# gameplay loop is missing $RequiredDynamicProjectileSourceContract"
+    }
+}
+foreach ($RequiredDynamicProjectileProfileContract in @(
+    '"schema_version": 2',
+    '"package_name": "avidscript.sample.dynamic_projectile"',
+    '"class_path": "/Script/Engine.Actor"',
+    '"K2_GetActorLocation"',
+    '"SetActorScale3D"',
+    '"script_name": "TwinStickProjectile"',
+    '"class_path": "/Game/Variant_TwinStick/Blueprints/BP_TwinStickProjectile.BP_TwinStickProjectile_C"',
+    '"base_class_path": "/Script/AvidTPSTemplate.TwinStickProjectile"'
+)) {
+    if (-not $DynamicProjectileProfile.Contains($RequiredDynamicProjectileProfileContract)) {
+        Add-Violation "dynamic projectile project profile is missing $RequiredDynamicProjectileProfileContract"
+    }
+}
+if (-not $DynamicProjectileReloadFixture.Contains('UE.SpawnActor(') -or
+    -not $DynamicProjectileReloadFixture.Contains('avid_on_begin_play')) {
+    Add-Violation 'dynamic projectile rejected reload fixture must attempt SpawnActor from candidate BeginPlay'
+}
+foreach ($RequiredDynamicProjectileIntegrationContract in @(
+    'AvidScript.Editor.DynamicProjectile.GameplayLoop',
+    'FAvidScriptEditorCSharpProfileService::LoadProfile',
+    'FAvidScriptEditorCSharpBuildService::BuildProfile',
+    'FAvidScriptWasmReloadManifestLoader::LoadFromFile',
+    'Session.LoadInitialModule(',
+    'Session.ReloadModule(',
+    'binding_reload_effect_unsupported',
+    'Session.TickLive(',
+    'generation_mismatch'
+)) {
+    if (-not $DynamicProjectileIntegrationTest.Contains($RequiredDynamicProjectileIntegrationContract)) {
+        Add-Violation "dynamic projectile integration evidence is missing $RequiredDynamicProjectileIntegrationContract"
+    }
+}
 if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")') -or
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
