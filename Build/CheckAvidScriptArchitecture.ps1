@@ -401,6 +401,7 @@ $ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Pub
 $ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$ObjectTypeBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectTypeBinding.cpp'
 $ObjectRegistryHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'
 $ObjectRegistrySource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'
 $RuntimeComponentSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptComponent.cpp'
@@ -469,6 +470,7 @@ $ProjectBindingProfileSource = Read-RequiredFile 'Source/AvidScriptEditor/Privat
 $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildInvoker.cpp'
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
+$CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -820,6 +822,114 @@ if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
     $BindingInvocationSource.Contains('RootComponent') -or
     $CSharpBindingRendererSource.Contains('RootComponent')) {
     Add-Violation 'property runtime and renderer must stay data-driven without per-property API switches'
+}
+
+# Phase 50 typed-project API contracts. These tokens intentionally come from the
+# production paths rather than the test fixture, so a project-specific shortcut
+# cannot satisfy the gate.
+foreach ($RequiredTypedObjectCapability in @(
+    'EAvidScriptBindingInvocationKind::ObjectTypeIsA',
+    'avid_object_type_is_a',
+    'TEXT("avidscript")',
+    'TEXT("(iii)i")'
+)) {
+    if (-not $ObjectTypeBindingSource.Contains($RequiredTypedObjectCapability)) {
+        Add-Violation "typed object capability specification is missing $RequiredTypedObjectCapability"
+    }
+}
+foreach ($RequiredPackedOwnerCapability in @(
+    'avid_owner_get_handle',
+    '"()I"',
+    'ModuleName == TEXT("avidscript")'
+)) {
+    if (-not $VmHostBindingsSource.Contains($RequiredPackedOwnerCapability)) {
+        Add-Violation "packed typed owner capability is missing $RequiredPackedOwnerCapability"
+    }
+}
+foreach ($RequiredTypedDescriptorField in @('ObjectTypeOrdinal', 'SelfTypeId', 'ResultTypeId')) {
+    if (-not $BindingDescriptorHeader.Contains($RequiredTypedDescriptorField)) {
+        Add-Violation "binding descriptor v6 model is missing $RequiredTypedDescriptorField"
+    }
+}
+foreach ($RequiredObjectPlanContract in @(
+    'Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal]',
+    'Model.SelfTypeId',
+    'Reference.ResultTypeId',
+    'Package->Impl->ExpectedSelfClass'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredObjectPlanContract)) {
+        Add-Violation "typed object package activation is missing $RequiredObjectPlanContract"
+    }
+}
+foreach ($RequiredDescriptorSelectionIdentity in @(
+    'descriptor_selection_v6',
+    'self_type_id',
+    'object_type_ordinal',
+    'object_class_path',
+    'object_base_type_id',
+    'result_type_id'
+)) {
+    if (-not $BindingDescriptorSource.Contains($RequiredDescriptorSelectionIdentity)) {
+        Add-Violation "descriptor v6 selection identity is missing $RequiredDescriptorSelectionIdentity"
+    }
+}
+foreach ($RequiredDescriptorPackageIdentity in @(
+    'descriptor_package_v6',
+    'TEXT("self_type_id")',
+    'TEXT("object_type_ordinal")',
+    'TEXT("object_class_path")',
+    'TEXT("object_base_type_id")',
+    'TEXT("result_type_id")'
+)) {
+    if (-not $BindingDescriptorSource.Contains($RequiredDescriptorPackageIdentity)) {
+        Add-Violation "descriptor v6 package identity is missing $RequiredDescriptorPackageIdentity"
+    }
+}
+if (-not $CSharpOperationLowererSource.Contains('operation.Conversion.IsUserDefined') -or
+    -not $CSharpOperationLowererSource.Contains('operation.Conversion.MethodSymbolId')) {
+    Add-Violation 'C# lowering must preserve SemanticConversion.IsUserDefined as a callable conversion'
+}
+
+# The generated facade must remain generic. Test/project class names and a
+# bespoke typed import would turn descriptor-driven coverage back into wrappers.
+if ($CSharpBindingRendererSource -match 'AAvidScriptTypedTest(?:Actor|Projectile)|TypedProjectApi' -or
+    $VmHostBindingsSource -match '(?i)avid_(?:typed|project|custom)_[a-z0-9_]+') {
+    Add-Violation 'typed project API must not add a project-specific facade wrapper or custom-class host import'
+}
+foreach ($RequiredStaticCheckedCastContract in @(
+    'public static %s TryCast(%s value)',
+    'AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, %d)',
+    'internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredStaticCheckedCastContract)) {
+        Add-Violation "typed facade is missing static Derived.TryCast(Base) contract $RequiredStaticCheckedCastContract"
+    }
+}
+if ($CSharpBindingRendererSource.Contains('public %s TryCast()')) {
+    Add-Violation 'typed facade must not regress to the obsolete inverse instance TryCast shape'
+}
+
+$ObjectTypeDispatchMatch = [regex]::Match(
+    $BindingInvocationSource,
+    'bool\s+DispatchAvidScriptObjectType\([\s\S]*?\r?\n\}\s*// namespace\r?\n\r?\nstruct\s+FAvidScriptBindingPackage::FImpl')
+if (-not $ObjectTypeDispatchMatch.Success) {
+    Add-Violation 'checked object-type dispatch implementation is missing'
+}
+else {
+    $ObjectTypeDispatchSource = $ObjectTypeDispatchMatch.Value
+    foreach ($ForbiddenCheckedCastLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
+        if ($ObjectTypeDispatchSource.Contains($ForbiddenCheckedCastLookup)) {
+            Add-Violation "checked object-type dispatch must use the immutable ordinal plan instead of $ForbiddenCheckedCastLookup"
+        }
+    }
+    if ($ObjectTypeDispatchSource -match '\bAActor\b' -or
+        -not $ObjectTypeDispatchSource.Contains('UObject* Object') -or
+        -not $ObjectTypeDispatchSource.Contains('Object->IsA(CachedClass)')) {
+        Add-Violation 'checked object-type dispatch must remain generic UObject dispatch rather than Actor-only dispatch'
+    }
+}
+if ($WasmRuntimeSource -match '\b(FindObject|LoadObject|StaticLoadObject)\s*(?:<|\()') {
+    Add-Violation 'Runtime must not perform path lookup for typed checked casts; Binding package activation owns class resolution'
 }
 $CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'
 $CSharpWorkspaceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpWorkspace/AvidScriptEditorCSharpWorkspaceService.cpp'
