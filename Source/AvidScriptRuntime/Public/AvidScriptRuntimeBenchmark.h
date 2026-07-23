@@ -146,6 +146,8 @@ struct FAvidScriptTypedObjectBenchmarkResult
 	uint64 BindingObjectTypeResultChecksum = 0;
 	uint64 WasmCheckedCastResultChecksum = 0;
 	uint64 TypedUpcastResultChecksum = 0;
+	uint64 NativeTargetSelectorChecksum = 0;
+	uint64 BindingTargetSelectorChecksum = 0;
 	int32 BindingPackageClassLoadsDuringLoad = 0;
 	int32 BindingPackageReflectedNameLookupsDuringLoad = 0;
 	int32 BindingPackageClassLoadsDuringWarmLoop = 0;

@@ -117,6 +117,10 @@ bool FAvidScriptTypedObjectBenchmarkSmokeTest::RunTest(const FString& Parameters
 		Result.WasmCheckedCastResultChecksum,
 		Result.NativeIsAResultChecksum);
 	TestTrue(TEXT("Typed upcast copied handle checksum is observable"), Result.TypedUpcastResultChecksum != 0);
+	TestTrue(TEXT("Native target selector sequence is observable"), Result.NativeTargetSelectorChecksum != 0);
+	TestEqual(TEXT("Binding uses the same target selector sequence as Native"),
+		Result.BindingTargetSelectorChecksum,
+		Result.NativeTargetSelectorChecksum);
 	TestTrue(TEXT("Package load resolves the immutable object type graph"), Result.BindingPackageClassLoadsDuringLoad >= 3);
 	TestTrue(TEXT("Package load may resolve the static schema sentinel once"), Result.BindingPackageReflectedNameLookupsDuringLoad >= 1);
 	TestTrue(TEXT("Native IsA P95 is ordered"), Result.NativeIsA.P95Ms >= Result.NativeIsA.P50Ms);
@@ -131,6 +135,7 @@ bool FAvidScriptTypedObjectBenchmarkSmokeTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("Summary exposes WAMR crossing count"), Result.Summary.Contains(TEXT("wasm_host_crossings")));
 	TestTrue(TEXT("Summary exposes observed typed upcast imports"), Result.Summary.Contains(TEXT("typed_upcast_host_imports")));
 	TestTrue(TEXT("Summary exposes observable checksums"), Result.Summary.Contains(TEXT("native_checksum")));
+	TestTrue(TEXT("Summary exposes selector sequence checksums"), Result.Summary.Contains(TEXT("native_selector_checksum")));
 	TestTrue(TEXT("Summary exposes warm lookup budget"), Result.Summary.Contains(TEXT("warm_reflected_name_lookups")));
 	return true;
 }

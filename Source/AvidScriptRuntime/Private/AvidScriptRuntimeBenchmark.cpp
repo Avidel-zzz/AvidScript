@@ -38,11 +38,30 @@ struct FAvidScriptTypedObjectWasmObservation
 
 volatile uint64 GAvidScriptTypedObjectBenchmarkSink = 0;
 
-FORCENOINLINE uint32 SelectOpaqueTypedObjectBenchmarkTarget(const uint64 OperationTag)
+FORCENOINLINE uint64 CreateOpaqueTypedObjectBenchmarkRoundSeed(const uint64 RoundTag)
 {
 	const uint64 Previous = GAvidScriptTypedObjectBenchmarkSink;
-	GAvidScriptTypedObjectBenchmarkSink = Previous ^ (OperationTag + 0x517cc1b727220a95ull);
-	return static_cast<uint32>((Previous + OperationTag) & 1u);
+	const uint64 Seed = (Previous ^ (RoundTag + 0x517cc1b727220a95ull)) * 0x9e3779b97f4a7c15ull;
+	GAvidScriptTypedObjectBenchmarkSink = Seed;
+	return Seed;
+}
+
+uint32 SelectTypedObjectBenchmarkTarget(const uint64 RoundSeed, const uint64 OperationTag)
+{
+	uint64 Mixed = RoundSeed ^ (OperationTag + 0x9e3779b97f4a7c15ull);
+	Mixed ^= Mixed >> 30;
+	Mixed *= 0xbf58476d1ce4e5b9ull;
+	Mixed ^= Mixed >> 27;
+	return static_cast<uint32>(Mixed & 1u);
+}
+
+uint64 AccumulateTypedObjectBenchmarkSelector(
+	const uint32 Selector,
+	const uint64 Accumulator,
+	const uint64 OperationTag)
+{
+	return (Accumulator ^ (static_cast<uint64>(Selector) + OperationTag + 0x94d049bb133111ebull))
+		* 0x100000001b3ull;
 }
 
 FORCENOINLINE uint64 ConsumeTypedObjectBenchmarkValue(
@@ -1336,6 +1355,7 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 	FAvidScriptTypedObjectBenchmarkResult& OutResult)
 {
 	OutResult = FAvidScriptTypedObjectBenchmarkResult();
+	GAvidScriptTypedObjectBenchmarkSink = 0;
 	OutResult.WarmupCount = FMath::Max(Options.WarmupCount, 0);
 	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
 	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
@@ -1473,22 +1493,34 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 	uint64 BindingResultChecksum = 0;
 	uint64 WasmResultChecksum = 0;
 	uint64 UpcastResultChecksum = 0;
+	uint64 NativeSelectorChecksum = 0;
+	uint64 BindingSelectorChecksum = 0;
 	int32 ActiveRunIndex = 0;
 	const int32 InitialWasmHostCrossingCount = LoadSmokeResult.HostImportCallCount;
 	int32 ObservedWasmHostCrossingCount = InitialWasmHostCrossingCount;
 	int32 TimedWasmHostCrossingStart = INDEX_NONE;
 	FString WasmObservationError;
 
-	auto MeasureNativeIsA = [&]()
+	auto MeasureNativeIsA = [&](const uint64 RoundSeed)
 	{
-		const double StartSeconds = FPlatformTime::Seconds();
+		double ElapsedCoreMs = 0.0;
 		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
 		{
 			const uint64 OperationTag = static_cast<uint64>(ActiveRunIndex)
 				* static_cast<uint64>(OutResult.IterationsPerSample)
 				+ static_cast<uint64>(IterationIndex + 1);
-			const uint32 Selector = SelectOpaqueTypedObjectBenchmarkTarget(OperationTag);
-			const bool bMatches = Component->IsA(EquivalentNativeTargets[Selector]);
+			const uint32 Selector = SelectTypedObjectBenchmarkTarget(RoundSeed, OperationTag);
+			const UClass* TargetClass = EquivalentNativeTargets[Selector];
+
+			const double StartSeconds = FPlatformTime::Seconds();
+			const bool bMatches = Component->IsA(TargetClass);
+			const double EndSeconds = FPlatformTime::Seconds();
+
+			ElapsedCoreMs += (EndSeconds - StartSeconds) * 1000.0;
+			NativeSelectorChecksum = AccumulateTypedObjectBenchmarkSelector(
+				Selector,
+				NativeSelectorChecksum,
+				OperationTag);
 			NativeResultChecksum = ConsumeTypedObjectBenchmarkValue(
 				bMatches ? 1u : 0u,
 				NativeResultChecksum,
@@ -1498,50 +1530,65 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 				return -1.0;
 			}
 		}
-		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+		return ElapsedCoreMs / static_cast<double>(OutResult.IterationsPerSample);
 	};
-	auto MeasureBindingObjectTypeIsA = [&]()
+	auto MeasureBindingObjectTypeIsA = [&](const uint64 RoundSeed)
 	{
-		const double StartSeconds = FPlatformTime::Seconds();
+		double ElapsedCoreMs = 0.0;
 		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
 		{
 			const uint64 OperationTag = static_cast<uint64>(ActiveRunIndex)
 				* static_cast<uint64>(OutResult.IterationsPerSample)
 				+ static_cast<uint64>(IterationIndex + 1);
-			const uint32 Selector = SelectOpaqueTypedObjectBenchmarkTarget(OperationTag);
+			const uint32 Selector = SelectTypedObjectBenchmarkTarget(RoundSeed, OperationTag);
 			const uint64 ObjectTypeArguments[] = {
 				ComponentHandle.Slot,
 				ComponentHandle.Generation,
 				EquivalentBindingTargetOrdinals[Selector]
 			};
 			FAvidScriptDynamicHostCallResult CallResult;
-			if (!DispatchTypedObjectBenchmarkCall(
-					*Package,
-					ObjectTypeOrdinal,
-					ObjectTypeArguments,
-					Context,
-					CallResult)
-				|| CallResult.ReturnValue != 1)
+
+			const double StartSeconds = FPlatformTime::Seconds();
+			const bool bDispatchSucceeded = DispatchTypedObjectBenchmarkCall(
+				*Package,
+				ObjectTypeOrdinal,
+				ObjectTypeArguments,
+				Context,
+				CallResult);
+			const double EndSeconds = FPlatformTime::Seconds();
+
+			ElapsedCoreMs += (EndSeconds - StartSeconds) * 1000.0;
+			if (!bDispatchSucceeded || CallResult.ReturnValue != 1)
 			{
 				return -1.0;
 			}
+			BindingSelectorChecksum = AccumulateTypedObjectBenchmarkSelector(
+				Selector,
+				BindingSelectorChecksum,
+				OperationTag);
 			BindingResultChecksum = ConsumeTypedObjectBenchmarkValue(
 				CallResult.ReturnValue,
 				BindingResultChecksum,
 				OperationTag);
 		}
-		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+		return ElapsedCoreMs / static_cast<double>(OutResult.IterationsPerSample);
 	};
 	auto MeasureWasmCheckedCast = [&]()
 	{
-		double ElapsedTickMs = 0.0;
+		double ElapsedCoreMs = 0.0;
 		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
 		{
+			const uint64 OperationTag = static_cast<uint64>(ActiveRunIndex)
+				* static_cast<uint64>(OutResult.IterationsPerSample)
+				+ static_cast<uint64>(IterationIndex + 1);
 			FAvidScriptWasmSmokeResult TickSmokeResult;
 			const int32 HostCrossingsBeforeTick = ObservedWasmHostCrossingCount;
-			const double TickStartSeconds = FPlatformTime::Seconds();
+
+			const double StartSeconds = FPlatformTime::Seconds();
 			const bool bTickSucceeded = Runtime.Tick(1.0f / 60.0f, TickSmokeResult);
-			ElapsedTickMs += (FPlatformTime::Seconds() - TickStartSeconds) * 1000.0;
+			const double EndSeconds = FPlatformTime::Seconds();
+
+			ElapsedCoreMs += (EndSeconds - StartSeconds) * 1000.0;
 			ObservedWasmHostCrossingCount = TickSmokeResult.HostImportCallCount;
 			if (!bTickSucceeded
 				|| ObservedWasmHostCrossingCount - HostCrossingsBeforeTick != 1)
@@ -1569,9 +1616,6 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 				return -1.0;
 			}
 			OutResult.LastWasmCheckedCastResult = static_cast<int32>(Observation.Match);
-			const uint64 OperationTag = static_cast<uint64>(ActiveRunIndex)
-				* static_cast<uint64>(OutResult.IterationsPerSample)
-				+ static_cast<uint64>(IterationIndex + 1);
 			WasmResultChecksum = ConsumeTypedObjectBenchmarkValue(
 				Observation.Match,
 				WasmResultChecksum,
@@ -1581,7 +1625,7 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 				UpcastResultChecksum,
 				OperationTag);
 		}
-		return ElapsedTickMs / static_cast<double>(OutResult.IterationsPerSample);
+		return ElapsedCoreMs / static_cast<double>(OutResult.IterationsPerSample);
 	};
 	auto MeasureExistingTypedBinding = [&]()
 	{
@@ -1611,6 +1655,7 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 			TimedWasmHostCrossingStart = ObservedWasmHostCrossingCount;
 		}
 		ActiveRunIndex = RunIndex;
+		const uint64 RoundSeed = CreateOpaqueTypedObjectBenchmarkRoundSeed(static_cast<uint64>(RunIndex + 1));
 		const bool bReverseOrder = (RunIndex & 1) != 0;
 		double NativeMs = 0.0;
 		double BindingMs = 0.0;
@@ -1620,13 +1665,13 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 		{
 			WasmMs = MeasureWasmCheckedCast();
 			ExistingTypedBindingMs = MeasureExistingTypedBinding();
-			BindingMs = MeasureBindingObjectTypeIsA();
-			NativeMs = MeasureNativeIsA();
+			BindingMs = MeasureBindingObjectTypeIsA(RoundSeed);
+			NativeMs = MeasureNativeIsA(RoundSeed);
 		}
 		else
 		{
-			NativeMs = MeasureNativeIsA();
-			BindingMs = MeasureBindingObjectTypeIsA();
+			NativeMs = MeasureNativeIsA(RoundSeed);
+			BindingMs = MeasureBindingObjectTypeIsA(RoundSeed);
 			ExistingTypedBindingMs = MeasureExistingTypedBinding();
 			WasmMs = MeasureWasmCheckedCast();
 		}
@@ -1687,6 +1732,8 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 	OutResult.BindingObjectTypeResultChecksum = BindingResultChecksum;
 	OutResult.WasmCheckedCastResultChecksum = WasmResultChecksum;
 	OutResult.TypedUpcastResultChecksum = UpcastResultChecksum;
+	OutResult.NativeTargetSelectorChecksum = NativeSelectorChecksum;
+	OutResult.BindingTargetSelectorChecksum = BindingSelectorChecksum;
 	if (TimedWasmHostCrossingStart == INDEX_NONE
 		|| OutResult.WasmCheckedCastHostCrossingCount != OutResult.WasmCheckedCastOperationCount
 		|| TotalObservedWasmHostCrossings != TotalWasmOperationCount
@@ -1708,23 +1755,27 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 		|| NativeResultChecksum == 0
 		|| NativeResultChecksum != BindingResultChecksum
 		|| NativeResultChecksum != WasmResultChecksum
-		|| UpcastResultChecksum == 0)
+		|| UpcastResultChecksum == 0
+		|| NativeSelectorChecksum == 0
+		|| NativeSelectorChecksum != BindingSelectorChecksum)
 	{
 		SetTypedObjectBenchmarkFailure(
 			OutResult,
 			TEXT("observable_result_mismatch"),
 			FString::Printf(
-				TEXT("wasm_match=%d | native_checksum=%llu | binding_checksum=%llu | wasm_checksum=%llu | upcast_checksum=%llu"),
+				TEXT("wasm_match=%d | native_checksum=%llu | binding_checksum=%llu | wasm_checksum=%llu | upcast_checksum=%llu | native_selector_checksum=%llu | binding_selector_checksum=%llu"),
 				OutResult.LastWasmCheckedCastResult,
 				NativeResultChecksum,
 				BindingResultChecksum,
 				WasmResultChecksum,
-				UpcastResultChecksum));
+				UpcastResultChecksum,
+				NativeSelectorChecksum,
+				BindingSelectorChecksum));
 		return false;
 	}
 	OutResult.bSucceeded = true;
 	OutResult.Summary = FString::Printf(
-		TEXT("typed_object_benchmark | warmup=%d | samples=%d | iterations=%d | native_is_a_p50_ms=%.6f | native_is_a_p95_ms=%.6f | binding_object_type_is_a_p50_ms=%.6f | binding_object_type_is_a_p95_ms=%.6f | wasm_checked_cast_p50_ms=%.6f | wasm_checked_cast_p95_ms=%.6f | existing_typed_binding_p50_ms=%.6f | native_operations=%d | binding_operations=%d | wasm_operations=%d | typed_upcast_operations=%d | wasm_host_crossings=%d | typed_upcast_host_imports=%d | last_wasm_match=%d | native_checksum=%llu | binding_checksum=%llu | wasm_checksum=%llu | upcast_checksum=%llu | warm_class_loads=%d | warm_reflected_name_lookups=%d | upcast_imports_per_iteration=%d | existing_typed_binding_budget=%s"),
+		TEXT("typed_object_benchmark | warmup=%d | samples=%d | iterations=%d | native_is_a_p50_ms=%.6f | native_is_a_p95_ms=%.6f | binding_object_type_is_a_p50_ms=%.6f | binding_object_type_is_a_p95_ms=%.6f | wasm_checked_cast_p50_ms=%.6f | wasm_checked_cast_p95_ms=%.6f | existing_typed_binding_p50_ms=%.6f | native_operations=%d | binding_operations=%d | wasm_operations=%d | typed_upcast_operations=%d | wasm_host_crossings=%d | typed_upcast_host_imports=%d | last_wasm_match=%d | native_checksum=%llu | binding_checksum=%llu | wasm_checksum=%llu | upcast_checksum=%llu | native_selector_checksum=%llu | binding_selector_checksum=%llu | warm_class_loads=%d | warm_reflected_name_lookups=%d | upcast_imports_per_iteration=%d | existing_typed_binding_budget=%s"),
 		OutResult.WarmupCount,
 		OutResult.SampleCount,
 		OutResult.IterationsPerSample,
@@ -1746,6 +1797,8 @@ bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
 		OutResult.BindingObjectTypeResultChecksum,
 		OutResult.WasmCheckedCastResultChecksum,
 		OutResult.TypedUpcastResultChecksum,
+		OutResult.NativeTargetSelectorChecksum,
+		OutResult.BindingTargetSelectorChecksum,
 		OutResult.BindingPackageClassLoadsDuringWarmLoop,
 		OutResult.BindingPackageReflectedNameLookupsDuringWarmLoop,
 		OutResult.UpcastHostImportsPerIteration,
