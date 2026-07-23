@@ -872,12 +872,11 @@ bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FStri
 		ParseDescriptor(SourceJson, Clone);
 		return Clone;
 	};
-	const auto ParserRejectsMutation = [this, &CloneRoot](
+	const auto ParserRejectsRoot = [this](
 		const TCHAR* Label,
-		const TFunctionRef<void(TSharedPtr<FJsonObject>&)>& Mutate)
+		const TSharedPtr<FJsonObject>& MutatedRoot,
+		const TCHAR* ExpectedSource)
 	{
-		TSharedPtr<FJsonObject> MutatedRoot = CloneRoot();
-		Mutate(MutatedRoot);
 		FString MutatedJson;
 		FAvidScriptBindingPackageModel MutatedPackage;
 		FString Category;
@@ -890,22 +889,65 @@ bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FStri
 					MutatedPackage,
 					Category,
 					Source));
-		TestEqual(TEXT("Invalid v6 graph reports descriptor contract failure"), Category, FString(TEXT("descriptor_contract_invalid")));
+		TestEqual(
+			*FString::Printf(TEXT("%s uses the stable error category"), Label),
+			Category,
+			FString(TEXT("descriptor_contract_invalid")));
+		if (ExpectedSource != nullptr)
+		{
+			TestEqual(
+				*FString::Printf(TEXT("%s reaches the intended inner guard"), Label),
+				Source,
+				FString(ExpectedSource));
+		}
+	};
+	const auto ParserRejectsMutation = [&CloneRoot, &ParserRejectsRoot](
+		const TCHAR* Label,
+		const TCHAR* ExpectedSource,
+		const TFunctionRef<void(TSharedPtr<FJsonObject>&)>& Mutate)
+	{
+		TSharedPtr<FJsonObject> MutatedRoot = CloneRoot();
+		Mutate(MutatedRoot);
+		ParserRejectsRoot(Label, MutatedRoot, ExpectedSource);
 	};
 
-	ParserRejectsMutation(TEXT("Object type ordinal holes fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
-	{
-		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+	ParserRejectsMutation(
+		TEXT("Object type ordinal holes fail closed"),
+		TEXT("types.object_type_ordinal"),
+		[this](TSharedPtr<FJsonObject>& MutatedRoot)
 		{
-			const TSharedPtr<FJsonObject> Type = Value->AsObject();
-			if (Type->GetIntegerField(TEXT("object_type_ordinal")) == 0)
+			int32 GraphTypeCount = 0;
+			int32 MaximumOrdinal = INDEX_NONE;
+			TSharedPtr<FJsonObject> MaximumOrdinalType;
+			for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
 			{
-				Type->SetNumberField(TEXT("object_type_ordinal"), 1);
-				break;
+				const TSharedPtr<FJsonObject> Type = Value->AsObject();
+				const int32 Ordinal = Type->GetIntegerField(TEXT("object_type_ordinal"));
+				if (Ordinal != INDEX_NONE)
+				{
+					++GraphTypeCount;
+					if (Ordinal > MaximumOrdinal)
+					{
+						MaximumOrdinal = Ordinal;
+						MaximumOrdinalType = Type;
+					}
+				}
 			}
-		}
-	});
-	ParserRejectsMutation(TEXT("Missing object type IDs fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+			TestEqual(
+				TEXT("Generated graph starts with a dense maximum ordinal"),
+				MaximumOrdinal,
+				GraphTypeCount - 1);
+			if (TestNotNull(TEXT("Ordinal-hole fixture finds the maximum node"), MaximumOrdinalType.Get()))
+			{
+				MaximumOrdinalType->SetNumberField(
+					TEXT("object_type_ordinal"),
+					MaximumOrdinal + 1);
+			}
+		});
+	ParserRejectsMutation(
+		TEXT("Missing object type IDs fail closed"),
+		nullptr,
+		[](TSharedPtr<FJsonObject>& MutatedRoot)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
 		{
@@ -917,26 +959,62 @@ bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FStri
 			}
 		}
 	});
-	ParserRejectsMutation(TEXT("Object type graph cycles fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
-	{
-		FString ActorTypeId;
-		TSharedPtr<FJsonObject> ObjectType;
-		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+	ParserRejectsMutation(
+		TEXT("Object type graph cycles fail closed"),
+		TEXT("types.base_type_id"),
+		[this](TSharedPtr<FJsonObject>& MutatedRoot)
 		{
-			const TSharedPtr<FJsonObject> Type = Value->AsObject();
-			const FString ClassPath = Type->GetStringField(TEXT("class_path"));
-			if (ClassPath == TEXT("/Script/Engine.Actor"))
+			TSharedPtr<FJsonObject> ActorType;
+			TSharedPtr<FJsonObject> StaticMeshActorType;
+			TSharedPtr<FJsonObject> ObjectType;
+			int32 RootCount = 0;
+			for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
 			{
-				ActorTypeId = Type->GetStringField(TEXT("stable_id"));
+				const TSharedPtr<FJsonObject> Type = Value->AsObject();
+				if (Type->GetIntegerField(TEXT("object_type_ordinal")) == INDEX_NONE)
+				{
+					continue;
+				}
+				if (Type->GetStringField(TEXT("base_type_id")).IsEmpty())
+				{
+					++RootCount;
+				}
+				const FString ClassPath = Type->GetStringField(TEXT("class_path"));
+				if (ClassPath == TEXT("/Script/Engine.Actor"))
+				{
+					ActorType = Type;
+				}
+				else if (ClassPath == TEXT("/Script/Engine.StaticMeshActor"))
+				{
+					StaticMeshActorType = Type;
+				}
+				else if (ClassPath == TEXT("/Script/CoreUObject.Object"))
+				{
+					ObjectType = Type;
+				}
 			}
-			else if (ClassPath == TEXT("/Script/CoreUObject.Object"))
+			TestEqual(TEXT("Cycle fixture keeps exactly one graph root"), RootCount, 1);
+			if (!TestNotNull(TEXT("Cycle fixture keeps the UObject root"), ObjectType.Get())
+				|| !TestNotNull(TEXT("Cycle fixture finds Actor"), ActorType.Get())
+				|| !TestNotNull(TEXT("Cycle fixture finds StaticMeshActor"), StaticMeshActorType.Get()))
 			{
-				ObjectType = Type;
+				return;
 			}
-		}
-		ObjectType->SetStringField(TEXT("base_type_id"), ActorTypeId);
-	});
-	ParserRejectsMutation(TEXT("Canonical object class path mismatches fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+			TestTrue(
+				TEXT("Cycle fixture leaves UObject as the empty-base root"),
+				ObjectType->GetStringField(TEXT("base_type_id")).IsEmpty());
+			TestEqual(
+				TEXT("Cycle fixture starts with StaticMeshActor pointing to Actor"),
+				StaticMeshActorType->GetStringField(TEXT("base_type_id")),
+				ActorType->GetStringField(TEXT("stable_id")));
+			ActorType->SetStringField(
+				TEXT("base_type_id"),
+				StaticMeshActorType->GetStringField(TEXT("stable_id")));
+		});
+	ParserRejectsMutation(
+		TEXT("Canonical object class path mismatches fail closed"),
+		nullptr,
+		[](TSharedPtr<FJsonObject>& MutatedRoot)
 	{
 		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
 		{
@@ -948,7 +1026,10 @@ bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FStri
 			}
 		}
 	});
-	ParserRejectsMutation(TEXT("Class-reference result type mismatches fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	ParserRejectsMutation(
+		TEXT("Class-reference result type mismatches fail closed"),
+		TEXT("class_references.result_type_id"),
+		[](TSharedPtr<FJsonObject>& MutatedRoot)
 	{
 		FString SceneComponentTypeId;
 		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
@@ -964,10 +1045,55 @@ bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FStri
 			TEXT("result_type_id"),
 			SceneComponentTypeId);
 	});
-	ParserRejectsMutation(TEXT("Actor instance packages require Self identity"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	ParserRejectsMutation(
+		TEXT("Mixed Actor packages require Self identity"),
+		TEXT("self_type_id"),
+		[](TSharedPtr<FJsonObject>& MutatedRoot)
 	{
 		MutatedRoot->SetStringField(TEXT("self_type_id"), TEXT(""));
 	});
+
+	FString InstanceOnlyJson;
+	FAvidScriptBindingSelectionResolveResult InstanceOnlySelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult InstanceOnlyGenerateResult;
+	const TArray<FAvidScriptProjectBindingClassSpec> NoClassReferences;
+	if (TestTrue(
+		TEXT("Instance-only descriptor generates without class references"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			NoClassReferences,
+			InstanceOnlyJson,
+			InstanceOnlySelectionResult,
+			InstanceOnlyGenerateResult)))
+	{
+		TSharedPtr<FJsonObject> InstanceOnlyRoot;
+		if (TestTrue(
+				TEXT("Instance-only descriptor is valid JSON"),
+				ParseDescriptor(InstanceOnlyJson, InstanceOnlyRoot)))
+		{
+			const TArray<TSharedPtr<FJsonValue>>& InstanceReferences =
+				InstanceOnlyRoot->GetArrayField(TEXT("class_references"));
+			const TArray<TSharedPtr<FJsonValue>>& InstanceBindings =
+				InstanceOnlyRoot->GetArrayField(TEXT("bindings"));
+			bool bAllBindingsUseInstanceReceivers = !InstanceBindings.IsEmpty();
+			for (const TSharedPtr<FJsonValue>& Value : InstanceBindings)
+			{
+				bAllBindingsUseInstanceReceivers &=
+					!Value->AsObject()->GetBoolField(TEXT("is_static"));
+			}
+			TestTrue(
+				TEXT("Instance-only fixture contains no class-reference Self trigger"),
+				InstanceReferences.IsEmpty());
+			TestTrue(
+				TEXT("Instance-only fixture requires only instance receivers"),
+				bAllBindingsUseInstanceReceivers);
+			InstanceOnlyRoot->SetStringField(TEXT("self_type_id"), TEXT(""));
+			ParserRejectsRoot(
+				TEXT("Instance receiver usage independently requires Self identity"),
+				InstanceOnlyRoot,
+				TEXT("self_type_id"));
+		}
+	}
 
 	TSharedPtr<FJsonObject> WrongBaseRoot = CloneRoot();
 	FString SceneComponentTypeId;
