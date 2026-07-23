@@ -8,6 +8,9 @@
 #include "Engine/World.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/UObjectGlobals.h"
+
+#include <initializer_list>
 
 namespace
 {
@@ -33,18 +36,6 @@ const uint8 GAvidScriptTrapTickWasmModule[] = {
 	0x02, 0x02, 0x00, 0x0b, 0x03, 0x00, 0x00, 0x0b
 };
 
-const uint8 GAvidScriptTypedOwnerImportWasmModule[] = {
-	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-	0x01, 0x08, 0x02, 0x60, 0x00, 0x01, 0x7e, 0x60, 0x00, 0x00,
-	0x02, 0x24, 0x01, 0x0a, 0x61, 0x76, 0x69, 0x64, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74,
-	0x15, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x5f, 0x67, 0x65, 0x74,
-	0x5f, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x00, 0x00,
-	0x03, 0x02, 0x01, 0x01,
-	0x07, 0x16, 0x01, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69,
-	0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x01,
-	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
-};
-
 const uint8 GAvidScriptTypedOwnerWrongSignatureWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 	0x01, 0x08, 0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x00, 0x00,
@@ -57,18 +48,234 @@ const uint8 GAvidScriptTypedOwnerWrongSignatureWasmModule[] = {
 	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
 };
 
-FAvidScriptBindingTypeModel MakeTypedOwnerObjectType()
+void AppendTestWasmBytes(TArray<uint8>& OutBytes, const std::initializer_list<uint8> Bytes)
+{
+	for (const uint8 Byte : Bytes)
+	{
+		OutBytes.Add(Byte);
+	}
+}
+
+void AppendTestWasmU32(TArray<uint8>& OutBytes, uint32 Value)
+{
+	do
+	{
+		uint8 Byte = static_cast<uint8>(Value & 0x7f);
+		Value >>= 7;
+		if (Value != 0)
+		{
+			Byte |= 0x80;
+		}
+		OutBytes.Add(Byte);
+	}
+	while (Value != 0);
+}
+
+void AppendTestWasmName(TArray<uint8>& OutBytes, const ANSICHAR* Name)
+{
+	const int32 Length = FCStringAnsi::Strlen(Name);
+	AppendTestWasmU32(OutBytes, static_cast<uint32>(Length));
+	OutBytes.Append(reinterpret_cast<const uint8*>(Name), Length);
+}
+
+void AppendTestWasmSection(TArray<uint8>& Module, const uint8 SectionId, const TArray<uint8>& Payload)
+{
+	Module.Add(SectionId);
+	AppendTestWasmU32(Module, static_cast<uint32>(Payload.Num()));
+	Module.Append(Payload);
+}
+
+TArray<uint8> MakeTestWasmModuleHeader()
+{
+	TArray<uint8> Module;
+	AppendTestWasmBytes(Module, { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 });
+	return Module;
+}
+
+void AppendTestWasmBeginPlayExport(
+	TArray<uint8>& Module,
+	const uint32 FunctionIndex,
+	const bool bExportMemory)
+{
+	TArray<uint8> ExportSection;
+	AppendTestWasmU32(ExportSection, bExportMemory ? 2 : 1);
+	if (bExportMemory)
+	{
+		AppendTestWasmName(ExportSection, "memory");
+		AppendTestWasmBytes(ExportSection, { 0x02, 0x00 });
+	}
+	AppendTestWasmName(ExportSection, "avid_on_begin_play");
+	ExportSection.Add(0x00);
+	AppendTestWasmU32(ExportSection, FunctionIndex);
+	AppendTestWasmSection(Module, 0x07, ExportSection);
+}
+
+void AppendTestWasmSingleFunctionCode(TArray<uint8>& Module, const TArray<uint8>& Body)
+{
+	TArray<uint8> CodeSection;
+	AppendTestWasmU32(CodeSection, 1);
+	AppendTestWasmU32(CodeSection, static_cast<uint32>(Body.Num()));
+	CodeSection.Append(Body);
+	AppendTestWasmSection(Module, 0x0a, CodeSection);
+}
+
+TArray<uint8> MakeTypedObjectRouteWasmModule()
+{
+	TArray<uint8> Module = MakeTestWasmModuleHeader();
+
+	TArray<uint8> TypeSection;
+	AppendTestWasmU32(TypeSection, 3);
+	AppendTestWasmBytes(TypeSection, { 0x60, 0x00, 0x01, 0x7e });
+	AppendTestWasmBytes(TypeSection, { 0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f });
+	AppendTestWasmBytes(TypeSection, { 0x60, 0x00, 0x00 });
+	AppendTestWasmSection(Module, 0x01, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendTestWasmU32(ImportSection, 2);
+	AppendTestWasmName(ImportSection, "avidscript");
+	AppendTestWasmName(ImportSection, "avid_owner_get_handle");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x00 });
+	AppendTestWasmName(ImportSection, "avidscript");
+	AppendTestWasmName(ImportSection, "avid_object_type_is_a");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x01 });
+	AppendTestWasmSection(Module, 0x02, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendTestWasmBytes(FunctionSection, { 0x01, 0x02 });
+	AppendTestWasmSection(Module, 0x03, FunctionSection);
+
+	TArray<uint8> MemorySection;
+	AppendTestWasmBytes(MemorySection, { 0x01, 0x00, 0x01 });
+	AppendTestWasmSection(Module, 0x05, MemorySection);
+	AppendTestWasmBeginPlayExport(Module, 2, true);
+
+	TArray<uint8> Body;
+	AppendTestWasmBytes(Body, {
+		0x01, 0x01, 0x7e,
+		0x10, 0x00, 0x21, 0x00,
+		0x41, 0x08, 0x20, 0x00, 0x37, 0x03, 0x00,
+		0x41, 0x00, 0x20, 0x00, 0xa7, 0x20, 0x00, 0x42, 0x20, 0x88, 0xa7,
+		0x41, 0x00, 0x10, 0x01, 0x36, 0x02, 0x00,
+		0x41, 0x04, 0x20, 0x00, 0xa7, 0x20, 0x00, 0x42, 0x20, 0x88, 0xa7,
+		0x41, 0x01, 0x10, 0x01, 0x36, 0x02, 0x00,
+		0x0b
+	});
+	AppendTestWasmSingleFunctionCode(Module, Body);
+	return Module;
+}
+
+TArray<uint8> MakeObjectTypeWrongSignatureWasmModule()
+{
+	TArray<uint8> Module = MakeTestWasmModuleHeader();
+	TArray<uint8> TypeSection;
+	AppendTestWasmBytes(TypeSection, {
+		0x02,
+		0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f,
+		0x60, 0x00, 0x00
+	});
+	AppendTestWasmSection(Module, 0x01, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendTestWasmU32(ImportSection, 1);
+	AppendTestWasmName(ImportSection, "avidscript");
+	AppendTestWasmName(ImportSection, "avid_object_type_is_a");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x00 });
+	AppendTestWasmSection(Module, 0x02, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendTestWasmBytes(FunctionSection, { 0x01, 0x01 });
+	AppendTestWasmSection(Module, 0x03, FunctionSection);
+	AppendTestWasmBeginPlayExport(Module, 1, false);
+	TArray<uint8> Body;
+	AppendTestWasmBytes(Body, { 0x00, 0x0b });
+	AppendTestWasmSingleFunctionCode(Module, Body);
+	return Module;
+}
+
+TArray<uint8> MakeEnvTypedOwnerWasmModule()
+{
+	TArray<uint8> Module = MakeTestWasmModuleHeader();
+	TArray<uint8> TypeSection;
+	AppendTestWasmBytes(TypeSection, {
+		0x02,
+		0x60, 0x00, 0x01, 0x7e,
+		0x60, 0x00, 0x00
+	});
+	AppendTestWasmSection(Module, 0x01, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendTestWasmU32(ImportSection, 1);
+	AppendTestWasmName(ImportSection, "env");
+	AppendTestWasmName(ImportSection, "avid_owner_get_handle");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x00 });
+	AppendTestWasmSection(Module, 0x02, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendTestWasmBytes(FunctionSection, { 0x01, 0x01 });
+	AppendTestWasmSection(Module, 0x03, FunctionSection);
+	AppendTestWasmBeginPlayExport(Module, 1, false);
+	TArray<uint8> Body;
+	AppendTestWasmBytes(Body, { 0x00, 0x0b });
+	AppendTestWasmSingleFunctionCode(Module, Body);
+	return Module;
+}
+
+TArray<uint8> MakeEnvLegacyOwnerWasmModule()
+{
+	TArray<uint8> Module = MakeTestWasmModuleHeader();
+	TArray<uint8> TypeSection;
+	AppendTestWasmBytes(TypeSection, {
+		0x02,
+		0x60, 0x00, 0x01, 0x7f,
+		0x60, 0x00, 0x00
+	});
+	AppendTestWasmSection(Module, 0x01, TypeSection);
+
+	TArray<uint8> ImportSection;
+	AppendTestWasmU32(ImportSection, 2);
+	AppendTestWasmName(ImportSection, "env");
+	AppendTestWasmName(ImportSection, "owner_get_slot");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x00 });
+	AppendTestWasmName(ImportSection, "env");
+	AppendTestWasmName(ImportSection, "owner_get_generation");
+	AppendTestWasmBytes(ImportSection, { 0x00, 0x00 });
+	AppendTestWasmSection(Module, 0x02, ImportSection);
+
+	TArray<uint8> FunctionSection;
+	AppendTestWasmBytes(FunctionSection, { 0x01, 0x01 });
+	AppendTestWasmSection(Module, 0x03, FunctionSection);
+	TArray<uint8> MemorySection;
+	AppendTestWasmBytes(MemorySection, { 0x01, 0x00, 0x01 });
+	AppendTestWasmSection(Module, 0x05, MemorySection);
+	AppendTestWasmBeginPlayExport(Module, 2, true);
+
+	TArray<uint8> Body;
+	AppendTestWasmBytes(Body, {
+		0x00,
+		0x41, 0x00, 0x10, 0x00, 0x36, 0x02, 0x00,
+		0x41, 0x04, 0x10, 0x01, 0x36, 0x02, 0x00,
+		0x0b
+	});
+	AppendTestWasmSingleFunctionCode(Module, Body);
+	return Module;
+}
+
+FAvidScriptBindingTypeModel MakeTypedOwnerObjectType(
+	const TCHAR* ClassPath,
+	const int32 ObjectTypeOrdinal,
+	const FString& BaseTypeId)
 {
 	FAvidScriptBindingTypeModel Type;
-	Type.CanonicalType = TEXT("object:/Script/CoreUObject.Object");
+	Type.CanonicalType = TEXT("object:") + FString(ClassPath);
 	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
 	Type.Kind = TEXT("object_handle");
 	Type.CppType = TEXT("UObject*");
 	Type.Size = 8;
 	Type.Alignment = 4;
 	Type.AbiTypes = { TEXT("i"), TEXT("i") };
-	Type.ObjectTypeOrdinal = 0;
-	Type.ClassPath = TEXT("/Script/CoreUObject.Object");
+	Type.ObjectTypeOrdinal = ObjectTypeOrdinal;
+	Type.ClassPath = ClassPath;
+	Type.BaseTypeId = BaseTypeId;
 	return Type;
 }
 
@@ -84,25 +291,31 @@ bool MakeTypedOwnerDescriptor(const bool bPublishObjectType, FString& OutJson)
 		: TEXT("avidscript.test.typed_owner_empty");
 	if (bPublishObjectType)
 	{
-		Package.Types.Add(MakeTypedOwnerObjectType());
+		const FAvidScriptBindingTypeModel ObjectType = MakeTypedOwnerObjectType(
+			TEXT("/Script/CoreUObject.Object"),
+			0,
+			FString());
+		const FAvidScriptBindingTypeModel ActorType = MakeTypedOwnerObjectType(
+			TEXT("/Script/Engine.Actor"),
+			1,
+			ObjectType.StableId);
+		Package.Types = { ObjectType, ActorType };
 	}
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 
-	FString TypesJson;
-	if (bPublishObjectType)
+	TArray<FString> TypeJsonEntries;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
-		const FAvidScriptBindingTypeModel& Type = Package.Types[0];
-		TypesJson = FString::Printf(
-			TEXT("[{\"stable_id\":\"%s\",\"canonical_type\":\"%s\",\"kind\":\"object_handle\",\"cpp_type\":\"UObject*\",\"size\":8,\"alignment\":4,\"abi_types\":[\"i\",\"i\"],\"object_type_ordinal\":0,\"class_path\":\"%s\",\"base_type_id\":\"\"}]"),
+		TypeJsonEntries.Add(FString::Printf(
+			TEXT("{\"stable_id\":\"%s\",\"canonical_type\":\"%s\",\"kind\":\"object_handle\",\"cpp_type\":\"UObject*\",\"size\":8,\"alignment\":4,\"abi_types\":[\"i\",\"i\"],\"object_type_ordinal\":%d,\"class_path\":\"%s\",\"base_type_id\":\"%s\"}"),
 			*Type.StableId,
 			*Type.CanonicalType,
-			*Type.ClassPath);
+			Type.ObjectTypeOrdinal,
+			*Type.ClassPath,
+			*Type.BaseTypeId));
 	}
-	else
-	{
-		TypesJson = TEXT("[]");
-	}
+	const FString TypesJson = TEXT("[") + FString::Join(TypeJsonEntries, TEXT(",")) + TEXT("]");
 
 	OutJson = FString::Printf(
 		TEXT("{\"schema_version\":6,\"generator_version\":\"%s\",\"engine_version\":\"%s\",\"source\":\"ue_reflection\",\"package_name\":\"%s\",\"package_hash\":\"%s\",\"selection_hash\":\"%s\",\"self_type_id\":\"\",\"types\":%s,\"class_references\":[],\"bindings\":[]}"),
@@ -115,14 +328,18 @@ bool MakeTypedOwnerDescriptor(const bool bPublishObjectType, FString& OutJson)
 	return true;
 }
 
-bool HasTypedOwnerObjectTypeImport(const FAvidScriptBindingPackage& Package)
+TArray<const FAvidScriptVmDynamicImport*> CollectTypedOwnerObjectTypeImports(
+	const FAvidScriptBindingPackage& Package)
 {
-	return Package.GetVmPackage().Imports.ContainsByPredicate([](const FAvidScriptVmDynamicImport& Import)
+	TArray<const FAvidScriptVmDynamicImport*> Imports;
+	for (const FAvidScriptVmDynamicImport& Import : Package.GetVmPackage().Imports)
 	{
-		return Import.ModuleName == TEXT("avidscript")
-			&& Import.ImportName == TEXT("avid_object_type_is_a")
-			&& Import.Signature == TEXT("(iii)i");
-	});
+		if (Import.ImportName == TEXT("avid_object_type_is_a"))
+		{
+			Imports.Add(&Import);
+		}
+	}
+	return Imports;
 }
 
 bool CreateSmokeWorld(UWorld*& OutWorld)
@@ -183,25 +400,22 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 		Runtime.HandleOwnerGetHandleImport(),
 		static_cast<int64>(0x0123456789abcdefull));
 
-	HostContext.OwnerHandle = {};
+	HostContext.OwnerHandle = { 7, 0 };
 	Runtime.SetHostContext(HostContext);
-	TestEqual(TEXT("Invalid typed owner handle fails closed"), Runtime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
+	TestEqual(TEXT("Typed owner rejects a zero generation"), Runtime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
 	FString FailureModule;
 	FString FailureName;
 	FString FailureDetails;
-	TestTrue(TEXT("Invalid typed owner import reports a pending failure"),
+	TestTrue(TEXT("Zero generation reports a pending failure"),
 		Runtime.ConsumePendingHostImportFailure(FailureModule, FailureName, FailureDetails));
 	TestEqual(TEXT("Typed owner failure keeps the canonical module"), FailureModule, FString(TEXT("avidscript")));
 	TestEqual(TEXT("Typed owner failure keeps the canonical import"), FailureName, FString(TEXT("avid_owner_get_handle")));
 
-	FAvidScriptWasmSmokeResult LoadResult;
-	TestTrue(TEXT("Typed owner import accepts the exact i64 signature"), Runtime.LoadModule(
-		GAvidScriptTypedOwnerImportWasmModule,
-		UE_ARRAY_COUNT(GAvidScriptTypedOwnerImportWasmModule),
-		TEXT("typed_owner_import"),
-		LoadResult));
-	TestTrue(TEXT("Typed owner module instantiates after import validation"), LoadResult.bModuleInstantiated);
-	Runtime.Unload();
+	HostContext.OwnerHandle = { 0, 9 };
+	Runtime.SetHostContext(HostContext);
+	TestEqual(TEXT("Typed owner rejects a zero slot"), Runtime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
+	TestTrue(TEXT("Zero slot reports a pending failure"),
+		Runtime.ConsumePendingHostImportFailure(FailureModule, FailureName, FailureDetails));
 
 	FAvidScriptWasmSmokeResult WrongSignatureResult;
 	TestFalse(TEXT("Typed owner import rejects an i32 signature before instantiation"), Runtime.LoadModule(
@@ -211,23 +425,164 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 		WrongSignatureResult));
 	TestFalse(TEXT("Wrong typed owner signature never instantiates a module"), WrongSignatureResult.bModuleInstantiated);
 
+	const TArray<uint8> EnvTypedOwnerModule = MakeEnvTypedOwnerWasmModule();
+	FAvidScriptWasmSmokeResult EnvTypedOwnerResult;
+	TestFalse(TEXT("env does not authorize the canonical typed owner import"), Runtime.LoadModule(
+		EnvTypedOwnerModule.GetData(),
+		EnvTypedOwnerModule.Num(),
+		TEXT("env_typed_owner_import"),
+		EnvTypedOwnerResult));
+	TestFalse(TEXT("Rejected env typed owner import never instantiates a module"),
+		EnvTypedOwnerResult.bModuleInstantiated);
+
 	FString EmptyDescriptorJson;
 	TestTrue(TEXT("Empty v6 descriptor serializes"), MakeTypedOwnerDescriptor(false, EmptyDescriptorJson));
 	TSharedPtr<const FAvidScriptBindingPackage> EmptyPackage;
 	FAvidScriptBindingPackageLoadResult EmptyPackageResult;
-	TestTrue(TEXT("Empty v6 descriptor loads"),
-		FAvidScriptBindingPackage::LoadDescriptor(EmptyDescriptorJson, EmptyPackage, EmptyPackageResult));
-	TestFalse(TEXT("Empty v6 descriptor does not authorize object-type import"),
-		EmptyPackage.IsValid() && HasTypedOwnerObjectTypeImport(*EmptyPackage));
+	if (!TestTrue(TEXT("Empty v6 descriptor loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(EmptyDescriptorJson, EmptyPackage, EmptyPackageResult))
+		|| !TestNotNull(TEXT("Empty descriptor produces a package"), EmptyPackage.Get()))
+	{
+		AddError(EmptyPackageResult.ErrorCategory + TEXT(": ") + EmptyPackageResult.ErrorDetails);
+		return false;
+	}
+	const TArray<const FAvidScriptVmDynamicImport*> EmptyObjectTypeImports =
+		CollectTypedOwnerObjectTypeImports(*EmptyPackage);
+	TestEqual(TEXT("Empty v6 descriptor authorizes zero same-name object-type imports"),
+		EmptyObjectTypeImports.Num(), 0);
 
 	FString PublishedDescriptorJson;
 	TestTrue(TEXT("Published v6 descriptor serializes"), MakeTypedOwnerDescriptor(true, PublishedDescriptorJson));
 	TSharedPtr<const FAvidScriptBindingPackage> PublishedPackage;
 	FAvidScriptBindingPackageLoadResult PublishedPackageResult;
-	TestTrue(TEXT("Published v6 descriptor loads"),
-		FAvidScriptBindingPackage::LoadDescriptor(PublishedDescriptorJson, PublishedPackage, PublishedPackageResult));
-	TestTrue(TEXT("Published v6 object types authorize only the fixed dynamic import"),
-		PublishedPackage.IsValid() && HasTypedOwnerObjectTypeImport(*PublishedPackage));
+	if (!TestTrue(TEXT("Published v6 descriptor loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(PublishedDescriptorJson, PublishedPackage, PublishedPackageResult))
+		|| !TestNotNull(TEXT("Published descriptor produces a package"), PublishedPackage.Get()))
+	{
+		AddError(PublishedPackageResult.ErrorCategory + TEXT(": ") + PublishedPackageResult.ErrorDetails);
+		return false;
+	}
+	const TArray<const FAvidScriptVmDynamicImport*> PublishedObjectTypeImports =
+		CollectTypedOwnerObjectTypeImports(*PublishedPackage);
+	if (!TestEqual(TEXT("Published v6 descriptor authorizes exactly one same-name object-type import"),
+		PublishedObjectTypeImports.Num(), 1))
+	{
+		return false;
+	}
+	const FAvidScriptVmDynamicImport& ObjectTypeImport = *PublishedObjectTypeImports[0];
+	TestEqual(TEXT("Object-type import uses the canonical module"),
+		ObjectTypeImport.ModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("Object-type import uses the canonical name"),
+		ObjectTypeImport.ImportName, FString(TEXT("avid_object_type_is_a")));
+	TestEqual(TEXT("Object-type import uses the fixed signature"),
+		ObjectTypeImport.Signature, FString(TEXT("(iii)i")));
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	UObject* OwnerObject = NewObject<UObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle OwnerHandle = Registry.RegisterObject(OwnerObject, RegisterResult, false);
+	if (!TestTrue(TEXT("Typed owner target registers in the runtime registry"),
+		RegisterResult.bSucceeded && OwnerHandle.IsValid()))
+	{
+		return false;
+	}
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = OwnerHandle;
+	Runtime.SetHostContext(HostContext);
+
+	const TArray<uint8> TypedObjectRouteModule = MakeTypedObjectRouteWasmModule();
+	FAvidScriptWasmSmokeResult RouteLoadResult;
+	if (!TestTrue(TEXT("Typed owner and object-type imports instantiate through WAMR"), Runtime.LoadModule(
+		TypedObjectRouteModule.GetData(),
+		TypedObjectRouteModule.Num(),
+		TEXT("typed_owner_object_route"),
+		PublishedPackage,
+		RouteLoadResult)))
+	{
+		AddError(RouteLoadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("Typed owner and object-type route module is instantiated"),
+		RouteLoadResult.bModuleInstantiated);
+
+	FAvidScriptWasmSmokeResult RouteBeginPlayResult;
+	if (!TestTrue(TEXT("WAMR executes typed owner and object-type package routes"),
+		Runtime.BeginPlay(RouteBeginPlayResult)))
+	{
+		AddError(RouteBeginPlayResult.ErrorMessage);
+		return false;
+	}
+	TArray<uint8> RouteState;
+	RouteState.SetNumZeroed(16);
+	FString StateReadError;
+	if (!TestTrue(TEXT("WAMR route writes its observable state"),
+		Runtime.ReadStateBytes(0, MakeArrayView(RouteState), StateReadError)))
+	{
+		AddError(StateReadError);
+		return false;
+	}
+	int32 ObjectMatch = 0;
+	int32 ObjectMismatch = 0;
+	uint64 PackedOwnerHandle = 0;
+	FMemory::Memcpy(&ObjectMatch, RouteState.GetData(), sizeof(ObjectMatch));
+	FMemory::Memcpy(&ObjectMismatch, RouteState.GetData() + 4, sizeof(ObjectMismatch));
+	FMemory::Memcpy(&PackedOwnerHandle, RouteState.GetData() + 8, sizeof(PackedOwnerHandle));
+	TestEqual(TEXT("Package dispatcher returns one for the UObject type match"), ObjectMatch, 1);
+	TestEqual(TEXT("Package dispatcher returns zero for the Actor type mismatch"), ObjectMismatch, 0);
+	TestEqual(TEXT("WAMR bridge returns the full packed 64-bit owner handle"),
+		PackedOwnerHandle, OwnerHandle.ToUInt64());
+	TestEqual(TEXT("WAMR route enters one canonical host import and two package dispatches"),
+		RouteBeginPlayResult.HostImportCallCount, 3);
+	TestEqual(TEXT("Last routed call records the package object-type ordinal"),
+		RouteBeginPlayResult.LastHostImportInput, static_cast<int32>(ObjectTypeImport.Ordinal));
+	TestEqual(TEXT("Last package dispatch records the mismatch result"),
+		RouteBeginPlayResult.LastHostImportResult, 0);
+	Runtime.Unload();
+
+	const TArray<uint8> WrongObjectTypeSignatureModule = MakeObjectTypeWrongSignatureWasmModule();
+	FAvidScriptWasmSmokeResult WrongObjectTypeSignatureResult;
+	TestFalse(TEXT("Object-type import rejects a wrong signature during load"), Runtime.LoadModule(
+		WrongObjectTypeSignatureModule.GetData(),
+		WrongObjectTypeSignatureModule.Num(),
+		TEXT("object_type_wrong_signature"),
+		PublishedPackage,
+		WrongObjectTypeSignatureResult));
+	TestFalse(TEXT("Wrong object-type signature fails before module instantiation"),
+		WrongObjectTypeSignatureResult.bModuleInstantiated);
+
+	const TArray<uint8> EnvLegacyOwnerModule = MakeEnvLegacyOwnerWasmModule();
+	FAvidScriptWasmSmokeResult LegacyLoadResult;
+	if (!TestTrue(TEXT("Legacy env owner slot and generation imports remain compatible"), Runtime.LoadModule(
+		EnvLegacyOwnerModule.GetData(),
+		EnvLegacyOwnerModule.Num(),
+		TEXT("env_legacy_owner_imports"),
+		LegacyLoadResult)))
+	{
+		AddError(LegacyLoadResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptWasmSmokeResult LegacyBeginPlayResult;
+	if (!TestTrue(TEXT("Legacy env owner imports execute through WAMR"),
+		Runtime.BeginPlay(LegacyBeginPlayResult)))
+	{
+		AddError(LegacyBeginPlayResult.ErrorMessage);
+		return false;
+	}
+	TArray<uint8> LegacyState;
+	LegacyState.SetNumZeroed(8);
+	if (!TestTrue(TEXT("Legacy env owner imports write observable state"),
+		Runtime.ReadStateBytes(0, MakeArrayView(LegacyState), StateReadError)))
+	{
+		AddError(StateReadError);
+		return false;
+	}
+	uint32 LegacySlot = 0;
+	uint32 LegacyGeneration = 0;
+	FMemory::Memcpy(&LegacySlot, LegacyState.GetData(), sizeof(LegacySlot));
+	FMemory::Memcpy(&LegacyGeneration, LegacyState.GetData() + 4, sizeof(LegacyGeneration));
+	TestEqual(TEXT("Legacy env owner slot remains compatible"), LegacySlot, OwnerHandle.Slot);
+	TestEqual(TEXT("Legacy env owner generation remains compatible"),
+		LegacyGeneration, OwnerHandle.Generation);
 	return true;
 }
 
