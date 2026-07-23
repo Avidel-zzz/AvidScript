@@ -1,10 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorTypedObjectBindingTestTypes.h"
+#include "AvidScriptObjectLifecycleBinding.h"
+#include "AvidScriptObjectTypeBinding.h"
 
 #include "Engine/Blueprint.h"
 #include "HAL/FileManager.h"
@@ -41,20 +44,89 @@ const FAvidScriptBindingTypeModel* FindAvidScriptObjectType(
 		});
 }
 
-bool ContainsAvidScriptBindingForFunction(
+const FAvidScriptBindingFunctionModel* FindAvidScriptBindingForFunction(
 	const FAvidScriptBindingPackageModel& Package,
 	const FString& OwnerClassPath,
 	const TCHAR* FunctionName)
 {
-	return Package.Bindings.ContainsByPredicate(
+	return Package.Bindings.FindByPredicate(
 		[&OwnerClassPath, FunctionName](const FAvidScriptBindingFunctionModel& Binding)
 		{
 			return Binding.OwnerClass == OwnerClassPath
-				&& Binding.UeFunction == FunctionName
-				&& Binding.DispatchMode == TEXT("cached_process_event")
-				&& Binding.HostImport.Module == TEXT("avidscript")
-				&& Binding.HostImport.Name.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive);
+				&& Binding.UeFunction == FunctionName;
 		});
+}
+
+FString MakeAvidScriptImportIdentity(
+	const FString& StableId,
+	const uint32 Ordinal,
+	const FString& ModuleName,
+	const FString& ImportName,
+	const FString& Signature)
+{
+	return FString::Printf(
+		TEXT("%s|%u|%s|%s|%s"),
+		*StableId,
+		Ordinal,
+		*ModuleName,
+		*ImportName,
+		*Signature);
+}
+
+FString MakeAvidScriptImportIdentity(const FAvidScriptBindingFunctionModel& Binding)
+{
+	return MakeAvidScriptImportIdentity(
+		Binding.StableId,
+		static_cast<uint32>(Binding.Ordinal),
+		Binding.HostImport.Module,
+		Binding.HostImport.Name,
+		Binding.HostImport.Signature);
+}
+
+FString MakeAvidScriptImportIdentity(const FAvidScriptVmDynamicImport& Import)
+{
+	return MakeAvidScriptImportIdentity(
+		Import.StableId,
+		Import.Ordinal,
+		Import.ModuleName,
+		Import.ImportName,
+		Import.Signature);
+}
+
+void ReleaseAvidScriptTransientObject(UObject* Object)
+{
+	if (Object == nullptr)
+	{
+		return;
+	}
+
+	Object->SetFlags(RF_Transient);
+	Object->ClearFlags(RF_Public | RF_Standalone | RF_Transactional);
+	if (Object->IsRooted())
+	{
+		Object->RemoveFromRoot();
+	}
+	Object->MarkAsGarbage();
+}
+
+void CleanupAvidScriptTransientBlueprint(TStrongObjectPtr<UBlueprint>& Blueprint)
+{
+	UBlueprint* BlueprintObject = Blueprint.Get();
+	if (BlueprintObject == nullptr)
+	{
+		return;
+	}
+
+	UClass* GeneratedClass = BlueprintObject->GeneratedClass;
+	UClass* SkeletonGeneratedClass = BlueprintObject->SkeletonGeneratedClass;
+	BlueprintObject->RemoveGeneratedClasses();
+	ReleaseAvidScriptTransientObject(GeneratedClass);
+	if (SkeletonGeneratedClass != GeneratedClass)
+	{
+		ReleaseAvidScriptTransientObject(SkeletonGeneratedClass);
+	}
+	ReleaseAvidScriptTransientObject(BlueprintObject);
+	Blueprint.Reset();
 }
 } // namespace
 
@@ -95,6 +167,10 @@ bool FAvidScriptEditorTypedObjectBindingIntegrationTest::RunTest(const FString& 
 	{
 		return false;
 	}
+	ON_SCOPE_EXIT
+	{
+		CleanupAvidScriptTransientBlueprint(Blueprint);
+	};
 	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
 	UClass* BlueprintClass = Blueprint->GeneratedClass;
 	if (!TestNotNull(TEXT("Transient Blueprint subclass compiles a generated class"), BlueprintClass))
@@ -186,6 +262,11 @@ bool FAvidScriptEditorTypedObjectBindingIntegrationTest::RunTest(const FString& 
 		return false;
 	}
 	TestEqual(TEXT("Typed object descriptor publishes schema v6"), Package.SchemaVersion, 6);
+	TestEqual(TEXT("Descriptor publishes exactly one class reference"), Package.ClassReferences.Num(), 1);
+	if (Package.ClassReferences.Num() != 1)
+	{
+		return false;
+	}
 	const FAvidScriptBindingTypeModel* SelfType = Package.Types.FindByPredicate(
 		[&Package](const FAvidScriptBindingTypeModel& Type)
 		{
@@ -208,18 +289,103 @@ bool FAvidScriptEditorTypedObjectBindingIntegrationTest::RunTest(const FString& 
 		TestEqual(TEXT("Custom Actor keeps the Engine Actor base edge"), ActorType->BaseTypeId, EngineActorType->StableId);
 		TestEqual(TEXT("Engine Actor remains inside the ancestor closure"), EngineActorType->BaseTypeId, ObjectType->StableId);
 	}
-	TestTrue(
-		TEXT("Custom Actor UFUNCTION uses the generic reflected binding dispatcher"),
-		ContainsAvidScriptBindingForFunction(Package, ActorClassPath, TEXT("ApplyGameplayValue")));
-	TestTrue(
-		TEXT("Custom projectile UFUNCTION uses the generic reflected binding dispatcher"),
-		ContainsAvidScriptBindingForFunction(Package, ProjectileClassPath, TEXT("ActivateProjectile")));
-	if (Package.ClassReferences.Num() == 1)
+	TestEqual(TEXT("Descriptor publishes exactly two custom reflected bindings"), Package.Bindings.Num(), 2);
+	if (Package.Bindings.Num() != 2)
 	{
-		const FAvidScriptBindingClassReferenceModel& Reference = Package.ClassReferences[0];
-		TestEqual(TEXT("Descriptor class reference stays Blueprint concrete"), Reference.ClassPath, BlueprintClassPath);
-		TestEqual(TEXT("Typed Spawn result stays at the native projectile base"), Reference.BaseClassPath, ProjectileClassPath);
-		TestEqual(TEXT("Typed Spawn result resolves to the projectile graph node"), Reference.ResultTypeId, ProjectileType == nullptr ? FString() : ProjectileType->StableId);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* ActorBinding =
+		FindAvidScriptBindingForFunction(Package, ActorClassPath, TEXT("ApplyGameplayValue"));
+	const FAvidScriptBindingFunctionModel* ProjectileBinding =
+		FindAvidScriptBindingForFunction(Package, ProjectileClassPath, TEXT("ActivateProjectile"));
+	if (!TestNotNull(TEXT("Descriptor binds the custom Actor UFUNCTION"), ActorBinding)
+		|| !TestNotNull(TEXT("Descriptor binds the custom projectile UFUNCTION"), ProjectileBinding))
+	{
+		return false;
+	}
+	const auto ValidateReflectedImport = [this](const FAvidScriptBindingFunctionModel& Binding)
+	{
+		TestEqual(TEXT("Custom UFUNCTION uses cached ProcessEvent dispatch"),
+			Binding.DispatchMode, FString(TEXT("cached_process_event")));
+		TestEqual(TEXT("Custom UFUNCTION uses the generated reflection module"),
+			Binding.HostImport.Module, FString(TEXT("avidscript")));
+		TestEqual(TEXT("Custom UFUNCTION import name derives only from stable identity"),
+			Binding.HostImport.Name, TEXT("avid_ue_") + Binding.StableId.Left(16));
+		TestFalse(TEXT("Custom UFUNCTION import does not expose a per-function native symbol"),
+			Binding.HostImport.Name.Contains(Binding.UeFunction, ESearchCase::IgnoreCase));
+	};
+	ValidateReflectedImport(*ActorBinding);
+	ValidateReflectedImport(*ProjectileBinding);
+	TSet<FString> ReflectedImportWhitelist;
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		ReflectedImportWhitelist.Add(MakeAvidScriptImportIdentity(Binding));
+	}
+	TestEqual(TEXT("Descriptor reflected import whitelist has exact cardinality"),
+		ReflectedImportWhitelist.Num(), 2);
+
+	const FAvidScriptBindingClassReferenceModel& Reference = Package.ClassReferences[0];
+	TestEqual(TEXT("Descriptor class reference stays Blueprint concrete"), Reference.ClassPath, BlueprintClassPath);
+	TestEqual(TEXT("Typed Spawn result stays at the native projectile base"), Reference.BaseClassPath, ProjectileClassPath);
+	TestEqual(TEXT("Typed Spawn result resolves to the projectile graph node"),
+		Reference.ResultTypeId, ProjectileType == nullptr ? FString() : ProjectileType->StableId);
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult RuntimeLoadResult;
+	if (!TestTrue(
+			TEXT("Runtime package loads the typed custom reflection descriptor"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				RuntimePackage,
+				RuntimeLoadResult))
+		|| !RuntimePackage.IsValid())
+	{
+		AddError(RuntimeLoadResult.ErrorCategory + TEXT(": ") + RuntimeLoadResult.ErrorDetails);
+		return false;
+	}
+	TSet<FString> CapabilityImportWhitelist = ReflectedImportWhitelist;
+	uint32 CapabilityOrdinal = static_cast<uint32>(Package.Bindings.Num());
+	for (const FAvidScriptObjectLifecycleBindingSpec& Spec :
+		FAvidScriptObjectLifecycleBindings::GetSpecs())
+	{
+		CapabilityImportWhitelist.Add(MakeAvidScriptImportIdentity(
+			Spec.StableId,
+			CapabilityOrdinal++,
+			Spec.ModuleName,
+			Spec.ImportName,
+			Spec.Signature));
+	}
+	for (const FAvidScriptObjectTypeBindingSpec& Spec :
+		FAvidScriptObjectTypeBindings::GetSpecs())
+	{
+		CapabilityImportWhitelist.Add(MakeAvidScriptImportIdentity(
+			Spec.StableId,
+			CapabilityOrdinal++,
+			Spec.ModuleName,
+			Spec.ImportName,
+			Spec.Signature));
+	}
+	const int32 ExpectedCapabilityImportCount =
+		Package.Bindings.Num()
+		+ FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+		+ FAvidScriptObjectTypeBindings::GetSpecs().Num();
+	TestEqual(TEXT("Capability import whitelist has exact cardinality"),
+		CapabilityImportWhitelist.Num(), ExpectedCapabilityImportCount);
+	const TArray<FAvidScriptVmDynamicImport>& RuntimeImports =
+		RuntimePackage->GetVmPackage().Imports;
+	TestEqual(TEXT("Runtime package contains only reflected and fixed capability imports"),
+		RuntimeImports.Num(), CapabilityImportWhitelist.Num());
+	TSet<FString> ActualRuntimeImports;
+	for (const FAvidScriptVmDynamicImport& Import : RuntimeImports)
+	{
+		ActualRuntimeImports.Add(MakeAvidScriptImportIdentity(Import));
+	}
+	TestEqual(TEXT("Runtime package import identities contain no duplicates"),
+		ActualRuntimeImports.Num(), RuntimeImports.Num());
+	for (const FString& ExpectedImport : CapabilityImportWhitelist)
+	{
+		TestTrue(TEXT("Runtime package contains every exact whitelisted capability import"),
+			ActualRuntimeImports.Contains(ExpectedImport));
 	}
 
 	FString ReferenceSource;
@@ -242,10 +408,6 @@ bool FAvidScriptEditorTypedObjectBindingIntegrationTest::RunTest(const FString& 
 		TEXT("Facade exposes both ordinary custom UFUNCTION bindings"),
 		ReferenceSource.Contains(TEXT("ApplyGameplayValue(float Delta)"))
 		&& ReferenceSource.Contains(TEXT("ActivateProjectile()")));
-	TestFalse(
-		TEXT("Facade does not introduce per-UFUNCTION native imports"),
-		ReferenceSource.Contains(TEXT("avid_apply_gameplay_value"), ESearchCase::IgnoreCase)
-		|| ReferenceSource.Contains(TEXT("avid_activate_projectile"), ESearchCase::IgnoreCase));
 
 	return true;
 }
