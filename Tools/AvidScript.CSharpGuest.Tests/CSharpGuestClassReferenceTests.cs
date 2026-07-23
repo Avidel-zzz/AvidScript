@@ -15,9 +15,12 @@ internal static class CSharpGuestClassReferenceTests
         GeneratedProjectClassLowersToNominalI32();
         GeneratedTypedClassLowersToNominalI32();
         ForgedClassReferencesAreRejected();
+        ClassReferenceFieldOwnerMismatchFailsClosed();
+        ClassReferenceConstructorOwnerMismatchFailsClosed();
+        ClassReferenceTypeRequiresIntrinsicConstructor();
         ClassReferenceDoesNotImplicitlyConvert();
         LifecycleFacadeLowersToSharedImportsAndWasm();
-        return 5;
+        return 8;
     }
 
     private static void GeneratedProjectClassLowersToNominalI32()
@@ -158,7 +161,7 @@ internal static class CSharpGuestClassReferenceTests
         AssertLoweringRejected(ForgedClassReferenceSource(
             "private readonly int Ordinal;\n    public TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
             "0"),
-            "ASCG1004",
+            "ASCG1003",
             "a public class reference constructor must not be treated as intrinsic");
         AssertLoweringRejected(ForgedClassReferenceSource(
             "private readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
@@ -185,6 +188,102 @@ internal static class CSharpGuestClassReferenceTests
             "0"),
             "ASCG1003",
             "look-alike class references must contain exactly one ordinal field");
+    }
+
+    private static void ClassReferenceTypeRequiresIntrinsicConstructor()
+    {
+        AssertLoweringRejected(PassiveForgedClassReferenceSource(
+            "private readonly int Ordinal;"),
+            "ASCG1003",
+            "a class reference without an intrinsic constructor must be rejected even when never constructed");
+        AssertLoweringRejected(PassiveForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    public TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }"),
+            "ASCG1003",
+            "a public constructor must not authorize a passive class reference type");
+        AssertLoweringRejected(PassiveForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    internal TSubclassOfAForged(ref int ordinal) { Ordinal = ordinal; }"),
+            "ASCG1003",
+            "a ref constructor must not authorize a passive class reference type");
+    }
+
+    private static void ClassReferenceConstructorOwnerMismatchFailsClosed()
+    {
+        const string staticMeshTypeId = "type:global::AvidScript.TSubclassOfAStaticMeshActor";
+        const string actorTypeId = "type:global::AvidScript.TSubclassOfAActor";
+        SemanticDocument semantic = AnalyzeClassReferenceOwnerFixture();
+        SemanticCallable build = semantic.Callables.Single(callable =>
+            callable.Export?.Name == "avid_build_typed_class");
+        SemanticCallable actorConstructor = semantic.Callables.Single(callable =>
+            callable.IsConstructor
+            && callable.ContainingTypeId == actorTypeId
+            && callable.Parameters.Count == 1
+            && callable.Parameters[0].TypeId == "type:int32");
+        SemanticDocument constructorMismatch = WithReachableCallable(
+            RewriteMethodOperations(
+                semantic,
+                build.MethodSymbolId,
+                operation => operation.Kind == "object_creation"
+                    && operation.TypeId == staticMeshTypeId
+                        ? operation with { SymbolId = actorConstructor.MethodSymbolId }
+                        : operation),
+            actorConstructor.MethodSymbolId);
+        AssertLoweringRejected(
+            constructorMismatch,
+            "ASCG1004",
+            "class reference construction must use a constructor owned by the exact result type");
+    }
+
+    private static void ClassReferenceFieldOwnerMismatchFailsClosed()
+    {
+        const string staticMeshTypeId = "type:global::AvidScript.TSubclassOfAStaticMeshActor";
+        const string actorTypeId = "type:global::AvidScript.TSubclassOfAActor";
+        SemanticDocument semantic = AnalyzeClassReferenceOwnerFixture();
+        string staticMeshOrdinalPropertyId = semantic.Symbols.Single(symbol =>
+            symbol.Kind == "property"
+            && symbol.Name == "AvidScriptOrdinal"
+            && symbol.ContainingSymbolId == "symbol:" + staticMeshTypeId).Id;
+        SemanticCallable staticMeshOrdinalGetter = semantic.Callables.Single(callable =>
+            callable.AssociatedSymbolId == staticMeshOrdinalPropertyId);
+        string actorOrdinalFieldId = semantic.Symbols.Single(symbol =>
+            symbol.Kind == "field"
+            && symbol.Name == "Ordinal"
+            && symbol.ContainingSymbolId == "symbol:" + actorTypeId).Id;
+        SemanticDocument fieldMismatch = RewriteMethodOperations(
+            semantic,
+            staticMeshOrdinalGetter.MethodSymbolId,
+            operation => operation.Kind == "field_reference"
+                && operation.Children.Count == 1
+                && operation.Children[0].TypeId == staticMeshTypeId
+                    ? operation with { SymbolId = actorOrdinalFieldId }
+                    : operation);
+        AssertLoweringRejected(
+            fieldMismatch,
+            "ASCG1004",
+            "class reference ordinal fields must be owned by the exact receiver type");
+    }
+
+    private static SemanticDocument AnalyzeClassReferenceOwnerFixture()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_build_typed_class")]
+                public static TSubclassOfAStaticMeshActor Build() => new(1);
+
+                [UnmanagedCallersOnly(EntryPoint = "avid_read_typed_class")]
+                public static int Read(TSubclassOfAStaticMeshActor value)
+                    => value.AvidScriptOrdinal;
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            "class reference owner mismatch fixture should pass semantic analysis: "
+                + FormatSemanticDiagnostics(semantic));
+        return semantic;
     }
 
     private static void LifecycleFacadeLowersToSharedImportsAndWasm()
@@ -279,8 +378,18 @@ internal static class CSharpGuestClassReferenceTests
         SemanticDocument semantic = Analyze(source);
         Assert(semantic.Succeeded,
             message + ": semantic analysis should accept the source: " + FormatSemanticDiagnostics(semantic));
+        AssertLoweringRejected(semantic, expectedCode, message);
+    }
+
+    private static void AssertLoweringRejected(
+        SemanticDocument semantic,
+        string expectedCode,
+        string message)
+    {
         CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
-        Assert(!lowering.Succeeded && lowering.Diagnostics.Any(item => item.Code == expectedCode),
+        Assert(!lowering.Succeeded
+            && lowering.Module is null
+            && lowering.Diagnostics.Any(item => item.Code == expectedCode),
             message + ": " + FormatGuestDiagnostics(lowering));
     }
 
@@ -307,6 +416,84 @@ internal static class CSharpGuestClassReferenceTests
                 }
             }
             """;
+    }
+
+    private static string PassiveForgedClassReferenceSource(string members)
+    {
+        return $$"""
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct TSubclassOfAForged
+            {
+                {{members}}
+                internal int AvidScriptOrdinal => Ordinal;
+            }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_passive_forged_class_ref")]
+                public static int Probe(TSubclassOfAForged value)
+                    => value.AvidScriptOrdinal;
+            }
+            """;
+    }
+
+    private static SemanticDocument WithReachableCallable(
+        SemanticDocument document,
+        string methodSymbolId)
+    {
+        return document with
+        {
+            Reachability = document.Reachability! with
+            {
+                ReachableCallableIds = document.Reachability!.ReachableCallableIds
+                    .Append(methodSymbolId)
+                    .Distinct(StringComparer.Ordinal)
+                    .OrderBy(id => id, StringComparer.Ordinal)
+                    .ToArray(),
+            },
+        };
+    }
+
+    private static SemanticDocument RewriteMethodOperations(
+        SemanticDocument document,
+        string methodSymbolId,
+        Func<SemanticOperation, SemanticOperation> rewrite)
+    {
+        return document with
+        {
+            ControlFlowGraphs = document.ControlFlowGraphs
+                .Select(graph => graph.MethodSymbolId == methodSymbolId
+                    ? graph with
+                    {
+                        Blocks = graph.Blocks.Select(block => block with
+                        {
+                            Operations = block.Operations
+                                .Select(operation => RewriteOperation(operation, rewrite))
+                                .ToArray(),
+                            BranchValue = block.BranchValue is null
+                                ? null
+                                : RewriteOperation(block.BranchValue, rewrite),
+                        }).ToArray(),
+                    }
+                    : graph)
+                .ToArray(),
+        };
+    }
+
+    private static SemanticOperation RewriteOperation(
+        SemanticOperation operation,
+        Func<SemanticOperation, SemanticOperation> rewrite)
+    {
+        SemanticOperation withChildren = operation with
+        {
+            Children = operation.Children
+                .Select(child => RewriteOperation(child, rewrite))
+                .ToArray(),
+        };
+        return rewrite(withChildren);
     }
 
     private static System.Collections.Generic.IEnumerable<SemanticOperation> Flatten(

@@ -19,7 +19,8 @@ internal static class CSharpGuestOperatorTests
         BoundUserOperatorLowersToCallable();
         DirectBaseHandleUpcastsLowerToGuestCalls();
         MissingUserDefinedConversionFailsClosed();
-        return 3;
+        MalformedUserDefinedConversionsFailClosed();
+        return 4;
     }
 
     private static void BoundUserOperatorLowersToCallable()
@@ -167,9 +168,99 @@ internal static class CSharpGuestOperatorTests
         Assert(module.Imports.Count == 0
             && instructions.All(instruction => instruction.TargetId is null || !instruction.TargetId.StartsWith("import:", StringComparison.Ordinal)),
             "handle upcasts should not introduce Host imports");
+        GuestInstruction[] callerInstructions = module.Exports
+            .Where(export => export.Name is "avid_direct_base" or "avid_explicit_chain")
+            .Select(export => module.Functions.Single(function => function.Id == export.FunctionId))
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        Assert(callerInstructions.All(instruction => instruction.Op != "convert"),
+            "direct-base handle upcast callers should not emit ordinary convert instructions");
     }
 
     private static void MissingUserDefinedConversionFailsClosed()
+    {
+        SemanticDocument baseline = AnalyzeConversionFixture();
+        SemanticCallable conversion = GetConversionCallable(baseline);
+        SemanticCallableParameter parameter = conversion.Parameters.Single();
+        SemanticOperation conversionOperation = CSharpGuestSemanticFixture.Operation(
+            "conversion",
+            conversion.ReturnTypeId,
+            children: new[] { CSharpGuestSemanticFixture.Operation(
+                "parameter_reference", parameter.TypeId, parameter.SymbolId) },
+            conversion: new SemanticConversion(
+                "user_defined", true, false, true, false, false, false, true, conversion.MethodSymbolId + ":missing"));
+        SemanticDocument document = baseline with
+        {
+            ControlFlowGraphs = baseline.ControlFlowGraphs
+                .Where(graph => graph.MethodSymbolId != conversion.MethodSymbolId)
+                .Append(ReturnGraph(conversion.MethodSymbolId, conversionOperation))
+                .ToArray(),
+        };
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+
+        Assert(!result.Succeeded && result.Diagnostics.Any(item => item.Code == "ASCG1004"),
+            "a missing user-defined conversion target must fail with ASCG1004");
+    }
+
+    private static void MalformedUserDefinedConversionsFailClosed()
+    {
+        SemanticDocument baseline = AnalyzeConversionFixture();
+        SemanticCallable conversion = GetConversionCallable(baseline);
+        SemanticCallableParameter parameter = conversion.Parameters.Single();
+
+        SemanticDocument unreachable = baseline with
+        {
+            Reachability = baseline.Reachability! with
+            {
+                ReachableCallableIds = baseline.Reachability!.ReachableCallableIds
+                    .Where(id => id != conversion.MethodSymbolId)
+                    .ToArray(),
+            },
+        };
+        AssertConversionRejected(unreachable,
+            "an unreachable user-defined conversion callable");
+
+        SemanticCallable importedConversion = conversion with
+        {
+            HasBody = false,
+            Import = new SemanticCallableImport("env", "host_convert"),
+        };
+        SemanticDocument imported = ReplaceCallable(baseline, importedConversion);
+        imported = imported with
+        {
+            Reachability = imported.Reachability! with
+            {
+                ReachableImports = new[]
+                {
+                    new SemanticReachableImport(
+                        importedConversion.MethodSymbolId,
+                        importedConversion.Import!.Module,
+                        importedConversion.Import.Name),
+                },
+            },
+        };
+        AssertConversionRejected(imported,
+            "an imported user-defined conversion callable");
+
+        AssertConversionRejected(
+            ReplaceCallable(baseline, conversion with
+            {
+                Parameters = new[] { parameter with { RefKind = "ref" } },
+            }),
+            "a ref user-defined conversion callable");
+
+        AssertConversionRejected(
+            ReplaceCallable(baseline, conversion with { IsStatic = false }),
+            "an instance user-defined conversion callable");
+
+        AssertConversionRejected(
+            ReplaceCallable(baseline, conversion with { HasBody = false }),
+            "a user-defined conversion callable without a Guest body");
+    }
+
+    private static SemanticDocument AnalyzeConversionFixture()
     {
         const string source = """
             using System.Runtime.InteropServices;
@@ -199,29 +290,45 @@ internal static class CSharpGuestOperatorTests
             """;
         const string sourceId = "Scripts/MissingConversion.cs";
         FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
-        SemanticDocument baseline = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
-        SemanticCallable conversion = baseline.Callables.Single(callable =>
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            frontend.Source.Sha256);
+        Assert(semantic.Succeeded,
+            "conversion fixture should pass semantic analysis: "
+                + string.Join(" | ", semantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        return semantic;
+    }
+
+    private static SemanticCallable GetConversionCallable(SemanticDocument document)
+    {
+        return document.Callables.Single(callable =>
             callable.MethodSymbolId.Contains("Source.op_Implicit", StringComparison.Ordinal));
-        SemanticCallableParameter parameter = conversion.Parameters.Single();
-        SemanticOperation conversionOperation = CSharpGuestSemanticFixture.Operation(
-            "conversion",
-            conversion.ReturnTypeId,
-            children: new[] { CSharpGuestSemanticFixture.Operation(
-                "parameter_reference", parameter.TypeId, parameter.SymbolId) },
-            conversion: new SemanticConversion(
-                "user_defined", true, false, true, false, false, false, true, conversion.MethodSymbolId + ":missing"));
-        SemanticDocument document = baseline with
+    }
+
+    private static SemanticDocument ReplaceCallable(
+        SemanticDocument document,
+        SemanticCallable replacement)
+    {
+        return document with
         {
-            ControlFlowGraphs = baseline.ControlFlowGraphs
-                .Where(graph => graph.MethodSymbolId != conversion.MethodSymbolId)
-                .Append(ReturnGraph(conversion.MethodSymbolId, conversionOperation))
+            Callables = document.Callables
+                .Select(callable => callable.MethodSymbolId == replacement.MethodSymbolId
+                    ? replacement
+                    : callable)
                 .ToArray(),
         };
+    }
 
+    private static void AssertConversionRejected(SemanticDocument document, string description)
+    {
         CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
-
-        Assert(!result.Succeeded && result.Diagnostics.Any(item => item.Code == "ASCG1004"),
-            "a missing user-defined conversion target must fail with ASCG1004");
+        Assert(!result.Succeeded
+            && result.Module is null
+            && result.Diagnostics.Any(item => item.Code == "ASCG1004")
+            && result.Diagnostics.All(item => item.Code != "ASCG1006"),
+            description + " must fail with ASCG1004 before emitting or validating a call: "
+                + string.Join(" | ", result.Diagnostics.Select(item => item.Code + ":" + item.Message)));
     }
 
     private static SemanticControlFlowGraph ReturnGraph(string methodSymbolId, SemanticOperation returnValue)

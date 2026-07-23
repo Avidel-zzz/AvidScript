@@ -40,6 +40,8 @@ internal static class CSharpClassReferencePolicy
     {
         return callable.IsConstructor
             && !callable.IsStatic
+            && callable.HasBody
+            && callable.Import is null
             && IsClassReferenceTypeId(callable.ContainingTypeId)
             && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
             && callable.Parameters.Count == 1
@@ -49,28 +51,50 @@ internal static class CSharpClassReferencePolicy
 
     public static bool IsIntrinsicConstructor(SemanticDocument document, SemanticCallable callable)
     {
-        if (!IsIntrinsicConstructor(callable))
+        return IsIntrinsicConstructor(document, callable.ContainingTypeId, callable);
+    }
+
+    public static bool IsIntrinsicConstructor(
+        SemanticDocument document,
+        string? expectedTypeId,
+        SemanticCallable callable)
+    {
+        if (!string.Equals(callable.ContainingTypeId, expectedTypeId, StringComparison.Ordinal)
+            || !IsIntrinsicConstructor(callable))
         {
             return false;
         }
 
-        SemanticSymbol? symbol = document.Symbols.SingleOrDefault(item =>
-            string.Equals(item.Id, callable.MethodSymbolId, StringComparison.Ordinal));
-        return symbol is not null
-            && string.Equals(symbol.Accessibility, "internal", StringComparison.Ordinal);
+        return HasInternalSymbol(document.Symbols, callable);
     }
 
-    public static bool IsOrdinalField(SemanticDocument document, string? symbolId)
+    public static bool HasIntrinsicConstructor(
+        SemanticType type,
+        System.Collections.Generic.IReadOnlyList<SemanticSymbol> symbols,
+        System.Collections.Generic.IReadOnlyList<SemanticCallable> callables)
+    {
+        return callables.Count(callable =>
+            string.Equals(callable.ContainingTypeId, type.Id, StringComparison.Ordinal)
+            && IsIntrinsicConstructor(callable)
+            && HasInternalSymbol(symbols, callable)) == 1;
+    }
+
+    public static bool IsOrdinalField(
+        SemanticDocument document,
+        string? symbolId,
+        string? receiverTypeId)
     {
         SemanticSymbol? field = document.Symbols.SingleOrDefault(symbol =>
             string.Equals(symbol.Id, symbolId, StringComparison.Ordinal));
         return field is not null
             && field.Kind == "field"
             && !field.IsStatic
-            && document.Types.SingleOrDefault(type => string.Equals(
+            && string.Equals(
                 field.ContainingSymbolId,
-                "symbol:type:" + type.CanonicalName,
-                StringComparison.Ordinal)) is { } type
+                "symbol:" + receiverTypeId,
+                StringComparison.Ordinal)
+            && document.Types.SingleOrDefault(type =>
+                string.Equals(type.Id, receiverTypeId, StringComparison.Ordinal)) is { } type
             && IsType(type)
             && HasCanonicalField(type, document.Symbols);
     }
@@ -103,5 +127,21 @@ internal static class CSharpClassReferencePolicy
     private static bool IsIdentifierPart(char value)
     {
         return value == '_' || char.IsLetterOrDigit(value);
+    }
+
+    private static bool HasInternalSymbol(
+        System.Collections.Generic.IReadOnlyList<SemanticSymbol> symbols,
+        SemanticCallable callable)
+    {
+        SemanticSymbol? symbol = symbols.SingleOrDefault(item =>
+            string.Equals(item.Id, callable.MethodSymbolId, StringComparison.Ordinal));
+        return symbol is not null
+            && symbol.Kind == "constructor"
+            && !symbol.IsStatic
+            && string.Equals(
+                symbol.ContainingSymbolId,
+                "symbol:" + callable.ContainingTypeId,
+                StringComparison.Ordinal)
+            && string.Equals(symbol.Accessibility, "internal", StringComparison.Ordinal);
     }
 }

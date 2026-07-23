@@ -42,9 +42,17 @@ internal static class CSharpAggregateOperationLowerer
         }
 
         if (context.TryGetGuestType(operation.Children[0].TypeId, out GuestType receiverType)
-            && receiverType.Kind == "class_ref"
-            && CSharpClassReferencePolicy.IsOrdinalField(context.Document, operation.SymbolId))
+            && receiverType.Kind == "class_ref")
         {
+            if (!CSharpClassReferencePolicy.IsOrdinalField(
+                context.Document,
+                operation.SymbolId,
+                operation.Children[0].TypeId))
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} class reference ordinal field is malformed.");
+                return null;
+            }
+
             GuestRegister? classReference = CSharpOperationLowerer.LowerValue(
                 context,
                 operation.Children[0],

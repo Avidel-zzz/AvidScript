@@ -191,9 +191,20 @@ internal static class CSharpOperationLowerer
                     operation.Conversion.MethodSymbolId,
                     out SemanticCallable callable,
                     out string targetId)
+                || !callable.IsStatic
                 || callable.IsConstructor
+                || !callable.HasBody
+                || callable.Import is not null
                 || callable.Parameters.Count != 1
-                || !string.Equals(callable.Parameters[0].TypeId, operand.TypeId, StringComparison.Ordinal)
+                || !string.Equals(callable.Parameters[0].RefKind, "none", StringComparison.Ordinal)
+                || !string.Equals(
+                    callable.Parameters[0].TypeId,
+                    operation.Children[0].TypeId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    callable.Parameters[0].TypeId,
+                    operand.TypeId,
+                    StringComparison.Ordinal)
                 || !string.Equals(callable.ReturnTypeId, operation.TypeId, StringComparison.Ordinal))
             {
                 context.Add("ASCG1004", $"Block {blockOrdinal} user-defined conversion target is missing, unreachable, or malformed.");

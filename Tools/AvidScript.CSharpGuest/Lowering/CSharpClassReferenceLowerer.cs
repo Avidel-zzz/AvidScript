@@ -23,7 +23,10 @@ internal static class CSharpClassReferenceLowerer
         }
 
         if (!context.TryGetCallTarget(operation.SymbolId, out SemanticCallable constructor, out _)
-            || !CSharpClassReferencePolicy.IsIntrinsicConstructor(constructor)
+            || !CSharpClassReferencePolicy.IsIntrinsicConstructor(
+                context.Document,
+                operation.TypeId,
+                constructor)
             || operation.Children.Count != 1)
         {
             context.Add("ASCG1004", $"Block {blockOrdinal} class reference construction is malformed.");

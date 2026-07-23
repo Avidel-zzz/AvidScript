@@ -29,7 +29,13 @@ internal static class CSharpTypeLowerer
         };
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
-            GuestType? lowered = LowerType(type, document.Symbols, shapes, semanticTypes, diagnostics);
+            GuestType? lowered = LowerType(
+                type,
+                document.Symbols,
+                document.Callables,
+                shapes,
+                semanticTypes,
+                diagnostics);
             if (lowered is not null)
             {
                 rawTypes.Add(lowered);
@@ -58,6 +64,7 @@ internal static class CSharpTypeLowerer
     private static GuestType? LowerType(
         SemanticType type,
         IReadOnlyList<SemanticSymbol> symbols,
+        IReadOnlyList<SemanticCallable> callables,
         IReadOnlyDictionary<string, SemanticTypeShape> shapes,
         IReadOnlyDictionary<string, SemanticType> semanticTypes,
         List<GuestDiagnostic> diagnostics)
@@ -69,7 +76,8 @@ internal static class CSharpTypeLowerer
 
         if (CSharpClassReferencePolicy.IsType(type))
         {
-            if (!CSharpClassReferencePolicy.HasCanonicalField(type, symbols))
+            if (!CSharpClassReferencePolicy.HasCanonicalField(type, symbols)
+                || !CSharpClassReferencePolicy.HasIntrinsicConstructor(type, symbols, callables))
             {
                 Add(diagnostics, "ASCG1003", $"Class reference '{type.Id}' does not match the generated ordinal wrapper contract.");
                 return null;
