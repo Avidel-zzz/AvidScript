@@ -6,19 +6,13 @@
 
 Phase 50 的目标是为项目自定义 UE 类型建立 typed C# 到 WASM 再到 UE 的闭环：生成 typed `UE.Self`、typed class reference、typed `SpawnActor`、零 crossing upcast、一次 crossing checked downcast，以及自定义 native `UFUNCTION` 的 descriptor 驱动调用。
 
-## 结构门禁预验证身份
+## 结构预验证与正式 Gate
 
-本节只记录 Task 12 结构门禁在已提交生产源码上的预验证，不替代正式 Phase Gate：
+Task 12 使用 `Build/TestPhase50Architecture.ps1` 对 Phase 50 高价值合同执行独立结构预验证。该 checker 的所有生产输入都经统一清单读取，包含 `AvidScript.uplugin`；`Gate` 模式要求运行目录是干净的已提交 Git tree，并输出 commit、tree、checker SHA-256 与输入数量。精确预验证身份与命令结果记录在 `.superpowers/sdd/task-12-report.md`。
 
-| 字段 | 实际值 |
-| --- | --- |
-| 验证 commit | `2536f0808fcce8d099011e3a2d138bc5e586d241` |
-| 验证 tree | `2c2566963eeb5712d2d5095c312fda9b89fc75f1` |
-| checker SHA-256 | `2382ec8bedc5d3a0db75b8ed535850a8eb231cb986e9129fc0548b708b8932d2` |
-| 验证环境 | detached clean worktree；所有 architecture 输入与该 tree 一致 |
-| parser / architecture 结果 | 通过 / 通过 |
+结构预验证只回答“当前已提交候选是否满足 Task 12 静态合同”，不是 PhaseWorkflow 的正式 Gate，也不产生 freeze、attest 或 close evidence。正式 Phase Gate 仍为 **Pending**，必须在最终候选冻结后重新执行并写入不可变 evidence。
 
-Task 12 修复提交后的主线 commit/tree 尚未冻结，必须在干净主线提交上再次运行同一脚本，并由正式不可变 Gate evidence 记录最终 commit/tree。该项保持 `Pending`。
+本轮 checker 还明确验证 `65f5bc2` 引入的 canonical emission 路径：`ValidateCanonicalDescriptor` 从 `Package.SelfTypeId` 反查 `ClassPath`，再通过 `GenerateFromProfile(Profile, ClassReferences, ...)` 重建 canonical descriptor；不再依赖旧的 `GenerateWithClassReferences` token 假设。
 
 ## 验收映射
 
@@ -33,7 +27,7 @@ Task 12 修复提交后的主线 commit/tree 尚未冻结，必须在干净主�
 | wrong owner 在 BeginPlay 前拒绝 | Task 8、10 | `9a9547e`、`2536f08`；Task 8 review，Task 10 review 待填 | 待填 Automation callback evidence | Pending |
 | 拒绝 reload 后旧 Runtime 保活 | Task 8、10 | `9a9547e`、`2536f08`；Task 8 review，Task 10 review 待填 | 待填 Automation scheduler/Tick evidence | Pending |
 | warm path 无 class load/path lookup | Task 3、6、11 | `1971539`、`0724a7b`；Task 6/11 review | 待填 benchmark 采样与复核 | Pending |
-| 无项目专用 wrapper | Task 2、9、12 | `Build/CheckAvidScriptArchitecture.ps1` | 待填 architecture gate output | Pending |
+| 无项目专用 wrapper | Task 2、9、12 | `Build/CheckAvidScriptArchitecture.ps1`、`Build/TestPhase50Architecture.ps1` | 待填 architecture gate output | Pending |
 | 中文样例、性能说明与收尾文档 | Task 10、11、12 | `0724a7b`；Task 11 review | 待填文档审查和 Gate evidence | Pending |
 
 ## 集中验证清单
@@ -44,7 +38,7 @@ Task 12 修复提交后的主线 commit/tree 尚未冻结，必须在干净主�
 | --- | --- | --- | --- |
 | PowerShell parser | 所有 tracked `.ps1` 经过 `Parser.ParseFile` | Pending | 待 Gate 写入 |
 | .NET 合同与格式 | 固定 SDK `8.0.416`，共享 project graph 串行执行 | Pending | 待 Gate 写入 |
-| 架构门禁 | `Build/CheckAvidScriptArchitecture.ps1` | 结构预验证通过；正式 Gate Pending | 待冻结主线重跑并写入不可变 evidence |
+| 架构门禁 | `Build/CheckAvidScriptArchitecture.ps1`、`Build/TestPhase50Architecture.ps1 -Mode Gate` | 结构预验证与正式 Gate 分离；正式 Gate Pending | 待冻结主线重跑并写入不可变 evidence |
 | UE5.8 no-clean UBT | 最终四模块 scoped build | Pending，未执行 | 待 Gate 写入 |
 | 完整 Automation | `Automation RunTests AvidScript` | Pending，未执行 | 待 Gate 写入 |
 | 性能 benchmark | typed dispatch 同机采样、回退判定 | Pending，未执行 | 待 Gate 写入 |
