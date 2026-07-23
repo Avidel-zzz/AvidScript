@@ -6,7 +6,8 @@ bool FAvidScriptActorBinding::GetActorTransforms(
 	const FAvidScriptObjectRegistry& Registry,
 	TConstArrayView<FAvidScriptObjectHandle> ActorHandles,
 	TArray<FAvidScriptActorTransformSnapshot>& OutTransforms,
-	FAvidScriptActorTransformBatchResult& OutResult)
+	FAvidScriptActorTransformBatchResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	OutTransforms.Reset();
 	OutResult = FAvidScriptActorTransformBatchResult();
@@ -29,7 +30,7 @@ bool FAvidScriptActorBinding::GetActorTransforms(
 	{
 		FAvidScriptActorTransformSnapshot Snapshot;
 		FAvidScriptActorBindingResult ItemResult;
-		if (!GetActorTransform(Registry, ActorHandles[Index], Snapshot, ItemResult))
+		if (!GetActorTransform(Registry, ActorHandles[Index], Snapshot, ItemResult, DiagnosticsPolicy))
 		{
 			OutResult.ProcessedCount = Index;
 			OutResult.FailedIndex = Index;

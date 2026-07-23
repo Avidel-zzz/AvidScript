@@ -1,5 +1,7 @@
 #include "AvidScriptRuntimeBenchmark.h"
 
+#include "Benchmark/AvidScriptBenchmarkStatistics.h"
+
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmRuntime.h"
@@ -13,43 +15,16 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeBenchmark, Log, All);
 
 namespace
 {
-constexpr double AvidScriptMinimumBenchmarkMs = 0.0001;
-
 FAvidScriptBenchmarkStats CalculateStats(TArray<double> Samples)
 {
-	FAvidScriptBenchmarkStats Stats;
-	Stats.Count = Samples.Num();
-
-	if (Samples.IsEmpty())
-	{
-		return Stats;
-	}
-
-	Samples.Sort();
-
-	double TotalMs = 0.0;
-	for (const double Sample : Samples)
-	{
-		TotalMs += Sample;
-	}
-
-	const int32 LastIndex = Samples.Num() - 1;
-	const int32 P50Index = FMath::Clamp(FMath::RoundToInt(static_cast<double>(LastIndex) * 0.50), 0, LastIndex);
-	const int32 P95Index = FMath::Clamp(FMath::CeilToInt(static_cast<double>(LastIndex) * 0.95), 0, LastIndex);
-
-	Stats.MinMs = Samples[0];
-	Stats.MaxMs = Samples[LastIndex];
-	Stats.AvgMs = TotalMs / static_cast<double>(Samples.Num());
-	Stats.P50Ms = Samples[P50Index];
-	Stats.P95Ms = Samples[P95Index];
-	return Stats;
+	return CalculateAvidScriptBenchmarkStats(MoveTemp(Samples));
 }
 
 double MeasureElapsedPerIterationMs(double StartSeconds, int32 Iterations)
 {
 	const int32 SafeIterations = FMath::Max(Iterations, 1);
 	const double ElapsedMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
-	return FMath::Max(ElapsedMs / static_cast<double>(SafeIterations), AvidScriptMinimumBenchmarkMs);
+	return ElapsedMs / static_cast<double>(SafeIterations);
 }
 
 bool CreateBenchmarkWorld(UWorld*& OutWorld)
@@ -740,7 +715,12 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		FAvidScriptActorBindingResult BindingGetResult;
 		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
 		{
-			if (!FAvidScriptActorBinding::GetActorLocation(Registry, ActorHandle, BindingLocation, BindingGetResult))
+			if (!FAvidScriptActorBinding::GetActorLocation(
+				Registry,
+				ActorHandle,
+				BindingLocation,
+				BindingGetResult,
+				EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 			{
 				SetHostBindingFailure(
 					OutResult,
@@ -766,7 +746,9 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 				ActorHandle,
 				TargetLocation,
 				EAvidScriptActorWritePolicy::AllowWrites,
-				BindingSetResult))
+				BindingSetResult,
+				nullptr,
+				EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 			{
 				SetHostBindingFailure(
 					OutResult,
@@ -787,7 +769,12 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		{
 			for (const FAvidScriptObjectHandle& TransformHandle : TransformHandles)
 			{
-				if (!FAvidScriptActorBinding::GetActorTransform(Registry, TransformHandle, ScalarSnapshot, ScalarTransformResult))
+				if (!FAvidScriptActorBinding::GetActorTransform(
+					Registry,
+					TransformHandle,
+					ScalarSnapshot,
+					ScalarTransformResult,
+					EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 				{
 					SetHostBindingFailure(
 						OutResult,
@@ -806,7 +793,12 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 		FAvidScriptActorTransformBatchResult BatchTransformResult;
 		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
 		{
-			if (!FAvidScriptActorBinding::GetActorTransforms(Registry, TransformHandles, BatchSnapshots, BatchTransformResult))
+			if (!FAvidScriptActorBinding::GetActorTransforms(
+				Registry,
+				TransformHandles,
+				BatchSnapshots,
+				BatchTransformResult,
+				EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 			{
 				SetHostBindingFailure(
 					OutResult,

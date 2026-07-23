@@ -107,6 +107,7 @@ bool FAvidScriptSceneComponentBindingWorldLocationSmokeTest::RunTest(const FStri
 		TEXT("Actor returns a handle-backed root component"),
 		FAvidScriptActorBinding::GetRootComponentHandle(Registry, ActorHandle, ComponentHandle, RootResult));
 	TestTrue(TEXT("Root component handle is valid"), ComponentHandle.IsValid());
+	TestFalse(TEXT("Public root component diagnostics include the actor path by default"), RootResult.ObjectPath.IsEmpty());
 	TestNotEqual(TEXT("Root component uses a distinct object slot"), ComponentHandle.Slot, ActorHandle.Slot);
 	const int32 SlotsAfterFirstLookup = Registry.NumSlots();
 	FAvidScriptObjectHandle RepeatedComponentHandle;
@@ -125,6 +126,19 @@ bool FAvidScriptSceneComponentBindingWorldLocationSmokeTest::RunTest(const FStri
 		TEXT("SceneComponent world location is readable"),
 		FAvidScriptSceneComponentBinding::GetWorldLocation(Registry, ComponentHandle, ReadLocation, ReadResult));
 	TestTrue(TEXT("Read location matches component"), ReadLocation.Equals(InitialLocation, 0.01));
+	TestFalse(TEXT("Public component diagnostics include the component path by default"), ReadResult.ObjectPath.IsEmpty());
+
+	FVector FastPathLocation = FVector::ZeroVector;
+	FAvidScriptSceneComponentBindingResult FastPathResult;
+	TestTrue(
+		TEXT("SceneComponent supports explicit zero-path hot diagnostics"),
+		FAvidScriptSceneComponentBinding::GetWorldLocation(
+			Registry,
+			ComponentHandle,
+			FastPathLocation,
+			FastPathResult,
+			EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath));
+	TestTrue(TEXT("Explicit component hot diagnostics omit the object path"), FastPathResult.ObjectPath.IsEmpty());
 
 	const FVector TargetLocation(101.0, 202.0, 303.0);
 	FAvidScriptSceneComponentBindingResult WriteResult;

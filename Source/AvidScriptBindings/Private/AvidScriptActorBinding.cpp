@@ -7,10 +7,11 @@ bool FAvidScriptActorBinding::GetActorTransform(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	FAvidScriptActorTransformSnapshot& OutTransform,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	OutTransform = FAvidScriptActorTransformSnapshot();
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		return false;
@@ -29,9 +30,10 @@ bool FAvidScriptActorBinding::GetActorLocation(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	FVector& OutLocation,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		OutLocation = FVector::ZeroVector;
@@ -49,9 +51,10 @@ bool FAvidScriptActorBinding::SetActorLocation(
 	const FVector& Location,
 	EAvidScriptActorWritePolicy WritePolicy,
 	FAvidScriptActorBindingResult& OutResult,
-	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		return false;
@@ -94,10 +97,11 @@ bool FAvidScriptActorBinding::AddActorLocationOffset(
 	const FVector& Offset,
 	EAvidScriptActorWritePolicy WritePolicy,
 	FAvidScriptActorBindingResult& OutResult,
-	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	FVector CurrentLocation = FVector::ZeroVector;
-	if (!GetActorLocation(Registry, ActorHandle, CurrentLocation, OutResult))
+	if (!GetActorLocation(Registry, ActorHandle, CurrentLocation, OutResult, DiagnosticsPolicy))
 	{
 		return false;
 	}
@@ -108,16 +112,18 @@ bool FAvidScriptActorBinding::AddActorLocationOffset(
 		CurrentLocation + Offset,
 		WritePolicy,
 		OutResult,
-		HostEffectJournal);
+		HostEffectJournal,
+		DiagnosticsPolicy);
 }
 
 bool FAvidScriptActorBinding::GetActorRotation(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	FRotator& OutRotation,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		OutRotation = FRotator::ZeroRotator;
@@ -135,9 +141,10 @@ bool FAvidScriptActorBinding::SetActorRotation(
 	const FRotator& Rotation,
 	EAvidScriptActorWritePolicy WritePolicy,
 	FAvidScriptActorBindingResult& OutResult,
-	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		return false;
@@ -179,9 +186,10 @@ bool FAvidScriptActorBinding::GetActorScale3D(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	FVector& OutScale3D,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		OutScale3D = FVector::ZeroVector;
@@ -199,9 +207,10 @@ bool FAvidScriptActorBinding::SetActorScale3D(
 	const FVector& Scale3D,
 	EAvidScriptActorWritePolicy WritePolicy,
 	FAvidScriptActorBindingResult& OutResult,
-	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		return false;
@@ -243,10 +252,11 @@ bool FAvidScriptActorBinding::GetRootComponentHandle(
 	FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
 	FAvidScriptObjectHandle& OutComponentHandle,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	OutComponentHandle = FAvidScriptObjectHandle();
-	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult);
+	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
 	if (Actor == nullptr)
 	{
 		return false;
@@ -264,7 +274,10 @@ bool FAvidScriptActorBinding::GetRootComponentHandle(
 	}
 
 	FAvidScriptObjectHandleResult RegisterResult;
-	OutComponentHandle = Registry.RegisterObject(RootComponent, RegisterResult);
+	OutComponentHandle = Registry.RegisterObject(
+		RootComponent,
+		RegisterResult,
+		DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 	if (!RegisterResult.bSucceeded)
 	{
 		SetFailure(
@@ -282,10 +295,14 @@ bool FAvidScriptActorBinding::GetRootComponentHandle(
 AActor* FAvidScriptActorBinding::ResolveActor(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ActorHandle,
-	FAvidScriptActorBindingResult& OutResult)
+	FAvidScriptActorBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	FAvidScriptObjectHandleResult ObjectResult;
-	AActor* Actor = Registry.ResolveObject<AActor>(ActorHandle, ObjectResult);
+	AActor* Actor = Registry.ResolveObject<AActor>(
+		ActorHandle,
+		ObjectResult,
+		DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 	if (Actor == nullptr)
 	{
 		SetFailure(
@@ -352,14 +369,15 @@ void FAvidScriptActorBinding::SetSuccess(
 	const FRotator& Rotation,
 	const FVector& Scale3D)
 {
-	OutResult = FAvidScriptActorBindingResult();
-	OutResult.bSucceeded = true;
-	OutResult.Handle = ObjectResult.Handle;
-	OutResult.ObjectPath = ObjectResult.ObjectPath;
-	OutResult.Location = Location;
-	OutResult.Rotation = Rotation;
-	OutResult.Scale3D = Scale3D;
-	OutResult.ObjectResult = ObjectResult;
+	FAvidScriptActorBindingResult SuccessResult;
+	SuccessResult.bSucceeded = true;
+	SuccessResult.Handle = ObjectResult.Handle;
+	SuccessResult.ObjectPath = ObjectResult.ObjectPath;
+	SuccessResult.Location = Location;
+	SuccessResult.Rotation = Rotation;
+	SuccessResult.Scale3D = Scale3D;
+	SuccessResult.ObjectResult = ObjectResult;
+	OutResult = MoveTemp(SuccessResult);
 }
 
 void FAvidScriptActorBinding::SetFailure(
@@ -368,17 +386,18 @@ void FAvidScriptActorBinding::SetFailure(
 	const FString& ErrorCategory,
 	const FString& NextAction)
 {
-	OutResult = FAvidScriptActorBindingResult();
-	OutResult.Handle = ObjectResult.Handle;
-	OutResult.ObjectPath = ObjectResult.ObjectPath;
-	OutResult.ErrorCategory = ErrorCategory;
-	OutResult.NextAction = NextAction;
-	OutResult.ObjectResult = ObjectResult;
-	OutResult.ErrorMessage = FString::Printf(
+	FAvidScriptActorBindingResult FailureResult;
+	FailureResult.Handle = ObjectResult.Handle;
+	FailureResult.ObjectPath = ObjectResult.ObjectPath;
+	FailureResult.ErrorCategory = ErrorCategory;
+	FailureResult.NextAction = NextAction;
+	FailureResult.ObjectResult = ObjectResult;
+	FailureResult.ErrorMessage = FString::Printf(
 		TEXT("AvidScript actor binding error | category=%s | slot=%u | generation=%u | object=%s | next=%s"),
 		*ErrorCategory,
 		ObjectResult.Handle.Slot,
 		ObjectResult.Handle.Generation,
-		OutResult.ObjectPath.IsEmpty() ? TEXT("<none>") : *OutResult.ObjectPath,
+		FailureResult.ObjectPath.IsEmpty() ? TEXT("<none>") : *FailureResult.ObjectPath,
 		*NextAction);
+	OutResult = MoveTemp(FailureResult);
 }

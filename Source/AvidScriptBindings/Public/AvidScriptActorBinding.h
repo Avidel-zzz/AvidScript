@@ -14,6 +14,12 @@ enum class EAvidScriptActorWritePolicy : uint8
 	AllowWrites
 };
 
+enum class EAvidScriptBindingDiagnosticsPolicy : uint8
+{
+	IncludeObjectPath,
+	OmitObjectPath
+};
+
 struct FAvidScriptActorBindingResult
 {
 	bool bSucceeded = false;
@@ -35,19 +41,22 @@ public:
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		FAvidScriptActorTransformSnapshot& OutTransform,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool GetActorTransforms(
 		const FAvidScriptObjectRegistry& Registry,
 		TConstArrayView<FAvidScriptObjectHandle> ActorHandles,
 		TArray<FAvidScriptActorTransformSnapshot>& OutTransforms,
-		FAvidScriptActorTransformBatchResult& OutResult);
+		FAvidScriptActorTransformBatchResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool GetActorLocation(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		FVector& OutLocation,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool SetActorLocation(
 		FAvidScriptObjectRegistry& Registry,
@@ -55,7 +64,8 @@ public:
 		const FVector& Location,
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult,
-		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool AddActorLocationOffset(
 		FAvidScriptObjectRegistry& Registry,
@@ -63,13 +73,15 @@ public:
 		const FVector& Offset,
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult,
-		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool GetActorRotation(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		FRotator& OutRotation,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool SetActorRotation(
 		FAvidScriptObjectRegistry& Registry,
@@ -77,13 +89,15 @@ public:
 		const FRotator& Rotation,
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult,
-		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool GetActorScale3D(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		FVector& OutScale3D,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool SetActorScale3D(
 		FAvidScriptObjectRegistry& Registry,
@@ -91,19 +105,22 @@ public:
 		const FVector& Scale3D,
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptActorBindingResult& OutResult,
-		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool GetRootComponentHandle(
 		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
 		FAvidScriptObjectHandle& OutComponentHandle,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 private:
 	static AActor* ResolveActor(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,
-		FAvidScriptActorBindingResult& OutResult);
+		FAvidScriptActorBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy);
 	static bool PrepareTransformWrite(
 		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ActorHandle,

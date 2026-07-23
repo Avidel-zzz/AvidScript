@@ -23,13 +23,24 @@ bool FAvidScriptObjectRegistryHandleSmokeTest::RunTest(const FString& Parameters
 
 	TestTrue(TEXT("Registering a live UObject succeeds"), RegisterResult.bSucceeded);
 	TestTrue(TEXT("Generated object handle is valid"), Handle.IsValid());
+	TestFalse(TEXT("Default registration preserves the diagnostic object path"), RegisterResult.ObjectPath.IsEmpty());
 	TestNotEqual(TEXT("Guest-visible handle is not the raw UObject pointer"), Handle.ToUInt64(), reinterpret_cast<uint64>(Object));
+	FAvidScriptObjectHandleResult DiagnosticRegisterResult;
+	const FAvidScriptObjectHandle DiagnosticHandle = Registry.RegisterObject(Object, DiagnosticRegisterResult, false);
+	TestEqual(TEXT("Fast registration reuses the same handle"), DiagnosticHandle, Handle);
+	TestTrue(TEXT("Explicit fast registration omits the object path"), DiagnosticRegisterResult.ObjectPath.IsEmpty());
 
 	FAvidScriptObjectHandleResult ResolveResult;
-	UObject* ResolvedObject = Registry.ResolveObject<UObject>(Handle, ResolveResult);
+	UObject* ResolvedObject = Registry.ResolveObject<UObject>(Handle, ResolveResult, false);
 
 	TestTrue(TEXT("Resolving a valid handle succeeds"), ResolveResult.bSucceeded);
 	TestTrue(TEXT("Resolved object is the registered UObject"), ResolvedObject == Object);
+	TestTrue(TEXT("Successful hot-path resolve does not construct an object path"), ResolveResult.ObjectPath.IsEmpty());
+	FAvidScriptObjectHandleResult DefaultResolveResult;
+	TestTrue(
+		TEXT("Default resolve preserves the registered object"),
+		Registry.ResolveObject<UObject>(Handle, DefaultResolveResult) == Object);
+	TestFalse(TEXT("Default resolve preserves the diagnostic object path"), DefaultResolveResult.ObjectPath.IsEmpty());
 
 	return true;
 }

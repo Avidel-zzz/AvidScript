@@ -1071,7 +1071,12 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, i
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::GetActorLocation(*HostContext.ObjectRegistry, ActorHandle, OutLocation, BindingResult))
+	if (!FAvidScriptActorBinding::GetActorLocation(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		OutLocation,
+		BindingResult,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1126,7 +1131,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetLocationImport(int32 Slot, i
 		Location,
 		HostContext.ActorWritePolicy,
 		BindingResult,
-		HostContext.HostEffectJournal))
+		HostContext.HostEffectJournal,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1181,7 +1187,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorAddLocationOffsetImport(int32 S
 		Offset,
 		HostContext.ActorWritePolicy,
 		BindingResult,
-		HostContext.HostEffectJournal))
+		HostContext.HostEffectJournal,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1231,7 +1238,12 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRotationImport(int32 Slot, i
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::GetActorRotation(*HostContext.ObjectRegistry, ActorHandle, OutRotation, BindingResult))
+	if (!FAvidScriptActorBinding::GetActorRotation(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		OutRotation,
+		BindingResult,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1286,7 +1298,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetRotationImport(int32 Slot, i
 		Rotation,
 		HostContext.ActorWritePolicy,
 		BindingResult,
-		HostContext.HostEffectJournal))
+		HostContext.HostEffectJournal,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1330,7 +1343,12 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetScaleImport(int32 Slot, int3
 	ActorHandle.Generation = static_cast<uint32>(Generation);
 
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::GetActorScale3D(*HostContext.ObjectRegistry, ActorHandle, OutScale3D, BindingResult))
+	if (!FAvidScriptActorBinding::GetActorScale3D(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		OutScale3D,
+		BindingResult,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_scale"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Actor scale read failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -1374,7 +1392,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorSetScaleImport(int32 Slot, int3
 		Scale3D,
 		HostContext.ActorWritePolicy,
 		BindingResult,
-		HostContext.HostEffectJournal))
+		HostContext.HostEffectJournal,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_set_scale"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Actor scale write failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -1448,7 +1467,8 @@ bool FAvidScriptWasmRuntimeInstance::HandleActorGetTransformBatchImport(
 			*HostContext.ObjectRegistry,
 			TransformBatchHandleScratch,
 			TransformBatchSnapshotScratch,
-			BatchResult))
+			BatchResult,
+			EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(
 			TEXT("avidscript"),
@@ -1532,7 +1552,12 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 
 	const FAvidScriptObjectHandle ActorHandle{ static_cast<uint32>(Slot), static_cast<uint32>(Generation) };
 	FAvidScriptActorBindingResult BindingResult;
-	if (!FAvidScriptActorBinding::GetRootComponentHandle(*HostContext.ObjectRegistry, ActorHandle, OutComponentHandle, BindingResult))
+	if (!FAvidScriptActorBinding::GetRootComponentHandle(
+		*HostContext.ObjectRegistry,
+		ActorHandle,
+		OutComponentHandle,
+		BindingResult,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_root_component"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Root component lookup failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -1571,7 +1596,12 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentGetWorldLocationImport
 
 	const FAvidScriptObjectHandle ComponentHandle{ static_cast<uint32>(Slot), static_cast<uint32>(Generation) };
 	FAvidScriptSceneComponentBindingResult BindingResult;
-	if (!FAvidScriptSceneComponentBinding::GetWorldLocation(*HostContext.ObjectRegistry, ComponentHandle, OutWorldLocation, BindingResult))
+	if (!FAvidScriptSceneComponentBinding::GetWorldLocation(
+		*HostContext.ObjectRegistry,
+		ComponentHandle,
+		OutWorldLocation,
+		BindingResult,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("scene_component_get_world_location"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("SceneComponent location read failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -1615,7 +1645,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleSceneComponentSetWorldLocationImport
 		WorldLocation,
 		HostContext.ActorWritePolicy,
 		BindingResult,
-		HostContext.HostEffectJournal))
+		HostContext.HostEffectJournal,
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("scene_component_set_world_location"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("SceneComponent location write failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);

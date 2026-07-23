@@ -24,6 +24,12 @@ struct FAvidScriptBindingPackageLoadResult
 	FString ErrorDetails;
 };
 
+struct FAvidScriptBindingPackageInstrumentation
+{
+	uint64 ClassLoadCount = 0;
+	uint64 ReflectedNameLookupCount = 0;
+};
+
 struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
@@ -49,6 +55,7 @@ public:
 	const FString& GetPackageName() const;
 	const FString& GetPackageHash() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
+	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetClassReferenceCount() const;
 	bool TryResolveClassReference(

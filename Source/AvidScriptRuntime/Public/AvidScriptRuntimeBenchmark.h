@@ -90,6 +90,37 @@ struct FAvidScriptHostBindingBenchmarkResult
 	FAvidScriptBenchmarkStats WasmBatchGetActorTransforms;
 };
 
+struct FAvidScriptObjectLifecycleBenchmarkOptions
+{
+	int32 WarmupCount = 2;
+	int32 SampleCount = 20;
+	int32 IterationsPerSample = 128;
+};
+
+struct FAvidScriptObjectLifecycleBenchmarkResult
+{
+	bool bSucceeded = false;
+	int32 WarmupCount = 0;
+	int32 SampleCount = 0;
+	int32 IterationsPerSample = 0;
+	int32 BindingPackageClassLoadsDuringLoad = 0;
+	int32 BindingPackageReflectedNameLookupsDuringLoad = 0;
+	int32 BindingPackageClassLoadsDuringWarmLoop = 0;
+	int32 BindingPackageReflectedNameLookupsDuringWarmLoop = 0;
+	int32 SpawnImportsPerIteration = 0;
+	int32 DestroyImportsPerIteration = 0;
+	int32 WasmLifecycleImportsObserved = 0;
+	FString ErrorCategory;
+	FString ErrorMessage;
+	FString Summary;
+	FAvidScriptBenchmarkStats NativeSpawnActor;
+	FAvidScriptBenchmarkStats BindingSpawnActor;
+	FAvidScriptBenchmarkStats NativeDestroyActor;
+	FAvidScriptBenchmarkStats BindingDestroyActor;
+	FAvidScriptBenchmarkStats ClassOrdinalResolve;
+	FAvidScriptBenchmarkStats RegistryResolveSpawnedActor;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeBenchmark
 {
 public:
@@ -104,4 +135,8 @@ public:
 	static bool RunHostBindingBenchmark(
 		const FAvidScriptHostBindingBenchmarkOptions& Options,
 		FAvidScriptHostBindingBenchmarkResult& OutResult);
+
+	static bool RunObjectLifecycleBenchmark(
+		const FAvidScriptObjectLifecycleBenchmarkOptions& Options,
+		FAvidScriptObjectLifecycleBenchmarkResult& OutResult);
 };

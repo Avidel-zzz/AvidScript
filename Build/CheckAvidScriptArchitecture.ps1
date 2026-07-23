@@ -399,7 +399,11 @@ $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/A
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
 $ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectLifecycleBinding.h'
 $ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
+$BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$ObjectRegistryHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'
+$ObjectRegistrySource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'
+$RuntimeComponentSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptComponent.cpp'
 foreach ($RequiredSelectionContract in @(
     'FAvidScriptBindingSelectionProfile',
     'FAvidScriptBindingSelectionIssue',
@@ -715,6 +719,90 @@ foreach ($RequiredDynamicProjectileIntegrationContract in @(
 )) {
     if (-not $DynamicProjectileIntegrationTest.Contains($RequiredDynamicProjectileIntegrationContract)) {
         Add-Violation "dynamic projectile integration evidence is missing $RequiredDynamicProjectileIntegrationContract"
+    }
+}
+$ObjectLifecycleBenchmarkHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeBenchmark.h'
+$ObjectLifecycleBenchmarkSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Benchmark/AvidScriptObjectLifecycleBenchmark.cpp'
+$ObjectLifecycleBenchmarkTest = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptObjectLifecycleBenchmarkTests.cpp'
+$ActorBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptActorBinding.h'
+$ActorBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptActorBinding.cpp'
+$SceneComponentBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptSceneComponentBinding.h'
+$WasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+foreach ($RequiredLifecycleBenchmarkContract in @(
+    'FAvidScriptObjectLifecycleBenchmarkResult',
+    'RunObjectLifecycleBenchmark',
+    'NativeSpawnActor',
+    'BindingSpawnActor',
+    'NativeDestroyActor',
+    'BindingDestroyActor',
+    'ClassOrdinalResolve',
+    'RegistryResolveSpawnedActor',
+    'BindingPackageClassLoadsDuringWarmLoop',
+    'BindingPackageReflectedNameLookupsDuringWarmLoop',
+    'SpawnImportsPerIteration',
+    'DestroyImportsPerIteration',
+    'WasmLifecycleImportsObserved'
+)) {
+    if (-not $ObjectLifecycleBenchmarkHeader.Contains($RequiredLifecycleBenchmarkContract) -and
+        -not $ObjectLifecycleBenchmarkSource.Contains($RequiredLifecycleBenchmarkContract)) {
+        Add-Violation "object lifecycle benchmark is missing $RequiredLifecycleBenchmarkContract"
+    }
+}
+foreach ($RequiredLifecycleBenchmarkImplementation in @(
+    'Package->TryResolveClassReference(0, ResolvedClass, ResolvedBaseClass)',
+    'Registry.ResolveObject<AActor>(ResolveHandle, ResolveResult, false)',
+    'DispatchLifecycleBenchmarkCall(',
+    'RunLifecycleWasmCrossingProbe(',
+    'const bool bNativeFirst = (RunIndex & 1) == 0',
+    'Registry.GetLiveHandleCount() != 1',
+    'Package->GetInstrumentation()',
+    'InstrumentationAfterWarmLoop.ClassLoadCount',
+    'InstrumentationAfterWarmLoop.ReflectedNameLookupCount'
+)) {
+    if (-not $ObjectLifecycleBenchmarkSource.Contains($RequiredLifecycleBenchmarkImplementation)) {
+        Add-Violation "object lifecycle benchmark is missing fair warm-loop contract $RequiredLifecycleBenchmarkImplementation"
+    }
+}
+if ($ObjectLifecycleBenchmarkSource -match '\b(LoadObject|StaticLoadObject|FindFunction)\s*\(') {
+    Add-Violation 'object lifecycle benchmark timed owner must not perform class loads or reflected name lookup'
+}
+foreach ($RequiredLifecycleBenchmarkTestContract in @(
+    'AvidScript.Performance.ObjectLifecycleBenchmarkSmoke',
+    'Warm loop performs no binding package class loads',
+    'Warm loop performs no binding package reflected name lookups',
+    'Real WAMR probe observes Spawn and Destroy imports',
+    'SpawnActor uses one host import',
+    'DestroyActor uses one host import',
+	'warm_binding_package_reflected_name_lookups',
+    'Nearest-rank P95 uses the nineteenth of twenty samples'
+)) {
+    if (-not $ObjectLifecycleBenchmarkTest.Contains($RequiredLifecycleBenchmarkTestContract)) {
+        Add-Violation "object lifecycle benchmark test is missing $RequiredLifecycleBenchmarkTestContract"
+    }
+}
+if (-not $ObjectRegistryHeader.Contains('bool bIncludeObjectPath = true') -or
+    -not $ObjectRegistrySource.Contains('SetSuccess(OutResult, Handle, Object, bIncludeObjectPath)') -or
+    -not $BindingInvocationSource.Contains('ResolveObject<AActor>(Handle, ResolveResult, false)') -or
+    -not $BindingInvocationSource.Contains('ReleaseHandle(Handle, ReleaseResult, false)') -or
+    -not $RuntimeComponentSource.Contains('ObjectRegistry.RegisterObject(Owner, RegisterResult, true)')) {
+    Add-Violation 'object registry must preserve diagnostic defaults and require explicit zero-diagnostic hot-path policy'
+}
+if (-not $ActorBindingHeader.Contains('EAvidScriptBindingDiagnosticsPolicy') -or
+    -not $ActorBindingHeader.Contains('EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath') -or
+    -not $SceneComponentBindingHeader.Contains('EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath') -or
+    -not $ActorBindingSource.Contains('DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath') -or
+    -not $WasmRuntimeSource.Contains('EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath')) {
+    Add-Violation 'typed binding public APIs must preserve object-path diagnostics while WASM hot paths explicitly omit them'
+}
+foreach ($RequiredBindingInstrumentationContract in @(
+    'FAvidScriptBindingPackageInstrumentation',
+    'GetInstrumentation() const',
+    'Instrumentation.ClassLoadCount',
+    'Instrumentation.ReflectedNameLookupCount'
+)) {
+    if (-not $BindingInvocationHeader.Contains($RequiredBindingInstrumentationContract) -and
+        -not $BindingInvocationSource.Contains($RequiredBindingInstrumentationContract)) {
+        Add-Violation "binding package instrumentation is missing $RequiredBindingInstrumentationContract"
     }
 }
 if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")') -or

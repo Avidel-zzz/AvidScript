@@ -806,7 +806,7 @@ bool WriteAvidScriptRuntimeValueToGuest(
 				return false;
 			}
 			FAvidScriptObjectHandleResult RegisterResult;
-			Handle = Context.ObjectRegistry->RegisterObject(Object, RegisterResult);
+			Handle = Context.ObjectRegistry->RegisterObject(Object, RegisterResult, false);
 			if (!Handle.IsValid())
 			{
 				OutDetails = RegisterResult.ErrorMessage;
@@ -1098,7 +1098,7 @@ bool DispatchAvidScriptObjectLifecycle(
 		}
 
 		FAvidScriptObjectHandleResult RegisterResult;
-		const FAvidScriptObjectHandle Handle = Context.ObjectRegistry->RegisterObject(Actor, RegisterResult);
+		const FAvidScriptObjectHandle Handle = Context.ObjectRegistry->RegisterObject(Actor, RegisterResult, false);
 		if (!RegisterResult.bSucceeded || !Handle.IsValid())
 		{
 			Actor->Destroy();
@@ -1113,7 +1113,7 @@ bool DispatchAvidScriptObjectLifecycle(
 		if (!WriteAvidScriptLifecycleHandle(Call.Arguments[2], Handle, *Call.GuestMemory, Details))
 		{
 			FAvidScriptObjectHandleResult ReleaseResult;
-			Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult);
+			Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false);
 			Actor->Destroy();
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
@@ -1142,7 +1142,7 @@ bool DispatchAvidScriptObjectLifecycle(
 		static_cast<uint32>(Call.Arguments[1])
 	};
 	FAvidScriptObjectHandleResult ResolveResult;
-	AActor* Actor = Context.ObjectRegistry->ResolveObject<AActor>(Handle, ResolveResult);
+	AActor* Actor = Context.ObjectRegistry->ResolveObject<AActor>(Handle, ResolveResult, false);
 	if (Actor == nullptr)
 	{
 		SetAvidScriptBindingDispatchFailure(
@@ -1184,7 +1184,7 @@ bool DispatchAvidScriptObjectLifecycle(
 		}
 
 		FAvidScriptObjectHandleResult ReleaseResult;
-		if (!Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult))
+		if (!Context.ObjectRegistry->ReleaseHandle(Handle, ReleaseResult, false))
 		{
 			SetAvidScriptBindingDispatchFailure(
 				OutResult,
@@ -1224,6 +1224,7 @@ struct FAvidScriptBindingPackage::FImpl
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
 	TArray<FClassReferencePlan> ClassReferencePlans;
 	TArray<TStrongObjectPtr<UClass>> LoadedClasses;
+	FAvidScriptBindingPackageInstrumentation Instrumentation;
 	int32 RequiredScratchSize = 0;
 };
 
@@ -1303,6 +1304,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		UClass*& LoadedClass = LoadedClassesByPath.FindOrAdd(ClassPath);
 		if (LoadedClass == nullptr)
 		{
+			++Package->Impl->Instrumentation.ClassLoadCount;
 			LoadedClass = LoadObject<UClass>(nullptr, *ClassPath);
 			if (LoadedClass != nullptr && LoadedClass->GetPathName() == ClassPath)
 			{
@@ -1380,6 +1382,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 		if (Binding.BindingKind == TEXT("property_get"))
 		{
+			++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 			FProperty* Property = FindFProperty<FProperty>(OwnerClass, FName(*Binding.UeMember));
 			if (!IsAvidScriptRuntimePropertyReadable(Property))
 			{
@@ -1441,6 +1444,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			continue;
 		}
 
+		++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 		UFunction* Function = OwnerClass->FindFunctionByName(FName(*Binding.UeFunction));
 		if (!IsAvidScriptRuntimeFunctionAllowed(Function))
 		{
@@ -1660,6 +1664,11 @@ const FString& FAvidScriptBindingPackage::GetPackageHash() const
 const FAvidScriptVmBindingPackage& FAvidScriptBindingPackage::GetVmPackage() const
 {
 	return Impl->VmPackage;
+}
+
+const FAvidScriptBindingPackageInstrumentation& FAvidScriptBindingPackage::GetInstrumentation() const
+{
+	return Impl->Instrumentation;
 }
 
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const

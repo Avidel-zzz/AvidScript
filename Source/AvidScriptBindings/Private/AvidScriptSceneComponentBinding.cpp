@@ -6,9 +6,10 @@ bool FAvidScriptSceneComponentBinding::GetWorldLocation(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ComponentHandle,
 	FVector& OutWorldLocation,
-	FAvidScriptSceneComponentBindingResult& OutResult)
+	FAvidScriptSceneComponentBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	USceneComponent* Component = ResolveSceneComponent(Registry, ComponentHandle, OutResult);
+	USceneComponent* Component = ResolveSceneComponent(Registry, ComponentHandle, OutResult, DiagnosticsPolicy);
 	if (Component == nullptr)
 	{
 		OutWorldLocation = FVector::ZeroVector;
@@ -26,9 +27,10 @@ bool FAvidScriptSceneComponentBinding::SetWorldLocation(
 	const FVector& WorldLocation,
 	EAvidScriptActorWritePolicy WritePolicy,
 	FAvidScriptSceneComponentBindingResult& OutResult,
-	IAvidScriptBindingHostEffectJournal* HostEffectJournal)
+	IAvidScriptBindingHostEffectJournal* HostEffectJournal,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
-	USceneComponent* Component = ResolveSceneComponent(Registry, ComponentHandle, OutResult);
+	USceneComponent* Component = ResolveSceneComponent(Registry, ComponentHandle, OutResult, DiagnosticsPolicy);
 	if (Component == nullptr)
 	{
 		return false;
@@ -60,10 +62,14 @@ bool FAvidScriptSceneComponentBinding::SetWorldLocation(
 USceneComponent* FAvidScriptSceneComponentBinding::ResolveSceneComponent(
 	const FAvidScriptObjectRegistry& Registry,
 	const FAvidScriptObjectHandle& ComponentHandle,
-	FAvidScriptSceneComponentBindingResult& OutResult)
+	FAvidScriptSceneComponentBindingResult& OutResult,
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
 {
 	FAvidScriptObjectHandleResult ObjectResult;
-	USceneComponent* Component = Registry.ResolveObject<USceneComponent>(ComponentHandle, ObjectResult);
+	USceneComponent* Component = Registry.ResolveObject<USceneComponent>(
+		ComponentHandle,
+		ObjectResult,
+		DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 	if (Component == nullptr)
 	{
 		SetFailure(
@@ -123,12 +129,13 @@ void FAvidScriptSceneComponentBinding::SetSuccess(
 	const FAvidScriptObjectHandleResult& ObjectResult,
 	const FVector& WorldLocation)
 {
-	OutResult = FAvidScriptSceneComponentBindingResult();
-	OutResult.bSucceeded = true;
-	OutResult.Handle = ObjectResult.Handle;
-	OutResult.ObjectPath = ObjectResult.ObjectPath;
-	OutResult.WorldLocation = WorldLocation;
-	OutResult.ObjectResult = ObjectResult;
+	FAvidScriptSceneComponentBindingResult SuccessResult;
+	SuccessResult.bSucceeded = true;
+	SuccessResult.Handle = ObjectResult.Handle;
+	SuccessResult.ObjectPath = ObjectResult.ObjectPath;
+	SuccessResult.WorldLocation = WorldLocation;
+	SuccessResult.ObjectResult = ObjectResult;
+	OutResult = MoveTemp(SuccessResult);
 }
 
 void FAvidScriptSceneComponentBinding::SetFailure(
@@ -137,17 +144,18 @@ void FAvidScriptSceneComponentBinding::SetFailure(
 	const FString& ErrorCategory,
 	const FString& NextAction)
 {
-	OutResult = FAvidScriptSceneComponentBindingResult();
-	OutResult.Handle = ObjectResult.Handle;
-	OutResult.ObjectPath = ObjectResult.ObjectPath;
-	OutResult.ErrorCategory = ErrorCategory;
-	OutResult.NextAction = NextAction;
-	OutResult.ObjectResult = ObjectResult;
-	OutResult.ErrorMessage = FString::Printf(
+	FAvidScriptSceneComponentBindingResult FailureResult;
+	FailureResult.Handle = ObjectResult.Handle;
+	FailureResult.ObjectPath = ObjectResult.ObjectPath;
+	FailureResult.ErrorCategory = ErrorCategory;
+	FailureResult.NextAction = NextAction;
+	FailureResult.ObjectResult = ObjectResult;
+	FailureResult.ErrorMessage = FString::Printf(
 		TEXT("AvidScript scene component binding error | category=%s | slot=%u | generation=%u | object=%s | next=%s"),
 		*ErrorCategory,
 		ObjectResult.Handle.Slot,
 		ObjectResult.Handle.Generation,
-		OutResult.ObjectPath.IsEmpty() ? TEXT("<none>") : *OutResult.ObjectPath,
+		FailureResult.ObjectPath.IsEmpty() ? TEXT("<none>") : *FailureResult.ObjectPath,
 		*NextAction);
+	OutResult = MoveTemp(FailureResult);
 }

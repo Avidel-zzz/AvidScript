@@ -87,6 +87,19 @@ bool FAvidScriptActorBindingLocationReadWriteSmokeTest::RunTest(const FString& P
 		FAvidScriptActorBinding::GetActorLocation(Registry, ActorHandle, ReadLocation, ReadResult));
 	TestEqual(TEXT("Read location matches actor"), ReadLocation, InitialLocation);
 	TestTrue(TEXT("Read result is structured success"), ReadResult.bSucceeded);
+	TestFalse(TEXT("Public binding diagnostics include the actor path by default"), ReadResult.ObjectPath.IsEmpty());
+
+	FVector FastPathLocation = FVector::ZeroVector;
+	FAvidScriptActorBindingResult FastPathResult;
+	TestTrue(
+		TEXT("Actor location supports explicit zero-path hot diagnostics"),
+		FAvidScriptActorBinding::GetActorLocation(
+			Registry,
+			ActorHandle,
+			FastPathLocation,
+			FastPathResult,
+			EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath));
+	TestTrue(TEXT("Explicit hot diagnostics omit the actor path"), FastPathResult.ObjectPath.IsEmpty());
 
 	const FVector TargetLocation(101.0, 202.0, 303.0);
 	FAvidScriptActorBindingResult WriteResult;

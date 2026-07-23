@@ -4,7 +4,8 @@
 
 FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 	UObject* Object,
-	FAvidScriptObjectHandleResult& OutResult)
+	FAvidScriptObjectHandleResult& OutResult,
+	const bool bIncludeObjectPath)
 {
 	if (!IsValid(Object))
 	{
@@ -27,7 +28,7 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 			const FAvidScriptObjectHandle ExistingHandle{
 				static_cast<uint32>(*ExistingSlotIndex + 1),
 				ExistingSlot.Generation };
-			SetSuccess(OutResult, ExistingHandle, Object);
+			SetSuccess(OutResult, ExistingHandle, Object, bIncludeObjectPath);
 			return ExistingHandle;
 		}
 
@@ -53,13 +54,14 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 	++LiveHandleCount;
 
 	const FAvidScriptObjectHandle Handle{ static_cast<uint32>(SlotIndex + 1), Slot.Generation };
-	SetSuccess(OutResult, Handle, Object);
+	SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
 	return Handle;
 }
 
 UObject* FAvidScriptObjectRegistry::ResolveObject(
 	const FAvidScriptObjectHandle& Handle,
-	FAvidScriptObjectHandleResult& OutResult) const
+	FAvidScriptObjectHandleResult& OutResult,
+	const bool bIncludeObjectPath) const
 {
 	if (!Handle.IsValid())
 	{
@@ -119,13 +121,14 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 		return nullptr;
 	}
 
-	SetSuccess(OutResult, Handle, Object);
+	SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
 	return Object;
 }
 
 bool FAvidScriptObjectRegistry::ReleaseHandle(
 	const FAvidScriptObjectHandle& Handle,
-	FAvidScriptObjectHandleResult& OutResult)
+	FAvidScriptObjectHandleResult& OutResult,
+	const bool bIncludeObjectPath)
 {
 	if (!Handle.IsValid())
 	{
@@ -173,7 +176,7 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 		return false;
 	}
 
-	SetSuccess(OutResult, Handle, Slot.Object.Get());
+	SetSuccess(OutResult, Handle, Slot.Object.Get(), bIncludeObjectPath);
 	ObjectToSlot.Remove(Slot.ObjectKey);
 	Slot.Object.Reset();
 	Slot.ObjectKey = TObjectKey<UObject>();
@@ -203,12 +206,16 @@ uint32 FAvidScriptObjectRegistry::AdvanceGeneration(uint32 Generation)
 void FAvidScriptObjectRegistry::SetSuccess(
 	FAvidScriptObjectHandleResult& OutResult,
 	const FAvidScriptObjectHandle& Handle,
-	const UObject* Object)
+	const UObject* Object,
+	const bool bIncludeObjectPath)
 {
 	OutResult = FAvidScriptObjectHandleResult();
 	OutResult.bSucceeded = true;
 	OutResult.Handle = Handle;
-	OutResult.ObjectPath = Object != nullptr ? Object->GetPathName() : FString();
+	if (bIncludeObjectPath && Object != nullptr)
+	{
+		OutResult.ObjectPath = Object->GetPathName();
+	}
 }
 
 void FAvidScriptObjectRegistry::SetFailure(

@@ -35,13 +35,28 @@ struct FAvidScriptObjectHandleResult
 class AVIDSCRIPTBINDINGS_API FAvidScriptObjectRegistry
 {
 public:
-	FAvidScriptObjectHandle RegisterObject(UObject* Object, FAvidScriptObjectHandleResult& OutResult);
-	UObject* ResolveObject(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult) const;
+	FAvidScriptObjectHandle RegisterObject(
+		UObject* Object,
+		FAvidScriptObjectHandleResult& OutResult,
+		bool bIncludeObjectPath = true);
+	UObject* ResolveObject(
+		const FAvidScriptObjectHandle& Handle,
+		FAvidScriptObjectHandleResult& OutResult,
+		bool bIncludeObjectPath = true) const;
 
 	template <typename TObject>
 	TObject* ResolveObject(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult) const
 	{
-		UObject* Object = ResolveObject(Handle, OutResult);
+		return ResolveObject<TObject>(Handle, OutResult, true);
+	}
+
+	template <typename TObject>
+	TObject* ResolveObject(
+		const FAvidScriptObjectHandle& Handle,
+		FAvidScriptObjectHandleResult& OutResult,
+		const bool bIncludeObjectPath) const
+	{
+		UObject* Object = ResolveObject(Handle, OutResult, bIncludeObjectPath);
 		if (Object == nullptr)
 		{
 			return nullptr;
@@ -62,7 +77,10 @@ public:
 		return TypedObject;
 	}
 
-	bool ReleaseHandle(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectHandleResult& OutResult);
+	bool ReleaseHandle(
+		const FAvidScriptObjectHandle& Handle,
+		FAvidScriptObjectHandleResult& OutResult,
+		bool bIncludeObjectPath = true);
 	void Reset();
 
 	int32 NumSlots() const { return Slots.Num(); }
@@ -82,7 +100,8 @@ private:
 	static void SetSuccess(
 		FAvidScriptObjectHandleResult& OutResult,
 		const FAvidScriptObjectHandle& Handle,
-		const UObject* Object);
+		const UObject* Object,
+		bool bIncludeObjectPath);
 	static void SetFailure(
 		FAvidScriptObjectHandleResult& OutResult,
 		const FAvidScriptObjectHandle& Handle,

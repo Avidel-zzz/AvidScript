@@ -26,7 +26,8 @@ public:
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ComponentHandle,
 		FVector& OutWorldLocation,
-		FAvidScriptSceneComponentBindingResult& OutResult);
+		FAvidScriptSceneComponentBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 	static bool SetWorldLocation(
 		FAvidScriptObjectRegistry& Registry,
@@ -34,13 +35,15 @@ public:
 		const FVector& WorldLocation,
 		EAvidScriptActorWritePolicy WritePolicy,
 		FAvidScriptSceneComponentBindingResult& OutResult,
-		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr);
+		IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
 
 private:
 	static USceneComponent* ResolveSceneComponent(
 		const FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ComponentHandle,
-		FAvidScriptSceneComponentBindingResult& OutResult);
+		FAvidScriptSceneComponentBindingResult& OutResult,
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy);
 	static bool PrepareTransformWrite(
 		FAvidScriptObjectRegistry& Registry,
 		const FAvidScriptObjectHandle& ComponentHandle,

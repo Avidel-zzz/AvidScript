@@ -275,7 +275,7 @@ bool UAvidScriptComponent::ReloadScript()
 
 bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjectHandleResult& OutResult) const
 {
-	OutOwner = ObjectRegistry.ResolveObject<AActor>(OwnerHandle, OutResult);
+	OutOwner = ObjectRegistry.ResolveObject<AActor>(OwnerHandle, OutResult, false);
 	return OutOwner != nullptr;
 }
 
@@ -445,7 +445,7 @@ bool UAvidScriptComponent::RegisterOwner()
 {
 	AActor* Owner = GetOwner();
 	FAvidScriptObjectHandleResult RegisterResult;
-	OwnerHandle = ObjectRegistry.RegisterObject(Owner, RegisterResult);
+	OwnerHandle = ObjectRegistry.RegisterObject(Owner, RegisterResult, true);
 
 	RuntimeStats.bOwnerRegistered = RegisterResult.bSucceeded;
 	RuntimeStats.OwnerHandle = OwnerHandle;
@@ -554,7 +554,7 @@ bool UAvidScriptComponent::DispatchOwnerGameplayEvent(
 	}
 
 	FAvidScriptObjectHandleResult RegisterResult;
-	const FAvidScriptObjectHandle OtherHandle = ObjectRegistry.RegisterObject(OtherActor, RegisterResult);
+	const FAvidScriptObjectHandle OtherHandle = ObjectRegistry.RegisterObject(OtherActor, RegisterResult, false);
 	if (!RegisterResult.bSucceeded)
 	{
 		RuntimeStats.LastErrorMessage = RegisterResult.ErrorMessage;
@@ -620,7 +620,7 @@ void UAvidScriptComponent::ReleaseGameplayObjectHandles()
 			static_cast<uint32>(HandleValue),
 			static_cast<uint32>(HandleValue >> 32) };
 		FAvidScriptObjectHandleResult ReleaseResult;
-		ObjectRegistry.ReleaseHandle(Handle, ReleaseResult);
+		ObjectRegistry.ReleaseHandle(Handle, ReleaseResult, false);
 	}
 	GameplayObjectHandleValues.Reset();
 }
