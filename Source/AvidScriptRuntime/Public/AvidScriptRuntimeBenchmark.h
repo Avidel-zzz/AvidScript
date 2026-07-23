@@ -121,6 +121,42 @@ struct FAvidScriptObjectLifecycleBenchmarkResult
 	FAvidScriptBenchmarkStats RegistryResolveSpawnedActor;
 };
 
+struct FAvidScriptTypedObjectBenchmarkOptions
+{
+	int32 WarmupCount = 3;
+	int32 SampleCount = 20;
+	int32 IterationsPerSample = 1000;
+};
+
+struct FAvidScriptTypedObjectBenchmarkResult
+{
+	bool bSucceeded = false;
+	int32 WarmupCount = 0;
+	int32 SampleCount = 0;
+	int32 IterationsPerSample = 0;
+	int32 NativeIsAOperationCount = 0;
+	int32 BindingObjectTypeOperationCount = 0;
+	int32 WasmCheckedCastOperationCount = 0;
+	int32 WasmCheckedCastHostCrossingCount = 0;
+	int32 UpcastHostImportsPerIteration = 0;
+	int32 BindingPackageClassLoadsDuringLoad = 0;
+	int32 BindingPackageReflectedNameLookupsDuringLoad = 0;
+	int32 BindingPackageClassLoadsDuringWarmLoop = 0;
+	int32 BindingPackageReflectedNameLookupsDuringWarmLoop = 0;
+	double Phase49TypedBindingMedianMs = 0.0;
+	double ExistingTypedBindingRegressionPercent = 0.0;
+	bool bHasComparablePhase49Baseline = false;
+	bool bExistingTypedBindingWithinRegressionBudget = false;
+	FString ExistingTypedBindingRegressionStatus;
+	FString ErrorCategory;
+	FString ErrorMessage;
+	FString Summary;
+	FAvidScriptBenchmarkStats NativeIsA;
+	FAvidScriptBenchmarkStats BindingObjectTypeIsA;
+	FAvidScriptBenchmarkStats WasmCheckedCast;
+	FAvidScriptBenchmarkStats ExistingTypedBindingGetActorLocation;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeBenchmark
 {
 public:
@@ -139,4 +175,8 @@ public:
 	static bool RunObjectLifecycleBenchmark(
 		const FAvidScriptObjectLifecycleBenchmarkOptions& Options,
 		FAvidScriptObjectLifecycleBenchmarkResult& OutResult);
+
+	static bool RunTypedObjectBenchmark(
+		const FAvidScriptTypedObjectBenchmarkOptions& Options,
+		FAvidScriptTypedObjectBenchmarkResult& OutResult);
 };

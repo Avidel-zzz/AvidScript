@@ -3,13 +3,21 @@
 #include "Benchmark/AvidScriptBenchmarkStatistics.h"
 
 #include "AvidScriptActorBinding.h"
+#include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
+#include "AvidScriptHash.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptWasmRuntime.h"
 
+#include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Misc/EngineVersion.h"
+#include "Misc/ScopeExit.h"
+#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeBenchmark, Log, All);
 
@@ -376,6 +384,335 @@ bool MeasureTransformImportModule(
 	OutCallMs = SmokeResult.Metrics.BeginPlayCallMs;
 	Runtime.Unload();
 	return true;
+}
+
+void SetTypedObjectBenchmarkFailure(
+	FAvidScriptTypedObjectBenchmarkResult& OutResult,
+	const FString& Category,
+	const FString& Details)
+{
+	OutResult.bSucceeded = false;
+	OutResult.ErrorCategory = Category;
+	OutResult.ErrorMessage = FString::Printf(
+		TEXT("AvidScript typed object benchmark error | category=%s | details=%s"),
+		Category.IsEmpty() ? TEXT("<none>") : *Category,
+		Details.IsEmpty() ? TEXT("<none>") : *Details);
+	OutResult.Summary = FString::Printf(
+		TEXT("typed_object_benchmark_failed | category=%s | message=%s"),
+		*OutResult.ErrorCategory,
+		*OutResult.ErrorMessage);
+}
+
+FAvidScriptBindingTypeModel MakeTypedObjectBenchmarkType(
+	const TCHAR* ClassPath,
+	const TCHAR* CppType,
+	const int32 ObjectTypeOrdinal,
+	const FString& BaseTypeId)
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:") + FString(ClassPath);
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = CppType;
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	Type.ObjectTypeOrdinal = ObjectTypeOrdinal;
+	Type.ClassPath = ClassPath;
+	Type.BaseTypeId = BaseTypeId;
+	return Type;
+}
+
+FAvidScriptBindingTypeModel MakeTypedObjectBenchmarkStaticOwnerType()
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:/Script/Engine.KismetMathLibrary");
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = TEXT("UKismetMathLibrary");
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	return Type;
+}
+
+FAvidScriptBindingTypeModel MakeTypedObjectBenchmarkBoolType()
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("scalar:bool");
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("scalar");
+	Type.CppType = TEXT("bool");
+	Type.Size = 4;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i") };
+	return Type;
+}
+
+FAvidScriptBindingValueModel MakeTypedObjectBenchmarkBoolValue(
+	const TCHAR* Name,
+	const TCHAR* Direction,
+	const FAvidScriptBindingTypeModel& BoolType)
+{
+	FAvidScriptBindingValueModel Value;
+	Value.Name = Name;
+	Value.Direction = Direction;
+	Value.CanonicalType = BoolType.CanonicalType;
+	Value.TypeId = BoolType.StableId;
+	Value.Kind = BoolType.Kind;
+	Value.CppType = BoolType.CppType;
+	Value.AbiTypes = BoolType.AbiTypes;
+	return Value;
+}
+
+FAvidScriptBindingFunctionModel MakeTypedObjectBenchmarkSentinelBinding(
+	const FAvidScriptBindingTypeModel& BoolType)
+{
+	FAvidScriptBindingFunctionModel Binding;
+	Binding.Ordinal = 0;
+	Binding.OwnerClass = TEXT("/Script/Engine.KismetMathLibrary");
+	Binding.UeMember = TEXT("Not_PreBool");
+	Binding.UeFunction = Binding.UeMember;
+	Binding.ScriptName = TEXT("Not");
+	Binding.DispatchMode = TEXT("cached_process_event");
+	Binding.bStatic = true;
+	Binding.bConst = false;
+	Binding.ReloadEffect = EAvidScriptBindingReloadEffect::None;
+	Binding.ReturnValue = MakeTypedObjectBenchmarkBoolValue(TEXT("ReturnValue"), TEXT("return"), BoolType);
+	Binding.Parameters.Add(MakeTypedObjectBenchmarkBoolValue(TEXT("A"), TEXT("value"), BoolType));
+	Binding.CanonicalIdentity = TEXT("/Script/Engine.KismetMathLibrary::Not_PreBool(scalar:bool;A:value:scalar:bool)");
+	Binding.StableId = FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity);
+	Binding.HostImport.Module = TEXT("avidscript");
+	Binding.HostImport.Name = TEXT("avid_ue_") + Binding.StableId.Left(16);
+	Binding.HostImport.Signature = TEXT("(ii)i");
+	return Binding;
+}
+
+void WriteTypedObjectBenchmarkType(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const FAvidScriptBindingTypeModel& Type)
+{
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("stable_id"), Type.StableId);
+	Writer->WriteValue(TEXT("canonical_type"), Type.CanonicalType);
+	Writer->WriteValue(TEXT("kind"), Type.Kind);
+	Writer->WriteValue(TEXT("cpp_type"), Type.CppType);
+	Writer->WriteValue(TEXT("size"), Type.Size);
+	Writer->WriteValue(TEXT("alignment"), Type.Alignment);
+	Writer->WriteArrayStart(TEXT("abi_types"));
+	for (const FString& AbiType : Type.AbiTypes)
+	{
+		Writer->WriteValue(AbiType);
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteValue(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+	Writer->WriteValue(TEXT("class_path"), Type.ClassPath);
+	Writer->WriteValue(TEXT("base_type_id"), Type.BaseTypeId);
+	Writer->WriteObjectEnd();
+}
+
+void WriteTypedObjectBenchmarkValue(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const FAvidScriptBindingValueModel& Value)
+{
+	Writer->WriteValue(TEXT("name"), Value.Name);
+	Writer->WriteValue(TEXT("direction"), Value.Direction);
+	Writer->WriteValue(TEXT("has_default"), Value.bHasDefault);
+	Writer->WriteValue(TEXT("canonical_type"), Value.CanonicalType);
+	Writer->WriteValue(TEXT("type_id"), Value.TypeId);
+	Writer->WriteValue(TEXT("kind"), Value.Kind);
+	Writer->WriteValue(TEXT("cpp_type"), Value.CppType);
+	Writer->WriteArrayStart(TEXT("abi_types"));
+	for (const FString& AbiType : Value.AbiTypes)
+	{
+		Writer->WriteValue(AbiType);
+	}
+	Writer->WriteArrayEnd();
+}
+
+bool MakeTypedObjectBenchmarkPackage(
+	TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
+	FAvidScriptBindingPackageLoadResult& OutLoadResult)
+{
+	FAvidScriptBindingPackageModel Model;
+	Model.SchemaVersion = 6;
+	Model.GeneratorVersion = TEXT("50.5.benchmark");
+	Model.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Model.Source = TEXT("ue_reflection");
+	Model.PackageName = TEXT("avidscript.benchmark.typed_object");
+	const FAvidScriptBindingTypeModel UObjectType = MakeTypedObjectBenchmarkType(
+		TEXT("/Script/CoreUObject.Object"), TEXT("UObject"), 0, FString());
+	const FAvidScriptBindingTypeModel ActorComponentType = MakeTypedObjectBenchmarkType(
+		TEXT("/Script/Engine.ActorComponent"), TEXT("UActorComponent"), 1, UObjectType.StableId);
+	const FAvidScriptBindingTypeModel SceneComponentType = MakeTypedObjectBenchmarkType(
+		TEXT("/Script/Engine.SceneComponent"), TEXT("USceneComponent"), 2, ActorComponentType.StableId);
+	const FAvidScriptBindingTypeModel StaticOwnerType = MakeTypedObjectBenchmarkStaticOwnerType();
+	const FAvidScriptBindingTypeModel BoolType = MakeTypedObjectBenchmarkBoolType();
+	Model.Types = { UObjectType, ActorComponentType, SceneComponentType, StaticOwnerType, BoolType };
+	const FAvidScriptBindingFunctionModel SentinelBinding = MakeTypedObjectBenchmarkSentinelBinding(BoolType);
+	Model.Bindings.Add(SentinelBinding);
+	Model.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Model);
+	Model.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Model);
+
+	FString DescriptorJson;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&DescriptorJson);
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("schema_version"), Model.SchemaVersion);
+	Writer->WriteValue(TEXT("generator_version"), Model.GeneratorVersion);
+	Writer->WriteValue(TEXT("engine_version"), Model.EngineVersion);
+	Writer->WriteValue(TEXT("source"), Model.Source);
+	Writer->WriteValue(TEXT("package_name"), Model.PackageName);
+	Writer->WriteValue(TEXT("package_hash"), Model.PackageHash);
+	Writer->WriteValue(TEXT("selection_hash"), Model.SelectionHash);
+	Writer->WriteValue(TEXT("self_type_id"), Model.SelfTypeId);
+	Writer->WriteArrayStart(TEXT("types"));
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		WriteTypedObjectBenchmarkType(Writer, Type);
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("class_references"));
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("bindings"));
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("stable_id"), SentinelBinding.StableId);
+	Writer->WriteValue(TEXT("canonical_identity"), SentinelBinding.CanonicalIdentity);
+	Writer->WriteValue(TEXT("ordinal"), SentinelBinding.Ordinal);
+	Writer->WriteValue(TEXT("owner_class"), SentinelBinding.OwnerClass);
+	Writer->WriteValue(TEXT("binding_kind"), SentinelBinding.BindingKind);
+	Writer->WriteValue(TEXT("ue_member"), SentinelBinding.UeMember);
+	Writer->WriteValue(TEXT("script_name"), SentinelBinding.ScriptName);
+	Writer->WriteValue(TEXT("dispatch_mode"), SentinelBinding.DispatchMode);
+	Writer->WriteValue(TEXT("is_static"), SentinelBinding.bStatic);
+	Writer->WriteValue(TEXT("is_const"), SentinelBinding.bConst);
+	Writer->WriteValue(TEXT("reload_effect"), TEXT("none"));
+	Writer->WriteObjectStart(TEXT("return"));
+	WriteTypedObjectBenchmarkValue(Writer, SentinelBinding.ReturnValue);
+	Writer->WriteObjectEnd();
+	Writer->WriteArrayStart(TEXT("parameters"));
+	for (const FAvidScriptBindingValueModel& Parameter : SentinelBinding.Parameters)
+	{
+		Writer->WriteObjectStart();
+		WriteTypedObjectBenchmarkValue(Writer, Parameter);
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectStart(TEXT("host_import"));
+	Writer->WriteValue(TEXT("module"), SentinelBinding.HostImport.Module);
+	Writer->WriteValue(TEXT("name"), SentinelBinding.HostImport.Name);
+	Writer->WriteValue(TEXT("signature"), SentinelBinding.HostImport.Signature);
+	Writer->WriteObjectEnd();
+	Writer->WriteObjectEnd();
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectEnd();
+	if (!Writer->Close())
+	{
+		return false;
+	}
+	return FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, OutPackage, OutLoadResult);
+}
+
+uint32 FindTypedObjectBenchmarkOrdinal(const FAvidScriptBindingPackage& Package)
+{
+	for (const FAvidScriptObjectTypeBindingSpec& Spec : FAvidScriptObjectTypeBindings::GetSpecs())
+	{
+		const FAvidScriptVmDynamicImport* Import = Package.GetVmPackage().Imports.FindByPredicate(
+			[&Spec](const FAvidScriptVmDynamicImport& Candidate)
+			{
+				return Candidate.StableId == Spec.StableId;
+			});
+		if (Import != nullptr)
+		{
+			return Import->Ordinal;
+		}
+	}
+	return MAX_uint32;
+}
+
+bool DispatchTypedObjectBenchmarkCall(
+	const FAvidScriptBindingPackage& Package,
+	const uint32 Ordinal,
+	const TConstArrayView<uint64> Arguments,
+	const FAvidScriptBindingInvocationContext& Context,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Ordinal;
+	Call.Arguments = Arguments;
+	TArray<uint8> Scratch;
+	return Package.Dispatch(Call, Context, Scratch, OutResult);
+}
+
+TArray<uint8> BuildTypedObjectCastBenchmarkModule(
+	const FAvidScriptObjectHandle Handle,
+	const uint32 TargetObjectTypeOrdinal)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Types;
+	AppendBenchmarkU32Leb(Types, 3);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 3);
+	Types.Add(0x7f);
+	Types.Add(0x7f);
+	Types.Add(0x7f);
+	AppendBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7f);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 0);
+	AppendBenchmarkU32Leb(Types, 0);
+	Types.Add(0x60);
+	AppendBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7d);
+	AppendBenchmarkU32Leb(Types, 0);
+	AppendBenchmarkSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendBenchmarkU32Leb(Imports, 1);
+	AppendBenchmarkString(Imports, "avidscript");
+	AppendBenchmarkString(Imports, "avid_object_type_is_a");
+	Imports.Add(0x00);
+	AppendBenchmarkU32Leb(Imports, 0);
+	AppendBenchmarkSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendBenchmarkU32Leb(Functions, 2);
+	AppendBenchmarkU32Leb(Functions, 1);
+	AppendBenchmarkU32Leb(Functions, 2);
+	AppendBenchmarkSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendBenchmarkU32Leb(Exports, 2);
+	AppendBenchmarkString(Exports, "avid_on_begin_play");
+	Exports.Add(0x00);
+	AppendBenchmarkU32Leb(Exports, 1);
+	AppendBenchmarkString(Exports, "avid_on_tick");
+	Exports.Add(0x00);
+	AppendBenchmarkU32Leb(Exports, 2);
+	AppendBenchmarkSection(Module, 7, Exports);
+
+	TArray<uint8> BeginBody;
+	AppendBenchmarkU32Leb(BeginBody, 0);
+	BeginBody.Add(0x0b);
+	TArray<uint8> TickBody;
+	AppendBenchmarkU32Leb(TickBody, 0);
+	AppendBenchmarkI32Const(TickBody, Handle.Slot);
+	AppendBenchmarkI32Const(TickBody, Handle.Generation);
+	AppendBenchmarkI32Const(TickBody, TargetObjectTypeOrdinal);
+	TickBody.Add(0x10);
+	AppendBenchmarkU32Leb(TickBody, 0);
+	TickBody.Add(0x1a);
+	TickBody.Add(0x0b);
+	TArray<uint8> Code;
+	AppendBenchmarkU32Leb(Code, 2);
+	AppendBenchmarkU32Leb(Code, static_cast<uint32>(BeginBody.Num()));
+	Code.Append(BeginBody);
+	AppendBenchmarkU32Leb(Code, static_cast<uint32>(TickBody.Num()));
+	Code.Append(TickBody);
+	AppendBenchmarkSection(Module, 10, Code);
+	return Module;
 }
 } // namespace
 
@@ -885,5 +1222,296 @@ bool FAvidScriptRuntimeBenchmark::RunHostBindingBenchmark(
 
 	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	DestroyBenchmarkWorld(World);
+	return true;
+}
+
+bool FAvidScriptRuntimeBenchmark::RunTypedObjectBenchmark(
+	const FAvidScriptTypedObjectBenchmarkOptions& Options,
+	FAvidScriptTypedObjectBenchmarkResult& OutResult)
+{
+	OutResult = FAvidScriptTypedObjectBenchmarkResult();
+	OutResult.WarmupCount = FMath::Max(Options.WarmupCount, 0);
+	OutResult.SampleCount = FMath::Max(Options.SampleCount, 1);
+	OutResult.IterationsPerSample = FMath::Max(Options.IterationsPerSample, 1);
+	OutResult.UpcastHostImportsPerIteration = 0;
+	OutResult.ExistingTypedBindingRegressionStatus = TEXT("pending_same_machine_phase49_baseline");
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!MakeTypedObjectBenchmarkPackage(Package, LoadResult) || !Package.IsValid())
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			LoadResult.ErrorCategory.IsEmpty() ? FString(TEXT("package_load_failed")) : LoadResult.ErrorCategory,
+			LoadResult.ErrorDetails);
+		return false;
+	}
+	const FAvidScriptBindingPackageInstrumentation InstrumentationBeforeWarmLoop =
+		Package->GetInstrumentation();
+	if (InstrumentationBeforeWarmLoop.ClassLoadCount > MAX_int32
+		|| InstrumentationBeforeWarmLoop.ReflectedNameLookupCount > MAX_int32)
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("instrumentation_overflow"),
+			TEXT("Typed object package load instrumentation exceeded benchmark result width."));
+		return false;
+	}
+	OutResult.BindingPackageClassLoadsDuringLoad =
+		static_cast<int32>(InstrumentationBeforeWarmLoop.ClassLoadCount);
+	OutResult.BindingPackageReflectedNameLookupsDuringLoad =
+		static_cast<int32>(InstrumentationBeforeWarmLoop.ReflectedNameLookupCount);
+
+	const uint32 ObjectTypeOrdinal = FindTypedObjectBenchmarkOrdinal(*Package);
+	UClass* CachedActorComponentClass = nullptr;
+	if (ObjectTypeOrdinal == MAX_uint32
+		|| !Package->TryResolveObjectType(1, CachedActorComponentClass)
+		|| CachedActorComponentClass != UActorComponent::StaticClass())
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("object_type_plan_missing"),
+			TEXT("The typed object benchmark package did not expose the cached ActorComponent type plan."));
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateBenchmarkWorld(World))
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("world_create_failed"),
+			TEXT("The typed object benchmark requires an initialized editor or commandlet world context."));
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyBenchmarkWorld(World);
+	};
+
+	AActor* Actor = SpawnBenchmarkActor(World);
+	USceneComponent* Component = Actor != nullptr ? Cast<USceneComponent>(Actor->GetRootComponent()) : nullptr;
+	if (Actor == nullptr || Component == nullptr || !Component->IsA(CachedActorComponentClass))
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("fixture_create_failed"),
+			TEXT("The typed object benchmark could not create a SceneComponent fixture for the ActorComponent checked cast."));
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult, false);
+	if (!RegisterResult.bSucceeded || !ActorHandle.IsValid())
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			RegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("actor_register_failed")) : RegisterResult.ErrorCategory,
+			RegisterResult.ErrorMessage);
+		return false;
+	}
+	const FAvidScriptObjectHandle ComponentHandle = Registry.RegisterObject(Component, RegisterResult, false);
+	if (!RegisterResult.bSucceeded || !ComponentHandle.IsValid())
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			RegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("component_register_failed")) : RegisterResult.ErrorCategory,
+			RegisterResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	const uint64 ObjectTypeArguments[] = {
+		ComponentHandle.Slot,
+		ComponentHandle.Generation,
+		1
+	};
+	const TArray<uint8> WasmModule = BuildTypedObjectCastBenchmarkModule(ComponentHandle, 1);
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	Runtime.SetHostContext(HostContext);
+	FAvidScriptWasmSmokeResult LoadSmokeResult;
+	if (!Runtime.LoadModule(
+			WasmModule.GetData(),
+			WasmModule.Num(),
+			TEXT("benchmark_typed_object_checked_cast"),
+			Package,
+			LoadSmokeResult)
+		|| !Runtime.BeginPlay(LoadSmokeResult))
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("wasm_setup_failed"),
+			LoadSmokeResult.ErrorMessage);
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		Runtime.Unload();
+	};
+
+	TArray<double> NativeSamples;
+	TArray<double> BindingSamples;
+	TArray<double> WasmSamples;
+	TArray<double> ExistingTypedBindingSamples;
+	NativeSamples.Reserve(OutResult.SampleCount);
+	BindingSamples.Reserve(OutResult.SampleCount);
+	WasmSamples.Reserve(OutResult.SampleCount);
+	ExistingTypedBindingSamples.Reserve(OutResult.SampleCount);
+	int32 ExpectedWasmHostCrossings = 0;
+
+	auto MeasureNativeIsA = [&]()
+	{
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			if (!Component->IsA(CachedActorComponentClass))
+			{
+				return -1.0;
+			}
+		}
+		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+	};
+	auto MeasureBindingObjectTypeIsA = [&]()
+	{
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			FAvidScriptDynamicHostCallResult CallResult;
+			if (!DispatchTypedObjectBenchmarkCall(
+					*Package,
+					ObjectTypeOrdinal,
+					ObjectTypeArguments,
+					Context,
+					CallResult)
+				|| CallResult.ReturnValue != 1)
+			{
+				return -1.0;
+			}
+		}
+		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+	};
+	auto MeasureWasmCheckedCast = [&]()
+	{
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			FAvidScriptWasmSmokeResult TickSmokeResult;
+			if (!Runtime.Tick(1.0f / 60.0f, TickSmokeResult)
+				|| TickSmokeResult.HostImportCallCount != ++ExpectedWasmHostCrossings)
+			{
+				return -1.0;
+			}
+		}
+		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+	};
+	auto MeasureExistingTypedBinding = [&]()
+	{
+		const double StartSeconds = FPlatformTime::Seconds();
+		for (int32 IterationIndex = 0; IterationIndex < OutResult.IterationsPerSample; ++IterationIndex)
+		{
+			FVector Location;
+			FAvidScriptActorBindingResult BindingResult;
+			if (!FAvidScriptActorBinding::GetActorLocation(
+					Registry,
+					ActorHandle,
+					Location,
+					BindingResult,
+					EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
+			{
+				return -1.0;
+			}
+		}
+		return MeasureElapsedPerIterationMs(StartSeconds, OutResult.IterationsPerSample);
+	};
+
+	const int32 TotalRuns = OutResult.WarmupCount + OutResult.SampleCount;
+	for (int32 RunIndex = 0; RunIndex < TotalRuns; ++RunIndex)
+	{
+		const bool bReverseOrder = (RunIndex & 1) != 0;
+		double NativeMs = 0.0;
+		double BindingMs = 0.0;
+		double WasmMs = 0.0;
+		double ExistingTypedBindingMs = 0.0;
+		if (bReverseOrder)
+		{
+			WasmMs = MeasureWasmCheckedCast();
+			ExistingTypedBindingMs = MeasureExistingTypedBinding();
+			BindingMs = MeasureBindingObjectTypeIsA();
+			NativeMs = MeasureNativeIsA();
+		}
+		else
+		{
+			NativeMs = MeasureNativeIsA();
+			BindingMs = MeasureBindingObjectTypeIsA();
+			ExistingTypedBindingMs = MeasureExistingTypedBinding();
+			WasmMs = MeasureWasmCheckedCast();
+		}
+		if (NativeMs < 0.0 || BindingMs < 0.0 || WasmMs < 0.0 || ExistingTypedBindingMs < 0.0)
+		{
+			SetTypedObjectBenchmarkFailure(
+				OutResult,
+				TEXT("warm_dispatch_failed"),
+				TEXT("A warm typed object dispatch returned an unexpected type result or host crossing count."));
+			return false;
+		}
+		if (RunIndex >= OutResult.WarmupCount)
+		{
+			NativeSamples.Add(NativeMs);
+			BindingSamples.Add(BindingMs);
+			WasmSamples.Add(WasmMs);
+			ExistingTypedBindingSamples.Add(ExistingTypedBindingMs);
+		}
+	}
+
+	OutResult.NativeIsA = CalculateStats(NativeSamples);
+	OutResult.BindingObjectTypeIsA = CalculateStats(BindingSamples);
+	OutResult.WasmCheckedCast = CalculateStats(WasmSamples);
+	OutResult.ExistingTypedBindingGetActorLocation = CalculateStats(ExistingTypedBindingSamples);
+	const FAvidScriptBindingPackageInstrumentation InstrumentationAfterWarmLoop =
+		Package->GetInstrumentation();
+	const uint64 WarmClassLoads = InstrumentationAfterWarmLoop.ClassLoadCount
+		- InstrumentationBeforeWarmLoop.ClassLoadCount;
+	const uint64 WarmNameLookups = InstrumentationAfterWarmLoop.ReflectedNameLookupCount
+		- InstrumentationBeforeWarmLoop.ReflectedNameLookupCount;
+	if (WarmClassLoads != 0 || WarmNameLookups != 0)
+	{
+		SetTypedObjectBenchmarkFailure(
+			OutResult,
+			TEXT("warm_dispatch_lookup_budget_exceeded"),
+			FString::Printf(TEXT("class_loads=%llu | reflected_name_lookups=%llu"), WarmClassLoads, WarmNameLookups));
+		return false;
+	}
+	OutResult.BindingPackageClassLoadsDuringWarmLoop = static_cast<int32>(WarmClassLoads);
+	OutResult.BindingPackageReflectedNameLookupsDuringWarmLoop = static_cast<int32>(WarmNameLookups);
+	OutResult.NativeIsAOperationCount = OutResult.SampleCount * OutResult.IterationsPerSample;
+	OutResult.BindingObjectTypeOperationCount = OutResult.NativeIsAOperationCount;
+	OutResult.WasmCheckedCastOperationCount = OutResult.NativeIsAOperationCount;
+	OutResult.WasmCheckedCastHostCrossingCount = OutResult.WasmCheckedCastOperationCount;
+	OutResult.bSucceeded = true;
+	OutResult.Summary = FString::Printf(
+		TEXT("typed_object_benchmark | warmup=%d | samples=%d | iterations=%d | native_is_a_p50_ms=%.6f | native_is_a_p95_ms=%.6f | binding_object_type_is_a_p50_ms=%.6f | binding_object_type_is_a_p95_ms=%.6f | wasm_checked_cast_p50_ms=%.6f | wasm_checked_cast_p95_ms=%.6f | existing_typed_binding_p50_ms=%.6f | native_operations=%d | binding_operations=%d | wasm_operations=%d | wasm_host_crossings=%d | warm_class_loads=%d | warm_reflected_name_lookups=%d | upcast_imports=%d | existing_typed_binding_budget=%s"),
+		OutResult.WarmupCount,
+		OutResult.SampleCount,
+		OutResult.IterationsPerSample,
+		OutResult.NativeIsA.P50Ms,
+		OutResult.NativeIsA.P95Ms,
+		OutResult.BindingObjectTypeIsA.P50Ms,
+		OutResult.BindingObjectTypeIsA.P95Ms,
+		OutResult.WasmCheckedCast.P50Ms,
+		OutResult.WasmCheckedCast.P95Ms,
+		OutResult.ExistingTypedBindingGetActorLocation.P50Ms,
+		OutResult.NativeIsAOperationCount,
+		OutResult.BindingObjectTypeOperationCount,
+		OutResult.WasmCheckedCastOperationCount,
+		OutResult.WasmCheckedCastHostCrossingCount,
+		OutResult.BindingPackageClassLoadsDuringWarmLoop,
+		OutResult.BindingPackageReflectedNameLookupsDuringWarmLoop,
+		OutResult.UpcastHostImportsPerIteration,
+		*OutResult.ExistingTypedBindingRegressionStatus);
+	UE_LOG(LogAvidScriptRuntimeBenchmark, Display, TEXT("%s"), *OutResult.Summary);
 	return true;
 }
