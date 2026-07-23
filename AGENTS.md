@@ -1015,6 +1015,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 ## Phase 50 Typed Project API Rules
 
 - 2026-07-23 P50.0 重构后源码路径猜测复发：架构调研时先后直接读取了不存在的 `Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingModel.h` 和 `Source/AvidScriptRuntime/Private/AvidScriptRuntimeSession.cpp`；真实文件分别是 `AvidScriptEditorBindingDescriptorModel.h` 与 `Private/Session/AvidScriptRuntimeSession.cpp`。Prevention：重构过的模块不得根据类型名或旧目录结构猜路径；首次读取 basename 或 owner 前必须执行受限 `rg --files <module> | rg -F <keyword>` 或 `rg -l -F <symbol> <module>`，只读取索引确认的路径。
+- 2026-07-24 P50.2 checked-downcast 方向错误记录：renderer 与 golden test 曾共同生成并接受派生 wrapper 上的实例 `TryCast()` 返回直接基类；该方法只重复了零 crossing upcast，无法表达架构要求的 `Derived.TryCast(Base)`，直到真实 C# gameplay 样例编译才暴露。Prevention：checked downcast 固定生成为目标派生类型上的 `public static Derived TryCast(DirectBase value)`，检查目标派生 ordinal，成功复制 handle、mismatch 返回 default；golden 必须断言参数/返回方向，且每个 typed surface 批次必须至少有一个真实 Roslyn -> Guest IR -> WASM 调用用例，禁止仅凭 renderer 与同源字符串测试相互证明。
 - P50 object-type rule：自定义 UObject 类型必须由 descriptor v6 的稳定类型图和 package-load immutable `UClass` plan 驱动；Runtime 热路径只能按 ordinal 索引缓存类型，禁止根据 C# 名称或 class path 执行字符串反射查找。
 - P50 conversion rule：派生 handle 到基类 handle 的 upcast 必须完全在 Guest 内复制两个 `i32`，不得新增 Host import；基类 handle 到派生 handle 的 checked downcast 统一使用一个 object-type import，类型不匹配返回 invalid handle，stale/cross-world handle 继续失败关闭。
 - P50 API-growth rule：自定义项目 `UFUNCTION` 继续通过 descriptor、统一 dynamic ABI 和 cached `ProcessEvent` plan 扩展；禁止为单个项目类或函数手写 VM import、Runtime switch、WAMR wrapper 或 renderer 特判。
