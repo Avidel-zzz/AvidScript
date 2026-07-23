@@ -252,7 +252,11 @@ internal sealed class CSharpFunctionLoweringContext
     {
         if (methodSymbolId is not null
             && callablesBySymbol.TryGetValue(methodSymbolId, out SemanticCallable? found)
-            && (found.Import is not null || found.HasBody))
+            && (found.Import is not null || found.HasBody)
+            && IsReachable(found)
+            && (!found.IsConstructor
+                || !CSharpClassReferencePolicy.IsClassReferenceTypeId(found.ContainingTypeId)
+                || CSharpClassReferencePolicy.IsIntrinsicConstructor(Document, found)))
         {
             callable = found;
             targetId = found.Import is not null
@@ -264,6 +268,12 @@ internal sealed class CSharpFunctionLoweringContext
         callable = null!;
         targetId = null!;
         return false;
+    }
+
+    private bool IsReachable(SemanticCallable callable)
+    {
+        return Document.SchemaVersion < 5
+            || Document.Reachability!.ReachableCallableIds.Contains(callable.MethodSymbolId, StringComparer.Ordinal);
     }
 
     public bool TryLowerConstant(

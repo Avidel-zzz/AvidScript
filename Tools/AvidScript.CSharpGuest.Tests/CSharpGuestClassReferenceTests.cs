@@ -13,9 +13,11 @@ internal static class CSharpGuestClassReferenceTests
     public static int Run()
     {
         GeneratedProjectClassLowersToNominalI32();
+        GeneratedTypedClassLowersToNominalI32();
+        ForgedClassReferencesAreRejected();
         ClassReferenceDoesNotImplicitlyConvert();
         LifecycleFacadeLowersToSharedImportsAndWasm();
-        return 3;
+        return 5;
     }
 
     private static void GeneratedProjectClassLowersToNominalI32()
@@ -112,6 +114,79 @@ internal static class CSharpGuestClassReferenceTests
             "TSubclassOfAActor must not implicitly convert to an object handle");
     }
 
+    private static void GeneratedTypedClassLowersToNominalI32()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_typed_class_ref_ordinal")]
+                public static int GetStaticMeshOrdinal()
+                {
+                    TSubclassOfAStaticMeshActor value = ProjectClasses.StaticMeshClass;
+                    return value.AvidScriptOrdinal;
+                }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            "generated typed class reference source should pass semantic analysis: " + FormatSemanticDiagnostics(semantic));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(FormatGuestDiagnostics(lowering));
+        GuestType classReference = module.Types.Single(type =>
+            type.Id == "type:global::AvidScript.TSubclassOfAStaticMeshActor");
+        Assert(classReference.Kind == "class_ref"
+            && classReference.Storage == "i32"
+            && classReference.Size == 4
+            && classReference.Fields.Count == 0,
+            "generated typed class references should lower to nominal i32 class_ref cells");
+        Assert(module.Functions
+                .SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.Op == "constant"
+                    && instruction.Constant is { Kind: "class_ref", Value: "1" }),
+            "typed ProjectClasses entries should construct their ordinal inside the Guest");
+    }
+
+    private static void ForgedClassReferencesAreRejected()
+    {
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    public TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
+            "0"),
+            "ASCG1004",
+            "a public class reference constructor must not be treated as intrinsic");
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
+            "-1"),
+            "ASCG1004",
+            "negative class reference ordinals must be rejected");
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
+            "ordinal"),
+            "ASCG1004",
+            "nonliteral class reference ordinals must be rejected");
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "internal readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
+            "0"),
+            "ASCG1003",
+            "class reference ordinal fields must be private");
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "private readonly long Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = (long)ordinal; }",
+            "0"),
+            "ASCG1003",
+            "class reference ordinal fields must be int32");
+        AssertLoweringRejected(ForgedClassReferenceSource(
+            "private readonly int Ordinal;\n    private readonly int Other;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; Other = 0; }",
+            "0"),
+            "ASCG1003",
+            "look-alike class references must contain exactly one ordinal field");
+    }
+
     private static void LifecycleFacadeLowersToSharedImportsAndWasm()
     {
         const string source = """
@@ -199,6 +274,41 @@ internal static class CSharpGuestClassReferenceTests
         return string.Join(" | ", result.Diagnostics.Select(item => item.Code + ":" + item.Message));
     }
 
+    private static void AssertLoweringRejected(string source, string expectedCode, string message)
+    {
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            message + ": semantic analysis should accept the source: " + FormatSemanticDiagnostics(semantic));
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        Assert(!lowering.Succeeded && lowering.Diagnostics.Any(item => item.Code == expectedCode),
+            message + ": " + FormatGuestDiagnostics(lowering));
+    }
+
+    private static string ForgedClassReferenceSource(string members, string ordinal)
+    {
+        return $$"""
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct TSubclassOfAForged
+            {
+                {{members}}
+                internal int AvidScriptOrdinal => (int)Ordinal;
+            }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_forged_class_ref")]
+                public static int Probe(int ordinal)
+                {
+                    TSubclassOfAForged value = new({{ordinal}});
+                    return value.AvidScriptOrdinal;
+                }
+            }
+            """;
+    }
+
     private static System.Collections.Generic.IEnumerable<SemanticOperation> Flatten(
         SemanticOperation operation)
     {
@@ -231,6 +341,19 @@ internal static class CSharpGuestClassReferenceTests
             private readonly int Ordinal;
 
             internal TSubclassOfAActor(int ordinal)
+            {
+                Ordinal = ordinal;
+            }
+
+            internal int AvidScriptOrdinal => Ordinal;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public readonly struct TSubclassOfAStaticMeshActor
+        {
+            private readonly int Ordinal;
+
+            internal TSubclassOfAStaticMeshActor(int ordinal)
             {
                 Ordinal = ordinal;
             }
@@ -314,6 +437,7 @@ internal static class CSharpGuestClassReferenceTests
         public static class ProjectClasses
         {
             public static TSubclassOfAActor ProjectileClass => new(0);
+            public static TSubclassOfAStaticMeshActor StaticMeshClass => new(1);
         }
 
         public static class UE

@@ -179,8 +179,38 @@ internal static class CSharpOperationLowerer
         }
 
         GuestRegister? operand = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
+        if (operand is null)
+        {
+            return null;
+        }
+
+        if (operation.Conversion.IsUserDefined)
+        {
+            if (string.IsNullOrWhiteSpace(operation.Conversion.MethodSymbolId)
+                || !context.TryGetCallTarget(
+                    operation.Conversion.MethodSymbolId,
+                    out SemanticCallable callable,
+                    out string targetId)
+                || callable.IsConstructor
+                || callable.Parameters.Count != 1
+                || !string.Equals(callable.Parameters[0].TypeId, operand.TypeId, StringComparison.Ordinal)
+                || !string.Equals(callable.ReturnTypeId, operation.TypeId, StringComparison.Ordinal))
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} user-defined conversion target is missing, unreachable, or malformed.");
+                return null;
+            }
+
+            return EmitCall(
+                context,
+                callable,
+                targetId,
+                new[] { operand.Id },
+                blockOrdinal,
+                instructions);
+        }
+
         GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
-        if (operand is null || result is null)
+        if (result is null)
         {
             return null;
         }
