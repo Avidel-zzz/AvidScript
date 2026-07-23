@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains four host intrinsics"), FirstResult.IntrinsicCount, 4);
+	TestEqual(TEXT("Default schema contains five host intrinsics"), FirstResult.IntrinsicCount, 5);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -38,12 +38,78 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
+	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
+	TestEqual(TEXT("Schema serializes five intrinsic objects"), Intrinsics.Num(), 5);
+	const auto CountIntrinsic = [&Intrinsics](
+		const FString& Module,
+		const FString& Name,
+		const FString& Signature)
+	{
+		return Intrinsics.CountByPredicate(
+			[&Module, &Name, &Signature](const TSharedPtr<FJsonValue>& Value)
+			{
+				const TSharedPtr<FJsonObject> Intrinsic = Value.IsValid() ? Value->AsObject() : nullptr;
+				return Intrinsic.IsValid()
+					&& Intrinsic->GetStringField(TEXT("import_module")) == Module
+					&& Intrinsic->GetStringField(TEXT("import_name")) == Name
+					&& Intrinsic->GetStringField(TEXT("abi_signature")) == Signature;
+			});
+	};
+	const auto CountText = [&FirstJson](const FString& Token)
+	{
+		int32 Count = 0;
+		int32 SearchFrom = 0;
+		while ((SearchFrom = FirstJson.Find(
+			Token,
+			ESearchCase::CaseSensitive,
+			ESearchDir::FromStart,
+			SearchFrom)) != INDEX_NONE)
+		{
+			++Count;
+			SearchFrom += Token.Len();
+		}
+		return Count;
+	};
+	TestEqual(
+		TEXT("Schema contains exactly one packed owner intrinsic"),
+		CountIntrinsic(TEXT("avidscript"), TEXT("avid_owner_get_handle"), TEXT("()I")),
+		1);
+	TestEqual(
+		TEXT("Schema retains legacy owner generation intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("owner_get_generation"), TEXT("()i")),
+		1);
+	TestEqual(
+		TEXT("Schema retains legacy owner slot intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("owner_get_slot"), TEXT("()i")),
+		1);
+	TestEqual(
+		TEXT("Schema retains legacy Timer cancel intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i")),
+		1);
+	TestEqual(
+		TEXT("Schema retains legacy set-once Timer intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("timer_set_once"), TEXT("(fi)i")),
+		1);
+	TestTrue(
+		TEXT("Schema text spells the packed owner import exactly"),
+		FirstJson.Contains(TEXT("\"import_module\": \"avidscript\""))
+		&& FirstJson.Contains(TEXT("\"import_name\": \"avid_owner_get_handle\""))
+		&& FirstJson.Contains(TEXT("\"abi_signature\": \"()I\"")));
+	TestEqual(
+		TEXT("Schema text contains one packed owner import name"),
+		CountText(TEXT("\"avid_owner_get_handle\"")),
+		1);
+	TestEqual(
+		TEXT("Schema text contains one packed owner ABI signature"),
+		CountText(TEXT("\"()I\"")),
+		1);
 	TestTrue(TEXT("Schema includes actor location import"), FirstJson.Contains(TEXT("actor_get_location")));
 	TestTrue(TEXT("Schema includes actor root component import"), FirstJson.Contains(TEXT("actor_get_root_component")));
 	TestTrue(TEXT("Schema includes SceneComponent world location import"), FirstJson.Contains(TEXT("scene_component_get_world_location")));
 	TestTrue(TEXT("Schema includes FVector reflected type"), FirstJson.Contains(TEXT("FVector")));
 	TestTrue(TEXT("Schema includes FHitResult reflected wrapper context"), FirstJson.Contains(TEXT("FHitResult")));
 	TestTrue(TEXT("Schema includes USceneComponent return type"), FirstJson.Contains(TEXT("USceneComponent")));
+	TestTrue(TEXT("Schema includes owner generation intrinsic"), FirstJson.Contains(TEXT("owner_get_generation")) && FirstJson.Contains(TEXT("()i")));
 	TestTrue(TEXT("Schema includes owner slot intrinsic"), FirstJson.Contains(TEXT("owner_get_slot")));
 	TestTrue(TEXT("Schema includes set-once Timer intrinsic"), FirstJson.Contains(TEXT("timer_set_once")) && FirstJson.Contains(TEXT("(fi)i")));
 	TestTrue(TEXT("Schema includes Timer cancel intrinsic"), FirstJson.Contains(TEXT("timer_cancel")) && FirstJson.Contains(TEXT("(i)i")));

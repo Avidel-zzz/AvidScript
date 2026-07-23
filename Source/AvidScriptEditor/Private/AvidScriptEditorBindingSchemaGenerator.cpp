@@ -266,7 +266,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = ResolvedBindings.Num();
-	OutResult.IntrinsicCount = 4;
+	OutResult.IntrinsicCount = 5;
 	return true;
 }
 
