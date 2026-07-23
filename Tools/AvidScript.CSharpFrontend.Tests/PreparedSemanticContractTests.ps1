@@ -1,5 +1,6 @@
 param(
-    [string]$DotNetPath = (Join-Path $env:USERPROFILE ".dotnet\dotnet.exe")
+    [string]$DotNetPath = (Join-Path $env:USERPROFILE ".dotnet\dotnet.exe"),
+    [string]$BindingPackagePath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -162,14 +163,12 @@ foreach ($Directory in @($env:TEMP, $env:DOTNET_CLI_HOME, $env:APPDATA, $env:LOC
     New-Item -ItemType Directory -Force -Path $Directory | Out-Null
 }
 
-$BindingPackagePath = Get-ChildItem `
-    -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
-    -Filter "package.json" `
-    -File `
-    -Recurse `
-    -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
+. (Join-Path $PluginRoot "Build\AvidScriptCSharpBindingPackage.ps1")
+if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
+    $BindingPackagePath = Find-AvidScriptCSharpBindingPackageManifest `
+        -RootPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
+        -RequiredUeFunctions @("SetActorScale3D")
+}
 Assert-Condition (
     -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -and
     (Test-Path -LiteralPath $BindingPackagePath -PathType Leaf)) `
@@ -200,7 +199,6 @@ if (-not (Test-Path -LiteralPath $HelperPath -PathType Leaf)) {
 }
 
 . $HelperPath
-. (Join-Path $PluginRoot "Build\AvidScriptCSharpBindingPackage.ps1")
 
 $PreparedReportJson = Get-Content -Raw -LiteralPath $ReportPath | ConvertFrom-Json
 $AuthorizationPackage = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $BindingPackagePath

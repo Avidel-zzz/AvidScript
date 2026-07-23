@@ -181,14 +181,10 @@ foreach ($Directory in @($RunRoot, $CacheParent)) {
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
-    $BindingPackagePath = Get-ChildItem `
-        -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
-        -Filter "package.json" `
-        -File `
-        -Recurse `
-        -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1 -ExpandProperty FullName
+    . (Join-Path $PluginRoot "Build\AvidScriptCSharpBindingPackage.ps1")
+    $BindingPackagePath = Find-AvidScriptCSharpBindingPackageManifest `
+        -RootPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
+        -RequiredUeFunctions @("SetActorScale3D")
 }
 Assert-Condition (
     -not [string]::IsNullOrWhiteSpace($BindingPackagePath) -and

@@ -504,7 +504,11 @@ Assert-Condition ($SemanticJson.semantic_version -eq "1.7") "semantic artifact v
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
-Assert-Condition (@($SemanticJson.callables).Count -eq 52) "ActorLifecycle semantic callable count is not 52"
+Assert-Condition (@($SemanticJson.callables).Count -eq 53) "ActorLifecycle semantic callable count is not 53"
+$ActorMatchesCallables = @($SemanticJson.callables | Where-Object {
+    [string]$_.method_symbol_id -ceq "symbol:method:global::AvidScript.AActor.Matches(global::AvidScript.AActor):bool"
+})
+Assert-Condition ($ActorMatchesCallables.Count -eq 1) "ActorLifecycle semantic artifact is missing the AActor.Matches helper"
 Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 14) "ActorLifecycle semantic import count is not 14"
 Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.export }).Count -eq 5) "ActorLifecycle semantic export count is not 5"
 $GameplayCallbacks = @($SemanticJson.gameplay_event_callbacks)

@@ -351,3 +351,60 @@ function Resolve-AvidScriptCSharpBindingPackage {
         RequiredImports = @($RequiredImports)
     }
 }
+
+function Find-AvidScriptCSharpBindingPackageManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$RootPath,
+        [Parameter(Mandatory = $true)][string[]]$RequiredUeFunctions
+    )
+
+    if ($RequiredUeFunctions.Count -eq 0 -or
+        -not (Test-Path -LiteralPath $RootPath -PathType Container)) {
+        return ""
+    }
+
+    $Candidates = foreach ($ManifestFile in Get-ChildItem `
+            -LiteralPath $RootPath `
+            -Filter "package.json" `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue) {
+        try {
+            $Package = Resolve-AvidScriptCSharpBindingPackage -ManifestPath $ManifestFile.FullName
+            $Descriptor = Get-Content -Raw -LiteralPath $Package.DescriptorPath | ConvertFrom-Json
+            $AuthorizedStableIds = [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::Ordinal)
+            foreach ($Import in @($Package.RequiredImports)) {
+                [void]$AuthorizedStableIds.Add([string]$Import.StableId)
+            }
+
+            $ContainsRequiredFunctions = $true
+            foreach ($RequiredFunction in $RequiredUeFunctions) {
+                $Matches = @($Descriptor.bindings | Where-Object {
+                    [string]$_.ue_function -ceq $RequiredFunction -and
+                    $AuthorizedStableIds.Contains([string]$_.stable_id)
+                })
+                if ($Matches.Count -eq 0) {
+                    $ContainsRequiredFunctions = $false
+                    break
+                }
+            }
+            if ($ContainsRequiredFunctions) {
+                [pscustomobject]@{
+                    ManifestPath = $Package.ManifestPath
+                    ImportCount = @($Package.RequiredImports).Count
+                    LastWriteTime = $ManifestFile.LastWriteTimeUtc
+                }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return [string]($Candidates |
+        Sort-Object -Property @{ Expression = { $_.ImportCount }; Descending = $true },
+            @{ Expression = { $_.LastWriteTime }; Descending = $true },
+            @{ Expression = { $_.ManifestPath }; Descending = $false } |
+        Select-Object -First 1 -ExpandProperty ManifestPath)
+}
