@@ -137,8 +137,15 @@ struct FAvidScriptTypedObjectBenchmarkResult
 	int32 NativeIsAOperationCount = 0;
 	int32 BindingObjectTypeOperationCount = 0;
 	int32 WasmCheckedCastOperationCount = 0;
+	int32 TypedUpcastOperationCount = 0;
 	int32 WasmCheckedCastHostCrossingCount = 0;
+	int32 TypedUpcastHostImportCount = 0;
 	int32 UpcastHostImportsPerIteration = 0;
+	int32 LastWasmCheckedCastResult = 0;
+	uint64 NativeIsAResultChecksum = 0;
+	uint64 BindingObjectTypeResultChecksum = 0;
+	uint64 WasmCheckedCastResultChecksum = 0;
+	uint64 TypedUpcastResultChecksum = 0;
 	int32 BindingPackageClassLoadsDuringLoad = 0;
 	int32 BindingPackageReflectedNameLookupsDuringLoad = 0;
 	int32 BindingPackageClassLoadsDuringWarmLoop = 0;

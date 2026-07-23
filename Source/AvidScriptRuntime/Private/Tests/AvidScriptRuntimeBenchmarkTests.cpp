@@ -102,10 +102,21 @@ bool FAvidScriptTypedObjectBenchmarkSmokeTest::RunTest(const FString& Parameters
 	TestEqual(TEXT("Native operation count covers timed samples"), Result.NativeIsAOperationCount, TimedOperationCount);
 	TestEqual(TEXT("Binding operation count covers timed samples"), Result.BindingObjectTypeOperationCount, TimedOperationCount);
 	TestEqual(TEXT("WAMR operation count covers timed samples"), Result.WasmCheckedCastOperationCount, TimedOperationCount);
+	TestEqual(TEXT("Typed upcast operation count covers timed samples"), Result.TypedUpcastOperationCount, TimedOperationCount);
 	TestEqual(TEXT("WAMR performs one checked-cast crossing per timed operation"), Result.WasmCheckedCastHostCrossingCount, TimedOperationCount);
+	TestEqual(TEXT("Observed typed upcast workload adds no host import"), Result.TypedUpcastHostImportCount, 0);
 	TestEqual(TEXT("Warm typed dispatch performs no class loads"), Result.BindingPackageClassLoadsDuringWarmLoop, 0);
 	TestEqual(TEXT("Warm typed dispatch performs no reflected name lookup"), Result.BindingPackageReflectedNameLookupsDuringWarmLoop, 0);
 	TestEqual(TEXT("Typed upcasts use no host import"), Result.UpcastHostImportsPerIteration, 0);
+	TestEqual(TEXT("WAMR checked cast result is host-observable and matched"), Result.LastWasmCheckedCastResult, 1);
+	TestTrue(TEXT("Native IsA result checksum is observable"), Result.NativeIsAResultChecksum != 0);
+	TestEqual(TEXT("Binding consumes the same successful type results"),
+		Result.BindingObjectTypeResultChecksum,
+		Result.NativeIsAResultChecksum);
+	TestEqual(TEXT("WAMR consumes the same successful type results"),
+		Result.WasmCheckedCastResultChecksum,
+		Result.NativeIsAResultChecksum);
+	TestTrue(TEXT("Typed upcast copied handle checksum is observable"), Result.TypedUpcastResultChecksum != 0);
 	TestTrue(TEXT("Package load resolves the immutable object type graph"), Result.BindingPackageClassLoadsDuringLoad >= 3);
 	TestTrue(TEXT("Package load may resolve the static schema sentinel once"), Result.BindingPackageReflectedNameLookupsDuringLoad >= 1);
 	TestTrue(TEXT("Native IsA P95 is ordered"), Result.NativeIsA.P95Ms >= Result.NativeIsA.P50Ms);
@@ -118,6 +129,8 @@ bool FAvidScriptTypedObjectBenchmarkSmokeTest::RunTest(const FString& Parameters
 		FString(TEXT("pending_same_machine_phase49_baseline")));
 	TestTrue(TEXT("Summary identifies typed object benchmark"), Result.Summary.Contains(TEXT("typed_object_benchmark")));
 	TestTrue(TEXT("Summary exposes WAMR crossing count"), Result.Summary.Contains(TEXT("wasm_host_crossings")));
+	TestTrue(TEXT("Summary exposes observed typed upcast imports"), Result.Summary.Contains(TEXT("typed_upcast_host_imports")));
+	TestTrue(TEXT("Summary exposes observable checksums"), Result.Summary.Contains(TEXT("native_checksum")));
 	TestTrue(TEXT("Summary exposes warm lookup budget"), Result.Summary.Contains(TEXT("warm_reflected_name_lookups")));
 	return true;
 }
