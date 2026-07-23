@@ -927,6 +927,10 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TEXT("symbol:method:global::AvidScript.AAvidScriptTypedTestActor.op_Implicit(global::AvidScript.AAvidScriptTypedTestActor):global::AvidScript.AActor");
 	const FString ProjectileUpcastSymbol =
 		TEXT("symbol:method:global::AvidScript.AAvidScriptTypedTestProjectile.op_Implicit(global::AvidScript.AAvidScriptTypedTestProjectile):global::AvidScript.AAvidScriptTypedTestActor");
+	const FString TypedSelfGetterSymbol =
+		TEXT("symbol:method:global::AvidScript.UE.get_Self():global::AvidScript.AAvidScriptTypedTestActor");
+	const FString TypedSpawnActorSymbol =
+		TEXT("symbol:method:global::AvidScript.UE.SpawnActor(global::AvidScript.TSubclassOfAAvidScriptTypedTestProjectile,global::AvidScript.FTransform):global::AvidScript.AAvidScriptTypedTestProjectile");
 	TestEqual(
 		TEXT("Roslyn operation tree and CFG bind two Actor checked-downcast call sites"),
 		CountAvidScriptJsonStringField(SemanticRoot, TEXT("symbol_id"), ActorTryCastSymbol),
@@ -939,6 +943,22 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TEXT("Roslyn semantic artifact binds both direct-base implicit upcasts"),
 		SemanticJson.Contains(ActorUpcastSymbol)
 		&& SemanticJson.Contains(ProjectileUpcastSymbol));
+	const TSharedPtr<FJsonObject> TypedSelfSemanticCallable = FindAvidScriptJsonArrayObject(
+		SemanticRoot,
+		TEXT("callables"),
+		TEXT("method_symbol_id"),
+		TypedSelfGetterSymbol);
+	const TSharedPtr<FJsonObject> TypedSpawnSemanticCallable = FindAvidScriptJsonArrayObject(
+		SemanticRoot,
+		TEXT("callables"),
+		TEXT("method_symbol_id"),
+		TypedSpawnActorSymbol);
+	if (!TestTrue(
+		TEXT("Roslyn semantic artifact identifies the typed Self and Spawn wrappers"),
+		TypedSelfSemanticCallable.IsValid() && TypedSpawnSemanticCallable.IsValid()))
+	{
+		return false;
+	}
 
 	const TSharedPtr<FJsonObject> ObjectTypeImport = FindAvidScriptJsonArrayObject(
 		GuestIrRoot,
@@ -960,6 +980,41 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TEXT("Reachable Guest IR declares the object-type import exactly once"),
 		CountAvidScriptJsonStringField(GuestIrRoot, TEXT("name"), TEXT("avid_object_type_is_a")),
 		1);
+	const TSharedPtr<FJsonObject> OwnerHandleImport = FindAvidScriptJsonArrayObject(
+		GuestIrRoot,
+		TEXT("imports"),
+		TEXT("name"),
+		TEXT("avid_owner_get_handle"));
+	const TSharedPtr<FJsonObject> SpawnActorImport = FindAvidScriptJsonArrayObject(
+		GuestIrRoot,
+		TEXT("imports"),
+		TEXT("name"),
+		TEXT("avid_object_spawn_actor"));
+	if (!TestTrue(
+		TEXT("Reachable Guest IR declares the packed owner and Spawn imports"),
+		OwnerHandleImport.IsValid() && SpawnActorImport.IsValid()))
+	{
+		return false;
+	}
+	FString OwnerHandleImportId;
+	FString SpawnActorImportId;
+	if (!TestTrue(
+		TEXT("Reachable Guest IR packed owner and Spawn imports have stable identities"),
+		OwnerHandleImport->TryGetStringField(TEXT("id"), OwnerHandleImportId)
+		&& SpawnActorImport->TryGetStringField(TEXT("id"), SpawnActorImportId)))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject> TypedSelfFunction = FindAvidScriptJsonArrayObject(
+		GuestIrRoot,
+		TEXT("functions"),
+		TEXT("id"),
+		TEXT("function:") + TypedSelfGetterSymbol);
+	const TSharedPtr<FJsonObject> TypedSpawnFunction = FindAvidScriptJsonArrayObject(
+		GuestIrRoot,
+		TEXT("functions"),
+		TEXT("id"),
+		TEXT("function:") + TypedSpawnActorSymbol);
 	const TSharedPtr<FJsonObject> ActorTryCastFunction = FindAvidScriptJsonArrayObject(
 		GuestIrRoot,
 		TEXT("functions"),
@@ -981,14 +1036,31 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TEXT("id"),
 		TEXT("function:") + ProjectileUpcastSymbol);
 	if (!TestTrue(
-		TEXT("Reachable Guest IR contains both checked-downcast wrappers"),
-		ActorTryCastFunction.IsValid() && ProjectileTryCastFunction.IsValid())
+		TEXT("Reachable Guest IR contains the semantic-linked typed Self and Spawn wrappers"),
+		TypedSelfFunction.IsValid() && TypedSpawnFunction.IsValid())
+		|| !TestTrue(
+			TEXT("Reachable Guest IR contains both checked-downcast wrappers"),
+			ActorTryCastFunction.IsValid() && ProjectileTryCastFunction.IsValid())
 		|| !TestTrue(
 			TEXT("Reachable Guest IR contains both direct upcast wrappers"),
 			ActorUpcastFunction.IsValid() && ProjectileUpcastFunction.IsValid()))
 	{
 		return false;
 	}
+	TestEqual(
+		TEXT("Typed Self wrapper performs exactly one packed owner crossing"),
+		CountAvidScriptJsonStringField(
+			TypedSelfFunction,
+			TEXT("target_id"),
+			OwnerHandleImportId),
+		1);
+	TestEqual(
+		TEXT("Typed SpawnActor wrapper performs exactly one Spawn crossing"),
+		CountAvidScriptJsonStringField(
+			TypedSpawnFunction,
+			TEXT("target_id"),
+			SpawnActorImportId),
+		1);
 	TestEqual(
 		TEXT("Actor checked-downcast wrapper performs exactly one object-type crossing"),
 		CountAvidScriptJsonStringField(
@@ -1164,12 +1236,67 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("Typed cleanup preserves the owner"), IsValid(Owner));
 	TestTrue(TEXT("Typed cleanup preserves the unrelated sentinel"), IsValid(Sentinel));
 
+	const int32 HostImportsAfterTickCleanup = TickResult.HostImportCallCount;
 	FAvidScriptWasmSmokeResult StopResult;
 	if (!TestTrue(TEXT("Typed project API runtime stops cleanly"), Session.StopAndUnload(StopResult)))
 	{
 		AddError(StopResult.ErrorMessage);
 		return false;
 	}
+	TestEqual(
+		TEXT("EndPlay does not destroy the already-cleared projectile twice"),
+		StopResult.HostImportCallCount,
+		HostImportsAfterTickCleanup);
+
+	FAvidScriptRuntimeSession EarlyStopSession;
+	EarlyStopSession.SetHostContext(HostContext);
+	if (!TestTrue(
+		TEXT("Typed project API early-stop run enters BeginPlay"),
+		EarlyStopSession.LoadInitialModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Early-stop BeginPlay executes typed Self"), Owner->GameplayValue, 12.0f);
+	AAvidScriptTypedTestProjectile* EarlyStopProjectile =
+		FindAvidScriptTypedProjectApiProjectile(*World, *BlueprintClass);
+	if (!TestNotNull(TEXT("Early-stop run spawns a concrete Blueprint projectile"), EarlyStopProjectile))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Early-stop run owns one projectile handle"), Registry.GetLiveHandleCount(), 2);
+	if (!TestTrue(
+		TEXT("StopAndUnload routes EndPlay cleanup before the second Tick"),
+		EarlyStopSession.StopAndUnload(StopResult)))
+	{
+		AddError(StopResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Early-stop EndPlay performs BeginPlay crossings plus one target Destroy"),
+		StopResult.HostImportCallCount,
+		4);
+	TestTrue(
+		TEXT("Early-stop EndPlay destroys only the target projectile"),
+		!IsValid(EarlyStopProjectile) || EarlyStopProjectile->IsActorBeingDestroyed());
+	TestEqual(TEXT("Early-stop EndPlay releases only the target handle"), Registry.GetLiveHandleCount(), 1);
+	TestTrue(TEXT("Early-stop EndPlay preserves the owner"), IsValid(Owner));
+	TestTrue(TEXT("Early-stop EndPlay preserves the unrelated sentinel"), IsValid(Sentinel));
+	if (!TestTrue(
+		TEXT("Repeated StopAndUnload remains idempotent"),
+		EarlyStopSession.StopAndUnload(StopResult)))
+	{
+		AddError(StopResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Repeated StopAndUnload performs no host crossing"), StopResult.HostImportCallCount, 0);
+	TestEqual(TEXT("Repeated StopAndUnload preserves the owner-only registry"), Registry.GetLiveHandleCount(), 1);
+	TestTrue(TEXT("Repeated StopAndUnload preserves the owner"), IsValid(Owner));
+	TestTrue(TEXT("Repeated StopAndUnload preserves the unrelated sentinel"), IsValid(Sentinel));
 
 	FAvidScriptRuntimeSession StaleSession;
 	StaleSession.SetHostContext(HostContext);
@@ -1184,7 +1311,7 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		AddError(ReloadResult.ErrorMessage);
 		return false;
 	}
-	TestEqual(TEXT("Second BeginPlay still executes typed Self"), Owner->GameplayValue, 12.0f);
+	TestEqual(TEXT("Stale-run BeginPlay still executes typed Self"), Owner->GameplayValue, 16.0f);
 	AAvidScriptTypedTestProjectile* StaleProjectile =
 		FindAvidScriptTypedProjectApiProjectile(*World, *BlueprintClass);
 	if (!TestNotNull(TEXT("Stale-handle run spawns a fresh Blueprint projectile"), StaleProjectile))
@@ -1216,7 +1343,7 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		TEXT("Stale generation retains the registry failure detail"),
 		TickResult.ErrorMessage.Contains(TEXT("generation_mismatch"), ESearchCase::CaseSensitive));
 	TestEqual(TEXT("Stale checked cast cannot execute the projectile function"), StaleProjectile->ActivationCount, 0);
-	TestEqual(TEXT("Stale checked cast fails before later gameplay mutation"), Owner->GameplayValue, 12.0f);
+	TestEqual(TEXT("Stale checked cast fails before later gameplay mutation"), Owner->GameplayValue, 16.0f);
 	TestTrue(TEXT("Stale checked cast does not destroy the projectile"), IsValid(StaleProjectile));
 	TestTrue(TEXT("Stale checked cast preserves the unrelated sentinel"), IsValid(Sentinel));
 	StaleSession.UnloadLive();

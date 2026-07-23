@@ -66,14 +66,26 @@ public static class TypedProjectApiScript
         TickCount = nextTickCount;
         if (nextTickCount >= 2)
         {
-            UE.DestroyActor(actor);
             Projectile = default;
             TickCount = 0;
+            UE.DestroyActor(actor);
         }
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
+        AAvidScriptTypedTestProjectile projectile = Projectile;
+        if (!projectile.IsValid)
+        {
+            TickCount = 0;
+            return;
+        }
+
+        AAvidScriptTypedTestActor typedActor = projectile;
+        AActor actor = typedActor;
+        Projectile = default;
+        TickCount = 0;
+        UE.DestroyActor(actor);
     }
 }
