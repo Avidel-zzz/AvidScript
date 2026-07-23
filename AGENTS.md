@@ -1011,3 +1011,10 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-23 P49 最终 Gate callable fixture 漂移：P48.3 已为 ActorLifecycle 增加 `AActor.Matches(AActor)`，但 `BuildIntegrationTests.ps1` 仍保留 P48.2 的 52 callable 总数，直到 P49 全合同门禁才发现。Prevention：样例 helper 或生成 reference surface 变化时必须检索所有 artifact 总数断言；更新计数时同时断言新增 symbol id，避免只把数字改到当前值而失去语义证据。
 - 2026-07-23 P49 最终 Gate package fixture 选择不稳定：PreparedSemantic 与 SemanticCacheBuildIntegration 按修改时间选择任意最新 binding package，P49 DynamicProjectile 三项 profile 覆盖了旧 EngineGameplay package，夹具随后找不到 `UE.Self.SetActorScale3D`。Prevention：测试和构建入口不得用“latest package”代替能力选择；统一解析已验证 manifest/descriptor，并按 required UE function 与 authorized stable id 选择兼容 package，再用 import 数和稳定路径作确定性排序。
 - 2026-07-23 P49 恢复入口顺序第二次复发：上下文压缩恢复后先执行了 `git status`，随后才运行 `Build/InvokePhaseWorkflow.ps1 status -Phase 49`，再次违反恢复入口合同。Prevention：恢复后的第一条工具调用必须直接执行 PhaseWorkflow status；禁止把 git、memory、终端或源码探查放在它之前，状态确认后才允许展开其他检查。
+
+## Phase 50 Typed Project API Rules
+
+- 2026-07-23 P50.0 重构后源码路径猜测复发：架构调研时先后直接读取了不存在的 `Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingModel.h` 和 `Source/AvidScriptRuntime/Private/AvidScriptRuntimeSession.cpp`；真实文件分别是 `AvidScriptEditorBindingDescriptorModel.h` 与 `Private/Session/AvidScriptRuntimeSession.cpp`。Prevention：重构过的模块不得根据类型名或旧目录结构猜路径；首次读取 basename 或 owner 前必须执行受限 `rg --files <module> | rg -F <keyword>` 或 `rg -l -F <symbol> <module>`，只读取索引确认的路径。
+- P50 object-type rule：自定义 UObject 类型必须由 descriptor v6 的稳定类型图和 package-load immutable `UClass` plan 驱动；Runtime 热路径只能按 ordinal 索引缓存类型，禁止根据 C# 名称或 class path 执行字符串反射查找。
+- P50 conversion rule：派生 handle 到基类 handle 的 upcast 必须完全在 Guest 内复制两个 `i32`，不得新增 Host import；基类 handle 到派生 handle 的 checked downcast 统一使用一个 object-type import，类型不匹配返回 invalid handle，stale/cross-world handle 继续失败关闭。
+- P50 API-growth rule：自定义项目 `UFUNCTION` 继续通过 descriptor、统一 dynamic ABI 和 cached `ProcessEvent` plan 扩展；禁止为单个项目类或函数手写 VM import、Runtime switch、WAMR wrapper 或 renderer 特判。
