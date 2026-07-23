@@ -25,6 +25,7 @@ public class AvidScriptEditor : ModuleRules
 				"DirectoryWatcher",
 				"Projects",
 				"Json",
+				"Kismet",
 				"UnrealEd",
 				"ToolMenus",
 				"Slate",
