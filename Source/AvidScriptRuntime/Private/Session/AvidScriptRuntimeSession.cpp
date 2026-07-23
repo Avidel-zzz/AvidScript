@@ -387,6 +387,19 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 	return Snapshot;
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+FAvidScriptRuntimeSessionTestSnapshot FAvidScriptRuntimeSession::GetTestSnapshot() const
+{
+	FAvidScriptRuntimeSessionTestSnapshot Snapshot;
+	Snapshot.Runtime = GetSnapshot();
+	Snapshot.LiveManifest = LiveManifest;
+	Snapshot.HostContext = HostContext;
+	Snapshot.LiveRuntimeIdentity = LiveRuntime.Get();
+	Snapshot.bSchedulerAttached = LiveRuntime.IsValid() && Scheduler->IsAttachedTo(LiveRuntime.Get());
+	return Snapshot;
+}
+#endif
+
 bool FAvidScriptRuntimeSession::ValidateManifest(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	const FString& PreviousModuleId,
@@ -583,6 +596,12 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	}
 
 	FAvidScriptWasmSmokeResult BeginPlayResult;
+#if WITH_DEV_AUTOMATION_TESTS
+	if (CandidateBeginPlayObserverForTesting)
+	{
+		CandidateBeginPlayObserverForTesting();
+	}
+#endif
 	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);

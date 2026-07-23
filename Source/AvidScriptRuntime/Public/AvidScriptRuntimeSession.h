@@ -19,6 +19,17 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 	int32 RejectedReloadCount = 0;
 };
 
+#if WITH_DEV_AUTOMATION_TESTS
+struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionTestSnapshot
+{
+	FAvidScriptRuntimeSessionSnapshot Runtime;
+	FAvidScriptWasmReloadManifest LiveManifest;
+	FAvidScriptWasmHostContext HostContext;
+	const FAvidScriptWasmRuntimeInstance* LiveRuntimeIdentity = nullptr;
+	bool bSchedulerAttached = false;
+};
+#endif
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSession
 {
 public:
@@ -61,6 +72,11 @@ public:
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
+	void SetCandidateBeginPlayObserverForTesting(TFunction<void()> InObserver)
+	{
+		CandidateBeginPlayObserverForTesting = MoveTemp(InObserver);
+	}
+	FAvidScriptRuntimeSessionTestSnapshot GetTestSnapshot() const;
 #endif
 
 private:
@@ -91,6 +107,9 @@ private:
 	FAvidScriptWasmHostContext HostContext;
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
+#if WITH_DEV_AUTOMATION_TESTS
+	TFunction<void()> CandidateBeginPlayObserverForTesting;
+#endif
 };
 
 using FAvidScriptWasmReloadSession = FAvidScriptRuntimeSession;
