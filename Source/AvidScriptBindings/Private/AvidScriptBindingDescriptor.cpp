@@ -43,6 +43,25 @@ bool ReadAvidScriptBindingRequiredString(
 	return true;
 }
 
+bool ReadAvidScriptBindingRequiredStringAllowEmpty(
+	const TSharedPtr<FJsonObject>& Object,
+	const TCHAR* Field,
+	FString& OutValue,
+	FString& OutErrorSource)
+{
+	const TSharedPtr<FJsonValue> Value = Object.IsValid()
+		? Object->TryGetField(Field)
+		: nullptr;
+	if (!Value.IsValid()
+		|| Value->Type != EJson::String
+		|| !Value->TryGetString(OutValue))
+	{
+		OutErrorSource = Field;
+		return false;
+	}
+	return true;
+}
+
 bool ReadAvidScriptBindingRequiredBool(
 	const TSharedPtr<FJsonObject>& Object,
 	const TCHAR* Field,
@@ -162,6 +181,7 @@ bool ReadAvidScriptBindingEnumValues(
 
 bool ParseAvidScriptBindingType(
 	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
 	FAvidScriptBindingTypeModel& OutType,
 	FString& OutErrorSource)
 {
@@ -182,6 +202,39 @@ bool ParseAvidScriptBindingType(
 		|| OutType.Alignment <= 0)
 	{
 		return false;
+	}
+	if (SchemaVersion >= 6)
+	{
+		if (!ReadAvidScriptBindingRequiredInt(
+				Object,
+				TEXT("object_type_ordinal"),
+				OutType.ObjectTypeOrdinal,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("class_path"),
+				OutType.ClassPath,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("base_type_id"),
+				OutType.BaseTypeId,
+				OutErrorSource)
+			|| OutType.ObjectTypeOrdinal < INDEX_NONE
+			|| (OutType.Kind != TEXT("object_handle")
+				&& (OutType.ObjectTypeOrdinal != INDEX_NONE
+					|| !OutType.ClassPath.IsEmpty()
+					|| !OutType.BaseTypeId.IsEmpty()))
+			|| (OutType.Kind == TEXT("object_handle")
+				&& OutType.ObjectTypeOrdinal == INDEX_NONE
+				&& (!OutType.ClassPath.IsEmpty() || !OutType.BaseTypeId.IsEmpty()))
+			|| (OutType.Kind == TEXT("object_handle")
+				&& OutType.ObjectTypeOrdinal != INDEX_NONE
+				&& (OutType.ClassPath.IsEmpty()
+					|| OutType.CanonicalType != TEXT("object:") + OutType.ClassPath)))
+		{
+			return false;
+		}
 	}
 	return true;
 }
@@ -348,6 +401,7 @@ bool IsAvidScriptBindingIdentifier(const FString& Value)
 
 bool ParseAvidScriptBindingClassReference(
 	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
 	FAvidScriptBindingClassReferenceModel& OutReference,
 	FString& OutErrorSource)
 {
@@ -367,6 +421,197 @@ bool ParseAvidScriptBindingClassReference(
 			OutReference.LoadPolicy))
 	{
 		return false;
+	}
+	if (SchemaVersion >= 6
+		&& !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("result_type_id"),
+			OutReference.ResultTypeId,
+			OutErrorSource))
+	{
+		return false;
+	}
+	return true;
+}
+
+bool ValidateAvidScriptBindingV6ObjectTypes(
+	const FAvidScriptBindingPackageModel& Package,
+	FString& OutErrorSource)
+{
+	if (Package.SchemaVersion < 6)
+	{
+		return true;
+	}
+
+	TMap<FString, const FAvidScriptBindingTypeModel*> TypesById;
+	TMap<FString, const FAvidScriptBindingTypeModel*> GraphTypesById;
+	TSet<int32> GraphOrdinals;
+	int32 MaximumOrdinal = INDEX_NONE;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		TypesById.Add(Type.StableId, &Type);
+		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		if (Type.Kind != TEXT("object_handle")
+			|| GraphOrdinals.Contains(Type.ObjectTypeOrdinal)
+			|| GraphTypesById.Contains(Type.StableId))
+		{
+			OutErrorSource = TEXT("types.object_type_ordinal");
+			return false;
+		}
+		GraphOrdinals.Add(Type.ObjectTypeOrdinal);
+		GraphTypesById.Add(Type.StableId, &Type);
+		MaximumOrdinal = FMath::Max(MaximumOrdinal, Type.ObjectTypeOrdinal);
+	}
+	if (MaximumOrdinal != GraphTypesById.Num() - 1)
+	{
+		OutErrorSource = TEXT("types.object_type_ordinal");
+		return false;
+	}
+
+	TArray<const FAvidScriptBindingTypeModel*> GraphTypesByOrdinal;
+	GraphTypesByOrdinal.SetNumZeroed(GraphTypesById.Num());
+	for (const TPair<FString, const FAvidScriptBindingTypeModel*>& Pair : GraphTypesById)
+	{
+		const FAvidScriptBindingTypeModel& Type = *Pair.Value;
+		if (!GraphTypesByOrdinal.IsValidIndex(Type.ObjectTypeOrdinal))
+		{
+			OutErrorSource = TEXT("types.object_type_ordinal");
+			return false;
+		}
+		GraphTypesByOrdinal[Type.ObjectTypeOrdinal] = &Type;
+	}
+
+	FString PreviousClassPath;
+	int32 RootCount = 0;
+	for (const FAvidScriptBindingTypeModel* Type : GraphTypesByOrdinal)
+	{
+		if (Type == nullptr
+			|| (!PreviousClassPath.IsEmpty()
+				&& PreviousClassPath.Compare(Type->ClassPath, ESearchCase::CaseSensitive) >= 0))
+		{
+			OutErrorSource = TEXT("types.object_type_ordinal");
+			return false;
+		}
+		PreviousClassPath = Type->ClassPath;
+		if (Type->BaseTypeId.IsEmpty())
+		{
+			++RootCount;
+			if (Type->ClassPath != TEXT("/Script/CoreUObject.Object"))
+			{
+				OutErrorSource = TEXT("types.base_type_id");
+				return false;
+			}
+		}
+		else if (!GraphTypesById.Contains(Type->BaseTypeId)
+			|| Type->BaseTypeId == Type->StableId)
+		{
+			OutErrorSource = TEXT("types.base_type_id");
+			return false;
+		}
+	}
+	if (!GraphTypesByOrdinal.IsEmpty() && RootCount != 1)
+	{
+		OutErrorSource = TEXT("types.base_type_id");
+		return false;
+	}
+
+	for (const TPair<FString, const FAvidScriptBindingTypeModel*>& Pair : GraphTypesById)
+	{
+		TSet<FString> Visited;
+		const FAvidScriptBindingTypeModel* Current = Pair.Value;
+		while (Current != nullptr && !Current->BaseTypeId.IsEmpty())
+		{
+			if (Visited.Contains(Current->StableId))
+			{
+				OutErrorSource = TEXT("types.base_type_id");
+				return false;
+			}
+			Visited.Add(Current->StableId);
+			Current = GraphTypesById.FindRef(Current->BaseTypeId);
+		}
+	}
+
+	const auto IsGraphType = [&GraphTypesById](const FString& TypeId)
+	{
+		return GraphTypesById.Contains(TypeId);
+	};
+	const auto ValidateObjectValue = [&IsGraphType, &OutErrorSource](
+		const FAvidScriptBindingValueModel& Value)
+	{
+		if (Value.Kind == TEXT("object_handle") && !IsGraphType(Value.TypeId))
+		{
+			OutErrorSource = Value.Name;
+			return false;
+		}
+		return true;
+	};
+
+	TSet<FString> StaticOwnerTypeIds;
+	bool bRequiresSelf = !Package.ClassReferences.IsEmpty();
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		const FString OwnerTypeId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			TEXT("object:") + Binding.OwnerClass,
+			{});
+		const FAvidScriptBindingTypeModel* OwnerType = TypesById.FindRef(OwnerTypeId);
+		if (OwnerType == nullptr || OwnerType->CanonicalType != TEXT("object:") + Binding.OwnerClass)
+		{
+			OutErrorSource = Binding.OwnerClass;
+			return false;
+		}
+		if (Binding.bStatic)
+		{
+			StaticOwnerTypeIds.Add(OwnerTypeId);
+		}
+		else
+		{
+			bRequiresSelf = true;
+			if (!IsGraphType(OwnerTypeId))
+			{
+				OutErrorSource = Binding.OwnerClass;
+				return false;
+			}
+		}
+		if (!ValidateObjectValue(Binding.ReturnValue)
+			|| Binding.Parameters.ContainsByPredicate(
+				[&ValidateObjectValue](const FAvidScriptBindingValueModel& Parameter)
+				{
+					return !ValidateObjectValue(Parameter);
+				}))
+		{
+			return false;
+		}
+	}
+
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		if (Type.Kind == TEXT("object_handle")
+			&& Type.ObjectTypeOrdinal == INDEX_NONE
+			&& !StaticOwnerTypeIds.Contains(Type.StableId))
+		{
+			OutErrorSource = Type.CanonicalType;
+			return false;
+		}
+	}
+
+	if ((bRequiresSelf && Package.SelfTypeId.IsEmpty())
+		|| (!Package.SelfTypeId.IsEmpty() && !IsGraphType(Package.SelfTypeId)))
+	{
+		OutErrorSource = TEXT("self_type_id");
+		return false;
+	}
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+	{
+		const FAvidScriptBindingTypeModel* ResultType =
+			GraphTypesById.FindRef(Reference.ResultTypeId);
+		if (ResultType == nullptr || ResultType->ClassPath != Reference.BaseClassPath)
+		{
+			OutErrorSource = TEXT("class_references.result_type_id");
+			return false;
+		}
 	}
 	return true;
 }
@@ -470,10 +715,30 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(TEXT("descriptor_selection_v5"));
+	FString Identity(Package.SchemaVersion >= 6
+		? TEXT("descriptor_selection_v6")
+		: TEXT("descriptor_selection_v5"));
 	for (const FString& Key : SelectionKeys)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("binding"), Key);
+	}
+	if (Package.SchemaVersion >= 6)
+	{
+		AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);
+		for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+		{
+			if (Type.ObjectTypeOrdinal == INDEX_NONE)
+			{
+				continue;
+			}
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_type_id"), Type.StableId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("object_type_ordinal"),
+				FString::FromInt(Type.ObjectTypeOrdinal));
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_class_path"), Type.ClassPath);
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_base_type_id"), Type.BaseTypeId);
+		}
 	}
 	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
 	{
@@ -482,6 +747,10 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("class_path"), Reference.ClassPath);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("base_class_path"), Reference.BaseClassPath);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("load_policy"), Reference.LoadPolicy);
+		if (Package.SchemaVersion >= 6)
+		{
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);
+		}
 	}
 	return FAvidScriptHash::Sha256HexUtf8(Identity);
 }
@@ -522,13 +791,19 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(TEXT("descriptor_package_v5"));
+	FString Identity(Package.SchemaVersion >= 6
+		? TEXT("descriptor_package_v6")
+		: TEXT("descriptor_package_v5"));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("schema"), FString::FromInt(Package.SchemaVersion));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("generator"), Package.GeneratorVersion);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("engine"), Package.EngineVersion);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("source"), Package.Source);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("package"), Package.PackageName);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("selection"), Package.SelectionHash);
+	if (Package.SchemaVersion >= 6)
+	{
+		AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);
+	}
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("type_id"), Type.StableId);
@@ -545,6 +820,15 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		{
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("enum_name"), EnumValue.Name);
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("enum_value"), FString::Printf(TEXT("%lld"), EnumValue.Value));
+		}
+		if (Package.SchemaVersion >= 6)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("object_type_ordinal"),
+				FString::FromInt(Type.ObjectTypeOrdinal));
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_class_path"), Type.ClassPath);
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_base_type_id"), Type.BaseTypeId);
 		}
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
@@ -577,6 +861,10 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("class_path"), Reference.ClassPath);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("base_class_path"), Reference.BaseClassPath);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("load_policy"), Reference.LoadPolicy);
+		if (Package.SchemaVersion >= 6)
+		{
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);
+		}
 	}
 	return FAvidScriptHash::Sha256HexUtf8(Identity);
 }
@@ -603,7 +891,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		|| (OutPackage.SchemaVersion != 2
 			&& OutPackage.SchemaVersion != 3
 			&& OutPackage.SchemaVersion != 4
-			&& OutPackage.SchemaVersion != 5)
+			&& OutPackage.SchemaVersion != 5
+			&& OutPackage.SchemaVersion != 6)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -613,6 +902,16 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("selection_hash"), OutPackage.SelectionHash, OutErrorSource)
 		|| !IsAvidScriptBindingLowerSha256(OutPackage.PackageHash)
 		|| !IsAvidScriptBindingLowerSha256(OutPackage.SelectionHash))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		return false;
+	}
+	if (OutPackage.SchemaVersion >= 6
+		&& !ReadAvidScriptBindingRequiredStringAllowEmpty(
+			Root,
+			TEXT("self_type_id"),
+			OutPackage.SelfTypeId,
+			OutErrorSource))
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		return false;
@@ -639,7 +938,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	for (const TSharedPtr<FJsonValue>& Value : *Types)
 	{
 		FAvidScriptBindingTypeModel Type;
-		if (!ParseAvidScriptBindingType(Value.IsValid() ? Value->AsObject() : nullptr, Type, OutErrorSource)
+		if (!ParseAvidScriptBindingType(
+				Value.IsValid() ? Value->AsObject() : nullptr,
+				OutPackage.SchemaVersion,
+				Type,
+				OutErrorSource)
 			|| TypeIds.Contains(Type.StableId)
 			|| CanonicalTypes.Contains(Type.CanonicalType))
 		{
@@ -745,7 +1048,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& (*ClassReferences)[Index]->Type == EJson::Object
 				? (*ClassReferences)[Index]->AsObject()
 				: nullptr;
-			if (!ParseAvidScriptBindingClassReference(ReferenceObject, Reference, OutErrorSource)
+			if (!ParseAvidScriptBindingClassReference(
+					ReferenceObject,
+					OutPackage.SchemaVersion,
+					Reference,
+					OutErrorSource)
 				|| Reference.Ordinal != Index
 				|| StableIds.Contains(Reference.StableId)
 				|| ScriptNames.Contains(Reference.ScriptName)
@@ -777,6 +1084,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		OutErrorSource = TEXT("bindings|class_references");
+		return false;
+	}
+	if (!ValidateAvidScriptBindingV6ObjectTypes(OutPackage, OutErrorSource))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		return false;
 	}
 	return true;

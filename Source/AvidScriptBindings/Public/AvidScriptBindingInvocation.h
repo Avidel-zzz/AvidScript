@@ -57,6 +57,9 @@ public:
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
 	int32 GetRequiredScratchSize() const;
+	int32 GetObjectTypeCount() const;
+	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;
+	UClass* GetExpectedSelfClass() const;
 	int32 GetClassReferenceCount() const;
 	bool TryResolveClassReference(
 		uint32 Ordinal,

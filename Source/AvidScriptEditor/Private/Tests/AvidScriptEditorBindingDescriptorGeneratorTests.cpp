@@ -9,6 +9,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
+#include "Engine/StaticMeshActor.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 #include "Serialization/JsonReader.h"
@@ -261,7 +262,7 @@ bool FAvidScriptEditorBindingDescriptorV5DeterminismTest::RunTest(const FString&
 		return true;
 	}
 
-	TestEqual(TEXT("Descriptor schema is v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
+	TestEqual(TEXT("Descriptor schema is v6"), Root->GetIntegerField(TEXT("schema_version")), 6);
 	TestEqual(TEXT("Descriptor source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	TestEqual(
 		TEXT("Default package name is stable"),
@@ -387,7 +388,7 @@ bool FAvidScriptEditorBindingDescriptorV5PropertyGetTest::RunTest(const FString&
 	{
 		return true;
 	}
-	TestEqual(TEXT("Property descriptor uses schema v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
+	TestEqual(TEXT("Property descriptor uses schema v6"), Root->GetIntegerField(TEXT("schema_version")), 6);
 	const TArray<TSharedPtr<FJsonValue>>& Bindings = Root->GetArrayField(TEXT("bindings"));
 	int32 FunctionCount = 0;
 	int32 PropertyCount = 0;
@@ -440,7 +441,7 @@ bool FAvidScriptEditorBindingDescriptorV5PropertyGetTest::RunTest(const FString&
 			ParsedPackage,
 			ErrorCategory,
 			ErrorSource));
-	TestEqual(TEXT("Parsed package retains schema v5"), ParsedPackage.SchemaVersion, 5);
+	TestEqual(TEXT("Parsed package retains schema v6"), ParsedPackage.SchemaVersion, 6);
 	TestEqual(TEXT("Parsed package retains all bindings"), ParsedPackage.Bindings.Num(), 4);
 	TestEqual(
 		TEXT("Parsed property getter count is stable"),
@@ -494,7 +495,7 @@ bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FStri
 	FString FirstJson;
 	FAvidScriptBindingDescriptorGenerateResult FirstResult;
 	TestTrue(
-		TEXT("Schema v5 descriptor generates with class references"),
+		TEXT("Schema v6 descriptor generates with class references"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 			TEXT("avidscript.project.class_refs"),
 			Functions,
@@ -524,7 +525,7 @@ bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FStri
 	{
 		return false;
 	}
-	TestEqual(TEXT("Class reference descriptor uses schema v5"), Root->GetIntegerField(TEXT("schema_version")), 5);
+	TestEqual(TEXT("Class reference descriptor uses schema v6"), Root->GetIntegerField(TEXT("schema_version")), 6);
 	const TArray<TSharedPtr<FJsonValue>>& ReferenceValues = Root->GetArrayField(TEXT("class_references"));
 	TestEqual(TEXT("Descriptor publishes two class references"), ReferenceValues.Num(), 2);
 	FString PreviousStableId;
@@ -552,7 +553,7 @@ bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FStri
 	FString ClassOnlyJson;
 	FAvidScriptBindingDescriptorGenerateResult ClassOnlyResult;
 	TestTrue(
-		TEXT("Schema v5 class table can form an independent package"),
+		TEXT("Schema v6 class table can form an independent package"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 			TEXT("avidscript.project.class_refs_only"),
 			{},
@@ -568,7 +569,7 @@ bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FStri
 			ParsedPackage,
 			ErrorCategory,
 			ErrorSource));
-	TestEqual(TEXT("Class-only descriptor has an empty type table"), ParsedPackage.Types.Num(), 0);
+	TestTrue(TEXT("Class-only descriptor retains its class-result type graph"), !ParsedPackage.Types.IsEmpty());
 	TestEqual(TEXT("Class-only descriptor retains its class table"), ParsedPackage.ClassReferences.Num(), 2);
 
 	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
@@ -710,6 +711,394 @@ bool FAvidScriptEditorBindingDescriptorV5ClassReferenceTest::RunTest(const FStri
 		TEXT("Abstract Actor descriptor generates for runtime validation"),
 		{ TEXT("ControllerClass"), TEXT("/Script/Engine.Controller"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") },
 		TEXT("binding_class_not_spawnable"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest,
+	"AvidScript.Editor.BindingDescriptor.V6ObjectTypePlan",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV6ObjectTypePlanTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.project.object_type_plan");
+	Profile.SelfClassPath = TEXT("/Script/Engine.StaticMeshActor");
+	Profile.ExplicitFunctions = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") },
+		{ TEXT("/Script/Engine.Actor"), TEXT("GetDistanceTo") },
+		{ TEXT("/Script/Engine.Actor"), TEXT("K2_GetRootComponent") }
+	};
+	const TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+	};
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("Schema v6 descriptor generates from an explicit Actor self profile"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			ClassReferences,
+			DescriptorJson,
+			SelectionResult,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	if (!TestTrue(TEXT("Schema v6 descriptor is valid JSON"), ParseDescriptor(DescriptorJson, Root))
+		|| !Root.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("Object type descriptor publishes schema v6"), Root->GetIntegerField(TEXT("schema_version")), 6);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+		TEXT("Shared parser accepts the generated v6 object graph"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource)))
+	{
+		AddError(FString::Printf(TEXT("%s:%s"), *ErrorCategory, *ErrorSource));
+		return false;
+	}
+
+	TMap<FString, const FAvidScriptBindingTypeModel*> GraphTypesById;
+	TArray<const FAvidScriptBindingTypeModel*> GraphTypesByOrdinal;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			GraphTypesById.Add(Type.StableId, &Type);
+			if (GraphTypesByOrdinal.Num() <= Type.ObjectTypeOrdinal)
+			{
+				GraphTypesByOrdinal.SetNum(Type.ObjectTypeOrdinal + 1);
+			}
+			GraphTypesByOrdinal[Type.ObjectTypeOrdinal] = &Type;
+		}
+	}
+	TestTrue(TEXT("V6 publishes a non-empty handle-capable graph"), !GraphTypesByOrdinal.IsEmpty());
+	FString PreviousClassPath;
+	for (int32 Ordinal = 0; Ordinal < GraphTypesByOrdinal.Num(); ++Ordinal)
+	{
+		const FAvidScriptBindingTypeModel* Type = GraphTypesByOrdinal[Ordinal];
+		if (!TestNotNull(TEXT("Every object type ordinal is populated"), Type))
+		{
+			continue;
+		}
+		TestEqual(TEXT("Object type ordinal is dense"), Type->ObjectTypeOrdinal, Ordinal);
+		TestTrue(
+			TEXT("Object type ordinals follow canonical class path order"),
+			PreviousClassPath.IsEmpty() || PreviousClassPath < Type->ClassPath);
+		PreviousClassPath = Type->ClassPath;
+		if (!Type->BaseTypeId.IsEmpty())
+		{
+			TestTrue(TEXT("Every base edge resolves inside the graph"), GraphTypesById.Contains(Type->BaseTypeId));
+		}
+	}
+
+	const FAvidScriptBindingTypeModel* SelfType = GraphTypesById.FindRef(Package.SelfTypeId);
+	if (TestNotNull(TEXT("Explicit self type resolves to a graph node"), SelfType))
+	{
+		TestEqual(
+			TEXT("Explicit self keeps canonical class identity"),
+			SelfType->ClassPath,
+			FString(TEXT("/Script/Engine.StaticMeshActor")));
+	}
+	if (TestEqual(TEXT("V6 keeps one class reference"), Package.ClassReferences.Num(), 1))
+	{
+		const FAvidScriptBindingClassReferenceModel& Reference = Package.ClassReferences[0];
+		const FAvidScriptBindingTypeModel* ResultType = GraphTypesById.FindRef(Reference.ResultTypeId);
+		if (TestNotNull(TEXT("Class-reference result type resolves to the graph"), ResultType))
+		{
+			TestEqual(TEXT("Class-reference result matches its base class"), ResultType->ClassPath, Reference.BaseClassPath);
+		}
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (TestTrue(
+		TEXT("Runtime loads immutable v6 object type plans"),
+		FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, RuntimePackage, LoadResult))
+		&& RuntimePackage.IsValid())
+	{
+		TestEqual(
+			TEXT("Runtime object type count matches the descriptor graph"),
+			RuntimePackage->GetObjectTypeCount(),
+			GraphTypesByOrdinal.Num());
+		for (int32 Ordinal = 0; Ordinal < GraphTypesByOrdinal.Num(); ++Ordinal)
+		{
+			UClass* ResolvedClass = nullptr;
+			TestTrue(
+				TEXT("Object type resolves by ordinal"),
+				RuntimePackage->TryResolveObjectType(static_cast<uint32>(Ordinal), ResolvedClass));
+			if (ResolvedClass != nullptr && GraphTypesByOrdinal[Ordinal] != nullptr)
+			{
+				TestEqual(
+					TEXT("Resolved object type keeps canonical path"),
+					ResolvedClass->GetPathName(),
+					GraphTypesByOrdinal[Ordinal]->ClassPath);
+			}
+		}
+		UClass* OutOfRangeClass = AActor::StaticClass();
+		TestFalse(
+			TEXT("Out-of-range object type ordinal fails closed"),
+			RuntimePackage->TryResolveObjectType(static_cast<uint32>(GraphTypesByOrdinal.Num()), OutOfRangeClass));
+		TestNull(TEXT("Failed object type resolution clears output"), OutOfRangeClass);
+		TestEqual(
+			TEXT("Expected self class is cached from the self type ordinal"),
+			RuntimePackage->GetExpectedSelfClass(),
+			AStaticMeshActor::StaticClass());
+		TestEqual(
+			TEXT("Graph and reflected owners reuse one class load per path"),
+			RuntimePackage->GetInstrumentation().ClassLoadCount,
+			static_cast<uint64>(GraphTypesByOrdinal.Num()));
+	}
+
+	const auto CloneRoot = [&Root]()
+	{
+		FString SourceJson;
+		TSharedPtr<FJsonObject> Clone;
+		SerializeDescriptor(Root, SourceJson);
+		ParseDescriptor(SourceJson, Clone);
+		return Clone;
+	};
+	const auto ParserRejectsMutation = [this, &CloneRoot](
+		const TCHAR* Label,
+		const TFunctionRef<void(TSharedPtr<FJsonObject>&)>& Mutate)
+	{
+		TSharedPtr<FJsonObject> MutatedRoot = CloneRoot();
+		Mutate(MutatedRoot);
+		FString MutatedJson;
+		FAvidScriptBindingPackageModel MutatedPackage;
+		FString Category;
+		FString Source;
+		TestFalse(
+			Label,
+			SerializeDescriptor(MutatedRoot, MutatedJson)
+				&& FAvidScriptBindingDescriptorParser::Parse(
+					MutatedJson,
+					MutatedPackage,
+					Category,
+					Source));
+		TestEqual(TEXT("Invalid v6 graph reports descriptor contract failure"), Category, FString(TEXT("descriptor_contract_invalid")));
+	};
+
+	ParserRejectsMutation(TEXT("Object type ordinal holes fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			if (Type->GetIntegerField(TEXT("object_type_ordinal")) == 0)
+			{
+				Type->SetNumberField(TEXT("object_type_ordinal"), 1);
+				break;
+			}
+		}
+	});
+	ParserRejectsMutation(TEXT("Missing object type IDs fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			if (Type->GetIntegerField(TEXT("object_type_ordinal")) != INDEX_NONE)
+			{
+				Type->RemoveField(TEXT("stable_id"));
+				break;
+			}
+		}
+	});
+	ParserRejectsMutation(TEXT("Object type graph cycles fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		FString ActorTypeId;
+		TSharedPtr<FJsonObject> ObjectType;
+		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			const FString ClassPath = Type->GetStringField(TEXT("class_path"));
+			if (ClassPath == TEXT("/Script/Engine.Actor"))
+			{
+				ActorTypeId = Type->GetStringField(TEXT("stable_id"));
+			}
+			else if (ClassPath == TEXT("/Script/CoreUObject.Object"))
+			{
+				ObjectType = Type;
+			}
+		}
+		ObjectType->SetStringField(TEXT("base_type_id"), ActorTypeId);
+	});
+	ParserRejectsMutation(TEXT("Canonical object class path mismatches fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			if (Type->GetStringField(TEXT("class_path")) == TEXT("/Script/Engine.Actor"))
+			{
+				Type->SetStringField(TEXT("class_path"), TEXT("/Script/Engine.Pawn"));
+				break;
+			}
+		}
+	});
+	ParserRejectsMutation(TEXT("Class-reference result type mismatches fail closed"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		FString SceneComponentTypeId;
+		for (const TSharedPtr<FJsonValue>& Value : MutatedRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			if (Type->GetStringField(TEXT("class_path")) == TEXT("/Script/Engine.SceneComponent"))
+			{
+				SceneComponentTypeId = Type->GetStringField(TEXT("stable_id"));
+				break;
+			}
+		}
+		MutatedRoot->GetArrayField(TEXT("class_references"))[0]->AsObject()->SetStringField(
+			TEXT("result_type_id"),
+			SceneComponentTypeId);
+	});
+	ParserRejectsMutation(TEXT("Actor instance packages require Self identity"), [](TSharedPtr<FJsonObject>& MutatedRoot)
+	{
+		MutatedRoot->SetStringField(TEXT("self_type_id"), TEXT(""));
+	});
+
+	TSharedPtr<FJsonObject> WrongBaseRoot = CloneRoot();
+	FString SceneComponentTypeId;
+	TSharedPtr<FJsonObject> ActorTypeObject;
+	for (const TSharedPtr<FJsonValue>& Value : WrongBaseRoot->GetArrayField(TEXT("types")))
+	{
+		const TSharedPtr<FJsonObject> Type = Value->AsObject();
+		if (Type->GetStringField(TEXT("class_path")) == TEXT("/Script/Engine.SceneComponent"))
+		{
+			SceneComponentTypeId = Type->GetStringField(TEXT("stable_id"));
+		}
+		else if (Type->GetStringField(TEXT("class_path")) == TEXT("/Script/Engine.Actor"))
+		{
+			ActorTypeObject = Type;
+		}
+	}
+	ActorTypeObject->SetStringField(TEXT("base_type_id"), SceneComponentTypeId);
+	FString WrongBaseJson;
+	SerializeDescriptor(WrongBaseRoot, WrongBaseJson);
+	FAvidScriptBindingPackageModel WrongBaseModel;
+	TestTrue(
+		TEXT("Structurally complete wrong direct-super edge reaches package-load validation"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			WrongBaseJson,
+			WrongBaseModel,
+			ErrorCategory,
+			ErrorSource));
+	WrongBaseRoot->SetStringField(
+		TEXT("selection_hash"),
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(WrongBaseModel));
+	WrongBaseModel.SelectionHash = WrongBaseRoot->GetStringField(TEXT("selection_hash"));
+	WrongBaseRoot->SetStringField(
+		TEXT("package_hash"),
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(WrongBaseModel));
+	SerializeDescriptor(WrongBaseRoot, WrongBaseJson);
+	TestFalse(
+		TEXT("Package load rejects a reflected direct-super edge mismatch"),
+		FAvidScriptBindingPackage::LoadDescriptor(WrongBaseJson, RuntimePackage, LoadResult));
+	TestEqual(
+		TEXT("Wrong direct-super edge has a stable load category"),
+		LoadResult.ErrorCategory,
+		FString(TEXT("binding_object_type_base_mismatch")));
+
+	for (int32 LegacySchema = 2; LegacySchema <= 5; ++LegacySchema)
+	{
+		TSharedPtr<FJsonObject> LegacyRoot = CloneRoot();
+		LegacyRoot->SetNumberField(TEXT("schema_version"), LegacySchema);
+		LegacyRoot->RemoveField(TEXT("self_type_id"));
+		for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("types")))
+		{
+			const TSharedPtr<FJsonObject> Type = Value->AsObject();
+			Type->RemoveField(TEXT("object_type_ordinal"));
+			Type->RemoveField(TEXT("class_path"));
+			Type->RemoveField(TEXT("base_type_id"));
+		}
+		for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("class_references")))
+		{
+			Value->AsObject()->RemoveField(TEXT("result_type_id"));
+		}
+		if (LegacySchema < 5)
+		{
+			LegacyRoot->RemoveField(TEXT("class_references"));
+		}
+		if (LegacySchema <= 3)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("bindings")))
+			{
+				const TSharedPtr<FJsonObject> Binding = Value->AsObject();
+				Binding->SetStringField(TEXT("ue_function"), Binding->GetStringField(TEXT("ue_member")));
+				Binding->RemoveField(TEXT("binding_kind"));
+				Binding->RemoveField(TEXT("ue_member"));
+			}
+		}
+		if (LegacySchema == 2)
+		{
+			for (const TSharedPtr<FJsonValue>& Value : LegacyRoot->GetArrayField(TEXT("bindings")))
+			{
+				Value->AsObject()->RemoveField(TEXT("reload_effect"));
+			}
+		}
+		FString LegacyJson;
+		FAvidScriptBindingPackageModel LegacyPackage;
+		TestTrue(
+			*FString::Printf(TEXT("Schema v%d parser remains compatible"), LegacySchema),
+			SerializeDescriptor(LegacyRoot, LegacyJson)
+				&& FAvidScriptBindingDescriptorParser::Parse(
+					LegacyJson,
+					LegacyPackage,
+					ErrorCategory,
+					ErrorSource));
+		if (!LegacyPackage.Types.IsEmpty())
+		{
+			TestEqual(
+				TEXT("Legacy type model keeps no object ordinal"),
+				LegacyPackage.Types[0].ObjectTypeOrdinal,
+				INDEX_NONE);
+			TestTrue(TEXT("Legacy type model keeps no class path"), LegacyPackage.Types[0].ClassPath.IsEmpty());
+			TestTrue(TEXT("Legacy type model keeps no base edge"), LegacyPackage.Types[0].BaseTypeId.IsEmpty());
+		}
+	}
+
+	FString StaticOnlyJson;
+	FAvidScriptBindingDescriptorGenerateResult StaticOnlyResult;
+	TestTrue(
+		TEXT("Pure static descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.engine.static_only"),
+			{ { TEXT("/Script/Engine.KismetMathLibrary"), TEXT("VLerp") } },
+			StaticOnlyJson,
+			StaticOnlyResult));
+	FAvidScriptBindingPackageModel StaticOnlyPackage;
+	if (TestTrue(
+		TEXT("Pure static descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			StaticOnlyJson,
+			StaticOnlyPackage,
+			ErrorCategory,
+			ErrorSource)))
+	{
+		TestTrue(TEXT("Pure static descriptor has no Self type"), StaticOnlyPackage.SelfTypeId.IsEmpty());
+		const FAvidScriptBindingTypeModel* StaticOwnerType = StaticOnlyPackage.Types.FindByPredicate(
+			[](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.ClassPath.IsEmpty()
+					&& Type.CanonicalType == TEXT("object:/Script/Engine.KismetMathLibrary");
+			});
+		if (TestNotNull(TEXT("Pure static owner type remains available to renderers"), StaticOwnerType))
+		{
+			TestEqual(TEXT("Pure static owner has no runtime object ordinal"), StaticOwnerType->ObjectTypeOrdinal, INDEX_NONE);
+		}
+	}
 	return true;
 }
 

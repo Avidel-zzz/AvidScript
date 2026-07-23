@@ -10,6 +10,7 @@
 #include "AvidScriptFrontendReport.h"
 
 #include "Dom/JsonObject.h"
+#include "Engine/StaticMeshActor.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -127,11 +128,14 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		TEXT("AvidScriptGeneratedBindingsTests"),
 		TEXT("P43_3B_Slices")));
 
+	FAvidScriptBindingSelectionProfile AuthorizationProfile =
+		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
+	AuthorizationProfile.SelfClassPath = TEXT("/Script/Engine.StaticMeshActor");
 	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
 	if (!TestTrue(
 		TEXT("Complete gameplay authorization package with a class table publishes"),
 		FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
-			FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile(),
+			AuthorizationProfile,
 			{
 				{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
 			},
@@ -175,7 +179,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Authorization descriptor is schema v5"), AuthorizationModel.SchemaVersion, 5);
+	TestEqual(TEXT("Authorization descriptor is schema v6"), AuthorizationModel.SchemaVersion, 6);
 	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
@@ -240,6 +244,64 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		}
 	}
 	TestEqual(TEXT("Slice descriptor preserves the complete class table"), SliceModel.ClassReferences.Num(), 1);
+	TestEqual(TEXT("Slice preserves the authorized Self type"), SliceModel.SelfTypeId, AuthorizationModel.SelfTypeId);
+	if (SliceModel.ClassReferences.Num() == 1 && AuthorizationModel.ClassReferences.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Slice preserves class-reference result identity"),
+			SliceModel.ClassReferences[0].ResultTypeId,
+			AuthorizationModel.ClassReferences[0].ResultTypeId);
+	}
+
+	TMap<FString, const FAvidScriptBindingTypeModel*> AuthorizationTypesById;
+	TSet<FString> SliceTypeIds;
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		AuthorizationTypesById.Add(Type.StableId, &Type);
+	}
+	for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
+	{
+		SliceTypeIds.Add(Type.StableId);
+	}
+	TSet<FString> RequiredTypeIds;
+	RequiredTypeIds.Add(AuthorizationModel.SelfTypeId);
+	for (const FAvidScriptBindingClassReferenceModel& Reference : AuthorizationModel.ClassReferences)
+	{
+		RequiredTypeIds.Add(Reference.ResultTypeId);
+	}
+	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
+	{
+		RequiredTypeIds.Add(Binding.ReturnValue.TypeId);
+		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
+		{
+			RequiredTypeIds.Add(Parameter.TypeId);
+		}
+		if (!Binding.bStatic)
+		{
+			RequiredTypeIds.Add(FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+				TEXT("object:") + Binding.OwnerClass,
+				{}));
+		}
+	}
+	RequiredTypeIds.Remove(FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(TEXT("void"), {}));
+	TArray<FString> PendingTypeIds = RequiredTypeIds.Array();
+	while (!PendingTypeIds.IsEmpty())
+	{
+		const FString TypeId = PendingTypeIds.Pop(EAllowShrinking::No);
+		const FAvidScriptBindingTypeModel* Type = AuthorizationTypesById.FindRef(TypeId);
+		if (Type != nullptr && !Type->BaseTypeId.IsEmpty() && !RequiredTypeIds.Contains(Type->BaseTypeId))
+		{
+			RequiredTypeIds.Add(Type->BaseTypeId);
+			PendingTypeIds.Add(Type->BaseTypeId);
+		}
+	}
+	for (const FString& TypeId : RequiredTypeIds)
+	{
+		TestTrue(TEXT("Slice keeps every referenced type and graph ancestor"), SliceTypeIds.Contains(TypeId));
+	}
+	TestTrue(
+		TEXT("Slice drops unrelated authorization types instead of copying the full package"),
+		SliceModel.Types.Num() < AuthorizationModel.Types.Num());
 	bool bStableIdsMatch = ActualStableIds.Num() == ExpectedStableIds.Num();
 	for (const FString& StableId : ExpectedStableIds)
 	{
@@ -298,6 +360,22 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 			LoadedSlice->GetVmPackage().Imports.Num(),
 			2 + LifecycleSpecs.Num());
 		TestEqual(TEXT("Runtime slice creates one cached class plan"), LoadedSlice->GetClassReferenceCount(), 1);
+		int32 ExpectedObjectTypeCount = 0;
+		for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
+		{
+			if (Type.ObjectTypeOrdinal != INDEX_NONE)
+			{
+				++ExpectedObjectTypeCount;
+			}
+		}
+		TestEqual(
+			TEXT("Runtime slice creates only the retained object type plans"),
+			LoadedSlice->GetObjectTypeCount(),
+			ExpectedObjectTypeCount);
+		TestEqual(
+			TEXT("Runtime slice retains custom Self class identity"),
+			LoadedSlice->GetExpectedSelfClass(),
+			AStaticMeshActor::StaticClass());
 	}
 
 	const TArray<FAvidScriptReflectedPropertySelection> PropertySelections = {
@@ -340,7 +418,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Property authorization uses schema v5"), PropertyAuthorizationModel.SchemaVersion, 5);
+	TestEqual(TEXT("Property authorization uses schema v6"), PropertyAuthorizationModel.SchemaVersion, 6);
 	TestEqual(TEXT("Property authorization contains one binding"), PropertyAuthorizationModel.Bindings.Num(), 1);
 	if (PropertyAuthorizationModel.Bindings.Num() != 1)
 	{
@@ -383,7 +461,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Property runtime slice preserves schema v5"), PropertySliceModel.SchemaVersion, 5);
+	TestEqual(TEXT("Property runtime slice preserves schema v6"), PropertySliceModel.SchemaVersion, 6);
 	TestEqual(TEXT("Property runtime slice preserves one binding"), PropertySliceModel.Bindings.Num(), 1);
 	if (PropertySliceModel.Bindings.Num() == 1)
 	{

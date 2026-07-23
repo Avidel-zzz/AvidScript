@@ -7,8 +7,12 @@
 #include "AvidScriptFrontendReport.h"
 #include "AvidScriptHash.h"
 
+#include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -56,6 +60,166 @@ FString NormalizeAvidScriptCSharpBindingSlicePath(FString Path)
 	}
 	FPaths::NormalizeFilename(Path);
 	return Path;
+}
+
+bool BuildAvidScriptCSharpBindingSliceTypeClosure(
+	const FAvidScriptBindingPackageModel& AuthorizationModel,
+	FAvidScriptBindingPackageModel& SliceModel,
+	FString& OutErrorSource)
+{
+	TMap<FString, const FAvidScriptBindingTypeModel*> AuthorizationTypesById;
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		AuthorizationTypesById.Add(Type.StableId, &Type);
+	}
+
+	SliceModel.SelfTypeId = AuthorizationModel.SelfTypeId;
+	TSet<FString> RequiredTypeIds;
+	if (!SliceModel.SelfTypeId.IsEmpty())
+	{
+		RequiredTypeIds.Add(SliceModel.SelfTypeId);
+	}
+	for (FAvidScriptBindingClassReferenceModel& Reference : SliceModel.ClassReferences)
+	{
+		const FAvidScriptBindingClassReferenceModel* AuthorizationReference =
+			AuthorizationModel.ClassReferences.FindByPredicate(
+				[&Reference](const FAvidScriptBindingClassReferenceModel& Candidate)
+				{
+					return Candidate.StableId == Reference.StableId;
+				});
+		if (AuthorizationReference == nullptr)
+		{
+			OutErrorSource = Reference.StableId;
+			return false;
+		}
+		Reference.ResultTypeId = AuthorizationReference->ResultTypeId;
+		RequiredTypeIds.Add(Reference.ResultTypeId);
+	}
+
+	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
+	{
+		RequiredTypeIds.Add(FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			TEXT("object:") + Binding.OwnerClass,
+			{}));
+		if (Binding.ReturnValue.CanonicalType != TEXT("void"))
+		{
+			RequiredTypeIds.Add(Binding.ReturnValue.TypeId);
+		}
+		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
+		{
+			RequiredTypeIds.Add(Parameter.TypeId);
+		}
+	}
+
+	TArray<FString> PendingTypeIds = RequiredTypeIds.Array();
+	while (!PendingTypeIds.IsEmpty())
+	{
+		const FString TypeId = PendingTypeIds.Pop(EAllowShrinking::No);
+		const FAvidScriptBindingTypeModel* Type = AuthorizationTypesById.FindRef(TypeId);
+		if (Type == nullptr)
+		{
+			OutErrorSource = TypeId;
+			return false;
+		}
+		if (!Type->BaseTypeId.IsEmpty() && !RequiredTypeIds.Contains(Type->BaseTypeId))
+		{
+			RequiredTypeIds.Add(Type->BaseTypeId);
+			PendingTypeIds.Add(Type->BaseTypeId);
+		}
+	}
+
+	SliceModel.Types.Reset();
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		if (RequiredTypeIds.Contains(Type.StableId))
+		{
+			SliceModel.Types.Add(Type);
+		}
+	}
+	SliceModel.Types.Sort([](
+		const FAvidScriptBindingTypeModel& Left,
+		const FAvidScriptBindingTypeModel& Right)
+	{
+		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
+	});
+	int32 NextObjectTypeOrdinal = 0;
+	for (FAvidScriptBindingTypeModel& Type : SliceModel.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			Type.ObjectTypeOrdinal = NextObjectTypeOrdinal++;
+		}
+	}
+	SliceModel.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(SliceModel);
+	SliceModel.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(SliceModel);
+	return true;
+}
+
+bool RewriteAvidScriptCSharpBindingSliceDescriptor(
+	const FAvidScriptBindingPackageModel& SliceModel,
+	FString& InOutJson)
+{
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InOutJson);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+
+	Root->SetStringField(TEXT("self_type_id"), SliceModel.SelfTypeId);
+	Root->SetStringField(TEXT("selection_hash"), SliceModel.SelectionHash);
+	Root->SetStringField(TEXT("package_hash"), SliceModel.PackageHash);
+	TArray<TSharedPtr<FJsonValue>> TypeValues;
+	for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
+	{
+		TSharedPtr<FJsonObject> TypeObject = MakeShared<FJsonObject>();
+		TypeObject->SetStringField(TEXT("stable_id"), Type.StableId);
+		TypeObject->SetStringField(TEXT("canonical_type"), Type.CanonicalType);
+		TypeObject->SetStringField(TEXT("kind"), Type.Kind);
+		TypeObject->SetStringField(TEXT("cpp_type"), Type.CppType);
+		TypeObject->SetNumberField(TEXT("size"), Type.Size);
+		TypeObject->SetNumberField(TEXT("alignment"), Type.Alignment);
+		TArray<TSharedPtr<FJsonValue>> AbiTypes;
+		for (const FString& AbiType : Type.AbiTypes)
+		{
+			AbiTypes.Add(MakeShared<FJsonValueString>(AbiType));
+		}
+		TypeObject->SetArrayField(TEXT("abi_types"), MoveTemp(AbiTypes));
+		TypeObject->SetNumberField(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+		TypeObject->SetStringField(TEXT("class_path"), Type.ClassPath);
+		TypeObject->SetStringField(TEXT("base_type_id"), Type.BaseTypeId);
+		if (Type.Kind == TEXT("enum"))
+		{
+			TArray<TSharedPtr<FJsonValue>> EnumValues;
+			for (const FAvidScriptBindingEnumValue& EnumValue : Type.EnumValues)
+			{
+				TSharedPtr<FJsonObject> EnumObject = MakeShared<FJsonObject>();
+				EnumObject->SetStringField(TEXT("name"), EnumValue.Name);
+				EnumObject->SetNumberField(TEXT("value"), EnumValue.Value);
+				EnumValues.Add(MakeShared<FJsonValueObject>(MoveTemp(EnumObject)));
+			}
+			TypeObject->SetArrayField(TEXT("enum_values"), MoveTemp(EnumValues));
+		}
+		TypeValues.Add(MakeShared<FJsonValueObject>(MoveTemp(TypeObject)));
+	}
+	Root->SetArrayField(TEXT("types"), MoveTemp(TypeValues));
+
+	const TArray<TSharedPtr<FJsonValue>>& ReferenceValues =
+		Root->GetArrayField(TEXT("class_references"));
+	if (ReferenceValues.Num() != SliceModel.ClassReferences.Num())
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < ReferenceValues.Num(); ++Index)
+	{
+		ReferenceValues[Index]->AsObject()->SetStringField(
+			TEXT("result_type_id"),
+			SliceModel.ClassReferences[Index].ResultTypeId);
+	}
+
+	InOutJson.Empty();
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&InOutJson);
+	return FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 }
 } // namespace
 
@@ -291,6 +455,49 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			TEXT("repair the generated slice descriptor contract"));
 		return false;
 	}
+	FString ClosureErrorSource;
+	if (!BuildAvidScriptCSharpBindingSliceTypeClosure(
+			AuthorizationModel,
+			SliceModel,
+			ClosureErrorSource)
+		|| !RewriteAvidScriptCSharpBindingSliceDescriptor(
+			SliceModel,
+			SliceDescriptorJson))
+	{
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			TEXT("slice_type_closure_invalid"),
+			ClosureErrorSource.IsEmpty()
+				? AuthorizationModel.PackageName
+				: ClosureErrorSource,
+			TEXT("preserve Self, class-reference results, binding value types, receivers, and every object ancestor"));
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel VerifiedSliceModel;
+	if (!FAvidScriptBindingDescriptorParser::Parse(
+			SliceDescriptorJson,
+			VerifiedSliceModel,
+			ParseCategory,
+			ParseSource)
+		|| VerifiedSliceModel.SchemaVersion != 6
+		|| VerifiedSliceModel.SelectionHash
+			!= FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(VerifiedSliceModel)
+		|| VerifiedSliceModel.PackageHash
+			!= FAvidScriptBindingDescriptorIdentity::MakePackageHash(VerifiedSliceModel))
+	{
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			ParseCategory.IsEmpty()
+				? FString(TEXT("slice_identity_invalid"))
+				: ParseCategory,
+			ParseSource.IsEmpty()
+				? AuthorizationModel.PackageName
+				: ParseSource,
+			TEXT("recompute the complete schema v6 slice identity after closing its type graph"));
+		return false;
+	}
+	SliceModel = MoveTemp(VerifiedSliceModel);
 	if (SliceModel.Bindings.Num() != RequestedReflectedStableIds.Num())
 	{
 		SetAvidScriptCSharpBindingSliceFailure(

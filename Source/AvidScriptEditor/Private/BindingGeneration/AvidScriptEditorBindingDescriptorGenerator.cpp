@@ -5,10 +5,12 @@
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorBindingReloadEffectPolicy.h"
+#include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 #include "Dom/JsonObject.h"
+#include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
@@ -20,7 +22,7 @@
 
 namespace
 {
-constexpr const TCHAR* GeneratorVersion = TEXT("49.2.0");
+constexpr const TCHAR* GeneratorVersion = TEXT("50.1.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -224,11 +226,37 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		OutResult);
 }
 
-bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+namespace
+{
+void AddObjectHandleClass(const FProperty* Property, TArray<UClass*>& OutHandleClasses)
+{
+	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	{
+		OutHandleClasses.Add(ObjectProperty->PropertyClass);
+	}
+}
+
+void AddObjectHandleClasses(const UFunction* Function, TArray<UClass*>& OutHandleClasses)
+{
+	AddObjectHandleClass(Function->GetReturnProperty(), OutHandleClasses);
+	for (TFieldIterator<FProperty> It(Function); It; ++It)
+	{
+		const FProperty* Property = *It;
+		if (Property->HasAnyPropertyFlags(CPF_Parm)
+			&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		{
+			AddObjectHandleClass(Property, OutHandleClasses);
+		}
+	}
+}
+
+bool GenerateBindingDescriptor(
 	const FString& PackageName,
 	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	UClass* RequestedSelfClass,
+	const bool bUseDefaultActorSelf,
 	FString& OutJson,
 	FAvidScriptBindingDescriptorGenerateResult& OutResult)
 {
@@ -446,7 +474,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 	});
 
 	FAvidScriptBindingPackageModel Package;
-	Package.SchemaVersion = 5;
+	Package.SchemaVersion = 6;
 	Package.GeneratorVersion = GeneratorVersion;
 	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
 	Package.Source = TEXT("ue_reflection");
@@ -536,6 +564,142 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 		Package.ClassReferences[Index].Ordinal = Index;
 	}
 
+	const bool bPureStaticPackage = Package.ClassReferences.IsEmpty()
+		&& Bindings.ContainsByPredicate([](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.Function == nullptr
+				|| !Binding.Function->HasAnyFunctionFlags(FUNC_Static);
+		}) == false;
+	UClass* SelfClass = RequestedSelfClass;
+	if (SelfClass == nullptr && bUseDefaultActorSelf && !bPureStaticPackage)
+	{
+		SelfClass = AActor::StaticClass();
+	}
+
+	TArray<UClass*> HandleClasses;
+	for (const FResolvedBindingDescriptor& Binding : Bindings)
+	{
+		if (Binding.Function == nullptr || !Binding.Function->HasAnyFunctionFlags(FUNC_Static))
+		{
+			HandleClasses.Add(Binding.OwnerClass);
+		}
+		if (Binding.Function != nullptr)
+		{
+			AddObjectHandleClasses(Binding.Function, HandleClasses);
+		}
+		else
+		{
+			AddObjectHandleClass(Binding.Property, HandleClasses);
+		}
+	}
+	FAvidScriptEditorObjectTypeGraph ObjectTypeGraph;
+	FString ObjectTypeGraphErrorCategory;
+	FString ObjectTypeGraphErrorDetails;
+	if (!FAvidScriptEditorObjectTypeGraph::Build(
+			HandleClasses,
+			SelfClass,
+			ClassReferences,
+			ObjectTypeGraph,
+			ObjectTypeGraphErrorCategory,
+			ObjectTypeGraphErrorDetails))
+	{
+		SetFailure(
+			OutResult,
+			ObjectTypeGraphErrorCategory,
+			ObjectTypeGraphErrorDetails,
+			TEXT("Resolve the handle-capable UObject type graph before generating the binding package."));
+		return false;
+	}
+
+	for (const FAvidScriptEditorObjectTypeNode& Node : ObjectTypeGraph.Nodes)
+	{
+		FAvidScriptBindingTypeModel* TypeModel = Package.Types.FindByPredicate(
+			[&Node](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.StableId == Node.TypeId;
+			});
+		if (TypeModel == nullptr)
+		{
+			UClass* ObjectClass = LoadObject<UClass>(nullptr, *Node.CanonicalClassPath);
+			if (ObjectClass == nullptr)
+			{
+				SetFailure(
+					OutResult,
+					TEXT("object_type_class_missing"),
+					Node.CanonicalClassPath,
+					TEXT("Keep graph classes loaded until descriptor model publication completes."));
+				return false;
+			}
+			const FAvidScriptProjectedBindingType ProjectedType =
+				FAvidScriptEditorReflectedTypePolicy::MakeObjectType(ObjectClass);
+			FAvidScriptBindingTypeModel AddedType;
+			AddedType.StableId = Node.TypeId;
+			AddedType.CanonicalType = TEXT("object:") + Node.CanonicalClassPath;
+			AddedType.Kind = ProjectedType.Kind;
+			AddedType.CppType = ProjectedType.CppType;
+			AddedType.Size = ProjectedType.Size;
+			AddedType.Alignment = ProjectedType.Alignment;
+			AddedType.AbiTypes = ProjectedType.AbiValueTypes;
+			TypeModel = &Package.Types.Add_GetRef(MoveTemp(AddedType));
+		}
+		if (TypeModel->CanonicalType != TEXT("object:") + Node.CanonicalClassPath
+			|| TypeModel->Kind != TEXT("object_handle"))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("object_type_model_mismatch"),
+				Node.CanonicalClassPath,
+				TEXT("Use the object type graph as the sole source of v6 object identity."));
+			return false;
+		}
+		TypeModel->ObjectTypeOrdinal = Node.Ordinal;
+		TypeModel->ClassPath = Node.CanonicalClassPath;
+		TypeModel->BaseTypeId = Node.BaseTypeId;
+	}
+	Package.Types.Sort([](
+		const FAvidScriptBindingTypeModel& Left,
+		const FAvidScriptBindingTypeModel& Right)
+	{
+		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
+	});
+
+	if (SelfClass != nullptr)
+	{
+		const FAvidScriptEditorObjectTypeNode* SelfNode = ObjectTypeGraph.Nodes.FindByPredicate(
+			[SelfClass](const FAvidScriptEditorObjectTypeNode& Node)
+			{
+				return Node.CanonicalClassPath == SelfClass->GetPathName();
+			});
+		if (SelfNode == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("self_type_missing"),
+				SelfClass->GetPathName(),
+				TEXT("Publish Self through the v6 object type graph."));
+			return false;
+		}
+		Package.SelfTypeId = SelfNode->TypeId;
+	}
+	for (FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+	{
+		const FAvidScriptEditorObjectTypeNode* ResultNode = ObjectTypeGraph.Nodes.FindByPredicate(
+			[&Reference](const FAvidScriptEditorObjectTypeNode& Node)
+			{
+				return Node.CanonicalClassPath == Reference.BaseClassPath;
+			});
+		if (ResultNode == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("class_reference_result_type_missing"),
+				Reference.BaseClassPath,
+				TEXT("Publish class-reference result types through the v6 object type graph."));
+			return false;
+		}
+		Reference.ResultTypeId = ResultNode->TypeId;
+	}
+
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 	const int32 SchemaVersion = Package.SchemaVersion;
@@ -552,8 +716,9 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 	Writer->WriteValue(TEXT("package_name"), PackageName);
 	Writer->WriteValue(TEXT("package_hash"), PackageHash);
 	Writer->WriteValue(TEXT("selection_hash"), SelectionHash);
+	Writer->WriteValue(TEXT("self_type_id"), Package.SelfTypeId);
 	Writer->WriteArrayStart(TEXT("types"));
-	for (const FAvidScriptProjectedBindingType& Type : Types)
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
 		Writer->WriteObjectStart();
 		Writer->WriteValue(TEXT("stable_id"), Type.StableId);
@@ -562,7 +727,10 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 		Writer->WriteValue(TEXT("cpp_type"), Type.CppType);
 		Writer->WriteValue(TEXT("size"), Type.Size);
 		Writer->WriteValue(TEXT("alignment"), Type.Alignment);
-		WriteStringArray(Writer, TEXT("abi_types"), Type.AbiValueTypes);
+		WriteStringArray(Writer, TEXT("abi_types"), Type.AbiTypes);
+		Writer->WriteValue(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+		Writer->WriteValue(TEXT("class_path"), Type.ClassPath);
+		Writer->WriteValue(TEXT("base_type_id"), Type.BaseTypeId);
 		if (Type.Kind == TEXT("enum"))
 		{
 			Writer->WriteArrayStart(TEXT("enum_values"));
@@ -588,6 +756,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 		Writer->WriteValue(TEXT("class_path"), Reference.ClassPath);
 		Writer->WriteValue(TEXT("base_class_path"), Reference.BaseClassPath);
 		Writer->WriteValue(TEXT("load_policy"), Reference.LoadPolicy);
+		Writer->WriteValue(TEXT("result_type_id"), Reference.ResultTypeId);
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();
@@ -644,11 +813,31 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Bindings.Num();
-	OutResult.TypeCount = Types.Num();
+	OutResult.TypeCount = Package.Types.Num();
 	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
 	OutResult.PackageHash = PackageHash;
 	OutResult.SelectionHash = SelectionHash;
 	return true;
+}
+} // namespace
+
+bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+	const FString& PackageName,
+	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
+	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	FString& OutJson,
+	FAvidScriptBindingDescriptorGenerateResult& OutResult)
+{
+	return GenerateBindingDescriptor(
+		PackageName,
+		FunctionSelections,
+		PropertySelections,
+		ClassReferences,
+		nullptr,
+		true,
+		OutJson,
+		OutResult);
 }
 
 bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
@@ -724,11 +913,29 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
 	OutSelectionResult.bSucceeded = true;
-	return GenerateWithClassReferences(
+	UClass* SelfClass = nullptr;
+	if (!Profile.SelfClassPath.IsEmpty())
+	{
+		SelfClass = LoadObject<UClass>(nullptr, *Profile.SelfClassPath);
+		if (SelfClass == nullptr
+			|| SelfClass->GetPathName() != Profile.SelfClassPath
+			|| !SelfClass->IsChildOf(AActor::StaticClass()))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("self_class_missing"),
+				Profile.SelfClassPath,
+				TEXT("Use a loadable canonical Actor class path for the profile Self type."));
+			return false;
+		}
+	}
+	return GenerateBindingDescriptor(
 		Profile.PackageName,
 		FunctionSelections,
 		PropertySelections,
 		ClassReferences,
+		SelfClass,
+		true,
 		OutJson,
 		OutResult);
 }

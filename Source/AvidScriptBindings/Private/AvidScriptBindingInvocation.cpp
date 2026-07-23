@@ -1222,6 +1222,8 @@ struct FAvidScriptBindingPackage::FImpl
 	FString PackageHash;
 	FAvidScriptVmBindingPackage VmPackage;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
+	TArray<UClass*> ObjectTypePlans;
+	UClass* ExpectedSelfClass = nullptr;
 	TArray<FClassReferencePlan> ClassReferencePlans;
 	TArray<TStrongObjectPtr<UClass>> LoadedClasses;
 	FAvidScriptBindingPackageInstrumentation Instrumentation;
@@ -1295,28 +1297,110 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		? 0
 		: FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
 	Package->Impl->Plans.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
+	int32 ObjectTypeCount = 0;
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			++ObjectTypeCount;
+		}
+	}
+	Package->Impl->ObjectTypePlans.SetNumZeroed(ObjectTypeCount);
 	Package->Impl->ClassReferencePlans.Reserve(Model.ClassReferences.Num());
 	Package->Impl->VmPackage.Imports.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
 
 	TMap<FString, UClass*> LoadedClassesByPath;
-	const auto LoadClass = [&LoadedClassesByPath, &Package](const FString& ClassPath) -> UClass*
+	TSet<FString> AttemptedClassPaths;
+	const auto LoadClass = [&LoadedClassesByPath, &AttemptedClassPaths, &Package](
+		const FString& ClassPath) -> UClass*
 	{
-		UClass*& LoadedClass = LoadedClassesByPath.FindOrAdd(ClassPath);
-		if (LoadedClass == nullptr)
+		if (AttemptedClassPaths.Contains(ClassPath))
 		{
-			++Package->Impl->Instrumentation.ClassLoadCount;
-			LoadedClass = LoadObject<UClass>(nullptr, *ClassPath);
-			if (LoadedClass != nullptr && LoadedClass->GetPathName() == ClassPath)
-			{
-				Package->Impl->LoadedClasses.Emplace(LoadedClass);
-			}
-			else
-			{
-				LoadedClass = nullptr;
-			}
+			return LoadedClassesByPath.FindRef(ClassPath);
 		}
-		return LoadedClass;
+		AttemptedClassPaths.Add(ClassPath);
+		++Package->Impl->Instrumentation.ClassLoadCount;
+		UClass* LoadedClass = LoadObject<UClass>(nullptr, *ClassPath);
+		if (LoadedClass != nullptr && LoadedClass->GetPathName() == ClassPath)
+		{
+			LoadedClassesByPath.Add(ClassPath, LoadedClass);
+			Package->Impl->LoadedClasses.Emplace(LoadedClass);
+			return LoadedClass;
+		}
+		LoadedClassesByPath.Add(ClassPath, nullptr);
+		return nullptr;
 	};
+
+	TMap<FString, int32> ObjectTypeOrdinalsById;
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		UClass* ObjectClass = LoadClass(Type.ClassPath);
+		if (ObjectClass == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_object_type_class_missing"),
+				Type.ClassPath,
+				TEXT("A v6 object type class is unavailable or does not keep its canonical path."));
+			return false;
+		}
+		Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal] = ObjectClass;
+		ObjectTypeOrdinalsById.Add(Type.StableId, Type.ObjectTypeOrdinal);
+	}
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		UClass* ObjectClass = Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal];
+		UClass* ExpectedBaseClass = nullptr;
+		if (!Type.BaseTypeId.IsEmpty())
+		{
+			const int32* BaseOrdinal = ObjectTypeOrdinalsById.Find(Type.BaseTypeId);
+			ExpectedBaseClass = BaseOrdinal == nullptr
+				? nullptr
+				: Package->Impl->ObjectTypePlans[*BaseOrdinal];
+		}
+		if (ObjectClass == nullptr
+			|| ObjectClass->GetSuperClass() != ExpectedBaseClass)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_object_type_base_mismatch"),
+				Type.ClassPath,
+				TEXT("The v6 base_type_id must match the reflected direct superclass."));
+			return false;
+		}
+	}
+	if (!Model.SelfTypeId.IsEmpty())
+	{
+		const int32* SelfOrdinal = ObjectTypeOrdinalsById.Find(Model.SelfTypeId);
+		if (SelfOrdinal == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_self_type_missing"),
+				Model.SelfTypeId,
+				TEXT("The v6 Self type must resolve through the immutable object type plan."));
+			return false;
+		}
+		Package->Impl->ExpectedSelfClass = Package->Impl->ObjectTypePlans[*SelfOrdinal];
+		if (Package->Impl->ExpectedSelfClass == nullptr
+			|| !Package->Impl->ExpectedSelfClass->IsChildOf(AActor::StaticClass()))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_self_type_mismatch"),
+				Model.SelfTypeId,
+				TEXT("The v6 Self type must resolve to an Actor-derived class."));
+			return false;
+		}
+	}
 
 	for (const FAvidScriptBindingClassReferenceModel& Reference : Model.ClassReferences)
 	{
@@ -1332,7 +1416,18 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 #endif
 		UClass* Class = LoadClass(Reference.ClassPath);
-		UClass* BaseClass = LoadClass(Reference.BaseClassPath);
+		UClass* BaseClass = nullptr;
+		if (Model.SchemaVersion >= 6)
+		{
+			const int32* ResultOrdinal = ObjectTypeOrdinalsById.Find(Reference.ResultTypeId);
+			BaseClass = ResultOrdinal == nullptr
+				? nullptr
+				: Package->Impl->ObjectTypePlans[*ResultOrdinal];
+		}
+		else
+		{
+			BaseClass = LoadClass(Reference.BaseClassPath);
+		}
 		if (Class == nullptr || BaseClass == nullptr)
 		{
 			SetAvidScriptBindingLoadFailure(
@@ -1674,6 +1769,29 @@ const FAvidScriptBindingPackageInstrumentation& FAvidScriptBindingPackage::GetIn
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const
 {
 	return Impl->RequiredScratchSize;
+}
+
+int32 FAvidScriptBindingPackage::GetObjectTypeCount() const
+{
+	return Impl->ObjectTypePlans.Num();
+}
+
+bool FAvidScriptBindingPackage::TryResolveObjectType(
+	const uint32 Ordinal,
+	UClass*& OutClass) const
+{
+	OutClass = nullptr;
+	if (!Impl->ObjectTypePlans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	OutClass = Impl->ObjectTypePlans[static_cast<int32>(Ordinal)];
+	return OutClass != nullptr;
+}
+
+UClass* FAvidScriptBindingPackage::GetExpectedSelfClass() const
+{
+	return Impl->ExpectedSelfClass;
 }
 
 int32 FAvidScriptBindingPackage::GetClassReferenceCount() const

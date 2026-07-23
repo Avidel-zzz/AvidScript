@@ -19,6 +19,9 @@ struct FAvidScriptBindingTypeModel
 	int32 Alignment = 0;
 	TArray<FString> AbiTypes;
 	TArray<FAvidScriptBindingEnumValue> EnumValues;
+	int32 ObjectTypeOrdinal = INDEX_NONE;
+	FString ClassPath;
+	FString BaseTypeId;
 };
 
 struct FAvidScriptBindingValueModel
@@ -68,6 +71,7 @@ struct FAvidScriptBindingClassReferenceModel
 	FString ClassPath;
 	FString BaseClassPath;
 	FString LoadPolicy;
+	FString ResultTypeId;
 };
 
 struct FAvidScriptBindingPackageModel
@@ -79,6 +83,7 @@ struct FAvidScriptBindingPackageModel
 	FString PackageName;
 	FString PackageHash;
 	FString SelectionHash;
+	FString SelfTypeId;
 	TArray<FAvidScriptBindingTypeModel> Types;
 	TArray<FAvidScriptBindingFunctionModel> Bindings;
 	TArray<FAvidScriptBindingClassReferenceModel> ClassReferences;

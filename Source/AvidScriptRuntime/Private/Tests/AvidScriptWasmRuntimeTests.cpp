@@ -3,6 +3,7 @@
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptWorldSubsystem.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -72,6 +73,85 @@ void DestroySmokeWorld(UWorld*& World)
 	World = nullptr;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptBindingDescriptorLegacyIdentityTest,
+	"AvidScript.Runtime.Binding.DescriptorLegacyIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptBindingDescriptorLegacyIdentityTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingPackageModel Package;
+	Package.GeneratorVersion = TEXT("legacy.generator");
+	Package.EngineVersion = TEXT("5.8.0");
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = TEXT("legacy.package");
+
+	FAvidScriptBindingTypeModel Type;
+	Type.StableId = TEXT("type-id");
+	Type.CanonicalType = TEXT("bool");
+	Type.Kind = TEXT("scalar");
+	Type.CppType = TEXT("bool");
+	Type.Size = 1;
+	Type.Alignment = 1;
+	Type.AbiTypes = { TEXT("i") };
+	Package.Types.Add(Type);
+
+	FAvidScriptBindingFunctionModel Binding;
+	Binding.StableId = TEXT("binding-id");
+	Binding.CanonicalIdentity = TEXT("owner::fn(void)");
+	Binding.Ordinal = 0;
+	Binding.OwnerClass = TEXT("/Script/Engine.Actor");
+	Binding.UeMember = TEXT("Fn");
+	Binding.UeFunction = TEXT("Fn");
+	Binding.ScriptName = TEXT("Fn");
+	Binding.DispatchMode = TEXT("cached_process_event");
+	Binding.bStatic = false;
+	Binding.bConst = true;
+	Binding.ReloadEffect = EAvidScriptBindingReloadEffect::None;
+	Binding.ReturnValue.Name = TEXT("return");
+	Binding.ReturnValue.Direction = TEXT("return");
+	Binding.ReturnValue.CanonicalType = TEXT("void");
+	Binding.ReturnValue.TypeId = TEXT("void-id");
+	Binding.ReturnValue.Kind = TEXT("void");
+	Binding.ReturnValue.CppType = TEXT("void");
+	Binding.HostImport.Module = TEXT("avidscript");
+	Binding.HostImport.Name = TEXT("avid_ue_test");
+	Binding.HostImport.Signature = TEXT("(ii)i");
+	Package.Bindings.Add(Binding);
+
+	const TCHAR* ExpectedSelectionHashes[] = {
+		TEXT(""),
+		TEXT(""),
+		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
+		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
+		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
+		TEXT("bcd25af7b336196501ff44962e5c23e032d23cd8d9bb0c0792b1aaad32a1f75f")
+	};
+	const TCHAR* ExpectedPackageHashes[] = {
+		TEXT(""),
+		TEXT(""),
+		TEXT("54fe33c5d11181fee26c57d10b8a64e210fd0f0b4c58bf61b3a05825c1d6ffc1"),
+		TEXT("beb2669bb1a4c51c206884876db5bf7a0f370e963cc1b70343163beb13095c6b"),
+		TEXT("beb2669bb1a4c51c206884876db5bf7a0f370e963cc1b70343163beb13095c6b"),
+		TEXT("1f973d1960e15c88c361b7b88855ebaa5de502b36c2542dfd99a286986aad3da")
+	};
+
+	for (int32 SchemaVersion = 2; SchemaVersion <= 5; ++SchemaVersion)
+	{
+		Package.SchemaVersion = SchemaVersion;
+		Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+		TestEqual(
+			*FString::Printf(TEXT("Schema v%d selection hash keeps legacy bytes"), SchemaVersion),
+			Package.SelectionHash,
+			FString(ExpectedSelectionHashes[SchemaVersion]));
+		TestEqual(
+			*FString::Printf(TEXT("Schema v%d package hash keeps legacy bytes"), SchemaVersion),
+			FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package),
+			FString(ExpectedPackageHashes[SchemaVersion]));
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptMinimalWasmSmokeTest,
