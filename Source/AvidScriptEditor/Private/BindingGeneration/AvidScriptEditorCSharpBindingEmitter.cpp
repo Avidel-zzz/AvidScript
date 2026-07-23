@@ -66,14 +66,34 @@ bool ValidateCanonicalDescriptor(
 		});
 	}
 
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = Package.PackageName;
+	Profile.ExplicitFunctions = MoveTemp(FunctionSelections);
+	Profile.ExplicitProperties = MoveTemp(PropertySelections);
+	if (!Package.SelfTypeId.IsEmpty())
+	{
+		const FAvidScriptBindingTypeModel* SelfType = Package.Types.FindByPredicate(
+			[&Package](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.StableId == Package.SelfTypeId;
+			});
+		if (SelfType == nullptr || SelfType->ClassPath.IsEmpty())
+		{
+			OutErrorCategory = TEXT("descriptor_self_type_missing");
+			OutErrorSource = Package.SelfTypeId;
+			return false;
+		}
+		Profile.SelfClassPath = SelfType->ClassPath;
+	}
+
 	FString CanonicalDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	FAvidScriptBindingDescriptorGenerateResult RegenerationResult;
-	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
-		Package.PackageName,
-		FunctionSelections,
-		PropertySelections,
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+		Profile,
 		ClassReferences,
 		CanonicalDescriptorJson,
+		SelectionResult,
 		RegenerationResult))
 	{
 		OutErrorCategory = TEXT("descriptor_regeneration_failed");
