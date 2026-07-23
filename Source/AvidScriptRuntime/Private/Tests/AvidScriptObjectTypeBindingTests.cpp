@@ -2,8 +2,11 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptHash.h"
+#include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 
+#include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
@@ -15,6 +18,7 @@ namespace
 {
 FAvidScriptBindingTypeModel MakeObjectType(
 	const TCHAR* ClassPath,
+	const TCHAR* CppType,
 	const int32 ObjectTypeOrdinal,
 	const FString& BaseTypeId)
 {
@@ -22,7 +26,7 @@ FAvidScriptBindingTypeModel MakeObjectType(
 	Type.CanonicalType = TEXT("object:") + FString(ClassPath);
 	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
 	Type.Kind = TEXT("object_handle");
-	Type.CppType = TEXT("UObject*");
+	Type.CppType = CppType;
 	Type.Size = 8;
 	Type.Alignment = 4;
 	Type.AbiTypes = { TEXT("i"), TEXT("i") };
@@ -32,7 +36,73 @@ FAvidScriptBindingTypeModel MakeObjectType(
 	return Type;
 }
 
-bool WriteObjectType(
+FAvidScriptBindingTypeModel MakeStaticOwnerType()
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:/Script/Engine.KismetMathLibrary");
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = TEXT("UKismetMathLibrary");
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	return Type;
+}
+
+FAvidScriptBindingTypeModel MakeBoolType()
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("scalar:bool");
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("scalar");
+	Type.CppType = TEXT("bool");
+	Type.Size = 4;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i") };
+	return Type;
+}
+
+FAvidScriptBindingValueModel MakeBoolValue(
+	const TCHAR* Name,
+	const TCHAR* Direction,
+	const FAvidScriptBindingTypeModel& BoolType)
+{
+	FAvidScriptBindingValueModel Value;
+	Value.Name = Name;
+	Value.Direction = Direction;
+	Value.CanonicalType = BoolType.CanonicalType;
+	Value.TypeId = BoolType.StableId;
+	Value.Kind = BoolType.Kind;
+	Value.CppType = BoolType.CppType;
+	Value.AbiTypes = BoolType.AbiTypes;
+	return Value;
+}
+
+FAvidScriptBindingFunctionModel MakeStaticSentinelBinding(
+	const FAvidScriptBindingTypeModel& BoolType)
+{
+	FAvidScriptBindingFunctionModel Binding;
+	Binding.Ordinal = 0;
+	Binding.OwnerClass = TEXT("/Script/Engine.KismetMathLibrary");
+	Binding.UeMember = TEXT("Not_PreBool");
+	Binding.UeFunction = Binding.UeMember;
+	Binding.ScriptName = TEXT("Not");
+	Binding.DispatchMode = TEXT("cached_process_event");
+	Binding.bStatic = true;
+	Binding.bConst = false;
+	Binding.ReloadEffect = EAvidScriptBindingReloadEffect::None;
+	Binding.ReturnValue = MakeBoolValue(TEXT("ReturnValue"), TEXT("return"), BoolType);
+	Binding.Parameters.Add(MakeBoolValue(TEXT("A"), TEXT("value"), BoolType));
+	Binding.CanonicalIdentity =
+		TEXT("/Script/Engine.KismetMathLibrary::Not_PreBool(scalar:bool;A:value:scalar:bool)");
+	Binding.StableId = FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity);
+	Binding.HostImport.Module = TEXT("avidscript");
+	Binding.HostImport.Name = TEXT("avid_ue_") + Binding.StableId.Left(16);
+	Binding.HostImport.Signature = TEXT("(ii)i");
+	return Binding;
+}
+
+void WriteType(
 	const TSharedRef<TJsonWriter<>>& Writer,
 	const FAvidScriptBindingTypeModel& Type)
 {
@@ -53,7 +123,25 @@ bool WriteObjectType(
 	Writer->WriteValue(TEXT("class_path"), Type.ClassPath);
 	Writer->WriteValue(TEXT("base_type_id"), Type.BaseTypeId);
 	Writer->WriteObjectEnd();
-	return true;
+}
+
+void WriteValue(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const FAvidScriptBindingValueModel& Value)
+{
+	Writer->WriteValue(TEXT("name"), Value.Name);
+	Writer->WriteValue(TEXT("direction"), Value.Direction);
+	Writer->WriteValue(TEXT("has_default"), Value.bHasDefault);
+	Writer->WriteValue(TEXT("canonical_type"), Value.CanonicalType);
+	Writer->WriteValue(TEXT("type_id"), Value.TypeId);
+	Writer->WriteValue(TEXT("kind"), Value.Kind);
+	Writer->WriteValue(TEXT("cpp_type"), Value.CppType);
+	Writer->WriteArrayStart(TEXT("abi_types"));
+	for (const FString& AbiType : Value.AbiTypes)
+	{
+		Writer->WriteValue(AbiType);
+	}
+	Writer->WriteArrayEnd();
 }
 
 bool MakeObjectTypeDescriptor(FString& OutJson)
@@ -67,35 +155,30 @@ bool MakeObjectTypeDescriptor(FString& OutJson)
 
 	const FAvidScriptBindingTypeModel UObjectType = MakeObjectType(
 		TEXT("/Script/CoreUObject.Object"),
+		TEXT("UObject"),
 		0,
 		FString());
-	const FAvidScriptBindingTypeModel ActorType = MakeObjectType(
-		TEXT("/Script/Engine.Actor"),
-		1,
-		UObjectType.StableId);
 	const FAvidScriptBindingTypeModel ActorComponentType = MakeObjectType(
 		TEXT("/Script/Engine.ActorComponent"),
-		2,
+		TEXT("UActorComponent"),
+		1,
 		UObjectType.StableId);
 	const FAvidScriptBindingTypeModel SceneComponentType = MakeObjectType(
 		TEXT("/Script/Engine.SceneComponent"),
-		3,
+		TEXT("USceneComponent"),
+		2,
 		ActorComponentType.StableId);
-	Package.Types = { UObjectType, ActorType, ActorComponentType, SceneComponentType };
-	Package.SelfTypeId = ActorType.StableId;
-
-	FAvidScriptBindingClassReferenceModel ActorReference;
-	ActorReference.Ordinal = 0;
-	ActorReference.ScriptName = TEXT("ActorClass");
-	ActorReference.ClassPath = TEXT("/Script/Engine.Actor");
-	ActorReference.BaseClassPath = TEXT("/Script/Engine.Actor");
-	ActorReference.LoadPolicy = TEXT("EditorLoad");
-	ActorReference.ResultTypeId = ActorType.StableId;
-	ActorReference.StableId = FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
-		ActorReference.ClassPath,
-		ActorReference.BaseClassPath,
-		ActorReference.LoadPolicy);
-	Package.ClassReferences.Add(ActorReference);
+	const FAvidScriptBindingTypeModel StaticOwnerType = MakeStaticOwnerType();
+	const FAvidScriptBindingTypeModel BoolType = MakeBoolType();
+	Package.Types = {
+		UObjectType,
+		ActorComponentType,
+		SceneComponentType,
+		StaticOwnerType,
+		BoolType
+	};
+	const FAvidScriptBindingFunctionModel StaticBinding = MakeStaticSentinelBinding(BoolType);
+	Package.Bindings.Add(StaticBinding);
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 
@@ -112,21 +195,41 @@ bool MakeObjectTypeDescriptor(FString& OutJson)
 	Writer->WriteArrayStart(TEXT("types"));
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
-		WriteObjectType(Writer, Type);
+		WriteType(Writer, Type);
 	}
 	Writer->WriteArrayEnd();
 	Writer->WriteArrayStart(TEXT("class_references"));
-	Writer->WriteObjectStart();
-	Writer->WriteValue(TEXT("stable_id"), ActorReference.StableId);
-	Writer->WriteValue(TEXT("ordinal"), ActorReference.Ordinal);
-	Writer->WriteValue(TEXT("script_name"), ActorReference.ScriptName);
-	Writer->WriteValue(TEXT("class_path"), ActorReference.ClassPath);
-	Writer->WriteValue(TEXT("base_class_path"), ActorReference.BaseClassPath);
-	Writer->WriteValue(TEXT("load_policy"), ActorReference.LoadPolicy);
-	Writer->WriteValue(TEXT("result_type_id"), ActorReference.ResultTypeId);
-	Writer->WriteObjectEnd();
 	Writer->WriteArrayEnd();
 	Writer->WriteArrayStart(TEXT("bindings"));
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("stable_id"), StaticBinding.StableId);
+	Writer->WriteValue(TEXT("canonical_identity"), StaticBinding.CanonicalIdentity);
+	Writer->WriteValue(TEXT("ordinal"), StaticBinding.Ordinal);
+	Writer->WriteValue(TEXT("owner_class"), StaticBinding.OwnerClass);
+	Writer->WriteValue(TEXT("binding_kind"), StaticBinding.BindingKind);
+	Writer->WriteValue(TEXT("ue_member"), StaticBinding.UeMember);
+	Writer->WriteValue(TEXT("script_name"), StaticBinding.ScriptName);
+	Writer->WriteValue(TEXT("dispatch_mode"), StaticBinding.DispatchMode);
+	Writer->WriteValue(TEXT("is_static"), StaticBinding.bStatic);
+	Writer->WriteValue(TEXT("is_const"), StaticBinding.bConst);
+	Writer->WriteValue(TEXT("reload_effect"), TEXT("none"));
+	Writer->WriteObjectStart(TEXT("return"));
+	WriteValue(Writer, StaticBinding.ReturnValue);
+	Writer->WriteObjectEnd();
+	Writer->WriteArrayStart(TEXT("parameters"));
+	for (const FAvidScriptBindingValueModel& Parameter : StaticBinding.Parameters)
+	{
+		Writer->WriteObjectStart();
+		WriteValue(Writer, Parameter);
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectStart(TEXT("host_import"));
+	Writer->WriteValue(TEXT("module"), StaticBinding.HostImport.Module);
+	Writer->WriteValue(TEXT("name"), StaticBinding.HostImport.Name);
+	Writer->WriteValue(TEXT("signature"), StaticBinding.HostImport.Signature);
+	Writer->WriteObjectEnd();
+	Writer->WriteObjectEnd();
 	Writer->WriteArrayEnd();
 	Writer->WriteObjectEnd();
 	return Writer->Close();
@@ -189,7 +292,13 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
 		return false;
 	}
-	TestEqual(TEXT("Immutable plan contains all object types"), Package->GetObjectTypeCount(), 4);
+	TestEqual(TEXT("Immutable plan contains all object types"), Package->GetObjectTypeCount(), 3);
+	TestEqual(TEXT("Class-reference-free package keeps no expected Self class"),
+		Package->GetExpectedSelfClass(), static_cast<UClass*>(nullptr));
+	TestEqual(TEXT("Class-reference-free package keeps no lifecycle class references"),
+		Package->GetClassReferenceCount(), 0);
+	TestEqual(TEXT("Package exposes only the reflected sentinel and object-type imports"),
+		Package->GetVmPackage().Imports.Num(), 2);
 	const TConstArrayView<FAvidScriptObjectTypeBindingSpec> Specs =
 		FAvidScriptObjectTypeBindings::GetSpecs();
 	TestEqual(TEXT("Object type capability publishes one import spec"), Specs.Num(), 1);
@@ -202,11 +311,40 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	for (const FAvidScriptObjectLifecycleBindingSpec& LifecycleSpec :
+		FAvidScriptObjectLifecycleBindings::GetSpecs())
+	{
+		TestFalse(
+			*FString::Printf(TEXT("Class-reference-free package excludes lifecycle import %s"),
+				*LifecycleSpec.ImportName),
+			Package->GetVmPackage().Imports.ContainsByPredicate(
+				[&LifecycleSpec](const FAvidScriptVmDynamicImport& Import)
+				{
+					return Import.StableId == LifecycleSpec.StableId;
+				}));
+	}
 	const uint32 ObjectTypeOrdinal = FindObjectTypeOrdinal(*Package);
 	if (!TestTrue(TEXT("Object type import is attached to the package"), ObjectTypeOrdinal != MAX_uint32))
 	{
 		return false;
 	}
+
+	const uint64 ClassLoadCount = Package->GetInstrumentation().ClassLoadCount;
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	UClass* CachedObjectClass = nullptr;
+	UClass* CachedActorComponentClass = nullptr;
+	UClass* CachedSceneComponentClass = nullptr;
+	TestTrue(TEXT("Package retains cached UObject class after GC"),
+		Package->TryResolveObjectType(0, CachedObjectClass));
+	TestTrue(TEXT("Package retains cached ActorComponent class after GC"),
+		Package->TryResolveObjectType(1, CachedActorComponentClass));
+	TestTrue(TEXT("Package retains cached SceneComponent class after GC"),
+		Package->TryResolveObjectType(2, CachedSceneComponentClass));
+	TestEqual(TEXT("Cached UObject class remains stable"), CachedObjectClass, UObject::StaticClass());
+	TestEqual(TEXT("Cached ActorComponent class remains stable"),
+		CachedActorComponentClass, UActorComponent::StaticClass());
+	TestEqual(TEXT("Cached SceneComponent class remains stable"),
+		CachedSceneComponentClass, USceneComponent::StaticClass());
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult RegisterResult;
@@ -237,7 +375,7 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 	FAvidScriptBindingInvocationContext Context;
 	Context.ObjectRegistry = &Registry;
 	FAvidScriptDynamicHostCallResult Result;
-	const uint64 ComponentArguments[] = { ComponentHandle.Slot, ComponentHandle.Generation, 2 };
+	const uint64 ComponentArguments[] = { ComponentHandle.Slot, ComponentHandle.Generation, 1 };
 	if (!TestTrue(TEXT("Component matches its cached ActorComponent class"),
 		DispatchObjectType(*Package, ObjectTypeOrdinal, ComponentArguments, Context, Result)))
 	{
@@ -246,29 +384,43 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("Component type match returns one"), Result.ReturnValue, static_cast<uint64>(1));
 
-	const uint64 MismatchArguments[] = { ComponentHandle.Slot, ComponentHandle.Generation, 1 };
-	if (!TestTrue(TEXT("Component mismatch remains a successful dispatch"),
+	const FAvidScriptObjectHandle PlainObjectHandle = Registry.RegisterObject(
+		NewObject<UObject>(),
+		RegisterResult,
+		false);
+	if (!TestTrue(TEXT("Plain UObject registers for mismatch coverage"),
+		RegisterResult.bSucceeded && PlainObjectHandle.IsValid()))
+	{
+		return false;
+	}
+	const uint64 MismatchArguments[] = { PlainObjectHandle.Slot, PlainObjectHandle.Generation, 2 };
+	if (!TestTrue(TEXT("Plain UObject mismatch remains a successful dispatch"),
 		DispatchObjectType(*Package, ObjectTypeOrdinal, MismatchArguments, Context, Result)))
 	{
 		AddError(Result.Details);
 		return false;
 	}
-	TestEqual(TEXT("Component mismatch returns zero"), Result.ReturnValue, static_cast<uint64>(0));
+	TestEqual(TEXT("Plain UObject mismatch returns zero"), Result.ReturnValue, static_cast<uint64>(0));
 
-	FAvidScriptObjectRegistry ForeignRegistry;
-	FAvidScriptObjectHandleResult ForeignRegisterResult;
-	const FAvidScriptObjectHandle ForeignHandle = ForeignRegistry.RegisterObject(
+	FAvidScriptObjectRegistry CrossRegistry;
+	FAvidScriptObjectHandleResult CrossRegistryRegisterResult;
+	const FAvidScriptObjectHandle CrossRegistryHandle = CrossRegistry.RegisterObject(
 		NewObject<USceneComponent>(GetTransientPackage()),
-		ForeignRegisterResult,
+		CrossRegistryRegisterResult,
 		false);
-	if (!TestTrue(TEXT("Foreign component registers"), ForeignRegisterResult.bSucceeded))
+	if (!TestTrue(TEXT("Cross-registry component registers"),
+		CrossRegistryRegisterResult.bSucceeded && CrossRegistryHandle.IsValid()))
 	{
 		return false;
 	}
-	const uint64 ForeignArguments[] = { ForeignHandle.Slot, ForeignHandle.Generation, 2 };
-	TestFalse(TEXT("Foreign registry generation fails closed"),
-		DispatchObjectType(*Package, ObjectTypeOrdinal, ForeignArguments, Context, Result));
-	TestTrue(TEXT("Foreign registry reports the registry generation failure"),
+	const uint64 CrossRegistryArguments[] = {
+		CrossRegistryHandle.Slot,
+		CrossRegistryHandle.Generation,
+		1
+	};
+	TestFalse(TEXT("Cross-registry handle with a mismatched local generation fails closed"),
+		DispatchObjectType(*Package, ObjectTypeOrdinal, CrossRegistryArguments, Context, Result));
+	TestTrue(TEXT("Cross-registry generation mismatch reports the local registry failure"),
 		Result.Details.Contains(TEXT("generation_mismatch")));
 
 	if (!TestTrue(TEXT("Component handle releases"),
@@ -291,11 +443,18 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 		NewObject<USceneComponent>(GetTransientPackage()),
 		RegisterResult,
 		false);
-	const uint64 InvalidOrdinalArguments[] = { CurrentHandle.Slot, CurrentHandle.Generation, 4 };
+	if (!TestTrue(TEXT("Current component registers for ordinal bounds coverage"),
+		RegisterResult.bSucceeded && CurrentHandle.IsValid()))
+	{
+		return false;
+	}
+	const uint64 InvalidOrdinalArguments[] = { CurrentHandle.Slot, CurrentHandle.Generation, 3 };
 	TestFalse(TEXT("Out-of-range object type ordinal fails closed"),
 		DispatchObjectType(*Package, ObjectTypeOrdinal, InvalidOrdinalArguments, Context, Result));
 	TestTrue(TEXT("Out-of-range object type ordinal is stable"),
 		Result.Details.Contains(TEXT("object_type_ordinal_out_of_range")));
+	TestEqual(TEXT("GC and dispatch do not trigger additional class loads"),
+		Package->GetInstrumentation().ClassLoadCount, ClassLoadCount);
 	return true;
 }
 
