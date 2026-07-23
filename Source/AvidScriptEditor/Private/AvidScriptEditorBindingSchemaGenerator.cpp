@@ -105,12 +105,13 @@ bool DescribeProperty(const FProperty* Property, FString& OutType)
 
 void WriteIntrinsic(
 	const TSharedRef<TJsonWriter<>>& Writer,
+	const TCHAR* ImportModule,
 	const TCHAR* ImportName,
 	const TCHAR* AbiSignature,
 	const TCHAR* Kind)
 {
 	Writer->WriteObjectStart();
-	Writer->WriteValue(TEXT("import_module"), TEXT("env"));
+	Writer->WriteValue(TEXT("import_module"), ImportModule);
 	Writer->WriteValue(TEXT("import_name"), ImportName);
 	Writer->WriteValue(TEXT("abi_signature"), AbiSignature);
 	Writer->WriteValue(TEXT("kind"), Kind);
@@ -249,10 +250,11 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 	}
 	Writer->WriteArrayEnd();
 	Writer->WriteArrayStart(TEXT("intrinsics"));
-	WriteIntrinsic(Writer, TEXT("owner_get_generation"), TEXT("()i"), TEXT("host_context"));
-	WriteIntrinsic(Writer, TEXT("owner_get_slot"), TEXT("()i"), TEXT("host_context"));
-	WriteIntrinsic(Writer, TEXT("timer_cancel"), TEXT("(i)i"), TEXT("runtime_service"));
-	WriteIntrinsic(Writer, TEXT("timer_set_once"), TEXT("(fi)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("avidscript"), TEXT("avid_owner_get_handle"), TEXT("()I"), TEXT("host_context"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_generation"), TEXT("()i"), TEXT("host_context"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_slot"), TEXT("()i"), TEXT("host_context"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("timer_set_once"), TEXT("(fi)i"), TEXT("runtime_service"));
 	Writer->WriteArrayEnd();
 	Writer->WriteObjectEnd();
 	if (!Writer->Close())
@@ -345,6 +347,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
 	SupportedImports.Add(TEXT("env.owner_get_slot"));
 	SupportedImports.Add(TEXT("env.timer_cancel"));
 	SupportedImports.Add(TEXT("env.timer_set_once"));
+	SupportedImports.Add(TEXT("avidscript.avid_owner_get_handle"));
 
 	for (int32 Index = 0; Index < RequiredImports->Num(); ++Index)
 	{

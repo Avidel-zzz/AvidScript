@@ -55,6 +55,13 @@ FString ExtractStateContractSurface(const FString& Source)
 	}
 	return Source.Mid(StartIndex, EndIndex - StartIndex);
 }
+
+FString ExtractTypedProjectFacadeSurface(const FString& Source)
+{
+	const FString StartToken = TEXT("[StructLayout(LayoutKind.Sequential)]\npublic readonly struct TSubclassOfAActor");
+	const int32 StartIndex = Source.Find(StartToken);
+	return StartIndex == INDEX_NONE ? FString() : Source.Mid(StartIndex);
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -211,7 +218,7 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 	TestTrue(TEXT("Facade publishes the project class by descriptor ordinal"),
 		Source.Contains(TEXT("public static TSubclassOfAActor ProjectileClass => new(0);")));
 	TestFalse(TEXT("Class facade does not expose an implicit integer conversion"),
-		Source.Contains(TEXT("implicit operator")));
+		Source.Contains(TEXT("implicit operator int")));
 	TestTrue(TEXT("Lifecycle facade unwraps class and transform values for SpawnActor"),
 		Source.Contains(TEXT("public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)"))
 		&& Source.Contains(TEXT("actorClass.AvidScriptOrdinal, in transform"))
@@ -223,8 +230,7 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 	TestTrue(TEXT("Lifecycle facade unwraps Actor and class values for IsA"),
 		Source.Contains(TEXT("public static bool IsA(AActor actor, TSubclassOfAActor actorClass)"))
 		&& Source.Contains(TEXT("actorClass.AvidScriptOrdinal")));
-	TestFalse(TEXT("Lifecycle facade exposes no implicit unsafe handle conversion"),
-		Source.Contains(TEXT("implicit operator")) || Source.Contains(TEXT("IntPtr")));
+	TestFalse(TEXT("Lifecycle facade exposes no unsafe pointer conversion"), Source.Contains(TEXT("IntPtr")));
 
 	const auto& LifecycleSpecs = FAvidScriptObjectLifecycleBindings::GetSpecs();
 	for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
@@ -277,12 +283,22 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 	if (Manifest.IsValid())
 	{
 		TestEqual(TEXT("Manifest records one class reference"), Manifest->GetIntegerField(TEXT("class_reference_count")), 1);
-		TestEqual(TEXT("Manifest identifies descriptor schema v5"), Manifest->GetIntegerField(TEXT("descriptor_schema_version")), 5);
+		TestEqual(TEXT("Manifest identifies descriptor schema v6"), Manifest->GetIntegerField(TEXT("descriptor_schema_version")), 6);
 		const TArray<TSharedPtr<FJsonValue>>& RequiredImports = Manifest->GetArrayField(TEXT("required_imports"));
 		TestEqual(
 			TEXT("Manifest appends shared lifecycle imports after reflected imports"),
 			RequiredImports.Num(),
-			DescriptorResult.BindingCount + LifecycleSpecs.Num());
+			DescriptorResult.BindingCount + LifecycleSpecs.Num() + 1);
+		TestTrue(
+			TEXT("Manifest includes the packed owner import"),
+			RequiredImports.ContainsByPredicate([](const TSharedPtr<FJsonValue>& Value)
+			{
+				const TSharedPtr<FJsonObject> Import = Value.IsValid() ? Value->AsObject() : nullptr;
+				return Import.IsValid()
+					&& Import->GetStringField(TEXT("module")) == TEXT("avidscript")
+					&& Import->GetStringField(TEXT("name")) == TEXT("avid_owner_get_handle")
+					&& Import->GetStringField(TEXT("signature")) == TEXT("()I");
+			}));
 		for (int32 SpecIndex = 0;
 			SpecIndex < LifecycleSpecs.Num() && DescriptorResult.BindingCount + SpecIndex < RequiredImports.Num();
 			++SpecIndex)
@@ -302,6 +318,135 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 			TestEqual(TEXT("Lifecycle manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), Spec.Signature);
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest,
+	"AvidScript.Editor.CSharpBindingEmitter.TypedProjectApi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.project.typed_facade");
+	Profile.SelfClassPath = TEXT("/Script/Engine.StaticMeshActor");
+	const TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{ TEXT("ProjectileClass"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("/Script/Engine.StaticMeshActor"), TEXT("EditorLoad") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+		TEXT("Typed project API descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			ClassReferences,
+			DescriptorJson,
+			SelectionResult,
+			DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FString Source;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+		TEXT("Typed project API facade emits"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(DescriptorJson, Source, ManifestJson, EmitResult)))
+	{
+		AddError(EmitResult.ErrorMessage);
+		return false;
+	}
+
+	TestTrue(TEXT("Typed facade declares a nominal StaticMeshActor handle"),
+		Source.Contains(TEXT("public readonly struct AStaticMeshActor")));
+	TestTrue(TEXT("Typed facade keeps two-cell object ABI"),
+		Source.Contains(TEXT("private readonly int Slot;"))
+		&& Source.Contains(TEXT("private readonly int Generation;"))
+		&& Source.Contains(TEXT("public bool HasHandle => Slot > 0 && Generation > 0;"))
+		&& Source.Contains(TEXT("public bool IsNull => Slot == 0 && Generation == 0;")));
+	TestTrue(TEXT("Typed facade emits direct-base upcast without a host import"),
+		Source.Contains(TEXT("public static implicit operator AActor(AStaticMeshActor value)"))
+		&& Source.Contains(TEXT("return new(value.Slot, value.Generation);")));
+	TestTrue(TEXT("Typed facade emits checked direct-base cast"),
+		Source.Contains(TEXT("public AActor TryCast()"))
+		&& Source.Contains(TEXT("AvidScriptNative.ObjectTypeIsA(Slot, Generation, 1) != 0"))
+		&& Source.Contains(TEXT("return default;")));
+	TestTrue(TEXT("Typed facade emits one packed owner import and typed Self"),
+		Source.Contains(TEXT("public static AStaticMeshActor Self"))
+		&& Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_owner_get_handle\")]"))
+		&& Source.Contains(TEXT("private static extern long OwnerGetHandle();"))
+		&& Source.Contains(TEXT("return new((int)packedHandle, (int)(packedHandle >> 32));"))
+		&& !Source.Contains(TEXT("owner_get_slot"))
+		&& !Source.Contains(TEXT("owner_get_generation")));
+	TestTrue(TEXT("Typed facade emits nominal class references and typed Spawn"),
+		Source.Contains(TEXT("public readonly struct TSubclassOfAStaticMeshActor"))
+		&& Source.Contains(TEXT("public static TSubclassOfAStaticMeshActor ProjectileClass => new(0);"))
+		&& Source.Contains(TEXT("public static AStaticMeshActor SpawnActor(TSubclassOfAStaticMeshActor actorClass, FTransform transform)"))
+		&& Source.Contains(TEXT("public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)")));
+	TestTrue(TEXT("Typed facade declares the object-type import exactly once"),
+		Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_object_type_is_a\")]"))
+		&& Source.Contains(TEXT("internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);")));
+
+	FAvidScriptBindingSelectionProfile InheritedMemberProfile = Profile;
+	InheritedMemberProfile.ExplicitFunctions.Add({ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") });
+	FString InheritedDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult InheritedSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult InheritedDescriptorResult;
+	FString InheritedSource;
+	FString InheritedManifest;
+	FAvidScriptCSharpBindingEmitResult InheritedEmitResult;
+	if (TestTrue(
+		TEXT("Inherited-member descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			InheritedMemberProfile,
+			ClassReferences,
+			InheritedDescriptorJson,
+			InheritedSelectionResult,
+			InheritedDescriptorResult))
+		&& TestTrue(
+			TEXT("Inherited-member facade emits"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				InheritedDescriptorJson,
+				InheritedSource,
+				InheritedManifest,
+				InheritedEmitResult)))
+	{
+		const int32 DerivedStart = InheritedSource.Find(TEXT("public readonly struct AStaticMeshActor"));
+		const int32 DerivedEnd = DerivedStart == INDEX_NONE ? INDEX_NONE : InheritedSource.Find(TEXT("\n}"), DerivedStart);
+		const FString DerivedBlock = DerivedEnd == INDEX_NONE ? FString() : InheritedSource.Mid(DerivedStart, DerivedEnd - DerivedStart);
+		TestTrue(TEXT("Base wrapper keeps its reflected member"), InheritedSource.Contains(TEXT("public FVector GetActorScale3D()")));
+		TestFalse(TEXT("Derived wrapper does not copy base reflected members"), DerivedBlock.Contains(TEXT("GetActorScale3D")));
+	}
+
+	const FString FixturePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/BindingGeneration/P50_TypedProjectApi.generated.cs")));
+	FString FixtureSource;
+	if (!TestTrue(TEXT("Typed project API golden fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
+	{
+		return false;
+	}
+	const FString TypedSurface = ExtractTypedProjectFacadeSurface(Source);
+	if (TypedSurface != FixtureSource)
+	{
+		const FString ActualPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+			FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptGeneratedBindingsTests/P50_TypedProjectApi.actual.cs")));
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ActualPath), true);
+		TestTrue(
+			TEXT("Changed typed project API facade is saved for deterministic fixture review"),
+			FFileHelper::SaveStringToFile(
+				TypedSurface,
+				*ActualPath,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+		AddInfo(FString::Printf(TEXT("Changed typed project API facade: %s"), *ActualPath));
+	}
+	TestEqual(TEXT("Typed project API facade matches the C# golden contract"), TypedSurface, FixtureSource);
+
 	return true;
 }
 
