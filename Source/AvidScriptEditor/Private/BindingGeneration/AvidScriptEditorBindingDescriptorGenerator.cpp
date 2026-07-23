@@ -5,12 +5,10 @@
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorBindingReloadEffectPolicy.h"
-#include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 #include "Dom/JsonObject.h"
-#include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
@@ -226,36 +224,11 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 		OutResult);
 }
 
-namespace
-{
-void AddObjectHandleClass(const FProperty* Property, TArray<UClass*>& OutHandleClasses)
-{
-	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
-	{
-		OutHandleClasses.Add(ObjectProperty->PropertyClass);
-	}
-}
-
-void AddObjectHandleClasses(const UFunction* Function, TArray<UClass*>& OutHandleClasses)
-{
-	AddObjectHandleClass(Function->GetReturnProperty(), OutHandleClasses);
-	for (TFieldIterator<FProperty> It(Function); It; ++It)
-	{
-		const FProperty* Property = *It;
-		if (Property->HasAnyPropertyFlags(CPF_Parm)
-			&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
-		{
-			AddObjectHandleClass(Property, OutHandleClasses);
-		}
-	}
-}
-
-bool GenerateBindingDescriptor(
+bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
 	const FString& PackageName,
 	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
-	UClass* SelfClass,
 	FString& OutJson,
 	FAvidScriptBindingDescriptorGenerateResult& OutResult)
 {
@@ -563,41 +536,6 @@ bool GenerateBindingDescriptor(
 		Package.ClassReferences[Index].Ordinal = Index;
 	}
 
-	TArray<UClass*> HandleClasses;
-	for (const FResolvedBindingDescriptor& Binding : Bindings)
-	{
-		if (Binding.Function == nullptr || !Binding.Function->HasAnyFunctionFlags(FUNC_Static))
-		{
-			HandleClasses.Add(Binding.OwnerClass);
-		}
-		if (Binding.Function != nullptr)
-		{
-			AddObjectHandleClasses(Binding.Function, HandleClasses);
-		}
-		else
-		{
-			AddObjectHandleClass(Binding.Property, HandleClasses);
-		}
-	}
-	FAvidScriptEditorObjectTypeGraph ObjectTypeGraph;
-	FString ObjectTypeGraphErrorCategory;
-	FString ObjectTypeGraphErrorDetails;
-	if (!FAvidScriptEditorObjectTypeGraph::Build(
-		HandleClasses,
-		SelfClass,
-		ClassReferences,
-		ObjectTypeGraph,
-		ObjectTypeGraphErrorCategory,
-		ObjectTypeGraphErrorDetails))
-	{
-		SetFailure(
-			OutResult,
-			ObjectTypeGraphErrorCategory,
-			ObjectTypeGraphErrorDetails,
-			TEXT("Resolve the handle-capable UObject type graph before generating the binding package."));
-		return false;
-	}
-
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 	const int32 SchemaVersion = Package.SchemaVersion;
@@ -712,25 +650,6 @@ bool GenerateBindingDescriptor(
 	OutResult.SelectionHash = SelectionHash;
 	return true;
 }
-} // namespace
-
-bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
-	const FString& PackageName,
-	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
-	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
-	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
-	FString& OutJson,
-	FAvidScriptBindingDescriptorGenerateResult& OutResult)
-{
-	return GenerateBindingDescriptor(
-		PackageName,
-		FunctionSelections,
-		PropertySelections,
-		ClassReferences,
-		nullptr,
-		OutJson,
-		OutResult);
-}
 
 bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	const FAvidScriptBindingSelectionProfile& Profile,
@@ -805,53 +724,11 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
 	OutSelectionResult.bSucceeded = true;
-	UClass* SelfClass = nullptr;
-	if (!Profile.SelfClassPath.IsEmpty())
-	{
-		SelfClass = LoadObject<UClass>(nullptr, *Profile.SelfClassPath);
-		if (SelfClass == nullptr)
-		{
-			SetFailure(
-				OutResult,
-				TEXT("self_class_missing"),
-				Profile.SelfClassPath,
-				TEXT("Use a loadable canonical Actor class path for the profile self type."));
-			return false;
-		}
-	}
-	else
-	{
-		const auto HasActorLifecycleOwner = [](const FString& OwnerClassPath)
-		{
-			UClass* OwnerClass = LoadObject<UClass>(nullptr, *OwnerClassPath);
-			return OwnerClass != nullptr && OwnerClass->IsChildOf(AActor::StaticClass());
-		};
-		for (const FAvidScriptReflectedFunctionSelection& Selection : FunctionSelections)
-		{
-			if (HasActorLifecycleOwner(Selection.OwnerClassPath))
-			{
-				SelfClass = AActor::StaticClass();
-				break;
-			}
-		}
-		if (SelfClass == nullptr)
-		{
-			for (const FAvidScriptReflectedPropertySelection& Selection : PropertySelections)
-			{
-				if (HasActorLifecycleOwner(Selection.OwnerClassPath))
-				{
-					SelfClass = AActor::StaticClass();
-					break;
-				}
-			}
-		}
-	}
-	return GenerateBindingDescriptor(
+	return GenerateWithClassReferences(
 		Profile.PackageName,
 		FunctionSelections,
 		PropertySelections,
 		ClassReferences,
-		SelfClass,
 		OutJson,
 		OutResult);
 }
