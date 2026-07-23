@@ -1,12 +1,18 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptRuntimeSession.h"
 #include "Session/AvidScriptRuntimeEventRouter.h"
 #include "Session/AvidScriptRuntimeScheduler.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 
+#include "GameFramework/Actor.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -49,6 +55,102 @@ FAvidScriptWasmStateSlot MakeSessionStateSlot(
 	Slot.Size = 4;
 	Slot.Alignment = 4;
 	return Slot;
+}
+
+FAvidScriptBindingTypeModel MakeSessionOwnerType(
+	const TCHAR* ClassPath,
+	const TCHAR* CppType,
+	const int32 ObjectTypeOrdinal,
+	const FString& BaseTypeId)
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:") + FString(ClassPath);
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = CppType;
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	Type.ObjectTypeOrdinal = ObjectTypeOrdinal;
+	Type.ClassPath = ClassPath;
+	Type.BaseTypeId = BaseTypeId;
+	return Type;
+}
+
+bool MakeTypedOwnerSessionPackage(
+	TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
+	FString& OutError)
+{
+	FAvidScriptBindingPackageModel Model;
+	Model.SchemaVersion = 6;
+	Model.GeneratorVersion = TEXT("50.0.session_test");
+	Model.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Model.Source = TEXT("ue_reflection");
+	Model.PackageName = TEXT("avidscript.test.session_typed_owner");
+
+	const FAvidScriptBindingTypeModel ObjectType = MakeSessionOwnerType(
+		TEXT("/Script/CoreUObject.Object"),
+		TEXT("UObject"),
+		0,
+		FString());
+	const FAvidScriptBindingTypeModel ActorType = MakeSessionOwnerType(
+		TEXT("/Script/Engine.Actor"),
+		TEXT("AActor"),
+		1,
+		ObjectType.StableId);
+	Model.Types = { ObjectType, ActorType };
+	Model.SelfTypeId = ActorType.StableId;
+
+	FAvidScriptBindingClassReferenceModel ActorReference;
+	ActorReference.Ordinal = 0;
+	ActorReference.ScriptName = TEXT("ActorClass");
+	ActorReference.ClassPath = TEXT("/Script/Engine.Actor");
+	ActorReference.BaseClassPath = TEXT("/Script/Engine.Actor");
+	ActorReference.LoadPolicy = TEXT("EditorLoad");
+	ActorReference.ResultTypeId = ActorType.StableId;
+	ActorReference.StableId = FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+		ActorReference.ClassPath,
+		ActorReference.BaseClassPath,
+		ActorReference.LoadPolicy);
+	Model.ClassReferences.Add(ActorReference);
+	Model.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Model);
+	Model.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Model);
+
+	const FString DescriptorJson = FString::Printf(
+		TEXT("{\"schema_version\":6,\"generator_version\":\"%s\",\"engine_version\":\"%s\",\"source\":\"ue_reflection\",\"package_name\":\"%s\",\"package_hash\":\"%s\",\"selection_hash\":\"%s\",\"self_type_id\":\"%s\",\"types\":[{\"stable_id\":\"%s\",\"canonical_type\":\"%s\",\"kind\":\"object_handle\",\"cpp_type\":\"UObject\",\"size\":8,\"alignment\":4,\"abi_types\":[\"i\",\"i\"],\"object_type_ordinal\":0,\"class_path\":\"%s\",\"base_type_id\":\"\"},{\"stable_id\":\"%s\",\"canonical_type\":\"%s\",\"kind\":\"object_handle\",\"cpp_type\":\"AActor\",\"size\":8,\"alignment\":4,\"abi_types\":[\"i\",\"i\"],\"object_type_ordinal\":1,\"class_path\":\"%s\",\"base_type_id\":\"%s\"}],\"class_references\":[{\"stable_id\":\"%s\",\"ordinal\":0,\"script_name\":\"ActorClass\",\"class_path\":\"/Script/Engine.Actor\",\"base_class_path\":\"/Script/Engine.Actor\",\"load_policy\":\"EditorLoad\",\"result_type_id\":\"%s\"}],\"bindings\":[]}"),
+		*Model.GeneratorVersion,
+		*Model.EngineVersion,
+		*Model.PackageName,
+		*Model.PackageHash,
+		*Model.SelectionHash,
+		*Model.SelfTypeId,
+		*ObjectType.StableId,
+		*ObjectType.CanonicalType,
+		*ObjectType.ClassPath,
+		*ActorType.StableId,
+		*ActorType.CanonicalType,
+		*ActorType.ClassPath,
+		*ActorType.BaseTypeId,
+		*ActorReference.StableId,
+		*ActorReference.ResultTypeId);
+
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, OutPackage, LoadResult))
+	{
+		return true;
+	}
+
+	OutError = LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails;
+	return false;
+}
+
+FAvidScriptWasmReloadManifest MakeTypedOwnerSessionManifest(
+	const FString& ModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& Package)
+{
+	FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
+	Manifest.BindingPackage = Package;
+	return Manifest;
 }
 }
 
@@ -402,6 +504,122 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	FAvidScriptWasmSmokeResult StopResult;
 	Session.StopAndUnload(StopResult);
 	TestEqual(TEXT("session returns to empty"), Session.GetSnapshot().LifecycleState, EAvidScriptLifecycleState::Empty);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionTypedOwnerValidationTest,
+	"AvidScript.Architecture.Session.TypedOwnerValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionTypedOwnerValidationTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<const FAvidScriptBindingPackage> TypedOwnerPackage;
+	FString PackageError;
+	if (!TestTrue(TEXT("Typed owner package loads"), MakeTypedOwnerSessionPackage(TypedOwnerPackage, PackageError)))
+	{
+		AddError(PackageError);
+		return false;
+	}
+	TestEqual(TEXT("Typed owner package expects Actor Self"), TypedOwnerPackage->GetExpectedSelfClass(), AActor::StaticClass());
+
+	FAvidScriptObjectRegistry Registry;
+	UObject* WrongOwner = NewObject<UObject>(GetTransientPackage());
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle WrongOwnerHandle = Registry.RegisterObject(WrongOwner, RegisterResult, false);
+	if (!TestTrue(TEXT("Wrong owner registers"), RegisterResult.bSucceeded))
+	{
+		AddError(RegisterResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptWasmHostContext WrongOwnerContext;
+	WrongOwnerContext.ObjectRegistry = &Registry;
+	WrongOwnerContext.OwnerHandle = WrongOwnerHandle;
+	const FAvidScriptWasmReloadManifest TypedOwnerManifest = MakeTypedOwnerSessionManifest(
+		TEXT("typed_owner_candidate"),
+		TypedOwnerPackage);
+
+	FAvidScriptRuntimeSession InitialSession;
+	InitialSession.SetHostContext(WrongOwnerContext);
+	FAvidScriptWasmReloadResult InitialResult;
+	TestFalse(TEXT("Wrong owner rejects initial load before BeginPlay"), InitialSession.LoadInitialModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		TypedOwnerManifest,
+		InitialResult));
+	TestEqual(TEXT("Wrong owner initial category is stable"), InitialResult.ErrorCategory, FString(TEXT("runtime_owner_type_mismatch")));
+	TestTrue(TEXT("Wrong owner initial result includes expected class"), InitialResult.ErrorMessage.Contains(TEXT("expected=Actor")));
+	TestTrue(TEXT("Wrong owner initial result includes actual class"), InitialResult.ErrorMessage.Contains(TEXT("actual=Object")));
+	TestFalse(TEXT("Wrong owner leaves BeginPlay callback count at zero"), InitialResult.RuntimeResult.bBeginPlayCalled);
+	TestFalse(TEXT("Wrong owner initial load leaves no live runtime"), InitialSession.IsLiveLoaded());
+
+	FAvidScriptRuntimeSession MissingRegistrySession;
+	FAvidScriptWasmHostContext MissingRegistryContext;
+	MissingRegistryContext.OwnerHandle = WrongOwnerHandle;
+	MissingRegistrySession.SetHostContext(MissingRegistryContext);
+	FAvidScriptWasmReloadResult MissingRegistryResult;
+	TestFalse(TEXT("Missing registry fails closed"), MissingRegistrySession.LoadInitialModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		MakeTypedOwnerSessionManifest(TEXT("typed_owner_missing_registry"), TypedOwnerPackage),
+		MissingRegistryResult));
+	TestEqual(TEXT("Missing registry uses stable category"), MissingRegistryResult.ErrorCategory, FString(TEXT("runtime_owner_type_mismatch")));
+	TestTrue(TEXT("Missing registry result includes unresolved actual"), MissingRegistryResult.ErrorMessage.Contains(TEXT("actual=<unresolved:missing_registry>")));
+
+	FAvidScriptObjectHandleResult ReleaseResult;
+	TestTrue(TEXT("Wrong owner handle releases"), Registry.ReleaseHandle(WrongOwnerHandle, ReleaseResult, false));
+	FAvidScriptRuntimeSession StaleOwnerSession;
+	StaleOwnerSession.SetHostContext(WrongOwnerContext);
+	FAvidScriptWasmReloadResult StaleOwnerResult;
+	TestFalse(TEXT("Stale owner fails closed"), StaleOwnerSession.LoadInitialModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		MakeTypedOwnerSessionManifest(TEXT("typed_owner_stale"), TypedOwnerPackage),
+		StaleOwnerResult));
+	TestEqual(TEXT("Stale owner uses stable category"), StaleOwnerResult.ErrorCategory, FString(TEXT("runtime_owner_type_mismatch")));
+	TestTrue(TEXT("Stale owner retains registry failure detail"), StaleOwnerResult.ErrorMessage.Contains(TEXT("actual=<unresolved:generation_mismatch>")));
+
+	UObject* ReloadWrongOwner = NewObject<UObject>(GetTransientPackage());
+	FAvidScriptObjectHandleResult ReloadRegisterResult;
+	const FAvidScriptObjectHandle ReloadWrongOwnerHandle = Registry.RegisterObject(ReloadWrongOwner, ReloadRegisterResult, false);
+	if (!TestTrue(TEXT("Reload wrong owner registers"), ReloadRegisterResult.bSucceeded))
+	{
+		AddError(ReloadRegisterResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptRuntimeSession ReloadSession;
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(TEXT("Reload session starts with untyped runtime"), ReloadSession.LoadInitialModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("typed_owner_live")),
+		ReloadResult));
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Live runtime ticks before typed owner rejection"), ReloadSession.Tick(1.0f / 60.0f, TickResult));
+	const FAvidScriptRuntimeSessionSnapshot BeforeReload = ReloadSession.GetSnapshot();
+
+	FAvidScriptWasmHostContext ReloadWrongOwnerContext;
+	ReloadWrongOwnerContext.ObjectRegistry = &Registry;
+	ReloadWrongOwnerContext.OwnerHandle = ReloadWrongOwnerHandle;
+	ReloadSession.SetHostContext(ReloadWrongOwnerContext);
+	TestFalse(TEXT("Wrong owner rejects reload candidate"), ReloadSession.ReloadModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		TypedOwnerManifest,
+		ReloadResult));
+	TestEqual(TEXT("Reload owner category is stable"), ReloadResult.ErrorCategory, FString(TEXT("runtime_owner_type_mismatch")));
+	TestTrue(TEXT("Reload preserves live runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+	TestFalse(TEXT("Owner rejection never begins candidate"), ReloadResult.RuntimeResult.bBeginPlayCalled);
+	TestFalse(TEXT("Owner rejection does not open transaction"), ReloadResult.bHostEffectTransactionAttempted);
+	TestEqual(TEXT("Rejected candidate keeps live module"), ReloadSession.GetSnapshot().ModuleId, BeforeReload.ModuleId);
+	TestEqual(TEXT("Rejected candidate keeps scheduler tick state"), ReloadSession.GetSnapshot().TickCallCount, BeforeReload.TickCallCount);
+	TestTrue(TEXT("Live runtime continues ticking after owner rejection"), ReloadSession.Tick(1.0f / 60.0f, TickResult));
+	TestEqual(TEXT("Live runtime tick count advances after owner rejection"), ReloadSession.GetSnapshot().TickCallCount, BeforeReload.TickCallCount + 1);
+
+	FAvidScriptWasmSmokeResult StopResult;
+	ReloadSession.StopAndUnload(StopResult);
 	return true;
 }
 

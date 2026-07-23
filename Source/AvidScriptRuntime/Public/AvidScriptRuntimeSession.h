@@ -75,6 +75,9 @@ private:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
+	bool ValidateExpectedOwner(
+		const FAvidScriptWasmReloadManifest& Manifest,
+		FAvidScriptWasmReloadResult& OutResult) const;
 	bool ActivateValidatedRuntime(
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& CandidateRuntime,
 		const FAvidScriptWasmReloadManifest& Manifest,

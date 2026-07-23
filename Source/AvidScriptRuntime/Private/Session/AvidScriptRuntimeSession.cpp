@@ -5,6 +5,8 @@
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
+#include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
@@ -456,6 +458,11 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 	FAvidScriptWasmReloadResult& OutResult) const
 {
+	if (!ValidateExpectedOwner(Manifest, OutResult))
+	{
+		return false;
+	}
+
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
 	FAvidScriptWasmSmokeResult RuntimeResult;
 
@@ -481,6 +488,70 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	CandidateRuntime->SetHostContext(HostContext);
 	OutResult.RuntimeResult = RuntimeResult;
 	OutRuntime = MoveTemp(CandidateRuntime);
+	return true;
+}
+
+bool FAvidScriptRuntimeSession::ValidateExpectedOwner(
+	const FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmReloadResult& OutResult) const
+{
+	if (!Manifest.BindingPackage.IsValid())
+	{
+		return true;
+	}
+
+	UClass* const ExpectedSelfClass = Manifest.BindingPackage->GetExpectedSelfClass();
+	// Packages without typed Self retain the legacy owner contract.
+	if (ExpectedSelfClass == nullptr)
+	{
+		return true;
+	}
+
+	auto RejectOwner = [&OutResult](const FString& Expected, const FString& Actual, const FString& Reason)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<owner>"),
+			TEXT("runtime_owner_type_mismatch"),
+			FString::Printf(TEXT("expected=%s; actual=%s; reason=%s"), *Expected, *Actual, *Reason),
+			TEXT("bind the script to a live owner that matches its generated Self type"));
+		return false;
+	};
+
+	if (!IsValid(ExpectedSelfClass))
+	{
+		return RejectOwner(TEXT("<invalid_expected_class>"), TEXT("<unresolved>"), TEXT("the package ExpectedSelfClass is invalid"));
+	}
+
+	const FString ExpectedClassName = ExpectedSelfClass->GetName();
+	if (HostContext.ObjectRegistry == nullptr)
+	{
+		return RejectOwner(ExpectedClassName, TEXT("<unresolved:missing_registry>"), TEXT("the host object registry is missing"));
+	}
+
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* const OwnerObject = HostContext.ObjectRegistry->ResolveObject(
+		HostContext.OwnerHandle,
+		ResolveResult,
+		false);
+	if (OwnerObject == nullptr)
+	{
+		const FString ResolveCategory = ResolveResult.ErrorCategory.IsEmpty()
+			? TEXT("unresolved")
+			: ResolveResult.ErrorCategory;
+		return RejectOwner(
+			ExpectedClassName,
+			FString::Printf(TEXT("<unresolved:%s>"), *ResolveCategory),
+			TEXT("the host owner handle cannot be resolved by the active registry"));
+	}
+
+	UClass* const ActualClass = OwnerObject->GetClass();
+	const FString ActualClassName = ActualClass != nullptr ? ActualClass->GetName() : TEXT("<invalid_object_class>");
+	if (ActualClass == nullptr || !OwnerObject->IsA(ExpectedSelfClass))
+	{
+		return RejectOwner(ExpectedClassName, ActualClassName, TEXT("the resolved owner does not satisfy ExpectedSelfClass"));
+	}
+
 	return true;
 }
 
