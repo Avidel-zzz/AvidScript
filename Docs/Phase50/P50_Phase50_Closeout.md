@@ -6,18 +6,32 @@
 
 Phase 50 的目标是为项目自定义 UE 类型建立 typed C# 到 WASM 再到 UE 的闭环：生成 typed `UE.Self`、typed class reference、typed `SpawnActor`、零 crossing upcast、一次 crossing checked downcast，以及自定义 native `UFUNCTION` 的 descriptor 驱动调用。
 
+## 结构门禁预验证身份
+
+本节只记录 Task 12 结构门禁在已提交生产源码上的预验证，不替代正式 Phase Gate：
+
+| 字段 | 实际值 |
+| --- | --- |
+| 验证 commit | `2536f0808fcce8d099011e3a2d138bc5e586d241` |
+| 验证 tree | `2c2566963eeb5712d2d5095c312fda9b89fc75f1` |
+| checker SHA-256 | `2382ec8bedc5d3a0db75b8ed535850a8eb231cb986e9129fc0548b708b8932d2` |
+| 验证环境 | detached clean worktree；所有 architecture 输入与该 tree 一致 |
+| parser / architecture 结果 | 通过 / 通过 |
+
+Task 12 修复提交后的主线 commit/tree 尚未冻结，必须在干净主线提交上再次运行同一脚本，并由正式不可变 Gate evidence 记录最终 commit/tree。该项保持 `Pending`。
+
 ## 验收映射
 
 | 验收项 | 实现范围 | 代码/审查线索 | 最终 Gate 证据 | 状态 |
 | --- | --- | --- | --- | --- |
 | typed `UE.Self` | Task 1、4、7 | `507e80a`、`7dc47d9`、`32dfdd3`；Task 4/7 review | 待填不可变 Gate evidence | Pending |
 | descriptor v6 类型图与 identity | Task 2、3 | `c76a32f`、`91fd8fe`；Task 2/3 review | 待填不可变 Gate evidence | Pending |
-| typed Blueprint Spawn | Task 4、9、10 | `7dc47d9`、`dd7cef0`；Task 9 review | 待填集成 Automation evidence | Pending |
-| 自定义 native `UFUNCTION` 闭环 | Task 9、10 | `dd7cef0`、`0572d75`；Task 9 review | 待填真实 C#/WASM/WAMR/UE evidence | Pending |
-| upcast 为零 Host crossing | Task 4、5、10 | `7dc47d9`、`8ac988b`；Task 5 review | 待填 Guest IR/WASM import evidence | Pending |
-| checked downcast 为一次 Host crossing | Task 6、7、10 | `a92b895`、`c94861b`；Task 6/7 review | 待填 WAMR success/mismatch evidence | Pending |
-| wrong owner 在 BeginPlay 前拒绝 | Task 8、10 | `9a9547e`；Task 8 review | 待填 Automation callback evidence | Pending |
-| 拒绝 reload 后旧 Runtime 保活 | Task 8、10 | `9a9547e`；Task 8 review | 待填 Automation scheduler/Tick evidence | Pending |
+| typed Blueprint Spawn | Task 4、9、10 | `7dc47d9`、`dd7cef0`、`2536f08`；Task 9 review，Task 10 review 待填 | 待填集成 Automation evidence | Pending |
+| 自定义 native `UFUNCTION` 闭环 | Task 9、10 | `dd7cef0`、`0572d75`、`2536f08`；Task 9 review，Task 10 review 待填 | 待填真实 C#/WASM/WAMR/UE evidence | Pending |
+| upcast 为零 Host crossing | Task 4、5、10 | `7dc47d9`、`8ac988b`、`2536f08`；Task 5 review，Task 10 review 待填 | 待填 Guest IR/WASM import evidence | Pending |
+| checked downcast 为一次 Host crossing | Task 6、7、10 | `a92b895`、`c94861b`、`2536f08`；Task 6/7 review，Task 10 review 待填 | 待填 WAMR success/mismatch evidence | Pending |
+| wrong owner 在 BeginPlay 前拒绝 | Task 8、10 | `9a9547e`、`2536f08`；Task 8 review，Task 10 review 待填 | 待填 Automation callback evidence | Pending |
+| 拒绝 reload 后旧 Runtime 保活 | Task 8、10 | `9a9547e`、`2536f08`；Task 8 review，Task 10 review 待填 | 待填 Automation scheduler/Tick evidence | Pending |
 | warm path 无 class load/path lookup | Task 3、6、11 | `1971539`、`0724a7b`；Task 6/11 review | 待填 benchmark 采样与复核 | Pending |
 | 无项目专用 wrapper | Task 2、9、12 | `Build/CheckAvidScriptArchitecture.ps1` | 待填 architecture gate output | Pending |
 | 中文样例、性能说明与收尾文档 | Task 10、11、12 | `0724a7b`；Task 11 review | 待填文档审查和 Gate evidence | Pending |
@@ -30,7 +44,7 @@ Phase 50 的目标是为项目自定义 UE 类型建立 typed C# 到 WASM 再到
 | --- | --- | --- | --- |
 | PowerShell parser | 所有 tracked `.ps1` 经过 `Parser.ParseFile` | Pending | 待 Gate 写入 |
 | .NET 合同与格式 | 固定 SDK `8.0.416`，共享 project graph 串行执行 | Pending | 待 Gate 写入 |
-| 架构门禁 | `Build/CheckAvidScriptArchitecture.ps1` | Pending，本次仅执行脚本自检 | 待 Gate 写入 |
+| 架构门禁 | `Build/CheckAvidScriptArchitecture.ps1` | 结构预验证通过；正式 Gate Pending | 待冻结主线重跑并写入不可变 evidence |
 | UE5.8 no-clean UBT | 最终四模块 scoped build | Pending，未执行 | 待 Gate 写入 |
 | 完整 Automation | `Automation RunTests AvidScript` | Pending，未执行 | 待 Gate 写入 |
 | 性能 benchmark | typed dispatch 同机采样、回退判定 | Pending，未执行 | 待 Gate 写入 |

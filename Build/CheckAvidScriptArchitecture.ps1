@@ -5,6 +5,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $PluginRoot = [System.IO.Path]::GetFullPath($PluginRoot)
 $Violations = [System.Collections.Generic.List[string]]::new()
+$ArchitectureEvidencePaths = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase)
 
 function Add-Violation {
     param([string]$Message)
@@ -13,12 +15,96 @@ function Add-Violation {
 
 function Read-RequiredFile {
     param([string]$RelativePath)
+    [void]$ArchitectureEvidencePaths.Add($RelativePath.Replace('\', '/'))
     $Path = Join-Path $PluginRoot $RelativePath
     if (-not [System.IO.File]::Exists($Path)) {
         Add-Violation "missing required architecture file: $RelativePath"
         return ''
     }
     return [System.IO.File]::ReadAllText($Path)
+}
+
+function Get-SourceSlice {
+    param(
+        [string]$Source,
+        [string]$StartToken,
+        [string]$EndToken,
+        [string]$Description
+    )
+
+    $StartIndex = $Source.IndexOf($StartToken, [System.StringComparison]::Ordinal)
+    if ($StartIndex -lt 0) {
+        Add-Violation "$Description start token is missing: $StartToken"
+        return ''
+    }
+    $EndIndex = $Source.IndexOf(
+        $EndToken,
+        $StartIndex + $StartToken.Length,
+        [System.StringComparison]::Ordinal)
+    if ($EndIndex -lt 0) {
+        Add-Violation "$Description end token is missing: $EndToken"
+        return ''
+    }
+    return $Source.Substring($StartIndex, $EndIndex - $StartIndex)
+}
+
+function Test-RequiredTokenSequence {
+    param(
+        [string]$Source,
+        [string[]]$Tokens,
+        [string]$Description
+    )
+
+    $Cursor = 0
+    foreach ($Token in $Tokens) {
+        $TokenIndex = $Source.IndexOf($Token, $Cursor, [System.StringComparison]::Ordinal)
+        if ($TokenIndex -lt 0) {
+            Add-Violation "$Description is missing ordered token: $Token"
+            return
+        }
+        $Cursor = $TokenIndex + $Token.Length
+    }
+}
+
+function Test-NativeSymbolAllowlist {
+    param(
+        [string]$InitializerSource,
+        [string[]]$ExpectedNames,
+        [string]$Description
+    )
+
+    $Matches = [regex]::Matches(
+        $InitializerSource,
+        '\{\s*"(?<name>[a-z0-9_]+)"\s*,\s*reinterpret_cast<void\*>\((?<function>[A-Za-z0-9_]+)\)\s*,\s*"(?<signature>[^"]+)"\s*,\s*nullptr\s*\}')
+    $ActualNames = @($Matches | ForEach-Object { $_.Groups['name'].Value })
+    $MissingNames = @($ExpectedNames | Where-Object { $ActualNames -notcontains $_ })
+    $UnexpectedNames = @($ActualNames | Where-Object { $ExpectedNames -notcontains $_ })
+    $DuplicateNames = @(
+        $ActualNames
+        | Group-Object
+        | Where-Object { $_.Count -ne 1 }
+        | ForEach-Object { $_.Name })
+    if ($MissingNames.Count -gt 0 -or
+        $UnexpectedNames.Count -gt 0 -or
+        $DuplicateNames.Count -gt 0 -or
+        $ActualNames.Count -ne $ExpectedNames.Count) {
+        $AllowlistViolation = "$Description differs from the static host import allowlist" `
+            + " | missing=$($MissingNames -join ',')" `
+            + " | unexpected=$($UnexpectedNames -join ',')" `
+            + " | duplicate=$($DuplicateNames -join ',')"
+        Add-Violation $AllowlistViolation
+    }
+}
+
+$ArchitectureScriptPath = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
+$PluginRootPrefix = $PluginRoot.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if ($ArchitectureScriptPath.StartsWith(
+    $PluginRootPrefix,
+    [System.StringComparison]::OrdinalIgnoreCase)) {
+    [void]$ArchitectureEvidencePaths.Add(
+        [System.IO.Path]::GetRelativePath($PluginRoot, $ArchitectureScriptPath).Replace('\', '/'))
 }
 
 function Test-SourceTreeForbiddenPattern {
@@ -149,6 +235,7 @@ foreach ($ForbiddenVmDiagnosticConcern in @('CSharp', 'SemanticSpan', 'SourcePat
     }
 }
 $VmHostBindingsSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'
+$VmDynamicRegistrySource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'
 foreach ($RequiredVmPrimitive in @('TranslateGuestRange', 'actor_get_transform_batch')) {
     if (-not $VmHostBindingsSource.Contains($RequiredVmPrimitive)) {
         Add-Violation "VM guest-memory adapter is missing $RequiredVmPrimitive"
@@ -824,84 +911,321 @@ if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
     Add-Violation 'property runtime and renderer must stay data-driven without per-property API switches'
 }
 
-# Phase 50 typed-project API contracts. These tokens intentionally come from the
-# production paths rather than the test fixture, so a project-specific shortcut
-# cannot satisfy the gate.
-foreach ($RequiredTypedObjectCapability in @(
-    'EAvidScriptBindingInvocationKind::ObjectTypeIsA',
-    'avid_object_type_is_a',
-    'TEXT("avidscript")',
-    'TEXT("(iii)i")'
-)) {
-    if (-not $ObjectTypeBindingSource.Contains($RequiredTypedObjectCapability)) {
-        Add-Violation "typed object capability specification is missing $RequiredTypedObjectCapability"
-    }
-}
-foreach ($RequiredPackedOwnerCapability in @(
-    'avid_owner_get_handle',
-    '"()I"',
-    'ModuleName == TEXT("avidscript")'
-)) {
-    if (-not $VmHostBindingsSource.Contains($RequiredPackedOwnerCapability)) {
-        Add-Violation "packed typed owner capability is missing $RequiredPackedOwnerCapability"
-    }
-}
+# Phase 50 typed-project API contracts are checked inside their production
+# builders, initializers, and dispatch closure. Test fixtures and comments cannot
+# satisfy these checks.
 foreach ($RequiredTypedDescriptorField in @('ObjectTypeOrdinal', 'SelfTypeId', 'ResultTypeId')) {
     if (-not $BindingDescriptorHeader.Contains($RequiredTypedDescriptorField)) {
         Add-Violation "binding descriptor v6 model is missing $RequiredTypedDescriptorField"
     }
 }
+
+$DescriptorSelectionIdentitySource = Get-SourceSlice `
+    $BindingDescriptorSource `
+    'FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(' `
+    'FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(' `
+    'descriptor selection identity builder'
+$DescriptorPackageIdentitySource = Get-SourceSlice `
+    $BindingDescriptorSource `
+    'FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(' `
+    'bool FAvidScriptBindingDescriptorParser::Parse(' `
+    'descriptor package identity builder'
+$DescriptorGenerationSource = Get-SourceSlice `
+    $BindingDescriptorGeneratorSource `
+    'bool GenerateBindingDescriptor(' `
+    '} // namespace' `
+    'descriptor canonical generation path'
+
+Test-RequiredTokenSequence $DescriptorSelectionIdentitySource @(
+    'SelectionKeys.Sort(',
+    'TEXT("descriptor_selection_v6")',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);',
+    'TEXT("object_type_ordinal")',
+    'FString::FromInt(Type.ObjectTypeOrdinal)',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("object_class_path"), Type.ClassPath);',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("object_base_type_id"), Type.BaseTypeId);',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);',
+    'return FAvidScriptHash::Sha256HexUtf8(Identity);'
+) 'descriptor v6 selection canonical builder'
+Test-RequiredTokenSequence $DescriptorPackageIdentitySource @(
+    'TEXT("descriptor_package_v6")',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);',
+    'TEXT("object_type_ordinal")',
+    'FString::FromInt(Type.ObjectTypeOrdinal)',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("object_class_path"), Type.ClassPath);',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("object_base_type_id"), Type.BaseTypeId);',
+    'AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);',
+    'return FAvidScriptHash::Sha256HexUtf8(Identity);'
+) 'descriptor v6 package canonical builder'
+Test-RequiredTokenSequence $DescriptorGenerationSource @(
+    'Bindings.Sort(',
+    'Package.ClassReferences.Sort(',
+    'Package.Types.Sort(',
+    'Package.SelfTypeId = SelfNode->TypeId;',
+    'Reference.ResultTypeId = ResultNode->TypeId;',
+    'Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);',
+    'Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);'
+) 'descriptor stable ordering and hash publication path'
+
+$DescriptorLoadSource = Get-SourceSlice `
+    $BindingInvocationSource `
+    'bool FAvidScriptBindingPackage::LoadDescriptor(' `
+    'const FString& FAvidScriptBindingPackage::GetPackageName() const' `
+    'binding package descriptor activation'
 foreach ($RequiredObjectPlanContract in @(
     'Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal]',
     'Model.SelfTypeId',
     'Reference.ResultTypeId',
     'Package->Impl->ExpectedSelfClass'
 )) {
-    if (-not $BindingInvocationSource.Contains($RequiredObjectPlanContract)) {
+    if (-not $DescriptorLoadSource.Contains($RequiredObjectPlanContract)) {
         Add-Violation "typed object package activation is missing $RequiredObjectPlanContract"
     }
 }
-foreach ($RequiredDescriptorSelectionIdentity in @(
-    'descriptor_selection_v6',
-    'self_type_id',
-    'object_type_ordinal',
-    'object_class_path',
-    'object_base_type_id',
-    'result_type_id'
-)) {
-    if (-not $BindingDescriptorSource.Contains($RequiredDescriptorSelectionIdentity)) {
-        Add-Violation "descriptor v6 selection identity is missing $RequiredDescriptorSelectionIdentity"
-    }
-}
-foreach ($RequiredDescriptorPackageIdentity in @(
-    'descriptor_package_v6',
-    'TEXT("self_type_id")',
-    'TEXT("object_type_ordinal")',
-    'TEXT("object_class_path")',
-    'TEXT("object_base_type_id")',
-    'TEXT("result_type_id")'
-)) {
-    if (-not $BindingDescriptorSource.Contains($RequiredDescriptorPackageIdentity)) {
-        Add-Violation "descriptor v6 package identity is missing $RequiredDescriptorPackageIdentity"
-    }
-}
-if (-not $CSharpOperationLowererSource.Contains('operation.Conversion.IsUserDefined') -or
-    -not $CSharpOperationLowererSource.Contains('operation.Conversion.MethodSymbolId')) {
-    Add-Violation 'C# lowering must preserve SemanticConversion.IsUserDefined as a callable conversion'
+
+$ObjectTypeSpecFactorySource = Get-SourceSlice `
+    $ObjectTypeBindingSource `
+    'FAvidScriptObjectTypeBindingSpec MakeObjectTypeSpec(' `
+    '} // namespace' `
+    'object type capability initializer'
+$ObjectTypeSpecsSource = Get-SourceSlice `
+    ($ObjectTypeBindingSource + "`n<AVIDSCRIPT_EOF>") `
+    'TConstArrayView<FAvidScriptObjectTypeBindingSpec> FAvidScriptObjectTypeBindings::GetSpecs()' `
+    '<AVIDSCRIPT_EOF>' `
+    'object type capability table'
+Test-RequiredTokenSequence $ObjectTypeSpecFactorySource @(
+    'Spec.Kind = Kind;',
+    'Spec.ModuleName = TEXT("avidscript");',
+    'Spec.ImportName = ImportName;',
+    'Spec.Signature = Signature;',
+    'return Spec;'
+) 'object type capability initializer'
+if (-not [regex]::IsMatch(
+    $ObjectTypeSpecsSource,
+    'MakeObjectTypeSpec\(\s*EAvidScriptBindingInvocationKind::ObjectTypeIsA,\s*TEXT\("avidscript\.object_type\.v1\|is_a\|object_handle,object_type_ordinal->i32"\),\s*TEXT\("avid_object_type_is_a"\),\s*TEXT\("\(iii\)i"\)\s*\)')) {
+    Add-Violation 'object type capability must bind kind, identity, avid_object_type_is_a, and (iii)i in one initializer record'
 }
 
-# The generated facade must remain generic. Test/project class names and a
-# bespoke typed import would turn descriptor-driven coverage back into wrappers.
-if ($CSharpBindingRendererSource -match 'AAvidScriptTypedTest(?:Actor|Projectile)|TypedProjectApi' -or
-    $VmHostBindingsSource -match '(?i)avid_(?:typed|project|custom)_[a-z0-9_]+') {
-    Add-Violation 'typed project API must not add a project-specific facade wrapper or custom-class host import'
+$OwnerGetHandleSource = Get-SourceSlice `
+    $VmHostBindingsSource `
+    'int64_t OwnerGetHandle(' `
+    'int32_t TimerSetOnce(' `
+    'packed owner host function'
+$CanonicalNativeSymbolsSource = Get-SourceSlice `
+    $VmHostBindingsSource `
+    'NativeSymbol GNativeSymbols[] = {' `
+    'NativeSymbol GCompatibilityNativeSymbols[] = {' `
+    'canonical WAMR native symbol initializer'
+$CompatibilityNativeSymbolsSource = Get-SourceSlice `
+    $VmHostBindingsSource `
+    'NativeSymbol GCompatibilityNativeSymbols[] = {' `
+    '#endif' `
+    'compatibility WAMR native symbol initializer'
+$StaticHostImportPolicySource = Get-SourceSlice `
+    $VmHostBindingsSource `
+    'bool IsAvidScriptWamrStaticHostImport(' `
+    'bool RegisterAvidScriptWamrHostBindings()' `
+    'static host import policy'
+$StaticHostRegistrationSource = Get-SourceSlice `
+    $VmHostBindingsSource `
+    'bool RegisterAvidScriptWamrHostBindings()' `
+    'void UnregisterAvidScriptWamrHostBindings()' `
+    'static host import registration'
+
+$CanonicalStaticImportNames = @(
+    'host_add_i32',
+    'host_fail_i32',
+    'actor_get_location',
+    'actor_set_location',
+    'actor_add_location_offset',
+    'actor_get_rotation',
+    'actor_set_rotation',
+    'actor_get_scale',
+    'actor_set_scale',
+    'actor_get_transform_batch',
+    'actor_get_root_component',
+    'scene_component_get_world_location',
+    'scene_component_set_world_location',
+    'owner_get_slot',
+    'owner_get_generation',
+    'avid_owner_get_handle',
+    'timer_set_once',
+    'timer_cancel'
+)
+$CompatibilityStaticImportNames = @(
+    $CanonicalStaticImportNames | Where-Object { $_ -ne 'avid_owner_get_handle' })
+Test-NativeSymbolAllowlist `
+    $CanonicalNativeSymbolsSource `
+    $CanonicalStaticImportNames `
+    'canonical WAMR native symbols'
+Test-NativeSymbolAllowlist `
+    $CompatibilityNativeSymbolsSource `
+    $CompatibilityStaticImportNames `
+    'compatibility WAMR native symbols'
+Test-RequiredTokenSequence $OwnerGetHandleSource @(
+    'Call.BindingId = EAvidScriptHostBindingId::OwnerGetHandle;',
+    'Dispatch(ExecEnv, "avid_owner_get_handle", Call, Result)',
+    'Result.ReturnValueI64'
+) 'packed owner host function'
+$RuntimeOwnerHandleSource = Get-SourceSlice `
+    $RuntimeSource `
+    'int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()' `
+    'int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(' `
+    'packed owner runtime handler'
+$RuntimeHostDispatchSource = Get-SourceSlice `
+    ($RuntimeSource + "`n<AVIDSCRIPT_EOF>") `
+    'bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(' `
+    '<AVIDSCRIPT_EOF>' `
+    'runtime static host dispatch'
+Test-RequiredTokenSequence $RuntimeOwnerHandleSource @(
+    'const FAvidScriptObjectHandle OwnerHandle = HostContext.OwnerHandle;',
+    'const uint64 PackedHandle = static_cast<uint64>(OwnerHandle.Slot)',
+    '(static_cast<uint64>(OwnerHandle.Generation) << 32)',
+    'return static_cast<int64>(PackedHandle);'
+) 'packed owner runtime handler'
+Test-RequiredTokenSequence $RuntimeHostDispatchSource @(
+    'case EAvidScriptHostBindingId::OwnerGetHandle:',
+    'const int64 Value = HandleOwnerGetHandleImport();',
+    'return FinishI64(Value, Value != 0);'
+) 'packed owner runtime dispatch'
+if (-not $CanonicalNativeSymbolsSource.Contains(
+    '{ "avid_owner_get_handle", reinterpret_cast<void*>(OwnerGetHandle), "()I", nullptr }')) {
+    Add-Violation 'packed owner name, function, and signature must share one canonical NativeSymbol initializer'
+}
+if (-not $VmHostBindingsSource.Contains('constexpr const char* CanonicalModuleName = "avidscript";') -or
+    -not $StaticHostRegistrationSource.Contains(
+        'wasm_runtime_register_natives(CanonicalModuleName, GNativeSymbols, UE_ARRAY_COUNT(GNativeSymbols))') -or
+    -not $StaticHostImportPolicySource.Contains(
+        'ModuleName == TEXT("avidscript") && ImportName == TEXT("avid_owner_get_handle")')) {
+    Add-Violation 'packed owner initializer must register only in canonical avidscript module and match static import policy'
+}
+
+$ExpectedCapabilityImportNames = @(
+    'avid_object_spawn_actor',
+    'avid_object_destroy_actor',
+    'avid_object_is_a',
+    'avid_object_type_is_a'
+)
+$CapabilityImportNames = @(
+    [regex]::Matches(
+        $ObjectLifecycleBindingSource + "`n" + $ObjectTypeBindingSource,
+        'TEXT\("(?<name>avid_[a-z0-9_]+)"\)')
+    | ForEach-Object { $_.Groups['name'].Value }
+    | Sort-Object -Unique)
+$UnexpectedCapabilityImportNames = @(
+    $CapabilityImportNames | Where-Object { $ExpectedCapabilityImportNames -notcontains $_ })
+$MissingCapabilityImportNames = @(
+    $ExpectedCapabilityImportNames | Where-Object { $CapabilityImportNames -notcontains $_ })
+if ($UnexpectedCapabilityImportNames.Count -gt 0 -or
+    $MissingCapabilityImportNames.Count -gt 0 -or
+    $CapabilityImportNames.Count -ne $ExpectedCapabilityImportNames.Count) {
+    $CapabilityAllowlistViolation = 'descriptor capability imports differ from the generic allowlist' `
+        + " | missing=$($MissingCapabilityImportNames -join ',')" `
+        + " | unexpected=$($UnexpectedCapabilityImportNames -join ',')"
+    Add-Violation $CapabilityAllowlistViolation
+}
+$GeneratedBindingImportLiterals = @(
+    [regex]::Matches($BindingDescriptorGeneratorSource, 'TEXT\("(?<name>avid_[a-z0-9_]*)"\)')
+    | ForEach-Object { $_.Groups['name'].Value }
+    | Sort-Object -Unique)
+if ($GeneratedBindingImportLiterals.Count -ne 1 -or
+    $GeneratedBindingImportLiterals[0] -cne 'avid_ue_') {
+    Add-Violation 'reflected project imports must use only the descriptor-derived avid_ue_<stable-id> namespace'
+}
+foreach ($RequiredDynamicRegistryContract in @(
+    'Import.ModuleName != TEXT("avidscript")',
+    'IsAvidScriptDynamicSafeToken(Import.ImportName)',
+    'IsAvidScriptWamrStaticHostImport(Import.ModuleName, Import.ImportName)',
+    'InvokeAvidScriptDynamicRawImport'
+)) {
+    if (-not $VmDynamicRegistrySource.Contains($RequiredDynamicRegistryContract)) {
+        Add-Violation "dynamic host registry is missing generic package contract $RequiredDynamicRegistryContract"
+    }
+}
+
+$RenderMethodSource = Get-SourceSlice `
+    $CSharpBindingRendererSource `
+    'bool RenderMethod(' `
+    'bool RenderPropertyGetter(' `
+    'generated C# method renderer'
+$RenderPropertySource = Get-SourceSlice `
+    $CSharpBindingRendererSource `
+    'bool RenderPropertyGetter(' `
+    'void AppendVector(' `
+    'generated C# property renderer'
+$EmitReferenceSource = Get-SourceSlice `
+    $CSharpBindingRendererSource `
+    'bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(' `
+    'bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(' `
+    'generated C# facade publisher'
+foreach ($GenericRendererSource in @($RenderMethodSource, $RenderPropertySource)) {
+    if (-not $GenericRendererSource.Contains('*EscapeCSharpString(Binding.HostImport.Module)') -or
+        -not $GenericRendererSource.Contains('*EscapeCSharpString(Binding.HostImport.Name)')) {
+        Add-Violation 'project method/property wrappers must derive imports from descriptor HostImport records'
+    }
+}
+foreach ($RequiredGenericFacadeContract in @(
+    'for (const FAvidScriptBindingTypeModel* Type : ObjectTypes)',
+    'AppendObjectHandleProxy(',
+    'for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)',
+    '*EscapeCSharpString(Spec.ModuleName)',
+    '*EscapeCSharpString(Spec.ImportName)'
+)) {
+    if (-not $EmitReferenceSource.Contains($RequiredGenericFacadeContract)) {
+        Add-Violation "typed facade must remain descriptor/spec driven: $RequiredGenericFacadeContract"
+    }
+}
+$AllowedFixedRendererImports = @(
+    'avid_owner_get_handle',
+    'avid_object_type_is_a',
+    'timer_set_once',
+    'timer_cancel'
+)
+$FixedRendererImports = @(
+    [regex]::Matches(
+        $CSharpBindingRendererSource,
+        'EntryPoint = \\"(?<name>[a-z0-9_]+)\\"')
+    | ForEach-Object { $_.Groups['name'].Value }
+    | Sort-Object -Unique)
+$UnexpectedFixedRendererImports = @(
+    $FixedRendererImports | Where-Object { $AllowedFixedRendererImports -notcontains $_ })
+$MissingFixedRendererImports = @(
+    $AllowedFixedRendererImports | Where-Object { $FixedRendererImports -notcontains $_ })
+if ($UnexpectedFixedRendererImports.Count -gt 0 -or
+    $MissingFixedRendererImports.Count -gt 0 -or
+    $FixedRendererImports.Count -ne $AllowedFixedRendererImports.Count) {
+    $RendererAllowlistViolation = 'renderer fixed imports differ from the generic facade allowlist' `
+        + " | missing=$($MissingFixedRendererImports -join ',')" `
+        + " | unexpected=$($UnexpectedFixedRendererImports -join ',')"
+    Add-Violation $RendererAllowlistViolation
+}
+$AllowedLiteralFacadeStructs = @(
+    'FVector',
+    'FRotator',
+    'FTransform',
+    'InputEvent',
+    'TSubclassOfAActor'
+)
+$LiteralFacadeStructs = @(
+    [regex]::Matches(
+        $CSharpBindingRendererSource,
+        'TEXT\("public readonly struct (?<name>[A-Za-z0-9_]+)"\)')
+    | ForEach-Object { $_.Groups['name'].Value }
+    | Sort-Object -Unique)
+$UnexpectedLiteralFacadeStructs = @(
+    $LiteralFacadeStructs | Where-Object { $AllowedLiteralFacadeStructs -notcontains $_ })
+if ($UnexpectedLiteralFacadeStructs.Count -gt 0) {
+    $FacadeStructViolation = 'renderer contains a hard-coded project wrapper instead of a descriptor-derived object handle' `
+        + " | unexpected=$($UnexpectedLiteralFacadeStructs -join ',')"
+    Add-Violation $FacadeStructViolation
 }
 foreach ($RequiredStaticCheckedCastContract in @(
     'public static %s TryCast(%s value)',
     'AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, %d)',
     'internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);'
 )) {
-    if (-not $CSharpBindingRendererSource.Contains($RequiredStaticCheckedCastContract)) {
+    if (-not $EmitReferenceSource.Contains($RequiredStaticCheckedCastContract) -and
+        -not $CSharpBindingRendererSource.Contains($RequiredStaticCheckedCastContract)) {
         Add-Violation "typed facade is missing static Derived.TryCast(Base) contract $RequiredStaticCheckedCastContract"
     }
 }
@@ -909,27 +1233,68 @@ if ($CSharpBindingRendererSource.Contains('public %s TryCast()')) {
     Add-Violation 'typed facade must not regress to the obsolete inverse instance TryCast shape'
 }
 
-$ObjectTypeDispatchMatch = [regex]::Match(
-    $BindingInvocationSource,
-    'bool\s+DispatchAvidScriptObjectType\([\s\S]*?\r?\n\}\s*// namespace\r?\n\r?\nstruct\s+FAvidScriptBindingPackage::FImpl')
-if (-not $ObjectTypeDispatchMatch.Success) {
-    Add-Violation 'checked object-type dispatch implementation is missing'
-}
-else {
-    $ObjectTypeDispatchSource = $ObjectTypeDispatchMatch.Value
-    foreach ($ForbiddenCheckedCastLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
-        if ($ObjectTypeDispatchSource.Contains($ForbiddenCheckedCastLookup)) {
-            Add-Violation "checked object-type dispatch must use the immutable ordinal plan instead of $ForbiddenCheckedCastLookup"
-        }
+$ConversionFunctionSource = Get-SourceSlice `
+    $CSharpOperationLowererSource `
+    'private static GuestRegister? LowerConversion(' `
+    'private static GuestRegister? LowerFieldLoad(' `
+    'C# conversion lowering function'
+$UserDefinedConversionSource = Get-SourceSlice `
+    $ConversionFunctionSource `
+    'if (operation.Conversion.IsUserDefined)' `
+    'GuestRegister? result = context.CreateTemporary(' `
+    'C# user-defined conversion branch'
+Test-RequiredTokenSequence $UserDefinedConversionSource @(
+    'if (operation.Conversion.IsUserDefined)',
+    'operation.Conversion.MethodSymbolId',
+    'context.TryGetCallTarget(',
+    '!callable.IsStatic',
+    'callable.IsConstructor',
+    '!callable.HasBody',
+    'callable.Import is not null',
+    'callable.Parameters.Count != 1',
+    'callable.Parameters[0].RefKind',
+    'callable.Parameters[0].TypeId',
+    'callable.ReturnTypeId',
+    'return EmitCall('
+) 'validated SemanticConversion.IsUserDefined to Guest EmitCall path'
+
+$ObjectTypeDispatchSource = Get-SourceSlice `
+    $BindingInvocationSource `
+    'bool DispatchAvidScriptObjectType(' `
+    '} // namespace' `
+    'checked object type dispatch'
+$ObjectRegistryResolveSource = Get-SourceSlice `
+    $ObjectRegistrySource `
+    'UObject* FAvidScriptObjectRegistry::ResolveObject(' `
+    'bool FAvidScriptObjectRegistry::ReleaseHandle(' `
+    'object registry UObject resolver'
+$ObjectTypePlanResolveSource = Get-SourceSlice `
+    $BindingInvocationSource `
+    'bool FAvidScriptBindingPackage::TryResolveObjectType(' `
+    'UClass* FAvidScriptBindingPackage::GetExpectedSelfClass() const' `
+    'cached object type plan resolver'
+$TypedCastDispatchClosure = $ObjectTypeDispatchSource `
+    + "`n" + $ObjectRegistryResolveSource `
+    + "`n" + $ObjectTypePlanResolveSource
+foreach ($ForbiddenCheckedCastLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
+    if ($TypedCastDispatchClosure.Contains($ForbiddenCheckedCastLookup)) {
+        Add-Violation "typed cast dispatch/helper closure must use cached plans instead of $ForbiddenCheckedCastLookup"
     }
-    if ($ObjectTypeDispatchSource -match '\bAActor\b' -or
-        -not $ObjectTypeDispatchSource.Contains('UObject* Object') -or
-        -not $ObjectTypeDispatchSource.Contains('Object->IsA(CachedClass)')) {
-        Add-Violation 'checked object-type dispatch must remain generic UObject dispatch rather than Actor-only dispatch'
+}
+foreach ($RequiredGenericDispatchContract in @(
+    'UObject* Object = Context.ObjectRegistry->ResolveObject(Handle, ResolveResult, false);',
+    'Package.TryResolveObjectType(static_cast<uint32>(Call.Arguments[2]), CachedClass)',
+    'Object->IsA(CachedClass)'
+)) {
+    if (-not $ObjectTypeDispatchSource.Contains($RequiredGenericDispatchContract)) {
+        Add-Violation "checked object type dispatch is missing UObject/cached-plan contract $RequiredGenericDispatchContract"
     }
 }
-if ($WasmRuntimeSource -match '\b(FindObject|LoadObject|StaticLoadObject)\s*(?:<|\()') {
-    Add-Violation 'Runtime must not perform path lookup for typed checked casts; Binding package activation owns class resolution'
+if ($ObjectTypeDispatchSource -match '\bAActor\b' -or
+    -not $ObjectRegistryResolveSource.Contains('UObject* FAvidScriptObjectRegistry::ResolveObject(') -or
+    -not $ObjectRegistryResolveSource.Contains('UObject* Object = Slot.Object.Get();') -or
+    -not $ObjectTypePlanResolveSource.Contains('UClass*& OutClass')) {
+    Add-Violation 'checked object type dispatch and direct helpers must preserve UObject input and UClass plan contracts'
 }
 $CSharpWorkspaceHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorCSharpWorkspaceService.h'
 $CSharpWorkspaceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpWorkspace/AvidScriptEditorCSharpWorkspaceService.cpp'
@@ -1619,6 +1984,60 @@ else {
         }
     }
 }
+
+$EvidenceCommitOutput = @(& git -C $PluginRoot rev-parse HEAD 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Add-Violation 'architecture evidence requires a readable Git HEAD commit'
+    $EvidenceCommit = 'unavailable'
+}
+else {
+    $EvidenceCommit = ($EvidenceCommitOutput -join '').Trim()
+}
+$EvidenceTreeOutput = @(& git -C $PluginRoot rev-parse 'HEAD^{tree}' 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Add-Violation 'architecture evidence requires a readable Git HEAD tree'
+    $EvidenceTree = 'unavailable'
+}
+else {
+    $EvidenceTree = ($EvidenceTreeOutput -join '').Trim()
+}
+$TrackedDirtyOutput = @(& git -C $PluginRoot diff --name-only HEAD -- 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Add-Violation 'architecture evidence could not inspect tracked worktree changes'
+    $TrackedDirtyOutput = @()
+}
+$UntrackedOutput = @(& git -C $PluginRoot ls-files --others --exclude-standard 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Add-Violation 'architecture evidence could not inspect untracked worktree inputs'
+    $UntrackedOutput = @()
+}
+$DirtyArchitectureInputs = [System.Collections.Generic.List[string]]::new()
+foreach ($DirtyPath in @($TrackedDirtyOutput) + @($UntrackedOutput)) {
+    $NormalizedDirtyPath = ([string]$DirtyPath).Trim().Replace('\', '/')
+    if ($ArchitectureEvidencePaths.Contains($NormalizedDirtyPath)) {
+        $DirtyArchitectureInputs.Add($NormalizedDirtyPath)
+    }
+}
+if ($DirtyArchitectureInputs.Count -gt 0) {
+    $DirtyEvidenceViolation = 'architecture evidence inputs differ from the reported Git tree: ' `
+        + ($DirtyArchitectureInputs -join ', ')
+    Add-Violation $DirtyEvidenceViolation
+}
+$CheckerSha256Algorithm = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $CheckerSha256 = [System.BitConverter]::ToString(
+        $CheckerSha256Algorithm.ComputeHash(
+            [System.IO.File]::ReadAllBytes($ArchitectureScriptPath))).Replace('-', '').ToLowerInvariant()
+}
+finally {
+    $CheckerSha256Algorithm.Dispose()
+}
+
+Write-Host "Evidence commit: $EvidenceCommit"
+Write-Host "Evidence tree: $EvidenceTree"
+Write-Host "Evidence checker SHA-256: $CheckerSha256"
+$EvidenceInputState = if ($DirtyArchitectureInputs.Count -eq 0) { 'clean' } else { 'dirty' }
+Write-Host "Evidence architecture inputs: $EvidenceInputState"
 
 if ($Violations.Count -gt 0) {
     Write-Host "AvidScript architecture check failed with $($Violations.Count) violation(s):"
