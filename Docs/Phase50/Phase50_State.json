@@ -31,9 +31,9 @@
     },
     {
       "id": "P50.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "UE Automation AvidScript.Architecture.Session.TypedOwnerValidation: 1/1 Success; process/test exit 0; log Saved/Logs/AvidScript_P50_TypedOwner.log; UBT no-clean four-module build succeeded in C:/tmp/AvidScript_P50_UBT2.log",
+      "completed_at_utc": "2026-07-23T21:46:49.5219310+00:00"
     },
     {
       "id": "P50.4",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "batch-complete -Phase 50 -BatchId P50.3 -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-07-23T20:23:29.2528974+00:00"
+  "next_action": "batch-complete -Phase 50 -BatchId P50.4 -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-07-23T21:46:49.5245300+00:00"
 }
