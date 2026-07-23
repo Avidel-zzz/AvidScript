@@ -4,13 +4,18 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "Algo/Reverse.h"
+#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -62,7 +67,166 @@ bool IsLowerHexSha256(const FString& Value)
 	}
 	return true;
 }
+
+const FAvidScriptEditorObjectTypeNode* FindObjectTypeNode(
+	const FAvidScriptEditorObjectTypeGraph& Graph,
+	const UClass* Class)
+{
+	const FString CanonicalClassPath = Class->GetPathName();
+	return Graph.Nodes.FindByPredicate([&CanonicalClassPath](const FAvidScriptEditorObjectTypeNode& Node)
+	{
+		return Node.CanonicalClassPath == CanonicalClassPath;
+	});
+}
+
+UClass* MakeDuplicateShortNameObjectTypeClass(const TCHAR* ModulePath)
+{
+	UPackage* Package = CreatePackage(ModulePath);
+	UClass* Class = NewObject<UClass>(Package, TEXT("AvidScriptObjectTypeGraphDuplicate"), RF_Transient);
+	Class->SetSuperStruct(UObject::StaticClass());
+	return Class;
+}
+
+bool AreObjectTypeGraphsEqual(
+	const FAvidScriptEditorObjectTypeGraph& Left,
+	const FAvidScriptEditorObjectTypeGraph& Right)
+{
+	if (Left.Nodes.Num() != Right.Nodes.Num())
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < Left.Nodes.Num(); ++Index)
+	{
+		const FAvidScriptEditorObjectTypeNode& LeftNode = Left.Nodes[Index];
+		const FAvidScriptEditorObjectTypeNode& RightNode = Right.Nodes[Index];
+		if (LeftNode.TypeId != RightNode.TypeId
+			|| LeftNode.CanonicalClassPath != RightNode.CanonicalClassPath
+			|| LeftNode.BaseTypeId != RightNode.BaseTypeId
+			|| LeftNode.Ordinal != RightNode.Ordinal)
+		{
+			return false;
+		}
+	}
+	return true;
+}
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorObjectTypeGraphDeterminismTest,
+	"AvidScript.Editor.BindingDescriptor.ObjectTypeGraphDeterminism",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorObjectTypeGraphDeterminismTest::RunTest(const FString& Parameters)
+{
+	UClass* FirstDuplicate = MakeDuplicateShortNameObjectTypeClass(TEXT("/Script/AvidScriptGraphOne"));
+	UClass* SecondDuplicate = MakeDuplicateShortNameObjectTypeClass(TEXT("/Script/AvidScriptGraphTwo"));
+	const TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{ TEXT("ActorClass"), TEXT("/Script/Engine.Actor"), TEXT("/Script/Engine.Actor"), TEXT("EditorLoad") }
+	};
+	TArray<UClass*> HandleClasses = {
+		USceneComponent::StaticClass(),
+		FirstDuplicate,
+		AActor::StaticClass(),
+		SecondDuplicate,
+		USceneComponent::StaticClass()
+	};
+
+	FAvidScriptEditorObjectTypeGraph FirstGraph;
+	FString ErrorCategory;
+	FString ErrorDetails;
+	TestTrue(
+		TEXT("Object type graph accepts unordered handle classes"),
+		FAvidScriptEditorObjectTypeGraph::Build(
+			HandleClasses,
+			AActor::StaticClass(),
+			ClassReferences,
+			FirstGraph,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(TEXT("Object type graph does not report an error"), ErrorCategory.IsEmpty());
+
+	Algo::Reverse(HandleClasses);
+	FAvidScriptEditorObjectTypeGraph ReorderedGraph;
+	TestTrue(
+		TEXT("Object type graph accepts reordered handle classes"),
+		FAvidScriptEditorObjectTypeGraph::Build(
+			HandleClasses,
+			AActor::StaticClass(),
+			ClassReferences,
+			ReorderedGraph,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(TEXT("Reflection input order does not change the graph"), AreObjectTypeGraphsEqual(ReorderedGraph, FirstGraph));
+
+	FString PreviousPath;
+	for (int32 Index = 0; Index < FirstGraph.Nodes.Num(); ++Index)
+	{
+		const FAvidScriptEditorObjectTypeNode& Node = FirstGraph.Nodes[Index];
+		TestTrue(TEXT("Object type graph sorts by canonical class path"), PreviousPath.IsEmpty() || PreviousPath < Node.CanonicalClassPath);
+		TestEqual(TEXT("Object type graph assigns contiguous ordinals"), Node.Ordinal, Index);
+		PreviousPath = Node.CanonicalClassPath;
+	}
+
+	const FAvidScriptEditorObjectTypeNode* ObjectNode = FindObjectTypeNode(FirstGraph, UObject::StaticClass());
+	const FAvidScriptEditorObjectTypeNode* ActorNode = FindObjectTypeNode(FirstGraph, AActor::StaticClass());
+	const FAvidScriptEditorObjectTypeNode* ActorComponentNode = FindObjectTypeNode(FirstGraph, UActorComponent::StaticClass());
+	const FAvidScriptEditorObjectTypeNode* SceneComponentNode = FindObjectTypeNode(FirstGraph, USceneComponent::StaticClass());
+	const FAvidScriptEditorObjectTypeNode* FirstDuplicateNode = FindObjectTypeNode(FirstGraph, FirstDuplicate);
+	const FAvidScriptEditorObjectTypeNode* SecondDuplicateNode = FindObjectTypeNode(FirstGraph, SecondDuplicate);
+	TestNotNull(TEXT("Graph contains the UObject root"), ObjectNode);
+	TestNotNull(TEXT("Graph contains the Actor self class"), ActorNode);
+	TestNotNull(TEXT("Graph contains the ActorComponent super class"), ActorComponentNode);
+	TestNotNull(TEXT("Graph contains the SceneComponent handle class"), SceneComponentNode);
+	TestNotNull(TEXT("Graph contains the first duplicate short name"), FirstDuplicateNode);
+	TestNotNull(TEXT("Graph contains the second duplicate short name"), SecondDuplicateNode);
+	if (ObjectNode != nullptr && ActorNode != nullptr && ActorComponentNode != nullptr && SceneComponentNode != nullptr)
+	{
+		TestTrue(TEXT("UObject is the root edge"), ObjectNode->BaseTypeId.IsEmpty());
+		TestEqual(TEXT("Actor directly derives from UObject"), ActorNode->BaseTypeId, ObjectNode->TypeId);
+		TestEqual(TEXT("SceneComponent directly derives from ActorComponent"), SceneComponentNode->BaseTypeId, ActorComponentNode->TypeId);
+	}
+	if (FirstDuplicateNode != nullptr && SecondDuplicateNode != nullptr)
+	{
+		TestNotEqual(TEXT("Cross-module duplicate short names have distinct type ids"), FirstDuplicateNode->TypeId, SecondDuplicateNode->TypeId);
+	}
+
+	TArray<UClass*> NullHandleClasses = { nullptr };
+	FAvidScriptEditorObjectTypeGraph InvalidGraph;
+	TestFalse(
+		TEXT("Null handle classes fail closed"),
+		FAvidScriptEditorObjectTypeGraph::Build(
+			NullHandleClasses,
+			nullptr,
+			{},
+			InvalidGraph,
+			ErrorCategory,
+			ErrorDetails));
+	TestEqual(TEXT("Null handle classes use a stable error category"), ErrorCategory, FString(TEXT("object_type_class_invalid")));
+
+	const TArray<FAvidScriptProjectBindingClassSpec> MissingBaseReferences = {
+		{ TEXT("MissingBase"), TEXT("/Script/Engine.Actor"), TEXT("/Script/AvidScriptMissing.NoBase"), TEXT("EditorLoad") }
+	};
+	TestFalse(
+		TEXT("Missing class-reference bases fail closed"),
+		FAvidScriptEditorObjectTypeGraph::Build(
+			{},
+			nullptr,
+			MissingBaseReferences,
+			InvalidGraph,
+			ErrorCategory,
+			ErrorDetails));
+	TestEqual(
+		TEXT("Missing class-reference bases use a stable error category"),
+		ErrorCategory,
+		FString(TEXT("object_type_class_reference_base_missing")));
+
+	FAvidScriptEditorObjectTypeGraph StaticOnlyGraph;
+	TestTrue(
+		TEXT("Static-only packages accept an empty graph self class"),
+		FAvidScriptEditorObjectTypeGraph::Build({}, nullptr, {}, StaticOnlyGraph, ErrorCategory, ErrorDetails));
+	TestEqual(TEXT("Static-only packages have no handle-capable graph nodes"), StaticOnlyGraph.Nodes.Num(), 0);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV5DeterminismTest,
