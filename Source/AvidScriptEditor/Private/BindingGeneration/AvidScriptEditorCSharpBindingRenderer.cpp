@@ -584,13 +584,13 @@ void AppendObjectHandleProxy(
 	TArray<FString>& Lines,
 	const FString& TypeName,
 	const FString& DirectBaseTypeName,
-	const int32 DirectBaseOrdinal)
+	const int32 ObjectTypeOrdinal)
 {
 	Lines.Add(TEXT("[StructLayout(LayoutKind.Sequential)]"));
 	Lines.Add(TEXT("public readonly struct ") + TypeName);
 	Lines.Add(TEXT("{"));
-	Lines.Add(TEXT("    private readonly int Slot;"));
-	Lines.Add(TEXT("    private readonly int Generation;"));
+	Lines.Add(TEXT("    internal readonly int Slot;"));
+	Lines.Add(TEXT("    internal readonly int Generation;"));
 	Lines.Add(TEXT(""));
 	Lines.Add(FString::Printf(TEXT("    internal %s(int slot, int generation)"), *TypeName));
 	Lines.Add(TEXT("    {"));
@@ -612,13 +612,13 @@ void AppendObjectHandleProxy(
 			TEXT("        return new(value.Slot, value.Generation);"),
 			TEXT("    }"),
 			TEXT(""),
-			FString::Printf(TEXT("    public %s TryCast()"), *DirectBaseTypeName),
+			FString::Printf(TEXT("    public static %s TryCast(%s value)"), *TypeName, *DirectBaseTypeName),
 			TEXT("    {"),
 			FString::Printf(
-				TEXT("        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, %d) != 0)"),
-				DirectBaseOrdinal),
+				TEXT("        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, %d) != 0)"),
+				ObjectTypeOrdinal),
 			TEXT("        {"),
-			TEXT("            return new(Slot, Generation);"),
+			TEXT("            return new(value.Slot, value.Generation);"),
 			TEXT("        }"),
 			TEXT("        return default;"),
 			TEXT("    }")
@@ -1060,10 +1060,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			const FAvidScriptBindingTypeModel* DirectBaseType = Type->BaseTypeId.IsEmpty()
 				? nullptr
 				: TypesById.FindRef(Type->BaseTypeId);
-			if (DirectBaseType != nullptr && DirectBaseType->ObjectTypeOrdinal == INDEX_NONE)
+			if (DirectBaseType != nullptr && Type->ObjectTypeOrdinal == INDEX_NONE)
 			{
 				OutErrorCategory = TEXT("descriptor_contract_invalid");
-				OutErrorSource = Type->BaseTypeId;
+				OutErrorSource = Type->StableId;
 				return false;
 			}
 			const FString DirectBaseTypeName = DirectBaseType == nullptr
@@ -1073,7 +1073,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				Lines,
 				TypeName,
 				DirectBaseTypeName,
-				DirectBaseType == nullptr ? INDEX_NONE : DirectBaseType->ObjectTypeOrdinal);
+				Type->ObjectTypeOrdinal);
 			bNeedsObjectTypeIsA |= DirectBaseType != nullptr;
 		}
 

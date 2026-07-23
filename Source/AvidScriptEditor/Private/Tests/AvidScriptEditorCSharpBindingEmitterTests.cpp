@@ -62,6 +62,58 @@ FString ExtractTypedProjectFacadeSurface(const FString& Source)
 	const int32 StartIndex = Source.Find(StartToken);
 	return StartIndex == INDEX_NONE ? FString() : Source.Mid(StartIndex);
 }
+
+bool UpgradeTypedProjectFacadeGolden(FString& InOutSource)
+{
+	const int32 SlotCount = InOutSource.ReplaceInline(
+		TEXT("    private readonly int Slot;"),
+		TEXT("    internal readonly int Slot;"),
+		ESearchCase::CaseSensitive);
+	const int32 GenerationCount = InOutSource.ReplaceInline(
+		TEXT("    private readonly int Generation;"),
+		TEXT("    internal readonly int Generation;"),
+		ESearchCase::CaseSensitive);
+	const int32 ActorCastCount = InOutSource.ReplaceInline(
+		TEXT("    public UObject TryCast()\n"
+			"    {\n"
+			"        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 0) != 0)\n"
+			"        {\n"
+			"            return new(Slot, Generation);\n"
+			"        }\n"
+			"        return default;\n"
+			"    }"),
+		TEXT("    public static AActor TryCast(UObject value)\n"
+			"    {\n"
+			"        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)\n"
+			"        {\n"
+			"            return new(value.Slot, value.Generation);\n"
+			"        }\n"
+			"        return default;\n"
+			"    }"),
+		ESearchCase::CaseSensitive);
+	const int32 StaticMeshActorCastCount = InOutSource.ReplaceInline(
+		TEXT("    public AActor TryCast()\n"
+			"    {\n"
+			"        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 1) != 0)\n"
+			"        {\n"
+			"            return new(Slot, Generation);\n"
+			"        }\n"
+			"        return default;\n"
+			"    }"),
+		TEXT("    public static AStaticMeshActor TryCast(AActor value)\n"
+			"    {\n"
+			"        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0)\n"
+			"        {\n"
+			"            return new(value.Slot, value.Generation);\n"
+			"        }\n"
+			"        return default;\n"
+			"    }"),
+		ESearchCase::CaseSensitive);
+	return SlotCount == 3
+		&& GenerationCount == 3
+		&& ActorCastCount == 1
+		&& StaticMeshActorCastCount == 1;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -364,17 +416,20 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 	TestTrue(TEXT("Typed facade declares a nominal StaticMeshActor handle"),
 		Source.Contains(TEXT("public readonly struct AStaticMeshActor")));
 	TestTrue(TEXT("Typed facade keeps two-cell object ABI"),
-		Source.Contains(TEXT("private readonly int Slot;"))
-		&& Source.Contains(TEXT("private readonly int Generation;"))
+		Source.Contains(TEXT("internal readonly int Slot;"))
+		&& Source.Contains(TEXT("internal readonly int Generation;"))
 		&& Source.Contains(TEXT("public bool HasHandle => Slot > 0 && Generation > 0;"))
 		&& Source.Contains(TEXT("public bool IsNull => Slot == 0 && Generation == 0;")));
 	TestTrue(TEXT("Typed facade emits direct-base upcast without a host import"),
 		Source.Contains(TEXT("public static implicit operator AActor(AStaticMeshActor value)"))
 		&& Source.Contains(TEXT("return new(value.Slot, value.Generation);")));
-	TestTrue(TEXT("Typed facade emits checked direct-base cast"),
-		Source.Contains(TEXT("public AActor TryCast()"))
-		&& Source.Contains(TEXT("AvidScriptNative.ObjectTypeIsA(Slot, Generation, 1) != 0"))
+	TestTrue(TEXT("Typed facade emits checked cast on the target-derived wrapper"),
+		Source.Contains(TEXT("public static AStaticMeshActor TryCast(AActor value)"))
+		&& Source.Contains(TEXT("AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0"))
+		&& Source.Contains(TEXT("return new(value.Slot, value.Generation);"))
 		&& Source.Contains(TEXT("return default;")));
+	TestFalse(TEXT("Typed facade removes the old reversed instance cast"),
+		Source.Contains(TEXT("public AActor TryCast()")));
 	TestTrue(TEXT("Typed facade emits one packed owner import and typed Self"),
 		Source.Contains(TEXT("public static AStaticMeshActor Self"))
 		&& Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_owner_get_handle\")]"))
@@ -390,6 +445,49 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 	TestTrue(TEXT("Typed facade declares the object-type import exactly once"),
 		Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_object_type_is_a\")]"))
 		&& Source.Contains(TEXT("internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);")));
+
+	FAvidScriptBindingPackageModel MissingDerivedOrdinalPackage;
+	FString MissingDerivedOrdinalParseCategory;
+	FString MissingDerivedOrdinalParseSource;
+	if (TestTrue(
+		TEXT("Typed project API descriptor parses for fail-closed renderer coverage"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			MissingDerivedOrdinalPackage,
+			MissingDerivedOrdinalParseCategory,
+			MissingDerivedOrdinalParseSource)))
+	{
+		FAvidScriptBindingTypeModel* MissingOrdinalType =
+			MissingDerivedOrdinalPackage.Types.FindByPredicate(
+				[](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.CppType == TEXT("AStaticMeshActor");
+				});
+		if (TestNotNull(TEXT("Fail-closed renderer coverage finds the derived type"), MissingOrdinalType))
+		{
+			const FString ExpectedErrorSource = MissingOrdinalType->StableId;
+			MissingOrdinalType->ObjectTypeOrdinal = INDEX_NONE;
+			FString InvalidSource;
+			FString InvalidCategory;
+			FString InvalidErrorSource;
+			TestFalse(
+				TEXT("Renderer rejects a derived wrapper without its target ordinal"),
+				FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+					MissingDerivedOrdinalPackage,
+					FAvidScriptHash::Sha256HexUtf8(DescriptorJson),
+					InvalidSource,
+					InvalidCategory,
+					InvalidErrorSource));
+			TestEqual(
+				TEXT("Missing derived ordinal uses the descriptor contract category"),
+				InvalidCategory,
+				FString(TEXT("descriptor_contract_invalid")));
+			TestEqual(
+				TEXT("Missing derived ordinal identifies the target-derived type"),
+				InvalidErrorSource,
+				ExpectedErrorSource);
+		}
+	}
 
 	FAvidScriptBindingSelectionProfile InheritedMemberProfile = Profile;
 	InheritedMemberProfile.ExplicitFunctions.Add({ TEXT("/Script/Engine.Actor"), TEXT("GetActorScale3D") });
@@ -427,6 +525,12 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 		TEXT("AvidScript/Tests/Fixtures/BindingGeneration/P50_TypedProjectApi.generated.cs")));
 	FString FixtureSource;
 	if (!TestTrue(TEXT("Typed project API golden fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
+	{
+		return false;
+	}
+	if (!TestTrue(
+		TEXT("Legacy typed project API fixture upgrades exactly to the Task 10 cast contract"),
+		UpgradeTypedProjectFacadeGolden(FixtureSource)))
 	{
 		return false;
 	}

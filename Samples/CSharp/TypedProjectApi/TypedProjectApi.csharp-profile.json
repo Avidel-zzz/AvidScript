@@ -1,0 +1,39 @@
+{
+  "schema_version": 3,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/TypedProjectApi/TypedProjectApiScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_typed_project_api",
+  "artifact_stem": "profile_typed_project_api",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_typed_project_api",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_typed_project_api/profile_typed_project_api.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_typed_project_api/profile_typed_project_api.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.typed_project_api",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestActor",
+        "include_functions": [
+          "ApplyGameplayValue"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestProjectile",
+        "include_functions": [
+          "ActivateProjectile"
+        ]
+      }
+    ],
+    "class_references": [
+      {
+        "script_name": "Projectile",
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestProjectile",
+        "base_class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestProjectile",
+        "load_policy": "EditorLoad"
+      }
+    ]
+  }
+}
