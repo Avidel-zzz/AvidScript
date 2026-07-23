@@ -6,6 +6,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
 
 namespace
@@ -31,6 +32,98 @@ const uint8 GAvidScriptTrapTickWasmModule[] = {
 	0x74, 0x69, 0x63, 0x6b, 0x00, 0x01, 0x0a, 0x08,
 	0x02, 0x02, 0x00, 0x0b, 0x03, 0x00, 0x00, 0x0b
 };
+
+const uint8 GAvidScriptTypedOwnerImportWasmModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x08, 0x02, 0x60, 0x00, 0x01, 0x7e, 0x60, 0x00, 0x00,
+	0x02, 0x24, 0x01, 0x0a, 0x61, 0x76, 0x69, 0x64, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74,
+	0x15, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x5f, 0x67, 0x65, 0x74,
+	0x5f, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x00, 0x00,
+	0x03, 0x02, 0x01, 0x01,
+	0x07, 0x16, 0x01, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69,
+	0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x01,
+	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
+};
+
+const uint8 GAvidScriptTypedOwnerWrongSignatureWasmModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x08, 0x02, 0x60, 0x00, 0x01, 0x7f, 0x60, 0x00, 0x00,
+	0x02, 0x24, 0x01, 0x0a, 0x61, 0x76, 0x69, 0x64, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74,
+	0x15, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x77, 0x6e, 0x65, 0x72, 0x5f, 0x67, 0x65, 0x74,
+	0x5f, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x00, 0x00,
+	0x03, 0x02, 0x01, 0x01,
+	0x07, 0x16, 0x01, 0x12, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67, 0x69,
+	0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00, 0x01,
+	0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b
+};
+
+FAvidScriptBindingTypeModel MakeTypedOwnerObjectType()
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:/Script/CoreUObject.Object");
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = TEXT("UObject*");
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	Type.ObjectTypeOrdinal = 0;
+	Type.ClassPath = TEXT("/Script/CoreUObject.Object");
+	return Type;
+}
+
+bool MakeTypedOwnerDescriptor(const bool bPublishObjectType, FString& OutJson)
+{
+	FAvidScriptBindingPackageModel Package;
+	Package.SchemaVersion = 6;
+	Package.GeneratorVersion = TEXT("50.0.test");
+	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = bPublishObjectType
+		? TEXT("avidscript.test.typed_owner")
+		: TEXT("avidscript.test.typed_owner_empty");
+	if (bPublishObjectType)
+	{
+		Package.Types.Add(MakeTypedOwnerObjectType());
+	}
+	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+
+	FString TypesJson;
+	if (bPublishObjectType)
+	{
+		const FAvidScriptBindingTypeModel& Type = Package.Types[0];
+		TypesJson = FString::Printf(
+			TEXT("[{\"stable_id\":\"%s\",\"canonical_type\":\"%s\",\"kind\":\"object_handle\",\"cpp_type\":\"UObject*\",\"size\":8,\"alignment\":4,\"abi_types\":[\"i\",\"i\"],\"object_type_ordinal\":0,\"class_path\":\"%s\",\"base_type_id\":\"\"}]"),
+			*Type.StableId,
+			*Type.CanonicalType,
+			*Type.ClassPath);
+	}
+	else
+	{
+		TypesJson = TEXT("[]");
+	}
+
+	OutJson = FString::Printf(
+		TEXT("{\"schema_version\":6,\"generator_version\":\"%s\",\"engine_version\":\"%s\",\"source\":\"ue_reflection\",\"package_name\":\"%s\",\"package_hash\":\"%s\",\"selection_hash\":\"%s\",\"self_type_id\":\"\",\"types\":%s,\"class_references\":[],\"bindings\":[]}"),
+		*Package.GeneratorVersion,
+		*Package.EngineVersion,
+		*Package.PackageName,
+		*Package.PackageHash,
+		*Package.SelectionHash,
+		*TypesJson);
+	return true;
+}
+
+bool HasTypedOwnerObjectTypeImport(const FAvidScriptBindingPackage& Package)
+{
+	return Package.GetVmPackage().Imports.ContainsByPredicate([](const FAvidScriptVmDynamicImport& Import)
+	{
+		return Import.ModuleName == TEXT("avidscript")
+			&& Import.ImportName == TEXT("avid_object_type_is_a")
+			&& Import.Signature == TEXT("(iii)i");
+	});
+}
 
 bool CreateSmokeWorld(UWorld*& OutWorld)
 {
@@ -73,6 +166,70 @@ void DestroySmokeWorld(UWorld*& World)
 	World = nullptr;
 }
 } // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptTypedOwnerImportsTest,
+	"AvidScript.Runtime.TypedOwnerImports",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.OwnerHandle = { 0x89abcdefu, 0x01234567u };
+	Runtime.SetHostContext(HostContext);
+	TestEqual(
+		TEXT("Packed typed owner handle preserves slot and generation bits"),
+		Runtime.HandleOwnerGetHandleImport(),
+		static_cast<int64>(0x0123456789abcdefull));
+
+	HostContext.OwnerHandle = {};
+	Runtime.SetHostContext(HostContext);
+	TestEqual(TEXT("Invalid typed owner handle fails closed"), Runtime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
+	FString FailureModule;
+	FString FailureName;
+	FString FailureDetails;
+	TestTrue(TEXT("Invalid typed owner import reports a pending failure"),
+		Runtime.ConsumePendingHostImportFailure(FailureModule, FailureName, FailureDetails));
+	TestEqual(TEXT("Typed owner failure keeps the canonical module"), FailureModule, FString(TEXT("avidscript")));
+	TestEqual(TEXT("Typed owner failure keeps the canonical import"), FailureName, FString(TEXT("avid_owner_get_handle")));
+
+	FAvidScriptWasmSmokeResult LoadResult;
+	TestTrue(TEXT("Typed owner import accepts the exact i64 signature"), Runtime.LoadModule(
+		GAvidScriptTypedOwnerImportWasmModule,
+		UE_ARRAY_COUNT(GAvidScriptTypedOwnerImportWasmModule),
+		TEXT("typed_owner_import"),
+		LoadResult));
+	TestTrue(TEXT("Typed owner module instantiates after import validation"), LoadResult.bModuleInstantiated);
+	Runtime.Unload();
+
+	FAvidScriptWasmSmokeResult WrongSignatureResult;
+	TestFalse(TEXT("Typed owner import rejects an i32 signature before instantiation"), Runtime.LoadModule(
+		GAvidScriptTypedOwnerWrongSignatureWasmModule,
+		UE_ARRAY_COUNT(GAvidScriptTypedOwnerWrongSignatureWasmModule),
+		TEXT("typed_owner_wrong_signature"),
+		WrongSignatureResult));
+	TestFalse(TEXT("Wrong typed owner signature never instantiates a module"), WrongSignatureResult.bModuleInstantiated);
+
+	FString EmptyDescriptorJson;
+	TestTrue(TEXT("Empty v6 descriptor serializes"), MakeTypedOwnerDescriptor(false, EmptyDescriptorJson));
+	TSharedPtr<const FAvidScriptBindingPackage> EmptyPackage;
+	FAvidScriptBindingPackageLoadResult EmptyPackageResult;
+	TestTrue(TEXT("Empty v6 descriptor loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(EmptyDescriptorJson, EmptyPackage, EmptyPackageResult));
+	TestFalse(TEXT("Empty v6 descriptor does not authorize object-type import"),
+		EmptyPackage.IsValid() && HasTypedOwnerObjectTypeImport(*EmptyPackage));
+
+	FString PublishedDescriptorJson;
+	TestTrue(TEXT("Published v6 descriptor serializes"), MakeTypedOwnerDescriptor(true, PublishedDescriptorJson));
+	TSharedPtr<const FAvidScriptBindingPackage> PublishedPackage;
+	FAvidScriptBindingPackageLoadResult PublishedPackageResult;
+	TestTrue(TEXT("Published v6 descriptor loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(PublishedDescriptorJson, PublishedPackage, PublishedPackageResult));
+	TestTrue(TEXT("Published v6 object types authorize only the fixed dynamic import"),
+		PublishedPackage.IsValid() && HasTypedOwnerObjectTypeImport(*PublishedPackage));
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptBindingDescriptorLegacyIdentityTest,

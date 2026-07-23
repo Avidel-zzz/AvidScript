@@ -20,6 +20,7 @@ enum class EAvidScriptHostBindingId : uint16
 	SceneComponentSetWorldLocation,
 	OwnerGetSlot,
 	OwnerGetGeneration,
+	OwnerGetHandle,
 	TimerSetOnce,
 	TimerCancel
 };
@@ -84,6 +85,7 @@ struct FAvidScriptHostCallResult
 {
 	bool bSucceeded = false;
 	int32 ReturnValue = 0;
+	int64 ReturnValueI64 = 0;
 	uint32 IntValues[2] = {};
 	float FloatValues[3] = {};
 	FString Details;

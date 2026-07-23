@@ -130,6 +130,7 @@ public:
 	int32 HandleHostFailI32Import(int32 Input);
 	int32 HandleOwnerGetSlotImport();
 	int32 HandleOwnerGetGenerationImport();
+	int64 HandleOwnerGetHandleImport();
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);

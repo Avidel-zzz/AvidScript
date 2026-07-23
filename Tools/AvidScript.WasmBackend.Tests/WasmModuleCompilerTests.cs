@@ -11,10 +11,11 @@ internal static class WasmModuleCompilerTests
         CompilationIsByteDeterministic();
         InvalidGuestIrIsRejected();
         ImportsAndCallsUseStableFunctionIndices();
+        TypedOwnerImportUsesExactI64Signature();
         ConditionalControlFlowAndScalarOperatorsCompile();
         StateStructPointersAndSRetUseLinearMemory();
         HeapAtPageBoundaryStillReservesRuntimeStack();
-        return 7;
+        return 8;
     }
 
     private static void MinimalModuleHasCanonicalSectionsAndProvenance()
@@ -107,6 +108,30 @@ internal static class WasmModuleCompilerTests
             "function import should retain its host module and name");
         Assert(info.Exports.Single(item => item.Name == "guest_add").Index == 1,
             "defined function index should follow imported functions");
+    }
+
+    private static void TypedOwnerImportUsesExactI64Signature()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestType int64Type = new(
+            "type:int64", "scalar", "i64", Array.Empty<GuestField>(), null, null, 8, 8);
+        GuestImport ownerImport = new(
+            "import:typed_owner", "avidscript", "avid_owner_get_handle",
+            Array.Empty<string>(), int64Type.Id);
+        module = module with
+        {
+            Types = module.Types.Concat(new[] { int64Type }).ToArray(),
+            Imports = new[] { ownerImport },
+        };
+
+        WasmCompilationResult result = WasmModuleCompiler.Compile(module);
+        Assert(result.Succeeded, "typed owner import module should compile");
+        WasmArtifactInfo info = WasmArtifactInspector.Inspect(result.Bytes);
+        WasmImportInfo import = info.Imports.Single(item => item.Name == "avid_owner_get_handle");
+        Assert(import.Module == "avidscript" && import.Kind == 0,
+            "typed owner import should retain the canonical host namespace");
+        Assert(ReadFunctionResultType(result.Bytes, import.TypeIndex) == 0x7e,
+            "typed owner import must use the exact WASM i64 result signature");
     }
 
     private static void ConditionalControlFlowAndScalarOperatorsCompile()
@@ -364,6 +389,41 @@ internal static class WasmModuleCompilerTests
         }
 
         throw new InvalidOperationException("memory section was not found");
+    }
+
+    private static byte ReadFunctionResultType(byte[] artifact, uint typeIndex)
+    {
+        int offset = 8;
+        while (offset < artifact.Length)
+        {
+            byte sectionId = artifact[offset++];
+            uint payloadLength = ReadU32(artifact, ref offset);
+            int payloadEnd = checked(offset + (int)payloadLength);
+            if (sectionId != 1)
+            {
+                offset = payloadEnd;
+                continue;
+            }
+
+            uint typeCount = ReadU32(artifact, ref offset);
+            for (uint index = 0; index < typeCount; ++index)
+            {
+                Assert(artifact[offset++] == 0x60, "function type must use the WASM function marker");
+                uint parameterCount = ReadU32(artifact, ref offset);
+                offset = checked(offset + (int)parameterCount);
+                uint resultCount = ReadU32(artifact, ref offset);
+                Assert(resultCount <= 1, "AvidScript function imports use at most one WASM result");
+                byte resultType = resultCount == 1 ? artifact[offset++] : (byte)0x40;
+                if (index == typeIndex)
+                {
+                    return resultType;
+                }
+            }
+
+            break;
+        }
+
+        throw new InvalidOperationException("import function type was not found");
     }
 
     private static uint ReadU32(byte[] bytes, ref int offset)

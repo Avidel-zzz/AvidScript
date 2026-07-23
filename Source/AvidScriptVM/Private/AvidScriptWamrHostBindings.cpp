@@ -365,6 +365,14 @@ int32_t OwnerGetGeneration(wasm_exec_env_t ExecEnv)
 	return Dispatch(ExecEnv, "owner_get_generation", Call, Result) ? Result.ReturnValue : 0;
 }
 
+int64_t OwnerGetHandle(wasm_exec_env_t ExecEnv)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::OwnerGetHandle;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, "avid_owner_get_handle", Call, Result) ? Result.ReturnValueI64 : 0;
+}
+
 int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
 {
 	FAvidScriptHostCall Call;
@@ -381,6 +389,27 @@ int32_t TimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle)
 }
 
 NativeSymbol GNativeSymbols[] = {
+	{ "host_add_i32", reinterpret_cast<void*>(HostAddI32), "(i)i", nullptr },
+	{ "host_fail_i32", reinterpret_cast<void*>(HostFailI32), "(i)i", nullptr },
+	{ "actor_get_location", reinterpret_cast<void*>(ActorGetLocation), "(iii)i", nullptr },
+	{ "actor_set_location", reinterpret_cast<void*>(ActorSetLocation), "(iifff)i", nullptr },
+	{ "actor_add_location_offset", reinterpret_cast<void*>(ActorAddLocationOffset), "(iifff)i", nullptr },
+	{ "actor_get_rotation", reinterpret_cast<void*>(ActorGetRotation), "(iii)i", nullptr },
+	{ "actor_set_rotation", reinterpret_cast<void*>(ActorSetRotation), "(iifff)i", nullptr },
+	{ "actor_get_scale", reinterpret_cast<void*>(ActorGetScale), "(iii)i", nullptr },
+	{ "actor_set_scale", reinterpret_cast<void*>(ActorSetScale), "(iifff)i", nullptr },
+	{ "actor_get_transform_batch", reinterpret_cast<void*>(ActorGetTransformBatch), "(iii)i", nullptr },
+	{ "actor_get_root_component", reinterpret_cast<void*>(ActorGetRootComponent), "(iii)i", nullptr },
+	{ "scene_component_get_world_location", reinterpret_cast<void*>(SceneComponentGetWorldLocation), "(iii)i", nullptr },
+	{ "scene_component_set_world_location", reinterpret_cast<void*>(SceneComponentSetWorldLocation), "(iifff)i", nullptr },
+	{ "owner_get_slot", reinterpret_cast<void*>(OwnerGetSlot), "()i", nullptr },
+	{ "owner_get_generation", reinterpret_cast<void*>(OwnerGetGeneration), "()i", nullptr },
+	{ "avid_owner_get_handle", reinterpret_cast<void*>(OwnerGetHandle), "()I", nullptr },
+	{ "timer_set_once", reinterpret_cast<void*>(TimerSetOnce), "(fi)i", nullptr },
+	{ "timer_cancel", reinterpret_cast<void*>(TimerCancel), "(i)i", nullptr }
+};
+
+NativeSymbol GCompatibilityNativeSymbols[] = {
 	{ "host_add_i32", reinterpret_cast<void*>(HostAddI32), "(i)i", nullptr },
 	{ "host_fail_i32", reinterpret_cast<void*>(HostFailI32), "(i)i", nullptr },
 	{ "actor_get_location", reinterpret_cast<void*>(ActorGetLocation), "(iii)i", nullptr },
@@ -427,7 +456,8 @@ bool IsAvidScriptWamrStaticHostImport(const FString& ModuleName, const FString& 
 		TEXT("timer_set_once"),
 		TEXT("timer_cancel")
 	};
-	return StaticImports.Contains(ImportName);
+	return StaticImports.Contains(ImportName)
+		|| (ModuleName == TEXT("avidscript") && ImportName == TEXT("avid_owner_get_handle"));
 }
 
 bool RegisterAvidScriptWamrHostBindings()
@@ -440,7 +470,10 @@ bool RegisterAvidScriptWamrHostBindings()
 		return false;
 	}
 
-	if (!wasm_runtime_register_natives(CompatibilityModuleName, GNativeSymbols, UE_ARRAY_COUNT(GNativeSymbols)))
+	if (!wasm_runtime_register_natives(
+		CompatibilityModuleName,
+		GCompatibilityNativeSymbols,
+		UE_ARRAY_COUNT(GCompatibilityNativeSymbols)))
 	{
 		wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols);
 		return false;
@@ -453,7 +486,7 @@ bool RegisterAvidScriptWamrHostBindings()
 void UnregisterAvidScriptWamrHostBindings()
 {
 #if AVIDSCRIPT_WITH_WAMR
-	wasm_runtime_unregister_natives(CompatibilityModuleName, GNativeSymbols);
+	wasm_runtime_unregister_natives(CompatibilityModuleName, GCompatibilityNativeSymbols);
 	wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols);
 #endif
 }

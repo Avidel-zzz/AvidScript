@@ -1038,6 +1038,31 @@ int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetGenerationImport()
 	return LastHostImportResult;
 }
 
+int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	const FAvidScriptObjectHandle OwnerHandle = HostContext.OwnerHandle;
+	if (!OwnerHandle.IsValid())
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_owner_get_handle"),
+			TEXT("Missing valid owner handle context for avidscript.avid_owner_get_handle"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	const uint64 PackedHandle = static_cast<uint64>(OwnerHandle.Slot)
+		| (static_cast<uint64>(OwnerHandle.Generation) << 32);
+	LastHostImportResult = static_cast<int32>(OwnerHandle.Slot);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return static_cast<int64>(PackedHandle);
+}
+
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation)
 {
 	const double HostImportStartSeconds = FPlatformTime::Seconds();
@@ -1950,6 +1975,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 		}
 		return bSucceeded;
 	};
+	auto FinishI64 = [&Finish, &OutResult](int64 ReturnValue, bool bSucceeded)
+	{
+		OutResult.ReturnValueI64 = ReturnValue;
+		return Finish(static_cast<int32>(ReturnValue), bSucceeded);
+	};
 
 	switch (Call.BindingId)
 	{
@@ -1967,6 +1997,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleOwnerGetGenerationImport();
 		return Finish(Value, Value > 0);
+	}
+	case EAvidScriptHostBindingId::OwnerGetHandle:
+	{
+		const int64 Value = HandleOwnerGetHandleImport();
+		return FinishI64(Value, Value != 0);
 	}
 	case EAvidScriptHostBindingId::TimerSetOnce:
 	{
