@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptObjectTypeBinding.h"
 #include "Containers/StringConv.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -1208,6 +1209,66 @@ bool DispatchAvidScriptObjectLifecycle(
 	OutResult.ReturnValue = Actor->IsA(Class) ? 1 : 0;
 	return true;
 }
+
+bool DispatchAvidScriptObjectType(
+	const FAvidScriptBindingPackage& Package,
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan,
+	const FAvidScriptDynamicHostCall& Call,
+	const FAvidScriptBindingInvocationContext& Context,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Context.ObjectRegistry == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_object_registry_missing"),
+			Plan.DebugPath,
+			TEXT("The Runtime Session has no object registry for object type handles."));
+		return false;
+	}
+	if (Call.Arguments[0] > MAX_uint32
+		|| Call.Arguments[1] > MAX_uint32
+		|| Call.Arguments[2] > MAX_uint32)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_target_invalid"),
+			Plan.DebugPath,
+			TEXT("The object handle or object type ordinal exceeds the 32-bit ABI."));
+		return false;
+	}
+
+	const FAvidScriptObjectHandle Handle{
+		static_cast<uint32>(Call.Arguments[0]),
+		static_cast<uint32>(Call.Arguments[1])
+	};
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* Object = Context.ObjectRegistry->ResolveObject(Handle, ResolveResult, false);
+	if (Object == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_target_invalid"),
+			Plan.DebugPath,
+			ResolveResult.ErrorMessage);
+		return false;
+	}
+
+	UClass* CachedClass = nullptr;
+	if (!Package.TryResolveObjectType(static_cast<uint32>(Call.Arguments[2]), CachedClass))
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("object_type_ordinal_out_of_range"),
+			Plan.DebugPath,
+			TEXT("The object type ordinal is outside the immutable package type plan."));
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.ReturnValue = Object->IsA(CachedClass) ? 1 : 0;
+	return true;
+}
 } // namespace
 
 struct FAvidScriptBindingPackage::FImpl
@@ -1296,7 +1357,6 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	const int32 LifecycleBindingCount = Model.ClassReferences.IsEmpty()
 		? 0
 		: FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
-	Package->Impl->Plans.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
 	int32 ObjectTypeCount = 0;
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
@@ -1305,9 +1365,15 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			++ObjectTypeCount;
 		}
 	}
+	const int32 ObjectTypeBindingCount = ObjectTypeCount == 0
+		? 0
+		: FAvidScriptObjectTypeBindings::GetSpecs().Num();
+	Package->Impl->Plans.Reserve(
+		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount);
 	Package->Impl->ObjectTypePlans.SetNumZeroed(ObjectTypeCount);
 	Package->Impl->ClassReferencePlans.Reserve(Model.ClassReferences.Num());
-	Package->Impl->VmPackage.Imports.Reserve(Model.Bindings.Num() + LifecycleBindingCount);
+	Package->Impl->VmPackage.Imports.Reserve(
+		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount);
 
 	TMap<FString, UClass*> LoadedClassesByPath;
 	TSet<FString> AttemptedClassPaths;
@@ -1736,6 +1802,26 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	if (!Package->Impl->ObjectTypePlans.IsEmpty())
+	{
+		for (const FAvidScriptObjectTypeBindingSpec& Spec : FAvidScriptObjectTypeBindings::GetSpecs())
+		{
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = Spec.Kind;
+			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
+			Plan.ExpectedArgumentCount = 3;
+
+			Package->Impl->VmPackage.Imports.Add({
+				Spec.StableId,
+				static_cast<uint32>(Package->Impl->Plans.Num()),
+				Spec.ModuleName,
+				Spec.ImportName,
+				Spec.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+		}
+	}
+
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
@@ -1858,6 +1944,10 @@ bool FAvidScriptBindingPackage::Dispatch(
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectIsA)
 	{
 		return DispatchAvidScriptObjectLifecycle(*this, Plan, Call, Context, OutResult);
+	}
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectTypeIsA)
+	{
+		return DispatchAvidScriptObjectType(*this, Plan, Call, Context, OutResult);
 	}
 
 	UObject* Target = nullptr;

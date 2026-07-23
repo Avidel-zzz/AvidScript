@@ -1,16 +1,8 @@
 #pragma once
 
+#include "AvidScriptBindingInvocationKind.h"
 #include "Containers/ArrayView.h"
 #include "CoreMinimal.h"
-
-enum class EAvidScriptBindingInvocationKind : uint8
-{
-	ReflectedFunction,
-	ReflectedPropertyRead,
-	ObjectSpawnActor,
-	ObjectDestroyActor,
-	ObjectIsA
-};
 
 struct FAvidScriptObjectLifecycleBindingSpec
 {
