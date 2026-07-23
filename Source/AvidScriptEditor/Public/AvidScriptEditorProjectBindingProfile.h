@@ -15,6 +15,7 @@ struct FAvidScriptProjectBindingClassSpec
 struct FAvidScriptProjectBindingProfileSpec
 {
 	FString PackageName;
+	FString SelfClassPath;
 	TArray<FString> ModulePaths;
 	TArray<FAvidScriptReflectedClassSelection> Classes;
 	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;

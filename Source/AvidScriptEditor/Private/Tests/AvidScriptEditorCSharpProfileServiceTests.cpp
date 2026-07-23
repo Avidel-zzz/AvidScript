@@ -332,6 +332,36 @@ bool FAvidScriptEditorCSharpProfileServiceProjectBindingProfileTest::RunTest(con
 	}
 	FAvidScriptEditorCSharpBuildPipeline::Cleanup(ReusedPlan);
 
+	const FString TypedSelfProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		TestRoot,
+		TEXT("typed_self_project_binding.csharp-profile.json")));
+	FString TypedSelfProfileText = ProfileText;
+	TypedSelfProfileText.ReplaceInline(
+		TEXT("\"schema_version\": 2"),
+		TEXT("\"schema_version\": 3"),
+		ESearchCase::CaseSensitive);
+	TypedSelfProfileText.ReplaceInline(
+		TEXT("    \"package_name\": \"avidscript.project.profile_service\",\n"),
+		TEXT("    \"package_name\": \"avidscript.project.profile_service\",\n")
+		TEXT("    \"self_class_path\": \"/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor\",\n"),
+		ESearchCase::CaseSensitive);
+	TestTrue(
+		TEXT("Typed self project binding C# profile can be written"),
+		FFileHelper::SaveStringToFile(TypedSelfProfileText, *TypedSelfProfilePath));
+	FAvidScriptEditorCSharpProfileLoadResult TypedSelfResult;
+	TestTrue(
+		TEXT("Schema v3 typed self project binding profile loads"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(TypedSelfProfilePath, TypedSelfResult));
+	TestEqual(TEXT("Typed self project binding schema is 3"), TypedSelfResult.SchemaVersion, 3);
+	TestEqual(
+		TEXT("Typed self project binding spec retains self class"),
+		TypedSelfResult.ProjectBindingProfile.SelfClassPath,
+		FString(TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor")));
+	TestEqual(
+		TEXT("Typed self project binding selection retains self class"),
+		TypedSelfResult.ResolvedBindingSelection.SelfClassPath,
+		FString(TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor")));
+
 	const FString InvalidProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
 		TestRoot,
 		TEXT("invalid_project_binding.csharp-profile.json")));
@@ -429,6 +459,51 @@ bool FAvidScriptEditorCSharpProfileServiceProjectBindingProfileTest::RunTest(con
 		TEXT("Schema v1 binding profile rejection category is stable"),
 		LegacyBindingProfileResult.ErrorCategory,
 		FString(TEXT("binding_profile_schema_unsupported")));
+
+	const FString SchemaV2TypedSelfProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		TestRoot,
+		TEXT("schema_v2_typed_self.csharp-profile.json")));
+	FString SchemaV2TypedSelfProfileText = ProfileText;
+	SchemaV2TypedSelfProfileText.ReplaceInline(
+		TEXT("    \"package_name\": \"avidscript.project.profile_service\",\n"),
+		TEXT("    \"package_name\": \"avidscript.project.profile_service\",\n")
+		TEXT("    \"self_class_path\": \"/Script/Engine.Actor\",\n"),
+		ESearchCase::CaseSensitive);
+	TestTrue(
+		TEXT("Schema v2 typed self C# profile can be written"),
+		FFileHelper::SaveStringToFile(SchemaV2TypedSelfProfileText, *SchemaV2TypedSelfProfilePath));
+	FAvidScriptEditorCSharpProfileLoadResult SchemaV2TypedSelfResult;
+	TestFalse(
+		TEXT("Schema v2 rejects typed self field"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(
+			SchemaV2TypedSelfProfilePath,
+			SchemaV2TypedSelfResult));
+	TestEqual(
+		TEXT("Schema v2 typed self rejection category is stable"),
+		SchemaV2TypedSelfResult.ErrorCategory,
+		FString(TEXT("profile_self_field_not_supported")));
+
+	const FString SchemaV1TypedSelfProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		TestRoot,
+		TEXT("schema_v1_typed_self.csharp-profile.json")));
+	FString SchemaV1TypedSelfProfileText = SchemaV2TypedSelfProfileText;
+	SchemaV1TypedSelfProfileText.ReplaceInline(
+		TEXT("\"schema_version\": 2"),
+		TEXT("\"schema_version\": 1"),
+		ESearchCase::CaseSensitive);
+	TestTrue(
+		TEXT("Schema v1 typed self C# profile can be written"),
+		FFileHelper::SaveStringToFile(SchemaV1TypedSelfProfileText, *SchemaV1TypedSelfProfilePath));
+	FAvidScriptEditorCSharpProfileLoadResult SchemaV1TypedSelfResult;
+	TestFalse(
+		TEXT("Schema v1 rejects typed self field"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(
+			SchemaV1TypedSelfProfilePath,
+			SchemaV1TypedSelfResult));
+	TestEqual(
+		TEXT("Schema v1 typed self rejection category is stable"),
+		SchemaV1TypedSelfResult.ErrorCategory,
+		FString(TEXT("profile_self_field_not_supported")));
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

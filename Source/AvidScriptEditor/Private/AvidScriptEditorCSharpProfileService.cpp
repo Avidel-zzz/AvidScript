@@ -147,6 +147,7 @@ bool TryGetAvidScriptCSharpProfileNameArray(
 
 bool ParseAvidScriptCSharpProjectBindingProfile(
 	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
 	FAvidScriptEditorCSharpProfileLoadResult& OutResult)
 {
 	if (!Object.IsValid())
@@ -172,6 +173,30 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 	if (!TryGetAvidScriptCSharpProfileStringArray(Object, TEXT("module_paths"), Spec.ModulePaths, OutResult))
 	{
 		return false;
+	}
+	if (Object->HasField(TEXT("self_class_path")))
+	{
+		if (SchemaVersion != 3)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("profile_self_field_not_supported"),
+				TEXT("binding_profile.self_class_path requires C# profile schema_version 3."),
+				TEXT("upgrade the C# profile to schema_version 3 before declaring self_class_path"),
+				OutResult);
+			return false;
+		}
+		if (!TryGetAvidScriptCSharpProfileStringField(
+				Object,
+				TEXT("self_class_path"),
+				Spec.SelfClassPath))
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_self_class_invalid"),
+				TEXT("binding_profile.self_class_path must be a non-empty string."),
+				TEXT("set self_class_path to a loadable AActor-derived UClass path"),
+				OutResult);
+			return false;
+		}
 	}
 
 	if (Object->HasField(TEXT("classes")))
@@ -553,12 +578,12 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 
 	double SchemaVersion = 0.0;
 	if (!ProfileObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
-		|| (SchemaVersion != 1.0 && SchemaVersion != 2.0))
+		|| (SchemaVersion != 1.0 && SchemaVersion != 2.0 && SchemaVersion != 3.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be 1 or 2."),
-			TEXT("update the profile JSON to schema_version 2"),
+			TEXT("C# profile schema_version must be 1, 2, or 3."),
+			TEXT("update the profile JSON to schema_version 3"),
 			OutResult);
 		return false;
 	}
@@ -666,7 +691,23 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 
 	OutResult.ResolvedBindingSelection =
 		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
-	if (OutResult.SchemaVersion == 1 && ProfileObject->HasField(TEXT("binding_profile")))
+	const TSharedPtr<FJsonObject>* BindingProfileObject = nullptr;
+	const bool bHasBindingProfile = ProfileObject->HasField(TEXT("binding_profile"));
+	const bool bHasSelfClassPath =
+		ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)
+		&& BindingProfileObject != nullptr
+		&& (*BindingProfileObject).IsValid()
+		&& (*BindingProfileObject)->HasField(TEXT("self_class_path"));
+	if (OutResult.SchemaVersion != 3 && bHasSelfClassPath)
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("profile_self_field_not_supported"),
+			TEXT("binding_profile.self_class_path requires C# profile schema_version 3."),
+			TEXT("upgrade the C# profile to schema_version 3 before declaring self_class_path"),
+			OutResult);
+		return false;
+	}
+	if (OutResult.SchemaVersion == 1 && bHasBindingProfile)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("binding_profile_schema_unsupported"),
@@ -675,12 +716,14 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			OutResult);
 		return false;
 	}
-	if (OutResult.SchemaVersion == 2 && ProfileObject->HasField(TEXT("binding_profile")))
+	if ((OutResult.SchemaVersion == 2 || OutResult.SchemaVersion == 3) && bHasBindingProfile)
 	{
-		const TSharedPtr<FJsonObject>* BindingProfileObject = nullptr;
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)
 			|| BindingProfileObject == nullptr
-			|| !ParseAvidScriptCSharpProjectBindingProfile(*BindingProfileObject, OutResult))
+			|| !ParseAvidScriptCSharpProjectBindingProfile(
+				*BindingProfileObject,
+				OutResult.SchemaVersion,
+				OutResult))
 		{
 			if (OutResult.ErrorCategory.IsEmpty())
 			{

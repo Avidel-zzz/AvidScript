@@ -11,7 +11,7 @@
 
 namespace
 {
-constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("49.1.0");
+constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("50.1.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -150,6 +150,39 @@ bool NormalizeClassRule(
 	return true;
 }
 
+bool NormalizeSelfClassPath(
+	FString& SelfClassPath,
+	FAvidScriptBindingSelectionResolveResult& OutResult)
+{
+	if (SelfClassPath.IsEmpty())
+	{
+		return true;
+	}
+
+	UClass* SelfClass = LoadObject<UClass>(nullptr, *SelfClassPath);
+	if (SelfClass == nullptr)
+	{
+		SetProjectProfileFailure(
+			OutResult,
+			TEXT("self_class_missing"),
+			SelfClassPath,
+			TEXT("Use a loadable AActor-derived UClass path for binding_profile.self_class_path."));
+		return false;
+	}
+	if (!SelfClass->IsChildOf(AActor::StaticClass()))
+	{
+		SetProjectProfileFailure(
+			OutResult,
+			TEXT("self_class_not_actor"),
+			SelfClass->GetPathName(),
+			TEXT("Use an AActor-derived UClass path for binding_profile.self_class_path."));
+		return false;
+	}
+
+	SelfClassPath = SelfClass->GetPathName();
+	return true;
+}
+
 FString MakeClassReferenceIdentity(const FAvidScriptProjectBindingClassSpec& Spec)
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeClassReferenceIdentity(
@@ -236,6 +269,11 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			TEXT("profile_empty"),
 			Spec.PackageName,
 			TEXT("Declare at least one /Script module or explicit reflected class."));
+		return false;
+	}
+	FString SelfClassPath = Spec.SelfClassPath;
+	if (!NormalizeSelfClassPath(SelfClassPath, OutResult))
+	{
 		return false;
 	}
 	FString EngineBuildIdentity;
@@ -425,6 +463,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	RulesByPath.GetKeys(ClassPaths);
 	ClassPaths.Sort();
 	OutSelection.PackageName = Spec.PackageName;
+	OutSelection.SelfClassPath = MoveTemp(SelfClassPath);
 	for (const FString& ClassPath : ClassPaths)
 	{
 		OutSelection.Classes.Add(RulesByPath.FindChecked(ClassPath));
@@ -457,6 +496,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	Identity.Add(TEXT("resolver=") + FString(ProjectBindingProfileResolverVersion));
 	Identity.Add(TEXT("engine_build_id=") + EngineBuildIdentity);
 	Identity.Add(TEXT("package=") + Spec.PackageName);
+	Identity.Add(TEXT("self_class=") + OutSelection.SelfClassPath);
 	Identity.Add(TEXT("descriptor_selection=") + DescriptorResult.SelectionHash);
 	Identity.Add(TEXT("descriptor_package=") + DescriptorResult.PackageHash);
 	for (const FString& ModulePath : ModulePaths)

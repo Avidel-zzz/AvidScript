@@ -32,6 +32,7 @@ struct FAvidScriptBindingSelectionProfile
 	TArray<FAvidScriptReflectedPropertySelection> ExplicitProperties;
 	bool bStrictExplicitFunctions = true;
 	bool bStrictExplicitProperties = true;
+	FString SelfClassPath;
 };
 
 struct FAvidScriptBindingSelectionIssue

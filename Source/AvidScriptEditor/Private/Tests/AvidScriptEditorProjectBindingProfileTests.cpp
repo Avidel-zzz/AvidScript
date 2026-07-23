@@ -13,6 +13,9 @@
 
 namespace
 {
+constexpr const TCHAR* ProjectBindingProfileTypedSelfClassPath =
+	TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor");
+
 bool IsProjectProfileSha256(const FString& Value)
 {
 	if (Value.Len() != 64)
@@ -52,6 +55,7 @@ bool FAvidScriptEditorProjectBindingProfileStableResolutionTest::RunTest(const F
 {
 	FAvidScriptProjectBindingProfileSpec FirstSpec;
 	FirstSpec.PackageName = TEXT("avidscript.project.stable");
+	FirstSpec.SelfClassPath = ProjectBindingProfileTypedSelfClassPath;
 	FirstSpec.Classes.Add(MakeProjectProfileClassRule(
 		TEXT("/Script/Engine.Pawn"),
 		{ TEXT("AddMovementInput") }));
@@ -85,6 +89,10 @@ bool FAvidScriptEditorProjectBindingProfileStableResolutionTest::RunTest(const F
 			FirstHash,
 			FirstResult));
 	TestTrue(TEXT("Project profile result succeeds"), FirstResult.bSucceeded);
+	TestEqual(
+		TEXT("Typed self class path is resolved"),
+		FirstSelection.SelfClassPath,
+		FString(ProjectBindingProfileTypedSelfClassPath));
 	TestEqual(TEXT("Project profile keeps two classes"), FirstSelection.Classes.Num(), 2);
 	TestEqual(TEXT("Project profile keeps two class references"), FirstClassReferences.Num(), 2);
 	TestTrue(TEXT("Project profile hash is SHA-256"), IsProjectProfileSha256(FirstHash));
@@ -124,6 +132,67 @@ bool FAvidScriptEditorProjectBindingProfileStableResolutionTest::RunTest(const F
 			SecondHash,
 			SecondResult));
 	TestEqual(TEXT("Reordered profile hash is stable"), SecondHash, FirstHash);
+
+	FAvidScriptProjectBindingProfileSpec DifferentSelfSpec = FirstSpec;
+	DifferentSelfSpec.SelfClassPath = TEXT("/Script/Engine.StaticMeshActor");
+	FAvidScriptBindingSelectionProfile DifferentSelfSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> DifferentSelfClassReferences;
+	FString DifferentSelfHash;
+	FAvidScriptBindingSelectionResolveResult DifferentSelfResult;
+	TestTrue(
+		TEXT("Different typed self profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			DifferentSelfSpec,
+			DifferentSelfSelection,
+			DifferentSelfClassReferences,
+			DifferentSelfHash,
+			DifferentSelfResult));
+	TestNotEqual(
+		TEXT("Typed self class path changes selection identity"),
+		DifferentSelfHash,
+		FirstHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileTypedSelfValidationTest,
+	"AvidScript.Editor.ProjectBindingProfile.TypedSelfValidation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileTypedSelfValidationTest::RunTest(const FString& Parameters)
+{
+	const auto ResolveInvalidSelf = [this](
+		const FString& SelfClassPath,
+		const FString& ExpectedCategory)
+	{
+		FAvidScriptProjectBindingProfileSpec Spec;
+		Spec.PackageName = TEXT("avidscript.project.typed_self_validation");
+		Spec.SelfClassPath = SelfClassPath;
+		Spec.Classes.Add(MakeProjectProfileClassRule(
+			TEXT("/Script/Engine.Actor"),
+			{ TEXT("K2_GetActorLocation") }));
+		FAvidScriptBindingSelectionProfile Selection;
+		TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+		FString SelectionHash;
+		FAvidScriptBindingSelectionResolveResult Result;
+		TestFalse(
+			FString::Printf(TEXT("Invalid typed self fails: %s"), *ExpectedCategory),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec,
+				Selection,
+				ClassReferences,
+				SelectionHash,
+				Result));
+		TestEqual(TEXT("Invalid typed self category is stable"), Result.ErrorCategory, ExpectedCategory);
+		return true;
+	};
+
+	ResolveInvalidSelf(
+		TEXT("/Script/Engine.AvidScriptMissingSelfActor"),
+		TEXT("self_class_missing"));
+	ResolveInvalidSelf(
+		TEXT("/Script/Engine.SceneComponent"),
+		TEXT("self_class_not_actor"));
 	return true;
 }
 
