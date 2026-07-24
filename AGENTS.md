@@ -148,8 +148,9 @@ Plugins/AvidScript/Docs
 - 独立代码审查安排在最终全量 automation 之前。审查修复后先运行受影响 focused tests，随后只运行一次最终全量 automation，避免“全量测试 -> 审查修改 -> 再全量测试”的重复成本。
 - 只有 ABI、guest memory、状态迁移、生命周期事务、崩溃或数据损坏风险，以及需要先确认根因的真实回归，才允许在批次中途立即编译或运行聚焦测试。即使属于例外，也应合并同一风险面的修改后再执行。
 - 批量验证不等于把反馈无限推迟到数小时任务末尾。单个批次不得跨越多个相互独立的架构层，也不得以减少测试时间为理由跳过最终门禁、清理 Editor Target 或降低成功判定标准。
-- 每次开始新任务、网络重连或上下文压缩恢复后，第一条仓库命令必须是 `Build/InvokePhaseWorkflow.ps1 status -Phase <当前Phase>`；当前 Phase 49 固定使用 `Build/InvokePhaseWorkflow.ps1 status -Phase 49`。只有对应 state 文件尚不存在时才允许回退到计划/债务文档，并在状态机可用后立即自举。
+- 每次开始新任务、网络重连或上下文压缩恢复后，第一条仓库命令必须是 `Build/InvokePhaseWorkflow.ps1 status -Phase <当前Phase>`；当前 Phase 50 固定使用 `Build/InvokePhaseWorkflow.ps1 status -Phase 50`。只有对应 state 文件尚不存在时才允许回退到计划/债务文档，并在状态机可用后立即自举。
 - 状态创建后只通过 `Build/InvokePhaseWorkflow.ps1` 执行 batch、debt、architecture revision、freeze、attest、close 和 reopen。完整 Gate 验证 `gate_ready` 候选提交；Gate 后只允许一个受限 attestation commit，没有匹配 commit/tree/state hash 的不可变 Gate 报告时不得宣布 Phase 完成。
+- 2026-07-24 P50 工作流探测错误记录：`Build/InvokePhaseWorkflow.ps1` 没有 `help` 子命令，直接执行 `help` 会先因缺少有效 `-Phase` 触发 `ASPW1101`，不提供使用说明。Prevention：恢复状态使用 `status -Phase <N>`；需要确认命令参数时读取脚本 `param`/`switch` 块或既有流程文档，不再用不存在的 `help` 探测。
 
 ## C# Guest Toolchain Workflow
 
