@@ -43,9 +43,9 @@
     },
     {
       "id": "P50.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Typed benchmark harness and architecture freeze completed through commits 0724a7b, 89838b5, 31a7e5b, 4c5a652, 759dc75, 3305de9, 0e54fc1, 93ff6fb and 23b238c. Clean detached prevalidation at 23b238c passed dedicated Phase 50 Gate with 19 registered inputs, 17 checker fixtures, and generic architecture checker. Independent final review approved with no Critical or Important findings; formal UBT, full Automation and benchmark execution remain deferred to the frozen full Gate.",
+      "completed_at_utc": "2026-07-24T02:38:00.0750690+00:00"
     }
   ],
   "debt": [],
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "batch-complete -Phase 50 -BatchId P50.5 -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-07-23T22:03:16.3064812+00:00"
+  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
+  "revision": 6,
+  "updated_at_utc": "2026-07-24T02:38:00.0771491+00:00"
 }
