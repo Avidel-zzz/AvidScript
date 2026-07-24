@@ -21,6 +21,12 @@ function Add-Violation {
     $Violations.Add($Message)
 }
 
+function ConvertFrom-CppPhase2LineSplicing {
+    param([string]$Source)
+
+    return [regex]::Replace($Source, '\\(?:\r\n|\n|\r)', '')
+}
+
 function Remove-SourceComments {
     param(
         [string]$Source,
@@ -690,16 +696,25 @@ function Test-GeneratedSurfaceConstructionClosure {
     param(
         [string]$RendererSource,
         [string]$StateContractRendererSource,
+        [string]$DefaultValueFormatterSource,
+        [string]$SyntaxSource,
+        [string]$LifecycleBindingSource,
         [System.Collections.Generic.List[string]]$Violations
     )
 
     $ExpectedHashes = [ordered]@{
         'BindingRenderer' = 'b015232a6254014864708bbdb2338c34196f046ef2b168877a1f9cb8408d7ac4'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
+        'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
+        'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
+        'LifecycleBinding' = '4a7c325d2f16e119ea3ce08af777186fda194e61bd3e397e4b29bb6e2c50510e'
     }
     $ActualSources = [ordered]@{
         'BindingRenderer' = $RendererSource
         'StateContractRenderer' = $StateContractRendererSource
+        'DefaultValueFormatter' = $DefaultValueFormatterSource
+        'CSharpSyntax' = $SyntaxSource
+        'LifecycleBinding' = $LifecycleBindingSource
     }
     foreach ($Entry in $ActualSources.GetEnumerator()) {
         $ActualHash = Get-CanonicalCodeSha256 $Entry.Value
@@ -716,7 +731,8 @@ function Test-RegistryPathSurface {
         [string]$Description
     )
 
-    $CodeWithoutStrings = Remove-SourceStrings $RegistrySource
+    $Phase2Source = ConvertFrom-CppPhase2LineSplicing $RegistrySource
+    $CodeWithoutStrings = Remove-SourceStrings $Phase2Source
     $PathIdentifierCount = [regex]::Matches($CodeWithoutStrings, '\bGetPathName\b').Count
     if ($PathIdentifierCount -ne 2) {
         Add-Violation $Violations "$Description must contain exactly two reviewed GetPathName identifiers; actual=$PathIdentifierCount"
@@ -729,6 +745,12 @@ function Test-RegistryPathSurface {
     if ($CodeWithoutStrings.Contains('##')) {
         Add-Violation $Violations "$Description contains token-paste and can synthesize unreviewed path calls"
     }
+    if ($CodeWithoutStrings.Contains('%:')) {
+        Add-Violation $Violations "$Description contains alternative preprocessor tokens"
+    }
+    if ($CodeWithoutStrings.Contains('??/')) {
+        Add-Violation $Violations "$Description contains a trigraph that can synthesize line splicing"
+    }
 }
 
 function Test-DiagnosticForwarding {
@@ -738,14 +760,15 @@ function Test-DiagnosticForwarding {
         [System.Collections.Generic.List[string]]$Violations
     )
 
-    $FailureCalls = @(Get-CallArguments $FunctionBody 'SetFailure' $Violations "$FunctionName failure calls")
+    $Phase2Body = ConvertFrom-CppPhase2LineSplicing $FunctionBody
+    $FailureCalls = @(Get-CallArguments $Phase2Body 'SetFailure' $Violations "$FunctionName failure calls")
     foreach ($FailureCall in $FailureCalls) {
         if ($FailureCall.Arguments.Count -ne 6 -or
             $FailureCall.Arguments[4].Trim() -cne 'bIncludeObjectPath') {
             Add-Violation $Violations "$FunctionName failure diagnostics must forward bIncludeObjectPath"
         }
     }
-    $SuccessCalls = @(Get-CallArguments $FunctionBody 'SetSuccess' $Violations "$FunctionName success calls")
+    $SuccessCalls = @(Get-CallArguments $Phase2Body 'SetSuccess' $Violations "$FunctionName success calls")
     foreach ($SuccessCall in $SuccessCalls) {
         if ($SuccessCall.Arguments.Count -ne 4 -or
             $SuccessCall.Arguments[3].Trim() -cne 'bIncludeObjectPath') {
@@ -1072,12 +1095,21 @@ function Test-RendererCandidates {
     param(
         [string]$Source,
         [string]$StateContractRendererSource,
+        [string]$DefaultValueFormatterSource,
+        [string]$SyntaxSource,
+        [string]$LifecycleBindingSource,
         [System.Collections.Generic.List[string]]$Violations
     )
 
     $Literals = @(Get-CppStringLiterals $Source $Violations 'C# renderer')
     Test-RendererFrozenRegions $Source $Violations
-    Test-GeneratedSurfaceConstructionClosure $Source $StateContractRendererSource $Violations
+    Test-GeneratedSurfaceConstructionClosure `
+        $Source `
+        $StateContractRendererSource `
+        $DefaultValueFormatterSource `
+        $SyntaxSource `
+        $LifecycleBindingSource `
+        $Violations
     $LiteralStream = $Literals -join ''
     $EntryPointTokenCount = [regex]::Matches($LiteralStream, '\bEntryPoint\b').Count
     $EntryPointMatches = @(
@@ -1280,6 +1312,19 @@ function Test-TypedCastDispatch {
     }
 
     Test-RegistryPathSurface $RegistrySource $Violations 'typed cast object registry'
+    $ExpectedRegistryHashes = [ordered]@{
+        'ObjectRegistryHeader' = '58e9690b316c97ecff4f28761ea995b957c4281d0500fafceb9b390ca89fea45'
+        'ObjectRegistrySource' = 'f447932ceaa5f20bf7fd614dbeac4bc065c91c0899e9e800a677326670f50b78'
+    }
+    foreach ($RegistryHashEntry in ([ordered]@{
+        'ObjectRegistryHeader' = $RegistryHeader
+        'ObjectRegistrySource' = $RegistrySource
+    }).GetEnumerator()) {
+        $ActualHash = Get-CanonicalCodeSha256 $RegistryHashEntry.Value
+        if ($ActualHash -cne $ExpectedRegistryHashes[$RegistryHashEntry.Key]) {
+            Add-Violation $Violations "frozen registry implementation $($RegistryHashEntry.Key) changed: actual=$ActualHash expected=$($ExpectedRegistryHashes[$RegistryHashEntry.Key])"
+        }
+    }
     $Closure = Remove-SourceStrings (
         $Dispatch.Text + "`n" +
         $ResolveObject.Text + "`n" +
@@ -1421,6 +1466,8 @@ function Invoke-Phase50Contracts {
     $DynamicRegistry = $Inputs['Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'].Code
     $Renderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'].Code
     $StateContractRenderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'].Code
+    $DefaultValueFormatter = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.cpp'].Code
+    $Syntax = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpSyntax.cpp'].Code
     $OperationLowerer = $Inputs['Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'].Code
     $Invocation = $Inputs['Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'].Code
     $ObjectRegistryHeader = $Inputs['Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'].Code
@@ -1646,7 +1693,13 @@ function Invoke-Phase50Contracts {
     }
 
     Test-GeneratedImportLiterals $DescriptorGenerator $Violations
-    Test-RendererCandidates $Renderer $StateContractRenderer $Violations
+    Test-RendererCandidates `
+        $Renderer `
+        $StateContractRenderer `
+        $DefaultValueFormatter `
+        $Syntax `
+        $LifecycleBindings `
+        $Violations
     foreach ($RendererFunctionSpec in @(
         [pscustomobject]@{
             Pattern = '\bbool\s+RenderMethod\s*\('
@@ -2061,9 +2114,57 @@ void SetFailure()
         Write-Host 'Fixture passed: registry path macros and extra path identifiers are rejected.'
     }
 
+    $RegistryPhase2Failures = New-ViolationList
+    $RegistryPhase2Regression = @'
+#include "Registry.h"
+void SetSuccess()
+{
+    if (bIncludeObjectPath && Object != nullptr)
+    {
+        OutResult.ObjectPath = Object->GetPathName();
+    }
+}
+void SetFailure()
+{
+    if (bIncludeObjectPath && Object != nullptr)
+    {
+        OutResult.ObjectPath = Object->GetPathName();
+    }
+    Audit = Object->GetPath\
+Name();
+}
+'@
+    Test-RegistryPathSurface `
+        $RegistryPhase2Regression `
+        $RegistryPhase2Failures `
+        'registry phase-2 regression fixture'
+    if ($RegistryPhase2Failures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'phase-2 line-spliced path regression fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: C++ phase-2 line-spliced path identifiers are rejected.'
+    }
+
+    $AlternativePreprocessorFailures = New-ViolationList
+    $AlternativePreprocessorRegression = @'
+%:define AVID_PATH Object->GetPathName()
+Object->GetPathName();
+'@
+    Test-RegistryPathSurface `
+        $AlternativePreprocessorRegression `
+        $AlternativePreprocessorFailures `
+        'alternative preprocessor regression fixture'
+    if ($AlternativePreprocessorFailures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'alternative preprocessor token regression fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: alternative preprocessor tokens are rejected.'
+    }
+
     $ForwardingFailures = New-ViolationList
     $ForwardingRegression = @'
-SetFailure(OutResult, Handle, TEXT("invalid"), Object, true, TEXT("next"));
+SetFail\
+ure(OutResult, Handle, TEXT("invalid"), Object, true, TEXT("next"));
 SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
 '@
     Test-DiagnosticForwarding `
@@ -2071,10 +2172,10 @@ SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
         'ReleaseHandle fixture' `
         $ForwardingFailures
     if ($ForwardingFailures.Count -eq 0) {
-        Add-Violation $FixtureFailures 'public registry entry forwarding regression fixture was not rejected'
+        Add-Violation $FixtureFailures 'phase-2 public registry entry forwarding regression fixture was not rejected'
     }
     else {
-        Write-Host 'Fixture passed: every public registry entry must forward bIncludeObjectPath.'
+        Write-Host 'Fixture passed: phase-2 calls in every public registry entry must forward bIncludeObjectPath.'
     }
 
     if ($FixtureFailures.Count -gt 0) {
@@ -2099,13 +2200,25 @@ if ($Mode -eq 'Hashes') {
     $HashViolations = New-ViolationList
     $RendererPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
     $RendererSource = [System.IO.File]::ReadAllText($RendererPath)
-    $RendererCode = Remove-SourceComments $RendererSource $HashViolations 'C# renderer hash input'
+    $RendererCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $RendererSource) $HashViolations 'C# renderer hash input'
     $StateContractRendererPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'
     $StateContractRendererSource = [System.IO.File]::ReadAllText($StateContractRendererPath)
-    $StateContractRendererCode = Remove-SourceComments $StateContractRendererSource $HashViolations 'C# state contract renderer hash input'
+    $StateContractRendererCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $StateContractRendererSource) $HashViolations 'C# state contract renderer hash input'
+    $DefaultValueFormatterPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.cpp'
+    $DefaultValueFormatterSource = [System.IO.File]::ReadAllText($DefaultValueFormatterPath)
+    $DefaultValueFormatterCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $DefaultValueFormatterSource) $HashViolations 'C# default value formatter hash input'
+    $SyntaxPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpSyntax.cpp'
+    $SyntaxSource = [System.IO.File]::ReadAllText($SyntaxPath)
+    $SyntaxCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $SyntaxSource) $HashViolations 'C# syntax hash input'
+    $LifecycleBindingPath = Join-Path $PluginRoot 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
+    $LifecycleBindingSource = [System.IO.File]::ReadAllText($LifecycleBindingPath)
+    $LifecycleBindingCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $LifecycleBindingSource) $HashViolations 'object lifecycle binding hash input'
     $RegistryPath = Join-Path $PluginRoot 'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'
     $RegistrySource = [System.IO.File]::ReadAllText($RegistryPath)
-    $RegistryCode = Remove-SourceComments $RegistrySource $HashViolations 'object registry diagnostic hash input'
+    $RegistryCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $RegistrySource) $HashViolations 'object registry diagnostic hash input'
+    $RegistryHeaderPath = Join-Path $PluginRoot 'Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'
+    $RegistryHeaderSource = [System.IO.File]::ReadAllText($RegistryHeaderPath)
+    $RegistryHeaderCode = Remove-SourceComments (ConvertFrom-CppPhase2LineSplicing $RegistryHeaderSource) $HashViolations 'object registry header hash input'
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $RendererCode $Entry.Value $HashViolations "renderer hash region $($Entry.Key)"
         if ($null -ne $Region) {
@@ -2114,6 +2227,11 @@ if ($Mode -eq 'Hashes') {
     }
     Write-Host "BindingRenderer=$(Get-CanonicalCodeSha256 $RendererCode)"
     Write-Host "StateContractRenderer=$(Get-CanonicalCodeSha256 $StateContractRendererCode)"
+    Write-Host "DefaultValueFormatter=$(Get-CanonicalCodeSha256 $DefaultValueFormatterCode)"
+    Write-Host "CSharpSyntax=$(Get-CanonicalCodeSha256 $SyntaxCode)"
+    Write-Host "LifecycleBinding=$(Get-CanonicalCodeSha256 $LifecycleBindingCode)"
+    Write-Host "ObjectRegistryHeader=$(Get-CanonicalCodeSha256 $RegistryHeaderCode)"
+    Write-Host "ObjectRegistrySource=$(Get-CanonicalCodeSha256 $RegistryCode)"
     foreach ($DiagnosticLeafSpec in ([ordered]@{
         'SetSuccess' = '\bvoid\s+FAvidScriptObjectRegistry::SetSuccess\s*\('
         'SetFailure' = '\bvoid\s+FAvidScriptObjectRegistry::SetFailure\s*\('
@@ -2168,7 +2286,13 @@ function Read-ArchitectureInput {
         $Raw = $Raw.Substring(1)
     }
     $Code = if ($Kind -eq 'Source') {
-        Remove-SourceComments $Raw $Violations $NormalizedPath
+        $CommentInput = if ([System.IO.Path]::GetExtension($NormalizedPath) -ceq '.cs') {
+            $Raw
+        }
+        else {
+            ConvertFrom-CppPhase2LineSplicing $Raw
+        }
+        Remove-SourceComments $CommentInput $Violations $NormalizedPath
     }
     else {
         $Raw
@@ -2192,8 +2316,10 @@ $InputManifest = [ordered]@{
     'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp' = 'Source'
+    'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp' = 'Source'
+    'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpSyntax.cpp' = 'Source'
     'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp' = 'Source'
