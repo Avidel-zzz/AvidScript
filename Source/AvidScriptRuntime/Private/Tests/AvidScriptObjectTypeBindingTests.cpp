@@ -4,6 +4,7 @@
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectLifecycleBinding.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptObjectTypeBinding.h"
 
 #include "Components/ActorComponent.h"
@@ -349,7 +350,7 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult RegisterResult;
 	const FAvidScriptObjectHandle RetiredHandle = Registry.RegisterObject(
-		NewObject<UObject>(),
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()),
 		RegisterResult,
 		false);
 	if (!TestTrue(TEXT("Registry establishes a retired handle generation"), RegisterResult.bSucceeded))
@@ -385,7 +386,7 @@ bool FAvidScriptObjectTypeBindingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Component type match returns one"), Result.ReturnValue, 1);
 
 	const FAvidScriptObjectHandle PlainObjectHandle = Registry.RegisterObject(
-		NewObject<UObject>(),
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage()),
 		RegisterResult,
 		false);
 	if (!TestTrue(TEXT("Plain UObject registers for mismatch coverage"),

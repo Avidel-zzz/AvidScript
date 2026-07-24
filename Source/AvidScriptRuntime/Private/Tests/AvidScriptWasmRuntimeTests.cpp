@@ -4,6 +4,7 @@
 #include "AvidScriptWorldSubsystem.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/EngineVersion.h"
@@ -300,6 +301,21 @@ bool MakeTypedOwnerDescriptor(const bool bPublishObjectType, FString& OutJson)
 			1,
 			ObjectType.StableId);
 		Package.Types = { ObjectType, ActorType };
+		Package.SelfTypeId = ActorType.StableId;
+
+		FAvidScriptBindingClassReferenceModel ActorReference;
+		ActorReference.Ordinal = 0;
+		ActorReference.ScriptName = TEXT("ActorClass");
+		ActorReference.ClassPath = ActorType.ClassPath;
+		ActorReference.BaseClassPath = ActorType.ClassPath;
+		ActorReference.LoadPolicy = TEXT("EditorLoad");
+		ActorReference.ResultTypeId = ActorType.StableId;
+		ActorReference.StableId =
+			FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+				ActorReference.ClassPath,
+				ActorReference.BaseClassPath,
+				ActorReference.LoadPolicy);
+		Package.ClassReferences.Add(MoveTemp(ActorReference));
 	}
 	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
 	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
@@ -316,15 +332,30 @@ bool MakeTypedOwnerDescriptor(const bool bPublishObjectType, FString& OutJson)
 			*Type.BaseTypeId));
 	}
 	const FString TypesJson = TEXT("[") + FString::Join(TypeJsonEntries, TEXT(",")) + TEXT("]");
+	FString ClassReferencesJson = TEXT("[]");
+	if (!Package.ClassReferences.IsEmpty())
+	{
+		const FAvidScriptBindingClassReferenceModel& Reference = Package.ClassReferences[0];
+		ClassReferencesJson = FString::Printf(
+			TEXT("[{\"stable_id\":\"%s\",\"ordinal\":0,\"script_name\":\"%s\",\"class_path\":\"%s\",\"base_class_path\":\"%s\",\"load_policy\":\"%s\",\"result_type_id\":\"%s\"}]"),
+			*Reference.StableId,
+			*Reference.ScriptName,
+			*Reference.ClassPath,
+			*Reference.BaseClassPath,
+			*Reference.LoadPolicy,
+			*Reference.ResultTypeId);
+	}
 
 	OutJson = FString::Printf(
-		TEXT("{\"schema_version\":6,\"generator_version\":\"%s\",\"engine_version\":\"%s\",\"source\":\"ue_reflection\",\"package_name\":\"%s\",\"package_hash\":\"%s\",\"selection_hash\":\"%s\",\"self_type_id\":\"\",\"types\":%s,\"class_references\":[],\"bindings\":[]}"),
+		TEXT("{\"schema_version\":6,\"generator_version\":\"%s\",\"engine_version\":\"%s\",\"source\":\"ue_reflection\",\"package_name\":\"%s\",\"package_hash\":\"%s\",\"selection_hash\":\"%s\",\"self_type_id\":\"%s\",\"types\":%s,\"class_references\":%s,\"bindings\":[]}"),
 		*Package.GeneratorVersion,
 		*Package.EngineVersion,
 		*Package.PackageName,
 		*Package.PackageHash,
 		*Package.SelectionHash,
-		*TypesJson);
+		*Package.SelfTypeId,
+		*TypesJson,
+		*ClassReferencesJson);
 	return true;
 }
 
@@ -439,17 +470,18 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Empty v6 descriptor serializes"), MakeTypedOwnerDescriptor(false, EmptyDescriptorJson));
 	TSharedPtr<const FAvidScriptBindingPackage> EmptyPackage;
 	FAvidScriptBindingPackageLoadResult EmptyPackageResult;
-	if (!TestTrue(TEXT("Empty v6 descriptor loads"),
-		FAvidScriptBindingPackage::LoadDescriptor(EmptyDescriptorJson, EmptyPackage, EmptyPackageResult))
-		|| !TestNotNull(TEXT("Empty descriptor produces a package"), EmptyPackage.Get()))
-	{
-		AddError(EmptyPackageResult.ErrorCategory + TEXT(": ") + EmptyPackageResult.ErrorDetails);
-		return false;
-	}
-	const TArray<const FAvidScriptVmDynamicImport*> EmptyObjectTypeImports =
-		CollectTypedOwnerObjectTypeImports(*EmptyPackage);
-	TestEqual(TEXT("Empty v6 descriptor authorizes zero same-name object-type imports"),
-		EmptyObjectTypeImports.Num(), 0);
+	TestFalse(TEXT("Empty v6 descriptor fails closed"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			EmptyDescriptorJson,
+			EmptyPackage,
+			EmptyPackageResult));
+	TestNull(TEXT("Rejected empty descriptor produces no package"), EmptyPackage.Get());
+	TestEqual(TEXT("Empty descriptor rejection keeps the contract category"),
+		EmptyPackageResult.ErrorCategory,
+		FString(TEXT("descriptor_contract_invalid")));
+	TestEqual(TEXT("Empty descriptor rejection identifies its missing capability"),
+		EmptyPackageResult.ErrorSource,
+		FString(TEXT("bindings|class_references")));
 
 	FString PublishedDescriptorJson;
 	TestTrue(TEXT("Published v6 descriptor serializes"), MakeTypedOwnerDescriptor(true, PublishedDescriptorJson));
@@ -479,7 +511,8 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptObjectHandleResult RegisterResult;
-	UObject* OwnerObject = NewObject<UObject>(GetTransientPackage());
+	UObject* OwnerObject =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
 	const FAvidScriptObjectHandle OwnerHandle = Registry.RegisterObject(OwnerObject, RegisterResult, false);
 	if (!TestTrue(TEXT("Typed owner target registers in the runtime registry"),
 		RegisterResult.bSucceeded && OwnerHandle.IsValid()))
