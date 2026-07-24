@@ -15,6 +15,7 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 			InvalidHandle,
 			TEXT("invalid_object"),
 			Object,
+			bIncludeObjectPath,
 			TEXT("Register only live UObject instances owned by the current world or package."));
 		return InvalidHandle;
 	}
@@ -70,6 +71,7 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 			Handle,
 			TEXT("invalid_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Use a handle returned by the active AvidScript object registry."));
 		return nullptr;
 	}
@@ -82,6 +84,7 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 			Handle,
 			TEXT("invalid_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Discard handles from previous worlds or registry resets."));
 		return nullptr;
 	}
@@ -94,6 +97,7 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 			Handle,
 			TEXT("generation_mismatch"),
 			Slot.Object.Get(),
+			bIncludeObjectPath,
 			TEXT("Discard stale handles and request a fresh handle from the host."));
 		return nullptr;
 	}
@@ -105,6 +109,7 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 			Handle,
 			TEXT("stale_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Discard released handles and request a fresh handle from the host."));
 		return nullptr;
 	}
@@ -117,6 +122,7 @@ UObject* FAvidScriptObjectRegistry::ResolveObject(
 			Handle,
 			TEXT("invalid_object"),
 			Object,
+			bIncludeObjectPath,
 			TEXT("Stop using handles whose UObject has been destroyed or garbage collected."));
 		return nullptr;
 	}
@@ -137,6 +143,7 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 			Handle,
 			TEXT("invalid_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Release only handles returned by the active AvidScript object registry."));
 		return false;
 	}
@@ -149,6 +156,7 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 			Handle,
 			TEXT("invalid_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Ignore release requests for handles outside the active registry."));
 		return false;
 	}
@@ -161,6 +169,7 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 			Handle,
 			TEXT("generation_mismatch"),
 			Slot.Object.Get(),
+			bIncludeObjectPath,
 			TEXT("Ignore release requests for stale handle generations."));
 		return false;
 	}
@@ -172,6 +181,7 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 			Handle,
 			TEXT("stale_handle"),
 			nullptr,
+			bIncludeObjectPath,
 			TEXT("Ignore duplicate release requests."));
 		return false;
 	}
@@ -223,11 +233,15 @@ void FAvidScriptObjectRegistry::SetFailure(
 	const FAvidScriptObjectHandle& Handle,
 	const TCHAR* ErrorCategory,
 	const UObject* Object,
+	const bool bIncludeObjectPath,
 	const TCHAR* NextAction)
 {
 	OutResult = FAvidScriptObjectHandleResult();
 	OutResult.Handle = Handle;
-	OutResult.ObjectPath = Object != nullptr ? Object->GetPathName() : FString();
+	if (bIncludeObjectPath && Object != nullptr)
+	{
+		OutResult.ObjectPath = Object->GetPathName();
+	}
 	OutResult.ErrorCategory = ErrorCategory;
 	OutResult.NextAction = NextAction;
 	OutResult.ErrorMessage = FString::Printf(

@@ -70,6 +70,7 @@ public:
 				Handle,
 				TEXT("type_mismatch"),
 				Object,
+				bIncludeObjectPath,
 				TEXT("Use a handle API that matches the registered UObject type."));
 			return nullptr;
 		}
@@ -107,6 +108,7 @@ private:
 		const FAvidScriptObjectHandle& Handle,
 		const TCHAR* ErrorCategory,
 		const UObject* Object,
+		bool bIncludeObjectPath,
 		const TCHAR* NextAction);
 
 	TArray<FSlot> Slots;

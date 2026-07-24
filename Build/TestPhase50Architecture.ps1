@@ -114,6 +114,43 @@ function Remove-SourceComments {
     return $Builder.ToString()
 }
 
+function Remove-SourceStrings {
+    param([string]$Source)
+
+    $Builder = [System.Text.StringBuilder]::new($Source.Length)
+    $Quote = [char]0
+    for ($Index = 0; $Index -lt $Source.Length; ++$Index) {
+        $Character = $Source[$Index]
+        if ($Quote -eq [char]0) {
+            if ($Character -eq '"' -or $Character -eq "'") {
+                $Quote = $Character
+                [void]$Builder.Append(' ')
+            }
+            else {
+                [void]$Builder.Append($Character)
+            }
+            continue
+        }
+
+        if ($Character -eq '\' -and $Index + 1 -lt $Source.Length) {
+            [void]$Builder.Append(' ')
+            ++$Index
+            [void]$Builder.Append(' ')
+            continue
+        }
+        if ($Character -eq $Quote) {
+            $Quote = [char]0
+        }
+        if ($Character -eq "`r" -or $Character -eq "`n") {
+            [void]$Builder.Append($Character)
+        }
+        else {
+            [void]$Builder.Append(' ')
+        }
+    }
+    return $Builder.ToString()
+}
+
 function Get-BalancedSpan {
     param(
         [string]$Source,
@@ -439,7 +476,8 @@ function Get-DirectCallNames {
 
     $Names = [System.Collections.Generic.List[string]]::new()
     $Pattern = '(?<![A-Za-z0-9_])(?<callee>[A-Za-z_][A-Za-z0-9_]*(?:\s*(?:::|->|\.)\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*(?:<[^;{}()]*>)?\s*\('
-    foreach ($Match in [regex]::Matches($Body, $Pattern)) {
+    $Code = Remove-SourceStrings $Body
+    foreach ($Match in [regex]::Matches($Code, $Pattern)) {
         $Name = [regex]::Replace($Match.Groups['callee'].Value, '\s+', '')
         if ($Name -in @(
             'if', 'for', 'while', 'switch', 'return', 'sizeof',
@@ -465,6 +503,38 @@ function Test-DirectCallAllowlist {
     $Unexpected = @($Actual | Where-Object { $AllowedCalls -cnotcontains $_ })
     if ($Unexpected.Count -gt 0) {
         Add-Violation $Violations "$Description contains unreviewed helper calls: $($Unexpected -join ', ')"
+    }
+}
+
+function Test-GeneratedLiteralStream {
+    param(
+        [string]$Source,
+        [string[]]$AllowedAvidTokens,
+        [string[]]$AllowedDeclarationNames,
+        [System.Collections.Generic.List[string]]$Violations,
+        [string]$Description
+    )
+
+    $Literals = @(Get-CppStringLiterals $Source $Violations $Description)
+    $LiteralStream = $Literals -join ''
+    $UnexpectedAvidTokens = @(
+        [regex]::Matches($LiteralStream, '\bavid_[a-z0-9_]+\b') |
+            ForEach-Object { $_.Value } |
+            Where-Object { $AllowedAvidTokens -cnotcontains $_ } |
+            Sort-Object -Unique)
+    if ($UnexpectedAvidTokens.Count -gt 0) {
+        Add-Violation $Violations "$Description contains bespoke split-capable avid_* literals: $($UnexpectedAvidTokens -join ', ')"
+    }
+
+    $UnexpectedDeclarations = @(
+        [regex]::Matches(
+            $LiteralStream,
+            '\b(?:public|internal)\s+(?:(?:readonly|static)\s+)?(?:struct|class|enum)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)') |
+            ForEach-Object { $_.Groups['name'].Value } |
+            Where-Object { $AllowedDeclarationNames -cnotcontains $_ } |
+            Sort-Object -Unique)
+    if ($UnexpectedDeclarations.Count -gt 0) {
+        Add-Violation $Violations "$Description contains bespoke split-capable wrapper declarations: $($UnexpectedDeclarations -join ', ')"
     }
 }
 
@@ -754,19 +824,14 @@ function Test-RendererCandidates {
     )
 
     $Literals = @(Get-CppStringLiterals $Source $Violations 'C# renderer')
-    $EntryPointCandidates = @($Literals | Where-Object { $_.Contains('EntryPoint') })
-    $ParsedEntryPoints = [System.Collections.Generic.List[string]]::new()
-    foreach ($Candidate in $EntryPointCandidates) {
-        $Matches = [regex]::Matches($Candidate, 'EntryPoint\s*=\s*"(?<name>[^"]+)"')
-        if ($Matches.Count -ne 1) {
-            Add-Violation $Violations "renderer has an unparsed EntryPoint candidate: $Candidate"
-            continue
-        }
-        $ParsedEntryPoints.Add($Matches[0].Groups['name'].Value)
+    $LiteralStream = $Literals -join ''
+    $EntryPointTokenCount = [regex]::Matches($LiteralStream, '\bEntryPoint\b').Count
+    $EntryPointMatches = @(
+        [regex]::Matches($LiteralStream, 'EntryPoint\s*=\s*"(?<name>[^"]+)"'))
+    if ($EntryPointMatches.Count -ne $EntryPointTokenCount) {
+        Add-Violation $Violations "renderer EntryPoint parse completeness failed: candidates=$EntryPointTokenCount parsed=$($EntryPointMatches.Count)"
     }
-    if ($ParsedEntryPoints.Count -ne $EntryPointCandidates.Count) {
-        Add-Violation $Violations "renderer EntryPoint parse completeness failed: candidates=$($EntryPointCandidates.Count) parsed=$($ParsedEntryPoints.Count)"
-    }
+    $ParsedEntryPoints = @($EntryPointMatches | ForEach-Object { $_.Groups['name'].Value })
     Test-ExactMultiset `
         @($ParsedEntryPoints) `
         @(
@@ -796,6 +861,24 @@ function Test-RendererCandidates {
     if ($UnexpectedAvidTokens.Count -gt 0) {
         Add-Violation $Violations "renderer contains bespoke avid_* literals: $($UnexpectedAvidTokens -join ', ')"
     }
+    Test-GeneratedLiteralStream `
+        $Source `
+        $AllowedAvidLiterals `
+        @(
+            'FVector',
+            'InputEvent',
+            'FRotator',
+            'FTransform',
+            'AvidScriptBindingPackage',
+            'TSubclassOfAActor',
+            'ProjectClasses',
+            'FAvidScriptObjectHandle',
+            'UE',
+            'AvidScriptRuntimeNative',
+            'AvidScriptNative'
+        ) `
+        $Violations `
+        'C# renderer'
 
     $DeclarationCandidates = @(
         $Literals | Where-Object {
@@ -858,6 +941,7 @@ function Test-GeneratedImportLiterals {
     )
 
     $Literals = @(Get-CppStringLiterals $Source $Violations 'descriptor import generator')
+    $LiteralStream = $Literals -join ''
     $Candidates = [System.Collections.Generic.List[string]]::new()
     foreach ($Literal in $Literals) {
         foreach ($Match in [regex]::Matches($Literal, '\bavid_[a-z0-9_]*\b')) {
@@ -872,11 +956,20 @@ function Test-GeneratedImportLiterals {
     if ($Unexpected.Count -gt 0) {
         Add-Violation $Violations "descriptor import generator contains bespoke avid_* literals: $($Unexpected -join ', ')"
     }
+    $UnexpectedSplit = @(
+        [regex]::Matches($LiteralStream, '\bavid_[a-z0-9_]+') |
+            ForEach-Object { $_.Value } |
+            Where-Object { -not $_.StartsWith('avid_ue_', [System.StringComparison]::Ordinal) } |
+            Sort-Object -Unique)
+    if ($UnexpectedSplit.Count -gt 0) {
+        Add-Violation $Violations "descriptor import generator contains bespoke split-capable avid_* literals: $($UnexpectedSplit -join ', ')"
+    }
 }
 
 function Test-TypedCastDispatch {
     param(
         [string]$InvocationSource,
+        [string]$RegistryHeader,
         [string]$RegistrySource,
         [System.Collections.Generic.List[string]]$Violations
     )
@@ -896,18 +989,42 @@ function Test-TypedCastDispatch {
         '\bbool\s+FAvidScriptBindingPackage::TryResolveObjectType\s*\(' `
         $Violations `
         'typed cast UClass plan resolver'
-    if ($null -eq $Dispatch -or $null -eq $ResolveObject -or $null -eq $ResolveType) {
+    $DispatchFailure = Get-UniqueBraceRegion `
+        $InvocationSource `
+        '\bvoid\s+SetAvidScriptBindingDispatchFailure\s*\(' `
+        $Violations `
+        'typed cast dispatch failure leaf'
+    $SetSuccess = Get-UniqueBraceRegion `
+        $RegistrySource `
+        '\bvoid\s+FAvidScriptObjectRegistry::SetSuccess\s*\(' `
+        $Violations `
+        'typed cast registry success leaf'
+    $SetFailure = Get-UniqueBraceRegion `
+        $RegistrySource `
+        '\bvoid\s+FAvidScriptObjectRegistry::SetFailure\s*\(' `
+        $Violations `
+        'typed cast registry failure leaf'
+    if ($null -eq $Dispatch -or
+        $null -eq $ResolveObject -or
+        $null -eq $ResolveType -or
+        $null -eq $DispatchFailure -or
+        $null -eq $SetSuccess -or
+        $null -eq $SetFailure) {
         return
     }
 
-    $Closure = $Dispatch.Text + "`n" + $ResolveObject.Text + "`n" + $ResolveType.Text
+    $Closure = Remove-SourceStrings (
+        $Dispatch.Text + "`n" +
+        $ResolveObject.Text + "`n" +
+        $ResolveType.Text + "`n" +
+        $DispatchFailure.Text)
     foreach ($ForbiddenLookup in @('FindObject', 'LoadObject', 'StaticLoadObject', 'GetPathName')) {
         if ($Closure -match ('\b' + $ForbiddenLookup + '\s*(?:<[^>]+>)?\s*\(')) {
-            Add-Violation $Violations "typed cast direct closure contains path lookup $ForbiddenLookup"
+            Add-Violation $Violations "typed cast reviewed closure contains path lookup $ForbiddenLookup"
         }
     }
     if ($Closure -match '\bAActor\b') {
-        Add-Violation $Violations 'typed cast direct closure contains Actor-only dispatch'
+        Add-Violation $Violations 'typed cast reviewed closure contains Actor-only dispatch'
     }
 
     Test-DirectCallAllowlist `
@@ -937,6 +1054,60 @@ function Test-TypedCastDispatch {
         @('Impl->ObjectTypePlans.IsValidIndex') `
         $Violations `
         'typed cast UClass plan resolver'
+    Test-DirectCallAllowlist `
+        $DispatchFailure.Body `
+        @('FAvidScriptDynamicHostCallResult', 'FString::Printf', 'Source.IsEmpty') `
+        $Violations `
+        'typed cast dispatch failure leaf'
+    Test-DirectCallAllowlist `
+        $SetSuccess.Body `
+        @('FAvidScriptObjectHandleResult', 'Object->GetPathName') `
+        $Violations `
+        'typed cast registry success leaf'
+    Test-DirectCallAllowlist `
+        $SetFailure.Body `
+        @('FAvidScriptObjectHandleResult', 'Object->GetPathName', 'FString::Printf', 'OutResult.ObjectPath.IsEmpty') `
+        $Violations `
+        'typed cast registry failure leaf'
+
+    foreach ($DiagnosticLeaf in @($SetSuccess, $SetFailure)) {
+        Test-RegexSequence `
+            $DiagnosticLeaf.Text `
+            @(
+                'bool\s+bIncludeObjectPath',
+                'if\s*\(\s*bIncludeObjectPath\s*&&\s*Object\s*!=\s*nullptr\s*\)',
+                'OutResult\s*\.\s*ObjectPath\s*=\s*Object\s*->\s*GetPathName\s*\(\s*\)'
+            ) `
+            $Violations `
+            'typed cast registry diagnostic path guard'
+    }
+    $FailureCalls = @(Get-CallArguments $ResolveObject.Body 'SetFailure' $Violations 'typed cast ResolveObject failure calls')
+    foreach ($FailureCall in $FailureCalls) {
+        if ($FailureCall.Arguments.Count -ne 6 -or
+            $FailureCall.Arguments[4].Trim() -cne 'bIncludeObjectPath') {
+            Add-Violation $Violations 'typed cast ResolveObject failure diagnostics must forward bIncludeObjectPath'
+        }
+    }
+    $SuccessCalls = @(Get-CallArguments $ResolveObject.Body 'SetSuccess' $Violations 'typed cast ResolveObject success calls')
+    foreach ($SuccessCall in $SuccessCalls) {
+        if ($SuccessCall.Arguments.Count -ne 4 -or
+            $SuccessCall.Arguments[3].Trim() -cne 'bIncludeObjectPath') {
+            Add-Violation $Violations 'typed cast ResolveObject success diagnostics must forward bIncludeObjectPath'
+        }
+    }
+    if ($FailureCalls.Count -eq 0 -or $SuccessCalls.Count -ne 1) {
+        Add-Violation $Violations 'typed cast ResolveObject diagnostic leaves are incomplete'
+    }
+    Test-RegexSequence `
+        $RegistryHeader `
+        @(
+            'SetFailure\s*\(',
+            'Object\s*,\s*bIncludeObjectPath\s*,\s*TEXT\s*\(\s*"Use a handle API that matches the registered UObject type\."\s*\)',
+            'static\s+void\s+SetFailure\s*\(',
+            'const\s+UObject\s*\*\s*Object\s*,\s*bool\s+bIncludeObjectPath\s*,\s*const\s+TCHAR\s*\*\s*NextAction'
+        ) `
+        $Violations `
+        'typed registry template diagnostic forwarding'
 
     Test-RegexSequence `
         $Dispatch.Text `
@@ -972,6 +1143,7 @@ function Invoke-Phase50Contracts {
     $Renderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'].Code
     $OperationLowerer = $Inputs['Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'].Code
     $Invocation = $Inputs['Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'].Code
+    $ObjectRegistryHeader = $Inputs['Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'].Code
     $ObjectRegistry = $Inputs['Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'].Code
     $Runtime = $Inputs['Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'].Code
 
@@ -1304,7 +1476,7 @@ function Invoke-Phase50Contracts {
         }
     }
 
-    Test-TypedCastDispatch $Invocation $ObjectRegistry $Violations
+    Test-TypedCastDispatch $Invocation $ObjectRegistryHeader $ObjectRegistry $Violations
 }
 
 function Invoke-CheckerFixtures {
@@ -1413,7 +1585,7 @@ Object->IsA(CachedClass);
         ) `
         $TypedPositiveFailures `
         'typed formatting fixture'
-    if ($TypedPositiveCode -match '\b(?:FindObject|LoadObject|StaticLoadObject|GetPathName)\s*(?:<[^>]+>)?\s*\(') {
+    if ((Remove-SourceStrings $TypedPositiveCode) -match '\b(?:FindObject|LoadObject|StaticLoadObject|GetPathName)\s*(?:<[^>]+>)?\s*\(') {
         Add-Violation $TypedPositiveFailures 'comment stripping left a forbidden lookup'
     }
     if ($TypedPositiveFailures.Count -ne 0) {
@@ -1438,6 +1610,54 @@ Object->IsA(CachedClass);
     }
     else {
         Write-Host 'Fixture passed: an unreviewed helper and path lookup regression is rejected.'
+    }
+
+    $SplitSurface = @'
+OutSource += TEXT("public readonly ");
+OutSource += TEXT("struct ProjectEnemy");
+OutSource += TEXT("\n");
+OutSource += TEXT("avid_");
+OutSource += TEXT("project_enemy_call");
+'@
+    $SplitSurfaceFailures = New-ViolationList
+    Test-GeneratedLiteralStream `
+        $SplitSurface `
+        @('avid_owner_get_handle', 'avid_object_type_is_a') `
+        @('FVector') `
+        $SplitSurfaceFailures `
+        'split generated surface fixture'
+    if ($SplitSurfaceFailures.Count -lt 2) {
+        Add-Violation $FixtureFailures 'split wrapper/import regression fixture was not fully rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: split bespoke wrapper and import literals are rejected.'
+    }
+
+    $StringCallFailures = New-ViolationList
+    $StringCallFixture = 'FString Diagnostic = TEXT("LoadObject( ResolveTypeByPath("); SafeLeaf();'
+    Test-DirectCallAllowlist `
+        $StringCallFixture `
+        @('SafeLeaf') `
+        $StringCallFailures `
+        'string call fixture'
+    if ($StringCallFailures.Count -ne 0) {
+        Add-Violation $FixtureFailures "string literal call fixture produced false positives: $($StringCallFailures -join '; ')"
+    }
+    else {
+        Write-Host 'Fixture passed: call-like text inside strings is ignored.'
+    }
+
+    $HelperLeafFailures = New-ViolationList
+    Test-DirectCallAllowlist `
+        'FString::Printf(TEXT("failure")); ResolveTypeByPath();' `
+        @('FString::Printf') `
+        $HelperLeafFailures `
+        'reviewed helper leaf fixture'
+    if ($HelperLeafFailures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'reviewed helper leaf regression fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: reviewed helper leaves reject new transitive calls.'
     }
 
     if ($FixtureFailures.Count -gt 0) {
@@ -1506,6 +1726,7 @@ $InputManifest = [ordered]@{
     'Build/TestPhase50Architecture.ps1' = 'PowerShell'
     'AvidScript.uplugin' = 'Json'
     'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h' = 'Source'
+    'Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp' = 'Source'
     'Source/AvidScriptBindings/Private/AvidScriptObjectTypeBinding.cpp' = 'Source'

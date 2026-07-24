@@ -73,6 +73,13 @@ bool FAvidScriptObjectRegistryGenerationSmokeTest::RunTest(const FString& Parame
 	UObject* OldResolvedObject = Registry.ResolveObject<UObject>(FirstHandle, OldResolveResult);
 	TestNull(TEXT("Old generation does not resolve a reused slot"), OldResolvedObject);
 	TestEqual(TEXT("Old generation reports generation mismatch"), OldResolveResult.ErrorCategory, FString(TEXT("generation_mismatch")));
+	FAvidScriptObjectHandleResult FastOldResolveResult;
+	TestNull(
+		TEXT("Hot-path stale generation remains rejected"),
+		Registry.ResolveObject<UObject>(FirstHandle, FastOldResolveResult, false));
+	TestTrue(
+		TEXT("Hot-path failure diagnostics do not construct an object path"),
+		FastOldResolveResult.ObjectPath.IsEmpty());
 
 	FAvidScriptObjectHandleResult NewResolveResult;
 	UObject* NewResolvedObject = Registry.ResolveObject<UObject>(SecondHandle, NewResolveResult);
