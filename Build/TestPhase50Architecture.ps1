@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Gate', 'Fixtures')]
+    [ValidateSet('Gate', 'Fixtures', 'Hashes')]
     [string]$Mode = 'Gate',
     [string]$PluginRoot = (Split-Path -Parent $PSScriptRoot)
 )
@@ -506,6 +506,106 @@ function Test-DirectCallAllowlist {
     }
 }
 
+function Test-SingleCallInsideGuard {
+    param(
+        [string]$FunctionBody,
+        [string]$GuardAnchorPattern,
+        [string]$CallName,
+        [System.Collections.Generic.List[string]]$Violations,
+        [string]$Description
+    )
+
+    $Guard = Get-UniqueBraceRegion $FunctionBody $GuardAnchorPattern $Violations "$Description guard"
+    if ($null -eq $Guard) {
+        return
+    }
+    $AllCalls = @(Get-CallArguments $FunctionBody $CallName $Violations "$Description calls")
+    $GuardCalls = @(Get-CallArguments $Guard.Body $CallName $Violations "$Description guarded calls")
+    if ($AllCalls.Count -ne 1 -or $GuardCalls.Count -ne 1) {
+        Add-Violation $Violations "$Description must call $CallName exactly once inside its guard; total=$($AllCalls.Count) guarded=$($GuardCalls.Count)"
+    }
+}
+
+function Get-CanonicalCodeSha256 {
+    param([string]$Source)
+
+    $Builder = [System.Text.StringBuilder]::new($Source.Length)
+    $Quote = [char]0
+    for ($Index = 0; $Index -lt $Source.Length; ++$Index) {
+        $Character = $Source[$Index]
+        if ($Quote -eq [char]0) {
+            if ([char]::IsWhiteSpace($Character)) {
+                continue
+            }
+            [void]$Builder.Append($Character)
+            if ($Character -eq '"' -or $Character -eq "'") {
+                $Quote = $Character
+            }
+            continue
+        }
+
+        [void]$Builder.Append($Character)
+        if ($Character -eq '\' -and $Index + 1 -lt $Source.Length) {
+            ++$Index
+            [void]$Builder.Append($Source[$Index])
+            continue
+        }
+        if ($Character -eq $Quote) {
+            $Quote = [char]0
+        }
+    }
+
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Builder.ToString())
+    $Sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [System.BitConverter]::ToString($Sha256.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Sha256.Dispose()
+    }
+}
+
+function Get-RendererFrozenRegions {
+    return [ordered]@{
+        'RenderMethod' = '\bbool\s+RenderMethod\s*\('
+        'RenderPropertyGetter' = '\bbool\s+RenderPropertyGetter\s*\('
+        'AppendVector' = '\bvoid\s+AppendVector\s*\('
+        'AppendInputEvent' = '\bvoid\s+AppendInputEvent\s*\('
+        'AppendRotator' = '\bvoid\s+AppendRotator\s*\('
+        'AppendTransform' = '\bvoid\s+AppendTransform\s*\('
+        'AppendObjectHandleProxy' = '\bvoid\s+AppendObjectHandleProxy\s*\('
+        'EmitReferenceSource' = '\bbool\s+FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource\s*\('
+    }
+}
+
+function Test-RendererFrozenRegions {
+    param(
+        [string]$Source,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    $ExpectedHashes = [ordered]@{
+        'RenderMethod' = '1a15391bbf155a72609e7c4c79a68449b973b277df2def596da879efd721a891'
+        'RenderPropertyGetter' = '661aae6e944acb756717bd846c0b51df4c91df9a8fd5807a0c33a8090e7f2d2c'
+        'AppendVector' = '0f1af6bdbd0c0648cc8937b41c08c8d736e87ec3987043873fe9d23b6acfc138'
+        'AppendInputEvent' = '53acefe766bbe56437cc880a13b23c7baa11971618f1cafc5c8e0a64cbd85c2f'
+        'AppendRotator' = '1901cee9db8a5b6c3aef70f3c3737db4a1e270416d549ca90c81cb77ccd83a69'
+        'AppendTransform' = '979cf49b745874a00383c5392d678e5aaa386bbbcf6c2592666adfa8ffc9896e'
+        'AppendObjectHandleProxy' = '9b326ddffe189dba3ccaf69bb95e05b153c55c946b9f613d9197a3fb35e3858a'
+        'EmitReferenceSource' = '6fe1530e91cd0cab96693c9b411ac7f6b8074c884eceea9ffc6c47e5e8085f10'
+    }
+    foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
+        $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
+        if ($null -eq $Region) {
+            continue
+        }
+        $ActualHash = Get-CanonicalCodeSha256 $Region.Text
+        if ($ActualHash -cne $ExpectedHashes[$Entry.Key]) {
+            Add-Violation $Violations "frozen renderer region $($Entry.Key) changed: actual=$ActualHash expected=$($ExpectedHashes[$Entry.Key])"
+        }
+    }
+}
+
 function Test-GeneratedLiteralStream {
     param(
         [string]$Source,
@@ -824,6 +924,7 @@ function Test-RendererCandidates {
     )
 
     $Literals = @(Get-CppStringLiterals $Source $Violations 'C# renderer')
+    Test-RendererFrozenRegions $Source $Violations
     $LiteralStream = $Literals -join ''
     $EntryPointTokenCount = [regex]::Matches($LiteralStream, '\bEntryPoint\b').Count
     $EntryPointMatches = @(
@@ -1080,6 +1181,12 @@ function Test-TypedCastDispatch {
             ) `
             $Violations `
             'typed cast registry diagnostic path guard'
+        Test-SingleCallInsideGuard `
+            $DiagnosticLeaf.Body `
+            '\bif\s*\(\s*bIncludeObjectPath\s*&&\s*Object\s*!=\s*nullptr\s*\)' `
+            'GetPathName' `
+            $Violations `
+            'typed cast registry diagnostic path'
     }
     $FailureCalls = @(Get-CallArguments $ResolveObject.Body 'SetFailure' $Violations 'typed cast ResolveObject failure calls')
     foreach ($FailureCall in $FailureCalls) {
@@ -1660,6 +1767,51 @@ OutSource += TEXT("project_enemy_call");
         Write-Host 'Fixture passed: reviewed helper leaves reject new transitive calls.'
     }
 
+    $FrozenRendererBase = 'void Render() { Out += TEXT("public readonly struct %s"); }'
+    $FrozenRendererFormatting = @'
+void Render()
+{
+    Out += TEXT("public readonly struct %s");
+}
+'@
+    $FrozenRendererMutation = @'
+void Render()
+{
+    const FString Name = TEXT("ProjectEnemy");
+    const FString Declaration = TEXT("public readonly struct ");
+    Out += Declaration + Name;
+}
+'@
+    $BaseHash = Get-CanonicalCodeSha256 $FrozenRendererBase
+    if ($BaseHash -cne (Get-CanonicalCodeSha256 $FrozenRendererFormatting) -or
+        $BaseHash -ceq (Get-CanonicalCodeSha256 $FrozenRendererMutation)) {
+        Add-Violation $FixtureFailures 'canonical renderer hash fixture did not ignore formatting while rejecting variable reorder'
+    }
+    else {
+        Write-Host 'Fixture passed: canonical renderer hashes ignore formatting and reject reordered variable assembly.'
+    }
+
+    $GuardedLeafFailures = New-ViolationList
+    $GuardedLeafRegression = @'
+if (bIncludeObjectPath && Object != nullptr)
+{
+    OutResult.ObjectPath = Object->GetPathName();
+}
+Audit = Object->GetPathName();
+'@
+    Test-SingleCallInsideGuard `
+        $GuardedLeafRegression `
+        '\bif\s*\(\s*bIncludeObjectPath\s*&&\s*Object\s*!=\s*nullptr\s*\)' `
+        'GetPathName' `
+        $GuardedLeafFailures `
+        'guarded leaf regression fixture'
+    if ($GuardedLeafFailures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'extra unguarded allowlisted call fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: an extra unguarded allowlisted path call is rejected.'
+    }
+
     if ($FixtureFailures.Count -gt 0) {
         Write-Host "Phase 50 architecture checker fixtures failed with $($FixtureFailures.Count) violation(s):"
         foreach ($Failure in $FixtureFailures) {
@@ -1676,6 +1828,26 @@ if ($Mode -eq 'Fixtures') {
         exit 0
     }
     exit 1
+}
+
+if ($Mode -eq 'Hashes') {
+    $HashViolations = New-ViolationList
+    $RendererPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
+    $RendererSource = [System.IO.File]::ReadAllText($RendererPath)
+    $RendererCode = Remove-SourceComments $RendererSource $HashViolations 'C# renderer hash input'
+    foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
+        $Region = Get-UniqueBraceRegion $RendererCode $Entry.Value $HashViolations "renderer hash region $($Entry.Key)"
+        if ($null -ne $Region) {
+            Write-Host "$($Entry.Key)=$(Get-CanonicalCodeSha256 $Region.Text)"
+        }
+    }
+    if ($HashViolations.Count -gt 0) {
+        foreach ($Violation in $HashViolations) {
+            Write-Host " - $Violation"
+        }
+        exit 1
+    }
+    exit 0
 }
 
 $PluginRoot = [System.IO.Path]::GetFullPath($PluginRoot)
