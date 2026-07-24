@@ -43,9 +43,9 @@
     },
     {
       "id": "P50.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Architecture and benchmark scope remains complete through 23b238c. Frozen Gate at 8ded438 passed static, .NET 159/159, format 7/7, PowerShell 105/105, four-module UBT, and typed benchmark structural budgets, then exposed two stale Runtime test fixtures. Commit 26f5606 replaces abstract UObject construction with the concrete registry test type and aligns empty/published schema-v6 descriptors with the shared fail-closed contract. Independent review approved 8ded438..26f5606 with no Critical, Important or Minor findings; final build and Automation evidence will be regenerated after re-freeze.",
+      "completed_at_utc": "2026-07-24T03:21:29.9918540+00:00"
     }
   ],
   "debt": [],
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "batch-complete -Phase 50 -BatchId P50.5 -Evidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-07-24T03:08:12.6355134+00:00"
+  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
+  "revision": 9,
+  "updated_at_utc": "2026-07-24T03:21:29.9941154+00:00"
 }
