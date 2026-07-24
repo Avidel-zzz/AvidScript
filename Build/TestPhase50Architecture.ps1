@@ -1591,8 +1591,10 @@ if ($DirtyPaths.Count -gt 0) {
 
 $Sha256 = [System.Security.Cryptography.SHA256]::Create()
 try {
+    $CanonicalCheckerText = $Inputs['Build/TestPhase50Architecture.ps1'].Raw -replace "`r`n?", "`n"
+    $CanonicalCheckerBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($CanonicalCheckerText)
     $CheckerSha256 = [System.BitConverter]::ToString(
-        $Sha256.ComputeHash($Inputs['Build/TestPhase50Architecture.ps1'].Bytes)
+        $Sha256.ComputeHash($CanonicalCheckerBytes)
     ).Replace('-', '').ToLowerInvariant()
 }
 finally {
