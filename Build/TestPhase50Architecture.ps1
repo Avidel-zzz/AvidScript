@@ -526,36 +526,116 @@ function Test-SingleCallInsideGuard {
     }
 }
 
+function Get-CanonicalCppTokenStream {
+    param([string]$Source)
+
+    $Tokens = [System.Collections.Generic.List[string]]::new()
+    $MultiCharacterOperators = @(
+        '<=>', '>>=', '<<=', '->*', '...',
+        '##', '::', '->', '++', '--', '<<', '>>', '<=', '>=', '==', '!=',
+        '&&', '||', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '.*'
+    )
+    for ($Index = 0; $Index -lt $Source.Length;) {
+        $Character = $Source[$Index]
+        if ([char]::IsWhiteSpace($Character)) {
+            ++$Index
+            continue
+        }
+
+        if ([char]::IsLetter($Character) -or $Character -eq '_') {
+            $Start = $Index
+            ++$Index
+            while ($Index -lt $Source.Length -and
+                ([char]::IsLetterOrDigit($Source[$Index]) -or $Source[$Index] -eq '_')) {
+                ++$Index
+            }
+            $Tokens.Add($Source.Substring($Start, $Index - $Start))
+            continue
+        }
+
+        if ([char]::IsDigit($Character) -or
+            ($Character -eq '.' -and $Index + 1 -lt $Source.Length -and
+                [char]::IsDigit($Source[$Index + 1]))) {
+            $Start = $Index
+            ++$Index
+            while ($Index -lt $Source.Length) {
+                $NumberCharacter = $Source[$Index]
+                if ([char]::IsLetterOrDigit($NumberCharacter) -or
+                    $NumberCharacter -eq '_' -or
+                    $NumberCharacter -eq '.' -or
+                    $NumberCharacter -eq "'") {
+                    ++$Index
+                    continue
+                }
+                if (($NumberCharacter -eq '+' -or $NumberCharacter -eq '-') -and
+                    $Index -gt $Start -and
+                    $Source[$Index - 1] -in @('e', 'E', 'p', 'P')) {
+                    ++$Index
+                    continue
+                }
+                break
+            }
+            $Tokens.Add($Source.Substring($Start, $Index - $Start))
+            continue
+        }
+
+        if ($Character -eq '"' -or $Character -eq "'") {
+            $Start = $Index
+            $Quote = $Character
+            ++$Index
+            $Closed = $false
+            while ($Index -lt $Source.Length) {
+                if ($Source[$Index] -eq '\') {
+                    $Index += [Math]::Min(2, $Source.Length - $Index)
+                    continue
+                }
+                if ($Source[$Index] -eq $Quote) {
+                    ++$Index
+                    $Closed = $true
+                    break
+                }
+                ++$Index
+            }
+            if (-not $Closed) {
+                throw 'unterminated C++ string or character literal in canonical hash input'
+            }
+            $Tokens.Add($Source.Substring($Start, $Index - $Start))
+            continue
+        }
+
+        $Operator = $null
+        foreach ($Candidate in $MultiCharacterOperators) {
+            if ($Index + $Candidate.Length -le $Source.Length -and
+                $Source.Substring($Index, $Candidate.Length) -ceq $Candidate) {
+                $Operator = $Candidate
+                break
+            }
+        }
+        if ($null -ne $Operator) {
+            $Tokens.Add($Operator)
+            $Index += $Operator.Length
+            continue
+        }
+
+        $Tokens.Add([string]$Character)
+        ++$Index
+    }
+
+    $Builder = [System.Text.StringBuilder]::new()
+    foreach ($Token in $Tokens) {
+        [void]$Builder.Append($Token.Length)
+        [void]$Builder.Append(':')
+        [void]$Builder.Append($Token)
+        [void]$Builder.Append(';')
+    }
+    return $Builder.ToString()
+}
+
 function Get-CanonicalCodeSha256 {
     param([string]$Source)
 
-    $Builder = [System.Text.StringBuilder]::new($Source.Length)
-    $Quote = [char]0
-    for ($Index = 0; $Index -lt $Source.Length; ++$Index) {
-        $Character = $Source[$Index]
-        if ($Quote -eq [char]0) {
-            if ([char]::IsWhiteSpace($Character)) {
-                continue
-            }
-            [void]$Builder.Append($Character)
-            if ($Character -eq '"' -or $Character -eq "'") {
-                $Quote = $Character
-            }
-            continue
-        }
-
-        [void]$Builder.Append($Character)
-        if ($Character -eq '\' -and $Index + 1 -lt $Source.Length) {
-            ++$Index
-            [void]$Builder.Append($Source[$Index])
-            continue
-        }
-        if ($Character -eq $Quote) {
-            $Quote = [char]0
-        }
-    }
-
-    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Builder.ToString())
+    $CanonicalTokens = Get-CanonicalCppTokenStream $Source
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($CanonicalTokens)
     $Sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
         return [System.BitConverter]::ToString($Sha256.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant()
@@ -585,14 +665,14 @@ function Test-RendererFrozenRegions {
     )
 
     $ExpectedHashes = [ordered]@{
-        'RenderMethod' = '1a15391bbf155a72609e7c4c79a68449b973b277df2def596da879efd721a891'
-        'RenderPropertyGetter' = '661aae6e944acb756717bd846c0b51df4c91df9a8fd5807a0c33a8090e7f2d2c'
-        'AppendVector' = '0f1af6bdbd0c0648cc8937b41c08c8d736e87ec3987043873fe9d23b6acfc138'
-        'AppendInputEvent' = '53acefe766bbe56437cc880a13b23c7baa11971618f1cafc5c8e0a64cbd85c2f'
-        'AppendRotator' = '1901cee9db8a5b6c3aef70f3c3737db4a1e270416d549ca90c81cb77ccd83a69'
-        'AppendTransform' = '979cf49b745874a00383c5392d678e5aaa386bbbcf6c2592666adfa8ffc9896e'
-        'AppendObjectHandleProxy' = '9b326ddffe189dba3ccaf69bb95e05b153c55c946b9f613d9197a3fb35e3858a'
-        'EmitReferenceSource' = '6fe1530e91cd0cab96693c9b411ac7f6b8074c884eceea9ffc6c47e5e8085f10'
+        'RenderMethod' = '8de2161bc979d478083b62f8ce12c8eddcb7199cc5e48a191c83c3afb0f38723'
+        'RenderPropertyGetter' = 'd5137318d606be8a3a9452dbe68af1c2dd3c1f4ceb7865fe242a72193bbe7006'
+        'AppendVector' = 'a052bea5eda0769613a907e479549d6c9032b6ae9a9b90a110714105d07a4e3d'
+        'AppendInputEvent' = '27014e57fb190bcd48d5028c4b1722e5f6ec11837962c6bae8cb52658a580f39'
+        'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
+        'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
+        'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
+        'EmitReferenceSource' = '2fe7cf4a3f1820c53316bb10104290029d1a8b74491ea63eb9248da1e95e94c9'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -603,6 +683,77 @@ function Test-RendererFrozenRegions {
         if ($ActualHash -cne $ExpectedHashes[$Entry.Key]) {
             Add-Violation $Violations "frozen renderer region $($Entry.Key) changed: actual=$ActualHash expected=$($ExpectedHashes[$Entry.Key])"
         }
+    }
+}
+
+function Test-GeneratedSurfaceConstructionClosure {
+    param(
+        [string]$RendererSource,
+        [string]$StateContractRendererSource,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    $ExpectedHashes = [ordered]@{
+        'BindingRenderer' = 'b015232a6254014864708bbdb2338c34196f046ef2b168877a1f9cb8408d7ac4'
+        'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
+    }
+    $ActualSources = [ordered]@{
+        'BindingRenderer' = $RendererSource
+        'StateContractRenderer' = $StateContractRendererSource
+    }
+    foreach ($Entry in $ActualSources.GetEnumerator()) {
+        $ActualHash = Get-CanonicalCodeSha256 $Entry.Value
+        if ($ActualHash -cne $ExpectedHashes[$Entry.Key]) {
+            Add-Violation $Violations "frozen generated surface source $($Entry.Key) changed: actual=$ActualHash expected=$($ExpectedHashes[$Entry.Key])"
+        }
+    }
+}
+
+function Test-RegistryPathSurface {
+    param(
+        [string]$RegistrySource,
+        [System.Collections.Generic.List[string]]$Violations,
+        [string]$Description
+    )
+
+    $CodeWithoutStrings = Remove-SourceStrings $RegistrySource
+    $PathIdentifierCount = [regex]::Matches($CodeWithoutStrings, '\bGetPathName\b').Count
+    if ($PathIdentifierCount -ne 2) {
+        Add-Violation $Violations "$Description must contain exactly two reviewed GetPathName identifiers; actual=$PathIdentifierCount"
+    }
+    $NonIncludeDirectives = @(
+        [regex]::Matches($CodeWithoutStrings, '(?m)^\s*#\s*(?!include\b)[A-Za-z_]+'))
+    if ($NonIncludeDirectives.Count -gt 0) {
+        Add-Violation $Violations "$Description contains non-include preprocessor directives"
+    }
+    if ($CodeWithoutStrings.Contains('##')) {
+        Add-Violation $Violations "$Description contains token-paste and can synthesize unreviewed path calls"
+    }
+}
+
+function Test-DiagnosticForwarding {
+    param(
+        [string]$FunctionBody,
+        [string]$FunctionName,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    $FailureCalls = @(Get-CallArguments $FunctionBody 'SetFailure' $Violations "$FunctionName failure calls")
+    foreach ($FailureCall in $FailureCalls) {
+        if ($FailureCall.Arguments.Count -ne 6 -or
+            $FailureCall.Arguments[4].Trim() -cne 'bIncludeObjectPath') {
+            Add-Violation $Violations "$FunctionName failure diagnostics must forward bIncludeObjectPath"
+        }
+    }
+    $SuccessCalls = @(Get-CallArguments $FunctionBody 'SetSuccess' $Violations "$FunctionName success calls")
+    foreach ($SuccessCall in $SuccessCalls) {
+        if ($SuccessCall.Arguments.Count -ne 4 -or
+            $SuccessCall.Arguments[3].Trim() -cne 'bIncludeObjectPath') {
+            Add-Violation $Violations "$FunctionName success diagnostics must forward bIncludeObjectPath"
+        }
+    }
+    if ($FailureCalls.Count -eq 0 -or $SuccessCalls.Count -eq 0) {
+        Add-Violation $Violations "$FunctionName diagnostic leaves are incomplete"
     }
 }
 
@@ -920,11 +1071,13 @@ function Test-StaticImportPolicy {
 function Test-RendererCandidates {
     param(
         [string]$Source,
+        [string]$StateContractRendererSource,
         [System.Collections.Generic.List[string]]$Violations
     )
 
     $Literals = @(Get-CppStringLiterals $Source $Violations 'C# renderer')
     Test-RendererFrozenRegions $Source $Violations
+    Test-GeneratedSurfaceConstructionClosure $Source $StateContractRendererSource $Violations
     $LiteralStream = $Literals -join ''
     $EntryPointTokenCount = [regex]::Matches($LiteralStream, '\bEntryPoint\b').Count
     $EntryPointMatches = @(
@@ -1085,6 +1238,16 @@ function Test-TypedCastDispatch {
         '\bUObject\s*\*\s*FAvidScriptObjectRegistry::ResolveObject\s*\(' `
         $Violations `
         'typed cast UObject resolver'
+    $RegisterObject = Get-UniqueBraceRegion `
+        $RegistrySource `
+        '\bFAvidScriptObjectHandle\s+FAvidScriptObjectRegistry::RegisterObject\s*\(' `
+        $Violations `
+        'typed cast UObject registration'
+    $ReleaseHandle = Get-UniqueBraceRegion `
+        $RegistrySource `
+        '\bbool\s+FAvidScriptObjectRegistry::ReleaseHandle\s*\(' `
+        $Violations `
+        'typed cast UObject release'
     $ResolveType = Get-UniqueBraceRegion `
         $InvocationSource `
         '\bbool\s+FAvidScriptBindingPackage::TryResolveObjectType\s*\(' `
@@ -1107,6 +1270,8 @@ function Test-TypedCastDispatch {
         'typed cast registry failure leaf'
     if ($null -eq $Dispatch -or
         $null -eq $ResolveObject -or
+        $null -eq $RegisterObject -or
+        $null -eq $ReleaseHandle -or
         $null -eq $ResolveType -or
         $null -eq $DispatchFailure -or
         $null -eq $SetSuccess -or
@@ -1114,6 +1279,7 @@ function Test-TypedCastDispatch {
         return
     }
 
+    Test-RegistryPathSurface $RegistrySource $Violations 'typed cast object registry'
     $Closure = Remove-SourceStrings (
         $Dispatch.Text + "`n" +
         $ResolveObject.Text + "`n" +
@@ -1188,22 +1354,28 @@ function Test-TypedCastDispatch {
             $Violations `
             'typed cast registry diagnostic path'
     }
-    $FailureCalls = @(Get-CallArguments $ResolveObject.Body 'SetFailure' $Violations 'typed cast ResolveObject failure calls')
-    foreach ($FailureCall in $FailureCalls) {
-        if ($FailureCall.Arguments.Count -ne 6 -or
-            $FailureCall.Arguments[4].Trim() -cne 'bIncludeObjectPath') {
-            Add-Violation $Violations 'typed cast ResolveObject failure diagnostics must forward bIncludeObjectPath'
+    $ExpectedDiagnosticLeafHashes = [ordered]@{
+        'SetSuccess' = '2beff04f9ef5cb619939fd36487500155c02cec7866426ea3c080aa461473317'
+        'SetFailure' = '2673b4a7d2edc663de8c13b7de7612065cfbb472bee40a39dae405e5fbf8afa4'
+    }
+    foreach ($DiagnosticLeafEntry in ([ordered]@{
+        'SetSuccess' = $SetSuccess
+        'SetFailure' = $SetFailure
+    }).GetEnumerator()) {
+        $ActualHash = Get-CanonicalCodeSha256 $DiagnosticLeafEntry.Value.Text
+        if ($ActualHash -cne $ExpectedDiagnosticLeafHashes[$DiagnosticLeafEntry.Key]) {
+            Add-Violation $Violations "frozen registry diagnostic leaf $($DiagnosticLeafEntry.Key) changed: actual=$ActualHash expected=$($ExpectedDiagnosticLeafHashes[$DiagnosticLeafEntry.Key])"
         }
     }
-    $SuccessCalls = @(Get-CallArguments $ResolveObject.Body 'SetSuccess' $Violations 'typed cast ResolveObject success calls')
-    foreach ($SuccessCall in $SuccessCalls) {
-        if ($SuccessCall.Arguments.Count -ne 4 -or
-            $SuccessCall.Arguments[3].Trim() -cne 'bIncludeObjectPath') {
-            Add-Violation $Violations 'typed cast ResolveObject success diagnostics must forward bIncludeObjectPath'
-        }
-    }
-    if ($FailureCalls.Count -eq 0 -or $SuccessCalls.Count -ne 1) {
-        Add-Violation $Violations 'typed cast ResolveObject diagnostic leaves are incomplete'
+    foreach ($RegistryEntry in @(
+        [pscustomobject]@{ Name = 'RegisterObject'; Region = $RegisterObject },
+        [pscustomobject]@{ Name = 'ResolveObject'; Region = $ResolveObject },
+        [pscustomobject]@{ Name = 'ReleaseHandle'; Region = $ReleaseHandle }
+    )) {
+        Test-DiagnosticForwarding `
+            $RegistryEntry.Region.Body `
+            "typed cast $($RegistryEntry.Name)" `
+            $Violations
     }
     Test-RegexSequence `
         $RegistryHeader `
@@ -1248,6 +1420,7 @@ function Invoke-Phase50Contracts {
     $HostBindings = $Inputs['Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'].Code
     $DynamicRegistry = $Inputs['Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'].Code
     $Renderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'].Code
+    $StateContractRenderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'].Code
     $OperationLowerer = $Inputs['Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'].Code
     $Invocation = $Inputs['Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'].Code
     $ObjectRegistryHeader = $Inputs['Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'].Code
@@ -1473,7 +1646,7 @@ function Invoke-Phase50Contracts {
     }
 
     Test-GeneratedImportLiterals $DescriptorGenerator $Violations
-    Test-RendererCandidates $Renderer $Violations
+    Test-RendererCandidates $Renderer $StateContractRenderer $Violations
     foreach ($RendererFunctionSpec in @(
         [pscustomobject]@{
             Pattern = '\bbool\s+RenderMethod\s*\('
@@ -1791,6 +1964,51 @@ void Render()
         Write-Host 'Fixture passed: canonical renderer hashes ignore formatting and reject reordered variable assembly.'
     }
 
+    $OperatorBase = 'void Render() { ++ParameterIndex; }'
+    $OperatorFormatting = @'
+void Render()
+{
+    ++ ParameterIndex;
+}
+'@
+    $OperatorSplit = 'void Render() { + +ParameterIndex; }'
+    $OperatorHash = Get-CanonicalCodeSha256 $OperatorBase
+    if ($OperatorHash -cne (Get-CanonicalCodeSha256 $OperatorFormatting) -or
+        $OperatorHash -ceq (Get-CanonicalCodeSha256 $OperatorSplit)) {
+        Add-Violation $FixtureFailures 'canonical C++ token hash did not preserve the ++ operator boundary'
+    }
+    else {
+        Write-Host 'Fixture passed: canonical C++ token hashes preserve multi-character operator boundaries.'
+    }
+
+    $TransitiveBase = @'
+FString ConvertToStorage(FString Value) { return Value + TEXT(".Slot"); }
+void Render() { Out += ConvertToStorage(Value); }
+'@
+    $TransitiveFormatting = @'
+FString ConvertToStorage(FString Value)
+{
+    return Value + TEXT(".Slot");
+}
+
+void Render()
+{
+    Out += ConvertToStorage(Value);
+}
+'@
+    $TransitiveMutation = @'
+FString ConvertToStorage(FString Value) { return Value + TEXT(".Generation"); }
+void Render() { Out += ConvertToStorage(Value); }
+'@
+    $TransitiveHash = Get-CanonicalCodeSha256 $TransitiveBase
+    if ($TransitiveHash -cne (Get-CanonicalCodeSha256 $TransitiveFormatting) -or
+        $TransitiveHash -ceq (Get-CanonicalCodeSha256 $TransitiveMutation)) {
+        Add-Violation $FixtureFailures 'generated surface closure hash did not cover a transitive helper mutation'
+    }
+    else {
+        Write-Host 'Fixture passed: generated surface closure hashes include transitive helper behavior.'
+    }
+
     $GuardedLeafFailures = New-ViolationList
     $GuardedLeafRegression = @'
 if (bIncludeObjectPath && Object != nullptr)
@@ -1810,6 +2028,53 @@ Audit = Object->GetPathName();
     }
     else {
         Write-Host 'Fixture passed: an extra unguarded allowlisted path call is rejected.'
+    }
+
+    $RegistryMacroFailures = New-ViolationList
+    $RegistryMacroRegression = @'
+#include "Registry.h"
+#define AVID_PATH (Object->GetPathName())
+void SetSuccess()
+{
+    if (bIncludeObjectPath && Object != nullptr)
+    {
+        OutResult.ObjectPath = Object->GetPathName();
+    }
+}
+void SetFailure()
+{
+    if (bIncludeObjectPath && Object != nullptr)
+    {
+        OutResult.ObjectPath = Object->GetPathName();
+    }
+    Audit = AVID_PATH;
+}
+'@
+    Test-RegistryPathSurface `
+        $RegistryMacroRegression `
+        $RegistryMacroFailures `
+        'registry macro regression fixture'
+    if ($RegistryMacroFailures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'object-like macro path regression fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: registry path macros and extra path identifiers are rejected.'
+    }
+
+    $ForwardingFailures = New-ViolationList
+    $ForwardingRegression = @'
+SetFailure(OutResult, Handle, TEXT("invalid"), Object, true, TEXT("next"));
+SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
+'@
+    Test-DiagnosticForwarding `
+        $ForwardingRegression `
+        'ReleaseHandle fixture' `
+        $ForwardingFailures
+    if ($ForwardingFailures.Count -eq 0) {
+        Add-Violation $FixtureFailures 'public registry entry forwarding regression fixture was not rejected'
+    }
+    else {
+        Write-Host 'Fixture passed: every public registry entry must forward bIncludeObjectPath.'
     }
 
     if ($FixtureFailures.Count -gt 0) {
@@ -1835,10 +2100,31 @@ if ($Mode -eq 'Hashes') {
     $RendererPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'
     $RendererSource = [System.IO.File]::ReadAllText($RendererPath)
     $RendererCode = Remove-SourceComments $RendererSource $HashViolations 'C# renderer hash input'
+    $StateContractRendererPath = Join-Path $PluginRoot 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'
+    $StateContractRendererSource = [System.IO.File]::ReadAllText($StateContractRendererPath)
+    $StateContractRendererCode = Remove-SourceComments $StateContractRendererSource $HashViolations 'C# state contract renderer hash input'
+    $RegistryPath = Join-Path $PluginRoot 'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'
+    $RegistrySource = [System.IO.File]::ReadAllText($RegistryPath)
+    $RegistryCode = Remove-SourceComments $RegistrySource $HashViolations 'object registry diagnostic hash input'
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $RendererCode $Entry.Value $HashViolations "renderer hash region $($Entry.Key)"
         if ($null -ne $Region) {
             Write-Host "$($Entry.Key)=$(Get-CanonicalCodeSha256 $Region.Text)"
+        }
+    }
+    Write-Host "BindingRenderer=$(Get-CanonicalCodeSha256 $RendererCode)"
+    Write-Host "StateContractRenderer=$(Get-CanonicalCodeSha256 $StateContractRendererCode)"
+    foreach ($DiagnosticLeafSpec in ([ordered]@{
+        'SetSuccess' = '\bvoid\s+FAvidScriptObjectRegistry::SetSuccess\s*\('
+        'SetFailure' = '\bvoid\s+FAvidScriptObjectRegistry::SetFailure\s*\('
+    }).GetEnumerator()) {
+        $DiagnosticLeaf = Get-UniqueBraceRegion `
+            $RegistryCode `
+            $DiagnosticLeafSpec.Value `
+            $HashViolations `
+            "registry diagnostic hash region $($DiagnosticLeafSpec.Key)"
+        if ($null -ne $DiagnosticLeaf) {
+            Write-Host "$($DiagnosticLeafSpec.Key)=$(Get-CanonicalCodeSha256 $DiagnosticLeaf.Text)"
         }
     }
     if ($HashViolations.Count -gt 0) {
@@ -1907,6 +2193,7 @@ $InputManifest = [ordered]@{
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingEmitter.cpp' = 'Source'
     'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp' = 'Source'
+    'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp' = 'Source'
     'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp' = 'Source'
