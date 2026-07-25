@@ -103,11 +103,22 @@ class AAvidScriptBindingRuntimeProcessEventTestActor : public AActor
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintSetter)
+	void SetRoutedValue(float Value)
+	{
+		++BlueprintSetterCallCount;
+		RoutedValue = Value + 1.0f;
+	}
+
 	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
 	{
 		++ProcessEventCallCount;
 		Super::ProcessEvent(Function, Parameters);
 	}
 
+	UPROPERTY(BlueprintReadWrite, BlueprintSetter = SetRoutedValue, Category = "AvidScript")
+	float RoutedValue = 0.0f;
+
 	int32 ProcessEventCallCount = 0;
+	int32 BlueprintSetterCallCount = 0;
 };

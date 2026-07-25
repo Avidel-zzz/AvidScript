@@ -1,0 +1,29 @@
+{
+  "schema_version": 5,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/BidirectionalProperties/BidirectionalProperties.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_bidirectional_properties",
+  "artifact_stem": "profile_bidirectional_properties",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_bidirectional_properties",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_bidirectional_properties/profile_bidirectional_properties.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_bidirectional_properties/profile_bidirectional_properties.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.bidirectional_properties",
+    "self_class_path": "/Script/Engine.Actor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "K2_GetActorLocation",
+          "K2_SetActorLocation"
+        ],
+        "writable_properties": [
+          "CustomTimeDilation"
+        ]
+      }
+    ]
+  }
+}

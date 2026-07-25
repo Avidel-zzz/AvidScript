@@ -16,10 +16,11 @@ internal static class CSharpGuestLoweringTests
         VoidFallthroughExitReturnsNormally();
         LoweringIsByteDeterministic();
         ReachabilityPrunesUnusedImports();
+        BidirectionalPropertyAssignmentLowersThroughAccessor();
         NaturalGameplayCallbacksSynthesizeOneRouter();
         MissingGameplayCallbacksRemainNoOp();
         ExplicitGameplayRouterConflictFailsClosed();
-        return 8;
+        return 9;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -123,6 +124,71 @@ internal static class CSharpGuestLoweringTests
 
         Assert(module.Imports.Count == 0,
             "imports outside the export-root callable closure should not enter Guest IR");
+    }
+
+    private static void BidirectionalPropertyAssignmentLowersThroughAccessor()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace Game;
+
+            public readonly struct ActorProxy
+            {
+                public readonly int Slot;
+                public readonly int Generation;
+
+                public ActorProxy(int slot, int generation)
+                {
+                    Slot = slot;
+                    Generation = generation;
+                }
+
+                public float CustomTimeDilation
+                {
+                    set => Native.SetCustomTimeDilation(Slot, Generation, value);
+                }
+            }
+
+            internal static class Native
+            {
+                [DllImport("avidscript", EntryPoint = "avid_property_set_custom_time_dilation")]
+                internal static extern int SetCustomTimeDilation(int slot, int generation, float value);
+            }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static void OnBeginPlay(int slot, int generation)
+                {
+                    ActorProxy actor = new(slot, generation);
+                    actor.CustomTimeDilation = 2.5f;
+                }
+            }
+            """;
+        SemanticDocument document = AnalyzeGameplaySource(
+            source,
+            "Scripts/BidirectionalPropertyAssignment.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("property assignment produced no Guest module");
+
+        Assert(result.Succeeded, "natural C# property assignment should lower");
+        GuestFunction entry = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(item => item.Name == "avid_on_begin_play").FunctionId);
+        GuestFunction setter = module.Functions.Single(function =>
+            function.Id.Contains("set_CustomTimeDilation", StringComparison.Ordinal));
+        GuestImport hostImport = module.Imports.Single(item =>
+            item.Name == "avid_property_set_custom_time_dilation");
+
+        Assert(entry.Blocks.SelectMany(block => block.Instructions).Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == setter.Id),
+            "property assignment should call the generated setter accessor");
+        Assert(setter.Blocks.SelectMany(block => block.Instructions).Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == hostImport.Id),
+            "generated setter accessor should call its authorized host import");
+        Assert(GuestModuleValidator.Validate(module).Succeeded,
+            "bidirectional property Guest IR should pass independent validation");
     }
 
     private static void NaturalGameplayCallbacksSynthesizeOneRouter()

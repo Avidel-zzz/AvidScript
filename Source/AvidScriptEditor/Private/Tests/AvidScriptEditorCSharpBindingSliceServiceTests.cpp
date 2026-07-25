@@ -625,6 +625,125 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		TestEqual(TEXT("Property runtime slice creates its reflected and object-type imports"), LoadedPropertySlice->GetVmPackage().Imports.Num(), 2);
 	}
 
+	const TArray<FAvidScriptReflectedPropertySelection> WritablePropertySelections = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString WritablePropertyAuthorizationJson;
+	FAvidScriptBindingDescriptorGenerateResult WritablePropertyDescriptorResult;
+	if (!TestTrue(
+			TEXT("Writable property authorization descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.engine.writable_property_slice"),
+				{},
+				WritablePropertySelections,
+				WritablePropertyAuthorizationJson,
+				WritablePropertyDescriptorResult)))
+	{
+		return false;
+	}
+	FAvidScriptCSharpBindingEmitResult WritablePropertyAuthorizationPackage;
+	if (!TestTrue(
+			TEXT("Writable property authorization package publishes"),
+			FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor(
+				WritablePropertyAuthorizationJson,
+				OutputRoot,
+				WritablePropertyAuthorizationPackage)))
+	{
+		AddError(WritablePropertyAuthorizationPackage.ErrorMessage);
+		return false;
+	}
+	FAvidScriptBindingPackageModel WritablePropertyAuthorizationModel;
+	if (!TestTrue(
+			TEXT("Writable property authorization descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				WritablePropertyAuthorizationJson,
+				WritablePropertyAuthorizationModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Writable property authorization uses schema v8"), WritablePropertyAuthorizationModel.SchemaVersion, 8);
+	TestEqual(TEXT("Writable property authorization contains getter and setter"), WritablePropertyAuthorizationModel.Bindings.Num(), 2);
+	const FAvidScriptBindingFunctionModel* WritableSetter =
+		WritablePropertyAuthorizationModel.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.BindingKind == TEXT("property_set");
+			});
+	if (!TestNotNull(TEXT("Writable property setter resolves"), WritableSetter))
+	{
+		return false;
+	}
+
+	const FAvidScriptFrontendBindingPackage WritableSetterProvenance =
+		MakeAvidScriptBindingSliceTestProvenance(
+			WritablePropertyAuthorizationPackage,
+			{ MakeAvidScriptBindingSliceTestImport(*WritableSetter) });
+	FAvidScriptCSharpBindingEmitResult WritableSetterSlicePackage;
+	FAvidScriptEditorCSharpBindingSliceResult WritableSetterSliceResult;
+	if (!TestTrue(
+			TEXT("Used writable setter publishes a setter-only runtime slice"),
+			FAvidScriptEditorCSharpBindingSliceService::Publish(
+				WritablePropertyAuthorizationPackage.DescriptorPath,
+				WritableSetterProvenance,
+				OutputRoot,
+				WritableSetterSlicePackage,
+				WritableSetterSliceResult)))
+	{
+		AddError(WritableSetterSliceResult.ErrorMessage);
+		return false;
+	}
+	FString WritableSetterSliceJson;
+	FAvidScriptBindingPackageModel WritableSetterSliceModel;
+	if (!TestTrue(
+			TEXT("Setter-only runtime slice descriptor reads"),
+			FFileHelper::LoadFileToString(
+				WritableSetterSliceJson,
+				*WritableSetterSlicePackage.DescriptorPath))
+		|| !TestTrue(
+			TEXT("Setter-only runtime slice descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				WritableSetterSliceJson,
+				WritableSetterSliceModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Setter-only runtime slice preserves schema v8"), WritableSetterSliceModel.SchemaVersion, 8);
+	TestEqual(TEXT("Setter-only runtime slice contains one binding"), WritableSetterSliceModel.Bindings.Num(), 1);
+	if (WritableSetterSliceModel.Bindings.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Setter-only runtime slice preserves property_set"),
+			WritableSetterSliceModel.Bindings[0].BindingKind,
+			FString(TEXT("property_set")));
+		TestEqual(
+			TEXT("Setter-only runtime slice preserves stable identity"),
+			WritableSetterSliceModel.Bindings[0].StableId,
+			WritableSetter->StableId);
+	}
+
+	FAvidScriptCSharpBindingEmitResult ForgedSetterSlicePackage;
+	FAvidScriptEditorCSharpBindingSliceResult ForgedSetterSliceResult;
+	const FAvidScriptFrontendBindingPackage ForgedSetterProvenance =
+		MakeAvidScriptBindingSliceTestProvenance(
+			PropertyAuthorizationPackage,
+			{ MakeAvidScriptBindingSliceTestImport(*WritableSetter) });
+	TestFalse(
+		TEXT("Read-only authorization cannot publish a writable setter import"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			PropertyAuthorizationPackage.DescriptorPath,
+			ForgedSetterProvenance,
+			OutputRoot,
+			ForgedSetterSlicePackage,
+			ForgedSetterSliceResult));
+	TestEqual(
+		TEXT("Forged setter rejection has a stable category"),
+		ForgedSetterSliceResult.ErrorCategory,
+		FString(TEXT("slice_binding_missing")));
+
 	const FAvidScriptFrontendBindingPackage UnauthorizedLifecycleProvenance =
 		MakeAvidScriptBindingSliceTestProvenance(
 			PropertyAuthorizationPackage,

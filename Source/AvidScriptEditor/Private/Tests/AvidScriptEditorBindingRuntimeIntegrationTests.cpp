@@ -38,6 +38,192 @@ uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 	return Bits;
 }
 
+void AppendAvidScriptPropertyBenchmarkU32Leb(TArray<uint8>& Bytes, uint32 Value)
+{
+	do
+	{
+		uint8 Byte = Value & 0x7f;
+		Value >>= 7;
+		if (Value != 0)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	}
+	while (Value != 0);
+}
+
+void AppendAvidScriptPropertyBenchmarkI32Leb(TArray<uint8>& Bytes, int32 Value)
+{
+	bool bHasMore = true;
+	while (bHasMore)
+	{
+		uint8 Byte = static_cast<uint8>(Value) & 0x7f;
+		Value >>= 7;
+		const bool bSignBitSet = (Byte & 0x40) != 0;
+		bHasMore = !((Value == 0 && !bSignBitSet)
+			|| (Value == -1 && bSignBitSet));
+		if (bHasMore)
+		{
+			Byte |= 0x80;
+		}
+		Bytes.Add(Byte);
+	}
+}
+
+void AppendAvidScriptPropertyBenchmarkString(TArray<uint8>& Bytes, const FString& Value)
+{
+	FTCHARToUTF8 Utf8(*Value);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Bytes, Utf8.Length());
+	Bytes.Append(
+		reinterpret_cast<const uint8*>(Utf8.Get()),
+		Utf8.Length());
+}
+
+void AppendAvidScriptPropertyBenchmarkSection(
+	TArray<uint8>& Module,
+	const uint8 SectionId,
+	const TConstArrayView<uint8> Payload)
+{
+	Module.Add(SectionId);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Module, Payload.Num());
+	Module.Append(Payload.GetData(), Payload.Num());
+}
+
+TArray<uint8> BuildAvidScriptPropertyBenchmarkModule(
+	const FAvidScriptBindingHostImportModel& HostImport,
+	const FAvidScriptObjectHandle& OwnerHandle,
+	const bool bWriteOnBeginPlay = false,
+	const bool bTrapAfterBeginPlayWrite = false,
+	const float BeginPlayValue = 1.0f)
+{
+	TArray<uint8> Module = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+
+	TArray<uint8> Types;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 3);
+	Types.Add(0x60);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 3);
+	Types.Append({ 0x7f, 0x7f, 0x7d });
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7f);
+	Types.Add(0x60);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 0);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 0);
+	Types.Add(0x60);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 1);
+	Types.Add(0x7d);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 0);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Imports, 1);
+	AppendAvidScriptPropertyBenchmarkString(Imports, HostImport.Module);
+	AppendAvidScriptPropertyBenchmarkString(Imports, HostImport.Name);
+	Imports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Imports, 0);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 2);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 1);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 2);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 2);
+	AppendAvidScriptPropertyBenchmarkString(Exports, TEXT("avid_on_begin_play"));
+	Exports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 1);
+	AppendAvidScriptPropertyBenchmarkString(Exports, TEXT("avid_on_tick"));
+	Exports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 2);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 7, Exports);
+
+	TArray<uint8> BeginPlayBody;
+	AppendAvidScriptPropertyBenchmarkU32Leb(BeginPlayBody, 0);
+	if (bWriteOnBeginPlay)
+	{
+		BeginPlayBody.Add(0x41);
+		AppendAvidScriptPropertyBenchmarkI32Leb(
+			BeginPlayBody,
+			static_cast<int32>(OwnerHandle.Slot));
+		BeginPlayBody.Add(0x41);
+		AppendAvidScriptPropertyBenchmarkI32Leb(
+			BeginPlayBody,
+			static_cast<int32>(OwnerHandle.Generation));
+		BeginPlayBody.Add(0x43);
+		uint32 BeginPlayValueBits = 0;
+		FMemory::Memcpy(&BeginPlayValueBits, &BeginPlayValue, sizeof(BeginPlayValueBits));
+		BeginPlayBody.Append(
+			reinterpret_cast<const uint8*>(&BeginPlayValueBits),
+			sizeof(BeginPlayValueBits));
+		BeginPlayBody.Append({ 0x10, 0x00, 0x1a });
+	}
+	if (bTrapAfterBeginPlayWrite)
+	{
+		BeginPlayBody.Add(0x00);
+	}
+	BeginPlayBody.Add(0x0b);
+	TArray<uint8> TickBody;
+	AppendAvidScriptPropertyBenchmarkU32Leb(TickBody, 0);
+	TickBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(
+		TickBody,
+		static_cast<int32>(OwnerHandle.Slot));
+	TickBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(
+		TickBody,
+		static_cast<int32>(OwnerHandle.Generation));
+	TickBody.Append({ 0x20, 0x00, 0x10, 0x00, 0x1a, 0x0b });
+	TArray<uint8> Code;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Code, 2);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Code, BeginPlayBody.Num());
+	Code.Append(BeginPlayBody);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Code, TickBody.Num());
+	Code.Append(TickBody);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 10, Code);
+	return Module;
+}
+
+FAvidScriptWasmReloadManifest MakeAvidScriptPropertySessionManifest(
+	const FString& ModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& Package)
+{
+	FAvidScriptWasmReloadManifest Manifest =
+		FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
+	Manifest.Language = TEXT("CSharp");
+	Manifest.WasmFile = TEXT("Saved/AvidScript/") + ModuleId + TEXT(".wasm");
+	Manifest.WasmSha256 = FString::ChrN(64, TEXT('a'));
+	Manifest.BindingPackageName = Package->GetPackageName();
+	Manifest.BindingPackageHash = Package->GetPackageHash();
+	Manifest.BindingPackageManifestFile =
+		TEXT("Saved/AvidScript/") + ModuleId + TEXT(".bindings.json");
+	Manifest.BindingPackageManifestSha256 = FString::ChrN(64, TEXT('b'));
+	Manifest.BindingDescriptorFile =
+		TEXT("Saved/AvidScript/") + ModuleId + TEXT(".descriptor.json");
+	Manifest.BindingDescriptorSha256 = FString::ChrN(64, TEXT('c'));
+	Manifest.DebugMapFile = TEXT("Saved/AvidScript/") + ModuleId + TEXT(".debug.json");
+	Manifest.DebugMapSha256 = FString::ChrN(64, TEXT('d'));
+	Manifest.BindingPackage = Package;
+	return Manifest;
+}
+
+double CalculateAvidScriptPropertyBenchmarkPercentile(
+	TArray<double> Samples,
+	const double Quantile)
+{
+	Samples.Sort();
+	if (Samples.IsEmpty())
+	{
+		return 0.0;
+	}
+	const int32 Index = FMath::Clamp(
+		FMath::FloorToInt(Quantile * static_cast<double>(Samples.Num() - 1)),
+		0,
+		Samples.Num() - 1);
+	return Samples[Index];
+}
+
 bool RehashAvidScriptBindingRuntimeDescriptor(FString& InOutJson)
 {
 	FAvidScriptBindingPackageModel Package;
@@ -1657,6 +1843,532 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertySetTest::RunTest(const FStr
 	TestTrue(
 		TEXT("Direct reflected property setter mutates the Actor"),
 		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 2.5f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest,
+	"AvidScript.Editor.BindingRuntime.BlueprintSetterProperty",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor"),
+			TEXT("RoutedValue"),
+			true
+		}
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("BlueprintSetter property generates a schema v8 package"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.editor.blueprint_setter_runtime"),
+				{},
+				Properties,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("BlueprintSetter descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Setter = Descriptor.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	if (!TestNotNull(TEXT("BlueprintSetter descriptor contains a setter"), Setter))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("BlueprintSetter write policy is explicit"),
+		Setter->WritePolicy,
+		FString(TEXT("blueprint_setter")));
+	TestEqual(
+		TEXT("BlueprintSetter dispatch mode is cached"),
+		Setter->DispatchMode,
+		FString(TEXT("cached_blueprint_setter")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime caches the BlueprintSetter invocation plan"),
+			FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("BlueprintSetter runtime world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptBindingRuntimeProcessEventTestActor* Actor =
+		World->SpawnActor<AAvidScriptBindingRuntimeProcessEventTestActor>();
+	if (!TestNotNull(TEXT("BlueprintSetter runtime actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("BlueprintSetter runtime actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	const uint64 Arguments[] = {
+		ActorHandle.Slot,
+		ActorHandle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(2.5f)
+	};
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Setter->Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult DispatchResult;
+
+	TestFalse(
+		TEXT("Read-only context rejects BlueprintSetter dispatch"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestEqual(TEXT("Rejected BlueprintSetter does not reach ProcessEvent"), Actor->ProcessEventCallCount, 0);
+	TestEqual(TEXT("Rejected BlueprintSetter does not call the setter"), Actor->BlueprintSetterCallCount, 0);
+
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TestTrue(
+		TEXT("Writable context dispatches the cached BlueprintSetter"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestEqual(TEXT("BlueprintSetter reaches ProcessEvent once"), Actor->ProcessEventCallCount, 1);
+	TestEqual(TEXT("BlueprintSetter native implementation runs once"), Actor->BlueprintSetterCallCount, 1);
+	TestTrue(
+		TEXT("BlueprintSetter semantics, not raw property copy, determine the stored value"),
+		FMath::IsNearlyEqual(Actor->RoutedValue, 3.5f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest,
+	"AvidScript.Editor.BindingRuntime.ReflectedPropertyCandidateReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Reload property descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.editor.property_reload"),
+				{},
+				Properties,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Setter = Descriptor.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	if (!TestNotNull(TEXT("Reload property setter resolves"), Setter))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Reload property package loads"),
+			FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Reload property world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Reload property actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->CustomTimeDilation = 1.0f;
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("Reload property actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.World = World;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	const TArray<uint8> InitialModule = BuildAvidScriptPropertyBenchmarkModule(
+		Setter->HostImport,
+		ActorHandle);
+	const TArray<uint8> SuccessfulCandidate = BuildAvidScriptPropertyBenchmarkModule(
+		Setter->HostImport,
+		ActorHandle,
+		true,
+		false,
+		2.0f);
+	const TArray<uint8> TrappingCandidate = BuildAvidScriptPropertyBenchmarkModule(
+		Setter->HostImport,
+		ActorHandle,
+		true,
+		true,
+		3.0f);
+
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(
+		TEXT("Initial property runtime starts"),
+		Session.LoadInitialModule(
+			InitialModule.GetData(),
+			InitialModule.Num(),
+			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_live"), Package),
+			ReloadResult));
+	TestTrue(
+		TEXT("Initial runtime leaves the property unchanged"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
+
+	TestTrue(
+		TEXT("Successful property candidate applies"),
+		Session.ReloadModule(
+			SuccessfulCandidate.GetData(),
+			SuccessfulCandidate.Num(),
+			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_committed"), Package),
+			ReloadResult));
+	TestTrue(TEXT("Successful candidate opens a host-effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
+	TestTrue(TEXT("Successful candidate commits the property transaction"), ReloadResult.bHostEffectTransactionCommitted);
+	TestFalse(TEXT("Successful candidate does not roll back"), ReloadResult.bHostEffectRollbackAttempted);
+	TestEqual(TEXT("Successful candidate captures the property once"), ReloadResult.HostEffectCapturedObjectCount, 1);
+	TestTrue(
+		TEXT("Committed candidate property value remains active"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 2.0f));
+
+	TestFalse(
+		TEXT("Trapping property candidate is rejected"),
+		Session.ReloadModule(
+			TrappingCandidate.GetData(),
+			TrappingCandidate.Num(),
+			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_trap"), Package),
+			ReloadResult));
+	TestTrue(TEXT("Rejected candidate preserves the previous runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
+	TestFalse(TEXT("Rejected candidate does not commit"), ReloadResult.bHostEffectTransactionCommitted);
+	TestTrue(TEXT("Rejected candidate attempts property rollback"), ReloadResult.bHostEffectRollbackAttempted);
+	TestTrue(TEXT("Rejected candidate property rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
+	TestEqual(TEXT("Rejected candidate captures one property snapshot"), ReloadResult.HostEffectCapturedObjectCount, 1);
+	TestEqual(TEXT("Rejected candidate restores one property snapshot"), ReloadResult.HostEffectRestoredObjectCount, 1);
+	TestTrue(
+		TEXT("Rejected candidate restores the committed property value"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 2.0f));
+	TestEqual(
+		TEXT("Committed runtime remains active after candidate trap"),
+		Session.GetSnapshot().ModuleId,
+		FString(TEXT("property_reload_committed")));
+
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Previous runtime continues ticking after rollback"), Session.Tick(0.75f, TickResult));
+	TestTrue(
+		TEXT("Previous runtime setter remains executable after rollback"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 0.75f));
+	FAvidScriptWasmSmokeResult StopResult;
+	Session.StopAndUnload(StopResult);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest,
+	"AvidScript.Performance.ReflectedPropertySetter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Property benchmark descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.performance.property_setter"),
+				{},
+				Properties,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Setter = Descriptor.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	if (!TestNotNull(TEXT("Property benchmark setter resolves"), Setter))
+	{
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("Property benchmark setter has the expected WASM ABI"),
+			Setter->HostImport.Signature,
+			FString(TEXT("(iif)i"))))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Property benchmark package loads"),
+			FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Property benchmark world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Property benchmark actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("Property benchmark actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.ObjectRegistry = &Registry;
+	InvocationContext.OwnerHandle = ActorHandle;
+	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	uint64 Arguments[] = {
+		ActorHandle.Slot,
+		ActorHandle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(1.0f)
+	};
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Setter->Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptDynamicHostCallResult DispatchResult;
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	FAvidScriptWasmRuntimeInstance Runtime;
+	Runtime.SetHostContext(HostContext);
+	const TArray<uint8> Bytecode = BuildAvidScriptPropertyBenchmarkModule(
+		Setter->HostImport,
+		ActorHandle);
+	FAvidScriptWasmSmokeResult WasmResult;
+	if (!TestTrue(
+			TEXT("Property benchmark WASM module loads with the generated package"),
+			Runtime.LoadModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				TEXT("phase52_property_setter_benchmark"),
+				Package,
+				WasmResult))
+		|| !TestTrue(TEXT("Property benchmark BeginPlay succeeds"), Runtime.BeginPlay(WasmResult)))
+	{
+		AddError(WasmResult.ErrorMessage);
+		return false;
+	}
+
+	static constexpr int32 WarmupCount = 3;
+	static constexpr int32 SampleCount = 20;
+	static constexpr int32 IterationsPerSample = 512;
+	TArray<double> NativeSamples;
+	TArray<double> BindingSamples;
+	TArray<double> WasmSamples;
+	NativeSamples.Reserve(SampleCount);
+	BindingSamples.Reserve(SampleCount);
+	WasmSamples.Reserve(SampleCount);
+	const FAvidScriptBindingPackageInstrumentation WarmInstrumentation =
+		Package->GetInstrumentation();
+	const int32 HostImportsBeforeTicks = WasmResult.HostImportCallCount;
+
+	for (int32 RunIndex = 0; RunIndex < WarmupCount + SampleCount; ++RunIndex)
+	{
+		const double NativeStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
+		{
+			Actor->CustomTimeDilation = 1.0f
+				+ static_cast<float>((RunIndex + Iteration) & 7) * 0.01f;
+		}
+		const double NativeMs = (FPlatformTime::Seconds() - NativeStart)
+			* 1000.0 / IterationsPerSample;
+
+		const double BindingStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
+		{
+			const float Value = 1.0f
+				+ static_cast<float>((RunIndex + Iteration) & 7) * 0.01f;
+			Arguments[2] = MakeAvidScriptBindingRuntimeF32Cell(Value);
+			if (!Package->Dispatch(Call, InvocationContext, Scratch, DispatchResult))
+			{
+				AddError(DispatchResult.Details);
+				return false;
+			}
+		}
+		const double BindingMs = (FPlatformTime::Seconds() - BindingStart)
+			* 1000.0 / IterationsPerSample;
+
+		const double WasmStart = FPlatformTime::Seconds();
+		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
+		{
+			const float Value = 1.0f
+				+ static_cast<float>((RunIndex + Iteration) & 7) * 0.01f;
+			if (!Runtime.Tick(Value, WasmResult))
+			{
+				AddError(WasmResult.ErrorMessage);
+				return false;
+			}
+		}
+		const double WasmMs = (FPlatformTime::Seconds() - WasmStart)
+			* 1000.0 / IterationsPerSample;
+
+		if (RunIndex >= WarmupCount)
+		{
+			NativeSamples.Add(NativeMs);
+			BindingSamples.Add(BindingMs);
+			WasmSamples.Add(WasmMs);
+		}
+	}
+
+	const FAvidScriptBindingPackageInstrumentation FinalInstrumentation =
+		Package->GetInstrumentation();
+	const int32 ExpectedCrossings =
+		(WarmupCount + SampleCount) * IterationsPerSample;
+	TestEqual(
+		TEXT("Warm setter performs no additional class loads"),
+		FinalInstrumentation.ClassLoadCount,
+		WarmInstrumentation.ClassLoadCount);
+	TestEqual(
+		TEXT("Warm setter performs no additional reflected-name lookups"),
+		FinalInstrumentation.ReflectedNameLookupCount,
+		WarmInstrumentation.ReflectedNameLookupCount);
+	TestEqual(
+		TEXT("Every WAMR setter performs exactly one host crossing"),
+		WasmResult.HostImportCallCount - HostImportsBeforeTicks,
+		ExpectedCrossings);
+	TestEqual(TEXT("Native benchmark records all samples"), NativeSamples.Num(), SampleCount);
+	TestEqual(TEXT("Binding benchmark records all samples"), BindingSamples.Num(), SampleCount);
+	TestEqual(TEXT("WAMR benchmark records all samples"), WasmSamples.Num(), SampleCount);
+
+	const double NativeP50 = CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.50);
+	const double NativeP95 = CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.95);
+	const double BindingP50 = CalculateAvidScriptPropertyBenchmarkPercentile(BindingSamples, 0.50);
+	const double BindingP95 = CalculateAvidScriptPropertyBenchmarkPercentile(BindingSamples, 0.95);
+	const double WasmP50 = CalculateAvidScriptPropertyBenchmarkPercentile(WasmSamples, 0.50);
+	const double WasmP95 = CalculateAvidScriptPropertyBenchmarkPercentile(WasmSamples, 0.95);
+	TestTrue(TEXT("Native setter P50 is sampled"), NativeP50 > 0.0);
+	TestTrue(TEXT("Binding setter P50 is sampled"), BindingP50 > 0.0);
+	TestTrue(TEXT("WAMR setter P50 is sampled"), WasmP50 > 0.0);
+	AddInfo(FString::Printf(
+		TEXT("phase52_property_setter_benchmark | samples=%d | iterations=%d | native_p50_ms=%.9f | native_p95_ms=%.9f | binding_p50_ms=%.9f | binding_p95_ms=%.9f | wamr_p50_ms=%.9f | wamr_p95_ms=%.9f | crossings=%d | warm_class_loads=0 | warm_reflected_name_lookups=0 | snapshot_captures=0"),
+		SampleCount,
+		IterationsPerSample,
+		NativeP50,
+		NativeP95,
+		BindingP50,
+		BindingP95,
+		WasmP50,
+		WasmP95,
+		ExpectedCrossings));
+	Runtime.Unload();
 	return true;
 }
 
