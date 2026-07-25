@@ -150,7 +150,8 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptCore' @(
 )
 
 Test-SourceTreeForbiddenPattern 'Source' @(
-    '\bCountByPredicate\s*\('
+    '\bCountByPredicate\s*\(',
+    'FString::Printf\s*\(\s*\*'
 )
 
 $BindingsBuild = Read-RequiredFile 'Source/AvidScriptBindings/AvidScriptBindings.Build.cs'
