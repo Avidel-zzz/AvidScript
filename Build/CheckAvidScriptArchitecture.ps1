@@ -768,6 +768,7 @@ foreach ($RequiredPropertyGameplayEvidence in @(
     'FORCENOINLINE void SetAvidScriptPropertyBenchmarkNative',
     'NativeChecksum',
     'BidirectionalPropertiesSample',
+    'MakeBuildRequest(ProfileResult)',
     'BuildProfile(',
     'ReflectedVectorPropertySet'
 )) {

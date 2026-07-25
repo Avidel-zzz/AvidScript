@@ -2363,22 +2363,24 @@ bool FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest::RunTest(c
 	FPaths::NormalizeFilename(SemanticCacheRoot);
 	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
 	IFileManager::Get().DeleteDirectory(*SemanticCacheRoot, false, true);
-	ProfileResult.BuildConfig.OutputRoot = OutputRoot;
-	ProfileResult.BuildConfig.ReportPath =
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = OutputRoot;
+	BuildRequest.Config.ReportPath =
 		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
 			OutputRoot,
-			ProfileResult.BuildConfig.ArtifactStem);
-	ProfileResult.BuildConfig.ManifestPath =
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
 		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
 			OutputRoot,
-			ProfileResult.BuildConfig.ArtifactStem);
-	ProfileResult.BuildConfig.SemanticCacheRoot = SemanticCacheRoot;
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot = SemanticCacheRoot;
 
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!TestTrue(
 		TEXT("Bidirectional property sample builds through the production profile pipeline"),
 		FAvidScriptEditorCSharpBuildService::BuildProfile(
-			ProfileResult.BuildConfig,
+			BuildRequest,
 			BuildResult)))
 	{
 		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
