@@ -110,6 +110,12 @@ public:
 		RoutedValue = Value + 1.0f;
 	}
 
+	UFUNCTION(BlueprintCallable)
+	void SetAlternateRoutedValue(float Value)
+	{
+		RoutedValue = Value + 2.0f;
+	}
+
 	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
 	{
 		++ProcessEventCallCount;

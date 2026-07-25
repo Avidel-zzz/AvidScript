@@ -1,11 +1,16 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorBindingSelectionResolver.h"
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorProjectBindingProfile.h"
+#include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 
 #include "Algo/Reverse.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
+#include "Modules/ModuleManifest.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -151,6 +156,222 @@ bool FAvidScriptEditorProjectBindingProfileStableResolutionTest::RunTest(const F
 		TEXT("Typed self class path changes selection identity"),
 		DifferentSelfHash,
 		FirstHash);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfilePhase51IdentityGoldenTest,
+	"AvidScript.Editor.ProjectBindingProfile.Phase51IdentityGolden",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfilePhase51IdentityGoldenTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.phase51_identity_golden");
+	Spec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("K2_GetActorLocation") }));
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult ResolveResult;
+	if (!TestTrue(
+			TEXT("Phase51 identity fixture resolves"),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				Spec,
+				Selection,
+				ClassReferences,
+				SelectionHash,
+				ResolveResult)))
+	{
+		AddError(ResolveResult.ErrorMessage);
+		return false;
+	}
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult DescriptorSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("Phase51 identity fixture regenerates its descriptor"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Selection,
+				ClassReferences,
+				DescriptorJson,
+				DescriptorSelectionResult,
+				DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel DescriptorPackage;
+	FString DescriptorErrorCategory;
+	FString DescriptorErrorSource;
+	if (!TestTrue(
+		TEXT("Phase51 identity fixture descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			DescriptorPackage,
+			DescriptorErrorCategory,
+			DescriptorErrorSource)))
+	{
+		AddError(DescriptorErrorCategory + TEXT(":") + DescriptorErrorSource);
+		return false;
+	}
+	TestEqual(
+		TEXT("Non-writable descriptor keeps the Phase51 generator identity"),
+		DescriptorPackage.GeneratorVersion,
+		FString(TEXT("50.1.0")));
+
+	FModuleManifest ModuleManifest;
+	const FString ManifestPath = FModuleManifest::GetFileName(
+		FPlatformProcess::GetModulesDirectory(),
+		false);
+	if (!TestTrue(
+			TEXT("Phase51 identity golden can read the active engine build id"),
+			FModuleManifest::TryRead(ManifestPath, ModuleManifest)
+				&& !ModuleManifest.BuildId.IsEmpty()))
+	{
+		return false;
+	}
+
+	const FString Phase51Identity =
+		TEXT("resolver=50.1.0\n")
+		TEXT("engine_build_id=") + ModuleManifest.BuildId
+		+ TEXT("\npackage=") + Spec.PackageName
+		+ TEXT("\nself_class=")
+		+ TEXT("\ndescriptor_selection=") + DescriptorResult.SelectionHash
+		+ TEXT("\ndescriptor_package=") + DescriptorResult.PackageHash
+		+ TEXT("\nclass_rule:/Script/Engine.Actor")
+		TEXT("|if=K2_GetActorLocation|ef=|ip=|ep=|drp=0");
+	TestEqual(
+		TEXT("Profile selection hash retains the Phase51 identity bytes"),
+		SelectionHash,
+		FAvidScriptHash::Sha256HexUtf8(Phase51Identity));
+
+	FAvidScriptProjectBindingProfileSpec FactorySpec = Spec;
+	FactorySpec.PackageName =
+		TEXT("avidscript.project.phase51_factory_identity_golden");
+	FactorySpec.ClassReferences.Add({
+		TEXT("InventoryStateClass"),
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+		TEXT("/Script/CoreUObject.Object"),
+		TEXT("EditorLoad")
+	});
+	FactorySpec.ObjectFactories.Add({
+		TEXT("InventoryState"),
+		TEXT("InventoryStateClass"),
+		TEXT("/Script/CoreUObject.Object"),
+		EAvidScriptProjectObjectFactoryKind::NewObject,
+		EAvidScriptProjectObjectOwnership::Session,
+		EAvidScriptProjectComponentRegistration::None
+	});
+
+	FAvidScriptBindingSelectionProfile FactorySelection;
+	TArray<FAvidScriptProjectBindingClassSpec> FactoryClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories;
+	FString FactorySelectionHash;
+	FAvidScriptBindingSelectionResolveResult FactoryResolveResult;
+	if (!TestTrue(
+			TEXT("Phase51 object-factory identity fixture resolves"),
+			FAvidScriptEditorProjectBindingProfile::Resolve(
+				FactorySpec,
+				FactorySelection,
+				FactoryClassReferences,
+				ObjectFactories,
+				FactorySelectionHash,
+				FactoryResolveResult)))
+	{
+		AddError(FactoryResolveResult.ErrorMessage);
+		return false;
+	}
+
+	FString FactoryDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult FactoryDescriptorSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult FactoryDescriptorResult;
+	if (!TestTrue(
+			TEXT("Phase51 resolver identity descriptor regenerates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				FactorySelection,
+				{},
+				FactoryDescriptorJson,
+				FactoryDescriptorSelectionResult,
+				FactoryDescriptorResult)))
+	{
+		AddError(FactoryDescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FString FullFactoryDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult FullFactoryDescriptorSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult FullFactoryDescriptorResult;
+	if (!TestTrue(
+			TEXT("Phase51 object-factory descriptor regenerates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				FactorySelection,
+				FactoryClassReferences,
+				ObjectFactories,
+				FullFactoryDescriptorJson,
+				FullFactoryDescriptorSelectionResult,
+				FullFactoryDescriptorResult)))
+	{
+		AddError(FullFactoryDescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel FullFactoryDescriptorPackage;
+	if (!TestTrue(
+			TEXT("Phase51 object-factory descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				FullFactoryDescriptorJson,
+				FullFactoryDescriptorPackage,
+				DescriptorErrorCategory,
+				DescriptorErrorSource)))
+	{
+		AddError(DescriptorErrorCategory + TEXT(":") + DescriptorErrorSource);
+		return false;
+	}
+	TestEqual(
+		TEXT("Non-writable object-factory descriptor keeps the Phase51 generator identity"),
+		FullFactoryDescriptorPackage.GeneratorVersion,
+		FString(TEXT("51.1.0")));
+
+	if (!TestEqual(
+		TEXT("Phase51 object-factory fixture retains one class reference"),
+		FactoryClassReferences.Num(),
+		1))
+	{
+		return false;
+	}
+	const FAvidScriptProjectBindingClassSpec& FactoryClassReference =
+		FactoryClassReferences[0];
+	const FString FactoryClassReferenceIdentity =
+		FAvidScriptBindingDescriptorIdentity::MakeClassReferenceIdentity(
+			FactoryClassReference.ClassPath,
+			FactoryClassReference.BaseClassPath,
+			FactoryClassReference.LoadPolicy)
+		+ TEXT("|") + FactoryClassReference.ScriptName;
+	const FString Phase51FactoryIdentity =
+		TEXT("resolver=51.1.0\n")
+		TEXT("engine_build_id=") + ModuleManifest.BuildId
+		+ TEXT("\npackage=") + FactorySpec.PackageName
+		+ TEXT("\nself_class=")
+		+ TEXT("\ndescriptor_selection=")
+		+ FactoryDescriptorResult.SelectionHash
+		+ TEXT("\ndescriptor_package=") + FactoryDescriptorResult.PackageHash
+		+ TEXT("\nclass_rule:/Script/Engine.Actor")
+		TEXT("|if=K2_GetActorLocation|ef=|ip=|ep=|drp=0")
+		+ TEXT("\nclass_reference=") + FactoryClassReferenceIdentity
+		+ TEXT("\nobject_factory=InventoryState")
+		TEXT("|class_reference=InventoryStateClass")
+		TEXT("|kind=new_object|outer=/Script/CoreUObject.Object")
+		TEXT("|ownership=session|registration=none");
+	TestEqual(
+		TEXT("Object-factory profile selection hash retains the Phase51 identity bytes"),
+		FactorySelectionHash,
+		FAvidScriptHash::Sha256HexUtf8(Phase51FactoryIdentity));
 	return true;
 }
 

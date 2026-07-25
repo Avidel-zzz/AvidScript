@@ -33,6 +33,7 @@ struct FResolvedBindingDescriptor
 	FProperty* Property = nullptr;
 	FString BindingKind = TEXT("function");
 	FString UeMember;
+	FString UeFunction;
 	FAvidScriptProjectedFunction Projection;
 	FString ScriptName;
 	FString CanonicalIdentity;
@@ -437,6 +438,8 @@ bool GenerateBindingDescriptor(
 			SetterBinding.Property = Property;
 			SetterBinding.BindingKind = TEXT("property_set");
 			SetterBinding.UeMember = Property->GetName();
+			SetterBinding.UeFunction =
+				Property->GetMetaData(TEXT("BlueprintSetter"));
 			SetterBinding.DispatchMode = MoveTemp(SetterDispatchMode);
 			SetterBinding.WritePolicy = MoveTemp(SetterWritePolicy);
 			SetterBinding.Projection.ReturnValue.Name = TEXT("return");
@@ -457,11 +460,12 @@ bool GenerateBindingDescriptor(
 					TEXT(""))
 				+ TEXT(")i");
 			SetterBinding.ScriptName = Property->GetAuthoredName();
-			SetterBinding.CanonicalIdentity = OwnerClass->GetPathName()
-				+ TEXT("::property_set:") + Property->GetName()
-				+ TEXT("(")
-				+ SetterBinding.Projection.Parameters[0].Type.CanonicalType
-				+ TEXT(")");
+			SetterBinding.CanonicalIdentity =
+				FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+					OwnerClass->GetPathName(),
+					Property->GetName(),
+					SetterBinding.Projection.Parameters[0].Type.CanonicalType,
+					SetterBinding.UeFunction);
 			SetterBinding.StableId = HashSha256(SetterBinding.CanonicalIdentity);
 			SetterBinding.ImportName = TEXT("avid_ue_")
 				+ SetterBinding.StableId.Left(16);
@@ -551,7 +555,9 @@ bool GenerateBindingDescriptor(
 		BindingModel.OwnerClass = Binding.OwnerClass->GetPathName();
 		BindingModel.BindingKind = Binding.BindingKind;
 		BindingModel.UeMember = Binding.UeMember;
-		BindingModel.UeFunction = Binding.Function == nullptr ? FString() : Binding.Function->GetName();
+		BindingModel.UeFunction = Binding.Function == nullptr
+			? Binding.UeFunction
+			: Binding.Function->GetName();
 		BindingModel.ScriptName = Binding.ScriptName;
 		BindingModel.DispatchMode = Binding.DispatchMode;
 		BindingModel.WritePolicy = Binding.WritePolicy;

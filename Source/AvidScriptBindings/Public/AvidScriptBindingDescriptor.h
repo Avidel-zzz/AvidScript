@@ -152,6 +152,12 @@ public:
 		EAvidScriptObjectOwnershipPolicy Ownership,
 		EAvidScriptComponentRegistrationPolicy Registration);
 
+	static FString MakePropertySetCanonicalIdentity(
+		const FString& OwnerClass,
+		const FString& PropertyName,
+		const FString& CanonicalValueType,
+		const FString& BlueprintSetterFunction);
+
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);
 };

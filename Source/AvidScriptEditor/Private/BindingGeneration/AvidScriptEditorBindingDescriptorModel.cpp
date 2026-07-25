@@ -167,6 +167,11 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		{
 			Writer->WriteValue(TEXT("binding_kind"), Binding.BindingKind);
 			Writer->WriteValue(TEXT("ue_member"), Binding.UeMember);
+			if (Package.SchemaVersion >= 8
+				&& Binding.BindingKind == TEXT("property_set"))
+			{
+				Writer->WriteValue(TEXT("ue_function"), Binding.UeFunction);
+			}
 		}
 		else
 		{

@@ -321,6 +321,16 @@ bool ParseAvidScriptBindingFunction(
 		{
 			OutBinding.UeFunction = OutBinding.UeMember;
 		}
+		else if (SchemaVersion >= 8
+			&& OutBinding.BindingKind == TEXT("property_set")
+			&& !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("ue_function"),
+				OutBinding.UeFunction,
+				OutErrorSource))
+		{
+			return false;
+		}
 	}
 	if (SchemaVersion >= 8)
 	{
@@ -940,6 +950,22 @@ FString FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
 		Registration));
 }
 
+FString FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+	const FString& OwnerClass,
+	const FString& PropertyName,
+	const FString& CanonicalValueType,
+	const FString& BlueprintSetterFunction)
+{
+	FString Identity = OwnerClass
+		+ TEXT("::property_set:") + PropertyName
+		+ TEXT("(") + CanonicalValueType + TEXT(")");
+	if (!BlueprintSetterFunction.IsEmpty())
+	{
+		Identity += TEXT("::blueprint_setter:") + BlueprintSetterFunction;
+	}
+	return Identity;
+}
+
 FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	const FAvidScriptBindingPackageModel& Package)
 {
@@ -1168,6 +1194,13 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 				Identity,
 				TEXT("write_policy"),
 				Binding.WritePolicy);
+			if (Binding.BindingKind == TEXT("property_set"))
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("ue_function"),
+					Binding.UeFunction);
+			}
 		}
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("static"), Binding.bStatic ? TEXT("1") : TEXT("0"));
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("const"), Binding.bConst ? TEXT("1") : TEXT("0"));
@@ -1421,9 +1454,17 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					|| Binding.Parameters.Num() != 1
 					|| Binding.Parameters[0].Direction != TEXT("value")
 					|| ((Binding.DispatchMode != TEXT("cached_property_set")
-							|| Binding.WritePolicy != TEXT("direct"))
+							|| Binding.WritePolicy != TEXT("direct")
+							|| !Binding.UeFunction.IsEmpty())
 						&& (Binding.DispatchMode != TEXT("cached_blueprint_setter")
-							|| Binding.WritePolicy != TEXT("blueprint_setter")))))
+							|| Binding.WritePolicy != TEXT("blueprint_setter")
+							|| Binding.UeFunction.IsEmpty()))
+					|| Binding.CanonicalIdentity
+						!= FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+							Binding.OwnerClass,
+							Binding.UeMember,
+							Binding.Parameters[0].CanonicalType,
+							Binding.UeFunction)))
 			|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity)
 			|| Binding.HostImport.Module != TEXT("avidscript")
 			|| Binding.HostImport.Name != TEXT("avid_ue_") + Binding.StableId.Left(16)

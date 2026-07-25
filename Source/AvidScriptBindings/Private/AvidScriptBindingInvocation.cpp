@@ -428,9 +428,11 @@ FString MakeAvidScriptRuntimePropertySetCanonicalIdentity(
 	const FProperty* Property,
 	const FAvidScriptBindingFunctionModel& Binding)
 {
-	return OwnerClass->GetPathName()
-		+ TEXT("::property_set:") + Property->GetName()
-		+ TEXT("(") + Binding.Parameters[0].CanonicalType + TEXT(")");
+	return FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+		OwnerClass->GetPathName(),
+		Property->GetName(),
+		Binding.Parameters[0].CanonicalType,
+		Binding.UeFunction);
 }
 
 FString MakeAvidScriptRuntimeSelectionHash(const FAvidScriptBindingPackageModel& Package)
@@ -2174,6 +2176,15 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				Property->GetMetaData(TEXT("BlueprintSetter"));
 			UFunction* BlueprintSetter = nullptr;
 			TArray<FProperty*> SetterParameters;
+			if (Binding.UeFunction != BlueprintSetterName)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_blueprint_setter_mismatch"),
+					Binding.CanonicalIdentity,
+					TEXT("The authorized BlueprintSetter name no longer matches the property metadata."));
+				return false;
+			}
 			if (BlueprintSetterName.IsEmpty())
 			{
 				if (Binding.DispatchMode != TEXT("cached_property_set")
@@ -2191,7 +2202,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			{
 				++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 				BlueprintSetter = OwnerClass->FindFunctionByName(
-					FName(*BlueprintSetterName));
+					FName(*Binding.UeFunction));
 				if (BlueprintSetter != nullptr)
 				{
 					for (TFieldIterator<FProperty> It(BlueprintSetter); It; ++It)

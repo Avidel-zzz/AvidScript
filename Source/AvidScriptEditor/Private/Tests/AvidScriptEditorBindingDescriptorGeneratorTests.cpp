@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "Algo/Reverse.h"
@@ -18,6 +19,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
@@ -326,6 +328,9 @@ bool FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest::RunTest(
 		FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			Package,
 			CanonicalJson));
+	TestFalse(
+		TEXT("Schema v7 canonical bytes do not expose the v8 setter function field"),
+		CanonicalJson.Contains(TEXT("\"ue_function\"")));
 
 	FAvidScriptBindingPackageModel ParsedPackage;
 	FString ErrorCategory;
@@ -857,6 +862,7 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 	{
 		TestEqual(TEXT("Setter uses direct write policy"), Setter->WritePolicy, FString(TEXT("direct")));
 		TestEqual(TEXT("Setter uses cached property dispatch"), Setter->DispatchMode, FString(TEXT("cached_property_set")));
+		TestTrue(TEXT("Direct property setter has no BlueprintSetter UFunction"), Setter->UeFunction.IsEmpty());
 		TestEqual(TEXT("Setter carries one value parameter"), Setter->Parameters.Num(), 1);
 		TestEqual(TEXT("Setter ABI carries owner handle and float"), Setter->HostImport.Signature, FString(TEXT("(iif)i")));
 		TestEqual(
@@ -864,6 +870,213 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			Setter->ReloadEffect,
 			EAvidScriptBindingReloadEffect::ReflectedProperty);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV8BlueprintSetterIdentityTest,
+	"AvidScript.Editor.BindingDescriptor.V8BlueprintSetterIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV8BlueprintSetterIdentityTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerClassPath =
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ OwnerClassPath, TEXT("RoutedValue"), true }
+	};
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("BlueprintSetter property generates a schema v8 descriptor"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.test.blueprint_setter_identity"),
+				{},
+				Properties,
+				Json,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("BlueprintSetter descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				Json,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(":") + ErrorSource);
+		return false;
+	}
+
+	const int32 SetterIndex = Package.Bindings.IndexOfByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	if (!TestTrue(TEXT("BlueprintSetter descriptor contains a setter"), SetterIndex != INDEX_NONE))
+	{
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel& Setter = Package.Bindings[SetterIndex];
+	TestEqual(
+		TEXT("Descriptor fixes the concrete BlueprintSetter UFunction"),
+		Setter.UeFunction,
+		FString(TEXT("SetRoutedValue")));
+	const FString ExpectedIdentity =
+		FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+			OwnerClassPath,
+			TEXT("RoutedValue"),
+			Setter.Parameters[0].CanonicalType,
+			TEXT("SetRoutedValue"));
+	TestEqual(
+		TEXT("BlueprintSetter name participates in canonical identity"),
+		Setter.CanonicalIdentity,
+		ExpectedIdentity);
+	TestEqual(
+		TEXT("BlueprintSetter name participates in stable identity"),
+		Setter.StableId,
+		FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity));
+
+	FAvidScriptBindingPackageModel AlternateSetterPackage = Package;
+	AlternateSetterPackage.Bindings[SetterIndex].UeFunction =
+		TEXT("SetAlternateRoutedValue");
+	TestNotEqual(
+		TEXT("BlueprintSetter name participates in package identity"),
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(
+			AlternateSetterPackage),
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package));
+
+	TSharedPtr<FJsonObject> Root;
+	if (!TestTrue(TEXT("BlueprintSetter descriptor is JSON"), ParseDescriptor(Json, Root))
+		|| !Root.IsValid())
+	{
+		return false;
+	}
+	TSharedPtr<FJsonObject> SetterObject;
+	for (const TSharedPtr<FJsonValue>& BindingValue :
+		Root->GetArrayField(TEXT("bindings")))
+	{
+		const TSharedPtr<FJsonObject> Candidate =
+			BindingValue.IsValid() ? BindingValue->AsObject() : nullptr;
+		if (Candidate.IsValid()
+			&& Candidate->GetStringField(TEXT("binding_kind"))
+				== TEXT("property_set"))
+		{
+			SetterObject = Candidate;
+			break;
+		}
+	}
+	if (!TestTrue(
+			TEXT("Canonical JSON contains the property setter"),
+			SetterObject.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Canonical JSON carries the BlueprintSetter UFunction"),
+		SetterObject->GetStringField(TEXT("ue_function")),
+		FString(TEXT("SetRoutedValue")));
+
+	SetterObject->RemoveField(TEXT("ue_function"));
+	FString MissingSetterJson;
+	FAvidScriptBindingPackageModel MissingSetterPackage;
+	TestFalse(
+		TEXT("Schema v8 parser rejects a missing setter function field"),
+		SerializeDescriptor(Root, MissingSetterJson)
+			&& FAvidScriptBindingDescriptorParser::Parse(
+				MissingSetterJson,
+				MissingSetterPackage,
+				ErrorCategory,
+				ErrorSource));
+	TestEqual(
+		TEXT("Missing setter function field has a stable source"),
+		ErrorSource,
+		FString(TEXT("ue_function")));
+
+	if (!TestTrue(
+		TEXT("BlueprintSetter descriptor JSON can be restored"),
+		ParseDescriptor(Json, Root)))
+	{
+		return false;
+	}
+	for (const TSharedPtr<FJsonValue>& BindingValue :
+		Root->GetArrayField(TEXT("bindings")))
+	{
+		const TSharedPtr<FJsonObject> Candidate =
+			BindingValue.IsValid() ? BindingValue->AsObject() : nullptr;
+		if (Candidate.IsValid()
+			&& Candidate->GetStringField(TEXT("binding_kind"))
+				== TEXT("property_set"))
+		{
+			Candidate->SetStringField(
+				TEXT("ue_function"),
+				TEXT("SetAlternateRoutedValue"));
+			break;
+		}
+	}
+	FString TamperedSetterJson;
+	FAvidScriptBindingPackageModel TamperedSetterPackage;
+	TestFalse(
+		TEXT("Parser rejects a setter function not bound by stable identity"),
+		SerializeDescriptor(Root, TamperedSetterJson)
+			&& FAvidScriptBindingDescriptorParser::Parse(
+				TamperedSetterJson,
+				TamperedSetterPackage,
+				ErrorCategory,
+				ErrorSource));
+	TestEqual(
+		TEXT("Setter stable identity tampering is a descriptor contract failure"),
+		ErrorCategory,
+		FString(TEXT("descriptor_contract_invalid")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Runtime accepts the descriptor before metadata drift"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			Json,
+			RuntimePackage,
+			LoadResult));
+
+	FProperty* RoutedValueProperty = FindFProperty<FProperty>(
+		AAvidScriptBindingRuntimeProcessEventTestActor::StaticClass(),
+		TEXT("RoutedValue"));
+	if (!TestNotNull(
+			TEXT("BlueprintSetter drift fixture property exists"),
+			RoutedValueProperty))
+	{
+		return false;
+	}
+	const FString OriginalBlueprintSetter =
+		RoutedValueProperty->GetMetaData(TEXT("BlueprintSetter"));
+	RoutedValueProperty->SetMetaData(
+		TEXT("BlueprintSetter"),
+		TEXT("SetAlternateRoutedValue"));
+	TSharedPtr<const FAvidScriptBindingPackage> DriftedRuntimePackage;
+	FAvidScriptBindingPackageLoadResult DriftedLoadResult;
+	const bool bDriftedLoadSucceeded =
+		FAvidScriptBindingPackage::LoadDescriptor(
+			Json,
+			DriftedRuntimePackage,
+			DriftedLoadResult);
+	RoutedValueProperty->SetMetaData(
+		TEXT("BlueprintSetter"),
+		*OriginalBlueprintSetter);
+	TestFalse(
+		TEXT("Runtime rejects BlueprintSetter metadata drift to a same-signature function"),
+		bDriftedLoadSucceeded);
+	TestEqual(
+		TEXT("BlueprintSetter metadata drift has a stable category"),
+		DriftedLoadResult.ErrorCategory,
+		FString(TEXT("binding_property_blueprint_setter_mismatch")));
 	return true;
 }
 

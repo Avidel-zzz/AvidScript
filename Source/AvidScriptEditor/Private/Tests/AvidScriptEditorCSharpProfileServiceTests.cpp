@@ -894,6 +894,56 @@ bool FAvidScriptEditorCSharpProfileServiceWritablePropertyTest::RunTest(const FS
 			Result.ResolvedBindingSelection.Classes[0].WritableProperties.Num(),
 			1);
 	}
+
+	const FString ReadOnlyProfileTemplate =
+		TEXT("{\n")
+		TEXT("  \"schema_version\": %d,\n")
+		TEXT("  \"language\": \"csharp\",\n")
+		TEXT("  \"source_path\": \"%s\",\n")
+		TEXT("  \"binding_profile\": {\n")
+		TEXT("    \"package_name\": \"avidscript.test.read_only_identity\",\n")
+		TEXT("    \"classes\": [{\n")
+		TEXT("      \"class_path\": \"/Script/Engine.Actor\",\n")
+		TEXT("      \"include_properties\": [\"CustomTimeDilation\"]\n")
+		TEXT("    }]\n")
+		TEXT("  }\n")
+		TEXT("}\n");
+	const auto LoadReadOnlyProfile = [this, &TestRoot, &SourcePath, &ReadOnlyProfileTemplate](
+		const int32 SchemaVersion,
+		FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+	{
+		const FString ReadOnlyProfilePath =
+			NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+				TestRoot,
+				FString::Printf(TEXT("read_only_v%d.csharp-profile.json"), SchemaVersion)));
+		const FString ReadOnlyProfileText = FString::Printf(
+			*ReadOnlyProfileTemplate,
+			SchemaVersion,
+			*SourcePath);
+		TestTrue(
+			*FString::Printf(
+				TEXT("Read-only schema v%d profile can be written"),
+				SchemaVersion),
+			FFileHelper::SaveStringToFile(
+				ReadOnlyProfileText,
+				*ReadOnlyProfilePath));
+		return FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ReadOnlyProfilePath,
+			OutResult);
+	};
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema4ReadOnlyResult;
+	FAvidScriptEditorCSharpProfileLoadResult Schema5ReadOnlyResult;
+	TestTrue(
+		TEXT("Schema v4 read-only profile resolves"),
+		LoadReadOnlyProfile(4, Schema4ReadOnlyResult));
+	TestTrue(
+		TEXT("Schema v5 read-only profile resolves without opting into writable identity"),
+		LoadReadOnlyProfile(5, Schema5ReadOnlyResult));
+	TestEqual(
+		TEXT("Unused writable-property syntax leaves the Phase51 selection hash unchanged"),
+		Schema5ReadOnlyResult.BindingSelectionHash,
+		Schema4ReadOnlyResult.BindingSelectionHash);
 	return true;
 }
 #endif // WITH_DEV_AUTOMATION_TESTS

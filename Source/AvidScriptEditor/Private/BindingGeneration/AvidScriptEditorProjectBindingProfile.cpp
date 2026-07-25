@@ -279,7 +279,10 @@ bool TryGetEngineBuildIdentity(
 	return false;
 }
 
-void AppendRuleIdentity(const FAvidScriptReflectedClassSelection& Rule, TArray<FString>& OutIdentity)
+void AppendRuleIdentity(
+	const FAvidScriptReflectedClassSelection& Rule,
+	const bool bIncludeWritableProperties,
+	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
 	{
@@ -291,14 +294,20 @@ void AppendRuleIdentity(const FAvidScriptReflectedClassSelection& Rule, TArray<F
 		}
 		return FString::Join(Values, TEXT(","));
 	};
-	OutIdentity.Add(
+	FString Identity =
 		TEXT("class_rule:") + Rule.OwnerClassPath
 		+ TEXT("|if=") + JoinNames(Rule.IncludeFunctions)
 		+ TEXT("|ef=") + JoinNames(Rule.ExcludeFunctions)
 		+ TEXT("|ip=") + JoinNames(Rule.IncludeProperties)
-		+ TEXT("|ep=") + JoinNames(Rule.ExcludeProperties)
-		+ TEXT("|wp=") + JoinNames(Rule.WritableProperties)
-		+ FString::Printf(TEXT("|drp=%d"), Rule.bDiscoverReadableProperties ? 1 : 0));
+		+ TEXT("|ep=") + JoinNames(Rule.ExcludeProperties);
+	if (bIncludeWritableProperties)
+	{
+		Identity += TEXT("|wp=") + JoinNames(Rule.WritableProperties);
+	}
+	Identity += FString::Printf(
+		TEXT("|drp=%d"),
+		Rule.bDiscoverReadableProperties ? 1 : 0);
+	OutIdentity.Add(MoveTemp(Identity));
 }
 } // namespace
 
@@ -824,7 +833,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	}
 	for (const FAvidScriptReflectedClassSelection& Rule : OutSelection.Classes)
 	{
-		AppendRuleIdentity(Rule, Identity);
+		AppendRuleIdentity(Rule, bHasWritableProperties, Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)
 	{
