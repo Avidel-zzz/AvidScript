@@ -672,13 +672,13 @@ function Test-RendererFrozenRegions {
 
     $ExpectedHashes = [ordered]@{
         'RenderMethod' = '8de2161bc979d478083b62f8ce12c8eddcb7199cc5e48a191c83c3afb0f38723'
-        'RenderPropertyGetter' = 'd5137318d606be8a3a9452dbe68af1c2dd3c1f4ceb7865fe242a72193bbe7006'
+        'RenderPropertyGetter' = '4f607fe468130480bf2dfdd541d785134176fce3baa5e2dd31b07f7a659db215'
         'AppendVector' = 'a052bea5eda0769613a907e479549d6c9032b6ae9a9b90a110714105d07a4e3d'
         'AppendInputEvent' = '27014e57fb190bcd48d5028c4b1722e5f6ec11837962c6bae8cb52658a580f39'
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-        'EmitReferenceSource' = 'ffbdedc4d4a8bf35b3fa8d9ff5a0712b911546d583aa2b71623e30c1c0697456'
+        'EmitReferenceSource' = 'c39e6ab40ed3ef4f192a9799922e3a85b59aa406280e4485bc7cefff4a0261f4'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-        'BindingRenderer' = 'bcfea333c3150d31d0be954b2c0de736fe7f46ccf56dfcc8a9686ce276ebc628'
+        'BindingRenderer' = '63891e9ee22959aee6351e1931c63826146918f8495c3573f2e616e7ab45b10f'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -1121,6 +1121,7 @@ function Test-RendererCandidates {
     Test-ExactMultiset `
         @($ParsedEntryPoints) `
         @(
+            '%s',
             '%s',
             '%s',
             '%s',

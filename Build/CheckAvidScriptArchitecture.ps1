@@ -505,9 +505,14 @@ foreach ($RequiredSelectionContract in @(
     'IncludeProperties',
     'ExcludeProperties',
     'ExplicitProperties',
+    'bWritable',
+    'WritableProperties',
     'CandidatePropertyCount',
     'AcceptedPropertyCount',
-    'RejectedPropertyCount'
+    'RejectedPropertyCount',
+    'CandidateWritablePropertyCount',
+    'AcceptedWritablePropertyCount',
+    'RejectedWritablePropertyCount'
 )) {
     if (-not $BindingSelectionTypes.Contains($RequiredSelectionContract)) {
         Add-Violation "binding selection types are missing $RequiredSelectionContract"
@@ -530,8 +535,11 @@ if (-not $ReflectedFunctionPolicySource.Contains('FAvidScriptEditorReflectedFunc
     Add-Violation 'reflected function eligibility must remain in the shared function policy'
 }
 if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable') -or
+    -not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable') -or
+    -not $ReflectedPropertyPolicySource.Contains('cached_property_set') -or
+    -not $ReflectedPropertyPolicySource.Contains('cached_blueprint_setter') -or
     -not $ReflectedTypePolicyHeader.Contains('ProjectReadableProperty')) {
-    Add-Violation 'reflected property eligibility must reuse the shared reflected type policy'
+    Add-Violation 'reflected property eligibility and write routing must remain in the shared reflected property policy'
 }
 foreach ($RequiredProfileGeneratorContract in @('MakeEngineGameplayProfile', 'GenerateFromProfile')) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredProfileGeneratorContract)) {
@@ -563,6 +571,7 @@ $CSharpBuildInvokerSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/C
 $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
+$CSharpCallOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCallOperationLowerer.cs'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -656,7 +665,11 @@ foreach ($RequiredPropertyDescriptorParserContract in @(
     'binding_kind',
     'ue_member',
     'property_get',
-    'cached_property_get'
+    'cached_property_get',
+    'property_set',
+    'write_policy',
+    'cached_property_set',
+    'cached_blueprint_setter'
 )) {
     if (-not $BindingDescriptorSource.Contains($RequiredPropertyDescriptorParserContract)) {
         Add-Violation "binding descriptor v4 parser is missing $RequiredPropertyDescriptorParserContract"
@@ -666,7 +679,9 @@ foreach ($RequiredPropertyDescriptorGeneratorContract in @(
     'GenerateWithReadableProperties',
     'property_get:',
     'cached_property_get',
-    'ProjectReadableProperty'
+    'ProjectReadableProperty',
+    'property_set:',
+    'WritablePropertyGeneratorVersion'
 )) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredPropertyDescriptorGeneratorContract)) {
         Add-Violation "binding descriptor v4 generator is missing $RequiredPropertyDescriptorGeneratorContract"
@@ -676,7 +691,14 @@ foreach ($RequiredPropertyRuntimeContract in @(
     'FindFProperty<FProperty>',
     'Plan.ReflectedProperty',
     'WriteAvidScriptRuntimeValueToGuest',
-    'binding_property_read_failed'
+    'binding_property_read_failed',
+    'EAvidScriptBindingInvocationKind::ReflectedPropertyWrite',
+    'cached_property_set',
+    'cached_blueprint_setter',
+    'PrepareReflectedProperty',
+    'SetAvidScriptRuntimeValueFromCells',
+    'binding_property_write_policy_mismatch',
+    'binding_property_write_failed'
 )) {
     if (-not $BindingInvocationSource.Contains($RequiredPropertyRuntimeContract)) {
         Add-Violation "cached property runtime is missing $RequiredPropertyRuntimeContract"
@@ -685,6 +707,8 @@ foreach ($RequiredPropertyRuntimeContract in @(
 foreach ($RequiredPropertyFacadeContract in @(
     'RenderPropertyGetter',
     'Binding.BindingKind == TEXT("property_get")',
+    'BuildPropertySetterInterop',
+    'Binding.BindingKind == TEXT("property_set")',
     'GenerateWithObjectFactories',
     'public bool IsNull => Slot == 0 && Generation == 0;',
     'public bool HasHandle => Slot > 0 && Generation > 0;'
@@ -693,6 +717,23 @@ foreach ($RequiredPropertyFacadeContract in @(
         -not $CSharpBindingEmitterSource.Contains($RequiredPropertyFacadeContract) -and
         -not $CSharpBindingSliceSource.Contains($RequiredPropertyFacadeContract)) {
         Add-Violation "C# property facade pipeline is missing $RequiredPropertyFacadeContract"
+    }
+}
+foreach ($RequiredPropertySliceContract in @(
+    'Binding.BindingKind == TEXT("property_get")',
+    'Binding.BindingKind == TEXT("property_set")'
+)) {
+    if (-not $CSharpBindingSliceSource.Contains($RequiredPropertySliceContract)) {
+        Add-Violation "C# runtime slice is missing property accessor contract $RequiredPropertySliceContract"
+    }
+}
+foreach ($RequiredPropertyLoweringContract in @(
+    'LowerPropertySetter',
+    'TryGetPropertySetter',
+    'property setter'
+)) {
+    if (-not $CSharpCallOperationLowererSource.Contains($RequiredPropertyLoweringContract)) {
+        Add-Violation "C# Guest lowering is missing property setter contract $RequiredPropertyLoweringContract"
     }
 }
 foreach ($RequiredClassReferenceDescriptorContract in @(
@@ -2192,6 +2233,11 @@ foreach ($RequiredHostEffectContract in @(
 foreach ($RequiredHostEffectBehavior in @(
     'EAvidScriptBindingReloadEffect::ActorTransform',
     'EAvidScriptBindingReloadEffect::SceneComponentTransform',
+    'EAvidScriptBindingReloadEffect::ReflectedProperty',
+    'FAvidScriptHostEffectTransaction::PrepareReflectedProperty',
+    'Property->InitializeValue(Data)',
+    'Property->CopyCompleteValue(',
+    'Property->DestroyValue(Data)',
     'binding_reload_effect_unsupported',
     'host_effect_restore_failed'
 )) {
@@ -2227,11 +2273,14 @@ if (-not $RuntimeSource.Contains('InvocationContext.HostEffectJournal = HostCont
     Add-Violation 'Wasm dynamic host calls must forward the candidate host effect journal into binding invocation'
 }
 $DynamicPrepareIndex = $BindingInvocationSource.IndexOf('Context.HostEffectJournal->PrepareEffect(')
+$ReflectedPropertyPrepareIndex = $BindingInvocationSource.IndexOf('Context.HostEffectJournal->PrepareReflectedProperty(')
 $DynamicProcessEventIndex = $BindingInvocationSource.IndexOf('Target->ProcessEvent(Plan.Function, Frame)')
 if (-not $BindingInvocationSource.Contains('binding_reload_effect_unsupported') -or
     $DynamicPrepareIndex -lt 0 -or
+    $ReflectedPropertyPrepareIndex -lt 0 -or
     $DynamicProcessEventIndex -lt 0 -or
-    $DynamicPrepareIndex -ge $DynamicProcessEventIndex) {
+    $DynamicPrepareIndex -ge $DynamicProcessEventIndex -or
+    $ReflectedPropertyPrepareIndex -ge $DynamicProcessEventIndex) {
     Add-Violation 'dynamic binding candidate policy must reject unsupported writes and prepare reversible effects before ProcessEvent'
 }
 if (-not $VmBackendContractSource.Contains('IAvidScriptVmGuestMemory* GetGuestMemory()') -or
