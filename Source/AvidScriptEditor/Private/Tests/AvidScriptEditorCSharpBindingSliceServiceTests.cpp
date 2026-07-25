@@ -408,6 +408,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	}
 
 	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
+	const FAvidScriptBindingTypeModel* InactiveObjectType = nullptr;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	const bool bSliceLoaded = FAvidScriptBindingPackage::LoadDescriptor(SliceJson, LoadedSlice, LoadResult);
 	TestTrue(TEXT("Runtime slice loads invocation package"), bSliceLoaded);
@@ -460,7 +461,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		TestEqual(
 			TEXT("Runtime loads and anchors only active object-type classes"),
 			LoadedSlice->GetInstrumentation().ClassLoadCount,
-			ActiveObjectTypeCount);
+			static_cast<uint64>(ActiveObjectTypeCount));
 		TestEqual(
 			TEXT("Runtime slice retains custom Self class identity"),
 			LoadedSlice->GetExpectedSelfClass(),
@@ -914,7 +915,6 @@ bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
 		2);
 
 	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
-	const FAvidScriptBindingTypeModel* InactiveObjectType = nullptr;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	if (!TestTrue(
 		TEXT("Factory runtime slice loads immutable plans"),

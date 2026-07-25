@@ -1319,11 +1319,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			OutErrorSource = TEXT("active_object_type_ordinals");
 			return false;
 		}
-		const int32 ObjectTypeCount = OutPackage.Types.CountByPredicate(
-			[](const FAvidScriptBindingTypeModel& Type)
-			{
-				return Type.ObjectTypeOrdinal != INDEX_NONE;
-			});
+		int32 ObjectTypeCount = 0;
+		for (const FAvidScriptBindingTypeModel& Type : OutPackage.Types)
+		{
+			ObjectTypeCount += Type.ObjectTypeOrdinal != INDEX_NONE ? 1 : 0;
+		}
 		int32 PreviousOrdinal = INDEX_NONE;
 		for (const TSharedPtr<FJsonValue>& Value : *ActiveOrdinals)
 		{
