@@ -665,6 +665,11 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
 			RuntimePackage.ManifestPath);
 	Plan.FinalConfig.RuntimeBindingPackagePath =
 		Plan.RuntimeBindingPackagePath;
+	// The final lowering must consume the compact slice so generated object-type
+	// constants match its contiguous ordinal table.
+	Plan.FinalConfig.BindingPackagePath =
+		Plan.RuntimeBindingPackagePath;
+	Plan.FinalConfig.PreparedBuildReportPath.Reset();
 	Plan.FinalConfig.bOmitRuntimeBindingPackage = false;
 	return true;
 }

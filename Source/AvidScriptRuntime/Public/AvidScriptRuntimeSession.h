@@ -6,6 +6,7 @@
 class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
+class IAvidScriptBindingHostEffectJournal;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
@@ -76,6 +77,15 @@ public:
 	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
 	void SetCandidateBeginPlayObserverForTesting(TFunction<void()> InObserver)
 	{
+		CandidateBeginPlayObserverForTesting =
+			[Observer = MoveTemp(InObserver)](IAvidScriptBindingHostEffectJournal*) mutable
+			{
+				Observer();
+			};
+	}
+	void SetCandidateBeginPlayObserverForTesting(
+		TFunction<void(IAvidScriptBindingHostEffectJournal*)> InObserver)
+	{
 		CandidateBeginPlayObserverForTesting = MoveTemp(InObserver);
 	}
 	void SetLiveExecutionObserverForTesting(TFunction<void()> InObserver)
@@ -117,7 +127,8 @@ private:
 	int32 ActiveGuestCallDepth = 0;
 	bool bMutationInProgress = false;
 #if WITH_DEV_AUTOMATION_TESTS
-	TFunction<void()> CandidateBeginPlayObserverForTesting;
+	TFunction<void(IAvidScriptBindingHostEffectJournal*)>
+		CandidateBeginPlayObserverForTesting;
 	TFunction<void()> LiveExecutionObserverForTesting;
 #endif
 };

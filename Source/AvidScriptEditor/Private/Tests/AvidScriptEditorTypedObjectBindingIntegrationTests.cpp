@@ -866,8 +866,8 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		return false;
 	}
 	TestEqual(TEXT("Typed project API build performs bootstrap and final passes"), BuildResult.BuildInvocationCount, 2);
-	TestEqual(TEXT("Typed project API build invokes Roslyn frontend once"), BuildResult.FrontendInvocationCount, 1);
-	TestEqual(TEXT("Typed project API build emits one semantic model"), BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Typed project API build reruns Roslyn for the compact slice"), BuildResult.FrontendInvocationCount, 2);
+	TestEqual(TEXT("Typed project API build emits authorization and slice semantic models"), BuildResult.SemanticInvocationCount, 2);
 	TestEqual(TEXT("Typed project API build lowers reachable Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
 	TestEqual(TEXT("Typed project API build emits WASM twice"), BuildResult.WasmBackendInvocationCount, 2);
 	TestTrue(
@@ -1428,8 +1428,8 @@ bool FAvidScriptEditorCSharpComponentGameplayTest::RunTest(
 	}
 	TestEqual(TEXT("Component gameplay uses bootstrap and final builds"),
 		BuildResult.BuildInvocationCount, 2);
-	TestEqual(TEXT("Component gameplay invokes Roslyn once"),
-		BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Component gameplay relowers against compact slice ordinals"),
+		BuildResult.SemanticInvocationCount, 2);
 	TestEqual(TEXT("Component gameplay lowers Guest IR twice"),
 		BuildResult.GuestIrInvocationCount, 2);
 	TestEqual(TEXT("Component gameplay emits WASM twice"),

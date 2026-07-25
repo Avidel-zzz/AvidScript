@@ -293,26 +293,6 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		SliceTypeIds.Add(Type.StableId);
 	}
-	for (const FAvidScriptBindingTypeModel& AuthorizationType : AuthorizationModel.Types)
-	{
-		if (AuthorizationType.ObjectTypeOrdinal == INDEX_NONE)
-		{
-			continue;
-		}
-		const FAvidScriptBindingTypeModel* SliceType = SliceModel.Types.FindByPredicate(
-			[&AuthorizationType](const FAvidScriptBindingTypeModel& Candidate)
-			{
-				return Candidate.StableId == AuthorizationType.StableId;
-			});
-		TestNotNull(TEXT("Slice preserves every authorization object type"), SliceType);
-		if (SliceType != nullptr)
-		{
-			TestEqual(
-				TEXT("Slice preserves the prepared object-type ordinal"),
-				SliceType->ObjectTypeOrdinal,
-				AuthorizationType.ObjectTypeOrdinal);
-		}
-	}
 	TSet<FString> RequiredTypeIds;
 	RequiredTypeIds.Add(AuthorizationModel.SelfTypeId);
 	for (const FAvidScriptBindingClassReferenceModel& Reference : AuthorizationModel.ClassReferences)
@@ -349,6 +329,30 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		TestTrue(TEXT("Slice keeps every referenced type and graph ancestor"), SliceTypeIds.Contains(TypeId));
 	}
+	int32 SliceObjectTypeCount = 0;
+	int32 AuthorizationObjectTypeCount = 0;
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		AuthorizationObjectTypeCount += Type.ObjectTypeOrdinal != INDEX_NONE ? 1 : 0;
+	}
+	for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
+	{
+		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		TestTrue(
+			TEXT("Slice object types are restricted to the required closure"),
+			RequiredTypeIds.Contains(Type.StableId));
+		TestEqual(
+			TEXT("Slice object-type ordinals are contiguous for final lowering"),
+			Type.ObjectTypeOrdinal,
+			SliceObjectTypeCount);
+		++SliceObjectTypeCount;
+	}
+	TestTrue(
+		TEXT("Slice drops unrelated authorization object types"),
+		SliceObjectTypeCount < AuthorizationObjectTypeCount);
 	TestTrue(
 		TEXT("Slice drops unrelated authorization types instead of copying the full package"),
 		SliceModel.Types.Num() < AuthorizationModel.Types.Num());

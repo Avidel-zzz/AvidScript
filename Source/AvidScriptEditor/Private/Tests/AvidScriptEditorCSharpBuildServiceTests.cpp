@@ -125,8 +125,8 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(TEXT("Custom C# profile build result succeeds"), BuildResult.bSucceeded);
 	TestEqual(TEXT("Custom C# profile process exit code"), BuildResult.ProcessExitCode, 0);
 	TestEqual(TEXT("Automatic custom C# profile performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
-	TestEqual(TEXT("Automatic custom C# profile runs Frontend once"), BuildResult.FrontendInvocationCount, 1);
-	TestEqual(TEXT("Automatic custom C# profile runs Semantic once"), BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Automatic custom C# profile reruns Frontend for the compact slice"), BuildResult.FrontendInvocationCount, 2);
+	TestEqual(TEXT("Automatic custom C# profile reruns Semantic for slice ordinals"), BuildResult.SemanticInvocationCount, 2);
 	TestEqual(TEXT("Automatic custom C# profile runs Guest IR twice"), BuildResult.GuestIrInvocationCount, 2);
 	TestEqual(TEXT("Automatic custom C# profile runs WASM backend twice"), BuildResult.WasmBackendInvocationCount, 2);
 	TestEqual(TEXT("Cold custom C# profile records a cache miss"), BuildResult.SemanticCacheLookup, FString(TEXT("miss")));

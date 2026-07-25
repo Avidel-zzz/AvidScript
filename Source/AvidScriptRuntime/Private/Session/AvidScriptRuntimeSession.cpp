@@ -804,14 +804,18 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 #if WITH_DEV_AUTOMATION_TESTS
 	if (CandidateBeginPlayObserverForTesting)
 	{
-		TFunction<void()> Observer = MoveTemp(CandidateBeginPlayObserverForTesting);
-		Observer();
+		TFunction<void(IAvidScriptBindingHostEffectJournal*)> Observer =
+			MoveTemp(CandidateBeginPlayObserverForTesting);
+		Observer(
+			bUseHostEffectTransaction
+				? &HostEffectTransaction.GetValue()
+				: nullptr);
 	}
 #endif
 	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);
-		const bool bBorrowedHandlesRolledBack = RollbackBorrowedHandles();
+		bool bHostEffectsRolledBack = true;
 		if (bUseHostEffectTransaction)
 		{
 			OutResult.bHostEffectRollbackAttempted = true;
@@ -820,12 +824,16 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				? *HostContext.ObjectRegistry
 				: EmptyRegistry;
 			FAvidScriptHostEffectTransactionResult RollbackResult;
-			OutResult.bHostEffectRollbackSucceeded = HostEffectTransaction->Rollback(
+			bHostEffectsRolledBack = HostEffectTransaction->Rollback(
 				RollbackRegistry,
-				RollbackResult)
-				&& bBorrowedHandlesRolledBack;
+				RollbackResult);
 			CopyHostEffectResult(RollbackResult, OutResult);
 		}
+		const bool bBorrowedHandlesRolledBack = RollbackBorrowedHandles();
+		OutResult.bHostEffectRollbackSucceeded =
+			bUseHostEffectTransaction
+			&& bHostEffectsRolledBack
+			&& bBorrowedHandlesRolledBack;
 		CandidateRuntime->SetHostContext(HostContext);
 		CandidateRuntime->Unload();
 		return false;

@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
@@ -691,11 +692,20 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	TestTrue(TEXT("initial live runtime ticks"), Session.Tick(1.0f / 60.0f, TickResult));
 	TestEqual(TEXT("initial tick count"), Session.GetSnapshot().TickCallCount, 1);
 
-	UAvidScriptObjectRegistryTestObject* BorrowedCandidateObject =
-		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	USceneComponent* BorrowedCandidateComponent =
+		NewObject<USceneComponent>(GetTransientPackage());
+	const FTransform OriginalCandidateTransform(
+		FRotator::ZeroRotator,
+		FVector(10.0, 20.0, 30.0));
+	BorrowedCandidateComponent->SetWorldTransform(OriginalCandidateTransform);
 	bool bCandidateBorrowSucceeded = false;
+	bool bCandidateEffectPrepared = false;
 	Session.SetCandidateBeginPlayObserverForTesting(
-		[&Session, &Registry, BorrowedCandidateObject, &bCandidateBorrowSucceeded]()
+		[&Session,
+		 &Registry,
+		 BorrowedCandidateComponent,
+		 &bCandidateBorrowSucceeded,
+		 &bCandidateEffectPrepared](IAvidScriptBindingHostEffectJournal* Journal)
 		{
 			IAvidScriptObjectOwnershipDomain* Ownership =
 				Session.GetTestSnapshot().HostContext.ObjectOwnership;
@@ -703,8 +713,24 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 			bCandidateBorrowSucceeded = Ownership != nullptr
 				&& Ownership->Borrow(
 					Registry,
-					*BorrowedCandidateObject,
+					*BorrowedCandidateComponent,
 					BorrowResult);
+			if (!bCandidateBorrowSucceeded || Journal == nullptr)
+			{
+				return;
+			}
+			FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+			bCandidateEffectPrepared = Journal->PrepareEffect(
+				Registry,
+				BorrowResult.Handle,
+				*BorrowedCandidateComponent,
+				EAvidScriptBindingReloadEffect::SceneComponentTransform,
+				PrepareResult);
+			if (bCandidateEffectPrepared)
+			{
+				BorrowedCandidateComponent->SetWorldLocation(
+					FVector(900.0, 800.0, 700.0));
+			}
 		});
 
 	TestFalse(
@@ -717,11 +743,18 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	TestTrue(TEXT("rollback preserves old runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
 	TestTrue(TEXT("candidate reload opens host effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
 	TestTrue(TEXT("candidate acquires a borrowed handle before trapping"), bCandidateBorrowSucceeded);
+	TestTrue(TEXT("candidate captures its borrowed component transform"), bCandidateEffectPrepared);
 	TestEqual(TEXT("candidate rollback releases its borrowed registry slot"), Registry.GetLiveHandleCount(), 0);
 	TestFalse(TEXT("trapping candidate does not commit host effects"), ReloadResult.bHostEffectTransactionCommitted);
 	TestTrue(TEXT("candidate trap attempts host effect rollback"), ReloadResult.bHostEffectRollbackAttempted);
-	TestTrue(TEXT("empty host effect rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
-	TestEqual(TEXT("empty host effect transaction captures no objects"), ReloadResult.HostEffectCapturedObjectCount, 0);
+	TestTrue(TEXT("borrowed component host effect rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
+	TestEqual(TEXT("host effect transaction captures one component"), ReloadResult.HostEffectCapturedObjectCount, 1);
+	TestEqual(TEXT("host effect transaction restores one component"), ReloadResult.HostEffectRestoredObjectCount, 1);
+	TestTrue(
+		TEXT("component transform is restored before its borrowed lease is released"),
+		BorrowedCandidateComponent->GetComponentTransform().Equals(
+			OriginalCandidateTransform,
+			0.01));
 	TestEqual(TEXT("old module remains active"), Session.GetSnapshot().ModuleId, FString(TEXT("session_live")));
 	TestEqual(TEXT("one reload is rejected"), Session.GetSnapshot().RejectedReloadCount, 1);
 	TestEqual(TEXT("session remains running"), Session.GetSnapshot().LifecycleState, EAvidScriptLifecycleState::Running);
