@@ -7,16 +7,13 @@
 #include "AvidScriptSceneAttachmentBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 #include "AvidScriptFrontendReport.h"
 #include "AvidScriptHash.h"
 
-#include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
-#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -243,80 +240,6 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	return true;
 }
 
-bool RewriteAvidScriptCSharpBindingSliceDescriptor(
-	const FAvidScriptBindingPackageModel& SliceModel,
-	FString& InOutJson)
-{
-	TSharedPtr<FJsonObject> Root;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InOutJson);
-	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
-	{
-		return false;
-	}
-
-	Root->SetStringField(TEXT("self_type_id"), SliceModel.SelfTypeId);
-	Root->SetStringField(TEXT("selection_hash"), SliceModel.SelectionHash);
-	Root->SetStringField(TEXT("package_hash"), SliceModel.PackageHash);
-	TArray<TSharedPtr<FJsonValue>> ActiveObjectTypeOrdinals;
-	for (const int32 Ordinal : SliceModel.ActiveObjectTypeOrdinals)
-	{
-		ActiveObjectTypeOrdinals.Add(MakeShared<FJsonValueNumber>(Ordinal));
-	}
-	Root->SetArrayField(
-		TEXT("active_object_type_ordinals"),
-		MoveTemp(ActiveObjectTypeOrdinals));
-	TArray<TSharedPtr<FJsonValue>> TypeValues;
-	for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
-	{
-		TSharedPtr<FJsonObject> TypeObject = MakeShared<FJsonObject>();
-		TypeObject->SetStringField(TEXT("stable_id"), Type.StableId);
-		TypeObject->SetStringField(TEXT("canonical_type"), Type.CanonicalType);
-		TypeObject->SetStringField(TEXT("kind"), Type.Kind);
-		TypeObject->SetStringField(TEXT("cpp_type"), Type.CppType);
-		TypeObject->SetNumberField(TEXT("size"), Type.Size);
-		TypeObject->SetNumberField(TEXT("alignment"), Type.Alignment);
-		TArray<TSharedPtr<FJsonValue>> AbiTypes;
-		for (const FString& AbiType : Type.AbiTypes)
-		{
-			AbiTypes.Add(MakeShared<FJsonValueString>(AbiType));
-		}
-		TypeObject->SetArrayField(TEXT("abi_types"), MoveTemp(AbiTypes));
-		TypeObject->SetNumberField(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
-		TypeObject->SetStringField(TEXT("class_path"), Type.ClassPath);
-		TypeObject->SetStringField(TEXT("base_type_id"), Type.BaseTypeId);
-		if (Type.Kind == TEXT("enum"))
-		{
-			TArray<TSharedPtr<FJsonValue>> EnumValues;
-			for (const FAvidScriptBindingEnumValue& EnumValue : Type.EnumValues)
-			{
-				TSharedPtr<FJsonObject> EnumObject = MakeShared<FJsonObject>();
-				EnumObject->SetStringField(TEXT("name"), EnumValue.Name);
-				EnumObject->SetNumberField(TEXT("value"), EnumValue.Value);
-				EnumValues.Add(MakeShared<FJsonValueObject>(MoveTemp(EnumObject)));
-			}
-			TypeObject->SetArrayField(TEXT("enum_values"), MoveTemp(EnumValues));
-		}
-		TypeValues.Add(MakeShared<FJsonValueObject>(MoveTemp(TypeObject)));
-	}
-	Root->SetArrayField(TEXT("types"), MoveTemp(TypeValues));
-
-	const TArray<TSharedPtr<FJsonValue>>& ReferenceValues =
-		Root->GetArrayField(TEXT("class_references"));
-	if (ReferenceValues.Num() != SliceModel.ClassReferences.Num())
-	{
-		return false;
-	}
-	for (int32 Index = 0; Index < ReferenceValues.Num(); ++Index)
-	{
-		ReferenceValues[Index]->AsObject()->SetStringField(
-			TEXT("result_type_id"),
-			SliceModel.ClassReferences[Index].ResultTypeId);
-	}
-
-	InOutJson.Empty();
-	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&InOutJson);
-	return FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
-}
 } // namespace
 
 bool FAvidScriptEditorCSharpBindingSliceService::Publish(
@@ -720,7 +643,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			Provenance.UsedObjectTypeOrdinals,
 			SliceModel,
 			ClosureErrorSource)
-		|| !RewriteAvidScriptCSharpBindingSliceDescriptor(
+		|| !FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			SliceModel,
 			SliceDescriptorJson))
 	{
