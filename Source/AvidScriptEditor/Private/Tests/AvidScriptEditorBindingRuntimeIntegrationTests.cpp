@@ -2390,17 +2390,51 @@ bool FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest::RunTest(c
 	TestTrue(TEXT("Sample publishes a runtime binding package"), FPaths::FileExists(BuildResult.BindingPackagePath));
 	TestTrue(TEXT("Sample publishes a WASM manifest"), FPaths::FileExists(BuildResult.ManifestPath));
 
-	FString RuntimePackageJson;
+	FString RuntimePackageManifestJson;
+	TSharedPtr<FJsonObject> RuntimePackageManifestObject;
+	const TSharedPtr<FJsonObject>* RuntimePackageFilesObject = nullptr;
+	FString RuntimeDescriptorFile;
+	if (!TestTrue(
+		TEXT("Sample runtime binding package manifest can be read"),
+		FFileHelper::LoadFileToString(
+			RuntimePackageManifestJson,
+			*BuildResult.BindingPackagePath))
+		|| !TestTrue(
+			TEXT("Sample runtime binding package manifest parses"),
+			FJsonSerializer::Deserialize(
+				TJsonReaderFactory<>::Create(RuntimePackageManifestJson),
+				RuntimePackageManifestObject))
+		|| !TestTrue(
+			TEXT("Sample runtime binding package manifest exposes files"),
+			RuntimePackageManifestObject.IsValid()
+				&& RuntimePackageManifestObject->TryGetObjectField(
+					TEXT("files"),
+					RuntimePackageFilesObject))
+		|| RuntimePackageFilesObject == nullptr
+		|| !TestTrue(
+			TEXT("Sample runtime binding package manifest names its descriptor"),
+			(*RuntimePackageFilesObject)->TryGetStringField(
+				TEXT("descriptor"),
+				RuntimeDescriptorFile)
+				&& !RuntimeDescriptorFile.IsEmpty()))
+	{
+		return false;
+	}
+
+	const FString RuntimeDescriptorPath = FPaths::Combine(
+		FPaths::GetPath(BuildResult.BindingPackagePath),
+		RuntimeDescriptorFile);
+	FString RuntimeDescriptorJson;
 	FAvidScriptBindingPackageModel RuntimePackageModel;
 	FString ParseCategory;
 	FString ParseSource;
 	if (!TestTrue(
-		TEXT("Sample runtime binding package can be read"),
-		FFileHelper::LoadFileToString(RuntimePackageJson, *BuildResult.BindingPackagePath))
+		TEXT("Sample runtime binding descriptor can be read"),
+		FFileHelper::LoadFileToString(RuntimeDescriptorJson, *RuntimeDescriptorPath))
 		|| !TestTrue(
-			TEXT("Sample runtime binding package parses"),
+			TEXT("Sample runtime binding descriptor parses"),
 			FAvidScriptBindingDescriptorParser::Parse(
-				RuntimePackageJson,
+				RuntimeDescriptorJson,
 				RuntimePackageModel,
 				ParseCategory,
 				ParseSource)))
