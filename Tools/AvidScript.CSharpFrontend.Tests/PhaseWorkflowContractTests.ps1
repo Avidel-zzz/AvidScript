@@ -604,6 +604,26 @@ Invoke-ContractCase 'Evidence.PrivacyDoublePlusContentRejected' {
     Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted private content beginning with two plus signs'
 }
 
+Invoke-ContractCase 'Evidence.PrivacyColoredDiffRejected' {
+    $Root = New-FixtureRepository 'EvidencePrivacyColoredDiff'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    $PrivatePath = 'C:' + '\Users\Example\file'
+    Write-Utf8Text (Join-Path $Root 'Docs\Colored.md') "private path $PrivatePath`n"
+    Commit-Paths $Root @(
+        'Docs/Phase91/Phase91_State.json',
+        'Docs/Colored.md') 'add private path under colored diff'
+    Invoke-FixtureGit $Root @('config', 'color.ui', 'always') | Out-Null
+    $State = Read-AvidScriptPhaseState $Root 91
+    $Diagnostic = ''
+    try {
+        Test-AvidScriptPhasePrivacy $Root $State | Out-Null
+    }
+    catch {
+        $Diagnostic = $_.Exception.Message
+    }
+    Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted a private path when Git forced colored output'
+}
+
 Invoke-ContractCase 'Evidence.PrivacyChangeRejected' {
     $Fixture = Prepare-GateReadyFixture 'EvidencePrivacy'
     $Gate = New-ValidGateReport $Fixture 'EvidencePrivacy'
