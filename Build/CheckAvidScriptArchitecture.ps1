@@ -2058,7 +2058,7 @@ foreach ($RequiredGuestObjectTypeExtractionContract in @(
 }
 $GuestObjectTypeExtractionFailureSource = Get-SourceSlice `
     -Source $CSharpBuildScriptSource `
-    -StartToken '$RequiredExports = @(' `
+    -StartToken '$RequiredExports = @($GuestIrModel.exports' `
     -EndToken '$ObservedExports = @(' `
     -Description 'C# Guest object-type extraction failure path'
 Test-RequiredTokenSequence `
