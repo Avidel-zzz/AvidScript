@@ -94,6 +94,29 @@ function New-BindingPackageWithActiveObjectTypes {
     $DescriptorSource = Join-Path $SourceDirectory ([string]$Manifest.files.descriptor)
     $ReferenceSource = Join-Path $SourceDirectory ([string]$Manifest.files.reference_source)
     $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
+    if ([int]$Descriptor.schema_version -lt 6) {
+        $Descriptor.schema_version = 6
+        $Manifest.descriptor_schema_version = 6
+        $Descriptor | Add-Member -NotePropertyName self_type_id -NotePropertyValue ""
+        $ObjectOrdinalAssigned = $false
+        foreach ($Type in @($Descriptor.types)) {
+            $ObjectTypeOrdinal = if ($ObjectOrdinalAssigned) { -1 } else { 0 }
+            $ClassPath = if ($ObjectOrdinalAssigned) {
+                ""
+            }
+            else {
+                "/Script/CoreUObject.Object"
+            }
+            $Type | Add-Member `
+                -NotePropertyName object_type_ordinal `
+                -NotePropertyValue $ObjectTypeOrdinal
+            $Type | Add-Member `
+                -NotePropertyName class_path `
+                -NotePropertyValue $ClassPath
+            $Type | Add-Member -NotePropertyName base_type_id -NotePropertyValue ""
+            $ObjectOrdinalAssigned = $true
+        }
+    }
     $ActiveProperty = $Descriptor.PSObject.Properties['active_object_type_ordinals']
     if ($null -eq $ActiveProperty) {
         $Descriptor | Add-Member `
