@@ -6,6 +6,7 @@
 
 #include "UObject/GCObject.h"
 #include "UObject/ObjectKey.h"
+#include "UObject/ObjectPtr.h"
 #include "UObject/WeakObjectPtr.h"
 
 class AActor;
@@ -39,7 +40,7 @@ private:
 		TObjectKey<UObject> ObjectKey;
 		TWeakObjectPtr<UObject> Object;
 		TWeakObjectPtr<AActor> ComponentOwner;
-		UObject* StrongObject = nullptr;
+		TObjectPtr<UObject> StrongObject;
 		FAvidScriptObjectHandle Handle;
 		EAvidScriptObjectFactoryKind Kind = EAvidScriptObjectFactoryKind::NewObject;
 	};

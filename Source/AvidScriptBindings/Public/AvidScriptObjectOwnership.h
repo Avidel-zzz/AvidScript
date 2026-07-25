@@ -11,7 +11,8 @@ enum class EAvidScriptObjectFactoryKind : uint8;
 class AVIDSCRIPTBINDINGS_API IAvidScriptObjectOwnershipDomain
 {
 public:
-	virtual ~IAvidScriptObjectOwnershipDomain() = default;
+	IAvidScriptObjectOwnershipDomain();
+	virtual ~IAvidScriptObjectOwnershipDomain();
 
 	virtual bool Adopt(
 		FAvidScriptObjectRegistry& Registry,
