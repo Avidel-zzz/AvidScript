@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "phase_id": 51,
+  "status": "passed",
+  "verified_commit": "5e34e599ec37132f28cb8e2f90ffd93987402824",
+  "verified_tree": "418add020b240bce0b6fca992af75b659ea41505",
+  "verified_state_sha256": "a256370b90e5ac846808f3a6d3a96c3865eea0be0fec65c555d5eb09e691fa8b",
+  "gate_report_sha256": "de2901a462eccede33615d4248486e293b3f135267fe1f3c9d88a3695b5d26b1",
+  "checks": {
+    "dotnet_tests": {
+      "passed": 167,
+      "total": 167
+    },
+    "dotnet_format": {
+      "passed": 5,
+      "total": 5
+    },
+    "powershell_contracts": {
+      "passed": 117,
+      "total": 117
+    },
+    "phase_workflow_contracts": {
+      "passed": 26,
+      "total": 26
+    },
+    "powershell_parser": {
+      "passed": 23,
+      "total": 23
+    },
+    "phase_architecture_fixtures": {
+      "passed": 17,
+      "total": 17
+    },
+    "architecture": "passed",
+    "ubt": "passed_new_no_clean_invocation",
+    "automation": {
+      "found": 263,
+      "completed": 263,
+      "succeeded": 263,
+      "failed": 0,
+      "not_run": 0,
+      "queue_empty": true,
+      "test_exit": true,
+      "request_exit_status": 0,
+      "process_exit_code": 0
+    },
+    "object_component_performance": {
+      "status": "passed",
+      "wasm_cycle_p50_ms": 0.016677,
+      "wasm_cycle_p95_ms": 0.018625,
+      "imports_per_iteration": 4,
+      "warm_class_loads": 0,
+      "warm_reflected_name_lookups": 0
+    },
+    "typed_performance": "passed",
+    "object_lifecycle_performance": "passed",
+    "independent_review": {
+      "critical": 0,
+      "important": 0,
+      "minor": 0
+    }
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 1
+  },
+  "evidence_strategy": "在精确冻结候选上集中执行静态、.NET 与 PhaseWorkflow Gate；依赖项目 Saved 生成物的合同宿主在具有冻结 protected-dirty baseline 的主插件执行；UE5.8 no-clean UBT 与完整 263 项 Automation 各执行一次，并由同一原始日志提供功能与性能证据。"
+}

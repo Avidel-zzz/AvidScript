@@ -5,7 +5,7 @@
     "goal": "建立 descriptor 驱动的 UObject/Component 构造、Session 所有权、组件查询与 Attach/Detach C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d3837b6af995ccf289f01f9ddf4e34eec1fa319e"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase51/P51.0_Object_Component_Ownership_Architecture.md",
     "version": 1,
@@ -60,9 +60,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 0,
-    "automation": 0,
-    "full_gate": 0
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 1
   },
   "freeze": {
     "source_commit": "5afee849216832126093a10bd63130d74b0d3773",
@@ -72,13 +72,13 @@
     "at_utc": "2026-07-25T16:26:09.8005611+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScriptPhase51Gate-5e34e59-final\\Phase51_Gate.json",
+    "report_sha256": "de2901a462eccede33615d4248486e293b3f135267fe1f3c9d88a3695b5d26b1",
+    "run_id": "phase51-5e34e59-final",
+    "verified_commit": "5e34e599ec37132f28cb8e2f90ffd93987402824",
+    "verified_tree": "418add020b240bce0b6fca992af75b659ea41505",
+    "attestation_parent": "5e34e599ec37132f28cb8e2f90ffd93987402824",
+    "attested_at_utc": "2026-07-25T16:54:10.2429667+00:00"
   },
   "protected_dirty": [
     {
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 51 -GateReportPath <path>",
-  "revision": 11,
-  "updated_at_utc": "2026-07-25T16:26:09.8069940+00:00"
+  "next_action": "close -Phase 51",
+  "revision": 12,
+  "updated_at_utc": "2026-07-25T16:54:10.2452123+00:00"
 }
