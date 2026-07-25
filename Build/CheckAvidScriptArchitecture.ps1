@@ -2013,8 +2013,10 @@ foreach ($RequiredDualPackageContract in @(
     'OmitRuntimeBindingPackage',
     'ASBI4303',
     'ASBI4304',
+    'ASBI4305',
     'HasActiveObjectTypeOrdinals',
-    'binding_runtime_object_type_mismatch'
+    'binding_runtime_object_type_mismatch',
+    'guest_object_type_provenance_invalid'
 )) {
     if (-not $CSharpBuildScriptSource.Contains($RequiredDualPackageContract)) {
         Add-Violation "C# build pipeline is missing dual-package contract $RequiredDualPackageContract"
@@ -2046,13 +2048,29 @@ foreach ($RequiredGuestObjectTypeExtractionContract in @(
     'avid_object_type_is_a',
     '$ConstantsByResultId.TryGetValue(',
     '$Operands.Count -eq 3',
-    'direct non-negative int32 constant ordinal'
+    'direct non-negative int32 constant ordinal',
+    'object_type_ref constants must contain a direct non-negative int32 ordinal'
 )) {
     if (-not $CSharpBuildScriptSource.Contains(
             $RequiredGuestObjectTypeExtractionContract)) {
         Add-Violation "C# final Guest IR object-type extraction is missing $RequiredGuestObjectTypeExtractionContract"
     }
 }
+$GuestObjectTypeExtractionFailureSource = Get-SourceSlice `
+    -Source $CSharpBuildScriptSource `
+    -StartToken '$RequiredExports = @(' `
+    -EndToken '$ObservedExports = @(' `
+    -Description 'C# Guest object-type extraction failure path'
+Test-RequiredTokenSequence `
+    -Source $GuestObjectTypeExtractionFailureSource `
+    -Tokens @(
+        'Get-UsedObjectTypeOrdinals -Model $GuestIrModel',
+        'catch {',
+        'Remove-LoadableArtifacts',
+        'ASBI4305',
+        'guest_object_type_provenance_invalid',
+        'exit 1') `
+    -Description 'C# Guest object-type extraction failure path'
 if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
 }

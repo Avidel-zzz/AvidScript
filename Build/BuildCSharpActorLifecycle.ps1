@@ -379,14 +379,18 @@ function Get-UsedObjectTypeOrdinals {
                     continue
                 }
                 $Ordinal = 0
-                if ($Instruction.constant.value -is [string] -and
+                $HasObjectTypeOrdinal =
+                    $Instruction.constant.value -is [string] -and
                     [int]::TryParse(
                         [string]$Instruction.constant.value,
                         [System.Globalization.NumberStyles]::None,
                         [System.Globalization.CultureInfo]::InvariantCulture,
-                        [ref]$Ordinal)) {
-                    [void]$Ordinals.Add($Ordinal)
+                        [ref]$Ordinal) -and
+                    $Ordinal -ge 0
+                if (-not $HasObjectTypeOrdinal) {
+                    throw "Guest IR object_type_ref constants must contain a direct non-negative int32 ordinal."
                 }
+                [void]$Ordinals.Add($Ordinal)
             }
         }
     }
@@ -977,7 +981,25 @@ $DebugMapSha256 = Get-Sha256Hex $DebugMapArtifactPath
 $StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
 $WasmSha256 = Get-Sha256Hex $WasmArtifactPath
 $RequiredExports = @($GuestIrModel.exports | ForEach-Object { [string]$_.name })
-$UsedObjectTypeOrdinals = @(Get-UsedObjectTypeOrdinals -Model $GuestIrModel)
+try {
+    $UsedObjectTypeOrdinals = @(
+        Get-UsedObjectTypeOrdinals -Model $GuestIrModel)
+}
+catch {
+    Remove-LoadableArtifacts
+    $Diagnostics += [ordered]@{
+        code = "ASBI4305"
+        severity = "error"
+        message = $_.Exception.Message
+        file = $SourceId
+    }
+    Write-BuildReport `
+        -Result "guest_object_type_provenance_invalid" `
+        -DirectAbiSupported $false `
+        -ReportDiagnostics $Diagnostics
+    Write-Output "[AvidScript][CSharp][Build] result=guest_object_type_provenance_invalid report=$ReportPath"
+    exit 1
+}
 $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind -eq 0 } | ForEach-Object { [string]$_.name })
 $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }

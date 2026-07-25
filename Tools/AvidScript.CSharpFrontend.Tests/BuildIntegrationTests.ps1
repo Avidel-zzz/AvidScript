@@ -282,6 +282,87 @@ public static class RuntimePackageContractScript
     [System.IO.File]::WriteAllText($Path, $Text, $Utf8)
 }
 
+function Write-GuestProvenanceMutationCompiler {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Text = @'
+param(
+    [Parameter(Mandatory = $true)][string]$DotNetPath,
+    [Parameter(Mandatory = $true)][string]$SemanticPath,
+    [Parameter(Mandatory = $true)][string]$FrontendArtifactSha256,
+    [Parameter(Mandatory = $true)][string]$GuestIrPath,
+    [Parameter(Mandatory = $true)][string]$DebugMapPath,
+    [Parameter(Mandatory = $true)][string]$StateSchemaPath,
+    [Parameter(Mandatory = $true)][string]$WasmPath,
+    [Parameter(Mandatory = $true)][string]$InspectionPath,
+    [string]$Configuration = "Release"
+)
+
+$ErrorActionPreference = "Stop"
+$RealCompilerPath = $env:AVIDSCRIPT_REAL_GUEST_COMPILER
+if ([string]::IsNullOrWhiteSpace($RealCompilerPath) -or
+    -not (Test-Path -LiteralPath $RealCompilerPath -PathType Leaf)) {
+    throw "Real Guest compiler path is missing for the provenance mutation fixture."
+}
+
+& $RealCompilerPath @PSBoundParameters
+$RealCompilerExit = $LASTEXITCODE
+if ($RealCompilerExit -ne 0) {
+    exit $RealCompilerExit
+}
+
+$Model = Get-Content -Raw -LiteralPath $GuestIrPath | ConvertFrom-Json
+$ObjectTypeImportIds = @($Model.imports | Where-Object {
+    [string]$_.module -ceq "avidscript" -and
+    [string]$_.name -ceq "avid_object_type_is_a"
+} | ForEach-Object { [string]$_.id })
+$ConstantsByResultId = @{}
+foreach ($Function in @($Model.functions)) {
+    foreach ($Block in @($Function.blocks)) {
+        foreach ($Instruction in @($Block.instructions)) {
+            if ([string]$Instruction.op -ceq "constant") {
+                $ConstantsByResultId[[string]$Instruction.result_id] = $Instruction
+            }
+        }
+    }
+}
+
+$Mutated = $false
+foreach ($Function in @($Model.functions)) {
+    foreach ($Block in @($Function.blocks)) {
+        foreach ($Instruction in @($Block.instructions)) {
+            $Operands = @($Instruction.operand_ids)
+            if ([string]$Instruction.op -ceq "call" -and
+                $ObjectTypeImportIds -ccontains [string]$Instruction.target_id -and
+                $Operands.Count -eq 3 -and
+                $ConstantsByResultId.ContainsKey([string]$Operands[2])) {
+                $ConstantsByResultId[[string]$Operands[2]].constant.value = "-1"
+                $Mutated = $true
+                break
+            }
+        }
+        if ($Mutated) {
+            break
+        }
+    }
+    if ($Mutated) {
+        break
+    }
+}
+if (-not $Mutated) {
+    throw "Guest provenance mutation fixture found no object-type intrinsic call."
+}
+
+$Utf8 = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllText(
+    $GuestIrPath,
+    ($Model | ConvertTo-Json -Depth 100),
+    $Utf8)
+exit 0
+'@
+    [System.IO.File]::WriteAllText($Path, $Text, $Utf8)
+}
+
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
 if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
@@ -356,6 +437,11 @@ $ScalarActiveRuntimePackagePath =
     New-BindingPackageWithScalarActiveObjectType `
         -SourceManifestPath $ComponentActiveRuntimePackagePath `
         -OutputDirectory (Join-Path $RunRoot "ScalarActiveRuntimePackage")
+$GuestProvenanceMutationCompilerPath = Join-Path `
+    $RunRoot `
+    "MutateGuestObjectTypeProvenance.ps1"
+Write-GuestProvenanceMutationCompiler `
+    -Path $GuestProvenanceMutationCompilerPath
 
 $RuntimeAllowedRoot = Join-Path $RunRoot "RuntimeAllowed"
 New-Item -ItemType Directory -Force -Path $RuntimeAllowedRoot | Out-Null
@@ -439,6 +525,63 @@ Assert-Condition (
     -not (Test-Path -LiteralPath (
         Join-Path $GuestObjectTypeMismatchRoot "guest_object_type_mismatch.wasm") -PathType Leaf)) `
     "guest object-type mismatch left loadable WASM"
+
+$InvalidGuestProvenanceRoot = Join-Path $RunRoot "InvalidGuestProvenance"
+New-Item -ItemType Directory -Force -Path $InvalidGuestProvenanceRoot |
+    Out-Null
+$InvalidGuestProvenanceReport = Join-Path `
+    $InvalidGuestProvenanceRoot `
+    "invalid_guest_provenance.csharp.report.json"
+$InvalidGuestProvenanceManifest = Join-Path `
+    $InvalidGuestProvenanceRoot `
+    "invalid_guest_provenance.avidscript.json"
+$PreviousRealGuestCompiler = $env:AVIDSCRIPT_REAL_GUEST_COMPILER
+$env:AVIDSCRIPT_REAL_GUEST_COMPILER = Join-Path `
+    $PluginRoot `
+    "Build\InvokeCSharpGuestCompiler.ps1"
+try {
+    & $BuildScript `
+        -DotNetPath $DotNetPath `
+        -OutputRoot $InvalidGuestProvenanceRoot `
+        -SourcePath $GuestObjectTypeMismatchSource `
+        -BindingPackagePath $EngineObjectAuthorizationPackagePath `
+        -RuntimeBindingPackagePath $EngineNoActiveRuntimePackagePath `
+        -GuestCompilerPath $GuestProvenanceMutationCompilerPath `
+        -ModuleId "p51_invalid_guest_provenance" `
+        -ArtifactStem "invalid_guest_provenance" `
+        -ReportPath $InvalidGuestProvenanceReport `
+        -ManifestPath $InvalidGuestProvenanceManifest | Out-Null
+    $InvalidGuestProvenanceExit = $LASTEXITCODE
+}
+finally {
+    $env:AVIDSCRIPT_REAL_GUEST_COMPILER = $PreviousRealGuestCompiler
+}
+Assert-Condition ($InvalidGuestProvenanceExit -eq 1) `
+    "invalid Guest provenance must return exit 1; actual=$InvalidGuestProvenanceExit"
+$InvalidGuestProvenanceJson =
+    Get-Content -Raw -LiteralPath $InvalidGuestProvenanceReport |
+    ConvertFrom-Json
+Assert-Condition (
+    $InvalidGuestProvenanceJson.result -eq
+        "guest_object_type_provenance_invalid") `
+    "invalid Guest provenance has the wrong result"
+Assert-Condition (
+    @($InvalidGuestProvenanceJson.diagnostics |
+        Where-Object code -eq "ASBI4305").Count -eq 1) `
+    "invalid Guest provenance diagnostic is missing"
+Assert-Condition (
+    -not (Test-Path -LiteralPath $InvalidGuestProvenanceManifest -PathType Leaf)) `
+    "invalid Guest provenance left a manifest"
+foreach ($InvalidGuestArtifact in @(
+    "invalid_guest_provenance.guestir.json",
+    "invalid_guest_provenance.csharp.debug.json",
+    "invalid_guest_provenance.state.json",
+    "invalid_guest_provenance.wasm")) {
+    Assert-Condition (
+        -not (Test-Path -LiteralPath (
+            Join-Path $InvalidGuestProvenanceRoot $InvalidGuestArtifact) -PathType Leaf)) `
+        "invalid Guest provenance left loadable artifact $InvalidGuestArtifact"
+}
 
 $RuntimeObjectTypeMismatchRoot = Join-Path $RunRoot "RuntimeObjectTypeMismatch"
 New-Item -ItemType Directory -Force -Path $RuntimeObjectTypeMismatchRoot |
@@ -914,4 +1057,4 @@ Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 14/14 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 15/15 passed"
