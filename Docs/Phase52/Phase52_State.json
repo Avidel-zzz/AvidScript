@@ -48,7 +48,21 @@
       "completed_at_utc": null
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P52-REVIEW-01",
+      "severity": "Important",
+      "found_batch": "P52.5",
+      "scope": "独立复审发现 C# property lvalue 求值顺序、legacy profile identity、BlueprintSetter descriptor identity、object snapshot GC root、accessor-level provenance、benchmark anti-optimization 与真实样例闭环缺口",
+      "evidence": "独立只读审查快照 6a9c905：1 High、5 Medium，并确认 BidirectionalProperties 样例尚未进入同一 profile build/WASM/UE 证据链",
+      "deferral_reason": "在 P52.5 集中修复批次统一处理，避免每个审查项各自触发 UBT 与 Automation",
+      "remediation": "修复六项生产合同；增加 legacy identity、求值顺序、精确 accessor、GC rollback、anti-fold benchmark 与真实样例 profile gameplay 回归；受影响 focused 通过后只执行一次最终全量 Gate",
+      "status": "Open",
+      "resolution_evidence": "",
+      "target_phase": null,
+      "transfer_reason": ""
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -101,6 +115,6 @@
     }
   ],
   "next_action": "batch-complete -Phase 52 -BatchId P52.5 -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-07-25T18:21:40.1867716+00:00"
+  "revision": 6,
+  "updated_at_utc": "2026-07-25T18:55:39.2959788+00:00"
 }
