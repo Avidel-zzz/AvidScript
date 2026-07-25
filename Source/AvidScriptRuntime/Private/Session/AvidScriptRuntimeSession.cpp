@@ -7,6 +7,7 @@
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "Validation/AvidScriptWasmImportPolicy.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptRuntimeSession, Log, All);
 
@@ -75,6 +76,24 @@ void CopyHostEffectResult(
 	OutResult.HostEffectFailedObjectCount = HostEffectResult.FailedObjectCount;
 	OutResult.HostEffectErrorSource = HostEffectResult.ErrorSource;
 }
+
+void SetSessionExecutionFailure(
+	const FString& ModuleId,
+	const FString& ExportName,
+	const FString& Details,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	OutResult = FAvidScriptWasmSmokeResult();
+	OutResult.ModuleId = ModuleId;
+	OutResult.ExportName = ExportName;
+	OutResult.ErrorCategory = TEXT("reentrant_operation");
+	OutResult.NextAction = TEXT("defer the requested operation until the active guest call returns");
+	OutResult.ErrorMessage = FString::Printf(
+		TEXT("AvidScript runtime operation rejected | module=%s | export=%s | category=reentrant_operation | details=%s"),
+		ModuleId.IsEmpty() ? TEXT("<none>") : *ModuleId,
+		ExportName.IsEmpty() ? TEXT("<none>") : *ExportName,
+		*Details);
+}
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
@@ -93,6 +112,17 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	const FString ModuleId = TEXT("embedded_smoke");
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, ModuleId, PreviousModuleId);
+	if (IsOperationActive())
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("reentrant_operation"),
+			TEXT("embedded module load was requested while another Runtime operation is active"),
+			TEXT("defer the load until the active guest call or Runtime mutation returns"));
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 
 	const FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
@@ -125,6 +155,17 @@ bool FAvidScriptRuntimeSession::LoadInitialModule(
 {
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (IsOperationActive())
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("reentrant_operation"),
+			TEXT("initial module load was requested while another Runtime operation is active"),
+			TEXT("defer the load until the active guest call or Runtime mutation returns"));
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 
 	if (!ValidateManifest(Manifest, PreviousModuleId, OutResult))
 	{
@@ -157,6 +198,19 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 {
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
+	if (IsOperationActive())
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<session>"),
+			TEXT("reentrant_operation"),
+			TEXT("reload was requested while another Runtime operation is active"),
+			TEXT("defer the reload until the active guest call or Runtime mutation returns"));
+		++RejectedReloadCount;
+		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 
 	if (!ValidateManifest(Manifest, PreviousModuleId, OutResult))
 	{
@@ -272,6 +326,23 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEvent(
 
 bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_tick"),
+			TEXT("tick was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (LiveExecutionObserverForTesting)
+	{
+		TFunction<void()> Observer = MoveTemp(LiveExecutionObserverForTesting);
+		Observer();
+	}
+#endif
 	return Scheduler->Tick(DeltaSeconds, OutResult);
 }
 
@@ -280,6 +351,16 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_event"),
+			TEXT("event dispatch was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	return EventRouter->Dispatch(EventId, Value, OutResult);
 }
 
@@ -287,11 +368,31 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_gameplay_event"),
+			TEXT("gameplay event dispatch was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	return EventRouter->Dispatch(Event, OutResult);
 }
 
 bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_end_play"),
+			TEXT("EndPlay was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	if (!IsLiveLoaded())
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
@@ -310,6 +411,16 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 
 bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutResult)
 {
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("<unload>"),
+			TEXT("unload was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	bool bSucceeded = true;
 	FAvidScriptWasmSmokeResult EndPlayFailure;
 	Scheduler->Detach();
@@ -444,42 +555,6 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 		return false;
 	}
 
-	const bool bRequiresDynamicBindingPackage = Manifest.RequiredImports.ContainsByPredicate(
-		[](const FAvidScriptWasmRequiredImport& Import)
-		{
-			return Import.ModuleName == TEXT("avidscript")
-				&& (Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive)
-					|| Import.ImportName == TEXT("avid_owner_get_handle"));
-		});
-	if (bRequiresDynamicBindingPackage && !Manifest.BindingPackage.IsValid())
-	{
-		SetReloadFailure(
-			OutResult,
-			TEXT("<manifest>"),
-			TEXT("binding_package_missing"),
-			TEXT("manifest declares generated UE imports without a loaded binding package"),
-			TEXT("load the script through its verified .avidscript.json manifest"));
-		return false;
-	}
-
-	const bool bRequiresPackedOwnerCapability = Manifest.RequiredImports.ContainsByPredicate(
-		[](const FAvidScriptWasmRequiredImport& Import)
-		{
-			return Import.ModuleName == TEXT("avidscript")
-				&& Import.ImportName == TEXT("avid_owner_get_handle");
-		});
-	if (bRequiresPackedOwnerCapability
-		&& Manifest.BindingPackage->GetExpectedSelfClass() == nullptr)
-	{
-		SetReloadFailure(
-			OutResult,
-			TEXT("<manifest>"),
-			TEXT("binding_package_import_mismatch"),
-			TEXT("packed owner import requires a schema v6 binding package with ExpectedSelfClass"),
-			TEXT("rebuild the script and binding package as one transaction"));
-		return false;
-	}
-
 	return true;
 }
 
@@ -490,6 +565,51 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 	FAvidScriptWasmReloadResult& OutResult) const
 {
+	if (Bytecode == nullptr || BytecodeSize <= 0)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<bytecode>"),
+			TEXT("invalid_bytecode"),
+			TEXT("WASM bytecode pointer must be non-null and byte count must be positive"),
+			TEXT("provide the complete built WASM module before loading or reloading"));
+		return false;
+	}
+
+	FAvidScriptWasmImportContractResult ImportContractResult;
+	if (!InspectAndValidateAvidScriptWasmImportContract(
+			MakeArrayView(Bytecode, BytecodeSize),
+			Manifest,
+			ImportContractResult))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<manifest>"),
+			ImportContractResult.ErrorCategory,
+			ImportContractResult.ErrorDetails,
+			ImportContractResult.NextAction);
+		return false;
+	}
+
+	const bool bRequiresPackedOwnerCapability = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& Import)
+		{
+			return Import.ModuleName == TEXT("avidscript")
+				&& Import.ImportName == TEXT("avid_owner_get_handle");
+		});
+	if (bRequiresPackedOwnerCapability
+		&& (!Manifest.BindingPackage.IsValid()
+			|| Manifest.BindingPackage->GetExpectedSelfClass() == nullptr))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<manifest>"),
+			TEXT("binding_package_import_mismatch"),
+			TEXT("actual packed owner import requires a schema v6 binding package with ExpectedSelfClass"),
+			TEXT("rebuild the script and binding package as one transaction"));
+		return false;
+	}
+
 	if (!ValidateExpectedOwner(Manifest, OutResult))
 	{
 		return false;
@@ -618,7 +738,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 #if WITH_DEV_AUTOMATION_TESTS
 	if (CandidateBeginPlayObserverForTesting)
 	{
-		CandidateBeginPlayObserverForTesting();
+		TFunction<void()> Observer = MoveTemp(CandidateBeginPlayObserverForTesting);
+		Observer();
 	}
 #endif
 	if (!CandidateRuntime->BeginPlay(BeginPlayResult))

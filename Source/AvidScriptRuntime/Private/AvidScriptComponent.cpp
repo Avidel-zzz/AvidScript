@@ -3,6 +3,7 @@
 
 #include "GameFramework/Actor.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptComponent, Log, All);
 
@@ -168,10 +169,30 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& OutResult)
 {
 	OutResult = FAvidScriptWasmReloadResult();
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
+
 	const FAvidScriptRuntimeSessionSnapshot PreviousSnapshot = RuntimeSession.IsValid()
 		? RuntimeSession->GetSnapshot()
 		: FAvidScriptRuntimeSessionSnapshot();
 	const FString CandidateManifestPath = ResolveScriptManifestPath();
+
+	if (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive())
+	{
+		OutResult.PreviousModuleId = PreviousSnapshot.ModuleId;
+		OutResult.ActiveModuleId = PreviousSnapshot.ModuleId;
+		OutResult.CandidateModuleId = PreviousSnapshot.ModuleId;
+		OutResult.ExportName = TEXT("<component>");
+		OutResult.ErrorCategory = TEXT("reentrant_operation");
+		OutResult.ErrorMessage = TEXT("AvidScript component reload was requested while guest code or another Runtime mutation is active.");
+		OutResult.NextAction = TEXT("defer reload until the current script callback returns");
+		OutResult.bRollbackPreservedLiveRuntime = PreviousSnapshot.bHasActiveRuntime;
+		++RuntimeStats.RejectedReloadCount;
+		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
+		return false;
+	}
 
 	if (!RuntimeSession.IsValid() ||
 		PreviousSnapshot.LifecycleState != EAvidScriptLifecycleState::Running ||
@@ -281,6 +302,11 @@ bool UAvidScriptComponent::ResolveOwnerActor(AActor*& OutOwner, FAvidScriptObjec
 
 bool UAvidScriptComponent::DispatchScriptEvent(int32 EventId, float Value)
 {
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
+
 	const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession.IsValid()
 		? RuntimeSession->GetSnapshot()
 		: FAvidScriptRuntimeSessionSnapshot();
@@ -326,8 +352,15 @@ bool UAvidScriptComponent::DispatchScriptInput(int32 ActionId, int32 TriggerEven
 void UAvidScriptComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
 
 	RuntimeStats = FAvidScriptComponentRuntimeStats();
+	bRuntimeReleaseDeferred = false;
+	bOwnerReleaseDeferred = false;
+	bRuntimeReleaseInProgress = false;
 
 	if (!RegisterOwner())
 	{
@@ -400,6 +433,11 @@ void UAvidScriptComponent::TickComponent(
 	ELevelTick TickType,
 	FActorComponentTickFunction* ThisTickFunction)
 {
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
+
 	if (RuntimeSession.IsValid() &&
 		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
 	{
@@ -439,7 +477,10 @@ void UAvidScriptComponent::TickComponent(
 		}
 	}
 
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (IsRegistered())
+	{
+		Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	}
 }
 bool UAvidScriptComponent::RegisterOwner()
 {
@@ -463,6 +504,12 @@ bool UAvidScriptComponent::RegisterOwner()
 
 void UAvidScriptComponent::ReleaseOwner()
 {
+	if (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive())
+	{
+		bOwnerReleaseDeferred = true;
+		return;
+	}
+
 	if (!OwnerHandle.IsValid() || RuntimeStats.bOwnerReleased)
 	{
 		return;
@@ -471,6 +518,7 @@ void UAvidScriptComponent::ReleaseOwner()
 	FAvidScriptObjectHandleResult ReleaseResult;
 	if (ObjectRegistry.ReleaseHandle(OwnerHandle, ReleaseResult))
 	{
+		bOwnerReleaseDeferred = false;
 		RuntimeStats.bOwnerReleased = true;
 		RuntimeStats.OwnerHandle = OwnerHandle;
 		RuntimeStats.OwnerObjectPath = ReleaseResult.ObjectPath;
@@ -510,6 +558,11 @@ void UAvidScriptComponent::UnbindOwnerGameplayDelegates()
 
 bool UAvidScriptComponent::DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event)
 {
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
+
 	if (!RuntimeSession.IsValid() ||
 		RuntimeSession->GetSnapshot().LifecycleState != EAvidScriptLifecycleState::Running)
 	{
@@ -652,12 +705,32 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	FAvidScriptWasmSmokeResult LocalUnloadResult;
 	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
 
+	if (bRuntimeReleaseInProgress ||
+		(RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
+	{
+		bRuntimeReleaseDeferred = true;
+		UnloadResult = FAvidScriptWasmSmokeResult();
+		UnloadResult.ModuleId = RuntimeSession.IsValid() ? RuntimeSession->GetLiveModuleId() : FString();
+		UnloadResult.ExportName = TEXT("<unload>");
+		UnloadResult.ErrorCategory = TEXT("reentrant_operation");
+		UnloadResult.NextAction = TEXT("defer Runtime release until the active script callback returns");
+		UnloadResult.ErrorMessage = TEXT("AvidScript component deferred Runtime release while a script operation was active.");
+		return;
+	}
+
+	bRuntimeReleaseInProgress = true;
 	UnbindOwnerGameplayDelegates();
 	if (RuntimeSession.IsValid())
 	{
 		if (!RuntimeSession->StopAndUnload(UnloadResult))
 		{
 			RecordRuntimeFailure(UnloadResult);
+			if (UnloadResult.ErrorCategory == TEXT("reentrant_operation"))
+			{
+				bRuntimeReleaseDeferred = true;
+				bRuntimeReleaseInProgress = false;
+				return;
+			}
 		}
 		RuntimeSession.Reset();
 	}
@@ -666,6 +739,8 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 		UnloadResult = FAvidScriptWasmSmokeResult();
 	}
 	ReleaseGameplayObjectHandles();
+	bRuntimeReleaseDeferred = false;
+	bRuntimeReleaseInProgress = false;
 
 	RuntimeStats.Metrics = UnloadResult.Metrics;
 	RuntimeStats.bEndPlayCalled = RuntimeStats.bEndPlayCalled || UnloadResult.bEndPlayCalled;
@@ -678,4 +753,24 @@ void UAvidScriptComponent::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadR
 	}
 	CopyComponentEventStats(UnloadResult, RuntimeStats);
 	RuntimeStats.bRuntimeLoaded = false;
+}
+
+void UAvidScriptComponent::FlushDeferredRuntimeRelease()
+{
+	if (bRuntimeReleaseInProgress ||
+		(RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
+	{
+		return;
+	}
+
+	if (bRuntimeReleaseDeferred)
+	{
+		bRuntimeReleaseDeferred = false;
+		ReleaseRuntime();
+	}
+	if (bOwnerReleaseDeferred)
+	{
+		bOwnerReleaseDeferred = false;
+		ReleaseOwner();
+	}
 }

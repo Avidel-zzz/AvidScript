@@ -204,6 +204,16 @@ TArray<uint8> BuildActorLifecycleFixture(
 	return Module;
 }
 
+FAvidScriptWasmReloadManifest MakeActorLifecycleManifest(const FString& ModuleId)
+{
+	FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
+	Manifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("env"), TEXT("actor_set_location") },
+		FAvidScriptWasmRequiredImport{ TEXT("env"), TEXT("actor_add_location_offset") }
+	};
+	return Manifest;
+}
+
 TArray<uint8> BuildActorSetLocationFixture(const FAvidScriptObjectHandle& ActorHandle, const FVector& TargetLocation)
 {
 	TArray<uint8> Module;
@@ -721,9 +731,9 @@ bool FAvidScriptWasmReloadSkipsEndPlayTransitionSmokeTest::RunTest(const FString
 		1,
 		FVector(5.0, 0.0, 0.0));
 
-	FAvidScriptWasmReloadManifest OldManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_end_play_old"));
+	FAvidScriptWasmReloadManifest OldManifest = MakeActorLifecycleManifest(TEXT("reload_end_play_old"));
 	OldManifest.RequiredExports.Add(TEXT("avid_on_end_play"));
-	FAvidScriptWasmReloadManifest NewManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_end_play_new"));
+	FAvidScriptWasmReloadManifest NewManifest = MakeActorLifecycleManifest(TEXT("reload_end_play_new"));
 	NewManifest.RequiredExports.Add(TEXT("avid_on_end_play"));
 
 	FAvidScriptWasmReloadSession Session;
@@ -806,14 +816,14 @@ bool FAvidScriptWasmCandidateHostEffectRollbackTest::RunTest(const FString& Para
 	TestTrue(TEXT("Live host effect fixture loads"), Session.LoadInitialModule(
 		LiveBytes.GetData(),
 		LiveBytes.Num(),
-		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("host_effect_live")),
+		MakeActorLifecycleManifest(TEXT("host_effect_live")),
 		ReloadResult));
 	TestEqual(TEXT("Live fixture establishes actor location"), Actor->GetActorLocation(), LiveLocation);
 
 	TestFalse(TEXT("Write-then-trap candidate is rejected"), Session.ReloadModule(
 		CandidateBytes.GetData(),
 		CandidateBytes.Num(),
-		FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("host_effect_candidate_trap")),
+		MakeActorLifecycleManifest(TEXT("host_effect_candidate_trap")),
 		ReloadResult));
 	TestTrue(TEXT("Host effect transaction is attempted"), ReloadResult.bHostEffectTransactionAttempted);
 	TestFalse(TEXT("Rejected candidate does not commit host effects"), ReloadResult.bHostEffectTransactionCommitted);

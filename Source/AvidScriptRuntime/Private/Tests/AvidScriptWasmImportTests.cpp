@@ -84,7 +84,7 @@ bool FAvidScriptWasmMissingImportSmokeTest::RunTest(const FString& Parameters)
 		Result);
 
 	TestFalse(TEXT("Missing host import is reported without crash"), bLoaded);
-	TestEqual(TEXT("Missing import category"), Result.ErrorCategory, FString(TEXT("missing_import")));
+	TestEqual(TEXT("Missing import category"), Result.ErrorCategory, FString(TEXT("binding_package_missing")));
 	TestEqual(TEXT("Missing import module"), Result.ImportModuleName, FString(TEXT("avidscript")));
 	TestEqual(TEXT("Missing import name"), Result.ImportName, FString(TEXT("host_missing_i32")));
 	TestTrue(TEXT("Missing import diagnostic names the import"), Result.ErrorMessage.Contains(TEXT("avidscript.host_missing_i32")));

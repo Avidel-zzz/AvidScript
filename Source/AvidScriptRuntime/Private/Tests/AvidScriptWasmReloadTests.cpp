@@ -32,6 +32,23 @@ const uint8 GAvidScriptReloadCompatibleWasmModule[] = {
 	0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b
 };
 
+const uint8 GAvidScriptReloadManifestWasmModule[] = {
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x0d, 0x03, 0x60, 0x00, 0x00, 0x60, 0x01,
+	0x7d, 0x00, 0x60, 0x01, 0x7f, 0x01, 0x7f, 0x02,
+	0x1b, 0x01, 0x0a, 0x61, 0x76, 0x69, 0x64, 0x73,
+	0x63, 0x72, 0x69, 0x70, 0x74, 0x0c, 0x68, 0x6f,
+	0x73, 0x74, 0x5f, 0x61, 0x64, 0x64, 0x5f, 0x69,
+	0x33, 0x32, 0x00, 0x02, 0x03, 0x03, 0x02, 0x00,
+	0x01, 0x07, 0x25, 0x02, 0x12, 0x61, 0x76, 0x69,
+	0x64, 0x5f, 0x6f, 0x6e, 0x5f, 0x62, 0x65, 0x67,
+	0x69, 0x6e, 0x5f, 0x70, 0x6c, 0x61, 0x79, 0x00,
+	0x01, 0x0c, 0x61, 0x76, 0x69, 0x64, 0x5f, 0x6f,
+	0x6e, 0x5f, 0x74, 0x69, 0x63, 0x6b, 0x00, 0x02,
+	0x0a, 0x07, 0x02, 0x02, 0x00, 0x0b, 0x02, 0x00,
+	0x0b
+};
+
 const uint8 GAvidScriptReloadMissingTickWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 	0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
@@ -91,7 +108,9 @@ bool WriteReloadManifestFixture(
 	const FString& ModuleId,
 	const FString& WasmPath,
 	const FString& WasmSha256,
-	const FString& StateMigrationJson = FString())
+	const FString& StateMigrationJson = FString(),
+	const FString& RequiredImportsJson =
+		TEXT("[{ \"module\": \"avidscript\", \"name\": \"host_add_i32\" }]"))
 {
 	const FString StateMigrationField = StateMigrationJson.IsEmpty()
 		? FString()
@@ -106,15 +125,24 @@ bool WriteReloadManifestFixture(
 		TEXT("%s")
 		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
 		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
-		TEXT("  \"required_imports\": [{ \"module\": \"env\", \"name\": \"actor_set_location\" }],\n")
+		TEXT("  \"required_imports\": %s,\n")
 		TEXT("  \"toolchain\": { \"compiler\": \"ldc2\", \"version\": \"1.42.0\", \"target\": \"wasm32-unknown-unknown-wasm\", \"linker\": \"ldc2-internal-lld\" }\n")
 		TEXT("}\n"),
 		*ModuleId,
 		*StateMigrationField,
 		*ProjectRelativeJsonPathForReloadManifestTest(WasmPath),
-		*WasmSha256);
+		*WasmSha256,
+		*RequiredImportsJson);
 
 	return FFileHelper::SaveStringToFile(ManifestJson, *ManifestPath);
+}
+
+bool LoadReloadDynamicImportFixture(TArray<uint8>& OutBytecode)
+{
+	const FString FixturePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/WasmBackend/P42_3_DynamicRawImport.wasm")));
+	return FFileHelper::LoadFileToArray(OutBytecode, *FixturePath);
 }
 
 FString NormalizeReloadTestFullPath(FString Path)
@@ -164,7 +192,7 @@ bool FAvidScriptReloadStateMigrationManifestContractTest::RunTest(const FString&
 	IFileManager::Get().MakeDirectory(*TestRoot, true);
 	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("state_migration_manifest.wasm"));
 	TArray<uint8> WasmBytes;
-	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	WasmBytes.Append(GAvidScriptReloadManifestWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadManifestWasmModule));
 	TestTrue(TEXT("State migration WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
 	const FString WasmSha256 = ComputeReloadTestSha256Hex(WasmBytes);
 	const FString FingerprintA(TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
@@ -187,17 +215,25 @@ bool FAvidScriptReloadStateMigrationManifestContractTest::RunTest(const FString&
 	FAvidScriptWasmReloadManifestLoadResult LoadResult;
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> LoadedBytecode;
-	TestTrue(TEXT("Valid migration manifest loads"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+	const bool bValidManifestLoaded = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		ValidManifestPath,
 		Manifest,
 		LoadedBytecode,
-		LoadResult));
+		LoadResult);
+	if (!TestTrue(TEXT("Valid migration manifest loads"), bValidManifestLoaded))
+	{
+		return true;
+	}
 	TestTrue(TEXT("Host snapshot strategy is enabled"), Manifest.StateMigration.IsEnabled());
 	TestEqual(TEXT("V1 schema version defaults to one"), Manifest.StateMigration.SchemaVersion, 1);
 	TestEqual(TEXT("V1 policy defaults to compatible"), Manifest.StateMigration.Policy, FString(TEXT("compatible")));
 	TestEqual(TEXT("V1 contract version defaults to one"), Manifest.StateMigration.ContractVersion, 1);
 	TestEqual(TEXT("Migration owner type"), Manifest.StateMigration.OwnerTypeId, FString(TEXT("type:Game.Script")));
 	TestEqual(TEXT("Migration slot count"), Manifest.StateMigration.Slots.Num(), 2);
+	if (Manifest.StateMigration.Slots.Num() != 2)
+	{
+		return true;
+	}
 	TestEqual(TEXT("Migration first offset"), Manifest.StateMigration.Slots[0].Offset, 16u);
 	TestEqual(TEXT("V1 slots have no aliases"), Manifest.StateMigration.Slots[0].Aliases.Num(), 0);
 
@@ -215,14 +251,28 @@ bool FAvidScriptReloadStateMigrationManifestContractTest::RunTest(const FString&
 		WasmPath,
 		WasmSha256,
 		ValidV2Schema));
-	TestTrue(TEXT("Valid v2 migration manifest loads"), FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+	const bool bValidV2ManifestLoaded = FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		ValidV2ManifestPath,
 		Manifest,
 		LoadedBytecode,
-		LoadResult));
+		LoadResult);
+	if (!TestTrue(TEXT("Valid v2 migration manifest loads"), bValidV2ManifestLoaded))
+	{
+		return true;
+	}
 	TestEqual(TEXT("V2 schema version is retained"), Manifest.StateMigration.SchemaVersion, 2);
 	TestEqual(TEXT("V2 policy is retained"), Manifest.StateMigration.Policy, FString(TEXT("explicit")));
 	TestEqual(TEXT("V2 contract version is retained"), Manifest.StateMigration.ContractVersion, 2);
+	TestEqual(TEXT("V2 migration slot count"), Manifest.StateMigration.Slots.Num(), 2);
+	if (Manifest.StateMigration.Slots.Num() != 2)
+	{
+		return true;
+	}
+	TestEqual(TEXT("V2 first slot alias count"), Manifest.StateMigration.Slots[0].Aliases.Num(), 1);
+	if (Manifest.StateMigration.Slots[0].Aliases.Num() != 1)
+	{
+		return true;
+	}
 	TestEqual(TEXT("V2 alias is retained"), Manifest.StateMigration.Slots[0].Aliases[0], FString(TEXT("global:old_score")));
 
 	const FString UnsortedAliasSchema = ValidV2Schema.Replace(
@@ -509,10 +559,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptReloadGeneratedImportsRequirePackageTest::RunTest(const FString& Parameters)
 {
+	TArray<uint8> DynamicImportBytecode;
+	if (!TestTrue(TEXT("Generated import WASM fixture loads"), LoadReloadDynamicImportFixture(DynamicImportBytecode)))
+	{
+		return false;
+	}
+
 	FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(
 		TEXT("reload_generated_import_without_package"));
+	Manifest.RequiredExports = { TEXT("avid_on_begin_play") };
 	Manifest.RequiredImports = {
-		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("avid_ue_missing_package") }
+		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("avid_ue_1111111111111111") }
 	};
 
 	FAvidScriptWasmReloadSession Session;
@@ -520,8 +577,8 @@ bool FAvidScriptReloadGeneratedImportsRequirePackageTest::RunTest(const FString&
 	TestFalse(
 		TEXT("Generated UE imports fail closed without a binding package"),
 		Session.LoadInitialModule(
-			GAvidScriptReloadCompatibleWasmModule,
-			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			DynamicImportBytecode.GetData(),
+			DynamicImportBytecode.Num(),
 			Manifest,
 			Result));
 	TestEqual(
@@ -537,17 +594,179 @@ bool FAvidScriptReloadGeneratedImportsRequirePackageTest::RunTest(const FString&
 	};
 	FAvidScriptWasmReloadSession PackedOwnerSession;
 	TestFalse(
-		TEXT("Packed owner import fails closed without a binding package"),
+		TEXT("Manifest-only packed owner claim is rejected before package authorization"),
 		PackedOwnerSession.LoadInitialModule(
 			GAvidScriptReloadCompatibleWasmModule,
 			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
 			PackedOwnerManifest,
 			Result));
 	TestEqual(
-		TEXT("Missing packed owner package has a stable category"),
+		TEXT("Manifest-only packed owner claim has a stable category"),
 		Result.ErrorCategory,
-		FString(TEXT("binding_package_missing")));
+		FString(TEXT("manifest_wasm_import_mismatch")));
 	TestFalse(TEXT("Rejected packed owner module is not activated"), PackedOwnerSession.IsLiveLoaded());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadDirectSessionRejectsInvalidBytecodeTest,
+	"AvidScript.Reload.DirectSessionRejectsInvalidBytecode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadDirectSessionRejectsInvalidBytecodeTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmReloadSession Session;
+	FAvidScriptWasmReloadResult Result;
+	TestFalse(
+		TEXT("Direct Session rejects empty bytecode before WASM inspection"),
+		Session.LoadInitialModule(
+			nullptr,
+			0,
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_invalid_bytecode")),
+			Result));
+	TestEqual(
+		TEXT("Invalid bytecode has the established stable category"),
+		Result.ErrorCategory,
+		FString(TEXT("invalid_bytecode")));
+	TestFalse(TEXT("Invalid bytecode never activates a runtime"), Session.IsLiveLoaded());
+
+	TestFalse(
+		TEXT("Direct Session rejects a null pointer with a positive byte count before WASM inspection"),
+		Session.LoadInitialModule(
+			nullptr,
+			8,
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_null_bytecode")),
+			Result));
+	TestEqual(TEXT("Null bytecode has a stable category"), Result.ErrorCategory, FString(TEXT("invalid_bytecode")));
+
+	const uint8 PlaceholderByte = 0;
+	TestFalse(
+		TEXT("Direct Session rejects a negative byte count before constructing an array view"),
+		Session.LoadInitialModule(
+			&PlaceholderByte,
+			-1,
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_negative_bytecode")),
+			Result));
+	TestEqual(TEXT("Negative byte count has a stable category"), Result.ErrorCategory, FString(TEXT("invalid_bytecode")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadReentrantMutationRejectedTest,
+	"AvidScript.Reload.ReentrantMutationRejected",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadReentrantMutationRejectedTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmReloadSession Session;
+	FAvidScriptWasmReloadResult Result;
+	if (!TestTrue(
+		TEXT("Initial module loads"),
+		Session.LoadInitialModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_reentrant_v1")),
+			Result)))
+	{
+		return false;
+	}
+
+	bool bNestedReloadSucceeded = true;
+	FAvidScriptWasmReloadResult NestedResult;
+	Session.SetCandidateBeginPlayObserverForTesting([&]()
+	{
+		bNestedReloadSucceeded = Session.ReloadModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_reentrant_nested")),
+			NestedResult);
+	});
+
+	TestTrue(
+		TEXT("Outer reload remains valid"),
+		Session.ReloadModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_reentrant_v2")),
+			Result));
+	TestFalse(TEXT("Nested reload is rejected while a runtime mutation is active"), bNestedReloadSucceeded);
+	TestEqual(
+		TEXT("Nested reload has a stable category"),
+		NestedResult.ErrorCategory,
+		FString(TEXT("reentrant_operation")));
+	TestEqual(TEXT("Outer candidate remains active"), Session.GetLiveModuleId(), FString(TEXT("reload_reentrant_v2")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadLiveExecutionRejectsReloadTest,
+	"AvidScript.Reload.LiveExecutionRejectsReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadLiveExecutionRejectsReloadTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmReloadSession Session;
+	FAvidScriptWasmReloadResult Result;
+	if (!TestTrue(
+		TEXT("Initial module loads"),
+		Session.LoadInitialModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_live_guard_v1")),
+			Result)))
+	{
+		return false;
+	}
+
+	bool bNestedReloadSucceeded = true;
+	FAvidScriptWasmReloadResult NestedResult;
+	Session.SetLiveExecutionObserverForTesting([&]()
+	{
+		bNestedReloadSucceeded = Session.ReloadModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_live_guard_nested")),
+			NestedResult);
+	});
+
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Outer guest call completes"), Session.TickLive(1.0f / 60.0f, TickResult));
+	TestFalse(TEXT("Reload requested during guest execution is rejected"), bNestedReloadSucceeded);
+	TestEqual(
+		TEXT("Live-execution reload rejection has a stable category"),
+		NestedResult.ErrorCategory,
+		FString(TEXT("reentrant_operation")));
+	TestEqual(TEXT("Original runtime remains active"), Session.GetLiveModuleId(), FString(TEXT("reload_live_guard_v1")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadDirectSessionRejectsManifestImportMismatchTest,
+	"AvidScript.Reload.DirectSessionRejectsManifestImportMismatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadDirectSessionRejectsManifestImportMismatchTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(
+		TEXT("reload_direct_import_mismatch"));
+	Manifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("host_add_i32") }
+	};
+
+	FAvidScriptWasmReloadSession Session;
+	FAvidScriptWasmReloadResult Result;
+	TestFalse(
+		TEXT("Direct Session API rejects a manifest that misrepresents the actual WASM import table"),
+		Session.LoadInitialModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			Manifest,
+			Result));
+	TestEqual(
+		TEXT("Direct Session mismatch has a stable category"),
+		Result.ErrorCategory,
+		FString(TEXT("manifest_wasm_import_mismatch")));
+	TestFalse(TEXT("Direct Session mismatch never activates a runtime"), Session.IsLiveLoaded());
 	return true;
 }
 
@@ -565,7 +784,7 @@ bool FAvidScriptReloadManifestLoadsWasmSmokeTest::RunTest(const FString& Paramet
 	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_smoke.avidscript.json"));
 
 	TArray<uint8> WasmBytes;
-	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	WasmBytes.Append(GAvidScriptReloadManifestWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadManifestWasmModule));
 	TestTrue(TEXT("WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
 
 	const FString WasmSha256 = ComputeReloadTestSha256Hex(WasmBytes);
@@ -593,10 +812,50 @@ bool FAvidScriptReloadManifestLoadsWasmSmokeTest::RunTest(const FString& Paramet
 	TestEqual(TEXT("WASM SHA256"), Manifest.WasmSha256, WasmSha256);
 	TestEqual(TEXT("Required export count"), Manifest.RequiredExports.Num(), 2);
 	TestEqual(TEXT("Required import count"), Manifest.RequiredImports.Num(), 1);
-	TestEqual(TEXT("Required import module"), Manifest.RequiredImports[0].ModuleName, FString(TEXT("env")));
-	TestEqual(TEXT("Required import name"), Manifest.RequiredImports[0].ImportName, FString(TEXT("actor_set_location")));
+	TestEqual(TEXT("Required import module"), Manifest.RequiredImports[0].ModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("Required import name"), Manifest.RequiredImports[0].ImportName, FString(TEXT("host_add_i32")));
 	TestEqual(TEXT("Loaded byte size"), LoadedBytecode.Num(), WasmBytes.Num());
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptReloadManifestAllowsZeroImportsTest,
+	"AvidScript.Reload.ManifestAllowsZeroImports",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptReloadManifestAllowsZeroImportsTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = GetReloadManifestTestRoot();
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+
+	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("manifest_zero_imports.wasm"));
+	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_zero_imports.avidscript.json"));
+	TArray<uint8> WasmBytes;
+	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	TestTrue(TEXT("Zero-import WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+	TestTrue(
+		TEXT("Zero-import manifest fixture writes"),
+		WriteReloadManifestFixture(
+			ManifestPath,
+			TEXT("manifest_zero_imports"),
+			WasmPath,
+			ComputeReloadTestSha256Hex(WasmBytes),
+			FString(),
+			TEXT("[]")));
+
+	FAvidScriptWasmReloadManifestLoadResult LoadResult;
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> LoadedBytecode;
+	TestTrue(
+		TEXT("A file manifest may declare an empty import array when WASM imports no functions"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			ManifestPath,
+			Manifest,
+			LoadedBytecode,
+			LoadResult));
+	TestEqual(TEXT("Zero-import manifest remains empty"), Manifest.RequiredImports.Num(), 0);
+	TestEqual(TEXT("Zero-import bytecode is preserved"), LoadedBytecode.Num(), WasmBytes.Num());
 	return true;
 }
 
@@ -614,7 +873,7 @@ bool FAvidScriptReloadManifestRejectsHashMismatchSmokeTest::RunTest(const FStrin
 	const FString ManifestPath = FPaths::Combine(TestRoot, TEXT("manifest_hash_mismatch.avidscript.json"));
 
 	TArray<uint8> WasmBytes;
-	WasmBytes.Append(GAvidScriptReloadCompatibleWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	WasmBytes.Append(GAvidScriptReloadManifestWasmModule, UE_ARRAY_COUNT(GAvidScriptReloadManifestWasmModule));
 	TestTrue(TEXT("WASM fixture writes"), FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
 	TestTrue(
 		TEXT("Manifest fixture writes"),

@@ -335,6 +335,8 @@ $RuntimeDebugMapSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Dia
 $RuntimeReloadSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmReload.cpp'
 $VmModuleLayoutHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptWasmModuleLayout.h'
 $VmModuleLayoutSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmModuleLayout.cpp'
+$VmImportPolicySource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmImportPolicy.cpp'
+$WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
 if ($ReloadTypesHeader -match '\bFAvidScriptRuntimeSession\b') {
     Add-Violation 'WASM reload types header must not declare RuntimeSession ownership'
 }
@@ -947,10 +949,10 @@ foreach ($RequiredRuntimeManifestImportContract in @(
     }
 }
 if (-not $RuntimeSessionSource.Contains('Import.ImportName == TEXT("avid_owner_get_handle")') -or
-    -not $RuntimeSessionSource.Contains('bRequiresDynamicBindingPackage && !Manifest.BindingPackage.IsValid()') -or
     -not $RuntimeSessionSource.Contains('bRequiresPackedOwnerCapability') -or
+    -not $RuntimeSessionSource.Contains('!Manifest.BindingPackage.IsValid()') -or
     -not $RuntimeSessionSource.Contains('Manifest.BindingPackage->GetExpectedSelfClass() == nullptr')) {
-    Add-Violation 'Runtime activation must require a verified schema v6 Self package for packed owner and a verified package for generated UE imports'
+    Add-Violation 'Runtime activation must derive packed-owner use from exact actual imports and require a verified schema v6 Self package'
 }
 foreach ($RequiredLegacyClassReferenceRendererContract in @(
     'bHasTypedClassReferenceSurface',
@@ -1262,21 +1264,73 @@ if (-not $RuntimeReloadSource.Contains('bRequiresPackedOwnerCapability') -or
     Add-Violation 'Runtime reload must treat package capabilities as an authorization superset while requiring every script packed-owner import to be authorized'
 }
 foreach ($RequiredWasmImportIdentityContract in @(
-    'WasmLayout.FunctionImports',
-    'Manifest.RequiredImports',
+    'ActualLayout.FunctionImports',
+    'ExpectedImports',
     'manifest_wasm_import_mismatch')) {
-    if (-not $RuntimeReloadSource.Contains($RequiredWasmImportIdentityContract)) {
-        Add-Violation "Runtime reload must compare script manifest imports with the actual WASM function import identities: $RequiredWasmImportIdentityContract"
+    if (-not $VmImportPolicySource.Contains($RequiredWasmImportIdentityContract)) {
+        Add-Violation "VM import policy must compare expected imports with the actual WASM function import identities: $RequiredWasmImportIdentityContract"
     }
 }
 foreach ($RequiredDynamicImportAuthorizationContract in @(
     'IsAvidScriptVmStaticHostImport',
-    'Manifest.BindingPackage->GetVmPackage()',
+    'BindingPackage->Imports',
     'AuthorizedDynamicImports',
-    'VmBindingPackage->Imports',
     'binding_package_import_mismatch')) {
-    if (-not $RuntimeReloadSource.Contains($RequiredDynamicImportAuthorizationContract)) {
-        Add-Violation "Runtime reload must authorize each non-static WASM import against the current immutable binding package: $RequiredDynamicImportAuthorizationContract"
+    if (-not $VmImportPolicySource.Contains($RequiredDynamicImportAuthorizationContract)) {
+        Add-Violation "VM import policy must authorize each non-static WASM import against the current immutable binding package: $RequiredDynamicImportAuthorizationContract"
+    }
+}
+$ManifestLoadImportSlice = Get-SourceSlice `
+    $RuntimeReloadSource `
+    'bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(' `
+    'OutResult.ByteSize = OutBytecode.Num();' `
+    'manifest loader import authorization'
+Test-RequiredTokenSequence $ManifestLoadImportSlice @(
+    'InspectAvidScriptWasmModuleLayout(',
+    'TryGetArrayField(TEXT("required_imports")',
+    'if (!ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, ImportContractResult))'
+) 'manifest loader must inspect actual imports, parse expected imports, and apply the shared policy in order'
+
+$RuntimeSessionImportSlice = Get-SourceSlice `
+    $RuntimeSessionSource `
+    'bool FAvidScriptRuntimeSession::BuildValidatedRuntime(' `
+    'bool FAvidScriptRuntimeSession::ValidateExpectedOwner(' `
+    'direct Runtime Session import authorization'
+Test-RequiredTokenSequence $RuntimeSessionImportSlice @(
+    'if (Bytecode == nullptr || BytecodeSize <= 0)',
+    'if (!InspectAndValidateAvidScriptWasmImportContract(',
+    'ImportContractResult.ErrorCategory',
+    'CandidateRuntime->LoadModule('
+) 'direct Runtime Session must reject invalid bytecode and authorize actual imports before VM load'
+
+$WamrBackendLoadSlice = Get-SourceSlice `
+    $WamrBackendSource `
+    'bool Load(' `
+    'bool ResolveExport(' `
+    'WAMR backend load authorization'
+Test-RequiredTokenSequence $WamrBackendLoadSlice @(
+    'InspectAvidScriptWasmModuleLayout(Bytecode, ModuleLayout, LayoutError)',
+    'if (!ValidateAvidScriptVmImportContract(',
+    'AcquireWamrLease(OutError)',
+    'AcquireAvidScriptWamrDynamicImports(',
+    'Module = wasm_runtime_load('
+) 'VM backend must authorize actual imports before acquiring WAMR, registering natives, or loading the module'
+foreach ($RequiredWamrCallLeaseContract in @(
+    '++ActiveCallDepth;',
+    'const bool bUnloadRequestedDuringCall = bUnloadDeferred;',
+    'if (ActiveCallDepth == 0 && bUnloadDeferred)',
+    'PerformUnload();',
+    'reentrant_unload')) {
+    if (-not $WamrBackendSource.Contains($RequiredWamrCallLeaseContract)) {
+        Add-Violation "WAMR backend must defer physical unload until active guest calls unwind: $RequiredWamrCallLeaseContract"
+    }
+}
+foreach ($RequiredSessionOperationLeaseContract in @(
+    'TGuardValue<bool> MutationGuard(bMutationInProgress, true);',
+    'TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);',
+    'TEXT("reentrant_operation")')) {
+    if (-not $RuntimeSessionSource.Contains($RequiredSessionOperationLeaseContract)) {
+        Add-Violation "Runtime Session must reject destructive or nested reentry while a guest call is active: $RequiredSessionOperationLeaseContract"
     }
 }
 if (-not $VmContractHeader.Contains('AVIDSCRIPTVM_API bool IsAvidScriptVmStaticHostImport')) {

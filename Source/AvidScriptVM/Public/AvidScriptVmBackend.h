@@ -159,9 +159,24 @@ struct FAvidScriptVmBindingPackage
 	TArray<FAvidScriptVmDynamicImport> Imports;
 };
 
+struct FAvidScriptVmExpectedImport
+{
+	FString ModuleName;
+	FString ImportName;
+};
+
+struct FAvidScriptWasmModuleLayout;
+
 AVIDSCRIPTVM_API bool IsAvidScriptVmStaticHostImport(
 	const FString& ModuleName,
 	const FString& ImportName);
+
+AVIDSCRIPTVM_API bool ValidateAvidScriptVmImportContract(
+	const FAvidScriptWasmModuleLayout& ActualLayout,
+	const FAvidScriptVmBindingPackage* BindingPackage,
+	TConstArrayView<FAvidScriptVmExpectedImport> ExpectedImports,
+	bool bEnforceExpectedImports,
+	FAvidScriptVmError& OutError);
 
 struct FAvidScriptVmLoadConfig
 {

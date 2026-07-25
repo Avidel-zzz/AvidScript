@@ -1,6 +1,7 @@
 #include "AvidScriptWasmReload.h"
 
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
+#include "Validation/AvidScriptWasmImportPolicy.h"
 
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptWasmModuleLayout.h"
@@ -922,6 +923,75 @@ bool LoadManifestDebugMap(
 }
 } // namespace
 
+bool ValidateAvidScriptWasmImportContract(
+	const FAvidScriptWasmModuleLayout& WasmLayout,
+	const FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmImportContractResult& OutResult)
+{
+	OutResult = FAvidScriptWasmImportContractResult();
+	TArray<FAvidScriptVmExpectedImport> ExpectedImports;
+	ExpectedImports.Reserve(Manifest.RequiredImports.Num());
+	for (const FAvidScriptWasmRequiredImport& RequiredImport : Manifest.RequiredImports)
+	{
+		ExpectedImports.Add({
+			RequiredImport.ModuleName,
+			RequiredImport.ImportName
+		});
+	}
+	const FAvidScriptVmBindingPackage* VmBindingPackage =
+		Manifest.BindingPackage.IsValid()
+			? &Manifest.BindingPackage->GetVmPackage()
+			: nullptr;
+	FAvidScriptVmError VmError;
+	if (ValidateAvidScriptVmImportContract(
+		WasmLayout,
+		VmBindingPackage,
+		ExpectedImports,
+		true,
+		VmError))
+	{
+		return true;
+	}
+
+	OutResult.ErrorCategory = VmError.Category;
+	OutResult.ErrorDetails = VmError.Details;
+	if (VmError.Category == TEXT("manifest_wasm_import_mismatch"))
+	{
+		OutResult.NextAction = TEXT("rebuild the script manifest from the actual WASM import section");
+	}
+	else if (VmError.Category == TEXT("binding_package_missing"))
+	{
+		OutResult.NextAction = TEXT("rebuild the script and binding package as one transaction");
+	}
+	else if (VmError.Category == TEXT("binding_package_import_mismatch"))
+	{
+		OutResult.NextAction = TEXT("rebuild the script from the current binding package");
+	}
+	else
+	{
+		OutResult.NextAction = TEXT("rebuild and republish the current binding package");
+	}
+	return false;
+}
+
+bool InspectAndValidateAvidScriptWasmImportContract(
+	TConstArrayView<uint8> Bytecode,
+	const FAvidScriptWasmReloadManifest& Manifest,
+	FAvidScriptWasmImportContractResult& OutResult)
+{
+	FAvidScriptWasmModuleLayout WasmLayout;
+	FString WasmLayoutError;
+	if (!InspectAvidScriptWasmModuleLayout(Bytecode, WasmLayout, WasmLayoutError))
+	{
+		OutResult = FAvidScriptWasmImportContractResult();
+		OutResult.ErrorCategory = TEXT("wasm_layout_invalid");
+		OutResult.ErrorDetails = MoveTemp(WasmLayoutError);
+		OutResult.NextAction = TEXT("rebuild the WASM module with the supported backend");
+		return false;
+	}
+	return ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, OutResult);
+}
+
 FAvidScriptWasmReloadManifest FAvidScriptWasmReloadManifest::MakeSmoke(const FString& InModuleId)
 {
 	FAvidScriptWasmReloadManifest Manifest;
@@ -1248,13 +1318,13 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 
 	const TArray<TSharedPtr<FJsonValue>>* RequiredImportValues = nullptr;
 	if (!RootObject->TryGetArrayField(TEXT("required_imports"), RequiredImportValues) ||
-		RequiredImportValues == nullptr || RequiredImportValues->IsEmpty())
+		RequiredImportValues == nullptr)
 	{
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("manifest_invalid"),
-			TEXT("required_imports must contain at least one import"),
-			TEXT("declare required host imports before activating this module"));
+			TEXT("required_imports must be an array"),
+			TEXT("declare the complete host import array before activating this module"));
 		return false;
 	}
 
@@ -1295,104 +1365,15 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		Manifest.RequiredImports.Add(MoveTemp(RequiredImport));
 	}
 
-	const auto MakeImportIdentityKey = [](const FString& ModuleName, const FString& ImportName)
-	{
-		return FString::Printf(TEXT("%d:"), ModuleName.Len())
-			+ ModuleName
-			+ FString::Printf(TEXT("%d:"), ImportName.Len())
-			+ ImportName;
-	};
-	TMap<FString, int32> WasmImportCounts;
-	for (const FAvidScriptWasmFunctionImport& FunctionImport : WasmLayout.FunctionImports)
-	{
-		++WasmImportCounts.FindOrAdd(MakeImportIdentityKey(
-			FunctionImport.ModuleName,
-			FunctionImport.ImportName));
-	}
-	TMap<FString, int32> ManifestImportCounts;
-	for (const FAvidScriptWasmRequiredImport& RequiredImport : Manifest.RequiredImports)
-	{
-		++ManifestImportCounts.FindOrAdd(MakeImportIdentityKey(
-			RequiredImport.ModuleName,
-			RequiredImport.ImportName));
-	}
-	bool bImportIdentitiesMatch =
-		WasmImportCounts.Num() == ManifestImportCounts.Num()
-		&& WasmLayout.FunctionImports.Num() == Manifest.RequiredImports.Num();
-	if (bImportIdentitiesMatch)
-	{
-		for (const TPair<FString, int32>& Pair : WasmImportCounts)
-		{
-			const int32* ManifestCount = ManifestImportCounts.Find(Pair.Key);
-			if (ManifestCount == nullptr || *ManifestCount != Pair.Value)
-			{
-				bImportIdentitiesMatch = false;
-				break;
-			}
-		}
-	}
-	if (!bImportIdentitiesMatch)
+	FAvidScriptWasmImportContractResult ImportContractResult;
+	if (!ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, ImportContractResult))
 	{
 		SetManifestLoadFailure(
 			OutResult,
-			TEXT("manifest_wasm_import_mismatch"),
-			FString::Printf(
-				TEXT("script manifest imports=%d differ from WASM function imports=%d"),
-				Manifest.RequiredImports.Num(),
-				WasmLayout.FunctionImports.Num()),
-			TEXT("rebuild the script manifest from the actual WASM import section"));
+			ImportContractResult.ErrorCategory,
+			ImportContractResult.ErrorDetails,
+			ImportContractResult.NextAction);
 		return false;
-	}
-
-	const FAvidScriptVmBindingPackage* VmBindingPackage =
-		Manifest.BindingPackage.IsValid()
-			? &Manifest.BindingPackage->GetVmPackage()
-			: nullptr;
-	TSet<FString> AuthorizedDynamicImports;
-	if (VmBindingPackage != nullptr)
-	{
-		AuthorizedDynamicImports.Reserve(VmBindingPackage->Imports.Num());
-		for (const FAvidScriptVmDynamicImport& Import : VmBindingPackage->Imports)
-		{
-			AuthorizedDynamicImports.Add(MakeImportIdentityKey(
-				Import.ModuleName,
-				Import.ImportName));
-		}
-	}
-	for (const FAvidScriptWasmRequiredImport& RequiredImport : Manifest.RequiredImports)
-	{
-		if (IsAvidScriptVmStaticHostImport(
-				RequiredImport.ModuleName,
-				RequiredImport.ImportName))
-		{
-			continue;
-		}
-		if (VmBindingPackage == nullptr)
-		{
-			SetManifestLoadFailure(
-				OutResult,
-				TEXT("binding_package_missing"),
-				FString::Printf(
-					TEXT("dynamic import %s.%s requires a verified binding package"),
-					*RequiredImport.ModuleName,
-					*RequiredImport.ImportName),
-				TEXT("rebuild the script and binding package as one transaction"));
-			return false;
-		}
-		if (!AuthorizedDynamicImports.Contains(MakeImportIdentityKey(
-				RequiredImport.ModuleName,
-				RequiredImport.ImportName)))
-		{
-			SetManifestLoadFailure(
-				OutResult,
-				TEXT("binding_package_import_mismatch"),
-				FString::Printf(
-					TEXT("dynamic import %s.%s is not authorized by the current binding package"),
-					*RequiredImport.ModuleName,
-					*RequiredImport.ImportName),
-				TEXT("rebuild the script from the current binding package"));
-			return false;
-		}
 	}
 
 	if (bRequiresPackedOwnerCapability && !Manifest.BindingPackage.IsValid())

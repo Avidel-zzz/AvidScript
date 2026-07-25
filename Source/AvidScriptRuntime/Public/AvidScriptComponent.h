@@ -61,6 +61,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Runtime")
 	bool ReloadScript();
 
+#if WITH_DEV_AUTOMATION_TESTS
+	FAvidScriptRuntimeSession* GetRuntimeSessionForTesting() const { return RuntimeSession.Get(); }
+#endif
+
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(
@@ -93,6 +97,7 @@ private:
 	FString ResolveScriptManifestPath() const;
 	void RecordRuntimeFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
+	void FlushDeferredRuntimeRelease();
 
 	UPROPERTY(EditAnywhere, Category = "AvidScript", meta = (FilePathFilter = "avidscript.json"))
 	FFilePath ScriptManifestFile;
@@ -102,4 +107,7 @@ private:
 	TSet<uint64> GameplayObjectHandleValues;
 	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptComponentRuntimeStats RuntimeStats;
+	bool bRuntimeReleaseDeferred = false;
+	bool bOwnerReleaseDeferred = false;
+	bool bRuntimeReleaseInProgress = false;
 };

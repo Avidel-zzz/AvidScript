@@ -68,14 +68,23 @@ public:
 		bSawGuestMemory = Call.GuestMemory != nullptr;
 		OutResult.bSucceeded = true;
 		OutResult.ReturnValue = LastInput + 1;
+		if (BackendToUnload != nullptr)
+		{
+			IAvidScriptVmBackend* RequestedBackend = BackendToUnload;
+			BackendToUnload = nullptr;
+			bRequestedUnload = true;
+			RequestedBackend->Unload();
+		}
 		return true;
 	}
 
+	IAvidScriptVmBackend* BackendToUnload = nullptr;
 	int32 CallCount = 0;
 	uint32 LastOrdinal = MAX_uint32;
 	int32 LastArgumentCount = 0;
 	int32 LastInput = 0;
 	bool bSawGuestMemory = false;
+	bool bRequestedUnload = false;
 };
 
 bool CallBeginPlay(
@@ -131,6 +140,44 @@ bool FAvidScriptVmDynamicRawRegistrySmokeTest::RunTest(const FString& Parameters
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmDynamicRawRegistryReentrantUnloadTest,
+	"AvidScript.Architecture.VM.DynamicRawRegistryReentrantUnload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmDynamicRawRegistryReentrantUnloadTest::RunTest(const FString& Parameters)
+{
+	TArray<uint8> Bytecode;
+	if (!TestTrue(TEXT("Generated dynamic raw fixture loads"), LoadDynamicFixture(Bytecode)))
+	{
+		return false;
+	}
+
+	FAvidScriptVmBindingPackage Package = MakeDynamicPackage(TEXT("f"), 0);
+	FAvidScriptDynamicRawTestDispatcher Dispatcher;
+	FAvidScriptVmLoadConfig Config;
+	Config.HostDispatcher = &Dispatcher;
+	Config.BindingPackage = &Package;
+
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptWamrBackend();
+	if (!TestTrue(TEXT("Reentrant unload fixture attaches"), Backend->Load(
+		Bytecode,
+		TEXT("dynamic_raw_reentrant_unload"),
+		Config,
+		Error)))
+	{
+		return false;
+	}
+
+	Dispatcher.BackendToUnload = Backend.Get();
+	TestFalse(TEXT("Unload requested inside a host callback fails the active call safely"), CallBeginPlay(*Backend, Error));
+	TestTrue(TEXT("Host callback requested unload"), Dispatcher.bRequestedUnload);
+	TestEqual(TEXT("Reentrant unload has a stable category"), Error.Category, FString(TEXT("reentrant_unload")));
+	TestFalse(TEXT("Deferred unload completes after the active WAMR call unwinds"), Backend->IsLoaded());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmDynamicRawRegistryFailureTest,
 	"AvidScript.Architecture.VM.DynamicRawRegistryFailure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -153,7 +200,7 @@ bool FAvidScriptVmDynamicRawRegistryFailureTest::RunTest(const FString& Paramete
 		TEXT("dynamic_raw_missing_package"),
 		MissingPackageConfig,
 		Error));
-	TestEqual(TEXT("Missing package remains a missing import"), Error.Category, FString(TEXT("missing_import")));
+	TestEqual(TEXT("Missing package reports a stable category"), Error.Category, FString(TEXT("binding_package_missing")));
 
 	FAvidScriptVmBindingPackage InvalidPackage = MakeDynamicPackage(TEXT("c"), 0);
 	InvalidPackage.Imports.Add(MakeDynamicImport(0));
@@ -174,6 +221,35 @@ bool FAvidScriptVmDynamicRawRegistryFailureTest::RunTest(const FString& Paramete
 	FirstConfig.BindingPackage = &FirstPackage;
 	TUniquePtr<IAvidScriptVmBackend> FirstBackend = CreateAvidScriptWamrBackend();
 	TestTrue(TEXT("Conflict seed package attaches"), FirstBackend->Load(Bytecode, TEXT("dynamic_raw_conflict_seed"), FirstConfig, Error));
+
+	TUniquePtr<IAvidScriptVmBackend> BorrowingBackend = CreateAvidScriptWamrBackend();
+	TestFalse(TEXT("A warmed global registry cannot authorize a package-less VM"), BorrowingBackend->Load(
+		Bytecode,
+		TEXT("dynamic_raw_warmed_registry_borrow"),
+		MissingPackageConfig,
+		Error));
+	TestEqual(TEXT("Warmed registry borrowing is rejected before WAMR load"), Error.Category, FString(TEXT("binding_package_missing")));
+
+	FAvidScriptVmBindingPackage WrongPackage;
+	WrongPackage.PackageName = TEXT("avidscript.phase50.wrong");
+	WrongPackage.PackageHash = FString::ChrN(64, TEXT('f'));
+	FAvidScriptVmDynamicImport WrongImport;
+	WrongImport.StableId = TEXT("2222222222222222222222222222222222222222222222222222222222222222");
+	WrongImport.Ordinal = 0;
+	WrongImport.ModuleName = TEXT("avidscript");
+	WrongImport.ImportName = TEXT("avid_ue_2222222222222222");
+	WrongImport.Signature = TEXT("(i)i");
+	WrongPackage.Imports.Add(MoveTemp(WrongImport));
+	FAvidScriptVmLoadConfig WrongPackageConfig;
+	WrongPackageConfig.HostDispatcher = &Dispatcher;
+	WrongPackageConfig.BindingPackage = &WrongPackage;
+	TUniquePtr<IAvidScriptVmBackend> WrongPackageBackend = CreateAvidScriptWamrBackend();
+	TestFalse(TEXT("A warmed registry cannot authorize an import absent from the current non-empty package"), WrongPackageBackend->Load(
+		Bytecode,
+		TEXT("dynamic_raw_wrong_package_borrow"),
+		WrongPackageConfig,
+		Error));
+	TestEqual(TEXT("Wrong current package borrowing is rejected before WAMR load"), Error.Category, FString(TEXT("binding_package_import_mismatch")));
 
 	FAvidScriptVmBindingPackage ConflictPackage = MakeDynamicPackage(TEXT("e"), 0);
 	ConflictPackage.Imports[0].StableId = TEXT("3333333333333333333333333333333333333333333333333333333333333333");

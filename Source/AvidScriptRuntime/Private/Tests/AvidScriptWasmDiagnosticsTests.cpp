@@ -616,9 +616,9 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 			ImportMismatchBytecode,
 			ImportMismatchResult));
 	TestEqual(
-		TEXT("WASM layout mismatch category"),
+		TEXT("WASM import identity mismatch category"),
 		ImportMismatchResult.ErrorCategory,
-		FString(TEXT("debug_map_wasm_layout_mismatch")));
+		FString(TEXT("manifest_wasm_import_mismatch")));
 
 	FAvidScriptRuntimeSession TickTrapSession;
 	FAvidScriptWasmReloadResult InitialResult;
@@ -678,7 +678,7 @@ bool FAvidScriptWasmDiagnosticRuntimeIntegrationTest::RunTest(const FString& Par
 			return Frame.bSourceMapped;
 		}));
 
-	const TArray<uint8> HealthyBytecode = BuildRuntimeDiagnosticsFixture(false, false);
+	const TArray<uint8> HealthyBytecode = BuildRuntimeDiagnosticsFixture(false, false, false, 0);
 	FAvidScriptRuntimeSession ReloadSession;
 	FAvidScriptWasmReloadManifest HealthyManifest = FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("healthy_live"));
 	FAvidScriptWasmReloadResult HealthyLoadResult;

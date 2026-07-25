@@ -62,6 +62,7 @@ public:
 	void UnloadLive();
 
 	bool IsLiveLoaded() const;
+	bool IsOperationActive() const { return bMutationInProgress || ActiveGuestCallDepth > 0; }
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;
@@ -75,6 +76,10 @@ public:
 	void SetCandidateBeginPlayObserverForTesting(TFunction<void()> InObserver)
 	{
 		CandidateBeginPlayObserverForTesting = MoveTemp(InObserver);
+	}
+	void SetLiveExecutionObserverForTesting(TFunction<void()> InObserver)
+	{
+		LiveExecutionObserverForTesting = MoveTemp(InObserver);
 	}
 	FAvidScriptRuntimeSessionTestSnapshot GetTestSnapshot() const;
 #endif
@@ -107,8 +112,11 @@ private:
 	FAvidScriptWasmHostContext HostContext;
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
+	int32 ActiveGuestCallDepth = 0;
+	bool bMutationInProgress = false;
 #if WITH_DEV_AUTOMATION_TESTS
 	TFunction<void()> CandidateBeginPlayObserverForTesting;
+	TFunction<void()> LiveExecutionObserverForTesting;
 #endif
 };
 

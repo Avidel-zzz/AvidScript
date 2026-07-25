@@ -4,6 +4,7 @@
 #include "AvidScriptWamrCallStack.h"
 #include "AvidScriptWamrDynamicRegistry.h"
 #include "AvidScriptWamrHostBindings.h"
+#include "AvidScriptWasmModuleLayout.h"
 
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
@@ -100,9 +101,17 @@ public:
 		const FAvidScriptVmLoadConfig& Config,
 		FAvidScriptVmError& OutError) override
 	{
+		OutError.Reset();
+		if (ActiveCallDepth > 0)
+		{
+			SetVmError(
+				OutError,
+				TEXT("reentrant_operation"),
+				TEXT("A VM module cannot be replaced while a guest call is active."));
+			return false;
+		}
 		Unload();
 		LoadMetrics = FAvidScriptVmLoadMetrics();
-		OutError.Reset();
 
 #if !AVIDSCRIPT_WITH_WAMR
 		SetVmError(OutError, TEXT("backend_unavailable"), TEXT("WAMR artifacts are unavailable for this target."));
@@ -129,10 +138,26 @@ public:
 					TEXT("Dynamic binding packages require a host dispatcher."));
 				return false;
 			}
-			if (!ValidateAvidScriptVmBindingPackage(*Config.BindingPackage, OutError))
-			{
-				return false;
-			}
+		}
+
+		FAvidScriptWasmModuleLayout ModuleLayout;
+		FString LayoutError;
+		if (!InspectAvidScriptWasmModuleLayout(Bytecode, ModuleLayout, LayoutError))
+		{
+			SetVmError(OutError, TEXT("wasm_layout_invalid"), LayoutError);
+			return false;
+		}
+		if (!ValidateAvidScriptVmImportContract(
+			ModuleLayout,
+			Config.BindingPackage,
+			TConstArrayView<FAvidScriptVmExpectedImport>(),
+			false,
+			OutError))
+		{
+			return false;
+		}
+		if (Config.BindingPackage != nullptr)
+		{
 			AttachedBindingPackage = *Config.BindingPackage;
 		}
 
@@ -305,15 +330,38 @@ public:
 
 		uint32 Cells[FAvidScriptVmCallFrame::MaxCells] = {};
 		FMemory::Memcpy(Cells, Frame.Cells, Frame.CellCount * sizeof(uint32));
-		if (!wasm_runtime_call_wasm(
+		++ActiveCallDepth;
+		const bool bCallSucceeded = wasm_runtime_call_wasm(
 			ExecEnv,
 			static_cast<wasm_function_inst_t>(FunctionValue),
 			Frame.CellCount,
-			Cells))
+			Cells);
+		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
+		FString Exception;
+		TArray<FAvidScriptVmStackFrame> StackFrames;
+		if (!bCallSucceeded)
 		{
-			const FString Exception = GetWamrException(ModuleInstance);
-			TArray<FAvidScriptVmStackFrame> StackFrames;
+			Exception = GetWamrException(ModuleInstance);
 			CaptureAvidScriptWamrCallStack(ExecEnv, StackFrames);
+		}
+
+		--ActiveCallDepth;
+		if (ActiveCallDepth == 0 && bUnloadDeferred)
+		{
+			PerformUnload();
+		}
+
+		if (bUnloadRequestedDuringCall)
+		{
+			SetVmError(
+				OutError,
+				TEXT("reentrant_unload"),
+				TEXT("VM unload was deferred until the active guest call unwound."));
+			return false;
+		}
+
+		if (!bCallSucceeded)
+		{
 			if (bHasPendingHostImportFailure)
 			{
 				OutError.Reset();
@@ -335,41 +383,12 @@ public:
 
 	void Unload() override
 	{
-#if AVIDSCRIPT_WITH_WAMR
-		if (ExecEnv != nullptr)
+		if (ActiveCallDepth > 0)
 		{
-			wasm_runtime_set_user_data(ExecEnv, nullptr);
-			wasm_runtime_destroy_exec_env(ExecEnv);
-			ExecEnv = nullptr;
+			bUnloadDeferred = true;
+			return;
 		}
-
-		if (ModuleInstance != nullptr)
-		{
-			wasm_runtime_deinstantiate(ModuleInstance);
-			ModuleInstance = nullptr;
-		}
-
-		if (Module != nullptr)
-		{
-			wasm_runtime_unload(Module);
-			Module = nullptr;
-		}
-
-		ReleaseAvidScriptWamrDynamicImports(DynamicRegistrations);
-		DynamicOrdinals.Reset();
-		AttachedBindingPackage = FAvidScriptVmBindingPackage();
-
-		if (bOwnsRuntimeLease)
-		{
-			ReleaseWamrLease();
-			bOwnsRuntimeLease = false;
-		}
-#endif
-
-		ExportTable.Reset();
-		ModuleBuffer.Reset();
-		ModuleId.Reset();
-		HostDispatcher = nullptr;
+		PerformUnload();
 	}
 
 	bool IsLoaded() const override
@@ -531,6 +550,46 @@ public:
 	}
 
 private:
+	void PerformUnload()
+	{
+#if AVIDSCRIPT_WITH_WAMR
+		if (ExecEnv != nullptr)
+		{
+			wasm_runtime_set_user_data(ExecEnv, nullptr);
+			wasm_runtime_destroy_exec_env(ExecEnv);
+			ExecEnv = nullptr;
+		}
+
+		if (ModuleInstance != nullptr)
+		{
+			wasm_runtime_deinstantiate(ModuleInstance);
+			ModuleInstance = nullptr;
+		}
+
+		if (Module != nullptr)
+		{
+			wasm_runtime_unload(Module);
+			Module = nullptr;
+		}
+
+		ReleaseAvidScriptWamrDynamicImports(DynamicRegistrations);
+		DynamicOrdinals.Reset();
+		AttachedBindingPackage = FAvidScriptVmBindingPackage();
+
+		if (bOwnsRuntimeLease)
+		{
+			ReleaseWamrLease();
+			bOwnsRuntimeLease = false;
+		}
+#endif
+
+		ExportTable.Reset();
+		ModuleBuffer.Reset();
+		ModuleId.Reset();
+		HostDispatcher = nullptr;
+		bUnloadDeferred = false;
+	}
+
 	TArray<uint8> ModuleBuffer;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
@@ -540,6 +599,8 @@ private:
 	FAvidScriptVmExportTable ExportTable;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	bool bOwnsRuntimeLease = false;
+	int32 ActiveCallDepth = 0;
+	bool bUnloadDeferred = false;
 	bool bHasPendingHostImportFailure = false;
 	FString PendingHostImportName;
 	FString PendingHostImportDetails;
