@@ -1306,6 +1306,10 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		|| !IsAvidScriptBindingLowerSha256(OutPackage.SelectionHash))
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		if (OutErrorSource.IsEmpty())
+		{
+			OutErrorSource = TEXT("root");
+		}
 		return false;
 	}
 	if (OutPackage.SchemaVersion >= 6
@@ -1636,11 +1640,19 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	if (!ValidateAvidScriptBindingV6ObjectTypes(OutPackage, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		if (OutErrorSource.IsEmpty())
+		{
+			OutErrorSource = TEXT("object_type_graph");
+		}
 		return false;
 	}
 	if (!ValidateAvidScriptBindingV7ObjectFactories(OutPackage, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		if (OutErrorSource.IsEmpty())
+		{
+			OutErrorSource = TEXT("object_factories");
+		}
 		return false;
 	}
 	return true;
