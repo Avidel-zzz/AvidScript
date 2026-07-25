@@ -275,10 +275,10 @@ function Test-AvidScriptPhasePrivacy {
         }
     }
 
-    $Patch = (Invoke-AvidScriptGit $RepositoryRoot @('diff', '--no-ext-diff', '--unified=0', $Range)).Text
+    $Patch = (Invoke-AvidScriptGit $RepositoryRoot @(
+        'diff', '--no-ext-diff', '--unified=0', '--output-indicator-new=>', $Range)).Text
     $AddedPatch = (@($Patch -split "`n" | Where-Object {
-        $_.StartsWith('+', [System.StringComparison]::Ordinal) -and
-        -not $_.StartsWith('+++', [System.StringComparison]::Ordinal)
+        $_.StartsWith('>', [System.StringComparison]::Ordinal)
     }) -join "`n")
     foreach ($Pattern in @(
         '(?i)[A-Z]:[\\/]+Users[\\/]+',

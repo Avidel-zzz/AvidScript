@@ -585,6 +585,25 @@ Invoke-ContractCase 'Evidence.PrivacySchemaTokenIdentifierAllowed' {
     Assert-Condition (Test-AvidScriptPhasePrivacy $Root $State) 'privacy scan rejected a non-secret token identifier'
 }
 
+Invoke-ContractCase 'Evidence.PrivacyDoublePlusContentRejected' {
+    $Root = New-FixtureRepository 'EvidencePrivacyDoublePlus'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    $PrivatePath = 'C:' + '\Users\Example\file'
+    Write-Utf8Text (Join-Path $Root 'Docs\Prefixed.md') "++$PrivatePath`n"
+    Commit-Paths $Root @(
+        'Docs/Phase91/Phase91_State.json',
+        'Docs/Prefixed.md') 'add prefixed private path'
+    $State = Read-AvidScriptPhaseState $Root 91
+    $Diagnostic = ''
+    try {
+        Test-AvidScriptPhasePrivacy $Root $State | Out-Null
+    }
+    catch {
+        $Diagnostic = $_.Exception.Message
+    }
+    Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted private content beginning with two plus signs'
+}
+
 Invoke-ContractCase 'Evidence.PrivacyChangeRejected' {
     $Fixture = Prepare-GateReadyFixture 'EvidencePrivacy'
     $Gate = New-ValidGateReport $Fixture 'EvidencePrivacy'
