@@ -12,6 +12,7 @@
 
 namespace
 {
+constexpr const TCHAR* LegacyProjectBindingProfileResolverVersion = TEXT("50.1.0");
 constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
 
 void SetProjectProfileFailure(
@@ -298,12 +299,26 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	FString& OutSelectionHash,
 	FAvidScriptBindingSelectionResolveResult& OutResult)
 {
-	TArray<FAvidScriptProjectObjectFactorySpec> IgnoredObjectFactories;
+	if (!Spec.ObjectFactories.IsEmpty())
+	{
+		OutSelection = FAvidScriptBindingSelectionProfile();
+		OutClassReferences.Empty();
+		OutSelectionHash.Reset();
+		OutResult = FAvidScriptBindingSelectionResolveResult();
+		SetProjectProfileFailure(
+			OutResult,
+			TEXT("binding_profile_factory_output_required"),
+			Spec.PackageName,
+			TEXT("Use the factory-aware Resolve overload for profiles that declare object_factories."));
+		return false;
+	}
+
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories;
 	return Resolve(
 		Spec,
 		OutSelection,
 		OutClassReferences,
-		IgnoredObjectFactories,
+		ObjectFactories,
 		OutSelectionHash,
 		OutResult);
 }
@@ -658,6 +673,17 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 				TEXT("Choose a current non-deprecated UObject class for the factory."));
 			return false;
 		}
+		if (ObjectClass->ClassWithin != nullptr
+			&& !OuterClass->IsChildOf(ObjectClass->ClassWithin))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_outer_type_mismatch"),
+				OuterClass->GetPathName() + TEXT(" -> ")
+					+ ObjectClass->ClassWithin->GetPathName(),
+				TEXT("Choose an outer_base_class_path compatible with the factory class Within constraint."));
+			return false;
+		}
 
 		const bool bIsActorComponent =
 			ObjectClass->IsChildOf(UActorComponent::StaticClass());
@@ -726,9 +752,22 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	FString DescriptorJson;
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	TArray<FAvidScriptProjectBindingClassSpec> SpawnClassReferences;
+	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)
+	{
+		UClass* Class = LoadObject<UClass>(nullptr, *ClassReference.ClassPath);
+		UClass* BaseClass = LoadObject<UClass>(nullptr, *ClassReference.BaseClassPath);
+		if (Class != nullptr
+			&& BaseClass != nullptr
+			&& Class->IsChildOf(AActor::StaticClass())
+			&& BaseClass->IsChildOf(AActor::StaticClass()))
+		{
+			SpawnClassReferences.Add(ClassReference);
+		}
+	}
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 			OutSelection,
-			OutClassReferences,
+			SpawnClassReferences,
 			DescriptorJson,
 			SelectionResult,
 			DescriptorResult))
@@ -747,7 +786,11 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	OutResult = MoveTemp(SelectionResult);
 
 	TArray<FString> Identity;
-	Identity.Add(TEXT("resolver=") + FString(ProjectBindingProfileResolverVersion));
+	Identity.Add(
+		TEXT("resolver=")
+		+ FString(Spec.ObjectFactories.IsEmpty()
+			? LegacyProjectBindingProfileResolverVersion
+			: ProjectBindingProfileResolverVersion));
 	Identity.Add(TEXT("engine_build_id=") + EngineBuildIdentity);
 	Identity.Add(TEXT("package=") + Spec.PackageName);
 	Identity.Add(TEXT("self_class=") + OutSelection.SelfClassPath);

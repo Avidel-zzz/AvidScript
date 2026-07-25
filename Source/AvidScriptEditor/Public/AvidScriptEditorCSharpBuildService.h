@@ -30,6 +30,7 @@ struct FAvidScriptEditorCSharpBuildRequest
 	FAvidScriptEditorCSharpBuildConfig Config;
 	FAvidScriptBindingSelectionProfile AuthorizationBindingProfile;
 	TArray<FAvidScriptProjectBindingClassSpec> AuthorizationClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> AuthorizationObjectFactories;
 	FString BindingSelectionHash;
 	bool bUsesEngineGameplayBindingProfile = true;
 };

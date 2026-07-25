@@ -658,6 +658,25 @@ bool FAvidScriptEditorCSharpProfileServiceObjectFactorySchemaTest::RunTest(const
 			ValidResult.ResolvedObjectFactories[1].OuterBaseClassPath,
 			FString(TEXT("/Script/Engine.Actor")));
 	}
+	const FAvidScriptEditorCSharpBuildRequest ValidFactoryRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ValidResult);
+	TestEqual(
+		TEXT("Resolved factories reach the C# build request"),
+		ValidFactoryRequest.AuthorizationObjectFactories.Num(),
+		2);
+	FAvidScriptEditorCSharpBuildPlan UnsupportedFactoryPlan;
+	FAvidScriptEditorCSharpBuildResult UnsupportedFactoryResult;
+	TestFalse(
+		TEXT("Incomplete descriptor v7 propagation fails closed"),
+		FAvidScriptEditorCSharpBuildPipeline::Prepare(
+			ValidFactoryRequest,
+			UnsupportedFactoryPlan,
+			UnsupportedFactoryResult));
+	TestEqual(
+		TEXT("Incomplete factory pipeline category is stable"),
+		UnsupportedFactoryResult.ErrorCategory,
+		FString(TEXT("binding_factory_pipeline_unavailable")));
+	FAvidScriptEditorCSharpBuildPipeline::Cleanup(UnsupportedFactoryPlan);
 
 	FAvidScriptEditorCSharpProfileLoadResult MissingReferenceResult;
 	TestFalse(

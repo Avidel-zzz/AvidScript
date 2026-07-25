@@ -300,6 +300,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 	OutResult = FAvidScriptEditorCSharpBuildResult();
 	OutPlan.AuthorizationBindingProfile = Request.AuthorizationBindingProfile;
 	OutPlan.AuthorizationClassReferences = Request.AuthorizationClassReferences;
+	OutPlan.AuthorizationObjectFactories = Request.AuthorizationObjectFactories;
 	OutPlan.BindingSelectionHash = Request.BindingSelectionHash;
 	OutPlan.bUsesEngineGameplayBindingProfile =
 		Request.bUsesEngineGameplayBindingProfile;
@@ -379,6 +380,16 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 		FAvidScriptCSharpBuildInvocationCounts(),
 		OutResult);
 	OutResult.BindingSelectionHash = OutPlan.BindingSelectionHash;
+
+	if (!OutPlan.AuthorizationObjectFactories.IsEmpty())
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("binding_factory_pipeline_unavailable"),
+			TEXT("Object factories reached a build pipeline that cannot publish descriptor v7."),
+			TEXT("complete the descriptor v7 factory propagation before building this profile"),
+			OutResult);
+		return false;
+	}
 
 	if (NormalizedConfig.BuildScriptPath.IsEmpty()
 		|| !FPaths::FileExists(NormalizedConfig.BuildScriptPath))

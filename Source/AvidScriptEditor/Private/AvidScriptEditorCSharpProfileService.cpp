@@ -893,6 +893,7 @@ FAvidScriptEditorCSharpProfileService::MakeBuildRequest(
 	Request.Config = Profile.BuildConfig;
 	Request.AuthorizationBindingProfile = Profile.ResolvedBindingSelection;
 	Request.AuthorizationClassReferences = Profile.ResolvedClassReferences;
+	Request.AuthorizationObjectFactories = Profile.ResolvedObjectFactories;
 	Request.BindingSelectionHash = Profile.BindingSelectionHash;
 	Request.bUsesEngineGameplayBindingProfile =
 		Profile.bUsesEngineGameplayBindingProfile;

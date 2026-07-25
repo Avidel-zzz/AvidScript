@@ -554,6 +554,61 @@ bool FAvidScriptEditorProjectBindingProfileObjectFactoryResolutionTest::RunTest(
 		TEXT("Object factory outer constraint changes selection identity"),
 		DifferentOuterHash,
 		SelectionHash);
+
+	FAvidScriptBindingSelectionProfile LegacyOverloadSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> LegacyOverloadClassReferences;
+	FString LegacyOverloadHash;
+	FAvidScriptBindingSelectionResolveResult LegacyOverloadResult;
+	TestFalse(
+		TEXT("Legacy resolver overload cannot discard object factories"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			LegacyOverloadSelection,
+			LegacyOverloadClassReferences,
+			LegacyOverloadHash,
+			LegacyOverloadResult));
+	TestEqual(
+		TEXT("Factory-aware resolver requirement category is stable"),
+		LegacyOverloadResult.ErrorCategory,
+		FString(TEXT("binding_profile_factory_output_required")));
+
+	FAvidScriptProjectBindingProfileSpec WithinMismatchSpec;
+	WithinMismatchSpec.PackageName = TEXT("avidscript.project.factory_within_mismatch");
+	WithinMismatchSpec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("K2_GetActorLocation") }));
+	WithinMismatchSpec.ClassReferences.Add({
+		TEXT("ConsoleClass"),
+		TEXT("/Script/Engine.Console"),
+		TEXT("/Script/CoreUObject.Object"),
+		TEXT("EditorLoad")
+	});
+	WithinMismatchSpec.ObjectFactories.Add({
+		TEXT("Console"),
+		TEXT("ConsoleClass"),
+		TEXT("/Script/Engine.Actor"),
+		EAvidScriptProjectObjectFactoryKind::NewObject,
+		EAvidScriptProjectObjectOwnership::Session,
+		EAvidScriptProjectComponentRegistration::None
+	});
+	FAvidScriptBindingSelectionProfile WithinMismatchSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> WithinMismatchClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> WithinMismatchFactories;
+	FString WithinMismatchHash;
+	FAvidScriptBindingSelectionResolveResult WithinMismatchResult;
+	TestFalse(
+		TEXT("Factory outer must satisfy the UE ClassWithin constraint"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			WithinMismatchSpec,
+			WithinMismatchSelection,
+			WithinMismatchClassReferences,
+			WithinMismatchFactories,
+			WithinMismatchHash,
+			WithinMismatchResult));
+	TestEqual(
+		TEXT("ClassWithin mismatch category is stable"),
+		WithinMismatchResult.ErrorCategory,
+		FString(TEXT("binding_factory_outer_type_mismatch")));
 	return true;
 }
 
