@@ -84,6 +84,25 @@ bool FAvidScriptEditorObjectTypeGraph::Build(
 	FString& OutErrorCategory,
 	FString& OutErrorDetails)
 {
+	return Build(
+		HandleClasses,
+		SelfClass,
+		ClassReferences,
+		TConstArrayView<FAvidScriptProjectObjectFactorySpec>(),
+		OutGraph,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool FAvidScriptEditorObjectTypeGraph::Build(
+	const TConstArrayView<UClass*> HandleClasses,
+	UClass* SelfClass,
+	const TConstArrayView<FAvidScriptProjectBindingClassSpec> ClassReferences,
+	const TConstArrayView<FAvidScriptProjectObjectFactorySpec> ObjectFactories,
+	FAvidScriptEditorObjectTypeGraph& OutGraph,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
 	OutGraph = FAvidScriptEditorObjectTypeGraph();
 	OutErrorCategory.Empty();
 	OutErrorDetails.Empty();
@@ -123,6 +142,66 @@ bool FAvidScriptEditorObjectTypeGraph::Build(
 			return false;
 		}
 		if (!AddObjectTypeClosure(BaseClass, ClassesByPath, OutErrorCategory, OutErrorDetails))
+		{
+			return false;
+		}
+	}
+	for (const FAvidScriptProjectObjectFactorySpec& Factory : ObjectFactories)
+	{
+		const FAvidScriptProjectBindingClassSpec* ClassReference =
+			ClassReferences.FindByPredicate(
+				[&Factory](const FAvidScriptProjectBindingClassSpec& Candidate)
+				{
+					return Candidate.ScriptName == Factory.ClassReference;
+				});
+		if (ClassReference == nullptr)
+		{
+			SetObjectTypeGraphFailure(
+				OutErrorCategory,
+				OutErrorDetails,
+				TEXT("object_type_factory_class_reference_missing"),
+				Factory.ClassReference);
+			return false;
+		}
+
+		UClass* FactoryClass =
+			LoadObject<UClass>(nullptr, *ClassReference->ClassPath);
+		if (FactoryClass == nullptr
+			|| FactoryClass->GetPathName() != ClassReference->ClassPath)
+		{
+			SetObjectTypeGraphFailure(
+				OutErrorCategory,
+				OutErrorDetails,
+				TEXT("object_type_factory_class_missing"),
+				ClassReference->ClassPath);
+			return false;
+		}
+		if (!AddObjectTypeClosure(
+				FactoryClass,
+				ClassesByPath,
+				OutErrorCategory,
+				OutErrorDetails))
+		{
+			return false;
+		}
+
+		UClass* OuterClass =
+			LoadObject<UClass>(nullptr, *Factory.OuterBaseClassPath);
+		if (OuterClass == nullptr
+			|| OuterClass->GetPathName() != Factory.OuterBaseClassPath)
+		{
+			SetObjectTypeGraphFailure(
+				OutErrorCategory,
+				OutErrorDetails,
+				TEXT("object_type_factory_outer_missing"),
+				Factory.OuterBaseClassPath);
+			return false;
+		}
+		if (!AddObjectTypeClosure(
+				OuterClass,
+				ClassesByPath,
+				OutErrorCategory,
+				OutErrorDetails))
 		{
 			return false;
 		}

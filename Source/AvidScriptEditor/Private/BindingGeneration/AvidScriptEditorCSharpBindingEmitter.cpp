@@ -98,6 +98,50 @@ bool ValidateCanonicalDescriptor(
 			Reference.LoadPolicy
 		});
 	}
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories;
+	ObjectFactories.Reserve(Package.ObjectFactories.Num());
+	for (const FAvidScriptBindingObjectFactoryModel& Factory : Package.ObjectFactories)
+	{
+		const FAvidScriptBindingClassReferenceModel* ClassReference =
+			Package.ClassReferences.FindByPredicate(
+				[&Factory](
+					const FAvidScriptBindingClassReferenceModel& Candidate)
+				{
+					return Candidate.StableId
+						== Factory.ClassReferenceId;
+				});
+		const FAvidScriptBindingTypeModel* OuterType =
+			Package.Types.FindByPredicate(
+				[&Factory](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.StableId == Factory.OuterTypeId;
+				});
+		if (ClassReference == nullptr
+			|| OuterType == nullptr
+			|| OuterType->ClassPath.IsEmpty())
+		{
+			OutErrorCategory = TEXT("descriptor_factory_provenance_missing");
+			OutErrorSource = Factory.StableId;
+			return false;
+		}
+
+		FAvidScriptProjectObjectFactorySpec FactorySpec;
+		FactorySpec.ScriptName = Factory.ScriptName;
+		FactorySpec.ClassReference = ClassReference->ScriptName;
+		FactorySpec.OuterBaseClassPath = OuterType->ClassPath;
+		FactorySpec.Kind =
+			Factory.Kind == EAvidScriptObjectFactoryKind::ActorComponent
+				? EAvidScriptProjectObjectFactoryKind::ActorComponent
+				: EAvidScriptProjectObjectFactoryKind::NewObject;
+		FactorySpec.Ownership =
+			EAvidScriptProjectObjectOwnership::Session;
+		FactorySpec.Registration =
+			Factory.Registration
+				== EAvidScriptComponentRegistrationPolicy::RegisterInstance
+				? EAvidScriptProjectComponentRegistration::RegisterInstance
+				: EAvidScriptProjectComponentRegistration::None;
+		ObjectFactories.Add(MoveTemp(FactorySpec));
+	}
 
 	FAvidScriptBindingSelectionProfile Profile;
 	Profile.PackageName = Package.PackageName;
@@ -125,6 +169,7 @@ bool ValidateCanonicalDescriptor(
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		Profile,
 		ClassReferences,
+		ObjectFactories,
 		CanonicalDescriptorJson,
 		SelectionResult,
 		RegenerationResult))
@@ -401,6 +446,7 @@ bool FAvidScriptEditorCSharpBindingEmitter::Emit(
 	OutResult.BindingCount = Package.Bindings.Num();
 	OutResult.TypeCount = Package.Types.Num();
 	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
+	OutResult.ObjectFactoryCount = Package.ObjectFactories.Num();
 	OutResult.PackageName = Package.PackageName;
 	OutResult.PackageHash = Package.PackageHash;
 	OutResult.DescriptorHash = DescriptorHash;
@@ -469,11 +515,31 @@ bool FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
 	FString& OutManifestJson,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return EmitProfile(
+		Profile,
+		ClassReferences,
+		{},
+		OutDescriptorJson,
+		OutReferenceSource,
+		OutManifestJson,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
+	FString& OutDescriptorJson,
+	FString& OutReferenceSource,
+	FString& OutManifestJson,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		Profile,
 		ClassReferences,
+		ObjectFactories,
 		OutDescriptorJson,
 		SelectionResult,
 		DescriptorResult))
@@ -574,11 +640,33 @@ bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
 	const FString& OutputRoot,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
+	return PublishProfile(
+		Profile,
+		ClassReferences,
+		{},
+		OutputRoot,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+	const FAvidScriptBindingSelectionProfile& Profile,
+	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
 	FString Descriptor;
 	FString Source;
 	FString Manifest;
 	FAvidScriptCSharpBindingEmitResult EmitResult;
-	if (!EmitProfile(Profile, ClassReferences, Descriptor, Source, Manifest, EmitResult))
+	if (!EmitProfile(
+			Profile,
+			ClassReferences,
+			ObjectFactories,
+			Descriptor,
+			Source,
+			Manifest,
+			EmitResult))
 	{
 		OutResult = MoveTemp(EmitResult);
 		return false;

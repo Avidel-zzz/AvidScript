@@ -1,0 +1,320 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
+
+#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
+#include "Dom/JsonObject.h"
+#include "GameFramework/Actor.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/EngineVersion.h"
+#include "Serialization/JsonWriter.h"
+
+namespace
+{
+FAvidScriptBindingTypeModel MakeObjectType(
+	const TCHAR* ClassPath,
+	const TCHAR* CppType,
+	const int32 Ordinal,
+	const FString& BaseTypeId)
+{
+	FAvidScriptBindingTypeModel Type;
+	Type.CanonicalType = TEXT("object:") + FString(ClassPath);
+	Type.StableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+		Type.CanonicalType, {});
+	Type.Kind = TEXT("object_handle");
+	Type.CppType = CppType;
+	Type.Size = 8;
+	Type.Alignment = 4;
+	Type.AbiTypes = { TEXT("i"), TEXT("i") };
+	Type.ObjectTypeOrdinal = Ordinal;
+	Type.ClassPath = ClassPath;
+	Type.BaseTypeId = BaseTypeId;
+	return Type;
+}
+
+void WriteObjectType(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const FAvidScriptBindingTypeModel& Type)
+{
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("stable_id"), Type.StableId);
+	Writer->WriteValue(TEXT("canonical_type"), Type.CanonicalType);
+	Writer->WriteValue(TEXT("kind"), Type.Kind);
+	Writer->WriteValue(TEXT("cpp_type"), Type.CppType);
+	Writer->WriteValue(TEXT("size"), Type.Size);
+	Writer->WriteValue(TEXT("alignment"), Type.Alignment);
+	Writer->WriteArrayStart(TEXT("abi_types"));
+	for (const FString& AbiType : Type.AbiTypes)
+	{
+		Writer->WriteValue(AbiType);
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteValue(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+	Writer->WriteValue(TEXT("class_path"), Type.ClassPath);
+	Writer->WriteValue(TEXT("base_type_id"), Type.BaseTypeId);
+	Writer->WriteObjectEnd();
+}
+
+FAvidScriptBindingPackageModel MakeFactoryPackage(
+	const TCHAR* ClassPath,
+	const TCHAR* CppType,
+	const EAvidScriptObjectFactoryKind Kind,
+	const int32 OuterOrdinal)
+{
+	FAvidScriptBindingPackageModel Package;
+	Package.SchemaVersion = 7;
+	Package.GeneratorVersion = TEXT("51.1.test");
+	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = TEXT("avidscript.test.object_factory_plan");
+
+	const FAvidScriptBindingTypeModel ObjectType = MakeObjectType(
+		TEXT("/Script/CoreUObject.Object"), TEXT("UObject"), 0, FString());
+	const FAvidScriptBindingTypeModel ActorType = MakeObjectType(
+		TEXT("/Script/Engine.Actor"), TEXT("AActor"), 1, ObjectType.StableId);
+	const FAvidScriptBindingTypeModel ActorComponentType = MakeObjectType(
+		TEXT("/Script/Engine.ActorComponent"), TEXT("UActorComponent"), 2, ObjectType.StableId);
+	Package.Types = { ObjectType, ActorType, ActorComponentType };
+	if (FString(ClassPath) != TEXT("/Script/Engine.ActorComponent"))
+	{
+		Package.Types.Add(MakeObjectType(
+			ClassPath, CppType, 3, ActorComponentType.StableId));
+	}
+	Package.SelfTypeId = ActorType.StableId;
+
+	FAvidScriptBindingClassReferenceModel Reference;
+	Reference.Ordinal = 0;
+	Reference.ScriptName = TEXT("FactoryClass");
+	Reference.ClassPath = ClassPath;
+	Reference.BaseClassPath = FString(ClassPath) == TEXT("/Script/Engine.ActorComponent")
+		? TEXT("/Script/CoreUObject.Object")
+		: TEXT("/Script/Engine.ActorComponent");
+	Reference.LoadPolicy = TEXT("EditorLoad");
+	Reference.ResultTypeId = FString(ClassPath) == TEXT("/Script/Engine.ActorComponent")
+		? ObjectType.StableId
+		: ActorComponentType.StableId;
+	Reference.StableId = FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+		Reference.ClassPath, Reference.BaseClassPath, Reference.LoadPolicy);
+	Package.ClassReferences = { Reference };
+
+	FAvidScriptBindingObjectFactoryModel Factory;
+	Factory.Ordinal = 0;
+	Factory.ScriptName = TEXT("Factory");
+	Factory.ClassReferenceId = Reference.StableId;
+	Factory.Kind = Kind;
+	Factory.OuterTypeId = Package.Types[OuterOrdinal].StableId;
+	Factory.Ownership = EAvidScriptObjectOwnershipPolicy::Session;
+	Factory.Registration = Kind == EAvidScriptObjectFactoryKind::ActorComponent
+		? EAvidScriptComponentRegistrationPolicy::RegisterInstance
+		: EAvidScriptComponentRegistrationPolicy::None;
+	Factory.StableId = FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+		Factory.ClassReferenceId,
+		Factory.Kind,
+		Factory.OuterTypeId,
+		Factory.Ownership,
+		Factory.Registration);
+	Package.ObjectFactories = { Factory };
+	Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+	Package.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+	return Package;
+}
+
+bool SerializeFactoryPackage(
+	const FAvidScriptBindingPackageModel& Package,
+	FString& OutJson)
+{
+	OutJson.Empty();
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("schema_version"), Package.SchemaVersion);
+	Writer->WriteValue(TEXT("generator_version"), Package.GeneratorVersion);
+	Writer->WriteValue(TEXT("engine_version"), Package.EngineVersion);
+	Writer->WriteValue(TEXT("source"), Package.Source);
+	Writer->WriteValue(TEXT("package_name"), Package.PackageName);
+	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
+	Writer->WriteValue(TEXT("selection_hash"), Package.SelectionHash);
+	Writer->WriteValue(TEXT("self_type_id"), Package.SelfTypeId);
+	Writer->WriteArrayStart(TEXT("types"));
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		WriteObjectType(Writer, Type);
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("class_references"));
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Reference.StableId);
+		Writer->WriteValue(TEXT("ordinal"), Reference.Ordinal);
+		Writer->WriteValue(TEXT("script_name"), Reference.ScriptName);
+		Writer->WriteValue(TEXT("class_path"), Reference.ClassPath);
+		Writer->WriteValue(TEXT("base_class_path"), Reference.BaseClassPath);
+		Writer->WriteValue(TEXT("load_policy"), Reference.LoadPolicy);
+		Writer->WriteValue(TEXT("result_type_id"), Reference.ResultTypeId);
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("object_factories"));
+	for (const FAvidScriptBindingObjectFactoryModel& Factory : Package.ObjectFactories)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Factory.StableId);
+		Writer->WriteValue(TEXT("ordinal"), Factory.Ordinal);
+		Writer->WriteValue(TEXT("script_name"), Factory.ScriptName);
+		Writer->WriteValue(TEXT("class_reference_id"), Factory.ClassReferenceId);
+		Writer->WriteValue(TEXT("kind"), LexToString(Factory.Kind));
+		Writer->WriteValue(TEXT("outer_type_id"), Factory.OuterTypeId);
+		Writer->WriteValue(TEXT("ownership"), LexToString(Factory.Ownership));
+		Writer->WriteValue(TEXT("registration"), LexToString(Factory.Registration));
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteArrayStart(TEXT("bindings"));
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectEnd();
+	return Writer->Close();
+}
+
+bool LoadFactoryPackage(
+	const FAvidScriptBindingPackageModel& Model,
+	TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
+	FAvidScriptBindingPackageLoadResult& OutResult)
+{
+	FString Json;
+	return SerializeFactoryPackage(Model, Json)
+		&& FAvidScriptBindingPackage::LoadDescriptor(Json, OutPackage, OutResult);
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptObjectFactoryPlanTest,
+	"AvidScript.Runtime.Binding.ObjectFactoryPlan",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
+{
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	const FAvidScriptBindingPackageModel ValidPackage = MakeFactoryPackage(
+		TEXT("/Script/Engine.SceneComponent"),
+		TEXT("USceneComponent"),
+		EAvidScriptObjectFactoryKind::ActorComponent,
+		1);
+	if (!TestTrue(TEXT("Factory package loads"),
+		LoadFactoryPackage(ValidPackage, Package, LoadResult))
+		|| !TestNotNull(TEXT("Factory package is returned"), Package.Get()))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	TestEqual(TEXT("Factory result reports one immutable factory"), LoadResult.ObjectFactoryCount, 1);
+	TestEqual(TEXT("Factory package exposes one immutable factory"), Package->GetObjectFactoryCount(), 1);
+	TestEqual(TEXT("Factory package retains its descriptor schema provenance"),
+		Package->GetDescriptorSchemaVersion(), 7);
+	TestEqual(TEXT("Each unique factory and graph class path loads once"),
+		Package->GetInstrumentation().ClassLoadCount, static_cast<uint64>(4));
+	TestEqual(TEXT("Factory plan load performs no reflected member-name lookup"),
+		Package->GetInstrumentation().ReflectedNameLookupCount,
+		static_cast<uint64>(0));
+	const FAvidScriptObjectFactoryPlan* Plan = nullptr;
+	if (!TestTrue(TEXT("Factory ordinal resolves from the immutable plan"),
+		Package->TryResolveObjectFactory(0, Plan))
+		|| !TestNotNull(TEXT("Factory lookup returns a plan"), Plan))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Factory caches its concrete class"), Plan->ObjectClass, USceneComponent::StaticClass());
+	TestEqual(TEXT("Factory caches its required outer"), Plan->RequiredOuterClass, AActor::StaticClass());
+	TestEqual(TEXT("Factory caches the concrete object-type ordinal"), Plan->ResultObjectTypeOrdinal, 3);
+	TestEqual(TEXT("Factory caches session ownership"), Plan->Ownership, EAvidScriptObjectOwnershipPolicy::Session);
+	TestEqual(TEXT("Factory caches component registration"),
+		Plan->Registration, EAvidScriptComponentRegistrationPolicy::RegisterInstance);
+	TestEqual(TEXT("Ordinal factory lookup performs no additional class load"),
+		Package->GetInstrumentation().ClassLoadCount, static_cast<uint64>(4));
+	UClass* LegacyClass = nullptr;
+	UClass* LegacyBaseClass = nullptr;
+	TestFalse(TEXT("Factory-owned class is not exposed through lifecycle lookup"),
+		Package->TryResolveClassReference(0, LegacyClass, LegacyBaseClass));
+	Plan = reinterpret_cast<const FAvidScriptObjectFactoryPlan*>(static_cast<UPTRINT>(1));
+	TestFalse(TEXT("Out-of-range factory ordinal fails closed"),
+		Package->TryResolveObjectFactory(1, Plan));
+	TestNull(TEXT("Out-of-range factory ordinal clears output"), Plan);
+
+	const auto TestActivationFailure = [this](
+		const TCHAR* Label,
+		const FAvidScriptBindingPackageModel& Model,
+		const TCHAR* ExpectedCategory)
+	{
+		TSharedPtr<const FAvidScriptBindingPackage> RejectedPackage;
+		FAvidScriptBindingPackageLoadResult RejectedResult;
+		TestFalse(Label, LoadFactoryPackage(Model, RejectedPackage, RejectedResult));
+		TestNull(TEXT("Rejected factory package does not activate"), RejectedPackage.Get());
+		TestEqual(TEXT("Factory rejection category is stable"),
+			RejectedResult.ErrorCategory, FString(ExpectedCategory));
+	};
+	TestActivationFailure(
+		TEXT("Abstract factory class fails before activation"),
+		MakeFactoryPackage(
+			TEXT("/Script/Engine.ActorComponent"),
+			TEXT("UActorComponent"),
+			EAvidScriptObjectFactoryKind::ActorComponent,
+			1),
+		TEXT("binding_factory_class_abstract"));
+	TestActivationFailure(
+		TEXT("Component class cannot use new-object factory kind"),
+		MakeFactoryPackage(
+			TEXT("/Script/Engine.SceneComponent"),
+			TEXT("USceneComponent"),
+			EAvidScriptObjectFactoryKind::NewObject,
+			1),
+		TEXT("binding_factory_kind_mismatch"));
+	TestActivationFailure(
+		TEXT("Component outer and ClassWithin mismatch fails before activation"),
+		MakeFactoryPackage(
+			TEXT("/Script/Engine.SceneComponent"),
+			TEXT("USceneComponent"),
+			EAvidScriptObjectFactoryKind::ActorComponent,
+			0),
+		TEXT("binding_factory_outer_mismatch"));
+
+	FAvidScriptBindingPackageModel InheritanceMismatch = MakeFactoryPackage(
+		TEXT("/Script/Engine.SceneComponent"),
+		TEXT("USceneComponent"),
+		EAvidScriptObjectFactoryKind::ActorComponent,
+		1);
+	FAvidScriptBindingClassReferenceModel& MismatchedReference =
+		InheritanceMismatch.ClassReferences[0];
+	MismatchedReference.BaseClassPath = TEXT("/Script/Engine.Actor");
+	MismatchedReference.ResultTypeId = InheritanceMismatch.Types[1].StableId;
+	MismatchedReference.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+			MismatchedReference.ClassPath,
+			MismatchedReference.BaseClassPath,
+			MismatchedReference.LoadPolicy);
+	FAvidScriptBindingObjectFactoryModel& MismatchedFactory =
+		InheritanceMismatch.ObjectFactories[0];
+	MismatchedFactory.ClassReferenceId = MismatchedReference.StableId;
+	MismatchedFactory.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+			MismatchedFactory.ClassReferenceId,
+			MismatchedFactory.Kind,
+			MismatchedFactory.OuterTypeId,
+			MismatchedFactory.Ownership,
+			MismatchedFactory.Registration);
+	InheritanceMismatch.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
+			InheritanceMismatch);
+	InheritanceMismatch.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(
+			InheritanceMismatch);
+	TestActivationFailure(
+		TEXT("Factory class cannot escape its declared base constraint"),
+		InheritanceMismatch,
+		TEXT("binding_factory_class_inheritance_mismatch"));
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

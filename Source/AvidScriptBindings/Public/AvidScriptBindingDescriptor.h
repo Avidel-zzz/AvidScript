@@ -105,6 +105,15 @@ struct FAvidScriptBindingPackageModel
 	TArray<FAvidScriptBindingObjectFactoryModel> ObjectFactories;
 };
 
+class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorTypeGraph
+{
+public:
+	static bool IsDerivedFromClassPath(
+		const FAvidScriptBindingPackageModel& Package,
+		const FString& TypeId,
+		const FString& ClassPath);
+};
+
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorIdentity
 {
 public:

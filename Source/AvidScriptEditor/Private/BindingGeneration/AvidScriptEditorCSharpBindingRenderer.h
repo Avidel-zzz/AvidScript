@@ -6,6 +6,8 @@
 class FAvidScriptEditorCSharpBindingRenderer
 {
 public:
+	static int32 GetLifecycleImportCount(
+		const FAvidScriptBindingPackageModel& Package);
 	static int32 GetManifestImportCount(const FAvidScriptBindingPackageModel& Package);
 
 	static bool EmitReferenceSource(

@@ -457,6 +457,14 @@ bool FAvidScriptBindingDescriptorV7ObjectFactoriesTest::RunTest(
 				}
 			}
 		});
+	ParserRejectsMutation(
+		TEXT("Unowned non-Actor class references fail closed"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			Root->SetArrayField(
+				TEXT("object_factories"),
+				TArray<TSharedPtr<FJsonValue>>());
+		});
 
 	FAvidScriptBindingPackageModel DifferentFactoryPackage = Package;
 	FAvidScriptBindingObjectFactoryModel* DifferentFactory =

@@ -2,6 +2,7 @@
 
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptBindingReloadEffect.h"
+#include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptVmBackend.h"
@@ -16,6 +17,7 @@ struct FAvidScriptBindingPackageLoadResult
 	bool bSucceeded = false;
 	int32 BindingCount = 0;
 	int32 ClassReferenceCount = 0;
+	int32 ObjectFactoryCount = 0;
 	int32 RequiredScratchSize = 0;
 	FString PackageName;
 	FString PackageHash;
@@ -54,6 +56,7 @@ public:
 
 	const FString& GetPackageName() const;
 	const FString& GetPackageHash() const;
+	int32 GetDescriptorSchemaVersion() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
 	int32 GetRequiredScratchSize() const;
@@ -65,6 +68,10 @@ public:
 		uint32 Ordinal,
 		UClass*& OutClass,
 		UClass*& OutBaseClass) const;
+	int32 GetObjectFactoryCount() const;
+	bool TryResolveObjectFactory(
+		uint32 Ordinal,
+		const FAvidScriptObjectFactoryPlan*& OutPlan) const;
 
 	bool Dispatch(
 		const FAvidScriptDynamicHostCall& Call,

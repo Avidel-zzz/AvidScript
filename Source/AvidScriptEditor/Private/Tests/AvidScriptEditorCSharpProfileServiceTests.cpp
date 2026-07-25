@@ -664,19 +664,22 @@ bool FAvidScriptEditorCSharpProfileServiceObjectFactorySchemaTest::RunTest(const
 		TEXT("Resolved factories reach the C# build request"),
 		ValidFactoryRequest.AuthorizationObjectFactories.Num(),
 		2);
-	FAvidScriptEditorCSharpBuildPlan UnsupportedFactoryPlan;
-	FAvidScriptEditorCSharpBuildResult UnsupportedFactoryResult;
-	TestFalse(
-		TEXT("Incomplete descriptor v7 propagation fails closed"),
+	FAvidScriptEditorCSharpBuildPlan FactoryPlan;
+	FAvidScriptEditorCSharpBuildResult FactoryPlanResult;
+	TestTrue(
+		TEXT("Descriptor v7 factories reach build-plan publication"),
 		FAvidScriptEditorCSharpBuildPipeline::Prepare(
 			ValidFactoryRequest,
-			UnsupportedFactoryPlan,
-			UnsupportedFactoryResult));
+			FactoryPlan,
+			FactoryPlanResult));
 	TestEqual(
-		TEXT("Incomplete factory pipeline category is stable"),
-		UnsupportedFactoryResult.ErrorCategory,
-		FString(TEXT("binding_factory_pipeline_unavailable")));
-	FAvidScriptEditorCSharpBuildPipeline::Cleanup(UnsupportedFactoryPlan);
+		TEXT("Prepared build plan retains two object factories"),
+		FactoryPlan.AuthorizationObjectFactories.Num(),
+		2);
+	TestTrue(
+		TEXT("Factory profile publishes a content-addressed authorization package"),
+		!FactoryPlan.AuthorizationBindingPackagePath.IsEmpty());
+	FAvidScriptEditorCSharpBuildPipeline::Cleanup(FactoryPlan);
 
 	FAvidScriptEditorCSharpProfileLoadResult MissingReferenceResult;
 	TestFalse(

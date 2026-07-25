@@ -334,14 +334,34 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 3 -and
         $DescriptorSchemaVersion -ne 4 -and
         $DescriptorSchemaVersion -ne 5 -and
-        $DescriptorSchemaVersion -ne 6) -or
+        $DescriptorSchemaVersion -ne 6 -and
+        $DescriptorSchemaVersion -ne 7) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
         throw "Binding descriptor identity does not match package.json."
     }
+    if ($DescriptorSchemaVersion -eq 7) {
+        $ManifestObjectFactoryCount = 0
+        $DescriptorObjectFactoryProperty =
+            $Descriptor.PSObject.Properties['object_factories']
+        if ($null -eq $DescriptorObjectFactoryProperty) {
+            throw "Binding descriptor v7 must publish object_factories."
+        }
+        $DescriptorObjectFactories = @($DescriptorObjectFactoryProperty.Value)
+        if (-not (Try-GetAvidScriptBindingJsonInt32 `
+                -Value $Manifest.object_factory_count `
+                -ParsedValue ([ref]$ManifestObjectFactoryCount)) -or
+            $ManifestObjectFactoryCount -ne $DescriptorObjectFactories.Count) {
+            throw "Binding package object_factory_count does not match descriptor v7 object_factories."
+        }
+    }
+    elseif ($null -ne $Manifest.PSObject.Properties['object_factory_count']) {
+        throw "Binding package object_factory_count is only valid for descriptor schema v7."
+    }
     $SelfTypeId = ""
-    if ($DescriptorSchemaVersion -eq 6) {
+    if ($DescriptorSchemaVersion -eq 6 -or
+        $DescriptorSchemaVersion -eq 7) {
         if ($Descriptor.self_type_id -isnot [string]) {
             throw "Binding descriptor self_type_id must be a JSON string."
         }
@@ -398,9 +418,10 @@ function Resolve-AvidScriptCSharpBindingPackage {
         }
     }
     if ($SeenPackedOwner -and
-        ($DescriptorSchemaVersion -ne 6 -or
+        (($DescriptorSchemaVersion -ne 6 -and
+            $DescriptorSchemaVersion -ne 7) -or
             [string]::IsNullOrWhiteSpace($SelfTypeId))) {
-        throw "Binding package packed owner capability requires descriptor schema v6 with a non-empty self_type_id."
+        throw "Binding package packed owner capability requires descriptor schema v6 or v7 with a non-empty self_type_id."
     }
     if ($RequiredImports.Count -eq 0) {
         throw "Binding package required_imports must not be empty."

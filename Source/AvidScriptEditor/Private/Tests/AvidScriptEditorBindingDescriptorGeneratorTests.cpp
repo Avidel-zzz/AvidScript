@@ -137,6 +137,23 @@ FAvidScriptBindingPackageModel MakeV7CanonicalSerializerPackage()
 	ObjectType.ClassPath = TEXT("/Script/CoreUObject.Object");
 	Package.Types.Add(ObjectType);
 
+	FAvidScriptBindingTypeModel ActorType;
+	ActorType.CanonicalType = TEXT("object:/Script/Engine.Actor");
+	ActorType.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			ActorType.CanonicalType,
+			{});
+	ActorType.Kind = TEXT("object_handle");
+	ActorType.CppType = TEXT("AActor");
+	ActorType.Size = 8;
+	ActorType.Alignment = 4;
+	ActorType.AbiTypes = { TEXT("i"), TEXT("i") };
+	ActorType.ObjectTypeOrdinal = 1;
+	ActorType.ClassPath = TEXT("/Script/Engine.Actor");
+	ActorType.BaseTypeId = ObjectType.StableId;
+	Package.Types.Add(ActorType);
+	Package.SelfTypeId = ActorType.StableId;
+
 	FAvidScriptBindingClassReferenceModel Reference;
 	Reference.Ordinal = 0;
 	Reference.ScriptName = TEXT("ConsoleClass");
@@ -360,6 +377,173 @@ bool FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest::RunTest(
 			FactoryBearingJson,
 			BaselineJson);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV7FactoryGenerationTest,
+	"AvidScript.Editor.BindingDescriptor.V7FactoryGeneration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV7FactoryGenerationTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.project.factory_generation");
+	Profile.SelfClassPath = TEXT("/Script/Engine.Actor");
+
+	const TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{
+			TEXT("InventoryStateClass"),
+			TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+			TEXT("/Script/CoreUObject.Object"),
+			TEXT("EditorLoad")
+		},
+		{
+			TEXT("SceneComponentClass"),
+			TEXT("/Script/Engine.SceneComponent"),
+			TEXT("/Script/Engine.ActorComponent"),
+			TEXT("EditorLoad")
+		}
+	};
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories = {
+		{
+			TEXT("InventoryState"),
+			TEXT("InventoryStateClass"),
+			TEXT("/Script/CoreUObject.Object"),
+			EAvidScriptProjectObjectFactoryKind::NewObject,
+			EAvidScriptProjectObjectOwnership::Session,
+			EAvidScriptProjectComponentRegistration::None
+		},
+		{
+			TEXT("SceneComponent"),
+			TEXT("SceneComponentClass"),
+			TEXT("/Script/Engine.Actor"),
+			EAvidScriptProjectObjectFactoryKind::ActorComponent,
+			EAvidScriptProjectObjectOwnership::Session,
+			EAvidScriptProjectComponentRegistration::RegisterInstance
+		}
+	};
+
+	FString FirstJson;
+	FAvidScriptBindingSelectionResolveResult FirstSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult FirstResult;
+	if (!TestTrue(
+		TEXT("Factory-aware profile generates descriptor v7"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			ClassReferences,
+			ObjectFactories,
+			FirstJson,
+			FirstSelectionResult,
+			FirstResult)))
+	{
+		AddError(FirstResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Generator reports two object factories"),
+		FirstResult.ObjectFactoryCount,
+		2);
+
+	Algo::Reverse(ObjectFactories);
+	FString ReorderedJson;
+	FAvidScriptBindingSelectionResolveResult ReorderedSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult ReorderedResult;
+	TestTrue(
+		TEXT("Reordered factory input generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			ClassReferences,
+			ObjectFactories,
+			ReorderedJson,
+			ReorderedSelectionResult,
+			ReorderedResult));
+	TestEqual(
+		TEXT("Factory input order does not change descriptor bytes"),
+		ReorderedJson,
+		FirstJson);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+		TEXT("Shared parser accepts generated descriptor v7"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			FirstJson,
+			Package,
+			ErrorCategory,
+			ErrorSource)))
+	{
+		AddError(FString::Printf(
+			TEXT("%s:%s"),
+			*ErrorCategory,
+			*ErrorSource));
+		return false;
+	}
+	TestEqual(TEXT("Factory descriptor schema is v7"), Package.SchemaVersion, 7);
+	TestEqual(
+		TEXT("Factory descriptor retains two factories"),
+		Package.ObjectFactories.Num(),
+		2);
+
+	TSet<FString> ObjectClassPaths;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			ObjectClassPaths.Add(Type.ClassPath);
+		}
+	}
+	TestTrue(
+		TEXT("Object type closure contains the concrete UObject factory class"),
+		ObjectClassPaths.Contains(
+			TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject")));
+	TestTrue(
+		TEXT("Object type closure contains the concrete component factory class"),
+		ObjectClassPaths.Contains(TEXT("/Script/Engine.SceneComponent")));
+	TestTrue(
+		TEXT("Object type closure contains the Actor Outer constraint"),
+		ObjectClassPaths.Contains(TEXT("/Script/Engine.Actor")));
+
+	FString PreviousStableId;
+	for (int32 Index = 0; Index < Package.ObjectFactories.Num(); ++Index)
+	{
+		const FAvidScriptBindingObjectFactoryModel& Factory =
+			Package.ObjectFactories[Index];
+		TestEqual(TEXT("Factory ordinal is contiguous"), Factory.Ordinal, Index);
+		TestTrue(
+			TEXT("Factories use stable-id order"),
+			PreviousStableId.IsEmpty() || PreviousStableId < Factory.StableId);
+		PreviousStableId = Factory.StableId;
+	}
+
+	FString LegacyJson;
+	FAvidScriptBindingSelectionResolveResult LegacySelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult LegacyResult;
+	TestTrue(
+		TEXT("Legacy class-reference overload still generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			ClassReferences,
+			LegacyJson,
+			LegacySelectionResult,
+			LegacyResult));
+	FAvidScriptBindingPackageModel LegacyPackage;
+	TestTrue(
+		TEXT("Legacy descriptor remains parseable"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			LegacyJson,
+			LegacyPackage,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("Legacy descriptor remains schema v6"),
+		LegacyPackage.SchemaVersion,
+		6);
+	TestTrue(
+		TEXT("Legacy descriptor does not publish object factories"),
+		LegacyPackage.ObjectFactories.IsEmpty());
 	return true;
 }
 

@@ -698,10 +698,25 @@ bool ValidateAvidScriptBindingV7ObjectFactories(
 	}
 
 	TSet<FString> ClassReferenceIds;
+	TSet<FString> FactoryClassReferenceIds;
+	for (const FAvidScriptBindingObjectFactoryModel& Factory :
+		Package.ObjectFactories)
+	{
+		FactoryClassReferenceIds.Add(Factory.ClassReferenceId);
+	}
 	for (const FAvidScriptBindingClassReferenceModel& Reference :
 		Package.ClassReferences)
 	{
 		ClassReferenceIds.Add(Reference.StableId);
+		if (!FactoryClassReferenceIds.Contains(Reference.StableId)
+			&& !FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+				Package,
+				Reference.ResultTypeId,
+				TEXT("/Script/Engine.Actor")))
+		{
+			OutErrorSource = TEXT("class_references.capability");
+			return false;
+		}
 	}
 
 	TSet<FString> ObjectTypeIds;
@@ -774,6 +789,44 @@ void AppendAvidScriptBindingValueIdentity(
 	}
 }
 } // namespace
+
+bool FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+	const FAvidScriptBindingPackageModel& Package,
+	const FString& TypeId,
+	const FString& ClassPath)
+{
+	if (TypeId.IsEmpty() || ClassPath.IsEmpty())
+	{
+		return false;
+	}
+
+	FString CurrentTypeId = TypeId;
+	TSet<FString> VisitedTypeIds;
+	while (!CurrentTypeId.IsEmpty()
+		&& !VisitedTypeIds.Contains(CurrentTypeId))
+	{
+		VisitedTypeIds.Add(CurrentTypeId);
+		const FAvidScriptBindingTypeModel* Type =
+			Package.Types.FindByPredicate(
+				[&CurrentTypeId](
+					const FAvidScriptBindingTypeModel& Candidate)
+				{
+					return Candidate.StableId == CurrentTypeId;
+				});
+		if (Type == nullptr
+			|| Type->Kind != TEXT("object_handle")
+			|| Type->ObjectTypeOrdinal == INDEX_NONE)
+		{
+			return false;
+		}
+		if (Type->ClassPath == ClassPath)
+		{
+			return true;
+		}
+		CurrentTypeId = Type->BaseTypeId;
+	}
+	return false;
+}
 
 FString FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 	const FString& CanonicalType,

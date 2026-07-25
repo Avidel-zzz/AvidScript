@@ -627,16 +627,45 @@ void AppendObjectHandleProxy(
 	}
 }
 
+bool IsAvidScriptActorClassReference(
+	const FAvidScriptBindingPackageModel& Package,
+	const FAvidScriptBindingClassReferenceModel& Reference)
+{
+	if (Package.SchemaVersion < 6)
+	{
+		return true;
+	}
+	return FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+		Package,
+		Reference.ResultTypeId,
+		TEXT("/Script/Engine.Actor"));
+}
+
+bool HasAvidScriptActorClassReferences(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	return Package.ClassReferences.ContainsByPredicate(
+		[&Package](const FAvidScriptBindingClassReferenceModel& Reference)
+		{
+			return IsAvidScriptActorClassReference(Package, Reference);
+		});
+}
+
 } // namespace
+
+int32 FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	return HasAvidScriptActorClassReferences(Package)
+		? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+		: 0;
+}
 
 int32 FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(
 	const FAvidScriptBindingPackageModel& Package)
 {
 	int32 ImportCount = Package.Bindings.Num();
-	if (!Package.ClassReferences.IsEmpty())
-	{
-		ImportCount += FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
-	}
+	ImportCount += GetLifecycleImportCount(Package);
 	if (Package.Types.ContainsByPredicate(
 		[](const FAvidScriptBindingTypeModel& Type)
 		{
@@ -659,7 +688,18 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
 {
-	const bool bHasLifecycleBindings = !Package.ClassReferences.IsEmpty();
+	TArray<const FAvidScriptBindingClassReferenceModel*>
+		ActorLifecycleClassReferences;
+	for (const FAvidScriptBindingClassReferenceModel& Reference :
+		Package.ClassReferences)
+	{
+		if (IsAvidScriptActorClassReference(Package, Reference))
+		{
+			ActorLifecycleClassReferences.Add(&Reference);
+		}
+	}
+	const bool bHasLifecycleBindings =
+		!ActorLifecycleClassReferences.IsEmpty();
 	const bool bHasTypedClassReferenceSurface =
 		bHasLifecycleBindings && Package.SchemaVersion >= 6;
 	const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
@@ -819,16 +859,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		{
 			return false;
 		}
-		for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+		for (const FAvidScriptBindingClassReferenceModel* Reference :
+			ActorLifecycleClassReferences)
 		{
 			const FString ReferenceKey = bHasTypedClassReferenceSurface
-				? Reference.ResultTypeId
-				: Reference.BaseClassPath;
+				? Reference->ResultTypeId
+				: Reference->BaseClassPath;
 			const FAvidScriptBindingTypeModel* ResultType = bHasTypedClassReferenceSurface
-				? TypesById.FindRef(Reference.ResultTypeId)
+				? TypesById.FindRef(Reference->ResultTypeId)
 				: FindRenderedType(
 					TypesByCanonical,
-					TEXT("object:") + Reference.BaseClassPath);
+					TEXT("object:") + Reference->BaseClassPath);
 			if (!AddClassReferenceType(
 					ResultType,
 					ReferenceKey,
@@ -1058,11 +1099,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			});
 		}
 		Lines.Append({ TEXT("public static class ProjectClasses"), TEXT("{") });
-		for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+		for (const FAvidScriptBindingClassReferenceModel* Reference :
+			ActorLifecycleClassReferences)
 		{
 			const FString ReferenceKey = bHasTypedClassReferenceSurface
-				? Reference.ResultTypeId
-				: Reference.BaseClassPath;
+				? Reference->ResultTypeId
+				: Reference->BaseClassPath;
 			const FString* ClassReferenceTypeName = ClassReferenceTypeNamesByKey.Find(ReferenceKey);
 			if (ClassReferenceTypeName == nullptr)
 			{
@@ -1075,8 +1117,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			Lines.Add(FString::Printf(
 				TEXT("    public static %s %s => new(%d);"),
 				**ClassReferenceTypeName,
-				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Reference.ScriptName),
-				Reference.Ordinal));
+				*FAvidScriptEditorCSharpSyntax::MakeIdentifier(
+					Reference->ScriptName),
+				Reference->Ordinal));
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
 	}
@@ -1361,6 +1404,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
 	Writer->WriteValue(TEXT("descriptor_schema_version"), Package.SchemaVersion);
 	Writer->WriteValue(TEXT("class_reference_count"), Package.ClassReferences.Num());
+	if (Package.SchemaVersion >= 7)
+	{
+		Writer->WriteValue(
+			TEXT("object_factory_count"),
+			Package.ObjectFactories.Num());
+	}
 	Writer->WriteValue(TEXT("descriptor_sha256"), DescriptorHash);
 	Writer->WriteValue(TEXT("reference_source_sha256"), SourceHash);
 	Writer->WriteObjectStart(TEXT("files"));
@@ -1378,7 +1427,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 		Writer->WriteValue(TEXT("signature"), Binding.HostImport.Signature);
 		Writer->WriteObjectEnd();
 	}
-	if (!Package.ClassReferences.IsEmpty())
+	const bool bHasLifecycleBindings =
+		HasAvidScriptActorClassReferences(Package);
+	if (bHasLifecycleBindings)
 	{
 		const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
 			FAvidScriptObjectLifecycleBindings::GetSpecs();
@@ -1402,9 +1453,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 	{
 		const int32 ObjectTypeImportOffset =
 			Package.Bindings.Num()
-			+ (Package.ClassReferences.IsEmpty()
-				? 0
-				: FAvidScriptObjectLifecycleBindings::GetSpecs().Num());
+			+ (bHasLifecycleBindings
+				? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+				: 0);
 		const TConstArrayView<FAvidScriptObjectTypeBindingSpec> ObjectTypeSpecs =
 			FAvidScriptObjectTypeBindings::GetSpecs();
 		for (int32 SpecIndex = 0; SpecIndex < ObjectTypeSpecs.Num(); ++SpecIndex)

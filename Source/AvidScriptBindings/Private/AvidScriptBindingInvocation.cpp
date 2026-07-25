@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectTypeBinding.h"
+#include "Components/ActorComponent.h"
 #include "Containers/StringConv.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -1281,11 +1282,13 @@ struct FAvidScriptBindingPackage::FImpl
 
 	FString PackageName;
 	FString PackageHash;
+	int32 DescriptorSchemaVersion = 0;
 	FAvidScriptVmBindingPackage VmPackage;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
 	TArray<UClass*> ObjectTypePlans;
 	UClass* ExpectedSelfClass = nullptr;
 	TArray<FClassReferencePlan> ClassReferencePlans;
+	TArray<FAvidScriptObjectFactoryPlan> ObjectFactoryPlans;
 	TArray<TStrongObjectPtr<UClass>> LoadedClasses;
 	FAvidScriptBindingPackageInstrumentation Instrumentation;
 	int32 RequiredScratchSize = 0;
@@ -1352,11 +1355,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	TSharedPtr<FAvidScriptBindingPackage> Package = MakeShareable(new FAvidScriptBindingPackage());
 	Package->Impl->PackageName = Model.PackageName;
 	Package->Impl->PackageHash = Model.PackageHash;
+	Package->Impl->DescriptorSchemaVersion = Model.SchemaVersion;
 	Package->Impl->VmPackage.PackageName = Model.PackageName;
 	Package->Impl->VmPackage.PackageHash = Model.PackageHash;
-	const int32 LifecycleBindingCount = Model.ClassReferences.IsEmpty()
-		? 0
-		: FAvidScriptObjectLifecycleBindings::GetSpecs().Num();
 	int32 ObjectTypeCount = 0;
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
@@ -1368,12 +1369,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	const int32 ObjectTypeBindingCount = ObjectTypeCount == 0
 		? 0
 		: FAvidScriptObjectTypeBindings::GetSpecs().Num();
-	Package->Impl->Plans.Reserve(
-		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount);
 	Package->Impl->ObjectTypePlans.SetNumZeroed(ObjectTypeCount);
 	Package->Impl->ClassReferencePlans.Reserve(Model.ClassReferences.Num());
-	Package->Impl->VmPackage.Imports.Reserve(
-		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount);
+	Package->Impl->ObjectFactoryPlans.SetNum(Model.ObjectFactories.Num());
 
 	TMap<FString, UClass*> LoadedClassesByPath;
 	TSet<FString> AttemptedClassPaths;
@@ -1398,6 +1396,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	};
 
 	TMap<FString, int32> ObjectTypeOrdinalsById;
+	TMap<FString, int32> ObjectTypeOrdinalsByClassPath;
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
 		if (Type.ObjectTypeOrdinal == INDEX_NONE)
@@ -1416,6 +1415,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 		Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal] = ObjectClass;
 		ObjectTypeOrdinalsById.Add(Type.StableId, Type.ObjectTypeOrdinal);
+		ObjectTypeOrdinalsByClassPath.Add(Type.ClassPath, Type.ObjectTypeOrdinal);
 	}
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
@@ -1468,6 +1468,18 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	TSet<FString> FactoryClassReferenceIds;
+	for (const FAvidScriptBindingObjectFactoryModel& Factory : Model.ObjectFactories)
+	{
+		FactoryClassReferenceIds.Add(Factory.ClassReferenceId);
+	}
+	TMap<FString, UClass*> FactoryClassesByReferenceId;
+	bool bHasLifecycleClassReferences = false;
+	if (Model.SchemaVersion >= 7)
+	{
+		Package->Impl->ClassReferencePlans.SetNum(Model.ClassReferences.Num());
+	}
+
 	for (const FAvidScriptBindingClassReferenceModel& Reference : Model.ClassReferences)
 	{
 #if !WITH_EDITOR
@@ -1481,6 +1493,56 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 #endif
+		const bool bFactoryClassReference =
+			FactoryClassReferenceIds.Contains(Reference.StableId);
+		const bool bActorLifecycleReference =
+			Model.SchemaVersion < 6
+			|| FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+				Model,
+				Reference.ResultTypeId,
+				TEXT("/Script/Engine.Actor"));
+		if (!bFactoryClassReference && !bActorLifecycleReference)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_class_capability_missing"),
+				Reference.StableId,
+				TEXT("A non-Actor class reference must be owned by an object factory."));
+			return false;
+		}
+		if (bFactoryClassReference)
+		{
+			UClass* Class = LoadClass(Reference.ClassPath);
+			const int32* BaseOrdinal =
+				ObjectTypeOrdinalsById.Find(Reference.ResultTypeId);
+			UClass* BaseClass = BaseOrdinal == nullptr
+				? nullptr
+				: Package->Impl->ObjectTypePlans[*BaseOrdinal];
+			if (Class == nullptr || BaseClass == nullptr)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					Reference.LoadPolicy == TEXT("CookRequired")
+						? FString(TEXT("binding_class_cook_missing"))
+						: FString(TEXT("binding_class_missing")),
+					Reference.ClassPath,
+					TEXT("The factory class is unavailable under the declared load policy."));
+				return false;
+			}
+			if (!Class->IsChildOf(BaseClass))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_factory_class_inheritance_mismatch"),
+					Reference.ClassPath + TEXT(" -> ")
+						+ Reference.BaseClassPath,
+					TEXT("The factory class must satisfy its declared base constraint."));
+				return false;
+			}
+			FactoryClassesByReferenceId.Add(Reference.StableId, Class);
+			continue;
+		}
+
 		UClass* Class = LoadClass(Reference.ClassPath);
 		UClass* BaseClass = nullptr;
 		if (Model.SchemaVersion >= 6)
@@ -1526,8 +1588,117 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				TEXT("The resolved class is abstract, deprecated, superseded, or not placeable."));
 			return false;
 		}
-		Package->Impl->ClassReferencePlans.Add({ Class, BaseClass });
+		if (Model.SchemaVersion >= 7)
+		{
+			Package->Impl->ClassReferencePlans[Reference.Ordinal] = { Class, BaseClass };
+		}
+		else
+		{
+			Package->Impl->ClassReferencePlans.Add({ Class, BaseClass });
+		}
+		bHasLifecycleClassReferences = true;
 	}
+
+	for (const FAvidScriptBindingObjectFactoryModel& Factory : Model.ObjectFactories)
+	{
+		UClass* ObjectClass = FactoryClassesByReferenceId.FindRef(Factory.ClassReferenceId);
+		const int32* OuterOrdinal = ObjectTypeOrdinalsById.Find(Factory.OuterTypeId);
+		const int32* ResultOrdinal = ObjectClass == nullptr
+			? nullptr
+			: ObjectTypeOrdinalsByClassPath.Find(ObjectClass->GetPathName());
+		if (ObjectClass == nullptr || OuterOrdinal == nullptr || ResultOrdinal == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_result_type_missing"),
+				Factory.StableId,
+				TEXT("The factory class, required Outer, or concrete result type is missing from the immutable plan."));
+			return false;
+		}
+
+		UClass* RequiredOuterClass = Package->Impl->ObjectTypePlans[*OuterOrdinal];
+		if (RequiredOuterClass == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_outer_mismatch"),
+				Factory.StableId,
+				TEXT("The factory required Outer is unavailable from the immutable object type plan."));
+			return false;
+		}
+		if (ObjectClass->HasAnyClassFlags(CLASS_Abstract))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_class_abstract"),
+				ObjectClass->GetPathName(),
+				TEXT("Factory classes must be concrete."));
+			return false;
+		}
+		if (ObjectClass->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_class_deprecated"),
+				ObjectClass->GetPathName(),
+				TEXT("Factory classes cannot be deprecated or superseded."));
+			return false;
+		}
+
+		const bool bActorClass = ObjectClass->IsChildOf(AActor::StaticClass());
+		const bool bActorComponentClass = ObjectClass->IsChildOf(UActorComponent::StaticClass());
+		const bool bKindMatches =
+			(Factory.Kind == EAvidScriptObjectFactoryKind::NewObject
+				&& Factory.Registration == EAvidScriptComponentRegistrationPolicy::None
+				&& !bActorClass
+				&& !bActorComponentClass)
+			|| (Factory.Kind == EAvidScriptObjectFactoryKind::ActorComponent
+				&& Factory.Registration
+					== EAvidScriptComponentRegistrationPolicy::RegisterInstance
+				&& bActorComponentClass);
+		if (!bKindMatches)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_kind_mismatch"),
+				Factory.StableId,
+				TEXT("The factory kind, registration policy, and reflected class are incompatible."));
+			return false;
+		}
+
+		UClass* ClassWithin = ObjectClass->ClassWithin;
+		const bool bOuterMatchesClassWithin = ClassWithin != nullptr
+			&& RequiredOuterClass->IsChildOf(ClassWithin);
+		const bool bComponentOuterMatches = Factory.Kind
+			!= EAvidScriptObjectFactoryKind::ActorComponent
+			|| RequiredOuterClass->IsChildOf(AActor::StaticClass());
+		if (!bOuterMatchesClassWithin || !bComponentOuterMatches)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_factory_outer_mismatch"),
+				Factory.StableId,
+				TEXT("The factory required Outer does not satisfy the class ClassWithin contract."));
+			return false;
+		}
+
+		FAvidScriptObjectFactoryPlan& Plan =
+			Package->Impl->ObjectFactoryPlans[Factory.Ordinal];
+		Plan.Kind = Factory.Kind;
+		Plan.ObjectClass = ObjectClass;
+		Plan.RequiredOuterClass = RequiredOuterClass;
+		Plan.ResultObjectTypeOrdinal = *ResultOrdinal;
+		Plan.Ownership = Factory.Ownership;
+		Plan.Registration = Factory.Registration;
+	}
+
+	const int32 LifecycleBindingCount = bHasLifecycleClassReferences
+		? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+		: 0;
+	const int32 TotalImportCount =
+		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount;
+	Package->Impl->Plans.Reserve(TotalImportCount);
+	Package->Impl->VmPackage.Imports.Reserve(TotalImportCount);
 
 	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
 	{
@@ -1765,7 +1936,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Package->Impl->Plans.Add(MoveTemp(Plan));
 	}
 
-	if (!Package->Impl->ClassReferencePlans.IsEmpty())
+	if (bHasLifecycleClassReferences)
 	{
 		for (const FAvidScriptObjectLifecycleBindingSpec& Spec : FAvidScriptObjectLifecycleBindings::GetSpecs())
 		{
@@ -1825,6 +1996,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
+	OutResult.ObjectFactoryCount = Package->Impl->ObjectFactoryPlans.Num();
 	OutResult.RequiredScratchSize = Package->Impl->RequiredScratchSize;
 	OutResult.PackageName = Package->Impl->PackageName;
 	OutResult.PackageHash = Package->Impl->PackageHash;
@@ -1840,6 +2012,11 @@ const FString& FAvidScriptBindingPackage::GetPackageName() const
 const FString& FAvidScriptBindingPackage::GetPackageHash() const
 {
 	return Impl->PackageHash;
+}
+
+int32 FAvidScriptBindingPackage::GetDescriptorSchemaVersion() const
+{
+	return Impl->DescriptorSchemaVersion;
 }
 
 const FAvidScriptVmBindingPackage& FAvidScriptBindingPackage::GetVmPackage() const
@@ -1901,6 +2078,26 @@ bool FAvidScriptBindingPackage::TryResolveClassReference(
 	OutClass = Plan.Class;
 	OutBaseClass = Plan.BaseClass;
 	return OutClass != nullptr && OutBaseClass != nullptr;
+}
+
+int32 FAvidScriptBindingPackage::GetObjectFactoryCount() const
+{
+	return Impl->ObjectFactoryPlans.Num();
+}
+
+bool FAvidScriptBindingPackage::TryResolveObjectFactory(
+	const uint32 Ordinal,
+	const FAvidScriptObjectFactoryPlan*& OutPlan) const
+{
+	OutPlan = nullptr;
+	if (!Impl->ObjectFactoryPlans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	OutPlan = &Impl->ObjectFactoryPlans[static_cast<int32>(Ordinal)];
+	return OutPlan->ObjectClass != nullptr
+		&& OutPlan->RequiredOuterClass != nullptr
+		&& OutPlan->ResultObjectTypeOrdinal != INDEX_NONE;
 }
 
 bool FAvidScriptBindingPackage::Dispatch(

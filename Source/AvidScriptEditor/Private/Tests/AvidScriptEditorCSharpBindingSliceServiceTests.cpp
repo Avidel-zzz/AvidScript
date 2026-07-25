@@ -670,4 +670,157 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest,
+	"AvidScript.Editor.CSharpBindingSlice.ObjectFactory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptGeneratedBindingsTests"),
+		TEXT("P51_1_FactorySlices")));
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.project.factory_slice");
+	Profile.SelfClassPath = TEXT("/Script/Engine.Actor");
+	const TArray<FAvidScriptProjectBindingClassSpec> ClassReferences = {
+		{
+			TEXT("InventoryStateClass"),
+			TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+			TEXT("/Script/CoreUObject.Object"),
+			TEXT("EditorLoad")
+		},
+		{
+			TEXT("SceneComponentClass"),
+			TEXT("/Script/Engine.SceneComponent"),
+			TEXT("/Script/Engine.ActorComponent"),
+			TEXT("EditorLoad")
+		}
+	};
+	const TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories = {
+		{
+			TEXT("InventoryState"),
+			TEXT("InventoryStateClass"),
+			TEXT("/Script/CoreUObject.Object"),
+			EAvidScriptProjectObjectFactoryKind::NewObject,
+			EAvidScriptProjectObjectOwnership::Session,
+			EAvidScriptProjectComponentRegistration::None
+		},
+		{
+			TEXT("SceneComponent"),
+			TEXT("SceneComponentClass"),
+			TEXT("/Script/Engine.Actor"),
+			EAvidScriptProjectObjectFactoryKind::ActorComponent,
+			EAvidScriptProjectObjectOwnership::Session,
+			EAvidScriptProjectComponentRegistration::RegisterInstance
+		}
+	};
+
+	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
+	if (!TestTrue(
+		TEXT("Factory authorization package publishes"),
+		FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+			Profile,
+			ClassReferences,
+			ObjectFactories,
+			OutputRoot,
+			AuthorizationPackage)))
+	{
+		AddError(AuthorizationPackage.ErrorMessage);
+		return false;
+	}
+	TArray<FAvidScriptFrontendBindingImport> ManifestImports;
+	if (!TestTrue(
+		TEXT("Factory authorization manifest imports read"),
+		ReadAvidScriptBindingSliceTestManifestImports(
+			AuthorizationPackage.ManifestPath,
+			ManifestImports)))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Factory authorization has object type and owner capabilities only"),
+		ManifestImports.Num(),
+		2);
+
+	const FAvidScriptFrontendBindingPackage Provenance =
+		MakeAvidScriptBindingSliceTestProvenance(
+			AuthorizationPackage,
+			ManifestImports);
+	FAvidScriptCSharpBindingEmitResult SlicePackage;
+	FAvidScriptEditorCSharpBindingSliceResult SliceResult;
+	if (!TestTrue(
+		TEXT("Factory runtime slice publishes"),
+		FAvidScriptEditorCSharpBindingSliceService::Publish(
+			AuthorizationPackage.DescriptorPath,
+			Provenance,
+			OutputRoot,
+			SlicePackage,
+			SliceResult)))
+	{
+		AddError(SliceResult.ErrorMessage);
+		return false;
+	}
+
+	FString SliceJson;
+	FAvidScriptBindingPackageModel SliceModel;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Factory runtime slice reads"),
+		FFileHelper::LoadFileToString(
+			SliceJson,
+			*SlicePackage.DescriptorPath))
+		|| !TestTrue(
+			TEXT("Factory runtime slice parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				SliceJson,
+				SliceModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Factory runtime slice preserves descriptor v7"),
+		SliceModel.SchemaVersion,
+		7);
+	TestEqual(
+		TEXT("Factory runtime slice preserves both factories"),
+		SliceModel.ObjectFactories.Num(),
+		2);
+	TestEqual(
+		TEXT("Factory runtime slice preserves both class references"),
+		SliceModel.ClassReferences.Num(),
+		2);
+
+	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("Factory runtime slice loads immutable plans"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			SliceJson,
+			LoadedSlice,
+			LoadResult))
+		|| !TestNotNull(
+			TEXT("Factory runtime package exists"),
+			LoadedSlice.Get()))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+	TestEqual(
+		TEXT("Factory runtime package exposes two immutable factory plans"),
+		LoadedSlice->GetObjectFactoryCount(),
+		2);
+	TestEqual(
+		TEXT("Factory-only class references do not add Actor lifecycle imports"),
+		LoadedSlice->GetVmPackage().Imports.Num(),
+		1);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

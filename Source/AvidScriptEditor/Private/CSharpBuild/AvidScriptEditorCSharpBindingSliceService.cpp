@@ -97,6 +97,52 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 		Reference.ResultTypeId = AuthorizationReference->ResultTypeId;
 		RequiredTypeIds.Add(Reference.ResultTypeId);
 	}
+	for (const FAvidScriptBindingObjectFactoryModel& Factory :
+		SliceModel.ObjectFactories)
+	{
+		const FAvidScriptBindingObjectFactoryModel* AuthorizationFactory =
+			AuthorizationModel.ObjectFactories.FindByPredicate(
+				[&Factory](
+					const FAvidScriptBindingObjectFactoryModel& Candidate)
+				{
+					return Candidate.StableId == Factory.StableId;
+				});
+		const FAvidScriptBindingClassReferenceModel* AuthorizationReference =
+			AuthorizationModel.ClassReferences.FindByPredicate(
+				[&Factory](
+					const FAvidScriptBindingClassReferenceModel& Candidate)
+				{
+					return Candidate.StableId
+						== Factory.ClassReferenceId;
+				});
+		const FAvidScriptBindingTypeModel* ConcreteType =
+			AuthorizationReference == nullptr
+				? nullptr
+				: AuthorizationModel.Types.FindByPredicate(
+					[AuthorizationReference](
+						const FAvidScriptBindingTypeModel& Type)
+					{
+						return Type.ClassPath
+							== AuthorizationReference->ClassPath;
+					});
+		if (AuthorizationFactory == nullptr
+			|| AuthorizationReference == nullptr
+			|| ConcreteType == nullptr
+			|| Factory.Ordinal != AuthorizationFactory->Ordinal
+			|| Factory.ScriptName != AuthorizationFactory->ScriptName
+			|| Factory.ClassReferenceId
+				!= AuthorizationFactory->ClassReferenceId
+			|| Factory.OuterTypeId != AuthorizationFactory->OuterTypeId
+			|| Factory.Kind != AuthorizationFactory->Kind
+			|| Factory.Ownership != AuthorizationFactory->Ownership
+			|| Factory.Registration != AuthorizationFactory->Registration)
+		{
+			OutErrorSource = Factory.StableId;
+			return false;
+		}
+		RequiredTypeIds.Add(Factory.OuterTypeId);
+		RequiredTypeIds.Add(ConcreteType->StableId);
+	}
 
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
 	{
@@ -302,7 +348,10 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	const TConstArrayView<FAvidScriptObjectTypeBindingSpec> ObjectTypeSpecs =
 		FAvidScriptObjectTypeBindings::GetSpecs();
 	const int32 ReflectedBindingCount = AuthorizationModel.Bindings.Num();
-	const bool bPublishesLifecycleCapabilities = !AuthorizationModel.ClassReferences.IsEmpty();
+	const int32 LifecycleImportCount =
+		FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
+			AuthorizationModel);
+	const bool bPublishesLifecycleCapabilities = LifecycleImportCount > 0;
 	const bool bPublishesObjectTypeCapability = AuthorizationModel.Types.ContainsByPredicate(
 		[](const FAvidScriptBindingTypeModel& Type)
 		{
@@ -310,7 +359,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		});
 	const int32 ObjectTypeImportOffset =
 		ReflectedBindingCount
-		+ (bPublishesLifecycleCapabilities ? LifecycleSpecs.Num() : 0);
+		+ LifecycleImportCount;
 	const int32 ExpectedProfileImportCount =
 		FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel);
 	if (AuthorizationModel.PackageName != Provenance.PackageName
@@ -475,11 +524,58 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			Reference.LoadPolicy
 		});
 	}
-	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithClassReferences(
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories;
+	ObjectFactories.Reserve(AuthorizationModel.ObjectFactories.Num());
+	for (const FAvidScriptBindingObjectFactoryModel& Factory :
+		AuthorizationModel.ObjectFactories)
+	{
+		const FAvidScriptBindingClassReferenceModel* ClassReference =
+			AuthorizationModel.ClassReferences.FindByPredicate(
+				[&Factory](
+					const FAvidScriptBindingClassReferenceModel& Candidate)
+				{
+					return Candidate.StableId
+						== Factory.ClassReferenceId;
+				});
+		const FAvidScriptBindingTypeModel* OuterType =
+			AuthorizationModel.Types.FindByPredicate(
+				[&Factory](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.StableId == Factory.OuterTypeId;
+				});
+		if (ClassReference == nullptr || OuterType == nullptr)
+		{
+			SetAvidScriptCSharpBindingSliceFailure(
+				OutResult,
+				TEXT("slice_factory_provenance_invalid"),
+				Factory.StableId,
+				TEXT("preserve factory class-reference and Outer type provenance"));
+			return false;
+		}
+
+		FAvidScriptProjectObjectFactorySpec FactorySpec;
+		FactorySpec.ScriptName = Factory.ScriptName;
+		FactorySpec.ClassReference = ClassReference->ScriptName;
+		FactorySpec.OuterBaseClassPath = OuterType->ClassPath;
+		FactorySpec.Kind =
+			Factory.Kind == EAvidScriptObjectFactoryKind::ActorComponent
+				? EAvidScriptProjectObjectFactoryKind::ActorComponent
+				: EAvidScriptProjectObjectFactoryKind::NewObject;
+		FactorySpec.Ownership =
+			EAvidScriptProjectObjectOwnership::Session;
+		FactorySpec.Registration =
+			Factory.Registration
+				== EAvidScriptComponentRegistrationPolicy::RegisterInstance
+				? EAvidScriptProjectComponentRegistration::RegisterInstance
+				: EAvidScriptProjectComponentRegistration::None;
+		ObjectFactories.Add(MoveTemp(FactorySpec));
+	}
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
 			AuthorizationModel.PackageName,
 			FunctionSelections,
 			PropertySelections,
 			ClassReferences,
+			ObjectFactories,
 			SliceDescriptorJson,
 			GenerateResult))
 	{
@@ -530,7 +626,8 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			VerifiedSliceModel,
 			ParseCategory,
 			ParseSource)
-		|| VerifiedSliceModel.SchemaVersion != 6
+		|| VerifiedSliceModel.SchemaVersion
+			!= AuthorizationModel.SchemaVersion
 		|| VerifiedSliceModel.SelectionHash
 			!= FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(VerifiedSliceModel)
 		|| VerifiedSliceModel.PackageHash
@@ -544,7 +641,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			ParseSource.IsEmpty()
 				? AuthorizationModel.PackageName
 				: ParseSource,
-			TEXT("recompute the complete schema v6 slice identity after closing its type graph"));
+			TEXT("recompute the complete descriptor slice identity after closing its type graph"));
 		return false;
 	}
 	SliceModel = MoveTemp(VerifiedSliceModel);
@@ -564,6 +661,16 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			TEXT("slice_class_reference_mismatch"),
 			AuthorizationModel.PackageName,
 			TEXT("preserve the complete authorization class table in the runtime slice"));
+		return false;
+	}
+	if (SliceModel.ObjectFactories.Num()
+		!= AuthorizationModel.ObjectFactories.Num())
+	{
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			TEXT("slice_object_factory_mismatch"),
+			AuthorizationModel.PackageName,
+			TEXT("preserve the complete authorization object factory table in the runtime slice"));
 		return false;
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)

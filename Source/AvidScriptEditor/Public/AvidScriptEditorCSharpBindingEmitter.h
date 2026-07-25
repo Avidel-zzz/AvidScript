@@ -4,6 +4,7 @@
 
 struct FAvidScriptBindingSelectionProfile;
 struct FAvidScriptProjectBindingClassSpec;
+struct FAvidScriptProjectObjectFactorySpec;
 
 struct FAvidScriptCSharpBindingEmitResult
 {
@@ -12,6 +13,7 @@ struct FAvidScriptCSharpBindingEmitResult
 	int32 BindingCount = 0;
 	int32 TypeCount = 0;
 	int32 ClassReferenceCount = 0;
+	int32 ObjectFactoryCount = 0;
 	FString PackageName;
 	FString PackageHash;
 	FString DescriptorHash;
@@ -61,6 +63,14 @@ public:
 		FString& OutReferenceSource,
 		FString& OutManifestJson,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
+	static bool EmitProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+		const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
+		FString& OutDescriptorJson,
+		FString& OutReferenceSource,
+		FString& OutManifestJson,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
 
 	static FString GetDefaultOutputRoot();
 
@@ -90,6 +100,12 @@ public:
 	static bool PublishProfile(
 		const FAvidScriptBindingSelectionProfile& Profile,
 		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+	static bool PublishProfile(
+		const FAvidScriptBindingSelectionProfile& Profile,
+		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
+		const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
 		const FString& OutputRoot,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 };

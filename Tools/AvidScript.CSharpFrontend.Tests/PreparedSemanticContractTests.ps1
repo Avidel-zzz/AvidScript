@@ -312,7 +312,25 @@ catch {
         [string]$_.Exception.Data["AvidScriptCode"] -ceq "ASBI4402"
 }
 Assert-Condition $SelflessPackedOwnerRejected `
-    "prepared semantic accepted packed owner capability without schema v6 self_type_id"
+    "prepared semantic accepted packed owner capability without schema v6 or v7 self_type_id"
+
+$V7OwnerAuthorization = [pscustomobject]@{
+    DescriptorSchemaVersion = 7
+    SelfTypeId = ("a" * 64)
+    RequiredImports = @([pscustomobject]@{
+        StableId = $PackedOwnerUsedImport.stable_id
+        Ordinal = $PackedOwnerUsedImport.ordinal
+        Module = $PackedOwnerUsedImport.module
+        Name = $PackedOwnerUsedImport.name
+        Signature = $PackedOwnerUsedImport.signature
+    })
+}
+Assert-AvidScriptPreparedSemanticUsedImports `
+    -AuthorizationModel ([pscustomobject]@{
+        used_import_count = 1
+        used_imports = @($PackedOwnerUsedImport)
+    }) `
+    -ExpectedAuthorizationPackage $V7OwnerAuthorization
 
 $StringOrdinalReportPath = New-MutatedReportPath `
     -Directory (Join-Path $RunRoot "StringOrdinal") `

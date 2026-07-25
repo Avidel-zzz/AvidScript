@@ -485,8 +485,10 @@ $ReflectedFunctionPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Priv
 $ReflectedPropertyPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.cpp'
 $ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedTypePolicy.h'
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
+$BindingDescriptorModelSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorModel.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
+$ObjectFactoryPolicyHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectFactoryPolicy.h'
 $ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectLifecycleBinding.h'
 $ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
@@ -683,7 +685,7 @@ foreach ($RequiredPropertyRuntimeContract in @(
 foreach ($RequiredPropertyFacadeContract in @(
     'RenderPropertyGetter',
     'Binding.BindingKind == TEXT("property_get")',
-    'GenerateWithClassReferences',
+    'GenerateWithObjectFactories',
     'public bool IsNull => Slot == 0 && Generation == 0;',
     'public bool HasHandle => Slot > 0 && Generation > 0;'
 )) {
@@ -707,11 +709,14 @@ foreach ($RequiredClassReferenceDescriptorContract in @(
 foreach ($RequiredClassReferenceGeneratorContract in @(
     'GenerateWithClassReferences',
     'Package.ClassReferences.Sort',
-    'Writer->WriteArrayStart(TEXT("class_references"))'
+    'FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical'
 )) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredClassReferenceGeneratorContract)) {
         Add-Violation "binding descriptor v5 generator is missing $RequiredClassReferenceGeneratorContract"
     }
+}
+if (-not $BindingDescriptorModelSource.Contains('Writer->WriteArrayStart(TEXT("class_references"))')) {
+    Add-Violation 'canonical descriptor serializer must own class_references JSON emission'
 }
 foreach ($RequiredClassReferenceRuntimeContract in @(
     'ClassReferencePlans',
@@ -911,10 +916,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..6) {
+foreach ($RequiredDescriptorSchemaVersion in 2..7) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v6 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v7 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -923,21 +928,24 @@ foreach ($PackedOwnerContract in @(
     "()I",
     'Try-GetAvidScriptBindingJsonInt32',
     '$DescriptorSchemaVersion -ne 6',
+    '$DescriptorSchemaVersion -ne 7',
     '[string]::IsNullOrWhiteSpace($SelfTypeId)',
-    'packed owner capability requires descriptor schema v6 with a non-empty self_type_id')) {
+    'packed owner capability requires descriptor schema v6 or v7 with a non-empty self_type_id')) {
     if (-not $CSharpBindingPackageSource.Contains($PackedOwnerContract)) {
         Add-Violation "C# binding package resolver must validate the packed owner intrinsic exactly: $PackedOwnerContract"
     }
 }
 if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
-    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6')) {
-    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5 and v6 typed object packages'
+    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
+    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7')) {
+    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5, v6, and v7 typed object packages'
 }
 foreach ($RequiredRuntimeManifestImportContract in @(
     'avidscript.owner_get_handle.v1',
     'bSeenPackedOwner',
     'TryGetInt32Field(*ImportObject, TEXT("ordinal"), Ordinal)',
     'DescriptorSchemaVersion != 6',
+    'DescriptorSchemaVersion != 7',
     'GetExpectedSelfClass() == nullptr',
     '!bBindingPackageHasPackedOwnerCapability',
     'manifest_wasm_import_mismatch',
@@ -952,13 +960,72 @@ if (-not $RuntimeSessionSource.Contains('Import.ImportName == TEXT("avid_owner_g
     -not $RuntimeSessionSource.Contains('bRequiresPackedOwnerCapability') -or
     -not $RuntimeSessionSource.Contains('!Manifest.BindingPackage.IsValid()') -or
     -not $RuntimeSessionSource.Contains('Manifest.BindingPackage->GetExpectedSelfClass() == nullptr')) {
-    Add-Violation 'Runtime activation must derive packed-owner use from exact actual imports and require a verified schema v6 Self package'
+    Add-Violation 'Runtime activation must derive packed-owner use from exact actual imports and require a verified typed Self package'
+}
+foreach ($RequiredObjectFactoryModelContract in @(
+    'FAvidScriptBindingObjectFactoryModel',
+    'FAvidScriptBindingDescriptorTypeGraph',
+    'IsDerivedFromClassPath',
+    'MakeObjectFactoryStableId',
+    'ValidateAvidScriptBindingV7ObjectFactories',
+    'class_references.capability',
+    'OutPackage.SchemaVersion != 7',
+    'Root->TryGetArrayField(TEXT("object_factories")')) {
+    if (-not $BindingDescriptorHeader.Contains($RequiredObjectFactoryModelContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredObjectFactoryModelContract)) {
+        Add-Violation "descriptor v7 object-factory owner is missing $RequiredObjectFactoryModelContract"
+    }
+}
+foreach ($RequiredObjectFactoryGeneratorContract in @(
+    'GenerateWithObjectFactories',
+    'Package.SchemaVersion = ObjectFactories.IsEmpty() ? 6 : 7',
+    'FAvidScriptEditorObjectTypeGraph::Build(',
+    'Package.ObjectFactories.Sort',
+    'FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical')) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredObjectFactoryGeneratorContract)) {
+        Add-Violation "descriptor v7 generator owner is missing $RequiredObjectFactoryGeneratorContract"
+    }
+}
+foreach ($RequiredObjectFactoryPlanContract in @(
+    'FAvidScriptObjectFactoryPlan',
+    'GetDescriptorSchemaVersion',
+    'ObjectFactoryPlans.SetNum(Model.ObjectFactories.Num())',
+    'FactoryClassesByReferenceId',
+    'ObjectTypeOrdinalsByClassPath',
+    'binding_class_capability_missing',
+    'TryResolveObjectFactory')) {
+    if (-not $ObjectFactoryPolicyHeader.Contains($RequiredObjectFactoryPlanContract) -and
+        -not $BindingInvocationHeader.Contains($RequiredObjectFactoryPlanContract) -and
+        -not $BindingInvocationSource.Contains($RequiredObjectFactoryPlanContract)) {
+        Add-Violation "immutable object-factory package plan owner is missing $RequiredObjectFactoryPlanContract"
+    }
+}
+foreach ($RequiredObjectFactoryProvenanceContract in @(
+    'object_factory_count',
+    "Properties['object_factories']",
+    'DescriptorSchemaVersion -eq 7')) {
+    if (-not $CSharpBindingPackageSource.Contains($RequiredObjectFactoryProvenanceContract)) {
+        Add-Violation "C# binding package resolver is missing descriptor v7 factory provenance $RequiredObjectFactoryProvenanceContract"
+    }
+}
+if (-not $RuntimeReloadSource.Contains('GetObjectFactoryCount()') -or
+    -not $RuntimeReloadSource.Contains('GetDescriptorSchemaVersion()') -or
+    -not $RuntimeReloadSource.Contains('package.json descriptor_schema_version does not match the descriptor') -or
+    -not $RuntimeReloadSource.Contains('TEXT("object_factory_count")') -or
+    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion == 7')) {
+    Add-Violation 'Runtime reload must validate descriptor schema and v7 factory provenance against the immutable package plan'
+}
+if (-not $CSharpBindingRendererSource.Contains(
+        'FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(') -or
+    -not $BindingInvocationSource.Contains(
+        'FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(')) {
+    Add-Violation 'renderer and runtime must share descriptor type-graph capability classification'
 }
 foreach ($RequiredLegacyClassReferenceRendererContract in @(
     'bHasTypedClassReferenceSurface',
-    '? Reference.ResultTypeId',
-    ': Reference.BaseClassPath',
-    'TEXT("object:") + Reference.BaseClassPath',
+    '? Reference->ResultTypeId',
+    ': Reference->BaseClassPath',
+    'TEXT("object:") + Reference->BaseClassPath',
     'class_references.base_class_path')) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredLegacyClassReferenceRendererContract)) {
         Add-Violation "C# binding renderer must preserve schema v5 class-reference emission from base_class_path: $RequiredLegacyClassReferenceRendererContract"
@@ -1232,7 +1299,7 @@ foreach ($GenericRendererSource in @($RenderMethodSource, $RenderPropertySource)
 foreach ($RequiredGenericFacadeContract in @(
     'for (const FAvidScriptBindingTypeModel* Type : ObjectTypes)',
     'AppendObjectHandleProxy(',
-    'for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)',
+    'for (const FAvidScriptBindingClassReferenceModel* Reference :',
     '*EscapeCSharpString(Spec.ModuleName)',
     '*EscapeCSharpString(Spec.ImportName)'
 )) {
@@ -1822,6 +1889,7 @@ foreach ($RequiredPreparedOwnerContract in @(
     '$Signature -ceq "()I"',
     'Try-GetAvidScriptBindingJsonInt32',
     '$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 6',
+    '$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 7',
     '$ExpectedAuthorizationPackage.SelfTypeId')) {
     if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedOwnerContract)) {
         Add-Violation "prepared semantic helper must validate packed owner provenance exactly: $RequiredPreparedOwnerContract"

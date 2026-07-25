@@ -25,4 +25,13 @@ struct FAvidScriptEditorObjectTypeGraph
 		FAvidScriptEditorObjectTypeGraph& OutGraph,
 		FString& OutErrorCategory,
 		FString& OutErrorDetails);
+
+	static bool Build(
+		TConstArrayView<UClass*> HandleClasses,
+		UClass* SelfClass,
+		TConstArrayView<FAvidScriptProjectBindingClassSpec> ClassReferences,
+		TConstArrayView<FAvidScriptProjectObjectFactorySpec> ObjectFactories,
+		FAvidScriptEditorObjectTypeGraph& OutGraph,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
 };

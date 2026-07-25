@@ -381,16 +381,6 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 		OutResult);
 	OutResult.BindingSelectionHash = OutPlan.BindingSelectionHash;
 
-	if (!OutPlan.AuthorizationObjectFactories.IsEmpty())
-	{
-		SetAvidScriptCSharpBuildPipelineFailure(
-			TEXT("binding_factory_pipeline_unavailable"),
-			TEXT("Object factories reached a build pipeline that cannot publish descriptor v7."),
-			TEXT("complete the descriptor v7 factory propagation before building this profile"),
-			OutResult);
-		return false;
-	}
-
 	if (NormalizedConfig.BuildScriptPath.IsEmpty()
 		|| !FPaths::FileExists(NormalizedConfig.BuildScriptPath))
 	{
@@ -464,6 +454,7 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 		if (!FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
 				OutPlan.AuthorizationBindingProfile,
 				OutPlan.AuthorizationClassReferences,
+				OutPlan.AuthorizationObjectFactories,
 				FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot(),
 				BindingEmitResult))
 		{

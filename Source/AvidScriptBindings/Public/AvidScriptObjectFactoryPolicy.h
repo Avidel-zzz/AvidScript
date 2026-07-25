@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 
+class UClass;
+
 enum class EAvidScriptObjectFactoryKind : uint8
 {
 	NewObject,
@@ -17,6 +19,18 @@ enum class EAvidScriptComponentRegistrationPolicy : uint8
 {
 	None,
 	RegisterInstance
+};
+
+struct FAvidScriptObjectFactoryPlan
+{
+	EAvidScriptObjectFactoryKind Kind = EAvidScriptObjectFactoryKind::NewObject;
+	UClass* ObjectClass = nullptr;
+	UClass* RequiredOuterClass = nullptr;
+	int32 ResultObjectTypeOrdinal = INDEX_NONE;
+	EAvidScriptObjectOwnershipPolicy Ownership =
+		EAvidScriptObjectOwnershipPolicy::Session;
+	EAvidScriptComponentRegistrationPolicy Registration =
+		EAvidScriptComponentRegistrationPolicy::None;
 };
 
 AVIDSCRIPTBINDINGS_API const TCHAR* LexToString(

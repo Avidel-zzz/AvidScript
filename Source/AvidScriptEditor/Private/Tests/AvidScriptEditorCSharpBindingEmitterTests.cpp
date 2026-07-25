@@ -2,6 +2,7 @@
 
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingInvocation.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
@@ -13,6 +14,8 @@
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "Engine/StaticMeshActor.h"
+#include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -392,6 +395,271 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 			}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest,
+	"AvidScript.Editor.CSharpBindingEmitter.ObjectFactoryManifest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
+	const FString& Parameters)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+		TEXT("Factory-only descriptor v7 generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
+			TEXT("avidscript.project.factory_manifest"),
+			{},
+			{},
+			{
+				{
+					TEXT("InventoryStateClass"),
+					TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+					TEXT("/Script/CoreUObject.Object"),
+					TEXT("EditorLoad")
+				},
+				{
+					TEXT("SceneComponentClass"),
+					TEXT("/Script/Engine.SceneComponent"),
+					TEXT("/Script/Engine.ActorComponent"),
+					TEXT("EditorLoad")
+				}
+			},
+			{
+				{
+					TEXT("InventoryState"),
+					TEXT("InventoryStateClass"),
+					TEXT("/Script/CoreUObject.Object"),
+					EAvidScriptProjectObjectFactoryKind::NewObject,
+					EAvidScriptProjectObjectOwnership::Session,
+					EAvidScriptProjectComponentRegistration::None
+				},
+				{
+					TEXT("SceneComponent"),
+					TEXT("SceneComponentClass"),
+					TEXT("/Script/Engine.Actor"),
+					EAvidScriptProjectObjectFactoryKind::ActorComponent,
+					EAvidScriptProjectObjectOwnership::Session,
+					EAvidScriptProjectComponentRegistration::RegisterInstance
+				}
+			},
+			DescriptorJson,
+			DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	FString Source;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+		TEXT("Factory-only descriptor v7 emits canonically"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			Source,
+			ManifestJson,
+			EmitResult)))
+	{
+		AddError(EmitResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Emitter reports the factory table"),
+		EmitResult.ObjectFactoryCount,
+		2);
+	TestFalse(
+		TEXT("Factory class references do not publish Actor lifecycle facade"),
+		Source.Contains(TEXT("public static class ProjectClasses"))
+			|| Source.Contains(TEXT("SpawnActor("))
+			|| Source.Contains(TEXT("avid_object_spawn_actor")));
+	TestTrue(
+		TEXT("Factory object graph still publishes object type checks"),
+		Source.Contains(TEXT("avid_object_type_is_a")));
+
+	TSharedPtr<FJsonObject> Manifest;
+	if (!TestTrue(
+		TEXT("Factory manifest parses"),
+		ParseJsonObject(ManifestJson, Manifest))
+		|| !TestNotNull(TEXT("Factory manifest object exists"), Manifest.Get()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Factory manifest identifies descriptor schema v7"),
+		Manifest->GetIntegerField(TEXT("descriptor_schema_version")),
+		7);
+	TestEqual(
+		TEXT("Factory manifest preserves class-reference provenance"),
+		Manifest->GetIntegerField(TEXT("class_reference_count")),
+		2);
+	TestEqual(
+		TEXT("Factory manifest preserves object-factory provenance"),
+		Manifest->GetIntegerField(TEXT("object_factory_count")),
+		2);
+	const TArray<TSharedPtr<FJsonValue>>& RequiredImports =
+		Manifest->GetArrayField(TEXT("required_imports"));
+	TestEqual(
+		TEXT("Factory-only package requires object type and packed owner capabilities"),
+		RequiredImports.Num(),
+		2);
+
+	FString MixedDescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult MixedDescriptorResult;
+	if (!TestTrue(
+		TEXT("Mixed Actor and factory descriptor v7 generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
+			TEXT("avidscript.project.mixed_factory_manifest"),
+			{},
+			{},
+			{
+				{
+					TEXT("InventoryStateClass"),
+					TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+					TEXT("/Script/CoreUObject.Object"),
+					TEXT("EditorLoad")
+				},
+				{
+					TEXT("ProjectileClass"),
+					TEXT("/Script/Engine.StaticMeshActor"),
+					TEXT("/Script/Engine.Actor"),
+					TEXT("EditorLoad")
+				},
+				{
+					TEXT("SceneComponentClass"),
+					TEXT("/Script/Engine.SceneComponent"),
+					TEXT("/Script/Engine.ActorComponent"),
+					TEXT("EditorLoad")
+				}
+			},
+			{
+				{
+					TEXT("InventoryState"),
+					TEXT("InventoryStateClass"),
+					TEXT("/Script/CoreUObject.Object"),
+					EAvidScriptProjectObjectFactoryKind::NewObject,
+					EAvidScriptProjectObjectOwnership::Session,
+					EAvidScriptProjectComponentRegistration::None
+				},
+				{
+					TEXT("SceneComponent"),
+					TEXT("SceneComponentClass"),
+					TEXT("/Script/Engine.Actor"),
+					EAvidScriptProjectObjectFactoryKind::ActorComponent,
+					EAvidScriptProjectObjectOwnership::Session,
+					EAvidScriptProjectComponentRegistration::RegisterInstance
+				}
+			},
+			MixedDescriptorJson,
+			MixedDescriptorResult)))
+	{
+		AddError(MixedDescriptorResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptBindingPackageModel MixedModel;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Mixed descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			MixedDescriptorJson,
+			MixedModel,
+			ParseCategory,
+			ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingClassReferenceModel* ProjectileReference =
+		MixedModel.ClassReferences.FindByPredicate(
+			[](const FAvidScriptBindingClassReferenceModel& Reference)
+			{
+				return Reference.ScriptName == TEXT("ProjectileClass");
+			});
+	if (!TestNotNull(
+		TEXT("Mixed descriptor retains Actor lifecycle class reference"),
+		ProjectileReference))
+	{
+		return false;
+	}
+
+	FString MixedSource;
+	FString MixedManifestJson;
+	FAvidScriptCSharpBindingEmitResult MixedEmitResult;
+	if (!TestTrue(
+		TEXT("Mixed descriptor emits"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			MixedDescriptorJson,
+			MixedSource,
+			MixedManifestJson,
+			MixedEmitResult)))
+	{
+		AddError(MixedEmitResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Mixed facade preserves the Actor class-reference ordinal"),
+		MixedSource.Contains(FString::Printf(
+			TEXT("public static TSubclassOfAActor ProjectileClass => new(%d);"),
+			ProjectileReference->Ordinal)));
+	TestFalse(
+		TEXT("Mixed facade does not expose factory classes as spawn capabilities"),
+		MixedSource.Contains(TEXT(" InventoryStateClass =>"))
+			|| MixedSource.Contains(TEXT(" SceneComponentClass =>")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> MixedRuntimePackage;
+	FAvidScriptBindingPackageLoadResult MixedLoadResult;
+	if (!TestTrue(
+		TEXT("Mixed descriptor loads immutable runtime plans"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			MixedDescriptorJson,
+			MixedRuntimePackage,
+			MixedLoadResult))
+		|| !TestNotNull(
+			TEXT("Mixed runtime package exists"),
+			MixedRuntimePackage.Get()))
+	{
+		AddError(MixedLoadResult.ErrorCategory + TEXT(": ")
+			+ MixedLoadResult.ErrorDetails);
+		return false;
+	}
+	UClass* ResolvedClass = nullptr;
+	UClass* ResolvedBaseClass = nullptr;
+	TestTrue(
+		TEXT("Actor lifecycle ordinal resolves through its original mixed table slot"),
+		MixedRuntimePackage->TryResolveClassReference(
+			ProjectileReference->Ordinal,
+			ResolvedClass,
+			ResolvedBaseClass));
+	TestEqual(
+		TEXT("Mixed Actor lifecycle class is cached"),
+		ResolvedClass,
+		AStaticMeshActor::StaticClass());
+	TestEqual(
+		TEXT("Mixed Actor lifecycle base is cached"),
+		ResolvedBaseClass,
+		AActor::StaticClass());
+	for (const FAvidScriptBindingClassReferenceModel& Reference :
+		MixedModel.ClassReferences)
+	{
+		if (Reference.ScriptName == TEXT("ProjectileClass"))
+		{
+			continue;
+		}
+		TestFalse(
+			TEXT("Factory-owned mixed table slot is not a lifecycle capability"),
+			MixedRuntimePackage->TryResolveClassReference(
+				Reference.Ordinal,
+				ResolvedClass,
+				ResolvedBaseClass));
+	}
+	TestEqual(
+		TEXT("Mixed runtime publishes lifecycle and object-type imports only"),
+		MixedRuntimePackage->GetVmPackage().Imports.Num(),
+		FAvidScriptObjectLifecycleBindings::GetSpecs().Num() + 1);
 	return true;
 }
 
