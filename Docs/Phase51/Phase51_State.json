@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 51,
+    "goal": "建立 descriptor 驱动的 UObject/Component 构造、Session 所有权、组件查询与 Attach/Detach C#/WASM/UE 游戏逻辑闭环",
+    "start_commit": "d3837b6af995ccf289f01f9ddf4e34eec1fa319e"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase51/P51.0_Object_Component_Ownership_Architecture.md",
+    "version": 1,
+    "sha256": "b13d60e63cad6389db6556b254ed3755f220aef774f3fd86bfd74a88327fbda5",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase51/P51.1_Object_Component_Ownership_Implementation_Plan.md",
+    "closeout": "Docs/Phase51/P51_Phase51_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P51.1",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P51.2",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P51.3",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P51.4",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P51.5",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [],
+  "next_action": "batch-complete -Phase 51 -BatchId P51.1 -Evidence <text>",
+  "revision": 1,
+  "updated_at_utc": "2026-07-25T07:34:57.4215596+00:00"
+}
