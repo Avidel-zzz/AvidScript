@@ -577,6 +577,7 @@ $CSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/
 $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBindingSliceService.cpp'
 $CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
 $CSharpCallOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCallOperationLowerer.cs'
+$BindingRuntimeIntegrationTestsSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorBindingRuntimeIntegrationTests.cpp'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -604,7 +605,9 @@ foreach ($RequiredProjectProfileContract in @(
     'FModuleManifest::TryRead',
     'ModuleManifest.BuildId',
     'FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile',
-    'FAvidScriptHash::Sha256HexUtf8'
+    'FAvidScriptHash::Sha256HexUtf8',
+    'bIncludeWritableProperties',
+    'AppendRuleIdentity(Rule, bHasWritableProperties, Identity)'
 )) {
     if (-not $ProjectBindingProfileHeader.Contains($RequiredProjectProfileContract) -and
         -not $ProjectBindingProfileSource.Contains($RequiredProjectProfileContract)) {
@@ -674,7 +677,9 @@ foreach ($RequiredPropertyDescriptorParserContract in @(
     'property_set',
     'write_policy',
     'cached_property_set',
-    'cached_blueprint_setter'
+    'cached_blueprint_setter',
+    'MakePropertySetCanonicalIdentity',
+    'ue_function'
 )) {
     if (-not $BindingDescriptorSource.Contains($RequiredPropertyDescriptorParserContract)) {
         Add-Violation "binding descriptor v4 parser is missing $RequiredPropertyDescriptorParserContract"
@@ -685,7 +690,7 @@ foreach ($RequiredPropertyDescriptorGeneratorContract in @(
     'property_get:',
     'cached_property_get',
     'ProjectReadableProperty',
-    'property_set:',
+    'MakePropertySetCanonicalIdentity',
     'WritablePropertyGeneratorVersion'
 )) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredPropertyDescriptorGeneratorContract)) {
@@ -703,6 +708,8 @@ foreach ($RequiredPropertyRuntimeContract in @(
     'PrepareReflectedProperty',
     'SetAvidScriptRuntimeValueFromCells',
     'BlueprintSetter candidate reload is not reversible',
+    'Binding.UeFunction != BlueprintSetterName',
+    'binding_property_blueprint_setter_mismatch',
     'binding_property_write_policy_mismatch',
     'binding_property_write_failed'
 )) {
@@ -735,11 +742,35 @@ foreach ($RequiredPropertySliceContract in @(
 }
 foreach ($RequiredPropertyLoweringContract in @(
     'LowerPropertySetter',
+    'LowerPropertyReceiver',
+    'GuestRegister receiver',
     'TryGetPropertySetter',
     'property setter'
 )) {
     if (-not $CSharpCallOperationLowererSource.Contains($RequiredPropertyLoweringContract)) {
         Add-Violation "C# Guest lowering is missing property setter contract $RequiredPropertyLoweringContract"
+    }
+}
+foreach ($RequiredPropertyOperationContract in @(
+    'GuestRegister? propertyReceiver = null;',
+    'LowerPropertyReceiver(',
+    'LowerPropertySetter(',
+    '? propertyValue',
+    ': LowerValue(context, operation.Children[1]'
+)) {
+    if (-not $CSharpOperationLowererSource.Contains($RequiredPropertyOperationContract)) {
+        Add-Violation "C# Guest property evaluation order is missing $RequiredPropertyOperationContract"
+    }
+}
+foreach ($RequiredPropertyGameplayEvidence in @(
+    'FORCENOINLINE void SetAvidScriptPropertyBenchmarkNative',
+    'NativeChecksum',
+    'BidirectionalPropertiesSample',
+    'BuildProfile(',
+    'ReflectedVectorPropertySet'
+)) {
+    if (-not $BindingRuntimeIntegrationTestsSource.Contains($RequiredPropertyGameplayEvidence)) {
+        Add-Violation "Phase 52 gameplay evidence is missing $RequiredPropertyGameplayEvidence"
     }
 }
 foreach ($RequiredClassReferenceDescriptorContract in @(
@@ -2043,7 +2074,16 @@ foreach ($RequiredReachabilityContract in @(
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
     }
 }
-foreach ($RequiredReachabilityProjection in @('export_roots', 'entrypoint_roots', 'all_callables_compatibility', 'AssociatedSymbolId', 'gameplayEventCallbacks')) {
+foreach ($RequiredReachabilityProjection in @(
+    'export_roots',
+    'entrypoint_roots',
+    'all_callables_compatibility',
+    'AssociatedSymbolId',
+    'gameplayEventCallbacks',
+    'QueuePropertyAccessors',
+    'PropertyAccess.Write',
+    'PropertyAccess.ReadWrite'
+)) {
     if (-not $SemanticReachabilitySource.Contains($RequiredReachabilityProjection)) {
         Add-Violation "C# Semantic reachability is missing projection contract $RequiredReachabilityProjection"
     }
@@ -2230,7 +2270,8 @@ foreach ($RequiredHostEffectContract in @(
     'FAvidScriptHostEffectTransactionResult',
     'TWeakObjectPtr<UObject>',
     'TSet<FEntryKey>',
-    'FirstPrepareErrorSource'
+    'FirstPrepareErrorSource',
+    'TStrongObjectPtr<UObject>'
 )) {
     if (-not $HostEffectTransactionHeader.Contains($RequiredHostEffectContract)) {
         Add-Violation "host effect transaction header is missing contract $RequiredHostEffectContract"
@@ -2243,6 +2284,8 @@ foreach ($RequiredHostEffectBehavior in @(
     'FAvidScriptHostEffectTransaction::PrepareReflectedProperty',
     'Property->InitializeValue(Data)',
     'Property->CopyCompleteValue(',
+    'CastField<FObjectPropertyBase>(Property)',
+    'StrongObjectReferences.Emplace',
     'Property->DestroyValue(Data)',
     'binding_reload_effect_unsupported',
     'host_effect_restore_failed'
