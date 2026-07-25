@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "phase_id": 50,
+  "status": "passed",
+  "verified_commit": "711e3eeb8c839fbad58f45dfaaa7849ab4025347",
+  "verified_tree": "2e351607d9b6424f9e9fe2f72853b1fea622caa7",
+  "verified_state_sha256": "8e24479a25eca3c9f366680909ee2295768844aa074b6b5ce85b47ae59add129",
+  "gate_report_sha256": "0a0ce66d6649147c626abc25e55bf45bf063c59aebb7151500acd74aa8cb2dac",
+  "checks": {
+    "dotnet_tests": {
+      "passed": 163,
+      "total": 163
+    },
+    "dotnet_format": {
+      "passed": 5,
+      "total": 5
+    },
+    "powershell_contracts": {
+      "passed": 113,
+      "total": 113
+    },
+    "phase_workflow_contracts": {
+      "passed": 26,
+      "total": 26
+    },
+    "powershell_parser": {
+      "passed": 23,
+      "total": 23
+    },
+    "phase_architecture_fixtures": {
+      "passed": 17,
+      "total": 17
+    },
+    "architecture": "passed",
+    "runtime_source_equivalence": "passed",
+    "ubt": "passed_reused_exact_runtime_tree",
+    "automation": {
+      "found": 250,
+      "completed": 250,
+      "succeeded": 250,
+      "failed": 0,
+      "not_run": 0,
+      "queue_empty": true,
+      "test_exit": true,
+      "request_exit_status": 0,
+      "process_exit_code": 0
+    },
+    "typed_performance_regression_limit_percent": 5.0,
+    "typed_performance": "passed",
+    "typed_performance_baseline": "pending_same_machine_phase49_baseline",
+    "object_lifecycle_performance": "passed",
+    "reentrant_lifecycle_safety": "passed",
+    "phase_privacy_safety": "passed"
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 1
+  },
+  "evidence_strategy": "候选相对完整 Runtime Gate 基线只修改 PhaseWorkflow、合同、状态与错误记录；Runtime、Automation 和 UBT 输入树逐字相同，因此复用带原始 SHA-256 的完整日志，并在精确候选上重新执行静态、.NET 与 PowerShell Gate。"
+}
