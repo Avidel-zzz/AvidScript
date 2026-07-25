@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: freeze review_evidence 误用英文，违反给人读的文档使用中文；状态尚未提交，需记录并以中文证据重新冻结。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "Phase 50 实现、跨层安全修复、README、MIT 与隐私清理完成；独立复审无 Critical/Important 发现，两项 Normal 已修复；聚焦安全回归与架构夹具通过；正式 Gate 编排偏差均在有效完整 Gate 前记录并修正。",
+    "completed_at_utc": "2026-07-25T03:40:31.8944976+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "ab7ac7c36804af9fc1847f996178437821afb42b",
+    "source_tree": "71c29f808429b2771e4a01a659b911d8d536b9db",
+    "state_sha256": "f425aa12dccd22f906f68dc9c0647c51bda20c4ff16fa4957cc1bd16db52a571",
+    "review_evidence": "Phase 50 实现、跨层安全修复、README、MIT 与隐私清理完成；独立复审无 Critical/Important 发现，两项 Normal 已修复；聚焦安全回归与架构夹具通过；正式 Gate 编排偏差均在有效完整 Gate 前记录并修正。",
+    "at_utc": "2026-07-25T03:40:31.8944976+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
-  "revision": 24,
-  "updated_at_utc": "2026-07-25T03:40:01.5728351+00:00"
+  "next_action": "attest -Phase 50 -GateReportPath <path>",
+  "revision": 25,
+  "updated_at_utc": "2026-07-25T03:40:31.9000484+00:00"
 }
