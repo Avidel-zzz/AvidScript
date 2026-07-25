@@ -687,11 +687,37 @@ public:
 		return bAcceptPrepare;
 	}
 
+	bool PrepareReflectedProperty(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		FProperty& Property,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override
+	{
+		++ReflectedPropertyPrepareCallCount;
+		LastRegistry = &Registry;
+		LastHandle = Handle;
+		LastTarget = &Target;
+		LastProperty = &Property;
+		LastEffect = EAvidScriptBindingReloadEffect::ReflectedProperty;
+		OutResult = FAvidScriptBindingHostEffectPrepareResult();
+		OutResult.bSucceeded = bAcceptPrepare;
+		if (!bAcceptPrepare)
+		{
+			OutResult.ErrorCategory = TEXT("test_host_effect_rejected");
+			OutResult.ErrorSource = Target.GetPathName();
+			OutResult.ErrorDetails = TEXT("The test journal rejected the candidate property write.");
+		}
+		return bAcceptPrepare;
+	}
+
 	bool bAcceptPrepare = false;
 	int32 PrepareCallCount = 0;
+	int32 ReflectedPropertyPrepareCallCount = 0;
 	FAvidScriptObjectRegistry* LastRegistry = nullptr;
 	FAvidScriptObjectHandle LastHandle;
 	UObject* LastTarget = nullptr;
+	FProperty* LastProperty = nullptr;
 	EAvidScriptBindingReloadEffect LastEffect = EAvidScriptBindingReloadEffect::Unsupported;
 };
 
@@ -1978,6 +2004,27 @@ bool FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest::RunTest(const F
 	TestTrue(
 		TEXT("BlueprintSetter semantics, not raw property copy, determine the stored value"),
 		FMath::IsNearlyEqual(Actor->RoutedValue, 3.5f));
+
+	FAvidScriptBindingRuntimeRecordingJournal CandidateJournal(true);
+	Context.HostEffectJournal = &CandidateJournal;
+	Actor->RoutedValue = 7.0f;
+	Actor->ProcessEventCallCount = 0;
+	Actor->BlueprintSetterCallCount = 0;
+	TestFalse(
+		TEXT("Candidate context rejects a BlueprintSetter before ProcessEvent"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestEqual(
+		TEXT("Rejected BlueprintSetter candidate does not capture a partial property snapshot"),
+		CandidateJournal.ReflectedPropertyPrepareCallCount,
+		0);
+	TestEqual(TEXT("Rejected candidate does not reach ProcessEvent"), Actor->ProcessEventCallCount, 0);
+	TestEqual(TEXT("Rejected candidate does not call the BlueprintSetter"), Actor->BlueprintSetterCallCount, 0);
+	TestTrue(
+		TEXT("Rejected candidate leaves the property unchanged"),
+		FMath::IsNearlyEqual(Actor->RoutedValue, 7.0f));
+	TestTrue(
+		TEXT("Rejected candidate reports the stable unsupported reload category"),
+		DispatchResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
 	return true;
 }
 

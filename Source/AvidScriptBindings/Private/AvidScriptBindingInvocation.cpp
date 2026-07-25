@@ -2887,6 +2887,16 @@ bool FAvidScriptBindingPackage::Dispatch(
 		{
 			return true;
 		}
+		if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+			&& Plan.Function != nullptr)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_reload_effect_unsupported"),
+				Plan.DebugPath,
+				TEXT("BlueprintSetter candidate reload is not reversible because ProcessEvent may produce additional host effects."));
+			return false;
+		}
 		if (Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported)
 		{
 			SetAvidScriptBindingDispatchFailure(

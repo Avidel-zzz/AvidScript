@@ -697,6 +697,7 @@ foreach ($RequiredPropertyRuntimeContract in @(
     'cached_blueprint_setter',
     'PrepareReflectedProperty',
     'SetAvidScriptRuntimeValueFromCells',
+    'BlueprintSetter candidate reload is not reversible',
     'binding_property_write_policy_mismatch',
     'binding_property_write_failed'
 )) {
