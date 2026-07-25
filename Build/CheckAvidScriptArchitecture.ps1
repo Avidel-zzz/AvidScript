@@ -2042,6 +2042,17 @@ Test-RequiredTokenSequence `
         'binding_runtime_object_type_mismatch',
         'exit 1') `
     -Description 'C# runtime object-type provenance validation'
+foreach ($RequiredGuestObjectTypeExtractionContract in @(
+    'avid_object_type_is_a',
+    '$ConstantsByResultId.TryGetValue(',
+    '$Operands.Count -eq 3',
+    'direct non-negative int32 constant ordinal'
+)) {
+    if (-not $CSharpBuildScriptSource.Contains(
+            $RequiredGuestObjectTypeExtractionContract)) {
+        Add-Violation "C# final Guest IR object-type extraction is missing $RequiredGuestObjectTypeExtractionContract"
+    }
+}
 if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
 }

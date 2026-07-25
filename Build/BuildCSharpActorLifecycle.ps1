@@ -353,11 +353,29 @@ function Get-UsedObjectTypeOrdinals {
     param([Parameter(Mandatory = $true)]$Model)
 
     $Ordinals = [System.Collections.Generic.SortedSet[int]]::new()
+    $ObjectTypeImportIds = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($Import in @($Model.imports)) {
+        if ([string]$Import.module -ceq "avidscript" -and
+            [string]$Import.name -ceq "avid_object_type_is_a") {
+            [void]$ObjectTypeImportIds.Add([string]$Import.id)
+        }
+    }
+
+    $ConstantsByResultId =
+        [System.Collections.Generic.Dictionary[string, object]]::new(
+            [System.StringComparer]::Ordinal)
     foreach ($Function in @($Model.functions)) {
         foreach ($Block in @($Function.blocks)) {
             foreach ($Instruction in @($Block.instructions)) {
-                if ([string]$Instruction.op -cne "constant" -or
-                    [string]$Instruction.constant.kind -cne "object_type_ref") {
+                if ([string]$Instruction.op -cne "constant") {
+                    continue
+                }
+                $ResultId = [string]$Instruction.result_id
+                if (-not [string]::IsNullOrWhiteSpace($ResultId)) {
+                    $ConstantsByResultId[$ResultId] = $Instruction
+                }
+                if ([string]$Instruction.constant.kind -cne "object_type_ref") {
                     continue
                 }
                 $Ordinal = 0
@@ -369,6 +387,39 @@ function Get-UsedObjectTypeOrdinals {
                         [ref]$Ordinal)) {
                     [void]$Ordinals.Add($Ordinal)
                 }
+            }
+        }
+    }
+
+    foreach ($Function in @($Model.functions)) {
+        foreach ($Block in @($Function.blocks)) {
+            foreach ($Instruction in @($Block.instructions)) {
+                if ([string]$Instruction.op -cne "call" -or
+                    -not $ObjectTypeImportIds.Contains(
+                        [string]$Instruction.target_id)) {
+                    continue
+                }
+
+                $Operands = @($Instruction.operand_ids)
+                $OrdinalInstruction = $null
+                $Ordinal = 0
+                $HasDirectOrdinal =
+                    $Operands.Count -eq 3 -and
+                    $ConstantsByResultId.TryGetValue(
+                        [string]$Operands[2],
+                        [ref]$OrdinalInstruction) -and
+                    [string]$OrdinalInstruction.constant.kind -ceq "int32" -and
+                    $OrdinalInstruction.constant.value -is [string] -and
+                    [int]::TryParse(
+                        [string]$OrdinalInstruction.constant.value,
+                        [System.Globalization.NumberStyles]::None,
+                        [System.Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$Ordinal) -and
+                    $Ordinal -ge 0
+                if (-not $HasDirectOrdinal) {
+                    throw "Guest IR avid_object_type_is_a calls must use a direct non-negative int32 constant ordinal."
+                }
+                [void]$Ordinals.Add($Ordinal)
             }
         }
     }
