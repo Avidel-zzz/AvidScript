@@ -11,10 +11,13 @@
 脚本侧只需要写：
 
 ```csharp
-UE.Self.CustomTimeDilation = 1.0f;
+AActor self = UE.Self;
+self.CustomTimeDilation = 1.0f;
 ```
 
 生成器负责把该赋值映射到 descriptor v8 的 `property_set` binding。运行时在加载阶段缓存 `FProperty` 或 BlueprintSetter 调用计划，热路径不按名字查找反射成员。
+
+当前对象 facade 使用零分配的 `readonly struct`。C# 不允许直接修改属性返回的临时 struct，因此写属性前要把 `UE.Self` 缓存到局部变量；同一事件入口后续的属性读写和函数调用都复用这个变量，不产生托管分配。未来若引入 ref-return Self facade，会在保持 Guest IR、状态迁移和热重载语义稳定后再移除这项限制。
 
 ## 权限
 

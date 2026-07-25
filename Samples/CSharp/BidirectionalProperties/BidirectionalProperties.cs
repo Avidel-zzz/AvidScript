@@ -10,25 +10,28 @@ public static class BidirectionalProperties
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
+        AActor self = UE.Self;
         ElapsedSeconds = 0.0f;
-        UE.Self.CustomTimeDilation = 1.0f;
-        UE.Self.SetActorLocation(new FVector(0.0f, 0.0f, 100.0f));
+        self.CustomTimeDilation = 1.0f;
+        self.SetActorLocation(new FVector(0.0f, 0.0f, 100.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
+        AActor self = UE.Self;
         ElapsedSeconds += deltaSeconds;
-        UE.Self.CustomTimeDilation = 1.0f + ElapsedSeconds * 0.05f;
+        self.CustomTimeDilation = 1.0f + ElapsedSeconds * 0.05f;
 
-        FVector location = UE.Self.GetActorLocation();
-        UE.Self.SetActorLocation(
+        FVector location = self.GetActorLocation();
+        self.SetActorLocation(
             location + new FVector(60.0f * deltaSeconds, 0.0f, 0.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
-        UE.Self.CustomTimeDilation = 1.0f;
+        AActor self = UE.Self;
+        self.CustomTimeDilation = 1.0f;
     }
 }

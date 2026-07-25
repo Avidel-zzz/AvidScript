@@ -579,6 +579,7 @@ $CSharpBindingSliceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/C
 $CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
 $CSharpCallOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCallOperationLowerer.cs'
 $BindingRuntimeIntegrationTestsSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorBindingRuntimeIntegrationTests.cpp'
+$BidirectionalPropertiesSampleSource = Read-RequiredFile 'Samples/CSharp/BidirectionalProperties/BidirectionalProperties.cs'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -773,6 +774,10 @@ foreach ($RequiredPropertyGameplayEvidence in @(
     if (-not $BindingRuntimeIntegrationTestsSource.Contains($RequiredPropertyGameplayEvidence)) {
         Add-Violation "Phase 52 gameplay evidence is missing $RequiredPropertyGameplayEvidence"
     }
+}
+if (-not $BidirectionalPropertiesSampleSource.Contains('AActor self = UE.Self;') -or
+    $BidirectionalPropertiesSampleSource.Contains('UE.Self.CustomTimeDilation =')) {
+    Add-Violation 'Phase 52 property sample must cache the zero-allocation Self facade before property writes'
 }
 foreach ($RequiredClassReferenceDescriptorContract in @(
     'FAvidScriptBindingClassReferenceModel',
