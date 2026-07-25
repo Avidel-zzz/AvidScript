@@ -13,7 +13,7 @@
 
 namespace
 {
-FAvidScriptBindingTypeModel MakeObjectType(
+FAvidScriptBindingTypeModel MakeFactoryPlanObjectType(
 	const TCHAR* ClassPath,
 	const TCHAR* CppType,
 	const int32 Ordinal,
@@ -70,16 +70,16 @@ FAvidScriptBindingPackageModel MakeFactoryPackage(
 	Package.Source = TEXT("ue_reflection");
 	Package.PackageName = TEXT("avidscript.test.object_factory_plan");
 
-	const FAvidScriptBindingTypeModel ObjectType = MakeObjectType(
+	const FAvidScriptBindingTypeModel ObjectType = MakeFactoryPlanObjectType(
 		TEXT("/Script/CoreUObject.Object"), TEXT("UObject"), 0, FString());
-	const FAvidScriptBindingTypeModel ActorType = MakeObjectType(
+	const FAvidScriptBindingTypeModel ActorType = MakeFactoryPlanObjectType(
 		TEXT("/Script/Engine.Actor"), TEXT("AActor"), 1, ObjectType.StableId);
-	const FAvidScriptBindingTypeModel ActorComponentType = MakeObjectType(
+	const FAvidScriptBindingTypeModel ActorComponentType = MakeFactoryPlanObjectType(
 		TEXT("/Script/Engine.ActorComponent"), TEXT("UActorComponent"), 2, ObjectType.StableId);
 	Package.Types = { ObjectType, ActorType, ActorComponentType };
 	if (FString(ClassPath) != TEXT("/Script/Engine.ActorComponent"))
 	{
-		Package.Types.Add(MakeObjectType(
+		Package.Types.Add(MakeFactoryPlanObjectType(
 			ClassPath, CppType, 3, ActorComponentType.StableId));
 	}
 	Package.SelfTypeId = ActorType.StableId;

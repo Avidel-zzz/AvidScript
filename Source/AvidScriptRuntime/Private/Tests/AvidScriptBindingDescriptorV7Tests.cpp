@@ -354,9 +354,12 @@ bool FAvidScriptBindingDescriptorV7ObjectFactoriesTest::RunTest(
 				Root->GetArrayField(TEXT("object_factories"))[0]->AsObject();
 			const FString MissingId = FString::ChrN(64, TEXT('a'));
 			Factory->SetStringField(TEXT("class_reference_id"), MissingId);
-			EAvidScriptObjectFactoryKind Kind;
-			EAvidScriptObjectOwnershipPolicy Ownership;
-			EAvidScriptComponentRegistrationPolicy Registration;
+			EAvidScriptObjectFactoryKind Kind =
+				EAvidScriptObjectFactoryKind::NewObject;
+			EAvidScriptObjectOwnershipPolicy Ownership =
+				EAvidScriptObjectOwnershipPolicy::Session;
+			EAvidScriptComponentRegistrationPolicy Registration =
+				EAvidScriptComponentRegistrationPolicy::None;
 			if (TryParseAvidScriptObjectFactoryKind(
 					Factory->GetStringField(TEXT("kind")),
 					Kind)
@@ -385,9 +388,12 @@ bool FAvidScriptBindingDescriptorV7ObjectFactoriesTest::RunTest(
 				Root->GetArrayField(TEXT("object_factories"))[0]->AsObject();
 			const FString MissingId = FString::ChrN(64, TEXT('b'));
 			Factory->SetStringField(TEXT("outer_type_id"), MissingId);
-			EAvidScriptObjectFactoryKind Kind;
-			EAvidScriptObjectOwnershipPolicy Ownership;
-			EAvidScriptComponentRegistrationPolicy Registration;
+			EAvidScriptObjectFactoryKind Kind =
+				EAvidScriptObjectFactoryKind::NewObject;
+			EAvidScriptObjectOwnershipPolicy Ownership =
+				EAvidScriptObjectOwnershipPolicy::Session;
+			EAvidScriptComponentRegistrationPolicy Registration =
+				EAvidScriptComponentRegistrationPolicy::None;
 			if (TryParseAvidScriptObjectFactoryKind(
 					Factory->GetStringField(TEXT("kind")),
 					Kind)
