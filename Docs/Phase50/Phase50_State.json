@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: close 隐私扫描错误检查完整 diff，导致已删除的本机路径与 SchemaToken 标识符误报；修复为仅检查新增内容并补充合同测试后重新冻结 Gate",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "close 隐私扫描修复完成：删除行与 SchemaToken 误报已消除；新增行通过独立 indicator、--no-color、--text 与 --no-textconv 防止 ++ 前缀、ANSI 颜色及 binary/textconv 绕过。六项 privacy 合同、PhaseWorkflow 26/26、parser 23/23 与真实阶段范围均通过；独立复审三轮发现的 Important 已逐项先红后绿修复，终止复审 0 Critical/0 Important。",
+    "completed_at_utc": "2026-07-25T07:09:44.4410094+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "11a72f49bd7e6c3ff2d9795d2cb9893737d0e2c5",
+    "source_tree": "244c95bd17037b3aad9550667653e5e1c2576269",
+    "state_sha256": "cf757bfc208a76e422e335450d13e0ed2819ad384aa8200513088238ed2e37b4",
+    "review_evidence": "close 隐私扫描修复完成：删除行与 SchemaToken 误报已消除；新增行通过独立 indicator、--no-color、--text 与 --no-textconv 防止 ++ 前缀、ANSI 颜色及 binary/textconv 绕过。六项 privacy 合同、PhaseWorkflow 26/26、parser 23/23 与真实阶段范围均通过；独立复审三轮发现的 Important 已逐项先红后绿修复，终止复审 0 Critical/0 Important。",
+    "at_utc": "2026-07-25T07:09:44.4410094+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
-  "revision": 33,
-  "updated_at_utc": "2026-07-25T06:34:41.2887972+00:00"
+  "next_action": "attest -Phase 50 -GateReportPath <path>",
+  "revision": 34,
+  "updated_at_utc": "2026-07-25T07:09:44.4477228+00:00"
 }
