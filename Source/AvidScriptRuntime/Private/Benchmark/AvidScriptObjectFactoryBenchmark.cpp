@@ -23,7 +23,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptObjectFactoryBenchmark, Log, All);
 
 namespace
 {
-constexpr int32 AvidScriptObjectFactoryTypeOrdinal = 4;
+constexpr int32 AvidScriptObjectFactoryTypeOrdinal = 6;
 constexpr int32 AvidScriptObjectFactoryImportCount = 4;
 
 double MeasureObjectFactoryPerIterationMs(
@@ -162,16 +162,22 @@ bool MakeObjectFactoryBenchmarkPackage(
 	const FAvidScriptBindingTypeModel ActorComponentType = MakeObjectFactoryBenchmarkType(
 		TEXT("/Script/Engine.ActorComponent"), TEXT("UActorComponent"), 2, ObjectType.StableId);
 	const FAvidScriptBindingTypeModel SceneComponentType = MakeObjectFactoryBenchmarkType(
-		TEXT("/Script/Engine.SceneComponent"), TEXT("USceneComponent"), 3, ActorComponentType.StableId);
+		TEXT("/Script/Engine.SceneComponent"), TEXT("USceneComponent"), 5, ActorComponentType.StableId);
+	const FAvidScriptBindingTypeModel PrimitiveComponentType = MakeObjectFactoryBenchmarkType(
+		TEXT("/Script/Engine.PrimitiveComponent"), TEXT("UPrimitiveComponent"), 4, SceneComponentType.StableId);
+	const FAvidScriptBindingTypeModel MeshComponentType = MakeObjectFactoryBenchmarkType(
+		TEXT("/Script/Engine.MeshComponent"), TEXT("UMeshComponent"), 3, PrimitiveComponentType.StableId);
 	const FAvidScriptBindingTypeModel StaticMeshComponentType = MakeObjectFactoryBenchmarkType(
 		TEXT("/Script/Engine.StaticMeshComponent"),
 		TEXT("UStaticMeshComponent"),
 		AvidScriptObjectFactoryTypeOrdinal,
-		SceneComponentType.StableId);
+		MeshComponentType.StableId);
 	Model.Types = {
 		ObjectType,
 		ActorType,
 		ActorComponentType,
+		MeshComponentType,
+		PrimitiveComponentType,
 		SceneComponentType,
 		StaticMeshComponentType
 	};
