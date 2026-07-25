@@ -1,69 +1,96 @@
 # Phase 52 双向属性 Binding 收尾报告
 
-> 状态：集中 Gate 待执行。P52.1 至 P52.4 已实现并有 focused 证据；P52.5 正在完成最终独立复审、全量验证、attestation 与 close。在这些步骤完成前不声明 Phase 52 已完成。
+> 状态：已通过最终 Gate 并完成 attestation。P52.1 至 P52.5 均已完成；本文与 `P52_Gate_Summary.json` 构成收尾提交，外部不可变 close evidence 由工作流 `close` 命令生成。
 
-## 阶段目标
+## 阶段成果
 
-把 descriptor 驱动的 reflected property 从只读升级为显式授权、缓存执行、可回滚的 C# `get/set` 闭环，并建立后续容器、delegate 与通用成员写入共用的能力模型和事务基础。
-
-## 已完成能力
+Phase 52 已把 descriptor 驱动的 reflected property 从只读升级为显式授权、缓存执行、可回滚的 C# `get/set` 闭环：
 
 - profile 显式声明属性读写意图，旧只读 profile 的 hash 与行为保持兼容；
 - descriptor schema v8 发布独立 `property_get/property_set`、写策略和精确 BlueprintSetter 身份；
 - C# renderer 生成自然属性，Roslyn 语义可达性按 getter/setter 精确裁剪；
 - C# lowering 保证 receiver 先于右值求值，复合赋值不重复求值 receiver；
-- package load 缓存 `FProperty*`、owner class 与可选 setter `UFunction*`，热路径不做名称查找；
+- package load 一次性缓存 `FProperty*`、owner class 与可选 setter `UFunction*`，热路径不做名称查找；
 - direct setter 支持 scalar、object handle 与现有 inline UStruct ABI；
-- candidate transaction 首次写入捕获类型正确的属性快照，失败逆序回滚，UObject 快照跨 GC 保持强引用；
+- candidate transaction 首次写入捕获类型正确的属性快照，失败时逆序回滚，UObject 快照跨 GC 保持强引用；
 - 具有不可逆副作用的 BlueprintSetter 在 candidate `ProcessEvent` 前失败关闭；
 - runtime slice 只发布 C# 最终实际使用的访问器，并保持 package/import provenance 精确匹配；
-- 中文 `BidirectionalProperties` 样例通过真实 profile、Roslyn、Guest IR、WASM、WAMR 与 UE Actor 生命周期闭环；
-- 描述符解析失败现在保留包头、类型索引、binding 索引和对象图错误源，不再退化为空诊断。
+- 描述符解析失败保留包头、类型索引、binding 索引和对象图错误源；
+- 独立复审发现的问题全部关闭，终轮结论为 Critical 0、Important 0、Minor 0。
 
-## 实际游戏逻辑
+## 游戏逻辑闭环
 
-样例在 `BeginPlay` 写入 `AActor.CustomTimeDilation` 并设置 Actor scale，在 `Tick` 继续写属性、读取 `FVector` scale 后计算并写回，在 `EndPlay` 恢复状态。最终 focused 测试证明：
+中文版 `BidirectionalProperties` 样例已通过真实 profile、Roslyn、Guest IR、WASM、WAMR 与 UE Actor 生命周期：
 
-- production profile 构建执行 bootstrap/final 两轮；
-- setter-only 源只在 runtime slice 中保留 setter；
-- manifest、runtime package 和 WASM 共同加载；
-- `BeginPlay/Tick/EndPlay` 均进入真实 UE Actor；
+- `BeginPlay` 写入 `AActor.CustomTimeDilation` 并设置 Actor scale；
+- `Tick` 继续写属性、读取 `FVector` scale 后计算并写回；
+- `EndPlay` 恢复状态；
+- production profile 完成 bootstrap/final 两轮构建；
+- setter-only 源在 runtime slice 中只保留 setter；
+- manifest、descriptor、runtime package 与 WASM 共同加载；
 - scalar property set 与 `FVector` function ABI 都产生可观察结果。
 
-## 独立复审修复
+这证明当前 C# 脚本已经能在 UE 生命周期中读取和写入授权 reflected property，而不是只验证孤立 Host 函数。
 
-初轮独立复审发现 1 项 High 和 5 项 Medium，集中修复覆盖：
+## 架构边界
 
-- C# 属性赋值求值顺序；
-- Phase 51 旧 profile identity；
-- BlueprintSetter descriptor identity；
-- object property snapshot 的 GC root；
-- getter/setter accessor 级可达性；
-- benchmark 防编译器折叠；
-- 真实 profile 示例的 build request、诊断源位置、`UE.Self` struct 赋值语义、受支持 FVector API 和 package manifest/descriptor 分层。
+- Core 保持无 UE/WAMR 依赖；
+- Bindings 负责 UE typed API、property plan 与 descriptor 调用，不依赖 WAMR；
+- VM 只暴露 Core 级执行合同，不包含 gameplay 类型；
+- Runtime 显式组合 Core、Bindings 与 VM，并持有 Session 和 candidate transaction 生命周期；
+- Guest IR 保持语言中立，PowerShell 只负责编排和证据闭合；
+- property、setter identity、调用能力与 runtime slice 均由 descriptor 生成链驱动，没有新增手写 UE API 白名单。
 
-最终独立复审结论将在 `P52.5_Independent_Review.md` 中记录。
+## 最终 Gate
 
-## 性能
+| 验证面 | 最终结果 | 说明 |
+| --- | --- | --- |
+| .NET test hosts | 173 / 173 | 固定 SDK 8.0.416，五个共享 graph 宿主串行执行 |
+| `dotnet format` | 5 / 5 | 精确候选，`--verify-no-changes --no-restore` |
+| PowerShell contracts | 117 / 117 | 六个 Saved 依赖宿主 91/91，精确候选 PhaseWorkflow 26/26 |
+| tracked PowerShell parser | 23 / 23 | 全部 tracked `.ps1` |
+| frozen architecture fixtures | 17 / 17 | canonical、token、closure 与 path 正负例 |
+| 主架构检查 | 通过 | 精确候选，架构输入与模块边界均 clean |
+| UE5.8 no-clean UBT | 通过 | 5 个增量 action，`Result: Succeeded`，没有清理 Editor Target |
+| full Automation | 276 / 276 | failed/not-run 0，Queue Empty、TestExit、RequestExit status 0、进程退出码 0 |
+| 独立复审 | 0 findings | Critical 0、Important 0、Minor 0 |
 
-最终 anti-fold focused benchmark：
+外部包装器出现过三类非产品假阴性：变量插值语法错误在任何测试启动前被 parser 拦截；主 worktree 与冻结 worktree 的 CRLF/LF 差异被原始字节哈希误判，随后改为规范化内容身份；主架构脚本被错误交给 Windows PowerShell 5.1，随后使用规定的 PowerShell 7 重跑静态 Gate。被拒的 Attempt 日志均保留，最终 attestation 只引用通过日志。Gate 报告首次还因给非 Automation 检查附加扩展 `counts` 被 schema 拒绝，状态未改变；最终报告按既有 schema 重新生成并通过验证。
+
+## 性能结果
+
+同一份 276/276 完整 Automation 日志包含最终 anti-fold 属性性能采样：
 
 | 路径 | P50 | P95 |
 | --- | ---: | ---: |
-| Native setter | 0.000000393 ms | 0.000000975 ms |
-| Cached binding setter | 0.000196480 ms | 0.000212887 ms |
-| WAMR setter | 0.001013475 ms | 0.001106841 ms |
+| Native setter | 0.000000393 ms | 0.000000589 ms |
+| Cached binding setter | 0.000195898 ms | 0.000206441 ms |
+| WAMR setter | 0.000925778 ms | 0.000964450 ms |
 
-11,776 次调用保持一次 import crossing，warm class lookup、reflected-name lookup 与重复 snapshot capture 为 0。P52.4 初步 native 数字可被编译器折叠，已由这份 checksum 消费、禁止关键内联的最终基线取代。
+11,776 次调用保持一次 import crossing，warm class lookup、reflected-name lookup 与重复 snapshot capture 均为 0，checksum 为 23.78。P52.4 的初步 native 数字可被编译器折叠，已由这份 checksum 消费、禁止关键内联的最终基线取代。
+
+同轮历史性能面继续通过：组件 WASM cycle P50/P95 为 0.009725/0.012083 ms，每轮 4 次 import；typed checked cast P50/P95 为 0.000764/0.001237 ms，typed upcast Host import 为 0；对象 spawn/destroy 各为 1 次 import。上述数字是 UE5.8 Development Editor / NullRHI 下的 smoke benchmark，不替代 Shipping、移动端和长期回归基线。
 
 ## 当前边界
 
 Phase 52 不宣称覆盖任意 out/ref UStruct、`FHitResult`、容器、delegate、Cook/Shipping 和移动端。`K2_SetActorLocation` 等接口需要通用 out/ref ABI 后才能安全进入脚本表面；不会通过为单个 UE API 手写特例绕过。
 
-## 最终 Gate
+## Gate 身份
 
-最终数字将在冻结候选完成集中 Gate 后写入。计划保持一次 no-clean UE5.8 Editor build、一次完整 `Automation RunTests AvidScript`，并串行执行五个 .NET host、format、PowerShell contracts、parser 与 architecture fixtures。
+| 字段 | 值 |
+| --- | --- |
+| verified commit | `8f6766e920bb51545ea782f4010a728ff37e65c8` |
+| verified tree | `37c1284060e8d089c29f2f25fefa328d55fe1b83` |
+| verified state SHA-256 | `aeb32dcb9ac41201e01c9d776f3ea306e6290adcab516208cbe63e54dfee0064` |
+| gate report | `C:\tmp\AvidScriptPhase52Gate-8f6766e-final\Phase52_Gate.json` |
+| gate report SHA-256 | `3b36243a10ba1a97a4f2ba69c59b05ad9edfaff6b80d7a7449a386429d2b4609` |
+| attestation commit | 本收尾提交 |
+| close evidence | `C:\tmp\AvidScriptPhase52Gate-8f6766e-final\Phase52_Close.json` |
+
+## 下一阶段
+
+Phase 53 将建立通用 out/ref UStruct ABI：由 descriptor 发布参数方向与稳定 call-frame layout，C# renderer/lowering 支持 `out/ref`，Guest IR 与 WASM linear memory 承载可写槽位，Host 使用缓存 marshalling plan 执行并把结果写回。首个完整证明目标是让 `FHitResult` 与 `K2_SetActorLocation` 通过同一生成链进入 C# gameplay，不增加单 API 特例，并建立零热路径名称查找、可量化 crossing 与分配预算。
 
 ## 当前结论
 
-**Phase 52 功能实现已经闭环，阶段状态仍为实施中。** 只有 freeze、完整 Gate、attest、close evidence 与安全推送全部完成后，本文才会更新为正式完成。
+**Phase 52 已完成。** C# 双向 reflected property、candidate 回滚、accessor 级 runtime slice、真实 UE 生命周期样例、完整 Gate、attestation 与 close evidence 形成了可复核闭环。

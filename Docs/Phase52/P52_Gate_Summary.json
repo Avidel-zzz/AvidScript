@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "phase_id": 52,
+  "status": "passed",
+  "verified_commit": "8f6766e920bb51545ea782f4010a728ff37e65c8",
+  "verified_tree": "37c1284060e8d089c29f2f25fefa328d55fe1b83",
+  "verified_state_sha256": "aeb32dcb9ac41201e01c9d776f3ea306e6290adcab516208cbe63e54dfee0064",
+  "gate_report_sha256": "3b36243a10ba1a97a4f2ba69c59b05ad9edfaff6b80d7a7449a386429d2b4609",
+  "checks": {
+    "dotnet_tests": {
+      "passed": 173,
+      "total": 173
+    },
+    "dotnet_format": {
+      "passed": 5,
+      "total": 5
+    },
+    "powershell_contracts": {
+      "passed": 117,
+      "total": 117
+    },
+    "phase_workflow_contracts": {
+      "passed": 26,
+      "total": 26
+    },
+    "powershell_parser": {
+      "passed": 23,
+      "total": 23
+    },
+    "phase_architecture_fixtures": {
+      "passed": 17,
+      "total": 17
+    },
+    "architecture": "passed",
+    "ubt": "passed_new_no_clean_invocation",
+    "automation": {
+      "found": 276,
+      "completed": 276,
+      "succeeded": 276,
+      "failed": 0,
+      "not_run": 0,
+      "queue_empty": true,
+      "test_exit": true,
+      "request_exit_status": 0,
+      "process_exit_code": 0
+    },
+    "property_performance": {
+      "status": "passed",
+      "native_p50_ms": 0.000000393,
+      "native_p95_ms": 0.000000589,
+      "binding_p50_ms": 0.000195898,
+      "binding_p95_ms": 0.000206441,
+      "wamr_p50_ms": 0.000925778,
+      "wamr_p95_ms": 0.000964450,
+      "crossings": 11776,
+      "warm_class_loads": 0,
+      "warm_reflected_name_lookups": 0,
+      "snapshot_captures": 0
+    },
+    "object_component_performance": "passed",
+    "typed_performance": "passed",
+    "object_lifecycle_performance": "passed",
+    "independent_review": {
+      "critical": 0,
+      "important": 0,
+      "minor": 0
+    }
+  },
+  "invocations": {
+    "ubt": 1,
+    "automation": 1,
+    "full_gate": 1
+  },
+  "evidence_strategy": "在精确冻结候选上集中执行静态、.NET 与 PhaseWorkflow Gate；依赖项目 Saved 生成物的合同宿主在具有冻结 protected-dirty baseline 的主插件执行；UE5.8 no-clean UBT 与完整 276 项 Automation 各执行一次，并由同一原始日志提供功能与性能证据。"
+}
