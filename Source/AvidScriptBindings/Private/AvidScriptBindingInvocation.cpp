@@ -2153,6 +2153,33 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	if (ObjectFactoryBindingCount > 0)
+	{
+		for (const FAvidScriptObjectFactoryBindingSpec& Spec :
+			FAvidScriptObjectFactoryBinding::GetSpecs())
+		{
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = Spec.Kind;
+			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
+			Plan.bRequiresWriteAccess =
+				Spec.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
+				|| Spec.Kind == EAvidScriptBindingInvocationKind::ObjectRelease;
+			Plan.ExpectedArgumentCount = Spec.Kind
+				== EAvidScriptBindingInvocationKind::ObjectRelease
+				? 2
+				: 3;
+
+			Package->Impl->VmPackage.Imports.Add({
+				Spec.StableId,
+				static_cast<uint32>(Package->Impl->Plans.Num()),
+				Spec.ModuleName,
+				Spec.ImportName,
+				Spec.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+		}
+	}
+
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
@@ -2253,33 +2280,6 @@ bool FAvidScriptBindingPackage::TryResolveObjectFactory(
 	if (!Impl->ObjectFactoryPlans.IsValidIndex(static_cast<int32>(Ordinal)))
 	{
 		return false;
-	}
-
-	if (ObjectFactoryBindingCount > 0)
-	{
-		for (const FAvidScriptObjectFactoryBindingSpec& Spec :
-			FAvidScriptObjectFactoryBinding::GetSpecs())
-		{
-			FAvidScriptRuntimeBindingInvocationPlan Plan;
-			Plan.Kind = Spec.Kind;
-			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
-			Plan.bRequiresWriteAccess =
-				Spec.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
-				|| Spec.Kind == EAvidScriptBindingInvocationKind::ObjectRelease;
-			Plan.ExpectedArgumentCount = Spec.Kind
-				== EAvidScriptBindingInvocationKind::ObjectRelease
-				? 2
-				: 3;
-
-			Package->Impl->VmPackage.Imports.Add({
-				Spec.StableId,
-				static_cast<uint32>(Package->Impl->Plans.Num()),
-				Spec.ModuleName,
-				Spec.ImportName,
-				Spec.Signature
-			});
-			Package->Impl->Plans.Add(MoveTemp(Plan));
-		}
 	}
 	OutPlan = &Impl->ObjectFactoryPlans[static_cast<int32>(Ordinal)];
 	return OutPlan->ObjectClass != nullptr

@@ -1124,3 +1124,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-25 P51.2 路径防错规则同轮未机械执行：记录上一条后又按概念名猜测 `AvidScriptBindingPackage.h` 与 `AvidScriptBindingInvoker.h`，两个路径均不存在。Prevention：未知 owner 的读取命令不得手工录入路径；必须直接复制本轮 `rg --files` 输出中的完整路径，若索引没有目标 basename，则先按符号检索 owner，不能把概念名转换成文件名尝试。
 - 2026-07-25 P51.2 Phase state 路径再次猜测：已经索引出 `Docs/Phase51/Phase51_State.json`，仍额外尝试不存在的 `Build/PhaseState/phase-51.json`。Prevention：同轮索引已返回唯一目标时禁止再构造候选路径；后续命令参数必须逐字使用索引结果，状态读取统一由 `InvokePhaseWorkflow.ps1 status` 或该已确认文档承担。
 - 2026-07-25 P51.2 索引外扩展名补全复发：`rg --files` 只返回 inline 定义的 `AvidScriptObjectRegistryTestTypes.h`，仍尝试读取并不存在的同名 `.cpp`。Prevention：索引结果是允许读取路径的白名单；不得根据已确认 basename 继续补全另一扩展名，只有符号检索明确返回新 owner 时才加入读取批次。
+- 2026-07-25 P51.2 重复结构补丁锚点过宽：factory import 追加块只锚定通用的 object-type 尾部与相邻大括号，被应用到 `TryResolveObjectFactory`，首次 Bindings UBT 因 `Package` 与计数变量越界失败。Prevention：长实现文件中的块移动或插入必须同时锚定目标函数签名和唯一尾部字段（本例 `LoadDescriptor` 与 `OutResult.BindingCount`）；应用后用函数级源码切片确认新增块位于预期作用域，再进入 UBT。
