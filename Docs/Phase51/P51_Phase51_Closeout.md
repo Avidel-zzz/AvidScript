@@ -4,7 +4,7 @@
 
 ## 当前批次
 
-- P51.1：Pending
+- P51.1：Completed
 - P51.2：Pending
 - P51.3：Pending
 - P51.4：Pending
@@ -12,11 +12,20 @@
 
 ## 已完成能力
 
-尚未进入实现提交。
+- Profile schema v4 已支持 UObject/ActorComponent factory 声明及生成期 UE 约束验证。
+- Descriptor v7 已发布 canonical `object_factories` 表，并保持 v2-v6 identity 兼容。
+- Generator、emitter、binding slice、PowerShell resolver 与 runtime reload 已闭合 schema v7 owner 链。
+- Runtime package load 已生成缓存 `UClass*` 与 object type ordinal 的不可变 factory plan。
+- Actor lifecycle 与 object factory class reference 已严格分流，能力重叠和未拥有的非 Actor 引用会失败关闭。
+- 详细实现边界见 `Docs/Phase51/P51.1_Object_Factory_Descriptor_Implementation_Report.md`。
 
 ## 验证
 
-最终集中 Gate 前仅记录阻塞性、风险驱动的聚焦验证，不用局部成功替代完整验收。
+- UE5.8 no-clean module UBT：Bindings、Runtime、Editor 成功。
+- 聚焦 Automation：30/30 Success。
+- Prepared Semantic：13/13 passed。
+- 精确 clean candidate architecture checker：passed。
+- 这些结果完成 P51.1 批次验收，不替代 P51.5 的 Phase 51 最终 Gate。
 
 ## Gate 身份
 

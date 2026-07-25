@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P51.1",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "f165507: descriptor v7 object factories, immutable runtime plans, no-clean UE5.8 UBT succeeded, Automation 30/30, Prepared Semantic 13/13, clean architecture checker passed",
+      "completed_at_utc": "2026-07-25T09:55:32.7605536+00:00"
     },
     {
       "id": "P51.2",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 51 -BatchId P51.1 -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-07-25T07:34:57.4215596+00:00"
+  "next_action": "batch-complete -Phase 51 -BatchId P51.2 -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-07-25T09:55:32.7629575+00:00"
 }
