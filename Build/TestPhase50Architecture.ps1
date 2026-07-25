@@ -678,7 +678,7 @@ function Test-RendererFrozenRegions {
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-        'EmitReferenceSource' = 'b6afc255848ddb70d28e7fb3207cdd2a7dbc3a04b95a7bb9fb6a443a5ddeac4c'
+        'EmitReferenceSource' = 'ffbdedc4d4a8bf35b3fa8d9ff5a0712b911546d583aa2b71623e30c1c0697456'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-        'BindingRenderer' = '68f6ac0abc5fea5dbf4169d29034d2b9e062689d7c1075497b124e6ee918412f'
+        'BindingRenderer' = 'bcfea333c3150d31d0be954b2c0de736fe7f46ccf56dfcc8a9686ce276ebc628'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -1313,8 +1313,8 @@ function Test-TypedCastDispatch {
 
     Test-RegistryPathSurface $RegistrySource $Violations 'typed cast object registry'
     $ExpectedRegistryHashes = [ordered]@{
-        'ObjectRegistryHeader' = '58e9690b316c97ecff4f28761ea995b957c4281d0500fafceb9b390ca89fea45'
-        'ObjectRegistrySource' = 'f447932ceaa5f20bf7fd614dbeac4bc065c91c0899e9e800a677326670f50b78'
+        'ObjectRegistryHeader' = '2d535d0d14eb057679cc7c6c208afbda3ad7610d1c74a25c88ef06cb4d4045f2'
+        'ObjectRegistrySource' = 'a1100acc84ee22dd77c0e00d13c1167ff4cdde03273f9b584cf30e9b0e0e36c3'
     }
     foreach ($RegistryHashEntry in ([ordered]@{
         'ObjectRegistryHeader' = $RegistryHeader
@@ -1557,7 +1557,7 @@ function Invoke-Phase50Contracts {
                 'SelfType\s*->\s*ClassPath\s*\.\s*IsEmpty\s*\(',
                 'Profile\s*\.\s*SelfClassPath\s*=\s*SelfType\s*->\s*ClassPath',
                 'FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile\s*\(',
-                'Profile\s*,\s*ClassReferences\s*,\s*CanonicalDescriptorJson\s*,\s*SelectionResult\s*,\s*RegenerationResult'
+                'Profile\s*,\s*ClassReferences\s*,\s*ObjectFactories\s*,\s*CanonicalDescriptorJson\s*,\s*SelectionResult\s*,\s*RegenerationResult'
             ) `
             $Violations `
             'custom Self canonical regeneration path'
