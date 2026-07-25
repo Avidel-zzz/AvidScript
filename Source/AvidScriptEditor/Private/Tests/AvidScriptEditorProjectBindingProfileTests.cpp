@@ -440,4 +440,121 @@ bool FAvidScriptEditorProjectBindingProfileDuplicateScriptNameTest::RunTest(cons
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileObjectFactoryResolutionTest,
+	"AvidScript.Editor.ProjectBindingProfile.ObjectFactoryResolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileObjectFactoryResolutionTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.object_factory_resolution");
+	Spec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("K2_GetActorLocation") }));
+	Spec.ClassReferences.Add({
+		TEXT("SensorComponentClass"),
+		TEXT("/Script/Engine.StaticMeshComponent"),
+		TEXT("/Script/Engine.ActorComponent"),
+		TEXT("EditorLoad")
+	});
+	Spec.ClassReferences.Add({
+		TEXT("InventoryStateClass"),
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"),
+		TEXT("/Script/CoreUObject.Object"),
+		TEXT("EditorLoad")
+	});
+	Spec.ObjectFactories.Add({
+		TEXT("SensorComponent"),
+		TEXT("SensorComponentClass"),
+		TEXT("/Script/Engine.Actor"),
+		EAvidScriptProjectObjectFactoryKind::ActorComponent,
+		EAvidScriptProjectObjectOwnership::Session,
+		EAvidScriptProjectComponentRegistration::RegisterInstance
+	});
+	Spec.ObjectFactories.Add({
+		TEXT("InventoryState"),
+		TEXT("InventoryStateClass"),
+		TEXT("/Script/CoreUObject.Object"),
+		EAvidScriptProjectObjectFactoryKind::NewObject,
+		EAvidScriptProjectObjectOwnership::Session,
+		EAvidScriptProjectComponentRegistration::None
+	});
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> ObjectFactories;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestTrue(
+		TEXT("Object factory project profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			ObjectFactories,
+			SelectionHash,
+			Result));
+	TestTrue(TEXT("Object factory resolution succeeds"), Result.bSucceeded);
+	TestEqual(TEXT("Object factory profile keeps two class references"), ClassReferences.Num(), 2);
+	TestEqual(TEXT("Object factory profile keeps two factories"), ObjectFactories.Num(), 2);
+	TestTrue(TEXT("Object factory profile hash is SHA-256"), IsProjectProfileSha256(SelectionHash));
+	if (ObjectFactories.Num() == 2)
+	{
+		TestEqual(
+			TEXT("Object factories sort by script name"),
+			ObjectFactories[0].ScriptName,
+			FString(TEXT("InventoryState")));
+		TestEqual(
+			TEXT("Component factory sorts second"),
+			ObjectFactories[1].ScriptName,
+			FString(TEXT("SensorComponent")));
+	}
+
+	FAvidScriptProjectBindingProfileSpec ReorderedSpec = Spec;
+	Algo::Reverse(ReorderedSpec.ClassReferences);
+	Algo::Reverse(ReorderedSpec.ObjectFactories);
+	FAvidScriptBindingSelectionProfile ReorderedSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> ReorderedClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> ReorderedObjectFactories;
+	FString ReorderedHash;
+	FAvidScriptBindingSelectionResolveResult ReorderedResult;
+	TestTrue(
+		TEXT("Reordered object factory profile resolves"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			ReorderedSpec,
+			ReorderedSelection,
+			ReorderedClassReferences,
+			ReorderedObjectFactories,
+			ReorderedHash,
+			ReorderedResult));
+	TestEqual(
+		TEXT("Object factory declaration order does not change selection identity"),
+		ReorderedHash,
+		SelectionHash);
+
+	FAvidScriptProjectBindingProfileSpec DifferentOuterSpec = Spec;
+	DifferentOuterSpec.ObjectFactories[1].OuterBaseClassPath = TEXT("/Script/Engine.Actor");
+	FAvidScriptBindingSelectionProfile DifferentOuterSelection;
+	TArray<FAvidScriptProjectBindingClassSpec> DifferentOuterClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> DifferentOuterFactories;
+	FString DifferentOuterHash;
+	FAvidScriptBindingSelectionResolveResult DifferentOuterResult;
+	TestTrue(
+		TEXT("New object factory accepts an Actor outer constraint"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			DifferentOuterSpec,
+			DifferentOuterSelection,
+			DifferentOuterClassReferences,
+			DifferentOuterFactories,
+			DifferentOuterHash,
+			DifferentOuterResult));
+	TestNotEqual(
+		TEXT("Object factory outer constraint changes selection identity"),
+		DifferentOuterHash,
+		SelectionHash);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

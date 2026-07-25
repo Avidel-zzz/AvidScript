@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptHash.h"
+#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformProcess.h"
 #include "Modules/ModuleManifest.h"
@@ -11,7 +12,7 @@
 
 namespace
 {
-constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("50.1.0");
+constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -197,6 +198,54 @@ FString MakeClassReferenceDeclarationIdentity(const FAvidScriptProjectBindingCla
 		+ TEXT("|") + Spec.ScriptName;
 }
 
+const TCHAR* GetProjectObjectFactoryKindToken(
+	const EAvidScriptProjectObjectFactoryKind Kind)
+{
+	switch (Kind)
+	{
+	case EAvidScriptProjectObjectFactoryKind::NewObject:
+		return TEXT("new_object");
+	case EAvidScriptProjectObjectFactoryKind::ActorComponent:
+		return TEXT("actor_component");
+	default:
+		return TEXT("<invalid>");
+	}
+}
+
+const TCHAR* GetProjectObjectOwnershipToken(
+	const EAvidScriptProjectObjectOwnership Ownership)
+{
+	return Ownership == EAvidScriptProjectObjectOwnership::Session
+		? TEXT("session")
+		: TEXT("<invalid>");
+}
+
+const TCHAR* GetProjectComponentRegistrationToken(
+	const EAvidScriptProjectComponentRegistration Registration)
+{
+	switch (Registration)
+	{
+	case EAvidScriptProjectComponentRegistration::None:
+		return TEXT("none");
+	case EAvidScriptProjectComponentRegistration::RegisterInstance:
+		return TEXT("register_instance");
+	default:
+		return TEXT("<invalid>");
+	}
+}
+
+FString MakeObjectFactoryDeclarationIdentity(
+	const FAvidScriptProjectObjectFactorySpec& Factory)
+{
+	return Factory.ScriptName
+		+ TEXT("|class_reference=") + Factory.ClassReference
+		+ TEXT("|kind=") + GetProjectObjectFactoryKindToken(Factory.Kind)
+		+ TEXT("|outer=") + Factory.OuterBaseClassPath
+		+ TEXT("|ownership=") + GetProjectObjectOwnershipToken(Factory.Ownership)
+		+ TEXT("|registration=")
+		+ GetProjectComponentRegistrationToken(Factory.Registration);
+}
+
 bool TryGetEngineBuildIdentity(
 	FString& OutBuildIdentity,
 	FString& OutManifestPath)
@@ -249,8 +298,27 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	FString& OutSelectionHash,
 	FAvidScriptBindingSelectionResolveResult& OutResult)
 {
+	TArray<FAvidScriptProjectObjectFactorySpec> IgnoredObjectFactories;
+	return Resolve(
+		Spec,
+		OutSelection,
+		OutClassReferences,
+		IgnoredObjectFactories,
+		OutSelectionHash,
+		OutResult);
+}
+
+bool FAvidScriptEditorProjectBindingProfile::Resolve(
+	const FAvidScriptProjectBindingProfileSpec& Spec,
+	FAvidScriptBindingSelectionProfile& OutSelection,
+	TArray<FAvidScriptProjectBindingClassSpec>& OutClassReferences,
+	TArray<FAvidScriptProjectObjectFactorySpec>& OutObjectFactories,
+	FString& OutSelectionHash,
+	FAvidScriptBindingSelectionResolveResult& OutResult)
+{
 	OutSelection = FAvidScriptBindingSelectionProfile();
 	OutClassReferences.Empty();
+	OutObjectFactories.Empty();
 	OutSelectionHash.Reset();
 	OutResult = FAvidScriptBindingSelectionResolveResult();
 	if (Spec.PackageName.IsEmpty())
@@ -262,7 +330,9 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			TEXT("Provide a stable non-empty project binding package name."));
 		return false;
 	}
-	if (Spec.ModulePaths.IsEmpty() && Spec.Classes.IsEmpty())
+	if (Spec.ModulePaths.IsEmpty()
+		&& Spec.Classes.IsEmpty()
+		&& Spec.ObjectFactories.IsEmpty())
 	{
 		SetProjectProfileFailure(
 			OutResult,
@@ -361,6 +431,72 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		RulesByPath.Add(Rule.OwnerClassPath, MoveTemp(Rule));
 	}
 
+	TSet<FString> FactoryScriptNames;
+	TSet<FString> FactoryClassReferenceNames;
+	for (const FAvidScriptProjectObjectFactorySpec& Factory : Spec.ObjectFactories)
+	{
+		if (!IsProjectProfileIdentifier(Factory.ScriptName))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_script_name_invalid"),
+				Factory.ScriptName,
+				TEXT("Use a unique C# identifier for each object factory."));
+			return false;
+		}
+		if (FactoryScriptNames.Contains(Factory.ScriptName))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_script_name_duplicate"),
+				Factory.ScriptName,
+				TEXT("Keep each object factory script_name exactly once."));
+			return false;
+		}
+		if (!IsProjectProfileIdentifier(Factory.ClassReference))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_class_reference_invalid"),
+				Factory.ClassReference,
+				TEXT("Reference a class_references script_name identifier."));
+			return false;
+		}
+		if (Factory.Kind != EAvidScriptProjectObjectFactoryKind::NewObject
+			&& Factory.Kind != EAvidScriptProjectObjectFactoryKind::ActorComponent)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_kind_invalid"),
+				Factory.ScriptName,
+				TEXT("Use new_object or actor_component."));
+			return false;
+		}
+		if (Factory.Ownership != EAvidScriptProjectObjectOwnership::Session)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_ownership_invalid"),
+				Factory.ScriptName,
+				TEXT("Use session ownership."));
+			return false;
+		}
+		if (Factory.Registration != EAvidScriptProjectComponentRegistration::None
+			&& Factory.Registration
+				!= EAvidScriptProjectComponentRegistration::RegisterInstance)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_registration_invalid"),
+				Factory.ScriptName,
+				TEXT("Use none or register_instance."));
+			return false;
+		}
+
+		FactoryScriptNames.Add(Factory.ScriptName);
+		FactoryClassReferenceNames.Add(Factory.ClassReference);
+	}
+
 	TSet<FString> ClassReferenceScriptNames;
 	TSet<FString> ClassReferenceIdentities;
 	for (FAvidScriptProjectBindingClassSpec ClassReference : Spec.ClassReferences)
@@ -414,8 +550,11 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 				TEXT("Choose a base_class_path that owns the referenced class."));
 			return false;
 		}
-		if (!Class->IsChildOf(AActor::StaticClass())
-			|| !BaseClass->IsChildOf(AActor::StaticClass()))
+		const bool bUsedByObjectFactory =
+			FactoryClassReferenceNames.Contains(ClassReference.ScriptName);
+		if ((!Class->IsChildOf(AActor::StaticClass())
+				|| !BaseClass->IsChildOf(AActor::StaticClass()))
+			&& !bUsedByObjectFactory)
 		{
 			SetProjectProfileFailure(
 				OutResult,
@@ -424,7 +563,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 				TEXT("Use an AActor-derived class and AActor-derived base constraint for SpawnActor."));
 			return false;
 		}
-		if (Class->HasAnyClassFlags(CLASS_Abstract))
+		if (Class->HasAnyClassFlags(CLASS_Abstract) && !bUsedByObjectFactory)
 		{
 			SetProjectProfileFailure(
 				OutResult,
@@ -456,6 +595,121 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	{
 		return MakeClassReferenceIdentity(Left).Compare(
 			MakeClassReferenceIdentity(Right),
+			ESearchCase::CaseSensitive) < 0;
+	});
+
+	TMap<FString, FAvidScriptProjectBindingClassSpec> ClassReferencesByScriptName;
+	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)
+	{
+		ClassReferencesByScriptName.Add(ClassReference.ScriptName, ClassReference);
+	}
+
+	for (FAvidScriptProjectObjectFactorySpec Factory : Spec.ObjectFactories)
+	{
+		const FAvidScriptProjectBindingClassSpec* ClassReference =
+			ClassReferencesByScriptName.Find(Factory.ClassReference);
+		if (ClassReference == nullptr)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_class_reference_missing"),
+				Factory.ClassReference,
+				TEXT("Reference a class_references entry from the same binding profile."));
+			return false;
+		}
+
+		UClass* ObjectClass = LoadObject<UClass>(nullptr, *ClassReference->ClassPath);
+		UClass* OuterClass = Factory.OuterBaseClassPath.IsEmpty()
+			? nullptr
+			: LoadObject<UClass>(nullptr, *Factory.OuterBaseClassPath);
+		if (ObjectClass == nullptr)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_profile_factory_class_reference_missing"),
+				ClassReference->ClassPath,
+				TEXT("Use a loadable class reference for the object factory."));
+			return false;
+		}
+		if (OuterClass == nullptr)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_outer_type_mismatch"),
+				Factory.OuterBaseClassPath,
+				TEXT("Use a loadable UObject-derived UClass as outer_base_class_path."));
+			return false;
+		}
+		if (ObjectClass->HasAnyClassFlags(CLASS_Abstract))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_class_abstract"),
+				ObjectClass->GetPathName(),
+				TEXT("Choose a concrete UObject class for the factory."));
+			return false;
+		}
+		if (ObjectClass->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_class_deprecated"),
+				ObjectClass->GetPathName(),
+				TEXT("Choose a current non-deprecated UObject class for the factory."));
+			return false;
+		}
+
+		const bool bIsActorComponent =
+			ObjectClass->IsChildOf(UActorComponent::StaticClass());
+		const bool bIsActor = ObjectClass->IsChildOf(AActor::StaticClass());
+		if ((Factory.Kind == EAvidScriptProjectObjectFactoryKind::NewObject
+				&& (bIsActorComponent || bIsActor))
+			|| (Factory.Kind == EAvidScriptProjectObjectFactoryKind::ActorComponent
+				&& !bIsActorComponent))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_kind_mismatch"),
+				ObjectClass->GetPathName(),
+				TEXT("Match new_object to a non-Actor UObject or actor_component to a UActorComponent class."));
+			return false;
+		}
+		if (Factory.Kind == EAvidScriptProjectObjectFactoryKind::ActorComponent
+			&& !OuterClass->IsChildOf(AActor::StaticClass()))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_outer_type_mismatch"),
+				OuterClass->GetPathName(),
+				TEXT("Use an AActor-derived outer_base_class_path for actor_component."));
+			return false;
+		}
+
+		const bool bRegistrationMatches =
+			(Factory.Kind == EAvidScriptProjectObjectFactoryKind::NewObject
+				&& Factory.Registration == EAvidScriptProjectComponentRegistration::None)
+			|| (Factory.Kind == EAvidScriptProjectObjectFactoryKind::ActorComponent
+				&& Factory.Registration
+					== EAvidScriptProjectComponentRegistration::RegisterInstance);
+		if (!bRegistrationMatches)
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("binding_factory_registration_mismatch"),
+				Factory.ScriptName,
+				TEXT("Use none for new_object and register_instance for actor_component."));
+			return false;
+		}
+
+		Factory.OuterBaseClassPath = OuterClass->GetPathName();
+		OutObjectFactories.Add(MoveTemp(Factory));
+	}
+	OutObjectFactories.Sort([](
+		const FAvidScriptProjectObjectFactorySpec& Left,
+		const FAvidScriptProjectObjectFactorySpec& Right)
+	{
+		return Left.ScriptName.Compare(
+			Right.ScriptName,
 			ESearchCase::CaseSensitive) < 0;
 	});
 
@@ -512,6 +766,12 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		Identity.Add(
 			TEXT("class_reference=")
 			+ MakeClassReferenceDeclarationIdentity(ClassReference));
+	}
+	for (const FAvidScriptProjectObjectFactorySpec& Factory : OutObjectFactories)
+	{
+		Identity.Add(
+			TEXT("object_factory=")
+			+ MakeObjectFactoryDeclarationIdentity(Factory));
 	}
 	OutSelectionHash = FAvidScriptHash::Sha256HexUtf8(FString::Join(Identity, TEXT("\n")));
 

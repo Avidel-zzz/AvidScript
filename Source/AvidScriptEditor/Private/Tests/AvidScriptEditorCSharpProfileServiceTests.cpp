@@ -506,4 +506,317 @@ bool FAvidScriptEditorCSharpProfileServiceProjectBindingProfileTest::RunTest(con
 		FString(TEXT("profile_self_field_not_supported")));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceObjectFactorySchemaTest,
+	"AvidScript.Editor.CSharpProfileService.ObjectFactorySchema",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceObjectFactorySchemaTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		GetAvidScriptCSharpProfileServiceTestRoot(),
+		TEXT("ObjectFactorySchema")));
+	TestTrue(
+		TEXT("Object factory profile test root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("ObjectFactories.cs")));
+	TestTrue(
+		TEXT("Object factory profile source can be written"),
+		FFileHelper::SaveStringToFile(MakeAvidScriptCSharpProfileSourceText(), *SourcePath));
+
+	const auto MakeProfileText = [&SourcePath](
+		const int32 SchemaVersion,
+		const FString& ClassReferencesJson,
+		const FString& FactoriesJson)
+	{
+		return FString::Printf(
+			TEXT("{\n")
+			TEXT("  \"schema_version\": %d,\n")
+			TEXT("  \"language\": \"csharp\",\n")
+			TEXT("  \"source_path\": \"%s\",\n")
+			TEXT("  \"binding_profile\": {\n")
+			TEXT("    \"package_name\": \"avidscript.project.object_factories\",\n")
+			TEXT("    \"classes\": [{\"class_path\": \"/Script/Engine.Actor\"}],\n")
+			TEXT("    \"class_references\": %s,\n")
+			TEXT("    \"object_factories\": %s\n")
+			TEXT("  }\n")
+			TEXT("}\n"),
+			SchemaVersion,
+			*SourcePath,
+			*ClassReferencesJson,
+			*FactoriesJson);
+	};
+
+	int32 ProfileIndex = 0;
+	const auto LoadProfileText = [
+		this,
+		&TestRoot,
+		&ProfileIndex](
+			const FString& Label,
+			const FString& ProfileText,
+			FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+	{
+		const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+			TestRoot,
+			FString::Printf(TEXT("factory_profile_%d.csharp-profile.json"), ProfileIndex++)));
+		if (!TestTrue(
+				*FString::Printf(TEXT("%s can be written"), *Label),
+				FFileHelper::SaveStringToFile(ProfileText, *ProfilePath)))
+		{
+			return false;
+		}
+		return FAvidScriptEditorCSharpProfileService::LoadProfile(ProfilePath, OutResult);
+	};
+
+	const FString ActorClassReferences = TEXT(
+		"[{"
+		"\"script_name\":\"SpawnClass\","
+		"\"class_path\":\"/Script/Engine.StaticMeshActor\","
+		"\"base_class_path\":\"/Script/Engine.Actor\""
+		"}]");
+	const FString ObjectFactoryClassReferences = TEXT(
+		"["
+		"{"
+		"\"script_name\":\"InventoryStateClass\","
+		"\"class_path\":\"/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject\","
+		"\"base_class_path\":\"/Script/CoreUObject.Object\""
+		"},"
+		"{"
+		"\"script_name\":\"SensorComponentClass\","
+		"\"class_path\":\"/Script/Engine.StaticMeshComponent\","
+		"\"base_class_path\":\"/Script/Engine.ActorComponent\""
+		"}"
+		"]");
+	const FString ValidFactories = TEXT(
+		"["
+		"{"
+		"\"script_name\":\"InventoryState\","
+		"\"class_reference\":\"InventoryStateClass\","
+		"\"kind\":\"new_object\","
+		"\"outer_base_class_path\":\"/Script/CoreUObject.Object\","
+		"\"ownership\":\"session\""
+		"},"
+		"{"
+		"\"script_name\":\"SensorComponent\","
+		"\"class_reference\":\"SensorComponentClass\","
+		"\"kind\":\"actor_component\","
+		"\"outer_base_class_path\":\"/Script/Engine.Actor\","
+		"\"ownership\":\"session\","
+		"\"registration\":\"register_instance\""
+		"}"
+		"]");
+
+	FAvidScriptEditorCSharpProfileLoadResult SchemaV3Result;
+	TestFalse(
+		TEXT("Schema v3 rejects object_factories"),
+		LoadProfileText(
+			TEXT("Schema v3 object factory profile"),
+			MakeProfileText(
+				3,
+				ActorClassReferences,
+				TEXT(
+					"[{"
+					"\"script_name\":\"LegacyFactory\","
+					"\"class_reference\":\"SpawnClass\","
+					"\"kind\":\"new_object\","
+					"\"outer_base_class_path\":\"/Script/CoreUObject.Object\","
+					"\"ownership\":\"session\""
+					"}]")),
+			SchemaV3Result));
+	TestEqual(
+		TEXT("Schema v3 object factory rejection category is stable"),
+		SchemaV3Result.ErrorCategory,
+		FString(TEXT("binding_profile_factory_schema_unsupported")));
+
+	FAvidScriptEditorCSharpProfileLoadResult ValidResult;
+	TestTrue(
+		TEXT("Schema v4 accepts valid object factories"),
+		LoadProfileText(
+			TEXT("Schema v4 valid object factory profile"),
+			MakeProfileText(4, ObjectFactoryClassReferences, ValidFactories),
+			ValidResult));
+	TestEqual(TEXT("Schema v4 is retained"), ValidResult.SchemaVersion, 4);
+	TestEqual(
+		TEXT("Schema v4 profile retains two object factories"),
+		ValidResult.ProjectBindingProfile.ObjectFactories.Num(),
+		2);
+	TestEqual(
+		TEXT("Schema v4 resolves two object factories"),
+		ValidResult.ResolvedObjectFactories.Num(),
+		2);
+	if (ValidResult.ResolvedObjectFactories.Num() == 2)
+	{
+		TestEqual(
+			TEXT("Resolved factories use deterministic script-name order"),
+			ValidResult.ResolvedObjectFactories[0].ScriptName,
+			FString(TEXT("InventoryState")));
+		TestEqual(
+			TEXT("Resolved component factory retains canonical outer"),
+			ValidResult.ResolvedObjectFactories[1].OuterBaseClassPath,
+			FString(TEXT("/Script/Engine.Actor")));
+	}
+
+	FAvidScriptEditorCSharpProfileLoadResult MissingReferenceResult;
+	TestFalse(
+		TEXT("Object factory rejects an unknown class reference"),
+		LoadProfileText(
+			TEXT("Unknown class reference factory profile"),
+			MakeProfileText(
+				4,
+				ActorClassReferences,
+				TEXT(
+					"[{"
+					"\"script_name\":\"MissingReference\","
+					"\"class_reference\":\"UnknownClass\","
+					"\"kind\":\"new_object\","
+					"\"outer_base_class_path\":\"/Script/CoreUObject.Object\","
+					"\"ownership\":\"session\""
+					"}]")),
+			MissingReferenceResult));
+	TestEqual(
+		TEXT("Unknown factory class reference category is stable"),
+		MissingReferenceResult.ErrorCategory,
+		FString(TEXT("binding_profile_factory_class_reference_missing")));
+
+	FString DuplicateFactories = ValidFactories;
+	DuplicateFactories.ReplaceInline(
+		TEXT("\"script_name\":\"SensorComponent\""),
+		TEXT("\"script_name\":\"InventoryState\""),
+		ESearchCase::CaseSensitive);
+	FAvidScriptEditorCSharpProfileLoadResult DuplicateResult;
+	TestFalse(
+		TEXT("Object factory script names must be unique"),
+		LoadProfileText(
+			TEXT("Duplicate object factory profile"),
+			MakeProfileText(4, ObjectFactoryClassReferences, DuplicateFactories),
+			DuplicateResult));
+	TestEqual(
+		TEXT("Duplicate factory script name category is stable"),
+		DuplicateResult.ErrorCategory,
+		FString(TEXT("binding_profile_factory_script_name_duplicate")));
+
+	FString UnknownKindFactories = ValidFactories;
+	UnknownKindFactories.ReplaceInline(
+		TEXT("\"kind\":\"new_object\""),
+		TEXT("\"kind\":\"pooled_object\""),
+		ESearchCase::CaseSensitive);
+	FAvidScriptEditorCSharpProfileLoadResult UnknownKindResult;
+	TestFalse(
+		TEXT("Object factory rejects unknown kind"),
+		LoadProfileText(
+			TEXT("Unknown object factory kind profile"),
+			MakeProfileText(4, ObjectFactoryClassReferences, UnknownKindFactories),
+			UnknownKindResult));
+	TestEqual(
+		TEXT("Unknown factory kind category is stable"),
+		UnknownKindResult.ErrorCategory,
+		FString(TEXT("binding_profile_factory_kind_invalid")));
+
+	FString ComponentWithoutRegistration = ValidFactories;
+	ComponentWithoutRegistration.ReplaceInline(
+		TEXT(",\"registration\":\"register_instance\""),
+		TEXT(""),
+		ESearchCase::CaseSensitive);
+	FAvidScriptEditorCSharpProfileLoadResult ComponentRegistrationResult;
+	TestFalse(
+		TEXT("Actor component factory requires register_instance"),
+		LoadProfileText(
+			TEXT("Unregistered component factory profile"),
+			MakeProfileText(4, ObjectFactoryClassReferences, ComponentWithoutRegistration),
+			ComponentRegistrationResult));
+	TestEqual(
+		TEXT("Component registration mismatch category is stable"),
+		ComponentRegistrationResult.ErrorCategory,
+		FString(TEXT("binding_factory_registration_mismatch")));
+
+	FString NewObjectRegistration = ValidFactories;
+	NewObjectRegistration.ReplaceInline(
+		TEXT(
+			"\"kind\":\"new_object\","
+			"\"outer_base_class_path\":\"/Script/CoreUObject.Object\","
+			"\"ownership\":\"session\""),
+		TEXT(
+			"\"kind\":\"new_object\","
+			"\"outer_base_class_path\":\"/Script/CoreUObject.Object\","
+			"\"ownership\":\"session\","
+			"\"registration\":\"register_instance\""),
+		ESearchCase::CaseSensitive);
+	FAvidScriptEditorCSharpProfileLoadResult NewObjectRegistrationResult;
+	TestFalse(
+		TEXT("New object factory rejects component registration"),
+		LoadProfileText(
+			TEXT("Registered UObject factory profile"),
+			MakeProfileText(4, ObjectFactoryClassReferences, NewObjectRegistration),
+			NewObjectRegistrationResult));
+	TestEqual(
+		TEXT("New object registration mismatch category is stable"),
+		NewObjectRegistrationResult.ErrorCategory,
+		FString(TEXT("binding_factory_registration_mismatch")));
+
+	const auto VerifyFactoryParseFailure = [
+		this,
+		&LoadProfileText,
+		&MakeProfileText,
+		&ObjectFactoryClassReferences](
+			const FString& Label,
+			const FString& Factories,
+			const FString& ExpectedCategory)
+	{
+		FAvidScriptEditorCSharpProfileLoadResult Result;
+		TestFalse(
+			*FString::Printf(TEXT("%s is rejected"), *Label),
+			LoadProfileText(
+				Label,
+				MakeProfileText(4, ObjectFactoryClassReferences, Factories),
+				Result));
+		TestEqual(
+			*FString::Printf(TEXT("%s category is stable"), *Label),
+			Result.ErrorCategory,
+			ExpectedCategory);
+	};
+
+	FString NonStringFactoryField = ValidFactories;
+	NonStringFactoryField.ReplaceInline(
+		TEXT("\"script_name\":\"InventoryState\""),
+		TEXT("\"script_name\":42"),
+		ESearchCase::CaseSensitive);
+	VerifyFactoryParseFailure(
+		TEXT("Non-string object factory field"),
+		NonStringFactoryField,
+		TEXT("binding_profile_factory_invalid"));
+
+	FString EmptyFactoryField = ValidFactories;
+	EmptyFactoryField.ReplaceInline(
+		TEXT("\"class_reference\":\"InventoryStateClass\""),
+		TEXT("\"class_reference\":\"\""),
+		ESearchCase::CaseSensitive);
+	VerifyFactoryParseFailure(
+		TEXT("Empty object factory field"),
+		EmptyFactoryField,
+		TEXT("binding_profile_factory_invalid"));
+
+	FString UnknownOwnershipFactories = ValidFactories;
+	UnknownOwnershipFactories.ReplaceInline(
+		TEXT("\"ownership\":\"session\""),
+		TEXT("\"ownership\":\"world\""),
+		ESearchCase::CaseSensitive);
+	VerifyFactoryParseFailure(
+		TEXT("Unknown object factory ownership"),
+		UnknownOwnershipFactories,
+		TEXT("binding_profile_factory_ownership_invalid"));
+
+	FString UnknownRegistrationFactories = ValidFactories;
+	UnknownRegistrationFactories.ReplaceInline(
+		TEXT("\"registration\":\"register_instance\""),
+		TEXT("\"registration\":\"auto\""),
+		ESearchCase::CaseSensitive);
+	VerifyFactoryParseFailure(
+		TEXT("Unknown object factory registration"),
+		UnknownRegistrationFactories,
+		TEXT("binding_profile_factory_registration_invalid"));
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

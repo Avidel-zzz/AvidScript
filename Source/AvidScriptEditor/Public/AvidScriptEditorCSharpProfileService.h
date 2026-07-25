@@ -19,6 +19,7 @@ struct FAvidScriptEditorCSharpProfileLoadResult
 	FAvidScriptBindingSelectionProfile ResolvedBindingSelection;
 	FAvidScriptBindingSelectionResolveResult BindingSelectionValidation;
 	TArray<FAvidScriptProjectBindingClassSpec> ResolvedClassReferences;
+	TArray<FAvidScriptProjectObjectFactorySpec> ResolvedObjectFactories;
 	FString BindingSelectionHash;
 };
 

@@ -176,12 +176,12 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 	}
 	if (Object->HasField(TEXT("self_class_path")))
 	{
-		if (SchemaVersion != 3)
+		if (SchemaVersion != 3 && SchemaVersion != 4)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("profile_self_field_not_supported"),
-				TEXT("binding_profile.self_class_path requires C# profile schema_version 3."),
-				TEXT("upgrade the C# profile to schema_version 3 before declaring self_class_path"),
+				TEXT("binding_profile.self_class_path requires C# profile schema_version 3 or 4."),
+				TEXT("upgrade the C# profile to schema_version 3 or 4 before declaring self_class_path"),
 				OutResult);
 			return false;
 		}
@@ -299,11 +299,133 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 		}
 	}
 
+	if (Object->HasField(TEXT("object_factories")))
+	{
+		if (SchemaVersion != 4)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_factory_schema_unsupported"),
+				TEXT("C# binding_profile object_factories requires profile schema_version 4."),
+				TEXT("upgrade the C# profile to schema_version 4 before declaring object_factories"),
+				OutResult);
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ObjectFactories = nullptr;
+		if (!Object->TryGetArrayField(TEXT("object_factories"), ObjectFactories)
+			|| ObjectFactories == nullptr)
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("binding_profile_object_factories_invalid"),
+				TEXT("C# binding_profile object_factories must be an array."),
+				TEXT("replace object_factories with an array of factory objects"),
+				OutResult);
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& FactoryValue : *ObjectFactories)
+		{
+			const TSharedPtr<FJsonObject> FactoryObject =
+				TryGetAvidScriptCSharpProfileObjectValue(FactoryValue);
+			FAvidScriptProjectObjectFactorySpec Factory;
+			FString Kind;
+			FString Ownership;
+			if (!FactoryObject.IsValid()
+				|| !TryGetAvidScriptCSharpProfileStringField(
+					FactoryObject, TEXT("script_name"), Factory.ScriptName)
+				|| !TryGetAvidScriptCSharpProfileStringField(
+					FactoryObject, TEXT("class_reference"), Factory.ClassReference)
+				|| !TryGetAvidScriptCSharpProfileStringField(
+					FactoryObject, TEXT("kind"), Kind)
+				|| !TryGetAvidScriptCSharpProfileStringField(
+					FactoryObject, TEXT("outer_base_class_path"), Factory.OuterBaseClassPath)
+				|| !TryGetAvidScriptCSharpProfileStringField(
+					FactoryObject, TEXT("ownership"), Ownership))
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_factory_invalid"),
+					TEXT("Each object factory requires non-empty script_name, class_reference, kind, outer_base_class_path, and ownership strings."),
+					TEXT("complete or remove the invalid object factory"),
+					OutResult);
+				return false;
+			}
+
+			if (Kind == TEXT("new_object"))
+			{
+				Factory.Kind = EAvidScriptProjectObjectFactoryKind::NewObject;
+			}
+			else if (Kind == TEXT("actor_component"))
+			{
+				Factory.Kind = EAvidScriptProjectObjectFactoryKind::ActorComponent;
+			}
+			else
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_factory_kind_invalid"),
+					FString::Printf(TEXT("Object factory kind is unsupported: %s"), *Kind),
+					TEXT("use new_object or actor_component"),
+					OutResult);
+				return false;
+			}
+
+			if (Ownership != TEXT("session"))
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_factory_ownership_invalid"),
+					FString::Printf(TEXT("Object factory ownership is unsupported: %s"), *Ownership),
+					TEXT("use session ownership"),
+					OutResult);
+				return false;
+			}
+			Factory.Ownership = EAvidScriptProjectObjectOwnership::Session;
+
+			FString Registration;
+			if (FactoryObject->HasField(TEXT("registration")))
+			{
+				if (!TryGetAvidScriptCSharpProfileStringField(
+						FactoryObject,
+						TEXT("registration"),
+						Registration))
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_factory_registration_invalid"),
+						TEXT("Object factory registration must be a non-empty string."),
+						TEXT("use none or register_instance"),
+						OutResult);
+					return false;
+				}
+				if (Registration == TEXT("none"))
+				{
+					Factory.Registration = EAvidScriptProjectComponentRegistration::None;
+				}
+				else if (Registration == TEXT("register_instance"))
+				{
+					Factory.Registration =
+						EAvidScriptProjectComponentRegistration::RegisterInstance;
+				}
+				else
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_factory_registration_invalid"),
+						FString::Printf(
+							TEXT("Object factory registration is unsupported: %s"),
+							*Registration),
+						TEXT("use none or register_instance"),
+						OutResult);
+					return false;
+				}
+			}
+
+			Spec.ObjectFactories.Add(MoveTemp(Factory));
+		}
+	}
+
 	FAvidScriptBindingSelectionResolveResult ResolveResult;
 	if (!FAvidScriptEditorProjectBindingProfile::Resolve(
 		Spec,
 		OutResult.ResolvedBindingSelection,
 		OutResult.ResolvedClassReferences,
+		OutResult.ResolvedObjectFactories,
 		OutResult.BindingSelectionHash,
 		ResolveResult))
 	{
@@ -578,12 +700,15 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 
 	double SchemaVersion = 0.0;
 	if (!ProfileObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
-		|| (SchemaVersion != 1.0 && SchemaVersion != 2.0 && SchemaVersion != 3.0))
+		|| (SchemaVersion != 1.0
+			&& SchemaVersion != 2.0
+			&& SchemaVersion != 3.0
+			&& SchemaVersion != 4.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be 1, 2, or 3."),
-			TEXT("update the profile JSON to schema_version 3"),
+			TEXT("C# profile schema_version must be 1, 2, 3, or 4."),
+			TEXT("update the profile JSON to schema_version 4"),
 			OutResult);
 		return false;
 	}
@@ -698,12 +823,27 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		&& BindingProfileObject != nullptr
 		&& (*BindingProfileObject).IsValid()
 		&& (*BindingProfileObject)->HasField(TEXT("self_class_path"));
-	if (OutResult.SchemaVersion != 3 && bHasSelfClassPath)
+	const bool bHasObjectFactories =
+		BindingProfileObject != nullptr
+		&& (*BindingProfileObject).IsValid()
+		&& (*BindingProfileObject)->HasField(TEXT("object_factories"));
+	if (OutResult.SchemaVersion != 3
+		&& OutResult.SchemaVersion != 4
+		&& bHasSelfClassPath)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_self_field_not_supported"),
-			TEXT("binding_profile.self_class_path requires C# profile schema_version 3."),
-			TEXT("upgrade the C# profile to schema_version 3 before declaring self_class_path"),
+			TEXT("binding_profile.self_class_path requires C# profile schema_version 3 or 4."),
+			TEXT("upgrade the C# profile to schema_version 3 or 4 before declaring self_class_path"),
+			OutResult);
+		return false;
+	}
+	if (OutResult.SchemaVersion != 4 && bHasObjectFactories)
+	{
+		SetAvidScriptCSharpProfileFailure(
+			TEXT("binding_profile_factory_schema_unsupported"),
+			TEXT("binding_profile.object_factories requires C# profile schema_version 4."),
+			TEXT("upgrade schema_version to 4 or remove object_factories"),
 			OutResult);
 		return false;
 	}
@@ -716,7 +856,10 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			OutResult);
 		return false;
 	}
-	if ((OutResult.SchemaVersion == 2 || OutResult.SchemaVersion == 3) && bHasBindingProfile)
+	if ((OutResult.SchemaVersion == 2
+			|| OutResult.SchemaVersion == 3
+			|| OutResult.SchemaVersion == 4)
+		&& bHasBindingProfile)
 	{
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)
 			|| BindingProfileObject == nullptr
