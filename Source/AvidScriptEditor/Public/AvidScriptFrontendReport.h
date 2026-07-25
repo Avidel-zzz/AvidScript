@@ -47,6 +47,8 @@ struct FAvidScriptFrontendBindingPackage
 	int32 ProfileImportCount = 0;
 	int32 UsedImportCount = 0;
 	TArray<FAvidScriptFrontendBindingImport> UsedImports;
+	int32 UsedObjectTypeCount = 0;
+	TArray<int32> UsedObjectTypeOrdinals;
 };
 
 struct FAvidScriptFrontendReport

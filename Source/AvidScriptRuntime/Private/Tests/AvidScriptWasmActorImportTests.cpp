@@ -6,6 +6,7 @@
 #include "AvidScriptWasmRuntime.h"
 
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -479,7 +480,9 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 	TestTrue(TEXT("Actor registers"), RegisterResult.bSucceeded);
 
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptSessionObjectOwnership Ownership;
 	HostContext.ObjectRegistry = &Registry;
+	HostContext.ObjectOwnership = &Ownership;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	HostContext.OwnerHandle = ActorHandle;
 
@@ -561,6 +564,7 @@ bool FAvidScriptWasmActorImportDirectHandlerSmokeTest::RunTest(const FString& Pa
 	TestEqual(TEXT("Stale owner slot import fails closed"), Runtime.HandleOwnerGetSlotImport(), 0);
 	TestEqual(TEXT("Stale owner generation import fails closed"), Runtime.HandleOwnerGetGenerationImport(), 0);
 
+	Ownership.Cleanup(Registry);
 	DestroyWasmActorImportWorld(World);
 	return true;
 }

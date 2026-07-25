@@ -956,6 +956,20 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	if (Package.SchemaVersion >= 6)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);
+		if (Package.bHasActiveObjectTypeOrdinals)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("runtime_object_type_slice"),
+				TEXT("1"));
+			for (const int32 Ordinal : Package.ActiveObjectTypeOrdinals)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("active_object_type_ordinal"),
+					FString::FromInt(Ordinal));
+			}
+		}
 		for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 		{
 			if (Type.ObjectTypeOrdinal == INDEX_NONE)
@@ -1075,6 +1089,20 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 	if (Package.SchemaVersion >= 6)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);
+		if (Package.bHasActiveObjectTypeOrdinals)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("runtime_object_type_slice"),
+				TEXT("1"));
+			for (const int32 Ordinal : Package.ActiveObjectTypeOrdinals)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("active_object_type_ordinal"),
+					FString::FromInt(Ordinal));
+			}
+		}
 	}
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
@@ -1240,6 +1268,13 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		OutErrorSource = TEXT("object_factories");
 		return false;
 	}
+	if (OutPackage.SchemaVersion < 6
+		&& Root->HasField(TEXT("active_object_type_ordinals")))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = TEXT("active_object_type_ordinals");
+		return false;
+	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Types = nullptr;
 	if (!Root->TryGetArrayField(TEXT("types"), Types)
@@ -1271,6 +1306,50 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		CanonicalTypes.Add(Type.CanonicalType);
 		TypesByCanonical.Add(Type.CanonicalType, Type);
 		OutPackage.Types.Add(MoveTemp(Type));
+	}
+	if (Root->HasField(TEXT("active_object_type_ordinals")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* ActiveOrdinals = nullptr;
+		if (!Root->TryGetArrayField(
+				TEXT("active_object_type_ordinals"),
+				ActiveOrdinals)
+			|| ActiveOrdinals == nullptr)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = TEXT("active_object_type_ordinals");
+			return false;
+		}
+		const int32 ObjectTypeCount = OutPackage.Types.CountByPredicate(
+			[](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.ObjectTypeOrdinal != INDEX_NONE;
+			});
+		int32 PreviousOrdinal = INDEX_NONE;
+		for (const TSharedPtr<FJsonValue>& Value : *ActiveOrdinals)
+		{
+			const double Number = Value.IsValid() && Value->Type == EJson::Number
+				? Value->AsNumber()
+				: -1.0;
+			if (!FMath::IsFinite(Number)
+				|| Number < 0.0
+				|| Number > static_cast<double>(MAX_int32)
+				|| FMath::TruncToDouble(Number) != Number)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = TEXT("active_object_type_ordinals");
+				return false;
+			}
+			const int32 Ordinal = static_cast<int32>(Number);
+			if (Ordinal <= PreviousOrdinal || Ordinal >= ObjectTypeCount)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = TEXT("active_object_type_ordinals");
+				return false;
+			}
+			OutPackage.ActiveObjectTypeOrdinals.Add(Ordinal);
+			PreviousOrdinal = Ordinal;
+		}
+		OutPackage.bHasActiveObjectTypeOrdinals = true;
 	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Bindings = nullptr;

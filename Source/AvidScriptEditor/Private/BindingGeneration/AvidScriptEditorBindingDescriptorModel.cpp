@@ -66,6 +66,15 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 	if (Package.SchemaVersion >= 6)
 	{
 		Writer->WriteValue(TEXT("self_type_id"), Package.SelfTypeId);
+		if (Package.bHasActiveObjectTypeOrdinals)
+		{
+			Writer->WriteArrayStart(TEXT("active_object_type_ordinals"));
+			for (const int32 Ordinal : Package.ActiveObjectTypeOrdinals)
+			{
+				Writer->WriteValue(Ordinal);
+			}
+			Writer->WriteArrayEnd();
+		}
 	}
 
 	Writer->WriteArrayStart(TEXT("types"));

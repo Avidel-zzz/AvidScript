@@ -259,6 +259,13 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	TestTrue(
 		TEXT("Runtime slice descriptor parses"),
 		FAvidScriptBindingDescriptorParser::Parse(SliceJson, SliceModel, ParseCategory, ParseSource));
+	TestTrue(
+		TEXT("Runtime slice declares an explicit object-type activation set"),
+		SliceModel.bHasActiveObjectTypeOrdinals);
+	TestEqual(
+		TEXT("Fixture without reachable type tokens declares an empty activation set"),
+		SliceModel.ActiveObjectTypeOrdinals.Num(),
+		0);
 	TSet<FString> ExpectedStableIds = { GetScale->StableId, SetScale->StableId };
 	TSet<FString> ActualStableIds;
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
@@ -341,18 +348,23 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		{
 			continue;
 		}
-		TestTrue(
-			TEXT("Slice object types are restricted to the required closure"),
-			RequiredTypeIds.Contains(Type.StableId));
-		TestEqual(
-			TEXT("Slice object-type ordinals are contiguous for final lowering"),
-			Type.ObjectTypeOrdinal,
-			SliceObjectTypeCount);
+		const FAvidScriptBindingTypeModel* AuthorizationType =
+			AuthorizationTypesById.FindRef(Type.StableId);
+		if (TestNotNull(
+			TEXT("Slice object type comes from the authorization graph"),
+			AuthorizationType))
+		{
+			TestEqual(
+				TEXT("Slice object-type ordinal preserves prepared C# constants"),
+				Type.ObjectTypeOrdinal,
+				AuthorizationType->ObjectTypeOrdinal);
+		}
 		++SliceObjectTypeCount;
 	}
-	TestTrue(
-		TEXT("Slice drops unrelated authorization object types"),
-		SliceObjectTypeCount < AuthorizationObjectTypeCount);
+	TestEqual(
+		TEXT("Slice preserves the complete stable object-type ordinal table"),
+		SliceObjectTypeCount,
+		AuthorizationObjectTypeCount);
 	TestTrue(
 		TEXT("Slice drops unrelated authorization types instead of copying the full package"),
 		SliceModel.Types.Num() < AuthorizationModel.Types.Num());
@@ -414,22 +426,103 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 			LoadedSlice->GetVmPackage().Imports.Num(),
 			2 + LifecycleSpecs.Num() + 1);
 		TestEqual(TEXT("Runtime slice creates one cached class plan"), LoadedSlice->GetClassReferenceCount(), 1);
-		int32 ExpectedObjectTypeCount = 0;
+		int32 ActiveObjectTypeCount = 0;
+		int32 InactiveObjectTypeCount = 0;
 		for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
 		{
-			if (Type.ObjectTypeOrdinal != INDEX_NONE)
+			if (Type.ObjectTypeOrdinal == INDEX_NONE)
 			{
-				++ExpectedObjectTypeCount;
+				continue;
+			}
+			UClass* ResolvedClass = nullptr;
+			const bool bResolved = LoadedSlice->TryResolveObjectType(
+				static_cast<uint32>(Type.ObjectTypeOrdinal),
+				ResolvedClass);
+			const bool bRequired = RequiredTypeIds.Contains(Type.StableId);
+			TestEqual(
+				TEXT("Runtime activates exactly the selected object-type closure"),
+				bResolved,
+				bRequired);
+			ActiveObjectTypeCount += bResolved ? 1 : 0;
+			InactiveObjectTypeCount += bResolved ? 0 : 1;
+			if (!bResolved && InactiveObjectType == nullptr)
+			{
+				InactiveObjectType = &Type;
 			}
 		}
 		TestEqual(
-			TEXT("Runtime slice creates only the retained object type plans"),
+			TEXT("Runtime slice keeps authorization ordinal capacity"),
 			LoadedSlice->GetObjectTypeCount(),
-			ExpectedObjectTypeCount);
+			AuthorizationObjectTypeCount);
+		TestTrue(
+			TEXT("Runtime slice leaves unrelated authorization object types inactive"),
+			InactiveObjectTypeCount > 0);
+		TestEqual(
+			TEXT("Runtime loads and anchors only active object-type classes"),
+			LoadedSlice->GetInstrumentation().ClassLoadCount,
+			ActiveObjectTypeCount);
 		TestEqual(
 			TEXT("Runtime slice retains custom Self class identity"),
 			LoadedSlice->GetExpectedSelfClass(),
 			AStaticMeshActor::StaticClass());
+	}
+	if (TestNotNull(
+		TEXT("Authorization graph retains an inactive object type for provenance coverage"),
+		InactiveObjectType))
+	{
+		FAvidScriptFrontendBindingPackage TypedProvenance = Provenance;
+		TypedProvenance.UsedObjectTypeCount = 1;
+		TypedProvenance.UsedObjectTypeOrdinals = {
+			InactiveObjectType->ObjectTypeOrdinal
+		};
+		FAvidScriptCSharpBindingEmitResult TypedSlicePackage;
+		FAvidScriptEditorCSharpBindingSliceResult TypedSliceResult;
+		if (TestTrue(
+			TEXT("Object-type provenance runtime slice publishes"),
+			FAvidScriptEditorCSharpBindingSliceService::Publish(
+				AuthorizationPackage.DescriptorPath,
+				TypedProvenance,
+				OutputRoot,
+				TypedSlicePackage,
+				TypedSliceResult)))
+		{
+			FString TypedSliceJson;
+			FAvidScriptBindingPackageModel TypedSliceModel;
+			TestTrue(
+				TEXT("Object-type provenance descriptor reads"),
+				FFileHelper::LoadFileToString(
+					TypedSliceJson,
+					*TypedSlicePackage.DescriptorPath));
+			TestTrue(
+				TEXT("Object-type provenance descriptor parses"),
+				FAvidScriptBindingDescriptorParser::Parse(
+					TypedSliceJson,
+					TypedSliceModel,
+					ParseCategory,
+					ParseSource));
+			TestTrue(
+				TEXT("Runtime slice preserves the reachable Guest type ordinal"),
+				TypedSliceModel.ActiveObjectTypeOrdinals
+					== TypedProvenance.UsedObjectTypeOrdinals);
+
+			TSharedPtr<const FAvidScriptBindingPackage> TypedLoadedSlice;
+			FAvidScriptBindingPackageLoadResult TypedLoadResult;
+			if (TestTrue(
+				TEXT("Object-type provenance runtime slice loads"),
+				FAvidScriptBindingPackage::LoadDescriptor(
+					TypedSliceJson,
+					TypedLoadedSlice,
+					TypedLoadResult))
+				&& TypedLoadedSlice.IsValid())
+			{
+				UClass* ResolvedClass = nullptr;
+				TestTrue(
+					TEXT("Reachable Guest object-type ordinal activates its immutable class plan"),
+					TypedLoadedSlice->TryResolveObjectType(
+						static_cast<uint32>(InactiveObjectType->ObjectTypeOrdinal),
+						ResolvedClass));
+			}
+		}
 	}
 
 	const TArray<FAvidScriptReflectedPropertySelection> PropertySelections = {
@@ -821,6 +914,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
 		2);
 
 	TSharedPtr<const FAvidScriptBindingPackage> LoadedSlice;
+	const FAvidScriptBindingTypeModel* InactiveObjectType = nullptr;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	if (!TestTrue(
 		TEXT("Factory runtime slice loads immutable plans"),

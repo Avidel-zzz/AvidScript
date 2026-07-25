@@ -276,7 +276,9 @@ bool FAvidScriptFrontendReportCSharpBindingProvenanceLoadTest::RunTest(const FSt
 		TEXT("    \"used_imports\": [\n")
 		TEXT("      { \"stable_id\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"ordinal\": 10, \"module\": \"avidscript\", \"name\": \"avid_ue_1111111111111111\", \"signature\": \"(ii)i\" },\n")
 		TEXT("      { \"stable_id\": \"2222222222222222222222222222222222222222222222222222222222222222\", \"ordinal\": 20, \"module\": \"avidscript\", \"name\": \"avid_ue_2222222222222222\", \"signature\": \"(i)i\" }\n")
-		TEXT("    ]\n")
+		TEXT("    ],\n")
+		TEXT("    \"used_object_type_count\": 2,\n")
+		TEXT("    \"used_object_type_ordinals\": [3, 7]\n")
 		TEXT("  },\n")
 		TEXT("  \"diagnostics\": []\n")
 		TEXT("}\n");
@@ -293,6 +295,13 @@ bool FAvidScriptFrontendReportCSharpBindingProvenanceLoadTest::RunTest(const FSt
 	TestEqual(TEXT("Binding package profile import count"), Report.BindingPackage.ProfileImportCount, 115);
 	TestEqual(TEXT("Binding package declared used import count"), Report.BindingPackage.UsedImportCount, 2);
 	TestEqual(TEXT("Binding package parsed used import count"), Report.BindingPackage.UsedImports.Num(), 2);
+	TestEqual(
+		TEXT("Binding package declared used object-type count"),
+		Report.BindingPackage.UsedObjectTypeCount,
+		2);
+	TestTrue(
+		TEXT("Binding package preserves used object-type ordinals"),
+		Report.BindingPackage.UsedObjectTypeOrdinals == TArray<int32>{ 3, 7 });
 	if (Report.BindingPackage.UsedImports.Num() == 2)
 	{
 		const FAvidScriptFrontendBindingImport& First = Report.BindingPackage.UsedImports[0];

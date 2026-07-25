@@ -99,6 +99,8 @@ struct FAvidScriptBindingPackageModel
 	FString PackageHash;
 	FString SelectionHash;
 	FString SelfTypeId;
+	bool bHasActiveObjectTypeOrdinals = false;
+	TArray<int32> ActiveObjectTypeOrdinals;
 	TArray<FAvidScriptBindingTypeModel> Types;
 	TArray<FAvidScriptBindingFunctionModel> Bindings;
 	TArray<FAvidScriptBindingClassReferenceModel> ClassReferences;

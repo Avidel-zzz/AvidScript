@@ -609,7 +609,9 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
 	}
 	if (!BootstrapReport.BindingPackage.bPresent
 		|| BootstrapReport.BindingPackage.UsedImportCount
-			!= BootstrapReport.BindingPackage.UsedImports.Num())
+			!= BootstrapReport.BindingPackage.UsedImports.Num()
+		|| BootstrapReport.BindingPackage.UsedObjectTypeCount
+			!= BootstrapReport.BindingPackage.UsedObjectTypeOrdinals.Num())
 	{
 		ApplyAvidScriptCSharpBuildPipelineOutcome(
 			BootstrapResult,
@@ -618,7 +620,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
 			OutResult);
 		SetAvidScriptCSharpBuildPipelineFailure(
 			TEXT("bootstrap_binding_provenance_invalid"),
-			TEXT("Bootstrap report does not contain a complete binding_package.used_imports provenance set."),
+			TEXT("Bootstrap report does not contain complete import and object-type provenance."),
 			TEXT("rerun bootstrap with the current semantic and build report toolchain"),
 			OutResult);
 		return false;
@@ -665,11 +667,6 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteBootstrap(
 			RuntimePackage.ManifestPath);
 	Plan.FinalConfig.RuntimeBindingPackagePath =
 		Plan.RuntimeBindingPackagePath;
-	// The final lowering must consume the compact slice so generated object-type
-	// constants match its contiguous ordinal table.
-	Plan.FinalConfig.BindingPackagePath =
-		Plan.RuntimeBindingPackagePath;
-	Plan.FinalConfig.PreparedBuildReportPath.Reset();
 	Plan.FinalConfig.bOmitRuntimeBindingPackage = false;
 	return true;
 }

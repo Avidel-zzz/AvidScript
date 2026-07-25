@@ -99,6 +99,7 @@ FString NormalizeAvidScriptCSharpBindingSlicePath(FString Path)
 
 bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	const FAvidScriptBindingPackageModel& AuthorizationModel,
+	const TConstArrayView<int32> ActiveObjectTypeOrdinals,
 	FAvidScriptBindingPackageModel& SliceModel,
 	FString& OutErrorSource)
 {
@@ -109,7 +110,21 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	}
 
 	SliceModel.SelfTypeId = AuthorizationModel.SelfTypeId;
+	SliceModel.bHasActiveObjectTypeOrdinals = true;
+	SliceModel.ActiveObjectTypeOrdinals.Reset(ActiveObjectTypeOrdinals.Num());
+	SliceModel.ActiveObjectTypeOrdinals.Append(
+		ActiveObjectTypeOrdinals.GetData(),
+		ActiveObjectTypeOrdinals.Num());
 	TSet<FString> RequiredTypeIds;
+	// Prepared C# constants use authorization ordinals. Preserve the complete
+	// object table while the runtime loader activates only the selected closure.
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			RequiredTypeIds.Add(Type.StableId);
+		}
+	}
 	if (!SliceModel.SelfTypeId.IsEmpty())
 	{
 		RequiredTypeIds.Add(SliceModel.SelfTypeId);
@@ -223,14 +238,6 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	{
 		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
 	});
-	int32 NextObjectTypeOrdinal = 0;
-	for (FAvidScriptBindingTypeModel& Type : SliceModel.Types)
-	{
-		if (Type.ObjectTypeOrdinal != INDEX_NONE)
-		{
-			Type.ObjectTypeOrdinal = NextObjectTypeOrdinal++;
-		}
-	}
 	SliceModel.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(SliceModel);
 	SliceModel.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(SliceModel);
 	return true;
@@ -250,6 +257,14 @@ bool RewriteAvidScriptCSharpBindingSliceDescriptor(
 	Root->SetStringField(TEXT("self_type_id"), SliceModel.SelfTypeId);
 	Root->SetStringField(TEXT("selection_hash"), SliceModel.SelectionHash);
 	Root->SetStringField(TEXT("package_hash"), SliceModel.PackageHash);
+	TArray<TSharedPtr<FJsonValue>> ActiveObjectTypeOrdinals;
+	for (const int32 Ordinal : SliceModel.ActiveObjectTypeOrdinals)
+	{
+		ActiveObjectTypeOrdinals.Add(MakeShared<FJsonValueNumber>(Ordinal));
+	}
+	Root->SetArrayField(
+		TEXT("active_object_type_ordinals"),
+		MoveTemp(ActiveObjectTypeOrdinals));
 	TArray<TSharedPtr<FJsonValue>> TypeValues;
 	for (const FAvidScriptBindingTypeModel& Type : SliceModel.Types)
 	{
@@ -317,6 +332,8 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 
 	if (!Provenance.bPresent
 		|| Provenance.UsedImportCount != Provenance.UsedImports.Num()
+		|| Provenance.UsedObjectTypeCount
+			!= Provenance.UsedObjectTypeOrdinals.Num()
 		|| Provenance.UsedImports.IsEmpty())
 	{
 		SetAvidScriptCSharpBindingSliceFailure(
@@ -700,6 +717,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	FString ClosureErrorSource;
 	if (!BuildAvidScriptCSharpBindingSliceTypeClosure(
 			AuthorizationModel,
+			Provenance.UsedObjectTypeOrdinals,
 			SliceModel,
 			ClosureErrorSource)
 		|| !RewriteAvidScriptCSharpBindingSliceDescriptor(

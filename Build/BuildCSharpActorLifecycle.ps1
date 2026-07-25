@@ -211,6 +211,7 @@ function New-BindingPackageReportValue {
     param(
         [AllowNull()][object]$PackageInfo,
         [AllowEmptyCollection()][object[]]$UsedImports,
+        [AllowEmptyCollection()][int[]]$UsedObjectTypeOrdinals,
         [bool]$Required,
         [switch]$ExplicitEmpty
     )
@@ -230,6 +231,8 @@ function New-BindingPackageReportValue {
                 profile_import_count = 0
                 used_import_count = 0
                 used_imports = @()
+                used_object_type_count = 0
+                used_object_type_ordinals = @()
             }
         }
         return $null
@@ -247,6 +250,8 @@ function New-BindingPackageReportValue {
         profile_import_count = @($PackageInfo.RequiredImports).Count
         used_import_count = @($UsedImports).Count
         used_imports = @($UsedImports)
+        used_object_type_count = @($UsedObjectTypeOrdinals).Count
+        used_object_type_ordinals = @($UsedObjectTypeOrdinals)
     }
 }
 
@@ -344,6 +349,32 @@ function Test-JsonLowercaseSha256 {
     return $Value -is [string] -and $Value -cmatch '^[0-9a-f]{64}$'
 }
 
+function Get-UsedObjectTypeOrdinals {
+    param([Parameter(Mandatory = $true)]$Model)
+
+    $Ordinals = [System.Collections.Generic.SortedSet[int]]::new()
+    foreach ($Function in @($Model.functions)) {
+        foreach ($Block in @($Function.blocks)) {
+            foreach ($Instruction in @($Block.instructions)) {
+                if ([string]$Instruction.op -cne "constant" -or
+                    [string]$Instruction.constant.kind -cne "object_type_ref") {
+                    continue
+                }
+                $Ordinal = 0
+                if ($Instruction.constant.value -is [string] -and
+                    [int]::TryParse(
+                        [string]$Instruction.constant.value,
+                        [System.Globalization.NumberStyles]::None,
+                        [System.Globalization.CultureInfo]::InvariantCulture,
+                        [ref]$Ordinal)) {
+                    [void]$Ordinals.Add($Ordinal)
+                }
+            }
+        }
+    }
+    return @($Ordinals)
+}
+
 function Write-BuildReport {
     param(
         [Parameter(Mandatory = $true)][string]$Result,
@@ -379,11 +410,13 @@ function Write-BuildReport {
         binding_authorization = New-BindingPackageReportValue `
             -PackageInfo $BindingAuthorizationInfo `
             -UsedImports $UsedAuthorizationBindingImports `
+            -UsedObjectTypeOrdinals $UsedObjectTypeOrdinals `
             -Required (-not $IsDefaultSource) `
             -ExplicitEmpty
         binding_package = New-BindingPackageReportValue `
             -PackageInfo $BindingPackageInfo `
             -UsedImports $UsedRuntimeBindingImports `
+            -UsedObjectTypeOrdinals $UsedObjectTypeOrdinals `
             -Required ($null -ne $BindingPackageInfo)
         required_exports = @($RequiredExports)
         required_imports = @($RequiredImports)
@@ -507,6 +540,7 @@ $RequiredImports = @()
 $ObservedExports = @()
 $UsedAuthorizationBindingImports = @()
 $UsedRuntimeBindingImports = @()
+$UsedObjectTypeOrdinals = @()
 $BindingAuthorizationInfo = $null
 $BindingPackageInfo = $null
 $Diagnostics = @()
@@ -892,6 +926,7 @@ $DebugMapSha256 = Get-Sha256Hex $DebugMapArtifactPath
 $StateSchemaSha256 = Get-Sha256Hex $StateSchemaArtifactPath
 $WasmSha256 = Get-Sha256Hex $WasmArtifactPath
 $RequiredExports = @($GuestIrModel.exports | ForEach-Object { [string]$_.name })
+$UsedObjectTypeOrdinals = @(Get-UsedObjectTypeOrdinals -Model $GuestIrModel)
 $ObservedExports = @($WasmInspectionModel.exports | Where-Object { [int]$_.kind -eq 0 } | ForEach-Object { [string]$_.name })
 $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
     [ordered]@{ module = [string]$_.module; name = [string]$_.name }
@@ -1188,6 +1223,8 @@ $Manifest = [ordered]@{
             profile_import_count = @($BindingPackageInfo.RequiredImports).Count
             used_import_count = @($UsedRuntimeBindingImports).Count
             used_imports = @($UsedRuntimeBindingImports)
+            used_object_type_count = @($UsedObjectTypeOrdinals).Count
+            used_object_type_ordinals = @($UsedObjectTypeOrdinals)
         }
     }
     guest_ir = [ordered]@{

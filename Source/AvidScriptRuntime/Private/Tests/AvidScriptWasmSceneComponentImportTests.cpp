@@ -4,6 +4,7 @@
 #include "AvidScriptWasmRuntime.h"
 
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -251,7 +252,9 @@ bool FAvidScriptWasmSceneComponentObjectGraphSmokeTest::RunTest(const FString& P
 	TestNotEqual(TEXT("Fixture actor does not occupy slot one"), ActorHandle.Slot, 1u);
 
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptSessionObjectOwnership Ownership;
 	HostContext.ObjectRegistry = &Registry;
+	HostContext.ObjectOwnership = &Ownership;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptWasmRuntimeInstance Runtime;
 	Runtime.SetHostContext(HostContext);
@@ -267,6 +270,7 @@ bool FAvidScriptWasmSceneComponentObjectGraphSmokeTest::RunTest(const FString& P
 	TestTrue(TEXT("SceneComponent object graph BeginPlay succeeds"), bLoaded && Runtime.BeginPlay(Result));
 	TestTrue(TEXT("Guest handle and vector memory drive component setter"), Actor->GetActorLocation().Equals(InitialLocation + FVector(5.0, 0.0, 0.0), 0.01));
 
+	Ownership.Cleanup(Registry);
 	DestroySceneComponentImportWorld(World);
 	return true;
 }
@@ -289,7 +293,9 @@ bool FAvidScriptWasmSceneComponentInvalidHandlePointerSmokeTest::RunTest(const F
 	FAvidScriptObjectHandleResult ActorResult;
 	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, ActorResult);
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptSessionObjectOwnership Ownership;
 	HostContext.ObjectRegistry = &Registry;
+	HostContext.ObjectOwnership = &Ownership;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 	FAvidScriptWasmRuntimeInstance Runtime;
 	Runtime.SetHostContext(HostContext);
@@ -301,6 +307,7 @@ bool FAvidScriptWasmSceneComponentInvalidHandlePointerSmokeTest::RunTest(const F
 	TestFalse(TEXT("Out-of-bounds component handle output traps safely"), bLoaded && Runtime.BeginPlay(Result));
 	TestEqual(TEXT("Pointer failure identifies root component import"), Result.ImportName, FString(TEXT("actor_get_root_component")));
 
+	Ownership.Cleanup(Registry);
 	DestroySceneComponentImportWorld(World);
 	return true;
 }

@@ -1606,10 +1606,19 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		return false;
 	}
 	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesByCanonical;
+	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesById;
+	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesByClassPath;
 	DeclaredTypesByCanonical.Reserve(Model.Types.Num());
+	DeclaredTypesById.Reserve(Model.Types.Num());
+	DeclaredTypesByClassPath.Reserve(Model.Types.Num());
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
 		DeclaredTypesByCanonical.Add(Type.CanonicalType, &Type);
+		DeclaredTypesById.Add(Type.StableId, &Type);
+		if (!Type.ClassPath.IsEmpty())
+		{
+			DeclaredTypesByClassPath.Add(Type.ClassPath, &Type);
+		}
 	}
 
 	TSharedPtr<FAvidScriptBindingPackage> Package = MakeShareable(new FAvidScriptBindingPackage());
@@ -1657,9 +1666,129 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 
 	TMap<FString, int32> ObjectTypeOrdinalsById;
 	TMap<FString, int32> ObjectTypeOrdinalsByClassPath;
+	TMap<int32, const FAvidScriptBindingTypeModel*> ObjectTypesByOrdinal;
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
 		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		ObjectTypeOrdinalsById.Add(Type.StableId, Type.ObjectTypeOrdinal);
+		ObjectTypeOrdinalsByClassPath.Add(Type.ClassPath, Type.ObjectTypeOrdinal);
+		ObjectTypesByOrdinal.Add(Type.ObjectTypeOrdinal, &Type);
+	}
+
+	TSet<FString> ActiveObjectTypeIds;
+	TArray<FString> PendingObjectTypeIds;
+	FString MissingRequiredTypeId;
+	const auto RequireObjectType = [
+		&DeclaredTypesById,
+		&ActiveObjectTypeIds,
+		&PendingObjectTypeIds,
+		&MissingRequiredTypeId](const FString& TypeId)
+	{
+		if (TypeId.IsEmpty() || !MissingRequiredTypeId.IsEmpty())
+		{
+			return;
+		}
+		const FAvidScriptBindingTypeModel* Type = DeclaredTypesById.FindRef(TypeId);
+		if (Type == nullptr)
+		{
+			MissingRequiredTypeId = TypeId;
+			return;
+		}
+		if (Type->ObjectTypeOrdinal != INDEX_NONE
+			&& !ActiveObjectTypeIds.Contains(TypeId))
+		{
+			ActiveObjectTypeIds.Add(TypeId);
+			PendingObjectTypeIds.Add(TypeId);
+		}
+	};
+
+	if (Model.bHasActiveObjectTypeOrdinals)
+	{
+		for (const int32 Ordinal : Model.ActiveObjectTypeOrdinals)
+		{
+			const FAvidScriptBindingTypeModel* Type =
+				ObjectTypesByOrdinal.FindRef(Ordinal);
+			if (Type != nullptr)
+			{
+				RequireObjectType(Type->StableId);
+			}
+		}
+	}
+	else
+	{
+		for (const TPair<int32, const FAvidScriptBindingTypeModel*>& Pair :
+			ObjectTypesByOrdinal)
+		{
+			RequireObjectType(Pair.Value->StableId);
+		}
+	}
+	RequireObjectType(Model.SelfTypeId);
+	for (const FAvidScriptBindingClassReferenceModel& Reference : Model.ClassReferences)
+	{
+		RequireObjectType(Reference.ResultTypeId);
+	}
+	for (const FAvidScriptBindingObjectFactoryModel& Factory : Model.ObjectFactories)
+	{
+		RequireObjectType(Factory.OuterTypeId);
+		const FAvidScriptBindingClassReferenceModel* Reference =
+			Model.ClassReferences.FindByPredicate(
+				[&Factory](const FAvidScriptBindingClassReferenceModel& Candidate)
+				{
+					return Candidate.StableId == Factory.ClassReferenceId;
+				});
+		const FAvidScriptBindingTypeModel* ConcreteType = Reference == nullptr
+			? nullptr
+			: DeclaredTypesByClassPath.FindRef(Reference->ClassPath);
+		if (ConcreteType == nullptr)
+		{
+			MissingRequiredTypeId = Reference == nullptr
+				? Factory.ClassReferenceId
+				: Reference->ClassPath;
+		}
+		else
+		{
+			RequireObjectType(ConcreteType->StableId);
+		}
+	}
+	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
+	{
+		if (const FAvidScriptBindingTypeModel* OwnerType =
+			DeclaredTypesByClassPath.FindRef(Binding.OwnerClass))
+		{
+			RequireObjectType(OwnerType->StableId);
+		}
+		RequireObjectType(Binding.ReturnValue.TypeId);
+		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
+		{
+			RequireObjectType(Parameter.TypeId);
+		}
+	}
+	while (!PendingObjectTypeIds.IsEmpty())
+	{
+		const FString TypeId = PendingObjectTypeIds.Pop(EAllowShrinking::No);
+		const FAvidScriptBindingTypeModel* Type = DeclaredTypesById.FindRef(TypeId);
+		if (Type != nullptr)
+		{
+			RequireObjectType(Type->BaseTypeId);
+		}
+	}
+	if (!MissingRequiredTypeId.IsEmpty())
+	{
+		SetAvidScriptBindingLoadFailure(
+			OutResult,
+			TEXT("binding_object_type_required_missing"),
+			MissingRequiredTypeId,
+			TEXT("A selected binding capability references a type outside the descriptor type graph."));
+		return false;
+	}
+
+	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
+	{
+		if (Type.ObjectTypeOrdinal == INDEX_NONE
+			|| !ActiveObjectTypeIds.Contains(Type.StableId))
 		{
 			continue;
 		}
@@ -1674,12 +1803,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 		Package->Impl->ObjectTypePlans[Type.ObjectTypeOrdinal] = ObjectClass;
-		ObjectTypeOrdinalsById.Add(Type.StableId, Type.ObjectTypeOrdinal);
-		ObjectTypeOrdinalsByClassPath.Add(Type.ClassPath, Type.ObjectTypeOrdinal);
 	}
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
-		if (Type.ObjectTypeOrdinal == INDEX_NONE)
+		if (Type.ObjectTypeOrdinal == INDEX_NONE
+			|| !ActiveObjectTypeIds.Contains(Type.StableId))
 		{
 			continue;
 		}

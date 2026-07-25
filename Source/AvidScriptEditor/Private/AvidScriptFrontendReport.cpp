@@ -305,6 +305,10 @@ void LoadAvidScriptBindingPackageMetadata(const TSharedPtr<FJsonObject>& RootObj
 	(*PackageObject)->TryGetStringField(TEXT("reference_source_sha256"), Package.ReferenceSourceSha256);
 	Package.ProfileImportCount = GetAvidScriptJsonIntField(*PackageObject, TEXT("profile_import_count"), 0);
 	Package.UsedImportCount = GetAvidScriptJsonIntField(*PackageObject, TEXT("used_import_count"), 0);
+	Package.UsedObjectTypeCount = GetAvidScriptJsonIntField(
+		*PackageObject,
+		TEXT("used_object_type_count"),
+		0);
 
 	const TArray<TSharedPtr<FJsonValue>>* UsedImports = nullptr;
 	if (!(*PackageObject)->TryGetArrayField(TEXT("used_imports"), UsedImports) || UsedImports == nullptr)
@@ -326,6 +330,30 @@ void LoadAvidScriptBindingPackageMetadata(const TSharedPtr<FJsonObject>& RootObj
 		ImportObject->TryGetStringField(TEXT("name"), Import.Name);
 		ImportObject->TryGetStringField(TEXT("signature"), Import.Signature);
 		Package.UsedImports.Add(MoveTemp(Import));
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* UsedObjectTypeOrdinals = nullptr;
+	if ((*PackageObject)->TryGetArrayField(
+			TEXT("used_object_type_ordinals"),
+			UsedObjectTypeOrdinals)
+		&& UsedObjectTypeOrdinals != nullptr)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *UsedObjectTypeOrdinals)
+		{
+			if (!Value.IsValid() || Value->Type != EJson::Number)
+			{
+				continue;
+			}
+			const double Number = Value->AsNumber();
+			if (!FMath::IsFinite(Number)
+				|| Number < 0.0
+				|| Number > static_cast<double>(MAX_int32)
+				|| FMath::TruncToDouble(Number) != Number)
+			{
+				continue;
+			}
+			Package.UsedObjectTypeOrdinals.Add(static_cast<int32>(Number));
+		}
 	}
 }
 
