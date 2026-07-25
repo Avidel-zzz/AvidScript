@@ -4,7 +4,9 @@
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
 #include "Containers/StringConv.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -1423,6 +1425,107 @@ bool DispatchAvidScriptObjectFactory(
 	OutResult.ReturnValueI64 = static_cast<int64>(BindingResult.Handle.ToUInt64());
 	return true;
 }
+
+bool DispatchAvidScriptSceneAttachment(
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan,
+	const FAvidScriptDynamicHostCall& Call,
+	const FAvidScriptBindingInvocationContext& Context,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Plan.bRequiresWriteAccess
+		&& Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_write_denied"),
+			Plan.DebugPath,
+			TEXT("Scene attachment requires an explicitly writable host context."));
+		return false;
+	}
+	if (Context.HostEffectJournal != nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_reload_effect_unsupported"),
+			Plan.DebugPath,
+			TEXT("Candidate reload cannot roll back Attach or Detach side effects."));
+		return false;
+	}
+	if (Context.ObjectRegistry == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_object_registry_missing"),
+			Plan.DebugPath,
+			TEXT("The Runtime Session has no object registry for scene component handles."));
+		return false;
+	}
+	if (Call.Arguments.ContainsByPredicate(
+		[](const uint64 Argument)
+		{
+			return Argument > MAX_uint32;
+		}))
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_argument_invalid"),
+			Plan.DebugPath,
+			TEXT("A scene component handle cell or rules field exceeds the 32-bit ABI."));
+		return false;
+	}
+
+	const FAvidScriptObjectHandle ChildHandle{
+		static_cast<uint32>(Call.Arguments[0]),
+		static_cast<uint32>(Call.Arguments[1])
+	};
+	FAvidScriptObjectHandleResult BindingResult;
+	bool bSucceeded = false;
+	switch (Plan.Kind)
+	{
+	case EAvidScriptBindingInvocationKind::SceneComponentAttach:
+	{
+		const FAvidScriptObjectHandle ParentHandle{
+			static_cast<uint32>(Call.Arguments[2]),
+			static_cast<uint32>(Call.Arguments[3])
+		};
+		bSucceeded = FAvidScriptSceneAttachmentBinding::Attach(
+			*Context.ObjectRegistry,
+			ChildHandle,
+			ParentHandle,
+			static_cast<uint32>(Call.Arguments[4]),
+			BindingResult);
+		break;
+	}
+	case EAvidScriptBindingInvocationKind::SceneComponentDetach:
+		bSucceeded = FAvidScriptSceneAttachmentBinding::Detach(
+			*Context.ObjectRegistry,
+			ChildHandle,
+			static_cast<uint32>(Call.Arguments[2]),
+			BindingResult);
+		break;
+	default:
+		checkNoEntry();
+		break;
+	}
+
+	if (!bSucceeded || !BindingResult.bSucceeded)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			BindingResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("binding_scene_attachment_failed"))
+				: BindingResult.ErrorCategory,
+			Plan.DebugPath,
+			BindingResult.ErrorMessage.IsEmpty()
+				? FString(TEXT("The scene attachment binding rejected the operation."))
+				: BindingResult.ErrorMessage);
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.ReturnValue = 1;
+	return true;
+}
 } // namespace
 
 struct FAvidScriptBindingPackage::FImpl
@@ -1852,11 +1955,24 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		&& !Package->Impl->ObjectFactoryPlans.IsEmpty()
 		? FAvidScriptObjectFactoryBinding::GetSpecs().Num()
 		: 0;
+	const bool bHasSceneComponentFactory =
+		Model.SchemaVersion >= 7
+		&& Package->Impl->ObjectFactoryPlans.ContainsByPredicate(
+			[](const FAvidScriptObjectFactoryPlan& Factory)
+			{
+				return IsValid(Factory.ObjectClass)
+					&& Factory.ObjectClass->IsChildOf(
+						USceneComponent::StaticClass());
+			});
+	const int32 SceneAttachmentBindingCount = bHasSceneComponentFactory
+		? FAvidScriptSceneAttachmentBinding::GetSpecs().Num()
+		: 0;
 	const int32 TotalImportCount =
 		Model.Bindings.Num()
 		+ LifecycleBindingCount
 		+ ObjectTypeBindingCount
-		+ ObjectFactoryBindingCount;
+		+ ObjectFactoryBindingCount
+		+ SceneAttachmentBindingCount;
 	Package->Impl->Plans.Reserve(TotalImportCount);
 	Package->Impl->VmPackage.Imports.Reserve(TotalImportCount);
 
@@ -2180,6 +2296,31 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	if (SceneAttachmentBindingCount > 0)
+	{
+		for (const FAvidScriptSceneAttachmentBindingSpec& Spec :
+			FAvidScriptSceneAttachmentBinding::GetSpecs())
+		{
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = Spec.Kind;
+			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
+			Plan.bRequiresWriteAccess = true;
+			Plan.ExpectedArgumentCount = Spec.Kind
+				== EAvidScriptBindingInvocationKind::SceneComponentAttach
+				? 5
+				: 3;
+
+			Package->Impl->VmPackage.Imports.Add({
+				Spec.StableId,
+				static_cast<uint32>(Package->Impl->Plans.Num()),
+				Spec.ModuleName,
+				Spec.ImportName,
+				Spec.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+		}
+	}
+
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
@@ -2338,6 +2479,11 @@ bool FAvidScriptBindingPackage::Dispatch(
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ActorFindComponent)
 	{
 		return DispatchAvidScriptObjectFactory(*this, Plan, Call, Context, OutResult);
+	}
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::SceneComponentAttach
+		|| Plan.Kind == EAvidScriptBindingInvocationKind::SceneComponentDetach)
+	{
+		return DispatchAvidScriptSceneAttachment(Plan, Call, Context, OutResult);
 	}
 
 	UObject* Target = nullptr;

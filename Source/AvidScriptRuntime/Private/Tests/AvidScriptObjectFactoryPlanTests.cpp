@@ -3,6 +3,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptObjectFactoryBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 
 #include "Components/ActorComponent.h"
@@ -228,6 +229,28 @@ uint32 FindObjectFactoryBindingOrdinal(
 	}
 	return MAX_uint32;
 }
+
+uint32 FindSceneAttachmentBindingOrdinal(
+	const FAvidScriptBindingPackage& Package,
+	const EAvidScriptBindingInvocationKind Kind)
+{
+	for (const FAvidScriptSceneAttachmentBindingSpec& Spec :
+		FAvidScriptSceneAttachmentBinding::GetSpecs())
+	{
+		if (Spec.Kind != Kind)
+		{
+			continue;
+		}
+		const FAvidScriptVmDynamicImport* Import =
+			Package.GetVmPackage().Imports.FindByPredicate(
+				[&Spec](const FAvidScriptVmDynamicImport& Candidate)
+				{
+					return Candidate.StableId == Spec.StableId;
+				});
+		return Import != nullptr ? Import->Ordinal : MAX_uint32;
+	}
+	return MAX_uint32;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -257,10 +280,13 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 	const TConstArrayView<FAvidScriptObjectFactoryBindingSpec> FactorySpecs =
 		FAvidScriptObjectFactoryBinding::GetSpecs();
 	TestEqual(TEXT("Object factory publishes three generic import specs"), FactorySpecs.Num(), 3);
+	const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec> AttachmentSpecs =
+		FAvidScriptSceneAttachmentBinding::GetSpecs();
+	TestEqual(TEXT("Scene attachment publishes two generic import specs"), AttachmentSpecs.Num(), 2);
 	TestEqual(
-		TEXT("Factory package adds object-type plus three factory imports"),
+		TEXT("Component factory package adds type, factory, and attachment imports"),
 		Package->GetVmPackage().Imports.Num(),
-		4);
+		6);
 	TestTrue(
 		TEXT("Construct uses one packed-i64 crossing"),
 		FactorySpecs.ContainsByPredicate(
@@ -287,6 +313,26 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 				return Spec.Kind == EAvidScriptBindingInvocationKind::ActorFindComponent
 					&& Spec.ImportName == TEXT("avid_actor_find_component")
 					&& Spec.Signature == TEXT("(iii)I");
+			}));
+	TestTrue(
+		TEXT("Attach uses one five-cell i32 crossing"),
+		AttachmentSpecs.ContainsByPredicate(
+			[](const FAvidScriptSceneAttachmentBindingSpec& Spec)
+			{
+				return Spec.Kind
+					== EAvidScriptBindingInvocationKind::SceneComponentAttach
+					&& Spec.ImportName == TEXT("avid_scene_component_attach")
+					&& Spec.Signature == TEXT("(iiiii)i");
+			}));
+	TestTrue(
+		TEXT("Detach uses one three-cell i32 crossing"),
+		AttachmentSpecs.ContainsByPredicate(
+			[](const FAvidScriptSceneAttachmentBindingSpec& Spec)
+			{
+				return Spec.Kind
+					== EAvidScriptBindingInvocationKind::SceneComponentDetach
+					&& Spec.ImportName == TEXT("avid_scene_component_detach")
+					&& Spec.Signature == TEXT("(iii)i");
 			}));
 	TestEqual(TEXT("Factory package retains its descriptor schema provenance"),
 		Package->GetDescriptorSchemaVersion(), 7);
@@ -328,9 +374,17 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 	const uint32 FindOrdinal = FindObjectFactoryBindingOrdinal(
 		*Package,
 		EAvidScriptBindingInvocationKind::ActorFindComponent);
+	const uint32 AttachOrdinal = FindSceneAttachmentBindingOrdinal(
+		*Package,
+		EAvidScriptBindingInvocationKind::SceneComponentAttach);
+	const uint32 DetachOrdinal = FindSceneAttachmentBindingOrdinal(
+		*Package,
+		EAvidScriptBindingInvocationKind::SceneComponentDetach);
 	if (!TestTrue(TEXT("Construct import ordinal resolves"), ConstructOrdinal != MAX_uint32)
 		|| !TestTrue(TEXT("Release import ordinal resolves"), ReleaseOrdinal != MAX_uint32)
-		|| !TestTrue(TEXT("FindComponent import ordinal resolves"), FindOrdinal != MAX_uint32))
+		|| !TestTrue(TEXT("FindComponent import ordinal resolves"), FindOrdinal != MAX_uint32)
+		|| !TestTrue(TEXT("Attach import ordinal resolves"), AttachOrdinal != MAX_uint32)
+		|| !TestTrue(TEXT("Detach import ordinal resolves"), DetachOrdinal != MAX_uint32))
 	{
 		return false;
 	}
@@ -381,6 +435,30 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 			CandidateScratch,
 			CandidateResult));
 	TestFalse(TEXT("FindComponent is not rejected as a candidate side effect"),
+		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
+	const uint64 AttachArguments[] = { 1, 1, 2, 1, 0 };
+	CandidateCall.BindingOrdinal = AttachOrdinal;
+	CandidateCall.Arguments = AttachArguments;
+	TestFalse(
+		TEXT("Candidate reload rejects Attach before component mutation"),
+		Package->Dispatch(
+			CandidateCall,
+			CandidateContext,
+			CandidateScratch,
+			CandidateResult));
+	TestTrue(TEXT("Attach candidate rejection has the reload category"),
+		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
+	const uint64 DetachArguments[] = { 1, 1, 0 };
+	CandidateCall.BindingOrdinal = DetachOrdinal;
+	CandidateCall.Arguments = DetachArguments;
+	TestFalse(
+		TEXT("Candidate reload rejects Detach before component mutation"),
+		Package->Dispatch(
+			CandidateCall,
+			CandidateContext,
+			CandidateScratch,
+			CandidateResult));
+	TestTrue(TEXT("Detach candidate rejection has the reload category"),
 		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
 	TestEqual(TEXT("Candidate object gates do not invoke the transform journal"),
 		CandidateJournal.PrepareCount, 0);

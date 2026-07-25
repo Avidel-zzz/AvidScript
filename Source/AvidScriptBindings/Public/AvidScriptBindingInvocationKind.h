@@ -13,5 +13,7 @@ enum class EAvidScriptBindingInvocationKind : uint8
 	ObjectTypeIsA = 5,
 	ObjectConstruct = 6,
 	ObjectRelease = 7,
-	ActorFindComponent = 8
+	ActorFindComponent = 8,
+	SceneComponentAttach = 9,
+	SceneComponentDetach = 10
 };

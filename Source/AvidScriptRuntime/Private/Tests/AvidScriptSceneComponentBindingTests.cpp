@@ -2,6 +2,7 @@
 
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "AvidScriptSceneComponentBinding.h"
 
 #include "AvidScriptObjectRegistryTestTypes.h"
@@ -9,6 +10,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -38,7 +40,9 @@ public:
 	EAvidScriptBindingReloadEffect PreparedEffect = EAvidScriptBindingReloadEffect::Unsupported;
 };
 
-bool CreateSceneComponentBindingWorld(UWorld*& OutWorld)
+bool CreateSceneComponentBindingWorld(
+	UWorld*& OutWorld,
+	const FName WorldName = TEXT("AvidScriptSceneComponentBindingWorld"))
 {
 	OutWorld = nullptr;
 	if (GEngine == nullptr)
@@ -46,7 +50,7 @@ bool CreateSceneComponentBindingWorld(UWorld*& OutWorld)
 		return false;
 	}
 
-	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, TEXT("AvidScriptSceneComponentBindingWorld"));
+	OutWorld = UWorld::CreateWorld(EWorldType::Game, false, WorldName);
 	if (OutWorld == nullptr)
 	{
 		return false;
@@ -191,6 +195,172 @@ bool FAvidScriptSceneComponentBindingWorldLocationSmokeTest::RunTest(const FStri
 	TestEqual(TEXT("Failed read zeros output"), ReadLocation, FVector::ZeroVector);
 
 	DestroySceneComponentBindingWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptSceneAttachmentBindingTest,
+	"AvidScript.Binding.SceneComponent.Attachment",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptSceneAttachmentBindingTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	UWorld* OtherWorld = nullptr;
+	if (!CreateSceneComponentBindingWorld(
+			World,
+			TEXT("AvidScriptSceneAttachmentWorld"))
+		|| !CreateSceneComponentBindingWorld(
+			OtherWorld,
+			TEXT("AvidScriptSceneAttachmentOtherWorld")))
+	{
+		AddError(TEXT("Failed to create SceneComponent attachment test worlds."));
+		DestroySceneComponentBindingWorld(OtherWorld);
+		DestroySceneComponentBindingWorld(World);
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroySceneComponentBindingWorld(OtherWorld);
+		DestroySceneComponentBindingWorld(World);
+	};
+
+	AAvidScriptActorBindingTestActor* const ChildActor =
+		World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	AAvidScriptActorBindingTestActor* const ParentActor =
+		World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	AAvidScriptActorBindingTestActor* const OtherWorldActor =
+		OtherWorld->SpawnActor<AAvidScriptActorBindingTestActor>();
+	if (!TestNotNull(TEXT("Attachment child actor spawns"), ChildActor)
+		|| !TestNotNull(TEXT("Attachment parent actor spawns"), ParentActor)
+		|| !TestNotNull(TEXT("Cross-world parent actor spawns"), OtherWorldActor))
+	{
+		return false;
+	}
+
+	USceneComponent* const Child = ChildActor->GetRootComponent();
+	USceneComponent* const Parent = ParentActor->GetRootComponent();
+	USceneComponent* const OtherWorldParent = OtherWorldActor->GetRootComponent();
+	if (!TestNotNull(TEXT("Attachment child root exists"), Child)
+		|| !TestNotNull(TEXT("Attachment parent root exists"), Parent)
+		|| !TestNotNull(TEXT("Cross-world parent root exists"), OtherWorldParent))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult Result;
+	const FAvidScriptObjectHandle ChildHandle =
+		Registry.RegisterObject(Child, Result, false);
+	const FAvidScriptObjectHandle ParentHandle =
+		Registry.RegisterObject(Parent, Result, false);
+	const FAvidScriptObjectHandle OtherWorldParentHandle =
+		Registry.RegisterObject(OtherWorldParent, Result, false);
+	if (!TestTrue(TEXT("Attachment handles register"),
+		ChildHandle.IsValid()
+			&& ParentHandle.IsValid()
+			&& OtherWorldParentHandle.IsValid()))
+	{
+		return false;
+	}
+
+	const FVector InitialWorldLocation(121.0, 34.0, 55.0);
+	Child->SetWorldLocation(InitialWorldLocation);
+	TestTrue(
+		TEXT("KeepWorld attaches same-world components"),
+		FAvidScriptSceneAttachmentBinding::Attach(
+			Registry,
+			ChildHandle,
+			ParentHandle,
+			FAvidScriptSceneAttachmentRules::EncodeAttach(
+				EAvidScriptSceneAttachmentRule::KeepWorld,
+				false),
+			Result));
+	TestEqual(TEXT("Attach records the requested parent"), Child->GetAttachParent(), Parent);
+	TestTrue(TEXT("KeepWorld preserves child world location"),
+		Child->GetComponentLocation().Equals(InitialWorldLocation, 0.01));
+	TestTrue(TEXT("Attach success omits object path diagnostics"), Result.ObjectPath.IsEmpty());
+
+	TestFalse(
+		TEXT("An attached child cannot become its own ancestor"),
+		FAvidScriptSceneAttachmentBinding::Attach(
+			Registry,
+			ParentHandle,
+			ChildHandle,
+			FAvidScriptSceneAttachmentRules::EncodeAttach(
+				EAvidScriptSceneAttachmentRule::KeepRelative,
+				false),
+			Result));
+	TestEqual(TEXT("Cycle rejection has a stable category"),
+		Result.ErrorCategory, FString(TEXT("binding_attachment_cycle")));
+	TestFalse(
+		TEXT("A component cannot attach to itself"),
+		FAvidScriptSceneAttachmentBinding::Attach(
+			Registry,
+			ChildHandle,
+			ChildHandle,
+			0,
+			Result));
+	TestEqual(TEXT("Self attachment uses the cycle category"),
+		Result.ErrorCategory, FString(TEXT("binding_attachment_cycle")));
+
+	TestTrue(
+		TEXT("KeepWorld detaches a live component"),
+		FAvidScriptSceneAttachmentBinding::Detach(
+			Registry,
+			ChildHandle,
+			FAvidScriptSceneAttachmentRules::EncodeDetach(
+				EAvidScriptSceneDetachmentRule::KeepWorld),
+			Result));
+	TestNull(TEXT("Detach clears the attachment parent"), Child->GetAttachParent());
+	TestTrue(TEXT("Detach success omits object path diagnostics"), Result.ObjectPath.IsEmpty());
+
+	TestFalse(
+		TEXT("Attach rejects reserved rule values"),
+		FAvidScriptSceneAttachmentBinding::Attach(
+			Registry,
+			ChildHandle,
+			ParentHandle,
+			3,
+			Result));
+	TestEqual(TEXT("Invalid attach rules have a stable category"),
+		Result.ErrorCategory, FString(TEXT("binding_attachment_rules_invalid")));
+	TestFalse(
+		TEXT("Detach rejects SnapToTarget"),
+		FAvidScriptSceneAttachmentBinding::Detach(
+			Registry,
+			ChildHandle,
+			static_cast<uint32>(EAvidScriptSceneAttachmentRule::SnapToTarget),
+			Result));
+	TestEqual(TEXT("Invalid detach rules share the stable rule category"),
+		Result.ErrorCategory, FString(TEXT("binding_attachment_rules_invalid")));
+
+	TestFalse(
+		TEXT("Cross-world attachment fails closed"),
+		FAvidScriptSceneAttachmentBinding::Attach(
+			Registry,
+			ChildHandle,
+			OtherWorldParentHandle,
+			FAvidScriptSceneAttachmentRules::EncodeAttach(
+				EAvidScriptSceneAttachmentRule::SnapToTarget,
+				false),
+			Result));
+	TestEqual(TEXT("Cross-world rejection has a stable category"),
+		Result.ErrorCategory, FString(TEXT("binding_attachment_world_mismatch")));
+
+	FAvidScriptObjectHandleResult ReleaseResult;
+	TestTrue(TEXT("Attachment child handle releases"),
+		Registry.ReleaseHandle(ChildHandle, ReleaseResult, false));
+	TestFalse(
+		TEXT("Detached stale generation fails closed"),
+		FAvidScriptSceneAttachmentBinding::Detach(
+			Registry,
+			ChildHandle,
+			0,
+			Result));
+	TestEqual(TEXT("Stale generation preserves registry diagnostics"),
+		Result.ErrorCategory, FString(TEXT("generation_mismatch")));
+	TestTrue(TEXT("Stale diagnostics still omit object paths"), Result.ObjectPath.IsEmpty());
 	return true;
 }
 
