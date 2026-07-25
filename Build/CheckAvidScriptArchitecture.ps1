@@ -1018,9 +1018,11 @@ if (-not $RuntimeReloadSource.Contains('GetObjectFactoryCount()') -or
 }
 if (-not $CSharpBindingRendererSource.Contains(
         'FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(') -or
+    -not $CSharpBindingRendererSource.Contains(
+        'ResultType->ClassPath != Reference.BaseClassPath') -or
     -not $BindingInvocationSource.Contains(
         'FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(')) {
-    Add-Violation 'renderer and runtime must share descriptor type-graph capability classification'
+    Add-Violation 'renderer and runtime must validate and share descriptor type-graph capability classification'
 }
 foreach ($RequiredLegacyClassReferenceRendererContract in @(
     'bHasTypedClassReferenceSurface',

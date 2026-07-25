@@ -291,6 +291,16 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 		InheritanceMismatch.Types.Num(),
 		InheritanceMismatch.Types[0].StableId);
 	InheritanceMismatch.Types.Add(ConsoleType);
+	InheritanceMismatch.Types.Sort([](
+		const FAvidScriptBindingTypeModel& Left,
+		const FAvidScriptBindingTypeModel& Right)
+	{
+		return Left.ClassPath < Right.ClassPath;
+	});
+	for (int32 Index = 0; Index < InheritanceMismatch.Types.Num(); ++Index)
+	{
+		InheritanceMismatch.Types[Index].ObjectTypeOrdinal = Index;
+	}
 	FAvidScriptBindingClassReferenceModel& MismatchedReference =
 		InheritanceMismatch.ClassReferences[0];
 	MismatchedReference.BaseClassPath = ConsoleType.ClassPath;

@@ -690,10 +690,46 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 {
 	TArray<const FAvidScriptBindingClassReferenceModel*>
 		ActorLifecycleClassReferences;
+	TSet<FString> FactoryClassReferenceIds;
+	for (const FAvidScriptBindingObjectFactoryModel& Factory :
+		Package.ObjectFactories)
+	{
+		FactoryClassReferenceIds.Add(Factory.ClassReferenceId);
+	}
 	for (const FAvidScriptBindingClassReferenceModel& Reference :
 		Package.ClassReferences)
 	{
-		if (IsAvidScriptActorClassReference(Package, Reference))
+		if (Package.SchemaVersion >= 6)
+		{
+			const FAvidScriptBindingTypeModel* ResultType =
+				Package.Types.FindByPredicate(
+					[&Reference](
+						const FAvidScriptBindingTypeModel& Type)
+					{
+						return Type.StableId == Reference.ResultTypeId;
+					});
+			if (ResultType == nullptr
+				|| ResultType->Kind != TEXT("object_handle")
+				|| ResultType->ObjectTypeOrdinal == INDEX_NONE
+				|| ResultType->ClassPath != Reference.BaseClassPath)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = TEXT("class_references.result_type_id");
+				return false;
+			}
+		}
+		const bool bActorLifecycleReference =
+			IsAvidScriptActorClassReference(Package, Reference);
+		const bool bFactoryClassReference =
+			FactoryClassReferenceIds.Contains(Reference.StableId);
+		if (Package.SchemaVersion >= 7
+			&& bActorLifecycleReference == bFactoryClassReference)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = TEXT("class_references.capability");
+			return false;
+		}
+		if (bActorLifecycleReference)
 		{
 			ActorLifecycleClassReferences.Add(&Reference);
 		}
