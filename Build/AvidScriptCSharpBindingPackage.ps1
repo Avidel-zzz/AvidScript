@@ -368,6 +368,9 @@ function Resolve-AvidScriptCSharpBindingPackage {
         if ($DescriptorSchemaVersion -lt 6) {
             throw "Binding descriptor active_object_type_ordinals requires schema v6 or v7."
         }
+        if ($ActiveObjectTypeProperty.Value -isnot [System.Array]) {
+            throw "Binding descriptor active_object_type_ordinals must be a JSON array."
+        }
 
         $DeclaredObjectTypeOrdinals =
             [System.Collections.Generic.HashSet[int]]::new()

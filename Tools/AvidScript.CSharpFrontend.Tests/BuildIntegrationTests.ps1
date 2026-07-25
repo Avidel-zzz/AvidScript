@@ -82,50 +82,139 @@ function New-BindingPackageSubset {
     return $SubsetManifestPath
 }
 
-function New-BindingPackageWithActiveObjectTypes {
+function Find-CanonicalBindingPackage {
     param(
-        [Parameter(Mandatory = $true)][string]$SourceManifestPath,
-        [Parameter(Mandatory = $true)][string]$OutputDirectory,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][int[]]$ActiveOrdinals
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("Absent", "Empty", "NonEmpty")]
+        [string]$ActiveObjectTypeMode,
+        [string[]]$RequiredUeMembers = @(),
+        [string[]]$RequiredImportNames = @()
     )
 
-    $Manifest = Get-Content -Raw -LiteralPath $SourceManifestPath | ConvertFrom-Json
-    $SourceDirectory = Split-Path -Parent $SourceManifestPath
-    $DescriptorSource = Join-Path $SourceDirectory ([string]$Manifest.files.descriptor)
-    $ReferenceSource = Join-Path $SourceDirectory ([string]$Manifest.files.reference_source)
-    $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
-    if ([int]$Descriptor.schema_version -lt 6) {
-        $Descriptor.schema_version = 6
-        $Manifest.descriptor_schema_version = 6
-        $Descriptor | Add-Member -NotePropertyName self_type_id -NotePropertyValue ""
-        $ObjectOrdinalAssigned = $false
-        foreach ($Type in @($Descriptor.types)) {
-            $ObjectTypeOrdinal = if ($ObjectOrdinalAssigned) { -1 } else { 0 }
-            $ClassPath = if ($ObjectOrdinalAssigned) {
-                ""
+    $GeneratedRoot = Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings"
+    $Candidates = foreach ($Candidate in Get-ChildItem `
+            -LiteralPath $GeneratedRoot `
+            -Filter "package.json" `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue) {
+        try {
+            $Manifest = Get-Content -Raw -LiteralPath $Candidate.FullName |
+                ConvertFrom-Json
+            if ([string]$Manifest.package_name -cne $PackageName) {
+                continue
             }
-            else {
-                "/Script/CoreUObject.Object"
+            $DescriptorPath = Join-Path `
+                $Candidate.DirectoryName `
+                ([string]$Manifest.files.descriptor)
+            $ReferenceSourcePath = Join-Path `
+                $Candidate.DirectoryName `
+                ([string]$Manifest.files.reference_source)
+            $Descriptor = Get-Content -Raw -LiteralPath $DescriptorPath |
+                ConvertFrom-Json
+            if ([int]$Descriptor.schema_version -lt 6 -or
+                [string]$Descriptor.package_name -cne $PackageName -or
+                (Get-Sha256Hex $DescriptorPath) -cne
+                    [string]$Manifest.descriptor_sha256 -or
+                (Get-Sha256Hex $ReferenceSourcePath) -cne
+                    [string]$Manifest.reference_source_sha256) {
+                continue
             }
-            $Type | Add-Member `
-                -NotePropertyName object_type_ordinal `
-                -NotePropertyValue $ObjectTypeOrdinal
-            $Type | Add-Member `
-                -NotePropertyName class_path `
-                -NotePropertyValue $ClassPath
-            $Type | Add-Member -NotePropertyName base_type_id -NotePropertyValue ""
-            $ObjectOrdinalAssigned = $true
+
+            $ActiveProperty =
+                $Descriptor.PSObject.Properties['active_object_type_ordinals']
+            $ActiveModeMatches = switch ($ActiveObjectTypeMode) {
+                "Absent" { $null -eq $ActiveProperty }
+                "Empty" {
+                    $null -ne $ActiveProperty -and
+                    $ActiveProperty.Value -is [System.Array] -and
+                    @($ActiveProperty.Value).Count -eq 0
+                }
+                "NonEmpty" {
+                    $null -ne $ActiveProperty -and
+                    $ActiveProperty.Value -is [System.Array] -and
+                    @($ActiveProperty.Value).Count -gt 0
+                }
+            }
+            if (-not $ActiveModeMatches) {
+                continue
+            }
+
+            $ImportNames = @($Manifest.required_imports |
+                ForEach-Object { [string]$_.name })
+            $HasRequiredImports = $true
+            foreach ($RequiredImportName in $RequiredImportNames) {
+                if ($ImportNames -cnotcontains $RequiredImportName) {
+                    $HasRequiredImports = $false
+                    break
+                }
+            }
+            if (-not $HasRequiredImports) {
+                continue
+            }
+
+            $ImportStableIds = @($Manifest.required_imports |
+                ForEach-Object { [string]$_.stable_id })
+            $HasRequiredMembers = $true
+            foreach ($RequiredUeMember in $RequiredUeMembers) {
+                $MatchingBindings = @($Descriptor.bindings | Where-Object {
+                    [string]$_.ue_member -ceq $RequiredUeMember -and
+                    $ImportStableIds -ccontains [string]$_.stable_id
+                })
+                if ($MatchingBindings.Count -eq 0) {
+                    $HasRequiredMembers = $false
+                    break
+                }
+            }
+            if (-not $HasRequiredMembers) {
+                continue
+            }
+
+            [pscustomobject]@{
+                Path = $Candidate.FullName
+                ImportCount = @($Manifest.required_imports).Count
+                LastWriteTime = $Candidate.LastWriteTime
+            }
+        }
+        catch {
+            continue
         }
     }
-    $ActiveProperty = $Descriptor.PSObject.Properties['active_object_type_ordinals']
-    if ($null -eq $ActiveProperty) {
-        $Descriptor | Add-Member `
-            -NotePropertyName active_object_type_ordinals `
-            -NotePropertyValue @($ActiveOrdinals)
-    }
-    else {
-        $ActiveProperty.Value = @($ActiveOrdinals)
-    }
+    $Selected = $Candidates |
+        Sort-Object `
+            -Property @{ Expression = { $_.ImportCount }; Descending = $true },
+                @{ Expression = { $_.LastWriteTime }; Descending = $true } |
+        Select-Object -First 1
+    Assert-Condition ($null -ne $Selected) `
+        "canonical binding package fixture is missing: package=$PackageName active=$ActiveObjectTypeMode"
+    return [string]$Selected.Path
+}
+
+function New-BindingPackageWithScalarActiveObjectType {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceManifestPath,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory
+    )
+
+    $Manifest = Get-Content -Raw -LiteralPath $SourceManifestPath |
+        ConvertFrom-Json
+    $SourceDirectory = Split-Path -Parent $SourceManifestPath
+    $DescriptorSource = Join-Path `
+        $SourceDirectory `
+        ([string]$Manifest.files.descriptor)
+    $ReferenceSource = Join-Path `
+        $SourceDirectory `
+        ([string]$Manifest.files.reference_source)
+    $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource |
+        ConvertFrom-Json
+    $ActiveProperty =
+        $Descriptor.PSObject.Properties['active_object_type_ordinals']
+    Assert-Condition (
+        $null -ne $ActiveProperty -and
+        @($ActiveProperty.Value).Count -gt 0) `
+        "scalar active object-type fixture requires a non-empty canonical source package"
+    $ActiveProperty.Value = [int]@($ActiveProperty.Value)[0]
 
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     $DescriptorDestination =
@@ -245,20 +334,28 @@ $RuntimeSetPackagePath = New-BindingPackageSubset `
     -AuthorizationManifestPath $BindingPackagePath `
     -OutputDirectory (Join-Path $RunRoot "RuntimeSetPackage") `
     -UeFunctions @("SetActorScale3D")
-$RuntimeSetDescriptor = Get-Content -Raw -LiteralPath (
-    Join-Path `
-        (Split-Path -Parent $RuntimeSetPackagePath) `
-        ([string](Get-Content -Raw -LiteralPath $RuntimeSetPackagePath |
-            ConvertFrom-Json).files.descriptor)) | ConvertFrom-Json
-$FixtureActiveOrdinal = @($RuntimeSetDescriptor.types |
-    ForEach-Object { [int]$_.object_type_ordinal } |
-    Where-Object { $_ -ge 0 } |
-    Sort-Object | Select-Object -First 1)[0]
-$RuntimeObjectTypeMismatchPackagePath =
-    New-BindingPackageWithActiveObjectTypes `
-        -SourceManifestPath $RuntimeSetPackagePath `
-        -OutputDirectory (Join-Path $RunRoot "RuntimeObjectTypeMismatchPackage") `
-        -ActiveOrdinals @($FixtureActiveOrdinal)
+$EngineObjectAuthorizationPackagePath = Find-CanonicalBindingPackage `
+    -PackageName "avidscript.engine.gameplay" `
+    -ActiveObjectTypeMode "Absent" `
+    -RequiredImportNames @("avid_object_type_is_a", "avid_owner_get_handle")
+$EngineNoActiveRuntimePackagePath = Find-CanonicalBindingPackage `
+    -PackageName "avidscript.engine.gameplay" `
+    -ActiveObjectTypeMode "Empty" `
+    -RequiredImportNames @("avid_object_type_is_a", "avid_owner_get_handle")
+$ComponentAuthorizationPackagePath = Find-CanonicalBindingPackage `
+    -PackageName "avidscript.sample.component_gameplay" `
+    -ActiveObjectTypeMode "Absent" `
+    -RequiredUeMembers @("ApplyGameplayValue") `
+    -RequiredImportNames @("avid_owner_get_handle")
+$ComponentActiveRuntimePackagePath = Find-CanonicalBindingPackage `
+    -PackageName "avidscript.sample.component_gameplay" `
+    -ActiveObjectTypeMode "NonEmpty" `
+    -RequiredUeMembers @("ApplyGameplayValue") `
+    -RequiredImportNames @("avid_owner_get_handle")
+$ScalarActiveRuntimePackagePath =
+    New-BindingPackageWithScalarActiveObjectType `
+        -SourceManifestPath $ComponentActiveRuntimePackagePath `
+        -OutputDirectory (Join-Path $RunRoot "ScalarActiveRuntimePackage")
 
 $RuntimeAllowedRoot = Join-Path $RunRoot "RuntimeAllowed"
 New-Item -ItemType Directory -Force -Path $RuntimeAllowedRoot | Out-Null
@@ -289,16 +386,81 @@ Assert-Condition ($RuntimeAllowedJson.binding_authorization.manifest_file -ne $R
 $RuntimeAllowedManifestJson = Get-Content -Raw -LiteralPath $RuntimeAllowedManifest | ConvertFrom-Json
 Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq 1) "final manifest did not publish the runtime package subset"
 
+$GuestObjectTypeMismatchRoot = Join-Path $RunRoot "GuestObjectTypeMismatch"
+New-Item -ItemType Directory -Force -Path $GuestObjectTypeMismatchRoot |
+    Out-Null
+$GuestObjectTypeMismatchSource = Join-Path `
+    $GuestObjectTypeMismatchRoot `
+    "GuestObjectTypeMismatchScript.cs"
+$GuestObjectTypeMismatchReport = Join-Path `
+    $GuestObjectTypeMismatchRoot `
+    "guest_object_type_mismatch.csharp.report.json"
+$GuestObjectTypeMismatchManifest = Join-Path `
+    $GuestObjectTypeMismatchRoot `
+    "guest_object_type_mismatch.avidscript.json"
+Write-LifecycleSource `
+    -Path $GuestObjectTypeMismatchSource `
+    -BeginPlayBody 'UObject value = UE.Self; AActor casted = AActor.TryCast(value);'
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $GuestObjectTypeMismatchRoot `
+    -SourcePath $GuestObjectTypeMismatchSource `
+    -BindingPackagePath $EngineObjectAuthorizationPackagePath `
+    -RuntimeBindingPackagePath $EngineNoActiveRuntimePackagePath `
+    -ModuleId "p51_guest_object_type_mismatch" `
+    -ArtifactStem "guest_object_type_mismatch" `
+    -ReportPath $GuestObjectTypeMismatchReport `
+    -ManifestPath $GuestObjectTypeMismatchManifest | Out-Null
+$GuestObjectTypeMismatchExit = $LASTEXITCODE
+Assert-Condition ($GuestObjectTypeMismatchExit -eq 1) `
+    "guest object-type mismatch must return exit 1; actual=$GuestObjectTypeMismatchExit"
+$GuestObjectTypeMismatchJson =
+    Get-Content -Raw -LiteralPath $GuestObjectTypeMismatchReport |
+    ConvertFrom-Json
+Assert-Condition (
+    $GuestObjectTypeMismatchJson.result -eq
+        "binding_runtime_object_type_mismatch") `
+    "guest object-type mismatch has the wrong result"
+Assert-Condition (
+    @($GuestObjectTypeMismatchJson.diagnostics |
+        Where-Object code -eq "ASBI4304").Count -eq 1) `
+    "guest object-type mismatch diagnostic is missing"
+$GuestObjectTypeMismatchDiagnostic = @(
+    $GuestObjectTypeMismatchJson.diagnostics |
+        Where-Object code -eq "ASBI4304")[0]
+Assert-Condition (
+    @($GuestObjectTypeMismatchDiagnostic.runtime_active_object_type_ordinals).Count -eq 0 -and
+    @($GuestObjectTypeMismatchDiagnostic.guest_used_object_type_ordinals).Count -gt 0) `
+    "guest object-type mismatch did not exercise an unactivated Guest ordinal"
+Assert-Condition (
+    -not (Test-Path -LiteralPath $GuestObjectTypeMismatchManifest -PathType Leaf)) `
+    "guest object-type mismatch left a manifest"
+Assert-Condition (
+    -not (Test-Path -LiteralPath (
+        Join-Path $GuestObjectTypeMismatchRoot "guest_object_type_mismatch.wasm") -PathType Leaf)) `
+    "guest object-type mismatch left loadable WASM"
+
 $RuntimeObjectTypeMismatchRoot = Join-Path $RunRoot "RuntimeObjectTypeMismatch"
-New-Item -ItemType Directory -Force -Path $RuntimeObjectTypeMismatchRoot | Out-Null
-$RuntimeObjectTypeMismatchReport = Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.csharp.report.json"
-$RuntimeObjectTypeMismatchManifest = Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.avidscript.json"
+New-Item -ItemType Directory -Force -Path $RuntimeObjectTypeMismatchRoot |
+    Out-Null
+$RuntimeObjectTypeMismatchSource = Join-Path `
+    $RuntimeObjectTypeMismatchRoot `
+    "RuntimeObjectTypeMismatchScript.cs"
+$RuntimeObjectTypeMismatchReport = Join-Path `
+    $RuntimeObjectTypeMismatchRoot `
+    "runtime_object_type_mismatch.csharp.report.json"
+$RuntimeObjectTypeMismatchManifest = Join-Path `
+    $RuntimeObjectTypeMismatchRoot `
+    "runtime_object_type_mismatch.avidscript.json"
+Write-LifecycleSource `
+    -Path $RuntimeObjectTypeMismatchSource `
+    -BeginPlayBody 'UE.Self.ApplyGameplayValue(1.0f);'
 & $BuildScript `
     -DotNetPath $DotNetPath `
     -OutputRoot $RuntimeObjectTypeMismatchRoot `
-    -SourcePath $RuntimeAllowedSource `
-    -BindingPackagePath $BindingPackagePath `
-    -RuntimeBindingPackagePath $RuntimeObjectTypeMismatchPackagePath `
+    -SourcePath $RuntimeObjectTypeMismatchSource `
+    -BindingPackagePath $ComponentAuthorizationPackagePath `
+    -RuntimeBindingPackagePath $ComponentActiveRuntimePackagePath `
     -ModuleId "p51_runtime_object_type_mismatch" `
     -ArtifactStem "runtime_object_type_mismatch" `
     -ReportPath $RuntimeObjectTypeMismatchReport `
@@ -317,6 +479,13 @@ Assert-Condition (
     @($RuntimeObjectTypeMismatchJson.diagnostics |
         Where-Object code -eq "ASBI4304").Count -eq 1) `
     "runtime object-type mismatch diagnostic is missing"
+$RuntimeObjectTypeMismatchDiagnostic = @(
+    $RuntimeObjectTypeMismatchJson.diagnostics |
+        Where-Object code -eq "ASBI4304")[0]
+Assert-Condition (
+    @($RuntimeObjectTypeMismatchDiagnostic.runtime_active_object_type_ordinals).Count -gt 0 -and
+    @($RuntimeObjectTypeMismatchDiagnostic.guest_used_object_type_ordinals).Count -eq 0) `
+    "runtime object-type mismatch did not exercise an unused activation ordinal"
 Assert-Condition (
     -not (Test-Path -LiteralPath $RuntimeObjectTypeMismatchManifest -PathType Leaf)) `
     "runtime object-type mismatch left a manifest"
@@ -324,6 +493,45 @@ Assert-Condition (
     -not (Test-Path -LiteralPath (
         Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.wasm") -PathType Leaf)) `
     "runtime object-type mismatch left loadable WASM"
+
+$ScalarActiveRoot = Join-Path $RunRoot "ScalarActiveObjectType"
+New-Item -ItemType Directory -Force -Path $ScalarActiveRoot | Out-Null
+$ScalarActiveReport = Join-Path `
+    $ScalarActiveRoot `
+    "scalar_active_object_type.csharp.report.json"
+$ScalarActiveManifest = Join-Path `
+    $ScalarActiveRoot `
+    "scalar_active_object_type.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $ScalarActiveRoot `
+    -SourcePath $RuntimeObjectTypeMismatchSource `
+    -BindingPackagePath $ComponentAuthorizationPackagePath `
+    -RuntimeBindingPackagePath $ScalarActiveRuntimePackagePath `
+    -ModuleId "p51_scalar_active_object_type" `
+    -ArtifactStem "scalar_active_object_type" `
+    -ReportPath $ScalarActiveReport `
+    -ManifestPath $ScalarActiveManifest | Out-Null
+$ScalarActiveExit = $LASTEXITCODE
+Assert-Condition ($ScalarActiveExit -eq 1) `
+    "scalar active object-type package must return exit 1; actual=$ScalarActiveExit"
+$ScalarActiveJson = Get-Content -Raw -LiteralPath $ScalarActiveReport |
+    ConvertFrom-Json
+Assert-Condition ($ScalarActiveJson.result -eq "runtime_binding_package_invalid") `
+    "scalar active object-type package has the wrong result"
+Assert-Condition (
+    @($ScalarActiveJson.diagnostics | Where-Object {
+        $_.code -eq "ASBI4302" -and
+        $_.message -like "*must be a JSON array*"
+    }).Count -eq 1) `
+    "scalar active object-type package was not rejected as a JSON shape error"
+Assert-Condition (
+    -not (Test-Path -LiteralPath $ScalarActiveManifest -PathType Leaf)) `
+    "scalar active object-type package left a manifest"
+Assert-Condition (
+    -not (Test-Path -LiteralPath (
+        Join-Path $ScalarActiveRoot "scalar_active_object_type.wasm") -PathType Leaf)) `
+    "scalar active object-type package left loadable WASM"
 
 $PreparedBootstrapRoot = Join-Path $RunRoot "PreparedBootstrap"
 $PreparedBootstrapReport = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.csharp.report.json"
@@ -706,4 +914,4 @@ Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 12/12 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 14/14 passed"

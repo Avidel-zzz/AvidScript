@@ -937,6 +937,8 @@ foreach ($PackedOwnerContract in @(
 }
 foreach ($ActiveObjectTypePackageContract in @(
     'active_object_type_ordinals',
+    '-isnot [System.Array]',
+    'must be a JSON array',
     'HasActiveObjectTypeOrdinals',
     'ActiveObjectTypeOrdinals',
     'strictly increasing declared object ordinals'
@@ -1756,10 +1758,11 @@ if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
     $CSharpBuildInvokerSource.Contains('BindingSliceService')) {
     Add-Violation 'C# BuildInvoker must execute one normalized build without selecting or slicing packages'
 }
-if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorGenerator::Generate') -or
-    -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor') -or
+if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories') -or
+    -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical') -or
+    -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorCSharpBindingEmitter::PublishDerivedSliceDescriptor') -or
     $CSharpBindingSliceSource.Contains('FPlatformProcess::ExecProcess')) {
-    Add-Violation 'C# BindingSliceService must reuse the descriptor generator and package publisher without invoking builds'
+    Add-Violation 'C# BindingSliceService must reuse the factory-aware descriptor generator, canonical serializer, and derived package publisher without invoking builds'
 }
 $CSharpGuestContext = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpFunctionLoweringContext.cs'
 $CSharpOperationLowerer = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs'
@@ -2017,6 +2020,28 @@ foreach ($RequiredDualPackageContract in @(
         Add-Violation "C# build pipeline is missing dual-package contract $RequiredDualPackageContract"
     }
 }
+$ObjectTypeProvenanceValidationSource = Get-SourceSlice `
+    -Source $CSharpBuildScriptSource `
+    -StartToken 'if ([bool]$BindingPackageInfo.HasActiveObjectTypeOrdinals)' `
+    -EndToken '$DirectAbiExports = @(' `
+    -Description 'C# runtime object-type provenance validation'
+Test-RequiredTokenSequence `
+    -Source $ObjectTypeProvenanceValidationSource `
+    -Tokens @(
+        '$RuntimeActiveObjectTypeOrdinals =',
+        '@($BindingPackageInfo.ActiveObjectTypeOrdinals)',
+        '$ObjectTypeOrdinalsMatch =',
+        '$RuntimeActiveObjectTypeOrdinals.Count -eq $UsedObjectTypeOrdinals.Count',
+        'for ($Index = 0; $Index -lt $UsedObjectTypeOrdinals.Count; ++$Index)',
+        '[int]$RuntimeActiveObjectTypeOrdinals[$Index] -ne',
+        '[int]$UsedObjectTypeOrdinals[$Index]',
+        '$ObjectTypeOrdinalsMatch = $false',
+        'if (-not $ObjectTypeOrdinalsMatch)',
+        'Remove-LoadableArtifacts',
+        'ASBI4304',
+        'binding_runtime_object_type_mismatch',
+        'exit 1') `
+    -Description 'C# runtime object-type provenance validation'
 if ($CSharpBuildScriptSource.Contains('MissingBindingImports')) {
     Add-Violation 'complete binding packages are authorization ceilings; unused imports must not be required in Guest IR'
 }
