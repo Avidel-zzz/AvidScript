@@ -624,6 +624,27 @@ Invoke-ContractCase 'Evidence.PrivacyColoredDiffRejected' {
     Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted a private path when Git forced colored output'
 }
 
+Invoke-ContractCase 'Evidence.PrivacyBinaryClassifiedFileRejected' {
+    $Root = New-FixtureRepository 'EvidencePrivacyBinaryClassified'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    $PrivatePath = 'C:' + '\Users\Example\file'
+    Write-Utf8Text (Join-Path $Root '.gitattributes') "Docs/Opaque.md -diff`n"
+    Write-Utf8Text (Join-Path $Root 'Docs\Opaque.md') "private path $PrivatePath`n"
+    Commit-Paths $Root @(
+        '.gitattributes',
+        'Docs/Phase91/Phase91_State.json',
+        'Docs/Opaque.md') 'add binary-classified private path'
+    $State = Read-AvidScriptPhaseState $Root 91
+    $Diagnostic = ''
+    try {
+        Test-AvidScriptPhasePrivacy $Root $State | Out-Null
+    }
+    catch {
+        $Diagnostic = $_.Exception.Message
+    }
+    Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted a private path hidden by a diff attribute'
+}
+
 Invoke-ContractCase 'Evidence.PrivacyChangeRejected' {
     $Fixture = Prepare-GateReadyFixture 'EvidencePrivacy'
     $Gate = New-ValidGateReport $Fixture 'EvidencePrivacy'

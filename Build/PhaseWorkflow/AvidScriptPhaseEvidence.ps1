@@ -276,7 +276,8 @@ function Test-AvidScriptPhasePrivacy {
     }
 
     $Patch = (Invoke-AvidScriptGit $RepositoryRoot @(
-        'diff', '--no-color', '--no-ext-diff', '--unified=0', '--output-indicator-new=>', $Range)).Text
+        'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--text',
+        '--unified=0', '--output-indicator-new=>', $Range)).Text
     $AddedPatch = (@($Patch -split "`n" | Where-Object {
         $_.StartsWith('>', [System.StringComparison]::Ordinal)
     }) -join "`n")
