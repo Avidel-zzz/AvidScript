@@ -1,0 +1,49 @@
+{
+  "schema_version": 4,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/ComponentGameplay/ComponentGameplay.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_component_gameplay",
+  "artifact_stem": "profile_component_gameplay",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_component_gameplay",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_component_gameplay/profile_component_gameplay.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_component_gameplay/profile_component_gameplay.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.component_gameplay",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestActor",
+        "include_functions": [
+          "ApplyGameplayValue"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestSceneComponent",
+        "include_functions": [
+          "ApplyGameplayPulse"
+        ]
+      }
+    ],
+    "class_references": [
+      {
+        "script_name": "GameplayComponentClass",
+        "class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestSceneComponent",
+        "base_class_path": "/Script/AvidScriptEditor.AvidScriptTypedTestSceneComponent",
+        "load_policy": "EditorLoad"
+      }
+    ],
+    "object_factories": [
+      {
+        "script_name": "GameplayComponent",
+        "class_reference": "GameplayComponentClass",
+        "kind": "actor_component",
+        "outer_base_class_path": "/Script/Engine.Actor",
+        "ownership": "session",
+        "registration": "register_instance"
+      }
+    ]
+  }
+}

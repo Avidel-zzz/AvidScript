@@ -11,12 +11,16 @@ struct FAvidScriptEditorCSharpObjectFactorySurface
 	FString PropertyName;
 	FString FactoryTokenName;
 	FString TypeTokenName;
+	bool bSceneComponent = false;
 };
 
 class FAvidScriptEditorCSharpObjectFactoryRenderer
 {
 public:
 	static bool ValidateBindingContract(
+		FString& OutErrorCategory,
+		FString& OutErrorSource);
+	static bool ValidateAttachmentContract(
 		FString& OutErrorCategory,
 		FString& OutErrorSource);
 
@@ -36,6 +40,10 @@ public:
 		TArray<FString>& Lines);
 
 	static void AppendNativeImports(
+		bool bNeedsLeadingBlank,
+		TArray<FString>& Lines);
+
+	static void AppendSceneAttachmentNativeImports(
 		bool bNeedsLeadingBlank,
 		TArray<FString>& Lines);
 };

@@ -1,6 +1,7 @@
 #include "BindingGeneration/AvidScriptEditorCSharpObjectFactoryRenderer.h"
 
 #include "AvidScriptObjectFactoryBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
 
 namespace
@@ -25,6 +26,28 @@ const FAvidScriptBindingTypeModel* FindTypeById(
 		{
 			return Type.StableId == StableId;
 		});
+}
+
+bool IsObjectTypeDerivedFrom(
+	const FAvidScriptBindingPackageModel& Package,
+	const FAvidScriptBindingTypeModel& Type,
+	const FString& BaseClassPath)
+{
+	const FAvidScriptBindingTypeModel* Current = &Type;
+	TSet<FString> VisitedTypeIds;
+	while (Current != nullptr
+		&& !VisitedTypeIds.Contains(Current->StableId))
+	{
+		if (Current->ClassPath == BaseClassPath)
+		{
+			return true;
+		}
+		VisitedTypeIds.Add(Current->StableId);
+		Current = Current->BaseTypeId.IsEmpty()
+			? nullptr
+			: FindTypeById(Package, Current->BaseTypeId);
+	}
+	return false;
 }
 } // namespace
 
@@ -62,6 +85,39 @@ bool FAvidScriptEditorCSharpObjectFactoryRenderer::ValidateBindingContract(
 		return true;
 	}
 	OutErrorCategory = TEXT("object_factory_binding_contract_invalid");
+	OutErrorSource = TEXT("missing_required_kind");
+	return false;
+}
+
+bool FAvidScriptEditorCSharpObjectFactoryRenderer::ValidateAttachmentContract(
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	bool bHasAttach = false;
+	bool bHasDetach = false;
+	const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec> Specs =
+		FAvidScriptSceneAttachmentBinding::GetSpecs();
+	for (const FAvidScriptSceneAttachmentBindingSpec& Spec : Specs)
+	{
+		switch (Spec.Kind)
+		{
+		case EAvidScriptBindingInvocationKind::SceneComponentAttach:
+			bHasAttach = !bHasAttach && Spec.Signature == TEXT("(iiiii)i");
+			break;
+		case EAvidScriptBindingInvocationKind::SceneComponentDetach:
+			bHasDetach = !bHasDetach && Spec.Signature == TEXT("(iii)i");
+			break;
+		default:
+			OutErrorCategory = TEXT("scene_attachment_binding_contract_invalid");
+			OutErrorSource = Spec.StableId;
+			return false;
+		}
+	}
+	if (Specs.Num() == 2 && bHasAttach && bHasDetach)
+	{
+		return true;
+	}
+	OutErrorCategory = TEXT("scene_attachment_binding_contract_invalid");
 	OutErrorSource = TEXT("missing_required_kind");
 	return false;
 }
@@ -173,7 +229,12 @@ bool FAvidScriptEditorCSharpObjectFactoryRenderer::BuildSurfaces(
 			OuterType,
 			PropertyName,
 			FactoryTokenName,
-			TypeTokenName
+			TypeTokenName,
+			bComponentFactory
+				&& IsObjectTypeDerivedFrom(
+					Package,
+					*ResultType,
+					TEXT("/Script/Engine.SceneComponent"))
 		});
 	}
 	OutSurfaces.Sort(
@@ -322,9 +383,86 @@ void FAvidScriptEditorCSharpObjectFactoryRenderer::AppendFacadeMethods(
 			});
 		}
 	}
+
+	const bool bHasSceneComponent = Surfaces.ContainsByPredicate(
+		[](const FAvidScriptEditorCSharpObjectFactorySurface& Surface)
+		{
+			return Surface.bSceneComponent;
+		});
+	if (bHasSceneComponent)
+	{
+		Lines.Append({
+			TEXT("    public enum AttachmentRule : int"),
+			TEXT("    {"),
+			TEXT("        KeepRelative = 0,"),
+			TEXT("        KeepWorld = 1,"),
+			TEXT("        SnapToTarget = 2,"),
+			TEXT("    }"),
+			TEXT(""),
+			TEXT("    public enum DetachmentRule : int"),
+			TEXT("    {"),
+			TEXT("        KeepRelative = 0,"),
+			TEXT("        KeepWorld = 1,"),
+			TEXT("    }"),
+			TEXT(""),
+			TEXT("    public static bool AttachTo("),
+			TEXT("        USceneComponent child, USceneComponent parent,"),
+			TEXT("        AttachmentRule rule, bool weldSimulatedBodies)"),
+			TEXT("    {"),
+			TEXT("        int rules = (int)rule;"),
+			TEXT("        if (weldSimulatedBodies)"),
+			TEXT("        {"),
+			TEXT("            rules += 4;"),
+			TEXT("        }"),
+			TEXT("        return AvidScriptNative.SceneComponentAttach("),
+			TEXT("            child.AvidScriptSlot, child.AvidScriptGeneration,"),
+			TEXT("            parent.AvidScriptSlot, parent.AvidScriptGeneration,"),
+			TEXT("            rules) != 0;"),
+			TEXT("    }"),
+			TEXT(""),
+			TEXT("    public static bool Detach("),
+			TEXT("        USceneComponent child, DetachmentRule rule)"),
+			TEXT("        => AvidScriptNative.SceneComponentDetach("),
+			TEXT("            child.AvidScriptSlot, child.AvidScriptGeneration,"),
+			TEXT("            (int)rule) != 0;"),
+			TEXT("")
+		});
+	}
 	if (!Lines.IsEmpty() && Lines.Last().IsEmpty())
 	{
 		Lines.Pop();
+	}
+}
+
+void FAvidScriptEditorCSharpObjectFactoryRenderer::AppendSceneAttachmentNativeImports(
+	const bool bNeedsLeadingBlank,
+	TArray<FString>& Lines)
+{
+	const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec> Specs =
+		FAvidScriptSceneAttachmentBinding::GetSpecs();
+	for (int32 SpecIndex = 0; SpecIndex < Specs.Num(); ++SpecIndex)
+	{
+		const FAvidScriptSceneAttachmentBindingSpec& Spec = Specs[SpecIndex];
+		if (bNeedsLeadingBlank || SpecIndex > 0)
+		{
+			Lines.Add(TEXT(""));
+		}
+		Lines.Add(FString::Printf(
+			TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+			*Spec.ModuleName,
+			*Spec.ImportName));
+		switch (Spec.Kind)
+		{
+		case EAvidScriptBindingInvocationKind::SceneComponentAttach:
+			Lines.Add(TEXT("    internal static extern int SceneComponentAttach(int childSlot, int childGeneration, int parentSlot, int parentGeneration, int rules);"));
+			break;
+		case EAvidScriptBindingInvocationKind::SceneComponentDetach:
+			Lines.Add(TEXT("    internal static extern int SceneComponentDetach(int childSlot, int childGeneration, int rules);"));
+			break;
+		default:
+			checkNoEntry();
+			break;
+		}
 	}
 }
 

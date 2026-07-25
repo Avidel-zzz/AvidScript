@@ -1353,4 +1353,283 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpComponentGameplayTest,
+	"AvidScript.Editor.CSharp.ComponentGameplay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpComponentGameplayTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = MakeAvidScriptTypedObjectBindingTestPath(
+		FPaths::Combine(
+			TEXT("ComponentGameplay"),
+			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+
+	const FString ProfilePath = GetAvidScriptTypedProjectApiPluginPath(
+		TEXT("Samples/CSharp/ComponentGameplay/ComponentGameplay.csharp-profile.json"));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+		TEXT("Component gameplay schema v4 profile parses"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ProfilePath,
+			ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Component gameplay profile uses schema v4"),
+		ProfileResult.SchemaVersion, 4);
+	TestEqual(TEXT("Component gameplay resolves one factory class"),
+		ProfileResult.ResolvedClassReferences.Num(), 1);
+	TestEqual(TEXT("Component gameplay resolves one generic factory"),
+		ProfileResult.ResolvedObjectFactories.Num(), 1);
+	if (ProfileResult.ResolvedClassReferences.Num() != 1
+		|| ProfileResult.ResolvedObjectFactories.Num() != 1)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Component gameplay factory stays project-defined"),
+		ProfileResult.ResolvedClassReferences[0].ClassPath,
+		UAvidScriptTypedTestSceneComponent::StaticClass()->GetPathName());
+
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = FPaths::Combine(TestRoot, TEXT("Build"));
+	BuildRequest.Config.ArtifactStem = TEXT("component_gameplay");
+	BuildRequest.Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot =
+		FPaths::Combine(TestRoot, TEXT("SemanticCache/v1"));
+	BuildRequest.Config.bDisableSemanticCache = true;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+		TEXT("Component gameplay builds through Roslyn, Guest IR, and WASM"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(
+			BuildRequest,
+			BuildResult)))
+	{
+		AddError(
+			BuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + BuildResult.Stdout
+			+ TEXT("\nstderr:\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Component gameplay uses bootstrap and final builds"),
+		BuildResult.BuildInvocationCount, 2);
+	TestEqual(TEXT("Component gameplay invokes Roslyn once"),
+		BuildResult.SemanticInvocationCount, 1);
+	TestEqual(TEXT("Component gameplay lowers Guest IR twice"),
+		BuildResult.GuestIrInvocationCount, 2);
+	TestEqual(TEXT("Component gameplay emits WASM twice"),
+		BuildResult.WasmBackendInvocationCount, 2);
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+		TEXT("Component gameplay manifest authorizes emitted WASM"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			BuildResult.ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("Component gameplay emits non-empty WASM"),
+		!Bytecode.IsEmpty());
+	if (!TestTrue(TEXT("Component gameplay owns a runtime binding package"),
+		Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Component gameplay runtime caches one factory"),
+		Manifest.BindingPackage->GetObjectFactoryCount(), 1);
+	TestEqual(TEXT("Component gameplay runtime publishes eight dynamic imports"),
+		Manifest.BindingPackage->GetVmPackage().Imports.Num(), 8);
+
+	const TSet<FString> RequiredCapabilityImports = {
+		TEXT("avid_owner_get_handle"),
+		TEXT("avid_object_construct"),
+		TEXT("avid_object_release"),
+		TEXT("avid_actor_find_component"),
+		TEXT("avid_scene_component_attach"),
+		TEXT("avid_scene_component_detach")
+	};
+	TestEqual(TEXT("Component gameplay reaches six shared and two reflected imports"),
+		Manifest.RequiredImports.Num(), 8);
+	int32 ReflectedImportCount = 0;
+	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
+	{
+		TestEqual(TEXT("Component gameplay imports only the AvidScript module"),
+			Import.ModuleName, FString(TEXT("avidscript")));
+		if (Import.ImportName.StartsWith(
+			TEXT("avid_ue_"),
+			ESearchCase::CaseSensitive))
+		{
+			++ReflectedImportCount;
+		}
+		else
+		{
+			TestTrue(TEXT("Component gameplay uses only generic capabilities"),
+				RequiredCapabilityImports.Contains(Import.ImportName));
+		}
+	}
+	TestEqual(TEXT("Component gameplay reaches two project UFUNCTION imports"),
+		ReflectedImportCount, 2);
+	TestEqual(TEXT("Component gameplay needs no runtime object-type cast crossing"),
+		CountAvidScriptRequiredImport(
+			Manifest,
+			TEXT("avidscript"),
+			TEXT("avid_object_type_is_a")),
+		0);
+
+	UWorld* World = nullptr;
+	if (!TestTrue(TEXT("Component gameplay World starts"),
+		CreateAvidScriptTypedProjectApiWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptTypedProjectApiWorld(World);
+	};
+	AAvidScriptTypedTestActor* const Owner =
+		World->SpawnActor<AAvidScriptTypedTestActor>();
+	if (!TestNotNull(TEXT("Component gameplay owner spawns"), Owner))
+	{
+		return false;
+	}
+	UAvidScriptTypedTestSceneComponent* const ExistingComponent =
+		Owner->TypedRootComponent;
+	if (!TestNotNull(TEXT("Component gameplay owner has a typed root"),
+		ExistingComponent))
+	{
+		return false;
+	}
+
+	TInlineComponentArray<UAvidScriptTypedTestSceneComponent*>
+		ComponentsBeforeBeginPlay;
+	Owner->GetComponents(ComponentsBeforeBeginPlay);
+	TestEqual(TEXT("Owner starts with one project component"),
+		ComponentsBeforeBeginPlay.Num(), 1);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult OwnerRegisterResult;
+	const FAvidScriptObjectHandle OwnerHandle = Registry.RegisterObject(
+		Owner,
+		OwnerRegisterResult,
+		false);
+	if (!TestTrue(TEXT("Component gameplay owner registers"),
+		OwnerRegisterResult.bSucceeded && OwnerHandle.IsValid()))
+	{
+		return false;
+	}
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = OwnerHandle;
+	HostContext.World = World;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+
+	FAvidScriptRuntimeSession Session;
+	Session.SetHostContext(HostContext);
+	FAvidScriptWasmReloadResult ReloadResult;
+	if (!TestTrue(
+		TEXT("Component gameplay executes BeginPlay in WAMR"),
+		Session.LoadInitialModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest,
+			ReloadResult)))
+	{
+		AddError(ReloadResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("BeginPlay reaches the project Actor UFUNCTION"),
+		Owner->GameplayValue, 1.0f);
+	TInlineComponentArray<UAvidScriptTypedTestSceneComponent*>
+		ComponentsAfterBeginPlay;
+	Owner->GetComponents(ComponentsAfterBeginPlay);
+	TestEqual(TEXT("BeginPlay creates exactly one dynamic component"),
+		ComponentsAfterBeginPlay.Num(), 2);
+	UAvidScriptTypedTestSceneComponent* DynamicComponent = nullptr;
+	for (UAvidScriptTypedTestSceneComponent* Component :
+		ComponentsAfterBeginPlay)
+	{
+		if (Component != ExistingComponent)
+		{
+			DynamicComponent = Component;
+			break;
+		}
+	}
+	if (!TestNotNull(TEXT("Created component keeps its project type"),
+		DynamicComponent))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Created component is registered"),
+		DynamicComponent->IsRegistered());
+	TestEqual(TEXT("Created component attaches to the queried root"),
+		DynamicComponent->GetAttachParent(),
+		static_cast<USceneComponent*>(ExistingComponent));
+	TestEqual(TEXT("BeginPlay publishes owner, queried root, and created handles"),
+		Registry.GetLiveHandleCount(), 3);
+
+	FAvidScriptWasmSmokeResult TickResult;
+	if (!TestTrue(TEXT("Component gameplay Tick executes in WAMR"),
+		Session.TickLive(0.25f, TickResult)))
+	{
+		AddError(TickResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Tick calls the project component UFUNCTION once"),
+		DynamicComponent->GameplayPulseCount, 1);
+	TestEqual(TEXT("Tick forwards DeltaSeconds to the project component"),
+		DynamicComponent->AccumulatedDeltaSeconds, 0.25f);
+	TestEqual(TEXT("Tick calls the project Actor UFUNCTION"),
+		Owner->GameplayValue, 3.0f);
+	TestEqual(TEXT("BeginPlay plus Tick uses exactly eight host crossings"),
+		TickResult.HostImportCallCount, 8);
+
+	TWeakObjectPtr<UAvidScriptTypedTestSceneComponent> WeakDynamicComponent(
+		DynamicComponent);
+	FAvidScriptWasmSmokeResult StopResult;
+	if (!TestTrue(TEXT("Component gameplay routes EndPlay and unloads"),
+		Session.StopAndUnload(StopResult)))
+	{
+		AddError(StopResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("EndPlay Detach and Release add exactly two crossings"),
+		StopResult.HostImportCallCount, 10);
+	TInlineComponentArray<UAvidScriptTypedTestSceneComponent*>
+		ComponentsAfterStop;
+	Owner->GetComponents(ComponentsAfterStop);
+	TestEqual(TEXT("EndPlay cleanup restores the original component count"),
+		ComponentsAfterStop.Num(), 1);
+	TestEqual(TEXT("EndPlay cleanup preserves the queried root"),
+		ComponentsAfterStop[0], ExistingComponent);
+	TestTrue(TEXT("EndPlay cleanup destroys only the dynamic component"),
+		!WeakDynamicComponent.IsValid()
+			|| WeakDynamicComponent->IsBeingDestroyed());
+	TestEqual(TEXT("EndPlay releases only the dynamic component handle"),
+		Registry.GetLiveHandleCount(), 2);
+	TestTrue(TEXT("EndPlay preserves the owner and queried root"),
+		IsValid(Owner) && IsValid(ExistingComponent));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

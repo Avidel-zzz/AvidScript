@@ -8,6 +8,7 @@
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "Serialization/JsonWriter.h"
 
 namespace BindingArtifact = AvidScriptCSharpBindingArtifact;
@@ -653,6 +654,28 @@ bool HasAvidScriptActorClassReferences(
 		});
 }
 
+bool HasAvidScriptSceneComponentFactories(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	return Package.ObjectFactories.ContainsByPredicate(
+		[&Package](const FAvidScriptBindingObjectFactoryModel& Factory)
+		{
+			const FAvidScriptBindingClassReferenceModel* Reference =
+				Package.ClassReferences.FindByPredicate(
+					[&Factory](
+						const FAvidScriptBindingClassReferenceModel& Candidate)
+					{
+						return Candidate.StableId
+							== Factory.ClassReferenceId;
+					});
+			return Reference != nullptr
+				&& FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+					Package,
+					Reference->ResultTypeId,
+					TEXT("/Script/Engine.SceneComponent"));
+		});
+}
+
 } // namespace
 
 int32 FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
@@ -680,6 +703,11 @@ int32 FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(
 	if (Package.SchemaVersion >= 7 && !Package.ObjectFactories.IsEmpty())
 	{
 		ImportCount += FAvidScriptObjectFactoryBinding::GetSpecs().Num();
+	}
+	if (Package.SchemaVersion >= 7
+		&& HasAvidScriptSceneComponentFactories(Package))
+	{
+		ImportCount += FAvidScriptSceneAttachmentBinding::GetSpecs().Num();
 	}
 	if (!Package.SelfTypeId.IsEmpty())
 	{
@@ -806,8 +834,18 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	}
 	const bool bHasObjectFactoryBindings =
 		Package.SchemaVersion >= 7 && !Package.ObjectFactories.IsEmpty();
+	const bool bHasSceneAttachmentBindings =
+		bHasObjectFactoryBindings
+		&& HasAvidScriptSceneComponentFactories(Package);
 	if (bHasObjectFactoryBindings
 		&& !FAvidScriptEditorCSharpObjectFactoryRenderer::ValidateBindingContract(
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
+	}
+	if (bHasSceneAttachmentBindings
+		&& !FAvidScriptEditorCSharpObjectFactoryRenderer::ValidateAttachmentContract(
 			OutErrorCategory,
 			OutErrorSource))
 	{
@@ -1471,6 +1509,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				|| bNeedsObjectTypeIsA,
 			Lines);
 	}
+	if (bHasSceneAttachmentBindings)
+	{
+		FAvidScriptEditorCSharpObjectFactoryRenderer::AppendSceneAttachmentNativeImports(
+			true,
+			Lines);
+	}
 	Lines.Add(TEXT("}"));
 	Lines.Add(TEXT(""));
 	OutSource = FString::Join(Lines, TEXT("\n"));
@@ -1584,6 +1628,29 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			Writer->WriteValue(TEXT("name"), Spec.ImportName);
 			Writer->WriteValue(TEXT("signature"), Spec.Signature);
 			Writer->WriteObjectEnd();
+		}
+		if (HasAvidScriptSceneComponentFactories(Package))
+		{
+			const int32 SceneAttachmentImportOffset =
+				ObjectFactoryImportOffset + ObjectFactorySpecs.Num();
+			const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec>
+				AttachmentSpecs = FAvidScriptSceneAttachmentBinding::GetSpecs();
+			for (int32 SpecIndex = 0;
+				SpecIndex < AttachmentSpecs.Num();
+				++SpecIndex)
+			{
+				const FAvidScriptSceneAttachmentBindingSpec& Spec =
+					AttachmentSpecs[SpecIndex];
+				Writer->WriteObjectStart();
+				Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
+				Writer->WriteValue(
+					TEXT("ordinal"),
+					SceneAttachmentImportOffset + SpecIndex);
+				Writer->WriteValue(TEXT("module"), Spec.ModuleName);
+				Writer->WriteValue(TEXT("name"), Spec.ImportName);
+				Writer->WriteValue(TEXT("signature"), Spec.Signature);
+				Writer->WriteObjectEnd();
+			}
 		}
 	}
 	if (!Package.SelfTypeId.IsEmpty())

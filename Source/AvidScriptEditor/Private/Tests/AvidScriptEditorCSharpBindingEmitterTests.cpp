@@ -7,6 +7,7 @@
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
@@ -493,10 +494,14 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 			&& !Source.Contains(TEXT("public TObjectFactoryOfInventoryState(int ordinal)"))
 			&& !Source.Contains(TEXT("implicit operator int")));
 	TestTrue(
-		TEXT("Factory facade exposes typed construction, query, and release"),
+		TEXT("Factory facade exposes typed construction, query, attachment, and release"),
 		Source.Contains(TEXT(" NewObject(UObject outer, TObjectFactoryOfInventoryState factory)"))
 			&& Source.Contains(TEXT(" CreateComponent(AActor outer, TObjectFactoryOfSceneComponent factory)"))
 			&& Source.Contains(TEXT(" FindComponent(AActor actor, TObjectTypeOfSceneComponent type)"))
+			&& Source.Contains(TEXT("public enum AttachmentRule : int"))
+			&& Source.Contains(TEXT("public enum DetachmentRule : int"))
+			&& Source.Contains(TEXT("public static bool AttachTo("))
+			&& Source.Contains(TEXT("public static bool Detach("))
 			&& Source.Contains(TEXT(" Release(UAvidScriptCSharpBindingEmitterTestObject value)"))
 			&& Source.Contains(TEXT(" Release(USceneComponent value)")));
 	TestTrue(
@@ -506,7 +511,9 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 			&& Source.Contains(TEXT("return new((int)packedHandle, (int)(packedHandle >> 32));"))
 			&& Source.Contains(TEXT("internal static extern long ObjectConstruct("))
 			&& Source.Contains(TEXT("internal static extern int ObjectRelease("))
-			&& Source.Contains(TEXT("internal static extern long ActorFindComponent(")));
+			&& Source.Contains(TEXT("internal static extern long ActorFindComponent("))
+			&& Source.Contains(TEXT("internal static extern int SceneComponentAttach("))
+			&& Source.Contains(TEXT("internal static extern int SceneComponentDetach(")));
 
 	TSharedPtr<FJsonObject> Manifest;
 	if (!TestTrue(
@@ -531,9 +538,9 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 	const TArray<TSharedPtr<FJsonValue>>& RequiredImports =
 		Manifest->GetArrayField(TEXT("required_imports"));
 	const bool bFactoryImportCountValid = TestEqual(
-		TEXT("Factory-only package requires object type, factory, and packed owner capabilities"),
+		TEXT("Factory-only package requires type, factory, attachment, and owner capabilities"),
 		RequiredImports.Num(),
-		5);
+		7);
 	const TConstArrayView<FAvidScriptObjectFactoryBindingSpec> FactorySpecs =
 		FAvidScriptObjectFactoryBinding::GetSpecs();
 	if (bFactoryImportCountValid
@@ -550,6 +557,34 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 				TestEqual(TEXT("Factory manifest appends a stable ordinal"), Import->GetIntegerField(TEXT("ordinal")), 1 + SpecIndex);
 				TestEqual(TEXT("Factory manifest preserves shared import name"), Import->GetStringField(TEXT("name")), FactorySpecs[SpecIndex].ImportName);
 				TestEqual(TEXT("Factory manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), FactorySpecs[SpecIndex].Signature);
+			}
+		}
+	}
+	const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec> AttachmentSpecs =
+		FAvidScriptSceneAttachmentBinding::GetSpecs();
+	if (bFactoryImportCountValid
+		&& TestEqual(TEXT("Scene attachment has two shared specifications"),
+			AttachmentSpecs.Num(), 2))
+	{
+		for (int32 SpecIndex = 0; SpecIndex < AttachmentSpecs.Num(); ++SpecIndex)
+		{
+			const TSharedPtr<FJsonObject> Import =
+				RequiredImports[4 + SpecIndex]->AsObject();
+			TestTrue(TEXT("Attachment manifest import remains an object"), Import.IsValid());
+			if (Import.IsValid())
+			{
+				TestEqual(TEXT("Attachment manifest preserves shared stable id"),
+					Import->GetStringField(TEXT("stable_id")),
+					AttachmentSpecs[SpecIndex].StableId);
+				TestEqual(TEXT("Attachment manifest appends a stable ordinal"),
+					Import->GetIntegerField(TEXT("ordinal")),
+					4 + SpecIndex);
+				TestEqual(TEXT("Attachment manifest preserves shared import name"),
+					Import->GetStringField(TEXT("name")),
+					AttachmentSpecs[SpecIndex].ImportName);
+				TestEqual(TEXT("Attachment manifest preserves shared ABI signature"),
+					Import->GetStringField(TEXT("signature")),
+					AttachmentSpecs[SpecIndex].Signature);
 			}
 		}
 	}
@@ -708,7 +743,8 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 		MixedRuntimePackage->GetVmPackage().Imports.Num(),
 		FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
 			+ FAvidScriptObjectTypeBindings::GetSpecs().Num()
-			+ FAvidScriptObjectFactoryBinding::GetSpecs().Num());
+			+ FAvidScriptObjectFactoryBinding::GetSpecs().Num()
+			+ FAvidScriptSceneAttachmentBinding::GetSpecs().Num());
 	return true;
 }
 
