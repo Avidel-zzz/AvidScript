@@ -5,7 +5,7 @@
     "goal": "建立 descriptor 驱动的 UObject/Component 构造、Session 所有权、组件查询与 Attach/Detach C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d3837b6af995ccf289f01f9ddf4e34eec1fa319e"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase51/P51.0_Object_Component_Ownership_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "独立只读复审覆盖 architecture、ownership、reload、reentrancy、cleanup 与跨制品 provenance；最终结论 Critical 0、Important 0；报告见 Docs/Phase51/P51.5_Independent_Review.md",
+    "completed_at_utc": "2026-07-25T16:00:05.6908176+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "ba87d8553386abea07d1711c02aace35ec9e0eeb",
+    "source_tree": "3baa15a2f7d90d2b4834cf434dfa4ef8c26b1caf",
+    "state_sha256": "cb997ff769c235c8f96915353992d4db6476bc1e739e3af771070dac5cb0fc33",
+    "review_evidence": "独立只读复审覆盖 architecture、ownership、reload、reentrancy、cleanup 与跨制品 provenance；最终结论 Critical 0、Important 0；报告见 Docs/Phase51/P51.5_Independent_Review.md",
+    "at_utc": "2026-07-25T16:00:05.6908176+00:00"
   },
   "gate": {
     "report_path": "",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 51 -ReviewEvidence <text>",
-  "revision": 7,
-  "updated_at_utc": "2026-07-25T15:59:09.2304790+00:00"
+  "next_action": "attest -Phase 51 -GateReportPath <path>",
+  "revision": 8,
+  "updated_at_utc": "2026-07-25T16:00:05.6964821+00:00"
 }
