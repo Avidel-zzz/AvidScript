@@ -5,7 +5,7 @@
     "goal": "建立 descriptor v8 驱动、显式授权、缓存执行并支持 candidate reload 回滚的 C# 双向 reflected property Binding 闭环",
     "start_commit": "474607b4a92031a19f9a38f6b38e6a1d0ddc39d4"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase52/P52.0_Bidirectional_Property_Binding_Architecture.md",
     "version": 1,
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "独立复审报告 Docs/Phase52/P52.5_Independent_Review.md：六项初轮问题与两项补充 Minor 全部关闭，终轮 Critical 0、Important 0、Minor 0；C# 双向属性、candidate 回滚、runtime slice、真实 gameplay 与 anti-fold 性能基线均已复核。",
+    "completed_at_utc": "2026-07-25T20:24:28.4851225+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "b86dea29e75c961c288abf1fe6a6c65c14c46684",
+    "source_tree": "d4fd4f4c448dab9e33d0c220cfa90425f2826682",
+    "state_sha256": "66e13315fdbdda10c35db130f32d23ddb48613cddf57eab95c85717d1d851245",
+    "review_evidence": "独立复审报告 Docs/Phase52/P52.5_Independent_Review.md：六项初轮问题与两项补充 Minor 全部关闭，终轮 Critical 0、Important 0、Minor 0；C# 双向属性、candidate 回滚、runtime slice、真实 gameplay 与 anti-fold 性能基线均已复核。",
+    "at_utc": "2026-07-25T20:24:28.4851225+00:00"
   },
   "gate": {
     "report_path": "",
@@ -114,7 +114,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 52 -ReviewEvidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-07-25T20:23:51.2431417+00:00"
+  "next_action": "attest -Phase 52 -GateReportPath <path>",
+  "revision": 9,
+  "updated_at_utc": "2026-07-25T20:24:28.4900549+00:00"
 }
