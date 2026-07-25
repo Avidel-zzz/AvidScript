@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "Algo/Reverse.h"
 #include "Components/ActorComponent.h"
@@ -12,6 +13,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "GameFramework/Actor.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersion.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -109,6 +111,68 @@ bool AreObjectTypeGraphsEqual(
 		}
 	}
 	return true;
+}
+
+FAvidScriptBindingPackageModel MakeV7CanonicalSerializerPackage()
+{
+	FAvidScriptBindingPackageModel Package;
+	Package.SchemaVersion = 7;
+	Package.GeneratorVersion = TEXT("51.1.serializer.test");
+	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
+	Package.Source = TEXT("ue_reflection");
+	Package.PackageName = TEXT("avidscript.test.v7_canonical_serializer");
+
+	FAvidScriptBindingTypeModel ObjectType;
+	ObjectType.CanonicalType = TEXT("object:/Script/CoreUObject.Object");
+	ObjectType.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			ObjectType.CanonicalType,
+			{});
+	ObjectType.Kind = TEXT("object_handle");
+	ObjectType.CppType = TEXT("UObject");
+	ObjectType.Size = 8;
+	ObjectType.Alignment = 4;
+	ObjectType.AbiTypes = { TEXT("i"), TEXT("i") };
+	ObjectType.ObjectTypeOrdinal = 0;
+	ObjectType.ClassPath = TEXT("/Script/CoreUObject.Object");
+	Package.Types.Add(ObjectType);
+
+	FAvidScriptBindingClassReferenceModel Reference;
+	Reference.Ordinal = 0;
+	Reference.ScriptName = TEXT("ConsoleClass");
+	Reference.ClassPath = TEXT("/Script/Engine.Console");
+	Reference.BaseClassPath = TEXT("/Script/CoreUObject.Object");
+	Reference.LoadPolicy = TEXT("EditorLoad");
+	Reference.ResultTypeId = ObjectType.StableId;
+	Reference.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
+			Reference.ClassPath,
+			Reference.BaseClassPath,
+			Reference.LoadPolicy);
+	Package.ClassReferences.Add(Reference);
+
+	FAvidScriptBindingObjectFactoryModel Factory;
+	Factory.Ordinal = 0;
+	Factory.ScriptName = TEXT("Console");
+	Factory.ClassReferenceId = Reference.StableId;
+	Factory.Kind = EAvidScriptObjectFactoryKind::NewObject;
+	Factory.OuterTypeId = ObjectType.StableId;
+	Factory.Ownership = EAvidScriptObjectOwnershipPolicy::Session;
+	Factory.Registration = EAvidScriptComponentRegistrationPolicy::None;
+	Factory.StableId =
+		FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+			Factory.ClassReferenceId,
+			Factory.Kind,
+			Factory.OuterTypeId,
+			Factory.Ownership,
+			Factory.Registration);
+	Package.ObjectFactories.Add(Factory);
+
+	Package.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
+	Package.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
+	return Package;
 }
 } // namespace
 
@@ -226,6 +290,76 @@ bool FAvidScriptEditorObjectTypeGraphDeterminismTest::RunTest(const FString& Par
 		TEXT("Static-only packages accept an empty graph self class"),
 		FAvidScriptEditorObjectTypeGraph::Build({}, nullptr, {}, StaticOnlyGraph, ErrorCategory, ErrorDetails));
 	TestEqual(TEXT("Static-only packages have no handle-capable graph nodes"), StaticOnlyGraph.Nodes.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest,
+	"AvidScript.Editor.BindingDescriptor.V7CanonicalSerializer",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest::RunTest(
+	const FString& Parameters)
+{
+	const FAvidScriptBindingPackageModel Package =
+		MakeV7CanonicalSerializerPackage();
+	FString CanonicalJson;
+	TestTrue(
+		TEXT("Production canonical serializer emits descriptor v7"),
+		FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Package,
+			CanonicalJson));
+
+	FAvidScriptBindingPackageModel ParsedPackage;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Shared parser accepts production canonical descriptor v7"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			CanonicalJson,
+			ParsedPackage,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("Canonical descriptor retains one object factory"),
+		ParsedPackage.ObjectFactories.Num(),
+		1);
+
+	for (int32 LegacySchemaVersion = 2; LegacySchemaVersion <= 6;
+		++LegacySchemaVersion)
+	{
+		FAvidScriptBindingPackageModel LegacyBaseline = Package;
+		LegacyBaseline.SchemaVersion = LegacySchemaVersion;
+		LegacyBaseline.ObjectFactories.Empty();
+		LegacyBaseline.SelectionHash =
+			FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
+				LegacyBaseline);
+		LegacyBaseline.PackageHash =
+			FAvidScriptBindingDescriptorIdentity::MakePackageHash(
+				LegacyBaseline);
+
+		FAvidScriptBindingPackageModel LegacyWithIgnoredFactory =
+			LegacyBaseline;
+		LegacyWithIgnoredFactory.ObjectFactories = Package.ObjectFactories;
+		FString BaselineJson;
+		FString FactoryBearingJson;
+		TestTrue(
+			TEXT("Legacy baseline canonical serialization succeeds"),
+			FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+				LegacyBaseline,
+				BaselineJson));
+		TestTrue(
+			TEXT("Legacy factory-bearing model canonical serialization succeeds"),
+			FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+				LegacyWithIgnoredFactory,
+				FactoryBearingJson));
+		TestEqual(
+			*FString::Printf(
+				TEXT("Schema v%d canonical bytes ignore v7-only factories"),
+				LegacySchemaVersion),
+			FactoryBearingJson,
+			BaselineJson);
+	}
 	return true;
 }
 

@@ -434,6 +434,78 @@ bool ParseAvidScriptBindingClassReference(
 	return true;
 }
 
+bool ParseAvidScriptBindingObjectFactory(
+	const TSharedPtr<FJsonObject>& Object,
+	FAvidScriptBindingObjectFactoryModel& OutFactory,
+	FString& OutErrorSource)
+{
+	FString Kind;
+	FString Ownership;
+	FString Registration;
+	if (!ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("stable_id"),
+			OutFactory.StableId,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredInt(
+			Object,
+			TEXT("ordinal"),
+			OutFactory.Ordinal,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("script_name"),
+			OutFactory.ScriptName,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("class_reference_id"),
+			OutFactory.ClassReferenceId,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("kind"),
+			Kind,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("outer_type_id"),
+			OutFactory.OuterTypeId,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("ownership"),
+			Ownership,
+			OutErrorSource)
+		|| !ReadAvidScriptBindingRequiredString(
+			Object,
+			TEXT("registration"),
+			Registration,
+			OutErrorSource)
+		|| !IsAvidScriptBindingLowerSha256(OutFactory.StableId)
+		|| !IsAvidScriptBindingLowerSha256(OutFactory.ClassReferenceId)
+		|| !IsAvidScriptBindingLowerSha256(OutFactory.OuterTypeId)
+		|| !IsAvidScriptBindingIdentifier(OutFactory.ScriptName)
+		|| !TryParseAvidScriptObjectFactoryKind(Kind, OutFactory.Kind)
+		|| !TryParseAvidScriptObjectOwnershipPolicy(
+			Ownership,
+			OutFactory.Ownership)
+		|| !TryParseAvidScriptComponentRegistrationPolicy(
+			Registration,
+			OutFactory.Registration)
+		|| OutFactory.StableId
+			!= FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+				OutFactory.ClassReferenceId,
+				OutFactory.Kind,
+				OutFactory.OuterTypeId,
+				OutFactory.Ownership,
+				OutFactory.Registration))
+	{
+		return false;
+	}
+	return true;
+}
+
 bool ValidateAvidScriptBindingV6ObjectTypes(
 	const FAvidScriptBindingPackageModel& Package,
 	FString& OutErrorSource)
@@ -616,6 +688,61 @@ bool ValidateAvidScriptBindingV6ObjectTypes(
 	return true;
 }
 
+bool ValidateAvidScriptBindingV7ObjectFactories(
+	const FAvidScriptBindingPackageModel& Package,
+	FString& OutErrorSource)
+{
+	if (Package.SchemaVersion < 7)
+	{
+		return true;
+	}
+
+	TSet<FString> ClassReferenceIds;
+	for (const FAvidScriptBindingClassReferenceModel& Reference :
+		Package.ClassReferences)
+	{
+		ClassReferenceIds.Add(Reference.StableId);
+	}
+
+	TSet<FString> ObjectTypeIds;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		if (Type.Kind == TEXT("object_handle")
+			&& Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			ObjectTypeIds.Add(Type.StableId);
+		}
+	}
+
+	for (const FAvidScriptBindingObjectFactoryModel& Factory :
+		Package.ObjectFactories)
+	{
+		if (!ClassReferenceIds.Contains(Factory.ClassReferenceId))
+		{
+			OutErrorSource = TEXT("object_factories.class_reference_id");
+			return false;
+		}
+		if (!ObjectTypeIds.Contains(Factory.OuterTypeId))
+		{
+			OutErrorSource = TEXT("object_factories.outer_type_id");
+			return false;
+		}
+		const bool bRegistrationMatches =
+			(Factory.Kind == EAvidScriptObjectFactoryKind::NewObject
+				&& Factory.Registration
+					== EAvidScriptComponentRegistrationPolicy::None)
+			|| (Factory.Kind == EAvidScriptObjectFactoryKind::ActorComponent
+				&& Factory.Registration
+					== EAvidScriptComponentRegistrationPolicy::RegisterInstance);
+		if (!bRegistrationMatches)
+		{
+			OutErrorSource = TEXT("object_factories.registration");
+			return false;
+		}
+	}
+	return true;
+}
+
 void AppendAvidScriptBindingIdentityField(
 	FString& Identity,
 	const TCHAR* Label,
@@ -694,6 +821,52 @@ FString FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
 		LoadPolicy));
 }
 
+FString FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryIdentity(
+	const FString& ClassReferenceId,
+	const EAvidScriptObjectFactoryKind Kind,
+	const FString& OuterTypeId,
+	const EAvidScriptObjectOwnershipPolicy Ownership,
+	const EAvidScriptComponentRegistrationPolicy Registration)
+{
+	FString Identity(TEXT("object_factory"));
+	AppendAvidScriptBindingIdentityField(
+		Identity,
+		TEXT("class_reference_id"),
+		ClassReferenceId);
+	AppendAvidScriptBindingIdentityField(
+		Identity,
+		TEXT("kind"),
+		LexToString(Kind));
+	AppendAvidScriptBindingIdentityField(
+		Identity,
+		TEXT("outer_type_id"),
+		OuterTypeId);
+	AppendAvidScriptBindingIdentityField(
+		Identity,
+		TEXT("ownership"),
+		LexToString(Ownership));
+	AppendAvidScriptBindingIdentityField(
+		Identity,
+		TEXT("registration"),
+		LexToString(Registration));
+	return Identity;
+}
+
+FString FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+	const FString& ClassReferenceId,
+	const EAvidScriptObjectFactoryKind Kind,
+	const FString& OuterTypeId,
+	const EAvidScriptObjectOwnershipPolicy Ownership,
+	const EAvidScriptComponentRegistrationPolicy Registration)
+{
+	return FAvidScriptHash::Sha256HexUtf8(MakeObjectFactoryIdentity(
+		ClassReferenceId,
+		Kind,
+		OuterTypeId,
+		Ownership,
+		Registration));
+}
+
 FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	const FAvidScriptBindingPackageModel& Package)
 {
@@ -715,9 +888,11 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 6
-		? TEXT("descriptor_selection_v6")
-		: TEXT("descriptor_selection_v5"));
+	FString Identity(Package.SchemaVersion >= 7
+		? TEXT("descriptor_selection_v7")
+		: Package.SchemaVersion >= 6
+			? TEXT("descriptor_selection_v6")
+			: TEXT("descriptor_selection_v5"));
 	for (const FString& Key : SelectionKeys)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("binding"), Key);
@@ -750,6 +925,45 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		if (Package.SchemaVersion >= 6)
 		{
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);
+		}
+	}
+	if (Package.SchemaVersion >= 7)
+	{
+		for (const FAvidScriptBindingObjectFactoryModel& Factory :
+			Package.ObjectFactories)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_id"),
+				Factory.StableId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_ordinal"),
+				FString::FromInt(Factory.Ordinal));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_script_name"),
+				Factory.ScriptName);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_class_reference_id"),
+				Factory.ClassReferenceId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_kind"),
+				LexToString(Factory.Kind));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_outer_type_id"),
+				Factory.OuterTypeId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_ownership"),
+				LexToString(Factory.Ownership));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_registration"),
+				LexToString(Factory.Registration));
 		}
 	}
 	return FAvidScriptHash::Sha256HexUtf8(Identity);
@@ -791,9 +1005,11 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 6
-		? TEXT("descriptor_package_v6")
-		: TEXT("descriptor_package_v5"));
+	FString Identity(Package.SchemaVersion >= 7
+		? TEXT("descriptor_package_v7")
+		: Package.SchemaVersion >= 6
+			? TEXT("descriptor_package_v6")
+			: TEXT("descriptor_package_v5"));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("schema"), FString::FromInt(Package.SchemaVersion));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("generator"), Package.GeneratorVersion);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("engine"), Package.EngineVersion);
@@ -866,6 +1082,45 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("result_type_id"), Reference.ResultTypeId);
 		}
 	}
+	if (Package.SchemaVersion >= 7)
+	{
+		for (const FAvidScriptBindingObjectFactoryModel& Factory :
+			Package.ObjectFactories)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_id"),
+				Factory.StableId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_ordinal"),
+				FString::FromInt(Factory.Ordinal));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_script_name"),
+				Factory.ScriptName);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_class_reference_id"),
+				Factory.ClassReferenceId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_kind"),
+				LexToString(Factory.Kind));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_outer_type_id"),
+				Factory.OuterTypeId);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_ownership"),
+				LexToString(Factory.Ownership));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("factory_registration"),
+				LexToString(Factory.Registration));
+		}
+	}
 	return FAvidScriptHash::Sha256HexUtf8(Identity);
 }
 
@@ -892,7 +1147,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 3
 			&& OutPackage.SchemaVersion != 4
 			&& OutPackage.SchemaVersion != 5
-			&& OutPackage.SchemaVersion != 6)
+			&& OutPackage.SchemaVersion != 6
+			&& OutPackage.SchemaVersion != 7)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -920,6 +1176,12 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		OutErrorSource = TEXT("class_references");
+		return false;
+	}
+	if (OutPackage.SchemaVersion < 7 && Root->HasField(TEXT("object_factories")))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = TEXT("object_factories");
 		return false;
 	}
 
@@ -1080,6 +1342,50 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			OutPackage.ClassReferences.Add(MoveTemp(Reference));
 		}
 	}
+	if (OutPackage.SchemaVersion >= 7)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* ObjectFactories = nullptr;
+		if (!Root->TryGetArrayField(TEXT("object_factories"), ObjectFactories)
+			|| ObjectFactories == nullptr)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = TEXT("object_factories");
+			return false;
+		}
+
+		TSet<FString> StableIds;
+		TSet<FString> ScriptNames;
+		FString PreviousStableId;
+		for (int32 Index = 0; Index < ObjectFactories->Num(); ++Index)
+		{
+			FAvidScriptBindingObjectFactoryModel Factory;
+			const TSharedPtr<FJsonObject> FactoryObject =
+				(*ObjectFactories)[Index].IsValid()
+				&& (*ObjectFactories)[Index]->Type == EJson::Object
+				? (*ObjectFactories)[Index]->AsObject()
+				: nullptr;
+			if (!ParseAvidScriptBindingObjectFactory(
+					FactoryObject,
+					Factory,
+					OutErrorSource)
+				|| Factory.Ordinal != Index
+				|| StableIds.Contains(Factory.StableId)
+				|| ScriptNames.Contains(Factory.ScriptName)
+				|| (!PreviousStableId.IsEmpty()
+					&& PreviousStableId.Compare(
+						Factory.StableId,
+						ESearchCase::CaseSensitive) >= 0))
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = TEXT("object_factories");
+				return false;
+			}
+			PreviousStableId = Factory.StableId;
+			StableIds.Add(Factory.StableId);
+			ScriptNames.Add(Factory.ScriptName);
+			OutPackage.ObjectFactories.Add(MoveTemp(Factory));
+		}
+	}
 	if (OutPackage.Bindings.IsEmpty() && OutPackage.ClassReferences.IsEmpty())
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
@@ -1087,6 +1393,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		return false;
 	}
 	if (!ValidateAvidScriptBindingV6ObjectTypes(OutPackage, OutErrorSource))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		return false;
+	}
+	if (!ValidateAvidScriptBindingV7ObjectFactories(OutPackage, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		return false;

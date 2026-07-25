@@ -13,3 +13,33 @@ FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(CanonicalType, EnumValues);
 }
+
+FString FAvidScriptEditorBindingDescriptorIdentity::MakeObjectFactoryIdentity(
+	const FString& ClassReferenceId,
+	const EAvidScriptObjectFactoryKind Kind,
+	const FString& OuterTypeId,
+	const EAvidScriptObjectOwnershipPolicy Ownership,
+	const EAvidScriptComponentRegistrationPolicy Registration)
+{
+	return FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryIdentity(
+		ClassReferenceId,
+		Kind,
+		OuterTypeId,
+		Ownership,
+		Registration);
+}
+
+FString FAvidScriptEditorBindingDescriptorIdentity::MakeObjectFactoryStableId(
+	const FString& ClassReferenceId,
+	const EAvidScriptObjectFactoryKind Kind,
+	const FString& OuterTypeId,
+	const EAvidScriptObjectOwnershipPolicy Ownership,
+	const EAvidScriptComponentRegistrationPolicy Registration)
+{
+	return FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
+		ClassReferenceId,
+		Kind,
+		OuterTypeId,
+		Ownership,
+		Registration);
+}

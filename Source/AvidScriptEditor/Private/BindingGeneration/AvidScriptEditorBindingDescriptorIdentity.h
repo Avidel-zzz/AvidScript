@@ -12,4 +12,18 @@ public:
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+
+	static FString MakeObjectFactoryIdentity(
+		const FString& ClassReferenceId,
+		EAvidScriptObjectFactoryKind Kind,
+		const FString& OuterTypeId,
+		EAvidScriptObjectOwnershipPolicy Ownership,
+		EAvidScriptComponentRegistrationPolicy Registration);
+
+	static FString MakeObjectFactoryStableId(
+		const FString& ClassReferenceId,
+		EAvidScriptObjectFactoryKind Kind,
+		const FString& OuterTypeId,
+		EAvidScriptObjectOwnershipPolicy Ownership,
+		EAvidScriptComponentRegistrationPolicy Registration);
 };

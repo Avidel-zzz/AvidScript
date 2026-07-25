@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptBindingReloadEffect.h"
+#include "AvidScriptObjectFactoryPolicy.h"
 #include "CoreMinimal.h"
 
 struct FAvidScriptBindingEnumValue
@@ -74,6 +75,20 @@ struct FAvidScriptBindingClassReferenceModel
 	FString ResultTypeId;
 };
 
+struct FAvidScriptBindingObjectFactoryModel
+{
+	FString StableId;
+	int32 Ordinal = INDEX_NONE;
+	FString ScriptName;
+	FString ClassReferenceId;
+	EAvidScriptObjectFactoryKind Kind = EAvidScriptObjectFactoryKind::NewObject;
+	FString OuterTypeId;
+	EAvidScriptObjectOwnershipPolicy Ownership =
+		EAvidScriptObjectOwnershipPolicy::Session;
+	EAvidScriptComponentRegistrationPolicy Registration =
+		EAvidScriptComponentRegistrationPolicy::None;
+};
+
 struct FAvidScriptBindingPackageModel
 {
 	int32 SchemaVersion = 0;
@@ -87,6 +102,7 @@ struct FAvidScriptBindingPackageModel
 	TArray<FAvidScriptBindingTypeModel> Types;
 	TArray<FAvidScriptBindingFunctionModel> Bindings;
 	TArray<FAvidScriptBindingClassReferenceModel> ClassReferences;
+	TArray<FAvidScriptBindingObjectFactoryModel> ObjectFactories;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorIdentity
@@ -109,6 +125,20 @@ public:
 		const FString& ClassPath,
 		const FString& BaseClassPath,
 		const FString& LoadPolicy);
+
+	static FString MakeObjectFactoryIdentity(
+		const FString& ClassReferenceId,
+		EAvidScriptObjectFactoryKind Kind,
+		const FString& OuterTypeId,
+		EAvidScriptObjectOwnershipPolicy Ownership,
+		EAvidScriptComponentRegistrationPolicy Registration);
+
+	static FString MakeObjectFactoryStableId(
+		const FString& ClassReferenceId,
+		EAvidScriptObjectFactoryKind Kind,
+		const FString& OuterTypeId,
+		EAvidScriptObjectOwnershipPolicy Ownership,
+		EAvidScriptComponentRegistrationPolicy Registration);
 
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);

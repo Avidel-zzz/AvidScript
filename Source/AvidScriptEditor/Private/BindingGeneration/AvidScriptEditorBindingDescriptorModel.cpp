@@ -122,6 +122,30 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		Writer->WriteArrayEnd();
 	}
 
+	if (Package.SchemaVersion >= 7)
+	{
+		Writer->WriteArrayStart(TEXT("object_factories"));
+		for (const FAvidScriptBindingObjectFactoryModel& Factory :
+			Package.ObjectFactories)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("stable_id"), Factory.StableId);
+			Writer->WriteValue(TEXT("ordinal"), Factory.Ordinal);
+			Writer->WriteValue(TEXT("script_name"), Factory.ScriptName);
+			Writer->WriteValue(
+				TEXT("class_reference_id"),
+				Factory.ClassReferenceId);
+			Writer->WriteValue(TEXT("kind"), LexToString(Factory.Kind));
+			Writer->WriteValue(TEXT("outer_type_id"), Factory.OuterTypeId);
+			Writer->WriteValue(TEXT("ownership"), LexToString(Factory.Ownership));
+			Writer->WriteValue(
+				TEXT("registration"),
+				LexToString(Factory.Registration));
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+	}
+
 	Writer->WriteArrayStart(TEXT("bindings"));
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{

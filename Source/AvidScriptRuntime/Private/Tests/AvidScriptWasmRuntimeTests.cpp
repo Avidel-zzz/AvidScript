@@ -681,7 +681,8 @@ bool FAvidScriptBindingDescriptorLegacyIdentityTest::RunTest(const FString& Para
 		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
 		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
 		TEXT("267679b8a642f30d296bd8645580f271ef25bb7bd4e4c42244eeceae83ba4d54"),
-		TEXT("bcd25af7b336196501ff44962e5c23e032d23cd8d9bb0c0792b1aaad32a1f75f")
+		TEXT("bcd25af7b336196501ff44962e5c23e032d23cd8d9bb0c0792b1aaad32a1f75f"),
+		TEXT("32c282b301d29454ee56e2044bd9e349c22304664a744a2e5eb01004d01198f1")
 	};
 	const TCHAR* ExpectedPackageHashes[] = {
 		TEXT(""),
@@ -689,10 +690,11 @@ bool FAvidScriptBindingDescriptorLegacyIdentityTest::RunTest(const FString& Para
 		TEXT("54fe33c5d11181fee26c57d10b8a64e210fd0f0b4c58bf61b3a05825c1d6ffc1"),
 		TEXT("beb2669bb1a4c51c206884876db5bf7a0f370e963cc1b70343163beb13095c6b"),
 		TEXT("beb2669bb1a4c51c206884876db5bf7a0f370e963cc1b70343163beb13095c6b"),
-		TEXT("1f973d1960e15c88c361b7b88855ebaa5de502b36c2542dfd99a286986aad3da")
+		TEXT("1f973d1960e15c88c361b7b88855ebaa5de502b36c2542dfd99a286986aad3da"),
+		TEXT("0dcfaccbcb47831268e6b16a5da658970817659c76c7ae4efb22c8425d294c81")
 	};
 
-	for (int32 SchemaVersion = 2; SchemaVersion <= 5; ++SchemaVersion)
+	for (int32 SchemaVersion = 2; SchemaVersion <= 6; ++SchemaVersion)
 	{
 		Package.SchemaVersion = SchemaVersion;
 		Package.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Package);
