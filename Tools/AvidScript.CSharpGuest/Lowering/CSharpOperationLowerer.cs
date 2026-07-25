@@ -205,7 +205,7 @@ internal static class CSharpOperationLowerer
     {
         if (operation.Children.Count != 0
             || !context.TryGetGuestType(operation.TypeId, out GuestType type)
-            || type.Kind is "void" or "class_ref")
+            || type.Kind is "void" or "class_ref" or "factory_ref" or "object_type_ref")
         {
             return Malformed(context, operation, blockOrdinal);
         }

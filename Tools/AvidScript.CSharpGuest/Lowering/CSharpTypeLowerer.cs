@@ -74,6 +74,29 @@ internal static class CSharpTypeLowerer
             return intrinsic;
         }
 
+        if (CSharpObjectCapabilityPolicy.TryGetKind(type.CanonicalName, out CSharpObjectCapabilityKind capabilityKind))
+        {
+            if (!CSharpObjectCapabilityPolicy.IsType(type)
+                || !CSharpObjectCapabilityPolicy.HasCanonicalField(type, symbols)
+                || !CSharpObjectCapabilityPolicy.HasIntrinsicConstructor(type, symbols, callables))
+            {
+                Add(diagnostics, "ASCG1003", $"Object capability '{type.Id}' does not match the generated nominal wrapper contract.");
+                return null;
+            }
+
+            return new GuestType(
+                type.Id,
+                capabilityKind == CSharpObjectCapabilityKind.Factory
+                    ? "factory_ref"
+                    : "object_type_ref",
+                "i32",
+                Array.Empty<GuestField>(),
+                null,
+                null,
+                4,
+                4);
+        }
+
         if (CSharpClassReferencePolicy.IsType(type))
         {
             if (!CSharpClassReferencePolicy.HasCanonicalField(type, symbols)

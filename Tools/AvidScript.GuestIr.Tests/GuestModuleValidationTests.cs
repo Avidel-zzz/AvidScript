@@ -18,9 +18,10 @@ internal static class GuestModuleValidationTests
         InvalidConstantLiteralIsRejected();
         InstructionTypesMustMatch();
         ClassReferenceConversionsFailClosed();
+        ObjectCapabilityFamiliesFailClosed();
         VoidSemanticsUseTypeShape();
         ExportsMustBeUniqueAndTargetFunctions();
-        return 14;
+        return 15;
     }
 
     private static void MinimalModuleIsValid()
@@ -238,6 +239,127 @@ internal static class GuestModuleValidationTests
             {
                 Types = module.Types.Append(classReferenceType).ToArray(),
                 Functions = new[] { function },
+            },
+            "ASIR1008");
+    }
+    private static void ObjectCapabilityFamiliesFailClosed()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestType factoryType = new(
+            "type:global::AvidScript.TObjectFactoryOfInventoryState",
+            "factory_ref",
+            "i32",
+            Array.Empty<GuestField>(),
+            null,
+            null,
+            4,
+            4);
+        GuestType objectType = new(
+            "type:global::AvidScript.TObjectTypeOfSceneComponent",
+            "object_type_ref",
+            "i32",
+            Array.Empty<GuestField>(),
+            null,
+            null,
+            4,
+            4);
+        GuestType[] types = module.Types.Append(factoryType).Append(objectType).ToArray();
+
+        GuestFunction ConstantFunction(GuestConstant constant)
+        {
+            GuestFunction function = module.Functions[0] with
+            {
+                Locals = new[] { new GuestRegister("value:factory", factoryType.Id) },
+                ReturnTypeId = factoryType.Id,
+            };
+            GuestBasicBlock block = function.Blocks[0] with
+            {
+                Instructions = new[]
+                {
+                    new GuestInstruction(
+                        "constant",
+                        "value:factory",
+                        Array.Empty<string>(),
+                        null,
+                        null,
+                        constant),
+                },
+                Terminator = new GuestTerminator("return", null, null, null, "value:factory"),
+            };
+            return function with { Blocks = new[] { block } };
+        }
+
+        AssertDiagnostic(
+            module with
+            {
+                Types = types,
+                Functions = new[]
+                {
+                    ConstantFunction(new GuestConstant("object_type_ref", "0")),
+                },
+            },
+            "ASIR1008");
+        AssertDiagnostic(
+            module with
+            {
+                Types = types,
+                Functions = new[]
+                {
+                    ConstantFunction(new GuestConstant("zero", null)),
+                },
+            },
+            "ASIR1008");
+
+        GuestFunction conversion = module.Functions[0] with
+        {
+            Parameters = new[] { new GuestRegister("value:source", "type:int32") },
+            Locals = new[] { new GuestRegister("value:factory", factoryType.Id) },
+            ReturnTypeId = factoryType.Id,
+        };
+        GuestBasicBlock conversionBlock = conversion.Blocks[0] with
+        {
+            Instructions = new[]
+            {
+                new GuestInstruction(
+                    "convert",
+                    "value:factory",
+                    new[] { "value:source" },
+                    null,
+                    null,
+                    null),
+            },
+            Terminator = new GuestTerminator("return", null, null, null, "value:factory"),
+        };
+        AssertDiagnostic(
+            module with
+            {
+                Types = types,
+                Functions = new[] { conversion with { Blocks = new[] { conversionBlock } } },
+            },
+            "ASIR1008");
+
+        GuestFunction projection = module.Functions[0] with
+        {
+            Parameters = new[] { new GuestRegister("value:factory", factoryType.Id) },
+        };
+        GuestBasicBlock projectionBlock = projection.Blocks[0] with
+        {
+            Instructions = new[]
+            {
+                new GuestInstruction(
+                    "convert",
+                    "value:result",
+                    new[] { "value:factory" },
+                    null,
+                    "object_type_ref_ordinal",
+                    null),
+            },
+        };
+        AssertDiagnostic(
+            module with
+            {
+                Types = types,
+                Functions = new[] { projection with { Blocks = new[] { projectionBlock } } },
             },
             "ASIR1008");
     }

@@ -2,8 +2,10 @@
 
 #include "BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h"
 #include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
+#include "BindingGeneration/AvidScriptEditorCSharpObjectFactoryRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
+#include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "Serialization/JsonWriter.h"
@@ -666,13 +668,18 @@ int32 FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(
 {
 	int32 ImportCount = Package.Bindings.Num();
 	ImportCount += GetLifecycleImportCount(Package);
-	if (Package.Types.ContainsByPredicate(
+	const bool bHasObjectTypeBindings = Package.Types.ContainsByPredicate(
 		[](const FAvidScriptBindingTypeModel& Type)
 		{
 			return Type.ObjectTypeOrdinal != INDEX_NONE;
-		}))
+		});
+	if (bHasObjectTypeBindings)
 	{
 		ImportCount += FAvidScriptObjectTypeBindings::GetSpecs().Num();
+	}
+	if (Package.SchemaVersion >= 7 && !Package.ObjectFactories.IsEmpty())
+	{
+		ImportCount += FAvidScriptObjectFactoryBinding::GetSpecs().Num();
 	}
 	if (!Package.SelfTypeId.IsEmpty())
 	{
@@ -796,6 +803,15 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			OutErrorSource = TEXT("missing_required_kind");
 			return false;
 		}
+	}
+	const bool bHasObjectFactoryBindings =
+		Package.SchemaVersion >= 7 && !Package.ObjectFactories.IsEmpty();
+	if (bHasObjectFactoryBindings
+		&& !FAvidScriptEditorCSharpObjectFactoryRenderer::ValidateBindingContract(
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
 	}
 
 	TMap<FString, const FAvidScriptBindingTypeModel*> TypesByCanonical;
@@ -939,6 +955,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			OutErrorSource = TEXT("self_type_id");
 			return false;
 		}
+	}
+
+	TArray<FAvidScriptEditorCSharpObjectFactorySurface> ObjectFactorySurfaces;
+	if (!FAvidScriptEditorCSharpObjectFactoryRenderer::BuildSurfaces(
+			Package,
+			CSharpTypeNames,
+			ObjectFactorySurfaces,
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
 	}
 
 	TMap<FString, TArray<const FAvidScriptBindingFunctionModel*>> BindingsByOwner;
@@ -1159,6 +1186,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
 	}
+	if (!ObjectFactorySurfaces.IsEmpty())
+	{
+		FAvidScriptEditorCSharpObjectFactoryRenderer::AppendCapabilityTokens(
+			ObjectFactorySurfaces,
+			Lines);
+	}
 
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
@@ -1265,7 +1298,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		Lines.Add(TEXT(""));
 	}
 
-	if (SelfType != nullptr || bHasLifecycleBindings)
+	if (SelfType != nullptr || bHasLifecycleBindings || bHasObjectFactoryBindings)
 	{
 		Lines.Append({ TEXT("public static class UE"), TEXT("{") });
 		if (SelfType != nullptr)
@@ -1334,6 +1367,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				TEXT("            actor.AvidScriptSlot, actor.AvidScriptGeneration,"),
 				TEXT("            actorClass.AvidScriptOrdinal) != 0;")
 			});
+		}
+		if ((SelfType != nullptr || bHasLifecycleBindings)
+			&& bHasObjectFactoryBindings)
+		{
+			Lines.Add(TEXT(""));
+		}
+		if (bHasObjectFactoryBindings)
+		{
+			FAvidScriptEditorCSharpObjectFactoryRenderer::AppendFacadeMethods(
+				ObjectFactorySurfaces,
+				Lines);
 		}
 		if (SelfType != nullptr)
 		{
@@ -1419,6 +1463,14 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			TEXT("    internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);")
 		});
 	}
+	if (bHasObjectFactoryBindings)
+	{
+		FAvidScriptEditorCSharpObjectFactoryRenderer::AppendNativeImports(
+			!Package.Bindings.IsEmpty()
+				|| bHasLifecycleBindings
+				|| bNeedsObjectTypeIsA,
+			Lines);
+	}
 	Lines.Add(TEXT("}"));
 	Lines.Add(TEXT(""));
 	OutSource = FString::Join(Lines, TEXT("\n"));
@@ -1481,11 +1533,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			Writer->WriteObjectEnd();
 		}
 	}
-	if (Package.Types.ContainsByPredicate(
+	const bool bHasObjectTypeBindings = Package.Types.ContainsByPredicate(
 		[](const FAvidScriptBindingTypeModel& Type)
 		{
 			return Type.ObjectTypeOrdinal != INDEX_NONE;
-		}))
+		});
+	if (bHasObjectTypeBindings)
 	{
 		const int32 ObjectTypeImportOffset =
 			Package.Bindings.Num()
@@ -1500,6 +1553,33 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 			Writer->WriteObjectStart();
 			Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
 			Writer->WriteValue(TEXT("ordinal"), ObjectTypeImportOffset + SpecIndex);
+			Writer->WriteValue(TEXT("module"), Spec.ModuleName);
+			Writer->WriteValue(TEXT("name"), Spec.ImportName);
+			Writer->WriteValue(TEXT("signature"), Spec.Signature);
+			Writer->WriteObjectEnd();
+		}
+	}
+	if (Package.SchemaVersion >= 7 && !Package.ObjectFactories.IsEmpty())
+	{
+		const int32 ObjectFactoryImportOffset =
+			Package.Bindings.Num()
+			+ (bHasLifecycleBindings
+				? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+				: 0)
+			+ (bHasObjectTypeBindings
+				? FAvidScriptObjectTypeBindings::GetSpecs().Num()
+				: 0);
+		const TConstArrayView<FAvidScriptObjectFactoryBindingSpec>
+			ObjectFactorySpecs = FAvidScriptObjectFactoryBinding::GetSpecs();
+		for (int32 SpecIndex = 0; SpecIndex < ObjectFactorySpecs.Num(); ++SpecIndex)
+		{
+			const FAvidScriptObjectFactoryBindingSpec& Spec =
+				ObjectFactorySpecs[SpecIndex];
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("stable_id"), Spec.StableId);
+			Writer->WriteValue(
+				TEXT("ordinal"),
+				ObjectFactoryImportOffset + SpecIndex);
 			Writer->WriteValue(TEXT("module"), Spec.ModuleName);
 			Writer->WriteValue(TEXT("name"), Spec.ImportName);
 			Writer->WriteValue(TEXT("signature"), Spec.Signature);

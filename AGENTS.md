@@ -78,6 +78,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-25 P51.3 验证流程错误记录：实现仍只存在于插件内的 Git worktree 时，直接从项目根运行 `-Module=AvidScriptEditor`；UE 项目固定引用主插件目录，因此实际编译并加载了主分支旧源码，聚焦自动化继续执行旧的 factory import 断言。Prevention：worktree 批次进入 UE 验证前，必须先提交候选、核验主目录受保护文件、以 `--ff-only` 同步主插件，再从项目根构建；自动化失败若行号/断言文本与 worktree 不符，先核对主目录 `HEAD` 和加载 DLL 来源，不盲目修改实现。
+
 - Do not use `Build.bat -Clean` just to make UBT notice new plugin `.cpp` or `.h` files. On 2026-07-02 this accidentally triggered a heavy `AvidTPSTemplateEditor` rebuild. Treat full target clean as destructive-to-time and run it only after explicit user approval.
 - For normal AvidScript C++ iteration, prefer module-scoped validation first:
 
@@ -153,6 +155,8 @@ Plugins/AvidScript/Docs
 - 2026-07-24 P50 工作流探测错误记录：`Build/InvokePhaseWorkflow.ps1` 没有 `help` 子命令，直接执行 `help` 会先因缺少有效 `-Phase` 触发 `ASPW1101`，不提供使用说明。Prevention：恢复状态使用 `status -Phase <N>`；需要确认命令参数时读取脚本 `param`/`switch` 块或既有流程文档，不再用不存在的 `help` 探测。
 
 ## C# Guest Toolchain Workflow
+
+- 2026-07-25 P51.3 编译错误记录：新增 `TryGetKindFromTypeId(..., out kind)` 时直接用短路 `&&` 转发另一个 `TryGet`，当前缀不匹配时 `out kind` 未赋值，触发 CS0177。Prevention：所有带 `out` 参数的布尔短路 helper 在表达式前先显式初始化输出，或改写为完整分支；新增 Tools helper 后先执行受影响 .NET 测试宿主的集中编译再进入 UE Gate。
 
 - P13.1 verified the user-local .NET 8 SDK at `<UserProfile>\.dotnet\dotnet.exe` can install and list `wasi-experimental`. Prefer this SDK for C# WASI probes over `C:\Program Files\dotnet\dotnet.exe` on this machine.
 - The Program Files .NET 9.0.306 CLI currently fails workload commands in `Microsoft.DotNet.Installer.Windows.InstallerBase`, and .NET 9 rejects `wasi-wasm` with `The 'wasi-experimental' workload is not supported in .NET 9.` Do not spend Phase time trying to force that path unless the toolchain has been repaired or upgraded.

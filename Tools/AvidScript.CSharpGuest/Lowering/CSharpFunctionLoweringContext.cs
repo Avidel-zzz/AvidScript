@@ -255,8 +255,10 @@ internal sealed class CSharpFunctionLoweringContext
             && (found.Import is not null || found.HasBody)
             && IsReachable(found)
             && (!found.IsConstructor
-                || !CSharpClassReferencePolicy.IsClassReferenceTypeId(found.ContainingTypeId)
-                || CSharpClassReferencePolicy.IsIntrinsicConstructor(Document, found)))
+                || (!CSharpClassReferencePolicy.IsClassReferenceTypeId(found.ContainingTypeId)
+                    && !CSharpObjectCapabilityPolicy.IsCapabilityTypeId(found.ContainingTypeId))
+                || CSharpClassReferencePolicy.IsIntrinsicConstructor(Document, found)
+                || CSharpObjectCapabilityPolicy.IsIntrinsicConstructor(Document, found)))
         {
             callable = found;
             targetId = found.Import is not null

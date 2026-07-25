@@ -16,7 +16,9 @@ public static class GuestConstantCodec
         Span<byte> destination = bytes;
         switch (constant.Kind)
         {
-            case "zero" when targetType.Kind != "void" && constant.Value is null:
+            case "zero" when targetType.Kind != "void"
+                && !IsNominalOrdinal(targetType)
+                && constant.Value is null:
                 return true;
             case "bool" when IsIntegerTarget(targetType, 1)
                 && constant.Value is "0" or "1":
@@ -47,6 +49,18 @@ public static class GuestConstantCodec
                 && int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out int classOrdinal)
                 && classOrdinal >= 0:
                 BinaryPrimitives.WriteInt32LittleEndian(destination, classOrdinal);
+                return true;
+            case "factory_ref" when targetType.Kind == "factory_ref"
+                && targetType.Storage == "i32"
+                && int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out int factoryOrdinal)
+                && factoryOrdinal >= 0:
+                BinaryPrimitives.WriteInt32LittleEndian(destination, factoryOrdinal);
+                return true;
+            case "object_type_ref" when targetType.Kind == "object_type_ref"
+                && targetType.Storage == "i32"
+                && int.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out int objectTypeOrdinal)
+                && objectTypeOrdinal >= 0:
+                BinaryPrimitives.WriteInt32LittleEndian(destination, objectTypeOrdinal);
                 return true;
             case "uint32" or "address" when IsIntegerTarget(targetType, 4)
                 && uint.TryParse(constant.Value, IntegerStyle, CultureInfo.InvariantCulture, out uint uint32):
@@ -83,5 +97,10 @@ public static class GuestConstantCodec
         return type.Size == size
             && type.Storage is "i32" or "i64"
             && type.Kind is "scalar" or "enum" or "string" or "array" or "handle";
+    }
+
+    private static bool IsNominalOrdinal(GuestType type)
+    {
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref";
     }
 }

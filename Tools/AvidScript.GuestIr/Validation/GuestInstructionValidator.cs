@@ -231,6 +231,12 @@ internal static class GuestInstructionValidator
             AddTypeMismatch(context, function, instruction);
             return;
         }
+        if (context.Types.TryGetValue(operands[0]!.TypeId, out GuestType? operandType)
+            && IsNominalOrdinal(operandType))
+        {
+            AddTypeMismatch(context, function, instruction);
+            return;
+        }
 
         bool comparison = instruction.OperatorKind is "equals" or "not_equals"
             or "less_than" or "less_than_or_equal"
@@ -294,9 +300,33 @@ internal static class GuestInstructionValidator
             return;
         }
 
+        if (string.Equals(instruction.OperatorKind, "factory_ref_ordinal", StringComparison.Ordinal))
+        {
+            if (sourceType.Kind != "factory_ref"
+                || targetType.Kind != "scalar"
+                || targetType.Storage != "i32"
+                || !string.Equals(result.TypeId, "type:int32", StringComparison.Ordinal))
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+            return;
+        }
+
+        if (string.Equals(instruction.OperatorKind, "object_type_ref_ordinal", StringComparison.Ordinal))
+        {
+            if (sourceType.Kind != "object_type_ref"
+                || targetType.Kind != "scalar"
+                || targetType.Storage != "i32"
+                || !string.Equals(result.TypeId, "type:int32", StringComparison.Ordinal))
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+            return;
+        }
+
         if (instruction.OperatorKind is not null
-            || sourceType.Kind == "class_ref"
-            || targetType.Kind == "class_ref")
+            || IsNominalOrdinal(sourceType)
+            || IsNominalOrdinal(targetType))
         {
             AddTypeMismatch(context, function, instruction);
         }
@@ -387,5 +417,10 @@ internal static class GuestInstructionValidator
         context.Add(
             "ASIR1009",
             $"Function '{function.Id}' call target '{instruction.TargetId}' has an incompatible signature.");
+    }
+
+    private static bool IsNominalOrdinal(GuestType type)
+    {
+        return type.Kind is "class_ref" or "factory_ref" or "object_type_ref";
     }
 }

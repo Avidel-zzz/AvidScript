@@ -4,6 +4,7 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
@@ -479,6 +480,33 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 	TestTrue(
 		TEXT("Factory object graph still publishes object type checks"),
 		Source.Contains(TEXT("avid_object_type_is_a")));
+	TestTrue(
+		TEXT("Factory descriptor publishes nominal project capability tokens"),
+		Source.Contains(TEXT("public static class ProjectFactories"))
+			&& Source.Contains(TEXT("public static class ProjectTypes"))
+			&& Source.Contains(TEXT("public readonly struct TObjectFactoryOfInventoryState"))
+			&& Source.Contains(TEXT("public readonly struct TObjectTypeOfSceneComponent")));
+	TestTrue(
+		TEXT("Factory tokens expose stable generated literals only"),
+		Source.Contains(TEXT("internal TObjectFactoryOfInventoryState(int ordinal)"))
+			&& Source.Contains(TEXT("internal TObjectTypeOfSceneComponent(int ordinal)"))
+			&& !Source.Contains(TEXT("public TObjectFactoryOfInventoryState(int ordinal)"))
+			&& !Source.Contains(TEXT("implicit operator int")));
+	TestTrue(
+		TEXT("Factory facade exposes typed construction, query, and release"),
+		Source.Contains(TEXT(" NewObject(UObject outer, TObjectFactoryOfInventoryState factory)"))
+			&& Source.Contains(TEXT(" CreateComponent(AActor outer, TObjectFactoryOfSceneComponent factory)"))
+			&& Source.Contains(TEXT(" FindComponent(AActor actor, TObjectTypeOfSceneComponent type)"))
+			&& Source.Contains(TEXT(" Release(UAvidScriptCSharpBindingEmitterTestObject value)"))
+			&& Source.Contains(TEXT(" Release(USceneComponent value)")));
+	TestTrue(
+		TEXT("Factory facade uses packed i64 handles without guest scratch memory"),
+		Source.Contains(TEXT("long packedHandle = AvidScriptNative.ObjectConstruct("))
+			&& Source.Contains(TEXT("long packedHandle = AvidScriptNative.ActorFindComponent("))
+			&& Source.Contains(TEXT("return new((int)packedHandle, (int)(packedHandle >> 32));"))
+			&& Source.Contains(TEXT("internal static extern long ObjectConstruct("))
+			&& Source.Contains(TEXT("internal static extern int ObjectRelease("))
+			&& Source.Contains(TEXT("internal static extern long ActorFindComponent(")));
 
 	TSharedPtr<FJsonObject> Manifest;
 	if (!TestTrue(
@@ -502,10 +530,29 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 		2);
 	const TArray<TSharedPtr<FJsonValue>>& RequiredImports =
 		Manifest->GetArrayField(TEXT("required_imports"));
-	TestEqual(
-		TEXT("Factory-only package requires object type and packed owner capabilities"),
+	const bool bFactoryImportCountValid = TestEqual(
+		TEXT("Factory-only package requires object type, factory, and packed owner capabilities"),
 		RequiredImports.Num(),
-		2);
+		5);
+	const TConstArrayView<FAvidScriptObjectFactoryBindingSpec> FactorySpecs =
+		FAvidScriptObjectFactoryBinding::GetSpecs();
+	if (bFactoryImportCountValid
+		&& TestEqual(TEXT("Factory capability has three shared specifications"), FactorySpecs.Num(), 3))
+	{
+		for (int32 SpecIndex = 0; SpecIndex < FactorySpecs.Num(); ++SpecIndex)
+		{
+			const TSharedPtr<FJsonObject> Import =
+				RequiredImports[1 + SpecIndex]->AsObject();
+			TestTrue(TEXT("Factory manifest import remains an object"), Import.IsValid());
+			if (Import.IsValid())
+			{
+				TestEqual(TEXT("Factory manifest preserves shared stable id"), Import->GetStringField(TEXT("stable_id")), FactorySpecs[SpecIndex].StableId);
+				TestEqual(TEXT("Factory manifest appends a stable ordinal"), Import->GetIntegerField(TEXT("ordinal")), 1 + SpecIndex);
+				TestEqual(TEXT("Factory manifest preserves shared import name"), Import->GetStringField(TEXT("name")), FactorySpecs[SpecIndex].ImportName);
+				TestEqual(TEXT("Factory manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), FactorySpecs[SpecIndex].Signature);
+			}
+		}
+	}
 
 	FString MixedDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult MixedDescriptorResult;
@@ -657,9 +704,11 @@ bool FAvidScriptEditorCSharpBindingEmitterObjectFactoryManifestTest::RunTest(
 				ResolvedBaseClass));
 	}
 	TestEqual(
-		TEXT("Mixed runtime publishes lifecycle and object-type imports only"),
+		TEXT("Mixed runtime publishes lifecycle, object-type, and factory imports"),
 		MixedRuntimePackage->GetVmPackage().Imports.Num(),
-		FAvidScriptObjectLifecycleBindings::GetSpecs().Num() + 1);
+		FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
+			+ FAvidScriptObjectTypeBindings::GetSpecs().Num()
+			+ FAvidScriptObjectFactoryBinding::GetSpecs().Num());
 	return true;
 }
 

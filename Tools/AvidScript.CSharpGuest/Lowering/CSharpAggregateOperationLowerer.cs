@@ -42,6 +42,39 @@ internal static class CSharpAggregateOperationLowerer
         }
 
         if (context.TryGetGuestType(operation.Children[0].TypeId, out GuestType receiverType)
+            && receiverType.Kind is "factory_ref" or "object_type_ref")
+        {
+            if (!CSharpObjectCapabilityPolicy.IsOrdinalField(
+                context.Document,
+                operation.SymbolId,
+                operation.Children[0].TypeId))
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} object capability ordinal field is malformed.");
+                return null;
+            }
+
+            GuestRegister? capability = CSharpOperationLowerer.LowerValue(
+                context,
+                operation.Children[0],
+                blockOrdinal,
+                instructions);
+            GuestRegister? ordinal = context.CreateTemporary(operation.TypeId, blockOrdinal);
+            if (capability is null || ordinal is null)
+            {
+                return null;
+            }
+
+            instructions.Add(new GuestInstruction(
+                "convert",
+                ordinal.Id,
+                new[] { capability.Id },
+                null,
+                receiverType.Kind + "_ordinal",
+                null));
+            return ordinal;
+        }
+
+        if (context.TryGetGuestType(operation.Children[0].TypeId, out receiverType)
             && receiverType.Kind == "class_ref")
         {
             if (!CSharpClassReferencePolicy.IsOrdinalField(

@@ -154,6 +154,11 @@ public static class CSharpGuestLowerer
                 Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' has no Guest value type.");
                 continue;
             }
+            if (guestTypes[symbol.TypeId].Kind is "factory_ref" or "object_type_ref")
+            {
+                Add(diagnostics, "ASCG1003", $"Static field '{symbol.Id}' cannot store a nominal object capability.");
+                continue;
+            }
 
             globals.Add(new GuestGlobal(
                 CSharpGuestIds.Global(symbol.Id),
@@ -215,6 +220,7 @@ public static class CSharpGuestLowerer
             .Where(callable => callable.HasBody
                 && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
                 && !CSharpClassReferencePolicy.IsIntrinsicUpcast(document, callable)
+                && !CSharpObjectCapabilityPolicy.IsIntrinsicConstructor(callable)
                 && (reachableCallableIds is null
                     || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
