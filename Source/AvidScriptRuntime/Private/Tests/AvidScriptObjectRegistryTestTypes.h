@@ -54,4 +54,7 @@ public:
 	{
 		RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	}
+
+	UPROPERTY()
+	TObjectPtr<UAvidScriptObjectRegistryTestObject> HostEffectObjectProperty;
 };

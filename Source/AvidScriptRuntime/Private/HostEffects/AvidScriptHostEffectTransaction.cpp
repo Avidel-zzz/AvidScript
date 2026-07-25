@@ -13,6 +13,7 @@ FAvidScriptHostEffectTransaction::FPropertySnapshot::FPropertySnapshot(
 	FPropertySnapshot&& Other) noexcept
 	: Property(Other.Property)
 	, Data(Other.Data)
+	, StrongObjectReferences(MoveTemp(Other.StrongObjectReferences))
 {
 	Other.Property = nullptr;
 	Other.Data = nullptr;
@@ -27,6 +28,7 @@ FAvidScriptHostEffectTransaction::FPropertySnapshot::operator=(
 		Reset();
 		Property = Other.Property;
 		Data = Other.Data;
+		StrongObjectReferences = MoveTemp(Other.StrongObjectReferences);
 		Other.Property = nullptr;
 		Other.Data = nullptr;
 	}
@@ -56,6 +58,24 @@ bool FAvidScriptHostEffectTransaction::FPropertySnapshot::Capture(
 	Property->CopyCompleteValue(
 		Data,
 		Property->ContainerPtrToValuePtr<void>(&Source));
+	if (const FObjectPropertyBase* ObjectProperty =
+		CastField<FObjectPropertyBase>(Property))
+	{
+		const int32 ElementSize = Property->GetElementSize();
+		const int32 ElementCount = ElementSize > 0 ? Size / ElementSize : 0;
+		StrongObjectReferences.Reserve(ElementCount);
+		for (int32 Index = 0; Index < ElementCount; ++Index)
+		{
+			const void* ElementData =
+				static_cast<const uint8*>(Data)
+				+ static_cast<SIZE_T>(Index) * ElementSize;
+			if (UObject* ReferencedObject =
+				ObjectProperty->GetObjectPropertyValue(ElementData))
+			{
+				StrongObjectReferences.Emplace(ReferencedObject);
+			}
+		}
+	}
 	return true;
 }
 
@@ -84,6 +104,7 @@ void FAvidScriptHostEffectTransaction::FPropertySnapshot::Reset()
 	}
 	Property = nullptr;
 	Data = nullptr;
+	StrongObjectReferences.Reset();
 }
 
 bool FAvidScriptHostEffectTransaction::PrepareEffect(

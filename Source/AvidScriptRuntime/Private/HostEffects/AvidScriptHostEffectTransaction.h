@@ -3,6 +3,7 @@
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptObjectRegistry.h"
 #include "CoreMinimal.h"
+#include "UObject/StrongObjectPtr.h"
 
 enum class EAvidScriptHostEffectTransactionState : uint8
 {
@@ -83,6 +84,7 @@ private:
 
 		FProperty* Property = nullptr;
 		void* Data = nullptr;
+		TArray<TStrongObjectPtr<UObject>, TInlineAllocator<1>> StrongObjectReferences;
 	};
 
 	struct FEntry

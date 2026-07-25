@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -259,6 +260,119 @@ bool FAvidScriptHostEffectTransactionFailureAndCommitTest::RunTest(const FString
 	FAvidScriptHostEffectTransactionResult ClosedResult;
 	TestFalse(TEXT("Rollback after commit is rejected"), CommitTransaction.Rollback(Registry, ClosedResult));
 	TestEqual(TEXT("Rollback after commit reports closed state"), ClosedResult.ErrorCategory, FString(TEXT("host_effect_transaction_closed")));
+
+	DestroyHostEffectWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptHostEffectObjectPropertyGarbageCollectionTest,
+	"AvidScript.Architecture.HostEffects.ObjectPropertyGarbageCollection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptHostEffectObjectPropertyGarbageCollectionTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!CreateHostEffectWorld(World))
+	{
+		AddError(TEXT("Failed to create object property transaction world."));
+		return true;
+	}
+
+	AAvidScriptActorBindingTestActor* Actor =
+		World->SpawnActor<AAvidScriptActorBindingTestActor>();
+	if (!TestNotNull(TEXT("Object property actor spawns"), Actor))
+	{
+		DestroyHostEffectWorld(World);
+		return true;
+	}
+
+	FObjectPropertyBase* ObjectProperty = FindFProperty<FObjectPropertyBase>(
+		AAvidScriptActorBindingTestActor::StaticClass(),
+		GET_MEMBER_NAME_CHECKED(
+			AAvidScriptActorBindingTestActor,
+			HostEffectObjectProperty));
+	if (!TestNotNull(TEXT("Object property reflection resolves"), ObjectProperty))
+	{
+		DestroyHostEffectWorld(World);
+		return true;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	const FAvidScriptObjectHandle ActorHandle =
+		RegisterHostEffectObject(Registry, *Actor, *this);
+	FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+
+	UAvidScriptObjectRegistryTestObject* RollbackOriginal =
+		NewObject<UAvidScriptObjectRegistryTestObject>();
+	TWeakObjectPtr<UAvidScriptObjectRegistryTestObject> RollbackOriginalWeak(
+		RollbackOriginal);
+	Actor->HostEffectObjectProperty = RollbackOriginal;
+
+	FAvidScriptHostEffectTransaction RollbackTransaction;
+	TestTrue(
+		TEXT("Object property snapshot captures before candidate overwrite"),
+		RollbackTransaction.PrepareReflectedProperty(
+			Registry,
+			ActorHandle,
+			*Actor,
+			*ObjectProperty,
+			PrepareResult));
+	Actor->HostEffectObjectProperty =
+		NewObject<UAvidScriptObjectRegistryTestObject>();
+	RollbackOriginal = nullptr;
+
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestTrue(
+		TEXT("Snapshot keeps overwritten object alive across garbage collection"),
+		RollbackOriginalWeak.IsValid());
+
+	FAvidScriptHostEffectTransactionResult RollbackResult;
+	TestTrue(
+		TEXT("Object property rollback succeeds after garbage collection"),
+		RollbackTransaction.Rollback(Registry, RollbackResult));
+	TestTrue(
+		TEXT("Rollback restores the original object reference"),
+		Actor->HostEffectObjectProperty == RollbackOriginalWeak.Get());
+
+	Actor->HostEffectObjectProperty = nullptr;
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestFalse(
+		TEXT("Rollback releases the snapshot strong reference"),
+		RollbackOriginalWeak.IsValid());
+
+	UAvidScriptObjectRegistryTestObject* CommitOriginal =
+		NewObject<UAvidScriptObjectRegistryTestObject>();
+	TWeakObjectPtr<UAvidScriptObjectRegistryTestObject> CommitOriginalWeak(
+		CommitOriginal);
+	Actor->HostEffectObjectProperty = CommitOriginal;
+
+	FAvidScriptHostEffectTransaction CommitTransaction;
+	TestTrue(
+		TEXT("Commit object property snapshot captures"),
+		CommitTransaction.PrepareReflectedProperty(
+			Registry,
+			ActorHandle,
+			*Actor,
+			*ObjectProperty,
+			PrepareResult));
+	UAvidScriptObjectRegistryTestObject* CommitCandidate =
+		NewObject<UAvidScriptObjectRegistryTestObject>();
+	Actor->HostEffectObjectProperty = CommitCandidate;
+	CommitOriginal = nullptr;
+
+	FAvidScriptHostEffectTransactionResult CommitResult;
+	TestTrue(
+		TEXT("Object property transaction commits"),
+		CommitTransaction.Commit(CommitResult));
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestFalse(
+		TEXT("Commit releases the snapshot strong reference"),
+		CommitOriginalWeak.IsValid());
+	TestTrue(
+		TEXT("Commit preserves the candidate object reference"),
+		Actor->HostEffectObjectProperty == CommitCandidate);
 
 	DestroyHostEffectWorld(World);
 	return true;
