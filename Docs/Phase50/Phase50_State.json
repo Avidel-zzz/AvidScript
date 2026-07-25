@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 首次完整 Automation 暴露三个旧 reload fixture 的 WASM import section 与 manifest required_imports 漂移；StateMigration 测试在加载失败后仍索引空 slots，需修复并使用剩余 Gate 预算复验。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "独立复审发现并推动修复一项 Critical 重入卸载 UAF、四项 Import/入口合同问题与一项测试覆盖缺口。修复后 Backend active-call lease、Session mutation/guest-execution lease、Component deferred release 与函数内顺序门禁均已落地；Reload 15/15、VM DynamicRawRegistry 3/3、Component 8/8、Phase50 architecture fixtures 17/17 通过，UBT no-clean 覆盖 VM、Runtime、Editor，无未处理 Blocker/Critical/Important debt。",
+    "completed_at_utc": "2026-07-25T05:45:18.2735049+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "1950a86bf4a1b70354734a0ae2b8c0b3e2ea369d",
+    "source_tree": "96b70108df05f28cce2a2560fb002d2517953b01",
+    "state_sha256": "12ef5a6a2b66a131fb6b244ac0ef183e4aee88eebe4da16f5fa86ea3135de515",
+    "review_evidence": "独立复审发现并推动修复一项 Critical 重入卸载 UAF、四项 Import/入口合同问题与一项测试覆盖缺口。修复后 Backend active-call lease、Session mutation/guest-execution lease、Component deferred release 与函数内顺序门禁均已落地；Reload 15/15、VM DynamicRawRegistry 3/3、Component 8/8、Phase50 architecture fixtures 17/17 通过，UBT no-clean 覆盖 VM、Runtime、Editor，无未处理 Blocker/Critical/Important debt。",
+    "at_utc": "2026-07-25T05:45:18.2735049+00:00"
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
-  "revision": 27,
-  "updated_at_utc": "2026-07-25T05:43:44.9626294+00:00"
+  "next_action": "attest -Phase 50 -GateReportPath <path>",
+  "revision": 28,
+  "updated_at_utc": "2026-07-25T05:45:18.2799582+00:00"
 }
