@@ -11,6 +11,7 @@
 
 class UClass;
 class UWorld;
+class IAvidScriptObjectOwnershipDomain;
 
 struct FAvidScriptBindingPackageLoadResult
 {
@@ -35,6 +36,7 @@ struct FAvidScriptBindingPackageInstrumentation
 struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
+	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;

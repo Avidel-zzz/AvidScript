@@ -117,6 +117,7 @@ struct FAvidScriptDynamicHostCallResult
 {
 	bool bSucceeded = false;
 	int32 ReturnValue = 0;
+	int64 ReturnValueI64 = 0;
 	FString Details;
 };
 

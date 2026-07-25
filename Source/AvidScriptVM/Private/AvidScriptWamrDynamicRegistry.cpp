@@ -69,20 +69,30 @@ bool IsAvidScriptDynamicSafeToken(const FString& Value)
 	return true;
 }
 
-bool ParseAvidScriptRawSignature(const FString& Signature, uint32& OutParameterCount)
+bool ParseAvidScriptRawSignature(
+	const FString& Signature,
+	uint32& OutParameterCount,
+	EAvidScriptWamrRawResultKind& OutResultKind)
 {
 	OutParameterCount = 0;
+	OutResultKind = EAvidScriptWamrRawResultKind::I32;
 	if (Signature.Len() < 3 || Signature[0] != TEXT('('))
 	{
 		return false;
 	}
 	const int32 CloseIndex = Signature.Find(TEXT(")"), ESearchCase::CaseSensitive);
+	const TCHAR ResultType = CloseIndex == INDEX_NONE || CloseIndex + 1 >= Signature.Len()
+		? TEXT('\0')
+		: Signature[CloseIndex + 1];
 	if (CloseIndex == INDEX_NONE
 		|| CloseIndex != Signature.Len() - 2
-		|| Signature[CloseIndex + 1] != TEXT('i'))
+		|| (ResultType != TEXT('i') && ResultType != TEXT('I')))
 	{
 		return false;
 	}
+	OutResultKind = ResultType == TEXT('I')
+		? EAvidScriptWamrRawResultKind::I64
+		: EAvidScriptWamrRawResultKind::I32;
 	for (int32 Index = 1; Index < CloseIndex; ++Index)
 	{
 		const TCHAR Type = Signature[Index];
@@ -148,7 +158,7 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 	IAvidScriptWamrHostBridge* Bridge = ExecEnv != nullptr
 		? static_cast<IAvidScriptWamrHostBridge*>(wasm_runtime_get_user_data(ExecEnv))
 		: nullptr;
-	int32 ReturnValue = 0;
+	int64 ReturnValue = 0;
 	FString FailureDetails;
 	const bool bSucceeded = Attachment != nullptr
 		&& Bridge != nullptr
@@ -171,7 +181,15 @@ void InvokeAvidScriptDynamicRawImport(wasm_exec_env_t ExecEnv, uint64* Arguments
 		SetDynamicRawException(ExecEnv);
 		ReturnValue = 0;
 	}
-	*reinterpret_cast<int32*>(Arguments) = ReturnValue;
+	if (Attachment != nullptr
+		&& Attachment->ResultKind == EAvidScriptWamrRawResultKind::I64)
+	{
+		*reinterpret_cast<int64*>(Arguments) = ReturnValue;
+	}
+	else
+	{
+		*reinterpret_cast<int32*>(Arguments) = static_cast<int32>(ReturnValue);
+	}
 }
 
 void ReleaseAvidScriptDynamicRegistryEntry(const FAvidScriptWamrDynamicRegistration& Registration)
@@ -222,12 +240,13 @@ bool ValidateAvidScriptVmBindingPackage(
 	{
 		const FAvidScriptVmDynamicImport& Import = Package.Imports[Index];
 		uint32 ParameterCount = 0;
+		EAvidScriptWamrRawResultKind ResultKind = EAvidScriptWamrRawResultKind::I32;
 		const FString ImportKey = MakeAvidScriptDynamicRegistryKey(Import.ModuleName, Import.ImportName);
 		if (!IsAvidScriptLowerSha256(Import.StableId)
 			|| Import.Ordinal != static_cast<uint32>(Index)
 			|| Import.ModuleName != TEXT("avidscript")
 			|| !IsAvidScriptDynamicSafeToken(Import.ImportName)
-			|| !ParseAvidScriptRawSignature(Import.Signature, ParameterCount)
+			|| !ParseAvidScriptRawSignature(Import.Signature, ParameterCount, ResultKind)
 			|| StableIds.Contains(Import.StableId)
 			|| ImportKeys.Contains(ImportKey)
 			|| IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName))
@@ -296,7 +315,10 @@ bool AcquireAvidScriptWamrDynamicImports(
 		Entry->Attachment.ModuleName = Import.ModuleName;
 		Entry->Attachment.ImportName = Import.ImportName;
 		Entry->Attachment.Signature = Import.Signature;
-		ParseAvidScriptRawSignature(Import.Signature, Entry->Attachment.ParameterCount);
+		ParseAvidScriptRawSignature(
+			Import.Signature,
+			Entry->Attachment.ParameterCount,
+			Entry->Attachment.ResultKind);
 		CopyAvidScriptDynamicUtf8(Import.ModuleName, Entry->ModuleNameUtf8);
 		CopyAvidScriptDynamicUtf8(Import.ImportName, Entry->ImportNameUtf8);
 		CopyAvidScriptDynamicUtf8(Import.Signature, Entry->SignatureUtf8);

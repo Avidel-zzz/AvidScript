@@ -2,6 +2,8 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptObjectFactoryBinding.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
@@ -13,6 +15,24 @@
 
 namespace
 {
+class FObjectFactoryCandidateJournal final
+	: public IAvidScriptBindingHostEffectJournal
+{
+public:
+	bool PrepareEffect(
+		FAvidScriptObjectRegistry&,
+		const FAvidScriptObjectHandle&,
+		UObject&,
+		EAvidScriptBindingReloadEffect,
+		FAvidScriptBindingHostEffectPrepareResult&) override
+	{
+		++PrepareCount;
+		return false;
+	}
+
+	int32 PrepareCount = 0;
+};
+
 FAvidScriptBindingTypeModel MakeFactoryPlanObjectType(
 	const TCHAR* ClassPath,
 	const TCHAR* CppType,
@@ -186,6 +206,28 @@ bool LoadFactoryPackage(
 	return SerializeFactoryPackage(Model, Json)
 		&& FAvidScriptBindingPackage::LoadDescriptor(Json, OutPackage, OutResult);
 }
+
+uint32 FindObjectFactoryBindingOrdinal(
+	const FAvidScriptBindingPackage& Package,
+	const EAvidScriptBindingInvocationKind Kind)
+{
+	for (const FAvidScriptObjectFactoryBindingSpec& Spec :
+		FAvidScriptObjectFactoryBinding::GetSpecs())
+	{
+		if (Spec.Kind != Kind)
+		{
+			continue;
+		}
+		const FAvidScriptVmDynamicImport* Import =
+			Package.GetVmPackage().Imports.FindByPredicate(
+				[&Spec](const FAvidScriptVmDynamicImport& Candidate)
+				{
+					return Candidate.StableId == Spec.StableId;
+				});
+		return Import != nullptr ? Import->Ordinal : MAX_uint32;
+	}
+	return MAX_uint32;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -212,6 +254,40 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Factory result reports one immutable factory"), LoadResult.ObjectFactoryCount, 1);
 	TestEqual(TEXT("Factory package exposes one immutable factory"), Package->GetObjectFactoryCount(), 1);
+	const TConstArrayView<FAvidScriptObjectFactoryBindingSpec> FactorySpecs =
+		FAvidScriptObjectFactoryBinding::GetSpecs();
+	TestEqual(TEXT("Object factory publishes three generic import specs"), FactorySpecs.Num(), 3);
+	TestEqual(
+		TEXT("Factory package adds object-type plus three factory imports"),
+		Package->GetVmPackage().Imports.Num(),
+		4);
+	TestTrue(
+		TEXT("Construct uses one packed-i64 crossing"),
+		FactorySpecs.ContainsByPredicate(
+			[](const FAvidScriptObjectFactoryBindingSpec& Spec)
+			{
+				return Spec.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
+					&& Spec.ImportName == TEXT("avid_object_construct")
+					&& Spec.Signature == TEXT("(iii)I");
+			}));
+	TestTrue(
+		TEXT("Release uses one i32 crossing"),
+		FactorySpecs.ContainsByPredicate(
+			[](const FAvidScriptObjectFactoryBindingSpec& Spec)
+			{
+				return Spec.Kind == EAvidScriptBindingInvocationKind::ObjectRelease
+					&& Spec.ImportName == TEXT("avid_object_release")
+					&& Spec.Signature == TEXT("(ii)i");
+			}));
+	TestTrue(
+		TEXT("FindComponent uses one packed-i64 crossing"),
+		FactorySpecs.ContainsByPredicate(
+			[](const FAvidScriptObjectFactoryBindingSpec& Spec)
+			{
+				return Spec.Kind == EAvidScriptBindingInvocationKind::ActorFindComponent
+					&& Spec.ImportName == TEXT("avid_actor_find_component")
+					&& Spec.Signature == TEXT("(iii)I");
+			}));
 	TestEqual(TEXT("Factory package retains its descriptor schema provenance"),
 		Package->GetDescriptorSchemaVersion(), 7);
 	TestEqual(TEXT("Each unique factory and graph class path loads once"),
@@ -242,6 +318,72 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Out-of-range factory ordinal fails closed"),
 		Package->TryResolveObjectFactory(1, Plan));
 	TestNull(TEXT("Out-of-range factory ordinal clears output"), Plan);
+
+	const uint32 ConstructOrdinal = FindObjectFactoryBindingOrdinal(
+		*Package,
+		EAvidScriptBindingInvocationKind::ObjectConstruct);
+	const uint32 ReleaseOrdinal = FindObjectFactoryBindingOrdinal(
+		*Package,
+		EAvidScriptBindingInvocationKind::ObjectRelease);
+	const uint32 FindOrdinal = FindObjectFactoryBindingOrdinal(
+		*Package,
+		EAvidScriptBindingInvocationKind::ActorFindComponent);
+	if (!TestTrue(TEXT("Construct import ordinal resolves"), ConstructOrdinal != MAX_uint32)
+		|| !TestTrue(TEXT("Release import ordinal resolves"), ReleaseOrdinal != MAX_uint32)
+		|| !TestTrue(TEXT("FindComponent import ordinal resolves"), FindOrdinal != MAX_uint32))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry CandidateRegistry;
+	FAvidScriptSessionObjectOwnership CandidateOwnership;
+	FObjectFactoryCandidateJournal CandidateJournal;
+	FAvidScriptBindingInvocationContext CandidateContext;
+	CandidateContext.ObjectRegistry = &CandidateRegistry;
+	CandidateContext.ObjectOwnership = &CandidateOwnership;
+	CandidateContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	CandidateContext.HostEffectJournal = &CandidateJournal;
+	TArray<uint8> CandidateScratch;
+	FAvidScriptDynamicHostCallResult CandidateResult;
+	const uint64 ConstructArguments[] = { 0, 0, 0 };
+	FAvidScriptDynamicHostCall CandidateCall;
+	CandidateCall.BindingOrdinal = ConstructOrdinal;
+	CandidateCall.Arguments = ConstructArguments;
+	TestFalse(
+		TEXT("Candidate reload rejects Construct before object mutation"),
+		Package->Dispatch(
+			CandidateCall,
+			CandidateContext,
+			CandidateScratch,
+			CandidateResult));
+	TestTrue(TEXT("Construct candidate rejection has the reload category"),
+		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
+	const uint64 ReleaseArguments[] = { 1, 1 };
+	CandidateCall.BindingOrdinal = ReleaseOrdinal;
+	CandidateCall.Arguments = ReleaseArguments;
+	TestFalse(
+		TEXT("Candidate reload rejects Release before ownership mutation"),
+		Package->Dispatch(
+			CandidateCall,
+			CandidateContext,
+			CandidateScratch,
+			CandidateResult));
+	TestTrue(TEXT("Release candidate rejection has the reload category"),
+		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
+	const uint64 FindArguments[] = { 1, 1, 3 };
+	CandidateCall.BindingOrdinal = FindOrdinal;
+	CandidateCall.Arguments = FindArguments;
+	TestFalse(
+		TEXT("Candidate FindComponent passes the reload gate and reaches handle validation"),
+		Package->Dispatch(
+			CandidateCall,
+			CandidateContext,
+			CandidateScratch,
+			CandidateResult));
+	TestFalse(TEXT("FindComponent is not rejected as a candidate side effect"),
+		CandidateResult.Details.Contains(TEXT("binding_reload_effect_unsupported")));
+	TestEqual(TEXT("Candidate object gates do not invoke the transform journal"),
+		CandidateJournal.PrepareCount, 0);
 
 	const auto TestActivationFailure = [this](
 		const TCHAR* Label,

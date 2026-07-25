@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "Components/ActorComponent.h"
 #include "Containers/StringConv.h"
@@ -1270,6 +1271,158 @@ bool DispatchAvidScriptObjectType(
 	OutResult.ReturnValue = Object->IsA(CachedClass) ? 1 : 0;
 	return true;
 }
+
+bool DispatchAvidScriptObjectFactory(
+	const FAvidScriptBindingPackage& Package,
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan,
+	const FAvidScriptDynamicHostCall& Call,
+	const FAvidScriptBindingInvocationContext& Context,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Plan.bRequiresWriteAccess
+		&& Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_write_denied"),
+			Plan.DebugPath,
+			TEXT("The object factory operation requires an explicitly writable host context."));
+		return false;
+	}
+	if (Context.HostEffectJournal != nullptr
+		&& Plan.Kind != EAvidScriptBindingInvocationKind::ActorFindComponent)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_reload_effect_unsupported"),
+			Plan.DebugPath,
+			TEXT("Candidate reload cannot roll back Construct or Release side effects."));
+		return false;
+	}
+	if (Context.ObjectRegistry == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_object_registry_missing"),
+			Plan.DebugPath,
+			TEXT("The Runtime Session has no object registry for factory handles."));
+		return false;
+	}
+	if (Context.ObjectOwnership == nullptr)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_object_ownership_missing"),
+			Plan.DebugPath,
+			TEXT("The Runtime Session has no object ownership domain."));
+		return false;
+	}
+	if (Call.Arguments.ContainsByPredicate(
+		[](const uint64 Argument)
+		{
+			return Argument > MAX_uint32;
+		}))
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			TEXT("binding_argument_invalid"),
+			Plan.DebugPath,
+			TEXT("A factory ordinal or object handle cell exceeds the 32-bit ABI."));
+		return false;
+	}
+
+	FAvidScriptObjectHandleResult BindingResult;
+	bool bSucceeded = false;
+	switch (Plan.Kind)
+	{
+	case EAvidScriptBindingInvocationKind::ObjectConstruct:
+	{
+		const FAvidScriptObjectFactoryPlan* FactoryPlan = nullptr;
+		if (!Package.TryResolveObjectFactory(
+			static_cast<uint32>(Call.Arguments[0]),
+			FactoryPlan))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("object_factory_ordinal_out_of_range"),
+				Plan.DebugPath,
+				TEXT("The factory ordinal is outside the immutable package factory plan."));
+			return false;
+		}
+		const FAvidScriptObjectHandle OuterHandle{
+			static_cast<uint32>(Call.Arguments[1]),
+			static_cast<uint32>(Call.Arguments[2])
+		};
+		bSucceeded = FAvidScriptObjectFactoryBinding::Construct(
+			*FactoryPlan,
+			*Context.ObjectRegistry,
+			*Context.ObjectOwnership,
+			OuterHandle,
+			BindingResult);
+		break;
+	}
+	case EAvidScriptBindingInvocationKind::ObjectRelease:
+	{
+		const FAvidScriptObjectHandle Handle{
+			static_cast<uint32>(Call.Arguments[0]),
+			static_cast<uint32>(Call.Arguments[1])
+		};
+		bSucceeded = FAvidScriptObjectFactoryBinding::Release(
+			*Context.ObjectRegistry,
+			*Context.ObjectOwnership,
+			Handle,
+			BindingResult);
+		break;
+	}
+	case EAvidScriptBindingInvocationKind::ActorFindComponent:
+	{
+		UClass* ComponentClass = nullptr;
+		if (!Package.TryResolveObjectType(
+			static_cast<uint32>(Call.Arguments[2]),
+			ComponentClass))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("object_type_ordinal_out_of_range"),
+				Plan.DebugPath,
+				TEXT("The object type ordinal is outside the immutable package type plan."));
+			return false;
+		}
+		const FAvidScriptObjectHandle ActorHandle{
+			static_cast<uint32>(Call.Arguments[0]),
+			static_cast<uint32>(Call.Arguments[1])
+		};
+		bSucceeded = FAvidScriptObjectFactoryBinding::FindComponent(
+			*Context.ObjectRegistry,
+			ActorHandle,
+			*ComponentClass,
+			BindingResult);
+		break;
+	}
+	default:
+		checkNoEntry();
+		break;
+	}
+
+	if (!bSucceeded || !BindingResult.bSucceeded)
+	{
+		SetAvidScriptBindingDispatchFailure(
+			OutResult,
+			BindingResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("binding_object_factory_failed"))
+				: BindingResult.ErrorCategory,
+			Plan.DebugPath,
+			BindingResult.ErrorMessage.IsEmpty()
+				? FString(TEXT("The object factory binding rejected the operation."))
+				: BindingResult.ErrorMessage);
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.ReturnValue = 1;
+	OutResult.ReturnValueI64 = static_cast<int64>(BindingResult.Handle.ToUInt64());
+	return true;
+}
 } // namespace
 
 struct FAvidScriptBindingPackage::FImpl
@@ -1695,8 +1848,15 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	const int32 LifecycleBindingCount = bHasLifecycleClassReferences
 		? FAvidScriptObjectLifecycleBindings::GetSpecs().Num()
 		: 0;
+	const int32 ObjectFactoryBindingCount = Model.SchemaVersion >= 7
+		&& !Package->Impl->ObjectFactoryPlans.IsEmpty()
+		? FAvidScriptObjectFactoryBinding::GetSpecs().Num()
+		: 0;
 	const int32 TotalImportCount =
-		Model.Bindings.Num() + LifecycleBindingCount + ObjectTypeBindingCount;
+		Model.Bindings.Num()
+		+ LifecycleBindingCount
+		+ ObjectTypeBindingCount
+		+ ObjectFactoryBindingCount;
 	Package->Impl->Plans.Reserve(TotalImportCount);
 	Package->Impl->VmPackage.Imports.Reserve(TotalImportCount);
 
@@ -2094,6 +2254,33 @@ bool FAvidScriptBindingPackage::TryResolveObjectFactory(
 	{
 		return false;
 	}
+
+	if (ObjectFactoryBindingCount > 0)
+	{
+		for (const FAvidScriptObjectFactoryBindingSpec& Spec :
+			FAvidScriptObjectFactoryBinding::GetSpecs())
+		{
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = Spec.Kind;
+			Plan.DebugPath = Spec.ModuleName + TEXT(".") + Spec.ImportName;
+			Plan.bRequiresWriteAccess =
+				Spec.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
+				|| Spec.Kind == EAvidScriptBindingInvocationKind::ObjectRelease;
+			Plan.ExpectedArgumentCount = Spec.Kind
+				== EAvidScriptBindingInvocationKind::ObjectRelease
+				? 2
+				: 3;
+
+			Package->Impl->VmPackage.Imports.Add({
+				Spec.StableId,
+				static_cast<uint32>(Package->Impl->Plans.Num()),
+				Spec.ModuleName,
+				Spec.ImportName,
+				Spec.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+		}
+	}
 	OutPlan = &Impl->ObjectFactoryPlans[static_cast<int32>(Ordinal)];
 	return OutPlan->ObjectClass != nullptr
 		&& OutPlan->RequiredOuterClass != nullptr
@@ -2145,6 +2332,12 @@ bool FAvidScriptBindingPackage::Dispatch(
 	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectTypeIsA)
 	{
 		return DispatchAvidScriptObjectType(*this, Plan, Call, Context, OutResult);
+	}
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
+		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectRelease
+		|| Plan.Kind == EAvidScriptBindingInvocationKind::ActorFindComponent)
+	{
+		return DispatchAvidScriptObjectFactory(*this, Plan, Call, Context, OutResult);
 	}
 
 	UObject* Target = nullptr;

@@ -12,7 +12,7 @@ public:
 	virtual bool DispatchDynamicHostCall(
 		const FAvidScriptWamrRawImportAttachment& Attachment,
 		TConstArrayView<uint64> Arguments,
-		int32& OutReturnValue,
+		int64& OutReturnValue,
 		FString& OutFailureDetails) = 0;
 	virtual void RecordHostImportFailure(const char* ImportName, const FString& Details) = 0;
 };

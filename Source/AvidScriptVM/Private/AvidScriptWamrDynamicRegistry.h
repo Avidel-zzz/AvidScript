@@ -2,6 +2,12 @@
 
 #include "AvidScriptVmBackend.h"
 
+enum class EAvidScriptWamrRawResultKind : uint8
+{
+	I32,
+	I64
+};
+
 struct FAvidScriptWamrRawImportAttachment
 {
 	FString StableId;
@@ -9,6 +15,7 @@ struct FAvidScriptWamrRawImportAttachment
 	FString ImportName;
 	FString Signature;
 	uint32 ParameterCount = 0;
+	EAvidScriptWamrRawResultKind ResultKind = EAvidScriptWamrRawResultKind::I32;
 };
 
 struct FAvidScriptWamrDynamicRegistration

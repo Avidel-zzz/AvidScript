@@ -98,7 +98,6 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 	OutResult = FAvidScriptObjectHandleResult();
 	OutResult.bSucceeded = true;
 	OutResult.Handle = Handle;
-	OutResult.ObjectPath = Object.GetPathName();
 	return true;
 }
 
@@ -133,7 +132,7 @@ bool FAvidScriptSessionObjectOwnership::Release(
 	}
 
 	const FOwnedObject OwnedObject = OwnedObjects[*OwnedObjectIndex];
-	if (!Registry.ReleaseHandle(OwnedObject.Handle, OutResult))
+	if (!Registry.ReleaseHandle(OwnedObject.Handle, OutResult, false))
 	{
 		return false;
 	}

@@ -428,7 +428,7 @@ public:
 	bool DispatchDynamicHostCall(
 		const FAvidScriptWamrRawImportAttachment& Attachment,
 		TConstArrayView<uint64> Arguments,
-		int32& OutReturnValue,
+		int64& OutReturnValue,
 		FString& OutFailureDetails) override
 	{
 		OutReturnValue = 0;
@@ -456,7 +456,9 @@ public:
 				: Result.Details;
 			return false;
 		}
-		OutReturnValue = Result.ReturnValue;
+		OutReturnValue = Attachment.ResultKind == EAvidScriptWamrRawResultKind::I64
+			? Result.ReturnValueI64
+			: Result.ReturnValue;
 		return true;
 	}
 

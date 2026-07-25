@@ -1952,6 +1952,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 
 	FAvidScriptBindingInvocationContext InvocationContext;
 	InvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
+	InvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
 	InvocationContext.OwnerHandle = HostContext.OwnerHandle;
 	InvocationContext.World = HostContext.World;
 	InvocationContext.WritePolicy = HostContext.ActorWritePolicy;
