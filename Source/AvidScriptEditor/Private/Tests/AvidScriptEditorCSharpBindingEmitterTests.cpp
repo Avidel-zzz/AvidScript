@@ -739,43 +739,45 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 		Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_object_type_is_a\")]"))
 		&& Source.Contains(TEXT("internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);")));
 
-	FAvidScriptBindingPackageModel MissingDerivedOrdinalPackage;
-	FString MissingDerivedOrdinalParseCategory;
-	FString MissingDerivedOrdinalParseSource;
+	FAvidScriptBindingPackageModel MissingClassReferenceResultPackage;
+	FString MissingClassReferenceResultParseCategory;
+	FString MissingClassReferenceResultParseSource;
 	if (TestTrue(
 		TEXT("Typed project API descriptor parses for fail-closed renderer coverage"),
 		FAvidScriptBindingDescriptorParser::Parse(
 			DescriptorJson,
-			MissingDerivedOrdinalPackage,
-			MissingDerivedOrdinalParseCategory,
-			MissingDerivedOrdinalParseSource)))
+			MissingClassReferenceResultPackage,
+			MissingClassReferenceResultParseCategory,
+			MissingClassReferenceResultParseSource)))
 	{
-		FAvidScriptBindingTypeModel* MissingOrdinalType =
-			MissingDerivedOrdinalPackage.Types.FindByPredicate(
-				[](const FAvidScriptBindingTypeModel& Type)
+		FAvidScriptBindingClassReferenceModel* MissingResultReference =
+			MissingClassReferenceResultPackage.ClassReferences.FindByPredicate(
+				[](const FAvidScriptBindingClassReferenceModel& Reference)
 				{
-					return Type.CppType == TEXT("AStaticMeshActor");
+					return Reference.ScriptName == TEXT("ProjectileClass");
 				});
-		if (TestNotNull(TEXT("Fail-closed renderer coverage finds the derived type"), MissingOrdinalType))
+		if (TestNotNull(
+			TEXT("Fail-closed renderer coverage finds the derived class reference"),
+			MissingResultReference))
 		{
-			MissingOrdinalType->ObjectTypeOrdinal = INDEX_NONE;
+			MissingResultReference->ResultTypeId = FString::ChrN(64, TEXT('f'));
 			FString InvalidSource;
 			FString InvalidCategory;
 			FString InvalidErrorSource;
 			TestFalse(
-				TEXT("Renderer rejects a derived wrapper without its target ordinal"),
+				TEXT("Renderer rejects a class reference without its result type"),
 				FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
-					MissingDerivedOrdinalPackage,
+					MissingClassReferenceResultPackage,
 					FAvidScriptHash::Sha256HexUtf8(DescriptorJson),
 					InvalidSource,
 					InvalidCategory,
 					InvalidErrorSource));
 			TestEqual(
-				TEXT("Missing derived ordinal uses the descriptor contract category"),
+				TEXT("Missing class-reference result uses the descriptor contract category"),
 				InvalidCategory,
 				FString(TEXT("descriptor_contract_invalid")));
 			TestEqual(
-				TEXT("Missing derived ordinal identifies the class-reference result contract"),
+				TEXT("Missing result identifies the class-reference result contract"),
 				InvalidErrorSource,
 				FString(TEXT("class_references.result_type_id")));
 		}

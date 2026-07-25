@@ -285,10 +285,16 @@ bool FAvidScriptObjectFactoryPlanTest::RunTest(const FString& Parameters)
 		TEXT("USceneComponent"),
 		EAvidScriptObjectFactoryKind::ActorComponent,
 		1);
+	const FAvidScriptBindingTypeModel ConsoleType = MakeFactoryPlanObjectType(
+		TEXT("/Script/Engine.Console"),
+		TEXT("UConsole"),
+		InheritanceMismatch.Types.Num(),
+		InheritanceMismatch.Types[0].StableId);
+	InheritanceMismatch.Types.Add(ConsoleType);
 	FAvidScriptBindingClassReferenceModel& MismatchedReference =
 		InheritanceMismatch.ClassReferences[0];
-	MismatchedReference.BaseClassPath = TEXT("/Script/Engine.Actor");
-	MismatchedReference.ResultTypeId = InheritanceMismatch.Types[1].StableId;
+	MismatchedReference.BaseClassPath = ConsoleType.ClassPath;
+	MismatchedReference.ResultTypeId = ConsoleType.StableId;
 	MismatchedReference.StableId =
 		FAvidScriptBindingDescriptorIdentity::MakeClassReferenceStableId(
 			MismatchedReference.ClassPath,
