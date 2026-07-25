@@ -983,6 +983,39 @@ if (-not $IsDefaultSource) {
         Write-Output "[AvidScript][CSharp][Build] result=binding_runtime_import_mismatch report=$ReportPath"
         exit 1
     }
+
+    if ([bool]$BindingPackageInfo.HasActiveObjectTypeOrdinals) {
+        $RuntimeActiveObjectTypeOrdinals =
+            @($BindingPackageInfo.ActiveObjectTypeOrdinals)
+        $ObjectTypeOrdinalsMatch =
+            $RuntimeActiveObjectTypeOrdinals.Count -eq $UsedObjectTypeOrdinals.Count
+        if ($ObjectTypeOrdinalsMatch) {
+            for ($Index = 0; $Index -lt $UsedObjectTypeOrdinals.Count; ++$Index) {
+                if ([int]$RuntimeActiveObjectTypeOrdinals[$Index] -ne
+                    [int]$UsedObjectTypeOrdinals[$Index]) {
+                    $ObjectTypeOrdinalsMatch = $false
+                    break
+                }
+            }
+        }
+        if (-not $ObjectTypeOrdinalsMatch) {
+            Remove-LoadableArtifacts
+            $Diagnostics += [ordered]@{
+                code = "ASBI4304"
+                severity = "error"
+                message = "Final Guest IR object-type provenance does not match the selected runtime binding package activation set."
+                runtime_active_object_type_ordinals =
+                    @($RuntimeActiveObjectTypeOrdinals)
+                guest_used_object_type_ordinals = @($UsedObjectTypeOrdinals)
+            }
+            Write-BuildReport `
+                -Result "binding_runtime_object_type_mismatch" `
+                -DirectAbiSupported $false `
+                -ReportDiagnostics $Diagnostics
+            Write-Output "[AvidScript][CSharp][Build] result=binding_runtime_object_type_mismatch report=$ReportPath"
+            exit 1
+        }
+    }
 }
 $DirectAbiExports = @(
     "avid_on_begin_play",

@@ -82,6 +82,50 @@ function New-BindingPackageSubset {
     return $SubsetManifestPath
 }
 
+function New-BindingPackageWithActiveObjectTypes {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceManifestPath,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][int[]]$ActiveOrdinals
+    )
+
+    $Manifest = Get-Content -Raw -LiteralPath $SourceManifestPath | ConvertFrom-Json
+    $SourceDirectory = Split-Path -Parent $SourceManifestPath
+    $DescriptorSource = Join-Path $SourceDirectory ([string]$Manifest.files.descriptor)
+    $ReferenceSource = Join-Path $SourceDirectory ([string]$Manifest.files.reference_source)
+    $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
+    $ActiveProperty = $Descriptor.PSObject.Properties['active_object_type_ordinals']
+    if ($null -eq $ActiveProperty) {
+        $Descriptor | Add-Member `
+            -NotePropertyName active_object_type_ordinals `
+            -NotePropertyValue @($ActiveOrdinals)
+    }
+    else {
+        $ActiveProperty.Value = @($ActiveOrdinals)
+    }
+
+    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+    $DescriptorDestination =
+        Join-Path $OutputDirectory ([string]$Manifest.files.descriptor)
+    $ReferenceDestination =
+        Join-Path $OutputDirectory ([string]$Manifest.files.reference_source)
+    [System.IO.File]::WriteAllText(
+        $DescriptorDestination,
+        ($Descriptor | ConvertTo-Json -Depth 64),
+        $Utf8)
+    Copy-Item `
+        -LiteralPath $ReferenceSource `
+        -Destination $ReferenceDestination `
+        -Force
+    $Manifest.descriptor_sha256 = Get-Sha256Hex $DescriptorDestination
+    $OutputManifestPath = Join-Path $OutputDirectory "package.json"
+    [System.IO.File]::WriteAllText(
+        $OutputManifestPath,
+        ($Manifest | ConvertTo-Json -Depth 32),
+        $Utf8)
+    return $OutputManifestPath
+}
+
 function Write-LifecycleSource {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -178,6 +222,20 @@ $RuntimeSetPackagePath = New-BindingPackageSubset `
     -AuthorizationManifestPath $BindingPackagePath `
     -OutputDirectory (Join-Path $RunRoot "RuntimeSetPackage") `
     -UeFunctions @("SetActorScale3D")
+$RuntimeSetDescriptor = Get-Content -Raw -LiteralPath (
+    Join-Path `
+        (Split-Path -Parent $RuntimeSetPackagePath) `
+        ([string](Get-Content -Raw -LiteralPath $RuntimeSetPackagePath |
+            ConvertFrom-Json).files.descriptor)) | ConvertFrom-Json
+$FixtureActiveOrdinal = @($RuntimeSetDescriptor.types |
+    ForEach-Object { [int]$_.object_type_ordinal } |
+    Where-Object { $_ -ge 0 } |
+    Sort-Object | Select-Object -First 1)[0]
+$RuntimeObjectTypeMismatchPackagePath =
+    New-BindingPackageWithActiveObjectTypes `
+        -SourceManifestPath $RuntimeSetPackagePath `
+        -OutputDirectory (Join-Path $RunRoot "RuntimeObjectTypeMismatchPackage") `
+        -ActiveOrdinals @($FixtureActiveOrdinal)
 
 $RuntimeAllowedRoot = Join-Path $RunRoot "RuntimeAllowed"
 New-Item -ItemType Directory -Force -Path $RuntimeAllowedRoot | Out-Null
@@ -207,6 +265,42 @@ Assert-Condition ($RuntimeAllowedJson.binding_package.used_import_count -eq 1) "
 Assert-Condition ($RuntimeAllowedJson.binding_authorization.manifest_file -ne $RuntimeAllowedJson.binding_package.manifest_file) "authorization and runtime package paths were collapsed"
 $RuntimeAllowedManifestJson = Get-Content -Raw -LiteralPath $RuntimeAllowedManifest | ConvertFrom-Json
 Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq 1) "final manifest did not publish the runtime package subset"
+
+$RuntimeObjectTypeMismatchRoot = Join-Path $RunRoot "RuntimeObjectTypeMismatch"
+New-Item -ItemType Directory -Force -Path $RuntimeObjectTypeMismatchRoot | Out-Null
+$RuntimeObjectTypeMismatchReport = Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.csharp.report.json"
+$RuntimeObjectTypeMismatchManifest = Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $RuntimeObjectTypeMismatchRoot `
+    -SourcePath $RuntimeAllowedSource `
+    -BindingPackagePath $BindingPackagePath `
+    -RuntimeBindingPackagePath $RuntimeObjectTypeMismatchPackagePath `
+    -ModuleId "p51_runtime_object_type_mismatch" `
+    -ArtifactStem "runtime_object_type_mismatch" `
+    -ReportPath $RuntimeObjectTypeMismatchReport `
+    -ManifestPath $RuntimeObjectTypeMismatchManifest | Out-Null
+$RuntimeObjectTypeMismatchExit = $LASTEXITCODE
+Assert-Condition ($RuntimeObjectTypeMismatchExit -eq 1) `
+    "runtime object-type mismatch must return exit 1; actual=$RuntimeObjectTypeMismatchExit"
+$RuntimeObjectTypeMismatchJson =
+    Get-Content -Raw -LiteralPath $RuntimeObjectTypeMismatchReport |
+    ConvertFrom-Json
+Assert-Condition (
+    $RuntimeObjectTypeMismatchJson.result -eq
+        "binding_runtime_object_type_mismatch") `
+    "runtime object-type mismatch has the wrong result"
+Assert-Condition (
+    @($RuntimeObjectTypeMismatchJson.diagnostics |
+        Where-Object code -eq "ASBI4304").Count -eq 1) `
+    "runtime object-type mismatch diagnostic is missing"
+Assert-Condition (
+    -not (Test-Path -LiteralPath $RuntimeObjectTypeMismatchManifest -PathType Leaf)) `
+    "runtime object-type mismatch left a manifest"
+Assert-Condition (
+    -not (Test-Path -LiteralPath (
+        Join-Path $RuntimeObjectTypeMismatchRoot "runtime_object_type_mismatch.wasm") -PathType Leaf)) `
+    "runtime object-type mismatch left loadable WASM"
 
 $PreparedBootstrapRoot = Join-Path $RunRoot "PreparedBootstrap"
 $PreparedBootstrapReport = Join-Path $PreparedBootstrapRoot "prepared_bootstrap.csharp.report.json"
@@ -589,4 +683,4 @@ Assert-Condition ($ManifestJson.state_migration.schema_version -eq 2 -and
 Assert-Condition ($ManifestJson.wasm.sha256 -eq $WasmSha256) "manifest WASM hash differs"
 Assert-Condition ($ManifestJson.toolchain.compiler -eq "avidscript-csharp-guest-wasm") "manifest does not identify the formal compiler chain"
 
-Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 11/11 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildIntegration: 12/12 passed"

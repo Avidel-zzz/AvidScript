@@ -935,6 +935,17 @@ foreach ($PackedOwnerContract in @(
         Add-Violation "C# binding package resolver must validate the packed owner intrinsic exactly: $PackedOwnerContract"
     }
 }
+foreach ($ActiveObjectTypePackageContract in @(
+    'active_object_type_ordinals',
+    'HasActiveObjectTypeOrdinals',
+    'ActiveObjectTypeOrdinals',
+    'strictly increasing declared object ordinals'
+)) {
+    if (-not $CSharpBindingPackageSource.Contains(
+            $ActiveObjectTypePackageContract)) {
+        Add-Violation "C# binding package resolver is missing active object-type provenance $ActiveObjectTypePackageContract"
+    }
+}
 if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
     -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
     -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7')) {
@@ -1993,7 +2004,15 @@ if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
     -not $CSharpBuildScriptSource.Contains('UsedRuntimeBindingImports')) {
     Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
 }
-foreach ($RequiredDualPackageContract in @('binding_authorization', 'RuntimeBindingPackagePath', 'OmitRuntimeBindingPackage', 'ASBI4303')) {
+foreach ($RequiredDualPackageContract in @(
+    'binding_authorization',
+    'RuntimeBindingPackagePath',
+    'OmitRuntimeBindingPackage',
+    'ASBI4303',
+    'ASBI4304',
+    'HasActiveObjectTypeOrdinals',
+    'binding_runtime_object_type_mismatch'
+)) {
     if (-not $CSharpBuildScriptSource.Contains($RequiredDualPackageContract)) {
         Add-Violation "C# build pipeline is missing dual-package contract $RequiredDualPackageContract"
     }

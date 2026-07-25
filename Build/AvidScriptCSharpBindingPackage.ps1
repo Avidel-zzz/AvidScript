@@ -359,6 +359,45 @@ function Resolve-AvidScriptCSharpBindingPackage {
     elseif ($null -ne $Manifest.PSObject.Properties['object_factory_count']) {
         throw "Binding package object_factory_count is only valid for descriptor schema v7."
     }
+
+    $HasActiveObjectTypeOrdinals = $false
+    $ActiveObjectTypeOrdinals = @()
+    $ActiveObjectTypeProperty =
+        $Descriptor.PSObject.Properties['active_object_type_ordinals']
+    if ($null -ne $ActiveObjectTypeProperty) {
+        if ($DescriptorSchemaVersion -lt 6) {
+            throw "Binding descriptor active_object_type_ordinals requires schema v6 or v7."
+        }
+
+        $DeclaredObjectTypeOrdinals =
+            [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($Type in @($Descriptor.types)) {
+            $ObjectTypeOrdinal = 0
+            $ObjectTypeOrdinalValid =
+                Try-GetAvidScriptBindingJsonInt32 `
+                    -Value $Type.object_type_ordinal `
+                    -ParsedValue ([ref]$ObjectTypeOrdinal)
+            if ($ObjectTypeOrdinalValid -and
+                $ObjectTypeOrdinal -ge 0) {
+                [void]$DeclaredObjectTypeOrdinals.Add($ObjectTypeOrdinal)
+            }
+        }
+
+        $PreviousOrdinal = -1
+        foreach ($Value in @($ActiveObjectTypeProperty.Value)) {
+            $ActiveOrdinal = 0
+            if (-not (Try-GetAvidScriptBindingJsonInt32 `
+                    -Value $Value `
+                    -ParsedValue ([ref]$ActiveOrdinal)) -or
+                $ActiveOrdinal -le $PreviousOrdinal -or
+                -not $DeclaredObjectTypeOrdinals.Contains($ActiveOrdinal)) {
+                throw "Binding descriptor active_object_type_ordinals must be strictly increasing declared object ordinals."
+            }
+            $ActiveObjectTypeOrdinals += $ActiveOrdinal
+            $PreviousOrdinal = $ActiveOrdinal
+        }
+        $HasActiveObjectTypeOrdinals = $true
+    }
     $SelfTypeId = ""
     if ($DescriptorSchemaVersion -eq 6 -or
         $DescriptorSchemaVersion -eq 7) {
@@ -439,6 +478,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         ReferenceSourcePath = $ReferenceSourcePath
         ReferenceSourceSha256 = $ReferenceSourceHash
         RequiredImports = @($RequiredImports)
+        HasActiveObjectTypeOrdinals = $HasActiveObjectTypeOrdinals
+        ActiveObjectTypeOrdinals = @($ActiveObjectTypeOrdinals)
     }
 }
 
