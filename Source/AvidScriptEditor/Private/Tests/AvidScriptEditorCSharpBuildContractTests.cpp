@@ -97,7 +97,9 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 
 	const FString FailedReportBody = FString::Printf(TEXT(
 		"$Json = '{\"schema_version\":1,\"result\":\"phase42_binding_required\",\"succeeded\":false,%s"
-		"\"diagnostics\":[{\"code\":\"ASBI4201\",\"severity\":\"error\",\"message\":\"bindings required\"}]}'\n"
+		"\"diagnostics\":[{\"code\":\"ASBI4201\",\"severity\":\"error\","
+		"\"file\":\"Scripts/Profile.cs\",\"start\":42,\"length\":3,\"line\":6,\"column\":9,"
+		"\"end_line\":6,\"end_column\":12,\"message\":\"bindings required\"}]}'\n"
 		"[System.IO.File]::WriteAllText($ReportPath, $Json)"),
 		*GetCSharpContractReportMetadataJson());
 	const FAvidScriptEditorCSharpBuildConfig FailedReportConfig = MakeCSharpContractConfig(
@@ -107,6 +109,10 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 		FAvidScriptEditorCSharpBuildService::BuildProfile(FailedReportConfig, FailedReportResult));
 	TestEqual(TEXT("Failed structured report category"),
 		FailedReportResult.ErrorCategory, FString(TEXT("phase42_binding_required")));
+	TestEqual(
+		TEXT("Failed structured report preserves source location"),
+		FailedReportResult.ErrorMessage,
+		FString(TEXT("Scripts/Profile.cs(7,10): ASBI4201: bindings required")));
 	TestEqual(TEXT("Failed report preserves Frontend count"), FailedReportResult.FrontendInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves Semantic count"), FailedReportResult.SemanticInvocationCount, 1);
 	TestEqual(TEXT("Failed report preserves Guest IR count"), FailedReportResult.GuestIrInvocationCount, 1);

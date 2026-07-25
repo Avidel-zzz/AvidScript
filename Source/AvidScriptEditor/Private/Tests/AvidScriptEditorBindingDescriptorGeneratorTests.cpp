@@ -841,6 +841,71 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 		AddError(ErrorCategory + TEXT(":") + ErrorSource);
 		return false;
 	}
+
+	const auto ParserRejectsWithSource = [this, &Json](
+		const TCHAR* Label,
+		const TCHAR* ExpectedSource,
+		const TFunctionRef<void(TSharedPtr<FJsonObject>&)>& Mutate)
+	{
+		TSharedPtr<FJsonObject> Root;
+		FString MutatedJson;
+		FAvidScriptBindingPackageModel MutatedPackage;
+		FString Category;
+		FString Source;
+		const bool bParsed = ParseDescriptor(Json, Root);
+		if (bParsed)
+		{
+			Mutate(Root);
+		}
+		const bool bRejected = bParsed
+			&& SerializeDescriptor(Root, MutatedJson)
+			&& !FAvidScriptBindingDescriptorParser::Parse(
+				MutatedJson,
+				MutatedPackage,
+				Category,
+				Source);
+		TestTrue(Label, bRejected);
+		TestEqual(
+			TEXT("Invalid schema v8 descriptor uses the stable category"),
+			Category,
+			FString(TEXT("descriptor_contract_invalid")));
+		TestEqual(
+			TEXT("Invalid schema v8 descriptor identifies its source"),
+			Source,
+			FString(ExpectedSource));
+	};
+	ParserRejectsWithSource(
+		TEXT("Unsupported schema version identifies its header field"),
+		TEXT("schema_version"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			Root->SetNumberField(TEXT("schema_version"), 9);
+		});
+	ParserRejectsWithSource(
+		TEXT("Malformed package hash identifies its header field"),
+		TEXT("package_hash"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			Root->SetStringField(TEXT("package_hash"), TEXT("invalid"));
+		});
+	ParserRejectsWithSource(
+		TEXT("Malformed type identity identifies its array index"),
+		TEXT("types[0]"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			Root->GetArrayField(TEXT("types"))[0]
+				->AsObject()
+				->SetStringField(TEXT("stable_id"), TEXT("invalid"));
+		});
+	ParserRejectsWithSource(
+		TEXT("Malformed binding identity identifies its array index"),
+		TEXT("bindings[0]"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			Root->GetArrayField(TEXT("bindings"))[0]
+				->AsObject()
+				->SetStringField(TEXT("stable_id"), TEXT("invalid"));
+		});
 	TestEqual(TEXT("Writable descriptor uses schema v8"), Package.SchemaVersion, 8);
 	const FAvidScriptBindingFunctionModel* Getter = Package.Bindings.FindByPredicate(
 		[](const FAvidScriptBindingFunctionModel& Binding)
