@@ -5,6 +5,7 @@
 struct FAvidScriptBindingSelectionProfile;
 struct FAvidScriptProjectBindingClassSpec;
 struct FAvidScriptProjectObjectFactorySpec;
+class FAvidScriptEditorCSharpBindingSliceService;
 
 struct FAvidScriptCSharpBindingEmitResult
 {
@@ -106,6 +107,14 @@ public:
 		const FAvidScriptBindingSelectionProfile& Profile,
 		const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 		const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
+		const FString& OutputRoot,
+		FAvidScriptCSharpBindingEmitResult& OutResult);
+
+private:
+	friend class FAvidScriptEditorCSharpBindingSliceService;
+
+	static bool PublishDerivedSliceDescriptor(
+		const FString& DescriptorJson,
 		const FString& OutputRoot,
 		FAvidScriptCSharpBindingEmitResult& OutResult);
 };

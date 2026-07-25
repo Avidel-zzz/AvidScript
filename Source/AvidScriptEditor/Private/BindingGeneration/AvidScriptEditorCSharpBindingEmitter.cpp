@@ -205,6 +205,145 @@ bool IsSafePackageName(const FString& Value)
 	return true;
 }
 
+bool ValidateStructurallyCanonicalDescriptor(
+	const FString& DescriptorJson,
+	const FAvidScriptBindingPackageModel& Package,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			RuntimePackage,
+			LoadResult))
+	{
+		OutErrorCategory = LoadResult.ErrorCategory;
+		OutErrorSource = LoadResult.ErrorSource;
+		return false;
+	}
+
+	FString CanonicalDescriptorJson;
+	if (!FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Package,
+			CanonicalDescriptorJson))
+	{
+		OutErrorCategory = TEXT("descriptor_serialize_failed");
+		OutErrorSource = Package.PackageName;
+		return false;
+	}
+	if (CanonicalDescriptorJson != DescriptorJson)
+	{
+		OutErrorCategory = TEXT("descriptor_not_canonical");
+		OutErrorSource = Package.PackageName;
+		return false;
+	}
+	return true;
+}
+
+bool EmitAvidScriptCSharpBindingDescriptor(
+	const FString& DescriptorJson,
+	const bool bRequireReflectionRegeneration,
+	FString& OutReferenceSource,
+	FString& OutManifestJson,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	OutReferenceSource.Empty();
+	OutManifestJson.Empty();
+	OutResult = FAvidScriptCSharpBindingEmitResult();
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!FAvidScriptEditorBindingDescriptorModelParser::Parse(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource))
+	{
+		SetFailure(
+			OutResult,
+			ErrorCategory,
+			ErrorSource,
+			TEXT("Regenerate the descriptor with the matching Phase 42 generator."));
+		return false;
+	}
+	if (!IsSafePackageName(Package.PackageName))
+	{
+		SetFailure(
+			OutResult,
+			TEXT("package_name_invalid"),
+			Package.PackageName,
+			TEXT("Use only letters, digits, dot, underscore, and dash in package names."));
+		return false;
+	}
+	const bool bCanonical = bRequireReflectionRegeneration
+		? ValidateCanonicalDescriptor(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource)
+		: ValidateStructurallyCanonicalDescriptor(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource);
+	if (!bCanonical)
+	{
+		SetFailure(
+			OutResult,
+			ErrorCategory,
+			ErrorSource,
+			bRequireReflectionRegeneration
+				? TEXT("Regenerate the descriptor from the current UE reflection snapshot.")
+				: TEXT("Regenerate the derived slice from its verified authorization descriptor."));
+		return false;
+	}
+
+	const FString DescriptorHash = FAvidScriptHash::Sha256HexUtf8(DescriptorJson);
+	if (!FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			Package,
+			DescriptorHash,
+			OutReferenceSource,
+			ErrorCategory,
+			ErrorSource))
+	{
+		OutReferenceSource.Empty();
+		SetFailure(
+			OutResult,
+			ErrorCategory,
+			ErrorSource,
+			TEXT("Resolve the descriptor projection or generated C# name collision."));
+		return false;
+	}
+	const FString SourceHash = FAvidScriptHash::Sha256HexUtf8(OutReferenceSource);
+	if (!FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
+			Package,
+			DescriptorHash,
+			SourceHash,
+			OutManifestJson))
+	{
+		OutReferenceSource.Empty();
+		OutManifestJson.Empty();
+		SetFailure(
+			OutResult,
+			TEXT("manifest_serialize_failed"),
+			Package.PackageName,
+			TEXT("Inspect the generated binding manifest writer state."));
+		return false;
+	}
+
+	OutResult.bSucceeded = true;
+	OutResult.BindingCount = Package.Bindings.Num();
+	OutResult.TypeCount = Package.Types.Num();
+	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
+	OutResult.ObjectFactoryCount = Package.ObjectFactories.Num();
+	OutResult.PackageName = Package.PackageName;
+	OutResult.PackageHash = Package.PackageHash;
+	OutResult.DescriptorHash = DescriptorHash;
+	OutResult.SourceHash = SourceHash;
+	OutResult.ManifestHash = FAvidScriptHash::Sha256HexUtf8(OutManifestJson);
+	return true;
+}
 void ConvertToUtf8Bytes(const FString& Text, TArray<uint8>& OutBytes)
 {
 	const FTCHARToUTF8 Converted(*Text);
@@ -380,79 +519,12 @@ bool FAvidScriptEditorCSharpBindingEmitter::Emit(
 	FString& OutManifestJson,
 	FAvidScriptCSharpBindingEmitResult& OutResult)
 {
-	OutReferenceSource.Empty();
-	OutManifestJson.Empty();
-	OutResult = FAvidScriptCSharpBindingEmitResult();
-	FAvidScriptBindingPackageModel Package;
-	FString ErrorCategory;
-	FString ErrorSource;
-	if (!FAvidScriptEditorBindingDescriptorModelParser::Parse(
+	return EmitAvidScriptCSharpBindingDescriptor(
 		DescriptorJson,
-		Package,
-		ErrorCategory,
-		ErrorSource))
-	{
-		SetFailure(
-			OutResult,
-			ErrorCategory,
-			ErrorSource,
-			TEXT("Regenerate the descriptor with the matching Phase 42 generator."));
-		return false;
-	}
-	if (!IsSafePackageName(Package.PackageName))
-	{
-		SetFailure(
-			OutResult,
-			TEXT("package_name_invalid"),
-			Package.PackageName,
-			TEXT("Use only letters, digits, dot, underscore, and dash in package names."));
-		return false;
-	}
-	if (!ValidateCanonicalDescriptor(DescriptorJson, Package, ErrorCategory, ErrorSource))
-	{
-		SetFailure(
-			OutResult,
-			ErrorCategory,
-			ErrorSource,
-			TEXT("Regenerate the descriptor from the current UE reflection snapshot."));
-		return false;
-	}
-
-	const FString DescriptorHash = FAvidScriptHash::Sha256HexUtf8(DescriptorJson);
-	if (!FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(Package, DescriptorHash, OutReferenceSource, ErrorCategory, ErrorSource))
-	{
-		OutReferenceSource.Empty();
-		SetFailure(
-			OutResult,
-			ErrorCategory,
-			ErrorSource,
-			TEXT("Resolve the descriptor projection or generated C# name collision."));
-		return false;
-	}
-	const FString SourceHash = FAvidScriptHash::Sha256HexUtf8(OutReferenceSource);
-	if (!FAvidScriptEditorCSharpBindingRenderer::EmitManifest(Package, DescriptorHash, SourceHash, OutManifestJson))
-	{
-		OutReferenceSource.Empty();
-		OutManifestJson.Empty();
-		SetFailure(
-			OutResult,
-			TEXT("manifest_serialize_failed"),
-			Package.PackageName,
-			TEXT("Inspect the generated binding manifest writer state."));
-		return false;
-	}
-
-	OutResult.bSucceeded = true;
-	OutResult.BindingCount = Package.Bindings.Num();
-	OutResult.TypeCount = Package.Types.Num();
-	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
-	OutResult.ObjectFactoryCount = Package.ObjectFactories.Num();
-	OutResult.PackageName = Package.PackageName;
-	OutResult.PackageHash = Package.PackageHash;
-	OutResult.DescriptorHash = DescriptorHash;
-	OutResult.SourceHash = SourceHash;
-	OutResult.ManifestHash = FAvidScriptHash::Sha256HexUtf8(OutManifestJson);
-	return true;
+		true,
+		OutReferenceSource,
+		OutManifestJson,
+		OutResult);
 }
 
 bool FAvidScriptEditorCSharpBindingEmitter::EmitDefault(
@@ -645,6 +717,33 @@ bool FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
 		ClassReferences,
 		{},
 		OutputRoot,
+		OutResult);
+}
+
+bool FAvidScriptEditorCSharpBindingEmitter::PublishDerivedSliceDescriptor(
+	const FString& DescriptorJson,
+	const FString& OutputRoot,
+	FAvidScriptCSharpBindingEmitResult& OutResult)
+{
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!EmitAvidScriptCSharpBindingDescriptor(
+			DescriptorJson,
+			false,
+			Source,
+			Manifest,
+			EmitResult))
+	{
+		OutResult = MoveTemp(EmitResult);
+		return false;
+	}
+	return PublishGeneratedPackage(
+		OutputRoot,
+		DescriptorJson,
+		Source,
+		Manifest,
+		EmitResult,
 		OutResult);
 }
 

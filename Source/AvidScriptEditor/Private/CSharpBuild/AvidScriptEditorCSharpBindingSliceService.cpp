@@ -783,7 +783,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		}
 	}
 
-	if (!FAvidScriptEditorCSharpBindingEmitter::PublishDescriptor(
+	if (!FAvidScriptEditorCSharpBindingEmitter::PublishDerivedSliceDescriptor(
 			SliceDescriptorJson,
 			OutputRoot,
 			OutPackage))
