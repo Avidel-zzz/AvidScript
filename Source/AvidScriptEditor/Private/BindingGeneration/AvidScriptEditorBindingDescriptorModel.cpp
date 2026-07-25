@@ -174,6 +174,10 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		}
 		Writer->WriteValue(TEXT("script_name"), Binding.ScriptName);
 		Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 8)
+		{
+			Writer->WriteValue(TEXT("write_policy"), Binding.WritePolicy);
+		}
 		Writer->WriteValue(TEXT("is_static"), Binding.bStatic);
 		Writer->WriteValue(TEXT("is_const"), Binding.bConst);
 		if (Package.SchemaVersion >= 3)

@@ -1546,6 +1546,121 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FStr
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReflectedPropertySetTest,
+	"AvidScript.Editor.BindingRuntime.ReflectedPropertySet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReflectedPropertySetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Writable Actor property generates a schema v8 package"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.engine.property_write_runtime"),
+				{},
+				Properties,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Writable property descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Setter =
+		Descriptor.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.BindingKind == TEXT("property_set");
+			});
+	if (!TestNotNull(TEXT("Writable descriptor contains a setter"), Setter))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime builds an immutable writable property plan"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Writable property runtime world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Writable property actor spawns"), Actor))
+	{
+		return false;
+	}
+	Actor->CustomTimeDilation = 1.0f;
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle =
+		Registry.RegisterObject(Actor, RegisterResult);
+	const uint64 Arguments[] = {
+		ActorHandle.Slot,
+		ActorHandle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(2.5f)
+	};
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Setter->Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	TestFalse(
+		TEXT("Read-only host context rejects reflected property writes"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestTrue(
+		TEXT("Rejected write leaves the Actor property unchanged"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
+
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TestTrue(
+		TEXT("Writable host context dispatches the cached property setter"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestTrue(
+		TEXT("Direct reflected property setter mutates the Actor"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 2.5f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingRuntimeReflectedSetActorScaleTest,
 	"AvidScript.Editor.BindingRuntime.ReflectedSetActorScaleLifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

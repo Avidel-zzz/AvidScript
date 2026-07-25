@@ -56,6 +56,7 @@ struct FAvidScriptBindingFunctionModel
 	FString UeFunction;
 	FString ScriptName;
 	FString DispatchMode;
+	FString WritePolicy = TEXT("none");
 	bool bStatic = false;
 	bool bConst = false;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;

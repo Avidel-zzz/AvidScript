@@ -59,6 +59,45 @@ internal static class CSharpCallOperationLowerer
             instructions);
     }
 
+    public static bool LowerPropertySetter(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        GuestRegister value,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (!context.TryGetPropertySetter(operation.SymbolId, out SemanticCallable callable, out string targetId))
+        {
+            context.Add("ASCG1005", $"Block {blockOrdinal} property '{operation.SymbolId}' has no Guest setter.");
+            return false;
+        }
+
+        if (callable.IsStatic || callable.Parameters.Count != 1 || operation.Children.Count != 1)
+        {
+            context.Add("ASCG1004", $"Block {blockOrdinal} property setter '{operation.SymbolId}' has an invalid receiver contract.");
+            return false;
+        }
+
+        GuestRegister? receiver = CSharpOperationLowerer.LowerValue(
+            context,
+            operation.Children[0],
+            blockOrdinal,
+            instructions);
+        if (receiver is null)
+        {
+            return false;
+        }
+
+        CSharpOperationLowerer.EmitCall(
+            context,
+            callable,
+            targetId,
+            new[] { receiver.Id, value.Id },
+            blockOrdinal,
+            instructions);
+        return true;
+    }
+
     public static GuestRegister? LowerObjectCreation(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,

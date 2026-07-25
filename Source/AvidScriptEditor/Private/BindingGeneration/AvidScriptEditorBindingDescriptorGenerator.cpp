@@ -23,6 +23,7 @@ namespace
 {
 constexpr const TCHAR* GeneratorVersion = TEXT("50.1.0");
 constexpr const TCHAR* ObjectFactoryGeneratorVersion = TEXT("51.1.0");
+constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -37,6 +38,8 @@ struct FResolvedBindingDescriptor
 	FString CanonicalIdentity;
 	FString StableId;
 	FString ImportName;
+	FString DispatchMode = TEXT("cached_process_event");
+	FString WritePolicy = TEXT("none");
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	int32 Ordinal = INDEX_NONE;
 };
@@ -331,6 +334,7 @@ bool GenerateBindingDescriptor(
 		Binding.CanonicalIdentity = MakeCanonicalIdentity(OwnerClass, Function, Binding.Projection);
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		Binding.DispatchMode = TEXT("cached_process_event");
 		Binding.ReloadEffect = FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
 	}
@@ -389,6 +393,7 @@ bool GenerateBindingDescriptor(
 		Binding.Property = Property;
 		Binding.BindingKind = TEXT("property_get");
 		Binding.UeMember = Property->GetName();
+		Binding.DispatchMode = TEXT("cached_property_get");
 		FString ProjectionErrorSource;
 		if (!FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 			Property,
@@ -407,6 +412,63 @@ bool GenerateBindingDescriptor(
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
 		Binding.ReloadEffect = EAvidScriptBindingReloadEffect::None;
+
+		if (Selection.bWritable)
+		{
+			FString SetterDispatchMode;
+			FString SetterWritePolicy;
+			if (!FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
+					Property,
+					SetterDispatchMode,
+					SetterWritePolicy,
+					PropertyPolicyCategory,
+					PropertyPolicySource))
+			{
+				SetFailure(
+					OutResult,
+					PropertyPolicyCategory,
+					PropertyPolicySource,
+					TEXT("Remove the property from writable_properties or use a setter-compatible runtime property."));
+				return false;
+			}
+
+			FResolvedBindingDescriptor SetterBinding;
+			SetterBinding.OwnerClass = OwnerClass;
+			SetterBinding.Property = Property;
+			SetterBinding.BindingKind = TEXT("property_set");
+			SetterBinding.UeMember = Property->GetName();
+			SetterBinding.DispatchMode = MoveTemp(SetterDispatchMode);
+			SetterBinding.WritePolicy = MoveTemp(SetterWritePolicy);
+			SetterBinding.Projection.ReturnValue.Name = TEXT("return");
+			SetterBinding.Projection.ReturnValue.Direction = TEXT("return");
+			SetterBinding.Projection.ReturnValue.Type =
+				FAvidScriptEditorReflectedTypePolicy::MakeVoidType();
+			FinalizeType(SetterBinding.Projection.ReturnValue.Type);
+
+			FAvidScriptProjectedBindingValue Value = Binding.Projection.ReturnValue;
+			Value.Name = TEXT("value");
+			Value.Direction = TEXT("value");
+			Value.bHasDefaultValue = false;
+			Value.DefaultValue.Empty();
+			SetterBinding.Projection.Parameters.Add(MoveTemp(Value));
+			SetterBinding.Projection.AbiSignature = TEXT("(ii")
+				+ FString::Join(
+					SetterBinding.Projection.Parameters[0].Type.AbiValueTypes,
+					TEXT(""))
+				+ TEXT(")i");
+			SetterBinding.ScriptName = Property->GetAuthoredName();
+			SetterBinding.CanonicalIdentity = OwnerClass->GetPathName()
+				+ TEXT("::property_set:") + Property->GetName()
+				+ TEXT("(")
+				+ SetterBinding.Projection.Parameters[0].Type.CanonicalType
+				+ TEXT(")");
+			SetterBinding.StableId = HashSha256(SetterBinding.CanonicalIdentity);
+			SetterBinding.ImportName = TEXT("avid_ue_")
+				+ SetterBinding.StableId.Left(16);
+			SetterBinding.ReloadEffect =
+				EAvidScriptBindingReloadEffect::ReflectedProperty;
+			Bindings.Add(MoveTemp(SetterBinding));
+		}
 		Bindings.Add(MoveTemp(Binding));
 	}
 
@@ -449,10 +511,21 @@ bool GenerateBindingDescriptor(
 	});
 
 	FAvidScriptBindingPackageModel Package;
-	Package.SchemaVersion = ObjectFactories.IsEmpty() ? 6 : 7;
-	Package.GeneratorVersion = ObjectFactories.IsEmpty()
-		? GeneratorVersion
-		: ObjectFactoryGeneratorVersion;
+	const bool bHasWritableProperties = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	Package.SchemaVersion = bHasWritableProperties
+		? 8
+		: ObjectFactories.IsEmpty()
+			? 6
+			: 7;
+	Package.GeneratorVersion = bHasWritableProperties
+		? WritablePropertyGeneratorVersion
+		: ObjectFactories.IsEmpty()
+			? GeneratorVersion
+			: ObjectFactoryGeneratorVersion;
 	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
 	Package.Source = TEXT("ue_reflection");
 	Package.PackageName = PackageName;
@@ -480,11 +553,12 @@ bool GenerateBindingDescriptor(
 		BindingModel.UeMember = Binding.UeMember;
 		BindingModel.UeFunction = Binding.Function == nullptr ? FString() : Binding.Function->GetName();
 		BindingModel.ScriptName = Binding.ScriptName;
-		BindingModel.DispatchMode = Binding.BindingKind == TEXT("function")
-			? TEXT("cached_process_event")
-			: TEXT("cached_property_get");
+		BindingModel.DispatchMode = Binding.DispatchMode;
+		BindingModel.WritePolicy = Binding.WritePolicy;
 		BindingModel.bStatic = Binding.Function != nullptr && Binding.Function->HasAnyFunctionFlags(FUNC_Static);
-		BindingModel.bConst = Binding.Function == nullptr || Binding.Function->HasAnyFunctionFlags(FUNC_Const);
+		BindingModel.bConst = Binding.BindingKind == TEXT("property_get")
+			|| (Binding.Function != nullptr
+				&& Binding.Function->HasAnyFunctionFlags(FUNC_Const));
 		BindingModel.ReloadEffect = Binding.ReloadEffect;
 		BindingModel.ReturnValue = MakeBindingValueModel(Binding.Projection.ReturnValue);
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
@@ -929,7 +1003,9 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	bool bRequestsReadableProperties = !Profile.ExplicitProperties.IsEmpty();
 	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
 	{
-		bRequestsReadableProperties |= Rule.bDiscoverReadableProperties || !Rule.IncludeProperties.IsEmpty();
+		bRequestsReadableProperties |= Rule.bDiscoverReadableProperties
+			|| !Rule.IncludeProperties.IsEmpty()
+			|| !Rule.WritableProperties.IsEmpty();
 	}
 	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
 	if (bRequestsReadableProperties)
@@ -944,6 +1020,9 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 			OutSelectionResult.CandidatePropertyCount = PropertyResult.CandidatePropertyCount;
 			OutSelectionResult.AcceptedPropertyCount = PropertyResult.AcceptedPropertyCount;
 			OutSelectionResult.RejectedPropertyCount = PropertyResult.RejectedPropertyCount;
+			OutSelectionResult.CandidateWritablePropertyCount = PropertyResult.CandidateWritablePropertyCount;
+			OutSelectionResult.AcceptedWritablePropertyCount = PropertyResult.AcceptedWritablePropertyCount;
+			OutSelectionResult.RejectedWritablePropertyCount = PropertyResult.RejectedWritablePropertyCount;
 			OutSelectionResult.Issues.Append(PropertyResult.Issues);
 			OutSelectionResult.ErrorCategory = PropertyResult.ErrorCategory;
 			OutSelectionResult.ErrorSource = PropertyResult.ErrorSource;
@@ -959,6 +1038,9 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.CandidatePropertyCount = PropertyResult.CandidatePropertyCount;
 		OutSelectionResult.AcceptedPropertyCount = PropertyResult.AcceptedPropertyCount;
 		OutSelectionResult.RejectedPropertyCount = PropertyResult.RejectedPropertyCount;
+		OutSelectionResult.CandidateWritablePropertyCount = PropertyResult.CandidateWritablePropertyCount;
+		OutSelectionResult.AcceptedWritablePropertyCount = PropertyResult.AcceptedWritablePropertyCount;
+		OutSelectionResult.RejectedWritablePropertyCount = PropertyResult.RejectedWritablePropertyCount;
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
 	OutSelectionResult.bSucceeded = true;

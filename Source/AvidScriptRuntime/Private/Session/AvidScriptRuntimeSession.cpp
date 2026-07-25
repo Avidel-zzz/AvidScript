@@ -645,7 +645,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 			OutResult,
 			TEXT("<manifest>"),
 			TEXT("binding_package_import_mismatch"),
-			TEXT("actual packed owner import requires a schema v6 or v7 binding package with ExpectedSelfClass"),
+			TEXT("actual packed owner import requires a schema v6 or newer binding package with ExpectedSelfClass"),
 			TEXT("rebuild the script and binding package as one transaction"));
 		return false;
 	}

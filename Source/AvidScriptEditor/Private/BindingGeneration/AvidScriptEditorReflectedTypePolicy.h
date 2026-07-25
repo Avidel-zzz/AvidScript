@@ -39,6 +39,7 @@ struct FAvidScriptProjectedFunction
 class FAvidScriptEditorReflectedTypePolicy
 {
 public:
+	static FAvidScriptProjectedBindingType MakeVoidType();
 	static FAvidScriptProjectedBindingType MakeObjectType(const UClass* ObjectClass);
 	static bool ProjectFunction(
 		const UFunction* Function,

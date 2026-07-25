@@ -76,16 +76,37 @@ bool ValidateCanonicalDescriptor(
 	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
 	FunctionSelections.Reserve(Package.Bindings.Num());
 	PropertySelections.Reserve(Package.Bindings.Num());
+	TSet<FString> WritablePropertyKeys;
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		if (Binding.BindingKind == TEXT("property_set"))
+		{
+			WritablePropertyKeys.Add(
+				Binding.OwnerClass + TEXT("\n") + Binding.UeMember);
+		}
+	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		if (Binding.BindingKind == TEXT("property_get"))
 		{
-			PropertySelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+			const FString PropertyKey = Binding.OwnerClass
+				+ TEXT("\n") + Binding.UeMember;
+			PropertySelections.Add({
+				Binding.OwnerClass,
+				FName(*Binding.UeMember),
+				WritablePropertyKeys.Remove(PropertyKey) > 0
+			});
 		}
-		else
+		else if (Binding.BindingKind == TEXT("function"))
 		{
 			FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
 		}
+	}
+	if (!WritablePropertyKeys.IsEmpty())
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = TEXT("orphan_property_set");
+		return false;
 	}
 	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
 	ClassReferences.Reserve(Package.ClassReferences.Num());

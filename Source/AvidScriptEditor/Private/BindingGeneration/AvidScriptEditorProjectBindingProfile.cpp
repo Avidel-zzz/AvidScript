@@ -14,6 +14,7 @@ namespace
 {
 constexpr const TCHAR* LegacyProjectBindingProfileResolverVersion = TEXT("50.1.0");
 constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
+constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -121,7 +122,8 @@ bool NormalizeClassRule(
 	if (!NormalizeNames(Rule.IncludeFunctions, Rule.OwnerClassPath, TEXT("include_functions"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeFunctions, Rule.OwnerClassPath, TEXT("exclude_functions"), OutResult)
 		|| !NormalizeNames(Rule.IncludeProperties, Rule.OwnerClassPath, TEXT("include_properties"), OutResult)
-		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult))
+		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult)
+		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult))
 	{
 		return false;
 	}
@@ -146,6 +148,18 @@ bool NormalizeClassRule(
 				TEXT("member_filter_conflict"),
 				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
 				TEXT("Remove properties that appear in both include and exclude filters."));
+			return false;
+		}
+	}
+	for (const FName Name : Rule.WritableProperties)
+	{
+		if (Rule.ExcludeProperties.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("member_filter_conflict"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Remove writable properties from the property exclude filter."));
 			return false;
 		}
 	}
@@ -283,6 +297,7 @@ void AppendRuleIdentity(const FAvidScriptReflectedClassSelection& Rule, TArray<F
 		+ TEXT("|ef=") + JoinNames(Rule.ExcludeFunctions)
 		+ TEXT("|ip=") + JoinNames(Rule.IncludeProperties)
 		+ TEXT("|ep=") + JoinNames(Rule.ExcludeProperties)
+		+ TEXT("|wp=") + JoinNames(Rule.WritableProperties)
 		+ FString::Printf(TEXT("|drp=%d"), Rule.bDiscoverReadableProperties ? 1 : 0));
 }
 } // namespace
@@ -786,11 +801,18 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	OutResult = MoveTemp(SelectionResult);
 
 	TArray<FString> Identity;
+	const bool bHasWritableProperties = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.WritableProperties.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(Spec.ObjectFactories.IsEmpty()
-			? LegacyProjectBindingProfileResolverVersion
-			: ProjectBindingProfileResolverVersion));
+		+ FString(bHasWritableProperties
+			? WritablePropertyProfileResolverVersion
+			: Spec.ObjectFactories.IsEmpty()
+				? LegacyProjectBindingProfileResolverVersion
+				: ProjectBindingProfileResolverVersion));
 	Identity.Add(TEXT("engine_build_id=") + EngineBuildIdentity);
 	Identity.Add(TEXT("package=") + Spec.PackageName);
 	Identity.Add(TEXT("self_class=") + OutSelection.SelfClassPath);

@@ -561,7 +561,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 4
 			&& DescriptorSchemaVersion != 5
 			&& DescriptorSchemaVersion != 6
-			&& DescriptorSchemaVersion != 7)
+			&& DescriptorSchemaVersion != 7
+			&& DescriptorSchemaVersion != 8)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -583,7 +584,7 @@ bool ValidateBindingPackageManifest(
 			TEXT("republish the binding package from one descriptor snapshot"));
 		return false;
 	}
-	if (DescriptorSchemaVersion == 7)
+	if (DescriptorSchemaVersion >= 7)
 	{
 		int32 ObjectFactoryCount = INDEX_NONE;
 		if (!TryGetInt32Field(
@@ -597,8 +598,8 @@ bool ValidateBindingPackageManifest(
 			SetManifestLoadFailure(
 				OutResult,
 				TEXT("binding_package_invalid"),
-				TEXT("package.json object_factory_count does not match descriptor v7"),
-				TEXT("republish the descriptor v7 binding package"));
+				TEXT("package.json object_factory_count does not match descriptor"),
+				TEXT("republish the current binding package"));
 			return false;
 		}
 	}
@@ -607,7 +608,7 @@ bool ValidateBindingPackageManifest(
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("binding_package_invalid"),
-			TEXT("package.json object_factory_count is only valid for descriptor schema v7"),
+			TEXT("package.json object_factory_count requires descriptor schema v7 or newer"),
 			TEXT("republish the binding package with matching schema provenance"));
 		return false;
 	}
@@ -759,14 +760,13 @@ bool ValidateBindingPackageManifest(
 	}
 
 	if (bSeenPackedOwner
-		&& ((DescriptorSchemaVersion != 6
-				&& DescriptorSchemaVersion != 7)
+		&& (DescriptorSchemaVersion < 6
 			|| Manifest.BindingPackage->GetExpectedSelfClass() == nullptr))
 	{
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("binding_package_import_mismatch"),
-			TEXT("package.json packed owner capability requires descriptor schema v6 or v7 self_type_id"),
+			TEXT("package.json packed owner capability requires descriptor schema v6 or newer self_type_id"),
 			TEXT("regenerate the binding package from one reflection snapshot"));
 		return false;
 	}
@@ -1421,7 +1421,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		SetManifestLoadFailure(
 			OutResult,
 			TEXT("binding_package_missing"),
-			TEXT("packed owner import requires a verified schema v6 or v7 binding package"),
+			TEXT("packed owner import requires a verified schema v6 or newer binding package"),
 			TEXT("rebuild the script and binding package as one transaction"));
 		return false;
 	}

@@ -248,6 +248,29 @@ internal sealed class CSharpFunctionLoweringContext
         return false;
     }
 
+    public bool TryGetPropertySetter(string? propertySymbolId, out SemanticCallable callable, out string targetId)
+    {
+        SemanticCallable[] matches = callablesBySymbol.Values
+            .Where(item => string.Equals(item.AssociatedSymbolId, propertySymbolId, StringComparison.Ordinal)
+                && string.Equals(item.ReturnTypeId, "type:void", StringComparison.Ordinal)
+                && item.Parameters.Count == 1
+                && (item.Import is not null || item.HasBody))
+            .OrderBy(item => item.MethodSymbolId, StringComparer.Ordinal)
+            .ToArray();
+        if (matches.Length == 1)
+        {
+            callable = matches[0];
+            targetId = callable.Import is not null
+                ? CSharpGuestIds.Import(callable.MethodSymbolId)
+                : CSharpGuestIds.Function(callable.MethodSymbolId);
+            return true;
+        }
+
+        callable = null!;
+        targetId = null!;
+        return false;
+    }
+
     public bool TryGetCallTarget(string? methodSymbolId, out SemanticCallable callable, out string targetId)
     {
         if (methodSymbolId is not null

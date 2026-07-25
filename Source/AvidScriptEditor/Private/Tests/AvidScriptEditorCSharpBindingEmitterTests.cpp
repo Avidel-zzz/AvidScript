@@ -1038,6 +1038,60 @@ bool FAvidScriptEditorCSharpBindingEmitterPropertyGetTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterPropertySetTest,
+	"AvidScript.Editor.CSharpBindingEmitter.PropertySet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterPropertySetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("Writable property descriptor generates for C# emission"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.engine.property_set_facade"),
+				{},
+				Properties,
+				DescriptorJson,
+				DescriptorResult)))
+	{
+		return false;
+	}
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+			TEXT("Schema v8 property descriptor emits through the canonical C# pipeline"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				DescriptorJson,
+				Source,
+				Manifest,
+				EmitResult)))
+	{
+		AddError(EmitResult.ErrorMessage);
+		return false;
+	}
+
+	TestEqual(TEXT("Writable property facade exposes two bindings"), EmitResult.BindingCount, 2);
+	TestTrue(
+		TEXT("Generated property exposes natural get and set accessors"),
+		Source.Contains(
+			TEXT("public float CustomTimeDilation\n    {\n        get"))
+		&& Source.Contains(TEXT("        set\n        {")));
+	TestTrue(
+		TEXT("Generated setter calls a cached native import"),
+		Source.Contains(TEXT("int selfSlot, int selfGeneration, float value")));
+	TestTrue(
+		TEXT("Writable package manifest carries schema v8"),
+		Manifest.Contains(TEXT("\"descriptor_schema_version\": 8")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest,
 	"AvidScript.Editor.CSharpBindingEmitter.GameplayProfile",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

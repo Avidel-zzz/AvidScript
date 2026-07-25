@@ -128,6 +128,22 @@ bool IsAvidScriptRuntimePropertyReadable(const FProperty* Property)
 		&& !Property->HasAnyPropertyFlags(CPF_Parm | CPF_EditorOnly | CPF_Deprecated);
 }
 
+bool IsAvidScriptRuntimePropertyWritable(const FProperty* Property)
+{
+	const EPropertyFlags RejectedFlags =
+		CPF_BlueprintReadOnly
+		| CPF_EditConst
+		| CPF_Config
+		| CPF_GlobalConfig
+		| CPF_EditorOnly
+		| CPF_Deprecated
+		| CPF_InstancedReference
+		| CPF_ContainsInstancedReference
+		| CPF_Net;
+	return IsAvidScriptRuntimePropertyReadable(Property)
+		&& !Property->HasAnyPropertyFlags(RejectedFlags);
+}
+
 FString GetAvidScriptRuntimePropertyDirection(const FProperty* Property)
 {
 	if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
@@ -405,6 +421,16 @@ FString MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
 	return OwnerClass->GetPathName()
 		+ TEXT("::property_get:") + Property->GetName()
 		+ TEXT("(") + Binding.ReturnValue.CanonicalType + TEXT(")");
+}
+
+FString MakeAvidScriptRuntimePropertySetCanonicalIdentity(
+	const UClass* OwnerClass,
+	const FProperty* Property,
+	const FAvidScriptBindingFunctionModel& Binding)
+{
+	return OwnerClass->GetPathName()
+		+ TEXT("::property_set:") + Property->GetName()
+		+ TEXT("(") + Binding.Parameters[0].CanonicalType + TEXT(")");
 }
 
 FString MakeAvidScriptRuntimeSelectionHash(const FAvidScriptBindingPackageModel& Package)
@@ -2126,11 +2152,202 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				TEXT("The reflected owner class is unavailable in this runtime build."));
 			return false;
 		}
+		if (Binding.BindingKind == TEXT("property_set"))
+		{
+			++Package->Impl->Instrumentation.ReflectedNameLookupCount;
+			FProperty* Property = FindFProperty<FProperty>(
+				OwnerClass,
+				FName(*Binding.UeMember));
+			if (!IsAvidScriptRuntimePropertyWritable(Property)
+				|| Property->GetOwnerStruct() != OwnerClass
+				|| Binding.Parameters.Num() != 1)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_write_missing"),
+					Binding.OwnerClass + TEXT(".") + Binding.UeMember,
+					TEXT("The reflected property is missing or no longer satisfies runtime write policy."));
+				return false;
+			}
+
+			const FString BlueprintSetterName =
+				Property->GetMetaData(TEXT("BlueprintSetter"));
+			UFunction* BlueprintSetter = nullptr;
+			TArray<FProperty*> SetterParameters;
+			if (BlueprintSetterName.IsEmpty())
+			{
+				if (Binding.DispatchMode != TEXT("cached_property_set")
+					|| Binding.WritePolicy != TEXT("direct"))
+				{
+					SetAvidScriptBindingLoadFailure(
+						OutResult,
+						TEXT("binding_property_write_policy_mismatch"),
+						Binding.CanonicalIdentity,
+						TEXT("Direct reflected property writes require the cached direct policy."));
+					return false;
+				}
+			}
+			else
+			{
+				++Package->Impl->Instrumentation.ReflectedNameLookupCount;
+				BlueprintSetter = OwnerClass->FindFunctionByName(
+					FName(*BlueprintSetterName));
+				if (BlueprintSetter != nullptr)
+				{
+					for (TFieldIterator<FProperty> It(BlueprintSetter); It; ++It)
+					{
+						FProperty* Parameter = *It;
+						if (Parameter->HasAnyPropertyFlags(CPF_Parm)
+							&& !Parameter->HasAnyPropertyFlags(CPF_ReturnParm))
+						{
+							SetterParameters.Add(Parameter);
+						}
+					}
+				}
+				if (Binding.DispatchMode != TEXT("cached_blueprint_setter")
+					|| Binding.WritePolicy != TEXT("blueprint_setter")
+					|| !IsAvidScriptRuntimeFunctionAllowed(BlueprintSetter)
+					|| BlueprintSetter->GetOwnerClass() != OwnerClass
+					|| BlueprintSetter->HasAnyFunctionFlags(FUNC_Static)
+					|| BlueprintSetter->GetReturnProperty() != nullptr
+					|| SetterParameters.Num() != 1)
+				{
+					SetAvidScriptBindingLoadFailure(
+						OutResult,
+						TEXT("binding_property_blueprint_setter_mismatch"),
+						Binding.CanonicalIdentity,
+						TEXT("The cached BlueprintSetter no longer matches the authorized property."));
+					return false;
+				}
+			}
+
+			FAvidScriptRuntimeBindingValuePlan PropertyValuePlan;
+			FString ValueDetails;
+			if (!BuildAvidScriptRuntimeValuePlan(
+					Property,
+					Binding.Parameters[0],
+					DeclaredTypesByCanonical.FindRef(
+						Binding.Parameters[0].CanonicalType),
+					2,
+					PropertyValuePlan,
+					ValueDetails))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_contract_mismatch"),
+					Binding.CanonicalIdentity,
+					ValueDetails);
+				return false;
+			}
+
+			FAvidScriptRuntimeBindingInvocationPlan Plan;
+			Plan.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+			Plan.OwnerClass = OwnerClass;
+			Plan.Function = BlueprintSetter;
+			Plan.ReflectedProperty = Property;
+			Plan.DebugPath = Property->GetPathName();
+			Plan.bRequiresWriteAccess = true;
+			Plan.ReloadEffect = EAvidScriptBindingReloadEffect::ReflectedProperty;
+			if (BlueprintSetter != nullptr)
+			{
+				Plan.DebugPath += TEXT(":") + BlueprintSetter->GetName();
+				Plan.FrameSize = BlueprintSetter->GetStructureSize();
+				Plan.FrameAlignment = FMath::Max(
+					1,
+					BlueprintSetter->GetMinAlignment());
+				if (Plan.FrameSize < BlueprintSetter->ParmsSize
+					|| !FMath::IsPowerOfTwo(Plan.FrameAlignment)
+					|| Plan.FrameSize > MAX_int32 - (Plan.FrameAlignment - 1))
+				{
+					SetAvidScriptBindingLoadFailure(
+						OutResult,
+						TEXT("binding_frame_layout_invalid"),
+						Binding.CanonicalIdentity,
+						TEXT("The BlueprintSetter frame size or alignment is invalid."));
+					return false;
+				}
+				Plan.RequiredScratchSize = Plan.FrameSize
+					+ Plan.FrameAlignment - 1;
+				if (!BuildAvidScriptRuntimeValuePlan(
+						SetterParameters[0],
+						Binding.Parameters[0],
+						DeclaredTypesByCanonical.FindRef(
+							Binding.Parameters[0].CanonicalType),
+						2,
+						Plan.Parameters.AddDefaulted_GetRef(),
+						ValueDetails))
+				{
+					SetAvidScriptBindingLoadFailure(
+						OutResult,
+						TEXT("binding_property_blueprint_setter_mismatch"),
+						Binding.CanonicalIdentity,
+						ValueDetails);
+					return false;
+				}
+			}
+			else
+			{
+				Plan.Parameters.Add(MoveTemp(PropertyValuePlan));
+			}
+
+			FString ReturnDetails;
+			const int32 ReturnOffset = 2 + Plan.Parameters[0].ArgumentWidth;
+			if (!BuildAvidScriptRuntimeValuePlan(
+					nullptr,
+					Binding.ReturnValue,
+					nullptr,
+					ReturnOffset,
+					Plan.ReturnValue,
+					ReturnDetails))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_return_contract_mismatch"),
+					Binding.CanonicalIdentity,
+					ReturnDetails);
+				return false;
+			}
+			Plan.ExpectedArgumentCount = ReturnOffset;
+			Plan.bRequiresGuestMemory =
+				Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Name;
+			const FString ExpectedIdentity =
+				MakeAvidScriptRuntimePropertySetCanonicalIdentity(
+					OwnerClass,
+					Property,
+					Binding);
+			if (Binding.CanonicalIdentity != ExpectedIdentity
+				|| Binding.StableId
+					!= FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity)
+				|| Binding.HostImport.Signature
+					!= MakeAvidScriptRuntimeExpectedSignature(Binding))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_property_identity_mismatch"),
+					Binding.CanonicalIdentity,
+					TEXT("The writable property descriptor no longer matches the active reflection snapshot."));
+				return false;
+			}
+
+			Package->Impl->RequiredScratchSize = FMath::Max(
+				Package->Impl->RequiredScratchSize,
+				Plan.RequiredScratchSize);
+			Package->Impl->VmPackage.Imports.Add({
+				Binding.StableId,
+				static_cast<uint32>(Binding.Ordinal),
+				Binding.HostImport.Module,
+				Binding.HostImport.Name,
+				Binding.HostImport.Signature
+			});
+			Package->Impl->Plans.Add(MoveTemp(Plan));
+			continue;
+		}
 		if (Binding.BindingKind == TEXT("property_get"))
 		{
 			++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 			FProperty* Property = FindFProperty<FProperty>(OwnerClass, FName(*Binding.UeMember));
-			if (!IsAvidScriptRuntimePropertyReadable(Property))
+			if (!IsAvidScriptRuntimePropertyReadable(Property)
+				|| Property->GetOwnerStruct() != OwnerClass)
 			{
 				SetAvidScriptBindingLoadFailure(
 					OutResult,
@@ -2664,7 +2881,71 @@ bool FAvidScriptBindingPackage::Dispatch(
 			TEXT("The reflected binding requires an explicitly writable host context."));
 		return false;
 	}
-	if (Plan.ReflectedProperty != nullptr)
+	const auto PrepareHostEffect = [&]()
+	{
+		if (Context.HostEffectJournal == nullptr || !Plan.bRequiresWriteAccess)
+		{
+			return true;
+		}
+		if (Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_reload_effect_unsupported"),
+				Plan.DebugPath,
+				TEXT("The reflected write has no reversible candidate reload adapter."));
+			return false;
+		}
+		if (Context.ObjectRegistry == nullptr)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				TEXT("binding_host_effect_registry_missing"),
+				Plan.DebugPath,
+				TEXT("The candidate host effect journal requires an object registry."));
+			return false;
+		}
+
+		const FAvidScriptObjectHandle EffectHandle = Plan.bStatic
+			? Context.OwnerHandle
+			: FAvidScriptObjectHandle{
+				static_cast<uint32>(Call.Arguments[0]),
+				static_cast<uint32>(Call.Arguments[1])
+			};
+		FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+		const bool bPrepared = Plan.ReloadEffect
+			== EAvidScriptBindingReloadEffect::ReflectedProperty
+			? Plan.ReflectedProperty != nullptr
+				&& Context.HostEffectJournal->PrepareReflectedProperty(
+					*Context.ObjectRegistry,
+					EffectHandle,
+					*Target,
+					*Plan.ReflectedProperty,
+					PrepareResult)
+			: Context.HostEffectJournal->PrepareEffect(
+				*Context.ObjectRegistry,
+				EffectHandle,
+				*Target,
+				Plan.ReloadEffect,
+				PrepareResult);
+		if (!bPrepared)
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				PrepareResult.ErrorCategory.IsEmpty()
+					? FString(TEXT("binding_host_effect_prepare_failed"))
+					: PrepareResult.ErrorCategory,
+				PrepareResult.ErrorSource.IsEmpty()
+					? Plan.DebugPath
+					: PrepareResult.ErrorSource,
+				PrepareResult.ErrorDetails.IsEmpty()
+					? FString(TEXT("The candidate host effect could not be prepared."))
+					: PrepareResult.ErrorDetails);
+			return false;
+		}
+		return true;
+	};
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyRead)
 	{
 		if (!WriteAvidScriptRuntimeValueToGuest(
 			Plan.ReturnValue,
@@ -2679,6 +2960,34 @@ bool FAvidScriptBindingPackage::Dispatch(
 				TEXT("binding_property_read_failed"),
 				Plan.DebugPath,
 				Details);
+			return false;
+		}
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		return true;
+	}
+	if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+		&& Plan.Function == nullptr)
+	{
+		if (!PrepareHostEffect()
+			|| !SetAvidScriptRuntimeValueFromCells(
+				Plan.Parameters[0],
+				Call.Arguments.Slice(
+					Plan.Parameters[0].ArgumentOffset,
+					Plan.Parameters[0].ArgumentWidth),
+				Call.GuestMemory,
+				Context,
+				Target,
+				Details))
+		{
+			if (OutResult.Details.IsEmpty())
+			{
+				SetAvidScriptBindingDispatchFailure(
+					OutResult,
+					TEXT("binding_property_write_failed"),
+					Plan.DebugPath,
+					Details);
+			}
 			return false;
 		}
 		OutResult.bSucceeded = true;
@@ -2746,54 +3055,9 @@ bool FAvidScriptBindingPackage::Dispatch(
 		}
 	}
 
-	if (Context.HostEffectJournal != nullptr && Plan.bRequiresWriteAccess)
+	if (!PrepareHostEffect())
 	{
-		if (Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_reload_effect_unsupported"),
-				Plan.DebugPath,
-				TEXT("The reflected write has no reversible candidate reload adapter."));
-			return false;
-		}
-		if (Context.ObjectRegistry == nullptr)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_host_effect_registry_missing"),
-				Plan.DebugPath,
-				TEXT("The candidate host effect journal requires an object registry."));
-			return false;
-		}
-
-		const FAvidScriptObjectHandle EffectHandle = Plan.bStatic
-			? Context.OwnerHandle
-			: FAvidScriptObjectHandle{
-				static_cast<uint32>(Call.Arguments[0]),
-				static_cast<uint32>(Call.Arguments[1])
-			};
-		FAvidScriptBindingHostEffectPrepareResult PrepareResult;
-		if (!Context.HostEffectJournal->PrepareEffect(
-			*Context.ObjectRegistry,
-			EffectHandle,
-			*Target,
-			Plan.ReloadEffect,
-			PrepareResult))
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				PrepareResult.ErrorCategory.IsEmpty()
-					? FString(TEXT("binding_host_effect_prepare_failed"))
-					: PrepareResult.ErrorCategory,
-				PrepareResult.ErrorSource.IsEmpty()
-					? Plan.DebugPath
-					: PrepareResult.ErrorSource,
-				PrepareResult.ErrorDetails.IsEmpty()
-					? FString(TEXT("The candidate host effect could not be prepared."))
-					: PrepareResult.ErrorDetails);
-			return false;
-		}
+		return false;
 	}
 
 	Target->ProcessEvent(Plan.Function, Frame);

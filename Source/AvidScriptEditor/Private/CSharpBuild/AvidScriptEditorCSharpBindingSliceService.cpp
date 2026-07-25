@@ -370,6 +370,7 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	TSet<FString> RequestedReflectedStableIds;
 	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
 	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
+	TMap<FString, int32> PropertySelectionIndices;
 	FunctionSelections.Reserve(Provenance.UsedImports.Num());
 	PropertySelections.Reserve(Provenance.UsedImports.Num());
 	for (const FAvidScriptFrontendBindingImport& Import : Provenance.UsedImports)
@@ -428,11 +429,28 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			}
 
 			RequestedReflectedStableIds.Add(Import.StableId);
-			if (Binding.BindingKind == TEXT("property_get"))
+			if (Binding.BindingKind == TEXT("property_get")
+				|| Binding.BindingKind == TEXT("property_set"))
 			{
-				PropertySelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+				const FString PropertyKey = Binding.OwnerClass
+					+ TEXT("\n") + Binding.UeMember;
+				if (int32* ExistingIndex = PropertySelectionIndices.Find(PropertyKey))
+				{
+					PropertySelections[*ExistingIndex].bWritable |=
+						Binding.BindingKind == TEXT("property_set");
+				}
+				else
+				{
+					PropertySelectionIndices.Add(
+						PropertyKey,
+						PropertySelections.Add({
+							Binding.OwnerClass,
+							FName(*Binding.UeMember),
+							Binding.BindingKind == TEXT("property_set")
+						}));
+				}
 			}
-			else
+			else if (Binding.BindingKind == TEXT("function"))
 			{
 				FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
 			}
@@ -637,6 +655,18 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			TEXT("repair the generated slice descriptor contract"));
 		return false;
 	}
+	SliceModel.Bindings.RemoveAll(
+		[&RequestedReflectedStableIds](
+			const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return !RequestedReflectedStableIds.Contains(Binding.StableId);
+		});
+	for (int32 Index = 0; Index < SliceModel.Bindings.Num(); ++Index)
+	{
+		SliceModel.Bindings[Index].Ordinal = Index;
+	}
+	SliceModel.SchemaVersion = AuthorizationModel.SchemaVersion;
+	SliceModel.GeneratorVersion = AuthorizationModel.GeneratorVersion;
 	FString ClosureErrorSource;
 	if (!BuildAvidScriptCSharpBindingSliceTypeClosure(
 			AuthorizationModel,

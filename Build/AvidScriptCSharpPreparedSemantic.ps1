@@ -96,8 +96,7 @@ function Assert-AvidScriptPreparedSemanticUsedImports {
             $Module -ceq "avidscript" -and
             $Name -ceq "avid_owner_get_handle" -and
             $Signature -ceq "()I" -and
-            ([int]$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 6 -or
-                [int]$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 7) -and
+            [int]$ExpectedAuthorizationPackage.DescriptorSchemaVersion -ge 6 -and
             -not [string]::IsNullOrWhiteSpace(
                 [string]$ExpectedAuthorizationPackage.SelfTypeId)
         Assert-AvidScriptPreparedSemantic `

@@ -104,6 +104,7 @@ bool FailPropertySelection(
 {
 	OutSelections.Empty();
 	OutResult.AcceptedPropertyCount = 0;
+	OutResult.AcceptedWritablePropertyCount = 0;
 	SortPropertySelectionIssues(OutResult.Issues);
 	return false;
 }
@@ -135,7 +136,9 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 	TSet<FString> SeenSelections;
 	for (const FAvidScriptReflectedClassSelection& Rule : ClassRules)
 	{
-		const bool bSelectsProperties = Rule.bDiscoverReadableProperties || !Rule.IncludeProperties.IsEmpty();
+		const bool bSelectsProperties = Rule.bDiscoverReadableProperties
+			|| !Rule.IncludeProperties.IsEmpty()
+			|| !Rule.WritableProperties.IsEmpty();
 		if (!bSelectsProperties)
 		{
 			continue;
@@ -164,19 +167,29 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 
 		const TSet<FName> IncludeNames(Rule.IncludeProperties);
 		const TSet<FName> ExcludeNames(Rule.ExcludeProperties);
+		const TSet<FName> WritableNames(Rule.WritableProperties);
 		TSet<FName> FoundIncludeNames;
+		TSet<FName> FoundWritableNames;
 		TArray<FProperty*> Candidates;
 		for (TFieldIterator<FProperty> It(OwnerClass, EFieldIterationFlags::IncludeSuper); It; ++It)
 		{
 			FProperty* Property = *It;
 			if (Property == nullptr
-				|| (!Rule.bDiscoverReadableProperties && !IncludeNames.Contains(Property->GetFName()))
-				|| (!IncludeNames.IsEmpty() && !IncludeNames.Contains(Property->GetFName()))
+				|| (!Rule.bDiscoverReadableProperties
+					&& !IncludeNames.Contains(Property->GetFName())
+					&& !WritableNames.Contains(Property->GetFName()))
+				|| (!IncludeNames.IsEmpty()
+					&& !IncludeNames.Contains(Property->GetFName())
+					&& !WritableNames.Contains(Property->GetFName()))
 				|| ExcludeNames.Contains(Property->GetFName()))
 			{
 				continue;
 			}
 			FoundIncludeNames.Add(Property->GetFName());
+			if (WritableNames.Contains(Property->GetFName()))
+			{
+				FoundWritableNames.Add(Property->GetFName());
+			}
 			Candidates.Add(Property);
 		}
 		Candidates.Sort([](const FProperty& Left, const FProperty& Right)
@@ -198,10 +211,36 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 				return FailPropertySelection(OutSelections, OutResult);
 			}
 		}
+		for (const FName WritableName : WritableNames)
+		{
+			if (!FoundWritableNames.Contains(WritableName)
+				&& !ExcludeNames.Contains(WritableName))
+			{
+				const FString Source = MakeResolvedPropertySelectionKey(
+					Rule.OwnerClassPath,
+					WritableName);
+				AddPropertySelectionIssue(
+					OutResult,
+					true,
+					Rule.OwnerClassPath,
+					WritableName,
+					TEXT("property_missing"),
+					Source);
+				++OutResult.RejectedWritablePropertyCount;
+				SetPropertySelectionFailure(
+					OutResult,
+					TEXT("property_missing"),
+					Source,
+					TEXT("Update writable_properties to a member available on the selected class."));
+				return FailPropertySelection(OutSelections, OutResult);
+			}
+		}
 
 		for (FProperty* Property : Candidates)
 		{
 			++OutResult.CandidatePropertyCount;
+			const bool bWritable = WritableNames.Contains(Property->GetFName());
+			OutResult.CandidateWritablePropertyCount += bWritable ? 1 : 0;
 			FString Category;
 			FString Source;
 			if (!FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable(Property, Category, Source))
@@ -213,10 +252,38 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 					Property->GetFName(),
 					Category,
 					Source);
+				OutResult.RejectedWritablePropertyCount += bWritable ? 1 : 0;
 				continue;
 			}
+			if (bWritable)
+			{
+				FString DispatchMode;
+				FString WritePolicy;
+				if (!FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
+						Property,
+						DispatchMode,
+						WritePolicy,
+						Category,
+						Source))
+				{
+					AddPropertySelectionIssue(
+						OutResult,
+						true,
+						Rule.OwnerClassPath,
+						Property->GetFName(),
+						Category,
+						Source);
+					++OutResult.RejectedWritablePropertyCount;
+					SetPropertySelectionFailure(
+						OutResult,
+						Category,
+						Source,
+						TEXT("Remove the property from writable_properties or use a setter-compatible runtime property."));
+					return FailPropertySelection(OutSelections, OutResult);
+				}
+			}
 			if (!AddReadablePropertySelection(
-				{ Rule.OwnerClassPath, Property->GetFName() },
+				{ Rule.OwnerClassPath, Property->GetFName(), bWritable },
 				SeenSelections,
 				OutSelections,
 				OutResult))
@@ -234,6 +301,8 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 	for (const FAvidScriptReflectedPropertySelection& Selection : ExplicitProperties)
 	{
 		++OutResult.CandidatePropertyCount;
+		OutResult.CandidateWritablePropertyCount += Selection.bWritable ? 1 : 0;
+		bool bWritableRejectionCounted = false;
 		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
 		FProperty* Property = OwnerClass == nullptr
 			? nullptr
@@ -252,11 +321,37 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 		}
 		else if (FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable(Property, Category, Source))
 		{
-			if (!AddReadablePropertySelection(Selection, SeenSelections, OutSelections, OutResult))
+			if (Selection.bWritable)
 			{
-				return FailPropertySelection(OutSelections, OutResult);
+				FString DispatchMode;
+				FString WritePolicy;
+				if (!FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
+						Property,
+						DispatchMode,
+						WritePolicy,
+						Category,
+						Source))
+				{
+					++OutResult.RejectedWritablePropertyCount;
+					bWritableRejectionCounted = true;
+				}
+				else if (!AddReadablePropertySelection(Selection, SeenSelections, OutSelections, OutResult))
+				{
+					return FailPropertySelection(OutSelections, OutResult);
+				}
+				else
+				{
+					continue;
+				}
 			}
-			continue;
+			else
+			{
+				if (!AddReadablePropertySelection(Selection, SeenSelections, OutSelections, OutResult))
+				{
+					return FailPropertySelection(OutSelections, OutResult);
+				}
+				continue;
+			}
 		}
 
 		AddPropertySelectionIssue(
@@ -266,6 +361,10 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 			Selection.PropertyName,
 			Category,
 			Source);
+		if (Selection.bWritable && !bWritableRejectionCounted)
+		{
+			++OutResult.RejectedWritablePropertyCount;
+		}
 		if (Profile.bStrictExplicitProperties)
 		{
 			SetPropertySelectionFailure(
@@ -294,5 +393,9 @@ bool FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
 
 	OutResult.bSucceeded = true;
 	OutResult.AcceptedPropertyCount = OutSelections.Num();
+	for (const FAvidScriptReflectedPropertySelection& Selection : OutSelections)
+	{
+		OutResult.AcceptedWritablePropertyCount += Selection.bWritable ? 1 : 0;
+	}
 	return true;
 }

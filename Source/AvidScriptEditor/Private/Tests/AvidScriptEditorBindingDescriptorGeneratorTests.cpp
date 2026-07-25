@@ -797,6 +797,77 @@ bool FAvidScriptEditorBindingDescriptorV5PropertyGetTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorV8PropertySetTest,
+	"AvidScript.Editor.BindingDescriptor.V8PropertySet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.Actor"), TEXT("CustomTimeDilation"), true }
+	};
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Writable reflected property generates a descriptor"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.engine.property_set"),
+				{},
+				Properties,
+				Json,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Writable property publishes getter and setter"), GenerateResult.BindingCount, 2);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Shared descriptor parser accepts schema v8 property bindings"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				Json,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(":") + ErrorSource);
+		return false;
+	}
+	TestEqual(TEXT("Writable descriptor uses schema v8"), Package.SchemaVersion, 8);
+	const FAvidScriptBindingFunctionModel* Getter = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_get")
+				&& Binding.UeMember == TEXT("CustomTimeDilation");
+		});
+	const FAvidScriptBindingFunctionModel* Setter = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set")
+				&& Binding.UeMember == TEXT("CustomTimeDilation");
+		});
+	if (TestNotNull(TEXT("Schema v8 retains the property getter"), Getter))
+	{
+		TestEqual(TEXT("Getter remains read-only"), Getter->WritePolicy, FString(TEXT("none")));
+	}
+	if (TestNotNull(TEXT("Schema v8 retains the property setter"), Setter))
+	{
+		TestEqual(TEXT("Setter uses direct write policy"), Setter->WritePolicy, FString(TEXT("direct")));
+		TestEqual(TEXT("Setter uses cached property dispatch"), Setter->DispatchMode, FString(TEXT("cached_property_set")));
+		TestEqual(TEXT("Setter carries one value parameter"), Setter->Parameters.Num(), 1);
+		TestEqual(TEXT("Setter ABI carries owner handle and float"), Setter->HostImport.Signature, FString(TEXT("(iif)i")));
+		TestEqual(
+			TEXT("Setter declares transactional property effect"),
+			Setter->ReloadEffect,
+			EAvidScriptBindingReloadEffect::ReflectedProperty);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV5ClassReferenceTest,
 	"AvidScript.Editor.BindingDescriptor.V5ClassReference",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -310,7 +310,9 @@ bool ParseAvidScriptBindingFunction(
 	{
 		if (!ReadAvidScriptBindingRequiredString(Object, TEXT("binding_kind"), OutBinding.BindingKind, OutErrorSource)
 			|| !ReadAvidScriptBindingRequiredString(Object, TEXT("ue_member"), OutBinding.UeMember, OutErrorSource)
-			|| (OutBinding.BindingKind != TEXT("function") && OutBinding.BindingKind != TEXT("property_get")))
+			|| (OutBinding.BindingKind != TEXT("function")
+				&& OutBinding.BindingKind != TEXT("property_get")
+				&& (SchemaVersion < 8 || OutBinding.BindingKind != TEXT("property_set"))))
 		{
 			OutErrorSource = TEXT("binding_kind");
 			return false;
@@ -319,6 +321,21 @@ bool ParseAvidScriptBindingFunction(
 		{
 			OutBinding.UeFunction = OutBinding.UeMember;
 		}
+	}
+	if (SchemaVersion >= 8)
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("write_policy"),
+				OutBinding.WritePolicy,
+				OutErrorSource))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		OutBinding.WritePolicy = TEXT("none");
 	}
 
 	if (SchemaVersion == 2)
@@ -944,8 +961,10 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 7
-		? TEXT("descriptor_selection_v7")
+	FString Identity(Package.SchemaVersion >= 8
+		? TEXT("descriptor_selection_v8")
+		: Package.SchemaVersion >= 7
+			? TEXT("descriptor_selection_v7")
 		: Package.SchemaVersion >= 6
 			? TEXT("descriptor_selection_v6")
 			: TEXT("descriptor_selection_v5"));
@@ -1075,8 +1094,10 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 7
-		? TEXT("descriptor_package_v7")
+	FString Identity(Package.SchemaVersion >= 8
+		? TEXT("descriptor_package_v8")
+		: Package.SchemaVersion >= 7
+			? TEXT("descriptor_package_v7")
 		: Package.SchemaVersion >= 6
 			? TEXT("descriptor_package_v6")
 			: TEXT("descriptor_package_v5"));
@@ -1141,6 +1162,13 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("member"), Binding.UeMember);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("script_name"), Binding.ScriptName);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("dispatch"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 8)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("write_policy"),
+				Binding.WritePolicy);
+		}
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("static"), Binding.bStatic ? TEXT("1") : TEXT("0"));
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("const"), Binding.bConst ? TEXT("1") : TEXT("0"));
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("reload"), LexToString(Binding.ReloadEffect));
@@ -1232,7 +1260,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 4
 			&& OutPackage.SchemaVersion != 5
 			&& OutPackage.SchemaVersion != 6
-			&& OutPackage.SchemaVersion != 7)
+			&& OutPackage.SchemaVersion != 7
+			&& OutPackage.SchemaVersion != 8)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -1372,15 +1401,29 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				Binding,
 				OutErrorSource)
 			|| Binding.Ordinal != Index
-			|| (Binding.BindingKind == TEXT("function") && Binding.DispatchMode != TEXT("cached_process_event"))
+			|| (Binding.BindingKind == TEXT("function")
+				&& (Binding.DispatchMode != TEXT("cached_process_event")
+					|| Binding.WritePolicy != TEXT("none")))
 			|| (Binding.BindingKind == TEXT("property_get") && Binding.DispatchMode != TEXT("cached_property_get"))
 			|| (Binding.BindingKind == TEXT("property_get")
 				&& (Binding.bStatic
 					|| !Binding.bConst
+					|| Binding.WritePolicy != TEXT("none")
 					|| Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None
 					|| !Binding.Parameters.IsEmpty()
 					|| Binding.ReturnValue.CanonicalType == TEXT("void")
 					|| Binding.HostImport.Signature != TEXT("(iii)i")))
+			|| (Binding.BindingKind == TEXT("property_set")
+				&& (Binding.bStatic
+					|| Binding.bConst
+					|| Binding.ReloadEffect != EAvidScriptBindingReloadEffect::ReflectedProperty
+					|| Binding.ReturnValue.CanonicalType != TEXT("void")
+					|| Binding.Parameters.Num() != 1
+					|| Binding.Parameters[0].Direction != TEXT("value")
+					|| ((Binding.DispatchMode != TEXT("cached_property_set")
+							|| Binding.WritePolicy != TEXT("direct"))
+						&& (Binding.DispatchMode != TEXT("cached_blueprint_setter")
+							|| Binding.WritePolicy != TEXT("blueprint_setter")))))
 			|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity)
 			|| Binding.HostImport.Module != TEXT("avidscript")
 			|| Binding.HostImport.Name != TEXT("avid_ue_") + Binding.StableId.Left(16)
@@ -1389,6 +1432,18 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		{
 			OutErrorCategory = TEXT("descriptor_contract_invalid");
 			return false;
+		}
+		if (Binding.BindingKind == TEXT("property_set"))
+		{
+			const FString ExpectedSignature = TEXT("(ii")
+				+ FString::Join(Binding.Parameters[0].AbiTypes, TEXT(""))
+				+ TEXT(")i");
+			if (Binding.HostImport.Signature != ExpectedSignature)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = Binding.CanonicalIdentity;
+				return false;
+			}
 		}
 
 		BindingIds.Add(Binding.StableId);

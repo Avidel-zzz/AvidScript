@@ -112,16 +112,6 @@ bool ProjectScalarProperty(const FProperty* Property, FAvidScriptProjectedBindin
 	return false;
 }
 
-FAvidScriptProjectedBindingType MakeVoidType()
-{
-	FAvidScriptProjectedBindingType Type;
-	Type.CanonicalType = TEXT("void");
-	Type.Kind = TEXT("void");
-	Type.CppType = TEXT("void");
-	Type.bVoid = true;
-	return Type;
-}
-
 FString GetPropertyDirection(const FProperty* Property)
 {
 	if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
@@ -156,6 +146,16 @@ void AppendAbiTypes(const FAvidScriptProjectedBindingValue& Value, TArray<FStrin
 	OutTypes.Append(Value.Type.AbiValueTypes);
 }
 } // namespace
+
+FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeVoidType()
+{
+	FAvidScriptProjectedBindingType Type;
+	Type.CanonicalType = TEXT("void");
+	Type.Kind = TEXT("void");
+	Type.CppType = TEXT("void");
+	Type.bVoid = true;
+	return Type;
+}
 
 FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeObjectType(const UClass* ObjectClass)
 {

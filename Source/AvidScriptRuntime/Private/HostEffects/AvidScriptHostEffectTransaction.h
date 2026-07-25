@@ -31,6 +31,12 @@ public:
 		UObject& Target,
 		EAvidScriptBindingReloadEffect Effect,
 		FAvidScriptBindingHostEffectPrepareResult& OutResult) override;
+	bool PrepareReflectedProperty(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		FProperty& Property,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override;
 
 	bool Commit(FAvidScriptHostEffectTransactionResult& OutResult);
 	bool Rollback(
@@ -45,15 +51,38 @@ private:
 	{
 		uint64 HandleValue = 0;
 		EAvidScriptBindingReloadEffect Effect = EAvidScriptBindingReloadEffect::Unsupported;
+		const FProperty* Property = nullptr;
 
 		bool operator==(const FEntryKey&) const = default;
 
 		friend uint32 GetTypeHash(const FEntryKey& Key)
 		{
 			return HashCombineFast(
-				::GetTypeHash(Key.HandleValue),
-				::GetTypeHash(static_cast<uint8>(Key.Effect)));
+				HashCombineFast(
+					::GetTypeHash(Key.HandleValue),
+					::GetTypeHash(static_cast<uint8>(Key.Effect))),
+				PointerHash(Key.Property));
 		}
+	};
+
+	struct FPropertySnapshot
+	{
+		FPropertySnapshot() = default;
+		~FPropertySnapshot();
+		FPropertySnapshot(const FPropertySnapshot&) = delete;
+		FPropertySnapshot& operator=(const FPropertySnapshot&) = delete;
+		FPropertySnapshot(FPropertySnapshot&& Other) noexcept;
+		FPropertySnapshot& operator=(FPropertySnapshot&& Other) noexcept;
+
+		bool Capture(FProperty& InProperty, UObject& Source);
+		bool Restore(UObject& Target) const;
+		bool IsValid() const { return Property != nullptr && Data != nullptr; }
+
+	private:
+		void Reset();
+
+		FProperty* Property = nullptr;
+		void* Data = nullptr;
 	};
 
 	struct FEntry
@@ -62,6 +91,7 @@ private:
 		TWeakObjectPtr<UObject> Object;
 		EAvidScriptBindingReloadEffect Effect = EAvidScriptBindingReloadEffect::Unsupported;
 		FTransform OriginalTransform = FTransform::Identity;
+		FPropertySnapshot OriginalProperty;
 	};
 
 	static FString FormatHandle(const FAvidScriptObjectHandle& Handle);

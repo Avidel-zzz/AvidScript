@@ -11,4 +11,11 @@ public:
 		const FProperty* Property,
 		FString& OutCategory,
 		FString& OutSource);
+
+	static bool EvaluateWritable(
+		const FProperty* Property,
+		FString& OutDispatchMode,
+		FString& OutWritePolicy,
+		FString& OutCategory,
+		FString& OutSource);
 };

@@ -176,12 +176,12 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 	}
 	if (Object->HasField(TEXT("self_class_path")))
 	{
-		if (SchemaVersion != 3 && SchemaVersion != 4)
+		if (SchemaVersion != 3 && SchemaVersion != 4 && SchemaVersion != 5)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("profile_self_field_not_supported"),
-				TEXT("binding_profile.self_class_path requires C# profile schema_version 3 or 4."),
-				TEXT("upgrade the C# profile to schema_version 3 or 4 before declaring self_class_path"),
+				TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, or 5."),
+				TEXT("upgrade the C# profile to schema_version 5 before declaring self_class_path"),
 				OutResult);
 			return false;
 		}
@@ -221,7 +221,8 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_functions"), ClassSelection.IncludeFunctions, OutResult)
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_functions"), ClassSelection.ExcludeFunctions, OutResult)
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_properties"), ClassSelection.IncludeProperties, OutResult)
-				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_properties"), ClassSelection.ExcludeProperties, OutResult))
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_properties"), ClassSelection.ExcludeProperties, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("writable_properties"), ClassSelection.WritableProperties, OutResult))
 			{
 				if (OutResult.ErrorCategory.IsEmpty())
 				{
@@ -231,6 +232,16 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 						TEXT("fix or remove the invalid class selection object"),
 						OutResult);
 				}
+				return false;
+			}
+			if (ClassObject->HasField(TEXT("writable_properties"))
+				&& SchemaVersion != 5)
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_writable_property_schema_unsupported"),
+					TEXT("binding_profile classes writable_properties requires C# profile schema_version 5."),
+					TEXT("upgrade schema_version to 5 or remove writable_properties"),
+					OutResult);
 				return false;
 			}
 			if (ClassObject->HasField(TEXT("discover_readable_properties"))
@@ -301,12 +312,12 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 
 	if (Object->HasField(TEXT("object_factories")))
 	{
-		if (SchemaVersion != 4)
+		if (SchemaVersion != 4 && SchemaVersion != 5)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("binding_profile_factory_schema_unsupported"),
-				TEXT("C# binding_profile object_factories requires profile schema_version 4."),
-				TEXT("upgrade the C# profile to schema_version 4 before declaring object_factories"),
+				TEXT("C# binding_profile object_factories requires profile schema_version 4 or 5."),
+				TEXT("upgrade the C# profile to schema_version 5 before declaring object_factories"),
 				OutResult);
 			return false;
 		}
@@ -703,12 +714,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		|| (SchemaVersion != 1.0
 			&& SchemaVersion != 2.0
 			&& SchemaVersion != 3.0
-			&& SchemaVersion != 4.0))
+			&& SchemaVersion != 4.0
+			&& SchemaVersion != 5.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be 1, 2, 3, or 4."),
-			TEXT("update the profile JSON to schema_version 4"),
+			TEXT("C# profile schema_version must be 1, 2, 3, 4, or 5."),
+			TEXT("update the profile JSON to schema_version 5"),
 			OutResult);
 		return false;
 	}
@@ -829,21 +841,24 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		&& (*BindingProfileObject)->HasField(TEXT("object_factories"));
 	if (OutResult.SchemaVersion != 3
 		&& OutResult.SchemaVersion != 4
+		&& OutResult.SchemaVersion != 5
 		&& bHasSelfClassPath)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_self_field_not_supported"),
-			TEXT("binding_profile.self_class_path requires C# profile schema_version 3 or 4."),
-			TEXT("upgrade the C# profile to schema_version 3 or 4 before declaring self_class_path"),
+			TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, or 5."),
+			TEXT("upgrade the C# profile to schema_version 5 before declaring self_class_path"),
 			OutResult);
 		return false;
 	}
-	if (OutResult.SchemaVersion != 4 && bHasObjectFactories)
+	if (OutResult.SchemaVersion != 4
+		&& OutResult.SchemaVersion != 5
+		&& bHasObjectFactories)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("binding_profile_factory_schema_unsupported"),
-			TEXT("binding_profile.object_factories requires C# profile schema_version 4."),
-			TEXT("upgrade schema_version to 4 or remove object_factories"),
+			TEXT("binding_profile.object_factories requires C# profile schema_version 4 or 5."),
+			TEXT("upgrade schema_version to 5 or remove object_factories"),
 			OutResult);
 		return false;
 	}
@@ -858,7 +873,8 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	}
 	if ((OutResult.SchemaVersion == 2
 			|| OutResult.SchemaVersion == 3
-			|| OutResult.SchemaVersion == 4)
+			|| OutResult.SchemaVersion == 4
+			|| OutResult.SchemaVersion == 5)
 		&& bHasBindingProfile)
 	{
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)

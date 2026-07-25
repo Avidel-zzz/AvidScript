@@ -841,4 +841,59 @@ bool FAvidScriptEditorCSharpProfileServiceObjectFactorySchemaTest::RunTest(const
 		TEXT("binding_profile_factory_registration_invalid"));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceWritablePropertyTest,
+	"AvidScript.Editor.CSharpProfileService.WritableProperty",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceWritablePropertyTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		GetAvidScriptCSharpProfileServiceTestRoot(),
+		TEXT("WritableProperty")));
+	TestTrue(
+		TEXT("Writable property profile root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("WritableProperty.cs")));
+	TestTrue(
+		TEXT("Writable property source can be written"),
+		FFileHelper::SaveStringToFile(
+			MakeAvidScriptCSharpProfileSourceText(),
+			*SourcePath));
+	const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("writable.csharp-profile.json")));
+	const FString ProfileText = FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 5,\n")
+		TEXT("  \"language\": \"csharp\",\n")
+		TEXT("  \"source_path\": \"%s\",\n")
+		TEXT("  \"binding_profile\": {\n")
+		TEXT("    \"package_name\": \"avidscript.test.writable\",\n")
+		TEXT("    \"classes\": [{\n")
+		TEXT("      \"class_path\": \"/Script/Engine.Actor\",\n")
+		TEXT("      \"writable_properties\": [\"CustomTimeDilation\"]\n")
+		TEXT("    }]\n")
+		TEXT("  }\n")
+		TEXT("}\n"),
+		*SourcePath);
+	TestTrue(
+		TEXT("Writable property profile can be written"),
+		FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+
+	FAvidScriptEditorCSharpProfileLoadResult Result;
+	TestTrue(
+		TEXT("C# profile schema v5 accepts writable_properties"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(ProfilePath, Result));
+	TestEqual(TEXT("Writable C# profile retains schema v5"), Result.SchemaVersion, 5);
+	if (Result.ResolvedBindingSelection.Classes.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Writable property authorization reaches the resolved profile"),
+			Result.ResolvedBindingSelection.Classes[0].WritableProperties.Num(),
+			1);
+	}
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

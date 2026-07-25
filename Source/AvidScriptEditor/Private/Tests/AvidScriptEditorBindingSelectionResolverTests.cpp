@@ -333,6 +333,50 @@ bool FAvidScriptEditorBindingPropertySelectionCompatibilityTest::RunTest(const F
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingWritablePropertySelectionTest,
+	"AvidScript.Editor.BindingSelection.WritableProperty",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingWritablePropertySelectionTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.engine.writable_property");
+	FAvidScriptReflectedClassSelection ActorRule;
+	ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+	ActorRule.WritableProperties.Add(TEXT("CustomTimeDilation"));
+	Profile.Classes.Add(ActorRule);
+
+	TArray<FAvidScriptReflectedPropertySelection> Selections;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestTrue(
+		TEXT("Explicitly authorized writable property resolves"),
+		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			Selections,
+			Result));
+	TestEqual(TEXT("One writable candidate is considered"), Result.CandidateWritablePropertyCount, 1);
+	TestEqual(TEXT("One writable property is accepted"), Result.AcceptedWritablePropertyCount, 1);
+	if (Selections.Num() == 1)
+	{
+		TestTrue(TEXT("Resolved property retains write authorization"), Selections[0].bWritable);
+	}
+
+	Profile.Classes[0].WritableProperties = { TEXT("RootComponent") };
+	Selections.Empty();
+	Result = FAvidScriptBindingSelectionResolveResult();
+	TestFalse(
+		TEXT("Blueprint read-only property is rejected for writes"),
+		FAvidScriptEditorBindingPropertySelectionResolver::ResolveReadable(
+			Profile,
+			Selections,
+			Result));
+	TestTrue(TEXT("Rejected writable property publishes no partial selection"), Selections.IsEmpty());
+	TestEqual(TEXT("Write rejection has a stable category"), Result.ErrorCategory, FString(TEXT("property_write_not_allowed")));
+	TestEqual(TEXT("One writable property is rejected"), Result.RejectedWritablePropertyCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingPropertySelectionStrictFailureTest,
 	"AvidScript.Editor.BindingSelection.PropertyStrictFailure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

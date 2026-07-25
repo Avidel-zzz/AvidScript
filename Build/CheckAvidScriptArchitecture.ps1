@@ -916,10 +916,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..7) {
+foreach ($RequiredDescriptorSchemaVersion in 2..8) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v7 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v8 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -927,10 +927,9 @@ foreach ($PackedOwnerContract in @(
     "avid_owner_get_handle",
     "()I",
     'Try-GetAvidScriptBindingJsonInt32',
-    '$DescriptorSchemaVersion -ne 6',
-    '$DescriptorSchemaVersion -ne 7',
-    '[string]::IsNullOrWhiteSpace($SelfTypeId)',
-    'packed owner capability requires descriptor schema v6 or v7 with a non-empty self_type_id')) {
+	'$DescriptorSchemaVersion -lt 6',
+	'[string]::IsNullOrWhiteSpace($SelfTypeId)',
+	'packed owner capability requires descriptor schema v6 or newer with a non-empty self_type_id')) {
     if (-not $CSharpBindingPackageSource.Contains($PackedOwnerContract)) {
         Add-Violation "C# binding package resolver must validate the packed owner intrinsic exactly: $PackedOwnerContract"
     }
@@ -949,16 +948,16 @@ foreach ($ActiveObjectTypePackageContract in @(
     }
 }
 if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
-    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
-    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7')) {
-    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5, v6, and v7 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 8')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v8 typed object packages'
 }
 foreach ($RequiredRuntimeManifestImportContract in @(
     'avidscript.owner_get_handle.v1',
     'bSeenPackedOwner',
     'TryGetInt32Field(*ImportObject, TEXT("ordinal"), Ordinal)',
-    'DescriptorSchemaVersion != 6',
-    'DescriptorSchemaVersion != 7',
+	'DescriptorSchemaVersion < 6',
     'GetExpectedSelfClass() == nullptr',
     '!bBindingPackageHasPackedOwnerCapability',
     'manifest_wasm_import_mismatch',
@@ -983,7 +982,7 @@ foreach ($RequiredObjectFactoryModelContract in @(
     'ValidateAvidScriptBindingV7ObjectFactories',
     'bFactoryClassReference == bActorLifecycleReference',
     'class_references.capability',
-    'OutPackage.SchemaVersion != 7',
+    'OutPackage.SchemaVersion != 8',
     'Root->TryGetArrayField(TEXT("object_factories")')) {
     if (-not $BindingDescriptorHeader.Contains($RequiredObjectFactoryModelContract) -and
         -not $BindingDescriptorSource.Contains($RequiredObjectFactoryModelContract)) {
@@ -992,7 +991,8 @@ foreach ($RequiredObjectFactoryModelContract in @(
 }
 foreach ($RequiredObjectFactoryGeneratorContract in @(
     'GenerateWithObjectFactories',
-    'Package.SchemaVersion = ObjectFactories.IsEmpty() ? 6 : 7',
+    'Package.SchemaVersion = bHasWritableProperties',
+	'WritablePropertyGeneratorVersion',
     'FAvidScriptEditorObjectTypeGraph::Build(',
     'Package.ObjectFactories.Sort',
     'FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical')) {
@@ -1017,7 +1017,7 @@ foreach ($RequiredObjectFactoryPlanContract in @(
 foreach ($RequiredObjectFactoryProvenanceContract in @(
     'object_factory_count',
     "Properties['object_factories']",
-    'DescriptorSchemaVersion -eq 7')) {
+    'DescriptorSchemaVersion -ge 7')) {
     if (-not $CSharpBindingPackageSource.Contains($RequiredObjectFactoryProvenanceContract)) {
         Add-Violation "C# binding package resolver is missing descriptor v7 factory provenance $RequiredObjectFactoryProvenanceContract"
     }
@@ -1026,8 +1026,8 @@ if (-not $RuntimeReloadSource.Contains('GetObjectFactoryCount()') -or
     -not $RuntimeReloadSource.Contains('GetDescriptorSchemaVersion()') -or
     -not $RuntimeReloadSource.Contains('package.json descriptor_schema_version does not match the descriptor') -or
     -not $RuntimeReloadSource.Contains('TEXT("object_factory_count")') -or
-    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion == 7')) {
-    Add-Violation 'Runtime reload must validate descriptor schema and v7 factory provenance against the immutable package plan'
+    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion >= 7')) {
+    Add-Violation 'Runtime reload must validate descriptor schema and extensible factory provenance against the immutable package plan'
 }
 if (-not $CSharpBindingRendererSource.Contains(
         'FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(') -or
@@ -1905,8 +1905,7 @@ foreach ($RequiredPreparedOwnerContract in @(
     'avid_owner_get_handle',
     '$Signature -ceq "()I"',
     'Try-GetAvidScriptBindingJsonInt32',
-    '$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 6',
-    '$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 7',
+	'$ExpectedAuthorizationPackage.DescriptorSchemaVersion -ge 6',
     '$ExpectedAuthorizationPackage.SelfTypeId')) {
     if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedOwnerContract)) {
         Add-Violation "prepared semantic helper must validate packed owner provenance exactly: $RequiredPreparedOwnerContract"

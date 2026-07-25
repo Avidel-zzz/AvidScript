@@ -8,6 +8,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -126,14 +127,45 @@ bool FAvidScriptHostEffectTransactionRollbackTest::RunTest(const FString& Parame
 		false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+	FProperty* TimeDilationProperty = FindFProperty<FProperty>(
+		AActor::StaticClass(),
+		GET_MEMBER_NAME_CHECKED(AActor, CustomTimeDilation));
+	if (!TestNotNull(
+			TEXT("CustomTimeDilation reflection property resolves"),
+			TimeDilationProperty))
+	{
+		DestroyHostEffectWorld(World);
+		return true;
+	}
+	Actor->CustomTimeDilation = 1.25f;
+	TestTrue(
+		TEXT("Reflected property write captures an aligned snapshot"),
+		Transaction.PrepareReflectedProperty(
+			Registry,
+			ActorHandle,
+			*Actor,
+			*TimeDilationProperty,
+			PrepareResult));
+	TestTrue(
+		TEXT("Repeated property write reuses its snapshot"),
+		Transaction.PrepareReflectedProperty(
+			Registry,
+			ActorHandle,
+			*Actor,
+			*TimeDilationProperty,
+			PrepareResult));
+	Actor->CustomTimeDilation = 3.5f;
 
 	FAvidScriptHostEffectTransactionResult RollbackResult;
 	TestTrue(TEXT("Rollback restores all captured effects"), Transaction.Rollback(Registry, RollbackResult));
 	TestTrue(TEXT("Rollback reports success"), RollbackResult.bSucceeded);
-	TestEqual(TEXT("Rollback captured two domains"), RollbackResult.CapturedObjectCount, 2);
-	TestEqual(TEXT("Rollback restored two domains"), RollbackResult.RestoredObjectCount, 2);
+	TestEqual(TEXT("Rollback captured three domains"), RollbackResult.CapturedObjectCount, 3);
+	TestEqual(TEXT("Rollback restored three domains"), RollbackResult.RestoredObjectCount, 3);
 	TestEqual(TEXT("Rollback has no failures"), RollbackResult.FailedObjectCount, 0);
 	TestTrue(TEXT("Actor returns to pre-candidate transform"), Actor->GetActorTransform().Equals(InitialTransform, 0.01));
+	TestTrue(
+		TEXT("Actor property returns to its pre-candidate value"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.25f));
 	TestEqual(TEXT("Transaction is rolled back"), Transaction.GetState(), EAvidScriptHostEffectTransactionState::RolledBack);
 
 	FAvidScriptHostEffectTransactionResult RepeatedResult;

@@ -437,8 +437,111 @@ bool RenderMethod(
 	return true;
 }
 
+bool BuildPropertySetterInterop(
+	const FAvidScriptBindingFunctionModel& Setter,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	FString& OutPublicType,
+	TArray<FString>& OutNativeParameters,
+	TArray<FString>& OutNativeArguments,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	if (Setter.BindingKind != TEXT("property_set")
+		|| Setter.bStatic
+		|| Setter.bConst
+		|| Setter.ReturnValue.CanonicalType != TEXT("void")
+		|| Setter.Parameters.Num() != 1
+		|| Setter.Parameters[0].Direction != TEXT("value")
+		|| MakeExpectedAbiSignature(Setter) != Setter.HostImport.Signature)
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = Setter.CanonicalIdentity;
+		return false;
+	}
+	if (!ResolveCSharpType(
+			Setter.Parameters[0],
+			TypesByCanonical,
+			OutPublicType,
+			OutErrorSource))
+	{
+		OutErrorCategory = TEXT("unsupported_csharp_type");
+		return false;
+	}
+
+	const FAvidScriptBindingValueModel& Value = Setter.Parameters[0];
+	OutNativeParameters = { TEXT("int selfSlot"), TEXT("int selfGeneration") };
+	OutNativeArguments = { TEXT("this.Slot"), TEXT("this.Generation") };
+	if (Value.Kind == TEXT("object_handle"))
+	{
+		OutNativeParameters.Add(TEXT("int valueSlot"));
+		OutNativeParameters.Add(TEXT("int valueGeneration"));
+		OutNativeArguments.Add(TEXT("value.AvidScriptSlot"));
+		OutNativeArguments.Add(TEXT("value.AvidScriptGeneration"));
+	}
+	else if (Value.Kind == TEXT("struct"))
+	{
+		TArray<FCSharpComponent> Components;
+		if (!ResolveComponents(Value, Components, OutErrorSource)
+			|| Components.Num() != Value.AbiTypes.Num())
+		{
+			OutErrorCategory = TEXT("unsupported_csharp_type");
+			return false;
+		}
+		for (const FCSharpComponent& Component : Components)
+		{
+			OutNativeParameters.Add(
+				Component.CSharpType + TEXT(" value") + Component.Name);
+			OutNativeArguments.Add(TEXT("value") + Component.Access);
+		}
+	}
+	else
+	{
+		FString StorageType;
+		if (!ResolveStorageType(
+				Value,
+				TypesByCanonical,
+				StorageType,
+				OutErrorSource))
+		{
+			OutErrorCategory = TEXT("unsupported_csharp_type");
+			return false;
+		}
+		OutNativeParameters.Add(StorageType + TEXT(" value"));
+		OutNativeArguments.Add(ConvertToStorage(Value, TEXT("value")));
+	}
+	return true;
+}
+
+void AppendPropertySetterInterop(
+	const FAvidScriptBindingFunctionModel& Setter,
+	const TArray<FString>& NativeParameters,
+	const TArray<FString>& NativeArguments,
+	FCSharpRenderedMethod& OutMethod)
+{
+	OutMethod.MethodLines.Append({
+		TEXT("        set"),
+		TEXT("        {"),
+		FString::Printf(
+			TEXT("            _ = AvidScriptNative.%s(%s);"),
+			*MakeNativeMethodName(Setter.Ordinal),
+			*FString::Join(NativeArguments, TEXT(", "))),
+		TEXT("        }")
+	});
+	OutMethod.NativeLines.Append({
+		FString::Printf(
+			TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+			*EscapeCSharpString(Setter.HostImport.Module),
+			*EscapeCSharpString(Setter.HostImport.Name)),
+		FString::Printf(
+			TEXT("    internal static extern int %s(%s);"),
+			*MakeNativeMethodName(Setter.Ordinal),
+			*FString::Join(NativeParameters, TEXT(", ")))
+	});
+}
+
 bool RenderPropertyGetter(
 	const FAvidScriptBindingFunctionModel& Binding,
+	const FAvidScriptBindingFunctionModel* Setter,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
 	FCSharpRenderedMethod& OutMethod,
 	FString& OutErrorCategory,
@@ -473,8 +576,7 @@ bool RenderPropertyGetter(
 			TEXT("            _ = AvidScriptNative.%s(this.Slot, this.Generation, out __returnValue);"),
 			*MakeNativeMethodName(Binding.Ordinal)),
 		TEXT("            return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"),
-		TEXT("        }"),
-		TEXT("    }")
+		TEXT("        }")
 	});
 	OutMethod.NativeLines.Append({
 		FString::Printf(
@@ -486,6 +588,85 @@ bool RenderPropertyGetter(
 			*MakeNativeMethodName(Binding.Ordinal),
 			*StorageType)
 	});
+
+	if (Setter != nullptr)
+	{
+		if (Setter->OwnerClass != Binding.OwnerClass
+			|| Setter->UeMember != Binding.UeMember
+			|| Setter->ScriptName != Binding.ScriptName
+			|| Setter->Parameters.Num() != 1
+			|| Setter->Parameters[0].CanonicalType
+				!= Binding.ReturnValue.CanonicalType)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Setter->CanonicalIdentity;
+			return false;
+		}
+		FString SetterPublicType;
+		TArray<FString> NativeParameters;
+		TArray<FString> NativeArguments;
+		if (!BuildPropertySetterInterop(
+				*Setter,
+				TypesByCanonical,
+				SetterPublicType,
+				NativeParameters,
+				NativeArguments,
+				OutErrorCategory,
+				OutErrorSource))
+		{
+			return false;
+		}
+		if (SetterPublicType != PublicType)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Setter->CanonicalIdentity;
+			return false;
+		}
+		AppendPropertySetterInterop(
+			*Setter,
+			NativeParameters,
+			NativeArguments,
+			OutMethod);
+	}
+	OutMethod.MethodLines.Add(TEXT("    }"));
+	OutMethod.SignatureKey = PropertyName;
+	return true;
+}
+
+bool RenderPropertySetter(
+	const FAvidScriptBindingFunctionModel& Setter,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	FCSharpRenderedMethod& OutMethod,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	FString PublicType;
+	TArray<FString> NativeParameters;
+	TArray<FString> NativeArguments;
+	if (!BuildPropertySetterInterop(
+			Setter,
+			TypesByCanonical,
+			PublicType,
+			NativeParameters,
+			NativeArguments,
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
+	}
+
+	const FString PropertyName =
+		FAvidScriptEditorCSharpSyntax::MakeIdentifier(Setter.ScriptName);
+	OutMethod.MethodLines.Append({
+		FString::Printf(TEXT("    public %s %s"), *PublicType, *PropertyName),
+		TEXT("    {")
+	});
+	AppendPropertySetterInterop(
+		Setter,
+		NativeParameters,
+		NativeArguments,
+		OutMethod);
+	OutMethod.MethodLines.Add(TEXT("    }"));
 	OutMethod.SignatureKey = PropertyName;
 	return true;
 }
@@ -1016,6 +1197,8 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	}
 
 	TMap<FString, TArray<const FAvidScriptBindingFunctionModel*>> BindingsByOwner;
+	TMap<FString, const FAvidScriptBindingFunctionModel*> PropertyGetters;
+	TMap<FString, const FAvidScriptBindingFunctionModel*> PropertySetters;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		if (FindRenderedType(TypesByCanonical, TEXT("object:") + Binding.OwnerClass) == nullptr)
@@ -1025,6 +1208,23 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			return false;
 		}
 		BindingsByOwner.FindOrAdd(Binding.OwnerClass).Add(&Binding);
+		if (Binding.BindingKind == TEXT("property_get")
+			|| Binding.BindingKind == TEXT("property_set"))
+		{
+			const FString PropertyKey = Binding.OwnerClass
+				+ TEXT("\n") + Binding.UeMember;
+			TMap<FString, const FAvidScriptBindingFunctionModel*>& Accessors =
+				Binding.BindingKind == TEXT("property_get")
+					? PropertyGetters
+					: PropertySetters;
+			if (Accessors.Contains(PropertyKey))
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = PropertyKey;
+				return false;
+			}
+			Accessors.Add(PropertyKey, &Binding);
+		}
 	}
 
 	TSet<FString> ObjectTypesUsedAsValues;
@@ -1077,6 +1277,18 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	TSet<FString> MethodSignatures;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
+		if (Binding.BindingKind == TEXT("property_set"))
+		{
+			const FString PropertyKey = Binding.OwnerClass
+				+ TEXT("\n") + Binding.UeMember;
+			if (PropertyGetters.Contains(PropertyKey))
+			{
+				RenderedMethods.Add(
+					Binding.Ordinal,
+					FCSharpRenderedMethod());
+				continue;
+			}
+		}
 		const FAvidScriptBindingTypeModel* OwnerType = FindRenderedType(
 			TypesByCanonical,
 			TEXT("object:") + Binding.OwnerClass);
@@ -1092,9 +1304,29 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 
 		FCSharpRenderedMethod Rendered;
+		const FString PropertyKey = Binding.OwnerClass
+			+ TEXT("\n") + Binding.UeMember;
 		const bool bRendered = Binding.BindingKind == TEXT("property_get")
-			? RenderPropertyGetter(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource)
-			: RenderMethod(Binding, TypesByCanonical, Rendered, OutErrorCategory, OutErrorSource);
+			? RenderPropertyGetter(
+				Binding,
+				PropertySetters.FindRef(PropertyKey),
+				TypesByCanonical,
+				Rendered,
+				OutErrorCategory,
+				OutErrorSource)
+			: Binding.BindingKind == TEXT("property_set")
+				? RenderPropertySetter(
+					Binding,
+					TypesByCanonical,
+					Rendered,
+					OutErrorCategory,
+					OutErrorSource)
+				: RenderMethod(
+					Binding,
+					TypesByCanonical,
+					Rendered,
+					OutErrorCategory,
+					OutErrorSource);
 		if (!bRendered)
 		{
 			return false;
@@ -1337,6 +1569,13 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			});
 			for (const FAvidScriptBindingFunctionModel* Binding : SortedBindings)
 			{
+				const FString PropertyKey = Binding->OwnerClass
+					+ TEXT("\n") + Binding->UeMember;
+				if (Binding->BindingKind == TEXT("property_set")
+					&& PropertyGetters.Contains(PropertyKey))
+				{
+					continue;
+				}
 				Lines.Add(TEXT(""));
 				Lines.Append(RenderedMethods.FindChecked(Binding->Ordinal).MethodLines);
 			}

@@ -10,6 +10,8 @@ const TCHAR* LexToString(const EAvidScriptBindingReloadEffect Effect)
 		return TEXT("actor_transform");
 	case EAvidScriptBindingReloadEffect::SceneComponentTransform:
 		return TEXT("scene_component_transform");
+	case EAvidScriptBindingReloadEffect::ReflectedProperty:
+		return TEXT("reflected_property");
 	case EAvidScriptBindingReloadEffect::Unsupported:
 		return TEXT("unsupported");
 	default:
@@ -34,6 +36,11 @@ bool TryParseAvidScriptBindingReloadEffect(
 	if (Value == TEXT("scene_component_transform"))
 	{
 		OutEffect = EAvidScriptBindingReloadEffect::SceneComponentTransform;
+		return true;
+	}
+	if (Value == TEXT("reflected_property"))
+	{
+		OutEffect = EAvidScriptBindingReloadEffect::ReflectedProperty;
 		return true;
 	}
 	if (Value == TEXT("unsupported"))

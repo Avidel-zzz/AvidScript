@@ -2,6 +2,89 @@
 
 #include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
+#include "UObject/UnrealType.h"
+
+FAvidScriptHostEffectTransaction::FPropertySnapshot::~FPropertySnapshot()
+{
+	Reset();
+}
+
+FAvidScriptHostEffectTransaction::FPropertySnapshot::FPropertySnapshot(
+	FPropertySnapshot&& Other) noexcept
+	: Property(Other.Property)
+	, Data(Other.Data)
+{
+	Other.Property = nullptr;
+	Other.Data = nullptr;
+}
+
+FAvidScriptHostEffectTransaction::FPropertySnapshot&
+FAvidScriptHostEffectTransaction::FPropertySnapshot::operator=(
+	FPropertySnapshot&& Other) noexcept
+{
+	if (this != &Other)
+	{
+		Reset();
+		Property = Other.Property;
+		Data = Other.Data;
+		Other.Property = nullptr;
+		Other.Data = nullptr;
+	}
+	return *this;
+}
+
+bool FAvidScriptHostEffectTransaction::FPropertySnapshot::Capture(
+	FProperty& InProperty,
+	UObject& Source)
+{
+	Reset();
+	const int32 Size = InProperty.GetSize();
+	const uint32 Alignment = static_cast<uint32>(
+		FMath::Max(1, InProperty.GetMinAlignment()));
+	if (Size <= 0 || !FMath::IsPowerOfTwo(Alignment))
+	{
+		return false;
+	}
+
+	Data = FMemory::Malloc(Size, Alignment);
+	if (Data == nullptr)
+	{
+		return false;
+	}
+	Property = &InProperty;
+	Property->InitializeValue(Data);
+	Property->CopyCompleteValue(
+		Data,
+		Property->ContainerPtrToValuePtr<void>(&Source));
+	return true;
+}
+
+bool FAvidScriptHostEffectTransaction::FPropertySnapshot::Restore(
+	UObject& Target) const
+{
+	if (!IsValid())
+	{
+		return false;
+	}
+	Property->CopyCompleteValue(
+		Property->ContainerPtrToValuePtr<void>(&Target),
+		Data);
+	return true;
+}
+
+void FAvidScriptHostEffectTransaction::FPropertySnapshot::Reset()
+{
+	if (Property != nullptr && Data != nullptr)
+	{
+		Property->DestroyValue(Data);
+	}
+	if (Data != nullptr)
+	{
+		FMemory::Free(Data);
+	}
+	Property = nullptr;
+	Data = nullptr;
+}
 
 bool FAvidScriptHostEffectTransaction::PrepareEffect(
 	FAvidScriptObjectRegistry& Registry,
@@ -113,6 +196,89 @@ bool FAvidScriptHostEffectTransaction::PrepareEffect(
 	return true;
 }
 
+bool FAvidScriptHostEffectTransaction::PrepareReflectedProperty(
+	FAvidScriptObjectRegistry& Registry,
+	const FAvidScriptObjectHandle& Handle,
+	UObject& Target,
+	FProperty& Property,
+	FAvidScriptBindingHostEffectPrepareResult& OutResult)
+{
+	OutResult = FAvidScriptBindingHostEffectPrepareResult();
+	if (State != EAvidScriptHostEffectTransactionState::Open)
+	{
+		SetPrepareFailure(
+			OutResult,
+			TEXT("host_effect_transaction_closed"),
+			FormatHandle(Handle),
+			TEXT("The candidate host effect transaction has already completed."));
+		return false;
+	}
+
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* ResolvedObject = Registry.ResolveObject(Handle, ResolveResult);
+	if (ResolvedObject == nullptr)
+	{
+		SetPrepareFailure(
+			OutResult,
+			TEXT("host_effect_handle_invalid"),
+			FormatHandle(Handle),
+			ResolveResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("The candidate write handle is not live."))
+				: ResolveResult.ErrorCategory);
+		return false;
+	}
+	if (ResolvedObject != &Target)
+	{
+		SetPrepareFailure(
+			OutResult,
+			TEXT("host_effect_target_mismatch"),
+			FormatHandle(Handle),
+			TEXT("The invocation target does not match the registry object for this handle."));
+		return false;
+	}
+
+	const UClass* OwnerClass = Cast<UClass>(Property.GetOwnerStruct());
+	if (OwnerClass == nullptr || !Target.IsA(OwnerClass))
+	{
+		SetPrepareFailure(
+			OutResult,
+			TEXT("host_effect_target_type_mismatch"),
+			Property.GetPathName(),
+			TEXT("The reflected property does not belong to the invocation target."));
+		return false;
+	}
+
+	const FEntryKey Key{
+		Handle.ToUInt64(),
+		EAvidScriptBindingReloadEffect::ReflectedProperty,
+		&Property
+	};
+	if (CapturedKeys.Contains(Key))
+	{
+		OutResult.bSucceeded = true;
+		return true;
+	}
+
+	FEntry Entry;
+	Entry.Handle = Handle;
+	Entry.Object = &Target;
+	Entry.Effect = EAvidScriptBindingReloadEffect::ReflectedProperty;
+	if (!Entry.OriginalProperty.Capture(Property, Target))
+	{
+		SetPrepareFailure(
+			OutResult,
+			TEXT("host_effect_property_capture_failed"),
+			Property.GetPathName(),
+			TEXT("The reflected property snapshot could not satisfy its size and alignment contract."));
+		return false;
+	}
+
+	CapturedKeys.Add(Key);
+	Entries.Add(MoveTemp(Entry));
+	OutResult.bSucceeded = true;
+	return true;
+}
+
 bool FAvidScriptHostEffectTransaction::Commit(FAvidScriptHostEffectTransactionResult& OutResult)
 {
 	OutResult = FAvidScriptHostEffectTransactionResult();
@@ -185,6 +351,10 @@ bool FAvidScriptHostEffectTransaction::Rollback(
 				bRestored = Component->GetComponentTransform().Equals(Entry.OriginalTransform, 0.01);
 			}
 		}
+		else if (Entry.Effect == EAvidScriptBindingReloadEffect::ReflectedProperty)
+		{
+			bRestored = Entry.OriginalProperty.Restore(*CapturedObject);
+		}
 
 		if (bRestored)
 		{
@@ -195,7 +365,7 @@ bool FAvidScriptHostEffectTransaction::Rollback(
 			RecordRestoreFailure(
 				OutResult,
 				Entry,
-				TEXT("The host object did not accept its captured transform."));
+				TEXT("The host object did not accept its captured state."));
 		}
 	}
 

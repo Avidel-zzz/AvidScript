@@ -665,6 +665,16 @@ internal static class CSharpOperationLowerer
             }
         }
 
+        if (target.Kind == "property_reference")
+        {
+            return CSharpCallOperationLowerer.LowerPropertySetter(
+                context,
+                target,
+                value,
+                blockOrdinal,
+                instructions);
+        }
+
         context.Add("ASCG1004", $"Block {blockOrdinal} assignment target '{target.Kind}' is not writable.");
         return false;
     }

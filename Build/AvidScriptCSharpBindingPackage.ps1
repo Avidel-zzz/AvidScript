@@ -335,29 +335,30 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 4 -and
         $DescriptorSchemaVersion -ne 5 -and
         $DescriptorSchemaVersion -ne 6 -and
-        $DescriptorSchemaVersion -ne 7) -or
+        $DescriptorSchemaVersion -ne 7 -and
+        $DescriptorSchemaVersion -ne 8) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
         throw "Binding descriptor identity does not match package.json."
     }
-    if ($DescriptorSchemaVersion -eq 7) {
+    if ($DescriptorSchemaVersion -ge 7) {
         $ManifestObjectFactoryCount = 0
         $DescriptorObjectFactoryProperty =
             $Descriptor.PSObject.Properties['object_factories']
         if ($null -eq $DescriptorObjectFactoryProperty) {
-            throw "Binding descriptor v7 must publish object_factories."
+            throw "Binding descriptor schema v7 or newer must publish object_factories."
         }
         $DescriptorObjectFactories = @($DescriptorObjectFactoryProperty.Value)
         if (-not (Try-GetAvidScriptBindingJsonInt32 `
                 -Value $Manifest.object_factory_count `
                 -ParsedValue ([ref]$ManifestObjectFactoryCount)) -or
             $ManifestObjectFactoryCount -ne $DescriptorObjectFactories.Count) {
-            throw "Binding package object_factory_count does not match descriptor v7 object_factories."
+            throw "Binding package object_factory_count does not match descriptor object_factories."
         }
     }
     elseif ($null -ne $Manifest.PSObject.Properties['object_factory_count']) {
-        throw "Binding package object_factory_count is only valid for descriptor schema v7."
+        throw "Binding package object_factory_count requires descriptor schema v7 or newer."
     }
 
     $HasActiveObjectTypeOrdinals = $false
@@ -366,7 +367,7 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $Descriptor.PSObject.Properties['active_object_type_ordinals']
     if ($null -ne $ActiveObjectTypeProperty) {
         if ($DescriptorSchemaVersion -lt 6) {
-            throw "Binding descriptor active_object_type_ordinals requires schema v6 or v7."
+            throw "Binding descriptor active_object_type_ordinals requires schema v6 or newer."
         }
         if ($ActiveObjectTypeProperty.Value -isnot [System.Array]) {
             throw "Binding descriptor active_object_type_ordinals must be a JSON array."
@@ -402,8 +403,7 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $HasActiveObjectTypeOrdinals = $true
     }
     $SelfTypeId = ""
-    if ($DescriptorSchemaVersion -eq 6 -or
-        $DescriptorSchemaVersion -eq 7) {
+    if ($DescriptorSchemaVersion -ge 6) {
         if ($Descriptor.self_type_id -isnot [string]) {
             throw "Binding descriptor self_type_id must be a JSON string."
         }
@@ -459,11 +459,10 @@ function Resolve-AvidScriptCSharpBindingPackage {
             Signature = $Signature
         }
     }
-    if ($SeenPackedOwner -and
-        (($DescriptorSchemaVersion -ne 6 -and
-            $DescriptorSchemaVersion -ne 7) -or
-            [string]::IsNullOrWhiteSpace($SelfTypeId))) {
-        throw "Binding package packed owner capability requires descriptor schema v6 or v7 with a non-empty self_type_id."
+	if ($SeenPackedOwner -and
+		($DescriptorSchemaVersion -lt 6 -or
+			[string]::IsNullOrWhiteSpace($SelfTypeId))) {
+		throw "Binding package packed owner capability requires descriptor schema v6 or newer with a non-empty self_type_id."
     }
     if ($RequiredImports.Count -eq 0) {
         throw "Binding package required_imports must not be empty."

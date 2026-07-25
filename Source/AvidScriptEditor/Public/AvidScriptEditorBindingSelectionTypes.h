@@ -12,6 +12,7 @@ struct FAvidScriptReflectedPropertySelection
 {
 	FString OwnerClassPath;
 	FName PropertyName;
+	bool bWritable = false;
 };
 
 struct FAvidScriptReflectedClassSelection
@@ -21,6 +22,7 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> ExcludeFunctions;
 	TArray<FName> IncludeProperties;
 	TArray<FName> ExcludeProperties;
+	TArray<FName> WritableProperties;
 	bool bDiscoverReadableProperties = false;
 };
 
@@ -55,6 +57,9 @@ struct FAvidScriptBindingSelectionResolveResult
 	int32 CandidatePropertyCount = 0;
 	int32 AcceptedPropertyCount = 0;
 	int32 RejectedPropertyCount = 0;
+	int32 CandidateWritablePropertyCount = 0;
+	int32 AcceptedWritablePropertyCount = 0;
+	int32 RejectedWritablePropertyCount = 0;
 	TArray<FAvidScriptBindingSelectionIssue> Issues;
 	FString ErrorCategory;
 	FString ErrorSource;
