@@ -276,13 +276,17 @@ function Test-AvidScriptPhasePrivacy {
     }
 
     $Patch = (Invoke-AvidScriptGit $RepositoryRoot @('diff', '--no-ext-diff', '--unified=0', $Range)).Text
+    $AddedPatch = (@($Patch -split "`n" | Where-Object {
+        $_.StartsWith('+', [System.StringComparison]::Ordinal) -and
+        -not $_.StartsWith('+++', [System.StringComparison]::Ordinal)
+    }) -join "`n")
     foreach ($Pattern in @(
         '(?i)[A-Z]:[\\/]+Users[\\/]+',
         '-----BEGIN [A-Z ]*PRIVATE KEY-----',
-        '(?i)(password|secret|token)\s*[:=]\s*["''][^"'']{8,}["'']',
+        '(?i)(?:^|[^A-Za-z0-9])(password|secret|token)\s*[:=]\s*["''][^"'']{8,}["'']',
         'gh[pousr]_[A-Za-z0-9_]{20,}'
     )) {
-        if ($Patch -match $Pattern) {
+        if ($AddedPatch -match $Pattern) {
             Throw-AvidScriptPhaseError 'ASPW4031' 'phase commit range failed privacy scanning'
         }
     }

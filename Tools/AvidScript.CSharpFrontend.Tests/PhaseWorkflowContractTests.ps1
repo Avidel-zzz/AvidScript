@@ -558,6 +558,32 @@ Invoke-ContractCase 'Evidence.AttestationSourceChangeRejected' {
     Assert-Condition ($Close.Output.Contains('ASPW3032')) 'source attestation diagnostic differs'
 }
 
+Invoke-ContractCase 'Evidence.PrivacyDeletedAccountPathIgnored' {
+    $Root = New-FixtureRepository 'EvidencePrivacyDeletedPath'
+    Write-Utf8Text (Join-Path $Root 'Docs\Legacy.md') "legacy path C:\Users\Example\file`n"
+    Commit-Paths $Root @('Docs/Legacy.md') 'add legacy local path'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    Write-Utf8Text (Join-Path $Root 'Docs\Legacy.md') "legacy path removed`n"
+    Commit-Paths $Root @(
+        'Docs/Phase91/Phase91_State.json',
+        'Docs/Legacy.md') 'remove legacy local path'
+    $State = Read-AvidScriptPhaseState $Root 91
+    Assert-Condition (Test-AvidScriptPhasePrivacy $Root $State) 'privacy scan rejected a deleted account path'
+}
+
+Invoke-ContractCase 'Evidence.PrivacySchemaTokenIdentifierAllowed' {
+    $Root = New-FixtureRepository 'EvidencePrivacySchemaToken'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    Write-Utf8Text `
+        (Join-Path $Root 'Tools\SchemaCheck.ps1') `
+        ('$RequiredDescriptorSchemaToken = ''$DescriptorSchemaVersion -ne '' + $RequiredDescriptorSchemaVersion' + "`n")
+    Commit-Paths $Root @(
+        'Docs/Phase91/Phase91_State.json',
+        'Tools/SchemaCheck.ps1') 'add schema token identifier'
+    $State = Read-AvidScriptPhaseState $Root 91
+    Assert-Condition (Test-AvidScriptPhasePrivacy $Root $State) 'privacy scan rejected a non-secret token identifier'
+}
+
 Invoke-ContractCase 'Evidence.PrivacyChangeRejected' {
     $Fixture = Prepare-GateReadyFixture 'EvidencePrivacy'
     $Gate = New-ValidGateReport $Fixture 'EvidencePrivacy'

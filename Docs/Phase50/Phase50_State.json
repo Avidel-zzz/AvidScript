@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -44,15 +44,15 @@
     {
       "id": "P50.5",
       "status": "Completed",
-      "evidence": "最终完整 Automation 在 250 项中发现唯一 TypedOwnerValidation fixture 漂移：零 import WASM 错误声明 packed owner。已新增真实 avid_owner_get_handle import 模块并保持 manifest 精确一致，聚焦 TypedOwnerValidation 1/1 通过且稳定返回 binding_package_import_mismatch；同时记录该失误，产品安全顺序未放宽。",
-      "completed_at_utc": "2026-07-25T06:05:40.1550572+00:00"
+      "evidence": "修复 close 隐私扫描误报：仅检查新增 diff 行，并要求 secret/token/password 为独立标识符；新增删除旧账户路径与 SchemaToken 正例合同，连同真实私有路径负例及 PhaseWorkflow 全宿主 23/23 通过。失败 attestation 已用可追踪 revert 保留历史，未绕过 close。",
+      "completed_at_utc": "2026-07-25T06:34:41.2864775+00:00"
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "最终 Gate 唯一失败已确认是 TypedOwnerValidation 的 legacy fixture 与 actual import 合同漂移，不是产品回归；fixture 已改为真实导入 avid_owner_get_handle，Node 标准 WASM parser 与 UE 聚焦 Automation 均验证目标 module/name，稳定后置分类为 binding_package_import_mismatch。此前独立复审的重入 UAF 与 Import 合同修复继续保持通过，无未处理重要 debt。",
-    "completed_at_utc": "2026-07-25T06:06:35.2988962+00:00"
+    "completed": false,
+    "evidence": "reopened: close 隐私扫描错误检查完整 diff，导致已删除的本机路径与 SchemaToken 标识符误报；修复为仅检查新增内容并补充合同测试后重新冻结 Gate",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "8a2e2fc3288f71d1a5c5f64504adf756bacda725",
-    "source_tree": "86265e758a79233de9baecc998e3935604317351",
-    "state_sha256": "a1c6ba501f8c14e7d6c5067e38350699ecfde7107af218bb16578b202e7eae8f",
-    "review_evidence": "最终 Gate 唯一失败已确认是 TypedOwnerValidation 的 legacy fixture 与 actual import 合同漂移，不是产品回归；fixture 已改为真实导入 avid_owner_get_handle，Node 标准 WASM parser 与 UE 聚焦 Automation 均验证目标 module/name，稳定后置分类为 binding_package_import_mismatch。此前独立复审的重入 UAF 与 Import 合同修复继续保持通过，无未处理重要 debt。",
-    "at_utc": "2026-07-25T06:06:35.2988962+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "attest -Phase 50 -GateReportPath <path>",
-  "revision": 31,
-  "updated_at_utc": "2026-07-25T06:06:35.3043057+00:00"
+  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
+  "revision": 33,
+  "updated_at_utc": "2026-07-25T06:34:41.2887972+00:00"
 }
