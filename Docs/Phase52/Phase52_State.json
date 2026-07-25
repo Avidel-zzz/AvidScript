@@ -37,9 +37,9 @@
     },
     {
       "id": "P52.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "提交 32bcb21 与修复 5336366 完成中文版 BeginPlay/Tick C# 样例、真实 C# property assignment lowering、scalar/struct 路径、BlueprintSetter、candidate commit/trap rollback/旧 runtime 延续；Guest 62/62 与 focused UE Automation 5/5 通过；setter benchmark native P50/P95 0.000000196/0.000000393 ms，binding 0.000190041/0.000193359 ms，WAMR 0.000931446/0.000948632 ms，11776 次调用均为单 crossing，warm class/name lookup 与 snapshot capture 均为 0",
+      "completed_at_utc": "2026-07-25T18:21:40.1841387+00:00"
     },
     {
       "id": "P52.5",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 52 -BatchId P52.4 -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-07-25T17:56:24.0501838+00:00"
+  "next_action": "batch-complete -Phase 52 -BatchId P52.5 -Evidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-07-25T18:21:40.1867716+00:00"
 }
