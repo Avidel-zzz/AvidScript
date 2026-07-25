@@ -1760,10 +1760,16 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		{
 			RequireObjectType(OwnerType->StableId);
 		}
-		RequireObjectType(Binding.ReturnValue.TypeId);
+		if (Binding.ReturnValue.Kind == TEXT("object_handle"))
+		{
+			RequireObjectType(Binding.ReturnValue.TypeId);
+		}
 		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
 		{
-			RequireObjectType(Parameter.TypeId);
+			if (Parameter.Kind == TEXT("object_handle"))
+			{
+				RequireObjectType(Parameter.TypeId);
+			}
 		}
 	}
 	while (!PendingObjectTypeIds.IsEmpty())
