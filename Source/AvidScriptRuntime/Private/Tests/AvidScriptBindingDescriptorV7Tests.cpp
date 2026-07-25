@@ -465,6 +465,37 @@ bool FAvidScriptBindingDescriptorV7ObjectFactoriesTest::RunTest(
 				TEXT("object_factories"),
 				TArray<TSharedPtr<FJsonValue>>());
 		});
+	ParserRejectsMutation(
+		TEXT("Actor lifecycle and object factory capabilities cannot overlap"),
+		[](TSharedPtr<FJsonObject>& Root)
+		{
+			FString FactoryClassReferenceId;
+			for (const TSharedPtr<FJsonValue>& Value :
+				Root->GetArrayField(TEXT("object_factories")))
+			{
+				const TSharedPtr<FJsonObject> Factory = Value->AsObject();
+				if (Factory->GetStringField(TEXT("kind"))
+					== TEXT("new_object"))
+				{
+					FactoryClassReferenceId = Factory->GetStringField(
+						TEXT("class_reference_id"));
+					break;
+				}
+			}
+			for (const TSharedPtr<FJsonValue>& Value :
+				Root->GetArrayField(TEXT("class_references")))
+			{
+				const TSharedPtr<FJsonObject> Reference = Value->AsObject();
+				if (Reference->GetStringField(TEXT("stable_id"))
+					== FactoryClassReferenceId)
+				{
+					Reference->SetStringField(
+						TEXT("result_type_id"),
+						Root->GetStringField(TEXT("self_type_id")));
+					break;
+				}
+			}
+		});
 
 	FAvidScriptBindingPackageModel DifferentFactoryPackage = Package;
 	FAvidScriptBindingObjectFactoryModel* DifferentFactory =

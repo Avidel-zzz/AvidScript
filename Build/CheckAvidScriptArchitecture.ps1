@@ -968,6 +968,7 @@ foreach ($RequiredObjectFactoryModelContract in @(
     'IsDerivedFromClassPath',
     'MakeObjectFactoryStableId',
     'ValidateAvidScriptBindingV7ObjectFactories',
+    'bFactoryClassReference == bActorLifecycleReference',
     'class_references.capability',
     'OutPackage.SchemaVersion != 7',
     'Root->TryGetArrayField(TEXT("object_factories")')) {

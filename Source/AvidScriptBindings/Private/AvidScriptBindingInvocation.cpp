@@ -1501,13 +1501,13 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				Model,
 				Reference.ResultTypeId,
 				TEXT("/Script/Engine.Actor"));
-		if (!bFactoryClassReference && !bActorLifecycleReference)
+		if (bFactoryClassReference == bActorLifecycleReference)
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
 				TEXT("binding_class_capability_missing"),
 				Reference.StableId,
-				TEXT("A non-Actor class reference must be owned by an object factory."));
+				TEXT("Each class reference must expose exactly one of Actor lifecycle or object factory capability."));
 			return false;
 		}
 		if (bFactoryClassReference)

@@ -708,11 +708,14 @@ bool ValidateAvidScriptBindingV7ObjectFactories(
 		Package.ClassReferences)
 	{
 		ClassReferenceIds.Add(Reference.StableId);
-		if (!FactoryClassReferenceIds.Contains(Reference.StableId)
-			&& !FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+		const bool bFactoryClassReference =
+			FactoryClassReferenceIds.Contains(Reference.StableId);
+		const bool bActorLifecycleReference =
+			FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
 				Package,
 				Reference.ResultTypeId,
-				TEXT("/Script/Engine.Actor")))
+				TEXT("/Script/Engine.Actor"));
+		if (bFactoryClassReference == bActorLifecycleReference)
 		{
 			OutErrorSource = TEXT("class_references.capability");
 			return false;
