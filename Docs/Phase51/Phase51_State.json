@@ -37,9 +37,9 @@
     },
     {
       "id": "P51.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "a731f77: generic Attach/Detach bindings; 890745f: typed C# ComponentGameplay; 509017c/a5ce7ec: concrete scene factory classification and slice authorization; UE5.8 no-clean Bindings/Runtime/Editor builds succeeded; focused Automation 5/5 Success; real C# Roslyn/Guest IR/WASM BeginPlay-Tick-EndPlay loop verified with 10 crossings",
+      "completed_at_utc": "2026-07-25T12:00:32.9247868+00:00"
     },
     {
       "id": "P51.5",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 51 -BatchId P51.4 -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-07-25T11:26:44.2612803+00:00"
+  "next_action": "batch-complete -Phase 51 -BatchId P51.5 -Evidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-07-25T12:00:32.9272658+00:00"
 }
