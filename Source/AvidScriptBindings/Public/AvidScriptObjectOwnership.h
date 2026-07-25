@@ -21,9 +21,11 @@ public:
 		EAvidScriptObjectFactoryKind Kind,
 		FAvidScriptObjectHandleResult& OutResult) = 0;
 	virtual bool Release(
-		UObject& Object,
+		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectRegistry& Registry,
 		FAvidScriptObjectHandleResult& OutResult) = 0;
-	virtual bool Owns(const UObject& Object) const = 0;
+	virtual bool Owns(
+		const FAvidScriptObjectHandle& Handle,
+		const UObject* ExpectedObject = nullptr) const = 0;
 	virtual void Cleanup(FAvidScriptObjectRegistry& Registry) = 0;
 };

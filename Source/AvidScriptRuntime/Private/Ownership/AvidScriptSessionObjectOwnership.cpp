@@ -70,7 +70,8 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 	}
 
 	const TObjectKey<UObject> ObjectKey(&Object);
-	if (ObjectToOwnedIndex.Contains(ObjectKey))
+	if (ObjectToOwnedIndex.Contains(ObjectKey)
+		|| HandleToOwnedIndex.Contains(Handle.ToUInt64()))
 	{
 		SetFailure(
 			OutResult,
@@ -91,6 +92,7 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 	OwnedObject.Handle = Handle;
 	OwnedObject.Kind = Kind;
 	ObjectToOwnedIndex.Add(ObjectKey, OwnedObjects.Num() - 1);
+	HandleToOwnedIndex.Add(Handle.ToUInt64(), OwnedObjects.Num() - 1);
 	BoundRegistry = &Registry;
 
 	OutResult = FAvidScriptObjectHandleResult();
@@ -101,7 +103,7 @@ bool FAvidScriptSessionObjectOwnership::Adopt(
 }
 
 bool FAvidScriptSessionObjectOwnership::Release(
-	UObject& Object,
+	const FAvidScriptObjectHandle& Handle,
 	FAvidScriptObjectRegistry& Registry,
 	FAvidScriptObjectHandleResult& OutResult)
 {
@@ -109,23 +111,22 @@ bool FAvidScriptSessionObjectOwnership::Release(
 	{
 		SetFailure(
 			OutResult,
-			FAvidScriptObjectHandle(),
-			&Object,
+			Handle,
+			nullptr,
 			TEXT("ownership_registry_mismatch"),
 			TEXT("release through the object registry bound to the active session ownership domain"));
 		return false;
 	}
 
-	const TObjectKey<UObject> ObjectKey(&Object);
-	const int32* const OwnedObjectIndex = ObjectToOwnedIndex.Find(ObjectKey);
+	const int32* const OwnedObjectIndex = HandleToOwnedIndex.Find(Handle.ToUInt64());
 	if (OwnedObjectIndex == nullptr
 		|| !OwnedObjects.IsValidIndex(*OwnedObjectIndex)
-		|| OwnedObjects[*OwnedObjectIndex].Object.Get() != &Object)
+		|| OwnedObjects[*OwnedObjectIndex].Handle != Handle)
 	{
 		SetFailure(
 			OutResult,
-			FAvidScriptObjectHandle(),
-			&Object,
+			Handle,
+			nullptr,
 			TEXT("ownership_violation"),
 			TEXT("release only objects constructed and owned by the active session"));
 		return false;
@@ -146,12 +147,16 @@ bool FAvidScriptSessionObjectOwnership::Release(
 	return true;
 }
 
-bool FAvidScriptSessionObjectOwnership::Owns(const UObject& Object) const
+bool FAvidScriptSessionObjectOwnership::Owns(
+	const FAvidScriptObjectHandle& Handle,
+	const UObject* ExpectedObject) const
 {
-	const int32* const OwnedObjectIndex = ObjectToOwnedIndex.Find(TObjectKey<UObject>(&Object));
+	const int32* const OwnedObjectIndex = HandleToOwnedIndex.Find(Handle.ToUInt64());
 	return OwnedObjectIndex != nullptr
 		&& OwnedObjects.IsValidIndex(*OwnedObjectIndex)
-		&& OwnedObjects[*OwnedObjectIndex].Object.Get() == &Object;
+		&& OwnedObjects[*OwnedObjectIndex].Handle == Handle
+		&& (ExpectedObject == nullptr
+			|| OwnedObjects[*OwnedObjectIndex].ObjectKey == TObjectKey<UObject>(ExpectedObject));
 }
 
 void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Registry)
@@ -165,6 +170,7 @@ void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Regis
 	TArray<FOwnedObject> CleanupObjects = MoveTemp(OwnedObjects);
 	OwnedObjects.Reset();
 	ObjectToOwnedIndex.Reset();
+	HandleToOwnedIndex.Reset();
 	BoundRegistry = nullptr;
 
 	for (int32 OwnedObjectIndex = CleanupObjects.Num() - 1; OwnedObjectIndex >= 0; --OwnedObjectIndex)
@@ -235,9 +241,11 @@ void FAvidScriptSessionObjectOwnership::DestroyOwnedComponent(const FOwnedObject
 void FAvidScriptSessionObjectOwnership::RemoveAt(const int32 OwnedObjectIndex)
 {
 	ObjectToOwnedIndex.Remove(OwnedObjects[OwnedObjectIndex].ObjectKey);
+	HandleToOwnedIndex.Remove(OwnedObjects[OwnedObjectIndex].Handle.ToUInt64());
 	OwnedObjects.RemoveAt(OwnedObjectIndex, 1, EAllowShrinking::No);
 	for (int32 Index = OwnedObjectIndex; Index < OwnedObjects.Num(); ++Index)
 	{
 		ObjectToOwnedIndex.FindChecked(OwnedObjects[Index].ObjectKey) = Index;
+		HandleToOwnedIndex.FindChecked(OwnedObjects[Index].Handle.ToUInt64()) = Index;
 	}
 }

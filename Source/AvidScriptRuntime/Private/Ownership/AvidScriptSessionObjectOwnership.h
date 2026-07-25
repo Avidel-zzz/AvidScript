@@ -23,10 +23,12 @@ public:
 		EAvidScriptObjectFactoryKind Kind,
 		FAvidScriptObjectHandleResult& OutResult) override;
 	virtual bool Release(
-		UObject& Object,
+		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectRegistry& Registry,
 		FAvidScriptObjectHandleResult& OutResult) override;
-	virtual bool Owns(const UObject& Object) const override;
+	virtual bool Owns(
+		const FAvidScriptObjectHandle& Handle,
+		const UObject* ExpectedObject = nullptr) const override;
 	virtual void Cleanup(FAvidScriptObjectRegistry& Registry) override;
 
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
@@ -56,5 +58,6 @@ private:
 
 	TArray<FOwnedObject> OwnedObjects;
 	TMap<TObjectKey<UObject>, int32> ObjectToOwnedIndex;
+	TMap<uint64, int32> HandleToOwnedIndex;
 	FAvidScriptObjectRegistry* BoundRegistry = nullptr;
 };

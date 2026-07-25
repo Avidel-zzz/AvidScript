@@ -1015,23 +1015,23 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 		ObjectHandle,
 		EAvidScriptObjectFactoryKind::NewObject,
 		HandleResult));
-	TestTrue(TEXT("Ownership authority is observable"), Ownership->Owns(*Object));
+	TestTrue(TEXT("Ownership authority is observable"), Ownership->Owns(ObjectHandle, Object));
 	FAvidScriptObjectRegistry OtherRegistry;
 	TestFalse(TEXT("Ownership rejects release through another registry"), Ownership->Release(
-		*Object,
+		ObjectHandle,
 		OtherRegistry,
 		HandleResult));
 	TestEqual(TEXT("Registry mismatch category is stable"), HandleResult.ErrorCategory, FString(TEXT("ownership_registry_mismatch")));
-	TestTrue(TEXT("Registry mismatch preserves ownership"), Ownership->Owns(*Object));
+	TestTrue(TEXT("Registry mismatch preserves ownership"), Ownership->Owns(ObjectHandle, Object));
 
 	Object = nullptr;
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	TestTrue(TEXT("Ownership domain keeps ordinary object alive"), WeakObject.IsValid());
 	TestTrue(TEXT("Explicit release accepts owned object"), Ownership->Release(
-		*WeakObject.Get(),
+		ObjectHandle,
 		Registry,
 		HandleResult));
-	TestFalse(TEXT("Released object leaves ownership domain"), Ownership->Owns(*WeakObject.Get()));
+	TestFalse(TEXT("Released object leaves ownership domain"), Ownership->Owns(ObjectHandle, WeakObject.Get()));
 	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	TestFalse(TEXT("Released ordinary object is collectable"), WeakObject.IsValid());
 
@@ -1061,6 +1061,9 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 	ExternalComponent->RegisterComponent();
 	ExternalComponent->DestroyComponent();
 	TestTrue(TEXT("Externally destroyed component enters destruction"), ExternalComponent->IsBeingDestroyed());
+	TestTrue(TEXT("Externally destroyed component keeps handle authority until cleanup"), Ownership->Owns(
+		ExternalComponentHandle,
+		ExternalComponent));
 
 	UAvidScriptSessionOwnershipTestComponent::GetDestructionOrder().Reset();
 	UAvidScriptSessionOwnershipTestComponent* FirstComponent =
@@ -1098,7 +1101,7 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 	const FAvidScriptObjectHandle ForeignHandle = Registry.RegisterObject(ForeignObject, HandleResult, false);
 	TestTrue(TEXT("Foreign handle registers"), HandleResult.bSucceeded);
 	TestFalse(TEXT("Session rejects release without authority"), Ownership->Release(
-		*ForeignObject,
+		ForeignHandle,
 		Registry,
 		HandleResult));
 	TestEqual(TEXT("Authority failure category is stable"), HandleResult.ErrorCategory, FString(TEXT("ownership_violation")));
