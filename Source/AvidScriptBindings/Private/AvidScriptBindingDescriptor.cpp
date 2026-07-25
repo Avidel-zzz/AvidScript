@@ -1362,6 +1362,12 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			|| CanonicalTypes.Contains(Type.CanonicalType))
 		{
 			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			if (OutErrorSource.IsEmpty())
+			{
+				OutErrorSource = FString::Printf(
+					TEXT("types[%d]"),
+					OutPackage.Types.Num());
+			}
 			return false;
 		}
 		TypeIds.Add(Type.StableId);
@@ -1472,6 +1478,10 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			|| Imports.Contains(Binding.HostImport.Module + TEXT(".") + Binding.HostImport.Name))
 		{
 			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			if (OutErrorSource.IsEmpty())
+			{
+				OutErrorSource = FString::Printf(TEXT("bindings[%d]"), Index);
+			}
 			return false;
 		}
 		if (Binding.BindingKind == TEXT("property_set"))
