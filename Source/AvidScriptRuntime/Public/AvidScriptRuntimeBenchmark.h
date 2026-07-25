@@ -121,6 +121,46 @@ struct FAvidScriptObjectLifecycleBenchmarkResult
 	FAvidScriptBenchmarkStats RegistryResolveSpawnedActor;
 };
 
+struct FAvidScriptObjectFactoryBenchmarkOptions
+{
+	int32 WarmupCount = 3;
+	int32 SampleCount = 20;
+	int32 IterationsPerSample = 64;
+	int32 ComponentCount = 64;
+};
+
+struct FAvidScriptObjectFactoryBenchmarkResult
+{
+	bool bSucceeded = false;
+	int32 WarmupCount = 0;
+	int32 SampleCount = 0;
+	int32 IterationsPerSample = 0;
+	int32 ComponentCount = 0;
+	int32 BindingPackageClassLoadsDuringLoad = 0;
+	int32 BindingPackageReflectedNameLookupsDuringLoad = 0;
+	int32 BindingPackageClassLoadsDuringWarmLoop = 0;
+	int32 BindingPackageReflectedNameLookupsDuringWarmLoop = 0;
+	int32 ConstructImportsPerWasmIteration = 0;
+	int32 FindImportsPerWasmIteration = 0;
+	int32 AttachImportsPerWasmIteration = 0;
+	int32 ReleaseImportsPerWasmIteration = 0;
+	int32 WasmImportsObserved = 0;
+	FString ErrorCategory;
+	FString ErrorMessage;
+	FString Summary;
+	FAvidScriptBenchmarkStats NativeConstructComponent;
+	FAvidScriptBenchmarkStats BindingConstructComponent;
+	FAvidScriptBenchmarkStats NativeFindComponent;
+	FAvidScriptBenchmarkStats BindingFindComponent;
+	FAvidScriptBenchmarkStats NativeAttachComponent;
+	FAvidScriptBenchmarkStats BindingAttachComponent;
+	FAvidScriptBenchmarkStats NativeReleaseComponent;
+	FAvidScriptBenchmarkStats BindingReleaseComponent;
+	FAvidScriptBenchmarkStats WasmComponentCycle;
+	FAvidScriptBenchmarkStats FactoryOrdinalResolve;
+	FAvidScriptBenchmarkStats RegistryResolveComponent;
+};
+
 struct FAvidScriptTypedObjectBenchmarkOptions
 {
 	int32 WarmupCount = 3;
@@ -184,6 +224,10 @@ public:
 	static bool RunObjectLifecycleBenchmark(
 		const FAvidScriptObjectLifecycleBenchmarkOptions& Options,
 		FAvidScriptObjectLifecycleBenchmarkResult& OutResult);
+
+	static bool RunObjectFactoryBenchmark(
+		const FAvidScriptObjectFactoryBenchmarkOptions& Options,
+		FAvidScriptObjectFactoryBenchmarkResult& OutResult);
 
 	static bool RunTypedObjectBenchmark(
 		const FAvidScriptTypedObjectBenchmarkOptions& Options,
