@@ -43,9 +43,9 @@
     },
     {
       "id": "P52.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审六项历史问题及两项补充 Minor 全部关闭，终轮 Critical 0、Important 0、Minor 0；production profile C# 到 WASM、runtime slice、UE BeginPlay/Tick/EndPlay focused 闭环通过，anti-fold benchmark 与诊断 provenance 已冻结。",
+      "completed_at_utc": "2026-07-25T20:23:38.9134525+00:00"
     }
   ],
   "debt": [
@@ -57,8 +57,8 @@
       "evidence": "独立只读审查快照 6a9c905：1 High、5 Medium，并确认 BidirectionalProperties 样例尚未进入同一 profile build/WASM/UE 证据链",
       "deferral_reason": "在 P52.5 集中修复批次统一处理，避免每个审查项各自触发 UBT 与 Automation",
       "remediation": "修复六项生产合同；增加 legacy identity、求值顺序、精确 accessor、GC rollback、anti-fold benchmark 与真实样例 profile gameplay 回归；受影响 focused 通过后只执行一次最终全量 Gate",
-      "status": "Open",
-      "resolution_evidence": "",
+      "status": "Verified",
+      "resolution_evidence": "提交 b89459b、330e8c2、ff5a8ac、00fd474、34fc408、aca0673、bc550cd、623b959、354aecf 与 adefa0a 关闭求值顺序、legacy identity、BlueprintSetter identity、GC root、accessor provenance、benchmark 防优化及真实样例/诊断缺口；Docs/Phase52/P52.5_Independent_Review.md 终轮复核为 0/0/0。",
       "target_phase": null,
       "transfer_reason": ""
     }
@@ -114,7 +114,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 52 -BatchId P52.5 -Evidence <text>",
-  "revision": 6,
-  "updated_at_utc": "2026-07-25T18:55:39.2959788+00:00"
+  "next_action": "freeze -Phase 52 -ReviewEvidence <text>",
+  "revision": 8,
+  "updated_at_utc": "2026-07-25T20:23:51.2431417+00:00"
 }
