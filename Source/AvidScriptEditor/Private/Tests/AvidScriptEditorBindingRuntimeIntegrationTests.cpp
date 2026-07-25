@@ -187,13 +187,17 @@ TArray<uint8> BuildAvidScriptPropertyBenchmarkModule(
 
 FAvidScriptWasmReloadManifest MakeAvidScriptPropertySessionManifest(
 	const FString& ModuleId,
-	const TSharedPtr<const FAvidScriptBindingPackage>& Package)
+	const TSharedPtr<const FAvidScriptBindingPackage>& Package,
+	const FAvidScriptBindingHostImportModel& HostImport)
 {
 	FAvidScriptWasmReloadManifest Manifest =
 		FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
 	Manifest.Language = TEXT("CSharp");
 	Manifest.WasmFile = TEXT("Saved/AvidScript/") + ModuleId + TEXT(".wasm");
 	Manifest.WasmSha256 = FString::ChrN(64, TEXT('a'));
+	Manifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ HostImport.Module, HostImport.Name }
+	};
 	Manifest.BindingPackageName = Package->GetPackageName();
 	Manifest.BindingPackageHash = Package->GetPackageHash();
 	Manifest.BindingPackageManifestFile =
@@ -1957,6 +1961,8 @@ bool FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest::RunTest(const F
 	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
 	FAvidScriptDynamicHostCallResult DispatchResult;
 
+	Actor->ProcessEventCallCount = 0;
+	Actor->BlueprintSetterCallCount = 0;
 	TestFalse(
 		TEXT("Read-only context rejects BlueprintSetter dispatch"),
 		Package->Dispatch(Call, Context, Scratch, DispatchResult));
@@ -2087,7 +2093,10 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest::RunTest(const F
 		Session.LoadInitialModule(
 			InitialModule.GetData(),
 			InitialModule.Num(),
-			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_live"), Package),
+			MakeAvidScriptPropertySessionManifest(
+				TEXT("property_reload_live"),
+				Package,
+				Setter->HostImport),
 			ReloadResult));
 	TestTrue(
 		TEXT("Initial runtime leaves the property unchanged"),
@@ -2098,7 +2107,10 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest::RunTest(const F
 		Session.ReloadModule(
 			SuccessfulCandidate.GetData(),
 			SuccessfulCandidate.Num(),
-			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_committed"), Package),
+			MakeAvidScriptPropertySessionManifest(
+				TEXT("property_reload_committed"),
+				Package,
+				Setter->HostImport),
 			ReloadResult));
 	TestTrue(TEXT("Successful candidate opens a host-effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
 	TestTrue(TEXT("Successful candidate commits the property transaction"), ReloadResult.bHostEffectTransactionCommitted);
@@ -2113,7 +2125,10 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest::RunTest(const F
 		Session.ReloadModule(
 			TrappingCandidate.GetData(),
 			TrappingCandidate.Num(),
-			MakeAvidScriptPropertySessionManifest(TEXT("property_reload_trap"), Package),
+			MakeAvidScriptPropertySessionManifest(
+				TEXT("property_reload_trap"),
+				Package,
+				Setter->HostImport),
 			ReloadResult));
 	TestTrue(TEXT("Rejected candidate preserves the previous runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
 	TestFalse(TEXT("Rejected candidate does not commit"), ReloadResult.bHostEffectTransactionCommitted);

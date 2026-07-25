@@ -742,7 +742,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	TestEqual(
 		TEXT("Forged setter rejection has a stable category"),
 		ForgedSetterSliceResult.ErrorCategory,
-		FString(TEXT("slice_binding_missing")));
+		FString(TEXT("slice_import_identity_mismatch")));
 
 	const FAvidScriptFrontendBindingPackage UnauthorizedLifecycleProvenance =
 		MakeAvidScriptBindingSliceTestProvenance(

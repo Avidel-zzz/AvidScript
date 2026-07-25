@@ -1179,3 +1179,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-26 P52.4 Git 写操作再次用分号连接：记录实现批次时把精确 `git add` 与 `git commit` 放在同一 shell 字符串，虽然只暂存了 Phase 状态文件，但破坏了一调用一逻辑命令的审计边界。Prevention：暂存、提交、身份读取各自使用独立工具调用；执行 shell 前机械扫描 `;`、`&&`、`||`，Git 工作流命令不得包含这些分隔符。
 - 2026-07-26 P52.4 .NET SDK 启动器选择错误：首次使用系统 `dotnet`，而仓库 `global.json` 固定 8.0.416，系统安装仅有 9.0.306，测试在编译前失败。Prevention：AvidScript 的 .NET 构建与测试固定使用 `C:\Users\12159\.dotnet\dotnet.exe`；仅在显式验证 SDK 探测失败行为时使用 PATH 中的 `dotnet`。
 - 2026-07-26 P52.4 `rg` 单行正则误含 `\n`：检索 C# 属性语法时在默认单行模式的 pattern 中放入换行转义，`rg` 在读取文件前拒绝。Prevention：源码结构检索拆成多个单行 token；确需跨行时显式使用 `-U` 并先验证正则，否则不在 pattern 中写 `\n`。
+- 2026-07-26 P52.4 Automation 启动器超时过短：首次聚焦 UE Automation 把外层工具超时设为 1 秒，工具在 5 秒最小窗口终止等待，但 `UnrealEditor-Cmd` 子进程继续运行。随后先按精确项目命令行确认唯一子进程并等待结束，没有并发启动第二份。Prevention：UE Automation 首次调用固定使用至少 10 分钟工具超时；若外层意外退出，先枚举精确 `UnrealEditor-Cmd` 命令行并等待或读取现有日志，禁止直接重启。
