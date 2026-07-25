@@ -1308,7 +1308,32 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		if (OutErrorSource.IsEmpty())
 		{
-			OutErrorSource = TEXT("root");
+			if (OutPackage.SchemaVersion != 2
+				&& OutPackage.SchemaVersion != 3
+				&& OutPackage.SchemaVersion != 4
+				&& OutPackage.SchemaVersion != 5
+				&& OutPackage.SchemaVersion != 6
+				&& OutPackage.SchemaVersion != 7
+				&& OutPackage.SchemaVersion != 8)
+			{
+				OutErrorSource = TEXT("schema_version");
+			}
+			else if (OutPackage.Source != TEXT("ue_reflection"))
+			{
+				OutErrorSource = TEXT("source");
+			}
+			else if (!IsAvidScriptBindingLowerSha256(OutPackage.PackageHash))
+			{
+				OutErrorSource = TEXT("package_hash");
+			}
+			else if (!IsAvidScriptBindingLowerSha256(OutPackage.SelectionHash))
+			{
+				OutErrorSource = TEXT("selection_hash");
+			}
+			else
+			{
+				OutErrorSource = TEXT("root");
+			}
 		}
 		return false;
 	}
