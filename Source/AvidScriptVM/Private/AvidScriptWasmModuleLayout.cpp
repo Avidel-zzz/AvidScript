@@ -202,7 +202,8 @@ bool SkipWasmImportDescriptor(FAvidScriptWasmLayoutReader& Reader, uint8 Kind)
 
 bool ParseWasmImportSection(
 	FAvidScriptWasmLayoutReader& Reader,
-	uint32& OutImportedFunctionCount)
+	uint32& OutImportedFunctionCount,
+	TArray<FAvidScriptWasmFunctionImport>& OutFunctionImports)
 {
 	uint32 ImportCount = 0;
 	if (!Reader.ReadU32Leb(ImportCount) || ImportCount > MaxWasmLayoutItems)
@@ -228,6 +229,10 @@ bool ParseWasmImportSection(
 			{
 				return false;
 			}
+			FAvidScriptWasmFunctionImport& FunctionImport =
+				OutFunctionImports.AddDefaulted_GetRef();
+			FunctionImport.ModuleName = MoveTemp(ModuleName);
+			FunctionImport.ImportName = MoveTemp(ImportName);
 			++OutImportedFunctionCount;
 		}
 	}
@@ -347,7 +352,10 @@ bool InspectAvidScriptWasmModuleLayout(
 				return false;
 			}
 			bHasImportSection = true;
-			bParsed = ParseWasmImportSection(SectionReader, OutLayout.ImportedFunctionCount);
+			bParsed = ParseWasmImportSection(
+				SectionReader,
+				OutLayout.ImportedFunctionCount,
+				OutLayout.FunctionImports);
 			break;
 		case 3:
 			if (bHasFunctionSection)
@@ -380,6 +388,12 @@ bool InspectAvidScriptWasmModuleLayout(
 	if (!bHasImportSection)
 	{
 		OutLayout.ImportedFunctionCount = 0;
+		OutLayout.FunctionImports.Reset();
+	}
+	if (OutLayout.ImportedFunctionCount != static_cast<uint32>(OutLayout.FunctionImports.Num()))
+	{
+		OutError = TEXT("WASM function import identity count is inconsistent");
+		return false;
 	}
 	if (!bHasFunctionSection)
 	{

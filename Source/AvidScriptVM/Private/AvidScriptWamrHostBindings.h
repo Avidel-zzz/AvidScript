@@ -17,6 +17,5 @@ public:
 	virtual void RecordHostImportFailure(const char* ImportName, const FString& Details) = 0;
 };
 
-bool IsAvidScriptWamrStaticHostImport(const FString& ModuleName, const FString& ImportName);
 bool RegisterAvidScriptWamrHostBindings();
 void UnregisterAvidScriptWamrHostBindings();

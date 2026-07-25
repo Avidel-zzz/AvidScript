@@ -956,8 +956,9 @@ $DirectAbiExports = @(
     "avid_on_timer",
     "avid_on_event",
     "avid_on_gameplay_event")
-$MissingDeclaredExports = @($DirectAbiExports | Where-Object { $RequiredExports -notcontains $_ })
-$MissingObservedExports = @($DirectAbiExports | Where-Object { $ObservedExports -notcontains $_ })
+$UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
+$MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
+$UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
 $GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
     [string]$GuestIrModel.ir_version -eq "1.0" -and
     [bool]$GuestIrModel.succeeded -and
@@ -1134,14 +1135,22 @@ if ($StateSchemaContractValid) {
 $WasmInspectionValid = [int]$WasmInspectionModel.schema_version -eq 1 -and
     [string]$WasmInspectionModel.sha256 -eq $WasmSha256
 if (-not $GuestContractValid -or -not $DebugMapContractValid -or -not $StateSchemaContractValid -or -not $WasmInspectionValid -or
-    $MissingDeclaredExports.Count -gt 0 -or $MissingObservedExports.Count -gt 0) {
+    $RequiredExports.Count -eq 0 -or $UnexpectedDeclaredExports.Count -gt 0 -or
+    $MissingObservedExports.Count -gt 0 -or
+    $UnexpectedObservedExports.Count -gt 0) {
     Remove-LoadableArtifacts
     $Diagnostics += [ordered]@{
         code = "direct_abi_contract_invalid"
         severity = "error"
         message = "Guest IR, C# debug map, state migration, or final WASM direct ABI contract is invalid."
-        missing_declared_exports = @($MissingDeclaredExports)
+        guest_contract_valid = $GuestContractValid
+        debug_map_contract_valid = $DebugMapContractValid
+        state_schema_contract_valid = $StateSchemaContractValid
+        wasm_inspection_valid = $WasmInspectionValid
+        required_export_count = $RequiredExports.Count
+        unexpected_declared_exports = @($UnexpectedDeclaredExports)
         missing_observed_exports = @($MissingObservedExports)
+        unexpected_observed_exports = @($UnexpectedObservedExports)
     }
     Write-BuildReport -Result "direct_abi_unsupported" -DirectAbiSupported $false -ReportDiagnostics $Diagnostics
     Write-Output "[AvidScript][CSharp][Build] result=direct_abi_unsupported report=$ReportPath"

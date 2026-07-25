@@ -280,6 +280,55 @@ Assert-PreparedSemanticFailure `
     -FrontendDestinationPath (Join-Path $RunRoot "AuthorizationMismatch\prepared_semantic_contract.csharp.frontend.json") `
     -SemanticDestinationPath (Join-Path $RunRoot "AuthorizationMismatch\prepared_semantic_contract.csharp.semantic.json")
 
+$PackedOwnerUsedImport = [pscustomobject]@{
+    stable_id = "avidscript.owner_get_handle.v1"
+    ordinal = -1
+    module = "avidscript"
+    name = "avid_owner_get_handle"
+    signature = "()I"
+}
+$SelflessAuthorization = [pscustomobject]@{
+    DescriptorSchemaVersion = 5
+    SelfTypeId = ""
+    RequiredImports = @([pscustomobject]@{
+        StableId = $PackedOwnerUsedImport.stable_id
+        Ordinal = $PackedOwnerUsedImport.ordinal
+        Module = $PackedOwnerUsedImport.module
+        Name = $PackedOwnerUsedImport.name
+        Signature = $PackedOwnerUsedImport.signature
+    })
+}
+$SelflessPackedOwnerRejected = $false
+try {
+    Assert-AvidScriptPreparedSemanticUsedImports `
+        -AuthorizationModel ([pscustomobject]@{
+            used_import_count = 1
+            used_imports = @($PackedOwnerUsedImport)
+        }) `
+        -ExpectedAuthorizationPackage $SelflessAuthorization
+}
+catch {
+    $SelflessPackedOwnerRejected =
+        [string]$_.Exception.Data["AvidScriptCode"] -ceq "ASBI4402"
+}
+Assert-Condition $SelflessPackedOwnerRejected `
+    "prepared semantic accepted packed owner capability without schema v6 self_type_id"
+
+$StringOrdinalReportPath = New-MutatedReportPath `
+    -Directory (Join-Path $RunRoot "StringOrdinal") `
+    -FileName "prepared_semantic_contract.csharp.report.json" `
+    -Mutation {
+        param($Report)
+        $Report.binding_authorization.used_imports[0].ordinal = "0"
+    }
+Assert-PreparedSemanticFailure `
+    -PreparedReportPath $StringOrdinalReportPath `
+    -ExpectedSourcePath $SourcePath `
+    -ExpectedAuthorizationPackage $AuthorizationPackage `
+    -ExpectedCode "ASBI4402" `
+    -FrontendDestinationPath (Join-Path $RunRoot "StringOrdinal\prepared_semantic_contract.csharp.frontend.json") `
+    -SemanticDestinationPath (Join-Path $RunRoot "StringOrdinal\prepared_semantic_contract.csharp.semantic.json")
+
 $ArtifactMismatchReportPath = New-MutatedReportPath `
     -Directory (Join-Path $RunRoot "ArtifactMismatch") `
     -FileName "prepared_semantic_contract.csharp.report.json" `
@@ -583,5 +632,5 @@ foreach ($CleanupArtifact in $CleanupArtifacts) {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $CleanupArtifact.FullName -Force
 }
 
-Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 11/11 passed"
+Write-Output "AvidScript.CSharpFrontend.PreparedSemanticContracts: 13/13 passed"
 exit 0

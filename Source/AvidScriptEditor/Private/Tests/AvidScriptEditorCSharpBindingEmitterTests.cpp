@@ -4,8 +4,10 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectLifecycleBinding.h"
+#include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
+#include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
 
@@ -63,57 +65,6 @@ FString ExtractTypedProjectFacadeSurface(const FString& Source)
 	return StartIndex == INDEX_NONE ? FString() : Source.Mid(StartIndex);
 }
 
-bool UpgradeTypedProjectFacadeGolden(FString& InOutSource)
-{
-	const int32 SlotCount = InOutSource.ReplaceInline(
-		TEXT("    private readonly int Slot;"),
-		TEXT("    internal readonly int Slot;"),
-		ESearchCase::CaseSensitive);
-	const int32 GenerationCount = InOutSource.ReplaceInline(
-		TEXT("    private readonly int Generation;"),
-		TEXT("    internal readonly int Generation;"),
-		ESearchCase::CaseSensitive);
-	const int32 ActorCastCount = InOutSource.ReplaceInline(
-		TEXT("    public UObject TryCast()\n"
-			"    {\n"
-			"        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 0) != 0)\n"
-			"        {\n"
-			"            return new(Slot, Generation);\n"
-			"        }\n"
-			"        return default;\n"
-			"    }"),
-		TEXT("    public static AActor TryCast(UObject value)\n"
-			"    {\n"
-			"        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)\n"
-			"        {\n"
-			"            return new(value.Slot, value.Generation);\n"
-			"        }\n"
-			"        return default;\n"
-			"    }"),
-		ESearchCase::CaseSensitive);
-	const int32 StaticMeshActorCastCount = InOutSource.ReplaceInline(
-		TEXT("    public AActor TryCast()\n"
-			"    {\n"
-			"        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 1) != 0)\n"
-			"        {\n"
-			"            return new(Slot, Generation);\n"
-			"        }\n"
-			"        return default;\n"
-			"    }"),
-		TEXT("    public static AStaticMeshActor TryCast(AActor value)\n"
-			"    {\n"
-			"        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0)\n"
-			"        {\n"
-			"            return new(value.Slot, value.Generation);\n"
-			"        }\n"
-			"        return default;\n"
-			"    }"),
-		ESearchCase::CaseSensitive);
-	return SlotCount == 3
-		&& GenerationCount == 3
-		&& ActorCastCount == 1
-		&& StaticMeshActorCastCount == 1;
-}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -284,6 +235,60 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 		&& Source.Contains(TEXT("actorClass.AvidScriptOrdinal")));
 	TestFalse(TEXT("Lifecycle facade exposes no unsafe pointer conversion"), Source.Contains(TEXT("IntPtr")));
 
+	FAvidScriptBindingPackageModel LegacyClassReferencePackage;
+	FString LegacyClassReferenceParseCategory;
+	FString LegacyClassReferenceParseSource;
+	if (TestTrue(
+		TEXT("Class reference descriptor parses before schema v5 projection"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			LegacyClassReferencePackage,
+			LegacyClassReferenceParseCategory,
+			LegacyClassReferenceParseSource)))
+	{
+		LegacyClassReferencePackage.SchemaVersion = 5;
+		LegacyClassReferencePackage.SelfTypeId.Empty();
+		for (FAvidScriptBindingTypeModel& Type : LegacyClassReferencePackage.Types)
+		{
+			Type.ObjectTypeOrdinal = INDEX_NONE;
+			Type.ClassPath.Empty();
+			Type.BaseTypeId.Empty();
+		}
+		for (FAvidScriptBindingClassReferenceModel& Reference : LegacyClassReferencePackage.ClassReferences)
+		{
+			Reference.ResultTypeId.Empty();
+		}
+		LegacyClassReferencePackage.SelectionHash =
+			FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(LegacyClassReferencePackage);
+		LegacyClassReferencePackage.PackageHash =
+			FAvidScriptBindingDescriptorIdentity::MakePackageHash(LegacyClassReferencePackage);
+
+		FString LegacyClassReferenceDescriptor;
+		TestTrue(
+			TEXT("Schema v5 class reference descriptor serializes canonically"),
+			FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+				LegacyClassReferencePackage,
+				LegacyClassReferenceDescriptor));
+		FString LegacyClassReferenceSource;
+		FString LegacyClassReferenceManifest;
+		FAvidScriptCSharpBindingEmitResult LegacyClassReferenceEmitResult;
+		TestTrue(
+			TEXT("Schema v5 class reference descriptor regenerates a legacy facade"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				LegacyClassReferenceDescriptor,
+				LegacyClassReferenceSource,
+				LegacyClassReferenceManifest,
+				LegacyClassReferenceEmitResult));
+		TestTrue(
+			TEXT("Schema v5 class reference uses base_class_path for its nominal wrapper"),
+			LegacyClassReferenceSource.Contains(
+				TEXT("public static TSubclassOfAActor ProjectileClass => new(0);")));
+		TestTrue(
+			TEXT("Schema v5 class reference keeps the Actor lifecycle facade"),
+			LegacyClassReferenceSource.Contains(
+				TEXT("public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)")));
+	}
+
 	const auto& LifecycleSpecs = FAvidScriptObjectLifecycleBindings::GetSpecs();
 	for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
 	{
@@ -338,9 +343,9 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 		TestEqual(TEXT("Manifest identifies descriptor schema v6"), Manifest->GetIntegerField(TEXT("descriptor_schema_version")), 6);
 		const TArray<TSharedPtr<FJsonValue>>& RequiredImports = Manifest->GetArrayField(TEXT("required_imports"));
 		TestEqual(
-			TEXT("Manifest appends shared lifecycle imports after reflected imports"),
+			TEXT("Manifest appends lifecycle, object-type, and owner capabilities after reflected imports"),
 			RequiredImports.Num(),
-			DescriptorResult.BindingCount + LifecycleSpecs.Num() + 1);
+			DescriptorResult.BindingCount + LifecycleSpecs.Num() + 2);
 		TestTrue(
 			TEXT("Manifest includes the packed owner import"),
 			RequiredImports.ContainsByPredicate([](const TSharedPtr<FJsonValue>& Value)
@@ -368,6 +373,23 @@ bool FAvidScriptEditorCSharpBindingEmitterClassReferenceTest::RunTest(const FStr
 			TestEqual(TEXT("Lifecycle manifest preserves shared module"), Import->GetStringField(TEXT("module")), Spec.ModuleName);
 			TestEqual(TEXT("Lifecycle manifest preserves shared import name"), Import->GetStringField(TEXT("name")), Spec.ImportName);
 			TestEqual(TEXT("Lifecycle manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), Spec.Signature);
+		}
+		const TConstArrayView<FAvidScriptObjectTypeBindingSpec> ObjectTypeSpecs =
+			FAvidScriptObjectTypeBindings::GetSpecs();
+		if (TestEqual(TEXT("Object-type capability has one shared specification"), ObjectTypeSpecs.Num(), 1))
+		{
+			const int32 ObjectTypeImportOrdinal =
+				DescriptorResult.BindingCount + LifecycleSpecs.Num();
+			const TSharedPtr<FJsonObject> Import =
+				RequiredImports[ObjectTypeImportOrdinal]->AsObject();
+			TestTrue(TEXT("Object-type manifest import remains an object"), Import.IsValid());
+			if (Import.IsValid())
+			{
+				TestEqual(TEXT("Object-type manifest preserves shared stable id"), Import->GetStringField(TEXT("stable_id")), ObjectTypeSpecs[0].StableId);
+				TestEqual(TEXT("Object-type manifest appends a stable ordinal"), Import->GetIntegerField(TEXT("ordinal")), ObjectTypeImportOrdinal);
+				TestEqual(TEXT("Object-type manifest preserves shared import name"), Import->GetStringField(TEXT("name")), ObjectTypeSpecs[0].ImportName);
+				TestEqual(TEXT("Object-type manifest preserves shared ABI signature"), Import->GetStringField(TEXT("signature")), ObjectTypeSpecs[0].Signature);
+			}
 		}
 	}
 	return true;
@@ -442,6 +464,9 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 		&& Source.Contains(TEXT("public static TSubclassOfAStaticMeshActor ProjectileClass => new(0);"))
 		&& Source.Contains(TEXT("public static AStaticMeshActor SpawnActor(TSubclassOfAStaticMeshActor actorClass, FTransform transform)"))
 		&& Source.Contains(TEXT("public static AActor SpawnActor(TSubclassOfAActor actorClass, FTransform transform)")));
+	TestTrue(TEXT("Typed class references upcast through the reflected inheritance graph"),
+		Source.Contains(TEXT("public static implicit operator TSubclassOfAActor(TSubclassOfAStaticMeshActor value)"))
+		&& Source.Contains(TEXT("return new(value.Ordinal);")));
 	TestTrue(TEXT("Typed facade declares the object-type import exactly once"),
 		Source.Contains(TEXT("[DllImport(\"avidscript\", EntryPoint = \"avid_object_type_is_a\")]"))
 		&& Source.Contains(TEXT("internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);")));
@@ -465,7 +490,6 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 				});
 		if (TestNotNull(TEXT("Fail-closed renderer coverage finds the derived type"), MissingOrdinalType))
 		{
-			const FString ExpectedErrorSource = MissingOrdinalType->StableId;
 			MissingOrdinalType->ObjectTypeOrdinal = INDEX_NONE;
 			FString InvalidSource;
 			FString InvalidCategory;
@@ -483,9 +507,9 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 				InvalidCategory,
 				FString(TEXT("descriptor_contract_invalid")));
 			TestEqual(
-				TEXT("Missing derived ordinal identifies the target-derived type"),
+				TEXT("Missing derived ordinal identifies the class-reference result contract"),
 				InvalidErrorSource,
-				ExpectedErrorSource);
+				FString(TEXT("class_references.result_type_id")));
 		}
 	}
 
@@ -525,12 +549,6 @@ bool FAvidScriptEditorCSharpBindingEmitterTypedProjectApiTest::RunTest(const FSt
 		TEXT("AvidScript/Tests/Fixtures/BindingGeneration/P50_TypedProjectApi.generated.cs")));
 	FString FixtureSource;
 	if (!TestTrue(TEXT("Typed project API golden fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
-	{
-		return false;
-	}
-	if (!TestTrue(
-		TEXT("Legacy typed project API fixture upgrades exactly to the Task 10 cast contract"),
-		UpgradeTypedProjectFacadeGolden(FixtureSource)))
 	{
 		return false;
 	}
@@ -615,8 +633,8 @@ bool FAvidScriptEditorCSharpBindingEmitterPropertyGetTest::RunTest(const FString
 		const TSharedPtr<FJsonObject> DescriptorBinding = DescriptorObject->GetArrayField(TEXT("bindings"))[0]->AsObject();
 		const TSharedPtr<FJsonObject> DescriptorImport = DescriptorBinding->GetObjectField(TEXT("host_import"));
 		const TArray<TSharedPtr<FJsonValue>>& ManifestImports = ManifestObject->GetArrayField(TEXT("required_imports"));
-		TestEqual(TEXT("Property manifest declares one required import"), ManifestImports.Num(), 1);
-		if (ManifestImports.Num() == 1)
+		TestEqual(TEXT("Property manifest declares reflected, object-type, and packed owner imports"), ManifestImports.Num(), 3);
+		if (ManifestImports.Num() == 3)
 		{
 			const TSharedPtr<FJsonObject> ManifestImport = ManifestImports[0]->AsObject();
 			TestTrue(
@@ -636,6 +654,29 @@ bool FAvidScriptEditorCSharpBindingEmitterPropertyGetTest::RunTest(const FString
 				TEXT("Property manifest preserves the host ABI signature"),
 				ManifestImport->GetStringField(TEXT("signature")),
 				DescriptorImport->GetStringField(TEXT("signature")));
+			TestTrue(
+				TEXT("Property manifest includes object-type support"),
+				ManifestImports.ContainsByPredicate(
+					[](const TSharedPtr<FJsonValue>& Value)
+					{
+						const TSharedPtr<FJsonObject> Import = Value->AsObject();
+						return Import.IsValid()
+							&& Import->GetStringField(TEXT("name")) == TEXT("avid_object_type_is_a")
+							&& Import->GetStringField(TEXT("signature")) == TEXT("(iii)i");
+					}));
+			TestTrue(
+				TEXT("Property manifest includes the packed owner import"),
+				ManifestImports.ContainsByPredicate(
+					[](const TSharedPtr<FJsonValue>& Value)
+					{
+						const TSharedPtr<FJsonObject> Import = Value->AsObject();
+						return Import.IsValid()
+							&& Import->GetStringField(TEXT("stable_id")) == TEXT("avidscript.owner_get_handle.v1")
+							&& Import->GetIntegerField(TEXT("ordinal")) == -1
+							&& Import->GetStringField(TEXT("module")) == TEXT("avidscript")
+							&& Import->GetStringField(TEXT("name")) == TEXT("avid_owner_get_handle")
+							&& Import->GetStringField(TEXT("signature")) == TEXT("()I");
+					}));
 		}
 	}
 	return true;
@@ -774,7 +815,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 		TestEqual(
 			TEXT("Gameplay manifest declares all reflected imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			342);
+			344);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();
@@ -1035,6 +1076,70 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptEditorCSharpBindingEmitterFailureAndPublishTest::RunTest(const FString& Parameters)
 {
+	FString LegacyDescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult LegacyDescriptorResult;
+	TestTrue(
+		TEXT("Legacy-schema fixture starts from a valid descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateDefault(
+			LegacyDescriptorJson,
+			LegacyDescriptorResult));
+	FAvidScriptBindingPackageModel CurrentPackage;
+	FString LegacyErrorCategory;
+	FString LegacyErrorSource;
+	if (TestTrue(
+		TEXT("Current descriptor parses before legacy projection"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			LegacyDescriptorJson,
+			CurrentPackage,
+			LegacyErrorCategory,
+			LegacyErrorSource)))
+	{
+		for (int32 LegacySchema = 2; LegacySchema <= 5; ++LegacySchema)
+		{
+			FAvidScriptBindingPackageModel LegacyPackage = CurrentPackage;
+			LegacyPackage.SchemaVersion = LegacySchema;
+			LegacyPackage.SelfTypeId.Empty();
+			if (LegacySchema < 5)
+			{
+				LegacyPackage.ClassReferences.Empty();
+			}
+			for (FAvidScriptBindingTypeModel& Type : LegacyPackage.Types)
+			{
+				Type.ObjectTypeOrdinal = INDEX_NONE;
+				Type.ClassPath.Empty();
+				Type.BaseTypeId.Empty();
+			}
+			for (FAvidScriptBindingClassReferenceModel& Reference : LegacyPackage.ClassReferences)
+			{
+				Reference.ResultTypeId.Empty();
+			}
+			LegacyPackage.SelectionHash =
+				FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(LegacyPackage);
+			LegacyPackage.PackageHash =
+				FAvidScriptBindingDescriptorIdentity::MakePackageHash(LegacyPackage);
+
+			FString CanonicalLegacyJson;
+			TestTrue(
+				*FString::Printf(TEXT("Schema v%d canonical descriptor serializes"), LegacySchema),
+				FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+					LegacyPackage,
+					CanonicalLegacyJson));
+			FString LegacySource;
+			FString LegacyManifest;
+			FAvidScriptCSharpBindingEmitResult LegacyEmitResult;
+			TestTrue(
+				*FString::Printf(TEXT("Schema v%d descriptor remains compatible with C# emission"), LegacySchema),
+				FAvidScriptEditorCSharpBindingEmitter::Emit(
+					CanonicalLegacyJson,
+					LegacySource,
+					LegacyManifest,
+					LegacyEmitResult));
+			TestTrue(
+				*FString::Printf(TEXT("Schema v%d emits a complete legacy facade"), LegacySchema),
+				!LegacySource.IsEmpty() && !LegacyManifest.IsEmpty());
+		}
+	}
+
 	FString CollisionDescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult CollisionDescriptorResult;
 	TestTrue(

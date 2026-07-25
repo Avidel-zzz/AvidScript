@@ -2,8 +2,10 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptObjectLifecycleBinding.h"
+#include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 #include "AvidScriptFrontendReport.h"
 #include "AvidScriptHash.h"
 
@@ -297,10 +299,20 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	}
 	const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
 		FAvidScriptObjectLifecycleBindings::GetSpecs();
+	const TConstArrayView<FAvidScriptObjectTypeBindingSpec> ObjectTypeSpecs =
+		FAvidScriptObjectTypeBindings::GetSpecs();
 	const int32 ReflectedBindingCount = AuthorizationModel.Bindings.Num();
 	const bool bPublishesLifecycleCapabilities = !AuthorizationModel.ClassReferences.IsEmpty();
-	const int32 ExpectedProfileImportCount = ReflectedBindingCount
+	const bool bPublishesObjectTypeCapability = AuthorizationModel.Types.ContainsByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.ObjectTypeOrdinal != INDEX_NONE;
+		});
+	const int32 ObjectTypeImportOffset =
+		ReflectedBindingCount
 		+ (bPublishesLifecycleCapabilities ? LifecycleSpecs.Num() : 0);
+	const int32 ExpectedProfileImportCount =
+		FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel);
 	if (AuthorizationModel.PackageName != Provenance.PackageName
 		|| AuthorizationModel.PackageHash != Provenance.PackageHash
 		|| ExpectedProfileImportCount != Provenance.ProfileImportCount)
@@ -321,7 +333,16 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	PropertySelections.Reserve(Provenance.UsedImports.Num());
 	for (const FAvidScriptFrontendBindingImport& Import : Provenance.UsedImports)
 	{
-		if (!IsAvidScriptCSharpBindingSliceStableId(Import.StableId))
+		const bool bHasPackedOwnerStableId =
+			Import.StableId == TEXT("avidscript.owner_get_handle.v1");
+		const bool bIsPackedOwner =
+			bHasPackedOwnerStableId
+			&& Import.Ordinal == INDEX_NONE
+			&& Import.Module == TEXT("avidscript")
+			&& Import.Name == TEXT("avid_owner_get_handle")
+			&& Import.Signature == TEXT("()I");
+		if (!IsAvidScriptCSharpBindingSliceStableId(Import.StableId)
+			&& !bHasPackedOwnerStableId)
 		{
 			SetAvidScriptCSharpBindingSliceFailure(
 				OutResult,
@@ -377,31 +398,53 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			continue;
 		}
 
-		if (!bPublishesLifecycleCapabilities
-			|| Import.Ordinal < ReflectedBindingCount)
-		{
-			SetAvidScriptCSharpBindingSliceFailure(
-				OutResult,
-				TEXT("slice_binding_missing"),
-				Import.StableId,
-				TEXT("regenerate the complete package and rerun bootstrap"));
-			return false;
-		}
 		const int32 LifecycleSpecIndex = Import.Ordinal - ReflectedBindingCount;
-		if (LifecycleSpecIndex >= LifecycleSpecs.Num()
-			|| LifecycleSpecs[LifecycleSpecIndex].StableId != Import.StableId)
+		if (bPublishesLifecycleCapabilities
+			&& LifecycleSpecs.IsValidIndex(LifecycleSpecIndex))
 		{
-			SetAvidScriptCSharpBindingSliceFailure(
-				OutResult,
-				TEXT("slice_binding_missing"),
-				Import.StableId,
-				TEXT("regenerate the complete package and rerun bootstrap"));
-			return false;
+			const FAvidScriptObjectLifecycleBindingSpec& LifecycleSpec =
+				LifecycleSpecs[LifecycleSpecIndex];
+			if (LifecycleSpec.StableId != Import.StableId
+				|| LifecycleSpec.ModuleName != Import.Module
+				|| LifecycleSpec.ImportName != Import.Name
+				|| LifecycleSpec.Signature != Import.Signature)
+			{
+				SetAvidScriptCSharpBindingSliceFailure(
+					OutResult,
+					TEXT("slice_import_identity_mismatch"),
+					Import.StableId,
+					TEXT("rerun bootstrap with untampered import provenance"));
+				return false;
+			}
+			continue;
 		}
-		const FAvidScriptObjectLifecycleBindingSpec& LifecycleSpec = LifecycleSpecs[LifecycleSpecIndex];
-		if (LifecycleSpec.ModuleName != Import.Module
-			|| LifecycleSpec.ImportName != Import.Name
-			|| LifecycleSpec.Signature != Import.Signature)
+
+		const int32 ObjectTypeSpecIndex = Import.Ordinal - ObjectTypeImportOffset;
+		if (bPublishesObjectTypeCapability
+			&& ObjectTypeSpecs.IsValidIndex(ObjectTypeSpecIndex))
+		{
+			const FAvidScriptObjectTypeBindingSpec& ObjectTypeSpec =
+				ObjectTypeSpecs[ObjectTypeSpecIndex];
+			if (ObjectTypeSpec.StableId != Import.StableId
+				|| ObjectTypeSpec.ModuleName != Import.Module
+				|| ObjectTypeSpec.ImportName != Import.Name
+				|| ObjectTypeSpec.Signature != Import.Signature)
+			{
+				SetAvidScriptCSharpBindingSliceFailure(
+					OutResult,
+					TEXT("slice_import_identity_mismatch"),
+					Import.StableId,
+					TEXT("rerun bootstrap with untampered import provenance"));
+				return false;
+			}
+			continue;
+		}
+
+		if (bIsPackedOwner && !AuthorizationModel.SelfTypeId.IsEmpty())
+		{
+			continue;
+		}
+		if (bHasPackedOwnerStableId)
 		{
 			SetAvidScriptCSharpBindingSliceFailure(
 				OutResult,
@@ -410,6 +453,13 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 				TEXT("rerun bootstrap with untampered import provenance"));
 			return false;
 		}
+
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			TEXT("slice_binding_missing"),
+			Import.StableId,
+			TEXT("regenerate the complete package and rerun bootstrap"));
+		return false;
 	}
 
 	FString SliceDescriptorJson;

@@ -230,7 +230,7 @@ bool ValidateAvidScriptVmBindingPackage(
 			|| !ParseAvidScriptRawSignature(Import.Signature, ParameterCount)
 			|| StableIds.Contains(Import.StableId)
 			|| ImportKeys.Contains(ImportKey)
-			|| IsAvidScriptWamrStaticHostImport(Import.ModuleName, Import.ImportName))
+			|| IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName))
 		{
 			SetDynamicRegistryError(
 				OutError,

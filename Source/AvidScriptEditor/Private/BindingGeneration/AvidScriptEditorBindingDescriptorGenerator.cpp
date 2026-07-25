@@ -269,7 +269,8 @@ bool GenerateBindingDescriptor(
 	}
 	if (FunctionSelections.IsEmpty()
 		&& PropertySelections.IsEmpty()
-		&& ClassReferences.IsEmpty())
+		&& ClassReferences.IsEmpty()
+		&& RequestedSelfClass == nullptr)
 	{
 		SetFailure(OutResult, TEXT("selection_empty"), PackageName, TEXT("Select at least one reflected function, readable property, or class reference for the binding package."));
 		return false;
@@ -869,12 +870,20 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		FunctionSelections,
 		OutSelectionResult))
 	{
-		SetFailure(
-			OutResult,
-			OutSelectionResult.ErrorCategory,
-			OutSelectionResult.ErrorSource,
-			OutSelectionResult.NextAction);
-		return false;
+		const bool bHasNonFunctionSurface =
+			!Profile.ExplicitProperties.IsEmpty()
+			|| !Profile.SelfClassPath.IsEmpty()
+			|| !ClassReferences.IsEmpty();
+		if (OutSelectionResult.ErrorCategory != TEXT("profile_empty") || !bHasNonFunctionSurface)
+		{
+			SetFailure(
+				OutResult,
+				OutSelectionResult.ErrorCategory,
+				OutSelectionResult.ErrorSource,
+				OutSelectionResult.NextAction);
+			return false;
+		}
+		OutSelectionResult = FAvidScriptBindingSelectionResolveResult();
 	}
 
 	bool bRequestsReadableProperties = !Profile.ExplicitProperties.IsEmpty();

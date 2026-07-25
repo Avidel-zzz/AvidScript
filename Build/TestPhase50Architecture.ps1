@@ -678,7 +678,7 @@ function Test-RendererFrozenRegions {
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-        'EmitReferenceSource' = '2fe7cf4a3f1820c53316bb10104290029d1a8b74491ea63eb9248da1e95e94c9'
+        'EmitReferenceSource' = 'b6afc255848ddb70d28e7fb3207cdd2a7dbc3a04b95a7bb9fb6a443a5ddeac4c'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-        'BindingRenderer' = 'b015232a6254014864708bbdb2338c34196f046ef2b168877a1f9cb8408d7ac4'
+        'BindingRenderer' = '68f6ac0abc5fea5dbf4169d29034d2b9e062689d7c1075497b124e6ee918412f'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -1049,7 +1049,7 @@ function Test-StaticImportPolicy {
 
     $Policy = Get-UniqueBraceRegion `
         $Source `
-        '\bbool\s+IsAvidScriptWamrStaticHostImport\s*\(' `
+        '\bbool\s+IsAvidScriptVmStaticHostImport\s*\(' `
         $Violations `
         'static host import policy'
     if ($null -eq $Policy) {
@@ -1565,6 +1565,19 @@ function Invoke-Phase50Contracts {
             Add-Violation $Violations 'canonical descriptor validation regressed to GenerateWithClassReferences and may discard custom Self'
         }
     }
+    if ($null -ne $CanonicalValidation) {
+        Test-RegexSequence `
+            $CanonicalValidation.Text `
+            @(
+                'Package\s*\.\s*SchemaVersion\s*<\s*6',
+                'FAvidScriptBindingPackage::LoadDescriptor\s*\(',
+                'FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical\s*\(',
+                'CanonicalDescriptorJson\s*!=\s*DescriptorJson',
+                'FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile\s*\('
+            ) `
+            $Violations `
+            'version-aware canonical descriptor compatibility'
+    }
 
     $ObjectTypeFactory = Get-UniqueBraceRegion `
         $ObjectTypeBindings `
@@ -1768,7 +1781,7 @@ function Invoke-Phase50Contracts {
     foreach ($DynamicContract in @(
         'Import.ModuleName != TEXT("avidscript")',
         'IsAvidScriptDynamicSafeToken(Import.ImportName)',
-        'IsAvidScriptWamrStaticHostImport(Import.ModuleName, Import.ImportName)',
+        'IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)',
         'InvokeAvidScriptDynamicRawImport'
     )) {
         if (-not $DynamicRegistry.Contains($DynamicContract)) {

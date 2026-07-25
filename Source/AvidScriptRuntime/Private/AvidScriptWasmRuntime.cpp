@@ -1056,6 +1056,17 @@ int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 		return 0;
 	}
 
+	if (!BindingPackage.IsValid()
+		|| BindingPackage->GetExpectedSelfClass() == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_owner_get_handle"),
+			TEXT("Packed owner access requires a binding package with ExpectedSelfClass"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
 	const uint64 PackedHandle = static_cast<uint64>(OwnerHandle.Slot)
 		| (static_cast<uint64>(OwnerHandle.Generation) << 32);
 	LastHostImportResult = static_cast<int32>(OwnerHandle.Slot);

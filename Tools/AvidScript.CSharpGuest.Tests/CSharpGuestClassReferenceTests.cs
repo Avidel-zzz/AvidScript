@@ -14,13 +14,16 @@ internal static class CSharpGuestClassReferenceTests
     {
         GeneratedProjectClassLowersToNominalI32();
         GeneratedTypedClassLowersToNominalI32();
+        GeneratedTypedClassUpcastsNominally();
+        DefaultObjectHandleLowersToZeroedMemory();
         ForgedClassReferencesAreRejected();
+        AuthorizedClassReferenceOrdinalsFailClosed();
         ClassReferenceFieldOwnerMismatchFailsClosed();
         ClassReferenceConstructorOwnerMismatchFailsClosed();
         ClassReferenceTypeRequiresIntrinsicConstructor();
         ClassReferenceDoesNotImplicitlyConvert();
         LifecycleFacadeLowersToSharedImportsAndWasm();
-        return 8;
+        return 11;
     }
 
     private static void GeneratedProjectClassLowersToNominalI32()
@@ -156,6 +159,89 @@ internal static class CSharpGuestClassReferenceTests
             "typed ProjectClasses entries should construct their ordinal inside the Guest");
     }
 
+    private static void GeneratedTypedClassUpcastsNominally()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_upcast_class_ref")]
+                public static int Upcast()
+                {
+                    TSubclassOfAActor actorClass = ProjectClasses.StaticMeshClass;
+                    return actorClass.AvidScriptOrdinal;
+                }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            "generated class reference upcast should pass semantic analysis: "
+                + FormatSemanticDiagnostics(semantic));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(FormatGuestDiagnostics(lowering));
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(lowering.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "generated class reference upcast should lower to valid Guest IR");
+        Assert(instructions.Any(instruction => instruction.Op == "convert"
+                && instruction.OperatorKind == "class_ref_upcast"),
+            "generated class reference upcast should preserve the authorized ordinal");
+        Assert(module.Functions.All(function =>
+                !function.Id.Contains(".op_Implicit(", StringComparison.Ordinal)),
+            "intrinsic class reference upcasts should not emit callable Guest bodies");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Assert(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "class reference upcasts should compile to WASM as zero-cost i32 conversions");
+    }
+
+    private static void DefaultObjectHandleLowersToZeroedMemory()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_default_actor_slot")]
+                public static int DefaultActorSlot()
+                {
+                    AActor actor = default;
+                    return actor.AvidScriptSlot;
+                }
+            }
+            """;
+        SemanticDocument semantic = Analyze(source);
+        Assert(semantic.Succeeded,
+            "default object handle should pass semantic analysis: "
+                + FormatSemanticDiagnostics(semantic));
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(FormatGuestDiagnostics(lowering));
+        Assert(lowering.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "default object handle should lower to valid Guest IR");
+        Assert(module.Functions
+                .SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.Op == "constant"
+                    && instruction.Constant is { Kind: "zero", Value: null }),
+            "default object handle should become an explicit zero-memory value");
+
+        WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
+        Assert(wasm.Succeeded && wasm.Bytes.Length > 8,
+            "default object handle zero initialization should compile to WASM");
+    }
+
     private static void ForgedClassReferencesAreRejected()
     {
         AssertLoweringRejected(ForgedClassReferenceSource(
@@ -166,13 +252,13 @@ internal static class CSharpGuestClassReferenceTests
         AssertLoweringRejected(ForgedClassReferenceSource(
             "private readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
             "-1"),
-            "ASCG1004",
-            "negative class reference ordinals must be rejected");
+            "ASCG1003",
+            "unauthorized class reference types must be rejected before ordinal validation");
         AssertLoweringRejected(ForgedClassReferenceSource(
             "private readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
             "ordinal"),
-            "ASCG1004",
-            "nonliteral class reference ordinals must be rejected");
+            "ASCG1003",
+            "unauthorized class reference types must not reach literal ordinal validation");
         AssertLoweringRejected(ForgedClassReferenceSource(
             "internal readonly int Ordinal;\n    internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }",
             "0"),
@@ -188,6 +274,55 @@ internal static class CSharpGuestClassReferenceTests
             "0"),
             "ASCG1003",
             "look-alike class references must contain exactly one ordinal field");
+        AssertLoweringRejected(
+            ForgedClassReferenceUpcastSource(),
+            "ASCG1003",
+            "a user-declared class reference cannot relabel an authorized ordinal through a forged upcast");
+    }
+
+    private static void AuthorizedClassReferenceOrdinalsFailClosed()
+    {
+        const string negativeSource = """
+            using System.Runtime.InteropServices;
+            namespace AvidScript;
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_negative_class_ref")]
+                public static TSubclassOfAStaticMeshActor Build() => new(-1);
+            }
+            """;
+        AssertLoweringRejected(
+            negativeSource,
+            "ASCG1004",
+            "negative ordinals on an authorized generated class reference must be rejected");
+
+        const string nonLiteralSource = """
+            using System.Runtime.InteropServices;
+            namespace AvidScript;
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_nonliteral_class_ref")]
+                public static TSubclassOfAStaticMeshActor Build(int ordinal) => new(ordinal);
+            }
+            """;
+        AssertLoweringRejected(
+            nonLiteralSource,
+            "ASCG1004",
+            "nonliteral ordinals on an authorized generated class reference must be rejected");
+
+        const string relabeledSource = """
+            using System.Runtime.InteropServices;
+            namespace AvidScript;
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_relabeled_class_ref")]
+                public static TSubclassOfAStaticMeshActor Build() => new(0);
+            }
+            """;
+        AssertLoweringRejected(
+            relabeledSource,
+            "ASCG1004",
+            "an authorized wrapper must not relabel an ordinal published for an incompatible wrapper");
     }
 
     private static void ClassReferenceTypeRequiresIntrinsicConstructor()
@@ -440,6 +575,33 @@ internal static class CSharpGuestClassReferenceTests
             """;
     }
 
+    private static string ForgedClassReferenceUpcastSource()
+    {
+        return """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public readonly struct TSubclassOfAForged
+            {
+                private readonly int Ordinal;
+                internal TSubclassOfAForged(int ordinal) { Ordinal = ordinal; }
+                public static implicit operator TSubclassOfAActor(TSubclassOfAForged value)
+                    => new(value.Ordinal);
+            }
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_forged_class_ref_upcast")]
+                public static int Probe()
+                {
+                    TSubclassOfAActor value = new TSubclassOfAForged(0);
+                    return value.AvidScriptOrdinal;
+                }
+            }
+            """;
+    }
+
     private static SemanticDocument WithReachableCallable(
         SemanticDocument document,
         string methodSymbolId)
@@ -546,6 +708,11 @@ internal static class CSharpGuestClassReferenceTests
             }
 
             internal int AvidScriptOrdinal => Ordinal;
+
+            public static implicit operator TSubclassOfAActor(TSubclassOfAStaticMeshActor value)
+            {
+                return new(value.Ordinal);
+            }
         }
 
         public readonly struct AActor

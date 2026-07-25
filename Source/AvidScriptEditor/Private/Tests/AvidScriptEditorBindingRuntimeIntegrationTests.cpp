@@ -10,6 +10,7 @@
 #include "AvidScriptEditorCSharpProfileService.h"
 #include "AvidScriptEditorCSharpWorkspaceService.h"
 #include "AvidScriptEditorResultPresentation.h"
+#include "AvidScriptHash.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
@@ -60,6 +61,32 @@ bool RehashAvidScriptBindingRuntimeDescriptor(FString& InOutJson)
 	InOutJson.Empty();
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&InOutJson);
 	return FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+}
+
+bool SaveAvidScriptBindingRuntimeJsonWithHash(
+	const TSharedRef<FJsonObject>& Object,
+	const FString& Path,
+	FString& OutSha256)
+{
+	OutSha256.Reset();
+	FString Json;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	if (!FJsonSerializer::Serialize(Object, Writer)
+		|| !FFileHelper::SaveStringToFile(
+			Json,
+			*Path,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		return false;
+	}
+
+	TArray<uint8> Bytes;
+	if (!FFileHelper::LoadFileToArray(Bytes, *Path))
+	{
+		return false;
+	}
+	OutSha256 = FAvidScriptHash::Sha256Hex(Bytes);
+	return !OutSha256.IsEmpty();
 }
 
 class FAvidScriptBindingRuntimeTestGuestMemory final : public IAvidScriptVmGuestMemory
@@ -588,9 +615,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 342 generated bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 342 generated bindings and two shared capabilities"), *BuildLabel),
 		AuthorizationImports->Num(),
-		342);
+		344);
 
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
 	if (!Test.TestTrue(
@@ -611,9 +638,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s runtime package contains five reachable bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s runtime package contains five reachable bindings and object-type support"), *BuildLabel),
 		OutManifest.BindingPackage->GetVmPackage().Imports.Num(),
-		5);
+		6);
 	int32 RequiredDynamicImportCount = 0;
 	for (const FAvidScriptWasmRequiredImport& Import : OutManifest.RequiredImports)
 	{
@@ -870,9 +897,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 342 gameplay bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 342 gameplay bindings and two shared capabilities"), *BuildLabel),
 		AuthorizationImports->Num(),
-		342);
+		344);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -895,9 +922,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s runtime package contains three reachable bindings"), *BuildLabel),
+		*FString::Printf(TEXT("%s runtime package contains three reachable bindings and object-type support"), *BuildLabel),
 		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
-		3);
+		4);
 	int32 DynamicImportCount = 0;
 	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
 	{
@@ -1067,11 +1094,18 @@ bool FAvidScriptEditorBindingRuntimeFNameInputTest::RunTest(const FString& Param
 		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
 		return false;
 	}
-	TestEqual(TEXT("FName runtime package exposes one cached import"), Package->GetVmPackage().Imports.Num(), 1);
-	if (Package->GetVmPackage().Imports.Num() != 1)
+	TestEqual(TEXT("FName runtime package exposes its reflected and object-type imports"), Package->GetVmPackage().Imports.Num(), 2);
+	if (Package->GetVmPackage().Imports.Num() != 2)
 	{
 		return false;
 	}
+	TestTrue(
+		TEXT("FName runtime package exposes object-type support"),
+		Package->GetVmPackage().Imports.ContainsByPredicate(
+			[](const FAvidScriptVmDynamicImport& Import)
+			{
+				return Import.ImportName == TEXT("avid_object_type_is_a");
+			}));
 
 	UWorld* World = nullptr;
 	if (!TestTrue(
@@ -1419,7 +1453,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FStr
 	FString DescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
 	if (!TestTrue(
-		TEXT("Readable Actor property generates a schema v5 package"),
+		TEXT("Readable Actor property generates a schema v6 package"),
 		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
 			TEXT("avidscript.engine.property_runtime"),
 			{},
@@ -1440,7 +1474,14 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyGetTest::RunTest(const FStr
 		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
 		return false;
 	}
-	TestEqual(TEXT("Property package exposes one cached import"), Package->GetVmPackage().Imports.Num(), 1);
+	TestEqual(TEXT("Property package exposes its reflected and object-type imports"), Package->GetVmPackage().Imports.Num(), 2);
+	TestTrue(
+		TEXT("Property runtime package exposes object-type support"),
+		Package->GetVmPackage().Imports.ContainsByPredicate(
+			[](const FAvidScriptVmDynamicImport& Import)
+			{
+				return Import.ImportName == TEXT("avid_object_type_is_a");
+			}));
 
 	UWorld* World = nullptr;
 	if (!TestTrue(
@@ -1830,13 +1871,13 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		return false;
 	}
 	TestEqual(
-		TEXT("Generated C# manifest records a five-binding runtime profile"),
+		TEXT("Generated C# manifest records five bindings, object-type support, and packed owner access"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
-		5);
+		7);
 	TestEqual(
-		TEXT("Generated C# manifest records five used binding stable identities"),
+		TEXT("Generated C# manifest records five reflected bindings and packed owner access"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
-		5);
+		6);
 	(*BindingPackageObject)->SetStringField(
 		TEXT("descriptor_sha256"),
 		TEXT("0000000000000000000000000000000000000000000000000000000000000000"));
@@ -1865,6 +1906,331 @@ bool FAvidScriptEditorBindingRuntimeGeneratedCSharpLifecycleTest::RunTest(const 
 		TEXT("Tampered binding descriptor hash has a stable category"),
 		TamperedLoadResult.ErrorCategory,
 		FString(TEXT("binding_package_hash_mismatch")));
+
+	FString OriginalPackageJson;
+	TSharedPtr<FJsonObject> OriginalPackageObject;
+	if (!TestTrue(
+			TEXT("Runtime binding package can be read for capability tamper validation"),
+			FFileHelper::LoadFileToString(OriginalPackageJson, *BuildResult.BindingPackagePath))
+		|| !TestTrue(
+			TEXT("Runtime binding package parses for capability tamper validation"),
+			FJsonSerializer::Deserialize(
+				TJsonReaderFactory<>::Create(OriginalPackageJson),
+				OriginalPackageObject))
+		|| !TestTrue(
+			TEXT("Runtime binding package is an object for capability tamper validation"),
+			OriginalPackageObject.IsValid()))
+	{
+		return false;
+	}
+
+	TArray<FString> CapabilityTamperPaths;
+	ON_SCOPE_EXIT
+	{
+		for (const FString& Path : CapabilityTamperPaths)
+		{
+			IFileManager::Get().Delete(*Path, false, true, true);
+		}
+	};
+	const auto RejectMutatedPackage = [
+		this,
+		&ManifestJson,
+		&BuildResult,
+		&CapabilityTamperPaths](
+		const TSharedRef<FJsonObject>& PackageObject,
+		const TCHAR* Suffix,
+		const TCHAR* Label,
+		const TCHAR* ExpectedCategory,
+		const bool bHidePackedOwnerInScriptManifest)
+	{
+		const FString PackagePath = FPaths::Combine(
+			FPaths::GetPath(BuildResult.BindingPackagePath),
+			FString::Printf(TEXT("package.%s.json"), Suffix));
+		const FString ScriptManifestPath = FPaths::Combine(
+			FPaths::GetPath(BuildResult.ManifestPath),
+			FString::Printf(TEXT("generated_binding_lifecycle.%s.avidscript.json"), Suffix));
+		CapabilityTamperPaths.Add(PackagePath);
+		CapabilityTamperPaths.Add(ScriptManifestPath);
+
+		FString PackageSha256;
+		if (!TestTrue(
+			*FString::Printf(TEXT("%s package writes"), Label),
+			SaveAvidScriptBindingRuntimeJsonWithHash(
+				PackageObject,
+				PackagePath,
+				PackageSha256)))
+		{
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> ScriptManifestObject;
+		const TSharedRef<TJsonReader<>> ScriptManifestReader =
+			TJsonReaderFactory<>::Create(ManifestJson);
+		const TSharedPtr<FJsonObject>* ScriptBindingPackage = nullptr;
+		if (!TestTrue(
+				*FString::Printf(TEXT("%s script manifest reparses"), Label),
+				FJsonSerializer::Deserialize(
+					ScriptManifestReader,
+					ScriptManifestObject))
+			|| !TestTrue(
+				*FString::Printf(TEXT("%s script manifest retains package metadata"), Label),
+				ScriptManifestObject.IsValid()
+					&& ScriptManifestObject->TryGetObjectField(
+						TEXT("binding_package"),
+						ScriptBindingPackage)
+					&& ScriptBindingPackage != nullptr
+					&& ScriptBindingPackage->IsValid()))
+		{
+			return false;
+		}
+		(*ScriptBindingPackage)->SetStringField(TEXT("manifest_file"), PackagePath);
+		(*ScriptBindingPackage)->SetStringField(TEXT("manifest_sha256"), PackageSha256);
+		if (bHidePackedOwnerInScriptManifest)
+		{
+			TArray<TSharedPtr<FJsonValue>> ScriptRequiredImports =
+				ScriptManifestObject->GetArrayField(TEXT("required_imports"));
+			int32 HiddenOwnerCount = 0;
+			for (const TSharedPtr<FJsonValue>& Value : ScriptRequiredImports)
+			{
+				const TSharedPtr<FJsonObject> Import =
+					Value.IsValid() ? Value->AsObject() : nullptr;
+				FString ModuleName;
+				FString ImportName;
+				if (Import.IsValid()
+					&& Import->TryGetStringField(TEXT("module"), ModuleName)
+					&& Import->TryGetStringField(TEXT("name"), ImportName)
+					&& ModuleName == TEXT("avidscript")
+					&& ImportName == TEXT("avid_owner_get_handle"))
+				{
+					Import->SetStringField(TEXT("module"), TEXT("env"));
+					Import->SetStringField(TEXT("name"), TEXT("hidden_owner_import"));
+					++HiddenOwnerCount;
+				}
+			}
+			TestEqual(
+				TEXT("Tampered script manifest hides exactly one real WASM owner import"),
+				HiddenOwnerCount,
+				1);
+			ScriptManifestObject->SetArrayField(
+				TEXT("required_imports"),
+				MoveTemp(ScriptRequiredImports));
+		}
+
+		FString IgnoredScriptManifestSha256;
+		if (!TestTrue(
+			*FString::Printf(TEXT("%s script manifest writes"), Label),
+			SaveAvidScriptBindingRuntimeJsonWithHash(
+				ScriptManifestObject.ToSharedRef(),
+				ScriptManifestPath,
+				IgnoredScriptManifestSha256)))
+		{
+			return false;
+		}
+
+		FAvidScriptWasmReloadManifest RejectedManifest;
+		TArray<uint8> RejectedBytecode;
+		FAvidScriptWasmReloadManifestLoadResult RejectedLoadResult;
+		TestFalse(
+			*FString::Printf(TEXT("%s is rejected"), Label),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				ScriptManifestPath,
+				RejectedManifest,
+				RejectedBytecode,
+				RejectedLoadResult));
+		TestEqual(
+			*FString::Printf(TEXT("%s has a stable category"), Label),
+			RejectedLoadResult.ErrorCategory,
+			FString(ExpectedCategory));
+		return true;
+	};
+
+	TSharedPtr<FJsonObject> OwnerOmittedPackage;
+	TestTrue(
+		TEXT("Owner-omitted package reparses"),
+		FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(OriginalPackageJson),
+			OwnerOmittedPackage));
+	if (OwnerOmittedPackage.IsValid())
+	{
+		TArray<TSharedPtr<FJsonValue>> RequiredImports =
+			OwnerOmittedPackage->GetArrayField(TEXT("required_imports"));
+		const int32 RemovedOwnerCount = RequiredImports.RemoveAll(
+			[](const TSharedPtr<FJsonValue>& Value)
+			{
+				const TSharedPtr<FJsonObject> Import =
+					Value.IsValid() ? Value->AsObject() : nullptr;
+				FString ImportName;
+				return Import.IsValid()
+					&& Import->TryGetStringField(TEXT("name"), ImportName)
+					&& ImportName == TEXT("avid_owner_get_handle");
+			});
+		TestEqual(TEXT("Owner-omitted package removes exactly one capability"), RemovedOwnerCount, 1);
+		OwnerOmittedPackage->SetArrayField(TEXT("required_imports"), MoveTemp(RequiredImports));
+		RejectMutatedPackage(
+			OwnerOmittedPackage.ToSharedRef(),
+			TEXT("owner_omitted"),
+			TEXT("Package that omits a script-required packed owner capability"),
+			TEXT("binding_package_import_mismatch"),
+			false);
+		RejectMutatedPackage(
+			OwnerOmittedPackage.ToSharedRef(),
+			TEXT("owner_hidden"),
+			TEXT("Script manifest that hides a real WASM packed owner import"),
+			TEXT("manifest_wasm_import_mismatch"),
+			true);
+	}
+
+	TSharedPtr<FJsonObject> FractionalOrdinalPackage;
+	TestTrue(
+		TEXT("Fractional-ordinal package reparses"),
+		FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(OriginalPackageJson),
+			FractionalOrdinalPackage));
+	if (FractionalOrdinalPackage.IsValid())
+	{
+		TArray<TSharedPtr<FJsonValue>> RequiredImports =
+			FractionalOrdinalPackage->GetArrayField(TEXT("required_imports"));
+		bool bMutatedDynamicOrdinal = false;
+		for (const TSharedPtr<FJsonValue>& Value : RequiredImports)
+		{
+			const TSharedPtr<FJsonObject> Import =
+				Value.IsValid() ? Value->AsObject() : nullptr;
+			FString ImportName;
+			if (Import.IsValid()
+				&& Import->TryGetStringField(TEXT("name"), ImportName)
+				&& ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+			{
+				Import->SetNumberField(TEXT("ordinal"), 0.4);
+				bMutatedDynamicOrdinal = true;
+				break;
+			}
+		}
+		TestTrue(TEXT("Fractional-ordinal package mutates one dynamic import"), bMutatedDynamicOrdinal);
+		FractionalOrdinalPackage->SetArrayField(TEXT("required_imports"), MoveTemp(RequiredImports));
+		RejectMutatedPackage(
+			FractionalOrdinalPackage.ToSharedRef(),
+			TEXT("fractional_ordinal"),
+			TEXT("Package with a fractional dynamic import ordinal"),
+			TEXT("binding_package_invalid"),
+			false);
+	}
+
+	TSharedPtr<FJsonObject> UnauthorizedImportManifest;
+	TestTrue(
+		TEXT("Unauthorized-import script manifest reparses"),
+		FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(ManifestJson),
+			UnauthorizedImportManifest));
+	if (UnauthorizedImportManifest.IsValid())
+	{
+		TArray<TSharedPtr<FJsonValue>> RequiredImports =
+			UnauthorizedImportManifest->GetArrayField(TEXT("required_imports"));
+		FString OriginalDynamicImport;
+		const FString UnauthorizedDynamicImport =
+			TEXT("avid_ue_ffffffffffffffff");
+		for (const TSharedPtr<FJsonValue>& Value : RequiredImports)
+		{
+			const TSharedPtr<FJsonObject> Import =
+				Value.IsValid() ? Value->AsObject() : nullptr;
+			FString ModuleName;
+			FString ImportName;
+			if (Import.IsValid()
+				&& Import->TryGetStringField(TEXT("module"), ModuleName)
+				&& Import->TryGetStringField(TEXT("name"), ImportName)
+				&& ModuleName == TEXT("avidscript")
+				&& ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive))
+			{
+				OriginalDynamicImport = ImportName;
+				Import->SetStringField(TEXT("name"), UnauthorizedDynamicImport);
+				break;
+			}
+		}
+		TestFalse(
+			TEXT("Unauthorized-import fixture finds one real dynamic import"),
+			OriginalDynamicImport.IsEmpty());
+		TestEqual(
+			TEXT("Unauthorized dynamic import preserves WASM section width"),
+			UnauthorizedDynamicImport.Len(),
+			OriginalDynamicImport.Len());
+		UnauthorizedImportManifest->SetArrayField(
+			TEXT("required_imports"),
+			MoveTemp(RequiredImports));
+
+		TArray<uint8> MutatedWasm = Bytecode;
+		FTCHARToUTF8 OriginalImportUtf8(*OriginalDynamicImport);
+		FTCHARToUTF8 UnauthorizedImportUtf8(*UnauthorizedDynamicImport);
+		int32 ReplacedImportCount = 0;
+		for (int32 Offset = 0;
+			Offset + OriginalImportUtf8.Length() <= MutatedWasm.Num();
+			++Offset)
+		{
+			if (FMemory::Memcmp(
+				MutatedWasm.GetData() + Offset,
+				OriginalImportUtf8.Get(),
+				OriginalImportUtf8.Length()) == 0)
+			{
+				FMemory::Memcpy(
+					MutatedWasm.GetData() + Offset,
+					UnauthorizedImportUtf8.Get(),
+					UnauthorizedImportUtf8.Length());
+				++ReplacedImportCount;
+			}
+		}
+		TestEqual(
+			TEXT("Unauthorized-import fixture replaces exactly one WASM import identity"),
+			ReplacedImportCount,
+			1);
+
+		const FString MutatedWasmPath = FPaths::Combine(
+			FPaths::GetPath(BuildResult.ManifestPath),
+			TEXT("generated_binding_lifecycle.unauthorized_import.wasm"));
+		const FString UnauthorizedManifestPath = FPaths::Combine(
+			FPaths::GetPath(BuildResult.ManifestPath),
+			TEXT("generated_binding_lifecycle.unauthorized_import.avidscript.json"));
+		CapabilityTamperPaths.Add(MutatedWasmPath);
+		CapabilityTamperPaths.Add(UnauthorizedManifestPath);
+		TestTrue(
+			TEXT("Unauthorized-import WASM writes"),
+			FFileHelper::SaveArrayToFile(MutatedWasm, *MutatedWasmPath));
+
+		const TSharedPtr<FJsonObject>* WasmObject = nullptr;
+		if (TestTrue(
+			TEXT("Unauthorized-import manifest retains WASM metadata"),
+			UnauthorizedImportManifest->TryGetObjectField(
+				TEXT("wasm"),
+				WasmObject)
+				&& WasmObject != nullptr
+				&& WasmObject->IsValid()))
+		{
+			(*WasmObject)->SetStringField(TEXT("file"), MutatedWasmPath);
+			(*WasmObject)->SetStringField(
+				TEXT("sha256"),
+				FAvidScriptHash::Sha256Hex(MutatedWasm));
+		}
+
+		FString IgnoredManifestSha256;
+		TestTrue(
+			TEXT("Unauthorized-import script manifest writes"),
+			SaveAvidScriptBindingRuntimeJsonWithHash(
+				UnauthorizedImportManifest.ToSharedRef(),
+				UnauthorizedManifestPath,
+				IgnoredManifestSha256));
+
+		FAvidScriptWasmReloadManifest RejectedManifest;
+		TArray<uint8> RejectedBytecode;
+		FAvidScriptWasmReloadManifestLoadResult RejectedLoadResult;
+		TestFalse(
+			TEXT("Actual WASM dynamic import must be authorized by the current package"),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				UnauthorizedManifestPath,
+				RejectedManifest,
+				RejectedBytecode,
+				RejectedLoadResult));
+		TestEqual(
+			TEXT("Unauthorized dynamic import has a stable category"),
+			RejectedLoadResult.ErrorCategory,
+			FString(TEXT("binding_package_import_mismatch")));
+	}
 
 	return true;
 }
@@ -1928,9 +2294,9 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 		return false;
 	}
 	TestEqual(
-		TEXT("Playable pickup runtime package contains five reachable reflected bindings"),
+		TEXT("Playable pickup runtime package contains five reflected bindings and object-type support"),
 		Manifest.BindingPackage->GetVmPackage().Imports.Num(),
-		5);
+		6);
 	int32 ReflectedImportCount = 0;
 	int32 TimerImportCount = 0;
 	for (const FAvidScriptWasmRequiredImport& Import : Manifest.RequiredImports)
@@ -2017,9 +2383,9 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 		return false;
 	}
 	TestEqual(
-		TEXT("One playable pickup Tick uses six host crossings"),
+		TEXT("One playable pickup Tick uses four host crossings with packed owner access"),
 		MetricsTickResult.HostImportCallCount - HostImportsAfterBeginPlay,
-		6);
+		4);
 	FAvidScriptGameplayEvent MetricsOverlapEvent;
 	MetricsOverlapEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
 	MetricsOverlapEvent.ObjectHandle = PlayerHandle;
@@ -2033,9 +2399,9 @@ bool FAvidScriptEditorBindingRuntimePlayablePickupTest::RunTest(const FString& P
 		return false;
 	}
 	TestEqual(
-		TEXT("One successful pickup overlap uses eight host crossings"),
+		TEXT("One successful pickup overlap uses six host crossings with packed owner access"),
 		MetricsOverlapResult.HostImportCallCount - MetricsTickResult.HostImportCallCount,
-		8);
+		6);
 	MetricsSession.UnloadLive();
 	PickupActor->SetActorRotation(FRotator(0.0, 10.0, 0.0));
 	PickupActor->SetActorHiddenInGame(false);

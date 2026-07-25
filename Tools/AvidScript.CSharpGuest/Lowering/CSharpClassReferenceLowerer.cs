@@ -45,9 +45,16 @@ internal static class CSharpClassReferenceLowerer
                 NumberStyles.Integer,
                 CultureInfo.InvariantCulture,
                 out int ordinal)
-            || ordinal < 0)
+            || ordinal < 0
+            || operation.TypeId is null
+            || !CSharpClassReferencePolicy.IsAuthorizedOrdinal(
+                context.Document,
+                operation.TypeId,
+                ordinal))
         {
-            context.Add("ASCG1004", $"Block {blockOrdinal} class reference requires a generated non-negative ordinal literal.");
+            context.Add(
+                "ASCG1004",
+                $"Block {blockOrdinal} class reference requires a generated ordinal published for its nominal wrapper.");
             return true;
         }
 

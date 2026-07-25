@@ -75,6 +75,30 @@ internal static class WasmMemoryEmitter
         }
     }
 
+    public static void WriteZero(
+        WasmBinaryWriter writer,
+        Action<WasmBinaryWriter> writeDestinationAddress,
+        int size)
+    {
+        ArgumentNullException.ThrowIfNull(writeDestinationAddress);
+        if (size < 0)
+        {
+            throw new OverflowException("Invalid WASM memory zero range.");
+        }
+
+        int written = 0;
+        while (written < size)
+        {
+            int remaining = size - written;
+            int chunk = remaining >= 4 ? 4 : remaining >= 2 ? 2 : 1;
+            writeDestinationAddress(writer);
+            writer.WriteByte(0x41);
+            writer.WriteS32(0);
+            WriteChunkStore(writer, chunk, checked((uint)written));
+            written += chunk;
+        }
+    }
+
     public static void WriteArrayElementAddress(
         WasmBinaryWriter writer,
         Action<WasmBinaryWriter> writeArrayAddress,

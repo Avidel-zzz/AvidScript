@@ -268,6 +268,21 @@ internal sealed class WasmFunctionCompiler
     {
         GuestConstant constant = instruction.Constant!;
         GuestType targetType = moduleLayout.Types[registers[instruction.ResultId!].TypeId];
+        if (IsMemoryValue(instruction.ResultId!))
+        {
+            if (constant.Kind != "zero")
+            {
+                throw new NotSupportedException(
+                    $"Memory constant kind '{constant.Kind}' is not implemented.");
+            }
+
+            WasmMemoryEmitter.WriteZero(
+                body,
+                writer => WriteLocalGet(writer, localIndices[instruction.ResultId!]),
+                targetType.Size);
+            return;
+        }
+
         switch (targetType.Storage)
         {
             case "i32":

@@ -448,7 +448,8 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 		[](const FAvidScriptWasmRequiredImport& Import)
 		{
 			return Import.ModuleName == TEXT("avidscript")
-				&& Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive);
+				&& (Import.ImportName.StartsWith(TEXT("avid_ue_"), ESearchCase::CaseSensitive)
+					|| Import.ImportName == TEXT("avid_owner_get_handle"));
 		});
 	if (bRequiresDynamicBindingPackage && !Manifest.BindingPackage.IsValid())
 	{
@@ -458,6 +459,24 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 			TEXT("binding_package_missing"),
 			TEXT("manifest declares generated UE imports without a loaded binding package"),
 			TEXT("load the script through its verified .avidscript.json manifest"));
+		return false;
+	}
+
+	const bool bRequiresPackedOwnerCapability = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& Import)
+		{
+			return Import.ModuleName == TEXT("avidscript")
+				&& Import.ImportName == TEXT("avid_owner_get_handle");
+		});
+	if (bRequiresPackedOwnerCapability
+		&& Manifest.BindingPackage->GetExpectedSelfClass() == nullptr)
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<manifest>"),
+			TEXT("binding_package_import_mismatch"),
+			TEXT("packed owner import requires a schema v6 binding package with ExpectedSelfClass"),
+			TEXT("rebuild the script and binding package as one transaction"));
 		return false;
 	}
 

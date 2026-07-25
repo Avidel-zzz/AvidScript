@@ -431,7 +431,7 @@ NativeSymbol GCompatibilityNativeSymbols[] = {
 #endif
 }
 
-bool IsAvidScriptWamrStaticHostImport(const FString& ModuleName, const FString& ImportName)
+bool IsAvidScriptVmStaticHostImport(const FString& ModuleName, const FString& ImportName)
 {
 	if (ModuleName != TEXT("avidscript") && ModuleName != TEXT("env"))
 	{

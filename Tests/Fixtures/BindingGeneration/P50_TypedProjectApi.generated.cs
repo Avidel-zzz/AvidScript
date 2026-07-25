@@ -22,6 +22,11 @@ public readonly struct TSubclassOfAStaticMeshActor
     }
 
     internal int AvidScriptOrdinal => Ordinal;
+
+    public static implicit operator TSubclassOfAActor(TSubclassOfAStaticMeshActor value)
+    {
+        return new(value.Ordinal);
+    }
 }
 
 public static class ProjectClasses
@@ -45,8 +50,8 @@ internal readonly struct FAvidScriptObjectHandle
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct UObject
 {
-    private readonly int Slot;
-    private readonly int Generation;
+    internal readonly int Slot;
+    internal readonly int Generation;
 
     internal UObject(int slot, int generation)
     {
@@ -64,8 +69,8 @@ public readonly struct UObject
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct AActor
 {
-    private readonly int Slot;
-    private readonly int Generation;
+    internal readonly int Slot;
+    internal readonly int Generation;
 
     internal AActor(int slot, int generation)
     {
@@ -84,11 +89,11 @@ public readonly struct AActor
         return new(value.Slot, value.Generation);
     }
 
-    public UObject TryCast()
+    public static AActor TryCast(UObject value)
     {
-        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 0) != 0)
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)
         {
-            return new(Slot, Generation);
+            return new(value.Slot, value.Generation);
         }
         return default;
     }
@@ -97,8 +102,8 @@ public readonly struct AActor
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct AStaticMeshActor
 {
-    private readonly int Slot;
-    private readonly int Generation;
+    internal readonly int Slot;
+    internal readonly int Generation;
 
     internal AStaticMeshActor(int slot, int generation)
     {
@@ -117,11 +122,11 @@ public readonly struct AStaticMeshActor
         return new(value.Slot, value.Generation);
     }
 
-    public AActor TryCast()
+    public static AStaticMeshActor TryCast(AActor value)
     {
-        if (AvidScriptNative.ObjectTypeIsA(Slot, Generation, 1) != 0)
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0)
         {
-            return new(Slot, Generation);
+            return new(value.Slot, value.Generation);
         }
         return default;
     }
@@ -137,6 +142,7 @@ public static class UE
             return new((int)packedHandle, (int)(packedHandle >> 32));
         }
     }
+
     public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);
     public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;
 

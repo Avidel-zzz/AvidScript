@@ -411,8 +411,9 @@ foreach ($RequiredWasmLayoutParserContract in @(
 if (-not $RuntimeReloadSource.Contains('LoadManifestDebugMap') -or
     -not $RuntimeReloadSource.Contains('TryResolveDebugMapPathFromManifest') -or
     -not $RuntimeReloadSource.Contains('InspectAvidScriptWasmModuleLayout') -or
-    -not $RuntimeReloadSource.Contains('debug_map_wasm_layout_invalid') -or
+    -not $RuntimeReloadSource.Contains('wasm_layout_invalid') -or
     -not $RuntimeReloadSource.Contains('debug_map_wasm_layout_mismatch') -or
+    -not $RuntimeReloadSource.Contains('LoadManifestDebugMap(*RootObject, ManifestFullPath, WasmLayout') -or
     -not $RuntimeReloadSource.Contains('DebugImportedFunctionCount') -or
     -not $RuntimeReloadSource.Contains('DebugDefinedFunctionCount')) {
     Add-Violation 'Runtime reload must resolve and validate the immutable debug map before candidate activation'
@@ -566,6 +567,16 @@ $CSharpLiveReloadCompletionSource = Read-RequiredFile 'Source/AvidScriptEditor/P
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
+foreach ($RequiredEmitterSchemaContract in @(
+    'Package.SchemaVersion < 6',
+    'FAvidScriptBindingPackage::LoadDescriptor',
+    'FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical',
+    'ValidateCanonicalDescriptor'
+)) {
+    if (-not $CSharpBindingEmitterSource.Contains($RequiredEmitterSchemaContract)) {
+        Add-Violation "C# binding emitter is missing current descriptor schema contract $RequiredEmitterSchemaContract"
+    }
+}
 foreach ($RequiredProjectProfileContract in @(
     'FAvidScriptProjectBindingProfileSpec',
     'FAvidScriptProjectBindingClassSpec',
@@ -898,11 +909,58 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-if (-not $CSharpBindingPackageSource.Contains('[int]$Descriptor.schema_version -ne 5')) {
-    Add-Violation 'C# binding package resolver must accept descriptor schema v5 class reference packages'
+foreach ($RequiredDescriptorSchemaVersion in 2..6) {
+    $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
+    if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v6 compatibility: $RequiredDescriptorSchemaToken"
+    }
 }
-if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5')) {
-    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5 class reference packages'
+foreach ($PackedOwnerContract in @(
+    "avidscript.owner_get_handle.v1",
+    "avid_owner_get_handle",
+    "()I",
+    'Try-GetAvidScriptBindingJsonInt32',
+    '$DescriptorSchemaVersion -ne 6',
+    '[string]::IsNullOrWhiteSpace($SelfTypeId)',
+    'packed owner capability requires descriptor schema v6 with a non-empty self_type_id')) {
+    if (-not $CSharpBindingPackageSource.Contains($PackedOwnerContract)) {
+        Add-Violation "C# binding package resolver must validate the packed owner intrinsic exactly: $PackedOwnerContract"
+    }
+}
+if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
+    -not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6')) {
+    Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5 and v6 typed object packages'
+}
+foreach ($RequiredRuntimeManifestImportContract in @(
+    'avidscript.owner_get_handle.v1',
+    'bSeenPackedOwner',
+    'TryGetInt32Field(*ImportObject, TEXT("ordinal"), Ordinal)',
+    'DescriptorSchemaVersion != 6',
+    'GetExpectedSelfClass() == nullptr',
+    '!bBindingPackageHasPackedOwnerCapability',
+    'manifest_wasm_import_mismatch',
+    'DeclaredImport->StableId != RuntimeImport.StableId',
+    'DeclaredImport->Ordinal != RuntimeImport.Ordinal',
+    'DeclaredImport->Signature != RuntimeImport.Signature')) {
+    if (-not $RuntimeReloadSource.Contains($RequiredRuntimeManifestImportContract)) {
+        Add-Violation "Runtime reload manifest must distinguish packed owner access and compare dynamic import identity exactly: $RequiredRuntimeManifestImportContract"
+    }
+}
+if (-not $RuntimeSessionSource.Contains('Import.ImportName == TEXT("avid_owner_get_handle")') -or
+    -not $RuntimeSessionSource.Contains('bRequiresDynamicBindingPackage && !Manifest.BindingPackage.IsValid()') -or
+    -not $RuntimeSessionSource.Contains('bRequiresPackedOwnerCapability') -or
+    -not $RuntimeSessionSource.Contains('Manifest.BindingPackage->GetExpectedSelfClass() == nullptr')) {
+    Add-Violation 'Runtime activation must require a verified schema v6 Self package for packed owner and a verified package for generated UE imports'
+}
+foreach ($RequiredLegacyClassReferenceRendererContract in @(
+    'bHasTypedClassReferenceSurface',
+    '? Reference.ResultTypeId',
+    ': Reference.BaseClassPath',
+    'TEXT("object:") + Reference.BaseClassPath',
+    'class_references.base_class_path')) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredLegacyClassReferenceRendererContract)) {
+        Add-Violation "C# binding renderer must preserve schema v5 class-reference emission from base_class_path: $RequiredLegacyClassReferenceRendererContract"
+    }
 }
 if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
     $CSharpBindingRendererSource.Contains('CustomTimeDilation') -or
@@ -1023,7 +1081,7 @@ $CompatibilityNativeSymbolsSource = Get-SourceSlice `
     'compatibility WAMR native symbol initializer'
 $StaticHostImportPolicySource = Get-SourceSlice `
     $VmHostBindingsSource `
-    'bool IsAvidScriptWamrStaticHostImport(' `
+    'bool IsAvidScriptVmStaticHostImport(' `
     'bool RegisterAvidScriptWamrHostBindings()' `
     'static host import policy'
 $StaticHostRegistrationSource = Get-SourceSlice `
@@ -1135,7 +1193,7 @@ if ($GeneratedBindingImportLiterals.Count -ne 1 -or
 foreach ($RequiredDynamicRegistryContract in @(
     'Import.ModuleName != TEXT("avidscript")',
     'IsAvidScriptDynamicSafeToken(Import.ImportName)',
-    'IsAvidScriptWamrStaticHostImport(Import.ModuleName, Import.ImportName)',
+    'IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)',
     'InvokeAvidScriptDynamicRawImport'
 )) {
     if (-not $VmDynamicRegistrySource.Contains($RequiredDynamicRegistryContract)) {
@@ -1158,6 +1216,11 @@ $EmitReferenceSource = Get-SourceSlice `
     'bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(' `
     'bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(' `
     'generated C# facade publisher'
+$EmitManifestSource = Get-SourceSlice `
+    ($CSharpBindingRendererSource + "`n<AVIDSCRIPT_EOF>") `
+    'bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(' `
+    '<AVIDSCRIPT_EOF>' `
+    'generated C# manifest publisher'
 foreach ($GenericRendererSource in @($RenderMethodSource, $RenderPropertySource)) {
     if (-not $GenericRendererSource.Contains('*EscapeCSharpString(Binding.HostImport.Module)') -or
         -not $GenericRendererSource.Contains('*EscapeCSharpString(Binding.HostImport.Name)')) {
@@ -1173,6 +1236,68 @@ foreach ($RequiredGenericFacadeContract in @(
 )) {
     if (-not $EmitReferenceSource.Contains($RequiredGenericFacadeContract)) {
         Add-Violation "typed facade must remain descriptor/spec driven: $RequiredGenericFacadeContract"
+    }
+}
+foreach ($RequiredObjectTypeManifestContract in @(
+    'FAvidScriptObjectTypeBindings::GetSpecs()',
+    'Spec.StableId',
+    'Spec.ImportName',
+    'Spec.Signature')) {
+    if (-not $EmitManifestSource.Contains($RequiredObjectTypeManifestContract)) {
+        Add-Violation "generated C# manifest must publish the shared object-type capability exactly: $RequiredObjectTypeManifestContract"
+    }
+}
+foreach ($RequiredSliceCapabilityContract in @(
+    'FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel)',
+    'FAvidScriptObjectTypeBindings::GetSpecs()',
+    'avidscript.owner_get_handle.v1',
+    'slice_import_identity_mismatch')) {
+    if (-not $CSharpBindingSliceSource.Contains($RequiredSliceCapabilityContract)) {
+        Add-Violation "C# binding slice identity must validate every shared manifest capability: $RequiredSliceCapabilityContract"
+    }
+}
+if (-not $RuntimeReloadSource.Contains('bRequiresPackedOwnerCapability') -or
+    -not $RuntimeReloadSource.Contains('!bBindingPackageHasPackedOwnerCapability') -or
+    $RuntimeReloadSource.Contains('bRequiresPackedOwnerCapability != bBindingPackageHasPackedOwnerCapability')) {
+    Add-Violation 'Runtime reload must treat package capabilities as an authorization superset while requiring every script packed-owner import to be authorized'
+}
+foreach ($RequiredWasmImportIdentityContract in @(
+    'WasmLayout.FunctionImports',
+    'Manifest.RequiredImports',
+    'manifest_wasm_import_mismatch')) {
+    if (-not $RuntimeReloadSource.Contains($RequiredWasmImportIdentityContract)) {
+        Add-Violation "Runtime reload must compare script manifest imports with the actual WASM function import identities: $RequiredWasmImportIdentityContract"
+    }
+}
+foreach ($RequiredDynamicImportAuthorizationContract in @(
+    'IsAvidScriptVmStaticHostImport',
+    'Manifest.BindingPackage->GetVmPackage()',
+    'AuthorizedDynamicImports',
+    'VmBindingPackage->Imports',
+    'binding_package_import_mismatch')) {
+    if (-not $RuntimeReloadSource.Contains($RequiredDynamicImportAuthorizationContract)) {
+        Add-Violation "Runtime reload must authorize each non-static WASM import against the current immutable binding package: $RequiredDynamicImportAuthorizationContract"
+    }
+}
+if (-not $VmContractHeader.Contains('AVIDSCRIPTVM_API bool IsAvidScriptVmStaticHostImport')) {
+    Add-Violation 'VM must publish one canonical static-host-import policy for registry and Runtime authorization checks'
+}
+foreach ($RequiredPackedOwnerRuntimeDefense in @(
+    'BindingPackage.IsValid()',
+    'BindingPackage->GetExpectedSelfClass()',
+    'Packed owner access requires a binding package with ExpectedSelfClass')) {
+    if (-not $WasmRuntimeSource.Contains($RequiredPackedOwnerRuntimeDefense)) {
+        Add-Violation "packed owner runtime handler must independently require an authorized Self package: $RequiredPackedOwnerRuntimeDefense"
+    }
+}
+foreach ($RequiredWasmInspectorImportContract in @(
+    'FAvidScriptWasmFunctionImport',
+    'OutLayout.FunctionImports',
+    'FunctionImport.ModuleName',
+    'FunctionImport.ImportName')) {
+    if (-not $VmModuleLayoutSource.Contains($RequiredWasmInspectorImportContract) -and
+        -not $VmModuleLayoutHeader.Contains($RequiredWasmInspectorImportContract)) {
+        Add-Violation "WASM module layout inspector must preserve function import identity: $RequiredWasmInspectorImportContract"
     }
 }
 $AllowedFixedRendererImports = @(
@@ -1531,6 +1656,28 @@ foreach ($RequiredClassReferenceGuestContract in @(
         Add-Violation "nominal C# Guest class reference lowering is missing $RequiredClassReferenceGuestContract"
     }
 }
+foreach ($RequiredClassReferenceAuthorizationContract in @(
+    'ProjectClassesSymbolId',
+    'UeSymbolId',
+    'symbol.Name == "SpawnActor"',
+    'symbol.Name == "actorClass"',
+    'IsAuthorizedType(sourceType.Id, document.Symbols)',
+    'IsAuthorizedType(targetType.Id, document.Symbols)')) {
+    if (-not $CSharpClassReferencePolicySource.Contains($RequiredClassReferenceAuthorizationContract)) {
+        Add-Violation "C# Guest class references must be authorized by the exact generated public API surface: $RequiredClassReferenceAuthorizationContract"
+    }
+}
+foreach ($RequiredClassReferenceOrdinalContract in @(
+    'IsAuthorizedOrdinal',
+    'TryReadPublishedOrdinal',
+    'IsCompatibleClassReferenceType',
+    'publishedOrdinal == ordinal',
+    'CSharpClassReferencePolicy.IsAuthorizedOrdinal')) {
+    if (-not $CSharpClassReferencePolicySource.Contains($RequiredClassReferenceOrdinalContract) -and
+        -not $CSharpClassReferenceLowererSource.Contains($RequiredClassReferenceOrdinalContract)) {
+        Add-Violation "C# Guest class reference ordinals must be bound to compatible generated ProjectClasses provenance: $RequiredClassReferenceOrdinalContract"
+    }
+}
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
@@ -1568,6 +1715,14 @@ foreach ($RequiredSemanticCacheBuildContract in @(
         Add-Violation "C# build pipeline is missing semantic cache contract $RequiredSemanticCacheBuildContract"
     }
 }
+foreach ($RequiredDirectAbiBuildContract in @(
+    '$RequiredExports.Count -eq 0',
+    'required_export_count = $RequiredExports.Count',
+    'direct_abi_contract_invalid')) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredDirectAbiBuildContract)) {
+        Add-Violation "C# build pipeline must reject an empty or invalid Direct ABI export surface: $RequiredDirectAbiBuildContract"
+    }
+}
 foreach ($RequiredDebugArtifactBuildContract in @(
     'imported_function_count',
     'defined_function_count',
@@ -1578,6 +1733,18 @@ foreach ($RequiredDebugArtifactBuildContract in @(
     if (-not $CSharpBuildScriptSource.Contains($RequiredDebugArtifactBuildContract)) {
         Add-Violation "C# build pipeline is missing debug artifact index-space contract $RequiredDebugArtifactBuildContract"
     }
+}
+foreach ($RequiredOptionalExportContract in @(
+    '$UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })',
+    '$MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })',
+    '$UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })')) {
+    if (-not $CSharpBuildScriptSource.Contains($RequiredOptionalExportContract)) {
+        Add-Violation "C# direct ABI must validate only the event hooks declared by the script: $RequiredOptionalExportContract"
+    }
+}
+if ($CSharpBuildScriptSource.Contains(
+        '$MissingDeclaredExports = @($DirectAbiExports | Where-Object { $RequiredExports -notcontains $_ })')) {
+    Add-Violation 'C# direct ABI must not require every optional event hook in every script'
 }
 foreach ($RequiredPreparedHelperContract in @(
     'Import-AvidScriptCSharpPreparedSemantic',
@@ -1592,6 +1759,18 @@ foreach ($RequiredPreparedHelperContract in @(
 )) {
     if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedHelperContract)) {
         Add-Violation "prepared semantic helper is missing validation contract $RequiredPreparedHelperContract"
+    }
+}
+foreach ($RequiredPreparedOwnerContract in @(
+    'avidscript.owner_get_handle.v1',
+    '$Ordinal -eq -1',
+    'avid_owner_get_handle',
+    '$Signature -ceq "()I"',
+    'Try-GetAvidScriptBindingJsonInt32',
+    '$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 6',
+    '$ExpectedAuthorizationPackage.SelfTypeId')) {
+    if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedOwnerContract)) {
+        Add-Violation "prepared semantic helper must validate packed owner provenance exactly: $RequiredPreparedOwnerContract"
     }
 }
 foreach ($RequiredPreparedPublicationContract in @(

@@ -529,6 +529,25 @@ bool FAvidScriptReloadGeneratedImportsRequirePackageTest::RunTest(const FString&
 		Result.ErrorCategory,
 		FString(TEXT("binding_package_missing")));
 	TestFalse(TEXT("Rejected generated import module is not activated"), Session.IsLiveLoaded());
+
+	FAvidScriptWasmReloadManifest PackedOwnerManifest = FAvidScriptWasmReloadManifest::MakeSmoke(
+		TEXT("reload_packed_owner_without_package"));
+	PackedOwnerManifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("avid_owner_get_handle") }
+	};
+	FAvidScriptWasmReloadSession PackedOwnerSession;
+	TestFalse(
+		TEXT("Packed owner import fails closed without a binding package"),
+		PackedOwnerSession.LoadInitialModule(
+			GAvidScriptReloadCompatibleWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+			PackedOwnerManifest,
+			Result));
+	TestEqual(
+		TEXT("Missing packed owner package has a stable category"),
+		Result.ErrorCategory,
+		FString(TEXT("binding_package_missing")));
+	TestFalse(TEXT("Rejected packed owner module is not activated"), PackedOwnerSession.IsLiveLoaded());
 	return true;
 }
 

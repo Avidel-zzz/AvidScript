@@ -159,6 +159,10 @@ struct FAvidScriptVmBindingPackage
 	TArray<FAvidScriptVmDynamicImport> Imports;
 };
 
+AVIDSCRIPTVM_API bool IsAvidScriptVmStaticHostImport(
+	const FString& ModuleName,
+	const FString& ImportName);
+
 struct FAvidScriptVmLoadConfig
 {
 	uint32 StackSize = 64 * 1024;

@@ -2,6 +2,7 @@
 
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 
+#include "AvidScriptVmBackend.h"
 #include "AvidScriptWasmModuleLayout.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -517,8 +518,10 @@ bool LoadStateMigrationManifest(
 
 bool ValidateBindingPackageManifest(
 	const FAvidScriptWasmReloadManifest& Manifest,
+	bool& OutHasPackedOwnerCapability,
 	FAvidScriptWasmReloadManifestLoadResult& OutResult)
 {
+	OutHasPackedOwnerCapability = false;
 	FString PackageManifestJson;
 	if (!FFileHelper::LoadFileToString(PackageManifestJson, *Manifest.BindingPackageManifestFile))
 	{
@@ -549,13 +552,14 @@ bool ValidateBindingPackageManifest(
 	FString PackageName;
 	FString PackageHash;
 	FString DescriptorSha256;
-	if (!PackageObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
+	if (!TryGetInt32Field(*PackageObject, TEXT("schema_version"), SchemaVersion)
 		|| SchemaVersion != 1
-		|| !PackageObject->TryGetNumberField(TEXT("descriptor_schema_version"), DescriptorSchemaVersion)
+		|| !TryGetInt32Field(*PackageObject, TEXT("descriptor_schema_version"), DescriptorSchemaVersion)
 		|| (DescriptorSchemaVersion != 2
 			&& DescriptorSchemaVersion != 3
 			&& DescriptorSchemaVersion != 4
-			&& DescriptorSchemaVersion != 5)
+			&& DescriptorSchemaVersion != 5
+			&& DescriptorSchemaVersion != 6)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -634,24 +638,63 @@ bool ValidateBindingPackageManifest(
 		return false;
 	}
 
-	TSet<FString> DeclaredImports;
+	TMap<FString, FAvidScriptVmDynamicImport> DeclaredImports;
+	bool bSeenPackedOwner = false;
 	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImportValues)
 	{
 		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid()
 			? ImportValue->AsObject()
 			: nullptr;
+		FString StableId;
+		int32 Ordinal = INDEX_NONE;
 		FString ModuleName;
 		FString ImportName;
+		FString Signature;
 		if (!ImportObject.IsValid()
+			|| !ImportObject->TryGetStringField(TEXT("stable_id"), StableId)
+			|| !TryGetInt32Field(*ImportObject, TEXT("ordinal"), Ordinal)
 			|| !ImportObject->TryGetStringField(TEXT("module"), ModuleName)
 			|| !ImportObject->TryGetStringField(TEXT("name"), ImportName)
+			|| !ImportObject->TryGetStringField(TEXT("signature"), Signature)
+			|| StableId.IsEmpty()
 			|| ModuleName.IsEmpty()
-			|| ImportName.IsEmpty())
+			|| ImportName.IsEmpty()
+			|| Signature.IsEmpty())
 		{
 			SetManifestLoadFailure(
 				OutResult,
 				TEXT("binding_package_invalid"),
 				TEXT("package.json required_imports contains an invalid import"),
+				TEXT("republish the generated binding package"));
+			return false;
+		}
+
+		const bool bIsPackedOwner =
+			StableId == TEXT("avidscript.owner_get_handle.v1")
+			&& Ordinal == INDEX_NONE
+			&& ModuleName == TEXT("avidscript")
+			&& ImportName == TEXT("avid_owner_get_handle")
+			&& Signature == TEXT("()I");
+		if (bIsPackedOwner)
+		{
+			if (bSeenPackedOwner)
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("binding_package_invalid"),
+					TEXT("package.json required_imports contains a duplicate packed owner import"),
+					TEXT("republish the generated binding package"));
+				return false;
+			}
+			bSeenPackedOwner = true;
+			continue;
+		}
+		if (Ordinal < 0)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_invalid"),
+				TEXT("package.json required_imports contains an invalid dynamic import ordinal"),
 				TEXT("republish the generated binding package"));
 			return false;
 		}
@@ -665,8 +708,26 @@ bool ValidateBindingPackageManifest(
 				TEXT("package.json required_imports contains a duplicate import"),
 				TEXT("republish the generated binding package"));
 			return false;
-		}
-		DeclaredImports.Add(ImportKey);
+			}
+		FAvidScriptVmDynamicImport DeclaredImport;
+		DeclaredImport.StableId = MoveTemp(StableId);
+		DeclaredImport.Ordinal = static_cast<uint32>(Ordinal);
+		DeclaredImport.ModuleName = MoveTemp(ModuleName);
+		DeclaredImport.ImportName = MoveTemp(ImportName);
+		DeclaredImport.Signature = MoveTemp(Signature);
+		DeclaredImports.Add(ImportKey, MoveTemp(DeclaredImport));
+	}
+
+	if (bSeenPackedOwner
+		&& (DescriptorSchemaVersion != 6
+			|| Manifest.BindingPackage->GetExpectedSelfClass() == nullptr))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_import_mismatch"),
+			TEXT("package.json packed owner capability requires descriptor schema v6 self_type_id"),
+			TEXT("regenerate the schema v6 binding package from one reflection snapshot"));
+		return false;
 	}
 
 	const TArray<FAvidScriptVmDynamicImport>& RuntimeImports = Manifest.BindingPackage->GetVmPackage().Imports;
@@ -681,13 +742,18 @@ bool ValidateBindingPackageManifest(
 	}
 	for (const FAvidScriptVmDynamicImport& RuntimeImport : RuntimeImports)
 	{
-		if (!DeclaredImports.Contains(RuntimeImport.ModuleName + TEXT("\n") + RuntimeImport.ImportName))
+		const FAvidScriptVmDynamicImport* DeclaredImport =
+			DeclaredImports.Find(RuntimeImport.ModuleName + TEXT("\n") + RuntimeImport.ImportName);
+		if (DeclaredImport == nullptr
+			|| DeclaredImport->StableId != RuntimeImport.StableId
+			|| DeclaredImport->Ordinal != RuntimeImport.Ordinal
+			|| DeclaredImport->Signature != RuntimeImport.Signature)
 		{
 			SetManifestLoadFailure(
 				OutResult,
 				TEXT("binding_package_import_mismatch"),
 				FString::Printf(
-					TEXT("descriptor dynamic import is missing from package.json: %s.%s"),
+					TEXT("descriptor dynamic import is missing or differs from package.json: %s.%s"),
 					*RuntimeImport.ModuleName,
 					*RuntimeImport.ImportName),
 				TEXT("regenerate the binding package from one reflection snapshot"));
@@ -695,13 +761,14 @@ bool ValidateBindingPackageManifest(
 		}
 	}
 
+	OutHasPackedOwnerCapability = bSeenPackedOwner;
 	return true;
 }
 
 bool LoadManifestDebugMap(
 	const FJsonObject& RootObject,
 	const FString& ManifestFullPath,
-	TConstArrayView<uint8> Bytecode,
+	const FAvidScriptWasmModuleLayout& WasmLayout,
 	FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadManifestLoadResult& OutResult)
 {
@@ -753,17 +820,6 @@ bool LoadManifestDebugMap(
 		return false;
 	}
 
-	FAvidScriptWasmModuleLayout WasmLayout;
-	FString WasmLayoutError;
-	if (!InspectAvidScriptWasmModuleLayout(Bytecode, WasmLayout, WasmLayoutError))
-	{
-		SetManifestLoadFailure(
-			OutResult,
-			TEXT("debug_map_wasm_layout_invalid"),
-			WasmLayoutError,
-			TEXT("rebuild the WASM module and debug artifacts from one supported toolchain"));
-		return false;
-	}
 	if (DebugImportedFunctionCount != static_cast<int32>(WasmLayout.ImportedFunctionCount)
 		|| DebugDefinedFunctionCount != static_cast<int32>(WasmLayout.DefinedFunctionCount)
 		|| Manifest.RequiredImports.Num() != static_cast<int32>(WasmLayout.ImportedFunctionCount))
@@ -935,7 +991,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	}
 
 	int32 SchemaVersion = 0;
-	if (!RootObject->TryGetNumberField(TEXT("schema_version"), SchemaVersion) ||
+	if (!TryGetInt32Field(*RootObject, TEXT("schema_version"), SchemaVersion) ||
 		SchemaVersion != FAvidScriptWasmReloadManifest::SupportedSchemaVersion)
 	{
 		SetManifestLoadFailure(
@@ -954,7 +1010,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		return false;
 	}
 
-	if (!RootObject->TryGetNumberField(TEXT("abi_version"), Manifest.AbiVersion))
+	if (!TryGetInt32Field(*RootObject, TEXT("abi_version"), Manifest.AbiVersion))
 	{
 		SetManifestLoadFailure(
 			OutResult,
@@ -1054,6 +1110,19 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		return false;
 	}
 
+	FAvidScriptWasmModuleLayout WasmLayout;
+	FString WasmLayoutError;
+	if (!InspectAvidScriptWasmModuleLayout(Bytecode, WasmLayout, WasmLayoutError))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("wasm_layout_invalid"),
+			WasmLayoutError,
+			TEXT("rebuild the WASM module with the supported backend"));
+		return false;
+	}
+
+	bool bBindingPackageHasPackedOwnerCapability = false;
 	const TSharedPtr<FJsonObject>* BindingPackageObjectPtr = nullptr;
 	if (RootObject->TryGetObjectField(TEXT("binding_package"), BindingPackageObjectPtr)
 		&& BindingPackageObjectPtr != nullptr
@@ -1145,7 +1214,10 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 				TEXT("rebuild the script and binding package as one transaction"));
 			return false;
 		}
-		if (!ValidateBindingPackageManifest(Manifest, OutResult))
+		if (!ValidateBindingPackageManifest(
+				Manifest,
+				bBindingPackageHasPackedOwnerCapability,
+				OutResult))
 		{
 			return false;
 		}
@@ -1186,6 +1258,7 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 		return false;
 	}
 
+	bool bRequiresPackedOwnerCapability = false;
 	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImportValues)
 	{
 		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid() ? ImportValue->AsObject() : nullptr;
@@ -1206,10 +1279,144 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 			return false;
 		}
 
+		const bool bIsPackedOwner =
+			RequiredImport.ModuleName == TEXT("avidscript")
+			&& RequiredImport.ImportName == TEXT("avid_owner_get_handle");
+		if (bIsPackedOwner && bRequiresPackedOwnerCapability)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("manifest_invalid"),
+				TEXT("required_imports contains a duplicate packed owner import"),
+				TEXT("rebuild the script manifest from the actual WASM import table"));
+			return false;
+		}
+		bRequiresPackedOwnerCapability |= bIsPackedOwner;
 		Manifest.RequiredImports.Add(MoveTemp(RequiredImport));
 	}
 
-	if (!LoadManifestDebugMap(*RootObject, ManifestFullPath, MakeArrayView(Bytecode), Manifest, OutResult))
+	const auto MakeImportIdentityKey = [](const FString& ModuleName, const FString& ImportName)
+	{
+		return FString::Printf(TEXT("%d:"), ModuleName.Len())
+			+ ModuleName
+			+ FString::Printf(TEXT("%d:"), ImportName.Len())
+			+ ImportName;
+	};
+	TMap<FString, int32> WasmImportCounts;
+	for (const FAvidScriptWasmFunctionImport& FunctionImport : WasmLayout.FunctionImports)
+	{
+		++WasmImportCounts.FindOrAdd(MakeImportIdentityKey(
+			FunctionImport.ModuleName,
+			FunctionImport.ImportName));
+	}
+	TMap<FString, int32> ManifestImportCounts;
+	for (const FAvidScriptWasmRequiredImport& RequiredImport : Manifest.RequiredImports)
+	{
+		++ManifestImportCounts.FindOrAdd(MakeImportIdentityKey(
+			RequiredImport.ModuleName,
+			RequiredImport.ImportName));
+	}
+	bool bImportIdentitiesMatch =
+		WasmImportCounts.Num() == ManifestImportCounts.Num()
+		&& WasmLayout.FunctionImports.Num() == Manifest.RequiredImports.Num();
+	if (bImportIdentitiesMatch)
+	{
+		for (const TPair<FString, int32>& Pair : WasmImportCounts)
+		{
+			const int32* ManifestCount = ManifestImportCounts.Find(Pair.Key);
+			if (ManifestCount == nullptr || *ManifestCount != Pair.Value)
+			{
+				bImportIdentitiesMatch = false;
+				break;
+			}
+		}
+	}
+	if (!bImportIdentitiesMatch)
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("manifest_wasm_import_mismatch"),
+			FString::Printf(
+				TEXT("script manifest imports=%d differ from WASM function imports=%d"),
+				Manifest.RequiredImports.Num(),
+				WasmLayout.FunctionImports.Num()),
+			TEXT("rebuild the script manifest from the actual WASM import section"));
+		return false;
+	}
+
+	const FAvidScriptVmBindingPackage* VmBindingPackage =
+		Manifest.BindingPackage.IsValid()
+			? &Manifest.BindingPackage->GetVmPackage()
+			: nullptr;
+	TSet<FString> AuthorizedDynamicImports;
+	if (VmBindingPackage != nullptr)
+	{
+		AuthorizedDynamicImports.Reserve(VmBindingPackage->Imports.Num());
+		for (const FAvidScriptVmDynamicImport& Import : VmBindingPackage->Imports)
+		{
+			AuthorizedDynamicImports.Add(MakeImportIdentityKey(
+				Import.ModuleName,
+				Import.ImportName));
+		}
+	}
+	for (const FAvidScriptWasmRequiredImport& RequiredImport : Manifest.RequiredImports)
+	{
+		if (IsAvidScriptVmStaticHostImport(
+				RequiredImport.ModuleName,
+				RequiredImport.ImportName))
+		{
+			continue;
+		}
+		if (VmBindingPackage == nullptr)
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_missing"),
+				FString::Printf(
+					TEXT("dynamic import %s.%s requires a verified binding package"),
+					*RequiredImport.ModuleName,
+					*RequiredImport.ImportName),
+				TEXT("rebuild the script and binding package as one transaction"));
+			return false;
+		}
+		if (!AuthorizedDynamicImports.Contains(MakeImportIdentityKey(
+				RequiredImport.ModuleName,
+				RequiredImport.ImportName)))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_import_mismatch"),
+				FString::Printf(
+					TEXT("dynamic import %s.%s is not authorized by the current binding package"),
+					*RequiredImport.ModuleName,
+					*RequiredImport.ImportName),
+				TEXT("rebuild the script from the current binding package"));
+			return false;
+		}
+	}
+
+	if (bRequiresPackedOwnerCapability && !Manifest.BindingPackage.IsValid())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_missing"),
+			TEXT("packed owner import requires a verified schema v6 binding package"),
+			TEXT("rebuild the script and binding package as one transaction"));
+		return false;
+	}
+	if (bRequiresPackedOwnerCapability
+		&& (!bBindingPackageHasPackedOwnerCapability
+			|| Manifest.BindingPackage->GetExpectedSelfClass() == nullptr))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_import_mismatch"),
+			TEXT("script required_imports claims packed owner capability that the package does not authorize"),
+			TEXT("rebuild the schema v6 script and binding package as one transaction"));
+		return false;
+	}
+
+	if (!LoadManifestDebugMap(*RootObject, ManifestFullPath, WasmLayout, Manifest, OutResult))
 	{
 		return false;
 	}

@@ -138,7 +138,8 @@ internal static class CSharpGuestDataTests
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
         GuestDataSegment segment = module.DataSegments.Single(item => item.Kind == "utf8_string" && item.ElementCount == 6);
         byte[] expectedBytes = { 6, 0, 0, 0, (byte)'P', (byte)'l', (byte)'a', (byte)'y', (byte)'e', (byte)'r', 0 };
-        GuestImport import = module.Imports.Single(item => item.Module == "avidscript");
+        GuestImport import = module.Imports.Single(item =>
+            item.Module == "avidscript" && item.Name != "avid_owner_get_handle");
         GuestInstruction[] instructions = module.Functions.SelectMany(item => item.Blocks).SelectMany(item => item.Instructions).ToArray();
 
         Assert(lowering.Succeeded && validation.Succeeded,

@@ -29,6 +29,25 @@ function Test-AvidScriptBindingSha256 {
         $Value -cmatch "^[0-9a-f]{64}$"
 }
 
+function Try-GetAvidScriptBindingJsonInt32 {
+    param(
+        [object]$Value,
+        [Parameter(Mandatory = $true)][ref]$ParsedValue
+    )
+
+    if ($Value -is [int]) {
+        $ParsedValue.Value = $Value
+        return $true
+    }
+    if ($Value -is [long] -and
+        $Value -ge [int]::MinValue -and
+        $Value -le [int]::MaxValue) {
+        $ParsedValue.Value = [int]$Value
+        return $true
+    }
+    return $false
+}
+
 function Get-AvidScriptBindingFullPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -255,8 +274,18 @@ function Resolve-AvidScriptCSharpBindingPackage {
         throw "Binding package manifest JSON is invalid: $($_.Exception.Message)"
     }
 
-    if ([int]$Manifest.schema_version -ne 1) {
+    $ManifestSchemaVersion = 0
+    if (-not (Try-GetAvidScriptBindingJsonInt32 `
+            -Value $Manifest.schema_version `
+            -ParsedValue ([ref]$ManifestSchemaVersion)) -or
+        $ManifestSchemaVersion -ne 1) {
         throw "Binding package schema_version must be 1."
+    }
+    $ManifestDescriptorSchemaVersion = 0
+    if (-not (Try-GetAvidScriptBindingJsonInt32 `
+            -Value $Manifest.descriptor_schema_version `
+            -ParsedValue ([ref]$ManifestDescriptorSchemaVersion))) {
+        throw "Binding package descriptor_schema_version must be a JSON int32."
     }
     $PackageName = [string]$Manifest.package_name
     $PackageHash = [string]$Manifest.package_hash
@@ -297,31 +326,64 @@ function Resolve-AvidScriptCSharpBindingPackage {
     catch {
         throw "Binding descriptor JSON is invalid: $($_.Exception.Message)"
     }
-    if (([int]$Descriptor.schema_version -ne 2 -and
-        [int]$Descriptor.schema_version -ne 3 -and
-        [int]$Descriptor.schema_version -ne 4 -and
-        [int]$Descriptor.schema_version -ne 5) -or
+    $DescriptorSchemaVersion = 0
+    if (-not (Try-GetAvidScriptBindingJsonInt32 `
+            -Value $Descriptor.schema_version `
+            -ParsedValue ([ref]$DescriptorSchemaVersion)) -or
+        ($DescriptorSchemaVersion -ne 2 -and
+        $DescriptorSchemaVersion -ne 3 -and
+        $DescriptorSchemaVersion -ne 4 -and
+        $DescriptorSchemaVersion -ne 5 -and
+        $DescriptorSchemaVersion -ne 6) -or
+        $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
         throw "Binding descriptor identity does not match package.json."
+    }
+    $SelfTypeId = ""
+    if ($DescriptorSchemaVersion -eq 6) {
+        if ($Descriptor.self_type_id -isnot [string]) {
+            throw "Binding descriptor self_type_id must be a JSON string."
+        }
+        $SelfTypeId = [string]$Descriptor.self_type_id
     }
 
     $RequiredImports = @()
     $ImportKeys = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
+    $SeenPackedOwner = $false
     foreach ($Import in @($Manifest.required_imports)) {
+        $Ordinal = 0
+        $HasOrdinal = Try-GetAvidScriptBindingJsonInt32 `
+            -Value $Import.ordinal `
+            -ParsedValue ([ref]$Ordinal)
         $StableId = [string]$Import.stable_id
-        $Ordinal = [int]$Import.ordinal
         $Module = [string]$Import.module
         $Name = [string]$Import.name
         $Signature = [string]$Import.signature
-        if (-not (Test-AvidScriptBindingSha256 $StableId) -or
-            $null -eq $Import.ordinal -or
-            $Ordinal -lt 0 -or
+        $IsReflectedImport = (Test-AvidScriptBindingSha256 $StableId) -and $Ordinal -ge 0
+        $IsPackedOwnerImport =
+            $StableId -ceq 'avidscript.owner_get_handle.v1' -and
+            $Ordinal -eq -1 -and
+            $Module -ceq 'avidscript' -and
+            $Name -ceq 'avid_owner_get_handle' -and
+            $Signature -ceq '()I'
+        if (-not $HasOrdinal -or
+            $Import.stable_id -isnot [string] -or
+            $Import.module -isnot [string] -or
+            $Import.name -isnot [string] -or
+            $Import.signature -isnot [string] -or
             [string]::IsNullOrWhiteSpace($Module) -or
             [string]::IsNullOrWhiteSpace($Name) -or
-            [string]::IsNullOrWhiteSpace($Signature)) {
+            [string]::IsNullOrWhiteSpace($Signature) -or
+            (-not $IsReflectedImport -and -not $IsPackedOwnerImport)) {
             throw "Binding package required_imports contains invalid identity, ordinal, module, name, or signature data."
+        }
+        if ($IsPackedOwnerImport) {
+            if ($SeenPackedOwner) {
+                throw "Binding package required_imports contains duplicate packed owner capability."
+            }
+            $SeenPackedOwner = $true
         }
         $Key = "$Module`n$Name"
         if (-not $ImportKeys.Add($Key)) {
@@ -335,6 +397,11 @@ function Resolve-AvidScriptCSharpBindingPackage {
             Signature = $Signature
         }
     }
+    if ($SeenPackedOwner -and
+        ($DescriptorSchemaVersion -ne 6 -or
+            [string]::IsNullOrWhiteSpace($SelfTypeId))) {
+        throw "Binding package packed owner capability requires descriptor schema v6 with a non-empty self_type_id."
+    }
     if ($RequiredImports.Count -eq 0) {
         throw "Binding package required_imports must not be empty."
     }
@@ -344,6 +411,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         ManifestSha256 = Get-AvidScriptBindingSha256Hex $ManifestFullPath
         PackageName = $PackageName
         PackageHash = $PackageHash
+        DescriptorSchemaVersion = $DescriptorSchemaVersion
+        SelfTypeId = $SelfTypeId
         DescriptorPath = $DescriptorPath
         DescriptorSha256 = $DescriptorHash
         ReferenceSourcePath = $ReferenceSourcePath

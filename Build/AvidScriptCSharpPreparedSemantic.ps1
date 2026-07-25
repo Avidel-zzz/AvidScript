@@ -70,20 +70,42 @@ function Assert-AvidScriptPreparedSemanticUsedImports {
     $SeenKeys = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     $UsedImports = @($AuthorizationModel.used_imports)
+    $UsedImportCount = 0
     Assert-AvidScriptPreparedSemantic `
-        -Condition ([int]$AuthorizationModel.used_import_count -eq $UsedImports.Count) `
+        -Condition ((Try-GetAvidScriptBindingJsonInt32 `
+                -Value $AuthorizationModel.used_import_count `
+                -ParsedValue ([ref]$UsedImportCount)) -and
+            $UsedImportCount -eq $UsedImports.Count) `
         -Code "ASBI4402" `
         -Message "Prepared binding_authorization.used_import_count does not match used_imports."
 
     foreach ($Import in $UsedImports) {
+        $Ordinal = 0
+        $HasOrdinal = Try-GetAvidScriptBindingJsonInt32 `
+            -Value $Import.ordinal `
+            -ParsedValue ([ref]$Ordinal)
         $StableId = [string]$Import.stable_id
-        $Ordinal = [int]$Import.ordinal
         $Module = [string]$Import.module
         $Name = [string]$Import.name
         $Signature = [string]$Import.signature
+        $IsReflectedOrSharedDynamicImport =
+            (Test-AvidScriptBindingSha256 $StableId) -and $Ordinal -ge 0
+        $IsPackedOwnerImport =
+            $StableId -ceq "avidscript.owner_get_handle.v1" -and
+            $Ordinal -eq -1 -and
+            $Module -ceq "avidscript" -and
+            $Name -ceq "avid_owner_get_handle" -and
+            $Signature -ceq "()I" -and
+            [int]$ExpectedAuthorizationPackage.DescriptorSchemaVersion -eq 6 -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$ExpectedAuthorizationPackage.SelfTypeId)
         Assert-AvidScriptPreparedSemantic `
-            -Condition ((Test-AvidScriptBindingSha256 $StableId) -and
-                $Ordinal -ge 0 -and
+            -Condition ($HasOrdinal -and
+                $Import.stable_id -is [string] -and
+                $Import.module -is [string] -and
+                $Import.name -is [string] -and
+                $Import.signature -is [string] -and
+                ($IsReflectedOrSharedDynamicImport -or $IsPackedOwnerImport) -and
                 -not [string]::IsNullOrWhiteSpace($Module) -and
                 -not [string]::IsNullOrWhiteSpace($Name) -and
                 -not [string]::IsNullOrWhiteSpace($Signature)) `

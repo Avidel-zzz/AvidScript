@@ -30,6 +30,7 @@ internal static class CSharpOperationLowerer
             "compound_assignment" => LowerCompoundAssignment(context, operation, blockOrdinal, instructions),
             "conversion" => LowerConversion(context, operation, blockOrdinal, instructions),
             "declaration_expression" => LowerAddress(context, operation, blockOrdinal, instructions),
+            "default_value" => LowerDefaultValue(context, operation, blockOrdinal, instructions),
             "field_reference" => LowerFieldLoad(context, operation, blockOrdinal, instructions),
             "flow_capture" => LowerFlowCapture(context, operation, blockOrdinal, instructions),
             "flow_capture_reference" => LowerFlowCaptureReference(context, operation, blockOrdinal, instructions),
@@ -99,6 +100,7 @@ internal static class CSharpOperationLowerer
         SemanticOperation target = operation.Children[0];
         GuestRegister? left = LowerValue(context, target, blockOrdinal, instructions);
         GuestRegister? right = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+        right = WidenShiftCount(context, operation.OperatorKind, left, right, blockOrdinal, instructions);
         GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
         if (left is null || right is null || result is null)
         {
@@ -129,6 +131,7 @@ internal static class CSharpOperationLowerer
 
         GuestRegister? left = LowerValue(context, operation.Children[0], blockOrdinal, instructions);
         GuestRegister? right = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+        right = WidenShiftCount(context, operation.OperatorKind, left, right, blockOrdinal, instructions);
         if (left is null || right is null)
         {
             return null;
@@ -167,6 +170,60 @@ internal static class CSharpOperationLowerer
         return result;
     }
 
+    private static GuestRegister? WidenShiftCount(
+        CSharpFunctionLoweringContext context,
+        string operatorKind,
+        GuestRegister? left,
+        GuestRegister? right,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (left is null
+            || right is null
+            || string.Equals(left.TypeId, right.TypeId, StringComparison.Ordinal)
+            || operatorKind is not ("left_shift" or "right_shift" or "unsigned_right_shift"))
+        {
+            return right;
+        }
+
+        GuestRegister? widened = context.CreateTemporary(left.TypeId, blockOrdinal);
+        if (widened is null)
+        {
+            return null;
+        }
+
+        instructions.Add(new GuestInstruction(
+            "convert", widened.Id, new[] { right.Id }, null, null, null));
+        return widened;
+    }
+
+    private static GuestRegister? LowerDefaultValue(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (operation.Children.Count != 0
+            || !context.TryGetGuestType(operation.TypeId, out GuestType type)
+            || type.Kind is "void" or "class_ref")
+        {
+            return Malformed(context, operation, blockOrdinal);
+        }
+
+        GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
+        if (result is not null)
+        {
+            instructions.Add(new GuestInstruction(
+                "constant",
+                result.Id,
+                Array.Empty<string>(),
+                null,
+                null,
+                new GuestConstant("zero", null)));
+        }
+        return result;
+    }
+
     private static GuestRegister? LowerConversion(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,
@@ -190,8 +247,33 @@ internal static class CSharpOperationLowerer
                 || !context.TryGetCallTarget(
                     operation.Conversion.MethodSymbolId,
                     out SemanticCallable callable,
-                    out string targetId)
-                || !callable.IsStatic
+                    out string targetId))
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} user-defined conversion target is missing, unreachable, or malformed.");
+                return null;
+            }
+
+            if (CSharpClassReferencePolicy.IsIntrinsicUpcast(context.Document, callable)
+                && string.Equals(callable.Parameters[0].TypeId, operand.TypeId, StringComparison.Ordinal)
+                && string.Equals(callable.ReturnTypeId, operation.TypeId, StringComparison.Ordinal))
+            {
+                GuestRegister? upcast = context.CreateTemporary(operation.TypeId, blockOrdinal);
+                if (upcast is null)
+                {
+                    return null;
+                }
+
+                instructions.Add(new GuestInstruction(
+                    "convert",
+                    upcast.Id,
+                    new[] { operand.Id },
+                    null,
+                    "class_ref_upcast",
+                    null));
+                return upcast;
+            }
+
+            if (!callable.IsStatic
                 || callable.IsConstructor
                 || !callable.HasBody
                 || callable.Import is not null

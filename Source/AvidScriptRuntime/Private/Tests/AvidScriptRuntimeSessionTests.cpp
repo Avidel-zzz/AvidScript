@@ -712,6 +712,35 @@ bool FAvidScriptRuntimeSessionTypedOwnerValidationTest::RunTest(const FString& P
 	TestEqual(TEXT("Pawn package expects Pawn Self"), PawnOwnerPackage->GetExpectedSelfClass(), APawn::StaticClass());
 	TestEqual(TEXT("Valid legacy package has no Expected Self"), LegacyPackage->GetExpectedSelfClass(), static_cast<UClass*>(nullptr));
 
+	FAvidScriptWasmReloadManifest LegacyPackedOwnerManifest = MakeSessionManifest(
+		TEXT("typed_owner_legacy_packed"),
+		LegacyPackage);
+	LegacyPackedOwnerManifest.RequiredImports = {
+		FAvidScriptWasmRequiredImport{ TEXT("avidscript"), TEXT("avid_owner_get_handle") }
+	};
+	FAvidScriptRuntimeSession LegacyPackedOwnerSession;
+	int32 LegacyPackedOwnerBeginPlayCount = 0;
+	LegacyPackedOwnerSession.SetCandidateBeginPlayObserverForTesting(
+		[&LegacyPackedOwnerBeginPlayCount]()
+		{
+			++LegacyPackedOwnerBeginPlayCount;
+		});
+	FAvidScriptWasmReloadResult LegacyPackedOwnerResult;
+	TestFalse(TEXT("Packed owner cannot borrow a legacy package"), LegacyPackedOwnerSession.LoadInitialModule(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule),
+		LegacyPackedOwnerManifest,
+		LegacyPackedOwnerResult));
+	TestEqual(
+		TEXT("Legacy packed owner rejection has a stable category"),
+		LegacyPackedOwnerResult.ErrorCategory,
+		FString(TEXT("binding_package_import_mismatch")));
+	TestEqual(
+		TEXT("Legacy packed owner rejection occurs before BeginPlay"),
+		LegacyPackedOwnerBeginPlayCount,
+		0);
+	TestFalse(TEXT("Legacy packed owner rejection leaves no live runtime"), LegacyPackedOwnerSession.IsLiveLoaded());
+
 	UWorld* World = nullptr;
 	AActor* Owner = nullptr;
 	if (!TestTrue(TEXT("Typed owner test world and owner are created"), CreateSessionOwnerWorld(World, Owner)))

@@ -236,6 +236,15 @@ bool FAvidScriptEditorDynamicProjectileIntegrationTest::RunTest(const FString& P
 	{
 		return false;
 	}
+	TestFalse(
+		TEXT("Dynamic projectile script does not import packed owner access"),
+		HasAvidScriptRequiredImport(
+			MainManifest,
+			TEXT("avidscript"),
+			TEXT("avid_owner_get_handle")));
+	TestNotNull(
+		TEXT("Runtime package may retain authorized Self capability as a superset"),
+		MainManifest.BindingPackage->GetExpectedSelfClass());
 	TestEqual(TEXT("Runtime package caches one class reference"), MainManifest.BindingPackage->GetClassReferenceCount(), 1);
 	UClass* CachedProjectileClass = nullptr;
 	UClass* CachedBaseClass = nullptr;

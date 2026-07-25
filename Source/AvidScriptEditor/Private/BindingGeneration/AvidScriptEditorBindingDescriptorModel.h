@@ -11,3 +11,11 @@ public:
 		FString& OutErrorCategory,
 		FString& OutErrorSource);
 };
+
+class FAvidScriptEditorBindingDescriptorModelSerializer
+{
+public:
+	static bool SerializeCanonical(
+		const FAvidScriptBindingPackageModel& Package,
+		FString& OutJson);
+};

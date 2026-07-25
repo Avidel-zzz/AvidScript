@@ -170,17 +170,17 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		return false;
 	}
 	TestEqual(
-		TEXT("Custom report keeps the complete gameplay profile as its authorization ceiling"),
+		TEXT("Custom report keeps the gameplay profile and shared capabilities as its authorization ceiling"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("profile_import_count"))),
-		342);
+		344);
 	TestEqual(
-		TEXT("Custom authorization records the five reachable generated bindings"),
+		TEXT("Custom authorization records five reflected bindings and packed owner access"),
 		static_cast<int32>((*BindingAuthorizationObject)->GetIntegerField(TEXT("used_import_count"))),
-		5);
+		6);
 	TestEqual(
-		TEXT("Custom authorization exposes five used stable identities"),
+		TEXT("Custom authorization exposes six used stable identities"),
 		(*BindingAuthorizationObject)->GetArrayField(TEXT("used_imports")).Num(),
-		5);
+		6);
 	const TSharedPtr<FJsonObject>* BindingPackageObject = nullptr;
 	if (!TestTrue(
 		TEXT("Custom report contains binding package provenance"),
@@ -205,14 +205,14 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TEXT("Custom report records a content-addressed package hash"),
 		(*BindingPackageObject)->GetStringField(TEXT("package_hash")).IsEmpty());
 	TestEqual(
-		TEXT("Custom report publishes only the five-binding runtime package"),
+		TEXT("Custom report publishes five bindings, object-type support, and packed owner access"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("profile_import_count"))),
-		5);
+		7);
 	TestEqual(
-		TEXT("Custom runtime package records the five generated bindings used by the script"),
+		TEXT("Custom runtime package records five reflected bindings and packed owner access"),
 		static_cast<int32>((*BindingPackageObject)->GetIntegerField(TEXT("used_import_count"))),
-		5);
-	TestEqual(TEXT("Custom report exposes five used stable identities"), (*BindingPackageObject)->GetArrayField(TEXT("used_imports")).Num(), 5);
+		6);
+	TestEqual(TEXT("Custom report exposes six used stable identities"), (*BindingPackageObject)->GetArrayField(TEXT("used_imports")).Num(), 6);
 
 	TSharedPtr<FJsonObject> ManifestObject;
 	TestTrue(TEXT("Custom C# profile manifest is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ManifestPath, ManifestObject));
@@ -226,9 +226,9 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 			&& ManifestBindingPackage->IsValid())
 		{
 			TestEqual(
-				TEXT("Custom manifest publishes five runtime imports"),
+				TEXT("Custom manifest publishes five bindings, object-type support, and packed owner access"),
 				static_cast<int32>((*ManifestBindingPackage)->GetIntegerField(TEXT("profile_import_count"))),
-				5);
+				7);
 		}
 	}
 

@@ -1,5 +1,6 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 
+#include "AvidScriptBindingInvocation.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptHash.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
@@ -39,6 +40,38 @@ bool ValidateCanonicalDescriptor(
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
 {
+	if (Package.SchemaVersion < 6)
+	{
+		TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+		FAvidScriptBindingPackageLoadResult LoadResult;
+		if (!FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			RuntimePackage,
+			LoadResult))
+		{
+			OutErrorCategory = LoadResult.ErrorCategory;
+			OutErrorSource = LoadResult.ErrorSource;
+			return false;
+		}
+
+		FString CanonicalDescriptorJson;
+		if (!FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Package,
+			CanonicalDescriptorJson))
+		{
+			OutErrorCategory = TEXT("descriptor_serialize_failed");
+			OutErrorSource = Package.PackageName;
+			return false;
+		}
+		if (CanonicalDescriptorJson != DescriptorJson)
+		{
+			OutErrorCategory = TEXT("descriptor_not_canonical");
+			OutErrorSource = Package.PackageName;
+			return false;
+		}
+		return true;
+	}
+
 	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
 	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
 	FunctionSelections.Reserve(Package.Bindings.Num());

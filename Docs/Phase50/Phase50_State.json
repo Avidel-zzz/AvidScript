@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -44,15 +44,15 @@
     {
       "id": "P50.5",
       "status": "Completed",
-      "evidence": "Architecture and benchmark scope remains complete through 23b238c. Frozen Gate at 8ded438 passed static, .NET 159/159, format 7/7, PowerShell 105/105, four-module UBT, and typed benchmark structural budgets, then exposed two stale Runtime test fixtures. Commit 26f5606 replaces abstract UObject construction with the concrete registry test type and aligns empty/published schema-v6 descriptors with the shared fail-closed contract. Independent review approved 8ded438..26f5606 with no Critical, Important or Minor findings; final build and Automation evidence will be regenerated after re-freeze.",
-      "completed_at_utc": "2026-07-24T03:21:29.9918540+00:00"
+      "evidence": "完成 typed project API 性能采样、schema v2-v6 兼容收口与完整安全复审；WASM 真实 import 与 manifest 精确多集合一致，所有非静态 import 必须属于当前 immutable binding package，packed owner 另需 ExpectedSelfClass；高风险 RED/GREEN、VM import layout、GeneratedCSharpLifecycle、DynamicProjectile 与 handler 聚焦回归均通过；架构夹具 17/17，主 checker 仅剩提交前 dirty evidence；最终独立复审无 Critical/Important 发现，README 与 MIT 已准备，集中 Gate 留待冻结候选一次执行。",
+      "completed_at_utc": "2026-07-25T03:31:18.0262405+00:00"
     }
   ],
   "debt": [],
   "review": {
-    "completed": true,
-    "evidence": "Task 10, Task 11 and final Task 12 architecture reviews approved. After the first frozen Gate exposed only two Runtime test-fixture regressions, independent review approved test-only repair 8ded438..26f5606 with no Critical, Important or Minor findings and confirmed no production validation was weakened.",
-    "completed_at_utc": "2026-07-24T03:22:26.1425935+00:00"
+    "completed": false,
+    "evidence": "reopened: 全量 Automation 稳定暴露 v6 包解析、无函数 typed profile canonical 重建与 ABI fixture 迁移缺口",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "1cdaf6dbba0911139079c544cef2f25791c3715e",
-    "source_tree": "4c73f2598c8211881ef9cfbd79fd6fc7314889dd",
-    "state_sha256": "54781f96b911957474543fc8c3f73a2300b7b766b8a3d47e7c1353b48567d9b8",
-    "review_evidence": "Task 10, Task 11 and final Task 12 architecture reviews approved. After the first frozen Gate exposed only two Runtime test-fixture regressions, independent review approved test-only repair 8ded438..26f5606 with no Critical, Important or Minor findings and confirmed no production validation was weakened.",
-    "at_utc": "2026-07-24T03:22:26.1425935+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "attest -Phase 50 -GateReportPath <path>",
-  "revision": 10,
-  "updated_at_utc": "2026-07-24T03:22:26.1480276+00:00"
+  "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
+  "revision": 12,
+  "updated_at_utc": "2026-07-25T03:31:18.0284465+00:00"
 }

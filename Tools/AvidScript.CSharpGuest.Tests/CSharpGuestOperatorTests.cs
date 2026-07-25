@@ -17,10 +17,11 @@ internal static class CSharpGuestOperatorTests
     public static int Run()
     {
         BoundUserOperatorLowersToCallable();
+        IntegralShiftCountWidensToLeftOperandType();
         DirectBaseHandleUpcastsLowerToGuestCalls();
         MissingUserDefinedConversionFailsClosed();
         MalformedUserDefinedConversionsFailClosed();
-        return 4;
+        return 5;
     }
 
     private static void BoundUserOperatorLowersToCallable()
@@ -85,6 +86,47 @@ internal static class CSharpGuestOperatorTests
         Assert(instructions.Any(item => item.Op == "call" && item.TargetId == $"import:{OperatorId}")
             && instructions.All(item => item.Op != "binary"),
             "user-defined operator should lower to its Roslyn-bound callable");
+    }
+
+    private static void IntegralShiftCountWidensToLeftOperandType()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_unpack_generation")]
+                public static long UnpackGeneration(long packedHandle) => packedHandle >> 32;
+            }
+            """;
+        const string sourceId = "Scripts/IntegralShift.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded,
+            "integral shift source should pass semantic analysis: "
+                + string.Join(" | ", semantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestFunction function = module.Exports
+            .Where(export => export.Name == "avid_unpack_generation")
+            .Select(export => module.Functions.Single(item => item.Id == export.FunctionId))
+            .Single();
+        GuestInstruction[] instructions = function.Blocks.SelectMany(block => block.Instructions).ToArray();
+        GuestInstruction shift = instructions.Single(item =>
+            item.Op == "binary" && item.OperatorKind == "right_shift");
+        GuestInstruction conversion = instructions.Single(item =>
+            item.Op == "convert" && item.ResultId == shift.OperandIds[1]);
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "integral shift count should lower to valid Guest IR");
+        Assert(conversion.OperandIds.Count == 1,
+            "integral shift count should be explicitly widened before the binary instruction");
     }
 
     private static void DirectBaseHandleUpcastsLowerToGuestCalls()

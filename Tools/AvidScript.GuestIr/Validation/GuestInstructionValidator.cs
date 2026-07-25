@@ -282,6 +282,18 @@ internal static class GuestInstructionValidator
             return;
         }
 
+        if (string.Equals(instruction.OperatorKind, "class_ref_upcast", StringComparison.Ordinal))
+        {
+            if (sourceType.Kind != "class_ref"
+                || targetType.Kind != "class_ref"
+                || sourceType.Storage != "i32"
+                || targetType.Storage != "i32")
+            {
+                AddTypeMismatch(context, function, instruction);
+            }
+            return;
+        }
+
         if (instruction.OperatorKind is not null
             || sourceType.Kind == "class_ref"
             || targetType.Kind == "class_ref")

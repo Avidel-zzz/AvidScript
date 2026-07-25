@@ -214,6 +214,7 @@ public static class CSharpGuestLowerer
         foreach (SemanticCallable callable in document.Callables
             .Where(callable => callable.HasBody
                 && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
+                && !CSharpClassReferencePolicy.IsIntrinsicUpcast(document, callable)
                 && (reachableCallableIds is null
                     || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))

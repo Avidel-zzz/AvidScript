@@ -1,5 +1,41 @@
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 
+#include "Serialization/JsonWriter.h"
+
+namespace
+{
+void WriteDescriptorModelStringArray(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const TCHAR* Name,
+	const TArray<FString>& Values)
+{
+	Writer->WriteArrayStart(Name);
+	for (const FString& Value : Values)
+	{
+		Writer->WriteValue(Value);
+	}
+	Writer->WriteArrayEnd();
+}
+
+void WriteDescriptorModelBindingValue(
+	const TSharedRef<TJsonWriter<>>& Writer,
+	const FAvidScriptBindingValueModel& Value)
+{
+	Writer->WriteValue(TEXT("name"), Value.Name);
+	Writer->WriteValue(TEXT("direction"), Value.Direction);
+	Writer->WriteValue(TEXT("has_default"), Value.bHasDefault);
+	if (Value.bHasDefault)
+	{
+		Writer->WriteValue(TEXT("default_value"), Value.DefaultValue);
+	}
+	Writer->WriteValue(TEXT("canonical_type"), Value.CanonicalType);
+	Writer->WriteValue(TEXT("type_id"), Value.TypeId);
+	Writer->WriteValue(TEXT("kind"), Value.Kind);
+	Writer->WriteValue(TEXT("cpp_type"), Value.CppType);
+	WriteDescriptorModelStringArray(Writer, TEXT("abi_types"), Value.AbiTypes);
+}
+} // namespace
+
 bool FAvidScriptEditorBindingDescriptorModelParser::Parse(
 	const FString& Json,
 	FAvidScriptBindingPackageModel& OutPackage,
@@ -11,4 +47,130 @@ bool FAvidScriptEditorBindingDescriptorModelParser::Parse(
 		OutPackage,
 		OutErrorCategory,
 		OutErrorSource);
+}
+
+bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+	const FAvidScriptBindingPackageModel& Package,
+	FString& OutJson)
+{
+	OutJson.Empty();
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+	Writer->WriteObjectStart();
+	Writer->WriteValue(TEXT("schema_version"), Package.SchemaVersion);
+	Writer->WriteValue(TEXT("generator_version"), Package.GeneratorVersion);
+	Writer->WriteValue(TEXT("engine_version"), Package.EngineVersion);
+	Writer->WriteValue(TEXT("source"), Package.Source);
+	Writer->WriteValue(TEXT("package_name"), Package.PackageName);
+	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
+	Writer->WriteValue(TEXT("selection_hash"), Package.SelectionHash);
+	if (Package.SchemaVersion >= 6)
+	{
+		Writer->WriteValue(TEXT("self_type_id"), Package.SelfTypeId);
+	}
+
+	Writer->WriteArrayStart(TEXT("types"));
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Type.StableId);
+		Writer->WriteValue(TEXT("canonical_type"), Type.CanonicalType);
+		Writer->WriteValue(TEXT("kind"), Type.Kind);
+		Writer->WriteValue(TEXT("cpp_type"), Type.CppType);
+		Writer->WriteValue(TEXT("size"), Type.Size);
+		Writer->WriteValue(TEXT("alignment"), Type.Alignment);
+		WriteDescriptorModelStringArray(Writer, TEXT("abi_types"), Type.AbiTypes);
+		if (Package.SchemaVersion >= 6)
+		{
+			Writer->WriteValue(TEXT("object_type_ordinal"), Type.ObjectTypeOrdinal);
+			Writer->WriteValue(TEXT("class_path"), Type.ClassPath);
+			Writer->WriteValue(TEXT("base_type_id"), Type.BaseTypeId);
+		}
+		if (Type.Kind == TEXT("enum"))
+		{
+			Writer->WriteArrayStart(TEXT("enum_values"));
+			for (const FAvidScriptBindingEnumValue& EnumValue : Type.EnumValues)
+			{
+				Writer->WriteObjectStart();
+				Writer->WriteValue(TEXT("name"), EnumValue.Name);
+				Writer->WriteValue(TEXT("value"), EnumValue.Value);
+				Writer->WriteObjectEnd();
+			}
+			Writer->WriteArrayEnd();
+		}
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+
+	if (Package.SchemaVersion >= 5)
+	{
+		Writer->WriteArrayStart(TEXT("class_references"));
+		for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("stable_id"), Reference.StableId);
+			Writer->WriteValue(TEXT("ordinal"), Reference.Ordinal);
+			Writer->WriteValue(TEXT("script_name"), Reference.ScriptName);
+			Writer->WriteValue(TEXT("class_path"), Reference.ClassPath);
+			Writer->WriteValue(TEXT("base_class_path"), Reference.BaseClassPath);
+			Writer->WriteValue(TEXT("load_policy"), Reference.LoadPolicy);
+			if (Package.SchemaVersion >= 6)
+			{
+				Writer->WriteValue(TEXT("result_type_id"), Reference.ResultTypeId);
+			}
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+	}
+
+	Writer->WriteArrayStart(TEXT("bindings"));
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		Writer->WriteObjectStart();
+		Writer->WriteValue(TEXT("stable_id"), Binding.StableId);
+		Writer->WriteValue(TEXT("canonical_identity"), Binding.CanonicalIdentity);
+		Writer->WriteValue(TEXT("ordinal"), Binding.Ordinal);
+		Writer->WriteValue(TEXT("owner_class"), Binding.OwnerClass);
+		if (Package.SchemaVersion >= 4)
+		{
+			Writer->WriteValue(TEXT("binding_kind"), Binding.BindingKind);
+			Writer->WriteValue(TEXT("ue_member"), Binding.UeMember);
+		}
+		else
+		{
+			Writer->WriteValue(TEXT("ue_function"), Binding.UeFunction);
+		}
+		Writer->WriteValue(TEXT("script_name"), Binding.ScriptName);
+		Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+		Writer->WriteValue(TEXT("is_static"), Binding.bStatic);
+		Writer->WriteValue(TEXT("is_const"), Binding.bConst);
+		if (Package.SchemaVersion >= 3)
+		{
+			Writer->WriteValue(TEXT("reload_effect"), LexToString(Binding.ReloadEffect));
+		}
+		Writer->WriteObjectStart(TEXT("return"));
+		WriteDescriptorModelBindingValue(Writer, Binding.ReturnValue);
+		Writer->WriteObjectEnd();
+		Writer->WriteArrayStart(TEXT("parameters"));
+		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
+		{
+			Writer->WriteObjectStart();
+			WriteDescriptorModelBindingValue(Writer, Parameter);
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+		Writer->WriteObjectStart(TEXT("host_import"));
+		Writer->WriteValue(TEXT("module"), Binding.HostImport.Module);
+		Writer->WriteValue(TEXT("name"), Binding.HostImport.Name);
+		Writer->WriteValue(TEXT("signature"), Binding.HostImport.Signature);
+		Writer->WriteObjectEnd();
+		Writer->WriteObjectEnd();
+	}
+	Writer->WriteArrayEnd();
+	Writer->WriteObjectEnd();
+	if (!Writer->Close())
+	{
+		OutJson.Empty();
+		return false;
+	}
+	return true;
 }

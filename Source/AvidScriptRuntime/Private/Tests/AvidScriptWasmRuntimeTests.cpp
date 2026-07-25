@@ -427,16 +427,26 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 	HostContext.OwnerHandle = { 0x89abcdefu, 0x01234567u };
 	Runtime.SetHostContext(HostContext);
 	TestEqual(
-		TEXT("Packed typed owner handle preserves slot and generation bits"),
+		TEXT("Packed typed owner handle requires package authorization"),
 		Runtime.HandleOwnerGetHandleImport(),
-		static_cast<int64>(0x0123456789abcdefull));
+		static_cast<int64>(0));
+	FString FailureModule;
+	FString FailureName;
+	FString FailureDetails;
+	TestTrue(
+		TEXT("Missing typed owner package reports a pending failure"),
+		Runtime.ConsumePendingHostImportFailure(
+			FailureModule,
+			FailureName,
+			FailureDetails));
+	TestEqual(
+		TEXT("Missing package failure keeps the canonical import"),
+		FailureName,
+		FString(TEXT("avid_owner_get_handle")));
 
 	HostContext.OwnerHandle = { 7, 0 };
 	Runtime.SetHostContext(HostContext);
 	TestEqual(TEXT("Typed owner rejects a zero generation"), Runtime.HandleOwnerGetHandleImport(), static_cast<int64>(0));
-	FString FailureModule;
-	FString FailureName;
-	FString FailureDetails;
 	TestTrue(TEXT("Zero generation reports a pending failure"),
 		Runtime.ConsumePendingHostImportFailure(FailureModule, FailureName, FailureDetails));
 	TestEqual(TEXT("Typed owner failure keeps the canonical module"), FailureModule, FString(TEXT("avidscript")));

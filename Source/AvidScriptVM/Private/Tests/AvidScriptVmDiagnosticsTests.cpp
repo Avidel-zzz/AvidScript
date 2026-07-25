@@ -84,6 +84,35 @@ TArray<uint8> BuildDiagnosticTrapFixture()
 	AppendDiagnosticSection(Module, 10, Code);
 	return Module;
 }
+
+TArray<uint8> BuildDiagnosticImportFixture()
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Imports;
+	AppendDiagnosticU32Leb(Imports, 4);
+	AppendDiagnosticString(Imports, "avidscript");
+	AppendDiagnosticString(Imports, "same");
+	Imports.Add(0x00);
+	AppendDiagnosticU32Leb(Imports, 0);
+	AppendDiagnosticString(Imports, "env");
+	AppendDiagnosticString(Imports, "memory");
+	Imports.Add(0x02);
+	Imports.Add(0x00);
+	AppendDiagnosticU32Leb(Imports, 1);
+	AppendDiagnosticString(Imports, "env");
+	AppendDiagnosticString(Imports, "other");
+	Imports.Add(0x00);
+	AppendDiagnosticU32Leb(Imports, 0);
+	AppendDiagnosticString(Imports, "avidscript");
+	AppendDiagnosticString(Imports, "same");
+	Imports.Add(0x00);
+	AppendDiagnosticU32Leb(Imports, 0);
+	AppendDiagnosticSection(Module, 2, Imports);
+	return Module;
+}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -157,6 +186,22 @@ bool FAvidScriptVmModuleLayoutTest::RunTest(const FString& Parameters)
 		TEXT("truncated WASM layout is rejected"),
 		InspectAvidScriptWasmModuleLayout(MakeArrayView(Truncated), Layout, Error));
 	TestTrue(TEXT("layout failure explains its source"), !Error.IsEmpty());
+
+	const TArray<uint8> ImportBytecode = BuildDiagnosticImportFixture();
+	TestTrue(
+		TEXT("mixed WASM imports are inspected"),
+		InspectAvidScriptWasmModuleLayout(MakeArrayView(ImportBytecode), Layout, Error));
+	TestEqual(TEXT("only function imports are counted"), Layout.ImportedFunctionCount, 3u);
+	TestEqual(TEXT("all function import identities are retained"), Layout.FunctionImports.Num(), 3);
+	if (Layout.FunctionImports.Num() == 3)
+	{
+		TestEqual(TEXT("first function import module"), Layout.FunctionImports[0].ModuleName, FString(TEXT("avidscript")));
+		TestEqual(TEXT("first function import name"), Layout.FunctionImports[0].ImportName, FString(TEXT("same")));
+		TestEqual(TEXT("non-function import does not disturb order"), Layout.FunctionImports[1].ModuleName, FString(TEXT("env")));
+		TestEqual(TEXT("second function import name"), Layout.FunctionImports[1].ImportName, FString(TEXT("other")));
+		TestEqual(TEXT("repeated function import module is retained"), Layout.FunctionImports[2].ModuleName, FString(TEXT("avidscript")));
+		TestEqual(TEXT("repeated function import is retained"), Layout.FunctionImports[2].ImportName, FString(TEXT("same")));
+	}
 	return true;
 }
 

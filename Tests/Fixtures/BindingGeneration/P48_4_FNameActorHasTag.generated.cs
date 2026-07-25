@@ -47,8 +47,8 @@ public sealed class AvidStateAliasAttribute : Attribute
 internal static class AvidScriptBindingPackage
 {
     internal const string PackageName = "avidscript.engine.fname.facade";
-    internal const string PackageHash = "a9e475d62402c0b4b27b9cbc40e66a82705712d5415b18a20c1c3ba27574df0a";
-    internal const string DescriptorHash = "0a8b740ae15ae386d29b64e7eec1945780c7be2656437b3835bb89ae70aa0cb4";
+    internal const string PackageHash = "67898628adbbab5a59e93f98660877e0aca252bf3c2e167ed3dde16ab31ef2a4";
+    internal const string DescriptorHash = "285336c1bc133cd0fa72f2a7ebc96567d82eaea9c0e86a6f5527e61e76c7b92b";
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -99,10 +99,29 @@ internal readonly struct FAvidScriptObjectHandle
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public readonly struct UObject
+{
+    internal readonly int Slot;
+    internal readonly int Generation;
+
+    internal UObject(int slot, int generation)
+    {
+        Slot = slot;
+        Generation = generation;
+    }
+
+    internal int AvidScriptSlot => Slot;
+    internal int AvidScriptGeneration => Generation;
+    public bool IsNull => Slot == 0 && Generation == 0;
+    public bool HasHandle => Slot > 0 && Generation > 0;
+    public bool IsValid => Slot > 0 && Generation > 0;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public readonly struct AActor
 {
-    private readonly int Slot;
-    private readonly int Generation;
+    internal readonly int Slot;
+    internal readonly int Generation;
 
     internal AActor(int slot, int generation)
     {
@@ -116,6 +135,20 @@ public readonly struct AActor
     public bool HasHandle => Slot > 0 && Generation > 0;
     public bool IsValid => Slot > 0 && Generation > 0;
 
+    public static implicit operator UObject(AActor value)
+    {
+        return new(value.Slot, value.Generation);
+    }
+
+    public static AActor TryCast(UObject value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
+
     public bool ActorHasTag(string Tag)
     {
         int __returnValue;
@@ -126,19 +159,23 @@ public readonly struct AActor
 
 public static class UE
 {
-    public static AActor Self => new(AvidScriptRuntimeNative.OwnerGetSlot(), AvidScriptRuntimeNative.OwnerGetGeneration());
+    public static AActor Self
+    {
+        get
+        {
+            long packedHandle = OwnerGetHandle();
+            return new((int)packedHandle, (int)(packedHandle >> 32));
+        }
+    }
     public static int SetTimer(float delaySeconds, int callbackId) => AvidScriptRuntimeNative.TimerSetOnce(delaySeconds, callbackId);
     public static bool CancelTimer(int timerHandle) => AvidScriptRuntimeNative.TimerCancel(timerHandle) != 0;
+
+    [DllImport("avidscript", EntryPoint = "avid_owner_get_handle")]
+    private static extern long OwnerGetHandle();
 }
 
 internal static class AvidScriptRuntimeNative
 {
-    [DllImport("env", EntryPoint = "owner_get_slot")]
-    internal static extern int OwnerGetSlot();
-
-    [DllImport("env", EntryPoint = "owner_get_generation")]
-    internal static extern int OwnerGetGeneration();
-
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
 
@@ -150,4 +187,7 @@ internal static class AvidScriptNative
 {
     [DllImport("avidscript", EntryPoint = "avid_ue_31cc75e0bdf4ab1e")]
     internal static extern int Invoke0000(int selfSlot, int selfGeneration, string p0, out int returnValue);
+
+    [DllImport("avidscript", EntryPoint = "avid_object_type_is_a")]
+    internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);
 }

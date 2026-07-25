@@ -100,6 +100,62 @@ Assert-Condition ($SeedStateSchemaJson.schema_version -eq 2 -and
     @($SeedStateSchemaJson.slots | Where-Object { $_.PSObject.Properties.Name -contains "aliases" }).Count -eq @($SeedStateSchemaJson.slots).Count) `
     "seed state schema must use the structured v2 contract"
 
+$ZeroExportCompiler = Join-Path $RunRoot "ZeroExportCompiler.ps1"
+$ZeroExportBody = @"
+`$GuestIr = [System.IO.File]::ReadAllText('$SeedGuestIr')
+`$ExportsStart = `$GuestIr.IndexOf('  "exports": [', [System.StringComparison]::Ordinal)
+`$DiagnosticsStart = `$GuestIr.IndexOf('  "diagnostics":', `$ExportsStart, [System.StringComparison]::Ordinal)
+if (`$ExportsStart -lt 0 -or `$DiagnosticsStart -le `$ExportsStart) {
+    throw 'seed Guest IR does not use the canonical top-level exports/diagnostics order'
+}
+`$GuestIrWithoutExports = `$GuestIr.Substring(0, `$ExportsStart) +
+    '  "exports": [],' + [char]10 +
+    `$GuestIr.Substring(`$DiagnosticsStart)
+[System.IO.File]::WriteAllText(
+    `$GuestIrPath,
+    `$GuestIrWithoutExports,
+    [System.Text.UTF8Encoding]::new(`$false))
+`$GuestIrSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath `$GuestIrPath).Hash.ToLowerInvariant()
+`$DebugMap = Get-Content -Raw -LiteralPath '$SeedDebugMap' | ConvertFrom-Json
+`$DebugMap.provenance.guest_ir_sha256 = `$GuestIrSha256
+`$DebugMap | ConvertTo-Json -Depth 64 | Set-Content -LiteralPath `$DebugMapPath -Encoding utf8
+Copy-Item -LiteralPath '$SeedStateSchema' -Destination `$StateSchemaPath -Force
+`$BackendDll = Join-Path '$PluginRoot' 'Tools\AvidScript.WasmBackend\bin\Release\net8.0\AvidScript.WasmBackend.dll'
+& `$DotNetPath `$BackendDll `$GuestIrPath `$WasmPath
+if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+& `$DotNetPath `$BackendDll --inspect `$WasmPath `$InspectionPath
+exit `$LASTEXITCODE
+"@
+Write-FakeCompiler -Path $ZeroExportCompiler -Body $ZeroExportBody
+$ZeroExportRoot = Join-Path $RunRoot "ZeroExport"
+$ZeroExportReport = Join-Path $ZeroExportRoot "zero_export.csharp.report.json"
+$ZeroExportManifest = Join-Path $ZeroExportRoot "zero_export.avidscript.json"
+& $BuildScript `
+    -DotNetPath $DotNetPath `
+    -OutputRoot $ZeroExportRoot `
+    -SourcePath $SourcePath `
+    -ProjectPath $ProjectPath `
+    -SemanticCacheRoot $CacheRoot `
+    -ModuleId "csharp_zero_export" `
+    -ArtifactStem "zero_export" `
+    -ReportPath $ZeroExportReport `
+    -ManifestPath $ZeroExportManifest `
+    -GuestCompilerPath $ZeroExportCompiler | Out-Null
+$ZeroExportExit = $LASTEXITCODE
+Assert-Condition ($ZeroExportExit -eq 1) "zero-export project must return exit 1; actual=$ZeroExportExit"
+$ZeroExportJson = Get-Content -Raw -LiteralPath $ZeroExportReport | ConvertFrom-Json
+Assert-Condition ($ZeroExportJson.result -eq "direct_abi_unsupported") `
+    "zero-export project was not classified as direct ABI unsupported"
+$ZeroExportDiagnostic = @($ZeroExportJson.diagnostics |
+    Where-Object { $_.code -eq "direct_abi_contract_invalid" })
+Assert-Condition ($ZeroExportDiagnostic.Count -eq 1 -and
+    [int]$ZeroExportDiagnostic[0].required_export_count -eq 0) `
+    "zero-export project did not report the empty direct ABI contract"
+Assert-Condition (-not (Test-Path -LiteralPath $ZeroExportManifest -PathType Leaf)) `
+    "zero-export failure left a manifest"
+Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $ZeroExportRoot "zero_export.wasm") -PathType Leaf)) `
+    "zero-export failure left WASM"
+
 function Invoke-MalformedStateSchemaCase {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -383,5 +439,5 @@ Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureManifest -PathTyp
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureDebugMap -PathType Leaf)) "invalid prepared import left C# debug map"
 Assert-Condition (-not (Test-Path -LiteralPath $PreparedFailureWasm -PathType Leaf)) "invalid prepared import left WASM"
 
-Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 13/13 passed"
+Write-Output "AvidScript.CSharpFrontend.BuildPublicationContracts: 14/14 passed"
 exit 0
