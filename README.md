@@ -4,7 +4,7 @@ AvidScript 是面向 Unreal Engine 的实验性现代脚本框架。目前主线
 
 项目目标不是为每个 UE API 手写一层 wrapper，而是从 UE Reflection 和项目 Binding Profile 生成类型、函数与属性投影，在加载阶段建立不可变 dispatch plan，让脚本在 `BeginPlay`、`Tick`、Timer、Overlap 等 UE 事件中编写真实游戏逻辑。
 
-> 当前版本为 `0.1.0 开发者预览`。Phase 50 主要验证 UE5.8 源码版、Windows 64 位 Development Editor；Cook、Shipping、Android 和 iOS 尚未完成正式支持。
+> 当前版本为 `0.1.0 开发者预览`。Phase 51 主要验证 UE5.8 源码版、Windows 64 位 Development Editor；Cook、Shipping、Android 和 iOS 尚未完成正式支持。
 
 ## 当前能力
 
@@ -13,6 +13,9 @@ AvidScript 是面向 Unreal Engine 的实验性现代脚本框架。目前主线
 - 常用值类型：`FVector`、`FRotator`、`FTransform`、`FName` 等；
 - typed `UE.Self`、项目 Actor handle、生成式继承关系与失败关闭的 checked cast；
 - `TSubclassOf<T>` 风格 class reference，以及 `SpawnActor`、`DestroyActor`、`IsA`；
+- descriptor 驱动的 UObject/ActorComponent 工厂、typed `FindComponent` 与显式 `Release`；
+- Session 级对象所有权、普通 UObject GC 强引用和 Component 生命周期回收；
+- SceneComponent typed Attach/Detach、same-world/cycle 校验与固定 attachment rules；
 - generational object handle、World 隔离和失效句柄检测；
 - binding package、prepared semantic、WASM import identity 与 Runtime Session 的多层 provenance 校验；
 - C# 热重载、显式状态迁移、失败候选回滚和调试映射；
@@ -119,6 +122,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [TypedProjectApi](Samples/CSharp/TypedProjectApi/README.md) | typed Self、自定义 UFUNCTION、Spawn、cast 与销毁 |
 | [DynamicProjectile](Samples/CSharp/DynamicProjectile/README.md) | Blueprint class reference、Timer、Spawn/Destroy 与热重载回滚 |
 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap 游戏事件、持久状态与热重载 |
+| [ComponentGameplay](Samples/CSharp/ComponentGameplay/ComponentGameplay.cs) | BeginPlay 创建/查询组件、Attach，Tick 调用 UFUNCTION，EndPlay 释放 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | 基础 BeginPlay/Tick/EndPlay |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
@@ -131,7 +135,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - PowerShell parser、构建合同与架构门禁；
 - UE5.8 no-clean 模块构建和 `Automation RunTests AvidScript`。
 
-Phase 50 的能力、性能数据和边界见 [Phase 50 收尾报告](Docs/Phase50/P50_Phase50_Closeout.md)。
+Phase 51 的对象/组件闭环、性能数据和边界见 [Phase 51 收尾报告](Docs/Phase51/P51_Phase51_Closeout.md)。
 
 ## 当前边界
 

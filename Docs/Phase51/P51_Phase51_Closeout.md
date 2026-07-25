@@ -26,7 +26,10 @@
 - `ComponentGameplay` 样例已通过真实 Roslyn、Guest IR、WASM 与 UE BeginPlay/Tick/EndPlay，单次生命周期精确发生 10 次 crossing。
 - Native、Binding、WAMR 对象组件基准已落地；64 组件下 WAMR 四操作周期 P50/P95 为 `0.009683/0.010223 ms`。
 - 基准 warm loop 为 0 class load、0 reflected-name lookup，5888 次 WAMR import 与预期完全一致。
+- Runtime slice 已发布 hash 保护的 active object type 集合，final Guest IR 对其执行严格有序精确比较。
+- generated `TryCast` 的 `avid_object_type_is_a` ordinal 已进入可达激活闭包；malformed provenance 以 `ASBI4305` 失败并删除所有可加载制品。
 - P51.3、P51.4 与 P51.5 基准证据分别见对应中文实现文档和 `Docs/Phase51/P51.5_Object_Component_Benchmark.md`。
+- 独立复审的发现、修复与终止结论见 `Docs/Phase51/P51.5_Independent_Review.md`。
 
 ## 验证
 
@@ -40,6 +43,8 @@
 - P51.3、P51.4 producer/consumer no-clean 构建成功；P51.4 聚焦 Automation 5/5 Success。
 - P51.5 Runtime UBT 在新增源文件后以 `-NoUBTMakefiles` 重建 action graph，5/5 actions Success。
 - P51.5 正式对象组件基准 Automation 1/1 Success；最终 Phase Gate 尚待 freeze 后集中执行。
+- 最终 provenance BuildIntegration 15/15 passed，五个 .NET host 合计 167/167 passed。
+- exact-tree architecture checker 与 mutation fixtures passed；独立复审终止结论为 0 Critical / 0 Important。
 
 ## Gate 身份
 
