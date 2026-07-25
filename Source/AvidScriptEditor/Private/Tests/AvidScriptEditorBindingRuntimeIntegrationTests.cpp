@@ -20,6 +20,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -226,6 +227,13 @@ double CalculateAvidScriptPropertyBenchmarkPercentile(
 		0,
 		Samples.Num() - 1);
 	return Samples[Index];
+}
+
+FORCENOINLINE void SetAvidScriptPropertyBenchmarkNative(
+	AActor& Actor,
+	const float Value)
+{
+	Actor.CustomTimeDilation = Value;
 }
 
 bool RehashAvidScriptBindingRuntimeDescriptor(FString& InOutJson)
@@ -1877,6 +1885,128 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertySetTest::RunTest(const FStr
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReflectedVectorPropertySetTest,
+	"AvidScript.Editor.BindingRuntime.ReflectedVectorPropertySet",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReflectedVectorPropertySetTest::RunTest(const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TEXT("/Script/Engine.MovementComponent"), TEXT("Velocity"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("FVector property setter descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.editor.vector_property_set"),
+			{},
+			Properties,
+			DescriptorJson,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("FVector property setter descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Setter = Descriptor.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	if (!TestNotNull(TEXT("FVector property setter resolves"), Setter)
+		|| !TestEqual(
+			TEXT("FVector property setter uses the packed struct ABI"),
+			Setter->HostImport.Signature,
+			FString(TEXT("(iifff)i"))))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("FVector property setter package loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(DescriptorJson, Package, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("FVector property setter world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	UProjectileMovementComponent* Movement = Actor == nullptr
+		? nullptr
+		: NewObject<UProjectileMovementComponent>(Actor);
+	if (!TestNotNull(TEXT("FVector property setter actor spawns"), Actor)
+		|| !TestNotNull(TEXT("Concrete movement component is created"), Movement))
+	{
+		return false;
+	}
+	Actor->AddInstanceComponent(Movement);
+	Movement->RegisterComponent();
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle MovementHandle = Registry.RegisterObject(
+		Movement,
+		RegisterResult);
+	if (!TestTrue(TEXT("Movement component registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	const FVector ExpectedVelocity(120.0, -35.0, 8.5);
+	const uint64 Arguments[] = {
+		MovementHandle.Slot,
+		MovementHandle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(ExpectedVelocity.X),
+		MakeAvidScriptBindingRuntimeF32Cell(ExpectedVelocity.Y),
+		MakeAvidScriptBindingRuntimeF32Cell(ExpectedVelocity.Z)
+	};
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Setter->Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = MovementHandle;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	TestTrue(
+		TEXT("Cached FVector property setter dispatches"),
+		Package->Dispatch(Call, Context, Scratch, DispatchResult));
+	TestTrue(
+		TEXT("Cached FVector property setter mutates the concrete component"),
+		Movement->Velocity.Equals(ExpectedVelocity, 0.001));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest,
 	"AvidScript.Editor.BindingRuntime.BlueprintSetterProperty",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2202,6 +2332,175 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyReloadTest::RunTest(const F
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest,
+	"AvidScript.Editor.BindingRuntime.BidirectionalPropertiesSample",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest::RunTest(const FString& Parameters)
+{
+	FString ProfilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Samples/CSharp/BidirectionalProperties/BidirectionalProperties.csharp-profile.json")));
+	FPaths::NormalizeFilename(ProfilePath);
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+		TEXT("Bidirectional property sample profile loads"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ProfilePath,
+			ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorCategory + TEXT(": ") + ProfileResult.ErrorMessage);
+		return false;
+	}
+
+	FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest/Tests/P52/BidirectionalProperties")));
+	FString SemanticCacheRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScript/Tests/P52/BidirectionalProperties/CSharpSemanticCache/v1")));
+	FPaths::NormalizeFilename(OutputRoot);
+	FPaths::NormalizeFilename(SemanticCacheRoot);
+	IFileManager::Get().DeleteDirectory(*OutputRoot, false, true);
+	IFileManager::Get().DeleteDirectory(*SemanticCacheRoot, false, true);
+	ProfileResult.BuildConfig.OutputRoot = OutputRoot;
+	ProfileResult.BuildConfig.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			OutputRoot,
+			ProfileResult.BuildConfig.ArtifactStem);
+	ProfileResult.BuildConfig.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			OutputRoot,
+			ProfileResult.BuildConfig.ArtifactStem);
+	ProfileResult.BuildConfig.SemanticCacheRoot = SemanticCacheRoot;
+
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+		TEXT("Bidirectional property sample builds through the production profile pipeline"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(
+			ProfileResult.BuildConfig,
+			BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestEqual(TEXT("Sample performs bootstrap and final builds"), BuildResult.BuildInvocationCount, 2);
+	TestTrue(TEXT("Sample publishes a runtime binding package"), FPaths::FileExists(BuildResult.BindingPackagePath));
+	TestTrue(TEXT("Sample publishes a WASM manifest"), FPaths::FileExists(BuildResult.ManifestPath));
+
+	FString RuntimePackageJson;
+	FAvidScriptBindingPackageModel RuntimePackageModel;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Sample runtime binding package can be read"),
+		FFileHelper::LoadFileToString(RuntimePackageJson, *BuildResult.BindingPackagePath))
+		|| !TestTrue(
+			TEXT("Sample runtime binding package parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				RuntimePackageJson,
+				RuntimePackageModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	int32 RuntimeSetterCount = 0;
+	int32 RuntimeGetterCount = 0;
+	for (const FAvidScriptBindingFunctionModel& Binding : RuntimePackageModel.Bindings)
+	{
+		if (Binding.UeMember != TEXT("CustomTimeDilation"))
+		{
+			continue;
+		}
+		RuntimeSetterCount += Binding.BindingKind == TEXT("property_set") ? 1 : 0;
+		RuntimeGetterCount += Binding.BindingKind == TEXT("property_get") ? 1 : 0;
+	}
+	TestEqual(TEXT("Setter-only source retains the authorized setter"), RuntimeSetterCount, 1);
+	TestEqual(TEXT("Setter-only source does not retain the unused getter"), RuntimeGetterCount, 0);
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestResult;
+	if (!TestTrue(
+		TEXT("Sample manifest and WASM load with their generated runtime slice"),
+		FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			BuildResult.ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestResult)))
+	{
+		AddError(ManifestResult.ErrorCategory + TEXT(": ") + ManifestResult.ErrorMessage);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Bidirectional property sample world is created"),
+		CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AActor* Actor = SpawnAvidScriptBindingRuntimeIntegrationActor(*World);
+	if (!TestNotNull(TEXT("Bidirectional property sample actor spawns"), Actor))
+	{
+		return false;
+	}
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle = Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("Bidirectional property sample actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = ActorHandle;
+	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	FAvidScriptWasmRuntimeInstance Runtime;
+	Runtime.SetHostContext(HostContext);
+	FAvidScriptWasmSmokeResult WasmResult;
+	if (!TestTrue(
+		TEXT("Bidirectional property sample WASM links"),
+		Runtime.LoadModule(
+			Bytecode.GetData(),
+			Bytecode.Num(),
+			Manifest.ModuleId,
+			Manifest.BindingPackage,
+			WasmResult))
+		|| !TestTrue(TEXT("Bidirectional property sample BeginPlay executes"), Runtime.BeginPlay(WasmResult)))
+	{
+		AddError(WasmResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("BeginPlay writes the scalar reflected property"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
+	TestTrue(
+		TEXT("BeginPlay writes FVector location through the generated facade"),
+		Actor->GetActorLocation().Equals(FVector(0.0, 0.0, 100.0), 0.001));
+	TestTrue(TEXT("Bidirectional property sample Tick executes"), Runtime.Tick(0.5f, WasmResult));
+	TestTrue(
+		TEXT("Tick advances the scalar reflected property"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.025f));
+	TestTrue(
+		TEXT("Tick reads and writes FVector location"),
+		Actor->GetActorLocation().Equals(FVector(30.0, 0.0, 100.0), 0.001));
+	TestTrue(TEXT("Bidirectional property sample EndPlay executes"), Runtime.EndPlay(WasmResult));
+	TestTrue(
+		TEXT("EndPlay restores the scalar reflected property"),
+		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
+	Runtime.Unload();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest,
 	"AvidScript.Performance.ReflectedPropertySetter",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -2341,17 +2640,23 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 	const FAvidScriptBindingPackageInstrumentation WarmInstrumentation =
 		Package->GetInstrumentation();
 	const int32 HostImportsBeforeTicks = WasmResult.HostImportCallCount;
+	double ExpectedChecksum = 0.0;
+	double NativeChecksum = 0.0;
+	double BindingChecksum = 0.0;
+	double WasmChecksum = 0.0;
 
 	for (int32 RunIndex = 0; RunIndex < WarmupCount + SampleCount; ++RunIndex)
 	{
 		const double NativeStart = FPlatformTime::Seconds();
 		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
 		{
-			Actor->CustomTimeDilation = 1.0f
-				+ static_cast<float>((RunIndex + Iteration) & 7) * 0.01f;
+			SetAvidScriptPropertyBenchmarkNative(
+				*Actor,
+				1.0f + static_cast<float>((RunIndex + Iteration) & 7) * 0.01f);
 		}
 		const double NativeMs = (FPlatformTime::Seconds() - NativeStart)
 			* 1000.0 / IterationsPerSample;
+		NativeChecksum += Actor->CustomTimeDilation;
 
 		const double BindingStart = FPlatformTime::Seconds();
 		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
@@ -2367,6 +2672,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 		}
 		const double BindingMs = (FPlatformTime::Seconds() - BindingStart)
 			* 1000.0 / IterationsPerSample;
+		BindingChecksum += Actor->CustomTimeDilation;
 
 		const double WasmStart = FPlatformTime::Seconds();
 		for (int32 Iteration = 0; Iteration < IterationsPerSample; ++Iteration)
@@ -2381,6 +2687,9 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 		}
 		const double WasmMs = (FPlatformTime::Seconds() - WasmStart)
 			* 1000.0 / IterationsPerSample;
+		WasmChecksum += Actor->CustomTimeDilation;
+		ExpectedChecksum += 1.0
+			+ static_cast<double>((RunIndex + IterationsPerSample - 1) & 7) * 0.01;
 
 		if (RunIndex >= WarmupCount)
 		{
@@ -2409,6 +2718,15 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 	TestEqual(TEXT("Native benchmark records all samples"), NativeSamples.Num(), SampleCount);
 	TestEqual(TEXT("Binding benchmark records all samples"), BindingSamples.Num(), SampleCount);
 	TestEqual(TEXT("WAMR benchmark records all samples"), WasmSamples.Num(), SampleCount);
+	TestTrue(
+		TEXT("Native setter checksum proves every sample reached its expected final write"),
+		FMath::IsNearlyEqual(NativeChecksum, ExpectedChecksum, 0.0001));
+	TestTrue(
+		TEXT("Binding setter checksum matches the native write sequence"),
+		FMath::IsNearlyEqual(BindingChecksum, ExpectedChecksum, 0.0001));
+	TestTrue(
+		TEXT("WAMR setter checksum matches the native write sequence"),
+		FMath::IsNearlyEqual(WasmChecksum, ExpectedChecksum, 0.0001));
 
 	const double NativeP50 = CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.50);
 	const double NativeP95 = CalculateAvidScriptPropertyBenchmarkPercentile(NativeSamples, 0.95);
@@ -2420,7 +2738,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 	TestTrue(TEXT("Binding setter P50 is sampled"), BindingP50 > 0.0);
 	TestTrue(TEXT("WAMR setter P50 is sampled"), WasmP50 > 0.0);
 	AddInfo(FString::Printf(
-		TEXT("phase52_property_setter_benchmark | samples=%d | iterations=%d | native_p50_ms=%.9f | native_p95_ms=%.9f | binding_p50_ms=%.9f | binding_p95_ms=%.9f | wamr_p50_ms=%.9f | wamr_p95_ms=%.9f | crossings=%d | warm_class_loads=0 | warm_reflected_name_lookups=0 | snapshot_captures=0"),
+		TEXT("phase52_property_setter_benchmark | samples=%d | iterations=%d | native_p50_ms=%.9f | native_p95_ms=%.9f | binding_p50_ms=%.9f | binding_p95_ms=%.9f | wamr_p50_ms=%.9f | wamr_p95_ms=%.9f | checksum=%.6f | crossings=%d | warm_class_loads=0 | warm_reflected_name_lookups=0 | snapshot_captures=0"),
 		SampleCount,
 		IterationsPerSample,
 		NativeP50,
@@ -2429,6 +2747,7 @@ bool FAvidScriptEditorBindingRuntimeReflectedPropertyBenchmarkTest::RunTest(cons
 		BindingP95,
 		WasmP50,
 		WasmP95,
+		ExpectedChecksum,
 		ExpectedCrossings));
 	Runtime.Unload();
 	return true;

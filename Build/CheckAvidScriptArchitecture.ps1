@@ -125,10 +125,11 @@ function Test-SourceTreeForbiddenPattern {
             continue
         }
 
+        $RelativePath = [System.IO.Path]::GetRelativePath($PluginRoot, $Path).Replace('\', '/')
+        [void]$ArchitectureEvidencePaths.Add($RelativePath)
         $Text = [System.IO.File]::ReadAllText($Path)
         foreach ($Pattern in $Patterns) {
             if ([regex]::IsMatch($Text, $Pattern)) {
-                $RelativePath = [System.IO.Path]::GetRelativePath($PluginRoot, $Path)
                 Add-Violation "$RelativePath matches forbidden dependency pattern '$Pattern'"
             }
         }
@@ -146,6 +147,10 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptCore' @(
     '#include\s+["<](Engine|GameFramework|Components|UObject)/',
     'wasm_runtime_|wasm_export\.h',
     '#include\s+["<]AvidScript(ActorBinding|ObjectRegistry|SceneComponentBinding|WasmRuntime|Component)\.h'
+)
+
+Test-SourceTreeForbiddenPattern 'Source' @(
+    '\bCountByPredicate\s*\('
 )
 
 $BindingsBuild = Read-RequiredFile 'Source/AvidScriptBindings/AvidScriptBindings.Build.cs'
