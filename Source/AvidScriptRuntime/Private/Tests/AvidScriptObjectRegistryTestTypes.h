@@ -14,6 +14,27 @@ class UAvidScriptObjectRegistryTestObject : public UObject
 };
 
 UCLASS()
+class UAvidScriptSessionOwnershipTestComponent : public USceneComponent
+{
+	GENERATED_BODY()
+
+public:
+	int32 DestructionOrderId = 0;
+
+	static TArray<int32>& GetDestructionOrder()
+	{
+		static TArray<int32> DestructionOrder;
+		return DestructionOrder;
+	}
+
+	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override
+	{
+		GetDestructionOrder().Add(DestructionOrderId);
+		Super::OnComponentDestroyed(bDestroyingHierarchy);
+	}
+};
+
+UCLASS()
 class AAvidScriptActorBindingTestActor : public AActor
 {
 	GENERATED_BODY()

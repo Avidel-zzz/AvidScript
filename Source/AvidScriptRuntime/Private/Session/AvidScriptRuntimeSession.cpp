@@ -4,6 +4,7 @@
 #include "AvidScriptRuntimeScheduler.h"
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -97,13 +98,15 @@ void SetSessionExecutionFailure(
 } // namespace
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
-	: Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
+	: ObjectOwnership(MakeUnique<FAvidScriptSessionObjectOwnership>())
+	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
 }
 
 FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 {
+	checkf(!IsOperationActive(), TEXT("AvidScript RuntimeSession cannot be destroyed during an active guest call or mutation."));
 	UnloadLive();
 }
 
@@ -275,7 +278,21 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 }
 void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
+	if (IsOperationActive())
+	{
+		UE_LOG(
+			LogAvidScriptRuntimeSession,
+			Verbose,
+			TEXT("AvidScript host context change rejected during an active guest call or mutation."));
+		return;
+	}
+	if (HostContext.ObjectRegistry != nullptr
+		&& HostContext.ObjectRegistry != InHostContext.ObjectRegistry)
+	{
+		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
+	}
 	HostContext = InHostContext;
+	HostContext.ObjectOwnership = ObjectOwnership.Get();
 	HostContext.HostEffectJournal = nullptr;
 	if (!HostContext.World.IsValid()
 		&& HostContext.ObjectRegistry != nullptr
@@ -297,6 +314,18 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 
 void FAvidScriptRuntimeSession::ClearHostContext()
 {
+	if (IsOperationActive())
+	{
+		UE_LOG(
+			LogAvidScriptRuntimeSession,
+			Verbose,
+			TEXT("AvidScript host context clear rejected during an active guest call or mutation."));
+		return;
+	}
+	if (HostContext.ObjectRegistry != nullptr)
+	{
+		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
+	}
 	HostContext = FAvidScriptWasmHostContext();
 	if (LiveRuntime)
 	{
@@ -406,7 +435,12 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 		return false;
 	}
 
-	return LiveRuntime->EndPlay(OutResult);
+	const bool bSucceeded = LiveRuntime->EndPlay(OutResult);
+	if (bSucceeded && HostContext.ObjectRegistry != nullptr)
+	{
+		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
+	}
+	return bSucceeded;
 }
 
 bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutResult)
@@ -441,6 +475,10 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	{
 		OutResult = FAvidScriptWasmSmokeResult();
 		OutResult.bUnloaded = true;
+	}
+	if (HostContext.ObjectRegistry != nullptr)
+	{
+		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
 
 	LiveManifest = FAvidScriptWasmReloadManifest();

@@ -3,6 +3,8 @@
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptGameplayEvent.h"
+#include "AvidScriptObjectFactoryPolicy.h"
+#include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptRuntimeSession.h"
 #include "Session/AvidScriptRuntimeEventRouter.h"
 #include "Session/AvidScriptRuntimeScheduler.h"
@@ -10,11 +12,13 @@
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -967,6 +971,171 @@ bool FAvidScriptRuntimeSessionTypedOwnerValidationTest::RunTest(const FString& P
 	TestEqual(TEXT("Live runtime tick count advances after owner rejection"), ReloadSession.GetSnapshot().TickCallCount, BeforeReload.Runtime.TickCallCount + 1);
 
 	ReloadSession.StopAndUnload(StopResult);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionObjectOwnershipTest,
+	"AvidScript.Architecture.Session.ObjectOwnership",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	Session.SetHostContext(HostContext);
+
+	IAvidScriptObjectOwnershipDomain* const Ownership =
+		Session.GetTestSnapshot().HostContext.ObjectOwnership;
+	if (!TestNotNull(TEXT("Session injects its ownership domain"), Ownership))
+	{
+		return false;
+	}
+
+	UAvidScriptObjectRegistryTestObject* Object =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	UAvidScriptObjectRegistryTestObject* WrongObject =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	TWeakObjectPtr<UAvidScriptObjectRegistryTestObject> WeakObject(Object);
+	FAvidScriptObjectHandleResult HandleResult;
+	const FAvidScriptObjectHandle ObjectHandle = Registry.RegisterObject(Object, HandleResult, false);
+	TestTrue(TEXT("Object handle registers"), HandleResult.bSucceeded);
+	TestFalse(TEXT("Ownership rejects a handle for a different object"), Ownership->Adopt(
+		Registry,
+		*WrongObject,
+		ObjectHandle,
+		EAvidScriptObjectFactoryKind::NewObject,
+		HandleResult));
+	TestEqual(TEXT("Handle mismatch category is stable"), HandleResult.ErrorCategory, FString(TEXT("ownership_handle_mismatch")));
+	TestTrue(TEXT("Session adopts ordinary object"), Ownership->Adopt(
+		Registry,
+		*Object,
+		ObjectHandle,
+		EAvidScriptObjectFactoryKind::NewObject,
+		HandleResult));
+	TestTrue(TEXT("Ownership authority is observable"), Ownership->Owns(*Object));
+	FAvidScriptObjectRegistry OtherRegistry;
+	TestFalse(TEXT("Ownership rejects release through another registry"), Ownership->Release(
+		*Object,
+		OtherRegistry,
+		HandleResult));
+	TestEqual(TEXT("Registry mismatch category is stable"), HandleResult.ErrorCategory, FString(TEXT("ownership_registry_mismatch")));
+	TestTrue(TEXT("Registry mismatch preserves ownership"), Ownership->Owns(*Object));
+
+	Object = nullptr;
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestTrue(TEXT("Ownership domain keeps ordinary object alive"), WeakObject.IsValid());
+	TestTrue(TEXT("Explicit release accepts owned object"), Ownership->Release(
+		*WeakObject.Get(),
+		Registry,
+		HandleResult));
+	TestFalse(TEXT("Released object leaves ownership domain"), Ownership->Owns(*WeakObject.Get()));
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	TestFalse(TEXT("Released ordinary object is collectable"), WeakObject.IsValid());
+
+	UWorld* World = nullptr;
+	AActor* Owner = nullptr;
+	if (!TestTrue(TEXT("Component ownership fixture world is created"), CreateSessionOwnerWorld(World, Owner)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroySessionOwnerWorld(World);
+	};
+
+	UAvidScriptSessionOwnershipTestComponent* ExternalComponent =
+		NewObject<UAvidScriptSessionOwnershipTestComponent>(Owner);
+	const FAvidScriptObjectHandle ExternalComponentHandle =
+		Registry.RegisterObject(ExternalComponent, HandleResult, false);
+	TestTrue(TEXT("External-destroy component handle registers"), HandleResult.bSucceeded);
+	TestTrue(TEXT("Session adopts external-destroy component"), Ownership->Adopt(
+		Registry,
+		*ExternalComponent,
+		ExternalComponentHandle,
+		EAvidScriptObjectFactoryKind::ActorComponent,
+		HandleResult));
+	Owner->AddInstanceComponent(ExternalComponent);
+	ExternalComponent->RegisterComponent();
+	ExternalComponent->DestroyComponent();
+	TestTrue(TEXT("Externally destroyed component enters destruction"), ExternalComponent->IsBeingDestroyed());
+
+	UAvidScriptSessionOwnershipTestComponent::GetDestructionOrder().Reset();
+	UAvidScriptSessionOwnershipTestComponent* FirstComponent =
+		NewObject<UAvidScriptSessionOwnershipTestComponent>(Owner);
+	FirstComponent->DestructionOrderId = 1;
+	const FAvidScriptObjectHandle FirstComponentHandle =
+		Registry.RegisterObject(FirstComponent, HandleResult, false);
+	TestTrue(TEXT("First component handle registers"), HandleResult.bSucceeded);
+	TestTrue(TEXT("Session adopts first dynamic component"), Ownership->Adopt(
+		Registry,
+		*FirstComponent,
+		FirstComponentHandle,
+		EAvidScriptObjectFactoryKind::ActorComponent,
+		HandleResult));
+	Owner->AddInstanceComponent(FirstComponent);
+	FirstComponent->RegisterComponent();
+
+	UAvidScriptSessionOwnershipTestComponent* SecondComponent =
+		NewObject<UAvidScriptSessionOwnershipTestComponent>(Owner);
+	SecondComponent->DestructionOrderId = 2;
+	const FAvidScriptObjectHandle SecondComponentHandle =
+		Registry.RegisterObject(SecondComponent, HandleResult, false);
+	TestTrue(TEXT("Second component handle registers"), HandleResult.bSucceeded);
+	TestTrue(TEXT("Session adopts second dynamic component"), Ownership->Adopt(
+		Registry,
+		*SecondComponent,
+		SecondComponentHandle,
+		EAvidScriptObjectFactoryKind::ActorComponent,
+		HandleResult));
+	Owner->AddInstanceComponent(SecondComponent);
+	SecondComponent->RegisterComponent();
+
+	UAvidScriptObjectRegistryTestObject* ForeignObject =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle ForeignHandle = Registry.RegisterObject(ForeignObject, HandleResult, false);
+	TestTrue(TEXT("Foreign handle registers"), HandleResult.bSucceeded);
+	TestFalse(TEXT("Session rejects release without authority"), Ownership->Release(
+		*ForeignObject,
+		Registry,
+		HandleResult));
+	TestEqual(TEXT("Authority failure category is stable"), HandleResult.ErrorCategory, FString(TEXT("ownership_violation")));
+
+	FAvidScriptWasmReloadResult LoadResult;
+	TestTrue(TEXT("Reentrant fixture runtime loads"), Session.LoadEmbeddedSmoke(LoadResult));
+	bool bReentrantStopSucceeded = true;
+	FAvidScriptWasmSmokeResult ReentrantStopResult;
+	bool bContextMutationRejected = false;
+	Session.SetLiveExecutionObserverForTesting(
+		[&Session, &Registry, &bReentrantStopSucceeded, &ReentrantStopResult, &bContextMutationRejected]()
+		{
+			Session.ClearHostContext();
+			bContextMutationRejected = Session.GetTestSnapshot().HostContext.ObjectRegistry == &Registry;
+			bReentrantStopSucceeded = Session.StopAndUnload(ReentrantStopResult);
+		});
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Live runtime ticks around reentrant stop attempt"), Session.Tick(1.0f / 60.0f, TickResult));
+	TestFalse(TEXT("Reentrant stop is rejected"), bReentrantStopSucceeded);
+	TestTrue(TEXT("Reentrant context mutation is rejected"), bContextMutationRejected);
+	TestEqual(TEXT("Reentrant stop category is stable"), ReentrantStopResult.ErrorCategory, FString(TEXT("reentrant_operation")));
+	TestFalse(TEXT("Rejected reentrant stop preserves first component"), FirstComponent->IsBeingDestroyed());
+	TestFalse(TEXT("Rejected reentrant stop preserves second component"), SecondComponent->IsBeingDestroyed());
+
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(TEXT("Session stop cleans owned objects"), Session.StopAndUnload(StopResult));
+	TestTrue(TEXT("First owned dynamic component is destroyed"), FirstComponent->IsBeingDestroyed());
+	TestTrue(TEXT("Second owned dynamic component is destroyed"), SecondComponent->IsBeingDestroyed());
+	const TArray<int32>& DestructionOrder = UAvidScriptSessionOwnershipTestComponent::GetDestructionOrder();
+	TestEqual(TEXT("Session cleanup destroys two live components"), DestructionOrder.Num(), 2);
+	if (DestructionOrder.Num() == 2)
+	{
+		TestEqual(TEXT("Session cleanup starts with newest component"), DestructionOrder[0], 2);
+		TestEqual(TEXT("Session cleanup ends with oldest component"), DestructionOrder[1], 1);
+	}
+	TestEqual(TEXT("Only foreign handle remains after ownership cleanup"), Registry.GetLiveHandleCount(), 1);
+	TestTrue(TEXT("Foreign handle remains releasable"), Registry.ReleaseHandle(ForeignHandle, HandleResult, false));
 	return true;
 }
 

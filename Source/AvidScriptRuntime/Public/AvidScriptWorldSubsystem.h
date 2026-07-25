@@ -36,7 +36,10 @@ public:
 private:
 	void RecordFailure(const FAvidScriptWasmSmokeResult& Result);
 	void ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUnloadResult = nullptr);
+	void FlushDeferredRuntimeRelease();
 
 	TUniquePtr<FAvidScriptRuntimeSession> RuntimeSession;
 	FAvidScriptWorldRuntimeStats RuntimeStats;
+	bool bRuntimeReleaseDeferred = false;
+	bool bRuntimeReleaseInProgress = false;
 };

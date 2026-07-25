@@ -5,6 +5,7 @@
 
 class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
+class FAvidScriptSessionObjectOwnership;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
@@ -105,6 +106,7 @@ private:
 		bool bUseHostEffectTransaction,
 		FAvidScriptWasmReloadResult& OutResult);
 
+	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;

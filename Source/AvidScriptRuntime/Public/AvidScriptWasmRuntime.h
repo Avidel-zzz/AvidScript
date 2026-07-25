@@ -6,6 +6,7 @@
 #include "AvidScriptLifecycleState.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
+#include "AvidScriptObjectOwnership.h"
 
 #include "CoreMinimal.h"
 
@@ -62,6 +63,7 @@ struct FAvidScriptWasmSmokeResult
 struct FAvidScriptWasmHostContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
+	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;

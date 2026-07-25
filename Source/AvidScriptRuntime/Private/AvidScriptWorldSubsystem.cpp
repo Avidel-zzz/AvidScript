@@ -1,6 +1,7 @@
 #include "AvidScriptWorldSubsystem.h"
 
 #include "Engine/World.h"
+#include "Misc/ScopeExit.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWorldSubsystem, Log, All);
 
@@ -38,6 +39,8 @@ void UAvidScriptWorldSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	RuntimeStats = FAvidScriptWorldRuntimeStats();
+	bRuntimeReleaseDeferred = false;
+	bRuntimeReleaseInProgress = false;
 	RuntimeSession = MakeUnique<FAvidScriptRuntimeSession>();
 
 	FAvidScriptWasmReloadResult ReloadResult;
@@ -91,6 +94,11 @@ void UAvidScriptWorldSubsystem::OnWorldEndPlay(UWorld& InWorld)
 
 void UAvidScriptWorldSubsystem::Tick(float DeltaTime)
 {
+	ON_SCOPE_EXIT
+	{
+		FlushDeferredRuntimeRelease();
+	};
+
 	if (RuntimeSession.IsValid() &&
 		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
 	{
@@ -168,11 +176,35 @@ void UAvidScriptWorldSubsystem::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUn
 	FAvidScriptWasmSmokeResult LocalUnloadResult;
 	FAvidScriptWasmSmokeResult& UnloadResult = OutUnloadResult != nullptr ? *OutUnloadResult : LocalUnloadResult;
 
+	if (bRuntimeReleaseInProgress
+		|| (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
+	{
+		bRuntimeReleaseDeferred = true;
+		UnloadResult = FAvidScriptWasmSmokeResult();
+		UnloadResult.ModuleId = RuntimeSession.IsValid() ? RuntimeSession->GetLiveModuleId() : FString();
+		UnloadResult.ExportName = TEXT("<unload>");
+		UnloadResult.ErrorCategory = TEXT("reentrant_operation");
+		UnloadResult.NextAction = TEXT("defer world Runtime release until the active script callback returns");
+		UnloadResult.ErrorMessage = TEXT("AvidScript world subsystem deferred Runtime release while a script operation was active.");
+		return;
+	}
+
+	bRuntimeReleaseInProgress = true;
+	ON_SCOPE_EXIT
+	{
+		bRuntimeReleaseInProgress = false;
+	};
+
 	if (RuntimeSession.IsValid())
 	{
 		if (!RuntimeSession->StopAndUnload(UnloadResult))
 		{
 			RecordFailure(UnloadResult);
+			if (RuntimeSession->IsOperationActive())
+			{
+				bRuntimeReleaseDeferred = true;
+				return;
+			}
 		}
 		RuntimeSession.Reset();
 	}
@@ -184,4 +216,17 @@ void UAvidScriptWorldSubsystem::ReleaseRuntime(FAvidScriptWasmSmokeResult* OutUn
 	RuntimeStats.Metrics = UnloadResult.Metrics;
 	RuntimeStats.TickCallCount = FMath::Max(RuntimeStats.TickCallCount, UnloadResult.TickCallCount);
 	RuntimeStats.bRuntimeLoaded = false;
+}
+
+void UAvidScriptWorldSubsystem::FlushDeferredRuntimeRelease()
+{
+	if (!bRuntimeReleaseDeferred
+		|| bRuntimeReleaseInProgress
+		|| (RuntimeSession.IsValid() && RuntimeSession->IsOperationActive()))
+	{
+		return;
+	}
+
+	bRuntimeReleaseDeferred = false;
+	ReleaseRuntime();
 }
