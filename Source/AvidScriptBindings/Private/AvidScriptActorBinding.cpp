@@ -1,5 +1,7 @@
 #include "AvidScriptActorBinding.h"
 
+#include "AvidScriptObjectOwnership.h"
+
 #include "Components/SceneComponent.h"
 #include "GameFramework/Actor.h"
 
@@ -253,7 +255,8 @@ bool FAvidScriptActorBinding::GetRootComponentHandle(
 	const FAvidScriptObjectHandle& ActorHandle,
 	FAvidScriptObjectHandle& OutComponentHandle,
 	FAvidScriptActorBindingResult& OutResult,
-	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy)
+	EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy,
+	IAvidScriptObjectOwnershipDomain* ObjectOwnership)
 {
 	OutComponentHandle = FAvidScriptObjectHandle();
 	AActor* Actor = ResolveActor(Registry, ActorHandle, OutResult, DiagnosticsPolicy);
@@ -273,18 +276,26 @@ bool FAvidScriptActorBinding::GetRootComponentHandle(
 		return false;
 	}
 
-	FAvidScriptObjectHandleResult RegisterResult;
-	OutComponentHandle = Registry.RegisterObject(
-		RootComponent,
-		RegisterResult,
-		DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
-	if (!RegisterResult.bSucceeded)
+	FAvidScriptObjectHandleResult HandleResult;
+	if (ObjectOwnership != nullptr)
+	{
+		ObjectOwnership->Borrow(Registry, *RootComponent, HandleResult);
+		OutComponentHandle = HandleResult.Handle;
+	}
+	else
+	{
+		OutComponentHandle = Registry.RegisterObject(
+			RootComponent,
+			HandleResult,
+			DiagnosticsPolicy == EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
+	}
+	if (!HandleResult.bSucceeded)
 	{
 		SetFailure(
 			OutResult,
-			RegisterResult,
-			RegisterResult.ErrorCategory.IsEmpty() ? FString(TEXT("invalid_object")) : RegisterResult.ErrorCategory,
-			RegisterResult.NextAction);
+			HandleResult,
+			HandleResult.ErrorCategory.IsEmpty() ? FString(TEXT("invalid_object")) : HandleResult.ErrorCategory,
+			HandleResult.NextAction);
 		return false;
 	}
 

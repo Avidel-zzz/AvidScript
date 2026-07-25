@@ -110,6 +110,15 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 
 	SliceModel.SelfTypeId = AuthorizationModel.SelfTypeId;
 	TSet<FString> RequiredTypeIds;
+	// Prepared C# constants use authorization ordinals. Keep the complete object
+	// table so a runtime slice cannot reinterpret an already-lowered ordinal.
+	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
+	{
+		if (Type.ObjectTypeOrdinal != INDEX_NONE)
+		{
+			RequiredTypeIds.Add(Type.StableId);
+		}
+	}
 	if (!SliceModel.SelfTypeId.IsEmpty())
 	{
 		RequiredTypeIds.Add(SliceModel.SelfTypeId);
@@ -223,14 +232,6 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	{
 		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
 	});
-	int32 NextObjectTypeOrdinal = 0;
-	for (FAvidScriptBindingTypeModel& Type : SliceModel.Types)
-	{
-		if (Type.ObjectTypeOrdinal != INDEX_NONE)
-		{
-			Type.ObjectTypeOrdinal = NextObjectTypeOrdinal++;
-		}
-	}
 	SliceModel.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(SliceModel);
 	SliceModel.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(SliceModel);
 	return true;

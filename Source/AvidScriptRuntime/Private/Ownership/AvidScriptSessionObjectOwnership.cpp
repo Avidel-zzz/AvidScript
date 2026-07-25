@@ -138,11 +138,68 @@ bool FAvidScriptSessionObjectOwnership::Release(
 	}
 
 	RemoveAt(*OwnedObjectIndex);
-	if (OwnedObjects.IsEmpty())
-	{
-		BoundRegistry = nullptr;
-	}
+	ResetBoundRegistryIfEmpty();
 	DestroyOwnedComponent(OwnedObject);
+	return true;
+}
+
+bool FAvidScriptSessionObjectOwnership::Borrow(
+	FAvidScriptObjectRegistry& Registry,
+	UObject& Object,
+	FAvidScriptObjectHandleResult& OutResult)
+{
+	if (!IsValid(&Object))
+	{
+		SetFailure(
+			OutResult,
+			FAvidScriptObjectHandle(),
+			&Object,
+			TEXT("ownership_invalid_object"),
+			TEXT("borrow only a live object returned by the active session"));
+		return false;
+	}
+	if (BoundRegistry != nullptr && BoundRegistry != &Registry)
+	{
+		SetFailure(
+			OutResult,
+			FAvidScriptObjectHandle(),
+			&Object,
+			TEXT("ownership_registry_mismatch"),
+			TEXT("borrow through the object registry bound to the active session"));
+		return false;
+	}
+
+	const TObjectKey<UObject> ObjectKey(&Object);
+	if (const int32* OwnedIndex = ObjectToOwnedIndex.Find(ObjectKey))
+	{
+		OutResult = FAvidScriptObjectHandleResult();
+		OutResult.bSucceeded = true;
+		OutResult.Handle = OwnedObjects[*OwnedIndex].Handle;
+		return true;
+	}
+	if (const int32* BorrowedIndex = ObjectToBorrowedIndex.Find(ObjectKey))
+	{
+		OutResult = FAvidScriptObjectHandleResult();
+		OutResult.bSucceeded = true;
+		OutResult.Handle = BorrowedObjects[*BorrowedIndex].Handle;
+		return true;
+	}
+
+	const FAvidScriptObjectHandle Handle = Registry.AcquireBorrowedObject(
+		&Object,
+		OutResult,
+		false);
+	if (!OutResult.bSucceeded || !Handle.IsValid())
+	{
+		return false;
+	}
+
+	FBorrowedObject& BorrowedObject = BorrowedObjects.Emplace_GetRef();
+	BorrowedObject.ObjectKey = ObjectKey;
+	BorrowedObject.Handle = Handle;
+	ObjectToBorrowedIndex.Add(ObjectKey, BorrowedObjects.Num() - 1);
+	HandleToBorrowedIndex.Add(Handle.ToUInt64(), BorrowedObjects.Num() - 1);
+	BoundRegistry = &Registry;
 	return true;
 }
 
@@ -167,9 +224,13 @@ void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Regis
 	}
 
 	TArray<FOwnedObject> CleanupObjects = MoveTemp(OwnedObjects);
+	TArray<FBorrowedObject> CleanupBorrowedObjects = MoveTemp(BorrowedObjects);
 	OwnedObjects.Reset();
 	ObjectToOwnedIndex.Reset();
 	HandleToOwnedIndex.Reset();
+	BorrowedObjects.Reset();
+	ObjectToBorrowedIndex.Reset();
+	HandleToBorrowedIndex.Reset();
 	BoundRegistry = nullptr;
 
 	for (int32 OwnedObjectIndex = CleanupObjects.Num() - 1; OwnedObjectIndex >= 0; --OwnedObjectIndex)
@@ -180,6 +241,54 @@ void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Regis
 		DestroyOwnedComponent(OwnedObject);
 		OwnedObject.StrongObject = nullptr;
 	}
+	for (int32 BorrowedIndex = CleanupBorrowedObjects.Num() - 1;
+		BorrowedIndex >= 0;
+		--BorrowedIndex)
+	{
+		FAvidScriptObjectHandleResult ReleaseResult;
+		Registry.ReleaseBorrowedHandle(
+			CleanupBorrowedObjects[BorrowedIndex].Handle,
+			ReleaseResult,
+			false);
+	}
+}
+
+bool FAvidScriptSessionObjectOwnership::RollbackBorrowedHandles(
+	FAvidScriptObjectRegistry& Registry,
+	const int32 RetainedCount,
+	FString& OutError)
+{
+	OutError.Empty();
+	if (RetainedCount < 0 || RetainedCount > BorrowedObjects.Num())
+	{
+		OutError = TEXT("The borrowed-handle checkpoint is outside the active lease journal.");
+		return false;
+	}
+	if (BoundRegistry != nullptr && BoundRegistry != &Registry)
+	{
+		OutError = TEXT("Borrowed-handle rollback used a registry other than the bound session registry.");
+		return false;
+	}
+
+	bool bSucceeded = true;
+	for (int32 Index = BorrowedObjects.Num() - 1; Index >= RetainedCount; --Index)
+	{
+		FAvidScriptObjectHandleResult ReleaseResult;
+		if (!Registry.ReleaseBorrowedHandle(
+				BorrowedObjects[Index].Handle,
+				ReleaseResult,
+				false))
+		{
+			bSucceeded = false;
+			if (OutError.IsEmpty())
+			{
+				OutError = ReleaseResult.ErrorMessage;
+			}
+		}
+		RemoveBorrowedAt(Index);
+	}
+	ResetBoundRegistryIfEmpty();
+	return bSucceeded;
 }
 
 void FAvidScriptSessionObjectOwnership::AddReferencedObjects(FReferenceCollector& Collector)
@@ -246,5 +355,28 @@ void FAvidScriptSessionObjectOwnership::RemoveAt(const int32 OwnedObjectIndex)
 	{
 		ObjectToOwnedIndex.FindChecked(OwnedObjects[Index].ObjectKey) = Index;
 		HandleToOwnedIndex.FindChecked(OwnedObjects[Index].Handle.ToUInt64()) = Index;
+	}
+}
+
+void FAvidScriptSessionObjectOwnership::RemoveBorrowedAt(
+	const int32 BorrowedObjectIndex)
+{
+	ObjectToBorrowedIndex.Remove(BorrowedObjects[BorrowedObjectIndex].ObjectKey);
+	HandleToBorrowedIndex.Remove(
+		BorrowedObjects[BorrowedObjectIndex].Handle.ToUInt64());
+	BorrowedObjects.RemoveAt(BorrowedObjectIndex, 1, EAllowShrinking::No);
+	for (int32 Index = BorrowedObjectIndex; Index < BorrowedObjects.Num(); ++Index)
+	{
+		ObjectToBorrowedIndex.FindChecked(BorrowedObjects[Index].ObjectKey) = Index;
+		HandleToBorrowedIndex.FindChecked(
+			BorrowedObjects[Index].Handle.ToUInt64()) = Index;
+	}
+}
+
+void FAvidScriptSessionObjectOwnership::ResetBoundRegistryIfEmpty()
+{
+	if (OwnedObjects.IsEmpty() && BorrowedObjects.IsEmpty())
+	{
+		BoundRegistry = nullptr;
 	}
 }

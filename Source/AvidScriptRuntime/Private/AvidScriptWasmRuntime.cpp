@@ -1091,7 +1091,6 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, i
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
-
 	if (Slot <= 0 || Generation <= 0)
 	{
 		SetPendingHostImportFailure(
@@ -1578,6 +1577,15 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
 	}
+	if (HostContext.ObjectOwnership == nullptr)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("actor_get_root_component"),
+			TEXT("Missing ownership domain for borrowed root component handle"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
 
 	if (Slot <= 0 || Generation <= 0)
 	{
@@ -1593,7 +1601,8 @@ int32 FAvidScriptWasmRuntimeInstance::HandleActorGetRootComponentImport(
 		ActorHandle,
 		OutComponentHandle,
 		BindingResult,
-		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath))
+		EAvidScriptBindingDiagnosticsPolicy::OmitObjectPath,
+		HostContext.ObjectOwnership))
 	{
 		SetPendingHostImportFailure(TEXT("avidscript"), TEXT("actor_get_root_component"), BindingResult.ErrorMessage.IsEmpty() ? FString::Printf(TEXT("Root component lookup failed | slot=%d | generation=%d"), Slot, Generation) : BindingResult.ErrorMessage);
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);

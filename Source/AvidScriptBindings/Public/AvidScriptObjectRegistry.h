@@ -39,6 +39,10 @@ public:
 		UObject* Object,
 		FAvidScriptObjectHandleResult& OutResult,
 		bool bIncludeObjectPath = true);
+	FAvidScriptObjectHandle AcquireBorrowedObject(
+		UObject* Object,
+		FAvidScriptObjectHandleResult& OutResult,
+		bool bIncludeObjectPath = true);
 	UObject* ResolveObject(
 		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectHandleResult& OutResult,
@@ -82,6 +86,10 @@ public:
 		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectHandleResult& OutResult,
 		bool bIncludeObjectPath = true);
+	bool ReleaseBorrowedHandle(
+		const FAvidScriptObjectHandle& Handle,
+		FAvidScriptObjectHandleResult& OutResult,
+		bool bIncludeObjectPath = true);
 	void Reset();
 
 	int32 NumSlots() const { return Slots.Num(); }
@@ -94,10 +102,13 @@ private:
 		TWeakObjectPtr<UObject> Object;
 		TObjectKey<UObject> ObjectKey;
 		uint32 Generation = 1;
+		int32 BorrowedLeaseCount = 0;
+		bool bAnchored = false;
 		bool bOccupied = false;
 	};
 
 	static uint32 AdvanceGeneration(uint32 Generation);
+	void ReleaseSlot(int32 SlotIndex);
 	static void SetSuccess(
 		FAvidScriptObjectHandleResult& OutResult,
 		const FAvidScriptObjectHandle& Handle,

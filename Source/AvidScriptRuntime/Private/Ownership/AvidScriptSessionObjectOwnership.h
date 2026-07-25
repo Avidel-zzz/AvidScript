@@ -22,6 +22,10 @@ public:
 		const FAvidScriptObjectHandle& Handle,
 		EAvidScriptObjectFactoryKind Kind,
 		FAvidScriptObjectHandleResult& OutResult) override;
+	virtual bool Borrow(
+		FAvidScriptObjectRegistry& Registry,
+		UObject& Object,
+		FAvidScriptObjectHandleResult& OutResult) override;
 	virtual bool Release(
 		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectRegistry& Registry,
@@ -35,6 +39,11 @@ public:
 	virtual FString GetReferencerName() const override;
 
 	int32 Num() const { return OwnedObjects.Num(); }
+	int32 GetBorrowedHandleCount() const { return BorrowedObjects.Num(); }
+	bool RollbackBorrowedHandles(
+		FAvidScriptObjectRegistry& Registry,
+		int32 RetainedCount,
+		FString& OutError);
 
 private:
 	struct FOwnedObject
@@ -46,6 +55,11 @@ private:
 		FAvidScriptObjectHandle Handle;
 		EAvidScriptObjectFactoryKind Kind = EAvidScriptObjectFactoryKind::NewObject;
 	};
+	struct FBorrowedObject
+	{
+		TObjectKey<UObject> ObjectKey;
+		FAvidScriptObjectHandle Handle;
+	};
 
 	static void SetFailure(
 		FAvidScriptObjectHandleResult& OutResult,
@@ -55,9 +69,14 @@ private:
 		const TCHAR* NextAction);
 	static void DestroyOwnedComponent(const FOwnedObject& OwnedObject);
 	void RemoveAt(int32 OwnedObjectIndex);
+	void RemoveBorrowedAt(int32 BorrowedObjectIndex);
+	void ResetBoundRegistryIfEmpty();
 
 	TArray<FOwnedObject> OwnedObjects;
 	TMap<TObjectKey<UObject>, int32> ObjectToOwnedIndex;
 	TMap<uint64, int32> HandleToOwnedIndex;
+	TArray<FBorrowedObject> BorrowedObjects;
+	TMap<TObjectKey<UObject>, int32> ObjectToBorrowedIndex;
+	TMap<uint64, int32> HandleToBorrowedIndex;
 	FAvidScriptObjectRegistry* BoundRegistry = nullptr;
 };

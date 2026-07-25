@@ -805,18 +805,21 @@ bool WriteAvidScriptRuntimeValueToGuest(
 		FAvidScriptObjectHandle Handle;
 		if (Object != nullptr)
 		{
-			if (Context.ObjectRegistry == nullptr)
+			if (Context.ObjectRegistry == nullptr || Context.ObjectOwnership == nullptr)
 			{
-				OutDetails = TEXT("The binding call cannot publish a UObject result without an object registry.");
+				OutDetails = TEXT("The binding call cannot publish a UObject result without registry and ownership services.");
 				return false;
 			}
-			FAvidScriptObjectHandleResult RegisterResult;
-			Handle = Context.ObjectRegistry->RegisterObject(Object, RegisterResult, false);
-			if (!Handle.IsValid())
+			FAvidScriptObjectHandleResult BorrowResult;
+			if (!Context.ObjectOwnership->Borrow(
+					*Context.ObjectRegistry,
+					*Object,
+					BorrowResult))
 			{
-				OutDetails = RegisterResult.ErrorMessage;
+				OutDetails = BorrowResult.ErrorMessage;
 				return false;
 			}
+			Handle = BorrowResult.Handle;
 		}
 		FMemory::Memcpy(Bytes, &Handle.Slot, sizeof(Handle.Slot));
 		FMemory::Memcpy(Bytes + sizeof(Handle.Slot), &Handle.Generation, sizeof(Handle.Generation));
@@ -1396,6 +1399,7 @@ bool DispatchAvidScriptObjectFactory(
 		};
 		bSucceeded = FAvidScriptObjectFactoryBinding::FindComponent(
 			*Context.ObjectRegistry,
+			*Context.ObjectOwnership,
 			ActorHandle,
 			*ComponentClass,
 			BindingResult);

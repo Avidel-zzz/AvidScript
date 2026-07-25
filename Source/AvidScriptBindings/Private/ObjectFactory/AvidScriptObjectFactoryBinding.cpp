@@ -222,6 +222,7 @@ bool FAvidScriptObjectFactoryBinding::Release(
 
 bool FAvidScriptObjectFactoryBinding::FindComponent(
 	FAvidScriptObjectRegistry& Registry,
+	IAvidScriptObjectOwnershipDomain& Ownership,
 	const FAvidScriptObjectHandle& ActorHandle,
 	UClass& ComponentClass,
 	FAvidScriptObjectHandleResult& OutResult)
@@ -258,9 +259,7 @@ bool FAvidScriptObjectFactoryBinding::FindComponent(
 		return true;
 	}
 
-	const FAvidScriptObjectHandle Handle = Registry.RegisterObject(
-		Component,
-		OutResult,
-		false);
-	return OutResult.bSucceeded && Handle.IsValid();
+	return Ownership.Borrow(Registry, *Component, OutResult)
+		&& OutResult.bSucceeded
+		&& OutResult.Handle.IsValid();
 }

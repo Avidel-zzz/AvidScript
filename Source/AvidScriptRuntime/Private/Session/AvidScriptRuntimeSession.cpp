@@ -286,6 +286,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 			TEXT("AvidScript host context change rejected during an active guest call or mutation."));
 		return;
 	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	if (HostContext.ObjectRegistry != nullptr
 		&& HostContext.ObjectRegistry != InHostContext.ObjectRegistry)
 	{
@@ -322,6 +323,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 			TEXT("AvidScript host context clear rejected during an active guest call or mutation."));
 		return;
 	}
+	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -761,6 +763,32 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("rebuild and validate the candidate before activation"));
 		return false;
 	}
+	const int32 BorrowedHandleCheckpoint = ObjectOwnership->GetBorrowedHandleCount();
+	const auto RollbackBorrowedHandles = [this, BorrowedHandleCheckpoint]() -> bool
+	{
+		if (ObjectOwnership->GetBorrowedHandleCount() == BorrowedHandleCheckpoint)
+		{
+			return true;
+		}
+		if (HostContext.ObjectRegistry == nullptr)
+		{
+			return false;
+		}
+		FString RollbackError;
+		const bool bRolledBack = ObjectOwnership->RollbackBorrowedHandles(
+			*HostContext.ObjectRegistry,
+			BorrowedHandleCheckpoint,
+			RollbackError);
+		if (!bRolledBack)
+		{
+			UE_LOG(
+				LogAvidScriptRuntimeSession,
+				Error,
+				TEXT("AvidScript candidate borrowed-handle rollback failed: %s"),
+				RollbackError.IsEmpty() ? TEXT("<none>") : *RollbackError);
+		}
+		return bRolledBack;
+	};
 
 	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
 	if (bUseHostEffectTransaction)
@@ -783,6 +811,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	if (!CandidateRuntime->BeginPlay(BeginPlayResult))
 	{
 		CopyRuntimeFailure(BeginPlayResult, OutResult);
+		const bool bBorrowedHandlesRolledBack = RollbackBorrowedHandles();
 		if (bUseHostEffectTransaction)
 		{
 			OutResult.bHostEffectRollbackAttempted = true;
@@ -793,7 +822,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			FAvidScriptHostEffectTransactionResult RollbackResult;
 			OutResult.bHostEffectRollbackSucceeded = HostEffectTransaction->Rollback(
 				RollbackRegistry,
-				RollbackResult);
+				RollbackResult)
+				&& bBorrowedHandlesRolledBack;
 			CopyHostEffectResult(RollbackResult, OutResult);
 		}
 		CandidateRuntime->SetHostContext(HostContext);
@@ -806,6 +836,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		FAvidScriptHostEffectTransactionResult CommitResult;
 		if (!HostEffectTransaction->Commit(CommitResult))
 		{
+			RollbackBorrowedHandles();
 			CopyHostEffectResult(CommitResult, OutResult);
 			SetReloadFailure(
 				OutResult,

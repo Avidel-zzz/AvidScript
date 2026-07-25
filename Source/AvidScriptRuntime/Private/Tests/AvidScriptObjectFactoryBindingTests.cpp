@@ -40,6 +40,14 @@ public:
 		return false;
 	}
 
+	bool Borrow(
+		FAvidScriptObjectRegistry&,
+		UObject&,
+		FAvidScriptObjectHandleResult&) override
+	{
+		return false;
+	}
+
 	bool Owns(const FAvidScriptObjectHandle&, const UObject*) const override
 	{
 		return false;
@@ -259,6 +267,7 @@ bool FAvidScriptObjectFactoryBindingTest::RunTest(const FString& Parameters)
 		TEXT("FindComponent returns an existing matching component"),
 		FAvidScriptObjectFactoryBinding::FindComponent(
 			Registry,
+			Ownership,
 			OwnerHandle,
 			*UAvidScriptSessionOwnershipTestComponent::StaticClass(),
 			Result));
@@ -268,10 +277,41 @@ bool FAvidScriptObjectFactoryBindingTest::RunTest(const FString& Parameters)
 		TEXT("A missing component is a successful empty query"),
 		FAvidScriptObjectFactoryBinding::FindComponent(
 			Registry,
+			Ownership,
 			OtherOwnerHandle,
 			*UAvidScriptSessionOwnershipTestComponent::StaticClass(),
 			Result));
 	TestFalse(TEXT("Query miss returns an invalid packed handle"), Result.Handle.IsValid());
+	UAvidScriptSessionOwnershipTestComponent* BorrowedComponent =
+		NewObject<UAvidScriptSessionOwnershipTestComponent>(OtherOwner);
+	OtherOwner->AddInstanceComponent(BorrowedComponent);
+	BorrowedComponent->RegisterComponent();
+	const int32 LiveHandlesBeforeBorrow = Registry.GetLiveHandleCount();
+	TestTrue(
+		TEXT("FindComponent acquires a borrowed handle for an existing component"),
+		FAvidScriptObjectFactoryBinding::FindComponent(
+			Registry,
+			Ownership,
+			OtherOwnerHandle,
+			*UAvidScriptSessionOwnershipTestComponent::StaticClass(),
+			Result));
+	const FAvidScriptObjectHandle BorrowedHandle = Result.Handle;
+	TestTrue(TEXT("Borrowed component handle is valid"), BorrowedHandle.IsValid());
+	TestEqual(TEXT("First borrowed component adds one registry slot"),
+		Registry.GetLiveHandleCount(),
+		LiveHandlesBeforeBorrow + 1);
+	TestTrue(
+		TEXT("Repeated FindComponent reuses the session borrowed lease"),
+		FAvidScriptObjectFactoryBinding::FindComponent(
+			Registry,
+			Ownership,
+			OtherOwnerHandle,
+			*UAvidScriptSessionOwnershipTestComponent::StaticClass(),
+			Result));
+	TestEqual(TEXT("Repeated FindComponent returns the same handle"), Result.Handle, BorrowedHandle);
+	TestEqual(TEXT("Repeated FindComponent does not grow the registry"),
+		Registry.GetLiveHandleCount(),
+		LiveHandlesBeforeBorrow + 1);
 
 	TestFalse(
 		TEXT("Component factory rejects a non-Actor Outer"),
@@ -296,6 +336,9 @@ bool FAvidScriptObjectFactoryBindingTest::RunTest(const FString& Parameters)
 		Owner->GetInstanceComponents().Contains(Component));
 
 	Ownership.Cleanup(Registry);
+	TestEqual(TEXT("Session cleanup releases the borrowed component slot"),
+		Registry.GetLiveHandleCount(),
+		LiveHandlesBeforeBorrow - 1);
 	DestroyObjectFactoryBindingWorld(World);
 	return true;
 }

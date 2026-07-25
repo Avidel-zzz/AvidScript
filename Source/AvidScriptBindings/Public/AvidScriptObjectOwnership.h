@@ -20,6 +20,10 @@ public:
 		const FAvidScriptObjectHandle& Handle,
 		EAvidScriptObjectFactoryKind Kind,
 		FAvidScriptObjectHandleResult& OutResult) = 0;
+	virtual bool Borrow(
+		FAvidScriptObjectRegistry& Registry,
+		UObject& Object,
+		FAvidScriptObjectHandleResult& OutResult) = 0;
 	virtual bool Release(
 		const FAvidScriptObjectHandle& Handle,
 		FAvidScriptObjectRegistry& Registry,

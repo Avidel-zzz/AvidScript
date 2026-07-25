@@ -673,7 +673,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString& Parameters)
 {
+	FAvidScriptObjectRegistry Registry;
 	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	Session.SetHostContext(HostContext);
 	FAvidScriptWasmReloadResult ReloadResult;
 	TestTrue(
 		TEXT("initial session starts"),
@@ -687,6 +691,22 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 	TestTrue(TEXT("initial live runtime ticks"), Session.Tick(1.0f / 60.0f, TickResult));
 	TestEqual(TEXT("initial tick count"), Session.GetSnapshot().TickCallCount, 1);
 
+	UAvidScriptObjectRegistryTestObject* BorrowedCandidateObject =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	bool bCandidateBorrowSucceeded = false;
+	Session.SetCandidateBeginPlayObserverForTesting(
+		[&Session, &Registry, BorrowedCandidateObject, &bCandidateBorrowSucceeded]()
+		{
+			IAvidScriptObjectOwnershipDomain* Ownership =
+				Session.GetTestSnapshot().HostContext.ObjectOwnership;
+			FAvidScriptObjectHandleResult BorrowResult;
+			bCandidateBorrowSucceeded = Ownership != nullptr
+				&& Ownership->Borrow(
+					Registry,
+					*BorrowedCandidateObject,
+					BorrowResult);
+		});
+
 	TestFalse(
 		TEXT("candidate BeginPlay trap rejects reload"),
 		Session.ReloadModule(
@@ -696,6 +716,8 @@ bool FAvidScriptRuntimeSessionCandidateBeginRollbackTest::RunTest(const FString&
 			ReloadResult));
 	TestTrue(TEXT("rollback preserves old runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
 	TestTrue(TEXT("candidate reload opens host effect transaction"), ReloadResult.bHostEffectTransactionAttempted);
+	TestTrue(TEXT("candidate acquires a borrowed handle before trapping"), bCandidateBorrowSucceeded);
+	TestEqual(TEXT("candidate rollback releases its borrowed registry slot"), Registry.GetLiveHandleCount(), 0);
 	TestFalse(TEXT("trapping candidate does not commit host effects"), ReloadResult.bHostEffectTransactionCommitted);
 	TestTrue(TEXT("candidate trap attempts host effect rollback"), ReloadResult.bHostEffectRollbackAttempted);
 	TestTrue(TEXT("empty host effect rollback succeeds"), ReloadResult.bHostEffectRollbackSucceeded);
@@ -1139,6 +1161,59 @@ bool FAvidScriptRuntimeSessionObjectOwnershipTest::RunTest(const FString& Parame
 	}
 	TestEqual(TEXT("Only foreign handle remains after ownership cleanup"), Registry.GetLiveHandleCount(), 1);
 	TestTrue(TEXT("Foreign handle remains releasable"), Registry.ReleaseHandle(ForeignHandle, HandleResult, false));
+
+	FAvidScriptObjectRegistry ReentrantCleanupRegistry;
+	FAvidScriptRuntimeSession ReentrantCleanupSession;
+	FAvidScriptWasmHostContext ReentrantCleanupContext;
+	ReentrantCleanupContext.ObjectRegistry = &ReentrantCleanupRegistry;
+	ReentrantCleanupSession.SetHostContext(ReentrantCleanupContext);
+	FAvidScriptWasmReloadResult ReentrantCleanupLoadResult;
+	TestTrue(TEXT("Cleanup reentrancy fixture runtime loads"),
+		ReentrantCleanupSession.LoadEmbeddedSmoke(ReentrantCleanupLoadResult));
+	IAvidScriptObjectOwnershipDomain* ReentrantCleanupOwnership =
+		ReentrantCleanupSession.GetTestSnapshot().HostContext.ObjectOwnership;
+	UAvidScriptSessionOwnershipTestComponent* ReentrantCleanupComponent =
+		NewObject<UAvidScriptSessionOwnershipTestComponent>(Owner);
+	Owner->AddInstanceComponent(ReentrantCleanupComponent);
+	ReentrantCleanupComponent->RegisterComponent();
+	const FAvidScriptObjectHandle ReentrantCleanupHandle =
+		ReentrantCleanupRegistry.RegisterObject(
+			ReentrantCleanupComponent,
+			HandleResult,
+			false);
+	TestTrue(TEXT("Cleanup reentrancy fixture component is adopted"),
+		ReentrantCleanupOwnership != nullptr
+		&& ReentrantCleanupOwnership->Adopt(
+			ReentrantCleanupRegistry,
+			*ReentrantCleanupComponent,
+			ReentrantCleanupHandle,
+			EAvidScriptObjectFactoryKind::ActorComponent,
+			HandleResult));
+	bool bCleanupReentrantTickSucceeded = true;
+	FAvidScriptWasmSmokeResult CleanupReentrantTickResult;
+	UAvidScriptSessionOwnershipTestComponent::GetDestructionObserver() =
+		[&ReentrantCleanupSession,
+			&bCleanupReentrantTickSucceeded,
+			&CleanupReentrantTickResult]()
+		{
+			bCleanupReentrantTickSucceeded = ReentrantCleanupSession.Tick(
+				1.0f / 60.0f,
+				CleanupReentrantTickResult);
+		};
+	ReentrantCleanupSession.ClearHostContext();
+	TestFalse(TEXT("Host-context cleanup rejects component-destruction reentry"),
+		bCleanupReentrantTickSucceeded);
+	TestEqual(TEXT("Cleanup reentry has the stable category"),
+		CleanupReentrantTickResult.ErrorCategory,
+		FString(TEXT("reentrant_operation")));
+	TestTrue(TEXT("Host-context cleanup still destroys the owned component"),
+		ReentrantCleanupComponent->IsBeingDestroyed());
+	TestEqual(TEXT("Host-context cleanup releases every owned handle"),
+		ReentrantCleanupRegistry.GetLiveHandleCount(),
+		0);
+	FAvidScriptWasmSmokeResult ReentrantCleanupStopResult;
+	TestTrue(TEXT("Cleanup reentrancy fixture stops after context clear"),
+		ReentrantCleanupSession.StopAndUnload(ReentrantCleanupStopResult));
 	return true;
 }
 

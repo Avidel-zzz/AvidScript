@@ -26,6 +26,7 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 		const FSlot& ExistingSlot = Slots[*ExistingSlotIndex];
 		if (ExistingSlot.bOccupied && ExistingSlot.Object.Get() == Object)
 		{
+			Slots[*ExistingSlotIndex].bAnchored = true;
 			const FAvidScriptObjectHandle ExistingHandle{
 				static_cast<uint32>(*ExistingSlotIndex + 1),
 				ExistingSlot.Generation };
@@ -50,11 +51,88 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 	FSlot& Slot = Slots[SlotIndex];
 	Slot.Object = Object;
 	Slot.ObjectKey = ObjectKey;
+	Slot.BorrowedLeaseCount = 0;
+	Slot.bAnchored = true;
 	Slot.bOccupied = true;
 	ObjectToSlot.Add(ObjectKey, SlotIndex);
 	++LiveHandleCount;
 
 	const FAvidScriptObjectHandle Handle{ static_cast<uint32>(SlotIndex + 1), Slot.Generation };
+	SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
+	return Handle;
+}
+
+FAvidScriptObjectHandle FAvidScriptObjectRegistry::AcquireBorrowedObject(
+	UObject* Object,
+	FAvidScriptObjectHandleResult& OutResult,
+	const bool bIncludeObjectPath)
+{
+	if (!IsValid(Object))
+	{
+		const FAvidScriptObjectHandle InvalidHandle;
+		SetFailure(
+			OutResult,
+			InvalidHandle,
+			TEXT("invalid_object"),
+			Object,
+			bIncludeObjectPath,
+			TEXT("borrow only live UObject instances visible to the active session"));
+		return InvalidHandle;
+	}
+
+	const TObjectKey<UObject> ObjectKey(Object);
+	if (const int32* ExistingSlotIndex = ObjectToSlot.Find(ObjectKey))
+	{
+		FSlot& ExistingSlot = Slots[*ExistingSlotIndex];
+		if (ExistingSlot.bOccupied && ExistingSlot.Object.Get() == Object)
+		{
+			if (ExistingSlot.BorrowedLeaseCount == MAX_int32)
+			{
+				const FAvidScriptObjectHandle ExistingHandle{
+					static_cast<uint32>(*ExistingSlotIndex + 1),
+					ExistingSlot.Generation };
+				SetFailure(
+					OutResult,
+					ExistingHandle,
+					TEXT("borrowed_lease_overflow"),
+					Object,
+					bIncludeObjectPath,
+					TEXT("release borrowed handles before acquiring another lease"));
+				return FAvidScriptObjectHandle();
+			}
+			++ExistingSlot.BorrowedLeaseCount;
+			const FAvidScriptObjectHandle ExistingHandle{
+				static_cast<uint32>(*ExistingSlotIndex + 1),
+				ExistingSlot.Generation };
+			SetSuccess(OutResult, ExistingHandle, Object, bIncludeObjectPath);
+			return ExistingHandle;
+		}
+		ObjectToSlot.Remove(ObjectKey);
+	}
+
+	int32 SlotIndex = INDEX_NONE;
+	if (FreeSlots.Num() > 0)
+	{
+		SlotIndex = FreeSlots.Pop(EAllowShrinking::No);
+	}
+	else
+	{
+		SlotIndex = Slots.Emplace();
+		Slots[SlotIndex].Generation = GenerationDomain;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	Slot.Object = Object;
+	Slot.ObjectKey = ObjectKey;
+	Slot.BorrowedLeaseCount = 1;
+	Slot.bAnchored = false;
+	Slot.bOccupied = true;
+	ObjectToSlot.Add(ObjectKey, SlotIndex);
+	++LiveHandleCount;
+
+	const FAvidScriptObjectHandle Handle{
+		static_cast<uint32>(SlotIndex + 1),
+		Slot.Generation };
 	SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
 	return Handle;
 }
@@ -187,14 +265,69 @@ bool FAvidScriptObjectRegistry::ReleaseHandle(
 	}
 
 	SetSuccess(OutResult, Handle, Slot.Object.Get(), bIncludeObjectPath);
-	ObjectToSlot.Remove(Slot.ObjectKey);
-	Slot.Object.Reset();
-	Slot.ObjectKey = TObjectKey<UObject>();
-	Slot.bOccupied = false;
-	Slot.Generation = AdvanceGeneration(Slot.Generation);
-	FreeSlots.Add(SlotIndex);
-	check(LiveHandleCount > 0);
-	--LiveHandleCount;
+	ReleaseSlot(SlotIndex);
+	return true;
+}
+
+bool FAvidScriptObjectRegistry::ReleaseBorrowedHandle(
+	const FAvidScriptObjectHandle& Handle,
+	FAvidScriptObjectHandleResult& OutResult,
+	const bool bIncludeObjectPath)
+{
+	if (!Handle.IsValid())
+	{
+		SetFailure(
+			OutResult,
+			Handle,
+			TEXT("invalid_handle"),
+			nullptr,
+			bIncludeObjectPath,
+			TEXT("release only borrowed handles returned by the active registry"));
+		return false;
+	}
+	const int32 SlotIndex = static_cast<int32>(Handle.Slot - 1);
+	if (!Slots.IsValidIndex(SlotIndex))
+	{
+		SetFailure(
+			OutResult,
+			Handle,
+			TEXT("invalid_handle"),
+			nullptr,
+			bIncludeObjectPath,
+			TEXT("ignore borrowed handles outside the active registry"));
+		return false;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Handle.Generation)
+	{
+		SetFailure(
+			OutResult,
+			Handle,
+			TEXT("generation_mismatch"),
+			Slot.Object.Get(),
+			bIncludeObjectPath,
+			TEXT("discard stale borrowed handle generations"));
+		return false;
+	}
+	if (!Slot.bOccupied || Slot.BorrowedLeaseCount <= 0)
+	{
+		SetFailure(
+			OutResult,
+			Handle,
+			TEXT("borrowed_lease_missing"),
+			Slot.Object.Get(),
+			bIncludeObjectPath,
+			TEXT("release each borrowed lease exactly once"));
+		return false;
+	}
+
+	SetSuccess(OutResult, Handle, Slot.Object.Get(), bIncludeObjectPath);
+	--Slot.BorrowedLeaseCount;
+	if (Slot.BorrowedLeaseCount == 0 && !Slot.bAnchored)
+	{
+		ReleaseSlot(SlotIndex);
+	}
 	return true;
 }
 
@@ -211,6 +344,21 @@ uint32 FAvidScriptObjectRegistry::AdvanceGeneration(uint32 Generation)
 {
 	const uint32 NextGeneration = Generation + 1;
 	return NextGeneration != 0 ? NextGeneration : 1;
+}
+
+void FAvidScriptObjectRegistry::ReleaseSlot(const int32 SlotIndex)
+{
+	FSlot& Slot = Slots[SlotIndex];
+	ObjectToSlot.Remove(Slot.ObjectKey);
+	Slot.Object.Reset();
+	Slot.ObjectKey = TObjectKey<UObject>();
+	Slot.BorrowedLeaseCount = 0;
+	Slot.bAnchored = false;
+	Slot.bOccupied = false;
+	Slot.Generation = AdvanceGeneration(Slot.Generation);
+	FreeSlots.Add(SlotIndex);
+	check(LiveHandleCount > 0);
+	--LiveHandleCount;
 }
 
 void FAvidScriptObjectRegistry::SetSuccess(

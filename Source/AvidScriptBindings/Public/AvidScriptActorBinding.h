@@ -7,6 +7,7 @@
 #include "CoreMinimal.h"
 
 class AActor;
+class IAvidScriptObjectOwnershipDomain;
 
 enum class EAvidScriptActorWritePolicy : uint8
 {
@@ -113,7 +114,8 @@ public:
 		const FAvidScriptObjectHandle& ActorHandle,
 		FAvidScriptObjectHandle& OutComponentHandle,
 		FAvidScriptActorBindingResult& OutResult,
-		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath);
+		EAvidScriptBindingDiagnosticsPolicy DiagnosticsPolicy = EAvidScriptBindingDiagnosticsPolicy::IncludeObjectPath,
+		IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr);
 
 private:
 	static AActor* ResolveActor(

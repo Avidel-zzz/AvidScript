@@ -1313,6 +1313,7 @@ bool FAvidScriptRuntimeBenchmark::RunObjectFactoryBenchmark(
 	OutResult.BindingPackageReflectedNameLookupsDuringWarmLoop =
 		static_cast<int32>(WarmNameLookups);
 
+	Ownership.Cleanup(Registry);
 	FindTarget->DestroyComponent();
 	if (!Registry.ReleaseHandle(FindTargetHandle, HandleResult, false)
 		|| !Registry.ReleaseHandle(RootHandle, HandleResult, false)
@@ -1324,7 +1325,6 @@ bool FAvidScriptRuntimeBenchmark::RunObjectFactoryBenchmark(
 			HandleResult.ErrorMessage);
 		return false;
 	}
-	Ownership.Cleanup(Registry);
 	if (Registry.GetLiveHandleCount() != 0)
 	{
 		SetObjectFactoryBenchmarkFailure(

@@ -26,10 +26,20 @@ public:
 		static TArray<int32> DestructionOrder;
 		return DestructionOrder;
 	}
+	static TFunction<void()>& GetDestructionObserver()
+	{
+		static TFunction<void()> Observer;
+		return Observer;
+	}
 
 	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override
 	{
 		GetDestructionOrder().Add(DestructionOrderId);
+		if (GetDestructionObserver())
+		{
+			TFunction<void()> Observer = MoveTemp(GetDestructionObserver());
+			Observer();
+		}
 		Super::OnComponentDestroyed(bDestroyingHierarchy);
 	}
 };

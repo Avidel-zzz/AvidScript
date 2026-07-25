@@ -293,6 +293,26 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		SliceTypeIds.Add(Type.StableId);
 	}
+	for (const FAvidScriptBindingTypeModel& AuthorizationType : AuthorizationModel.Types)
+	{
+		if (AuthorizationType.ObjectTypeOrdinal == INDEX_NONE)
+		{
+			continue;
+		}
+		const FAvidScriptBindingTypeModel* SliceType = SliceModel.Types.FindByPredicate(
+			[&AuthorizationType](const FAvidScriptBindingTypeModel& Candidate)
+			{
+				return Candidate.StableId == AuthorizationType.StableId;
+			});
+		TestNotNull(TEXT("Slice preserves every authorization object type"), SliceType);
+		if (SliceType != nullptr)
+		{
+			TestEqual(
+				TEXT("Slice preserves the prepared object-type ordinal"),
+				SliceType->ObjectTypeOrdinal,
+				AuthorizationType.ObjectTypeOrdinal);
+		}
+	}
 	TSet<FString> RequiredTypeIds;
 	RequiredTypeIds.Add(AuthorizationModel.SelfTypeId);
 	for (const FAvidScriptBindingClassReferenceModel& Reference : AuthorizationModel.ClassReferences)

@@ -39,6 +39,7 @@ public:
 
 	static bool FindComponent(
 		FAvidScriptObjectRegistry& Registry,
+		IAvidScriptObjectOwnershipDomain& Ownership,
 		const FAvidScriptObjectHandle& ActorHandle,
 		UClass& ComponentClass,
 		FAvidScriptObjectHandleResult& OutResult);
