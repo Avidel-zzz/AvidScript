@@ -668,10 +668,19 @@ bool HasAvidScriptSceneComponentFactories(
 						return Candidate.StableId
 							== Factory.ClassReferenceId;
 					});
-			return Reference != nullptr
+			const FAvidScriptBindingTypeModel* ConcreteType =
+				Reference == nullptr
+					? nullptr
+					: Package.Types.FindByPredicate(
+						[Reference](
+							const FAvidScriptBindingTypeModel& Type)
+						{
+							return Type.ClassPath == Reference->ClassPath;
+						});
+			return ConcreteType != nullptr
 				&& FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
 					Package,
-					Reference->ResultTypeId,
+					ConcreteType->StableId,
 					TEXT("/Script/Engine.SceneComponent"));
 		});
 }
