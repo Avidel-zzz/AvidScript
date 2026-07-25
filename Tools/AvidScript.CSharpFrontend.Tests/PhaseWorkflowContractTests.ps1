@@ -560,7 +560,8 @@ Invoke-ContractCase 'Evidence.AttestationSourceChangeRejected' {
 
 Invoke-ContractCase 'Evidence.PrivacyDeletedAccountPathIgnored' {
     $Root = New-FixtureRepository 'EvidencePrivacyDeletedPath'
-    Write-Utf8Text (Join-Path $Root 'Docs\Legacy.md') "legacy path C:\Users\Example\file`n"
+    $PrivatePath = 'C:' + '\Users\Example\file'
+    Write-Utf8Text (Join-Path $Root 'Docs\Legacy.md') "legacy path $PrivatePath`n"
     Commit-Paths $Root @('Docs/Legacy.md') 'add legacy local path'
     $StatePath = Start-FixturePhase $Root 91 @('P91.1')
     Write-Utf8Text (Join-Path $Root 'Docs\Legacy.md') "legacy path removed`n"
