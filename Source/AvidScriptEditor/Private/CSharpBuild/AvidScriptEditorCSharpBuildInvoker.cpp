@@ -75,9 +75,17 @@ bool SetAvidScriptCSharpStructuredInvocationFailure(
 	{
 		if (Diagnostic.IsError())
 		{
-			ErrorMessage = Diagnostic.Code.IsEmpty()
+			const FString DiagnosticMessage = Diagnostic.Code.IsEmpty()
 				? Diagnostic.Message
 				: FString::Printf(TEXT("%s: %s"), *Diagnostic.Code, *Diagnostic.Message);
+			ErrorMessage = Diagnostic.Start != INDEX_NONE && !Diagnostic.File.IsEmpty()
+				? FString::Printf(
+					TEXT("%s(%d,%d): %s"),
+					*Diagnostic.File,
+					Diagnostic.Line + 1,
+					Diagnostic.Column + 1,
+					*DiagnosticMessage)
+				: DiagnosticMessage;
 			break;
 		}
 	}
