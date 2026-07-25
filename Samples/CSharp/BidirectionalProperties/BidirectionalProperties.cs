@@ -13,7 +13,7 @@ public static class BidirectionalProperties
         AActor self = UE.Self;
         ElapsedSeconds = 0.0f;
         self.CustomTimeDilation = 1.0f;
-        self.SetActorLocation(new FVector(0.0f, 0.0f, 100.0f));
+        self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -23,9 +23,9 @@ public static class BidirectionalProperties
         ElapsedSeconds += deltaSeconds;
         self.CustomTimeDilation = 1.0f + ElapsedSeconds * 0.05f;
 
-        FVector location = self.GetActorLocation();
-        self.SetActorLocation(
-            location + new FVector(60.0f * deltaSeconds, 0.0f, 0.0f));
+        FVector scale = self.GetActorScale3D();
+        self.SetActorScale3D(
+            scale + new FVector(0.5f * deltaSeconds, 0.0f, 0.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
@@ -33,5 +33,6 @@ public static class BidirectionalProperties
     {
         AActor self = UE.Self;
         self.CustomTimeDilation = 1.0f;
+        self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
     }
 }

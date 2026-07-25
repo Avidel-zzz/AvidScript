@@ -2485,19 +2485,22 @@ bool FAvidScriptEditorBindingRuntimeBidirectionalPropertiesSampleTest::RunTest(c
 		TEXT("BeginPlay writes the scalar reflected property"),
 		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
 	TestTrue(
-		TEXT("BeginPlay writes FVector location through the generated facade"),
-		Actor->GetActorLocation().Equals(FVector(0.0, 0.0, 100.0), 0.001));
+		TEXT("BeginPlay writes FVector scale through the generated facade"),
+		Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.001));
 	TestTrue(TEXT("Bidirectional property sample Tick executes"), Runtime.Tick(0.5f, WasmResult));
 	TestTrue(
 		TEXT("Tick advances the scalar reflected property"),
 		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.025f));
 	TestTrue(
-		TEXT("Tick reads and writes FVector location"),
-		Actor->GetActorLocation().Equals(FVector(30.0, 0.0, 100.0), 0.001));
+		TEXT("Tick reads and writes FVector scale"),
+		Actor->GetActorScale3D().Equals(FVector(1.25, 1.0, 1.0), 0.001));
 	TestTrue(TEXT("Bidirectional property sample EndPlay executes"), Runtime.EndPlay(WasmResult));
 	TestTrue(
 		TEXT("EndPlay restores the scalar reflected property"),
 		FMath::IsNearlyEqual(Actor->CustomTimeDilation, 1.0f));
+	TestTrue(
+		TEXT("EndPlay restores FVector scale"),
+		Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.001));
 	Runtime.Unload();
 	return true;
 }

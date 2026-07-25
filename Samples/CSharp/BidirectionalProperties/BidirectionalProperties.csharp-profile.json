@@ -17,8 +17,8 @@
       {
         "class_path": "/Script/Engine.Actor",
         "include_functions": [
-          "K2_GetActorLocation",
-          "K2_SetActorLocation"
+          "GetActorScale3D",
+          "SetActorScale3D"
         ],
         "writable_properties": [
           "CustomTimeDilation"

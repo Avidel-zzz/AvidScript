@@ -4,9 +4,9 @@
 
 ## 脚本行为
 
-- `BeginPlay` 把 `CustomTimeDilation` 设置为 `1.0`，并把 Actor 放到初始高度；
-- `Tick` 按累计时间更新 `CustomTimeDilation`，同时沿 X 轴移动 Actor；
-- `EndPlay` 把时间膨胀恢复为 `1.0`。
+- `BeginPlay` 把 `CustomTimeDilation` 设置为 `1.0`，并初始化 Actor 缩放；
+- `Tick` 按累计时间更新 `CustomTimeDilation`，同时通过 `FVector` 增加 X 轴缩放；
+- `EndPlay` 把时间膨胀和缩放恢复为初始值。
 
 脚本侧只需要写：
 
@@ -23,8 +23,10 @@ self.CustomTimeDilation = 1.0f;
 
 `BidirectionalProperties.csharp-profile.json` 使用 schema v5，只授权：
 
-- `AActor.K2_GetActorLocation`；
-- `AActor.K2_SetActorLocation`；
+- `AActor.GetActorScale3D`；
+- `AActor.SetActorScale3D`；
 - 可写属性 `AActor.CustomTimeDilation`。
 
 未列入 profile 的属性和函数不会进入授权 binding package。
+
+`K2_SetActorLocation` 还包含 sweep 与 `FHitResult` out 参数，当前通用 UFunction ABI 尚未覆盖这组签名，因此本示例不把它冒充为已支持 API；位置写入将在后续 out-struct/复杂参数阶段统一解决。

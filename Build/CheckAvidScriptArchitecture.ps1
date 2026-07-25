@@ -777,6 +777,8 @@ foreach ($RequiredPropertyGameplayEvidence in @(
     }
 }
 if (-not $BidirectionalPropertiesSampleSource.Contains('AActor self = UE.Self;') -or
+    -not $BidirectionalPropertiesSampleSource.Contains('self.GetActorScale3D()') -or
+    -not $BidirectionalPropertiesSampleSource.Contains('self.SetActorScale3D(') -or
     $BidirectionalPropertiesSampleSource.Contains('UE.Self.CustomTimeDilation =')) {
     Add-Violation 'Phase 52 property sample must cache the zero-allocation Self facade before property writes'
 }
