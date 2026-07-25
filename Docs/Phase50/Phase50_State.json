@@ -44,14 +44,14 @@
     {
       "id": "P50.5",
       "status": "Completed",
-      "evidence": "Phase 50 typed project API、安全修复、性能、README/MIT、隐私清理和独立复审均完成；聚焦回归通过。正式集中 Gate 前的三项流程偏差已全部记录并修正：Git shell 写操作拆分、PowerShell wrapper 插值修正、纯静态 Gate 改在 verified HEAD 的 clean detached worktree 执行；此前静态预检 parser 23/23、fixtures 17/17，未开始 .NET/UBT/full Automation。",
-      "completed_at_utc": "2026-07-25T03:38:59.7217815+00:00"
+      "evidence": "Phase 50 typed project API、安全修复、性能采样、README、MIT、隐私清理和独立复审全部完成；独立复审无 Critical/Important 发现，聚焦回归通过。正式 Gate 前发现的编排偏差均已记录并修正，纯静态 Gate 将只在 verified HEAD 的 clean detached worktree 执行，依赖 Saved 产物的合同与 UE 验收保留在主工作区。",
+      "completed_at_utc": "2026-07-25T03:40:01.5700502+00:00"
     }
   ],
   "debt": [],
   "review": {
     "completed": false,
-    "evidence": "reopened: 静态 Gate 错在主工作树执行，未按既有规范使用冻结 HEAD 的 clean detached worktree；parser 23/23 与 fixtures 17/17 已通过，失败仅为两个 protected dirty 文件，完整 Gate 尚未开始。",
+    "evidence": "reopened: freeze review_evidence 误用英文，违反给人读的文档使用中文；状态尚未提交，需记录并以中文证据重新冻结。",
     "completed_at_utc": null
   },
   "budgets": {
@@ -95,6 +95,6 @@
     }
   ],
   "next_action": "freeze -Phase 50 -ReviewEvidence <text>",
-  "revision": 21,
-  "updated_at_utc": "2026-07-25T03:38:59.7245989+00:00"
+  "revision": 24,
+  "updated_at_utc": "2026-07-25T03:40:01.5728351+00:00"
 }
