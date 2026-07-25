@@ -5,7 +5,7 @@
     "goal": "建立 descriptor 驱动的 UObject/Component 构造、Session 所有权、组件查询与 Attach/Detach C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d3837b6af995ccf289f01f9ddf4e34eec1fa319e"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase51/P51.0_Object_Component_Ownership_Architecture.md",
     "version": 1,
@@ -50,9 +50,9 @@
   ],
   "debt": [],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 最终 Static Gate 发现 Phase 51 factory renderer、borrowed object registry 与 canonical regeneration 的受控 Phase 50 hash/pattern 基线尚未更新；先审查真实差异并同步门禁后重新冻结",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "独立审查报告 Docs/Phase51/P51.5_Independent_Review.md：Critical 0、Important 0、Minor 0；object type provenance、TryCast ordinal、fail-closed artifact cleanup、component/session ownership 与架构边界均已复核；冻结基线复验通过。",
+    "completed_at_utc": "2026-07-25T16:26:09.8005611+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -65,11 +65,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "5afee849216832126093a10bd63130d74b0d3773",
+    "source_tree": "e4e45bf3e13896607eff907d5f774bffb14db004",
+    "state_sha256": "20d3d5239fd71ae9d6f450e1736a71efce8019138ce680de2fe36842f6c49a62",
+    "review_evidence": "独立审查报告 Docs/Phase51/P51.5_Independent_Review.md：Critical 0、Important 0、Minor 0；object type provenance、TryCast ordinal、fail-closed artifact cleanup、component/session ownership 与架构边界均已复核；冻结基线复验通过。",
+    "at_utc": "2026-07-25T16:26:09.8005611+00:00"
   },
   "gate": {
     "report_path": "",
@@ -100,7 +100,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 51 -ReviewEvidence <text>",
-  "revision": 10,
-  "updated_at_utc": "2026-07-25T16:23:51.4907681+00:00"
+  "next_action": "attest -Phase 51 -GateReportPath <path>",
+  "revision": 11,
+  "updated_at_utc": "2026-07-25T16:26:09.8069940+00:00"
 }
