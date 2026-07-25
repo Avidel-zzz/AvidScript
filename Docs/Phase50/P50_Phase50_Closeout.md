@@ -1,6 +1,6 @@
 # Phase 50 Typed Project API 收尾报告
 
-> 状态：已通过最终 Gate 并完成 attestation。P50.1 至 P50.5 均已完成；本文与 `P50_Gate_Summary.json` 构成收尾提交，外部不可变 close evidence 由工作流 `close` 命令生成。
+> 状态：Gate 前候选。P50.1 至 P50.4 已完成，P50.5 的实现、修复、性能采样和预验证已经完成；最终冻结候选的集中 Gate、attest 与 close 仍为 Pending，本文当前不声明 Phase 50 已关闭。
 
 ## 阶段成果
 
@@ -48,55 +48,54 @@ Phase 50 已把自定义 UE Actor 类型接入现有 C# -> Roslyn -> Guest IR ->
 | WASM SHA-256 | `2e9f2cd1725afd05894e4c83832a454d504547ffa848ef1bca989275a6e7fe75` |
 | 链路 | typed source -> Roslyn semantic -> Guest IR -> WASM |
 
-这证明当前 typed facade 可以被真实 C# 编译链消费；最终冻结 Gate 又通过 250 项完整 UE Automation 验证了 WAMR/UE 生命周期中的整体行为。
+这证明当前 typed facade 可以被真实 C# 编译链消费；冻结 Gate 仍需从完整 Automation 证明最终候选在 WAMR/UE 生命周期中的整体行为。
 
 ## 性能结果
 
-最终 Gate 在 UE5.8 Win64 Development Editor / NullRHI 下的独立采样结果如下：
+2026-07-24 的 UE5.8 Win64 Development Editor / NullRHI 独立采样结果如下：
 
 | 指标 | P50 / P95 |
 | --- | --- |
-| Native `UObject::IsA` | 0.000018 / 0.000019 ms |
-| Binding ordinal checked cast | 0.000041 / 0.000047 ms |
-| WAMR checked cast | 0.000890 / 0.001255 ms |
-| 既有 typed binding | 0.000056 ms P50 |
+| Native `UObject::IsA` | 0.000016 / 0.000018 ms |
+| Binding ordinal checked cast | 0.000038 / 0.000039 ms |
+| WAMR checked cast | 0.000738 / 0.000860 ms |
+| 既有 typed binding | 0.000049 ms P50 |
 
 20,000 次 typed upcast 的 Host import 为 0；20,000 次 WAMR checked cast 的 crossing delta 精确为 20,000；warm class load 与 reflected-name lookup 均为 0。Packed owner 使 PlayablePickup 单次 Tick crossing 从 6 降到 4，成功 BeginOverlap 从 8 降到 6。
 
 Phase 49 没有同机、同 harness 的冻结 median，因此 `<= 5%` 回退项保持 `pending_same_machine_phase49_baseline`，不会使用异机或不同 workload 数据伪造通过结论。
 
-## 最终 Gate
+## Gate 前验证
 
-| 验证面 | 最终结果 | 说明 |
+| 验证面 | 当前结果 | 说明 |
 | --- | --- | --- |
 | .NET test hosts | 163 / 163 | 固定 SDK 8.0.416，五个共享 graph 宿主串行执行 |
 | PowerShell contracts | 108 / 108 | 七组合同宿主 |
 | tracked PowerShell parser | 23 / 23 | 全部 tracked `.ps1` |
 | Phase 50 architecture fixtures | 17 / 17 | canonical/token/closure/path 负例与正例 |
-| 主架构检查 | 通过 | clean detached worktree，19 个冻结输入与主架构边界均通过 |
-| `dotnet format` | 5 / 5 | `--verify-no-changes --no-restore` |
-| no-clean UBT | 通过 | Bindings、VM、Runtime、Editor 四模块；最终候选 Target up to date；未清理 Editor Target |
-| full Automation | 250 / 250 | found/completed/succeeded 均为 250，failed/not-run 均为 0，队列为空，进程退出码 0 |
-| typed/object lifecycle benchmark | 通过 | warm class load/name lookup 均为 0，upcast 零 crossing，checked cast 计数精确 |
+| 主架构检查 | 仅 dirty evidence 违规 | 生产合同无其他违规，提交冻结候选后重跑 |
+| no-clean UBT | 通过 | WASM import 安全修复后 VM + Runtime + Editor 为 23.08 秒；handler 防御增量 Runtime 为 19.83 秒；未清理 Editor Target |
+| focused Automation | 9 / 9；审查/安全回归 5 / 5 | v5 class-reference、owner 正反授权、真实 WASM import 身份、strict ordinal 与 Runtime handler 防御均通过 |
+| full Automation | Pending | 必须在最终冻结候选上完整重跑 |
 
-完整 Automation 的修复历史按原始日志记录：首次完整 Gate 暴露 legacy fixture 漂移并在重入安全审查后触发空 slot 断言；第二次完整 Gate 只剩 `TypedOwnerValidation` 的零 import fixture 错误声明 packed owner；修复为真实 `avid_owner_get_handle` import 后，最终候选完整重跑为 250/250。三次 full Gate、16 次 UBT 与 25 次 Automation 超过原预算，原因已写入不可变 Gate report，未通过省略失败轮次伪造预算合规。
+完整 Automation 的修复历史按原始日志记录：首次完整 Gate 有 20 个失败；第二轮有 18 个稳定 Editor 失败；后续修复轮为 10、11、3 个失败；最后 3 项计数断言已修复，并通过覆盖相关路径的 focused 8/8。以上历史不能替代最终全量 Gate。
 
-独立复审曾发现一项 Critical：动态 native 回调内重入 unload 会让正在执行的 WAMR module instance 被释放，形成 UAF。Backend 现使用 active-call depth 与 deferred physical unload，Session 拒绝 guest 执行期间的 load/reload/unload 和嵌套执行，Component 也延迟释放 Runtime/Owner；对应 unload、reload、nested call 与 component destroy during tick 回归均已通过。其他跨层风险包括 legacy/selfless package 借用、schema v5 class-reference 重建、合法 wrapper ordinal 重标、Runtime package manifest 的非整数 ordinal、package 授权超集被误当成 script import 精确集合、script manifest 隐藏真实 WASM owner import，以及跨会话借用全局动态导入注册表，均已修复并纳入回归。
+独立复审发现的跨层风险已补上回归：legacy/selfless package 借用、schema v5 class-reference 重建、合法 wrapper ordinal 重标、Runtime package manifest 的非整数 ordinal、package 授权超集被误当成 script import 精确集合、script manifest 隐藏真实 WASM owner import，以及跨会话借用全局动态导入注册表。最终只读复审无 Critical/Important 发现；两项 Normal 建议已落实为完整重复 import identity 断言与 README 开发者预览口径。
 
 ## 验收映射
 
 | 验收项 | 当前状态 | 最终证据 |
 | --- | --- | --- |
-| typed `UE.Self` 与一次 packed-owner crossing | Passed | 最终 Automation 与 crossing 计数 |
-| typed Blueprint/native class reference 与 typed Spawn | Passed | 最终 Automation |
-| 自定义 native `UFUNCTION` 通用闭环 | Passed | descriptor、真实 C# replay 与最终 Automation |
-| upcast 零 crossing | Passed | 最终 benchmark |
-| checked downcast 一次 crossing | Passed | 最终 benchmark |
-| wrong owner 在 `BeginPlay` 前拒绝 | Passed | 最终 Automation |
-| reload candidate 错误时旧 Runtime 保活 | Passed | 最终 Automation |
-| warm path 零 class load/name lookup | Passed | 最终 benchmark |
-| 无项目专用 wrapper | Passed | clean candidate 架构 checker |
-| 中文样例、性能与收尾文档 | Passed | 本收尾提交 |
+| typed `UE.Self` 与一次 packed-owner crossing | Implemented | 待冻结 Gate |
+| typed Blueprint/native class reference 与 typed Spawn | Implemented | 待冻结 Gate |
+| 自定义 native `UFUNCTION` 通用闭环 | Implemented | 待冻结 Gate |
+| upcast 零 crossing | Implemented，benchmark 已采样 | 待冻结 Gate |
+| checked downcast 一次 crossing | Implemented，benchmark 已采样 | 待冻结 Gate |
+| wrong owner 在 `BeginPlay` 前拒绝 | Implemented | 待冻结 Gate |
+| reload candidate 错误时旧 Runtime 保活 | Implemented | 待冻结 Gate |
+| warm path 零 class load/name lookup | Implemented，benchmark 已采样 | 待冻结 Gate |
+| 无项目专用 wrapper | 架构 checker 已覆盖 | 待 clean candidate Gate |
+| 中文样例、性能与收尾文档 | Implemented | 待 attestation 更新 |
 
 ## 已知边界
 
@@ -109,13 +108,12 @@ Phase 49 没有同机、同 harness 的冻结 median，因此 `<= 5%` 回退项�
 
 | 字段 | 值 |
 | --- | --- |
-| verified commit | `45a80c5ec91582729eb986b8952329578b9e58b0` |
-| verified tree | `180e0092e6ab4a7c9c552e74f9e0ec019cc18f46` |
-| gate report | `C:\tmp\AvidScriptPhase50Gate-45a80c5-final\Phase50_Gate.json` |
-| gate report SHA-256 | `2ce61fbce2dfbd92133fdef25ef1b83c0985ce38aa0579d0e24b7d424d1c4ac6` |
-| Automation | 250 / 250 |
-| attestation commit | 本收尾提交 |
-| close evidence | `C:\tmp\AvidScriptPhase50Gate-45a80c5-final\Phase50_Close.json` |
+| verified commit | Pending |
+| verified tree | Pending |
+| gate report | Pending |
+| Automation | Pending |
+| attestation commit | Pending |
+| close evidence | Pending |
 
 ## 下一阶段
 
@@ -123,4 +121,4 @@ Phase 51 建议以 UObject/Component 游戏开发闭环为主：通用对象与�
 
 ## 当前结论
 
-**Phase 50 已完成。** 冻结候选、集中 Gate、不可变报告 attestation、单独收尾提交与外部 close evidence 共同形成可复核闭环；后续功能演进从 Phase 51 开始。
+**Gate 前候选已就绪，但 Phase 50 尚未关闭。** 只有最终候选完成 freeze、集中 Gate、不可变报告 attest、单独 attestation commit 和 close evidence 后，本文才会更新为正式完成。

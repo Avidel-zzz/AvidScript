@@ -5,7 +5,7 @@
     "goal": "打通自定义 UFUNCTION、typed Self/Spawn/Cast 与真实 C#/WASM/UE 游戏逻辑闭环",
     "start_commit": "d73779f5a9e493a71eba1d71ce9d898ff9857552"
   },
-  "declared_stage": "gate_attested",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase50/P50.0_Typed_Project_API_Architecture.md",
     "version": 1,
@@ -60,9 +60,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 16,
-    "automation": 25,
-    "full_gate": 3
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
   },
   "freeze": {
     "source_commit": "8a2e2fc3288f71d1a5c5f64504adf756bacda725",
@@ -72,13 +72,13 @@
     "at_utc": "2026-07-25T06:06:35.2988962+00:00"
   },
   "gate": {
-    "report_path": "C:\\tmp\\AvidScriptPhase50Gate-45a80c5-final\\Phase50_Gate.json",
-    "report_sha256": "2ce61fbce2dfbd92133fdef25ef1b83c0985ce38aa0579d0e24b7d424d1c4ac6",
-    "run_id": "phase50-45a80c5-final",
-    "verified_commit": "45a80c5ec91582729eb986b8952329578b9e58b0",
-    "verified_tree": "180e0092e6ab4a7c9c552e74f9e0ec019cc18f46",
-    "attestation_parent": "45a80c5ec91582729eb986b8952329578b9e58b0",
-    "attested_at_utc": "2026-07-25T06:24:05.4043305+00:00"
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
   },
   "protected_dirty": [
     {
@@ -94,7 +94,7 @@
       "head_blob_sha256": "5881954e78c9759dafb336484adf7dcd9d064122599e9b93337c69067b08c1cf"
     }
   ],
-  "next_action": "close -Phase 50",
-  "revision": 32,
-  "updated_at_utc": "2026-07-25T06:24:05.4070136+00:00"
+  "next_action": "attest -Phase 50 -GateReportPath <path>",
+  "revision": 31,
+  "updated_at_utc": "2026-07-25T06:06:35.3043057+00:00"
 }
