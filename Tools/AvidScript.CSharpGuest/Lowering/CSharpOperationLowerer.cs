@@ -75,6 +75,32 @@ internal static class CSharpOperationLowerer
         }
 
         SemanticOperation target = operation.Children[0];
+        if (target.Kind == "property_reference")
+        {
+            GuestRegister? receiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
+                context,
+                target,
+                blockOrdinal,
+                instructions);
+            GuestRegister? propertyValue = receiver is null
+                ? null
+                : LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+            if (receiver is null || propertyValue is null)
+            {
+                return null;
+            }
+
+            return CSharpCallOperationLowerer.LowerPropertySetter(
+                context,
+                target,
+                receiver,
+                propertyValue,
+                blockOrdinal,
+                instructions)
+                ? propertyValue
+                : null;
+        }
+
         GuestRegister? value = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
         if (value is null || target.Kind == "discard")
         {
@@ -98,7 +124,32 @@ internal static class CSharpOperationLowerer
         }
 
         SemanticOperation target = operation.Children[0];
-        GuestRegister? left = LowerValue(context, target, blockOrdinal, instructions);
+        GuestRegister? propertyReceiver = null;
+        GuestRegister? left;
+        if (target.Kind == "property_reference")
+        {
+            propertyReceiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
+                context,
+                target,
+                blockOrdinal,
+                instructions);
+            if (propertyReceiver is null)
+            {
+                return null;
+            }
+
+            left = CSharpCallOperationLowerer.LowerProperty(
+                context,
+                target,
+                propertyReceiver,
+                blockOrdinal,
+                instructions);
+        }
+        else
+        {
+            left = LowerValue(context, target, blockOrdinal, instructions);
+        }
+
         GuestRegister? right = LowerValue(context, operation.Children[1], blockOrdinal, instructions);
         right = WidenShiftCount(context, operation.OperatorKind, left, right, blockOrdinal, instructions);
         GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
@@ -114,6 +165,19 @@ internal static class CSharpOperationLowerer
             null,
             operation.OperatorKind,
             null));
+        if (propertyReceiver is not null)
+        {
+            return CSharpCallOperationLowerer.LowerPropertySetter(
+                context,
+                target,
+                propertyReceiver,
+                result,
+                blockOrdinal,
+                instructions)
+                ? result
+                : null;
+        }
+
         return StoreValue(context, target, result, blockOrdinal, instructions)
             ? result
             : null;

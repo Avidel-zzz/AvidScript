@@ -59,9 +59,78 @@ internal static class CSharpCallOperationLowerer
             instructions);
     }
 
+    public static GuestRegister? LowerProperty(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        GuestRegister receiver,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (!context.TryGetPropertyGetter(operation.SymbolId, out SemanticCallable callable, out string targetId))
+        {
+            context.Add("ASCG1005", $"Block {blockOrdinal} property '{operation.SymbolId}' has no Guest getter.");
+            return null;
+        }
+
+        if (callable.IsStatic || callable.Parameters.Count != 0 || operation.Children.Count != 1)
+        {
+            context.Add("ASCG1004", $"Block {blockOrdinal} property getter '{operation.SymbolId}' has an invalid receiver contract.");
+            return null;
+        }
+
+        return CSharpOperationLowerer.EmitCall(
+            context,
+            callable,
+            targetId,
+            new[] { receiver.Id },
+            blockOrdinal,
+            instructions);
+    }
+
+    public static GuestRegister? LowerPropertyReceiver(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (operation.Children.Count != 1)
+        {
+            context.Add("ASCG1004", $"Block {blockOrdinal} property '{operation.SymbolId}' has an invalid receiver contract.");
+            return null;
+        }
+
+        return CSharpOperationLowerer.LowerValue(
+            context,
+            operation.Children[0],
+            blockOrdinal,
+            instructions);
+    }
+
     public static bool LowerPropertySetter(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,
+        GuestRegister value,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? receiver = LowerPropertyReceiver(
+            context,
+            operation,
+            blockOrdinal,
+            instructions);
+        return receiver is not null && LowerPropertySetter(
+            context,
+            operation,
+            receiver,
+            value,
+            blockOrdinal,
+            instructions);
+    }
+
+    public static bool LowerPropertySetter(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        GuestRegister receiver,
         GuestRegister value,
         int blockOrdinal,
         List<GuestInstruction> instructions)
@@ -75,16 +144,6 @@ internal static class CSharpCallOperationLowerer
         if (callable.IsStatic || callable.Parameters.Count != 1 || operation.Children.Count != 1)
         {
             context.Add("ASCG1004", $"Block {blockOrdinal} property setter '{operation.SymbolId}' has an invalid receiver contract.");
-            return false;
-        }
-
-        GuestRegister? receiver = CSharpOperationLowerer.LowerValue(
-            context,
-            operation.Children[0],
-            blockOrdinal,
-            instructions);
-        if (receiver is null)
-        {
             return false;
         }
 

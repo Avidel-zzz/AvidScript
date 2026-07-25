@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
@@ -17,10 +18,12 @@ internal static class CSharpGuestLoweringTests
         LoweringIsByteDeterministic();
         ReachabilityPrunesUnusedImports();
         BidirectionalPropertyAssignmentLowersThroughAccessor();
+        PropertyAssignmentEvaluatesReceiverBeforeRightHandSide();
+        CompoundPropertyAssignmentCapturesReceiverOnce();
         NaturalGameplayCallbacksSynthesizeOneRouter();
         MissingGameplayCallbacksRemainNoOp();
         ExplicitGameplayRouterConflictFailsClosed();
-        return 9;
+        return 11;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -189,6 +192,108 @@ internal static class CSharpGuestLoweringTests
             "generated setter accessor should call its authorized host import");
         Assert(GuestModuleValidator.Validate(module).Succeeded,
             "bidirectional property Guest IR should pass independent validation");
+    }
+
+    private static void PropertyAssignmentEvaluatesReceiverBeforeRightHandSide()
+    {
+        GuestFunction entry = LowerPropertyEvaluationSource(
+            "AcquireActor().Value = ComputeValue();",
+            "avid_on_begin_play");
+        GuestInstruction[] calls = entry.Blocks
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call")
+            .ToArray();
+
+        int receiverIndex = FindSingleCall(calls, "AcquireActor(");
+        int rightHandSideIndex = FindSingleCall(calls, "ComputeValue(");
+        int setterIndex = FindSingleCall(calls, "set_Value(");
+        Assert(receiverIndex < rightHandSideIndex && rightHandSideIndex < setterIndex,
+            "property assignment must evaluate receiver before RHS and invoke setter last");
+        Assert(calls[receiverIndex].ResultId is not null
+            && calls[setterIndex].OperandIds.Count > 0
+            && calls[setterIndex].OperandIds[0] == calls[receiverIndex].ResultId,
+            "property setter must receive the captured receiver register");
+    }
+
+    private static void CompoundPropertyAssignmentCapturesReceiverOnce()
+    {
+        GuestFunction entry = LowerPropertyEvaluationSource(
+            "AcquireActor().Value += ComputeValue();",
+            "avid_on_tick");
+        GuestInstruction[] calls = entry.Blocks
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call")
+            .ToArray();
+
+        int receiverIndex = FindSingleCall(calls, "AcquireActor(");
+        int getterIndex = FindSingleCall(calls, "get_Value(");
+        int rightHandSideIndex = FindSingleCall(calls, "ComputeValue(");
+        int setterIndex = FindSingleCall(calls, "set_Value(");
+        GuestInstruction getter = calls[getterIndex];
+        GuestInstruction setter = calls[setterIndex];
+
+        Assert(receiverIndex < getterIndex
+            && getterIndex < rightHandSideIndex
+            && rightHandSideIndex < setterIndex,
+            "compound property assignment must evaluate receiver, getter, RHS, then setter");
+        Assert(getter.OperandIds.Count > 0
+            && setter.OperandIds.Count > 0
+            && calls[receiverIndex].ResultId is not null
+            && getter.OperandIds[0] == calls[receiverIndex].ResultId
+            && setter.OperandIds[0] == calls[receiverIndex].ResultId,
+            "compound property getter and setter must share the captured receiver register");
+    }
+
+    private static GuestFunction LowerPropertyEvaluationSource(string operation, string exportName)
+    {
+        string source = $$"""
+            using System.Runtime.InteropServices;
+
+            namespace Game;
+
+            public readonly struct ActorProxy
+            {
+                public float Value
+                {
+                    get => 1.0f;
+                    set { }
+                }
+            }
+
+            public static class Script
+            {
+                private static ActorProxy AcquireActor() => default;
+                private static float ComputeValue() => 2.0f;
+
+                [UnmanagedCallersOnly(EntryPoint = "{{exportName}}")]
+                public static void Run()
+                {
+                    {{operation}}
+                }
+            }
+            """;
+        SemanticDocument document = AnalyzeGameplaySource(
+            source,
+            $"Scripts/{exportName}.PropertyEvaluation.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException($"{exportName} property evaluation produced no Guest module");
+
+        Assert(result.Succeeded, $"{exportName} property evaluation should lower");
+        return module.Functions.Single(function =>
+            function.Id == module.Exports.Single(item => item.Name == exportName).FunctionId);
+    }
+
+    private static int FindSingleCall(IReadOnlyList<GuestInstruction> calls, string methodName)
+    {
+        int[] matches = calls
+            .Select((instruction, index) => (instruction, index))
+            .Where(item => item.instruction.TargetId?.Contains(methodName, StringComparison.Ordinal) == true)
+            .Select(item => item.index)
+            .ToArray();
+        Assert(matches.Length == 1,
+            $"expected exactly one call to '{methodName}', found {matches.Length}");
+        return matches[0];
     }
 
     private static void NaturalGameplayCallbacksSynthesizeOneRouter()

@@ -36,14 +36,23 @@ internal static class SemanticReachabilityProjector
         Dictionary<string, SemanticControlFlowGraph> graphsByMethodId = controlFlowGraphs.ToDictionary(
             graph => graph.MethodSymbolId,
             StringComparer.Ordinal);
-        Dictionary<string, string[]> accessorsByAssociatedSymbolId = callables
+        Dictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId = callables
             .Where(callable => callable.AssociatedSymbolId is not null)
             .GroupBy(callable => callable.AssociatedSymbolId!, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => group.Select(callable => callable.MethodSymbolId)
-                    .OrderBy(id => id, StringComparer.Ordinal)
-                    .ToArray(),
+                group => new AssociatedAccessorTargets(
+                    group.Select(callable => callable.MethodSymbolId)
+                        .OrderBy(id => id, StringComparer.Ordinal)
+                        .ToArray(),
+                    group.Where(IsPropertyGetter)
+                        .Select(callable => callable.MethodSymbolId)
+                        .OrderBy(id => id, StringComparer.Ordinal)
+                        .ToArray(),
+                    group.Where(IsPropertySetter)
+                        .Select(callable => callable.MethodSymbolId)
+                        .OrderBy(id => id, StringComparer.Ordinal)
+                        .ToArray()),
                 StringComparer.Ordinal);
         SortedSet<string> pending = new(rootIds, StringComparer.Ordinal);
         HashSet<string> reachable = new(StringComparer.Ordinal);
@@ -59,13 +68,15 @@ internal static class SemanticReachabilityProjector
 
             foreach (SemanticOperation operation in graph.Blocks
                 .Where(block => block.IsReachable)
-                .SelectMany(EnumerateBlockOperations)
-                .SelectMany(EnumerateOperations))
+                .SelectMany(EnumerateBlockOperations))
             {
-                QueueTarget(operation.SymbolId, callablesById, accessorsByAssociatedSymbolId, reachable, pending);
-                QueueTarget(operation.Conversion?.MethodSymbolId, callablesById, accessorsByAssociatedSymbolId, reachable, pending);
-                QueueTarget(operation.InputConversion?.MethodSymbolId, callablesById, accessorsByAssociatedSymbolId, reachable, pending);
-                QueueTarget(operation.OutputConversion?.MethodSymbolId, callablesById, accessorsByAssociatedSymbolId, reachable, pending);
+                QueueOperationTargets(
+                    operation,
+                    PropertyAccess.Read,
+                    callablesById,
+                    accessorsByAssociatedSymbolId,
+                    reachable,
+                    pending);
             }
         }
 
@@ -90,24 +101,76 @@ internal static class SemanticReachabilityProjector
         }
     }
 
-    private static IEnumerable<SemanticOperation> EnumerateOperations(SemanticOperation operation)
+    private static void QueueOperationTargets(
+        SemanticOperation operation,
+        PropertyAccess propertyAccess,
+        IReadOnlyDictionary<string, SemanticCallable> callablesById,
+        IReadOnlyDictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId,
+        IReadOnlySet<string> reachable,
+        ISet<string> pending)
     {
-        yield return operation;
-        foreach (SemanticOperation child in operation.Children)
+        QueueTarget(
+            operation.SymbolId,
+            callablesById,
+            accessorsByAssociatedSymbolId,
+            reachable,
+            pending,
+            includeAssociatedAccessors: operation.Kind != "property_reference");
+        QueueTarget(
+            operation.Conversion?.MethodSymbolId,
+            callablesById,
+            accessorsByAssociatedSymbolId,
+            reachable,
+            pending);
+        QueueTarget(
+            operation.InputConversion?.MethodSymbolId,
+            callablesById,
+            accessorsByAssociatedSymbolId,
+            reachable,
+            pending);
+        QueueTarget(
+            operation.OutputConversion?.MethodSymbolId,
+            callablesById,
+            accessorsByAssociatedSymbolId,
+            reachable,
+            pending);
+
+        if (operation.Kind == "property_reference")
         {
-            foreach (SemanticOperation descendant in EnumerateOperations(child))
+            QueuePropertyAccessors(
+                operation.SymbolId,
+                propertyAccess,
+                accessorsByAssociatedSymbolId,
+                reachable,
+                pending);
+        }
+
+        for (int index = 0; index < operation.Children.Count; ++index)
+        {
+            PropertyAccess childAccess = operation.Kind switch
             {
-                yield return descendant;
-            }
+                "assignment" when index == 0 => PropertyAccess.Write,
+                "compound_assignment" when index == 0 => PropertyAccess.ReadWrite,
+                "increment_or_decrement" when index == 0 => PropertyAccess.ReadWrite,
+                _ => PropertyAccess.Read,
+            };
+            QueueOperationTargets(
+                operation.Children[index],
+                childAccess,
+                callablesById,
+                accessorsByAssociatedSymbolId,
+                reachable,
+                pending);
         }
     }
 
     private static void QueueTarget(
         string? symbolId,
         IReadOnlyDictionary<string, SemanticCallable> callablesById,
-        IReadOnlyDictionary<string, string[]> accessorsByAssociatedSymbolId,
+        IReadOnlyDictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId,
         IReadOnlySet<string> reachable,
-        ISet<string> pending)
+        ISet<string> pending,
+        bool includeAssociatedAccessors = true)
     {
         if (symbolId is null)
         {
@@ -119,16 +182,60 @@ internal static class SemanticReachabilityProjector
             pending.Add(symbolId);
         }
 
-        if (accessorsByAssociatedSymbolId.TryGetValue(symbolId, out string[]? accessorIds))
+        if (includeAssociatedAccessors
+            && accessorsByAssociatedSymbolId.TryGetValue(symbolId, out AssociatedAccessorTargets? accessors))
         {
-            foreach (string accessorId in accessorIds)
+            QueueAccessorIds(accessors.All, reachable, pending);
+        }
+    }
+
+    private static void QueuePropertyAccessors(
+        string? propertySymbolId,
+        PropertyAccess access,
+        IReadOnlyDictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId,
+        IReadOnlySet<string> reachable,
+        ISet<string> pending)
+    {
+        if (propertySymbolId is null
+            || !accessorsByAssociatedSymbolId.TryGetValue(propertySymbolId, out AssociatedAccessorTargets? accessors))
+        {
+            return;
+        }
+
+        if (access is PropertyAccess.Read or PropertyAccess.ReadWrite)
+        {
+            QueueAccessorIds(accessors.Getters, reachable, pending);
+        }
+
+        if (access is PropertyAccess.Write or PropertyAccess.ReadWrite)
+        {
+            QueueAccessorIds(accessors.Setters, reachable, pending);
+        }
+    }
+
+    private static void QueueAccessorIds(
+        IEnumerable<string> accessorIds,
+        IReadOnlySet<string> reachable,
+        ISet<string> pending)
+    {
+        foreach (string accessorId in accessorIds)
+        {
+            if (!reachable.Contains(accessorId))
             {
-                if (!reachable.Contains(accessorId))
-                {
-                    pending.Add(accessorId);
-                }
+                pending.Add(accessorId);
             }
         }
+    }
+
+    private static bool IsPropertyGetter(SemanticCallable callable)
+    {
+        return !string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal);
+    }
+
+    private static bool IsPropertySetter(SemanticCallable callable)
+    {
+        return string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
+            && callable.Parameters.Count > 0;
     }
 
     private static SemanticReachableImport[] BuildReachableImports(
@@ -147,4 +254,16 @@ internal static class SemanticReachabilityProjector
             .ThenBy(import => import.MethodSymbolId, StringComparer.Ordinal)
             .ToArray();
     }
+
+    private enum PropertyAccess
+    {
+        Read,
+        Write,
+        ReadWrite,
+    }
+
+    private sealed record AssociatedAccessorTargets(
+        IReadOnlyList<string> All,
+        IReadOnlyList<string> Getters,
+        IReadOnlyList<string> Setters);
 }
