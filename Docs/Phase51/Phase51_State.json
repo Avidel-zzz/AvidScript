@@ -31,9 +31,9 @@
     },
     {
       "id": "P51.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "d9c1216: typed factory/type token, generated UE facade, nominal Guest IR, packed i64 WASM; .NET 167/167; UE5.8 no-clean Editor build succeeded; focused Automation 1/1 Success; clean architecture check passed",
+      "completed_at_utc": "2026-07-25T11:26:44.2580347+00:00"
     },
     {
       "id": "P51.4",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 51 -BatchId P51.3 -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-07-25T10:46:36.3402291+00:00"
+  "next_action": "batch-complete -Phase 51 -BatchId P51.4 -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-07-25T11:26:44.2612803+00:00"
 }

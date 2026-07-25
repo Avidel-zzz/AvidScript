@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-25 P51.3 路径探测错误复发：上下文恢复后依据摘要中的计划简称直接拼写两个 `Docs/Phase51` 文件名，读取命令因文件不存在失败；没有写盘，但重复违反了已知的路径发现规则。Prevention：摘要中的文件描述不得当作路径证据；即使目录与 Phase 已知，也必须先用 `rg --files <dir>` 取得精确文件名，再复制该输出用于后续读取，禁止凭阶段编号补全路径。
 - 2026-07-25 P51.3 验证流程错误记录：实现仍只存在于插件内的 Git worktree 时，直接从项目根运行 `-Module=AvidScriptEditor`；UE 项目固定引用主插件目录，因此实际编译并加载了主分支旧源码，聚焦自动化继续执行旧的 factory import 断言。Prevention：worktree 批次进入 UE 验证前，必须先提交候选、核验主目录受保护文件、以 `--ff-only` 同步主插件，再从项目根构建；自动化失败若行号/断言文本与 worktree 不符，先核对主目录 `HEAD` 和加载 DLL 来源，不盲目修改实现。
 
 - Do not use `Build.bat -Clean` just to make UBT notice new plugin `.cpp` or `.h` files. On 2026-07-02 this accidentally triggered a heavy `AvidTPSTemplateEditor` rebuild. Treat full target clean as destructive-to-time and run it only after explicit user approval.
