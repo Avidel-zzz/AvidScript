@@ -1,8 +1,10 @@
 #include "CSharpBuild/AvidScriptEditorCSharpBindingSliceService.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
+#include "AvidScriptSceneAttachmentBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
@@ -18,6 +20,37 @@
 
 namespace
 {
+bool HasAvidScriptCSharpBindingSliceSceneComponentFactory(
+	const FAvidScriptBindingPackageModel& Package)
+{
+	return Package.ObjectFactories.ContainsByPredicate(
+		[&Package](const FAvidScriptBindingObjectFactoryModel& Factory)
+		{
+			const FAvidScriptBindingClassReferenceModel* Reference =
+				Package.ClassReferences.FindByPredicate(
+					[&Factory](
+						const FAvidScriptBindingClassReferenceModel& Candidate)
+					{
+						return Candidate.StableId
+							== Factory.ClassReferenceId;
+					});
+			const FAvidScriptBindingTypeModel* ConcreteType =
+				Reference == nullptr
+					? nullptr
+					: Package.Types.FindByPredicate(
+						[Reference](
+							const FAvidScriptBindingTypeModel& Type)
+						{
+							return Type.ClassPath == Reference->ClassPath;
+						});
+			return ConcreteType != nullptr
+				&& FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
+					Package,
+					ConcreteType->StableId,
+					TEXT("/Script/Engine.SceneComponent"));
+		});
+}
+
 void SetAvidScriptCSharpBindingSliceFailure(
 	FAvidScriptEditorCSharpBindingSliceResult& OutResult,
 	const FString& ErrorCategory,
@@ -347,6 +380,10 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		FAvidScriptObjectLifecycleBindings::GetSpecs();
 	const TConstArrayView<FAvidScriptObjectTypeBindingSpec> ObjectTypeSpecs =
 		FAvidScriptObjectTypeBindings::GetSpecs();
+	const TConstArrayView<FAvidScriptObjectFactoryBindingSpec> ObjectFactorySpecs =
+		FAvidScriptObjectFactoryBinding::GetSpecs();
+	const TConstArrayView<FAvidScriptSceneAttachmentBindingSpec> AttachmentSpecs =
+		FAvidScriptSceneAttachmentBinding::GetSpecs();
 	const int32 ReflectedBindingCount = AuthorizationModel.Bindings.Num();
 	const int32 LifecycleImportCount =
 		FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
@@ -360,6 +397,21 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	const int32 ObjectTypeImportOffset =
 		ReflectedBindingCount
 		+ LifecycleImportCount;
+	const bool bPublishesObjectFactoryCapabilities =
+		AuthorizationModel.SchemaVersion >= 7
+		&& !AuthorizationModel.ObjectFactories.IsEmpty();
+	const int32 ObjectFactoryImportOffset =
+		ObjectTypeImportOffset
+		+ (bPublishesObjectTypeCapability ? ObjectTypeSpecs.Num() : 0);
+	const bool bPublishesSceneAttachmentCapabilities =
+		AuthorizationModel.SchemaVersion >= 7
+		&& HasAvidScriptCSharpBindingSliceSceneComponentFactory(
+			AuthorizationModel);
+	const int32 SceneAttachmentImportOffset =
+		ObjectFactoryImportOffset
+		+ (bPublishesObjectFactoryCapabilities
+			? ObjectFactorySpecs.Num()
+			: 0);
 	const int32 ExpectedProfileImportCount =
 		FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel);
 	if (AuthorizationModel.PackageName != Provenance.PackageName
@@ -478,6 +530,50 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 				|| ObjectTypeSpec.ModuleName != Import.Module
 				|| ObjectTypeSpec.ImportName != Import.Name
 				|| ObjectTypeSpec.Signature != Import.Signature)
+			{
+				SetAvidScriptCSharpBindingSliceFailure(
+					OutResult,
+					TEXT("slice_import_identity_mismatch"),
+					Import.StableId,
+					TEXT("rerun bootstrap with untampered import provenance"));
+				return false;
+			}
+			continue;
+		}
+
+		const int32 ObjectFactorySpecIndex =
+			Import.Ordinal - ObjectFactoryImportOffset;
+		if (bPublishesObjectFactoryCapabilities
+			&& ObjectFactorySpecs.IsValidIndex(ObjectFactorySpecIndex))
+		{
+			const FAvidScriptObjectFactoryBindingSpec& ObjectFactorySpec =
+				ObjectFactorySpecs[ObjectFactorySpecIndex];
+			if (ObjectFactorySpec.StableId != Import.StableId
+				|| ObjectFactorySpec.ModuleName != Import.Module
+				|| ObjectFactorySpec.ImportName != Import.Name
+				|| ObjectFactorySpec.Signature != Import.Signature)
+			{
+				SetAvidScriptCSharpBindingSliceFailure(
+					OutResult,
+					TEXT("slice_import_identity_mismatch"),
+					Import.StableId,
+					TEXT("rerun bootstrap with untampered import provenance"));
+				return false;
+			}
+			continue;
+		}
+
+		const int32 AttachmentSpecIndex =
+			Import.Ordinal - SceneAttachmentImportOffset;
+		if (bPublishesSceneAttachmentCapabilities
+			&& AttachmentSpecs.IsValidIndex(AttachmentSpecIndex))
+		{
+			const FAvidScriptSceneAttachmentBindingSpec& AttachmentSpec =
+				AttachmentSpecs[AttachmentSpecIndex];
+			if (AttachmentSpec.StableId != Import.StableId
+				|| AttachmentSpec.ModuleName != Import.Module
+				|| AttachmentSpec.ImportName != Import.Name
+				|| AttachmentSpec.Signature != Import.Signature)
 			{
 				SetAvidScriptCSharpBindingSliceFailure(
 					OutResult,

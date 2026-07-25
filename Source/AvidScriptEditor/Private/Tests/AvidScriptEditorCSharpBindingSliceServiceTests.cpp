@@ -741,9 +741,9 @@ bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
 		return false;
 	}
 	TestEqual(
-		TEXT("Factory authorization has object type and owner capabilities only"),
+		TEXT("Factory authorization has type, factory, attachment, and owner capabilities"),
 		ManifestImports.Num(),
-		2);
+		7);
 
 	const FAvidScriptFrontendBindingPackage Provenance =
 		MakeAvidScriptBindingSliceTestProvenance(
@@ -817,9 +817,9 @@ bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
 		LoadedSlice->GetObjectFactoryCount(),
 		2);
 	TestEqual(
-		TEXT("Factory-only class references do not add Actor lifecycle imports"),
+		TEXT("Factory runtime package publishes type, factory, and attachment imports"),
 		LoadedSlice->GetVmPackage().Imports.Num(),
-		1);
+		6);
 	return true;
 }
 
