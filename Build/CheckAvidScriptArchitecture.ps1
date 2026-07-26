@@ -434,6 +434,7 @@ foreach ($RequiredWamrCMakeIsolationToken in @(
 foreach ($RequiredWasmtimeShimToken in @(
     'avidscript_wasmtime_engine_new',
     'avidscript_wasmtime_linker_define_func',
+    'const uint32_t* cells',
     'avidscript_wasmtime_memory_data')) {
     if (-not $WasmtimeShimHeader.Contains($RequiredWasmtimeShimToken) -or
         -not $WasmtimeShimSource.Contains($RequiredWasmtimeShimToken)) {
@@ -450,6 +451,16 @@ if ($WasmtimeShimSource.Contains('GetProcAddress') -or $WasmtimeBackendSource.Co
 foreach ($RequiredBorrowOverride in @('BorrowReadOnlyBytes', 'BorrowMutableBytes')) {
     if (-not $WasmtimeBackendSource.Contains($RequiredBorrowOverride)) {
         Add-Violation "Wasmtime guest memory is missing $RequiredBorrowOverride"
+    }
+}
+foreach ($RequiredWasmtimeDynamicToken in @(
+    'FAvidScriptWasmtimeDynamicHostContext',
+    'DynamicHostContexts.Reserve',
+    'DispatchDynamicHostCall',
+    'uint64 ArgumentCells[64]',
+    'PendingHostImportModuleName')) {
+    if (-not $WasmtimeBackendSource.Contains($RequiredWasmtimeDynamicToken)) {
+        Add-Violation "Wasmtime per-instance dynamic import path is missing $RequiredWasmtimeDynamicToken"
     }
 }
 if ($StaticHostImportSource.Contains('TArray<uint32> InputCells') -or
@@ -512,6 +523,29 @@ if ($EditorBuild.Contains('"Wasmtime"')) {
 
 $RuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+$RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
+$RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
+$RuntimeBackendLaneHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptRuntimeBackendTestLanes.h'
+foreach ($RequiredRuntimeSessionToken in @(
+    'SetBackendSelectionForTesting',
+    'BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr',
+    'BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto',
+    'BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode',
+    'BackendSelection.bAllowFallback = true')) {
+    if (-not $RuntimeSessionHeader.Contains($RequiredRuntimeSessionToken) -and
+        -not $RuntimeSessionSource.Contains($RequiredRuntimeSessionToken)) {
+        Add-Violation "Runtime session backend-selection contract is missing $RequiredRuntimeSessionToken"
+    }
+}
+foreach ($RequiredRuntimeLaneToken in @(
+    'EAvidScriptVmBackendKind::Wasmtime',
+    'EAvidScriptVmExecutionMode::Jit',
+    'EAvidScriptVmArtifactFormat::WasmBytecode',
+    'Wasmtime.Selection.bAllowFallback = false')) {
+    if (-not $RuntimeBackendLaneHeader.Contains($RequiredRuntimeLaneToken)) {
+        Add-Violation "Runtime parity lane contract is missing $RequiredRuntimeLaneToken"
+    }
+}
 $GameplayEventHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptGameplayEvent.h'
 $EventRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeEventRouter.cpp'
 foreach ($RequiredTimerStructure in @('ActiveTimers', 'TimerHeap', 'DueTimerScratch')) {

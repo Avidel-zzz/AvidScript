@@ -3,6 +3,7 @@
 #include "wasmtime.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #define AVIDSCRIPT_WASMTIME_MAX_VALUES 64
 
@@ -36,6 +37,8 @@ struct AvidScriptWasmtimeFunction
 {
 	wasmtime_func_t value;
 	uint32_t parameter_count;
+	uint32_t cell_count;
+	wasmtime_valkind_t parameter_kinds[AVIDSCRIPT_WASMTIME_MAX_VALUES];
 };
 
 struct AvidScriptWasmtimeFailure
@@ -441,15 +444,17 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	const char* export_name,
 	size_t export_name_size,
 	AvidScriptWasmtimeFunction** out_function,
-	uint32_t* out_parameter_count)
+	uint32_t* out_cell_count)
 {
 	wasmtime_extern_t item;
 	wasm_functype_t* type;
 	const wasm_valtype_vec_t* parameters;
 	const wasm_valtype_vec_t* results;
 	AvidScriptWasmtimeFunction* function;
+	size_t parameter_index;
+	uint32_t cell_count = 0;
 	*out_function = NULL;
-	*out_parameter_count = 0;
+	*out_cell_count = 0;
 	if (!wasmtime_instance_export_get(
 		store->context,
 		&instance->value,
@@ -472,10 +477,7 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	}
 	parameters = wasm_functype_params(type);
 	results = wasm_functype_results(type);
-	if (results->size != 0
-		|| (parameters->size != 0
-			&& (parameters->size != 1
-				|| wasm_valtype_kind(parameters->data[0]) != WASM_F32)))
+	if (results->size != 0 || parameters->size > AVIDSCRIPT_WASMTIME_MAX_VALUES)
 	{
 		wasm_functype_delete(type);
 		wasmtime_extern_delete(&item);
@@ -490,7 +492,29 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	}
 	function->value = item.of.func;
 	function->parameter_count = (uint32_t)parameters->size;
-	*out_parameter_count = function->parameter_count;
+	for (parameter_index = 0; parameter_index < parameters->size; ++parameter_index)
+	{
+		const wasm_valkind_t kind = wasm_valtype_kind(parameters->data[parameter_index]);
+		switch (kind)
+		{
+		case WASM_I32:
+		case WASM_F32:
+			cell_count += 1;
+			break;
+		case WASM_I64:
+		case WASM_F64:
+			cell_count += 2;
+			break;
+		default:
+			free(function);
+			wasm_functype_delete(type);
+			wasmtime_extern_delete(&item);
+			return 3;
+		}
+		function->parameter_kinds[parameter_index] = kind;
+	}
+	function->cell_count = cell_count;
+	*out_cell_count = cell_count;
 	*out_function = function;
 	wasm_functype_delete(type);
 	wasmtime_extern_delete(&item);
@@ -505,22 +529,51 @@ void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function)
 AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
-	const float* optional_delta_seconds)
+	const uint32_t* cells,
+	size_t cell_count)
 {
-	wasmtime_val_t argument;
-	const wasmtime_val_t* arguments = NULL;
+	wasmtime_val_t arguments[AVIDSCRIPT_WASMTIME_MAX_VALUES];
 	wasm_trap_t* trap = NULL;
 	wasmtime_error_t* error;
-	if (function->parameter_count == 1)
+	size_t parameter_index;
+	size_t cell_index = 0;
+	if (cell_count != function->cell_count)
 	{
-		argument.kind = WASMTIME_F32;
-		argument.of.f32 = *optional_delta_seconds;
-		arguments = &argument;
+		return NULL;
+	}
+	for (parameter_index = 0; parameter_index < function->parameter_count; ++parameter_index)
+	{
+		uint64_t wide_bits;
+		arguments[parameter_index].kind = function->parameter_kinds[parameter_index];
+		switch (function->parameter_kinds[parameter_index])
+		{
+		case WASM_I32:
+			arguments[parameter_index].of.i32 = (int32_t)cells[cell_index++];
+			break;
+		case WASM_F32:
+			memcpy(&arguments[parameter_index].of.f32, &cells[cell_index], sizeof(float));
+			++cell_index;
+			break;
+		case WASM_I64:
+			wide_bits = (uint64_t)cells[cell_index]
+				| ((uint64_t)cells[cell_index + 1] << 32);
+			arguments[parameter_index].of.i64 = (int64_t)wide_bits;
+			cell_index += 2;
+			break;
+		case WASM_F64:
+			wide_bits = (uint64_t)cells[cell_index]
+				| ((uint64_t)cells[cell_index + 1] << 32);
+			memcpy(&arguments[parameter_index].of.f64, &wide_bits, sizeof(double));
+			cell_index += 2;
+			break;
+		default:
+			return NULL;
+		}
 	}
 	error = wasmtime_func_call(
 		store->context,
 		&function->value,
-		arguments,
+		function->parameter_count == 0 ? NULL : arguments,
 		function->parameter_count,
 		NULL,
 		0,

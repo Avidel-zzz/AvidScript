@@ -5,6 +5,7 @@
 #include "AvidScriptWasmReload.h"
 #include "AvidScriptWasmRuntime.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Engine/Engine.h"
@@ -418,30 +419,33 @@ bool FAvidScriptWasmActorExternalFileSetLocationSmokeTest::RunTest(const FString
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 
-	FAvidScriptWasmRuntimeInstance Runtime;
-	Runtime.SetHostContext(HostContext);
-
-	FAvidScriptWasmSmokeResult RuntimeResult;
-	const bool bRuntimeLoaded = Runtime.LoadModule(
-		LoadedBytes.GetData(),
-		LoadedBytes.Num(),
-		TEXT("external_actor_set_location"),
-		RuntimeResult);
-	if (!bRuntimeLoaded)
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
-		AddError(RuntimeResult.ErrorMessage);
+		Actor->SetActorLocation(FVector(10.0, 20.0, 30.0));
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		Runtime.SetHostContext(HostContext);
+		FAvidScriptWasmSmokeResult RuntimeResult;
+		const bool bRuntimeLoaded = Runtime.LoadModule(
+			LoadedBytes.GetData(),
+			LoadedBytes.Num(),
+			TEXT("external_actor_set_location"),
+			RuntimeResult);
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("runtime loads external actor fixture")),
+			bRuntimeLoaded))
+		{
+			AddError(RuntimeResult.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, RuntimeResult);
+		const bool bBeginPlaySucceeded = Runtime.BeginPlay(RuntimeResult);
+		if (!bBeginPlaySucceeded)
+		{
+			AddError(RuntimeResult.ErrorMessage);
+		}
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay calls actor import")), bBeginPlaySucceeded);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Actor moved by WASM FVector")), Actor->GetActorLocation(), TargetLocation);
 	}
-
-	TestTrue(TEXT("Runtime loads external actor fixture"), bRuntimeLoaded);
-
-	const bool bBeginPlaySucceeded = bRuntimeLoaded && Runtime.BeginPlay(RuntimeResult);
-	if (!bBeginPlaySucceeded)
-	{
-		AddError(RuntimeResult.ErrorMessage);
-	}
-
-	TestTrue(TEXT("BeginPlay calls actor import"), bBeginPlaySucceeded);
-	TestEqual(TEXT("Actor moved by WASM"), Actor->GetActorLocation(), TargetLocation);
 
 	IFileManager::Get().Delete(*FixturePath);
 	DestroyWasmActorImportWorld(World);

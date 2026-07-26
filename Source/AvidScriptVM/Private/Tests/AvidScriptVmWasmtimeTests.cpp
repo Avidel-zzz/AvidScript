@@ -10,6 +10,8 @@
 
 namespace
 {
+constexpr const TCHAR* WasmtimeDynamicImportName = TEXT("avid_ue_1111111111111111");
+
 void AppendWasmtimeU32Leb(TArray<uint8>& Bytes, uint32 Value)
 {
 	do
@@ -172,6 +174,32 @@ TArray<uint8> BuildWasmtimeI32ImportFixture(const char* ImportName, int32 Input)
 	Code.Append(Body);
 	AppendWasmtimeSection(Module, 10, Code);
 	return Module;
+}
+
+FAvidScriptVmBindingPackage MakeWasmtimeDynamicPackage(uint32 TargetOrdinal, TCHAR HashCharacter)
+{
+	FAvidScriptVmBindingPackage Package;
+	Package.PackageName = TEXT("avidscript.phase54.wasmtime_dynamic");
+	Package.PackageHash = FString::ChrN(64, HashCharacter);
+	if (TargetOrdinal > 0)
+	{
+		FAvidScriptVmDynamicImport Padding;
+		Padding.StableId = TEXT("2222222222222222222222222222222222222222222222222222222222222222");
+		Padding.Ordinal = 0;
+		Padding.ModuleName = TEXT("avidscript");
+		Padding.ImportName = TEXT("avid_ue_2222222222222222");
+		Padding.Signature = TEXT("(i)i");
+		Package.Imports.Add(MoveTemp(Padding));
+	}
+
+	FAvidScriptVmDynamicImport Import;
+	Import.StableId = TEXT("1111111111111111111111111111111111111111111111111111111111111111");
+	Import.Ordinal = TargetOrdinal;
+	Import.ModuleName = TEXT("avidscript");
+	Import.ImportName = WasmtimeDynamicImportName;
+	Import.Signature = TEXT("(i)i");
+	Package.Imports.Add(MoveTemp(Import));
+	return Package;
 }
 
 TArray<uint8> BuildWasmtimeVectorFixture()
@@ -401,12 +429,37 @@ public:
 		return OutResult.bSucceeded;
 	}
 
+	bool DispatchDynamicHostCall(
+		const FAvidScriptDynamicHostCall& Call,
+		FAvidScriptDynamicHostCallResult& OutResult) override
+	{
+		++DynamicCallCount;
+		LastDynamicOrdinal = Call.BindingOrdinal;
+		LastDynamicArgumentCount = Call.Arguments.Num();
+		LastDynamicInput = Call.Arguments.IsEmpty() ? 0 : static_cast<int32>(Call.Arguments[0]);
+		bSawDynamicGuestMemory = Call.GuestMemory != nullptr;
+		OutResult.bSucceeded = !bFailDynamicCall;
+		OutResult.ReturnValue = LastDynamicInput + 1;
+		if (bFailDynamicCall)
+		{
+			OutResult.Details = TEXT("wasmtime dynamic failure sentinel");
+			return false;
+		}
+		return true;
+	}
+
 	IAvidScriptVmBackend* BackendToUnload = nullptr;
 	int32 CallCount = 0;
 	int32 LastI32 = 0;
 	int32 CapturedOutputFloatCount = 0;
 	EAvidScriptHostBindingId LastBindingId = EAvidScriptHostBindingId::Invalid;
 	TArray<uint32> CapturedInputCells;
+	int32 DynamicCallCount = 0;
+	uint32 LastDynamicOrdinal = MAX_uint32;
+	int32 LastDynamicArgumentCount = 0;
+	int32 LastDynamicInput = 0;
+	bool bSawDynamicGuestMemory = false;
+	bool bFailDynamicCall = false;
 };
 } // namespace
 
@@ -556,6 +609,73 @@ bool FAvidScriptVmWasmtimeStaticImportsTest::RunTest(const FString& Parameters)
 	const float ExpectedBatch = 84.0f;
 	FMemory::Memcpy(&ExpectedBatchBits, &ExpectedBatch, sizeof(float));
 	TestEqual(TEXT("guest observes batch output memory"), Dispatcher.LastI32, static_cast<int32>(ExpectedBatchBits));
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeDynamicImportsTest,
+	"AvidScript.VM.Wasmtime.DynamicImports",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeDynamicImportsTest::RunTest(const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	const TArray<uint8> Fixture = BuildWasmtimeI32ImportFixture("avid_ue_1111111111111111", 41);
+	FAvidScriptVmBindingPackage FirstPackage = MakeWasmtimeDynamicPackage(0, TEXT('a'));
+	FAvidScriptVmBindingPackage SecondPackage = MakeWasmtimeDynamicPackage(1, TEXT('b'));
+	FAvidScriptWasmtimeTestDispatcher FirstDispatcher;
+	FAvidScriptWasmtimeTestDispatcher SecondDispatcher;
+	FAvidScriptVmLoadConfig FirstConfig;
+	FirstConfig.HostDispatcher = &FirstDispatcher;
+	FirstConfig.BindingPackage = &FirstPackage;
+	FAvidScriptVmLoadConfig SecondConfig;
+	SecondConfig.HostDispatcher = &SecondDispatcher;
+	SecondConfig.BindingPackage = &SecondPackage;
+
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> FirstBackend = CreateWasmtimeBackendForTest(Error);
+	TUniquePtr<IAvidScriptVmBackend> SecondBackend = CreateWasmtimeBackendForTest(Error);
+	if (!TestTrue(TEXT("first per-instance package loads"), FirstBackend->Load(
+			Fixture,
+			TEXT("wasmtime_dynamic_first"),
+			FirstConfig,
+			Error))
+		|| !TestTrue(TEXT("second per-instance package loads"), SecondBackend->Load(
+			Fixture,
+			TEXT("wasmtime_dynamic_second"),
+			SecondConfig,
+			Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+
+	FAvidScriptVmExportHandle FirstBeginPlay;
+	FAvidScriptVmExportHandle SecondBeginPlay;
+	TestTrue(TEXT("first dynamic BeginPlay resolves"),
+		FirstBackend->ResolveExport(TEXT("avid_on_begin_play"), FirstBeginPlay, Error));
+	TestTrue(TEXT("second dynamic BeginPlay resolves"),
+		SecondBackend->ResolveExport(TEXT("avid_on_begin_play"), SecondBeginPlay, Error));
+	TestTrue(TEXT("first dynamic callback succeeds"),
+		FirstBackend->Call(FirstBeginPlay, FAvidScriptVmCallFrame(), Error));
+	TestTrue(TEXT("second dynamic callback succeeds"),
+		SecondBackend->Call(SecondBeginPlay, FAvidScriptVmCallFrame(), Error));
+	TestEqual(TEXT("first metadata keeps local ordinal zero"), FirstDispatcher.LastDynamicOrdinal, 0u);
+	TestEqual(TEXT("second metadata keeps local ordinal one"), SecondDispatcher.LastDynamicOrdinal, 1u);
+	TestEqual(TEXT("dynamic callback receives one canonical cell"), SecondDispatcher.LastDynamicArgumentCount, 1);
+	TestEqual(TEXT("dynamic callback preserves i32 cell bits"), SecondDispatcher.LastDynamicInput, 41);
+	TestTrue(TEXT("dynamic callback exposes active guest memory"), SecondDispatcher.bSawDynamicGuestMemory);
+
+	SecondDispatcher.bFailDynamicCall = true;
+	TestFalse(TEXT("dynamic dispatcher failure traps"),
+		SecondBackend->Call(SecondBeginPlay, FAvidScriptVmCallFrame(), Error));
+	TestEqual(TEXT("dynamic failure category"), Error.Category, FString(TEXT("host_import_failed")));
+	TestEqual(TEXT("dynamic failure module"), Error.ImportModuleName, FString(TEXT("avidscript")));
+	TestEqual(TEXT("dynamic failure import"), Error.ImportName, FString(WasmtimeDynamicImportName));
+	TestEqual(TEXT("dynamic failure details"), Error.Details, FString(TEXT("wasmtime dynamic failure sentinel")));
 	return true;
 #endif
 }

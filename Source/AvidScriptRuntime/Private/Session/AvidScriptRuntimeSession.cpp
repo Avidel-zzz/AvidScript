@@ -102,6 +102,10 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
+	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
+	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
+	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	BackendSelection.bAllowFallback = true;
 }
 
 FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
@@ -128,7 +132,8 @@ bool FAvidScriptRuntimeSession::LoadEmbeddedSmoke(FAvidScriptWasmReloadResult& O
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 
 	const FAvidScriptWasmReloadManifest Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(ModuleId);
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
+	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
+		MakeUnique<FAvidScriptWasmRuntimeInstance>(BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	if (!CandidateRuntime->LoadEmbeddedSmokeModule(RuntimeResult) ||
 		!CandidateRuntime->ValidateRequiredExports(Manifest.RequiredExports, RuntimeResult))
@@ -655,7 +660,8 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 		return false;
 	}
 
-	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime = MakeUnique<FAvidScriptWasmRuntimeInstance>();
+	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
+		MakeUnique<FAvidScriptWasmRuntimeInstance>(BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 
 	if (!CandidateRuntime->LoadModule(

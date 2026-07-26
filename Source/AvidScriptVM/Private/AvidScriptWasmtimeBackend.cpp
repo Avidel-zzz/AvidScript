@@ -4,6 +4,7 @@
 #include "AvidScriptWasmtimeApi.h"
 #include "AvidScriptWasmModuleLayout.h"
 
+#include "Containers/StringConv.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
@@ -189,12 +190,23 @@ struct FAvidScriptWasmtimeHostContext
 	FAvidScriptVmAbiSignature Signature;
 };
 
+struct FAvidScriptWasmtimeDynamicHostContext
+{
+	FAvidScriptWasmtimeBackend* Backend = nullptr;
+	uint32 Ordinal = MAX_uint32;
+	FString StableId;
+	FString ModuleName;
+	FString ImportName;
+	FString CompactSignature;
+	FAvidScriptVmAbiSignature Signature;
+};
+
 struct FAvidScriptWasmtimeExportEntry
 {
 	FString Name;
 	AvidScriptWasmtimeFunction* Function = nullptr;
 	uint32 Generation = 0;
-	uint32 ParameterCount = 0;
+	uint32 CellCount = 0;
 };
 #endif
 
@@ -249,15 +261,6 @@ public:
 			SetWasmtimeError(OutError, TEXT("invalid_config"), TEXT("VM stack and heap sizes must be non-zero."));
 			return false;
 		}
-		if (Config.BindingPackage != nullptr)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("dynamic_import_unavailable"),
-				TEXT("Wasmtime dynamic binding packages are implemented by Phase 54 Task 3B."));
-			return false;
-		}
-
 		FAvidScriptWasmModuleLayout ModuleLayout;
 		FString LayoutError;
 		if (!InspectAvidScriptWasmModuleLayout(Bytecode, ModuleLayout, LayoutError))
@@ -267,7 +270,7 @@ public:
 		}
 		if (!ValidateAvidScriptVmImportContract(
 			ModuleLayout,
-			nullptr,
+			Config.BindingPackage,
 			TConstArrayView<FAvidScriptVmExpectedImport>(),
 			false,
 			OutError))
@@ -340,6 +343,12 @@ public:
 			PerformUnload();
 			return false;
 		}
+		if (Config.BindingPackage != nullptr && !DefineDynamicImports(*Config.BindingPackage, OutError))
+		{
+			LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
+			PerformUnload();
+			return false;
+		}
 
 		AvidScriptWasmtimeFailure* InstantiateFailure = avidscript_wasmtime_linker_instantiate(
 			Linker,
@@ -391,14 +400,14 @@ public:
 		++ExportLookupCount;
 		FTCHARToUTF8 ExportNameUtf8(*ExportName);
 		AvidScriptWasmtimeFunction* Function = nullptr;
-		uint32 ParameterCount = 0;
+		uint32 CellCount = 0;
 		const int ResolveResult = avidscript_wasmtime_instance_resolve_event_export(
 			Store,
 			Instance,
 			ExportNameUtf8.Get(),
 			static_cast<size_t>(ExportNameUtf8.Length()),
 			&Function,
-			&ParameterCount);
+			&CellCount);
 		if (ResolveResult == 1)
 		{
 			SetWasmtimeError(
@@ -420,7 +429,7 @@ public:
 			SetWasmtimeError(
 				OutError,
 				TEXT("invalid_arguments"),
-				TEXT("Wasmtime event exports must be () -> void or (f32) -> void in this execution tier."));
+				TEXT("Wasmtime exports must return void and use only core numeric ABI parameters."));
 			return false;
 		}
 		if (ResolveResult != 0 || Function == nullptr)
@@ -436,7 +445,7 @@ public:
 		Entry.Name = ExportName;
 		Entry.Function = Function;
 		Entry.Generation = ExportGeneration;
-		Entry.ParameterCount = ParameterCount;
+		Entry.CellCount = CellCount;
 		const uint32 EntryIndex = static_cast<uint32>(ExportEntries.Num() - 1);
 		ExportNameToIndex.Add(ExportName, EntryIndex);
 
@@ -454,6 +463,7 @@ public:
 	{
 		OutError.Reset();
 		bHasPendingHostFailure = false;
+		PendingHostImportModuleName.Reset();
 		PendingHostImportName.Reset();
 		PendingHostFailureDetails.Reset();
 		if (Frame.CellCount > FAvidScriptVmCallFrame::MaxCells)
@@ -489,25 +499,18 @@ public:
 			return false;
 		}
 		const FAvidScriptWasmtimeExportEntry& Entry = ExportEntries[Handle.Slot - 1];
-		if (Frame.CellCount != Entry.ParameterCount)
+		if (Frame.CellCount != Entry.CellCount)
 		{
 			SetWasmtimeError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame does not match the cached export signature."));
 			return false;
-		}
-
-		float DeltaSeconds = 0.0f;
-		const float* OptionalDeltaSeconds = nullptr;
-		if (Entry.ParameterCount == 1)
-		{
-			FMemory::Memcpy(&DeltaSeconds, Frame.Cells, sizeof(float));
-			OptionalDeltaSeconds = &DeltaSeconds;
 		}
 
 		++ActiveCallDepth;
 		AvidScriptWasmtimeFailure* CallFailure = avidscript_wasmtime_function_call_event(
 			Store,
 			Entry.Function,
-			OptionalDeltaSeconds);
+			Frame.Cells,
+			Frame.CellCount);
 		const bool bCallFailed = CallFailure != nullptr;
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
 		FString FailureDetails;
@@ -537,7 +540,7 @@ public:
 			{
 				OutError.Reset();
 				OutError.Category = TEXT("host_import_failed");
-				OutError.ImportModuleName = TEXT("avidscript");
+				OutError.ImportModuleName = PendingHostImportModuleName;
 				OutError.ImportName = PendingHostImportName;
 				OutError.Details = PendingHostFailureDetails;
 			}
@@ -755,9 +758,10 @@ public:
 		if (ArgumentCount != static_cast<size_t>(HostContext.Signature.Parameters.Num())
 			|| ResultCount != (HostContext.Signature.bHasResult ? 1u : 0u))
 		{
-			bHasPendingHostFailure = true;
-			PendingHostImportName = UTF8_TO_TCHAR(HostContext.Import->ImportName);
-			PendingHostFailureDetails = TEXT("Wasmtime host callback shape does not match the static import catalog.");
+			RecordPendingHostFailure(
+				TEXT("avidscript"),
+				UTF8_TO_TCHAR(HostContext.Import->ImportName),
+				TEXT("Wasmtime host callback shape does not match the static import catalog."));
 			return false;
 		}
 		TArray<FAvidScriptVmStaticValue, TInlineAllocator<8>> StaticArguments;
@@ -768,9 +772,10 @@ public:
 				HostContext.Signature.Parameters[static_cast<int32>(Index)];
 			if (Arguments[Index].kind != ToWasmtimeValueKind(ExpectedKind))
 			{
-				bHasPendingHostFailure = true;
-				PendingHostImportName = UTF8_TO_TCHAR(HostContext.Import->ImportName);
-				PendingHostFailureDetails = TEXT("Wasmtime host callback value kind does not match the static import catalog.");
+				RecordPendingHostFailure(
+					TEXT("avidscript"),
+					UTF8_TO_TCHAR(HostContext.Import->ImportName),
+					TEXT("Wasmtime host callback value kind does not match the static import catalog."));
 				return false;
 			}
 			FAvidScriptVmStaticValue& Value = StaticArguments.AddDefaulted_GetRef();
@@ -807,11 +812,12 @@ public:
 		ActiveCaller = PreviousCaller;
 		if (!bSucceeded)
 		{
-			bHasPendingHostFailure = true;
-			PendingHostImportName = UTF8_TO_TCHAR(HostContext.Import->ImportName);
-			PendingHostFailureDetails = FailureDetails.IsEmpty()
-				? TEXT("Wasmtime static host import adapter rejected the call.")
-				: MoveTemp(FailureDetails);
+			RecordPendingHostFailure(
+				TEXT("avidscript"),
+				UTF8_TO_TCHAR(HostContext.Import->ImportName),
+				FailureDetails.IsEmpty()
+					? TEXT("Wasmtime static host import adapter rejected the call.")
+					: MoveTemp(FailureDetails));
 			return false;
 		}
 
@@ -839,10 +845,120 @@ public:
 		}
 		return true;
 	}
+
+	bool InvokeDynamicHostImport(
+		FAvidScriptWasmtimeDynamicHostContext& HostContext,
+		AvidScriptWasmtimeCaller* Caller,
+		const AvidScriptWasmtimeValue* Arguments,
+		size_t ArgumentCount,
+		AvidScriptWasmtimeValue* Results,
+		size_t ResultCount)
+	{
+		const size_t ExpectedResultCount = HostContext.Signature.bHasResult ? 1u : 0u;
+		if (ArgumentCount != static_cast<size_t>(HostContext.Signature.Parameters.Num())
+			|| ResultCount != ExpectedResultCount)
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("Wasmtime dynamic host callback shape does not match its binding package."));
+			return false;
+		}
+
+		uint64 ArgumentCells[64] = {};
+		for (size_t Index = 0; Index < ArgumentCount; ++Index)
+		{
+			const EAvidScriptVmValueKind ExpectedKind =
+				HostContext.Signature.Parameters[static_cast<int32>(Index)];
+			if (Arguments[Index].kind != ToWasmtimeValueKind(ExpectedKind))
+			{
+				RecordPendingHostFailure(
+					HostContext.ModuleName,
+					HostContext.ImportName,
+					TEXT("Wasmtime dynamic host callback value kind does not match its binding package."));
+				return false;
+			}
+			switch (ExpectedKind)
+			{
+			case EAvidScriptVmValueKind::I32:
+				ArgumentCells[Index] = static_cast<uint32>(Arguments[Index].of.i32);
+				break;
+			case EAvidScriptVmValueKind::I64:
+				ArgumentCells[Index] = static_cast<uint64>(Arguments[Index].of.i64);
+				break;
+			case EAvidScriptVmValueKind::F32:
+			{
+				uint32 Bits = 0;
+				FMemory::Memcpy(&Bits, &Arguments[Index].of.f32, sizeof(Bits));
+				ArgumentCells[Index] = Bits;
+				break;
+			}
+			case EAvidScriptVmValueKind::F64:
+				FMemory::Memcpy(&ArgumentCells[Index], &Arguments[Index].of.f64, sizeof(uint64));
+				break;
+			}
+		}
+
+		if (HostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("No host dispatcher is attached to the VM instance."));
+			return false;
+		}
+
+		FAvidScriptDynamicHostCall Call;
+		Call.BindingOrdinal = HostContext.Ordinal;
+		Call.Arguments = MakeArrayView(ArgumentCells, static_cast<int32>(ArgumentCount));
+		Call.GuestMemory = this;
+		FAvidScriptDynamicHostCallResult Result;
+		AvidScriptWasmtimeCaller* PreviousCaller = ActiveCaller;
+		ActiveCaller = Caller;
+		const bool bSucceeded =
+			HostDispatcher->DispatchDynamicHostCall(Call, Result) && Result.bSucceeded;
+		ActiveCaller = PreviousCaller;
+		if (!bSucceeded)
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				Result.Details.IsEmpty()
+					? TEXT("Wasmtime dynamic host dispatcher rejected the call.")
+					: MoveTemp(Result.Details));
+			return false;
+		}
+
+		if (ResultCount == 1)
+		{
+			if (HostContext.Signature.Result == EAvidScriptVmValueKind::I64)
+			{
+				Results[0].kind = AVIDSCRIPT_WASMTIME_I64;
+				Results[0].of.i64 = Result.ReturnValueI64;
+			}
+			else
+			{
+				Results[0].kind = AVIDSCRIPT_WASMTIME_I32;
+				Results[0].of.i32 = Result.ReturnValue;
+			}
+		}
+		return true;
+	}
 #endif
 
 private:
 #if AVIDSCRIPT_WITH_WASMTIME
+	void RecordPendingHostFailure(
+		const FString& ModuleName,
+		const FString& ImportName,
+		FString Details)
+	{
+		bHasPendingHostFailure = true;
+		PendingHostImportModuleName = ModuleName;
+		PendingHostImportName = ImportName;
+		PendingHostFailureDetails = MoveTemp(Details);
+	}
+
 	static bool StaticHostCallback(
 		void* Environment,
 		AvidScriptWasmtimeCaller* Caller,
@@ -858,6 +974,29 @@ private:
 			return false;
 		}
 		return HostContext->Backend->InvokeStaticHostImport(
+			*HostContext,
+			Caller,
+			Arguments,
+			ArgumentCount,
+			Results,
+			ResultCount);
+	}
+
+	static bool DynamicHostCallback(
+		void* Environment,
+		AvidScriptWasmtimeCaller* Caller,
+		const AvidScriptWasmtimeValue* Arguments,
+		size_t ArgumentCount,
+		AvidScriptWasmtimeValue* Results,
+		size_t ResultCount)
+	{
+		FAvidScriptWasmtimeDynamicHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeDynamicHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr)
+		{
+			return false;
+		}
+		return HostContext->Backend->InvokeDynamicHostImport(
 			*HostContext,
 			Caller,
 			Arguments,
@@ -938,6 +1077,74 @@ private:
 		return true;
 	}
 
+	bool DefineDynamicImports(
+		const FAvidScriptVmBindingPackage& BindingPackage,
+		FAvidScriptVmError& OutError)
+	{
+		DynamicHostContexts.Reserve(BindingPackage.Imports.Num());
+		for (const FAvidScriptVmDynamicImport& Import : BindingPackage.Imports)
+		{
+			TUniquePtr<FAvidScriptWasmtimeDynamicHostContext> HostContext =
+				MakeUnique<FAvidScriptWasmtimeDynamicHostContext>();
+			HostContext->Backend = this;
+			HostContext->Ordinal = Import.Ordinal;
+			HostContext->StableId = Import.StableId;
+			HostContext->ModuleName = Import.ModuleName;
+			HostContext->ImportName = Import.ImportName;
+			HostContext->CompactSignature = Import.Signature;
+			FString ParseError;
+			if (!ParseAvidScriptVmAbiSignature(
+				Import.Signature,
+				HostContext->Signature,
+				ParseError))
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("host_import_registration_failed");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = MoveTemp(ParseError);
+				return false;
+			}
+
+			TArray<AvidScriptWasmtimeValueKind, TInlineAllocator<64>> ParameterKinds;
+			ParameterKinds.Reserve(HostContext->Signature.Parameters.Num());
+			for (EAvidScriptVmValueKind Kind : HostContext->Signature.Parameters)
+			{
+				ParameterKinds.Add(ToWasmtimeValueKind(Kind));
+			}
+			const AvidScriptWasmtimeValueKind ResultKind =
+				ToWasmtimeValueKind(HostContext->Signature.Result);
+			FTCHARToUTF8 ModuleNameUtf8(*HostContext->ModuleName);
+			FTCHARToUTF8 ImportNameUtf8(*HostContext->ImportName);
+			FAvidScriptWasmtimeDynamicHostContext* HostContextPointer = HostContext.Get();
+			DynamicHostContexts.Add(MoveTemp(HostContext));
+			AvidScriptWasmtimeFailure* DefineFailure = avidscript_wasmtime_linker_define_func(
+				Linker,
+				ModuleNameUtf8.Get(),
+				static_cast<size_t>(ModuleNameUtf8.Length()),
+				ImportNameUtf8.Get(),
+				static_cast<size_t>(ImportNameUtf8.Length()),
+				ParameterKinds.GetData(),
+				static_cast<size_t>(ParameterKinds.Num()),
+				HostContextPointer->Signature.bHasResult ? &ResultKind : nullptr,
+				HostContextPointer->Signature.bHasResult ? 1 : 0,
+				&DynamicHostCallback,
+				HostContextPointer);
+			if (DefineFailure != nullptr)
+			{
+				TArray<FAvidScriptVmStackFrame> Frames;
+				bool bWasTrap = false;
+				OutError.Reset();
+				OutError.Category = TEXT("host_import_registration_failed");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = ConsumeWasmtimeFailure(DefineFailure, Frames, bWasTrap);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	bool TryGetGuestMemory(uint8*& OutData, size_t& OutSize)
 	{
 		return avidscript_wasmtime_memory_data(
@@ -974,6 +1181,7 @@ private:
 			Linker = nullptr;
 		}
 		HostContexts.Reset();
+		DynamicHostContexts.Reset();
 		ActiveCaller = nullptr;
 		if (Store != nullptr)
 		{
@@ -1017,6 +1225,7 @@ private:
 	int32 ActiveCallDepth = 0;
 	bool bUnloadDeferred = false;
 	bool bHasPendingHostFailure = false;
+	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
 	FString PendingHostFailureDetails;
 
@@ -1028,6 +1237,7 @@ private:
 	AvidScriptWasmtimeInstance* Instance = nullptr;
 	AvidScriptWasmtimeCaller* ActiveCaller = nullptr;
 	TArray<TUniquePtr<FAvidScriptWasmtimeHostContext>> HostContexts;
+	TArray<TUniquePtr<FAvidScriptWasmtimeDynamicHostContext>> DynamicHostContexts;
 	TArray<FAvidScriptWasmtimeExportEntry> ExportEntries;
 #endif
 };

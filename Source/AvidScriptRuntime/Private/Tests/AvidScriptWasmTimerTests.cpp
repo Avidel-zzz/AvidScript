@@ -2,6 +2,7 @@
 
 #include "AvidScriptWasmRuntime.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "Containers/Set.h"
 #include "Math/NumericLimits.h"
 #include "Misc/AutomationTest.h"
@@ -236,21 +237,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptWasmTimerCallbackRescheduleSmokeTest::RunTest(const FString& Parameters)
 {
 	const TArray<uint8> WasmBytes = BuildTimerCallbackFixture(false);
-	FAvidScriptWasmRuntimeInstance Runtime;
-	FAvidScriptWasmSmokeResult Result;
-	TestTrue(TEXT("Timer reschedule fixture loads"), Runtime.LoadModule(
-		WasmBytes.GetData(), WasmBytes.Num(), TEXT("timer_callback_reschedule"), Result));
-	TestTrue(TEXT("BeginPlay schedules the first timer"), Runtime.BeginPlay(Result));
-
-	TestTrue(TEXT("First Tick executes one callback"), Runtime.Tick(1.0f / 60.0f, Result));
-	TestEqual(TEXT("First Tick executes exactly one callback"), Result.TimerCallbackCount, 1);
-	TestEqual(TEXT("First callback id"), Result.LastTimerCallbackId, 7);
-	TestEqual(TEXT("Callback-scheduled zero-delay timer waits pending"), Runtime.GetPendingTimerCount(), 1);
-
-	TestTrue(TEXT("Second Tick executes the deferred callback"), Runtime.Tick(1.0f / 60.0f, Result));
-	TestEqual(TEXT("Second Tick executes exactly one additional callback"), Result.TimerCallbackCount, 2);
-	TestEqual(TEXT("Deferred callback id"), Result.LastTimerCallbackId, 8);
-	TestEqual(TEXT("Rescheduled zero-delay timer again waits for the next frame"), Runtime.GetPendingTimerCount(), 1);
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("timer reschedule fixture loads")),
+			Runtime.LoadModule(
+				WasmBytes.GetData(),
+				WasmBytes.Num(),
+				TEXT("timer_callback_reschedule"),
+				Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay schedules first timer")), Runtime.BeginPlay(Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("first Tick executes callback")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("first callback count")), Result.TimerCallbackCount, 1);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("first callback id")), Result.LastTimerCallbackId, 7);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("callback reschedule waits pending")), Runtime.GetPendingTimerCount(), 1);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("second Tick executes deferred callback")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("second callback count")), Result.TimerCallbackCount, 2);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("deferred callback id")), Result.LastTimerCallbackId, 8);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("rescheduled timer waits next frame")), Runtime.GetPendingTimerCount(), 1);
+	}
 	return true;
 }
 

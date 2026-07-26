@@ -2,6 +2,7 @@
 
 #include "AvidScriptWasmRuntime.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "Misc/AutomationTest.h"
 
 namespace
@@ -49,21 +50,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptWasmImportBridgeSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmSmokeResult Result;
-	const bool bSucceeded = FAvidScriptWasmRuntime::RunEmbeddedHostImportSmokeTest(Result);
-
-	if (!bSucceeded)
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
-		AddError(Result.ErrorMessage);
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		const bool bSucceeded =
+			Runtime.LoadEmbeddedHostImportModule(Result) && Runtime.BeginPlay(Result);
+		if (!bSucceeded)
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("WASM guest calls deterministic host import")), bSucceeded);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay succeeds after host import")), Result.bBeginPlayCalled);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import call count")), Result.HostImportCallCount, 1);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import input")), Result.LastHostImportInput, 41);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import result")), Result.LastHostImportResult, 42);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host import timing is captured")), Result.Metrics.HostImportCallMs > 0.0);
 	}
-
-	TestTrue(TEXT("WASM guest can call deterministic host import"), bSucceeded);
-	TestTrue(TEXT("BeginPlay export succeeds after host import"), Result.bBeginPlayCalled);
-	TestEqual(TEXT("Host import call count"), Result.HostImportCallCount, 1);
-	TestEqual(TEXT("Host import input"), Result.LastHostImportInput, 41);
-	TestEqual(TEXT("Host import result"), Result.LastHostImportResult, 42);
-	TestTrue(TEXT("Host import timing is captured"), Result.Metrics.HostImportCallMs > 0.0);
-
 	return true;
 }
 
@@ -74,20 +79,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptWasmMissingImportSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmRuntimeInstance Runtime;
-	FAvidScriptWasmSmokeResult Result;
-
-	const bool bLoaded = Runtime.LoadModule(
-		GAvidScriptMissingImportWasmModule,
-		UE_ARRAY_COUNT(GAvidScriptMissingImportWasmModule),
-		TEXT("missing_import"),
-		Result);
-
-	TestFalse(TEXT("Missing host import is reported without crash"), bLoaded);
-	TestEqual(TEXT("Missing import category"), Result.ErrorCategory, FString(TEXT("binding_package_missing")));
-	TestEqual(TEXT("Missing import module"), Result.ImportModuleName, FString(TEXT("avidscript")));
-	TestEqual(TEXT("Missing import name"), Result.ImportName, FString(TEXT("host_missing_i32")));
-	TestTrue(TEXT("Missing import diagnostic names the import"), Result.ErrorMessage.Contains(TEXT("avidscript.host_missing_i32")));
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		const bool bLoaded = Runtime.LoadModule(
+			GAvidScriptMissingImportWasmModule,
+			UE_ARRAY_COUNT(GAvidScriptMissingImportWasmModule),
+			TEXT("missing_import"),
+			Result);
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing host import is reported")), bLoaded);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing import category")), Result.ErrorCategory, FString(TEXT("binding_package_missing")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing import module")), Result.ImportModuleName, FString(TEXT("avidscript")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing import name")), Result.ImportName, FString(TEXT("host_missing_i32")));
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing import diagnostic names the import")),
+			Result.ErrorMessage.Contains(TEXT("avidscript.host_missing_i32")));
+	}
 
 	return true;
 }
@@ -99,17 +108,30 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptWasmFailingImportSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmRuntimeInstance Runtime;
-	FAvidScriptWasmSmokeResult Result;
-
-	TestTrue(
-		TEXT("Failing import module loads"),
-		Runtime.LoadModule(GAvidScriptFailingImportWasmModule, UE_ARRAY_COUNT(GAvidScriptFailingImportWasmModule), TEXT("failing_import"), Result));
-	TestFalse(TEXT("Host-side import failure is reported without crash"), Runtime.BeginPlay(Result));
-	TestEqual(TEXT("Host failure category"), Result.ErrorCategory, FString(TEXT("host_import_failed")));
-	TestEqual(TEXT("Host failure import module"), Result.ImportModuleName, FString(TEXT("avidscript")));
-	TestEqual(TEXT("Host failure import name"), Result.ImportName, FString(TEXT("host_fail_i32")));
-	TestTrue(TEXT("Host failure diagnostic names the import"), Result.ErrorMessage.Contains(TEXT("avidscript.host_fail_i32")));
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("failing import module loads")),
+			Runtime.LoadModule(
+				GAvidScriptFailingImportWasmModule,
+				UE_ARRAY_COUNT(GAvidScriptFailingImportWasmModule),
+				TEXT("failing_import"),
+				Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host-side import failure is reported")), Runtime.BeginPlay(Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure category")), Result.ErrorCategory, FString(TEXT("host_import_failed")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure import module")), Result.ImportModuleName, FString(TEXT("avidscript")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure import name")), Result.ImportName, FString(TEXT("host_fail_i32")));
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("host failure diagnostic names the import")),
+			Result.ErrorMessage.Contains(TEXT("avidscript.host_fail_i32")));
+	}
 
 	return true;
 }

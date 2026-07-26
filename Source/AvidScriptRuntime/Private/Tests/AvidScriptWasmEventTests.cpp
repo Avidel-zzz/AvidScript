@@ -4,6 +4,7 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptWasmRuntime.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "Fixtures/AvidScriptGameplayEventFixture.h"
 
 #include "Components/SceneComponent.h"
@@ -179,22 +180,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptWasmEventSuccessAndLifecycleSmokeTest::RunTest(const FString& Parameters)
 {
 	const TArray<uint8> WasmBytes = BuildEventFixture(false);
-	FAvidScriptWasmRuntimeInstance Runtime;
-	FAvidScriptWasmSmokeResult Result;
-	TestTrue(TEXT("Event fixture loads"), Runtime.LoadModule(WasmBytes.GetData(), WasmBytes.Num(), TEXT("event_success"), Result));
-	TestFalse(TEXT("Event before BeginPlay fails"), Runtime.DispatchEvent(1, 1.0f, Result));
-	TestEqual(TEXT("Pre-BeginPlay event category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
-	TestTrue(TEXT("Event fixture BeginPlay succeeds"), Runtime.BeginPlay(Result));
-	TestTrue(TEXT("Gameplay event callback succeeds"), Runtime.DispatchEvent(7, 25.0f, Result));
-	TestEqual(TEXT("Gameplay event count"), Result.EventCallbackCount, 1);
-	TestEqual(TEXT("Gameplay event id"), Result.LastEventId, 7);
-	TestEqual(TEXT("Gameplay event value"), Result.LastEventValue, 25.0f);
-	TestTrue(TEXT("Gameplay event callback records timing"), Result.Metrics.EventCallbackCallMs > 0.0);
-	TestTrue(TEXT("Optional EndPlay succeeds"), Runtime.EndPlay(Result));
-	TestFalse(TEXT("Event after EndPlay fails"), Runtime.DispatchEvent(8, 1.0f, Result));
-	TestEqual(TEXT("Post-EndPlay event category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
-	Runtime.Unload(Result);
-	TestEqual(TEXT("Unload preserves event count"), Result.EventCallbackCount, 1);
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("event fixture loads")),
+			Runtime.LoadModule(WasmBytes.GetData(), WasmBytes.Num(), TEXT("event_success"), Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("event before BeginPlay fails")), Runtime.DispatchEvent(1, 1.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("pre-BeginPlay event category")), Result.ErrorCategory, FString(TEXT("invalid_state")));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("event fixture BeginPlay succeeds")), Runtime.BeginPlay(Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("gameplay event callback succeeds")), Runtime.DispatchEvent(7, 25.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("gameplay event count")), Result.EventCallbackCount, 1);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("gameplay event id")), Result.LastEventId, 7);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("gameplay event value")), Result.LastEventValue, 25.0f);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("event callback timing")), Result.Metrics.EventCallbackCallMs > 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("optional EndPlay succeeds")), Runtime.EndPlay(Result));
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("event after EndPlay fails")), Runtime.DispatchEvent(8, 1.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("post-EndPlay event category")), Result.ErrorCategory, FString(TEXT("invalid_state")));
+		Runtime.Unload(Result);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("unload preserves event count")), Result.EventCallbackCount, 1);
+	}
 	return true;
 }
 

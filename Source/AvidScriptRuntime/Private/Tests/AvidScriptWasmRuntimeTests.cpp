@@ -5,6 +5,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Misc/EngineVersion.h"
@@ -531,101 +532,109 @@ bool FAvidScriptTypedOwnerImportsTest::RunTest(const FString& Parameters)
 	}
 	HostContext.ObjectRegistry = &Registry;
 	HostContext.OwnerHandle = OwnerHandle;
-	Runtime.SetHostContext(HostContext);
 
 	const TArray<uint8> TypedObjectRouteModule = MakeTypedObjectRouteWasmModule();
-	FAvidScriptWasmSmokeResult RouteLoadResult;
-	if (!TestTrue(TEXT("Typed owner and object-type imports instantiate through WAMR"), Runtime.LoadModule(
-		TypedObjectRouteModule.GetData(),
-		TypedObjectRouteModule.Num(),
-		TEXT("typed_owner_object_route"),
-		PublishedPackage,
-		RouteLoadResult)))
-	{
-		AddError(RouteLoadResult.ErrorMessage);
-		return false;
-	}
-	TestTrue(TEXT("Typed owner and object-type route module is instantiated"),
-		RouteLoadResult.bModuleInstantiated);
-
-	FAvidScriptWasmSmokeResult RouteBeginPlayResult;
-	if (!TestTrue(TEXT("WAMR executes typed owner and object-type package routes"),
-		Runtime.BeginPlay(RouteBeginPlayResult)))
-	{
-		AddError(RouteBeginPlayResult.ErrorMessage);
-		return false;
-	}
-	TArray<uint8> RouteState;
-	RouteState.SetNumZeroed(16);
-	FString StateReadError;
-	if (!TestTrue(TEXT("WAMR route writes its observable state"),
-		Runtime.ReadStateBytes(0, MakeArrayView(RouteState), StateReadError)))
-	{
-		AddError(StateReadError);
-		return false;
-	}
-	int32 ObjectMatch = 0;
-	int32 ObjectMismatch = 0;
-	uint64 PackedOwnerHandle = 0;
-	FMemory::Memcpy(&ObjectMatch, RouteState.GetData(), sizeof(ObjectMatch));
-	FMemory::Memcpy(&ObjectMismatch, RouteState.GetData() + 4, sizeof(ObjectMismatch));
-	FMemory::Memcpy(&PackedOwnerHandle, RouteState.GetData() + 8, sizeof(PackedOwnerHandle));
-	TestEqual(TEXT("Package dispatcher returns one for the UObject type match"), ObjectMatch, 1);
-	TestEqual(TEXT("Package dispatcher returns zero for the Actor type mismatch"), ObjectMismatch, 0);
-	TestEqual(TEXT("WAMR bridge returns the full packed 64-bit owner handle"),
-		PackedOwnerHandle, OwnerHandle.ToUInt64());
-	TestEqual(TEXT("WAMR route enters one canonical host import and two package dispatches"),
-		RouteBeginPlayResult.HostImportCallCount, 3);
-	TestEqual(TEXT("Last routed call records the package object-type ordinal"),
-		RouteBeginPlayResult.LastHostImportInput, static_cast<int32>(ObjectTypeImport.Ordinal));
-	TestEqual(TEXT("Last package dispatch records the mismatch result"),
-		RouteBeginPlayResult.LastHostImportResult, 0);
-	Runtime.Unload();
-
 	const TArray<uint8> WrongObjectTypeSignatureModule = MakeObjectTypeWrongSignatureWasmModule();
-	FAvidScriptWasmSmokeResult WrongObjectTypeSignatureResult;
-	TestFalse(TEXT("Object-type import rejects a wrong signature during load"), Runtime.LoadModule(
-		WrongObjectTypeSignatureModule.GetData(),
-		WrongObjectTypeSignatureModule.Num(),
-		TEXT("object_type_wrong_signature"),
-		PublishedPackage,
-		WrongObjectTypeSignatureResult));
-	TestFalse(TEXT("Wrong object-type signature fails before module instantiation"),
-		WrongObjectTypeSignatureResult.bModuleInstantiated);
-
 	const TArray<uint8> EnvLegacyOwnerModule = MakeEnvLegacyOwnerWasmModule();
-	FAvidScriptWasmSmokeResult LegacyLoadResult;
-	if (!TestTrue(TEXT("Legacy env owner slot and generation imports remain compatible"), Runtime.LoadModule(
-		EnvLegacyOwnerModule.GetData(),
-		EnvLegacyOwnerModule.Num(),
-		TEXT("env_legacy_owner_imports"),
-		LegacyLoadResult)))
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
-		AddError(LegacyLoadResult.ErrorMessage);
-		return false;
+		FAvidScriptWasmRuntimeInstance LaneRuntime(Lane.Selection);
+		LaneRuntime.SetHostContext(HostContext);
+		FAvidScriptWasmSmokeResult RouteLoadResult;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("typed owner and object-type imports instantiate")),
+			LaneRuntime.LoadModule(
+				TypedObjectRouteModule.GetData(),
+				TypedObjectRouteModule.Num(),
+				TEXT("typed_owner_object_route"),
+				PublishedPackage,
+				RouteLoadResult)))
+		{
+			AddError(RouteLoadResult.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, RouteLoadResult);
+
+		FAvidScriptWasmSmokeResult RouteBeginPlayResult;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("typed owner and object-type package routes execute")),
+			LaneRuntime.BeginPlay(RouteBeginPlayResult)))
+		{
+			AddError(RouteBeginPlayResult.ErrorMessage);
+			continue;
+		}
+		TArray<uint8> RouteState;
+		RouteState.SetNumZeroed(16);
+		FString StateReadError;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("route writes observable guest state")),
+			LaneRuntime.ReadStateBytes(0, MakeArrayView(RouteState), StateReadError)))
+		{
+			AddError(StateReadError);
+			continue;
+		}
+		int32 ObjectMatch = 0;
+		int32 ObjectMismatch = 0;
+		uint64 PackedOwnerHandle = 0;
+		FMemory::Memcpy(&ObjectMatch, RouteState.GetData(), sizeof(ObjectMatch));
+		FMemory::Memcpy(&ObjectMismatch, RouteState.GetData() + 4, sizeof(ObjectMismatch));
+		FMemory::Memcpy(&PackedOwnerHandle, RouteState.GetData() + 8, sizeof(PackedOwnerHandle));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("UObject type match")), ObjectMatch, 1);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Actor type mismatch")), ObjectMismatch, 0);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("packed owner handle")), PackedOwnerHandle, OwnerHandle.ToUInt64());
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("static plus dynamic host call count")), RouteBeginPlayResult.HostImportCallCount, 3);
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("last dynamic binding ordinal")),
+			RouteBeginPlayResult.LastHostImportInput,
+			static_cast<int32>(ObjectTypeImport.Ordinal));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("last dynamic result")), RouteBeginPlayResult.LastHostImportResult, 0);
+		LaneRuntime.Unload();
+
+		FAvidScriptWasmSmokeResult WrongObjectTypeSignatureResult;
+		TestFalse(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("wrong dynamic signature is rejected")),
+			LaneRuntime.LoadModule(
+				WrongObjectTypeSignatureModule.GetData(),
+				WrongObjectTypeSignatureModule.Num(),
+				TEXT("object_type_wrong_signature"),
+				PublishedPackage,
+				WrongObjectTypeSignatureResult));
+		TestFalse(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("wrong signature never instantiates")),
+			WrongObjectTypeSignatureResult.bModuleInstantiated);
+
+		FAvidScriptWasmSmokeResult LegacyLoadResult;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("legacy env owner imports remain compatible")),
+			LaneRuntime.LoadModule(
+				EnvLegacyOwnerModule.GetData(),
+				EnvLegacyOwnerModule.Num(),
+				TEXT("env_legacy_owner_imports"),
+				LegacyLoadResult)))
+		{
+			AddError(LegacyLoadResult.ErrorMessage);
+			continue;
+		}
+		FAvidScriptWasmSmokeResult LegacyBeginPlayResult;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("legacy env owner imports execute")),
+			LaneRuntime.BeginPlay(LegacyBeginPlayResult));
+		TArray<uint8> LegacyState;
+		LegacyState.SetNumZeroed(8);
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("legacy owner imports write guest state")),
+			LaneRuntime.ReadStateBytes(0, MakeArrayView(LegacyState), StateReadError)))
+		{
+			AddError(StateReadError);
+			continue;
+		}
+		uint32 LegacySlot = 0;
+		uint32 LegacyGeneration = 0;
+		FMemory::Memcpy(&LegacySlot, LegacyState.GetData(), sizeof(LegacySlot));
+		FMemory::Memcpy(&LegacyGeneration, LegacyState.GetData() + 4, sizeof(LegacyGeneration));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("legacy owner slot")), LegacySlot, OwnerHandle.Slot);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("legacy owner generation")), LegacyGeneration, OwnerHandle.Generation);
 	}
-	FAvidScriptWasmSmokeResult LegacyBeginPlayResult;
-	if (!TestTrue(TEXT("Legacy env owner imports execute through WAMR"),
-		Runtime.BeginPlay(LegacyBeginPlayResult)))
-	{
-		AddError(LegacyBeginPlayResult.ErrorMessage);
-		return false;
-	}
-	TArray<uint8> LegacyState;
-	LegacyState.SetNumZeroed(8);
-	if (!TestTrue(TEXT("Legacy env owner imports write observable state"),
-		Runtime.ReadStateBytes(0, MakeArrayView(LegacyState), StateReadError)))
-	{
-		AddError(StateReadError);
-		return false;
-	}
-	uint32 LegacySlot = 0;
-	uint32 LegacyGeneration = 0;
-	FMemory::Memcpy(&LegacySlot, LegacyState.GetData(), sizeof(LegacySlot));
-	FMemory::Memcpy(&LegacyGeneration, LegacyState.GetData() + 4, sizeof(LegacyGeneration));
-	TestEqual(TEXT("Legacy env owner slot remains compatible"), LegacySlot, OwnerHandle.Slot);
-	TestEqual(TEXT("Legacy env owner generation remains compatible"),
-		LegacyGeneration, OwnerHandle.Generation);
 	return true;
 }
 
@@ -739,28 +748,36 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptPackagedTimingSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmRuntimeInstance Runtime;
-	FAvidScriptWasmSmokeResult Result;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult Result;
 
-	TestTrue(TEXT("Embedded module loads"), Runtime.LoadEmbeddedSmokeModule(Result));
-	TestTrue(TEXT("Runtime init timing is captured"), Result.Metrics.RuntimeInitMs >= 0.0);
-	TestTrue(TEXT("Module load timing is captured"), Result.Metrics.ModuleLoadMs > 0.0);
-	TestTrue(TEXT("Module instantiate timing is captured"), Result.Metrics.ModuleInstantiateMs > 0.0);
-	TestTrue(TEXT("Exec env creation timing is captured"), Result.Metrics.ExecEnvCreateMs >= 0.0);
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("embedded module loads")),
+			Runtime.LoadEmbeddedSmokeModule(Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("runtime init timing is captured")), Result.Metrics.RuntimeInitMs >= 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("module load timing is captured")), Result.Metrics.ModuleLoadMs > 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("module instantiate timing is captured")), Result.Metrics.ModuleInstantiateMs > 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("exec env creation timing is captured")), Result.Metrics.ExecEnvCreateMs >= 0.0);
 
-	TestTrue(TEXT("BeginPlay export succeeds"), Runtime.BeginPlay(Result));
-	TestTrue(TEXT("BeginPlay timing is captured"), Result.Metrics.BeginPlayCallMs >= 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay export succeeds")), Runtime.BeginPlay(Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay timing is captured")), Result.Metrics.BeginPlayCallMs >= 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick export succeeds")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick timing is captured")), Result.Metrics.TickCallMs >= 0.0);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing optional EndPlay is a no-op")), Runtime.EndPlay(Result));
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing EndPlay is not marked called")), Result.bEndPlayCalled);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing EndPlay has zero call time")), Result.Metrics.EndPlayCallMs, 0.0);
 
-	TestTrue(TEXT("Tick export succeeds"), Runtime.Tick(1.0f / 60.0f, Result));
-	TestTrue(TEXT("Tick timing is captured"), Result.Metrics.TickCallMs >= 0.0);
-
-	TestTrue(TEXT("Missing optional EndPlay export is a successful no-op"), Runtime.EndPlay(Result));
-	TestFalse(TEXT("Missing optional EndPlay export is not marked called"), Result.bEndPlayCalled);
-	TestEqual(TEXT("Missing optional EndPlay export has zero call time"), Result.Metrics.EndPlayCallMs, 0.0);
-
-	Runtime.Unload(Result);
-	TestTrue(TEXT("Unload reports completed state"), Result.bUnloaded);
-	TestTrue(TEXT("Unload timing is captured"), Result.Metrics.UnloadMs >= 0.0);
+		Runtime.Unload(Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("unload reports completed state")), Result.bUnloaded);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("unload timing is captured")), Result.Metrics.UnloadMs >= 0.0);
+	}
 
 	return true;
 }
@@ -797,30 +814,29 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptWasmErrorSmokeTest::RunTest(const FString& Parameters)
 {
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
 	{
-		FAvidScriptWasmRuntimeInstance Runtime;
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
 		FAvidScriptWasmSmokeResult Result;
 
 		TestTrue(
-			TEXT("Module missing tick export still loads"),
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("module missing tick export still loads")),
 			Runtime.LoadModule(GAvidScriptMissingTickWasmModule, UE_ARRAY_COUNT(GAvidScriptMissingTickWasmModule), TEXT("missing_tick"), Result));
-		TestTrue(TEXT("BeginPlay still succeeds"), Runtime.BeginPlay(Result));
-		TestFalse(TEXT("Missing Tick export is reported without crash"), Runtime.Tick(1.0f / 60.0f, Result));
-		TestEqual(TEXT("Missing export category"), Result.ErrorCategory, FString(TEXT("missing_export")));
-		TestEqual(TEXT("Missing export name"), Result.ExportName, FString(TEXT("avid_on_tick")));
-	}
-
-	{
-		FAvidScriptWasmRuntimeInstance Runtime;
-		FAvidScriptWasmSmokeResult Result;
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay still succeeds")), Runtime.BeginPlay(Result));
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing Tick export is reported")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export category")), Result.ErrorCategory, FString(TEXT("missing_export")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
 
 		TestTrue(
-			TEXT("Trap module loads"),
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap module loads")),
 			Runtime.LoadModule(GAvidScriptTrapTickWasmModule, UE_ARRAY_COUNT(GAvidScriptTrapTickWasmModule), TEXT("trap_tick"), Result));
-		TestTrue(TEXT("BeginPlay succeeds before trap"), Runtime.BeginPlay(Result));
-		TestFalse(TEXT("Tick trap is reported without crash"), Runtime.Tick(1.0f / 60.0f, Result));
-		TestEqual(TEXT("Trap category"), Result.ErrorCategory, FString(TEXT("trap")));
-		TestEqual(TEXT("Trap export name"), Result.ExportName, FString(TEXT("avid_on_tick")));
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay succeeds before trap")), Runtime.BeginPlay(Result));
+		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick trap is reported")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap category")), Result.ErrorCategory, FString(TEXT("trap")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap preserves stack frames")), !Result.DiagnosticFrames.IsEmpty());
 	}
 
 	return true;

@@ -2,6 +2,7 @@
 
 #include "AvidScriptWasmReload.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 
@@ -434,38 +435,44 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptReloadCompatibleSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmReloadSession Session;
-	FAvidScriptWasmReloadResult Result;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmReloadSession Session;
+		Session.SetBackendSelectionForTesting(Lane.Selection);
+		FAvidScriptWasmReloadResult Result;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("initial module loads")),
+			Session.LoadInitialModule(
+				GAvidScriptReloadCompatibleWasmModule,
+				UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+				FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v1")),
+				Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("initial live module id")), Session.GetLiveModuleId(), FString(TEXT("reload_v1")));
 
-	TestTrue(
-		TEXT("Initial module loads"),
-		Session.LoadInitialModule(
-			GAvidScriptReloadCompatibleWasmModule,
-			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
-			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v1")),
-			Result));
-	TestEqual(TEXT("Initial live module id"), Session.GetLiveModuleId(), FString(TEXT("reload_v1")));
-
-	FAvidScriptWasmSmokeResult TickResult;
-	TestTrue(TEXT("Initial live runtime ticks"), Session.TickLive(1.0f / 60.0f, TickResult));
-	TestEqual(TEXT("Initial live tick count"), Session.GetLiveTickCallCount(), 1);
-
-	TestTrue(
-		TEXT("Compatible reload applies"),
-		Session.ReloadModule(
-			GAvidScriptReloadCompatibleWasmModule,
-			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
-			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v2")),
-			Result));
-
-	TestTrue(TEXT("Reload result reports applied"), Result.bReloadApplied);
-	TestEqual(TEXT("Reload result previous module"), Result.PreviousModuleId, FString(TEXT("reload_v1")));
-	TestEqual(TEXT("Reload result active module"), Result.ActiveModuleId, FString(TEXT("reload_v2")));
-	TestEqual(TEXT("Live module id switches"), Session.GetLiveModuleId(), FString(TEXT("reload_v2")));
-	TestEqual(TEXT("Successful reload count"), Session.GetSuccessfulReloadCount(), 1);
-
-	TestTrue(TEXT("Reloaded live runtime ticks"), Session.TickLive(1.0f / 60.0f, TickResult));
-	TestEqual(TEXT("Reloaded live tick count starts fresh"), Session.GetLiveTickCallCount(), 1);
+		FAvidScriptWasmSmokeResult TickResult;
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("initial live runtime ticks")), Session.TickLive(1.0f / 60.0f, TickResult));
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("initial live tick count")), Session.GetLiveTickCallCount(), 1);
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("compatible reload applies")),
+			Session.ReloadModule(
+				GAvidScriptReloadCompatibleWasmModule,
+				UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+				FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v2")),
+				Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("reload result reports applied")), Result.bReloadApplied);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("reload previous module")), Result.PreviousModuleId, FString(TEXT("reload_v1")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("reload active module")), Result.ActiveModuleId, FString(TEXT("reload_v2")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("live module id switches")), Session.GetLiveModuleId(), FString(TEXT("reload_v2")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("successful reload count")), Session.GetSuccessfulReloadCount(), 1);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("reloaded live runtime ticks")), Session.TickLive(1.0f / 60.0f, TickResult));
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("reloaded tick count starts fresh")), Session.GetLiveTickCallCount(), 1);
+	}
 
 	return true;
 }
@@ -477,36 +484,42 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptReloadMissingExportRollbackSmokeTest::RunTest(const FString& Parameters)
 {
-	FAvidScriptWasmReloadSession Session;
-	FAvidScriptWasmReloadResult Result;
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmReloadSession Session;
+		Session.SetBackendSelectionForTesting(Lane.Selection);
+		FAvidScriptWasmReloadResult Result;
+		if (!TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("rollback seed module loads")),
+			Session.LoadInitialModule(
+				GAvidScriptReloadCompatibleWasmModule,
+				UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
+				FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v1")),
+				Result)))
+		{
+			AddError(Result.ErrorMessage);
+			continue;
+		}
 
-	TestTrue(
-		TEXT("Initial module loads"),
-		Session.LoadInitialModule(
-			GAvidScriptReloadCompatibleWasmModule,
-			UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule),
-			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_v1")),
-			Result));
-
-	FAvidScriptWasmSmokeResult TickResult;
-	TestTrue(TEXT("Initial live runtime ticks"), Session.TickLive(1.0f / 60.0f, TickResult));
-
-	TestFalse(
-		TEXT("Reload with missing tick export is rejected"),
-		Session.ReloadModule(
-			GAvidScriptReloadMissingTickWasmModule,
-			UE_ARRAY_COUNT(GAvidScriptReloadMissingTickWasmModule),
-			FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_missing_tick")),
-			Result));
-
-	TestTrue(TEXT("Rollback preserved live runtime"), Result.bRollbackPreservedLiveRuntime);
-	TestEqual(TEXT("Missing export category"), Result.ErrorCategory, FString(TEXT("missing_export")));
-	TestEqual(TEXT("Missing export name"), Result.ExportName, FString(TEXT("avid_on_tick")));
-	TestEqual(TEXT("Live module id stays on previous runtime"), Session.GetLiveModuleId(), FString(TEXT("reload_v1")));
-	TestEqual(TEXT("Rejected reload count"), Session.GetRejectedReloadCount(), 1);
-
-	TestTrue(TEXT("Previous live runtime still ticks"), Session.TickLive(1.0f / 60.0f, TickResult));
-	TestEqual(TEXT("Previous live tick count continues"), Session.GetLiveTickCallCount(), 2);
+		FAvidScriptWasmSmokeResult TickResult;
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("rollback seed runtime ticks")), Session.TickLive(1.0f / 60.0f, TickResult));
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		TestFalse(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing-export reload is rejected")),
+			Session.ReloadModule(
+				GAvidScriptReloadMissingTickWasmModule,
+				UE_ARRAY_COUNT(GAvidScriptReloadMissingTickWasmModule),
+				FAvidScriptWasmReloadManifest::MakeSmoke(TEXT("reload_missing_tick")),
+				Result));
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("rollback preserves live runtime")), Result.bRollbackPreservedLiveRuntime);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export category")), Result.ErrorCategory, FString(TEXT("missing_export")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("live module remains previous")), Session.GetLiveModuleId(), FString(TEXT("reload_v1")));
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("rejected reload count")), Session.GetRejectedReloadCount(), 1);
+		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("previous live runtime still ticks")), Session.TickLive(1.0f / 60.0f, TickResult));
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("previous live tick count continues")), Session.GetLiveTickCallCount(), 2);
+	}
 
 	return true;
 }

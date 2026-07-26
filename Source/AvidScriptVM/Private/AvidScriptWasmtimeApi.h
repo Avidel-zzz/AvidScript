@@ -86,12 +86,13 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	const char* export_name,
 	size_t export_name_size,
 	AvidScriptWasmtimeFunction** out_function,
-	uint32_t* out_parameter_count);
+	uint32_t* out_cell_count);
 void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function);
 AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
-	const float* optional_delta_seconds);
+	const uint32_t* cells,
+	size_t cell_count);
 
 bool avidscript_wasmtime_memory_data(
 	AvidScriptWasmtimeStore* store,

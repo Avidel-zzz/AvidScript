@@ -6,6 +6,7 @@
 #include "AvidScriptWasmReload.h"
 #include "AvidScriptWasmRuntime.h"
 
+#include "AvidScriptRuntimeBackendTestLanes.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -642,6 +643,9 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# source adapter manifest requires set-once Timer import"), bRequiresTimerSetOnce);
 	TestFalse(TEXT("C# source adapter manifest omits unreachable Timer cancel import"), bRequiresTimerCancel);
 
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : GetAvidScriptRuntimeBackendTestLanes())
+	{
+	AddInfo(AvidScriptRuntimeLaneLabel(Lane, TEXT("running shared C# source adapter lifecycle oracle")));
 	UWorld* World = nullptr;
 	if (!CreateCSharpContractWorld(World))
 	{
@@ -685,6 +689,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	HostContext.OwnerHandle = ActorHandle;
 
 	FAvidScriptWasmReloadSession Session;
+	Session.SetBackendSelectionForTesting(Lane.Selection);
 	Session.SetHostContext(HostContext);
 
 	FAvidScriptWasmReloadResult ReloadResult;
@@ -715,6 +720,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		DestroyCSharpContractWorld(World);
 		return true;
 	}
+	TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
 
 	TestTrue(TEXT("C# first Tick source applies stateful elapsed expression"), Actor->GetActorLocation().Equals(FVector(102.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# first Tick source rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
@@ -924,6 +930,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# EndPlay source calls export"), EndPlayResult.bEndPlayCalled);
 
 	DestroyCSharpContractWorld(World);
+	}
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

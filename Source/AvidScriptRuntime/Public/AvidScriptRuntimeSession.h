@@ -75,6 +75,11 @@ public:
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }
 #if WITH_DEV_AUTOMATION_TESTS
 	FAvidScriptWasmRuntimeInstance* GetLiveRuntimeForTesting() const { return LiveRuntime.Get(); }
+	void SetBackendSelectionForTesting(const FAvidScriptVmBackendSelection& InBackendSelection)
+	{
+		check(!LiveRuntime);
+		BackendSelection = InBackendSelection;
+	}
 	void SetCandidateBeginPlayObserverForTesting(TFunction<void()> InObserver)
 	{
 		CandidateBeginPlayObserverForTesting =
@@ -122,6 +127,7 @@ private:
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;
 	FAvidScriptWasmReloadManifest LiveManifest;
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptVmBackendSelection BackendSelection;
 	int32 SuccessfulReloadCount = 0;
 	int32 RejectedReloadCount = 0;
 	int32 ActiveGuestCallDepth = 0;
