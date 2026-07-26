@@ -33,6 +33,8 @@ pwsh -NoProfile -File .\Benchmarks\PuertsComparison\Scripts\Install-PuertsBenchm
 
 正式同机 warm baseline 已于 2026-07-26 完成：5 个独立进程、每进程 5 次 warmup 与 30 次正式 sample，共 6,000 条正确样本。当前 WAMR interpreter 路径尚未快于 Puerts；十项 workload 的 AvidScript/Puerts Reflection P50 比率几何平均为 6.99x。
 
-完整环境、分项结果、校准修正和 P53.4 优化方向见 [P53.3 Puerts 同机 Warm Baseline 报告](../../Docs/Phase53/P53.3_Puerts_Warm_Baseline_Report.md)。
+完整环境、分项结果和校准修正见 [P53.3 Puerts 同机 Warm Baseline 报告](../../Docs/Phase53/P53.3_Puerts_Warm_Baseline_Report.md)。
+
+P53.4 已完成首项通用热路径优化：取消成功 handle resolve 中无人消费的 UObject path materialization。正式复测中，涉及 UObject target resolve 的 workload 提升 20.2% 到 34.9%，`vector_value` 相对 Puerts Reflection 达到 `0.92x`。优化前后、被拒绝候选与剩余执行层差距见 [P53.4 通用热路径优化报告](../../Docs/Phase53/P53.4_Generic_Hot_Path_Optimization_Report.md)。
 
 只有正确性、版本、采样和 provenance 合同全部通过的 workload 才能进入正式报告。Cold 启动与稳定内存将单独报告，不与 warm 排名混合。
