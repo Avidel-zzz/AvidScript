@@ -83,6 +83,19 @@ Assert-True ($RunnerSource.Contains('timed mode requires an exact iteration_coun
     'timed mode must reject missing or incomplete frozen iteration counts'
 Assert-True ($RunnerSource.Contains('if (Request.Mode != EAvidScriptPerfBenchmarkMode::Timed)')) `
     'explicit timed mode must not enter calibration'
+Assert-True ($RunnerSource.Contains('constexpr int32 PerfRunnerResultSchemaVersion = 1;')) `
+    'warm core must pin the emitted result payload to schema v1'
+$ExactVersionPattern = 'TEXT\("version"\),\s*PerfRunnerResultSchemaVersion,\s*PerfRunnerResultSchemaVersion,'
+Assert-True ([regex]::IsMatch($RunnerSource, $ExactVersionPattern)) `
+    'result_schema.version parser must accept exactly v1'
+$SerializedVersionPattern = 'TEXT\("schema_version"\),\s*PerfRunnerResultSchemaVersion\)'
+Assert-True ([regex]::IsMatch($RunnerSource, $SerializedVersionPattern)) `
+    'result serialization must always label the payload as v1'
+Assert-True ($RunnerSource.Contains('request result_schema.sha256 must equal provenance result_schema_sha256')) `
+    'warm core must reject mixed result schema provenance'
+$HashEqualityPattern = 'ResultSchemaSha256\.Equals\(\s*ProvenanceResultSchemaSha256,\s*ESearchCase::CaseSensitive\)'
+Assert-True ([regex]::IsMatch($RunnerSource, $HashEqualityPattern)) `
+    'result schema hash equality must be case-sensitive'
 Assert-True ($RunnerSource.Contains('WarmupSamples')) `
     'warm core must execute the exact requested warmup count'
 Assert-True ($RunnerSource.Contains('TimedSamples')) `

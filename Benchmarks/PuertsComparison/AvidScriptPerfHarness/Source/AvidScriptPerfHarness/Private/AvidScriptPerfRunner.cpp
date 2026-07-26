@@ -29,6 +29,7 @@ namespace
 	constexpr uint32 PerfRunnerExactSeedMask = 0x007fffffu;
 	constexpr int32 PerfRunnerWorkloadShift = 24;
 	constexpr int32 PerfRunnerIterationMask = 0x00ffffff;
+	constexpr int32 PerfRunnerResultSchemaVersion = 1;
 
 	uint32 PerfRunnerMix(const uint32 Value)
 	{
@@ -509,7 +510,6 @@ namespace
 		double MinimumSampleMilliseconds = 0.0;
 		int32 MinimumIterations = 0;
 		int32 MaximumIterations = 0;
-		int32 ResultSchemaVersion = 0;
 		TSharedPtr<FJsonObject> Provenance;
 		TArray<int32> FrozenIterationCounts;
 		FString TemporaryResultPath;
@@ -984,21 +984,30 @@ namespace
 		const TSharedPtr<FJsonObject>* ResultSchema = nullptr;
 		if (!Root->TryGetObjectField(TEXT("result_schema"), ResultSchema) ||
 			ResultSchema == nullptr ||
-			!TryGetRequiredInteger(
+			!ResultSchema->IsValid())
+		{
+			OutError = TEXT("request result_schema must be an object");
+			return false;
+		}
+		if (!TryGetRequiredInteger(
 				*ResultSchema,
 				TEXT("version"),
-				1,
-				MAX_int32,
+				PerfRunnerResultSchemaVersion,
+				PerfRunnerResultSchemaVersion,
 				IntegerValue,
 				OutError))
 		{
-			if (OutError.IsEmpty())
-			{
-				OutError = TEXT("request result_schema must be an object");
-			}
 			return false;
 		}
-		OutRequest.ResultSchemaVersion = static_cast<int32>(IntegerValue);
+		FString ResultSchemaSha256;
+		if (!TryGetRequiredString(
+				*ResultSchema,
+				TEXT("sha256"),
+				ResultSchemaSha256,
+				OutError))
+		{
+			return false;
+		}
 
 		const TSharedPtr<FJsonObject>* Provenance = nullptr;
 		if (!Root->TryGetObjectField(TEXT("provenance"), Provenance) ||
@@ -1009,6 +1018,23 @@ namespace
 			return false;
 		}
 		OutRequest.Provenance = *Provenance;
+		FString ProvenanceResultSchemaSha256;
+		if (!TryGetRequiredString(
+				OutRequest.Provenance,
+				TEXT("result_schema_sha256"),
+				ProvenanceResultSchemaSha256,
+				OutError))
+		{
+			return false;
+		}
+		if (!ResultSchemaSha256.Equals(
+				ProvenanceResultSchemaSha256,
+				ESearchCase::CaseSensitive))
+		{
+			OutError =
+				TEXT("request result_schema.sha256 must equal provenance result_schema_sha256");
+			return false;
+		}
 
 		FString RequestedResultPath;
 		if (!TryGetRequiredString(
@@ -1578,7 +1604,7 @@ namespace
 		SetExactIntegerField(
 			Root,
 			TEXT("schema_version"),
-			Request.ResultSchemaVersion);
+			PerfRunnerResultSchemaVersion);
 		SetExactUnsignedField(
 			Root,
 			TEXT("timer_frequency_hz"),
