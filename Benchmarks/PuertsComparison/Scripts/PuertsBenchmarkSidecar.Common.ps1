@@ -323,6 +323,7 @@ function Test-SidecarCalibrationResult {
     Test-SidecarProvenance -Actual $Result.provenance -Expected $ExpectedProvenance -Label 'calibration'
 
     $ExpectedWorkloads = @($Profile.workloads | ForEach-Object { [string]$_ })
+    $ExpectedLanes = @($Profile.lanes | ForEach-Object { [string]$_ })
     $ActualWorkloads = @($Result.iteration_counts.PSObject.Properties.Name | ForEach-Object { [string]$_ })
     if ($ActualWorkloads.Count -ne $ExpectedWorkloads.Count) {
         throw "ASP53S2042 calibration iteration map 数量不完整：actual=$($ActualWorkloads.Count) expected=$($ExpectedWorkloads.Count)"
@@ -331,10 +332,20 @@ function Test-SidecarCalibrationResult {
         if ($ActualWorkloads -cnotcontains $Workload) {
             throw "ASP53S2042 calibration iteration map 缺少 workload：$Workload"
         }
-        $Iterations = [int64]$Result.iteration_counts.$Workload
-        if ($Iterations -lt [int64]$Profile.minimum_iterations -or
-            $Iterations -gt [int64]$Profile.maximum_iterations) {
-            throw "ASP53S2043 calibration iterations 越界：workload=$Workload iterations=$Iterations"
+        $LaneCounts = $Result.iteration_counts.$Workload
+        $ActualLanes = @($LaneCounts.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+        if ($ActualLanes.Count -ne $ExpectedLanes.Count) {
+            throw "ASP53S2042 calibration lane iteration map 数量不完整：workload=$Workload"
+        }
+        foreach ($Lane in $ExpectedLanes) {
+            if ($ActualLanes -cnotcontains $Lane) {
+                throw "ASP53S2042 calibration iteration map 缺少 lane：workload=$Workload lane=$Lane"
+            }
+            $Iterations = [int64]$LaneCounts.$Lane
+            if ($Iterations -lt [int64]$Profile.minimum_iterations -or
+                $Iterations -gt [int64]$Profile.maximum_iterations) {
+                throw "ASP53S2043 calibration iterations 越界：workload=$Workload lane=$Lane iterations=$Iterations"
+            }
         }
     }
 
@@ -438,7 +449,7 @@ function Test-SidecarProcessResult {
         if ([int64]$Sample.host_import_call_count -ne [int64]$Sample.expected_host_import_call_count) {
             throw "ASP53S2039 host_import_call_count 未达到 expected 值：process=$ExpectedProcessRun lane=$Lane workload=$Workload sample=$SampleIndex"
         }
-        $CalibratedIterations = [int64]$Manifest.calibration.iteration_counts.$Workload
+        $CalibratedIterations = [int64]$Manifest.calibration.iteration_counts.$Workload.$Lane
         if ([int64]$Sample.iterations -ne $CalibratedIterations) {
             throw "ASP53S2044 timed sample 未使用固定 calibration iterations：process=$ExpectedProcessRun lane=$Lane workload=$Workload actual=$($Sample.iterations) expected=$CalibratedIterations"
         }
@@ -452,28 +463,10 @@ function Test-SidecarProcessResult {
 
     foreach ($Workload in $ExpectedWorkloads) {
         for ($SampleIndex = 0; $SampleIndex -lt $TimedSamples; ++$SampleIndex) {
-            $ReferenceIterations = $null
-            $ReferenceChecksum = $null
-            $ReferenceFinalScalar = $null
-            $ReferenceOperationCallCount = $null
             foreach ($Lane in $ExpectedLanes) {
                 $Key = "$Workload|$SampleIndex|$Lane"
                 if (-not $SamplesByKey.ContainsKey($Key)) {
                     throw "ASP53S2011 raw result 缺少样本：process=$ExpectedProcessRun key=$Key"
-                }
-
-                $Sample = $SamplesByKey[$Key]
-                if ($null -eq $ReferenceIterations) {
-                    $ReferenceIterations = [int64]$Sample.iterations
-                    $ReferenceChecksum = [int64]$Sample.checksum
-                    $ReferenceFinalScalar = [double]$Sample.final_scalar
-                    $ReferenceOperationCallCount = [int64]$Sample.operation_call_count
-                }
-                elseif ([int64]$Sample.iterations -ne $ReferenceIterations -or
-                    [int64]$Sample.checksum -ne $ReferenceChecksum -or
-                    [double]$Sample.final_scalar -ne $ReferenceFinalScalar -or
-                    [int64]$Sample.operation_call_count -ne $ReferenceOperationCallCount) {
-                    throw "ASP53S2012 lane 公平性失败：process=$ExpectedProcessRun workload=$Workload sample=$SampleIndex"
                 }
             }
         }

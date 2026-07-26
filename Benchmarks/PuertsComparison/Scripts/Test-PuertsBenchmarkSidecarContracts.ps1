@@ -221,7 +221,12 @@ $Result = $null
 if ([string]$Request.mode -ceq 'calibration') {
     $IterationCounts = [ordered]@{}
     for ($WorkloadIndex = 0; $WorkloadIndex -lt $Request.workloads.Count; ++$WorkloadIndex) {
-        $IterationCounts[[string]$Request.workloads[$WorkloadIndex]] = [int64](100 * ($WorkloadIndex + 1))
+        $LaneCounts = [ordered]@{}
+        for ($LaneIndex = 0; $LaneIndex -lt $Request.lanes.Count; ++$LaneIndex) {
+            $LaneCounts[[string]$Request.lanes[$LaneIndex]] = [int64](
+                100 * ($WorkloadIndex + 1) * ($LaneIndex + 1))
+        }
+        $IterationCounts[[string]$Request.workloads[$WorkloadIndex]] = $LaneCounts
     }
     $Result = [ordered]@{
         schema_version = [int]$Request.result_schema.version
@@ -279,8 +284,9 @@ elseif ([string]$Request.mode -ceq 'timed') {
             for ($LanePosition = 0; $LanePosition -lt $WilliamsOrder.Count; ++$LanePosition) {
                 $Lane = [string]$WilliamsOrder[$LanePosition]
                 $LaneIndex = [Array]::IndexOf([object[]]@($Request.lanes), $Lane)
-                $Iterations = [int64]$Request.iteration_counts.$Workload
+                $Iterations = [int64]$Request.iteration_counts.$Workload.$Lane
                 $CyclesPerOperation = 1 + $SampleIndex + ($LaneIndex * 100) + ($WorkloadIndex * 1000)
+                $LaneChecksum = $Checksum + $LaneIndex
                 $Samples.Add([ordered]@{
                     process_run = [int]$Request.process_run
                     lane = $Lane
@@ -290,8 +296,8 @@ elseif ([string]$Request.mode -ceq 'timed') {
                     seed = $SampleSeed
                     iterations = $Iterations
                     elapsed_cycles = [int64]($Iterations * $CyclesPerOperation)
-                    checksum = [int64]$Checksum
-                    expected_checksum = [int64]$Checksum
+                    checksum = [int64]$LaneChecksum
+                    expected_checksum = [int64]$LaneChecksum
                     final_scalar = [double](10 + $WorkloadIndex + $SampleIndex)
                     expected_final_scalar = [double](10 + $WorkloadIndex + $SampleIndex)
                     operation_call_count = $Iterations
@@ -596,7 +602,8 @@ Write-Output "假 Editor PID=$PID"
     $MixedIterationRequest = Copy-AttemptFixture $FirstAttempt 'mixed-iteration-request'
     $TimedRequestPath = Join-Path $MixedIterationRequest 'runs/02/request.json'
     $TimedRequest = Get-Content -LiteralPath $TimedRequestPath -Raw | ConvertFrom-Json
-    $TimedRequest.iteration_counts.scalar_noop = [int64]$TimedRequest.iteration_counts.scalar_noop + 1
+    $TimedRequest.iteration_counts.scalar_noop.avidscript_wamr =
+        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wamr + 1
     Write-NewJson $TimedRequestPath $TimedRequest
     $MixedIterationManifestPath = Join-Path $MixedIterationRequest 'attempt.json'
     $MixedIterationManifest = Get-Content -LiteralPath $MixedIterationManifestPath -Raw | ConvertFrom-Json

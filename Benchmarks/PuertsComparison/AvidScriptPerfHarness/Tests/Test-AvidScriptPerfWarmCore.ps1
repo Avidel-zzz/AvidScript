@@ -150,8 +150,12 @@ foreach ($BalancedRow in @(
     Assert-True ($RunnerSource.Contains($BalancedRow)) "missing balanced lane row: $BalancedRow"
 }
 Assert-True ($RunnerSource.Contains('LanePosition')) 'samples must record lane_position'
-Assert-True ($RunnerSource.Contains('CalibrateWorkloadIterations')) `
-    'warm core must calibrate one shared iteration count per workload'
+Assert-True ($RunnerSource.Contains('CalibrateLaneIterations')) `
+    'warm core must independently calibrate every workload and lane pair'
+Assert-True ($RunnerSource.Contains('GetPerfIterationMatrixIndex')) `
+    'warm core must index frozen iterations by workload and lane'
+Assert-True (-not $RunnerSource.Contains('CalibrateWorkloadIterations')) `
+    'warm core must not restore shared per-workload calibration'
 Assert-True ($RunnerSource.Contains('MaximumIterations / 2')) `
     'calibration doubling must guard overflow'
 Assert-True ($RunnerSource.Contains('EAvidScriptPerfBenchmarkMode::Calibrate')) `

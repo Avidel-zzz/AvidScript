@@ -653,11 +653,16 @@ namespace
 	{
 		EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
 		int32 LanePosition = 0;
+		int32 Iterations = 0;
 		uint64 ElapsedCycles = 0;
 		uint32 Checksum = 0;
+		uint32 ExpectedChecksum = 0;
 		int32 FinalScalar = 0;
+		int32 ExpectedFinalScalar = 0;
 		uint64 OperationCallCount = 0;
+		uint64 ExpectedOperationCallCount = 0;
 		int32 HostImportCallCount = 0;
+		int32 ExpectedHostImportCallCount = 0;
 	};
 
 	struct FPerfOracle
@@ -686,6 +691,14 @@ namespace
 		int32 HostImportCallCount = 0;
 		int32 ExpectedHostImportCallCount = 0;
 	};
+
+	int32 GetPerfIterationMatrixIndex(
+		const int32 WorkloadIndex,
+		const EAvidScriptPerfLane Lane)
+	{
+		return WorkloadIndex * PerfRunnerLaneCount +
+			static_cast<int32>(Lane);
+	}
 
 	const TCHAR* GetPerfLaneName(const EAvidScriptPerfLane Lane)
 	{
@@ -1227,23 +1240,44 @@ namespace
 					TEXT("timed mode requires an exact iteration_counts mapping");
 				return false;
 			}
+			OutRequest.FrozenIterationCounts.Reserve(
+				OutRequest.Workloads.Num() * PerfRunnerLaneCount);
 			for (const EAvidScriptPerfWorkload Workload : OutRequest.Workloads)
 			{
 				const FString WorkloadName = GetPerfWorkloadName(Workload);
-				if (!TryGetRequiredInteger(
-					*IterationCounts,
-					*WorkloadName,
-					OutRequest.MinimumIterations,
-					OutRequest.MaximumIterations,
-					IntegerValue,
-					OutError))
+				const TSharedPtr<FJsonObject>* LaneIterationCounts = nullptr;
+				if (!(*IterationCounts)->TryGetObjectField(
+						WorkloadName,
+						LaneIterationCounts) ||
+					LaneIterationCounts == nullptr ||
+					!LaneIterationCounts->IsValid() ||
+					(*LaneIterationCounts)->Values.Num() != PerfRunnerLaneCount)
 				{
 					OutError =
 						TEXT("timed mode requires an exact iteration_counts mapping");
 					return false;
 				}
-				OutRequest.FrozenIterationCounts.Add(
-					static_cast<int32>(IntegerValue));
+				for (int32 LaneIndex = 0;
+					LaneIndex < PerfRunnerLaneCount;
+					++LaneIndex)
+				{
+					const EAvidScriptPerfLane Lane =
+						static_cast<EAvidScriptPerfLane>(LaneIndex);
+					if (!TryGetRequiredInteger(
+							*LaneIterationCounts,
+							GetPerfLaneName(Lane),
+							OutRequest.MinimumIterations,
+							OutRequest.MaximumIterations,
+							IntegerValue,
+							OutError))
+					{
+						OutError =
+							TEXT("timed mode requires an exact iteration_counts mapping");
+						return false;
+					}
+					OutRequest.FrozenIterationCounts.Add(
+						static_cast<int32>(IntegerValue));
+				}
 			}
 		}
 
@@ -1738,10 +1772,9 @@ namespace
 		const FPerfBenchmarkRequest& Request,
 		const int32 WorkloadIndex,
 		const int32 SampleIndex,
-		const int32 Iterations,
+		const TArray<int32>& IterationCounts,
 		const uint32 Seed,
 		const bool bTimed,
-		const FPerfOracle& Oracle,
 		TArray<FPerfLaneObservation, TInlineAllocator<PerfRunnerLaneCount>>& OutObservations,
 		FString& OutError)
 	{
@@ -1756,13 +1789,21 @@ namespace
 			LanePosition < LaneOrder.Num();
 			++LanePosition)
 		{
+			const EAvidScriptPerfLane Lane = LaneOrder[LanePosition];
+			const int32 Iterations = IterationCounts[
+				GetPerfIterationMatrixIndex(WorkloadIndex, Lane)];
+			const FPerfOracle Oracle = RunNativeOracle(
+				Fixture,
+				Request.Workloads[WorkloadIndex],
+				Iterations,
+				Seed);
 			FPerfLaneObservation Observation;
 			if (!RunPerfLane(
 					Fixture,
 					Reflection,
 					Static,
 					AvidScript,
-					LaneOrder[LanePosition],
+					Lane,
 					Request.Workloads[WorkloadIndex],
 					Iterations,
 					Seed,
@@ -1779,18 +1820,32 @@ namespace
 				return false;
 			}
 			Observation.LanePosition = LanePosition;
+			Observation.Iterations = Iterations;
+			Observation.ExpectedChecksum = Oracle.Checksum;
+			Observation.ExpectedFinalScalar = Oracle.FinalScalar;
+			Observation.ExpectedOperationCallCount =
+				GetExpectedOperationCallCount(
+					Request.Workloads[WorkloadIndex],
+					Iterations);
+			Observation.ExpectedHostImportCallCount =
+				Lane == EAvidScriptPerfLane::AvidScriptWamr
+					? GetExpectedAvidScriptHostCallCount(
+						Request.Workloads[WorkloadIndex],
+						Iterations)
+					: 0;
 			OutObservations.Add(Observation);
 		}
 		return true;
 	}
 
-	bool CalibrateWorkloadIterations(
+	bool CalibrateLaneIterations(
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
 		FAvidScriptLane& AvidScript,
 		const FPerfBenchmarkRequest& Request,
 		const int32 WorkloadIndex,
+		const EAvidScriptPerfLane Lane,
 		int32& OutIterations,
 		FString& OutError)
 	{
@@ -1807,40 +1862,34 @@ namespace
 				Request.Workloads[WorkloadIndex],
 				Iterations,
 				Seed);
-			TArray<FPerfLaneObservation, TInlineAllocator<PerfRunnerLaneCount>>
-				Observations;
-			if (!RunPerfRound(
-				Fixture,
-				Reflection,
-				Static,
-				AvidScript,
-				Request,
-				WorkloadIndex,
-				CalibrationRound,
-				Iterations,
-				Seed,
-				true,
-				Oracle,
-				Observations,
-				OutError))
+			FPerfLaneObservation Observation;
+			if (!RunPerfLane(
+					Fixture,
+					Reflection,
+					Static,
+					AvidScript,
+					Lane,
+					Request.Workloads[WorkloadIndex],
+					Iterations,
+					Seed,
+					true,
+					Observation,
+					OutError) ||
+				!ValidatePerfObservation(
+					Observation,
+					Oracle,
+					Request.Workloads[WorkloadIndex],
+					Iterations,
+					OutError))
 			{
 				return false;
 			}
 
-			bool bEveryLaneReachedMinimum = true;
-			for (const FPerfLaneObservation& Observation : Observations)
-			{
-				const double ElapsedMilliseconds =
-					static_cast<double>(Observation.ElapsedCycles) *
-					FPlatformTime::GetSecondsPerCycle64() *
-					1000.0;
-				if (ElapsedMilliseconds < Request.MinimumSampleMilliseconds)
-				{
-					bEveryLaneReachedMinimum = false;
-					break;
-				}
-			}
-			if (bEveryLaneReachedMinimum)
+			const double ElapsedMilliseconds =
+				static_cast<double>(Observation.ElapsedCycles) *
+				FPlatformTime::GetSecondsPerCycle64() *
+				1000.0;
+			if (ElapsedMilliseconds >= Request.MinimumSampleMilliseconds)
 			{
 				OutIterations = Iterations;
 				return true;
@@ -1848,11 +1897,12 @@ namespace
 			if (Iterations >= Request.MaximumIterations)
 			{
 				OutError = FString::Printf(
-					TEXT("calibration could not reach %.3f ms for every lane ")
-						TEXT("by maximum_iterations=%d workload=%s"),
+					TEXT("calibration could not reach %.3f ms by ")
+						TEXT("maximum_iterations=%d workload=%s lane=%s"),
 					Request.MinimumSampleMilliseconds,
 					Request.MaximumIterations,
-					GetPerfWorkloadName(Request.Workloads[WorkloadIndex]));
+					GetPerfWorkloadName(Request.Workloads[WorkloadIndex]),
+					GetPerfLaneName(Lane));
 				return false;
 			}
 
@@ -1966,10 +2016,25 @@ namespace
 				WorkloadIndex < Request.Workloads.Num();
 				++WorkloadIndex)
 			{
-				SetExactIntegerField(
-					IterationCountsJson,
+				const TSharedRef<FJsonObject> LaneIterationCountsJson =
+					MakeShared<FJsonObject>();
+				for (int32 LaneIndex = 0;
+					LaneIndex < PerfRunnerLaneCount;
+					++LaneIndex)
+				{
+					const EAvidScriptPerfLane Lane =
+						static_cast<EAvidScriptPerfLane>(LaneIndex);
+					SetExactIntegerField(
+						LaneIterationCountsJson,
+						GetPerfLaneName(Lane),
+						IterationCounts[
+							GetPerfIterationMatrixIndex(
+								WorkloadIndex,
+								Lane)]);
+				}
+				IterationCountsJson->SetObjectField(
 					GetPerfWorkloadName(Request.Workloads[WorkloadIndex]),
-					IterationCounts[WorkloadIndex]);
+					LaneIterationCountsJson);
 			}
 			Root->SetObjectField(
 				TEXT("iteration_counts"),
@@ -2142,27 +2207,36 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 	}
 
 	TArray<int32> IterationCounts;
-	IterationCounts.Reserve(Request.Workloads.Num());
+	IterationCounts.Reserve(
+		Request.Workloads.Num() * PerfRunnerLaneCount);
 	if (Request.Mode != EAvidScriptPerfBenchmarkMode::Timed)
 	{
 		for (int32 WorkloadIndex = 0;
 			WorkloadIndex < Request.Workloads.Num();
 			++WorkloadIndex)
 		{
-			int32 Iterations = 0;
-			if (!CalibrateWorkloadIterations(
-				*Fixture,
-				Reflection,
-				Static,
-				AvidScript,
-				Request,
-				WorkloadIndex,
-				Iterations,
-				OutError))
+			for (int32 LaneIndex = 0;
+				LaneIndex < PerfRunnerLaneCount;
+				++LaneIndex)
 			{
-				return false;
+				const EAvidScriptPerfLane Lane =
+					static_cast<EAvidScriptPerfLane>(LaneIndex);
+				int32 Iterations = 0;
+				if (!CalibrateLaneIterations(
+						*Fixture,
+						Reflection,
+						Static,
+						AvidScript,
+						Request,
+						WorkloadIndex,
+						Lane,
+						Iterations,
+						OutError))
+				{
+					return false;
+				}
+				IterationCounts.Add(Iterations);
 			}
-			IterationCounts.Add(Iterations);
 		}
 	}
 	else
@@ -2183,7 +2257,6 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 		{
 			const EAvidScriptPerfWorkload Workload =
 				Request.Workloads[WorkloadIndex];
-			const int32 Iterations = IterationCounts[WorkloadIndex];
 
 			for (int32 WarmupIndex = 0;
 				WarmupIndex < Request.WarmupSamples;
@@ -2193,8 +2266,6 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Request.Seed,
 					WorkloadIndex,
 					WarmupIndex);
-				const FPerfOracle Oracle =
-					RunNativeOracle(*Fixture, Workload, Iterations, Seed);
 				TArray<
 					FPerfLaneObservation,
 					TInlineAllocator<PerfRunnerLaneCount>> Observations;
@@ -2206,10 +2277,9 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Request,
 					WorkloadIndex,
 					WarmupIndex,
-					Iterations,
+					IterationCounts,
 					Seed,
 					false,
-					Oracle,
 					Observations,
 					OutError))
 				{
@@ -2225,8 +2295,6 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Request.Seed,
 					WorkloadIndex,
 					SampleIndex);
-				const FPerfOracle Oracle =
-					RunNativeOracle(*Fixture, Workload, Iterations, Seed);
 				TArray<
 					FPerfLaneObservation,
 					TInlineAllocator<PerfRunnerLaneCount>> Observations;
@@ -2238,10 +2306,9 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Request,
 					WorkloadIndex,
 					SampleIndex,
-					Iterations,
+					IterationCounts,
 					Seed,
 					true,
-					Oracle,
 					Observations,
 					OutError))
 				{
@@ -2257,24 +2324,22 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Sample.Workload = Workload;
 					Sample.SampleIndex = SampleIndex;
 					Sample.Seed = Seed;
-					Sample.Iterations = Iterations;
+					Sample.Iterations = Observation.Iterations;
 					Sample.ElapsedCycles = Observation.ElapsedCycles;
 					Sample.Checksum = Observation.Checksum;
-					Sample.ExpectedChecksum = Oracle.Checksum;
+					Sample.ExpectedChecksum =
+						Observation.ExpectedChecksum;
 					Sample.FinalScalar = Observation.FinalScalar;
-					Sample.ExpectedFinalScalar = Oracle.FinalScalar;
+					Sample.ExpectedFinalScalar =
+						Observation.ExpectedFinalScalar;
 					Sample.OperationCallCount =
 						Observation.OperationCallCount;
 					Sample.ExpectedOperationCallCount =
-						GetExpectedOperationCallCount(Workload, Iterations);
+						Observation.ExpectedOperationCallCount;
 					Sample.HostImportCallCount =
 						Observation.HostImportCallCount;
 					Sample.ExpectedHostImportCallCount =
-						Observation.Lane == EAvidScriptPerfLane::AvidScriptWamr
-							? GetExpectedAvidScriptHostCallCount(
-								Workload,
-								Iterations)
-							: 0;
+						Observation.ExpectedHostImportCallCount;
 				}
 			}
 		}

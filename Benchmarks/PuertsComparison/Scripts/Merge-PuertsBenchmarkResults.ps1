@@ -36,14 +36,27 @@ function Test-IterationMap {
     )
 
     $ExpectedWorkloads = @($Profile.workloads | ForEach-Object { [string]$_ })
+    $ExpectedLanes = @($Profile.lanes | ForEach-Object { [string]$_ })
     $ActualWorkloads = @($Actual.PSObject.Properties.Name | ForEach-Object { [string]$_ })
     if ($ActualWorkloads.Count -ne $ExpectedWorkloads.Count) {
         throw "ASP53S2046 iteration_counts 数量不一致：$Label"
     }
     foreach ($Workload in $ExpectedWorkloads) {
-        if ($ActualWorkloads -cnotcontains $Workload -or
-            [int64]$Actual.$Workload -ne [int64]$Expected.$Workload) {
+        if ($ActualWorkloads -cnotcontains $Workload) {
             throw "ASP53S2046 iteration_counts 不一致：$Label workload=$Workload"
+        }
+        $ActualLaneNames = @($Actual.$Workload.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+        $ExpectedLaneNames = @($Expected.$Workload.PSObject.Properties.Name | ForEach-Object { [string]$_ })
+        if ($ActualLaneNames.Count -ne $ExpectedLanes.Count -or
+            $ExpectedLaneNames.Count -ne $ExpectedLanes.Count) {
+            throw "ASP53S2046 iteration_counts lane 数量不一致：$Label workload=$Workload"
+        }
+        foreach ($Lane in $ExpectedLanes) {
+            if ($ActualLaneNames -cnotcontains $Lane -or
+                $ExpectedLaneNames -cnotcontains $Lane -or
+                [int64]$Actual.$Workload.$Lane -ne [int64]$Expected.$Workload.$Lane) {
+                throw "ASP53S2046 iteration_counts 不一致：$Label workload=$Workload lane=$Lane"
+            }
         }
     }
 }
@@ -290,7 +303,7 @@ foreach ($RunEntry in @($ManifestRuns | Sort-Object { [int]$_.process_run })) {
     }
 
     foreach ($Sample in @($Result.samples)) {
-        $CorrectnessKey = "$($Sample.workload)|$($Sample.sample_index)"
+        $CorrectnessKey = "$($Sample.workload)|$($Sample.sample_index)|$($Sample.lane)"
         $CorrectnessValue = "$($Sample.checksum)|$($Sample.final_scalar)|$($Sample.operation_call_count)"
         if (-not $CrossProcessCorrectness.ContainsKey($CorrectnessKey)) {
             $CrossProcessCorrectness[$CorrectnessKey] = $CorrectnessValue

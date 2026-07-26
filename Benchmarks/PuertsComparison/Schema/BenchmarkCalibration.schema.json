@@ -75,8 +75,20 @@
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {
-        "type": "integer",
-        "minimum": 1
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "native_cpp",
+          "puerts_v8_reflection",
+          "puerts_v8_static",
+          "avidscript_wamr"
+        ],
+        "properties": {
+          "native_cpp": { "type": "integer", "minimum": 1 },
+          "puerts_v8_reflection": { "type": "integer", "minimum": 1 },
+          "puerts_v8_static": { "type": "integer", "minimum": 1 },
+          "avidscript_wamr": { "type": "integer", "minimum": 1 }
+        }
       }
     }
   }
