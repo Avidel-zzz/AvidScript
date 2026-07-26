@@ -23,6 +23,53 @@ extern "C"
 namespace
 {
 constexpr uint32 ErrorBufferSize = 512;
+FCriticalSection GBackendIdentityCriticalSection;
+uint64 GNextBackendInstanceIdentity = 0;
+
+uint64 AllocateBackendInstanceIdentity()
+{
+	FScopeLock Lock(&GBackendIdentityCriticalSection);
+	++GNextBackendInstanceIdentity;
+	if (GNextBackendInstanceIdentity == 0)
+	{
+		++GNextBackendInstanceIdentity;
+	}
+	return GNextBackendInstanceIdentity;
+}
+
+FString GetWamrTargetTriple()
+{
+#if PLATFORM_WINDOWS
+	return TEXT("x86_64-pc-windows-msvc");
+#elif PLATFORM_LINUX
+	return TEXT("x86_64-unknown-linux-gnu");
+#else
+	return TEXT("unknown-unknown-unknown");
+#endif
+}
+
+FAvidScriptVmBackendInfo MakeWamrBackendInfo()
+{
+	FAvidScriptVmBackendInfo Info;
+	Info.Kind = EAvidScriptVmBackendKind::Wamr;
+	Info.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	Info.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
+		| EAvidScriptVmCapability::Interpreter
+		| EAvidScriptVmCapability::StructuredStack;
+	Info.StableBackendId = TEXT("wamr.interpreter");
+	Info.TargetTriple = GetWamrTargetTriple();
+#if AVIDSCRIPT_WITH_WAMR
+	uint32 Major = 0;
+	uint32 Minor = 0;
+	uint32 Patch = 0;
+	wasm_runtime_get_version(&Major, &Minor, &Patch);
+	Info.RuntimeVersion = FString::Printf(TEXT("%u.%u.%u"), Major, Minor, Patch);
+#else
+	Info.RuntimeVersion = TEXT("unavailable");
+#endif
+	return Info;
+}
 
 double MeasureElapsedMs(double StartSeconds)
 {
@@ -90,9 +137,20 @@ FString GetWamrException(wasm_module_inst_t ModuleInstance)
 class FAvidScriptWamrBackend final : public IAvidScriptVmBackend, public IAvidScriptWamrHostBridge, public IAvidScriptVmGuestMemory
 {
 public:
+	FAvidScriptWamrBackend()
+		: BackendInfo(MakeWamrBackendInfo())
+	{
+		AdvanceBackendInstanceIdentity();
+	}
+
 	~FAvidScriptWamrBackend() override
 	{
 		Unload();
+	}
+
+	const FAvidScriptVmBackendInfo& GetBackendInfo() const override
+	{
+		return BackendInfo;
 	}
 
 	bool Load(
@@ -293,6 +351,10 @@ public:
 				TEXT("missing_export"),
 				FString::Printf(TEXT("Required export '%s' was not found."), *ExportName));
 		}
+		else
+		{
+			OutHandle.BackendInstanceIdentity = BackendInstanceIdentity;
+		}
 		return bResolved;
 #endif
 	}
@@ -314,6 +376,19 @@ public:
 		if (Frame.CellCount > FAvidScriptVmCallFrame::MaxCells)
 		{
 			SetVmError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame exceeds its fixed cell capacity."));
+			return false;
+		}
+
+		if (Handle.BackendInstanceIdentity != BackendInstanceIdentity)
+		{
+			const bool bBelongsToPreviousInstance = OwnedBackendInstanceIdentities.Contains(
+				Handle.BackendInstanceIdentity);
+			SetVmError(
+				OutError,
+				bBelongsToPreviousInstance ? TEXT("stale_export") : TEXT("foreign_export"),
+				bBelongsToPreviousInstance
+					? TEXT("The export handle belongs to an unloaded VM instance.")
+					: TEXT("The export handle belongs to a different VM backend instance."));
 			return false;
 		}
 
@@ -590,8 +665,18 @@ private:
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
 		bUnloadDeferred = false;
+		AdvanceBackendInstanceIdentity();
 	}
 
+	void AdvanceBackendInstanceIdentity()
+	{
+		BackendInstanceIdentity = AllocateBackendInstanceIdentity();
+		OwnedBackendInstanceIdentities.Add(BackendInstanceIdentity);
+	}
+
+	FAvidScriptVmBackendInfo BackendInfo;
+	uint64 BackendInstanceIdentity = 0;
+	TSet<uint64> OwnedBackendInstanceIdentities;
 	TArray<uint8> ModuleBuffer;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;

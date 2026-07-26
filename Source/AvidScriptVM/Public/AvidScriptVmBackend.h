@@ -2,6 +2,80 @@
 
 #include "CoreMinimal.h"
 
+enum class EAvidScriptVmBackendKind : uint8
+{
+	Wamr,
+	Wasmtime
+};
+
+enum class EAvidScriptVmExecutionMode : uint8
+{
+	Auto,
+	Interpreter,
+	Aot,
+	Jit
+};
+
+enum class EAvidScriptVmArtifactFormat : uint8
+{
+	WasmBytecode,
+	WamrAot,
+	WasmtimeSerialized
+};
+
+enum class EAvidScriptVmCapability : uint32
+{
+	None = 0,
+	GuestMemory = 1 << 0,
+	Interpreter = 1 << 1,
+	Aot = 1 << 2,
+	Jit = 1 << 3,
+	PrecompiledArtifact = 1 << 4,
+	StructuredStack = 1 << 5
+};
+ENUM_CLASS_FLAGS(EAvidScriptVmCapability);
+
+struct FAvidScriptVmBackendInfo
+{
+	EAvidScriptVmBackendKind Kind = EAvidScriptVmBackendKind::Wamr;
+	EAvidScriptVmExecutionMode ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	EAvidScriptVmArtifactFormat ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	EAvidScriptVmCapability Capabilities = EAvidScriptVmCapability::None;
+	FString StableBackendId;
+	FString RuntimeVersion;
+	FString TargetTriple;
+};
+
+struct FAvidScriptVmBackendSelection
+{
+	EAvidScriptVmBackendKind BackendKind = EAvidScriptVmBackendKind::Wamr;
+	EAvidScriptVmExecutionMode ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	EAvidScriptVmArtifactFormat ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	bool bAllowFallback = false;
+};
+
+struct FAvidScriptVmArtifactView
+{
+	TArrayView<const uint8> ExecutionBytes;
+	EAvidScriptVmArtifactFormat ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	TArrayView<const uint8> CanonicalWasmBytes;
+	FString ExecutionIdentity;
+	FString CanonicalWasmIdentity;
+	FString TargetTriple;
+
+	static FAvidScriptVmArtifactView FromWasmBytecode(
+		TArrayView<const uint8> WasmBytes,
+		const FString& WasmIdentity = FString())
+	{
+		FAvidScriptVmArtifactView View;
+		View.ExecutionBytes = WasmBytes;
+		View.CanonicalWasmBytes = WasmBytes;
+		View.ExecutionIdentity = WasmIdentity;
+		View.CanonicalWasmIdentity = WasmIdentity;
+		return View;
+	}
+};
+
 enum class EAvidScriptHostBindingId : uint16
 {
 	Invalid = 0,
@@ -54,6 +128,7 @@ struct FAvidScriptVmExportHandle
 {
 	uint32 Slot = 0;
 	uint32 Generation = 0;
+	uint64 BackendInstanceIdentity = 0;
 
 	bool IsValid() const
 	{
@@ -188,12 +263,16 @@ struct FAvidScriptVmLoadConfig
 };
 
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();
+AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptVmBackend(
+	const FAvidScriptVmBackendSelection& Selection,
+	FAvidScriptVmError& OutError);
 
 class AVIDSCRIPTVM_API IAvidScriptVmBackend
 {
 public:
 	virtual ~IAvidScriptVmBackend() = default;
 
+	virtual const FAvidScriptVmBackendInfo& GetBackendInfo() const = 0;
 	virtual bool Load(
 		TArrayView<const uint8> Bytecode,
 		const FString& ModuleId,

@@ -47,6 +47,169 @@ bool FAvidScriptVmExportCacheTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmBackendInfoContractTest,
+	"AvidScript.Architecture.VM.BackendInfoContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmBackendInfoContractTest::RunTest(const FString& Parameters)
+{
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptWamrBackend();
+	if (!TestNotNull(TEXT("WAMR compatibility factory returns a backend"), Backend.Get()))
+	{
+		return false;
+	}
+
+	const FAvidScriptVmBackendInfo& Info = Backend->GetBackendInfo();
+	TestEqual(TEXT("backend kind is WAMR"), Info.Kind, EAvidScriptVmBackendKind::Wamr);
+	TestEqual(
+		TEXT("actual execution mode is interpreter"),
+		Info.ExecutionMode,
+		EAvidScriptVmExecutionMode::Interpreter);
+	TestEqual(
+		TEXT("artifact format is WASM bytecode"),
+		Info.ArtifactFormat,
+		EAvidScriptVmArtifactFormat::WasmBytecode);
+	TestTrue(
+		TEXT("guest memory capability is advertised"),
+		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::GuestMemory));
+	TestTrue(
+		TEXT("interpreter capability is advertised"),
+		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::Interpreter));
+	TestTrue(
+		TEXT("structured stack capability is advertised"),
+		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::StructuredStack));
+	TestFalse(TEXT("stable backend id is populated"), Info.StableBackendId.IsEmpty());
+	TestFalse(TEXT("runtime version is populated"), Info.RuntimeVersion.IsEmpty());
+	TestFalse(TEXT("target triple is populated"), Info.TargetTriple.IsEmpty());
+
+	const uint8 WasmBytes[] = { 0x00, 0x61, 0x73, 0x6d };
+	const FAvidScriptVmArtifactView Artifact = FAvidScriptVmArtifactView::FromWasmBytecode(
+		MakeArrayView(WasmBytes),
+		TEXT("wasm-sha256"));
+	TestEqual(
+		TEXT("WASM convenience execution bytes"),
+		Artifact.ExecutionBytes.Num(),
+		static_cast<int32>(UE_ARRAY_COUNT(WasmBytes)));
+	TestEqual(
+		TEXT("WASM convenience canonical bytes"),
+		Artifact.CanonicalWasmBytes.Num(),
+		static_cast<int32>(UE_ARRAY_COUNT(WasmBytes)));
+	TestEqual(
+		TEXT("WASM convenience artifact format"),
+		Artifact.ArtifactFormat,
+		EAvidScriptVmArtifactFormat::WasmBytecode);
+	TestEqual(TEXT("WASM convenience execution identity"), Artifact.ExecutionIdentity, FString(TEXT("wasm-sha256")));
+	TestEqual(TEXT("WASM convenience canonical identity"), Artifact.CanonicalWasmIdentity, FString(TEXT("wasm-sha256")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmBackendFactorySelectionTest,
+	"AvidScript.Architecture.VM.BackendFactorySelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmBackendFactorySelectionTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptVmError Error;
+	FAvidScriptVmBackendSelection Selection;
+	Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("unavailable Wasmtime backend is rejected"), Backend.Get());
+	TestEqual(TEXT("Wasmtime error category"), Error.Category, FString(TEXT("backend_unavailable")));
+
+	Selection.BackendKind = EAvidScriptVmBackendKind::Wamr;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WamrAot;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("unavailable WAMR AOT mode is rejected"), Backend.Get());
+	TestEqual(TEXT("WAMR AOT error category"), Error.Category, FString(TEXT("execution_mode_unavailable")));
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("unavailable WAMR JIT mode is rejected"), Backend.Get());
+	TestEqual(TEXT("WAMR JIT error category"), Error.Category, FString(TEXT("execution_mode_unavailable")));
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	Selection.bAllowFallback = true;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	if (!TestNotNull(TEXT("WAMR Auto selection can fall back to interpreter"), Backend.Get()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("successful factory clears the error category"), Error.Category.IsEmpty());
+	TestEqual(
+		TEXT("fallback reports actual interpreter mode"),
+		Backend->GetBackendInfo().ExecutionMode,
+		EAvidScriptVmExecutionMode::Interpreter);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmBackendInstanceHandleContractTest,
+	"AvidScript.Architecture.VM.BackendInstanceHandleContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmBackendInstanceHandleContractTest::RunTest(const FString& Parameters)
+{
+	const uint8 MinimalModule[] = {
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+		0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x70, 0x69,
+		0x6e, 0x67, 0x00, 0x00, 0x0a, 0x04, 0x01, 0x02,
+		0x00, 0x0b
+	};
+
+	TUniquePtr<IAvidScriptVmBackend> FirstBackend = CreateAvidScriptWamrBackend();
+	TUniquePtr<IAvidScriptVmBackend> SecondBackend = CreateAvidScriptWamrBackend();
+	FAvidScriptVmLoadConfig Config;
+	FAvidScriptVmError Error;
+	if (!TestTrue(
+		TEXT("first backend loads"),
+		FirstBackend->Load(MakeArrayView(MinimalModule), TEXT("instance_first"), Config, Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	if (!TestTrue(
+		TEXT("second backend loads"),
+		SecondBackend->Load(MakeArrayView(MinimalModule), TEXT("instance_second"), Config, Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+
+	FAvidScriptVmExportHandle FirstHandle;
+	FAvidScriptVmExportHandle SecondHandle;
+	TestTrue(TEXT("first backend resolves export"), FirstBackend->ResolveExport(TEXT("ping"), FirstHandle, Error));
+	TestTrue(TEXT("second backend resolves export"), SecondBackend->ResolveExport(TEXT("ping"), SecondHandle, Error));
+	TestNotEqual(TEXT("backend instance identities differ"), FirstHandle.BackendInstanceIdentity, SecondHandle.BackendInstanceIdentity);
+
+	FAvidScriptVmCallFrame EmptyFrame;
+	TestFalse(TEXT("second backend rejects first backend handle"), SecondBackend->Call(FirstHandle, EmptyFrame, Error));
+	TestEqual(TEXT("foreign handle error category"), Error.Category, FString(TEXT("foreign_export")));
+
+	const uint64 PreviousIdentity = FirstHandle.BackendInstanceIdentity;
+	FirstBackend->Unload();
+	if (!TestTrue(
+		TEXT("first backend reloads"),
+		FirstBackend->Load(MakeArrayView(MinimalModule), TEXT("instance_reloaded"), Config, Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	FAvidScriptVmExportHandle ReloadedHandle;
+	TestTrue(TEXT("reloaded backend resolves export"), FirstBackend->ResolveExport(TEXT("ping"), ReloadedHandle, Error));
+	TestNotEqual(TEXT("reload advances backend instance identity"), ReloadedHandle.BackendInstanceIdentity, PreviousIdentity);
+	TestFalse(TEXT("reloaded backend rejects old handle"), FirstBackend->Call(FirstHandle, EmptyFrame, Error));
+	TestEqual(TEXT("old handle error category"), Error.Category, FString(TEXT("stale_export")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWamrBackendSmokeTest,
 	"AvidScript.Architecture.VM.WamrBackendSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

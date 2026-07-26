@@ -61,10 +61,12 @@ double MeasureElapsedMs(double StartSeconds)
 void PrepareResult(
 	FAvidScriptWasmSmokeResult& OutResult,
 	const FString& ModuleId,
+	const FAvidScriptVmBackendInfo& BackendInfo,
 	const FAvidScriptWasmRuntimeMetrics& Metrics)
 {
 	OutResult = FAvidScriptWasmSmokeResult();
 	OutResult.ModuleId = ModuleId;
+	OutResult.BackendInfo = BackendInfo;
 	OutResult.Metrics = Metrics;
 }
 
@@ -202,6 +204,20 @@ bool CallVmExport(
 }
 } // namespace
 
+FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance()
+{
+	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
+	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
+	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	BackendSelection.bAllowFallback = true;
+}
+
+FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
+	const FAvidScriptVmBackendSelection& InBackendSelection)
+	: BackendSelection(InBackendSelection)
+{
+}
+
 FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
 {
 	Unload();
@@ -326,9 +342,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 {
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
+	ActiveBackendInfo = FAvidScriptVmBackendInfo();
 	ResetHostImportState();
 	ModuleId = InModuleId;
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	CopyHostImportStateToResult(OutResult);
 
 	if (Bytecode == nullptr || BytecodeSize <= 0)
@@ -337,12 +354,15 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		return false;
 	}
 
-	VmBackend = CreateAvidScriptWamrBackend();
+	FAvidScriptVmError Error;
+	VmBackend = CreateAvidScriptVmBackend(BackendSelection, Error);
 	if (!VmBackend)
 	{
-		SetFailure(OutResult, ModuleId, TEXT("<runtime>"), TEXT("backend_unavailable"), TEXT("The VM backend factory returned null"), TEXT("verify the AvidScriptVM module is available for this target"));
+		SetFailureFromVmError(OutResult, ModuleId, TEXT("<runtime>"), Error, InDebugMap.Get());
 		return false;
 	}
+	ActiveBackendInfo = VmBackend->GetBackendInfo();
+	OutResult.BackendInfo = ActiveBackendInfo;
 
 	BindingPackage = InBindingPackage;
 	DebugMap = InDebugMap;
@@ -358,7 +378,6 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	FAvidScriptVmLoadConfig Config;
 	Config.HostDispatcher = this;
 	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
-	FAvidScriptVmError Error;
 	const bool bLoaded = VmBackend->Load(MakeArrayView(Bytecode, BytecodeSize), ModuleId, Config, Error);
 	const FAvidScriptVmLoadMetrics& LoadMetrics = VmBackend->GetLoadMetrics();
 	Metrics.RuntimeInitMs = LoadMetrics.RuntimeInitMs;
@@ -392,7 +411,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	const TArray<FString>& RequiredExports,
 	FAvidScriptWasmSmokeResult& OutResult) const
 {
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -427,7 +446,7 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 }
 bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -505,7 +524,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 
 bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -591,7 +610,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -661,7 +680,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	constexpr const TCHAR* ExportName = TEXT("avid_on_gameplay_event");
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -773,7 +792,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 
 bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, Metrics);
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -929,7 +948,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	LifecycleState.Reset();
 
 	Metrics.UnloadMs = bHadResources ? MeasureElapsedMs(UnloadStartSeconds) : 0.0;
-	PrepareResult(OutResult, PreviousModuleId, Metrics);
+	PrepareResult(OutResult, PreviousModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = bWasRuntimeInitialized;
 	OutResult.bModuleLoaded = bWasModuleLoaded;
 	OutResult.bModuleInstantiated = bWasModuleInstantiated;

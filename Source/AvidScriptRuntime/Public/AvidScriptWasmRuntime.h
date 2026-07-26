@@ -57,6 +57,7 @@ struct FAvidScriptWasmSmokeResult
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;
+	FAvidScriptVmBackendInfo BackendInfo;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
@@ -80,7 +81,8 @@ struct FAvidScriptWasmTimerEntry
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance : public IAvidScriptHostDispatcher
 {
 public:
-	FAvidScriptWasmRuntimeInstance() = default;
+	FAvidScriptWasmRuntimeInstance();
+	explicit FAvidScriptWasmRuntimeInstance(const FAvidScriptVmBackendSelection& InBackendSelection);
 	~FAvidScriptWasmRuntimeInstance();
 
 	FAvidScriptWasmRuntimeInstance(const FAvidScriptWasmRuntimeInstance&) = delete;
@@ -175,6 +177,8 @@ private:
 	void CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
+	FAvidScriptVmBackendSelection BackendSelection;
+	FAvidScriptVmBackendInfo ActiveBackendInfo;
 	FAvidScriptVmExportHandle BeginPlayExport;
 	FAvidScriptVmExportHandle TickExport;
 	FAvidScriptVmExportHandle EndPlayExport;
