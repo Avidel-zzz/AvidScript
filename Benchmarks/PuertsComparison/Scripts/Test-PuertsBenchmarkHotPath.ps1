@@ -28,6 +28,9 @@ $ResolveSource = $InvocationSource.Substring($ResolveStart, $ResolveEnd - $Resol
 $NoPathResolvePattern = 'ResolveObject\(\s*\{\s*Slot\s*,\s*Generation\s*\}\s*,\s*ResolveResult\s*,\s*false\s*\)'
 Assert-True ([regex]::IsMatch($ResolveSource, $NoPathResolvePattern)) `
     'successful dynamic handle resolution must suppress UObject path materialization'
+$FailurePathResolvePattern = 'if\s*\(\s*OutObject\s*==\s*nullptr\s*\)\s*\{\s*Context\.ObjectRegistry->ResolveObject\(\s*\{\s*Slot\s*,\s*Generation\s*\}\s*,\s*ResolveResult\s*,\s*true\s*\)'
+Assert-True ([regex]::IsMatch($ResolveSource, $FailurePathResolvePattern)) `
+    'failed dynamic handle resolution must restore the full object-path diagnostic'
 Assert-True ($ResolveSource.Contains('Context.ObjectRegistry == nullptr')) `
     'dynamic handle resolution must retain the missing-registry guard'
 Assert-True ($ResolveSource.Contains('!OutObject->IsA(ExpectedClass)')) `
@@ -45,4 +48,4 @@ foreach ($FixtureToken in @(
         "production binding hot path must not reference benchmark fixture token: $FixtureToken"
 }
 
-Write-Output 'AvidScript production hot-path contracts passed: path_materialization=0 registry_guard=1 type_guard=1 fixture_fast_path=0'
+Write-Output 'AvidScript production hot-path contracts passed: success_path_materialization=0 failure_path_materialization=1 registry_guard=1 type_guard=1 fixture_fast_path=0'

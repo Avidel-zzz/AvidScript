@@ -484,6 +484,10 @@ bool ResolveAvidScriptRuntimeHandle(
 		false);
 	if (OutObject == nullptr)
 	{
+		Context.ObjectRegistry->ResolveObject(
+			{ Slot, Generation },
+			ResolveResult,
+			true);
 		OutDetails = ResolveResult.ErrorMessage;
 		return false;
 	}
