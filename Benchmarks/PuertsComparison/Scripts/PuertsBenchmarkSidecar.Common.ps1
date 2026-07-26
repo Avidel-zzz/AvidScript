@@ -118,6 +118,9 @@ function Get-SidecarInstalledPuertsContentDigest {
 
     $Root = Resolve-SidecarCanonicalDirectory -Path $Path -Code 'ASP53S2117' -Label 'Puerts install root'
     $ExcludedDirectoryNames = @('Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '.git')
+    $ExcludedRelativePrefixes = @(
+        'Source/CSharpParamDefaultValueMetas/bin/',
+        'Source/CSharpParamDefaultValueMetas/obj/')
     $Entries = [System.Collections.Generic.List[string]]::new()
     foreach ($File in @(Get-ChildItem -LiteralPath $Root -File -Force -Recurse)) {
         $RelativePath = [System.IO.Path]::GetRelativePath($Root, $File.FullName).Replace('\', '/')
@@ -127,6 +130,16 @@ function Get-SidecarInstalledPuertsContentDigest {
         $PathParts = @($RelativePath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries))
         $RootDirectory = if ($PathParts.Count -gt 1) { $PathParts[0] } else { '' }
         if ($ExcludedDirectoryNames -icontains $RootDirectory) {
+            continue
+        }
+        $IsKnownGeneratedFile = $false
+        foreach ($Prefix in $ExcludedRelativePrefixes) {
+            if ($RelativePath.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $IsKnownGeneratedFile = $true
+                break
+            }
+        }
+        if ($IsKnownGeneratedFile) {
             continue
         }
         $Entries.Add(('{0}`t{1}' -f $RelativePath, (Get-SidecarFileSha256 -Path $File.FullName)))

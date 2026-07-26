@@ -248,6 +248,9 @@ try {
     $TopLevelBinariesPath = Join-Path $PuertsTarget 'Binaries/ignored.bin'
     [System.IO.Directory]::CreateDirectory((Split-Path -Parent $TopLevelBinariesPath)) | Out-Null
     [System.IO.File]::WriteAllText($TopLevelBinariesPath, 'ignored-binary', [System.Text.UTF8Encoding]::new($false))
+    $GeneratedCSharpObjPath = Join-Path $PuertsTarget 'Source/CSharpParamDefaultValueMetas/obj/fixture.assets.json'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $GeneratedCSharpObjPath)) | Out-Null
+    [System.IO.File]::WriteAllText($GeneratedCSharpObjPath, 'generated-msbuild-state', [System.Text.UTF8Encoding]::new($false))
     $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
     $ManagedMarker = [ordered]@{
         schema_version = 2
@@ -267,7 +270,7 @@ try {
     $ManagedMarker.installed_content_sha256 = $InstalledPuertsDigest.content_sha256
     $ManagedMarker.installed_file_count = $InstalledPuertsDigest.file_count
     Write-NewJson $ManagedMarkerPath $ManagedMarker
-    Assert-True ([int]$InstalledPuertsDigest.file_count -eq 3) 'Puerts digest must include nested ThirdParty/Test/Binaries content and exclude top-level Binaries'
+    Assert-True ([int]$InstalledPuertsDigest.file_count -eq 3) 'Puerts digest must include nested ThirdParty/Test/Binaries content and exclude only known generated output'
     [System.IO.File]::WriteAllText((Join-Path $HarnessTarget 'AvidScriptPerfHarness.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
     New-TestJunction -Path (Join-Path $FixtureRoot 'Source') -Target $SourceTarget
     New-TestJunction -Path (Join-Path $FixtureRoot 'Config') -Target $ConfigTarget
@@ -972,4 +975,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 top_level_generated_ignored=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

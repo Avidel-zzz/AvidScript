@@ -206,6 +206,9 @@ try {
     Assert-True ([int64]$Marker.installed_file_count -gt 0) 'installed marker is missing a deterministic file count'
     New-Item -ItemType Directory -Force -Path (Join-Path $HappyProject 'Plugins/Puerts/Binaries/Win64') | Out-Null
     'generated binary' | Set-Content -LiteralPath (Join-Path $HappyProject 'Plugins/Puerts/Binaries/Win64/UnrealEditor-Puerts.dll') -Encoding utf8NoBOM
+    $GeneratedCSharpObjPath = Join-Path $HappyProject 'Plugins/Puerts/Source/CSharpParamDefaultValueMetas/obj/fixture.assets.json'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $GeneratedCSharpObjPath) | Out-Null
+    'generated msbuild state' | Set-Content -LiteralPath $GeneratedCSharpObjPath -Encoding utf8NoBOM
     $Verified = Invoke-Installer Verify $HappyProject $CacheRoot $TestLockPath
     Assert-True ($Verified.ExitCode -eq 0) "happy-path verify failed: $($Verified.Text)"
     $LfLockPath = Join-Path $FixtureRoot 'fixture-lock-lf.json'

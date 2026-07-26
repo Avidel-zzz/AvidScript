@@ -175,6 +175,9 @@ function Get-InstalledContentSummary {
     )
 
     $ExcludedDirectoryNames = @('Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '.git')
+    $ExcludedRelativePrefixes = @(
+        'Source/CSharpParamDefaultValueMetas/bin/',
+        'Source/CSharpParamDefaultValueMetas/obj/')
     $ManifestLines = [System.Collections.Generic.List[string]]::new()
     foreach ($File in Get-ChildItem -LiteralPath $InstallPath -File -Recurse -Force) {
         $RelativePath = [System.IO.Path]::GetRelativePath($InstallPath, $File.FullName).Replace('\', '/')
@@ -186,6 +189,16 @@ function Get-InstalledContentSummary {
         }
         $RootDirectoryName = $RelativePath.Split('/')[0]
         if ($RootDirectoryName -in $ExcludedDirectoryNames) {
+            continue
+        }
+        $IsKnownGeneratedFile = $false
+        foreach ($Prefix in $ExcludedRelativePrefixes) {
+            if ($RelativePath.StartsWith($Prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $IsKnownGeneratedFile = $true
+                break
+            }
+        }
+        if ($IsKnownGeneratedFile) {
             continue
         }
         $ManifestLines.Add(("{0}`t{1}" -f $RelativePath, (Get-FileSha256 $File.FullName)))
