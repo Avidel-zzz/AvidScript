@@ -69,7 +69,8 @@
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wamr_interpreter" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_jit" } } }] }
-      ]
+      ],
+      "items": false
     },
     "lane_catalog_entry": {
       "type": "object",
@@ -88,6 +89,7 @@
         "compiler_flags",
         "runtime_build_config",
         "runtime_build_identity",
+        "runtime_artifact_sha256",
         "target_triple",
         "cpu_feature_policy",
         "backend_id",
@@ -109,6 +111,7 @@
         "compiler_flags": { "type": "array", "items": { "type": "string" } },
         "runtime_build_config": { "type": "string", "minLength": 1 },
         "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "runtime_artifact_sha256": { "$ref": "#/$defs/sha256" },
         "target_triple": { "type": "string", "minLength": 1 },
         "cpu_feature_policy": { "type": "string", "minLength": 1 },
         "backend_id": { "type": ["string", "null"] },
@@ -129,6 +132,7 @@
         "source_wasm_sha256",
         "target_triple",
         "runtime_build_identity",
+        "runtime_artifact_sha256",
         "fallback_used"
       ],
       "properties": {
@@ -140,6 +144,7 @@
         "source_wasm_sha256": { "$ref": "#/$defs/sha256" },
         "target_triple": { "type": "string", "minLength": 1 },
         "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "runtime_artifact_sha256": { "$ref": "#/$defs/sha256" },
         "fallback_used": { "const": false }
       }
     },
@@ -152,9 +157,11 @@
         "lane_identity_sha256",
         "workload",
         "sample_index",
+        "seed",
         "iterations",
         "elapsed_cycles",
         "checksum",
+        "expected_checksum",
         "correct"
       ],
       "properties": {
@@ -163,9 +170,11 @@
         "lane_identity_sha256": { "$ref": "#/$defs/sha256" },
         "workload": { "type": "string", "minLength": 1 },
         "sample_index": { "type": "integer", "minimum": 0 },
+        "seed": { "type": "integer", "minimum": 0 },
         "iterations": { "type": "integer", "minimum": 1 },
         "elapsed_cycles": { "type": "integer", "minimum": 1 },
         "checksum": { "type": "integer" },
+        "expected_checksum": { "type": "integer" },
         "correct": { "const": true },
         "backend_info": { "$ref": "#/$defs/backend_info" }
       },

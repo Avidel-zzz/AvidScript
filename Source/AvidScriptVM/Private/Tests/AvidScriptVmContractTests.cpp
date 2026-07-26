@@ -121,6 +121,17 @@ bool FAvidScriptVmBackendInfoContractTest::RunTest(const FString& Parameters)
 		EnumHasAnyFlags(Info.Capabilities, EAvidScriptVmCapability::StructuredStack));
 	TestFalse(TEXT("stable backend id is populated"), Info.StableBackendId.IsEmpty());
 	TestFalse(TEXT("runtime version is populated"), Info.RuntimeVersion.IsEmpty());
+	TestFalse(TEXT("runtime artifact identity is populated"), Info.RuntimeArtifactSha256.IsEmpty());
+	TestTrue(
+		TEXT("runtime build identity binds interpreter configuration"),
+		Info.RuntimeBuildIdentity.Contains(
+			TEXT("config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0"),
+			ESearchCase::CaseSensitive));
+	TestTrue(
+		TEXT("runtime build identity binds the linked static artifact"),
+		Info.RuntimeBuildIdentity.EndsWith(
+			TEXT("static_lib_sha256=") + Info.RuntimeArtifactSha256,
+			ESearchCase::CaseSensitive));
 	TestFalse(TEXT("target triple is populated"), Info.TargetTriple.IsEmpty());
 
 	const uint8 WasmBytes[] = { 0x00, 0x61, 0x73, 0x6d };

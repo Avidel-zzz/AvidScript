@@ -12,6 +12,12 @@
 #ifndef AVIDSCRIPT_WITH_WAMR
 #define AVIDSCRIPT_WITH_WAMR 0
 #endif
+#ifndef AVIDSCRIPT_WAMR_INTERPRETER_CONFIG
+#define AVIDSCRIPT_WAMR_INTERPRETER_CONFIG "unavailable"
+#endif
+#ifndef AVIDSCRIPT_WAMR_STATIC_LIB_SHA256
+#define AVIDSCRIPT_WAMR_STATIC_LIB_SHA256 "unavailable"
+#endif
 
 #if AVIDSCRIPT_WITH_WAMR
 extern "C"
@@ -68,6 +74,15 @@ FAvidScriptVmBackendInfo MakeWamrBackendInfo()
 #else
 	Info.RuntimeVersion = TEXT("unavailable");
 #endif
+	const FString InterpreterConfig =
+		UTF8_TO_TCHAR(AVIDSCRIPT_WAMR_INTERPRETER_CONFIG);
+	Info.RuntimeArtifactSha256 =
+		UTF8_TO_TCHAR(AVIDSCRIPT_WAMR_STATIC_LIB_SHA256);
+	Info.RuntimeBuildIdentity = FString::Printf(
+		TEXT("wamr-v%s;config=%s;static_lib_sha256=%s"),
+		*Info.RuntimeVersion,
+		*InterpreterConfig,
+		*Info.RuntimeArtifactSha256);
 	return Info;
 }
 

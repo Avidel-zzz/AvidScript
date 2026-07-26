@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BenchmarkRoot = Split-Path -Parent $ScriptRoot
+. (Join-Path $ScriptRoot 'PuertsBenchmarkSidecar.Common.ps1')
 if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
     $ProfilePath = Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json'
 }
@@ -52,7 +53,9 @@ if ([int]$Profile.schema_version -ne 2 -or
     throw 'ASP53R1002 benchmark profile does not define a valid canonical five-lane result matrix'
 }
 if (@($Result.lane_catalog).Count -ne $ExpectedLanes.Count -or
-    [string]$Result.lane_catalog_sha256 -cne [string]$Result.provenance.lane_catalog_sha256) {
+    [string]$Result.lane_catalog_sha256 -cne [string]$Result.provenance.lane_catalog_sha256 -or
+    (Get-SidecarLaneCatalogSha256 -Catalog @($Result.lane_catalog)) -cne
+        [string]$Result.lane_catalog_sha256) {
     throw 'ASP54R1012 result lane catalog/hash is incomplete or inconsistent'
 }
 $LaneIdentityById = @{}
@@ -61,6 +64,10 @@ for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
     $CatalogEntry = $Result.lane_catalog[$LaneIndex]
     if ([string]$CatalogEntry.lane_id -cne $ExpectedLane) {
         throw "ASP54R1012 result lane catalog order mismatch: lane=$ExpectedLane"
+    }
+    if ([string]$CatalogEntry.lane_identity_sha256 -cne
+        (Get-SidecarLaneIdentitySha256 -Entry $CatalogEntry)) {
+        throw "ASP54R1012 result lane identity hash mismatch: lane=$ExpectedLane"
     }
     $LaneIdentityById[$ExpectedLane] = [string]$CatalogEntry.lane_identity_sha256
 }
@@ -97,9 +104,13 @@ foreach ($Sample in $Samples) {
             [string]$Sample.backend_info.artifact_sha256 -cne [string]$CatalogEntry.execution_artifact_sha256 -or
             [string]$Sample.backend_info.source_wasm_sha256 -cne [string]$CatalogEntry.source_wasm_sha256 -or
             [string]$Sample.backend_info.target_triple -cne [string]$CatalogEntry.target_triple -or
-            [string]$Sample.backend_info.runtime_build_identity -cne [string]$CatalogEntry.runtime_build_identity) {
+            [string]$Sample.backend_info.runtime_build_identity -cne [string]$CatalogEntry.runtime_build_identity -or
+            [string]$Sample.backend_info.runtime_artifact_sha256 -cne [string]$CatalogEntry.runtime_artifact_sha256) {
             throw "ASP54R1013 AvidScript backend provenance mismatch: lane=$Lane"
         }
+    }
+    if ([int64]$Sample.checksum -ne [int64]$Sample.expected_checksum) {
+        throw "ASP54R1014 lane-specific checksum oracle mismatch: lane=$Lane workload=$Workload"
     }
     if ($Workload -cnotin $ExpectedWorkloads) {
         throw "ASP53R1005 unknown workload: $Workload"
@@ -121,19 +132,19 @@ foreach ($Sample in $Samples) {
 foreach ($ProcessRun in 0..($ExpectedProcessRuns - 1)) {
     foreach ($Workload in $ExpectedWorkloads) {
         foreach ($SampleIndex in 0..($ExpectedSamples - 1)) {
-            $ReferenceChecksum = $null
+            $ComparableChecksums = @{}
             foreach ($Lane in $ExpectedLanes) {
                 $Key = "$ProcessRun|$Workload|$SampleIndex|$Lane"
                 if (-not $SamplesByKey.ContainsKey($Key)) {
                     throw "ASP53R1009 missing sample: $Key"
                 }
                 $Sample = $SamplesByKey[$Key]
-                if ($null -eq $ReferenceChecksum) {
-                    $ReferenceChecksum = [int64]$Sample.checksum
-                }
-                elseif ([int64]$Sample.checksum -ne $ReferenceChecksum) {
+                $ComparableKey = "$([int64]$Sample.seed)|$([int64]$Sample.iterations)"
+                if ($ComparableChecksums.ContainsKey($ComparableKey) -and
+                    [int64]$Sample.checksum -ne [int64]$ComparableChecksums[$ComparableKey]) {
                     throw "ASP53R1011 checksum mismatch across lanes: process=$ProcessRun workload=$Workload sample=$SampleIndex"
                 }
+                $ComparableChecksums[$ComparableKey] = [int64]$Sample.checksum
             }
         }
     }

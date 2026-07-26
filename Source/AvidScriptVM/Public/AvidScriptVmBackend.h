@@ -43,6 +43,8 @@ struct FAvidScriptVmBackendInfo
 	EAvidScriptVmCapability Capabilities = EAvidScriptVmCapability::None;
 	FString StableBackendId;
 	FString RuntimeVersion;
+	FString RuntimeBuildIdentity;
+	FString RuntimeArtifactSha256;
 	FString TargetTriple;
 };
 

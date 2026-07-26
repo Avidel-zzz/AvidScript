@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using UnrealBuildTool;
 
 public class Wasmtime : ModuleRules
@@ -28,6 +29,10 @@ public class Wasmtime : ModuleRules
 			bHasManagedLayout
 				? "AVIDSCRIPT_WITH_WASMTIME=1"
 				: "AVIDSCRIPT_WITH_WASMTIME=0");
+		PublicDefinitions.Add(
+			bHasManagedLayout
+				? $"AVIDSCRIPT_WASMTIME_DLL_SHA256=\"{ComputeFileSha256(DllPath)}\""
+				: "AVIDSCRIPT_WASMTIME_DLL_SHA256=\"unavailable\"");
 
 		if (bHasManagedLayout)
 		{
@@ -35,6 +40,17 @@ public class Wasmtime : ModuleRules
 			PublicAdditionalLibraries.Add(ImportLibraryPath);
 			PublicDelayLoadDLLs.Add("wasmtime.dll");
 			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.dll", DllPath, StagedFileType.NonUFS);
+		}
+	}
+
+	private static string ComputeFileSha256(string Path)
+	{
+		using (SHA256 Hasher = SHA256.Create())
+		using (FileStream Stream = File.OpenRead(Path))
+		{
+			return System.BitConverter.ToString(Hasher.ComputeHash(Stream))
+				.Replace("-", "")
+				.ToLowerInvariant();
 		}
 	}
 }

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using UnrealBuildTool;
 
 public class WAMR : ModuleRules
@@ -17,6 +18,14 @@ public class WAMR : ModuleRules
 		bool bEnableWamr = bHasHeaders && bHasLibrary;
 
 		PublicDefinitions.Add(bEnableWamr ? "AVIDSCRIPT_WITH_WAMR=1" : "AVIDSCRIPT_WITH_WAMR=0");
+		PublicDefinitions.Add(
+			bEnableWamr
+				? "AVIDSCRIPT_WAMR_INTERPRETER_CONFIG=\"interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0\""
+				: "AVIDSCRIPT_WAMR_INTERPRETER_CONFIG=\"unavailable\"");
+		PublicDefinitions.Add(
+			bEnableWamr
+				? $"AVIDSCRIPT_WAMR_STATIC_LIB_SHA256=\"{ComputeFileSha256(LibraryPath)}\""
+				: "AVIDSCRIPT_WAMR_STATIC_LIB_SHA256=\"unavailable\"");
 
 		if (bEnableWamr)
 		{
@@ -28,6 +37,17 @@ public class WAMR : ModuleRules
 			{
 				PublicSystemLibraries.Add("ntdll.lib");
 			}
+		}
+	}
+
+	private static string ComputeFileSha256(string Path)
+	{
+		using (SHA256 Hasher = SHA256.Create())
+		using (FileStream Stream = File.OpenRead(Path))
+		{
+			return System.BitConverter.ToString(Hasher.ComputeHash(Stream))
+				.Replace("-", "")
+				.ToLowerInvariant();
 		}
 	}
 

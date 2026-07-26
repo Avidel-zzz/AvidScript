@@ -196,6 +196,8 @@ $ProjectJunctions = Assert-SidecarBenchmarkProjectProvenance `
     -ProjectPath $ResolvedProjectPath `
     -AvidScriptCommit $AvidScriptCommit `
     -AvidScriptTreeSha $AvidScriptTreeSha
+$AvidScriptRuntimeIdentity = Get-SidecarAvidScriptRuntimeIdentity `
+    -PluginRoot ([string]$ProjectJunctions.AvidScript)
 if (-not $AllowNonFormalProfile) {
     Assert-SidecarRunnerCandidate `
         -PluginRoot $RunnerPluginRoot `
@@ -277,6 +279,10 @@ $LaneCatalogResolution = New-SidecarResolvedLaneCatalog `
         '${puerts_commit}' = $PuertsCommit
         '${puerts_backend_sha256}' = $PuertsBackendSha256
         '${wasm_sha256}' = $WasmSha256
+        '${wamr_static_lib_sha256}' = [string]$AvidScriptRuntimeIdentity.wamr_static_lib_sha256
+        '${wamr_runtime_build_identity}' = [string]$AvidScriptRuntimeIdentity.wamr_runtime_build_identity
+        '${wasmtime_dll_sha256}' = [string]$AvidScriptRuntimeIdentity.wasmtime_dll_sha256
+        '${wasmtime_runtime_build_identity}' = [string]$AvidScriptRuntimeIdentity.wasmtime_runtime_build_identity
     }
 $LaneCatalog = @($LaneCatalogResolution.entries)
 $LaneCatalogSha256 = [string]$LaneCatalogResolution.sha256

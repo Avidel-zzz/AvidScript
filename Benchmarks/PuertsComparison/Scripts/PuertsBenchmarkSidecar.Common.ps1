@@ -552,7 +552,7 @@ function Test-SidecarProfile {
         @($Workloads | Sort-Object -Unique).Count -ne $Workloads.Count) {
         throw 'ASP53S2004 benchmark profile 的 lane/workload 不允许重复'
     }
-    if ([string]$Profile.lane_identity_algorithm -cne 'ordered_json_utf8_sha256_v1' -or
+    if ([string]$Profile.lane_identity_algorithm -cne 'canonical_json_utf8_sha256_v1' -or
         @($Profile.lane_catalog).Count -ne $ExpectedLanes.Count) {
         throw 'ASP54S2004 benchmark profile 缺少固定 lane catalog 或 identity 算法'
     }
@@ -564,11 +564,152 @@ function Test-SidecarProfile {
     }
 }
 
-function Get-SidecarJsonSha256 {
+function Get-SidecarAvidScriptRuntimeIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$PluginRoot
+    )
+
+    $ResolvedPluginRoot = Resolve-SidecarCanonicalDirectory `
+        -Path $PluginRoot `
+        -Code 'ASP54S2056' `
+        -Label 'AvidScript runtime identity root'
+    $WamrCandidates = @(
+        (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/WAMR/lib/Win64/Release/iwasm.lib'),
+        (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/WAMR/lib/Win64/Release/libiwasm.lib'),
+        (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/WAMR/lib/Win64/Release/vmlib.lib')
+    )
+    $WamrLibrary = @(
+        $WamrCandidates | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        }
+    ) | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace([string]$WamrLibrary)) {
+        throw 'ASP54S2056 WAMR linked static runtime artifact is missing'
+    }
+    $WasmtimeCandidates = @(
+        (Join-Path $ResolvedPluginRoot 'Binaries/Win64/wasmtime.dll'),
+        (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0/lib/wasmtime.dll')
+    )
+    $WasmtimeDll = @(
+        $WasmtimeCandidates | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        }
+    ) | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace([string]$WasmtimeDll)) {
+        throw 'ASP54S2056 Wasmtime staged or managed runtime DLL is missing'
+    }
+
+    $WamrSha256 = Get-SidecarFileSha256 -Path ([string]$WamrLibrary)
+    $WasmtimeSha256 = Get-SidecarFileSha256 -Path ([string]$WasmtimeDll)
+    return [pscustomobject][ordered]@{
+        wamr_static_lib_sha256 = $WamrSha256
+        wamr_runtime_build_identity = (
+            'wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0;' +
+            "static_lib_sha256=$WamrSha256")
+        wasmtime_dll_sha256 = $WasmtimeSha256
+        wasmtime_runtime_build_identity = (
+            "wasmtime-v45.0.0;cranelift=1;dll_sha256=$WasmtimeSha256")
+    }
+}
+
+function ConvertTo-SidecarCanonicalJsonString {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+
+    $Builder = [System.Text.StringBuilder]::new()
+    [void]$Builder.Append('"')
+    foreach ($Character in $Value.ToCharArray()) {
+        $Code = [int]$Character
+        switch ($Code) {
+            0x08 { [void]$Builder.Append('\b'); continue }
+            0x09 { [void]$Builder.Append('\t'); continue }
+            0x0a { [void]$Builder.Append('\n'); continue }
+            0x0c { [void]$Builder.Append('\f'); continue }
+            0x0d { [void]$Builder.Append('\r'); continue }
+            0x22 { [void]$Builder.Append('\"'); continue }
+            0x5c { [void]$Builder.Append('\\'); continue }
+        }
+        if ($Code -lt 0x20) {
+            [void]$Builder.AppendFormat(
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                '\u{0:x4}',
+                $Code)
+        }
+        else {
+            [void]$Builder.Append($Character)
+        }
+    }
+    [void]$Builder.Append('"')
+    return $Builder.ToString()
+}
+
+function ConvertTo-SidecarCanonicalJson {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) {
+        return 'null'
+    }
+    if ($Value -is [string]) {
+        return ConvertTo-SidecarCanonicalJsonString -Value ([string]$Value)
+    }
+    if ($Value -is [bool]) {
+        return $(if ([bool]$Value) { 'true' } else { 'false' })
+    }
+    if ($Value -is [System.Collections.IDictionary] -or
+        $Value -is [System.Management.Automation.PSCustomObject]) {
+        $Properties = @{}
+        if ($Value -is [System.Collections.IDictionary]) {
+            foreach ($Key in $Value.Keys) {
+                $Properties[[string]$Key] = $Value[$Key]
+            }
+        }
+        else {
+            foreach ($Property in $Value.PSObject.Properties) {
+                $Properties[[string]$Property.Name] = $Property.Value
+            }
+        }
+        $Names = [string[]]@($Properties.Keys)
+        [Array]::Sort($Names, [System.StringComparer]::Ordinal)
+        $Members = foreach ($Name in $Names) {
+            (ConvertTo-SidecarCanonicalJsonString -Value $Name) + ':' +
+                (ConvertTo-SidecarCanonicalJson -Value $Properties[$Name])
+        }
+        return '{' + ($Members -join ',') + '}'
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $Items = foreach ($Item in $Value) {
+            ConvertTo-SidecarCanonicalJson -Value $Item
+        }
+        return '[' + ($Items -join ',') + ']'
+    }
+    if ($Value -is [byte] -or
+        $Value -is [sbyte] -or
+        $Value -is [int16] -or
+        $Value -is [uint16] -or
+        $Value -is [int32] -or
+        $Value -is [uint32] -or
+        $Value -is [int64] -or
+        $Value -is [uint64]) {
+        return ([System.IFormattable]$Value).ToString(
+            $null,
+            [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
+        $Number = [double]$Value
+        if ([double]::IsNaN($Number) -or [double]::IsInfinity($Number)) {
+            throw 'ASP54S2055 canonical JSON 不允许 NaN 或 Infinity'
+        }
+        return $Number.ToString(
+            'R',
+            [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    throw "ASP54S2055 canonical JSON 不支持值类型：$($Value.GetType().FullName)"
+}
+
+function Get-SidecarCanonicalJsonSha256 {
     param([Parameter(Mandatory = $true)]$Value)
 
-    $Json = $Value | ConvertTo-Json -Depth 64 -Compress
-    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Json)
+    $Json = ConvertTo-SidecarCanonicalJson -Value $Value
+    $Bytes = [System.Text.UTF8Encoding]::new($false, $true).GetBytes($Json)
     $Hasher = [System.Security.Cryptography.SHA256]::Create()
     try {
         return [Convert]::ToHexString($Hasher.ComputeHash($Bytes)).ToLowerInvariant()
@@ -576,6 +717,33 @@ function Get-SidecarJsonSha256 {
     finally {
         $Hasher.Dispose()
     }
+}
+
+function Get-SidecarLaneIdentitySha256 {
+    param([Parameter(Mandatory = $true)]$Entry)
+
+    $IdentityInput = [ordered]@{}
+    if ($Entry -is [System.Collections.IDictionary]) {
+        foreach ($Key in $Entry.Keys) {
+            if ([string]$Key -cne 'lane_identity_sha256') {
+                $IdentityInput[[string]$Key] = $Entry[$Key]
+            }
+        }
+    }
+    else {
+        foreach ($Property in $Entry.PSObject.Properties) {
+            if ($Property.Name -cne 'lane_identity_sha256') {
+                $IdentityInput[$Property.Name] = $Property.Value
+            }
+        }
+    }
+    return Get-SidecarCanonicalJsonSha256 -Value $IdentityInput
+}
+
+function Get-SidecarLaneCatalogSha256 {
+    param([Parameter(Mandatory = $true)]$Catalog)
+
+    return Get-SidecarCanonicalJsonSha256 -Value @($Catalog)
 }
 
 function Resolve-SidecarCatalogValue {
@@ -622,14 +790,14 @@ function New-SidecarResolvedLaneCatalog {
     $Catalog = [System.Collections.Generic.List[object]]::new()
     foreach ($TemplateEntry in @($Profile.lane_catalog)) {
         $ResolvedEntry = Resolve-SidecarCatalogValue -Value $TemplateEntry -Tokens $Tokens
-        $Identity = Get-SidecarJsonSha256 -Value $ResolvedEntry
+        $Identity = Get-SidecarLaneIdentitySha256 -Entry $ResolvedEntry
         $ResolvedEntry | Add-Member -NotePropertyName lane_identity_sha256 -NotePropertyValue $Identity
         $Catalog.Add($ResolvedEntry)
     }
     $CatalogArray = $Catalog.ToArray()
     return [pscustomobject][ordered]@{
         entries = $CatalogArray
-        sha256 = Get-SidecarJsonSha256 -Value $CatalogArray
+        sha256 = Get-SidecarLaneCatalogSha256 -Catalog $CatalogArray
     }
 }
 
@@ -642,11 +810,27 @@ function Test-SidecarLaneCatalog {
         [Parameter(Mandatory = $true)][string]$Label
     )
 
+    $ActualEntries = @($Actual)
+    $ExpectedEntries = @($Expected)
+    $ActualLaneIdentitiesValid = @(
+        $ActualEntries | Where-Object {
+            [string]$_.lane_identity_sha256 -cne
+                (Get-SidecarLaneIdentitySha256 -Entry $_)
+        }
+    ).Count -eq 0
+    $ExpectedLaneIdentitiesValid = @(
+        $ExpectedEntries | Where-Object {
+            [string]$_.lane_identity_sha256 -cne
+                (Get-SidecarLaneIdentitySha256 -Entry $_)
+        }
+    ).Count -eq 0
     if ($ActualSha256 -cne $ExpectedSha256 -or
-        (Get-SidecarJsonSha256 -Value @($Actual)) -cne $ActualSha256 -or
-        (Get-SidecarJsonSha256 -Value @($Expected)) -cne $ExpectedSha256 -or
-        (@($Actual) | ConvertTo-Json -Depth 64 -Compress) -cne
-            (@($Expected) | ConvertTo-Json -Depth 64 -Compress)) {
+        -not $ActualLaneIdentitiesValid -or
+        -not $ExpectedLaneIdentitiesValid -or
+        (Get-SidecarLaneCatalogSha256 -Catalog $ActualEntries) -cne $ActualSha256 -or
+        (Get-SidecarLaneCatalogSha256 -Catalog $ExpectedEntries) -cne $ExpectedSha256 -or
+        (ConvertTo-SidecarCanonicalJson -Value $ActualEntries) -cne
+            (ConvertTo-SidecarCanonicalJson -Value $ExpectedEntries)) {
         throw "ASP54S2052 lane catalog/hash 不一致：$Label"
     }
 }
@@ -906,7 +1090,8 @@ function Test-SidecarProcessResult {
                 [string]$Sample.backend_info.artifact_sha256 -cne [string]$LaneCatalogEntry.execution_artifact_sha256 -or
                 [string]$Sample.backend_info.source_wasm_sha256 -cne [string]$LaneCatalogEntry.source_wasm_sha256 -or
                 [string]$Sample.backend_info.target_triple -cne [string]$LaneCatalogEntry.target_triple -or
-                [string]$Sample.backend_info.runtime_build_identity -cne [string]$LaneCatalogEntry.runtime_build_identity) {
+                [string]$Sample.backend_info.runtime_build_identity -cne [string]$LaneCatalogEntry.runtime_build_identity -or
+                [string]$Sample.backend_info.runtime_artifact_sha256 -cne [string]$LaneCatalogEntry.runtime_artifact_sha256) {
                 throw "ASP54S2054 raw result AvidScript backend provenance 不匹配：process=$ExpectedProcessRun lane=$Lane"
             }
         }

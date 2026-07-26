@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BenchmarkRoot = Split-Path -Parent $ScriptRoot
 $ValidatorPath = Join-Path $ScriptRoot 'Test-PuertsBenchmarkResult.ps1'
+. (Join-Path $ScriptRoot 'PuertsBenchmarkSidecar.Common.ps1')
 $FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('AvidScriptP53ResultTest-' + [Guid]::NewGuid().ToString('N'))
 $ProfileContractPath = Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json'
 $SchemaPaths = @(
@@ -86,12 +87,13 @@ try {
         timed_samples = 1
         lanes = $ExpectedLanes
         workloads = @('scalar_noop', 'property_get_set')
+        lane_identity_algorithm = 'canonical_json_utf8_sha256_v1'
         lane_catalog = @()
     }
     for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
         $Lane = $ExpectedLanes[$LaneIndex]
         $IsAvidScript = $Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)
-        $Profile.lane_catalog += [ordered]@{
+        $CatalogEntry = [ordered]@{
             lane_id = $Lane
             runtime_id = if ($IsAvidScript) {
                 if ($Lane -ceq 'avidscript_wamr_interpreter') { 'wamr.interpreter' } else { 'wasmtime.cranelift.jit' }
@@ -107,6 +109,7 @@ try {
             compiler_flags = @('fixture')
             runtime_build_config = 'fixture-build'
             runtime_build_identity = 'fixture-runtime-build'
+            runtime_artifact_sha256 = 'd' * 64
             target_triple = 'x86_64-pc-windows-msvc'
             cpu_feature_policy = 'host_default'
             backend_id = if ($IsAvidScript) {
@@ -114,8 +117,10 @@ try {
             } else { $null }
             execution_mode = if ($Lane -ceq 'avidscript_wasmtime_jit') { 'jit' } elseif ($IsAvidScript) { 'interpreter' } else { 'native_or_jit' }
             fallback_used = $false
-            lane_identity_sha256 = ([char]([int][char]'a' + $LaneIndex)).ToString() * 64
         }
+        $CatalogEntry['lane_identity_sha256'] =
+            Get-SidecarLaneIdentitySha256 -Entry $CatalogEntry
+        $Profile.lane_catalog += $CatalogEntry
     }
     Write-Json $ProfilePath $Profile
 
@@ -123,15 +128,23 @@ try {
     foreach ($Workload in $Profile.workloads) {
         $LaneIndex = 0
         foreach ($Lane in $Profile.lanes) {
+            $Iterations = 1024 + $LaneIndex
+            $ExpectedChecksum = if ($Workload -ceq 'scalar_noop') {
+                17000 + $Iterations
+            } else {
+                23000 + $Iterations
+            }
             $Samples += [ordered]@{
                 process_run = 0
                 lane = $Lane
                 lane_identity_sha256 = [string]$Profile.lane_catalog[$LaneIndex].lane_identity_sha256
                 workload = $Workload
                 sample_index = 0
-                iterations = 1024
+                seed = 4242
+                iterations = $Iterations
                 elapsed_cycles = 5000
-                checksum = if ($Workload -ceq 'scalar_noop') { 17 } else { 23 }
+                checksum = $ExpectedChecksum
+                expected_checksum = $ExpectedChecksum
                 correct = $true
             }
             if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
@@ -144,17 +157,19 @@ try {
                     source_wasm_sha256 = 'a' * 64
                     target_triple = 'x86_64-pc-windows-msvc'
                     runtime_build_identity = 'fixture-runtime-build'
+                    runtime_artifact_sha256 = 'd' * 64
                     fallback_used = $false
                 }
             }
             ++$LaneIndex
         }
     }
+    $CatalogSha256 = Get-SidecarLaneCatalogSha256 -Catalog $Profile.lane_catalog
     $Result = [ordered]@{
         schema_version = 2
         run_id = '00000000-0000-0000-0000-000000000001'
         lane_catalog = $Profile.lane_catalog
-        lane_catalog_sha256 = 'f' * 64
+        lane_catalog_sha256 = $CatalogSha256
         provenance = [ordered]@{
             ue_version = '5.8.0'
             ue_build_id = 'fixture-build'
@@ -164,7 +179,7 @@ try {
             puerts_commit = ('b' * 40)
             puerts_backend_sha256 = ('c' * 64)
             profile_id = 'contract-fixture'
-            lane_catalog_sha256 = 'f' * 64
+            lane_catalog_sha256 = $CatalogSha256
         }
         samples = $Samples
     }
@@ -173,7 +188,7 @@ try {
     $ValidOutput = & pwsh -NoProfile -File $ValidatorPath -ResultPath $ResultPath -ProfilePath $ProfilePath
     Assert-True ($LASTEXITCODE -eq 0) 'complete five-lane result did not pass'
     $Valid = $ValidOutput | ConvertFrom-Json
-    Assert-True ([int]$Valid.raw_sample_count -eq 10) 'valid fixture sample count mismatch'
+    Assert-True ([int]$Valid.raw_sample_count -eq 10) 'valid mixed-iteration fixture sample count mismatch'
 
     $Missing = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
     $Missing.samples = @($Missing.samples | Select-Object -Skip 1)
@@ -187,11 +202,88 @@ try {
     Write-Json $DuplicatePath $Duplicate
     Invoke-ValidatorFailure $DuplicatePath $ProfilePath 'ASP53R1008'
 
-    $Checksum = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
-    $Checksum.samples[1].checksum = 99
-    $ChecksumPath = Join-Path $FixtureRoot 'checksum.json'
-    Write-Json $ChecksumPath $Checksum
-    Invoke-ValidatorFailure $ChecksumPath $ProfilePath 'ASP53R1011'
+    $WrongExpectedChecksum = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+    $WrongExpectedChecksum.samples[1].expected_checksum =
+        [int64]$WrongExpectedChecksum.samples[1].checksum + 1
+    $WrongExpectedChecksumPath = Join-Path $FixtureRoot 'wrong-expected-checksum.json'
+    Write-Json $WrongExpectedChecksumPath $WrongExpectedChecksum
+    Invoke-ValidatorFailure $WrongExpectedChecksumPath $ProfilePath 'ASP54R1014'
+
+    $EqualIterationMismatch = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+    $EqualIterationMismatch.samples[1].iterations = $EqualIterationMismatch.samples[0].iterations
+    $EqualIterationMismatch.samples[1].checksum = [int64]$EqualIterationMismatch.samples[0].checksum + 7
+    $EqualIterationMismatch.samples[1].expected_checksum = $EqualIterationMismatch.samples[1].checksum
+    $EqualIterationMismatchPath = Join-Path $FixtureRoot 'equal-iteration-mismatch.json'
+    Write-Json $EqualIterationMismatchPath $EqualIterationMismatch
+    Invoke-ValidatorFailure $EqualIterationMismatchPath $ProfilePath 'ASP53R1011'
+
+    $ForgedHash = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+    $ForgedHash.lane_catalog_sha256 = 'f' * 64
+    $ForgedHash.provenance.lane_catalog_sha256 = 'f' * 64
+    $ForgedHashPath = Join-Path $FixtureRoot 'forged-catalog-hash.json'
+    Write-Json $ForgedHashPath $ForgedHash
+    Invoke-ValidatorFailure $ForgedHashPath $ProfilePath 'ASP54R1012'
+
+    $OriginalEntry = $Profile.lane_catalog[0]
+    $ReorderedEntry = [ordered]@{}
+    $EntryNames = @($OriginalEntry.Keys)
+    [array]::Reverse($EntryNames)
+    foreach ($Name in $EntryNames) {
+        if ($Name -cne 'lane_identity_sha256') {
+            $ReorderedEntry[$Name] = $OriginalEntry[$Name]
+        }
+    }
+    Assert-True (
+        (Get-SidecarLaneIdentitySha256 -Entry $ReorderedEntry) -ceq
+        [string]$OriginalEntry.lane_identity_sha256) `
+        'lane identity changed when object properties were reordered'
+
+    $OriginalCulture = [System.Globalization.CultureInfo]::CurrentCulture
+    try {
+        [System.Globalization.CultureInfo]::CurrentCulture =
+            [System.Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+        Assert-True (
+            (Get-SidecarLaneCatalogSha256 -Catalog $Profile.lane_catalog) -ceq
+            $CatalogSha256) 'lane catalog hash changed under fr-FR culture'
+    }
+    finally {
+        [System.Globalization.CultureInfo]::CurrentCulture = $OriginalCulture
+    }
+
+    $LfCatalogPath = Join-Path $FixtureRoot 'catalog-lf.json'
+    $BomCatalogPath = Join-Path $FixtureRoot 'catalog-bom-crlf.json'
+    $CatalogJson = $Profile.lane_catalog | ConvertTo-Json -Depth 32
+    [System.IO.File]::WriteAllText(
+        $LfCatalogPath,
+        ($CatalogJson -replace "`r`n", "`n") + "`n",
+        [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText(
+        $BomCatalogPath,
+        ($CatalogJson -replace "(?<!`r)`n", "`r`n") + "`r`n",
+        [System.Text.UTF8Encoding]::new($true))
+    $LfCatalog = Get-Content -LiteralPath $LfCatalogPath -Raw | ConvertFrom-Json
+    $BomCatalog = Get-Content -LiteralPath $BomCatalogPath -Raw | ConvertFrom-Json
+    Assert-True (
+        (Get-SidecarLaneCatalogSha256 -Catalog $LfCatalog) -ceq
+        (Get-SidecarLaneCatalogSha256 -Catalog $BomCatalog)) `
+        'lane catalog hash changed with BOM or newline serialization'
+
+    $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
+    foreach ($Mutation in @('swapped', 'duplicate')) {
+        $SchemaMutation = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+        if ($Mutation -ceq 'swapped') {
+            $First = $SchemaMutation.lane_catalog[0]
+            $SchemaMutation.lane_catalog[0] = $SchemaMutation.lane_catalog[1]
+            $SchemaMutation.lane_catalog[1] = $First
+        }
+        else {
+            $SchemaMutation.lane_catalog[1] = $SchemaMutation.lane_catalog[0]
+        }
+        $MutationJson = $SchemaMutation | ConvertTo-Json -Depth 32
+        Assert-True (
+            -not ($MutationJson | Test-Json -SchemaFile $ResultSchemaPath -ErrorAction SilentlyContinue)) `
+            "BenchmarkResult schema accepted $Mutation lane_catalog"
+    }
 
     $LegacyLane = $Result | ConvertTo-Json -Depth 32 | ConvertFrom-Json
     $LegacyLane.samples[0].lane = 'avidscript_wamr'
@@ -217,4 +309,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark result contracts passed: schema_v2=5 lanes=5 complete=1 missing=1 duplicate=1 checksum=1 identity=1 fallback=1 legacy=1'
+Write-Output 'Puerts benchmark result contracts passed: schema_v2=5 lanes=5 mixed_iterations=1 missing=1 duplicate=1 oracle=1 equal_iteration=1 canonical_hash=4 schema_order=2 identity=1 fallback=1 legacy=1'

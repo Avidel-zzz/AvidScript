@@ -22,6 +22,11 @@ $HarnessRoot = Split-Path -Parent $PSScriptRoot
 $SourceRoot = Join-Path $HarnessRoot 'Source/AvidScriptPerfHarness'
 $RunnerHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfRunner.h')
 $RunnerSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfRunner.cpp')
+$VmBackendHeader = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Public/AvidScriptVmBackend.h')
+$WamrBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp')
+$WasmtimeBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp')
+$WamrBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/WAMR/WAMR.Build.cs')
+$WasmtimeBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/Wasmtime/Wasmtime.Build.cs')
 $FixtureHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfFixture.h')
 $FixtureSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfFixture.cpp')
 $StaticBindings = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfStaticBindings.cpp')
@@ -194,12 +199,30 @@ Assert-True ($RunnerSource.Contains('wasmtime.cranelift.jit')) `
     'Wasmtime lane must reject a runtime build identity mismatch'
 Assert-True ($RunnerSource.Contains('wamr.interpreter')) `
     'WAMR lane must reject a runtime build identity mismatch'
-Assert-True ($RunnerSource.Contains('ActualRuntimeBuildIdentity.Equals(')) `
+Assert-True ($RunnerSource.Contains('Actual.RuntimeBuildIdentity.Equals(')) `
     'runtime build identity must be derived from actual backend evidence and compared with the catalog'
-Assert-True ($RunnerSource.Contains('wamr-v%s-x86_64-windows-fast-interp')) `
-    'WAMR runtime build identity must include the actual runtime version and execution tier'
-Assert-True ($RunnerSource.Contains('wasmtime-v%s-x86_64-windows-c-api')) `
-    'Wasmtime runtime build identity must include the actual runtime version and linked API target'
+foreach ($ObservedField in @('RuntimeBuildIdentity', 'RuntimeArtifactSha256')) {
+    Assert-True ($VmBackendHeader.Contains("FString $ObservedField;")) `
+        "VM backend info must expose observed field: $ObservedField"
+    Assert-True ($RunnerSource.Contains("Actual.$ObservedField")) `
+        "runner must consume observed backend field: $ObservedField"
+}
+Assert-True (-not $RunnerSource.Contains('ActualRuntimeBuildIdentity = FString::Printf')) `
+    'runner must not infer runtime build identity from generic backend mode/version'
+Assert-True ($WamrBackendSource.Contains('AVIDSCRIPT_WAMR_INTERPRETER_CONFIG')) `
+    'WAMR backend identity must bind the compile-time interpreter configuration'
+Assert-True ($WamrBackendSource.Contains('AVIDSCRIPT_WAMR_STATIC_LIB_SHA256')) `
+    'WAMR backend identity must bind the linked static runtime artifact'
+Assert-True ($WamrBuildRules.Contains('ComputeFileSha256')) `
+    'WAMR build rules must hash the selected static runtime artifact'
+Assert-True ($WasmtimeBackendSource.Contains('ObservedDllSha256')) `
+    'Wasmtime backend must expose the DLL hash observed at its load boundary'
+Assert-True ($WasmtimeBuildRules.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256')) `
+    'Wasmtime build rules must bind the managed DLL hash into the backend'
+Assert-True ($RunnerSource.Contains('GetCanonicalLaneIdentitySha256')) `
+    'C++ request ingestion must recompute each canonical lane identity'
+Assert-True ($RunnerSource.Contains('GetCanonicalLaneCatalogSha256')) `
+    'C++ request ingestion must recompute the complete catalog identity'
 Assert-True ($RunnerSource.Contains('fallback_used')) `
     'AvidScript sample evidence must expose fallback usage'
 Assert-True ($RunnerSource.Contains('lane_identity_sha256')) `

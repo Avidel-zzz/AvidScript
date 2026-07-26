@@ -133,6 +133,37 @@ function Invoke-ExpectedFailure {
     }
 }
 
+function Assert-SchemaRejectsNoncanonicalCatalog {
+    param(
+        [Parameter(Mandatory = $true)][string]$DocumentPath,
+        [Parameter(Mandatory = $true)][string]$SchemaPath,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $Original = Get-Content -LiteralPath $DocumentPath -Raw | ConvertFrom-Json
+    $Swapped = Get-Content -LiteralPath $DocumentPath -Raw | ConvertFrom-Json
+    $Swapped.lane_catalog = @(
+        $Original.lane_catalog[1],
+        $Original.lane_catalog[0],
+        $Original.lane_catalog[2],
+        $Original.lane_catalog[3],
+        $Original.lane_catalog[4])
+    Assert-True (-not (($Swapped | ConvertTo-Json -Depth 64) |
+            Test-Json -SchemaFile $SchemaPath -ErrorAction SilentlyContinue)) `
+        "$Label schema 接受了交换后的 lane_catalog"
+
+    $Duplicated = Get-Content -LiteralPath $DocumentPath -Raw | ConvertFrom-Json
+    $Duplicated.lane_catalog = @(
+        $Original.lane_catalog[0],
+        $Original.lane_catalog[0],
+        $Original.lane_catalog[2],
+        $Original.lane_catalog[3],
+        $Original.lane_catalog[4])
+    Assert-True (-not (($Duplicated | ConvertTo-Json -Depth 64) |
+            Test-Json -SchemaFile $SchemaPath -ErrorAction SilentlyContinue)) `
+        "$Label schema 接受了重复的 lane_catalog"
+}
+
 function Copy-AttemptFixture {
     param(
         [Parameter(Mandatory = $true)][string]$SourceAttempt,
@@ -230,6 +261,12 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $SourceTarget 'fixture.cpp'), "fixture`n", [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText((Join-Path $ConfigTarget 'DefaultEngine.ini'), "[fixture]`n", [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText((Join-Path $CandidateTarget 'AvidScript.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
+    $FixtureWamrLibrary = Join-Path $CandidateTarget 'Source/ThirdParty/WAMR/lib/Win64/Release/iwasm.lib'
+    $FixtureWasmtimeDll = Join-Path $CandidateTarget 'Binaries/Win64/wasmtime.dll'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $FixtureWamrLibrary)) | Out-Null
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $FixtureWasmtimeDll)) | Out-Null
+    [System.IO.File]::WriteAllText($FixtureWamrLibrary, 'fixture-wamr-runtime', [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($FixtureWasmtimeDll, 'fixture-wasmtime-runtime', [System.Text.UTF8Encoding]::new($false))
     Invoke-TestGit -RepositoryPath $CandidateTarget init --quiet | Out-Null
     Invoke-TestGit -RepositoryPath $CandidateTarget config user.name 'Codex Fixture' | Out-Null
     Invoke-TestGit -RepositoryPath $CandidateTarget config user.email 'fixture@example.invalid' | Out-Null
@@ -462,6 +499,7 @@ elseif ([string]$Request.mode -ceq 'timed') {
                         source_wasm_sha256 = [string]$CatalogEntry.source_wasm_sha256
                         target_triple = [string]$CatalogEntry.target_triple
                         runtime_build_identity = [string]$CatalogEntry.runtime_build_identity
+                        runtime_artifact_sha256 = [string]$CatalogEntry.runtime_artifact_sha256
                         fallback_used = $false
                     }
                 }
@@ -739,6 +777,22 @@ Write-Output "假 Editor PID=$PID"
     $AggregateRaw = Get-Content -LiteralPath $AggregatePath -Raw
     $AggregateSchemaSnapshotPath = Join-Path $FirstAttempt $Manifest.aggregate_schema.snapshot_path
     Assert-True ($AggregateRaw | Test-Json -SchemaFile $AggregateSchemaSnapshotPath) '聚合结果不符合 attempt 固定 Schema'
+    Assert-SchemaRejectsNoncanonicalCatalog `
+        -DocumentPath (Join-Path $FirstAttempt $Manifest.calibration.request_path) `
+        -SchemaPath $RequestSchemaPath `
+        -Label 'BenchmarkProcessRequest'
+    Assert-SchemaRejectsNoncanonicalCatalog `
+        -DocumentPath (Join-Path $FirstAttempt $Manifest.calibration.raw_path) `
+        -SchemaPath $CalibrationSchemaPath `
+        -Label 'BenchmarkCalibration'
+    Assert-SchemaRejectsNoncanonicalCatalog `
+        -DocumentPath (Join-Path $FirstAttempt $Manifest.process_runs[0].raw_result_path) `
+        -SchemaPath $RawSchemaPath `
+        -Label 'BenchmarkProcessResult'
+    Assert-SchemaRejectsNoncanonicalCatalog `
+        -DocumentPath $AggregatePath `
+        -SchemaPath $AggregateSchemaPath `
+        -Label 'BenchmarkAggregate'
     $Aggregate = $AggregateRaw | ConvertFrom-Json
     Assert-True ($Aggregate.aggregate_schema.sha256 -ceq $Manifest.aggregate_schema.sha256) '聚合结果未记录 aggregate schema 哈希'
     Assert-True ([int]$Aggregate.samples.Count -eq 150) '聚合结果未保留全部 raw samples'
@@ -1015,4 +1069,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 schema_v2=1 raw_samples=150 process_stats=50 cross_process_stats=10 paired=8 identity_rejections=3 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 schema_order_rejections=8 schema_v2=1 raw_samples=150 process_stats=50 cross_process_stats=10 paired=8 identity_rejections=3 mixed_rejections=4'

@@ -134,7 +134,14 @@
       "type": "array",
       "minItems": 5,
       "maxItems": 5,
-      "items": { "$ref": "#/$defs/lane_catalog_entry" }
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "native_cpp" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_reflection" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wamr_interpreter" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_jit" } } }] }
+      ],
+      "items": false
     },
     "lane_catalog_entry": {
       "type": "object",
@@ -143,7 +150,7 @@
         "lane_id", "runtime_id", "runtime_version", "execution_tier", "adapter_id",
         "wasm_workload_kind", "source_wasm_sha256", "execution_artifact_format",
         "execution_artifact_sha256", "compiler_identity", "compiler_flags",
-        "runtime_build_config", "runtime_build_identity", "target_triple",
+        "runtime_build_config", "runtime_build_identity", "runtime_artifact_sha256", "target_triple",
         "cpu_feature_policy", "backend_id", "execution_mode", "fallback_used",
         "lane_identity_sha256"
       ],
@@ -161,6 +168,7 @@
         "compiler_flags": { "type": "array", "items": { "type": "string" } },
         "runtime_build_config": { "type": "string", "minLength": 1 },
         "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "runtime_artifact_sha256": { "$ref": "#/$defs/sha256" },
         "target_triple": { "type": "string", "minLength": 1 },
         "cpu_feature_policy": { "type": "string", "minLength": 1 },
         "backend_id": { "type": ["string", "null"] },

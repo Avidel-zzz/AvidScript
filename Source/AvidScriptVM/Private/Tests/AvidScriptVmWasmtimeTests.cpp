@@ -491,6 +491,17 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+	const FAvidScriptVmBackendInfo& LoadedInfo = Backend->GetBackendInfo();
+	TestEqual(
+		TEXT("loaded runtime artifact identity is SHA-256"),
+		LoadedInfo.RuntimeArtifactSha256.Len(),
+		64);
+	TestEqual(
+		TEXT("runtime build identity binds the loaded DLL"),
+		LoadedInfo.RuntimeBuildIdentity,
+		FString::Printf(
+			TEXT("wasmtime-v45.0.0;cranelift=1;dll_sha256=%s"),
+			*LoadedInfo.RuntimeArtifactSha256));
 	TestTrue(TEXT("RuntimeInitMs is measured"), Backend->GetLoadMetrics().RuntimeInitMs > 0.0);
 	TestTrue(TEXT("ModuleLoadMs is measured"), Backend->GetLoadMetrics().ModuleLoadMs > 0.0);
 	TestTrue(TEXT("ModuleInstantiateMs is measured"), Backend->GetLoadMetrics().ModuleInstantiateMs > 0.0);

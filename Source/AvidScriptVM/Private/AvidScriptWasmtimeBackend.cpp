@@ -6,13 +6,18 @@
 
 #include "Containers/StringConv.h"
 #include "HAL/CriticalSection.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
 
 #ifndef AVIDSCRIPT_WITH_WASMTIME
 #define AVIDSCRIPT_WITH_WASMTIME 0
+#endif
+#ifndef AVIDSCRIPT_WASMTIME_DLL_SHA256
+#define AVIDSCRIPT_WASMTIME_DLL_SHA256 "unavailable"
 #endif
 
 namespace
@@ -21,6 +26,7 @@ FCriticalSection GWasmtimeIdentityCriticalSection;
 FCriticalSection GWasmtimeDllCriticalSection;
 uint64 GNextWasmtimeInstanceIdentity = 1ull << 63;
 void* GWasmtimeDllHandle = nullptr;
+FString GWasmtimeObservedDllSha256;
 
 uint64 AllocateWasmtimeInstanceIdentity()
 {
@@ -39,11 +45,42 @@ double MeasureWasmtimeElapsedMs(double StartSeconds)
 }
 
 #if AVIDSCRIPT_WITH_WASMTIME && PLATFORM_WINDOWS
-bool EnsureWasmtimeDllLoaded(FString& OutError)
+bool GetWasmtimeDllSha256(
+	const FString& Path,
+	FString& OutSha256,
+	FString& OutError)
+{
+	TArray<uint8> Bytes;
+	if (!FFileHelper::LoadFileToArray(Bytes, *Path))
+	{
+		OutError = FString::Printf(
+			TEXT("The Wasmtime DLL could not be read for identity verification: %s"),
+			*Path);
+		return false;
+	}
+	FSHA256Signature Signature;
+	if (!FPlatformMisc::GetSHA256Signature(
+		Bytes.GetData(),
+		static_cast<uint32>(Bytes.Num()),
+		Signature))
+	{
+		OutError = FString::Printf(
+			TEXT("The Wasmtime DLL SHA-256 could not be computed: %s"),
+			*Path);
+		return false;
+	}
+	OutSha256 = Signature.ToString().ToLower();
+	return true;
+}
+
+bool EnsureWasmtimeDllLoaded(
+	FString& OutObservedDllSha256,
+	FString& OutError)
 {
 	FScopeLock Lock(&GWasmtimeDllCriticalSection);
 	if (GWasmtimeDllHandle != nullptr)
 	{
+		OutObservedDllSha256 = GWasmtimeObservedDllSha256;
 		return true;
 	}
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScript"));
@@ -58,13 +95,37 @@ bool EnsureWasmtimeDllLoaded(FString& OutError)
 			Plugin->GetBaseDir(),
 			TEXT("Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0/lib/wasmtime.dll"))
 	};
+	const FString ExpectedDllSha256 =
+		FString(UTF8_TO_TCHAR(AVIDSCRIPT_WASMTIME_DLL_SHA256)).ToLower();
 	for (const FString& Candidate : Candidates)
 	{
 		if (FPaths::FileExists(Candidate))
 		{
+			FString ObservedDllSha256;
+			if (!GetWasmtimeDllSha256(
+				Candidate,
+				ObservedDllSha256,
+				OutError))
+			{
+				return false;
+			}
+			if (!ObservedDllSha256.Equals(
+				ExpectedDllSha256,
+				ESearchCase::CaseSensitive))
+			{
+				OutError = FString::Printf(
+					TEXT("The Wasmtime DLL SHA-256 does not match the linked managed artifact: ")
+					TEXT("path=%s expected=%s observed=%s"),
+					*Candidate,
+					*ExpectedDllSha256,
+					*ObservedDllSha256);
+				return false;
+			}
 			GWasmtimeDllHandle = FPlatformProcess::GetDllHandle(*Candidate);
 			if (GWasmtimeDllHandle != nullptr)
 			{
+				GWasmtimeObservedDllSha256 = ObservedDllSha256;
+				OutObservedDllSha256 = ObservedDllSha256;
 				return true;
 			}
 		}
@@ -284,12 +345,18 @@ public:
 		const double RuntimeInitStart = FPlatformTime::Seconds();
 #if PLATFORM_WINDOWS
 		FString DllLoadError;
-		if (!EnsureWasmtimeDllLoaded(DllLoadError))
+		FString ObservedDllSha256;
+		if (!EnsureWasmtimeDllLoaded(ObservedDllSha256, DllLoadError))
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 			SetWasmtimeError(OutError, TEXT("runtime_init_failed"), DllLoadError);
 			return false;
 		}
+		BackendInfo.RuntimeArtifactSha256 = ObservedDllSha256;
+		BackendInfo.RuntimeBuildIdentity = FString::Printf(
+			TEXT("wasmtime-v%s;cranelift=1;dll_sha256=%s"),
+			*BackendInfo.RuntimeVersion,
+			*ObservedDllSha256);
 #endif
 		Engine = avidscript_wasmtime_engine_new();
 		LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);

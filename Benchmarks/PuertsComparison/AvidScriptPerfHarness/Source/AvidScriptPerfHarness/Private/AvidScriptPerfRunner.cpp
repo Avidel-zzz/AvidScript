@@ -5,11 +5,13 @@
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmReloadTypes.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Containers/StringConv.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
 #include "JSLogger.h"
@@ -32,6 +34,236 @@ namespace
 	constexpr int32 PerfRunnerResultSchemaVersion = 2;
 	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
 	constexpr int32 PerfRunnerSteadyStateConfirmationSamples = 3;
+
+	void AppendCanonicalJsonString(
+		const FString& Value,
+		FString& OutCanonical)
+	{
+		OutCanonical.AppendChar(TEXT('"'));
+		for (const TCHAR Character : Value)
+		{
+			switch (Character)
+			{
+			case TEXT('\b'):
+				OutCanonical.Append(TEXT("\\b"));
+				break;
+			case TEXT('\t'):
+				OutCanonical.Append(TEXT("\\t"));
+				break;
+			case TEXT('\n'):
+				OutCanonical.Append(TEXT("\\n"));
+				break;
+			case TEXT('\f'):
+				OutCanonical.Append(TEXT("\\f"));
+				break;
+			case TEXT('\r'):
+				OutCanonical.Append(TEXT("\\r"));
+				break;
+			case TEXT('"'):
+				OutCanonical.Append(TEXT("\\\""));
+				break;
+			case TEXT('\\'):
+				OutCanonical.Append(TEXT("\\\\"));
+				break;
+			default:
+				if (static_cast<uint32>(Character) < 0x20u)
+				{
+					OutCanonical.Appendf(
+						TEXT("\\u%04x"),
+						static_cast<uint32>(Character));
+				}
+				else
+				{
+					OutCanonical.AppendChar(Character);
+				}
+				break;
+			}
+		}
+		OutCanonical.AppendChar(TEXT('"'));
+	}
+
+	bool AppendCanonicalJsonValue(
+		const TSharedPtr<FJsonValue>& Value,
+		FString& OutCanonical,
+		FString& OutError);
+
+	bool AppendCanonicalJsonObject(
+		const TSharedPtr<FJsonObject>& Object,
+		const FString* ExcludedField,
+		FString& OutCanonical,
+		FString& OutError)
+	{
+		if (!Object.IsValid())
+		{
+			OutError = TEXT("canonical lane catalog contains an invalid object");
+			return false;
+		}
+		TArray<FString> Names;
+		Object->Values.GenerateKeyArray(Names);
+		Names.Sort(
+			[](const FString& Left, const FString& Right)
+			{
+				return Left.Compare(
+					Right,
+					ESearchCase::CaseSensitive) < 0;
+			});
+
+		OutCanonical.AppendChar(TEXT('{'));
+		bool bFirst = true;
+		for (const FString& Name : Names)
+		{
+			if (ExcludedField != nullptr &&
+				Name.Equals(*ExcludedField, ESearchCase::CaseSensitive))
+			{
+				continue;
+			}
+			if (!bFirst)
+			{
+				OutCanonical.AppendChar(TEXT(','));
+			}
+			bFirst = false;
+			AppendCanonicalJsonString(Name, OutCanonical);
+			OutCanonical.AppendChar(TEXT(':'));
+			if (!AppendCanonicalJsonValue(
+				Object->Values.FindChecked(Name),
+				OutCanonical,
+				OutError))
+			{
+				return false;
+			}
+		}
+		OutCanonical.AppendChar(TEXT('}'));
+		return true;
+	}
+
+	bool AppendCanonicalJsonValue(
+		const TSharedPtr<FJsonValue>& Value,
+		FString& OutCanonical,
+		FString& OutError)
+	{
+		if (!Value.IsValid())
+		{
+			OutError = TEXT("canonical lane catalog contains an invalid value");
+			return false;
+		}
+		switch (Value->Type)
+		{
+		case EJson::Null:
+			OutCanonical.Append(TEXT("null"));
+			return true;
+		case EJson::String:
+			AppendCanonicalJsonString(Value->AsString(), OutCanonical);
+			return true;
+		case EJson::Boolean:
+			OutCanonical.Append(
+				Value->AsBool() ? TEXT("true") : TEXT("false"));
+			return true;
+		case EJson::Array:
+		{
+			OutCanonical.AppendChar(TEXT('['));
+			const TArray<TSharedPtr<FJsonValue>>& Items = Value->AsArray();
+			for (int32 Index = 0; Index < Items.Num(); ++Index)
+			{
+				if (Index > 0)
+				{
+					OutCanonical.AppendChar(TEXT(','));
+				}
+				if (!AppendCanonicalJsonValue(
+					Items[Index],
+					OutCanonical,
+					OutError))
+				{
+					return false;
+				}
+			}
+			OutCanonical.AppendChar(TEXT(']'));
+			return true;
+		}
+		case EJson::Object:
+			return AppendCanonicalJsonObject(
+				Value->AsObject(),
+				nullptr,
+				OutCanonical,
+				OutError);
+		default:
+			OutError = TEXT(
+				"canonical lane catalog permits only null, string, boolean, array, and object values");
+			return false;
+		}
+	}
+
+	bool GetCanonicalJsonSha256(
+		const FString& CanonicalJson,
+		FString& OutSha256,
+		FString& OutError)
+	{
+		const FTCHARToUTF8 Utf8(*CanonicalJson);
+		if (Utf8.Length() < 0 ||
+			static_cast<uint64>(Utf8.Length()) > MAX_uint32)
+		{
+			OutError = TEXT("canonical lane catalog UTF-8 payload is too large");
+			return false;
+		}
+		FSHA256Signature Signature;
+		if (!FPlatformMisc::GetSHA256Signature(
+			Utf8.Get(),
+			static_cast<uint32>(Utf8.Length()),
+			Signature))
+		{
+			OutError = TEXT("canonical lane catalog SHA-256 failed");
+			return false;
+		}
+		OutSha256 = Signature.ToString().ToLower();
+		return true;
+	}
+
+	bool GetCanonicalLaneIdentitySha256(
+		const TSharedPtr<FJsonObject>& Entry,
+		FString& OutSha256,
+		FString& OutError)
+	{
+		FString CanonicalJson;
+		const FString ExcludedField = TEXT("lane_identity_sha256");
+		if (!AppendCanonicalJsonObject(
+			Entry,
+			&ExcludedField,
+			CanonicalJson,
+			OutError))
+		{
+			return false;
+		}
+		return GetCanonicalJsonSha256(
+			CanonicalJson,
+			OutSha256,
+			OutError);
+	}
+
+	bool GetCanonicalLaneCatalogSha256(
+		const TArray<TSharedPtr<FJsonValue>>& Catalog,
+		FString& OutSha256,
+		FString& OutError)
+	{
+		FString CanonicalJson(TEXT("["));
+		for (int32 Index = 0; Index < Catalog.Num(); ++Index)
+		{
+			if (Index > 0)
+			{
+				CanonicalJson.AppendChar(TEXT(','));
+			}
+			if (!AppendCanonicalJsonValue(
+				Catalog[Index],
+				CanonicalJson,
+				OutError))
+			{
+				return false;
+			}
+		}
+		CanonicalJson.AppendChar(TEXT(']'));
+		return GetCanonicalJsonSha256(
+			CanonicalJson,
+			OutSha256,
+			OutError);
+	}
 
 	uint32 PerfRunnerMix(const uint32 Value)
 	{
@@ -186,6 +418,7 @@ namespace
 			const FString& ExpectedSourceWasmSha256,
 			const FString& ExpectedTargetTriple,
 			const FString& ExpectedRuntimeBuildIdentity,
+			const FString& ExpectedRuntimeArtifactSha256,
 			AAvidScriptPerfFixture& SharedFixture,
 			FString& OutError)
 		{
@@ -267,25 +500,6 @@ namespace
 				Actual.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmBytecode
 					? TEXT("wasm_bytecode")
 					: TEXT("unsupported");
-			FString ActualRuntimeBuildIdentity;
-			if (Actual.Kind == EAvidScriptVmBackendKind::Wamr &&
-				Actual.ExecutionMode == EAvidScriptVmExecutionMode::Interpreter)
-			{
-				ActualRuntimeBuildIdentity = FString::Printf(
-					TEXT("wamr-v%s-x86_64-windows-fast-interp"),
-					*Actual.RuntimeVersion);
-			}
-			else if (Actual.Kind == EAvidScriptVmBackendKind::Wasmtime &&
-				Actual.ExecutionMode == EAvidScriptVmExecutionMode::Jit)
-			{
-				ActualRuntimeBuildIdentity = FString::Printf(
-					TEXT("wasmtime-v%s-x86_64-windows-c-api"),
-					*Actual.RuntimeVersion);
-			}
-			else
-			{
-				ActualRuntimeBuildIdentity = TEXT("unsupported");
-			}
 			if (!Actual.StableBackendId.Equals(ExpectedBackendId, ESearchCase::CaseSensitive) ||
 				!Actual.RuntimeVersion.Equals(ExpectedRuntimeVersion, ESearchCase::CaseSensitive) ||
 				!ActualExecutionMode.Equals(ExpectedExecutionMode, ESearchCase::CaseSensitive) ||
@@ -295,27 +509,36 @@ namespace
 				(!ExpectedSourceWasmSha256.IsEmpty() &&
 				 !Manifest.WasmSha256.Equals(ExpectedSourceWasmSha256, ESearchCase::CaseSensitive)) ||
 				!Actual.TargetTriple.Equals(ExpectedTargetTriple, ESearchCase::CaseSensitive) ||
-				!ActualRuntimeBuildIdentity.Equals(
-					ExpectedRuntimeBuildIdentity,
-					ESearchCase::CaseSensitive) ||
+				(!ExpectedRuntimeBuildIdentity.IsEmpty() &&
+				 !Actual.RuntimeBuildIdentity.Equals(
+					 ExpectedRuntimeBuildIdentity,
+					 ESearchCase::CaseSensitive)) ||
+				(!ExpectedRuntimeArtifactSha256.IsEmpty() &&
+				 !Actual.RuntimeArtifactSha256.Equals(
+					 ExpectedRuntimeArtifactSha256,
+					 ESearchCase::CaseSensitive)) ||
+				Actual.RuntimeBuildIdentity.IsEmpty() ||
+				Actual.RuntimeArtifactSha256.IsEmpty() ||
 				BackendSelection.bAllowFallback)
 			{
 				OutError = FString::Printf(
 					TEXT("AvidScript benchmark backend provenance mismatch: ")
-					TEXT("expected=%s/%s/%s/%s/%s/%s ")
-					TEXT("actual=%s/%s/%s/%s/%s/%s fallback_used=%s"),
+					TEXT("expected=%s/%s/%s/%s/%s build=%s runtime_artifact=%s ")
+					TEXT("actual=%s/%s/%s/%s/%s build=%s runtime_artifact=%s fallback_used=%s"),
 					*ExpectedBackendId,
 					*ExpectedRuntimeVersion,
 					*ExpectedExecutionMode,
 					*ExpectedArtifactFormat,
 					*ExpectedTargetTriple,
 					*ExpectedRuntimeBuildIdentity,
+					*ExpectedRuntimeArtifactSha256,
 					*Actual.StableBackendId,
 					*Actual.RuntimeVersion,
 					*ActualExecutionMode,
 					*ActualArtifactFormat,
 					*Actual.TargetTriple,
-					*ActualRuntimeBuildIdentity,
+					*Actual.RuntimeBuildIdentity,
+					*Actual.RuntimeArtifactSha256,
 					BackendSelection.bAllowFallback ? TEXT("true") : TEXT("false"));
 				Session.UnloadLive();
 				return false;
@@ -330,7 +553,10 @@ namespace
 			BackendInfoJson->SetStringField(TEXT("target_triple"), Actual.TargetTriple);
 			BackendInfoJson->SetStringField(
 				TEXT("runtime_build_identity"),
-				ActualRuntimeBuildIdentity);
+				Actual.RuntimeBuildIdentity);
+			BackendInfoJson->SetStringField(
+				TEXT("runtime_artifact_sha256"),
+				Actual.RuntimeArtifactSha256);
 			BackendInfoJson->SetBoolField(TEXT("fallback_used"), false);
 			LastHostImportCallCount = ReloadResult.RuntimeResult.HostImportCallCount;
 			return true;
@@ -737,6 +963,7 @@ namespace
 		FString SourceWasmSha256;
 		FString TargetTriple;
 		FString RuntimeBuildIdentity;
+		FString RuntimeArtifactSha256;
 		TSharedPtr<FJsonObject> Json;
 	};
 
@@ -1203,6 +1430,7 @@ namespace
 				!TryGetRequiredString(EntryJson, TEXT("execution_artifact_sha256"), Entry.ArtifactSha256, OutError) ||
 				!TryGetRequiredString(EntryJson, TEXT("target_triple"), Entry.TargetTriple, OutError) ||
 				!TryGetRequiredString(EntryJson, TEXT("runtime_build_identity"), Entry.RuntimeBuildIdentity, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("runtime_artifact_sha256"), Entry.RuntimeArtifactSha256, OutError) ||
 				!EntryJson->TryGetBoolField(TEXT("fallback_used"), bFallbackUsed) ||
 				bFallbackUsed)
 			{
@@ -1220,8 +1448,40 @@ namespace
 			{
 				return false;
 			}
+			FString ComputedLaneIdentitySha256;
+			if (!GetCanonicalLaneIdentitySha256(
+					EntryJson,
+					ComputedLaneIdentitySha256,
+					OutError) ||
+				!ComputedLaneIdentitySha256.Equals(
+					Entry.LaneIdentitySha256,
+					ESearchCase::CaseSensitive))
+			{
+				if (OutError.IsEmpty())
+				{
+					OutError = FString::Printf(
+						TEXT("request lane identity hash mismatch: lane=%s"),
+						*LaneName);
+				}
+				return false;
+			}
 			Entry.Json = EntryJson;
 			OutRequest.LaneCatalog.Add(MoveTemp(Entry));
+		}
+		FString ComputedLaneCatalogSha256;
+		if (!GetCanonicalLaneCatalogSha256(
+				*LaneCatalogValues,
+				ComputedLaneCatalogSha256,
+				OutError) ||
+			!ComputedLaneCatalogSha256.Equals(
+				OutRequest.LaneCatalogSha256,
+				ESearchCase::CaseSensitive))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request lane catalog hash mismatch");
+			}
+			return false;
 		}
 
 		TArray<FString> WorkloadNames;
@@ -2512,6 +2772,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			WamrCatalog.SourceWasmSha256,
 			WamrCatalog.TargetTriple,
 			WamrCatalog.RuntimeBuildIdentity,
+			WamrCatalog.RuntimeArtifactSha256,
 			*Fixture,
 			OutError))
 	{
@@ -2535,6 +2796,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			WasmtimeCatalog.SourceWasmSha256,
 			WasmtimeCatalog.TargetTriple,
 			WasmtimeCatalog.RuntimeBuildIdentity,
+			WasmtimeCatalog.RuntimeArtifactSha256,
 			*Fixture,
 			OutError))
 	{
@@ -2759,7 +3021,8 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			FString(),
 			TEXT("x86_64-pc-windows-msvc"),
-			TEXT("wamr-v2.4.4-x86_64-windows-fast-interp"),
+			FString(),
+			FString(),
 			*Fixture,
 			Error))
 	{
@@ -2780,7 +3043,8 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			FString(),
 			TEXT("x86_64-pc-windows-msvc"),
-			TEXT("wasmtime-v45.0.0-x86_64-windows-c-api"),
+			FString(),
+			FString(),
 			*Fixture,
 			Error))
 	{
