@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0 Important=0；正式 baseline/optimized 各 6000/6000 正确样本；发布证据 Docs/Phase53/P53_Benchmark_Evidence.json；五组 benchmark 合同与聚焦 FourLane.Correctness 通过；Gate 统一 pwsh7 外层并隔离 PS5 合同，短根工程为深层制品预留路径预算；Cold/RSS lane isolation 转入 Phase54。",
+      "completed_at_utc": "2026-07-26T14:27:07.4906953+00:00"
     }
   ],
   "debt": [
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 23,
-  "updated_at_utc": "2026-07-26T14:26:02.7661598+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 24,
+  "updated_at_utc": "2026-07-26T14:27:07.4929996+00:00"
 }
