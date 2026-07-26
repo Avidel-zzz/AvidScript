@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.0 worktree 探测命令再次使用分号连接：为一次读取 `git-dir`、`common-dir`、branch 与 superproject，把四个只读 Git 查询放进同一 PowerShell 命令。虽然没有修改仓库，但再次破坏“一次调用一个逻辑命令”的审计边界。Prevention：每次发送 `shell_command` 前执行字面扫描，命令字符串不得包含 `;`、`&&`、`||`；即使属于同一 worktree 探测步骤，也拆成独立调用，不能以“只读”或“同一目的”为例外。
 - 2026-07-26 P53.5 最终 Gate 临时工程路径预算遗漏：隔离工程位于描述性长目录下，生成 binding reference source 的完整路径达到 261 字符；`pwsh 7 Test-Path` 为 true，但 C# build service 使用的 Windows PowerShell 5 返回 false，prepare 以 `ASBI4202` 拒绝。Prevention：会生成深层 Saved/Intermediate 制品的 UE Gate 工程使用短且唯一的根目录，并在 UBT 前计算最长已知制品路径，Windows PowerShell 5 消费链固定保留低于 240 字符的预算；不能只验证工程根可创建。
 - 2026-07-26 P53.5 最终 Gate 全仓 parser 宿主错误：Gate 外层继续由 Windows PowerShell 5 执行，并用 5.1 parser 扫描包含合法 PowerShell 7 管道续行的 `CheckAvidScriptArchitecture.ps1`，在架构门禁执行前产生假失败。Prevention：最终 Gate 外层、全仓 parser 和架构脚本统一使用 `pwsh 7 -NoProfile`；只有明确验证 Windows PowerShell 5 行为的合同才启动独立 `powershell.exe` 子进程，不能让旧宿主定义全仓语法上限。
 - 2026-07-26 P53.5 最终 Gate PowerShell 宿主选错：新增的 Phase 53 benchmark 合同使用 `Test-Json`，一次性驱动却沿用 PhaseWorkflow 合同的 `powershell.exe` 宿主，Windows PowerShell 5 在执行合同前以 command-not-found 失败。Prevention：PhaseWorkflow 拒绝路径合同保持隔离 `powershell.exe -NoProfile`；使用 PowerShell 7 API 的 benchmark/dependency 合同固定使用已确认的 `pwsh.exe -NoProfile`，Gate 清单按脚本运行时要求分组，不能共用单一宿主。
