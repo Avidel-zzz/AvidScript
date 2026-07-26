@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
-    "version": 1,
-    "sha256": "2e973810534eb6fa786e8aba6818b6cd8eb7b56974ffc036940e9e6445c6fd79",
-    "revision_reason": "initial architecture freeze"
+    "version": 2,
+    "sha256": "9be4255b59c40be5083d6ef729b5721820a9570486fdbb2347455d4d14caef56",
+    "revision_reason": "正式校准证明共享迭代数由最快 lane 放大慢 lane 到不可执行时长；改为 workload x lane 独立校准并只比较归一化 ns/op。"
   },
   "documents": {
     "plan": "Docs/Phase53/P53.1_Puerts_Performance_Comparison_Implementation_Plan.md",
@@ -31,9 +31,9 @@
     },
     {
       "id": "P53.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "正式 warm baseline 完成：AvidScript commit 1ab9c4c81780、Puerts 1977328c8466、UE5.8 Win64 Development Editor；独立 lane 校准，1 calibration + 5 fresh timed processes，5 warmup + 30 timed samples，6,000/6,000 正确；aggregate attempt c7c7209e-f1ec-4ff9-9d06-5fa1a054a90f。P50 几何平均 Avid/Puerts Reflection=6.99x、Avid/Puerts Static=11.82x；中文报告 P53.3_Puerts_Warm_Baseline_Report.md 已记录。",
+      "completed_at_utc": "2026-07-26T10:31:48.4499601+00:00"
     },
     {
       "id": "P53.4",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.3 -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-07-26T07:29:45.3344772+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.4 -Evidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-07-26T10:31:48.4521769+00:00"
 }

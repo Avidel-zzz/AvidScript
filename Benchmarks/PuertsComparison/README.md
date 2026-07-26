@@ -31,4 +31,8 @@ pwsh -NoProfile -File .\Benchmarks\PuertsComparison\Scripts\Install-PuertsBenchm
 
 ## 结果边界
 
-本目录尚未生成正式同机数据前，不代表 AvidScript 已快于 Puerts。只有正确性、版本、采样和 provenance 合同全部通过的 workload 才能进入最终报告。
+正式同机 warm baseline 已于 2026-07-26 完成：5 个独立进程、每进程 5 次 warmup 与 30 次正式 sample，共 6,000 条正确样本。当前 WAMR interpreter 路径尚未快于 Puerts；十项 workload 的 AvidScript/Puerts Reflection P50 比率几何平均为 6.99x。
+
+完整环境、分项结果、校准修正和 P53.4 优化方向见 [P53.3 Puerts 同机 Warm Baseline 报告](../../Docs/Phase53/P53.3_Puerts_Warm_Baseline_Report.md)。
+
+只有正确性、版本、采样和 provenance 合同全部通过的 workload 才能进入正式报告。Cold 启动与稳定内存将单独报告，不与 warm 排名混合。
