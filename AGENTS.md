@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.3 SDD 报告跟踪错误：实现代理使用强制暂存，把已被忽略的 `.superpowers/sdd/.../task-P53.3-clean-project-report.md` 纳入产品提交。Prevention：`.superpowers` 必须持续保持忽略；每次 Phase 提交前用显式 commit path allowlist 校验全部 staged paths，并机械拒绝任何 `.superpowers/` 路径，禁止 `git add -f`。
 - 2026-07-26 P53 首版 benchmark 公平性设计错误：共享 fixture 最初是 `UObject`，但 AvidScript profile Self 合同要求 `AActor`；三条 lane 又各自创建对象，Puerts static 通过额外 UObject 参数的全静态 proxy 调用，属性 workload 实际调用 getter/setter 函数，且 AvidScript 用额外 UFUNCTION crossing 发布 checksum。Prevention：跨框架 benchmark 在首次 UBT 前完成独立语义复审；所有 lane 复用同一 Actor fixture，static lane 使用实例 `.Method/.Property`，property workload 必须走正式属性表面，guest 结果通过计时外 state/memory slot读取，不允许某一 lane 独占额外 crossing。
 - 2026-07-26 P53 事件 seed 精度错误：首版准备把任意 int32 seed 数值传入 `avid_on_event` 的 float 参数，固定 seed `1397313073` 无法被 float 精确表示，会让 C# checksum 与 Native/JS 确定性分叉。Prevention：复用 float 事件 ABI 的整数 benchmark seed 固定在有符号 24 位精确范围并由 profile validator 断言；需要完整 int32 输入时新增通用 int32 export/call contract，禁止依靠 float 数值往返或 NaN bit-cast。
 - 2026-07-26 P53 PowerShell 单行输出解包错误：dependency installer 的 Git helper 返回单行字符串时被 pipeline 自动解包，调用方直接 `(...)[-1]` 取得最后一个 `Char`，随后 `Trim()` 失败；安装在 stage 创建前停止。Prevention：所有可能返回一行或多行的 native helper 消费点先用 `@(...)` 捕获，再把末项显式转为 `[string]`；合同至少覆盖 remote、commit 和 tree 三个单行命令。

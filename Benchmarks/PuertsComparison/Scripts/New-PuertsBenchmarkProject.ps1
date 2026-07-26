@@ -24,6 +24,136 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not ('AvidScript.P53Benchmark.NativePath' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace AvidScript.P53Benchmark
+{
+    public static class NativePath
+    {
+        private const uint FileShareRead = 0x00000001;
+        private const uint FileShareWrite = 0x00000002;
+        private const uint FileShareDelete = 0x00000004;
+        private const uint OpenExisting = 3;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            SafeFileHandle file,
+            StringBuilder filePath,
+            uint filePathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(
+            string path,
+            IntPtr securityAttributes);
+
+        public static string ResolveExistingPath(string path)
+        {
+            using (SafeFileHandle handle = CreateFileW(
+                path,
+                0,
+                FileShareRead | FileShareWrite | FileShareDelete,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics,
+                IntPtr.Zero))
+            {
+                if (handle.IsInvalid)
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "CreateFileW failed while resolving path: " + path);
+                }
+
+                int capacity = 512;
+                while (true)
+                {
+                    StringBuilder buffer = new StringBuilder(capacity);
+                    uint length = GetFinalPathNameByHandleW(
+                        handle,
+                        buffer,
+                        checked((uint)buffer.Capacity),
+                        0);
+                    if (length == 0)
+                    {
+                        throw new Win32Exception(
+                            Marshal.GetLastWin32Error(),
+                            "GetFinalPathNameByHandleW failed for path: " + path);
+                    }
+
+                    if (length < buffer.Capacity)
+                    {
+                        return NormalizeDosPath(buffer.ToString());
+                    }
+
+                    capacity = checked((int)length + 1);
+                }
+            }
+        }
+
+        public static void CreateNewDirectory(string path)
+        {
+            if (!CreateDirectoryW(path, IntPtr.Zero))
+            {
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(),
+                    "CreateDirectoryW failed for path: " + path);
+            }
+        }
+
+        private static string NormalizeDosPath(string path)
+        {
+            const string uncPrefix = @"\\?\UNC\";
+            const string dosPrefix = @"\\?\";
+            if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + path.Substring(uncPrefix.Length);
+            }
+
+            if (path.StartsWith(dosPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return path.Substring(dosPrefix.Length);
+            }
+
+            return path;
+        }
+    }
+}
+'@
+}
+
+function ConvertTo-NormalizedAbsolutePath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $FullPath = [System.IO.Path]::GetFullPath($Path)
+    $Root = [System.IO.Path]::GetPathRoot($FullPath)
+    if ($FullPath.Length -gt $Root.Length) {
+        $FullPath = $FullPath.TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
+    }
+
+    return $FullPath
+}
+
 function Resolve-CanonicalExistingPath {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -32,23 +162,59 @@ function Resolve-CanonicalExistingPath {
         [Parameter(Mandatory = $true)][string]$Label
     )
 
-    if (-not (Test-Path -LiteralPath $Path -PathType $PathType)) {
+    $AbsolutePath = ConvertTo-NormalizedAbsolutePath -Path $Path
+    if (-not (Test-Path -LiteralPath $AbsolutePath -PathType $PathType)) {
         throw "$Code $Label does not exist or has the wrong type: $Path"
     }
 
-    return [System.IO.Path]::GetFullPath((Get-Item -LiteralPath $Path -Force -ErrorAction Stop).FullName)
+    try {
+        return ConvertTo-NormalizedAbsolutePath -Path (
+            [AvidScript.P53Benchmark.NativePath]::ResolveExistingPath($AbsolutePath))
+    }
+    catch {
+        throw "$Code $Label could not be resolved to its final Windows target: $AbsolutePath`n$($_.Exception.Message)"
+    }
 }
 
 function Resolve-CanonicalOutputRoot {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $Resolved = [System.IO.Path]::GetFullPath($Path)
-    if (Test-Path -LiteralPath $Resolved -PathType Leaf) {
-        throw "ASP53B1006 OutputRoot must be a directory path: $Resolved"
+    $AbsolutePath = ConvertTo-NormalizedAbsolutePath -Path $Path
+    if (Test-Path -LiteralPath $AbsolutePath -PathType Leaf) {
+        throw "ASP53B1006 OutputRoot must be a directory path: $AbsolutePath"
+    }
+    if (Test-Path -LiteralPath $AbsolutePath -PathType Container) {
+        return Resolve-CanonicalExistingPath -Path $AbsolutePath -PathType Container `
+            -Code 'ASP53B1006' -Label 'OutputRoot'
     }
 
-    [System.IO.Directory]::CreateDirectory($Resolved) | Out-Null
-    return $Resolved
+    $MissingComponents = [System.Collections.Generic.List[string]]::new()
+    $ExistingAncestor = $AbsolutePath
+    while (-not (Test-Path -LiteralPath $ExistingAncestor)) {
+        $Component = [System.IO.Path]::GetFileName($ExistingAncestor)
+        if ([string]::IsNullOrEmpty($Component)) {
+            throw "ASP53B1006 OutputRoot has no resolvable existing ancestor: $AbsolutePath"
+        }
+
+        $MissingComponents.Insert(0, $Component)
+        $Parent = [System.IO.Path]::GetDirectoryName($ExistingAncestor)
+        if ([string]::IsNullOrEmpty($Parent) -or $Parent -ceq $ExistingAncestor) {
+            throw "ASP53B1006 OutputRoot has no resolvable existing ancestor: $AbsolutePath"
+        }
+        $ExistingAncestor = $Parent
+    }
+
+    if (-not (Test-Path -LiteralPath $ExistingAncestor -PathType Container)) {
+        throw "ASP53B1006 OutputRoot ancestor must be a directory: $ExistingAncestor"
+    }
+
+    $Resolved = Resolve-CanonicalExistingPath -Path $ExistingAncestor -PathType Container `
+        -Code 'ASP53B1006' -Label 'OutputRoot ancestor'
+    foreach ($Component in $MissingComponents) {
+        $Resolved = Join-Path $Resolved $Component
+    }
+
+    return ConvertTo-NormalizedAbsolutePath -Path $Resolved
 }
 
 function Test-IsLowerHex40 {
@@ -80,14 +246,14 @@ function Get-NormalizedPathPrefix {
         [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 }
 
-function Test-PathWithin {
+function Test-ResolvedPathWithin {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Root
     )
 
-    $ResolvedPath = [System.IO.Path]::GetFullPath($Path)
-    $ResolvedRoot = [System.IO.Path]::GetFullPath($Root)
+    $ResolvedPath = ConvertTo-NormalizedAbsolutePath -Path $Path
+    $ResolvedRoot = ConvertTo-NormalizedAbsolutePath -Path $Root
     if ($ResolvedPath -ieq $ResolvedRoot) {
         return $true
     }
@@ -102,14 +268,14 @@ function Assert-NoOverlapWithDestination {
     )
 
     foreach ($PluginPath in $PluginPaths) {
-        if ((Test-PathWithin -Path $AttemptPath -Root $PluginPath) -or
-            (Test-PathWithin -Path $PluginPath -Root $AttemptPath)) {
+        if ((Test-ResolvedPathWithin -Path $AttemptPath -Root $PluginPath) -or
+            (Test-ResolvedPathWithin -Path $PluginPath -Root $AttemptPath)) {
             throw "ASP53B1200 source/destination overlap is not allowed: plugin=$PluginPath destination=$AttemptPath"
         }
     }
 }
 
-function New-UniqueAttemptDirectory {
+function Get-UniqueAttemptPath {
     param([Parameter(Mandatory = $true)][string]$Root)
 
     $Stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -119,11 +285,39 @@ function New-UniqueAttemptDirectory {
             continue
         }
 
-        New-Item -ItemType Directory -Path $Candidate -ErrorAction Stop | Out-Null
-        return [System.IO.Path]::GetFullPath($Candidate)
+        return ConvertTo-NormalizedAbsolutePath -Path $Candidate
     }
 
-    throw "ASP53B1201 could not allocate a unique attempt directory under $Root"
+    throw "ASP53B1201 could not select a unique attempt directory under $Root"
+}
+
+function New-ValidatedAttemptDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputRoot,
+        [Parameter(Mandatory = $true)][string]$AttemptPath
+    )
+
+    [System.IO.Directory]::CreateDirectory($OutputRoot) | Out-Null
+    $CreatedOutputRoot = Resolve-CanonicalExistingPath -Path $OutputRoot -PathType Container `
+        -Code 'ASP53B1201' -Label 'created OutputRoot'
+    if ($CreatedOutputRoot -ine $OutputRoot) {
+        throw "ASP53B1201 OutputRoot target changed before creation: actual=$CreatedOutputRoot expected=$OutputRoot"
+    }
+
+    try {
+        [AvidScript.P53Benchmark.NativePath]::CreateNewDirectory($AttemptPath)
+    }
+    catch {
+        throw "ASP53B1201 refused to reuse or overwrite attempt directory: $AttemptPath`n$($_.Exception.Message)"
+    }
+
+    $CreatedAttemptPath = Resolve-CanonicalExistingPath -Path $AttemptPath -PathType Container `
+        -Code 'ASP53B1201' -Label 'created attempt directory'
+    if ($CreatedAttemptPath -ine $AttemptPath) {
+        throw "ASP53B1201 attempt target changed during creation: actual=$CreatedAttemptPath expected=$AttemptPath"
+    }
+
+    return $CreatedAttemptPath
 }
 
 function Write-NewTextFile {
@@ -246,8 +440,9 @@ function New-ProjectJunction {
         throw "$Code created item is not a junction: $Path"
     }
 
-    $ResolvedTarget = [System.IO.Path]::GetFullPath([string]$Item.Target)
-    if ($ResolvedTarget -cne $Target) {
+    $ResolvedTarget = Resolve-CanonicalExistingPath -Path $Path -PathType Container `
+        -Code $Code -Label 'created junction'
+    if ($ResolvedTarget -ine $Target) {
         throw "$Code junction target mismatch: path=$Path target=$ResolvedTarget expected=$Target"
     }
 }
@@ -257,7 +452,21 @@ $ResolvedSourceProjectPath = Resolve-CanonicalExistingPath -Path $SourceProjectP
 if ([System.IO.Path]::GetExtension($ResolvedSourceProjectPath) -cne '.uproject') {
     throw "ASP53B1000 SourceProjectPath must point to a .uproject file: $ResolvedSourceProjectPath"
 }
-$ResolvedSourceProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $ResolvedSourceProjectPath))
+$ResolvedSourceProjectRoot = Resolve-CanonicalExistingPath `
+    -Path (Split-Path -Parent $ResolvedSourceProjectPath) `
+    -PathType Container `
+    -Code 'ASP53B1000' `
+    -Label 'source project root'
+$ResolvedSourceDirectory = Resolve-CanonicalExistingPath `
+    -Path (Join-Path $ResolvedSourceProjectRoot 'Source') `
+    -PathType Container `
+    -Code 'ASP53B1000' `
+    -Label 'source project Source directory'
+$ResolvedConfigDirectory = Resolve-CanonicalExistingPath `
+    -Path (Join-Path $ResolvedSourceProjectRoot 'Config') `
+    -PathType Container `
+    -Code 'ASP53B1000' `
+    -Label 'source project Config directory'
 
 $ResolvedAvidScriptPluginPath = Resolve-CanonicalExistingPath -Path $AvidScriptPluginPath -PathType Container `
     -Code 'ASP53B1001' -Label 'AvidScriptPluginPath'
@@ -276,7 +485,7 @@ $ResolvedHarnessPluginPath = Resolve-CanonicalExistingPath -Path $HarnessPluginP
 if (-not (Test-Path -LiteralPath (Join-Path $ResolvedHarnessPluginPath 'AvidScriptPerfHarness.uplugin') -PathType Leaf)) {
     throw "ASP53B1003 HarnessPluginPath must contain AvidScriptPerfHarness.uplugin: $ResolvedHarnessPluginPath"
 }
-if (-not (Test-PathWithin -Path $ResolvedHarnessPluginPath -Root $ResolvedAvidScriptPluginPath)) {
+if (-not (Test-ResolvedPathWithin -Path $ResolvedHarnessPluginPath -Root $ResolvedAvidScriptPluginPath)) {
     throw "ASP53B1003 HarnessPluginPath must stay inside the candidate worktree: $ResolvedHarnessPluginPath"
 }
 
@@ -290,15 +499,31 @@ if (-not (Test-IsLowerHex40 -Value $ExpectedAvidScriptTree)) {
 }
 
 $GitTopLevel = (@(Invoke-Git -RepositoryPath $ResolvedAvidScriptPluginPath -Code 'ASP53B1100' rev-parse --show-toplevel))[0].Trim()
-if ([System.IO.Path]::GetFullPath($GitTopLevel) -cne $ResolvedAvidScriptPluginPath) {
+$ResolvedGitTopLevel = Resolve-CanonicalExistingPath -Path $GitTopLevel -PathType Container `
+    -Code 'ASP53B1100' -Label 'Git worktree root'
+if ($ResolvedGitTopLevel -ine $ResolvedAvidScriptPluginPath) {
     throw "ASP53B1100 AvidScriptPluginPath must be the Git worktree root: $ResolvedAvidScriptPluginPath"
 }
 
 $GitDir = (@(Invoke-Git -RepositoryPath $ResolvedAvidScriptPluginPath -Code 'ASP53B1101' rev-parse --git-dir))[0].Trim()
 $GitCommonDir = (@(Invoke-Git -RepositoryPath $ResolvedAvidScriptPluginPath -Code 'ASP53B1101' rev-parse --git-common-dir))[0].Trim()
-$ResolvedGitDir = [System.IO.Path]::GetFullPath((Join-Path $ResolvedAvidScriptPluginPath $GitDir))
-$ResolvedGitCommonDir = [System.IO.Path]::GetFullPath((Join-Path $ResolvedAvidScriptPluginPath $GitCommonDir))
-if ($ResolvedGitDir -ceq $ResolvedGitCommonDir) {
+$GitDirPath = if ([System.IO.Path]::IsPathFullyQualified($GitDir)) {
+    $GitDir
+}
+else {
+    Join-Path $ResolvedAvidScriptPluginPath $GitDir
+}
+$GitCommonDirPath = if ([System.IO.Path]::IsPathFullyQualified($GitCommonDir)) {
+    $GitCommonDir
+}
+else {
+    Join-Path $ResolvedAvidScriptPluginPath $GitCommonDir
+}
+$ResolvedGitDir = Resolve-CanonicalExistingPath -Path $GitDirPath -PathType Container `
+    -Code 'ASP53B1101' -Label 'Git directory'
+$ResolvedGitCommonDir = Resolve-CanonicalExistingPath -Path $GitCommonDirPath -PathType Container `
+    -Code 'ASP53B1101' -Label 'Git common directory'
+if ($ResolvedGitDir -ieq $ResolvedGitCommonDir) {
     throw "ASP53B1101 AvidScriptPluginPath is not a linked Git worktree: $ResolvedAvidScriptPluginPath"
 }
 
@@ -317,21 +542,22 @@ if (($StatusOutput -join "`n").Trim().Length -ne 0) {
     throw "ASP53B1105 candidate worktree must be clean: $($StatusOutput -join '; ')"
 }
 
-$AttemptPath = New-UniqueAttemptDirectory -Root $ResolvedOutputRoot
+$AttemptPath = Get-UniqueAttemptPath -Root $ResolvedOutputRoot
 Assert-NoOverlapWithDestination -AttemptPath $AttemptPath -PluginPaths @(
     $ResolvedAvidScriptPluginPath,
     $ResolvedPuertsPluginPath,
     $ResolvedHarnessPluginPath
 )
+$AttemptPath = New-ValidatedAttemptDirectory -OutputRoot $ResolvedOutputRoot -AttemptPath $AttemptPath
 
 $AttemptProjectPath = Join-Path $AttemptPath ([System.IO.Path]::GetFileName($ResolvedSourceProjectPath))
 Copy-NewFile -Source $ResolvedSourceProjectPath -Destination $AttemptProjectPath -Code 'ASP53B1202'
 
 New-ProjectJunction -Path (Join-Path $AttemptPath 'Source') `
-    -Target ([System.IO.Path]::GetFullPath((Join-Path $ResolvedSourceProjectRoot 'Source'))) `
+    -Target $ResolvedSourceDirectory `
     -Code 'ASP53B1203'
 New-ProjectJunction -Path (Join-Path $AttemptPath 'Config') `
-    -Target ([System.IO.Path]::GetFullPath((Join-Path $ResolvedSourceProjectRoot 'Config'))) `
+    -Target $ResolvedConfigDirectory `
     -Code 'ASP53B1203'
 New-ProjectJunction -Path (Join-Path $AttemptPath 'Plugins\AvidScript') `
     -Target $ResolvedAvidScriptPluginPath `
@@ -351,8 +577,8 @@ $Marker = [ordered]@{
     candidate_commit = $ActualCommit
     candidate_tree = $ActualTree
     junctions = [ordered]@{
-        Source = [System.IO.Path]::GetFullPath((Join-Path $ResolvedSourceProjectRoot 'Source'))
-        Config = [System.IO.Path]::GetFullPath((Join-Path $ResolvedSourceProjectRoot 'Config'))
+        Source = $ResolvedSourceDirectory
+        Config = $ResolvedConfigDirectory
         AvidScript = $ResolvedAvidScriptPluginPath
         Puerts = $ResolvedPuertsPluginPath
         AvidScriptPerfHarness = $ResolvedHarnessPluginPath

@@ -82,6 +82,15 @@ function Assert-JunctionTarget {
     Assert-Equal ([System.IO.Path]::GetFullPath(([string]$Item.Target))) $ExpectedTarget "junction target mismatch for $Path"
 }
 
+function Assert-PathAbsent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+
+    Assert-True (-not (Test-Path -LiteralPath $Path)) "$Message path=$Path"
+}
+
 Assert-True (Test-Path -LiteralPath $BootstrapPath -PathType Leaf) "missing source file $BootstrapPath"
 
 $ParserErrors = $null
@@ -205,6 +214,7 @@ try {
     Assert-Equal ((Get-FileHash -LiteralPath $MarkerPath -Algorithm SHA256).Hash) $FirstMarkerHash 'second run overwrote the first marker'
 
     $DirtyMarkerPath = Join-Path $CandidateWorktreePath 'dirty.txt'
+    $DirtyRejectedOutputRoot = Join-Path $FixtureRoot 'DirtyRejectedOutput'
     Write-Utf8NoBom -Path $DirtyMarkerPath -Value "dirty`n"
     Invoke-ExpectedFailure {
         & $BootstrapPath `
@@ -212,36 +222,41 @@ try {
             -AvidScriptPluginPath $CandidateWorktreePath `
             -PuertsPluginPath $PuertsPluginPath `
             -HarnessPluginPath $HarnessPluginPath `
-            -OutputRoot $OutputRoot `
+            -OutputRoot $DirtyRejectedOutputRoot `
             -ExpectedAvidScriptCommit $ExpectedCommit `
             -ExpectedAvidScriptTree $ExpectedTree | Out-Null
     } 'ASP53B1105'
+    Assert-PathAbsent -Path $DirtyRejectedOutputRoot -Message 'dirty rejection created an output directory'
     Remove-Item -LiteralPath $DirtyMarkerPath -Force
 
+    $CommitRejectedOutputRoot = Join-Path $FixtureRoot 'CommitRejectedOutput'
     Invoke-ExpectedFailure {
         & $BootstrapPath `
             -SourceProjectPath $SourceProjectPath `
             -AvidScriptPluginPath $CandidateWorktreePath `
             -PuertsPluginPath $PuertsPluginPath `
             -HarnessPluginPath $HarnessPluginPath `
-            -OutputRoot $OutputRoot `
+            -OutputRoot $CommitRejectedOutputRoot `
             -ExpectedAvidScriptCommit ('0' * 40) `
             -ExpectedAvidScriptTree $ExpectedTree | Out-Null
     } 'ASP53B1103'
+    Assert-PathAbsent -Path $CommitRejectedOutputRoot -Message 'commit rejection created an output directory'
 
+    $TreeRejectedOutputRoot = Join-Path $FixtureRoot 'TreeRejectedOutput'
     Invoke-ExpectedFailure {
         & $BootstrapPath `
             -SourceProjectPath $SourceProjectPath `
             -AvidScriptPluginPath $CandidateWorktreePath `
             -PuertsPluginPath $PuertsPluginPath `
             -HarnessPluginPath $HarnessPluginPath `
-            -OutputRoot $OutputRoot `
+            -OutputRoot $TreeRejectedOutputRoot `
             -ExpectedAvidScriptCommit $ExpectedCommit `
             -ExpectedAvidScriptTree ('1' * 40) | Out-Null
     } 'ASP53B1104'
+    Assert-PathAbsent -Path $TreeRejectedOutputRoot -Message 'tree rejection created an output directory'
 
+    $NestedOutputRoot = Join-Path $CandidateWorktreePath 'OutputInsideCandidate'
     Invoke-ExpectedFailure {
-        $NestedOutputRoot = Join-Path $CandidateWorktreePath 'OutputInsideCandidate'
         & $BootstrapPath `
             -SourceProjectPath $SourceProjectPath `
             -AvidScriptPluginPath $CandidateWorktreePath `
@@ -251,6 +266,57 @@ try {
             -ExpectedAvidScriptCommit $ExpectedCommit `
             -ExpectedAvidScriptTree $ExpectedTree | Out-Null
     } 'ASP53B1200'
+    Assert-PathAbsent -Path $NestedOutputRoot -Message 'direct overlap rejection created an output directory'
+
+    $CandidateAliasContainer = Join-Path $FixtureRoot 'CandidateAliasContainer'
+    New-Item -ItemType Directory -Path $CandidateAliasContainer | Out-Null
+    $CandidateAliasPath = Join-Path $CandidateAliasContainer 'CandidateAlias'
+    New-Item -ItemType Junction -Path $CandidateAliasPath -Target $CandidateWorktreePath | Out-Null
+    $AliasedNestedOutputRoot = Join-Path $CandidateAliasPath 'OutputThroughAlias'
+    Invoke-ExpectedFailure {
+        & $BootstrapPath `
+            -SourceProjectPath $SourceProjectPath `
+            -AvidScriptPluginPath $CandidateWorktreePath `
+            -PuertsPluginPath $PuertsPluginPath `
+            -HarnessPluginPath $HarnessPluginPath `
+            -OutputRoot $AliasedNestedOutputRoot `
+            -ExpectedAvidScriptCommit $ExpectedCommit `
+            -ExpectedAvidScriptTree $ExpectedTree | Out-Null
+    } 'ASP53B1200'
+    Assert-PathAbsent -Path $AliasedNestedOutputRoot -Message 'aliased overlap rejection created an output directory'
+    Assert-PathAbsent -Path (Join-Path $CandidateWorktreePath 'OutputThroughAlias') `
+        -Message 'aliased overlap rejection wrote through the junction target'
+
+    $AliasedPluginTargetRoot = Join-Path $FixtureRoot 'AliasedPluginTarget'
+    $AliasedPluginTarget = Join-Path $AliasedPluginTargetRoot 'Nested\Puerts'
+    Write-Utf8NoBom -Path (Join-Path $AliasedPluginTarget 'Puerts.uplugin') -Value "{`n  `"FileVersion`": 3`n}`n"
+    $AliasedPluginContainer = Join-Path $FixtureRoot 'AliasedPluginContainer'
+    New-Item -ItemType Directory -Path $AliasedPluginContainer | Out-Null
+    $IntermediatePluginAlias = Join-Path $AliasedPluginContainer 'TargetAlias'
+    New-Item -ItemType Junction -Path $IntermediatePluginAlias -Target $AliasedPluginTargetRoot | Out-Null
+    $AliasedPuertsPluginPath = Join-Path $IntermediatePluginAlias 'Nested\Puerts'
+    $AliasedPluginEntriesBefore = @(
+        Get-ChildItem -LiteralPath $AliasedPluginTarget -Force |
+            ForEach-Object { $_.Name } |
+            Sort-Object
+    )
+    Invoke-ExpectedFailure {
+        & $BootstrapPath `
+            -SourceProjectPath $SourceProjectPath `
+            -AvidScriptPluginPath $CandidateWorktreePath `
+            -PuertsPluginPath $AliasedPuertsPluginPath `
+            -HarnessPluginPath $HarnessPluginPath `
+            -OutputRoot $AliasedPluginTarget `
+            -ExpectedAvidScriptCommit $ExpectedCommit `
+            -ExpectedAvidScriptTree $ExpectedTree | Out-Null
+    } 'ASP53B1200'
+    $AliasedPluginEntriesAfter = @(
+        Get-ChildItem -LiteralPath $AliasedPluginTarget -Force |
+            ForEach-Object { $_.Name } |
+            Sort-Object
+    )
+    Assert-Equal ($AliasedPluginEntriesAfter -join '|') ($AliasedPluginEntriesBefore -join '|') `
+        'intermediate plugin alias rejection created an attempt directory'
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {
@@ -258,4 +324,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=1 junctions=5 marker=1 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejection=1 generated_dirs=4 privacy=1'
+Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=1 junctions=5 marker=1 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejections=3 alias_overlap_rejections=2 no_write_rejections=6 generated_dirs=4 privacy=1'
