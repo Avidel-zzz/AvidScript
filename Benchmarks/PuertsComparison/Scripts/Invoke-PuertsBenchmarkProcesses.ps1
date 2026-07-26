@@ -76,6 +76,7 @@ $AggregatorPath = Join-Path $ScriptRoot 'Merge-PuertsBenchmarkResults.ps1'
 $ResolvedProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
 $ResolvedEditorExecutable = [System.IO.Path]::GetFullPath($EditorExecutable)
 $ResolvedProfilePath = [System.IO.Path]::GetFullPath($ProfilePath)
+$CanonicalProfilePath = [System.IO.Path]::GetFullPath((Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json'))
 $ResolvedRequestSchemaPath = [System.IO.Path]::GetFullPath($RequestSchemaPath)
 $ResolvedCalibrationSchemaPath = [System.IO.Path]::GetFullPath($CalibrationSchemaPath)
 $ResolvedResultSchemaPath = [System.IO.Path]::GetFullPath($ResultSchemaPath)
@@ -178,14 +179,30 @@ if (@($EditorPrefixArguments).Count -gt 0) {
 
 $Profile = Read-SidecarJson -Path $ResolvedProfilePath -Code 'ASP53S2106'
 Test-SidecarProfile -Profile $Profile
-$IsFormalProfile =
-    [int]$Profile.process_runs -eq 5 -and
-    [int]$Profile.warmup_samples -eq 5 -and
-    [int]$Profile.timed_samples -eq 30 -and
-    [Math]::Abs([double]$Profile.minimum_sample_milliseconds - 5.0) -lt 0.000000001
-if (-not $IsFormalProfile -and -not $AllowNonFormalProfile) {
-    throw 'ASP53S2115 正式 benchmark 必须固定 process_runs=5、warmup_samples=5、timed_samples=30、minimum_sample_milliseconds=5.0；开发合同需显式使用 -AllowNonFormalProfile'
+if (-not $AllowNonFormalProfile) {
+    $CanonicalProfileSha = Get-SidecarFileSha256 -Path $CanonicalProfilePath
+    $SelectedProfileSha = Get-SidecarFileSha256 -Path $ResolvedProfilePath
+    $ProfilesMatch = $CanonicalProfileSha -ceq $SelectedProfileSha -and
+        [System.Linq.Enumerable]::SequenceEqual(
+            [byte[]][System.IO.File]::ReadAllBytes($CanonicalProfilePath),
+            [byte[]][System.IO.File]::ReadAllBytes($ResolvedProfilePath))
+    if (-not $ProfilesMatch) {
+        throw 'ASP53S2115 formal benchmark requires the tracked Config/BenchmarkProfile.json bytes and SHA-256; use -AllowNonFormalProfile only for development contracts'
+    }
 }
+
+Assert-SidecarBenchmarkProjectProvenance `
+    -ProjectPath $ResolvedProjectPath `
+    -AvidScriptCommit $AvidScriptCommit `
+    -AvidScriptTreeSha $AvidScriptTreeSha | Out-Null
+Assert-SidecarPuertsManagedMarker `
+    -ProjectPath $ResolvedProjectPath `
+    -PuertsCommit $PuertsCommit `
+    -PuertsBackendSha256 $PuertsBackendSha256
+Assert-SidecarFormalArtifacts `
+    -ProjectPath $ResolvedProjectPath `
+    -WasmSha256 $WasmSha256 `
+    -ManifestSha256 $ManifestSha256
 $RequestSchema = Read-SidecarJson -Path $ResolvedRequestSchemaPath -Code 'ASP53S2107'
 $CalibrationSchema = Read-SidecarJson -Path $ResolvedCalibrationSchemaPath -Code 'ASP53S2107'
 $ResultSchema = Read-SidecarJson -Path $ResolvedResultSchemaPath -Code 'ASP53S2107'

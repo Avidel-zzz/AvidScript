@@ -23,6 +23,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptRoot 'PuertsBenchmarkSidecar.Common.ps1')
 
 if (-not ('AvidScript.P53Benchmark.NativePath' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -264,13 +266,13 @@ function Test-ResolvedPathWithin {
 function Assert-NoOverlapWithDestination {
     param(
         [Parameter(Mandatory = $true)][string]$AttemptPath,
-        [Parameter(Mandatory = $true)][string[]]$PluginPaths
+        [Parameter(Mandatory = $true)][string[]]$SourcePaths
     )
 
-    foreach ($PluginPath in $PluginPaths) {
-        if ((Test-ResolvedPathWithin -Path $AttemptPath -Root $PluginPath) -or
-            (Test-ResolvedPathWithin -Path $PluginPath -Root $AttemptPath)) {
-            throw "ASP53B1200 source/destination overlap is not allowed: plugin=$PluginPath destination=$AttemptPath"
+    foreach ($SourcePath in $SourcePaths) {
+        if ((Test-ResolvedPathWithin -Path $AttemptPath -Root $SourcePath) -or
+            (Test-ResolvedPathWithin -Path $SourcePath -Root $AttemptPath)) {
+            throw "ASP53B1200 source/destination overlap is not allowed: source=$SourcePath destination=$AttemptPath"
         }
     }
 }
@@ -543,7 +545,9 @@ if (($StatusOutput -join "`n").Trim().Length -ne 0) {
 }
 
 $AttemptPath = Get-UniqueAttemptPath -Root $ResolvedOutputRoot
-Assert-NoOverlapWithDestination -AttemptPath $AttemptPath -PluginPaths @(
+Assert-NoOverlapWithDestination -AttemptPath $AttemptPath -SourcePaths @(
+    $ResolvedSourceDirectory,
+    $ResolvedConfigDirectory,
     $ResolvedAvidScriptPluginPath,
     $ResolvedPuertsPluginPath,
     $ResolvedHarnessPluginPath
@@ -570,12 +574,24 @@ New-ProjectJunction -Path (Join-Path $AttemptPath 'Plugins\AvidScriptPerfHarness
     -Code 'ASP53B1203'
 
 $MarkerPath = Join-Path $AttemptPath 'benchmark-project.json'
+$SourceDigest = Get-SidecarDirectoryContentDigest -Path $ResolvedSourceDirectory
+$ConfigDigest = Get-SidecarDirectoryContentDigest -Path $ResolvedConfigDirectory
 $Marker = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     created_utc = [System.DateTimeOffset]::UtcNow.ToString('o')
     project_filename = [System.IO.Path]::GetFileName($ResolvedSourceProjectPath)
     candidate_commit = $ActualCommit
     candidate_tree = $ActualTree
+    source = [ordered]@{
+        canonical_path = $ResolvedSourceDirectory
+        content_sha256 = [string]$SourceDigest.content_sha256
+        file_count = [int]$SourceDigest.file_count
+    }
+    config = [ordered]@{
+        canonical_path = $ResolvedConfigDirectory
+        content_sha256 = [string]$ConfigDigest.content_sha256
+        file_count = [int]$ConfigDigest.file_count
+    }
     junctions = [ordered]@{
         Source = $ResolvedSourceDirectory
         Config = $ResolvedConfigDirectory

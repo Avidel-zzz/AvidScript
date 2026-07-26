@@ -53,6 +53,56 @@ function Get-TestFileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-TestDirectoryDigest {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Root = [System.IO.Path]::GetFullPath($Path).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $Entries = @(
+        Get-ChildItem -LiteralPath $Root -File -Force -Recurse |
+            ForEach-Object {
+                $Relative = [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/')
+                '{0}`t{1}`t{2}' -f $Relative, [int64]$_.Length, (Get-TestFileSha256 $_.FullName)
+            } |
+            Sort-Object -CaseSensitive
+    )
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes(([string]::Join("`n", $Entries)) + "`n")
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [pscustomobject]@{
+            content_sha256 = ([System.BitConverter]::ToString($Hasher.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+            file_count = $Entries.Count
+        }
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
+function Invoke-TestGit {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryPath,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
+    )
+
+    $Output = & git -C $RepositoryPath @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "ASP53ST1003 git failed: git -C $RepositoryPath $($Arguments -join ' ')`n$($Output -join [Environment]::NewLine)"
+    }
+    return @($Output)
+}
+
+function New-TestJunction {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+}
+
 function Invoke-ExpectedFailure {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$Action,
@@ -148,6 +198,66 @@ try {
     New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
     $ProjectPath = Join-Path $FixtureRoot 'SidecarFixture.uproject'
     [System.IO.File]::WriteAllText($ProjectPath, "{}`n", [System.Text.UTF8Encoding]::new($false))
+    $SourceTarget = Join-Path $FixtureRoot 'source-target'
+    $ConfigTarget = Join-Path $FixtureRoot 'config-target'
+    $CandidateTarget = Join-Path $FixtureRoot 'candidate-target'
+    $PuertsTarget = Join-Path $FixtureRoot 'puerts-target'
+    $HarnessTarget = Join-Path $FixtureRoot 'harness-target'
+    [System.IO.Directory]::CreateDirectory($SourceTarget) | Out-Null
+    [System.IO.Directory]::CreateDirectory($ConfigTarget) | Out-Null
+    [System.IO.Directory]::CreateDirectory($CandidateTarget) | Out-Null
+    [System.IO.Directory]::CreateDirectory($PuertsTarget) | Out-Null
+    [System.IO.Directory]::CreateDirectory($HarnessTarget) | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $SourceTarget 'fixture.cpp'), "fixture`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $ConfigTarget 'DefaultEngine.ini'), "[fixture]`n", [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $CandidateTarget 'AvidScript.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-TestGit -RepositoryPath $CandidateTarget init --quiet | Out-Null
+    Invoke-TestGit -RepositoryPath $CandidateTarget config user.name 'Codex Fixture' | Out-Null
+    Invoke-TestGit -RepositoryPath $CandidateTarget config user.email 'fixture@example.invalid' | Out-Null
+    Invoke-TestGit -RepositoryPath $CandidateTarget add . | Out-Null
+    Invoke-TestGit -RepositoryPath $CandidateTarget commit --quiet -m fixture | Out-Null
+    $CandidateCommit = ([string](@(Invoke-TestGit -RepositoryPath $CandidateTarget rev-parse HEAD)[0])).Trim().ToLowerInvariant()
+    $CandidateTree = ([string](@(Invoke-TestGit -RepositoryPath $CandidateTarget rev-parse 'HEAD^{tree}')[0])).Trim().ToLowerInvariant()
+    [System.IO.File]::WriteAllText((Join-Path $PuertsTarget 'Puerts.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
+    $BackendPath = Join-Path $PuertsTarget 'Backend.bin'
+    [System.IO.File]::WriteAllText($BackendPath, 'backend', [System.Text.UTF8Encoding]::new($false))
+    $PuertsBackendSha = Get-TestFileSha256 $BackendPath
+    Write-NewJson (Join-Path $PuertsTarget '.avidscript-puerts-install.json') ([ordered]@{
+            schema_version = 2
+            source_commit_sha = $CandidateCommit
+            backend_sha256 = $PuertsBackendSha
+            installed_content_sha256 = ('1' * 64)
+            installed_file_count = 3
+        })
+    [System.IO.File]::WriteAllText((Join-Path $HarnessTarget 'AvidScriptPerfHarness.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
+    New-TestJunction -Path (Join-Path $FixtureRoot 'Source') -Target $SourceTarget
+    New-TestJunction -Path (Join-Path $FixtureRoot 'Config') -Target $ConfigTarget
+    New-TestJunction -Path (Join-Path $FixtureRoot 'Plugins/AvidScript') -Target $CandidateTarget
+    New-TestJunction -Path (Join-Path $FixtureRoot 'Plugins/Puerts') -Target $PuertsTarget
+    New-TestJunction -Path (Join-Path $FixtureRoot 'Plugins/AvidScriptPerfHarness') -Target $HarnessTarget
+    $ArtifactRoot = Join-Path $FixtureRoot 'Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf'
+    New-Item -ItemType Directory -Force -Path $ArtifactRoot | Out-Null
+    $WasmPath = Join-Path $ArtifactRoot 'profile_phase53_perf.wasm'
+    $ManifestPath = Join-Path $ArtifactRoot 'profile_phase53_perf.avidscript.json'
+    [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0,97,115,109,1,0,0,0))
+    [System.IO.File]::WriteAllText($ManifestPath, "{}`n", [System.Text.UTF8Encoding]::new($false))
+    $SourceDigest = Get-TestDirectoryDigest $SourceTarget
+    $ConfigDigest = Get-TestDirectoryDigest $ConfigTarget
+    Write-NewJson (Join-Path $FixtureRoot 'benchmark-project.json') ([ordered]@{
+            schema_version = 2
+            project_filename = 'SidecarFixture.uproject'
+            candidate_commit = $CandidateCommit
+            candidate_tree = $CandidateTree
+            source = [ordered]@{ canonical_path = $SourceTarget; content_sha256 = $SourceDigest.content_sha256; file_count = $SourceDigest.file_count }
+            config = [ordered]@{ canonical_path = $ConfigTarget; content_sha256 = $ConfigDigest.content_sha256; file_count = $ConfigDigest.file_count }
+            junctions = [ordered]@{
+                Source = $SourceTarget
+                Config = $ConfigTarget
+                AvidScript = $CandidateTarget
+                Puerts = $PuertsTarget
+                AvidScriptPerfHarness = $HarnessTarget
+            }
+        })
 
     $ProfilePath = Join-Path $FixtureRoot 'profile.json'
     $Profile = [ordered]@{
@@ -360,17 +470,17 @@ Write-Output "假 Editor PID=$PID"
         OutputRoot = $OutputRoot
         UeVersion = '5.8.0'
         UeBuildId = 'sidecar-engine-build'
-        AvidScriptCommit = ('a' * 40)
-        AvidScriptTreeSha = ('d' * 40)
+        AvidScriptCommit = $CandidateCommit
+        AvidScriptTreeSha = $CandidateTree
         AvidScriptDirty = $false
-        PuertsCommit = ('b' * 40)
-        PuertsBackendSha256 = ('c' * 64)
+        PuertsCommit = $CandidateCommit
+        PuertsBackendSha256 = $PuertsBackendSha
         CpuModel = 'Contract CPU'
         OperatingSystem = 'Contract OS'
         WamrMode = 'interpreter'
         V8Mode = 'jit'
-        WasmSha256 = ('e' * 64)
-        ManifestSha256 = ('f' * 64)
+        WasmSha256 = Get-TestFileSha256 $WasmPath
+        ManifestSha256 = Get-TestFileSha256 $ManifestPath
         AllowNonFormalProfile = $true
     }
 
@@ -384,6 +494,58 @@ Write-Output "假 Editor PID=$PID"
     Invoke-ExpectedFailure {
         & $RunnerPath @DefaultGateArguments | Out-Null
     } 'ASP53S2115'
+
+    $OneWorkloadProfilePath = Join-Path $FixtureRoot 'one-workload-formal-looking-profile.json'
+    $OneWorkloadProfile = $Profile | ConvertTo-Json -Depth 32 | ConvertFrom-Json
+    $OneWorkloadProfile.process_runs = [int]$TrackedProfile.process_runs
+    $OneWorkloadProfile.warmup_samples = [int]$TrackedProfile.warmup_samples
+    $OneWorkloadProfile.timed_samples = [int]$TrackedProfile.timed_samples
+    $OneWorkloadProfile.minimum_sample_milliseconds = [double]$TrackedProfile.minimum_sample_milliseconds
+    $OneWorkloadProfile.workloads = @('scalar_noop')
+    Write-NewJson $OneWorkloadProfilePath $OneWorkloadProfile
+    $OneWorkloadArguments = $DefaultGateArguments.Clone()
+    $OneWorkloadArguments.ProfilePath = $OneWorkloadProfilePath
+    Invoke-ExpectedFailure {
+        & $RunnerPath @OneWorkloadArguments | Out-Null
+    } 'ASP53S2115'
+
+    $WrongCandidateIdentityArguments = $RunnerArguments.Clone()
+    $WrongCandidateIdentityArguments.AvidScriptTreeSha = ('0' * 40)
+    Invoke-ExpectedFailure {
+        & $RunnerPath @WrongCandidateIdentityArguments | Out-Null
+    } 'ASP53S2116'
+
+    $DirtyCandidatePath = Join-Path $CandidateTarget 'dirty.txt'
+    [System.IO.File]::WriteAllText($DirtyCandidatePath, "dirty`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2116'
+    Remove-Item -LiteralPath $DirtyCandidatePath -Force
+
+    $SourceFixturePath = Join-Path $SourceTarget 'fixture.cpp'
+    $SourceFixtureBytes = [System.IO.File]::ReadAllBytes($SourceFixturePath)
+    [System.IO.File]::WriteAllText($SourceFixturePath, "tampered`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2116'
+    [System.IO.File]::WriteAllBytes($SourceFixturePath, $SourceFixtureBytes)
+
+    $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
+    $ManagedMarkerRaw = [System.IO.File]::ReadAllText($ManagedMarkerPath)
+    $ManagedMarker = $ManagedMarkerRaw | ConvertFrom-Json
+    $ManagedMarker.schema_version = 1
+    Write-NewJson $ManagedMarkerPath $ManagedMarker
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2117'
+    [System.IO.File]::WriteAllText($ManagedMarkerPath, $ManagedMarkerRaw, [System.Text.UTF8Encoding]::new($false))
+
+    $WasmBytes = [System.IO.File]::ReadAllBytes($WasmPath)
+    [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0,97,115,109,2,0,0,0))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2118'
+    [System.IO.File]::WriteAllBytes($WasmPath, $WasmBytes)
 
     foreach ($ReservedArgument in @(
         '-eXeCcMdS:Quit',
@@ -719,4 +881,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=5 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

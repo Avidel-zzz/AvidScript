@@ -28,6 +28,208 @@ function Get-SidecarFileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Resolve-SidecarCanonicalDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$RequireJunction
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        throw "$Code $Label directory is missing: $Path"
+    }
+
+    $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($RequireJunction -and $Item.LinkType -cne 'Junction') {
+        throw "$Code $Label must be a junction: $Path"
+    }
+
+    try {
+        $Resolved = if ($Item.LinkType -eq 'Junction') {
+            $Item.ResolveLinkTarget($true)
+        }
+        else {
+            $Item
+        }
+        if ($null -eq $Resolved) {
+            throw 'ResolveLinkTarget returned no target.'
+        }
+        return [System.IO.Path]::GetFullPath($Resolved.FullName).TrimEnd(
+            [System.IO.Path]::DirectorySeparatorChar,
+            [System.IO.Path]::AltDirectorySeparatorChar)
+    }
+    catch {
+        throw "$Code $Label could not be resolved to a canonical directory: $Path`n$($_.Exception.Message)"
+    }
+}
+
+function Get-SidecarDirectoryContentDigest {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Root = Resolve-SidecarCanonicalDirectory -Path $Path -Code 'ASP53S2000' -Label 'digest root'
+    $Entries = [System.Collections.Generic.List[string]]::new()
+    foreach ($File in @(Get-ChildItem -LiteralPath $Root -File -Force -Recurse)) {
+        $RelativePath = [System.IO.Path]::GetRelativePath($Root, $File.FullName).Replace('\', '/')
+        $Entries.Add(('{0}`t{1}`t{2}' -f $RelativePath, [int64]$File.Length, (Get-SidecarFileSha256 -Path $File.FullName)))
+    }
+    $Values = @($Entries)
+    [System.Array]::Sort($Values, [System.StringComparer]::Ordinal)
+    $Payload = [string]::Join("`n", $Values) + "`n"
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Payload)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $Digest = ([System.BitConverter]::ToString($Hasher.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+
+    return [pscustomobject][ordered]@{
+        content_sha256 = $Digest
+        file_count = [int]$Values.Count
+    }
+}
+
+function Get-SidecarRequiredPropertyValue {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $Property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $Property -or $null -eq $Property.Value) {
+        throw "$Code missing required field: $Label.$Name"
+    }
+    return $Property.Value
+}
+
+function Invoke-SidecarGit {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryPath,
+        [Parameter(Mandatory = $true)][string]$Code,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
+    )
+
+    $Output = & git -C $RepositoryPath @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Code git failed: git -C $RepositoryPath $($Arguments -join ' ')`n$($Output -join [Environment]::NewLine)"
+    }
+    return @($Output)
+}
+
+function Assert-SidecarBenchmarkProjectProvenance {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$AvidScriptCommit,
+        [Parameter(Mandatory = $true)][string]$AvidScriptTreeSha
+    )
+
+    $ProjectRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ProjectPath))
+    $Marker = Read-SidecarJson -Path (Join-Path $ProjectRoot 'benchmark-project.json') -Code 'ASP53S2116'
+    if ([int](Get-SidecarRequiredPropertyValue $Marker 'schema_version' 'ASP53S2116' 'benchmark-project') -ne 2) {
+        throw 'ASP53S2116 benchmark-project marker schema_version must be 2'
+    }
+
+    $ExpectedJunctions = [ordered]@{
+        Source = 'Source'
+        Config = 'Config'
+        AvidScript = 'Plugins/AvidScript'
+        Puerts = 'Plugins/Puerts'
+        AvidScriptPerfHarness = 'Plugins/AvidScriptPerfHarness'
+    }
+    $MarkerJunctions = Get-SidecarRequiredPropertyValue $Marker 'junctions' 'ASP53S2116' 'benchmark-project'
+    $ActualJunctions = [ordered]@{}
+    foreach ($Entry in $ExpectedJunctions.GetEnumerator()) {
+        $ExpectedTarget = [string](Get-SidecarRequiredPropertyValue $MarkerJunctions $Entry.Key 'ASP53S2116' 'benchmark-project.junctions')
+        $ActualTarget = Resolve-SidecarCanonicalDirectory -Path (Join-Path $ProjectRoot $Entry.Value) `
+            -Code 'ASP53S2116' -Label "project junction $($Entry.Key)" -RequireJunction
+        if ($ActualTarget -ine $ExpectedTarget) {
+            throw "ASP53S2116 project junction target changed: name=$($Entry.Key) actual=$ActualTarget expected=$ExpectedTarget"
+        }
+        $ActualJunctions[$Entry.Key] = $ActualTarget
+    }
+
+    foreach ($Entry in @(@{ Name = 'source'; Path = $ActualJunctions.Source }, @{ Name = 'config'; Path = $ActualJunctions.Config })) {
+        $Recorded = Get-SidecarRequiredPropertyValue $Marker $Entry.Name 'ASP53S2116' 'benchmark-project'
+        $ExpectedCanonicalPath = [string](Get-SidecarRequiredPropertyValue $Recorded 'canonical_path' 'ASP53S2116' "benchmark-project.$($Entry.Name)")
+        $ExpectedDigest = [string](Get-SidecarRequiredPropertyValue $Recorded 'content_sha256' 'ASP53S2116' "benchmark-project.$($Entry.Name)")
+        $ExpectedCount = [int](Get-SidecarRequiredPropertyValue $Recorded 'file_count' 'ASP53S2116' "benchmark-project.$($Entry.Name)")
+        if ($ExpectedCanonicalPath -ine $Entry.Path -or $ExpectedDigest -cnotmatch '^[0-9a-f]{64}$' -or $ExpectedCount -lt 0) {
+            throw "ASP53S2116 benchmark-project $($Entry.Name) digest metadata is invalid"
+        }
+        $ActualDigest = Get-SidecarDirectoryContentDigest -Path $Entry.Path
+        if ($ActualDigest.content_sha256 -cne $ExpectedDigest -or $ActualDigest.file_count -ne $ExpectedCount) {
+            throw "ASP53S2116 project $($Entry.Name) content changed after marker creation"
+        }
+    }
+
+    $MarkerCommit = [string](Get-SidecarRequiredPropertyValue $Marker 'candidate_commit' 'ASP53S2116' 'benchmark-project')
+    $MarkerTree = [string](Get-SidecarRequiredPropertyValue $Marker 'candidate_tree' 'ASP53S2116' 'benchmark-project')
+    if ($MarkerCommit -cne $AvidScriptCommit -or $MarkerTree -cne $AvidScriptTreeSha) {
+        throw "ASP53S2116 marker candidate identity does not match command line: marker_commit=$MarkerCommit marker_tree=$MarkerTree"
+    }
+    $ActualCommit = ([string](@(Invoke-SidecarGit -RepositoryPath $ActualJunctions.AvidScript -Code 'ASP53S2116' rev-parse HEAD)[0])).Trim().ToLowerInvariant()
+    $ActualTree = ([string](@(Invoke-SidecarGit -RepositoryPath $ActualJunctions.AvidScript -Code 'ASP53S2116' rev-parse 'HEAD^{tree}')[0])).Trim().ToLowerInvariant()
+    $Status = @(Invoke-SidecarGit -RepositoryPath $ActualJunctions.AvidScript -Code 'ASP53S2116' status --porcelain=v1 --untracked-files=all)
+    if ($ActualCommit -cne $AvidScriptCommit -or $ActualTree -cne $AvidScriptTreeSha -or ($Status -join "`n").Trim().Length -ne 0) {
+        throw 'ASP53S2116 candidate Git HEAD/tree/clean status no longer matches the formal run identity'
+    }
+
+    return $ActualJunctions
+}
+
+function Assert-SidecarPuertsManagedMarker {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$PuertsCommit,
+        [Parameter(Mandatory = $true)][string]$PuertsBackendSha256
+    )
+
+    $ProjectRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ProjectPath))
+    $LockPath = Join-Path $PSScriptRoot '../Config/PuertsDependency.lock.json'
+    $Lock = Read-SidecarJson -Path $LockPath -Code 'ASP53S2117'
+    $Installation = Get-SidecarRequiredPropertyValue $Lock 'installation' 'ASP53S2117' 'PuertsDependency.lock'
+    $ManagedMarkerName = [string](Get-SidecarRequiredPropertyValue $Installation 'managed_marker_name' 'ASP53S2117' 'PuertsDependency.lock.installation')
+    $PluginRelativePath = [string](Get-SidecarRequiredPropertyValue $Installation 'project_plugin_path' 'ASP53S2117' 'PuertsDependency.lock.installation')
+    if ($ManagedMarkerName -cnotmatch '^(?:\.)?[A-Za-z0-9][A-Za-z0-9._-]*\.json$' -or $PluginRelativePath -cne 'Plugins/Puerts') {
+        throw 'ASP53S2117 tracked Puerts dependency lock has an unsafe managed marker contract'
+    }
+
+    $Marker = Read-SidecarJson -Path (Join-Path (Join-Path $ProjectRoot $PluginRelativePath) $ManagedMarkerName) -Code 'ASP53S2117'
+    if ([int](Get-SidecarRequiredPropertyValue $Marker 'schema_version' 'ASP53S2117' 'Puerts managed marker') -ne 2) {
+        throw 'ASP53S2117 Puerts managed marker schema_version must be 2'
+    }
+    $SourceCommit = [string](Get-SidecarRequiredPropertyValue $Marker 'source_commit_sha' 'ASP53S2117' 'Puerts managed marker')
+    $BackendSha = [string](Get-SidecarRequiredPropertyValue $Marker 'backend_sha256' 'ASP53S2117' 'Puerts managed marker')
+    $InstalledDigest = [string](Get-SidecarRequiredPropertyValue $Marker 'installed_content_sha256' 'ASP53S2117' 'Puerts managed marker')
+    $InstalledFileCount = [int](Get-SidecarRequiredPropertyValue $Marker 'installed_file_count' 'ASP53S2117' 'Puerts managed marker')
+    if ($SourceCommit -cne $PuertsCommit -or $BackendSha -cne $PuertsBackendSha256 -or
+        $InstalledDigest -cnotmatch '^[0-9a-f]{64}$' -or $InstalledFileCount -lt 1) {
+        throw 'ASP53S2117 Puerts managed marker does not bind the requested dependency identity'
+    }
+}
+
+function Assert-SidecarFormalArtifacts {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][string]$WasmSha256,
+        [Parameter(Mandatory = $true)][string]$ManifestSha256
+    )
+
+    $ProjectRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ProjectPath))
+    $ArtifactRoot = Join-Path $ProjectRoot 'Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf'
+    $ManifestPath = Join-Path $ArtifactRoot 'profile_phase53_perf.avidscript.json'
+    $WasmPath = Join-Path $ArtifactRoot 'profile_phase53_perf.wasm'
+    $ActualManifestSha = Get-SidecarFileSha256 -Path $ManifestPath
+    $ActualWasmSha = Get-SidecarFileSha256 -Path $WasmPath
+    if ($ActualManifestSha -cne $ManifestSha256 -or $ActualWasmSha -cne $WasmSha256) {
+        throw 'ASP53S2118 formal Saved artifact digest does not match command line provenance'
+    }
+}
+
 function Write-SidecarNewText {
     param(
         [Parameter(Mandatory = $true)][string]$Path,

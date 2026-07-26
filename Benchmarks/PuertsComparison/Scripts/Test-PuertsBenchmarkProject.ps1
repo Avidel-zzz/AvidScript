@@ -42,6 +42,33 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Value, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Get-DirectoryContentDigest {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Root = [System.IO.Path]::GetFullPath($Path).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $Entries = @(
+        Get-ChildItem -LiteralPath $Root -File -Force -Recurse |
+            ForEach-Object {
+                $Relative = [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/')
+                '{0}`t{1}`t{2}' -f $Relative, [int64]$_.Length, (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            } |
+            Sort-Object -CaseSensitive
+    )
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes(([string]::Join("`n", $Entries)) + "`n")
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [pscustomobject]@{
+            content_sha256 = ([System.BitConverter]::ToString($Hasher.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+            file_count = $Entries.Count
+        }
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
 function Invoke-Git {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryPath,
@@ -186,7 +213,7 @@ try {
     Assert-True (-not ($MarkerBytes[0] -eq 239 -and $MarkerBytes[1] -eq 187 -and $MarkerBytes[2] -eq 191)) 'marker file must be UTF-8 without BOM'
     $MarkerRaw = Get-Content -LiteralPath $MarkerPath -Raw
     $Marker = $MarkerRaw | ConvertFrom-Json
-    Assert-Equal ([int]($Marker.schema_version)) 1 'marker schema_version mismatch'
+    Assert-Equal ([int]($Marker.schema_version)) 2 'marker schema_version mismatch'
     Assert-Equal ([string]($Marker.project_filename)) 'AvidTPSTemplate.uproject' 'marker project filename mismatch'
     Assert-Equal ([string]($Marker.candidate_commit)) $ExpectedCommit 'marker commit mismatch'
     Assert-Equal ([string]($Marker.candidate_tree)) $ExpectedTree 'marker tree mismatch'
@@ -200,6 +227,14 @@ try {
     Assert-Equal ([string]($Marker.junctions.AvidScript)) ([System.IO.Path]::GetFullPath($CandidateWorktreePath)) 'marker AvidScript junction mismatch'
     Assert-Equal ([string]($Marker.junctions.Puerts)) ([System.IO.Path]::GetFullPath($PuertsPluginPath)) 'marker Puerts junction mismatch'
     Assert-Equal ([string]($Marker.junctions.AvidScriptPerfHarness)) ([System.IO.Path]::GetFullPath($HarnessPluginPath)) 'marker harness junction mismatch'
+    foreach ($Entry in @(
+            @{ Name = 'source'; Path = (Join-Path $SourceProjectRoot 'Source') },
+            @{ Name = 'config'; Path = (Join-Path $SourceProjectRoot 'Config') })) {
+        $Digest = Get-DirectoryContentDigest -Path $Entry.Path
+        Assert-Equal ([string]$Marker.$($Entry.Name).canonical_path) ([System.IO.Path]::GetFullPath($Entry.Path)) "marker $($Entry.Name) canonical path mismatch"
+        Assert-Equal ([string]$Marker.$($Entry.Name).content_sha256) ([string]$Digest.content_sha256) "marker $($Entry.Name) digest mismatch"
+        Assert-Equal ([int]$Marker.$($Entry.Name).file_count) ([int]$Digest.file_count) "marker $($Entry.Name) file count mismatch"
+    }
 
     $FirstMarkerHash = (Get-FileHash -LiteralPath $MarkerPath -Algorithm SHA256).Hash
     $SecondRun = (& $BootstrapPath `
@@ -287,6 +322,22 @@ try {
     Assert-PathAbsent -Path (Join-Path $CandidateWorktreePath 'OutputThroughAlias') `
         -Message 'aliased overlap rejection wrote through the junction target'
 
+    foreach ($Overlap in @(
+            @{ Name = 'Source'; Path = (Join-Path $SourceProjectRoot 'Source\OutputInsideSource') },
+            @{ Name = 'Config'; Path = (Join-Path $SourceProjectRoot 'Config\OutputInsideConfig') })) {
+        Invoke-ExpectedFailure {
+            & $BootstrapPath `
+                -SourceProjectPath $SourceProjectPath `
+                -AvidScriptPluginPath $CandidateWorktreePath `
+                -PuertsPluginPath $PuertsPluginPath `
+                -HarnessPluginPath $HarnessPluginPath `
+                -OutputRoot $Overlap.Path `
+                -ExpectedAvidScriptCommit $ExpectedCommit `
+                -ExpectedAvidScriptTree $ExpectedTree | Out-Null
+        } 'ASP53B1200'
+        Assert-PathAbsent -Path $Overlap.Path -Message "$($Overlap.Name) overlap rejection created an output directory"
+    }
+
     $AliasedPluginTargetRoot = Join-Path $FixtureRoot 'AliasedPluginTarget'
     $AliasedPluginTarget = Join-Path $AliasedPluginTargetRoot 'Nested\Puerts'
     Write-Utf8NoBom -Path (Join-Path $AliasedPluginTarget 'Puerts.uplugin') -Value "{`n  `"FileVersion`": 3`n}`n"
@@ -324,4 +375,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=1 junctions=5 marker=1 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejections=3 alias_overlap_rejections=2 no_write_rejections=6 generated_dirs=4 privacy=1'
+Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=1 junctions=5 marker_v2=1 source_config_digests=2 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejections=5 alias_overlap_rejections=2 no_write_rejections=8 generated_dirs=4 privacy=1'
