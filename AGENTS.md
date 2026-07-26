@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.1 共享 worktree 暂存区污染提交：实现代理实际与控制器共享 Phase worktree，并在验证完成前暂存 Task 1 文件；控制器随后只对计划文档执行精确 `git add`，但直接 `git commit` 仍把暂存区内代理代码一并纳入 `04ea016`，导致文档和未完成验收的实现混在同一提交。Prevention：任何代理运行期间控制器禁止提交共享 worktree；每次 commit 前必须执行并人工核对 `git diff --cached --name-only` 与本次 owned path 清单，即使刚执行的是精确 `git add` 也不能假设暂存区此前为空；并行编码代理默认使用独立 Git worktree，无法证明隔离时只允许只读 sidecar。
 - 2026-07-27 P54.0 worktree 探测命令再次使用分号连接：为一次读取 `git-dir`、`common-dir`、branch 与 superproject，把四个只读 Git 查询放进同一 PowerShell 命令。虽然没有修改仓库，但再次破坏“一次调用一个逻辑命令”的审计边界。Prevention：每次发送 `shell_command` 前执行字面扫描，命令字符串不得包含 `;`、`&&`、`||`；即使属于同一 worktree 探测步骤，也拆成独立调用，不能以“只读”或“同一目的”为例外。
 - 2026-07-26 P53.5 最终 Gate 临时工程路径预算遗漏：隔离工程位于描述性长目录下，生成 binding reference source 的完整路径达到 261 字符；`pwsh 7 Test-Path` 为 true，但 C# build service 使用的 Windows PowerShell 5 返回 false，prepare 以 `ASBI4202` 拒绝。Prevention：会生成深层 Saved/Intermediate 制品的 UE Gate 工程使用短且唯一的根目录，并在 UBT 前计算最长已知制品路径，Windows PowerShell 5 消费链固定保留低于 240 字符的预算；不能只验证工程根可创建。
 - 2026-07-26 P53.5 最终 Gate 全仓 parser 宿主错误：Gate 外层继续由 Windows PowerShell 5 执行，并用 5.1 parser 扫描包含合法 PowerShell 7 管道续行的 `CheckAvidScriptArchitecture.ps1`，在架构门禁执行前产生假失败。Prevention：最终 Gate 外层、全仓 parser 和架构脚本统一使用 `pwsh 7 -NoProfile`；只有明确验证 Windows PowerShell 5 行为的合同才启动独立 `powershell.exe` 子进程，不能让旧宿主定义全仓语法上限。
