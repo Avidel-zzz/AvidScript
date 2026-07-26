@@ -6,12 +6,16 @@
 
 #include "Containers/StringConv.h"
 #include "HAL/CriticalSection.h"
-#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeLock.h"
+#include "Ssl.h"
+
+THIRD_PARTY_INCLUDES_START
+#include <openssl/sha.h>
+THIRD_PARTY_INCLUDES_END
 
 #ifndef AVIDSCRIPT_WITH_WASMTIME
 #define AVIDSCRIPT_WITH_WASMTIME 0
@@ -58,18 +62,22 @@ bool GetWasmtimeDllSha256(
 			*Path);
 		return false;
 	}
-	FSHA256Signature Signature;
-	if (!FPlatformMisc::GetSHA256Signature(
-		Bytes.GetData(),
-		static_cast<uint32>(Bytes.Num()),
-		Signature))
+	uint8 Digest[SHA256_DIGEST_LENGTH] = {};
+	if (SHA256(
+			Bytes.GetData(),
+			static_cast<size_t>(Bytes.Num()),
+			Digest) == nullptr)
 	{
 		OutError = FString::Printf(
 			TEXT("The Wasmtime DLL SHA-256 could not be computed: %s"),
 			*Path);
 		return false;
 	}
-	OutSha256 = Signature.ToString().ToLower();
+	OutSha256.Reset(SHA256_DIGEST_LENGTH * 2);
+	for (const uint8 Byte : Digest)
+	{
+		OutSha256 += FString::Printf(TEXT("%02x"), Byte);
+	}
 	return true;
 }
 

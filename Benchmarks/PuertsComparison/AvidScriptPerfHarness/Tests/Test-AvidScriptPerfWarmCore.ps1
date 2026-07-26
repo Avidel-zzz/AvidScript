@@ -25,6 +25,7 @@ $RunnerSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfRun
 $VmBackendHeader = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Public/AvidScriptVmBackend.h')
 $WamrBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp')
 $WasmtimeBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp')
+$WasmRuntimeSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp')
 $WamrBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/WAMR/WAMR.Build.cs')
 $WasmtimeBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/Wasmtime/Wasmtime.Build.cs')
 $FixtureHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfFixture.h')
@@ -219,6 +220,9 @@ Assert-True ($WasmtimeBackendSource.Contains('ObservedDllSha256')) `
     'Wasmtime backend must expose the DLL hash observed at its load boundary'
 Assert-True ($WasmtimeBuildRules.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256')) `
     'Wasmtime build rules must bind the managed DLL hash into the backend'
+Assert-True ($WasmRuntimeSource.Contains(
+        'ActiveBackendInfo = VmBackend->GetBackendInfo();')) `
+    'runtime results must refresh backend evidence after the backend load boundary'
 Assert-True ($RunnerSource.Contains('GetCanonicalLaneIdentitySha256')) `
     'C++ request ingestion must recompute each canonical lane identity'
 Assert-True ($RunnerSource.Contains('GetCanonicalLaneCatalogSha256')) `

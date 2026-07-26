@@ -21,7 +21,10 @@ public class AvidScriptPerfHarness : ModuleRules
             "AvidScriptRuntime",
             "Json",
             "JsonUtilities",
-            "Projects"
+            "Projects",
+            "SSL"
         });
+
+        AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
     }
 }

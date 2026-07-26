@@ -18,9 +18,12 @@ public class AvidScriptVM : ModuleRules
 			new[]
 			{
 				"Projects",
+				"SSL",
 				"WAMR",
 				"Wasmtime"
 			}
 		);
+
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
 	}
 }

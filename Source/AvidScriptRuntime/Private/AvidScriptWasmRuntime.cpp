@@ -379,6 +379,8 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	Config.HostDispatcher = this;
 	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
 	const bool bLoaded = VmBackend->Load(MakeArrayView(Bytecode, BytecodeSize), ModuleId, Config, Error);
+	ActiveBackendInfo = VmBackend->GetBackendInfo();
+	OutResult.BackendInfo = ActiveBackendInfo;
 	const FAvidScriptVmLoadMetrics& LoadMetrics = VmBackend->GetLoadMetrics();
 	Metrics.RuntimeInitMs = LoadMetrics.RuntimeInitMs;
 	Metrics.ModuleLoadMs = LoadMetrics.ModuleLoadMs;

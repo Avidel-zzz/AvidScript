@@ -11,7 +11,6 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
 #include "JSLogger.h"
@@ -23,6 +22,11 @@
 #include "Misc/ScopeExit.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Ssl.h"
+
+THIRD_PARTY_INCLUDES_START
+#include <openssl/sha.h>
+THIRD_PARTY_INCLUDES_END
 
 namespace
 {
@@ -99,7 +103,11 @@ namespace
 			return false;
 		}
 		TArray<FString> Names;
-		Object->Values.GenerateKeyArray(Names);
+		Names.Reserve(Object->Values.Num());
+		for (const auto& Field : Object->Values)
+		{
+			Names.Add(FString(*Field.Key));
+		}
 		Names.Sort(
 			[](const FString& Left, const FString& Right)
 			{
@@ -125,7 +133,7 @@ namespace
 			AppendCanonicalJsonString(Name, OutCanonical);
 			OutCanonical.AppendChar(TEXT(':'));
 			if (!AppendCanonicalJsonValue(
-				Object->Values.FindChecked(Name),
+				Object->TryGetField(Name),
 				OutCanonical,
 				OutError))
 			{
@@ -204,16 +212,20 @@ namespace
 			OutError = TEXT("canonical lane catalog UTF-8 payload is too large");
 			return false;
 		}
-		FSHA256Signature Signature;
-		if (!FPlatformMisc::GetSHA256Signature(
-			Utf8.Get(),
-			static_cast<uint32>(Utf8.Length()),
-			Signature))
+		uint8 Digest[SHA256_DIGEST_LENGTH] = {};
+		if (SHA256(
+				reinterpret_cast<const uint8*>(Utf8.Get()),
+				static_cast<size_t>(Utf8.Length()),
+				Digest) == nullptr)
 		{
 			OutError = TEXT("canonical lane catalog SHA-256 failed");
 			return false;
 		}
-		OutSha256 = Signature.ToString().ToLower();
+		OutSha256.Reset(SHA256_DIGEST_LENGTH * 2);
+		for (const uint8 Byte : Digest)
+		{
+			OutSha256 += FString::Printf(TEXT("%02x"), Byte);
+		}
 		return true;
 	}
 
