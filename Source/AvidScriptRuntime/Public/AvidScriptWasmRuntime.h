@@ -125,7 +125,7 @@ public:
 	int32 GetTimerCallbackCount() const { return TimerCallbackCount; }
 	int32 GetEventCallbackCount() const { return EventCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
-	FAvidScriptWasmRuntimeMetrics GetMetrics() const;
+	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
 	int32 HandleHostAddI32Import(int32 Input);
@@ -207,7 +207,6 @@ private:
 	int32 HostImportCallCount = 0;
 	int32 LastHostImportInput = 0;
 	int32 LastHostImportResult = 0;
-	uint64 DynamicHostImportCallCycles = 0;
 	bool bHasPendingHostImportFailure = false;
 	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
@@ -215,7 +214,6 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
-	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TArray<uint8> BindingInvocationScratch;
