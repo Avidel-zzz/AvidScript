@@ -43,12 +43,26 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0 Important=0；正式 baseline/optimized 各 6000/6000 正确样本；发布证据 Docs/Phase53/P53_Benchmark_Evidence.json；五组 benchmark 合同与聚焦 FourLane.Correctness 通过；Cold/RSS lane isolation 转入 Phase54。",
+      "completed_at_utc": "2026-07-26T13:36:08.3736847+00:00"
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P53-COLD-RSS-LANE-ISOLATION",
+      "severity": "Normal",
+      "found_batch": "P53.5",
+      "scope": "为 AvidScript/WAMR、Puerts Reflection、Puerts Static 分别采集 lane 隔离的冷启动时间、稳定 RSS 与峰值 RSS；当前四 lane 同进程数据只能表示组合 Editor 包络。",
+      "evidence": "正式 attempt 28c5857c-1149-4c29-aa42-b390e0697f43 的 fresh process wall time 为 24.46-25.11 秒、PeakPhysMemoryMB 为 1599-1602，但同时加载 UE、Puerts/V8、AvidScript/WAMR 与 Harness，不能归因到单一框架。",
+      "deferral_reason": "lane 隔离需要改变启动配置、结果 schema 与 runner 生命周期，并重新生成独立 baseline；把它塞入 warm 优化收口会混合实验口径并迫使已完成的同机矩阵失效。",
+      "remediation": "在下一性能执行层 Phase 增加 lane-exclusive process mode、startup milestones、稳定采样窗口、peak RSS 和 unload policy，再以固定 manifest 生成独立 cold/memory 报告。",
+      "status": "Transferred",
+      "resolution_evidence": "P53 warm 排名不使用组合进程的 cold/RSS 数字；P53.4 报告已明确其不可归因边界。",
+      "target_phase": 54,
+      "transfer_reason": "Phase 54 进入 VM 执行层与 generated thunk 性能路线时，需要同时建立 lane-exclusive cold/RSS 基线；与 interpreter/AOT/JIT 分层一起设计可避免再次改写 schema 和启动编排。"
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -81,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 6,
-  "updated_at_utc": "2026-07-26T11:21:54.0135694+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 9,
+  "updated_at_utc": "2026-07-26T13:36:08.3762949+00:00"
 }
