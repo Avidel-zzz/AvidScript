@@ -75,6 +75,7 @@ function Assert-ProjectRoot {
     if (-not (Test-Path -LiteralPath $Resolved -PathType Container)) {
         throw "ASP53D1201 project root does not exist: $Resolved"
     }
+    Assert-ProjectRootAncestorsAreOrdinary $Resolved
     $Resolved = Get-CanonicalDirectoryPath $Resolved
     $Projects = @(Get-ChildItem -LiteralPath $Resolved -Filter '*.uproject' -File)
     if ($Projects.Count -ne 1) {
@@ -90,6 +91,18 @@ function Test-IsReparsePoint {
         return $false
     }
     return (((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Assert-ProjectRootAncestorsAreOrdinary {
+    param([Parameter(Mandatory = $true)][string]$CanonicalProjectRoot)
+
+    $Ancestor = [IO.Directory]::GetParent((Resolve-FullPath $CanonicalProjectRoot))
+    while ($null -ne $Ancestor) {
+        if (Test-IsReparsePoint $Ancestor.FullName) {
+            throw 'ASP53D1206 refusing to manage a ProjectRoot with a reparse-point ancestor'
+        }
+        $Ancestor = $Ancestor.Parent
+    }
 }
 
 function Get-CanonicalDirectoryPath {
@@ -385,23 +398,57 @@ function Read-AndAssertManagedMarker {
     return $Marker
 }
 
-function Assert-RemoveTargetIsOrdinaryAndContained {
-    param([Parameter(Mandatory = $true)]$Paths)
+function Assert-InstallPathIsContained {
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$FailureCode
+    )
 
-    if (-not (Test-Path -LiteralPath $Paths.PluginsRoot -PathType Container) -or
-        (Test-IsReparsePoint $Paths.PluginsRoot)) {
+    $CanonicalPluginsRoot = Get-CanonicalDirectoryPath $Paths.PluginsRoot
+    $ExpectedInstallPath = Resolve-FullPath (Join-Path $CanonicalPluginsRoot 'Puerts')
+    if ((Resolve-FullPath $Paths.InstallPath) -cne $ExpectedInstallPath) {
+        throw "$FailureCode Puerts path is outside the canonical project Plugins root"
+    }
+}
+
+function Assert-InstallDestinationBeforeWrite {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResolvedProjectRoot,
+        [Parameter(Mandatory = $true)]$Lock
+    )
+
+    # Directory-swap TOCTOU requires handles or ACLs and is outside the local trusted-build model.
+    $RecheckedProjectRoot = Assert-ProjectRoot $ResolvedProjectRoot
+    $RecheckedPaths = Get-InstallPaths $RecheckedProjectRoot $Lock
+    if (-not (Test-Path -LiteralPath $RecheckedPaths.PluginsRoot -PathType Container)) {
+        throw 'ASP53D1705 project Plugins directory disappeared before Puerts install'
+    }
+    Assert-InstallPathIsContained $RecheckedPaths 'ASP53D1705'
+    if (Test-Path -LiteralPath $RecheckedPaths.InstallPath) {
+        throw "ASP53D1700 install target already exists; verify or remove it explicitly: $($RecheckedPaths.InstallPath)"
+    }
+    return $RecheckedPaths
+}
+
+function Assert-RemoveTargetIsOrdinaryAndContained {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResolvedProjectRoot,
+        [Parameter(Mandatory = $true)]$Lock
+    )
+
+    # Directory-swap TOCTOU requires handles or ACLs and is outside the local trusted-build model.
+    $RecheckedProjectRoot = Assert-ProjectRoot $ResolvedProjectRoot
+    $RecheckedPaths = Get-InstallPaths $RecheckedProjectRoot $Lock
+    if (-not (Test-Path -LiteralPath $RecheckedPaths.PluginsRoot -PathType Container) -or
+        (Test-IsReparsePoint $RecheckedPaths.PluginsRoot)) {
         throw 'ASP53D1900 refusing to remove through a reparse-point Plugins directory'
     }
-    if (-not (Test-Path -LiteralPath $Paths.InstallPath -PathType Container) -or
-        (Test-IsReparsePoint $Paths.InstallPath)) {
+    if (-not (Test-Path -LiteralPath $RecheckedPaths.InstallPath -PathType Container) -or
+        (Test-IsReparsePoint $RecheckedPaths.InstallPath)) {
         throw 'ASP53D1900 refusing to remove a reparse-point Puerts directory'
     }
-    $CanonicalPluginsRoot = Get-CanonicalDirectoryPath $Paths.PluginsRoot
-    $CanonicalInstallPath = Get-CanonicalDirectoryPath $Paths.InstallPath
-    $PluginsPrefix = $CanonicalPluginsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $CanonicalInstallPath.StartsWith($PluginsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'ASP53D1900 refusing to remove a directory outside the canonical project Plugins root'
-    }
+    Assert-InstallPathIsContained $RecheckedPaths 'ASP53D1900'
+    return $RecheckedPaths
 }
 
 function Install-Dependency {
@@ -460,10 +507,7 @@ function Install-Dependency {
             throw 'ASP53D1704 extracted backend does not provide V8 9.4.146.24'
         }
         Write-ManagedMarker (Join-Path $StagedPlugin $Lock.installation.managed_marker_name) $ResolvedLockPath $Lock
-        $Paths = Get-InstallPaths $ResolvedProjectRoot $Lock
-        if (Test-Path -LiteralPath $Paths.InstallPath) {
-            throw "ASP53D1700 install target already exists; verify or remove it explicitly: $($Paths.InstallPath)"
-        }
+        $Paths = Assert-InstallDestinationBeforeWrite $ResolvedProjectRoot $Lock
         Move-Item -LiteralPath $StagedPlugin -Destination $Paths.InstallPath
     }
     finally {
@@ -534,7 +578,7 @@ function Remove-Dependency {
         return [pscustomobject]@{ succeeded = $true; mode = 'Remove'; removed = $false }
     }
     Read-AndAssertManagedMarker $Paths.MarkerPath $ResolvedLockPath $Lock -AllowLegacySchema1 | Out-Null
-    Assert-RemoveTargetIsOrdinaryAndContained $Paths
+    $Paths = Assert-RemoveTargetIsOrdinaryAndContained $ResolvedProjectRoot $Lock
     Remove-Item -LiteralPath $Paths.InstallPath -Recurse -Force
     return [pscustomobject]@{ succeeded = $true; mode = 'Remove'; removed = $true }
 }

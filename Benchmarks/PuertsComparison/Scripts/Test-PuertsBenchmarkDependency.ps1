@@ -302,6 +302,14 @@ try {
     New-TestJunction $ProjectRootJunction $ProjectRootTarget
     Assert-True ((Invoke-Installer Install $ProjectRootJunction $CacheRoot $TestLockPath).ExitCode -eq 0) 'reparse-point ProjectRoot did not normalize to its target'
 
+    # Concurrent directory swaps require handles or ACLs and are outside this local trusted-build fixture.
+    $AncestorJunctionTarget = Join-Path $FixtureRoot 'project-root-ancestor-target'
+    $AncestorJunction = Join-Path $FixtureRoot 'project-root-ancestor-junction'
+    New-Item -ItemType Directory -Force -Path $AncestorJunctionTarget | Out-Null
+    New-TestJunction $AncestorJunction $AncestorJunctionTarget
+    $AncestorProject = New-TestProject $AncestorJunction 'project-root-child'
+    Assert-InstallerFailure (Invoke-Installer Install $AncestorProject $CacheRoot $TestLockPath) 'ASP53D1206'
+
     $FailureCacheRoot = Join-Path $FixtureRoot 'failure-cache'
     New-TestSourceCache $FailureCacheRoot $SeedBare
     $FailureProject = New-TestProject $FixtureRoot 'download-failure'
@@ -317,4 +325,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 download_publish=1 cache_preserved=1 source_tamper=1 backend_tamper=1 nested_tamper=2 marker_tamper=1 legacy_remove=1 reparse_rejected=2 projectroot_normalized=1 atomic_download=1'
+Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 download_publish=1 cache_preserved=1 source_tamper=1 backend_tamper=1 nested_tamper=2 marker_tamper=1 legacy_remove=1 reparse_rejected=3 projectroot_normalized=1 atomic_download=1'
