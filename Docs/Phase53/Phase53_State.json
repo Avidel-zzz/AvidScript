@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 最终 Gate 驱动在候选 cwd 外探测 dotnet SDK，错误命中 10.0.301；修正为候选目录内验证 pinned global.json 后重新冻结。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；最终 Gate SDK cwd 修正已记录；Normal Cold/RSS lane isolation 已转入 Phase54。",
+    "completed_at_utc": "2026-07-26T13:45:30.1172568+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "7466e2838a58747dda813f74ba7fb998e585e82a",
+    "source_tree": "a249479a1a9810767fdbd33ab39c31f536c836c7",
+    "state_sha256": "00907e4e402df8298e04d5f66882ecf3f5b12a3367268b6b201bee89e563255a",
+    "review_evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；最终 Gate SDK cwd 修正已记录；Normal Cold/RSS lane isolation 已转入 Phase54。",
+    "at_utc": "2026-07-26T13:45:30.1172568+00:00"
   },
   "gate": {
     "report_path": "",
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
-  "revision": 12,
-  "updated_at_utc": "2026-07-26T13:44:57.0917602+00:00"
+  "next_action": "attest -Phase 53 -GateReportPath <path>",
+  "revision": 13,
+  "updated_at_utc": "2026-07-26T13:45:30.1224304+00:00"
 }
