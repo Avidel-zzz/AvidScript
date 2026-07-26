@@ -8,7 +8,9 @@ param(
 
     [string]$CacheRoot = (Join-Path ([System.IO.Path]::GetTempPath()) 'AvidScriptPhase53'),
 
-    [string]$LockPath = ''
+    [string]$LockPath = '',
+
+    [string]$DownloadUriOverride = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,6 +107,40 @@ function Get-FileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-InstalledContentSummary {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallPath,
+        [Parameter(Mandatory = $true)][string]$MarkerName
+    )
+
+    $ExcludedDirectoryNames = @('Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '.git')
+    $ManifestLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($File in Get-ChildItem -LiteralPath $InstallPath -File -Recurse -Force) {
+        $RelativePath = [System.IO.Path]::GetRelativePath($InstallPath, $File.FullName).Replace('\', '/')
+        if ($RelativePath.StartsWith('./', [StringComparison]::Ordinal)) {
+            $RelativePath = $RelativePath.Substring(2)
+        }
+        if ($RelativePath -ceq $MarkerName) {
+            continue
+        }
+        $PathSegments = $RelativePath.Split('/')
+        if (@($PathSegments | Where-Object { $_ -in $ExcludedDirectoryNames }).Count -ne 0) {
+            continue
+        }
+        $ManifestLines.Add(("{0}`t{1}" -f $RelativePath, (Get-FileSha256 $File.FullName)))
+    }
+
+    $SortedManifestLines = @($ManifestLines)
+    [Array]::Sort($SortedManifestLines, [StringComparer]::Ordinal)
+    $Manifest = [string]::Join("`n", $SortedManifestLines) + "`n"
+    $ManifestBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Manifest)
+    $Digest = [System.Security.Cryptography.SHA256]::HashData($ManifestBytes)
+    return [pscustomobject]@{
+        sha256 = ([System.Convert]::ToHexString($Digest)).ToLowerInvariant()
+        file_count = [int64]$SortedManifestLines.Count
+    }
+}
+
 function Assert-BackendArchive {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -121,6 +157,49 @@ function Assert-BackendArchive {
     $ActualSha = Get-FileSha256 $Path
     if ($ActualSha -cne [string]$Lock.backend.sha256) {
         throw "ASP53D1302 Puerts backend archive SHA-256 mismatch: actual=$ActualSha"
+    }
+}
+
+function Get-BackendArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)]$Lock,
+        [string]$DownloadUriOverride = ''
+    )
+
+    $ArchivePath = Join-Path $Root $Lock.backend.asset_name
+    if (Test-Path -LiteralPath $ArchivePath -PathType Leaf) {
+        Assert-BackendArchive $ArchivePath $Lock
+        return $ArchivePath
+    }
+
+    New-Item -ItemType Directory -Force -Path $Root | Out-Null
+    $TemporaryPath = Join-Path $Root ("$($Lock.backend.asset_name).partial-$([Guid]::NewGuid().ToString('N')).tmp")
+    $DownloadUri = if ([string]::IsNullOrWhiteSpace($DownloadUriOverride)) { [string]$Lock.backend.asset_url } else { $DownloadUriOverride }
+    try {
+        try {
+            Invoke-WebRequest -Uri $DownloadUri -OutFile $TemporaryPath -UseBasicParsing -ErrorAction Stop
+        }
+        catch {
+            throw "ASP53D1303 unable to download Puerts backend archive: $($_.Exception.Message)"
+        }
+        Assert-BackendArchive $TemporaryPath $Lock
+        try {
+            [System.IO.File]::Move($TemporaryPath, $ArchivePath)
+        }
+        catch [System.IO.IOException] {
+            if (Test-Path -LiteralPath $ArchivePath -PathType Leaf) {
+                Assert-BackendArchive $ArchivePath $Lock
+                return $ArchivePath
+            }
+            throw "ASP53D1304 unable to atomically publish Puerts backend archive: $($_.Exception.Message)"
+        }
+        return $ArchivePath
+    }
+    finally {
+        if (Test-Path -LiteralPath $TemporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $TemporaryPath -Force
+        }
     }
 }
 
@@ -191,8 +270,10 @@ function Write-ManagedMarker {
         [Parameter(Mandatory = $true)]$Lock
     )
 
+    $InstallPath = Split-Path -Parent $Path
+    $InstalledContent = Get-InstalledContentSummary $InstallPath (Split-Path -Leaf $Path)
     $Marker = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         managed_by = 'AvidScriptPhase53'
         lock_sha256 = Get-FileSha256 $LockFile
         source_repository_url = [string]$Lock.source.repository_url
@@ -200,6 +281,8 @@ function Write-ManagedMarker {
         source_plugin_tree_sha1 = [string]$Lock.source.plugin_tree_sha1
         backend_asset_name = [string]$Lock.backend.asset_name
         backend_sha256 = [string]$Lock.backend.sha256
+        installed_content_sha256 = $InstalledContent.sha256
+        installed_file_count = $InstalledContent.file_count
         installed_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
     }
     $Json = (($Marker | ConvertTo-Json -Depth 8) -replace "`r`n", "`n") + "`n"
@@ -216,16 +299,37 @@ function Read-AndAssertManagedMarker {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw 'ASP53D1600 refusing to manage Puerts directory without the AvidScript marker'
     }
-    $Marker = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    try {
+        $Marker = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
+    }
     $ExpectedLockSha = Get-FileSha256 $LockFile
-    if ([int]$Marker.schema_version -ne 1 -or
+    $MarkerSchemaVersion = 0
+    $MarkerFileCount = [int64]0
+    $HasValidSchemaVersion = [int]::TryParse(
+        [string]$Marker.schema_version,
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$MarkerSchemaVersion)
+    $HasValidFileCount = [int64]::TryParse(
+        [string]$Marker.installed_file_count,
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$MarkerFileCount)
+    if (-not $HasValidSchemaVersion -or
+        $MarkerSchemaVersion -ne 2 -or
         $Marker.managed_by -cne 'AvidScriptPhase53' -or
         $Marker.lock_sha256 -cne $ExpectedLockSha -or
         $Marker.source_repository_url -cne [string]$Lock.source.repository_url -or
         $Marker.source_commit_sha -cne [string]$Lock.source.commit_sha -or
         $Marker.source_plugin_tree_sha1 -cne [string]$Lock.source.plugin_tree_sha1 -or
         $Marker.backend_asset_name -cne [string]$Lock.backend.asset_name -or
-        $Marker.backend_sha256 -cne [string]$Lock.backend.sha256) {
+        $Marker.backend_sha256 -cne [string]$Lock.backend.sha256 -or
+        ([string]$Marker.installed_content_sha256) -cnotmatch '^[0-9a-f]{64}$' -or
+        ([string]$Marker.installed_file_count) -cnotmatch '^(0|[1-9][0-9]*)$' -or
+        -not $HasValidFileCount) {
         throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
     }
     return $Marker
@@ -236,7 +340,8 @@ function Install-Dependency {
         [Parameter(Mandatory = $true)][string]$ResolvedProjectRoot,
         [Parameter(Mandatory = $true)][string]$ResolvedCacheRoot,
         [Parameter(Mandatory = $true)][string]$ResolvedLockPath,
-        [Parameter(Mandatory = $true)]$Lock
+        [Parameter(Mandatory = $true)]$Lock,
+        [string]$DownloadUriOverride = ''
     )
 
     $Paths = Get-InstallPaths $ResolvedProjectRoot $Lock
@@ -245,12 +350,7 @@ function Install-Dependency {
     }
 
     $SourceRoot = Initialize-SourceCache $ResolvedCacheRoot $Lock
-    $ArchivePath = Join-Path $ResolvedCacheRoot $Lock.backend.asset_name
-    if (-not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
-        New-Item -ItemType Directory -Force -Path $ResolvedCacheRoot | Out-Null
-        Invoke-WebRequest -Uri $Lock.backend.asset_url -OutFile $ArchivePath -UseBasicParsing
-    }
-    Assert-BackendArchive $ArchivePath $Lock
+    $ArchivePath = Get-BackendArchive $ResolvedCacheRoot $Lock $DownloadUriOverride
 
     New-Item -ItemType Directory -Force -Path $Paths.PluginsRoot | Out-Null
     $StageRoot = Join-Path $Paths.PluginsRoot ('.AvidScriptPuertsStage-' + [Guid]::NewGuid().ToString('N'))
@@ -313,7 +413,7 @@ function Verify-Dependency {
     if (-not (Test-Path -LiteralPath $Paths.InstallPath -PathType Container)) {
         throw "ASP53D1800 Puerts is not installed at $($Paths.InstallPath)"
     }
-    Read-AndAssertManagedMarker $Paths.MarkerPath $ResolvedLockPath $Lock | Out-Null
+    $Marker = Read-AndAssertManagedMarker $Paths.MarkerPath $ResolvedLockPath $Lock
     Initialize-SourceCache $ResolvedCacheRoot $Lock | Out-Null
 
     $ArchivePath = Join-Path $ResolvedCacheRoot $Lock.backend.asset_name
@@ -328,6 +428,11 @@ function Verify-Dependency {
             throw "ASP53D1801 installed Puerts dependency is incomplete: $RelativePath"
         }
     }
+    $InstalledContent = Get-InstalledContentSummary $Paths.InstallPath (Split-Path -Leaf $Paths.MarkerPath)
+    if ($Marker.installed_content_sha256 -cne $InstalledContent.sha256 -or
+        [int64]$Marker.installed_file_count -ne $InstalledContent.file_count) {
+        throw 'ASP53D1802 installed Puerts content does not match its managed marker'
+    }
 
     return [pscustomobject][ordered]@{
         succeeded = $true
@@ -338,6 +443,8 @@ function Verify-Dependency {
         runtime = [string]$Lock.backend.runtime
         runtime_version = [string]$Lock.backend.runtime_version
         install_path = $Paths.InstallPath
+        installed_content_sha256 = $InstalledContent.sha256
+        installed_file_count = $InstalledContent.file_count
     }
 }
 
@@ -378,7 +485,7 @@ if ($Mode -ceq 'ValidateLock') {
 $ResolvedProjectRoot = Assert-ProjectRoot $ProjectRoot
 $ResolvedCacheRoot = Resolve-FullPath $CacheRoot
 $Result = switch ($Mode) {
-    'Install' { Install-Dependency $ResolvedProjectRoot $ResolvedCacheRoot $ResolvedLockPath $DependencyLock }
+    'Install' { Install-Dependency $ResolvedProjectRoot $ResolvedCacheRoot $ResolvedLockPath $DependencyLock $DownloadUriOverride }
     'Verify' { Verify-Dependency $ResolvedProjectRoot $ResolvedCacheRoot $ResolvedLockPath $DependencyLock }
     'Remove' { Remove-Dependency $ResolvedProjectRoot $ResolvedLockPath $DependencyLock }
 }
