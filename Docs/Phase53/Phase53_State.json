@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Completed",
-      "evidence": "独立复审 Critical=0、Important=0；正式 baseline/optimized 各 6000/6000；中文收尾和发布证据完成；Windows CRLF 回归与最终 Gate 路径失误均已修复或记录。",
-      "completed_at_utc": "2026-07-26T14:52:35.1666529+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "P53.5 独立复审 Critical 0 / Important 0；benchmark correctness 12000/12000；发布证据完成隐私与身份审查；Windows CRLF 回归已修复，最终 Gate 流程失误已记录。",
-    "completed_at_utc": "2026-07-26T14:53:17.5466333+00:00"
+    "completed": false,
+    "evidence": "reopened: 记录 release identity 长哈希人工补全错误并增加机器传递规则。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "40e7f4823d45c17c505ede9b024cc9276760f3e1",
-    "source_tree": "251f662764eb6ec4c171c66df0ed2414e85b57e2",
-    "state_sha256": "5092afb1277de108293c4ed16d79aa5900966140c5e041c34301cb0efd4910ac",
-    "review_evidence": "P53.5 独立复审 Critical 0 / Important 0；benchmark correctness 12000/12000；发布证据完成隐私与身份审查；Windows CRLF 回归已修复，最终 Gate 流程失误已记录。",
-    "at_utc": "2026-07-26T14:53:17.5466333+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "attest -Phase 53 -GateReportPath <path>",
-  "revision": 31,
-  "updated_at_utc": "2026-07-26T14:53:17.5511452+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
+  "revision": 32,
+  "updated_at_utc": "2026-07-26T14:54:56.1154684+00:00"
 }
