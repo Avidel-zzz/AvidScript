@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase54/P54.0_Execution_Tier_Performance_Architecture.md",
-    "version": 1,
-    "sha256": "d329aaf6bc6c4e4d06ff685973c1325985aba00960727457955c40c6d2c409b4",
-    "revision_reason": "initial architecture freeze"
+    "version": 2,
+    "sha256": "83c5385556abf718e94660c8b026c83d8296b538827b7c02c92400cc28295c5a",
+    "revision_reason": "按用户确认将 PC 关键路径改为 Wasmtime Cranelift JIT 对 Puerts V8 JIT；WAMR AOT 后移到 Shipping 与移动端，并加入 JIT 对 JIT 止损 Gate。"
   },
   "documents": {
     "plan": "Docs/Phase54/P54.1_Execution_Tier_Implementation_Plan.md",
@@ -19,15 +19,15 @@
   "batches": [
     {
       "id": "P54.0",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "架构 v2、实施计划、中文 closeout 骨架、两项只读审计与流程错误预防规则已写入；基线架构检查通过。",
+      "completed_at_utc": "2026-07-26T17:14:49.4622398+00:00"
     },
     {
       "id": "P54.1",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "backend identity/capability/selection/artifact/factory/instance-owned handle 已实现；UE5.8 VM+Runtime build 通过，VM Automation 12/12、Runtime smoke 1/1，通过独立源码审查；共享暂存区历史问题已记录且不影响实现。",
+      "completed_at_utc": "2026-07-26T17:15:00.7777339+00:00"
     },
     {
       "id": "P54.2",
@@ -112,7 +112,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 54 -BatchId P54.0 -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-07-26T16:45:00.2053310+00:00"
+  "next_action": "batch-complete -Phase 54 -BatchId P54.2 -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-07-26T17:15:00.7794745+00:00"
 }
