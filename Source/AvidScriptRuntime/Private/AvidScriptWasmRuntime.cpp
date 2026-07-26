@@ -956,14 +956,28 @@ bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
 	return VmBackend && VmBackend->IsLoaded();
 }
 
+FAvidScriptWasmRuntimeMetrics FAvidScriptWasmRuntimeInstance::GetMetrics() const
+{
+	FAvidScriptWasmRuntimeMetrics Result = Metrics;
+	Result.HostImportCallMs += FPlatformTime::ToMilliseconds64(DynamicHostImportCallCycles);
+	return Result;
+}
+
 void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
 	HostContext = InHostContext;
+	BindingInvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
+	BindingInvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
+	BindingInvocationContext.OwnerHandle = HostContext.OwnerHandle;
+	BindingInvocationContext.World = HostContext.World;
+	BindingInvocationContext.WritePolicy = HostContext.ActorWritePolicy;
+	BindingInvocationContext.HostEffectJournal = HostContext.HostEffectJournal;
 }
 
 void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 {
 	HostContext = FAvidScriptWasmHostContext();
+	BindingInvocationContext = FAvidScriptBindingInvocationContext();
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()
@@ -1947,7 +1961,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	const FAvidScriptDynamicHostCall& Call,
 	FAvidScriptDynamicHostCallResult& OutResult)
 {
-	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	const uint64 HostImportStartCycles = FPlatformTime::Cycles64();
 	++HostImportCallCount;
 	LastHostImportInput = static_cast<int32>(Call.BindingOrdinal);
 	LastHostImportResult = 0;
@@ -1955,24 +1969,17 @@ bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	{
 		OutResult = FAvidScriptDynamicHostCallResult();
 		OutResult.Details = TEXT("No reflected binding package is attached to this Runtime instance.");
-		Metrics.HostImportCallMs += MeasureElapsedMs(HostImportStartSeconds);
+		DynamicHostImportCallCycles += FPlatformTime::Cycles64() - HostImportStartCycles;
 		return false;
 	}
 
-	FAvidScriptBindingInvocationContext InvocationContext;
-	InvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
-	InvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
-	InvocationContext.OwnerHandle = HostContext.OwnerHandle;
-	InvocationContext.World = HostContext.World;
-	InvocationContext.WritePolicy = HostContext.ActorWritePolicy;
-	InvocationContext.HostEffectJournal = HostContext.HostEffectJournal;
 	const bool bSucceeded = BindingPackage->Dispatch(
 		Call,
-		InvocationContext,
+		BindingInvocationContext,
 		BindingInvocationScratch,
 		OutResult);
 	LastHostImportResult = OutResult.ReturnValue;
-	Metrics.HostImportCallMs += MeasureElapsedMs(HostImportStartSeconds);
+	DynamicHostImportCallCycles += FPlatformTime::Cycles64() - HostImportStartCycles;
 	return bSucceeded;
 }
 
@@ -2123,6 +2130,7 @@ void FAvidScriptWasmRuntimeInstance::ResetHostImportState()
 	HostImportCallCount = 0;
 	LastHostImportInput = 0;
 	LastHostImportResult = 0;
+	DynamicHostImportCallCycles = 0;
 	bHasPendingHostImportFailure = false;
 	PendingHostImportModuleName.Empty();
 	PendingHostImportName.Empty();
@@ -2134,7 +2142,7 @@ void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasm
 	OutResult.HostImportCallCount = HostImportCallCount;
 	OutResult.LastHostImportInput = LastHostImportInput;
 	OutResult.LastHostImportResult = LastHostImportResult;
-	OutResult.Metrics = Metrics;
+	OutResult.Metrics = GetMetrics();
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const
