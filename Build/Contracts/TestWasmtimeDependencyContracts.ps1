@@ -238,12 +238,22 @@ function Get-BuildDependencyAnalysis {
     )
 
     $CodeMask = Get-CSharpCodeMask -Source $Source
-    $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
+    $OccurrencePattern = '\b' + [regex]::Escape($Visibility) +
+        'DependencyModuleNames\b'
+    $AllowedInvocationPattern = '^(?s)' + [regex]::Escape($Visibility) +
         'DependencyModuleNames\s*\.\s*(?<method>Add|AddRange)\s*\('
     $Names = [System.Collections.Generic.List[string]]::new()
     $UnresolvedCount = 0
-    foreach ($Invocation in [regex]::Matches($CodeMask, $InvocationPattern)) {
-        $OpenParenthesis = $Invocation.Index + $Invocation.Length - 1
+    $UnsupportedCount = 0
+    foreach ($Occurrence in [regex]::Matches($CodeMask, $OccurrencePattern)) {
+        $Invocation = [regex]::Match(
+            $CodeMask.Substring($Occurrence.Index),
+            $AllowedInvocationPattern)
+        if (-not $Invocation.Success) {
+            ++$UnsupportedCount
+            continue
+        }
+        $OpenParenthesis = $Occurrence.Index + $Invocation.Length - 1
         $Depth = 0
         $CloseParenthesis = -1
         for ($Index = $OpenParenthesis; $Index -lt $CodeMask.Length; ++$Index) {
@@ -280,6 +290,7 @@ function Get-BuildDependencyAnalysis {
     return [pscustomobject]@{
         Names = @($Names)
         UnresolvedCount = $UnresolvedCount
+        UnsupportedCount = $UnsupportedCount
     }
 }
 
@@ -359,6 +370,10 @@ Assert-True ($VmPrivateDependencyAnalysis.UnresolvedCount -eq 0) `
     'AvidScriptVM has a non-literal private dependency declaration'
 Assert-True ($VmPublicDependencyAnalysis.UnresolvedCount -eq 0) `
     'AvidScriptVM has a non-literal public dependency declaration'
+Assert-True ($VmPrivateDependencyAnalysis.UnsupportedCount -eq 0) `
+    'AvidScriptVM has an unsupported private dependency-list occurrence'
+Assert-True ($VmPublicDependencyAnalysis.UnsupportedCount -eq 0) `
+    'AvidScriptVM has an unsupported public dependency-list occurrence'
 Assert-True ($VmPrivateDependencyAnalysis.Names -contains 'Wasmtime') `
     'AvidScriptVM is missing its structured private Wasmtime dependency'
 Assert-True ($VmPublicDependencyAnalysis.Names -notcontains 'Wasmtime') `
@@ -395,6 +410,23 @@ $PublicVariableAnalysis = Get-BuildDependencyAnalysis `
     -Visibility Public
 Assert-True ($PublicVariableAnalysis.UnresolvedCount -eq 1) `
     'public variable dependency did not fail closed'
+$UnsupportedInsertMutation = $VmBuild.Replace(
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;',
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;' + "`n`t`t" +
+        'PublicDependencyModuleNames.Insert(0, "Wasmtime");')
+$UnsupportedInsertAnalysis = Get-BuildDependencyAnalysis `
+    -Source $UnsupportedInsertMutation `
+    -Visibility Public
+Assert-True ($UnsupportedInsertAnalysis.UnsupportedCount -eq 1) `
+    'unsupported PublicDependencyModuleNames.Insert mutation did not fail closed'
+$AliasMutation = $VmBuild.Replace(
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;',
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;' + "`n`t`t" +
+        'var PublicDependencyAlias = PublicDependencyModuleNames;' + "`n`t`t" +
+        'PublicDependencyAlias.Add("Wasmtime");')
+$AliasAnalysis = Get-BuildDependencyAnalysis -Source $AliasMutation -Visibility Public
+Assert-True ($AliasAnalysis.UnsupportedCount -eq 1) `
+    'PublicDependencyModuleNames alias mutation did not fail closed'
 $ArchitectureSource = Get-Content -LiteralPath (
     Join-Path $PluginRoot 'Build/CheckAvidScriptArchitecture.ps1') -Raw
 Assert-True $ArchitectureSource.Contains('Get-CSharpCodeMask') `
@@ -413,6 +445,8 @@ Assert-True $ArchitectureSource.Contains(
     'architecture checker does not reject a public Wasmtime dependency'
 Assert-True $ArchitectureSource.Contains('$VmPublicDependencyAnalysis.UnresolvedCount -gt 0') `
     'architecture checker does not fail closed on unresolved public dependencies'
+Assert-True $ArchitectureSource.Contains('$VmPublicDependencyAnalysis.UnsupportedCount -gt 0') `
+    'architecture checker does not fail closed on unsupported public dependency-list occurrences'
 $VmPublicText = (
     Get-ChildItem -LiteralPath (Join-Path $PluginRoot 'Source/AvidScriptVM/Public') -File -Recurse |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
@@ -627,4 +661,5 @@ Write-Output (
     'tracked_lock=1 schema=1 license=1 cli_validate=1 parser=1 archive_identity=2 traversal=1 ads=1 ' +
     'missing_layout=3 install=1 verify=1 idempotent=1 content_tamper=1 extra_file=1 ' +
     'marker_drift=1 installed_ads=2 unmanaged_remove=1 drift_remove=1 ancestor_reparse=2 managed_remove=1 ' +
-    'gitignore=1 ubt=1 private_dependency_structure=2 dependency_decoys=2 public_boundary=1')
+    'gitignore=1 ubt=1 private_dependency_structure=2 dependency_decoys=2 unsupported_mutators=2 ' +
+    'public_boundary=1')

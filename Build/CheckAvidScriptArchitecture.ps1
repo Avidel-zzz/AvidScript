@@ -130,12 +130,22 @@ function Get-BuildDependencyAnalysis {
     )
 
     $CodeMask = Get-CSharpCodeMask -Source $Source
-    $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
+    $OccurrencePattern = '\b' + [regex]::Escape($Visibility) +
+        'DependencyModuleNames\b'
+    $AllowedInvocationPattern = '^(?s)' + [regex]::Escape($Visibility) +
         'DependencyModuleNames\s*\.\s*(?<method>Add|AddRange)\s*\('
     $Names = [System.Collections.Generic.List[string]]::new()
     $UnresolvedCount = 0
-    foreach ($Invocation in [regex]::Matches($CodeMask, $InvocationPattern)) {
-        $OpenParenthesis = $Invocation.Index + $Invocation.Length - 1
+    $UnsupportedCount = 0
+    foreach ($Occurrence in [regex]::Matches($CodeMask, $OccurrencePattern)) {
+        $Invocation = [regex]::Match(
+            $CodeMask.Substring($Occurrence.Index),
+            $AllowedInvocationPattern)
+        if (-not $Invocation.Success) {
+            ++$UnsupportedCount
+            continue
+        }
+        $OpenParenthesis = $Occurrence.Index + $Invocation.Length - 1
         $Depth = 0
         $CloseParenthesis = -1
         for ($Index = $OpenParenthesis; $Index -lt $CodeMask.Length; ++$Index) {
@@ -172,6 +182,7 @@ function Get-BuildDependencyAnalysis {
     return [pscustomobject]@{
         Names = @($Names)
         UnresolvedCount = $UnresolvedCount
+        UnsupportedCount = $UnsupportedCount
     }
 }
 
@@ -293,6 +304,12 @@ if ($VmPrivateDependencyAnalysis.UnresolvedCount -gt 0) {
 }
 if ($VmPublicDependencyAnalysis.UnresolvedCount -gt 0) {
     Add-Violation 'AvidScriptVM public dependencies must use literal-only Add/AddRange declarations'
+}
+if ($VmPrivateDependencyAnalysis.UnsupportedCount -gt 0) {
+    Add-Violation 'AvidScriptVM private dependency-list occurrences must be literal-only Add/AddRange calls'
+}
+if ($VmPublicDependencyAnalysis.UnsupportedCount -gt 0) {
+    Add-Violation 'AvidScriptVM public dependency-list occurrences must be literal-only Add/AddRange calls'
 }
 foreach ($RequiredVmBackendDependency in @('WAMR', 'Wasmtime')) {
     if ($VmPrivateDependencyAnalysis.Names -notcontains $RequiredVmBackendDependency) {
