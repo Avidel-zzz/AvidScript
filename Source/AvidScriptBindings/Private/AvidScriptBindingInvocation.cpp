@@ -77,58 +77,9 @@ struct FAvidScriptRuntimeBindingInvocationPlan
 	int32 FrameAlignment = 1;
 	int32 RequiredScratchSize = 0;
 	int32 ExpectedArgumentCount = 0;
-	TArray<FProperty*> FrameInitializers;
-	TArray<FProperty*> FrameDestructors;
 	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
 	FAvidScriptRuntimeBindingValuePlan ReturnValue;
 };
-
-bool BuildAvidScriptRuntimeFrameLifecyclePlan(
-	FAvidScriptRuntimeBindingInvocationPlan& Plan,
-	FString& OutDetails)
-{
-	if (Plan.Function == nullptr)
-	{
-		OutDetails = TEXT("The reflected invocation plan has no UFunction.");
-		return false;
-	}
-
-	for (FProperty* Property = Plan.Function->PropertyLink;
-		Property != nullptr;
-		Property = Property->PropertyLinkNext)
-	{
-		if (!Property->IsInContainer(Plan.FrameSize))
-		{
-			OutDetails = FString::Printf(
-				TEXT("Property '%s' is outside the cached UFunction frame."),
-				*Property->GetName());
-			return false;
-		}
-		if (!Property->HasAnyPropertyFlags(CPF_ZeroConstructor))
-		{
-			Plan.FrameInitializers.Add(Property);
-		}
-	}
-
-	for (FProperty* Property = Plan.Function->DestructorLink;
-		Property != nullptr;
-		Property = Property->DestructorLinkNext)
-	{
-		if (Property->HasAnyPropertyFlags(CPF_NoDestructor))
-		{
-			break;
-		}
-		if (!Property->IsInContainer(Plan.FrameSize))
-		{
-			OutDetails = FString::Printf(
-				TEXT("Destructor property '%s' is outside the cached UFunction frame."),
-				*Property->GetName());
-			return false;
-		}
-		Plan.FrameDestructors.Add(Property);
-	}
-	return true;
-}
 
 void SetAvidScriptBindingLoadFailure(
 	FAvidScriptBindingPackageLoadResult& OutResult,
@@ -2331,15 +2282,6 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				}
 				Plan.RequiredScratchSize = Plan.FrameSize
 					+ Plan.FrameAlignment - 1;
-				if (!BuildAvidScriptRuntimeFrameLifecyclePlan(Plan, ValueDetails))
-				{
-					SetAvidScriptBindingLoadFailure(
-						OutResult,
-						TEXT("binding_frame_lifecycle_invalid"),
-						Binding.CanonicalIdentity,
-						ValueDetails);
-					return false;
-				}
 				if (!BuildAvidScriptRuntimeValuePlan(
 						SetterParameters[0],
 						Binding.Parameters[0],
@@ -2556,15 +2498,6 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 		Plan.RequiredScratchSize = Plan.FrameSize + Plan.FrameAlignment - 1;
-		if (!BuildAvidScriptRuntimeFrameLifecyclePlan(Plan, ValueDetails))
-		{
-			SetAvidScriptBindingLoadFailure(
-				OutResult,
-				TEXT("binding_frame_lifecycle_invalid"),
-				Binding.CanonicalIdentity,
-				ValueDetails);
-			return false;
-		}
 		int32 ArgumentOffset = Binding.bStatic ? 0 : 2;
 		for (int32 Index = 0; Index < Binding.Parameters.Num(); ++Index)
 		{
@@ -3099,17 +3032,10 @@ bool FAvidScriptBindingPackage::Dispatch(
 		return false;
 	}
 	void* Frame = reinterpret_cast<void*>(FrameAddress);
-	FMemory::Memzero(Frame, Plan.FrameSize);
-	for (FProperty* Property : Plan.FrameInitializers)
-	{
-		Property->InitializeValue_InContainer(Frame);
-	}
+	Plan.Function->InitializeStruct(Frame);
 	ON_SCOPE_EXIT
 	{
-		for (FProperty* Property : Plan.FrameDestructors)
-		{
-			Property->DestroyValue_InContainer(Frame);
-		}
+		Plan.Function->DestroyStruct(Frame);
 	};
 
 	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Plan.Parameters)
