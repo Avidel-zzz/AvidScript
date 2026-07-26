@@ -37,9 +37,9 @@
     },
     {
       "id": "P53.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "通用热路径优化完成：commit 2ce7a9b41e7b 取消成功 handle resolve 的 UObject path materialization，不改变 generation、stale handle、IsA、ownership 或失败诊断；干净候选 UE5.8 UBT 编译链接 AvidScriptBindings 与 AvidScriptPerfHarness，focused Automation AvidScript.PerformanceComparison.FourLane.Correctness 通过；正式 attempt 28c5857c-1149-4c29-aa42-b390e0697f43 为 1 calibration + 5 fresh timed processes、5 warmup + 30 timed，6,000/6,000 样本正确。UObject crossing workload 提升 20.2%-34.9%，Avid/Puerts Reflection 几何平均由 6.99x 降至 5.73x；生产 hot-path 静态合同通过。",
+      "completed_at_utc": "2026-07-26T11:21:54.0112267+00:00"
     },
     {
       "id": "P53.5",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.4 -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-07-26T10:31:48.4521769+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
+  "revision": 6,
+  "updated_at_utc": "2026-07-26T11:21:54.0135694+00:00"
 }
