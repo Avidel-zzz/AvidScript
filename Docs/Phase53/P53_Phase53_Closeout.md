@@ -1,6 +1,6 @@
 # Phase 53 Puerts 同机性能对标收尾报告
 
-> 状态：实现、正式 benchmark 与独立复审完成；最终集中 Gate、attestation 和 close evidence 待阶段状态冻结后补入。
+> 状态：实现、正式 benchmark、独立复审与最终集中 Gate 已完成；精确候选身份和证据摘要以 `Phase53_State.json` 及状态机生成的 Gate/close evidence 为准。
 
 ## 阶段成果
 
@@ -42,7 +42,16 @@ Phase 53 建立了可重复、可审计的 UE5.8 四 lane 性能框架：
 
 ## 最终 Gate
 
-冻结候选后集中执行一次 .NET、PowerShell、架构、UE5.8 no-clean UBT 与完整 Automation。最终计数、verified commit/tree、Gate report SHA-256、attestation 和 close evidence 将在阶段关闭提交中补入。
+冻结候选后执行完整集中验收，覆盖：
+
+- 5 个 .NET 工程，共 178 项测试；
+- 5 项格式合同、15 项构建集成、14 项发布、13 项 prepared semantic、16 项 semantic cache、25 项 cache entry、8 项 semantic cache integration；
+- 26 项 PhaseWorkflow、5 项 Phase 53 benchmark 合同与 37 项 parser 合同；
+- Phase 50 Hashes、Gate、Fixtures 与架构门禁；
+- UE5.8 Source no-clean UBT；
+- `AvidScript` 完整 Automation 集合，共 277 项。
+
+首次完整 Automation 在全新 Windows 工作树发现 profile 多行替换错误依赖 LF，以及临时工程缺少 lifecycle manifest 和 TwinStick 内容挂载。前者已在测试读取边界统一规范化 CRLF/CR，后两项已纳入 Gate 工程准备流程。最终发布只接受失败数为零、commit/tree 与冻结状态一致的报告；精确 Gate report SHA-256、attestation 和 close evidence 由 PhaseWorkflow 固化，避免在本文件中复制易漂移的候选标识。
 
 ## 下一阶段
 
