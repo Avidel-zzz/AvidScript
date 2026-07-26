@@ -1018,21 +1018,26 @@ namespace
 			return false;
 		}
 		OutRequest.Provenance = *Provenance;
-		FString ProvenanceResultSchemaSha256;
+		const TCHAR* ExpectedProvenanceSchemaHashField =
+			OutRequest.Mode == EAvidScriptPerfBenchmarkMode::Calibrate
+				? TEXT("calibration_schema_sha256")
+				: TEXT("result_schema_sha256");
+		FString ExpectedProvenanceSchemaSha256;
 		if (!TryGetRequiredString(
 				OutRequest.Provenance,
-				TEXT("result_schema_sha256"),
-				ProvenanceResultSchemaSha256,
+				ExpectedProvenanceSchemaHashField,
+				ExpectedProvenanceSchemaSha256,
 				OutError))
 		{
 			return false;
 		}
 		if (!ResultSchemaSha256.Equals(
-				ProvenanceResultSchemaSha256,
+				ExpectedProvenanceSchemaSha256,
 				ESearchCase::CaseSensitive))
 		{
-			OutError =
-				TEXT("request result_schema.sha256 must equal provenance result_schema_sha256");
+			OutError = FString::Printf(
+				TEXT("request result_schema.sha256 must equal selected provenance schema hash: field=%s"),
+				ExpectedProvenanceSchemaHashField);
 			return false;
 		}
 

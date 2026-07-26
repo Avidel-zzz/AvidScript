@@ -91,11 +91,14 @@ Assert-True ([regex]::IsMatch($RunnerSource, $ExactVersionPattern)) `
 $SerializedVersionPattern = 'TEXT\("schema_version"\),\s*PerfRunnerResultSchemaVersion\)'
 Assert-True ([regex]::IsMatch($RunnerSource, $SerializedVersionPattern)) `
     'result serialization must always label the payload as v1'
-Assert-True ($RunnerSource.Contains('request result_schema.sha256 must equal provenance result_schema_sha256')) `
-    'warm core must reject mixed result schema provenance'
-$HashEqualityPattern = 'ResultSchemaSha256\.Equals\(\s*ProvenanceResultSchemaSha256,\s*ESearchCase::CaseSensitive\)'
+$SchemaHashFieldPattern = 'OutRequest\.Mode == EAvidScriptPerfBenchmarkMode::Calibrate\s*\?\s*TEXT\("calibration_schema_sha256"\)\s*:\s*TEXT\("result_schema_sha256"\)'
+Assert-True ([regex]::IsMatch($RunnerSource, $SchemaHashFieldPattern)) `
+    'calibration and timed modes must select their respective provenance schema hash fields'
+Assert-True ($RunnerSource.Contains('request result_schema.sha256 must equal selected provenance schema hash')) `
+    'warm core must fail closed on a selected schema hash mismatch'
+$HashEqualityPattern = 'ResultSchemaSha256\.Equals\(\s*ExpectedProvenanceSchemaSha256,\s*ESearchCase::CaseSensitive\)'
 Assert-True ([regex]::IsMatch($RunnerSource, $HashEqualityPattern)) `
-    'result schema hash equality must be case-sensitive'
+    'selected result schema hash equality must be case-sensitive'
 Assert-True ($RunnerSource.Contains('WarmupSamples')) `
     'warm core must execute the exact requested warmup count'
 Assert-True ($RunnerSource.Contains('TimedSamples')) `
