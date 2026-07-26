@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.5 状态检查分号禁令再次复发：恢复收尾后把 `git status`、`git log` 与 `git diff --check` 放进同一 PowerShell 调用；命令虽只读且成功，但再次破坏“一次调用一个逻辑命令”的审计边界。Prevention：发送任何 `shell_command` 前机械扫描 `;`、`&&`、`||`；状态、身份和差异检查分别调用，不能因同属 Git 检查而合并。
 - 2026-07-26 P53.5 发布证据不可变性误判：P53.3/P53.4 报告把 `C:\tmp` attempt 称为不可变证据，但没有发布 aggregate SHA 或可分发的机器摘要；本机目录可变且其他机器无法审计表格。Prevention：正式性能结论只引用带 SHA-256 的 raw aggregate，并在仓库发布去路径、去 raw sample 的 compact statistics/provenance 摘要；阶段外目录只能称为本机原始证据，不能称为发布制品。
 - 2026-07-26 P53.5 formal provenance 信任边界错误：首版 runner 只验证命令行 commit/hash 格式并原样写入结果，Puerts Verify 也只检查 marker 和少量文件存在；调用者可把陈旧或被改动的 candidate/artifact 标成锁定身份。Prevention：正式 runner 在启动进程前重验 clean-project marker、candidate HEAD/tree/clean、tracked canonical profile/lock、Puerts 安装内容、WASM/manifest 与 Editor executable identity；命令行值必须和实物及 tracked lock 三方一致。
 - 2026-07-26 P53.5 委派基线完整 SHA 抄写错误：未执行 `git rev-parse HEAD` 就把不存在的 `71753da50e...` 写入 SDD ledger 和三个 agent brief；agents 被迫回退到本地真实 `71753dad890...`。Prevention：任何委派 brief、candidate marker 或 Gate identity 中的完整 Git 对象都从当前仓库命令输出逐字复制，禁止由短 SHA 补全。

@@ -4,7 +4,7 @@ AvidScript 是面向 Unreal Engine 的实验性现代脚本框架。目前主线
 
 项目目标不是为每个 UE API 手写一层 wrapper，而是从 UE Reflection 和项目 Binding Profile 生成类型、函数与属性投影，在加载阶段建立不可变 dispatch plan，让脚本在 `BeginPlay`、`Tick`、Timer、Overlap 等 UE 事件中编写真实游戏逻辑。
 
-> 当前版本为 `0.1.0 开发者预览`。Phase 51 主要验证 UE5.8 源码版、Windows 64 位 Development Editor；Cook、Shipping、Android 和 iOS 尚未完成正式支持。
+> 当前版本为 `0.1.0 开发者预览`。Phase 53 主要验证 UE5.8 源码版、Windows 64 位 Development Editor；Cook、Shipping、Android 和 iOS 尚未完成正式支持。
 
 ## 当前能力
 
@@ -135,7 +135,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - PowerShell parser、构建合同与架构门禁；
 - UE5.8 no-clean 模块构建和 `Automation RunTests AvidScript`。
 
-Phase 51 的对象/组件闭环、性能数据和边界见 [Phase 51 收尾报告](Docs/Phase51/P51_Phase51_Closeout.md)。
+Phase 53 已建立与 Puerts V8 reflection/static 的同机四 lane benchmark。完整方法、复审与结果见 [Phase 53 收尾报告](Docs/Phase53/P53_Phase53_Closeout.md) 和 [机器可读证据](Docs/Phase53/P53_Benchmark_Evidence.json)。
 
 ## 当前边界
 
@@ -143,7 +143,7 @@ Phase 51 的对象/组件闭环、性能数据和边界见 [Phase 51 收尾报�
 - arbitrary `UStruct`、容器、delegate、Blueprint 图中新声明函数尚未完整支持；
 - C# 支持面由 Roslyn semantic/CFG lowering 能力决定，并非完整 .NET Runtime；
 - 移动端 AOT、Cook/Shipping、崩溃隔离和跨平台性能仍在后续阶段；
-- 尚未建立与 Puerts、UnLua、AngelScript 的同机同项目公开 benchmark，因此当前不宣称外部性能排名。
+- 已建立 Puerts 同机矩阵，但尚未覆盖 UnLua、AngelScript、Shipping 和移动端；当前 WAMR interpreter 除 `vector_value` 外仍未全面达到 Puerts V8，不宣称整体性能领先。
 
 ## 开发约定
 
