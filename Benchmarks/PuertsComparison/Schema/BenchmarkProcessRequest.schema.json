@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AvidScript single-process benchmark request",
+  "title": "AvidScript 单进程基准请求",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -99,11 +99,13 @@
         "manifest_sha256",
         "avidscript_tree_sha",
         "avidscript_dirty",
+        "allow_non_formal_profile",
         "profile_id",
         "profile_sha256",
         "request_schema_sha256",
         "calibration_schema_sha256",
-        "result_schema_sha256"
+        "result_schema_sha256",
+        "aggregate_schema_sha256"
       ],
       "properties": {
         "ue_version": { "type": "string", "minLength": 1 },
@@ -122,11 +124,13 @@
         "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "avidscript_tree_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "avidscript_dirty": { "const": false },
+        "allow_non_formal_profile": { "type": "boolean" },
         "profile_id": { "type": "string", "minLength": 1 },
         "profile_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "request_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "calibration_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "result_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "result_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "aggregate_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
     "result_schema": {
@@ -134,7 +138,7 @@
       "additionalProperties": false,
       "required": ["version", "sha256"],
       "properties": {
-        "version": { "type": "integer", "minimum": 1 },
+        "version": { "const": 1 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },

@@ -213,6 +213,27 @@ function Get-SidecarRotatedLaneOrder {
     return $Result.ToArray()
 }
 
+function Get-SidecarWilliamsLaneOrder {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$BaseLaneOrder,
+        [Parameter(Mandatory = $true)][int]$ProcessRun,
+        [Parameter(Mandatory = $true)][int]$WorkloadIndex,
+        [Parameter(Mandatory = $true)][int]$SampleIndex
+    )
+
+    if ($BaseLaneOrder.Count -ne 4) {
+        throw 'ASP53S2004 Williams 顺序要求恰好四个 lane'
+    }
+    $BalancedRows = @(
+        @(0, 1, 3, 2),
+        @(1, 2, 0, 3),
+        @(2, 3, 1, 0),
+        @(3, 0, 2, 1)
+    )
+    $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 4 + 4) % 4
+    return @($BalancedRows[$Row] | ForEach-Object { $BaseLaneOrder[$_] })
+}
+
 function Get-SidecarExpectedSampleSeed {
     param(
         [Parameter(Mandatory = $true)][int]$Seed,
@@ -247,11 +268,13 @@ function Get-SidecarProvenanceFieldNames {
         'manifest_sha256',
         'avidscript_tree_sha',
         'avidscript_dirty',
+        'allow_non_formal_profile',
         'profile_id',
         'profile_sha256',
         'request_schema_sha256',
         'calibration_schema_sha256',
-        'result_schema_sha256'
+        'result_schema_sha256',
+        'aggregate_schema_sha256'
     )
 }
 
@@ -379,10 +402,16 @@ function Test-SidecarProcessResult {
             $SampleIndex -ge $TimedSamples) {
             throw "ASP53S2009 raw result 含越界样本：process=$ExpectedProcessRun lane=$Lane workload=$Workload sample=$SampleIndex"
         }
+        $WorkloadIndex = [Array]::IndexOf([object[]]$ExpectedWorkloads, $Workload)
+        $WilliamsOrder = Get-SidecarWilliamsLaneOrder `
+            -BaseLaneOrder @($Result.lane_order) `
+            -ProcessRun $ExpectedProcessRun `
+            -WorkloadIndex $WorkloadIndex `
+            -SampleIndex $SampleIndex
         if ($LanePosition -lt 0 -or
             $LanePosition -ge $ExpectedLanes.Count -or
-            [string]$Result.lane_order[$LanePosition] -cne $Lane) {
-            throw "ASP53S2040 lane_position 与轮转顺序不匹配：process=$ExpectedProcessRun lane=$Lane position=$LanePosition"
+            [string]$WilliamsOrder[$LanePosition] -cne $Lane) {
+            throw "ASP53S2040 lane_position 与 Williams 顺序不匹配：process=$ExpectedProcessRun lane=$Lane workload=$Workload sample=$SampleIndex position=$LanePosition"
         }
         $PositionKey = "$Workload|$SampleIndex|$LanePosition"
         if ($PositionsByKey.ContainsKey($PositionKey)) {
@@ -390,7 +419,6 @@ function Test-SidecarProcessResult {
         }
         $PositionsByKey[$PositionKey] = $true
 
-        $WorkloadIndex = [Array]::IndexOf([object[]]$ExpectedWorkloads, $Workload)
         $ExpectedSeed = Get-SidecarExpectedSampleSeed `
             -Seed ([int]$Profile.seed) `
             -WorkloadIndex $WorkloadIndex `

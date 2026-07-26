@@ -47,6 +47,12 @@ function Write-NewJson {
     [System.IO.File]::WriteAllText($Path, $Json, [System.Text.UTF8Encoding]::new($false))
 }
 
+function Get-TestFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
 function Invoke-ExpectedFailure {
     param(
         [Parameter(Mandatory = $true)][scriptblock]$Action,
@@ -62,6 +68,38 @@ function Invoke-ExpectedFailure {
     }
 }
 
+function Copy-AttemptFixture {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceAttempt,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $Candidate = Join-Path $FixtureRoot $Name
+    Copy-Item -LiteralPath $SourceAttempt -Destination $Candidate -Recurse
+    $ManifestPath = Join-Path $Candidate 'attempt.json'
+    $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+
+    $CalibrationRequestPath = Join-Path $Candidate $Manifest.calibration.request_path
+    $CalibrationRequest = Get-Content -LiteralPath $CalibrationRequestPath -Raw | ConvertFrom-Json
+    $CalibrationResultPath = Join-Path $Candidate $Manifest.calibration.raw_path
+    $CalibrationRequest.result_path = $CalibrationResultPath
+    $CalibrationRequest.result_write.temporary_path = "$CalibrationResultPath.$($Manifest.attempt_id).tmp"
+    Write-NewJson $CalibrationRequestPath $CalibrationRequest
+    $Manifest.calibration.request_sha256 = Get-TestFileSha256 $CalibrationRequestPath
+
+    foreach ($RunEntry in @($Manifest.process_runs)) {
+        $RequestPath = Join-Path $Candidate $RunEntry.request_path
+        $Request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
+        $ResultPath = Join-Path $Candidate $RunEntry.raw_result_path
+        $Request.result_path = $ResultPath
+        $Request.result_write.temporary_path = "$ResultPath.$($Manifest.attempt_id).tmp"
+        Write-NewJson $RequestPath $Request
+        $RunEntry.request_sha256 = Get-TestFileSha256 $RequestPath
+    }
+    Write-NewJson $ManifestPath $Manifest
+    return $Candidate
+}
+
 function Copy-AndMutateRawResult {
     param(
         [Parameter(Mandatory = $true)][string]$SourceAttempt,
@@ -69,8 +107,7 @@ function Copy-AndMutateRawResult {
         [Parameter(Mandatory = $true)][scriptblock]$Mutation
     )
 
-    $Candidate = Join-Path $FixtureRoot $Name
-    Copy-Item -LiteralPath $SourceAttempt -Destination $Candidate -Recurse
+    $Candidate = Copy-AttemptFixture -SourceAttempt $SourceAttempt -Name $Name
     $RawPath = Join-Path $Candidate 'runs/02/raw-result.json'
     $Raw = Get-Content -LiteralPath $RawPath -Raw | ConvertFrom-Json
     & $Mutation $Raw
@@ -103,6 +140,9 @@ $TrackedProfile = Get-Content -LiteralPath (Join-Path $BenchmarkRoot 'Config/Ben
 Assert-True ([int]$TrackedProfile.process_runs -eq 5) '正式 profile 必须固定执行 5 个独立进程'
 Assert-True ([int]$TrackedProfile.warmup_samples -eq 5) '正式 profile 必须固定 5 次预热'
 Assert-True ([int]$TrackedProfile.timed_samples -eq 30) '正式 profile 必须固定 30 个计时样本'
+Assert-Near ([double]$TrackedProfile.minimum_sample_milliseconds) 5.0 -Message '正式 profile 必须固定最短样本时间为 5.0 ms'
+$RequestSchema = Get-Content -LiteralPath $RequestSchemaPath -Raw | ConvertFrom-Json
+Assert-True ([int]$RequestSchema.properties.result_schema.properties.version.const -eq 1) 'request result_schema.version 必须固定为 const 1'
 
 try {
     New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
@@ -118,9 +158,9 @@ try {
         configuration = 'Development'
         null_rhi = $true
         process_runs = 5
-        warmup_samples = 5
-        timed_samples = 30
-        minimum_sample_milliseconds = 5.0
+        warmup_samples = 1
+        timed_samples = 3
+        minimum_sample_milliseconds = 0.1
         minimum_iterations = 100
         maximum_iterations = 100000
         seed = 1397313
@@ -159,22 +199,22 @@ function Get-NativeSwitchValue {
         }
         return $Value
     }
-    throw "fake editor did not receive switch: $Prefix"
+    throw "假 Editor 未收到参数：$Prefix"
 }
 
 foreach ($RequiredArgument in @('-run=AvidScriptPerfRun', '-Multiprocess', '-NoCompile')) {
     if ($EditorArguments -cnotcontains $RequiredArgument) {
-        throw "fake editor missing commandlet argument: $RequiredArgument"
+        throw "假 Editor 缺少 Commandlet 参数：$RequiredArgument"
     }
 }
 if (@($EditorArguments | Where-Object { $_.StartsWith('-ExecCmds=') }).Count -ne 0) {
-    throw 'fake editor must not receive -ExecCmds'
+    throw '假 Editor 不允许收到 -ExecCmds'
 }
 
 $RequestPath = Get-NativeSwitchValue '-AvidScriptPerfRequest='
 $ResultPath = Get-NativeSwitchValue '-AvidScriptPerfResult='
 if (-not (Test-Path -LiteralPath $RequestPath -PathType Leaf)) {
-    throw "fake editor request missing: path=[$RequestPath] args=[$($EditorArguments -join '][')]"
+    throw "假 Editor 找不到 request：path=[$RequestPath] args=[$($EditorArguments -join '][')]"
 }
 $Request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
 $Result = $null
@@ -204,6 +244,24 @@ elseif ([string]$Request.mode -ceq 'timed') {
         return [int]($Mixed -band 0x007fffffL)
     }
 
+    function Get-FakeWilliamsOrder {
+        param(
+            [string[]]$BaseOrder,
+            [int]$ProcessRun,
+            [int]$WorkloadIndex,
+            [int]$SampleIndex
+        )
+
+        $Rows = @(
+            @(0, 1, 3, 2),
+            @(1, 2, 0, 3),
+            @(2, 3, 1, 0),
+            @(3, 0, 2, 1)
+        )
+        $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 4 + 4) % 4
+        return @($Rows[$Row] | ForEach-Object { $BaseOrder[$_] })
+    }
+
     $Samples = [System.Collections.Generic.List[object]]::new()
     for ($WorkloadIndex = 0; $WorkloadIndex -lt $Request.workloads.Count; ++$WorkloadIndex) {
         $Workload = [string]$Request.workloads[$WorkloadIndex]
@@ -213,9 +271,14 @@ elseif ([string]$Request.mode -ceq 'timed') {
                 -WorkloadIndex $WorkloadIndex `
                 -SampleIndex $SampleIndex
             $Checksum = 1000 + ($WorkloadIndex * 100) + $SampleIndex
-            for ($LaneIndex = 0; $LaneIndex -lt $Request.lanes.Count; ++$LaneIndex) {
-                $Lane = [string]$Request.lanes[$LaneIndex]
-                $LanePosition = [Array]::IndexOf([object[]]@($Request.lane_order), $Lane)
+            $WilliamsOrder = Get-FakeWilliamsOrder `
+                -BaseOrder @($Request.lane_order) `
+                -ProcessRun ([int]$Request.process_run) `
+                -WorkloadIndex $WorkloadIndex `
+                -SampleIndex $SampleIndex
+            for ($LanePosition = 0; $LanePosition -lt $WilliamsOrder.Count; ++$LanePosition) {
+                $Lane = [string]$WilliamsOrder[$LanePosition]
+                $LaneIndex = [Array]::IndexOf([object[]]@($Request.lanes), $Lane)
                 $Iterations = [int64]$Request.iteration_counts.$Workload
                 $CyclesPerOperation = 1 + $SampleIndex + ($LaneIndex * 100) + ($WorkloadIndex * 1000)
                 $Samples.Add([ordered]@{
@@ -251,7 +314,7 @@ elseif ([string]$Request.mode -ceq 'timed') {
     }
 }
 else {
-    throw "fake editor received unknown mode: $($Request.mode)"
+    throw "假 Editor 收到未知模式：$($Request.mode)"
 }
 
 $Json = (($Result | ConvertTo-Json -Depth 64) -replace "`r`n", "`n") + "`n"
@@ -277,7 +340,7 @@ finally {
 }
 [System.IO.File]::Move([string]$Request.result_write.temporary_path, $ResultPath)
 
-Write-Output "fake-editor-pid=$PID"
+Write-Output "假 Editor PID=$PID"
 '@
     [System.IO.File]::WriteAllText($FakeEditorPath, $FakeEditor, [System.Text.UTF8Encoding]::new($false))
 
@@ -302,7 +365,47 @@ Write-Output "fake-editor-pid=$PID"
         V8Mode = 'jit'
         WasmSha256 = ('e' * 64)
         ManifestSha256 = ('f' * 64)
+        AllowNonFormalProfile = $true
     }
+
+    $DefaultGateArguments = @{}
+    foreach ($Entry in $RunnerArguments.GetEnumerator()) {
+        if ($Entry.Key -cne 'AllowNonFormalProfile') {
+            $DefaultGateArguments[$Entry.Key] = $Entry.Value
+        }
+    }
+    $DefaultGateArguments.EditorPrefixArguments = @()
+    Invoke-ExpectedFailure {
+        & $RunnerPath @DefaultGateArguments | Out-Null
+    } 'ASP53S2115'
+
+    foreach ($ReservedArgument in @(
+        '-eXeCcMdS:Quit',
+        '-RuN=Other',
+        '-aViDsCrIpTpErFrEqUeSt=x',
+        '-AVIDSCRIPTPERFRESULT=x',
+        '-mUlTiPrOcEsS',
+        '-nOcOmPiLe',
+        '-nUlLrHi',
+        '-D3D12',
+        '-rHi=Vulkan',
+        '-aBsLoG=x',
+        $ProjectPath)) {
+        $RejectedArguments = $RunnerArguments.Clone()
+        $RejectedArguments.AdditionalEditorArguments = @($ReservedArgument)
+        Invoke-ExpectedFailure {
+            & $RunnerPath @RejectedArguments | Out-Null
+        } 'ASP53S2114'
+    }
+    $RejectedPrefixArguments = $RunnerArguments.Clone()
+    $RejectedPrefixArguments.EditorPrefixArguments = @(
+        '-RuN=Other',
+        '-File',
+        $FakeEditorPath
+    )
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RejectedPrefixArguments | Out-Null
+    } 'ASP53S2114'
 
     $FirstRunOutput = & $RunnerPath @RunnerArguments
     $FirstRun = $FirstRunOutput | ConvertFrom-Json
@@ -314,9 +417,13 @@ Write-Output "fake-editor-pid=$PID"
     $Manifest = Get-Content -LiteralPath (Join-Path $FirstAttempt 'attempt.json') -Raw | ConvertFrom-Json
     Assert-True ($Manifest.profile.sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 profile 哈希'
     Assert-True ($Manifest.result_schema.sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 raw schema 哈希'
+    Assert-True ($Manifest.aggregate_schema.sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 aggregate schema 哈希'
+    Assert-True ((Get-TestFileSha256 (Join-Path $FirstAttempt $Manifest.aggregate_schema.snapshot_path)) -ceq $Manifest.aggregate_schema.sha256) 'aggregate schema 快照哈希不匹配'
     Assert-True ([int]$Manifest.process_runs.Count -eq 5) 'attempt 清单没有 5 个进程'
     Assert-True ($Manifest.calibration.sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 calibration raw 哈希'
+    Assert-True ($Manifest.calibration.request_sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 calibration request 哈希'
     Assert-True (Test-Path -LiteralPath (Join-Path $FirstAttempt $Manifest.calibration.raw_path) -PathType Leaf) 'attempt 未保留 calibration.json'
+    Assert-True ($Manifest.provenance.allow_non_formal_profile -eq $true) 'fixture attempt 未记录非正式 profile 开关'
 
     $ExpectedLaneOrders = @(
         'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr',
@@ -336,9 +443,12 @@ Write-Output "fake-editor-pid=$PID"
         Assert-True ([int]$Request.schema_version -eq 1) "进程 $ProcessRun request 缺少 schema_version"
         Assert-True ([string]$Request.mode -ceq 'timed') "进程 $ProcessRun request 不是 timed 模式"
         Assert-True ((@($Request.lane_order) -join ',') -ceq $ExpectedLaneOrders[$ProcessRun]) "lane 顺序未按进程轮转：$ProcessRun"
-        Assert-True ([int]$Request.warmup_samples -eq 5) "进程 $ProcessRun 未使用 profile 预热次数"
-        Assert-True ([int]$Request.timed_samples -eq 30) "进程 $ProcessRun 未使用 profile 样本数"
+        Assert-True ([int]$Request.warmup_samples -eq 1) "进程 $ProcessRun 未使用 fixture profile 预热次数"
+        Assert-True ([int]$Request.timed_samples -eq 3) "进程 $ProcessRun 未使用 fixture profile 样本数"
         Assert-True ([string]$Request.result_write.strategy -ceq 'same_directory_temporary_then_atomic_rename') "进程 $ProcessRun 未声明原子发布策略"
+        Assert-True ((Get-TestFileSha256 (Join-Path $RunDirectory 'request.json')) -ceq $Manifest.process_runs[$ProcessRun].request_sha256) "进程 $ProcessRun request 哈希未固定"
+        Assert-True ([string]$Request.result_path -ceq (Join-Path $RunDirectory 'raw-result.json')) "进程 $ProcessRun result_path 未绑定 run 目录"
+        Assert-True ([string]$Request.result_write.temporary_path -ceq "$($Request.result_path).$($Manifest.attempt_id).tmp") "进程 $ProcessRun temporary_path 未绑定 run 目录"
         Assert-True ($Request.provenance.null_rhi -eq $true) "进程 $ProcessRun 未固定 NullRHI"
         Assert-True ($Request.provenance.avidscript_dirty -eq $false) "进程 $ProcessRun 允许 dirty AvidScript"
         Assert-True (($Request.iteration_counts | ConvertTo-Json -Compress) -ceq $ExpectedIterationCounts) "进程 $ProcessRun 未复用 calibration iteration map"
@@ -350,9 +460,11 @@ Write-Output "fake-editor-pid=$PID"
 
     $AggregatePath = Join-Path $FirstAttempt 'aggregate.json'
     $AggregateRaw = Get-Content -LiteralPath $AggregatePath -Raw
-    Assert-True ($AggregateRaw | Test-Json -SchemaFile $AggregateSchemaPath) '聚合结果不符合 Schema'
+    $AggregateSchemaSnapshotPath = Join-Path $FirstAttempt $Manifest.aggregate_schema.snapshot_path
+    Assert-True ($AggregateRaw | Test-Json -SchemaFile $AggregateSchemaSnapshotPath) '聚合结果不符合 attempt 固定 Schema'
     $Aggregate = $AggregateRaw | ConvertFrom-Json
-    Assert-True ([int]$Aggregate.samples.Count -eq 1200) '聚合结果未保留全部 raw samples'
+    Assert-True ($Aggregate.aggregate_schema.sha256 -ceq $Manifest.aggregate_schema.sha256) '聚合结果未记录 aggregate schema 哈希'
+    Assert-True ([int]$Aggregate.samples.Count -eq 120) '聚合结果未保留全部 raw samples'
     Assert-True ([int]$Aggregate.process_statistics.Count -eq 40) '每进程统计矩阵不完整'
     Assert-True ([int]$Aggregate.cross_process_statistics.Count -eq 8) '跨进程统计矩阵不完整'
     Assert-True ([int]$Aggregate.paired_comparisons.Count -eq 6) '同进程配对比较矩阵不完整'
@@ -362,32 +474,33 @@ Write-Output "fake-editor-pid=$PID"
         $_.lane -ceq 'native_cpp' -and $_.workload -ceq 'scalar_noop'
     })
     Assert-True ($ScalarNativeProcess.Count -eq 1) '缺少 process/native_cpp/scalar_noop 统计'
-    Assert-True ([int]$ScalarNativeProcess[0].sample_count -eq 30) '每个 process/lane/workload 应有 30 个样本'
-    Assert-Near ([double]$ScalarNativeProcess[0].p50_ns_per_operation) 15.0 -Message '每进程 P50 计算错误'
-    Assert-Near ([double]$ScalarNativeProcess[0].p95_ns_per_operation) 29.0 -Message '每进程 P95 计算错误'
-    Assert-Near ([double]$ScalarNativeProcess[0].mad_ns_per_operation) 7.0 -Message '每进程 MAD 计算错误'
+    Assert-True ([int]$ScalarNativeProcess[0].sample_count -eq 3) '每个 fixture process/lane/workload 应有 3 个样本'
+    Assert-Near ([double]$ScalarNativeProcess[0].p50_ns_per_operation) 2.0 -Message '每进程 P50 计算错误'
+    Assert-Near ([double]$ScalarNativeProcess[0].p95_ns_per_operation) 3.0 -Message '每进程 P95 计算错误'
+    Assert-Near ([double]$ScalarNativeProcess[0].mad_ns_per_operation) 1.0 -Message '每进程 MAD 计算错误'
     $ScalarNativeCrossProcess = @($Aggregate.cross_process_statistics | Where-Object {
         $_.lane -ceq 'native_cpp' -and $_.workload -ceq 'scalar_noop'
     })
     Assert-True ($ScalarNativeCrossProcess.Count -eq 1) '缺少跨进程 native_cpp/scalar_noop 统计'
     Assert-True ([int]$ScalarNativeCrossProcess[0].process_count -eq 5) '跨进程统计必须基于 5 个 process summary'
-    Assert-Near ([double]$ScalarNativeCrossProcess[0].p50_of_process_p50_ns_per_operation) 15.0 -Message '跨进程 P50 计算错误'
-    Assert-Near ([double]$ScalarNativeCrossProcess[0].p95_of_process_p50_ns_per_operation) 15.0 -Message '跨进程 P95 计算错误'
+    Assert-Near ([double]$ScalarNativeCrossProcess[0].p50_of_process_p50_ns_per_operation) 2.0 -Message '跨进程 P50 计算错误'
+    Assert-Near ([double]$ScalarNativeCrossProcess[0].p95_of_process_p50_ns_per_operation) 2.0 -Message '跨进程 P95 计算错误'
     Assert-Near ([double]$ScalarNativeCrossProcess[0].mad_of_process_p50_ns_per_operation) 0.0 -Message '跨进程 MAD 计算错误'
     $ReflectionPair = @($Aggregate.paired_comparisons | Where-Object {
         $_.lane -ceq 'puerts_v8_reflection' -and $_.workload -ceq 'scalar_noop'
     })
     Assert-True ($ReflectionPair.Count -eq 1 -and [int]$ReflectionPair[0].per_process_ratios.Count -eq 5) '配对比较未保留 5 个 process ratio'
-    Assert-Near ([double]$ReflectionPair[0].p50_ratio) (115.0 / 15.0) -Message '同进程配对 ratio 计算错误'
+    Assert-Near ([double]$ReflectionPair[0].p50_ratio) (102.0 / 2.0) -Message '同进程配对 ratio 计算错误'
     $ScalarNativePooled = @($Aggregate.descriptive_pooled_statistics | Where-Object {
         $_.lane -ceq 'native_cpp' -and $_.workload -ceq 'scalar_noop'
     })
     Assert-True ($ScalarNativePooled.Count -eq 1 -and $ScalarNativePooled[0].descriptive_only -eq $true) '池化统计必须明确标记 descriptive_only'
-    Assert-True ([int]$ScalarNativePooled[0].sample_count -eq 150) '池化描述统计应保留 150 个样本'
-    $ExpectedGeometricMean = [Math]::Exp((1..30 | ForEach-Object { [Math]::Log([double]$_) } | Measure-Object -Average).Average)
+    Assert-True ([int]$ScalarNativePooled[0].sample_count -eq 15) 'fixture 池化描述统计应保留 15 个样本'
+    $ExpectedGeometricMean = [Math]::Exp((1..3 | ForEach-Object { [Math]::Log([double]$_) } | Measure-Object -Average).Average)
     Assert-Near ([double]$ScalarNativePooled[0].geometric_mean_ns_per_operation) $ExpectedGeometricMean 0.000001 -Message '池化几何平均数计算错误'
 
-    $RawAuditSample = (Get-Content -LiteralPath (Join-Path $FirstAttempt 'runs/00/raw-result.json') -Raw | ConvertFrom-Json).samples[0]
+    $RawAuditResult = Get-Content -LiteralPath (Join-Path $FirstAttempt 'runs/00/raw-result.json') -Raw | ConvertFrom-Json
+    $RawAuditSample = $RawAuditResult.samples[0]
     foreach ($Field in @(
         'lane_position',
         'seed',
@@ -400,6 +513,12 @@ Write-Output "fake-editor-pid=$PID"
         'expected_host_import_call_count')) {
         Assert-True ($null -ne $RawAuditSample.PSObject.Properties[$Field]) "raw sample 缺少公平性字段：$Field"
     }
+    $WilliamsNativeSample = @($RawAuditResult.samples | Where-Object {
+        $_.workload -ceq 'scalar_noop' -and
+        [int]$_.sample_index -eq 1 -and
+        $_.lane -ceq 'native_cpp'
+    })
+    Assert-True ($WilliamsNativeSample.Count -eq 1 -and [int]$WilliamsNativeSample[0].lane_position -eq 2) 'Williams row 1 应把 native_cpp 放在 position 2'
 
     Invoke-ExpectedFailure {
         & $AggregatorPath -AttemptPath $FirstAttempt -Mode Aggregate | Out-Null
@@ -442,14 +561,83 @@ Write-Output "fake-editor-pid=$PID"
         & $AggregatorPath -AttemptPath $MixedSchema -Mode Validate | Out-Null
     } 'ASP53S2014'
 
-    $MixedIterationRequest = Join-Path $FixtureRoot 'mixed-iteration-request'
-    Copy-Item -LiteralPath $FirstAttempt -Destination $MixedIterationRequest -Recurse
+    $TamperedRequestAttempt = Copy-AttemptFixture $FirstAttempt 'tampered-request-sha'
+    $TamperedRequestPath = Join-Path $TamperedRequestAttempt 'runs/02/request.json'
+    $TamperedRequest = Get-Content -LiteralPath $TamperedRequestPath -Raw | ConvertFrom-Json
+    $TamperedRequest.seed = [int]$TamperedRequest.seed + 1
+    Write-NewJson $TamperedRequestPath $TamperedRequest
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $TamperedRequestAttempt -Mode Validate | Out-Null
+    } 'ASP53S2051'
+
+    $TamperedCalibrationRequestAttempt = Copy-AttemptFixture $FirstAttempt 'tampered-calibration-request-sha'
+    $TamperedCalibrationRequestPath = Join-Path $TamperedCalibrationRequestAttempt 'calibration/request.json'
+    $TamperedCalibrationRequest = Get-Content -LiteralPath $TamperedCalibrationRequestPath -Raw | ConvertFrom-Json
+    $TamperedCalibrationRequest.seed = [int]$TamperedCalibrationRequest.seed + 1
+    Write-NewJson $TamperedCalibrationRequestPath $TamperedCalibrationRequest
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $TamperedCalibrationRequestAttempt -Mode Validate | Out-Null
+    } 'ASP53S2051'
+
+    $TamperedAggregateSchemaAttempt = Copy-AttemptFixture $FirstAttempt 'tampered-aggregate-schema'
+    $TamperedAggregateSchemaPath = Join-Path $TamperedAggregateSchemaAttempt $Manifest.aggregate_schema.snapshot_path
+    $TamperedAggregateSchema = Get-Content -LiteralPath $TamperedAggregateSchemaPath -Raw | ConvertFrom-Json
+    $TamperedAggregateSchema.title = '被篡改的聚合 Schema'
+    Write-NewJson $TamperedAggregateSchemaPath $TamperedAggregateSchema
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $TamperedAggregateSchemaAttempt -Mode Validate | Out-Null
+    } 'ASP53S2025'
+
+    $MixedIterationRequest = Copy-AttemptFixture $FirstAttempt 'mixed-iteration-request'
     $TimedRequestPath = Join-Path $MixedIterationRequest 'runs/02/request.json'
     $TimedRequest = Get-Content -LiteralPath $TimedRequestPath -Raw | ConvertFrom-Json
     $TimedRequest.iteration_counts.scalar_noop = [int64]$TimedRequest.iteration_counts.scalar_noop + 1
     Write-NewJson $TimedRequestPath $TimedRequest
+    $MixedIterationManifestPath = Join-Path $MixedIterationRequest 'attempt.json'
+    $MixedIterationManifest = Get-Content -LiteralPath $MixedIterationManifestPath -Raw | ConvertFrom-Json
+    $MixedIterationManifest.process_runs[2].request_sha256 = Get-TestFileSha256 $TimedRequestPath
+    Write-NewJson $MixedIterationManifestPath $MixedIterationManifest
     Invoke-ExpectedFailure {
         & $AggregatorPath -AttemptPath $MixedIterationRequest -Mode Validate | Out-Null
+    } 'ASP53S2046'
+
+    $V2RequestAttempt = Copy-AttemptFixture $FirstAttempt 'v2-result-schema-request'
+    $V2RequestPath = Join-Path $V2RequestAttempt 'runs/02/request.json'
+    $V2Request = Get-Content -LiteralPath $V2RequestPath -Raw | ConvertFrom-Json
+    $V2Request.result_schema.version = 2
+    Write-NewJson $V2RequestPath $V2Request
+    $V2ManifestPath = Join-Path $V2RequestAttempt 'attempt.json'
+    $V2Manifest = Get-Content -LiteralPath $V2ManifestPath -Raw | ConvertFrom-Json
+    $V2Manifest.process_runs[2].request_sha256 = Get-TestFileSha256 $V2RequestPath
+    Write-NewJson $V2ManifestPath $V2Manifest
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $V2RequestAttempt -Mode Validate | Out-Null
+    } 'ASP53S2046'
+
+    $WrongResultPathAttempt = Copy-AttemptFixture $FirstAttempt 'wrong-result-path-request'
+    $WrongResultRequestPath = Join-Path $WrongResultPathAttempt 'runs/02/request.json'
+    $WrongResultRequest = Get-Content -LiteralPath $WrongResultRequestPath -Raw | ConvertFrom-Json
+    $WrongResultRequest.result_path = Join-Path $WrongResultPathAttempt 'runs/03/raw-result.json'
+    Write-NewJson $WrongResultRequestPath $WrongResultRequest
+    $WrongResultManifestPath = Join-Path $WrongResultPathAttempt 'attempt.json'
+    $WrongResultManifest = Get-Content -LiteralPath $WrongResultManifestPath -Raw | ConvertFrom-Json
+    $WrongResultManifest.process_runs[2].request_sha256 = Get-TestFileSha256 $WrongResultRequestPath
+    Write-NewJson $WrongResultManifestPath $WrongResultManifest
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $WrongResultPathAttempt -Mode Validate | Out-Null
+    } 'ASP53S2046'
+
+    $WrongTemporaryPathAttempt = Copy-AttemptFixture $FirstAttempt 'wrong-temporary-path-request'
+    $WrongTemporaryRequestPath = Join-Path $WrongTemporaryPathAttempt 'runs/02/request.json'
+    $WrongTemporaryRequest = Get-Content -LiteralPath $WrongTemporaryRequestPath -Raw | ConvertFrom-Json
+    $WrongTemporaryRequest.result_write.temporary_path = "$($WrongTemporaryRequest.result_path).wrong.tmp"
+    Write-NewJson $WrongTemporaryRequestPath $WrongTemporaryRequest
+    $WrongTemporaryManifestPath = Join-Path $WrongTemporaryPathAttempt 'attempt.json'
+    $WrongTemporaryManifest = Get-Content -LiteralPath $WrongTemporaryManifestPath -Raw | ConvertFrom-Json
+    $WrongTemporaryManifest.process_runs[2].request_sha256 = Get-TestFileSha256 $WrongTemporaryRequestPath
+    Write-NewJson $WrongTemporaryManifestPath $WrongTemporaryManifest
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $WrongTemporaryPathAttempt -Mode Validate | Out-Null
     } 'ASP53S2046'
 
     $BadSeed = Copy-AndMutateRawResult $FirstAttempt 'bad-seed' {
@@ -494,7 +682,12 @@ Write-Output "fake-editor-pid=$PID"
 
     $BadLanePosition = Copy-AndMutateRawResult $FirstAttempt 'bad-lane-position' {
         param($Raw)
-        $Raw.samples[0].lane_position = [int]$Raw.samples[1].lane_position
+        $Target = @($Raw.samples | Where-Object {
+            $_.workload -ceq 'scalar_noop' -and
+            [int]$_.sample_index -eq 1 -and
+            $_.lane -ceq 'native_cpp'
+        })
+        $Target[0].lane_position = 0
     }
     Invoke-ExpectedFailure {
         & $AggregatorPath -AttemptPath $BadLanePosition -Mode Validate | Out-Null
@@ -514,4 +707,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar contracts passed: parser=1 commandlet=1 calibration_processes=1 timed_processes=5 fresh_pids=6 rotation=1 immutable=1 raw_samples=1200 process_stats=40 cross_process_stats=8 paired=6 descriptive_pool=8 mixed_rejections=4 fixed_iteration_rejections=2 fairness_rejections=6'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=1 reserved_args=12 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

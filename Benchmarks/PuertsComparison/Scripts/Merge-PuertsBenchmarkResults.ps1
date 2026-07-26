@@ -58,9 +58,11 @@ function Test-RequestProfileContract {
         [Parameter(Mandatory = $true)]$ExpectedLaneOrder,
         [Parameter(Mandatory = $true)][int]$ExpectedResultSchemaVersion,
         [Parameter(Mandatory = $true)][string]$ExpectedResultSchemaSha256,
+        [Parameter(Mandatory = $true)][string]$ExpectedResultPath,
         [Parameter(Mandatory = $true)][string]$Label
     )
 
+    $ExpectedTemporaryPath = "$ExpectedResultPath.$($Manifest.attempt_id).tmp"
     if ([string]$Request.mode -cne $ExpectedMode -or
         [int]$Request.process_run -ne $ExpectedProcessRun -or
         [string]$Request.attempt_id -cne [string]$Manifest.attempt_id -or
@@ -70,7 +72,17 @@ function Test-RequestProfileContract {
         [int64]$Request.minimum_iterations -ne [int64]$Profile.minimum_iterations -or
         [int64]$Request.maximum_iterations -ne [int64]$Profile.maximum_iterations -or
         [int]$Request.result_schema.version -ne $ExpectedResultSchemaVersion -or
-        [string]$Request.result_schema.sha256 -cne $ExpectedResultSchemaSha256) {
+        [string]$Request.result_schema.sha256 -cne $ExpectedResultSchemaSha256 -or
+        -not [string]::Equals(
+            [string]$Request.result_path,
+            $ExpectedResultPath,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        [string]$Request.result_write.strategy -cne 'same_directory_temporary_then_atomic_rename' -or
+        [bool]$Request.result_write.overwrite -or
+        -not [string]::Equals(
+            [string]$Request.result_write.temporary_path,
+            $ExpectedTemporaryPath,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "ASP53S2046 request 未固定 profile/attempt/Schema：$Label"
     }
     $ExpectedTimedSamples = if ($ExpectedMode -ceq 'timed') { [int]$Profile.timed_samples } else { 0 }
@@ -107,21 +119,30 @@ $ProfilePath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath
 $RequestSchemaPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.request_schema.snapshot_path)
 $CalibrationSchemaPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.calibration_schema.snapshot_path)
 $ResultSchemaPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.result_schema.snapshot_path)
+$AggregateSchemaPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.aggregate_schema.snapshot_path)
 $ProfileSha256 = Get-SidecarFileSha256 -Path $ProfilePath
 $RequestSchemaSha256 = Get-SidecarFileSha256 -Path $RequestSchemaPath
 $CalibrationSchemaSha256 = Get-SidecarFileSha256 -Path $CalibrationSchemaPath
 $ResultSchemaSha256 = Get-SidecarFileSha256 -Path $ResultSchemaPath
+$AggregateSchemaSha256 = Get-SidecarFileSha256 -Path $AggregateSchemaPath
 if ($ProfileSha256 -cne [string]$Manifest.profile.sha256) {
     throw 'ASP53S2024 profile 快照 SHA-256 不匹配'
 }
 if ($RequestSchemaSha256 -cne [string]$Manifest.request_schema.sha256 -or
     $CalibrationSchemaSha256 -cne [string]$Manifest.calibration_schema.sha256 -or
-    $ResultSchemaSha256 -cne [string]$Manifest.result_schema.sha256) {
-    throw 'ASP53S2025 request/calibration/result Schema 快照 SHA-256 不匹配'
+    $ResultSchemaSha256 -cne [string]$Manifest.result_schema.sha256 -or
+    $AggregateSchemaSha256 -cne [string]$Manifest.aggregate_schema.sha256) {
+    throw 'ASP53S2025 request/calibration/result/aggregate Schema 快照 SHA-256 不匹配'
 }
 
 $Profile = Read-SidecarJson -Path $ProfilePath -Code 'ASP53S2027'
 Test-SidecarProfile -Profile $Profile
+$AggregateSchema = Read-SidecarJson -Path $AggregateSchemaPath -Code 'ASP53S2027'
+$IsFormalProfile =
+    [int]$Profile.process_runs -eq 5 -and
+    [int]$Profile.warmup_samples -eq 5 -and
+    [int]$Profile.timed_samples -eq 30 -and
+    [Math]::Abs([double]$Profile.minimum_sample_milliseconds - 5.0) -lt 0.000000001
 if ([string]$Profile.profile_id -cne [string]$Manifest.profile.id -or
     [int]$Profile.process_runs -ne [int]$Manifest.profile.process_runs -or
     [int]$Profile.warmup_samples -ne [int]$Manifest.profile.warmup_samples -or
@@ -132,7 +153,10 @@ if ([string]$Profile.profile_id -cne [string]$Manifest.profile.id -or
     $ProfileSha256 -cne [string]$Manifest.provenance.profile_sha256 -or
     $RequestSchemaSha256 -cne [string]$Manifest.provenance.request_schema_sha256 -or
     $CalibrationSchemaSha256 -cne [string]$Manifest.provenance.calibration_schema_sha256 -or
-    $ResultSchemaSha256 -cne [string]$Manifest.provenance.result_schema_sha256) {
+    $ResultSchemaSha256 -cne [string]$Manifest.provenance.result_schema_sha256 -or
+    $AggregateSchemaSha256 -cne [string]$Manifest.provenance.aggregate_schema_sha256 -or
+    [int]$AggregateSchema.properties.schema_version.const -ne [int]$Manifest.aggregate_schema.version -or
+    (-not $IsFormalProfile -and -not [bool]$Manifest.provenance.allow_non_formal_profile)) {
     throw 'ASP53S2014 attempt provenance 与 profile/Schema 固定值不一致'
 }
 if ([bool]$Manifest.provenance.avidscript_dirty) {
@@ -140,6 +164,10 @@ if ([bool]$Manifest.provenance.avidscript_dirty) {
 }
 
 $CalibrationRequestPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.calibration.request_path)
+$CalibrationResultPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.calibration.raw_path)
+if ((Get-SidecarFileSha256 -Path $CalibrationRequestPath) -cne [string]$Manifest.calibration.request_sha256) {
+    throw 'ASP53S2051 calibration request SHA-256 与 attempt 清单不一致'
+}
 $CalibrationRequestRaw = Get-Content -LiteralPath $CalibrationRequestPath -Raw
 if (-not ($CalibrationRequestRaw | Test-Json -SchemaFile $RequestSchemaPath -ErrorAction SilentlyContinue)) {
     throw 'ASP53S2046 calibration request 不符合固定 Schema'
@@ -154,9 +182,9 @@ Test-RequestProfileContract `
     -ExpectedLaneOrder @($Profile.lanes) `
     -ExpectedResultSchemaVersion ([int]$Manifest.calibration_schema.version) `
     -ExpectedResultSchemaSha256 ([string]$Manifest.calibration_schema.sha256) `
+    -ExpectedResultPath $CalibrationResultPath `
     -Label 'calibration request'
 
-$CalibrationResultPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.calibration.raw_path)
 $CalibrationMetadataPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$Manifest.calibration.process_metadata_path)
 $ValidatedCalibration = Test-SidecarCalibrationResult `
     -ResultPath $CalibrationResultPath `
@@ -207,6 +235,10 @@ foreach ($RunEntry in @($ManifestRuns | Sort-Object { [int]$_.process_run })) {
         -Code 'ASP53S2007' -Label "manifest process $ProcessRun lane_order"
 
     $RequestPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$RunEntry.request_path)
+    $RawResultPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$RunEntry.raw_result_path)
+    if ((Get-SidecarFileSha256 -Path $RequestPath) -cne [string]$RunEntry.request_sha256) {
+        throw "ASP53S2051 timed request SHA-256 与 attempt 清单不一致：process=$ProcessRun"
+    }
     $RequestRaw = Get-Content -LiteralPath $RequestPath -Raw
     if (-not ($RequestRaw | Test-Json -SchemaFile $RequestSchemaPath -ErrorAction SilentlyContinue)) {
         throw "ASP53S2046 timed request 不符合固定 Schema：process=$ProcessRun"
@@ -221,6 +253,7 @@ foreach ($RunEntry in @($ManifestRuns | Sort-Object { [int]$_.process_run })) {
         -ExpectedLaneOrder $ExpectedLaneOrder `
         -ExpectedResultSchemaVersion ([int]$Manifest.result_schema.version) `
         -ExpectedResultSchemaSha256 ([string]$Manifest.result_schema.sha256) `
+        -ExpectedResultPath $RawResultPath `
         -Label "timed request process=$ProcessRun"
     Test-IterationMap `
         -Actual $Request.iteration_counts `
@@ -228,7 +261,6 @@ foreach ($RunEntry in @($ManifestRuns | Sort-Object { [int]$_.process_run })) {
         -Profile $Profile `
         -Label "timed request process=$ProcessRun"
 
-    $RawResultPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$RunEntry.raw_result_path)
     $ProcessMetadataPath = Resolve-SidecarChildPath -Root $ResolvedAttemptPath -RelativePath ([string]$RunEntry.process_metadata_path)
     $ProcessMetadata = Read-SidecarJson -Path $ProcessMetadataPath -Code 'ASP53S2029'
     if ([int]$ProcessMetadata.process_run -ne $ProcessRun -or
@@ -427,6 +459,10 @@ $Aggregate = [pscustomobject][ordered]@{
         version = [int]$Manifest.result_schema.version
         sha256 = [string]$Manifest.result_schema.sha256
     }
+    aggregate_schema = [pscustomobject][ordered]@{
+        version = [int]$Manifest.aggregate_schema.version
+        sha256 = [string]$Manifest.aggregate_schema.sha256
+    }
     provenance = $Manifest.provenance
     calibration = [pscustomobject][ordered]@{
         calibration_id = [string]$Calibration.calibration_id
@@ -451,10 +487,9 @@ $Aggregate = [pscustomobject][ordered]@{
     samples = @($AllSamples)
 }
 
-$AggregateSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkAggregate.schema.json'
 $AggregateJson = (($Aggregate | ConvertTo-Json -Depth 64) -replace "`r`n", "`n") + "`n"
 if (-not ($AggregateJson | Test-Json -SchemaFile $AggregateSchemaPath -ErrorAction SilentlyContinue)) {
-    throw 'ASP53S2032 聚合结果未通过 BenchmarkAggregate Schema'
+    throw 'ASP53S2032 聚合结果未通过 attempt 固定的 BenchmarkAggregate Schema'
 }
 if ($Mode -ceq 'Aggregate') {
     Write-SidecarNewText -Path $AggregatePath -Value $AggregateJson -Code 'ASP53S2026'

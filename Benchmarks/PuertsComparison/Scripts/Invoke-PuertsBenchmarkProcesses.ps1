@@ -54,6 +54,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ManifestSha256,
 
+    [switch]$AllowNonFormalProfile,
+
     [string]$CommandletName = 'AvidScriptPerfRun'
 )
 
@@ -68,6 +70,7 @@ if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
 $RequestSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkProcessRequest.schema.json'
 $CalibrationSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkCalibration.schema.json'
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkProcessResult.schema.json'
+$AggregateSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkAggregate.schema.json'
 $AggregatorPath = Join-Path $ScriptRoot 'Merge-PuertsBenchmarkResults.ps1'
 
 $ResolvedProjectPath = [System.IO.Path]::GetFullPath($ProjectPath)
@@ -76,6 +79,7 @@ $ResolvedProfilePath = [System.IO.Path]::GetFullPath($ProfilePath)
 $ResolvedRequestSchemaPath = [System.IO.Path]::GetFullPath($RequestSchemaPath)
 $ResolvedCalibrationSchemaPath = [System.IO.Path]::GetFullPath($CalibrationSchemaPath)
 $ResolvedResultSchemaPath = [System.IO.Path]::GetFullPath($ResultSchemaPath)
+$ResolvedAggregateSchemaPath = [System.IO.Path]::GetFullPath($AggregateSchemaPath)
 $ResolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 
 if (-not (Test-Path -LiteralPath $ResolvedProjectPath -PathType Leaf) -or
@@ -90,6 +94,7 @@ foreach ($RequiredFile in @(
     $ResolvedRequestSchemaPath,
     $ResolvedCalibrationSchemaPath,
     $ResolvedResultSchemaPath,
+    $ResolvedAggregateSchemaPath,
     $AggregatorPath)) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
         throw "ASP53S2103 benchmark sidecar 输入文件不存在：$RequiredFile"
@@ -117,22 +122,83 @@ if ($AvidScriptCommit -cnotmatch '^[0-9a-f]{40}$' -or
 if ($AvidScriptDirty) {
     throw 'ASP53S2113 公平 benchmark 拒绝 dirty AvidScript 工作树'
 }
-foreach ($Argument in @($AdditionalEditorArguments)) {
-    if ($Argument -cmatch '^-((run|ExecCmds|AvidScriptPerfRequest|AvidScriptPerfResult|AbsLog)=|Multiprocess$|NoCompile$)') {
-        throw "ASP53S2114 AdditionalEditorArguments 不得覆盖 sidecar 保留参数：$Argument"
+
+function Test-ReservedEditorArgument {
+    param([AllowEmptyString()][string]$Argument)
+
+    $Candidate = $Argument.Trim().Trim('"')
+    if ([string]::IsNullOrWhiteSpace($Candidate)) {
+        return $false
+    }
+    if ($Candidate -imatch (
+            '^-(' +
+            '(run|ExecCmds|AvidScriptPerfRequest|AvidScriptPerfResult|AbsLog)(=|:)|' +
+            'Multiprocess$|NoCompile$|NullRHI$|' +
+            '(D3D11|D3D12|DX11|DX12|Vulkan|OpenGL|Metal|SM5|SM6)$|' +
+            '((Dynamic)?RHI)(=|:)|' +
+            '(RHIThread|NoRHIThread)$' +
+            ')')) {
+        return $true
+    }
+    if ($Candidate -imatch '\.uproject"?$') {
+        return $true
+    }
+    try {
+        return [string]::Equals(
+            [System.IO.Path]::GetFullPath($Candidate),
+            $ResolvedProjectPath,
+            [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+foreach ($Argument in @($EditorPrefixArguments) + @($AdditionalEditorArguments)) {
+    if (Test-ReservedEditorArgument -Argument ([string]$Argument)) {
+        throw "ASP53S2114 Editor 参数不得覆盖 sidecar 保留参数：$Argument"
+    }
+}
+if (@($EditorPrefixArguments).Count -gt 0) {
+    $PrefixScriptPath = if (@($EditorPrefixArguments).Count -eq 3) {
+        [System.IO.Path]::GetFullPath([string]$EditorPrefixArguments[2])
+    }
+    else {
+        ''
+    }
+    if (-not $AllowNonFormalProfile -or
+        @($EditorPrefixArguments).Count -ne 3 -or
+        [string]$EditorPrefixArguments[0] -ine '-NoProfile' -or
+        [string]$EditorPrefixArguments[1] -ine '-File' -or
+        [System.IO.Path]::GetExtension($PrefixScriptPath) -ine '.ps1' -or
+        -not (Test-Path -LiteralPath $PrefixScriptPath -PathType Leaf)) {
+        throw 'ASP53S2114 EditorPrefixArguments 仅允许开发合同以 -NoProfile -File <现有.ps1> 启动假 Editor'
     }
 }
 
 $Profile = Read-SidecarJson -Path $ResolvedProfilePath -Code 'ASP53S2106'
 Test-SidecarProfile -Profile $Profile
+$IsFormalProfile =
+    [int]$Profile.process_runs -eq 5 -and
+    [int]$Profile.warmup_samples -eq 5 -and
+    [int]$Profile.timed_samples -eq 30 -and
+    [Math]::Abs([double]$Profile.minimum_sample_milliseconds - 5.0) -lt 0.000000001
+if (-not $IsFormalProfile -and -not $AllowNonFormalProfile) {
+    throw 'ASP53S2115 正式 benchmark 必须固定 process_runs=5、warmup_samples=5、timed_samples=30、minimum_sample_milliseconds=5.0；开发合同需显式使用 -AllowNonFormalProfile'
+}
 $RequestSchema = Read-SidecarJson -Path $ResolvedRequestSchemaPath -Code 'ASP53S2107'
 $CalibrationSchema = Read-SidecarJson -Path $ResolvedCalibrationSchemaPath -Code 'ASP53S2107'
 $ResultSchema = Read-SidecarJson -Path $ResolvedResultSchemaPath -Code 'ASP53S2107'
+$AggregateSchema = Read-SidecarJson -Path $ResolvedAggregateSchemaPath -Code 'ASP53S2107'
 $RequestSchemaVersion = [int]$RequestSchema.properties.schema_version.const
 $CalibrationSchemaVersion = [int]$CalibrationSchema.properties.schema_version.const
 $ResultSchemaVersion = [int]$ResultSchema.properties.schema_version.const
-if ($RequestSchemaVersion -lt 1 -or $CalibrationSchemaVersion -lt 1 -or $ResultSchemaVersion -lt 1) {
-    throw 'ASP53S2107 request/calibration/result Schema 缺少有效 schema_version const'
+$AggregateSchemaVersion = [int]$AggregateSchema.properties.schema_version.const
+if ($RequestSchemaVersion -ne 1 -or
+    $CalibrationSchemaVersion -ne 1 -or
+    $ResultSchemaVersion -ne 1 -or
+    $AggregateSchemaVersion -ne 2) {
+    throw 'ASP53S2107 request/calibration/result/aggregate Schema 版本不符合固定合同'
 }
 
 if (-not (Test-Path -LiteralPath $ResolvedOutputRoot)) {
@@ -156,18 +222,22 @@ $ProfileSnapshotRelativePath = 'profile.snapshot.json'
 $RequestSchemaSnapshotRelativePath = 'schemas/BenchmarkProcessRequest.schema.json'
 $CalibrationSchemaSnapshotRelativePath = 'schemas/BenchmarkCalibration.schema.json'
 $ResultSchemaSnapshotRelativePath = 'schemas/BenchmarkProcessResult.schema.json'
+$AggregateSchemaSnapshotRelativePath = 'schemas/BenchmarkAggregate.schema.json'
 $ProfileSnapshotPath = Join-Path $AttemptPath $ProfileSnapshotRelativePath
 $RequestSchemaSnapshotPath = Join-Path $AttemptPath $RequestSchemaSnapshotRelativePath
 $CalibrationSchemaSnapshotPath = Join-Path $AttemptPath $CalibrationSchemaSnapshotRelativePath
 $ResultSchemaSnapshotPath = Join-Path $AttemptPath $ResultSchemaSnapshotRelativePath
+$AggregateSchemaSnapshotPath = Join-Path $AttemptPath $AggregateSchemaSnapshotRelativePath
 Copy-SidecarNewFile -Source $ResolvedProfilePath -Destination $ProfileSnapshotPath
 Copy-SidecarNewFile -Source $ResolvedRequestSchemaPath -Destination $RequestSchemaSnapshotPath
 Copy-SidecarNewFile -Source $ResolvedCalibrationSchemaPath -Destination $CalibrationSchemaSnapshotPath
 Copy-SidecarNewFile -Source $ResolvedResultSchemaPath -Destination $ResultSchemaSnapshotPath
+Copy-SidecarNewFile -Source $ResolvedAggregateSchemaPath -Destination $AggregateSchemaSnapshotPath
 $ProfileSha256 = Get-SidecarFileSha256 -Path $ProfileSnapshotPath
 $RequestSchemaSha256 = Get-SidecarFileSha256 -Path $RequestSchemaSnapshotPath
 $CalibrationSchemaSha256 = Get-SidecarFileSha256 -Path $CalibrationSchemaSnapshotPath
 $ResultSchemaSha256 = Get-SidecarFileSha256 -Path $ResultSchemaSnapshotPath
+$AggregateSchemaSha256 = Get-SidecarFileSha256 -Path $AggregateSchemaSnapshotPath
 
 $Provenance = [pscustomobject][ordered]@{
     ue_version = $UeVersion
@@ -191,6 +261,8 @@ $Provenance = [pscustomobject][ordered]@{
     request_schema_sha256 = $RequestSchemaSha256
     calibration_schema_sha256 = $CalibrationSchemaSha256
     result_schema_sha256 = $ResultSchemaSha256
+    aggregate_schema_sha256 = $AggregateSchemaSha256
+    allow_non_formal_profile = [bool]$AllowNonFormalProfile
 }
 
 function New-BenchmarkRequest {
@@ -353,6 +425,7 @@ Write-ValidatedBenchmarkRequest `
     -Path $CalibrationRequestPath `
     -Request $CalibrationRequest `
     -Label 'calibration'
+$CalibrationRequestSha256 = Get-SidecarFileSha256 -Path $CalibrationRequestPath
 $CalibrationProcessMetadata = Invoke-BenchmarkEditorProcess `
     -Label 'calibration' `
     -ProcessRun -1 `
@@ -373,13 +446,30 @@ Write-SidecarNewJson -Path $CalibrationProcessMetadataPath -Value $CalibrationPr
 $RunEntries = [System.Collections.Generic.List[object]]::new()
 for ($ProcessRun = 0; $ProcessRun -lt [int]$Profile.process_runs; ++$ProcessRun) {
     $RunRelativePath = 'runs/{0:D2}' -f $ProcessRun
-    New-Item -ItemType Directory -Path (Join-Path $AttemptPath $RunRelativePath) | Out-Null
+    $RunPath = Join-Path $AttemptPath $RunRelativePath
+    New-Item -ItemType Directory -Path $RunPath | Out-Null
+    $LaneOrder = Get-SidecarRotatedLaneOrder -Lanes @($Profile.lanes) -ProcessRun $ProcessRun
+    $RequestRelativePath = "$RunRelativePath/request.json"
+    $RawResultRelativePath = "$RunRelativePath/raw-result.json"
+    $ProcessMetadataRelativePath = "$RunRelativePath/process.json"
+    $RequestPath = Join-Path $AttemptPath $RequestRelativePath
+    $RawResultPath = Join-Path $AttemptPath $RawResultRelativePath
+    $Request = New-BenchmarkRequest `
+        -Mode timed `
+        -ProcessRun $ProcessRun `
+        -LaneOrder $LaneOrder `
+        -IterationCounts $Calibration.iteration_counts `
+        -OutputSchemaVersion $ResultSchemaVersion `
+        -OutputSchemaSha256 $ResultSchemaSha256 `
+        -ResultPath $RawResultPath
+    Write-ValidatedBenchmarkRequest -Path $RequestPath -Request $Request -Label "process=$ProcessRun"
     $RunEntries.Add([pscustomobject][ordered]@{
         process_run = $ProcessRun
-        lane_order = Get-SidecarRotatedLaneOrder -Lanes @($Profile.lanes) -ProcessRun $ProcessRun
-        request_path = "$RunRelativePath/request.json"
-        raw_result_path = "$RunRelativePath/raw-result.json"
-        process_metadata_path = "$RunRelativePath/process.json"
+        lane_order = $LaneOrder
+        request_path = $RequestRelativePath
+        request_sha256 = Get-SidecarFileSha256 -Path $RequestPath
+        raw_result_path = $RawResultRelativePath
+        process_metadata_path = $ProcessMetadataRelativePath
     })
 }
 
@@ -411,9 +501,15 @@ $Manifest = [pscustomobject][ordered]@{
         sha256 = $ResultSchemaSha256
         snapshot_path = $ResultSchemaSnapshotRelativePath
     }
+    aggregate_schema = [pscustomobject][ordered]@{
+        version = $AggregateSchemaVersion
+        sha256 = $AggregateSchemaSha256
+        snapshot_path = $AggregateSchemaSnapshotRelativePath
+    }
     provenance = $Provenance
     calibration = [pscustomobject][ordered]@{
         request_path = 'calibration/request.json'
+        request_sha256 = $CalibrationRequestSha256
         raw_path = 'calibration/calibration.json'
         process_metadata_path = 'calibration/process.json'
         sha256 = [string]$ValidatedCalibration.sha256
@@ -431,15 +527,6 @@ foreach ($RunEntry in @($RunEntries)) {
     $RequestPath = Resolve-SidecarChildPath -Root $AttemptPath -RelativePath ([string]$RunEntry.request_path)
     $RawResultPath = Resolve-SidecarChildPath -Root $AttemptPath -RelativePath ([string]$RunEntry.raw_result_path)
     $ProcessMetadataPath = Resolve-SidecarChildPath -Root $AttemptPath -RelativePath ([string]$RunEntry.process_metadata_path)
-    $Request = New-BenchmarkRequest `
-        -Mode timed `
-        -ProcessRun $ProcessRun `
-        -LaneOrder @($RunEntry.lane_order) `
-        -IterationCounts $Calibration.iteration_counts `
-        -OutputSchemaVersion $ResultSchemaVersion `
-        -OutputSchemaSha256 $ResultSchemaSha256 `
-        -ResultPath $RawResultPath
-    Write-ValidatedBenchmarkRequest -Path $RequestPath -Request $Request -Label "process=$ProcessRun"
     $ProcessMetadata = Invoke-BenchmarkEditorProcess `
         -Label "timed process=$ProcessRun" `
         -ProcessRun $ProcessRun `
