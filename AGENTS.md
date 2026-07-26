@@ -78,6 +78,12 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.5 发布证据不可变性误判：P53.3/P53.4 报告把 `C:\tmp` attempt 称为不可变证据，但没有发布 aggregate SHA 或可分发的机器摘要；本机目录可变且其他机器无法审计表格。Prevention：正式性能结论只引用带 SHA-256 的 raw aggregate，并在仓库发布去路径、去 raw sample 的 compact statistics/provenance 摘要；阶段外目录只能称为本机原始证据，不能称为发布制品。
+- 2026-07-26 P53.5 formal provenance 信任边界错误：首版 runner 只验证命令行 commit/hash 格式并原样写入结果，Puerts Verify 也只检查 marker 和少量文件存在；调用者可把陈旧或被改动的 candidate/artifact 标成锁定身份。Prevention：正式 runner 在启动进程前重验 clean-project marker、candidate HEAD/tree/clean、tracked canonical profile/lock、Puerts 安装内容、WASM/manifest 与 Editor executable identity；命令行值必须和实物及 tracked lock 三方一致。
+- 2026-07-26 P53.5 委派基线完整 SHA 抄写错误：未执行 `git rev-parse HEAD` 就把不存在的 `71753da50e...` 写入 SDD ledger 和三个 agent brief；agents 被迫回退到本地真实 `71753dad890...`。Prevention：任何委派 brief、candidate marker 或 Gate identity 中的完整 Git 对象都从当前仓库命令输出逐字复制，禁止由短 SHA 补全。
+- 2026-07-26 P53.5 Saved artifact 路径猜测：准备复跑时直接读取猜测的 `Saved/AvidScript/PerformanceComparison`，真实制品位于 `Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf`。Prevention：首次读取生成目录先枚举现有 `Saved` 子树或检索生产 owner 中的固定路径常量，再使用确认路径；阶段摘要中的概念名不能当磁盘路径。
+- 2026-07-26 P53.5 Git 只读命令再次用分号连接：审查 agent commit 时把 `git show --stat` 与完整 `git show` 放进同一 shell 调用。Prevention：即使目标 commit 相同，规模检查和内容检查仍是两个逻辑命令；发送前机械扫描 `;`、`&&`、`||`。
+- 2026-07-26 P53.5 Puerts 计时合同 owner 漏审：首轮 lane-parity patch 已让 JS workload 不再返回 checksum，但 `AAvidScriptPerfFixture::RunPuertsWorkload` 仍调用 `FJsObject::Func<int32>`，静态合同只检查 runner/JS token而没有读取实际 invocation owner。Prevention：跨语言计时边界变更必须同时复读注册点、存储 owner、调用 owner 和结果读取 owner；合同明确断言 `Action`/`Func` 形态，UE non-unity 可见性由直接 include 验证。
 - 2026-07-26 P53.3 关键路径委派错误：把 10 项 warm matrix 这一立即阻塞任务交给子代理后等待，代理只扩展静态契约测试而未进入实现，用户可见进度停滞。Prevention：当前下一步直接依赖的实现由主代理本地完成；子代理只承担不阻塞主线的独立 sidecar，30 秒内无产品代码变化时立即要求状态并收回任务，禁止用更多测试代替已明确要求的实现。
 - 2026-07-26 P53.3 集中验收前遗留合同未同步：warm core 首次真实 UE5.8 构建暴露旧裸 include `JsonSerializer.h`/`JsonWriter.h`，10 项正确性首次运行又因 Automation 仍写死 workload count 7 失败。Prevention：扩展稳定枚举时全仓检索固定 count 和旧终值；UE5.8 Json include 固定使用 `Serialization/JsonSerializer.h` 与 `Serialization/JsonWriter.h`；集中验收前执行该模块的 include owner 与枚举消费者扫描。
 - 2026-07-26 P53.3 长构建短 timeout 错误复发：首次 no-clean UBT 再次给 `shell_command` 1 秒 timeout，包装进程在 5 秒下限退出但子 UBT 继续运行，必须额外追踪进程与引擎日志。Prevention：UBT、Automation 和 C# profile 首次调用固定使用至少 600000 ms timeout；只有工具明确返回 running cell 才使用 `wait`，不再用短 timeout 模拟后台执行。
