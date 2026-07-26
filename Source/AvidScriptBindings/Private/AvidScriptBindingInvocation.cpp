@@ -2556,13 +2556,14 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 		Plan.RequiredScratchSize = Plan.FrameSize + Plan.FrameAlignment - 1;
-		if (!BuildAvidScriptRuntimeFrameLifecyclePlan(Plan, ValueDetails))
+		FString LifecycleDetails;
+		if (!BuildAvidScriptRuntimeFrameLifecyclePlan(Plan, LifecycleDetails))
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
 				TEXT("binding_frame_lifecycle_invalid"),
 				Binding.CanonicalIdentity,
-				ValueDetails);
+				LifecycleDetails);
 			return false;
 		}
 		int32 ArgumentOffset = Binding.bStatic ? 0 : 2;
