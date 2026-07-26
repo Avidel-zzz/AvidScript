@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0、Important=0；正式 benchmark 12000/12000；完整 Automation 277/277；隐私扫描发现的用户绝对路径已改为环境变量，隔离工程 junction 入口规则已记录。",
+      "completed_at_utc": "2026-07-26T15:50:51.0017709+00:00"
     }
   ],
   "debt": [
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 36,
-  "updated_at_utc": "2026-07-26T15:49:38.4494610+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 37,
+  "updated_at_utc": "2026-07-26T15:50:51.0046238+00:00"
 }
