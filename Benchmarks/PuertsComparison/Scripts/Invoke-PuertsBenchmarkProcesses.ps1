@@ -62,6 +62,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BenchmarkRoot = Split-Path -Parent $ScriptRoot
+$RunnerPluginRoot = Split-Path -Parent (Split-Path -Parent $BenchmarkRoot)
 . (Join-Path $ScriptRoot 'PuertsBenchmarkSidecar.Common.ps1')
 
 if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
@@ -191,10 +192,21 @@ if (-not $AllowNonFormalProfile) {
     }
 }
 
-Assert-SidecarBenchmarkProjectProvenance `
+$ProjectJunctions = Assert-SidecarBenchmarkProjectProvenance `
     -ProjectPath $ResolvedProjectPath `
     -AvidScriptCommit $AvidScriptCommit `
-    -AvidScriptTreeSha $AvidScriptTreeSha | Out-Null
+    -AvidScriptTreeSha $AvidScriptTreeSha
+if (-not $AllowNonFormalProfile) {
+    Assert-SidecarRunnerCandidate `
+        -PluginRoot $RunnerPluginRoot `
+        -CandidateRoot ([string]$ProjectJunctions.AvidScript)
+    $EditorIdentity = Assert-SidecarFormalEditorExecutable `
+        -EditorExecutable $ResolvedEditorExecutable `
+        -UeVersion $UeVersion
+}
+else {
+    $EditorIdentity = Get-SidecarEditorIdentity -EditorExecutable $ResolvedEditorExecutable
+}
 Assert-SidecarPuertsProvenance `
     -ProjectPath $ResolvedProjectPath `
     -PuertsCommit $PuertsCommit `
@@ -259,6 +271,8 @@ $AggregateSchemaSha256 = Get-SidecarFileSha256 -Path $AggregateSchemaSnapshotPat
 $Provenance = [pscustomobject][ordered]@{
     ue_version = $UeVersion
     ue_build_id = $UeBuildId
+    editor_executable_sha256 = [string]$EditorIdentity.sha256
+    editor_file_version = [string]$EditorIdentity.file_version
     target = [string]$Profile.target
     configuration = [string]$Profile.configuration
     avidscript_commit = $AvidScriptCommit

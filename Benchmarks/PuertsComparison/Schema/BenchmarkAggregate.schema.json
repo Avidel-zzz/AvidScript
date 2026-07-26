@@ -267,6 +267,8 @@
       "required": [
         "ue_version",
         "ue_build_id",
+        "editor_executable_sha256",
+        "editor_file_version",
         "target",
         "configuration",
         "avidscript_commit",
@@ -292,6 +294,8 @@
       "properties": {
         "ue_version": { "type": "string", "minLength": 1 },
         "ue_build_id": { "type": "string", "minLength": 1 },
+        "editor_executable_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "editor_file_version": { "type": "string", "minLength": 1 },
         "target": { "type": "string", "minLength": 1 },
         "configuration": { "type": "string", "minLength": 1 },
         "avidscript_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },

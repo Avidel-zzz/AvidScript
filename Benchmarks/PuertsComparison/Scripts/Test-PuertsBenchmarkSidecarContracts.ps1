@@ -188,6 +188,9 @@ foreach ($ScriptPath in @($RunnerPath, $AggregatorPath, $CommonPath)) {
 . $CommonPath
 
 $TrackedProfile = Get-Content -LiteralPath (Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json') -Raw | ConvertFrom-Json
+$TrackedLockPath = Join-Path $BenchmarkRoot 'Config/PuertsDependency.lock.json'
+$TrackedLock = Get-Content -LiteralPath $TrackedLockPath -Raw | ConvertFrom-Json
+$TrackedLockSha256 = Get-TestFileSha256 $TrackedLockPath
 Assert-True ([int]$TrackedProfile.process_runs -eq 5) '正式 profile 必须固定执行 5 个独立进程'
 Assert-True ([int]$TrackedProfile.warmup_samples -eq 5) '正式 profile 必须固定 5 次预热'
 Assert-True ([int]$TrackedProfile.timed_samples -eq 30) '正式 profile 必须固定 30 个计时样本'
@@ -222,7 +225,8 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $PuertsTarget 'Puerts.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
     $BackendPath = Join-Path $PuertsTarget 'Backend.bin'
     [System.IO.File]::WriteAllText($BackendPath, 'backend', [System.Text.UTF8Encoding]::new($false))
-    $PuertsBackendSha = Get-TestFileSha256 $BackendPath
+    $PuertsCommit = [string]$TrackedLock.source.commit_sha
+    $PuertsBackendSha = [string]$TrackedLock.backend.sha256
     $NestedBinariesPath = Join-Path $PuertsTarget 'ThirdParty/Test/Binaries/nested.bin'
     [System.IO.Directory]::CreateDirectory((Split-Path -Parent $NestedBinariesPath)) | Out-Null
     [System.IO.File]::WriteAllText($NestedBinariesPath, 'nested-binary', [System.Text.UTF8Encoding]::new($false))
@@ -232,8 +236,12 @@ try {
     $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
     $ManagedMarker = [ordered]@{
         schema_version = 2
-        source_commit_sha = $CandidateCommit
+        source_commit_sha = $PuertsCommit
+        source_plugin_tree_sha1 = [string]$TrackedLock.source.plugin_tree_sha1
+        source_repository_url = [string]$TrackedLock.source.repository_url
         backend_sha256 = $PuertsBackendSha
+        backend_asset_name = [string]$TrackedLock.backend.asset_name
+        lock_sha256 = $TrackedLockSha256
         installed_content_sha256 = ('0' * 64)
         installed_file_count = 0
     }
@@ -489,7 +497,7 @@ Write-Output "假 Editor PID=$PID"
         AvidScriptCommit = $CandidateCommit
         AvidScriptTreeSha = $CandidateTree
         AvidScriptDirty = $false
-        PuertsCommit = $CandidateCommit
+        PuertsCommit = $PuertsCommit
         PuertsBackendSha256 = $PuertsBackendSha
         CpuModel = 'Contract CPU'
         OperatingSystem = 'Contract OS'
@@ -510,6 +518,16 @@ Write-Output "假 Editor PID=$PID"
     Invoke-ExpectedFailure {
         & $RunnerPath @DefaultGateArguments | Out-Null
     } 'ASP53S2115'
+
+    Invoke-ExpectedFailure {
+        Assert-SidecarFormalEditorExecutable -EditorExecutable $PowerShellExecutable -UeVersion '5.8.0' | Out-Null
+    } 'ASP53S2119'
+
+    $NonCandidateFormalArguments = $DefaultGateArguments.Clone()
+    $NonCandidateFormalArguments.ProfilePath = Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json'
+    Invoke-ExpectedFailure {
+        & $RunnerPath @NonCandidateFormalArguments | Out-Null
+    } 'ASP53S2120'
 
     $OneWorkloadProfilePath = Join-Path $FixtureRoot 'one-workload-formal-looking-profile.json'
     $OneWorkloadProfile = $Profile | ConvertTo-Json -Depth 32 | ConvertFrom-Json
@@ -553,6 +571,18 @@ Write-Output "假 Editor PID=$PID"
     Write-NewJson $ManagedMarkerPath $ManagedMarker
     Invoke-ExpectedFailure {
         & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2117'
+    [System.IO.File]::WriteAllText($ManagedMarkerPath, $ManagedMarkerRaw, [System.Text.UTF8Encoding]::new($false))
+
+    $MutualCheatMarker = $ManagedMarkerRaw | ConvertFrom-Json
+    $MutualCheatMarker.source_commit_sha = ('a' * 40)
+    $MutualCheatMarker.backend_sha256 = ('b' * 64)
+    Write-NewJson $ManagedMarkerPath $MutualCheatMarker
+    $MutualCheatArguments = $RunnerArguments.Clone()
+    $MutualCheatArguments.PuertsCommit = ('a' * 40)
+    $MutualCheatArguments.PuertsBackendSha256 = ('b' * 64)
+    Invoke-ExpectedFailure {
+        & $RunnerPath @MutualCheatArguments | Out-Null
     } 'ASP53S2117'
     [System.IO.File]::WriteAllText($ManagedMarkerPath, $ManagedMarkerRaw, [System.Text.UTF8Encoding]::new($false))
 
@@ -641,6 +671,8 @@ Write-Output "假 Editor PID=$PID"
     Assert-True ($Manifest.calibration.request_sha256 -cmatch '^[0-9a-f]{64}$') 'attempt 未固定 calibration request 哈希'
     Assert-True (Test-Path -LiteralPath (Join-Path $FirstAttempt $Manifest.calibration.raw_path) -PathType Leaf) 'attempt 未保留 calibration.json'
     Assert-True ($Manifest.provenance.allow_non_formal_profile -eq $true) 'fixture attempt 未记录非正式 profile 开关'
+    Assert-True ($Manifest.provenance.editor_executable_sha256 -cmatch '^[0-9a-f]{64}$') 'fixture attempt 未记录 editor 可执行文件哈希'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Manifest.provenance.editor_file_version)) 'fixture attempt 未记录 editor 文件版本'
 
     $ExpectedLaneOrders = @(
         'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr',
@@ -925,4 +957,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=8 top_level_generated_ignored=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 top_level_generated_ignored=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

@@ -145,6 +145,65 @@ function Get-SidecarRequiredPropertyValue {
     return $Property.Value
 }
 
+function Get-SidecarEditorIdentity {
+    param([Parameter(Mandatory = $true)][string]$EditorExecutable)
+
+    if (-not (Test-Path -LiteralPath $EditorExecutable -PathType Leaf)) {
+        throw "ASP53S2119 UnrealEditor-Cmd executable is missing: $EditorExecutable"
+    }
+    try {
+        $VersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($EditorExecutable)
+    }
+    catch {
+        throw "ASP53S2119 could not read executable version metadata: $EditorExecutable`n$($_.Exception.Message)"
+    }
+
+    return [pscustomobject][ordered]@{
+        sha256 = Get-SidecarFileSha256 -Path $EditorExecutable
+        file_version = if ([string]::IsNullOrWhiteSpace([string]$VersionInfo.FileVersion)) { 'unknown' } else { [string]$VersionInfo.FileVersion }
+        product_name = [string]$VersionInfo.ProductName
+        file_description = [string]$VersionInfo.FileDescription
+    }
+}
+
+function Assert-SidecarFormalEditorExecutable {
+    param(
+        [Parameter(Mandatory = $true)][string]$EditorExecutable,
+        [Parameter(Mandatory = $true)][string]$UeVersion
+    )
+
+    $ResolvedEditorExecutable = [System.IO.Path]::GetFullPath($EditorExecutable)
+    $Win64Directory = Split-Path -Parent $ResolvedEditorExecutable
+    $BinariesDirectory = Split-Path -Parent $Win64Directory
+    $EngineDirectory = Split-Path -Parent $BinariesDirectory
+    if ([System.IO.Path]::GetFileName($ResolvedEditorExecutable) -ine 'UnrealEditor-Cmd.exe' -or
+        [System.IO.Path]::GetFileName($Win64Directory) -ine 'Win64' -or
+        [System.IO.Path]::GetFileName($BinariesDirectory) -ine 'Binaries' -or
+        [System.IO.Path]::GetFileName($EngineDirectory) -ine 'Engine') {
+        throw 'ASP53S2119 formal benchmark requires Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
+    }
+
+    $Identity = Get-SidecarEditorIdentity -EditorExecutable $ResolvedEditorExecutable
+    if ($Identity.product_name -cne 'UnrealEditor' -or
+        $Identity.file_description -cne 'UnrealEditor' -or
+        -not $Identity.file_version.StartsWith($UeVersion, [System.StringComparison]::Ordinal)) {
+        throw 'ASP53S2119 formal benchmark UnrealEditor-Cmd version metadata does not match UeVersion'
+    }
+    return $Identity
+}
+
+function Assert-SidecarRunnerCandidate {
+    param(
+        [Parameter(Mandatory = $true)][string]$PluginRoot,
+        [Parameter(Mandatory = $true)][string]$CandidateRoot
+    )
+
+    $ResolvedPluginRoot = Resolve-SidecarCanonicalDirectory -Path $PluginRoot -Code 'ASP53S2120' -Label 'runner plugin root'
+    if ($ResolvedPluginRoot -ine $CandidateRoot) {
+        throw "ASP53S2120 formal runner checkout is not the marker candidate: runner=$ResolvedPluginRoot candidate=$CandidateRoot"
+    }
+}
+
 function Invoke-SidecarGit {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryPath,
@@ -230,6 +289,8 @@ function Assert-SidecarPuertsProvenance {
     $ProjectRoot = Split-Path -Parent ([System.IO.Path]::GetFullPath($ProjectPath))
     $LockPath = Join-Path $PSScriptRoot '../Config/PuertsDependency.lock.json'
     $Lock = Read-SidecarJson -Path $LockPath -Code 'ASP53S2117'
+    $LockSource = Get-SidecarRequiredPropertyValue $Lock 'source' 'ASP53S2117' 'PuertsDependency.lock'
+    $LockBackend = Get-SidecarRequiredPropertyValue $Lock 'backend' 'ASP53S2117' 'PuertsDependency.lock'
     $Installation = Get-SidecarRequiredPropertyValue $Lock 'installation' 'ASP53S2117' 'PuertsDependency.lock'
     $ManagedMarkerName = [string](Get-SidecarRequiredPropertyValue $Installation 'managed_marker_name' 'ASP53S2117' 'PuertsDependency.lock.installation')
     $PluginRelativePath = [string](Get-SidecarRequiredPropertyValue $Installation 'project_plugin_path' 'ASP53S2117' 'PuertsDependency.lock.installation')
@@ -243,12 +304,25 @@ function Assert-SidecarPuertsProvenance {
         throw 'ASP53S2117 Puerts managed marker schema_version must be 2'
     }
     $SourceCommit = [string](Get-SidecarRequiredPropertyValue $Marker 'source_commit_sha' 'ASP53S2117' 'Puerts managed marker')
+    $SourcePluginTree = [string](Get-SidecarRequiredPropertyValue $Marker 'source_plugin_tree_sha1' 'ASP53S2117' 'Puerts managed marker')
+    $SourceRepositoryUrl = [string](Get-SidecarRequiredPropertyValue $Marker 'source_repository_url' 'ASP53S2117' 'Puerts managed marker')
     $BackendSha = [string](Get-SidecarRequiredPropertyValue $Marker 'backend_sha256' 'ASP53S2117' 'Puerts managed marker')
+    $BackendAssetName = [string](Get-SidecarRequiredPropertyValue $Marker 'backend_asset_name' 'ASP53S2117' 'Puerts managed marker')
+    $LockSha256 = [string](Get-SidecarRequiredPropertyValue $Marker 'lock_sha256' 'ASP53S2117' 'Puerts managed marker')
     $InstalledDigest = [string](Get-SidecarRequiredPropertyValue $Marker 'installed_content_sha256' 'ASP53S2117' 'Puerts managed marker')
     $InstalledFileCount = [int](Get-SidecarRequiredPropertyValue $Marker 'installed_file_count' 'ASP53S2117' 'Puerts managed marker')
-    if ($SourceCommit -cne $PuertsCommit -or $BackendSha -cne $PuertsBackendSha256 -or
+    $ExpectedSourceCommit = [string](Get-SidecarRequiredPropertyValue $LockSource 'commit_sha' 'ASP53S2117' 'PuertsDependency.lock.source')
+    $ExpectedSourcePluginTree = [string](Get-SidecarRequiredPropertyValue $LockSource 'plugin_tree_sha1' 'ASP53S2117' 'PuertsDependency.lock.source')
+    $ExpectedSourceRepositoryUrl = [string](Get-SidecarRequiredPropertyValue $LockSource 'repository_url' 'ASP53S2117' 'PuertsDependency.lock.source')
+    $ExpectedBackendSha = [string](Get-SidecarRequiredPropertyValue $LockBackend 'sha256' 'ASP53S2117' 'PuertsDependency.lock.backend')
+    $ExpectedBackendAssetName = [string](Get-SidecarRequiredPropertyValue $LockBackend 'asset_name' 'ASP53S2117' 'PuertsDependency.lock.backend')
+    $ExpectedLockSha256 = Get-SidecarFileSha256 -Path $LockPath
+    if ($PuertsCommit -cne $ExpectedSourceCommit -or $PuertsBackendSha256 -cne $ExpectedBackendSha -or
+        $SourceCommit -cne $ExpectedSourceCommit -or $SourcePluginTree -cne $ExpectedSourcePluginTree -or
+        $SourceRepositoryUrl -cne $ExpectedSourceRepositoryUrl -or $BackendSha -cne $ExpectedBackendSha -or
+        $BackendAssetName -cne $ExpectedBackendAssetName -or $LockSha256 -cne $ExpectedLockSha256 -or
         $InstalledDigest -cnotmatch '^[0-9a-f]{64}$' -or $InstalledFileCount -lt 1) {
-        throw 'ASP53S2117 Puerts managed marker does not bind the requested dependency identity'
+        throw 'ASP53S2117 Puerts managed marker/command line identity does not match the tracked dependency lock'
     }
     $ActualDigest = Get-SidecarInstalledPuertsContentDigest -Path $PuertsPath -ManagedMarkerName $ManagedMarkerName
     if ($ActualDigest.content_sha256 -cne $InstalledDigest -or $ActualDigest.file_count -ne $InstalledFileCount) {
@@ -500,6 +574,8 @@ function Get-SidecarProvenanceFieldNames {
     return @(
         'ue_version',
         'ue_build_id',
+        'editor_executable_sha256',
+        'editor_file_version',
         'target',
         'configuration',
         'avidscript_commit',
