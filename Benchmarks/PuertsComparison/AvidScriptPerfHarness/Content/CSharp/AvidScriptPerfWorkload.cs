@@ -27,7 +27,6 @@ public static class AvidScriptPerfWorkload
     [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
     public static void Run(int packedWorkload, float seedValue)
     {
-        AAvidScriptPerfFixture fixture = UE.Self;
         int workload = (packedWorkload >> WorkloadShift) & 0x7f;
         int iterations = packedWorkload & IterationMask;
         int accumulator = (int)seedValue;
@@ -38,26 +37,32 @@ public static class AvidScriptPerfWorkload
         }
         else if (workload == 1)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunScalarNoOp(fixture, iterations, accumulator);
         }
         else if (workload == 2)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunScalarAdd(fixture, iterations, accumulator);
         }
         else if (workload == 3)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunProperty(fixture, iterations, accumulator);
         }
         else if (workload == 4)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunVectorValue(fixture, iterations, accumulator);
         }
         else if (workload == 5)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunObjectRoundtrip(fixture, iterations, accumulator);
         }
         else if (workload == 6)
         {
+            AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunBatchScalar(fixture, iterations, accumulator);
         }
         else

@@ -1001,6 +1001,34 @@ internal static class CSharpOperationLowerer
 
         if (target.Kind == "flow_capture_reference")
         {
+            if (context.TryGetCaptureAddressTarget(
+                    target.CaptureId,
+                    out GuestRegister capturedStorage,
+                    out bool capturedStorageIsAddress))
+            {
+                if (!string.Equals(target.TypeId, value.TypeId, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                instructions.Add(capturedStorageIsAddress
+                    ? new GuestInstruction(
+                        "indirect_store",
+                        null,
+                        new[] { capturedStorage.Id, value.Id },
+                        target.TypeId,
+                        null,
+                        null)
+                    : new GuestInstruction(
+                        "local_store",
+                        null,
+                        new[] { value.Id },
+                        capturedStorage.Id,
+                        null,
+                        null));
+                return true;
+            }
+
             GuestRegister? capture = context.GetOrCreateCapture(
                 target.CaptureId,
                 target.TypeId,

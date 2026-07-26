@@ -2,6 +2,7 @@
 
 #include "AvidScriptPerfFixture.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmReloadTypes.h"
 #include "AvidScriptWasmRuntime.h"
 #include "Engine/Engine.h"
@@ -158,7 +159,7 @@ namespace
 	struct FAvidScriptLane
 	{
 		FAvidScriptObjectRegistry Registry;
-		FAvidScriptWasmRuntimeInstance Runtime;
+		FAvidScriptRuntimeSession Session;
 		FAvidScriptWasmReloadManifest Manifest;
 		TArray<uint8> Bytecode;
 		const FAvidScriptWasmStateSlot* ResultSlot = nullptr;
@@ -215,27 +216,21 @@ namespace
 			HostContext.OwnerHandle = OwnerHandle;
 			HostContext.World = SharedFixture.GetWorld();
 			HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
-			Runtime.SetHostContext(HostContext);
+			Session.SetHostContext(HostContext);
 
-			FAvidScriptWasmSmokeResult SmokeResult;
-			if (!Runtime.LoadModule(
+			FAvidScriptWasmReloadResult ReloadResult;
+			if (!Session.LoadInitialModule(
 					Bytecode.GetData(),
 					Bytecode.Num(),
-					Manifest.ModuleId,
-					Manifest.BindingPackage,
-					Manifest.DebugMap,
-					SmokeResult)
-				|| !Runtime.ValidateRequiredExports(
-					Manifest.RequiredExports,
-					SmokeResult)
-				|| !Runtime.BeginPlay(SmokeResult))
+					Manifest,
+					ReloadResult))
 			{
 				OutError = FString::Printf(
 					TEXT("AvidScript benchmark runtime initialization failed: %s"),
-					*SmokeResult.ErrorMessage);
+					*ReloadResult.ErrorMessage);
 				return false;
 			}
-			LastHostImportCallCount = SmokeResult.HostImportCallCount;
+			LastHostImportCallCount = ReloadResult.RuntimeResult.HostImportCallCount;
 			return true;
 		}
 
@@ -262,7 +257,7 @@ namespace
 				(WorkloadId << PerfRunnerWorkloadShift) |
 				(Iterations & PerfRunnerIterationMask);
 			FAvidScriptWasmSmokeResult SmokeResult;
-			if (!Runtime.DispatchEvent(
+			if (!Session.DispatchEvent(
 				PackedWorkload,
 				static_cast<float>(Seed),
 				SmokeResult))
@@ -275,7 +270,10 @@ namespace
 
 			int32 Checksum = 0;
 			FString ReadError;
-			if (!Runtime.ReadStateBytes(
+			const FAvidScriptWasmRuntimeInstance* Runtime =
+				Session.GetLiveRuntimeForTesting();
+			if (Runtime == nullptr ||
+				!Runtime->ReadStateBytes(
 				ResultSlot->Offset,
 				MakeArrayView(
 					reinterpret_cast<uint8*>(&Checksum),
@@ -313,6 +311,7 @@ namespace
 		}
 		FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
 		WorldContext.SetCurrentWorld(OutWorld);
+		OutWorld->InitializeActorsForPlay(FURL());
 		return true;
 	}
 
@@ -411,13 +410,13 @@ namespace
 		switch (Workload)
 		{
 		case EAvidScriptPerfWorkload::PropertyGetSet:
-			return Iterations * 2;
+			return Iterations * 2 + 1;
 		case EAvidScriptPerfWorkload::ScalarNoOp:
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 		case EAvidScriptPerfWorkload::BatchScalar:
-			return Iterations;
+			return Iterations + 1;
 		default:
 			return 0;
 		}

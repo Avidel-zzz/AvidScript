@@ -12,7 +12,8 @@ internal static class CSharpGuestFlowTests
     {
         FlowCapturesAndCompoundAssignmentsUseExplicitStorage();
         AssignmentsCanStoreIntoExistingFlowCaptures();
-        return 2;
+        AssignmentThroughAddressCaptureUpdatesOriginalStorage();
+        return 3;
     }
 
     private static void FlowCapturesAndCompoundAssignmentsUseExplicitStorage()
@@ -106,6 +107,63 @@ internal static class CSharpGuestFlowTests
         Assert(instructions.Count(item => item.Op == "local_store") == 2
             && instructions.Count(item => item.Op == "global_store") == 1,
             "capture creation and overwrite should share one explicit storage slot");
+    }
+
+    private static void AssignmentThroughAddressCaptureUpdatesOriginalStorage()
+    {
+        const string localId = "symbol:local:global::Game.Script.Main.value:int32";
+        SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
+        SemanticSymbol local = new(
+            localId,
+            "local",
+            "value",
+            CSharpGuestSemanticFixture.MainMethodId,
+            "type:int32",
+            "int value",
+            false,
+            "private",
+            baseline.Symbols[0].Span);
+        SemanticOperation localReference = CSharpGuestSemanticFixture.Operation(
+            "local_reference",
+            "type:int32",
+            localId);
+        SemanticOperation capture = CSharpGuestSemanticFixture.Operation(
+            "flow_capture",
+            null,
+            children: new[] { localReference },
+            captureId: "capture:address");
+        SemanticOperation captureReference = CSharpGuestSemanticFixture.Operation(
+            "flow_capture_reference",
+            "type:int32",
+            captureId: "capture:address");
+        SemanticOperation captureAssignment = CSharpGuestSemanticFixture.Operation(
+            "assignment",
+            "type:int32",
+            children: new[] { captureReference, Literal(9) });
+        SemanticControlFlowGraph graph = ReturnGraph(new[] { capture, captureAssignment });
+        SemanticDocument document = baseline with
+        {
+            Symbols = baseline.Symbols.Append(local).ToArray(),
+            ControlFlowGraphs = new[] { graph },
+        };
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "address capture assignment module should lower and validate");
+        Assert(instructions.Any(item =>
+                item.Op == "local_store"
+                && item.TargetId == $"value:local:{localId}"
+                && item.OperandIds.Count == 1),
+            "assignment through an address capture should update the original local storage");
     }
 
     private static SemanticControlFlowGraph ReturnGraph(SemanticOperation[] operations)
