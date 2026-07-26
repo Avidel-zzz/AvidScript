@@ -1,16 +1,16 @@
 const UE = require("ue");
 const puerts = require("puerts");
 
-const fixture = puerts.argv.getByName("Fixture");
 const MIX_MULTIPLIER = 1664525;
 const MIX_INCREMENT = 1013904223;
-let callbackChecksum = 0;
+let moduleChecksum = 0;
 
 function mix(value) {
     return (Math.imul(value | 0, MIX_MULTIPLIER) + MIX_INCREMENT) | 0;
 }
 
 function runWorkload(workload, iterations, seed) {
+    const fixture = puerts.argv.getByName("Fixture");
     let accumulator = seed | 0;
     const inOutRef = puerts.$ref(new UE.Vector(0, 0, 0));
     const outRef = puerts.$ref(new UE.Vector(0, 0, 0));
@@ -62,24 +62,24 @@ function runWorkload(workload, iterations, seed) {
                 throw new Error(`unknown static workload ${workload}`);
         }
     }
-    return accumulator | 0;
+    moduleChecksum = accumulator | 0;
 }
 
 function resetCallback(seed) {
-    callbackChecksum = seed | 0;
+    moduleChecksum = seed | 0;
 }
 
 function emptyCallback(token) {
-    callbackChecksum = mix(callbackChecksum ^ (token | 0));
+    moduleChecksum = mix(moduleChecksum ^ (token | 0));
 }
 
 function tickCallback(deltaSeconds) {
     void deltaSeconds;
-    callbackChecksum = mix(callbackChecksum ^ 1);
+    moduleChecksum = mix(moduleChecksum ^ 1);
 }
 
-function getCallbackChecksum() {
-    return callbackChecksum | 0;
+function getModuleChecksum() {
+    return moduleChecksum | 0;
 }
 
 fixture.RegisterPuertsCallbacks(
@@ -88,4 +88,4 @@ fixture.RegisterPuertsCallbacks(
     resetCallback,
     emptyCallback,
     tickCallback,
-    getCallbackChecksum);
+    getModuleChecksum);

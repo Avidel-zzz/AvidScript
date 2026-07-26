@@ -31,6 +31,7 @@ namespace
 	constexpr int32 PerfRunnerIterationMask = 0x00ffffff;
 	constexpr int32 PerfRunnerResultSchemaVersion = 1;
 	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
+	constexpr int32 PerfRunnerSteadyStateConfirmationSamples = 3;
 
 	uint32 PerfRunnerMix(const uint32 Value)
 	{
@@ -698,6 +699,14 @@ namespace
 	{
 		return WorkloadIndex * PerfRunnerLaneCount +
 			static_cast<int32>(Lane);
+	}
+
+	double GetSteadyStateMedianMilliseconds(
+		TArray<double, TInlineAllocator<PerfRunnerSteadyStateConfirmationSamples>> Samples)
+	{
+		check(Samples.Num() == PerfRunnerSteadyStateConfirmationSamples);
+		Samples.Sort();
+		return Samples[Samples.Num() / 2];
 	}
 
 	const TCHAR* GetPerfLaneName(const EAvidScriptPerfLane Lane)
@@ -1452,6 +1461,15 @@ namespace
 		}
 	}
 
+	void CollectPuertsWorkloadChecksum(
+		AAvidScriptPerfFixture& Fixture,
+		const int32 LaneId,
+		FPerfLaneObservation& OutObservation)
+	{
+		OutObservation.Checksum = static_cast<uint32>(
+			Fixture.GetPuertsCallbackChecksum(LaneId));
+	}
+
 	bool CollectCallbackWorkload(
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
@@ -1560,12 +1578,11 @@ namespace
 				}
 				else
 				{
-					OutObservation.Checksum =
-						static_cast<uint32>(Fixture.RunPuertsWorkload(
-							Reflection.LaneId,
-							static_cast<int32>(Workload),
-							Iterations,
-							static_cast<int32>(Seed)));
+					Fixture.RunPuertsWorkload(
+						Reflection.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed));
 				}
 				EndCycles = FPlatformTime::Cycles64();
 			}
@@ -1579,12 +1596,11 @@ namespace
 			}
 			else
 			{
-				OutObservation.Checksum =
-					static_cast<uint32>(Fixture.RunPuertsWorkload(
-						Reflection.LaneId,
-						static_cast<int32>(Workload),
-						Iterations,
-						static_cast<int32>(Seed)));
+				Fixture.RunPuertsWorkload(
+					Reflection.LaneId,
+					static_cast<int32>(Workload),
+					Iterations,
+					static_cast<int32>(Seed));
 			}
 			break;
 		case EAvidScriptPerfLane::PuertsV8Static:
@@ -1601,12 +1617,11 @@ namespace
 				}
 				else
 				{
-					OutObservation.Checksum =
-						static_cast<uint32>(Fixture.RunPuertsWorkload(
-							Static.LaneId,
-							static_cast<int32>(Workload),
-							Iterations,
-							static_cast<int32>(Seed)));
+					Fixture.RunPuertsWorkload(
+						Static.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed));
 				}
 				EndCycles = FPlatformTime::Cycles64();
 			}
@@ -1620,12 +1635,11 @@ namespace
 			}
 			else
 			{
-				OutObservation.Checksum =
-					static_cast<uint32>(Fixture.RunPuertsWorkload(
-						Static.LaneId,
-						static_cast<int32>(Workload),
-						Iterations,
-						static_cast<int32>(Seed)));
+				Fixture.RunPuertsWorkload(
+					Static.LaneId,
+					static_cast<int32>(Workload),
+					Iterations,
+					static_cast<int32>(Seed));
 			}
 			break;
 		case EAvidScriptPerfLane::AvidScriptWamr:
@@ -1699,6 +1713,24 @@ namespace
 		default:
 			checkNoEntry();
 			return false;
+		}
+
+		if (!IsCallbackWorkload(Workload))
+		{
+			if (Lane == EAvidScriptPerfLane::PuertsV8Reflection)
+			{
+				CollectPuertsWorkloadChecksum(
+					Fixture,
+					Reflection.LaneId,
+					OutObservation);
+			}
+			else if (Lane == EAvidScriptPerfLane::PuertsV8Static)
+			{
+				CollectPuertsWorkloadChecksum(
+					Fixture,
+					Static.LaneId,
+					OutObservation);
+			}
 		}
 
 		if (!CollectCallbackWorkload(
@@ -1851,12 +1883,13 @@ namespace
 	{
 		int32 Iterations = Request.MinimumIterations;
 		int32 CalibrationRound = 0;
-		for (;;)
+		auto RunCalibrationSample =
+			[&](double& OutElapsedMilliseconds) -> bool
 		{
 			const uint32 Seed = MakePerfRunnerSampleSeed(
 				Request.Seed,
 				WorkloadIndex,
-				CalibrationRound);
+				CalibrationRound++);
 			const FPerfOracle Oracle = RunNativeOracle(
 				Fixture,
 				Request.Workloads[WorkloadIndex],
@@ -1885,19 +1918,50 @@ namespace
 				return false;
 			}
 
-			const double ElapsedMilliseconds =
+			OutElapsedMilliseconds =
 				static_cast<double>(Observation.ElapsedCycles) *
 				FPlatformTime::GetSecondsPerCycle64() *
 				1000.0;
-			if (ElapsedMilliseconds >= Request.MinimumSampleMilliseconds)
+			return true;
+		};
+		for (;;)
+		{
+			double CandidateElapsedMilliseconds = 0.0;
+			if (!RunCalibrationSample(CandidateElapsedMilliseconds))
 			{
-				OutIterations = Iterations;
-				return true;
+				return false;
+			}
+
+			if (CandidateElapsedMilliseconds >= Request.MinimumSampleMilliseconds)
+			{
+				TArray<
+					double,
+					TInlineAllocator<PerfRunnerSteadyStateConfirmationSamples>>
+					SteadyStateSamples;
+				for (int32 SampleIndex = 0;
+					SampleIndex < PerfRunnerSteadyStateConfirmationSamples;
+					++SampleIndex)
+				{
+					double ElapsedMilliseconds = 0.0;
+					if (!RunCalibrationSample(ElapsedMilliseconds))
+					{
+						return false;
+					}
+					SteadyStateSamples.Add(ElapsedMilliseconds);
+				}
+
+				const double SteadyStateMedianMilliseconds =
+					GetSteadyStateMedianMilliseconds(MoveTemp(SteadyStateSamples));
+				if (SteadyStateMedianMilliseconds >= Request.MinimumSampleMilliseconds)
+				{
+					OutIterations = Iterations;
+					return true;
+				}
 			}
 			if (Iterations >= Request.MaximumIterations)
 			{
 				OutError = FString::Printf(
-					TEXT("calibration could not reach %.3f ms by ")
+					TEXT("calibration could not confirm %.3f ms steady state by ")
 						TEXT("maximum_iterations=%d workload=%s lane=%s"),
 					Request.MinimumSampleMilliseconds,
 					Request.MaximumIterations,
@@ -1916,7 +1980,6 @@ namespace
 				return false;
 			}
 			Iterations = NextIterations;
-			++CalibrationRound;
 		}
 	}
 

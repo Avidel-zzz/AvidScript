@@ -107,7 +107,7 @@ foreach ($Script in @($ReflectionScript, $StaticScript)) {
     foreach ($RefApi in @('puerts.$ref', 'puerts.$set', 'puerts.$unref')) {
         Assert-True ($Script.Contains($RefApi)) "Puerts ref/out workload must use official API: $RefApi"
     }
-    foreach ($Callback in @('resetCallback', 'emptyCallback', 'tickCallback', 'getCallbackChecksum')) {
+    foreach ($Callback in @('resetCallback', 'emptyCallback', 'tickCallback', 'getModuleChecksum')) {
         Assert-True ($Script.Contains($Callback)) "Puerts lane must register callback surface: $Callback"
     }
 }
@@ -156,6 +156,12 @@ Assert-True ($RunnerSource.Contains('GetPerfIterationMatrixIndex')) `
     'warm core must index frozen iterations by workload and lane'
 Assert-True (-not $RunnerSource.Contains('CalibrateWorkloadIterations')) `
     'warm core must not restore shared per-workload calibration'
+Assert-True ($RunnerSource.Contains('PerfRunnerSteadyStateConfirmationSamples = 3')) `
+    'calibration must require three steady-state confirmation samples per workload/lane candidate'
+Assert-True ($RunnerSource.Contains('GetSteadyStateMedianMilliseconds')) `
+    'calibration must compute a steady-state median rather than freeze a cold observation'
+Assert-True ($RunnerSource.Contains('SteadyStateMedianMilliseconds >= Request.MinimumSampleMilliseconds')) `
+    'calibration must require the steady-state P50 to reach the requested sample floor'
 Assert-True ($RunnerSource.Contains('MaximumIterations / 2')) `
     'calibration doubling must guard overflow'
 Assert-True ($RunnerSource.Contains('EAvidScriptPerfBenchmarkMode::Calibrate')) `
@@ -201,6 +207,8 @@ Assert-True ($RunnerSource.Contains('DispatchWorkload')) `
     'AvidScript DispatchEvent must have an isolated timed entrypoint'
 Assert-True ($RunnerSource.Contains('CollectWorkloadResult')) `
     'AvidScript state collection must be separate from DispatchEvent timing'
+Assert-True ($RunnerSource.Contains('CollectPuertsWorkloadChecksum')) `
+    'Puerts workload checksum must have a separate post-timing getter path'
 $RunLaneStart = $RunnerSource.IndexOf('bool RunPerfLane(')
 $RunLaneEnd = $RunnerSource.IndexOf('bool ValidatePerfObservation(', $RunLaneStart)
 Assert-True ($RunLaneStart -ge 0 -and $RunLaneEnd -gt $RunLaneStart) `
@@ -220,6 +228,29 @@ $EndCyclesIndex = $RunLaneSource.IndexOf('EndCycles = FPlatformTime::Cycles64();
 $CollectIndex = $RunLaneSource.IndexOf('AvidScript.CollectWorkloadResult(')
 Assert-True ($DispatchIndex -ge 0 -and $EndCyclesIndex -gt $DispatchIndex -and $CollectIndex -gt $EndCyclesIndex) `
     'AvidScript result/state collection must occur after the timed DispatchEvent region'
+$PuertsTimedChecksumIndex = $RunLaneSource.IndexOf('CollectPuertsWorkloadChecksum(')
+$PuertsTimedEndCyclesIndex = $RunLaneSource.IndexOf('EndCycles = FPlatformTime::Cycles64();')
+Assert-True ($PuertsTimedChecksumIndex -gt $PuertsTimedEndCyclesIndex) `
+    'Puerts workload checksum must be read after the timed dispatch region'
+
+foreach ($Script in @($ReflectionScript, $StaticScript)) {
+    Assert-True ([regex]::IsMatch(
+        $Script,
+        '(?s)function runWorkload\(workload, iterations, seed\)\s*\{\s*const fixture = puerts\.argv\.getByName\("Fixture"\);')) `
+        'Puerts workload dispatch must resolve its fixture receiver inside every invocation'
+    Assert-True (-not [regex]::IsMatch(
+        $Script,
+        '(?m)^const fixture = puerts\.argv\.getByName\("Fixture"\);')) `
+        'Puerts module initialization must not capture the fixture receiver outside timing'
+    Assert-True ($Script.Contains('let moduleChecksum = 0;')) `
+        'Puerts workload must retain its timed checksum in module state'
+    Assert-True ($Script.Contains('moduleChecksum = accumulator | 0;')) `
+        'Puerts timed workload must write the module checksum instead of returning it'
+    Assert-True ($Script.Contains('function getModuleChecksum()')) `
+        'Puerts checksum must be exposed through a separate getter'
+    Assert-True ($Script.Contains('getModuleChecksum);')) `
+        'Puerts callback registration must publish the post-timing checksum getter'
+}
 Assert-True ($RunnerSource.Contains('FILEWRITE_NoReplaceExisting')) `
     'successful result publication must reject overwrite'
 Assert-True ($RunnerSource.Contains('same_directory_temporary_then_atomic_rename')) `
