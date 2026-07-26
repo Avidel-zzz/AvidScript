@@ -106,8 +106,8 @@ function Get-SidecarInstalledPuertsContentDigest {
             continue
         }
         $PathParts = @($RelativePath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries))
-        $DirectoryParts = if ($PathParts.Count -gt 1) { @($PathParts[0..($PathParts.Count - 2)]) } else { @() }
-        if (@($DirectoryParts | Where-Object { $ExcludedDirectoryNames -icontains $_ }).Count -ne 0) {
+        $RootDirectory = if ($PathParts.Count -gt 1) { $PathParts[0] } else { '' }
+        if ($ExcludedDirectoryNames -icontains $RootDirectory) {
             continue
         }
         $Entries.Add(('{0}`t{1}' -f $RelativePath, (Get-SidecarFileSha256 -Path $File.FullName)))

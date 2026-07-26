@@ -223,6 +223,12 @@ try {
     $BackendPath = Join-Path $PuertsTarget 'Backend.bin'
     [System.IO.File]::WriteAllText($BackendPath, 'backend', [System.Text.UTF8Encoding]::new($false))
     $PuertsBackendSha = Get-TestFileSha256 $BackendPath
+    $NestedBinariesPath = Join-Path $PuertsTarget 'ThirdParty/Test/Binaries/nested.bin'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $NestedBinariesPath)) | Out-Null
+    [System.IO.File]::WriteAllText($NestedBinariesPath, 'nested-binary', [System.Text.UTF8Encoding]::new($false))
+    $TopLevelBinariesPath = Join-Path $PuertsTarget 'Binaries/ignored.bin'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $TopLevelBinariesPath)) | Out-Null
+    [System.IO.File]::WriteAllText($TopLevelBinariesPath, 'ignored-binary', [System.Text.UTF8Encoding]::new($false))
     $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
     $ManagedMarker = [ordered]@{
         schema_version = 2
@@ -238,6 +244,7 @@ try {
     $ManagedMarker.installed_content_sha256 = $InstalledPuertsDigest.content_sha256
     $ManagedMarker.installed_file_count = $InstalledPuertsDigest.file_count
     Write-NewJson $ManagedMarkerPath $ManagedMarker
+    Assert-True ([int]$InstalledPuertsDigest.file_count -eq 3) 'Puerts digest must include nested ThirdParty/Test/Binaries content and exclude top-level Binaries'
     [System.IO.File]::WriteAllText((Join-Path $HarnessTarget 'AvidScriptPerfHarness.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
     New-TestJunction -Path (Join-Path $FixtureRoot 'Source') -Target $SourceTarget
     New-TestJunction -Path (Join-Path $FixtureRoot 'Config') -Target $ConfigTarget
@@ -563,6 +570,19 @@ Write-Output "假 Editor PID=$PID"
         & $RunnerPath @RunnerArguments | Out-Null
     } 'ASP53S2117'
     [System.IO.File]::WriteAllBytes($BackendPath, $BackendBytes)
+
+    $NestedBinariesBytes = [System.IO.File]::ReadAllBytes($NestedBinariesPath)
+    [System.IO.File]::WriteAllText($NestedBinariesPath, "tampered-nested`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2117'
+    [System.IO.File]::WriteAllBytes($NestedBinariesPath, $NestedBinariesBytes)
+
+    $TopLevelBinariesBytes = [System.IO.File]::ReadAllBytes($TopLevelBinariesPath)
+    [System.IO.File]::WriteAllText($TopLevelBinariesPath, "tampered-top-level`n", [System.Text.UTF8Encoding]::new($false))
+    $IgnoredTopLevelBinariesRun = (& $RunnerPath @RunnerArguments) | ConvertFrom-Json
+    Assert-True ($IgnoredTopLevelBinariesRun.succeeded -eq $true) 'top-level Puerts Binaries content must not affect the installed digest'
+    [System.IO.File]::WriteAllBytes($TopLevelBinariesPath, $TopLevelBinariesBytes)
 
     $WasmBytes = [System.IO.File]::ReadAllBytes($WasmPath)
     [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0,97,115,109,2,0,0,0))
@@ -905,4 +925,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=7 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=8 top_level_generated_ignored=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
