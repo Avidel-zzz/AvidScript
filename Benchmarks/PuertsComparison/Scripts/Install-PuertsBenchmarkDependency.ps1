@@ -75,11 +75,38 @@ function Assert-ProjectRoot {
     if (-not (Test-Path -LiteralPath $Resolved -PathType Container)) {
         throw "ASP53D1201 project root does not exist: $Resolved"
     }
+    $Resolved = Get-CanonicalDirectoryPath $Resolved
     $Projects = @(Get-ChildItem -LiteralPath $Resolved -Filter '*.uproject' -File)
     if ($Projects.Count -ne 1) {
         throw "ASP53D1202 project root must contain exactly one .uproject: $Resolved"
     }
     return $Resolved
+}
+
+function Test-IsReparsePoint {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+    return (((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Get-CanonicalDirectoryPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Item = Get-Item -LiteralPath $Path -Force
+    if (-not $Item.PSIsContainer) {
+        throw "ASP53D1901 expected a directory: $Path"
+    }
+    if (Test-IsReparsePoint $Path) {
+        $Target = $Item.ResolveLinkTarget($true)
+        if ($null -eq $Target) {
+            throw "ASP53D1901 unable to resolve reparse-point directory: $Path"
+        }
+        return Resolve-FullPath $Target.FullName
+    }
+    return Resolve-FullPath $Item.FullName
 }
 
 function Get-InstallPaths {
@@ -93,6 +120,12 @@ function Get-InstallPaths {
     $ExpectedInstallPath = Resolve-FullPath (Join-Path $PluginsRoot 'Puerts')
     if ($InstallPath -cne $ExpectedInstallPath) {
         throw 'ASP53D1203 dependency lock attempted to escape the expected Plugins/Puerts location'
+    }
+    if ((Test-Path -LiteralPath $PluginsRoot) -and (Test-IsReparsePoint $PluginsRoot)) {
+        throw 'ASP53D1204 refusing to manage a reparse-point Plugins directory'
+    }
+    if ((Test-Path -LiteralPath $InstallPath) -and (Test-IsReparsePoint $InstallPath)) {
+        throw 'ASP53D1205 refusing to manage a reparse-point Puerts directory'
     }
     return [pscustomobject]@{
         PluginsRoot = $PluginsRoot
@@ -123,8 +156,8 @@ function Get-InstalledContentSummary {
         if ($RelativePath -ceq $MarkerName) {
             continue
         }
-        $PathSegments = $RelativePath.Split('/')
-        if (@($PathSegments | Where-Object { $_ -in $ExcludedDirectoryNames }).Count -ne 0) {
+        $RootDirectoryName = $RelativePath.Split('/')[0]
+        if ($RootDirectoryName -in $ExcludedDirectoryNames) {
             continue
         }
         $ManifestLines.Add(("{0}`t{1}" -f $RelativePath, (Get-FileSha256 $File.FullName)))
@@ -293,7 +326,8 @@ function Read-AndAssertManagedMarker {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$LockFile,
-        [Parameter(Mandatory = $true)]$Lock
+        [Parameter(Mandatory = $true)]$Lock,
+        [switch]$AllowLegacySchema1
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -307,19 +341,35 @@ function Read-AndAssertManagedMarker {
     }
     $ExpectedLockSha = Get-FileSha256 $LockFile
     $MarkerSchemaVersion = 0
-    $MarkerFileCount = [int64]0
     $HasValidSchemaVersion = [int]::TryParse(
         [string]$Marker.schema_version,
         [Globalization.NumberStyles]::None,
         [Globalization.CultureInfo]::InvariantCulture,
         [ref]$MarkerSchemaVersion)
+    $MatchesLock =
+        $Marker.managed_by -ceq 'AvidScriptPhase53' -and
+        $Marker.lock_sha256 -ceq $ExpectedLockSha -and
+        $Marker.source_repository_url -ceq [string]$Lock.source.repository_url -and
+        $Marker.source_commit_sha -ceq [string]$Lock.source.commit_sha -and
+        $Marker.source_plugin_tree_sha1 -ceq [string]$Lock.source.plugin_tree_sha1 -and
+        $Marker.backend_asset_name -ceq [string]$Lock.backend.asset_name -and
+        $Marker.backend_sha256 -ceq [string]$Lock.backend.sha256
+    if (-not $HasValidSchemaVersion -or -not $MatchesLock) {
+        throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
+    }
+    if ($MarkerSchemaVersion -eq 1) {
+        if ($AllowLegacySchema1) {
+            return $Marker
+        }
+        throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
+    }
+    $MarkerFileCount = [int64]0
     $HasValidFileCount = [int64]::TryParse(
         [string]$Marker.installed_file_count,
         [Globalization.NumberStyles]::None,
         [Globalization.CultureInfo]::InvariantCulture,
         [ref]$MarkerFileCount)
-    if (-not $HasValidSchemaVersion -or
-        $MarkerSchemaVersion -ne 2 -or
+    if ($MarkerSchemaVersion -ne 2 -or
         $Marker.managed_by -cne 'AvidScriptPhase53' -or
         $Marker.lock_sha256 -cne $ExpectedLockSha -or
         $Marker.source_repository_url -cne [string]$Lock.source.repository_url -or
@@ -333,6 +383,25 @@ function Read-AndAssertManagedMarker {
         throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
     }
     return $Marker
+}
+
+function Assert-RemoveTargetIsOrdinaryAndContained {
+    param([Parameter(Mandatory = $true)]$Paths)
+
+    if (-not (Test-Path -LiteralPath $Paths.PluginsRoot -PathType Container) -or
+        (Test-IsReparsePoint $Paths.PluginsRoot)) {
+        throw 'ASP53D1900 refusing to remove through a reparse-point Plugins directory'
+    }
+    if (-not (Test-Path -LiteralPath $Paths.InstallPath -PathType Container) -or
+        (Test-IsReparsePoint $Paths.InstallPath)) {
+        throw 'ASP53D1900 refusing to remove a reparse-point Puerts directory'
+    }
+    $CanonicalPluginsRoot = Get-CanonicalDirectoryPath $Paths.PluginsRoot
+    $CanonicalInstallPath = Get-CanonicalDirectoryPath $Paths.InstallPath
+    $PluginsPrefix = $CanonicalPluginsRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $CanonicalInstallPath.StartsWith($PluginsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ASP53D1900 refusing to remove a directory outside the canonical project Plugins root'
+    }
 }
 
 function Install-Dependency {
@@ -353,6 +422,7 @@ function Install-Dependency {
     $ArchivePath = Get-BackendArchive $ResolvedCacheRoot $Lock $DownloadUriOverride
 
     New-Item -ItemType Directory -Force -Path $Paths.PluginsRoot | Out-Null
+    $Paths = Get-InstallPaths $ResolvedProjectRoot $Lock
     $StageRoot = Join-Path $Paths.PluginsRoot ('.AvidScriptPuertsStage-' + [Guid]::NewGuid().ToString('N'))
     $SourceExtraction = Join-Path $StageRoot 'source'
     $BackendExtraction = Join-Path $StageRoot 'backend'
@@ -390,6 +460,10 @@ function Install-Dependency {
             throw 'ASP53D1704 extracted backend does not provide V8 9.4.146.24'
         }
         Write-ManagedMarker (Join-Path $StagedPlugin $Lock.installation.managed_marker_name) $ResolvedLockPath $Lock
+        $Paths = Get-InstallPaths $ResolvedProjectRoot $Lock
+        if (Test-Path -LiteralPath $Paths.InstallPath) {
+            throw "ASP53D1700 install target already exists; verify or remove it explicitly: $($Paths.InstallPath)"
+        }
         Move-Item -LiteralPath $StagedPlugin -Destination $Paths.InstallPath
     }
     finally {
@@ -459,10 +533,8 @@ function Remove-Dependency {
     if (-not (Test-Path -LiteralPath $Paths.InstallPath)) {
         return [pscustomobject]@{ succeeded = $true; mode = 'Remove'; removed = $false }
     }
-    Read-AndAssertManagedMarker $Paths.MarkerPath $ResolvedLockPath $Lock | Out-Null
-    if (-not $Paths.InstallPath.StartsWith($Paths.PluginsRoot + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'ASP53D1900 refusing to remove a directory outside the project Plugins root'
-    }
+    Read-AndAssertManagedMarker $Paths.MarkerPath $ResolvedLockPath $Lock -AllowLegacySchema1 | Out-Null
+    Assert-RemoveTargetIsOrdinaryAndContained $Paths
     Remove-Item -LiteralPath $Paths.InstallPath -Recurse -Force
     return [pscustomobject]@{ succeeded = $true; mode = 'Remove'; removed = $true }
 }

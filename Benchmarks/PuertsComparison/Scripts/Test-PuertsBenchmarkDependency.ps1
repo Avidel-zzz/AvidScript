@@ -18,7 +18,7 @@ function Assert-True {
 
 function Invoke-Installer {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('ValidateLock', 'Install', 'Verify')][string]$Mode,
+        [Parameter(Mandatory = $true)][ValidateSet('ValidateLock', 'Install', 'Verify', 'Remove')][string]$Mode,
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [Parameter(Mandatory = $true)][string]$CacheRoot,
         [Parameter(Mandatory = $true)][string]$CandidateLockPath,
@@ -84,6 +84,57 @@ function New-TestBackendArchive {
     & tar -czf $ArchivePath -C $ArchiveRoot Puerts
     Assert-True ($LASTEXITCODE -eq 0) 'unable to create local V8 fixture archive'
     return $ArchivePath
+}
+
+function Start-TestArchiveServer {
+    param(
+        [Parameter(Mandatory = $true)][string]$FixtureRoot,
+        [Parameter(Mandatory = $true)][string]$ArchivePath
+    )
+
+    $PortProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $PortProbe.Start()
+    $Port = ([System.Net.IPEndPoint]$PortProbe.LocalEndpoint).Port
+    $PortProbe.Stop()
+    $Prefix = "http://127.0.0.1:$Port/"
+    $ReadyPath = Join-Path $FixtureRoot ('archive-server-' + [Guid]::NewGuid().ToString('N') + '.ready')
+    $ServerScriptPath = Join-Path $FixtureRoot ('archive-server-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+    @'
+param([string]$Prefix, [string]$ArchivePath, [string]$ReadyPath)
+$ErrorActionPreference = 'Stop'
+$Listener = [System.Net.HttpListener]::new()
+$Listener.Prefixes.Add($Prefix)
+$Listener.Start()
+New-Item -ItemType File -Path $ReadyPath -Force | Out-Null
+try {
+    $Context = $Listener.GetContext()
+    $Bytes = [System.IO.File]::ReadAllBytes($ArchivePath)
+    $Context.Response.ContentLength64 = $Bytes.Length
+    $Context.Response.OutputStream.Write($Bytes, 0, $Bytes.Length)
+    $Context.Response.Close()
+}
+finally {
+    $Listener.Stop()
+    $Listener.Close()
+}
+'@ | Set-Content -LiteralPath $ServerScriptPath -Encoding utf8NoBOM
+    $Process = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-File', $ServerScriptPath, '-Prefix', $Prefix, '-ArchivePath', $ArchivePath, '-ReadyPath', $ReadyPath) -PassThru -WindowStyle Hidden
+    $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+    while (-not (Test-Path -LiteralPath $ReadyPath) -and [DateTimeOffset]::UtcNow -lt $Deadline) {
+        if ($Process.HasExited) {
+            throw "ASP53T1002 local archive server exited before becoming ready: $($Process.ExitCode)"
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    Assert-True (Test-Path -LiteralPath $ReadyPath) 'local archive server did not become ready'
+    return [pscustomobject]@{ Process = $Process; Uri = ($Prefix + 'fixture-v8.tgz') }
+}
+
+function New-TestJunction {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Target)
+
+    New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+    Assert-True (((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) "junction was not created: $Path"
 }
 
 function Invoke-Git {
@@ -157,6 +208,28 @@ try {
     'generated binary' | Set-Content -LiteralPath (Join-Path $HappyProject 'Plugins/Puerts/Binaries/Win64/UnrealEditor-Puerts.dll') -Encoding utf8NoBOM
     $Verified = Invoke-Installer Verify $HappyProject $CacheRoot $TestLockPath
     Assert-True ($Verified.ExitCode -eq 0) "happy-path verify failed: $($Verified.Text)"
+
+    $DownloadedCacheRoot = Join-Path $FixtureRoot 'downloaded-cache'
+    New-TestSourceCache $DownloadedCacheRoot $SeedBare
+    $ArchiveServer = Start-TestArchiveServer $FixtureRoot $ArchivePath
+    try {
+        $DownloadedProject = New-TestProject $FixtureRoot 'downloaded-archive'
+        $DownloadedInstall = Invoke-Installer Install $DownloadedProject $DownloadedCacheRoot $TestLockPath $ArchiveServer.Uri
+        Assert-True ($DownloadedInstall.ExitCode -eq 0) "loopback archive download install failed: $($DownloadedInstall.Text)"
+        Assert-True ($ArchiveServer.Process.WaitForExit(10000)) 'loopback archive server did not finish after one request'
+        Assert-True ($ArchiveServer.Process.ExitCode -eq 0) 'loopback archive server failed'
+        $DownloadedArchive = Join-Path $DownloadedCacheRoot $TestLock.backend.asset_name
+        Assert-True (Test-Path -LiteralPath $DownloadedArchive -PathType Leaf) 'successful download did not publish final cache archive'
+        Assert-True ((Get-FileHash -LiteralPath $DownloadedArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $TestLock.backend.sha256) 'published cache archive hash mismatch'
+        $DownloadResiduals = @(Get-ChildItem -LiteralPath $DownloadedCacheRoot -File | Where-Object { $_.Name -like "$($TestLock.backend.asset_name).partial-*.tmp" })
+        Assert-True ($DownloadResiduals.Count -eq 0) 'successful download left a temporary cache file'
+    }
+    finally {
+        if ($null -ne $ArchiveServer -and -not $ArchiveServer.Process.HasExited) {
+            Stop-Process -Id $ArchiveServer.Process.Id -Force
+        }
+    }
+
     $CachedArchiveProject = New-TestProject $FixtureRoot 'cached-archive'
     $CachedArchiveInstall = Invoke-Installer Install $CachedArchiveProject $CacheRoot $TestLockPath 'http://127.0.0.1:1/fixture-v8.tgz'
     Assert-True ($CachedArchiveInstall.ExitCode -eq 0) "existing valid cache was not used atomically: $($CachedArchiveInstall.Text)"
@@ -172,6 +245,20 @@ try {
     Add-Content -LiteralPath (Join-Path $BackendProject 'Plugins/Puerts/ThirdParty/v8_9.4.146.24/Bin/Win64/v8.dll') -Value 'tampered backend'
     Assert-InstallerFailure (Invoke-Installer Verify $BackendProject $CacheRoot $TestLockPath) 'ASP53D1802'
 
+    $NestedSourceProject = New-TestProject $FixtureRoot 'nested-source-tamper'
+    Assert-True ((Invoke-Installer Install $NestedSourceProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'nested source fixture install failed'
+    $NestedSourcePath = Join-Path $NestedSourceProject 'Plugins/Puerts/Source/JsEnv/Intermediate/generated.bin'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $NestedSourcePath) | Out-Null
+    'tampered nested source intermediate' | Set-Content -LiteralPath $NestedSourcePath -Encoding utf8NoBOM
+    Assert-InstallerFailure (Invoke-Installer Verify $NestedSourceProject $CacheRoot $TestLockPath) 'ASP53D1802'
+
+    $NestedBackendProject = New-TestProject $FixtureRoot 'nested-backend-tamper'
+    Assert-True ((Invoke-Installer Install $NestedBackendProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'nested backend fixture install failed'
+    $NestedBackendPath = Join-Path $NestedBackendProject 'Plugins/Puerts/ThirdParty/v8_9.4.146.24/Binaries/Win64/generated.dll'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $NestedBackendPath) | Out-Null
+    'tampered nested backend binary' | Set-Content -LiteralPath $NestedBackendPath -Encoding utf8NoBOM
+    Assert-InstallerFailure (Invoke-Installer Verify $NestedBackendProject $CacheRoot $TestLockPath) 'ASP53D1802'
+
     $MarkerProject = New-TestProject $FixtureRoot 'marker-tamper'
     Assert-True ((Invoke-Installer Install $MarkerProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'marker-tamper fixture install failed'
     $TamperedMarkerPath = Join-Path $MarkerProject 'Plugins/Puerts/.avidscript-puerts-install.json'
@@ -179,6 +266,41 @@ try {
     $TamperedMarker.installed_content_sha256 = ('0' * 64)
     $TamperedMarker | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $TamperedMarkerPath -Encoding utf8NoBOM
     Assert-InstallerFailure (Invoke-Installer Verify $MarkerProject $CacheRoot $TestLockPath) 'ASP53D1802'
+
+    $LegacyProject = New-TestProject $FixtureRoot 'legacy-remove'
+    Assert-True ((Invoke-Installer Install $LegacyProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'legacy-remove fixture install failed'
+    $LegacyMarkerPath = Join-Path $LegacyProject 'Plugins/Puerts/.avidscript-puerts-install.json'
+    $LegacyMarker = Get-Content -LiteralPath $LegacyMarkerPath -Raw | ConvertFrom-Json
+    $LegacyMarker.schema_version = 1
+    $LegacyMarker.PSObject.Properties.Remove('installed_content_sha256')
+    $LegacyMarker.PSObject.Properties.Remove('installed_file_count')
+    $LegacyMarker | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $LegacyMarkerPath -Encoding utf8NoBOM
+    Assert-InstallerFailure (Invoke-Installer Verify $LegacyProject $CacheRoot $TestLockPath) 'ASP53D1601'
+    $LegacyRemove = Invoke-Installer Remove $LegacyProject $CacheRoot $TestLockPath
+    Assert-True ($LegacyRemove.ExitCode -eq 0) "legacy marker remove failed: $($LegacyRemove.Text)"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $LegacyProject 'Plugins/Puerts'))) 'legacy marker remove left the install directory behind'
+    Assert-True ((Invoke-Installer Install $LegacyProject $CacheRoot $TestLockPath).ExitCode -eq 0) 'lock-managed reinstall after legacy remove failed'
+
+    $PluginsJunctionProject = New-TestProject $FixtureRoot 'plugins-junction'
+    $PluginsJunctionTarget = Join-Path $FixtureRoot 'plugins-junction-target'
+    New-Item -ItemType Directory -Force -Path $PluginsJunctionTarget | Out-Null
+    New-TestJunction (Join-Path $PluginsJunctionProject 'Plugins') $PluginsJunctionTarget
+    Assert-InstallerFailure (Invoke-Installer Install $PluginsJunctionProject $CacheRoot $TestLockPath) 'ASP53D1204'
+
+    $InstallJunctionProject = New-TestProject $FixtureRoot 'install-junction'
+    $InstallJunctionPlugins = Join-Path $InstallJunctionProject 'Plugins'
+    $InstallJunctionTarget = Join-Path $FixtureRoot 'install-junction-target'
+    New-Item -ItemType Directory -Force -Path $InstallJunctionPlugins | Out-Null
+    New-Item -ItemType Directory -Force -Path $InstallJunctionTarget | Out-Null
+    'escape sentinel' | Set-Content -LiteralPath (Join-Path $InstallJunctionTarget 'sentinel.txt') -Encoding utf8NoBOM
+    New-TestJunction (Join-Path $InstallJunctionPlugins 'Puerts') $InstallJunctionTarget
+    Assert-InstallerFailure (Invoke-Installer Remove $InstallJunctionProject $CacheRoot $TestLockPath) 'ASP53D1205'
+    Assert-True (Test-Path -LiteralPath (Join-Path $InstallJunctionTarget 'sentinel.txt') -PathType Leaf) 'junction target was modified during rejected remove'
+
+    $ProjectRootTarget = New-TestProject $FixtureRoot 'project-root-target'
+    $ProjectRootJunction = Join-Path $FixtureRoot 'project-root-junction'
+    New-TestJunction $ProjectRootJunction $ProjectRootTarget
+    Assert-True ((Invoke-Installer Install $ProjectRootJunction $CacheRoot $TestLockPath).ExitCode -eq 0) 'reparse-point ProjectRoot did not normalize to its target'
 
     $FailureCacheRoot = Join-Path $FixtureRoot 'failure-cache'
     New-TestSourceCache $FailureCacheRoot $SeedBare
@@ -195,4 +317,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 source_tamper=1 backend_tamper=1 marker_tamper=1 atomic_download=1'
+Write-Output 'Puerts dependency contracts passed: parser=1 schema=1 happy=1 download_publish=1 cache_preserved=1 source_tamper=1 backend_tamper=1 nested_tamper=2 marker_tamper=1 legacy_remove=1 reparse_rejected=2 projectroot_normalized=1 atomic_download=1'
