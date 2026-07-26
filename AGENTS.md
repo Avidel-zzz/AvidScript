@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.5 最终 Gate SDK 探测 cwd 错误：一次性驱动在项目根而不是候选插件目录调用固定 `$env:USERPROFILE\.dotnet\dotnet.exe --version`，因此没有读取候选 `global.json` 并命中 10.0.301；Gate 在测试前失败。Prevention：SDK 版本探测与所有 .NET 命令必须在候选插件 cwd 内执行，先验证输出恰为 8.0.416，再启动测试；固定 host 路径不能替代 cwd 下的 `global.json` 解析。
 - 2026-07-26 P53.5 PhaseWorkflow 入口路径猜测：恢复主分支状态时直接调用不存在的 `Build/PhaseWorkflow/InvokePhaseWorkflow.ps1`，真实入口为 `Build/InvokePhaseWorkflow.ps1`。Prevention：状态机命令统一使用仓库已确认入口 `Build/InvokePhaseWorkflow.ps1`；若入口无法执行，先用 `rg --files | rg 'InvokePhaseWorkflow\.ps1$'` 定位，不从目录名推导路径。
 - 2026-07-26 P53.5 状态检查分号禁令再次复发：恢复收尾后把 `git status`、`git log` 与 `git diff --check` 放进同一 PowerShell 调用；命令虽只读且成功，但再次破坏“一次调用一个逻辑命令”的审计边界。Prevention：发送任何 `shell_command` 前机械扫描 `;`、`&&`、`||`；状态、身份和差异检查分别调用，不能因同属 Git 检查而合并。
 - 2026-07-26 P53.5 发布证据不可变性误判：P53.3/P53.4 报告把 `C:\tmp` attempt 称为不可变证据，但没有发布 aggregate SHA 或可分发的机器摘要；本机目录可变且其他机器无法审计表格。Prevention：正式性能结论只引用带 SHA-256 的 raw aggregate，并在仓库发布去路径、去 raw sample 的 compact statistics/provenance 摘要；阶段外目录只能称为本机原始证据，不能称为发布制品。
