@@ -195,7 +195,7 @@ Assert-SidecarBenchmarkProjectProvenance `
     -ProjectPath $ResolvedProjectPath `
     -AvidScriptCommit $AvidScriptCommit `
     -AvidScriptTreeSha $AvidScriptTreeSha | Out-Null
-Assert-SidecarPuertsManagedMarker `
+Assert-SidecarPuertsProvenance `
     -ProjectPath $ResolvedProjectPath `
     -PuertsCommit $PuertsCommit `
     -PuertsBackendSha256 $PuertsBackendSha256

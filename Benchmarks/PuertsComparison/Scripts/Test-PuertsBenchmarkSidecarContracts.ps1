@@ -185,6 +185,7 @@ foreach ($ScriptPath in @($RunnerPath, $AggregatorPath, $CommonPath)) {
         [ref]$ParserErrors)
     Assert-True (@($ParserErrors).Count -eq 0) "PowerShell 解析失败：$ScriptPath"
 }
+. $CommonPath
 
 $TrackedProfile = Get-Content -LiteralPath (Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json') -Raw | ConvertFrom-Json
 Assert-True ([int]$TrackedProfile.process_runs -eq 5) '正式 profile 必须固定执行 5 个独立进程'
@@ -222,13 +223,21 @@ try {
     $BackendPath = Join-Path $PuertsTarget 'Backend.bin'
     [System.IO.File]::WriteAllText($BackendPath, 'backend', [System.Text.UTF8Encoding]::new($false))
     $PuertsBackendSha = Get-TestFileSha256 $BackendPath
-    Write-NewJson (Join-Path $PuertsTarget '.avidscript-puerts-install.json') ([ordered]@{
-            schema_version = 2
-            source_commit_sha = $CandidateCommit
-            backend_sha256 = $PuertsBackendSha
-            installed_content_sha256 = ('1' * 64)
-            installed_file_count = 3
-        })
+    $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
+    $ManagedMarker = [ordered]@{
+        schema_version = 2
+        source_commit_sha = $CandidateCommit
+        backend_sha256 = $PuertsBackendSha
+        installed_content_sha256 = ('0' * 64)
+        installed_file_count = 0
+    }
+    Write-NewJson $ManagedMarkerPath $ManagedMarker
+    $InstalledPuertsDigest = Get-SidecarInstalledPuertsContentDigest `
+        -Path $PuertsTarget `
+        -ManagedMarkerName '.avidscript-puerts-install.json'
+    $ManagedMarker.installed_content_sha256 = $InstalledPuertsDigest.content_sha256
+    $ManagedMarker.installed_file_count = $InstalledPuertsDigest.file_count
+    Write-NewJson $ManagedMarkerPath $ManagedMarker
     [System.IO.File]::WriteAllText((Join-Path $HarnessTarget 'AvidScriptPerfHarness.uplugin'), "{}`n", [System.Text.UTF8Encoding]::new($false))
     New-TestJunction -Path (Join-Path $FixtureRoot 'Source') -Target $SourceTarget
     New-TestJunction -Path (Join-Path $FixtureRoot 'Config') -Target $ConfigTarget
@@ -539,6 +548,21 @@ Write-Output "假 Editor PID=$PID"
         & $RunnerPath @RunnerArguments | Out-Null
     } 'ASP53S2117'
     [System.IO.File]::WriteAllText($ManagedMarkerPath, $ManagedMarkerRaw, [System.Text.UTF8Encoding]::new($false))
+
+    $PuertsUpluginPath = Join-Path $PuertsTarget 'Puerts.uplugin'
+    $PuertsUpluginBytes = [System.IO.File]::ReadAllBytes($PuertsUpluginPath)
+    [System.IO.File]::WriteAllText($PuertsUpluginPath, "tampered`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2117'
+    [System.IO.File]::WriteAllBytes($PuertsUpluginPath, $PuertsUpluginBytes)
+
+    $BackendBytes = [System.IO.File]::ReadAllBytes($BackendPath)
+    [System.IO.File]::WriteAllText($BackendPath, "tampered-backend`n", [System.Text.UTF8Encoding]::new($false))
+    Invoke-ExpectedFailure {
+        & $RunnerPath @RunnerArguments | Out-Null
+    } 'ASP53S2117'
+    [System.IO.File]::WriteAllBytes($BackendPath, $BackendBytes)
 
     $WasmBytes = [System.IO.File]::ReadAllBytes($WasmPath)
     [System.IO.File]::WriteAllBytes($WasmPath, [byte[]](0,97,115,109,2,0,0,0))
@@ -881,4 +905,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=5 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=2 provenance_rejections=7 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

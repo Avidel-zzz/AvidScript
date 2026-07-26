@@ -91,6 +91,45 @@ function Get-SidecarDirectoryContentDigest {
     }
 }
 
+function Get-SidecarInstalledPuertsContentDigest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ManagedMarkerName
+    )
+
+    $Root = Resolve-SidecarCanonicalDirectory -Path $Path -Code 'ASP53S2117' -Label 'Puerts install root'
+    $ExcludedDirectoryNames = @('Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '.git')
+    $Entries = [System.Collections.Generic.List[string]]::new()
+    foreach ($File in @(Get-ChildItem -LiteralPath $Root -File -Force -Recurse)) {
+        $RelativePath = [System.IO.Path]::GetRelativePath($Root, $File.FullName).Replace('\', '/')
+        if ($RelativePath -ieq $ManagedMarkerName) {
+            continue
+        }
+        $PathParts = @($RelativePath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries))
+        $DirectoryParts = if ($PathParts.Count -gt 1) { @($PathParts[0..($PathParts.Count - 2)]) } else { @() }
+        if (@($DirectoryParts | Where-Object { $ExcludedDirectoryNames -icontains $_ }).Count -ne 0) {
+            continue
+        }
+        $Entries.Add(('{0}`t{1}' -f $RelativePath, (Get-SidecarFileSha256 -Path $File.FullName)))
+    }
+    $Values = @($Entries)
+    [System.Array]::Sort($Values, [System.StringComparer]::Ordinal)
+    $Payload = [string]::Join("`n", $Values) + "`n"
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Payload)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $Digest = ([System.BitConverter]::ToString($Hasher.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+
+    return [pscustomobject][ordered]@{
+        content_sha256 = $Digest
+        file_count = [int]$Values.Count
+    }
+}
+
 function Get-SidecarRequiredPropertyValue {
     param(
         [Parameter(Mandatory = $true)]$Object,
@@ -181,7 +220,7 @@ function Assert-SidecarBenchmarkProjectProvenance {
     return $ActualJunctions
 }
 
-function Assert-SidecarPuertsManagedMarker {
+function Assert-SidecarPuertsProvenance {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectPath,
         [Parameter(Mandatory = $true)][string]$PuertsCommit,
@@ -198,7 +237,8 @@ function Assert-SidecarPuertsManagedMarker {
         throw 'ASP53S2117 tracked Puerts dependency lock has an unsafe managed marker contract'
     }
 
-    $Marker = Read-SidecarJson -Path (Join-Path (Join-Path $ProjectRoot $PluginRelativePath) $ManagedMarkerName) -Code 'ASP53S2117'
+    $PuertsPath = Join-Path $ProjectRoot $PluginRelativePath
+    $Marker = Read-SidecarJson -Path (Join-Path $PuertsPath $ManagedMarkerName) -Code 'ASP53S2117'
     if ([int](Get-SidecarRequiredPropertyValue $Marker 'schema_version' 'ASP53S2117' 'Puerts managed marker') -ne 2) {
         throw 'ASP53S2117 Puerts managed marker schema_version must be 2'
     }
@@ -209,6 +249,10 @@ function Assert-SidecarPuertsManagedMarker {
     if ($SourceCommit -cne $PuertsCommit -or $BackendSha -cne $PuertsBackendSha256 -or
         $InstalledDigest -cnotmatch '^[0-9a-f]{64}$' -or $InstalledFileCount -lt 1) {
         throw 'ASP53S2117 Puerts managed marker does not bind the requested dependency identity'
+    }
+    $ActualDigest = Get-SidecarInstalledPuertsContentDigest -Path $PuertsPath -ManagedMarkerName $ManagedMarkerName
+    if ($ActualDigest.content_sha256 -cne $InstalledDigest -or $ActualDigest.file_count -ne $InstalledFileCount) {
+        throw 'ASP53S2117 Puerts installed content does not match the managed marker digest'
     }
 }
 
