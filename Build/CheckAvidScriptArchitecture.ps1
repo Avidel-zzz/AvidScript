@@ -66,25 +66,113 @@ function Test-RequiredTokenSequence {
     }
 }
 
-function Get-BuildDependencyNames {
+function Get-CSharpCodeMask {
+    param([string]$Source)
+
+    $NonCodePattern = '(?ms)//[^\r\n]*|/\*.*?\*/|(?<raw>"{3,}).*?\k<raw>|' +
+        '@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'''
+    return [regex]::Replace(
+        $Source,
+        $NonCodePattern,
+        {
+            param($Match)
+            return [regex]::Replace($Match.Value, '[^\r\n]', ' ')
+        })
+}
+
+function Get-LiteralDependencyNames {
+    param(
+        [string]$Method,
+        [string]$ArgumentText
+    )
+
+    if ($Method -ceq 'Add') {
+        $Literal = [regex]::Match(
+            $ArgumentText,
+            '^\s*"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"\s*$')
+        if (-not $Literal.Success) {
+            return $null
+        }
+        return @($Literal.Groups['name'].Value)
+    }
+
+    $Range = [regex]::Match(
+        $ArgumentText,
+        '(?s)^\s*new\s*(?:string\s*)?\[\s*\]\s*\{\s*(?<items>.*?)\s*\}\s*$')
+    if (-not $Range.Success) {
+        return $null
+    }
+    $Items = $Range.Groups['items'].Value
+    if ([string]::IsNullOrWhiteSpace($Items)) {
+        return @()
+    }
+    $Parts = @($Items.Split(','))
+    if ([string]::IsNullOrWhiteSpace($Parts[-1])) {
+        $Parts = @($Parts | Select-Object -First ($Parts.Count - 1))
+    }
+    $Names = [System.Collections.Generic.List[string]]::new()
+    foreach ($Part in $Parts) {
+        $Literal = [regex]::Match(
+            $Part,
+            '^\s*"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"\s*$')
+        if (-not $Literal.Success) {
+            return $null
+        }
+        $Names.Add($Literal.Groups['name'].Value)
+    }
+    return @($Names)
+}
+
+function Get-BuildDependencyAnalysis {
     param(
         [string]$Source,
         [ValidateSet('Public', 'Private')][string]$Visibility
     )
 
-    $SourceWithoutComments = [regex]::Replace($Source, '(?s)/\*.*?\*/', '')
-    $SourceWithoutComments = [regex]::Replace($SourceWithoutComments, '(?m)//.*$', '')
+    $CodeMask = Get-CSharpCodeMask -Source $Source
     $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
-        'DependencyModuleNames\s*\.\s*(?:Add|AddRange)\s*\((?<body>.*?)\)\s*;'
+        'DependencyModuleNames\s*\.\s*(?<method>Add|AddRange)\s*\('
     $Names = [System.Collections.Generic.List[string]]::new()
-    foreach ($Invocation in [regex]::Matches($SourceWithoutComments, $InvocationPattern)) {
-        foreach ($Literal in [regex]::Matches(
-            $Invocation.Groups['body'].Value,
-            '"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"')) {
-            $Names.Add($Literal.Groups['name'].Value)
+    $UnresolvedCount = 0
+    foreach ($Invocation in [regex]::Matches($CodeMask, $InvocationPattern)) {
+        $OpenParenthesis = $Invocation.Index + $Invocation.Length - 1
+        $Depth = 0
+        $CloseParenthesis = -1
+        for ($Index = $OpenParenthesis; $Index -lt $CodeMask.Length; ++$Index) {
+            if ($CodeMask[$Index] -ceq '(') {
+                ++$Depth
+            }
+            elseif ($CodeMask[$Index] -ceq ')') {
+                --$Depth
+                if ($Depth -eq 0) {
+                    $CloseParenthesis = $Index
+                    break
+                }
+            }
+        }
+        if ($CloseParenthesis -lt 0 -or
+            -not $CodeMask.Substring($CloseParenthesis + 1) -match '^\s*;') {
+            ++$UnresolvedCount
+            continue
+        }
+        $ArgumentText = $Source.Substring(
+            $OpenParenthesis + 1,
+            $CloseParenthesis - $OpenParenthesis - 1)
+        $LiteralNames = Get-LiteralDependencyNames `
+            -Method $Invocation.Groups['method'].Value `
+            -ArgumentText $ArgumentText
+        if ($null -eq $LiteralNames) {
+            ++$UnresolvedCount
+            continue
+        }
+        foreach ($Name in @($LiteralNames)) {
+            $Names.Add($Name)
         }
     }
-    return @($Names)
+    return [pscustomobject]@{
+        Names = @($Names)
+        UnresolvedCount = $UnresolvedCount
+    }
 }
 
 function Test-NativeSymbolAllowlist {
@@ -198,14 +286,20 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'Core')) {
         Add-Violation "AvidScriptVM is missing required dependency $RequiredDependency"
     }
 }
-$VmPrivateDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Private)
-$VmPublicDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Public)
+$VmPrivateDependencyAnalysis = Get-BuildDependencyAnalysis -Source $VmBuild -Visibility Private
+$VmPublicDependencyAnalysis = Get-BuildDependencyAnalysis -Source $VmBuild -Visibility Public
+if ($VmPrivateDependencyAnalysis.UnresolvedCount -gt 0) {
+    Add-Violation 'AvidScriptVM private dependencies must use literal-only Add/AddRange declarations'
+}
+if ($VmPublicDependencyAnalysis.UnresolvedCount -gt 0) {
+    Add-Violation 'AvidScriptVM public dependencies must use literal-only Add/AddRange declarations'
+}
 foreach ($RequiredVmBackendDependency in @('WAMR', 'Wasmtime')) {
-    if ($VmPrivateDependencies -notcontains $RequiredVmBackendDependency) {
+    if ($VmPrivateDependencyAnalysis.Names -notcontains $RequiredVmBackendDependency) {
         Add-Violation "AvidScriptVM is missing its private $RequiredVmBackendDependency dependency"
     }
 }
-if ($VmPublicDependencies -contains 'Wasmtime') {
+if ($VmPublicDependencyAnalysis.Names -contains 'Wasmtime') {
     Add-Violation 'AvidScriptVM must not expose Wasmtime through PublicDependencyModuleNames'
 }
 foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {

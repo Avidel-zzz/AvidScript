@@ -174,25 +174,113 @@ function Install-Fixture {
         -LockSha256 $LockSha256
 }
 
-function Get-BuildDependencyNames {
+function Get-CSharpCodeMask {
+    param([Parameter(Mandatory = $true)][string]$Source)
+
+    $NonCodePattern = '(?ms)//[^\r\n]*|/\*.*?\*/|(?<raw>"{3,}).*?\k<raw>|@"(?:""|[^"])*"|' +
+        '"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'''
+    return [regex]::Replace(
+        $Source,
+        $NonCodePattern,
+        {
+            param($Match)
+            return [regex]::Replace($Match.Value, '[^\r\n]', ' ')
+        })
+}
+
+function Get-LiteralDependencyNames {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$ArgumentText
+    )
+
+    if ($Method -ceq 'Add') {
+        $Literal = [regex]::Match(
+            $ArgumentText,
+            '^\s*"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"\s*$')
+        if (-not $Literal.Success) {
+            return $null
+        }
+        return @($Literal.Groups['name'].Value)
+    }
+
+    $Range = [regex]::Match(
+        $ArgumentText,
+        '(?s)^\s*new\s*(?:string\s*)?\[\s*\]\s*\{\s*(?<items>.*?)\s*\}\s*$')
+    if (-not $Range.Success) {
+        return $null
+    }
+    $Items = $Range.Groups['items'].Value
+    if ([string]::IsNullOrWhiteSpace($Items)) {
+        return @()
+    }
+    $Parts = @($Items.Split(','))
+    if ([string]::IsNullOrWhiteSpace($Parts[-1])) {
+        $Parts = @($Parts | Select-Object -First ($Parts.Count - 1))
+    }
+    $Names = [System.Collections.Generic.List[string]]::new()
+    foreach ($Part in $Parts) {
+        $Literal = [regex]::Match(
+            $Part,
+            '^\s*"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"\s*$')
+        if (-not $Literal.Success) {
+            return $null
+        }
+        $Names.Add($Literal.Groups['name'].Value)
+    }
+    return @($Names)
+}
+
+function Get-BuildDependencyAnalysis {
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][ValidateSet('Public', 'Private')][string]$Visibility
     )
 
-    $SourceWithoutComments = [regex]::Replace($Source, '(?s)/\*.*?\*/', '')
-    $SourceWithoutComments = [regex]::Replace($SourceWithoutComments, '(?m)//.*$', '')
+    $CodeMask = Get-CSharpCodeMask -Source $Source
     $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
-        'DependencyModuleNames\s*\.\s*(?:Add|AddRange)\s*\((?<body>.*?)\)\s*;'
+        'DependencyModuleNames\s*\.\s*(?<method>Add|AddRange)\s*\('
     $Names = [System.Collections.Generic.List[string]]::new()
-    foreach ($Invocation in [regex]::Matches($SourceWithoutComments, $InvocationPattern)) {
-        foreach ($Literal in [regex]::Matches(
-            $Invocation.Groups['body'].Value,
-            '"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"')) {
-            $Names.Add($Literal.Groups['name'].Value)
+    $UnresolvedCount = 0
+    foreach ($Invocation in [regex]::Matches($CodeMask, $InvocationPattern)) {
+        $OpenParenthesis = $Invocation.Index + $Invocation.Length - 1
+        $Depth = 0
+        $CloseParenthesis = -1
+        for ($Index = $OpenParenthesis; $Index -lt $CodeMask.Length; ++$Index) {
+            if ($CodeMask[$Index] -ceq '(') {
+                ++$Depth
+            }
+            elseif ($CodeMask[$Index] -ceq ')') {
+                --$Depth
+                if ($Depth -eq 0) {
+                    $CloseParenthesis = $Index
+                    break
+                }
+            }
+        }
+        if ($CloseParenthesis -lt 0 -or
+            -not $CodeMask.Substring($CloseParenthesis + 1) -match '^\s*;') {
+            ++$UnresolvedCount
+            continue
+        }
+        $ArgumentText = $Source.Substring(
+            $OpenParenthesis + 1,
+            $CloseParenthesis - $OpenParenthesis - 1)
+        $LiteralNames = Get-LiteralDependencyNames `
+            -Method $Invocation.Groups['method'].Value `
+            -ArgumentText $ArgumentText
+        if ($null -eq $LiteralNames) {
+            ++$UnresolvedCount
+            continue
+        }
+        foreach ($Name in @($LiteralNames)) {
+            $Names.Add($Name)
         }
     }
-    return @($Names)
+    return [pscustomobject]@{
+        Names = @($Names)
+        UnresolvedCount = $UnresolvedCount
+    }
 }
 
 Assert-True (Test-Path -LiteralPath $InstallerPath -PathType Leaf) 'installer is missing'
@@ -265,36 +353,66 @@ foreach ($RequiredToken in @(
 Assert-True (-not [regex]::IsMatch($WasmtimeBuild, '"wasmtime\.lib"')) 'Wasmtime.Build.cs must not link the static library'
 
 $VmBuild = Get-Content -LiteralPath (Join-Path $PluginRoot 'Source/AvidScriptVM/AvidScriptVM.Build.cs') -Raw
-$VmPrivateDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Private)
-$VmPublicDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Public)
-Assert-True ($VmPrivateDependencies -contains 'Wasmtime') `
+$VmPrivateDependencyAnalysis = Get-BuildDependencyAnalysis -Source $VmBuild -Visibility Private
+$VmPublicDependencyAnalysis = Get-BuildDependencyAnalysis -Source $VmBuild -Visibility Public
+Assert-True ($VmPrivateDependencyAnalysis.UnresolvedCount -eq 0) `
+    'AvidScriptVM has a non-literal private dependency declaration'
+Assert-True ($VmPublicDependencyAnalysis.UnresolvedCount -eq 0) `
+    'AvidScriptVM has a non-literal public dependency declaration'
+Assert-True ($VmPrivateDependencyAnalysis.Names -contains 'Wasmtime') `
     'AvidScriptVM is missing its structured private Wasmtime dependency'
-Assert-True ($VmPublicDependencies -notcontains 'Wasmtime') `
+Assert-True ($VmPublicDependencyAnalysis.Names -notcontains 'Wasmtime') `
     'AvidScriptVM exposes Wasmtime as a public dependency'
 $PublicDependencyMutation = $VmBuild.Replace(
     'PrivateDependencyModuleNames.AddRange',
     'PublicDependencyModuleNames.AddRange')
-$MutatedPrivateDependencies = @(
-    Get-BuildDependencyNames -Source $PublicDependencyMutation -Visibility Private)
-$MutatedPublicDependencies = @(
-    Get-BuildDependencyNames -Source $PublicDependencyMutation -Visibility Public)
-Assert-True ($MutatedPrivateDependencies -notcontains 'Wasmtime') `
+$MutatedPrivateAnalysis = Get-BuildDependencyAnalysis `
+    -Source $PublicDependencyMutation `
+    -Visibility Private
+$MutatedPublicAnalysis = Get-BuildDependencyAnalysis `
+    -Source $PublicDependencyMutation `
+    -Visibility Public
+Assert-True ($MutatedPrivateAnalysis.Names -notcontains 'Wasmtime') `
     'structured dependency parser did not notice removal from PrivateDependencyModuleNames'
-Assert-True ($MutatedPublicDependencies -contains 'Wasmtime') `
+Assert-True ($MutatedPublicAnalysis.Names -contains 'Wasmtime') `
     'structured dependency parser did not notice addition to PublicDependencyModuleNames'
+$DecoyMutation = $VmBuild.Replace('"Wasmtime"', '"NotWasmtime"')
+$DecoyMutation = $DecoyMutation.Replace(
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;',
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;' + "`n`t`t" +
+        'string DependencyDecoy = "PrivateDependencyModuleNames.Add(\"Wasmtime\");";')
+$DecoyPrivateAnalysis = Get-BuildDependencyAnalysis -Source $DecoyMutation -Visibility Private
+Assert-True ($DecoyPrivateAnalysis.Names -notcontains 'Wasmtime') `
+    'decoy string fabricated a private Wasmtime dependency'
+$PublicVariableMutation = $VmBuild.Replace('"Wasmtime"', '"NotWasmtime"')
+$PublicVariableMutation = $PublicVariableMutation.Replace(
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;',
+    'PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;' + "`n`t`t" +
+        'string PublicBackendDependency = "Wasmtime";' + "`n`t`t" +
+        'PublicDependencyModuleNames.Add(PublicBackendDependency);')
+$PublicVariableAnalysis = Get-BuildDependencyAnalysis `
+    -Source $PublicVariableMutation `
+    -Visibility Public
+Assert-True ($PublicVariableAnalysis.UnresolvedCount -eq 1) `
+    'public variable dependency did not fail closed'
 $ArchitectureSource = Get-Content -LiteralPath (
     Join-Path $PluginRoot 'Build/CheckAvidScriptArchitecture.ps1') -Raw
-Assert-True $ArchitectureSource.Contains('Get-BuildDependencyNames') `
+Assert-True $ArchitectureSource.Contains('Get-CSharpCodeMask') `
+    'architecture checker does not mask C# comments and strings before locating calls'
+Assert-True $ArchitectureSource.Contains('Get-BuildDependencyAnalysis') `
     'architecture checker does not structurally inspect module dependencies'
-Assert-True $ArchitectureSource.Contains('$VmPrivateDependencies') `
+Assert-True $ArchitectureSource.Contains('$VmPrivateDependencyAnalysis') `
     'architecture checker does not inspect PrivateDependencyModuleNames'
-Assert-True $ArchitectureSource.Contains('$VmPublicDependencies') `
+Assert-True $ArchitectureSource.Contains('$VmPublicDependencyAnalysis') `
     'architecture checker does not inspect PublicDependencyModuleNames'
 Assert-True $ArchitectureSource.Contains(
-    '$VmPrivateDependencies -notcontains $RequiredVmBackendDependency') `
+    '$VmPrivateDependencyAnalysis.Names -notcontains $RequiredVmBackendDependency') `
     'architecture checker does not reject a missing private Wasmtime dependency'
-Assert-True $ArchitectureSource.Contains('$VmPublicDependencies -contains ''Wasmtime''') `
+Assert-True $ArchitectureSource.Contains(
+    '$VmPublicDependencyAnalysis.Names -contains ''Wasmtime''') `
     'architecture checker does not reject a public Wasmtime dependency'
+Assert-True $ArchitectureSource.Contains('$VmPublicDependencyAnalysis.UnresolvedCount -gt 0') `
+    'architecture checker does not fail closed on unresolved public dependencies'
 $VmPublicText = (
     Get-ChildItem -LiteralPath (Join-Path $PluginRoot 'Source/AvidScriptVM/Public') -File -Recurse |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
@@ -509,4 +627,4 @@ Write-Output (
     'tracked_lock=1 schema=1 license=1 cli_validate=1 parser=1 archive_identity=2 traversal=1 ads=1 ' +
     'missing_layout=3 install=1 verify=1 idempotent=1 content_tamper=1 extra_file=1 ' +
     'marker_drift=1 installed_ads=2 unmanaged_remove=1 drift_remove=1 ancestor_reparse=2 managed_remove=1 ' +
-    'gitignore=1 ubt=1 private_dependency_structure=2 public_boundary=1')
+    'gitignore=1 ubt=1 private_dependency_structure=2 dependency_decoys=2 public_boundary=1')
