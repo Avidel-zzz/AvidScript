@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0、Important=0；正式 benchmark 各 6000/6000；发布证据与中文文档完成；CRLF 回归、路径猜测与身份转录失误均已修复或记录。",
+      "completed_at_utc": "2026-07-26T14:55:53.6417394+00:00"
     }
   ],
   "debt": [
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 32,
-  "updated_at_utc": "2026-07-26T14:54:56.1154684+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 33,
+  "updated_at_utc": "2026-07-26T14:55:53.6446723+00:00"
 }
