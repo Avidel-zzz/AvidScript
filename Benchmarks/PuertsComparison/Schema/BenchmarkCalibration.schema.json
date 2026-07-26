@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AvidScript benchmark calibration result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "calibration_id",
+    "timer_frequency_hz",
+    "provenance",
+    "iteration_counts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "calibration_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f-]{36}$"
+    },
+    "timer_frequency_hz": { "type": "integer", "minimum": 1 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ue_version",
+        "ue_build_id",
+        "target",
+        "configuration",
+        "avidscript_commit",
+        "puerts_commit",
+        "puerts_backend_sha256",
+        "null_rhi",
+        "cpu",
+        "os",
+        "wamr_mode",
+        "v8_mode",
+        "wasm_sha256",
+        "manifest_sha256",
+        "avidscript_tree_sha",
+        "avidscript_dirty",
+        "profile_id",
+        "profile_sha256",
+        "request_schema_sha256",
+        "calibration_schema_sha256",
+        "result_schema_sha256"
+      ],
+      "properties": {
+        "ue_version": { "type": "string", "minLength": 1 },
+        "ue_build_id": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "configuration": { "type": "string", "minLength": 1 },
+        "avidscript_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "puerts_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "puerts_backend_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "null_rhi": { "type": "boolean" },
+        "cpu": { "type": "string", "minLength": 1 },
+        "os": { "type": "string", "minLength": 1 },
+        "wamr_mode": { "type": "string", "minLength": 1 },
+        "v8_mode": { "type": "string", "minLength": 1 },
+        "wasm_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "avidscript_tree_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "avidscript_dirty": { "const": false },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "profile_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "request_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "calibration_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "result_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "iteration_counts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  }
+}
