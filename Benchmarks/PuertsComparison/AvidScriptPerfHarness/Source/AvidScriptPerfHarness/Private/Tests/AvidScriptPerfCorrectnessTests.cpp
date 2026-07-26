@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptControlledRuntimeRunner.h"
 #include "AvidScriptPerfRunner.h"
 #include "Misc/AutomationTest.h"
 
@@ -45,6 +46,40 @@ bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("AvidScript Wasmtime lane records host calls"),
 		Result.AvidScriptWasmtimeHostCallCount > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptControlledRuntimeCorrectnessTest,
+	"AvidScript.PerformanceComparison.ControlledRuntime.Correctness",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptControlledRuntimeCorrectnessTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptControlledRuntimeSmokeResult Result;
+	const bool bSucceeded =
+		FAvidScriptControlledRuntimeRunner::RunCorrectnessSmoke(
+			4096,
+			1397313,
+			Result);
+	TestTrue(TEXT("controlled runtime correctness smoke succeeds"), bSucceeded);
+	if (!bSucceeded)
+	{
+		AddError(Result.Error);
+		return false;
+	}
+	TestEqual(TEXT("native result matches oracle"), Result.NativeResult, Result.Expected);
+	TestEqual(TEXT("V8 WASM result matches oracle"), Result.PuertsV8Result, Result.Expected);
+	TestEqual(TEXT("WAMR result matches oracle"), Result.WamrResult, Result.Expected);
+	TestEqual(TEXT("Wasmtime result matches oracle"), Result.WasmtimeResult, Result.Expected);
+	TestTrue(
+		TEXT("Puerts lane executes WebAssembly.Module and WebAssembly.Instance"),
+		Result.bPuertsExecutedWebAssembly);
+	TestEqual(
+		TEXT("all VM lanes consume the tracked kernel digest"),
+		Result.KernelWasmSha256,
+		TEXT("230aed5ae6bd816e7780e0519354b100f29d23908ff0e6c1f0b52af5d4c834f7"));
 	return true;
 }
 

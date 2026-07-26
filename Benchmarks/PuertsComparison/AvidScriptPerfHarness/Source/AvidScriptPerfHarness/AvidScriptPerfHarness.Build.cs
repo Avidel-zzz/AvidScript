@@ -19,6 +19,7 @@ public class AvidScriptPerfHarness : ModuleRules
             "AvidScriptBindings",
             "AvidScriptEditor",
             "AvidScriptRuntime",
+            "AvidScriptVM",
             "Json",
             "JsonUtilities",
             "Projects",

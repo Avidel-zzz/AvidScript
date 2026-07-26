@@ -38,7 +38,10 @@ struct AvidScriptWasmtimeFunction
 	wasmtime_func_t value;
 	uint32_t parameter_count;
 	uint32_t cell_count;
+	uint32_t result_count;
+	uint32_t result_cell_count;
 	wasmtime_valkind_t parameter_kinds[AVIDSCRIPT_WASMTIME_MAX_VALUES];
+	wasmtime_valkind_t result_kinds[AVIDSCRIPT_WASMTIME_MAX_VALUES];
 };
 
 struct AvidScriptWasmtimeFailure
@@ -444,7 +447,8 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	const char* export_name,
 	size_t export_name_size,
 	AvidScriptWasmtimeFunction** out_function,
-	uint32_t* out_cell_count)
+	uint32_t* out_parameter_cell_count,
+	uint32_t* out_result_cell_count)
 {
 	wasmtime_extern_t item;
 	wasm_functype_t* type;
@@ -452,9 +456,12 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	const wasm_valtype_vec_t* results;
 	AvidScriptWasmtimeFunction* function;
 	size_t parameter_index;
+	size_t result_index;
 	uint32_t cell_count = 0;
+	uint32_t result_cell_count = 0;
 	*out_function = NULL;
-	*out_cell_count = 0;
+	*out_parameter_cell_count = 0;
+	*out_result_cell_count = 0;
 	if (!wasmtime_instance_export_get(
 		store->context,
 		&instance->value,
@@ -477,7 +484,8 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	}
 	parameters = wasm_functype_params(type);
 	results = wasm_functype_results(type);
-	if (results->size != 0 || parameters->size > AVIDSCRIPT_WASMTIME_MAX_VALUES)
+	if (parameters->size > AVIDSCRIPT_WASMTIME_MAX_VALUES
+		|| results->size > AVIDSCRIPT_WASMTIME_MAX_VALUES)
 	{
 		wasm_functype_delete(type);
 		wasmtime_extern_delete(&item);
@@ -492,6 +500,7 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	}
 	function->value = item.of.func;
 	function->parameter_count = (uint32_t)parameters->size;
+	function->result_count = (uint32_t)results->size;
 	for (parameter_index = 0; parameter_index < parameters->size; ++parameter_index)
 	{
 		const wasm_valkind_t kind = wasm_valtype_kind(parameters->data[parameter_index]);
@@ -513,8 +522,31 @@ int avidscript_wasmtime_instance_resolve_event_export(
 		}
 		function->parameter_kinds[parameter_index] = kind;
 	}
+	for (result_index = 0; result_index < results->size; ++result_index)
+	{
+		const wasm_valkind_t kind = wasm_valtype_kind(results->data[result_index]);
+		switch (kind)
+		{
+		case WASM_I32:
+		case WASM_F32:
+			result_cell_count += 1;
+			break;
+		case WASM_I64:
+		case WASM_F64:
+			result_cell_count += 2;
+			break;
+		default:
+			free(function);
+			wasm_functype_delete(type);
+			wasmtime_extern_delete(&item);
+			return 3;
+		}
+		function->result_kinds[result_index] = kind;
+	}
 	function->cell_count = cell_count;
-	*out_cell_count = cell_count;
+	function->result_cell_count = result_cell_count;
+	*out_parameter_cell_count = cell_count;
+	*out_result_cell_count = result_cell_count;
 	*out_function = function;
 	wasm_functype_delete(type);
 	wasmtime_extern_delete(&item);
@@ -530,14 +562,26 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	const uint32_t* cells,
-	size_t cell_count)
+	size_t cell_count,
+	uint32_t* out_result_cells,
+	size_t result_cell_capacity,
+	size_t* out_result_cell_count)
 {
 	wasmtime_val_t arguments[AVIDSCRIPT_WASMTIME_MAX_VALUES];
+	wasmtime_val_t results[AVIDSCRIPT_WASMTIME_MAX_VALUES];
 	wasm_trap_t* trap = NULL;
 	wasmtime_error_t* error;
 	size_t parameter_index;
+	size_t result_index;
 	size_t cell_index = 0;
+	size_t result_cell_index = 0;
+	*out_result_cell_count = 0;
 	if (cell_count != function->cell_count)
+	{
+		return NULL;
+	}
+	if (function->result_cell_count > result_cell_capacity
+		|| (function->result_cell_count > 0 && out_result_cells == NULL))
 	{
 		return NULL;
 	}
@@ -575,10 +619,43 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 		&function->value,
 		function->parameter_count == 0 ? NULL : arguments,
 		function->parameter_count,
-		NULL,
-		0,
+		function->result_count == 0 ? NULL : results,
+		function->result_count,
 		&trap);
-	return avidscript_wasmtime_failure_new(error, trap);
+	if (error != NULL || trap != NULL)
+	{
+		return avidscript_wasmtime_failure_new(error, trap);
+	}
+	for (result_index = 0; result_index < function->result_count; ++result_index)
+	{
+		uint64_t wide_bits;
+		switch (function->result_kinds[result_index])
+		{
+		case WASM_I32:
+			out_result_cells[result_cell_index++] = (uint32_t)results[result_index].of.i32;
+			break;
+		case WASM_F32:
+			memcpy(
+				&out_result_cells[result_cell_index++],
+				&results[result_index].of.f32,
+				sizeof(float));
+			break;
+		case WASM_I64:
+			wide_bits = (uint64_t)results[result_index].of.i64;
+			out_result_cells[result_cell_index++] = (uint32_t)wide_bits;
+			out_result_cells[result_cell_index++] = (uint32_t)(wide_bits >> 32);
+			break;
+		case WASM_F64:
+			memcpy(&wide_bits, &results[result_index].of.f64, sizeof(double));
+			out_result_cells[result_cell_index++] = (uint32_t)wide_bits;
+			out_result_cells[result_cell_index++] = (uint32_t)(wide_bits >> 32);
+			break;
+		default:
+			return NULL;
+		}
+	}
+	*out_result_cell_count = result_cell_index;
+	return NULL;
 }
 
 bool avidscript_wasmtime_memory_data(

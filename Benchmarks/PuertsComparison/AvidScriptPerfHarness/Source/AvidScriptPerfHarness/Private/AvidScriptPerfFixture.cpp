@@ -1,5 +1,7 @@
 #include "AvidScriptPerfFixture.h"
 
+#include "Misc/Base64.h"
+
 #include "UEDataBinding.hpp"
 
 namespace
@@ -82,6 +84,48 @@ void AAvidScriptPerfFixture::RegisterPuertsCallbacks(
 		StaticGetCallbackChecksum = MoveTemp(GetCallbackChecksum);
 		bHasStaticCallbacks = true;
 	}
+}
+
+FString AAvidScriptPerfFixture::GetControlledWasmBase64() const
+{
+	return ControlledWasmBase64;
+}
+
+void AAvidScriptPerfFixture::RegisterControlledWasmRunner(
+	FJsObject Runner,
+	const bool bUsesWebAssemblyModule,
+	const bool bUsesWebAssemblyInstance)
+{
+	ControlledWasmRunner = MoveTemp(Runner);
+	bControlledUsesWebAssemblyModule = bUsesWebAssemblyModule;
+	bControlledUsesWebAssemblyInstance = bUsesWebAssemblyInstance;
+	bHasControlledWasmRunner = true;
+}
+
+void AAvidScriptPerfFixture::SetControlledWasmBytes(const TConstArrayView<uint8> Bytes)
+{
+	ControlledWasmBase64 = FBase64::Encode(Bytes.GetData(), Bytes.Num());
+	ControlledWasmRunner = FJsObject();
+	bHasControlledWasmRunner = false;
+	bControlledUsesWebAssemblyModule = false;
+	bControlledUsesWebAssemblyInstance = false;
+}
+
+bool AAvidScriptPerfFixture::HasControlledWasmRunner() const
+{
+	return bHasControlledWasmRunner;
+}
+
+bool AAvidScriptPerfFixture::ControlledRunnerUsesWebAssembly() const
+{
+	return bControlledUsesWebAssemblyModule && bControlledUsesWebAssemblyInstance;
+}
+
+int32 AAvidScriptPerfFixture::RunControlledWasm(
+	const int32 Iterations,
+	const int32 Seed) const
+{
+	return ControlledWasmRunner.Func<int32>(Iterations, Seed);
 }
 
 int32 AAvidScriptPerfFixture::NativeNoOp(const int32 Value) const

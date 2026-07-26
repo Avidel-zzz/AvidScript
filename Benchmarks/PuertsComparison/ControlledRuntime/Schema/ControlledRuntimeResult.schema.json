@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/controlled-runtime-result-v1.json",
+  "title": "AvidScript Controlled Runtime Process Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "mode",
+    "process_run",
+    "pid",
+    "kernel_wasm_sha256",
+    "timing_boundary",
+    "compile_in_timed_region",
+    "instantiate_in_timed_region",
+    "export_lookup_in_timed_region",
+    "fallback_used",
+    "lane_identities",
+    "calibration",
+    "samples",
+    "correctness_failures"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "identical_wasm_kernel" },
+    "mode": { "enum": ["calibration", "timed"] },
+    "process_run": { "type": "integer", "minimum": -1 },
+    "pid": { "type": "integer", "minimum": 1 },
+    "kernel_wasm_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "timing_boundary": { "const": "single_cached_export_call" },
+    "compile_in_timed_region": { "const": false },
+    "instantiate_in_timed_region": { "const": false },
+    "export_lookup_in_timed_region": { "const": false },
+    "fallback_used": { "const": false },
+    "lane_identities": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        { "$ref": "#/$defs/puertsLane" },
+        { "$ref": "#/$defs/wasmtimeLane" },
+        { "$ref": "#/$defs/wamrLane" },
+        { "$ref": "#/$defs/nativeLane" }
+      ],
+      "items": false
+    },
+    "calibration": { "type": "object" },
+    "samples": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sample" }
+    },
+    "correctness_failures": { "const": 0 }
+  },
+  "$defs": {
+    "laneBase": {
+      "type": "object",
+      "required": [
+        "lane_id",
+        "runtime_id",
+        "runtime_version",
+        "adapter_id",
+        "execution_tier",
+        "wasm_workload_kind",
+        "source_wasm_sha256",
+        "execution_artifact_format",
+        "execution_artifact_sha256",
+        "compiler_identity",
+        "compiler_flags",
+        "runtime_build_identity",
+        "runtime_artifact_sha256",
+        "target_triple",
+        "fallback_used"
+      ],
+      "properties": {
+        "wasm_workload_kind": { "const": "identical_wasm_kernel" },
+        "source_wasm_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "execution_artifact_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "fallback_used": { "const": false }
+      }
+    },
+    "puertsLane": {
+      "allOf": [
+        { "$ref": "#/$defs/laneBase" },
+        {
+          "properties": {
+            "lane_id": { "const": "puerts_v8_wasm_jit" },
+            "runtime_id": { "const": "v8.webassembly.tiered_jit" },
+            "adapter_id": { "const": "puerts_webassembly_module_instance" },
+            "execution_tier": { "const": "tiered_jit" },
+            "compiler_identity": { "const": "v8.webassembly.tiered_jit" }
+          }
+        }
+      ]
+    },
+    "wasmtimeLane": {
+      "allOf": [
+        { "$ref": "#/$defs/laneBase" },
+        {
+          "properties": {
+            "lane_id": { "const": "avidscript_wasmtime_cranelift_jit" },
+            "runtime_id": { "const": "wasmtime.cranelift.jit" },
+            "execution_tier": { "const": "jit" },
+            "compiler_identity": { "const": "cranelift" }
+          }
+        }
+      ]
+    },
+    "wamrLane": {
+      "allOf": [
+        { "$ref": "#/$defs/laneBase" },
+        {
+          "properties": {
+            "lane_id": { "const": "avidscript_wamr_interpreter" },
+            "runtime_id": { "const": "wamr.interpreter" },
+            "execution_tier": { "const": "interpreter" }
+          }
+        }
+      ]
+    },
+    "nativeLane": {
+      "allOf": [
+        { "$ref": "#/$defs/laneBase" },
+        {
+          "properties": {
+            "lane_id": { "const": "native_cpp_reference" },
+            "runtime_id": { "const": "unreal_engine_native" },
+            "execution_tier": { "const": "native" }
+          }
+        }
+      ]
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id",
+        "sample_index",
+        "iterations",
+        "seed",
+        "duration_ns",
+        "ns_per_iteration",
+        "result",
+        "expected",
+        "correct",
+        "host_crossing_count"
+      ],
+      "properties": {
+        "lane_id": {
+          "enum": [
+            "puerts_v8_wasm_jit",
+            "avidscript_wasmtime_cranelift_jit",
+            "avidscript_wamr_interpreter",
+            "native_cpp_reference"
+          ]
+        },
+        "sample_index": { "type": "integer", "minimum": 0 },
+        "iterations": { "type": "integer", "minimum": 1 },
+        "seed": { "type": "integer" },
+        "duration_ns": { "type": "number", "minimum": 0 },
+        "ns_per_iteration": { "type": "number", "minimum": 0 },
+        "result": { "type": "integer" },
+        "expected": { "type": "integer" },
+        "correct": { "const": true },
+        "host_crossing_count": { "const": 1 }
+      }
+    }
+  }
+}

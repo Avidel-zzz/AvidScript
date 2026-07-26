@@ -51,6 +51,20 @@ public:
 		FJsObject TickCallback,
 		FJsObject GetCallbackChecksum);
 
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Performance")
+	FString GetControlledWasmBase64() const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
+	void RegisterControlledWasmRunner(
+		FJsObject Runner,
+		bool bUsesWebAssemblyModule,
+		bool bUsesWebAssemblyInstance);
+
+	void SetControlledWasmBytes(TConstArrayView<uint8> Bytes);
+	bool HasControlledWasmRunner() const;
+	bool ControlledRunnerUsesWebAssembly() const;
+	int32 RunControlledWasm(int32 Iterations, int32 Seed) const;
+
 	int32 NativeNoOp(int32 Value) const;
 	int32 NativeAddInt32(int32 Left, int32 Right) const;
 	void NativeSetScalar(int32 Value);
@@ -86,8 +100,13 @@ private:
 	FJsObject StaticEmptyCallback;
 	FJsObject StaticTickCallback;
 	FJsObject StaticGetCallbackChecksum;
+	FJsObject ControlledWasmRunner;
+	FString ControlledWasmBase64;
 	bool bHasReflectionCallbacks = false;
 	bool bHasStaticCallbacks = false;
+	bool bHasControlledWasmRunner = false;
+	bool bControlledUsesWebAssemblyModule = false;
+	bool bControlledUsesWebAssemblyInstance = false;
 	uint32 NativeCallbackChecksum = 0;
 	mutable uint64 OperationCallCounts[10] = {};
 };

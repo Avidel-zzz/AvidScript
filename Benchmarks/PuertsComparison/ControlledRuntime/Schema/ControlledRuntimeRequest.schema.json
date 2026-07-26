@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/controlled-runtime-request-v1.json",
+  "title": "AvidScript Controlled Runtime Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "mode",
+    "process_run",
+    "warmup_samples",
+    "timed_samples",
+    "minimum_sample_milliseconds",
+    "minimum_iterations",
+    "maximum_iterations",
+    "seed",
+    "kernel_wasm_path",
+    "kernel_wasm_sha256",
+    "puerts_commit",
+    "puerts_backend_sha256",
+    "target_triple"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "identical_wasm_kernel" },
+    "mode": { "enum": ["calibration", "timed"] },
+    "process_run": { "type": "integer", "minimum": -1 },
+    "warmup_samples": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "timed_samples": { "type": "integer", "minimum": 0, "maximum": 1000 },
+    "minimum_sample_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
+    "minimum_iterations": { "type": "integer", "minimum": 1 },
+    "maximum_iterations": { "type": "integer", "minimum": 1 },
+    "seed": { "type": "integer" },
+    "kernel_wasm_path": { "type": "string", "minLength": 1 },
+    "kernel_wasm_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "puerts_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "puerts_backend_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "target_triple": { "const": "x86_64-pc-windows-msvc" },
+    "iterations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "puerts_v8_wasm_jit",
+        "avidscript_wasmtime_cranelift_jit",
+        "avidscript_wamr_interpreter",
+        "native_cpp_reference"
+      ],
+      "properties": {
+        "puerts_v8_wasm_jit": { "type": "integer", "minimum": 1 },
+        "avidscript_wasmtime_cranelift_jit": { "type": "integer", "minimum": 1 },
+        "avidscript_wamr_interpreter": { "type": "integer", "minimum": 1 },
+        "native_cpp_reference": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "calibration" } } },
+      "then": {
+        "properties": {
+          "process_run": { "const": -1 },
+          "timed_samples": { "const": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "mode": { "const": "timed" } } },
+      "then": {
+        "required": ["iterations"],
+        "properties": {
+          "process_run": { "minimum": 0 },
+          "timed_samples": { "minimum": 1 }
+        }
+      }
+    }
+  ]
+}

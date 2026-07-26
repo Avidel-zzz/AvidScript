@@ -377,9 +377,14 @@ public:
 	bool Call(
 		const FAvidScriptVmExportHandle& Handle,
 		const FAvidScriptVmCallFrame& Frame,
-		FAvidScriptVmError& OutError) override
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult) override
 	{
 		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
 		bHasPendingHostImportFailure = false;
 		PendingHostImportName.Reset();
 		PendingHostImportDetails.Reset();
@@ -467,6 +472,11 @@ public:
 			return false;
 		}
 
+		if (OutResult != nullptr)
+		{
+			OutResult->Cells[0] = Cells[0];
+			OutResult->CellCount = 1;
+		}
 		return true;
 #endif
 	}

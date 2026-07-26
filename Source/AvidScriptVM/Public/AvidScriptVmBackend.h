@@ -146,6 +146,12 @@ struct FAvidScriptVmCallFrame
 	uint32 CellCount = 0;
 };
 
+struct FAvidScriptVmCallResult
+{
+	uint32 Cells[FAvidScriptVmCallFrame::MaxCells] = {};
+	uint32 CellCount = 0;
+};
+
 struct FAvidScriptHostCall
 {
 	EAvidScriptHostBindingId BindingId = EAvidScriptHostBindingId::Invalid;
@@ -330,7 +336,8 @@ public:
 	virtual bool Call(
 		const FAvidScriptVmExportHandle& Handle,
 		const FAvidScriptVmCallFrame& Frame,
-		FAvidScriptVmError& OutError) = 0;
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult = nullptr) = 0;
 	virtual void Unload() = 0;
 	virtual bool IsLoaded() const = 0;
 	virtual IAvidScriptVmGuestMemory* GetGuestMemory() { return nullptr; }

@@ -276,6 +276,7 @@ struct FAvidScriptWasmtimeExportEntry
 	AvidScriptWasmtimeFunction* Function = nullptr;
 	uint32 Generation = 0;
 	uint32 CellCount = 0;
+	uint32 ResultCellCount = 0;
 };
 #endif
 
@@ -476,13 +477,15 @@ public:
 		FTCHARToUTF8 ExportNameUtf8(*ExportName);
 		AvidScriptWasmtimeFunction* Function = nullptr;
 		uint32 CellCount = 0;
+		uint32 ResultCellCount = 0;
 		const int ResolveResult = avidscript_wasmtime_instance_resolve_event_export(
 			Store,
 			Instance,
 			ExportNameUtf8.Get(),
 			static_cast<size_t>(ExportNameUtf8.Length()),
 			&Function,
-			&CellCount);
+			&CellCount,
+			&ResultCellCount);
 		if (ResolveResult == 1)
 		{
 			SetWasmtimeError(
@@ -504,7 +507,7 @@ public:
 			SetWasmtimeError(
 				OutError,
 				TEXT("invalid_arguments"),
-				TEXT("Wasmtime exports must return void and use only core numeric ABI parameters."));
+				TEXT("Wasmtime exports must use only core numeric ABI parameters and results."));
 			return false;
 		}
 		if (ResolveResult != 0 || Function == nullptr)
@@ -521,6 +524,7 @@ public:
 		Entry.Function = Function;
 		Entry.Generation = ExportGeneration;
 		Entry.CellCount = CellCount;
+		Entry.ResultCellCount = ResultCellCount;
 		const uint32 EntryIndex = static_cast<uint32>(ExportEntries.Num() - 1);
 		ExportNameToIndex.Add(ExportName, EntryIndex);
 
@@ -534,9 +538,14 @@ public:
 	bool Call(
 		const FAvidScriptVmExportHandle& Handle,
 		const FAvidScriptVmCallFrame& Frame,
-		FAvidScriptVmError& OutError) override
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult) override
 	{
 		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
 		bHasPendingHostFailure = false;
 		PendingHostImportModuleName.Reset();
 		PendingHostImportName.Reset();
@@ -581,11 +590,16 @@ public:
 		}
 
 		++ActiveCallDepth;
+		uint32 ResultCells[FAvidScriptVmCallFrame::MaxCells] = {};
+		size_t ResultCellCount = 0;
 		AvidScriptWasmtimeFailure* CallFailure = avidscript_wasmtime_function_call_event(
 			Store,
 			Entry.Function,
 			Frame.Cells,
-			Frame.CellCount);
+			Frame.CellCount,
+			Entry.ResultCellCount == 0 ? nullptr : ResultCells,
+			FAvidScriptVmCallFrame::MaxCells,
+			&ResultCellCount);
 		const bool bCallFailed = CallFailure != nullptr;
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
 		FString FailureDetails;
@@ -628,6 +642,14 @@ public:
 			}
 			OutError.StackFrames = MoveTemp(StackFrames);
 			return false;
+		}
+		if (OutResult != nullptr)
+		{
+			FMemory::Memcpy(
+				OutResult->Cells,
+				ResultCells,
+				ResultCellCount * sizeof(uint32));
+			OutResult->CellCount = static_cast<uint32>(ResultCellCount);
 		}
 		return true;
 #endif

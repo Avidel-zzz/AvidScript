@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "profile_id": "ue58-win64-controlled-runtime-v1",
+  "benchmark_kind": "identical_wasm_kernel",
+  "process_runs": 5,
+  "warmup_samples": 5,
+  "timed_samples": 30,
+  "minimum_sample_milliseconds": 5.0,
+  "minimum_iterations": 1000,
+  "maximum_iterations": 10000000,
+  "seed": 1397313,
+  "target_triple": "x86_64-pc-windows-msvc",
+  "kernel_contract": "Kernel/controlled_runtime_kernel.contract.json",
+  "kernel_wasm_sha256": "230aed5ae6bd816e7780e0519354b100f29d23908ff0e6c1f0b52af5d4c834f7",
+  "lanes": [
+    "puerts_v8_wasm_jit",
+    "avidscript_wasmtime_cranelift_jit",
+    "avidscript_wamr_interpreter",
+    "native_cpp_reference"
+  ],
+  "pc_stop_gate": {
+    "baseline_lane": "puerts_v8_wasm_jit",
+    "candidate_lane": "avidscript_wasmtime_cranelift_jit",
+    "maximum_slowdown_ratio": 1.05,
+    "statistics": [
+      "p50",
+      "p95"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schema/controlled-runtime-aggregate-v1.json",
+  "title": "AvidScript Controlled Runtime Aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "kernel_wasm_sha256",
+    "process_runs",
+    "timed_samples_per_lane_per_process",
+    "timed_pids",
+    "observation_count",
+    "correctness_failures",
+    "fallback_used",
+    "metrics",
+    "ratios",
+    "pc_default_gate"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "identical_wasm_kernel" },
+    "kernel_wasm_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "process_runs": { "type": "integer", "minimum": 1 },
+    "timed_samples_per_lane_per_process": { "type": "integer", "minimum": 1 },
+    "timed_pids": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true
+    },
+    "observation_count": { "type": "integer", "minimum": 1 },
+    "correctness_failures": { "const": 0 },
+    "fallback_used": { "const": false },
+    "metrics": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane_id", "sample_count", "p50_ns_per_iteration", "p95_ns_per_iteration", "mad_ns_per_iteration"],
+        "properties": {
+          "lane_id": { "type": "string" },
+          "sample_count": { "type": "integer", "minimum": 1 },
+          "p50_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "p95_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "ratios": {
+      "type": "object",
+      "required": ["wasmtime_over_v8_p50", "wasmtime_over_v8_p95"],
+      "properties": {
+        "wasmtime_over_v8_p50": { "type": "number", "minimum": 0 },
+        "wasmtime_over_v8_p95": { "type": "number", "minimum": 0 }
+      }
+    },
+    "pc_default_gate": {
+      "enum": [
+        "wasmtime_pc_default_gate_passed",
+        "wasmtime_pc_default_rejected"
+      ]
+    }
+  }
+}

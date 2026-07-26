@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kernel_id": "avidscript.controlled_runtime.i32_mix.v1",
+  "export_name": "run",
+  "signature": "(i32,i32)->i32",
+  "wat_path": "controlled_runtime_kernel.wat",
+  "wat_normalized_sha256": "361215451547c89929ca272884a52f175768546395d03f8b2db61b70d64ffbcc",
+  "wasm_path": "controlled_runtime_kernel.wasm",
+  "wasm_sha256": "230aed5ae6bd816e7780e0519354b100f29d23908ff0e6c1f0b52af5d4c834f7",
+  "compiler": {
+    "package": "wasmtime",
+    "version": "45.0.0",
+    "entrypoint": "wasmtime.wat2wasm"
+  },
+  "imports": [],
+  "features": [
+    "mvp",
+    "i32"
+  ]
+}
