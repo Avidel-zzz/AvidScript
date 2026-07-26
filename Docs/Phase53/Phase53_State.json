@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0 Important=0；正式 baseline/optimized 各 6000/6000 正确样本；发布证据 Docs/Phase53/P53_Benchmark_Evidence.json；五组 benchmark 合同与聚焦 FourLane.Correctness 通过；最终 Gate 固定候选 cwd 的 SDK，并按 native 真实退出码处理预期 stderr；Cold/RSS lane isolation 转入 Phase54。",
+      "completed_at_utc": "2026-07-26T13:49:13.0583993+00:00"
     }
   ],
   "debt": [
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 14,
-  "updated_at_utc": "2026-07-26T13:48:09.9303201+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 15,
+  "updated_at_utc": "2026-07-26T13:49:13.0611850+00:00"
 }
