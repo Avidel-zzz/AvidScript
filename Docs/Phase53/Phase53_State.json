@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Completed",
-      "evidence": "独立复审 Critical=0 Important=0；正式 baseline/optimized 各 6000/6000 正确样本；发布证据 Docs/Phase53/P53_Benchmark_Evidence.json；五组 benchmark 合同与聚焦 FourLane.Correctness 通过；Gate 统一 pwsh7 外层并隔离 PS5 合同，短根工程为深层制品预留路径预算；Cold/RSS lane isolation 转入 Phase54。",
-      "completed_at_utc": "2026-07-26T14:27:07.4906953+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；最终 Gate 使用 pwsh7 外层、隔离 PS5 合同与短根 UE 工程；Normal Cold/RSS lane isolation 已转入 Phase54。",
-    "completed_at_utc": "2026-07-26T14:27:52.8342928+00:00"
+    "completed": false,
+    "evidence": "reopened: 最终自动化发现 TypedProjectApi 测试依赖 LF 换行；修复 Windows CRLF 兼容并重新冻结验收候选。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "fa10193246e55da3d5661a19a1d386e9d1085d4e",
-    "source_tree": "b98ddec27eec096cf52ed2e18e1c44e23b76670a",
-    "state_sha256": "0ad5f45bc42c39b17a845f6fc6e8309cbbe6f87bb5d756cc519e5bada88ed545",
-    "review_evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；最终 Gate 使用 pwsh7 外层、隔离 PS5 合同与短根 UE 工程；Normal Cold/RSS lane isolation 已转入 Phase54。",
-    "at_utc": "2026-07-26T14:27:52.8342928+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "attest -Phase 53 -GateReportPath <path>",
-  "revision": 25,
-  "updated_at_utc": "2026-07-26T14:27:52.8405545+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
+  "revision": 26,
+  "updated_at_utc": "2026-07-26T14:46:54.4756836+00:00"
 }

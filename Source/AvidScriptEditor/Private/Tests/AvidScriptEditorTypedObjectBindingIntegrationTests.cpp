@@ -702,6 +702,8 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 	{
 		return false;
 	}
+	DynamicProfileText.ReplaceInline(TEXT("\r\n"), TEXT("\n"), ESearchCase::CaseSensitive);
+	DynamicProfileText.ReplaceInline(TEXT("\r"), TEXT("\n"), ESearchCase::CaseSensitive);
 	const FString NativeClassReference = FString::Printf(
 		TEXT("        \"script_name\": \"Projectile\",\n")
 		TEXT("        \"class_path\": \"%s\",\n")
