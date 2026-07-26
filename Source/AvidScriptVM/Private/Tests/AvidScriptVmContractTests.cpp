@@ -7,6 +7,47 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
+namespace
+{
+class FAvidScriptNonBorrowingGuestMemory final : public IAvidScriptVmGuestMemory
+{
+public:
+	bool ReadBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) override
+	{
+		return false;
+	}
+
+	bool WriteBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError) override
+	{
+		return false;
+	}
+};
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmGuestMemoryBorrowContractTest,
+	"AvidScript.Architecture.VM.GuestMemoryBorrowContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmGuestMemoryBorrowContractTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptNonBorrowingGuestMemory Memory;
+	uint8 Sentinel[] = { 1, 2, 3, 4 };
+	TConstArrayView<uint8> ReadOnlyView = MakeArrayView(Sentinel);
+	TArrayView<uint8> MutableView = MakeArrayView(Sentinel);
+	FString Error;
+
+	TestFalse(TEXT("default read-only borrow fails closed"), Memory.BorrowReadOnlyBytes(4, 4, 4, ReadOnlyView, Error));
+	TestTrue(TEXT("default read-only borrow clears its view"), ReadOnlyView.IsEmpty());
+	TestTrue(TEXT("default read-only borrow reports unavailability"), Error.StartsWith(TEXT("guest_memory_borrow_unavailable:")));
+
+	Error.Reset();
+	TestFalse(TEXT("default mutable borrow fails closed"), Memory.BorrowMutableBytes(4, 4, 4, MutableView, Error));
+	TestTrue(TEXT("default mutable borrow clears its view"), MutableView.IsEmpty());
+	TestTrue(TEXT("default mutable borrow reports unavailability"), Error.StartsWith(TEXT("guest_memory_borrow_unavailable:")));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmExportCacheTest,
 	"AvidScript.Architecture.VM.ExportCache",
@@ -113,11 +154,42 @@ bool FAvidScriptVmBackendFactorySelectionTest::RunTest(const FString& Parameters
 	FAvidScriptVmError Error;
 	FAvidScriptVmBackendSelection Selection;
 	Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
-	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
 	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptVmBackend(Selection, Error);
+#if AVIDSCRIPT_WITH_WASMTIME
+	if (!TestNotNull(TEXT("Wasmtime JIT selection returns a backend"), Backend.Get()))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	TestEqual(TEXT("Wasmtime backend kind"), Backend->GetBackendInfo().Kind, EAvidScriptVmBackendKind::Wasmtime);
+	TestEqual(TEXT("Wasmtime execution mode"), Backend->GetBackendInfo().ExecutionMode, EAvidScriptVmExecutionMode::Jit);
+	TestEqual(TEXT("Wasmtime artifact format"), Backend->GetBackendInfo().ArtifactFormat, EAvidScriptVmArtifactFormat::WasmBytecode);
+	TestFalse(TEXT("Wasmtime factory does not report fallback"), Selection.bAllowFallback);
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNotNull(TEXT("Wasmtime Auto explicitly selects its JIT"), Backend.Get());
+	if (Backend)
+	{
+		TestEqual(TEXT("Wasmtime Auto reports actual JIT"), Backend->GetBackendInfo().ExecutionMode, EAvidScriptVmExecutionMode::Jit);
+	}
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("Wasmtime interpreter mode is rejected"), Backend.Get());
+	TestEqual(TEXT("Wasmtime interpreter category"), Error.Category, FString(TEXT("execution_mode_unavailable")));
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("Wasmtime serialized artifact is not accepted by the JIT core"), Backend.Get());
+	TestEqual(TEXT("Wasmtime serialized category"), Error.Category, FString(TEXT("artifact_format_unavailable")));
+#else
 	TestNull(TEXT("unavailable Wasmtime backend is rejected"), Backend.Get());
 	TestEqual(TEXT("Wasmtime error category"), Error.Category, FString(TEXT("backend_unavailable")));
+#endif
 
 	Selection.BackendKind = EAvidScriptVmBackendKind::Wamr;
 	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
@@ -145,6 +217,42 @@ bool FAvidScriptVmBackendFactorySelectionTest::RunTest(const FString& Parameters
 		TEXT("fallback reports actual interpreter mode"),
 		Backend->GetBackendInfo().ExecutionMode,
 		EAvidScriptVmExecutionMode::Interpreter);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmAbiSignatureContractTest,
+	"AvidScript.Architecture.VM.AbiSignatureContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmAbiSignatureContractTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptVmAbiSignature Signature;
+	FString Error;
+	TestTrue(TEXT("all compact WASM value kinds parse"), ParseAvidScriptVmAbiSignature(TEXT("(iIfF)I"), Signature, Error));
+	TestEqual(TEXT("four parameters are retained"), Signature.Parameters.Num(), 4);
+	if (Signature.Parameters.Num() == 4)
+	{
+		TestEqual(TEXT("i maps to i32"), Signature.Parameters[0], EAvidScriptVmValueKind::I32);
+		TestEqual(TEXT("I maps to i64"), Signature.Parameters[1], EAvidScriptVmValueKind::I64);
+		TestEqual(TEXT("f maps to f32"), Signature.Parameters[2], EAvidScriptVmValueKind::F32);
+		TestEqual(TEXT("F maps to f64"), Signature.Parameters[3], EAvidScriptVmValueKind::F64);
+	}
+	TestTrue(TEXT("one result is retained"), Signature.bHasResult);
+	TestEqual(TEXT("result maps to i64"), Signature.Result, EAvidScriptVmValueKind::I64);
+
+	TestTrue(TEXT("void result parses"), ParseAvidScriptVmAbiSignature(TEXT("(f)"), Signature, Error));
+	TestFalse(TEXT("void result is explicit"), Signature.bHasResult);
+	TestEqual(TEXT("void signature retains its parameter"), Signature.Parameters.Num(), 1);
+
+	TestFalse(TEXT("missing open parenthesis is rejected"), ParseAvidScriptVmAbiSignature(TEXT("i)i"), Signature, Error));
+	TestFalse(TEXT("multiple results are rejected"), ParseAvidScriptVmAbiSignature(TEXT("(i)ii"), Signature, Error));
+	TestFalse(TEXT("unknown value kind is rejected"), ParseAvidScriptVmAbiSignature(TEXT("(v)i"), Signature, Error));
+	TestFalse(TEXT("more than 64 parameters are rejected"), ParseAvidScriptVmAbiSignature(
+		TEXT("(") + FString::ChrN(65, TEXT('i')) + TEXT(")i"),
+		Signature,
+		Error));
+	TestFalse(TEXT("parse failures retain details"), Error.IsEmpty());
 	return true;
 }
 

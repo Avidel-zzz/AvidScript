@@ -17,6 +17,7 @@ public class AvidScriptVM : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
+				"Projects",
 				"WAMR",
 				"Wasmtime"
 			}

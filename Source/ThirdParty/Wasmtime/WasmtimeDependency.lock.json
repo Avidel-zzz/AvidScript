@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "dependency": "Wasmtime minimal C API",
+  "dependency": "Wasmtime Cranelift C API",
   "version": "v45.0.0",
   "platform": "Win64",
   "release_url": "https://github.com/bytecodealliance/wasmtime/releases/tag/v45.0.0",
@@ -12,9 +12,9 @@
     "root": "wasmtime-v45.0.0-x86_64-windows-c-api"
   },
   "layout": {
-    "include_relative_path": "min/include",
-    "dll_relative_path": "min/lib/wasmtime.dll",
-    "import_library_relative_path": "min/lib/wasmtime.dll.lib",
+    "include_relative_path": "include",
+    "dll_relative_path": "lib/wasmtime.dll",
+    "import_library_relative_path": "lib/wasmtime.dll.lib",
     "license_relative_path": "LICENSE"
   },
   "install": {

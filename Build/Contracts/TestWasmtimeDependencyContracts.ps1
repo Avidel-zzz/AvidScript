@@ -84,16 +84,17 @@ function New-SyntheticArchive {
     try {
         $Root = 'wasmtime-v45.0.0-x86_64-windows-c-api'
         if ($Missing -cne 'header') {
-            Add-ZipTextEntry $Archive "$Root/min/include/wasmtime.h" 'synthetic wasmtime header'
+            Add-ZipTextEntry $Archive "$Root/include/wasmtime.h" 'synthetic wasmtime header'
         }
-        Add-ZipTextEntry $Archive "$Root/min/include/wasm.h" 'synthetic wasm header'
+        Add-ZipTextEntry $Archive "$Root/include/wasm.h" 'synthetic wasm header'
+        Add-ZipTextEntry $Archive "$Root/include/wasmtime/conf.h" '#define WASMTIME_FEATURE_CRANELIFT'
         if ($Missing -cne 'dll') {
-            Add-ZipTextEntry $Archive "$Root/min/lib/wasmtime.dll" 'synthetic dll'
+            Add-ZipTextEntry $Archive "$Root/lib/wasmtime.dll" 'synthetic dll'
         }
         if ($Missing -cne 'import') {
-            Add-ZipTextEntry $Archive "$Root/min/lib/wasmtime.dll.lib" 'synthetic import library'
+            Add-ZipTextEntry $Archive "$Root/lib/wasmtime.dll.lib" 'synthetic import library'
         }
-        Add-ZipTextEntry $Archive "$Root/min/lib/wasmtime.lib" 'synthetic static library'
+        Add-ZipTextEntry $Archive "$Root/lib/wasmtime.lib" 'synthetic static library'
         Add-ZipTextEntry $Archive "$Root/LICENSE" 'synthetic official archive license'
         if ($Traversal) {
             Add-ZipTextEntry $Archive "$Root/../escape.txt" 'must not escape'
@@ -545,7 +546,7 @@ try {
     $Marker = Get-Content -LiteralPath $MarkerPath -Raw | ConvertFrom-Json
     Assert-True ($Marker.schema_version -eq 1) 'marker schema version drifted'
     Assert-True ($Marker.installed_content_sha256 -cmatch '^[0-9a-f]{64}$') 'marker content digest is invalid'
-    Assert-True ([int64]$Marker.installed_file_count -eq 5) 'marker file count is unexpected'
+    Assert-True ([int64]$Marker.installed_file_count -eq 6) 'marker file count is unexpected'
     $IdempotentResult = Install-Fixture `
         -RepositoryRoot $HappyRepository `
         -CacheRoot $CacheRoot `

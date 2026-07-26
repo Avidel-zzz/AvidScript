@@ -1,4 +1,5 @@
 #include "AvidScriptWamrHostBindings.h"
+#include "AvidScriptVmStaticHostImports.h"
 
 #ifndef AVIDSCRIPT_WITH_WAMR
 #define AVIDSCRIPT_WITH_WAMR 0
@@ -19,6 +20,11 @@ constexpr const char* CompatibilityModuleName = "env";
 constexpr int32 MaxTransformBatchCount = 256;
 constexpr uint32 TransformBatchInputCellsPerItem = 2;
 constexpr uint32 TransformBatchOutputFloatsPerItem = 9;
+
+const char* StaticImportName(EAvidScriptHostBindingId BindingId)
+{
+	return GetAvidScriptVmStaticHostImport(BindingId).ImportName;
+}
 
 IAvidScriptWamrHostBridge* GetBridge(wasm_exec_env_t ExecEnv)
 {
@@ -217,47 +223,47 @@ int32_t DispatchVectorRead(
 
 int32_t HostAddI32(wasm_exec_env_t ExecEnv, int32_t Input)
 {
-	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::HostAddI32, "host_add_i32", Input);
+	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::HostAddI32, StaticImportName(EAvidScriptHostBindingId::HostAddI32), Input);
 }
 
 int32_t HostFailI32(wasm_exec_env_t ExecEnv, int32_t Input)
 {
-	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::HostFailI32, "host_fail_i32", Input);
+	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::HostFailI32, StaticImportName(EAvidScriptHostBindingId::HostFailI32), Input);
 }
 
 int32_t ActorGetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutAddress)
 {
-	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetLocation, "actor_get_location", Slot, Generation, OutAddress);
+	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetLocation, StaticImportName(EAvidScriptHostBindingId::ActorGetLocation), Slot, Generation, OutAddress);
 }
 
 int32_t ActorSetLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
 {
-	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetLocation, "actor_set_location", Slot, Generation, X, Y, Z);
+	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetLocation, StaticImportName(EAvidScriptHostBindingId::ActorSetLocation), Slot, Generation, X, Y, Z);
 }
 
 int32_t ActorAddLocationOffset(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
 {
-	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorAddLocationOffset, "actor_add_location_offset", Slot, Generation, X, Y, Z);
+	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorAddLocationOffset, StaticImportName(EAvidScriptHostBindingId::ActorAddLocationOffset), Slot, Generation, X, Y, Z);
 }
 
 int32_t ActorGetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutAddress)
 {
-	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetRotation, "actor_get_rotation", Slot, Generation, OutAddress);
+	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetRotation, StaticImportName(EAvidScriptHostBindingId::ActorGetRotation), Slot, Generation, OutAddress);
 }
 
 int32_t ActorSetRotation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float Pitch, float Yaw, float Roll)
 {
-	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetRotation, "actor_set_rotation", Slot, Generation, Pitch, Yaw, Roll);
+	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetRotation, StaticImportName(EAvidScriptHostBindingId::ActorSetRotation), Slot, Generation, Pitch, Yaw, Roll);
 }
 
 int32_t ActorGetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutAddress)
 {
-	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetScale, "actor_get_scale", Slot, Generation, OutAddress);
+	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::ActorGetScale, StaticImportName(EAvidScriptHostBindingId::ActorGetScale), Slot, Generation, OutAddress);
 }
 
 int32_t ActorSetScale(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
 {
-	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetScale, "actor_set_scale", Slot, Generation, X, Y, Z);
+	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::ActorSetScale, StaticImportName(EAvidScriptHostBindingId::ActorSetScale), Slot, Generation, X, Y, Z);
 }
 
 int32_t ActorGetTransformBatch(
@@ -266,7 +272,7 @@ int32_t ActorGetTransformBatch(
 	int32_t Count,
 	int32_t OutputAddress)
 {
-	constexpr const char* ImportName = "actor_get_transform_batch";
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::ActorGetTransformBatch);
 	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
 	if (Count < 0 || Count > MaxTransformBatchCount)
 	{
@@ -325,7 +331,8 @@ int32_t ActorGetRootComponent(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Gen
 	Call.IntArgs[1] = Generation;
 	Call.GuestAddress = static_cast<uint32>(OutAddress);
 	FAvidScriptHostCallResult Result;
-	if (!Dispatch(ExecEnv, "actor_get_root_component", Call, Result))
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::ActorGetRootComponent);
+	if (!Dispatch(ExecEnv, ImportName, Call, Result))
 	{
 		return 0;
 	}
@@ -334,19 +341,19 @@ int32_t ActorGetRootComponent(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Gen
 		Result.IntValues[0],
 		Result.IntValues[1]
 	};
-	return WriteGuestBytes(ExecEnv, "actor_get_root_component", OutAddress, HandleValues, sizeof(HandleValues))
+	return WriteGuestBytes(ExecEnv, ImportName, OutAddress, HandleValues, sizeof(HandleValues))
 		? Result.ReturnValue
 		: 0;
 }
 
 int32_t SceneComponentGetWorldLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, int32_t OutAddress)
 {
-	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::SceneComponentGetWorldLocation, "scene_component_get_world_location", Slot, Generation, OutAddress);
+	return DispatchVectorRead(ExecEnv, EAvidScriptHostBindingId::SceneComponentGetWorldLocation, StaticImportName(EAvidScriptHostBindingId::SceneComponentGetWorldLocation), Slot, Generation, OutAddress);
 }
 
 int32_t SceneComponentSetWorldLocation(wasm_exec_env_t ExecEnv, int32_t Slot, int32_t Generation, float X, float Y, float Z)
 {
-	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::SceneComponentSetWorldLocation, "scene_component_set_world_location", Slot, Generation, X, Y, Z);
+	return DispatchActorVectorWrite(ExecEnv, EAvidScriptHostBindingId::SceneComponentSetWorldLocation, StaticImportName(EAvidScriptHostBindingId::SceneComponentSetWorldLocation), Slot, Generation, X, Y, Z);
 }
 
 int32_t OwnerGetSlot(wasm_exec_env_t ExecEnv)
@@ -354,7 +361,7 @@ int32_t OwnerGetSlot(wasm_exec_env_t ExecEnv)
 	FAvidScriptHostCall Call;
 	Call.BindingId = EAvidScriptHostBindingId::OwnerGetSlot;
 	FAvidScriptHostCallResult Result;
-	return Dispatch(ExecEnv, "owner_get_slot", Call, Result) ? Result.ReturnValue : 0;
+	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::OwnerGetSlot), Call, Result) ? Result.ReturnValue : 0;
 }
 
 int32_t OwnerGetGeneration(wasm_exec_env_t ExecEnv)
@@ -362,7 +369,7 @@ int32_t OwnerGetGeneration(wasm_exec_env_t ExecEnv)
 	FAvidScriptHostCall Call;
 	Call.BindingId = EAvidScriptHostBindingId::OwnerGetGeneration;
 	FAvidScriptHostCallResult Result;
-	return Dispatch(ExecEnv, "owner_get_generation", Call, Result) ? Result.ReturnValue : 0;
+	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::OwnerGetGeneration), Call, Result) ? Result.ReturnValue : 0;
 }
 
 int64_t OwnerGetHandle(wasm_exec_env_t ExecEnv)
@@ -370,7 +377,7 @@ int64_t OwnerGetHandle(wasm_exec_env_t ExecEnv)
 	FAvidScriptHostCall Call;
 	Call.BindingId = EAvidScriptHostBindingId::OwnerGetHandle;
 	FAvidScriptHostCallResult Result;
-	return Dispatch(ExecEnv, "avid_owner_get_handle", Call, Result) ? Result.ReturnValueI64 : 0;
+	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::OwnerGetHandle), Call, Result) ? Result.ReturnValueI64 : 0;
 }
 
 int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
@@ -380,54 +387,68 @@ int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t Callba
 	Call.FloatArgs[0] = DelaySeconds;
 	Call.IntArgs[0] = CallbackId;
 	FAvidScriptHostCallResult Result;
-	return Dispatch(ExecEnv, "timer_set_once", Call, Result) ? Result.ReturnValue : 0;
+	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::TimerSetOnce), Call, Result) ? Result.ReturnValue : 0;
 }
 
 int32_t TimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle)
 {
-	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::TimerCancel, "timer_cancel", TimerHandle);
+	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::TimerCancel, StaticImportName(EAvidScriptHostBindingId::TimerCancel), TimerHandle);
 }
 
-NativeSymbol GNativeSymbols[] = {
-	{ "host_add_i32", reinterpret_cast<void*>(HostAddI32), "(i)i", nullptr },
-	{ "host_fail_i32", reinterpret_cast<void*>(HostFailI32), "(i)i", nullptr },
-	{ "actor_get_location", reinterpret_cast<void*>(ActorGetLocation), "(iii)i", nullptr },
-	{ "actor_set_location", reinterpret_cast<void*>(ActorSetLocation), "(iifff)i", nullptr },
-	{ "actor_add_location_offset", reinterpret_cast<void*>(ActorAddLocationOffset), "(iifff)i", nullptr },
-	{ "actor_get_rotation", reinterpret_cast<void*>(ActorGetRotation), "(iii)i", nullptr },
-	{ "actor_set_rotation", reinterpret_cast<void*>(ActorSetRotation), "(iifff)i", nullptr },
-	{ "actor_get_scale", reinterpret_cast<void*>(ActorGetScale), "(iii)i", nullptr },
-	{ "actor_set_scale", reinterpret_cast<void*>(ActorSetScale), "(iifff)i", nullptr },
-	{ "actor_get_transform_batch", reinterpret_cast<void*>(ActorGetTransformBatch), "(iii)i", nullptr },
-	{ "actor_get_root_component", reinterpret_cast<void*>(ActorGetRootComponent), "(iii)i", nullptr },
-	{ "scene_component_get_world_location", reinterpret_cast<void*>(SceneComponentGetWorldLocation), "(iii)i", nullptr },
-	{ "scene_component_set_world_location", reinterpret_cast<void*>(SceneComponentSetWorldLocation), "(iifff)i", nullptr },
-	{ "owner_get_slot", reinterpret_cast<void*>(OwnerGetSlot), "()i", nullptr },
-	{ "owner_get_generation", reinterpret_cast<void*>(OwnerGetGeneration), "()i", nullptr },
-	{ "avid_owner_get_handle", reinterpret_cast<void*>(OwnerGetHandle), "()I", nullptr },
-	{ "timer_set_once", reinterpret_cast<void*>(TimerSetOnce), "(fi)i", nullptr },
-	{ "timer_cancel", reinterpret_cast<void*>(TimerCancel), "(i)i", nullptr }
-};
+void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
+{
+	switch (BindingId)
+	{
+	case EAvidScriptHostBindingId::HostAddI32: return reinterpret_cast<void*>(HostAddI32);
+	case EAvidScriptHostBindingId::HostFailI32: return reinterpret_cast<void*>(HostFailI32);
+	case EAvidScriptHostBindingId::ActorGetLocation: return reinterpret_cast<void*>(ActorGetLocation);
+	case EAvidScriptHostBindingId::ActorSetLocation: return reinterpret_cast<void*>(ActorSetLocation);
+	case EAvidScriptHostBindingId::ActorAddLocationOffset: return reinterpret_cast<void*>(ActorAddLocationOffset);
+	case EAvidScriptHostBindingId::ActorGetRotation: return reinterpret_cast<void*>(ActorGetRotation);
+	case EAvidScriptHostBindingId::ActorSetRotation: return reinterpret_cast<void*>(ActorSetRotation);
+	case EAvidScriptHostBindingId::ActorGetScale: return reinterpret_cast<void*>(ActorGetScale);
+	case EAvidScriptHostBindingId::ActorSetScale: return reinterpret_cast<void*>(ActorSetScale);
+	case EAvidScriptHostBindingId::ActorGetTransformBatch: return reinterpret_cast<void*>(ActorGetTransformBatch);
+	case EAvidScriptHostBindingId::ActorGetRootComponent: return reinterpret_cast<void*>(ActorGetRootComponent);
+	case EAvidScriptHostBindingId::SceneComponentGetWorldLocation: return reinterpret_cast<void*>(SceneComponentGetWorldLocation);
+	case EAvidScriptHostBindingId::SceneComponentSetWorldLocation: return reinterpret_cast<void*>(SceneComponentSetWorldLocation);
+	case EAvidScriptHostBindingId::OwnerGetSlot: return reinterpret_cast<void*>(OwnerGetSlot);
+	case EAvidScriptHostBindingId::OwnerGetGeneration: return reinterpret_cast<void*>(OwnerGetGeneration);
+	case EAvidScriptHostBindingId::OwnerGetHandle: return reinterpret_cast<void*>(OwnerGetHandle);
+	case EAvidScriptHostBindingId::TimerSetOnce: return reinterpret_cast<void*>(TimerSetOnce);
+	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
+	default: return nullptr;
+	}
+}
 
-NativeSymbol GCompatibilityNativeSymbols[] = {
-	{ "host_add_i32", reinterpret_cast<void*>(HostAddI32), "(i)i", nullptr },
-	{ "host_fail_i32", reinterpret_cast<void*>(HostFailI32), "(i)i", nullptr },
-	{ "actor_get_location", reinterpret_cast<void*>(ActorGetLocation), "(iii)i", nullptr },
-	{ "actor_set_location", reinterpret_cast<void*>(ActorSetLocation), "(iifff)i", nullptr },
-	{ "actor_add_location_offset", reinterpret_cast<void*>(ActorAddLocationOffset), "(iifff)i", nullptr },
-	{ "actor_get_rotation", reinterpret_cast<void*>(ActorGetRotation), "(iii)i", nullptr },
-	{ "actor_set_rotation", reinterpret_cast<void*>(ActorSetRotation), "(iifff)i", nullptr },
-	{ "actor_get_scale", reinterpret_cast<void*>(ActorGetScale), "(iii)i", nullptr },
-	{ "actor_set_scale", reinterpret_cast<void*>(ActorSetScale), "(iifff)i", nullptr },
-	{ "actor_get_transform_batch", reinterpret_cast<void*>(ActorGetTransformBatch), "(iii)i", nullptr },
-	{ "actor_get_root_component", reinterpret_cast<void*>(ActorGetRootComponent), "(iii)i", nullptr },
-	{ "scene_component_get_world_location", reinterpret_cast<void*>(SceneComponentGetWorldLocation), "(iii)i", nullptr },
-	{ "scene_component_set_world_location", reinterpret_cast<void*>(SceneComponentSetWorldLocation), "(iifff)i", nullptr },
-	{ "owner_get_slot", reinterpret_cast<void*>(OwnerGetSlot), "()i", nullptr },
-	{ "owner_get_generation", reinterpret_cast<void*>(OwnerGetGeneration), "()i", nullptr },
-	{ "timer_set_once", reinterpret_cast<void*>(TimerSetOnce), "(fi)i", nullptr },
-	{ "timer_cancel", reinterpret_cast<void*>(TimerCancel), "(i)i", nullptr }
-};
+TArray<NativeSymbol> GNativeSymbols;
+TArray<NativeSymbol> GCompatibilityNativeSymbols;
+
+void BuildWamrStaticHostSymbolTables()
+{
+	if (!GNativeSymbols.IsEmpty())
+	{
+		return;
+	}
+	const TConstArrayView<FAvidScriptVmStaticHostImport> Imports = GetAvidScriptVmStaticHostImports();
+	GNativeSymbols.Reserve(Imports.Num());
+	GCompatibilityNativeSymbols.Reserve(Imports.Num());
+	for (const FAvidScriptVmStaticHostImport& Import : Imports)
+	{
+		NativeSymbol Symbol = {
+			Import.ImportName,
+			GetWamrStaticHostFunction(Import.BindingId),
+			Import.Signature,
+			nullptr
+		};
+		check(Symbol.func_ptr != nullptr);
+		GNativeSymbols.Add(Symbol);
+		if (Import.bSupportsEnvCompatibility)
+		{
+			GCompatibilityNativeSymbols.Add(Symbol);
+		}
+	}
+}
 #endif
 }
 
@@ -437,27 +458,15 @@ bool IsAvidScriptVmStaticHostImport(const FString& ModuleName, const FString& Im
 	{
 		return false;
 	}
-	static const TSet<FString> StaticImports = {
-		TEXT("host_add_i32"),
-		TEXT("host_fail_i32"),
-		TEXT("actor_get_location"),
-		TEXT("actor_set_location"),
-		TEXT("actor_add_location_offset"),
-		TEXT("actor_get_rotation"),
-		TEXT("actor_set_rotation"),
-		TEXT("actor_get_scale"),
-		TEXT("actor_set_scale"),
-		TEXT("actor_get_transform_batch"),
-		TEXT("actor_get_root_component"),
-		TEXT("scene_component_get_world_location"),
-		TEXT("scene_component_set_world_location"),
-		TEXT("owner_get_slot"),
-		TEXT("owner_get_generation"),
-		TEXT("timer_set_once"),
-		TEXT("timer_cancel")
-	};
-	return StaticImports.Contains(ImportName)
-		|| (ModuleName == TEXT("avidscript") && ImportName == TEXT("avid_owner_get_handle"));
+	for (const FAvidScriptVmStaticHostImport& Import : GetAvidScriptVmStaticHostImports())
+	{
+		if (ImportName == UTF8_TO_TCHAR(Import.ImportName)
+			&& (ModuleName == TEXT("avidscript") || Import.bSupportsEnvCompatibility))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool RegisterAvidScriptWamrHostBindings()
@@ -465,17 +474,18 @@ bool RegisterAvidScriptWamrHostBindings()
 #if !AVIDSCRIPT_WITH_WAMR
 	return false;
 #else
-	if (!wasm_runtime_register_natives(CanonicalModuleName, GNativeSymbols, UE_ARRAY_COUNT(GNativeSymbols)))
+	BuildWamrStaticHostSymbolTables();
+	if (!wasm_runtime_register_natives(CanonicalModuleName, GNativeSymbols.GetData(), GNativeSymbols.Num()))
 	{
 		return false;
 	}
 
 	if (!wasm_runtime_register_natives(
 		CompatibilityModuleName,
-		GCompatibilityNativeSymbols,
-		UE_ARRAY_COUNT(GCompatibilityNativeSymbols)))
+		GCompatibilityNativeSymbols.GetData(),
+		GCompatibilityNativeSymbols.Num()))
 	{
-		wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols);
+		wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols.GetData());
 		return false;
 	}
 
@@ -486,7 +496,7 @@ bool RegisterAvidScriptWamrHostBindings()
 void UnregisterAvidScriptWamrHostBindings()
 {
 #if AVIDSCRIPT_WITH_WAMR
-	wasm_runtime_unregister_natives(CompatibilityModuleName, GCompatibilityNativeSymbols);
-	wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols);
+	wasm_runtime_unregister_natives(CompatibilityModuleName, GCompatibilityNativeSymbols.GetData());
+	wasm_runtime_unregister_natives(CanonicalModuleName, GNativeSymbols.GetData());
 #endif
 }

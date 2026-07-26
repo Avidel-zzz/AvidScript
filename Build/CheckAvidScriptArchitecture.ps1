@@ -186,17 +186,13 @@ function Get-BuildDependencyAnalysis {
     }
 }
 
-function Test-NativeSymbolAllowlist {
+function Test-NameAllowlist {
     param(
-        [string]$InitializerSource,
+        [string[]]$ActualNames,
         [string[]]$ExpectedNames,
         [string]$Description
     )
 
-    $Matches = [regex]::Matches(
-        $InitializerSource,
-        '\{\s*"(?<name>[a-z0-9_]+)"\s*,\s*reinterpret_cast<void\*>\((?<function>[A-Za-z0-9_]+)\)\s*,\s*"(?<signature>[^"]+)"\s*,\s*nullptr\s*\}')
-    $ActualNames = @($Matches | ForEach-Object { $_.Groups['name'].Value })
     $MissingNames = @($ExpectedNames | Where-Object { $ActualNames -notcontains $_ })
     $UnexpectedNames = @($ActualNames | Where-Object { $ExpectedNames -notcontains $_ })
     $DuplicateNames = @(
@@ -324,6 +320,9 @@ foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 
         Add-Violation "AvidScriptVM must not depend on $ForbiddenDependency"
     }
 }
+if ($VmBuild.Contains('bUseUnity = false')) {
+    Add-Violation 'AvidScriptVM must preserve Unity builds; third-party headers require an explicit compile boundary'
+}
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
     'wasm_runtime_|wasm_export\.h',
@@ -334,6 +333,7 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
 
 $WasmtimeBuild = Read-RequiredFile 'Source/ThirdParty/Wasmtime/Wasmtime.Build.cs'
 $WasmtimeLock = Read-RequiredFile 'Source/ThirdParty/Wasmtime/WasmtimeDependency.lock.json'
+$WasmtimeInstaller = Read-RequiredFile 'Build/InstallWasmtimeDependency.ps1'
 foreach ($RequiredWasmtimeBuildContract in @(
     'ModuleType.External',
     'AVIDSCRIPT_WITH_WASMTIME=0',
@@ -342,7 +342,8 @@ foreach ($RequiredWasmtimeBuildContract in @(
     'PublicAdditionalLibraries.Add',
     'wasmtime.dll.lib',
     'PublicDelayLoadDLLs.Add("wasmtime.dll")',
-    'RuntimeDependencies.Add')) {
+    'RuntimeDependencies.Add',
+    '$(PluginDir)/Binaries/Win64/wasmtime.dll')) {
     if (-not $WasmtimeBuild.Contains($RequiredWasmtimeBuildContract)) {
         Add-Violation "Wasmtime external module is missing $RequiredWasmtimeBuildContract"
     }
@@ -351,22 +352,38 @@ if ($WasmtimeBuild -match '"wasmtime\.lib"') {
     Add-Violation 'Wasmtime external module must not link the static wasmtime.lib'
 }
 foreach ($RequiredWasmtimeLockIdentity in @(
+    '"dependency": "Wasmtime Cranelift C API"',
     '"version": "v45.0.0"',
     '"size_bytes": 28820070',
     '"sha256": "d5ee516fc141576ccd6c43146aafee1074c3c26764cba73b3a97f599a3791f9c"',
+    '"include_relative_path": "include"',
+    '"dll_relative_path": "lib/wasmtime.dll"',
     '"relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0"')) {
     if (-not $WasmtimeLock.Contains($RequiredWasmtimeLockIdentity)) {
         Add-Violation "Wasmtime dependency lock is missing $RequiredWasmtimeLockIdentity"
     }
 }
+if (-not $WasmtimeInstaller.Contains('WASMTIME_FEATURE_CRANELIFT')) {
+    Add-Violation 'Wasmtime dependency installer must reject layouts without Cranelift'
+}
 
 $VmContractHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
-foreach ($RequiredBatchContract in @('ActorGetTransformBatch', 'InputCells', 'OutputFloats')) {
+foreach ($RequiredBatchContract in @(
+    'ActorGetTransformBatch',
+    'InputCells',
+    'OutputFloats',
+    'BorrowReadOnlyBytes',
+    'BorrowMutableBytes')) {
     if (-not $VmContractHeader.Contains($RequiredBatchContract)) {
         Add-Violation "VM batch contract is missing $RequiredBatchContract"
     }
 }
 $WamrBuildScript = Read-RequiredFile 'Build/BuildWAMRWin64.cmd'
+$WamrCommonCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/common/iwasm_common.cmake'
+$WasmtimeShimHeader = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.h'
+$WasmtimeShimSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c'
+$WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp'
+$StaticHostImportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp'
 $WamrCallStackSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrCallStack.cpp'
 $WamrFastInterpreterSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_interp_fast.c'
 $WamrClassicInterpreterSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_interp_classic.c'
@@ -394,6 +411,51 @@ foreach ($RequiredWamrDiagnosticPrimitive in @(
 if (-not $WamrBuildScript.Contains('-DWAMR_BUILD_DUMP_CALL_STACK=1')) {
     Add-Violation 'Win64 WAMR build must enable bounded trap call-stack capture'
 }
+foreach ($RequiredWamrSymbolIsolationToken in @(
+    '-DWAMR_BUILD_WASM_C_API=0',
+    '/linkermember:1',
+    'wasm_runtime_init$',
+    'wasm_runtime_load$',
+    'wasm_config_',
+    'wasm_engine_',
+    'wasm_functype_',
+    'wasm_trap_')) {
+    if (-not $WamrBuildScript.Contains($RequiredWamrSymbolIsolationToken)) {
+        Add-Violation "Win64 WAMR symbol isolation is missing $RequiredWamrSymbolIsolationToken"
+    }
+}
+foreach ($RequiredWamrCMakeIsolationToken in @(
+    'WAMR_BUILD_WASM_C_API EQUAL 0',
+    'list(REMOVE_ITEM c_source_all "${IWASM_COMMON_DIR}/wasm_c_api.c")')) {
+    if (-not $WamrCommonCMake.Contains($RequiredWamrCMakeIsolationToken)) {
+        Add-Violation "vendored WAMR CMake symbol isolation is missing $RequiredWamrCMakeIsolationToken"
+    }
+}
+foreach ($RequiredWasmtimeShimToken in @(
+    'avidscript_wasmtime_engine_new',
+    'avidscript_wasmtime_linker_define_func',
+    'avidscript_wasmtime_memory_data')) {
+    if (-not $WasmtimeShimHeader.Contains($RequiredWasmtimeShimToken) -or
+        -not $WasmtimeShimSource.Contains($RequiredWasmtimeShimToken)) {
+        Add-Violation "Wasmtime unique-prefix C shim is missing $RequiredWasmtimeShimToken"
+    }
+}
+if (-not $WasmtimeShimSource.Contains('#include "wasmtime.h"') -or
+    $WasmtimeBackendSource.Contains('#include "wasmtime.h"')) {
+    Add-Violation 'Wasmtime headers must remain isolated to the unique-prefix C shim'
+}
+if ($WasmtimeShimSource.Contains('GetProcAddress') -or $WasmtimeBackendSource.Contains('GetProcAddress')) {
+    Add-Violation 'Wasmtime integration must not use dynamic per-symbol lookup'
+}
+foreach ($RequiredBorrowOverride in @('BorrowReadOnlyBytes', 'BorrowMutableBytes')) {
+    if (-not $WasmtimeBackendSource.Contains($RequiredBorrowOverride)) {
+        Add-Violation "Wasmtime guest memory is missing $RequiredBorrowOverride"
+    }
+}
+if ($StaticHostImportSource.Contains('TArray<uint32> InputCells') -or
+    $StaticHostImportSource.Contains('TArray<float> OutputFloats')) {
+    Add-Violation 'transform batch adapter must borrow guest spans without per-call arrays'
+}
 foreach ($WamrInterpreterSource in @(
     $WamrFastInterpreterSource,
     $WamrClassicInterpreterSource,
@@ -411,10 +473,13 @@ foreach ($ForbiddenVmDiagnosticConcern in @('CSharp', 'SemanticSpan', 'SourcePat
 }
 $VmHostBindingsSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'
 $VmDynamicRegistrySource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'
-foreach ($RequiredVmPrimitive in @('TranslateGuestRange', 'actor_get_transform_batch')) {
-    if (-not $VmHostBindingsSource.Contains($RequiredVmPrimitive)) {
-        Add-Violation "VM guest-memory adapter is missing $RequiredVmPrimitive"
+foreach ($RequiredVmPrimitive in @('BorrowReadOnlyBytes', 'BorrowMutableBytes', 'actor_get_transform_batch')) {
+    if (-not $StaticHostImportSource.Contains($RequiredVmPrimitive)) {
+        Add-Violation "shared VM guest-memory adapter is missing $RequiredVmPrimitive"
     }
+}
+if (-not $VmHostBindingsSource.Contains('TranslateGuestRange')) {
+    Add-Violation 'WAMR guest-memory adapter is missing TranslateGuestRange'
 }
 
 $RuntimeBuild = Read-RequiredFile 'Source/AvidScriptRuntime/AvidScriptRuntime.Build.cs'
@@ -1419,16 +1484,11 @@ $OwnerGetHandleSource = Get-SourceSlice `
     'int64_t OwnerGetHandle(' `
     'int32_t TimerSetOnce(' `
     'packed owner host function'
-$CanonicalNativeSymbolsSource = Get-SourceSlice `
-    $VmHostBindingsSource `
-    'NativeSymbol GNativeSymbols[] = {' `
-    'NativeSymbol GCompatibilityNativeSymbols[] = {' `
-    'canonical WAMR native symbol initializer'
-$CompatibilityNativeSymbolsSource = Get-SourceSlice `
-    $VmHostBindingsSource `
-    'NativeSymbol GCompatibilityNativeSymbols[] = {' `
-    '#endif' `
-    'compatibility WAMR native symbol initializer'
+$StaticHostCatalogSource = Get-SourceSlice `
+    $StaticHostImportSource `
+    'const FAvidScriptVmStaticHostImport GStaticHostImports[] = {' `
+    'static_assert(' `
+    'static host import catalog'
 $StaticHostImportPolicySource = Get-SourceSlice `
     $VmHostBindingsSource `
     'bool IsAvidScriptVmStaticHostImport(' `
@@ -1462,17 +1522,29 @@ $CanonicalStaticImportNames = @(
 )
 $CompatibilityStaticImportNames = @(
     $CanonicalStaticImportNames | Where-Object { $_ -ne 'avid_owner_get_handle' })
-Test-NativeSymbolAllowlist `
-    $CanonicalNativeSymbolsSource `
+
+$StaticHostCatalogRecords = @(
+    [regex]::Matches(
+        $StaticHostCatalogSource,
+        '\{\s*EAvidScriptHostBindingId::(?<binding>[A-Za-z0-9_]+)\s*,\s*"(?<name>[a-z0-9_]+)"\s*,\s*"(?<signature>[^"]+)"\s*,\s*(?<compatibility>true|false)\s*\}')
+)
+$CatalogStaticImportNames = @(
+    $StaticHostCatalogRecords | ForEach-Object { $_.Groups['name'].Value })
+$CompatibilityCatalogStaticImportNames = @(
+    $StaticHostCatalogRecords
+    | Where-Object { $_.Groups['compatibility'].Value -eq 'true' }
+    | ForEach-Object { $_.Groups['name'].Value })
+Test-NameAllowlist `
+    $CatalogStaticImportNames `
     $CanonicalStaticImportNames `
-    'canonical WAMR native symbols'
-Test-NativeSymbolAllowlist `
-    $CompatibilityNativeSymbolsSource `
+    'canonical static host catalog'
+Test-NameAllowlist `
+    $CompatibilityCatalogStaticImportNames `
     $CompatibilityStaticImportNames `
-    'compatibility WAMR native symbols'
+    'compatibility static host catalog'
 Test-RequiredTokenSequence $OwnerGetHandleSource @(
     'Call.BindingId = EAvidScriptHostBindingId::OwnerGetHandle;',
-    'Dispatch(ExecEnv, "avid_owner_get_handle", Call, Result)',
+    'Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::OwnerGetHandle), Call, Result)',
     'Result.ReturnValueI64'
 ) 'packed owner host function'
 $RuntimeOwnerHandleSource = Get-SourceSlice `
@@ -1496,16 +1568,19 @@ Test-RequiredTokenSequence $RuntimeHostDispatchSource @(
     'const int64 Value = HandleOwnerGetHandleImport();',
     'return FinishI64(Value, Value != 0);'
 ) 'packed owner runtime dispatch'
-if (-not $CanonicalNativeSymbolsSource.Contains(
-    '{ "avid_owner_get_handle", reinterpret_cast<void*>(OwnerGetHandle), "()I", nullptr }')) {
-    Add-Violation 'packed owner name, function, and signature must share one canonical NativeSymbol initializer'
+if (-not $StaticHostCatalogSource.Contains(
+    '{ EAvidScriptHostBindingId::OwnerGetHandle, "avid_owner_get_handle", "()I", false }')) {
+    Add-Violation 'packed owner name, binding, signature, and compatibility policy must share one catalog record'
 }
 if (-not $VmHostBindingsSource.Contains('constexpr const char* CanonicalModuleName = "avidscript";') -or
+    -not $StaticHostRegistrationSource.Contains('BuildWamrStaticHostSymbolTables();') -or
     -not $StaticHostRegistrationSource.Contains(
-        'wasm_runtime_register_natives(CanonicalModuleName, GNativeSymbols, UE_ARRAY_COUNT(GNativeSymbols))') -or
-    -not $StaticHostImportPolicySource.Contains(
-        'ModuleName == TEXT("avidscript") && ImportName == TEXT("avid_owner_get_handle")')) {
-    Add-Violation 'packed owner initializer must register only in canonical avidscript module and match static import policy'
+        'wasm_runtime_register_natives(CanonicalModuleName, GNativeSymbols.GetData(), GNativeSymbols.Num())') -or
+    -not $StaticHostRegistrationSource.Contains(
+        'wasm_runtime_register_natives(') -or
+    -not $VmHostBindingsSource.Contains('if (Import.bSupportsEnvCompatibility)') -or
+    -not $StaticHostImportPolicySource.Contains('(ModuleName == TEXT("avidscript") || Import.bSupportsEnvCompatibility)')) {
+    Add-Violation 'generated WAMR symbol tables must preserve canonical and compatibility catalog policy'
 }
 
 $ExpectedCapabilityImportNames = @(

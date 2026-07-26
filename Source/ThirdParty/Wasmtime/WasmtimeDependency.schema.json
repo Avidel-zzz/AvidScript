@@ -19,7 +19,7 @@
       "const": 1
     },
     "dependency": {
-      "const": "Wasmtime minimal C API"
+      "const": "Wasmtime Cranelift C API"
     },
     "version": {
       "const": "v45.0.0"
@@ -69,13 +69,13 @@
       ],
       "properties": {
         "include_relative_path": {
-          "const": "min/include"
+          "const": "include"
         },
         "dll_relative_path": {
-          "const": "min/lib/wasmtime.dll"
+          "const": "lib/wasmtime.dll"
         },
         "import_library_relative_path": {
-          "const": "min/lib/wasmtime.dll.lib"
+          "const": "lib/wasmtime.dll.lib"
         },
         "license_relative_path": {
           "const": "LICENSE"

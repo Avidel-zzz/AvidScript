@@ -48,7 +48,7 @@ function Assert-PinnedLockIdentity {
 
     $Expected = [ordered]@{
         schema_version = 1
-        dependency = 'Wasmtime minimal C API'
+        dependency = 'Wasmtime Cranelift C API'
         version = 'v45.0.0'
         platform = 'Win64'
         release_url = 'https://github.com/bytecodealliance/wasmtime/releases/tag/v45.0.0'
@@ -57,9 +57,9 @@ function Assert-PinnedLockIdentity {
         archive_size = [int64]28820070
         archive_sha256 = 'd5ee516fc141576ccd6c43146aafee1074c3c26764cba73b3a97f599a3791f9c'
         archive_root = 'wasmtime-v45.0.0-x86_64-windows-c-api'
-        include_path = 'min/include'
-        dll_path = 'min/lib/wasmtime.dll'
-        import_path = 'min/lib/wasmtime.dll.lib'
+        include_path = 'include'
+        dll_path = 'lib/wasmtime.dll'
+        import_path = 'lib/wasmtime.dll.lib'
         license_path = 'LICENSE'
         install_path = 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0'
         marker_name = '.avidscript-wasmtime-managed.json'
@@ -459,13 +459,19 @@ function Assert-WasmtimeArchiveLayout {
 
     $RequiredPaths = @(
         (Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime.h"),
+        (Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime/conf.h"),
         (Join-Path $ArchiveRoot $Lock.layout.dll_relative_path),
         (Join-Path $ArchiveRoot $Lock.layout.import_library_relative_path),
         (Join-Path $ArchiveRoot $Lock.layout.license_relative_path))
     foreach ($RequiredPath in $RequiredPaths) {
         if (-not (Test-Path -LiteralPath $RequiredPath -PathType Leaf)) {
-            throw "ASP54W1404 archive minimal layout is incomplete: $RequiredPath"
+            throw "ASP54W1404 archive Cranelift layout is incomplete: $RequiredPath"
         }
+    }
+    $ConfigPath = Join-Path $ArchiveRoot "$($Lock.layout.include_relative_path)/wasmtime/conf.h"
+    $ConfigText = [System.IO.File]::ReadAllText($ConfigPath)
+    if ($ConfigText -notmatch '(?m)^\s*#define\s+WASMTIME_FEATURE_CRANELIFT\b') {
+        throw 'ASP54W1405 archive C API does not enable the Cranelift compiler feature'
     }
 }
 

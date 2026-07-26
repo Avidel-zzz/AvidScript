@@ -179,6 +179,28 @@ public:
 		uint32 GuestAddress,
 		TConstArrayView<uint8> Bytes,
 		FString& OutError) = 0;
+	virtual bool BorrowReadOnlyBytes(
+		uint32 GuestAddress,
+		uint32 ByteCount,
+		uint32 Alignment,
+		TConstArrayView<uint8>& OutBytes,
+		FString& OutError)
+	{
+		OutBytes = TConstArrayView<uint8>();
+		OutError = TEXT("guest_memory_borrow_unavailable: this guest memory provider does not support synchronous borrowing.");
+		return false;
+	}
+	virtual bool BorrowMutableBytes(
+		uint32 GuestAddress,
+		uint32 ByteCount,
+		uint32 Alignment,
+		TArrayView<uint8>& OutBytes,
+		FString& OutError)
+	{
+		OutBytes = TArrayView<uint8>();
+		OutError = TEXT("guest_memory_borrow_unavailable: this guest memory provider does not support synchronous borrowing.");
+		return false;
+	}
 };
 
 struct FAvidScriptDynamicHostCall
@@ -218,6 +240,26 @@ struct FAvidScriptVmLoadMetrics
 	double ModuleInstantiateMs = 0.0;
 	double ExecEnvCreateMs = 0.0;
 };
+
+enum class EAvidScriptVmValueKind : uint8
+{
+	I32,
+	I64,
+	F32,
+	F64
+};
+
+struct FAvidScriptVmAbiSignature
+{
+	TArray<EAvidScriptVmValueKind> Parameters;
+	bool bHasResult = false;
+	EAvidScriptVmValueKind Result = EAvidScriptVmValueKind::I32;
+};
+
+AVIDSCRIPTVM_API bool ParseAvidScriptVmAbiSignature(
+	const FString& CompactSignature,
+	FAvidScriptVmAbiSignature& OutSignature,
+	FString& OutError);
 
 struct FAvidScriptVmDynamicImport
 {
@@ -263,6 +305,7 @@ struct FAvidScriptVmLoadConfig
 };
 
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();
+AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWasmtimeBackend();
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptVmBackend(
 	const FAvidScriptVmBackendSelection& Selection,
 	FAvidScriptVmError& OutError);

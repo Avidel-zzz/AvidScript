@@ -34,7 +34,7 @@ public class Wasmtime : ModuleRules
 			PublicIncludePaths.Add(IncludePath);
 			PublicAdditionalLibraries.Add(ImportLibraryPath);
 			PublicDelayLoadDLLs.Add("wasmtime.dll");
-			RuntimeDependencies.Add(DllPath);
+			RuntimeDependencies.Add("$(PluginDir)/Binaries/Win64/wasmtime.dll", DllPath, StagedFileType.NonUFS);
 		}
 	}
 }

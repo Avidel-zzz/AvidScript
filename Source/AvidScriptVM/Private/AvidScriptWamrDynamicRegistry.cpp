@@ -18,8 +18,6 @@ extern "C"
 
 namespace
 {
-constexpr int32 AvidScriptMaximumRawParameterCount = 64;
-
 void SetDynamicRegistryError(
 	FAvidScriptVmError& OutError,
 	const TCHAR* Category,
@@ -76,33 +74,23 @@ bool ParseAvidScriptRawSignature(
 {
 	OutParameterCount = 0;
 	OutResultKind = EAvidScriptWamrRawResultKind::I32;
-	if (Signature.Len() < 3 || Signature[0] != TEXT('('))
+	FAvidScriptVmAbiSignature ParsedSignature;
+	FString ParseError;
+	if (!ParseAvidScriptVmAbiSignature(Signature, ParsedSignature, ParseError)
+		|| !ParsedSignature.bHasResult)
 	{
 		return false;
 	}
-	const int32 CloseIndex = Signature.Find(TEXT(")"), ESearchCase::CaseSensitive);
-	const TCHAR ResultType = CloseIndex == INDEX_NONE || CloseIndex + 1 >= Signature.Len()
-		? TEXT('\0')
-		: Signature[CloseIndex + 1];
-	if (CloseIndex == INDEX_NONE
-		|| CloseIndex != Signature.Len() - 2
-		|| (ResultType != TEXT('i') && ResultType != TEXT('I')))
+	if (ParsedSignature.Result != EAvidScriptVmValueKind::I32
+		&& ParsedSignature.Result != EAvidScriptVmValueKind::I64)
 	{
 		return false;
 	}
-	OutResultKind = ResultType == TEXT('I')
+	OutParameterCount = static_cast<uint32>(ParsedSignature.Parameters.Num());
+	OutResultKind = ParsedSignature.Result == EAvidScriptVmValueKind::I64
 		? EAvidScriptWamrRawResultKind::I64
 		: EAvidScriptWamrRawResultKind::I32;
-	for (int32 Index = 1; Index < CloseIndex; ++Index)
-	{
-		const TCHAR Type = Signature[Index];
-		if (Type != TEXT('i') && Type != TEXT('I') && Type != TEXT('f') && Type != TEXT('F'))
-		{
-			return false;
-		}
-		++OutParameterCount;
-	}
-	return OutParameterCount <= AvidScriptMaximumRawParameterCount;
+	return true;
 }
 
 FString MakeAvidScriptDynamicRegistryKey(const FString& ModuleName, const FString& ImportName)

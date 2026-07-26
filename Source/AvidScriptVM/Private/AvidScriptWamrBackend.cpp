@@ -578,6 +578,118 @@ public:
 		#endif
 	}
 
+	bool BorrowReadOnlyBytes(
+		uint32 GuestAddress,
+		uint32 ByteCount,
+		uint32 Alignment,
+		TConstArrayView<uint8>& OutBytes,
+		FString& OutError) override
+	{
+		OutBytes = TConstArrayView<uint8>();
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WAMR
+		OutError = TEXT("guest_memory_borrow_unavailable: WAMR artifacts are unavailable for this target.");
+		return false;
+#else
+		if (Alignment == 0
+			|| !FMath::IsPowerOfTwo(Alignment)
+			|| GuestAddress % Alignment != 0
+			|| ByteCount > static_cast<uint32>(MAX_int32))
+		{
+			OutError = TEXT("guest_memory_invalid: read-only borrow alignment or size is invalid.");
+			return false;
+		}
+		if (ByteCount == 0)
+		{
+			return true;
+		}
+		if (ModuleInstance == nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: WAMR instance is unavailable for read-only borrowing.");
+			return false;
+		}
+		if (wasm_runtime_get_exception(ModuleInstance) != nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: guest memory cannot be borrowed while WAMR has a pending exception.");
+			return false;
+		}
+		if (!wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, ByteCount))
+		{
+			OutError = FString::Printf(
+				TEXT("guest_memory_invalid: read-only borrow range is invalid at %u for %u bytes."),
+				GuestAddress,
+				ByteCount);
+			wasm_runtime_clear_exception(ModuleInstance);
+			return false;
+		}
+		const uint8* Data = static_cast<const uint8*>(
+			wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress));
+		if (Data == nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: WAMR could not translate the read-only borrow address.");
+			return false;
+		}
+		OutBytes = MakeArrayView(Data, static_cast<int32>(ByteCount));
+		return true;
+#endif
+	}
+
+	bool BorrowMutableBytes(
+		uint32 GuestAddress,
+		uint32 ByteCount,
+		uint32 Alignment,
+		TArrayView<uint8>& OutBytes,
+		FString& OutError) override
+	{
+		OutBytes = TArrayView<uint8>();
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WAMR
+		OutError = TEXT("guest_memory_borrow_unavailable: WAMR artifacts are unavailable for this target.");
+		return false;
+#else
+		if (Alignment == 0
+			|| !FMath::IsPowerOfTwo(Alignment)
+			|| GuestAddress % Alignment != 0
+			|| ByteCount > static_cast<uint32>(MAX_int32))
+		{
+			OutError = TEXT("guest_memory_invalid: mutable borrow alignment or size is invalid.");
+			return false;
+		}
+		if (ByteCount == 0)
+		{
+			return true;
+		}
+		if (ModuleInstance == nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: WAMR instance is unavailable for mutable borrowing.");
+			return false;
+		}
+		if (wasm_runtime_get_exception(ModuleInstance) != nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: guest memory cannot be borrowed while WAMR has a pending exception.");
+			return false;
+		}
+		if (!wasm_runtime_validate_app_addr(ModuleInstance, GuestAddress, ByteCount))
+		{
+			OutError = FString::Printf(
+				TEXT("guest_memory_invalid: mutable borrow range is invalid at %u for %u bytes."),
+				GuestAddress,
+				ByteCount);
+			wasm_runtime_clear_exception(ModuleInstance);
+			return false;
+		}
+		uint8* Data = static_cast<uint8*>(
+			wasm_runtime_addr_app_to_native(ModuleInstance, GuestAddress));
+		if (Data == nullptr)
+		{
+			OutError = TEXT("guest_memory_invalid: WAMR could not translate the mutable borrow address.");
+			return false;
+		}
+		OutBytes = MakeArrayView(Data, static_cast<int32>(ByteCount));
+		return true;
+#endif
+	}
+
 	bool WriteBytes(
 		uint32 GuestAddress,
 		TConstArrayView<uint8> Bytes,
