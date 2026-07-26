@@ -78,6 +78,10 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53 恢复顺序错误复发：网络/上下文恢复后先执行了目录枚举与 `git status`，之后才调用最高 tracked Phase 的状态机。没有修改产品文件，但破坏了“状态机先行”的可审计顺序。Prevention：恢复后的首个仓库操作只允许从已知最高 state 执行 `Build/InvokePhaseWorkflow.ps1 status -Phase <N>`；目录、Git、计划和第三方探测全部排在该命令之后。若新 Phase 尚未自举，先检查上一 Phase 状态，再读取新 Phase 文档并立即 `start`。
+- 2026-07-26 P52 Gate 包装器错误记录：外部脚本没有先做 parser preflight，`"$RelativePath:"` 在任何产品测试启动前触发变量作用域语法错误；随后又用原始文件 SHA 比较两个 checkout，把内容相同的 CRLF/LF 脚本误判为不一致；主架构脚本还被错误交给 Windows PowerShell 5.1，无法解析 PowerShell 7 跨行管道。Prevention：Gate orchestrator 落盘后先用 PowerShell parser 做纯语法检查；tracked 文本跨 worktree 等价性使用 Git blob 或统一 LF 后比较，不用原始字节 hash；生产 `Build/*.ps1` 默认使用 `pwsh -NoProfile`，只有明确验证 Windows PowerShell 5.1 的合同宿主才使用 `powershell.exe`。Attempt 日志必须保留，最终 attestation 只引用通过日志。
+- 2026-07-26 P52 Gate 证据 schema 错误记录：首次报告给 Static、DotNet、PowerShell、Build 和 Performance 检查附加了扩展 `counts`，工作流以 `ASPW3023` 拒绝；状态未改变。Prevention：Phase Gate v1 只有 `Automation` category 可以发布 `counts`，其他 category 固定为 `null`，数字写入 `completion_marker` 或 tracked Gate summary；报告生成后先调用证据 validator/`attest`，拒绝报告另存 Attempt，不覆盖或伪装为已验证证据。
+- 2026-07-26 P52 Git revision 与 SDK 证据错误记录：PowerShell 中未引用 `HEAD^{tree}` 会让花括号参与 shell 解析；Gate 元数据又从 wrapper 根目录查询 `dotnet --version`，显示 10.0.301，而实际测试在具有 pinned `global.json` 的候选 cwd 下使用 8.0.416。Prevention：所有 revision expression 固定写成单引号参数，例如 `git rev-parse 'HEAD^{tree}'`；工具链版本必须在与被测命令完全相同的 working directory 和环境中采集，并在启动测试前断言期望版本。
 - 2026-07-25 P51.3 路径探测错误复发：上下文恢复后依据摘要中的计划简称直接拼写两个 `Docs/Phase51` 文件名，读取命令因文件不存在失败；没有写盘，但重复违反了已知的路径发现规则。Prevention：摘要中的文件描述不得当作路径证据；即使目录与 Phase 已知，也必须先用 `rg --files <dir>` 取得精确文件名，再复制该输出用于后续读取，禁止凭阶段编号补全路径。
 - 2026-07-25 P51.3 验证流程错误记录：实现仍只存在于插件内的 Git worktree 时，直接从项目根运行 `-Module=AvidScriptEditor`；UE 项目固定引用主插件目录，因此实际编译并加载了主分支旧源码，聚焦自动化继续执行旧的 factory import 断言。Prevention：worktree 批次进入 UE 验证前，必须先提交候选、核验主目录受保护文件、以 `--ff-only` 同步主插件，再从项目根构建；自动化失败若行号/断言文本与 worktree 不符，先核对主目录 `HEAD` 和加载 DLL 来源，不盲目修改实现。
 
@@ -151,7 +155,7 @@ Plugins/AvidScript/Docs
 - 独立代码审查安排在最终全量 automation 之前。审查修复后先运行受影响 focused tests，随后只运行一次最终全量 automation，避免“全量测试 -> 审查修改 -> 再全量测试”的重复成本。
 - 只有 ABI、guest memory、状态迁移、生命周期事务、崩溃或数据损坏风险，以及需要先确认根因的真实回归，才允许在批次中途立即编译或运行聚焦测试。即使属于例外，也应合并同一风险面的修改后再执行。
 - 批量验证不等于把反馈无限推迟到数小时任务末尾。单个批次不得跨越多个相互独立的架构层，也不得以减少测试时间为理由跳过最终门禁、清理 Editor Target 或降低成功判定标准。
-- 每次开始新任务、网络重连或上下文压缩恢复后，第一条仓库命令必须是 `Build/InvokePhaseWorkflow.ps1 status -Phase <当前Phase>`；当前 Phase 50 固定使用 `Build/InvokePhaseWorkflow.ps1 status -Phase 50`。只有对应 state 文件尚不存在时才允许回退到计划/债务文档，并在状态机可用后立即自举。
+- 每次开始新任务、网络重连或上下文压缩恢复后，第一条仓库命令必须是 `Build/InvokePhaseWorkflow.ps1 status -Phase <当前Phase>`；当前 Phase 由最高编号且未关闭的 tracked state 决定，不得把旧 Phase 编号硬编码在规范中。只有目标 state 尚不存在时才允许读取上一 Phase closeout 与新 Phase 架构/计划，并在文档提交后立即通过 `start` 自举状态。
 - 状态创建后只通过 `Build/InvokePhaseWorkflow.ps1` 执行 batch、debt、architecture revision、freeze、attest、close 和 reopen。完整 Gate 验证 `gate_ready` 候选提交；Gate 后只允许一个受限 attestation commit，没有匹配 commit/tree/state hash 的不可变 Gate 报告时不得宣布 Phase 完成。
 - 2026-07-24 P50 工作流探测错误记录：`Build/InvokePhaseWorkflow.ps1` 没有 `help` 子命令，直接执行 `help` 会先因缺少有效 `-Phase` 触发 `ASPW1101`，不提供使用说明。Prevention：恢复状态使用 `status -Phase <N>`；需要确认命令参数时读取脚本 `param`/`switch` 块或既有流程文档，不再用不存在的 `help` 探测。
 
