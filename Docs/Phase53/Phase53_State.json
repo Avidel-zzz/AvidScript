@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Completed",
-      "evidence": "独立复审 Critical=0 Important=0；正式 baseline/optimized 各 6000/6000 正确样本；发布证据 Docs/Phase53/P53_Benchmark_Evidence.json；五组 benchmark 合同与聚焦 FourLane.Correctness 通过；Gate 已固定 SDK cwd、native stderr 退出码语义与 PowerShell 5/7 宿主分组；Cold/RSS lane isolation 转入 Phase54。",
-      "completed_at_utc": "2026-07-26T13:58:17.0060797+00:00"
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
     }
   ],
   "debt": [
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；Gate SDK cwd、native stderr 与 PowerShell 宿主修正已记录；Normal Cold/RSS lane isolation 已转入 Phase54。",
-    "completed_at_utc": "2026-07-26T13:58:54.1271850+00:00"
+    "completed": false,
+    "evidence": "reopened: 最终 Gate 外层仍使用 Windows PowerShell 5 parser，误拒绝仓库合法 PowerShell 7 管道续行语法；统一外层/parser/架构门禁为 pwsh 7，仅 PhaseWorkflow 合同保留独立 powershell.exe。",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "2809fda7234319acf798ecd7b4f613f99476c2a4",
-    "source_tree": "fac3103dcee79f5988ae6f00837f2d6445e91097",
-    "state_sha256": "108094aba036cd5b6e69ff6553b912e98a80483117673a6fa66546f1cbe07048",
-    "review_evidence": "P53.5 独立复审：Critical 0、Important 0；正式证据身份/公平性/统计/依赖 provenance 已复核；Gate SDK cwd、native stderr 与 PowerShell 宿主修正已记录；Normal Cold/RSS lane isolation 已转入 Phase54。",
-    "at_utc": "2026-07-26T13:58:54.1271850+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
     "report_path": "",
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "attest -Phase 53 -GateReportPath <path>",
-  "revision": 19,
-  "updated_at_utc": "2026-07-26T13:58:54.1332555+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
+  "revision": 20,
+  "updated_at_utc": "2026-07-26T14:06:56.8211887+00:00"
 }
