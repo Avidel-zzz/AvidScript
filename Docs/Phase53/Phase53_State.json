@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "phase": {
+    "id": 53,
+    "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
+    "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
+  },
+  "declared_stage": "implementing",
+  "architecture": {
+    "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
+    "version": 1,
+    "sha256": "2e973810534eb6fa786e8aba6818b6cd8eb7b56974ffc036940e9e6445c6fd79",
+    "revision_reason": "initial architecture freeze"
+  },
+  "documents": {
+    "plan": "Docs/Phase53/P53.1_Puerts_Performance_Comparison_Implementation_Plan.md",
+    "closeout": "Docs/Phase53/P53_Phase53_Closeout.md"
+  },
+  "batches": [
+    {
+      "id": "P53.1",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P53.2",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P53.3",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P53.4",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    },
+    {
+      "id": "P53.5",
+      "status": "Pending",
+      "evidence": "",
+      "completed_at_utc": null
+    }
+  ],
+  "debt": [],
+  "review": {
+    "completed": false,
+    "evidence": "",
+    "completed_at_utc": null
+  },
+  "budgets": {
+    "ubt": 3,
+    "automation": 2,
+    "full_gate": 2
+  },
+  "invocations": {
+    "ubt": 0,
+    "automation": 0,
+    "full_gate": 0
+  },
+  "freeze": {
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
+  },
+  "gate": {
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
+  },
+  "protected_dirty": [],
+  "next_action": "batch-complete -Phase 53 -BatchId P53.1 -Evidence <text>",
+  "revision": 1,
+  "updated_at_utc": "2026-07-26T04:43:31.1764567+00:00"
+}
