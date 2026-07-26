@@ -517,8 +517,8 @@ function Test-SidecarExactArray {
 function Test-SidecarProfile {
     param([Parameter(Mandatory = $true)]$Profile)
 
-    if ([int]$Profile.schema_version -ne 1) {
-        throw 'ASP53S2004 benchmark profile schema_version 必须为 1'
+    if ([int]$Profile.schema_version -ne 2) {
+        throw 'ASP54S2004 benchmark profile schema_version 必须为 2'
     }
     if ([string]::IsNullOrWhiteSpace([string]$Profile.profile_id) -or
         [string]::IsNullOrWhiteSpace([string]$Profile.target) -or
@@ -538,12 +538,116 @@ function Test-SidecarProfile {
 
     $Lanes = @($Profile.lanes | ForEach-Object { [string]$_ })
     $Workloads = @($Profile.workloads | ForEach-Object { [string]$_ })
-    if ($Lanes.Count -ne 4 -or $Workloads.Count -lt 1) {
-        throw 'ASP53S2004 benchmark profile 必须包含四个 lane 和至少一个 workload'
+    $ExpectedLanes = @(
+        'native_cpp',
+        'puerts_v8_reflection',
+        'puerts_v8_static',
+        'avidscript_wamr_interpreter',
+        'avidscript_wasmtime_jit'
+    )
+    if ($Lanes.Count -ne $ExpectedLanes.Count -or $Workloads.Count -lt 1) {
+        throw 'ASP54S2004 benchmark profile 必须包含五个 canonical lane 和至少一个 workload'
     }
     if (@($Lanes | Sort-Object -Unique).Count -ne $Lanes.Count -or
         @($Workloads | Sort-Object -Unique).Count -ne $Workloads.Count) {
         throw 'ASP53S2004 benchmark profile 的 lane/workload 不允许重复'
+    }
+    if ([string]$Profile.lane_identity_algorithm -cne 'ordered_json_utf8_sha256_v1' -or
+        @($Profile.lane_catalog).Count -ne $ExpectedLanes.Count) {
+        throw 'ASP54S2004 benchmark profile 缺少固定 lane catalog 或 identity 算法'
+    }
+    for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
+        if ($Lanes[$Index] -cne $ExpectedLanes[$Index] -or
+            [string]$Profile.lane_catalog[$Index].lane_id -cne $ExpectedLanes[$Index]) {
+            throw "ASP54S2004 benchmark profile lane/catalog 顺序不匹配：index=$Index"
+        }
+    }
+}
+
+function Get-SidecarJsonSha256 {
+    param([Parameter(Mandatory = $true)]$Value)
+
+    $Json = $Value | ConvertTo-Json -Depth 64 -Compress
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Json)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($Hasher.ComputeHash($Bytes)).ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
+function Resolve-SidecarCatalogValue {
+    param(
+        [AllowNull()]$Value,
+        [Parameter(Mandatory = $true)][hashtable]$Tokens
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [string]) {
+        if ($Tokens.ContainsKey([string]$Value)) {
+            return $Tokens[[string]$Value]
+        }
+        return [string]$Value
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and
+        $Value -isnot [System.Management.Automation.PSCustomObject]) {
+        $ResolvedItems = [System.Collections.Generic.List[object]]::new()
+        foreach ($Item in @($Value)) {
+            $ResolvedItems.Add((Resolve-SidecarCatalogValue -Value $Item -Tokens $Tokens))
+        }
+        return ,$ResolvedItems.ToArray()
+    }
+    if ($Value -is [System.Management.Automation.PSCustomObject] -or
+        $Value -is [System.Collections.IDictionary]) {
+        $Resolved = [ordered]@{}
+        foreach ($Property in $Value.PSObject.Properties) {
+            $Resolved[$Property.Name] =
+                Resolve-SidecarCatalogValue -Value $Property.Value -Tokens $Tokens
+        }
+        return [pscustomobject]$Resolved
+    }
+    return $Value
+}
+
+function New-SidecarResolvedLaneCatalog {
+    param(
+        [Parameter(Mandatory = $true)]$Profile,
+        [Parameter(Mandatory = $true)][hashtable]$Tokens
+    )
+
+    $Catalog = [System.Collections.Generic.List[object]]::new()
+    foreach ($TemplateEntry in @($Profile.lane_catalog)) {
+        $ResolvedEntry = Resolve-SidecarCatalogValue -Value $TemplateEntry -Tokens $Tokens
+        $Identity = Get-SidecarJsonSha256 -Value $ResolvedEntry
+        $ResolvedEntry | Add-Member -NotePropertyName lane_identity_sha256 -NotePropertyValue $Identity
+        $Catalog.Add($ResolvedEntry)
+    }
+    $CatalogArray = $Catalog.ToArray()
+    return [pscustomobject][ordered]@{
+        entries = $CatalogArray
+        sha256 = Get-SidecarJsonSha256 -Value $CatalogArray
+    }
+}
+
+function Test-SidecarLaneCatalog {
+    param(
+        [Parameter(Mandatory = $true)]$Actual,
+        [Parameter(Mandatory = $true)][string]$ActualSha256,
+        [Parameter(Mandatory = $true)]$Expected,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha256,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if ($ActualSha256 -cne $ExpectedSha256 -or
+        (Get-SidecarJsonSha256 -Value @($Actual)) -cne $ActualSha256 -or
+        (Get-SidecarJsonSha256 -Value @($Expected)) -cne $ExpectedSha256 -or
+        (@($Actual) | ConvertTo-Json -Depth 64 -Compress) -cne
+            (@($Expected) | ConvertTo-Json -Depth 64 -Compress)) {
+        throw "ASP54S2052 lane catalog/hash 不一致：$Label"
     }
 }
 
@@ -573,16 +677,17 @@ function Get-SidecarWilliamsLaneOrder {
         [Parameter(Mandatory = $true)][int]$SampleIndex
     )
 
-    if ($BaseLaneOrder.Count -ne 4) {
-        throw 'ASP53S2004 Williams 顺序要求恰好四个 lane'
+    if ($BaseLaneOrder.Count -ne 5) {
+        throw 'ASP54S2004 Williams 顺序要求恰好五个 lane'
     }
     $BalancedRows = @(
-        @(0, 1, 3, 2),
-        @(1, 2, 0, 3),
-        @(2, 3, 1, 0),
-        @(3, 0, 2, 1)
+        @(0, 1, 4, 2, 3),
+        @(1, 2, 0, 3, 4),
+        @(2, 3, 1, 4, 0),
+        @(3, 4, 2, 0, 1),
+        @(4, 0, 3, 1, 2)
     )
-    $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 4 + 4) % 4
+    $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 5 + 5) % 5
     return @($BalancedRows[$Row] | ForEach-Object { $BaseLaneOrder[$_] })
 }
 
@@ -628,7 +733,8 @@ function Get-SidecarProvenanceFieldNames {
         'request_schema_sha256',
         'calibration_schema_sha256',
         'result_schema_sha256',
-        'aggregate_schema_sha256'
+        'aggregate_schema_sha256',
+        'lane_catalog_sha256'
     )
 }
 
@@ -663,7 +769,9 @@ function Test-SidecarCalibrationResult {
         [Parameter(Mandatory = $true)][string]$ResultPath,
         [Parameter(Mandatory = $true)][string]$SchemaPath,
         [Parameter(Mandatory = $true)]$Profile,
-        [Parameter(Mandatory = $true)]$ExpectedProvenance
+        [Parameter(Mandatory = $true)]$ExpectedProvenance,
+        [Parameter(Mandatory = $true)]$ExpectedLaneCatalog,
+        [Parameter(Mandatory = $true)][string]$ExpectedLaneCatalogSha256
     )
 
     if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
@@ -675,6 +783,12 @@ function Test-SidecarCalibrationResult {
     }
     $Result = $Raw | ConvertFrom-Json
     Test-SidecarProvenance -Actual $Result.provenance -Expected $ExpectedProvenance -Label 'calibration'
+    Test-SidecarLaneCatalog `
+        -Actual $Result.lane_catalog `
+        -ActualSha256 ([string]$Result.lane_catalog_sha256) `
+        -Expected $ExpectedLaneCatalog `
+        -ExpectedSha256 $ExpectedLaneCatalogSha256 `
+        -Label 'calibration'
 
     $ExpectedWorkloads = @($Profile.workloads | ForEach-Object { [string]$_ })
     $ExpectedLanes = @($Profile.lanes | ForEach-Object { [string]$_ })
@@ -743,8 +857,18 @@ function Test-SidecarProcessResult {
         -Actual $Result.provenance `
         -Expected $Manifest.provenance `
         -Label "process=$ExpectedProcessRun"
+    Test-SidecarLaneCatalog `
+        -Actual $Result.lane_catalog `
+        -ActualSha256 ([string]$Result.lane_catalog_sha256) `
+        -Expected $Manifest.lane_catalog `
+        -ExpectedSha256 ([string]$Manifest.lane_catalog_sha256) `
+        -Label "process=$ExpectedProcessRun"
 
     $ExpectedLanes = @($Profile.lanes | ForEach-Object { [string]$_ })
+    $LaneCatalogById = @{}
+    foreach ($Entry in @($Manifest.lane_catalog)) {
+        $LaneCatalogById[[string]$Entry.lane_id] = $Entry
+    }
     $ExpectedWorkloads = @($Profile.workloads | ForEach-Object { [string]$_ })
     $TimedSamples = [int]$Profile.timed_samples
     $ExpectedCount = $ExpectedLanes.Count * $ExpectedWorkloads.Count * $TimedSamples
@@ -766,6 +890,25 @@ function Test-SidecarProcessResult {
             $SampleIndex -lt 0 -or
             $SampleIndex -ge $TimedSamples) {
             throw "ASP53S2009 raw result 含越界样本：process=$ExpectedProcessRun lane=$Lane workload=$Workload sample=$SampleIndex"
+        }
+        $LaneCatalogEntry = $LaneCatalogById[$Lane]
+        if ($null -eq $LaneCatalogEntry -or
+            [string]$Sample.lane_identity_sha256 -cne [string]$LaneCatalogEntry.lane_identity_sha256) {
+            throw "ASP54S2053 raw result lane identity 不匹配：process=$ExpectedProcessRun lane=$Lane"
+        }
+        if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
+            if ($null -eq $Sample.backend_info -or
+                [bool]$Sample.backend_info.fallback_used -or
+                [string]$Sample.backend_info.backend_id -cne [string]$LaneCatalogEntry.backend_id -or
+                [string]$Sample.backend_info.runtime_version -cne [string]$LaneCatalogEntry.runtime_version -or
+                [string]$Sample.backend_info.execution_mode -cne [string]$LaneCatalogEntry.execution_mode -or
+                [string]$Sample.backend_info.artifact_format -cne [string]$LaneCatalogEntry.execution_artifact_format -or
+                [string]$Sample.backend_info.artifact_sha256 -cne [string]$LaneCatalogEntry.execution_artifact_sha256 -or
+                [string]$Sample.backend_info.source_wasm_sha256 -cne [string]$LaneCatalogEntry.source_wasm_sha256 -or
+                [string]$Sample.backend_info.target_triple -cne [string]$LaneCatalogEntry.target_triple -or
+                [string]$Sample.backend_info.runtime_build_identity -cne [string]$LaneCatalogEntry.runtime_build_identity) {
+                throw "ASP54S2054 raw result AvidScript backend provenance 不匹配：process=$ExpectedProcessRun lane=$Lane"
+            }
         }
         $WorkloadIndex = [Array]::IndexOf([object[]]$ExpectedWorkloads, $Workload)
         $WilliamsOrder = Get-SidecarWilliamsLaneOrder `

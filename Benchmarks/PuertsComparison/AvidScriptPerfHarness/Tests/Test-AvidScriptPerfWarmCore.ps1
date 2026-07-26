@@ -38,8 +38,26 @@ $BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 
 
 Assert-True ($RunnerHeader.Contains('RunWarmBenchmarkFromFiles')) `
     'runner must expose the warm benchmark file entrypoint'
-Assert-True ($RunnerHeader.Contains('RunFourLaneCorrectnessSmoke')) `
-    'existing four-lane correctness smoke API must remain available'
+Assert-True ($RunnerHeader.Contains('RunFiveLaneCorrectnessSmoke')) `
+    'runner must expose the canonical five-lane correctness smoke API'
+
+$ExpectedLanes = @(
+    'native_cpp',
+    'puerts_v8_reflection',
+    'puerts_v8_static',
+    'avidscript_wamr_interpreter',
+    'avidscript_wasmtime_jit'
+)
+Assert-True ([int]$BenchmarkProfile.schema_version -eq 2) `
+    'benchmark profile must use schema v2'
+Assert-True (@($BenchmarkProfile.lanes).Count -eq $ExpectedLanes.Count) `
+    'benchmark profile must contain exactly five canonical lanes'
+for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
+    Assert-True ([string]$BenchmarkProfile.lanes[$Index] -ceq $ExpectedLanes[$Index]) `
+        "benchmark lane order mismatch at index $Index"
+}
+Assert-True (@($BenchmarkProfile.lane_catalog).Count -eq $ExpectedLanes.Count) `
+    'benchmark profile must lock one catalog entry per canonical lane'
 
 foreach ($Switch in @('AvidScriptPerfRequest=', 'AvidScriptPerfResult=')) {
     Assert-True ($CommandletSource.Contains($Switch)) "commandlet must parse -$Switch"
@@ -153,12 +171,39 @@ Assert-True ($RunnerSource.Contains('return Iterations + 1;')) `
 Assert-True ($RunnerSource.Contains('BuildBalancedLaneOrder')) `
     'warm core must derive a balanced lane order for each sample'
 foreach ($BalancedRow in @(
-    '{ 0, 1, 3, 2 }',
-    '{ 1, 2, 0, 3 }',
-    '{ 2, 3, 1, 0 }',
-    '{ 3, 0, 2, 1 }')) {
+    '{ 0, 1, 4, 2, 3 }',
+    '{ 1, 2, 0, 3, 4 }',
+    '{ 2, 3, 1, 4, 0 }',
+    '{ 3, 4, 2, 0, 1 }',
+    '{ 4, 0, 3, 1, 2 }')) {
     Assert-True ($RunnerSource.Contains($BalancedRow)) "missing balanced lane row: $BalancedRow"
 }
+foreach ($SelectionContract in @(
+    'EAvidScriptVmBackendKind::Wamr',
+    'EAvidScriptVmExecutionMode::Interpreter',
+    'EAvidScriptVmBackendKind::Wasmtime',
+    'EAvidScriptVmExecutionMode::Jit',
+    'EAvidScriptVmArtifactFormat::WasmBytecode',
+    'bAllowFallback = false')) {
+    Assert-True ($RunnerSource.Contains($SelectionContract)) `
+        "missing explicit AvidScript backend selection contract: $SelectionContract"
+}
+Assert-True ($RunnerSource.Contains('SetBackendSelectionForTesting')) `
+    'both AvidScript lanes must inject selection through RuntimeSession'
+Assert-True ($RunnerSource.Contains('wasmtime.cranelift.jit')) `
+    'Wasmtime lane must reject a runtime build identity mismatch'
+Assert-True ($RunnerSource.Contains('wamr.interpreter')) `
+    'WAMR lane must reject a runtime build identity mismatch'
+Assert-True ($RunnerSource.Contains('ActualRuntimeBuildIdentity.Equals(')) `
+    'runtime build identity must be derived from actual backend evidence and compared with the catalog'
+Assert-True ($RunnerSource.Contains('wamr-v%s-x86_64-windows-fast-interp')) `
+    'WAMR runtime build identity must include the actual runtime version and execution tier'
+Assert-True ($RunnerSource.Contains('wasmtime-v%s-x86_64-windows-c-api')) `
+    'Wasmtime runtime build identity must include the actual runtime version and linked API target'
+Assert-True ($RunnerSource.Contains('fallback_used')) `
+    'AvidScript sample evidence must expose fallback usage'
+Assert-True ($RunnerSource.Contains('lane_identity_sha256')) `
+    'every sample must carry its resolved lane identity'
 Assert-True ($RunnerSource.Contains('LanePosition')) 'samples must record lane_position'
 Assert-True ($RunnerSource.Contains('CalibrateLaneIterations')) `
     'warm core must independently calibrate every workload and lane pair'
@@ -190,14 +235,14 @@ Assert-True ($RunnerSource.Contains('timed mode requires an exact iteration_coun
     'timed mode must reject missing or incomplete frozen iteration counts'
 Assert-True ($RunnerSource.Contains('if (Request.Mode != EAvidScriptPerfBenchmarkMode::Timed)')) `
     'explicit timed mode must not enter calibration'
-Assert-True ($RunnerSource.Contains('constexpr int32 PerfRunnerResultSchemaVersion = 1;')) `
-    'warm core must pin the emitted result payload to schema v1'
+Assert-True ($RunnerSource.Contains('constexpr int32 PerfRunnerResultSchemaVersion = 2;')) `
+    'warm core must pin the emitted result payload to schema v2'
 $ExactVersionPattern = 'TEXT\("version"\),\s*PerfRunnerResultSchemaVersion,\s*PerfRunnerResultSchemaVersion,'
 Assert-True ([regex]::IsMatch($RunnerSource, $ExactVersionPattern)) `
-    'result_schema.version parser must accept exactly v1'
+    'result_schema.version parser must accept exactly v2'
 $SerializedVersionPattern = 'TEXT\("schema_version"\),\s*PerfRunnerResultSchemaVersion\)'
 Assert-True ([regex]::IsMatch($RunnerSource, $SerializedVersionPattern)) `
-    'result serialization must always label the payload as v1'
+    'result serialization must always label the payload as v2'
 $SchemaHashFieldPattern = 'OutRequest\.Mode == EAvidScriptPerfBenchmarkMode::Calibrate\s*\?\s*TEXT\("calibration_schema_sha256"\)\s*:\s*TEXT\("result_schema_sha256"\)'
 Assert-True ([regex]::IsMatch($RunnerSource, $SchemaHashFieldPattern)) `
     'calibration and timed modes must select their respective provenance schema hash fields'
@@ -283,4 +328,4 @@ foreach ($Field in @(
     Assert-True ($RunnerSource.Contains("TEXT(`"$Field`")")) "sample JSON must include $Field"
 }
 
-Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=4 workloads=10 callbacks=2 ref_out=1 timing=cycles64 validation=1'
+Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=5 avidscript_backends=2 workloads=10 callbacks=2 ref_out=1 timing=cycles64 validation=1'

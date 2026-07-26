@@ -11,7 +11,7 @@ public:
 	{
 		RunCommand = IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("AvidScript.PerformanceComparison.Run"),
-			TEXT("Run the warm four-lane AvidScript/Puerts performance comparison."),
+			TEXT("Run the warm five-lane AvidScript/Puerts performance comparison."),
 			FConsoleCommandDelegate::CreateRaw(
 				this,
 				&FAvidScriptPerfHarnessModule::RunWarmBenchmark),

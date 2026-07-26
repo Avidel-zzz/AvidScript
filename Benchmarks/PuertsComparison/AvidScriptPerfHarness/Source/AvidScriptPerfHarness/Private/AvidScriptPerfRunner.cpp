@@ -29,7 +29,7 @@ namespace
 	constexpr uint32 PerfRunnerExactSeedMask = 0x007fffffu;
 	constexpr int32 PerfRunnerWorkloadShift = 24;
 	constexpr int32 PerfRunnerIterationMask = 0x00ffffff;
-	constexpr int32 PerfRunnerResultSchemaVersion = 1;
+	constexpr int32 PerfRunnerResultSchemaVersion = 2;
 	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
 	constexpr int32 PerfRunnerSteadyStateConfirmationSamples = 3;
 
@@ -174,8 +174,18 @@ namespace
 		TArray<uint8> Bytecode;
 		const FAvidScriptWasmStateSlot* ResultSlot = nullptr;
 		int32 LastHostImportCallCount = 0;
+		TSharedPtr<FJsonObject> BackendInfoJson;
 
 		bool Initialize(
+			const FAvidScriptVmBackendSelection& BackendSelection,
+			const FString& ExpectedBackendId,
+			const FString& ExpectedRuntimeVersion,
+			const FString& ExpectedExecutionMode,
+			const FString& ExpectedArtifactFormat,
+			const FString& ExpectedArtifactSha256,
+			const FString& ExpectedSourceWasmSha256,
+			const FString& ExpectedTargetTriple,
+			const FString& ExpectedRuntimeBuildIdentity,
 			AAvidScriptPerfFixture& SharedFixture,
 			FString& OutError)
 		{
@@ -227,6 +237,12 @@ namespace
 			HostContext.World = SharedFixture.GetWorld();
 			HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 			Session.SetHostContext(HostContext);
+#if WITH_DEV_AUTOMATION_TESTS
+			Session.SetBackendSelectionForTesting(BackendSelection);
+#else
+			OutError = TEXT("AvidScript benchmark backend selection requires WITH_DEV_AUTOMATION_TESTS");
+			return false;
+#endif
 
 			FAvidScriptWasmReloadResult ReloadResult;
 			if (!Session.LoadInitialModule(
@@ -240,6 +256,82 @@ namespace
 					*ReloadResult.ErrorMessage);
 				return false;
 			}
+			const FAvidScriptVmBackendInfo& Actual = ReloadResult.RuntimeResult.BackendInfo;
+			const FString ActualExecutionMode =
+				Actual.ExecutionMode == EAvidScriptVmExecutionMode::Interpreter
+					? TEXT("interpreter")
+					: Actual.ExecutionMode == EAvidScriptVmExecutionMode::Jit
+						? TEXT("jit")
+						: TEXT("unsupported");
+			const FString ActualArtifactFormat =
+				Actual.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmBytecode
+					? TEXT("wasm_bytecode")
+					: TEXT("unsupported");
+			FString ActualRuntimeBuildIdentity;
+			if (Actual.Kind == EAvidScriptVmBackendKind::Wamr &&
+				Actual.ExecutionMode == EAvidScriptVmExecutionMode::Interpreter)
+			{
+				ActualRuntimeBuildIdentity = FString::Printf(
+					TEXT("wamr-v%s-x86_64-windows-fast-interp"),
+					*Actual.RuntimeVersion);
+			}
+			else if (Actual.Kind == EAvidScriptVmBackendKind::Wasmtime &&
+				Actual.ExecutionMode == EAvidScriptVmExecutionMode::Jit)
+			{
+				ActualRuntimeBuildIdentity = FString::Printf(
+					TEXT("wasmtime-v%s-x86_64-windows-c-api"),
+					*Actual.RuntimeVersion);
+			}
+			else
+			{
+				ActualRuntimeBuildIdentity = TEXT("unsupported");
+			}
+			if (!Actual.StableBackendId.Equals(ExpectedBackendId, ESearchCase::CaseSensitive) ||
+				!Actual.RuntimeVersion.Equals(ExpectedRuntimeVersion, ESearchCase::CaseSensitive) ||
+				!ActualExecutionMode.Equals(ExpectedExecutionMode, ESearchCase::CaseSensitive) ||
+				!ActualArtifactFormat.Equals(ExpectedArtifactFormat, ESearchCase::CaseSensitive) ||
+				(!ExpectedArtifactSha256.IsEmpty() &&
+				 !Manifest.WasmSha256.Equals(ExpectedArtifactSha256, ESearchCase::CaseSensitive)) ||
+				(!ExpectedSourceWasmSha256.IsEmpty() &&
+				 !Manifest.WasmSha256.Equals(ExpectedSourceWasmSha256, ESearchCase::CaseSensitive)) ||
+				!Actual.TargetTriple.Equals(ExpectedTargetTriple, ESearchCase::CaseSensitive) ||
+				!ActualRuntimeBuildIdentity.Equals(
+					ExpectedRuntimeBuildIdentity,
+					ESearchCase::CaseSensitive) ||
+				BackendSelection.bAllowFallback)
+			{
+				OutError = FString::Printf(
+					TEXT("AvidScript benchmark backend provenance mismatch: ")
+					TEXT("expected=%s/%s/%s/%s/%s/%s ")
+					TEXT("actual=%s/%s/%s/%s/%s/%s fallback_used=%s"),
+					*ExpectedBackendId,
+					*ExpectedRuntimeVersion,
+					*ExpectedExecutionMode,
+					*ExpectedArtifactFormat,
+					*ExpectedTargetTriple,
+					*ExpectedRuntimeBuildIdentity,
+					*Actual.StableBackendId,
+					*Actual.RuntimeVersion,
+					*ActualExecutionMode,
+					*ActualArtifactFormat,
+					*Actual.TargetTriple,
+					*ActualRuntimeBuildIdentity,
+					BackendSelection.bAllowFallback ? TEXT("true") : TEXT("false"));
+				Session.UnloadLive();
+				return false;
+			}
+			BackendInfoJson = MakeShared<FJsonObject>();
+			BackendInfoJson->SetStringField(TEXT("backend_id"), Actual.StableBackendId);
+			BackendInfoJson->SetStringField(TEXT("runtime_version"), Actual.RuntimeVersion);
+			BackendInfoJson->SetStringField(TEXT("execution_mode"), ActualExecutionMode);
+			BackendInfoJson->SetStringField(TEXT("artifact_format"), ActualArtifactFormat);
+			BackendInfoJson->SetStringField(TEXT("artifact_sha256"), Manifest.WasmSha256);
+			BackendInfoJson->SetStringField(TEXT("source_wasm_sha256"), Manifest.WasmSha256);
+			BackendInfoJson->SetStringField(TEXT("target_triple"), Actual.TargetTriple);
+			BackendInfoJson->SetStringField(
+				TEXT("runtime_build_identity"),
+				ActualRuntimeBuildIdentity);
+			BackendInfoJson->SetBoolField(TEXT("fallback_used"), false);
 			LastHostImportCallCount = ReloadResult.RuntimeResult.HostImportCallCount;
 			return true;
 		}
@@ -620,7 +712,8 @@ namespace
 		NativeCpp,
 		PuertsV8Reflection,
 		PuertsV8Static,
-		AvidScriptWamr
+		AvidScriptWamrInterpreter,
+		AvidScriptWasmtimeJit
 	};
 
 	enum class EAvidScriptPerfBenchmarkMode : uint8
@@ -630,7 +723,22 @@ namespace
 		Timed
 	};
 
-	constexpr int32 PerfRunnerLaneCount = 4;
+	constexpr int32 PerfRunnerLaneCount = 5;
+
+	struct FPerfLaneCatalogEntry
+	{
+		EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+		FString LaneIdentitySha256;
+		FString BackendId;
+		FString RuntimeVersion;
+		FString ExecutionMode;
+		FString ArtifactFormat;
+		FString ArtifactSha256;
+		FString SourceWasmSha256;
+		FString TargetTriple;
+		FString RuntimeBuildIdentity;
+		TSharedPtr<FJsonObject> Json;
+	};
 
 	struct FPerfBenchmarkRequest
 	{
@@ -646,6 +754,9 @@ namespace
 		int32 MinimumIterations = 0;
 		int32 MaximumIterations = 0;
 		TSharedPtr<FJsonObject> Provenance;
+		TArray<TSharedPtr<FJsonValue>> LaneCatalogJson;
+		TArray<FPerfLaneCatalogEntry, TInlineAllocator<PerfRunnerLaneCount>> LaneCatalog;
+		FString LaneCatalogSha256;
 		TArray<int32> FrozenIterationCounts;
 		FString TemporaryResultPath;
 	};
@@ -664,6 +775,7 @@ namespace
 		uint64 ExpectedOperationCallCount = 0;
 		int32 HostImportCallCount = 0;
 		int32 ExpectedHostImportCallCount = 0;
+		TSharedPtr<FJsonObject> BackendInfo;
 	};
 
 	struct FPerfOracle
@@ -677,6 +789,7 @@ namespace
 	{
 		int32 ProcessRun = 0;
 		EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+		FString LaneIdentitySha256;
 		int32 LanePosition = 0;
 		EAvidScriptPerfWorkload Workload = EAvidScriptPerfWorkload::PureInteger;
 		int32 SampleIndex = 0;
@@ -691,6 +804,7 @@ namespace
 		uint64 ExpectedOperationCallCount = 0;
 		int32 HostImportCallCount = 0;
 		int32 ExpectedHostImportCallCount = 0;
+		TSharedPtr<FJsonObject> BackendInfo;
 	};
 
 	int32 GetPerfIterationMatrixIndex(
@@ -719,13 +833,35 @@ namespace
 			return TEXT("puerts_v8_reflection");
 		case EAvidScriptPerfLane::PuertsV8Static:
 			return TEXT("puerts_v8_static");
-		case EAvidScriptPerfLane::AvidScriptWamr:
-			return TEXT("avidscript_wamr");
+		case EAvidScriptPerfLane::AvidScriptWamrInterpreter:
+			return TEXT("avidscript_wamr_interpreter");
+		case EAvidScriptPerfLane::AvidScriptWasmtimeJit:
+			return TEXT("avidscript_wasmtime_jit");
 		default:
 			checkNoEntry();
 			return TEXT("");
 		}
 	}
+
+	bool IsAvidScriptPerfLane(const EAvidScriptPerfLane Lane)
+	{
+		return Lane == EAvidScriptPerfLane::AvidScriptWamrInterpreter ||
+			Lane == EAvidScriptPerfLane::AvidScriptWasmtimeJit;
+	}
+
+	struct FAvidScriptLaneSet
+	{
+		FAvidScriptLane WamrInterpreter;
+		FAvidScriptLane WasmtimeJit;
+
+		FAvidScriptLane& Get(const EAvidScriptPerfLane Lane)
+		{
+			check(IsAvidScriptPerfLane(Lane));
+			return Lane == EAvidScriptPerfLane::AvidScriptWamrInterpreter
+				? WamrInterpreter
+				: WasmtimeJit;
+		}
+	};
 
 	bool TryParsePerfLane(const FString& Name, EAvidScriptPerfLane& OutLane)
 	{
@@ -902,8 +1038,8 @@ namespace
 		if (!TryGetRequiredInteger(
 				Root,
 				TEXT("schema_version"),
-				1,
-				1,
+				PerfRunnerResultSchemaVersion,
+				PerfRunnerResultSchemaVersion,
 				IntegerValue,
 				OutError))
 		{
@@ -983,7 +1119,7 @@ namespace
 		{
 			if (OutError.IsEmpty())
 			{
-				OutError = TEXT("request lane_order must contain exactly four lanes");
+				OutError = TEXT("request lane_order must contain exactly five lanes");
 			}
 			return false;
 		}
@@ -1012,7 +1148,7 @@ namespace
 		{
 			if (OutError.IsEmpty())
 			{
-				OutError = TEXT("request lanes must contain exactly four lanes");
+				OutError = TEXT("request lanes must contain exactly five lanes");
 			}
 			return false;
 		}
@@ -1028,6 +1164,64 @@ namespace
 				return false;
 			}
 			RequestedLanes.Add(static_cast<int32>(Lane));
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* LaneCatalogValues = nullptr;
+		if (!Root->TryGetArrayField(TEXT("lane_catalog"), LaneCatalogValues) ||
+			LaneCatalogValues == nullptr ||
+			LaneCatalogValues->Num() != PerfRunnerLaneCount ||
+			!TryGetRequiredString(
+				Root,
+				TEXT("lane_catalog_sha256"),
+				OutRequest.LaneCatalogSha256,
+				OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request lane_catalog must contain exactly five entries");
+			}
+			return false;
+		}
+		OutRequest.LaneCatalogJson = *LaneCatalogValues;
+		for (int32 LaneIndex = 0; LaneIndex < PerfRunnerLaneCount; ++LaneIndex)
+		{
+			const TSharedPtr<FJsonObject> EntryJson =
+				(*LaneCatalogValues)[LaneIndex].IsValid()
+					? (*LaneCatalogValues)[LaneIndex]->AsObject()
+					: nullptr;
+			FPerfLaneCatalogEntry Entry;
+			FString LaneName;
+			bool bFallbackUsed = true;
+			if (!EntryJson.IsValid() ||
+				!TryGetRequiredString(EntryJson, TEXT("lane_id"), LaneName, OutError) ||
+				!TryParsePerfLane(LaneName, Entry.Lane) ||
+				static_cast<int32>(Entry.Lane) != LaneIndex ||
+				!TryGetRequiredString(EntryJson, TEXT("lane_identity_sha256"), Entry.LaneIdentitySha256, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("runtime_version"), Entry.RuntimeVersion, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("execution_mode"), Entry.ExecutionMode, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("execution_artifact_format"), Entry.ArtifactFormat, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("execution_artifact_sha256"), Entry.ArtifactSha256, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("target_triple"), Entry.TargetTriple, OutError) ||
+				!TryGetRequiredString(EntryJson, TEXT("runtime_build_identity"), Entry.RuntimeBuildIdentity, OutError) ||
+				!EntryJson->TryGetBoolField(TEXT("fallback_used"), bFallbackUsed) ||
+				bFallbackUsed)
+			{
+				if (OutError.IsEmpty())
+				{
+					OutError = FString::Printf(
+						TEXT("request lane_catalog entry is invalid or permits fallback: index=%d"),
+						LaneIndex);
+				}
+				return false;
+			}
+			if (IsAvidScriptPerfLane(Entry.Lane) &&
+				(!TryGetRequiredString(EntryJson, TEXT("backend_id"), Entry.BackendId, OutError) ||
+				 !TryGetRequiredString(EntryJson, TEXT("source_wasm_sha256"), Entry.SourceWasmSha256, OutError)))
+			{
+				return false;
+			}
+			Entry.Json = EntryJson;
+			OutRequest.LaneCatalog.Add(MoveTemp(Entry));
 		}
 
 		TArray<FString> WorkloadNames;
@@ -1180,6 +1374,22 @@ namespace
 			return false;
 		}
 		OutRequest.Provenance = *Provenance;
+		FString ProvenanceLaneCatalogSha256;
+		if (!TryGetRequiredString(
+				OutRequest.Provenance,
+				TEXT("lane_catalog_sha256"),
+				ProvenanceLaneCatalogSha256,
+				OutError) ||
+			!ProvenanceLaneCatalogSha256.Equals(
+				OutRequest.LaneCatalogSha256,
+				ESearchCase::CaseSensitive))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request lane_catalog_sha256 must equal provenance lane_catalog_sha256");
+			}
+			return false;
+		}
 		const TCHAR* ExpectedProvenanceSchemaHashField =
 			OutRequest.Mode == EAvidScriptPerfBenchmarkMode::Calibrate
 				? TEXT("calibration_schema_sha256")
@@ -1364,10 +1574,11 @@ namespace
 	{
 		static constexpr int32 BalancedRows[PerfRunnerLaneCount][PerfRunnerLaneCount] =
 		{
-			{ 0, 1, 3, 2 },
-			{ 1, 2, 0, 3 },
-			{ 2, 3, 1, 0 },
-			{ 3, 0, 2, 1 }
+			{ 0, 1, 4, 2, 3 },
+			{ 1, 2, 0, 3, 4 },
+			{ 2, 3, 1, 4, 0 },
+			{ 3, 4, 2, 0, 1 },
+			{ 4, 0, 3, 1, 2 }
 		};
 		const int32 Row = PositiveModulo(
 			static_cast<int64>(Request.ProcessRun) +
@@ -1406,7 +1617,7 @@ namespace
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
-		FAvidScriptLane& AvidScript,
+		FAvidScriptLaneSet& AvidScript,
 		const EAvidScriptPerfLane Lane,
 		const EAvidScriptPerfWorkload Workload,
 		const uint32 Seed,
@@ -1432,8 +1643,9 @@ namespace
 				Static.LaneId,
 				static_cast<int32>(Seed));
 			return true;
-		case EAvidScriptPerfLane::AvidScriptWamr:
-			return AvidScript.PrepareCallbackWorkload(Seed, OutError);
+		case EAvidScriptPerfLane::AvidScriptWamrInterpreter:
+		case EAvidScriptPerfLane::AvidScriptWasmtimeJit:
+			return AvidScript.Get(Lane).PrepareCallbackWorkload(Seed, OutError);
 		default:
 			checkNoEntry();
 			return false;
@@ -1474,7 +1686,7 @@ namespace
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
-		FAvidScriptLane& AvidScript,
+		FAvidScriptLaneSet& AvidScript,
 		const EAvidScriptPerfLane Lane,
 		const EAvidScriptPerfWorkload Workload,
 		const bool bAvidScriptDispatchSucceeded,
@@ -1501,8 +1713,9 @@ namespace
 			OutObservation.Checksum = static_cast<uint32>(
 				Fixture.GetPuertsCallbackChecksum(Static.LaneId));
 			return true;
-		case EAvidScriptPerfLane::AvidScriptWamr:
-			return AvidScript.CollectCallbackWorkload(
+		case EAvidScriptPerfLane::AvidScriptWamrInterpreter:
+		case EAvidScriptPerfLane::AvidScriptWasmtimeJit:
+			return AvidScript.Get(Lane).CollectCallbackWorkload(
 				bAvidScriptDispatchSucceeded,
 				AvidScriptDispatchResult,
 				OutObservation.Checksum,
@@ -1518,7 +1731,7 @@ namespace
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
-		FAvidScriptLane& AvidScript,
+		FAvidScriptLaneSet& AvidScript,
 		const EAvidScriptPerfLane Lane,
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
@@ -1642,15 +1855,17 @@ namespace
 					static_cast<int32>(Seed));
 			}
 			break;
-		case EAvidScriptPerfLane::AvidScriptWamr:
+		case EAvidScriptPerfLane::AvidScriptWamrInterpreter:
+		case EAvidScriptPerfLane::AvidScriptWasmtimeJit:
 		{
+			FAvidScriptLane& SelectedAvidScript = AvidScript.Get(Lane);
 			if (IsCallbackWorkload(Workload))
 			{
 				if (bTimed)
 				{
 					StartCycles = FPlatformTime::Cycles64();
 					bAvidScriptCallbackDispatchSucceeded =
-						AvidScript.DispatchCallbackWorkload(
+						SelectedAvidScript.DispatchCallbackWorkload(
 							Workload,
 							Iterations,
 							AvidScriptCallbackDispatchResult,
@@ -1660,7 +1875,7 @@ namespace
 				else
 				{
 					bAvidScriptCallbackDispatchSucceeded =
-						AvidScript.DispatchCallbackWorkload(
+						SelectedAvidScript.DispatchCallbackWorkload(
 							Workload,
 							Iterations,
 							AvidScriptCallbackDispatchResult,
@@ -1670,7 +1885,7 @@ namespace
 			}
 
 			int32 PackedWorkload = 0;
-			if (!AvidScript.PrepareWorkload(
+			if (!SelectedAvidScript.PrepareWorkload(
 				Workload,
 				Iterations,
 				Seed,
@@ -1685,7 +1900,7 @@ namespace
 			{
 				StartCycles = FPlatformTime::Cycles64();
 				bDispatchSucceeded =
-					AvidScript.DispatchWorkload(
+					SelectedAvidScript.DispatchWorkload(
 						PackedWorkload,
 						Seed,
 						DispatchResult);
@@ -1694,12 +1909,12 @@ namespace
 			else
 			{
 				bDispatchSucceeded =
-					AvidScript.DispatchWorkload(
+					SelectedAvidScript.DispatchWorkload(
 						PackedWorkload,
 						Seed,
 						DispatchResult);
 			}
-			if (!AvidScript.CollectWorkloadResult(
+			if (!SelectedAvidScript.CollectWorkloadResult(
 				bDispatchSucceeded,
 				DispatchResult,
 				OutObservation.Checksum,
@@ -1752,6 +1967,10 @@ namespace
 		OutObservation.FinalScalar = Fixture.ScalarValue;
 		OutObservation.OperationCallCount =
 			Fixture.GetOperationCallCount(static_cast<int32>(Workload));
+		if (IsAvidScriptPerfLane(Lane))
+		{
+			OutObservation.BackendInfo = AvidScript.Get(Lane).BackendInfoJson;
+		}
 		return true;
 	}
 
@@ -1765,7 +1984,7 @@ namespace
 		const uint64 ExpectedOperationCallCount =
 			GetExpectedOperationCallCount(Workload, Iterations);
 		const int32 ExpectedHostImportCallCount =
-			Observation.Lane == EAvidScriptPerfLane::AvidScriptWamr
+			IsAvidScriptPerfLane(Observation.Lane)
 				? GetExpectedAvidScriptHostCallCount(Workload, Iterations)
 				: 0;
 		if (Oracle.OperationCallCount != ExpectedOperationCallCount ||
@@ -1800,7 +2019,7 @@ namespace
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
-		FAvidScriptLane& AvidScript,
+		FAvidScriptLaneSet& AvidScript,
 		const FPerfBenchmarkRequest& Request,
 		const int32 WorkloadIndex,
 		const int32 SampleIndex,
@@ -1860,7 +2079,7 @@ namespace
 					Request.Workloads[WorkloadIndex],
 					Iterations);
 			Observation.ExpectedHostImportCallCount =
-				Lane == EAvidScriptPerfLane::AvidScriptWamr
+				IsAvidScriptPerfLane(Lane)
 					? GetExpectedAvidScriptHostCallCount(
 						Request.Workloads[WorkloadIndex],
 						Iterations)
@@ -1874,7 +2093,7 @@ namespace
 		AAvidScriptPerfFixture& Fixture,
 		FPuertsLane& Reflection,
 		FPuertsLane& Static,
-		FAvidScriptLane& AvidScript,
+		FAvidScriptLaneSet& AvidScript,
 		const FPerfBenchmarkRequest& Request,
 		const int32 WorkloadIndex,
 		const EAvidScriptPerfLane Lane,
@@ -2008,6 +2227,9 @@ namespace
 		const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
 		SetExactIntegerField(Object, TEXT("process_run"), Sample.ProcessRun);
 		Object->SetStringField(TEXT("lane"), GetPerfLaneName(Sample.Lane));
+		Object->SetStringField(
+			TEXT("lane_identity_sha256"),
+			Sample.LaneIdentitySha256);
 		SetExactIntegerField(Object, TEXT("lane_position"), Sample.LanePosition);
 		Object->SetStringField(
 			TEXT("workload"),
@@ -2046,6 +2268,10 @@ namespace
 			TEXT("expected_host_import_call_count"),
 			Sample.ExpectedHostImportCallCount);
 		Object->SetBoolField(TEXT("correct"), true);
+		if (Sample.BackendInfo.IsValid())
+		{
+			Object->SetObjectField(TEXT("backend_info"), Sample.BackendInfo.ToSharedRef());
+		}
 		return Object;
 	}
 
@@ -2066,6 +2292,10 @@ namespace
 			TEXT("timer_frequency_hz"),
 			static_cast<uint64>(
 				1.0 / FPlatformTime::GetSecondsPerCycle64()));
+		Root->SetArrayField(TEXT("lane_catalog"), Request.LaneCatalogJson);
+		Root->SetStringField(
+			TEXT("lane_catalog_sha256"),
+			Request.LaneCatalogSha256);
 		Root->SetObjectField(TEXT("provenance"), Request.Provenance.ToSharedRef());
 
 		if (Request.Mode == EAvidScriptPerfBenchmarkMode::Calibrate)
@@ -2263,8 +2493,50 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 	{
 		return false;
 	}
-	FAvidScriptLane AvidScript;
-	if (!AvidScript.Initialize(*Fixture, OutError))
+	FAvidScriptLaneSet AvidScript;
+	FAvidScriptVmBackendSelection WamrSelection;
+	WamrSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
+	WamrSelection.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	WamrSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	WamrSelection.bAllowFallback = false;
+	const FPerfLaneCatalogEntry& WamrCatalog =
+		Request.LaneCatalog[static_cast<int32>(
+			EAvidScriptPerfLane::AvidScriptWamrInterpreter)];
+	if (!AvidScript.WamrInterpreter.Initialize(
+			WamrSelection,
+			WamrCatalog.BackendId,
+			WamrCatalog.RuntimeVersion,
+			WamrCatalog.ExecutionMode,
+			WamrCatalog.ArtifactFormat,
+			WamrCatalog.ArtifactSha256,
+			WamrCatalog.SourceWasmSha256,
+			WamrCatalog.TargetTriple,
+			WamrCatalog.RuntimeBuildIdentity,
+			*Fixture,
+			OutError))
+	{
+		return false;
+	}
+	FAvidScriptVmBackendSelection WasmtimeSelection;
+	WasmtimeSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	WasmtimeSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	WasmtimeSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	WasmtimeSelection.bAllowFallback = false;
+	const FPerfLaneCatalogEntry& WasmtimeCatalog =
+		Request.LaneCatalog[static_cast<int32>(
+			EAvidScriptPerfLane::AvidScriptWasmtimeJit)];
+	if (!AvidScript.WasmtimeJit.Initialize(
+			WasmtimeSelection,
+			WasmtimeCatalog.BackendId,
+			WasmtimeCatalog.RuntimeVersion,
+			WasmtimeCatalog.ExecutionMode,
+			WasmtimeCatalog.ArtifactFormat,
+			WasmtimeCatalog.ArtifactSha256,
+			WasmtimeCatalog.SourceWasmSha256,
+			WasmtimeCatalog.TargetTriple,
+			WasmtimeCatalog.RuntimeBuildIdentity,
+			*Fixture,
+			OutError))
 	{
 		return false;
 	}
@@ -2383,6 +2655,9 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					FPerfSample& Sample = Samples.AddDefaulted_GetRef();
 					Sample.ProcessRun = Request.ProcessRun;
 					Sample.Lane = Observation.Lane;
+					Sample.LaneIdentitySha256 =
+						Request.LaneCatalog[static_cast<int32>(Observation.Lane)]
+							.LaneIdentitySha256;
 					Sample.LanePosition = Observation.LanePosition;
 					Sample.Workload = Workload;
 					Sample.SampleIndex = SampleIndex;
@@ -2403,6 +2678,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 						Observation.HostImportCallCount;
 					Sample.ExpectedHostImportCallCount =
 						Observation.ExpectedHostImportCallCount;
+					Sample.BackendInfo = Observation.BackendInfo;
 				}
 			}
 		}
@@ -2416,7 +2692,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 		OutError);
 }
 
-bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
+bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 	const int32 IterationsPerWorkload,
 	const int32 Seed,
 	FAvidScriptPerfSmokeResult& OutResult)
@@ -2468,8 +2744,45 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 		OutResult.Error = MoveTemp(Error);
 		return false;
 	}
-	FAvidScriptLane AvidScript;
-	if (!AvidScript.Initialize(*Fixture, Error))
+	FAvidScriptLaneSet AvidScript;
+	FAvidScriptVmBackendSelection WamrSelection;
+	WamrSelection.BackendKind = EAvidScriptVmBackendKind::Wamr;
+	WamrSelection.ExecutionMode = EAvidScriptVmExecutionMode::Interpreter;
+	WamrSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	WamrSelection.bAllowFallback = false;
+	if (!AvidScript.WamrInterpreter.Initialize(
+			WamrSelection,
+			TEXT("wamr.interpreter"),
+			TEXT("2.4.4"),
+			TEXT("interpreter"),
+			TEXT("wasm_bytecode"),
+			FString(),
+			FString(),
+			TEXT("x86_64-pc-windows-msvc"),
+			TEXT("wamr-v2.4.4-x86_64-windows-fast-interp"),
+			*Fixture,
+			Error))
+	{
+		OutResult.Error = MoveTemp(Error);
+		return false;
+	}
+	FAvidScriptVmBackendSelection WasmtimeSelection;
+	WasmtimeSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	WasmtimeSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	WasmtimeSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	WasmtimeSelection.bAllowFallback = false;
+	if (!AvidScript.WasmtimeJit.Initialize(
+			WasmtimeSelection,
+			TEXT("wasmtime.cranelift.jit"),
+			TEXT("45.0.0"),
+			TEXT("jit"),
+			TEXT("wasm_bytecode"),
+			FString(),
+			FString(),
+			TEXT("x86_64-pc-windows-msvc"),
+			TEXT("wasmtime-v45.0.0-x86_64-windows-c-api"),
+			*Fixture,
+			Error))
 	{
 		OutResult.Error = MoveTemp(Error);
 		return false;
@@ -2480,8 +2793,10 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 	uint32 NativeAggregate = 0;
 	uint32 ReflectionAggregate = 0;
 	uint32 StaticAggregate = 0;
-	uint32 AvidScriptAggregate = 0;
-	uint64 AvidScriptHostCallCount = 0;
+	uint32 AvidScriptWamrAggregate = 0;
+	uint32 AvidScriptWasmtimeAggregate = 0;
+	uint64 AvidScriptWamrHostCallCount = 0;
+	uint64 AvidScriptWasmtimeHostCallCount = 0;
 
 	for (int32 WorkloadIndex = 0; WorkloadIndex < WorkloadCount; ++WorkloadIndex)
 	{
@@ -2536,10 +2851,16 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 				StaticAggregate = PerfRunnerMix(
 					StaticAggregate ^ Observation.Checksum);
 				break;
-			case EAvidScriptPerfLane::AvidScriptWamr:
-				AvidScriptAggregate = PerfRunnerMix(
-					AvidScriptAggregate ^ Observation.Checksum);
-				AvidScriptHostCallCount += static_cast<uint64>(
+			case EAvidScriptPerfLane::AvidScriptWamrInterpreter:
+				AvidScriptWamrAggregate = PerfRunnerMix(
+					AvidScriptWamrAggregate ^ Observation.Checksum);
+				AvidScriptWamrHostCallCount += static_cast<uint64>(
+					Observation.HostImportCallCount);
+				break;
+			case EAvidScriptPerfLane::AvidScriptWasmtimeJit:
+				AvidScriptWasmtimeAggregate = PerfRunnerMix(
+					AvidScriptWasmtimeAggregate ^ Observation.Checksum);
+				AvidScriptWasmtimeHostCallCount += static_cast<uint64>(
 					Observation.HostImportCallCount);
 				break;
 			default:
@@ -2554,7 +2875,9 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 	OutResult.NativeChecksum = NativeAggregate;
 	OutResult.PuertsReflectionChecksum = ReflectionAggregate;
 	OutResult.PuertsStaticChecksum = StaticAggregate;
-	OutResult.AvidScriptChecksum = AvidScriptAggregate;
-	OutResult.AvidScriptHostCallCount = AvidScriptHostCallCount;
+	OutResult.AvidScriptWamrChecksum = AvidScriptWamrAggregate;
+	OutResult.AvidScriptWasmtimeChecksum = AvidScriptWasmtimeAggregate;
+	OutResult.AvidScriptWamrHostCallCount = AvidScriptWamrHostCallCount;
+	OutResult.AvidScriptWasmtimeHostCallCount = AvidScriptWasmtimeHostCallCount;
 	return true;
 }

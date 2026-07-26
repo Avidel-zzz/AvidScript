@@ -4,15 +4,15 @@
 #include "Misc/AutomationTest.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptPerfFourLaneCorrectnessTest,
-	"AvidScript.PerformanceComparison.FourLane.Correctness",
+	FAvidScriptPerfFiveLaneCorrectnessTest,
+	"AvidScript.PerformanceComparison.FiveLane.Correctness",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptPerfFourLaneCorrectnessTest::RunTest(const FString& Parameters)
+bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 {
 	FAvidScriptPerfSmokeResult Result;
-	const bool bSucceeded = FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(64, 1397313, Result);
-	TestTrue(TEXT("four-lane correctness smoke succeeds"), bSucceeded);
+	const bool bSucceeded = FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(64, 1397313, Result);
+	TestTrue(TEXT("five-lane correctness smoke succeeds"), bSucceeded);
 	if (!bSucceeded)
 	{
 		AddError(Result.Error);
@@ -33,11 +33,18 @@ bool FAvidScriptPerfFourLaneCorrectnessTest::RunTest(const FString& Parameters)
 		Result.NativeChecksum);
 	TestEqual(
 		TEXT("AvidScript WAMR aggregate matches native"),
-		Result.AvidScriptChecksum,
+		Result.AvidScriptWamrChecksum,
+		Result.NativeChecksum);
+	TestEqual(
+		TEXT("AvidScript Wasmtime aggregate matches native"),
+		Result.AvidScriptWasmtimeChecksum,
 		Result.NativeChecksum);
 	TestTrue(
 		TEXT("AvidScript WAMR lane records host calls"),
-		Result.AvidScriptHostCallCount > 0);
+		Result.AvidScriptWamrHostCallCount > 0);
+	TestTrue(
+		TEXT("AvidScript Wasmtime lane records host calls"),
+		Result.AvidScriptWasmtimeHostCallCount > 0);
 	return true;
 }
 

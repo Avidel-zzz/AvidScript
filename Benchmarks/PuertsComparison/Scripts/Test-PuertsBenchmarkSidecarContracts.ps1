@@ -211,7 +211,7 @@ Assert-True ([int]$TrackedProfile.warmup_samples -eq 5) '正式 profile 必须�
 Assert-True ([int]$TrackedProfile.timed_samples -eq 30) '正式 profile 必须固定 30 个计时样本'
 Assert-Near ([double]$TrackedProfile.minimum_sample_milliseconds) 5.0 -Message '正式 profile 必须固定最短样本时间为 5.0 ms'
 $RequestSchema = Get-Content -LiteralPath $RequestSchemaPath -Raw | ConvertFrom-Json
-Assert-True ([int]$RequestSchema.properties.result_schema.properties.version.const -eq 1) 'request result_schema.version 必须固定为 const 1'
+Assert-True ([int]$RequestSchema.properties.result_schema.properties.version.const -eq 2) 'request result_schema.version 必须固定为 const 2'
 
 try {
     New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
@@ -302,28 +302,17 @@ try {
         })
 
     $ProfilePath = Join-Path $FixtureRoot 'profile.json'
-    $Profile = [ordered]@{
-        schema_version = 1
-        profile_id = 'sidecar-contract'
-        platform = 'Win64'
-        target = 'SidecarFixtureEditor'
-        configuration = 'Development'
-        null_rhi = $true
-        process_runs = 5
-        warmup_samples = 1
-        timed_samples = 3
-        minimum_sample_milliseconds = 0.1
-        minimum_iterations = 100
-        maximum_iterations = 100000
-        seed = 1397313
-        lanes = @(
-            'native_cpp',
-            'puerts_v8_reflection',
-            'puerts_v8_static',
-            'avidscript_wamr'
-        )
-        workloads = @('scalar_noop', 'property_get_set')
-    }
+    $Profile = Get-Content -LiteralPath (
+        Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json') -Raw | ConvertFrom-Json
+    $Profile.profile_id = 'sidecar-contract'
+    $Profile.target = 'SidecarFixtureEditor'
+    $Profile.process_runs = 5
+    $Profile.warmup_samples = 1
+    $Profile.timed_samples = 3
+    $Profile.minimum_sample_milliseconds = 0.1
+    $Profile.minimum_iterations = 100
+    $Profile.maximum_iterations = 100000
+    $Profile.workloads = @('scalar_noop', 'property_get_set')
     Write-NewJson $ProfilePath $Profile
 
     $FakeEditorPath = Join-Path $FixtureRoot 'Fake-UnrealEditor-Cmd.ps1'
@@ -384,6 +373,8 @@ if ([string]$Request.mode -ceq 'calibration') {
         schema_version = [int]$Request.result_schema.version
         calibration_id = [string]$Request.attempt_id
         timer_frequency_hz = 1000000000
+        lane_catalog = @($Request.lane_catalog)
+        lane_catalog_sha256 = [string]$Request.lane_catalog_sha256
         provenance = $Request.provenance
         iteration_counts = $IterationCounts
     }
@@ -410,12 +401,13 @@ elseif ([string]$Request.mode -ceq 'timed') {
         )
 
         $Rows = @(
-            @(0, 1, 3, 2),
-            @(1, 2, 0, 3),
-            @(2, 3, 1, 0),
-            @(3, 0, 2, 1)
+            @(0, 1, 4, 2, 3),
+            @(1, 2, 0, 3, 4),
+            @(2, 3, 1, 4, 0),
+            @(3, 4, 2, 0, 1),
+            @(4, 0, 3, 1, 2)
         )
-        $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 4 + 4) % 4
+        $Row = (($ProcessRun + $WorkloadIndex + $SampleIndex) % 5 + 5) % 5
         return @($Rows[$Row] | ForEach-Object { $BaseOrder[$_] })
     }
 
@@ -439,9 +431,11 @@ elseif ([string]$Request.mode -ceq 'timed') {
                 $Iterations = [int64]$Request.iteration_counts.$Workload.$Lane
                 $CyclesPerOperation = 1 + $SampleIndex + ($LaneIndex * 100) + ($WorkloadIndex * 1000)
                 $LaneChecksum = $Checksum + $LaneIndex
-                $Samples.Add([ordered]@{
+                $CatalogEntry = $Request.lane_catalog[$LaneIndex]
+                $Sample = [ordered]@{
                     process_run = [int]$Request.process_run
                     lane = $Lane
+                    lane_identity_sha256 = [string]$CatalogEntry.lane_identity_sha256
                     lane_position = $LanePosition
                     workload = $Workload
                     sample_index = $SampleIndex
@@ -457,7 +451,21 @@ elseif ([string]$Request.mode -ceq 'timed') {
                     host_import_call_count = [int64]($LaneIndex * $Iterations)
                     expected_host_import_call_count = [int64]($LaneIndex * $Iterations)
                     correct = $true
-                })
+                }
+                if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
+                    $Sample['backend_info'] = [ordered]@{
+                        backend_id = [string]$CatalogEntry.backend_id
+                        runtime_version = [string]$CatalogEntry.runtime_version
+                        execution_mode = [string]$CatalogEntry.execution_mode
+                        artifact_format = [string]$CatalogEntry.execution_artifact_format
+                        artifact_sha256 = [string]$CatalogEntry.execution_artifact_sha256
+                        source_wasm_sha256 = [string]$CatalogEntry.source_wasm_sha256
+                        target_triple = [string]$CatalogEntry.target_triple
+                        runtime_build_identity = [string]$CatalogEntry.runtime_build_identity
+                        fallback_used = $false
+                    }
+                }
+                $Samples.Add($Sample)
             }
         }
     }
@@ -466,6 +474,8 @@ elseif ([string]$Request.mode -ceq 'timed') {
         run_id = [string]$Request.attempt_id
         process_run = [int]$Request.process_run
         lane_order = @($Request.lane_order)
+        lane_catalog = @($Request.lane_catalog)
+        lane_catalog_sha256 = [string]$Request.lane_catalog_sha256
         timer_frequency_hz = 1000000000
         provenance = $Request.provenance
         samples = $Samples
@@ -693,11 +703,11 @@ Write-Output "假 Editor PID=$PID"
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Manifest.provenance.editor_file_version)) 'fixture attempt 未记录 editor 文件版本'
 
     $ExpectedLaneOrders = @(
-        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr',
-        'puerts_v8_reflection,puerts_v8_static,avidscript_wamr,native_cpp',
-        'puerts_v8_static,avidscript_wamr,native_cpp,puerts_v8_reflection',
-        'avidscript_wamr,native_cpp,puerts_v8_reflection,puerts_v8_static',
-        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr'
+        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit',
+        'puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp',
+        'puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection',
+        'avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection,puerts_v8_static',
+        'avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter'
     )
     $ProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     $CalibrationProcess = Get-Content -LiteralPath (Join-Path $FirstAttempt $Manifest.calibration.process_metadata_path) -Raw | ConvertFrom-Json
@@ -707,7 +717,7 @@ Write-Output "假 Editor PID=$PID"
         $RunDirectory = Join-Path $FirstAttempt ('runs/{0:D2}' -f $ProcessRun)
         $Request = Get-Content -LiteralPath (Join-Path $RunDirectory 'request.json') -Raw | ConvertFrom-Json
         $Process = Get-Content -LiteralPath (Join-Path $RunDirectory 'process.json') -Raw | ConvertFrom-Json
-        Assert-True ([int]$Request.schema_version -eq 1) "进程 $ProcessRun request 缺少 schema_version"
+        Assert-True ([int]$Request.schema_version -eq 2) "进程 $ProcessRun request 缺少 schema_version"
         Assert-True ([string]$Request.mode -ceq 'timed') "进程 $ProcessRun request 不是 timed 模式"
         Assert-True ((@($Request.lane_order) -join ',') -ceq $ExpectedLaneOrders[$ProcessRun]) "lane 顺序未按进程轮转：$ProcessRun"
         Assert-True ([int]$Request.warmup_samples -eq 1) "进程 $ProcessRun 未使用 fixture profile 预热次数"
@@ -731,11 +741,11 @@ Write-Output "假 Editor PID=$PID"
     Assert-True ($AggregateRaw | Test-Json -SchemaFile $AggregateSchemaSnapshotPath) '聚合结果不符合 attempt 固定 Schema'
     $Aggregate = $AggregateRaw | ConvertFrom-Json
     Assert-True ($Aggregate.aggregate_schema.sha256 -ceq $Manifest.aggregate_schema.sha256) '聚合结果未记录 aggregate schema 哈希'
-    Assert-True ([int]$Aggregate.samples.Count -eq 120) '聚合结果未保留全部 raw samples'
-    Assert-True ([int]$Aggregate.process_statistics.Count -eq 40) '每进程统计矩阵不完整'
-    Assert-True ([int]$Aggregate.cross_process_statistics.Count -eq 8) '跨进程统计矩阵不完整'
-    Assert-True ([int]$Aggregate.paired_comparisons.Count -eq 6) '同进程配对比较矩阵不完整'
-    Assert-True ([int]$Aggregate.descriptive_pooled_statistics.Count -eq 8) '池化描述统计矩阵不完整'
+    Assert-True ([int]$Aggregate.samples.Count -eq 150) '聚合结果未保留全部 raw samples'
+    Assert-True ([int]$Aggregate.process_statistics.Count -eq 50) '每进程统计矩阵不完整'
+    Assert-True ([int]$Aggregate.cross_process_statistics.Count -eq 10) '跨进程统计矩阵不完整'
+    Assert-True ([int]$Aggregate.paired_comparisons.Count -eq 8) '同进程配对比较矩阵不完整'
+    Assert-True ([int]$Aggregate.descriptive_pooled_statistics.Count -eq 10) '池化描述统计矩阵不完整'
     $ScalarNativeProcess = @($Aggregate.process_statistics | Where-Object {
         [int]$_.process_run -eq 0 -and
         $_.lane -ceq 'native_cpp' -and $_.workload -ceq 'scalar_noop'
@@ -858,8 +868,8 @@ Write-Output "假 Editor PID=$PID"
     $MixedIterationRequest = Copy-AttemptFixture $FirstAttempt 'mixed-iteration-request'
     $TimedRequestPath = Join-Path $MixedIterationRequest 'runs/02/request.json'
     $TimedRequest = Get-Content -LiteralPath $TimedRequestPath -Raw | ConvertFrom-Json
-    $TimedRequest.iteration_counts.scalar_noop.avidscript_wamr =
-        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wamr + 1
+    $TimedRequest.iteration_counts.scalar_noop.avidscript_wamr_interpreter =
+        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wamr_interpreter + 1
     Write-NewJson $TimedRequestPath $TimedRequest
     $MixedIterationManifestPath = Join-Path $MixedIterationRequest 'attempt.json'
     $MixedIterationManifest = Get-Content -LiteralPath $MixedIterationManifestPath -Raw | ConvertFrom-Json
@@ -968,6 +978,36 @@ Write-Output "假 Editor PID=$PID"
     Invoke-ExpectedFailure {
         & $AggregatorPath -AttemptPath $BadIterations -Mode Validate | Out-Null
     } 'ASP53S2044'
+
+    $BadLaneIdentity = Copy-AndMutateRawResult $FirstAttempt 'bad-lane-identity' {
+        param($Raw)
+        $Raw.samples[0].lane_identity_sha256 = '0' * 64
+    }
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $BadLaneIdentity -Mode Validate | Out-Null
+    } 'ASP54S2053'
+
+    $BadBackendIdentity = Copy-AndMutateRawResult $FirstAttempt 'bad-backend-identity' {
+        param($Raw)
+        $Sample = @($Raw.samples | Where-Object {
+            $_.lane -ceq 'avidscript_wasmtime_jit'
+        })[0]
+        $Sample.backend_info.runtime_version = 'wrong-runtime'
+    }
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $BadBackendIdentity -Mode Validate | Out-Null
+    } 'ASP54S2054'
+
+    $FallbackUsed = Copy-AndMutateRawResult $FirstAttempt 'fallback-used' {
+        param($Raw)
+        $Sample = @($Raw.samples | Where-Object {
+            $_.lane -ceq 'avidscript_wasmtime_jit'
+        })[0]
+        $Sample.backend_info.fallback_used = $true
+    }
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $FallbackUsed -Mode Validate | Out-Null
+    } 'ASP53S2005'
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {
@@ -975,4 +1015,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 schema_v2=1 raw_samples=150 process_stats=50 cross_process_stats=10 paired=8 identity_rejections=3 mixed_rejections=4'

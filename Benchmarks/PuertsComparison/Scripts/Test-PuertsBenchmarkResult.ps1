@@ -44,11 +44,25 @@ $ExpectedLanes = @($Profile.lanes | ForEach-Object { [string]$_ })
 $ExpectedWorkloads = @($Profile.workloads | ForEach-Object { [string]$_ })
 $ExpectedProcessRuns = [int]$Profile.process_runs
 $ExpectedSamples = [int]$Profile.timed_samples
-if ($ExpectedLanes.Count -ne 4 -or
+if ([int]$Profile.schema_version -ne 2 -or
+    $ExpectedLanes.Count -ne 5 -or
     $ExpectedWorkloads.Count -lt 1 -or
     $ExpectedProcessRuns -lt 1 -or
     $ExpectedSamples -lt 1) {
-    throw 'ASP53R1002 benchmark profile does not define a valid four-lane result matrix'
+    throw 'ASP53R1002 benchmark profile does not define a valid canonical five-lane result matrix'
+}
+if (@($Result.lane_catalog).Count -ne $ExpectedLanes.Count -or
+    [string]$Result.lane_catalog_sha256 -cne [string]$Result.provenance.lane_catalog_sha256) {
+    throw 'ASP54R1012 result lane catalog/hash is incomplete or inconsistent'
+}
+$LaneIdentityById = @{}
+for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
+    $ExpectedLane = $ExpectedLanes[$LaneIndex]
+    $CatalogEntry = $Result.lane_catalog[$LaneIndex]
+    if ([string]$CatalogEntry.lane_id -cne $ExpectedLane) {
+        throw "ASP54R1012 result lane catalog order mismatch: lane=$ExpectedLane"
+    }
+    $LaneIdentityById[$ExpectedLane] = [string]$CatalogEntry.lane_identity_sha256
 }
 
 $ExpectedCount = $ExpectedLanes.Count *
@@ -68,6 +82,24 @@ foreach ($Sample in $Samples) {
     $SampleIndex = [int]$Sample.sample_index
     if ($Lane -cnotin $ExpectedLanes) {
         throw "ASP53R1004 unknown lane: $Lane"
+    }
+    if ([string]$Sample.lane_identity_sha256 -cne [string]$LaneIdentityById[$Lane]) {
+        throw "ASP54R1012 sample lane identity mismatch: lane=$Lane"
+    }
+    if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
+        $CatalogEntry = @($Result.lane_catalog | Where-Object { [string]$_.lane_id -ceq $Lane })[0]
+        if ($null -eq $Sample.backend_info -or
+            [bool]$Sample.backend_info.fallback_used -or
+            [string]$Sample.backend_info.backend_id -cne [string]$CatalogEntry.backend_id -or
+            [string]$Sample.backend_info.runtime_version -cne [string]$CatalogEntry.runtime_version -or
+            [string]$Sample.backend_info.execution_mode -cne [string]$CatalogEntry.execution_mode -or
+            [string]$Sample.backend_info.artifact_format -cne [string]$CatalogEntry.execution_artifact_format -or
+            [string]$Sample.backend_info.artifact_sha256 -cne [string]$CatalogEntry.execution_artifact_sha256 -or
+            [string]$Sample.backend_info.source_wasm_sha256 -cne [string]$CatalogEntry.source_wasm_sha256 -or
+            [string]$Sample.backend_info.target_triple -cne [string]$CatalogEntry.target_triple -or
+            [string]$Sample.backend_info.runtime_build_identity -cne [string]$CatalogEntry.runtime_build_identity) {
+            throw "ASP54R1013 AvidScript backend provenance mismatch: lane=$Lane"
+        }
     }
     if ($Workload -cnotin $ExpectedWorkloads) {
         throw "ASP53R1005 unknown workload: $Workload"
@@ -89,7 +121,6 @@ foreach ($Sample in $Samples) {
 foreach ($ProcessRun in 0..($ExpectedProcessRuns - 1)) {
     foreach ($Workload in $ExpectedWorkloads) {
         foreach ($SampleIndex in 0..($ExpectedSamples - 1)) {
-            $ReferenceIterations = $null
             $ReferenceChecksum = $null
             foreach ($Lane in $ExpectedLanes) {
                 $Key = "$ProcessRun|$Workload|$SampleIndex|$Lane"
@@ -97,12 +128,8 @@ foreach ($ProcessRun in 0..($ExpectedProcessRuns - 1)) {
                     throw "ASP53R1009 missing sample: $Key"
                 }
                 $Sample = $SamplesByKey[$Key]
-                if ($null -eq $ReferenceIterations) {
-                    $ReferenceIterations = [int64]$Sample.iterations
+                if ($null -eq $ReferenceChecksum) {
                     $ReferenceChecksum = [int64]$Sample.checksum
-                }
-                elseif ([int64]$Sample.iterations -ne $ReferenceIterations) {
-                    throw "ASP53R1010 iteration mismatch across lanes: process=$ProcessRun workload=$Workload sample=$SampleIndex"
                 }
                 elseif ([int64]$Sample.checksum -ne $ReferenceChecksum) {
                     throw "ASP53R1011 checksum mismatch across lanes: process=$ProcessRun workload=$Workload sample=$SampleIndex"

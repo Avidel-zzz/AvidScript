@@ -87,8 +87,15 @@ Assert-True ($AvidScriptWorkload.Contains('[AvidPersist]')) 'AvidScript lane mus
 Assert-True ($AvidScriptProfile.binding_profile.self_class_path -ceq '/Script/AvidScriptPerfHarness.AvidScriptPerfFixture') 'AvidScript profile self class must be the shared fixture'
 
 $Profile = Read-RequiredText 'Config/BenchmarkProfile.json' | ConvertFrom-Json
-$ExpectedLanes = @('native_cpp', 'puerts_v8_reflection', 'puerts_v8_static', 'avidscript_wamr')
-Assert-True (@($Profile.lanes).Count -eq $ExpectedLanes.Count) 'benchmark profile must contain exactly four lanes'
+$ExpectedLanes = @(
+    'native_cpp',
+    'puerts_v8_reflection',
+    'puerts_v8_static',
+    'avidscript_wamr_interpreter',
+    'avidscript_wasmtime_jit'
+)
+Assert-True ([int]$Profile.schema_version -eq 2) 'benchmark profile must use schema v2'
+Assert-True (@($Profile.lanes).Count -eq $ExpectedLanes.Count) 'benchmark profile must contain exactly five lanes'
 for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
     Assert-True ([string]$Profile.lanes[$Index] -ceq $ExpectedLanes[$Index]) "benchmark lane order mismatch at index $Index"
 }
@@ -112,4 +119,4 @@ $PrivateKeyToken = @('BEGIN', 'OPENSSH', 'PRIVATE', 'KEY') -join ' '
 Assert-True (-not $TrackedText.Contains($UserProfileToken)) 'benchmark sources must not contain a user-profile absolute path'
 Assert-True (-not $TrackedText.Contains($PrivateKeyToken)) 'benchmark sources must not contain private key material'
 
-Write-Output 'Puerts benchmark architecture passed: production_isolation=1 lanes=4 shared_fixture=1 provenance=1 privacy=1'
+Write-Output 'Puerts benchmark architecture passed: production_isolation=1 lanes=5 shared_fixture=1 provenance=1 privacy=1'

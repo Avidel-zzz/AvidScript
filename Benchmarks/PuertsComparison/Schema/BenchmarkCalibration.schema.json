@@ -7,16 +7,20 @@
     "schema_version",
     "calibration_id",
     "timer_frequency_hz",
+    "lane_catalog",
+    "lane_catalog_sha256",
     "provenance",
     "iteration_counts"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "calibration_id": {
       "type": "string",
       "pattern": "^[0-9a-f-]{36}$"
     },
     "timer_frequency_hz": { "type": "integer", "minimum": 1 },
+    "lane_catalog": { "$ref": "#/$defs/lane_catalog" },
+    "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },
     "provenance": {
       "type": "object",
       "additionalProperties": false,
@@ -45,7 +49,8 @@
         "request_schema_sha256",
         "calibration_schema_sha256",
         "result_schema_sha256",
-        "aggregate_schema_sha256"
+        "aggregate_schema_sha256",
+        "lane_catalog_sha256"
       ],
       "properties": {
         "ue_version": { "type": "string", "minLength": 1 },
@@ -72,7 +77,8 @@
         "request_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "calibration_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "result_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "aggregate_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "aggregate_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "lane_catalog_sha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "iteration_counts": {
@@ -85,14 +91,67 @@
           "native_cpp",
           "puerts_v8_reflection",
           "puerts_v8_static",
-          "avidscript_wamr"
+          "avidscript_wamr_interpreter",
+          "avidscript_wasmtime_jit"
         ],
         "properties": {
           "native_cpp": { "type": "integer", "minimum": 1 },
           "puerts_v8_reflection": { "type": "integer", "minimum": 1 },
           "puerts_v8_static": { "type": "integer", "minimum": 1 },
-          "avidscript_wamr": { "type": "integer", "minimum": 1 }
+          "avidscript_wamr_interpreter": { "type": "integer", "minimum": 1 },
+          "avidscript_wasmtime_jit": { "type": "integer", "minimum": 1 }
         }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "lane_id": {
+      "enum": [
+        "native_cpp",
+        "puerts_v8_reflection",
+        "puerts_v8_static",
+        "avidscript_wamr_interpreter",
+        "avidscript_wasmtime_jit"
+      ]
+    },
+    "lane_catalog": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/lane_catalog_entry" }
+    },
+    "lane_catalog_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id", "runtime_id", "runtime_version", "execution_tier", "adapter_id",
+        "wasm_workload_kind", "source_wasm_sha256", "execution_artifact_format",
+        "execution_artifact_sha256", "compiler_identity", "compiler_flags",
+        "runtime_build_config", "runtime_build_identity", "target_triple",
+        "cpu_feature_policy", "backend_id", "execution_mode", "fallback_used",
+        "lane_identity_sha256"
+      ],
+      "properties": {
+        "lane_id": { "$ref": "#/$defs/lane_id" },
+        "runtime_id": { "type": "string", "minLength": 1 },
+        "runtime_version": { "type": "string", "minLength": 1 },
+        "execution_tier": { "type": "string", "minLength": 1 },
+        "adapter_id": { "type": "string", "minLength": 1 },
+        "wasm_workload_kind": { "enum": ["not_applicable", "fixed_equivalent_kernel", "csharp_frontend_output"] },
+        "source_wasm_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "execution_artifact_format": { "type": "string", "minLength": 1 },
+        "execution_artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "compiler_identity": { "type": "string", "minLength": 1 },
+        "compiler_flags": { "type": "array", "items": { "type": "string" } },
+        "runtime_build_config": { "type": "string", "minLength": 1 },
+        "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "target_triple": { "type": "string", "minLength": 1 },
+        "cpu_feature_policy": { "type": "string", "minLength": 1 },
+        "backend_id": { "type": ["string", "null"] },
+        "execution_mode": { "type": "string", "minLength": 1 },
+        "fallback_used": { "const": false },
+        "lane_identity_sha256": { "$ref": "#/$defs/sha256" }
       }
     }
   }

@@ -6,19 +6,19 @@
   "required": [
     "schema_version",
     "run_id",
+    "lane_catalog",
+    "lane_catalog_sha256",
     "provenance",
     "samples"
   ],
   "properties": {
-    "schema_version": {
-      "const": 1
-    },
-    "run_id": {
-      "type": "string",
-      "pattern": "^[0-9a-f-]{36}$"
-    },
+    "schema_version": { "const": 2 },
+    "run_id": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+    "lane_catalog": { "$ref": "#/$defs/lane_catalog" },
+    "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },
     "provenance": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "ue_version",
         "ue_build_id",
@@ -27,9 +27,9 @@
         "avidscript_commit",
         "puerts_commit",
         "puerts_backend_sha256",
-        "profile_id"
+        "profile_id",
+        "lane_catalog_sha256"
       ],
-      "additionalProperties": false,
       "properties": {
         "ue_version": { "type": "string", "minLength": 1 },
         "ue_build_id": { "type": "string", "minLength": 1 },
@@ -37,44 +37,145 @@
         "configuration": { "type": "string", "minLength": 1 },
         "avidscript_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "puerts_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "puerts_backend_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "profile_id": { "type": "string", "minLength": 1 }
+        "puerts_backend_sha256": { "$ref": "#/$defs/sha256" },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "lane_catalog_sha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "samples": {
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "process_run",
-          "lane",
-          "workload",
-          "sample_index",
-          "iterations",
-          "elapsed_cycles",
-          "checksum",
-          "correct"
-        ],
-        "properties": {
-          "process_run": { "type": "integer", "minimum": 0 },
-          "lane": {
-            "enum": [
-              "native_cpp",
-              "puerts_v8_reflection",
-              "puerts_v8_static",
-              "avidscript_wamr"
-            ]
-          },
-          "workload": { "type": "string", "minLength": 1 },
-          "sample_index": { "type": "integer", "minimum": 0 },
-          "iterations": { "type": "integer", "minimum": 1 },
-          "elapsed_cycles": { "type": "integer", "minimum": 1 },
-          "checksum": { "type": "integer" },
-          "correct": { "const": true }
-        }
+      "items": { "$ref": "#/$defs/sample" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "lane_id": {
+      "enum": [
+        "native_cpp",
+        "puerts_v8_reflection",
+        "puerts_v8_static",
+        "avidscript_wamr_interpreter",
+        "avidscript_wasmtime_jit"
+      ]
+    },
+    "lane_catalog": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "native_cpp" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_reflection" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wamr_interpreter" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_jit" } } }] }
+      ]
+    },
+    "lane_catalog_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id",
+        "runtime_id",
+        "runtime_version",
+        "execution_tier",
+        "adapter_id",
+        "wasm_workload_kind",
+        "source_wasm_sha256",
+        "execution_artifact_format",
+        "execution_artifact_sha256",
+        "compiler_identity",
+        "compiler_flags",
+        "runtime_build_config",
+        "runtime_build_identity",
+        "target_triple",
+        "cpu_feature_policy",
+        "backend_id",
+        "execution_mode",
+        "fallback_used",
+        "lane_identity_sha256"
+      ],
+      "properties": {
+        "lane_id": { "$ref": "#/$defs/lane_id" },
+        "runtime_id": { "type": "string", "minLength": 1 },
+        "runtime_version": { "type": "string", "minLength": 1 },
+        "execution_tier": { "type": "string", "minLength": 1 },
+        "adapter_id": { "type": "string", "minLength": 1 },
+        "wasm_workload_kind": { "enum": ["not_applicable", "fixed_equivalent_kernel", "csharp_frontend_output"] },
+        "source_wasm_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "execution_artifact_format": { "type": "string", "minLength": 1 },
+        "execution_artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "compiler_identity": { "type": "string", "minLength": 1 },
+        "compiler_flags": { "type": "array", "items": { "type": "string" } },
+        "runtime_build_config": { "type": "string", "minLength": 1 },
+        "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "target_triple": { "type": "string", "minLength": 1 },
+        "cpu_feature_policy": { "type": "string", "minLength": 1 },
+        "backend_id": { "type": ["string", "null"] },
+        "execution_mode": { "type": "string", "minLength": 1 },
+        "fallback_used": { "const": false },
+        "lane_identity_sha256": { "$ref": "#/$defs/sha256" }
       }
+    },
+    "backend_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend_id",
+        "runtime_version",
+        "execution_mode",
+        "artifact_format",
+        "artifact_sha256",
+        "source_wasm_sha256",
+        "target_triple",
+        "runtime_build_identity",
+        "fallback_used"
+      ],
+      "properties": {
+        "backend_id": { "type": "string", "minLength": 1 },
+        "runtime_version": { "type": "string", "minLength": 1 },
+        "execution_mode": { "enum": ["interpreter", "jit"] },
+        "artifact_format": { "const": "wasm_bytecode" },
+        "artifact_sha256": { "$ref": "#/$defs/sha256" },
+        "source_wasm_sha256": { "$ref": "#/$defs/sha256" },
+        "target_triple": { "type": "string", "minLength": 1 },
+        "runtime_build_identity": { "type": "string", "minLength": 1 },
+        "fallback_used": { "const": false }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "process_run",
+        "lane",
+        "lane_identity_sha256",
+        "workload",
+        "sample_index",
+        "iterations",
+        "elapsed_cycles",
+        "checksum",
+        "correct"
+      ],
+      "properties": {
+        "process_run": { "type": "integer", "minimum": 0 },
+        "lane": { "$ref": "#/$defs/lane_id" },
+        "lane_identity_sha256": { "$ref": "#/$defs/sha256" },
+        "workload": { "type": "string", "minLength": 1 },
+        "sample_index": { "type": "integer", "minimum": 0 },
+        "iterations": { "type": "integer", "minimum": 1 },
+        "elapsed_cycles": { "type": "integer", "minimum": 1 },
+        "checksum": { "type": "integer" },
+        "correct": { "const": true },
+        "backend_info": { "$ref": "#/$defs/backend_info" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "lane": { "enum": ["avidscript_wamr_interpreter", "avidscript_wasmtime_jit"] } } },
+          "then": { "required": ["backend_info"] },
+          "else": { "properties": { "backend_info": false } }
+        }
+      ]
     }
   }
 }

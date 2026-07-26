@@ -223,11 +223,11 @@ $RequestSchemaVersion = [int]$RequestSchema.properties.schema_version.const
 $CalibrationSchemaVersion = [int]$CalibrationSchema.properties.schema_version.const
 $ResultSchemaVersion = [int]$ResultSchema.properties.schema_version.const
 $AggregateSchemaVersion = [int]$AggregateSchema.properties.schema_version.const
-if ($RequestSchemaVersion -ne 1 -or
-    $CalibrationSchemaVersion -ne 1 -or
-    $ResultSchemaVersion -ne 1 -or
+if ($RequestSchemaVersion -ne 2 -or
+    $CalibrationSchemaVersion -ne 2 -or
+    $ResultSchemaVersion -ne 2 -or
     $AggregateSchemaVersion -ne 2) {
-    throw 'ASP53S2107 request/calibration/result/aggregate Schema 版本不符合固定合同'
+    throw 'ASP54S2107 request/calibration/result/aggregate Schema 版本不符合 Phase 54 固定合同'
 }
 
 if (-not (Test-Path -LiteralPath $ResolvedOutputRoot)) {
@@ -267,6 +267,19 @@ $RequestSchemaSha256 = Get-SidecarFileSha256 -Path $RequestSchemaSnapshotPath
 $CalibrationSchemaSha256 = Get-SidecarFileSha256 -Path $CalibrationSchemaSnapshotPath
 $ResultSchemaSha256 = Get-SidecarFileSha256 -Path $ResultSchemaSnapshotPath
 $AggregateSchemaSha256 = Get-SidecarFileSha256 -Path $AggregateSchemaSnapshotPath
+$LaneCatalogResolution = New-SidecarResolvedLaneCatalog `
+    -Profile $Profile `
+    -Tokens @{
+        '${ue_version}' = $UeVersion
+        '${ue_build_id}' = $UeBuildId
+        '${editor_executable_sha256}' = [string]$EditorIdentity.sha256
+        '${avidscript_tree_sha}' = $AvidScriptTreeSha
+        '${puerts_commit}' = $PuertsCommit
+        '${puerts_backend_sha256}' = $PuertsBackendSha256
+        '${wasm_sha256}' = $WasmSha256
+    }
+$LaneCatalog = @($LaneCatalogResolution.entries)
+$LaneCatalogSha256 = [string]$LaneCatalogResolution.sha256
 
 $Provenance = [pscustomobject][ordered]@{
     ue_version = $UeVersion
@@ -293,6 +306,7 @@ $Provenance = [pscustomobject][ordered]@{
     calibration_schema_sha256 = $CalibrationSchemaSha256
     result_schema_sha256 = $ResultSchemaSha256
     aggregate_schema_sha256 = $AggregateSchemaSha256
+    lane_catalog_sha256 = $LaneCatalogSha256
     allow_non_formal_profile = [bool]$AllowNonFormalProfile
 }
 
@@ -314,6 +328,8 @@ function New-BenchmarkRequest {
         process_run = $ProcessRun
         lane_order = @($LaneOrder)
         lanes = @($Profile.lanes)
+        lane_catalog = $LaneCatalog
+        lane_catalog_sha256 = $LaneCatalogSha256
         workloads = @($Profile.workloads)
         warmup_samples = [int]$Profile.warmup_samples
         timed_samples = if ($Mode -ceq 'timed') { [int]$Profile.timed_samples } else { 0 }
@@ -468,7 +484,9 @@ $ValidatedCalibration = Test-SidecarCalibrationResult `
     -ResultPath $CalibrationResultPath `
     -SchemaPath $CalibrationSchemaSnapshotPath `
     -Profile $Profile `
-    -ExpectedProvenance $Provenance
+    -ExpectedProvenance $Provenance `
+    -ExpectedLaneCatalog $LaneCatalog `
+    -ExpectedLaneCatalogSha256 $LaneCatalogSha256
 $Calibration = $ValidatedCalibration.result
 $CalibrationProcessMetadata | Add-Member -NotePropertyName calibration_sha256 -NotePropertyValue ([string]$ValidatedCalibration.sha256)
 $CalibrationProcessMetadata | Add-Member -NotePropertyName iteration_counts -NotePropertyValue $Calibration.iteration_counts
@@ -505,7 +523,7 @@ for ($ProcessRun = 0; $ProcessRun -lt [int]$Profile.process_runs; ++$ProcessRun)
 }
 
 $Manifest = [pscustomobject][ordered]@{
-    schema_version = 1
+    schema_version = 2
     attempt_id = $AttemptId
     created_utc = [DateTime]::UtcNow.ToString('o')
     project_name = [System.IO.Path]::GetFileNameWithoutExtension($ResolvedProjectPath)
@@ -537,6 +555,8 @@ $Manifest = [pscustomobject][ordered]@{
         sha256 = $AggregateSchemaSha256
         snapshot_path = $AggregateSchemaSnapshotRelativePath
     }
+    lane_catalog = $LaneCatalog
+    lane_catalog_sha256 = $LaneCatalogSha256
     provenance = $Provenance
     calibration = [pscustomobject][ordered]@{
         request_path = 'calibration/request.json'

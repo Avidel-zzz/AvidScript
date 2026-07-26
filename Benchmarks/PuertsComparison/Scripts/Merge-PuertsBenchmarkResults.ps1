@@ -108,6 +108,12 @@ function Test-RequestProfileContract {
         -Code 'ASP53S2046' -Label "$Label workloads"
     Test-SidecarExactArray -Actual $Request.lane_order -Expected $ExpectedLaneOrder `
         -Code 'ASP53S2007' -Label "$Label lane_order"
+    Test-SidecarLaneCatalog `
+        -Actual $Request.lane_catalog `
+        -ActualSha256 ([string]$Request.lane_catalog_sha256) `
+        -Expected $Manifest.lane_catalog `
+        -ExpectedSha256 ([string]$Manifest.lane_catalog_sha256) `
+        -Label "$Label lane_catalog"
     Test-SidecarProvenance `
         -Actual $Request.provenance `
         -Expected $Manifest.provenance `
@@ -119,9 +125,15 @@ if (-not (Test-Path -LiteralPath $ResolvedAttemptPath -PathType Container)) {
     throw "ASP53S2022 attempt 目录不存在：$ResolvedAttemptPath"
 }
 $Manifest = Read-SidecarJson -Path (Join-Path $ResolvedAttemptPath 'attempt.json') -Code 'ASP53S2023'
-if ([int]$Manifest.schema_version -ne 1) {
-    throw 'ASP53S2023 attempt schema_version 必须为 1'
+if ([int]$Manifest.schema_version -ne 2) {
+    throw 'ASP54S2023 attempt schema_version 必须为 2'
 }
+Test-SidecarLaneCatalog `
+    -Actual $Manifest.lane_catalog `
+    -ActualSha256 ([string]$Manifest.lane_catalog_sha256) `
+    -Expected $Manifest.lane_catalog `
+    -ExpectedSha256 ([string]$Manifest.provenance.lane_catalog_sha256) `
+    -Label 'attempt manifest'
 
 $AggregatePath = Join-Path $ResolvedAttemptPath 'aggregate.json'
 if ($Mode -ceq 'Aggregate' -and (Test-Path -LiteralPath $AggregatePath)) {
@@ -203,7 +215,9 @@ $ValidatedCalibration = Test-SidecarCalibrationResult `
     -ResultPath $CalibrationResultPath `
     -SchemaPath $CalibrationSchemaPath `
     -Profile $Profile `
-    -ExpectedProvenance $Manifest.provenance
+    -ExpectedProvenance $Manifest.provenance `
+    -ExpectedLaneCatalog $Manifest.lane_catalog `
+    -ExpectedLaneCatalogSha256 ([string]$Manifest.lane_catalog_sha256)
 $Calibration = $ValidatedCalibration.result
 $CalibrationMetadata = Read-SidecarJson -Path $CalibrationMetadataPath -Code 'ASP53S2029'
 if ([int]$CalibrationMetadata.process_run -ne -1 -or
@@ -317,6 +331,7 @@ foreach ($RunEntry in @($ManifestRuns | Sort-Object { [int]$_.process_run })) {
         process_run = $ProcessRun
         run_id = [string]$Result.run_id
         lane_order = @($Result.lane_order)
+        lane_catalog_sha256 = [string]$Result.lane_catalog_sha256
         relative_path = [string]$RunEntry.raw_result_path
         sha256 = [string]$Validated.sha256
         pid = [int]$ProcessMetadata.pid
@@ -476,12 +491,15 @@ $Aggregate = [pscustomobject][ordered]@{
         version = [int]$Manifest.aggregate_schema.version
         sha256 = [string]$Manifest.aggregate_schema.sha256
     }
+    lane_catalog = @($Manifest.lane_catalog)
+    lane_catalog_sha256 = [string]$Manifest.lane_catalog_sha256
     provenance = $Manifest.provenance
     calibration = [pscustomobject][ordered]@{
         calibration_id = [string]$Calibration.calibration_id
         raw_path = [string]$Manifest.calibration.raw_path
         sha256 = [string]$ValidatedCalibration.sha256
         timer_frequency_hz = [int64]$Calibration.timer_frequency_hz
+        lane_catalog_sha256 = [string]$Calibration.lane_catalog_sha256
         iteration_counts = $Calibration.iteration_counts
     }
     timer_frequency_hz = $TimerFrequencyHz
