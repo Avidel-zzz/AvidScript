@@ -12,10 +12,10 @@ Phase 54 建立可替换执行后端、WAMR AOT 闭环、多 execution lane benc
 | --- | --- | --- |
 | P54.0 架构与计划 | 进行中 | 架构、实施计划和流程规则已起草 |
 | P54.1 backend contract | 未开始 |  |
-| P54.2 WAMR AOT | 未开始 |  |
-| P54.3 execution benchmark | 未开始 |  |
+| P54.2 Wasmtime JIT backend | 未开始 |  |
+| P54.3 JIT 对 JIT benchmark | 未开始 |  |
 | P54.4 crossing fast path | 未开始 |  |
-| P54.5 Wasmtime candidate | 未开始 |  |
+| P54.5 Shipping AOT/移动端 | 未开始 |  |
 | P54.6 competitor gate | 未开始 |  |
 
 ## 性能结论
