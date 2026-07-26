@@ -5,13 +5,20 @@
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmReloadTypes.h"
 #include "AvidScriptWasmRuntime.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
+#include "JsonSerializer.h"
+#include "JsonWriter.h"
 #include "JSLogger.h"
 #include "JSModuleLoader.h"
 #include "JsEnv.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 
@@ -234,12 +241,11 @@ namespace
 			return true;
 		}
 
-		bool RunWorkload(
+		bool PrepareWorkload(
 			const EAvidScriptPerfWorkload Workload,
 			const int32 Iterations,
 			const uint32 Seed,
-			uint32& OutChecksum,
-			int32& OutHostImportCallCount,
+			int32& OutPackedWorkload,
 			FString& OutError)
 		{
 			const int32 WorkloadId = static_cast<int32>(Workload);
@@ -253,18 +259,35 @@ namespace
 				return false;
 			}
 
-			const int32 PackedWorkload =
+			OutPackedWorkload =
 				(WorkloadId << PerfRunnerWorkloadShift) |
 				(Iterations & PerfRunnerIterationMask);
-			FAvidScriptWasmSmokeResult SmokeResult;
-			if (!Session.DispatchEvent(
+			return true;
+		}
+
+		bool DispatchWorkload(
+			const int32 PackedWorkload,
+			const uint32 Seed,
+			FAvidScriptWasmSmokeResult& OutDispatchResult)
+		{
+			return Session.DispatchEvent(
 				PackedWorkload,
 				static_cast<float>(Seed),
-				SmokeResult))
+				OutDispatchResult);
+		}
+
+		bool CollectWorkloadResult(
+			const bool bDispatchSucceeded,
+			const FAvidScriptWasmSmokeResult& DispatchResult,
+			uint32& OutChecksum,
+			int32& OutHostImportCallCount,
+			FString& OutError)
+		{
+			if (!bDispatchSucceeded)
 			{
 				OutError = FString::Printf(
 					TEXT("AvidScript benchmark workload dispatch failed: %s"),
-					*SmokeResult.ErrorMessage);
+					*DispatchResult.ErrorMessage);
 				return false;
 			}
 
@@ -288,8 +311,42 @@ namespace
 
 			OutChecksum = static_cast<uint32>(Checksum);
 			OutHostImportCallCount =
-				SmokeResult.HostImportCallCount - LastHostImportCallCount;
-			LastHostImportCallCount = SmokeResult.HostImportCallCount;
+				DispatchResult.HostImportCallCount - LastHostImportCallCount;
+			LastHostImportCallCount = DispatchResult.HostImportCallCount;
+			return true;
+		}
+
+		bool RunWorkload(
+			const EAvidScriptPerfWorkload Workload,
+			const int32 Iterations,
+			const uint32 Seed,
+			uint32& OutChecksum,
+			int32& OutHostImportCallCount,
+			FString& OutError)
+		{
+			int32 PackedWorkload = 0;
+			if (!PrepareWorkload(
+				Workload,
+				Iterations,
+				Seed,
+				PackedWorkload,
+				OutError))
+			{
+				return false;
+			}
+
+			FAvidScriptWasmSmokeResult DispatchResult;
+			const bool bDispatchSucceeded =
+				DispatchWorkload(PackedWorkload, Seed, DispatchResult);
+			if (!CollectWorkloadResult(
+				bDispatchSucceeded,
+				DispatchResult,
+				OutChecksum,
+				OutHostImportCallCount,
+				OutError))
+			{
+				return false;
+			}
 			return true;
 		}
 	};
@@ -421,6 +478,1445 @@ namespace
 			return 0;
 		}
 	}
+
+	enum class EAvidScriptPerfLane : uint8
+	{
+		NativeCpp,
+		PuertsV8Reflection,
+		PuertsV8Static,
+		AvidScriptWamr
+	};
+
+	enum class EAvidScriptPerfBenchmarkMode : uint8
+	{
+		Combined,
+		Calibrate,
+		Timed
+	};
+
+	constexpr int32 PerfRunnerLaneCount = 4;
+
+	struct FPerfBenchmarkRequest
+	{
+		EAvidScriptPerfBenchmarkMode Mode = EAvidScriptPerfBenchmarkMode::Combined;
+		FString AttemptId;
+		int32 ProcessRun = 0;
+		int32 Seed = 0;
+		TArray<EAvidScriptPerfLane, TInlineAllocator<PerfRunnerLaneCount>> LaneOrder;
+		TArray<EAvidScriptPerfWorkload> Workloads;
+		int32 WarmupSamples = 0;
+		int32 TimedSamples = 0;
+		double MinimumSampleMilliseconds = 0.0;
+		int32 MinimumIterations = 0;
+		int32 MaximumIterations = 0;
+		int32 ResultSchemaVersion = 0;
+		TSharedPtr<FJsonObject> Provenance;
+		TArray<int32> FrozenIterationCounts;
+		FString TemporaryResultPath;
+	};
+
+	struct FPerfLaneObservation
+	{
+		EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+		int32 LanePosition = 0;
+		uint64 ElapsedCycles = 0;
+		uint32 Checksum = 0;
+		int32 FinalScalar = 0;
+		uint64 OperationCallCount = 0;
+		int32 HostImportCallCount = 0;
+	};
+
+	struct FPerfOracle
+	{
+		uint32 Checksum = 0;
+		int32 FinalScalar = 0;
+		uint64 OperationCallCount = 0;
+	};
+
+	struct FPerfSample
+	{
+		int32 ProcessRun = 0;
+		EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+		int32 LanePosition = 0;
+		EAvidScriptPerfWorkload Workload = EAvidScriptPerfWorkload::PureInteger;
+		int32 SampleIndex = 0;
+		uint32 Seed = 0;
+		int32 Iterations = 0;
+		uint64 ElapsedCycles = 0;
+		uint32 Checksum = 0;
+		uint32 ExpectedChecksum = 0;
+		int32 FinalScalar = 0;
+		int32 ExpectedFinalScalar = 0;
+		uint64 OperationCallCount = 0;
+		uint64 ExpectedOperationCallCount = 0;
+		int32 HostImportCallCount = 0;
+		int32 ExpectedHostImportCallCount = 0;
+	};
+
+	const TCHAR* GetPerfLaneName(const EAvidScriptPerfLane Lane)
+	{
+		switch (Lane)
+		{
+		case EAvidScriptPerfLane::NativeCpp:
+			return TEXT("native_cpp");
+		case EAvidScriptPerfLane::PuertsV8Reflection:
+			return TEXT("puerts_v8_reflection");
+		case EAvidScriptPerfLane::PuertsV8Static:
+			return TEXT("puerts_v8_static");
+		case EAvidScriptPerfLane::AvidScriptWamr:
+			return TEXT("avidscript_wamr");
+		default:
+			checkNoEntry();
+			return TEXT("");
+		}
+	}
+
+	bool TryParsePerfLane(const FString& Name, EAvidScriptPerfLane& OutLane)
+	{
+		for (int32 LaneIndex = 0; LaneIndex < PerfRunnerLaneCount; ++LaneIndex)
+		{
+			const EAvidScriptPerfLane Lane =
+				static_cast<EAvidScriptPerfLane>(LaneIndex);
+			if (Name.Equals(GetPerfLaneName(Lane), ESearchCase::CaseSensitive))
+			{
+				OutLane = Lane;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	const TCHAR* GetPerfWorkloadName(const EAvidScriptPerfWorkload Workload)
+	{
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::PureInteger:
+			return TEXT("pure_integer");
+		case EAvidScriptPerfWorkload::ScalarNoOp:
+			return TEXT("scalar_noop");
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+			return TEXT("scalar_add_int32");
+		case EAvidScriptPerfWorkload::PropertyGetSet:
+			return TEXT("property_get_set");
+		case EAvidScriptPerfWorkload::VectorValue:
+			return TEXT("vector_value");
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
+			return TEXT("object_roundtrip");
+		case EAvidScriptPerfWorkload::BatchScalar:
+			return TEXT("batch_scalar");
+		default:
+			checkNoEntry();
+			return TEXT("");
+		}
+	}
+
+	bool TryParsePerfWorkload(
+		const FString& Name,
+		EAvidScriptPerfWorkload& OutWorkload)
+	{
+		constexpr int32 WorkloadCount =
+			static_cast<int32>(EAvidScriptPerfWorkload::BatchScalar) + 1;
+		for (int32 WorkloadIndex = 0; WorkloadIndex < WorkloadCount; ++WorkloadIndex)
+		{
+			const EAvidScriptPerfWorkload Workload =
+				static_cast<EAvidScriptPerfWorkload>(WorkloadIndex);
+			if (Name.Equals(
+				GetPerfWorkloadName(Workload),
+				ESearchCase::CaseSensitive))
+			{
+				OutWorkload = Workload;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool TryGetRequiredString(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* FieldName,
+		FString& OutValue,
+		FString& OutError)
+	{
+		if (!Object.IsValid() ||
+			!Object->TryGetStringField(FieldName, OutValue) ||
+			OutValue.IsEmpty())
+		{
+			OutError = FString::Printf(
+				TEXT("request field '%s' must be a non-empty string"),
+				FieldName);
+			return false;
+		}
+		return true;
+	}
+
+	bool TryGetRequiredInteger(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* FieldName,
+		const int64 Minimum,
+		const int64 Maximum,
+		int64& OutValue,
+		FString& OutError)
+	{
+		double Number = 0.0;
+		if (!Object.IsValid() ||
+			!Object->TryGetNumberField(FieldName, Number) ||
+			!FMath::IsFinite(Number) ||
+			FMath::Floor(Number) != Number ||
+			Number < static_cast<double>(Minimum) ||
+			Number > static_cast<double>(Maximum))
+		{
+			OutError = FString::Printf(
+				TEXT("request field '%s' must be an integer in [%lld, %lld]"),
+				FieldName,
+				Minimum,
+				Maximum);
+			return false;
+		}
+		OutValue = static_cast<int64>(Number);
+		return true;
+	}
+
+	bool TryGetRequiredStringArray(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* FieldName,
+		TArray<FString>& OutValues,
+		FString& OutError)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+		if (!Object.IsValid() ||
+			!Object->TryGetArrayField(FieldName, Values) ||
+			Values == nullptr ||
+			Values->IsEmpty())
+		{
+			OutError = FString::Printf(
+				TEXT("request field '%s' must be a non-empty string array"),
+				FieldName);
+			return false;
+		}
+
+		OutValues.Reset(Values->Num());
+		for (const TSharedPtr<FJsonValue>& Value : *Values)
+		{
+			FString StringValue;
+			if (!Value.IsValid() ||
+				!Value->TryGetString(StringValue) ||
+				StringValue.IsEmpty())
+			{
+				OutError = FString::Printf(
+					TEXT("request field '%s' must contain only non-empty strings"),
+					FieldName);
+				return false;
+			}
+			OutValues.Add(MoveTemp(StringValue));
+		}
+		return true;
+	}
+
+	bool ParsePerfBenchmarkRequest(
+		const FString& RequestPath,
+		const FString& ResultPath,
+		FPerfBenchmarkRequest& OutRequest,
+		FString& OutError)
+	{
+		FString RequestJson;
+		if (!FFileHelper::LoadFileToString(RequestJson, *RequestPath))
+		{
+			OutError = FString::Printf(
+				TEXT("unable to read benchmark request: %s"),
+				*RequestPath);
+			return false;
+		}
+
+		TSharedPtr<FJsonObject> Root;
+		const TSharedRef<TJsonReader<>> Reader =
+			TJsonReaderFactory<>::Create(RequestJson);
+		if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+		{
+			OutError = TEXT("benchmark request is not a JSON object");
+			return false;
+		}
+
+		int64 IntegerValue = 0;
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("schema_version"),
+				1,
+				1,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+
+		FString ModeName;
+		if (Root->TryGetStringField(TEXT("mode"), ModeName))
+		{
+			if (ModeName.Equals(TEXT("calibrate"), ESearchCase::CaseSensitive) ||
+				ModeName.Equals(TEXT("calibration"), ESearchCase::CaseSensitive))
+			{
+				OutRequest.Mode = EAvidScriptPerfBenchmarkMode::Calibrate;
+			}
+			else if (ModeName.Equals(TEXT("timed"), ESearchCase::CaseSensitive))
+			{
+				OutRequest.Mode = EAvidScriptPerfBenchmarkMode::Timed;
+			}
+			else
+			{
+				OutError = TEXT("request mode must be 'calibrate' or 'timed'");
+				return false;
+			}
+		}
+		else if (Root->HasField(TEXT("mode")))
+		{
+			OutError = TEXT("request mode must be a string");
+			return false;
+		}
+
+		if (!TryGetRequiredString(
+				Root,
+				TEXT("attempt_id"),
+				OutRequest.AttemptId,
+				OutError))
+		{
+			return false;
+		}
+		FGuid AttemptId;
+		if (!FGuid::Parse(OutRequest.AttemptId, AttemptId))
+		{
+			OutError = TEXT("request attempt_id must be a GUID");
+			return false;
+		}
+
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("process_run"),
+				-1,
+				MAX_int32,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.ProcessRun = static_cast<int32>(IntegerValue);
+
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("seed"),
+				MIN_int32,
+				MAX_int32,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.Seed = static_cast<int32>(IntegerValue);
+
+		TArray<FString> LaneNames;
+		if (!TryGetRequiredStringArray(
+				Root,
+				TEXT("lane_order"),
+				LaneNames,
+				OutError) ||
+			LaneNames.Num() != PerfRunnerLaneCount)
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request lane_order must contain exactly four lanes");
+			}
+			return false;
+		}
+		TSet<int32> UniqueLanes;
+		for (const FString& LaneName : LaneNames)
+		{
+			EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+			if (!TryParsePerfLane(LaneName, Lane) ||
+				UniqueLanes.Contains(static_cast<int32>(Lane)))
+			{
+				OutError = TEXT(
+					"request lane_order must contain each supported lane exactly once");
+				return false;
+			}
+			UniqueLanes.Add(static_cast<int32>(Lane));
+			OutRequest.LaneOrder.Add(Lane);
+		}
+
+		TArray<FString> RequestedLaneNames;
+		if (!TryGetRequiredStringArray(
+				Root,
+				TEXT("lanes"),
+				RequestedLaneNames,
+				OutError) ||
+			RequestedLaneNames.Num() != PerfRunnerLaneCount)
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request lanes must contain exactly four lanes");
+			}
+			return false;
+		}
+		TSet<int32> RequestedLanes;
+		for (const FString& LaneName : RequestedLaneNames)
+		{
+			EAvidScriptPerfLane Lane = EAvidScriptPerfLane::NativeCpp;
+			if (!TryParsePerfLane(LaneName, Lane) ||
+				RequestedLanes.Contains(static_cast<int32>(Lane)))
+			{
+				OutError = TEXT(
+					"request lanes must contain each supported lane exactly once");
+				return false;
+			}
+			RequestedLanes.Add(static_cast<int32>(Lane));
+		}
+
+		TArray<FString> WorkloadNames;
+		if (!TryGetRequiredStringArray(
+				Root,
+				TEXT("workloads"),
+				WorkloadNames,
+				OutError))
+		{
+			return false;
+		}
+		TSet<int32> UniqueWorkloads;
+		for (const FString& WorkloadName : WorkloadNames)
+		{
+			EAvidScriptPerfWorkload Workload =
+				EAvidScriptPerfWorkload::PureInteger;
+			if (!TryParsePerfWorkload(WorkloadName, Workload))
+			{
+				OutError = FString::Printf(
+					TEXT("unknown or unsupported warm workload: %s"),
+					*WorkloadName);
+				return false;
+			}
+			if (UniqueWorkloads.Contains(static_cast<int32>(Workload)))
+			{
+				OutError = FString::Printf(
+					TEXT("duplicate warm workload: %s"),
+					*WorkloadName);
+				return false;
+			}
+			UniqueWorkloads.Add(static_cast<int32>(Workload));
+			OutRequest.Workloads.Add(Workload);
+		}
+
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("warmup_samples"),
+				0,
+				MAX_int32,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.WarmupSamples = static_cast<int32>(IntegerValue);
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("timed_samples"),
+				0,
+				MAX_int32,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.TimedSamples = static_cast<int32>(IntegerValue);
+		if (OutRequest.Mode == EAvidScriptPerfBenchmarkMode::Calibrate)
+		{
+			if (OutRequest.ProcessRun != -1 || OutRequest.TimedSamples != 0)
+			{
+				OutError =
+					TEXT("calibration mode requires process_run=-1 and timed_samples=0");
+				return false;
+			}
+		}
+		else if (OutRequest.ProcessRun < 0 || OutRequest.TimedSamples < 1)
+		{
+			OutError =
+				TEXT("timed or combined mode requires process_run>=0 and timed_samples>=1");
+			return false;
+		}
+		const int64 TimedSampleCount =
+			static_cast<int64>(OutRequest.Workloads.Num()) *
+			OutRequest.TimedSamples *
+			PerfRunnerLaneCount;
+		if (TimedSampleCount > MAX_int32)
+		{
+			OutError = TEXT("requested timed sample matrix is too large");
+			return false;
+		}
+
+		if (!Root->TryGetNumberField(
+				TEXT("minimum_sample_milliseconds"),
+				OutRequest.MinimumSampleMilliseconds) ||
+			!FMath::IsFinite(OutRequest.MinimumSampleMilliseconds) ||
+			OutRequest.MinimumSampleMilliseconds <= 0.0)
+		{
+			OutError =
+				TEXT("request minimum_sample_milliseconds must be positive");
+			return false;
+		}
+
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("minimum_iterations"),
+				1,
+				PerfRunnerIterationMask,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.MinimumIterations = static_cast<int32>(IntegerValue);
+		if (!TryGetRequiredInteger(
+				Root,
+				TEXT("maximum_iterations"),
+				OutRequest.MinimumIterations,
+				PerfRunnerIterationMask,
+				IntegerValue,
+				OutError))
+		{
+			return false;
+		}
+		OutRequest.MaximumIterations = static_cast<int32>(IntegerValue);
+
+		const TSharedPtr<FJsonObject>* ResultSchema = nullptr;
+		if (!Root->TryGetObjectField(TEXT("result_schema"), ResultSchema) ||
+			ResultSchema == nullptr ||
+			!TryGetRequiredInteger(
+				*ResultSchema,
+				TEXT("version"),
+				1,
+				MAX_int32,
+				IntegerValue,
+				OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("request result_schema must be an object");
+			}
+			return false;
+		}
+		OutRequest.ResultSchemaVersion = static_cast<int32>(IntegerValue);
+
+		const TSharedPtr<FJsonObject>* Provenance = nullptr;
+		if (!Root->TryGetObjectField(TEXT("provenance"), Provenance) ||
+			Provenance == nullptr ||
+			!Provenance->IsValid())
+		{
+			OutError = TEXT("request provenance must be an object");
+			return false;
+		}
+		OutRequest.Provenance = *Provenance;
+
+		FString RequestedResultPath;
+		if (!TryGetRequiredString(
+				Root,
+				TEXT("result_path"),
+				RequestedResultPath,
+				OutError))
+		{
+			return false;
+		}
+		RequestedResultPath = FPaths::ConvertRelativePathToFull(RequestedResultPath);
+		FPaths::NormalizeFilename(RequestedResultPath);
+		FString NormalizedResultPath =
+			FPaths::ConvertRelativePathToFull(ResultPath);
+		FPaths::NormalizeFilename(NormalizedResultPath);
+		if (!RequestedResultPath.Equals(
+			NormalizedResultPath,
+			ESearchCase::IgnoreCase))
+		{
+			OutError =
+				TEXT("request result_path does not match -AvidScriptPerfResult");
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* IterationCounts = nullptr;
+		const bool bHasIterationCounts =
+			Root->TryGetObjectField(TEXT("iteration_counts"), IterationCounts) &&
+			IterationCounts != nullptr &&
+			IterationCounts->IsValid();
+		if (OutRequest.Mode == EAvidScriptPerfBenchmarkMode::Calibrate)
+		{
+			if (!bHasIterationCounts || !(*IterationCounts)->Values.IsEmpty())
+			{
+				OutError =
+					TEXT("calibration mode requires an empty iteration_counts mapping");
+				return false;
+			}
+		}
+		else if (OutRequest.Mode == EAvidScriptPerfBenchmarkMode::Timed)
+		{
+			if (!bHasIterationCounts ||
+				(*IterationCounts)->Values.Num() != OutRequest.Workloads.Num())
+			{
+				OutError =
+					TEXT("timed mode requires an exact iteration_counts mapping");
+				return false;
+			}
+			for (const EAvidScriptPerfWorkload Workload : OutRequest.Workloads)
+			{
+				const FString WorkloadName = GetPerfWorkloadName(Workload);
+				if (!TryGetRequiredInteger(
+					*IterationCounts,
+					*WorkloadName,
+					OutRequest.MinimumIterations,
+					OutRequest.MaximumIterations,
+					IntegerValue,
+					OutError))
+				{
+					OutError =
+						TEXT("timed mode requires an exact iteration_counts mapping");
+					return false;
+				}
+				OutRequest.FrozenIterationCounts.Add(
+					static_cast<int32>(IntegerValue));
+			}
+		}
+
+		const TSharedPtr<FJsonObject>* ResultWrite = nullptr;
+		FString WriteStrategy;
+		bool bOverwrite = true;
+		if (!Root->TryGetObjectField(TEXT("result_write"), ResultWrite) ||
+			ResultWrite == nullptr ||
+			!ResultWrite->IsValid() ||
+			!TryGetRequiredString(
+				*ResultWrite,
+				TEXT("strategy"),
+				WriteStrategy,
+				OutError) ||
+			!WriteStrategy.Equals(
+				TEXT("same_directory_temporary_then_atomic_rename"),
+				ESearchCase::CaseSensitive) ||
+			!TryGetRequiredString(
+				*ResultWrite,
+				TEXT("temporary_path"),
+				OutRequest.TemporaryResultPath,
+				OutError) ||
+			!(*ResultWrite)->TryGetBoolField(TEXT("overwrite"), bOverwrite) ||
+			bOverwrite)
+		{
+			OutError =
+				TEXT("request result_write must require same-directory atomic no-overwrite publication");
+			return false;
+		}
+		if (FPaths::IsRelative(OutRequest.TemporaryResultPath))
+		{
+			OutError =
+				TEXT("request result_write temporary_path must be absolute");
+			return false;
+		}
+		OutRequest.TemporaryResultPath =
+			FPaths::ConvertRelativePathToFull(OutRequest.TemporaryResultPath);
+		FPaths::NormalizeFilename(OutRequest.TemporaryResultPath);
+		if (!FPaths::GetPath(OutRequest.TemporaryResultPath).Equals(
+				FPaths::GetPath(NormalizedResultPath),
+				ESearchCase::IgnoreCase) ||
+			OutRequest.TemporaryResultPath.Equals(
+				NormalizedResultPath,
+				ESearchCase::IgnoreCase))
+		{
+			OutError =
+				TEXT("request result_write temporary_path must be a distinct file in the result directory");
+			return false;
+		}
+		return true;
+	}
+
+	uint32 MakePerfRunnerSampleSeed(
+		const int32 Seed,
+		const int32 WorkloadIndex,
+		const int32 SampleIndex)
+	{
+		return PerfRunnerMix(
+			static_cast<uint32>(Seed) ^
+			(static_cast<uint32>(WorkloadIndex + 1) * 0x9e3779b9u) ^
+			static_cast<uint32>(SampleIndex + 1)) & PerfRunnerExactSeedMask;
+	}
+
+	int32 PositiveModulo(const int64 Value, const int32 Modulus)
+	{
+		const int32 Remainder = static_cast<int32>(Value % Modulus);
+		return Remainder < 0 ? Remainder + Modulus : Remainder;
+	}
+
+	void BuildBalancedLaneOrder(
+		const FPerfBenchmarkRequest& Request,
+		const int32 WorkloadIndex,
+		const int32 SampleIndex,
+		TArray<EAvidScriptPerfLane, TInlineAllocator<PerfRunnerLaneCount>>& OutOrder)
+	{
+		static constexpr int32 BalancedRows[PerfRunnerLaneCount][PerfRunnerLaneCount] =
+		{
+			{ 0, 1, 3, 2 },
+			{ 1, 2, 0, 3 },
+			{ 2, 3, 1, 0 },
+			{ 3, 0, 2, 1 }
+		};
+		const int32 Row = PositiveModulo(
+			static_cast<int64>(Request.ProcessRun) +
+				WorkloadIndex +
+				SampleIndex,
+			PerfRunnerLaneCount);
+		OutOrder.Reset();
+		for (int32 Position = 0; Position < PerfRunnerLaneCount; ++Position)
+		{
+			OutOrder.Add(Request.LaneOrder[BalancedRows[Row][Position]]);
+		}
+	}
+
+	FPerfOracle RunNativeOracle(
+		AAvidScriptPerfFixture& Fixture,
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations,
+		const uint32 Seed)
+	{
+		Fixture.ScalarValue = 0;
+		Fixture.ResetOperationCounts();
+		FPerfOracle Oracle;
+		Oracle.Checksum =
+			RunNativeWorkload(Fixture, Workload, Iterations, Seed);
+		Oracle.FinalScalar = Fixture.ScalarValue;
+		Oracle.OperationCallCount =
+			Fixture.GetOperationCallCount(static_cast<int32>(Workload));
+		return Oracle;
+	}
+
+	bool RunPerfLane(
+		AAvidScriptPerfFixture& Fixture,
+		FPuertsLane& Reflection,
+		FPuertsLane& Static,
+		FAvidScriptLane& AvidScript,
+		const EAvidScriptPerfLane Lane,
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations,
+		const uint32 Seed,
+		const bool bTimed,
+		FPerfLaneObservation& OutObservation,
+		FString& OutError)
+	{
+		Fixture.ScalarValue = 0;
+		Fixture.ResetOperationCounts();
+		OutObservation = FPerfLaneObservation{};
+		OutObservation.Lane = Lane;
+
+		uint64 StartCycles = 0;
+		uint64 EndCycles = 0;
+		switch (Lane)
+		{
+		case EAvidScriptPerfLane::NativeCpp:
+			if (bTimed)
+			{
+				StartCycles = FPlatformTime::Cycles64();
+				OutObservation.Checksum =
+					RunNativeWorkload(Fixture, Workload, Iterations, Seed);
+				EndCycles = FPlatformTime::Cycles64();
+			}
+			else
+			{
+				OutObservation.Checksum =
+					RunNativeWorkload(Fixture, Workload, Iterations, Seed);
+			}
+			break;
+		case EAvidScriptPerfLane::PuertsV8Reflection:
+			if (bTimed)
+			{
+				StartCycles = FPlatformTime::Cycles64();
+				OutObservation.Checksum =
+					static_cast<uint32>(Fixture.RunPuertsWorkload(
+						Reflection.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed)));
+				EndCycles = FPlatformTime::Cycles64();
+			}
+			else
+			{
+				OutObservation.Checksum =
+					static_cast<uint32>(Fixture.RunPuertsWorkload(
+						Reflection.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed)));
+			}
+			break;
+		case EAvidScriptPerfLane::PuertsV8Static:
+			if (bTimed)
+			{
+				StartCycles = FPlatformTime::Cycles64();
+				OutObservation.Checksum =
+					static_cast<uint32>(Fixture.RunPuertsWorkload(
+						Static.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed)));
+				EndCycles = FPlatformTime::Cycles64();
+			}
+			else
+			{
+				OutObservation.Checksum =
+					static_cast<uint32>(Fixture.RunPuertsWorkload(
+						Static.LaneId,
+						static_cast<int32>(Workload),
+						Iterations,
+						static_cast<int32>(Seed)));
+			}
+			break;
+		case EAvidScriptPerfLane::AvidScriptWamr:
+		{
+			int32 PackedWorkload = 0;
+			if (!AvidScript.PrepareWorkload(
+				Workload,
+				Iterations,
+				Seed,
+				PackedWorkload,
+				OutError))
+			{
+				return false;
+			}
+			FAvidScriptWasmSmokeResult DispatchResult;
+			bool bDispatchSucceeded = false;
+			if (bTimed)
+			{
+				StartCycles = FPlatformTime::Cycles64();
+				bDispatchSucceeded =
+					AvidScript.DispatchWorkload(
+						PackedWorkload,
+						Seed,
+						DispatchResult);
+				EndCycles = FPlatformTime::Cycles64();
+			}
+			else
+			{
+				bDispatchSucceeded =
+					AvidScript.DispatchWorkload(
+						PackedWorkload,
+						Seed,
+						DispatchResult);
+			}
+			if (!AvidScript.CollectWorkloadResult(
+				bDispatchSucceeded,
+				DispatchResult,
+				OutObservation.Checksum,
+				OutObservation.HostImportCallCount,
+				OutError))
+			{
+				return false;
+			}
+			break;
+		}
+		default:
+			checkNoEntry();
+			return false;
+		}
+
+		OutObservation.ElapsedCycles =
+			bTimed ? EndCycles - StartCycles : 0;
+		OutObservation.FinalScalar = Fixture.ScalarValue;
+		OutObservation.OperationCallCount =
+			Fixture.GetOperationCallCount(static_cast<int32>(Workload));
+		return true;
+	}
+
+	bool ValidatePerfObservation(
+		const FPerfLaneObservation& Observation,
+		const FPerfOracle& Oracle,
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations,
+		FString& OutError)
+	{
+		const uint64 ExpectedOperationCallCount =
+			GetExpectedOperationCallCount(Workload, Iterations);
+		const int32 ExpectedHostImportCallCount =
+			Observation.Lane == EAvidScriptPerfLane::AvidScriptWamr
+				? GetExpectedAvidScriptHostCallCount(Workload, Iterations)
+				: 0;
+		if (Oracle.OperationCallCount != ExpectedOperationCallCount ||
+			Observation.Checksum != Oracle.Checksum ||
+			Observation.FinalScalar != Oracle.FinalScalar ||
+			Observation.OperationCallCount != ExpectedOperationCallCount ||
+			Observation.HostImportCallCount != ExpectedHostImportCallCount)
+		{
+			OutError = FString::Printf(
+				TEXT("correctness failure lane=%s workload=%s iterations=%d ")
+				TEXT("checksum=%u expected_checksum=%u final_scalar=%d ")
+				TEXT("expected_final_scalar=%d operation_count=%llu ")
+				TEXT("expected_operation_count=%llu host_count=%d ")
+				TEXT("expected_host_count=%d"),
+				GetPerfLaneName(Observation.Lane),
+				GetPerfWorkloadName(Workload),
+				Iterations,
+				Observation.Checksum,
+				Oracle.Checksum,
+				Observation.FinalScalar,
+				Oracle.FinalScalar,
+				Observation.OperationCallCount,
+				ExpectedOperationCallCount,
+				Observation.HostImportCallCount,
+				ExpectedHostImportCallCount);
+			return false;
+		}
+		return true;
+	}
+
+	bool RunPerfRound(
+		AAvidScriptPerfFixture& Fixture,
+		FPuertsLane& Reflection,
+		FPuertsLane& Static,
+		FAvidScriptLane& AvidScript,
+		const FPerfBenchmarkRequest& Request,
+		const int32 WorkloadIndex,
+		const int32 SampleIndex,
+		const int32 Iterations,
+		const uint32 Seed,
+		const bool bTimed,
+		const FPerfOracle& Oracle,
+		TArray<FPerfLaneObservation, TInlineAllocator<PerfRunnerLaneCount>>& OutObservations,
+		FString& OutError)
+	{
+		TArray<EAvidScriptPerfLane, TInlineAllocator<PerfRunnerLaneCount>> LaneOrder;
+		BuildBalancedLaneOrder(
+			Request,
+			WorkloadIndex,
+			SampleIndex,
+			LaneOrder);
+		OutObservations.Reset();
+		for (int32 LanePosition = 0;
+			LanePosition < LaneOrder.Num();
+			++LanePosition)
+		{
+			FPerfLaneObservation Observation;
+			if (!RunPerfLane(
+					Fixture,
+					Reflection,
+					Static,
+					AvidScript,
+					LaneOrder[LanePosition],
+					Request.Workloads[WorkloadIndex],
+					Iterations,
+					Seed,
+					bTimed,
+					Observation,
+					OutError) ||
+				!ValidatePerfObservation(
+					Observation,
+					Oracle,
+					Request.Workloads[WorkloadIndex],
+					Iterations,
+					OutError))
+			{
+				return false;
+			}
+			Observation.LanePosition = LanePosition;
+			OutObservations.Add(Observation);
+		}
+		return true;
+	}
+
+	bool CalibrateWorkloadIterations(
+		AAvidScriptPerfFixture& Fixture,
+		FPuertsLane& Reflection,
+		FPuertsLane& Static,
+		FAvidScriptLane& AvidScript,
+		const FPerfBenchmarkRequest& Request,
+		const int32 WorkloadIndex,
+		int32& OutIterations,
+		FString& OutError)
+	{
+		int32 Iterations = Request.MinimumIterations;
+		int32 CalibrationRound = 0;
+		for (;;)
+		{
+			const uint32 Seed = MakePerfRunnerSampleSeed(
+				Request.Seed,
+				WorkloadIndex,
+				CalibrationRound);
+			const FPerfOracle Oracle = RunNativeOracle(
+				Fixture,
+				Request.Workloads[WorkloadIndex],
+				Iterations,
+				Seed);
+			TArray<FPerfLaneObservation, TInlineAllocator<PerfRunnerLaneCount>>
+				Observations;
+			if (!RunPerfRound(
+				Fixture,
+				Reflection,
+				Static,
+				AvidScript,
+				Request,
+				WorkloadIndex,
+				CalibrationRound,
+				Iterations,
+				Seed,
+				true,
+				Oracle,
+				Observations,
+				OutError))
+			{
+				return false;
+			}
+
+			bool bEveryLaneReachedMinimum = true;
+			for (const FPerfLaneObservation& Observation : Observations)
+			{
+				const double ElapsedMilliseconds =
+					static_cast<double>(Observation.ElapsedCycles) *
+					FPlatformTime::GetSecondsPerCycle64() *
+					1000.0;
+				if (ElapsedMilliseconds < Request.MinimumSampleMilliseconds)
+				{
+					bEveryLaneReachedMinimum = false;
+					break;
+				}
+			}
+			if (bEveryLaneReachedMinimum)
+			{
+				OutIterations = Iterations;
+				return true;
+			}
+			if (Iterations >= Request.MaximumIterations)
+			{
+				OutError = FString::Printf(
+					TEXT("calibration could not reach %.3f ms for every lane ")
+						TEXT("by maximum_iterations=%d workload=%s"),
+					Request.MinimumSampleMilliseconds,
+					Request.MaximumIterations,
+					GetPerfWorkloadName(Request.Workloads[WorkloadIndex]));
+				return false;
+			}
+
+			const int32 NextIterations =
+				Iterations > Request.MaximumIterations / 2
+					? Request.MaximumIterations
+					: Iterations * 2;
+			if (NextIterations <= Iterations)
+			{
+				OutError = TEXT("calibration iteration doubling overflowed");
+				return false;
+			}
+			Iterations = NextIterations;
+			++CalibrationRound;
+		}
+	}
+
+	void SetExactIntegerField(
+		const TSharedRef<FJsonObject>& Object,
+		const TCHAR* FieldName,
+		const int64 Value)
+	{
+		Object->SetField(
+			FieldName,
+			MakeShared<FJsonValueNumberString>(LexToString(Value)));
+	}
+
+	void SetExactUnsignedField(
+		const TSharedRef<FJsonObject>& Object,
+		const TCHAR* FieldName,
+		const uint64 Value)
+	{
+		Object->SetField(
+			FieldName,
+			MakeShared<FJsonValueNumberString>(LexToString(Value)));
+	}
+
+	TSharedRef<FJsonObject> MakePerfSampleJson(const FPerfSample& Sample)
+	{
+		const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+		SetExactIntegerField(Object, TEXT("process_run"), Sample.ProcessRun);
+		Object->SetStringField(TEXT("lane"), GetPerfLaneName(Sample.Lane));
+		SetExactIntegerField(Object, TEXT("lane_position"), Sample.LanePosition);
+		Object->SetStringField(
+			TEXT("workload"),
+			GetPerfWorkloadName(Sample.Workload));
+		SetExactIntegerField(Object, TEXT("sample_index"), Sample.SampleIndex);
+		SetExactUnsignedField(Object, TEXT("seed"), Sample.Seed);
+		SetExactIntegerField(Object, TEXT("iterations"), Sample.Iterations);
+		SetExactUnsignedField(
+			Object,
+			TEXT("elapsed_cycles"),
+			Sample.ElapsedCycles);
+		SetExactUnsignedField(Object, TEXT("checksum"), Sample.Checksum);
+		SetExactUnsignedField(
+			Object,
+			TEXT("expected_checksum"),
+			Sample.ExpectedChecksum);
+		SetExactIntegerField(Object, TEXT("final_scalar"), Sample.FinalScalar);
+		SetExactIntegerField(
+			Object,
+			TEXT("expected_final_scalar"),
+			Sample.ExpectedFinalScalar);
+		SetExactUnsignedField(
+			Object,
+			TEXT("operation_call_count"),
+			Sample.OperationCallCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("expected_operation_call_count"),
+			Sample.ExpectedOperationCallCount);
+		SetExactIntegerField(
+			Object,
+			TEXT("host_import_call_count"),
+			Sample.HostImportCallCount);
+		SetExactIntegerField(
+			Object,
+			TEXT("expected_host_import_call_count"),
+			Sample.ExpectedHostImportCallCount);
+		Object->SetBoolField(TEXT("correct"), true);
+		return Object;
+	}
+
+	bool PublishPerfResult(
+		const FString& ResultPath,
+		const FPerfBenchmarkRequest& Request,
+		const TArray<int32>& IterationCounts,
+		const TArray<FPerfSample>& Samples,
+		FString& OutError)
+	{
+		const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+		SetExactIntegerField(
+			Root,
+			TEXT("schema_version"),
+			Request.ResultSchemaVersion);
+		SetExactUnsignedField(
+			Root,
+			TEXT("timer_frequency_hz"),
+			static_cast<uint64>(
+				1.0 / FPlatformTime::GetSecondsPerCycle64()));
+		Root->SetObjectField(TEXT("provenance"), Request.Provenance.ToSharedRef());
+
+		if (Request.Mode == EAvidScriptPerfBenchmarkMode::Calibrate)
+		{
+			Root->SetStringField(
+				TEXT("calibration_id"),
+				Request.AttemptId);
+			const TSharedRef<FJsonObject> IterationCountsJson =
+				MakeShared<FJsonObject>();
+			for (int32 WorkloadIndex = 0;
+				WorkloadIndex < Request.Workloads.Num();
+				++WorkloadIndex)
+			{
+				SetExactIntegerField(
+					IterationCountsJson,
+					GetPerfWorkloadName(Request.Workloads[WorkloadIndex]),
+					IterationCounts[WorkloadIndex]);
+			}
+			Root->SetObjectField(
+				TEXT("iteration_counts"),
+				IterationCountsJson);
+		}
+		else
+		{
+			Root->SetStringField(TEXT("run_id"), Request.AttemptId);
+			SetExactIntegerField(
+				Root,
+				TEXT("process_run"),
+				Request.ProcessRun);
+
+			TArray<TSharedPtr<FJsonValue>> LaneOrderJson;
+			for (const EAvidScriptPerfLane Lane : Request.LaneOrder)
+			{
+				LaneOrderJson.Add(
+					MakeShared<FJsonValueString>(GetPerfLaneName(Lane)));
+			}
+			Root->SetArrayField(
+				TEXT("lane_order"),
+				MoveTemp(LaneOrderJson));
+
+			TArray<TSharedPtr<FJsonValue>> SamplesJson;
+			SamplesJson.Reserve(Samples.Num());
+			for (const FPerfSample& Sample : Samples)
+			{
+				SamplesJson.Add(
+					MakeShared<FJsonValueObject>(
+						MakePerfSampleJson(Sample)));
+			}
+			Root->SetArrayField(TEXT("samples"), MoveTemp(SamplesJson));
+		}
+
+		FString ResultJson;
+		const TSharedRef<TJsonWriter<>> Writer =
+			TJsonWriterFactory<>::Create(&ResultJson);
+		if (!FJsonSerializer::Serialize(Root, Writer))
+		{
+			OutError = TEXT("unable to serialize warm benchmark result");
+			return false;
+		}
+		ResultJson += TEXT("\n");
+		if (!FFileHelper::SaveStringToFile(
+			ResultJson,
+			*Request.TemporaryResultPath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+			&IFileManager::Get(),
+			FILEWRITE_NoReplaceExisting))
+		{
+			OutError = FString::Printf(
+				TEXT("refused to overwrite or could not write temporary result: %s"),
+				*Request.TemporaryResultPath);
+			return false;
+		}
+		if (!IFileManager::Get().Move(
+			*ResultPath,
+			*Request.TemporaryResultPath,
+			false,
+			false,
+			false,
+			true))
+		{
+			IFileManager::Get().Delete(
+				*Request.TemporaryResultPath,
+				false,
+				true,
+				true);
+			OutError = FString::Printf(
+				TEXT("refused to overwrite or could not atomically publish result: %s"),
+				*ResultPath);
+			return false;
+		}
+		return true;
+	}
+}
+
+bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
+	const FString& RequestPath,
+	const FString& ResultPath,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (FPaths::IsRelative(RequestPath) || FPaths::IsRelative(ResultPath))
+	{
+		OutError = TEXT("benchmark request and result paths must be absolute");
+		return false;
+	}
+	if (!FPaths::FileExists(RequestPath))
+	{
+		OutError = FString::Printf(
+			TEXT("benchmark request does not exist: %s"),
+			*RequestPath);
+		return false;
+	}
+	if (FPaths::FileExists(ResultPath))
+	{
+		OutError = FString::Printf(
+			TEXT("refusing to overwrite existing benchmark result: %s"),
+			*ResultPath);
+		return false;
+	}
+	const FString ResultDirectory = FPaths::GetPath(ResultPath);
+	if (!FPaths::DirectoryExists(ResultDirectory))
+	{
+		OutError = FString::Printf(
+			TEXT("benchmark result directory does not exist: %s"),
+			*ResultDirectory);
+		return false;
+	}
+
+	FPerfBenchmarkRequest Request;
+	if (!ParsePerfBenchmarkRequest(
+		RequestPath,
+		ResultPath,
+		Request,
+		OutError))
+	{
+		return false;
+	}
+	if (FPaths::FileExists(Request.TemporaryResultPath))
+	{
+		OutError = FString::Printf(
+			TEXT("refusing to overwrite existing temporary result: %s"),
+			*Request.TemporaryResultPath);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!CreateBenchmarkWorld(World))
+	{
+		OutError = TEXT("unable to create the shared benchmark world");
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyBenchmarkWorld(World);
+	};
+
+	AAvidScriptPerfFixture* Fixture =
+		World->SpawnActor<AAvidScriptPerfFixture>();
+	if (Fixture == nullptr)
+	{
+		OutError = TEXT("unable to spawn the shared benchmark fixture actor");
+		return false;
+	}
+
+	FPuertsLane Reflection;
+	if (!Reflection.Initialize(
+		TEXT("reflection.js"),
+		AAvidScriptPerfFixture::ReflectionLaneId,
+		*Fixture,
+		OutError))
+	{
+		return false;
+	}
+	FPuertsLane Static;
+	if (!Static.Initialize(
+		TEXT("static.js"),
+		AAvidScriptPerfFixture::StaticLaneId,
+		*Fixture,
+		OutError))
+	{
+		return false;
+	}
+	FAvidScriptLane AvidScript;
+	if (!AvidScript.Initialize(*Fixture, OutError))
+	{
+		return false;
+	}
+
+	TArray<int32> IterationCounts;
+	IterationCounts.Reserve(Request.Workloads.Num());
+	if (Request.Mode != EAvidScriptPerfBenchmarkMode::Timed)
+	{
+		for (int32 WorkloadIndex = 0;
+			WorkloadIndex < Request.Workloads.Num();
+			++WorkloadIndex)
+		{
+			int32 Iterations = 0;
+			if (!CalibrateWorkloadIterations(
+				*Fixture,
+				Reflection,
+				Static,
+				AvidScript,
+				Request,
+				WorkloadIndex,
+				Iterations,
+				OutError))
+			{
+				return false;
+			}
+			IterationCounts.Add(Iterations);
+		}
+	}
+	else
+	{
+		IterationCounts = Request.FrozenIterationCounts;
+	}
+
+	TArray<FPerfSample> Samples;
+	if (Request.Mode != EAvidScriptPerfBenchmarkMode::Calibrate)
+	{
+		Samples.Reserve(
+			Request.Workloads.Num() *
+			Request.TimedSamples *
+			PerfRunnerLaneCount);
+		for (int32 WorkloadIndex = 0;
+			WorkloadIndex < Request.Workloads.Num();
+			++WorkloadIndex)
+		{
+			const EAvidScriptPerfWorkload Workload =
+				Request.Workloads[WorkloadIndex];
+			const int32 Iterations = IterationCounts[WorkloadIndex];
+
+			for (int32 WarmupIndex = 0;
+				WarmupIndex < Request.WarmupSamples;
+				++WarmupIndex)
+			{
+				const uint32 Seed = MakePerfRunnerSampleSeed(
+					Request.Seed,
+					WorkloadIndex,
+					WarmupIndex);
+				const FPerfOracle Oracle =
+					RunNativeOracle(*Fixture, Workload, Iterations, Seed);
+				TArray<
+					FPerfLaneObservation,
+					TInlineAllocator<PerfRunnerLaneCount>> Observations;
+				if (!RunPerfRound(
+					*Fixture,
+					Reflection,
+					Static,
+					AvidScript,
+					Request,
+					WorkloadIndex,
+					WarmupIndex,
+					Iterations,
+					Seed,
+					false,
+					Oracle,
+					Observations,
+					OutError))
+				{
+					return false;
+				}
+			}
+
+			for (int32 SampleIndex = 0;
+				SampleIndex < Request.TimedSamples;
+				++SampleIndex)
+			{
+				const uint32 Seed = MakePerfRunnerSampleSeed(
+					Request.Seed,
+					WorkloadIndex,
+					SampleIndex);
+				const FPerfOracle Oracle =
+					RunNativeOracle(*Fixture, Workload, Iterations, Seed);
+				TArray<
+					FPerfLaneObservation,
+					TInlineAllocator<PerfRunnerLaneCount>> Observations;
+				if (!RunPerfRound(
+					*Fixture,
+					Reflection,
+					Static,
+					AvidScript,
+					Request,
+					WorkloadIndex,
+					SampleIndex,
+					Iterations,
+					Seed,
+					true,
+					Oracle,
+					Observations,
+					OutError))
+				{
+					return false;
+				}
+
+				for (const FPerfLaneObservation& Observation : Observations)
+				{
+					FPerfSample& Sample = Samples.AddDefaulted_GetRef();
+					Sample.ProcessRun = Request.ProcessRun;
+					Sample.Lane = Observation.Lane;
+					Sample.LanePosition = Observation.LanePosition;
+					Sample.Workload = Workload;
+					Sample.SampleIndex = SampleIndex;
+					Sample.Seed = Seed;
+					Sample.Iterations = Iterations;
+					Sample.ElapsedCycles = Observation.ElapsedCycles;
+					Sample.Checksum = Observation.Checksum;
+					Sample.ExpectedChecksum = Oracle.Checksum;
+					Sample.FinalScalar = Observation.FinalScalar;
+					Sample.ExpectedFinalScalar = Oracle.FinalScalar;
+					Sample.OperationCallCount =
+						Observation.OperationCallCount;
+					Sample.ExpectedOperationCallCount =
+						GetExpectedOperationCallCount(Workload, Iterations);
+					Sample.HostImportCallCount =
+						Observation.HostImportCallCount;
+					Sample.ExpectedHostImportCallCount =
+						Observation.Lane == EAvidScriptPerfLane::AvidScriptWamr
+							? GetExpectedAvidScriptHostCallCount(
+								Workload,
+								Iterations)
+							: 0;
+				}
+			}
+		}
+	}
+
+	return PublishPerfResult(
+		ResultPath,
+		Request,
+		IterationCounts,
+		Samples,
+		OutError);
 }
 
 bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(

@@ -29,6 +29,11 @@ struct FAvidScriptPerfSmokeResult
 class AVIDSCRIPTPERFHARNESS_API FAvidScriptPerfRunner
 {
 public:
+	static bool RunWarmBenchmarkFromFiles(
+		const FString& RequestPath,
+		const FString& ResultPath,
+		FString& OutError);
+
 	static bool RunFourLaneCorrectnessSmoke(
 		int32 IterationsPerWorkload,
 		int32 Seed,
