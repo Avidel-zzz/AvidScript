@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.5 最终 Gate PowerShell 宿主选错：新增的 Phase 53 benchmark 合同使用 `Test-Json`，一次性驱动却沿用 PhaseWorkflow 合同的 `powershell.exe` 宿主，Windows PowerShell 5 在执行合同前以 command-not-found 失败。Prevention：PhaseWorkflow 拒绝路径合同保持隔离 `powershell.exe -NoProfile`；使用 PowerShell 7 API 的 benchmark/dependency 合同固定使用已确认的 `pwsh.exe -NoProfile`，Gate 清单按脚本运行时要求分组，不能共用单一宿主。
 - 2026-07-26 P53.5 最终 Gate 预期 stderr 误判：Windows PowerShell 5 的 native logging helper 在 `$ErrorActionPreference = 'Stop'` 下把 Guest 负例故意写出的 `ASCG1001` stderr 转成终止异常，尽管测试为 68/68 且进程退出码 0。Prevention：需要保留 native stdout/stderr 的 Gate helper 在最小调用作用域使用 `Continue` 采集两条流，恢复外层偏好后只按捕获的 `$LASTEXITCODE` 判定；stderr 文本本身不能替代退出码。
 - 2026-07-26 P53.5 最终 Gate SDK 探测 cwd 错误：一次性驱动在项目根而不是候选插件目录调用固定 `$env:USERPROFILE\.dotnet\dotnet.exe --version`，因此没有读取候选 `global.json` 并命中 10.0.301；Gate 在测试前失败。Prevention：SDK 版本探测与所有 .NET 命令必须在候选插件 cwd 内执行，先验证输出恰为 8.0.416，再启动测试；固定 host 路径不能替代 cwd 下的 `global.json` 解析。
 - 2026-07-26 P53.5 PhaseWorkflow 入口路径猜测：恢复主分支状态时直接调用不存在的 `Build/PhaseWorkflow/InvokePhaseWorkflow.ps1`，真实入口为 `Build/InvokePhaseWorkflow.ps1`。Prevention：状态机命令统一使用仓库已确认入口 `Build/InvokePhaseWorkflow.ps1`；若入口无法执行，先用 `rg --files | rg 'InvokePhaseWorkflow\.ps1$'` 定位，不从目录名推导路径。
