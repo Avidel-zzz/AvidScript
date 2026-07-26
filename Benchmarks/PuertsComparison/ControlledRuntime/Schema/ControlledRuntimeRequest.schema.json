@@ -19,7 +19,21 @@
     "kernel_wasm_sha256",
     "puerts_commit",
     "puerts_backend_sha256",
-    "target_triple"
+    "target_triple",
+    "attempt_id",
+    "profile_sha256",
+    "calibration_sha256",
+    "candidate_commit",
+    "candidate_tree_sha",
+    "candidate_clean",
+    "engine_version",
+    "engine_build_id",
+    "engine_executable_sha256",
+    "wasmtime_runtime_build_identity",
+    "wasmtime_runtime_artifact_sha256",
+    "wamr_runtime_build_identity",
+    "wamr_runtime_artifact_sha256",
+    "calibration_confirmation_samples"
   ],
   "properties": {
     "schema_version": { "const": 1 },
@@ -46,6 +60,44 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "target_triple": { "const": "x86_64-pc-windows-msvc" },
+    "attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "profile_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "calibration_sha256": {
+      "type": "string",
+      "pattern": "^(not_applicable|[0-9a-f]{64})$"
+    },
+    "candidate_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_tree_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_clean": { "const": true },
+    "engine_version": { "type": "string", "minLength": 1 },
+    "engine_build_id": { "type": "string", "minLength": 1 },
+    "engine_executable_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "wasmtime_runtime_build_identity": { "type": "string", "minLength": 1 },
+    "wasmtime_runtime_artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "wamr_runtime_build_identity": { "type": "string", "minLength": 1 },
+    "wamr_runtime_artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "calibration_confirmation_samples": { "const": 3 },
     "iterations": {
       "type": "object",
       "additionalProperties": false,
@@ -69,7 +121,8 @@
       "then": {
         "properties": {
           "process_run": { "const": -1 },
-          "timed_samples": { "const": 0 }
+          "timed_samples": { "const": 0 },
+          "calibration_sha256": { "const": "not_applicable" }
         }
       }
     },
@@ -79,7 +132,10 @@
         "required": ["iterations"],
         "properties": {
           "process_run": { "minimum": 0 },
-          "timed_samples": { "minimum": 1 }
+          "timed_samples": { "minimum": 1 },
+          "calibration_sha256": {
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
       }
     }

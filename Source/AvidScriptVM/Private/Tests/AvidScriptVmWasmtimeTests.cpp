@@ -129,6 +129,58 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	return Module;
 }
 
+TArray<uint8> BuildWasmtimeResultFixture(
+	const uint8 ResultType,
+	const int32 ResultCount)
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+
+	TArray<uint8> Types;
+	AppendWasmtimeU32Leb(Types, 1);
+	Types.Add(0x60);
+	Types.Add(0x00);
+	AppendWasmtimeU32Leb(Types, static_cast<uint32>(ResultCount));
+	for (int32 Index = 0; Index < ResultCount; ++Index)
+	{
+		Types.Add(ResultType);
+	}
+	AppendWasmtimeSection(Module, 1, Types);
+
+	TArray<uint8> Functions;
+	AppendWasmtimeU32Leb(Functions, 1);
+	AppendWasmtimeU32Leb(Functions, 0);
+	AppendWasmtimeSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeString(Exports, "result_test");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 0);
+	AppendWasmtimeSection(Module, 7, Exports);
+
+	TArray<uint8> Body;
+	Body.Add(0x00);
+	for (int32 Index = 0; Index < ResultCount; ++Index)
+	{
+		if (ResultType == 0x7f)
+		{
+			AppendWasmtimeI32Const(Body, Index + 7);
+		}
+		else
+		{
+			Body.Add(0xd0);
+			Body.Add(ResultType);
+		}
+	}
+	Body.Add(0x0b);
+	TArray<uint8> Code;
+	AppendWasmtimeU32Leb(Code, 1);
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(Body.Num()));
+	Code.Append(Body);
+	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
 TArray<uint8> BuildWasmtimeI32ImportFixture(const char* ImportName, int32 Input)
 {
 	TArray<uint8> Module = MakeWasmtimeModule();
@@ -561,6 +613,90 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };
 	TestFalse(TEXT("malformed WASM rejects"), Backend->Load(MakeArrayView(Malformed), TEXT("wasmtime_malformed"), Config, Error));
 	TestFalse(TEXT("malformed WASM reports details"), Error.Details.IsEmpty());
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeResultAbiTest,
+	"AvidScript.VM.Wasmtime.ResultAbi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FAvidScriptVmError Error;
+	FAvidScriptVmLoadConfig Config;
+	TUniquePtr<IAvidScriptVmBackend> Backend =
+		CreateWasmtimeBackendForTest(Error);
+
+	const TArray<uint8> VoidFixture = BuildWasmtimeResultFixture(0x7f, 0);
+	if (!LoadWasmtimeTestModule(*this, *Backend, VoidFixture, Config, Error))
+	{
+		return false;
+	}
+	FAvidScriptVmExportHandle Handle;
+	TestTrue(
+		TEXT("void result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	FAvidScriptVmCallResult Result;
+	TestTrue(
+		TEXT("void result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("void result has zero cells"), Result.CellCount, 0u);
+	TestTrue(
+		TEXT("legacy call keeps default null result compatibility"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error));
+
+	const TArray<uint8> I32Fixture = BuildWasmtimeResultFixture(0x7f, 1);
+	if (!LoadWasmtimeTestModule(*this, *Backend, I32Fixture, Config, Error))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("i32 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("i32 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("i32 result has one cell"), Result.CellCount, 1u);
+	TestEqual(TEXT("i32 result value is preserved"), Result.Cells[0], 7u);
+
+	const TArray<uint8> OversizeFixture = BuildWasmtimeResultFixture(
+		0x7f,
+		FAvidScriptVmCallResult::MaxCells + 1);
+	if (!LoadWasmtimeTestModule(*this, *Backend, OversizeFixture, Config, Error))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("oversize result ABI rejects at resolve"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestEqual(
+		TEXT("oversize result category"),
+		Error.Category,
+		FString(TEXT("invalid_export")));
+
+	const TArray<uint8> UnsupportedFixture =
+		BuildWasmtimeResultFixture(0x6f, 1);
+	if (!LoadWasmtimeTestModule(
+			*this,
+			*Backend,
+			UnsupportedFixture,
+			Config,
+			Error))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("unsupported result ABI rejects at resolve"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestEqual(
+		TEXT("unsupported result category"),
+		Error.Category,
+		FString(TEXT("invalid_arguments")));
 	return true;
 #endif
 }

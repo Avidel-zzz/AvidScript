@@ -18,6 +18,13 @@ typedef struct AvidScriptWasmtimeFunction AvidScriptWasmtimeFunction;
 typedef struct AvidScriptWasmtimeCaller AvidScriptWasmtimeCaller;
 typedef struct AvidScriptWasmtimeFailure AvidScriptWasmtimeFailure;
 
+typedef enum AvidScriptWasmtimeCallStatus
+{
+	AVIDSCRIPT_WASMTIME_CALL_SUCCESS = 0,
+	AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE = 1,
+	AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE = 2
+} AvidScriptWasmtimeCallStatus;
+
 typedef enum AvidScriptWasmtimeValueKind
 {
 	AVIDSCRIPT_WASMTIME_I32 = 0,
@@ -89,14 +96,15 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	uint32_t* out_parameter_cell_count,
 	uint32_t* out_result_cell_count);
 void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function);
-AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	const uint32_t* cells,
 	size_t cell_count,
 	uint32_t* out_result_cells,
 	size_t result_cell_capacity,
-	size_t* out_result_cell_count);
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure);
 
 bool avidscript_wasmtime_memory_data(
 	AvidScriptWasmtimeStore* store,

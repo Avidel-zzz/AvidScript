@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.3 Task 4C fix round 1 只读命令再次混合：读取 profile、validator 与 merger 时在一条 PowerShell `shell_command` 中使用分号连接三个 `Get-Content`，重复违反已记录的单逻辑命令规则。Prevention：同轮已把多文件 parser 固化进 tracked `Test-ControlledRuntimeContracts.ps1`；后续多文件读取必须拆成独立调用，命令提交前机械扫描完整字符串，出现语句分隔符即拒绝发送。
 - 2026-07-27 P54.3 Task 4C 结果写回补丁落点错误：为 WAMR `Call` 增加返回 cell 时，宽泛 patch 只锚定通用 `return true`，实际把 `OutResult/Cells` 写回插入后续 `BorrowReadOnlyBytes`；首轮 UBT 才发现未声明标识符。Prevention：同文件存在多个同形返回块时，patch context 必须包含目标函数签名和紧邻语义；静态合同不能只搜索 token 存在，还要隔离目标函数 slice 并拒绝 token 出现在其他 owner。
 - 2026-07-27 P54.3 Task 4C parser 探测再次使用分号：一次 PowerShell `shell_command` 用分号串联文件枚举、循环 parser 与输出，违反一调用一逻辑命令。Prevention：shell 调用发送前继续机械拒绝 `;`、`&&`、`||`；多文件 parser 应写入受审合同脚本后单独调用，不能把临时循环压成单行。
 - 2026-07-27 P54.3 上下文压缩恢复顺序遗漏：恢复后先读取外部 formal attempt 与 worktree Task 4B 报告，之后才在主插件运行 `Build/InvokePhaseWorkflow.ps1 status -Phase 54`。这些读取没有修改状态，但外部 evidence 延续仍属于当前 Phase 的恢复动作，不能绕过状态机先行规则。Prevention：网络重连、上下文压缩或自动续跑后的首个项目相关工具调用固定为主插件当前最高 Phase 的 `status`；外部 attempt、SDD ledger、agent 报告、Git 和源码读取全部排在其后，不能以路径位于仓库外为例外。

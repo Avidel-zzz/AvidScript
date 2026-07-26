@@ -8,6 +8,17 @@
     "schema_version",
     "benchmark_kind",
     "mode",
+    "request_seed",
+    "attempt_id",
+    "request_sha256",
+    "profile_sha256",
+    "calibration_sha256",
+    "candidate_commit",
+    "candidate_tree_sha",
+    "candidate_clean",
+    "engine_version",
+    "engine_build_id",
+    "engine_executable_sha256",
     "process_run",
     "pid",
     "kernel_wasm_sha256",
@@ -16,6 +27,7 @@
     "instantiate_in_timed_region",
     "export_lookup_in_timed_region",
     "fallback_used",
+    "lane_schedule_id",
     "lane_identities",
     "calibration",
     "samples",
@@ -25,6 +37,38 @@
     "schema_version": { "const": 1 },
     "benchmark_kind": { "const": "identical_wasm_kernel" },
     "mode": { "enum": ["calibration", "timed"] },
+    "request_seed": { "type": "integer" },
+    "attempt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "profile_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "calibration_sha256": {
+      "type": "string",
+      "pattern": "^(not_applicable|[0-9a-f]{64})$"
+    },
+    "candidate_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_tree_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "candidate_clean": { "const": true },
+    "engine_version": { "type": "string", "minLength": 1 },
+    "engine_build_id": { "type": "string", "minLength": 1 },
+    "engine_executable_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "process_run": { "type": "integer", "minimum": -1 },
     "pid": { "type": "integer", "minimum": 1 },
     "kernel_wasm_sha256": {
@@ -36,6 +80,37 @@
     "instantiate_in_timed_region": { "const": false },
     "export_lookup_in_timed_region": { "const": false },
     "fallback_used": { "const": false },
+    "lane_schedule_id": { "const": "round_robin_process_sample_v1" },
+    "warmup_lane_orders": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/laneOrder" }
+    },
+    "timed_lane_orders": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/laneOrder" }
+    },
+    "iterations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "puerts_v8_wasm_jit",
+        "avidscript_wasmtime_cranelift_jit",
+        "avidscript_wamr_interpreter",
+        "native_cpp_reference"
+      ],
+      "properties": {
+        "puerts_v8_wasm_jit": { "type": "integer", "minimum": 1 },
+        "avidscript_wasmtime_cranelift_jit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "avidscript_wamr_interpreter": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "native_cpp_reference": { "type": "integer", "minimum": 1 }
+      }
+    },
     "lane_identities": {
       "type": "array",
       "minItems": 4,
@@ -55,7 +130,42 @@
     },
     "correctness_failures": { "const": 0 }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "calibration" } } },
+      "then": {
+        "properties": {
+          "process_run": { "const": -1 },
+          "calibration_sha256": { "const": "not_applicable" },
+          "samples": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "mode": { "const": "timed" } } },
+      "then": {
+        "required": ["warmup_lane_orders", "timed_lane_orders", "iterations"],
+        "properties": {
+          "process_run": { "minimum": 0 },
+          "calibration_sha256": { "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "laneOrder": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "enum": [
+          "puerts_v8_wasm_jit",
+          "avidscript_wasmtime_cranelift_jit",
+          "avidscript_wamr_interpreter",
+          "native_cpp_reference"
+        ]
+      }
+    },
     "laneBase": {
       "type": "object",
       "required": [
@@ -92,12 +202,28 @@
       "allOf": [
         { "$ref": "#/$defs/laneBase" },
         {
+          "required": [
+            "adapter_proof_id",
+            "adapter_source_wasm_sha256",
+            "adapter_artifact_wasm_sha256"
+          ],
           "properties": {
             "lane_id": { "const": "puerts_v8_wasm_jit" },
             "runtime_id": { "const": "v8.webassembly.tiered_jit" },
             "adapter_id": { "const": "puerts_webassembly_module_instance" },
             "execution_tier": { "const": "tiered_jit" },
-            "compiler_identity": { "const": "v8.webassembly.tiered_jit" }
+            "compiler_identity": { "const": "v8.webassembly.tiered_jit" },
+            "adapter_proof_id": {
+              "const": "webassembly.module_instance.cached_export.v1"
+            },
+            "adapter_source_wasm_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "adapter_artifact_wasm_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
           }
         }
       ]
@@ -145,6 +271,8 @@
       "required": [
         "lane_id",
         "sample_index",
+        "lane_position",
+        "lane_rotation",
         "iterations",
         "seed",
         "duration_ns",
@@ -164,10 +292,12 @@
           ]
         },
         "sample_index": { "type": "integer", "minimum": 0 },
+        "lane_position": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "lane_rotation": { "type": "integer", "minimum": 0, "maximum": 3 },
         "iterations": { "type": "integer", "minimum": 1 },
         "seed": { "type": "integer" },
-        "duration_ns": { "type": "number", "minimum": 0 },
-        "ns_per_iteration": { "type": "number", "minimum": 0 },
+        "duration_ns": { "type": "number", "exclusiveMinimum": 0 },
+        "ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
         "result": { "type": "integer" },
         "expected": { "type": "integer" },
         "correct": { "const": true },

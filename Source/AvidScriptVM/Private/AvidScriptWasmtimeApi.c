@@ -97,6 +97,19 @@ static AvidScriptWasmtimeFailure* avidscript_wasmtime_failure_new(
 	return failure;
 }
 
+static AvidScriptWasmtimeFailure* avidscript_wasmtime_local_failure(
+	const char* message)
+{
+	AvidScriptWasmtimeFailure* failure =
+		(AvidScriptWasmtimeFailure*)calloc(1, sizeof(*failure));
+	if (failure == NULL)
+	{
+		return NULL;
+	}
+	wasm_name_new_from_string_nt(&failure->message, message);
+	return failure;
+}
+
 static wasm_valtype_t* avidscript_wasmtime_value_type(AvidScriptWasmtimeValueKind kind)
 {
 	switch (kind)
@@ -558,14 +571,15 @@ void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function)
 	free(function);
 }
 
-AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	const uint32_t* cells,
 	size_t cell_count,
 	uint32_t* out_result_cells,
 	size_t result_cell_capacity,
-	size_t* out_result_cell_count)
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure)
 {
 	wasmtime_val_t arguments[AVIDSCRIPT_WASMTIME_MAX_VALUES];
 	wasmtime_val_t results[AVIDSCRIPT_WASMTIME_MAX_VALUES];
@@ -575,15 +589,42 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 	size_t result_index;
 	size_t cell_index = 0;
 	size_t result_cell_index = 0;
+	if (out_failure == NULL)
+	{
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	*out_failure = NULL;
+	if (store == NULL || function == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime store and resolved function are required.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	if (cell_count > 0 && cells == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime argument cells are required for a non-empty call frame.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	if (out_result_cell_count == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime result cell count output is required.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
 	*out_result_cell_count = 0;
 	if (cell_count != function->cell_count)
 	{
-		return NULL;
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime call cell count does not match the resolved export ABI.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 	}
 	if (function->result_cell_count > result_cell_capacity
 		|| (function->result_cell_count > 0 && out_result_cells == NULL))
 	{
-		return NULL;
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime result buffer is smaller than the resolved export ABI.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 	}
 	for (parameter_index = 0; parameter_index < function->parameter_count; ++parameter_index)
 	{
@@ -611,7 +652,9 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 			cell_index += 2;
 			break;
 		default:
-			return NULL;
+			*out_failure = avidscript_wasmtime_local_failure(
+				"Wasmtime parameter kind is unsupported by the VM cell ABI.");
+			return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 		}
 	}
 	error = wasmtime_func_call(
@@ -624,7 +667,8 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 		&trap);
 	if (error != NULL || trap != NULL)
 	{
-		return avidscript_wasmtime_failure_new(error, trap);
+		*out_failure = avidscript_wasmtime_failure_new(error, trap);
+		return AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE;
 	}
 	for (result_index = 0; result_index < function->result_count; ++result_index)
 	{
@@ -651,11 +695,13 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_function_call_event(
 			out_result_cells[result_cell_index++] = (uint32_t)(wide_bits >> 32);
 			break;
 		default:
-			return NULL;
+			*out_failure = avidscript_wasmtime_local_failure(
+				"Wasmtime result kind is unsupported by the VM cell ABI.");
+			return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 		}
 	}
 	*out_result_cell_count = result_cell_index;
-	return NULL;
+	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 }
 
 bool avidscript_wasmtime_memory_data(

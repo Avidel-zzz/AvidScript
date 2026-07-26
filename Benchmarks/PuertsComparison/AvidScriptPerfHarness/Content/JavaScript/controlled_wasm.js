@@ -30,6 +30,7 @@ function decodeBase64(input) {
 }
 
 const kernelBytes = decodeBase64(fixture.GetControlledWasmBase64());
+const kernelWasmSha256 = fixture.GetControlledWasmSha256();
 const kernelModule = new WebAssembly.Module(kernelBytes);
 const kernelInstance = new WebAssembly.Instance(kernelModule, {});
 const run = kernelInstance.exports.run;
@@ -39,5 +40,6 @@ if (typeof run !== "function") {
 
 fixture.RegisterControlledWasmRunner(
     (iterations, seed) => run(iterations | 0, seed | 0) | 0,
-    true,
-    true);
+    "webassembly.module_instance.cached_export.v1",
+    kernelWasmSha256,
+    kernelWasmSha256);

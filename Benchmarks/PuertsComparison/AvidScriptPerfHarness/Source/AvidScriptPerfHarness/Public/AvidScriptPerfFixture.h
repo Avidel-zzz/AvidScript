@@ -54,15 +54,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Performance")
 	FString GetControlledWasmBase64() const;
 
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Performance")
+	FString GetControlledWasmSha256() const;
+
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
 	void RegisterControlledWasmRunner(
 		FJsObject Runner,
-		bool bUsesWebAssemblyModule,
-		bool bUsesWebAssemblyInstance);
+		const FString& AdapterProofId,
+		const FString& SourceWasmSha256,
+		const FString& ArtifactWasmSha256);
 
-	void SetControlledWasmBytes(TConstArrayView<uint8> Bytes);
+	void SetControlledWasmBytes(
+		TConstArrayView<uint8> Bytes,
+		const FString& WasmSha256);
 	bool HasControlledWasmRunner() const;
 	bool ControlledRunnerUsesWebAssembly() const;
+	const FString& GetControlledAdapterProofId() const;
+	const FString& GetControlledAdapterSourceWasmSha256() const;
+	const FString& GetControlledAdapterArtifactWasmSha256() const;
 	int32 RunControlledWasm(int32 Iterations, int32 Seed) const;
 
 	int32 NativeNoOp(int32 Value) const;
@@ -102,11 +111,13 @@ private:
 	FJsObject StaticGetCallbackChecksum;
 	FJsObject ControlledWasmRunner;
 	FString ControlledWasmBase64;
+	FString ControlledWasmSha256;
+	FString ControlledAdapterProofId;
+	FString ControlledAdapterSourceWasmSha256;
+	FString ControlledAdapterArtifactWasmSha256;
 	bool bHasReflectionCallbacks = false;
 	bool bHasStaticCallbacks = false;
 	bool bHasControlledWasmRunner = false;
-	bool bControlledUsesWebAssemblyModule = false;
-	bool bControlledUsesWebAssemblyInstance = false;
 	uint32 NativeCallbackChecksum = 0;
 	mutable uint64 OperationCallCounts[10] = {};
 };

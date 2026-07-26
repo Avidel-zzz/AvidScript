@@ -518,6 +518,15 @@ public:
 				TEXT("Wasmtime could not inspect or retain the export function."));
 			return false;
 		}
+		if (ResultCellCount > FAvidScriptVmCallResult::MaxCells)
+		{
+			avidscript_wasmtime_function_delete(Function);
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_export"),
+				TEXT("Wasmtime export result cells exceed the fixed VM result capacity."));
+			return false;
+		}
 
 		FAvidScriptWasmtimeExportEntry& Entry = ExportEntries.AddDefaulted_GetRef();
 		Entry.Name = ExportName;
@@ -590,24 +599,35 @@ public:
 		}
 
 		++ActiveCallDepth;
-		uint32 ResultCells[FAvidScriptVmCallFrame::MaxCells] = {};
+		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
 		size_t ResultCellCount = 0;
-		AvidScriptWasmtimeFailure* CallFailure = avidscript_wasmtime_function_call_event(
+		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const AvidScriptWasmtimeCallStatus CallStatus =
+			avidscript_wasmtime_function_call_event(
 			Store,
 			Entry.Function,
 			Frame.Cells,
 			Frame.CellCount,
 			Entry.ResultCellCount == 0 ? nullptr : ResultCells,
-			FAvidScriptVmCallFrame::MaxCells,
-			&ResultCellCount);
-		const bool bCallFailed = CallFailure != nullptr;
+			FAvidScriptVmCallResult::MaxCells,
+			&ResultCellCount,
+			&CallFailure);
+		const bool bCallFailed =
+			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
 		FString FailureDetails;
 		TArray<FAvidScriptVmStackFrame> StackFrames;
 		bool bWasTrap = false;
-		if (bCallFailed)
+		if (CallFailure != nullptr)
 		{
 			FailureDetails = ConsumeWasmtimeFailure(CallFailure, StackFrames, bWasTrap);
+		}
+		else if (bCallFailed)
+		{
+			FailureDetails =
+				CallStatus == AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE
+					? TEXT("Wasmtime rejected the local call ABI.")
+					: TEXT("Wasmtime failed without allocating a diagnostic.");
 		}
 
 		--ActiveCallDepth;
@@ -641,6 +661,14 @@ public:
 					FailureDetails.IsEmpty() ? TEXT("Wasmtime call failed without a diagnostic message.") : FailureDetails);
 			}
 			OutError.StackFrames = MoveTemp(StackFrames);
+			return false;
+		}
+		if (ResultCellCount != Entry.ResultCellCount)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_result"),
+				TEXT("Wasmtime returned a result cell count that differs from the resolved export ABI."));
 			return false;
 		}
 		if (OutResult != nullptr)

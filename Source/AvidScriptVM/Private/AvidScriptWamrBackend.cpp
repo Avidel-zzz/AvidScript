@@ -369,6 +369,74 @@ public:
 		else
 		{
 			OutHandle.BackendInstanceIdentity = BackendInstanceIdentity;
+			void* FunctionValue = nullptr;
+			if (!ExportTable.TryGet(OutHandle, FunctionValue, OutError))
+			{
+				OutHandle = {};
+				return false;
+			}
+			const wasm_function_inst_t Function =
+				static_cast<wasm_function_inst_t>(FunctionValue);
+			const uint32 ResultCount = wasm_func_get_result_count(
+				Function,
+				ModuleInstance);
+			if (ResultCount > FAvidScriptVmCallResult::MaxCells)
+			{
+				OutHandle = {};
+				SetVmError(
+					OutError,
+					TEXT("invalid_export"),
+					TEXT("WAMR export result count exceeds the fixed VM result capacity."));
+				return false;
+			}
+			TArray<wasm_valkind_t, TInlineAllocator<FAvidScriptVmCallResult::MaxCells>>
+				ResultTypes;
+			ResultTypes.SetNumUninitialized(ResultCount);
+			if (ResultCount > 0)
+			{
+				wasm_func_get_result_types(
+					Function,
+					ModuleInstance,
+					ResultTypes.GetData());
+			}
+			uint32 ResultCellCount = 0;
+			for (const wasm_valkind_t ResultType : ResultTypes)
+			{
+				switch (ResultType)
+				{
+				case WASM_I32:
+				case WASM_F32:
+					++ResultCellCount;
+					break;
+				case WASM_I64:
+				case WASM_F64:
+					ResultCellCount += 2;
+					break;
+				default:
+					OutHandle = {};
+					SetVmError(
+						OutError,
+						TEXT("invalid_export"),
+						TEXT("WAMR export results must use only core numeric ABI types."));
+					return false;
+				}
+				if (ResultCellCount > FAvidScriptVmCallResult::MaxCells)
+				{
+					OutHandle = {};
+					SetVmError(
+						OutError,
+						TEXT("invalid_export"),
+						TEXT("WAMR export result cells exceed the fixed VM result capacity."));
+					return false;
+				}
+			}
+			if (ExportResultCellCounts.Num() <
+				static_cast<int32>(OutHandle.Slot))
+			{
+				ExportResultCellCounts.SetNumZeroed(
+					static_cast<int32>(OutHandle.Slot));
+			}
+			ExportResultCellCounts[OutHandle.Slot - 1] = ResultCellCount;
 		}
 		return bResolved;
 #endif
@@ -422,6 +490,17 @@ public:
 			SetVmError(OutError, TEXT("invalid_state"), TEXT("Call requires a loaded VM instance."));
 			return false;
 		}
+		if (Handle.Slot == 0 ||
+			Handle.Slot > static_cast<uint32>(ExportResultCellCounts.Num()))
+		{
+			SetVmError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The export result ABI is no longer available."));
+			return false;
+		}
+		const uint32 ResultCellCount =
+			ExportResultCellCounts[Handle.Slot - 1];
 
 		uint32 Cells[FAvidScriptVmCallFrame::MaxCells] = {};
 		FMemory::Memcpy(Cells, Frame.Cells, Frame.CellCount * sizeof(uint32));
@@ -474,8 +553,11 @@ public:
 
 		if (OutResult != nullptr)
 		{
-			OutResult->Cells[0] = Cells[0];
-			OutResult->CellCount = 1;
+			FMemory::Memcpy(
+				OutResult->Cells,
+				Cells,
+				ResultCellCount * sizeof(uint32));
+			OutResult->CellCount = ResultCellCount;
 		}
 		return true;
 #endif
@@ -798,6 +880,7 @@ private:
 #endif
 
 		ExportTable.Reset();
+		ExportResultCellCounts.Reset();
 		ModuleBuffer.Reset();
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
@@ -821,6 +904,7 @@ private:
 	TArray<FAvidScriptWamrDynamicRegistration> DynamicRegistrations;
 	TMap<const FAvidScriptWamrRawImportAttachment*, uint32> DynamicOrdinals;
 	FAvidScriptVmExportTable ExportTable;
+	TArray<uint32> ExportResultCellCounts;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	bool bOwnsRuntimeLease = false;
 	int32 ActiveCallDepth = 0;

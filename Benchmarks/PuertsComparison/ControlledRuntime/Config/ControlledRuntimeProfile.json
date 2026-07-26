@@ -5,6 +5,7 @@
   "process_runs": 5,
   "warmup_samples": 5,
   "timed_samples": 30,
+  "calibration_confirmation_samples": 3,
   "minimum_sample_milliseconds": 5.0,
   "minimum_iterations": 1000,
   "maximum_iterations": 10000000,
@@ -12,6 +13,7 @@
   "target_triple": "x86_64-pc-windows-msvc",
   "kernel_contract": "Kernel/controlled_runtime_kernel.contract.json",
   "kernel_wasm_sha256": "230aed5ae6bd816e7780e0519354b100f29d23908ff0e6c1f0b52af5d4c834f7",
+  "lane_schedule_id": "round_robin_process_sample_v1",
   "lanes": [
     "puerts_v8_wasm_jit",
     "avidscript_wasmtime_cranelift_jit",

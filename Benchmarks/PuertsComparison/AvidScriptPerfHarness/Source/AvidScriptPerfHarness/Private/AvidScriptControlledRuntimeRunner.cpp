@@ -33,6 +33,9 @@ namespace
 	constexpr int32 ControlledRuntimeLaneCount = 4;
 	constexpr int32 ControlledRuntimeMaximumWarmups = 100;
 	constexpr int32 ControlledRuntimeMaximumTimedSamples = 1000;
+	constexpr int32 ControlledRuntimeCalibrationConfirmationSamples = 3;
+	constexpr const TCHAR* ControlledRuntimeLaneScheduleId =
+		TEXT("round_robin_process_sample_v1");
 
 	enum class EControlledRuntimeLane : uint8
 	{
@@ -65,6 +68,17 @@ namespace
 		EControlledRuntimeLane::AvidScriptWamrInterpreter,
 		EControlledRuntimeLane::NativeCppReference
 	};
+
+	EControlledRuntimeLane GetScheduledLane(
+		const int32 ProcessRun,
+		const int32 RoundIndex,
+		const int32 LanePosition)
+	{
+		const int32 Rotation =
+			(ProcessRun + RoundIndex) % ControlledRuntimeLaneCount;
+		return ControlledRuntimeLanes[
+			(Rotation + LanePosition) % ControlledRuntimeLaneCount];
+	}
 
 	uint32 RotateLeft13(const uint32 Value)
 	{
@@ -162,6 +176,20 @@ namespace
 		return true;
 	}
 
+	bool GetRequiredBool(
+		const TSharedPtr<FJsonObject>& Object,
+		const TCHAR* Name,
+		bool& OutValue,
+		FString& OutError)
+	{
+		if (!Object.IsValid() || !Object->TryGetBoolField(Name, OutValue))
+		{
+			OutError = FString::Printf(TEXT("required bool is missing: %s"), Name);
+			return false;
+		}
+		return true;
+	}
+
 	class FControlledRuntimeModuleLoader final : public puerts::IJSModuleLoader
 	{
 	public:
@@ -246,6 +274,7 @@ namespace
 		bool Initialize(
 			AAvidScriptPerfFixture& InFixture,
 			const TConstArrayView<uint8> WasmBytes,
+			const FString& WasmSha256,
 			FString& OutError)
 		{
 			const TSharedPtr<IPlugin> HarnessPlugin =
@@ -271,7 +300,7 @@ namespace
 			}
 
 			Fixture = &InFixture;
-			Fixture->SetControlledWasmBytes(WasmBytes);
+			Fixture->SetControlledWasmBytes(WasmBytes, WasmSha256);
 			Environment = MakeShared<puerts::FJsEnv>(
 				std::make_shared<FControlledRuntimeModuleLoader>(
 					ScriptRoot,
@@ -464,7 +493,11 @@ namespace
 				OutError = TEXT("unable to spawn controlled runtime fixture");
 				return false;
 			}
-			if (!Puerts.Initialize(*Fixture, WasmBytes, OutError))
+			if (!Puerts.Initialize(
+					*Fixture,
+					WasmBytes,
+					WasmSha256,
+					OutError))
 			{
 				return false;
 			}
@@ -530,6 +563,20 @@ namespace
 		FString PuertsCommit;
 		FString PuertsBackendSha256;
 		FString TargetTriple;
+		FString AttemptId;
+		FString ProfileSha256;
+		FString CalibrationSha256;
+		FString CandidateCommit;
+		FString CandidateTreeSha;
+		bool bCandidateClean = false;
+		FString EngineVersion;
+		FString EngineBuildId;
+		FString EngineExecutableSha256;
+		FString WasmtimeRuntimeBuildIdentity;
+		FString WasmtimeRuntimeArtifactSha256;
+		FString WamrRuntimeBuildIdentity;
+		FString WamrRuntimeArtifactSha256;
+		int32 CalibrationConfirmationSamples = 0;
 		TMap<FString, int32> Iterations;
 	};
 
@@ -603,6 +650,76 @@ namespace
 				Object,
 				TEXT("target_triple"),
 				OutRequest.TargetTriple,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("attempt_id"),
+				OutRequest.AttemptId,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("profile_sha256"),
+				OutRequest.ProfileSha256,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("calibration_sha256"),
+				OutRequest.CalibrationSha256,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("candidate_commit"),
+				OutRequest.CandidateCommit,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("candidate_tree_sha"),
+				OutRequest.CandidateTreeSha,
+				OutError) ||
+			!GetRequiredBool(
+				Object,
+				TEXT("candidate_clean"),
+				OutRequest.bCandidateClean,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("engine_version"),
+				OutRequest.EngineVersion,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("engine_build_id"),
+				OutRequest.EngineBuildId,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("engine_executable_sha256"),
+				OutRequest.EngineExecutableSha256,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("wasmtime_runtime_build_identity"),
+				OutRequest.WasmtimeRuntimeBuildIdentity,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("wasmtime_runtime_artifact_sha256"),
+				OutRequest.WasmtimeRuntimeArtifactSha256,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("wamr_runtime_build_identity"),
+				OutRequest.WamrRuntimeBuildIdentity,
+				OutError) ||
+			!GetRequiredString(
+				Object,
+				TEXT("wamr_runtime_artifact_sha256"),
+				OutRequest.WamrRuntimeArtifactSha256,
+				OutError) ||
+			!GetRequiredInteger(
+				Object,
+				TEXT("calibration_confirmation_samples"),
+				OutRequest.CalibrationConfirmationSamples,
 				OutError))
 		{
 			return false;
@@ -626,17 +743,34 @@ namespace
 			OutRequest.MaximumIterations < OutRequest.MinimumIterations ||
 			OutRequest.KernelWasmSha256.Len() != 64 ||
 			OutRequest.PuertsCommit.Len() != 40 ||
-			OutRequest.PuertsBackendSha256.Len() != 64)
+			OutRequest.PuertsBackendSha256.Len() != 64 ||
+			OutRequest.ProfileSha256.Len() != 64 ||
+			OutRequest.CandidateCommit.Len() != 40 ||
+			OutRequest.CandidateTreeSha.Len() != 40 ||
+			!OutRequest.bCandidateClean ||
+			OutRequest.EngineExecutableSha256.Len() != 64 ||
+			OutRequest.WasmtimeRuntimeArtifactSha256.Len() != 64 ||
+			OutRequest.WamrRuntimeArtifactSha256.Len() != 64 ||
+			OutRequest.CalibrationConfirmationSamples !=
+				ControlledRuntimeCalibrationConfirmationSamples)
 		{
 			OutError = TEXT("controlled runtime request bounds or identities are invalid");
 			return false;
 		}
 		if (OutRequest.Mode == TEXT("calibration"))
 		{
-			return OutRequest.ProcessRun == -1 &&
-				OutRequest.TimedSamples == 0;
+			if (OutRequest.ProcessRun != -1 ||
+				OutRequest.TimedSamples != 0 ||
+				OutRequest.CalibrationSha256 != TEXT("not_applicable"))
+			{
+				OutError = TEXT("calibration request identity is invalid");
+				return false;
+			}
+			return true;
 		}
-		if (OutRequest.ProcessRun < 0 || OutRequest.TimedSamples < 1)
+		if (OutRequest.ProcessRun < 0 ||
+			OutRequest.TimedSamples < 1 ||
+			OutRequest.CalibrationSha256.Len() != 64)
 		{
 			OutError = TEXT("timed request requires process_run >= 0 and timed_samples > 0");
 			return false;
@@ -715,6 +849,17 @@ namespace
 			Identity->SetStringField(
 				TEXT("runtime_artifact_sha256"),
 				Request.PuertsBackendSha256);
+			Identity->SetStringField(
+				TEXT("adapter_proof_id"),
+				Environment.Puerts.Fixture->GetControlledAdapterProofId());
+			Identity->SetStringField(
+				TEXT("adapter_source_wasm_sha256"),
+				Environment.Puerts.Fixture->
+					GetControlledAdapterSourceWasmSha256());
+			Identity->SetStringField(
+				TEXT("adapter_artifact_wasm_sha256"),
+				Environment.Puerts.Fixture->
+					GetControlledAdapterArtifactWasmSha256());
 			break;
 		case EControlledRuntimeLane::AvidScriptWasmtimeCraneliftJit:
 			Identity->SetStringField(
@@ -879,6 +1024,14 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 	{
 		return false;
 	}
+	TArray<uint8> RequestBytes;
+	FString RequestSha256;
+	if (!FFileHelper::LoadFileToArray(RequestBytes, *RequestPath) ||
+		!ComputeSha256(RequestBytes, RequestSha256))
+	{
+		OutError = TEXT("unable to hash controlled runtime request");
+		return false;
+	}
 	TArray<uint8> WasmBytes;
 	if (!FFileHelper::LoadFileToArray(WasmBytes, *Request.KernelWasmPath))
 	{
@@ -901,11 +1054,40 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 	{
 		return false;
 	}
+	if (Environment.Wasmtime.BackendInfo.RuntimeBuildIdentity !=
+			Request.WasmtimeRuntimeBuildIdentity ||
+		Environment.Wasmtime.BackendInfo.RuntimeArtifactSha256 !=
+			Request.WasmtimeRuntimeArtifactSha256 ||
+		Environment.Wamr.BackendInfo.RuntimeBuildIdentity !=
+			Request.WamrRuntimeBuildIdentity ||
+		Environment.Wamr.BackendInfo.RuntimeArtifactSha256 !=
+			Request.WamrRuntimeArtifactSha256)
+	{
+		OutError = TEXT("controlled runtime backend provenance differs from request");
+		return false;
+	}
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetNumberField(TEXT("schema_version"), ControlledRuntimeSchemaVersion);
 	Result->SetStringField(TEXT("benchmark_kind"), TEXT("identical_wasm_kernel"));
 	Result->SetStringField(TEXT("mode"), Request.Mode);
+	Result->SetNumberField(TEXT("request_seed"), Request.Seed);
+	Result->SetStringField(TEXT("attempt_id"), Request.AttemptId);
+	Result->SetStringField(TEXT("request_sha256"), RequestSha256);
+	Result->SetStringField(TEXT("profile_sha256"), Request.ProfileSha256);
+	Result->SetStringField(
+		TEXT("calibration_sha256"),
+		Request.CalibrationSha256);
+	Result->SetStringField(TEXT("candidate_commit"), Request.CandidateCommit);
+	Result->SetStringField(
+		TEXT("candidate_tree_sha"),
+		Request.CandidateTreeSha);
+	Result->SetBoolField(TEXT("candidate_clean"), Request.bCandidateClean);
+	Result->SetStringField(TEXT("engine_version"), Request.EngineVersion);
+	Result->SetStringField(TEXT("engine_build_id"), Request.EngineBuildId);
+	Result->SetStringField(
+		TEXT("engine_executable_sha256"),
+		Request.EngineExecutableSha256);
 	Result->SetNumberField(TEXT("process_run"), Request.ProcessRun);
 	Result->SetNumberField(
 		TEXT("pid"),
@@ -918,6 +1100,9 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 	Result->SetBoolField(TEXT("instantiate_in_timed_region"), false);
 	Result->SetBoolField(TEXT("export_lookup_in_timed_region"), false);
 	Result->SetBoolField(TEXT("fallback_used"), false);
+	Result->SetStringField(
+		TEXT("lane_schedule_id"),
+		ControlledRuntimeLaneScheduleId);
 
 	TArray<TSharedPtr<FJsonValue>> LaneIdentities;
 	for (const EControlledRuntimeLane Lane : ControlledRuntimeLanes)
@@ -955,17 +1140,31 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 			}
 			while (true)
 			{
-				if (!RunLaneAndValidate(
-						Environment,
-						Lane,
-						Iterations,
-						Request.Seed + 1009,
-						Actual,
-						DurationNanoseconds,
-						OutError))
+				TArray<uint64, TInlineAllocator<
+					ControlledRuntimeCalibrationConfirmationSamples>>
+					ConfirmationDurations;
+				for (int32 ConfirmationIndex = 0;
+					ConfirmationIndex <
+						ControlledRuntimeCalibrationConfirmationSamples;
+					++ConfirmationIndex)
 				{
-					return false;
+					if (!RunLaneAndValidate(
+							Environment,
+							Lane,
+							Iterations,
+							Request.Seed + 1009 + ConfirmationIndex * 17,
+							Actual,
+							DurationNanoseconds,
+							OutError))
+					{
+						return false;
+					}
+					ConfirmationDurations.Add(DurationNanoseconds);
 				}
+				ConfirmationDurations.Sort();
+				DurationNanoseconds =
+					ConfirmationDurations[
+						ControlledRuntimeCalibrationConfirmationSamples / 2];
 				if (static_cast<double>(DurationNanoseconds) >=
 						Request.MinimumSampleMilliseconds * 1000000.0 ||
 					Iterations == Request.MaximumIterations)
@@ -988,20 +1187,84 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 			TSharedRef<FJsonObject> LaneCalibration = MakeShared<FJsonObject>();
 			LaneCalibration->SetNumberField(TEXT("iterations"), Iterations);
 			LaneCalibration->SetNumberField(
-				TEXT("duration_ns"),
+				TEXT("median_duration_ns"),
 				static_cast<double>(DurationNanoseconds));
+			TArray<TSharedPtr<FJsonValue>> ConfirmationValues;
+			for (int32 ConfirmationIndex = 0;
+				ConfirmationIndex <
+					ControlledRuntimeCalibrationConfirmationSamples;
+				++ConfirmationIndex)
+			{
+				uint64 ConfirmationDuration = 0;
+				if (!RunLaneAndValidate(
+						Environment,
+						Lane,
+						Iterations,
+						Request.Seed + 2003 + ConfirmationIndex * 17,
+						Actual,
+						ConfirmationDuration,
+						OutError))
+				{
+					return false;
+				}
+				ConfirmationValues.Add(
+					MakeShared<FJsonValueNumber>(
+						static_cast<double>(ConfirmationDuration)));
+			}
+			ConfirmationValues.Sort(
+				[](const TSharedPtr<FJsonValue>& Left,
+					const TSharedPtr<FJsonValue>& Right)
+				{
+					return Left->AsNumber() < Right->AsNumber();
+				});
+			DurationNanoseconds = static_cast<uint64>(
+				ConfirmationValues[
+					ControlledRuntimeCalibrationConfirmationSamples / 2]
+					->AsNumber());
+			if (static_cast<double>(DurationNanoseconds) <
+				Request.MinimumSampleMilliseconds * 1000000.0)
+			{
+				OutError = FString::Printf(
+					TEXT("frozen calibration confirmations did not reach minimum duration lane=%s"),
+					GetLaneId(Lane));
+				return false;
+			}
+			LaneCalibration->SetNumberField(
+				TEXT("median_duration_ns"),
+				static_cast<double>(DurationNanoseconds));
+			LaneCalibration->SetArrayField(
+				TEXT("confirmation_duration_ns"),
+				ConfirmationValues);
 			Calibration->SetObjectField(GetLaneId(Lane), LaneCalibration);
 		}
 	}
 	else
 	{
+		TSharedRef<FJsonObject> FrozenIterations = MakeShared<FJsonObject>();
 		for (const EControlledRuntimeLane Lane : ControlledRuntimeLanes)
 		{
-			const int32 Iterations = Request.Iterations.FindChecked(GetLaneId(Lane));
-			for (int32 Warmup = 0;
-				Warmup < Request.WarmupSamples;
-				++Warmup)
+			FrozenIterations->SetNumberField(
+				GetLaneId(Lane),
+				Request.Iterations.FindChecked(GetLaneId(Lane)));
+		}
+		Result->SetObjectField(TEXT("iterations"), FrozenIterations);
+
+		TArray<TSharedPtr<FJsonValue>> WarmupLaneOrders;
+		for (int32 Warmup = 0;
+			Warmup < Request.WarmupSamples;
+			++Warmup)
+		{
+			TArray<TSharedPtr<FJsonValue>> LaneOrder;
+			for (int32 LanePosition = 0;
+				LanePosition < ControlledRuntimeLaneCount;
+				++LanePosition)
 			{
+				const EControlledRuntimeLane Lane = GetScheduledLane(
+					Request.ProcessRun,
+					Warmup,
+					LanePosition);
+				const int32 Iterations =
+					Request.Iterations.FindChecked(GetLaneId(Lane));
 				int32 WarmupActual = 0;
 				uint64 WarmupDuration = 0;
 				const int32 WarmupSeed =
@@ -1017,11 +1280,32 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 				{
 					return false;
 				}
+				LaneOrder.Add(
+					MakeShared<FJsonValueString>(GetLaneId(Lane)));
 			}
-			for (int32 SampleIndex = 0;
-				SampleIndex < Request.TimedSamples;
-				++SampleIndex)
+			WarmupLaneOrders.Add(MakeShared<FJsonValueArray>(LaneOrder));
+		}
+		Result->SetArrayField(TEXT("warmup_lane_orders"), WarmupLaneOrders);
+
+		TArray<TSharedPtr<FJsonValue>> TimedLaneOrders;
+		for (int32 SampleIndex = 0;
+			SampleIndex < Request.TimedSamples;
+			++SampleIndex)
+		{
+			TArray<TSharedPtr<FJsonValue>> LaneOrder;
+			const int32 LaneRotation =
+				(Request.ProcessRun + SampleIndex) %
+				ControlledRuntimeLaneCount;
+			for (int32 LanePosition = 0;
+				LanePosition < ControlledRuntimeLaneCount;
+				++LanePosition)
 			{
+				const EControlledRuntimeLane Lane = GetScheduledLane(
+					Request.ProcessRun,
+					SampleIndex,
+					LanePosition);
+				const int32 Iterations =
+					Request.Iterations.FindChecked(GetLaneId(Lane));
 				const int32 SampleSeed =
 					Request.Seed + Request.ProcessRun * 1009 + SampleIndex * 17;
 				int32 Actual = 0;
@@ -1042,6 +1326,8 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 				TSharedRef<FJsonObject> Sample = MakeShared<FJsonObject>();
 				Sample->SetStringField(TEXT("lane_id"), GetLaneId(Lane));
 				Sample->SetNumberField(TEXT("sample_index"), SampleIndex);
+				Sample->SetNumberField(TEXT("lane_position"), LanePosition);
+				Sample->SetNumberField(TEXT("lane_rotation"), LaneRotation);
 				Sample->SetNumberField(TEXT("iterations"), Iterations);
 				Sample->SetNumberField(TEXT("seed"), SampleSeed);
 				Sample->SetNumberField(
@@ -1056,8 +1342,12 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 				Sample->SetBoolField(TEXT("correct"), Actual == Expected);
 				Sample->SetNumberField(TEXT("host_crossing_count"), 1);
 				Samples.Add(MakeShared<FJsonValueObject>(Sample));
+				LaneOrder.Add(
+					MakeShared<FJsonValueString>(GetLaneId(Lane)));
 			}
+			TimedLaneOrders.Add(MakeShared<FJsonValueArray>(LaneOrder));
 		}
+		Result->SetArrayField(TEXT("timed_lane_orders"), TimedLaneOrders);
 	}
 	Result->SetObjectField(TEXT("calibration"), Calibration);
 	Result->SetArrayField(TEXT("samples"), Samples);

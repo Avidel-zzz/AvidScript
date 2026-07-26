@@ -7,57 +7,148 @@
   "required": [
     "schema_version",
     "benchmark_kind",
+    "attempt_id",
+    "profile_sha256",
+    "calibration_sha256",
+    "candidate",
+    "engine",
     "kernel_wasm_sha256",
+    "lane_schedule_id",
+    "lane_identities",
+    "lane_identities_sha256",
+    "calibration_pid",
+    "timed_pids",
     "process_runs",
     "timed_samples_per_lane_per_process",
-    "timed_pids",
     "observation_count",
     "correctness_failures",
     "fallback_used",
-    "metrics",
-    "ratios",
+    "result_sha256",
+    "request_sha256",
+    "process_metrics",
+    "cross_process_metrics",
+    "paired_ratios",
     "pc_default_gate"
   ],
   "properties": {
     "schema_version": { "const": 1 },
     "benchmark_kind": { "const": "identical_wasm_kernel" },
-    "kernel_wasm_sha256": {
+    "attempt_id": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
-    "process_runs": { "type": "integer", "minimum": 1 },
-    "timed_samples_per_lane_per_process": { "type": "integer", "minimum": 1 },
-    "timed_pids": {
-      "type": "array",
-      "items": { "type": "integer", "minimum": 1 },
-      "uniqueItems": true
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "calibration_sha256": { "$ref": "#/$defs/sha256" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree_sha", "clean"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/gitSha" },
+        "tree_sha": { "$ref": "#/$defs/gitSha" },
+        "clean": { "const": true }
+      }
     },
-    "observation_count": { "type": "integer", "minimum": 1 },
-    "correctness_failures": { "const": 0 },
-    "fallback_used": { "const": false },
-    "metrics": {
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "build_id", "executable_sha256"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "build_id": { "type": "string", "minLength": 1 },
+        "executable_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "kernel_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "lane_schedule_id": { "const": "round_robin_process_sample_v1" },
+    "lane_identities": {
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["lane_id", "sample_count", "p50_ns_per_iteration", "p95_ns_per_iteration", "mad_ns_per_iteration"],
-        "properties": {
-          "lane_id": { "type": "string" },
-          "sample_count": { "type": "integer", "minimum": 1 },
-          "p50_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "p95_ns_per_iteration": { "type": "number", "minimum": 0 },
-          "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
-        }
-      }
+      "items": { "type": "object" }
     },
-    "ratios": {
+    "lane_identities_sha256": { "$ref": "#/$defs/sha256" },
+    "calibration_pid": { "type": "integer", "minimum": 1 },
+    "timed_pids": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "type": "integer", "minimum": 1 },
+      "uniqueItems": true
+    },
+    "process_runs": { "const": 5 },
+    "timed_samples_per_lane_per_process": { "const": 30 },
+    "observation_count": { "const": 600 },
+    "correctness_failures": { "const": 0 },
+    "fallback_used": { "const": false },
+    "result_sha256": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/sha256" },
+      "uniqueItems": true
+    },
+    "request_sha256": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/sha256" },
+      "uniqueItems": true
+    },
+    "process_metrics": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/processMetric" }
+    },
+    "cross_process_metrics": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/crossProcessMetric" }
+    },
+    "paired_ratios": {
       "type": "object",
-      "required": ["wasmtime_over_v8_p50", "wasmtime_over_v8_p95"],
+      "additionalProperties": false,
+      "required": [
+        "per_process",
+        "wasmtime_over_v8_cross_process_p50",
+        "wasmtime_over_v8_cross_process_p95"
+      ],
       "properties": {
-        "wasmtime_over_v8_p50": { "type": "number", "minimum": 0 },
-        "wasmtime_over_v8_p95": { "type": "number", "minimum": 0 }
+        "per_process": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "process_run",
+              "wasmtime_over_v8_p50",
+              "wasmtime_over_v8_p95"
+            ],
+            "properties": {
+              "process_run": { "type": "integer", "minimum": 0, "maximum": 4 },
+              "wasmtime_over_v8_p50": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "wasmtime_over_v8_p95": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        },
+        "wasmtime_over_v8_cross_process_p50": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "wasmtime_over_v8_cross_process_p95": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "pc_default_gate": {
@@ -65,6 +156,73 @@
         "wasmtime_pc_default_gate_passed",
         "wasmtime_pc_default_rejected"
       ]
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "processMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "process_run",
+        "lane_id",
+        "sample_count",
+        "p50_ns_per_iteration",
+        "p95_ns_per_iteration",
+        "mad_ns_per_iteration"
+      ],
+      "properties": {
+        "process_run": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "lane_id": { "type": "string", "minLength": 1 },
+        "sample_count": { "const": 30 },
+        "p50_ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
+        "p95_ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
+        "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
+      }
+    },
+    "crossProcessMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id",
+        "process_count",
+        "process_p50_median_ns_per_iteration",
+        "process_p50_p95_ns_per_iteration",
+        "process_p95_median_ns_per_iteration",
+        "process_p95_p95_ns_per_iteration",
+        "process_mad_median_ns_per_iteration"
+      ],
+      "properties": {
+        "lane_id": { "type": "string", "minLength": 1 },
+        "process_count": { "const": 5 },
+        "process_p50_median_ns_per_iteration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "process_p50_p95_ns_per_iteration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "process_p95_median_ns_per_iteration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "process_p95_p95_ns_per_iteration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "process_mad_median_ns_per_iteration": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
     }
   }
 }

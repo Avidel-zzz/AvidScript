@@ -90,6 +90,18 @@ Assert-SidecarPuertsProvenance `
     -PuertsBackendSha256 $PuertsBackendSha256
 $AvidScriptRuntimeIdentity = Get-SidecarAvidScriptRuntimeIdentity `
     -PluginRoot ([string]$ProjectJunctions.AvidScript)
+$ProfileSha256 = Get-SidecarFileSha256 -Path $ResolvedProfilePath
+$EngineExecutableSha256 = Get-SidecarFileSha256 -Path $ResolvedEditorExecutable
+$EngineVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
+    $ResolvedEditorExecutable)
+$EngineVersion = [string]$EngineVersionInfo.ProductVersion
+if ([string]::IsNullOrWhiteSpace($EngineVersion)) {
+    $EngineVersion = [string]$EngineVersionInfo.FileVersion
+}
+if ([string]::IsNullOrWhiteSpace($EngineVersion)) {
+    throw 'ASP54S4309 Unreal Editor version identity is unavailable'
+}
+$EngineBuildId = '{0};sha256={1}' -f $EngineVersion, $EngineExecutableSha256
 
 $KernelPath = Join-Path ([string]$ProjectJunctions.AvidScript) (
     'Benchmarks/PuertsComparison/ControlledRuntime/Kernel/controlled_runtime_kernel.wasm')
@@ -112,8 +124,10 @@ $AttemptPath = Join-Path $ResolvedOutputRoot (
 New-Item -ItemType Directory -Path $AttemptPath | Out-Null
 $RequestsPath = Join-Path $AttemptPath 'requests'
 $ResultsPath = Join-Path $AttemptPath 'results'
+$LogsPath = Join-Path $AttemptPath 'logs'
 New-Item -ItemType Directory -Path $RequestsPath | Out-Null
 New-Item -ItemType Directory -Path $ResultsPath | Out-Null
+New-Item -ItemType Directory -Path $LogsPath | Out-Null
 
 function Write-Request {
     param(
@@ -133,7 +147,8 @@ function Write-Request {
 function Invoke-ControlledProcess {
     param(
         [string]$RequestPath,
-        [string]$ResultPath
+        [string]$ResultPath,
+        [string]$LogStem
     )
     $Arguments = @(
         $ResolvedProjectPath
@@ -149,9 +164,37 @@ function Invoke-ControlledProcess {
         "-AvidScriptControlledRuntimeRequest=$RequestPath"
         "-AvidScriptControlledRuntimeResult=$ResultPath"
     ) + @($AdditionalEditorArguments)
-    & $ResolvedEditorExecutable @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "ASP54S4307 controlled Editor process failed with exit code $LASTEXITCODE"
+    $StdoutPath = Join-Path $LogsPath "$LogStem.stdout.log"
+    $StderrPath = Join-Path $LogsPath "$LogStem.stderr.log"
+    $StartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $ResolvedEditorExecutable
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    foreach ($Argument in $Arguments) {
+        [void]$StartInfo.ArgumentList.Add([string]$Argument)
+    }
+    $Process = [System.Diagnostics.Process]::new()
+    $Process.StartInfo = $StartInfo
+    if (-not $Process.Start()) {
+        throw 'ASP54S4307 controlled Editor process could not start'
+    }
+    $StdoutTask = $Process.StandardOutput.ReadToEndAsync()
+    $StderrTask = $Process.StandardError.ReadToEndAsync()
+    $Process.WaitForExit()
+    [System.IO.File]::WriteAllText(
+        $StdoutPath,
+        $StdoutTask.GetAwaiter().GetResult(),
+        [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText(
+        $StderrPath,
+        $StderrTask.GetAwaiter().GetResult(),
+        [System.Text.UTF8Encoding]::new($false))
+    $ExitCode = $Process.ExitCode
+    $Process.Dispose()
+    if ($ExitCode -ne 0) {
+        throw "ASP54S4307 controlled Editor process failed with exit code $ExitCode; logs=$LogStem"
     }
     if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
         throw 'ASP54S4308 controlled Editor process did not publish a result'
@@ -172,18 +215,39 @@ function New-BaseRequest {
         puerts_commit = $PuertsCommit
         puerts_backend_sha256 = $PuertsBackendSha256
         target_triple = [string]$Profile.target_triple
+        attempt_id = $AttemptId
+        profile_sha256 = $ProfileSha256
+        calibration_sha256 = 'not_applicable'
+        candidate_commit = $AvidScriptCommit
+        candidate_tree_sha = $AvidScriptTreeSha
+        candidate_clean = $true
+        engine_version = $EngineVersion
+        engine_build_id = $EngineBuildId
+        engine_executable_sha256 = $EngineExecutableSha256
+        wasmtime_runtime_build_identity = [string]$AvidScriptRuntimeIdentity.wasmtime_runtime_build_identity
+        wasmtime_runtime_artifact_sha256 = [string]$AvidScriptRuntimeIdentity.wasmtime_dll_sha256
+        wamr_runtime_build_identity = [string]$AvidScriptRuntimeIdentity.wamr_runtime_build_identity
+        wamr_runtime_artifact_sha256 = [string]$AvidScriptRuntimeIdentity.wamr_static_lib_sha256
+        calibration_confirmation_samples = [int]$Profile.calibration_confirmation_samples
     }
 }
 $CalibrationRequest = New-BaseRequest
-$CalibrationRequest.mode = 'calibration'
-$CalibrationRequest.process_run = -1
-$CalibrationRequest.timed_samples = 0
+$CalibrationRequest['mode'] = 'calibration'
+$CalibrationRequest['process_run'] = -1
+$CalibrationRequest['timed_samples'] = 0
 $CalibrationRequestPath = Join-Path $RequestsPath 'calibration.request.json'
 $CalibrationResultPath = Join-Path $ResultsPath 'calibration.result.json'
 Write-Request -Request $CalibrationRequest -Path $CalibrationRequestPath
-Invoke-ControlledProcess -RequestPath $CalibrationRequestPath -ResultPath $CalibrationResultPath
-& $ValidatorPath -ResultPath $CalibrationResultPath | Out-Null
+Invoke-ControlledProcess `
+    -RequestPath $CalibrationRequestPath `
+    -ResultPath $CalibrationResultPath `
+    -LogStem 'calibration'
+& $ValidatorPath `
+    -ResultPath $CalibrationResultPath `
+    -RequestPath $CalibrationRequestPath `
+    -ProfilePath $ResolvedProfilePath | Out-Null
 $Calibration = Get-Content -LiteralPath $CalibrationResultPath -Raw | ConvertFrom-Json
+$CalibrationSha256 = Get-SidecarFileSha256 -Path $CalibrationResultPath
 
 $Iterations = [ordered]@{}
 foreach ($LaneId in @($Profile.lanes)) {
@@ -192,24 +256,71 @@ foreach ($LaneId in @($Profile.lanes)) {
 $TimedResultPaths = @()
 for ($ProcessRun = 0; $ProcessRun -lt [int]$Profile.process_runs; ++$ProcessRun) {
     $TimedRequest = New-BaseRequest
-    $TimedRequest.mode = 'timed'
-    $TimedRequest.process_run = $ProcessRun
-    $TimedRequest.timed_samples = [int]$Profile.timed_samples
-    $TimedRequest.iterations = $Iterations
+    $TimedRequest['mode'] = 'timed'
+    $TimedRequest['process_run'] = $ProcessRun
+    $TimedRequest['timed_samples'] = [int]$Profile.timed_samples
+    $TimedRequest['iterations'] = $Iterations
+    $TimedRequest['calibration_sha256'] = $CalibrationSha256
     $TimedRequestPath = Join-Path $RequestsPath ("timed-$ProcessRun.request.json")
     $TimedResultPath = Join-Path $ResultsPath ("timed-$ProcessRun.result.json")
     Write-Request -Request $TimedRequest -Path $TimedRequestPath
-    Invoke-ControlledProcess -RequestPath $TimedRequestPath -ResultPath $TimedResultPath
+    Invoke-ControlledProcess `
+        -RequestPath $TimedRequestPath `
+        -ResultPath $TimedResultPath `
+        -LogStem "timed-$ProcessRun"
     & $ValidatorPath `
         -ResultPath $TimedResultPath `
-        -ExpectedTimedSamples ([int]$Profile.timed_samples) | Out-Null
+        -RequestPath $TimedRequestPath `
+        -ProfilePath $ResolvedProfilePath `
+        -CalibrationResultPath $CalibrationResultPath | Out-Null
     $TimedResultPaths += $TimedResultPath
 }
 $AggregatePath = Join-Path $AttemptPath 'aggregate.json'
 $MergeResult = & $MergerPath `
     -ResultPaths $TimedResultPaths `
+    -RequestPaths @(
+        0..([int]$Profile.process_runs - 1) |
+            ForEach-Object { Join-Path $RequestsPath "timed-$_.request.json" }
+    ) `
+    -CalibrationResultPath $CalibrationResultPath `
+    -CalibrationRequestPath $CalibrationRequestPath `
     -ProfilePath $ResolvedProfilePath `
     -OutputPath $AggregatePath
+
+$Attempt = [ordered]@{
+    schema_version = 1
+    attempt_id = $AttemptId
+    profile_path = $ResolvedProfilePath
+    profile_sha256 = $ProfileSha256
+    calibration_request_sha256 = Get-SidecarFileSha256 -Path $CalibrationRequestPath
+    calibration_sha256 = $CalibrationSha256
+    calibration_pid = [int]$Calibration.pid
+    candidate = [ordered]@{
+        commit = $AvidScriptCommit
+        tree_sha = $AvidScriptTreeSha
+        clean = $true
+    }
+    engine = [ordered]@{
+        version = $EngineVersion
+        build_id = $EngineBuildId
+        executable_sha256 = $EngineExecutableSha256
+    }
+    runtimes = [ordered]@{
+        puerts_commit = $PuertsCommit
+        puerts_backend_sha256 = $PuertsBackendSha256
+        wasmtime_build_identity = [string]$AvidScriptRuntimeIdentity.wasmtime_runtime_build_identity
+        wasmtime_artifact_sha256 = [string]$AvidScriptRuntimeIdentity.wasmtime_dll_sha256
+        wamr_build_identity = [string]$AvidScriptRuntimeIdentity.wamr_runtime_build_identity
+        wamr_artifact_sha256 = [string]$AvidScriptRuntimeIdentity.wamr_static_lib_sha256
+    }
+    kernel_wasm_sha256 = $KernelDigest
+    aggregate_sha256 = Get-SidecarFileSha256 -Path $AggregatePath
+}
+$AttemptJson = $Attempt | ConvertTo-Json -Depth 16
+[System.IO.File]::WriteAllText(
+    (Join-Path $AttemptPath 'attempt.json'),
+    $AttemptJson,
+    [System.Text.UTF8Encoding]::new($false))
 
 [pscustomobject]@{
     result = 'controlled_runtime_shootout_complete'

@@ -9,22 +9,41 @@ $ControlledRoot = Split-Path -Parent $ScriptRoot
 $PuertsComparisonRoot = Split-Path -Parent $ControlledRoot
 $PluginRoot = Split-Path -Parent (Split-Path -Parent $PuertsComparisonRoot)
 $HarnessRoot = Join-Path $PuertsComparisonRoot 'AvidScriptPerfHarness'
+. (Join-Path $PuertsComparisonRoot 'Scripts/PuertsBenchmarkSidecar.Common.ps1')
 $ProfilePath = Join-Path $ControlledRoot 'Config/ControlledRuntimeProfile.json'
-$RequestSchemaPath = Join-Path $ControlledRoot 'Schema/ControlledRuntimeRequest.schema.json'
-$ResultSchemaPath = Join-Path $ControlledRoot 'Schema/ControlledRuntimeResult.schema.json'
-$AggregateSchemaPath = Join-Path $ControlledRoot 'Schema/ControlledRuntimeAggregate.schema.json'
-$KernelContractPath = Join-Path $ControlledRoot 'Kernel/controlled_runtime_kernel.contract.json'
-$KernelWasmPath = Join-Path $ControlledRoot 'Kernel/controlled_runtime_kernel.wasm'
-$KernelWatPath = Join-Path $ControlledRoot 'Kernel/controlled_runtime_kernel.wat'
+$RequestSchemaPath = Join-Path $ControlledRoot (
+    'Schema/ControlledRuntimeRequest.schema.json')
+$ResultSchemaPath = Join-Path $ControlledRoot (
+    'Schema/ControlledRuntimeResult.schema.json')
+$AggregateSchemaPath = Join-Path $ControlledRoot (
+    'Schema/ControlledRuntimeAggregate.schema.json')
+$KernelContractPath = Join-Path $ControlledRoot (
+    'Kernel/controlled_runtime_kernel.contract.json')
+$KernelWasmPath = Join-Path $ControlledRoot (
+    'Kernel/controlled_runtime_kernel.wasm')
+$KernelWatPath = Join-Path $ControlledRoot (
+    'Kernel/controlled_runtime_kernel.wat')
 $RunnerPath = Join-Path $HarnessRoot (
     'Source/AvidScriptPerfHarness/Private/AvidScriptControlledRuntimeRunner.cpp')
-$JavaScriptPath = Join-Path $HarnessRoot 'Content/JavaScript/controlled_wasm.js'
-$VmHeaderPath = Join-Path $PluginRoot 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
+$JavaScriptPath = Join-Path $HarnessRoot (
+    'Content/JavaScript/controlled_wasm.js')
+$VmHeaderPath = Join-Path $PluginRoot (
+    'Source/AvidScriptVM/Public/AvidScriptVmBackend.h')
 $WasmtimeBackendPath = Join-Path $PluginRoot (
     'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp')
+$WasmtimeApiPath = Join-Path $PluginRoot (
+    'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c')
 $WamrBackendPath = Join-Path $PluginRoot (
     'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp')
+$WasmtimeTestsPath = Join-Path $PluginRoot (
+    'Source/AvidScriptVM/Private/Tests/AvidScriptVmWasmtimeTests.cpp')
+$WamrTestsPath = Join-Path $PluginRoot (
+    'Source/AvidScriptVM/Private/Tests/AvidScriptVmContractTests.cpp')
 $AttributesPath = Join-Path $PluginRoot '.gitattributes'
+$ValidatorPath = Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1'
+$MergerPath = Join-Path $ScriptRoot 'Merge-ControlledRuntimeResults.ps1'
+$OrchestratorPath = Join-Path $ScriptRoot (
+    'Invoke-ControlledRuntimeShootout.ps1')
 
 function Assert-True {
     param(
@@ -34,6 +53,17 @@ function Assert-True {
     if (-not $Condition) {
         throw "ASP54T4401 $Message"
     }
+}
+
+function Write-JsonFile {
+    param(
+        $Value,
+        [string]$Path
+    )
+    [System.IO.File]::WriteAllText(
+        $Path,
+        ($Value | ConvertTo-Json -Depth 32),
+        [System.Text.UTF8Encoding]::new($false))
 }
 
 foreach ($RequiredFile in @(
@@ -48,10 +78,32 @@ foreach ($RequiredFile in @(
     $JavaScriptPath,
     $VmHeaderPath,
     $WasmtimeBackendPath,
+    $WasmtimeApiPath,
     $WamrBackendPath,
-    $AttributesPath)) {
+    $WasmtimeTestsPath,
+    $WamrTestsPath,
+    $AttributesPath,
+    $ValidatorPath,
+    $MergerPath,
+    $OrchestratorPath
+)) {
     Assert-True (Test-Path -LiteralPath $RequiredFile -PathType Leaf) (
         "required controlled runtime file is missing: $RequiredFile")
+}
+
+foreach ($PowerShellPath in @(
+    $ValidatorPath,
+    $MergerPath,
+    $OrchestratorPath
+)) {
+    $ParseTokens = $null
+    $ParseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        $PowerShellPath,
+        [ref]$ParseTokens,
+        [ref]$ParseErrors)
+    Assert-True (@($ParseErrors).Count -eq 0) (
+        "PowerShell contract has parse errors: $PowerShellPath")
 }
 
 $Profile = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
@@ -61,21 +113,31 @@ $ExpectedLanes = @(
     'avidscript_wamr_interpreter',
     'native_cpp_reference'
 )
-Assert-True ([int]$Profile.schema_version -eq 1) 'profile schema_version must be 1'
-Assert-True ([string]$Profile.benchmark_kind -ceq 'identical_wasm_kernel') (
-    'profile benchmark kind must be identical_wasm_kernel')
-Assert-True ([int]$Profile.process_runs -eq 5) 'formal profile must use five fresh processes'
-Assert-True ([int]$Profile.warmup_samples -eq 5) 'formal profile must use five warmups'
-Assert-True ([int]$Profile.timed_samples -eq 30) 'formal profile must use 30 timed samples'
+Assert-True ([int]$Profile.schema_version -eq 1) (
+    'profile schema_version must be 1')
+Assert-True ([string]$Profile.benchmark_kind -ceq
+    'identical_wasm_kernel') 'benchmark kind must be identical_wasm_kernel'
+Assert-True ([int]$Profile.process_runs -eq 5) (
+    'formal profile must use five fresh timed processes')
+Assert-True ([int]$Profile.warmup_samples -eq 5) (
+    'formal profile must use five warmups')
+Assert-True ([int]$Profile.timed_samples -eq 30) (
+    'formal profile must use 30 timed samples')
+Assert-True ([int]$Profile.calibration_confirmation_samples -ge 3) (
+    'calibration must freeze from at least three confirmations')
 Assert-True ([double]$Profile.minimum_sample_milliseconds -ge 5.0) (
     'formal profile must calibrate each sample to at least 5 ms')
+Assert-True ([string]$Profile.lane_schedule_id -ceq
+    'round_robin_process_sample_v1') (
+    'formal profile must freeze the balanced lane schedule')
 Assert-True (
     [string]::Join('|', @($Profile.lanes)) -ceq
         [string]::Join('|', $ExpectedLanes)) (
     'formal profile lane order differs from the controlled contract')
 
-$KernelContract = Get-Content -LiteralPath $KernelContractPath -Raw | ConvertFrom-Json
-$KernelDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $KernelWasmPath).Hash.ToLowerInvariant()
+$KernelContract = Get-Content -LiteralPath $KernelContractPath -Raw |
+    ConvertFrom-Json
+$KernelDigest = Get-SidecarFileSha256 -Path $KernelWasmPath
 Assert-True ($KernelDigest -ceq [string]$KernelContract.wasm_sha256) (
     'tracked WASM digest differs from the kernel contract')
 Assert-True ($KernelDigest -ceq [string]$Profile.kernel_wasm_sha256) (
@@ -90,10 +152,14 @@ foreach ($Token in @(
     'new WebAssembly.Module(kernelBytes)',
     'new WebAssembly.Instance(kernelModule, {})',
     'const run = kernelInstance.exports.run',
-    '(iterations, seed) => run(iterations | 0, seed | 0) | 0')) {
-    Assert-True ($JavaScript.Contains($Token)) "V8 adapter is missing token: $Token"
+    'webassembly.module_instance.cached_export.v1',
+    'fixture.GetControlledWasmSha256()'
+)) {
+    Assert-True ($JavaScript.Contains($Token)) (
+        "V8 adapter is missing runtime proof token: $Token")
 }
-Assert-True (-not $JavaScript.Contains('for (let index = 0; index < iterations')) (
+Assert-True (-not $JavaScript.Contains(
+    'for (let index = 0; index < iterations')) (
     'V8 adapter must not replace the WASM kernel with a JavaScript loop')
 
 $Runner = Get-Content -LiteralPath $RunnerPath -Raw
@@ -104,27 +170,44 @@ foreach ($Token in @(
     'Selection.bAllowFallback = false',
     'Backend->ResolveExport(TEXT("run")',
     'Backend->Call(RunExport, Frame, VmError, &Result)',
-    'RunControlledRuntimeOracle(Iterations, Seed)')) {
-    Assert-True ($Runner.Contains($Token)) "controlled runner is missing token: $Token"
+    'RunControlledRuntimeOracle(Iterations, Seed)',
+    'GetScheduledLane(',
+    'TEXT("lane_position")',
+    'TEXT("lane_rotation")',
+    'TEXT("request_sha256")',
+    'ControlledRuntimeCalibrationConfirmationSamples'
+)) {
+    Assert-True ($Runner.Contains($Token)) (
+        "controlled runner is missing token: $Token")
 }
 Assert-True (-not $Runner.Contains('v8_turbofan')) (
     'controlled runtime identity must not claim TurboFan-only')
-$InitializationOffset = $Runner.IndexOf(
-    'if (!Environment.Initialize(WasmBytes, ActualWasmSha256, OutError))',
-    [System.StringComparison]::Ordinal)
-$TimingOffset = $Runner.IndexOf(
-    'const uint64 StartCycles = FPlatformTime::Cycles64()',
-    [System.StringComparison]::Ordinal)
-Assert-True ($InitializationOffset -ge 0 -and $TimingOffset -ge 0) (
-    'runner must expose initialization and timing boundaries')
 
 $VmHeader = Get-Content -LiteralPath $VmHeaderPath -Raw
 $WasmtimeBackend = Get-Content -LiteralPath $WasmtimeBackendPath -Raw
+$WasmtimeApi = Get-Content -LiteralPath $WasmtimeApiPath -Raw
 $WamrBackend = Get-Content -LiteralPath $WamrBackendPath -Raw
+$WasmtimeTests = Get-Content -LiteralPath $WasmtimeTestsPath -Raw
+$WamrTests = Get-Content -LiteralPath $WamrTestsPath -Raw
 Assert-True ($VmHeader.Contains('struct FAvidScriptVmCallResult')) (
     'VM contract must expose result cells')
-Assert-True ($WasmtimeBackend.Contains('Entry.ResultCellCount')) (
-    'Wasmtime backend must retain export result arity')
+Assert-True ($VmHeader.Contains(
+    'FAvidScriptVmCallResult* OutResult = nullptr')) (
+    'legacy VM Call must keep default null result compatibility')
+Assert-True ($WasmtimeBackend.Contains(
+    'ResultCellCount > FAvidScriptVmCallResult::MaxCells')) (
+    'Wasmtime resolve must reject result cells above fixed capacity')
+Assert-True ($WasmtimeApi.Contains(
+    'AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE')) (
+    'Wasmtime shim must distinguish local precondition failure')
+foreach ($Token in @(
+    'wasm_func_get_result_count',
+    'wasm_func_get_result_types',
+    'ExportResultCellCounts'
+)) {
+    Assert-True ($WamrBackend.Contains($Token)) (
+        "WAMR result ABI is missing token: $Token")
+}
 $WamrCallStart = $WamrBackend.IndexOf(
     'bool Call(',
     [System.StringComparison]::Ordinal)
@@ -132,19 +215,36 @@ $WamrCallEnd = $WamrBackend.IndexOf(
     'void Unload() override',
     $WamrCallStart,
     [System.StringComparison]::Ordinal)
-Assert-True ($WamrCallStart -ge 0 -and $WamrCallEnd -gt $WamrCallStart) (
+Assert-True ($WamrCallStart -ge 0 -and
+    $WamrCallEnd -gt $WamrCallStart) (
     'WAMR Call owner slice is unavailable')
 $WamrCallSlice = $WamrBackend.Substring(
     $WamrCallStart,
     $WamrCallEnd - $WamrCallStart)
-Assert-True ($WamrCallSlice.Contains('OutResult->Cells[0] = Cells[0]')) (
-    'WAMR backend must publish the i32 return cell')
+Assert-True ($WamrCallSlice.Contains(
+    'ResultCellCount * sizeof(uint32)')) (
+    'WAMR result copy must remain inside Call')
 Assert-True (
     $WamrBackend.IndexOf(
-        'OutResult->Cells[0] = Cells[0]',
+        'ResultCellCount * sizeof(uint32)',
         $WamrCallEnd,
         [System.StringComparison]::Ordinal) -lt 0) (
-    'WAMR return-cell write must not escape the Call owner')
+    'WAMR result copy must not escape the Call owner')
+foreach ($Token in @(
+    'void result has zero cells',
+    'i32 result has one cell',
+    'oversize result ABI rejects at resolve',
+    'unsupported result ABI rejects at resolve'
+)) {
+    Assert-True ($WasmtimeTests.Contains($Token)) (
+        "Wasmtime focused result test is missing: $Token")
+}
+Assert-True ($WamrTests.Contains(
+    'void WAMR export has zero result cells')) (
+    'WAMR focused void result test is missing')
+Assert-True ($WamrTests.Contains(
+    'generated i32 export preserves value')) (
+    'WAMR focused i32 result test is missing')
 
 if (-not [string]::IsNullOrWhiteSpace($WatCompilerModuleRoot)) {
     & (Join-Path $ScriptRoot 'Build-ControlledRuntimeKernel.ps1') `
@@ -153,22 +253,36 @@ if (-not [string]::IsNullOrWhiteSpace($WatCompilerModuleRoot)) {
 }
 
 $FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
-    'AvidScriptControlledRuntimeContracts-' + [Guid]::NewGuid().ToString('N'))
+    'AvidScriptControlledRuntimeContracts-' +
+    [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $FixtureRoot | Out-Null
 try {
+    $FixtureProfilePath = Join-Path $FixtureRoot 'profile.json'
+    Write-JsonFile -Value $Profile -Path $FixtureProfilePath
+    $ProfileSha256 = Get-SidecarFileSha256 -Path $FixtureProfilePath
+    $AttemptId = '11111111-2222-3333-4444-555555555555'
+    $CandidateCommit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $CandidateTree = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $EngineSha256 = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+    $PuertsSha256 = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+    $WasmtimeSha256 = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+    $WamrSha256 = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+
     function New-LaneIdentity {
         param(
             [string]$LaneId,
             [string]$RuntimeId,
             [string]$ExecutionTier,
-            [string]$CompilerIdentity
+            [string]$CompilerIdentity,
+            [string]$BuildIdentity,
+            [string]$RuntimeSha256
         )
         $AdapterId = switch ($LaneId) {
             'puerts_v8_wasm_jit' { 'puerts_webassembly_module_instance' }
             'native_cpp_reference' { 'native_cpp_oracle' }
             default { 'avidscript_vm_backend' }
         }
-        return [ordered]@{
+        $Identity = [ordered]@{
             lane_id = $LaneId
             runtime_id = $RuntimeId
             runtime_version = 'fixture'
@@ -180,11 +294,18 @@ try {
             execution_artifact_sha256 = $KernelDigest
             compiler_identity = $CompilerIdentity
             compiler_flags = 'host_default'
-            runtime_build_identity = 'fixture_build'
-            runtime_artifact_sha256 = $KernelDigest
+            runtime_build_identity = $BuildIdentity
+            runtime_artifact_sha256 = $RuntimeSha256
             target_triple = 'x86_64-pc-windows-msvc'
             fallback_used = $false
         }
+        if ($LaneId -ceq 'puerts_v8_wasm_jit') {
+            $Identity['adapter_proof_id'] =
+                'webassembly.module_instance.cached_export.v1'
+            $Identity['adapter_source_wasm_sha256'] = $KernelDigest
+            $Identity['adapter_artifact_wasm_sha256'] = $KernelDigest
+        }
+        return $Identity
     }
 
     $LaneIdentities = @(
@@ -192,44 +313,213 @@ try {
             -LaneId 'puerts_v8_wasm_jit' `
             -RuntimeId 'v8.webassembly.tiered_jit' `
             -ExecutionTier 'tiered_jit' `
-            -CompilerIdentity 'v8.webassembly.tiered_jit'),
+            -CompilerIdentity 'v8.webassembly.tiered_jit' `
+            -BuildIdentity $CandidateCommit `
+            -RuntimeSha256 $PuertsSha256),
         (New-LaneIdentity `
             -LaneId 'avidscript_wasmtime_cranelift_jit' `
             -RuntimeId 'wasmtime.cranelift.jit' `
             -ExecutionTier 'jit' `
-            -CompilerIdentity 'cranelift'),
+            -CompilerIdentity 'cranelift' `
+            -BuildIdentity 'fixture_wasmtime' `
+            -RuntimeSha256 $WasmtimeSha256),
         (New-LaneIdentity `
             -LaneId 'avidscript_wamr_interpreter' `
             -RuntimeId 'wamr.interpreter' `
             -ExecutionTier 'interpreter' `
-            -CompilerIdentity 'not_applicable'),
+            -CompilerIdentity 'not_applicable' `
+            -BuildIdentity 'fixture_wamr' `
+            -RuntimeSha256 $WamrSha256),
         (New-LaneIdentity `
             -LaneId 'native_cpp_reference' `
             -RuntimeId 'unreal_engine_native' `
             -ExecutionTier 'native' `
-            -CompilerIdentity 'ue58_msvc')
+            -CompilerIdentity 'ue58_msvc' `
+            -BuildIdentity 'fixture_engine' `
+            -RuntimeSha256 $KernelDigest)
     )
+
+    function New-BaseRequest {
+        return [ordered]@{
+            schema_version = 1
+            benchmark_kind = 'identical_wasm_kernel'
+            warmup_samples = [int]$Profile.warmup_samples
+            minimum_sample_milliseconds =
+                [double]$Profile.minimum_sample_milliseconds
+            minimum_iterations = [int]$Profile.minimum_iterations
+            maximum_iterations = [int]$Profile.maximum_iterations
+            seed = [int]$Profile.seed
+            kernel_wasm_path = $KernelWasmPath
+            kernel_wasm_sha256 = $KernelDigest
+            puerts_commit = $CandidateCommit
+            puerts_backend_sha256 = $PuertsSha256
+            target_triple = [string]$Profile.target_triple
+            attempt_id = $AttemptId
+            profile_sha256 = $ProfileSha256
+            calibration_sha256 = 'not_applicable'
+            candidate_commit = $CandidateCommit
+            candidate_tree_sha = $CandidateTree
+            candidate_clean = $true
+            engine_version = '5.8.0-fixture'
+            engine_build_id = 'fixture_engine'
+            engine_executable_sha256 = $EngineSha256
+            wasmtime_runtime_build_identity = 'fixture_wasmtime'
+            wasmtime_runtime_artifact_sha256 = $WasmtimeSha256
+            wamr_runtime_build_identity = 'fixture_wamr'
+            wamr_runtime_artifact_sha256 = $WamrSha256
+            calibration_confirmation_samples = 3
+        }
+    }
+
+    $CalibrationRequest = New-BaseRequest
+    $CalibrationRequest['mode'] = 'calibration'
+    $CalibrationRequest['process_run'] = -1
+    $CalibrationRequest['timed_samples'] = 0
+    $CalibrationRequestPath = Join-Path $FixtureRoot (
+        'calibration.request.json')
+    Write-JsonFile `
+        -Value $CalibrationRequest `
+        -Path $CalibrationRequestPath
+    Assert-True (
+        ([System.IO.File]::ReadAllText($CalibrationRequestPath) |
+            Test-Json -SchemaFile $RequestSchemaPath)) (
+        'calibration fixture request must match schema')
+
+    $CalibrationEntries = [ordered]@{}
+    foreach ($LaneId in $ExpectedLanes) {
+        $CalibrationEntries[$LaneId] = [ordered]@{
+            iterations = 1000
+            median_duration_ns = 6000000.0
+            confirmation_duration_ns = @(
+                5900000.0,
+                6000000.0,
+                6100000.0
+            )
+        }
+    }
+    $CalibrationResult = [ordered]@{
+        schema_version = 1
+        benchmark_kind = 'identical_wasm_kernel'
+        mode = 'calibration'
+        request_seed = [int]$Profile.seed
+        attempt_id = $AttemptId
+        request_sha256 = Get-SidecarFileSha256 `
+            -Path $CalibrationRequestPath
+        profile_sha256 = $ProfileSha256
+        calibration_sha256 = 'not_applicable'
+        candidate_commit = $CandidateCommit
+        candidate_tree_sha = $CandidateTree
+        candidate_clean = $true
+        engine_version = '5.8.0-fixture'
+        engine_build_id = 'fixture_engine'
+        engine_executable_sha256 = $EngineSha256
+        process_run = -1
+        pid = 49000
+        kernel_wasm_sha256 = $KernelDigest
+        timing_boundary = 'single_cached_export_call'
+        compile_in_timed_region = $false
+        instantiate_in_timed_region = $false
+        export_lookup_in_timed_region = $false
+        fallback_used = $false
+        lane_schedule_id = 'round_robin_process_sample_v1'
+        lane_identities = $LaneIdentities
+        calibration = $CalibrationEntries
+        samples = @()
+        correctness_failures = 0
+    }
+    $CalibrationResultPath = Join-Path $FixtureRoot (
+        'calibration.result.json')
+    Write-JsonFile `
+        -Value $CalibrationResult `
+        -Path $CalibrationResultPath
+    & $ValidatorPath `
+        -ResultPath $CalibrationResultPath `
+        -RequestPath $CalibrationRequestPath `
+        -ProfilePath $FixtureProfilePath | Out-Null
+    $CalibrationSha256 = Get-SidecarFileSha256 `
+        -Path $CalibrationResultPath
+
+    $Iterations = [ordered]@{}
+    foreach ($LaneId in $ExpectedLanes) {
+        $Iterations[$LaneId] = 1000
+    }
     $TimedPaths = @()
+    $TimedRequestPaths = @()
     for ($ProcessRun = 0; $ProcessRun -lt 5; ++$ProcessRun) {
+        $TimedRequest = New-BaseRequest
+        $TimedRequest['mode'] = 'timed'
+        $TimedRequest['process_run'] = $ProcessRun
+        $TimedRequest['timed_samples'] = 30
+        $TimedRequest['calibration_sha256'] = $CalibrationSha256
+        $TimedRequest['iterations'] = $Iterations
+        $TimedRequestPath = Join-Path $FixtureRoot (
+            "timed-$ProcessRun.request.json")
+        Write-JsonFile -Value $TimedRequest -Path $TimedRequestPath
+
         $Samples = @()
-        for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
-            $Samples += [ordered]@{
-                lane_id = $ExpectedLanes[$LaneIndex]
-                sample_index = 0
-                iterations = 1000
-                seed = 1397313 + $ProcessRun * 1009
-                duration_ns = 5000000.0 + $LaneIndex * 100000.0
-                ns_per_iteration = 5000.0 + $LaneIndex * 100.0
-                result = 123
-                expected = 123
-                correct = $true
-                host_crossing_count = 1
+        $TimedOrders = @()
+        for ($SampleIndex = 0; $SampleIndex -lt 30; ++$SampleIndex) {
+            $Rotation = ($ProcessRun + $SampleIndex) % 4
+            $Order = @(
+                0..3 | ForEach-Object {
+                    $ExpectedLanes[($Rotation + $_) % 4]
+                }
+            )
+            $TimedOrders += ,$Order
+            for ($LanePosition = 0; $LanePosition -lt 4; ++$LanePosition) {
+                $LaneId = $Order[$LanePosition]
+                $Seed = [int]$Profile.seed +
+                    $ProcessRun * 1009 + $SampleIndex * 17
+                $NsPerIteration = switch ($LaneId) {
+                    'puerts_v8_wasm_jit' { 100.0 }
+                    'avidscript_wasmtime_cranelift_jit' {
+                        if ($ProcessRun -eq 0) { 130.0 } else { 100.0 }
+                    }
+                    'avidscript_wamr_interpreter' { 500.0 }
+                    default { 50.0 }
+                }
+                $Oracle = [AvidScriptControlledOracle]::Run(1000, $Seed)
+                $Samples += [ordered]@{
+                    lane_id = $LaneId
+                    sample_index = $SampleIndex
+                    lane_position = $LanePosition
+                    lane_rotation = $Rotation
+                    iterations = 1000
+                    seed = $Seed
+                    duration_ns = $NsPerIteration * 1000.0
+                    ns_per_iteration = $NsPerIteration
+                    result = $Oracle
+                    expected = $Oracle
+                    correct = $true
+                    host_crossing_count = 1
+                }
             }
+        }
+        $WarmupOrders = @()
+        for ($WarmupIndex = 0; $WarmupIndex -lt 5; ++$WarmupIndex) {
+            $Rotation = ($ProcessRun + $WarmupIndex) % 4
+            $WarmupOrders += ,@(
+                0..3 | ForEach-Object {
+                    $ExpectedLanes[($Rotation + $_) % 4]
+                }
+            )
         }
         $FixtureResult = [ordered]@{
             schema_version = 1
             benchmark_kind = 'identical_wasm_kernel'
             mode = 'timed'
+            request_seed = [int]$Profile.seed
+            attempt_id = $AttemptId
+            request_sha256 = Get-SidecarFileSha256 `
+                -Path $TimedRequestPath
+            profile_sha256 = $ProfileSha256
+            calibration_sha256 = $CalibrationSha256
+            candidate_commit = $CandidateCommit
+            candidate_tree_sha = $CandidateTree
+            candidate_clean = $true
+            engine_version = '5.8.0-fixture'
+            engine_build_id = 'fixture_engine'
+            engine_executable_sha256 = $EngineSha256
             process_run = $ProcessRun
             pid = 50000 + $ProcessRun
             kernel_wasm_sha256 = $KernelDigest
@@ -238,55 +528,119 @@ try {
             instantiate_in_timed_region = $false
             export_lookup_in_timed_region = $false
             fallback_used = $false
+            lane_schedule_id = 'round_robin_process_sample_v1'
+            warmup_lane_orders = $WarmupOrders
+            timed_lane_orders = $TimedOrders
+            iterations = $Iterations
             lane_identities = $LaneIdentities
             calibration = [ordered]@{}
             samples = $Samples
             correctness_failures = 0
         }
-        $FixturePath = Join-Path $FixtureRoot ("timed-$ProcessRun.json")
-        [System.IO.File]::WriteAllText(
-            $FixturePath,
-            ($FixtureResult | ConvertTo-Json -Depth 16),
-            [System.Text.UTF8Encoding]::new($false))
-        & (Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1') `
+        $FixturePath = Join-Path $FixtureRoot (
+            "timed-$ProcessRun.result.json")
+        Write-JsonFile -Value $FixtureResult -Path $FixturePath
+        & $ValidatorPath `
             -ResultPath $FixturePath `
-            -ExpectedTimedSamples 1 | Out-Null
+            -RequestPath $TimedRequestPath `
+            -ProfilePath $FixtureProfilePath `
+            -CalibrationResultPath $CalibrationResultPath | Out-Null
         $TimedPaths += $FixturePath
+        $TimedRequestPaths += $TimedRequestPath
     }
-    $FixtureProfile = $Profile.PSObject.Copy()
-    $FixtureProfile.process_runs = 5
-    $FixtureProfile.timed_samples = 1
-    $FixtureProfilePath = Join-Path $FixtureRoot 'profile.json'
-    [System.IO.File]::WriteAllText(
-        $FixtureProfilePath,
-        ($FixtureProfile | ConvertTo-Json -Depth 16),
-        [System.Text.UTF8Encoding]::new($false))
-    $AggregatePath = Join-Path $FixtureRoot 'aggregate.json'
-    & (Join-Path $ScriptRoot 'Merge-ControlledRuntimeResults.ps1') `
-        -ResultPaths $TimedPaths `
-        -ProfilePath $FixtureProfilePath `
-        -OutputPath $AggregatePath | Out-Null
-    $AggregateText = [System.IO.File]::ReadAllText($AggregatePath)
-    Assert-True ($AggregateText | Test-Json -SchemaFile $AggregateSchemaPath) (
-        'fixture aggregate must match schema v1')
 
-    $RejectedFixture = Get-Content -LiteralPath $TimedPaths[0] -Raw | ConvertFrom-Json
-    $RejectedFixture.lane_identities[0].compiler_identity = 'v8_turbofan'
-    $RejectedPath = Join-Path $FixtureRoot 'rejected-turbofan-only.json'
-    [System.IO.File]::WriteAllText(
-        $RejectedPath,
-        ($RejectedFixture | ConvertTo-Json -Depth 16),
-        [System.Text.UTF8Encoding]::new($false))
-    $Rejected = $false
+    $AggregatePath = Join-Path $FixtureRoot 'aggregate.json'
+    $MergeResult = & $MergerPath `
+        -ResultPaths $TimedPaths `
+        -RequestPaths $TimedRequestPaths `
+        -CalibrationResultPath $CalibrationResultPath `
+        -CalibrationRequestPath $CalibrationRequestPath `
+        -ProfilePath $FixtureProfilePath `
+        -OutputPath $AggregatePath
+    Assert-True (
+        ([System.IO.File]::ReadAllText($AggregatePath) |
+            Test-Json -SchemaFile $AggregateSchemaPath)) (
+        'fixture aggregate must match schema v1')
+    $Aggregate = Get-Content -LiteralPath $AggregatePath -Raw |
+        ConvertFrom-Json
+    Assert-True (@($Aggregate.process_metrics).Count -eq 20) (
+        'aggregate must publish one metric per process/lane')
+    Assert-True (@($Aggregate.cross_process_metrics).Count -eq 4) (
+        'aggregate must publish cross-process lane metrics')
+    $CrossProcessP50 = [double](
+        $Aggregate.paired_ratios.wasmtime_over_v8_cross_process_p50)
+    $CrossProcessP95 = [double](
+        $Aggregate.paired_ratios.wasmtime_over_v8_cross_process_p95)
+    Assert-True ($CrossProcessP50 -eq 1.0) (
+        'one slow/four fast mutation must keep paired cross-process P50 at 1')
+    Assert-True ($CrossProcessP95 -eq 1.3) (
+        'one slow/four fast mutation must expose paired cross-process P95')
+    Assert-True ([string]$MergeResult.pc_default_gate -ceq
+        'wasmtime_pc_default_rejected') (
+        'paired P95 must reject one slow/four fast process evidence')
+
+    $UnequalResult = Get-Content -LiteralPath $TimedPaths[0] -Raw |
+        ConvertFrom-Json
+    $UnequalResult.samples = @($UnequalResult.samples)[0..118]
+    $UnequalPath = Join-Path $FixtureRoot 'rejected-unequal.result.json'
+    Write-JsonFile -Value $UnequalResult -Path $UnequalPath
+    $UnequalRejected = $false
     try {
-        & (Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1') `
-            -ResultPath $RejectedPath `
-            -ExpectedTimedSamples 1 | Out-Null
+        & $ValidatorPath `
+            -ResultPath $UnequalPath `
+            -RequestPath $TimedRequestPaths[0] `
+            -ProfilePath $FixtureProfilePath `
+            -CalibrationResultPath $CalibrationResultPath | Out-Null
     }
     catch {
-        $Rejected = $true
+        $UnequalRejected = $true
     }
-    Assert-True $Rejected 'TurboFan-only V8 identity mutation must be rejected'
+    Assert-True $UnequalRejected (
+        'unequal process/lane sample mutation must be rejected')
+
+    $DuplicateResult = Get-Content -LiteralPath $TimedPaths[0] -Raw |
+        ConvertFrom-Json
+    $DuplicateResult.samples[4].lane_id =
+        [string]$DuplicateResult.samples[0].lane_id
+    $DuplicateResult.samples[4].sample_index =
+        [int]$DuplicateResult.samples[0].sample_index
+    $DuplicatePath = Join-Path $FixtureRoot (
+        'rejected-duplicate.result.json')
+    Write-JsonFile -Value $DuplicateResult -Path $DuplicatePath
+    $DuplicateRejected = $false
+    try {
+        & $ValidatorPath `
+            -ResultPath $DuplicatePath `
+            -RequestPath $TimedRequestPaths[0] `
+            -ProfilePath $FixtureProfilePath `
+            -CalibrationResultPath $CalibrationResultPath | Out-Null
+    }
+    catch {
+        $DuplicateRejected = $true
+    }
+    Assert-True $DuplicateRejected (
+        'duplicate lane/sample index mutation must be rejected')
+
+    $InvalidResult = Get-Content -LiteralPath $TimedPaths[0] -Raw |
+        ConvertFrom-Json
+    $InvalidResult.samples[0].duration_ns = 0
+    $InvalidResult.samples[1].seed = [int]$InvalidResult.samples[1].seed + 1
+    $InvalidResult.samples[2].result = [int]$InvalidResult.samples[2].result + 1
+    $InvalidPath = Join-Path $FixtureRoot 'rejected-raw.result.json'
+    Write-JsonFile -Value $InvalidResult -Path $InvalidPath
+    $InvalidRejected = $false
+    try {
+        & $ValidatorPath `
+            -ResultPath $InvalidPath `
+            -RequestPath $TimedRequestPaths[0] `
+            -ProfilePath $FixtureProfilePath `
+            -CalibrationResultPath $CalibrationResultPath | Out-Null
+    }
+    catch {
+        $InvalidRejected = $true
+    }
+    Assert-True $InvalidRejected (
+        'duration/seed/oracle mutation must be rejected independently')
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {
@@ -302,4 +656,5 @@ finally {
         [int]$Profile.process_runs *
         [int]$Profile.timed_samples *
         $ExpectedLanes.Count)
+    statistics = 'per_process_then_cross_process_paired'
 }

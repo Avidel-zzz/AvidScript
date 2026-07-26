@@ -148,7 +148,9 @@ struct FAvidScriptVmCallFrame
 
 struct FAvidScriptVmCallResult
 {
-	uint32 Cells[FAvidScriptVmCallFrame::MaxCells] = {};
+	static constexpr uint32 MaxCells = 8;
+
+	uint32 Cells[MaxCells] = {};
 	uint32 CellCount = 0;
 };
 

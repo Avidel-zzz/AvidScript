@@ -386,7 +386,14 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("cached tick slot"), CachedTickHandle.Slot, TickHandle.Slot);
 
 	FAvidScriptVmCallFrame EmptyFrame;
-	TestTrue(TEXT("begin export calls"), Backend->Call(BeginHandle, EmptyFrame, Error));
+	FAvidScriptVmCallResult VoidResult;
+	TestTrue(
+		TEXT("begin export calls with result sink"),
+		Backend->Call(BeginHandle, EmptyFrame, Error, &VoidResult));
+	TestEqual(TEXT("void WAMR export has zero result cells"), VoidResult.CellCount, 0u);
+	TestTrue(
+		TEXT("legacy WAMR call keeps default null result compatibility"),
+		Backend->Call(BeginHandle, EmptyFrame, Error));
 	float DeltaSeconds = 1.0f / 60.0f;
 	FAvidScriptVmCallFrame TickFrame;
 	TickFrame.CellCount = 1;
@@ -435,10 +442,17 @@ bool FAvidScriptGeneratedWasmBackendArtifactSmokeTest::RunTest(const FString& Pa
 		ValueHandle,
 		Error));
 	FAvidScriptVmCallFrame EmptyFrame;
+	FAvidScriptVmCallResult Result;
 	TestTrue(TEXT("generated guest_value export executes"), Backend->Call(
 		ValueHandle,
 		EmptyFrame,
-		Error));
+		Error,
+		&Result));
+	TestEqual(TEXT("generated i32 export has one result cell"), Result.CellCount, 1u);
+	TestEqual(TEXT("generated i32 export preserves value"), Result.Cells[0], 7u);
+	TestTrue(
+		TEXT("generated export keeps legacy null result compatibility"),
+		Backend->Call(ValueHandle, EmptyFrame, Error));
 	Backend->Unload();
 	return true;
 }

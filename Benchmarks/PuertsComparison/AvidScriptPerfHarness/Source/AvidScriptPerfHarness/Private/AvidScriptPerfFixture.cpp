@@ -91,24 +91,35 @@ FString AAvidScriptPerfFixture::GetControlledWasmBase64() const
 	return ControlledWasmBase64;
 }
 
+FString AAvidScriptPerfFixture::GetControlledWasmSha256() const
+{
+	return ControlledWasmSha256;
+}
+
 void AAvidScriptPerfFixture::RegisterControlledWasmRunner(
 	FJsObject Runner,
-	const bool bUsesWebAssemblyModule,
-	const bool bUsesWebAssemblyInstance)
+	const FString& AdapterProofId,
+	const FString& SourceWasmSha256,
+	const FString& ArtifactWasmSha256)
 {
 	ControlledWasmRunner = MoveTemp(Runner);
-	bControlledUsesWebAssemblyModule = bUsesWebAssemblyModule;
-	bControlledUsesWebAssemblyInstance = bUsesWebAssemblyInstance;
+	ControlledAdapterProofId = AdapterProofId;
+	ControlledAdapterSourceWasmSha256 = SourceWasmSha256;
+	ControlledAdapterArtifactWasmSha256 = ArtifactWasmSha256;
 	bHasControlledWasmRunner = true;
 }
 
-void AAvidScriptPerfFixture::SetControlledWasmBytes(const TConstArrayView<uint8> Bytes)
+void AAvidScriptPerfFixture::SetControlledWasmBytes(
+	const TConstArrayView<uint8> Bytes,
+	const FString& WasmSha256)
 {
 	ControlledWasmBase64 = FBase64::Encode(Bytes.GetData(), Bytes.Num());
+	ControlledWasmSha256 = WasmSha256;
 	ControlledWasmRunner = FJsObject();
 	bHasControlledWasmRunner = false;
-	bControlledUsesWebAssemblyModule = false;
-	bControlledUsesWebAssemblyInstance = false;
+	ControlledAdapterProofId.Reset();
+	ControlledAdapterSourceWasmSha256.Reset();
+	ControlledAdapterArtifactWasmSha256.Reset();
 }
 
 bool AAvidScriptPerfFixture::HasControlledWasmRunner() const
@@ -118,7 +129,26 @@ bool AAvidScriptPerfFixture::HasControlledWasmRunner() const
 
 bool AAvidScriptPerfFixture::ControlledRunnerUsesWebAssembly() const
 {
-	return bControlledUsesWebAssemblyModule && bControlledUsesWebAssemblyInstance;
+	return bHasControlledWasmRunner &&
+		ControlledAdapterProofId ==
+			TEXT("webassembly.module_instance.cached_export.v1") &&
+		ControlledAdapterSourceWasmSha256 == ControlledWasmSha256 &&
+		ControlledAdapterArtifactWasmSha256 == ControlledWasmSha256;
+}
+
+const FString& AAvidScriptPerfFixture::GetControlledAdapterProofId() const
+{
+	return ControlledAdapterProofId;
+}
+
+const FString& AAvidScriptPerfFixture::GetControlledAdapterSourceWasmSha256() const
+{
+	return ControlledAdapterSourceWasmSha256;
+}
+
+const FString& AAvidScriptPerfFixture::GetControlledAdapterArtifactWasmSha256() const
+{
+	return ControlledAdapterArtifactWasmSha256;
 }
 
 int32 AAvidScriptPerfFixture::RunControlledWasm(
