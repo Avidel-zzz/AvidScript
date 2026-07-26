@@ -208,6 +208,11 @@ try {
     'generated binary' | Set-Content -LiteralPath (Join-Path $HappyProject 'Plugins/Puerts/Binaries/Win64/UnrealEditor-Puerts.dll') -Encoding utf8NoBOM
     $Verified = Invoke-Installer Verify $HappyProject $CacheRoot $TestLockPath
     Assert-True ($Verified.ExitCode -eq 0) "happy-path verify failed: $($Verified.Text)"
+    $LfLockPath = Join-Path $FixtureRoot 'fixture-lock-lf.json'
+    $LfLockText = [System.IO.File]::ReadAllText($TestLockPath).Replace("`r`n", "`n").Replace("`r", "`n")
+    [System.IO.File]::WriteAllText($LfLockPath, $LfLockText, [System.Text.UTF8Encoding]::new($false))
+    $VerifiedAcrossLineEndings = Invoke-Installer Verify $HappyProject $CacheRoot $LfLockPath
+    Assert-True ($VerifiedAcrossLineEndings.ExitCode -eq 0) "lock identity changed across CRLF/LF checkout normalization: $($VerifiedAcrossLineEndings.Text)"
 
     $DownloadedCacheRoot = Join-Path $FixtureRoot 'downloaded-cache'
     New-TestSourceCache $DownloadedCacheRoot $SeedBare

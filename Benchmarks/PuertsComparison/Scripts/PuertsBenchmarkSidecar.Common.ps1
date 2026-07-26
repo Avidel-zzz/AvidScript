@@ -28,6 +28,25 @@ function Get-SidecarFileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-SidecarDependencyLockSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "ASP53S2000 无法计算缺失文件的 SHA-256：$Path"
+    }
+
+    $Text = [System.IO.File]::ReadAllText($Path)
+    $CanonicalText = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($CanonicalText)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($Hasher.ComputeHash($Bytes)).ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
 function Resolve-SidecarCanonicalDirectory {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -316,7 +335,7 @@ function Assert-SidecarPuertsProvenance {
     $ExpectedSourceRepositoryUrl = [string](Get-SidecarRequiredPropertyValue $LockSource 'repository_url' 'ASP53S2117' 'PuertsDependency.lock.source')
     $ExpectedBackendSha = [string](Get-SidecarRequiredPropertyValue $LockBackend 'sha256' 'ASP53S2117' 'PuertsDependency.lock.backend')
     $ExpectedBackendAssetName = [string](Get-SidecarRequiredPropertyValue $LockBackend 'asset_name' 'ASP53S2117' 'PuertsDependency.lock.backend')
-    $ExpectedLockSha256 = Get-SidecarFileSha256 -Path $LockPath
+    $ExpectedLockSha256 = Get-SidecarDependencyLockSha256 -Path $LockPath
     if ($PuertsCommit -cne $ExpectedSourceCommit -or $PuertsBackendSha256 -cne $ExpectedBackendSha -or
         $SourceCommit -cne $ExpectedSourceCommit -or $SourcePluginTree -cne $ExpectedSourcePluginTree -or
         $SourceRepositoryUrl -cne $ExpectedSourceRepositoryUrl -or $BackendSha -cne $ExpectedBackendSha -or

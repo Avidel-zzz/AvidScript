@@ -53,6 +53,21 @@ function Get-TestFileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-TestCanonicalTextSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Text = [System.IO.File]::ReadAllText($Path)
+    $CanonicalText = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($CanonicalText)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($Hasher.ComputeHash($Bytes)).ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
 function Get-TestDirectoryDigest {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -190,7 +205,7 @@ foreach ($ScriptPath in @($RunnerPath, $AggregatorPath, $CommonPath)) {
 $TrackedProfile = Get-Content -LiteralPath (Join-Path $BenchmarkRoot 'Config/BenchmarkProfile.json') -Raw | ConvertFrom-Json
 $TrackedLockPath = Join-Path $BenchmarkRoot 'Config/PuertsDependency.lock.json'
 $TrackedLock = Get-Content -LiteralPath $TrackedLockPath -Raw | ConvertFrom-Json
-$TrackedLockSha256 = Get-TestFileSha256 $TrackedLockPath
+$TrackedLockSha256 = Get-TestCanonicalTextSha256 $TrackedLockPath
 Assert-True ([int]$TrackedProfile.process_runs -eq 5) '正式 profile 必须固定执行 5 个独立进程'
 Assert-True ([int]$TrackedProfile.warmup_samples -eq 5) '正式 profile 必须固定 5 次预热'
 Assert-True ([int]$TrackedProfile.timed_samples -eq 30) '正式 profile 必须固定 30 个计时样本'

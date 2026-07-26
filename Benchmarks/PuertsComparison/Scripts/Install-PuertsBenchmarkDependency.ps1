@@ -153,6 +153,21 @@ function Get-FileSha256 {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-DependencyLockSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $Text = [System.IO.File]::ReadAllText($Path)
+    $CanonicalText = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $Bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($CanonicalText)
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($Hasher.ComputeHash($Bytes)).ToLowerInvariant()
+    }
+    finally {
+        $Hasher.Dispose()
+    }
+}
+
 function Get-InstalledContentSummary {
     param(
         [Parameter(Mandatory = $true)][string]$InstallPath,
@@ -321,7 +336,7 @@ function Write-ManagedMarker {
     $Marker = [ordered]@{
         schema_version = 2
         managed_by = 'AvidScriptPhase53'
-        lock_sha256 = Get-FileSha256 $LockFile
+        lock_sha256 = Get-DependencyLockSha256 $LockFile
         source_repository_url = [string]$Lock.source.repository_url
         source_commit_sha = [string]$Lock.source.commit_sha
         source_plugin_tree_sha1 = [string]$Lock.source.plugin_tree_sha1
@@ -352,7 +367,7 @@ function Read-AndAssertManagedMarker {
     catch {
         throw 'ASP53D1601 managed Puerts marker does not match the tracked dependency lock'
     }
-    $ExpectedLockSha = Get-FileSha256 $LockFile
+    $ExpectedLockSha = Get-DependencyLockSha256 $LockFile
     $MarkerSchemaVersion = 0
     $HasValidSchemaVersion = [int]::TryParse(
         [string]$Marker.schema_version,

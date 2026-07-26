@@ -1,3 +1,4 @@
 Tests/Fixtures/BindingGeneration/*.generated.cs text eol=lf
 Docs/Phase*/Phase*_State.json text eol=lf
 Docs/Phase*/P*_Gate_Summary.json text eol=lf
+Benchmarks/PuertsComparison/Config/PuertsDependency.lock.json text eol=lf
