@@ -4,15 +4,15 @@
 #include "Misc/AutomationTest.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptPerfPuertsCorrectnessTest,
-	"AvidScript.PerformanceComparison.Puerts.Correctness",
+	FAvidScriptPerfFourLaneCorrectnessTest,
+	"AvidScript.PerformanceComparison.FourLane.Correctness",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptPerfPuertsCorrectnessTest::RunTest(const FString& Parameters)
+bool FAvidScriptPerfFourLaneCorrectnessTest::RunTest(const FString& Parameters)
 {
 	FAvidScriptPerfSmokeResult Result;
-	const bool bSucceeded = FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(64, 1397313, Result);
-	TestTrue(TEXT("Puerts reflection/static correctness smoke succeeds"), bSucceeded);
+	const bool bSucceeded = FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(64, 1397313, Result);
+	TestTrue(TEXT("four-lane correctness smoke succeeds"), bSucceeded);
 	if (!bSucceeded)
 	{
 		AddError(Result.Error);
@@ -28,6 +28,13 @@ bool FAvidScriptPerfPuertsCorrectnessTest::RunTest(const FString& Parameters)
 		TEXT("static aggregate matches native"),
 		Result.PuertsStaticChecksum,
 		Result.NativeChecksum);
+	TestEqual(
+		TEXT("AvidScript WAMR aggregate matches native"),
+		Result.AvidScriptChecksum,
+		Result.NativeChecksum);
+	TestTrue(
+		TEXT("AvidScript WAMR lane records host calls"),
+		Result.AvidScriptHostCallCount > 0);
 	return true;
 }
 

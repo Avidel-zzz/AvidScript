@@ -42,7 +42,7 @@ struct FAvidScriptEditorCSharpProfileTemplateResult
 	FString Configuration = TEXT("Release");
 };
 
-class FAvidScriptEditorCSharpProfileService
+class AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpProfileService
 {
 public:
 	static FString GetDefaultProfilePath();

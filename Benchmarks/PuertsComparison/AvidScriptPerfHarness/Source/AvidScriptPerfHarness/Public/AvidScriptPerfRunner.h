@@ -21,13 +21,15 @@ struct FAvidScriptPerfSmokeResult
 	uint32 NativeChecksum = 0;
 	uint32 PuertsReflectionChecksum = 0;
 	uint32 PuertsStaticChecksum = 0;
+	uint32 AvidScriptChecksum = 0;
+	uint64 AvidScriptHostCallCount = 0;
 	FString Error;
 };
 
 class AVIDSCRIPTPERFHARNESS_API FAvidScriptPerfRunner
 {
 public:
-	static bool RunPuertsCorrectnessSmoke(
+	static bool RunFourLaneCorrectnessSmoke(
 		int32 IterationsPerWorkload,
 		int32 Seed,
 		FAvidScriptPerfSmokeResult& OutResult);

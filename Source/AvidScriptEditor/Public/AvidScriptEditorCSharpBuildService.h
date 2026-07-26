@@ -73,7 +73,7 @@ struct FAvidScriptEditorCSharpBuildResult
 	bool bReusedAuthorizationBindingPackage = false;
 };
 
-class FAvidScriptEditorCSharpBuildService
+class AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpBuildService
 {
 public:
 	static FString GetDefaultActorLifecycleBuildScriptPath();

@@ -16,6 +16,8 @@ public class AvidScriptPerfHarness : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new[]
         {
+            "AvidScriptBindings",
+            "AvidScriptEditor",
             "AvidScriptRuntime",
             "Json",
             "JsonUtilities",

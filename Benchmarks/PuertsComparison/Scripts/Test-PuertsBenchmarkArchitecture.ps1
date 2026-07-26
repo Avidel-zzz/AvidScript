@@ -77,8 +77,8 @@ Assert-True ($StaticScript.Contains('fixture.StaticScalarValue =')) 'static lane
 Assert-True ($ReflectionScript.Contains('RegisterPuertsCallbacks')) 'reflection lane must publish host-callable callbacks'
 Assert-True ($StaticScript.Contains('RegisterPuertsCallbacks')) 'static lane must publish host-callable callbacks'
 
-$AvidScriptWorkload = Read-RequiredText 'Workloads/AvidScriptPerfWorkload.cs'
-$AvidScriptProfile = Read-RequiredText 'Workloads/AvidScriptPerfWorkload.csharp-profile.json' | ConvertFrom-Json
+$AvidScriptWorkload = Read-RequiredText 'AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.cs'
+$AvidScriptProfile = Read-RequiredText 'AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.csharp-profile.json' | ConvertFrom-Json
 Assert-True ($AvidScriptWorkload.Contains('EntryPoint = "avid_on_event"')) 'AvidScript lane must use the formal gameplay event export'
 Assert-True ($AvidScriptWorkload.Contains('AAvidScriptPerfFixture fixture = UE.Self')) 'AvidScript lane must use the shared fixture as self'
 Assert-True ($AvidScriptWorkload.Contains('fixture.ReflectAddInt32')) 'AvidScript lane must use the generated reflected binding'

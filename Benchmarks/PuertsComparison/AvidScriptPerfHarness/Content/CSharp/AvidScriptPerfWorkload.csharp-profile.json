@@ -1,7 +1,7 @@
 {
   "schema_version": 5,
   "language": "csharp",
-  "source_path": "Plugins/AvidScript/Benchmarks/PuertsComparison/Workloads/AvidScriptPerfWorkload.cs",
+  "source_path": "Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.cs",
   "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
   "module_id": "csharp_profile_phase53_perf",
   "artifact_stem": "profile_phase53_perf",

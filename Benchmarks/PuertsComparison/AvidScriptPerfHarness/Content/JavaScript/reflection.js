@@ -1,7 +1,7 @@
-import * as UE from "ue";
-import { argv } from "puerts";
+const UE = require("ue");
+const puerts = require("puerts");
 
-const fixture = argv.getByName("Fixture");
+const fixture = puerts.argv.getByName("Fixture");
 const MIX_MULTIPLIER = 1664525;
 const MIX_INCREMENT = 1013904223;
 
