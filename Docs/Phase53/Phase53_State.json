@@ -19,9 +19,9 @@
   "batches": [
     {
       "id": "P53.1",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Puerts lock/marker Verify passed; dependency contracts parser/schema/tamper rejection passed; architecture isolation passed; UE5.8 compiled and linked JsEnv plus AvidScriptPerfHarness with no-clean UBT, final incremental Result Succeeded in 9.11s; Chinese compatibility record added.",
+      "completed_at_utc": "2026-07-26T05:42:29.4939850+00:00"
     },
     {
       "id": "P53.2",
@@ -81,7 +81,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.1 -Evidence <text>",
-  "revision": 1,
-  "updated_at_utc": "2026-07-26T04:43:31.1764567+00:00"
+  "next_action": "batch-complete -Phase 53 -BatchId P53.2 -Evidence <text>",
+  "revision": 2,
+  "updated_at_utc": "2026-07-26T05:42:29.4962368+00:00"
 }

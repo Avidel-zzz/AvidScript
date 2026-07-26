@@ -13,12 +13,12 @@
 
 namespace
 {
-	constexpr uint32 MixMultiplier = 1664525u;
-	constexpr uint32 MixIncrement = 1013904223u;
+	constexpr uint32 PerfRunnerMixMultiplier = 1664525u;
+	constexpr uint32 PerfRunnerMixIncrement = 1013904223u;
 
-	uint32 Mix(const uint32 Value)
+	uint32 PerfRunnerMix(const uint32 Value)
 	{
-		return Value * MixMultiplier + MixIncrement;
+		return Value * PerfRunnerMixMultiplier + PerfRunnerMixIncrement;
 	}
 
 	class FAvidScriptPerfModuleLoader final : public puerts::IJSModuleLoader
@@ -165,20 +165,20 @@ namespace
 			switch (Workload)
 			{
 			case EAvidScriptPerfWorkload::PureInteger:
-				Accumulator = Mix(Accumulator ^ static_cast<uint32>(Index));
+				Accumulator = PerfRunnerMix(Accumulator ^ static_cast<uint32>(Index));
 				break;
 			case EAvidScriptPerfWorkload::ScalarNoOp:
-				Accumulator = Mix(static_cast<uint32>(Fixture.NativeNoOp(static_cast<int32>(Accumulator))) ^
+				Accumulator = PerfRunnerMix(static_cast<uint32>(Fixture.NativeNoOp(static_cast<int32>(Accumulator))) ^
 					static_cast<uint32>(Index));
 				break;
 			case EAvidScriptPerfWorkload::ScalarAddInt32:
-				Accumulator = Mix(static_cast<uint32>(Fixture.NativeAddInt32(
+				Accumulator = PerfRunnerMix(static_cast<uint32>(Fixture.NativeAddInt32(
 					static_cast<int32>(Accumulator),
 					Index)));
 				break;
 			case EAvidScriptPerfWorkload::PropertyGetSet:
 				Fixture.ScalarValue = static_cast<int32>(Accumulator ^ static_cast<uint32>(Index));
-				Accumulator = Mix(static_cast<uint32>(Fixture.ScalarValue));
+				Accumulator = PerfRunnerMix(static_cast<uint32>(Fixture.ScalarValue));
 				break;
 			case EAvidScriptPerfWorkload::VectorValue:
 			{
@@ -190,15 +190,15 @@ namespace
 				const uint32 Packed = static_cast<uint32>(Result.X) ^
 					(static_cast<uint32>(Result.Y) << 8) ^
 					(static_cast<uint32>(Result.Z) << 16);
-				Accumulator = Mix(Accumulator ^ Packed);
+				Accumulator = PerfRunnerMix(Accumulator ^ Packed);
 				break;
 			}
 			case EAvidScriptPerfWorkload::ObjectRoundtrip:
-				Accumulator = Mix(Accumulator ^
+				Accumulator = PerfRunnerMix(Accumulator ^
 					(Fixture.NativeObjectRoundtrip(&Fixture) == &Fixture ? static_cast<uint32>(Index) : 0xffffffffu));
 				break;
 			case EAvidScriptPerfWorkload::BatchScalar:
-				Accumulator = Mix(static_cast<uint32>(Fixture.NativeBatchAdd(
+				Accumulator = PerfRunnerMix(static_cast<uint32>(Fixture.NativeBatchAdd(
 					static_cast<int32>(Accumulator),
 					8)));
 				break;
@@ -357,13 +357,13 @@ bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
 			return false;
 		}
 
-		NativeAggregate = Mix(NativeAggregate ^ NativeChecksum);
-		ReflectionAggregate = Mix(ReflectionAggregate ^ ReflectionChecksum);
-		StaticAggregate = Mix(StaticAggregate ^ StaticChecksum);
+		NativeAggregate = PerfRunnerMix(NativeAggregate ^ NativeChecksum);
+		ReflectionAggregate = PerfRunnerMix(ReflectionAggregate ^ ReflectionChecksum);
+		StaticAggregate = PerfRunnerMix(StaticAggregate ^ StaticChecksum);
 	}
 
 	const int32 CallbackSeed = Seed ^ 0x5a5a5a5a;
-	const uint32 ExpectedCallback = Mix(static_cast<uint32>(CallbackSeed));
+	const uint32 ExpectedCallback = PerfRunnerMix(static_cast<uint32>(CallbackSeed));
 	const uint32 ReflectionCallback =
 		static_cast<uint32>(Fixture->RunPuertsEmptyCallback(Reflection.LaneId, CallbackSeed));
 	const uint32 StaticCallback =

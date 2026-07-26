@@ -2,12 +2,13 @@
 
 namespace
 {
-	constexpr uint32 MixMultiplier = 1664525u;
-	constexpr uint32 MixIncrement = 1013904223u;
+	constexpr uint32 PerfFixtureMixMultiplier = 1664525u;
+	constexpr uint32 PerfFixtureMixIncrement = 1013904223u;
 
-	int32 MixInt32(const int32 Value)
+	int32 PerfFixtureMixInt32(const int32 Value)
 	{
-		return static_cast<int32>(static_cast<uint32>(Value) * MixMultiplier + MixIncrement);
+		return static_cast<int32>(
+			static_cast<uint32>(Value) * PerfFixtureMixMultiplier + PerfFixtureMixIncrement);
 	}
 }
 
@@ -105,7 +106,7 @@ int32 AAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count
 	int32 Result = Seed;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		Result = MixInt32(Result ^ Index);
+		Result = PerfFixtureMixInt32(Result ^ Index);
 	}
 	return Result;
 }
