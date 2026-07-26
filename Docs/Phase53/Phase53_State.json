@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -74,7 +74,7 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 1,
+    "ubt": 2,
     "automation": 2,
     "full_gate": 1
   },
@@ -86,16 +86,16 @@
     "at_utc": "2026-07-26T15:53:49.3021941+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScriptPhase53Gate-63f69a6-final\\Phase53_Gate_PrivacyRetry.json",
+    "report_sha256": "2e27791fd43696df6dbc7b0320c0db94a7f7556d55b6e9fb1d735622ebfca7c7",
+    "run_id": "phase53-343d1d3-privacy-retry",
+    "verified_commit": "343d1d3d9ea9045ffcda5a4c213be5972b662361",
+    "verified_tree": "5912cb735e59cc9223dde7d8cdbfb169d3f770dd",
+    "attestation_parent": "343d1d3d9ea9045ffcda5a4c213be5972b662361",
+    "attested_at_utc": "2026-07-26T16:02:10.0634449+00:00"
   },
   "protected_dirty": [],
-  "next_action": "attest -Phase 53 -GateReportPath <path>",
-  "revision": 38,
-  "updated_at_utc": "2026-07-26T15:53:49.3071046+00:00"
+  "next_action": "close -Phase 53",
+  "revision": 39,
+  "updated_at_utc": "2026-07-26T16:02:10.0661208+00:00"
 }
