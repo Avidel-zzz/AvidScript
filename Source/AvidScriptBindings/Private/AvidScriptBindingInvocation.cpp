@@ -478,7 +478,10 @@ bool ResolveAvidScriptRuntimeHandle(
 		return false;
 	}
 	FAvidScriptObjectHandleResult ResolveResult;
-	OutObject = Context.ObjectRegistry->ResolveObject({ Slot, Generation }, ResolveResult);
+	OutObject = Context.ObjectRegistry->ResolveObject(
+		{ Slot, Generation },
+		ResolveResult,
+		false);
 	if (OutObject == nullptr)
 	{
 		OutDetails = ResolveResult.ErrorMessage;
