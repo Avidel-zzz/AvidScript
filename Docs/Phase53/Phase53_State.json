@@ -43,9 +43,9 @@
     },
     {
       "id": "P53.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "独立复审 Critical=0、Important=0；正式 baseline/optimized 各 6000/6000 样本；发布证据与中文收尾文档已固化；Windows clean-worktree CRLF 回归已修复并纳入最终集中 Gate。",
+      "completed_at_utc": "2026-07-26T14:49:25.5027867+00:00"
     }
   ],
   "debt": [
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "batch-complete -Phase 53 -BatchId P53.5 -Evidence <text>",
-  "revision": 26,
-  "updated_at_utc": "2026-07-26T14:46:54.4756836+00:00"
+  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
+  "revision": 27,
+  "updated_at_utc": "2026-07-26T14:49:25.5055973+00:00"
 }
