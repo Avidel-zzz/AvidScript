@@ -1,5 +1,7 @@
 #include "AvidScriptPerfFixture.h"
 
+#include "UEDataBinding.hpp"
+
 namespace
 {
 	constexpr uint32 PerfFixtureMixMultiplier = 1664525u;

@@ -135,6 +135,8 @@ Assert-True ([regex]::IsMatch(
     'Puerts timed workload bridge must not request a JS return value'
 Assert-True ($FixtureSource.Contains('Runner.Action(this, WorkloadId, Iterations, Seed);')) `
     'Puerts timed workload bridge must dispatch the fixture receiver explicitly'
+Assert-True ($FixtureSource.Contains('#include "UEDataBinding.hpp"')) `
+    'Puerts fixture bridge must directly include the UObject converter used by Runner.Action'
 Assert-True (-not $FixtureSource.Contains('Runner.Func<int32>(WorkloadId, Iterations, Seed)')) `
     'Puerts timed workload bridge must not convert a JS return checksum'
 Assert-True ($RunnerSource.Contains('Session.Tick(PerfRunnerTickDeltaSeconds')) `
