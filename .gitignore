@@ -57,6 +57,8 @@ TestResults/
 artifacts/
 coverage/
 .nuget/
+Benchmarks/PuertsComparison/.cache/
+Benchmarks/PuertsComparison/Results/
 *.coverage
 *.coveragexml
 *.trx

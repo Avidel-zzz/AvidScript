@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository_url": "https://github.com/Tencent/puerts.git",
+    "reference": "master",
+    "commit_sha": "1977328c84661024be10a9e73640a74b278a7659",
+    "plugin_subdirectory": "unreal/Puerts",
+    "plugin_tree_sha1": "788260b07bb3a1bd140c0f57489a6045dac0fcd3"
+  },
+  "backend": {
+    "runtime": "V8",
+    "runtime_version": "9.4.146.24",
+    "release_tag": "Unreal_v1.0.9",
+    "asset_name": "puerts_v8_94.tgz",
+    "asset_url": "https://github.com/Tencent/puerts/releases/download/Unreal_v1.0.9/puerts_v8_94.tgz",
+    "size_bytes": 420759188,
+    "sha256": "0ab80673f6bf59cf7f3f80ff17f254975f811813c4637ba2d85d6455fd1e4e24"
+  },
+  "installation": {
+    "project_plugin_path": "Plugins/Puerts",
+    "managed_marker_name": ".avidscript-puerts-install.json"
+  }
+}

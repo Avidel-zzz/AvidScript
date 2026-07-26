@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "profile_id": "ue58-win64-development-editor-v1",
+  "platform": "Win64",
+  "target": "AvidTPSTemplateEditor",
+  "configuration": "Development",
+  "null_rhi": true,
+  "process_runs": 5,
+  "warmup_samples": 5,
+  "timed_samples": 30,
+  "minimum_sample_milliseconds": 5.0,
+  "minimum_iterations": 1000,
+  "maximum_iterations": 10000000,
+  "seed": 1397313073,
+  "lanes": [
+    "native_cpp",
+    "puerts_v8_reflection",
+    "puerts_v8_static",
+    "avidscript_wamr"
+  ],
+  "workloads": [
+    "callback_empty",
+    "callback_begin_play",
+    "callback_tick",
+    "pure_integer",
+    "scalar_noop",
+    "scalar_add_int32",
+    "property_get_set",
+    "vector_value",
+    "vector_ref_out",
+    "object_roundtrip",
+    "batch_scalar"
+  ]
+}

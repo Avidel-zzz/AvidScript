@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AvidScript Puerts benchmark dependency lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "backend",
+    "installation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_url",
+        "reference",
+        "commit_sha",
+        "plugin_subdirectory",
+        "plugin_tree_sha1"
+      ],
+      "properties": {
+        "repository_url": {
+          "const": "https://github.com/Tencent/puerts.git"
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "plugin_subdirectory": {
+          "const": "unreal/Puerts"
+        },
+        "plugin_tree_sha1": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "runtime_version",
+        "release_tag",
+        "asset_name",
+        "asset_url",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "runtime": {
+          "const": "V8"
+        },
+        "runtime_version": {
+          "const": "9.4.146.24"
+        },
+        "release_tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_name": {
+          "pattern": "^[A-Za-z0-9._-]+\\.tgz$"
+        },
+        "asset_url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/Tencent/puerts/releases/download/"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_plugin_path",
+        "managed_marker_name"
+      ],
+      "properties": {
+        "project_plugin_path": {
+          "const": "Plugins/Puerts"
+        },
+        "managed_marker_name": {
+          "const": ".avidscript-puerts-install.json"
+        }
+      }
+    }
+  }
+}
