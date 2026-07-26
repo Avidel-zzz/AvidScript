@@ -5,7 +5,7 @@
     "goal": "建立 Puerts V8 与 AvidScript 在 UE5.8 Win64 的同机四路可复现性能基准，完成至少一轮通用热路径优化并公开分项结果",
     "start_commit": "a1cf61416ad1d28ac07e92da9626b54f2604b31e"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase53/P53.0_Puerts_Performance_Comparison_Architecture.md",
     "version": 2,
@@ -64,9 +64,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: 最终自动化发现 TypedProjectApi 测试依赖 LF 换行；修复 Windows CRLF 兼容并重新冻结验收候选。",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "P53.5 独立复审 Critical 0 / Important 0；benchmark correctness 12000/12000；发布证据完成隐私与身份审查；最终候选包含 Windows CRLF 回归修复。",
+    "completed_at_utc": "2026-07-26T14:49:45.9706137+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -79,11 +79,11 @@
     "full_gate": 0
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "57bd6e0ac02a4db4d7ac6ab0561829ad7fd23ff0",
+    "source_tree": "8c3948b992f2abd7ec6403f4dd1f2b70b006c6f4",
+    "state_sha256": "03ae32842efb5ae373d06dad97b1809a145a278d6dc339e1c6fa038b3424972e",
+    "review_evidence": "P53.5 独立复审 Critical 0 / Important 0；benchmark correctness 12000/12000；发布证据完成隐私与身份审查；最终候选包含 Windows CRLF 回归修复。",
+    "at_utc": "2026-07-26T14:49:45.9706137+00:00"
   },
   "gate": {
     "report_path": "",
@@ -95,7 +95,7 @@
     "attested_at_utc": null
   },
   "protected_dirty": [],
-  "next_action": "freeze -Phase 53 -ReviewEvidence <text>",
-  "revision": 27,
-  "updated_at_utc": "2026-07-26T14:49:25.5055973+00:00"
+  "next_action": "attest -Phase 53 -GateReportPath <path>",
+  "revision": 28,
+  "updated_at_utc": "2026-07-26T14:49:45.9755387+00:00"
 }
