@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AvidScript Wasmtime dependency lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dependency",
+    "version",
+    "platform",
+    "release_url",
+    "archive",
+    "layout",
+    "install",
+    "license"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "dependency": {
+      "const": "Wasmtime minimal C API"
+    },
+    "version": {
+      "const": "v45.0.0"
+    },
+    "platform": {
+      "const": "Win64"
+    },
+    "release_url": {
+      "const": "https://github.com/bytecodealliance/wasmtime/releases/tag/v45.0.0"
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "url",
+        "size_bytes",
+        "sha256",
+        "root"
+      ],
+      "properties": {
+        "name": {
+          "const": "wasmtime-v45.0.0-x86_64-windows-c-api.zip"
+        },
+        "url": {
+          "const": "https://github.com/bytecodealliance/wasmtime/releases/download/v45.0.0/wasmtime-v45.0.0-x86_64-windows-c-api.zip"
+        },
+        "size_bytes": {
+          "const": 28820070
+        },
+        "sha256": {
+          "const": "d5ee516fc141576ccd6c43146aafee1074c3c26764cba73b3a97f599a3791f9c"
+        },
+        "root": {
+          "const": "wasmtime-v45.0.0-x86_64-windows-c-api"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "include_relative_path",
+        "dll_relative_path",
+        "import_library_relative_path",
+        "license_relative_path"
+      ],
+      "properties": {
+        "include_relative_path": {
+          "const": "min/include"
+        },
+        "dll_relative_path": {
+          "const": "min/lib/wasmtime.dll"
+        },
+        "import_library_relative_path": {
+          "const": "min/lib/wasmtime.dll.lib"
+        },
+        "license_relative_path": {
+          "const": "LICENSE"
+        }
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "managed_marker_name"
+      ],
+      "properties": {
+        "relative_path": {
+          "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0"
+        },
+        "managed_marker_name": {
+          "const": ".avidscript-wasmtime-managed.json"
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expression",
+        "tracked_file"
+      ],
+      "properties": {
+        "expression": {
+          "const": "Apache-2.0 WITH LLVM-exception"
+        },
+        "tracked_file": {
+          "const": "Source/ThirdParty/Wasmtime/LICENSE.txt"
+        }
+      }
+    }
+  }
+}

@@ -14,6 +14,12 @@ public class AvidScriptVM : ModuleRules
 			}
 		);
 
-		PrivateDependencyModuleNames.Add("WAMR");
+		PrivateDependencyModuleNames.AddRange(
+			new[]
+			{
+				"WAMR",
+				"Wasmtime"
+			}
+		);
 	}
 }

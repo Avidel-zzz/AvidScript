@@ -137,7 +137,7 @@ function Test-SourceTreeForbiddenPattern {
 }
 
 $CoreBuild = Read-RequiredFile 'Source/AvidScriptCore/AvidScriptCore.Build.cs'
-foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'WAMR', 'Json', 'AvidScriptRuntime', 'AvidScriptBindings', 'AvidScriptEditor')) {
+foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'WAMR', 'Wasmtime', 'Json', 'AvidScriptRuntime', 'AvidScriptBindings', 'AvidScriptEditor')) {
     if ($CoreBuild.Contains('"' + $ForbiddenDependency + '"')) {
         Add-Violation "AvidScriptCore must not depend on $ForbiddenDependency"
     }
@@ -160,7 +160,7 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'CoreUObject', 'Engine', 'Js
         Add-Violation "AvidScriptBindings is missing required dependency $RequiredDependency"
     }
 }
-foreach ($ForbiddenDependency in @('WAMR', 'UnrealEd', 'AvidScriptRuntime', 'AvidScriptEditor')) {
+foreach ($ForbiddenDependency in @('WAMR', 'Wasmtime', 'UnrealEd', 'AvidScriptRuntime', 'AvidScriptEditor')) {
     if ($BindingsBuild.Contains('"' + $ForbiddenDependency + '"')) {
         Add-Violation "AvidScriptBindings must not depend on $ForbiddenDependency"
     }
@@ -176,8 +176,11 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'Core')) {
     if (-not $VmBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptVM is missing required dependency $RequiredDependency"
     }
-}if (-not $VmBuild.Contains('"WAMR"')) {
-    Add-Violation 'AvidScriptVM is missing its private WAMR backend dependency'
+}
+foreach ($RequiredVmBackendDependency in @('WAMR', 'Wasmtime')) {
+    if (-not $VmBuild.Contains('"' + $RequiredVmBackendDependency + '"')) {
+        Add-Violation "AvidScriptVM is missing its private $RequiredVmBackendDependency dependency"
+    }
 }
 foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {
     if ($VmBuild.Contains('"' + $ForbiddenDependency + '"')) {
@@ -187,9 +190,38 @@ foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
     'wasm_runtime_|wasm_export\.h',
+    'wasmtime\.h|AVIDSCRIPT_WITH_WASMTIME',
     '#include\s+["<](Engine|GameFramework|Components|UObject)/',
     '\b(UObject|AActor|USceneComponent|FVector|FRotator|FTransform)\b'
 )
+
+$WasmtimeBuild = Read-RequiredFile 'Source/ThirdParty/Wasmtime/Wasmtime.Build.cs'
+$WasmtimeLock = Read-RequiredFile 'Source/ThirdParty/Wasmtime/WasmtimeDependency.lock.json'
+foreach ($RequiredWasmtimeBuildContract in @(
+    'ModuleType.External',
+    'AVIDSCRIPT_WITH_WASMTIME=0',
+    'AVIDSCRIPT_WITH_WASMTIME=1',
+    'PublicIncludePaths.Add',
+    'PublicAdditionalLibraries.Add',
+    'wasmtime.dll.lib',
+    'PublicDelayLoadDLLs.Add("wasmtime.dll")',
+    'RuntimeDependencies.Add')) {
+    if (-not $WasmtimeBuild.Contains($RequiredWasmtimeBuildContract)) {
+        Add-Violation "Wasmtime external module is missing $RequiredWasmtimeBuildContract"
+    }
+}
+if ($WasmtimeBuild -match '"wasmtime\.lib"') {
+    Add-Violation 'Wasmtime external module must not link the static wasmtime.lib'
+}
+foreach ($RequiredWasmtimeLockIdentity in @(
+    '"version": "v45.0.0"',
+    '"size_bytes": 28820070',
+    '"sha256": "d5ee516fc141576ccd6c43146aafee1074c3c26764cba73b3a97f599a3791f9c"',
+    '"relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0"')) {
+    if (-not $WasmtimeLock.Contains($RequiredWasmtimeLockIdentity)) {
+        Add-Violation "Wasmtime dependency lock is missing $RequiredWasmtimeLockIdentity"
+    }
+}
 
 $VmContractHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
 foreach ($RequiredBatchContract in @('ActorGetTransformBatch', 'InputCells', 'OutputFloats')) {
@@ -253,19 +285,28 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'AvidScriptBindings', 'AvidS
     if (-not $RuntimeBuild.Contains('"' + $RequiredDependency + '"')) {
         Add-Violation "AvidScriptRuntime is missing required dependency $RequiredDependency"
     }
-}if ($RuntimeBuild.Contains('"WAMR"')) {
-    Add-Violation 'AvidScriptRuntime must not depend directly on WAMR'
+}
+foreach ($ForbiddenRuntimeVmDependency in @('WAMR', 'Wasmtime')) {
+    if ($RuntimeBuild.Contains('"' + $ForbiddenRuntimeVmDependency + '"')) {
+        Add-Violation "AvidScriptRuntime must not depend directly on $ForbiddenRuntimeVmDependency"
+    }
 }
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
     'wasm_runtime_|wasm_export\.h',
-    'AVIDSCRIPT_WITH_WAMR'
+    'AVIDSCRIPT_WITH_WAMR',
+    'wasmtime\.h|AVIDSCRIPT_WITH_WASMTIME'
 )
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptEditor' @(
     'wasm_runtime_|wasm_export\.h',
-    'AVIDSCRIPT_WITH_WAMR'
+    'AVIDSCRIPT_WITH_WAMR',
+    'wasmtime\.h|AVIDSCRIPT_WITH_WASMTIME'
 )
+$EditorBuild = Read-RequiredFile 'Source/AvidScriptEditor/AvidScriptEditor.Build.cs'
+if ($EditorBuild.Contains('"Wasmtime"')) {
+    Add-Violation 'AvidScriptEditor must not depend directly on Wasmtime'
+}
 
 $RuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'

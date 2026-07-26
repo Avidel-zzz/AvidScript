@@ -91,4 +91,5 @@ Source/ThirdParty/**/.cmake/
 !AGENTS.md
 !AvidScript.uplugin
 !Source/
+Source/ThirdParty/Wasmtime/installed/
 
