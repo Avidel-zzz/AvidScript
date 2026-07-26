@@ -78,6 +78,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.5 最终 Gate 临时工程路径预算遗漏：隔离工程位于描述性长目录下，生成 binding reference source 的完整路径达到 261 字符；`pwsh 7 Test-Path` 为 true，但 C# build service 使用的 Windows PowerShell 5 返回 false，prepare 以 `ASBI4202` 拒绝。Prevention：会生成深层 Saved/Intermediate 制品的 UE Gate 工程使用短且唯一的根目录，并在 UBT 前计算最长已知制品路径，Windows PowerShell 5 消费链固定保留低于 240 字符的预算；不能只验证工程根可创建。
 - 2026-07-26 P53.5 最终 Gate 全仓 parser 宿主错误：Gate 外层继续由 Windows PowerShell 5 执行，并用 5.1 parser 扫描包含合法 PowerShell 7 管道续行的 `CheckAvidScriptArchitecture.ps1`，在架构门禁执行前产生假失败。Prevention：最终 Gate 外层、全仓 parser 和架构脚本统一使用 `pwsh 7 -NoProfile`；只有明确验证 Windows PowerShell 5 行为的合同才启动独立 `powershell.exe` 子进程，不能让旧宿主定义全仓语法上限。
 - 2026-07-26 P53.5 最终 Gate PowerShell 宿主选错：新增的 Phase 53 benchmark 合同使用 `Test-Json`，一次性驱动却沿用 PhaseWorkflow 合同的 `powershell.exe` 宿主，Windows PowerShell 5 在执行合同前以 command-not-found 失败。Prevention：PhaseWorkflow 拒绝路径合同保持隔离 `powershell.exe -NoProfile`；使用 PowerShell 7 API 的 benchmark/dependency 合同固定使用已确认的 `pwsh.exe -NoProfile`，Gate 清单按脚本运行时要求分组，不能共用单一宿主。
 - 2026-07-26 P53.5 最终 Gate 预期 stderr 误判：Windows PowerShell 5 的 native logging helper 在 `$ErrorActionPreference = 'Stop'` 下把 Guest 负例故意写出的 `ASCG1001` stderr 转成终止异常，尽管测试为 68/68 且进程退出码 0。Prevention：需要保留 native stdout/stderr 的 Gate helper 在最小调用作用域使用 `Continue` 采集两条流，恢复外层偏好后只按捕获的 `$LASTEXITCODE` 判定；stderr 文本本身不能替代退出码。
