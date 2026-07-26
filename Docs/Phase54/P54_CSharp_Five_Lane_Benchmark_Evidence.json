@@ -1,0 +1,463 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase54-csharp-frontend-five-lane-formal",
+  "generated_at_utc": "2026-07-26T22:16:10.0407405+00:00",
+  "data_boundary": "csharp_frontend_output",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "attempt_id": "e5223aae-6127-41de-b041-54534b50739a",
+    "wall_time_seconds": 168.1490334,
+    "aggregate_filename": "aggregate.json",
+    "aggregate_sha256": "595ce9cd9d70a3f12649fa54979c55510e8d48b917dd7cc4af22dccc31e3fde7",
+    "candidate": {
+      "commit": "bf60dc0aaeb3d1d1a967afa6b905dd4ef8af3675",
+      "tree": "9f3e86855a401888bf860a9ff1995d198d176208",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "ue_build_id": "UE5-CL-0",
+      "editor_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2 10.0.26200.8875",
+      "producer_build_id": "bb408ff3-d5ed-438e-891b-2d9146203fba"
+    },
+    "profile": {
+      "id": "ue58-win64-development-editor-v2",
+      "sha256": "a8f3c54ef9b69b6d1b4b68bada0d06442b7670959e2c6d54bbc71a8b7e03f699",
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workloads": 10,
+      "lanes": 5,
+      "minimum_sample_milliseconds": 5.0
+    },
+    "artifacts": {
+      "wasm_sha256": "451b2cd5fcf7644542e76c6f4960bf7d8904073a1fce74d3c0e1aaae9e81e82a",
+      "manifest_sha256": "b1d0367bff5501d5e1cb25fea3a0281f318fd4ad131c6acbfcfc84f40b914424",
+      "csharp_source_sha256": "7621aecccb66d276af8fff7eaa4103ad998201567af9ef363ed0c56ddb1d1d98",
+      "binding_package_manifest_sha256": "6cdcaeeb4620906b9bbfa6db7da55cd526b5ba644bc96b360f8c16e6f3160a12",
+      "debug_map_sha256": "627780bb0e5c10510071b8841a445fbefef03092049c11d4a958b3e6afb18508"
+    },
+    "runtimes": {
+      "puerts": {
+        "commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "backend_sha256": "0ab80673f6bf59cf7f3f80ff17f254975f811813c4637ba2d85d6455fd1e4e24",
+        "installed_content_sha256": "82eb0a88e55ff4cdc55fc1cdaa795f988da5f1d313d41e93c1049cc89edf7065",
+        "version": "V8 9.4.146.24"
+      },
+      "wamr": {
+        "backend_id": "wamr.interpreter",
+        "version": "2.4.4",
+        "execution_mode": "interpreter",
+        "runtime_build_identity": "wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0;static_lib_sha256=e1afaf6e7da75b92b55d3ca8751e5f27b6b57179901ab04642faa084a8f180af",
+        "runtime_artifact_sha256": "e1afaf6e7da75b92b55d3ca8751e5f27b6b57179901ab04642faa084a8f180af",
+        "fallback_used": false
+      },
+      "wasmtime": {
+        "backend_id": "wasmtime.cranelift.jit",
+        "version": "45.0.0",
+        "execution_mode": "jit",
+        "runtime_build_identity": "wasmtime-v45.0.0;cranelift=1;dll_sha256=0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42",
+        "runtime_artifact_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42",
+        "managed_content_sha256": "4399f843601d637308bd85fff7a59245afdf3546fae327996d2504c7635528e5",
+        "fallback_used": false
+      }
+    },
+    "samples": {
+      "timed_total": 7500,
+      "correct": 7500,
+      "incorrect": 0,
+      "per_lane": 1500,
+      "per_lane_workload": 150
+    },
+    "processes": {
+      "calibration": 1,
+      "timed": 5,
+      "unique_pid_count": 6
+    },
+    "statistics_method": {
+      "percentile": "nearest_rank",
+      "primary_replicate": "process_summary",
+      "p50": "p50_of_process_p50",
+      "p95": "p95_of_process_p50",
+      "mad": "mad_of_process_p50",
+      "ratio": "wasmtime_p50_over_comparator_p50",
+      "unit": "ns_per_operation"
+    },
+    "results": [
+      {
+        "workload": "callback_empty",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.9776733398437499,
+            "p95": 0.9838134765625,
+            "mad": 0.006140136718750022
+          },
+          "puerts_v8_reflection": {
+            "p50": 167.896875,
+            "p95": 173.56875,
+            "mad": 5.671875
+          },
+          "puerts_v8_static": {
+            "p50": 167.0265625,
+            "p95": 175.5671875,
+            "mad": 8.540624999999977
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 705.5625,
+            "p95": 717.6624999999999,
+            "mad": 4.787500000000023
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 354.59375,
+            "p95": 369.05625,
+            "mad": 2.9750000000000227
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 362.6914384887191,
+          "over_puerts_reflection": 2.1119734956353415,
+          "over_puerts_static": 2.122978193962412,
+          "over_wamr": 0.5025688723536186
+        }
+      },
+      {
+        "workload": "callback_tick",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.9723022460937499,
+            "p95": 0.9797485351562499,
+            "mad": 0.0030029296874999334
+          },
+          "puerts_v8_reflection": {
+            "p50": 192.9875,
+            "p95": 196.571875,
+            "mad": 1.440624999999983
+          },
+          "puerts_v8_static": {
+            "p50": 192.44375,
+            "p95": 218.684375,
+            "mad": 1.140625
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 586.65,
+            "p95": 592.775,
+            "mad": 2.25
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 339.875,
+            "p95": 353.4125,
+            "mad": 2.8562500000000455
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 349.5569421601738,
+          "over_puerts_reflection": 1.7611244251570697,
+          "over_puerts_static": 1.7661004839076353,
+          "over_wamr": 0.579348845137646
+        }
+      },
+      {
+        "workload": "pure_integer",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.9751708984374999,
+            "p95": 0.9806396484375001,
+            "mad": 0.004431152343750022
+          },
+          "puerts_v8_reflection": {
+            "p50": 0.9806396484375001,
+            "p95": 0.99171142578125,
+            "mad": 0.0026733398437501776
+          },
+          "puerts_v8_static": {
+            "p50": 0.9808593750000001,
+            "p95": 1.0051635742187501,
+            "mad": 0.00244140625
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 59.055468749999996,
+            "p95": 60.41171875,
+            "mad": 0.09921875000000568
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 0.9984619140625,
+            "p95": 1.0189453124999999,
+            "mad": 0.0016845703124999112
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 1.0238840347495182,
+          "over_puerts_reflection": 1.0181741230363233,
+          "over_puerts_static": 1.0179460374352847,
+          "over_wamr": 0.016907188025029433
+        }
+      },
+      {
+        "workload": "scalar_noop",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.96859130859375,
+            "p95": 0.9836181640625,
+            "mad": 0.0003906249999999778
+          },
+          "puerts_v8_reflection": {
+            "p50": 90.45,
+            "p95": 91.5640625,
+            "mad": 0.7359375000000057
+          },
+          "puerts_v8_static": {
+            "p50": 27.313671875,
+            "p95": 31.29921875,
+            "mad": 0.22304687499999787
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 918.7875,
+            "p95": 925.2125,
+            "mad": 6.4249999999999545
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 658.0375,
+            "p95": 704.9625,
+            "mad": 5.362500000000068
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 679.3758050083809,
+          "over_puerts_reflection": 7.275152017689331,
+          "over_puerts_static": 24.091872488308567,
+          "over_wamr": 0.716202059779873
+        }
+      },
+      {
+        "workload": "scalar_add_int32",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.9739257812500001,
+            "p95": 1.00152587890625,
+            "mad": 0.0033081054687500444
+          },
+          "puerts_v8_reflection": {
+            "p50": 104.51875,
+            "p95": 107.6078125,
+            "mad": 0.7703125000000028
+          },
+          "puerts_v8_static": {
+            "p50": 29.592578125000003,
+            "p95": 34.067578125,
+            "mad": 0.49101562499999574
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 991.2874999999999,
+            "p95": 1057.3,
+            "mad": 8.124999999999886
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 751.4,
+            "p95": 764.85,
+            "mad": 12.975000000000023
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 771.516695076707,
+          "over_puerts_reflection": 7.189140704419064,
+          "over_puerts_static": 25.39150177541349,
+          "over_wamr": 0.7580041108154799
+        }
+      },
+      {
+        "workload": "property_get_set",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.9711425781249999,
+            "p95": 0.9838745117187501,
+            "mad": 0.004077148437500067
+          },
+          "puerts_v8_reflection": {
+            "p50": 102.18750000000001,
+            "p95": 108.6015625,
+            "mad": 0.11406250000001705
+          },
+          "puerts_v8_static": {
+            "p50": 62.74375,
+            "p95": 67.971875,
+            "mad": 0.2593749999999986
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 786.1125000000001,
+            "p95": 801.2499999999999,
+            "mad": 2.762499999999932
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 308.159375,
+            "p95": 314.453125,
+            "mad": 1.1374999999999886
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 317.31630549550005,
+          "over_puerts_reflection": 3.0156269113149845,
+          "over_puerts_static": 4.911395557326427,
+          "over_wamr": 0.39200416607037797
+        }
+      },
+      {
+        "workload": "vector_value",
+        "lanes": {
+          "native_cpp": {
+            "p50": 1.1024658203125,
+            "p95": 1.1052490234375,
+            "mad": 0.0027832031250001332
+          },
+          "puerts_v8_reflection": {
+            "p50": 1256.4375,
+            "p95": 1274.95,
+            "mad": 12.450000000000045
+          },
+          "puerts_v8_static": {
+            "p50": 1014.475,
+            "p95": 1025.7,
+            "mad": 8.875000000000114
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 1160.4125,
+            "p95": 1167.0,
+            "mad": 4.099999999999909
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 736.3249999999999,
+            "p95": 748.975,
+            "mad": 5.662500000000136
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 667.8891866155856,
+          "over_puerts_reflection": 0.5860418842958762,
+          "over_puerts_static": 0.7258187732571033,
+          "over_wamr": 0.6345372873870283
+        }
+      },
+      {
+        "workload": "vector_ref_out",
+        "lanes": {
+          "native_cpp": {
+            "p50": 1.7217529296874998,
+            "p95": 1.7294677734375,
+            "mad": 0.005395507812500089
+          },
+          "puerts_v8_reflection": {
+            "p50": 1035.8875,
+            "p95": 1057.2875,
+            "mad": 16.59999999999991
+          },
+          "puerts_v8_static": {
+            "p50": 810.4250000000001,
+            "p95": 840.0874999999999,
+            "mad": 11.700000000000045
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 1210.3125,
+            "p95": 1223.7125,
+            "mad": 13.400000000000091
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 850.7625,
+            "p95": 885.1375,
+            "mad": 10.550000000000068
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 494.1257745699985,
+          "over_puerts_reflection": 0.8212885086459678,
+          "over_puerts_static": 1.0497732671129345,
+          "over_wamr": 0.7029279628195197
+        }
+      },
+      {
+        "workload": "object_roundtrip",
+        "lanes": {
+          "native_cpp": {
+            "p50": 0.97474365234375,
+            "p95": 0.9773193359375,
+            "mad": 0.0025756835937499334
+          },
+          "puerts_v8_reflection": {
+            "p50": 131.8921875,
+            "p95": 135.45624999999998,
+            "mad": 0.6453124999999886
+          },
+          "puerts_v8_static": {
+            "p50": 46.99375,
+            "p95": 51.59765625,
+            "mad": 0.1054687499999929
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 1345.75,
+            "p95": 1361.3,
+            "mad": 15.549999999999955
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 835.4625000000001,
+            "p95": 864.275,
+            "mad": 11.88750000000016
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 857.1099673141226,
+          "over_puerts_reflection": 6.3344350854746425,
+          "over_puerts_static": 17.778161989626284,
+          "over_wamr": 0.6208155303733978
+        }
+      },
+      {
+        "workload": "batch_scalar",
+        "lanes": {
+          "native_cpp": {
+            "p50": 7.566210937499999,
+            "p95": 7.62509765625,
+            "mad": 0.006835937499999112
+          },
+          "puerts_v8_reflection": {
+            "p50": 106.928125,
+            "p95": 109.75625,
+            "mad": 0.41093749999998863
+          },
+          "puerts_v8_static": {
+            "p50": 30.88984375,
+            "p95": 35.23828125,
+            "mad": 0.16249999999999787
+          },
+          "avidscript_wamr_interpreter": {
+            "p50": 973.075,
+            "p95": 980.2125,
+            "mad": 0.6375000000000455
+          },
+          "avidscript_wasmtime_jit": {
+            "p50": 732.3375000000001,
+            "p95": 783.95,
+            "mad": 1.400000000000091
+          }
+        },
+        "wasmtime_p50_ratios": {
+          "over_native": 96.79052118020601,
+          "over_puerts_reflection": 6.848876289563669,
+          "over_puerts_static": 23.70803510458029,
+          "over_wamr": 0.752601289725869
+        }
+      }
+    ]
+  },
+  "diagnostic": {
+    "attempt_id": "08ced859-2281-4f7e-959a-4e555cc00682",
+    "timed_total": 250,
+    "correct": 250,
+    "incorrect": 0,
+    "profile_sha256": "e55fd65c3a166df21609ceb46dd6163e3551887d50736752ac4ddbba88bf6181"
+  },
+  "boundary_note": "These measurements include AvidScript C# frontend output, generated binding ABI, host crossings, and runtime execution. They do not isolate runtime-only superiority."
+}
