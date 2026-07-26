@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AvidScript same-machine benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "provenance",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f-]{36}$"
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "ue_version",
+        "ue_build_id",
+        "target",
+        "configuration",
+        "avidscript_commit",
+        "puerts_commit",
+        "puerts_backend_sha256",
+        "profile_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ue_version": { "type": "string", "minLength": 1 },
+        "ue_build_id": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "configuration": { "type": "string", "minLength": 1 },
+        "avidscript_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "puerts_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "puerts_backend_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "profile_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "process_run",
+          "lane",
+          "workload",
+          "sample_index",
+          "iterations",
+          "elapsed_cycles",
+          "checksum",
+          "correct"
+        ],
+        "properties": {
+          "process_run": { "type": "integer", "minimum": 0 },
+          "lane": {
+            "enum": [
+              "native_cpp",
+              "puerts_v8_reflection",
+              "puerts_v8_static",
+              "avidscript_wamr"
+            ]
+          },
+          "workload": { "type": "string", "minLength": 1 },
+          "sample_index": { "type": "integer", "minimum": 0 },
+          "iterations": { "type": "integer", "minimum": 1 },
+          "elapsed_cycles": { "type": "integer", "minimum": 1 },
+          "checksum": { "type": "integer" },
+          "correct": { "const": true }
+        }
+      }
+    }
+  }
+}

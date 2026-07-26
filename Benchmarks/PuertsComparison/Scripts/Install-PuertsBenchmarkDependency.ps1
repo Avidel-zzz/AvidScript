@@ -310,7 +310,7 @@ function Verify-Dependency {
     $RequiredFiles = @(
         'Puerts.uplugin',
         'Source/JsEnv/JsEnv.Build.cs',
-        'ThirdParty/v8_9.4.146.24/Inc/include/v8.h'
+        'ThirdParty/v8_9.4.146.24/Inc/v8.h'
     )
     foreach ($RelativePath in $RequiredFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $Paths.InstallPath $RelativePath) -PathType Leaf)) {

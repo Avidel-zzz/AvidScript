@@ -1,0 +1,29 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "AvidScript Performance Harness",
+  "Description": "Neutral same-machine benchmark harness for AvidScript and Puerts.",
+  "Category": "Testing",
+  "CreatedBy": "AvidScript",
+  "CanContainContent": true,
+  "EnabledByDefault": true,
+  "IsBetaVersion": true,
+  "Modules": [
+    {
+      "Name": "AvidScriptPerfHarness",
+      "Type": "Editor",
+      "LoadingPhase": "PostEngineInit"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "AvidScript",
+      "Enabled": true
+    },
+    {
+      "Name": "Puerts",
+      "Enabled": true
+    }
+  ]
+}

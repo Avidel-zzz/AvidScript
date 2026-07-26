@@ -78,6 +78,10 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53 第三方缓存设计错误：首次为阅读 Puerts 源码对 partial clone 执行完整 checkout，网络下载超时后留下数千条 staged deletion；该目录位于临时区且未影响产品仓库。Prevention：固定第三方源码使用 bare/filter clone，只通过 immutable commit 的 `git show`、`git archive` 或临时纯导出目录读取；安装器不得依赖可变 checkout，也不得用 checkout dirty state 代表已固定对象的身份。
+- 2026-07-26 P53 backend 完整性路径错误：安装前复审发现 verifier 把 V8 header 写成 `Inc/include/v8.h`，而 Puerts `JsEnv.Build.cs` 直接把 `Inc` 加入 include path，正确身份文件是 `Inc/v8.h`。Prevention：第三方完整性 marker 必须由固定提交的真实 Build.cs/include contract 推导；大型归档首次解压前先对照上游消费路径，不能凭常见目录布局猜测。
+- 2026-07-26 P53 schema 错误分类遗漏：dependency installer 在全局 `ErrorActionPreference=Stop` 下直接调用 `Test-Json`，无效 lock 先被 PowerShell 自身异常终止，未返回稳定的 `ASP53D1003`。Prevention：预期以布尔值判定的 schema 校验在最小作用域使用 `-ErrorAction SilentlyContinue`，随后由产品脚本统一抛出稳定分类；合同必须覆盖非法 remote、commit 和 asset URL。
+- 2026-07-26 P53 隐私扫描自匹配错误：architecture test 把待检测的用户目录和私钥头字面量写在自身源码中，再扫描整个 benchmark 目录，导致两次假阳性。Prevention：安全扫描规则 token 运行时分段构造，或从扫描集合显式排除规则定义文件；规则合同必须先证明正常 tracked tree 可通过，再用独立 fixture 证明恶意内容会被拒绝。
 - 2026-07-26 P53 恢复顺序错误复发：网络/上下文恢复后先执行了目录枚举与 `git status`，之后才调用最高 tracked Phase 的状态机。没有修改产品文件，但破坏了“状态机先行”的可审计顺序。Prevention：恢复后的首个仓库操作只允许从已知最高 state 执行 `Build/InvokePhaseWorkflow.ps1 status -Phase <N>`；目录、Git、计划和第三方探测全部排在该命令之后。若新 Phase 尚未自举，先检查上一 Phase 状态，再读取新 Phase 文档并立即 `start`。
 - 2026-07-26 P52 Gate 包装器错误记录：外部脚本没有先做 parser preflight，`"$RelativePath:"` 在任何产品测试启动前触发变量作用域语法错误；随后又用原始文件 SHA 比较两个 checkout，把内容相同的 CRLF/LF 脚本误判为不一致；主架构脚本还被错误交给 Windows PowerShell 5.1，无法解析 PowerShell 7 跨行管道。Prevention：Gate orchestrator 落盘后先用 PowerShell parser 做纯语法检查；tracked 文本跨 worktree 等价性使用 Git blob 或统一 LF 后比较，不用原始字节 hash；生产 `Build/*.ps1` 默认使用 `pwsh -NoProfile`，只有明确验证 Windows PowerShell 5.1 的合同宿主才使用 `powershell.exe`。Attempt 日志必须保留，最终 attestation 只引用通过日志。
 - 2026-07-26 P52 Gate 证据 schema 错误记录：首次报告给 Static、DotNet、PowerShell、Build 和 Performance 检查附加了扩展 `counts`，工作流以 `ASPW3023` 拒绝；状态未改变。Prevention：Phase Gate v1 只有 `Automation` category 可以发布 `counts`，其他 category 固定为 `null`，数字写入 `completion_marker` 或 tracked Gate summary；报告生成后先调用证据 validator/`attest`，拒绝报告另存 Attempt，不覆盖或伪装为已验证证据。

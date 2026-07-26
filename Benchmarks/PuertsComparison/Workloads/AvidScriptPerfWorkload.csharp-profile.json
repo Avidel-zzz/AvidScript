@@ -1,0 +1,31 @@
+{
+  "schema_version": 5,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Benchmarks/PuertsComparison/Workloads/AvidScriptPerfWorkload.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_phase53_perf",
+  "artifact_stem": "profile_phase53_perf",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf/profile_phase53_perf.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase53_perf/profile_phase53_perf.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.benchmark.phase53_perf",
+    "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",
+        "include_functions": [
+          "ReflectNoOp",
+          "ReflectAddInt32",
+          "ReflectSetScalar",
+          "ReflectGetScalar",
+          "ReflectVectorValue",
+          "ReflectObjectRoundtrip",
+          "ReflectBatchAdd"
+        ]
+      }
+    ]
+  }
+}
