@@ -1,6 +1,7 @@
 const UE = require("ue");
 const puerts = require("puerts");
 
+const fixture = puerts.argv.getByName("Fixture");
 const MIX_MULTIPLIER = 1664525;
 const MIX_INCREMENT = 1013904223;
 let moduleChecksum = 0;
@@ -9,8 +10,7 @@ function mix(value) {
     return (Math.imul(value | 0, MIX_MULTIPLIER) + MIX_INCREMENT) | 0;
 }
 
-function runWorkload(workload, iterations, seed) {
-    const fixture = puerts.argv.getByName("Fixture");
+function runWorkload(fixture, workload, iterations, seed) {
     let accumulator = seed | 0;
     const inOutRef = puerts.$ref(new UE.Vector(0, 0, 0));
     const outRef = puerts.$ref(new UE.Vector(0, 0, 0));

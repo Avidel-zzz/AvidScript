@@ -65,7 +65,7 @@ public:
 	int32 GetNativeCallbackChecksum() const;
 
 	bool HasPuertsCallbacks(int32 LaneId) const;
-	int32 RunPuertsWorkload(int32 LaneId, int32 WorkloadId, int32 Iterations, int32 Seed) const;
+	void RunPuertsWorkload(int32 LaneId, int32 WorkloadId, int32 Iterations, int32 Seed);
 	void ResetPuertsCallbackState(int32 LaneId, int32 Seed) const;
 	void RunPuertsEmptyCallback(int32 LaneId, int32 Token) const;
 	void RunPuertsTickCallback(int32 LaneId, float DeltaSeconds) const;

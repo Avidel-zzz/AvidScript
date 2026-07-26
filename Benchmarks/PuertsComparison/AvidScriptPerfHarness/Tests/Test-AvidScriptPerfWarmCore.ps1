@@ -129,6 +129,14 @@ foreach ($CallbackSurface in @(
     'GetPuertsCallbackChecksum')) {
     Assert-True ($FixtureHeader.Contains($CallbackSurface)) "fixture is missing callback surface: $CallbackSurface"
 }
+Assert-True ([regex]::IsMatch(
+    $FixtureHeader,
+    'void\s+RunPuertsWorkload\(int32 LaneId, int32 WorkloadId, int32 Iterations, int32 Seed\);')) `
+    'Puerts timed workload bridge must not request a JS return value'
+Assert-True ($FixtureSource.Contains('Runner.Action(this, WorkloadId, Iterations, Seed);')) `
+    'Puerts timed workload bridge must dispatch the fixture receiver explicitly'
+Assert-True (-not $FixtureSource.Contains('Runner.Func<int32>(WorkloadId, Iterations, Seed)')) `
+    'Puerts timed workload bridge must not convert a JS return checksum'
 Assert-True ($RunnerSource.Contains('Session.Tick(PerfRunnerTickDeltaSeconds')) `
     'AvidScript callback_tick must invoke FAvidScriptRuntimeSession::Tick'
 Assert-True ($RunnerSource.Contains('PrepareCallbackWorkload')) `
@@ -209,6 +217,8 @@ Assert-True ($RunnerSource.Contains('CollectWorkloadResult')) `
     'AvidScript state collection must be separate from DispatchEvent timing'
 Assert-True ($RunnerSource.Contains('CollectPuertsWorkloadChecksum')) `
     'Puerts workload checksum must have a separate post-timing getter path'
+Assert-True ($RunnerSource.Contains('Fixture.GetPuertsCallbackChecksum(LaneId)')) `
+    'Puerts workload checksum getter must read the module checksum after timing'
 $RunLaneStart = $RunnerSource.IndexOf('bool RunPerfLane(')
 $RunLaneEnd = $RunnerSource.IndexOf('bool ValidatePerfObservation(', $RunLaneStart)
 Assert-True ($RunLaneStart -ge 0 -and $RunLaneEnd -gt $RunLaneStart) `
@@ -236,12 +246,12 @@ Assert-True ($PuertsTimedChecksumIndex -gt $PuertsTimedEndCyclesIndex) `
 foreach ($Script in @($ReflectionScript, $StaticScript)) {
     Assert-True ([regex]::IsMatch(
         $Script,
-        '(?s)function runWorkload\(workload, iterations, seed\)\s*\{\s*const fixture = puerts\.argv\.getByName\("Fixture"\);')) `
-        'Puerts workload dispatch must resolve its fixture receiver inside every invocation'
+        'function runWorkload\(fixture, workload, iterations, seed\)')) `
+        'Puerts workload dispatch must receive its fixture receiver explicitly'
     Assert-True (-not [regex]::IsMatch(
         $Script,
-        '(?m)^const fixture = puerts\.argv\.getByName\("Fixture"\);')) `
-        'Puerts module initialization must not capture the fixture receiver outside timing'
+        '(?s)function runWorkload\(fixture, workload, iterations, seed\)\s*\{.*?puerts\.argv\.getByName\("Fixture"\)')) `
+        'Puerts timed workload must not look up the fixture receiver'
     Assert-True ($Script.Contains('let moduleChecksum = 0;')) `
         'Puerts workload must retain its timed checksum in module state'
     Assert-True ($Script.Contains('moduleChecksum = accumulator | 0;')) `

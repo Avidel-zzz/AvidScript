@@ -167,16 +167,16 @@ bool AAvidScriptPerfFixture::HasPuertsCallbacks(const int32 LaneId) const
 		: LaneId == StaticLaneId && bHasStaticCallbacks;
 }
 
-int32 AAvidScriptPerfFixture::RunPuertsWorkload(
+void AAvidScriptPerfFixture::RunPuertsWorkload(
 	const int32 LaneId,
 	const int32 WorkloadId,
 	const int32 Iterations,
-	const int32 Seed) const
+	const int32 Seed)
 {
 	const FJsObject& Runner = LaneId == ReflectionLaneId
 		? ReflectionWorkloadRunner
 		: StaticWorkloadRunner;
-	return Runner.Func<int32>(WorkloadId, Iterations, Seed);
+	Runner.Action(this, WorkloadId, Iterations, Seed);
 }
 
 void AAvidScriptPerfFixture::ResetPuertsCallbackState(
