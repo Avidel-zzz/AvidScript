@@ -1,9 +1,7 @@
 import * as UE from "ue";
-import * as cpp from "cpp";
 import { argv } from "puerts";
 
 const fixture = argv.getByName("Fixture");
-const bridge = cpp.AvidScriptPerfStatic;
 const MIX_MULTIPLIER = 1664525;
 const MIX_INCREMENT = 1013904223;
 
@@ -19,27 +17,27 @@ function runWorkload(workload, iterations, seed) {
                 accumulator = mix(accumulator ^ index);
                 break;
             case 1:
-                accumulator = mix(bridge.NoOp(fixture, accumulator) ^ index);
+                accumulator = mix(fixture.StaticNoOp(accumulator) ^ index);
                 break;
             case 2:
-                accumulator = mix(bridge.AddInt32(fixture, accumulator, index));
+                accumulator = mix(fixture.StaticAddInt32(accumulator, index));
                 break;
             case 3:
-                bridge.SetScalar(fixture, accumulator ^ index);
-                accumulator = mix(bridge.GetScalar(fixture));
+                fixture.StaticScalarValue = accumulator ^ index;
+                accumulator = mix(fixture.StaticScalarValue);
                 break;
             case 4: {
                 const value = new UE.Vector(index & 31, (index * 3) & 31, (index * 7) & 31);
-                const result = bridge.VectorValue(fixture, value);
+                const result = fixture.StaticVectorValue(value);
                 const packed = (result.X | 0) ^ ((result.Y | 0) << 8) ^ ((result.Z | 0) << 16);
                 accumulator = mix(accumulator ^ packed);
                 break;
             }
             case 5:
-                accumulator = mix(accumulator ^ (bridge.ObjectRoundtrip(fixture, fixture) === fixture ? index : -1));
+                accumulator = mix(accumulator ^ (fixture.StaticObjectRoundtrip(fixture) === fixture ? index : -1));
                 break;
             case 6:
-                accumulator = mix(bridge.BatchAdd(fixture, accumulator, 8));
+                accumulator = mix(fixture.StaticBatchAdd(accumulator, 8));
                 break;
             default:
                 throw new Error(`unknown static workload ${workload}`);
@@ -52,4 +50,4 @@ function emptyCallback(seed) {
     return mix(seed);
 }
 
-fixture.RegisterPuertsCallbacks(runWorkload, emptyCallback);
+fixture.RegisterPuertsCallbacks(2, runWorkload, emptyCallback);

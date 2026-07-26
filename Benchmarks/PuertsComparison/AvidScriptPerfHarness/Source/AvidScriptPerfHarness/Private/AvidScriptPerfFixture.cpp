@@ -11,80 +11,97 @@ namespace
 	}
 }
 
-int32 UAvidScriptPerfFixture::ReflectNoOp(const int32 Value) const
+int32 AAvidScriptPerfFixture::ReflectNoOp(const int32 Value) const
 {
 	return NativeNoOp(Value);
 }
 
-int32 UAvidScriptPerfFixture::ReflectAddInt32(const int32 Left, const int32 Right) const
+int32 AAvidScriptPerfFixture::ReflectAddInt32(const int32 Left, const int32 Right) const
 {
 	return NativeAddInt32(Left, Right);
 }
 
-void UAvidScriptPerfFixture::ReflectSetScalar(const int32 Value)
+void AAvidScriptPerfFixture::ReflectSetScalar(const int32 Value)
 {
 	NativeSetScalar(Value);
 }
 
-int32 UAvidScriptPerfFixture::ReflectGetScalar() const
+int32 AAvidScriptPerfFixture::ReflectGetScalar() const
 {
 	return NativeGetScalar();
 }
 
-FVector UAvidScriptPerfFixture::ReflectVectorValue(const FVector& Value) const
+FVector AAvidScriptPerfFixture::ReflectVectorValue(const FVector& Value) const
 {
 	return NativeVectorValue(Value);
 }
 
-UObject* UAvidScriptPerfFixture::ReflectObjectRoundtrip(UObject* Value) const
+UObject* AAvidScriptPerfFixture::ReflectObjectRoundtrip(UObject* Value) const
 {
 	return NativeObjectRoundtrip(Value);
 }
 
-int32 UAvidScriptPerfFixture::ReflectBatchAdd(const int32 Seed, const int32 Count) const
+int32 AAvidScriptPerfFixture::ReflectBatchAdd(const int32 Seed, const int32 Count) const
 {
 	return NativeBatchAdd(Seed, Count);
 }
 
-void UAvidScriptPerfFixture::RegisterPuertsCallbacks(FJsObject WorkloadRunner, FJsObject EmptyCallback)
+void AAvidScriptPerfFixture::RegisterPuertsCallbacks(
+	const int32 LaneId,
+	FJsObject WorkloadRunner,
+	FJsObject EmptyCallback)
 {
-	PuertsWorkloadRunner = MoveTemp(WorkloadRunner);
-	PuertsEmptyCallback = MoveTemp(EmptyCallback);
-	bHasPuertsCallbacks = true;
+	if (LaneId == ReflectionLaneId)
+	{
+		ReflectionWorkloadRunner = MoveTemp(WorkloadRunner);
+		ReflectionEmptyCallback = MoveTemp(EmptyCallback);
+		bHasReflectionCallbacks = true;
+	}
+	else if (LaneId == StaticLaneId)
+	{
+		StaticWorkloadRunner = MoveTemp(WorkloadRunner);
+		StaticEmptyCallback = MoveTemp(EmptyCallback);
+		bHasStaticCallbacks = true;
+	}
 }
 
-int32 UAvidScriptPerfFixture::NativeNoOp(const int32 Value) const
+int32 AAvidScriptPerfFixture::NativeNoOp(const int32 Value) const
 {
+	RecordOperation(1);
 	return Value;
 }
 
-int32 UAvidScriptPerfFixture::NativeAddInt32(const int32 Left, const int32 Right) const
+int32 AAvidScriptPerfFixture::NativeAddInt32(const int32 Left, const int32 Right) const
 {
+	RecordOperation(2);
 	return static_cast<int32>(static_cast<uint32>(Left) + static_cast<uint32>(Right));
 }
 
-void UAvidScriptPerfFixture::NativeSetScalar(const int32 Value)
+void AAvidScriptPerfFixture::NativeSetScalar(const int32 Value)
 {
 	ScalarValue = Value;
 }
 
-int32 UAvidScriptPerfFixture::NativeGetScalar() const
+int32 AAvidScriptPerfFixture::NativeGetScalar() const
 {
 	return ScalarValue;
 }
 
-FVector UAvidScriptPerfFixture::NativeVectorValue(const FVector& Value) const
+FVector AAvidScriptPerfFixture::NativeVectorValue(const FVector& Value) const
 {
+	RecordOperation(4);
 	return Value + FVector(1.0, 2.0, 3.0);
 }
 
-UObject* UAvidScriptPerfFixture::NativeObjectRoundtrip(UObject* Value) const
+UObject* AAvidScriptPerfFixture::NativeObjectRoundtrip(UObject* Value) const
 {
+	RecordOperation(5);
 	return Value;
 }
 
-int32 UAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count) const
+int32 AAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count) const
 {
+	RecordOperation(6);
 	int32 Result = Seed;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
@@ -93,20 +110,49 @@ int32 UAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count
 	return Result;
 }
 
-bool UAvidScriptPerfFixture::HasPuertsCallbacks() const
+bool AAvidScriptPerfFixture::HasPuertsCallbacks(const int32 LaneId) const
 {
-	return bHasPuertsCallbacks;
+	return LaneId == ReflectionLaneId
+		? bHasReflectionCallbacks
+		: LaneId == StaticLaneId && bHasStaticCallbacks;
 }
 
-int32 UAvidScriptPerfFixture::RunPuertsWorkload(
+int32 AAvidScriptPerfFixture::RunPuertsWorkload(
+	const int32 LaneId,
 	const int32 WorkloadId,
 	const int32 Iterations,
 	const int32 Seed) const
 {
-	return PuertsWorkloadRunner.Func<int32>(WorkloadId, Iterations, Seed);
+	const FJsObject& Runner = LaneId == ReflectionLaneId
+		? ReflectionWorkloadRunner
+		: StaticWorkloadRunner;
+	return Runner.Func<int32>(WorkloadId, Iterations, Seed);
 }
 
-int32 UAvidScriptPerfFixture::RunPuertsEmptyCallback(const int32 Seed) const
+int32 AAvidScriptPerfFixture::RunPuertsEmptyCallback(const int32 LaneId, const int32 Seed) const
 {
-	return PuertsEmptyCallback.Func<int32>(Seed);
+	const FJsObject& Callback = LaneId == ReflectionLaneId
+		? ReflectionEmptyCallback
+		: StaticEmptyCallback;
+	return Callback.Func<int32>(Seed);
+}
+
+void AAvidScriptPerfFixture::ResetOperationCounts()
+{
+	FMemory::Memzero(OperationCallCounts);
+}
+
+uint64 AAvidScriptPerfFixture::GetOperationCallCount(const int32 WorkloadId) const
+{
+	return WorkloadId >= 0 && WorkloadId < UE_ARRAY_COUNT(OperationCallCounts)
+		? OperationCallCounts[WorkloadId]
+		: 0;
+}
+
+void AAvidScriptPerfFixture::RecordOperation(const int32 WorkloadId) const
+{
+	if (WorkloadId >= 0 && WorkloadId < UE_ARRAY_COUNT(OperationCallCounts))
+	{
+		++OperationCallCounts[WorkloadId];
+	}
 }

@@ -23,8 +23,8 @@ function runWorkload(workload, iterations, seed) {
                 accumulator = mix(fixture.ReflectAddInt32(accumulator, index));
                 break;
             case 3:
-                fixture.ReflectSetScalar(accumulator ^ index);
-                accumulator = mix(fixture.ReflectGetScalar());
+                fixture.ScalarValue = accumulator ^ index;
+                accumulator = mix(fixture.ScalarValue);
                 break;
             case 4: {
                 const value = new UE.Vector(index & 31, (index * 3) & 31, (index * 7) & 31);
@@ -50,4 +50,4 @@ function emptyCallback(seed) {
     return mix(seed);
 }
 
-fixture.RegisterPuertsCallbacks(runWorkload, emptyCallback);
+fixture.RegisterPuertsCallbacks(1, runWorkload, emptyCallback);

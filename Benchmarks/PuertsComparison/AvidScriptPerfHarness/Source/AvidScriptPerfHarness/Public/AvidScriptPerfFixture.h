@@ -1,17 +1,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "JsObject.h"
-#include "UObject/Object.h"
 
 #include "AvidScriptPerfFixture.generated.h"
 
 UCLASS()
-class AVIDSCRIPTPERFHARNESS_API UAvidScriptPerfFixture final : public UObject
+class AVIDSCRIPTPERFHARNESS_API AAvidScriptPerfFixture final : public AActor
 {
 	GENERATED_BODY()
 
 public:
+	static constexpr int32 ReflectionLaneId = 1;
+	static constexpr int32 StaticLaneId = 2;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AvidScript|Performance")
 	int32 ScalarValue = 0;
 
@@ -37,7 +40,7 @@ public:
 	int32 ReflectBatchAdd(int32 Seed, int32 Count) const;
 
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
-	void RegisterPuertsCallbacks(FJsObject WorkloadRunner, FJsObject EmptyCallback);
+	void RegisterPuertsCallbacks(int32 LaneId, FJsObject WorkloadRunner, FJsObject EmptyCallback);
 
 	int32 NativeNoOp(int32 Value) const;
 	int32 NativeAddInt32(int32 Left, int32 Right) const;
@@ -47,12 +50,20 @@ public:
 	UObject* NativeObjectRoundtrip(UObject* Value) const;
 	int32 NativeBatchAdd(int32 Seed, int32 Count) const;
 
-	bool HasPuertsCallbacks() const;
-	int32 RunPuertsWorkload(int32 WorkloadId, int32 Iterations, int32 Seed) const;
-	int32 RunPuertsEmptyCallback(int32 Seed) const;
+	bool HasPuertsCallbacks(int32 LaneId) const;
+	int32 RunPuertsWorkload(int32 LaneId, int32 WorkloadId, int32 Iterations, int32 Seed) const;
+	int32 RunPuertsEmptyCallback(int32 LaneId, int32 Seed) const;
+	void ResetOperationCounts();
+	uint64 GetOperationCallCount(int32 WorkloadId) const;
 
 private:
-	FJsObject PuertsWorkloadRunner;
-	FJsObject PuertsEmptyCallback;
-	bool bHasPuertsCallbacks = false;
+	void RecordOperation(int32 WorkloadId) const;
+
+	FJsObject ReflectionWorkloadRunner;
+	FJsObject ReflectionEmptyCallback;
+	FJsObject StaticWorkloadRunner;
+	FJsObject StaticEmptyCallback;
+	bool bHasReflectionCallbacks = false;
+	bool bHasStaticCallbacks = false;
+	mutable uint64 OperationCallCounts[7] = {};
 };

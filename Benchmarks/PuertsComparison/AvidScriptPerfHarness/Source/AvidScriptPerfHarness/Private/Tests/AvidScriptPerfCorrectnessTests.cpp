@@ -11,7 +11,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptPerfPuertsCorrectnessTest::RunTest(const FString& Parameters)
 {
 	FAvidScriptPerfSmokeResult Result;
-	const bool bSucceeded = FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(64, 1397313073, Result);
+	const bool bSucceeded = FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(64, 1397313, Result);
 	TestTrue(TEXT("Puerts reflection/static correctness smoke succeeds"), bSucceeded);
 	if (!bSucceeded)
 	{

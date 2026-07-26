@@ -7,7 +7,7 @@
   "Category": "Testing",
   "CreatedBy": "AvidScript",
   "CanContainContent": true,
-  "EnabledByDefault": true,
+  "EnabledByDefault": false,
   "IsBetaVersion": true,
   "Modules": [
     {

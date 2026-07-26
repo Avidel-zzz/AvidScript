@@ -139,18 +139,29 @@ function Initialize-SourceCache {
         }
     }
 
-    $Remote = (Invoke-GitChecked $SourceRoot @('remote', 'get-url', 'origin'))[-1].Trim()
+    $RemoteOutput = @(Invoke-GitChecked $SourceRoot @('remote', 'get-url', 'origin'))
+    $Remote = ([string]$RemoteOutput[-1]).Trim()
     if ($Remote -cne [string]$Lock.source.repository_url) {
         throw "ASP53D1401 Puerts source remote mismatch: $Remote"
     }
 
-    Invoke-GitChecked $SourceRoot @('fetch', '--depth=1', 'origin', [string]$Lock.source.commit_sha) | Out-Null
-    $Commit = (Invoke-GitChecked $SourceRoot @('rev-parse', [string]$Lock.source.commit_sha))[-1].Trim()
+    $CommitExpression = "$($Lock.source.commit_sha)^{commit}"
+    & git -C $SourceRoot cat-file -e $CommitExpression 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-GitChecked $SourceRoot @(
+            'fetch',
+            '--depth=1',
+            'origin',
+            [string]$Lock.source.commit_sha) | Out-Null
+    }
+    $CommitOutput = @(Invoke-GitChecked $SourceRoot @('rev-parse', [string]$Lock.source.commit_sha))
+    $Commit = ([string]$CommitOutput[-1]).Trim()
     if ($Commit -cne [string]$Lock.source.commit_sha) {
         throw "ASP53D1402 Puerts source commit mismatch: $Commit"
     }
     $TreeExpression = "$($Lock.source.commit_sha):$($Lock.source.plugin_subdirectory)"
-    $Tree = (Invoke-GitChecked $SourceRoot @('rev-parse', $TreeExpression))[-1].Trim()
+    $TreeOutput = @(Invoke-GitChecked $SourceRoot @('rev-parse', $TreeExpression))
+    $Tree = ([string]$TreeOutput[-1]).Trim()
     if ($Tree -cne [string]$Lock.source.plugin_tree_sha1) {
         throw "ASP53D1403 Puerts plugin tree mismatch: $Tree"
     }

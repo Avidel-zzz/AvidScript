@@ -37,12 +37,14 @@ $PluginNames = @($Plugin.Plugins | ForEach-Object { [string]$_.Name })
 Assert-True ($PluginNames -ccontains 'AvidScript') 'benchmark harness must depend on AvidScript'
 Assert-True ($PluginNames -ccontains 'Puerts') 'benchmark harness must depend on Puerts'
 Assert-True (@($Plugin.Modules).Count -eq 1) 'benchmark harness must stay isolated in one optional module'
+Assert-True ($Plugin.EnabledByDefault -eq $false) 'optional competitor harness must not affect ordinary project builds'
 
 $BuildRules = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/AvidScriptPerfHarness.Build.cs'
 Assert-True ($BuildRules.Contains('"JsEnv"')) 'benchmark harness must compile against the official Puerts JsEnv module'
 Assert-True ($BuildRules.Contains('"AvidScriptRuntime"')) 'benchmark harness must use the formal AvidScript runtime surface'
 
 $Fixture = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Public/AvidScriptPerfFixture.h'
+Assert-True ($Fixture.Contains('AAvidScriptPerfFixture final : public AActor')) 'shared fixture must satisfy the AvidScript Actor self contract'
 foreach ($Method in @(
     'ReflectNoOp',
     'ReflectAddInt32',
@@ -60,23 +62,28 @@ foreach ($Method in @(
 }
 
 $StaticBindings = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfStaticBindings.cpp'
-Assert-True ($StaticBindings.Contains('puerts::DefineClass<AvidScriptPerfStatic>()')) 'static lane must use Puerts template binding'
-foreach ($Operation in @('NoOp', 'AddInt32', 'SetScalar', 'GetScalar', 'VectorValue', 'ObjectRoundtrip', 'BatchAdd')) {
-    Assert-True ($StaticBindings.Contains(".Function(`"$Operation`"")) "static lane is missing operation: $Operation"
+Assert-True ($StaticBindings.Contains('puerts::DefineClass<AAvidScriptPerfFixture>()')) 'static lane must bind the shared fixture instance'
+foreach ($Operation in @('StaticNoOp', 'StaticAddInt32', 'StaticVectorValue', 'StaticObjectRoundtrip', 'StaticBatchAdd')) {
+    Assert-True ($StaticBindings.Contains(".Method(`"$Operation`"")) "static lane is missing operation: $Operation"
 }
+Assert-True ($StaticBindings.Contains('.Property("StaticScalarValue"')) 'static lane must benchmark a template-bound property'
 
 $ReflectionScript = Read-RequiredText 'AvidScriptPerfHarness/Content/JavaScript/reflection.js'
 $StaticScript = Read-RequiredText 'AvidScriptPerfHarness/Content/JavaScript/static.js'
 Assert-True ($ReflectionScript.Contains('fixture.ReflectAddInt32')) 'reflection lane must call the reflected UFUNCTION surface'
-Assert-True ($StaticScript.Contains('cpp.AvidScriptPerfStatic')) 'static lane must call the template-bound C++ surface'
+Assert-True ($StaticScript.Contains('fixture.StaticAddInt32')) 'static lane must call the instance template-bound surface'
+Assert-True ($ReflectionScript.Contains('fixture.ScalarValue =')) 'reflection lane must benchmark reflected property access'
+Assert-True ($StaticScript.Contains('fixture.StaticScalarValue =')) 'static lane must benchmark template-bound property access'
 Assert-True ($ReflectionScript.Contains('RegisterPuertsCallbacks')) 'reflection lane must publish host-callable callbacks'
 Assert-True ($StaticScript.Contains('RegisterPuertsCallbacks')) 'static lane must publish host-callable callbacks'
 
 $AvidScriptWorkload = Read-RequiredText 'Workloads/AvidScriptPerfWorkload.cs'
 $AvidScriptProfile = Read-RequiredText 'Workloads/AvidScriptPerfWorkload.csharp-profile.json' | ConvertFrom-Json
 Assert-True ($AvidScriptWorkload.Contains('EntryPoint = "avid_on_event"')) 'AvidScript lane must use the formal gameplay event export'
-Assert-True ($AvidScriptWorkload.Contains('UAvidScriptPerfFixture fixture = UE.Self')) 'AvidScript lane must use the shared fixture as self'
+Assert-True ($AvidScriptWorkload.Contains('AAvidScriptPerfFixture fixture = UE.Self')) 'AvidScript lane must use the shared fixture as self'
 Assert-True ($AvidScriptWorkload.Contains('fixture.ReflectAddInt32')) 'AvidScript lane must use the generated reflected binding'
+Assert-True ($AvidScriptWorkload.Contains('fixture.ScalarValue =')) 'AvidScript lane must use generated property binding'
+Assert-True ($AvidScriptWorkload.Contains('[AvidPersist]')) 'AvidScript lane must publish checksum through guest state'
 Assert-True ($AvidScriptProfile.binding_profile.self_class_path -ceq '/Script/AvidScriptPerfHarness.AvidScriptPerfFixture') 'AvidScript profile self class must be the shared fixture'
 
 $Profile = Read-RequiredText 'Config/BenchmarkProfile.json' | ConvertFrom-Json
@@ -87,6 +94,7 @@ for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
 }
 Assert-True ([int]$Profile.process_runs -ge 5) 'benchmark profile requires at least five process runs'
 Assert-True ([int]$Profile.timed_samples -ge 30) 'benchmark profile requires at least thirty timed samples'
+Assert-True ([int]$Profile.seed -ge -16777216 -and [int]$Profile.seed -le 16777216) 'event ABI seed must remain exactly representable by float'
 
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
 $ResultSchema = Get-Content -LiteralPath $ResultSchemaPath -Raw | ConvertFrom-Json

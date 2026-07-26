@@ -78,6 +78,10 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53 首版 benchmark 公平性设计错误：共享 fixture 最初是 `UObject`，但 AvidScript profile Self 合同要求 `AActor`；三条 lane 又各自创建对象，Puerts static 通过额外 UObject 参数的全静态 proxy 调用，属性 workload 实际调用 getter/setter 函数，且 AvidScript 用额外 UFUNCTION crossing 发布 checksum。Prevention：跨框架 benchmark 在首次 UBT 前完成独立语义复审；所有 lane 复用同一 Actor fixture，static lane 使用实例 `.Method/.Property`，property workload 必须走正式属性表面，guest 结果通过计时外 state/memory slot读取，不允许某一 lane 独占额外 crossing。
+- 2026-07-26 P53 事件 seed 精度错误：首版准备把任意 int32 seed 数值传入 `avid_on_event` 的 float 参数，固定 seed `1397313073` 无法被 float 精确表示，会让 C# checksum 与 Native/JS 确定性分叉。Prevention：复用 float 事件 ABI 的整数 benchmark seed 固定在有符号 24 位精确范围并由 profile validator 断言；需要完整 int32 输入时新增通用 int32 export/call contract，禁止依靠 float 数值往返或 NaN bit-cast。
+- 2026-07-26 P53 PowerShell 单行输出解包错误：dependency installer 的 Git helper 返回单行字符串时被 pipeline 自动解包，调用方直接 `(...)[-1]` 取得最后一个 `Char`，随后 `Trim()` 失败；安装在 stage 创建前停止。Prevention：所有可能返回一行或多行的 native helper 消费点先用 `@(...)` 捕获，再把末项显式转为 `[string]`；合同至少覆盖 remote、commit 和 tree 三个单行命令。
+- 2026-07-26 P53 第三方安装无条件 fetch 错误：bare cache 已含固定 commit/tree，安装器仍每次执行网络 fetch，第二次安装因 GitHub TLS close 中断而在写工程前失败。Prevention：固定依赖先用 `git cat-file -e '<sha>^{commit}'` 验证本地对象，只在对象缺失时 fetch；archive、hash 和 install verify 必须支持完全离线重放。
 - 2026-07-26 P53 第三方缓存设计错误：首次为阅读 Puerts 源码对 partial clone 执行完整 checkout，网络下载超时后留下数千条 staged deletion；该目录位于临时区且未影响产品仓库。Prevention：固定第三方源码使用 bare/filter clone，只通过 immutable commit 的 `git show`、`git archive` 或临时纯导出目录读取；安装器不得依赖可变 checkout，也不得用 checkout dirty state 代表已固定对象的身份。
 - 2026-07-26 P53 backend 完整性路径错误：安装前复审发现 verifier 把 V8 header 写成 `Inc/include/v8.h`，而 Puerts `JsEnv.Build.cs` 直接把 `Inc` 加入 include path，正确身份文件是 `Inc/v8.h`。Prevention：第三方完整性 marker 必须由固定提交的真实 Build.cs/include contract 推导；大型归档首次解压前先对照上游消费路径，不能凭常见目录布局猜测。
 - 2026-07-26 P53 schema 错误分类遗漏：dependency installer 在全局 `ErrorActionPreference=Stop` 下直接调用 `Test-Json`，无效 lock 先被 PowerShell 自身异常终止，未返回稳定的 `ASP53D1003`。Prevention：预期以布尔值判定的 schema 校验在最小作用域使用 `-ErrorAction SilentlyContinue`，随后由产品脚本统一抛出稳定分类；合同必须覆盖非法 remote、commit 和 asset URL。

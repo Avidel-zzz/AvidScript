@@ -1,13 +1,15 @@
 #include "AvidScriptPerfRunner.h"
 
 #include "AvidScriptPerfFixture.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Interfaces/IPluginManager.h"
 #include "JSLogger.h"
 #include "JSModuleLoader.h"
 #include "JsEnv.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "UObject/StrongObjectPtr.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -75,10 +77,15 @@ namespace
 
 	struct FPuertsLane
 	{
-		TStrongObjectPtr<UAvidScriptPerfFixture> Fixture;
+		AAvidScriptPerfFixture* Fixture = nullptr;
+		int32 LaneId = 0;
 		TSharedPtr<puerts::FJsEnv> Environment;
 
-		bool Initialize(const FString& ModuleName, FString& OutError)
+		bool Initialize(
+			const FString& ModuleName,
+			const int32 InLaneId,
+			AAvidScriptPerfFixture& SharedFixture,
+			FString& OutError)
 		{
 			const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("AvidScriptPerfHarness"));
 			if (!Plugin.IsValid())
@@ -94,15 +101,16 @@ namespace
 				return false;
 			}
 
-			Fixture = TStrongObjectPtr<UAvidScriptPerfFixture>(NewObject<UAvidScriptPerfFixture>());
+			Fixture = &SharedFixture;
+			LaneId = InLaneId;
 			Environment = MakeShared<puerts::FJsEnv>(
 				std::make_shared<FAvidScriptPerfModuleLoader>(ScriptRoot),
 				std::make_shared<puerts::FDefaultLogger>(),
 				-1);
 			Environment->Start(
 				ModuleName,
-				{ TPair<FString, UObject*>(TEXT("Fixture"), Fixture.Get()) });
-			if (!Fixture->HasPuertsCallbacks())
+				{ TPair<FString, UObject*>(TEXT("Fixture"), Fixture) });
+			if (!Fixture->HasPuertsCallbacks(LaneId))
 			{
 				OutError = FString::Printf(TEXT("Puerts module did not register callbacks: %s"), *ModuleName);
 				return false;
@@ -111,8 +119,42 @@ namespace
 		}
 	};
 
+	bool CreateBenchmarkWorld(UWorld*& OutWorld)
+	{
+		OutWorld = nullptr;
+		if (GEngine == nullptr)
+		{
+			return false;
+		}
+		OutWorld = UWorld::CreateWorld(
+			EWorldType::Game,
+			false,
+			TEXT("AvidScriptPhase53BenchmarkWorld"));
+		if (OutWorld == nullptr)
+		{
+			return false;
+		}
+		FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+		WorldContext.SetCurrentWorld(OutWorld);
+		return true;
+	}
+
+	void DestroyBenchmarkWorld(UWorld*& World)
+	{
+		if (World == nullptr)
+		{
+			return;
+		}
+		if (GEngine != nullptr)
+		{
+			GEngine->DestroyWorldContext(World);
+		}
+		World->DestroyWorld(false);
+		World = nullptr;
+	}
+
 	uint32 RunNativeWorkload(
-		UAvidScriptPerfFixture& Fixture,
+		AAvidScriptPerfFixture& Fixture,
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
 		const uint32 Seed)
@@ -135,8 +177,8 @@ namespace
 					Index)));
 				break;
 			case EAvidScriptPerfWorkload::PropertyGetSet:
-				Fixture.NativeSetScalar(static_cast<int32>(Accumulator ^ static_cast<uint32>(Index)));
-				Accumulator = Mix(static_cast<uint32>(Fixture.NativeGetScalar()));
+				Fixture.ScalarValue = static_cast<int32>(Accumulator ^ static_cast<uint32>(Index));
+				Accumulator = Mix(static_cast<uint32>(Fixture.ScalarValue));
 				break;
 			case EAvidScriptPerfWorkload::VectorValue:
 			{
@@ -167,6 +209,23 @@ namespace
 		}
 		return Accumulator;
 	}
+
+	uint64 GetExpectedOperationCallCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::VectorValue:
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
+		case EAvidScriptPerfWorkload::BatchScalar:
+			return static_cast<uint64>(Iterations);
+		default:
+			return 0;
+		}
+	}
 }
 
 bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
@@ -182,21 +241,46 @@ bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
 		return false;
 	}
 
+	UWorld* World = nullptr;
+	if (!CreateBenchmarkWorld(World))
+	{
+		OutResult.Error = TEXT("Unable to create the shared benchmark world");
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyBenchmarkWorld(World);
+	};
+
+	AAvidScriptPerfFixture* Fixture = World->SpawnActor<AAvidScriptPerfFixture>();
+	if (Fixture == nullptr)
+	{
+		OutResult.Error = TEXT("Unable to spawn the shared benchmark fixture actor");
+		return false;
+	}
+
 	FString Error;
 	FPuertsLane Reflection;
-	if (!Reflection.Initialize(TEXT("reflection.js"), Error))
+	if (!Reflection.Initialize(
+		TEXT("reflection.js"),
+		AAvidScriptPerfFixture::ReflectionLaneId,
+		*Fixture,
+		Error))
 	{
 		OutResult.Error = MoveTemp(Error);
 		return false;
 	}
 	FPuertsLane Static;
-	if (!Static.Initialize(TEXT("static.js"), Error))
+	if (!Static.Initialize(
+		TEXT("static.js"),
+		AAvidScriptPerfFixture::StaticLaneId,
+		*Fixture,
+		Error))
 	{
 		OutResult.Error = MoveTemp(Error);
 		return false;
 	}
 
-	TStrongObjectPtr<UAvidScriptPerfFixture> NativeFixture(NewObject<UAvidScriptPerfFixture>());
 	constexpr int32 WorkloadCount = static_cast<int32>(EAvidScriptPerfWorkload::BatchScalar) + 1;
 	uint32 NativeAggregate = 0;
 	uint32 ReflectionAggregate = 0;
@@ -206,23 +290,39 @@ bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
 	{
 		const EAvidScriptPerfWorkload Workload = static_cast<EAvidScriptPerfWorkload>(WorkloadIndex);
 		const uint32 WorkloadSeed = static_cast<uint32>(Seed) ^ (0x9e3779b9u * static_cast<uint32>(WorkloadIndex + 1));
-		NativeFixture->ScalarValue = 0;
-		Reflection.Fixture->ScalarValue = 0;
-		Static.Fixture->ScalarValue = 0;
+		const uint64 ExpectedCallCount = GetExpectedOperationCallCount(
+			Workload,
+			IterationsPerWorkload);
 
+		Fixture->ScalarValue = 0;
+		Fixture->ResetOperationCounts();
 		const uint32 NativeChecksum = RunNativeWorkload(
-			*NativeFixture,
+			*Fixture,
 			Workload,
 			IterationsPerWorkload,
 			WorkloadSeed);
-		const uint32 ReflectionChecksum = static_cast<uint32>(Reflection.Fixture->RunPuertsWorkload(
+		const int32 NativeFinalScalar = Fixture->ScalarValue;
+		const uint64 NativeCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
+
+		Fixture->ScalarValue = 0;
+		Fixture->ResetOperationCounts();
+		const uint32 ReflectionChecksum = static_cast<uint32>(Fixture->RunPuertsWorkload(
+			Reflection.LaneId,
 			WorkloadIndex,
 			IterationsPerWorkload,
 			static_cast<int32>(WorkloadSeed)));
-		const uint32 StaticChecksum = static_cast<uint32>(Static.Fixture->RunPuertsWorkload(
+		const int32 ReflectionFinalScalar = Fixture->ScalarValue;
+		const uint64 ReflectionCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
+
+		Fixture->ScalarValue = 0;
+		Fixture->ResetOperationCounts();
+		const uint32 StaticChecksum = static_cast<uint32>(Fixture->RunPuertsWorkload(
+			Static.LaneId,
 			WorkloadIndex,
 			IterationsPerWorkload,
 			static_cast<int32>(WorkloadSeed)));
+		const int32 StaticFinalScalar = Fixture->ScalarValue;
+		const uint64 StaticCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
 		if (ReflectionChecksum != NativeChecksum || StaticChecksum != NativeChecksum)
 		{
 			OutResult.Error = FString::Printf(
@@ -231,6 +331,29 @@ bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
 				NativeChecksum,
 				ReflectionChecksum,
 				StaticChecksum);
+			return false;
+		}
+		if (ReflectionFinalScalar != NativeFinalScalar || StaticFinalScalar != NativeFinalScalar)
+		{
+			OutResult.Error = FString::Printf(
+				TEXT("final fixture state mismatch workload=%d native=%d reflection=%d static=%d"),
+				WorkloadIndex,
+				NativeFinalScalar,
+				ReflectionFinalScalar,
+				StaticFinalScalar);
+			return false;
+		}
+		if (NativeCallCount != ExpectedCallCount ||
+			ReflectionCallCount != ExpectedCallCount ||
+			StaticCallCount != ExpectedCallCount)
+		{
+			OutResult.Error = FString::Printf(
+				TEXT("operation count mismatch workload=%d expected=%llu native=%llu reflection=%llu static=%llu"),
+				WorkloadIndex,
+				ExpectedCallCount,
+				NativeCallCount,
+				ReflectionCallCount,
+				StaticCallCount);
 			return false;
 		}
 
@@ -242,9 +365,9 @@ bool FAvidScriptPerfRunner::RunPuertsCorrectnessSmoke(
 	const int32 CallbackSeed = Seed ^ 0x5a5a5a5a;
 	const uint32 ExpectedCallback = Mix(static_cast<uint32>(CallbackSeed));
 	const uint32 ReflectionCallback =
-		static_cast<uint32>(Reflection.Fixture->RunPuertsEmptyCallback(CallbackSeed));
+		static_cast<uint32>(Fixture->RunPuertsEmptyCallback(Reflection.LaneId, CallbackSeed));
 	const uint32 StaticCallback =
-		static_cast<uint32>(Static.Fixture->RunPuertsEmptyCallback(CallbackSeed));
+		static_cast<uint32>(Fixture->RunPuertsEmptyCallback(Static.LaneId, CallbackSeed));
 	if (ReflectionCallback != ExpectedCallback || StaticCallback != ExpectedCallback)
 	{
 		OutResult.Error = FString::Printf(

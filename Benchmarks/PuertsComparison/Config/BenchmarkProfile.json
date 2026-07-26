@@ -11,7 +11,7 @@
   "minimum_sample_milliseconds": 5.0,
   "minimum_iterations": 1000,
   "maximum_iterations": 10000000,
-  "seed": 1397313073,
+  "seed": 1397313,
   "lanes": [
     "native_cpp",
     "puerts_v8_reflection",

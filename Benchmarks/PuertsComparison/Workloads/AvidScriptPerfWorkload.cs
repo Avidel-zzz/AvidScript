@@ -10,10 +10,13 @@ public static class AvidScriptPerfWorkload
     private const int WorkloadShift = 24;
     private const int IterationMask = 0x00ffffff;
 
+    [AvidPersist]
+    private static int ResultChecksum;
+
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        UE.Self.ReflectSetScalar(0);
+        ResultChecksum = 0;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -24,7 +27,7 @@ public static class AvidScriptPerfWorkload
     [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
     public static void Run(int packedWorkload, float seedValue)
     {
-        UAvidScriptPerfFixture fixture = UE.Self;
+        AAvidScriptPerfFixture fixture = UE.Self;
         int workload = (packedWorkload >> WorkloadShift) & 0x7f;
         int iterations = packedWorkload & IterationMask;
         int accumulator = (int)seedValue;
@@ -43,8 +46,8 @@ public static class AvidScriptPerfWorkload
                     accumulator = Mix(fixture.ReflectAddInt32(accumulator, index));
                     break;
                 case 3:
-                    fixture.ReflectSetScalar(accumulator ^ index);
-                    accumulator = Mix(fixture.ReflectGetScalar());
+                    fixture.ScalarValue = accumulator ^ index;
+                    accumulator = Mix(fixture.ScalarValue);
                     break;
                 case 4:
                 {
@@ -77,7 +80,7 @@ public static class AvidScriptPerfWorkload
             }
         }
 
-        fixture.ReflectSetScalar(accumulator);
+        ResultChecksum = accumulator;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]

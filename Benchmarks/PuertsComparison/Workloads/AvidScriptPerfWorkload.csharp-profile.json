@@ -19,11 +19,12 @@
         "include_functions": [
           "ReflectNoOp",
           "ReflectAddInt32",
-          "ReflectSetScalar",
-          "ReflectGetScalar",
           "ReflectVectorValue",
           "ReflectObjectRoundtrip",
           "ReflectBatchAdd"
+        ],
+        "writable_properties": [
+          "ScalarValue"
         ]
       }
     ]
