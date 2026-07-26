@@ -66,6 +66,27 @@ function Test-RequiredTokenSequence {
     }
 }
 
+function Get-BuildDependencyNames {
+    param(
+        [string]$Source,
+        [ValidateSet('Public', 'Private')][string]$Visibility
+    )
+
+    $SourceWithoutComments = [regex]::Replace($Source, '(?s)/\*.*?\*/', '')
+    $SourceWithoutComments = [regex]::Replace($SourceWithoutComments, '(?m)//.*$', '')
+    $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
+        'DependencyModuleNames\s*\.\s*(?:Add|AddRange)\s*\((?<body>.*?)\)\s*;'
+    $Names = [System.Collections.Generic.List[string]]::new()
+    foreach ($Invocation in [regex]::Matches($SourceWithoutComments, $InvocationPattern)) {
+        foreach ($Literal in [regex]::Matches(
+            $Invocation.Groups['body'].Value,
+            '"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"')) {
+            $Names.Add($Literal.Groups['name'].Value)
+        }
+    }
+    return @($Names)
+}
+
 function Test-NativeSymbolAllowlist {
     param(
         [string]$InitializerSource,
@@ -177,10 +198,15 @@ foreach ($RequiredDependency in @('AvidScriptCore', 'Core')) {
         Add-Violation "AvidScriptVM is missing required dependency $RequiredDependency"
     }
 }
+$VmPrivateDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Private)
+$VmPublicDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Public)
 foreach ($RequiredVmBackendDependency in @('WAMR', 'Wasmtime')) {
-    if (-not $VmBuild.Contains('"' + $RequiredVmBackendDependency + '"')) {
+    if ($VmPrivateDependencies -notcontains $RequiredVmBackendDependency) {
         Add-Violation "AvidScriptVM is missing its private $RequiredVmBackendDependency dependency"
     }
+}
+if ($VmPublicDependencies -contains 'Wasmtime') {
+    Add-Violation 'AvidScriptVM must not expose Wasmtime through PublicDependencyModuleNames'
 }
 foreach ($ForbiddenDependency in @('CoreUObject', 'Engine', 'Json', 'UnrealEd', 'AvidScriptBindings', 'AvidScriptRuntime', 'AvidScriptEditor')) {
     if ($VmBuild.Contains('"' + $ForbiddenDependency + '"')) {

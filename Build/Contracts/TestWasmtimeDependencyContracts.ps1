@@ -129,6 +129,36 @@ function New-FixtureRepository {
     return $Root
 }
 
+function New-TestJunction {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+    Assert-True (
+        ((Get-Item -LiteralPath $Path -Force).Attributes -band
+            [System.IO.FileAttributes]::ReparsePoint) -ne 0) `
+        "junction was not created: $Path"
+}
+
+function Add-TestAlternateDataStream {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$StreamName
+    )
+
+    [System.IO.File]::WriteAllText(
+        $Path + ':' + $StreamName,
+        'untracked alternate stream',
+        [System.Text.UTF8Encoding]::new($false))
+    $NamedStreams = @(
+        Get-Item -LiteralPath $Path -Stream * |
+            Where-Object { $_.Stream -cne ':$DATA' })
+    Assert-True ($NamedStreams.Stream -contains $StreamName) `
+        "alternate stream was not created: $StreamName"
+}
+
 function Install-Fixture {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
@@ -142,6 +172,27 @@ function Install-Fixture {
         -CacheRoot $CacheRoot `
         -Lock $Lock `
         -LockSha256 $LockSha256
+}
+
+function Get-BuildDependencyNames {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][ValidateSet('Public', 'Private')][string]$Visibility
+    )
+
+    $SourceWithoutComments = [regex]::Replace($Source, '(?s)/\*.*?\*/', '')
+    $SourceWithoutComments = [regex]::Replace($SourceWithoutComments, '(?m)//.*$', '')
+    $InvocationPattern = '(?s)\b' + [regex]::Escape($Visibility) +
+        'DependencyModuleNames\s*\.\s*(?:Add|AddRange)\s*\((?<body>.*?)\)\s*;'
+    $Names = [System.Collections.Generic.List[string]]::new()
+    foreach ($Invocation in [regex]::Matches($SourceWithoutComments, $InvocationPattern)) {
+        foreach ($Literal in [regex]::Matches(
+            $Invocation.Groups['body'].Value,
+            '"(?<name>[A-Za-z_][A-Za-z0-9_.]*)"')) {
+            $Names.Add($Literal.Groups['name'].Value)
+        }
+    }
+    return @($Names)
 }
 
 Assert-True (Test-Path -LiteralPath $InstallerPath -PathType Leaf) 'installer is missing'
@@ -179,6 +230,18 @@ $ValidateResult = $ValidateOutput | ConvertFrom-Json
 Assert-True ($ValidateResult.succeeded -eq $true) 'tracked lock CLI did not report success'
 
 . $InstallerPath
+$InstallerSource = Get-Content -LiteralPath $InstallerPath -Raw
+Assert-True (
+    $InstallerSource -match (
+        '(?s)\$PublishPaths\s*=\s*Get-WasmtimeInstallPaths' +
+        '.*?\[System\.IO\.Directory\]::Move\(\$CandidatePath,\s*\$PublishPaths\.InstallPath\)')) `
+    'installer is missing the immediate pre-publication ancestor recheck'
+Assert-True (
+    $InstallerSource -match (
+        '(?s)\[void\]\(Test-WasmtimeDependency.*?' +
+        '\$RemovalPaths\s*=\s*Get-WasmtimeInstallPaths' +
+        '.*?Remove-Item\s+-LiteralPath\s+\$InstallFullPath\s+-Recurse')) `
+    'Remove is missing the immediate ancestor recheck'
 
 $GitIgnore = Get-Content -LiteralPath (Join-Path $PluginRoot '.gitignore') -Raw
 $KeepSourceIndex = $GitIgnore.IndexOf('!Source/', [System.StringComparison]::Ordinal)
@@ -202,7 +265,36 @@ foreach ($RequiredToken in @(
 Assert-True (-not [regex]::IsMatch($WasmtimeBuild, '"wasmtime\.lib"')) 'Wasmtime.Build.cs must not link the static library'
 
 $VmBuild = Get-Content -LiteralPath (Join-Path $PluginRoot 'Source/AvidScriptVM/AvidScriptVM.Build.cs') -Raw
-Assert-True $VmBuild.Contains('"Wasmtime"') 'AvidScriptVM is missing its private Wasmtime dependency'
+$VmPrivateDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Private)
+$VmPublicDependencies = @(Get-BuildDependencyNames -Source $VmBuild -Visibility Public)
+Assert-True ($VmPrivateDependencies -contains 'Wasmtime') `
+    'AvidScriptVM is missing its structured private Wasmtime dependency'
+Assert-True ($VmPublicDependencies -notcontains 'Wasmtime') `
+    'AvidScriptVM exposes Wasmtime as a public dependency'
+$PublicDependencyMutation = $VmBuild.Replace(
+    'PrivateDependencyModuleNames.AddRange',
+    'PublicDependencyModuleNames.AddRange')
+$MutatedPrivateDependencies = @(
+    Get-BuildDependencyNames -Source $PublicDependencyMutation -Visibility Private)
+$MutatedPublicDependencies = @(
+    Get-BuildDependencyNames -Source $PublicDependencyMutation -Visibility Public)
+Assert-True ($MutatedPrivateDependencies -notcontains 'Wasmtime') `
+    'structured dependency parser did not notice removal from PrivateDependencyModuleNames'
+Assert-True ($MutatedPublicDependencies -contains 'Wasmtime') `
+    'structured dependency parser did not notice addition to PublicDependencyModuleNames'
+$ArchitectureSource = Get-Content -LiteralPath (
+    Join-Path $PluginRoot 'Build/CheckAvidScriptArchitecture.ps1') -Raw
+Assert-True $ArchitectureSource.Contains('Get-BuildDependencyNames') `
+    'architecture checker does not structurally inspect module dependencies'
+Assert-True $ArchitectureSource.Contains('$VmPrivateDependencies') `
+    'architecture checker does not inspect PrivateDependencyModuleNames'
+Assert-True $ArchitectureSource.Contains('$VmPublicDependencies') `
+    'architecture checker does not inspect PublicDependencyModuleNames'
+Assert-True $ArchitectureSource.Contains(
+    '$VmPrivateDependencies -notcontains $RequiredVmBackendDependency') `
+    'architecture checker does not reject a missing private Wasmtime dependency'
+Assert-True $ArchitectureSource.Contains('$VmPublicDependencies -contains ''Wasmtime''') `
+    'architecture checker does not reject a public Wasmtime dependency'
 $VmPublicText = (
     Get-ChildItem -LiteralPath (Join-Path $PluginRoot 'Source/AvidScriptVM/Public') -File -Recurse |
         ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n"
@@ -336,6 +428,29 @@ try {
         Test-WasmtimeDependency $MarkerRepository $FixtureLock $FixtureLockSha
     } 'ASP54W1604'
 
+    $ContentAdsRepository = New-FixtureRepository $FixtureRoot 'content-ads'
+    Install-Fixture $ContentAdsRepository $CacheRoot $FixtureLock $FixtureLockSha | Out-Null
+    $ContentAdsInstallPath = Join-Path $ContentAdsRepository $FixtureLock.install.relative_path
+    $ContentAdsDllPath = Join-Path $ContentAdsInstallPath 'lib/wasmtime.dll'
+    Add-TestAlternateDataStream -Path $ContentAdsDllPath -StreamName 'avidscript-tamper'
+    Assert-ThrowsCode {
+        Test-WasmtimeDependency $ContentAdsRepository $FixtureLock $FixtureLockSha
+    } 'ASP54W1606'
+    Assert-ThrowsCode {
+        Remove-WasmtimeDependency $ContentAdsRepository $FixtureLock $FixtureLockSha
+    } 'ASP54W1606'
+    Assert-True (Test-Path -LiteralPath $ContentAdsDllPath -PathType Leaf) `
+        'Remove deleted managed content with an alternate stream'
+
+    $MarkerAdsRepository = New-FixtureRepository $FixtureRoot 'marker-ads'
+    Install-Fixture $MarkerAdsRepository $CacheRoot $FixtureLock $FixtureLockSha | Out-Null
+    $MarkerAdsPath = Join-Path $MarkerAdsRepository (
+        "$($FixtureLock.install.relative_path)/.avidscript-wasmtime-managed.json")
+    Add-TestAlternateDataStream -Path $MarkerAdsPath -StreamName 'avidscript-marker-tamper'
+    Assert-ThrowsCode {
+        Test-WasmtimeDependency $MarkerAdsRepository $FixtureLock $FixtureLockSha
+    } 'ASP54W1606'
+
     $UnmanagedRepository = New-FixtureRepository $FixtureRoot 'unmanaged'
     New-Item -ItemType Directory -Force -Path (
         Join-Path $UnmanagedRepository $FixtureLock.install.relative_path) | Out-Null
@@ -350,6 +465,27 @@ try {
     Assert-ThrowsCode {
         Remove-WasmtimeDependency $DriftRemoveRepository $FixtureLock $FixtureLockSha
     } 'ASP54W1605'
+
+    $AncestorRepository = New-FixtureRepository $FixtureRoot 'ancestor-reparse'
+    Install-Fixture $AncestorRepository $CacheRoot $FixtureLock $FixtureLockSha | Out-Null
+    $AncestorThirdPartyPath = Join-Path $AncestorRepository 'Source/ThirdParty'
+    $ExternalThirdPartyPath = Join-Path $FixtureRoot 'external-third-party'
+    Move-Item -LiteralPath $AncestorThirdPartyPath -Destination $ExternalThirdPartyPath
+    New-TestJunction -Path $AncestorThirdPartyPath -Target $ExternalThirdPartyPath
+    $ExternalSentinelPath = Join-Path $ExternalThirdPartyPath 'outside-repository-sentinel.txt'
+    'must survive rejected remove' |
+        Set-Content -LiteralPath $ExternalSentinelPath -Encoding utf8NoBOM
+    Assert-ThrowsCode {
+        Get-WasmtimeInstallPaths -RepositoryRoot $AncestorRepository -Lock $FixtureLock
+    } 'ASP54W1104'
+    Assert-ThrowsCode {
+        Remove-WasmtimeDependency $AncestorRepository $FixtureLock $FixtureLockSha
+    } 'ASP54W1104'
+    Assert-True (Test-Path -LiteralPath $ExternalSentinelPath -PathType Leaf) `
+        'ancestor-junction rejection modified the external target'
+    Assert-True (Test-Path -LiteralPath (
+        Join-Path $ExternalThirdPartyPath 'Wasmtime/installed/Win64/v45.0.0') -PathType Container) `
+        'ancestor-junction rejection removed the external managed tree'
 
     $RemoveRepository = New-FixtureRepository $FixtureRoot 'remove'
     Install-Fixture $RemoveRepository $CacheRoot $FixtureLock $FixtureLockSha | Out-Null
@@ -372,4 +508,5 @@ Write-Output (
     'Wasmtime dependency contracts passed: ' +
     'tracked_lock=1 schema=1 license=1 cli_validate=1 parser=1 archive_identity=2 traversal=1 ads=1 ' +
     'missing_layout=3 install=1 verify=1 idempotent=1 content_tamper=1 extra_file=1 ' +
-    'marker_drift=1 unmanaged_remove=1 drift_remove=1 managed_remove=1 gitignore=1 ubt=1 public_boundary=1')
+    'marker_drift=1 installed_ads=2 unmanaged_remove=1 drift_remove=1 ancestor_reparse=2 managed_remove=1 ' +
+    'gitignore=1 ubt=1 private_dependency_structure=2 public_boundary=1')

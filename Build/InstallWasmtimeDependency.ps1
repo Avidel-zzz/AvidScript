@@ -143,16 +143,105 @@ function Assert-NoReparseTree {
     }
 }
 
+function Assert-NoAlternateDataStreams {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Code
+    )
+
+    $Items = @((Get-Item -LiteralPath $Root -Force))
+    $Items += @(Get-ChildItem -LiteralPath $Root -Recurse -Force)
+    foreach ($Item in $Items) {
+        try {
+            $Streams = @(Get-Item -LiteralPath $Item.FullName -Stream * -ErrorAction Stop)
+        }
+        catch {
+            throw "$Code unable to inspect NTFS streams in managed content"
+        }
+        foreach ($Stream in $Streams) {
+            if ([string]$Stream.Stream -cne ':$DATA') {
+                throw "$Code managed content contains a non-default NTFS stream"
+            }
+        }
+    }
+}
+
+function Get-TrustedRepositoryRoot {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+    $Root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        throw "ASP54W1101 repository root does not exist: $Root"
+    }
+    $RootItem = Get-Item -LiteralPath $Root -Force
+    if (($RootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        $ResolvedTarget = $RootItem.ResolveLinkTarget($true)
+        if ($null -eq $ResolvedTarget -or -not $ResolvedTarget.PSIsContainer) {
+            throw 'ASP54W1101 trusted repository root could not be resolved'
+        }
+        return [System.IO.Path]::GetFullPath($ResolvedTarget.FullName)
+    }
+    return [System.IO.Path]::GetFullPath($RootItem.FullName)
+}
+
+function Assert-ContainedOrdinaryDirectoryPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$TrustedRoot,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    $Root = [System.IO.Path]::GetFullPath($TrustedRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $Target = [System.IO.Path]::GetFullPath($TargetPath)
+    $RootPrefix = $Root + [System.IO.Path]::DirectorySeparatorChar
+    if ($Target -cne $Root -and
+        -not $Target.StartsWith(
+            $RootPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ASP54W1102 managed path escaped the trusted repository root'
+    }
+
+    $RelativePath = [System.IO.Path]::GetRelativePath($Root, $Target)
+    $SeparatorCharacters = [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar)
+    $Segments = @($RelativePath.Split(
+        $SeparatorCharacters,
+        [System.StringSplitOptions]::RemoveEmptyEntries))
+    $CurrentPath = $Root
+    foreach ($Segment in $Segments) {
+        if ($Segment -ceq '..' -or $Segment -ceq '.') {
+            throw 'ASP54W1102 managed path escaped the trusted repository root'
+        }
+        $CurrentPath = Join-Path $CurrentPath $Segment
+        if (-not (Test-Path -LiteralPath $CurrentPath)) {
+            continue
+        }
+        $Item = Get-Item -LiteralPath $CurrentPath -Force
+        if (-not $Item.PSIsContainer) {
+            throw 'ASP54W1104 managed path ancestor is not a directory'
+        }
+        if (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'ASP54W1104 refusing a reparse-point managed path ancestor'
+        }
+        $PhysicalPath = [System.IO.Path]::GetFullPath($Item.FullName)
+        if ($PhysicalPath -cne $Root -and
+            -not $PhysicalPath.StartsWith(
+                $RootPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'ASP54W1104 managed path ancestor resolved outside the trusted repository root'
+        }
+    }
+}
+
 function Get-WasmtimeInstallPaths {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
         [Parameter(Mandatory = $true)]$Lock
     )
 
-    $Root = [System.IO.Path]::GetFullPath($RepositoryRoot)
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        throw "ASP54W1101 repository root does not exist: $Root"
-    }
+    $Root = Get-TrustedRepositoryRoot -RepositoryRoot $RepositoryRoot
     $InstalledRoot = [System.IO.Path]::GetFullPath(
         (Join-Path $Root 'Source/ThirdParty/Wasmtime/installed'))
     $InstallPath = [System.IO.Path]::GetFullPath((Join-Path $Root $Lock.install.relative_path))
@@ -169,15 +258,9 @@ function Get-WasmtimeInstallPaths {
         [System.StringComparison]::OrdinalIgnoreCase)) {
         throw 'ASP54W1102 dependency lock attempted to escape the installed boundary'
     }
-    foreach ($Path in @(
-        $InstalledRoot,
-        (Join-Path $InstalledRoot 'Win64'),
-        $InstallPath)) {
-        if ((Test-Path -LiteralPath $Path) -and (Test-IsReparsePoint $Path)) {
-            throw 'ASP54W1103 refusing to manage a reparse-point install path'
-        }
-    }
+    Assert-ContainedOrdinaryDirectoryPath -TrustedRoot $Root -TargetPath $InstallPath
     return [pscustomobject]@{
+        RepositoryRoot = $Root
         InstalledRoot = $InstalledRoot
         PlatformRoot = Join-Path $InstalledRoot 'Win64'
         InstallPath = $InstallPath
@@ -452,6 +535,7 @@ function Test-WasmtimeDependency {
         throw 'ASP54W1601 managed Wasmtime installation is missing'
     }
     Assert-NoReparseTree -Root $Paths.InstallPath -Code 'ASP54W1603'
+    Assert-NoAlternateDataStreams -Root $Paths.InstallPath -Code 'ASP54W1606'
     if (-not (Test-Path -LiteralPath $Paths.MarkerPath -PathType Leaf)) {
         throw 'ASP54W1602 managed marker is missing'
     }
@@ -564,7 +648,16 @@ function Install-WasmtimeDependency {
         if (Test-Path -LiteralPath $Paths.InstallPath) {
             throw 'ASP54W1501 install target appeared before atomic publication'
         }
-        [System.IO.Directory]::Move($CandidatePath, $Paths.InstallPath)
+        $PublishPaths = Get-WasmtimeInstallPaths -RepositoryRoot $RepositoryRoot -Lock $Lock
+        if ($PublishPaths.InstallPath -cne $Paths.InstallPath -or
+            $PublishPaths.PlatformRoot -cne $Paths.PlatformRoot) {
+            throw 'ASP54W1503 managed publication path changed during installation'
+        }
+        Assert-NoReparseTree -Root $CandidatePath -Code 'ASP54W1503'
+        if (Test-Path -LiteralPath $PublishPaths.InstallPath) {
+            throw 'ASP54W1501 install target appeared before atomic publication'
+        }
+        [System.IO.Directory]::Move($CandidatePath, $PublishPaths.InstallPath)
         return [pscustomobject]@{
             succeeded = $true
             mode = 'Install'
@@ -579,8 +672,12 @@ function Install-WasmtimeDependency {
             Remove-Item -LiteralPath $ExtractionRoot -Recurse -Force
         }
         if (Test-Path -LiteralPath $CandidatePath) {
+            $CleanupPaths = Get-WasmtimeInstallPaths -RepositoryRoot $RepositoryRoot -Lock $Lock
+            if ($CleanupPaths.PlatformRoot -cne $Paths.PlatformRoot) {
+                throw 'ASP54W1502 candidate cleanup path changed during installation'
+            }
             $CandidateFullPath = [System.IO.Path]::GetFullPath($CandidatePath)
-            $PlatformPrefix = $Paths.PlatformRoot.TrimEnd(
+            $PlatformPrefix = $CleanupPaths.PlatformRoot.TrimEnd(
                 [System.IO.Path]::DirectorySeparatorChar,
                 [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
             if (-not $CandidateFullPath.StartsWith(
@@ -602,8 +699,13 @@ function Remove-WasmtimeDependency {
 
     $Paths = Get-WasmtimeInstallPaths -RepositoryRoot $RepositoryRoot -Lock $Lock
     [void](Test-WasmtimeDependency $RepositoryRoot $Lock $LockSha256)
-    $InstallFullPath = [System.IO.Path]::GetFullPath($Paths.InstallPath)
-    $InstalledPrefix = $Paths.InstalledRoot.TrimEnd(
+    $RemovalPaths = Get-WasmtimeInstallPaths -RepositoryRoot $RepositoryRoot -Lock $Lock
+    if ($RemovalPaths.InstallPath -cne $Paths.InstallPath -or
+        $RemovalPaths.InstalledRoot -cne $Paths.InstalledRoot) {
+        throw 'ASP54W1701 managed removal path changed after verification'
+    }
+    $InstallFullPath = [System.IO.Path]::GetFullPath($RemovalPaths.InstallPath)
+    $InstalledPrefix = $RemovalPaths.InstalledRoot.TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
         [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
     if (-not $InstallFullPath.StartsWith(
@@ -612,10 +714,14 @@ function Remove-WasmtimeDependency {
         throw 'ASP54W1701 refusing to remove outside the installed boundary'
     }
     Assert-NoReparseTree -Root $InstallFullPath -Code 'ASP54W1702'
+    Assert-NoAlternateDataStreams -Root $InstallFullPath -Code 'ASP54W1606'
     Remove-Item -LiteralPath $InstallFullPath -Recurse -Force
-    foreach ($Parent in @($Paths.PlatformRoot, $Paths.InstalledRoot)) {
+    foreach ($Parent in @($RemovalPaths.PlatformRoot, $RemovalPaths.InstalledRoot)) {
         if ((Test-Path -LiteralPath $Parent -PathType Container) -and
             @(Get-ChildItem -LiteralPath $Parent -Force).Count -eq 0) {
+            Assert-ContainedOrdinaryDirectoryPath `
+                -TrustedRoot $RemovalPaths.RepositoryRoot `
+                -TargetPath $Parent
             if (Test-IsReparsePoint $Parent) {
                 throw 'ASP54W1702 refusing to remove a reparse-point parent'
             }
