@@ -37,6 +37,13 @@ FVector AAvidScriptPerfFixture::ReflectVectorValue(const FVector& Value) const
 	return NativeVectorValue(Value);
 }
 
+void AAvidScriptPerfFixture::ReflectVectorRefOut(
+	FVector& InOutValue,
+	FVector& OutValue) const
+{
+	NativeVectorRefOut(InOutValue, OutValue);
+}
+
 UObject* AAvidScriptPerfFixture::ReflectObjectRoundtrip(UObject* Value) const
 {
 	return NativeObjectRoundtrip(Value);
@@ -50,18 +57,27 @@ int32 AAvidScriptPerfFixture::ReflectBatchAdd(const int32 Seed, const int32 Coun
 void AAvidScriptPerfFixture::RegisterPuertsCallbacks(
 	const int32 LaneId,
 	FJsObject WorkloadRunner,
-	FJsObject EmptyCallback)
+	FJsObject ResetCallback,
+	FJsObject EmptyCallback,
+	FJsObject TickCallback,
+	FJsObject GetCallbackChecksum)
 {
 	if (LaneId == ReflectionLaneId)
 	{
 		ReflectionWorkloadRunner = MoveTemp(WorkloadRunner);
+		ReflectionResetCallback = MoveTemp(ResetCallback);
 		ReflectionEmptyCallback = MoveTemp(EmptyCallback);
+		ReflectionTickCallback = MoveTemp(TickCallback);
+		ReflectionGetCallbackChecksum = MoveTemp(GetCallbackChecksum);
 		bHasReflectionCallbacks = true;
 	}
 	else if (LaneId == StaticLaneId)
 	{
 		StaticWorkloadRunner = MoveTemp(WorkloadRunner);
+		StaticResetCallback = MoveTemp(ResetCallback);
 		StaticEmptyCallback = MoveTemp(EmptyCallback);
+		StaticTickCallback = MoveTemp(TickCallback);
+		StaticGetCallbackChecksum = MoveTemp(GetCallbackChecksum);
 		bHasStaticCallbacks = true;
 	}
 }
@@ -94,6 +110,15 @@ FVector AAvidScriptPerfFixture::NativeVectorValue(const FVector& Value) const
 	return Value + FVector(1.0, 2.0, 3.0);
 }
 
+void AAvidScriptPerfFixture::NativeVectorRefOut(
+	FVector& InOutValue,
+	FVector& OutValue) const
+{
+	RecordOperation(9);
+	OutValue = InOutValue + FVector(4.0, 5.0, 6.0);
+	InOutValue += FVector(1.0, 2.0, 3.0);
+}
+
 UObject* AAvidScriptPerfFixture::NativeObjectRoundtrip(UObject* Value) const
 {
 	RecordOperation(5);
@@ -109,6 +134,30 @@ int32 AAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count
 		Result = PerfFixtureMixInt32(Result ^ Index);
 	}
 	return Result;
+}
+
+void AAvidScriptPerfFixture::ResetNativeCallbackState(const int32 Seed)
+{
+	NativeCallbackChecksum = static_cast<uint32>(Seed);
+}
+
+void AAvidScriptPerfFixture::NativeEmptyCallback(const int32 Token)
+{
+	NativeCallbackChecksum = static_cast<uint32>(
+		PerfFixtureMixInt32(static_cast<int32>(
+			NativeCallbackChecksum ^ static_cast<uint32>(Token))));
+}
+
+void AAvidScriptPerfFixture::NativeTickCallback(const float DeltaSeconds)
+{
+	(void)DeltaSeconds;
+	NativeCallbackChecksum = static_cast<uint32>(
+		PerfFixtureMixInt32(static_cast<int32>(NativeCallbackChecksum ^ 1u)));
+}
+
+int32 AAvidScriptPerfFixture::GetNativeCallbackChecksum() const
+{
+	return static_cast<int32>(NativeCallbackChecksum);
 }
 
 bool AAvidScriptPerfFixture::HasPuertsCallbacks(const int32 LaneId) const
@@ -130,12 +179,42 @@ int32 AAvidScriptPerfFixture::RunPuertsWorkload(
 	return Runner.Func<int32>(WorkloadId, Iterations, Seed);
 }
 
-int32 AAvidScriptPerfFixture::RunPuertsEmptyCallback(const int32 LaneId, const int32 Seed) const
+void AAvidScriptPerfFixture::ResetPuertsCallbackState(
+	const int32 LaneId,
+	const int32 Seed) const
+{
+	const FJsObject& Callback = LaneId == ReflectionLaneId
+		? ReflectionResetCallback
+		: StaticResetCallback;
+	Callback.Action(Seed);
+}
+
+void AAvidScriptPerfFixture::RunPuertsEmptyCallback(
+	const int32 LaneId,
+	const int32 Token) const
 {
 	const FJsObject& Callback = LaneId == ReflectionLaneId
 		? ReflectionEmptyCallback
 		: StaticEmptyCallback;
-	return Callback.Func<int32>(Seed);
+	Callback.Action(Token);
+}
+
+void AAvidScriptPerfFixture::RunPuertsTickCallback(
+	const int32 LaneId,
+	const float DeltaSeconds) const
+{
+	const FJsObject& Callback = LaneId == ReflectionLaneId
+		? ReflectionTickCallback
+		: StaticTickCallback;
+	Callback.Action(DeltaSeconds);
+}
+
+int32 AAvidScriptPerfFixture::GetPuertsCallbackChecksum(const int32 LaneId) const
+{
+	const FJsObject& Callback = LaneId == ReflectionLaneId
+		? ReflectionGetCallbackChecksum
+		: StaticGetCallbackChecksum;
+	return Callback.Func<int32>();
 }
 
 void AAvidScriptPerfFixture::ResetOperationCounts()

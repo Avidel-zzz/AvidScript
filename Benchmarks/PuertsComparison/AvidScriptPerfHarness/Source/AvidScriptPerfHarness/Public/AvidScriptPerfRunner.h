@@ -10,7 +10,11 @@ enum class EAvidScriptPerfWorkload : int32
 	PropertyGetSet = 3,
 	VectorValue = 4,
 	ObjectRoundtrip = 5,
-	BatchScalar = 6
+	BatchScalar = 6,
+	CallbackEmpty = 7,
+	CallbackTick = 8,
+	VectorRefOut = 9,
+	Count = 10
 };
 
 struct FAvidScriptPerfSmokeResult

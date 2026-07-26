@@ -4,6 +4,7 @@ const puerts = require("puerts");
 const fixture = puerts.argv.getByName("Fixture");
 const MIX_MULTIPLIER = 1664525;
 const MIX_INCREMENT = 1013904223;
+let callbackChecksum = 0;
 
 function mix(value) {
     return (Math.imul(value | 0, MIX_MULTIPLIER) + MIX_INCREMENT) | 0;
@@ -11,6 +12,8 @@ function mix(value) {
 
 function runWorkload(workload, iterations, seed) {
     let accumulator = seed | 0;
+    const inOutRef = puerts.$ref(new UE.Vector(0, 0, 0));
+    const outRef = puerts.$ref(new UE.Vector(0, 0, 0));
     for (let index = 0; index < iterations; ++index) {
         switch (workload) {
             case 0:
@@ -39,6 +42,22 @@ function runWorkload(workload, iterations, seed) {
             case 6:
                 accumulator = mix(fixture.StaticBatchAdd(accumulator, 8));
                 break;
+            case 9: {
+                puerts.$set(
+                    inOutRef,
+                    new UE.Vector(index & 31, (index * 3) & 31, (index * 7) & 31));
+                fixture.StaticVectorRefOut(inOutRef, outRef);
+                const inOutValue = puerts.$unref(inOutRef);
+                const outValue = puerts.$unref(outRef);
+                const packed = (inOutValue.X | 0) +
+                    (inOutValue.Y | 0) * 37 +
+                    (inOutValue.Z | 0) * 101 +
+                    (outValue.X | 0) * 257 +
+                    (outValue.Y | 0) * 521 +
+                    (outValue.Z | 0) * 1031;
+                accumulator = mix(accumulator ^ packed);
+                break;
+            }
             default:
                 throw new Error(`unknown static workload ${workload}`);
         }
@@ -46,8 +65,27 @@ function runWorkload(workload, iterations, seed) {
     return accumulator | 0;
 }
 
-function emptyCallback(seed) {
-    return mix(seed);
+function resetCallback(seed) {
+    callbackChecksum = seed | 0;
 }
 
-fixture.RegisterPuertsCallbacks(2, runWorkload, emptyCallback);
+function emptyCallback(token) {
+    callbackChecksum = mix(callbackChecksum ^ (token | 0));
+}
+
+function tickCallback(deltaSeconds) {
+    void deltaSeconds;
+    callbackChecksum = mix(callbackChecksum ^ 1);
+}
+
+function getCallbackChecksum() {
+    return callbackChecksum | 0;
+}
+
+fixture.RegisterPuertsCallbacks(
+    2,
+    runWorkload,
+    resetCallback,
+    emptyCallback,
+    tickCallback,
+    getCallbackChecksum);

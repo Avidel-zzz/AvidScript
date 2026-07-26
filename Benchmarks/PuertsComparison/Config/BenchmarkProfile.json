@@ -20,7 +20,6 @@
   ],
   "workloads": [
     "callback_empty",
-    "callback_begin_play",
     "callback_tick",
     "pure_integer",
     "scalar_noop",

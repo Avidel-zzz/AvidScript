@@ -18,6 +18,7 @@ namespace
 				.Method("StaticAddInt32", MakeFunction(&AAvidScriptPerfFixture::NativeAddInt32))
 				.Property("StaticScalarValue", MakeProperty(&AAvidScriptPerfFixture::ScalarValue))
 				.Method("StaticVectorValue", MakeFunction(&AAvidScriptPerfFixture::NativeVectorValue))
+				.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::NativeVectorRefOut))
 				.Method("StaticObjectRoundtrip", MakeFunction(&AAvidScriptPerfFixture::NativeObjectRoundtrip))
 				.Method("StaticBatchAdd", MakeFunction(&AAvidScriptPerfFixture::NativeBatchAdd))
 				.Register();

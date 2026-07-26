@@ -22,9 +22,19 @@ $HarnessRoot = Split-Path -Parent $PSScriptRoot
 $SourceRoot = Join-Path $HarnessRoot 'Source/AvidScriptPerfHarness'
 $RunnerHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfRunner.h')
 $RunnerSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfRunner.cpp')
+$FixtureHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfFixture.h')
+$FixtureSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfFixture.cpp')
+$StaticBindings = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfStaticBindings.cpp')
 $CommandletHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfRunCommandlet.h')
 $CommandletSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfRunCommandlet.cpp')
 $ModuleSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfHarnessModule.cpp')
+$ReflectionScript = Get-SourceText (Join-Path $HarnessRoot 'Content/JavaScript/reflection.js')
+$StaticScript = Get-SourceText (Join-Path $HarnessRoot 'Content/JavaScript/static.js')
+$AvidScriptWorkload = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/AvidScriptPerfWorkload.cs')
+$AvidScriptProfile = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/AvidScriptPerfWorkload.csharp-profile.json') |
+    ConvertFrom-Json
+$BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Config/BenchmarkProfile.json') |
+    ConvertFrom-Json
 
 Assert-True ($RunnerHeader.Contains('RunWarmBenchmarkFromFiles')) `
     'runner must expose the warm benchmark file entrypoint'
@@ -38,20 +48,97 @@ Assert-True ($CommandletHeader.Contains('UCommandlet')) 'warm runner must be an 
 Assert-True ($ModuleSource.Contains('AvidScript.PerformanceComparison.Run')) `
     'module must expose the sidecar console command'
 
-foreach ($Workload in @(
+$ExpectedWarmWorkloads = @(
+    'callback_empty',
+    'callback_tick',
     'pure_integer',
     'scalar_noop',
     'scalar_add_int32',
     'property_get_set',
     'vector_value',
+    'vector_ref_out',
     'object_roundtrip',
-    'batch_scalar')) {
+    'batch_scalar'
+)
+Assert-True (@($BenchmarkProfile.workloads).Count -eq $ExpectedWarmWorkloads.Count) `
+    'benchmark profile must contain exactly ten warm workloads'
+for ($Index = 0; $Index -lt $ExpectedWarmWorkloads.Count; ++$Index) {
+    Assert-True ([string]$BenchmarkProfile.workloads[$Index] -ceq $ExpectedWarmWorkloads[$Index]) `
+        "benchmark warm workload order mismatch at index $Index"
+}
+
+foreach ($Workload in $ExpectedWarmWorkloads) {
     Assert-True ($RunnerSource.Contains("TEXT(`"$Workload`")")) "missing workload: $Workload"
 }
-foreach ($UnsupportedWorkload in @('callback_empty', 'callback_begin_play', 'callback_tick', 'vector_ref_out')) {
-    Assert-True (-not $RunnerSource.Contains("TEXT(`"$UnsupportedWorkload`")")) `
-        "warm core must not advertise unsupported workload: $UnsupportedWorkload"
+foreach ($SourceText in @($RunnerSource, ($BenchmarkProfile | ConvertTo-Json -Depth 10))) {
+    Assert-True (-not $SourceText.Contains('callback_begin_play')) `
+        'BeginPlay must remain outside the repeatable warm matrix'
 }
+
+foreach ($StableId in @(
+    'PureInteger = 0',
+    'ScalarNoOp = 1',
+    'ScalarAddInt32 = 2',
+    'PropertyGetSet = 3',
+    'VectorValue = 4',
+    'ObjectRoundtrip = 5',
+    'BatchScalar = 6',
+    'CallbackEmpty = 7',
+    'CallbackTick = 8',
+    'VectorRefOut = 9',
+    'Count = 10')) {
+    Assert-True ($RunnerHeader.Contains($StableId)) "missing stable workload id: $StableId"
+}
+
+Assert-True ($FixtureHeader.Contains('UPARAM(ref) FVector& InOutValue')) `
+    'fixture must expose one reflected FVector ref parameter'
+Assert-True ($FixtureHeader.Contains('FVector& OutValue')) `
+    'fixture must expose one reflected FVector out parameter'
+foreach ($Method in @('ReflectVectorRefOut', 'NativeVectorRefOut')) {
+    Assert-True ($FixtureHeader.Contains($Method)) "fixture is missing ref/out method: $Method"
+    Assert-True ($FixtureSource.Contains($Method)) "fixture is missing ref/out implementation: $Method"
+}
+Assert-True ($FixtureHeader.Contains('OperationCallCounts[10]')) `
+    'fixture operation accounting must cover all ten stable workload ids'
+Assert-True ($StaticBindings.Contains('.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::NativeVectorRefOut))')) `
+    'static lane must bind the real native FVector ref/out method'
+
+foreach ($Script in @($ReflectionScript, $StaticScript)) {
+    foreach ($RefApi in @('puerts.$ref', 'puerts.$set', 'puerts.$unref')) {
+        Assert-True ($Script.Contains($RefApi)) "Puerts ref/out workload must use official API: $RefApi"
+    }
+    foreach ($Callback in @('resetCallback', 'emptyCallback', 'tickCallback', 'getCallbackChecksum')) {
+        Assert-True ($Script.Contains($Callback)) "Puerts lane must register callback surface: $Callback"
+    }
+}
+Assert-True ($ReflectionScript.Contains('fixture.ReflectVectorRefOut(inOutRef, outRef)')) `
+    'reflection lane must call the reflected ref/out UFUNCTION'
+Assert-True ($StaticScript.Contains('fixture.StaticVectorRefOut(inOutRef, outRef)')) `
+    'static lane must call the template-bound native ref/out method'
+Assert-True ($AvidScriptWorkload.Contains('fixture.ReflectVectorRefOut(ref inOutValue, out outValue)')) `
+    'AvidScript lane must call the generated ref/out facade'
+Assert-True (@($AvidScriptProfile.binding_profile.classes[0].include_functions) -ccontains 'ReflectVectorRefOut') `
+    'AvidScript binding profile must authorize the reflected ref/out method'
+
+foreach ($CallbackSurface in @(
+    'NativeEmptyCallback',
+    'NativeTickCallback',
+    'ResetPuertsCallbackState',
+    'RunPuertsEmptyCallback',
+    'RunPuertsTickCallback',
+    'GetPuertsCallbackChecksum')) {
+    Assert-True ($FixtureHeader.Contains($CallbackSurface)) "fixture is missing callback surface: $CallbackSurface"
+}
+Assert-True ($RunnerSource.Contains('Session.Tick(PerfRunnerTickDeltaSeconds')) `
+    'AvidScript callback_tick must invoke FAvidScriptRuntimeSession::Tick'
+Assert-True ($RunnerSource.Contains('PrepareCallbackWorkload')) `
+    'callback state must be reset before dispatch'
+Assert-True ($RunnerSource.Contains('CollectCallbackWorkload')) `
+    'callback state must be collected after dispatch'
+Assert-True ($RunnerSource.Contains('case EAvidScriptPerfWorkload::VectorRefOut:')) `
+    'runner must execute and account for vector_ref_out'
+Assert-True ($RunnerSource.Contains('return Iterations + 1;')) `
+    'AvidScript vector_ref_out must account for one lazy owner lookup plus one import per operation'
 
 Assert-True ($RunnerSource.Contains('BuildBalancedLaneOrder')) `
     'warm core must derive a balanced lane order for each sample'
@@ -115,6 +202,15 @@ $RunLaneEnd = $RunnerSource.IndexOf('bool ValidatePerfObservation(', $RunLaneSta
 Assert-True ($RunLaneStart -ge 0 -and $RunLaneEnd -gt $RunLaneStart) `
     'unable to isolate RunPerfLane source'
 $RunLaneSource = $RunnerSource.Substring($RunLaneStart, $RunLaneEnd - $RunLaneStart)
+$PrepareCallbackIndex = $RunLaneSource.IndexOf('PrepareCallbackWorkload(')
+$FirstStartCyclesIndex = $RunLaneSource.IndexOf('StartCycles = FPlatformTime::Cycles64();')
+$CollectCallbackIndex = $RunLaneSource.IndexOf('CollectCallbackWorkload(')
+$LastEndCyclesIndex = $RunLaneSource.LastIndexOf('EndCycles = FPlatformTime::Cycles64();')
+Assert-True (
+    $PrepareCallbackIndex -ge 0 -and
+    $FirstStartCyclesIndex -gt $PrepareCallbackIndex -and
+    $CollectCallbackIndex -gt $LastEndCyclesIndex) `
+    'callback reset must precede timing and callback state collection must follow timing'
 $DispatchIndex = $RunLaneSource.IndexOf('AvidScript.DispatchWorkload(')
 $EndCyclesIndex = $RunLaneSource.IndexOf('EndCycles = FPlatformTime::Cycles64();', $DispatchIndex)
 $CollectIndex = $RunLaneSource.IndexOf('AvidScript.CollectWorkloadResult(')
@@ -140,4 +236,4 @@ foreach ($Field in @(
     Assert-True ($RunnerSource.Contains("TEXT(`"$Field`")")) "sample JSON must include $Field"
 }
 
-Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=4 workloads=7 timing=cycles64 validation=1'
+Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=4 workloads=10 callbacks=2 ref_out=1 timing=cycles64 validation=1'

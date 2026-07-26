@@ -12,8 +12,6 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
-#include "JsonSerializer.h"
-#include "JsonWriter.h"
 #include "JSLogger.h"
 #include "JSModuleLoader.h"
 #include "JsEnv.h"
@@ -21,6 +19,8 @@
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -30,6 +30,7 @@ namespace
 	constexpr int32 PerfRunnerWorkloadShift = 24;
 	constexpr int32 PerfRunnerIterationMask = 0x00ffffff;
 	constexpr int32 PerfRunnerResultSchemaVersion = 1;
+	constexpr float PerfRunnerTickDeltaSeconds = 1.0f / 60.0f;
 
 	uint32 PerfRunnerMix(const uint32 Value)
 	{
@@ -317,6 +318,95 @@ namespace
 			return true;
 		}
 
+		bool PrepareCallbackWorkload(
+			const uint32 Seed,
+			FString& OutError)
+		{
+			int32 PackedWorkload = 0;
+			if (!PrepareWorkload(
+					EAvidScriptPerfWorkload::CallbackTick,
+					1,
+					Seed,
+					PackedWorkload,
+					OutError))
+			{
+				return false;
+			}
+
+			FAvidScriptWasmSmokeResult ResetResult;
+			const bool bResetSucceeded =
+				DispatchWorkload(PackedWorkload, Seed, ResetResult);
+			uint32 IgnoredChecksum = 0;
+			int32 IgnoredHostImportCallCount = 0;
+			return CollectWorkloadResult(
+				bResetSucceeded,
+				ResetResult,
+				IgnoredChecksum,
+				IgnoredHostImportCallCount,
+				OutError);
+		}
+
+		bool DispatchCallbackWorkload(
+			const EAvidScriptPerfWorkload Workload,
+			const int32 Iterations,
+			FAvidScriptWasmSmokeResult& OutDispatchResult,
+			FString& OutError)
+		{
+			if (Workload == EAvidScriptPerfWorkload::CallbackEmpty)
+			{
+				int32 PackedWorkload = 0;
+				if (!PrepareWorkload(
+						Workload,
+						1,
+						0,
+						PackedWorkload,
+						OutError))
+				{
+					return false;
+				}
+				for (int32 Index = 0; Index < Iterations; ++Index)
+				{
+					if (!DispatchWorkload(
+							PackedWorkload,
+							static_cast<uint32>(Index),
+							OutDispatchResult))
+					{
+						return false;
+					}
+				}
+				return true;
+			}
+			if (Workload == EAvidScriptPerfWorkload::CallbackTick)
+			{
+				for (int32 Index = 0; Index < Iterations; ++Index)
+				{
+					if (!Session.Tick(PerfRunnerTickDeltaSeconds, OutDispatchResult))
+					{
+						return false;
+					}
+				}
+				return true;
+			}
+
+			OutError = TEXT("AvidScript callback dispatcher received a non-callback workload");
+			return false;
+		}
+
+		bool CollectCallbackWorkload(
+			const bool bDispatchSucceeded,
+			const FAvidScriptWasmSmokeResult& DispatchResult,
+			uint32& OutChecksum,
+			int32& OutHostImportCallCount,
+			FString& OutError)
+		{
+			return CollectWorkloadResult(
+				bDispatchSucceeded,
+				DispatchResult,
+				OutChecksum,
+				OutHostImportCallCount,
+				OutError);
+		}
+
 		bool RunWorkload(
 			const EAvidScriptPerfWorkload Workload,
 			const int32 Iterations,
@@ -387,6 +477,25 @@ namespace
 		World = nullptr;
 	}
 
+	bool IsCallbackWorkload(const EAvidScriptPerfWorkload Workload)
+	{
+		return Workload == EAvidScriptPerfWorkload::CallbackEmpty ||
+			Workload == EAvidScriptPerfWorkload::CallbackTick;
+	}
+
+	uint32 PackVectorRefOutResult(
+		const FVector& InOutValue,
+		const FVector& OutValue)
+	{
+		return static_cast<uint32>(
+			static_cast<int32>(InOutValue.X) +
+			static_cast<int32>(InOutValue.Y) * 37 +
+			static_cast<int32>(InOutValue.Z) * 101 +
+			static_cast<int32>(OutValue.X) * 257 +
+			static_cast<int32>(OutValue.Y) * 521 +
+			static_cast<int32>(OutValue.Z) * 1031);
+	}
+
 	uint32 RunNativeWorkload(
 		AAvidScriptPerfFixture& Fixture,
 		const EAvidScriptPerfWorkload Workload,
@@ -436,6 +545,29 @@ namespace
 					static_cast<int32>(Accumulator),
 					8)));
 				break;
+			case EAvidScriptPerfWorkload::CallbackEmpty:
+				Fixture.NativeEmptyCallback(Index);
+				Accumulator = static_cast<uint32>(
+					Fixture.GetNativeCallbackChecksum());
+				break;
+			case EAvidScriptPerfWorkload::CallbackTick:
+				Fixture.NativeTickCallback(PerfRunnerTickDeltaSeconds);
+				Accumulator = static_cast<uint32>(
+					Fixture.GetNativeCallbackChecksum());
+				break;
+			case EAvidScriptPerfWorkload::VectorRefOut:
+			{
+				FVector InOutValue(
+					static_cast<double>(Index & 31),
+					static_cast<double>((Index * 3) & 31),
+					static_cast<double>((Index * 7) & 31));
+				FVector OutValue = FVector::ZeroVector;
+				Fixture.NativeVectorRefOut(InOutValue, OutValue);
+				Accumulator = PerfRunnerMix(
+					Accumulator ^
+					PackVectorRefOutResult(InOutValue, OutValue));
+				break;
+			}
 			default:
 				checkNoEntry();
 				break;
@@ -455,6 +587,7 @@ namespace
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 		case EAvidScriptPerfWorkload::BatchScalar:
+		case EAvidScriptPerfWorkload::VectorRefOut:
 			return static_cast<uint64>(Iterations);
 		default:
 			return 0;
@@ -474,6 +607,7 @@ namespace
 		case EAvidScriptPerfWorkload::VectorValue:
 		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 		case EAvidScriptPerfWorkload::BatchScalar:
+		case EAvidScriptPerfWorkload::VectorRefOut:
 			return Iterations + 1;
 		default:
 			return 0;
@@ -604,6 +738,12 @@ namespace
 			return TEXT("object_roundtrip");
 		case EAvidScriptPerfWorkload::BatchScalar:
 			return TEXT("batch_scalar");
+		case EAvidScriptPerfWorkload::CallbackEmpty:
+			return TEXT("callback_empty");
+		case EAvidScriptPerfWorkload::CallbackTick:
+			return TEXT("callback_tick");
+		case EAvidScriptPerfWorkload::VectorRefOut:
+			return TEXT("vector_ref_out");
 		default:
 			checkNoEntry();
 			return TEXT("");
@@ -615,7 +755,7 @@ namespace
 		EAvidScriptPerfWorkload& OutWorkload)
 	{
 		constexpr int32 WorkloadCount =
-			static_cast<int32>(EAvidScriptPerfWorkload::BatchScalar) + 1;
+			static_cast<int32>(EAvidScriptPerfWorkload::Count);
 		for (int32 WorkloadIndex = 0; WorkloadIndex < WorkloadCount; ++WorkloadIndex)
 		{
 			const EAvidScriptPerfWorkload Workload =
@@ -1206,6 +1346,10 @@ namespace
 	{
 		Fixture.ScalarValue = 0;
 		Fixture.ResetOperationCounts();
+		if (IsCallbackWorkload(Workload))
+		{
+			Fixture.ResetNativeCallbackState(static_cast<int32>(Seed));
+		}
 		FPerfOracle Oracle;
 		Oracle.Checksum =
 			RunNativeWorkload(Fixture, Workload, Iterations, Seed);
@@ -1213,6 +1357,109 @@ namespace
 		Oracle.OperationCallCount =
 			Fixture.GetOperationCallCount(static_cast<int32>(Workload));
 		return Oracle;
+	}
+
+	bool PrepareCallbackWorkload(
+		AAvidScriptPerfFixture& Fixture,
+		FPuertsLane& Reflection,
+		FPuertsLane& Static,
+		FAvidScriptLane& AvidScript,
+		const EAvidScriptPerfLane Lane,
+		const EAvidScriptPerfWorkload Workload,
+		const uint32 Seed,
+		FString& OutError)
+	{
+		if (!IsCallbackWorkload(Workload))
+		{
+			return true;
+		}
+
+		switch (Lane)
+		{
+		case EAvidScriptPerfLane::NativeCpp:
+			Fixture.ResetNativeCallbackState(static_cast<int32>(Seed));
+			return true;
+		case EAvidScriptPerfLane::PuertsV8Reflection:
+			Fixture.ResetPuertsCallbackState(
+				Reflection.LaneId,
+				static_cast<int32>(Seed));
+			return true;
+		case EAvidScriptPerfLane::PuertsV8Static:
+			Fixture.ResetPuertsCallbackState(
+				Static.LaneId,
+				static_cast<int32>(Seed));
+			return true;
+		case EAvidScriptPerfLane::AvidScriptWamr:
+			return AvidScript.PrepareCallbackWorkload(Seed, OutError);
+		default:
+			checkNoEntry();
+			return false;
+		}
+	}
+
+	void RunPuertsCallbackWorkload(
+		AAvidScriptPerfFixture& Fixture,
+		const int32 LaneId,
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		for (int32 Index = 0; Index < Iterations; ++Index)
+		{
+			if (Workload == EAvidScriptPerfWorkload::CallbackEmpty)
+			{
+				Fixture.RunPuertsEmptyCallback(LaneId, Index);
+			}
+			else
+			{
+				Fixture.RunPuertsTickCallback(
+					LaneId,
+					PerfRunnerTickDeltaSeconds);
+			}
+		}
+	}
+
+	bool CollectCallbackWorkload(
+		AAvidScriptPerfFixture& Fixture,
+		FPuertsLane& Reflection,
+		FPuertsLane& Static,
+		FAvidScriptLane& AvidScript,
+		const EAvidScriptPerfLane Lane,
+		const EAvidScriptPerfWorkload Workload,
+		const bool bAvidScriptDispatchSucceeded,
+		const FAvidScriptWasmSmokeResult& AvidScriptDispatchResult,
+		FPerfLaneObservation& OutObservation,
+		FString& OutError)
+	{
+		if (!IsCallbackWorkload(Workload))
+		{
+			return true;
+		}
+
+		switch (Lane)
+		{
+		case EAvidScriptPerfLane::NativeCpp:
+			OutObservation.Checksum = static_cast<uint32>(
+				Fixture.GetNativeCallbackChecksum());
+			return true;
+		case EAvidScriptPerfLane::PuertsV8Reflection:
+			OutObservation.Checksum = static_cast<uint32>(
+				Fixture.GetPuertsCallbackChecksum(Reflection.LaneId));
+			return true;
+		case EAvidScriptPerfLane::PuertsV8Static:
+			OutObservation.Checksum = static_cast<uint32>(
+				Fixture.GetPuertsCallbackChecksum(Static.LaneId));
+			return true;
+		case EAvidScriptPerfLane::AvidScriptWamr:
+			return AvidScript.CollectCallbackWorkload(
+				bAvidScriptDispatchSucceeded,
+				AvidScriptDispatchResult,
+				OutObservation.Checksum,
+				OutObservation.HostImportCallCount,
+				OutError);
+		default:
+			checkNoEntry();
+			return false;
+		}
 	}
 
 	bool RunPerfLane(
@@ -1232,9 +1479,23 @@ namespace
 		Fixture.ResetOperationCounts();
 		OutObservation = FPerfLaneObservation{};
 		OutObservation.Lane = Lane;
+		if (!PrepareCallbackWorkload(
+				Fixture,
+				Reflection,
+				Static,
+				AvidScript,
+				Lane,
+				Workload,
+				Seed,
+				OutError))
+		{
+			return false;
+		}
 
 		uint64 StartCycles = 0;
 		uint64 EndCycles = 0;
+		bool bAvidScriptCallbackDispatchSucceeded = true;
+		FAvidScriptWasmSmokeResult AvidScriptCallbackDispatchResult;
 		switch (Lane)
 		{
 		case EAvidScriptPerfLane::NativeCpp:
@@ -1255,13 +1516,32 @@ namespace
 			if (bTimed)
 			{
 				StartCycles = FPlatformTime::Cycles64();
-				OutObservation.Checksum =
-					static_cast<uint32>(Fixture.RunPuertsWorkload(
+				if (IsCallbackWorkload(Workload))
+				{
+					RunPuertsCallbackWorkload(
+						Fixture,
 						Reflection.LaneId,
-						static_cast<int32>(Workload),
-						Iterations,
-						static_cast<int32>(Seed)));
+						Workload,
+						Iterations);
+				}
+				else
+				{
+					OutObservation.Checksum =
+						static_cast<uint32>(Fixture.RunPuertsWorkload(
+							Reflection.LaneId,
+							static_cast<int32>(Workload),
+							Iterations,
+							static_cast<int32>(Seed)));
+				}
 				EndCycles = FPlatformTime::Cycles64();
+			}
+			else if (IsCallbackWorkload(Workload))
+			{
+				RunPuertsCallbackWorkload(
+					Fixture,
+					Reflection.LaneId,
+					Workload,
+					Iterations);
 			}
 			else
 			{
@@ -1277,13 +1557,32 @@ namespace
 			if (bTimed)
 			{
 				StartCycles = FPlatformTime::Cycles64();
-				OutObservation.Checksum =
-					static_cast<uint32>(Fixture.RunPuertsWorkload(
+				if (IsCallbackWorkload(Workload))
+				{
+					RunPuertsCallbackWorkload(
+						Fixture,
 						Static.LaneId,
-						static_cast<int32>(Workload),
-						Iterations,
-						static_cast<int32>(Seed)));
+						Workload,
+						Iterations);
+				}
+				else
+				{
+					OutObservation.Checksum =
+						static_cast<uint32>(Fixture.RunPuertsWorkload(
+							Static.LaneId,
+							static_cast<int32>(Workload),
+							Iterations,
+							static_cast<int32>(Seed)));
+				}
 				EndCycles = FPlatformTime::Cycles64();
+			}
+			else if (IsCallbackWorkload(Workload))
+			{
+				RunPuertsCallbackWorkload(
+					Fixture,
+					Static.LaneId,
+					Workload,
+					Iterations);
 			}
 			else
 			{
@@ -1297,6 +1596,31 @@ namespace
 			break;
 		case EAvidScriptPerfLane::AvidScriptWamr:
 		{
+			if (IsCallbackWorkload(Workload))
+			{
+				if (bTimed)
+				{
+					StartCycles = FPlatformTime::Cycles64();
+					bAvidScriptCallbackDispatchSucceeded =
+						AvidScript.DispatchCallbackWorkload(
+							Workload,
+							Iterations,
+							AvidScriptCallbackDispatchResult,
+							OutError);
+					EndCycles = FPlatformTime::Cycles64();
+				}
+				else
+				{
+					bAvidScriptCallbackDispatchSucceeded =
+						AvidScript.DispatchCallbackWorkload(
+							Workload,
+							Iterations,
+							AvidScriptCallbackDispatchResult,
+							OutError);
+				}
+				break;
+			}
+
 			int32 PackedWorkload = 0;
 			if (!AvidScript.PrepareWorkload(
 				Workload,
@@ -1343,6 +1667,20 @@ namespace
 			return false;
 		}
 
+		if (!CollectCallbackWorkload(
+				Fixture,
+				Reflection,
+				Static,
+				AvidScript,
+				Lane,
+				Workload,
+				bAvidScriptCallbackDispatchSucceeded,
+				AvidScriptCallbackDispatchResult,
+				OutObservation,
+				OutError))
+		{
+			return false;
+		}
 		OutObservation.ElapsedCycles =
 			bTimed ? EndCycles - StartCycles : 0;
 		OutObservation.FinalScalar = Fixture.ScalarValue;
@@ -2009,7 +2347,8 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 		return false;
 	}
 
-	constexpr int32 WorkloadCount = static_cast<int32>(EAvidScriptPerfWorkload::BatchScalar) + 1;
+	constexpr int32 WorkloadCount =
+		static_cast<int32>(EAvidScriptPerfWorkload::Count);
 	uint32 NativeAggregate = 0;
 	uint32 ReflectionAggregate = 0;
 	uint32 StaticAggregate = 0;
@@ -2020,135 +2359,66 @@ bool FAvidScriptPerfRunner::RunFourLaneCorrectnessSmoke(
 	{
 		const EAvidScriptPerfWorkload Workload = static_cast<EAvidScriptPerfWorkload>(WorkloadIndex);
 		const uint32 WorkloadSeed = MakePerfRunnerWorkloadSeed(Seed, WorkloadIndex);
-		const uint64 ExpectedCallCount = GetExpectedOperationCallCount(
-			Workload,
-			IterationsPerWorkload);
-		const int32 ExpectedAvidScriptHostCallCount =
-			GetExpectedAvidScriptHostCallCount(
-				Workload,
-				IterationsPerWorkload);
-
-		Fixture->ScalarValue = 0;
-		Fixture->ResetOperationCounts();
-		const uint32 NativeChecksum = RunNativeWorkload(
+		const FPerfOracle Oracle = RunNativeOracle(
 			*Fixture,
 			Workload,
 			IterationsPerWorkload,
 			WorkloadSeed);
-		const int32 NativeFinalScalar = Fixture->ScalarValue;
-		const uint64 NativeCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
-
-		Fixture->ScalarValue = 0;
-		Fixture->ResetOperationCounts();
-		const uint32 ReflectionChecksum = static_cast<uint32>(Fixture->RunPuertsWorkload(
-			Reflection.LaneId,
-			WorkloadIndex,
-			IterationsPerWorkload,
-			static_cast<int32>(WorkloadSeed)));
-		const int32 ReflectionFinalScalar = Fixture->ScalarValue;
-		const uint64 ReflectionCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
-
-		Fixture->ScalarValue = 0;
-		Fixture->ResetOperationCounts();
-		const uint32 StaticChecksum = static_cast<uint32>(Fixture->RunPuertsWorkload(
-			Static.LaneId,
-			WorkloadIndex,
-			IterationsPerWorkload,
-			static_cast<int32>(WorkloadSeed)));
-		const int32 StaticFinalScalar = Fixture->ScalarValue;
-		const uint64 StaticCallCount = Fixture->GetOperationCallCount(WorkloadIndex);
-
-		Fixture->ScalarValue = 0;
-		Fixture->ResetOperationCounts();
-		uint32 AvidScriptChecksum = 0;
-		int32 AvidScriptWorkloadHostCallCount = 0;
-		if (!AvidScript.RunWorkload(
-			Workload,
-			IterationsPerWorkload,
-			WorkloadSeed,
-			AvidScriptChecksum,
-			AvidScriptWorkloadHostCallCount,
-			Error))
+		for (int32 LaneIndex = 0;
+			LaneIndex < PerfRunnerLaneCount;
+			++LaneIndex)
 		{
-			OutResult.Error = MoveTemp(Error);
-			return false;
-		}
-		const int32 AvidScriptFinalScalar = Fixture->ScalarValue;
-		const uint64 AvidScriptCallCount =
-			Fixture->GetOperationCallCount(WorkloadIndex);
-		if (ReflectionChecksum != NativeChecksum ||
-			StaticChecksum != NativeChecksum ||
-			AvidScriptChecksum != NativeChecksum)
-		{
-			OutResult.Error = FString::Printf(
-				TEXT("checksum mismatch workload=%d native=%u reflection=%u static=%u avidscript=%u"),
-				WorkloadIndex,
-				NativeChecksum,
-				ReflectionChecksum,
-				StaticChecksum,
-				AvidScriptChecksum);
-			return false;
-		}
-		if (ReflectionFinalScalar != NativeFinalScalar ||
-			StaticFinalScalar != NativeFinalScalar ||
-			AvidScriptFinalScalar != NativeFinalScalar)
-		{
-			OutResult.Error = FString::Printf(
-				TEXT("final fixture state mismatch workload=%d native=%d reflection=%d static=%d avidscript=%d"),
-				WorkloadIndex,
-				NativeFinalScalar,
-				ReflectionFinalScalar,
-				StaticFinalScalar,
-				AvidScriptFinalScalar);
-			return false;
-		}
-		if (NativeCallCount != ExpectedCallCount ||
-			ReflectionCallCount != ExpectedCallCount ||
-			StaticCallCount != ExpectedCallCount ||
-			AvidScriptCallCount != ExpectedCallCount)
-		{
-			OutResult.Error = FString::Printf(
-				TEXT("operation count mismatch workload=%d expected=%llu native=%llu reflection=%llu static=%llu avidscript=%llu"),
-				WorkloadIndex,
-				ExpectedCallCount,
-				NativeCallCount,
-				ReflectionCallCount,
-				StaticCallCount,
-				AvidScriptCallCount);
-			return false;
-		}
-		if (AvidScriptWorkloadHostCallCount != ExpectedAvidScriptHostCallCount)
-		{
-			OutResult.Error = FString::Printf(
-				TEXT("AvidScript host call mismatch workload=%d expected=%d actual=%d"),
-				WorkloadIndex,
-				ExpectedAvidScriptHostCallCount,
-				AvidScriptWorkloadHostCallCount);
-			return false;
-		}
+			const EAvidScriptPerfLane Lane =
+				static_cast<EAvidScriptPerfLane>(LaneIndex);
+			FPerfLaneObservation Observation;
+			if (!RunPerfLane(
+					*Fixture,
+					Reflection,
+					Static,
+					AvidScript,
+					Lane,
+					Workload,
+					IterationsPerWorkload,
+					WorkloadSeed,
+					false,
+					Observation,
+					Error) ||
+				!ValidatePerfObservation(
+					Observation,
+					Oracle,
+					Workload,
+					IterationsPerWorkload,
+					Error))
+			{
+				OutResult.Error = MoveTemp(Error);
+				return false;
+			}
 
-		NativeAggregate = PerfRunnerMix(NativeAggregate ^ NativeChecksum);
-		ReflectionAggregate = PerfRunnerMix(ReflectionAggregate ^ ReflectionChecksum);
-		StaticAggregate = PerfRunnerMix(StaticAggregate ^ StaticChecksum);
-		AvidScriptAggregate = PerfRunnerMix(AvidScriptAggregate ^ AvidScriptChecksum);
-		AvidScriptHostCallCount +=
-			static_cast<uint64>(AvidScriptWorkloadHostCallCount);
-	}
-
-	const int32 CallbackSeed = Seed ^ 0x5a5a5a5a;
-	const uint32 ExpectedCallback = PerfRunnerMix(static_cast<uint32>(CallbackSeed));
-	const uint32 ReflectionCallback =
-		static_cast<uint32>(Fixture->RunPuertsEmptyCallback(Reflection.LaneId, CallbackSeed));
-	const uint32 StaticCallback =
-		static_cast<uint32>(Fixture->RunPuertsEmptyCallback(Static.LaneId, CallbackSeed));
-	if (ReflectionCallback != ExpectedCallback || StaticCallback != ExpectedCallback)
-	{
-		OutResult.Error = FString::Printf(
-			TEXT("callback checksum mismatch expected=%u reflection=%u static=%u"),
-			ExpectedCallback,
-			ReflectionCallback,
-			StaticCallback);
-		return false;
+			switch (Lane)
+			{
+			case EAvidScriptPerfLane::NativeCpp:
+				NativeAggregate = PerfRunnerMix(
+					NativeAggregate ^ Observation.Checksum);
+				break;
+			case EAvidScriptPerfLane::PuertsV8Reflection:
+				ReflectionAggregate = PerfRunnerMix(
+					ReflectionAggregate ^ Observation.Checksum);
+				break;
+			case EAvidScriptPerfLane::PuertsV8Static:
+				StaticAggregate = PerfRunnerMix(
+					StaticAggregate ^ Observation.Checksum);
+				break;
+			case EAvidScriptPerfLane::AvidScriptWamr:
+				AvidScriptAggregate = PerfRunnerMix(
+					AvidScriptAggregate ^ Observation.Checksum);
+				AvidScriptHostCallCount += static_cast<uint64>(
+					Observation.HostImportCallCount);
+				break;
+			default:
+				checkNoEntry();
+				break;
+			}
+		}
 	}
 
 	OutResult.bSucceeded = true;

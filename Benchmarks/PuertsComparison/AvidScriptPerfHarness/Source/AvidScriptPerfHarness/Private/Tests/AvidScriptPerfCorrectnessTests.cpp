@@ -19,7 +19,10 @@ bool FAvidScriptPerfFourLaneCorrectnessTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("workload count"), Result.WorkloadCount, 7);
+	TestEqual(
+		TEXT("workload count"),
+		Result.WorkloadCount,
+		static_cast<int32>(EAvidScriptPerfWorkload::Count));
 	TestEqual(
 		TEXT("reflection aggregate matches native"),
 		Result.PuertsReflectionChecksum,

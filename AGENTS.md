@@ -78,6 +78,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-26 P53.3 关键路径委派错误：把 10 项 warm matrix 这一立即阻塞任务交给子代理后等待，代理只扩展静态契约测试而未进入实现，用户可见进度停滞。Prevention：当前下一步直接依赖的实现由主代理本地完成；子代理只承担不阻塞主线的独立 sidecar，30 秒内无产品代码变化时立即要求状态并收回任务，禁止用更多测试代替已明确要求的实现。
+- 2026-07-26 P53.3 集中验收前遗留合同未同步：warm core 首次真实 UE5.8 构建暴露旧裸 include `JsonSerializer.h`/`JsonWriter.h`，10 项正确性首次运行又因 Automation 仍写死 workload count 7 失败。Prevention：扩展稳定枚举时全仓检索固定 count 和旧终值；UE5.8 Json include 固定使用 `Serialization/JsonSerializer.h` 与 `Serialization/JsonWriter.h`；集中验收前执行该模块的 include owner 与枚举消费者扫描。
+- 2026-07-26 P53.3 长构建短 timeout 错误复发：首次 no-clean UBT 再次给 `shell_command` 1 秒 timeout，包装进程在 5 秒下限退出但子 UBT 继续运行，必须额外追踪进程与引擎日志。Prevention：UBT、Automation 和 C# profile 首次调用固定使用至少 600000 ms timeout；只有工具明确返回 running cell 才使用 `wait`，不再用短 timeout 模拟后台执行。
 - 2026-07-26 P53.3 SDD 报告跟踪错误：实现代理使用强制暂存，把已被忽略的 `.superpowers/sdd/.../task-P53.3-clean-project-report.md` 纳入产品提交。Prevention：`.superpowers` 必须持续保持忽略；每次 Phase 提交前用显式 commit path allowlist 校验全部 staged paths，并机械拒绝任何 `.superpowers/` 路径，禁止 `git add -f`。
 - 2026-07-26 P53 首版 benchmark 公平性设计错误：共享 fixture 最初是 `UObject`，但 AvidScript profile Self 合同要求 `AActor`；三条 lane 又各自创建对象，Puerts static 通过额外 UObject 参数的全静态 proxy 调用，属性 workload 实际调用 getter/setter 函数，且 AvidScript 用额外 UFUNCTION crossing 发布 checksum。Prevention：跨框架 benchmark 在首次 UBT 前完成独立语义复审；所有 lane 复用同一 Actor fixture，static lane 使用实例 `.Method/.Property`，property workload 必须走正式属性表面，guest 结果通过计时外 state/memory slot读取，不允许某一 lane 独占额外 crossing。
 - 2026-07-26 P53 事件 seed 精度错误：首版准备把任意 int32 seed 数值传入 `avid_on_event` 的 float 参数，固定 seed `1397313073` 无法被 float 精确表示，会让 C# checksum 与 Native/JS 确定性分叉。Prevention：复用 float 事件 ABI 的整数 benchmark seed 固定在有符号 24 位精确范围并由 profile validator 断言；需要完整 int32 输入时新增通用 int32 export/call contract，禁止依靠 float 数值往返或 NaN bit-cast。

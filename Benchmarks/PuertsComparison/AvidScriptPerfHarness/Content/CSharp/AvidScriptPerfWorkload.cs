@@ -22,6 +22,7 @@ public static class AvidScriptPerfWorkload
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
+        ResultChecksum = Mix(ResultChecksum ^ 1);
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_event")]
@@ -29,6 +30,17 @@ public static class AvidScriptPerfWorkload
     {
         int workload = (packedWorkload >> WorkloadShift) & 0x7f;
         int iterations = packedWorkload & IterationMask;
+        if (workload == 7)
+        {
+            ResultChecksum = Mix(ResultChecksum ^ (int)seedValue);
+            return;
+        }
+        if (workload == 8)
+        {
+            ResultChecksum = (int)seedValue;
+            return;
+        }
+
         int accumulator = (int)seedValue;
 
         if (workload == 0)
@@ -64,6 +76,11 @@ public static class AvidScriptPerfWorkload
         {
             AAvidScriptPerfFixture fixture = UE.Self;
             accumulator = RunBatchScalar(fixture, iterations, accumulator);
+        }
+        else if (workload == 9)
+        {
+            AAvidScriptPerfFixture fixture = UE.Self;
+            accumulator = RunVectorRefOut(fixture, iterations, accumulator);
         }
         else
         {
@@ -152,6 +169,30 @@ public static class AvidScriptPerfWorkload
             accumulator = Mix(
                 accumulator ^
                 (result.AvidScriptSlot == expected.AvidScriptSlot ? index : -1));
+        }
+        return accumulator;
+    }
+
+    private static int RunVectorRefOut(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            FVector inOutValue = new FVector(
+                index & 31,
+                (index * 3) & 31,
+                (index * 7) & 31);
+            FVector outValue;
+            fixture.ReflectVectorRefOut(ref inOutValue, out outValue);
+            int packed = (int)inOutValue.X +
+                (int)inOutValue.Y * 37 +
+                (int)inOutValue.Z * 101 +
+                (int)outValue.X * 257 +
+                (int)outValue.Y * 521 +
+                (int)outValue.Z * 1031;
+            accumulator = Mix(accumulator ^ packed);
         }
         return accumulator;
     }
