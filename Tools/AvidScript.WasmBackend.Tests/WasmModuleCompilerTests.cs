@@ -13,9 +13,10 @@ internal static class WasmModuleCompilerTests
         ImportsAndCallsUseStableFunctionIndices();
         TypedOwnerImportUsesExactI64Signature();
         ConditionalControlFlowAndScalarOperatorsCompile();
+        CanonicalIntegerBitwiseOperatorsCompile();
         StateStructPointersAndSRetUseLinearMemory();
         HeapAtPageBoundaryStillReservesRuntimeStack();
-        return 8;
+        return 9;
     }
 
     private static void MinimalModuleHasCanonicalSectionsAndProvenance()
@@ -199,6 +200,72 @@ internal static class WasmModuleCompilerTests
         Assert(result.Succeeded, "multi-block scalar function should compile");
         Assert(WasmArtifactInspector.Inspect(result.Bytes).FunctionBodyCount == 1,
             "compiled CFG should retain one defined function body");
+    }
+
+    private static void CanonicalIntegerBitwiseOperatorsCompile()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestType int64Type = new(
+            "type:int64", "scalar", "i64", Array.Empty<GuestField>(), null, null, 8, 8);
+        GuestFunction int32Function = CreateBitwiseFunction(
+            "function:bitwise_i32", "type:int32");
+        GuestFunction int64Function = CreateBitwiseFunction(
+            "function:bitwise_i64", int64Type.Id);
+        module = module with
+        {
+            Types = module.Types.Concat(new[] { int64Type }).ToArray(),
+            Functions = new[] { int32Function, int64Function },
+            Exports = new[]
+            {
+                new GuestExport("guest_bitwise_i32", int32Function.Id),
+                new GuestExport("guest_bitwise_i64", int64Function.Id),
+            },
+        };
+
+        WasmCompilationResult result = WasmModuleCompiler.Compile(module);
+
+        Assert(result.Succeeded,
+            "canonical integer bitwise operators should compile: "
+                + string.Join(" | ", result.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+        Assert(WasmArtifactInspector.Inspect(result.Bytes).FunctionBodyCount == 2,
+            "canonical integer bitwise module should retain both defined function bodies");
+    }
+
+    private static GuestFunction CreateBitwiseFunction(string id, string typeId)
+    {
+        return new GuestFunction(
+            id,
+            new[]
+            {
+                new GuestRegister("value:left", typeId),
+                new GuestRegister("value:right", typeId),
+            },
+            new[]
+            {
+                new GuestRegister("value:and", typeId),
+                new GuestRegister("value:or", typeId),
+                new GuestRegister("value:xor", typeId),
+            },
+            typeId,
+            "block:entry",
+            new[]
+            {
+                new GuestBasicBlock(
+                    "block:entry",
+                    new[]
+                    {
+                        new GuestInstruction(
+                            "binary", "value:and", new[] { "value:left", "value:right" },
+                            null, "bitwise_and", null),
+                        new GuestInstruction(
+                            "binary", "value:or", new[] { "value:left", "value:right" },
+                            null, "bitwise_or", null),
+                        new GuestInstruction(
+                            "binary", "value:xor", new[] { "value:and", "value:or" },
+                            null, "bitwise_xor", null),
+                    },
+                    new GuestTerminator("return", null, null, null, "value:xor")),
+            });
     }
 
     private static void StateStructPointersAndSRetUseLinearMemory()

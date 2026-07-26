@@ -32,55 +32,135 @@ public static class AvidScriptPerfWorkload
         int iterations = packedWorkload & IterationMask;
         int accumulator = (int)seedValue;
 
-        for (int index = 0; index < iterations; ++index)
+        if (workload == 0)
         {
-            switch (workload)
-            {
-                case 0:
-                    accumulator = Mix(accumulator ^ index);
-                    break;
-                case 1:
-                    accumulator = Mix(fixture.ReflectNoOp(accumulator) ^ index);
-                    break;
-                case 2:
-                    accumulator = Mix(fixture.ReflectAddInt32(accumulator, index));
-                    break;
-                case 3:
-                    fixture.ScalarValue = accumulator ^ index;
-                    accumulator = Mix(fixture.ScalarValue);
-                    break;
-                case 4:
-                {
-                    FVector value = new FVector(
-                        index & 31,
-                        (index * 3) & 31,
-                        (index * 7) & 31);
-                    FVector result = fixture.ReflectVectorValue(value);
-                    int packed = (int)result.X ^
-                        ((int)result.Y << 8) ^
-                        ((int)result.Z << 16);
-                    accumulator = Mix(accumulator ^ packed);
-                    break;
-                }
-                case 5:
-                {
-                    UObject expected = fixture;
-                    UObject result = fixture.ReflectObjectRoundtrip(expected);
-                    accumulator = Mix(
-                        accumulator ^
-                        (result.AvidScriptSlot == expected.AvidScriptSlot ? index : -1));
-                    break;
-                }
-                case 6:
-                    accumulator = Mix(fixture.ReflectBatchAdd(accumulator, 8));
-                    break;
-                default:
-                    accumulator = Mix(accumulator ^ -1);
-                    break;
-            }
+            accumulator = RunPureInteger(iterations, accumulator);
+        }
+        else if (workload == 1)
+        {
+            accumulator = RunScalarNoOp(fixture, iterations, accumulator);
+        }
+        else if (workload == 2)
+        {
+            accumulator = RunScalarAdd(fixture, iterations, accumulator);
+        }
+        else if (workload == 3)
+        {
+            accumulator = RunProperty(fixture, iterations, accumulator);
+        }
+        else if (workload == 4)
+        {
+            accumulator = RunVectorValue(fixture, iterations, accumulator);
+        }
+        else if (workload == 5)
+        {
+            accumulator = RunObjectRoundtrip(fixture, iterations, accumulator);
+        }
+        else if (workload == 6)
+        {
+            accumulator = RunBatchScalar(fixture, iterations, accumulator);
+        }
+        else
+        {
+            accumulator = Mix(accumulator ^ -1);
         }
 
         ResultChecksum = accumulator;
+    }
+
+    private static int RunPureInteger(int iterations, int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            accumulator = Mix(accumulator ^ index);
+        }
+        return accumulator;
+    }
+
+    private static int RunScalarNoOp(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            accumulator = Mix(fixture.ReflectNoOp(accumulator) ^ index);
+        }
+        return accumulator;
+    }
+
+    private static int RunScalarAdd(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            accumulator = Mix(fixture.ReflectAddInt32(accumulator, index));
+        }
+        return accumulator;
+    }
+
+    private static int RunProperty(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            fixture.ScalarValue = accumulator ^ index;
+            accumulator = Mix(fixture.ScalarValue);
+        }
+        return accumulator;
+    }
+
+    private static int RunVectorValue(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            FVector value = new FVector(
+                index & 31,
+                (index * 3) & 31,
+                (index * 7) & 31);
+            FVector result = fixture.ReflectVectorValue(value);
+            int packed = (int)result.X ^
+                ((int)result.Y << 8) ^
+                ((int)result.Z << 16);
+            accumulator = Mix(accumulator ^ packed);
+        }
+        return accumulator;
+    }
+
+    private static int RunObjectRoundtrip(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        AActor expectedActor = fixture;
+        UObject expected = expectedActor;
+        for (int index = 0; index < iterations; ++index)
+        {
+            UObject result = fixture.ReflectObjectRoundtrip(expected);
+            accumulator = Mix(
+                accumulator ^
+                (result.AvidScriptSlot == expected.AvidScriptSlot ? index : -1));
+        }
+        return accumulator;
+    }
+
+    private static int RunBatchScalar(
+        AAvidScriptPerfFixture fixture,
+        int iterations,
+        int accumulator)
+    {
+        for (int index = 0; index < iterations; ++index)
+        {
+            accumulator = Mix(fixture.ReflectBatchAdd(accumulator, 8));
+        }
+        return accumulator;
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]

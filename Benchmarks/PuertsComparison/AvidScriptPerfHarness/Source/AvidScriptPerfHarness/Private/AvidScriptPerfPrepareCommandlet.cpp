@@ -7,6 +7,29 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 
+namespace
+{
+	FString MakeAvidScriptPerfBuildDiagnosticTail(
+		const FAvidScriptEditorCSharpBuildResult& BuildResult)
+	{
+		constexpr int32 MaximumDiagnosticCharacters = 16000;
+		FString Details = BuildResult.Stderr;
+		if (!BuildResult.Stdout.IsEmpty())
+		{
+			if (!Details.IsEmpty())
+			{
+				Details += TEXT("\n");
+			}
+			Details += BuildResult.Stdout;
+		}
+		if (Details.Len() > MaximumDiagnosticCharacters)
+		{
+			Details.RightInline(MaximumDiagnosticCharacters);
+		}
+		return Details;
+	}
+}
+
 UAvidScriptPerfPrepareCommandlet::UAvidScriptPerfPrepareCommandlet()
 {
 	IsClient = false;
@@ -62,12 +85,15 @@ int32 UAvidScriptPerfPrepareCommandlet::Main(const FString& Params)
 		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult),
 		BuildResult))
 	{
+		const FString DiagnosticTail =
+			MakeAvidScriptPerfBuildDiagnosticTail(BuildResult);
 		UE_LOG(
 			LogTemp,
 			Error,
-			TEXT("ASP53P1003 C# benchmark profile build failed | category=%s | message=%s"),
+			TEXT("ASP53P1003 C# benchmark profile build failed | category=%s | message=%s | diagnostics=%s"),
 			*BuildResult.ErrorCategory,
-			*BuildResult.ErrorMessage);
+			*BuildResult.ErrorMessage,
+			DiagnosticTail.IsEmpty() ? TEXT("<none>") : *DiagnosticTail);
 		return 4;
 	}
 

@@ -18,10 +18,12 @@ internal static class CSharpGuestOperatorTests
     {
         BoundUserOperatorLowersToCallable();
         IntegralShiftCountWidensToLeftOperandType();
+        BuiltInUnaryOperatorsLowerToGuestPrimitives();
+        IncrementAndDecrementPreserveValueSemantics();
         DirectBaseHandleUpcastsLowerToGuestCalls();
         MissingUserDefinedConversionFailsClosed();
         MalformedUserDefinedConversionsFailClosed();
-        return 5;
+        return 7;
     }
 
     private static void BoundUserOperatorLowersToCallable()
@@ -127,6 +129,100 @@ internal static class CSharpGuestOperatorTests
             "integral shift count should lower to valid Guest IR");
         Assert(conversion.OperandIds.Count == 1,
             "integral shift count should be explicitly widened before the binary instruction");
+    }
+
+    private static void BuiltInUnaryOperatorsLowerToGuestPrimitives()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_unary_int")]
+                public static int UnaryInt(int value)
+                {
+                    int negated = -value;
+                    int complemented = ~value;
+                    return +negated + complemented;
+                }
+
+                [UnmanagedCallersOnly(EntryPoint = "avid_unary_bool")]
+                public static bool UnaryBool(bool value) => !value;
+            }
+            """;
+        const string sourceId = "Scripts/BuiltInUnary.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded,
+            "built-in unary source should pass semantic analysis: "
+                + string.Join(" | ", semantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "built-in unary operators should lower to valid Guest IR");
+        Assert(instructions.Any(item => item.Op == "binary" && item.OperatorKind == "subtract")
+            && instructions.Any(item => item.Op == "binary" && item.OperatorKind == "bitwise_xor")
+            && instructions.Any(item => item.Op == "binary" && item.OperatorKind == "equals"),
+            "negate, bitwise-not, and logical-not should lower to existing Guest binary primitives");
+    }
+
+    private static void IncrementAndDecrementPreserveValueSemantics()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_step")]
+                public static int Step(int value)
+                {
+                    int postfixIncrement = value++;
+                    int prefixIncrement = ++value;
+                    int postfixDecrement = value--;
+                    int prefixDecrement = --value;
+                    return postfixIncrement
+                        + prefixIncrement
+                        + postfixDecrement
+                        + prefixDecrement
+                        + value;
+                }
+            }
+            """;
+        const string sourceId = "Scripts/IncrementAndDecrement.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+        Assert(semantic.Succeeded,
+            "increment/decrement source should pass semantic analysis: "
+                + string.Join(" | ", semantic.Diagnostics.Select(item => item.Code + ":" + item.Message)));
+
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(semantic, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(item => $"{item.Code}:{item.Message}")));
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "increment/decrement operators should lower to valid Guest IR");
+        Assert(instructions.Count(item => item.Op == "binary" && item.OperatorKind == "add") >= 2
+            && instructions.Count(item => item.Op == "binary" && item.OperatorKind == "subtract") >= 2,
+            "increment/decrement should lower to existing add/subtract primitives");
     }
 
     private static void DirectBaseHandleUpcastsLowerToGuestCalls()

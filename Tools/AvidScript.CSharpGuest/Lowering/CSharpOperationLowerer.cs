@@ -34,6 +34,8 @@ internal static class CSharpOperationLowerer
             "field_reference" => LowerFieldLoad(context, operation, blockOrdinal, instructions),
             "flow_capture" => LowerFlowCapture(context, operation, blockOrdinal, instructions),
             "flow_capture_reference" => LowerFlowCaptureReference(context, operation, blockOrdinal, instructions),
+            "increment_or_decrement" => LowerIncrementOrDecrement(
+                context, operation, blockOrdinal, instructions),
             "instance_reference" => CSharpAggregateOperationLowerer.LowerInstance(
                 context, operation, blockOrdinal),
             "invocation" => CSharpCallOperationLowerer.LowerInvocation(
@@ -45,6 +47,7 @@ internal static class CSharpOperationLowerer
                 context, operation, blockOrdinal, instructions),
             "property_reference" => CSharpCallOperationLowerer.LowerProperty(
                 context, operation, blockOrdinal, instructions),
+            "unary" => LowerUnary(context, operation, blockOrdinal, instructions),
             _ => Unsupported(context, operation, blockOrdinal),
         };
     }
@@ -231,6 +234,273 @@ internal static class CSharpOperationLowerer
             null,
             operation.OperatorKind,
             null));
+        return result;
+    }
+
+    private static GuestRegister? LowerUnary(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (operation.Children.Count != 1 || string.IsNullOrWhiteSpace(operation.OperatorKind))
+        {
+            return Malformed(context, operation, blockOrdinal);
+        }
+
+        if (operation.Constant is not null)
+        {
+            return LowerLiteral(context, operation, blockOrdinal, instructions);
+        }
+
+        GuestRegister? operand = LowerValue(
+            context, operation.Children[0], blockOrdinal, instructions);
+        if (operand is null)
+        {
+            return null;
+        }
+
+        if (operation.SymbolId is not null)
+        {
+            if (!context.TryGetCallTarget(
+                    operation.SymbolId,
+                    out SemanticCallable callable,
+                    out string targetId))
+            {
+                context.Add(
+                    "ASCG1005",
+                    $"Block {blockOrdinal} unary operator target '{operation.SymbolId}' is not a Guest function.");
+                return null;
+            }
+
+            return EmitCall(
+                context,
+                callable,
+                targetId,
+                new[] { operand.Id },
+                blockOrdinal,
+                instructions);
+        }
+
+        if (operation.OperatorKind == "plus")
+        {
+            GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
+            if (result is not null)
+            {
+                instructions.Add(new GuestInstruction(
+                    "copy", result.Id, new[] { operand.Id }, null, null, null));
+            }
+            return result;
+        }
+
+        GuestRegister? zero = EmitZero(
+            context, operation.TypeId, blockOrdinal, instructions);
+        if (zero is null)
+        {
+            return null;
+        }
+
+        return operation.OperatorKind switch
+        {
+            "negate" => EmitBinaryPrimitive(
+                context, operation.TypeId, "subtract", zero, operand, blockOrdinal, instructions),
+            "logical_not" => EmitBinaryPrimitive(
+                context, operation.TypeId, "equals", operand, zero, blockOrdinal, instructions),
+            "bitwise_not" => LowerBitwiseNot(
+                context, operation.TypeId, operand, zero, blockOrdinal, instructions),
+            _ => Unsupported(context, operation, blockOrdinal),
+        };
+    }
+
+    private static GuestRegister? LowerBitwiseNot(
+        CSharpFunctionLoweringContext context,
+        string? typeId,
+        GuestRegister operand,
+        GuestRegister zero,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? one = EmitOne(context, typeId, blockOrdinal, instructions);
+        GuestRegister? allBits = one is null
+            ? null
+            : EmitBinaryPrimitive(
+                context, typeId, "subtract", zero, one, blockOrdinal, instructions);
+        return allBits is null
+            ? null
+            : EmitBinaryPrimitive(
+                context, typeId, "bitwise_xor", operand, allBits, blockOrdinal, instructions);
+    }
+
+    private static GuestRegister? LowerIncrementOrDecrement(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (operation.Children.Count != 1
+            || operation.OperatorKind is not ("increment" or "decrement"))
+        {
+            return Malformed(context, operation, blockOrdinal);
+        }
+
+        SemanticOperation target = operation.Children[0];
+        GuestRegister? propertyReceiver = null;
+        GuestRegister? previous;
+        if (target.Kind == "property_reference")
+        {
+            propertyReceiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
+                context,
+                target,
+                blockOrdinal,
+                instructions);
+            previous = propertyReceiver is null
+                ? null
+                : CSharpCallOperationLowerer.LowerProperty(
+                    context,
+                    target,
+                    propertyReceiver,
+                    blockOrdinal,
+                    instructions);
+        }
+        else
+        {
+            previous = LowerValue(context, target, blockOrdinal, instructions);
+        }
+
+        if (previous is null)
+        {
+            return null;
+        }
+
+        GuestRegister? next;
+        if (operation.SymbolId is not null)
+        {
+            if (!context.TryGetCallTarget(
+                    operation.SymbolId,
+                    out SemanticCallable callable,
+                    out string targetId))
+            {
+                context.Add(
+                    "ASCG1005",
+                    $"Block {blockOrdinal} increment/decrement target '{operation.SymbolId}' is not a Guest function.");
+                return null;
+            }
+
+            next = EmitCall(
+                context,
+                callable,
+                targetId,
+                new[] { previous.Id },
+                blockOrdinal,
+                instructions);
+        }
+        else
+        {
+            GuestRegister? one = EmitOne(
+                context, operation.TypeId, blockOrdinal, instructions);
+            next = one is null
+                ? null
+                : EmitBinaryPrimitive(
+                    context,
+                    operation.TypeId,
+                    operation.OperatorKind == "increment" ? "add" : "subtract",
+                    previous,
+                    one,
+                    blockOrdinal,
+                    instructions);
+        }
+
+        if (next is null)
+        {
+            return null;
+        }
+
+        bool stored = propertyReceiver is not null
+            ? CSharpCallOperationLowerer.LowerPropertySetter(
+                context,
+                target,
+                propertyReceiver,
+                next,
+                blockOrdinal,
+                instructions)
+            : StoreValue(context, target, next, blockOrdinal, instructions);
+        return stored
+            ? operation.IsPostfix ? previous : next
+            : null;
+    }
+
+    private static GuestRegister? EmitZero(
+        CSharpFunctionLoweringContext context,
+        string? typeId,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? result = context.CreateTemporary(typeId, blockOrdinal);
+        if (result is not null)
+        {
+            instructions.Add(new GuestInstruction(
+                "constant",
+                result.Id,
+                Array.Empty<string>(),
+                null,
+                null,
+                new GuestConstant("zero", null)));
+        }
+        return result;
+    }
+
+    private static GuestRegister? EmitOne(
+        CSharpFunctionLoweringContext context,
+        string? typeId,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        SemanticType? semanticType = context.Document.Types.SingleOrDefault(
+            item => string.Equals(item.Id, typeId, StringComparison.Ordinal));
+        if (semanticType is null
+            || !context.TryLowerConstant(
+                typeId,
+                new SemanticConstant(semanticType.CanonicalName, "1"),
+                out GuestConstant constant))
+        {
+            context.Add("ASCG1004", $"Block {blockOrdinal} cannot encode a typed one constant for '{typeId}'.");
+            return null;
+        }
+
+        GuestRegister? result = context.CreateTemporary(typeId, blockOrdinal);
+        if (result is not null)
+        {
+            instructions.Add(new GuestInstruction(
+                "constant",
+                result.Id,
+                Array.Empty<string>(),
+                null,
+                null,
+                constant));
+        }
+        return result;
+    }
+
+    private static GuestRegister? EmitBinaryPrimitive(
+        CSharpFunctionLoweringContext context,
+        string? typeId,
+        string operatorKind,
+        GuestRegister left,
+        GuestRegister right,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? result = context.CreateTemporary(typeId, blockOrdinal);
+        if (result is not null)
+        {
+            instructions.Add(new GuestInstruction(
+                "binary",
+                result.Id,
+                new[] { left.Id, right.Id },
+                null,
+                operatorKind,
+                null));
+        }
         return result;
     }
 
@@ -727,6 +997,23 @@ internal static class CSharpOperationLowerer
                     "global_store", null, new[] { value.Id }, globalId, null, null));
                 return true;
             }
+        }
+
+        if (target.Kind == "flow_capture_reference")
+        {
+            GuestRegister? capture = context.GetOrCreateCapture(
+                target.CaptureId,
+                target.TypeId,
+                blockOrdinal);
+            if (capture is null
+                || !string.Equals(capture.TypeId, value.TypeId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            instructions.Add(new GuestInstruction(
+                "local_store", null, new[] { value.Id }, capture.Id, null, null));
+            return true;
         }
 
         if (target.Kind == "property_reference")

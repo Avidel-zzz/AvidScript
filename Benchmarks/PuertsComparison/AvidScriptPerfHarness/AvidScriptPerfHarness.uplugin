@@ -13,7 +13,7 @@
     {
       "Name": "AvidScriptPerfHarness",
       "Type": "Editor",
-      "LoadingPhase": "PostEngineInit"
+      "LoadingPhase": "Default"
     }
   ],
   "Plugins": [
