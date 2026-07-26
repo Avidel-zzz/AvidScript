@@ -390,6 +390,11 @@ Write-Output "假 Editor PID=$PID"
         '-D3D12',
         '-rHi=Vulkan',
         '-aBsLoG=x',
+        '/NullRHI',
+        '/D3D12',
+        '/Multiprocess',
+        '/run=Other',
+        '/AbsLog=x',
         $ProjectPath)) {
         $RejectedArguments = $RunnerArguments.Clone()
         $RejectedArguments.AdditionalEditorArguments = @($ReservedArgument)
@@ -707,4 +712,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=1 reserved_args=12 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=1 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 request_v2_rejected=1 raw_samples=120 process_stats=40 cross_process_stats=8 paired=6 mixed_rejections=4'

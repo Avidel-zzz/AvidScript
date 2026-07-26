@@ -131,7 +131,7 @@ function Test-ReservedEditorArgument {
         return $false
     }
     if ($Candidate -imatch (
-            '^-(' +
+            '^[-/](' +
             '(run|ExecCmds|AvidScriptPerfRequest|AvidScriptPerfResult|AbsLog)(=|:)|' +
             'Multiprocess$|NoCompile$|NullRHI$|' +
             '(D3D11|D3D12|DX11|DX12|Vulkan|OpenGL|Metal|SM5|SM6)$|' +
