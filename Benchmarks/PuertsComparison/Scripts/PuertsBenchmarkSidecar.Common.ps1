@@ -142,7 +142,7 @@ function Get-SidecarInstalledPuertsContentDigest {
         if ($IsKnownGeneratedFile) {
             continue
         }
-        $Entries.Add(('{0}`t{1}' -f $RelativePath, (Get-SidecarFileSha256 -Path $File.FullName)))
+        $Entries.Add(("{0}`t{1}" -f $RelativePath, (Get-SidecarFileSha256 -Path $File.FullName)))
     }
     $Values = @($Entries)
     [System.Array]::Sort($Values, [System.StringComparer]::Ordinal)

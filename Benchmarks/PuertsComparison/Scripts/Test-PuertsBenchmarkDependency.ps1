@@ -5,8 +5,10 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BenchmarkRoot = Split-Path -Parent $ScriptRoot
 $InstallerPath = Join-Path $ScriptRoot 'Install-PuertsBenchmarkDependency.ps1'
+$CommonPath = Join-Path $ScriptRoot 'PuertsBenchmarkSidecar.Common.ps1'
 $LockPath = Join-Path $BenchmarkRoot 'Config/PuertsDependency.lock.json'
 $SchemaPath = Join-Path $BenchmarkRoot 'Schema/PuertsDependencyLock.schema.json'
+. $CommonPath
 
 function Assert-True {
     param([Parameter(Mandatory = $true)][bool]$Condition, [Parameter(Mandatory = $true)][string]$Message)
@@ -211,6 +213,11 @@ try {
     'generated msbuild state' | Set-Content -LiteralPath $GeneratedCSharpObjPath -Encoding utf8NoBOM
     $Verified = Invoke-Installer Verify $HappyProject $CacheRoot $TestLockPath
     Assert-True ($Verified.ExitCode -eq 0) "happy-path verify failed: $($Verified.Text)"
+    $SidecarDigest = Get-SidecarInstalledPuertsContentDigest `
+        -Path (Join-Path $HappyProject 'Plugins/Puerts') `
+        -ManagedMarkerName '.avidscript-puerts-install.json'
+    Assert-True ($SidecarDigest.content_sha256 -ceq $Marker.installed_content_sha256) 'installer and sidecar content digests diverged'
+    Assert-True ($SidecarDigest.file_count -eq $Marker.installed_file_count) 'installer and sidecar file counts diverged'
     $LfLockPath = Join-Path $FixtureRoot 'fixture-lock-lf.json'
     $LfLockText = [System.IO.File]::ReadAllText($TestLockPath).Replace("`r`n", "`n").Replace("`r", "`n")
     [System.IO.File]::WriteAllText($LfLockPath, $LfLockText, [System.Text.UTF8Encoding]::new($false))
