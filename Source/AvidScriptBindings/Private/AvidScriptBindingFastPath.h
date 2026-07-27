@@ -41,6 +41,8 @@ using FFastPathThunk = bool(*)(
 struct FFastPathPlan
 {
 	EAvidScriptBindingFastPathKind Kind = EAvidScriptBindingFastPathKind::None;
+	EAvidScriptBindingInvocationMode HighestInvocationMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
 	UFunction* Function = nullptr;
 	FFastPathThunk Thunk = nullptr;
 	int32 FrameSize = 0;

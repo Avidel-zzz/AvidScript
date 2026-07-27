@@ -2736,6 +2736,19 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	for (const FAvidScriptRuntimeBindingInvocationPlan& Plan : Package->Impl->Plans)
+	{
+		if (Plan.FastPath.HighestInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
+		{
+			++Package->Impl->Instrumentation.QualifiedNativeDirectPlanCount;
+		}
+		else
+		{
+			++Package->Impl->Instrumentation.SemanticOnlyPlanCount;
+		}
+	}
+
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
@@ -2782,6 +2795,19 @@ bool FAvidScriptBindingPackage::TryGetFastPathKind(
 		return false;
 	}
 	OutKind = Impl->Plans[Ordinal].FastPath.Kind;
+	return true;
+}
+
+bool FAvidScriptBindingPackage::TryGetInvocationMode(
+	const uint32 Ordinal,
+	EAvidScriptBindingInvocationMode& OutMode) const
+{
+	OutMode = EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	if (!Impl->Plans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	OutMode = Impl->Plans[Ordinal].FastPath.HighestInvocationMode;
 	return true;
 }
 

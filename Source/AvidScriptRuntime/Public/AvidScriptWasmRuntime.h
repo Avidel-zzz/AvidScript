@@ -76,6 +76,8 @@ struct FAvidScriptWasmHostContext
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
+	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 	EAvidScriptDynamicHostCallTimingPolicy DynamicHostCallTimingPolicy =
 		EAvidScriptDynamicHostCallTimingPolicy::Disabled;
 };

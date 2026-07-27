@@ -19,6 +19,18 @@ enum class EAvidScriptBindingFastPathKind : uint8
 	ScalarI32PairToI32
 };
 
+enum class EAvidScriptBindingInvocationPolicy : uint8
+{
+	SemanticProcessEvent,
+	QualifiedNativeDirect
+};
+
+enum class EAvidScriptBindingInvocationMode : uint8
+{
+	SemanticProcessEvent,
+	QualifiedNativeDirect
+};
+
 struct FAvidScriptBindingPackageLoadResult
 {
 	bool bSucceeded = false;
@@ -39,6 +51,8 @@ struct FAvidScriptBindingPackageInstrumentation
 	uint64 ReflectedNameLookupCount = 0;
 	uint64 TypedThunkPlanCount = 0;
 	uint64 ReflectionFallbackPlanCount = 0;
+	uint64 QualifiedNativeDirectPlanCount = 0;
+	uint64 SemanticOnlyPlanCount = 0;
 };
 
 struct FAvidScriptBindingInvocationContext
@@ -49,6 +63,8 @@ struct FAvidScriptBindingInvocationContext
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
+	EAvidScriptBindingInvocationPolicy InvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingPackage
@@ -72,6 +88,9 @@ public:
 	bool TryGetFastPathKind(
 		uint32 Ordinal,
 		EAvidScriptBindingFastPathKind& OutKind) const;
+	bool TryGetInvocationMode(
+		uint32 Ordinal,
+		EAvidScriptBindingInvocationMode& OutMode) const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetObjectTypeCount() const;
 	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;
