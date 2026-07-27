@@ -16,6 +16,8 @@ internal static class SemanticCallableProjector
         "global::System.Runtime.InteropServices.DllImportAttribute";
     private const string UnmanagedCallersOnlyAttributeName =
         "global::System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute";
+    private const string DataLaneAttributeName =
+        "global::AvidScript.AvidScriptDataLaneAttribute";
 
     public static SemanticCallableProjection Project(
         SemanticCompilationContext context,
@@ -39,6 +41,8 @@ internal static class SemanticCallableProjector
                 string methodId = SemanticSymbolProjector.GetSymbolId(method);
                 SemanticCallableImport? import = ProjectImport(method, diagnostics, unit);
                 SemanticCallableExport? export = ProjectExport(method, diagnostics, unit);
+                SemanticCallableOptimization? optimization =
+                    ProjectOptimization(method, diagnostics, unit);
                 if (export is not null && !exportOwners.TryAdd(export.Name, method))
                 {
                     diagnostics.Add(CreateDiagnostic(
@@ -68,7 +72,8 @@ internal static class SemanticCallableProjector
                         ? SemanticSymbolProjector.GetSymbolId(associated)
                         : null,
                     import,
-                    export);
+                    export,
+                    optimization);
                 if (!callables.TryAdd(methodId, callable))
                 {
                     throw new InvalidOperationException($"Duplicate semantic callable id: {methodId}");
@@ -176,6 +181,52 @@ internal static class SemanticCallableProjector
         }
 
         return new SemanticCallableExport(name);
+    }
+
+    private static SemanticCallableOptimization? ProjectOptimization(
+        IMethodSymbol method,
+        ICollection<SemanticDiagnostic> diagnostics,
+        SemanticCompilationUnit unit)
+    {
+        AttributeData[] attributes = method.GetAttributes()
+            .Where(attribute =>
+                attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    == DataLaneAttributeName)
+            .ToArray();
+        if (attributes.Length == 0)
+        {
+            return null;
+        }
+
+        AttributeData attribute = attributes[0];
+        bool hasRequiredConstructor = attributes.Length == 1
+            && attribute.ConstructorArguments.Length == 2
+            && attribute.ConstructorArguments[0].Type?.SpecialType == SpecialType.System_String
+            && attribute.ConstructorArguments[1].Type?.SpecialType == SpecialType.System_Int32
+            && attribute.ConstructorArguments[0].Value is string
+            && attribute.ConstructorArguments[1].Value is int;
+        string? optimizationClass = hasRequiredConstructor
+            ? (string?)attribute.ConstructorArguments[0].Value
+            : null;
+        int bindingOrdinal = hasRequiredConstructor
+            ? (int)attribute.ConstructorArguments[1].Value!
+            : -1;
+        bool supportedClass = optimizationClass is
+            "none" or "snapshot_read" or "buffered_write" or "fused_call";
+        if (!hasRequiredConstructor
+            || !supportedClass
+            || (optimizationClass != "none" && bindingOrdinal < 0))
+        {
+            diagnostics.Add(CreateDiagnostic(
+                "ASCS5004",
+                "AvidScriptDataLane requires (string class, int ordinal), a supported class, " +
+                "and a non-negative ordinal for non-'none' classes.",
+                method,
+                unit));
+            return null;
+        }
+
+        return new SemanticCallableOptimization(optimizationClass!, bindingOrdinal);
     }
 
     private static AttributeData? FindAttribute(IMethodSymbol method, string canonicalName)

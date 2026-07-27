@@ -29,6 +29,7 @@ public static class CSharpGuestLowerer
         Dictionary<string, GuestType> guestTypes = typeResult.Types.ToDictionary(
             type => type.Id,
             StringComparer.Ordinal);
+        IReadOnlyList<GuestType> moduleTypes = typeResult.Types;
         IReadOnlySet<string>? reachableCallableIds = GetReachableCallableIds(document);
         GuestGlobal[] globals = LowerGlobals(document, guestTypes, diagnostics);
         GuestImport[] imports = LowerImports(document, reachableCallableIds, guestTypes, diagnostics);
@@ -39,6 +40,24 @@ public static class CSharpGuestLowerer
             guestTypes,
             dataPool,
             diagnostics).ToList();
+        CSharpDataLaneFusionResult fusion = CSharpDataLaneFusionPass.Run(
+            document,
+            moduleTypes,
+            imports,
+            functions);
+        if (!fusion.Succeeded)
+        {
+            foreach (GuestDiagnostic diagnostic in fusion.Diagnostics)
+            {
+                Add(diagnostics, "ASCG1003", diagnostic.Message);
+            }
+
+            return Failure(diagnostics);
+        }
+
+        moduleTypes = fusion.Types;
+        imports = fusion.Imports.ToArray();
+        functions = fusion.Functions.ToList();
         CSharpGameplayEventLoweringResult? gameplayEvents = CSharpGameplayEventLowerer.Lower(
             document,
             guestTypes,
@@ -60,7 +79,7 @@ public static class CSharpGuestLowerer
         }
 
         GuestLayoutResult layout = GuestLayoutBuilder.Build(
-            typeResult.Types,
+            moduleTypes,
             globals,
             dataPool.Segments);
         if (!layout.Succeeded || layout.Layout is null)
@@ -87,7 +106,7 @@ public static class CSharpGuestLowerer
                 document.SemanticVersion),
             true,
             layout.Layout,
-            typeResult.Types,
+            moduleTypes,
             imports,
             globals,
             layout.DataSegments,
@@ -187,6 +206,12 @@ public static class CSharpGuestLowerer
                 .OrderBy(parameter => parameter.Ordinal)
                 .Select(CSharpAbiTypeMapper.ParameterType)
                 .ToArray();
+            if (!callable.IsStatic)
+            {
+                parameterTypeIds = new[] { callable.ContainingTypeId }
+                    .Concat(parameterTypeIds)
+                    .ToArray();
+            }
             if (!guestTypes.ContainsKey(callable.ReturnTypeId)
                 || parameterTypeIds.Any(typeId => !guestTypes.ContainsKey(typeId)))
             {
@@ -200,7 +225,9 @@ public static class CSharpGuestLowerer
                 callable.Import.Name,
                 parameterTypeIds,
                 callable.ReturnTypeId,
-                DispatchClass: "semantic"));
+                DispatchClass: "semantic",
+                OptimizationClass: callable.Optimization?.OptimizationClass ?? "none",
+                BindingOrdinal: callable.Optimization?.BindingOrdinal ?? -1));
         }
 
         return imports.ToArray();

@@ -13,7 +13,8 @@ public sealed record SemanticCallable(
     [property: JsonPropertyOrder(6)] bool HasBody,
     [property: JsonPropertyOrder(7)] string? AssociatedSymbolId,
     [property: JsonPropertyOrder(8)] SemanticCallableImport? Import,
-    [property: JsonPropertyOrder(9)] SemanticCallableExport? Export);
+    [property: JsonPropertyOrder(9)] SemanticCallableExport? Export,
+    [property: JsonPropertyOrder(10)] SemanticCallableOptimization? Optimization = null);
 
 public sealed record SemanticCallableParameter(
     [property: JsonPropertyOrder(0)] int Ordinal,
@@ -28,3 +29,7 @@ public sealed record SemanticCallableImport(
 
 public sealed record SemanticCallableExport(
     [property: JsonPropertyOrder(0)] string Name);
+
+public sealed record SemanticCallableOptimization(
+    [property: JsonPropertyOrder(0)] string OptimizationClass,
+    [property: JsonPropertyOrder(1)] int BindingOrdinal);

@@ -10,8 +10,8 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 7;
-    private const string CurrentSemanticVersion = "1.7";
+    private const int CurrentSchemaVersion = 8;
+    private const string CurrentSemanticVersion = "1.8";
 
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {

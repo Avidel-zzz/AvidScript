@@ -166,6 +166,15 @@ public static class GuestModuleValidator
                 context.Add("ASIR1011", $"Import '{import.Id}' has an invalid dispatch class '{import.DispatchClass}'.");
             }
 
+            if (import.OptimizationClass is not
+                    ("none" or "snapshot_read" or "buffered_write" or "fused_call")
+                || (import.OptimizationClass != "none" && import.BindingOrdinal < 0))
+            {
+                context.Add(
+                    "ASIR1011",
+                    $"Import '{import.Id}' has invalid optimization metadata.");
+            }
+
             for (int index = 0; index < import.ParameterTypeIds.Count; ++index)
             {
                 context.RequireType(import.ParameterTypeIds[index], $"Import '{import.Id}' parameter {index}");

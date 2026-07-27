@@ -15,7 +15,100 @@ internal static class SemanticCallableTests
         InvalidGameplayCallbackShapesFailClosed();
         GameplayCallbacksAreScopedToTheScriptHost();
         GameplayCallbacksRequireConcreteNonGenericBodies();
-        return 8;
+        DataLaneMetadataIsProjectedForMethodsAndAccessors();
+        InvalidDataLaneMetadataFailsClosed();
+        return 10;
+    }
+
+    private static void DataLaneMetadataIsProjectedForMethodsAndAccessors()
+    {
+        const string source = """
+            using System;
+
+            namespace AvidScript
+            {
+                [AttributeUsage(AttributeTargets.Method)]
+                public sealed class AvidScriptDataLaneAttribute : Attribute
+                {
+                    public AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal) { }
+                }
+
+                public struct Target
+                {
+                    [AvidScriptDataLane("snapshot_read", 4)]
+                    public int Snapshot() => 0;
+
+                    public int Value
+                    {
+                        [AvidScriptDataLane("buffered_write", 9)]
+                        set { }
+                    }
+                }
+            }
+            """;
+        const string sourceId = "Scripts/DataLaneMetadata.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        Assert(document.Succeeded, "valid data-lane metadata should analyze successfully");
+        Assert(document.SchemaVersion == 8 && document.SemanticVersion == "1.8",
+            "data-lane metadata should publish semantic schema v8 / version 1.8");
+        SemanticCallable method = document.Callables.Single(callable =>
+            callable.MethodSymbolId.Contains(".Snapshot():int32", StringComparison.Ordinal));
+        Assert(method.Optimization == new SemanticCallableOptimization("snapshot_read", 4),
+            "method data-lane metadata should retain its class and binding ordinal");
+        SemanticCallable setter = document.Callables.Single(callable =>
+            callable.AssociatedSymbolId is not null
+            && callable.ReturnTypeId == "type:void"
+            && callable.Parameters.Count == 1);
+        Assert(setter.Optimization == new SemanticCallableOptimization("buffered_write", 9),
+            "accessor data-lane metadata should retain its class and binding ordinal");
+    }
+
+    private static void InvalidDataLaneMetadataFailsClosed()
+    {
+        const string source = """
+            using System;
+
+            namespace AvidScript
+            {
+                [AttributeUsage(AttributeTargets.Method)]
+                public sealed class AvidScriptDataLaneAttribute : Attribute
+                {
+                    public AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal) { }
+                    public AvidScriptDataLaneAttribute(int bindingOrdinal, string optimizationClass) { }
+                }
+            }
+
+            static class Script
+            {
+                [AvidScript.AvidScriptDataLane("unknown", 0)]
+                public static void UnknownClass() { }
+
+                [AvidScript.AvidScriptDataLane("fused_call", -1)]
+                public static void NegativeOrdinal() { }
+
+                [AvidScript.AvidScriptDataLane(3, "buffered_write")]
+                public static void WrongConstructorShape() { }
+            }
+            """;
+        const string sourceId = "Scripts/InvalidDataLaneMetadata.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        SemanticDiagnostic[] diagnostics = document.Diagnostics
+            .Where(diagnostic => diagnostic.Code == "ASCS5004")
+            .ToArray();
+        Assert(!document.Succeeded && diagnostics.Length == 3,
+            "each invalid data-lane attribute should produce one stable ASCS5004 error");
+        Assert(document.Callables
+                .Where(callable => callable.MethodSymbolId.Contains("Script.", StringComparison.Ordinal))
+                .All(callable => callable.Optimization is null),
+            "invalid data-lane attributes must not publish partial optimization metadata");
+        Assert(document.ControlFlowGraphs.Count == 0,
+            "invalid data-lane metadata should fail closed before executable graphs are published");
     }
 
     private static void GameplayCallbacksAreScopedToTheScriptHost()
@@ -246,8 +339,8 @@ internal static class SemanticCallableTests
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
 
         Assert(document.Succeeded, "natural gameplay callbacks should analyze successfully");
-        Assert(document.SchemaVersion == 7 && document.SemanticVersion == "1.7",
-            "gameplay callback artifacts should use schema v7 / semantic version 1.7");
+        Assert(document.SchemaVersion == 8 && document.SemanticVersion == "1.8",
+            "gameplay callback artifacts should use schema v8 / semantic version 1.8");
         Assert(document.GameplayEventCallbacks.Select(callback => callback.EventType)
             .SequenceEqual(new[] { 1, 2, 3, 4 }),
             "gameplay callbacks should use stable event-type order");

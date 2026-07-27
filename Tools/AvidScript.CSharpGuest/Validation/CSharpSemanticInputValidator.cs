@@ -56,7 +56,7 @@ internal static class CSharpSemanticInputValidator
         return ValidateTypes(document.Types)
             && ValidateTypeShapes(document.TypeShapes)
             && ValidateSymbols(document.Symbols)
-            && ValidateCallables(document.Callables)
+            && ValidateCallables(document.SchemaVersion, document.Callables)
             && ValidateGameplayEventCallbacks(document)
             && ValidateMethods(document.Methods)
             && ValidateReachability(document)
@@ -99,7 +99,9 @@ internal static class CSharpSemanticInputValidator
                 .Select(symbol => symbol.ContainingSymbolId + "\n" + symbol.Name));
     }
 
-    private static bool ValidateCallables(IReadOnlyList<SemanticCallable> callables)
+    private static bool ValidateCallables(
+        int schemaVersion,
+        IReadOnlyList<SemanticCallable> callables)
     {
         if (callables.Any(callable => callable is null)
             || !Unique(callables.Select(callable => callable.MethodSymbolId)))
@@ -130,7 +132,14 @@ internal static class CSharpSemanticInputValidator
                         || string.IsNullOrWhiteSpace(callable.Import.Name)))
                 || (callable.Export is not null
                     && (string.IsNullOrWhiteSpace(callable.Export.Name)
-                        || !exportNames.Add(callable.Export.Name))))
+                        || !exportNames.Add(callable.Export.Name)))
+                || (schemaVersion < 8 && callable.Optimization is not null)
+                || (schemaVersion >= 8
+                    && callable.Optimization is not null
+                    && (callable.Optimization.OptimizationClass is not
+                            ("none" or "snapshot_read" or "buffered_write" or "fused_call")
+                        || (callable.Optimization.OptimizationClass != "none"
+                            && callable.Optimization.BindingOrdinal < 0))))
             {
                 return false;
             }
@@ -299,6 +308,7 @@ internal static class CSharpSemanticInputValidator
             (5, "1.5") => true,
             (6, "1.6") => true,
             (7, "1.7") => true,
+            (8, "1.8") => true,
             _ => false,
         };
     }
