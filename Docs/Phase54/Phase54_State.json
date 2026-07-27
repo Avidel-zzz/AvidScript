@@ -139,7 +139,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 54 -ReviewEvidence <text>",
-  "revision": 11,
-  "updated_at_utc": "2026-07-27T23:54:39.5660108+00:00"
+  "next_action": "debt-update -Phase 54 -DebtId P54-PERF-001 -Status Verified -Evidence <text>",
+  "revision": 12,
+  "updated_at_utc": "2026-07-27T23:55:55.4581190+00:00"
 }

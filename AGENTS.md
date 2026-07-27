@@ -1524,3 +1524,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the workflow CLI was first called as `help` without its mandatory `-Phase`, then `status` was run in an isolated worktree that intentionally does not contain the main worktree's protected dirty files; both preflights rejected the call.
 - Prevention: read the CLI parameter block before invocation, always pass `-Phase`, and execute protected-dirty state transitions from the worktree that owns the recorded baseline after fast-forwarding reviewed commits. Use isolated worktrees for implementation and clean evidence, not for validating another worktree's local-only files.
+
+### 2026-07-28: next actions must match every freeze-blocking debt severity
+
+- Mistake: phase next-action derivation routed only Open/Fixing Blocker and Critical debt to `debt-update`, while the freeze transition also rejects Important debt. A valid state therefore advertised a `freeze` command guaranteed to fail.
+- Prevention: derive next actions from the same severity set used by the target transition guard. Phase workflow contracts add an Important debt after all batches complete and require `debt-update` to be the unique next action.

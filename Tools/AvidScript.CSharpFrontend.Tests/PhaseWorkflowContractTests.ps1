@@ -441,6 +441,10 @@ Invoke-ContractCase 'Transitions.DebtBlocksFreezeUntilVerified' {
         '-FoundBatch', 'P91.1', '-Scope', 'workflow', '-Evidence', 'failure',
         '-DeferralReason', 'batch aggregation', '-Remediation', 'fix before freeze')
     Assert-Condition ($Add.ExitCode -eq 0) "debt add failed: $($Add.Output)"
+    $AfterAdd = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
+    Assert-Condition ($AfterAdd.next_action -ceq
+        'debt-update -Phase 91 -DebtId P91-D001 -Status Verified -Evidence <text>') `
+        'Important debt must be the next action when it blocks freeze'
     Commit-Paths $Root @('Docs/Phase91/Phase91_State.json') 'record phase debt'
     Assert-CliFailurePreservesState $Root $StatePath @(
         'freeze', '-Phase', '91', '-ReviewEvidence', 'reviewed') 'ASPW2108'

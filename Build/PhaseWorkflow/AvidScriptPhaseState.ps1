@@ -315,7 +315,8 @@ function Get-AvidScriptPhaseNextAction {
     param([Parameter(Mandatory = $true)]$State)
 
     foreach ($Debt in @($State.debt)) {
-        if ($Debt.status -in @('Open', 'Fixing') -and $Debt.severity -in @('Blocker', 'Critical')) {
+        if ($Debt.status -in @('Open', 'Fixing') -and
+            $Debt.severity -in @('Blocker', 'Critical', 'Important')) {
             return "debt-update -Phase $($State.phase.id) -DebtId $($Debt.id) -Status Verified -Evidence <text>"
         }
     }
