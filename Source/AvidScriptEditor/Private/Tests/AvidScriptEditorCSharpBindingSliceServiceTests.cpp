@@ -133,6 +133,18 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	FAvidScriptBindingSelectionProfile AuthorizationProfile =
 		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();
 	AuthorizationProfile.SelfClassPath = TEXT("/Script/Engine.StaticMeshActor");
+	for (FAvidScriptReflectedClassSelection& Rule : AuthorizationProfile.Classes)
+	{
+		if (Rule.OwnerClassPath == TEXT("/Script/Engine.Actor"))
+		{
+			Rule.IncludeFunctions = {
+				TEXT("GetActorScale3D"),
+				TEXT("SetActorScale3D")
+			};
+			Rule.NativeDirectFunctions.Add(TEXT("GetActorScale3D"));
+			break;
+		}
+	}
 	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
 	if (!TestTrue(
 		TEXT("Complete gameplay authorization package with a class table publishes"),
@@ -181,9 +193,13 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
-	TestEqual(TEXT("Authorization descriptor is schema v6"), AuthorizationModel.SchemaVersion, 6);
+	TestEqual(TEXT("Native-direct authorization descriptor is schema v8"), AuthorizationModel.SchemaVersion, 8);
 	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
+	TestEqual(
+		TEXT("Authorization getter uses qualified native-direct dispatch"),
+		GetScale->DispatchMode,
+		FString(TEXT("qualified_native_direct")));
 	TestEqual(TEXT("Authorization setter has actor transform effect"), SetScale->ReloadEffect, EAvidScriptBindingReloadEffect::ActorTransform);
 
 	const TConstArrayView<FAvidScriptObjectLifecycleBindingSpec> LifecycleSpecs =
@@ -274,6 +290,10 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		if (Binding.UeFunction == TEXT("GetActorScale3D"))
 		{
 			TestEqual(TEXT("Slice preserves getter reload effect"), Binding.ReloadEffect, EAvidScriptBindingReloadEffect::None);
+			TestEqual(
+				TEXT("Slice preserves qualified native-direct dispatch"),
+				Binding.DispatchMode,
+				FString(TEXT("qualified_native_direct")));
 		}
 		else if (Binding.UeFunction == TEXT("SetActorScale3D"))
 		{

@@ -624,13 +624,43 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 				: EAvidScriptProjectComponentRegistration::None;
 		ObjectFactories.Add(MoveTemp(FactorySpec));
 	}
-	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
-			AuthorizationModel.PackageName,
-			FunctionSelections,
-			PropertySelections,
+	FAvidScriptBindingSelectionProfile SliceProfile;
+	SliceProfile.PackageName = AuthorizationModel.PackageName;
+	SliceProfile.ExplicitProperties = MoveTemp(PropertySelections);
+	TMap<FString, FAvidScriptReflectedClassSelection> NativeDirectClassRules;
+	for (const FAvidScriptBindingFunctionModel& Binding : AuthorizationModel.Bindings)
+	{
+		if (RequestedReflectedStableIds.Contains(Binding.StableId)
+			&& Binding.BindingKind == TEXT("function")
+			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+		{
+			FAvidScriptReflectedClassSelection& Rule =
+				NativeDirectClassRules.FindOrAdd(Binding.OwnerClass);
+			Rule.OwnerClassPath = Binding.OwnerClass;
+			Rule.NativeDirectFunctions.Add(FName(*Binding.UeMember));
+		}
+	}
+	for (FAvidScriptReflectedFunctionSelection& Selection : FunctionSelections)
+	{
+		if (FAvidScriptReflectedClassSelection* Rule =
+			NativeDirectClassRules.Find(Selection.OwnerClassPath))
+		{
+			Rule->IncludeFunctions.Add(Selection.FunctionName);
+		}
+		else
+		{
+			SliceProfile.ExplicitFunctions.Add(MoveTemp(Selection));
+		}
+	}
+	NativeDirectClassRules.GenerateValueArray(SliceProfile.Classes);
+
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			SliceProfile,
 			ClassReferences,
 			ObjectFactories,
 			SliceDescriptorJson,
+			SelectionResult,
 			GenerateResult))
 	{
 		SetAvidScriptCSharpBindingSliceFailure(
