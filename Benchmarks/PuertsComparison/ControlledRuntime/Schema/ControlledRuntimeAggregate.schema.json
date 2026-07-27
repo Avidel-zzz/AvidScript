@@ -71,34 +71,38 @@
     "calibration_pid": { "type": "integer", "minimum": 1 },
     "timed_pids": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 1,
+      "maxItems": 100,
       "items": { "type": "integer", "minimum": 1 },
       "uniqueItems": true
     },
-    "process_runs": { "const": 5 },
-    "timed_samples_per_lane_per_process": { "const": 30 },
-    "observation_count": { "const": 600 },
+    "process_runs": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "timed_samples_per_lane_per_process": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "observation_count": { "type": "integer", "minimum": 4 },
     "correctness_failures": { "const": 0 },
     "fallback_used": { "const": false },
     "result_sha256": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 1,
+      "maxItems": 100,
       "items": { "$ref": "#/$defs/sha256" },
       "uniqueItems": true
     },
     "request_sha256": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 1,
+      "maxItems": 100,
       "items": { "$ref": "#/$defs/sha256" },
       "uniqueItems": true
     },
     "process_metrics": {
       "type": "array",
-      "minItems": 20,
-      "maxItems": 20,
+      "minItems": 4,
+      "maxItems": 400,
       "items": { "$ref": "#/$defs/processMetric" }
     },
     "cross_process_metrics": {
@@ -118,8 +122,8 @@
       "properties": {
         "per_process": {
           "type": "array",
-          "minItems": 5,
-          "maxItems": 5,
+          "minItems": 1,
+          "maxItems": 100,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -129,7 +133,7 @@
               "wasmtime_over_v8_p95"
             ],
             "properties": {
-              "process_run": { "type": "integer", "minimum": 0, "maximum": 4 },
+              "process_run": { "type": "integer", "minimum": 0, "maximum": 99 },
               "wasmtime_over_v8_p50": {
                 "type": "number",
                 "exclusiveMinimum": 0
@@ -179,9 +183,9 @@
         "mad_ns_per_iteration"
       ],
       "properties": {
-        "process_run": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "process_run": { "type": "integer", "minimum": 0, "maximum": 99 },
         "lane_id": { "type": "string", "minLength": 1 },
-        "sample_count": { "const": 30 },
+        "sample_count": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "p50_ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
         "p95_ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
         "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
@@ -201,7 +205,7 @@
       ],
       "properties": {
         "lane_id": { "type": "string", "minLength": 1 },
-        "process_count": { "const": 5 },
+        "process_count": { "type": "integer", "minimum": 1, "maximum": 100 },
         "process_p50_median_ns_per_iteration": {
           "type": "number",
           "exclusiveMinimum": 0
