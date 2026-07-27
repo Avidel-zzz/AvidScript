@@ -485,6 +485,47 @@ namespace
 			}
 			return true;
 		}
+
+		bool InitializeForCorrectnessSmoke(
+			const FString& ModuleName,
+			const int32 InLaneId,
+			AAvidScriptPerfFixture& SharedFixture,
+			FString& OutError)
+		{
+			const TSharedPtr<IPlugin> Plugin =
+				IPluginManager::Get().FindPlugin(TEXT("AvidScriptPerfHarness"));
+			if (!Plugin.IsValid())
+			{
+				OutError = TEXT("AvidScriptPerfHarness plugin is not mounted");
+				return false;
+			}
+
+			FString ScriptSha256;
+			FString RuntimeArtifactSha256;
+			const FString ScriptPath = FPaths::Combine(
+				Plugin->GetContentDir(),
+				TEXT("JavaScript"),
+				ModuleName);
+			const FString RuntimeModulePath =
+				FModuleManager::Get().GetModuleFilename(TEXT("JsEnv"));
+			if (RuntimeModulePath.IsEmpty() ||
+				!GetPerfFileSha256(ScriptPath, ScriptSha256, OutError) ||
+				!GetPerfFileSha256(
+					RuntimeModulePath,
+					RuntimeArtifactSha256,
+					OutError))
+			{
+				return false;
+			}
+
+			return Initialize(
+				ModuleName,
+				InLaneId,
+				ScriptSha256,
+				RuntimeArtifactSha256,
+				SharedFixture,
+				OutError);
+		}
 	};
 
 	struct FAvidScriptLane
@@ -3731,7 +3772,7 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 
 	FString Error;
 	FPuertsLane Reflection;
-	if (!Reflection.Initialize(
+	if (!Reflection.InitializeForCorrectnessSmoke(
 		TEXT("reflection.js"),
 		AAvidScriptPerfFixture::ReflectionLaneId,
 		*Fixture,
@@ -3741,7 +3782,7 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 		return false;
 	}
 	FPuertsLane Static;
-	if (!Static.Initialize(
+	if (!Static.InitializeForCorrectnessSmoke(
 		TEXT("static.js"),
 		AAvidScriptPerfFixture::StaticLaneId,
 		*Fixture,
