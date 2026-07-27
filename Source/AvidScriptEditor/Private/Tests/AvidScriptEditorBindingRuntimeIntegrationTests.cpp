@@ -4327,4 +4327,504 @@ bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Param
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest,
+	"AvidScript.Editor.BindingRuntime.QualifiedNativeDirect",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestClassPath =
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsTestObject");
+	const TArray<FAvidScriptReflectedFunctionSelection> Selections = {
+		{ TestClassPath, TEXT("FastPathAddInt32") },
+		{ TestClassPath, TEXT("FastPathMaxInt32") },
+		{ TestClassPath, TEXT("ReflectionFallbackAddFloat") }
+	};
+	const auto ParseDescriptor = [this](
+		const FString& Label,
+		const FString& DescriptorJson,
+		FAvidScriptBindingPackageModel& OutDescriptor)
+	{
+		FString ErrorCategory;
+		FString ErrorSource;
+		if (!TestTrue(
+				*FString::Printf(TEXT("%s descriptor parses"), *Label),
+				FAvidScriptBindingDescriptorParser::Parse(
+					DescriptorJson,
+					OutDescriptor,
+					ErrorCategory,
+					ErrorSource)))
+		{
+			AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+			return false;
+		}
+		return true;
+	};
+	const auto LoadPackage = [this](
+		const FString& Label,
+		const FString& DescriptorJson,
+		TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
+		FAvidScriptBindingPackageLoadResult& OutLoadResult)
+	{
+		if (!TestTrue(
+				*FString::Printf(TEXT("%s package loads"), *Label),
+				FAvidScriptBindingPackage::LoadDescriptor(
+					DescriptorJson,
+					OutPackage,
+					OutLoadResult)))
+		{
+			AddError(
+				OutLoadResult.ErrorCategory
+				+ TEXT(": ")
+				+ OutLoadResult.ErrorDetails);
+			return false;
+		}
+		return true;
+	};
+
+	FString LegacyDescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult LegacyGenerateResult;
+	if (!TestTrue(
+			TEXT("Legacy descriptor generates without native-direct authorization"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.qualified_native_direct.legacy"),
+				Selections,
+				LegacyDescriptorJson,
+				LegacyGenerateResult)))
+	{
+		AddError(LegacyGenerateResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptBindingPackageModel LegacyDescriptor;
+	if (!ParseDescriptor(
+			TEXT("Legacy qualified-native-direct control"),
+			LegacyDescriptorJson,
+			LegacyDescriptor))
+	{
+		return false;
+	}
+	TSharedPtr<const FAvidScriptBindingPackage> LegacyPackage;
+	FAvidScriptBindingPackageLoadResult LegacyLoadResult;
+	if (!LoadPackage(
+			TEXT("Legacy qualified-native-direct control"),
+			LegacyDescriptorJson,
+			LegacyPackage,
+			LegacyLoadResult))
+	{
+		return false;
+	}
+	const FAvidScriptBindingPackageInstrumentation LegacyInstrumentation =
+		LegacyPackage->GetInstrumentation();
+	TestEqual(
+		TEXT("Legacy package has no qualified native-direct plans"),
+		LegacyInstrumentation.QualifiedNativeDirectPlanCount,
+		0ull);
+	TestEqual(
+		TEXT("Legacy package keeps every dynamic plan semantic"),
+		LegacyInstrumentation.SemanticOnlyPlanCount,
+		static_cast<uint64>(LegacyLoadResult.BindingCount));
+	TestEqual(
+		TEXT("Legacy mode counters partition every dynamic plan"),
+		LegacyInstrumentation.QualifiedNativeDirectPlanCount
+			+ LegacyInstrumentation.SemanticOnlyPlanCount,
+		static_cast<uint64>(LegacyLoadResult.BindingCount));
+	for (const FAvidScriptBindingFunctionModel& Binding : LegacyDescriptor.Bindings)
+	{
+		EAvidScriptBindingInvocationMode Mode =
+			EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+		TestTrue(
+			*FString::Printf(
+				TEXT("Legacy ordinal %d exposes an invocation mode"),
+				Binding.Ordinal),
+			LegacyPackage->TryGetInvocationMode(Binding.Ordinal, Mode));
+		TestEqual(
+			*FString::Printf(
+				TEXT("Legacy ordinal %d remains semantic"),
+				Binding.Ordinal),
+			Mode,
+			EAvidScriptBindingInvocationMode::SemanticProcessEvent);
+	}
+
+	FAvidScriptBindingSelectionProfile DirectProfile;
+	DirectProfile.PackageName =
+		TEXT("avidscript.test.qualified_native_direct");
+	FAvidScriptReflectedClassSelection DirectClass;
+	DirectClass.OwnerClassPath = TestClassPath;
+	DirectClass.IncludeFunctions = {
+		TEXT("FastPathAddInt32"),
+		TEXT("FastPathMaxInt32"),
+		TEXT("ReflectionFallbackAddFloat")
+	};
+	DirectClass.NativeDirectFunctions = DirectClass.IncludeFunctions;
+	DirectProfile.Classes.Add(MoveTemp(DirectClass));
+
+	FString DirectDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult DirectSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DirectGenerateResult;
+	if (!TestTrue(
+			TEXT("Qualified descriptor generates with explicit authorization"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				DirectProfile,
+				DirectDescriptorJson,
+				DirectSelectionResult,
+				DirectGenerateResult)))
+	{
+		AddError(DirectGenerateResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptBindingPackageModel DirectDescriptor;
+	if (!ParseDescriptor(
+			TEXT("Qualified native-direct"),
+			DirectDescriptorJson,
+			DirectDescriptor))
+	{
+		return false;
+	}
+	TSharedPtr<const FAvidScriptBindingPackage> DirectPackage;
+	FAvidScriptBindingPackageLoadResult DirectLoadResult;
+	if (!LoadPackage(
+			TEXT("Qualified native-direct"),
+			DirectDescriptorJson,
+			DirectPackage,
+			DirectLoadResult))
+	{
+		return false;
+	}
+
+	const auto FindBinding =
+		[&DirectDescriptor](const TCHAR* FunctionName)
+		{
+			return DirectDescriptor.Bindings.FindByPredicate(
+				[FunctionName](const FAvidScriptBindingFunctionModel& Binding)
+				{
+					return Binding.UeFunction == FunctionName;
+				});
+		};
+	const FAvidScriptBindingFunctionModel* AddBinding =
+		FindBinding(TEXT("FastPathAddInt32"));
+	const FAvidScriptBindingFunctionModel* MaxBinding =
+		FindBinding(TEXT("FastPathMaxInt32"));
+	const FAvidScriptBindingFunctionModel* FloatBinding =
+		FindBinding(TEXT("ReflectionFallbackAddFloat"));
+	if (!TestNotNull(TEXT("Qualified Add binding is present"), AddBinding)
+		|| !TestNotNull(TEXT("Qualified Max binding is present"), MaxBinding)
+		|| !TestNotNull(TEXT("Authorized float fallback binding is present"), FloatBinding))
+	{
+		return false;
+	}
+
+	const FAvidScriptBindingPackageInstrumentation DirectInstrumentation =
+		DirectPackage->GetInstrumentation();
+	TestEqual(
+		TEXT("Two authorized int32 functions qualify for native-direct"),
+		DirectInstrumentation.QualifiedNativeDirectPlanCount,
+		2ull);
+	TestEqual(
+		TEXT("Authorized unsupported float shape remains semantic-only"),
+		DirectInstrumentation.SemanticOnlyPlanCount,
+		1ull);
+	TestEqual(
+		TEXT("Qualified mode counters partition every dynamic plan"),
+		DirectInstrumentation.QualifiedNativeDirectPlanCount
+			+ DirectInstrumentation.SemanticOnlyPlanCount,
+		static_cast<uint64>(DirectLoadResult.BindingCount));
+
+	EAvidScriptBindingInvocationMode AddMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	EAvidScriptBindingInvocationMode MaxMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	EAvidScriptBindingInvocationMode FloatMode =
+		EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	TestTrue(
+		TEXT("Qualified Add ordinal exposes its invocation mode"),
+		DirectPackage->TryGetInvocationMode(AddBinding->Ordinal, AddMode));
+	TestTrue(
+		TEXT("Qualified Max ordinal exposes its invocation mode"),
+		DirectPackage->TryGetInvocationMode(MaxBinding->Ordinal, MaxMode));
+	TestTrue(
+		TEXT("Authorized float ordinal exposes its fallback mode"),
+		DirectPackage->TryGetInvocationMode(FloatBinding->Ordinal, FloatMode));
+	TestEqual(
+		TEXT("Add qualifies for native-direct"),
+		AddMode,
+		EAvidScriptBindingInvocationMode::QualifiedNativeDirect);
+	TestEqual(
+		TEXT("Max qualifies for native-direct"),
+		MaxMode,
+		EAvidScriptBindingInvocationMode::QualifiedNativeDirect);
+	TestEqual(
+		TEXT("Unsupported float shape falls back to semantic ProcessEvent"),
+		FloatMode,
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent);
+
+	EAvidScriptBindingInvocationMode InvalidMode =
+		EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	TestFalse(
+		TEXT("Invalid ordinal has no invocation mode"),
+		DirectPackage->TryGetInvocationMode(MAX_uint32, InvalidMode));
+	TestEqual(
+		TEXT("Invalid ordinal resets invocation mode to semantic"),
+		InvalidMode,
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent);
+
+	FAvidScriptBindingInvocationContext DefaultInvocationContext;
+	TestEqual(
+		TEXT("Default binding invocation policy remains semantic"),
+		DefaultInvocationContext.InvocationPolicy,
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent);
+	FAvidScriptWasmHostContext DefaultHostContext;
+	TestEqual(
+		TEXT("Default WASM host context requests semantic ProcessEvent"),
+		DefaultHostContext.BindingInvocationPolicy,
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent);
+	FAvidScriptRuntimeSession DefaultPolicySession;
+	DefaultPolicySession.SetHostContext(DefaultHostContext);
+	TestEqual(
+		TEXT("Session SetHostContext preserves the default semantic policy"),
+		DefaultPolicySession.GetTestSnapshot().HostContext.BindingInvocationPolicy,
+		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent);
+
+	UClass* TestClass = LoadObject<UClass>(nullptr, *TestClassPath);
+	if (!TestNotNull(TEXT("Qualified native-direct test class loads"), TestClass))
+	{
+		return false;
+	}
+	UObject* Target = NewObject<UObject>(GetTransientPackage(), TestClass);
+	if (!TestNotNull(TEXT("Qualified native-direct target is created"), Target))
+	{
+		return false;
+	}
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle Handle =
+		Registry.RegisterObject(Target, RegisterResult);
+	if (!TestTrue(
+			TEXT("Qualified native-direct target registers"),
+			RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingInvocationContext SemanticContext;
+	SemanticContext.ObjectRegistry = &Registry;
+	SemanticContext.OwnerHandle = Handle;
+	FAvidScriptBindingInvocationContext DirectContext = SemanticContext;
+	DirectContext.InvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(DirectPackage->GetRequiredScratchSize());
+	FAvidScriptBindingRuntimeTestGuestMemory GuestMemory(128);
+	const auto Dispatch =
+		[&](const uint32 Ordinal,
+			const TConstArrayView<uint64> Arguments,
+			const FAvidScriptBindingInvocationContext& Context,
+			FAvidScriptDynamicHostCallResult& OutResult)
+		{
+			FAvidScriptDynamicHostCall Call;
+			Call.BindingOrdinal = Ordinal;
+			Call.Arguments = Arguments;
+			Call.GuestMemory = &GuestMemory;
+			return DirectPackage->Dispatch(
+				Call,
+				Context,
+				Scratch,
+				OutResult);
+		};
+
+	constexpr uint32 SemanticAddAddress = 64;
+	constexpr uint32 DirectAddAddress = 68;
+	const uint64 SemanticAddArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		SemanticAddAddress
+	};
+	const uint64 DirectAddArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		DirectAddAddress
+	};
+	FAvidScriptDynamicHostCallResult SemanticAddResult;
+	FAvidScriptDynamicHostCallResult DirectAddResult;
+	TestTrue(
+		TEXT("Qualified Add executes with semantic ProcessEvent policy"),
+		Dispatch(
+			AddBinding->Ordinal,
+			MakeArrayView(SemanticAddArguments),
+			SemanticContext,
+			SemanticAddResult));
+	TestTrue(
+		TEXT("Qualified Add executes with native-direct policy"),
+		Dispatch(
+			AddBinding->Ordinal,
+			MakeArrayView(DirectAddArguments),
+			DirectContext,
+			DirectAddResult));
+	TestEqual(
+		TEXT("Semantic Add returns 42"),
+		GuestMemory.ReadValue<int32>(SemanticAddAddress),
+		42);
+	TestEqual(
+		TEXT("Native-direct Add returns 42"),
+		GuestMemory.ReadValue<int32>(DirectAddAddress),
+		42);
+	TestEqual(
+		TEXT("Add policies expose the same host-call return"),
+		DirectAddResult.ReturnValue,
+		SemanticAddResult.ReturnValue);
+
+	constexpr uint32 SemanticMaxAddress = 72;
+	constexpr uint32 DirectMaxAddress = 76;
+	const uint64 SemanticMaxArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		17,
+		29,
+		SemanticMaxAddress
+	};
+	const uint64 DirectMaxArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		17,
+		29,
+		DirectMaxAddress
+	};
+	FAvidScriptDynamicHostCallResult SemanticMaxResult;
+	FAvidScriptDynamicHostCallResult DirectMaxResult;
+	TestTrue(
+		TEXT("Qualified Max executes with semantic ProcessEvent policy"),
+		Dispatch(
+			MaxBinding->Ordinal,
+			MakeArrayView(SemanticMaxArguments),
+			SemanticContext,
+			SemanticMaxResult));
+	TestTrue(
+		TEXT("Qualified Max executes with native-direct policy"),
+		Dispatch(
+			MaxBinding->Ordinal,
+			MakeArrayView(DirectMaxArguments),
+			DirectContext,
+			DirectMaxResult));
+	TestEqual(
+		TEXT("Semantic Max returns 29"),
+		GuestMemory.ReadValue<int32>(SemanticMaxAddress),
+		29);
+	TestEqual(
+		TEXT("Native-direct Max returns 29"),
+		GuestMemory.ReadValue<int32>(DirectMaxAddress),
+		29);
+	TestEqual(
+		TEXT("Max policies expose the same host-call return"),
+		DirectMaxResult.ReturnValue,
+		SemanticMaxResult.ReturnValue);
+
+	constexpr uint32 FloatResultAddress = 80;
+	const uint64 FloatArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(1.25f),
+		MakeAvidScriptBindingRuntimeF32Cell(2.5f),
+		FloatResultAddress
+	};
+	FAvidScriptDynamicHostCallResult FloatResult;
+	TestTrue(
+		TEXT("Requested direct policy falls back for an unsupported float shape"),
+		Dispatch(
+			FloatBinding->Ordinal,
+			MakeArrayView(FloatArguments),
+			DirectContext,
+			FloatResult));
+	TestEqual(
+		TEXT("Unsupported direct-authorized float preserves semantic return"),
+		GuestMemory.ReadValue<float>(FloatResultAddress),
+		3.75f);
+
+	constexpr uint32 DefaultPolicyAddress = 84;
+	const uint64 DefaultPolicyArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		DefaultPolicyAddress
+	};
+	constexpr uint32 GuardedDirectAddress = 88;
+	const int32 GuardedDirectSentinel = 0x13572468;
+	GuestMemory.WriteValue(GuardedDirectAddress, GuardedDirectSentinel);
+	const uint64 GuardedDirectArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		GuardedDirectAddress
+	};
+	{
+		TGuardValue<bool> DebuggingGuard(
+			GIntraFrameDebuggingGameThread,
+			true);
+		FAvidScriptDynamicHostCallResult DefaultPolicyResult;
+		TestTrue(
+			TEXT("Default policy remains semantic during intra-frame debugging"),
+			Dispatch(
+				AddBinding->Ordinal,
+				MakeArrayView(DefaultPolicyArguments),
+				SemanticContext,
+				DefaultPolicyResult));
+		TestEqual(
+			TEXT("Default semantic policy returns 42 while direct is guarded"),
+			GuestMemory.ReadValue<int32>(DefaultPolicyAddress),
+			42);
+
+		FAvidScriptDynamicHostCallResult GuardedDirectResult;
+		TestFalse(
+			TEXT("Native-direct fails closed during intra-frame debugging"),
+			Dispatch(
+				AddBinding->Ordinal,
+				MakeArrayView(GuardedDirectArguments),
+				DirectContext,
+				GuardedDirectResult));
+		TestTrue(
+			TEXT("Debugging guard reports the native-direct failure category"),
+			GuardedDirectResult.Details.Contains(
+				TEXT("binding_native_direct_debugging_active")));
+	}
+	TestEqual(
+		TEXT("Debugging guard does not write Guest Memory"),
+		GuestMemory.ReadValue<int32>(GuardedDirectAddress),
+		GuardedDirectSentinel);
+
+	constexpr uint32 StaleResultAddress = 92;
+	const int32 StaleSentinel = 0x24681357;
+	GuestMemory.WriteValue(StaleResultAddress, StaleSentinel);
+	const uint64 StaleArguments[] = {
+		Handle.Slot,
+		Handle.Generation + 1,
+		10,
+		20,
+		StaleResultAddress
+	};
+	FAvidScriptDynamicHostCallResult StaleResult;
+	TestFalse(
+		TEXT("Native-direct rejects a stale handle generation"),
+		Dispatch(
+			AddBinding->Ordinal,
+			MakeArrayView(StaleArguments),
+			DirectContext,
+			StaleResult));
+	TestEqual(
+		TEXT("Rejected native-direct stale handle does not write Guest Memory"),
+		GuestMemory.ReadValue<int32>(StaleResultAddress),
+		StaleSentinel);
+
+	AddInfo(
+		TEXT("Direct authorization for Actor functions accepts bypassing "
+			"AActor::ProcessEvent S3 guards; equal observable returns here "
+			"do not claim full semantic equivalence."));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
