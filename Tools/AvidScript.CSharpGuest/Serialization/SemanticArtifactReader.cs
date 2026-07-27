@@ -11,6 +11,7 @@ internal static class SemanticArtifactReader
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         PropertyNameCaseInsensitive = false,
+        MaxDepth = SemanticSerializer.MaximumDepth,
     };
 
     public static SemanticDocument Deserialize(ReadOnlySpan<byte> artifact)

@@ -6,11 +6,14 @@ namespace AvidScript.CSharpFrontend;
 
 public static class FrontendSerializer
 {
+    public const int MaximumDepth = 256;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        MaxDepth = MaximumDepth,
         WriteIndented = true,
     };
 

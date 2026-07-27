@@ -65,6 +65,25 @@ internal static class Program
         Assert(first.SequenceEqual(second), "serialization should be byte deterministic");
         Assert(first.Length > 0 && first[^1] == (byte)'\n', "serialized artifact should use an LF terminator");
         Assert(firstDocument.Source.SourceId == "Scripts/Deterministic.cs", "source id should normalize Windows separators");
+
+        StringBuilder deepSource = new("public class DeepScript { static void Tick() {");
+        for (int depth = 0; depth < 40; ++depth)
+        {
+            deepSource.Append("if (true) {");
+        }
+        deepSource.Append("int value = 1;");
+        for (int depth = 0; depth < 40; ++depth)
+        {
+            deepSource.Append('}');
+        }
+        deepSource.Append("} }");
+        FrontendDocument deepDocument = FrontendAnalyzer.Analyze(
+            deepSource.ToString(),
+            "Scripts/DeepScript.cs");
+        Assert(deepDocument.Succeeded, "deep valid source should analyze successfully");
+        Assert(
+            FrontendSerializer.Serialize(deepDocument).Length > 0,
+            "deep valid syntax should serialize within the explicit artifact depth budget");
     }
 
     private static void CliWritesDeterministicArtifactsAndExitCodes()

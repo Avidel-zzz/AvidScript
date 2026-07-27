@@ -1,16 +1,20 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AvidScript.CSharpFrontend;
 
 namespace AvidScript.CSharpSemantic;
 
 public static class SemanticSerializer
 {
+    public const int MaximumDepth = FrontendSerializer.MaximumDepth;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        MaxDepth = MaximumDepth,
         WriteIndented = true,
     };
 

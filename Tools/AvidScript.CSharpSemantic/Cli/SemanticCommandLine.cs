@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using AvidScript.CSharpFrontend;
 
 namespace AvidScript.CSharpSemantic;
 
@@ -140,7 +141,9 @@ public static class SemanticCommandLine
 
     private static string ReadFrontendSourceSha256(string frontendPath)
     {
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(frontendPath));
+        using JsonDocument document = JsonDocument.Parse(
+            File.ReadAllBytes(frontendPath),
+            new JsonDocumentOptions { MaxDepth = FrontendSerializer.MaximumDepth });
         JsonElement root = document.RootElement;
         if (!root.TryGetProperty("language", out JsonElement language) ||
             language.ValueKind != JsonValueKind.String ||

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpSemantic;
@@ -12,9 +13,10 @@ internal static class SemanticCliTests
         SemanticFailureStillWritesArtifact();
         ReferenceSourceBindsExternalFacade();
         ExecutableReferenceSourceProjectsFacade();
+        DeepFrontendArtifactIsAccepted();
         MalformedFrontendReturnsArtifactError();
         InvalidArgumentsReturnUsageExitCode();
-        return 6;
+        return 7;
     }
 
     private static void SuccessfulCliWritesSemanticArtifact()
@@ -110,6 +112,30 @@ internal static class Native
         Assert(json.Contains("global::AvidScript.Actor.SetScale(float32):void", StringComparison.Ordinal),
             "executable facade wrapper should be serialized as a callable");
     }
+
+    private static void DeepFrontendArtifactIsAccepted()
+    {
+        StringBuilder source = new("class Script { static void Tick() {");
+        for (int depth = 0; depth < 40; ++depth)
+        {
+            source.Append("if (true) {");
+        }
+        source.Append("int value = 1;");
+        for (int depth = 0; depth < 40; ++depth)
+        {
+            source.Append('}');
+        }
+        source.Append("} }");
+        using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create(
+            source.ToString(),
+            "Scripts/DeepScript.cs");
+
+        int exitCode = SemanticCommandLine.Run(workspace.CreateArguments());
+
+        Assert(exitCode == 0, "semantic CLI should accept a frontend artifact within the shared depth budget");
+        Assert(File.Exists(workspace.OutputPath), "deep semantic input should publish an artifact");
+    }
+
     private static void MalformedFrontendReturnsArtifactError()
     {
         using TempSemanticWorkspace workspace = TempSemanticWorkspace.Create("class Script { }", "Scripts/Malformed.cs");
