@@ -75,4 +75,34 @@ bool FAvidScriptPerfCostLadderMissingDriverTest::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptPerfCostBudgetTest,
+	"AvidScript.PerformanceComparison.CostLadder.Budget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptPerfCostBudgetTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptPerfCostBudgetInput Input;
+	Input.TypedEmptyP95Ns = 20.0;
+	Input.PuertsStaticScalarP50Ns = 25.0;
+	Input.GenericEmptyP95Ns = 120.0;
+	Input.ImmutableEnvironmentDispatchP95Ns = 45.0;
+	FAvidScriptPerfCostBudgetResult Result;
+	FString Error;
+	TestTrue(TEXT("valid budget evaluates"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
+	TestEqual(TEXT("typed to Puerts ratio"), Result.TypedToPuertsRatio, 0.8);
+	TestEqual(TEXT("generic crossing delta"), Result.GenericMinusTypedNs, 100.0);
+	TestEqual(TEXT("immutable dispatch delta"), Result.ImmutableDispatchMinusTypedNs, 25.0);
+	TestTrue(TEXT("70 percent stop-loss is inclusive"), Result.bSingleCallBudgetConstrained);
+
+	Input.TypedEmptyP95Ns = 17.49;
+	TestTrue(TEXT("sub-threshold budget evaluates"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
+	TestFalse(TEXT("sub-threshold budget remains unconstrained"), Result.bSingleCallBudgetConstrained);
+
+	Input.PuertsStaticScalarP50Ns = 0.0;
+	TestFalse(TEXT("zero baseline rejects"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
+	TestTrue(TEXT("invalid budget has explicit error"), Error.Contains(TEXT("positive Puerts baseline")));
+	return true;
+}
+
 #endif

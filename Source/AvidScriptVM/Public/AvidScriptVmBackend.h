@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptVmTypedHostImport.h"
 #include "CoreMinimal.h"
 
 enum class EAvidScriptVmBackendKind : uint8
@@ -312,6 +313,8 @@ struct FAvidScriptVmLoadConfig
 	uint32 HeapSize = 64 * 1024;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
 	const FAvidScriptVmBindingPackage* BindingPackage = nullptr;
+	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
+	TConstArrayView<FAvidScriptVmTypedHostImport> TypedHostImports;
 };
 
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();

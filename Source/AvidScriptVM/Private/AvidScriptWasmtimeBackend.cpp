@@ -2,6 +2,7 @@
 
 #include "AvidScriptVmStaticHostImports.h"
 #include "AvidScriptWasmtimeApi.h"
+#include "AvidScriptWasmtimeTypedHostApi.h"
 #include "AvidScriptWasmModuleLayout.h"
 
 #include "Containers/StringConv.h"
@@ -150,6 +151,14 @@ void SetWasmtimeError(FAvidScriptVmError& OutError, const TCHAR* Category, const
 	OutError.Details = Details;
 }
 
+FString MakeWasmtimeImportIdentityKey(const FString& ModuleName, const FString& ImportName)
+{
+	return FString::Printf(TEXT("%d:"), ModuleName.Len())
+		+ ModuleName
+		+ FString::Printf(TEXT("%d:"), ImportName.Len())
+		+ ImportName;
+}
+
 FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo()
 {
 	FAvidScriptVmBackendInfo Info;
@@ -270,6 +279,16 @@ struct FAvidScriptWasmtimeDynamicHostContext
 	FAvidScriptVmAbiSignature Signature;
 };
 
+struct FAvidScriptWasmtimeTypedHostContext
+{
+	FAvidScriptWasmtimeBackend* Backend = nullptr;
+	uint32 BindingOrdinal = MAX_uint32;
+	FString StableId;
+	FString ModuleName;
+	FString ImportName;
+	EAvidScriptVmTypedHostShape Shape = EAvidScriptVmTypedHostShape::None;
+};
+
 struct FAvidScriptWasmtimeExportEntry
 {
 	FString Name;
@@ -350,6 +369,16 @@ public:
 
 		ModuleId = InModuleId;
 		HostDispatcher = Config.HostDispatcher;
+		TypedHostDispatcher = Config.TypedHostDispatcher;
+		if (!ValidateTypedImports(
+			ModuleLayout,
+			Config.BindingPackage,
+			Config.TypedHostImports,
+			OutError))
+		{
+			PerformUnload();
+			return false;
+		}
 
 		const double RuntimeInitStart = FPlatformTime::Seconds();
 #if PLATFORM_WINDOWS
@@ -414,6 +443,12 @@ public:
 			return false;
 		}
 		if (!DefineStaticImports(OutError))
+		{
+			LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
+			PerformUnload();
+			return false;
+		}
+		if (!DefineTypedImports(Config.TypedHostImports, OutError))
 		{
 			LoadMetrics.ModuleInstantiateMs = MeasureWasmtimeElapsedMs(InstantiateStart);
 			PerformUnload();
@@ -1069,6 +1104,66 @@ public:
 		}
 		return true;
 	}
+
+	int32 InvokeTypedEmptyI32(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			TypedHostDispatcher->DispatchEmptyI32(HostContext.BindingOrdinal, OutValue);
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			return 0;
+		}
+		RecordPendingHostFailure(
+			HostContext.ModuleName,
+			HostContext.ImportName,
+			Status == EAvidScriptVmTypedHostStatus::FallbackRequired
+				? TEXT("The typed host import requires semantic fallback, but its dedicated ABI cannot fall back in place.")
+				: TEXT("The typed host dispatcher rejected the call."));
+		return 1;
+	}
+
+	int32 InvokeTypedI32Pair(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 Left,
+		int32 Right,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			TypedHostDispatcher->DispatchI32PairToI32(
+				HostContext.BindingOrdinal,
+				Left,
+				Right,
+				OutValue);
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			return 0;
+		}
+		RecordPendingHostFailure(
+			HostContext.ModuleName,
+			HostContext.ImportName,
+			Status == EAvidScriptVmTypedHostStatus::FallbackRequired
+				? TEXT("The typed host import requires semantic fallback, but its dedicated ABI cannot fall back in place.")
+				: TEXT("The typed host dispatcher rejected the call."));
+		return 1;
+	}
 #endif
 
 private:
@@ -1128,6 +1223,193 @@ private:
 			ArgumentCount,
 			Results,
 			ResultCount);
+	}
+
+	static int32 TypedEmptyI32Callback(void* Environment, int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedEmptyI32(*HostContext, *OutValue);
+	}
+
+	static int32 TypedI32PairCallback(
+		void* Environment,
+		int32 Left,
+		int32 Right,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedI32Pair(
+			*HostContext,
+			Left,
+			Right,
+			*OutValue);
+	}
+
+	bool ValidateTypedImports(
+		const FAvidScriptWasmModuleLayout& ModuleLayout,
+		const FAvidScriptVmBindingPackage* BindingPackage,
+		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+		FAvidScriptVmError& OutError)
+	{
+		TypedImportIdentityKeys.Reset();
+		if (Imports.IsEmpty())
+		{
+			return true;
+		}
+		if (TypedHostDispatcher == nullptr || BindingPackage == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("typed_host_config_invalid"),
+				TEXT("Typed host imports require both a dispatcher and a verified binding package."));
+			return false;
+		}
+
+		TMap<FString, const FAvidScriptVmDynamicImport*> PackageImports;
+		PackageImports.Reserve(BindingPackage->Imports.Num());
+		for (const FAvidScriptVmDynamicImport& Import : BindingPackage->Imports)
+		{
+			PackageImports.Add(
+				MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName),
+				&Import);
+		}
+		TMap<FString, int32> ActualImportCounts;
+		ActualImportCounts.Reserve(ModuleLayout.FunctionImports.Num());
+		for (const FAvidScriptWasmFunctionImport& Import : ModuleLayout.FunctionImports)
+		{
+			++ActualImportCounts.FindOrAdd(
+				MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName));
+		}
+
+		for (const FAvidScriptVmTypedHostImport& Import : Imports)
+		{
+			const FString IdentityKey =
+				MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName);
+			const TCHAR* ExpectedSignature = nullptr;
+			switch (Import.Shape)
+			{
+			case EAvidScriptVmTypedHostShape::EmptyI32:
+				ExpectedSignature = TEXT("()i");
+				break;
+			case EAvidScriptVmTypedHostShape::I32PairToI32:
+				ExpectedSignature = TEXT("(ii)i");
+				break;
+			default:
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_shape_unavailable");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("The requested typed host shape is not implemented by this backend stage.");
+				return false;
+			}
+			if (Import.StableId.IsEmpty()
+				|| Import.BindingOrdinal == MAX_uint32
+				|| Import.ModuleName.IsEmpty()
+				|| Import.ImportName.IsEmpty()
+				|| Import.Signature != ExpectedSignature)
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_contract_invalid");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("Typed host metadata is incomplete or does not match its fixed shape signature.");
+				return false;
+			}
+			if (IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)
+				|| TypedImportIdentityKeys.Contains(IdentityKey))
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_identity_conflict");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("Typed host import identities must be unique and cannot replace static imports.");
+				return false;
+			}
+			const FAvidScriptVmDynamicImport* const* PackageImport = PackageImports.Find(IdentityKey);
+			if (PackageImport == nullptr
+				|| (*PackageImport)->StableId != Import.StableId
+				|| (*PackageImport)->Ordinal != Import.BindingOrdinal
+				|| (*PackageImport)->Signature != Import.Signature
+				|| ActualImportCounts.FindRef(IdentityKey) != 1)
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_binding_mismatch");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("Typed host metadata does not match the binding package and actual WASM imports.");
+				return false;
+			}
+			TypedImportIdentityKeys.Add(IdentityKey);
+		}
+		return true;
+	}
+
+	bool DefineTypedImports(
+		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+		FAvidScriptVmError& OutError)
+	{
+		TypedHostContexts.Reserve(Imports.Num());
+		for (const FAvidScriptVmTypedHostImport& Import : Imports)
+		{
+			TUniquePtr<FAvidScriptWasmtimeTypedHostContext> HostContext =
+				MakeUnique<FAvidScriptWasmtimeTypedHostContext>();
+			HostContext->Backend = this;
+			HostContext->BindingOrdinal = Import.BindingOrdinal;
+			HostContext->StableId = Import.StableId;
+			HostContext->ModuleName = Import.ModuleName;
+			HostContext->ImportName = Import.ImportName;
+			HostContext->Shape = Import.Shape;
+			FTCHARToUTF8 ModuleNameUtf8(*HostContext->ModuleName);
+			FTCHARToUTF8 ImportNameUtf8(*HostContext->ImportName);
+			FAvidScriptWasmtimeTypedHostContext* HostContextPointer = HostContext.Get();
+			TypedHostContexts.Add(MoveTemp(HostContext));
+
+			AvidScriptWasmtimeFailure* DefineFailure = nullptr;
+			if (Import.Shape == EAvidScriptVmTypedHostShape::EmptyI32)
+			{
+				DefineFailure = avidscript_wasmtime_linker_define_empty_i32(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedEmptyI32Callback,
+					HostContextPointer);
+			}
+			else
+			{
+				DefineFailure = avidscript_wasmtime_linker_define_i32_pair(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedI32PairCallback,
+					HostContextPointer);
+			}
+			if (DefineFailure != nullptr)
+			{
+				TArray<FAvidScriptVmStackFrame> Frames;
+				bool bWasTrap = false;
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_registration_failed");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = ConsumeWasmtimeFailure(DefineFailure, Frames, bWasTrap);
+				return false;
+			}
+		}
+		return true;
 	}
 
 	bool DefineStaticImportForModule(
@@ -1209,6 +1491,11 @@ private:
 		DynamicHostContexts.Reserve(BindingPackage.Imports.Num());
 		for (const FAvidScriptVmDynamicImport& Import : BindingPackage.Imports)
 		{
+			if (TypedImportIdentityKeys.Contains(
+				MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName)))
+			{
+				continue;
+			}
 			TUniquePtr<FAvidScriptWasmtimeDynamicHostContext> HostContext =
 				MakeUnique<FAvidScriptWasmtimeDynamicHostContext>();
 			HostContext->Backend = this;
@@ -1307,6 +1594,8 @@ private:
 		}
 		HostContexts.Reset();
 		DynamicHostContexts.Reset();
+		TypedHostContexts.Reset();
+		TypedImportIdentityKeys.Reset();
 		ActiveCaller = nullptr;
 		if (Store != nullptr)
 		{
@@ -1328,6 +1617,7 @@ private:
 		ExportLookupCount = 0;
 		ModuleId.Reset();
 		HostDispatcher = nullptr;
+		TypedHostDispatcher = nullptr;
 		bUnloadDeferred = false;
 		AdvanceBackendInstanceIdentity();
 	}
@@ -1343,6 +1633,7 @@ private:
 	TSet<uint64> OwnedBackendInstanceIdentities;
 	FString ModuleId;
 	IAvidScriptHostDispatcher* HostDispatcher = nullptr;
+	IAvidScriptVmTypedHostDispatcher* TypedHostDispatcher = nullptr;
 	FAvidScriptVmLoadMetrics LoadMetrics;
 	TMap<FString, uint32> ExportNameToIndex;
 	uint32 ExportGeneration = 1;
@@ -1363,6 +1654,8 @@ private:
 	AvidScriptWasmtimeCaller* ActiveCaller = nullptr;
 	TArray<TUniquePtr<FAvidScriptWasmtimeHostContext>> HostContexts;
 	TArray<TUniquePtr<FAvidScriptWasmtimeDynamicHostContext>> DynamicHostContexts;
+	TArray<TUniquePtr<FAvidScriptWasmtimeTypedHostContext>> TypedHostContexts;
+	TSet<FString> TypedImportIdentityKeys;
 	TArray<FAvidScriptWasmtimeExportEntry> ExportEntries;
 #endif
 };

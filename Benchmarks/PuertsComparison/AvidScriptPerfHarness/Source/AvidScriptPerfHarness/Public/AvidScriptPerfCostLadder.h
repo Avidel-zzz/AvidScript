@@ -36,6 +36,22 @@ struct FAvidScriptPerfCostLadderDrivers
 	FAvidScriptPerfCostDriver ImmutableEnvironmentDispatch;
 };
 
+struct FAvidScriptPerfCostBudgetInput
+{
+	double TypedEmptyP95Ns = 0.0;
+	double PuertsStaticScalarP50Ns = 0.0;
+	double GenericEmptyP95Ns = 0.0;
+	double ImmutableEnvironmentDispatchP95Ns = 0.0;
+};
+
+struct FAvidScriptPerfCostBudgetResult
+{
+	double TypedToPuertsRatio = 0.0;
+	double GenericMinusTypedNs = 0.0;
+	double ImmutableDispatchMinusTypedNs = 0.0;
+	bool bSingleCallBudgetConstrained = false;
+};
+
 class AVIDSCRIPTPERFHARNESS_API FAvidScriptPerfCostLadder
 {
 public:
@@ -46,4 +62,9 @@ public:
 		FString& OutError);
 
 	static FName GetStageName(EAvidScriptPerfCostStage Stage);
+
+	static bool EvaluateBudget(
+		const FAvidScriptPerfCostBudgetInput& Input,
+		FAvidScriptPerfCostBudgetResult& OutResult,
+		FString& OutError);
 };

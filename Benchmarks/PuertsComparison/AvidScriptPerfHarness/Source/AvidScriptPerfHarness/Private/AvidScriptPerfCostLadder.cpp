@@ -86,3 +86,34 @@ FName FAvidScriptPerfCostLadder::GetStageName(const EAvidScriptPerfCostStage Sta
 		return NAME_None;
 	}
 }
+
+bool FAvidScriptPerfCostLadder::EvaluateBudget(
+	const FAvidScriptPerfCostBudgetInput& Input,
+	FAvidScriptPerfCostBudgetResult& OutResult,
+	FString& OutError)
+{
+	OutResult = FAvidScriptPerfCostBudgetResult();
+	OutError.Reset();
+	if (!FMath::IsFinite(Input.TypedEmptyP95Ns)
+		|| !FMath::IsFinite(Input.PuertsStaticScalarP50Ns)
+		|| !FMath::IsFinite(Input.GenericEmptyP95Ns)
+		|| !FMath::IsFinite(Input.ImmutableEnvironmentDispatchP95Ns)
+		|| Input.TypedEmptyP95Ns < 0.0
+		|| Input.PuertsStaticScalarP50Ns <= 0.0
+		|| Input.GenericEmptyP95Ns < 0.0
+		|| Input.ImmutableEnvironmentDispatchP95Ns < 0.0)
+	{
+		OutError = TEXT("Cost budget inputs must be finite non-negative timings with a positive Puerts baseline.");
+		return false;
+	}
+
+	OutResult.TypedToPuertsRatio =
+		Input.TypedEmptyP95Ns / Input.PuertsStaticScalarP50Ns;
+	OutResult.GenericMinusTypedNs =
+		Input.GenericEmptyP95Ns - Input.TypedEmptyP95Ns;
+	OutResult.ImmutableDispatchMinusTypedNs =
+		Input.ImmutableEnvironmentDispatchP95Ns - Input.TypedEmptyP95Ns;
+	OutResult.bSingleCallBudgetConstrained =
+		OutResult.TypedToPuertsRatio >= 0.70;
+	return true;
+}
