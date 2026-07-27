@@ -51,6 +51,17 @@ P1.2 document WAMR third-party strategy
 - Document each implemented group with status, evidence, verification result, and remaining risk.
 - AvidScript remains WASM-first, WAMR-first feasibility, C#-friendly, PC-first, and mobile-aware.
 
+### Simplified Parallel Phase Workflow
+
+- 架构、模块边界、公开接口、Schema、ABI 与验收指标冻结后，立即按独立写集拆分功能组并行开发；并行写任务必须使用独立 Git worktree/branch，或能够证明写集完全不重叠。
+- 禁止把阶段拆成“小任务实现 -> 独立复审 -> 再复审”的串行链。普通 Task 完成后只记录状态和非阻塞债务，不单独启动审查；整个 Phase 集成后只执行一次集中代码与架构审查。
+- 集中审查一次列全 findings，随后只安排一个集中修复批次。除修复引入新的 Blocker/Critical 外，不为单个 finding 再启动独立复审。
+- 只有 ABI/Schema 兼容性、安全、资源所有权与生命周期、数据破坏、线程并发、跨平台或 packaged target 编译等阻塞性高风险，允许在实现批次中途打断并执行最小探针。普通测试补全、文档、样式、低风险边界和非关键优化统一留到阶段 Gate。
+- 测试代码可随功能编写，但 UE 构建、Automation 和正式 benchmark 默认只在阶段末统一执行一次；不得用逐 Task 构建、重复全量回归或无意义 flag 组合测试替代工程判断。
+- 接口冻结后的编码代理必须面向落盘结果工作：开始后 10 分钟内提交第一份代码 diff，或返回精确 blocker 与已检查证据。超过时限仍停留在开放式分析且没有文件变化时，立即中断、缩小任务或收回主线。
+- 模型和代理按职责分配：架构冻结、跨层高风险判断和阶段末集中审查使用深度推理；边界明确的实现、测试补全和文档使用快速实现代理。禁止让高成本代理对已冻结的小接口重复开放式分析。
+- 固定阶段顺序为：接口冻结 -> 并行功能组实现 -> 集成 -> 一次集中审查 -> 一次集中修复 -> 一次统一构建/测试/benchmark Gate -> 中文收尾与发布。
+
 ## Documentation Workflow
 
 - Project-level decision docs live under:
@@ -1270,3 +1281,4 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-27 P54.5 Puerts 安装路径沿用旧摘要猜测：审计 `FBlueprintContextTracker` 时直接检索当前 worktree 中不存在的 `Benchmarks/.../Plugins/Puerts/Source` 与 `Plugins/Puerts/Source`，命令在读取前失败。Prevention：第三方 managed dependency 的物理位置可能位于短路径 Gate 工程或阶段证据目录；每轮首次访问必须先用 `rg --files` 或受管依赖 marker 定位当前安装根，摘要中的旧工程相对路径只能作为搜索关键词，不能直接作为 shell 路径。
 - 2026-07-27 P54.5 Windows 通配路径禁令复发：定位 dynamic host-call result 时再次把 `Source/AvidScript*` 作为 `rg` 路径参数，Win32 在检索前以非法路径拒绝。Prevention：`rg` 的路径位置机械只允许已确认存在的字面目录或文件；模块范围使用 `Source` 加 `-g 'AvidScript*'`/文件扩展过滤，提交命令前扫描所有 path 参数并拒绝 `*`、`?`。
 - 2026-07-27 P54.5 独立只读区段再次合并：审查 descriptor identity 与 parser 时把两个 `Get-Content` 作为换行分隔的两条命令放进同一次 `shell_command`；命令成功且未修改文件，但绕过了一调用一逻辑读取的审计边界。Prevention：不仅扫描 `;`、`&&`、`||`，还要按 shell 换行拆分顶层命令；即使读取同一文件的两个区段，也分别调用并让每次输出只对应一个审查问题。
+- 2026-07-27 P54.5 Runtime classifier 直接访问 editor-only 字段：qualified-native classifier 无条件读取 `UClass::ClassGeneratedBy`，该字段在 UE5.8 仅由 `WITH_EDITORONLY_DATA` 提供，独立审查发现 packaged/mobile target 会编译失败。Prevention：Runtime 模块首次使用 `UClass`/`UFunction` 数据成员前必须核对 UE5.8 声明周围的 build guards；editor-only 辅助证明封装成带相同宏的 load-time helper，非 editor target 返回保守且由 runtime class flags 继续约束的结果。
