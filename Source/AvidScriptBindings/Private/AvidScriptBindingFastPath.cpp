@@ -13,6 +13,15 @@ namespace
 {
 constexpr int32 ScalarI32PairFrameSize = 3 * sizeof(int32);
 
+bool HasEditorClassGenerator(const UClass& Class)
+{
+#if WITH_EDITORONLY_DATA
+	return Class.ClassGeneratedBy != nullptr;
+#else
+	return false;
+#endif
+}
+
 bool IsTrivialInt32Property(
 	const FProperty* Property,
 	const int32 FrameSize,
@@ -265,7 +274,7 @@ bool IsQualifiedNativeDirectFunction(const UFunction& Function)
 		|| !OwnerClass->HasAllClassFlags(CLASS_Native)
 		|| OwnerClass->HasAnyClassFlags(
 			CLASS_Interface | CLASS_CompiledFromBlueprint)
-		|| OwnerClass->ClassGeneratedBy != nullptr
+		|| HasEditorClassGenerator(*OwnerClass)
 		|| Function.GetSuperFunction() != nullptr
 		|| !Function.Script.IsEmpty()
 		|| Function.NumParms != 3
