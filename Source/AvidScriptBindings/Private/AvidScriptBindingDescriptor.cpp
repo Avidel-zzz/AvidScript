@@ -956,16 +956,85 @@ bool FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
 {
 	return DispatchMode == TEXT("cached_process_event")
 		|| (SchemaVersion >= 8
-			&& DispatchMode == TEXT("qualified_native_direct"));
+			&& (DispatchMode == TEXT("qualified_native_direct")
+				|| DispatchMode == TEXT("generated_native_s1")));
+}
+
+bool IsAvidScriptBindingLowerHex(const FString& Value)
+{
+	for (const TCHAR Character : Value)
+	{
+		if (!FChar::IsDigit(Character)
+			&& (Character < TEXT('a') || Character > TEXT('f')))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool IsAvidScriptGeneratedShape(const FString& Value)
+{
+	return Value == TEXT("i32_pair_to_i32")
+		|| Value == TEXT("property_i32_get_set")
+		|| Value == TEXT("vector_value")
+		|| Value == TEXT("stable_object_roundtrip");
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 	const FString& BaseCanonicalIdentity,
-	const FString& DispatchMode)
+	const FString& DispatchMode,
+	const FString& GeneratedShape,
+	const FString& GeneratedReceiverMode,
+	const FString& GeneratedImportName)
 {
-	return DispatchMode == TEXT("cached_process_event")
-		? BaseCanonicalIdentity
-		: BaseCanonicalIdentity + TEXT("::dispatch:") + DispatchMode;
+	if (DispatchMode == TEXT("cached_process_event"))
+	{
+		return BaseCanonicalIdentity;
+	}
+	if (OutBinding.DispatchMode == TEXT("generated_native_s1"))
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_shape"),
+				OutBinding.GeneratedShape,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_receiver_mode"),
+				OutBinding.GeneratedReceiverMode,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_import_name"),
+				OutBinding.GeneratedImportName,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredInt(
+				Object,
+				TEXT("semantic_fallback_ordinal"),
+				OutBinding.SemanticFallbackOrdinal,
+				OutErrorSource))
+		{
+			return false;
+		}
+	}
+	FString Identity = BaseCanonicalIdentity + TEXT("::dispatch:") + DispatchMode;
+	if (DispatchMode == TEXT("generated_native_s1"))
+	{
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("generated_shape"),
+			GeneratedShape);
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("generated_receiver"),
+			GeneratedReceiverMode);
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("generated_import"),
+			GeneratedImportName);
+	}
+	return Identity;
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
@@ -996,9 +1065,15 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember;
 		if (Package.SchemaVersion >= 8
 			&& Binding.BindingKind == TEXT("function")
-			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+			&& Binding.DispatchMode != TEXT("cached_process_event"))
 		{
-			Key += TEXT("|dispatch=qualified_native_direct");
+			Key += TEXT("|dispatch=") + Binding.DispatchMode;
+			if (Binding.DispatchMode == TEXT("generated_native_s1"))
+			{
+				Key += TEXT("|shape=") + Binding.GeneratedShape
+					+ TEXT("|receiver=") + Binding.GeneratedReceiverMode
+					+ TEXT("|import=") + Binding.GeneratedImportName;
+			}
 		}
 		SelectionKeys.Add(MoveTemp(Key));
 	}
@@ -1213,6 +1288,25 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("member"), Binding.UeMember);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("script_name"), Binding.ScriptName);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("dispatch"), Binding.DispatchMode);
+		if (Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("generated_shape"),
+				Binding.GeneratedShape);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("generated_receiver"),
+				Binding.GeneratedReceiverMode);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("generated_import"),
+				Binding.GeneratedImportName);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("semantic_fallback_ordinal"),
+				FString::FromInt(Binding.SemanticFallbackOrdinal));
+		}
 		if (Package.SchemaVersion >= 8)
 		{
 			AppendAvidScriptBindingIdentityField(
@@ -1488,11 +1582,37 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	for (int32 Index = 0; Index < Bindings->Num(); ++Index)
 	{
 		FAvidScriptBindingFunctionModel Binding;
-		if (!ParseAvidScriptBindingFunction(
+		const bool bParsedBinding = ParseAvidScriptBindingFunction(
 				(*Bindings)[Index].IsValid() ? (*Bindings)[Index]->AsObject() : nullptr,
 				OutPackage.SchemaVersion,
 				Binding,
-				OutErrorSource)
+				OutErrorSource);
+		FString ExpectedGeneratedImport;
+		if (bParsedBinding
+			&& Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			const FString GeneratedSuffix =
+				FAvidScriptBindingDescriptorIdentity::
+					MakeFunctionCanonicalIdentity(
+						FString(),
+						TEXT("generated_native_s1"),
+						Binding.GeneratedShape,
+						Binding.GeneratedReceiverMode,
+						Binding.GeneratedImportName);
+			if (Binding.CanonicalIdentity.EndsWith(
+					GeneratedSuffix,
+					ESearchCase::CaseSensitive))
+			{
+				const FString SemanticIdentity =
+					Binding.CanonicalIdentity.LeftChop(
+						GeneratedSuffix.Len());
+				ExpectedGeneratedImport =
+					TEXT("avid_s1_")
+					+ FAvidScriptHash::Sha256HexUtf8(
+						SemanticIdentity).Left(16);
+			}
+		}
+		if (!bParsedBinding
 			|| Binding.Ordinal != Index
 			|| (Binding.BindingKind == TEXT("function")
 				&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
@@ -1535,7 +1655,32 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 							Binding.UeFunction)))
 			|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity)
 			|| Binding.HostImport.Module != TEXT("avidscript")
-			|| Binding.HostImport.Name != TEXT("avid_ue_") + Binding.StableId.Left(16)
+			|| (Binding.DispatchMode == TEXT("generated_native_s1")
+				? (!IsAvidScriptGeneratedShape(Binding.GeneratedShape)
+					|| (Binding.GeneratedReceiverMode != TEXT("self_bound")
+						&& Binding.GeneratedReceiverMode != TEXT("stable_borrow"))
+					|| Binding.GeneratedImportName
+						!= Binding.HostImport.Name
+					|| Binding.GeneratedImportName
+						!= ExpectedGeneratedImport
+					|| !Binding.GeneratedImportName.StartsWith(
+						TEXT("avid_s1_"),
+						ESearchCase::CaseSensitive)
+					|| Binding.GeneratedImportName.Len() != 24
+					|| !IsAvidScriptBindingLowerHex(
+						Binding.GeneratedImportName.Right(16))
+					|| Binding.SemanticFallbackOrdinal != Binding.Ordinal
+					|| !Binding.CanonicalIdentity.EndsWith(
+						FAvidScriptBindingDescriptorIdentity::
+							MakeFunctionCanonicalIdentity(
+								FString(),
+								TEXT("generated_native_s1"),
+								Binding.GeneratedShape,
+								Binding.GeneratedReceiverMode,
+								Binding.GeneratedImportName),
+						ESearchCase::CaseSensitive))
+				: Binding.HostImport.Name
+					!= TEXT("avid_ue_") + Binding.StableId.Left(16))
 			|| BindingIds.Contains(Binding.StableId)
 			|| Imports.Contains(Binding.HostImport.Module + TEXT(".") + Binding.HostImport.Name))
 		{

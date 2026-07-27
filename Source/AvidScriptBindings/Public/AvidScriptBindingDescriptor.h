@@ -56,6 +56,10 @@ struct FAvidScriptBindingFunctionModel
 	FString UeFunction;
 	FString ScriptName;
 	FString DispatchMode;
+	FString GeneratedShape;
+	FString GeneratedReceiverMode;
+	FString GeneratedImportName;
+	int32 SemanticFallbackOrdinal = INDEX_NONE;
 	FString WritePolicy = TEXT("none");
 	bool bStatic = false;
 	bool bConst = false;
@@ -158,7 +162,10 @@ public:
 
 	static FString MakeFunctionCanonicalIdentity(
 		const FString& BaseCanonicalIdentity,
-		const FString& DispatchMode);
+		const FString& DispatchMode,
+		const FString& GeneratedShape = FString(),
+		const FString& GeneratedReceiverMode = FString(),
+		const FString& GeneratedImportName = FString());
 
 	static FString MakePropertySetCanonicalIdentity(
 		const FString& OwnerClass,

@@ -25,6 +25,7 @@ constexpr const TCHAR* GeneratorVersion = TEXT("50.1.0");
 constexpr const TCHAR* ObjectFactoryGeneratorVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
+constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("54.6.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -41,6 +42,8 @@ struct FResolvedBindingDescriptor
 	FString StableId;
 	FString ImportName;
 	FString DispatchMode = TEXT("cached_process_event");
+	FString GeneratedShape;
+	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	int32 Ordinal = INDEX_NONE;
@@ -114,6 +117,72 @@ FString MakeCanonicalIdentity(
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 		Identity,
 		DispatchMode);
+}
+
+bool ResolveGeneratedFunctionShape(
+	const UClass* OwnerClass,
+	const UFunction* Function,
+	const FAvidScriptProjectedFunction& Projection,
+	FString& OutShape,
+	FString& OutReceiverMode,
+	FString& OutCategory)
+{
+	OutShape.Reset();
+	OutReceiverMode.Reset();
+	OutCategory.Reset();
+	if (OwnerClass->HasAnyClassFlags(CLASS_CompiledFromBlueprint))
+	{
+		OutCategory = TEXT("generated_native_blueprint_owner");
+		return false;
+	}
+	if (OwnerClass->HasAnyClassFlags(CLASS_Interface)
+		|| Function->HasAnyFunctionFlags(
+			FUNC_Static | FUNC_Event | FUNC_Net | FUNC_Delegate
+				| FUNC_MulticastDelegate)
+		|| !Function->HasAnyFunctionFlags(FUNC_Native)
+		|| Function->HasMetaData(TEXT("CustomThunk")))
+	{
+		OutCategory = TEXT("generated_native_callable_unsupported");
+		return false;
+	}
+	for (const FAvidScriptProjectedBindingValue& Parameter : Projection.Parameters)
+	{
+		if (Parameter.Direction != TEXT("value"))
+		{
+			OutCategory = TEXT("generated_native_reference_direction_unsupported");
+			return false;
+		}
+	}
+
+	const FString& ReturnType = Projection.ReturnValue.Type.CanonicalType;
+	if (ReturnType == TEXT("scalar:i32")
+		&& Projection.Parameters.Num() == 2
+		&& Projection.Parameters[0].Type.CanonicalType == TEXT("scalar:i32")
+		&& Projection.Parameters[1].Type.CanonicalType == TEXT("scalar:i32"))
+	{
+		OutShape = TEXT("i32_pair_to_i32");
+		OutReceiverMode = TEXT("self_bound");
+		return true;
+	}
+	if (Projection.Parameters.Num() == 1
+		&& ReturnType == TEXT("struct:/Script/CoreUObject.Vector")
+		&& Projection.Parameters[0].Type.CanonicalType == ReturnType)
+	{
+		OutShape = TEXT("vector_value");
+		OutReceiverMode = TEXT("self_bound");
+		return true;
+	}
+	if (Projection.Parameters.Num() == 1
+		&& ReturnType == TEXT("object:/Script/CoreUObject.Object")
+		&& Projection.Parameters[0].Type.CanonicalType == ReturnType)
+	{
+		OutShape = TEXT("stable_object_roundtrip");
+		OutReceiverMode = TEXT("stable_borrow");
+		return true;
+	}
+
+	OutCategory = TEXT("generated_native_shape_unsupported");
+	return false;
 }
 
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
@@ -234,6 +303,7 @@ bool GenerateBindingDescriptor(
 	const FString& PackageName,
 	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
 	const TSet<FString>& NativeDirectFunctionKeys,
+	const TSet<FString>& GeneratedNativeFunctionKeys,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
@@ -337,16 +407,72 @@ bool GenerateBindingDescriptor(
 			FinalizeType(Parameter.Type);
 		}
 		Binding.ScriptName = GetDescriptorScriptFunctionName(Function);
-		Binding.DispatchMode = NativeDirectFunctionKeys.Contains(SelectionKey)
-			? FString(TEXT("qualified_native_direct"))
-			: FString(TEXT("cached_process_event"));
-		Binding.CanonicalIdentity = MakeCanonicalIdentity(
+		const bool bGeneratedNative =
+			GeneratedNativeFunctionKeys.Contains(SelectionKey);
+		Binding.DispatchMode = bGeneratedNative
+			? FString(TEXT("generated_native_s1"))
+			: NativeDirectFunctionKeys.Contains(SelectionKey)
+				? FString(TEXT("qualified_native_direct"))
+				: FString(TEXT("cached_process_event"));
+		const FString SemanticCanonicalIdentity = MakeCanonicalIdentity(
 			OwnerClass,
 			Function,
 			Binding.Projection,
-			Binding.DispatchMode);
+			TEXT("cached_process_event"));
+		if (bGeneratedNative)
+		{
+			FString EligibilityCategory;
+			if (!ResolveGeneratedFunctionShape(
+					OwnerClass,
+					Function,
+					Binding.Projection,
+					Binding.GeneratedShape,
+					Binding.GeneratedReceiverMode,
+					EligibilityCategory))
+			{
+				SetFailure(
+					OutResult,
+					EligibilityCategory,
+					SelectionKey,
+					TEXT("Select a native instance callable supported by the generated S1 shape contract."));
+				return false;
+			}
+			const FString OwnerModule = OwnerClass->GetOutermost()->GetName()
+				.Replace(TEXT("/Script/"), TEXT(""));
+			const FString OwnerHeader =
+				OwnerClass->GetMetaData(TEXT("ModuleRelativePath"));
+			if (OwnerModule.IsEmpty() || OwnerHeader.IsEmpty())
+			{
+				SetFailure(
+					OutResult,
+					TEXT("generated_native_owner_identity_missing"),
+					SelectionKey,
+					TEXT("Provide UHT owner module and ModuleRelativePath metadata."));
+				return false;
+			}
+			Binding.ImportName =
+				TEXT("avid_s1_") + HashSha256(SemanticCanonicalIdentity).Left(16);
+			Binding.CanonicalIdentity =
+				FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+					SemanticCanonicalIdentity,
+					Binding.DispatchMode,
+					Binding.GeneratedShape,
+					Binding.GeneratedReceiverMode,
+					Binding.ImportName);
+		}
+		else
+		{
+			Binding.CanonicalIdentity = MakeCanonicalIdentity(
+				OwnerClass,
+				Function,
+				Binding.Projection,
+				Binding.DispatchMode);
+		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
-		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		if (!bGeneratedNative)
+		{
+			Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		}
 		Binding.ReloadEffect = FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
 	}
@@ -537,12 +663,21 @@ bool GenerateBindingDescriptor(
 			return Binding.BindingKind == TEXT("function")
 				&& Binding.DispatchMode == TEXT("qualified_native_direct");
 		});
+	const bool bHasGeneratedNativeFunctions = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.BindingKind == TEXT("function")
+				&& Binding.DispatchMode == TEXT("generated_native_s1");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
+			|| bHasGeneratedNativeFunctions
 		? 8
 		: ObjectFactories.IsEmpty()
 			? 6
 			: 7;
-	Package.GeneratorVersion = bHasNativeDirectFunctions
+	Package.GeneratorVersion = bHasGeneratedNativeFunctions
+		? GeneratedNativeGeneratorVersion
+		: bHasNativeDirectFunctions
 		? NativeDirectGeneratorVersion
 		: bHasWritableProperties
 			? WritablePropertyGeneratorVersion
@@ -579,6 +714,10 @@ bool GenerateBindingDescriptor(
 			: Binding.Function->GetName();
 		BindingModel.ScriptName = Binding.ScriptName;
 		BindingModel.DispatchMode = Binding.DispatchMode;
+		BindingModel.GeneratedShape = Binding.GeneratedShape;
+		BindingModel.GeneratedReceiverMode = Binding.GeneratedReceiverMode;
+		BindingModel.GeneratedImportName = Binding.ImportName;
+		BindingModel.SemanticFallbackOrdinal = Binding.Ordinal;
 		BindingModel.WritePolicy = Binding.WritePolicy;
 		BindingModel.bStatic = Binding.Function != nullptr && Binding.Function->HasAnyFunctionFlags(FUNC_Static);
 		BindingModel.bConst = Binding.BindingKind == TEXT("property_get")
@@ -954,6 +1093,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
 		PackageName,
 		FunctionSelections,
 		{},
+		{},
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,
@@ -1071,11 +1211,17 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	}
 	OutSelectionResult.bSucceeded = true;
 	TSet<FString> NativeDirectFunctionKeys;
+	TSet<FString> GeneratedNativeFunctionKeys;
 	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
 	{
 		for (const FName FunctionName : Rule.NativeDirectFunctions)
 		{
 			NativeDirectFunctionKeys.Add(
+				MakeSelectionKey({ Rule.OwnerClassPath, FunctionName }));
+		}
+		for (const FName FunctionName : Rule.GeneratedNativeFunctions)
+		{
+			GeneratedNativeFunctionKeys.Add(
 				MakeSelectionKey({ Rule.OwnerClassPath, FunctionName }));
 		}
 	}
@@ -1099,6 +1245,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		Profile.PackageName,
 		FunctionSelections,
 		NativeDirectFunctionKeys,
+		GeneratedNativeFunctionKeys,
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,

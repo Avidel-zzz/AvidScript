@@ -12,6 +12,7 @@ public class AvidScriptEditor : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"AvidScriptCore",
 				"AvidScriptRuntime"
 			}
 		);
@@ -19,7 +20,6 @@ public class AvidScriptEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
-				"AvidScriptCore",
 				"AvidScriptBindings",
 				"AvidScriptVM",
 				"DirectoryWatcher",

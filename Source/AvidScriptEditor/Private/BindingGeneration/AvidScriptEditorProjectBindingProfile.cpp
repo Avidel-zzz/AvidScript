@@ -16,6 +16,7 @@ constexpr const TCHAR* LegacyProjectBindingProfileResolverVersion = TEXT("50.1.0
 constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectProfileResolverVersion = TEXT("54.5.0");
+constexpr const TCHAR* GeneratedNativeProfileResolverVersion = TEXT("54.6.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -123,6 +124,7 @@ bool NormalizeClassRule(
 	if (!NormalizeNames(Rule.IncludeFunctions, Rule.OwnerClassPath, TEXT("include_functions"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeFunctions, Rule.OwnerClassPath, TEXT("exclude_functions"), OutResult)
 		|| !NormalizeNames(Rule.NativeDirectFunctions, Rule.OwnerClassPath, TEXT("native_direct_functions"), OutResult)
+		|| !NormalizeNames(Rule.GeneratedNativeFunctions, Rule.OwnerClassPath, TEXT("generated_native_functions"), OutResult)
 		|| !NormalizeNames(Rule.IncludeProperties, Rule.OwnerClassPath, TEXT("include_properties"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult)
 		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult))
@@ -138,6 +140,37 @@ bool NormalizeClassRule(
 				TEXT("member_filter_conflict"),
 				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
 				TEXT("Remove members that appear in both include and exclude filters."));
+			return false;
+		}
+	}
+	for (const FName Name : Rule.GeneratedNativeFunctions)
+	{
+		if (Name.ToString().Contains(TEXT("*"))
+			|| Name.ToString().Contains(TEXT("?")))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("generated_native_wildcard_unsupported"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Select each generated native function by exact reflected name."));
+			return false;
+		}
+		if (!Rule.IncludeFunctions.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("generated_native_not_selected"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Add generated native functions to functions before granting S1 generation."));
+			return false;
+		}
+		if (Rule.NativeDirectFunctions.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("generated_native_dispatch_conflict"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Choose either native_direct_functions or generated_native_functions for a callable."));
 			return false;
 		}
 	}
@@ -285,6 +318,7 @@ void AppendRuleIdentity(
 	const FAvidScriptReflectedClassSelection& Rule,
 	const bool bIncludeWritableProperties,
 	const bool bIncludeNativeDirectFunctions,
+	const bool bIncludeGeneratedNativeFunctions,
 	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
@@ -310,6 +344,10 @@ void AppendRuleIdentity(
 	if (bIncludeNativeDirectFunctions)
 	{
 		Identity += TEXT("|ndf=") + JoinNames(Rule.NativeDirectFunctions);
+	}
+	if (bIncludeGeneratedNativeFunctions)
+	{
+		Identity += TEXT("|gnf=") + JoinNames(Rule.GeneratedNativeFunctions);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -827,9 +865,16 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		{
 			return !Rule.NativeDirectFunctions.IsEmpty();
 		});
+	const bool bHasGeneratedNativeFunctions = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.GeneratedNativeFunctions.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(bHasNativeDirectFunctions
+		+ FString(bHasGeneratedNativeFunctions
+			? GeneratedNativeProfileResolverVersion
+			: bHasNativeDirectFunctions
 			? NativeDirectProfileResolverVersion
 			: bHasWritableProperties
 				? WritablePropertyProfileResolverVersion
@@ -851,6 +896,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			Rule,
 			bHasWritableProperties,
 			bHasNativeDirectFunctions,
+			bHasGeneratedNativeFunctions,
 			Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)

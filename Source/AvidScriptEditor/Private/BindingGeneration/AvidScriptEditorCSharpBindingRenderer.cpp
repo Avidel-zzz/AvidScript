@@ -1805,6 +1805,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 		Writer->WriteValue(TEXT("module"), Binding.HostImport.Module);
 		Writer->WriteValue(TEXT("name"), Binding.HostImport.Name);
 		Writer->WriteValue(TEXT("signature"), Binding.HostImport.Signature);
+		if (Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+			Writer->WriteValue(TEXT("generated_shape"), Binding.GeneratedShape);
+			Writer->WriteValue(
+				TEXT("generated_receiver_mode"),
+				Binding.GeneratedReceiverMode);
+			Writer->WriteValue(
+				TEXT("semantic_fallback_ordinal"),
+				Binding.SemanticFallbackOrdinal);
+		}
 		Writer->WriteObjectEnd();
 	}
 	const bool bHasLifecycleBindings =

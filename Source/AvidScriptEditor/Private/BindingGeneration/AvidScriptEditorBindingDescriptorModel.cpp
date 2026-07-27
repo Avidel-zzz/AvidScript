@@ -60,6 +60,13 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			TEXT("qualified_native_direct"));
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
+		const FString GeneratedIdentitySuffix =
+			FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+				FString(),
+				TEXT("generated_native_s1"),
+				Binding.GeneratedShape,
+				Binding.GeneratedReceiverMode,
+				Binding.GeneratedImportName);
 		if (Binding.BindingKind == TEXT("function")
 			&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
 					Package.SchemaVersion,
@@ -67,6 +74,10 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 				|| ((Binding.DispatchMode == TEXT("qualified_native_direct"))
 					!= Binding.CanonicalIdentity.EndsWith(
 						NativeDirectIdentitySuffix,
+						ESearchCase::CaseSensitive))
+				|| ((Binding.DispatchMode == TEXT("generated_native_s1"))
+					!= Binding.CanonicalIdentity.EndsWith(
+						GeneratedIdentitySuffix,
 						ESearchCase::CaseSensitive))))
 		{
 			return false;
@@ -197,6 +208,19 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		}
 		Writer->WriteValue(TEXT("script_name"), Binding.ScriptName);
 		Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+		if (Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			Writer->WriteValue(TEXT("generated_shape"), Binding.GeneratedShape);
+			Writer->WriteValue(
+				TEXT("generated_receiver_mode"),
+				Binding.GeneratedReceiverMode);
+			Writer->WriteValue(
+				TEXT("generated_import_name"),
+				Binding.GeneratedImportName);
+			Writer->WriteValue(
+				TEXT("semantic_fallback_ordinal"),
+				Binding.SemanticFallbackOrdinal);
+		}
 		if (Package.SchemaVersion >= 8)
 		{
 			Writer->WriteValue(TEXT("write_policy"), Binding.WritePolicy);

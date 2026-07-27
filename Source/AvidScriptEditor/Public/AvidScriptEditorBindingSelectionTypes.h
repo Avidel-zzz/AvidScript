@@ -21,6 +21,7 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> IncludeFunctions;
 	TArray<FName> ExcludeFunctions;
 	TArray<FName> NativeDirectFunctions;
+	TArray<FName> GeneratedNativeFunctions;
 	TArray<FName> IncludeProperties;
 	TArray<FName> ExcludeProperties;
 	TArray<FName> WritableProperties;

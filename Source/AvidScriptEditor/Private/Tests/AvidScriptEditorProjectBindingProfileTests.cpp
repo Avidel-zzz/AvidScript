@@ -52,6 +52,56 @@ FAvidScriptReflectedClassSelection MakeProjectProfileClassRule(
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileGeneratedGrantRejectTest,
+	"AvidScript.Editor.ProjectBindingProfile.GeneratedGrantRejects",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileGeneratedGrantRejectTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.generated.reject");
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+	Rule.IncludeFunctions.Add(TEXT("K2_GetActorLocation"));
+	Rule.GeneratedNativeFunctions.Add(TEXT("SetActorScale3D"));
+	Spec.Classes.Add(Rule);
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestFalse(
+		TEXT("Generated grant must be a strict function subset"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Subset failure category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("generated_native_not_selected")));
+
+	Spec.Classes[0].IncludeFunctions.Add(TEXT("SetActorScale3D"));
+	Spec.Classes[0].NativeDirectFunctions.Add(TEXT("SetActorScale3D"));
+	TestFalse(
+		TEXT("Direct and generated ownership conflict"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Ownership failure category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("generated_native_dispatch_conflict")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorProjectBindingProfileStableResolutionTest,
 	"AvidScript.Editor.ProjectBindingProfile.StableResolution",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

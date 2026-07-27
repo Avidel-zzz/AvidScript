@@ -313,6 +313,73 @@ bool FAvidScriptEditorObjectTypeGraphDeterminismTest::RunTest(const FString& Par
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorGeneratedNativeTest,
+	"AvidScript.Editor.BindingDescriptor.GeneratedNativeS1",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject");
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.generated.descriptor");
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath = OwnerPath;
+	Rule.IncludeFunctions.Add(TEXT("ReservedHandleNames"));
+	Rule.GeneratedNativeFunctions.Add(TEXT("ReservedHandleNames"));
+	Profile.Classes.Add(Rule);
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	TestTrue(
+		TEXT("Eligible int32 pair generates an S1 descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			DescriptorJson,
+			SelectionResult,
+			GenerateResult));
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Generated descriptor satisfies parser contract"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	if (Package.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingFunctionModel& Binding = Package.Bindings[0];
+		TestEqual(
+			TEXT("Generated dispatch mode is explicit"),
+			Binding.DispatchMode,
+			FString(TEXT("generated_native_s1")));
+		TestEqual(
+			TEXT("Generated shape is explicit"),
+			Binding.GeneratedShape,
+			FString(TEXT("i32_pair_to_i32")));
+		TestTrue(
+			TEXT("Generated import is deterministic and dedicated"),
+			Binding.HostImport.Name.StartsWith(TEXT("avid_s1_"))
+				&& Binding.HostImport.Name
+					== Binding.GeneratedImportName);
+		TestEqual(
+			TEXT("Semantic fallback ordinal is retained"),
+			Binding.SemanticFallbackOrdinal,
+			Binding.Ordinal);
+	}
+	else
+	{
+		AddError(TEXT("Expected exactly one generated S1 binding."));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest,
 	"AvidScript.Editor.BindingDescriptor.V7CanonicalSerializer",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
