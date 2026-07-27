@@ -39,6 +39,8 @@ $WasmtimeTestsPath = Join-Path $PluginRoot (
     'Source/AvidScriptVM/Private/Tests/AvidScriptVmWasmtimeTests.cpp')
 $WamrTestsPath = Join-Path $PluginRoot (
     'Source/AvidScriptVM/Private/Tests/AvidScriptVmContractTests.cpp')
+$ResultFixtureBuilderPath = Join-Path $PluginRoot (
+    'Source/AvidScriptVM/Private/Tests/AvidScriptVmResultFixtureBuilder.h')
 $AttributesPath = Join-Path $PluginRoot '.gitattributes'
 $ValidatorPath = Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1'
 $MergerPath = Join-Path $ScriptRoot 'Merge-ControlledRuntimeResults.ps1'
@@ -82,6 +84,7 @@ foreach ($RequiredFile in @(
     $WamrBackendPath,
     $WasmtimeTestsPath,
     $WamrTestsPath,
+    $ResultFixtureBuilderPath,
     $AttributesPath,
     $ValidatorPath,
     $MergerPath,
@@ -189,6 +192,9 @@ $WasmtimeApi = Get-Content -LiteralPath $WasmtimeApiPath -Raw
 $WamrBackend = Get-Content -LiteralPath $WamrBackendPath -Raw
 $WasmtimeTests = Get-Content -LiteralPath $WasmtimeTestsPath -Raw
 $WamrTests = Get-Content -LiteralPath $WamrTestsPath -Raw
+$ResultFixtureBuilder = Get-Content `
+    -LiteralPath $ResultFixtureBuilderPath `
+    -Raw
 Assert-True ($VmHeader.Contains('struct FAvidScriptVmCallResult')) (
     'VM contract must expose result cells')
 Assert-True ($VmHeader.Contains(
@@ -233,6 +239,9 @@ Assert-True (
 foreach ($Token in @(
     'void result has zero cells',
     'i32 result has one cell',
+    'i64 result has two cells',
+    'f64 result has two cells',
+    'f32 result bits are preserved',
     'oversize result ABI rejects at resolve',
     'unsupported result ABI rejects at resolve'
 )) {
@@ -245,6 +254,27 @@ Assert-True ($WamrTests.Contains(
 Assert-True ($WamrTests.Contains(
     'generated i32 export preserves value')) (
     'WAMR focused i32 result test is missing')
+foreach ($Token in @(
+    'WAMR i64 result has two cells',
+    'WAMR i64 low cell is first',
+    'WAMR i64 high cell is second',
+    'WAMR f64 result has two cells',
+    'WAMR f64 low bits cell is first',
+    'WAMR f64 high bits cell is second',
+    'WAMR f32 result bits are preserved'
+)) {
+    Assert-True ($WamrTests.Contains($Token)) (
+        "WAMR wide result test is missing: $Token")
+}
+foreach ($Token in @(
+    'enum class EValueKind',
+    'AppendSignedLeb',
+    'AppendLittleEndian',
+    'BuildSingle'
+)) {
+    Assert-True ($ResultFixtureBuilder.Contains($Token)) (
+        "shared result fixture builder is missing: $Token")
+}
 
 if (-not [string]::IsNullOrWhiteSpace($WatCompilerModuleRoot)) {
     & (Join-Path $ScriptRoot 'Build-ControlledRuntimeKernel.ps1') `
@@ -354,6 +384,8 @@ try {
             puerts_commit = $CandidateCommit
             puerts_backend_sha256 = $PuertsSha256
             target_triple = [string]$Profile.target_triple
+            lane_schedule_id = [string]$Profile.lane_schedule_id
+            lanes = @($Profile.lanes)
             attempt_id = $AttemptId
             profile_sha256 = $ProfileSha256
             calibration_sha256 = 'not_applicable'
@@ -578,6 +610,71 @@ try {
     Assert-True ([string]$MergeResult.pc_default_gate -ceq
         'wasmtime_pc_default_rejected') (
         'paired P95 must reject one slow/four fast process evidence')
+
+    $SeedMutationRequest = Get-Content `
+        -LiteralPath $TimedRequestPaths[0] `
+        -Raw | ConvertFrom-Json
+    $SeedMutationRequest.seed = [int]$Profile.seed + 41
+    $SeedMutationRequestPath = Join-Path $FixtureRoot (
+        'rejected-seed.request.json')
+    Write-JsonFile `
+        -Value $SeedMutationRequest `
+        -Path $SeedMutationRequestPath
+    $SeedMutationResult = Get-Content `
+        -LiteralPath $TimedPaths[0] `
+        -Raw | ConvertFrom-Json
+    $SeedMutationResult.request_seed = [int]$SeedMutationRequest.seed
+    $SeedMutationResult.request_sha256 = Get-SidecarFileSha256 `
+        -Path $SeedMutationRequestPath
+    foreach ($Sample in @($SeedMutationResult.samples)) {
+        $MutatedSeed = [int]$SeedMutationRequest.seed +
+            [int]$SeedMutationRequest.process_run * 1009 +
+            [int]$Sample.sample_index * 17
+        $MutatedOracle = [AvidScriptControlledOracle]::Run(
+            [int]$Sample.iterations,
+            $MutatedSeed)
+        $Sample.seed = $MutatedSeed
+        $Sample.result = $MutatedOracle
+        $Sample.expected = $MutatedOracle
+    }
+    $SeedMutationResultPath = Join-Path $FixtureRoot (
+        'rejected-seed.result.json')
+    Write-JsonFile `
+        -Value $SeedMutationResult `
+        -Path $SeedMutationResultPath
+    $SeedValidatorRejected = $false
+    try {
+        & $ValidatorPath `
+            -ResultPath $SeedMutationResultPath `
+            -RequestPath $SeedMutationRequestPath `
+            -ProfilePath $FixtureProfilePath `
+            -CalibrationResultPath $CalibrationResultPath | Out-Null
+    }
+    catch {
+        $SeedValidatorRejected = $true
+    }
+    Assert-True $SeedValidatorRejected (
+        'profile seed drift must fail even after coherent oracle/hash rewrite')
+
+    $SeedResultPaths = @($SeedMutationResultPath) + @($TimedPaths[1..4])
+    $SeedRequestPaths = @($SeedMutationRequestPath) + @(
+        $TimedRequestPaths[1..4])
+    $SeedMergerRejected = $false
+    try {
+        & $MergerPath `
+            -ResultPaths $SeedResultPaths `
+            -RequestPaths $SeedRequestPaths `
+            -CalibrationResultPath $CalibrationResultPath `
+            -CalibrationRequestPath $CalibrationRequestPath `
+            -ProfilePath $FixtureProfilePath `
+            -OutputPath (Join-Path $FixtureRoot (
+                'rejected-seed.aggregate.json')) | Out-Null
+    }
+    catch {
+        $SeedMergerRejected = $true
+    }
+    Assert-True $SeedMergerRejected (
+        'merger must independently reject one timed request seed drift')
 
     $UnequalResult = Get-Content -LiteralPath $TimedPaths[0] -Raw |
         ConvertFrom-Json

@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptVmResultFixtureBuilder.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -125,58 +126,6 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	const TArray<uint8> TrapBody = { 0x00, 0x00, 0x0b };
 	AppendWasmtimeU32Leb(Code, static_cast<uint32>(TrapBody.Num()));
 	Code.Append(TrapBody);
-	AppendWasmtimeSection(Module, 10, Code);
-	return Module;
-}
-
-TArray<uint8> BuildWasmtimeResultFixture(
-	const uint8 ResultType,
-	const int32 ResultCount)
-{
-	TArray<uint8> Module = MakeWasmtimeModule();
-
-	TArray<uint8> Types;
-	AppendWasmtimeU32Leb(Types, 1);
-	Types.Add(0x60);
-	Types.Add(0x00);
-	AppendWasmtimeU32Leb(Types, static_cast<uint32>(ResultCount));
-	for (int32 Index = 0; Index < ResultCount; ++Index)
-	{
-		Types.Add(ResultType);
-	}
-	AppendWasmtimeSection(Module, 1, Types);
-
-	TArray<uint8> Functions;
-	AppendWasmtimeU32Leb(Functions, 1);
-	AppendWasmtimeU32Leb(Functions, 0);
-	AppendWasmtimeSection(Module, 3, Functions);
-
-	TArray<uint8> Exports;
-	AppendWasmtimeU32Leb(Exports, 1);
-	AppendWasmtimeString(Exports, "result_test");
-	Exports.Add(0x00);
-	AppendWasmtimeU32Leb(Exports, 0);
-	AppendWasmtimeSection(Module, 7, Exports);
-
-	TArray<uint8> Body;
-	Body.Add(0x00);
-	for (int32 Index = 0; Index < ResultCount; ++Index)
-	{
-		if (ResultType == 0x7f)
-		{
-			AppendWasmtimeI32Const(Body, Index + 7);
-		}
-		else
-		{
-			Body.Add(0xd0);
-			Body.Add(ResultType);
-		}
-	}
-	Body.Add(0x0b);
-	TArray<uint8> Code;
-	AppendWasmtimeU32Leb(Code, 1);
-	AppendWasmtimeU32Leb(Code, static_cast<uint32>(Body.Num()));
-	Code.Append(Body);
 	AppendWasmtimeSection(Module, 10, Code);
 	return Module;
 }
@@ -627,12 +576,14 @@ bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
 #if !AVIDSCRIPT_WITH_WASMTIME
 	return true;
 #else
+	using namespace AvidScriptVmResultFixture;
+
 	FAvidScriptVmError Error;
 	FAvidScriptVmLoadConfig Config;
 	TUniquePtr<IAvidScriptVmBackend> Backend =
 		CreateWasmtimeBackendForTest(Error);
 
-	const TArray<uint8> VoidFixture = BuildWasmtimeResultFixture(0x7f, 0);
+	const TArray<uint8> VoidFixture = Build(TConstArrayView<FValue>());
 	if (!LoadWasmtimeTestModule(*this, *Backend, VoidFixture, Config, Error))
 	{
 		return false;
@@ -650,7 +601,7 @@ bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
 		TEXT("legacy call keeps default null result compatibility"),
 		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error));
 
-	const TArray<uint8> I32Fixture = BuildWasmtimeResultFixture(0x7f, 1);
+	const TArray<uint8> I32Fixture = BuildSingle(EValueKind::I32, 7);
 	if (!LoadWasmtimeTestModule(*this, *Backend, I32Fixture, Config, Error))
 	{
 		return false;
@@ -664,9 +615,80 @@ bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("i32 result has one cell"), Result.CellCount, 1u);
 	TestEqual(TEXT("i32 result value is preserved"), Result.Cells[0], 7u);
 
-	const TArray<uint8> OversizeFixture = BuildWasmtimeResultFixture(
-		0x7f,
-		FAvidScriptVmCallResult::MaxCells + 1);
+	const uint64 I64Bits = 0x0123456789abcdefULL;
+	const TArray<uint8> I64Fixture =
+		BuildSingle(EValueKind::I64, I64Bits);
+	if (!LoadWasmtimeTestModule(*this, *Backend, I64Fixture, Config, Error))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("i64 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("i64 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("i64 result has two cells"), Result.CellCount, 2u);
+	TestEqual(
+		TEXT("i64 low cell is first"),
+		Result.Cells[0],
+		static_cast<uint32>(I64Bits));
+	TestEqual(
+		TEXT("i64 high cell is second"),
+		Result.Cells[1],
+		static_cast<uint32>(I64Bits >> 32));
+
+	const double F64Value = -123.5;
+	uint64 F64Bits = 0;
+	FMemory::Memcpy(&F64Bits, &F64Value, sizeof(F64Bits));
+	const TArray<uint8> F64Fixture =
+		BuildSingle(EValueKind::F64, F64Bits);
+	if (!LoadWasmtimeTestModule(*this, *Backend, F64Fixture, Config, Error))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("f64 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("f64 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("f64 result has two cells"), Result.CellCount, 2u);
+	TestEqual(
+		TEXT("f64 low bits cell is first"),
+		Result.Cells[0],
+		static_cast<uint32>(F64Bits));
+	TestEqual(
+		TEXT("f64 high bits cell is second"),
+		Result.Cells[1],
+		static_cast<uint32>(F64Bits >> 32));
+
+	const float F32Value = -3.25f;
+	uint32 F32Bits = 0;
+	FMemory::Memcpy(&F32Bits, &F32Value, sizeof(F32Bits));
+	const TArray<uint8> F32Fixture =
+		BuildSingle(EValueKind::F32, F32Bits);
+	if (!LoadWasmtimeTestModule(*this, *Backend, F32Fixture, Config, Error))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("f32 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("f32 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("f32 result has one cell"), Result.CellCount, 1u);
+	TestEqual(TEXT("f32 result bits are preserved"), Result.Cells[0], F32Bits);
+
+	TArray<FValue> OversizeResults;
+	for (uint32 Index = 0;
+		Index < FAvidScriptVmCallResult::MaxCells + 1;
+		++Index)
+	{
+		OversizeResults.Add(FValue{ EValueKind::I32, Index + 7 });
+	}
+	const TArray<uint8> OversizeFixture = Build(OversizeResults);
 	if (!LoadWasmtimeTestModule(*this, *Backend, OversizeFixture, Config, Error))
 	{
 		return false;
@@ -680,7 +702,7 @@ bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
 		FString(TEXT("invalid_export")));
 
 	const TArray<uint8> UnsupportedFixture =
-		BuildWasmtimeResultFixture(0x6f, 1);
+		BuildSingle(EValueKind::ExternRef, 0);
 	if (!LoadWasmtimeTestModule(
 			*this,
 			*Backend,

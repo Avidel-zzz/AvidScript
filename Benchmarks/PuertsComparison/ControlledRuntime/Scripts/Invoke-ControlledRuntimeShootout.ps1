@@ -215,6 +215,8 @@ function New-BaseRequest {
         puerts_commit = $PuertsCommit
         puerts_backend_sha256 = $PuertsBackendSha256
         target_triple = [string]$Profile.target_triple
+        lane_schedule_id = [string]$Profile.lane_schedule_id
+        lanes = @($Profile.lanes)
         attempt_id = $AttemptId
         profile_sha256 = $ProfileSha256
         calibration_sha256 = 'not_applicable'

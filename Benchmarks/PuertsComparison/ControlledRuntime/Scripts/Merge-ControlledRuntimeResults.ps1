@@ -39,6 +39,57 @@ if ($ResultPaths.Count -ne $ExpectedProcessRuns -or
     throw 'ASP54M4201 timed result/request process counts differ from profile'
 }
 
+function Assert-RequestMatchesTrackedProfile {
+    param(
+        $Request,
+        [string]$ExpectedMode
+    )
+    $ExpectedTimedSamples = if ($ExpectedMode -ceq 'calibration') {
+        0
+    }
+    else {
+        [int]$Profile.timed_samples
+    }
+    if ([string]$Request.mode -cne $ExpectedMode -or
+        [string]$Request.benchmark_kind -cne
+            [string]$Profile.benchmark_kind -or
+        [int]$Request.seed -ne [int]$Profile.seed -or
+        [int]$Request.warmup_samples -ne [int]$Profile.warmup_samples -or
+        [int]$Request.timed_samples -ne $ExpectedTimedSamples -or
+        [double]$Request.minimum_sample_milliseconds -ne
+            [double]$Profile.minimum_sample_milliseconds -or
+        [int]$Request.minimum_iterations -ne
+            [int]$Profile.minimum_iterations -or
+        [int]$Request.maximum_iterations -ne
+            [int]$Profile.maximum_iterations -or
+        [int]$Request.calibration_confirmation_samples -ne
+            [int]$Profile.calibration_confirmation_samples -or
+        [string]$Request.target_triple -cne
+            [string]$Profile.target_triple -or
+        [string]$Request.kernel_wasm_sha256 -cne
+            [string]$Profile.kernel_wasm_sha256 -or
+        [string]$Request.lane_schedule_id -cne
+            [string]$Profile.lane_schedule_id -or
+        [string]::Join('|', @($Request.lanes)) -cne
+            [string]::Join('|', @($Profile.lanes))) {
+        throw 'ASP54M4211 request workload contract differs from tracked profile'
+    }
+    if ($ExpectedMode -ceq 'calibration') {
+        if ([int]$Request.process_run -ne -1) {
+            throw 'ASP54M4212 calibration process_run must be -1'
+        }
+    }
+    elseif ([int]$Request.process_run -lt 0 -or
+        [int]$Request.process_run -ge $ExpectedProcessRuns) {
+        throw 'ASP54M4213 timed process_run is outside profile range'
+    }
+}
+
+$CalibrationRequest = Get-Content -LiteralPath $CalibrationRequestPath -Raw |
+    ConvertFrom-Json
+Assert-RequestMatchesTrackedProfile `
+    -Request $CalibrationRequest `
+    -ExpectedMode 'calibration'
 & $ValidatorPath `
     -ResultPath $CalibrationResultPath `
     -RequestPath $CalibrationRequestPath `
@@ -50,6 +101,11 @@ $CalibrationSha256 = Get-SidecarFileSha256 -Path $CalibrationResultPath
 $Results = @()
 $Requests = @()
 for ($Index = 0; $Index -lt $ExpectedProcessRuns; ++$Index) {
+    $Request = Get-Content -LiteralPath $RequestPaths[$Index] -Raw |
+        ConvertFrom-Json
+    Assert-RequestMatchesTrackedProfile `
+        -Request $Request `
+        -ExpectedMode 'timed'
     & $ValidatorPath `
         -ResultPath $ResultPaths[$Index] `
         -RequestPath $RequestPaths[$Index] `
@@ -57,8 +113,7 @@ for ($Index = 0; $Index -lt $ExpectedProcessRuns; ++$Index) {
         -CalibrationResultPath $CalibrationResultPath | Out-Null
     $Results += Get-Content -LiteralPath $ResultPaths[$Index] -Raw |
         ConvertFrom-Json
-    $Requests += Get-Content -LiteralPath $RequestPaths[$Index] -Raw |
-        ConvertFrom-Json
+    $Requests += $Request
 }
 
 $Pids = @($Results | ForEach-Object { [int]$_.pid })

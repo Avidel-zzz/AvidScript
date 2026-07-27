@@ -47,6 +47,46 @@ $Profile = Get-Content -LiteralPath $ResolvedProfilePath -Raw | ConvertFrom-Json
 $RequestSha256 = Get-SidecarFileSha256 -Path $ResolvedRequestPath
 $ProfileSha256 = Get-SidecarFileSha256 -Path $ResolvedProfilePath
 
+$ExpectedTimedSamples = if ([string]$Request.mode -ceq 'calibration') {
+    0
+}
+else {
+    [int]$Profile.timed_samples
+}
+$ExpectedProcessRun = [int]$Request.process_run
+$ExpectedLaneCatalog = [string]::Join('|', @($Profile.lanes))
+if ([string]$Request.benchmark_kind -cne
+        [string]$Profile.benchmark_kind -or
+    [int]$Request.seed -ne [int]$Profile.seed -or
+    [int]$Request.warmup_samples -ne [int]$Profile.warmup_samples -or
+    [int]$Request.timed_samples -ne $ExpectedTimedSamples -or
+    [double]$Request.minimum_sample_milliseconds -ne
+        [double]$Profile.minimum_sample_milliseconds -or
+    [int]$Request.minimum_iterations -ne
+        [int]$Profile.minimum_iterations -or
+    [int]$Request.maximum_iterations -ne
+        [int]$Profile.maximum_iterations -or
+    [int]$Request.calibration_confirmation_samples -ne
+        [int]$Profile.calibration_confirmation_samples -or
+    [string]$Request.target_triple -cne
+        [string]$Profile.target_triple -or
+    [string]$Request.kernel_wasm_sha256 -cne
+        [string]$Profile.kernel_wasm_sha256 -or
+    [string]$Request.lane_schedule_id -cne
+        [string]$Profile.lane_schedule_id -or
+    [string]::Join('|', @($Request.lanes)) -cne $ExpectedLaneCatalog) {
+    throw 'ASP54R4133 request workload contract differs from tracked profile'
+}
+if ([string]$Request.mode -ceq 'calibration') {
+    if ($ExpectedProcessRun -ne -1) {
+        throw 'ASP54R4134 calibration process_run must be -1'
+    }
+}
+elseif ($ExpectedProcessRun -lt 0 -or
+    $ExpectedProcessRun -ge [int]$Profile.process_runs) {
+    throw 'ASP54R4135 timed process_run is outside the tracked profile range'
+}
+
 $BoundFields = @(
     'attempt_id',
     'profile_sha256',
@@ -79,12 +119,7 @@ if ([int]$Result.process_run -ne [int]$Request.process_run -or
     throw 'ASP54R4107 mode, process, or seed identity differs from request'
 }
 
-$ExpectedLaneIds = @(
-    'puerts_v8_wasm_jit',
-    'avidscript_wasmtime_cranelift_jit',
-    'avidscript_wamr_interpreter',
-    'native_cpp_reference'
-)
+$ExpectedLaneIds = @($Profile.lanes)
 $ObservedLaneIds = @(
     $Result.lane_identities |
         ForEach-Object { [string]$_.lane_id }
@@ -143,8 +178,10 @@ if ([bool]$Result.compile_in_timed_region -or
     throw 'ASP54R4114 timing boundary, no-fallback, or correctness contract failed'
 }
 if ([string]$Result.lane_schedule_id -cne
-    [string]$Profile.lane_schedule_id) {
-    throw 'ASP54R4115 lane schedule identity differs from profile'
+        [string]$Profile.lane_schedule_id -or
+    [string]$Result.lane_schedule_id -cne
+        [string]$Request.lane_schedule_id) {
+    throw 'ASP54R4115 lane schedule identity differs from request/profile'
 }
 
 if (-not ('AvidScriptControlledOracle' -as [type])) {

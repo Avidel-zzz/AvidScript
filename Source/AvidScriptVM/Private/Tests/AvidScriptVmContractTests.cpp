@@ -2,6 +2,7 @@
 
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptVmExportTable.h"
+#include "AvidScriptVmResultFixtureBuilder.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -406,6 +407,118 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("old handle category"), Error.Category, FString(TEXT("stale_export")));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWamrWideResultAbiTest,
+	"AvidScript.Architecture.VM.WamrWideResultAbi",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWamrWideResultAbiTest::RunTest(const FString& Parameters)
+{
+	using namespace AvidScriptVmResultFixture;
+
+	TUniquePtr<IAvidScriptVmBackend> Backend = CreateAvidScriptWamrBackend();
+	if (!TestNotNull(TEXT("WAMR wide result backend is created"), Backend.Get()))
+	{
+		return false;
+	}
+	FAvidScriptVmError Error;
+	FAvidScriptVmLoadConfig Config;
+	FAvidScriptVmExportHandle Handle;
+	FAvidScriptVmCallResult Result;
+
+	const uint64 I64Bits = 0x0123456789abcdefULL;
+	const TArray<uint8> I64Fixture =
+		BuildSingle(EValueKind::I64, I64Bits);
+	if (!TestTrue(
+			TEXT("WAMR i64 result fixture loads"),
+			Backend->Load(
+				MakeArrayView(I64Fixture),
+				TEXT("wamr_i64_result"),
+				Config,
+				Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("WAMR i64 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("WAMR i64 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("WAMR i64 result has two cells"), Result.CellCount, 2u);
+	TestEqual(
+		TEXT("WAMR i64 low cell is first"),
+		Result.Cells[0],
+		static_cast<uint32>(I64Bits));
+	TestEqual(
+		TEXT("WAMR i64 high cell is second"),
+		Result.Cells[1],
+		static_cast<uint32>(I64Bits >> 32));
+
+	const double F64Value = -123.5;
+	uint64 F64Bits = 0;
+	FMemory::Memcpy(&F64Bits, &F64Value, sizeof(F64Bits));
+	const TArray<uint8> F64Fixture =
+		BuildSingle(EValueKind::F64, F64Bits);
+	if (!TestTrue(
+			TEXT("WAMR f64 result fixture loads"),
+			Backend->Load(
+				MakeArrayView(F64Fixture),
+				TEXT("wamr_f64_result"),
+				Config,
+				Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("WAMR f64 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("WAMR f64 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("WAMR f64 result has two cells"), Result.CellCount, 2u);
+	TestEqual(
+		TEXT("WAMR f64 low bits cell is first"),
+		Result.Cells[0],
+		static_cast<uint32>(F64Bits));
+	TestEqual(
+		TEXT("WAMR f64 high bits cell is second"),
+		Result.Cells[1],
+		static_cast<uint32>(F64Bits >> 32));
+
+	const float F32Value = -3.25f;
+	uint32 F32Bits = 0;
+	FMemory::Memcpy(&F32Bits, &F32Value, sizeof(F32Bits));
+	const TArray<uint8> F32Fixture =
+		BuildSingle(EValueKind::F32, F32Bits);
+	if (!TestTrue(
+			TEXT("WAMR f32 result fixture loads"),
+			Backend->Load(
+				MakeArrayView(F32Fixture),
+				TEXT("wamr_f32_result"),
+				Config,
+				Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("WAMR f32 result export resolves"),
+		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	TestTrue(
+		TEXT("WAMR f32 result export calls"),
+		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
+	TestEqual(TEXT("WAMR f32 result has one cell"), Result.CellCount, 1u);
+	TestEqual(
+		TEXT("WAMR f32 result bits are preserved"),
+		Result.Cells[0],
+		F32Bits);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptGeneratedWasmBackendArtifactSmokeTest,
 	"AvidScript.Architecture.VM.GeneratedWasmBackendArtifactSmoke",

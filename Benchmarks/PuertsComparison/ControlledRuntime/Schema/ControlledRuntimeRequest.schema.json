@@ -20,6 +20,8 @@
     "puerts_commit",
     "puerts_backend_sha256",
     "target_triple",
+    "lane_schedule_id",
+    "lanes",
     "attempt_id",
     "profile_sha256",
     "calibration_sha256",
@@ -60,6 +62,19 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "target_triple": { "const": "x86_64-pc-windows-msvc" },
+    "lane_schedule_id": { "const": "round_robin_process_sample_v1" },
+    "lanes": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        { "const": "puerts_v8_wasm_jit" },
+        { "const": "avidscript_wasmtime_cranelift_jit" },
+        { "const": "avidscript_wamr_interpreter" },
+        { "const": "native_cpp_reference" }
+      ],
+      "items": false
+    },
     "attempt_id": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
