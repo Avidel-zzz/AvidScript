@@ -23,6 +23,10 @@ $KernelWasmPath = Join-Path $ControlledRoot (
     'Kernel/controlled_runtime_kernel.wasm')
 $KernelWatPath = Join-Path $ControlledRoot (
     'Kernel/controlled_runtime_kernel.wat')
+$CrossingCostContractPath = Join-Path $ControlledRoot (
+    'Kernel/crossing_cost_kernel.contract.json')
+$CrossingCostWatPath = Join-Path $ControlledRoot (
+    'Kernel/crossing_cost_kernel.wat')
 $RunnerPath = Join-Path $HarnessRoot (
     'Source/AvidScriptPerfHarness/Private/AvidScriptControlledRuntimeRunner.cpp')
 $JavaScriptPath = Join-Path $HarnessRoot (
@@ -76,6 +80,8 @@ foreach ($RequiredFile in @(
     $KernelContractPath,
     $KernelWasmPath,
     $KernelWatPath,
+    $CrossingCostContractPath,
+    $CrossingCostWatPath,
     $RunnerPath,
     $JavaScriptPath,
     $VmHeaderPath,
@@ -151,6 +157,70 @@ $Attributes = Get-Content -LiteralPath $AttributesPath -Raw
 Assert-True ($Attributes.Contains(
     'Benchmarks/PuertsComparison/ControlledRuntime/Kernel/*.wasm binary')) (
     'tracked WASM must be declared binary in .gitattributes')
+
+function Assert-CrossingCostContract {
+    param(
+        [Parameter(Mandatory = $true)]$Contract,
+        [Parameter(Mandatory = $true)][string]$WatText
+    )
+    Assert-True ([int]$Contract.schema_version -eq 1) (
+        'crossing cost contract schema must be 1')
+    Assert-True ([string]$Contract.kernel_id -ceq
+        'avidscript.controlled_runtime.crossing_cost.v1') (
+        'crossing cost contract id is frozen')
+    Assert-True ($Contract.tracked_wasm -eq $false) (
+        'crossing cost WAT must remain the tracked source before VM integration')
+    Assert-True (@($Contract.imports).Count -eq 2) (
+        'crossing cost contract requires two host imports')
+    Assert-True ([string]$Contract.imports[0].module -ceq 'avidscript' -and
+        [string]$Contract.imports[0].name -ceq 'typed_empty_i32' -and
+        [string]$Contract.imports[0].signature -ceq '()->i32') (
+        'typed empty import contract differs')
+    Assert-True ([string]$Contract.imports[1].module -ceq 'avidscript' -and
+        [string]$Contract.imports[1].name -ceq 'i32_pair' -and
+        [string]$Contract.imports[1].signature -ceq '(i32,i32)->i32') (
+        'i32 pair import contract differs')
+    Assert-True (@($Contract.exports).Count -eq 2) (
+        'crossing cost contract requires two exports')
+    foreach ($Export in @($Contract.exports)) {
+        Assert-True ([string]$Export.signature -ceq '(i32,i32)->i32') (
+            'crossing cost export signature differs')
+        Assert-True (-not [string]::IsNullOrWhiteSpace(
+            [string]$Export.checksum_recurrence)) (
+            'crossing cost export must declare checksum recurrence')
+        Assert-True ($WatText.Contains(('(export "{0}")' -f [string]$Export.name))) (
+            "crossing cost WAT is missing export $($Export.name)")
+    }
+    foreach ($Token in @(
+        '(import "avidscript" "typed_empty_i32"',
+        '(import "avidscript" "i32_pair"',
+        'call $typed_empty_i32',
+        'call $i32_pair',
+        'local.set $value'
+    )) {
+        Assert-True ($WatText.Contains($Token)) (
+            "crossing cost WAT is missing token: $Token")
+    }
+}
+
+$CrossingCostContract = Get-Content -LiteralPath $CrossingCostContractPath -Raw |
+    ConvertFrom-Json
+$CrossingCostWat = Get-Content -LiteralPath $CrossingCostWatPath -Raw
+Assert-CrossingCostContract -Contract $CrossingCostContract -WatText $CrossingCostWat
+$TamperedCrossingCostContract = Get-Content -LiteralPath $CrossingCostContractPath -Raw |
+    ConvertFrom-Json
+$TamperedCrossingCostContract.exports[0].signature = '(i32)->i32'
+$TamperRejected = $false
+try {
+    Assert-CrossingCostContract `
+        -Contract $TamperedCrossingCostContract `
+        -WatText $CrossingCostWat
+}
+catch {
+    $TamperRejected = $true
+}
+Assert-True $TamperRejected (
+    'crossing cost contract tamper must be rejected')
 
 $JavaScript = Get-Content -LiteralPath $JavaScriptPath -Raw
 foreach ($Token in @(

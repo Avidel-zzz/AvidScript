@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kernel_id": "avidscript.controlled_runtime.crossing_cost.v1",
+  "wat_path": "crossing_cost_kernel.wat",
+  "wasm_path": "crossing_cost_kernel.wasm",
+  "tracked_wasm": false,
+  "compiler": {
+    "package": "wasmtime",
+    "version": "45.0.0",
+    "entrypoint": "wasmtime.wat2wasm"
+  },
+  "imports": [
+    {
+      "module": "avidscript",
+      "name": "typed_empty_i32",
+      "signature": "()->i32"
+    },
+    {
+      "module": "avidscript",
+      "name": "i32_pair",
+      "signature": "(i32,i32)->i32"
+    }
+  ],
+  "exports": [
+    {
+      "name": "run_empty",
+      "signature": "(i32,i32)->i32",
+      "checksum_recurrence": "value_0=seed; value_(n+1)=(typed_empty_i32() xor value_n)+n"
+    },
+    {
+      "name": "run_i32_pair",
+      "signature": "(i32,i32)->i32",
+      "checksum_recurrence": "value_0=seed; value_(n+1)=i32_pair(value_n,seed+n)"
+    }
+  ],
+  "features": [
+    "mvp",
+    "i32",
+    "host_imports"
+  ]
+}
