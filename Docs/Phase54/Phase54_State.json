@@ -43,15 +43,15 @@
     },
     {
       "id": "P54.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Crossing fast path、typed thunk 与正式五 lane 基准已完成；7500/7500 正确，P54.4 中文报告和 compact evidence 已发布。",
+      "completed_at_utc": "2026-07-27T12:28:45.7526169+00:00"
     },
     {
       "id": "P54.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Qualified native direct 已完成：scalar_add_int32 P50 218.84 ns/op，较 P54.4 改善 69.31%；960 万次真实 direct hit、零 direct 回退，正式矩阵 7500/7500 正确；当前仍比 Puerts Reflection 慢 1.92 倍。",
+      "completed_at_utc": "2026-07-27T12:29:03.9994762+00:00"
     },
     {
       "id": "P54.6",
@@ -112,7 +112,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 54 -BatchId P54.4 -Evidence <text>",
-  "revision": 6,
-  "updated_at_utc": "2026-07-27T00:47:49.3280184+00:00"
+  "next_action": "batch-complete -Phase 54 -BatchId P54.6 -Evidence <text>",
+  "revision": 8,
+  "updated_at_utc": "2026-07-27T12:29:04.0018495+00:00"
 }
