@@ -2,6 +2,7 @@
 
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptBindingReloadEffect.h"
+#include "AvidScriptGeneratedBindingRegistry.h"
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectRegistry.h"
@@ -28,7 +29,8 @@ enum class EAvidScriptBindingInvocationPolicy : uint8
 enum class EAvidScriptBindingInvocationMode : uint8
 {
 	SemanticProcessEvent,
-	QualifiedNativeDirect
+	QualifiedNativeDirect,
+	GeneratedNativeS1
 };
 
 struct FAvidScriptBindingPackageLoadResult
@@ -52,6 +54,7 @@ struct FAvidScriptBindingPackageInstrumentation
 	uint64 TypedThunkPlanCount = 0;
 	uint64 ReflectionFallbackPlanCount = 0;
 	uint64 QualifiedNativeDirectPlanCount = 0;
+	uint64 GeneratedNativeS1PlanCount = 0;
 	uint64 SemanticOnlyPlanCount = 0;
 };
 
@@ -60,6 +63,9 @@ struct FAvidScriptBindingInvocationInstrumentation
 	uint64 SemanticProcessEventCount = 0;
 	uint64 QualifiedNativeDirectCount = 0;
 	uint64 RequestedNativeDirectFallbackCount = 0;
+	uint64 GeneratedNativeS1HitCount = 0;
+	uint64 GeneratedNativeS1FallbackCount = 0;
+	uint64 GeneratedNativeS1RejectCount = 0;
 };
 
 struct FAvidScriptBindingInvocationContext
@@ -88,6 +94,19 @@ public:
 		const FString& DescriptorJson,
 		TSharedPtr<const FAvidScriptBindingPackage>& OutPackage,
 		FAvidScriptBindingPackageLoadResult& OutResult);
+#if WITH_DEV_AUTOMATION_TESTS
+	static TSharedPtr<const FAvidScriptBindingPackage>
+		MakeGeneratedPlanForTesting(
+			const FString& PackageHash,
+			const FString& StableId,
+			const FString& DescriptorIdentity,
+			EAvidScriptGeneratedBindingShape Shape,
+			UClass* ExpectedClass,
+			FProperty* ReflectedProperty,
+			bool bPropertyWrite,
+			bool bRequiresWriteAccess,
+			EAvidScriptBindingReloadEffect ReloadEffect);
+#endif
 
 	const FString& GetPackageName() const;
 	const FString& GetPackageHash() const;
@@ -100,6 +119,20 @@ public:
 	bool TryGetInvocationMode(
 		uint32 Ordinal,
 		EAvidScriptBindingInvocationMode& OutMode) const;
+	bool BuildTypedHostImports(
+		TArray<FAvidScriptVmTypedHostImport>& OutImports,
+		FString& OutError) const;
+	bool TryGetGeneratedBinding(
+		uint32 Ordinal,
+		const FAvidScriptGeneratedBindingEntry*& OutEntry,
+		UClass*& OutExpectedClass,
+		bool& bOutPropertyWrite,
+		bool& bOutRequiresWriteAccess) const;
+	bool PrepareGeneratedHostEffect(
+		uint32 Ordinal,
+		const FAvidScriptObjectHandle& ReceiverHandle,
+		UObject& Receiver,
+		const FAvidScriptBindingInvocationContext& Context) const;
 	bool TryFindFunctionOrdinal(
 		const UClass& OwnerClass,
 		FName FunctionName,

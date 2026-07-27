@@ -7,6 +7,7 @@
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptWasmRuntime.h"
 #include "Session/AvidScriptRuntimeEventRouter.h"
 #include "Session/AvidScriptRuntimeScheduler.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
@@ -20,9 +21,77 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/StrongObjectPtr.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
+EAvidScriptVmTypedHostStatus GeneratedSessionPairCall(
+	UObject& Receiver,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	static_cast<void>(Receiver);
+	OutValue = Left + Right;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus GeneratedSessionPropertyCall(
+	UObject& Receiver,
+	const bool bWrite,
+	int32& InOutValue)
+{
+	static_cast<void>(Receiver);
+	static_cast<void>(bWrite);
+	static_cast<void>(InOutValue);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+class FGeneratedHostEffectJournal final
+	: public IAvidScriptBindingHostEffectJournal
+{
+public:
+	bool PrepareEffect(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		const EAvidScriptBindingReloadEffect Effect,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override
+	{
+		static_cast<void>(Registry);
+		static_cast<void>(Target);
+		++EffectPrepareCount;
+		LastHandle = Handle;
+		LastEffect = Effect;
+		OutResult.bSucceeded = true;
+		return true;
+	}
+
+	bool PrepareReflectedProperty(
+		FAvidScriptObjectRegistry& Registry,
+		const FAvidScriptObjectHandle& Handle,
+		UObject& Target,
+		FProperty& Property,
+		FAvidScriptBindingHostEffectPrepareResult& OutResult) override
+	{
+		static_cast<void>(Registry);
+		static_cast<void>(Target);
+		++PropertyPrepareCount;
+		LastHandle = Handle;
+		LastProperty = &Property;
+		OutResult.bSucceeded = true;
+		return true;
+	}
+
+	int32 EffectPrepareCount = 0;
+	int32 PropertyPrepareCount = 0;
+	FAvidScriptObjectHandle LastHandle;
+	EAvidScriptBindingReloadEffect LastEffect =
+		EAvidScriptBindingReloadEffect::None;
+	FProperty* LastProperty = nullptr;
+};
+
 const uint8 GSessionCompatibleModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 	0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x01,
@@ -1293,6 +1362,348 @@ bool FAvidScriptRuntimeServicesAttachDetachTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("detached typed event category"), Result.ErrorCategory, FString(TEXT("invalid_state")));
 
 	Runtime.Unload(Result);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest,
+	"AvidScript.Runtime.Session.GeneratedSelfCapabilityBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptObjectRegistry Registry;
+	TStrongObjectPtr<UObject> FirstOwner(NewObject<UObject>());
+	TStrongObjectPtr<UObject> SecondOwner(NewObject<UObject>());
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle FirstHandle = Registry.RegisterObject(
+		FirstOwner.Get(),
+		RegisterResult,
+		false);
+	const FAvidScriptObjectHandle SecondHandle = Registry.RegisterObject(
+		SecondOwner.Get(),
+		RegisterResult,
+		false);
+	if (!TestTrue(
+			TEXT("Capability fixture handles are valid"),
+			FirstHandle.IsValid() && SecondHandle.IsValid()))
+	{
+		return false;
+	}
+
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptWasmHostContext Context;
+	FAvidScriptBindingInvocationInstrumentation Instrumentation;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = FirstHandle;
+	Context.BindingInvocationInstrumentation = &Instrumentation;
+	Runtime.SetHostContext(Context);
+	TestEqual(
+		TEXT("Generated success status is preserved"),
+		Runtime.RecordGeneratedStatusForTesting(
+			EAvidScriptVmTypedHostStatus::Succeeded),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	TestEqual(
+		TEXT("Dedicated S1 fallback is converted to fail-closed rejection"),
+		Runtime.RecordGeneratedStatusForTesting(
+			EAvidScriptVmTypedHostStatus::FallbackRequired),
+		EAvidScriptVmTypedHostStatus::Rejected);
+	TestEqual(
+		TEXT("Generated rejection status is preserved"),
+		Runtime.RecordGeneratedStatusForTesting(
+			EAvidScriptVmTypedHostStatus::Rejected),
+		EAvidScriptVmTypedHostStatus::Rejected);
+	TestEqual(
+		TEXT("Generated hit counter is exact"),
+		Instrumentation.GeneratedNativeS1HitCount,
+		uint64(1));
+	TestEqual(
+		TEXT("Generated fallback counter is exact"),
+		Instrumentation.GeneratedNativeS1FallbackCount,
+		uint64(1));
+	TestEqual(
+		TEXT("Generated reject counter is exact"),
+		Instrumentation.GeneratedNativeS1RejectCount,
+		uint64(1));
+	Runtime.BeginTypedCallbackEpochForTesting();
+
+	UObject* ResolvedObject = nullptr;
+	TestTrue(
+		TEXT("Explicit null world permits an otherwise valid Self capability"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(FirstHandle.Slot),
+			static_cast<int32>(FirstHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	TestEqual(
+		TEXT("First Self resolves to the first owner"),
+		ResolvedObject,
+		FirstOwner.Get());
+
+	const uint64 FirstContextEpoch = Runtime.GetReloadEpochForTesting();
+	Context.OwnerHandle = SecondHandle;
+	Runtime.SetHostContext(Context);
+	TestNotEqual(
+		TEXT("Changing HostContext advances the capability epoch"),
+		Runtime.GetReloadEpochForTesting(),
+		FirstContextEpoch);
+	TestFalse(
+		TEXT("Old Self arguments fail closed after HostContext replacement"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(FirstHandle.Slot),
+			static_cast<int32>(FirstHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	TestTrue(
+		TEXT("Replacement Self is resolved instead of reusing the old weak object"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(SecondHandle.Slot),
+			static_cast<int32>(SecondHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	TestEqual(
+		TEXT("Replacement Self resolves to the second owner"),
+		ResolvedObject,
+		SecondOwner.Get());
+	Runtime.EndTypedCallbackEpochForTesting();
+
+	TWeakObjectPtr<UWorld> StaleWorld;
+	{
+		UWorld* UnreferencedWorld = NewObject<UWorld>();
+		StaleWorld = UnreferencedWorld;
+		UnreferencedWorld->MarkAsGarbage();
+	}
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+	if (!TestTrue(
+			TEXT("World fixture weak pointer is stale"),
+			StaleWorld.IsStale()))
+	{
+		return false;
+	}
+
+	Context.World = StaleWorld;
+	Runtime.SetHostContext(Context);
+	Runtime.BeginTypedCallbackEpochForTesting();
+	TestFalse(
+		TEXT("A stale weak world fails closed instead of becoming unconstrained"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(SecondHandle.Slot),
+			static_cast<int32>(SecondHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	Runtime.EndTypedCallbackEpochForTesting();
+	Runtime.ClearHostContext();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeGeneratedHostEffectBoundaryTest,
+	"AvidScript.Runtime.Session.GeneratedHostEffectBoundary",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
+	const FString& Parameters)
+{
+	const FString FunctionPackageHash = FString::ChrN(64, TEXT('8'));
+	const FString PropertyPackageHash = FString::ChrN(64, TEXT('9'));
+	FAvidScriptGeneratedBindingRegistry& GeneratedRegistry =
+		FAvidScriptGeneratedBindingRegistry::Get();
+	GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
+	GeneratedRegistry.UnregisterPackage(PropertyPackageHash);
+	ON_SCOPE_EXIT
+	{
+		GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
+		GeneratedRegistry.UnregisterPackage(PropertyPackageHash);
+	};
+
+	FAvidScriptGeneratedBindingEntry FunctionEntry;
+	FunctionEntry.PackageHash = FunctionPackageHash;
+	FunctionEntry.StableId = FString::ChrN(64, TEXT('8'));
+	FunctionEntry.DescriptorIdentity = TEXT("test::generated-effect");
+	FunctionEntry.Shape = EAvidScriptGeneratedBindingShape::I32PairToI32;
+	FunctionEntry.ReceiverMode = EAvidScriptGeneratedReceiverMode::SelfBound;
+	FunctionEntry.I32PairCall = &GeneratedSessionPairCall;
+
+	FAvidScriptGeneratedBindingEntry PropertyEntry;
+	PropertyEntry.PackageHash = PropertyPackageHash;
+	PropertyEntry.StableId = FString::ChrN(64, TEXT('9'));
+	PropertyEntry.DescriptorIdentity = TEXT("test::generated-property");
+	PropertyEntry.Shape =
+		EAvidScriptGeneratedBindingShape::PropertyI32GetSet;
+	PropertyEntry.ReceiverMode = EAvidScriptGeneratedReceiverMode::SelfBound;
+	PropertyEntry.PropertyI32Call = &GeneratedSessionPropertyCall;
+
+	FString Error;
+	if (!TestTrue(
+			TEXT("Function effect fixture registers"),
+			GeneratedRegistry.RegisterPackage(
+				FunctionPackageHash,
+				MakeArrayView(&FunctionEntry, 1),
+				Error))
+		|| !TestTrue(
+			TEXT("Property effect fixture registers"),
+			GeneratedRegistry.RegisterPackage(
+				PropertyPackageHash,
+				MakeArrayView(&PropertyEntry, 1),
+				Error)))
+	{
+		return false;
+	}
+
+	TStrongObjectPtr<AAvidScriptActorBindingTestActor> Owner(
+		NewObject<AAvidScriptActorBindingTestActor>());
+	TStrongObjectPtr<AAvidScriptActorBindingTestActor> StableReceiver(
+		NewObject<AAvidScriptActorBindingTestActor>());
+	FAvidScriptObjectRegistry ObjectRegistry;
+	FAvidScriptObjectHandleResult HandleResult;
+	const FAvidScriptObjectHandle OwnerHandle = ObjectRegistry.RegisterObject(
+		Owner.Get(),
+		HandleResult,
+		false);
+	const FAvidScriptObjectHandle StableReceiverHandle =
+		ObjectRegistry.RegisterObject(
+			StableReceiver.Get(),
+			HandleResult,
+			false);
+	FProperty* Property = FindFProperty<FProperty>(
+		AAvidScriptActorBindingTestActor::StaticClass(),
+		GET_MEMBER_NAME_CHECKED(
+			AAvidScriptActorBindingTestActor,
+			HostEffectObjectProperty));
+	if (!TestNotNull(TEXT("Reflected property fixture resolves"), Property))
+	{
+		return false;
+	}
+
+	const TSharedPtr<const FAvidScriptBindingPackage> PropertyPackage =
+		FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
+			PropertyPackageHash,
+			PropertyEntry.StableId,
+			PropertyEntry.DescriptorIdentity,
+			PropertyEntry.Shape,
+			AAvidScriptActorBindingTestActor::StaticClass(),
+			Property,
+			true,
+			true,
+			EAvidScriptBindingReloadEffect::ReflectedProperty);
+	const TSharedPtr<const FAvidScriptBindingPackage> FunctionPackage =
+		FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
+			FunctionPackageHash,
+			FunctionEntry.StableId,
+			FunctionEntry.DescriptorIdentity,
+			FunctionEntry.Shape,
+			AAvidScriptActorBindingTestActor::StaticClass(),
+			nullptr,
+			false,
+			true,
+			EAvidScriptBindingReloadEffect::ActorTransform);
+	const TSharedPtr<const FAvidScriptBindingPackage> UnsupportedPackage =
+		FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
+			FunctionPackageHash,
+			FunctionEntry.StableId,
+			FunctionEntry.DescriptorIdentity,
+			FunctionEntry.Shape,
+			AAvidScriptActorBindingTestActor::StaticClass(),
+			nullptr,
+			false,
+			true,
+			EAvidScriptBindingReloadEffect::Unsupported);
+	if (!TestTrue(
+			TEXT("Generated effect test packages are created"),
+			PropertyPackage.IsValid()
+				&& FunctionPackage.IsValid()
+				&& UnsupportedPackage.IsValid()))
+	{
+		return false;
+	}
+
+	FGeneratedHostEffectJournal Journal;
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &ObjectRegistry;
+	Context.OwnerHandle = OwnerHandle;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	Context.HostEffectJournal = &Journal;
+	TestTrue(
+		TEXT("Generated property set prepares reflected-property rollback"),
+		PropertyPackage->PrepareGeneratedHostEffect(
+			0,
+			OwnerHandle,
+			*Owner,
+			Context));
+	TestEqual(
+		TEXT("Reflected-property journal is called exactly once"),
+		Journal.PropertyPrepareCount,
+		1);
+	TestEqual(
+		TEXT("Reflected-property journal receives the property"),
+		Journal.LastProperty,
+		Property);
+
+	TestTrue(
+		TEXT("Generated function prepares its declared reload effect"),
+		FunctionPackage->PrepareGeneratedHostEffect(
+			0,
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
+	TestTrue(
+		TEXT("Function journal receives the actual StableBorrow receiver handle"),
+		Journal.LastHandle == StableReceiverHandle);
+	TestEqual(
+		TEXT("Function journal receives the declared effect"),
+		Journal.LastEffect,
+		EAvidScriptBindingReloadEffect::ActorTransform);
+
+	TestFalse(
+		TEXT("Unsupported candidate reload effect rejects before the thunk"),
+		UnsupportedPackage->PrepareGeneratedHostEffect(
+			0,
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
+	Context.HostEffectJournal = nullptr;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
+	TestFalse(
+		TEXT("Generated writes cannot bypass the host read-only policy"),
+		FunctionPackage->PrepareGeneratedHostEffect(
+			0,
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TestTrue(
+		TEXT("Normal execution with no journal stays O(1) and accepts the plan"),
+		UnsupportedPackage->PrepareGeneratedHostEffect(
+			0,
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
+
+	TArray<FAvidScriptVmTypedHostImport> TypedImports;
+	FString TypedImportError;
+	TestTrue(
+		TEXT("Active leases publish one complete typed import list"),
+		FunctionPackage->BuildTypedHostImports(
+			TypedImports,
+			TypedImportError));
+	TestEqual(
+		TEXT("Typed import publication count is exact"),
+		TypedImports.Num(),
+		1);
+	GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
+	TestFalse(
+		TEXT("Revocation between package load and backend load aborts publication"),
+		FunctionPackage->BuildTypedHostImports(
+			TypedImports,
+			TypedImportError));
+	TestTrue(
+		TEXT("Revoked typed import publication leaves no partial list"),
+		TypedImports.IsEmpty());
+	TestEqual(
+		TEXT("Revoked typed import publication uses the stable category"),
+		TypedImportError,
+		FString(TEXT("generated_binding_unavailable")));
 	return true;
 }
 #endif

@@ -15,6 +15,49 @@ constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 constexpr int32 AvidScriptMaximumPendingTimers = 1024;
 constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
 
+uint32 LoadAvidScriptLittleEndianU32(
+	const TConstArrayView<uint8> Bytes,
+	const int32 Offset)
+{
+	return static_cast<uint32>(Bytes[Offset])
+		| (static_cast<uint32>(Bytes[Offset + 1]) << 8)
+		| (static_cast<uint32>(Bytes[Offset + 2]) << 16)
+		| (static_cast<uint32>(Bytes[Offset + 3]) << 24);
+}
+
+void StoreAvidScriptLittleEndianU32(
+	const TArrayView<uint8> Bytes,
+	const int32 Offset,
+	const uint32 Value)
+{
+	Bytes[Offset] = static_cast<uint8>(Value);
+	Bytes[Offset + 1] = static_cast<uint8>(Value >> 8);
+	Bytes[Offset + 2] = static_cast<uint8>(Value >> 16);
+	Bytes[Offset + 3] = static_cast<uint8>(Value >> 24);
+}
+
+float LoadAvidScriptLittleEndianF32(
+	const TConstArrayView<uint8> Bytes,
+	const int32 Offset)
+{
+	const uint32 Bits = LoadAvidScriptLittleEndianU32(Bytes, Offset);
+	float Value = 0.0f;
+	static_assert(sizeof(Value) == sizeof(Bits));
+	FMemory::Memcpy(&Value, &Bits, sizeof(Value));
+	return Value;
+}
+
+void StoreAvidScriptLittleEndianF32(
+	const TArrayView<uint8> Bytes,
+	const int32 Offset,
+	const float Value)
+{
+	uint32 Bits = 0;
+	static_assert(sizeof(Value) == sizeof(Bits));
+	FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+	StoreAvidScriptLittleEndianU32(Bytes, Offset, Bits);
+}
+
 struct FAvidScriptTimerDeadlineLess
 {
 	bool operator()(const FAvidScriptWasmTimerEntry& Left, const FAvidScriptWasmTimerEntry& Right) const
@@ -369,14 +412,36 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	if (BindingPackage.IsValid())
 	{
 		BindingInvocationScratch.SetNumUninitialized(BindingPackage->GetRequiredScratchSize());
+		FString TypedImportError;
+		if (!BindingPackage->BuildTypedHostImports(
+				TypedHostImports,
+				TypedImportError))
+		{
+			SetFailure(
+				OutResult,
+				ModuleId,
+				TEXT("<generated-bindings>"),
+				TEXT("generated_binding_unavailable"),
+				TypedImportError,
+				TEXT("load the matching generated module before loading the VM"));
+			VmBackend.Reset();
+			BindingPackage.Reset();
+			DebugMap.Reset();
+			BindingInvocationScratch.Reset();
+			TypedHostImports.Reset();
+			return false;
+		}
 	}
 	else
 	{
 		BindingInvocationScratch.Reset();
+		TypedHostImports.Reset();
 	}
 
 	FAvidScriptVmLoadConfig Config;
 	Config.HostDispatcher = this;
+	Config.TypedHostDispatcher = this;
+	Config.TypedHostImports = TypedHostImports;
 	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
 	const bool bLoaded = VmBackend->Load(MakeArrayView(Bytecode, BytecodeSize), ModuleId, Config, Error);
 	ActiveBackendInfo = VmBackend->GetBackendInfo();
@@ -394,6 +459,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		BindingPackage.Reset();
 		DebugMap.Reset();
 		BindingInvocationScratch.Reset();
+		TypedHostImports.Reset();
 		return false;
 	}
 
@@ -493,7 +559,8 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 	}
 
 	const double BeginPlayStartSeconds = FPlatformTime::Seconds();
-	if (!CallVmExport(
+	BeginTypedCallbackEpoch();
+	const bool bBeginPlayCalled = CallVmExport(
 		VmBackend.Get(),
 		BeginPlayExport,
 		ModuleId,
@@ -501,7 +568,9 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		0,
 		nullptr,
 		DebugMap.Get(),
-		OutResult))
+		OutResult);
+	EndTypedCallbackEpoch();
+	if (!bBeginPlayCalled)
 	{
 		Metrics.BeginPlayCallMs = MeasureElapsedMs(BeginPlayStartSeconds);
 		OutResult.Metrics = Metrics;
@@ -567,7 +636,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	FMemory::Memcpy(&TickArgs[0], &DeltaSeconds, sizeof(DeltaSeconds));
 
 	const double TickStartSeconds = FPlatformTime::Seconds();
-	if (!CallVmExport(
+	BeginTypedCallbackEpoch();
+	const bool bTickCalled = CallVmExport(
 		VmBackend.Get(),
 		TickExport,
 		ModuleId,
@@ -575,7 +645,9 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		UE_ARRAY_COUNT(TickArgs),
 		TickArgs,
 		DebugMap.Get(),
-		OutResult))
+		OutResult);
+	EndTypedCallbackEpoch();
+	if (!bTickCalled)
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 		OutResult.Metrics = Metrics;
@@ -650,7 +722,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	FMemory::Memcpy(&EventArgs[1], &Value, sizeof(Value));
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
-	if (!CallVmExport(
+	BeginTypedCallbackEpoch();
+	const bool bEventCalled = CallVmExport(
 		VmBackend.Get(),
 		EventExport,
 		ModuleId,
@@ -658,7 +731,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		UE_ARRAY_COUNT(EventArgs),
 		EventArgs,
 		DebugMap.Get(),
-		OutResult))
+		OutResult);
+	EndTypedCallbackEpoch();
+	if (!bEventCalled)
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
 		OutResult.Metrics = Metrics;
@@ -765,15 +840,18 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	FMemory::Memcpy(&EventArgs[7], &Event.VectorValue.Z, sizeof(float));
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
-	if (!CallVmExport(
-			VmBackend.Get(),
+	BeginTypedCallbackEpoch();
+	const bool bGameplayEventCalled = CallVmExport(
+		VmBackend.Get(),
 			GameplayEventExport,
 			ModuleId,
 			"avid_on_gameplay_event",
 			UE_ARRAY_COUNT(EventArgs),
-			EventArgs,
-			DebugMap.Get(),
-			OutResult))
+		EventArgs,
+		DebugMap.Get(),
+		OutResult);
+	EndTypedCallbackEpoch();
+	if (!bGameplayEventCalled)
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
 		OutResult.Metrics = Metrics;
@@ -860,7 +938,8 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 	}
 
 	const double EndPlayStartSeconds = FPlatformTime::Seconds();
-	if (!CallVmExport(
+	BeginTypedCallbackEpoch();
+	const bool bEndPlayCalled = CallVmExport(
 		VmBackend.Get(),
 		EndPlayExport,
 		ModuleId,
@@ -868,7 +947,9 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		0,
 		nullptr,
 		DebugMap.Get(),
-		OutResult))
+		OutResult);
+	EndTypedCallbackEpoch();
+	if (!bEndPlayCalled)
 	{
 		Metrics.EndPlayCallMs = MeasureElapsedMs(EndPlayStartSeconds);
 		OutResult.Metrics = Metrics;
@@ -929,7 +1010,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	}
 	BindingPackage.Reset();
 	DebugMap.Reset();
+	TypedHostImports.Reset();
 	BindingInvocationScratch.Reset();
+	CallbackEpochStack.Reset();
+	InvalidateSelfCapability();
 	BeginPlayExport = {};
 	TickExport = {};
 	EndPlayExport = {};
@@ -979,6 +1063,7 @@ bool FAvidScriptWasmRuntimeInstance::IsLoaded() const
 
 void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostContext& InHostContext)
 {
+	InvalidateSelfCapability();
 	HostContext = InHostContext;
 	BindingInvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
 	BindingInvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
@@ -993,6 +1078,7 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 
 void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 {
+	InvalidateSelfCapability();
 	HostContext = FAvidScriptWasmHostContext();
 	BindingInvocationContext = FAvidScriptBindingInvocationContext();
 }
@@ -1828,7 +1914,8 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmo
 			static_cast<uint32>(Timer.Handle)
 		};
 		const double CallbackStartSeconds = FPlatformTime::Seconds();
-		if (!CallVmExport(
+		BeginTypedCallbackEpoch();
+		const bool bTimerCalled = CallVmExport(
 			VmBackend.Get(),
 			TimerExport,
 			ModuleId,
@@ -1836,7 +1923,9 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmo
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
 			DebugMap.Get(),
-			OutResult))
+			OutResult);
+		EndTypedCallbackEpoch();
+		if (!bTimerCalled)
 		{
 			Metrics.TimerCallbackCallMs += MeasureElapsedMs(CallbackStartSeconds);
 			return false;
@@ -1972,6 +2061,605 @@ bool FAvidScriptWasmRuntimeInstance::ConsumePendingHostImportFailure(
 	PendingHostImportName.Empty();
 	PendingHostImportDetails.Empty();
 	return true;
+}
+
+void FAvidScriptWasmRuntimeInstance::BeginTypedCallbackEpoch()
+{
+	++NextCallbackEpoch;
+	if (NextCallbackEpoch == 0)
+	{
+		++NextCallbackEpoch;
+	}
+	CallbackEpochStack.Add(NextCallbackEpoch);
+}
+
+void FAvidScriptWasmRuntimeInstance::InvalidateSelfCapability()
+{
+	SelfCapability = FAvidScriptSelfCapability();
+	++ReloadEpoch;
+	if (ReloadEpoch == 0)
+	{
+		++ReloadEpoch;
+	}
+}
+
+void FAvidScriptWasmRuntimeInstance::EndTypedCallbackEpoch()
+{
+	if (!CallbackEpochStack.IsEmpty())
+	{
+		CallbackEpochStack.Pop(EAllowShrinking::No);
+	}
+}
+
+bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	UClass* ExpectedClass,
+	UObject*& OutObject)
+{
+	OutObject = nullptr;
+	if (!IsInGameThread()
+		|| CallbackEpochStack.IsEmpty()
+		|| HostContext.World.IsStale()
+		|| SelfSlot <= 0
+		|| SelfGeneration <= 0
+		|| HostContext.ObjectRegistry == nullptr)
+	{
+		return false;
+	}
+	const FAvidScriptObjectHandle RequestedHandle{
+		static_cast<uint32>(SelfSlot),
+		static_cast<uint32>(SelfGeneration)
+	};
+	if (!(RequestedHandle == HostContext.OwnerHandle))
+	{
+		return false;
+	}
+
+	const uint64 CallbackEpoch = CallbackEpochStack.Last();
+	if (SelfCapability.CallbackEpoch == CallbackEpoch
+		&& SelfCapability.ReloadEpoch == ReloadEpoch
+		&& SelfCapability.Handle == RequestedHandle)
+	{
+		OutObject = SelfCapability.Object.Get();
+		return OutObject != nullptr
+			&& (ExpectedClass == nullptr || OutObject->IsA(ExpectedClass))
+			&& (HostContext.World.Get() == nullptr
+				|| OutObject->GetWorld() == HostContext.World.Get());
+	}
+
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* Object = HostContext.ObjectRegistry->ResolveObject(
+		RequestedHandle,
+		ResolveResult,
+		false);
+	if (Object == nullptr
+		|| (ExpectedClass != nullptr && !Object->IsA(ExpectedClass))
+		|| (HostContext.World.Get() != nullptr
+			&& Object->GetWorld() != HostContext.World.Get()))
+	{
+		return false;
+	}
+
+	SelfCapability.Object = Object;
+	SelfCapability.Handle = RequestedHandle;
+	SelfCapability.ReloadEpoch = ReloadEpoch;
+	SelfCapability.CallbackEpoch = CallbackEpoch;
+	OutObject = Object;
+	return true;
+}
+
+UObject* FAvidScriptWasmRuntimeInstance::ResolveStableBorrow(
+	const int32 Slot,
+	const int32 Generation,
+	UClass* ExpectedClass) const
+{
+	if (!IsInGameThread()
+		|| CallbackEpochStack.IsEmpty()
+		|| HostContext.World.IsStale()
+		|| Slot <= 0
+		|| Generation <= 0
+		|| HostContext.ObjectRegistry == nullptr)
+	{
+		return nullptr;
+	}
+	const FAvidScriptObjectHandle Handle{
+		static_cast<uint32>(Slot),
+		static_cast<uint32>(Generation)
+	};
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* Object = HostContext.ObjectRegistry->ResolveObject(
+		Handle,
+		ResolveResult,
+		false);
+	if (Object == nullptr
+		|| (ExpectedClass != nullptr && !Object->IsA(ExpectedClass))
+		|| (HostContext.World.Get() != nullptr
+			&& Object->GetWorld() != HostContext.World.Get())
+		|| (HostContext.ObjectOwnership != nullptr
+			&& !HostContext.ObjectOwnership->Owns(Handle, Object)))
+	{
+		return nullptr;
+	}
+	return Object;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::RecordGeneratedStatus(
+	const EAvidScriptVmTypedHostStatus Status)
+{
+	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+		BindingInvocationContext.InvocationInstrumentation;
+	if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		if (Instrumentation != nullptr)
+		{
+			++Instrumentation->GeneratedNativeS1HitCount;
+		}
+		return Status;
+	}
+	if (Status == EAvidScriptVmTypedHostStatus::FallbackRequired)
+	{
+		if (Instrumentation != nullptr)
+		{
+			++Instrumentation->GeneratedNativeS1FallbackCount;
+		}
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	if (Instrumentation != nullptr)
+	{
+		++Instrumentation->GeneratedNativeS1RejectCount;
+	}
+	return EAvidScriptVmTypedHostStatus::Rejected;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchEmptyI32(
+	const uint32 BindingOrdinal,
+	int32& OutValue)
+{
+	OutValue = 0;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchI32PairToI32(
+	const uint32 BindingOrdinal,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	OutValue = 0;
+	// This control shape is deliberately receiver-free and never resolves UObject.
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchSelfI32PairToI32(
+	const uint32 BindingOrdinal,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
+	if (!IsInGameThread()
+		|| !BindingPackage.IsValid()
+		|| !BindingPackage->TryGetGeneratedBinding(
+			BindingOrdinal,
+			Entry,
+			ExpectedClass,
+			bPropertyWrite,
+			bRequiresWriteAccess)
+		|| Entry->Shape != EAvidScriptGeneratedBindingShape::I32PairToI32
+		|| Entry->ReceiverMode != EAvidScriptGeneratedReceiverMode::SelfBound
+		|| Entry->I32PairCall == nullptr
+		|| (bRequiresWriteAccess
+			&& HostContext.ActorWritePolicy
+				!= EAvidScriptActorWritePolicy::AllowWrites))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	UObject* Receiver = nullptr;
+	if (!ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			ExpectedClass,
+			Receiver))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	if (!BindingPackage->PrepareGeneratedHostEffect(
+			BindingOrdinal,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(
+		Entry->I32PairCall(*Receiver, Left, Right, OutValue));
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchSelfPropertyI32GetSet(
+	const uint32 BindingOrdinal,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
+	UObject* Receiver = nullptr;
+	if (!BindingPackage.IsValid()
+		|| !BindingPackage->TryGetGeneratedBinding(
+			BindingOrdinal,
+			Entry,
+			ExpectedClass,
+			bPropertyWrite,
+			bRequiresWriteAccess)
+		|| Entry->Shape != EAvidScriptGeneratedBindingShape::PropertyI32GetSet
+		|| Entry->ReceiverMode != EAvidScriptGeneratedReceiverMode::SelfBound
+		|| Entry->PropertyI32Call == nullptr
+		|| (bRequiresWriteAccess
+			&& HostContext.ActorWritePolicy
+				!= EAvidScriptActorWritePolicy::AllowWrites)
+		|| !ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			ExpectedClass,
+			Receiver)
+		|| (!bPropertyWrite
+			&& (GuestAddress < 0
+				|| VmBackend == nullptr
+				|| VmBackend->GetGuestMemory() == nullptr)))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	FString Error;
+	if (!bPropertyWrite)
+	{
+		TArrayView<uint8> ValidationBytes;
+		if (GuestMemory == nullptr
+			|| !GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				sizeof(int32),
+				alignof(int32),
+				ValidationBytes,
+				Error))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+	}
+	if (!BindingPackage->PrepareGeneratedHostEffect(
+			BindingOrdinal,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	int32 Value = bPropertyWrite ? GuestAddress : 0;
+	const EAvidScriptVmTypedHostStatus Status =
+		Entry->PropertyI32Call(*Receiver, bPropertyWrite, Value);
+	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return RecordGeneratedStatus(Status);
+	}
+	if (!bPropertyWrite)
+	{
+		TArrayView<uint8> OutputBytes;
+		if (!GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				sizeof(int32),
+				alignof(int32),
+				OutputBytes,
+				Error))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+		StoreAvidScriptLittleEndianU32(
+			OutputBytes,
+			0,
+			static_cast<uint32>(Value));
+	}
+	OutValue = 1;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchSelfVectorValue(
+	const uint32 BindingOrdinal,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
+	UObject* Receiver = nullptr;
+	if (!BindingPackage.IsValid()
+		|| !BindingPackage->TryGetGeneratedBinding(
+			BindingOrdinal,
+			Entry,
+			ExpectedClass,
+			bPropertyWrite,
+			bRequiresWriteAccess)
+		|| Entry->Shape != EAvidScriptGeneratedBindingShape::VectorValue
+		|| Entry->ReceiverMode != EAvidScriptGeneratedReceiverMode::SelfBound
+		|| Entry->VectorValueCall == nullptr
+		|| (bRequiresWriteAccess
+			&& HostContext.ActorWritePolicy
+				!= EAvidScriptActorWritePolicy::AllowWrites)
+		|| !ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			ExpectedClass,
+			Receiver)
+		|| GuestAddress < 0
+		|| VmBackend == nullptr
+		|| VmBackend->GetGuestMemory() == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	FString Error;
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend->GetGuestMemory();
+	FVector Input = FVector::ZeroVector;
+	{
+		TArrayView<uint8> InputBytes;
+		if (!GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				24,
+				4,
+				InputBytes,
+				Error))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+		Input = FVector(
+			LoadAvidScriptLittleEndianF32(InputBytes, 0),
+			LoadAvidScriptLittleEndianF32(InputBytes, 4),
+			LoadAvidScriptLittleEndianF32(InputBytes, 8));
+	}
+	if (!BindingPackage->PrepareGeneratedHostEffect(
+			BindingOrdinal,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	FVector Output = FVector::ZeroVector;
+	const EAvidScriptVmTypedHostStatus Status =
+		Entry->VectorValueCall(*Receiver, Input, Output);
+	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return RecordGeneratedStatus(Status);
+	}
+	{
+		TArrayView<uint8> OutputBytes;
+		if (!GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				24,
+				4,
+				OutputBytes,
+				Error))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+		StoreAvidScriptLittleEndianF32(
+			OutputBytes,
+			12,
+			static_cast<float>(Output.X));
+		StoreAvidScriptLittleEndianF32(
+			OutputBytes,
+			16,
+			static_cast<float>(Output.Y));
+		StoreAvidScriptLittleEndianF32(
+			OutputBytes,
+			20,
+			static_cast<float>(Output.Z));
+	}
+	OutValue = 1;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
+	const uint32 BindingOrdinal,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 ObjectSlot,
+	const int32 ObjectGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
+	if (!BindingPackage.IsValid()
+		|| !BindingPackage->TryGetGeneratedBinding(
+			BindingOrdinal,
+			Entry,
+			ExpectedClass,
+			bPropertyWrite,
+			bRequiresWriteAccess)
+		|| Entry->Shape
+			!= EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
+		|| Entry->ReceiverMode
+			!= EAvidScriptGeneratedReceiverMode::StableBorrow
+		|| Entry->ObjectRoundtripCall == nullptr
+		|| (bRequiresWriteAccess
+			&& HostContext.ActorWritePolicy
+				!= EAvidScriptActorWritePolicy::AllowWrites)
+		|| GuestAddress < 0
+		|| VmBackend == nullptr
+		|| VmBackend->GetGuestMemory() == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory = VmBackend->GetGuestMemory();
+	FString Error;
+	{
+		TArrayView<uint8> ValidationBytes;
+		if (!GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				8,
+				4,
+				ValidationBytes,
+				Error))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+	}
+
+	UObject* Receiver = ResolveStableBorrow(
+		SelfSlot,
+		SelfGeneration,
+		ExpectedClass);
+	UObject* InputObject = nullptr;
+	if (ObjectSlot != 0 || ObjectGeneration != 0)
+	{
+		InputObject = ResolveStableBorrow(
+			ObjectSlot,
+			ObjectGeneration,
+			nullptr);
+	}
+	if (Receiver == nullptr
+		|| ((ObjectSlot != 0 || ObjectGeneration != 0)
+			&& InputObject == nullptr))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	const FAvidScriptObjectHandle ReceiverHandle{
+		static_cast<uint32>(SelfSlot),
+		static_cast<uint32>(SelfGeneration)
+	};
+	if (!BindingPackage->PrepareGeneratedHostEffect(
+			BindingOrdinal,
+			ReceiverHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* OutputObject = nullptr;
+	const EAvidScriptVmTypedHostStatus Status =
+		Entry->ObjectRoundtripCall(*Receiver, InputObject, OutputObject);
+	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
+	{
+		return RecordGeneratedStatus(Status);
+	}
+
+	FAvidScriptObjectHandle OutputHandle;
+	if (OutputObject != nullptr)
+	{
+		if (HostContext.World.IsStale()
+			|| (HostContext.World.Get() != nullptr
+				&& OutputObject->GetWorld() != HostContext.World.Get()))
+		{
+			return RecordGeneratedStatus(
+				EAvidScriptVmTypedHostStatus::Rejected);
+		}
+		FAvidScriptObjectHandleResult HandleResult;
+		if (HostContext.ObjectOwnership != nullptr)
+		{
+			if (!HostContext.ObjectOwnership->Borrow(
+					*HostContext.ObjectRegistry,
+					*OutputObject,
+					HandleResult))
+			{
+				return RecordGeneratedStatus(
+					EAvidScriptVmTypedHostStatus::Rejected);
+			}
+			OutputHandle = HandleResult.Handle;
+		}
+		else
+		{
+			OutputHandle = HostContext.ObjectRegistry->AcquireBorrowedObject(
+				OutputObject,
+				HandleResult,
+				false);
+		}
+		if (!OutputHandle.IsValid())
+		{
+			return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		}
+	}
+
+	TArrayView<uint8> OutputBytes;
+	if (!GuestMemory->BorrowMutableBytes(
+			static_cast<uint32>(GuestAddress),
+			8,
+			4,
+			OutputBytes,
+			Error))
+	{
+		if (OutputHandle.IsValid())
+		{
+			FAvidScriptObjectHandleResult ReleaseResult;
+			if (HostContext.ObjectOwnership != nullptr)
+			{
+				HostContext.ObjectOwnership->Release(
+					OutputHandle,
+					*HostContext.ObjectRegistry,
+					ReleaseResult);
+			}
+			else
+			{
+				HostContext.ObjectRegistry->ReleaseBorrowedHandle(
+					OutputHandle,
+					ReleaseResult,
+					false);
+			}
+		}
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	StoreAvidScriptLittleEndianU32(OutputBytes, 0, OutputHandle.Slot);
+	StoreAvidScriptLittleEndianU32(
+		OutputBytes,
+		4,
+		OutputHandle.Generation);
+
+	OutValue = 1;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Succeeded);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchCommandBufferSubmit(
+	const uint32 BindingOrdinal,
+	const int32 GuestAddress,
+	const int32 ByteCount,
+	int32& OutValue)
+{
+	OutValue = 0;
+	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 }
 
 bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(

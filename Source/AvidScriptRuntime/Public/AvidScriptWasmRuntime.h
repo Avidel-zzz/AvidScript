@@ -90,7 +90,17 @@ struct FAvidScriptWasmTimerEntry
 	double DueTimeSeconds = 0.0;
 };
 
-class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance : public IAvidScriptHostDispatcher
+struct FAvidScriptSelfCapability
+{
+	TWeakObjectPtr<UObject> Object;
+	FAvidScriptObjectHandle Handle;
+	uint64 ReloadEpoch = 0;
+	uint64 CallbackEpoch = 0;
+};
+
+class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
+	: public IAvidScriptHostDispatcher
+	, public IAvidScriptVmTypedHostDispatcher
 {
 public:
 	FAvidScriptWasmRuntimeInstance();
@@ -129,6 +139,26 @@ public:
 #if WITH_DEV_AUTOMATION_TESTS
 	void SetStateWriteFailuresForTesting(TConstArrayView<int32> InWriteAttempts);
 	void ClearStateWriteFailureForTesting();
+	void BeginTypedCallbackEpochForTesting() { BeginTypedCallbackEpoch(); }
+	void EndTypedCallbackEpochForTesting() { EndTypedCallbackEpoch(); }
+	bool ResolveSelfCapabilityForTesting(
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		UClass* ExpectedClass,
+		UObject*& OutObject)
+	{
+		return ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			ExpectedClass,
+			OutObject);
+	}
+	uint64 GetReloadEpochForTesting() const { return ReloadEpoch; }
+	EAvidScriptVmTypedHostStatus RecordGeneratedStatusForTesting(
+		EAvidScriptVmTypedHostStatus Status)
+	{
+		return RecordGeneratedStatus(Status);
+	}
 #endif
 
 	bool IsLoaded() const;
@@ -173,9 +203,63 @@ public:
 	bool DispatchDynamicHostCall(
 		const FAvidScriptDynamicHostCall& Call,
 		FAvidScriptDynamicHostCallResult& OutResult) override;
+	EAvidScriptVmTypedHostStatus DispatchEmptyI32(
+		uint32 BindingOrdinal,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchI32PairToI32(
+		uint32 BindingOrdinal,
+		int32 Left,
+		int32 Right,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchSelfI32PairToI32(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchSelfPropertyI32GetSet(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchSelfVectorValue(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override;
+	EAvidScriptVmTypedHostStatus DispatchCommandBufferSubmit(
+		uint32 BindingOrdinal,
+		int32 GuestAddress,
+		int32 ByteCount,
+		int32& OutValue) override;
 
 
 private:
+	void BeginTypedCallbackEpoch();
+	void EndTypedCallbackEpoch();
+	void InvalidateSelfCapability();
+	bool ResolveSelfCapability(
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		UClass* ExpectedClass,
+		UObject*& OutObject);
+	UObject* ResolveStableBorrow(
+		int32 Slot,
+		int32 Generation,
+		UClass* ExpectedClass) const;
+	EAvidScriptVmTypedHostStatus RecordGeneratedStatus(
+		EAvidScriptVmTypedHostStatus Status);
 	void CollectDueTimers(float DeltaSeconds);
 	bool ExecuteDueTimerCallbacks(FAvidScriptWasmSmokeResult& OutResult);
 	int32 AllocateTimerHandle();
@@ -233,12 +317,17 @@ private:
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
+	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
 	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;
 	TArray<float> TransformBatchOutputScratch;
 	FAvidScriptLifecycleStateMachine LifecycleState;
 	FAvidScriptWasmRuntimeMetrics Metrics;
+	FAvidScriptSelfCapability SelfCapability;
+	TArray<uint64, TInlineAllocator<4>> CallbackEpochStack;
+	uint64 NextCallbackEpoch = 0;
+	uint64 ReloadEpoch = 0;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntime
