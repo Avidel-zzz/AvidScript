@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase54-qualified-native-direct-formal",
+  "generated_at_utc": "2026-07-27T12:23:08.9937170Z",
+  "data_boundary": "csharp_frontend_output",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "attempt_id": "48884b7b-a4a0-4bc3-8dbe-586fa8f302c6",
+    "aggregate_filename": "aggregate.json",
+    "aggregate_sha256": "3c34acfaab9400cd38013a078ece5fbab9aba8f53a611baef0958719f6814509",
+    "candidate": {
+      "commit": "4739fe7620db287b34e3165830874face9b49a48",
+      "tree": "ab2985d18b1fd9fe53ef78fef70c136c8fdf4952",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "ue_build_id": "UE5-CL-0",
+      "editor_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2 10.0.26200.8875"
+    },
+    "profile": {
+      "id": "ue58-win64-development-editor-v2",
+      "sha256": "cfbf732b91aa47ac07ee4844a710017e976e8e690a7d8035b373bff622db45d8",
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workloads": 10,
+      "lanes": 5,
+      "timed_observations": 7500
+    },
+    "artifacts": {
+      "wasm_sha256": "8f6bb74214cd380ae0e540ebf2e63c2ce3abf6fed398b40ce5f76e2aacc671a5",
+      "manifest_sha256": "68f1636c2d68546574391c1c96bedda6cf2025e8838077f64482165a49e10237"
+    },
+    "runtimes": {
+      "puerts_v8": {
+        "commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "version": "V8 9.4.146.24",
+        "execution_mode": "jit",
+        "fallback_used": false
+      },
+      "wasmtime": {
+        "version": "45.0.0",
+        "backend_id": "wasmtime.cranelift.jit",
+        "execution_mode": "jit",
+        "fallback_used": false
+      },
+      "wamr": {
+        "headline_included": false,
+        "reason": "P54.5 PC headline compares Wasmtime JIT with Puerts V8 JIT"
+      }
+    },
+    "statistics_method": {
+      "percentile": "nearest_rank",
+      "primary_replicate": "process_summary",
+      "p50": "p50_of_process_p50",
+      "p95": "p95_of_process_p50",
+      "mad": "mad_of_process_p50",
+      "unit": "ns_per_operation"
+    },
+    "scalar_add_int32": {
+      "p54_4_baseline": {
+        "p50": 713.1375,
+        "p95": 725.4625
+      },
+      "native_cpp": {
+        "p50": 0.9879638671875,
+        "p95": 0.9906982421875,
+        "mad": 0.0027343750000000666
+      },
+      "puerts_v8_reflection": {
+        "p50": 113.81875,
+        "p95": 117.7078125,
+        "mad": 1.5343749999999972
+      },
+      "puerts_v8_static": {
+        "p50": 28.673828125,
+        "p95": 32.881640625,
+        "mad": 0.7066406249999986
+      },
+      "avidscript_wasmtime_semantic": {
+        "p50": 682.35,
+        "p95": 705.7875,
+        "mad": 11.137499999999932
+      },
+      "avidscript_wasmtime_native_direct": {
+        "p50": 218.840625,
+        "p95": 220.26875,
+        "mad": 1.4281250000000227
+      },
+      "acceptance": {
+        "p50_improvement_vs_p54_4_percent": 69.31309069747876,
+        "p95_improvement_vs_p54_4_percent": 69.63736801477684,
+        "p50_improvement_vs_semantic_percent": 67.928390855133,
+        "direct_over_puerts_reflection_ratio": 1.9227115479655152,
+        "direct_over_puerts_static_ratio": 7.6320686601730126,
+        "minimum_improvement_gate_passed": true,
+        "under_500ns_gate_passed": true,
+        "p95_regression_gate_passed": true,
+        "beats_puerts_reflection_gate_passed": false,
+        "puerts_static_claim_allowed": false
+      }
+    },
+    "batch_scalar": {
+      "puerts_v8_reflection": {
+        "p50": 115.2546875,
+        "p95": 115.4046875,
+        "mad": 0.14999999999999147
+      },
+      "puerts_v8_static": {
+        "p50": 29.76875,
+        "p95": 35.316015625000006,
+        "mad": 0.134765625
+      },
+      "avidscript_wasmtime_semantic": {
+        "p50": 674.35,
+        "p95": 691.05,
+        "mad": 1.8500000000000227
+      },
+      "avidscript_wasmtime_native_direct": {
+        "p50": 219.325,
+        "p95": 224.115625,
+        "mad": 0.7093750000000227
+      }
+    },
+    "path_evidence": [
+      {
+        "workload": "scalar_add_int32",
+        "samples": 150,
+        "operation_call_count": 4800000,
+        "host_import_call_count": 4800150,
+        "direct_hit_count": 4800000,
+        "requested_direct_fallback_count": 0
+      },
+      {
+        "workload": "batch_scalar",
+        "samples": 150,
+        "operation_call_count": 4800000,
+        "host_import_call_count": 4800150,
+        "direct_hit_count": 4800000,
+        "requested_direct_fallback_count": 0
+      },
+      {
+        "workload": "scalar_noop",
+        "samples": 150,
+        "direct_hit_count": 0,
+        "requested_direct_fallback_count": 2400000
+      },
+      {
+        "workload": "property_get_set",
+        "samples": 150,
+        "direct_hit_count": 0,
+        "requested_direct_fallback_count": 9600000
+      },
+      {
+        "workload": "object_roundtrip",
+        "samples": 150,
+        "direct_hit_count": 0,
+        "requested_direct_fallback_count": 600000
+      },
+      {
+        "workload": "vector_ref_out",
+        "samples": 150,
+        "direct_hit_count": 0,
+        "requested_direct_fallback_count": 1200000
+      },
+      {
+        "workload": "vector_value",
+        "samples": 150,
+        "direct_hit_count": 0,
+        "requested_direct_fallback_count": 1200000
+      }
+    ]
+  },
+  "verification": {
+    "ue58_target_build": "passed",
+    "qualified_native_direct_automation": "passed",
+    "binding_slice_contract_automation": "passed",
+    "benchmark_prepare": "passed",
+    "five_lane_correctness": "passed",
+    "formal_sample_validation": "7500/7500 correct"
+  }
+}
