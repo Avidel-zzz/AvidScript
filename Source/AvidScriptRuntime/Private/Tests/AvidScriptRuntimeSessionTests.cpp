@@ -1374,8 +1374,8 @@ bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
 	const FString& Parameters)
 {
 	FAvidScriptObjectRegistry Registry;
-	TStrongObjectPtr<UObject> FirstOwner(NewObject<UObject>());
-	TStrongObjectPtr<UObject> SecondOwner(NewObject<UObject>());
+	TStrongObjectPtr<AActor> FirstOwner(NewObject<AActor>());
+	TStrongObjectPtr<AActor> SecondOwner(NewObject<AActor>());
 	FAvidScriptObjectHandleResult RegisterResult;
 	const FAvidScriptObjectHandle FirstHandle = Registry.RegisterObject(
 		FirstOwner.Get(),

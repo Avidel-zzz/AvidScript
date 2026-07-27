@@ -397,6 +397,9 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 		Profile.PackageName = TEXT("avidscript.generated.property.descriptor");
 		FAvidScriptReflectedClassSelection Rule;
 		Rule.OwnerClassPath = OwnerPath;
+		Rule.ExcludeFunctions.Add(TEXT("SetAlternateRoutedValue"));
+		Rule.ExcludeFunctions.Add(TEXT("SetGeneratedSetterInt"));
+		Rule.ExcludeFunctions.Add(TEXT("SetRoutedValue"));
 		Rule.IncludeProperties.Add(PropertyName);
 		Rule.GeneratedNativeProperties.Add(PropertyName);
 		if (bWritable)
@@ -516,11 +519,48 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 		GenerateResult.PackageHash,
 		SemanticResult.PackageHash);
 
-	FString TamperedJson = DescriptorJson;
-	TamperedJson.ReplaceInline(
-		TEXT("\"generated_shape\":\"property_i32_get_set\""),
-		TEXT("\"generated_shape\":\"vector_value\""),
-		ESearchCase::CaseSensitive);
+	TSharedPtr<FJsonObject> TamperedRoot;
+	if (!TestTrue(
+		TEXT("Generated property descriptor is readable for tamper test"),
+		ParseDescriptor(DescriptorJson, TamperedRoot)))
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* TamperedBindings = nullptr;
+	if (!TestTrue(
+		TEXT("Generated property tamper target exists"),
+		TamperedRoot->TryGetArrayField(TEXT("bindings"), TamperedBindings)
+			&& TamperedBindings != nullptr))
+	{
+		return false;
+	}
+	bool bTamperedGeneratedShape = false;
+	for (const TSharedPtr<FJsonValue>& Value : *TamperedBindings)
+	{
+		const TSharedPtr<FJsonObject> Binding =
+			Value.IsValid() ? Value->AsObject() : nullptr;
+		if (Binding.IsValid()
+			&& Binding->GetStringField(TEXT("dispatch_mode"))
+				== TEXT("generated_native_s1"))
+		{
+			Binding->SetStringField(TEXT("generated_shape"), TEXT("vector_value"));
+			bTamperedGeneratedShape = true;
+			break;
+		}
+	}
+	if (!TestTrue(
+		TEXT("Generated property shape is structurally tampered"),
+		bTamperedGeneratedShape))
+	{
+		return false;
+	}
+	FString TamperedJson;
+	if (!TestTrue(
+		TEXT("Tampered generated property descriptor serializes"),
+		SerializeDescriptor(TamperedRoot, TamperedJson)))
+	{
+		return false;
+	}
 	TestFalse(
 		TEXT("Generated property shape tamper fails closed"),
 		FAvidScriptBindingDescriptorParser::Parse(

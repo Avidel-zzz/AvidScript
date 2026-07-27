@@ -192,6 +192,18 @@ FAvidScriptVmBindingPackage MakeTypedBindingPackage(
 	FAvidScriptVmBindingPackage Package;
 	Package.PackageName = TEXT("avidscript.phase54.typed_host");
 	Package.PackageHash = FString::ChrN(64, TEXT('1'));
+	for (uint32 Index = 0; Index < Ordinal; ++Index)
+	{
+		FAvidScriptVmDynamicImport Padding;
+		Padding.StableId = FString::Printf(TEXT("%064x"), Index + 2);
+		Padding.Ordinal = Index;
+		Padding.ModuleName = TEXT("avidscript");
+		Padding.ImportName = FString::Printf(
+			TEXT("avid_ue_%016x"),
+			Index + 2);
+		Padding.Signature = TEXT("(i)i");
+		Package.Imports.Add(MoveTemp(Padding));
+	}
 	FAvidScriptVmDynamicImport Import;
 	Import.StableId = TypedStableId;
 	Import.Ordinal = Ordinal;

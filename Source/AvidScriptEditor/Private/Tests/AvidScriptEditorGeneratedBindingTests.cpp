@@ -234,6 +234,9 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 	FAvidScriptReflectedClassSelection Rule;
 	Rule.OwnerClassPath =
 		TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor");
+	Rule.ExcludeFunctions.Add(TEXT("SetAlternateRoutedValue"));
+	Rule.ExcludeFunctions.Add(TEXT("SetGeneratedSetterInt"));
+	Rule.ExcludeFunctions.Add(TEXT("SetRoutedValue"));
 	Rule.IncludeProperties.Add(TEXT("GeneratedPublicInt"));
 	Rule.WritableProperties.Add(TEXT("GeneratedPublicInt"));
 	Rule.GeneratedNativeProperties.Add(TEXT("GeneratedPublicInt"));
