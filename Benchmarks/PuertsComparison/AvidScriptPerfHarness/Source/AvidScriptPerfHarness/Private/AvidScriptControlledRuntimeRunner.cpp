@@ -1138,6 +1138,9 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 					return false;
 				}
 			}
+			TArray<uint64, TInlineAllocator<
+				ControlledRuntimeCalibrationConfirmationSamples>>
+				FrozenConfirmationDurations;
 			while (true)
 			{
 				TArray<uint64, TInlineAllocator<
@@ -1166,23 +1169,49 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 					ConfirmationDurations[
 						ControlledRuntimeCalibrationConfirmationSamples / 2];
 				if (static_cast<double>(DurationNanoseconds) >=
-						Request.MinimumSampleMilliseconds * 1000000.0 ||
-					Iterations == Request.MaximumIterations)
+					Request.MinimumSampleMilliseconds * 1000000.0)
 				{
-					break;
+					FrozenConfirmationDurations.Reset();
+					for (int32 ConfirmationIndex = 0;
+						ConfirmationIndex <
+							ControlledRuntimeCalibrationConfirmationSamples;
+						++ConfirmationIndex)
+					{
+						uint64 ConfirmationDuration = 0;
+						if (!RunLaneAndValidate(
+								Environment,
+								Lane,
+								Iterations,
+								Request.Seed + 2003 + ConfirmationIndex * 17,
+								Actual,
+								ConfirmationDuration,
+								OutError))
+						{
+							return false;
+						}
+						FrozenConfirmationDurations.Add(ConfirmationDuration);
+					}
+					FrozenConfirmationDurations.Sort();
+					DurationNanoseconds =
+						FrozenConfirmationDurations[
+							ControlledRuntimeCalibrationConfirmationSamples / 2];
+					if (static_cast<double>(DurationNanoseconds) >=
+						Request.MinimumSampleMilliseconds * 1000000.0)
+					{
+						break;
+					}
+				}
+				if (Iterations == Request.MaximumIterations)
+				{
+					OutError = FString::Printf(
+						TEXT("calibration did not reach a stable minimum duration lane=%s iterations=%d"),
+						GetLaneId(Lane),
+						Iterations);
+					return false;
 				}
 				const int64 Doubled = static_cast<int64>(Iterations) * 2;
 				Iterations = static_cast<int32>(
 					FMath::Min<int64>(Doubled, Request.MaximumIterations));
-			}
-			if (static_cast<double>(DurationNanoseconds) <
-				Request.MinimumSampleMilliseconds * 1000000.0)
-			{
-				OutError = FString::Printf(
-					TEXT("calibration did not reach minimum duration lane=%s iterations=%d"),
-					GetLaneId(Lane),
-					Iterations);
-				return false;
 			}
 			TSharedRef<FJsonObject> LaneCalibration = MakeShared<FJsonObject>();
 			LaneCalibration->SetNumberField(TEXT("iterations"), Iterations);
@@ -1190,48 +1219,13 @@ bool FAvidScriptControlledRuntimeRunner::RunFromFiles(
 				TEXT("median_duration_ns"),
 				static_cast<double>(DurationNanoseconds));
 			TArray<TSharedPtr<FJsonValue>> ConfirmationValues;
-			for (int32 ConfirmationIndex = 0;
-				ConfirmationIndex <
-					ControlledRuntimeCalibrationConfirmationSamples;
-				++ConfirmationIndex)
+			for (const uint64 ConfirmationDuration :
+				FrozenConfirmationDurations)
 			{
-				uint64 ConfirmationDuration = 0;
-				if (!RunLaneAndValidate(
-						Environment,
-						Lane,
-						Iterations,
-						Request.Seed + 2003 + ConfirmationIndex * 17,
-						Actual,
-						ConfirmationDuration,
-						OutError))
-				{
-					return false;
-				}
 				ConfirmationValues.Add(
 					MakeShared<FJsonValueNumber>(
 						static_cast<double>(ConfirmationDuration)));
 			}
-			ConfirmationValues.Sort(
-				[](const TSharedPtr<FJsonValue>& Left,
-					const TSharedPtr<FJsonValue>& Right)
-				{
-					return Left->AsNumber() < Right->AsNumber();
-				});
-			DurationNanoseconds = static_cast<uint64>(
-				ConfirmationValues[
-					ControlledRuntimeCalibrationConfirmationSamples / 2]
-					->AsNumber());
-			if (static_cast<double>(DurationNanoseconds) <
-				Request.MinimumSampleMilliseconds * 1000000.0)
-			{
-				OutError = FString::Printf(
-					TEXT("frozen calibration confirmations did not reach minimum duration lane=%s"),
-					GetLaneId(Lane));
-				return false;
-			}
-			LaneCalibration->SetNumberField(
-				TEXT("median_duration_ns"),
-				static_cast<double>(DurationNanoseconds));
 			LaneCalibration->SetArrayField(
 				TEXT("confirmation_duration_ns"),
 				ConfirmationValues);

@@ -130,6 +130,8 @@ Assert-True ([int]$Profile.calibration_confirmation_samples -ge 3) (
     'calibration must freeze from at least three confirmations')
 Assert-True ([double]$Profile.minimum_sample_milliseconds -ge 5.0) (
     'formal profile must calibrate each sample to at least 5 ms')
+Assert-True ([int]$Profile.maximum_iterations -ge 100000000) (
+    'formal profile must leave stable calibration headroom for modern JIT lanes')
 Assert-True ([string]$Profile.lane_schedule_id -ceq
     'round_robin_process_sample_v1') (
     'formal profile must freeze the balanced lane schedule')
