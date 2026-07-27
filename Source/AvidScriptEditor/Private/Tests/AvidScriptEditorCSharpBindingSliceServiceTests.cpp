@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptGeneratedBindingRegistry.h"
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
@@ -14,11 +15,22 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
 namespace
 {
+EAvidScriptVmTypedHostStatus InvokeAvidScriptBindingSliceTestPair(
+	UObject& Receiver,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	OutValue = Left + Right;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 FAvidScriptFrontendBindingImport MakeAvidScriptBindingSliceTestImport(
 	const FAvidScriptBindingFunctionModel& Binding)
 {
@@ -206,6 +218,31 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		return false;
 	}
+	FAvidScriptGeneratedBindingEntry GeneratedEntry;
+	GeneratedEntry.StableId = GeneratedPair->StableId;
+	GeneratedEntry.PackageHash = AuthorizationModel.PackageHash;
+	GeneratedEntry.DescriptorIdentity = GeneratedPair->CanonicalIdentity;
+	GeneratedEntry.Shape = EAvidScriptGeneratedBindingShape::I32PairToI32;
+	GeneratedEntry.ReceiverMode = EAvidScriptGeneratedReceiverMode::SelfBound;
+	GeneratedEntry.I32PairCall = &InvokeAvidScriptBindingSliceTestPair;
+	FAvidScriptGeneratedBindingRegistry& GeneratedRegistry =
+		FAvidScriptGeneratedBindingRegistry::Get();
+	GeneratedRegistry.UnregisterPackage(AuthorizationModel.PackageHash);
+	FString GeneratedRegistryError;
+	if (!TestTrue(
+			TEXT("Generated source package registers before slice publication"),
+			GeneratedRegistry.RegisterPackage(
+				AuthorizationModel.PackageHash,
+				MakeArrayView(&GeneratedEntry, 1),
+				GeneratedRegistryError)))
+	{
+		AddError(GeneratedRegistryError);
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		GeneratedRegistry.UnregisterPackage(AuthorizationModel.PackageHash);
+	};
 	TestEqual(TEXT("Native-direct authorization descriptor is schema v8"), AuthorizationModel.SchemaVersion, 8);
 	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
@@ -465,9 +502,35 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	if (LoadedSlice.IsValid())
 	{
 		TestEqual(
-			TEXT("Runtime slice creates reflected and lifecycle VM imports"),
+			TEXT("Runtime slice creates reflected, lifecycle, and object-type VM imports"),
 			LoadedSlice->GetVmPackage().Imports.Num(),
-			2 + LifecycleSpecs.Num() + 1);
+			SlicePackage.BindingCount + LifecycleSpecs.Num() + 1);
+		TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
+		FString TypedHostImportError;
+		TestTrue(
+			TEXT("Runtime slice builds its generated typed-host import"),
+			LoadedSlice->BuildTypedHostImports(
+				TypedHostImports,
+				TypedHostImportError));
+		if (!TypedHostImportError.IsEmpty())
+		{
+			AddError(TypedHostImportError);
+		}
+		TestEqual(
+			TEXT("Runtime slice builds exactly one generated typed-host import"),
+			TypedHostImports.Num(),
+			1);
+		if (TypedHostImports.Num() == 1)
+		{
+			TestEqual(
+				TEXT("Runtime slice typed-host import preserves generated stable ID"),
+				TypedHostImports[0].StableId,
+				GeneratedPair->StableId);
+			TestEqual(
+				TEXT("Runtime slice typed-host import preserves generated ordinal"),
+				TypedHostImports[0].BindingOrdinal,
+				static_cast<uint32>(GeneratedPair->Ordinal));
+		}
 		TestEqual(TEXT("Runtime slice creates one cached class plan"), LoadedSlice->GetClassReferenceCount(), 1);
 		int32 ActiveObjectTypeCount = 0;
 		int32 InactiveObjectTypeCount = 0;

@@ -1444,3 +1444,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the reviewed generated FVector in/out ABI buffer was added to the renderer without updating Phase 50's exact generated-declaration allowlist, so the stage gate correctly treated it as an unreviewed bespoke wrapper.
 - Prevention: every intentional generated declaration is added to both the literal-stream and exact-multiset allowlists in the same reviewed batch, followed by fixture tests before canonical hashes are refreshed.
+
+### 2026-07-27: generated slice fixtures must model registry lifecycle
+
+- Mistake: the binding-slice Automation fixture dynamically published a generated S1 authorization descriptor but did not register its matching complete generated package before runtime-slice publication, so the production loadability check correctly rejected it.
+- Prevention: generated-slice fixtures register exact package/stable-id/descriptor/shape entries before publishing a derived slice and revoke them with scope-bound cleanup. Production validation remains fail-closed.
+
+### 2026-07-27: runtime import-count tests must derive from route composition
+
+- Mistake: the slice fixture kept a pre-generated-route literal count for VM imports, so it failed after the generated S1 binding became loadable even though the resulting package was correct.
+- Prevention: import-count assertions derive from reflected bindings plus lifecycle and capability families, then independently assert typed-host import identity and ordinal instead of hiding route composition behind a stale integer.
