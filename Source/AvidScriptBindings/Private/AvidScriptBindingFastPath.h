@@ -3,6 +3,7 @@
 #include "AvidScriptBindingInvocation.h"
 
 class FProperty;
+class UClass;
 class UFunction;
 
 namespace UE::AvidScript::BindingPrivate
@@ -24,6 +25,7 @@ struct FFastPathBuildSpec
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
 	bool bHasReloadEffect = false;
+	bool bQualifiedNativeDirectAuthorized = false;
 	TConstArrayView<FFastPathValueSpec> Parameters;
 	FFastPathValueSpec ReturnValue;
 };
@@ -44,7 +46,9 @@ struct FFastPathPlan
 	EAvidScriptBindingInvocationMode HighestInvocationMode =
 		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
 	UFunction* Function = nullptr;
-	FFastPathThunk Thunk = nullptr;
+	UClass* NativeDirectOwnerClass = nullptr;
+	FFastPathThunk SemanticThunk = nullptr;
+	FFastPathThunk NativeDirectThunk = nullptr;
 	int32 FrameSize = 0;
 	int32 FrameAlignment = 1;
 	int32 ParameterFrameOffsets[2] = { INDEX_NONE, INDEX_NONE };
@@ -53,9 +57,12 @@ struct FFastPathPlan
 
 	bool IsBound() const
 	{
-		return Kind != EAvidScriptBindingFastPathKind::None && Thunk != nullptr;
+		return Kind != EAvidScriptBindingFastPathKind::None
+			&& SemanticThunk != nullptr;
 	}
 };
+
+bool IsQualifiedNativeDirectFunction(const UFunction& Function);
 
 bool TryBuildFastPath(
 	const FFastPathBuildSpec& Spec,
@@ -66,6 +73,7 @@ bool DispatchFastPath(
 	UObject& Target,
 	const FAvidScriptDynamicHostCall& Call,
 	TArray<uint8>& InvocationScratch,
+	EAvidScriptBindingInvocationPolicy InvocationPolicy,
 	FString& OutErrorCategory,
 	FString& OutErrorDetails);
 } // namespace UE::AvidScript::BindingPrivate

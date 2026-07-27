@@ -2596,6 +2596,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		FastPathSpec.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
 		FastPathSpec.bHasReloadEffect =
 			Plan.ReloadEffect != EAvidScriptBindingReloadEffect::None;
+		FastPathSpec.bQualifiedNativeDirectAuthorized =
+			Binding.DispatchMode == TEXT("qualified_native_direct");
 		FastPathSpec.Parameters = FastPathParameters;
 		FastPathSpec.ReturnValue = {
 			Plan.ReturnValue.Property,
@@ -3117,6 +3119,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 			*Target,
 			Call,
 			InvocationScratch,
+			Context.InvocationPolicy,
 			FastPathErrorCategory,
 			FastPathErrorDetails))
 		{
