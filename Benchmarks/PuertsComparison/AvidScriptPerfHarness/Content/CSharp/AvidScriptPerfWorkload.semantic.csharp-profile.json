@@ -3,15 +3,15 @@
   "language": "csharp",
   "source_path": "Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.cs",
   "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
-  "module_id": "csharp_profile_phase54_6_generated_s1",
-  "artifact_stem": "profile_phase54_6_generated_s1",
-  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1",
-  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/profile_phase54_6_generated_s1.csharp.report.json",
-  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/profile_phase54_6_generated_s1.avidscript.json",
+  "module_id": "csharp_profile_phase54_6_semantic",
+  "artifact_stem": "profile_phase54_6_semantic",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.avidscript.json",
   "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
   "configuration": "Release",
   "binding_profile": {
-    "package_name": "avidscript.benchmark.phase54_6.generated_shared",
+    "package_name": "avidscript.benchmark.phase54_6.semantic",
     "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",
     "classes": [
       {
@@ -26,19 +26,11 @@
           "ReflectBatchAdd"
         ],
         "native_direct_functions": [],
-        "generated_native_functions": [
-          "ReflectAddInt32",
-          "ReflectVectorValue",
-          "ReflectObjectRoundtrip",
-          "ReflectEventStep",
-          "ReflectBatchAdd"
-        ],
+        "generated_native_functions": [],
         "include_properties": [
           "ScalarValue"
         ],
-        "generated_native_properties": [
-          "ScalarValue"
-        ],
+        "generated_native_properties": [],
         "writable_properties": [
           "ScalarValue"
         ]

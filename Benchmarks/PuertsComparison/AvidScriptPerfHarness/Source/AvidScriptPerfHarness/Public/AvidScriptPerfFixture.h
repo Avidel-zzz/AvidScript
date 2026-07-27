@@ -40,6 +40,9 @@ public:
 	UObject* ReflectObjectRoundtrip(UObject* Value) const;
 
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
+	int32 ReflectEventStep(int32 Accumulator, int32 Token) const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
 	int32 ReflectBatchAdd(int32 Seed, int32 Count) const;
 
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
@@ -81,6 +84,7 @@ public:
 	FVector NativeVectorValue(const FVector& Value) const;
 	void NativeVectorRefOut(FVector& InOutValue, FVector& OutValue) const;
 	UObject* NativeObjectRoundtrip(UObject* Value) const;
+	int32 NativeEventStep(int32 Accumulator, int32 Token) const;
 	int32 NativeBatchAdd(int32 Seed, int32 Count) const;
 	void ResetNativeCallbackState(int32 Seed);
 	void NativeEmptyCallback(int32 Token);
@@ -93,7 +97,7 @@ public:
 	void RunPuertsEmptyCallback(int32 LaneId, int32 Token) const;
 	void RunPuertsTickCallback(int32 LaneId, float DeltaSeconds) const;
 	int32 GetPuertsCallbackChecksum(int32 LaneId) const;
-	void ResetOperationCounts();
+	void ResetOperationCounts(int32 ActiveWorkloadId);
 	uint64 GetOperationCallCount(int32 WorkloadId) const;
 
 private:
@@ -119,5 +123,6 @@ private:
 	bool bHasStaticCallbacks = false;
 	bool bHasControlledWasmRunner = false;
 	uint32 NativeCallbackChecksum = 0;
-	mutable uint64 OperationCallCounts[10] = {};
+	int32 ActiveOperationWorkloadId = INDEX_NONE;
+	mutable uint64 OperationCallCounts[13] = {};
 };

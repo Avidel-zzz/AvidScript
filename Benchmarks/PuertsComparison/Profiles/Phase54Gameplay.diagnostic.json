@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "profile_id": "phase54.6-gameplay-diagnostic-v1",
+  "evidence_class": "diagnostic",
+  "process_runs": 1,
+  "warmup_samples": 1,
+  "timed_samples": 3,
+  "seed": 1397313,
+  "calibration": {
+    "confirmation_samples": 3,
+    "minimum_sample_milliseconds": 1.0,
+    "minimum_iterations": 1,
+    "maximum_iterations": 65536
+  },
+  "validity": {
+    "data_lane_max_crossing_ratio": 0.5,
+    "require_clean_tree": false,
+    "raw_samples_tracked": false
+  },
+  "lanes": [
+    "native_cpp",
+    "puerts_v8_reflection",
+    "puerts_v8_static",
+    "avidscript_wasmtime_semantic",
+    "avidscript_wasmtime_generated_s1",
+    "avidscript_wasmtime_data_oriented"
+  ],
+  "workloads": [
+    "gameplay_frame_small",
+    "gameplay_frame_dense"
+  ],
+  "workload_contracts": {
+    "gameplay_frame_small": {
+      "logical_entities_per_frame": 1,
+      "scalar_property_operations_per_entity": 64,
+      "property_write_operations_per_frame": 32,
+      "property_batches_per_frame": 8,
+      "data_boundary_crossings_per_frame": 16,
+      "fixture_function_calls_per_frame": 46,
+      "vector_operations_per_entity": 8,
+      "object_operations_per_entity": 4,
+      "event_operations_per_entity": 2,
+      "logical_operations_per_frame": 78,
+      "actor_count": 1
+    },
+    "gameplay_frame_dense": {
+      "logical_entities_per_frame": 1024,
+      "scalar_property_operations_per_entity": 8,
+      "property_write_operations_per_frame": 4096,
+      "property_batches_per_frame": 1024,
+      "data_boundary_crossings_per_frame": 2048,
+      "fixture_function_calls_per_frame": 7168,
+      "vector_operations_per_entity": 2,
+      "object_or_event_operations_per_entity": 1,
+      "logical_operations_per_frame": 11264,
+      "actor_count": 1
+    }
+  },
+  "avidscript_artifacts": {
+    "avidscript_wasmtime_semantic": {
+      "binding_invocation_mode": "semantic_process_event",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.avidscript.json"
+    },
+    "avidscript_wasmtime_generated_s1": {
+      "binding_invocation_mode": "generated_native_s1",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/profile_phase54_6_generated_s1.avidscript.json"
+    },
+    "avidscript_wasmtime_data_oriented": {
+      "binding_invocation_mode": "data_command_buffer",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_data_oriented/profile_phase54_6_data_oriented.avidscript.json",
+      "metrics_contract": "FAvidScriptWasmSmokeResult.DataBridgeMetrics.v1"
+    }
+  },
+  "output": {
+    "raw_process_samples": "external_evidence_only",
+    "tracked_evidence": "hashes_and_summary_only",
+    "include_personal_absolute_paths": false
+  }
+}

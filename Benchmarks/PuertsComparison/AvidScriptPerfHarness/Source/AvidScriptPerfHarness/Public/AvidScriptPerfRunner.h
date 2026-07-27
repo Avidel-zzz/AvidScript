@@ -14,7 +14,9 @@ enum class EAvidScriptPerfWorkload : int32
 	CallbackEmpty = 7,
 	CallbackTick = 8,
 	VectorRefOut = 9,
-	Count = 10
+	GameplayFrameSmall = 10,
+	GameplayFrameDense = 11,
+	Count = 12
 };
 
 struct FAvidScriptPerfSmokeResult

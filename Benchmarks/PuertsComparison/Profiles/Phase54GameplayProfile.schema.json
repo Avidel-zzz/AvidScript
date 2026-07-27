@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P54.6 gameplay benchmark profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "evidence_class",
+    "process_runs",
+    "warmup_samples",
+    "timed_samples",
+    "seed",
+    "calibration",
+    "validity",
+    "lanes",
+    "workloads",
+    "workload_contracts",
+    "avidscript_artifacts",
+    "output"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "evidence_class": { "enum": ["diagnostic", "formal"] },
+    "process_runs": { "type": "integer", "minimum": 1 },
+    "warmup_samples": { "type": "integer", "minimum": 0 },
+    "timed_samples": { "type": "integer", "minimum": 1 },
+    "seed": { "type": "integer" },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmation_samples",
+        "minimum_sample_milliseconds",
+        "minimum_iterations",
+        "maximum_iterations"
+      ],
+      "properties": {
+        "confirmation_samples": { "type": "integer", "minimum": 1 },
+        "minimum_sample_milliseconds": { "type": "number", "exclusiveMinimum": 0 },
+        "minimum_iterations": { "type": "integer", "minimum": 1 },
+        "maximum_iterations": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "validity": { "type": "object" },
+    "lanes": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "native_cpp",
+          "puerts_v8_reflection",
+          "puerts_v8_static",
+          "avidscript_wasmtime_semantic",
+          "avidscript_wasmtime_generated_s1",
+          "avidscript_wasmtime_data_oriented"
+        ]
+      }
+    },
+    "workloads": {
+      "type": "array",
+      "const": ["gameplay_frame_small", "gameplay_frame_dense"]
+    },
+    "workload_contracts": { "type": "object" },
+    "avidscript_artifacts": { "type": "object" },
+    "gates": { "type": "object" },
+    "output": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "evidence_class": { "const": "formal" } },
+        "required": ["evidence_class"]
+      },
+      "then": {
+        "required": ["gates"],
+        "properties": {
+          "process_runs": { "const": 5 },
+          "warmup_samples": { "const": 5 },
+          "timed_samples": { "const": 30 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidence_class": { "const": "diagnostic" } },
+        "required": ["evidence_class"]
+      },
+      "then": {
+        "properties": {
+          "process_runs": { "const": 1 }
+        }
+      }
+    }
+  ]
+}

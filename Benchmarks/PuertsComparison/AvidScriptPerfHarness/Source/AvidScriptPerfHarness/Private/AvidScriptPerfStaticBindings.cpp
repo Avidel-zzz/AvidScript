@@ -20,6 +20,7 @@ namespace
 				.Method("StaticVectorValue", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorValue))
 				.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorRefOut))
 				.Method("StaticObjectRoundtrip", MakeFunction(&AAvidScriptPerfFixture::ReflectObjectRoundtrip))
+				.Method("StaticEventStep", MakeFunction(&AAvidScriptPerfFixture::ReflectEventStep))
 				.Method("StaticBatchAdd", MakeFunction(&AAvidScriptPerfFixture::ReflectBatchAdd))
 				.Register();
 		}

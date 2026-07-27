@@ -53,6 +53,13 @@ UObject* AAvidScriptPerfFixture::ReflectObjectRoundtrip(UObject* Value) const
 	return NativeObjectRoundtrip(Value);
 }
 
+int32 AAvidScriptPerfFixture::ReflectEventStep(
+	const int32 Accumulator,
+	const int32 Token) const
+{
+	return NativeEventStep(Accumulator, Token);
+}
+
 int32 AAvidScriptPerfFixture::ReflectBatchAdd(const int32 Seed, const int32 Count) const
 {
 	return NativeBatchAdd(Seed, Count);
@@ -201,6 +208,20 @@ UObject* AAvidScriptPerfFixture::NativeObjectRoundtrip(UObject* Value) const
 	return Value;
 }
 
+int32 AAvidScriptPerfFixture::NativeEventStep(
+	const int32 Accumulator,
+	const int32 Token) const
+{
+	RecordOperation(12);
+	const uint32 UnsignedAccumulator = static_cast<uint32>(Accumulator);
+	const uint32 UnsignedToken = static_cast<uint32>(Token);
+	const uint32 BranchToken =
+		((UnsignedAccumulator ^ UnsignedToken) & 1u) == 0u
+			? UnsignedToken
+			: ~UnsignedToken;
+	return static_cast<int32>(UnsignedAccumulator + BranchToken);
+}
+
 int32 AAvidScriptPerfFixture::NativeBatchAdd(const int32 Seed, const int32 Count) const
 {
 	RecordOperation(6);
@@ -293,9 +314,10 @@ int32 AAvidScriptPerfFixture::GetPuertsCallbackChecksum(const int32 LaneId) cons
 	return Callback.Func<int32>();
 }
 
-void AAvidScriptPerfFixture::ResetOperationCounts()
+void AAvidScriptPerfFixture::ResetOperationCounts(const int32 ActiveWorkloadId)
 {
 	FMemory::Memzero(OperationCallCounts);
+	this->ActiveOperationWorkloadId = ActiveWorkloadId;
 }
 
 uint64 AAvidScriptPerfFixture::GetOperationCallCount(const int32 WorkloadId) const
@@ -307,8 +329,12 @@ uint64 AAvidScriptPerfFixture::GetOperationCallCount(const int32 WorkloadId) con
 
 void AAvidScriptPerfFixture::RecordOperation(const int32 WorkloadId) const
 {
-	if (WorkloadId >= 0 && WorkloadId < UE_ARRAY_COUNT(OperationCallCounts))
+	const int32 CounterId =
+		ActiveOperationWorkloadId != INDEX_NONE
+			? ActiveOperationWorkloadId
+			: WorkloadId;
+	if (CounterId >= 0 && CounterId < UE_ARRAY_COUNT(OperationCallCounts))
 	{
-		++OperationCallCounts[WorkloadId];
+		++OperationCallCounts[CounterId];
 	}
 }

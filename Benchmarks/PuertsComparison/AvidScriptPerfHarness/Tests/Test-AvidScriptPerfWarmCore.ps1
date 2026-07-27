@@ -39,7 +39,7 @@ $StaticScript = Get-SourceText (Join-Path $HarnessRoot 'Content/JavaScript/stati
 $AvidScriptWorkload = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/AvidScriptPerfWorkload.cs')
 $AvidScriptProfile = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/AvidScriptPerfWorkload.csharp-profile.json') |
     ConvertFrom-Json
-$BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Config/BenchmarkProfile.json') |
+$BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Profiles/Phase54Gameplay.formal.json') |
     ConvertFrom-Json
 
 Assert-True ($RunnerHeader.Contains('RunWarmBenchmarkFromFiles')) `
@@ -52,25 +52,34 @@ $ExpectedLanes = @(
     'puerts_v8_reflection',
     'puerts_v8_static',
     'avidscript_wasmtime_semantic',
-    'avidscript_wasmtime_native_direct'
+    'avidscript_wasmtime_generated_s1',
+    'avidscript_wasmtime_data_oriented'
 )
-Assert-True ([int]$BenchmarkProfile.schema_version -eq 2) `
-    'benchmark profile must use schema v2'
+Assert-True ([int]$BenchmarkProfile.schema_version -eq 1) `
+    'gameplay benchmark profile must use schema v1'
 Assert-True (@($BenchmarkProfile.lanes).Count -eq $ExpectedLanes.Count) `
-    'benchmark profile must contain exactly five canonical lanes'
+    'benchmark profile must contain exactly six canonical lanes'
 for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
     Assert-True ([string]$BenchmarkProfile.lanes[$Index] -ceq $ExpectedLanes[$Index]) `
         "benchmark lane order mismatch at index $Index"
 }
-Assert-True (@($BenchmarkProfile.lane_catalog).Count -eq $ExpectedLanes.Count) `
-    'benchmark profile must lock one catalog entry per canonical lane'
-
 foreach ($Switch in @('AvidScriptPerfRequest=', 'AvidScriptPerfResult=')) {
     Assert-True ($CommandletSource.Contains($Switch)) "commandlet must parse -$Switch"
 }
 Assert-True ($CommandletHeader.Contains('UCommandlet')) 'warm runner must be an Editor commandlet'
 Assert-True ($ModuleSource.Contains('AvidScript.PerformanceComparison.Run')) `
     'module must expose the sidecar console command'
+
+$ExpectedProfileWorkloads = @(
+    'gameplay_frame_small',
+    'gameplay_frame_dense'
+)
+Assert-True (@($BenchmarkProfile.workloads).Count -eq $ExpectedProfileWorkloads.Count) `
+    'formal gameplay profile must contain both gameplay workloads'
+for ($Index = 0; $Index -lt $ExpectedProfileWorkloads.Count; ++$Index) {
+    Assert-True ([string]$BenchmarkProfile.workloads[$Index] -ceq $ExpectedProfileWorkloads[$Index]) `
+        "benchmark gameplay workload order mismatch at index $Index"
+}
 
 $ExpectedWarmWorkloads = @(
     'callback_empty',
@@ -82,14 +91,10 @@ $ExpectedWarmWorkloads = @(
     'vector_value',
     'vector_ref_out',
     'object_roundtrip',
-    'batch_scalar'
+    'batch_scalar',
+    'gameplay_frame_small',
+    'gameplay_frame_dense'
 )
-Assert-True (@($BenchmarkProfile.workloads).Count -eq $ExpectedWarmWorkloads.Count) `
-    'benchmark profile must contain exactly ten warm workloads'
-for ($Index = 0; $Index -lt $ExpectedWarmWorkloads.Count; ++$Index) {
-    Assert-True ([string]$BenchmarkProfile.workloads[$Index] -ceq $ExpectedWarmWorkloads[$Index]) `
-        "benchmark warm workload order mismatch at index $Index"
-}
 
 foreach ($Workload in $ExpectedWarmWorkloads) {
     Assert-True ($RunnerSource.Contains("TEXT(`"$Workload`")")) "missing workload: $Workload"
@@ -110,7 +115,9 @@ foreach ($StableId in @(
     'CallbackEmpty = 7',
     'CallbackTick = 8',
     'VectorRefOut = 9',
-    'Count = 10')) {
+    'GameplayFrameSmall = 10',
+    'GameplayFrameDense = 11',
+    'Count = 12')) {
     Assert-True ($RunnerHeader.Contains($StableId)) "missing stable workload id: $StableId"
 }
 
@@ -122,8 +129,8 @@ foreach ($Method in @('ReflectVectorRefOut', 'NativeVectorRefOut')) {
     Assert-True ($FixtureHeader.Contains($Method)) "fixture is missing ref/out method: $Method"
     Assert-True ($FixtureSource.Contains($Method)) "fixture is missing ref/out implementation: $Method"
 }
-Assert-True ($FixtureHeader.Contains('OperationCallCounts[10]')) `
-    'fixture operation accounting must cover all ten stable workload ids'
+Assert-True ($FixtureHeader.Contains('OperationCallCounts[13]')) `
+    'fixture operation accounting must cover gameplay and event-step opcodes'
 Assert-True ($StaticBindings.Contains('.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorRefOut))')) `
     'static lane must bind the same reflected FVector ref/out method'
 
@@ -177,11 +184,12 @@ Assert-True ($RunnerSource.Contains('return Iterations + 1;')) `
 Assert-True ($RunnerSource.Contains('BuildBalancedLaneOrder')) `
     'warm core must derive a balanced lane order for each sample'
 foreach ($BalancedRow in @(
-    '{ 0, 1, 4, 2, 3 }',
-    '{ 1, 2, 0, 3, 4 }',
-    '{ 2, 3, 1, 4, 0 }',
-    '{ 3, 4, 2, 0, 1 }',
-    '{ 4, 0, 3, 1, 2 }')) {
+    '{ 0, 1, 5, 2, 4, 3 }',
+    '{ 1, 2, 0, 3, 5, 4 }',
+    '{ 2, 3, 1, 4, 0, 5 }',
+    '{ 3, 4, 2, 5, 1, 0 }',
+    '{ 4, 5, 3, 0, 2, 1 }',
+    '{ 5, 0, 4, 1, 3, 2 }')) {
     Assert-True ($RunnerSource.Contains($BalancedRow)) "missing balanced lane row: $BalancedRow"
 }
 foreach ($SelectionContract in @(
@@ -240,8 +248,8 @@ Assert-True ($RunnerSource.Contains('GetPerfIterationMatrixIndex')) `
     'warm core must index frozen iterations by workload and lane'
 Assert-True (-not $RunnerSource.Contains('CalibrateWorkloadIterations')) `
     'warm core must not restore shared per-workload calibration'
-Assert-True ($RunnerSource.Contains('PerfRunnerSteadyStateConfirmationSamples = 3')) `
-    'calibration must require three steady-state confirmation samples per workload/lane candidate'
+Assert-True ($RunnerSource.Contains('Request.CalibrationConfirmationSamples')) `
+    'calibration confirmation count must come from the selected profile request'
 Assert-True ($RunnerSource.Contains('GetSteadyStateMedianMilliseconds')) `
     'calibration must compute a steady-state median rather than freeze a cold observation'
 Assert-True ($RunnerSource.Contains('SteadyStateMedianMilliseconds >= Request.MinimumSampleMilliseconds')) `
@@ -353,8 +361,25 @@ foreach ($Field in @(
     'expected_operation_call_count',
     'host_import_call_count',
     'expected_host_import_call_count',
+    'generated_s1_hit_count',
+    'generated_s1_fallback_count',
+    'generated_s1_reject_count',
+    'data_lane_command_count',
+    'data_lane_crossing_count',
+    'data_lane_rejected_buffer_count',
+    'semantic_hit_count',
+    'logical_operation_count',
     'correct')) {
     Assert-True ($RunnerSource.Contains("TEXT(`"$Field`")")) "sample JSON must include $Field"
 }
 
-Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=5 avidscript_backends=2 workloads=10 callbacks=2 ref_out=1 timing=cycles64 validation=1'
+Assert-True ($RunnerSource.Contains('WorkloadId += 2;')) `
+    'data gameplay workloads must map internally from 10/11 to batch4 paths 12/13'
+Assert-True ($RunnerSource.Contains('.PropertyWriteCount')) `
+    'data command validity must use property writes instead of all logical operations'
+Assert-True ($FixtureHeader.Contains('ReflectEventStep')) `
+    'gameplay event operations must use an explicit fixture event-step API'
+Assert-True ($RunnerSource.Contains('BindingPackageHash.Equals')) `
+    'generated and data lanes must fail closed unless their package hashes match'
+
+Write-Output 'AvidScript warm benchmark core static contracts passed: commandlet=1 lanes=6 avidscript_backends=3 workloads=12 gameplay=2 timing=cycles64 validation=1'
