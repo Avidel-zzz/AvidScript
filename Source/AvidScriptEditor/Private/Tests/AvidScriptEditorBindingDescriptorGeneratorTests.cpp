@@ -57,7 +57,7 @@ TSharedPtr<FJsonObject> FindBinding(
 	return nullptr;
 }
 
-bool IsLowerHexSha256(const FString& Value)
+bool IsDescriptorLowerHexSha256(const FString& Value)
 {
 	if (Value.Len() != 64)
 	{
@@ -813,8 +813,8 @@ bool FAvidScriptEditorBindingDescriptorV5DeterminismTest::RunTest(const FString&
 	TestTrue(TEXT("Default result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default v3 selection contains eight safe functions"), FirstResult.BindingCount, 8);
 	TestTrue(TEXT("Default descriptor contains projected types"), FirstResult.TypeCount >= 5);
-	TestTrue(TEXT("Package hash is a complete SHA-256"), IsLowerHexSha256(FirstResult.PackageHash));
-	TestTrue(TEXT("Selection hash is a complete SHA-256"), IsLowerHexSha256(FirstResult.SelectionHash));
+	TestTrue(TEXT("Package hash is a complete SHA-256"), IsDescriptorLowerHexSha256(FirstResult.PackageHash));
+	TestTrue(TEXT("Selection hash is a complete SHA-256"), IsDescriptorLowerHexSha256(FirstResult.SelectionHash));
 
 	FString SecondJson;
 	FAvidScriptBindingDescriptorGenerateResult SecondResult;
@@ -857,7 +857,7 @@ bool FAvidScriptEditorBindingDescriptorV5DeterminismTest::RunTest(const FString&
 		const FString Identity = Binding->GetStringField(TEXT("canonical_identity"));
 		TestTrue(TEXT("Binding identities use stable sort order"), PreviousIdentity.IsEmpty() || PreviousIdentity < Identity);
 		PreviousIdentity = Identity;
-		TestTrue(TEXT("Binding stable id is SHA-256"), IsLowerHexSha256(Binding->GetStringField(TEXT("stable_id"))));
+		TestTrue(TEXT("Binding stable id is SHA-256"), IsDescriptorLowerHexSha256(Binding->GetStringField(TEXT("stable_id"))));
 		TestEqual(TEXT("Binding ordinal matches stable array position"), Binding->GetIntegerField(TEXT("ordinal")), Index);
 		TestEqual(
 			TEXT("Generated host imports use the AvidScript binding module"),

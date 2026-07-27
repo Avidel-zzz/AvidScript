@@ -34,7 +34,8 @@ typedef struct AvidScriptWasmtimeStableObjectRoundtripBridge
 	void* environment;
 } AvidScriptWasmtimeStableObjectRoundtripBridge;
 
-_Static_assert(sizeof(wasmtime_val_raw_t) == 16, "Wasmtime raw value ABI must remain 16 bytes.");
+typedef char avidscript_wasmtime_raw_value_must_be_16_bytes[
+	(sizeof(wasmtime_val_raw_t) == 16) ? 1 : -1];
 
 static wasm_trap_t* avidscript_wasmtime_typed_bridge_unavailable(void)
 {

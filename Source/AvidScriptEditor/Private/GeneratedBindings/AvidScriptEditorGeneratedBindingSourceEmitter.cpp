@@ -3,7 +3,6 @@
 #include "Algo/Unique.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
-#include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
@@ -29,7 +28,7 @@ void SetEmitterFailure(
 		Source.IsEmpty() ? TEXT("<none>") : *Source);
 }
 
-bool IsLowerHexSha256(const FString& Value)
+bool IsGeneratedSourceLowerHexSha256(const FString& Value)
 {
 	if (Value.Len() != 64)
 	{
@@ -46,7 +45,7 @@ bool IsLowerHexSha256(const FString& Value)
 	return true;
 }
 
-bool IsSafeIdentifier(const FString& Value)
+bool IsGeneratedSourceSafeIdentifier(const FString& Value)
 {
 	if (Value.IsEmpty()
 		|| (!FChar::IsAlpha(Value[0]) && Value[0] != TEXT('_')))
@@ -98,7 +97,7 @@ FString EscapeCppString(FString Value)
 	return Value;
 }
 
-FString EscapeJsonString(FString Value)
+FString EscapeGeneratedJsonString(FString Value)
 {
 	Value.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
 	Value.ReplaceInline(TEXT("\""), TEXT("\\\""));
@@ -366,26 +365,26 @@ FString RenderManifest(
 	FString Result = FString::Printf(
 		TEXT("{\n  \"schema_version\": %d,\n  \"package_name\": \"%s\",\n  \"package_hash\": \"%s\",\n  \"bindings\": [\n"),
 		Package.SchemaVersion,
-		*EscapeJsonString(Package.PackageName),
-		*EscapeJsonString(Package.PackageHash));
+		*EscapeGeneratedJsonString(Package.PackageName),
+		*EscapeGeneratedJsonString(Package.PackageHash));
 	for (int32 Index = 0; Index < Package.Bindings.Num(); ++Index)
 	{
 		const FAvidScriptGeneratedBindingIr& Binding = Package.Bindings[Index];
 		Result += FString::Printf(
 			TEXT("    {\"stable_id\":\"%s\",\"owner_module\":\"%s\",\"owner_header\":\"%s\",\"owner_cpp_type\":\"%s\",\"member\":\"%s\",\"import_module\":\"%s\",\"import_name\":\"%s\",\"abi_signature\":\"%s\",\"shape\":\"%s\",\"receiver_mode\":\"%s\",\"descriptor_identity\":\"%s\"}%s\n"),
-			*EscapeJsonString(Binding.StableId),
-			*EscapeJsonString(Binding.OwnerModule),
-			*EscapeJsonString(Binding.OwnerHeader),
-			*EscapeJsonString(Binding.OwnerCppType),
-			*EscapeJsonString(Binding.FunctionName),
-			*EscapeJsonString(Binding.ImportModule),
-			*EscapeJsonString(Binding.ImportName),
-			*EscapeJsonString(Binding.AbiSignature),
+			*EscapeGeneratedJsonString(Binding.StableId),
+			*EscapeGeneratedJsonString(Binding.OwnerModule),
+			*EscapeGeneratedJsonString(Binding.OwnerHeader),
+			*EscapeGeneratedJsonString(Binding.OwnerCppType),
+			*EscapeGeneratedJsonString(Binding.FunctionName),
+			*EscapeGeneratedJsonString(Binding.ImportModule),
+			*EscapeGeneratedJsonString(Binding.ImportName),
+			*EscapeGeneratedJsonString(Binding.AbiSignature),
 			ShapeManifestToken(Binding.Shape),
 			Binding.ReceiverMode == EAvidScriptGeneratedReceiverMode::StableBorrow
 				? TEXT("stable_borrow")
 				: TEXT("self_bound"),
-			*EscapeJsonString(Binding.DescriptorIdentity),
+			*EscapeGeneratedJsonString(Binding.DescriptorIdentity),
 			Index + 1 == Package.Bindings.Num() ? TEXT("") : TEXT(","));
 	}
 	Result += TEXT("  ]\n}\n");
@@ -586,7 +585,7 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 		return false;
 	}
 	if (Package.PackageName.IsEmpty()
-		|| !IsLowerHexSha256(Package.PackageHash)
+		|| !IsGeneratedSourceLowerHexSha256(Package.PackageHash)
 		|| Package.Bindings.IsEmpty())
 	{
 		SetEmitterFailure(
@@ -611,11 +610,11 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 	{
 		const FAvidScriptGeneratedBindingIr& Binding =
 			SortedPackage.Bindings[Index];
-		if (!IsLowerHexSha256(Binding.StableId)
-			|| !IsSafeIdentifier(Binding.OwnerModule)
+		if (!IsGeneratedSourceLowerHexSha256(Binding.StableId)
+			|| !IsGeneratedSourceSafeIdentifier(Binding.OwnerModule)
 			|| !IsSafeHeader(Binding.OwnerHeader)
-			|| !IsSafeIdentifier(Binding.OwnerCppType)
-			|| !IsSafeIdentifier(Binding.FunctionName)
+			|| !IsGeneratedSourceSafeIdentifier(Binding.OwnerCppType)
+			|| !IsGeneratedSourceSafeIdentifier(Binding.FunctionName)
 			|| Binding.ImportModule != TEXT("avidscript")
 			|| !Binding.ImportName.StartsWith(
 				TEXT("avid_s1_"),
@@ -708,23 +707,28 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 
 	const bool bHadOutput = IFileManager::Get().DirectoryExists(
 		*OutputDirectory);
-	IPlatformFile& PlatformFile =
-		FPlatformFileManager::Get().GetPlatformFile();
+	IFileManager& FileManager = IFileManager::Get();
 	if ((bHadOutput
-			&& !PlatformFile.MoveDirectory(
+			&& !FileManager.Move(
 				*BackupDirectory,
-				*OutputDirectory))
-		|| !PlatformFile.MoveDirectory(
+				*OutputDirectory,
+				true,
+				true))
+		|| !FileManager.Move(
 			*OutputDirectory,
-			*StageDirectory))
+			*StageDirectory,
+			true,
+			true))
 	{
 		IFileManager::Get().DeleteDirectory(*StageDirectory, false, true);
 		if (bHadOutput
-			&& PlatformFile.DirectoryExists(*BackupDirectory))
+			&& FileManager.DirectoryExists(*BackupDirectory))
 		{
-			PlatformFile.MoveDirectory(
+			FileManager.Move(
 				*OutputDirectory,
-				*BackupDirectory);
+				*BackupDirectory,
+				true,
+				true);
 		}
 		SetEmitterFailure(
 			OutResult,
@@ -749,9 +753,11 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 		IFileManager::Get().DeleteDirectory(*OutputDirectory, false, true);
 		if (bHadOutput)
 		{
-			PlatformFile.MoveDirectory(
+			FileManager.Move(
 				*OutputDirectory,
-				*BackupDirectory);
+				*BackupDirectory,
+				true,
+				true);
 		}
 		if (IFileManager::Get().FileExists(*ProjectBackup))
 		{
