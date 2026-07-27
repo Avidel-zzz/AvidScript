@@ -126,7 +126,7 @@ bool FAvidScriptVmBackendInfoContractTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("runtime build identity binds interpreter configuration"),
 		Info.RuntimeBuildIdentity.Contains(
-			TEXT("config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0"),
+			TEXT("config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0,simd=1,simde=1"),
 			ESearchCase::CaseSensitive));
 	TestTrue(
 		TEXT("runtime build identity binds the linked static artifact"),

@@ -19,8 +19,9 @@ include(FetchContent)
 
 FetchContent_Declare(
     simde
-    GIT_REPOSITORY  https://github.com/simd-everywhere/simde
-    GIT_TAG v0.8.2
+    URL https://github.com/simd-everywhere/simde/archive/71fd833d9666141edcd1d3c109a80e228303d8d7.tar.gz
+    URL_HASH SHA256=72b2c14a487560b7eb203795f2c2fead5c7499662e639944cca2a9bb19f09029
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 message("-- Fetching simde ..")

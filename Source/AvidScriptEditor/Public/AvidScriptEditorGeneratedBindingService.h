@@ -32,4 +32,9 @@ public:
 		const FString& ProjectFile,
 		const FString& DescriptorJson,
 		FAvidScriptEditorGeneratedBindingResult& OutResult);
+
+	static bool GenerateProjectModuleFromDescriptorFile(
+		const FString& ProjectFile,
+		const FString& DescriptorFile,
+		FAvidScriptEditorGeneratedBindingResult& OutResult);
 };

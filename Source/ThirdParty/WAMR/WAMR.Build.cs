@@ -20,7 +20,7 @@ public class WAMR : ModuleRules
 		PublicDefinitions.Add(bEnableWamr ? "AVIDSCRIPT_WITH_WAMR=1" : "AVIDSCRIPT_WITH_WAMR=0");
 		PublicDefinitions.Add(
 			bEnableWamr
-				? "AVIDSCRIPT_WAMR_INTERPRETER_CONFIG=\"interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0\""
+				? "AVIDSCRIPT_WAMR_INTERPRETER_CONFIG=\"interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0,simd=1,simde=1\""
 				: "AVIDSCRIPT_WAMR_INTERPRETER_CONFIG=\"unavailable\"");
 		PublicDefinitions.Add(
 			bEnableWamr

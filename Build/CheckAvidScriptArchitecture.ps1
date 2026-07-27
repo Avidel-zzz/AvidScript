@@ -380,6 +380,8 @@ foreach ($RequiredBatchContract in @(
 }
 $WamrBuildScript = Read-RequiredFile 'Build/BuildWAMRWin64.cmd'
 $WamrCommonCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/common/iwasm_common.cmake'
+$WamrRuntimeCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/build-scripts/runtime_lib.cmake'
+$WamrSimdeCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/libraries/simde/simde.cmake'
 $WasmtimeShimHeader = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.h'
 $WasmtimeShimSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c'
 $WasmtimeShimInternal = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApiInternal.h'
@@ -412,8 +414,18 @@ foreach ($RequiredWamrDiagnosticPrimitive in @(
 if (-not $WamrBuildScript.Contains('-DWAMR_BUILD_DUMP_CALL_STACK=1')) {
     Add-Violation 'Win64 WAMR build must enable bounded trap call-stack capture'
 }
+foreach ($RequiredWamrSimdToken in @(
+    '-DWAMR_BUILD_SIMD=1',
+    '-DWAMR_BUILD_LIB_SIMDE=1')) {
+    if (-not $WamrBuildScript.Contains($RequiredWamrSimdToken)) {
+        Add-Violation "Win64 WAMR SIMD support is missing $RequiredWamrSimdToken"
+    }
+}
 foreach ($RequiredWamrSymbolIsolationToken in @(
     '-DWAMR_BUILD_WASM_C_API=0',
+    'set "PATH=%SystemRoot%\System32;%PATH%"',
+    '%SystemRoot%\System32\subst.exe',
+    '%SystemRoot%\System32\findstr.exe',
     '/linkermember:1',
     'wasm_runtime_init$',
     'wasm_runtime_load$',
@@ -430,6 +442,23 @@ foreach ($RequiredWamrCMakeIsolationToken in @(
     'list(REMOVE_ITEM c_source_all "${IWASM_COMMON_DIR}/wasm_c_api.c")')) {
     if (-not $WamrCommonCMake.Contains($RequiredWamrCMakeIsolationToken)) {
         Add-Violation "vendored WAMR CMake symbol isolation is missing $RequiredWamrCMakeIsolationToken"
+    }
+}
+if ($WamrRuntimeCMake.Contains('SIMDe doesnt support platform') -or
+    -not $WamrRuntimeCMake.Contains('include (${IWASM_DIR}/libraries/simde/simde.cmake)') -or
+    -not $WamrRuntimeCMake.Contains('set (WAMR_BUILD_SIMDE 1)')) {
+    Add-Violation 'vendored WAMR fast interpreter must enable pinned SIMDe for Win64 SIMD128'
+}
+if (-not $WamrFastInterpreterSource.Contains('simd_v128_to_simde_v128(V128 value)') -or
+    -not $WamrFastInterpreterSource.Contains('#define SIMD_V128_TO_SIMDE_V128(s_v) simd_v128_to_simde_v128(s_v)') -or
+    $WamrFastInterpreterSource.Contains('({')) {
+    Add-Violation 'vendored WAMR SIMD value conversion must remain alias-safe and MSVC-compatible'
+}
+foreach ($RequiredWamrSimdeIdentity in @(
+    '71fd833d9666141edcd1d3c109a80e228303d8d7.tar.gz',
+    'SHA256=72b2c14a487560b7eb203795f2c2fead5c7499662e639944cca2a9bb19f09029')) {
+    if (-not $WamrSimdeCMake.Contains($RequiredWamrSimdeIdentity)) {
+        Add-Violation "vendored WAMR SIMDe dependency is missing $RequiredWamrSimdeIdentity"
     }
 }
 foreach ($RequiredWasmtimeShimToken in @(

@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set "PATH=%SystemRoot%\System32;%PATH%"
 
 set "PLUGIN_ROOT=%~dp0.."
 for %%I in ("%PLUGIN_ROOT%") do set "PLUGIN_ROOT=%%~fI"
@@ -11,7 +12,7 @@ if exist "%MAPPED_DRIVE%\nul" (
   echo Set AVIDSCRIPT_WAMR_BUILD_DRIVE to an unused drive letter and retry.
   exit /b 1
 )
-subst %MAPPED_DRIVE% "%PLUGIN_ROOT%"
+"%SystemRoot%\System32\subst.exe" %MAPPED_DRIVE% "%PLUGIN_ROOT%"
 if errorlevel 1 exit /b %ERRORLEVEL%
 set "MAPPING_ACTIVE=1"
 set "RESULT=1"
@@ -19,7 +20,7 @@ set "RESULT=1"
 set "VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 set "WAMR_ROOT=%MAPPED_DRIVE%\Source\ThirdParty\WAMR"
 set "UPSTREAM_DIR=%WAMR_ROOT%\upstream"
-set "BUILD_DIR=%WAMR_ROOT%\build\Win64\ReleasePublic"
+set "BUILD_DIR=%WAMR_ROOT%\build\Win64\ReleasePublicSimdUrl"
 set "LIB_DIR=%WAMR_ROOT%\lib\Win64\Release"
 
 if not exist "%VS_VCVARS%" (
@@ -35,7 +36,7 @@ if not exist "%UPSTREAM_DIR%\product-mini\platforms\windows\CMakeLists.txt" (
 call "%VS_VCVARS%"
 if errorlevel 1 goto cleanup
 
-cmake -S "%UPSTREAM_DIR%\product-mini\platforms\windows" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DWAMR_BUILD_INTERP=1 -DWAMR_BUILD_FAST_INTERP=1 -DWAMR_BUILD_AOT=0 -DWAMR_BUILD_JIT=0 -DWAMR_BUILD_FAST_JIT=0 -DWAMR_BUILD_LIBC_BUILTIN=1 -DWAMR_BUILD_LIBC_WASI=0 -DWAMR_BUILD_MULTI_MODULE=0 -DWAMR_BUILD_SIMD=0 -DWAMR_BUILD_MINI_LOADER=0 -DWAMR_BUILD_DUMP_CALL_STACK=1 -DWAMR_BUILD_WASM_C_API=0
+cmake -S "%UPSTREAM_DIR%\product-mini\platforms\windows" -B "%BUILD_DIR%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DWAMR_BUILD_INTERP=1 -DWAMR_BUILD_FAST_INTERP=1 -DWAMR_BUILD_AOT=0 -DWAMR_BUILD_JIT=0 -DWAMR_BUILD_FAST_JIT=0 -DWAMR_BUILD_LIBC_BUILTIN=1 -DWAMR_BUILD_LIBC_WASI=0 -DWAMR_BUILD_MULTI_MODULE=0 -DWAMR_BUILD_SIMD=1 -DWAMR_BUILD_LIB_SIMDE=1 -DWAMR_BUILD_MINI_LOADER=0 -DWAMR_BUILD_DUMP_CALL_STACK=1 -DWAMR_BUILD_WASM_C_API=0
 if errorlevel 1 goto cleanup
 
 cmake --build "%BUILD_DIR%" --target vmlib
@@ -59,18 +60,18 @@ set "SYMBOLS_FILE=%BUILD_DIR%\libiwasm-linkermember.txt"
 dumpbin /nologo /linkermember:1 "%LIB_DIR%\libiwasm.lib" > "%SYMBOLS_FILE%"
 if errorlevel 1 goto cleanup
 
-findstr /r /c:" wasm_runtime_init$" "%SYMBOLS_FILE%" >nul
+"%SystemRoot%\System32\findstr.exe" /r /c:" wasm_runtime_init$" "%SYMBOLS_FILE%" >nul
 if errorlevel 1 (
   echo WAMR runtime symbol contract failed: wasm_runtime_init is missing.
   goto cleanup
 )
-findstr /r /c:" wasm_runtime_load$" "%SYMBOLS_FILE%" >nul
+"%SystemRoot%\System32\findstr.exe" /r /c:" wasm_runtime_load$" "%SYMBOLS_FILE%" >nul
 if errorlevel 1 (
   echo WAMR runtime symbol contract failed: wasm_runtime_load is missing.
   goto cleanup
 )
 
-findstr /c:" wasm_config_" /c:" wasm_engine_" /c:" wasm_functype_" /c:" wasm_trap_" "%SYMBOLS_FILE%" >nul
+"%SystemRoot%\System32\findstr.exe" /c:" wasm_config_" /c:" wasm_engine_" /c:" wasm_functype_" /c:" wasm_trap_" "%SYMBOLS_FILE%" >nul
 if not errorlevel 1 (
   echo WAMR symbol isolation failed: standard wasm-c-api symbols remain in libiwasm.lib.
   goto cleanup
@@ -79,5 +80,5 @@ if not errorlevel 1 (
 set "RESULT=0"
 
 :cleanup
-if defined MAPPING_ACTIVE subst %MAPPED_DRIVE% /d
+if defined MAPPING_ACTIVE "%SystemRoot%\System32\subst.exe" %MAPPED_DRIVE% /d
 exit /b %RESULT%

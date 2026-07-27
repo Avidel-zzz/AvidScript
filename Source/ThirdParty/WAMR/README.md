@@ -60,12 +60,12 @@ The script calls Visual Studio `vcvars64.bat`, configures WAMR with CMake + Ninj
 - libc builtin: enabled
 - libc WASI: disabled
 - multi-module: disabled
-- SIMD: disabled
+- SIMD128: enabled for the fast interpreter through SIMDe v0.8.2 pinned to commit `71fd833d9666141edcd1d3c109a80e228303d8d7`; source archive SHA-256 is `72b2c14a487560b7eb203795f2c2fead5c7499662e639944cca2a9bb19f09029`
 - mini loader: disabled
 - trap call-stack snapshot: enabled
 - standard wasm-c-api: disabled
 
-This is intentionally minimal for the first UE embedding spike.
+The interpreter remains the compatibility backend, but it accepts the same SIMD128 benchmark modules as the JIT lanes so controlled-runtime comparisons fail only on correctness, not on an avoidable feature mismatch.
 
 ## AvidScript 本地集成补丁
 
@@ -80,3 +80,7 @@ This is intentionally minimal for the first UE embedding spike.
 WAMR 2.4.4 在启用 `WAMR_BUILD_DUMP_CALL_STACK` 后，会在解释器异常出口同时创建快照并直接打印调用栈。AvidScript 将三个解释器异常出口调整为只调用 `wasm_interp_create_call_stack`，随后由 `AvidScriptVM/Private` 通过 bounded buffer API 读取并结构化解析。这样保留上游快照生命周期和 function index/offset，同时避免第三方文本绕过 Runtime/Editor 诊断管线污染游戏日志。
 
 升级 WAMR snapshot 时必须重新核对 `wasm_interp_fast.c`、`wasm_interp_classic.c` 与 `wasm_runtime.c` 的异常出口，并运行 `AvidScript.VM.Diagnostics.TrapCallStack` 证明 trap 有结构化帧且日志中没有原始 `#<ordinal>` dump。
+
+### Win64 SIMD 值转换
+
+上游快速解释器使用 GCC 语句表达式 `({ ... })` 把内部 `V128` 转换成 `simde_v128_t`，该扩展无法由 MSVC 编译。AvidScript 将转换集中到文件级 `simd_v128_to_simde_v128` 内联函数，继续通过 `bh_memcpy_s` 保持严格别名安全，不采用指针强转。架构检查同时禁止这段第三方快照重新引入 GCC 语句表达式。

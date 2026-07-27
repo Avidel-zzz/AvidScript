@@ -23,6 +23,16 @@
 
 #if WASM_ENABLE_SIMDE != 0
 #include "simde/wasm/simd128.h"
+
+static inline simde_v128_t
+simd_v128_to_simde_v128(V128 value)
+{
+    simde_v128_t simde_value;
+
+    bh_assert(sizeof(V128) == sizeof(simde_v128_t));
+    bh_memcpy_s(&simde_value, sizeof(simde_value), &value, sizeof(value));
+    return simde_value;
+}
 #endif
 
 typedef int32 CellType_I32;
@@ -5864,13 +5874,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 goto call_func_from_entry;
             }
 #if WASM_ENABLE_SIMDE != 0
-#define SIMD_V128_TO_SIMDE_V128(s_v)                                    \
-    ({                                                                  \
-        bh_assert(sizeof(V128) == sizeof(simde_v128_t));                \
-        simde_v128_t se_v;                                              \
-        bh_memcpy_s(&se_v, sizeof(simde_v128_t), &(s_v), sizeof(V128)); \
-        se_v;                                                           \
-    })
+#define SIMD_V128_TO_SIMDE_V128(s_v) simd_v128_to_simde_v128(s_v)
 
 #define SIMDE_V128_TO_SIMD_V128(sv, v)                                \
     do {                                                              \

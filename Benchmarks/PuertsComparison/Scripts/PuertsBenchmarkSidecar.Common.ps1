@@ -633,7 +633,7 @@ function Get-SidecarAvidScriptRuntimeIdentity {
     return [pscustomobject][ordered]@{
         wamr_static_lib_sha256 = $WamrSha256
         wamr_runtime_build_identity = (
-            'wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0;' +
+            'wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0,simd=1,simde=1;' +
             "static_lib_sha256=$WamrSha256")
         wasmtime_dll_sha256 = $WasmtimeSha256
         wasmtime_runtime_build_identity = (

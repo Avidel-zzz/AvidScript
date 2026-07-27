@@ -1469,3 +1469,28 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a new gameplay calibration assertion referenced formal and diagnostic profile variables before the test fixture loaded those JSON files.
 - Prevention: add fixture loading in the same patch as assertions that consume it, then run the focused contract host before committing the benchmark candidate.
+
+### 2026-07-28: every formal kernel feature must be loadable by every required lane
+
+- Mistake: the twelve-kernel controlled-runtime suite required `simd128`, but the required WAMR lane was still built with SIMD disabled, so the formal suite failed only after completing ten expensive kernels.
+- Prevention: derive runtime build features from the formal kernel contract before starting the suite, freeze SIMD and SIMDe flags in architecture checks and backend identity, and run the SIMD kernel as a focused blocker probe before the full formal matrix.
+
+### 2026-07-28: Windows build scripts must not assume System32 is on PATH
+
+- Mistake: the WAMR rebuild was launched in a valid non-interactive environment whose reduced `PATH` omitted System32, so bare `subst` failed before configuration.
+- Prevention: repository Windows build scripts prepend `%SystemRoot%\System32`, call critical operating-system tools such as `subst.exe` and `findstr.exe` by absolute path, and express fetched CMake dependencies as URL plus SHA-256 so builds do not depend on an incidental Git executable in caller PATH.
+
+### 2026-07-28: cross-platform SIMD builds must audit compiler extensions
+
+- Mistake: enabling WAMR fast-interpreter SIMDe on Win64 exposed an upstream GCC statement expression in the `V128` conversion macro, so configuration succeeded but MSVC compilation failed deep in the SIMD opcode switch.
+- Prevention: keep the conversion in an alias-safe file-level inline function, reject GCC statement expressions in the vendored fast interpreter through the architecture gate, and complete a real Win64 SIMD build before starting the formal runtime matrix.
+
+### 2026-07-28: orchestration layers must not parse domain artifacts
+
+- Mistake: the C# build pipeline directly loaded and parsed the generated binding descriptor so it could decide whether to emit an S1 module and inspect its package hash, violating the existing orchestration boundary.
+- Prevention: descriptor file loading, parsing, empty-package decisions and package identity stay behind `FAvidScriptEditorGeneratedBindingService`; the build pipeline consumes only the service result and owns orchestration messages.
+
+### 2026-07-28: quote Git revision expressions in PowerShell
+
+- Mistake: an unquoted `HEAD^{tree}` revision expression was parsed by the PowerShell command layer instead of being passed literally to Git, so a post-commit identity command failed after the commit itself succeeded.
+- Prevention: quote revision expressions containing braces, for example `git rev-parse 'HEAD^{tree}'`, and keep identity verification separate from state-changing Git commands.
