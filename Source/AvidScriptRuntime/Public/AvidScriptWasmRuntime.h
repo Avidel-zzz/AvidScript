@@ -24,8 +24,15 @@ struct FAvidScriptWasmRuntimeMetrics
 	double TimerCallbackCallMs = 0.0;
 	double EventCallbackCallMs = 0.0;
 	double HostImportCallMs = 0.0;
+	int32 TimedDynamicHostCallCount = 0;
 	double TickCallMs = 0.0;
 	double UnloadMs = 0.0;
+};
+
+enum class EAvidScriptDynamicHostCallTimingPolicy : uint8
+{
+	Disabled,
+	PerCall
 };
 
 struct FAvidScriptWasmSmokeResult
@@ -69,6 +76,8 @@ struct FAvidScriptWasmHostContext
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
+	EAvidScriptDynamicHostCallTimingPolicy DynamicHostCallTimingPolicy =
+		EAvidScriptDynamicHostCallTimingPolicy::Disabled;
 };
 
 struct FAvidScriptWasmTimerEntry
@@ -218,6 +227,7 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TArray<uint8> BindingInvocationScratch;

@@ -990,7 +990,7 @@ public:
 			return false;
 		}
 
-		uint64 ArgumentCells[64] = {};
+		uint64 ArgumentCells[64];
 		for (size_t Index = 0; Index < ArgumentCount; ++Index)
 		{
 			const EAvidScriptVmValueKind ExpectedKind =

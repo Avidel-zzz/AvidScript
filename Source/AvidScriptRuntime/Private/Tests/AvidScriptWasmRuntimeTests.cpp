@@ -94,6 +94,47 @@ TArray<uint8> MakeTestWasmModuleHeader()
 	return Module;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptDynamicHostCallTimingPolicyTest,
+	"AvidScript.Runtime.DynamicHostCallTimingPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptDynamicHostCallTimingPolicyTest::RunTest(const FString& Parameters)
+{
+	FAvidScriptDynamicHostCall Call;
+	FAvidScriptDynamicHostCallResult Result;
+
+	FAvidScriptWasmRuntimeInstance ProductionRuntime;
+	TestFalse(
+		TEXT("Production dynamic call fails without a binding package"),
+		ProductionRuntime.DispatchDynamicHostCall(Call, Result));
+	TestEqual(
+		TEXT("Production dynamic call does not sample the high-resolution clock"),
+		ProductionRuntime.GetMetrics().TimedDynamicHostCallCount,
+		0);
+	TestEqual(
+		TEXT("Production dynamic call leaves timing metrics untouched"),
+		ProductionRuntime.GetMetrics().HostImportCallMs,
+		0.0);
+
+	FAvidScriptWasmHostContext DiagnosticContext;
+	DiagnosticContext.DynamicHostCallTimingPolicy =
+		EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+	FAvidScriptWasmRuntimeInstance DiagnosticRuntime;
+	DiagnosticRuntime.SetHostContext(DiagnosticContext);
+	TestFalse(
+		TEXT("Diagnostic dynamic call fails without a binding package"),
+		DiagnosticRuntime.DispatchDynamicHostCall(Call, Result));
+	TestEqual(
+		TEXT("Diagnostic dynamic call records one timed sample"),
+		DiagnosticRuntime.GetMetrics().TimedDynamicHostCallCount,
+		1);
+	TestTrue(
+		TEXT("Diagnostic dynamic call captures elapsed time"),
+		DiagnosticRuntime.GetMetrics().HostImportCallMs >= 0.0);
+	return true;
+}
+
 void AppendTestWasmBeginPlayExport(
 	TArray<uint8>& Module,
 	const uint32 FunctionIndex,
