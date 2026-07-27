@@ -32,7 +32,8 @@ public sealed record GuestImport(
     [property: JsonPropertyOrder(1)] string Module,
     [property: JsonPropertyOrder(2)] string Name,
     [property: JsonPropertyOrder(3)] IReadOnlyList<string> ParameterTypeIds,
-    [property: JsonPropertyOrder(4)] string ReturnTypeId);
+    [property: JsonPropertyOrder(4)] string ReturnTypeId,
+    [property: JsonPropertyOrder(5)] string DispatchClass = "semantic");
 
 public sealed record GuestGlobal(
     [property: JsonPropertyOrder(0)] string Id,

@@ -128,6 +128,63 @@ TArray<uint8> BuildTypedHostFixture(bool bPairImport, int32 Left = 0, int32 Righ
 	return Module;
 }
 
+TArray<uint8> BuildTypedHostFixture(TConstArrayView<int32> Arguments)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00 };
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Types;
+	AppendTypedU32Leb(Types, 2);
+	Types.Add(0x60);
+	AppendTypedU32Leb(Types, static_cast<uint32>(Arguments.Num()));
+	for (int32 Index = 0; Index < Arguments.Num(); ++Index)
+	{
+		Types.Add(0x7f);
+	}
+	Types.Add(0x01);
+	Types.Add(0x7f);
+	const uint8 ExportType[] = { 0x60, 0x00, 0x01, 0x7f };
+	Types.Append(ExportType, UE_ARRAY_COUNT(ExportType));
+	AppendTypedSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendTypedU32Leb(Imports, 1);
+	AppendTypedString(Imports, "avidscript");
+	AppendTypedString(Imports, "avid_s1_1111111111111111");
+	Imports.Add(0x00);
+	AppendTypedU32Leb(Imports, 0);
+	AppendTypedSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedString(Exports, "run");
+	Exports.Add(0x00);
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedSection(Module, 7, Exports);
+
+	TArray<uint8> Body;
+	Body.Add(0x00);
+	for (int32 Argument : Arguments)
+	{
+		AppendTypedI32Const(Body, Argument);
+	}
+	Body.Add(0x10);
+	AppendTypedU32Leb(Body, 0);
+	Body.Add(0x0b);
+	TArray<uint8> Code;
+	AppendTypedU32Leb(Code, 1);
+	AppendTypedU32Leb(Code, static_cast<uint32>(Body.Num()));
+	Code.Append(Body);
+	AppendTypedSection(Module, 10, Code);
+	return Module;
+}
+
 FAvidScriptVmBindingPackage MakeTypedBindingPackage(
 	const FString& Signature = TEXT("(ii)i"),
 	uint32 Ordinal = 7)
@@ -195,60 +252,104 @@ public:
 	}
 
 	EAvidScriptVmTypedHostStatus DispatchSelfI32PairToI32(
-		uint32,
-		int32,
-		int32,
-		int32,
-		int32,
-		int32&) override
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue) override
 	{
-		return EAvidScriptVmTypedHostStatus::FallbackRequired;
+		LastOrdinal = BindingOrdinal;
+		LastSelfSlot = SelfSlot;
+		LastSelfGeneration = SelfGeneration;
+		LastLeft = Left;
+		LastRight = Right;
+		++SelfI32PairCalls;
+		OutValue = SelfSlot + SelfGeneration + Left + Right + Bias;
+		return Status;
 	}
 
 	EAvidScriptVmTypedHostStatus DispatchSelfPropertyI32GetSet(
-		uint32,
-		int32,
-		int32,
-		int32,
-		int32&) override
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override
 	{
-		return EAvidScriptVmTypedHostStatus::FallbackRequired;
+		LastOrdinal = BindingOrdinal;
+		LastSelfSlot = SelfSlot;
+		LastSelfGeneration = SelfGeneration;
+		LastGuestAddress = GuestAddress;
+		++SelfPropertyCalls;
+		OutValue = SelfSlot + SelfGeneration + GuestAddress + Bias;
+		return Status;
 	}
 
 	EAvidScriptVmTypedHostStatus DispatchSelfVectorValue(
-		uint32,
-		int32,
-		int32,
-		int32,
-		int32&) override
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override
 	{
-		return EAvidScriptVmTypedHostStatus::FallbackRequired;
+		LastOrdinal = BindingOrdinal;
+		LastSelfSlot = SelfSlot;
+		LastSelfGeneration = SelfGeneration;
+		LastGuestAddress = GuestAddress;
+		++SelfVectorCalls;
+		OutValue = SelfSlot + SelfGeneration + GuestAddress + Bias;
+		return Status;
 	}
 
 	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
-		uint32,
-		int32,
-		int32,
-		int32,
-		int32,
-		int32&) override
+		uint32 BindingOrdinal,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue) override
 	{
-		return EAvidScriptVmTypedHostStatus::FallbackRequired;
+		LastOrdinal = BindingOrdinal;
+		LastSelfSlot = SelfSlot;
+		LastSelfGeneration = SelfGeneration;
+		LastObjectSlot = ObjectSlot;
+		LastObjectGeneration = ObjectGeneration;
+		LastGuestAddress = GuestAddress;
+		++StableObjectCalls;
+		OutValue = SelfSlot + SelfGeneration + ObjectSlot + ObjectGeneration + GuestAddress + Bias;
+		return Status;
 	}
 
 	EAvidScriptVmTypedHostStatus DispatchCommandBufferSubmit(
-		uint32,
-		int32,
-		int32,
-		int32&) override
+		uint32 BindingOrdinal,
+		int32 GuestAddress,
+		int32 ByteCount,
+		int32& OutValue) override
 	{
-		return EAvidScriptVmTypedHostStatus::FallbackRequired;
+		LastOrdinal = BindingOrdinal;
+		LastGuestAddress = GuestAddress;
+		LastByteCount = ByteCount;
+		++CommandBufferCalls;
+		OutValue = GuestAddress + ByteCount + Bias;
+		return Status;
 	}
 
 	EAvidScriptVmTypedHostStatus Status = EAvidScriptVmTypedHostStatus::Succeeded;
 	uint32 LastOrdinal = MAX_uint32;
 	int32 LastLeft = 0;
 	int32 LastRight = 0;
+	int32 LastSelfSlot = 0;
+	int32 LastSelfGeneration = 0;
+	int32 LastObjectSlot = 0;
+	int32 LastObjectGeneration = 0;
+	int32 LastGuestAddress = 0;
+	int32 LastByteCount = 0;
+	int32 SelfI32PairCalls = 0;
+	int32 SelfPropertyCalls = 0;
+	int32 SelfVectorCalls = 0;
+	int32 StableObjectCalls = 0;
+	int32 CommandBufferCalls = 0;
 	int32 Bias = 0;
 };
 
@@ -312,6 +413,67 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("typed left is direct"), Dispatcher.LastLeft, 17);
 	TestEqual(TEXT("typed right is direct"), Dispatcher.LastRight, 19);
 
+	auto VerifyTypedShape = [this](
+		EAvidScriptVmTypedHostShape Shape,
+		const FString& Signature,
+		TConstArrayView<int32> Arguments,
+		int32 Expected,
+		int32 FTypedHostDispatcher::* CallCount)
+	{
+		FAvidScriptVmError ShapeError;
+		TUniquePtr<IAvidScriptVmBackend> ShapeBackend = CreateTypedWasmtimeBackend(ShapeError);
+		FTypedHostDispatcher ShapeDispatcher;
+		ShapeDispatcher.Bias = 3;
+		FAvidScriptVmBindingPackage ShapePackage = MakeTypedBindingPackage(Signature);
+		TArray<FAvidScriptVmTypedHostImport> ShapeImports = { MakeTypedImport(Shape, Signature) };
+		FAvidScriptVmLoadConfig ShapeConfig;
+		ShapeConfig.BindingPackage = &ShapePackage;
+		ShapeConfig.TypedHostDispatcher = &ShapeDispatcher;
+		ShapeConfig.TypedHostImports = ShapeImports;
+		if (!TestTrue(TEXT("extended typed shape loads"), ShapeBackend->Load(
+			BuildTypedHostFixture(Arguments), TEXT("typed_extended_shape"), ShapeConfig, ShapeError)))
+		{
+			AddError(ShapeError.Category + TEXT(": ") + ShapeError.Details);
+			return;
+		}
+		ResolveAndCallTypedRun(*this, *ShapeBackend, Expected, ShapeError);
+		TestEqual(TEXT("extended typed shape selects its dedicated dispatcher"), ShapeDispatcher.*CallCount, 1);
+	};
+	const TArray<int32> SelfPairArguments = { 1, 2, 3, 4 };
+	const TArray<int32> SelfAddressArguments = { 5, 6, 7 };
+	const TArray<int32> StableObjectArguments = { 8, 9, 10, 11, 12 };
+	const TArray<int32> CommandArguments = { 13, 14 };
+	VerifyTypedShape(
+		EAvidScriptVmTypedHostShape::SelfI32PairToI32,
+		TEXT("(iiii)i"),
+		SelfPairArguments,
+		13,
+		&FTypedHostDispatcher::SelfI32PairCalls);
+	VerifyTypedShape(
+		EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet,
+		TEXT("(iii)i"),
+		SelfAddressArguments,
+		21,
+		&FTypedHostDispatcher::SelfPropertyCalls);
+	VerifyTypedShape(
+		EAvidScriptVmTypedHostShape::SelfVectorValue,
+		TEXT("(iii)i"),
+		SelfAddressArguments,
+		21,
+		&FTypedHostDispatcher::SelfVectorCalls);
+	VerifyTypedShape(
+		EAvidScriptVmTypedHostShape::StableObjectRoundtrip,
+		TEXT("(iiiii)i"),
+		StableObjectArguments,
+		53,
+		&FTypedHostDispatcher::StableObjectCalls);
+	VerifyTypedShape(
+		EAvidScriptVmTypedHostShape::CommandBufferSubmit,
+		TEXT("(ii)i"),
+		CommandArguments,
+		30,
+		&FTypedHostDispatcher::CommandBufferCalls);
+
 	Dispatcher.Status = EAvidScriptVmTypedHostStatus::Rejected;
 	FAvidScriptVmExportHandle RejectHandle;
 	TestTrue(TEXT("reject export resolves"), Backend->ResolveExport(TEXT("run"), RejectHandle, Error));
@@ -350,6 +512,17 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		Error));
 	TestEqual(TEXT("wrong metadata category"), Error.Category, FString(TEXT("typed_host_contract_invalid")));
 
+	TArray<FAvidScriptVmTypedHostImport> InvalidExtendedImports = {
+		MakeTypedImport(EAvidScriptVmTypedHostShape::StableObjectRoundtrip, TEXT("(iiii)i"))
+	};
+	Config.TypedHostImports = InvalidExtendedImports;
+	TestFalse(TEXT("wrong extended typed metadata signature rejects load"), Backend->Load(
+		BuildTypedHostFixture(StableObjectArguments),
+		TEXT("typed_wrong_extended_metadata"),
+		Config,
+		Error));
+	TestEqual(TEXT("wrong extended metadata category"), Error.Category, FString(TEXT("typed_host_contract_invalid")));
+
 	Config.TypedHostImports = Imports;
 	const TArray<uint8> WrongArityFixture = BuildTypedHostFixture(false);
 	TestFalse(TEXT("wrong actual import arity rejects load"), Backend->Load(
@@ -358,6 +531,27 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		Config,
 		Error));
 	TestEqual(TEXT("wrong arity reaches Wasmtime type validation"), Error.Category, FString(TEXT("instantiate_failed")));
+
+	FTypedHostDispatcher ExtendedRejectDispatcher;
+	ExtendedRejectDispatcher.Status = EAvidScriptVmTypedHostStatus::Rejected;
+	FAvidScriptVmBindingPackage ExtendedRejectPackage = MakeTypedBindingPackage(TEXT("(iii)i"));
+	TArray<FAvidScriptVmTypedHostImport> ExtendedRejectImports = {
+		MakeTypedImport(EAvidScriptVmTypedHostShape::SelfVectorValue, TEXT("(iii)i"))
+	};
+	FAvidScriptVmLoadConfig ExtendedRejectConfig;
+	ExtendedRejectConfig.BindingPackage = &ExtendedRejectPackage;
+	ExtendedRejectConfig.TypedHostDispatcher = &ExtendedRejectDispatcher;
+	ExtendedRejectConfig.TypedHostImports = ExtendedRejectImports;
+	TUniquePtr<IAvidScriptVmBackend> ExtendedRejectBackend = CreateTypedWasmtimeBackend(Error);
+	TestTrue(TEXT("extended typed rejection fixture loads"), ExtendedRejectBackend->Load(
+		BuildTypedHostFixture(SelfAddressArguments),
+		TEXT("typed_extended_reject"),
+		ExtendedRejectConfig,
+		Error));
+	FAvidScriptVmExportHandle ExtendedRejectHandle;
+	TestTrue(TEXT("extended reject export resolves"), ExtendedRejectBackend->ResolveExport(TEXT("run"), ExtendedRejectHandle, Error));
+	TestFalse(TEXT("extended typed rejection traps"), ExtendedRejectBackend->Call(ExtendedRejectHandle, EmptyFrame, Error));
+	TestEqual(TEXT("extended typed rejection category"), Error.Category, FString(TEXT("host_import_failed")));
 
 	FTypedHostDispatcher FirstDispatcher;
 	FTypedHostDispatcher SecondDispatcher;
@@ -381,6 +575,29 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		Error));
 	ResolveAndCallTypedRun(*this, *FirstBackend, 37, Error);
 	ResolveAndCallTypedRun(*this, *SecondBackend, 136, Error);
+
+	FTypedHostDispatcher FirstStableDispatcher;
+	FTypedHostDispatcher SecondStableDispatcher;
+	FirstStableDispatcher.Bias = 1;
+	SecondStableDispatcher.Bias = 100;
+	FAvidScriptVmBindingPackage StablePackage = MakeTypedBindingPackage(TEXT("(iiiii)i"));
+	TArray<FAvidScriptVmTypedHostImport> StableImports = {
+		MakeTypedImport(EAvidScriptVmTypedHostShape::StableObjectRoundtrip, TEXT("(iiiii)i"))
+	};
+	FAvidScriptVmLoadConfig FirstStableConfig;
+	FirstStableConfig.BindingPackage = &StablePackage;
+	FirstStableConfig.TypedHostDispatcher = &FirstStableDispatcher;
+	FirstStableConfig.TypedHostImports = StableImports;
+	FAvidScriptVmLoadConfig SecondStableConfig = FirstStableConfig;
+	SecondStableConfig.TypedHostDispatcher = &SecondStableDispatcher;
+	TUniquePtr<IAvidScriptVmBackend> FirstStableBackend = CreateTypedWasmtimeBackend(Error);
+	TUniquePtr<IAvidScriptVmBackend> SecondStableBackend = CreateTypedWasmtimeBackend(Error);
+	TestTrue(TEXT("first stable-object typed instance loads"), FirstStableBackend->Load(
+		BuildTypedHostFixture(StableObjectArguments), TEXT("typed_stable_first"), FirstStableConfig, Error));
+	TestTrue(TEXT("second stable-object typed instance loads"), SecondStableBackend->Load(
+		BuildTypedHostFixture(StableObjectArguments), TEXT("typed_stable_second"), SecondStableConfig, Error));
+	ResolveAndCallTypedRun(*this, *FirstStableBackend, 51, Error);
+	ResolveAndCallTypedRun(*this, *SecondStableBackend, 150, Error);
 	return true;
 #endif
 }

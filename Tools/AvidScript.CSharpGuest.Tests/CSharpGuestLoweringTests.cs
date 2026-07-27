@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
@@ -23,7 +24,9 @@ internal static class CSharpGuestLoweringTests
         NaturalGameplayCallbacksSynthesizeOneRouter();
         MissingGameplayCallbacksRemainNoOp();
         ExplicitGameplayRouterConflictFailsClosed();
-        return 11;
+        ImportDispatchClassDefaultsRoundTripsAndValidates();
+        InvalidImportDispatchClassFailsClosed();
+        return 13;
     }
 
     private static void FailedSemanticDocumentIsRejected()
@@ -60,6 +63,8 @@ internal static class CSharpGuestLoweringTests
             "static script state should become a Guest global");
         Assert(module.Imports.Count == 1 && module.Imports[0].Name == "host_add",
             "semantic imports should become Guest imports");
+        Assert(module.Imports[0].DispatchClass == "semantic",
+            "semantic imports should retain the semantic dispatch class");
         Assert(module.Exports.Count == 1 && module.Exports[0].Name == "guest_main",
             "semantic exports should target lowered Guest functions");
         Assert(module.Provenance.SemanticSha256 == SemanticHash
@@ -127,6 +132,49 @@ internal static class CSharpGuestLoweringTests
 
         Assert(module.Imports.Count == 0,
             "imports outside the export-root callable closure should not enter Guest IR");
+    }
+
+    private static void ImportDispatchClassDefaultsRoundTripsAndValidates()
+    {
+        GuestModule module = CSharpGuestLowerer.Lower(
+            CSharpGuestSemanticFixture.Create(),
+            SemanticHash).Module
+            ?? throw new InvalidOperationException("valid semantic input produced no Guest module");
+        GuestImport legacyCompatibleImport = new(
+            module.Imports[0].Id,
+            module.Imports[0].Module,
+            module.Imports[0].Name,
+            module.Imports[0].ParameterTypeIds,
+            module.Imports[0].ReturnTypeId);
+        GuestModule withLegacyCompatibleImport = module with { Imports = new[] { legacyCompatibleImport } };
+        string serialized = Encoding.UTF8.GetString(GuestIrSerializer.Serialize(withLegacyCompatibleImport));
+        string legacySerialized = serialized.Replace(
+            ",\n      \"dispatch_class\": \"semantic\"",
+            string.Empty,
+            StringComparison.Ordinal);
+        GuestModule restored = GuestIrSerializer.Deserialize(Encoding.UTF8.GetBytes(legacySerialized));
+
+        Assert(GuestModuleValidator.CurrentSchemaVersion == 2
+            && GuestModuleValidator.CurrentIrVersion == "1.1",
+            "Guest IR dispatch metadata should advance the current schema identity once");
+        Assert(legacyCompatibleImport.DispatchClass == "semantic"
+            && restored.Imports[0].DispatchClass == "semantic",
+            "missing dispatch metadata must remain source-compatible as semantic after roundtrip");
+        Assert(GuestModuleValidator.Validate(restored).Succeeded,
+            "dispatch metadata roundtrip should remain independently valid");
+    }
+
+    private static void InvalidImportDispatchClassFailsClosed()
+    {
+        GuestModule module = CSharpGuestLowerer.Lower(
+            CSharpGuestSemanticFixture.Create(),
+            SemanticHash).Module
+            ?? throw new InvalidOperationException("valid semantic input produced no Guest module");
+        GuestImport invalid = module.Imports[0] with { DispatchClass = "unchecked" };
+        GuestValidationResult result = GuestModuleValidator.Validate(module with { Imports = new[] { invalid } });
+
+        Assert(!result.Succeeded && result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASIR1011"),
+            "invalid import dispatch classes should fail with the stable ASIR1011 diagnostic");
     }
 
     private static void BidirectionalPropertyAssignmentLowersThroughAccessor()

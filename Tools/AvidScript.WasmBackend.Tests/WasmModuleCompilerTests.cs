@@ -16,7 +16,8 @@ internal static class WasmModuleCompilerTests
         CanonicalIntegerBitwiseOperatorsCompile();
         StateStructPointersAndSRetUseLinearMemory();
         HeapAtPageBoundaryStillReservesRuntimeStack();
-        return 9;
+        DispatchMetadataDoesNotChangeBinaryImportShape();
+        return 10;
     }
 
     private static void MinimalModuleHasCanonicalSectionsAndProvenance()
@@ -133,6 +134,35 @@ internal static class WasmModuleCompilerTests
             "typed owner import should retain the canonical host namespace");
         Assert(ReadFunctionResultType(result.Bytes, import.TypeIndex) == 0x7e,
             "typed owner import must use the exact WASM i64 result signature");
+    }
+
+    private static void DispatchMetadataDoesNotChangeBinaryImportShape()
+    {
+        GuestModule module = CreateMinimalModule();
+        GuestImport semanticImport = new(
+            "import:dispatch_metadata",
+            "avidscript",
+            "avid_dispatch_metadata",
+            new[] { "type:int32", "type:int32" },
+            "type:int32",
+            "semantic");
+        GuestImport generatedImport = semanticImport with { DispatchClass = "generated_s1" };
+        GuestModule semanticModule = module with { Imports = new[] { semanticImport } };
+        GuestModule generatedModule = module with { Imports = new[] { generatedImport } };
+
+        WasmCompilationResult semantic = WasmModuleCompiler.Compile(semanticModule);
+        WasmCompilationResult generated = WasmModuleCompiler.Compile(generatedModule);
+        WasmImportInfo semanticInfo = WasmArtifactInspector.Inspect(semantic.Bytes).Imports.Single();
+        WasmImportInfo generatedInfo = WasmArtifactInspector.Inspect(generated.Bytes).Imports.Single();
+
+        Assert(semantic.Succeeded && generated.Succeeded,
+            "dispatch metadata variants should compile to WASM");
+        Assert(semantic.Bytes.SequenceEqual(generated.Bytes),
+            "dispatch metadata must not alter the WASM binary import section");
+        Assert(semanticInfo.Module == generatedInfo.Module
+            && semanticInfo.Name == generatedInfo.Name
+            && semanticInfo.TypeIndex == generatedInfo.TypeIndex,
+            "WASM imports must remain driven only by module, name, and signature");
     }
 
     private static void ConditionalControlFlowAndScalarOperatorsCompile()

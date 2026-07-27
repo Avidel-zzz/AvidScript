@@ -1164,10 +1164,120 @@ public:
 				: TEXT("The typed host dispatcher rejected the call."));
 		return 1;
 	}
+
+	int32 InvokeTypedSelfI32Pair(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchSelfI32PairToI32(
+			HostContext.BindingOrdinal, SelfSlot, SelfGeneration, Left, Right, OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedSelfPropertyI32GetSet(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchSelfPropertyI32GetSet(
+			HostContext.BindingOrdinal, SelfSlot, SelfGeneration, GuestAddress, OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedSelfVectorValue(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchSelfVectorValue(
+			HostContext.BindingOrdinal, SelfSlot, SelfGeneration, GuestAddress, OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedStableObjectRoundtrip(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchStableObjectRoundtrip(
+			HostContext.BindingOrdinal,
+			SelfSlot,
+			SelfGeneration,
+			ObjectSlot,
+			ObjectGeneration,
+			GuestAddress,
+			OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedCommandBufferSubmit(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		int32 GuestAddress,
+		int32 ByteCount,
+		int32& OutValue)
+	{
+		if (TypedHostDispatcher == nullptr)
+		{
+			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchCommandBufferSubmit(
+			HostContext.BindingOrdinal, GuestAddress, ByteCount, OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
 #endif
 
 private:
 #if AVIDSCRIPT_WITH_WASMTIME
+	int32 CompleteTypedInvocation(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		EAvidScriptVmTypedHostStatus Status)
+	{
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			return 0;
+		}
+		RecordPendingHostFailure(
+			HostContext.ModuleName,
+			HostContext.ImportName,
+			Status == EAvidScriptVmTypedHostStatus::FallbackRequired
+				? TEXT("The typed host import requires semantic fallback, but its dedicated ABI cannot fall back in place.")
+				: TEXT("The typed host dispatcher rejected the call."));
+		return 1;
+	}
+
 	void RecordPendingHostFailure(
 		const FString& ModuleName,
 		const FString& ImportName,
@@ -1255,6 +1365,94 @@ private:
 			*OutValue);
 	}
 
+	static int32 TypedSelfI32PairCallback(
+		void* Environment,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfI32Pair(
+			*HostContext, SelfSlot, SelfGeneration, Left, Right, *OutValue);
+	}
+
+	static int32 TypedSelfPropertyI32GetSetCallback(
+		void* Environment,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfPropertyI32GetSet(
+			*HostContext, SelfSlot, SelfGeneration, GuestAddress, *OutValue);
+	}
+
+	static int32 TypedSelfVectorValueCallback(
+		void* Environment,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfVectorValue(
+			*HostContext, SelfSlot, SelfGeneration, GuestAddress, *OutValue);
+	}
+
+	static int32 TypedStableObjectRoundtripCallback(
+		void* Environment,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedStableObjectRoundtrip(
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			ObjectSlot,
+			ObjectGeneration,
+			GuestAddress,
+			*OutValue);
+	}
+
+	static int32 TypedCommandBufferSubmitCallback(
+		void* Environment,
+		int32 GuestAddress,
+		int32 ByteCount,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedCommandBufferSubmit(
+			*HostContext, GuestAddress, ByteCount, *OutValue);
+	}
+
 	bool ValidateTypedImports(
 		const FAvidScriptWasmModuleLayout& ModuleLayout,
 		const FAvidScriptVmBindingPackage* BindingPackage,
@@ -1302,6 +1500,19 @@ private:
 				ExpectedSignature = TEXT("()i");
 				break;
 			case EAvidScriptVmTypedHostShape::I32PairToI32:
+				ExpectedSignature = TEXT("(ii)i");
+				break;
+			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
+				ExpectedSignature = TEXT("(iiii)i");
+				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
+			case EAvidScriptVmTypedHostShape::SelfVectorValue:
+				ExpectedSignature = TEXT("(iii)i");
+				break;
+			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
+				ExpectedSignature = TEXT("(iiiii)i");
+				break;
+			case EAvidScriptVmTypedHostShape::CommandBufferSubmit:
 				ExpectedSignature = TEXT("(ii)i");
 				break;
 			default:
@@ -1375,8 +1586,9 @@ private:
 			TypedHostContexts.Add(MoveTemp(HostContext));
 
 			AvidScriptWasmtimeFailure* DefineFailure = nullptr;
-			if (Import.Shape == EAvidScriptVmTypedHostShape::EmptyI32)
+			switch (Import.Shape)
 			{
+			case EAvidScriptVmTypedHostShape::EmptyI32:
 				DefineFailure = avidscript_wasmtime_linker_define_empty_i32(
 					Linker,
 					ModuleNameUtf8.Get(),
@@ -1385,9 +1597,8 @@ private:
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedEmptyI32Callback,
 					HostContextPointer);
-			}
-			else
-			{
+				break;
+			case EAvidScriptVmTypedHostShape::I32PairToI32:
 				DefineFailure = avidscript_wasmtime_linker_define_i32_pair(
 					Linker,
 					ModuleNameUtf8.Get(),
@@ -1396,6 +1607,64 @@ private:
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedI32PairCallback,
 					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
+				DefineFailure = avidscript_wasmtime_linker_define_self_i32_pair(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfI32PairCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
+				DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_get_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfPropertyI32GetSetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfVectorValue:
+				DefineFailure = avidscript_wasmtime_linker_define_self_vector_value(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfVectorValueCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
+				DefineFailure = avidscript_wasmtime_linker_define_stable_object_roundtrip(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedStableObjectRoundtripCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::CommandBufferSubmit:
+				DefineFailure = avidscript_wasmtime_linker_define_command_buffer_submit(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedCommandBufferSubmitCallback,
+					HostContextPointer);
+				break;
+			default:
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_shape_unavailable");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("The requested typed host shape is not implemented by this backend stage.");
+				return false;
 			}
 			if (DefineFailure != nullptr)
 			{

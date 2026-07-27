@@ -199,7 +199,8 @@ public static class CSharpGuestLowerer
                 callable.Import!.Module,
                 callable.Import.Name,
                 parameterTypeIds,
-                callable.ReturnTypeId));
+                callable.ReturnTypeId,
+                DispatchClass: "semantic"));
         }
 
         return imports.ToArray();

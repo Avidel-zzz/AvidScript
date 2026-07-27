@@ -6,8 +6,10 @@ namespace AvidScript.GuestIr;
 
 public static class GuestModuleValidator
 {
-    public const int CurrentSchemaVersion = 1;
-    public const string CurrentIrVersion = "1.0";
+    public const int CurrentSchemaVersion = 2;
+    public const string CurrentIrVersion = "1.1";
+    private const int LegacySchemaVersion = 1;
+    private const string LegacyIrVersion = "1.0";
 
     public static GuestValidationResult Validate(GuestModule module)
     {
@@ -48,8 +50,11 @@ public static class GuestModuleValidator
     {
         GuestModule module = context.Module;
         GuestProvenance provenance = module.Provenance;
-        if (module.SchemaVersion != CurrentSchemaVersion
-            || !string.Equals(module.IrVersion, CurrentIrVersion, StringComparison.Ordinal)
+        bool isCurrentVersion = module.SchemaVersion == CurrentSchemaVersion
+            && string.Equals(module.IrVersion, CurrentIrVersion, StringComparison.Ordinal);
+        bool isLegacyVersion = module.SchemaVersion == LegacySchemaVersion
+            && string.Equals(module.IrVersion, LegacyIrVersion, StringComparison.Ordinal);
+        if ((!isCurrentVersion && !isLegacyVersion)
             || string.IsNullOrWhiteSpace(module.ModuleId)
             || string.IsNullOrWhiteSpace(module.Language)
             || string.IsNullOrWhiteSpace(provenance.SourceId)
@@ -154,6 +159,11 @@ public static class GuestModuleValidator
             if (string.IsNullOrWhiteSpace(import.Module) || string.IsNullOrWhiteSpace(import.Name))
             {
                 context.Add("ASIR1009", $"Import '{import.Id}' has an invalid host module or name.");
+            }
+
+            if (import.DispatchClass is not ("semantic" or "generated_s1" or "data_lane"))
+            {
+                context.Add("ASIR1011", $"Import '{import.Id}' has an invalid dispatch class '{import.DispatchClass}'.");
             }
 
             for (int index = 0; index < import.ParameterTypeIds.Count; ++index)
