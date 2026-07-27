@@ -987,6 +987,8 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 	BindingInvocationContext.WritePolicy = HostContext.ActorWritePolicy;
 	BindingInvocationContext.HostEffectJournal = HostContext.HostEffectJournal;
 	BindingInvocationContext.InvocationPolicy = HostContext.BindingInvocationPolicy;
+	BindingInvocationContext.InvocationInstrumentation =
+		HostContext.BindingInvocationInstrumentation;
 }
 
 void FAvidScriptWasmRuntimeInstance::ClearHostContext()

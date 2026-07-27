@@ -55,6 +55,13 @@ struct FAvidScriptBindingPackageInstrumentation
 	uint64 SemanticOnlyPlanCount = 0;
 };
 
+struct FAvidScriptBindingInvocationInstrumentation
+{
+	uint64 SemanticProcessEventCount = 0;
+	uint64 QualifiedNativeDirectCount = 0;
+	uint64 RequestedNativeDirectFallbackCount = 0;
+};
+
 struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
@@ -65,6 +72,8 @@ struct FAvidScriptBindingInvocationContext
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	EAvidScriptBindingInvocationPolicy InvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
+	// Optional caller-owned counters. The owner must outlive every dispatch using this context.
+	FAvidScriptBindingInvocationInstrumentation* InvocationInstrumentation = nullptr;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingPackage
@@ -91,6 +100,10 @@ public:
 	bool TryGetInvocationMode(
 		uint32 Ordinal,
 		EAvidScriptBindingInvocationMode& OutMode) const;
+	bool TryFindFunctionOrdinal(
+		const UClass& OwnerClass,
+		FName FunctionName,
+		uint32& OutOrdinal) const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetObjectTypeCount() const;
 	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;

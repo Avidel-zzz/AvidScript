@@ -418,6 +418,11 @@ namespace
 		TArray<uint8> Bytecode;
 		const FAvidScriptWasmStateSlot* ResultSlot = nullptr;
 		int32 LastHostImportCallCount = 0;
+		FAvidScriptBindingInvocationInstrumentation InvocationInstrumentation;
+		uint64 LastQualifiedNativeDirectCount = 0;
+		uint64 LastRequestedNativeDirectFallbackCount = 0;
+		uint64 CollectedQualifiedNativeDirectCount = 0;
+		uint64 CollectedRequestedNativeDirectFallbackCount = 0;
 		bool bRequestsNativeDirect = false;
 		bool bScalarAddNativeDirect = false;
 		bool bBatchScalarNativeDirect = false;
@@ -487,6 +492,8 @@ namespace
 			HostContext.World = SharedFixture.GetWorld();
 			HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
 			HostContext.BindingInvocationPolicy = InvocationPolicy;
+			HostContext.BindingInvocationInstrumentation =
+				&InvocationInstrumentation;
 			Session.SetHostContext(HostContext);
 #if WITH_DEV_AUTOMATION_TESTS
 			Session.SetBackendSelectionForTesting(BackendSelection);
@@ -530,39 +537,30 @@ namespace
 				[this, &OutError](const TCHAR* FunctionName, bool& OutQualified)
 				{
 					OutQualified = false;
-					int32 MatchCount = 0;
-					for (const FAvidScriptVmDynamicImport& Import :
-						Manifest.BindingPackage->GetVmPackage().Imports)
-					{
-						if (!Import.StableId.Contains(
-								FunctionName,
-								ESearchCase::CaseSensitive))
-						{
-							continue;
-						}
-						++MatchCount;
-						EAvidScriptBindingInvocationMode Mode =
-							EAvidScriptBindingInvocationMode::SemanticProcessEvent;
-						if (!Manifest.BindingPackage->TryGetInvocationMode(
-								Import.Ordinal,
-								Mode))
-						{
-							OutError = FString::Printf(
-								TEXT("AvidScript benchmark cannot query invocation plan: %s"),
-								FunctionName);
-							return false;
-						}
-						OutQualified =
-							Mode == EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
-					}
-					if (MatchCount != 1)
+					uint32 Ordinal = MAX_uint32;
+					if (!Manifest.BindingPackage->TryFindFunctionOrdinal(
+							*AAvidScriptPerfFixture::StaticClass(),
+							FName(FunctionName),
+							Ordinal))
 					{
 						OutError = FString::Printf(
-							TEXT("AvidScript benchmark expected one invocation plan: %s count=%d"),
-							FunctionName,
-							MatchCount);
+							TEXT("AvidScript benchmark expected one invocation plan: %s"),
+							FunctionName);
 						return false;
 					}
+					EAvidScriptBindingInvocationMode Mode =
+						EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+					if (!Manifest.BindingPackage->TryGetInvocationMode(
+							Ordinal,
+							Mode))
+					{
+						OutError = FString::Printf(
+							TEXT("AvidScript benchmark cannot query invocation plan: %s"),
+							FunctionName);
+						return false;
+					}
+					OutQualified =
+						Mode == EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
 					return true;
 				};
 			if (!QueryNativeDirectPlan(TEXT("ReflectAddInt32"), bScalarAddNativeDirect) ||
@@ -650,52 +648,20 @@ namespace
 				Actual.RuntimeArtifactSha256);
 			BackendInfoJson->SetBoolField(TEXT("fallback_used"), false);
 			LastHostImportCallCount = ReloadResult.RuntimeResult.HostImportCallCount;
+			LastQualifiedNativeDirectCount =
+				InvocationInstrumentation.QualifiedNativeDirectCount;
+			LastRequestedNativeDirectFallbackCount =
+				InvocationInstrumentation.RequestedNativeDirectFallbackCount;
 			return true;
 		}
 
 		void GetInvocationEvidence(
-			const EAvidScriptPerfWorkload Workload,
-			const int32 Iterations,
 			uint64& OutDirectHitCount,
 			uint64& OutRequestedDirectFallbackCount) const
 		{
-			OutDirectHitCount = 0;
-			OutRequestedDirectFallbackCount = 0;
-			if (!bRequestsNativeDirect)
-			{
-				return;
-			}
-
-			const bool bQualified =
-				(Workload == EAvidScriptPerfWorkload::ScalarAddInt32 &&
-				 bScalarAddNativeDirect) ||
-				(Workload == EAvidScriptPerfWorkload::BatchScalar &&
-				 bBatchScalarNativeDirect);
-			uint64 InvocationCount = 0;
-			switch (Workload)
-			{
-			case EAvidScriptPerfWorkload::PropertyGetSet:
-				InvocationCount = static_cast<uint64>(Iterations) * 2;
-				break;
-			case EAvidScriptPerfWorkload::ScalarNoOp:
-			case EAvidScriptPerfWorkload::ScalarAddInt32:
-			case EAvidScriptPerfWorkload::VectorValue:
-			case EAvidScriptPerfWorkload::ObjectRoundtrip:
-			case EAvidScriptPerfWorkload::BatchScalar:
-			case EAvidScriptPerfWorkload::VectorRefOut:
-				InvocationCount = static_cast<uint64>(Iterations);
-				break;
-			default:
-				break;
-			}
-			if (bQualified)
-			{
-				OutDirectHitCount = InvocationCount;
-			}
-			else
-			{
-				OutRequestedDirectFallbackCount = InvocationCount;
-			}
+			OutDirectHitCount = CollectedQualifiedNativeDirectCount;
+			OutRequestedDirectFallbackCount =
+				CollectedRequestedNativeDirectFallbackCount;
 		}
 
 		bool PrepareWorkload(
@@ -770,6 +736,16 @@ namespace
 			OutHostImportCallCount =
 				DispatchResult.HostImportCallCount - LastHostImportCallCount;
 			LastHostImportCallCount = DispatchResult.HostImportCallCount;
+			CollectedQualifiedNativeDirectCount =
+				InvocationInstrumentation.QualifiedNativeDirectCount
+				- LastQualifiedNativeDirectCount;
+			CollectedRequestedNativeDirectFallbackCount =
+				InvocationInstrumentation.RequestedNativeDirectFallbackCount
+				- LastRequestedNativeDirectFallbackCount;
+			LastQualifiedNativeDirectCount =
+				InvocationInstrumentation.QualifiedNativeDirectCount;
+			LastRequestedNativeDirectFallbackCount =
+				InvocationInstrumentation.RequestedNativeDirectFallbackCount;
 			return true;
 		}
 
@@ -2393,8 +2369,6 @@ namespace
 			const FAvidScriptLane& SelectedAvidScript = AvidScript.Get(Lane);
 			OutObservation.BackendInfo = SelectedAvidScript.BackendInfoJson;
 			SelectedAvidScript.GetInvocationEvidence(
-				Workload,
-				Iterations,
 				OutObservation.DirectHitCount,
 				OutObservation.RequestedDirectFallbackCount);
 		}

@@ -2813,6 +2813,31 @@ bool FAvidScriptBindingPackage::TryGetInvocationMode(
 	return true;
 }
 
+bool FAvidScriptBindingPackage::TryFindFunctionOrdinal(
+	const UClass& OwnerClass,
+	const FName FunctionName,
+	uint32& OutOrdinal) const
+{
+	OutOrdinal = MAX_uint32;
+	for (int32 Index = 0; Index < Impl->Plans.Num(); ++Index)
+	{
+		const FAvidScriptRuntimeBindingInvocationPlan& Plan = Impl->Plans[Index];
+		if (Plan.OwnerClass != &OwnerClass
+			|| Plan.Function == nullptr
+			|| Plan.Function->GetFName() != FunctionName)
+		{
+			continue;
+		}
+		if (OutOrdinal != MAX_uint32)
+		{
+			OutOrdinal = MAX_uint32;
+			return false;
+		}
+		OutOrdinal = static_cast<uint32>(Index);
+	}
+	return OutOrdinal != MAX_uint32;
+}
+
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const
 {
 	return Impl->RequiredScratchSize;
@@ -2901,6 +2926,33 @@ bool FAvidScriptBindingPackage::Dispatch(
 		return false;
 	}
 	const FAvidScriptRuntimeBindingInvocationPlan& Plan = Impl->Plans[Call.BindingOrdinal];
+	const bool bRequestedNativeDirect =
+		Context.InvocationPolicy
+		== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
+	const bool bSelectedNativeDirect =
+		bRequestedNativeDirect
+		&& Plan.FastPath.IsBound()
+		&& Plan.FastPath.HighestInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	ON_SCOPE_EXIT
+	{
+		FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+			Context.InvocationInstrumentation;
+		if (Instrumentation == nullptr || !OutResult.bSucceeded)
+		{
+			return;
+		}
+		if (bSelectedNativeDirect)
+		{
+			++Instrumentation->QualifiedNativeDirectCount;
+			return;
+		}
+		++Instrumentation->SemanticProcessEventCount;
+		if (bRequestedNativeDirect)
+		{
+			++Instrumentation->RequestedNativeDirectFallbackCount;
+		}
+	};
 	if (Call.Arguments.Num() != Plan.ExpectedArgumentCount
 		|| (Plan.bRequiresGuestMemory && Call.GuestMemory == nullptr))
 	{

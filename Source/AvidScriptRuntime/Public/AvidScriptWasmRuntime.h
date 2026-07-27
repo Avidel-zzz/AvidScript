@@ -78,6 +78,7 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
+	FAvidScriptBindingInvocationInstrumentation* BindingInvocationInstrumentation = nullptr;
 	EAvidScriptDynamicHostCallTimingPolicy DynamicHostCallTimingPolicy =
 		EAvidScriptDynamicHostCallTimingPolicy::Disabled;
 };

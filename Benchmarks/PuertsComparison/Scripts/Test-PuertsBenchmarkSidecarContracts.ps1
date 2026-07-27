@@ -348,7 +348,7 @@ try {
     $Profile.minimum_sample_milliseconds = 0.1
     $Profile.minimum_iterations = 100
     $Profile.maximum_iterations = 100000
-    $Profile.workloads = @('scalar_noop', 'property_get_set')
+    $Profile.workloads = @('scalar_noop', 'scalar_add_int32', 'property_get_set')
     Write-NewJson $ProfilePath $Profile
 
     $FakeEditorPath = Join-Path $FixtureRoot 'Fake-UnrealEditor-Cmd.ps1'
@@ -810,11 +810,11 @@ Write-Output "假 Editor PID=$PID"
         -Label 'BenchmarkAggregate'
     $Aggregate = $AggregateRaw | ConvertFrom-Json
     Assert-True ($Aggregate.aggregate_schema.sha256 -ceq $Manifest.aggregate_schema.sha256) '聚合结果未记录 aggregate schema 哈希'
-    Assert-True ([int]$Aggregate.samples.Count -eq 150) '聚合结果未保留全部 raw samples'
-    Assert-True ([int]$Aggregate.process_statistics.Count -eq 50) '每进程统计矩阵不完整'
-    Assert-True ([int]$Aggregate.cross_process_statistics.Count -eq 10) '跨进程统计矩阵不完整'
-    Assert-True ([int]$Aggregate.paired_comparisons.Count -eq 8) '同进程配对比较矩阵不完整'
-    Assert-True ([int]$Aggregate.descriptive_pooled_statistics.Count -eq 10) '池化描述统计矩阵不完整'
+    Assert-True ([int]$Aggregate.samples.Count -eq 225) '聚合结果未保留全部 raw samples'
+    Assert-True ([int]$Aggregate.process_statistics.Count -eq 75) '每进程统计矩阵不完整'
+    Assert-True ([int]$Aggregate.cross_process_statistics.Count -eq 15) '跨进程统计矩阵不完整'
+    Assert-True ([int]$Aggregate.paired_comparisons.Count -eq 12) '同进程配对比较矩阵不完整'
+    Assert-True ([int]$Aggregate.descriptive_pooled_statistics.Count -eq 15) '池化描述统计矩阵不完整'
     $ScalarNativeProcess = @($Aggregate.process_statistics | Where-Object {
         [int]$_.process_run -eq 0 -and
         $_.lane -ceq 'native_cpp' -and $_.workload -ceq 'scalar_noop'
@@ -1084,6 +1084,9 @@ Write-Output "假 Editor PID=$PID"
             $_.lane -ceq 'avidscript_wasmtime_native_direct' -and
             $_.workload -ceq 'scalar_add_int32'
         })[0]
+        Assert-True ($null -ne $Sample) 'direct scalar fallback 夹具缺少目标 sample'
+        Assert-True ($null -ne $Sample.PSObject.Properties['direct_hit_count']) 'direct scalar fallback 夹具缺少 direct_hit_count'
+        Assert-True ($null -ne $Sample.PSObject.Properties['requested_direct_fallback_count']) 'direct scalar fallback 夹具缺少 requested_direct_fallback_count'
         $Sample.direct_hit_count = [int64]$Sample.iterations - 1
         $Sample.requested_direct_fallback_count = 1
     }
@@ -1097,4 +1100,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 schema_order_rejections=8 schema_v2=1 raw_samples=150 process_stats=50 cross_process_stats=10 paired=8 identity_rejections=3 mixed_rejections=4'
+Write-Output 'Puerts benchmark sidecar 合同通过：parser=1 formal_gate=4 provenance_rejections=9 known_generated_ignored=2 reserved_args=17 calibration_processes=1 timed_processes=5 fresh_pids=6 williams=1 request_hash=2 aggregate_snapshot=1 schema_order_rejections=8 schema_v2=1 raw_samples=225 process_stats=75 cross_process_stats=15 paired=12 identity_rejections=3 mixed_rejections=4'

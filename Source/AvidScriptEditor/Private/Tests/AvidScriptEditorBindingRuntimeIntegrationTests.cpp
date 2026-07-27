@@ -4591,6 +4591,17 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	{
 		return false;
 	}
+	uint32 ResolvedAddOrdinal = MAX_uint32;
+	TestTrue(
+		TEXT("Function identity resolves to one immutable package ordinal"),
+		DirectPackage->TryFindFunctionOrdinal(
+			*TestClass,
+			TEXT("FastPathAddInt32"),
+			ResolvedAddOrdinal));
+	TestEqual(
+		TEXT("Resolved function ordinal matches the generated binding"),
+		ResolvedAddOrdinal,
+		AddBinding->Ordinal);
 	UObject* Target = NewObject<UObject>(GetTransientPackage(), TestClass);
 	if (!TestNotNull(TEXT("Qualified native-direct target is created"), Target))
 	{
@@ -4610,6 +4621,8 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	FAvidScriptBindingInvocationContext SemanticContext;
 	SemanticContext.ObjectRegistry = &Registry;
 	SemanticContext.OwnerHandle = Handle;
+	FAvidScriptBindingInvocationInstrumentation InvocationInstrumentation;
+	SemanticContext.InvocationInstrumentation = &InvocationInstrumentation;
 	FAvidScriptBindingInvocationContext DirectContext = SemanticContext;
 	DirectContext.InvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
@@ -4819,6 +4832,18 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		TEXT("Rejected native-direct stale handle does not write Guest Memory"),
 		GuestMemory.ReadValue<int32>(StaleResultAddress),
 		StaleSentinel);
+	TestEqual(
+		TEXT("Instrumentation records successful semantic dispatches"),
+		InvocationInstrumentation.SemanticProcessEventCount,
+		4ull);
+	TestEqual(
+		TEXT("Instrumentation records actual qualified native-direct dispatches"),
+		InvocationInstrumentation.QualifiedNativeDirectCount,
+		2ull);
+	TestEqual(
+		TEXT("Instrumentation records requested direct semantic fallback"),
+		InvocationInstrumentation.RequestedNativeDirectFallbackCount,
+		1ull);
 
 	AddInfo(
 		TEXT("Direct authorization for Actor functions accepts bypassing "
