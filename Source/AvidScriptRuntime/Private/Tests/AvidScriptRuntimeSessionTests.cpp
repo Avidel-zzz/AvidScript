@@ -1439,7 +1439,7 @@ bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
 	TestEqual(
 		TEXT("First Self resolves to the first owner"),
 		ResolvedObject,
-		FirstOwner.Get());
+		static_cast<UObject*>(FirstOwner.Get()));
 
 	const uint64 FirstContextEpoch = Runtime.GetReloadEpochForTesting();
 	Context.OwnerHandle = SecondHandle;
@@ -1465,7 +1465,7 @@ bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
 	TestEqual(
 		TEXT("Replacement Self resolves to the second owner"),
 		ResolvedObject,
-		SecondOwner.Get());
+		static_cast<UObject*>(SecondOwner.Get()));
 	Runtime.EndTypedCallbackEpochForTesting();
 
 	TWeakObjectPtr<UWorld> StaleWorld;
