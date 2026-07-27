@@ -140,13 +140,52 @@ try {
 
     $SourceProjectRoot = Join-Path $FixtureRoot 'SourceProject'
     $SourceProjectPath = Join-Path $SourceProjectRoot 'AvidTPSTemplate.uproject'
-    Write-Utf8NoBom -Path $SourceProjectPath -Value "{`n  `"FileVersion`": 3`n}`n"
+    $SourceProjectJson = @'
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8-fixture",
+  "Category": "Benchmark",
+  "Modules": [
+    {
+      "Name": "FixtureModule",
+      "Type": "Runtime"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "ExistingPlugin",
+      "Enabled": false,
+      "FixtureField": "preserve"
+    },
+    {
+      "Name": "AvidScriptPerfHarness",
+      "Enabled": false,
+      "TargetAllowList": [
+        "Editor"
+      ]
+    }
+  ],
+  "FixtureRoot": {
+    "Nested": true
+  }
+}
+'@
+    Write-Utf8NoBom -Path $SourceProjectPath -Value $SourceProjectJson
+    $SourceProjectHashBefore = (Get-FileHash -LiteralPath $SourceProjectPath -Algorithm SHA256).Hash
     Write-Utf8NoBom -Path (Join-Path $SourceProjectRoot 'Source\Gameplay.txt') -Value "source`n"
     Write-Utf8NoBom -Path (Join-Path $SourceProjectRoot 'Config\DefaultGame.ini') -Value "[/Script/EngineSettings.GameMapsSettings]`n"
     Write-Utf8NoBom -Path (Join-Path $SourceProjectRoot 'Plugins\AvidScript\should-not-leak.txt') -Value "main-plugin`n"
     foreach ($GeneratedDirectory in @('Binaries', 'Intermediate', 'Saved', 'DerivedDataCache')) {
         Write-Utf8NoBom -Path (Join-Path $SourceProjectRoot "$GeneratedDirectory\sentinel.txt") -Value "$GeneratedDirectory`n"
     }
+
+    $SourceProjectWithoutPluginsRoot = Join-Path $FixtureRoot 'SourceProjectWithoutPlugins'
+    $SourceProjectWithoutPluginsPath = Join-Path $SourceProjectWithoutPluginsRoot 'AvidTPSTemplate.uproject'
+    Write-Utf8NoBom -Path $SourceProjectWithoutPluginsPath -Value "{`n  `"FileVersion`": 3,`n  `"FixtureField`": `"preserve`"`n}`n"
+    Write-Utf8NoBom -Path (Join-Path $SourceProjectWithoutPluginsRoot 'Source\Gameplay.txt') -Value "source`n"
+    Write-Utf8NoBom -Path (Join-Path $SourceProjectWithoutPluginsRoot 'Config\DefaultGame.ini') -Value "[Fixture]`n"
+    $SourceProjectWithoutPluginsHashBefore = (
+        Get-FileHash -LiteralPath $SourceProjectWithoutPluginsPath -Algorithm SHA256).Hash
 
     $RepositoryRoot = Join-Path $FixtureRoot 'AvidScriptRepo'
     New-Item -ItemType Directory -Force -Path $RepositoryRoot | Out-Null
@@ -193,7 +232,41 @@ try {
     Assert-True ($FirstRun.dirty -eq $false) 'result dirty flag must be false'
 
     Assert-True (Test-Path -LiteralPath $AttemptProjectPath -PathType Leaf) 'uproject copy is missing'
-    Assert-Equal (Get-Content -LiteralPath $AttemptProjectPath -Raw) (Get-Content -LiteralPath $SourceProjectPath -Raw) 'uproject copy content mismatch'
+    Assert-Equal ((Get-FileHash -LiteralPath $SourceProjectPath -Algorithm SHA256).Hash) $SourceProjectHashBefore `
+        'source uproject was modified'
+    $AttemptProject = Get-Content -LiteralPath $AttemptProjectPath -Raw | ConvertFrom-Json
+    Assert-Equal ([int]$AttemptProject.FileVersion) 3 'uproject FileVersion was not preserved'
+    Assert-Equal ([string]$AttemptProject.EngineAssociation) '5.8-fixture' 'uproject EngineAssociation was not preserved'
+    Assert-Equal ([string]$AttemptProject.Category) 'Benchmark' 'uproject Category was not preserved'
+    Assert-Equal ([string]$AttemptProject.Modules[0].Name) 'FixtureModule' 'uproject Modules were not preserved'
+    Assert-True ($AttemptProject.FixtureRoot.Nested -eq $true) 'uproject custom root field was not preserved'
+    $ExistingPlugin = @($AttemptProject.Plugins | Where-Object { $_.Name -ceq 'ExistingPlugin' })
+    Assert-Equal $ExistingPlugin.Count 1 'existing uproject plugin count changed'
+    Assert-True ($ExistingPlugin[0].Enabled -eq $false) 'existing uproject plugin Enabled changed'
+    Assert-Equal ([string]$ExistingPlugin[0].FixtureField) 'preserve' 'existing uproject plugin field changed'
+    $HarnessProjectPlugins = @($AttemptProject.Plugins | Where-Object { $_.Name -ceq 'AvidScriptPerfHarness' })
+    Assert-Equal $HarnessProjectPlugins.Count 1 'harness uproject plugin must not be duplicated'
+    Assert-True ($HarnessProjectPlugins[0].Enabled -eq $true) 'harness uproject plugin must be enabled'
+    Assert-Equal ([string]$HarnessProjectPlugins[0].TargetAllowList[0]) 'Editor' `
+        'existing harness uproject plugin fields were not preserved'
+
+    $NoPluginsRun = (& $BootstrapPath `
+        -SourceProjectPath $SourceProjectWithoutPluginsPath `
+        -AvidScriptPluginPath $CandidateWorktreePath `
+        -PuertsPluginPath $PuertsPluginPath `
+        -HarnessPluginPath $HarnessPluginPath `
+        -OutputRoot $OutputRoot `
+        -ExpectedAvidScriptCommit $ExpectedCommit `
+        -ExpectedAvidScriptTree $ExpectedTree) | ConvertFrom-Json
+    $NoPluginsProject = Get-Content -LiteralPath ([string]$NoPluginsRun.project_path) -Raw | ConvertFrom-Json
+    $AddedHarnessPlugins = @($NoPluginsProject.Plugins | Where-Object { $_.Name -ceq 'AvidScriptPerfHarness' })
+    Assert-Equal $AddedHarnessPlugins.Count 1 'missing harness uproject plugin was not added exactly once'
+    Assert-True ($AddedHarnessPlugins[0].Enabled -eq $true) 'added harness uproject plugin must be enabled'
+    Assert-Equal ([string]$NoPluginsProject.FixtureField) 'preserve' `
+        'uproject field was not preserved while adding a Plugins array'
+    Assert-Equal ((Get-FileHash -LiteralPath $SourceProjectWithoutPluginsPath -Algorithm SHA256).Hash) `
+        $SourceProjectWithoutPluginsHashBefore `
+        'source uproject without Plugins was modified'
 
     Assert-JunctionTarget -Path (Join-Path $AttemptPath 'Source') -ExpectedTarget ([System.IO.Path]::GetFullPath((Join-Path $SourceProjectRoot 'Source')))
     Assert-JunctionTarget -Path (Join-Path $AttemptPath 'Config') -ExpectedTarget ([System.IO.Path]::GetFullPath((Join-Path $SourceProjectRoot 'Config')))
@@ -375,4 +448,4 @@ finally {
     }
 }
 
-Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=1 junctions=5 marker_v2=1 source_config_digests=2 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejections=5 alias_overlap_rejections=2 no_write_rejections=8 generated_dirs=4 privacy=1'
+Write-Output 'Puerts benchmark clean project contracts passed: parser=2 happy_path=2 harness_project_addition=1 harness_project_enablement=2 harness_project_deduplication=2 project_field_preservation=7 source_project_unchanged=2 junctions=5 marker_v2=1 source_config_digests=2 dirty_rejection=1 commit_rejection=1 tree_rejection=1 attempt_reuse_rejection=1 overlap_rejections=5 alias_overlap_rejections=2 no_write_rejections=8 generated_dirs=4 privacy=1'

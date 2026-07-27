@@ -379,7 +379,7 @@ function Write-NewJsonFile {
     Write-NewTextFile -Path $Path -Value $Json -Code $Code
 }
 
-function Copy-NewFile {
+function Write-NewBenchmarkProjectFile {
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$Destination,
@@ -390,36 +390,70 @@ function Copy-NewFile {
         throw "$Code source file is missing: $Source"
     }
 
-    $Bytes = [System.IO.File]::ReadAllBytes($Source)
-    $Parent = Split-Path -Parent $Destination
-    if (-not (Test-Path -LiteralPath $Parent -PathType Container)) {
-        throw "$Code destination directory does not exist: $Parent"
-    }
-
-    $TemporaryPath = Join-Path $Parent (
-        '.{0}.{1}.tmp' -f [System.IO.Path]::GetFileName($Destination), [Guid]::NewGuid().ToString('N'))
     try {
-        $Stream = [System.IO.FileStream]::new(
-            $TemporaryPath,
-            [System.IO.FileMode]::CreateNew,
-            [System.IO.FileAccess]::Write,
-            [System.IO.FileShare]::Read)
-        try {
-            $Stream.Write($Bytes, 0, $Bytes.Length)
-            $Stream.Flush($true)
-        }
-        finally {
-            $Stream.Dispose()
-        }
+        $Project = Get-Content -LiteralPath $Source -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "$Code source project is not valid JSON: $Source`n$($_.Exception.Message)"
+    }
 
-        [System.IO.File]::Move($TemporaryPath, $Destination)
+    if ($Project -isnot [System.Management.Automation.PSCustomObject]) {
+        throw "$Code source project root must be a JSON object: $Source"
     }
-    catch [System.IO.IOException] {
-        if (Test-Path -LiteralPath $TemporaryPath -PathType Leaf) {
-            Remove-Item -LiteralPath $TemporaryPath -Force
+
+    $HarnessPluginName = 'AvidScriptPerfHarness'
+    $PluginsProperty = $Project.PSObject.Properties['Plugins']
+    $Plugins = if ($null -eq $PluginsProperty) {
+        @()
+    }
+    else {
+        @($PluginsProperty.Value)
+    }
+
+    $FoundHarnessPlugin = $false
+    $NormalizedPlugins = @(
+        foreach ($Plugin in $Plugins) {
+            $NameProperty = if ($null -eq $Plugin) {
+                $null
+            }
+            else {
+                $Plugin.PSObject.Properties['Name']
+            }
+
+            if ($null -ne $NameProperty -and [string]$NameProperty.Value -ceq $HarnessPluginName) {
+                if ($FoundHarnessPlugin) {
+                    continue
+                }
+
+                $EnabledProperty = $Plugin.PSObject.Properties['Enabled']
+                if ($null -eq $EnabledProperty) {
+                    Add-Member -InputObject $Plugin -MemberType NoteProperty -Name 'Enabled' -Value $true
+                }
+                else {
+                    $EnabledProperty.Value = $true
+                }
+                $FoundHarnessPlugin = $true
+            }
+
+            $Plugin
         }
-        throw "$Code refused to overwrite existing file: $Destination"
+    )
+
+    if (-not $FoundHarnessPlugin) {
+        $NormalizedPlugins += [pscustomobject][ordered]@{
+            Name = $HarnessPluginName
+            Enabled = $true
+        }
     }
+
+    if ($null -eq $PluginsProperty) {
+        Add-Member -InputObject $Project -MemberType NoteProperty -Name 'Plugins' -Value @($NormalizedPlugins)
+    }
+    else {
+        $PluginsProperty.Value = @($NormalizedPlugins)
+    }
+
+    Write-NewJsonFile -Path $Destination -Value $Project -Code $Code
 }
 
 function New-ProjectJunction {
@@ -555,7 +589,7 @@ Assert-NoOverlapWithDestination -AttemptPath $AttemptPath -SourcePaths @(
 $AttemptPath = New-ValidatedAttemptDirectory -OutputRoot $ResolvedOutputRoot -AttemptPath $AttemptPath
 
 $AttemptProjectPath = Join-Path $AttemptPath ([System.IO.Path]::GetFileName($ResolvedSourceProjectPath))
-Copy-NewFile -Source $ResolvedSourceProjectPath -Destination $AttemptProjectPath -Code 'ASP53B1202'
+Write-NewBenchmarkProjectFile -Source $ResolvedSourceProjectPath -Destination $AttemptProjectPath -Code 'ASP53B1202'
 
 New-ProjectJunction -Path (Join-Path $AttemptPath 'Source') `
     -Target $ResolvedSourceDirectory `
