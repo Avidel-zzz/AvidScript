@@ -82,7 +82,7 @@ function New-GateResult {
     }
 }
 
-function Find-CrossProcessMetric {
+function Find-CrossProcessStatistic {
     param(
         [object[]]$Statistics,
         [string]$Lane,
@@ -95,7 +95,105 @@ function Find-CrossProcessMetric {
     if ($match.Count -ne 1) {
         return $null
     }
-    return [double]$match[0].p50_of_process_p50_ns_per_operation
+    return $match[0]
+}
+
+function New-GameplayGateResult {
+    param(
+        [string]$Name,
+        [pscustomobject]$Candidate,
+        [pscustomobject]$Reflection,
+        [pscustomobject]$Static,
+        [pscustomobject]$Threshold,
+        [bool]$RawEvidenceValid
+    )
+
+    if (-not $RawEvidenceValid -or
+        $null -eq $Candidate -or
+        $null -eq $Reflection -or
+        $null -eq $Static) {
+        return [ordered]@{
+            name = $Name
+            status = 'not_measured'
+            pass = $false
+            value = $null
+            threshold = $Threshold
+            reason = $RawEvidenceValid ?
+                'required gameplay statistics are missing' :
+                'raw gameplay evidence is invalid'
+            audit = $null
+        }
+    }
+
+    $comparator = if (
+        [double]$Reflection.p50_of_process_p50_ns_per_operation -le
+        [double]$Static.p50_of_process_p50_ns_per_operation) {
+        $Reflection
+    }
+    else {
+        $Static
+    }
+    $candidateP50 =
+        [double]$Candidate.p50_of_process_p50_ns_per_operation
+    $candidateP95 =
+        [double]$Candidate.p95_of_process_p50_ns_per_operation
+    $candidateMad =
+        [double]$Candidate.mad_of_process_p50_ns_per_operation
+    $comparatorP50 =
+        [double]$comparator.p50_of_process_p50_ns_per_operation
+    $comparatorP95 =
+        [double]$comparator.p95_of_process_p50_ns_per_operation
+    $comparatorMad =
+        [double]$comparator.mad_of_process_p50_ns_per_operation
+
+    if ($comparatorP50 -le 0.0 -or $comparatorP95 -le 0.0) {
+        return [ordered]@{
+            name = $Name
+            status = 'not_measured'
+            pass = $false
+            value = $null
+            threshold = $Threshold
+            reason = 'Puerts comparator statistics must be positive'
+            audit = $null
+        }
+    }
+
+    $maximum = [double]$Threshold.maximum
+    $p50Ratio = $candidateP50 / $comparatorP50
+    $p95Ratio = $candidateP95 / $comparatorP95
+    $candidateUpper2Mad = $candidateP50 + (2.0 * $candidateMad)
+    $comparatorLower2Mad = $comparatorP50 - (2.0 * $comparatorMad)
+    $p50Pass = $p50Ratio -le $maximum
+    $p95Pass = $p95Ratio -le $maximum
+    $twoMadSeparated = $candidateUpper2Mad -lt $comparatorLower2Mad
+    $passed = $p50Pass -and $p95Pass -and $twoMadSeparated
+
+    return [ordered]@{
+        name = $Name
+        status = $passed ? 'pass' : 'fail'
+        pass = $passed
+        value = $p50Ratio
+        threshold = $Threshold
+        reason = 'P50 ratio, cross-process P95 ratio, and 2xMAD separation'
+        audit = [ordered]@{
+            candidate_lane = [string]$Candidate.lane
+            comparator_lane = [string]$comparator.lane
+            p50_ratio = $p50Ratio
+            p95_ratio = $p95Ratio
+            maximum_ratio = $maximum
+            p50_pass = $p50Pass
+            p95_pass = $p95Pass
+            candidate_p50_ns_per_operation = $candidateP50
+            candidate_cross_process_p95_ns_per_operation = $candidateP95
+            candidate_mad_ns_per_operation = $candidateMad
+            comparator_p50_ns_per_operation = $comparatorP50
+            comparator_cross_process_p95_ns_per_operation = $comparatorP95
+            comparator_mad_ns_per_operation = $comparatorMad
+            candidate_upper_2mad_ns_per_operation = $candidateUpper2Mad
+            comparator_lower_2mad_ns_per_operation = $comparatorLower2Mad
+            two_mad_separated = $twoMadSeparated
+        }
+    }
 }
 
 $profile = Read-JsonFile -Path $ProfilePath
@@ -311,6 +409,42 @@ $supplemental = $null
 if (-not [string]::IsNullOrWhiteSpace($SupplementalEvidencePath)) {
     $supplemental = Read-JsonFile -Path $SupplementalEvidencePath
 }
+$supplementalCandidateMatch = $false
+$supplementalReason = 'required supplemental evidence is missing'
+$supplementalCommit = $null
+$supplementalTree = $null
+if ($null -ne $supplemental) {
+    if ($supplemental.PSObject.Properties.Name -contains 'provenance' -and
+        $null -ne $supplemental.provenance -and
+        $supplemental.provenance.PSObject.Properties.Name -contains
+            'avidscript_commit' -and
+        $supplemental.provenance.PSObject.Properties.Name -contains
+            'avidscript_tree_sha') {
+        $supplementalCommit =
+            [string]$supplemental.provenance.avidscript_commit
+        $supplementalTree =
+            [string]$supplemental.provenance.avidscript_tree_sha
+        $supplementalCandidateMatch =
+            $supplementalCommit -ceq [string]$provenance.avidscript_commit -and
+            $supplementalTree -ceq [string]$provenance.avidscript_tree_sha
+        $supplementalReason = $supplementalCandidateMatch ?
+            'supplemental evidence candidate identity matches process evidence' :
+            'supplemental evidence candidate commit/tree does not match process evidence'
+    }
+    else {
+        $supplementalReason =
+            'supplemental evidence has no candidate commit/tree provenance'
+    }
+}
+$supplementalAudit = [ordered]@{
+    provided = $null -ne $supplemental
+    supplemental_candidate_match = $supplementalCandidateMatch
+    process_avidscript_commit = [string]$provenance.avidscript_commit
+    process_avidscript_tree_sha = [string]$provenance.avidscript_tree_sha
+    supplemental_avidscript_commit = $supplementalCommit
+    supplemental_avidscript_tree_sha = $supplementalTree
+    reason = $supplementalReason
+}
 
 $gates = [ordered]@{}
 $supplementalGateNames = @(
@@ -327,7 +461,7 @@ $supplementalGateNames = @(
 )
 foreach ($name in $supplementalGateNames) {
     $value = $null
-    if ($null -ne $supplemental -and
+    if ($supplementalCandidateMatch -and
         $supplemental.PSObject.Properties.Name -contains 'gate_inputs' -and
         $supplemental.gate_inputs.PSObject.Properties.Name -contains $name) {
         $value = [Nullable[double]]([double]$supplemental.gate_inputs.$name)
@@ -336,7 +470,7 @@ foreach ($name in $supplementalGateNames) {
         -Name $name `
         -Value $value `
         -Threshold $profile.gates.$name `
-        -Reason ($null -eq $value ? 'required supplemental evidence is missing' : 'supplemental evidence')
+        -Reason ($null -eq $value ? $supplementalReason : $supplementalReason)
 }
 
 foreach ($definition in @(
@@ -350,34 +484,25 @@ foreach ($definition in @(
     }
 )) {
     $threshold = $profile.gates.($definition.name)
-    $candidate = Find-CrossProcessMetric `
+    $candidate = Find-CrossProcessStatistic `
         -Statistics $crossProcessStatistics `
         -Lane ([string]$threshold.lane) `
         -Workload $definition.workload
-    $reflection = Find-CrossProcessMetric `
+    $reflection = Find-CrossProcessStatistic `
         -Statistics $crossProcessStatistics `
         -Lane 'puerts_v8_reflection' `
         -Workload $definition.workload
-    $static = Find-CrossProcessMetric `
+    $static = Find-CrossProcessStatistic `
         -Statistics $crossProcessStatistics `
         -Lane 'puerts_v8_static' `
         -Workload $definition.workload
-    $value = $null
-    if ($null -ne $candidate -and $null -ne $reflection -and $null -ne $static) {
-        $value = [Nullable[double]]($candidate / [Math]::Min($reflection, $static))
-    }
-    $reason = if ($validityErrors.Count -eq 0) {
-        'candidate versus fastest Puerts lane'
-    }
-    else {
-        'raw gameplay evidence is invalid'
-        $value = $null
-    }
-    $gates[$definition.name] = New-GateResult `
+    $gates[$definition.name] = New-GameplayGateResult `
         -Name $definition.name `
-        -Value $value `
+        -Candidate $candidate `
+        -Reflection $reflection `
+        -Static $static `
         -Threshold $threshold `
-        -Reason $reason
+        -RawEvidenceValid ($validityErrors.Count -eq 0)
 }
 
 $output = [ordered]@{
@@ -390,6 +515,7 @@ $output = [ordered]@{
         timed_samples = [int]$profile.timed_samples
     }
     provenance = $provenance
+    supplemental_evidence = $supplementalAudit
     source_process_result_sha256 = $sourceHashes
     validity = [ordered]@{
         valid = $validityErrors.Count -eq 0

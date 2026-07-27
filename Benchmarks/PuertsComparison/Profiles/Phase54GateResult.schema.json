@@ -6,6 +6,7 @@
     "schema_version",
     "profile",
     "provenance",
+    "supplemental_evidence",
     "source_process_result_sha256",
     "validity",
     "statistics_method",
@@ -23,6 +24,18 @@
     "validity": {
       "type": "object",
       "required": ["valid", "errors"]
+    },
+    "supplemental_evidence": {
+      "type": "object",
+      "required": [
+        "provided",
+        "supplemental_candidate_match",
+        "process_avidscript_commit",
+        "process_avidscript_tree_sha",
+        "supplemental_avidscript_commit",
+        "supplemental_avidscript_tree_sha",
+        "reason"
+      ]
     },
     "gates": {
       "type": "object",
@@ -64,7 +77,17 @@
       "properties": {
         "status": { "enum": ["pass", "fail", "not_measured"] },
         "pass": { "type": "boolean" },
-        "value": { "type": ["number", "null"] }
+        "value": { "type": ["number", "null"] },
+        "audit": {
+          "type": ["object", "null"],
+          "properties": {
+            "p50_ratio": { "type": "number" },
+            "p95_ratio": { "type": "number" },
+            "p50_pass": { "type": "boolean" },
+            "p95_pass": { "type": "boolean" },
+            "two_mad_separated": { "type": "boolean" }
+          }
+        }
       }
     }
   }

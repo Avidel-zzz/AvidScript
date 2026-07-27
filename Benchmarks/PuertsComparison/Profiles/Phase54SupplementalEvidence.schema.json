@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P54.6 supplemental benchmark evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provenance", "gate_inputs"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["avidscript_commit", "avidscript_tree_sha"],
+      "properties": {
+        "avidscript_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "avidscript_tree_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "gate_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wasmtime_v8_geo_ratio",
+        "kernel_win_rate",
+        "semantic_vs_puerts_reflection",
+        "s1_scalar_ns",
+        "s1_vs_puerts_static",
+        "s1_property_ns",
+        "callback_ns",
+        "callback_vs_puerts",
+        "vector_vs_p54_5",
+        "typed_empty_explained_ratio"
+      ],
+      "properties": {
+        "wasmtime_v8_geo_ratio": { "type": "number", "minimum": 0 },
+        "kernel_win_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "semantic_vs_puerts_reflection": { "type": "number", "minimum": 0 },
+        "s1_scalar_ns": { "type": "number", "minimum": 0 },
+        "s1_vs_puerts_static": { "type": "number", "minimum": 0 },
+        "s1_property_ns": { "type": "number", "minimum": 0 },
+        "callback_ns": { "type": "number", "minimum": 0 },
+        "callback_vs_puerts": { "type": "number", "minimum": 0 },
+        "vector_vs_p54_5": { "type": "number", "minimum": 0 },
+        "typed_empty_explained_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    }
+  }
+}
