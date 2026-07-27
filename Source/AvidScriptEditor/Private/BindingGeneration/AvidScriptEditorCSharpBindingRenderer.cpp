@@ -521,7 +521,7 @@ void AppendPropertySetterInterop(
 	if (Setter.DispatchMode == TEXT("generated_native_s1")
 		&& Setter.GeneratedShape == TEXT("property_i32_get_set")
 		&& Setter.Parameters.Num() == 1
-		&& Setter.Parameters[0].CanonicalType == TEXT("int32"))
+		&& Setter.Parameters[0].CanonicalType == TEXT("scalar:i32"))
 	{
 		OutMethod.MethodLines.Add(FString::Printf(
 			TEXT("        [AvidScriptDataLane(\"buffered_write\", %d)]"),
