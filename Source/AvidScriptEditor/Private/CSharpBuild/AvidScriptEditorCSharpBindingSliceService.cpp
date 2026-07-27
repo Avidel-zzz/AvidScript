@@ -235,6 +235,14 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 	{
 		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
 	});
+	SliceModel.GeneratedSourcePackageHash =
+		SliceModel.Bindings.ContainsByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.DispatchMode == TEXT("generated_native_s1");
+			})
+		? AuthorizationModel.PackageHash
+		: FString();
 	SliceModel.SelectionHash = FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(SliceModel);
 	SliceModel.PackageHash = FAvidScriptBindingDescriptorIdentity::MakePackageHash(SliceModel);
 	return true;
@@ -626,33 +634,69 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 	}
 	FAvidScriptBindingSelectionProfile SliceProfile;
 	SliceProfile.PackageName = AuthorizationModel.PackageName;
-	SliceProfile.ExplicitProperties = MoveTemp(PropertySelections);
-	TMap<FString, FAvidScriptReflectedClassSelection> NativeDirectClassRules;
+	TMap<FString, FAvidScriptReflectedClassSelection> SpecializedClassRules;
 	for (const FAvidScriptBindingFunctionModel& Binding : AuthorizationModel.Bindings)
 	{
-		if (RequestedReflectedStableIds.Contains(Binding.StableId)
-			&& Binding.BindingKind == TEXT("function")
-			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+		if (!RequestedReflectedStableIds.Contains(Binding.StableId))
+		{
+			continue;
+		}
+
+		if (Binding.BindingKind == TEXT("function")
+			&& (Binding.DispatchMode == TEXT("qualified_native_direct")
+				|| Binding.DispatchMode == TEXT("generated_native_s1")))
 		{
 			FAvidScriptReflectedClassSelection& Rule =
-				NativeDirectClassRules.FindOrAdd(Binding.OwnerClass);
+				SpecializedClassRules.FindOrAdd(Binding.OwnerClass);
 			Rule.OwnerClassPath = Binding.OwnerClass;
-			Rule.NativeDirectFunctions.Add(FName(*Binding.UeMember));
+			if (Binding.DispatchMode == TEXT("qualified_native_direct"))
+			{
+				Rule.NativeDirectFunctions.AddUnique(FName(*Binding.UeMember));
+			}
+			else
+			{
+				Rule.GeneratedNativeFunctions.AddUnique(FName(*Binding.UeMember));
+			}
+		}
+		else if ((Binding.BindingKind == TEXT("property_get")
+				|| Binding.BindingKind == TEXT("property_set"))
+			&& Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			FAvidScriptReflectedClassSelection& Rule =
+				SpecializedClassRules.FindOrAdd(Binding.OwnerClass);
+			Rule.OwnerClassPath = Binding.OwnerClass;
+			Rule.GeneratedNativeProperties.AddUnique(FName(*Binding.UeMember));
+		}
+	}
+	for (FAvidScriptReflectedPropertySelection& Selection : PropertySelections)
+	{
+		if (FAvidScriptReflectedClassSelection* Rule =
+			SpecializedClassRules.Find(Selection.OwnerClassPath))
+		{
+			Rule->IncludeProperties.AddUnique(Selection.PropertyName);
+			if (Selection.bWritable)
+			{
+				Rule->WritableProperties.AddUnique(Selection.PropertyName);
+			}
+		}
+		else
+		{
+			SliceProfile.ExplicitProperties.Add(MoveTemp(Selection));
 		}
 	}
 	for (FAvidScriptReflectedFunctionSelection& Selection : FunctionSelections)
 	{
 		if (FAvidScriptReflectedClassSelection* Rule =
-			NativeDirectClassRules.Find(Selection.OwnerClassPath))
+			SpecializedClassRules.Find(Selection.OwnerClassPath))
 		{
-			Rule->IncludeFunctions.Add(Selection.FunctionName);
+			Rule->IncludeFunctions.AddUnique(Selection.FunctionName);
 		}
 		else
 		{
 			SliceProfile.ExplicitFunctions.Add(MoveTemp(Selection));
 		}
 	}
-	NativeDirectClassRules.GenerateValueArray(SliceProfile.Classes);
+	SpecializedClassRules.GenerateValueArray(SliceProfile.Classes);
 
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
 	if (!FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(

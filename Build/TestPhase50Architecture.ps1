@@ -671,14 +671,14 @@ function Test-RendererFrozenRegions {
     )
 
     $ExpectedHashes = [ordered]@{
-        'RenderMethod' = '8de2161bc979d478083b62f8ce12c8eddcb7199cc5e48a191c83c3afb0f38723'
+		'RenderMethod' = 'bc40fe2e6cf177b9cd2e6881f3059172b716f7cda7b5ccd82b6adb494ef2e320'
         'RenderPropertyGetter' = '4f607fe468130480bf2dfdd541d785134176fce3baa5e2dd31b07f7a659db215'
         'AppendVector' = 'a052bea5eda0769613a907e479549d6c9032b6ae9a9b90a110714105d07a4e3d'
         'AppendInputEvent' = '27014e57fb190bcd48d5028c4b1722e5f6ec11837962c6bae8cb52658a580f39'
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-        'EmitReferenceSource' = '4bb72478fbe00e5acedef2a302af45da8c5b421aed28820639745135a7a75ee5'
+		'EmitReferenceSource' = '2562dda424a9a4bef0ddb618eb0db314e200453af59389c85f12989149de048f'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-        'BindingRenderer' = 'bbc08df36fbd892f7b394af4efef15af349df9a80be3acdb7b4da01c1e6e1d8b'
+		'BindingRenderer' = 'a652ba3607b82a008216e4bbcb38f31ab33ba80b154ad297fddf9709212596db'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -1248,6 +1248,7 @@ function Test-RendererCandidates {
             'TSubclassOfAActor',
             'ProjectClasses',
             'FAvidScriptObjectHandle',
+            'FAvidScriptVectorValueBuffer',
             'UE',
             'AvidScriptRuntimeNative',
             'AvidScriptNative'
@@ -1300,6 +1301,7 @@ function Test-RendererCandidates {
             'public|static|class|ProjectClasses',
             'public|-|enum|<dynamic>',
             'internal|readonly|struct|FAvidScriptObjectHandle',
+            'internal|-|struct|FAvidScriptVectorValueBuffer',
             'public|static|class|<dynamic>',
             'public|static|class|UE',
             'internal|static|class|AvidScriptRuntimeNative',

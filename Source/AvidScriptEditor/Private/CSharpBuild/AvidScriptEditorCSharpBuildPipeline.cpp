@@ -1,11 +1,15 @@
 #include "CSharpBuild/AvidScriptEditorCSharpBuildPipeline.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptFrontendReport.h"
+#include "AvidScriptGeneratedBindingRegistry.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBindingSliceService.h"
 
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
 DEFINE_LOG_CATEGORY_STATIC(
@@ -289,6 +293,82 @@ bool ValidateAvidScriptCSharpBuildPackagePath(
 		OutResult);
 	return false;
 }
+
+bool EnsureAvidScriptGeneratedBindingModule(
+	const FAvidScriptCSharpBindingEmitResult& BindingPackage,
+	FAvidScriptEditorCSharpBuildResult& OutResult)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingPackageModel DescriptorModel;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!FFileHelper::LoadFileToString(
+			DescriptorJson,
+			*BindingPackage.DescriptorPath)
+		|| !FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			DescriptorModel,
+			ParseCategory,
+			ParseSource))
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			ParseCategory.IsEmpty()
+				? FString(TEXT("generated_binding_descriptor_invalid"))
+				: ParseCategory,
+			ParseSource.IsEmpty()
+				? BindingPackage.DescriptorPath
+				: ParseSource,
+			TEXT("republish the generated binding descriptor before compiling C#"),
+			OutResult);
+		return false;
+	}
+
+	if (!DescriptorModel.Bindings.ContainsByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.DispatchMode == TEXT("generated_native_s1");
+			}))
+	{
+		return true;
+	}
+
+	const FString ProjectFile = FPaths::GetProjectFilePath();
+	FAvidScriptEditorGeneratedBindingResult GeneratedResult;
+	if (ProjectFile.IsEmpty()
+		|| !FAvidScriptEditorGeneratedBindingService::GenerateProjectModule(
+			ProjectFile,
+			DescriptorJson,
+			GeneratedResult))
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			GeneratedResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("generated_binding_module_emit_failed"))
+				: GeneratedResult.ErrorCategory,
+			GeneratedResult.ErrorMessage.IsEmpty()
+				? FString::Printf(
+					TEXT("Generated binding module could not be emitted for project: %s"),
+					*ProjectFile)
+				: GeneratedResult.ErrorMessage,
+			TEXT("repair the generated binding source error and retry the C# build"),
+			OutResult);
+		return false;
+	}
+
+	if (!FAvidScriptGeneratedBindingRegistry::Get().IsPackageActive(
+			DescriptorModel.PackageHash))
+	{
+		SetAvidScriptCSharpBuildPipelineFailure(
+			TEXT("generated_binding_build_required"),
+			FString::Printf(
+				TEXT("Generated binding source is ready at %s for package %s, but this Editor process has not loaded that module."),
+				*GeneratedResult.OutputDirectory,
+				*DescriptorModel.PackageHash),
+			TEXT("build the Editor target once, restart the Editor or commandlet, and retry the C# profile build"),
+			OutResult);
+		return false;
+	}
+	return true;
+}
 } // namespace
 
 static bool PrepareAvidScriptCSharpBuildPipeline(
@@ -487,6 +567,12 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 		OutResult.BindingSelectionHash = OutPlan.BindingSelectionHash;
 		OutResult.bReusedAuthorizationBindingPackage =
 			OutPlan.bReusedAuthorizationBindingPackage;
+		if (!EnsureAvidScriptGeneratedBindingModule(
+				BindingEmitResult,
+				OutResult))
+		{
+			return false;
+		}
 	}
 
 	if (!ValidateAvidScriptCSharpBuildPackagePath(

@@ -180,7 +180,11 @@ bool AttachAvidScriptGeneratedPlan(
 	}
 	FAvidScriptGeneratedBindingRegistry& Registry =
 		FAvidScriptGeneratedBindingRegistry::Get();
-	if (!Registry.IsPackageActive(Model.PackageHash))
+	const FString& GeneratedSourcePackageHash =
+		Model.GeneratedSourcePackageHash.IsEmpty()
+		? Model.PackageHash
+		: Model.GeneratedSourcePackageHash;
+	if (!Registry.IsPackageActive(GeneratedSourcePackageHash))
 	{
 		SetAvidScriptBindingLoadFailure(
 			OutResult,
@@ -192,7 +196,7 @@ bool AttachAvidScriptGeneratedPlan(
 
 	FString RegistryError;
 	if (!Registry.Acquire(
-			Model.PackageHash,
+			GeneratedSourcePackageHash,
 			Binding.StableId,
 			Binding.CanonicalIdentity,
 			GeneratedShape,
@@ -518,6 +522,23 @@ int32 GetAvidScriptRuntimeArgumentWidth(
 
 FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionModel& Binding)
 {
+	if (Binding.DispatchMode == TEXT("generated_native_s1"))
+	{
+		if (Binding.GeneratedShape == TEXT("i32_pair_to_i32"))
+		{
+			return TEXT("(iiii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("property_i32_get_set")
+			|| Binding.GeneratedShape == TEXT("vector_value"))
+		{
+			return TEXT("(iii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("stable_object_roundtrip"))
+		{
+			return TEXT("(iiiii)i");
+		}
+	}
+
 	FString Parameters;
 	if (!Binding.bStatic)
 	{

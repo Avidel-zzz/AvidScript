@@ -229,11 +229,17 @@ internal static class SemanticCallableProjector
             return null;
         }
 
+        bool directBufferedImport = !unit.IsPrimary
+            && !hasBody
+            && import is not null
+            && string.Equals(import.Module, "avidscript", StringComparison.Ordinal);
+        bool generatedPropertyWrapper = !unit.IsPrimary
+            && hasBody
+            && import is null
+            && method.MethodKind == MethodKind.PropertySet;
         if (optimizationClass == "buffered_write"
-            && (unit.IsPrimary
-                || hasBody
-                || import is null
-                || !string.Equals(import.Module, "avidscript", StringComparison.Ordinal)))
+            && !directBufferedImport
+            && !generatedPropertyWrapper)
         {
             return null;
         }

@@ -2429,13 +2429,40 @@ UObject* FAvidScriptWasmRuntimeInstance::ResolveStableBorrow(
 		Handle,
 		ResolveResult,
 		false);
+	const bool bOwnerCapability = Handle == HostContext.OwnerHandle;
 	if (Object == nullptr
 		|| (ExpectedClass != nullptr && !Object->IsA(ExpectedClass))
 		|| (HostContext.World.Get() != nullptr
 			&& Object->GetWorld() != HostContext.World.Get())
-		|| (HostContext.ObjectOwnership != nullptr
+		|| (!bOwnerCapability
+			&& HostContext.ObjectOwnership != nullptr
 			&& !HostContext.ObjectOwnership->Owns(Handle, Object)))
 	{
+		UE_LOG(
+			LogAvidScriptWasmRuntime,
+			Warning,
+			TEXT("Stable borrow rejected | handle=%u:%u | registry=%s | object=%s | expected=%s | object_world=%s | host_world=%s | owned=%d"),
+			Handle.Slot,
+			Handle.Generation,
+			ResolveResult.ErrorCategory.IsEmpty()
+				? TEXT("resolved")
+				: *ResolveResult.ErrorCategory,
+			Object == nullptr ? TEXT("<none>") : *Object->GetPathName(),
+			ExpectedClass == nullptr
+				? TEXT("<none>")
+				: *ExpectedClass->GetPathName(),
+			Object == nullptr || Object->GetWorld() == nullptr
+				? TEXT("<none>")
+				: *Object->GetWorld()->GetPathName(),
+			HostContext.World.Get() == nullptr
+				? TEXT("<none>")
+				: *HostContext.World->GetPathName(),
+			Object != nullptr
+				&& (bOwnerCapability
+					|| HostContext.ObjectOwnership == nullptr
+					|| HostContext.ObjectOwnership->Owns(Handle, Object))
+				? 1
+				: 0);
 		return nullptr;
 	}
 	return Object;
@@ -2445,6 +2472,7 @@ EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::RecordGeneratedStatus(
 	const EAvidScriptVmTypedHostStatus Status)
 {
+	++HostImportCallCount;
 	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 		BindingInvocationContext.InvocationInstrumentation;
 	if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
@@ -2753,6 +2781,17 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 	int32& OutValue)
 {
 	OutValue = 0;
+	const auto Reject = [this, BindingOrdinal](const TCHAR* Reason)
+	{
+		UE_LOG(
+			LogAvidScriptWasmRuntime,
+			Warning,
+			TEXT("Generated stable object roundtrip rejected | ordinal=%u | reason=%s"),
+			BindingOrdinal,
+			Reason);
+		return RecordGeneratedStatus(
+			EAvidScriptVmTypedHostStatus::Rejected);
+	};
 	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
 	UClass* ExpectedClass = nullptr;
 	bool bPropertyWrite = false;
@@ -2764,19 +2803,29 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 			ExpectedClass,
 			bPropertyWrite,
 			bRequiresWriteAccess)
-		|| Entry->Shape
+		)
+	{
+		return Reject(TEXT("binding_plan"));
+	}
+	if (Entry->Shape
 			!= EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
 		|| Entry->ReceiverMode
 			!= EAvidScriptGeneratedReceiverMode::StableBorrow
-		|| Entry->ObjectRoundtripCall == nullptr
-		|| (bRequiresWriteAccess
+		|| Entry->ObjectRoundtripCall == nullptr)
+	{
+		return Reject(TEXT("generated_entry"));
+	}
+	if ((bRequiresWriteAccess
 			&& HostContext.ActorWritePolicy
-				!= EAvidScriptActorWritePolicy::AllowWrites)
-		|| GuestAddress < 0
+				!= EAvidScriptActorWritePolicy::AllowWrites))
+	{
+		return Reject(TEXT("write_policy"));
+	}
+	if (GuestAddress < 0
 		|| VmBackend == nullptr
 		|| VmBackend->GetGuestMemory() == nullptr)
 	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		return Reject(TEXT("guest_memory"));
 	}
 
 	IAvidScriptVmGuestMemory* GuestMemory = VmBackend->GetGuestMemory();
@@ -2790,8 +2839,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 				ValidationBytes,
 				Error))
 		{
-			return RecordGeneratedStatus(
-				EAvidScriptVmTypedHostStatus::Rejected);
+			return Reject(TEXT("guest_input_buffer"));
 		}
 	}
 
@@ -2807,11 +2855,27 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 			ObjectGeneration,
 			nullptr);
 	}
-	if (Receiver == nullptr
-		|| ((ObjectSlot != 0 || ObjectGeneration != 0)
-			&& InputObject == nullptr))
+	if (Receiver == nullptr)
 	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		UE_LOG(
+			LogAvidScriptWasmRuntime,
+			Warning,
+			TEXT("Generated receiver borrow context | self=%d:%d | owner=%u:%u | expected=%s | callbacks=%d | world_stale=%d"),
+			SelfSlot,
+			SelfGeneration,
+			HostContext.OwnerHandle.Slot,
+			HostContext.OwnerHandle.Generation,
+			ExpectedClass == nullptr
+				? TEXT("<none>")
+				: *ExpectedClass->GetPathName(),
+			CallbackEpochStack.Num(),
+			HostContext.World.IsStale() ? 1 : 0);
+		return Reject(TEXT("receiver_stable_borrow"));
+	}
+	if ((ObjectSlot != 0 || ObjectGeneration != 0)
+		&& InputObject == nullptr)
+	{
+		return Reject(TEXT("input_stable_borrow"));
 	}
 	const FAvidScriptObjectHandle ReceiverHandle{
 		static_cast<uint32>(SelfSlot),
@@ -2823,7 +2887,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 			*Receiver,
 			BindingInvocationContext))
 	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		return Reject(TEXT("host_effect"));
 	}
 
 	UObject* OutputObject = nullptr;
@@ -2831,6 +2895,12 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 		Entry->ObjectRoundtripCall(*Receiver, InputObject, OutputObject);
 	if (Status != EAvidScriptVmTypedHostStatus::Succeeded)
 	{
+		UE_LOG(
+			LogAvidScriptWasmRuntime,
+			Warning,
+			TEXT("Generated stable object roundtrip call failed | ordinal=%u | status=%d"),
+			BindingOrdinal,
+			static_cast<int32>(Status));
 		return RecordGeneratedStatus(Status);
 	}
 
@@ -2841,8 +2911,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 			|| (HostContext.World.Get() != nullptr
 				&& OutputObject->GetWorld() != HostContext.World.Get()))
 		{
-			return RecordGeneratedStatus(
-				EAvidScriptVmTypedHostStatus::Rejected);
+			return Reject(TEXT("output_world"));
 		}
 		FAvidScriptObjectHandleResult HandleResult;
 		if (HostContext.ObjectOwnership != nullptr)
@@ -2852,8 +2921,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 					*OutputObject,
 					HandleResult))
 			{
-				return RecordGeneratedStatus(
-					EAvidScriptVmTypedHostStatus::Rejected);
+				return Reject(TEXT("output_borrow"));
 			}
 			OutputHandle = HandleResult.Handle;
 		}
@@ -2866,7 +2934,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 		}
 		if (!OutputHandle.IsValid())
 		{
-			return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+			return Reject(TEXT("output_handle"));
 		}
 	}
 
@@ -2896,7 +2964,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 					false);
 			}
 		}
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		return Reject(TEXT("guest_output_buffer"));
 	}
 	StoreAvidScriptLittleEndianU32(OutputBytes, 0, OutputHandle.Slot);
 	StoreAvidScriptLittleEndianU32(
@@ -2931,14 +2999,15 @@ FAvidScriptWasmRuntimeInstance::DispatchCommandBufferSubmit(
 			Bytes,
 			Error))
 	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		++HostImportCallCount;
+		++DataBridgeMetrics.RejectedBuffers;
+		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
 
 	OutValue = HandleDataLaneSubmitImport(Bytes);
-	return RecordGeneratedStatus(
-		OutValue > 0
-			? EAvidScriptVmTypedHostStatus::Succeeded
-			: EAvidScriptVmTypedHostStatus::Rejected);
+	return OutValue > 0
+		? EAvidScriptVmTypedHostStatus::Succeeded
+		: EAvidScriptVmTypedHostStatus::Rejected;
 }
 
 bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(

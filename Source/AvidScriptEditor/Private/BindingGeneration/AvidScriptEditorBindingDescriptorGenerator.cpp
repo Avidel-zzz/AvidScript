@@ -147,7 +147,8 @@ bool ResolveGeneratedFunctionShape(
 	}
 	for (const FAvidScriptProjectedBindingValue& Parameter : Projection.Parameters)
 	{
-		if (Parameter.Direction != TEXT("value"))
+		if (Parameter.Direction != TEXT("value")
+			&& Parameter.Direction != TEXT("const_ref"))
 		{
 			OutCategory = TEXT("generated_native_reference_direction_unsupported");
 			return false;
@@ -183,6 +184,23 @@ bool ResolveGeneratedFunctionShape(
 
 	OutCategory = TEXT("generated_native_shape_unsupported");
 	return false;
+}
+
+FString MakeGeneratedFunctionAbiSignature(const FString& Shape)
+{
+	if (Shape == TEXT("i32_pair_to_i32"))
+	{
+		return TEXT("(iiii)i");
+	}
+	if (Shape == TEXT("vector_value"))
+	{
+		return TEXT("(iii)i");
+	}
+	if (Shape == TEXT("stable_object_roundtrip"))
+	{
+		return TEXT("(iiiii)i");
+	}
+	return FString();
 }
 
 bool ResolveGeneratedPropertyShape(
@@ -478,6 +496,9 @@ bool GenerateBindingDescriptor(
 					TEXT("Select a native instance callable supported by the generated S1 shape contract."));
 				return false;
 			}
+			Binding.Projection.AbiSignature =
+				MakeGeneratedFunctionAbiSignature(Binding.GeneratedShape);
+			check(!Binding.Projection.AbiSignature.IsEmpty());
 			const FString OwnerModule = OwnerClass->GetOutermost()->GetName()
 				.Replace(TEXT("/Script/"), TEXT(""));
 			const FString OwnerHeader =

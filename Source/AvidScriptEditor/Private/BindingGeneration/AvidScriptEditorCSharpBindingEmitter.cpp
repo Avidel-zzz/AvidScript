@@ -77,7 +77,7 @@ bool ValidateCanonicalDescriptor(
 	FunctionSelections.Reserve(Package.Bindings.Num());
 	PropertySelections.Reserve(Package.Bindings.Num());
 	TSet<FString> WritablePropertyKeys;
-	TMap<FString, FAvidScriptReflectedClassSelection> NativeDirectClassRules;
+	TMap<FString, FAvidScriptReflectedClassSelection> SpecializedClassRules;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		if (Binding.BindingKind == TEXT("property_set"))
@@ -85,13 +85,30 @@ bool ValidateCanonicalDescriptor(
 			WritablePropertyKeys.Add(
 				Binding.OwnerClass + TEXT("\n") + Binding.UeMember);
 		}
-		else if (Binding.BindingKind == TEXT("function")
-			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+		if (Binding.BindingKind == TEXT("function")
+			&& (Binding.DispatchMode == TEXT("qualified_native_direct")
+				|| Binding.DispatchMode == TEXT("generated_native_s1")))
 		{
 			FAvidScriptReflectedClassSelection& Rule =
-				NativeDirectClassRules.FindOrAdd(Binding.OwnerClass);
+				SpecializedClassRules.FindOrAdd(Binding.OwnerClass);
 			Rule.OwnerClassPath = Binding.OwnerClass;
-			Rule.NativeDirectFunctions.Add(FName(*Binding.UeMember));
+			if (Binding.DispatchMode == TEXT("qualified_native_direct"))
+			{
+				Rule.NativeDirectFunctions.AddUnique(FName(*Binding.UeMember));
+			}
+			else
+			{
+				Rule.GeneratedNativeFunctions.AddUnique(FName(*Binding.UeMember));
+			}
+		}
+		else if ((Binding.BindingKind == TEXT("property_get")
+				|| Binding.BindingKind == TEXT("property_set"))
+			&& Binding.DispatchMode == TEXT("generated_native_s1"))
+		{
+			FAvidScriptReflectedClassSelection& Rule =
+				SpecializedClassRules.FindOrAdd(Binding.OwnerClass);
+			Rule.OwnerClassPath = Binding.OwnerClass;
+			Rule.GeneratedNativeProperties.AddUnique(FName(*Binding.UeMember));
 		}
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
@@ -100,18 +117,31 @@ bool ValidateCanonicalDescriptor(
 		{
 			const FString PropertyKey = Binding.OwnerClass
 				+ TEXT("\n") + Binding.UeMember;
-			PropertySelections.Add({
-				Binding.OwnerClass,
-				FName(*Binding.UeMember),
-				WritablePropertyKeys.Remove(PropertyKey) > 0
-			});
+			const bool bWritable = WritablePropertyKeys.Remove(PropertyKey) > 0;
+			if (FAvidScriptReflectedClassSelection* Rule =
+				SpecializedClassRules.Find(Binding.OwnerClass))
+			{
+				Rule->IncludeProperties.AddUnique(FName(*Binding.UeMember));
+				if (bWritable)
+				{
+					Rule->WritableProperties.AddUnique(FName(*Binding.UeMember));
+				}
+			}
+			else
+			{
+				PropertySelections.Add({
+					Binding.OwnerClass,
+					FName(*Binding.UeMember),
+					bWritable
+				});
+			}
 		}
 		else if (Binding.BindingKind == TEXT("function"))
 		{
 			if (FAvidScriptReflectedClassSelection* Rule =
-				NativeDirectClassRules.Find(Binding.OwnerClass))
+				SpecializedClassRules.Find(Binding.OwnerClass))
 			{
-				Rule->IncludeFunctions.Add(FName(*Binding.UeMember));
+				Rule->IncludeFunctions.AddUnique(FName(*Binding.UeMember));
 			}
 			else
 			{
@@ -188,7 +218,7 @@ bool ValidateCanonicalDescriptor(
 	Profile.PackageName = Package.PackageName;
 	Profile.ExplicitFunctions = MoveTemp(FunctionSelections);
 	Profile.ExplicitProperties = MoveTemp(PropertySelections);
-	NativeDirectClassRules.GenerateValueArray(Profile.Classes);
+	SpecializedClassRules.GenerateValueArray(Profile.Classes);
 	if (!Package.SelfTypeId.IsEmpty())
 	{
 		const FAvidScriptBindingTypeModel* SelfType = Package.Types.FindByPredicate(

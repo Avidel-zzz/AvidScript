@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
@@ -362,6 +363,10 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
 			TEXT("Generated shape is explicit"),
 			Binding.GeneratedShape,
 			FString(TEXT("i32_pair_to_i32")));
+		TestEqual(
+			TEXT("Generated pair uses the typed direct-return ABI"),
+			Binding.HostImport.Signature,
+			FString(TEXT("(iiii)i")));
 		TestTrue(
 			TEXT("Generated import is deterministic and dedicated"),
 			Binding.HostImport.Name.StartsWith(TEXT("avid_s1_"))
@@ -376,6 +381,89 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
 	{
 		AddError(TEXT("Expected exactly one generated S1 binding."));
 	}
+	FString PairReferenceSource;
+	FString PairManifestJson;
+	FAvidScriptCSharpBindingEmitResult PairEmitResult;
+	TestTrue(
+		TEXT("Generated pair survives C# facade rendering"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			PairReferenceSource,
+			PairManifestJson,
+			PairEmitResult));
+	TestTrue(
+		TEXT("Generated pair facade returns the typed host result directly"),
+		PairReferenceSource.Contains(
+			TEXT("return AvidScriptNative.Invoke0000(this.Slot, this.Generation"))
+			&& !PairReferenceSource.Contains(TEXT("out __returnValue")));
+
+	FAvidScriptBindingSelectionProfile VectorProfile;
+	VectorProfile.PackageName = TEXT("avidscript.generated.vector.descriptor");
+	FAvidScriptReflectedClassSelection VectorRule;
+	VectorRule.OwnerClassPath = OwnerPath;
+	VectorRule.IncludeFunctions.Add(TEXT("GeneratedVectorValue"));
+	VectorRule.GeneratedNativeFunctions.Add(TEXT("GeneratedVectorValue"));
+	VectorProfile.Classes.Add(MoveTemp(VectorRule));
+
+	FString VectorDescriptorJson;
+	FAvidScriptBindingSelectionResolveResult VectorSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult VectorGenerateResult;
+	TestTrue(
+		TEXT("Eligible const-ref FVector generates an S1 descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			VectorProfile,
+			VectorDescriptorJson,
+			VectorSelectionResult,
+			VectorGenerateResult));
+	FAvidScriptBindingPackageModel VectorPackage;
+	TestTrue(
+		TEXT("Generated const-ref vector descriptor satisfies parser contract"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			VectorDescriptorJson,
+			VectorPackage,
+			ErrorCategory,
+			ErrorSource));
+	if (VectorPackage.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingFunctionModel& VectorBinding =
+			VectorPackage.Bindings[0];
+		TestEqual(
+			TEXT("Const-ref vector uses generated S1"),
+			VectorBinding.DispatchMode,
+			FString(TEXT("generated_native_s1")));
+		TestEqual(
+			TEXT("Const-ref vector shape is explicit"),
+			VectorBinding.GeneratedShape,
+			FString(TEXT("vector_value")));
+		TestEqual(
+			TEXT("Const-ref input direction remains explicit"),
+			VectorBinding.Parameters[0].Direction,
+			FString(TEXT("const_ref")));
+		TestEqual(
+			TEXT("Generated vector uses one in-place guest buffer"),
+			VectorBinding.HostImport.Signature,
+			FString(TEXT("(iii)i")));
+	}
+	else
+	{
+		AddError(TEXT("Expected exactly one generated const-ref vector binding."));
+	}
+	FString VectorReferenceSource;
+	FString VectorManifestJson;
+	FAvidScriptCSharpBindingEmitResult VectorEmitResult;
+	TestTrue(
+		TEXT("Generated const-ref vector survives canonical reflection regeneration"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			VectorDescriptorJson,
+			VectorReferenceSource,
+			VectorManifestJson,
+			VectorEmitResult));
+	TestTrue(
+		TEXT("Generated vector facade uses a single in-place buffer"),
+		VectorReferenceSource.Contains(
+			TEXT("ref FAvidScriptVectorValueBuffer value"))
+			&& VectorReferenceSource.Contains(
+				TEXT("return __vectorValue.Result;")));
 	return true;
 }
 

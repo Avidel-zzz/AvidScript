@@ -103,6 +103,7 @@ struct FAvidScriptBindingPackageModel
 	FString PackageName;
 	FString PackageHash;
 	FString SelectionHash;
+	FString GeneratedSourcePackageHash;
 	FString SelfTypeId;
 	bool bHasActiveObjectTypeOrdinals = false;
 	TArray<int32> ActiveObjectTypeOrdinals;

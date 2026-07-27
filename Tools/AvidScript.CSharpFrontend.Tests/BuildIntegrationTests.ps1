@@ -1,6 +1,7 @@
 param(
     [string]$DotNetPath = (Join-Path $env:USERPROFILE ".dotnet\dotnet.exe"),
-    [string]$BindingPackagePath = ""
+    [string]$BindingPackagePath = "",
+    [string]$GeneratedBindingRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,10 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $BuildScript = Join-Path $PluginRoot "Build\BuildCSharpActorLifecycle.ps1"
 $RunRoot = Join-Path $PluginRoot "Saved\AvidScriptFrontendDotNet\BuildIntegration"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+if ([string]::IsNullOrWhiteSpace($GeneratedBindingRoot)) {
+    $GeneratedBindingRoot = Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings"
+}
+$GeneratedBindingRoot = [System.IO.Path]::GetFullPath($GeneratedBindingRoot)
 
 function Assert-Condition {
     param([bool]$Condition, [string]$Message)
@@ -92,9 +97,8 @@ function Find-CanonicalBindingPackage {
         [string[]]$RequiredImportNames = @()
     )
 
-    $GeneratedRoot = Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings"
     $Candidates = foreach ($Candidate in Get-ChildItem `
-            -LiteralPath $GeneratedRoot `
+            -LiteralPath $GeneratedBindingRoot `
             -Filter "package.json" `
             -File `
             -Recurse `
@@ -295,7 +299,9 @@ param(
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,
     [Parameter(Mandatory = $true)][string]$WasmPath,
     [Parameter(Mandatory = $true)][string]$InspectionPath,
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DataLaneFusion = "enabled"
 )
 
 $ErrorActionPreference = "Stop"
@@ -368,7 +374,7 @@ New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
     $RequiredAuthorizationFunctions = @("GetActorScale3D", "SetActorScale3D")
     $BindingPackageCandidates = foreach ($Candidate in Get-ChildItem `
-            -LiteralPath (Join-Path $ProjectRoot "Saved\AvidScriptGeneratedBindings") `
+            -LiteralPath $GeneratedBindingRoot `
             -Filter "package.json" `
             -File `
             -Recurse `
@@ -1005,7 +1011,7 @@ $SemanticSha256 = Get-Sha256Hex $NormalSemanticPath
 $GuestIrSha256 = Get-Sha256Hex $NormalGuestIrPath
 $DebugMapSha256 = Get-Sha256Hex $NormalDebugMapPath
 $WasmSha256 = Get-Sha256Hex $NormalWasmPath
-Assert-Condition ($GuestIrJson.schema_version -eq 1 -and $GuestIrJson.ir_version -eq "1.0" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
+Assert-Condition ($GuestIrJson.schema_version -eq 2 -and $GuestIrJson.ir_version -eq "1.1" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
 Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "Guest IR semantic provenance hash differs"
 Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
@@ -1017,7 +1023,7 @@ Assert-Condition (@($DebugMapJson.functions).Count -gt 0) "C# debug map does not
 Assert-Condition (@($GuestIrJson.functions | Where-Object { $_.id -ceq 'function:synthetic:gameplay_event' }).Count -eq 1) "Guest IR does not contain exactly one generated gameplay router"
 Assert-Condition (@($DebugMapJson.functions | Where-Object { $_.guest_function_id -ceq 'function:synthetic:gameplay_event' }).Count -eq 0) "generated gameplay router published a fake C# source location"
 Assert-Condition ([int]$DebugMapJson.defined_function_count -eq @($GuestIrJson.functions).Count) "generated gameplay router collapsed the debug-map function index space"
-Assert-Condition ($NormalJson.guest_ir.schema_version -eq 1 -and $NormalJson.guest_ir.version -eq "1.0") "report Guest IR contract is invalid"
+Assert-Condition ($NormalJson.guest_ir.schema_version -eq 2 -and $NormalJson.guest_ir.version -eq "1.1") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"
 Assert-Condition ($NormalJson.guest_ir.sha256 -eq $GuestIrSha256) "report Guest IR artifact hash differs"
 Assert-Condition ($NormalJson.debug_map.schema_version -eq 1 -and $NormalJson.debug_map.version -eq "1.0") "report C# debug map contract is invalid"
@@ -1042,7 +1048,7 @@ Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.fronten
 Assert-Condition (-not [string]::IsNullOrWhiteSpace($ManifestJson.source.semantic_file)) "manifest does not reference the semantic artifact"
 Assert-Condition ($ManifestJson.source.semantic_sha256 -eq $SemanticSha256) "manifest semantic hash differs"
 Assert-Condition ($ManifestJson.guest_ir.file -eq $NormalJson.artifacts.guest_ir_file) "manifest Guest IR path differs"
-Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 1 -and $ManifestJson.guest_ir.version -eq "1.0") "manifest Guest IR contract is invalid"
+Assert-Condition ($ManifestJson.guest_ir.schema_version -eq 2 -and $ManifestJson.guest_ir.version -eq "1.1") "manifest Guest IR contract is invalid"
 Assert-Condition ($ManifestJson.guest_ir.module_id -eq $GuestIrJson.module_id) "manifest Guest IR module identity differs"
 Assert-Condition ($ManifestJson.guest_ir.sha256 -eq $GuestIrSha256) "manifest Guest IR hash differs"
 Assert-Condition ($ManifestJson.debug_map.file -eq $NormalJson.artifacts.debug_map_file) "manifest C# debug map path differs"

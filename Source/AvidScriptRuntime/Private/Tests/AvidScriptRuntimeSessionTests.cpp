@@ -1426,6 +1426,10 @@ bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
 		TEXT("Generated reject counter is exact"),
 		Instrumentation.GeneratedNativeS1RejectCount,
 		uint64(1));
+	TestEqual(
+		TEXT("Every generated import contributes to the common host call count"),
+		Runtime.GetHostImportCallCountForTesting(),
+		3);
 	Runtime.BeginTypedCallbackEpochForTesting();
 
 	UObject* ResolvedObject = nullptr;

@@ -145,6 +145,12 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 			break;
 		}
 	}
+	FAvidScriptReflectedClassSelection GeneratedRule;
+	GeneratedRule.OwnerClassPath =
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject");
+	GeneratedRule.IncludeFunctions.Add(TEXT("ReservedHandleNames"));
+	GeneratedRule.GeneratedNativeFunctions.Add(TEXT("ReservedHandleNames"));
+	AuthorizationProfile.Classes.Add(MoveTemp(GeneratedRule));
 	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
 	if (!TestTrue(
 		TEXT("Complete gameplay authorization package with a class table publishes"),
@@ -188,8 +194,15 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		{
 			return Binding.UeFunction == TEXT("SetActorScale3D");
 		});
+	const FAvidScriptBindingFunctionModel* GeneratedPair =
+		AuthorizationModel.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeFunction == TEXT("ReservedHandleNames");
+			});
 	if (!TestNotNull(TEXT("Gameplay descriptor contains scale getter"), GetScale)
-		|| !TestNotNull(TEXT("Gameplay descriptor contains scale setter"), SetScale))
+		|| !TestNotNull(TEXT("Gameplay descriptor contains scale setter"), SetScale)
+		|| !TestNotNull(TEXT("Authorization descriptor contains generated pair"), GeneratedPair))
 	{
 		return false;
 	}
@@ -210,7 +223,8 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	}
 	TArray<FAvidScriptFrontendBindingImport> UsedImports = {
 		MakeAvidScriptBindingSliceTestImport(*GetScale),
-		MakeAvidScriptBindingSliceTestImport(*SetScale)
+		MakeAvidScriptBindingSliceTestImport(*SetScale),
+		MakeAvidScriptBindingSliceTestImport(*GeneratedPair)
 	};
 	for (int32 SpecIndex = 0; SpecIndex < LifecycleSpecs.Num(); ++SpecIndex)
 	{
@@ -263,8 +277,8 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		return false;
 	}
 
-	TestEqual(TEXT("Runtime slice reports every used import"), SliceResult.RequestedBindingCount, 2 + LifecycleSpecs.Num() + 2);
-	TestEqual(TEXT("Runtime slice emits two bindings"), SlicePackage.BindingCount, 2);
+	TestEqual(TEXT("Runtime slice reports every used import"), SliceResult.RequestedBindingCount, 3 + LifecycleSpecs.Num() + 2);
+	TestEqual(TEXT("Runtime slice emits three bindings"), SlicePackage.BindingCount, 3);
 	TestEqual(TEXT("Runtime slice preserves one class reference"), SlicePackage.ClassReferenceCount, 1);
 	TestEqual(TEXT("Runtime slice keeps package capability name"), SlicePackage.PackageName, AuthorizationPackage.PackageName);
 	TestNotEqual(TEXT("Runtime slice has a distinct package hash"), SlicePackage.PackageHash, AuthorizationPackage.PackageHash);
@@ -279,10 +293,18 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 		TEXT("Runtime slice declares an explicit object-type activation set"),
 		SliceModel.bHasActiveObjectTypeOrdinals);
 	TestEqual(
+		TEXT("Generated slice pins its complete generated-code source"),
+		SliceModel.GeneratedSourcePackageHash,
+		AuthorizationModel.PackageHash);
+	TestEqual(
 		TEXT("Fixture without reachable type tokens declares an empty activation set"),
 		SliceModel.ActiveObjectTypeOrdinals.Num(),
 		0);
-	TSet<FString> ExpectedStableIds = { GetScale->StableId, SetScale->StableId };
+	TSet<FString> ExpectedStableIds = {
+		GetScale->StableId,
+		SetScale->StableId,
+		GeneratedPair->StableId
+	};
 	TSet<FString> ActualStableIds;
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)
 	{

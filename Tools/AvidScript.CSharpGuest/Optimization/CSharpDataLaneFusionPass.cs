@@ -33,7 +33,11 @@ internal static class CSharpDataLaneFusionPass
         Dictionary<string, GuestType> typeMap = types.ToDictionary(
             type => type.Id,
             StringComparer.Ordinal);
-        Dictionary<string, SetterTarget> targets = BuildTargets(document, typeMap);
+        Dictionary<string, SetterTarget> targets = BuildTargets(
+            document,
+            typeMap,
+            imports,
+            functions);
         List<FunctionPlan> plans = BuildPlans(functions, targets);
         if (plans.All(plan => plan.Blocks.Count == 0))
         {
@@ -118,17 +122,23 @@ internal static class CSharpDataLaneFusionPass
 
     private static Dictionary<string, SetterTarget> BuildTargets(
         SemanticDocument document,
-        IReadOnlyDictionary<string, GuestType> types)
+        IReadOnlyDictionary<string, GuestType> types,
+        IReadOnlyList<GuestImport> imports,
+        IReadOnlyList<GuestFunction> functions)
     {
         Dictionary<string, SetterTarget> targets = new(StringComparer.Ordinal);
+        Dictionary<string, GuestImport> importsById = imports.ToDictionary(
+            import => import.Id,
+            StringComparer.Ordinal);
+        Dictionary<string, GuestFunction> functionsById = functions.ToDictionary(
+            function => function.Id,
+            StringComparer.Ordinal);
         foreach (SemanticCallable callable in document.Callables.OrderBy(
             callable => callable.MethodSymbolId,
             StringComparer.Ordinal))
         {
             if (callable.Optimization is not
                     { OptimizationClass: "buffered_write", BindingOrdinal: >= 0 }
-                || callable.Import is not { Module: "avidscript" }
-                || callable.HasBody
                 || callable.ReturnTypeId != "type:void"
                 || !TryGetSetterShape(callable, out string receiverTypeId)
                 || !types.TryGetValue(receiverTypeId, out GuestType? receiverType)
@@ -153,10 +163,108 @@ internal static class CSharpDataLaneFusionPass
                 receiverType.Id,
                 slotFields[0].Id,
                 generationFields[0].Id);
-            targets.TryAdd(CSharpGuestIds.Import(callable.MethodSymbolId), target);
+            string targetId;
+            if (!callable.HasBody
+                && callable.Import is { Module: "avidscript" })
+            {
+                targetId = CSharpGuestIds.Import(callable.MethodSymbolId);
+            }
+            else
+            {
+                targetId = CSharpGuestIds.Function(callable.MethodSymbolId);
+                if (callable.Import is not null
+                    || callable.AssociatedSymbolId is null
+                    || !functionsById.TryGetValue(targetId, out GuestFunction? function)
+                    || !IsGeneratedPropertyForwarder(
+                        function,
+                        target,
+                        importsById))
+                {
+                    continue;
+                }
+            }
+            targets.TryAdd(targetId, target);
         }
 
         return targets;
+    }
+
+    private static bool IsGeneratedPropertyForwarder(
+        GuestFunction function,
+        SetterTarget target,
+        IReadOnlyDictionary<string, GuestImport> imports)
+    {
+        if (function.Parameters.Count != 2
+            || function.Parameters[0].TypeId != target.ReceiverTypeId
+            || function.Parameters[1].TypeId != "type:int32")
+        {
+            return false;
+        }
+
+        GuestInstruction[] instructions = function.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        GuestInstruction[] calls = instructions
+            .Where(instruction => instruction.Op == "call")
+            .ToArray();
+        if (instructions.Length != 4
+            || calls.Length != 1
+            || instructions.Any(instruction => instruction.Op is not
+                ("field_load" or "local_load" or "call")))
+        {
+            return false;
+        }
+
+        GuestInstruction call = calls[0];
+        if (call.TargetId is null
+            || !imports.TryGetValue(call.TargetId, out GuestImport? import)
+            || import.Module != "avidscript"
+            || import.OptimizationClass != "buffered_write"
+            || import.BindingOrdinal != target.BindingOrdinal
+            || import.ReturnTypeId != "type:int32"
+            || !import.ParameterTypeIds.SequenceEqual(
+                new[] { "type:int32", "type:int32", "type:int32" })
+            || call.OperandIds.Count != 3)
+        {
+            return false;
+        }
+
+        GuestInstruction[] fieldLoads = instructions
+            .Where(instruction => instruction.Op == "field_load")
+            .ToArray();
+        GuestInstruction[] valueLoads = instructions
+            .Where(instruction => instruction.Op == "local_load")
+            .ToArray();
+        if (fieldLoads.Length != 2
+            || valueLoads.Length != 1
+            || fieldLoads.Any(load => load.OperandIds.Count != 1
+                || load.OperandIds[0] != function.Parameters[0].Id)
+            || valueLoads[0].TargetId != function.Parameters[1].Id)
+        {
+            return false;
+        }
+
+        GuestInstruction? slotLoad = fieldLoads.SingleOrDefault(
+            load => load.TargetId == target.SlotFieldId);
+        GuestInstruction? generationLoad = fieldLoads.SingleOrDefault(
+            load => load.TargetId == target.GenerationFieldId);
+        if (slotLoad?.ResultId is null
+            || generationLoad?.ResultId is null
+            || valueLoads[0].ResultId is null
+            || call.OperandIds[0] != slotLoad.ResultId
+            || call.OperandIds[1] != generationLoad.ResultId
+            || call.OperandIds[2] != valueLoads[0].ResultId)
+        {
+            return false;
+        }
+
+        return call.ResultId is null
+            || (!instructions.Any(instruction =>
+                    instruction != call
+                    && instruction.OperandIds.Contains(call.ResultId))
+                && function.Blocks.All(block =>
+                    block.Terminator.ConditionValueId != call.ResultId
+                    && block.Terminator.ReturnValueId != call.ResultId));
     }
 
     private static bool TryGetSetterShape(SemanticCallable callable, out string receiverTypeId)

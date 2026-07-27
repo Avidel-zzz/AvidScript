@@ -529,6 +529,32 @@ bool SaveDeterministicFile(const FString& Path, const FString& Contents)
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }
 
+bool DoesGeneratedFileMatch(
+	const FString& Path,
+	const FString& ExpectedContents)
+{
+	FString ExistingContents;
+	return FFileHelper::LoadFileToString(ExistingContents, *Path)
+		&& ExistingContents == ExpectedContents;
+}
+
+const TCHAR* ExpectedGeneratedAbiSignature(
+	const EAvidScriptGeneratedBindingShape Shape)
+{
+	switch (Shape)
+	{
+	case EAvidScriptGeneratedBindingShape::I32PairToI32:
+		return TEXT("(iiii)i");
+	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
+	case EAvidScriptGeneratedBindingShape::VectorValue:
+		return TEXT("(iii)i");
+	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
+		return TEXT("(iiiii)i");
+	default:
+		return TEXT("");
+	}
+}
+
 bool HasGeneratedDependencyCycle(
 	const FString& ProjectRoot,
 	const TArray<FString>& OwnerModules,
@@ -620,7 +646,8 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 				TEXT("avid_s1_"),
 				ESearchCase::CaseSensitive)
 			|| Binding.ImportName.Len() != 24
-			|| Binding.AbiSignature.IsEmpty()
+			|| Binding.AbiSignature
+				!= ExpectedGeneratedAbiSignature(Binding.Shape)
 			|| Binding.DescriptorIdentity.IsEmpty()
 			|| (Index > 0
 				&& Binding.StableId
@@ -665,6 +692,35 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 
 	const FString OutputDirectory =
 		ProjectRoot / TEXT("Source") / GeneratedModuleName;
+	const FString BuildCs = RenderBuildCs(OwnerModules);
+	const FString PublicHeader = RenderPublicHeader();
+	const FString PrivateCpp = RenderPrivateCpp(SortedPackage);
+	const FString Manifest = RenderManifest(SortedPackage);
+	if (ProjectJson == UpdatedProjectJson
+		&& DoesGeneratedFileMatch(
+			OutputDirectory
+				/ TEXT("AvidScriptGeneratedBindings.Build.cs"),
+			BuildCs)
+		&& DoesGeneratedFileMatch(
+			OutputDirectory / TEXT("Public")
+				/ TEXT("AvidScriptGeneratedBindings.h"),
+			PublicHeader)
+		&& DoesGeneratedFileMatch(
+			OutputDirectory / TEXT("Private")
+				/ TEXT("AvidScriptGeneratedBindings.cpp"),
+			PrivateCpp)
+		&& DoesGeneratedFileMatch(
+			OutputDirectory / TEXT("Private")
+				/ TEXT("generated-bindings.manifest.json"),
+			Manifest))
+	{
+		OutResult.bSucceeded = true;
+		OutResult.bReusedExistingModule = true;
+		OutResult.BindingCount = SortedPackage.Bindings.Num();
+		OutResult.PackageHash = SortedPackage.PackageHash;
+		OutResult.OutputDirectory = OutputDirectory;
+		return true;
+	}
 	const FString TransactionId = FGuid::NewGuid().ToString(
 		EGuidFormats::Digits);
 	const FString StageDirectory =
@@ -680,19 +736,19 @@ bool FAvidScriptEditorGeneratedBindingSourceEmitter::Emit(
 	const bool bStageWritten =
 		SaveDeterministicFile(
 			StageDirectory / TEXT("AvidScriptGeneratedBindings.Build.cs"),
-			RenderBuildCs(OwnerModules))
+			BuildCs)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Public")
 				/ TEXT("AvidScriptGeneratedBindings.h"),
-			RenderPublicHeader())
+			PublicHeader)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Private")
 				/ TEXT("AvidScriptGeneratedBindings.cpp"),
-			RenderPrivateCpp(SortedPackage))
+			PrivateCpp)
 		&& SaveDeterministicFile(
 			StageDirectory / TEXT("Private")
 				/ TEXT("generated-bindings.manifest.json"),
-			RenderManifest(SortedPackage))
+			Manifest)
 		&& SaveDeterministicFile(ProjectStage, UpdatedProjectJson);
 	if (!bStageWritten)
 	{

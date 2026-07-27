@@ -155,7 +155,7 @@ function Resolve-RequestTemplateIdentity {
     $reflectionScriptPath = Join-Path $harnessRoot 'Content\JavaScript\reflection.js'
     $staticScriptPath = Join-Path $harnessRoot 'Content\JavaScript\static.js'
     $wasmtimeRuntimePath = Join-Path $avidscriptRoot 'Binaries\Win64\wasmtime.dll'
-    $harnessModulePath = Join-Path $projectRoot (
+    $harnessModulePath = Join-Path $harnessRoot (
         'Binaries\Win64\UnrealEditor-AvidScriptPerfHarness.dll')
 
     $puertsMarker = Read-JsonFile -Path $puertsMarkerPath

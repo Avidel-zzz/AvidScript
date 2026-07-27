@@ -1235,6 +1235,14 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("source"), Package.Source);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("package"), Package.PackageName);
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("selection"), Package.SelectionHash);
+	if (Package.SchemaVersion >= 8
+		&& !Package.GeneratedSourcePackageHash.IsEmpty())
+	{
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("generated_source_package_hash"),
+			Package.GeneratedSourcePackageHash);
+	}
 	if (Package.SchemaVersion >= 6)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("self_type_id"), Package.SelfTypeId);
@@ -1467,6 +1475,20 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 	{
 		OutErrorCategory = TEXT("descriptor_contract_invalid");
 		return false;
+	}
+	if (Root->HasField(TEXT("generated_source_package_hash")))
+	{
+		if (OutPackage.SchemaVersion < 8
+			|| !Root->TryGetStringField(
+				TEXT("generated_source_package_hash"),
+				OutPackage.GeneratedSourcePackageHash)
+			|| !IsAvidScriptBindingLowerSha256(
+				OutPackage.GeneratedSourcePackageHash))
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = TEXT("generated_source_package_hash");
+			return false;
+		}
 	}
 	if (OutPackage.SchemaVersion < 5 && Root->HasField(TEXT("class_references")))
 	{

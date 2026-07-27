@@ -242,6 +242,12 @@ bool FAvidScriptEditorGeneratedBindingIrBuilder::Build(
 		Ir.OwnerModule = OwnerClass->GetOutermost()->GetName();
 		Ir.OwnerModule.RemoveFromStart(TEXT("/Script/"));
 		Ir.OwnerHeader = OwnerClass->GetMetaData(TEXT("ModuleRelativePath"));
+		Ir.OwnerHeader.RemoveFromStart(
+			TEXT("Public/"),
+			ESearchCase::CaseSensitive);
+		Ir.OwnerHeader.RemoveFromStart(
+			TEXT("Classes/"),
+			ESearchCase::CaseSensitive);
 		Ir.OwnerCppType =
 			FString(OwnerClass->GetPrefixCPP()) + OwnerClass->GetName();
 		Ir.FunctionName = Binding.UeMember;

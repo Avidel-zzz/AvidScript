@@ -73,6 +73,31 @@ function Get-ExpectedGeneratedHits {
     return 0u
 }
 
+function Get-ExpectedSemanticHits {
+    param(
+        [string]$Workload,
+        [uint64]$Iterations,
+        [uint64]$LogicalOperationCount
+    )
+
+    if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
+        return $LogicalOperationCount
+    }
+    if ($Workload -ceq 'property_get_set') {
+        return $Iterations * 2u
+    }
+    if ($Workload -in @(
+        'scalar_noop',
+        'scalar_add_int32',
+        'vector_value',
+        'vector_ref_out',
+        'object_roundtrip',
+        'batch_scalar')) {
+        return $Iterations
+    }
+    return 0u
+}
+
 function New-GateResult {
     param(
         [string]$Name,
@@ -435,6 +460,8 @@ foreach ($result in $results) {
     $timerFrequency = [double]$result.timer_frequency_hz
     foreach ($sample in @($result.samples)) {
         $requiredCounters = @(
+            'host_import_call_count',
+            'expected_host_import_call_count',
             'generated_s1_hit_count',
             'generated_s1_fallback_count',
             'generated_s1_reject_count',
@@ -482,6 +509,20 @@ foreach ($result in $results) {
             -Workload ([string]$sample.workload) `
             -Iterations ([uint64]$sample.iterations) `
             -LogicalOperationCount $logical
+        $expectedSemanticHits = Get-ExpectedSemanticHits `
+            -Workload ([string]$sample.workload) `
+            -Iterations ([uint64]$sample.iterations) `
+            -LogicalOperationCount $logical
+        $isAvidScriptLane =
+            ([string]$sample.lane).StartsWith(
+                'avidscript_',
+                [StringComparison]::Ordinal)
+        if ($isAvidScriptLane -and
+            [uint64]$sample.host_import_call_count -ne
+                [uint64]$sample.expected_host_import_call_count) {
+            $validityErrors.Add(
+                "host import count mismatch process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
+        }
         if ($sample.lane -ceq 'avidscript_wasmtime_generated_s1' -and
             ([uint64]$sample.generated_s1_hit_count -ne $expectedGeneratedHits -or
              [uint64]$sample.generated_s1_fallback_count -ne 0 -or
@@ -494,7 +535,7 @@ foreach ($result in $results) {
                 "generated S1 path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
         if ($sample.lane -ceq 'avidscript_wasmtime_semantic' -and
-            ([uint64]$sample.semantic_hit_count -ne $expectedGeneratedHits -or
+            ([uint64]$sample.semantic_hit_count -ne $expectedSemanticHits -or
              [uint64]$sample.generated_s1_hit_count -ne 0 -or
              [uint64]$sample.generated_s1_fallback_count -ne 0 -or
              [uint64]$sample.generated_s1_reject_count -ne 0 -or
@@ -520,6 +561,9 @@ foreach ($result in $results) {
             $expectedCrossings = $isGameplay ?
                 [uint64]($propertyWrites / 2) :
                 0u
+            $expectedDataHostCalls = $isGameplay ?
+                (1u + $expectedDataGeneratedHits + $expectedCrossings) :
+                [uint64]$sample.expected_host_import_call_count
             $invalidCrossingRatio = $commands -gt 0 -and
                 ([double]$crossings / [double]$commands) -gt $crossingRatioLimit
             if ([uint64]$sample.generated_s1_hit_count -ne $expectedDataGeneratedHits -or
@@ -528,6 +572,8 @@ foreach ($result in $results) {
                 [uint64]$sample.semantic_hit_count -ne 0 -or
                 $commands -ne $propertyWrites -or
                 $crossings -ne $expectedCrossings -or
+                [uint64]$sample.expected_host_import_call_count -ne
+                    $expectedDataHostCalls -or
                 [uint64]$sample.data_lane_rejected_buffer_count -ne 0 -or
                 ($isGameplay -and $commands -eq 0) -or
                 $invalidCrossingRatio) {

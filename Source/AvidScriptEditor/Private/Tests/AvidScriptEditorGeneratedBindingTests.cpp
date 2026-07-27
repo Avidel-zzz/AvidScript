@@ -27,7 +27,7 @@ FAvidScriptGeneratedBindingIr MakeGeneratedBinding(
 	Binding.FunctionName = TEXT("GeneratedPair");
 	Binding.ImportModule = TEXT("avidscript");
 	Binding.ImportName = TEXT("avid_s1_") + ImportSuffix;
-	Binding.AbiSignature = TEXT("(iiiii)i");
+	Binding.AbiSignature = TEXT("(iiii)i");
 	Binding.Shape = EAvidScriptGeneratedBindingShape::I32PairToI32;
 	Binding.ReceiverMode = EAvidScriptGeneratedReceiverMode::SelfBound;
 	Binding.DescriptorIdentity =
@@ -95,12 +95,14 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 		TEXT("3333333333333333"));
 	PropertyBinding.Shape =
 		EAvidScriptGeneratedBindingShape::PropertyI32GetSet;
+	PropertyBinding.AbiSignature = TEXT("(iii)i");
 	PropertyBinding.FunctionName = TEXT("GeneratedProperty");
 	Package.Bindings.Add(PropertyBinding);
 	FAvidScriptGeneratedBindingIr VectorBinding = MakeGeneratedBinding(
 		TEXT('4'),
 		TEXT("4444444444444444"));
 	VectorBinding.Shape = EAvidScriptGeneratedBindingShape::VectorValue;
+	VectorBinding.AbiSignature = TEXT("(iii)i");
 	VectorBinding.FunctionName = TEXT("GeneratedVector");
 	Package.Bindings.Add(VectorBinding);
 	FAvidScriptGeneratedBindingIr ObjectBinding = MakeGeneratedBinding(
@@ -108,6 +110,7 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 		TEXT("5555555555555555"));
 	ObjectBinding.Shape =
 		EAvidScriptGeneratedBindingShape::StableObjectRoundtrip;
+	ObjectBinding.AbiSignature = TEXT("(iiiii)i");
 	ObjectBinding.ReceiverMode =
 		EAvidScriptGeneratedReceiverMode::StableBorrow;
 	ObjectBinding.FunctionName = TEXT("GeneratedObject");
@@ -133,6 +136,9 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 			ProjectFile,
 			Package,
 			SecondResult));
+	TestTrue(
+		TEXT("Byte-identical generated module is reused"),
+		SecondResult.bReusedExistingModule);
 	TArray<FString> SecondContents;
 	TestTrue(
 		TEXT("Second artifact set is readable"),
@@ -267,6 +273,10 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 		2);
 	for (const FAvidScriptGeneratedBindingIr& Binding : Package.Bindings)
 	{
+		TestFalse(
+			TEXT("Generated cross-module include omits source-root prefixes"),
+			Binding.OwnerHeader.StartsWith(TEXT("Public/"))
+				|| Binding.OwnerHeader.StartsWith(TEXT("Classes/")));
 		TestEqual(
 			TEXT("IR uses the reflected field token"),
 			Binding.FunctionName,

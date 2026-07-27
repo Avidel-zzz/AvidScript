@@ -28,6 +28,12 @@ public:
 		return Slot + Generation;
 	}
 
+	UFUNCTION(BlueprintPure)
+	FVector GeneratedVectorValue(const FVector& Value) const
+	{
+		return Value;
+	}
+
 	UFUNCTION(BlueprintCallable, meta = (CPP_Default_bEnabled = "false", CPP_Default_Mode = "Primary"))
 	void OptionalProjection(bool bEnabled, EAvidScriptCSharpEmitterTestMode Mode)
 	{

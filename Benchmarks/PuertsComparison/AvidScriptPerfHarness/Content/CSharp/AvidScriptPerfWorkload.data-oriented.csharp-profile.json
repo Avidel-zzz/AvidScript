@@ -12,7 +12,7 @@
   "configuration": "Release",
   "data_lane_fusion": "enabled",
   "binding_profile": {
-    "package_name": "avidscript.benchmark.phase54_6.generated_shared",
+    "package_name": "avidscript.benchmark.p54_6.s1",
     "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",
     "classes": [
       {

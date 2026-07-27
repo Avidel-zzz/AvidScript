@@ -16,6 +16,7 @@ internal static class CSharpDataLaneFusionTests
     public static int Run()
     {
         ThreeSettersProduceExecutableCommandBuffer();
+        GeneratedPropertyWrapperProducesExecutableCommandBuffer();
         UserSetterBodiesNeverFuse();
         TwoSettersDoNotFuse();
         CallsStoresAndReadAfterWriteSplitFusionGroups();
@@ -23,7 +24,7 @@ internal static class CSharpDataLaneFusionTests
         DirectExternPropertyPreservesImportMetadata();
         FusionCanBeDisabledPerProfile();
         HostAbiBudgetSplitsLargeGroups();
-        return 8;
+        return 9;
     }
 
     private static void ThreeSettersProduceExecutableCommandBuffer()
@@ -165,6 +166,41 @@ internal static class CSharpDataLaneFusionTests
             && wasm.Bytes[2] == 0x73
             && wasm.Bytes[3] == 0x6d,
             "fused stack allocation and 16-bit field stores should compile to a WASM module");
+    }
+
+    private static void GeneratedPropertyWrapperProducesExecutableCommandBuffer()
+    {
+        Lowered lowered = LowerSource(
+            BuildSource("target.Value = 10; target.Value = 20; target.Value = 30;"),
+            "Scripts/DataLaneGeneratedPropertyWrapper.cs",
+            new[]
+            {
+                new SemanticReferenceSource(
+                    GeneratedPropertyWrapperReferenceSource,
+                    "generated://AvidScript.Bindings.generated.cs",
+                    IsExecutable: true),
+            });
+        GuestFunction function = MainFunction(lowered.Module);
+        GuestInstruction[] instructions = function.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        SemanticCallable wrapper = lowered.Semantic.Callables.Single(callable =>
+            callable.MethodSymbolId.Contains(".set_Value(", StringComparison.Ordinal));
+        GuestImport setterImport = lowered.Module.Imports.Single(import =>
+            import.Name == "avid_generated_property_set_i32");
+
+        Assert(wrapper.HasBody
+            && wrapper.Optimization is { OptimizationClass: "buffered_write", BindingOrdinal: 17 },
+            "the generated reference setter wrapper should retain trusted fusion metadata");
+        Assert(setterImport.OptimizationClass == "buffered_write"
+            && setterImport.BindingOrdinal == 17,
+            "the wrapped generated import should carry the same binding ordinal");
+        Assert(lowered.Module.Imports.Count(import => import.DispatchClass == "data_lane") == 2,
+            "a verified generated property wrapper should add epoch and submit imports");
+        Assert(!instructions.Any(instruction =>
+                instruction.Op == "call"
+                && instruction.TargetId == "function:" + wrapper.MethodSymbolId),
+            "verified generated property wrapper calls should be replaced by one command buffer");
     }
 
     private static void TwoSettersDoNotFuse()
@@ -539,6 +575,39 @@ internal static class CSharpDataLaneFusionTests
             {
                 [DllImport("env", EntryPoint = "host_probe")]
                 public static extern void Probe();
+            }
+        }
+        """;
+
+    private const string GeneratedPropertyWrapperReferenceSource = """
+        using System;
+        using System.Runtime.InteropServices;
+
+        namespace AvidScript
+        {
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class AvidScriptDataLaneAttribute : Attribute
+            {
+                public AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal) { }
+            }
+
+            public readonly struct Target
+            {
+                public readonly int Slot;
+                public readonly int Generation;
+
+                public int Value
+                {
+                    [AvidScriptDataLane("buffered_write", 17)]
+                    set { _ = Native.Set(Slot, Generation, value); }
+                }
+            }
+
+            internal static class Native
+            {
+                [AvidScriptDataLane("buffered_write", 17)]
+                [DllImport("avidscript", EntryPoint = "avid_generated_property_set_i32")]
+                internal static extern int Set(int slot, int generation, int value);
             }
         }
         """;

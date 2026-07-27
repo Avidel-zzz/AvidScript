@@ -257,10 +257,41 @@ function New-BindingPackageReportValue {
     }
 }
 
+function Test-CompilerInjectedBindingImport {
+    param(
+        [Parameter(Mandatory = $true)][object]$Import,
+        [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports
+    )
+
+    if (-not $AllowDataLaneImports -or
+        [string]$Import.module -cne "avidscript" -or
+        [string]$Import.dispatch_class -cne "data_lane" -or
+        [string]$Import.optimization_class -cne "none" -or
+        [int]$Import.binding_ordinal -ne -1) {
+        return $false
+    }
+
+    $ParameterTypes = @($Import.parameter_type_ids | ForEach-Object { [string]$_ })
+    if ([string]$Import.id -ceq "import:__avidscript_internal.avid_data_lane_epoch" -and
+        [string]$Import.name -ceq "avid_data_lane_epoch") {
+        return $ParameterTypes.Count -eq 0 -and
+            [string]$Import.return_type_id -ceq "type:uint64"
+    }
+    if ([string]$Import.id -ceq "import:__avidscript_internal.avid_data_lane_submit" -and
+        [string]$Import.name -ceq "avid_data_lane_submit") {
+        return $ParameterTypes.Count -eq 2 -and
+            $ParameterTypes[0] -ceq "type:address" -and
+            $ParameterTypes[1] -ceq "type:int32" -and
+            [string]$Import.return_type_id -ceq "type:int32"
+    }
+    return $false
+}
+
 function Test-BindingPackageImports {
     param(
         [AllowNull()][object]$PackageInfo,
-        [AllowEmptyCollection()][object[]]$GuestImports
+        [AllowEmptyCollection()][object[]]$GuestImports,
+        [bool]$AllowDataLaneImports = $false
     )
 
     $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -277,7 +308,10 @@ function Test-BindingPackageImports {
     foreach ($Import in @($GuestImports | Where-Object { [string]$_.module -eq "avidscript" })) {
         $Key = "$([string]$Import.module)`n$([string]$Import.name)"
         [void]$ObservedKeys.Add($Key)
-        if (-not $DeclaredByKey.ContainsKey($Key)) {
+        if (-not $DeclaredByKey.ContainsKey($Key) -and
+            -not (Test-CompilerInjectedBindingImport `
+                -Import $Import `
+                -AllowDataLaneImports $AllowDataLaneImports)) {
             $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
@@ -1013,7 +1047,8 @@ $RequiredImports = @($GuestIrModel.imports | ForEach-Object {
 if (-not $IsDefaultSource) {
     $AuthorizationValidation = Test-BindingPackageImports `
         -PackageInfo $BindingAuthorizationInfo `
-        -GuestImports $RequiredImports
+        -GuestImports @($GuestIrModel.imports) `
+        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled")
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
     if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
@@ -1030,7 +1065,8 @@ if (-not $IsDefaultSource) {
 
     $RuntimeValidation = Test-BindingPackageImports `
         -PackageInfo $BindingPackageInfo `
-        -GuestImports $RequiredImports
+        -GuestImports @($GuestIrModel.imports) `
+        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled")
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
     $RuntimeIdentityMismatch = @()
     $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -1106,8 +1142,8 @@ $DirectAbiExports = @(
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })
-$GuestContractValid = [int]$GuestIrModel.schema_version -eq 1 -and
-    [string]$GuestIrModel.ir_version -eq "1.0" -and
+$GuestContractValid = [int]$GuestIrModel.schema_version -eq 2 -and
+    [string]$GuestIrModel.ir_version -eq "1.1" -and
     [bool]$GuestIrModel.succeeded -and
     [string]$GuestIrModel.provenance.semantic_sha256 -eq $SemanticSha256 -and
     [string]$GuestIrModel.provenance.source_sha256 -eq [string]$FrontendModel.source.sha256

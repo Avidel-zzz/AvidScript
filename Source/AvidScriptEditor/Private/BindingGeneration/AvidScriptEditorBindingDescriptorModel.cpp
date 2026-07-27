@@ -92,6 +92,13 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 	Writer->WriteValue(TEXT("package_name"), Package.PackageName);
 	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
 	Writer->WriteValue(TEXT("selection_hash"), Package.SelectionHash);
+	if (Package.SchemaVersion >= 8
+		&& !Package.GeneratedSourcePackageHash.IsEmpty())
+	{
+		Writer->WriteValue(
+			TEXT("generated_source_package_hash"),
+			Package.GeneratedSourcePackageHash);
+	}
 	if (Package.SchemaVersion >= 6)
 	{
 		Writer->WriteValue(TEXT("self_type_id"), Package.SelfTypeId);

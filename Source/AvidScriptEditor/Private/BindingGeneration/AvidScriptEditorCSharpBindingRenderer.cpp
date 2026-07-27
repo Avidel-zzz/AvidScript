@@ -221,6 +221,23 @@ FString ConvertToStorage(const FAvidScriptBindingValueModel& Value, const FStrin
 
 FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 {
+	if (Binding.DispatchMode == TEXT("generated_native_s1"))
+	{
+		if (Binding.GeneratedShape == TEXT("i32_pair_to_i32"))
+		{
+			return TEXT("(iiii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("property_i32_get_set")
+			|| Binding.GeneratedShape == TEXT("vector_value"))
+		{
+			return TEXT("(iii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("stable_object_roundtrip"))
+		{
+			return TEXT("(iiiii)i");
+		}
+	}
+
 	FString Parameters;
 	if (!Binding.bStatic)
 	{
@@ -264,6 +281,12 @@ bool RenderMethod(
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
 	}
+	const bool bGeneratedI32Pair =
+		Binding.DispatchMode == TEXT("generated_native_s1")
+		&& Binding.GeneratedShape == TEXT("i32_pair_to_i32");
+	const bool bGeneratedVectorValue =
+		Binding.DispatchMode == TEXT("generated_native_s1")
+		&& Binding.GeneratedShape == TEXT("vector_value");
 
 	TArray<FString> PublicParameters;
 	TArray<FString> NativeParameters;
@@ -304,6 +327,25 @@ bool RenderMethod(
 		}
 		PublicParameters.Add(PublicDeclaration);
 		SignatureParameterTypes.Add(Modifier + PublicType);
+
+		if (bGeneratedVectorValue)
+		{
+			if (ParameterIndex != 0
+				|| Binding.Parameters.Num() != 1
+				|| PublicType != TEXT("FVector"))
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = Binding.CanonicalIdentity;
+				return false;
+			}
+			NativeParameters.Add(
+				TEXT("ref FAvidScriptVectorValueBuffer value"));
+			NativeArguments.Add(TEXT("ref __vectorValue"));
+			BeforeCall.Add(
+				TEXT("FAvidScriptVectorValueBuffer __vectorValue = new(")
+				+ PublicName + TEXT(");"));
+			continue;
+		}
 
 		if (Parameter.Direction == TEXT("ref") || Parameter.Direction == TEXT("out"))
 		{
@@ -385,7 +427,9 @@ bool RenderMethod(
 		NativeArguments.Insert(TEXT("this.Slot"), 0);
 	}
 
-	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
+	if (Binding.ReturnValue.CanonicalType != TEXT("void")
+		&& !bGeneratedI32Pair
+		&& !bGeneratedVectorValue)
 	{
 		FString StorageType;
 		if (!ResolveStorageType(Binding.ReturnValue, TypesByCanonical, StorageType, OutErrorSource))
@@ -411,15 +455,30 @@ bool RenderMethod(
 	{
 		OutMethod.MethodLines.Add(TEXT("        ") + Line);
 	}
-	OutMethod.MethodLines.Add(FString::Printf(
-		TEXT("        _ = AvidScriptNative.%s(%s);"),
-		*MakeNativeMethodName(Binding.Ordinal),
-		*FString::Join(NativeArguments, TEXT(", "))));
+	if (bGeneratedI32Pair)
+	{
+		OutMethod.MethodLines.Add(FString::Printf(
+			TEXT("        return AvidScriptNative.%s(%s);"),
+			*MakeNativeMethodName(Binding.Ordinal),
+			*FString::Join(NativeArguments, TEXT(", "))));
+	}
+	else
+	{
+		OutMethod.MethodLines.Add(FString::Printf(
+			TEXT("        _ = AvidScriptNative.%s(%s);"),
+			*MakeNativeMethodName(Binding.Ordinal),
+			*FString::Join(NativeArguments, TEXT(", "))));
+	}
 	for (const FString& Line : AfterCall)
 	{
 		OutMethod.MethodLines.Add(TEXT("        ") + Line);
 	}
-	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
+	if (bGeneratedVectorValue)
+	{
+		OutMethod.MethodLines.Add(TEXT("        return __vectorValue.Result;"));
+	}
+	else if (Binding.ReturnValue.CanonicalType != TEXT("void")
+		&& !bGeneratedI32Pair)
 	{
 		OutMethod.MethodLines.Add(TEXT("        return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"));
 	}
@@ -518,10 +577,12 @@ void AppendPropertySetterInterop(
 	const TArray<FString>& NativeArguments,
 	FCSharpRenderedMethod& OutMethod)
 {
-	if (Setter.DispatchMode == TEXT("generated_native_s1")
+	const bool bBufferedGeneratedI32 =
+		Setter.DispatchMode == TEXT("generated_native_s1")
 		&& Setter.GeneratedShape == TEXT("property_i32_get_set")
 		&& Setter.Parameters.Num() == 1
-		&& Setter.Parameters[0].CanonicalType == TEXT("scalar:i32"))
+		&& Setter.Parameters[0].CanonicalType == TEXT("scalar:i32");
+	if (bBufferedGeneratedI32)
 	{
 		OutMethod.MethodLines.Add(FString::Printf(
 			TEXT("        [AvidScriptDataLane(\"buffered_write\", %d)]"),
@@ -536,6 +597,12 @@ void AppendPropertySetterInterop(
 			*FString::Join(NativeArguments, TEXT(", "))),
 		TEXT("        }")
 	});
+	if (bBufferedGeneratedI32)
+	{
+		OutMethod.NativeLines.Add(FString::Printf(
+			TEXT("    [AvidScriptDataLane(\"buffered_write\", %d)]"),
+			Setter.Ordinal));
+	}
 	OutMethod.NativeLines.Append({
 		FString::Printf(
 			TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
@@ -700,6 +767,36 @@ void AppendVector(TArray<FString>& Lines)
 		TEXT("    public static FVector Zero => new(0.0f, 0.0f, 0.0f);"),
 		TEXT("    public static FVector operator +(FVector left, FVector right)"),
 		TEXT("        => new(left.X + right.X, left.Y + right.Y, left.Z + right.Z);"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
+void AppendGeneratedVectorValueBuffer(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("internal struct FAvidScriptVectorValueBuffer"),
+		TEXT("{"),
+		TEXT("    internal float InputX;"),
+		TEXT("    internal float InputY;"),
+		TEXT("    internal float InputZ;"),
+		TEXT("    internal float OutputX;"),
+		TEXT("    internal float OutputY;"),
+		TEXT("    internal float OutputZ;"),
+		TEXT(""),
+		TEXT("    internal FAvidScriptVectorValueBuffer(FVector value)"),
+		TEXT("    {"),
+		TEXT("        InputX = value.X;"),
+		TEXT("        InputY = value.Y;"),
+		TEXT("        InputZ = value.Z;"),
+		TEXT("        OutputX = 0.0f;"),
+		TEXT("        OutputY = 0.0f;"),
+		TEXT("        OutputZ = 0.0f;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    internal FVector Result"),
+		TEXT("        => new(OutputX, OutputY, OutputZ);"),
 		TEXT("}"),
 		TEXT("")
 	});
@@ -1354,6 +1451,13 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	bool bNeedsVector = false;
 	bool bNeedsRotator = false;
 	bool bNeedsTransform = false;
+	const bool bNeedsGeneratedVectorValueBuffer =
+		Package.Bindings.ContainsByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.DispatchMode == TEXT("generated_native_s1")
+					&& Binding.GeneratedShape == TEXT("vector_value");
+			});
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
 		bNeedsVector |= Type.CppType == TEXT("FVector");
@@ -1406,6 +1510,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("")
 	});
 	if (bNeedsVector) { AppendVector(Lines); }
+	if (bNeedsGeneratedVectorValueBuffer)
+	{
+		AppendGeneratedVectorValueBuffer(Lines);
+	}
 	AppendInputEvent(Lines);
 	if (bNeedsRotator) { AppendRotator(Lines); }
 	if (bNeedsTransform) { AppendTransform(Lines); }

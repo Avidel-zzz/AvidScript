@@ -1320,6 +1320,30 @@ namespace
 		}
 	}
 
+	uint64 GetExpectedSemanticHitCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		if (FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload))
+		{
+			return GetExpectedLogicalOperationCount(Workload, Iterations);
+		}
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::VectorValue:
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
+		case EAvidScriptPerfWorkload::BatchScalar:
+		case EAvidScriptPerfWorkload::VectorRefOut:
+			return static_cast<uint64>(Iterations);
+		case EAvidScriptPerfWorkload::PropertyGetSet:
+			return static_cast<uint64>(Iterations) * 2u;
+		default:
+			return 0;
+		}
+	}
+
 	uint64 GetExpectedPropertyWriteCount(
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations)
@@ -1331,6 +1355,26 @@ namespace
 		return FAvidScriptGameplayFrameBenchmark::GetCounts(
 			Workload,
 			Iterations).PropertyWriteCount;
+	}
+
+	int32 GetExpectedDataOrientedHostCallCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		if (!FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload))
+		{
+			return GetExpectedAvidScriptHostCallCount(Workload, Iterations);
+		}
+
+		const FAvidScriptGameplayFrameCounts Counts =
+			FAvidScriptGameplayFrameBenchmark::GetCounts(Workload, Iterations);
+		const uint64 ExpectedHostCalls =
+			1u +
+			(Counts.LogicalOperationCount - Counts.PropertyWriteCount) +
+			(Counts.PropertyWriteCount / 2u);
+		return ExpectedHostCalls <= static_cast<uint64>(MAX_int32)
+			? static_cast<int32>(ExpectedHostCalls)
+			: MAX_int32;
 	}
 
 	enum class EAvidScriptPerfLane : uint8
@@ -2798,13 +2842,16 @@ namespace
 			FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload);
 		const int32 ExpectedHostImportCallCount =
 			IsAvidScriptPerfLane(Observation.Lane)
-				&& !bDataGameplay
-				? GetExpectedAvidScriptHostCallCount(Workload, Iterations)
+				? (bDataLane
+					? GetExpectedDataOrientedHostCallCount(Workload, Iterations)
+					: GetExpectedAvidScriptHostCallCount(Workload, Iterations))
 				: 0;
 		const uint64 ExpectedLogicalOperationCount =
 			GetExpectedLogicalOperationCount(Workload, Iterations);
 		const uint64 ExpectedGeneratedS1HitCount =
 			GetExpectedGeneratedS1HitCount(Workload, Iterations);
+		const uint64 ExpectedSemanticHitCount =
+			GetExpectedSemanticHitCount(Workload, Iterations);
 		const uint64 ExpectedPropertyWriteCount =
 			GetExpectedPropertyWriteCount(Workload, Iterations);
 		const uint64 ExpectedDataGeneratedS1HitCount =
@@ -2820,7 +2867,7 @@ namespace
 		const bool bSemanticInvalid =
 			Observation.Lane ==
 				EAvidScriptPerfLane::AvidScriptWasmtimeSemantic &&
-			Observation.SemanticHitCount != ExpectedGeneratedS1HitCount;
+			Observation.SemanticHitCount != ExpectedSemanticHitCount;
 		const bool bGeneratedLaneDataInvalid =
 			Observation.Lane ==
 				EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1 &&
@@ -2852,8 +2899,7 @@ namespace
 			Observation.Checksum != Oracle.Checksum ||
 			Observation.FinalScalar != Oracle.FinalScalar ||
 			Observation.OperationCallCount != ExpectedOperationCallCount ||
-			(!bDataLane &&
-			 Observation.HostImportCallCount != ExpectedHostImportCallCount) ||
+			Observation.HostImportCallCount != ExpectedHostImportCallCount ||
 			Observation.LogicalOperationCount != ExpectedLogicalOperationCount ||
 			bGeneratedS1Invalid ||
 			bSemanticInvalid ||
@@ -2868,7 +2914,8 @@ namespace
 				TEXT("expected_operation_count=%llu host_count=%d ")
 				TEXT("expected_host_count=%d generated_hit=%llu ")
 				TEXT("expected_generated_hit=%llu generated_fallback=%llu ")
-				TEXT("generated_reject=%llu semantic_hit=%llu logical=%llu ")
+				TEXT("generated_reject=%llu semantic_hit=%llu ")
+				TEXT("expected_semantic_hit=%llu logical=%llu ")
 				TEXT("data_generated_expected=%llu data_commands=%llu ")
 				TEXT("data_commands_expected=%llu data_crossings=%llu ")
 				TEXT("data_crossings_expected=%llu data_rejected=%llu"),
@@ -2888,6 +2935,7 @@ namespace
 				Observation.GeneratedS1FallbackCount,
 				Observation.GeneratedS1RejectCount,
 				Observation.SemanticHitCount,
+				ExpectedSemanticHitCount,
 				ExpectedLogicalOperationCount,
 				ExpectedDataGeneratedS1HitCount,
 				Observation.DataLaneCommandCount,
@@ -2965,11 +3013,14 @@ namespace
 					Request.Workloads[WorkloadIndex],
 					Iterations);
 			Observation.ExpectedHostImportCallCount =
-				IsAvidScriptPerfLane(Lane) &&
-					Lane != EAvidScriptPerfLane::AvidScriptWasmtimeDataOriented
-					? GetExpectedAvidScriptHostCallCount(
-						Request.Workloads[WorkloadIndex],
-						Iterations)
+				IsAvidScriptPerfLane(Lane)
+					? (Lane == EAvidScriptPerfLane::AvidScriptWasmtimeDataOriented
+						? GetExpectedDataOrientedHostCallCount(
+							Request.Workloads[WorkloadIndex],
+							Iterations)
+						: GetExpectedAvidScriptHostCallCount(
+							Request.Workloads[WorkloadIndex],
+							Iterations))
 					: 0;
 			OutObservations.Add(Observation);
 		}

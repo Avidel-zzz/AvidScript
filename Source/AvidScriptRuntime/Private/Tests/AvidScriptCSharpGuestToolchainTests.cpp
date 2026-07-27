@@ -477,8 +477,8 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		AddError(FString::Printf(TEXT("Formal C# Guest IR is not valid JSON: %s"), *GuestIrPath));
 		return true;
 	}
-	TestEqual(TEXT("Guest IR schema version"), GuestIrRoot->GetIntegerField(TEXT("schema_version")), 1);
-	TestEqual(TEXT("Guest IR version"), GuestIrRoot->GetStringField(TEXT("ir_version")), FString(TEXT("1.0")));
+	TestEqual(TEXT("Guest IR schema version"), GuestIrRoot->GetIntegerField(TEXT("schema_version")), 2);
+	TestEqual(TEXT("Guest IR version"), GuestIrRoot->GetStringField(TEXT("ir_version")), FString(TEXT("1.1")));
 	TestEqual(TEXT("Guest IR language"), GuestIrRoot->GetStringField(TEXT("language")), FString(TEXT("csharp")));
 	TestTrue(TEXT("Guest IR lowering succeeded"), GuestIrRoot->GetBoolField(TEXT("succeeded")));
 

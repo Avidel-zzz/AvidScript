@@ -166,6 +166,7 @@ public:
 			OutObject);
 	}
 	uint64 GetReloadEpochForTesting() const { return ReloadEpoch; }
+	int32 GetHostImportCallCountForTesting() const { return HostImportCallCount; }
 	EAvidScriptVmTypedHostStatus RecordGeneratedStatusForTesting(
 		EAvidScriptVmTypedHostStatus Status)
 	{

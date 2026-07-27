@@ -6,6 +6,7 @@
 struct FAvidScriptEditorGeneratedBindingResult
 {
 	bool bSucceeded = false;
+	bool bReusedExistingModule = false;
 	int32 BindingCount = 0;
 	FString PackageHash;
 	FString OutputDirectory;

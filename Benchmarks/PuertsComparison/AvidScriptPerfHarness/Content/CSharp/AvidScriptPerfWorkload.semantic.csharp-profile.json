@@ -10,6 +10,7 @@
   "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.avidscript.json",
   "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
   "configuration": "Release",
+  "data_lane_fusion": "disabled",
   "binding_profile": {
     "package_name": "avidscript.benchmark.phase54_6.semantic",
     "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",

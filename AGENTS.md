@@ -1329,3 +1329,118 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - 2026-07-27 P54.6 Frontend JSON 默认深度无法承载真实脚本：现有 7 项 Frontend 测试只覆盖浅语法树，475 行 benchmark C# 的合法 AST 超过 `System.Text.Json` 默认 64 层，Frontend 在发布 artifact 时抛未处理 `JsonException`；即使单独放宽 writer，Semantic 的 `JsonDocument.Parse` 也会在同一默认深度拒绝。Prevention：Frontend artifact 的 writer 与所有 reader 共享一个显式、受限的最大深度；回归同时覆盖深控制流序列化和 Semantic CLI 消费，阶段 benchmark 在 UE Prepare 前先用真实 workload 执行一次独立 Frontend 冒烟。
 - 2026-07-27 P54.6 跨工具项目共享常量遗漏命名空间：Semantic 已有 Frontend project reference，但新增 `FrontendSerializer.MaximumDepth` 时未在 `SemanticCommandLine.cs` 导入 `AvidScript.CSharpFrontend`，聚焦 .NET 测试在运行前编译失败。Prevention：跨命名空间复用类型时补丁前先检查目标文件现有 using 与类型全名；改动后先构建最小 producer/consumer 项目，再启动较重的 UE Prepare。
 - 2026-07-27 P54.6 共享 project reference 的 .NET 测试错误并行：Frontend、Semantic 与 Guest 三个 `dotnet run` 同时构建 Release 依赖图，多个进程争写 `AvidScript.CSharpSemantic.dll`，产生与代码无关的 `CS2012` 文件锁失败。Prevention：只读且无共享输出的测试可并行；共享 project reference 和同一 configuration/obj 目录的 .NET build/run 固定按 producer 到 consumer 串行执行，除非显式分配独立输出目录。
+- 2026-07-27 P54.6 Guest IR 生产者与消费者版本漂移：Guest IR 已升级为 schema 2 / IR 1.1，但 C# build 发布门、PowerShell 集成测试和 UE Automation 仍硬编码 1 / 1.0，真实 benchmark 编译完成后被错误判为 `direct_abi_contract_invalid`。Prevention：制品版本升级必须用符号检索同步所有当前产物消费者；底层 validator 可显式保留 legacy 兼容，但发布门、manifest 和正式验收固定断言当前版本，并在真实样例 Prepare 前运行一次 BuildIntegration。
+- 2026-07-27 P54.6 Windows wildcard 路径再次传给 `rg`：一次合同检索把 `Content/CSharp/*.json` 作为路径参数，Win32 在读取前拒绝。Prevention：Windows 下 `rg` 路径参数只使用已确认存在的字面目录，扩展名筛选统一放入 `-g '*.json'`；提交命令前机械拒绝路径位置中的 `*` 与 `?`。
+- 2026-07-27 P54.6 集成夹具错误依赖 junction 递归：为让短路径 benchmark 工程复用主工程 canonical binding packages，先在生成目录下创建子目录 junction，但 `Get-ChildItem -Recurse` 没有把它们当作普通目录遍历，夹具仍报告 package missing。Prevention：需要跨工程复用只读制品的测试暴露显式 root 参数，并继续验证每个制品 hash；不依赖 shell 对 reparse point 的隐式递归语义，也不复制或改写 canonical 制品。
+- 2026-07-27 P54.6 Guest compiler 装饰器接口漂移：BuildIntegration 的 provenance mutation wrapper 使用 `@PSBoundParameters` 透传正式编译器，但正式调用新增 `DataLaneFusion` 后 wrapper 的 param block 未同步，负例在变异 Guest IR 前以未知参数失败。Prevention：测试装饰器必须镜像被包装命令的完整公开参数合同；正式编译器新增参数时用调用点检索同时更新所有 wrapper，并要求负例先证明目标变异已发生再断言稳定失败类别。
+- 2026-07-27 P54.6 Windows wildcard 路径规则记录后立即复发：检索 profile 测试时又把 `AvidScriptEditorCSharpProfile*` 放在 `rg` 路径位置，命令部分输出后仍以非法路径失败。Prevention：执行每条 `rg` 前不只检查主目录，还机械检查全部尾部 path token；模块名过滤只允许 `-g '*Profile*.cpp'`，绝不把通配符附在目录或文件路径上。
+- 2026-07-27 P54.6 generated S1 门禁与已实现 shape 自相矛盾：通用前置检查只接受 `value`，因此合法的 `FVector Function(const FVector&)` 在到达已实现的 `vector_value` 分支前被拒绝。Prevention：输入方向门禁明确接受 `value/const_ref`、拒绝 `ref/out`；每个新增 generated shape 都用真实 UHT 反射签名覆盖资格判断、descriptor shape 和生成 thunk，正式 profile Prepare 是阶段末必要验证。
+- 2026-07-27 P54.6 canonical regeneration 遗漏 generated S1 标记：C# emitter 从 descriptor 重建 reflection profile 时只恢复 `qualified_native_direct`，generated 函数和属性被降回 semantic，合法 descriptor 因而被自身判为 `descriptor_not_canonical`。Prevention：所有特殊 dispatch mode 由统一 class-rule 重建器恢复 include 集与专用子集；generated function、generated property 和 native direct 都必须有 generator 到 emitter 的 canonical roundtrip 回归。
+- 2026-07-27 P54.6 Windows PowerShell 5.1 长路径被误判为制品缺失：generated package 已完整发布，PowerShell 7 可读取，但 UE 启动的 `powershell.exe` 5.1 对 262 字符 reference source 路径返回 `Test-Path=false`，Build 报 `ASBI4202`。Prevention：Windows benchmark/CI 使用短路径工程，并限制正式 package identity 长度；错误为 missing 时同时记录绝对路径长度并用与 UE 相同的 Windows PowerShell 版本复验，不能按外层 PowerShell 7 结果推断子进程可见性。
+- 2026-07-27 P54.6 runtime slice 再生成遗漏 generated S1：切片服务在 P54.5 修复 direct dispatch 后仍把特殊规则命名和实现限定为 native-direct，导致完整包中的 generated function/property 在最小授权切片里降回 semantic 并触发 `slice_selection_mismatch`。Prevention：descriptor 的 canonical regeneration、runtime slice 与 emitter 共用同一特殊 dispatch 语义清单；切片必须按请求 stable ID 同时恢复 native-direct、generated function、generated property、writable property 与完整 include 集，真实 generated/data profile Prepare 作为阶段末闭环门禁。
+### 2026-07-27: generated S1 facade must follow the frozen typed ABI
+
+- Mistake: the runtime typed-host contract had already frozen compact signatures, but the descriptor generator and C# facade continued deriving the older generic reflected ABI. This produced `(iiiii)i` for an integer pair and `(iifffi)i` for `FVector`, so a real generated profile could not attach its runtime plan.
+- Prevention: treat each `generated_native_s1` shape as one end-to-end ABI contract shared by descriptor generation, C# facade rendering, VM linking, and runtime dispatch. Integer pair results return directly; vector calls use one 24-byte in-place guest buffer. Every new generated shape must assert its exact descriptor signature and emitted C# interop surface.
+
+### 2026-07-27: runtime reflection validation must recognize generated ABI shapes
+
+- Mistake: after fixing descriptor and facade generation, runtime reflection validation still recomputed every function signature with the generic reflected ABI and rejected the compact generated S1 signature as `binding_function_contract_mismatch`.
+- Prevention: generated bindings remain reflection-validated for owner, function, flags, parameters and canonical identity, but their host signature must be validated from the frozen generated shape contract. Keep the descriptor generator, facade renderer, VM linker and runtime reflection validator covered by the same exact-signature tests.
+
+### 2026-07-27: runtime slices need tamper-evident generated-code provenance
+
+- Mistake: generated C++ entries were registered under the complete authorization package hash, while automatic runtime slices had a distinct package hash and no explicit way to identify their generated-code source.
+- Prevention: schema v8 runtime slices that contain generated S1 bindings carry `generated_source_package_hash`; the field participates in the slice package hash and runtime registry acquisition. Never use registry-wide stable-id fallback or an unverified package search.
+
+### 2026-07-27: generated S1 source emission belongs in the product build pipeline
+
+- Mistake: the generated binding service existed only as a test-facing API, so `BuildProfile` could compile a generated S1 guest but never emitted or loaded the C++ call-site module needed by the runtime registry.
+- Prevention: automatic project profiles detect generated S1 descriptors, deterministically emit or reuse `AvidScriptGeneratedBindings`, and fail once with `generated_binding_build_required` until the Editor target is rebuilt and restarted. Do not hide this transition in benchmark-only commandlets.
+
+### 2026-07-27: normalize UHT module-relative headers for cross-module includes
+
+- Mistake: generated source copied `ModuleRelativePath` verbatim, producing `#include "Public/AvidScriptPerfFixture.h"`; Unreal module public include roots already point inside `Public`, so the real project module could not compile.
+- Prevention: generated binding IR strips leading `Public/` and legacy `Classes/` source-root prefixes before validating and emitting owner includes. Validate this with a real project module build, not only Engine headers or source-text tests.
+
+### 2026-07-27: benchmark plugin binaries live under the plugin root
+
+- Mistake: the six-lane benchmark orchestrator resolved the harness plugin root but hashed `UnrealEditor-AvidScriptPerfHarness.dll` under the project `Binaries` directory, so a valid isolated plugin build failed before calibration.
+- Prevention: derive the harness module artifact from `Plugins/AvidScriptPerfHarness/Binaries/Win64` and keep that root choice in the benchmark contract test. Evidence identity paths must match Unreal's actual module ownership.
+
+### 2026-07-27: the host owner handle is a root capability
+
+- Mistake: generated stable-object dispatch required every resolved handle to belong to session-created object ownership. `UE.Self` is host-injected and registry-valid but intentionally not session-owned, so passing Self as a `UObject` was rejected despite matching the active owner, class and world.
+- Prevention: stable borrow accepts the exact active `OwnerHandle` as a root capability; all other handles still require session ownership. Preserve exact slot and generation comparison so stale or foreign handles cannot use this exemption.
+
+### 2026-07-27: avoid broad recursive searches across the entire engine tree
+
+- Mistake: a recursive `Get-ChildItem` search across `C:\UnrealEngine` for optional Wasm tools timed out and produced no useful evidence.
+- Prevention: search known tool directories or use `rg --files` within a bounded subtree. Do not recursively enumerate the whole source engine for a non-blocking utility lookup.
+
+### 2026-07-27: keep PowerShell search patterns literal when grouping is unnecessary
+
+- Mistake: a broad `rg` expression embedded in a double-quoted PowerShell command contained unmatched grouping and failed in the shell before the search ran.
+- Prevention: use single-quoted literal patterns or separate simple `rg` searches for code discovery; only introduce regex grouping when it is required and locally testable.
+
+### 2026-07-27: generated imports must update the common host-call counter
+
+- Mistake: the generated S1 path updated dedicated hit/fallback/reject counters but not `HostImportCallCount`, so correct generated execution appeared to make only its final generic import.
+- Prevention: every Wasm-to-host ABI family updates the common crossing counter exactly once at its shared dispatch/status boundary; route-specific counters remain additional evidence rather than replacements for the common metric.
+- Validation: generated-route runtime tests assert both dedicated invocation evidence and the common host-call count before benchmark contracts are accepted.
+
+### 2026-07-27: data-lane fusion must cover the generated property facade
+
+- Mistake: the fusion pass was tested only with direct extern setter calls, while the product facade exposes a property setter wrapper around the generated import; enabled profiles therefore emitted byte-identical non-fused Wasm.
+- Prevention: generated facades place matching buffered-write metadata on the property wrapper and underlying import. The semantic layer admits wrapper metadata only from non-primary reference sources, and Guest IR validates the wrapper as an exact side-effect-free forwarding shape before fusion.
+- Validation: compile a product-shaped property facade and require distinct fused Guest IR/Wasm plus epoch and submit imports; direct-import unit fixtures alone are insufficient.
+
+### 2026-07-27: data-lane imports are not generated S1 invocations
+
+- Mistake: command-buffer submit returned through `RecordGeneratedStatus`, double-counting the common host call already recorded by the data-lane handler and polluting generated S1 hit metrics.
+- Prevention: typed data-lane imports own their host-call and data-bridge metrics; generated S1 route counters are reserved for generated binding thunks.
+
+### 2026-07-27: black-box test projects must not depend on internal ID helpers
+
+- Mistake: a Guest compiler test referenced the internal `CSharpGuestIds` helper from a separate test assembly and failed to compile.
+- Prevention: cross-assembly tests assert serialized public ID contracts such as the stable `function:` prefix, unless the production assembly explicitly grants internals access for a justified white-box test.
+
+### 2026-07-27: compiler-injected imports need a separate exact authorization contract
+
+- Mistake: binding-package authorization treated data-lane epoch and submit imports like user-selected UE bindings, so the first real fused profile was rejected after Guest IR generation.
+- Prevention: compiler-injected imports are admitted only when the profile enables the feature and the complete frozen Guest IR identity matches: internal ID, module, name, dispatch class, optimization metadata, binding ordinal, parameters and return type. They are not added to user binding packages or accepted by name alone.
+
+### 2026-07-27: gameplay benchmark output directories are caller-owned
+
+- Mistake: `Invoke-Phase54GameplayBenchmark.ps1` was invoked with a fresh path that had not been created, so its fail-closed preflight rejected the run before calibration.
+- Prevention: create and verify an empty unique evidence directory before invoking the orchestrator; the script writes sidecars but intentionally does not create or overwrite the evidence root.
+
+### 2026-07-27: expected metrics must cover optimized routes
+
+- Mistake: the data-oriented benchmark published and validated exact command counts but left its expected common host-call count at zero, weakening the evidence contract for the optimized route.
+- Prevention: every optimized benchmark lane publishes an independently derived expected host-call count, validates the observed count in the runner, and repeats the route-specific derivation in the external gate evaluator.
+
+### 2026-07-27: calibration ceilings must cover the fastest lane
+
+- Mistake: the diagnostic micro profile capped calibration at 100,000 iterations, so the native empty-callback lane could not reach the 0.25 ms timing floor on a fast desktop CPU.
+- Prevention: size diagnostic and formal calibration ceilings from the fastest zero-work lane, and freeze a contract that the formal ceiling is never below the validated diagnostic ceiling.
+
+### 2026-07-27: each benchmark route needs its own expected-hit model
+
+- Mistake: micro validation reused generated S1 expected-hit counts for the semantic lane, although supported route shapes differ; `scalar_noop` is semantic but not generated S1.
+- Prevention: derive and externally repeat separate semantic, generated S1, and data-oriented hit contracts. Shared workload correctness does not imply identical route instrumentation.
+
+### 2026-07-27: prepared-artifact integration tests need an explicit project root
+
+- Mistake: the phase-end integration host was launched from the physical plugin worktree without pointing it at the main project's prepared generated-binding root, so it failed before product assertions with a missing package prerequisite.
+- Prevention: tests that consume ignored project `Saved` artifacts run through a project-local plugin junction or receive the verified project artifact root explicitly; physical worktree execution is reserved for self-contained tracked tests.
+
+### 2026-07-27: PowerShell host success is not the last native exit code
+
+- Mistake: a phase-end wrapper checked `$LASTEXITCODE` after successful PowerShell contract scripts; one script intentionally ran rejected native child cases and left a stale non-zero value, so the wrapper stopped after reporting a pass.
+- Prevention: invoke PowerShell contract hosts under stop-on-error semantics and treat thrown errors or an explicit host result as failure. Inspect `$LASTEXITCODE` only immediately after a native executable whose exit code is the contract under test.
+
+### 2026-07-27: generated ABI surface changes must update the architecture allowlist
+
+- Mistake: the reviewed generated FVector in/out ABI buffer was added to the renderer without updating Phase 50's exact generated-declaration allowlist, so the stage gate correctly treated it as an unreviewed bespoke wrapper.
+- Prevention: every intentional generated declaration is added to both the literal-stream and exact-multiset allowlists in the same reviewed batch, followed by fixture tests before canonical hashes are refreshed.
