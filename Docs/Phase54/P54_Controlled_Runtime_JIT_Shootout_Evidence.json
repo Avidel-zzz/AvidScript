@@ -157,5 +157,5 @@
       "result": "wasmtime_pc_default_gate_passed"
     }
   },
-  "boundary_note": "The result compares one fixed identical WASM integer kernel through cached exports. It does not measure C# frontend, Unreal binding, lifecycle dispatch, GC, startup, memory, or the complete Puerts and AvidScript game scripting stacks."
+  "boundary_note": "The result compares one fixed identical WASM integer kernel through cached exports. Each V8, Wasmtime, and native sample performs 8192000 inner iterations, so short-call boundary cost is heavily amortized. V8 is identified as tiered JIT without per-sample Liftoff versus optimized-tier proof. The native execution artifact hash is a kernel contract tag, not a PE/COFF digest. The result does not measure C# frontend, Unreal binding, lifecycle dispatch, GC, startup, memory, or the complete Puerts and AvidScript game scripting stacks."
 }
