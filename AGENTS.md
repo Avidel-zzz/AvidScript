@@ -1494,3 +1494,33 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: an unquoted `HEAD^{tree}` revision expression was parsed by the PowerShell command layer instead of being passed literally to Git, so a post-commit identity command failed after the commit itself succeeded.
 - Prevention: quote revision expressions containing braces, for example `git rev-parse 'HEAD^{tree}'`, and keep identity verification separate from state-changing Git commands.
+
+### 2026-07-28: pass explicit inputs to ad-hoc evidence parsers
+
+- Mistake: an ad-hoc PowerShell parser read `$args[0]` even though the command did not invoke a script with positional arguments, so the aggregate path was null.
+- Prevention: bind evidence paths to named variables in the command, or invoke a checked script with explicit named parameters. Do not assume `shell_command` populates `$args`.
+
+### 2026-07-28: discover benchmark tool paths before invoking them
+
+- Mistake: a phase-end inspection assumed merge and evaluator scripts lived under the repository-root `Scripts` directory, while they are owned by `Benchmarks/PuertsComparison`; both reads failed before inspection.
+- Prevention: resolve unfamiliar tools with bounded `rg --files` first, then invoke the returned repository path. Do not infer ownership from a script filename.
+
+### 2026-07-28: preserve complete benchmark invocation parameters
+
+- Mistake: the first formal micro invocation omitted the mandatory `EditorExecutable` parameter and was rejected before Unreal started.
+- Prevention: derive formal invocations from one reviewed parameter block containing editor, project, profile, template and fresh output root. When repeating a sibling benchmark, change only profile and output identity.
+
+### 2026-07-28: exercise the successful formal evaluator path
+
+- Mistake: the centralized evaluator had only source-contract coverage for its formal path. A valid five-process result exposed three PowerShell representation bugs: equal `Compare-Object` returned null, nullable doubles were auto-unwrapped, and `OrderedDictionary` records collapsed multi-property grouping into one bucket.
+- Prevention: normalize command results with `@(...)`, cast present metrics to scalar `double`, store grouping records as `PSCustomObject`, and fail unless process and cross-process matrix cardinalities exactly match the profile. Keep a focused contract for all four invariants and run the evaluator on formal evidence before publishing conclusions.
+
+### 2026-07-28: inspect structured allocation evidence before aggregation
+
+- Mistake: an ad-hoc path-counter summary passed the structured `allocations` object to `Measure-Object -Sum`, producing many non-terminating conversion errors even though unrelated counters were calculated.
+- Prevention: inspect sample property types before aggregating; sum only numeric leaves such as `allocations.count` when the status declares them available, and omit unavailable metrics instead of coercing their wrapper object.
+
+### 2026-07-28: run phase workflow commands in the protected-dirty owner worktree
+
+- Mistake: the workflow CLI was first called as `help` without its mandatory `-Phase`, then `status` was run in an isolated worktree that intentionally does not contain the main worktree's protected dirty files; both preflights rejected the call.
+- Prevention: read the CLI parameter block before invocation, always pass `-Phase`, and execute protected-dirty state transitions from the worktree that owns the recorded baseline after fast-forwarding reviewed commits. Use isolated worktrees for implementation and clean evidence, not for validating another worktree's local-only files.

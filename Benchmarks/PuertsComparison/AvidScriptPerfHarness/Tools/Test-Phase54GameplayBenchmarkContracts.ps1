@@ -134,6 +134,17 @@ Assert-True ($evaluatorText.Contains('exact zero-based process_run sequence') -a
     $evaluatorText.Contains('distinct lowercase SHA-256 request identities') -and
     $evaluatorText.Contains('evaluated profile bytes')) `
     '统一 Gate 必须拒绝跨 run、重复 request、跳号进程与 profile bytes 不匹配。'
+Assert-True ($evaluatorText.Contains(
+        '@(Compare-Object -ReferenceObject $expectedProcessRuns') -and
+    $evaluatorText.Contains('[double]$metricValue = $Value')) `
+    '统一 Gate 必须兼容完全相等的进程序列与 PowerShell 解包后的 Nullable 数值。'
+Assert-True ($evaluatorText.Contains(
+        '$processStatistics.Add([pscustomobject][ordered]@{') -and
+    $evaluatorText.Contains('Gameplay process statistic matrix differs') -and
+    $evaluatorText.Contains('Gameplay cross-process statistic matrix differs') -and
+    $evaluatorText.Contains(
+        'Gameplay cross-process statistic process count differs')) `
+    'Gameplay 聚合必须使用可分组对象，并锁定完整进程与跨进程矩阵。'
 Assert-True (-not [regex]::IsMatch(
     $runnerText,
     'return\s+Workload\s*==\s*EAvidScriptPerfWorkload::PureInteger\s*\?\s*0')) `

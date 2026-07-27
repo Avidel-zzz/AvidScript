@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase54.6-performance-leadership-formal",
+  "generated_at_utc": "2026-07-27T23:49:07.5124891Z",
+  "data_boundary": "external_raw_evidence",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "candidate": {
+      "commit": "246f9a9201a7a8b8d96ec98e6f7f7d7170d2a3d8",
+      "tree": "25bfd4f554c490f1017bafab4d37e8e617b50b7d",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "ue_build_id": "UE5-CL-0",
+      "editor_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2 10.0.26200.8875"
+    },
+    "profiles": {
+      "gameplay": {
+        "id": "phase54.6-gameplay-formal-v1",
+        "sha256": "e2cc4255903425d311f018db64b8ab36583d1e96f4c5853b8cab81b89ae387c8",
+        "run_id": "471f6fc0-3153-41cd-986c-e1e5612beef4",
+        "process_runs": 5,
+        "warmup_samples": 5,
+        "timed_samples": 30,
+        "lanes": 6,
+        "workloads": 2,
+        "timed_observations": 1800
+      },
+      "micro": {
+        "id": "phase54.6-micro-formal-v1",
+        "sha256": "318aefaac13ad5c46a4874d2bf28b60caff29047dfbe5e96d61e4f4b90df326e",
+        "run_id": "57edf9f0-151f-41e7-943f-19523afbcba9",
+        "process_runs": 5,
+        "warmup_samples": 5,
+        "timed_samples": 30,
+        "lanes": 6,
+        "workloads": 10,
+        "timed_observations": 9000
+      },
+      "controlled_runtime": {
+        "kernels": 12,
+        "process_runs": 5,
+        "formal_observations": 600
+      },
+      "physical_cost": {
+        "process_runs": 5,
+        "formal_observations": 750
+      }
+    },
+    "runtimes": {
+      "puerts_v8": {
+        "commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "execution_mode": "jit",
+        "runtime_sha256": "6e29a6bbd329fa39f7c89f6cd03b63425756300fe6c7dc74f1b194b6b6baaabd"
+      },
+      "wasmtime": {
+        "version": "45.0.0",
+        "backend_id": "wasmtime.cranelift.jit",
+        "execution_mode": "jit",
+        "runtime_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42"
+      },
+      "wamr": {
+        "version": "2.4.4",
+        "backend_id": "wamr.interpreter",
+        "simd": true,
+        "simde": true,
+        "library_sha256": "5864ca243385c6b070b93dc0ae75d91b1b41f0f61ffa7df257dfc5cac14f9a1c"
+      }
+    },
+    "source_evidence": {
+      "gate_report_sha256": "239fed0d3d4df65a2ca23081781ae696f2f7ee3b1ce8f6dd7d6533a2647908e1",
+      "controlled_suite_sha256": "77bac14d24e1a164bb108194a42a45299fcdb540e428b6ebe705a195927a6bc0",
+      "focused_simd_probe_sha256": "ca78db4eca764fc9f1585790f09f11f63aa517efb0e4f16d79498c5f78efa761",
+      "physical_cost_sha256": "d56d21b318e9df1d0c2f0325a31be923315e41ad6ae1f14b300e78117e88e965",
+      "gameplay_process_sha256": [
+        "4adf63337a3d64c45989007d6b38cda47970c5131ef83b9b54ffcff850feded5",
+        "e3a2cac8f7d58cea3bd8a88f5c4aa6bf84d1e3101a85444c616fef55272c629f",
+        "2ba079baf41d7b0894d246581b73e1f0a2dd79ef673d9e0d89a3d2dab017355e",
+        "88689209382c94e62696427ddfccb5d6efbc8b488c325c47d9d07f8d5c9f36c1",
+        "40251ebffb3c8af28287f36697f812ddf9ced44c19c1d3bed5289b86a2f9218f"
+      ],
+      "micro_process_sha256": [
+        "36c1177bd83e11e318f3a44b4d3e16124802c83bf5425afca48f50c83895a78f",
+        "e13ec0f85a4b96cc35a36172f7483b3cfa23b26504a71f249b3758d05b7c7c1d",
+        "49470096ce9b1e0a5aad0474e90532eefa64d235b2e55b659d0fa4acfbefed1e",
+        "34b457e1bc608421e6db26513d7f23be25fdb23134123a11f186d3ff0a424f6a",
+        "f4956a0ddccf3693598c9d5ef2c53dea50bb726b5e9854572791be6a0f42d9a3"
+      ]
+    },
+    "statistics_method": {
+      "percentile": "nearest_rank",
+      "primary_replicate": "process_summary",
+      "gameplay_p50": "p50_of_process_p50",
+      "gameplay_p95": "p95_of_process_p50",
+      "gameplay_tail": "median_of_process_p95",
+      "mad": "mad_of_process_p50",
+      "unit": "ns_per_logical_operation"
+    },
+    "controlled_runtime": {
+      "correctness_failures": 0,
+      "fallback_used": false,
+      "p50_wasmtime_over_v8_geometric_mean": 0.9771570527501626,
+      "p95_wasmtime_over_v8_geometric_mean": 1.015893835024614,
+      "mad_wasmtime_over_v8_geometric_mean": 0.8453836776323124,
+      "p50_kernel_win_rate": 0.75,
+      "p95_kernel_win_rate": 0.3333333333333333,
+      "leadership_gate_passed": false
+    },
+    "physical_cost_ns_per_iteration": {
+      "typed_empty_import": {
+        "p50": 4.5785,
+        "p95": 6.315
+      },
+      "generic_empty_import": {
+        "p50": 32.5775,
+        "p95": 36.544
+      },
+      "typed_i32_pair_import": {
+        "p50": 4.5325,
+        "p95": 6.793
+      },
+      "typed_empty_under_25ns_gate_passed": true,
+      "typed_empty_explained_ratio": 0.21415162454873649
+    },
+    "micro_p50_ns_per_operation": {
+      "scalar_add_int32": {
+        "native_cpp": 1.7495849609375,
+        "puerts_v8_reflection": 103.884375,
+        "puerts_v8_static": 27.7,
+        "avidscript_wasmtime_semantic": 664.3625,
+        "avidscript_wasmtime_generated_s1": 54.121875,
+        "avidscript_wasmtime_data_oriented": 54.31328125
+      },
+      "property_get_set": {
+        "native_cpp": 0.97744140625,
+        "puerts_v8_reflection": 99.934375,
+        "puerts_v8_static": 60.42109375,
+        "avidscript_wasmtime_semantic": 235.859375,
+        "avidscript_wasmtime_generated_s1": 197.090625,
+        "avidscript_wasmtime_data_oriented": 196.621875
+      },
+      "callback_empty": {
+        "native_cpp": 1.03125,
+        "puerts_v8_reflection": 134.921875,
+        "puerts_v8_static": 137.453125,
+        "avidscript_wasmtime_semantic": 381.39375,
+        "avidscript_wasmtime_generated_s1": 385.8625,
+        "avidscript_wasmtime_data_oriented": 382.7125
+      },
+      "vector_value": {
+        "native_cpp": 1.32197265625,
+        "puerts_v8_reflection": 1282.525,
+        "puerts_v8_static": 1053.8125,
+        "avidscript_wasmtime_semantic": 707.4,
+        "avidscript_wasmtime_generated_s1": 199.96875,
+        "avidscript_wasmtime_data_oriented": 200.85
+      }
+    },
+    "gameplay_results": [
+      { "lane": "native_cpp", "workload": "gameplay_frame_small", "p50": 0.7621569511217948, "p95": 0.7704025659805689, "mad": 0.008245614858774064, "median_process_p95": 0.77668214455629 },
+      { "lane": "puerts_v8_reflection", "workload": "gameplay_frame_small", "p50": 205.88691907051282, "p95": 210.87239583333334, "mad": 2.9572315705128176, "median_process_p95": 262.12690304487177 },
+      { "lane": "puerts_v8_static", "workload": "gameplay_frame_small", "p50": 140.96053685897436, "p95": 146.09375, "mad": 1.5074118589743648, "median_process_p95": 199.1736778846154 },
+      { "lane": "avidscript_wasmtime_semantic", "workload": "gameplay_frame_small", "p50": 490.6650641025641, "p95": 538.9773637820513, "mad": 11.713741987179446, "median_process_p95": 705.1983173076923 },
+      { "lane": "avidscript_wasmtime_generated_s1", "workload": "gameplay_frame_small", "p50": 83.76903044871794, "p95": 91.71799879807692, "mad": 0.9652944711538396, "median_process_p95": 94.76287059294872 },
+      { "lane": "avidscript_wasmtime_data_oriented", "workload": "gameplay_frame_small", "p50": 106.89978966346153, "p95": 112.51252003205128, "mad": 1.0829827724358978, "median_process_p95": 124.86603565705128 },
+      { "lane": "native_cpp", "workload": "gameplay_frame_dense", "p50": 0.8292805064808239, "p95": 0.8360949429598722, "mad": 0.0024015253240411427, "median_process_p95": 0.8607690984552557 },
+      { "lane": "puerts_v8_reflection", "workload": "gameplay_frame_dense", "p50": 330.96590909090907, "p95": 333.7535511363636, "mad": 1.85546875, "median_process_p95": 436.96732954545456 },
+      { "lane": "puerts_v8_static", "workload": "gameplay_frame_dense", "p50": 229.931640625, "p95": 234.73899147727272, "mad": 1.353870738636374, "median_process_p95": 418.60795454545456 },
+      { "lane": "avidscript_wasmtime_semantic", "workload": "gameplay_frame_dense", "p50": 535.6534090909091, "p95": 561.5589488636364, "mad": 9.339488636363626, "median_process_p95": 761.3458806818181 },
+      { "lane": "avidscript_wasmtime_generated_s1", "workload": "gameplay_frame_dense", "p50": 106.4364346590909, "p95": 110.21950461647727, "mad": 1.5358664772727195, "median_process_p95": 116.16432883522727 },
+      { "lane": "avidscript_wasmtime_data_oriented", "workload": "gameplay_frame_dense", "p50": 126.18963068181819, "p95": 127.49245383522727, "mad": 1.3028231534090793, "median_process_p95": 134.4482421875 }
+    ],
+    "gameplay_path_evidence": [
+      { "lane": "avidscript_wasmtime_semantic", "workload": "gameplay_frame_small", "samples": 150, "host_import_call_count": 2995350, "semantic_hit_count": 2995200 },
+      { "lane": "avidscript_wasmtime_semantic", "workload": "gameplay_frame_dense", "samples": 150, "host_import_call_count": 1689750, "semantic_hit_count": 1689600 },
+      { "lane": "avidscript_wasmtime_generated_s1", "workload": "gameplay_frame_small", "samples": 150, "host_import_call_count": 11980950, "generated_s1_hit_count": 11980800, "generated_s1_fallback_count": 0, "generated_s1_reject_count": 0 },
+      { "lane": "avidscript_wasmtime_generated_s1", "workload": "gameplay_frame_dense", "samples": 150, "host_import_call_count": 13516950, "generated_s1_hit_count": 13516800, "generated_s1_fallback_count": 0, "generated_s1_reject_count": 0 },
+      { "lane": "avidscript_wasmtime_data_oriented", "workload": "gameplay_frame_small", "samples": 150, "host_import_call_count": 9523350, "generated_s1_hit_count": 7065600, "data_lane_command_count": 4915200, "data_lane_crossing_count": 2457600, "data_lane_rejected_buffer_count": 0 },
+      { "lane": "avidscript_wasmtime_data_oriented", "workload": "gameplay_frame_dense", "samples": 150, "host_import_call_count": 5529750, "generated_s1_hit_count": 4300800, "data_lane_command_count": 2457600, "data_lane_crossing_count": 1228800, "data_lane_rejected_buffer_count": 0 }
+    ],
+    "gates": [
+      { "name": "wasmtime_v8_geo_ratio", "value": 1.015893835024614, "threshold": { "maximum": 0.95 }, "pass": false },
+      { "name": "kernel_win_rate", "value": 0.3333333333333333, "threshold": { "minimum": 0.6 }, "pass": false },
+      { "name": "semantic_vs_puerts_reflection", "value": 6.395211021869265, "threshold": { "maximum": 0.8 }, "pass": false },
+      { "name": "s1_scalar_ns", "value": 54.121875, "threshold": { "maximum": 25.0 }, "pass": false },
+      { "name": "s1_vs_puerts_static", "value": 1.9538583032490977, "threshold": { "maximum": 0.9 }, "pass": false },
+      { "name": "s1_property_ns", "value": 197.090625, "threshold": { "maximum": 50.0 }, "pass": false },
+      { "name": "callback_ns", "value": 385.8625, "threshold": { "maximum": 150.0 }, "pass": false },
+      { "name": "callback_vs_puerts", "value": 2.859895773016792, "threshold": { "maximum": 0.85 }, "pass": false },
+      { "name": "vector_vs_phase54_baseline", "value": 0.27157674939734494, "threshold": { "maximum": 0.85 }, "pass": true },
+      { "name": "typed_empty_explained_ratio", "value": 0.21415162454873649, "threshold": { "minimum": 0.7 }, "pass": false },
+      { "name": "small_vs_best_puerts", "value": 0.5942729242903328, "p95_ratio": 0.47578009102109575, "threshold": { "maximum": 0.7 }, "pass": true },
+      { "name": "dense_vs_best_puerts", "value": 0.5488136836618468, "p95_ratio": 0.3211793773328809, "threshold": { "maximum": 0.7 }, "pass": true }
+    ],
+    "gate_summary": {
+      "passed": 3,
+      "failed": 9,
+      "not_measured": 0,
+      "absolute_leadership_achieved": false,
+      "gameplay_leadership_achieved": true
+    }
+  },
+  "verification": {
+    "ue58_no_clean_target_build": "passed",
+    "automation": "16/16 passed",
+    "static_and_dotnet_gate": "passed",
+    "controlled_runtime_contracts": "passed",
+    "formal_correctness": "0 failures",
+    "fallback_used": false,
+    "gameplay_gate_matrix": "12/12 measured",
+    "evaluator_contract_regression": "passed"
+  }
+}

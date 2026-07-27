@@ -117,18 +117,19 @@ function New-GateResult {
         }
     }
 
+    [double]$metricValue = $Value
     $passed = $true
     if ($Threshold.PSObject.Properties.Name -contains 'maximum') {
-        $passed = $passed -and ($Value.Value -le [double]$Threshold.maximum)
+        $passed = $passed -and ($metricValue -le [double]$Threshold.maximum)
     }
     if ($Threshold.PSObject.Properties.Name -contains 'minimum') {
-        $passed = $passed -and ($Value.Value -ge [double]$Threshold.minimum)
+        $passed = $passed -and ($metricValue -ge [double]$Threshold.minimum)
     }
     return [ordered]@{
         name = $Name
         status = $passed ? 'pass' : 'fail'
         pass = $passed
-        value = $Value.Value
+        value = $metricValue
         threshold = $Threshold
         reason = $Reason
     }
@@ -173,7 +174,7 @@ function Get-Phase54MicroStatistics {
     $requestHashes = @($microResults.request_sha256 | ForEach-Object {
         [string]$_
     })
-    if ((Compare-Object -ReferenceObject @(0..4) -DifferenceObject $processRuns).Count -ne 0 -or
+    if (@(Compare-Object -ReferenceObject @(0..4) -DifferenceObject $processRuns).Count -ne 0 -or
         $runIds.Count -ne 1 -or [string]::IsNullOrWhiteSpace($runIds[0]) -or
         @($requestHashes | Sort-Object -Unique).Count -ne 5 -or
         @($requestHashes | Where-Object { $_ -cnotmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
@@ -402,7 +403,7 @@ if ($processRuns.Count -ne $results.Count) {
     throw 'Process results must have unique process_run values.'
 }
 $expectedProcessRuns = @(0..([int]$profile.process_runs - 1))
-if ((Compare-Object -ReferenceObject $expectedProcessRuns -DifferenceObject $processRuns).Count -ne 0) {
+if (@(Compare-Object -ReferenceObject $expectedProcessRuns -DifferenceObject $processRuns).Count -ne 0) {
     throw 'Process results must contain the exact zero-based process_run sequence.'
 }
 $runIds = @($results | ForEach-Object { [string]$_.run_id } | Sort-Object -Unique)
@@ -612,7 +613,7 @@ $processStatistics = [Collections.Generic.List[object]]::new()
 foreach ($group in @($sampleRows | Group-Object process_run, lane, workload)) {
     $first = $group.Group[0]
     $values = [double[]]@($group.Group | ForEach-Object { $_.ns_per_operation })
-    $processStatistics.Add([ordered]@{
+    $processStatistics.Add([pscustomobject][ordered]@{
         process_run = $first.process_run
         lane = $first.lane
         workload = $first.workload
@@ -623,6 +624,17 @@ foreach ($group in @($sampleRows | Group-Object process_run, lane, workload)) {
         peak_memory_bytes = [uint64](($group.Group |
             Measure-Object -Property peak_memory_bytes -Maximum).Maximum)
     })
+    if ($values.Count -ne [int]$profile.timed_samples) {
+        throw 'Gameplay process statistic sample count differs from the profile.'
+    }
+}
+
+$expectedProcessStatistics =
+    [int]$profile.process_runs *
+    @($profile.lanes).Count *
+    @($profile.workloads).Count
+if ($processStatistics.Count -ne $expectedProcessStatistics) {
+    throw "Gameplay process statistic matrix differs: $($processStatistics.Count)/$expectedProcessStatistics."
 }
 
 $crossProcessStatistics = [Collections.Generic.List[object]]::new()
@@ -651,6 +663,15 @@ foreach ($group in @($processStatistics | Group-Object lane, workload)) {
         p50_of_process_mad_ns_per_operation =
             Get-NearestRank -Values $madValues -Percentile 0.50
     })
+    if ($group.Count -ne [int]$profile.process_runs) {
+        throw 'Gameplay cross-process statistic process count differs from the profile.'
+    }
+}
+
+$expectedCrossProcessStatistics =
+    @($profile.lanes).Count * @($profile.workloads).Count
+if ($crossProcessStatistics.Count -ne $expectedCrossProcessStatistics) {
+    throw "Gameplay cross-process statistic matrix differs: $($crossProcessStatistics.Count)/$expectedCrossProcessStatistics."
 }
 
 $supplementalGateInputs = $null
