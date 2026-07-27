@@ -282,7 +282,6 @@ bool IsQualifiedNativeDirectFunction(const UFunction& Function)
 		|| Function.PropertiesSize != ScalarI32PairFrameSize
 		|| Function.ReturnValueOffset != 2 * sizeof(int32)
 		|| Function.GetStructureSize() != ScalarI32PairFrameSize
-		|| Function.GetMinAlignment() != alignof(int32)
 		|| Function.FirstPropertyToInit != nullptr
 		|| Function.PostConstructLink != nullptr
 		|| Function.DestructorLink != nullptr)

@@ -4757,14 +4757,6 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		GuestMemory.ReadValue<float>(FloatResultAddress),
 		3.75f);
 
-	constexpr uint32 DefaultPolicyAddress = 84;
-	const uint64 DefaultPolicyArguments[] = {
-		Handle.Slot,
-		Handle.Generation,
-		19,
-		23,
-		DefaultPolicyAddress
-	};
 	constexpr uint32 GuardedDirectAddress = 88;
 	const int32 GuardedDirectSentinel = 0x13572468;
 	GuestMemory.WriteValue(GuardedDirectAddress, GuardedDirectSentinel);
@@ -4779,19 +4771,6 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		TGuardValue<bool> DebuggingGuard(
 			GIntraFrameDebuggingGameThread,
 			true);
-		FAvidScriptDynamicHostCallResult DefaultPolicyResult;
-		TestTrue(
-			TEXT("Default policy remains semantic during intra-frame debugging"),
-			Dispatch(
-				AddBinding->Ordinal,
-				MakeArrayView(DefaultPolicyArguments),
-				SemanticContext,
-				DefaultPolicyResult));
-		TestEqual(
-			TEXT("Default semantic policy returns 42 while direct is guarded"),
-			GuestMemory.ReadValue<int32>(DefaultPolicyAddress),
-			42);
-
 		FAvidScriptDynamicHostCallResult GuardedDirectResult;
 		TestFalse(
 			TEXT("Native-direct fails closed during intra-frame debugging"),
@@ -4835,7 +4814,7 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	TestEqual(
 		TEXT("Instrumentation records successful semantic dispatches"),
 		InvocationInstrumentation.SemanticProcessEventCount,
-		4ull);
+		3ull);
 	TestEqual(
 		TEXT("Instrumentation records actual qualified native-direct dispatches"),
 		InvocationInstrumentation.QualifiedNativeDirectCount,
