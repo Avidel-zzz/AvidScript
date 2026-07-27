@@ -1267,12 +1267,24 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		FunctionSelections,
 		OutSelectionResult))
 	{
+		const bool bHasClassPropertySurface =
+			Profile.Classes.ContainsByPredicate(
+				[](const FAvidScriptReflectedClassSelection& Rule)
+				{
+					return Rule.bDiscoverReadableProperties
+						|| !Rule.IncludeProperties.IsEmpty()
+						|| !Rule.WritableProperties.IsEmpty();
+				});
 		const bool bHasNonFunctionSurface =
 			!Profile.ExplicitProperties.IsEmpty()
+			|| bHasClassPropertySurface
 			|| !Profile.SelfClassPath.IsEmpty()
 			|| !ClassReferences.IsEmpty()
 			|| !ObjectFactories.IsEmpty();
-		if (OutSelectionResult.ErrorCategory != TEXT("profile_empty") || !bHasNonFunctionSurface)
+		const bool bHasExpectedEmptyFunctionSelection =
+			OutSelectionResult.ErrorCategory == TEXT("profile_empty")
+			|| OutSelectionResult.ErrorCategory == TEXT("selection_empty");
+		if (!bHasExpectedEmptyFunctionSelection || !bHasNonFunctionSurface)
 		{
 			SetFailure(
 				OutResult,

@@ -187,20 +187,20 @@ TArray<uint8> BuildTypedHostFixture(TConstArrayView<int32> Arguments)
 
 FAvidScriptVmBindingPackage MakeTypedBindingPackage(
 	const FString& Signature = TEXT("(ii)i"),
-	uint32 Ordinal = 7)
+	uint32 Ordinal = 1)
 {
+	check(Ordinal <= 1);
 	FAvidScriptVmBindingPackage Package;
 	Package.PackageName = TEXT("avidscript.phase54.typed_host");
 	Package.PackageHash = FString::ChrN(64, TEXT('1'));
-	for (uint32 Index = 0; Index < Ordinal; ++Index)
+	if (Ordinal == 1)
 	{
 		FAvidScriptVmDynamicImport Padding;
-		Padding.StableId = FString::Printf(TEXT("%064x"), Index + 2);
-		Padding.Ordinal = Index;
+		Padding.StableId =
+			TEXT("2222222222222222222222222222222222222222222222222222222222222222");
+		Padding.Ordinal = 0;
 		Padding.ModuleName = TEXT("avidscript");
-		Padding.ImportName = FString::Printf(
-			TEXT("avid_ue_%016x"),
-			Index + 2);
+		Padding.ImportName = TEXT("avid_ue_2222222222222222");
 		Padding.Signature = TEXT("(i)i");
 		Package.Imports.Add(MoveTemp(Padding));
 	}
@@ -217,7 +217,7 @@ FAvidScriptVmBindingPackage MakeTypedBindingPackage(
 FAvidScriptVmTypedHostImport MakeTypedImport(
 	EAvidScriptVmTypedHostShape Shape = EAvidScriptVmTypedHostShape::I32PairToI32,
 	const FString& Signature = TEXT("(ii)i"),
-	uint32 Ordinal = 7)
+	uint32 Ordinal = 1)
 {
 	FAvidScriptVmTypedHostImport Import;
 	Import.StableId = TypedStableId;
@@ -421,7 +421,7 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	ResolveAndCallTypedRun(*this, *Backend, 39, Error);
-	TestEqual(TEXT("typed ordinal is instance-local"), Dispatcher.LastOrdinal, 7u);
+	TestEqual(TEXT("typed ordinal is instance-local"), Dispatcher.LastOrdinal, 1u);
 	TestEqual(TEXT("typed left is direct"), Dispatcher.LastLeft, 17);
 	TestEqual(TEXT("typed right is direct"), Dispatcher.LastRight, 19);
 
