@@ -1645,10 +1645,16 @@ function Invoke-Phase50Contracts {
         'owner_get_generation|OwnerGetGeneration|()i|nullptr',
         'avid_owner_get_handle|OwnerGetHandle|()I|nullptr',
         'timer_set_once|TimerSetOnce|(fi)i|nullptr',
-        'timer_cancel|TimerCancel|(i)i|nullptr'
+        'timer_cancel|TimerCancel|(i)i|nullptr',
+        'avid_data_lane_epoch|DataLaneGetEpoch|()I|nullptr',
+        'avid_data_lane_submit|DataLaneSubmit|(ii)i|nullptr'
     )
     $CompatibilityNativeRecords = @(
-        $CanonicalNativeRecords | Where-Object { -not $_.StartsWith('avid_owner_get_handle|') })
+        $CanonicalNativeRecords | Where-Object {
+            -not $_.StartsWith('avid_owner_get_handle|') `
+                -and -not $_.StartsWith('avid_data_lane_epoch|') `
+                -and -not $_.StartsWith('avid_data_lane_submit|')
+        })
     $CompatibilityNames = @(
         $CompatibilityNativeRecords | ForEach-Object { ($_ -split '\|', 2)[0] })
     Test-NativeSymbolArray $HostBindings 'GNativeSymbols' $CanonicalNativeRecords $Violations

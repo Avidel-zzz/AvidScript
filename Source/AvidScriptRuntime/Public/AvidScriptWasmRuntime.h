@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptGameplayEvent.h"
+#include "AvidScriptDataBridgeTypes.h"
 #include "AvidScriptWasmDiagnostics.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
@@ -66,6 +67,8 @@ struct FAvidScriptWasmSmokeResult
 	int32 LastHostImportResult = 0;
 	FAvidScriptVmBackendInfo BackendInfo;
 	FAvidScriptWasmRuntimeMetrics Metrics;
+	FAvidScriptDataBridgeMetrics DataBridgeMetrics;
+	FAvidScriptBindingInvocationInstrumentation BindingInstrumentation;
 };
 
 struct FAvidScriptWasmHostContext
@@ -141,6 +144,15 @@ public:
 	void ClearStateWriteFailureForTesting();
 	void BeginTypedCallbackEpochForTesting() { BeginTypedCallbackEpoch(); }
 	void EndTypedCallbackEpochForTesting() { EndTypedCallbackEpoch(); }
+	void SetBindingPackageForTesting(
+		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage)
+	{
+		BindingPackage = InBindingPackage;
+	}
+	uint64 GetActiveCallbackEpochForTesting() const
+	{
+		return CallbackEpochStack.IsEmpty() ? 0 : CallbackEpochStack.Last();
+	}
 	bool ResolveSelfCapabilityForTesting(
 		int32 SelfSlot,
 		int32 SelfGeneration,
@@ -170,6 +182,7 @@ public:
 	int32 GetEventCallbackCount() const { return EventCallbackCount; }
 	const FString& GetModuleId() const { return ModuleId; }
 	const FAvidScriptWasmRuntimeMetrics& GetMetrics() const { return Metrics; }
+	const FAvidScriptDataBridgeMetrics& GetDataBridgeMetrics() const { return DataBridgeMetrics; }
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
 	int32 HandleHostAddI32Import(int32 Input);
@@ -177,6 +190,8 @@ public:
 	int32 HandleOwnerGetSlotImport();
 	int32 HandleOwnerGetGenerationImport();
 	int64 HandleOwnerGetHandleImport();
+	int64 HandleDataLaneGetEpochImport();
+	int32 HandleDataLaneSubmitImport(TConstArrayView<uint8> Bytes);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
@@ -325,6 +340,8 @@ private:
 	FAvidScriptLifecycleStateMachine LifecycleState;
 	FAvidScriptWasmRuntimeMetrics Metrics;
 	FAvidScriptSelfCapability SelfCapability;
+	FAvidScriptDataBridgeBudget DataBridgeBudget;
+	FAvidScriptDataBridgeMetrics DataBridgeMetrics;
 	TArray<uint64, TInlineAllocator<4>> CallbackEpochStack;
 	uint64 NextCallbackEpoch = 0;
 	uint64 ReloadEpoch = 0;

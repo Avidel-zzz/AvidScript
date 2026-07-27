@@ -17,8 +17,9 @@ internal static class CSharpDataLaneFusionTests
         ThreeSettersProduceExecutableCommandBuffer();
         TwoSettersDoNotFuse();
         CallsStoresAndReadAfterWriteSplitFusionGroups();
+        PotentiallyTrappingPreparationSplitsFusionGroups();
         DirectExternPropertyPreservesImportMetadata();
-        return 4;
+        return 5;
     }
 
     private static void ThreeSettersProduceExecutableCommandBuffer()
@@ -204,6 +205,33 @@ internal static class CSharpDataLaneFusionTests
                 .Count(instruction => instruction.Op == "call"
                     && instruction.TargetId?.Contains(".set_Value(int32):void", StringComparison.Ordinal) == true) == 8,
             "barriers should retain every original setter call");
+    }
+
+    private static void PotentiallyTrappingPreparationSplitsFusionGroups()
+    {
+        const string body = """
+            target.Value = 1;
+            target.Value = 2;
+            int computed = 100 / target.Slot;
+            target.Value = computed;
+            target.Value = 4;
+            target.Value = 5;
+            """;
+        GuestModule module = Lower(body, "Scripts/DataLaneTrappingPreparation.cs").Module;
+        GuestFunction function = MainFunction(module);
+        GuestInstruction[] instructions = function.Blocks
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(module.Imports.Count(import => import.DispatchClass == "data_lane") == 2,
+            "the three setters after a potentially trapping binary operation should still fuse");
+        Assert(instructions.Count(instruction =>
+                instruction.Op == "call"
+                && instruction.TargetId?.Contains(".set_Value(int32):void", StringComparison.Ordinal) == true) == 2,
+            "writes before a potentially trapping binary operation must remain observable before the trap");
+        Assert(instructions.Count(instruction =>
+                instruction.Op == "binary") == 1,
+            "the original potentially trapping binary operation should remain in place");
     }
 
     private static void DirectExternPropertyPreservesImportMetadata()

@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.6 恢复核对再次用分号连接 Git 查询：在一条 `shell_command` 中串联 `git status --short -- Tools` 与 `git log -3 --oneline`，重复破坏“一次调用一个逻辑命令”的审计边界。Prevention：所有 shell 调用在发送前对完整命令字符串做字面扫描；出现 `;`、`&&`、`||` 或多个顶层命令时直接拆分，Git 状态与历史即使属于同一次恢复核对也必须分别调用。
 - 2026-07-27 P54.6 ignored SDD 报告被代理强制跟踪复发：Task 2/3 提交把已被 `.gitignore` 排除的 `.superpowers/sdd/.../task-*-report.md` 纳入产品历史，违背仓库洁净度和既有 P53.3 规则。Prevention：编码代理提交前必须执行 `git ls-files --cached .superpowers` 并要求空结果；机械禁止 `git add -f`、`git add --force` 和任何被忽略路径，执行报告仅留本地，产品实现文档写入 `Docs/PhaseXX`。
 - 2026-07-27 P54.6 子代理提交 SHA 报告手误：代理最终消息把实际可达的 `6aaff016` 写成 `6aaff015`，控制器首次按错误对象检查而得到 `bad object`。Prevention：阶段状态不得直接采用消息中的手录 SHA；先在 owning worktree 执行 `git rev-parse HEAD`，再用 `git cat-file -e '<sha>^{commit}'` 验证对象可达，只有机器输出可写入 tracker、brief 或发布证据。
 - 2026-07-27 P54.6 typed C 窄探针错误选择不完整系统工具链：先后用 `VsDevCmd.bat` 和 `vcvars64.bat` 启动独立 MSVC `/Zs`，随后确认本机 VS 对应 Windows SDK 只有 UCRT 片段且缺少 `um`，两个 translation unit 均在标准头阶段停止，未检查产品代码。Prevention：启动独立 MSVC 探针前先验证同一 toolset 的 VC include 与 Windows SDK `ucrt/shared/um` 四项完整；任一缺失就不再重试临时宿主，C/C++ ABI 统一由仓库既定 UE5.8 UBT/AutoSDK Gate 编译，宿主初始化失败不得算产品失败或编译证据。

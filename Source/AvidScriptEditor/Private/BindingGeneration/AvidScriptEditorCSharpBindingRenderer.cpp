@@ -518,6 +518,15 @@ void AppendPropertySetterInterop(
 	const TArray<FString>& NativeArguments,
 	FCSharpRenderedMethod& OutMethod)
 {
+	if (Setter.DispatchMode == TEXT("generated_native_s1")
+		&& Setter.GeneratedShape == TEXT("property_i32_get_set")
+		&& Setter.Parameters.Num() == 1
+		&& Setter.Parameters[0].CanonicalType == TEXT("int32"))
+	{
+		OutMethod.MethodLines.Add(FString::Printf(
+			TEXT("        [AvidScriptDataLane(\"buffered_write\", %d)]"),
+			Setter.Ordinal));
+	}
 	OutMethod.MethodLines.Append({
 		TEXT("        set"),
 		TEXT("        {"),
@@ -1380,6 +1389,19 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		FString::Printf(TEXT("    internal const string PackageName = \"%s\";"), *EscapeCSharpString(Package.PackageName)),
 		FString::Printf(TEXT("    internal const string PackageHash = \"%s\";"), *Package.PackageHash),
 		FString::Printf(TEXT("    internal const string DescriptorHash = \"%s\";"), *DescriptorHash),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]"),
+		TEXT("internal sealed class AvidScriptDataLaneAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    internal AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal)"),
+		TEXT("    {"),
+		TEXT("        OptimizationClass = optimizationClass;"),
+		TEXT("        BindingOrdinal = bindingOrdinal;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    internal string OptimizationClass { get; }"),
+		TEXT("    internal int BindingOrdinal { get; }"),
 		TEXT("}"),
 		TEXT("")
 	});

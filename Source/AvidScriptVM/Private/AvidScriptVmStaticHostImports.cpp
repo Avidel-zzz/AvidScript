@@ -24,11 +24,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::OwnerGetGeneration, "owner_get_generation", "()i", true },
 	{ EAvidScriptHostBindingId::OwnerGetHandle, "avid_owner_get_handle", "()I", false },
 	{ EAvidScriptHostBindingId::TimerSetOnce, "timer_set_once", "(fi)i", true },
-	{ EAvidScriptHostBindingId::TimerCancel, "timer_cancel", "(i)i", true }
+	{ EAvidScriptHostBindingId::TimerCancel, "timer_cancel", "(i)i", true },
+	{ EAvidScriptHostBindingId::DataLaneGetEpoch, "avid_data_lane_epoch", "()I", false },
+	{ EAvidScriptHostBindingId::DataLaneSubmit, "avid_data_lane_submit", "(ii)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::TimerCancel),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DataLaneSubmit),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -215,7 +217,45 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	case EAvidScriptHostBindingId::OwnerGetGeneration:
 	case EAvidScriptHostBindingId::OwnerGetHandle:
+	case EAvidScriptHostBindingId::DataLaneGetEpoch:
 		break;
+	case EAvidScriptHostBindingId::DataLaneSubmit:
+	{
+		const int32 GuestAddress = Arguments[0].I32;
+		const int32 ByteCount = Arguments[1].I32;
+		if (ByteCount <= 0)
+		{
+			return FailStaticCall(
+				OutFailureDetails,
+				TEXT("guest_memory_invalid: command buffer byte count must be positive."));
+		}
+		if (!ValidateGuestRange(
+				GuestAddress,
+				static_cast<uint64>(ByteCount),
+				1,
+				alignof(uint32),
+				TEXT("command buffer"),
+				OutFailureDetails))
+		{
+			return false;
+		}
+		FString MemoryError;
+		if (!GuestMemory.BorrowReadOnlyBytes(
+				static_cast<uint32>(GuestAddress),
+				static_cast<uint32>(ByteCount),
+				alignof(uint32),
+				Call.InputBytes,
+				MemoryError))
+		{
+			OutFailureDetails = MemoryError.IsEmpty()
+				? TEXT("guest_memory_invalid: command buffer borrow failed.")
+				: MoveTemp(MemoryError);
+			return false;
+		}
+		Call.GuestAddress = static_cast<uint32>(GuestAddress);
+		Call.IntArgs[0] = ByteCount;
+		break;
+	}
 	case EAvidScriptHostBindingId::ActorGetTransformBatch:
 	{
 		const int32 InputAddress = Arguments[0].I32;

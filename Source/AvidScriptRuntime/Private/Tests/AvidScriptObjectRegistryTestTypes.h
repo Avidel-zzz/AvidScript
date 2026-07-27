@@ -57,4 +57,7 @@ public:
 
 	UPROPERTY()
 	TObjectPtr<UAvidScriptObjectRegistryTestObject> HostEffectObjectProperty;
+
+	UPROPERTY()
+	int32 DataLaneI32 = 0;
 };

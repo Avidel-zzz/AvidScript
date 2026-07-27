@@ -380,6 +380,52 @@ int64_t OwnerGetHandle(wasm_exec_env_t ExecEnv)
 	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::OwnerGetHandle), Call, Result) ? Result.ReturnValueI64 : 0;
 }
 
+int64_t DataLaneGetEpoch(wasm_exec_env_t ExecEnv)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DataLaneGetEpoch;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, StaticImportName(EAvidScriptHostBindingId::DataLaneGetEpoch), Call, Result) ? Result.ReturnValueI64 : 0;
+}
+
+int32_t DataLaneSubmit(wasm_exec_env_t ExecEnv, int32_t GuestAddress, int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(EAvidScriptHostBindingId::DataLaneSubmit);
+	if (ByteCount <= 0)
+	{
+		Fail(
+			ExecEnv,
+			GetBridge(ExecEnv),
+			ImportName,
+			TEXT("The command buffer byte count must be positive."));
+		return 0;
+	}
+
+	void* NativeAddress = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("command buffer"),
+			GuestAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			alignof(uint32),
+			NativeAddress))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::DataLaneSubmit;
+	Call.GuestAddress = static_cast<uint32>(GuestAddress);
+	Call.IntArgs[0] = ByteCount;
+	Call.InputBytes = MakeArrayView(
+		static_cast<const uint8*>(NativeAddress),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result) ? Result.ReturnValue : 0;
+}
+
 int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
 {
 	FAvidScriptHostCall Call;
@@ -417,6 +463,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::OwnerGetHandle: return reinterpret_cast<void*>(OwnerGetHandle);
 	case EAvidScriptHostBindingId::TimerSetOnce: return reinterpret_cast<void*>(TimerSetOnce);
 	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
+	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
+	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);
 	default: return nullptr;
 	}
 }

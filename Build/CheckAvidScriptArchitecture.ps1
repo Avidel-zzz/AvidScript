@@ -484,7 +484,7 @@ foreach ($ForbiddenVmDiagnosticConcern in @('CSharp', 'SemanticSpan', 'SourcePat
 }
 $VmHostBindingsSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'
 $VmDynamicRegistrySource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'
-foreach ($RequiredVmPrimitive in @('BorrowReadOnlyBytes', 'BorrowMutableBytes', 'actor_get_transform_batch')) {
+foreach ($RequiredVmPrimitive in @('BorrowReadOnlyBytes', 'BorrowMutableBytes', 'actor_get_transform_batch', 'avid_data_lane_submit')) {
     if (-not $StaticHostImportSource.Contains($RequiredVmPrimitive)) {
         Add-Violation "shared VM guest-memory adapter is missing $RequiredVmPrimitive"
     }
@@ -1552,10 +1552,14 @@ $CanonicalStaticImportNames = @(
     'owner_get_generation',
     'avid_owner_get_handle',
     'timer_set_once',
-    'timer_cancel'
+    'timer_cancel',
+    'avid_data_lane_epoch',
+    'avid_data_lane_submit'
 )
 $CompatibilityStaticImportNames = @(
-    $CanonicalStaticImportNames | Where-Object { $_ -ne 'avid_owner_get_handle' })
+    $CanonicalStaticImportNames | Where-Object {
+        $_ -notin @('avid_owner_get_handle', 'avid_data_lane_epoch', 'avid_data_lane_submit')
+    })
 
 $StaticHostCatalogRecords = @(
     [regex]::Matches(

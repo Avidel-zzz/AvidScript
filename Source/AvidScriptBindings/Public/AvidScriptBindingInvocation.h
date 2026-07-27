@@ -11,6 +11,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 class UClass;
+class FProperty;
 class UWorld;
 class IAvidScriptObjectOwnershipDomain;
 
@@ -127,6 +128,12 @@ public:
 		const FAvidScriptGeneratedBindingEntry*& OutEntry,
 		UClass*& OutExpectedClass,
 		bool& bOutPropertyWrite,
+		bool& bOutRequiresWriteAccess) const;
+	bool TryGetGeneratedPropertyBinding(
+		uint32 Ordinal,
+		const FAvidScriptGeneratedBindingEntry*& OutEntry,
+		UClass*& OutExpectedClass,
+		FProperty*& OutProperty,
 		bool& bOutRequiresWriteAccess) const;
 	bool PrepareGeneratedHostEffect(
 		uint32 Ordinal,

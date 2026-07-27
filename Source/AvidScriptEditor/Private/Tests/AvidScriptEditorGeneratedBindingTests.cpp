@@ -4,6 +4,7 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptHash.h"
+#include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 
 #include "Algo/Reverse.h"
 #include "HAL/FileManager.h"
@@ -271,6 +272,45 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 			TEXT("IR keeps the property shape"),
 			Binding.Shape,
 			EAvidScriptGeneratedBindingShape::PropertyI32GetSet);
+	}
+
+	FAvidScriptBindingPackageModel DescriptorPackage;
+	FString ParseErrorCategory;
+	FString ParseErrorSource;
+	TestTrue(
+		TEXT("Generated property descriptor parses for C# rendering"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			DescriptorPackage,
+			ParseErrorCategory,
+			ParseErrorSource));
+	const FAvidScriptBindingFunctionModel* Setter = DescriptorPackage.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_set");
+		});
+	FString CSharpSource;
+	FString CSharpErrorCategory;
+	FString CSharpErrorSource;
+	TestNotNull(TEXT("Generated property setter model resolves"), Setter);
+	TestTrue(
+		TEXT("Generated property descriptor reaches the C# facade"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			DescriptorPackage,
+			FAvidScriptHash::Sha256HexUtf8(DescriptorJson),
+			CSharpSource,
+			CSharpErrorCategory,
+			CSharpErrorSource));
+	TestTrue(
+		TEXT("C# facade declares the compile-time data lane attribute"),
+		CSharpSource.Contains(TEXT("internal sealed class AvidScriptDataLaneAttribute")));
+	if (Setter != nullptr)
+	{
+		TestTrue(
+			TEXT("Generated int setter carries its real binding ordinal"),
+			CSharpSource.Contains(FString::Printf(
+				TEXT("[AvidScriptDataLane(\"buffered_write\", %d)]"),
+				Setter->Ordinal)));
 	}
 
 	const FString TestRoot = FPaths::ProjectSavedDir()

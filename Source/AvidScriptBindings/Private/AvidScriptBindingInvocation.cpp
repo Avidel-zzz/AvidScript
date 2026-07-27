@@ -3217,6 +3217,40 @@ bool FAvidScriptBindingPackage::PrepareGeneratedHostEffect(
 		PrepareResult);
 }
 
+bool FAvidScriptBindingPackage::TryGetGeneratedPropertyBinding(
+	const uint32 Ordinal,
+	const FAvidScriptGeneratedBindingEntry*& OutEntry,
+	UClass*& OutExpectedClass,
+	FProperty*& OutProperty,
+	bool& bOutRequiresWriteAccess) const
+{
+	OutEntry = nullptr;
+	OutExpectedClass = nullptr;
+	OutProperty = nullptr;
+	bOutRequiresWriteAccess = false;
+	if (!IsInGameThread()
+		|| !Impl->Plans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan = Impl->Plans[Ordinal];
+	if (Plan.GeneratedEntry == nullptr
+		|| Plan.GeneratedLease.GetEntry() != Plan.GeneratedEntry
+		|| Plan.Kind
+			!= EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+		|| Plan.ReflectedProperty == nullptr)
+	{
+		return false;
+	}
+
+	OutEntry = Plan.GeneratedEntry;
+	OutExpectedClass = Plan.OwnerClass;
+	OutProperty = Plan.ReflectedProperty;
+	bOutRequiresWriteAccess = Plan.bRequiresWriteAccess;
+	return true;
+}
+
 bool FAvidScriptBindingPackage::TryFindFunctionOrdinal(
 	const UClass& OwnerClass,
 	const FName FunctionName,

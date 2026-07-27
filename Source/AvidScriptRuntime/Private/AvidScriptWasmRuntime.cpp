@@ -1,7 +1,9 @@
 #include "AvidScriptWasmRuntime.h"
 
 #include "AvidScriptSceneComponentBinding.h"
+#include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
+#include "UObject/UnrealType.h"
 
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWasmRuntime, Log, All);
@@ -14,6 +16,18 @@ constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 constexpr int32 AvidScriptMaximumPendingTimers = 1024;
 constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
+constexpr int32 AvidScriptDataBridgeBudgetCheckStride = 32;
+
+struct FAvidScriptPreparedDataLaneWrite
+{
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	FIntProperty* Property = nullptr;
+	UObject* Receiver = nullptr;
+	FAvidScriptObjectHandle ReceiverHandle;
+	uint32 BindingOrdinal = MAX_uint32;
+	int32 PreviousValue = 0;
+	int32 Value = 0;
+};
 
 uint32 LoadAvidScriptLittleEndianU32(
 	const TConstArrayView<uint8> Bytes,
@@ -385,6 +399,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 {
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
+	DataBridgeMetrics = FAvidScriptDataBridgeMetrics();
 	ActiveBackendInfo = FAvidScriptVmBackendInfo();
 	ResetHostImportState();
 	ModuleId = InModuleId;
@@ -1189,6 +1204,248 @@ int64 FAvidScriptWasmRuntimeInstance::HandleOwnerGetHandleImport()
 	LastHostImportResult = static_cast<int32>(OwnerHandle.Slot);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return static_cast<int64>(PackedHandle);
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	++DataBridgeMetrics.BoundaryCrossings;
+	if (!IsInGameThread()
+		|| CallbackEpochStack.IsEmpty()
+		|| !BindingPackage.IsValid()
+		|| HostContext.World.IsStale())
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_data_lane_epoch"),
+			TEXT("data_lane_epoch_unavailable: no active generated callback epoch."));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	const uint64 Epoch = CallbackEpochStack.Last();
+	LastHostImportResult = static_cast<int32>(Epoch);
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return static_cast<int64>(Epoch);
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
+	const TConstArrayView<uint8> Bytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Bytes.Num();
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	++DataBridgeMetrics.BoundaryCrossings;
+	++DataBridgeMetrics.SubmittedBuffers;
+	DataBridgeMetrics.SubmittedBytes += static_cast<uint64>(Bytes.Num());
+
+	FAvidScriptParsedCommandBuffer Buffer;
+	FAvidScriptCommandBufferParseResult ParseResult;
+	const uint64 ExpectedEpoch = CallbackEpochStack.IsEmpty()
+		? 0
+		: CallbackEpochStack.Last();
+	if (!IsInGameThread()
+		|| !BindingPackage.IsValid()
+		|| HostContext.World.IsStale()
+		|| !FAvidScriptCommandBufferParser::Parse(
+			Bytes,
+			ExpectedEpoch,
+			DataBridgeBudget,
+			Buffer,
+			ParseResult))
+	{
+		++DataBridgeMetrics.RejectedBuffers;
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_data_lane_submit"),
+			ParseResult.ErrorCategory.IsEmpty()
+				? TEXT("data_lane_context_invalid: submission requires an active generated callback on the Game Thread.")
+				: FString::Printf(
+					TEXT("%s at %s: %s"),
+					*ParseResult.ErrorCategory,
+					*ParseResult.ErrorSource,
+					*ParseResult.ErrorDetails));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	DataBridgeMetrics.SubmittedCommands +=
+		static_cast<uint64>(Buffer.Commands.Num());
+	TArray<FAvidScriptPreparedDataLaneWrite, TInlineAllocator<32>> PreparedWrites;
+	PreparedWrites.Reserve(Buffer.Commands.Num());
+	TArray<uint64, TInlineAllocator<32>> UniqueObjects;
+	for (int32 CommandIndex = 0; CommandIndex < Buffer.Commands.Num(); ++CommandIndex)
+	{
+		const FAvidScriptParsedCommand& Command = Buffer.Commands[CommandIndex];
+		const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+		UClass* ExpectedClass = nullptr;
+		FProperty* ReflectedProperty = nullptr;
+		bool bRequiresWriteAccess = false;
+		UObject* Receiver = nullptr;
+		const FAvidScriptObjectHandle ReceiverHandle{
+			static_cast<uint32>(Command.SelfSlot),
+			static_cast<uint32>(Command.SelfGeneration)
+			};
+		FIntProperty* IntProperty = nullptr;
+		const FAvidScriptPreparedDataLaneWrite* PreviousPrepared =
+			PreparedWrites.IsEmpty()
+				? nullptr
+				: &PreparedWrites.Last();
+		const bool bReusePreparedTarget = PreviousPrepared != nullptr
+			&& PreviousPrepared->BindingOrdinal == Command.BindingOrdinal
+			&& PreviousPrepared->ReceiverHandle == ReceiverHandle;
+		if (bReusePreparedTarget)
+		{
+			Entry = PreviousPrepared->Entry;
+			IntProperty = PreviousPrepared->Property;
+			Receiver = PreviousPrepared->Receiver;
+		}
+		else if (!BindingPackage->TryGetGeneratedPropertyBinding(
+					Command.BindingOrdinal,
+					Entry,
+					ExpectedClass,
+					ReflectedProperty,
+					bRequiresWriteAccess)
+				|| Entry == nullptr
+				|| Entry->Shape
+					!= EAvidScriptGeneratedBindingShape::PropertyI32GetSet
+				|| Entry->ReceiverMode
+					!= EAvidScriptGeneratedReceiverMode::SelfBound
+				|| Entry->PropertyI32Call == nullptr
+				|| (bRequiresWriteAccess
+					&& HostContext.ActorWritePolicy
+						!= EAvidScriptActorWritePolicy::AllowWrites)
+				|| !ResolveSelfCapability(
+					Command.SelfSlot,
+					Command.SelfGeneration,
+					ExpectedClass,
+					Receiver)
+				|| (IntProperty = CastField<FIntProperty>(ReflectedProperty)) == nullptr)
+		{
+			++DataBridgeMetrics.RejectedBuffers;
+			SetPendingHostImportFailure(
+				TEXT("avidscript"),
+				TEXT("avid_data_lane_submit"),
+				FString::Printf(
+					TEXT("data_lane_binding_rejected at command[%d]."),
+					CommandIndex));
+			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+			return 0;
+		}
+
+		const uint64 PackedHandle = static_cast<uint64>(ReceiverHandle.Slot)
+			| (static_cast<uint64>(ReceiverHandle.Generation) << 32);
+		if (!bReusePreparedTarget)
+		{
+			UniqueObjects.AddUnique(PackedHandle);
+		}
+		if (static_cast<uint32>(UniqueObjects.Num()) > DataBridgeBudget.MaxObjects)
+		{
+			++DataBridgeMetrics.RejectedBuffers;
+			SetPendingHostImportFailure(
+				TEXT("avidscript"),
+				TEXT("avid_data_lane_submit"),
+				TEXT("data_lane_object_budget_exceeded."));
+			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+			return 0;
+		}
+
+		const int32 PreviousValue = bReusePreparedTarget
+			? PreviousPrepared->PreviousValue
+			: IntProperty->GetPropertyValue_InContainer(Receiver);
+		FAvidScriptPreparedDataLaneWrite& Prepared =
+			PreparedWrites.AddDefaulted_GetRef();
+		Prepared.Entry = Entry;
+		Prepared.Property = IntProperty;
+		Prepared.Receiver = Receiver;
+		Prepared.ReceiverHandle = ReceiverHandle;
+		Prepared.BindingOrdinal = Command.BindingOrdinal;
+		Prepared.PreviousValue = PreviousValue;
+		Prepared.Value = Command.Arg0;
+	}
+
+	for (int32 CommandIndex = 0; CommandIndex < PreparedWrites.Num(); ++CommandIndex)
+	{
+		const FAvidScriptPreparedDataLaneWrite& Prepared = PreparedWrites[CommandIndex];
+		if (CommandIndex > 0)
+		{
+			const FAvidScriptPreparedDataLaneWrite& Previous =
+				PreparedWrites[CommandIndex - 1];
+			if (Previous.BindingOrdinal == Prepared.BindingOrdinal
+				&& Previous.ReceiverHandle == Prepared.ReceiverHandle)
+			{
+				continue;
+			}
+		}
+		if (!BindingPackage->PrepareGeneratedHostEffect(
+				Prepared.BindingOrdinal,
+				Prepared.ReceiverHandle,
+				*Prepared.Receiver,
+				BindingInvocationContext))
+		{
+			++DataBridgeMetrics.RejectedBuffers;
+			SetPendingHostImportFailure(
+				TEXT("avidscript"),
+				TEXT("avid_data_lane_submit"),
+				FString::Printf(
+					TEXT("data_lane_effect_prepare_failed at command[%d]."),
+					CommandIndex));
+			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+			return 0;
+		}
+	}
+
+	const double ApplyStartSeconds = FPlatformTime::Seconds();
+	int32 AppliedCount = 0;
+	for (; AppliedCount < PreparedWrites.Num(); ++AppliedCount)
+	{
+		FAvidScriptPreparedDataLaneWrite& Prepared = PreparedWrites[AppliedCount];
+		int32 Value = Prepared.Value;
+		const EAvidScriptVmTypedHostStatus Status =
+			Prepared.Entry->PropertyI32Call(*Prepared.Receiver, true, Value);
+		const bool bCheckApplyBudget =
+			(AppliedCount + 1) % AvidScriptDataBridgeBudgetCheckStride == 0
+			|| AppliedCount + 1 == PreparedWrites.Num();
+		const bool bApplyBudgetExceeded =
+			Status == EAvidScriptVmTypedHostStatus::Succeeded
+			&& bCheckApplyBudget
+			&& (FPlatformTime::Seconds() - ApplyStartSeconds) * 1000.0
+				> DataBridgeBudget.MaxApplyMilliseconds;
+		if (Status != EAvidScriptVmTypedHostStatus::Succeeded
+			|| bApplyBudgetExceeded)
+		{
+			for (int32 RollbackIndex = AppliedCount; RollbackIndex >= 0; --RollbackIndex)
+			{
+				const FAvidScriptPreparedDataLaneWrite& Rollback =
+					PreparedWrites[RollbackIndex];
+				Rollback.Property->SetPropertyValue_InContainer(
+					Rollback.Receiver,
+					Rollback.PreviousValue);
+			}
+			++DataBridgeMetrics.RejectedBuffers;
+			SetPendingHostImportFailure(
+				TEXT("avidscript"),
+				TEXT("avid_data_lane_submit"),
+				Status != EAvidScriptVmTypedHostStatus::Succeeded
+					? FString::Printf(
+						TEXT("data_lane_apply_failed at command[%d]."),
+						AppliedCount)
+					: FString::Printf(
+						TEXT("data_lane_apply_budget_exceeded after command[%d]."),
+						AppliedCount));
+			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+			return 0;
+		}
+	}
+
+	DataBridgeMetrics.AppliedCommands += static_cast<uint64>(AppliedCount);
+	LastHostImportResult = AppliedCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return AppliedCount;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation)
@@ -2659,7 +2916,29 @@ FAvidScriptWasmRuntimeInstance::DispatchCommandBufferSubmit(
 	int32& OutValue)
 {
 	OutValue = 0;
-	return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	TConstArrayView<uint8> Bytes;
+	FString Error;
+	if (BindingOrdinal == MAX_uint32
+		|| GuestAddress <= 0
+		|| ByteCount <= 0
+		|| GuestMemory == nullptr
+		|| !GuestMemory->BorrowReadOnlyBytes(
+			static_cast<uint32>(GuestAddress),
+			static_cast<uint32>(ByteCount),
+			alignof(uint32),
+			Bytes,
+			Error))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	OutValue = HandleDataLaneSubmitImport(Bytes);
+	return RecordGeneratedStatus(
+		OutValue > 0
+			? EAvidScriptVmTypedHostStatus::Succeeded
+			: EAvidScriptVmTypedHostStatus::Rejected);
 }
 
 bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
@@ -2747,6 +3026,16 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int64 Value = HandleOwnerGetHandleImport();
 		return FinishI64(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::DataLaneGetEpoch:
+	{
+		const int64 Value = HandleDataLaneGetEpochImport();
+		return FinishI64(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::DataLaneSubmit:
+	{
+		const int32 Value = HandleDataLaneSubmitImport(Call.InputBytes);
+		return Finish(Value, Value > 0);
 	}
 	case EAvidScriptHostBindingId::TimerSetOnce:
 	{
@@ -2859,6 +3148,11 @@ void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasm
 	OutResult.LastHostImportInput = LastHostImportInput;
 	OutResult.LastHostImportResult = LastHostImportResult;
 	OutResult.Metrics = Metrics;
+	OutResult.DataBridgeMetrics = DataBridgeMetrics;
+	OutResult.BindingInstrumentation =
+		HostContext.BindingInvocationInstrumentation == nullptr
+			? FAvidScriptBindingInvocationInstrumentation()
+			: *HostContext.BindingInvocationInstrumentation;
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const

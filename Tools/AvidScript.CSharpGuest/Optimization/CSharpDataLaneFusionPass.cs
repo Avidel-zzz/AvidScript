@@ -328,7 +328,7 @@ internal static class CSharpDataLaneFusionPass
     {
         return instruction.Op is
             "constant" or "copy" or "local_load" or "global_load" or "field_load"
-            or "address_of" or "data_address" or "binary" or "convert";
+            or "address_of" or "data_address";
     }
 
     private static GuestFunction TransformFunction(
