@@ -37,9 +37,9 @@
     },
     {
       "id": "P54.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "C# frontend 五通道正式矩阵 7500/7500 正确；同一 WASM 固定 kernel 的 V8 WebAssembly tiered JIT、Wasmtime Cranelift JIT、WAMR interpreter 与 Native oracle 正式对照完成，1 个校准进程加 5 个独立 timed process 共 600/600 正确、fallback=false。Wasmtime/V8 跨进程配对 P50=0.9992175567、P95=0.9835160910，均低于 1.05，PC 默认候选 Gate 通过；aggregate SHA-256=157bbe394ea19b7c68e35d5b1f5fcf2b2bf14f2330e04a8e4d987c040579f1a6；独立复审 Accepted，无 Critical/Important。",
+      "completed_at_utc": "2026-07-27T00:47:49.3254090+00:00"
     },
     {
       "id": "P54.4",
@@ -112,7 +112,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 54 -BatchId P54.3 -Evidence <text>",
-  "revision": 5,
-  "updated_at_utc": "2026-07-26T20:04:25.6789887+00:00"
+  "next_action": "batch-complete -Phase 54 -BatchId P54.4 -Evidence <text>",
+  "revision": 6,
+  "updated_at_utc": "2026-07-27T00:47:49.3280184+00:00"
 }
