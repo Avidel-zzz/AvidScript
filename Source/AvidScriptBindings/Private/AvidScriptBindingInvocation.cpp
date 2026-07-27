@@ -412,7 +412,9 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 			+ Parameter.CanonicalType;
 	}
 	Identity += TEXT(")");
-	return Identity;
+	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+		Identity,
+		Binding.DispatchMode);
 }
 
 FString MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
@@ -2738,8 +2740,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
-	for (const FAvidScriptRuntimeBindingInvocationPlan& Plan : Package->Impl->Plans)
+	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
 	{
+		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+			Package->Impl->Plans[PlanIndex];
 		if (Plan.FastPath.HighestInvocationMode
 			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
 		{
