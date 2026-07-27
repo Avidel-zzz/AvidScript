@@ -89,8 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.6 子代理提交 SHA 报告手误：代理最终消息把实际可达的 `6aaff016` 写成 `6aaff015`，控制器首次按错误对象检查而得到 `bad object`。Prevention：阶段状态不得直接采用消息中的手录 SHA；先在 owning worktree 执行 `git rev-parse HEAD`，再用 `git cat-file -e '<sha>^{commit}'` 验证对象可达，只有机器输出可写入 tracker、brief 或发布证据。
 - 2026-07-27 P54.6 typed C 窄探针错误选择不完整系统工具链：先后用 `VsDevCmd.bat` 和 `vcvars64.bat` 启动独立 MSVC `/Zs`，随后确认本机 VS 对应 Windows SDK 只有 UCRT 片段且缺少 `um`，两个 translation unit 均在标准头阶段停止，未检查产品代码。Prevention：启动独立 MSVC 探针前先验证同一 toolset 的 VC include 与 Windows SDK `ucrt/shared/um` 四项完整；任一缺失就不再重试临时宿主，C/C++ ABI 统一由仓库既定 UE5.8 UBT/AutoSDK Gate 编译，宿主初始化失败不得算产品失败或编译证据。
-- 2026-07-27 P54.6 typed host 静态检查 fail-fast 连续复发：先把允许“零匹配”的 marker `rg` 与其他查询放进 `Promise.all`，随后又把可能零匹配的 aggregate-initializer `rg` 包在会把非零转换成脚本失败的编排调用中。Prevention：所有探索型 `rg` 固定直接使用 `shell_command` 并把退出码 0/1 都作为有效查询结果；只有合同明确要求至少一项匹配时才允许外层编排器把退出码 1 视为失败，禁止在刚记录规则后继续沿用同一包装形式。
+- 2026-07-27 P54.6 探索型 `rg` fail-fast 三次连续复发：marker、aggregate initializer 与 Runtime epoch 三次查询都允许零匹配，却仍通过会把退出码 1 转成脚本异常的 `functions.exec -> tools.shell_command` 包装执行。Prevention：探索型 `rg` 机械禁止嵌套在 `functions.exec`；固定直接调用 `functions.shell_command`，由模型读取退出码 0/1。只有 tracked contract 明确要求至少一项匹配时，才允许使用会把 1 视为失败的编排层。
 - 2026-07-27 P54.6 计划提交暂存区核对再次混合命令：在一条 `shell_command` 中用分号连接 `git diff --cached --stat` 与 `git status --short`，重复违反一调用一逻辑命令规则。Prevention：Git 暂存内容、工作区状态、提交和身份查询固定为四类独立调用；发送前对完整 shell 字符串做字面扫描，包含 `;`、`&&`、`||` 时不允许执行，即使只是只读核对。
 - 2026-07-27 P54.6 上下文恢复未先执行状态机：恢复后先读取 memory、skill、计划和 Git 状态，未把主插件 `Build/InvokePhaseWorkflow.ps1 status -Phase 54` 作为首个项目相关命令。Prevention：每次上下文压缩、网络重连或自动续跑后设置恢复门闩；只有 Phase status 成功返回后才允许读取计划、源码、Git 或外部 evidence，memory/skill 读取不能被误当作已经恢复项目状态。
 - 2026-07-27 P54.3 Task 4C fix round 1 只读命令再次混合：读取 profile、validator 与 merger 时在一条 PowerShell `shell_command` 中使用分号连接三个 `Get-Content`，重复违反已记录的单逻辑命令规则。Prevention：同轮已把多文件 parser 固化进 tracked `Test-ControlledRuntimeContracts.ps1`；后续多文件读取必须拆成独立调用，命令提交前机械扫描完整字符串，出现语句分隔符即拒绝发送。

@@ -67,6 +67,7 @@ public:
 		int32 SelfGeneration,
 		int32 ObjectSlot,
 		int32 ObjectGeneration,
+		int32 GuestAddress,
 		int32& OutValue) = 0;
 
 	virtual EAvidScriptVmTypedHostStatus DispatchCommandBufferSubmit(

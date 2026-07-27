@@ -5,6 +5,8 @@
 已在任务 owned paths 内完成 P54.6B 的产品实现与窄测试代码，未运行 UE
 全构建、Automation 或正式 benchmark。
 
+提交 SHA：`6aaff016eeed8ec88fb6670137a6dcab66552c5b`
+
 ## 已实现
 
 - 新增后端中立的 Generated Binding IR，Core 公共头不依赖 UObject、Editor、
