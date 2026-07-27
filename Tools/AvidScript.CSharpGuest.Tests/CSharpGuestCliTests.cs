@@ -52,8 +52,10 @@ internal static class CSharpGuestCliTests
                 "--frontend-artifact-sha256", frontendArtifactSha256,
                 "--output", outputPath,
                 "--semantic", semanticPath,
+                "--data-lane-fusion", "disabled",
             });
-            Assert(secondExitCode == 0, "valid CLI options should remain order independent");
+            Assert(secondExitCode == 0,
+                "valid CLI options and disabled data-lane fusion should remain order independent");
             byte[] second = File.ReadAllBytes(outputPath);
             byte[] secondStateSchema = File.ReadAllBytes(stateSchemaPath);
             byte[] secondDebugMap = File.ReadAllBytes(debugMapPath);
@@ -65,6 +67,15 @@ internal static class CSharpGuestCliTests
                 "CLI state schema output should be deterministic");
             Assert(firstDebugMap.SequenceEqual(secondDebugMap),
                 "CLI debug map output should be deterministic");
+
+            int invalidFusionExitCode = GuestCommandLine.Run(new[]
+            {
+                "--semantic", semanticPath,
+                "--output", outputPath,
+                "--data-lane-fusion", "automatic",
+            });
+            Assert(invalidFusionExitCode == 2,
+                "unknown data-lane fusion modes should be rejected by the CLI contract");
 
             File.WriteAllText(outputPath, "stale");
             File.WriteAllText(stateSchemaPath, "stale");

@@ -14,6 +14,8 @@ param(
     [switch]$OmitRuntimeBindingPackage,
     [string]$PreparedBuildReportPath = "",
     [string]$SemanticCacheRoot = "",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DataLaneFusion = "enabled",
     [switch]$DisableSemanticCache
 )
 
@@ -459,6 +461,9 @@ function Write-BuildReport {
             script_type = $SelectedScriptTypeName
         }
         output_root = Convert-ToProjectRelativePath $OutputRoot
+        compilation = [ordered]@{
+            data_lane_fusion = $DataLaneFusion
+        }
         build_reuse = $BuildReuse
         semantic_cache = $SemanticCache
         tool_invocations = $ToolInvocations
@@ -919,7 +924,8 @@ $CompilerArguments = @(
     "-StateSchemaPath", $StateSchemaArtifactPath,
     "-WasmPath", $WasmArtifactPath,
     "-InspectionPath", $WasmInspectionArtifactPath,
-    "-Configuration", $Configuration)
+    "-Configuration", $Configuration,
+    "-DataLaneFusion", $DataLaneFusion)
     ++$ToolInvocations.guest_ir
     ++$ToolInvocations.wasm_backend
 $CompilerInvocation = Invoke-AvidScriptPowerShell -Arguments $CompilerArguments
@@ -1315,6 +1321,9 @@ $Manifest = [ordered]@{
         semantic_schema_version = [int]$SemanticModel.schema_version
         semantic_version = [string]$SemanticModel.semantic_version
         semantic_sha256 = $SemanticSha256
+    }
+    compilation = [ordered]@{
+        data_lane_fusion = $DataLaneFusion
     }
     binding_package = if ($null -eq $BindingPackageInfo) { $null } else {
         [ordered]@{

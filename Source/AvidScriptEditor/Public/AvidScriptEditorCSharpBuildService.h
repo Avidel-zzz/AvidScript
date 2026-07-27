@@ -21,6 +21,7 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ModuleId;
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
+	bool bEnableDataLaneFusion = true;
 	bool bOmitRuntimeBindingPackage = false;
 	bool bDisableSemanticCache = false;
 };

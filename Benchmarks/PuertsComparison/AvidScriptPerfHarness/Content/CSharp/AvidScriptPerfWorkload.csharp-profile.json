@@ -10,6 +10,7 @@
   "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/profile_phase54_6_generated_s1.avidscript.json",
   "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
   "configuration": "Release",
+  "data_lane_fusion": "disabled",
   "binding_profile": {
     "package_name": "avidscript.benchmark.phase54_6.generated_shared",
     "self_class_path": "/Script/AvidScriptPerfHarness.AvidScriptPerfFixture",

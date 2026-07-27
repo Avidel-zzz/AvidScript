@@ -103,6 +103,7 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 		TEXT("  \"module_id\": \"csharp_profile_driven\",\n")
 		TEXT("  \"artifact_stem\": \"profile_driven\",\n")
 		TEXT("  \"output_root\": \"%s\",\n")
+		TEXT("  \"data_lane_fusion\": \"disabled\",\n")
 		TEXT("  \"configuration\": \"Release\"\n")
 		TEXT("}\n"),
 		*SourcePath,
@@ -128,6 +129,25 @@ bool FAvidScriptEditorCSharpProfileServiceLoadProfileTest::RunTest(const FString
 	TestEqual(TEXT("C# profile manifest default"), Result.BuildConfig.ManifestPath, FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(OutputRoot, TEXT("profile_driven")));
 	TestEqual(TEXT("C# profile build script default"), Result.BuildConfig.BuildScriptPath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleBuildScriptPath());
 	TestEqual(TEXT("C# profile configuration"), Result.BuildConfig.Configuration, FString(TEXT("Release")));
+	TestFalse(TEXT("C# profile disables data-lane fusion"), Result.BuildConfig.bEnableDataLaneFusion);
+
+	const FString InvalidProfilePath = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		TestRoot,
+		TEXT("profile_invalid_data_lane_fusion.csharp-profile.json")));
+	const FString InvalidProfileText = ProfileText.Replace(
+		TEXT("\"data_lane_fusion\": \"disabled\""),
+		TEXT("\"data_lane_fusion\": \"automatic\""));
+	TestTrue(
+		TEXT("Invalid data-lane fusion profile can be written"),
+		FFileHelper::SaveStringToFile(InvalidProfileText, *InvalidProfilePath));
+	FAvidScriptEditorCSharpProfileLoadResult InvalidResult;
+	TestFalse(
+		TEXT("Unknown data-lane fusion mode is rejected"),
+		FAvidScriptEditorCSharpProfileService::LoadProfile(InvalidProfilePath, InvalidResult));
+	TestEqual(
+		TEXT("Unknown data-lane fusion mode reports a stable category"),
+		InvalidResult.ErrorCategory,
+		FString(TEXT("data_lane_fusion_invalid")));
 	return true;
 }
 
@@ -161,6 +181,7 @@ bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FSt
 	TestTrue(TEXT("Generated default C# profile load succeeds"), LoadResult.bSucceeded);
 	TestEqual(TEXT("Generated template uses schema version 2"), LoadResult.SchemaVersion, 2);
 	TestTrue(TEXT("Generated template defaults to EngineGameplay"), LoadResult.bUsesEngineGameplayBindingProfile);
+	TestTrue(TEXT("Generated template enables data-lane fusion"), LoadResult.BuildConfig.bEnableDataLaneFusion);
 	TestEqual(TEXT("Generated default C# profile source"), LoadResult.BuildConfig.SourcePath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleSourcePath());
 	TestEqual(TEXT("Generated default C# profile project"), LoadResult.BuildConfig.ProjectPath, FAvidScriptEditorCSharpBuildService::GetDefaultActorLifecycleProjectPath());
 	TestEqual(TEXT("Generated default C# profile module"), LoadResult.BuildConfig.ModuleId, FString(TEXT("csharp_profile_actor_lifecycle")));
@@ -174,6 +195,9 @@ bool FAvidScriptEditorCSharpProfileServiceDefaultTemplateTest::RunTest(const FSt
 			TemplateText.Contains(
 				NormalizeAvidScriptCSharpProfileTestPath(FPaths::ProjectDir()),
 				ESearchCase::IgnoreCase));
+		TestTrue(
+			TEXT("Schema v2 template audits the default data-lane fusion mode"),
+			TemplateText.Contains(TEXT("\"data_lane_fusion\": \"enabled\"")));
 	}
 	TestEqual(TEXT("Generated default C# profile artifact"), LoadResult.BuildConfig.ArtifactStem, FString(TEXT("profile_actor_lifecycle")));
 	TestTrue(TEXT("Generated default C# profile output root uses profile folder"), LoadResult.BuildConfig.OutputRoot.EndsWith(TEXT("Saved/AvidScriptCSharpGuest/Profiles/profile_actor_lifecycle")));

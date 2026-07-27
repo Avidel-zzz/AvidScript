@@ -654,6 +654,7 @@ bool SerializeAvidScriptCSharpProfileTemplate(
 		TEXT("build_script_path"),
 		MakeAvidScriptCSharpProfileTemplateStoredPath(TemplateResult.BuildScriptPath));
 	Object->SetStringField(TEXT("configuration"), TemplateResult.Configuration);
+	Object->SetStringField(TEXT("data_lane_fusion"), TEXT("enabled"));
 
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJsonText);
 	return FJsonSerializer::Serialize(Object, Writer);
@@ -920,6 +921,31 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	Config.Configuration = TryGetAvidScriptCSharpProfileStringField(ProfileObject, TEXT("configuration"), Configuration)
 		? Configuration
 		: FString(TEXT("Release"));
+
+	FString DataLaneFusion;
+	if (TryGetAvidScriptCSharpProfileStringField(
+			ProfileObject,
+			TEXT("data_lane_fusion"),
+			DataLaneFusion))
+	{
+		if (DataLaneFusion.Equals(TEXT("enabled"), ESearchCase::IgnoreCase))
+		{
+			Config.bEnableDataLaneFusion = true;
+		}
+		else if (DataLaneFusion.Equals(TEXT("disabled"), ESearchCase::IgnoreCase))
+		{
+			Config.bEnableDataLaneFusion = false;
+		}
+		else
+		{
+			SetAvidScriptCSharpProfileFailure(
+				TEXT("data_lane_fusion_invalid"),
+				TEXT("C# profile data_lane_fusion must be enabled or disabled."),
+				TEXT("set data_lane_fusion to enabled or disabled"),
+				OutResult);
+			return false;
+		}
+	}
 
 	OutResult.ResolvedBindingSelection =
 		FAvidScriptEditorBindingDescriptorGenerator::MakeEngineGameplayProfile();

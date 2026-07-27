@@ -142,6 +142,10 @@ FString BuildAvidScriptCSharpBuildInvocationParameters(const FAvidScriptEditorCS
 	AddAvidScriptCSharpBuildInvocationValueArgument(Arguments, TEXT("-ManifestPath"), Config.ManifestPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(
 		Arguments,
+		TEXT("-DataLaneFusion"),
+		Config.bEnableDataLaneFusion ? TEXT("enabled") : TEXT("disabled"));
+	AddAvidScriptCSharpBuildInvocationValueArgument(
+		Arguments,
 		TEXT("-PreparedBuildReportPath"),
 		Config.PreparedBuildReportPath);
 	AddAvidScriptCSharpBuildInvocationValueArgument(

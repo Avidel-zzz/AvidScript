@@ -249,6 +249,7 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		TestRoot,
 		TEXT("CallerOwnedPreparedReport"),
 		TEXT("missing.csharp.report.json")));
+	ExplicitConfig.bEnableDataLaneFusion = false;
 	ExplicitConfig.bDisableSemanticCache = true;
 	FAvidScriptEditorCSharpBuildResult ExplicitResult;
 	TestTrue(TEXT("Explicit package custom C# profile builds"), FAvidScriptEditorCSharpBuildService::BuildProfile(ExplicitConfig, ExplicitResult));
@@ -273,6 +274,9 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 		Invocation.ExecutablePath,
 		FString(TEXT("powershell.exe")));
 	TestFalse(TEXT("Prepared invocation contains parameters"), Invocation.Parameters.IsEmpty());
+	TestTrue(
+		TEXT("Prepared invocation forwards disabled data-lane fusion"),
+		Invocation.Parameters.Contains(TEXT("-DataLaneFusion \"disabled\"")));
 
 	FAvidScriptEditorCSharpBuildResult FinalizedResult;
 	TestTrue(
