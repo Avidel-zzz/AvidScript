@@ -11,11 +11,11 @@ run(iterations: i32, seed: i32) -> i32
 重新生成仅用于有意更新 kernel：
 
 ```powershell
-& "Benchmarks/PuertsComparison/ControlledRuntime/Scripts/Build-ControlledRuntimeKernel.ps1" -Mode Write -WatCompilerModuleRoot "<wasmtime-python-45-root>"
+& "Benchmarks/PuertsComparison/ControlledRuntime/Scripts/Build-ControlledRuntimeKernel.ps1" -Mode Write -WatCompilerModuleRoot "<wasmtime-python-45-root>" -PythonExecutable "<python-executable>"
 ```
 
 普通验证不会写文件：
 
 ```powershell
-& "Benchmarks/PuertsComparison/ControlledRuntime/Scripts/Build-ControlledRuntimeKernel.ps1" -Mode Verify -WatCompilerModuleRoot "<wasmtime-python-45-root>"
+& "Benchmarks/PuertsComparison/ControlledRuntime/Scripts/Build-ControlledRuntimeKernel.ps1" -Mode Verify -WatCompilerModuleRoot "<wasmtime-python-45-root>" -PythonExecutable "<python-executable>"
 ```

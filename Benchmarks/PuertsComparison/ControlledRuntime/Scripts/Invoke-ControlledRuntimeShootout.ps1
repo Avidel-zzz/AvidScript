@@ -26,6 +26,8 @@ param(
 
     [string]$ProfilePath = '',
 
+    [string]$KernelId = '',
+
     [switch]$AllowNonFormalProfile,
 
     [string[]]$AdditionalEditorArguments = @()
@@ -39,10 +41,14 @@ $SidecarScriptRoot = Join-Path $PuertsComparisonRoot 'Scripts'
 $RunnerPluginRoot = Split-Path -Parent (Split-Path -Parent $PuertsComparisonRoot)
 . (Join-Path $SidecarScriptRoot 'PuertsBenchmarkSidecar.Common.ps1')
 
+$isSuiteRun = -not [string]::IsNullOrWhiteSpace($KernelId)
+$canonicalProfileName = $isSuiteRun ?
+    'ControlledRuntimeSuiteProfile.json' :
+    'ControlledRuntimeProfile.json'
 if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
-    $ProfilePath = Join-Path $ControlledRoot 'Config/ControlledRuntimeProfile.json'
+    $ProfilePath = Join-Path $ControlledRoot "Config/$canonicalProfileName"
 }
-$CanonicalProfilePath = Join-Path $ControlledRoot 'Config/ControlledRuntimeProfile.json'
+$CanonicalProfilePath = Join-Path $ControlledRoot "Config/$canonicalProfileName"
 $RequestSchemaPath = Join-Path $ControlledRoot 'Schema/ControlledRuntimeRequest.schema.json'
 $ResultSchemaPath = Join-Path $ControlledRoot 'Schema/ControlledRuntimeResult.schema.json'
 $ValidatorPath = Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1'
@@ -91,6 +97,7 @@ Assert-SidecarPuertsProvenance `
 $AvidScriptRuntimeIdentity = Get-SidecarAvidScriptRuntimeIdentity `
     -PluginRoot ([string]$ProjectJunctions.AvidScript)
 $ProfileSha256 = Get-SidecarFileSha256 -Path $ResolvedProfilePath
+$SuiteProfileSha256 = $isSuiteRun ? $ProfileSha256 : 'not_applicable'
 $EngineExecutableSha256 = Get-SidecarFileSha256 -Path $ResolvedEditorExecutable
 $EngineVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo(
     $ResolvedEditorExecutable)
@@ -103,16 +110,42 @@ if ([string]::IsNullOrWhiteSpace($EngineVersion)) {
 }
 $EngineBuildId = '{0};sha256={1}' -f $EngineVersion, $EngineExecutableSha256
 
-$KernelPath = Join-Path ([string]$ProjectJunctions.AvidScript) (
-    'Benchmarks/PuertsComparison/ControlledRuntime/Kernel/controlled_runtime_kernel.wasm')
-$KernelContractPath = Join-Path ([string]$ProjectJunctions.AvidScript) (
-    'Benchmarks/PuertsComparison/ControlledRuntime/Kernel/controlled_runtime_kernel.contract.json')
-$KernelContract = Get-Content -LiteralPath $KernelContractPath -Raw | ConvertFrom-Json
-$KernelDigest = (Get-FileHash -Algorithm SHA256 -LiteralPath $KernelPath).Hash.ToLowerInvariant()
 $Profile = Get-Content -LiteralPath $ResolvedProfilePath -Raw | ConvertFrom-Json
-if ($KernelDigest -cne [string]$KernelContract.wasm_sha256 -or
-    $KernelDigest -cne [string]$Profile.kernel_wasm_sha256) {
-    throw 'ASP54S4305 project kernel bytes differ from contract/profile identity'
+$kernelRoot = Join-Path ([string]$ProjectJunctions.AvidScript) (
+    'Benchmarks/PuertsComparison/ControlledRuntime/Kernel')
+if ($isSuiteRun) {
+    $suiteContractPath = Join-Path (
+        Join-Path ([string]$ProjectJunctions.AvidScript) 'Benchmarks/PuertsComparison/ControlledRuntime') (
+        [string]$Profile.suite_contract)
+    $suiteContractSha256 = Get-SidecarFileSha256 -Path $suiteContractPath
+    if ($suiteContractSha256 -cne [string]$Profile.suite_contract_sha256) {
+        throw 'ASP54S4305 suite contract differs from profile identity'
+    }
+    $suiteContract = Get-Content -LiteralPath $suiteContractPath -Raw |
+        ConvertFrom-Json -Depth 100
+    $selectedKernels = @($suiteContract.kernels | Where-Object {
+        [string]$_.kernel_id -ceq $KernelId
+    })
+    if ($selectedKernels.Count -ne 1 -or
+        @($Profile.kernel_ids) -cnotcontains $KernelId) {
+        throw "ASP54S4305 suite kernel id is not authorized: $KernelId"
+    }
+    $selectedKernel = $selectedKernels[0]
+    $KernelPath = Join-Path $kernelRoot ([string]$selectedKernel.wasm_path)
+    $KernelDigest = Get-SidecarFileSha256 -Path $KernelPath
+    if ($KernelDigest -cne [string]$selectedKernel.wasm_sha256) {
+        throw "ASP54S4305 suite kernel bytes differ: $KernelId"
+    }
+}
+else {
+    $KernelPath = Join-Path $kernelRoot 'controlled_runtime_kernel.wasm'
+    $KernelContractPath = Join-Path $kernelRoot 'controlled_runtime_kernel.contract.json'
+    $KernelContract = Get-Content -LiteralPath $KernelContractPath -Raw | ConvertFrom-Json
+    $KernelDigest = Get-SidecarFileSha256 -Path $KernelPath
+    if ($KernelDigest -cne [string]$KernelContract.wasm_sha256 -or
+        $KernelDigest -cne [string]$Profile.kernel_wasm_sha256) {
+        throw 'ASP54S4305 project kernel bytes differ from contract/profile identity'
+    }
 }
 
 if (-not (Test-Path -LiteralPath $ResolvedOutputRoot)) {
@@ -128,6 +161,26 @@ $LogsPath = Join-Path $AttemptPath 'logs'
 New-Item -ItemType Directory -Path $RequestsPath | Out-Null
 New-Item -ItemType Directory -Path $ResultsPath | Out-Null
 New-Item -ItemType Directory -Path $LogsPath | Out-Null
+
+if ($isSuiteRun) {
+    $Profile.benchmark_kind = 'identical_wasm_kernel'
+    $Profile | Add-Member -Force -NotePropertyName kernel_contract -NotePropertyValue (
+        "Kernel/phase54_suite.contract.json#$KernelId")
+    $Profile | Add-Member -Force -NotePropertyName kernel_wasm_sha256 -NotePropertyValue $KernelDigest
+    $Profile | Add-Member -Force -NotePropertyName pc_stop_gate -NotePropertyValue ([pscustomobject]@{
+        baseline_lane = [string]$Profile.pc_leadership_gate.baseline_lane
+        candidate_lane = [string]$Profile.pc_leadership_gate.candidate_lane
+        maximum_slowdown_ratio = 1.0
+        statistics = @('p50', 'p95')
+    })
+    $effectiveProfilePath = Join-Path $AttemptPath "$KernelId.effective-profile.json"
+    [IO.File]::WriteAllText(
+        $effectiveProfilePath,
+        ($Profile | ConvertTo-Json -Depth 100) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+    $ResolvedProfilePath = $effectiveProfilePath
+    $ProfileSha256 = Get-SidecarFileSha256 -Path $ResolvedProfilePath
+}
 
 function Write-Request {
     param(
@@ -292,8 +345,11 @@ $MergeResult = & $MergerPath `
 $Attempt = [ordered]@{
     schema_version = 1
     attempt_id = $AttemptId
+    kernel_id = $isSuiteRun ? $KernelId : 'controlled_runtime_kernel'
     profile_path = $ResolvedProfilePath
     profile_sha256 = $ProfileSha256
+    suite_profile_sha256 = $SuiteProfileSha256
+    suite_contract_sha256 = $isSuiteRun ? $suiteContractSha256 : 'not_applicable'
     calibration_request_sha256 = Get-SidecarFileSha256 -Path $CalibrationRequestPath
     calibration_sha256 = $CalibrationSha256
     calibration_pid = [int]$Calibration.pid
@@ -327,9 +383,11 @@ $AttemptJson = $Attempt | ConvertTo-Json -Depth 16
 [pscustomobject]@{
     result = 'controlled_runtime_shootout_complete'
     attempt_id = $AttemptId
+    kernel_id = $isSuiteRun ? $KernelId : 'controlled_runtime_kernel'
     attempt_path = $AttemptPath
     aggregate_path = $AggregatePath
     aggregate_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $AggregatePath).Hash.ToLowerInvariant()
     pc_default_gate = [string]$MergeResult.pc_default_gate
+    suite_profile_sha256 = $SuiteProfileSha256
     wasmtime_runtime_build_identity = [string]$AvidScriptRuntimeIdentity.WasmtimeRuntimeBuildIdentity
 }

@@ -13,6 +13,7 @@
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMemory.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Interfaces/IPluginManager.h"
 #include "JSLogger.h"
@@ -22,6 +23,7 @@
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Ssl.h"
@@ -230,6 +232,38 @@ namespace
 		return true;
 	}
 
+	bool GetPerfFileSha256(
+		const FString& Path,
+		FString& OutSha256,
+		FString& OutError)
+	{
+		TArray<uint8> Bytes;
+		if (!FFileHelper::LoadFileToArray(Bytes, *Path))
+		{
+			OutError = FString::Printf(
+				TEXT("benchmark identity artifact could not be read: %s"),
+				*Path);
+			return false;
+		}
+		uint8 Digest[SHA256_DIGEST_LENGTH] = {};
+		if (SHA256(
+				Bytes.GetData(),
+				static_cast<size_t>(Bytes.Num()),
+				Digest) == nullptr)
+		{
+			OutError = FString::Printf(
+				TEXT("benchmark identity artifact SHA-256 failed: %s"),
+				*Path);
+			return false;
+		}
+		OutSha256.Reset(SHA256_DIGEST_LENGTH * 2);
+		for (const uint8 Byte : Digest)
+		{
+			OutSha256 += FString::Printf(TEXT("%02x"), Byte);
+		}
+		return true;
+	}
+
 	bool GetCanonicalLaneIdentitySha256(
 		const TSharedPtr<FJsonObject>& Entry,
 		FString& OutSha256,
@@ -371,6 +405,8 @@ namespace
 		bool Initialize(
 			const FString& ModuleName,
 			const int32 InLaneId,
+			const FString& ExpectedScriptSha256,
+			const FString& ExpectedRuntimeArtifactSha256,
 			AAvidScriptPerfFixture& SharedFixture,
 			FString& OutError)
 		{
@@ -390,6 +426,46 @@ namespace
 					TEXT("Puerts workload/runtime root is missing: workload=%s runtime=%s"),
 					*ScriptRoot,
 					*RuntimeRoot);
+				return false;
+			}
+
+			const FString ScriptPath = FPaths::Combine(ScriptRoot, ModuleName);
+			FString ActualScriptSha256;
+			if (!GetPerfFileSha256(ScriptPath, ActualScriptSha256, OutError) ||
+				!ActualScriptSha256.Equals(
+					ExpectedScriptSha256,
+					ESearchCase::CaseSensitive))
+			{
+				if (OutError.IsEmpty())
+				{
+					OutError = FString::Printf(
+						TEXT("Puerts workload script identity mismatch: module=%s expected=%s actual=%s"),
+						*ModuleName,
+						*ExpectedScriptSha256,
+						*ActualScriptSha256);
+				}
+				return false;
+			}
+
+			const FString RuntimeModulePath =
+				FModuleManager::Get().GetModuleFilename(TEXT("JsEnv"));
+			FString ActualRuntimeArtifactSha256;
+			if (RuntimeModulePath.IsEmpty() ||
+				!GetPerfFileSha256(
+					RuntimeModulePath,
+					ActualRuntimeArtifactSha256,
+					OutError) ||
+				!ActualRuntimeArtifactSha256.Equals(
+					ExpectedRuntimeArtifactSha256,
+					ESearchCase::CaseSensitive))
+			{
+				if (OutError.IsEmpty())
+				{
+					OutError = FString::Printf(
+						TEXT("Puerts runtime artifact identity mismatch: expected=%s actual=%s"),
+						*ExpectedRuntimeArtifactSha256,
+						*ActualRuntimeArtifactSha256);
+				}
 				return false;
 			}
 
@@ -563,6 +639,27 @@ namespace
 				(!bSemanticMode && !bRequestsNativeDirect))
 			{
 				OutError = TEXT("AvidScript benchmark binding invocation mode mismatch");
+				Session.UnloadLive();
+				return false;
+			}
+			uint32 ScalarOrdinal = MAX_uint32;
+			EAvidScriptBindingInvocationMode ScalarMode =
+				EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+			const EAvidScriptBindingInvocationMode ExpectedScalarMode =
+				bSemanticMode
+					? EAvidScriptBindingInvocationMode::SemanticProcessEvent
+					: EAvidScriptBindingInvocationMode::GeneratedNativeS1;
+			if (!Manifest.BindingPackage->TryFindFunctionOrdinal(
+					*AAvidScriptPerfFixture::StaticClass(),
+					FName(TEXT("ReflectAddInt32")),
+					ScalarOrdinal) ||
+				!Manifest.BindingPackage->TryGetInvocationMode(
+					ScalarOrdinal,
+					ScalarMode) ||
+				ScalarMode != ExpectedScalarMode)
+			{
+				OutError = TEXT(
+					"AvidScript benchmark immutable scalar invocation plan does not match the lane contract");
 				Session.UnloadLive();
 				return false;
 			}
@@ -1157,9 +1254,7 @@ namespace
 				Workload,
 				Iterations).LogicalOperationCount;
 		}
-		return Workload == EAvidScriptPerfWorkload::PureInteger
-			? 0
-			: static_cast<uint64>(Iterations);
+		return static_cast<uint64>(Iterations);
 	}
 
 	uint64 GetExpectedGeneratedS1HitCount(
@@ -1238,6 +1333,7 @@ namespace
 	{
 		EAvidScriptPerfBenchmarkMode Mode = EAvidScriptPerfBenchmarkMode::Combined;
 		FString AttemptId;
+		FString RequestSha256;
 		int32 ProcessRun = 0;
 		int32 Seed = 0;
 		TArray<EAvidScriptPerfLane, TInlineAllocator<PerfRunnerLaneCount>> LaneOrder;
@@ -1253,6 +1349,7 @@ namespace
 		TArray<TSharedPtr<FJsonValue>> LaneCatalogJson;
 		TArray<FPerfLaneCatalogEntry, TInlineAllocator<PerfRunnerLaneCount>> LaneCatalog;
 		FString LaneCatalogSha256;
+		FString EditorExecutableSha256;
 		TArray<int32> FrozenIterationCounts;
 		FString TemporaryResultPath;
 	};
@@ -1913,6 +2010,13 @@ namespace
 				TEXT("request minimum_sample_milliseconds must be positive");
 			return false;
 		}
+		if (!GetPerfFileSha256(
+				RequestPath,
+				OutRequest.RequestSha256,
+				OutError))
+		{
+			return false;
+		}
 		if (!Root->TryGetNumberField(
 				TEXT("data_lane_max_crossing_ratio"),
 				OutRequest.DataLaneMaxCrossingRatio) ||
@@ -1997,6 +2101,14 @@ namespace
 			return false;
 		}
 		OutRequest.Provenance = *Provenance;
+		if (!TryGetRequiredString(
+				OutRequest.Provenance,
+				TEXT("editor_executable_sha256"),
+				OutRequest.EditorExecutableSha256,
+				OutError))
+		{
+			return false;
+		}
 		FString ProvenanceLaneCatalogSha256;
 		if (!TryGetRequiredString(
 				OutRequest.Provenance,
@@ -2640,9 +2752,12 @@ namespace
 		const bool bDataLane =
 			Observation.Lane ==
 				EAvidScriptPerfLane::AvidScriptWasmtimeDataOriented;
+		const bool bDataGameplay =
+			bDataLane &&
+			FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload);
 		const int32 ExpectedHostImportCallCount =
 			IsAvidScriptPerfLane(Observation.Lane)
-				&& !bDataLane
+				&& !bDataGameplay
 				? GetExpectedAvidScriptHostCallCount(Workload, Iterations)
 				: 0;
 		const uint64 ExpectedLogicalOperationCount =
@@ -2671,10 +2786,9 @@ namespace
 			(Observation.DataLaneCommandCount != 0 ||
 			 Observation.DataLaneCrossingCount != 0 ||
 			 Observation.DataLaneRejectedBufferCount != 0);
-		const bool bDataLaneInvalid =
-			bDataLane &&
-			(!FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload) ||
-			 Observation.GeneratedS1HitCount != ExpectedDataGeneratedS1HitCount ||
+		const bool bDataGameplayInvalid =
+			bDataGameplay &&
+			(Observation.GeneratedS1HitCount != ExpectedDataGeneratedS1HitCount ||
 			 Observation.GeneratedS1FallbackCount != 0 ||
 			 Observation.GeneratedS1RejectCount != 0 ||
 			 Observation.DataLaneCommandCount != ExpectedPropertyWriteCount ||
@@ -2684,6 +2798,15 @@ namespace
 			 static_cast<double>(Observation.DataLaneCrossingCount) /
 				 static_cast<double>(Observation.DataLaneCommandCount) >
 				 DataLaneMaxCrossingRatio);
+		const bool bDataMicroInvalid =
+			bDataLane &&
+			!bDataGameplay &&
+			(Observation.GeneratedS1HitCount != ExpectedGeneratedS1HitCount ||
+			 Observation.GeneratedS1FallbackCount != 0 ||
+			 Observation.GeneratedS1RejectCount != 0 ||
+			 Observation.DataLaneCommandCount != 0 ||
+			 Observation.DataLaneCrossingCount != 0 ||
+			 Observation.DataLaneRejectedBufferCount != 0);
 		if (Oracle.OperationCallCount != ExpectedOperationCallCount ||
 			Observation.Checksum != Oracle.Checksum ||
 			Observation.FinalScalar != Oracle.FinalScalar ||
@@ -2694,7 +2817,8 @@ namespace
 			bGeneratedS1Invalid ||
 			bSemanticInvalid ||
 			bGeneratedLaneDataInvalid ||
-			bDataLaneInvalid)
+			bDataGameplayInvalid ||
+			bDataMicroInvalid)
 		{
 			OutError = FString::Printf(
 				TEXT("correctness failure lane=%s workload=%s iterations=%d ")
@@ -3086,6 +3210,7 @@ namespace
 		Root->SetStringField(
 			TEXT("lane_catalog_sha256"),
 			Request.LaneCatalogSha256);
+		Root->SetStringField(TEXT("request_sha256"), Request.RequestSha256);
 		Root->SetObjectField(TEXT("provenance"), Request.Provenance.ToSharedRef());
 
 		if (Request.Mode == EAvidScriptPerfBenchmarkMode::Calibrate)
@@ -3238,6 +3363,24 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 	{
 		return false;
 	}
+	FString ActualEditorExecutableSha256;
+	if (!GetPerfFileSha256(
+			FPlatformProcess::ExecutablePath(),
+			ActualEditorExecutableSha256,
+			OutError) ||
+		!ActualEditorExecutableSha256.Equals(
+			Request.EditorExecutableSha256,
+			ESearchCase::CaseSensitive))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = FString::Printf(
+				TEXT("Editor executable identity mismatch: expected=%s actual=%s"),
+				*Request.EditorExecutableSha256,
+				*ActualEditorExecutableSha256);
+		}
+		return false;
+	}
 	if (FPaths::FileExists(Request.TemporaryResultPath))
 	{
 		OutError = FString::Printf(
@@ -3266,18 +3409,28 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 	}
 
 	FPuertsLane Reflection;
+	const FPerfLaneCatalogEntry& ReflectionCatalog =
+		Request.LaneCatalog[static_cast<int32>(
+			EAvidScriptPerfLane::PuertsV8Reflection)];
 	if (!Reflection.Initialize(
 		TEXT("reflection.js"),
 		AAvidScriptPerfFixture::ReflectionLaneId,
+		ReflectionCatalog.ArtifactSha256,
+		ReflectionCatalog.RuntimeArtifactSha256,
 		*Fixture,
 		OutError))
 	{
 		return false;
 	}
 	FPuertsLane Static;
+	const FPerfLaneCatalogEntry& StaticCatalog =
+		Request.LaneCatalog[static_cast<int32>(
+			EAvidScriptPerfLane::PuertsV8Static)];
 	if (!Static.Initialize(
 		TEXT("static.js"),
 		AAvidScriptPerfFixture::StaticLaneId,
+		StaticCatalog.ArtifactSha256,
+		StaticCatalog.RuntimeArtifactSha256,
 		*Fixture,
 		OutError))
 	{

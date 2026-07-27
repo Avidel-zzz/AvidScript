@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P54.6 six-lane calibration result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timer_frequency_hz",
+    "request_sha256",
+    "lane_catalog",
+    "lane_catalog_sha256",
+    "provenance",
+    "calibration_id",
+    "iteration_counts"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "timer_frequency_hz": { "type": "integer", "minimum": 1 },
+    "request_sha256": { "$ref": "#/$defs/sha256" },
+    "lane_catalog": { "type": "array", "minItems": 6, "maxItems": 6 },
+    "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },
+    "provenance": { "type": "object" },
+    "calibration_id": { "type": "string", "minLength": 1 },
+    "iteration_counts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 6,
+        "maxProperties": 6,
+        "additionalProperties": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

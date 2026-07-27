@@ -90,37 +90,39 @@ Assert-True ($AvidScriptWorkload.Contains('fixture.ScalarValue =')) 'AvidScript 
 Assert-True ($AvidScriptWorkload.Contains('[AvidPersist]')) 'AvidScript lane must publish checksum through guest state'
 Assert-True ($AvidScriptProfile.binding_profile.self_class_path -ceq '/Script/AvidScriptPerfHarness.AvidScriptPerfFixture') 'AvidScript profile self class must be the shared fixture'
 
-$Profile = Read-RequiredText 'Config/BenchmarkProfile.json' | ConvertFrom-Json
+$Profile = Read-RequiredText 'Profiles/Phase54Gameplay.formal.json' | ConvertFrom-Json
+$RequestTemplate = Read-RequiredText 'Profiles/Phase54SixLaneRequest.template.json' | ConvertFrom-Json
 $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
     'avidscript_wasmtime_semantic',
-    'avidscript_wasmtime_native_direct'
+    'avidscript_wasmtime_generated_s1',
+    'avidscript_wasmtime_data_oriented'
 )
-Assert-True ([int]$Profile.schema_version -eq 2) 'benchmark profile must use schema v2'
-Assert-True (@($Profile.lanes).Count -eq $ExpectedLanes.Count) 'benchmark profile must contain exactly five lanes'
+Assert-True ([int]$Profile.schema_version -eq 1) 'Phase54 benchmark profile must use schema v1'
+Assert-True (@($Profile.lanes).Count -eq $ExpectedLanes.Count) 'Phase54 benchmark profile must contain exactly six lanes'
 for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
     Assert-True ([string]$Profile.lanes[$Index] -ceq $ExpectedLanes[$Index]) "benchmark lane order mismatch at index $Index"
 }
 Assert-True ([int]$Profile.process_runs -ge 5) 'benchmark profile requires at least five process runs'
 Assert-True ([int]$Profile.timed_samples -ge 30) 'benchmark profile requires at least thirty timed samples'
 Assert-True ([int]$Profile.seed -ge -16777216 -and [int]$Profile.seed -le 16777216) 'event ABI seed must remain exactly representable by float'
-$SemanticLane = @($Profile.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_semantic' })[0]
-$DirectLane = @($Profile.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_native_direct' })[0]
+$SemanticLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_semantic' })[0]
+$GeneratedLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_generated_s1' })[0]
+$DataLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_data_oriented' })[0]
 Assert-True ([string]$SemanticLane.backend_id -ceq 'wasmtime.cranelift.jit') 'semantic lane must use Wasmtime Cranelift'
-Assert-True ([string]$DirectLane.backend_id -ceq 'wasmtime.cranelift.jit') 'direct lane must use Wasmtime Cranelift'
+Assert-True ([string]$GeneratedLane.backend_id -ceq 'wasmtime.cranelift.jit') 'generated lane must use Wasmtime Cranelift'
+Assert-True ([string]$DataLane.backend_id -ceq 'wasmtime.cranelift.jit') 'data lane must use Wasmtime Cranelift'
 Assert-True ([string]$SemanticLane.binding_invocation_mode -ceq 'semantic_process_event') 'semantic lane must publish semantic_process_event'
-Assert-True ([string]$DirectLane.binding_invocation_mode -ceq 'qualified_native_direct') 'direct lane must publish qualified_native_direct'
+Assert-True ([string]$GeneratedLane.binding_invocation_mode -ceq 'generated_native_s1') 'generated lane must publish generated_native_s1'
+Assert-True ([string]$DataLane.binding_invocation_mode -ceq 'data_command_buffer') 'data lane must publish data_command_buffer'
 foreach ($Property in @(
     'runtime_id',
     'runtime_version',
-    'source_wasm_sha256',
-    'execution_artifact_sha256',
-    'runtime_build_identity',
-    'runtime_artifact_sha256',
     'backend_id')) {
-    Assert-True ([string]$SemanticLane.$Property -ceq [string]$DirectLane.$Property) "Wasmtime lanes must share $Property"
+    Assert-True ([string]$SemanticLane.$Property -ceq [string]$GeneratedLane.$Property) "semantic/generated Wasmtime lanes must share $Property"
+    Assert-True ([string]$SemanticLane.$Property -ceq [string]$DataLane.$Property) "semantic/data Wasmtime lanes must share $Property"
 }
 
 $Runner = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp'
@@ -130,7 +132,8 @@ Assert-True ($Runner.Contains('TryGetInvocationMode')) 'runner must query immuta
 Assert-True ($Runner.Contains('DirectHitCount')) 'runner must record direct-hit evidence'
 Assert-True ($Runner.Contains('RequestedDirectFallbackCount')) 'runner must record requested-direct fallback evidence'
 Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeSemantic')) 'runner must own an independent semantic Wasmtime session'
-Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeNativeDirect')) 'runner must own an independent direct Wasmtime session'
+Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeGeneratedS1')) 'runner must own an independent generated Wasmtime session'
+Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeDataOriented')) 'runner must own an independent data-oriented Wasmtime session'
 
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
 $ResultSchema = Get-Content -LiteralPath $ResultSchemaPath -Raw | ConvertFrom-Json
@@ -148,4 +151,4 @@ $PrivateKeyToken = @('BEGIN', 'OPENSSH', 'PRIVATE', 'KEY') -join ' '
 Assert-True (-not $TrackedText.Contains($UserProfileToken)) 'benchmark sources must not contain a user-profile absolute path'
 Assert-True (-not $TrackedText.Contains($PrivateKeyToken)) 'benchmark sources must not contain private key material'
 
-Write-Output 'Puerts benchmark architecture passed: production_isolation=1 lanes=5 shared_fixture=1 provenance=1 privacy=1'
+Write-Output 'Puerts benchmark architecture passed: production_isolation=1 lanes=6 shared_fixture=1 provenance=1 privacy=1'

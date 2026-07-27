@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "profile_id": "phase54.6-micro-diagnostic-v1",
+  "evidence_class": "diagnostic",
+  "process_runs": 1,
+  "warmup_samples": 1,
+  "timed_samples": 2,
+  "seed": 1397313,
+  "calibration": {
+    "confirmation_samples": 1,
+    "minimum_sample_milliseconds": 0.25,
+    "minimum_iterations": 10,
+    "maximum_iterations": 100000
+  },
+  "validity": {
+    "data_lane_max_crossing_ratio": 0.5,
+    "require_clean_tree": false,
+    "raw_samples_tracked": false
+  },
+  "lanes": [
+    "native_cpp",
+    "puerts_v8_reflection",
+    "puerts_v8_static",
+    "avidscript_wasmtime_semantic",
+    "avidscript_wasmtime_generated_s1",
+    "avidscript_wasmtime_data_oriented"
+  ],
+  "workloads": [
+    "callback_empty",
+    "callback_tick",
+    "pure_integer",
+    "scalar_noop",
+    "scalar_add_int32",
+    "property_get_set",
+    "vector_value",
+    "vector_ref_out",
+    "object_roundtrip",
+    "batch_scalar"
+  ],
+  "workload_contracts": {
+    "callback_empty": { "fixture_function_calls_per_frame": 0 },
+    "callback_tick": { "fixture_function_calls_per_frame": 0 },
+    "pure_integer": { "fixture_function_calls_per_frame": 0 },
+    "scalar_noop": { "fixture_function_calls_per_frame": 1 },
+    "scalar_add_int32": { "fixture_function_calls_per_frame": 1 },
+    "property_get_set": { "fixture_function_calls_per_frame": 0 },
+    "vector_value": { "fixture_function_calls_per_frame": 1 },
+    "vector_ref_out": { "fixture_function_calls_per_frame": 1 },
+    "object_roundtrip": { "fixture_function_calls_per_frame": 1 },
+    "batch_scalar": { "fixture_function_calls_per_frame": 1 }
+  },
+  "avidscript_artifacts": {
+    "avidscript_wasmtime_semantic": {
+      "binding_invocation_mode": "semantic_process_event",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.avidscript.json"
+    },
+    "avidscript_wasmtime_generated_s1": {
+      "binding_invocation_mode": "generated_native_s1",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/profile_phase54_6_generated_s1.avidscript.json"
+    },
+    "avidscript_wasmtime_data_oriented": {
+      "binding_invocation_mode": "data_command_buffer",
+      "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_data_oriented/profile_phase54_6_data_oriented.avidscript.json"
+    }
+  },
+  "output": {
+    "raw_process_samples": "external_evidence_only",
+    "tracked_evidence": "hashes_and_summary_only",
+    "include_personal_absolute_paths": false
+  }
+}

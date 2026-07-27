@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$WatCompilerModuleRoot = ''
+    [string]$WatCompilerModuleRoot = '',
+    [string]$PythonExecutable = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,22 +12,38 @@ $PluginRoot = Split-Path -Parent (Split-Path -Parent $PuertsComparisonRoot)
 $HarnessRoot = Join-Path $PuertsComparisonRoot 'AvidScriptPerfHarness'
 . (Join-Path $PuertsComparisonRoot 'Scripts/PuertsBenchmarkSidecar.Common.ps1')
 $ProfilePath = Join-Path $ControlledRoot 'Config/ControlledRuntimeProfile.json'
+$SuiteProfilePath = Join-Path $ControlledRoot (
+    'Config/ControlledRuntimeSuiteProfile.json')
+$PhysicalCostProfilePath = Join-Path $ControlledRoot (
+    'Config/PhysicalCostProfile.json')
 $RequestSchemaPath = Join-Path $ControlledRoot (
     'Schema/ControlledRuntimeRequest.schema.json')
 $ResultSchemaPath = Join-Path $ControlledRoot (
     'Schema/ControlledRuntimeResult.schema.json')
 $AggregateSchemaPath = Join-Path $ControlledRoot (
     'Schema/ControlledRuntimeAggregate.schema.json')
+$SuiteAggregateSchemaPath = Join-Path $ControlledRoot (
+    'Schema/ControlledRuntimeSuiteAggregate.schema.json')
+$PhysicalCostRequestSchemaPath = Join-Path $ControlledRoot (
+    'Schema/PhysicalCostRequest.schema.json')
+$PhysicalCostResultSchemaPath = Join-Path $ControlledRoot (
+    'Schema/PhysicalCostResult.schema.json')
+$PhysicalCostAggregateSchemaPath = Join-Path $ControlledRoot (
+    'Schema/PhysicalCostAggregate.schema.json')
 $KernelContractPath = Join-Path $ControlledRoot (
     'Kernel/controlled_runtime_kernel.contract.json')
 $KernelWasmPath = Join-Path $ControlledRoot (
     'Kernel/controlled_runtime_kernel.wasm')
 $KernelWatPath = Join-Path $ControlledRoot (
     'Kernel/controlled_runtime_kernel.wat')
+$SuiteContractPath = Join-Path $ControlledRoot (
+    'Kernel/phase54_suite.contract.json')
 $CrossingCostContractPath = Join-Path $ControlledRoot (
     'Kernel/crossing_cost_kernel.contract.json')
 $CrossingCostWatPath = Join-Path $ControlledRoot (
     'Kernel/crossing_cost_kernel.wat')
+$CrossingCostWasmPath = Join-Path $ControlledRoot (
+    'Kernel/crossing_cost_kernel.wasm')
 $RunnerPath = Join-Path $HarnessRoot (
     'Source/AvidScriptPerfHarness/Private/AvidScriptControlledRuntimeRunner.cpp')
 $JavaScriptPath = Join-Path $HarnessRoot (
@@ -50,6 +67,16 @@ $ValidatorPath = Join-Path $ScriptRoot 'Test-ControlledRuntimeResult.ps1'
 $MergerPath = Join-Path $ScriptRoot 'Merge-ControlledRuntimeResults.ps1'
 $OrchestratorPath = Join-Path $ScriptRoot (
     'Invoke-ControlledRuntimeShootout.ps1')
+$SuiteBuilderPath = Join-Path $ScriptRoot (
+    'Build-ControlledRuntimeSuite.ps1')
+$SuiteOrchestratorPath = Join-Path $ScriptRoot (
+    'Invoke-ControlledRuntimeSuite.ps1')
+$PhysicalCostOrchestratorPath = Join-Path $ScriptRoot (
+    'Invoke-PhysicalCostLadder.ps1')
+$PhysicalCostRunnerPath = Join-Path $HarnessRoot (
+    'Source/AvidScriptPerfHarness/Private/AvidScriptPerfCostRunner.cpp')
+$PhysicalCostCommandletPath = Join-Path $HarnessRoot (
+    'Source/AvidScriptPerfHarness/Private/AvidScriptPerfCostCommandlet.cpp')
 
 function Assert-True {
     param(
@@ -74,14 +101,22 @@ function Write-JsonFile {
 
 foreach ($RequiredFile in @(
     $ProfilePath,
+    $SuiteProfilePath,
+    $PhysicalCostProfilePath,
     $RequestSchemaPath,
     $ResultSchemaPath,
     $AggregateSchemaPath,
+    $SuiteAggregateSchemaPath,
+    $PhysicalCostRequestSchemaPath,
+    $PhysicalCostResultSchemaPath,
+    $PhysicalCostAggregateSchemaPath,
     $KernelContractPath,
     $KernelWasmPath,
     $KernelWatPath,
+    $SuiteContractPath,
     $CrossingCostContractPath,
     $CrossingCostWatPath,
+    $CrossingCostWasmPath,
     $RunnerPath,
     $JavaScriptPath,
     $VmHeaderPath,
@@ -94,7 +129,12 @@ foreach ($RequiredFile in @(
     $AttributesPath,
     $ValidatorPath,
     $MergerPath,
-    $OrchestratorPath
+    $OrchestratorPath,
+    $SuiteBuilderPath,
+    $SuiteOrchestratorPath,
+    $PhysicalCostOrchestratorPath,
+    $PhysicalCostRunnerPath,
+    $PhysicalCostCommandletPath
 )) {
     Assert-True (Test-Path -LiteralPath $RequiredFile -PathType Leaf) (
         "required controlled runtime file is missing: $RequiredFile")
@@ -103,7 +143,10 @@ foreach ($RequiredFile in @(
 foreach ($PowerShellPath in @(
     $ValidatorPath,
     $MergerPath,
-    $OrchestratorPath
+    $OrchestratorPath,
+    $SuiteBuilderPath,
+    $SuiteOrchestratorPath,
+    $PhysicalCostOrchestratorPath
 )) {
     $ParseTokens = $null
     $ParseErrors = $null
@@ -146,6 +189,45 @@ Assert-True (
         [string]::Join('|', $ExpectedLanes)) (
     'formal profile lane order differs from the controlled contract')
 
+$SuiteProfile = Get-Content -LiteralPath $SuiteProfilePath -Raw |
+    ConvertFrom-Json -Depth 100
+$SuiteContract = Get-Content -LiteralPath $SuiteContractPath -Raw |
+    ConvertFrom-Json -Depth 100
+Assert-True ([string]$SuiteProfile.benchmark_kind -ceq
+    'identical_wasm_kernel_suite') (
+    'suite benchmark kind must be identical_wasm_kernel_suite')
+Assert-True (@($SuiteProfile.kernel_ids).Count -eq 12 -and
+    @($SuiteContract.kernels).Count -eq 12) (
+    'controlled runtime suite must freeze exactly twelve kernels')
+Assert-True (
+    [string]::Join('|', @($SuiteProfile.kernel_ids)) -ceq
+        [string]::Join('|', @($SuiteContract.kernels | ForEach-Object {
+            [string]$_.kernel_id
+        }))) (
+    'suite profile and contract kernel order differ')
+Assert-True ((Get-SidecarFileSha256 -Path $SuiteContractPath) -ceq
+    [string]$SuiteProfile.suite_contract_sha256) (
+    'suite contract digest differs from profile identity')
+Assert-True ([double]$SuiteProfile.pc_leadership_gate.maximum_geometric_mean_ratio -eq
+    0.95) 'suite geometric mean leadership threshold must be 0.95'
+Assert-True ([double]$SuiteProfile.pc_leadership_gate.maximum_mad_geometric_mean_ratio -eq
+    1.25) 'suite MAD geometric mean threshold must be 1.25'
+Assert-True ([double]$SuiteProfile.pc_leadership_gate.minimum_kernel_win_rate -eq
+    0.60) 'suite kernel win rate leadership threshold must be 0.60'
+foreach ($Kernel in @($SuiteContract.kernels)) {
+    $SuiteWatPath = Join-Path $ControlledRoot (
+        'Kernel/' + [string]$Kernel.wat_path)
+    $SuiteWasmPath = Join-Path $ControlledRoot (
+        'Kernel/' + [string]$Kernel.wasm_path)
+    Assert-True (Test-Path -LiteralPath $SuiteWatPath -PathType Leaf) (
+        "suite WAT is missing: $($Kernel.kernel_id)")
+    Assert-True (Test-Path -LiteralPath $SuiteWasmPath -PathType Leaf) (
+        "suite WASM is missing: $($Kernel.kernel_id)")
+    Assert-True ((Get-SidecarFileSha256 -Path $SuiteWasmPath) -ceq
+        [string]$Kernel.wasm_sha256) (
+        "suite WASM identity differs: $($Kernel.kernel_id)")
+}
+
 $KernelContract = Get-Content -LiteralPath $KernelContractPath -Raw |
     ConvertFrom-Json
 $KernelDigest = Get-SidecarFileSha256 -Path $KernelWasmPath
@@ -168,8 +250,8 @@ function Assert-CrossingCostContract {
     Assert-True ([string]$Contract.kernel_id -ceq
         'avidscript.controlled_runtime.crossing_cost.v1') (
         'crossing cost contract id is frozen')
-    Assert-True ($Contract.tracked_wasm -eq $false) (
-        'crossing cost WAT must remain the tracked source before VM integration')
+    Assert-True ($Contract.tracked_wasm -eq $true) (
+        'physical crossing cost WASM must be tracked for formal execution')
     Assert-True (@($Contract.imports).Count -eq 2) (
         'crossing cost contract requires two host imports')
     Assert-True ([string]$Contract.imports[0].module -ceq 'avidscript' -and
@@ -180,8 +262,8 @@ function Assert-CrossingCostContract {
         [string]$Contract.imports[1].name -ceq 'i32_pair' -and
         [string]$Contract.imports[1].signature -ceq '(i32,i32)->i32') (
         'i32 pair import contract differs')
-    Assert-True (@($Contract.exports).Count -eq 2) (
-        'crossing cost contract requires two exports')
+    Assert-True (@($Contract.exports).Count -eq 3) (
+        'crossing cost contract requires three exports')
     foreach ($Export in @($Contract.exports)) {
         Assert-True ([string]$Export.signature -ceq '(i32,i32)->i32') (
             'crossing cost export signature differs')
@@ -192,6 +274,7 @@ function Assert-CrossingCostContract {
             "crossing cost WAT is missing export $($Export.name)")
     }
     foreach ($Token in @(
+        '(export "run_cached")',
         '(import "avidscript" "typed_empty_i32"',
         '(import "avidscript" "i32_pair"',
         'call $typed_empty_i32',
@@ -207,6 +290,9 @@ $CrossingCostContract = Get-Content -LiteralPath $CrossingCostContractPath -Raw 
     ConvertFrom-Json
 $CrossingCostWat = Get-Content -LiteralPath $CrossingCostWatPath -Raw
 Assert-CrossingCostContract -Contract $CrossingCostContract -WatText $CrossingCostWat
+Assert-True ((Get-SidecarFileSha256 -Path $CrossingCostWasmPath) -ceq
+    [string]$CrossingCostContract.wasm_sha256) (
+    'physical crossing cost WASM differs from tracked contract')
 $TamperedCrossingCostContract = Get-Content -LiteralPath $CrossingCostContractPath -Raw |
     ConvertFrom-Json
 $TamperedCrossingCostContract.exports[0].signature = '(i32)->i32'
@@ -221,6 +307,42 @@ catch {
 }
 Assert-True $TamperRejected (
     'crossing cost contract tamper must be rejected')
+
+$PhysicalCostProfile = Get-Content -LiteralPath $PhysicalCostProfilePath -Raw |
+    ConvertFrom-Json
+Assert-True ([int]$PhysicalCostProfile.process_runs -eq 5 -and
+    [int]$PhysicalCostProfile.warmup_samples -eq 5 -and
+    [int]$PhysicalCostProfile.timed_samples -eq 30) (
+    'formal physical cost profile must use 5 processes, 5 warmups, and 30 samples')
+Assert-True ([string]::Join('|', @($PhysicalCostProfile.stages)) -ceq
+    [string]::Join('|', @(
+        'native_no_op',
+        'cached_export',
+        'typed_empty_import',
+        'generic_empty_import',
+        'typed_i32_pair_import'))) (
+    'physical cost profile stage order differs')
+$PhysicalCostRunner = Get-Content -LiteralPath $PhysicalCostRunnerPath -Raw
+foreach ($Token in @(
+    'EAvidScriptVmTypedHostShape::EmptyI32',
+    'EAvidScriptVmTypedHostShape::I32PairToI32',
+    'DispatchDynamicHostCall(',
+    'ResolveExport(TEXT("run_cached")',
+    'ResolveExport(TEXT("run_empty")',
+    'ResolveExport(TEXT("run_i32_pair")',
+    'FPlatformProcess::ExecutablePath()',
+    'host_import_count'
+)) {
+    Assert-True ($PhysicalCostRunner.Contains($Token)) (
+        "physical cost runner is missing token: $Token")
+}
+$SuiteOrchestrator = Get-Content -LiteralPath $SuiteOrchestratorPath -Raw
+Assert-True ($SuiteOrchestrator.Contains('$madGeo -le $maximumMadGeo')) (
+    'suite leadership result must enforce the tracked MAD threshold')
+$SuiteBuilder = Get-Content -LiteralPath $SuiteBuilderPath -Raw
+Assert-True ($SuiteBuilder.Contains('[string]$PythonExecutable') -and
+    $SuiteBuilder.Contains('& $resolvedPython -c $probe')) (
+    'suite compiler must execute the explicitly supplied Python binary')
 
 $JavaScript = Get-Content -LiteralPath $JavaScriptPath -Raw
 foreach ($Token in @(
@@ -349,9 +471,17 @@ foreach ($Token in @(
 }
 
 if (-not [string]::IsNullOrWhiteSpace($WatCompilerModuleRoot)) {
+    if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
+        throw 'PythonExecutable is required when verifying tracked WAT/WASM bytes.'
+    }
     & (Join-Path $ScriptRoot 'Build-ControlledRuntimeKernel.ps1') `
         -Mode Verify `
-        -WatCompilerModuleRoot $WatCompilerModuleRoot | Out-Null
+        -WatCompilerModuleRoot $WatCompilerModuleRoot `
+        -PythonExecutable $PythonExecutable | Out-Null
+    & $SuiteBuilderPath `
+        -Mode Verify `
+        -WatCompilerModuleRoot $WatCompilerModuleRoot `
+        -PythonExecutable $PythonExecutable | Out-Null
 }
 
 $FixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
@@ -826,4 +956,5 @@ finally {
         [int]$Profile.timed_samples *
         $ExpectedLanes.Count)
     statistics = 'per_process_then_cross_process_paired'
+    suite_kernel_count = @($SuiteContract.kernels).Count
 }

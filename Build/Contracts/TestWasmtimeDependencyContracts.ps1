@@ -319,8 +319,14 @@ Assert-True ($TrackedLock.archive.root -ceq 'wasmtime-v45.0.0-x86_64-windows-c-a
 Assert-True ($TrackedLock.install.relative_path -ceq 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0') 'install path drifted'
 $TrackedLicensePath = Join-Path $ThirdPartyRoot 'LICENSE.txt'
 Assert-True (Test-Path -LiteralPath $TrackedLicensePath -PathType Leaf) 'tracked archive license is missing'
+$TrackedLicenseText = [System.IO.File]::ReadAllText($TrackedLicensePath).
+    Replace("`r`n", "`n").Replace("`r", "`n")
+$TrackedLicenseDigest = [Convert]::ToHexString(
+    [System.Security.Cryptography.SHA256]::HashData(
+        [System.Text.UTF8Encoding]::new($false).GetBytes(
+            $TrackedLicenseText))).ToLowerInvariant()
 Assert-True (
-    (Get-FileHash -LiteralPath $TrackedLicensePath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq
+    $TrackedLicenseDigest -ceq
         '268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5') `
     'tracked archive license drifted'
 

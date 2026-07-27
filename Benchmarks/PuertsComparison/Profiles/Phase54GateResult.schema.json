@@ -49,7 +49,7 @@
         "s1_property_ns",
         "callback_ns",
         "callback_vs_puerts",
-        "vector_vs_p54_5",
+        "vector_vs_phase54_baseline",
         "small_vs_best_puerts",
         "dense_vs_best_puerts",
         "typed_empty_explained_ratio"
@@ -63,7 +63,7 @@
         "s1_property_ns": { "$ref": "#/$defs/gate" },
         "callback_ns": { "$ref": "#/$defs/gate" },
         "callback_vs_puerts": { "$ref": "#/$defs/gate" },
-        "vector_vs_p54_5": { "$ref": "#/$defs/gate" },
+        "vector_vs_phase54_baseline": { "$ref": "#/$defs/gate" },
         "small_vs_best_puerts": { "$ref": "#/$defs/gate" },
         "dense_vs_best_puerts": { "$ref": "#/$defs/gate" },
         "typed_empty_explained_ratio": { "$ref": "#/$defs/gate" }

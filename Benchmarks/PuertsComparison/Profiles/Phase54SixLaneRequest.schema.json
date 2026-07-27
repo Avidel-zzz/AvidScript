@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P54.6 six-lane benchmark process request",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "attempt_id",
+    "process_run",
+    "lane_order",
+    "lanes",
+    "lane_catalog_sha256",
+    "lane_catalog",
+    "workloads",
+    "provenance",
+    "result_schema",
+    "result_path",
+    "result_write"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "mode": { "enum": ["calibration", "timed"] },
+    "lane_order": { "$ref": "#/$defs/lanes" },
+    "lanes": { "$ref": "#/$defs/lanes" },
+    "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },
+    "lane_catalog": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "lane_id",
+          "lane_identity_sha256",
+          "execution_artifact_sha256",
+          "runtime_artifact_sha256",
+          "fallback_used"
+        ]
+      }
+    },
+    "workloads": { "type": "array", "minItems": 1, "uniqueItems": true },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "editor_executable_sha256",
+        "harness_module_sha256",
+        "avidscript_commit",
+        "avidscript_tree_sha",
+        "avidscript_dirty",
+        "puerts_runtime_sha256",
+        "puerts_reflection_script_sha256",
+        "puerts_static_script_sha256",
+        "wasmtime_runtime_sha256",
+        "lane_catalog_sha256"
+      ]
+    },
+    "result_write": {
+      "type": "object",
+      "required": ["strategy", "temporary_path", "overwrite"],
+      "properties": {
+        "strategy": { "const": "same_directory_temporary_then_atomic_rename" },
+        "overwrite": { "const": false }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "lanes": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "native_cpp",
+          "puerts_v8_reflection",
+          "puerts_v8_static",
+          "avidscript_wasmtime_semantic",
+          "avidscript_wasmtime_generated_s1",
+          "avidscript_wasmtime_data_oriented"
+        ]
+      }
+    }
+  }
+}

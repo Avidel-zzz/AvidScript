@@ -80,7 +80,7 @@
     "s1_property_ns": { "maximum": 50.0 },
     "callback_ns": { "maximum": 150.0 },
     "callback_vs_puerts": { "maximum": 0.85 },
-    "vector_vs_p54_5": { "maximum": 0.85 },
+    "vector_vs_phase54_baseline": { "maximum": 0.85 },
     "small_vs_best_puerts": {
       "maximum": 0.70,
       "lane": "avidscript_wasmtime_generated_s1"

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profile_id": "ue58-win64-physical-crossing-cost-diagnostic-v1",
+  "benchmark_kind": "physical_crossing_cost_ladder",
+  "process_runs": 1,
+  "warmup_samples": 1,
+  "timed_samples": 3,
+  "iterations": 1000,
+  "seed": 1397313,
+  "stages": [
+    "native_no_op",
+    "cached_export",
+    "typed_empty_import",
+    "generic_empty_import",
+    "typed_i32_pair_import"
+  ]
+}

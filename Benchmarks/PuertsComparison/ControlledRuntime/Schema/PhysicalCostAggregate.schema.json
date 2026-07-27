@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "attempt_id",
+    "profile_sha256",
+    "candidate",
+    "engine_executable_sha256",
+    "kernel_wasm_sha256",
+    "runtime",
+    "process_runs",
+    "timed_samples_per_stage_per_process",
+    "observation_count",
+    "process_metrics",
+    "cross_process_metrics",
+    "cost_deltas",
+    "correctness_failures",
+    "fallback_used",
+    "result_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
+    "attempt_id": { "type": "string", "format": "uuid" },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree_sha", "clean"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "tree_sha": { "$ref": "#/$defs/commit" },
+        "clean": { "const": true }
+      }
+    },
+    "engine_executable_sha256": { "$ref": "#/$defs/sha256" },
+    "kernel_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "build_identity", "artifact_sha256"],
+      "properties": {
+        "id": { "const": "wasmtime.cranelift.jit" },
+        "version": { "type": "string", "minLength": 1 },
+        "build_identity": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "process_runs": { "type": "integer", "minimum": 1 },
+    "timed_samples_per_stage_per_process": { "type": "integer", "minimum": 1 },
+    "observation_count": { "type": "integer", "minimum": 5 },
+    "process_metrics": {
+      "type": "array",
+      "minItems": 5,
+      "items": { "$ref": "#/$defs/metric" }
+    },
+    "cross_process_metrics": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage",
+          "process_count",
+          "process_p50_median_ns_per_iteration",
+          "process_p50_p95_ns_per_iteration",
+          "process_p95_median_ns_per_iteration",
+          "process_p95_p95_ns_per_iteration",
+          "process_mad_median_ns_per_iteration"
+        ],
+        "properties": {
+          "stage": { "type": "string", "minLength": 1 },
+          "process_count": { "type": "integer", "minimum": 1 },
+          "process_p50_median_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "process_p50_p95_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "process_p95_median_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "process_p95_p95_ns_per_iteration": { "type": "number", "minimum": 0 },
+          "process_mad_median_ns_per_iteration": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "cost_deltas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "typed_empty_over_cached_p95",
+        "generic_minus_typed_empty_observed_p95_ns",
+        "typed_i32_pair_minus_typed_empty_observed_p95_ns"
+      ],
+      "properties": {
+        "typed_empty_over_cached_p95": { "type": "number", "minimum": 0 },
+        "generic_minus_typed_empty_observed_p95_ns": { "type": "number" },
+        "typed_i32_pair_minus_typed_empty_observed_p95_ns": { "type": "number" }
+      }
+    },
+    "correctness_failures": { "const": 0 },
+    "fallback_used": { "const": false },
+    "result_sha256": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sha256" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["process_run", "stage", "sample_count", "p50_ns_per_iteration", "p95_ns_per_iteration", "mad_ns_per_iteration"],
+      "properties": {
+        "process_run": { "type": "integer", "minimum": 0 },
+        "stage": { "type": "string", "minLength": 1 },
+        "sample_count": { "type": "integer", "minimum": 1 },
+        "p50_ns_per_iteration": { "type": "number", "minimum": 0 },
+        "p95_ns_per_iteration": { "type": "number", "minimum": 0 },
+        "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -382,6 +382,7 @@ $WamrBuildScript = Read-RequiredFile 'Build/BuildWAMRWin64.cmd'
 $WamrCommonCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/common/iwasm_common.cmake'
 $WasmtimeShimHeader = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.h'
 $WasmtimeShimSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c'
+$WasmtimeShimInternal = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApiInternal.h'
 $WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp'
 $StaticHostImportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp'
 $WamrCallStackSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrCallStack.cpp'
@@ -441,7 +442,8 @@ foreach ($RequiredWasmtimeShimToken in @(
         Add-Violation "Wasmtime unique-prefix C shim is missing $RequiredWasmtimeShimToken"
     }
 }
-if (-not $WasmtimeShimSource.Contains('#include "wasmtime.h"') -or
+if (-not $WasmtimeShimInternal.Contains('#include "wasmtime.h"') -or
+	$WasmtimeShimSource.Contains('#include "wasmtime.h"') -or
     $WasmtimeBackendSource.Contains('#include "wasmtime.h"')) {
     Add-Violation 'Wasmtime headers must remain isolated to the unique-prefix C shim'
 }
@@ -886,7 +888,8 @@ foreach ($RequiredProjectProfileContract in @(
     'FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile',
     'FAvidScriptHash::Sha256HexUtf8',
     'bIncludeWritableProperties',
-    'AppendRuleIdentity(Rule, bHasWritableProperties, Identity)'
+    'bHasGeneratedNativeProperties',
+    'AppendRuleIdentity('
 )) {
     if (-not $ProjectBindingProfileHeader.Contains($RequiredProjectProfileContract) -and
         -not $ProjectBindingProfileSource.Contains($RequiredProjectProfileContract)) {
@@ -1001,7 +1004,7 @@ foreach ($RequiredPropertyFacadeContract in @(
     'Binding.BindingKind == TEXT("property_get")',
     'BuildPropertySetterInterop',
     'Binding.BindingKind == TEXT("property_set")',
-    'GenerateWithObjectFactories',
+    'GenerateFromProfile',
     'public bool IsNull => Slot == 0 && Generation == 0;',
     'public bool HasHandle => Slot > 0 && Generation > 0;'
 )) {
@@ -2144,7 +2147,7 @@ if (-not $CSharpBuildInvokerSource.Contains('FPlatformProcess::ExecProcess') -or
     $CSharpBuildInvokerSource.Contains('BindingSliceService')) {
     Add-Violation 'C# BuildInvoker must execute one normalized build without selecting or slicing packages'
 }
-if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories') -or
+if (-not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile') -or
     -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical') -or
     -not $CSharpBindingSliceSource.Contains('FAvidScriptEditorCSharpBindingEmitter::PublishDerivedSliceDescriptor') -or
     $CSharpBindingSliceSource.Contains('FPlatformProcess::ExecProcess')) {

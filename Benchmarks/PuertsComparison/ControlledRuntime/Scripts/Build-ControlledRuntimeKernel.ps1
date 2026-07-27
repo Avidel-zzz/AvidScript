@@ -4,7 +4,10 @@ param(
     [string]$Mode = 'Verify',
 
     [Parameter(Mandatory = $true)]
-    [string]$WatCompilerModuleRoot
+    [string]$WatCompilerModuleRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PythonExecutable
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +15,7 @@ $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ControlledRoot = Split-Path -Parent $ScriptRoot
 $KernelRoot = Join-Path $ControlledRoot 'Kernel'
 $CompilerRoot = [System.IO.Path]::GetFullPath($WatCompilerModuleRoot)
+$ResolvedPython = (Resolve-Path -LiteralPath $PythonExecutable).Path
 
 if (-not (Test-Path -LiteralPath (Join-Path $CompilerRoot 'wasmtime/__init__.py') -PathType Leaf)) {
     throw "ASP54K1003 Wasmtime Python module root is invalid: $CompilerRoot"
@@ -26,9 +30,11 @@ function Get-NormalizedWatSha256 {
             $Utf8NoBom.GetBytes($NormalizedWat))).ToLowerInvariant()
 }
 
-$ContractPaths = @(Get-ChildItem -LiteralPath $KernelRoot -Filter '*.contract.json' -File |
-    Sort-Object -Property Name)
-if ($ContractPaths.Count -lt 2) {
+$ContractPaths = @(
+    'controlled_runtime_kernel.contract.json',
+    'crossing_cost_kernel.contract.json'
+) | ForEach-Object { Get-Item -LiteralPath (Join-Path $KernelRoot $_) }
+if ($ContractPaths.Count -ne 2) {
     throw 'ASP54K1001 both controlled kernel contracts are required'
 }
 
@@ -70,7 +76,7 @@ print(base64.b64encode(wasmtime.wat2wasm(wat)).decode("ascii"))
             throw "ASP54K1005 WAT digest mismatch for $($Contract.kernel_id)"
         }
 
-        $CompilerOutput = @(& python -c $CompilerProbe $WatPath)
+        $CompilerOutput = @(& $ResolvedPython -c $CompilerProbe $WatPath)
         $CompilerExitCode = $LASTEXITCODE
         if ($CompilerExitCode -ne 0 -or $CompilerOutput.Count -ne 2) {
             throw "ASP54K1006 wat2wasm failed for $($Contract.kernel_id) with exit code $CompilerExitCode"
@@ -117,5 +123,8 @@ finally {
     result = 'controlled_runtime_kernels_verified'
     mode = $Mode
     kernel_count = $Results.Count
+    python_executable_sha256 =
+        (Get-FileHash -LiteralPath $ResolvedPython -Algorithm SHA256).
+            Hash.ToLowerInvariant()
     kernels = $Results
 }

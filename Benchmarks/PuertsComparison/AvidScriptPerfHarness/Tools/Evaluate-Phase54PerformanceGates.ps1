@@ -6,7 +6,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string[]]$ProcessResultPath,
 
-    [string]$SupplementalEvidencePath,
+    [string]$ControlledSuiteAggregatePath,
+
+    [string[]]$MicroProcessResultPath,
+
+    [string]$PhysicalCostAggregatePath,
 
     [Parameter(Mandatory = $true)]
     [string]$OutputPath
@@ -44,6 +48,29 @@ function Get-Mad {
     $center = Get-NearestRank -Values $Values -Percentile 0.50
     $deviations = @($Values | ForEach-Object { [Math]::Abs($_ - $center) })
     return Get-NearestRank -Values $deviations -Percentile 0.50
+}
+
+function Get-ExpectedGeneratedHits {
+    param(
+        [string]$Workload,
+        [uint64]$Iterations,
+        [uint64]$LogicalOperationCount
+    )
+
+    if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
+        return $LogicalOperationCount
+    }
+    if ($Workload -in @(
+        'scalar_add_int32',
+        'vector_value',
+        'object_roundtrip',
+        'batch_scalar')) {
+        return $Iterations
+    }
+    if ($Workload -ceq 'property_get_set') {
+        return $Iterations * 2u
+    }
+    return 0u
 }
 
 function New-GateResult {
@@ -98,6 +125,117 @@ function Find-CrossProcessStatistic {
     return $match[0]
 }
 
+function Get-Phase54MicroStatistics {
+    param(
+        [string[]]$ResultPath,
+        [string]$CanonicalProfilePath,
+        [string]$CandidateCommit,
+        [string]$CandidateTree
+    )
+
+    if ($ResultPath.Count -ne 5) {
+        throw 'Formal supplemental micro evidence requires five process results.'
+    }
+    $microProfile = Read-JsonFile -Path $CanonicalProfilePath
+    $microProfileSha256 =
+        (Get-FileHash -LiteralPath $CanonicalProfilePath -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+    $microResults = @($ResultPath | ForEach-Object { Read-JsonFile -Path $_ })
+    $processRuns = @($microResults.process_run | ForEach-Object { [int]$_ } |
+        Sort-Object -Unique)
+    $runIds = @($microResults.run_id | ForEach-Object { [string]$_ } |
+        Sort-Object -Unique)
+    $requestHashes = @($microResults.request_sha256 | ForEach-Object {
+        [string]$_
+    })
+    if ((Compare-Object -ReferenceObject @(0..4) -DifferenceObject $processRuns).Count -ne 0 -or
+        $runIds.Count -ne 1 -or [string]::IsNullOrWhiteSpace($runIds[0]) -or
+        @($requestHashes | Sort-Object -Unique).Count -ne 5 -or
+        @($requestHashes | Where-Object { $_ -cnotmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+        throw 'Formal supplemental micro process/request identities are invalid.'
+    }
+
+    $rows = [Collections.Generic.List[object]]::new()
+    foreach ($result in $microResults) {
+        if ([string]$result.provenance.avidscript_commit -cne $CandidateCommit -or
+            [string]$result.provenance.avidscript_tree_sha -cne $CandidateTree -or
+            [bool]$result.provenance.avidscript_dirty -or
+            [string]$result.provenance.profile_id -cne
+                [string]$microProfile.profile_id -or
+            [string]$result.provenance.profile_sha256 -cne $microProfileSha256) {
+            throw 'Formal supplemental micro candidate/profile identity differs.'
+        }
+        [double]$timerFrequency = $result.timer_frequency_hz
+        foreach ($sample in @($result.samples)) {
+            [uint64]$logical = $sample.logical_operation_count
+            if (-not [bool]$sample.correct -or $logical -eq 0 -or
+                [uint64]$sample.checksum -ne [uint64]$sample.expected_checksum) {
+                throw 'Formal supplemental micro result contains an invalid sample.'
+            }
+            $rows.Add([pscustomobject]@{
+                process_run = [int]$result.process_run
+                lane = [string]$sample.lane
+                workload = [string]$sample.workload
+                ns_per_operation =
+                    ([double]$sample.elapsed_cycles * 1000000000.0) /
+                    ($timerFrequency * [double]$logical)
+            })
+        }
+    }
+    $expectedRows = 5 * [int]$microProfile.timed_samples *
+        @($microProfile.lanes).Count * @($microProfile.workloads).Count
+    if ($rows.Count -ne $expectedRows) {
+        throw "Formal supplemental micro matrix differs: $($rows.Count)/$expectedRows."
+    }
+
+    $processStats = [Collections.Generic.List[object]]::new()
+    foreach ($group in @($rows | Group-Object process_run, lane, workload)) {
+        [double[]]$values = @($group.Group | ForEach-Object {
+            [double]$_.ns_per_operation
+        })
+        if ($values.Count -ne [int]$microProfile.timed_samples) {
+            throw 'Formal supplemental micro sample count differs.'
+        }
+        $processStats.Add([pscustomobject]@{
+            lane = [string]$group.Group[0].lane
+            workload = [string]$group.Group[0].workload
+            p50 = Get-NearestRank -Values $values -Percentile 0.50
+        })
+    }
+
+    $statistics = [Collections.Generic.List[object]]::new()
+    foreach ($group in @($processStats | Group-Object lane, workload)) {
+        [double[]]$values = @($group.Group | ForEach-Object { [double]$_.p50 })
+        if ($values.Count -ne 5) {
+            throw 'Formal supplemental micro process count differs.'
+        }
+        $statistics.Add([pscustomobject]@{
+            lane = [string]$group.Group[0].lane
+            workload = [string]$group.Group[0].workload
+            p50_ns_per_operation =
+                Get-NearestRank -Values $values -Percentile 0.50
+        })
+    }
+    return @($statistics)
+}
+
+function Get-RequiredMicroP50 {
+    param(
+        [object[]]$Statistics,
+        [string]$Lane,
+        [string]$Workload
+    )
+
+    $match = @($Statistics | Where-Object {
+        [string]$_.lane -ceq $Lane -and
+        [string]$_.workload -ceq $Workload
+    })
+    if ($match.Count -ne 1 -or [double]$match[0].p50_ns_per_operation -le 0) {
+        throw "Formal supplemental micro statistic is missing: $Lane/$Workload."
+    }
+    return [double]$match[0].p50_ns_per_operation
+}
+
 function New-GameplayGateResult {
     param(
         [string]$Name,
@@ -125,9 +263,17 @@ function New-GameplayGateResult {
         }
     }
 
-    $comparator = if (
+    $p50Comparator = if (
         [double]$Reflection.p50_of_process_p50_ns_per_operation -le
         [double]$Static.p50_of_process_p50_ns_per_operation) {
+        $Reflection
+    }
+    else {
+        $Static
+    }
+    $p95Comparator = if (
+        [double]$Reflection.p50_of_process_p95_ns_per_operation -le
+        [double]$Static.p50_of_process_p95_ns_per_operation) {
         $Reflection
     }
     else {
@@ -136,15 +282,15 @@ function New-GameplayGateResult {
     $candidateP50 =
         [double]$Candidate.p50_of_process_p50_ns_per_operation
     $candidateP95 =
-        [double]$Candidate.p95_of_process_p50_ns_per_operation
+        [double]$Candidate.p50_of_process_p95_ns_per_operation
     $candidateMad =
         [double]$Candidate.mad_of_process_p50_ns_per_operation
     $comparatorP50 =
-        [double]$comparator.p50_of_process_p50_ns_per_operation
+        [double]$p50Comparator.p50_of_process_p50_ns_per_operation
     $comparatorP95 =
-        [double]$comparator.p95_of_process_p50_ns_per_operation
+        [double]$p95Comparator.p50_of_process_p95_ns_per_operation
     $comparatorMad =
-        [double]$comparator.mad_of_process_p50_ns_per_operation
+        [double]$p50Comparator.mad_of_process_p50_ns_per_operation
 
     if ($comparatorP50 -le 0.0 -or $comparatorP95 -le 0.0) {
         return [ordered]@{
@@ -177,17 +323,18 @@ function New-GameplayGateResult {
         reason = 'P50 ratio, cross-process P95 ratio, and 2xMAD separation'
         audit = [ordered]@{
             candidate_lane = [string]$Candidate.lane
-            comparator_lane = [string]$comparator.lane
+            p50_comparator_lane = [string]$p50Comparator.lane
+            p95_comparator_lane = [string]$p95Comparator.lane
             p50_ratio = $p50Ratio
             p95_ratio = $p95Ratio
             maximum_ratio = $maximum
             p50_pass = $p50Pass
             p95_pass = $p95Pass
             candidate_p50_ns_per_operation = $candidateP50
-            candidate_cross_process_p95_ns_per_operation = $candidateP95
+            candidate_median_process_p95_ns_per_operation = $candidateP95
             candidate_mad_ns_per_operation = $candidateMad
             comparator_p50_ns_per_operation = $comparatorP50
-            comparator_cross_process_p95_ns_per_operation = $comparatorP95
+            comparator_median_process_p95_ns_per_operation = $comparatorP95
             comparator_mad_ns_per_operation = $comparatorMad
             candidate_upper_2mad_ns_per_operation = $candidateUpper2Mad
             comparator_lower_2mad_ns_per_operation = $comparatorLower2Mad
@@ -229,13 +376,37 @@ $processRuns = @($results | ForEach-Object { [int]$_.process_run } | Sort-Object
 if ($processRuns.Count -ne $results.Count) {
     throw 'Process results must have unique process_run values.'
 }
+$expectedProcessRuns = @(0..([int]$profile.process_runs - 1))
+if ((Compare-Object -ReferenceObject $expectedProcessRuns -DifferenceObject $processRuns).Count -ne 0) {
+    throw 'Process results must contain the exact zero-based process_run sequence.'
+}
+$runIds = @($results | ForEach-Object { [string]$_.run_id } | Sort-Object -Unique)
+if ($runIds.Count -ne 1 -or [string]::IsNullOrWhiteSpace($runIds[0])) {
+    throw 'Timed process results must share one non-empty run_id.'
+}
+$requestHashes = @($results | ForEach-Object { [string]$_.request_sha256 })
+if (@($requestHashes | Sort-Object -Unique).Count -ne $results.Count -or
+    @($requestHashes | Where-Object { $_ -cnotmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+    throw 'Timed process results must carry distinct lowercase SHA-256 request identities.'
+}
 
 $identityFields = @(
+    'editor_executable_sha256',
+    'harness_module_sha256',
     'avidscript_commit',
     'avidscript_tree_sha',
+    'puerts_commit',
+    'puerts_runtime_sha256',
+    'puerts_reflection_script_sha256',
+    'puerts_static_script_sha256',
+    'wasmtime_runtime_sha256',
+    'wasm_sha256',
+    'manifest_sha256',
     'profile_id',
     'profile_sha256',
-    'lane_catalog_sha256'
+    'lane_catalog_sha256',
+    'request_schema_sha256',
+    'result_schema_sha256'
 )
 $provenance = [ordered]@{}
 foreach ($field in $identityFields) {
@@ -245,6 +416,12 @@ foreach ($field in $identityFields) {
         throw "Process provenance disagrees or is empty: $field"
     }
     $provenance[$field] = $values[0]
+}
+$expectedProfileSha256 =
+    (Get-FileHash -LiteralPath $ProfilePath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ([string]$provenance.profile_id -cne [string]$profile.profile_id -or
+    [string]$provenance.profile_sha256 -cne $expectedProfileSha256) {
+    throw 'Process provenance does not identify the evaluated profile bytes.'
 }
 if ($profile.evidence_class -ceq 'formal' -and
     @($results | Where-Object { [bool]$_.provenance.avidscript_dirty }).Count -ne 0) {
@@ -274,10 +451,13 @@ foreach ($result in $results) {
                 "missing $counter process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
             }
         }
-        $workloadContract =
-            $profile.workload_contracts.PSObject.Properties[
-                [string]$sample.workload
-            ].Value
+        $workloadProperty = $profile.workload_contracts.PSObject.Properties[
+            [string]$sample.workload
+        ]
+        if ($null -eq $workloadProperty) {
+            throw "Profile has no workload contract for $($sample.workload)."
+        }
+        $workloadContract = $workloadProperty.Value
         $expectedFixtureCalls =
             [uint64]$sample.iterations *
             [uint64]$workloadContract.fixture_function_calls_per_frame
@@ -298,10 +478,15 @@ foreach ($result in $results) {
                 "zero logical operation count process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
             continue
         }
+        $expectedGeneratedHits = Get-ExpectedGeneratedHits `
+            -Workload ([string]$sample.workload) `
+            -Iterations ([uint64]$sample.iterations) `
+            -LogicalOperationCount $logical
         if ($sample.lane -ceq 'avidscript_wasmtime_generated_s1' -and
-            ([uint64]$sample.generated_s1_hit_count -ne $logical -or
+            ([uint64]$sample.generated_s1_hit_count -ne $expectedGeneratedHits -or
              [uint64]$sample.generated_s1_fallback_count -ne 0 -or
              [uint64]$sample.generated_s1_reject_count -ne 0 -or
+             [uint64]$sample.semantic_hit_count -ne 0 -or
              [uint64]$sample.data_lane_command_count -ne 0 -or
              [uint64]$sample.data_lane_crossing_count -ne 0 -or
              [uint64]$sample.data_lane_rejected_buffer_count -ne 0)) {
@@ -309,26 +494,43 @@ foreach ($result in $results) {
                 "generated S1 path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
         if ($sample.lane -ceq 'avidscript_wasmtime_semantic' -and
-            [uint64]$sample.semantic_hit_count -ne $logical) {
+            ([uint64]$sample.semantic_hit_count -ne $expectedGeneratedHits -or
+             [uint64]$sample.generated_s1_hit_count -ne 0 -or
+             [uint64]$sample.generated_s1_fallback_count -ne 0 -or
+             [uint64]$sample.generated_s1_reject_count -ne 0 -or
+             [uint64]$sample.data_lane_command_count -ne 0 -or
+             [uint64]$sample.data_lane_crossing_count -ne 0 -or
+             [uint64]$sample.data_lane_rejected_buffer_count -ne 0)) {
             $validityErrors.Add(
                 "semantic path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
         if ($sample.lane -ceq 'avidscript_wasmtime_data_oriented') {
-            $propertyWrites =
-                [uint64]$sample.iterations *
-                [uint64]$workloadContract.property_write_operations_per_frame
-            $expectedGeneratedHits = $logical - $propertyWrites
-            $expectedCrossings = [uint64]($propertyWrites / 2)
             $commands = [uint64]$sample.data_lane_command_count
             $crossings = [uint64]$sample.data_lane_crossing_count
-            if ([uint64]$sample.generated_s1_hit_count -ne $expectedGeneratedHits -or
+            $isGameplay = [string]$sample.workload -in @(
+                'gameplay_frame_small',
+                'gameplay_frame_dense')
+            $propertyWrites = $isGameplay ?
+                ([uint64]$sample.iterations *
+                    [uint64]$workloadContract.property_write_operations_per_frame) :
+                0u
+            $expectedDataGeneratedHits = $isGameplay ?
+                ($logical - $propertyWrites) :
+                $expectedGeneratedHits
+            $expectedCrossings = $isGameplay ?
+                [uint64]($propertyWrites / 2) :
+                0u
+            $invalidCrossingRatio = $commands -gt 0 -and
+                ([double]$crossings / [double]$commands) -gt $crossingRatioLimit
+            if ([uint64]$sample.generated_s1_hit_count -ne $expectedDataGeneratedHits -or
                 [uint64]$sample.generated_s1_fallback_count -ne 0 -or
                 [uint64]$sample.generated_s1_reject_count -ne 0 -or
+                [uint64]$sample.semantic_hit_count -ne 0 -or
                 $commands -ne $propertyWrites -or
                 $crossings -ne $expectedCrossings -or
                 [uint64]$sample.data_lane_rejected_buffer_count -ne 0 -or
-                $commands -eq 0 -or
-                ([double]$crossings / [double]$commands) -gt $crossingRatioLimit) {
+                ($isGameplay -and $commands -eq 0) -or
+                $invalidCrossingRatio) {
                 $validityErrors.Add(
                     "data path mismatch process=$($result.process_run) workload=$($sample.workload)")
             }
@@ -405,44 +607,132 @@ foreach ($group in @($processStatistics | Group-Object lane, workload)) {
     })
 }
 
-$supplemental = $null
-if (-not [string]::IsNullOrWhiteSpace($SupplementalEvidencePath)) {
-    $supplemental = Read-JsonFile -Path $SupplementalEvidencePath
-}
+$supplementalGateInputs = $null
 $supplementalCandidateMatch = $false
-$supplementalReason = 'required supplemental evidence is missing'
+$supplementalReason = 'required raw supplemental evidence is missing'
 $supplementalCommit = $null
 $supplementalTree = $null
-if ($null -ne $supplemental) {
-    if ($supplemental.PSObject.Properties.Name -contains 'provenance' -and
-        $null -ne $supplemental.provenance -and
-        $supplemental.provenance.PSObject.Properties.Name -contains
-            'avidscript_commit' -and
-        $supplemental.provenance.PSObject.Properties.Name -contains
-            'avidscript_tree_sha') {
-        $supplementalCommit =
-            [string]$supplemental.provenance.avidscript_commit
-        $supplementalTree =
-            [string]$supplemental.provenance.avidscript_tree_sha
-        $supplementalCandidateMatch =
-            $supplementalCommit -ceq [string]$provenance.avidscript_commit -and
-            $supplementalTree -ceq [string]$provenance.avidscript_tree_sha
-        $supplementalReason = $supplementalCandidateMatch ?
-            'supplemental evidence candidate identity matches process evidence' :
-            'supplemental evidence candidate commit/tree does not match process evidence'
+$supplementalSourceSha256 = $null
+$supplementalProvided =
+    -not [string]::IsNullOrWhiteSpace($ControlledSuiteAggregatePath) -and
+    $null -ne $MicroProcessResultPath -and
+    $MicroProcessResultPath.Count -gt 0 -and
+    -not [string]::IsNullOrWhiteSpace($PhysicalCostAggregatePath)
+if ($supplementalProvided) {
+    $comparisonRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $controlledRoot = Join-Path $comparisonRoot 'ControlledRuntime'
+    $suiteJson = Get-Content -LiteralPath $ControlledSuiteAggregatePath -Raw
+    $physicalJson = Get-Content -LiteralPath $PhysicalCostAggregatePath -Raw
+    if (-not ($suiteJson | Test-Json -SchemaFile (
+            Join-Path $controlledRoot 'Schema/ControlledRuntimeSuiteAggregate.schema.json')) -or
+        -not ($physicalJson | Test-Json -SchemaFile (
+            Join-Path $controlledRoot 'Schema/PhysicalCostAggregate.schema.json'))) {
+        throw 'Raw supplemental aggregate schema validation failed.'
     }
-    else {
-        $supplementalReason =
-            'supplemental evidence has no candidate commit/tree provenance'
+    $suite = $suiteJson | ConvertFrom-Json -Depth 100
+    $physical = $physicalJson | ConvertFrom-Json -Depth 100
+    $supplementalCommit = [string]$suite.candidate.commit
+    $supplementalTree = [string]$suite.candidate.tree_sha
+    if ($supplementalCommit -cne [string]$provenance.avidscript_commit -or
+        $supplementalTree -cne [string]$provenance.avidscript_tree_sha -or
+        [string]$physical.candidate.commit -cne $supplementalCommit -or
+        [string]$physical.candidate.tree_sha -cne $supplementalTree -or
+        -not [bool]$suite.candidate.clean -or
+        -not [bool]$physical.candidate.clean -or
+        [int]$suite.correctness_failures -ne 0 -or
+        [int]$physical.correctness_failures -ne 0 -or
+        [bool]$suite.fallback_used -or
+        [bool]$physical.fallback_used) {
+        throw 'Raw supplemental candidate, correctness, or fallback identity differs.'
     }
+
+    $microProfilePath = Join-Path $comparisonRoot (
+        'Profiles/Phase54Micro.formal.json')
+    $microStats = Get-Phase54MicroStatistics `
+        -ResultPath $MicroProcessResultPath `
+        -CanonicalProfilePath $microProfilePath `
+        -CandidateCommit $supplementalCommit `
+        -CandidateTree $supplementalTree
+    $semanticScalar = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_semantic' -Workload 'scalar_add_int32'
+    $generatedScalar = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_generated_s1' -Workload 'scalar_add_int32'
+    $reflectionScalar = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'puerts_v8_reflection' -Workload 'scalar_add_int32'
+    $staticScalar = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'puerts_v8_static' -Workload 'scalar_add_int32'
+    $generatedProperty = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_generated_s1' -Workload 'property_get_set'
+    $generatedCallback = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_generated_s1' -Workload 'callback_empty'
+    $reflectionCallback = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'puerts_v8_reflection' -Workload 'callback_empty'
+    $staticCallback = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'puerts_v8_static' -Workload 'callback_empty'
+    $generatedVector = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_generated_s1' -Workload 'vector_value'
+
+    $historicalPath = Join-Path (
+        Split-Path -Parent (Split-Path -Parent $comparisonRoot)) (
+        'Docs/Phase54/P54_CSharp_Five_Lane_Benchmark_Evidence.json')
+    $historical = Read-JsonFile -Path $historicalPath
+    $historicalVector = @($historical.formal.results | Where-Object {
+        [string]$_.workload -ceq 'vector_value'
+    })
+    if ($historicalVector.Count -ne 1 -or
+        [double]$historicalVector[0].lanes.avidscript_wasmtime_jit.p50 -le 0) {
+        throw 'Tracked Phase54 vector baseline is invalid.'
+    }
+    $typedMetric = @($physical.cross_process_metrics | Where-Object {
+        [string]$_.stage -ceq 'typed_empty_import'
+    })
+    if ($typedMetric.Count -ne 1) {
+        throw 'Physical cost aggregate has no typed empty import metric.'
+    }
+
+    $supplementalGateInputs = [ordered]@{
+        wasmtime_v8_geo_ratio = [Math]::Max(
+            [double]$suite.leadership.p50_geometric_mean_ratio,
+            [double]$suite.leadership.p95_geometric_mean_ratio)
+        kernel_win_rate = [Math]::Min(
+            [double]$suite.leadership.p50_kernel_win_rate,
+            [double]$suite.leadership.p95_kernel_win_rate)
+        semantic_vs_puerts_reflection = $semanticScalar / $reflectionScalar
+        s1_scalar_ns = $generatedScalar
+        s1_vs_puerts_static = $generatedScalar / $staticScalar
+        s1_property_ns = $generatedProperty
+        callback_ns = $generatedCallback
+        callback_vs_puerts = $generatedCallback /
+            [Math]::Min($reflectionCallback, $staticCallback)
+        vector_vs_phase54_baseline = $generatedVector /
+            [double]$historicalVector[0].lanes.avidscript_wasmtime_jit.p50
+        typed_empty_explained_ratio =
+            [double]$typedMetric[0].process_p95_median_ns_per_iteration /
+            $staticScalar
+    }
+    $supplementalSourceSha256 = [ordered]@{
+        controlled_suite = (Get-FileHash -LiteralPath $ControlledSuiteAggregatePath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+        micro_process_results = @($MicroProcessResultPath | ForEach-Object {
+            (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+        })
+        physical_cost = (Get-FileHash -LiteralPath $PhysicalCostAggregatePath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+        historical_vector_baseline = (Get-FileHash -LiteralPath $historicalPath `
+            -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $supplementalCandidateMatch = $true
+    $supplementalReason =
+        'gate inputs were derived directly from candidate-bound raw evidence'
 }
 $supplementalAudit = [ordered]@{
-    provided = $null -ne $supplemental
+    provided = $supplementalProvided
     supplemental_candidate_match = $supplementalCandidateMatch
     process_avidscript_commit = [string]$provenance.avidscript_commit
     process_avidscript_tree_sha = [string]$provenance.avidscript_tree_sha
     supplemental_avidscript_commit = $supplementalCommit
     supplemental_avidscript_tree_sha = $supplementalTree
+    source_sha256 = $supplementalSourceSha256
     reason = $supplementalReason
 }
 
@@ -456,15 +746,14 @@ $supplementalGateNames = @(
     's1_property_ns',
     'callback_ns',
     'callback_vs_puerts',
-    'vector_vs_p54_5',
+    'vector_vs_phase54_baseline',
     'typed_empty_explained_ratio'
 )
 foreach ($name in $supplementalGateNames) {
     $value = $null
     if ($supplementalCandidateMatch -and
-        $supplemental.PSObject.Properties.Name -contains 'gate_inputs' -and
-        $supplemental.gate_inputs.PSObject.Properties.Name -contains $name) {
-        $value = [Nullable[double]]([double]$supplemental.gate_inputs.$name)
+        $supplementalGateInputs.Contains($name)) {
+        $value = [Nullable[double]]([double]$supplementalGateInputs[$name])
     }
     $gates[$name] = New-GateResult `
         -Name $name `

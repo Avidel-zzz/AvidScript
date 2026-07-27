@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "attempt_id",
+    "request_sha256",
+    "profile_sha256",
+    "candidate_commit",
+    "candidate_tree_sha",
+    "candidate_clean",
+    "engine_executable_sha256",
+    "process_run",
+    "pid",
+    "kernel_wasm_sha256",
+    "runtime_id",
+    "runtime_version",
+    "runtime_build_identity",
+    "runtime_artifact_sha256",
+    "fallback_used",
+    "correctness_failures",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
+    "attempt_id": { "type": "string", "format": "uuid" },
+    "request_sha256": { "$ref": "#/$defs/sha256" },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "candidate_commit": { "$ref": "#/$defs/commit" },
+    "candidate_tree_sha": { "$ref": "#/$defs/commit" },
+    "candidate_clean": { "const": true },
+    "engine_executable_sha256": { "$ref": "#/$defs/sha256" },
+    "process_run": { "type": "integer", "minimum": 0 },
+    "pid": { "type": "integer", "minimum": 1 },
+    "kernel_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "runtime_id": { "const": "wasmtime.cranelift.jit" },
+    "runtime_version": { "type": "string", "minLength": 1 },
+    "runtime_build_identity": { "type": "string", "minLength": 1 },
+    "runtime_artifact_sha256": { "$ref": "#/$defs/sha256" },
+    "fallback_used": { "const": false },
+    "correctness_failures": { "const": 0 },
+    "samples": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage",
+          "sample_index",
+          "stage_position",
+          "iterations",
+          "seed",
+          "duration_ns",
+          "ns_per_iteration",
+          "checksum",
+          "expected_checksum",
+          "correct",
+          "host_import_count"
+        ],
+        "properties": {
+          "stage": {
+            "enum": [
+              "native_no_op",
+              "cached_export",
+              "typed_empty_import",
+              "generic_empty_import",
+              "typed_i32_pair_import"
+            ]
+          },
+          "sample_index": { "type": "integer", "minimum": 0 },
+          "stage_position": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "iterations": { "type": "integer", "minimum": 1 },
+          "seed": { "type": "integer" },
+          "duration_ns": { "type": "number", "exclusiveMinimum": 0 },
+          "ns_per_iteration": { "type": "number", "exclusiveMinimum": 0 },
+          "checksum": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "expected_checksum": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "correct": { "const": true },
+          "host_import_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  }
+}

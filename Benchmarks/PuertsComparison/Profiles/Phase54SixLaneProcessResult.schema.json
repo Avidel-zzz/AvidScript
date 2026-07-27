@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "P54.6 six-lane timed process result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "timer_frequency_hz",
+    "request_sha256",
+    "lane_catalog",
+    "lane_catalog_sha256",
+    "provenance",
+    "run_id",
+    "process_run",
+    "lane_order",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "timer_frequency_hz": { "type": "integer", "minimum": 1 },
+    "request_sha256": { "$ref": "#/$defs/sha256" },
+    "lane_catalog": { "type": "array", "minItems": 6, "maxItems": 6 },
+    "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "editor_executable_sha256",
+        "harness_module_sha256",
+        "avidscript_commit",
+        "avidscript_tree_sha",
+        "avidscript_dirty",
+        "puerts_runtime_sha256",
+        "puerts_reflection_script_sha256",
+        "puerts_static_script_sha256",
+        "wasmtime_runtime_sha256",
+        "profile_id",
+        "profile_sha256",
+        "lane_catalog_sha256"
+      ]
+    },
+    "run_id": { "type": "string", "minLength": 1 },
+    "process_run": { "type": "integer", "minimum": 0 },
+    "lane_order": { "type": "array", "minItems": 6, "maxItems": 6 },
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "process_run",
+          "lane",
+          "lane_identity_sha256",
+          "workload",
+          "sample_index",
+          "iterations",
+          "elapsed_cycles",
+          "checksum",
+          "expected_checksum",
+          "generated_s1_hit_count",
+          "generated_s1_fallback_count",
+          "generated_s1_reject_count",
+          "data_lane_command_count",
+          "data_lane_crossing_count",
+          "data_lane_rejected_buffer_count",
+          "semantic_hit_count",
+          "logical_operation_count",
+          "correct"
+        ],
+        "properties": {
+          "lane_identity_sha256": { "$ref": "#/$defs/sha256" },
+          "workload": {
+            "enum": [
+              "callback_empty",
+              "callback_tick",
+              "pure_integer",
+              "scalar_noop",
+              "scalar_add_int32",
+              "property_get_set",
+              "vector_value",
+              "vector_ref_out",
+              "object_roundtrip",
+              "batch_scalar",
+              "gameplay_frame_small",
+              "gameplay_frame_dense"
+            ]
+          },
+          "elapsed_cycles": { "type": "integer", "minimum": 1 },
+          "logical_operation_count": { "type": "integer", "minimum": 1 },
+          "correct": { "const": true }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

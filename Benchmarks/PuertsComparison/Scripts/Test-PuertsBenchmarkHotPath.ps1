@@ -42,8 +42,9 @@ foreach ($FixtureToken in @(
     'AvidScriptPerf',
     'AAvidScriptPerfFixture',
     'scalar_noop',
-    'vector_value',
-    'object_roundtrip')) {
+    'ReflectAddInt32',
+    'ReflectVectorValue',
+    'ReflectObjectRoundtrip')) {
     Assert-True (-not $InvocationSource.Contains($FixtureToken)) `
         "production binding hot path must not reference benchmark fixture token: $FixtureToken"
 }

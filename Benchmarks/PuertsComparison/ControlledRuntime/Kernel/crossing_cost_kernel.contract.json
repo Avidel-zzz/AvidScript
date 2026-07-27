@@ -3,7 +3,9 @@
   "kernel_id": "avidscript.controlled_runtime.crossing_cost.v1",
   "wat_path": "crossing_cost_kernel.wat",
   "wasm_path": "crossing_cost_kernel.wasm",
-  "tracked_wasm": false,
+  "wat_normalized_sha256": "e882ab591511655fe52c97b15917934b60b30150f664197a27a502e806619db6",
+  "wasm_sha256": "0dbe3695a84035c18646602836c5821caebba44db32c75025814bff25ca04901",
+  "tracked_wasm": true,
   "compiler": {
     "package": "wasmtime",
     "version": "45.0.0",
@@ -22,6 +24,11 @@
     }
   ],
   "exports": [
+    {
+      "name": "run_cached",
+      "signature": "(i32,i32)->i32",
+      "checksum_recurrence": "value_0=seed; value_(n+1)=value_n+n"
+    },
     {
       "name": "run_empty",
       "signature": "(i32,i32)->i32",

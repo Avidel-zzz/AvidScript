@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AvidScript controlled runtime suite aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_kind",
+    "profile_sha256",
+    "suite_contract_sha256",
+    "candidate",
+    "engine",
+    "kernel_count",
+    "kernel_results",
+    "leadership",
+    "correctness_failures",
+    "fallback_used"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_kind": { "const": "identical_wasm_kernel_suite" },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "suite_contract_sha256": { "$ref": "#/$defs/sha256" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "tree_sha", "clean"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "tree_sha": { "$ref": "#/$defs/commit" },
+        "clean": { "const": true }
+      }
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "build_id", "executable_sha256"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "build_id": { "type": "string", "minLength": 1 },
+        "executable_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "kernel_count": { "const": 12 },
+    "kernel_results": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kernel_id",
+          "kernel_wasm_sha256",
+          "aggregate_sha256",
+          "wasmtime_over_v8_p50",
+          "wasmtime_over_v8_p95",
+          "wasmtime_over_v8_mad",
+          "p50_win",
+          "p95_win",
+          "correctness_failures",
+          "fallback_used"
+        ],
+        "properties": {
+          "kernel_id": { "type": "string", "minLength": 1 },
+          "kernel_wasm_sha256": { "$ref": "#/$defs/sha256" },
+          "aggregate_sha256": { "$ref": "#/$defs/sha256" },
+          "wasmtime_over_v8_p50": { "type": "number", "exclusiveMinimum": 0 },
+          "wasmtime_over_v8_p95": { "type": "number", "exclusiveMinimum": 0 },
+          "wasmtime_over_v8_mad": { "type": "number", "minimum": 0 },
+          "p50_win": { "type": "boolean" },
+          "p95_win": { "type": "boolean" },
+          "correctness_failures": { "const": 0 },
+          "fallback_used": { "const": false }
+        }
+      }
+    },
+    "leadership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximum_geometric_mean_ratio",
+        "maximum_mad_geometric_mean_ratio",
+        "minimum_kernel_win_rate",
+        "p50_geometric_mean_ratio",
+        "p95_geometric_mean_ratio",
+        "mad_geometric_mean_ratio",
+        "p50_kernel_win_rate",
+        "p95_kernel_win_rate",
+        "passed"
+      ],
+      "properties": {
+        "maximum_geometric_mean_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "maximum_mad_geometric_mean_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "minimum_kernel_win_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "p50_geometric_mean_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "p95_geometric_mean_ratio": { "type": "number", "exclusiveMinimum": 0 },
+        "mad_geometric_mean_ratio": { "type": "number", "minimum": 0 },
+        "p50_kernel_win_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "p95_kernel_win_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "passed": { "type": "boolean" }
+      }
+    },
+    "correctness_failures": { "const": 0 },
+    "fallback_used": { "const": false }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+  }
+}
