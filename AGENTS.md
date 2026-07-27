@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-27 P54.6 计划提交暂存区核对再次混合命令：在一条 `shell_command` 中用分号连接 `git diff --cached --stat` 与 `git status --short`，重复违反一调用一逻辑命令规则。Prevention：Git 暂存内容、工作区状态、提交和身份查询固定为四类独立调用；发送前对完整 shell 字符串做字面扫描，包含 `;`、`&&`、`||` 时不允许执行，即使只是只读核对。
+- 2026-07-27 P54.6 上下文恢复未先执行状态机：恢复后先读取 memory、skill、计划和 Git 状态，未把主插件 `Build/InvokePhaseWorkflow.ps1 status -Phase 54` 作为首个项目相关命令。Prevention：每次上下文压缩、网络重连或自动续跑后设置恢复门闩；只有 Phase status 成功返回后才允许读取计划、源码、Git 或外部 evidence，memory/skill 读取不能被误当作已经恢复项目状态。
 - 2026-07-27 P54.3 Task 4C fix round 1 只读命令再次混合：读取 profile、validator 与 merger 时在一条 PowerShell `shell_command` 中使用分号连接三个 `Get-Content`，重复违反已记录的单逻辑命令规则。Prevention：同轮已把多文件 parser 固化进 tracked `Test-ControlledRuntimeContracts.ps1`；后续多文件读取必须拆成独立调用，命令提交前机械扫描完整字符串，出现语句分隔符即拒绝发送。
 - 2026-07-27 P54.3 Task 4C 结果写回补丁落点错误：为 WAMR `Call` 增加返回 cell 时，宽泛 patch 只锚定通用 `return true`，实际把 `OutResult/Cells` 写回插入后续 `BorrowReadOnlyBytes`；首轮 UBT 才发现未声明标识符。Prevention：同文件存在多个同形返回块时，patch context 必须包含目标函数签名和紧邻语义；静态合同不能只搜索 token 存在，还要隔离目标函数 slice 并拒绝 token 出现在其他 owner。
 - 2026-07-27 P54.3 Task 4C parser 探测再次使用分号：一次 PowerShell `shell_command` 用分号串联文件枚举、循环 parser 与输出，违反一调用一逻辑命令。Prevention：shell 调用发送前继续机械拒绝 `;`、`&&`、`||`；多文件 parser 应写入受审合同脚本后单独调用，不能把临时循环压成单行。
