@@ -10,7 +10,7 @@
     "confirmation_samples": 3,
     "minimum_sample_milliseconds": 5.0,
     "minimum_iterations": 1,
-    "maximum_iterations": 65536
+    "maximum_iterations": 1048576
   },
   "validity": {
     "data_lane_max_crossing_ratio": 0.5,

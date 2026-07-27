@@ -1454,3 +1454,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the slice fixture kept a pre-generated-route literal count for VM imports, so it failed after the generated S1 binding became loadable even though the resulting package was correct.
 - Prevention: import-count assertions derive from reflected bindings plus lifecycle and capability families, then independently assert typed-host import identity and ordinal instead of hiding route composition behind a stale integer.
+
+### 2026-07-28: formal calibration ceilings must match the timing floor
+
+- Mistake: the formal gameplay profile retained a 65,536-iteration ceiling while raising the timing floor to 5 ms, so the native small-frame lane could not complete calibration on a fast desktop CPU.
+- Prevention: formal profiles size their ceiling from the fastest lane and timing floor, and contract tests freeze a formal gameplay ceiling above the diagnostic ceiling.
+
+### 2026-07-28: do not terminate Unreal build wrappers with short tool timeouts
+
+- Mistake: an initial one-second shell timeout terminated the `Build.bat` wrapper while its child build continued, causing the next invocation to wait noisily on the existing script.
+- Prevention: launch Unreal builds once with a full command timeout and use the execution cell's yield/wait mechanism for progress; never use a short process timeout as a polling mechanism.
+
+### 2026-07-28: contract assertions must load every referenced fixture
+
+- Mistake: a new gameplay calibration assertion referenced formal and diagnostic profile variables before the test fixture loaded those JSON files.
+- Prevention: add fixture loading in the same patch as assertions that consume it, then run the focused contract host before committing the benchmark candidate.

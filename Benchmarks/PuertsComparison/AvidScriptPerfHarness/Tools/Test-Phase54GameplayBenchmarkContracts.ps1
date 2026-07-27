@@ -34,6 +34,12 @@ $microFormal = Get-Content -LiteralPath (
 $microDiagnostic = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54Micro.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
+$gameplayFormal = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase54Gameplay.formal.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$gameplayDiagnostic = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase54Gameplay.diagnostic.json') -Raw |
+    ConvertFrom-Json -Depth 100
 $calibrationSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54SixLaneCalibration.schema.json') -Raw |
     ConvertFrom-Json -Depth 100
@@ -107,6 +113,11 @@ Assert-True (
     [int]$microFormal.calibration.maximum_iterations -ge
         [int]$microDiagnostic.calibration.maximum_iterations) `
     'Micro profile 必须允许 native empty callback 达到计时下限，且 formal 上限不得低于 diagnostic。'
+Assert-True (
+    [int]$gameplayFormal.calibration.maximum_iterations -ge 1048576 -and
+    [int]$gameplayFormal.calibration.maximum_iterations -gt
+        [int]$gameplayDiagnostic.calibration.maximum_iterations) `
+    'Gameplay formal profile 必须允许 native small frame 达到 5 ms 计时下限。'
 Assert-True (
     $runnerText.Contains('GetExpectedDataOrientedHostCallCount') -and
     $runnerText.Contains('Observation.HostImportCallCount != ExpectedHostImportCallCount')) `
