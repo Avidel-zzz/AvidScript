@@ -77,12 +77,21 @@ bool ValidateCanonicalDescriptor(
 	FunctionSelections.Reserve(Package.Bindings.Num());
 	PropertySelections.Reserve(Package.Bindings.Num());
 	TSet<FString> WritablePropertyKeys;
+	TMap<FString, FAvidScriptReflectedClassSelection> NativeDirectClassRules;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		if (Binding.BindingKind == TEXT("property_set"))
 		{
 			WritablePropertyKeys.Add(
 				Binding.OwnerClass + TEXT("\n") + Binding.UeMember);
+		}
+		else if (Binding.BindingKind == TEXT("function")
+			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+		{
+			FAvidScriptReflectedClassSelection& Rule =
+				NativeDirectClassRules.FindOrAdd(Binding.OwnerClass);
+			Rule.OwnerClassPath = Binding.OwnerClass;
+			Rule.NativeDirectFunctions.Add(FName(*Binding.UeMember));
 		}
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
@@ -99,7 +108,18 @@ bool ValidateCanonicalDescriptor(
 		}
 		else if (Binding.BindingKind == TEXT("function"))
 		{
-			FunctionSelections.Add({ Binding.OwnerClass, FName(*Binding.UeMember) });
+			if (FAvidScriptReflectedClassSelection* Rule =
+				NativeDirectClassRules.Find(Binding.OwnerClass))
+			{
+				Rule->IncludeFunctions.Add(FName(*Binding.UeMember));
+			}
+			else
+			{
+				FunctionSelections.Add({
+					Binding.OwnerClass,
+					FName(*Binding.UeMember)
+				});
+			}
 		}
 	}
 	if (!WritablePropertyKeys.IsEmpty())
@@ -168,6 +188,7 @@ bool ValidateCanonicalDescriptor(
 	Profile.PackageName = Package.PackageName;
 	Profile.ExplicitFunctions = MoveTemp(FunctionSelections);
 	Profile.ExplicitProperties = MoveTemp(PropertySelections);
+	NativeDirectClassRules.GenerateValueArray(Profile.Classes);
 	if (!Package.SelfTypeId.IsEmpty())
 	{
 		const FAvidScriptBindingTypeModel* SelfType = Package.Types.FindByPredicate(
