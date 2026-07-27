@@ -24,6 +24,7 @@ namespace
 constexpr const TCHAR* GeneratorVersion = TEXT("50.1.0");
 constexpr const TCHAR* ObjectFactoryGeneratorVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
+constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -92,7 +93,8 @@ FString MakeDescriptorPropertySelectionKey(const FAvidScriptReflectedPropertySel
 FString MakeCanonicalIdentity(
 	const UClass* OwnerClass,
 	const UFunction* Function,
-	const FAvidScriptProjectedFunction& Projection)
+	const FAvidScriptProjectedFunction& Projection,
+	const FString& DispatchMode)
 {
 	FString Identity = OwnerClass->GetPathName()
 		+ TEXT("::")
@@ -109,7 +111,9 @@ FString MakeCanonicalIdentity(
 			+ Parameter.Type.CanonicalType;
 	}
 	Identity += TEXT(")");
-	return Identity;
+	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+		Identity,
+		DispatchMode);
 }
 
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
@@ -229,6 +233,7 @@ void AddObjectHandleClasses(const UFunction* Function, TArray<UClass*>& OutHandl
 bool GenerateBindingDescriptor(
 	const FString& PackageName,
 	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
+	const TSet<FString>& NativeDirectFunctionKeys,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
@@ -332,10 +337,16 @@ bool GenerateBindingDescriptor(
 			FinalizeType(Parameter.Type);
 		}
 		Binding.ScriptName = GetDescriptorScriptFunctionName(Function);
-		Binding.CanonicalIdentity = MakeCanonicalIdentity(OwnerClass, Function, Binding.Projection);
+		Binding.DispatchMode = NativeDirectFunctionKeys.Contains(SelectionKey)
+			? FString(TEXT("qualified_native_direct"))
+			: FString(TEXT("cached_process_event"));
+		Binding.CanonicalIdentity = MakeCanonicalIdentity(
+			OwnerClass,
+			Function,
+			Binding.Projection,
+			Binding.DispatchMode);
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
-		Binding.DispatchMode = TEXT("cached_process_event");
 		Binding.ReloadEffect = FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
 	}
@@ -520,16 +531,24 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.BindingKind == TEXT("property_set");
 		});
-	Package.SchemaVersion = bHasWritableProperties
+	const bool bHasNativeDirectFunctions = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.BindingKind == TEXT("function")
+				&& Binding.DispatchMode == TEXT("qualified_native_direct");
+		});
+	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 		? 8
 		: ObjectFactories.IsEmpty()
 			? 6
 			: 7;
-	Package.GeneratorVersion = bHasWritableProperties
-		? WritablePropertyGeneratorVersion
-		: ObjectFactories.IsEmpty()
-			? GeneratorVersion
-			: ObjectFactoryGeneratorVersion;
+	Package.GeneratorVersion = bHasNativeDirectFunctions
+		? NativeDirectGeneratorVersion
+		: bHasWritableProperties
+			? WritablePropertyGeneratorVersion
+			: ObjectFactories.IsEmpty()
+				? GeneratorVersion
+				: ObjectFactoryGeneratorVersion;
 	Package.EngineVersion = FEngineVersion::Current().ToString(EVersionComponent::Patch);
 	Package.Source = TEXT("ue_reflection");
 	Package.PackageName = PackageName;
@@ -934,6 +953,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
 	return GenerateBindingDescriptor(
 		PackageName,
 		FunctionSelections,
+		{},
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,
@@ -1050,6 +1070,15 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
 	OutSelectionResult.bSucceeded = true;
+	TSet<FString> NativeDirectFunctionKeys;
+	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
+	{
+		for (const FName FunctionName : Rule.NativeDirectFunctions)
+		{
+			NativeDirectFunctionKeys.Add(
+				MakeSelectionKey({ Rule.OwnerClassPath, FunctionName }));
+		}
+	}
 	UClass* SelfClass = nullptr;
 	if (!Profile.SelfClassPath.IsEmpty())
 	{
@@ -1069,6 +1098,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	return GenerateBindingDescriptor(
 		Profile.PackageName,
 		FunctionSelections,
+		NativeDirectFunctionKeys,
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,

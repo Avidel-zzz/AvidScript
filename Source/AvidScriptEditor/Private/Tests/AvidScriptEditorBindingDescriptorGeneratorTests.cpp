@@ -939,6 +939,191 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorNativeDirectAuthorizationTest,
+	"AvidScript.Editor.BindingDescriptor.NativeDirectAuthorization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorNativeDirectAuthorizationTest::RunTest(
+	const FString& Parameters)
+{
+	const auto MakeProfile = [](const bool bAuthorizeNativeDirect, const bool bWritable)
+	{
+		FAvidScriptBindingSelectionProfile Profile;
+		Profile.PackageName = TEXT("avidscript.engine.native_direct_descriptor");
+		FAvidScriptReflectedClassSelection ActorRule;
+		ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+		ActorRule.IncludeFunctions = { TEXT("K2_GetActorLocation") };
+		if (bAuthorizeNativeDirect)
+		{
+			ActorRule.NativeDirectFunctions = { TEXT("K2_GetActorLocation") };
+		}
+		if (bWritable)
+		{
+			ActorRule.WritableProperties = { TEXT("CustomTimeDilation") };
+		}
+		Profile.Classes.Add(MoveTemp(ActorRule));
+		return Profile;
+	};
+	const auto GenerateAndParse = [this](
+		const FAvidScriptBindingSelectionProfile& Profile,
+		FString& OutJson,
+		FAvidScriptBindingPackageModel& OutPackage)
+	{
+		FAvidScriptBindingSelectionResolveResult SelectionResult;
+		FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+		if (!TestTrue(
+				TEXT("Native-direct descriptor fixture generates"),
+				FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+					Profile,
+					OutJson,
+					SelectionResult,
+					GenerateResult)))
+		{
+			AddError(GenerateResult.ErrorMessage);
+			return false;
+		}
+		FString ErrorCategory;
+		FString ErrorSource;
+		if (!TestTrue(
+				TEXT("Native-direct descriptor fixture parses"),
+				FAvidScriptBindingDescriptorParser::Parse(
+					OutJson,
+					OutPackage,
+					ErrorCategory,
+					ErrorSource)))
+		{
+			AddError(ErrorCategory + TEXT(":") + ErrorSource);
+			return false;
+		}
+		return true;
+	};
+	const auto FindModelBinding = [](
+		const FAvidScriptBindingPackageModel& Package,
+		const TCHAR* BindingKind,
+		const TCHAR* UeMember)
+	{
+		return Package.Bindings.FindByPredicate(
+			[BindingKind, UeMember](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.BindingKind == BindingKind
+					&& Binding.UeMember == UeMember;
+			});
+	};
+
+	FString CachedJson;
+	FAvidScriptBindingPackageModel CachedPackage;
+	if (!GenerateAndParse(MakeProfile(false, true), CachedJson, CachedPackage))
+	{
+		return false;
+	}
+	FString DirectJson;
+	FAvidScriptBindingPackageModel DirectPackage;
+	if (!GenerateAndParse(MakeProfile(true, true), DirectJson, DirectPackage))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Existing writable profile remains descriptor schema v8"), CachedPackage.SchemaVersion, 8);
+	TestEqual(TEXT("Native-direct authorization selects descriptor schema v8"), DirectPackage.SchemaVersion, 8);
+
+	const FAvidScriptBindingFunctionModel* CachedFunction =
+		FindModelBinding(CachedPackage, TEXT("function"), TEXT("K2_GetActorLocation"));
+	const FAvidScriptBindingFunctionModel* DirectFunction =
+		FindModelBinding(DirectPackage, TEXT("function"), TEXT("K2_GetActorLocation"));
+	if (TestNotNull(TEXT("Cached descriptor retains the selected function"), CachedFunction)
+		&& TestNotNull(TEXT("Direct descriptor retains the selected function"), DirectFunction))
+	{
+		TestEqual(
+			TEXT("Unspecified function remains cached ProcessEvent"),
+			CachedFunction->DispatchMode,
+			FString(TEXT("cached_process_event")));
+		TestEqual(
+			TEXT("Explicit authorization publishes qualified native direct"),
+			DirectFunction->DispatchMode,
+			FString(TEXT("qualified_native_direct")));
+		TestEqual(
+			TEXT("Native-direct mode participates in canonical identity"),
+			DirectFunction->CanonicalIdentity,
+			FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+				CachedFunction->CanonicalIdentity,
+				DirectFunction->DispatchMode));
+		TestNotEqual(
+			TEXT("Native-direct mode changes stable binding identity"),
+			DirectFunction->StableId,
+			CachedFunction->StableId);
+	}
+	TestNotEqual(
+		TEXT("Changing only authorization changes descriptor selection hash"),
+		DirectPackage.SelectionHash,
+		CachedPackage.SelectionHash);
+	TestNotEqual(
+		TEXT("Changing only authorization changes package hash"),
+		DirectPackage.PackageHash,
+		CachedPackage.PackageHash);
+
+	for (const TCHAR* PropertyKind : { TEXT("property_get"), TEXT("property_set") })
+	{
+		const FAvidScriptBindingFunctionModel* CachedProperty =
+			FindModelBinding(CachedPackage, PropertyKind, TEXT("CustomTimeDilation"));
+		const FAvidScriptBindingFunctionModel* DirectProperty =
+			FindModelBinding(DirectPackage, PropertyKind, TEXT("CustomTimeDilation"));
+		if (TestNotNull(TEXT("Cached profile retains property binding"), CachedProperty)
+			&& TestNotNull(TEXT("Direct profile retains property binding"), DirectProperty))
+		{
+			TestEqual(
+				TEXT("Function authorization does not change property dispatch"),
+				DirectProperty->DispatchMode,
+				CachedProperty->DispatchMode);
+			TestEqual(
+				TEXT("Function authorization does not change property canonical identity"),
+				DirectProperty->CanonicalIdentity,
+				CachedProperty->CanonicalIdentity);
+			TestEqual(
+				TEXT("Function authorization does not change property stable id"),
+				DirectProperty->StableId,
+				CachedProperty->StableId);
+		}
+	}
+
+	FString DirectOnlyJson;
+	FAvidScriptBindingPackageModel DirectOnlyPackage;
+	if (!GenerateAndParse(MakeProfile(true, false), DirectOnlyJson, DirectOnlyPackage))
+	{
+		return false;
+	}
+	FAvidScriptBindingPackageModel V7IdentityModel = DirectOnlyPackage;
+	V7IdentityModel.SchemaVersion = 7;
+	V7IdentityModel.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(V7IdentityModel);
+	V7IdentityModel.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(V7IdentityModel);
+	TSharedPtr<FJsonObject> V7Root;
+	TestTrue(TEXT("Direct-only descriptor JSON can be decoded"), ParseDescriptor(DirectOnlyJson, V7Root));
+	if (V7Root.IsValid())
+	{
+		V7Root->SetNumberField(TEXT("schema_version"), 7);
+		V7Root->SetStringField(TEXT("selection_hash"), V7IdentityModel.SelectionHash);
+		V7Root->SetStringField(TEXT("package_hash"), V7IdentityModel.PackageHash);
+		FString V7Json;
+		FAvidScriptBindingPackageModel RejectedPackage;
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestFalse(
+			TEXT("Descriptor schema v7 rejects qualified native-direct function mode"),
+			SerializeDescriptor(V7Root, V7Json)
+			&& FAvidScriptBindingDescriptorParser::Parse(
+				V7Json,
+				RejectedPackage,
+				ErrorCategory,
+				ErrorSource));
+		TestEqual(
+			TEXT("Legacy mode rejection uses the descriptor contract category"),
+			ErrorCategory,
+			FString(TEXT("descriptor_contract_invalid")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV8BlueprintSetterIdentityTest,
 	"AvidScript.Editor.BindingDescriptor.V8BlueprintSetterIdentity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

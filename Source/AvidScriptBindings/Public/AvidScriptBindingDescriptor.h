@@ -152,6 +152,14 @@ public:
 		EAvidScriptObjectOwnershipPolicy Ownership,
 		EAvidScriptComponentRegistrationPolicy Registration);
 
+	static bool IsFunctionDispatchModeSupported(
+		int32 SchemaVersion,
+		const FString& DispatchMode);
+
+	static FString MakeFunctionCanonicalIdentity(
+		const FString& BaseCanonicalIdentity,
+		const FString& DispatchMode);
+
 	static FString MakePropertySetCanonicalIdentity(
 		const FString& OwnerClass,
 		const FString& PropertyName,

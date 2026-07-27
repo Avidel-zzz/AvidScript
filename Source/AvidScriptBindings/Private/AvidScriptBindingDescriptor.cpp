@@ -950,6 +950,24 @@ FString FAvidScriptBindingDescriptorIdentity::MakeObjectFactoryStableId(
 		Registration));
 }
 
+bool FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
+	const int32 SchemaVersion,
+	const FString& DispatchMode)
+{
+	return DispatchMode == TEXT("cached_process_event")
+		|| (SchemaVersion >= 8
+			&& DispatchMode == TEXT("qualified_native_direct"));
+}
+
+FString FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+	const FString& BaseCanonicalIdentity,
+	const FString& DispatchMode)
+{
+	return DispatchMode == TEXT("cached_process_event")
+		? BaseCanonicalIdentity
+		: BaseCanonicalIdentity + TEXT("::dispatch:") + DispatchMode;
+}
+
 FString FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
 	const FString& OwnerClass,
 	const FString& PropertyName,
@@ -973,9 +991,16 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	SelectionKeys.Reserve(Package.Bindings.Num());
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
-		SelectionKeys.Add(Binding.BindingKind == TEXT("function")
+		FString Key = Binding.BindingKind == TEXT("function")
 			? Binding.OwnerClass + TEXT(".") + Binding.UeMember
-			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember);
+			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember;
+		if (Package.SchemaVersion >= 8
+			&& Binding.BindingKind == TEXT("function")
+			&& Binding.DispatchMode == TEXT("qualified_native_direct"))
+		{
+			Key += TEXT("|dispatch=qualified_native_direct");
+		}
+		SelectionKeys.Add(MoveTemp(Key));
 	}
 	SelectionKeys.Sort([](const FString& Left, const FString& Right)
 	{
@@ -1470,8 +1495,16 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				OutErrorSource)
 			|| Binding.Ordinal != Index
 			|| (Binding.BindingKind == TEXT("function")
-				&& (Binding.DispatchMode != TEXT("cached_process_event")
-					|| Binding.WritePolicy != TEXT("none")))
+				&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
+						OutPackage.SchemaVersion,
+						Binding.DispatchMode)
+					|| Binding.WritePolicy != TEXT("none")
+					|| ((Binding.DispatchMode == TEXT("qualified_native_direct"))
+						!= Binding.CanonicalIdentity.EndsWith(
+							FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+								FString(),
+								TEXT("qualified_native_direct")),
+							ESearchCase::CaseSensitive))))
 			|| (Binding.BindingKind == TEXT("property_get") && Binding.DispatchMode != TEXT("cached_property_get"))
 			|| (Binding.BindingKind == TEXT("property_get")
 				&& (Binding.bStatic

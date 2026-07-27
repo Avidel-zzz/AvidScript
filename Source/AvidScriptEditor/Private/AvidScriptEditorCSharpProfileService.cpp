@@ -14,6 +14,8 @@ namespace
 {
 constexpr const TCHAR* AvidScriptDefaultCSharpProfileTemplateModuleId = TEXT("csharp_profile_actor_lifecycle");
 constexpr const TCHAR* AvidScriptDefaultCSharpProfileTemplateArtifactStem = TEXT("profile_actor_lifecycle");
+constexpr const TCHAR* AvidScriptNativeDirectAuthorizationSemantics =
+	TEXT("native_direct_functions asserts standard UHT exec-thunk provenance, accepts bypassing inherited/custom ProcessEvent, and must never auto-authorize Engine or third-party functions");
 
 FString NormalizeAvidScriptCSharpProfilePath(FString Path)
 {
@@ -176,12 +178,15 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 	}
 	if (Object->HasField(TEXT("self_class_path")))
 	{
-		if (SchemaVersion != 3 && SchemaVersion != 4 && SchemaVersion != 5)
+		if (SchemaVersion != 3
+			&& SchemaVersion != 4
+			&& SchemaVersion != 5
+			&& SchemaVersion != 6)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("profile_self_field_not_supported"),
-				TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, or 5."),
-				TEXT("upgrade the C# profile to schema_version 5 before declaring self_class_path"),
+				TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, 5, or 6."),
+				TEXT("upgrade the C# profile to schema_version 6 before declaring self_class_path"),
 				OutResult);
 			return false;
 		}
@@ -234,13 +239,40 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 				}
 				return false;
 			}
+			if (ClassObject->HasField(TEXT("native_direct_functions")))
+			{
+				if (SchemaVersion != 6)
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_native_direct_schema_unsupported"),
+						TEXT("binding_profile classes native_direct_functions requires C# profile schema_version 6."),
+						AvidScriptNativeDirectAuthorizationSemantics,
+						OutResult);
+					return false;
+				}
+				if (!TryGetAvidScriptCSharpProfileNameArray(
+						ClassObject,
+						TEXT("native_direct_functions"),
+						ClassSelection.NativeDirectFunctions,
+						OutResult))
+				{
+					const FString Category = OutResult.ErrorCategory;
+					SetAvidScriptCSharpProfileFailure(
+						Category,
+						TEXT("C# binding_profile native_direct_functions must be an array of non-empty strings."),
+						AvidScriptNativeDirectAuthorizationSemantics,
+						OutResult);
+					return false;
+				}
+			}
 			if (ClassObject->HasField(TEXT("writable_properties"))
-				&& SchemaVersion != 5)
+				&& SchemaVersion != 5
+				&& SchemaVersion != 6)
 			{
 				SetAvidScriptCSharpProfileFailure(
 					TEXT("binding_profile_writable_property_schema_unsupported"),
-					TEXT("binding_profile classes writable_properties requires C# profile schema_version 5."),
-					TEXT("upgrade schema_version to 5 or remove writable_properties"),
+					TEXT("binding_profile classes writable_properties requires C# profile schema_version 5 or 6."),
+					TEXT("upgrade schema_version to 6 or remove writable_properties"),
 					OutResult);
 				return false;
 			}
@@ -312,12 +344,14 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 
 	if (Object->HasField(TEXT("object_factories")))
 	{
-		if (SchemaVersion != 4 && SchemaVersion != 5)
+		if (SchemaVersion != 4
+			&& SchemaVersion != 5
+			&& SchemaVersion != 6)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("binding_profile_factory_schema_unsupported"),
-				TEXT("C# binding_profile object_factories requires profile schema_version 4 or 5."),
-				TEXT("upgrade the C# profile to schema_version 5 before declaring object_factories"),
+				TEXT("C# binding_profile object_factories requires profile schema_version 4, 5, or 6."),
+				TEXT("upgrade the C# profile to schema_version 6 before declaring object_factories"),
 				OutResult);
 			return false;
 		}
@@ -715,12 +749,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			&& SchemaVersion != 2.0
 			&& SchemaVersion != 3.0
 			&& SchemaVersion != 4.0
-			&& SchemaVersion != 5.0))
+			&& SchemaVersion != 5.0
+			&& SchemaVersion != 6.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be 1, 2, 3, 4, or 5."),
-			TEXT("update the profile JSON to schema_version 5"),
+			TEXT("C# profile schema_version must be 1, 2, 3, 4, 5, or 6."),
+			TEXT("update the profile JSON to schema_version 6"),
 			OutResult);
 		return false;
 	}
@@ -842,23 +877,25 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	if (OutResult.SchemaVersion != 3
 		&& OutResult.SchemaVersion != 4
 		&& OutResult.SchemaVersion != 5
+		&& OutResult.SchemaVersion != 6
 		&& bHasSelfClassPath)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_self_field_not_supported"),
-			TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, or 5."),
-			TEXT("upgrade the C# profile to schema_version 5 before declaring self_class_path"),
+			TEXT("binding_profile.self_class_path requires C# profile schema_version 3, 4, 5, or 6."),
+			TEXT("upgrade the C# profile to schema_version 6 before declaring self_class_path"),
 			OutResult);
 		return false;
 	}
 	if (OutResult.SchemaVersion != 4
 		&& OutResult.SchemaVersion != 5
+		&& OutResult.SchemaVersion != 6
 		&& bHasObjectFactories)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("binding_profile_factory_schema_unsupported"),
-			TEXT("binding_profile.object_factories requires C# profile schema_version 4 or 5."),
-			TEXT("upgrade schema_version to 5 or remove object_factories"),
+			TEXT("binding_profile.object_factories requires C# profile schema_version 4, 5, or 6."),
+			TEXT("upgrade schema_version to 6 or remove object_factories"),
 			OutResult);
 		return false;
 	}
@@ -874,7 +911,8 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 	if ((OutResult.SchemaVersion == 2
 			|| OutResult.SchemaVersion == 3
 			|| OutResult.SchemaVersion == 4
-			|| OutResult.SchemaVersion == 5)
+			|| OutResult.SchemaVersion == 5
+			|| OutResult.SchemaVersion == 6)
 		&& bHasBindingProfile)
 	{
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)

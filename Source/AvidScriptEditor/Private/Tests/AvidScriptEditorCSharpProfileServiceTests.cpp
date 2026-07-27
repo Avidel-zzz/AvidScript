@@ -944,4 +944,126 @@ bool FAvidScriptEditorCSharpProfileServiceWritablePropertyTest::RunTest(const FS
 		Schema4ReadOnlyResult.BindingSelectionHash);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceNativeDirectAuthorizationTest,
+	"AvidScript.Editor.CSharpProfileService.NativeDirectAuthorization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceNativeDirectAuthorizationTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		GetAvidScriptCSharpProfileServiceTestRoot(),
+		TEXT("NativeDirectAuthorization")));
+	TestTrue(
+		TEXT("Native-direct profile root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("NativeDirectAuthorization.cs")));
+	TestTrue(
+		TEXT("Native-direct profile source can be written"),
+		FFileHelper::SaveStringToFile(
+			MakeAvidScriptCSharpProfileSourceText(),
+			*SourcePath));
+
+	const auto LoadProfile = [this, &TestRoot, &SourcePath](
+		const int32 SchemaVersion,
+		const TCHAR* Suffix,
+		const bool bDeclareNativeDirect,
+		FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+	{
+		const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(
+			FPaths::Combine(
+				TestRoot,
+				FString::Printf(
+					TEXT("native_direct_v%d_%s.csharp-profile.json"),
+					SchemaVersion,
+					Suffix)));
+		const FString NativeDirectField = bDeclareNativeDirect
+			? FString(TEXT(",\n      \"native_direct_functions\": [\"K2_GetActorLocation\"]"))
+			: FString();
+		const FString ProfileText = FString::Printf(
+			TEXT("{\n")
+			TEXT("  \"schema_version\": %d,\n")
+			TEXT("  \"language\": \"csharp\",\n")
+			TEXT("  \"source_path\": \"%s\",\n")
+			TEXT("  \"binding_profile\": {\n")
+			TEXT("    \"package_name\": \"avidscript.test.native_direct_profile\",\n")
+			TEXT("    \"classes\": [{\n")
+			TEXT("      \"class_path\": \"/Script/Engine.Actor\",\n")
+			TEXT("      \"include_functions\": [\"K2_GetActorLocation\"]%s\n")
+			TEXT("    }]\n")
+			TEXT("  }\n")
+			TEXT("}\n"),
+			SchemaVersion,
+			*SourcePath,
+			*NativeDirectField);
+		TestTrue(
+			TEXT("Native-direct C# profile fixture can be written"),
+			FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+		return FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ProfilePath,
+			OutResult);
+	};
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema5LegacyResult;
+	FAvidScriptEditorCSharpProfileLoadResult Schema6LegacyResult;
+	TestTrue(
+		TEXT("Schema v5 profile without native-direct authorization remains valid"),
+		LoadProfile(5, TEXT("legacy"), false, Schema5LegacyResult));
+	TestTrue(
+		TEXT("Schema v6 profile may omit native-direct authorization"),
+		LoadProfile(6, TEXT("legacy"), false, Schema6LegacyResult));
+	TestEqual(
+		TEXT("Omitting the v6 field preserves legacy selection identity"),
+		Schema6LegacyResult.BindingSelectionHash,
+		Schema5LegacyResult.BindingSelectionHash);
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema5DirectResult;
+	TestFalse(
+		TEXT("Schema v5 rejects native_direct_functions"),
+		LoadProfile(5, TEXT("direct"), true, Schema5DirectResult));
+	TestEqual(
+		TEXT("Legacy schema rejection has a stable category"),
+		Schema5DirectResult.ErrorCategory,
+		FString(TEXT("binding_profile_native_direct_schema_unsupported")));
+	TestTrue(
+		TEXT("Schema diagnostic states standard UHT exec-thunk provenance"),
+		Schema5DirectResult.NextAction.Contains(TEXT("standard UHT exec-thunk")));
+	TestTrue(
+		TEXT("Schema diagnostic states inherited or custom ProcessEvent bypass"),
+		Schema5DirectResult.NextAction.Contains(TEXT("inherited/custom ProcessEvent")));
+	TestTrue(
+		TEXT("Schema diagnostic forbids automatic Engine or third-party authorization"),
+		Schema5DirectResult.NextAction.Contains(TEXT("Engine or third-party")));
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema6DirectResult;
+	TestTrue(
+		TEXT("Schema v6 accepts native_direct_functions"),
+		LoadProfile(6, TEXT("direct"), true, Schema6DirectResult));
+	TestEqual(TEXT("Native-direct C# profile retains schema v6"), Schema6DirectResult.SchemaVersion, 6);
+	if (TestEqual(
+			TEXT("Native-direct C# profile retains one class rule"),
+			Schema6DirectResult.ResolvedBindingSelection.Classes.Num(),
+			1))
+	{
+		TestEqual(
+			TEXT("Resolved profile retains one native-direct authorization"),
+			Schema6DirectResult.ResolvedBindingSelection.Classes[0].NativeDirectFunctions.Num(),
+			1);
+		if (Schema6DirectResult.ResolvedBindingSelection.Classes[0].NativeDirectFunctions.Num() == 1)
+		{
+			TestEqual(
+				TEXT("Native-direct authorization reaches the resolved profile"),
+				Schema6DirectResult.ResolvedBindingSelection.Classes[0].NativeDirectFunctions[0],
+				FName(TEXT("K2_GetActorLocation")));
+		}
+	}
+	TestNotEqual(
+		TEXT("Adding only native-direct authorization changes profile selection identity"),
+		Schema6DirectResult.BindingSelectionHash,
+		Schema6LegacyResult.BindingSelectionHash);
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

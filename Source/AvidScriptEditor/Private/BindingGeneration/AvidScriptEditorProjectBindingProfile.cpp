@@ -15,6 +15,7 @@ namespace
 constexpr const TCHAR* LegacyProjectBindingProfileResolverVersion = TEXT("50.1.0");
 constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
+constexpr const TCHAR* NativeDirectProfileResolverVersion = TEXT("54.5.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -121,6 +122,7 @@ bool NormalizeClassRule(
 	Rule.OwnerClassPath = OwnerClass->GetPathName();
 	if (!NormalizeNames(Rule.IncludeFunctions, Rule.OwnerClassPath, TEXT("include_functions"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeFunctions, Rule.OwnerClassPath, TEXT("exclude_functions"), OutResult)
+		|| !NormalizeNames(Rule.NativeDirectFunctions, Rule.OwnerClassPath, TEXT("native_direct_functions"), OutResult)
 		|| !NormalizeNames(Rule.IncludeProperties, Rule.OwnerClassPath, TEXT("include_properties"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult)
 		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult))
@@ -282,6 +284,7 @@ bool TryGetEngineBuildIdentity(
 void AppendRuleIdentity(
 	const FAvidScriptReflectedClassSelection& Rule,
 	const bool bIncludeWritableProperties,
+	const bool bIncludeNativeDirectFunctions,
 	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
@@ -303,6 +306,10 @@ void AppendRuleIdentity(
 	if (bIncludeWritableProperties)
 	{
 		Identity += TEXT("|wp=") + JoinNames(Rule.WritableProperties);
+	}
+	if (bIncludeNativeDirectFunctions)
+	{
+		Identity += TEXT("|ndf=") + JoinNames(Rule.NativeDirectFunctions);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -815,13 +822,20 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		{
 			return !Rule.WritableProperties.IsEmpty();
 		});
+	const bool bHasNativeDirectFunctions = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.NativeDirectFunctions.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(bHasWritableProperties
-			? WritablePropertyProfileResolverVersion
-			: Spec.ObjectFactories.IsEmpty()
-				? LegacyProjectBindingProfileResolverVersion
-				: ProjectBindingProfileResolverVersion));
+		+ FString(bHasNativeDirectFunctions
+			? NativeDirectProfileResolverVersion
+			: bHasWritableProperties
+				? WritablePropertyProfileResolverVersion
+				: Spec.ObjectFactories.IsEmpty()
+					? LegacyProjectBindingProfileResolverVersion
+					: ProjectBindingProfileResolverVersion));
 	Identity.Add(TEXT("engine_build_id=") + EngineBuildIdentity);
 	Identity.Add(TEXT("package=") + Spec.PackageName);
 	Identity.Add(TEXT("self_class=") + OutSelection.SelfClassPath);
@@ -833,7 +847,11 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	}
 	for (const FAvidScriptReflectedClassSelection& Rule : OutSelection.Classes)
 	{
-		AppendRuleIdentity(Rule, bHasWritableProperties, Identity);
+		AppendRuleIdentity(
+			Rule,
+			bHasWritableProperties,
+			bHasNativeDirectFunctions,
+			Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)
 	{

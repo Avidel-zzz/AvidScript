@@ -8,6 +8,9 @@
 
 namespace
 {
+constexpr const TCHAR* NativeDirectAuthorizationNextAction =
+	TEXT("Authorize only an accepted include_functions member after asserting standard UHT exec-thunk provenance, accepting bypass of inherited/custom ProcessEvent, and never auto-authorizing Engine or third-party functions.");
+
 FString MakeResolvedSelectionKey(const FString& OwnerClassPath, const FName FunctionName)
 {
 	return OwnerClassPath + TEXT(".") + FunctionName.ToString();
@@ -195,13 +198,58 @@ bool FAvidScriptEditorBindingSelectionResolver::Resolve(
 
 		TSet<FName> IncludeNames(Rule.IncludeFunctions);
 		TSet<FName> ExcludeNames(Rule.ExcludeFunctions);
+		TSet<FName> SeenNativeDirectNames;
+		for (const FName NativeDirectName : Rule.NativeDirectFunctions)
+		{
+			const FString Source =
+				MakeResolvedSelectionKey(Rule.OwnerClassPath, NativeDirectName);
+			if (SeenNativeDirectNames.Contains(NativeDirectName))
+			{
+				AddIssue(
+					OutResult,
+					true,
+					Rule.OwnerClassPath,
+					NativeDirectName,
+					TEXT("native_direct_function_duplicate"),
+					Source);
+				SetFailure(
+					OutResult,
+					TEXT("native_direct_function_duplicate"),
+					Source,
+					NativeDirectAuthorizationNextAction);
+				return FailAndClear(OutSelections, OutResult);
+			}
+			SeenNativeDirectNames.Add(NativeDirectName);
+			if (!IncludeNames.Contains(NativeDirectName))
+			{
+				AddIssue(
+					OutResult,
+					true,
+					Rule.OwnerClassPath,
+					NativeDirectName,
+					TEXT("native_direct_function_not_included"),
+					Source);
+				SetFailure(
+					OutResult,
+					TEXT("native_direct_function_not_included"),
+					Source,
+					NativeDirectAuthorizationNextAction);
+				return FailAndClear(OutSelections, OutResult);
+			}
+		}
+
 		TSet<FName> FoundIncludeNames;
+		TSet<FName> DeclaredFunctionNames;
 		TArray<UFunction*> Candidates;
 		for (TFieldIterator<UFunction> It(OwnerClass, EFieldIterationFlags::None); It; ++It)
 		{
 			UFunction* Function = *It;
-			if (Function == nullptr
-				|| (!IncludeNames.IsEmpty() && !IncludeNames.Contains(Function->GetFName()))
+			if (Function == nullptr)
+			{
+				continue;
+			}
+			DeclaredFunctionNames.Add(Function->GetFName());
+			if ((!IncludeNames.IsEmpty() && !IncludeNames.Contains(Function->GetFName()))
 				|| ExcludeNames.Contains(Function->GetFName()))
 			{
 				continue;
@@ -213,6 +261,28 @@ bool FAvidScriptEditorBindingSelectionResolver::Resolve(
 		{
 			return Left.GetName().Compare(Right.GetName(), ESearchCase::CaseSensitive) < 0;
 		});
+
+		for (const FName NativeDirectName : Rule.NativeDirectFunctions)
+		{
+			if (!DeclaredFunctionNames.Contains(NativeDirectName))
+			{
+				const FString Source =
+					MakeResolvedSelectionKey(Rule.OwnerClassPath, NativeDirectName);
+				AddIssue(
+					OutResult,
+					true,
+					Rule.OwnerClassPath,
+					NativeDirectName,
+					TEXT("native_direct_function_unknown"),
+					Source);
+				SetFailure(
+					OutResult,
+					TEXT("native_direct_function_unknown"),
+					Source,
+					NativeDirectAuthorizationNextAction);
+				return FailAndClear(OutSelections, OutResult);
+			}
+		}
 
 		for (const FName IncludeName : IncludeNames)
 		{
@@ -235,6 +305,7 @@ bool FAvidScriptEditorBindingSelectionResolver::Resolve(
 			}
 		}
 
+		TSet<FName> AcceptedNames;
 		for (UFunction* Function : Candidates)
 		{
 			++OutResult.CandidateFunctionCount;
@@ -257,6 +328,29 @@ bool FAvidScriptEditorBindingSelectionResolver::Resolve(
 				OutSelections,
 				OutResult))
 			{
+				return FailAndClear(OutSelections, OutResult);
+			}
+			AcceptedNames.Add(Function->GetFName());
+		}
+
+		for (const FName NativeDirectName : Rule.NativeDirectFunctions)
+		{
+			if (!AcceptedNames.Contains(NativeDirectName))
+			{
+				const FString Source =
+					MakeResolvedSelectionKey(Rule.OwnerClassPath, NativeDirectName);
+				AddIssue(
+					OutResult,
+					true,
+					Rule.OwnerClassPath,
+					NativeDirectName,
+					TEXT("native_direct_function_rejected"),
+					Source);
+				SetFailure(
+					OutResult,
+					TEXT("native_direct_function_rejected"),
+					Source,
+					NativeDirectAuthorizationNextAction);
 				return FailAndClear(OutSelections, OutResult);
 			}
 		}

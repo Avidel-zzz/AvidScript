@@ -247,6 +247,86 @@ bool FAvidScriptEditorBindingSelectionStrictExplicitFailureTest::RunTest(const F
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingSelectionNativeDirectAuthorizationTest,
+	"AvidScript.Editor.BindingSelection.NativeDirectAuthorization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingSelectionNativeDirectAuthorizationTest::RunTest(
+	const FString& Parameters)
+{
+	const auto MakeProfile = [](
+		const TArray<FName>& IncludeFunctions,
+		const TArray<FName>& NativeDirectFunctions)
+	{
+		FAvidScriptBindingSelectionProfile Profile;
+		Profile.PackageName = TEXT("avidscript.engine.native_direct");
+		FAvidScriptReflectedClassSelection ActorRule;
+		ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+		ActorRule.IncludeFunctions = IncludeFunctions;
+		ActorRule.NativeDirectFunctions = NativeDirectFunctions;
+		Profile.Classes.Add(MoveTemp(ActorRule));
+		return Profile;
+	};
+
+	TArray<FAvidScriptReflectedFunctionSelection> Selections;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestTrue(
+		TEXT("Explicit native-direct authorization may select an accepted subset"),
+		FAvidScriptEditorBindingSelectionResolver::Resolve(
+			MakeProfile(
+				{ TEXT("ActorHasTag"), TEXT("K2_GetActorLocation") },
+				{ TEXT("ActorHasTag") }),
+			Selections,
+			Result));
+	TestEqual(TEXT("Authorized subset preserves both accepted selections"), Selections.Num(), 2);
+
+	const auto VerifyFailure = [this, &MakeProfile](
+		const TCHAR* Label,
+		const TArray<FName>& IncludeFunctions,
+		const TArray<FName>& NativeDirectFunctions,
+		const TCHAR* ExpectedCategory)
+	{
+		TArray<FAvidScriptReflectedFunctionSelection> RejectedSelections;
+		FAvidScriptBindingSelectionResolveResult RejectedResult;
+		TestFalse(
+			Label,
+			FAvidScriptEditorBindingSelectionResolver::Resolve(
+				MakeProfile(IncludeFunctions, NativeDirectFunctions),
+				RejectedSelections,
+				RejectedResult));
+		TestTrue(
+			*FString::Printf(TEXT("%s publishes no partial selection"), Label),
+			RejectedSelections.IsEmpty());
+		TestEqual(
+			*FString::Printf(TEXT("%s has a stable category"), Label),
+			RejectedResult.ErrorCategory,
+			FString(ExpectedCategory));
+	};
+
+	VerifyFailure(
+		TEXT("Duplicate native-direct authorization fails closed"),
+		{ TEXT("ActorHasTag") },
+		{ TEXT("ActorHasTag"), TEXT("ActorHasTag") },
+		TEXT("native_direct_function_duplicate"));
+	VerifyFailure(
+		TEXT("Unknown native-direct authorization fails closed"),
+		{ TEXT("AvidScriptMissingNativeDirectFunction") },
+		{ TEXT("AvidScriptMissingNativeDirectFunction") },
+		TEXT("native_direct_function_unknown"));
+	VerifyFailure(
+		TEXT("Rejected native-direct authorization fails closed"),
+		{ TEXT("K2_SetActorLocation") },
+		{ TEXT("K2_SetActorLocation") },
+		TEXT("native_direct_function_rejected"));
+	VerifyFailure(
+		TEXT("Native-direct authorization outside include_functions fails closed"),
+		{ TEXT("K2_GetActorLocation") },
+		{ TEXT("ActorHasTag") },
+		TEXT("native_direct_function_not_included"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingSelectionFNameExplicitTest,
 	"AvidScript.Editor.BindingSelection.FNameExplicit",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

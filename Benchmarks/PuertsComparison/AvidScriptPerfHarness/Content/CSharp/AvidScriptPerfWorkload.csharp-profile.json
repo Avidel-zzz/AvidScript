@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "language": "csharp",
   "source_path": "Plugins/AvidScriptPerfHarness/Content/CSharp/AvidScriptPerfWorkload.cs",
   "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
@@ -22,6 +22,10 @@
           "ReflectVectorValue",
           "ReflectVectorRefOut",
           "ReflectObjectRoundtrip",
+          "ReflectBatchAdd"
+        ],
+        "native_direct_functions": [
+          "ReflectAddInt32",
           "ReflectBatchAdd"
         ],
         "writable_properties": [

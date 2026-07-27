@@ -833,4 +833,115 @@ bool FAvidScriptEditorProjectBindingProfileObjectFactoryResolutionTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingProfileNativeDirectIdentityTest,
+	"AvidScript.Editor.ProjectBindingProfile.NativeDirectIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingProfileNativeDirectIdentityTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec LegacySpec;
+	LegacySpec.PackageName = TEXT("avidscript.project.native_direct_identity");
+	LegacySpec.Classes.Add(MakeProjectProfileClassRule(
+		TEXT("/Script/Engine.Actor"),
+		{ TEXT("ActorHasTag"), TEXT("K2_GetActorLocation") }));
+
+	const auto ResolveSpec = [this](
+		const FAvidScriptProjectBindingProfileSpec& Spec,
+		FAvidScriptBindingSelectionProfile& OutSelection,
+		FString& OutHash)
+	{
+		TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+		FAvidScriptBindingSelectionResolveResult Result;
+		const bool bResolved = FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			OutSelection,
+			ClassReferences,
+			OutHash,
+			Result);
+		TestTrue(TEXT("Native-direct project profile fixture resolves"), bResolved);
+		if (!bResolved)
+		{
+			AddError(Result.ErrorMessage);
+		}
+		return bResolved;
+	};
+
+	FAvidScriptBindingSelectionProfile LegacySelection;
+	FString LegacyHash;
+	if (!ResolveSpec(LegacySpec, LegacySelection, LegacyHash))
+	{
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("Legacy project profile retains one class rule"),
+			LegacySelection.Classes.Num(),
+			1))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Legacy project profile omits native-direct authorization"),
+		LegacySelection.Classes[0].NativeDirectFunctions.IsEmpty());
+
+	FAvidScriptProjectBindingProfileSpec AuthorizedSpec = LegacySpec;
+	AuthorizedSpec.Classes[0].NativeDirectFunctions = {
+		TEXT("K2_GetActorLocation"),
+		TEXT("ActorHasTag")
+	};
+	FAvidScriptBindingSelectionProfile AuthorizedSelection;
+	FString AuthorizedHash;
+	if (!ResolveSpec(AuthorizedSpec, AuthorizedSelection, AuthorizedHash))
+	{
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("Authorized project profile retains one class rule"),
+			AuthorizedSelection.Classes.Num(),
+			1)
+		|| !TestEqual(
+			TEXT("Authorized project profile retains two normalized functions"),
+			AuthorizedSelection.Classes[0].NativeDirectFunctions.Num(),
+			2))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Project profile normalizes native-direct function order"),
+		AuthorizedSelection.Classes[0].NativeDirectFunctions[0],
+		FName(TEXT("ActorHasTag")));
+	TestNotEqual(
+		TEXT("Adding only native-direct authorization changes selection hash"),
+		AuthorizedHash,
+		LegacyHash);
+
+	FAvidScriptProjectBindingProfileSpec ReorderedSpec = AuthorizedSpec;
+	Algo::Reverse(ReorderedSpec.Classes[0].NativeDirectFunctions);
+	FAvidScriptBindingSelectionProfile ReorderedSelection;
+	FString ReorderedHash;
+	if (!ResolveSpec(ReorderedSpec, ReorderedSelection, ReorderedHash))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Native-direct authorization order does not change selection hash"),
+		ReorderedHash,
+		AuthorizedHash);
+
+	FAvidScriptProjectBindingProfileSpec SubsetSpec = AuthorizedSpec;
+	SubsetSpec.Classes[0].NativeDirectFunctions = { TEXT("K2_GetActorLocation") };
+	FAvidScriptBindingSelectionProfile SubsetSelection;
+	FString SubsetHash;
+	if (!ResolveSpec(SubsetSpec, SubsetSelection, SubsetHash))
+	{
+		return false;
+	}
+	TestNotEqual(
+		TEXT("Changing only the native-direct authorization subset changes selection hash"),
+		SubsetHash,
+		AuthorizedHash);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

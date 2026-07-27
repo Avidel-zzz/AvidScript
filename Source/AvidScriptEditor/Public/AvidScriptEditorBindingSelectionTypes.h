@@ -20,6 +20,7 @@ struct FAvidScriptReflectedClassSelection
 	FString OwnerClassPath;
 	TArray<FName> IncludeFunctions;
 	TArray<FName> ExcludeFunctions;
+	TArray<FName> NativeDirectFunctions;
 	TArray<FName> IncludeProperties;
 	TArray<FName> ExcludeProperties;
 	TArray<FName> WritableProperties;

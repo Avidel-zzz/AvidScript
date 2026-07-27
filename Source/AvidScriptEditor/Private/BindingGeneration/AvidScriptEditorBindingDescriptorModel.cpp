@@ -54,6 +54,24 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 	FString& OutJson)
 {
 	OutJson.Empty();
+	const FString NativeDirectIdentitySuffix =
+		FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+			FString(),
+			TEXT("qualified_native_direct"));
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		if (Binding.BindingKind == TEXT("function")
+			&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
+					Package.SchemaVersion,
+					Binding.DispatchMode)
+				|| ((Binding.DispatchMode == TEXT("qualified_native_direct"))
+					!= Binding.CanonicalIdentity.EndsWith(
+						NativeDirectIdentitySuffix,
+						ESearchCase::CaseSensitive))))
+		{
+			return false;
+		}
+	}
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
 	Writer->WriteObjectStart();
 	Writer->WriteValue(TEXT("schema_version"), Package.SchemaVersion);
