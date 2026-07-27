@@ -678,7 +678,7 @@ function Test-RendererFrozenRegions {
         'AppendRotator' = '7a71fdf13edf712a20b7a6dcf5fd91ae284b36ed372feeef04011a2763deeacd'
         'AppendTransform' = 'd277ff9ceb802b8f5e24ee61a88c1fc8d2fc366a9231de145c8d224be7d0cd41'
         'AppendObjectHandleProxy' = '560156fdf7ad9344a2773cbcf9c733e81a36577c73abeaa6d136a7349c6c999d'
-        'EmitReferenceSource' = 'c39e6ab40ed3ef4f192a9799922e3a85b59aa406280e4485bc7cefff4a0261f4'
+        'EmitReferenceSource' = '4bb72478fbe00e5acedef2a302af45da8c5b421aed28820639745135a7a75ee5'
     }
     foreach ($Entry in (Get-RendererFrozenRegions).GetEnumerator()) {
         $Region = Get-UniqueBraceRegion $Source $Entry.Value $Violations "frozen renderer region $($Entry.Key)"
@@ -703,7 +703,7 @@ function Test-GeneratedSurfaceConstructionClosure {
     )
 
     $ExpectedHashes = [ordered]@{
-        'BindingRenderer' = '63891e9ee22959aee6351e1931c63826146918f8495c3573f2e616e7ab45b10f'
+        'BindingRenderer' = '052e51abc8d5fbb56bd252e3a59097538cf71fa50047bec230138aec1151777a'
         'StateContractRenderer' = '8d24e315f424a1827b2cdf6358019785c9d7ccdf5322b10f6a8971cee29ce9b9'
         'DefaultValueFormatter' = '6cffc9ae4e299b1b3134380b5827ccb068d6bcc01b4ff5b1bb65e30627e0bbf7'
         'CSharpSyntax' = 'bf685b36a2cd07cfffb69e46aa1937322b92e3ec9350afac4f7225f1c037249f'
@@ -872,6 +872,104 @@ function Test-NativeSymbolArray {
     Test-ExactMultiset @($ActualRecords) $ExpectedRecords $Violations $Description
 }
 
+function ConvertTo-StaticHostImportRecord {
+    param(
+        [string]$Candidate,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    $Trimmed = $Candidate.Trim()
+    if (-not ($Trimmed.StartsWith('{') -and $Trimmed.EndsWith('}'))) {
+        Add-Violation $Violations "static host catalog has an unparsed candidate: $Trimmed"
+        return $null
+    }
+    $Fields = @(Split-TopLevel $Trimmed.Substring(1, $Trimmed.Length - 2) `
+        $Violations 'static host catalog')
+    if ($Fields.Count -ne 4) {
+        Add-Violation $Violations "static host catalog entry must have four fields: $Trimmed"
+        return $null
+    }
+    $BindingId = [regex]::Replace($Fields[0], '\s+', '')
+    $Name = ConvertFrom-CppStringArgument $Fields[1]
+    $Signature = ConvertFrom-CppStringArgument $Fields[2]
+    $Compatibility = $Fields[3].Trim()
+    if ($BindingId -cnotmatch '^EAvidScriptHostBindingId::[A-Za-z0-9_]+$' -or
+        $null -eq $Name -or $null -eq $Signature -or
+        $Compatibility -notin @('true', 'false')) {
+        Add-Violation $Violations "static host catalog has a non-canonical entry: $Trimmed"
+        return $null
+    }
+    return "$BindingId|$Name|$Signature|$Compatibility"
+}
+
+function Test-StaticHostImportCatalog {
+    param(
+        [string]$Source,
+        [string[]]$ExpectedRecords,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    $Region = Get-UniqueBraceRegion $Source `
+        '\bconst\s+FAvidScriptVmStaticHostImport\s+GStaticHostImports\s*\[\s*\]\s*=' `
+        $Violations 'static host catalog initializer'
+    if ($null -eq $Region) {
+        return
+    }
+    $Candidates = @(Split-TopLevel $Region.Body $Violations 'static host catalog')
+    $Actual = [System.Collections.Generic.List[string]]::new()
+    foreach ($Candidate in $Candidates) {
+        $Record = ConvertTo-StaticHostImportRecord $Candidate $Violations
+        if ($null -ne $Record) {
+            $Actual.Add($Record)
+        }
+    }
+    Test-ExactMultiset @($Actual) $ExpectedRecords $Violations 'static host catalog'
+    Test-RegexSequence $Source @(
+        'UE_ARRAY_COUNT\s*\(\s*GStaticHostImports\s*\)',
+        'EAvidScriptHostBindingId::DataLaneSubmit',
+        'Static host catalog must remain dense and ordered by binding id'
+    ) $Violations 'static host catalog density proof'
+}
+
+function Test-WamrDynamicSymbolTables {
+    param(
+        [string]$Source,
+        [string[]]$ExpectedNativeRecords,
+        [System.Collections.Generic.List[string]]$Violations
+    )
+
+    foreach ($Name in @('GNativeSymbols', 'GCompatibilityNativeSymbols')) {
+        if ([regex]::Matches(
+                $Source,
+                ('\bTArray\s*<\s*NativeSymbol\s*>\s+' + [regex]::Escape($Name) + '\s*;')).Count -ne 1) {
+            Add-Violation $Violations "$Name must have exactly one dynamic table declaration"
+        }
+    }
+    $Builder = Get-UniqueBraceRegion $Source `
+        '\bvoid\s+BuildWamrStaticHostSymbolTables\s*\(' `
+        $Violations 'WAMR dynamic static-host table builder'
+    if ($null -ne $Builder) {
+        Test-RegexSequence $Builder.Text @(
+            'GetAvidScriptVmStaticHostImports\s*\(\s*\)',
+            'GetWamrStaticHostFunction\s*\(\s*Import\s*\.\s*BindingId\s*\)',
+            'GNativeSymbols\s*\.\s*Add\s*\(\s*Symbol\s*\)',
+            'Import\s*\.\s*bSupportsEnvCompatibility',
+            'GCompatibilityNativeSymbols\s*\.\s*Add\s*\(\s*Symbol\s*\)'
+        ) $Violations 'WAMR dynamic static-host table builder'
+    }
+    foreach ($Record in $ExpectedNativeRecords) {
+        $Fields = $Record -split '\|'
+        $Function = $Fields[1]
+        $Pattern = 'case\s+EAvidScriptHostBindingId::' +
+            [regex]::Escape($Function) +
+            '\s*:\s*return\s+reinterpret_cast\s*<\s*void\s*\*\s*>\s*\(\s*' +
+            [regex]::Escape($Function) + '\s*\)\s*;'
+        if ([regex]::Matches($Source, $Pattern).Count -ne 1) {
+            Add-Violation $Violations "WAMR static host function mapping differs: $Function"
+        }
+    }
+}
+
 function ConvertTo-SpecRecord {
     param(
         [string]$Candidate,
@@ -977,8 +1075,8 @@ function Test-WamrRegistration {
     Test-ExactMultiset `
         @($ActualRegistration) `
         @(
-            'CanonicalModuleName|GNativeSymbols|UE_ARRAY_COUNT(GNativeSymbols)',
-            'CompatibilityModuleName|GCompatibilityNativeSymbols|UE_ARRAY_COUNT(GCompatibilityNativeSymbols)'
+            'CanonicalModuleName|GNativeSymbols.GetData()|GNativeSymbols.Num()',
+            'CompatibilityModuleName|GCompatibilityNativeSymbols.GetData()|GCompatibilityNativeSymbols.Num()'
         ) `
         $Violations `
         'WAMR registration calls'
@@ -1000,7 +1098,7 @@ function Test-WamrRegistration {
         } | Where-Object { $_.Length -gt 0 })
     Test-ExactMultiset `
         $ActualRollback `
-        @('CanonicalModuleName|GNativeSymbols') `
+        @('CanonicalModuleName|GNativeSymbols.GetData()') `
         $Violations `
         'WAMR registration rollback'
 
@@ -1022,20 +1120,32 @@ function Test-WamrRegistration {
     Test-ExactMultiset `
         $ActualUnregistration `
         @(
-            'CompatibilityModuleName|GCompatibilityNativeSymbols',
-            'CanonicalModuleName|GNativeSymbols'
+            'CompatibilityModuleName|GCompatibilityNativeSymbols.GetData()',
+            'CanonicalModuleName|GNativeSymbols.GetData()'
         ) `
         $Violations `
         'WAMR unregistration calls'
 
     Test-DirectCallAllowlist `
         $RegisterFunction.Body `
-        @('wasm_runtime_register_natives', 'wasm_runtime_unregister_natives') `
+        @(
+            'BuildWamrStaticHostSymbolTables',
+            'wasm_runtime_register_natives',
+            'wasm_runtime_unregister_natives',
+            'GNativeSymbols.GetData',
+            'GNativeSymbols.Num',
+            'GCompatibilityNativeSymbols.GetData',
+            'GCompatibilityNativeSymbols.Num'
+        ) `
         $Violations `
         'WAMR registration function'
     Test-DirectCallAllowlist `
         $UnregisterFunction.Body `
-        @('wasm_runtime_unregister_natives') `
+        @(
+            'wasm_runtime_unregister_natives',
+            'GNativeSymbols.GetData',
+            'GCompatibilityNativeSymbols.GetData'
+        ) `
         $Violations `
         'WAMR unregistration function'
 }
@@ -1055,37 +1165,15 @@ function Test-StaticImportPolicy {
     if ($null -eq $Policy) {
         return
     }
-    $Initializer = Get-UniqueBraceRegion `
-        $Policy.Body `
-        'static\s+const\s+TSet\s*<\s*FString\s*>\s+StaticImports\s*=' `
-        $Violations `
-        'static host import policy initializer'
-    if ($null -eq $Initializer) {
-        return
-    }
-    $Candidates = @(Split-TopLevel $Initializer.Body $Violations 'static host import policy initializer')
-    $ActualNames = [System.Collections.Generic.List[string]]::new()
-    foreach ($Candidate in $Candidates) {
-        $Name = ConvertFrom-CppStringArgument $Candidate
-        if ($null -eq $Name) {
-            Add-Violation $Violations "static host import policy has an unparsed candidate: $Candidate"
-        }
-        else {
-            $ActualNames.Add($Name)
-        }
-    }
-    if ($ActualNames.Count -ne $Candidates.Count) {
-        Add-Violation $Violations "static host import policy parse completeness failed: candidates=$($Candidates.Count) parsed=$($ActualNames.Count)"
-    }
-    Test-ExactMultiset @($ActualNames) $CompatibilityNames $Violations 'static host import policy'
     Test-RegexSequence `
         $Policy.Text `
         @(
             'ModuleName\s*!=\s*TEXT\s*\(\s*"avidscript"\s*\)',
             'ModuleName\s*!=\s*TEXT\s*\(\s*"env"\s*\)',
-            'StaticImports\s*\.\s*Contains\s*\(\s*ImportName\s*\)',
+            'GetAvidScriptVmStaticHostImports\s*\(\s*\)',
+            'ImportName\s*==\s*UTF8_TO_TCHAR\s*\(\s*Import\s*\.\s*ImportName\s*\)',
             'ModuleName\s*==\s*TEXT\s*\(\s*"avidscript"\s*\)',
-            'ImportName\s*==\s*TEXT\s*\(\s*"avid_owner_get_handle"\s*\)'
+            'Import\s*\.\s*bSupportsEnvCompatibility'
         ) `
         $Violations `
         'static host import module/name policy'
@@ -1239,15 +1327,19 @@ function Test-GeneratedImportLiterals {
         Add-Violation $Violations 'descriptor import generator has no avid_ namespace candidate'
         return
     }
-    $Unexpected = @($Candidates | Where-Object { $_ -cne 'avid_ue_' } | Sort-Object -Unique)
+    $AllowedPrefixes = @('avid_ue_', 'avid_s1_')
+    $Unexpected = @($Candidates | Where-Object {
+        $AllowedPrefixes -cnotcontains $_
+    } | Sort-Object -Unique)
     if ($Unexpected.Count -gt 0) {
         Add-Violation $Violations "descriptor import generator contains bespoke avid_* literals: $($Unexpected -join ', ')"
     }
-    $UnexpectedSplit = @(
-        [regex]::Matches($LiteralStream, '\bavid_[a-z0-9_]+') |
-            ForEach-Object { $_.Value } |
-            Where-Object { -not $_.StartsWith('avid_ue_', [System.StringComparison]::Ordinal) } |
-            Sort-Object -Unique)
+    $UnexpectedSplit = @($Literals | ForEach-Object {
+        [regex]::Matches($_, '\bavid_[a-z0-9_]+') | ForEach-Object { $_.Value }
+    } | Where-Object {
+        -not $_.StartsWith('avid_ue_', [System.StringComparison]::Ordinal) -and
+        -not $_.StartsWith('avid_s1_', [System.StringComparison]::Ordinal)
+    } | Sort-Object -Unique)
     if ($UnexpectedSplit.Count -gt 0) {
         Add-Violation $Violations "descriptor import generator contains bespoke split-capable avid_* literals: $($UnexpectedSplit -join ', ')"
     }
@@ -1464,6 +1556,7 @@ function Invoke-Phase50Contracts {
     $ObjectTypeBindings = $Inputs['Source/AvidScriptBindings/Private/AvidScriptObjectTypeBinding.cpp'].Code
     $LifecycleBindings = $Inputs['Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'].Code
     $HostBindings = $Inputs['Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp'].Code
+    $StaticHostImports = $Inputs['Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp'].Code
     $DynamicRegistry = $Inputs['Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp'].Code
     $Renderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpBindingRenderer.cpp'].Code
     $StateContractRenderer = $Inputs['Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.cpp'].Code
@@ -1649,6 +1742,28 @@ function Invoke-Phase50Contracts {
         'avid_data_lane_epoch|DataLaneGetEpoch|()I|nullptr',
         'avid_data_lane_submit|DataLaneSubmit|(ii)i|nullptr'
     )
+    $StaticHostImportRecords = @(
+        'EAvidScriptHostBindingId::HostAddI32|host_add_i32|(i)i|true',
+        'EAvidScriptHostBindingId::HostFailI32|host_fail_i32|(i)i|true',
+        'EAvidScriptHostBindingId::ActorGetLocation|actor_get_location|(iii)i|true',
+        'EAvidScriptHostBindingId::ActorSetLocation|actor_set_location|(iifff)i|true',
+        'EAvidScriptHostBindingId::ActorAddLocationOffset|actor_add_location_offset|(iifff)i|true',
+        'EAvidScriptHostBindingId::ActorGetRotation|actor_get_rotation|(iii)i|true',
+        'EAvidScriptHostBindingId::ActorSetRotation|actor_set_rotation|(iifff)i|true',
+        'EAvidScriptHostBindingId::ActorGetScale|actor_get_scale|(iii)i|true',
+        'EAvidScriptHostBindingId::ActorSetScale|actor_set_scale|(iifff)i|true',
+        'EAvidScriptHostBindingId::ActorGetTransformBatch|actor_get_transform_batch|(iii)i|true',
+        'EAvidScriptHostBindingId::ActorGetRootComponent|actor_get_root_component|(iii)i|true',
+        'EAvidScriptHostBindingId::SceneComponentGetWorldLocation|scene_component_get_world_location|(iii)i|true',
+        'EAvidScriptHostBindingId::SceneComponentSetWorldLocation|scene_component_set_world_location|(iifff)i|true',
+        'EAvidScriptHostBindingId::OwnerGetSlot|owner_get_slot|()i|true',
+        'EAvidScriptHostBindingId::OwnerGetGeneration|owner_get_generation|()i|true',
+        'EAvidScriptHostBindingId::OwnerGetHandle|avid_owner_get_handle|()I|false',
+        'EAvidScriptHostBindingId::TimerSetOnce|timer_set_once|(fi)i|true',
+        'EAvidScriptHostBindingId::TimerCancel|timer_cancel|(i)i|true',
+        'EAvidScriptHostBindingId::DataLaneGetEpoch|avid_data_lane_epoch|()I|false',
+        'EAvidScriptHostBindingId::DataLaneSubmit|avid_data_lane_submit|(ii)i|false'
+    )
     $CompatibilityNativeRecords = @(
         $CanonicalNativeRecords | Where-Object {
             -not $_.StartsWith('avid_owner_get_handle|') `
@@ -1657,8 +1772,8 @@ function Invoke-Phase50Contracts {
         })
     $CompatibilityNames = @(
         $CompatibilityNativeRecords | ForEach-Object { ($_ -split '\|', 2)[0] })
-    Test-NativeSymbolArray $HostBindings 'GNativeSymbols' $CanonicalNativeRecords $Violations
-    Test-NativeSymbolArray $HostBindings 'GCompatibilityNativeSymbols' $CompatibilityNativeRecords $Violations
+    Test-StaticHostImportCatalog $StaticHostImports $StaticHostImportRecords $Violations
+    Test-WamrDynamicSymbolTables $HostBindings $CanonicalNativeRecords $Violations
     Test-WamrRegistration $HostBindings $Violations
     Test-StaticImportPolicy $HostBindings $CompatibilityNames $Violations
 
@@ -1672,7 +1787,7 @@ function Invoke-Phase50Contracts {
             $OwnerFunction.Text `
             @(
                 'Call\s*\.\s*BindingId\s*=\s*EAvidScriptHostBindingId::OwnerGetHandle',
-                'Dispatch\s*\(\s*ExecEnv\s*,\s*"avid_owner_get_handle"\s*,\s*Call\s*,\s*Result\s*\)',
+                'Dispatch\s*\(\s*ExecEnv\s*,\s*StaticImportName\s*\(\s*EAvidScriptHostBindingId::OwnerGetHandle\s*\)\s*,\s*Call\s*,\s*Result\s*\)',
                 'Result\s*\.\s*ReturnValueI64'
             ) `
             $Violations `
@@ -2343,6 +2458,7 @@ $InputManifest = [ordered]@{
     'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrDynamicRegistry.cpp' = 'Source'
     'Source/AvidScriptVM/Private/AvidScriptWamrHostBindings.cpp' = 'Source'
+    'Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp' = 'Source'
     'Tools/AvidScript.CSharpGuest/Lowering/CSharpOperationLowerer.cs' = 'Source'
 }
 foreach ($Entry in $InputManifest.GetEnumerator()) {
