@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase54-controlled-runtime-identical-wasm-jit-shootout",
+  "generated_at_utc": "2026-07-27T00:30:43.7889339Z",
+  "data_boundary": "single_cached_wasm_export_call",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "attempt_id": "5a4f7181-88fa-4dc4-a14a-274dc8d55615",
+    "aggregate_filename": "aggregate.json",
+    "aggregate_sha256": "157bbe394ea19b7c68e35d5b1f5fcf2b2bf14f2330e04a8e4d987c040579f1a6",
+    "candidate": {
+      "commit": "f56382df1ba674087471ec2651cc9984c9a9ea7a",
+      "tree": "ac91ee925c684bacc521c275ed8843c928843b34",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "editor_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "target_triple": "x86_64-pc-windows-msvc",
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2 10.0.26200.8875"
+    },
+    "profile": {
+      "id": "ue58-win64-controlled-runtime-v1",
+      "sha256": "7a446c9b9a46c30ff9e68112200d43e8b02d61ef2b26cd82b543bcd535e88415",
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples_per_lane_per_process": 30,
+      "calibration_confirmation_samples": 3,
+      "minimum_sample_milliseconds": 5.0,
+      "minimum_iterations": 1000,
+      "maximum_iterations": 100000000,
+      "lane_schedule_id": "round_robin_process_sample_v1"
+    },
+    "kernel": {
+      "kind": "identical_wasm_kernel",
+      "wasm_sha256": "230aed5ae6bd816e7780e0519354b100f29d23908ff0e6c1f0b52af5d4c834f7",
+      "export": "run",
+      "signature": "(i32 iterations, i32 seed) -> i32",
+      "host_crossings_per_sample": 1
+    },
+    "timing": {
+      "boundary": "single_cached_export_call",
+      "compile_in_timed_region": false,
+      "instantiate_in_timed_region": false,
+      "export_lookup_in_timed_region": false
+    },
+    "runtimes": {
+      "puerts_v8": {
+        "lane_id": "puerts_v8_wasm_jit",
+        "runtime_id": "v8.webassembly.tiered_jit",
+        "version": "9.4.146.24",
+        "execution_tier": "tiered_jit",
+        "adapter_id": "puerts_webassembly_module_instance",
+        "puerts_commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "runtime_artifact_sha256": "0ab80673f6bf59cf7f3f80ff17f254975f811813c4637ba2d85d6455fd1e4e24",
+        "fallback_used": false
+      },
+      "wasmtime": {
+        "lane_id": "avidscript_wasmtime_cranelift_jit",
+        "runtime_id": "wasmtime.cranelift.jit",
+        "version": "45.0.0",
+        "execution_tier": "jit",
+        "compiler_identity": "cranelift",
+        "runtime_build_identity": "wasmtime-v45.0.0;cranelift=1;dll_sha256=0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42",
+        "runtime_artifact_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42",
+        "fallback_used": false
+      },
+      "wamr": {
+        "lane_id": "avidscript_wamr_interpreter",
+        "runtime_id": "wamr.interpreter",
+        "version": "2.4.4",
+        "execution_tier": "interpreter",
+        "runtime_build_identity": "wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0;static_lib_sha256=e1afaf6e7da75b92b55d3ca8751e5f27b6b57179901ab04642faa084a8f180af",
+        "runtime_artifact_sha256": "e1afaf6e7da75b92b55d3ca8751e5f27b6b57179901ab04642faa084a8f180af",
+        "fallback_used": false
+      },
+      "native": {
+        "lane_id": "native_cpp_reference",
+        "runtime_id": "unreal_engine_native",
+        "execution_tier": "native"
+      }
+    },
+    "calibration": {
+      "pid": 52272,
+      "sha256": "2d2ef8524a11adf583f04cf002c6888191f0186b0ee39d5a9a595a04f2328bb9",
+      "iterations": {
+        "puerts_v8_wasm_jit": 8192000,
+        "avidscript_wasmtime_cranelift_jit": 8192000,
+        "avidscript_wamr_interpreter": 512000,
+        "native_cpp_reference": 8192000
+      },
+      "median_duration_ns": {
+        "puerts_v8_wasm_jit": 9491000,
+        "avidscript_wasmtime_cranelift_jit": 9473400,
+        "avidscript_wamr_interpreter": 5225200,
+        "native_cpp_reference": 9469300
+      }
+    },
+    "samples": {
+      "timed_total": 600,
+      "correct": 600,
+      "incorrect": 0,
+      "per_lane": 150,
+      "per_lane_per_process": 30
+    },
+    "processes": {
+      "calibration": 1,
+      "timed": 5,
+      "unique_pid_count": 6
+    },
+    "cross_process_metrics_ns_per_iteration": {
+      "puerts_v8_wasm_jit": {
+        "process_p50_median": 1.1779906616210938,
+        "process_p50_p95": 1.2024474487304688,
+        "process_p95_median": 1.367041015625,
+        "process_p95_p95": 1.40345458984375,
+        "process_mad_median": 0.016674804687500044
+      },
+      "avidscript_wasmtime_cranelift_jit": {
+        "process_p50_median": 1.1777099609375,
+        "process_p50_p95": 1.1986082763671875,
+        "process_p95_median": 1.28118896484375,
+        "process_p95_p95": 1.3445068359375,
+        "process_mad_median": 0.020275878906249933
+      },
+      "avidscript_wamr_interpreter": {
+        "process_p50_median": 10.414452148437501,
+        "process_p50_p95": 10.6322265625,
+        "process_p95_median": 11.9154296875,
+        "process_p95_p95": 12.777734375,
+        "process_mad_median": 0.15556542968750087
+      },
+      "native_cpp_reference": {
+        "process_p50_median": 1.1681883544921874,
+        "process_p50_p95": 1.1925414428710939,
+        "process_p95_median": 1.31142578125,
+        "process_p95_p95": 1.335595703125,
+        "process_mad_median": 0.012524353027343671
+      }
+    },
+    "paired_ratios": {
+      "definition": "wasmtime_over_v8",
+      "cross_process_p50": 0.9992175566586181,
+      "cross_process_p95": 0.9835160910097511
+    },
+    "pc_default_gate": {
+      "maximum_slowdown_ratio": 1.05,
+      "required_statistics": [
+        "p50",
+        "p95"
+      ],
+      "result": "wasmtime_pc_default_gate_passed"
+    }
+  },
+  "boundary_note": "The result compares one fixed identical WASM integer kernel through cached exports. It does not measure C# frontend, Unreal binding, lifecycle dispatch, GC, startup, memory, or the complete Puerts and AvidScript game scripting stacks."
+}
