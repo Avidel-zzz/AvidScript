@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase54-crossing-fast-path-formal",
+  "generated_at_utc": "2026-07-27T06:42:33.3976310Z",
+  "data_boundary": "csharp_frontend_output",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "attempt_id": "79ec8e0a-1155-4c5c-8737-30c820db03dd",
+    "aggregate_filename": "aggregate.json",
+    "aggregate_sha256": "312027e251336f865e01134c89044ed53f86680668a39437b1086d9330e2d2c3",
+    "candidate": {
+      "commit": "792b4a1e6f8547998f60114d23646d5fb85a83a0",
+      "tree": "15c07e67ca8885b407da3cddf94d16563c0f63d6",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "ue_build_id": "UE5-CL-0",
+      "editor_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2 10.0.26200.8875"
+    },
+    "profile": {
+      "id": "ue58-win64-development-editor-v2",
+      "sha256": "bc720f3f88bf2b1007ab0aed124937e85e7824af20147860230e2148a48e683e",
+      "process_runs": 5,
+      "warmup_samples": 5,
+      "timed_samples": 30,
+      "workloads": 10,
+      "lanes": 5,
+      "timed_observations": 7500
+    },
+    "artifacts": {
+      "wasm_sha256": "451b2cd5fcf7644542e76c6f4960bf7d8904073a1fce74d3c0e1aaae9e81e82a",
+      "manifest_sha256": "b1d0367bff5501d5e1cb25fea3a0281f318fd4ad131c6acbfcfc84f40b914424"
+    },
+    "runtimes": {
+      "puerts_v8": {
+        "commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "version": "V8 9.4.146.24",
+        "execution_mode": "jit",
+        "fallback_used": false
+      },
+      "wasmtime": {
+        "version": "45.0.0",
+        "backend_id": "wasmtime.cranelift.jit",
+        "execution_mode": "jit",
+        "runtime_artifact_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42",
+        "fallback_used": false
+      },
+      "wamr": {
+        "version": "2.4.4",
+        "backend_id": "wamr.interpreter",
+        "execution_mode": "interpreter",
+        "fallback_used": false
+      }
+    },
+    "statistics_method": {
+      "percentile": "nearest_rank",
+      "primary_replicate": "process_summary",
+      "p50": "p50_of_process_p50",
+      "p95": "p95_of_process_p50",
+      "mad": "mad_of_process_p50",
+      "unit": "ns_per_operation"
+    },
+    "runtime_control": {
+      "workload": "pure_integer",
+      "native_cpp": {
+        "p50": 0.97313232421875,
+        "p95": 0.9896362304687499,
+        "mad": 0.0023925781250001554
+      },
+      "puerts_v8_reflection": {
+        "p50": 0.9880981445312499,
+        "p95": 0.9942016601562499,
+        "mad": 0.0007568359374999778
+      },
+      "puerts_v8_static": {
+        "p50": 0.98916015625,
+        "p95": 1.00126953125,
+        "mad": 0.0013427734375
+      },
+      "avidscript_wamr_interpreter": {
+        "p50": 59.259375000000006,
+        "p95": 60.265625,
+        "mad": 0.3851562500000085
+      },
+      "avidscript_wasmtime_jit": {
+        "p50": 1.03326416015625,
+        "p95": 1.0696655273437499,
+        "mad": 0.0096435546875
+      }
+    },
+    "crossing_results": [
+      {
+        "workload": "scalar_noop",
+        "baseline_wasmtime_p50": 658.0375,
+        "optimized_wasmtime_p50": 688.1750000000001,
+        "optimized_wasmtime_p95": 704.2875,
+        "optimized_wasmtime_mad": 5.575000000000159,
+        "delta_percent": 4.579906160363212,
+        "puerts_reflection_p50": 90.51249999999999,
+        "puerts_static_p50": 26.687109375000002,
+        "wasmtime_over_reflection": 7.603093495373569,
+        "wasmtime_over_static": 25.786794303195304
+      },
+      {
+        "workload": "scalar_add_int32",
+        "baseline_wasmtime_p50": 751.4,
+        "optimized_wasmtime_p50": 713.1375,
+        "optimized_wasmtime_p95": 725.4625,
+        "optimized_wasmtime_mad": 10.200000000000045,
+        "delta_percent": -5.092161298908692,
+        "puerts_reflection_p50": 104.5875,
+        "puerts_static_p50": 28.542968749999996,
+        "wasmtime_over_reflection": 6.818572965220509,
+        "wasmtime_over_static": 24.9846996031203
+      },
+      {
+        "workload": "batch_scalar",
+        "baseline_wasmtime_p50": 732.3375000000001,
+        "optimized_wasmtime_p50": 710.0625,
+        "optimized_wasmtime_p95": 741.3875,
+        "optimized_wasmtime_mad": 16.649999999999977,
+        "delta_percent": -3.041630395821615,
+        "puerts_reflection_p50": 106.9828125,
+        "puerts_static_p50": 30.116015625,
+        "wasmtime_over_reflection": 6.637164264119529,
+        "wasmtime_over_static": 23.57757111171641
+      },
+      {
+        "workload": "property_get_set",
+        "baseline_wasmtime_p50": 308.159375,
+        "optimized_wasmtime_p50": 237.896875,
+        "optimized_wasmtime_p95": 239.06875,
+        "optimized_wasmtime_mad": 0.27812499999998863,
+        "delta_percent": -22.80070174726958,
+        "puerts_reflection_p50": 100.7109375,
+        "puerts_static_p50": 61.541406249999994,
+        "wasmtime_over_reflection": 2.3621751609650143,
+        "wasmtime_over_static": 3.8656392418722154
+      },
+      {
+        "workload": "object_roundtrip",
+        "baseline_wasmtime_p50": 835.4625000000001,
+        "optimized_wasmtime_p50": 871.875,
+        "optimized_wasmtime_p95": 890.25,
+        "optimized_wasmtime_mad": 18.375,
+        "delta_percent": 4.358364379011603,
+        "puerts_reflection_p50": 129.78437499999998,
+        "puerts_static_p50": 46.95390625,
+        "wasmtime_over_reflection": 6.71787339577665,
+        "wasmtime_over_static": 18.568742616595397
+      }
+    ]
+  },
+  "baseline": {
+    "attempt_id": "e5223aae-6127-41de-b041-54534b50739a",
+    "aggregate_sha256": "595ce9cd9d70a3f12649fa54979c55510e8d48b917dd7cc4af22dccc31e3fde7",
+    "evidence_file": "P54_CSharp_Five_Lane_Benchmark_Evidence.json"
+  },
+  "verification": {
+    "ue58_target_build": "passed",
+    "automation_filter": "AvidScript.Runtime.DynamicHostCallTimingPolicy+AvidScript.Editor.BindingRuntime.TypedThunk",
+    "automation_tests_found": 2,
+    "automation_tests_passed": 2,
+    "automation_tests_failed": 0,
+    "formal_sample_validation": "7500/7500 correct"
+  }
+}
