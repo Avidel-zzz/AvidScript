@@ -1066,4 +1066,111 @@ bool FAvidScriptEditorCSharpProfileServiceNativeDirectAuthorizationTest::RunTest
 		Schema6LegacyResult.BindingSelectionHash);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest,
+	"AvidScript.Editor.CSharpProfileService.GeneratedNativeAuthorization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(FPaths::Combine(
+		GetAvidScriptCSharpProfileServiceTestRoot(),
+		TEXT("GeneratedNativeAuthorization")));
+	TestTrue(
+		TEXT("Generated-native profile root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("GeneratedNativeAuthorization.cs")));
+	TestTrue(
+		TEXT("Generated-native profile source can be written"),
+		FFileHelper::SaveStringToFile(
+			MakeAvidScriptCSharpProfileSourceText(),
+			*SourcePath));
+
+	const auto LoadProfile = [this, &TestRoot, &SourcePath](
+		const int32 SchemaVersion,
+		const TCHAR* Suffix,
+		const FString& GeneratedField,
+		FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+	{
+		const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(
+			FPaths::Combine(
+				TestRoot,
+				FString::Printf(
+					TEXT("generated_native_v%d_%s.csharp-profile.json"),
+					SchemaVersion,
+					Suffix)));
+		const FString ProfileText = FString::Printf(
+			TEXT("{\n")
+			TEXT("  \"schema_version\": %d,\n")
+			TEXT("  \"language\": \"csharp\",\n")
+			TEXT("  \"source_path\": \"%s\",\n")
+			TEXT("  \"binding_profile\": {\n")
+			TEXT("    \"package_name\": \"avidscript.test.generated_native_profile\",\n")
+			TEXT("    \"classes\": [{\n")
+			TEXT("      \"class_path\": \"/Script/Engine.Actor\",\n")
+			TEXT("      \"include_functions\": [\"K2_GetActorLocation\"]%s\n")
+			TEXT("    }]\n")
+			TEXT("  }\n")
+			TEXT("}\n"),
+			SchemaVersion,
+			*SourcePath,
+			*GeneratedField);
+		TestTrue(
+			TEXT("Generated-native C# profile fixture can be written"),
+			FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+		return FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ProfilePath,
+			OutResult);
+	};
+
+	const FString GeneratedField =
+		TEXT(",\n      \"generated_native_functions\": [\"K2_GetActorLocation\"]");
+	FAvidScriptEditorCSharpProfileLoadResult Schema6Result;
+	TestFalse(
+		TEXT("Schema v6 rejects generated_native_functions"),
+		LoadProfile(6, TEXT("rejected"), GeneratedField, Schema6Result));
+	TestEqual(
+		TEXT("Legacy generated-native rejection has a stable category"),
+		Schema6Result.ErrorCategory,
+		FString(TEXT("binding_profile_generated_native_schema_unsupported")));
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema7LegacyResult;
+	TestTrue(
+		TEXT("Schema v7 may omit generated-native authorization"),
+		LoadProfile(7, TEXT("legacy"), FString(), Schema7LegacyResult));
+	FAvidScriptEditorCSharpProfileLoadResult Schema7GeneratedResult;
+	TestTrue(
+		TEXT("Schema v7 accepts generated_native_functions"),
+		LoadProfile(7, TEXT("generated"), GeneratedField, Schema7GeneratedResult));
+	TestEqual(
+		TEXT("Generated-native C# profile retains schema v7"),
+		Schema7GeneratedResult.SchemaVersion,
+		7);
+	if (TestEqual(
+		TEXT("Generated-native C# profile retains one class rule"),
+		Schema7GeneratedResult.ResolvedBindingSelection.Classes.Num(),
+		1))
+	{
+		const FAvidScriptReflectedClassSelection& ClassRule =
+			Schema7GeneratedResult.ResolvedBindingSelection.Classes[0];
+		if (TestEqual(
+			TEXT("Resolved profile retains one generated-native authorization"),
+			ClassRule.GeneratedNativeFunctions.Num(),
+			1))
+		{
+			TestEqual(
+				TEXT("Generated-native authorization reaches the resolved profile"),
+				ClassRule.GeneratedNativeFunctions[0],
+				FName(TEXT("K2_GetActorLocation")));
+		}
+	}
+	TestNotEqual(
+		TEXT("Generated-native authorization changes profile selection identity"),
+		Schema7GeneratedResult.BindingSelectionHash,
+		Schema7LegacyResult.BindingSelectionHash);
+	return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

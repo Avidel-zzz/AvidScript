@@ -1645,9 +1645,17 @@ $GeneratedBindingImportLiterals = @(
     [regex]::Matches($BindingDescriptorGeneratorSource, 'TEXT\("(?<name>avid_[a-z0-9_]*)"\)')
     | ForEach-Object { $_.Groups['name'].Value }
     | Sort-Object -Unique)
-if ($GeneratedBindingImportLiterals.Count -ne 1 -or
-    $GeneratedBindingImportLiterals[0] -cne 'avid_ue_') {
-    Add-Violation 'reflected project imports must use only the descriptor-derived avid_ue_<stable-id> namespace'
+$ExpectedGeneratedBindingImportPrefixes = @('avid_s1_', 'avid_ue_')
+$UnexpectedGeneratedBindingImportPrefixes = @(
+    $GeneratedBindingImportLiterals | Where-Object { $ExpectedGeneratedBindingImportPrefixes -cnotcontains $_ })
+$MissingGeneratedBindingImportPrefixes = @(
+    $ExpectedGeneratedBindingImportPrefixes | Where-Object { $GeneratedBindingImportLiterals -cnotcontains $_ })
+if ($UnexpectedGeneratedBindingImportPrefixes.Count -gt 0 -or
+    $MissingGeneratedBindingImportPrefixes.Count -gt 0 -or
+    $GeneratedBindingImportLiterals.Count -ne $ExpectedGeneratedBindingImportPrefixes.Count) {
+    Add-Violation ('reflected project imports must use only descriptor-derived avid_ue_<stable-id> and avid_s1_<content-hash> namespaces' `
+        + " | missing=$($MissingGeneratedBindingImportPrefixes -join ',')" `
+        + " | unexpected=$($UnexpectedGeneratedBindingImportPrefixes -join ',')")
 }
 foreach ($RequiredDynamicRegistryContract in @(
     'Import.ModuleName != TEXT("avidscript")',
