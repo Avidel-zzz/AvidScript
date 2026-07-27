@@ -178,6 +178,8 @@ function Get-InstalledContentSummary {
     $ExcludedRelativePrefixes = @(
         'Source/CSharpParamDefaultValueMetas/bin/',
         'Source/CSharpParamDefaultValueMetas/obj/')
+    $ExcludedRelativeFiles = @(
+        'Source/CSharpParamDefaultValueMetas/CSharpParamDefaultValueMetas.ubtplugin.csproj.props')
     $ManifestLines = [System.Collections.Generic.List[string]]::new()
     foreach ($File in Get-ChildItem -LiteralPath $InstallPath -File -Recurse -Force) {
         $RelativePath = [System.IO.Path]::GetRelativePath($InstallPath, $File.FullName).Replace('\', '/')
@@ -185,6 +187,9 @@ function Get-InstalledContentSummary {
             $RelativePath = $RelativePath.Substring(2)
         }
         if ($RelativePath -ceq $MarkerName) {
+            continue
+        }
+        if ($ExcludedRelativeFiles -icontains $RelativePath) {
             continue
         }
         $RootDirectoryName = $RelativePath.Split('/')[0]

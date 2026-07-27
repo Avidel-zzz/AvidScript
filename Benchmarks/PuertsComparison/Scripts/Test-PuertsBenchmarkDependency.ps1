@@ -211,6 +211,8 @@ try {
     $GeneratedCSharpObjPath = Join-Path $HappyProject 'Plugins/Puerts/Source/CSharpParamDefaultValueMetas/obj/fixture.assets.json'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $GeneratedCSharpObjPath) | Out-Null
     'generated msbuild state' | Set-Content -LiteralPath $GeneratedCSharpObjPath -Encoding utf8NoBOM
+    $GeneratedCSharpPropsPath = Join-Path $HappyProject 'Plugins/Puerts/Source/CSharpParamDefaultValueMetas/CSharpParamDefaultValueMetas.ubtplugin.csproj.props'
+    'generated UBT props' | Set-Content -LiteralPath $GeneratedCSharpPropsPath -Encoding utf8NoBOM
     $Verified = Invoke-Installer Verify $HappyProject $CacheRoot $TestLockPath
     Assert-True ($Verified.ExitCode -eq 0) "happy-path verify failed: $($Verified.Text)"
     $SidecarDigest = Get-SidecarInstalledPuertsContentDigest `

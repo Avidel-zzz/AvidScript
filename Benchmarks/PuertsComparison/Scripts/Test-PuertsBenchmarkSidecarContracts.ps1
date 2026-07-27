@@ -287,6 +287,8 @@ try {
     $GeneratedCSharpObjPath = Join-Path $PuertsTarget 'Source/CSharpParamDefaultValueMetas/obj/fixture.assets.json'
     [System.IO.Directory]::CreateDirectory((Split-Path -Parent $GeneratedCSharpObjPath)) | Out-Null
     [System.IO.File]::WriteAllText($GeneratedCSharpObjPath, 'generated-msbuild-state', [System.Text.UTF8Encoding]::new($false))
+    $GeneratedCSharpPropsPath = Join-Path $PuertsTarget 'Source/CSharpParamDefaultValueMetas/CSharpParamDefaultValueMetas.ubtplugin.csproj.props'
+    [System.IO.File]::WriteAllText($GeneratedCSharpPropsPath, 'generated-ubt-props', [System.Text.UTF8Encoding]::new($false))
     $ManagedMarkerPath = Join-Path $PuertsTarget '.avidscript-puerts-install.json'
     $ManagedMarker = [ordered]@{
         schema_version = 2

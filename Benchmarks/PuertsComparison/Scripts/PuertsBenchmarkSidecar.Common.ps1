@@ -121,10 +121,15 @@ function Get-SidecarInstalledPuertsContentDigest {
     $ExcludedRelativePrefixes = @(
         'Source/CSharpParamDefaultValueMetas/bin/',
         'Source/CSharpParamDefaultValueMetas/obj/')
+    $ExcludedRelativeFiles = @(
+        'Source/CSharpParamDefaultValueMetas/CSharpParamDefaultValueMetas.ubtplugin.csproj.props')
     $Entries = [System.Collections.Generic.List[string]]::new()
     foreach ($File in @(Get-ChildItem -LiteralPath $Root -File -Force -Recurse)) {
         $RelativePath = [System.IO.Path]::GetRelativePath($Root, $File.FullName).Replace('\', '/')
         if ($RelativePath -ieq $ManagedMarkerName) {
+            continue
+        }
+        if ($ExcludedRelativeFiles -icontains $RelativePath) {
             continue
         }
         $PathParts = @($RelativePath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries))
