@@ -308,7 +308,7 @@ internal static class CSharpSemanticInputValidator
             (5, "1.5") => true,
             (6, "1.6") => true,
             (7, "1.7") => true,
-            (8, "1.8") => true,
+            (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
     }

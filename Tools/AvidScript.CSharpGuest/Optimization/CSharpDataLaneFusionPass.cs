@@ -17,9 +17,6 @@ internal sealed record CSharpDataLaneFusionResult(
 internal static class CSharpDataLaneFusionPass
 {
     private const int MinimumGroupSize = 3;
-    private const int HeaderBytes = 24;
-    private const int CommandBytes = 32;
-    private const int MaximumCommandCount = ushort.MaxValue;
     private const uint CommandMagic = 0x41564342u;
 
     public static CSharpDataLaneFusionResult Run(
@@ -123,14 +120,6 @@ internal static class CSharpDataLaneFusionPass
         SemanticDocument document,
         IReadOnlyDictionary<string, GuestType> types)
     {
-        HashSet<string> importIds = document.Callables
-            .Where(callable => callable.Import is not null)
-            .Select(callable => CSharpGuestIds.Import(callable.MethodSymbolId))
-            .ToHashSet(StringComparer.Ordinal);
-        HashSet<string> functionIds = document.Callables
-            .Where(callable => callable.HasBody)
-            .Select(callable => CSharpGuestIds.Function(callable.MethodSymbolId))
-            .ToHashSet(StringComparer.Ordinal);
         Dictionary<string, SetterTarget> targets = new(StringComparer.Ordinal);
         foreach (SemanticCallable callable in document.Callables.OrderBy(
             callable => callable.MethodSymbolId,
@@ -138,12 +127,11 @@ internal static class CSharpDataLaneFusionPass
         {
             if (callable.Optimization is not
                     { OptimizationClass: "buffered_write", BindingOrdinal: >= 0 }
-                || callable.IsStatic
+                || callable.Import is not { Module: "avidscript" }
+                || callable.HasBody
                 || callable.ReturnTypeId != "type:void"
-                || callable.Parameters.Count != 1
-                || callable.Parameters[0].TypeId != "type:int32"
-                || callable.Parameters[0].RefKind != "none"
-                || !types.TryGetValue(callable.ContainingTypeId, out GuestType? receiverType)
+                || !TryGetSetterShape(callable, out string receiverTypeId)
+                || !types.TryGetValue(receiverTypeId, out GuestType? receiverType)
                 || receiverType.Kind != "struct")
             {
                 continue;
@@ -165,19 +153,38 @@ internal static class CSharpDataLaneFusionPass
                 receiverType.Id,
                 slotFields[0].Id,
                 generationFields[0].Id);
-            string importId = CSharpGuestIds.Import(callable.MethodSymbolId);
-            string functionId = CSharpGuestIds.Function(callable.MethodSymbolId);
-            if (callable.Import is not null && importIds.Contains(importId))
-            {
-                targets.TryAdd(importId, target);
-            }
-            if (callable.HasBody && functionIds.Contains(functionId))
-            {
-                targets.TryAdd(functionId, target);
-            }
+            targets.TryAdd(CSharpGuestIds.Import(callable.MethodSymbolId), target);
         }
 
         return targets;
+    }
+
+    private static bool TryGetSetterShape(SemanticCallable callable, out string receiverTypeId)
+    {
+        receiverTypeId = string.Empty;
+        if (callable.IsStatic)
+        {
+            if (callable.Parameters.Count != 2
+                || callable.Parameters[0].RefKind != "none"
+                || callable.Parameters[1].TypeId != "type:int32"
+                || callable.Parameters[1].RefKind != "none")
+            {
+                return false;
+            }
+
+            receiverTypeId = callable.Parameters[0].TypeId;
+            return true;
+        }
+
+        if (callable.Parameters.Count != 1
+            || callable.Parameters[0].TypeId != "type:int32"
+            || callable.Parameters[0].RefKind != "none")
+        {
+            return false;
+        }
+
+        receiverTypeId = callable.ContainingTypeId;
+        return true;
     }
 
     private static List<FunctionPlan> BuildPlans(
@@ -253,7 +260,7 @@ internal static class CSharpDataLaneFusionPass
 
                 receiverId = candidate.ReceiverId;
                 active.Add(candidate);
-                if (active.Count == MaximumCommandCount)
+                if (active.Count == CSharpDataLaneAbi.MaximumFusedCommands)
                 {
                     Flush();
                 }
@@ -421,7 +428,8 @@ internal static class CSharpDataLaneFusionPass
             return id;
         }
 
-        int byteCount = checked(HeaderBytes + (CommandBytes * group.Calls.Count));
+        int byteCount = checked(
+            CSharpDataLaneAbi.HeaderBytes + (CSharpDataLaneAbi.CommandBytes * group.Calls.Count));
         string epochId = Define("type:uint64", "epoch");
         instructions.Add(new GuestInstruction(
             "call",
@@ -492,7 +500,7 @@ internal static class CSharpDataLaneFusionPass
         string recordBytesId = Constant(
             "type:uint32",
             "uint32",
-            CommandBytes,
+            CSharpDataLaneAbi.CommandBytes,
             "record_bytes");
         string zeroI32Id = Constant("type:int32", "int32", 0, "zero_i32");
 

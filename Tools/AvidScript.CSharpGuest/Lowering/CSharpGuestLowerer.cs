@@ -8,7 +8,10 @@ namespace AvidScript.CSharpGuest;
 
 public static class CSharpGuestLowerer
 {
-    public static CSharpGuestLoweringResult Lower(SemanticDocument document, string semanticSha256)
+    public static CSharpGuestLoweringResult Lower(
+        SemanticDocument document,
+        string semanticSha256,
+        bool enableDataLaneFusion = true)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(semanticSha256);
@@ -40,24 +43,27 @@ public static class CSharpGuestLowerer
             guestTypes,
             dataPool,
             diagnostics).ToList();
-        CSharpDataLaneFusionResult fusion = CSharpDataLaneFusionPass.Run(
-            document,
-            moduleTypes,
-            imports,
-            functions);
-        if (!fusion.Succeeded)
+        if (enableDataLaneFusion)
         {
-            foreach (GuestDiagnostic diagnostic in fusion.Diagnostics)
+            CSharpDataLaneFusionResult fusion = CSharpDataLaneFusionPass.Run(
+                document,
+                moduleTypes,
+                imports,
+                functions);
+            if (!fusion.Succeeded)
             {
-                Add(diagnostics, "ASCG1003", diagnostic.Message);
+                foreach (GuestDiagnostic diagnostic in fusion.Diagnostics)
+                {
+                    Add(diagnostics, "ASCG1003", diagnostic.Message);
+                }
+
+                return Failure(diagnostics);
             }
 
-            return Failure(diagnostics);
+            moduleTypes = fusion.Types;
+            imports = fusion.Imports.ToArray();
+            functions = fusion.Functions.ToList();
         }
-
-        moduleTypes = fusion.Types;
-        imports = fusion.Imports.ToArray();
-        functions = fusion.Functions.ToList();
         CSharpGameplayEventLoweringResult? gameplayEvents = CSharpGameplayEventLowerer.Lower(
             document,
             guestTypes,

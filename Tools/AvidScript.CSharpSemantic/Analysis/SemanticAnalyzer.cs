@@ -10,9 +10,6 @@ namespace AvidScript.CSharpSemantic;
 
 public static class SemanticAnalyzer
 {
-    private const int CurrentSchemaVersion = 8;
-    private const string CurrentSemanticVersion = "1.8";
-
     public static SemanticDocument Analyze(string source, string sourceId, string frontendSourceSha256)
     {
         return Analyze(source, sourceId, frontendSourceSha256, Array.Empty<SemanticReferenceSource>());
@@ -34,9 +31,9 @@ public static class SemanticAnalyzer
         if (!sourceSha256.Equals(frontendSourceSha256, StringComparison.OrdinalIgnoreCase))
         {
             return new SemanticDocument(
-                CurrentSchemaVersion,
+                SemanticContract.CurrentSchemaVersion,
                 "csharp",
-                CurrentSemanticVersion,
+                SemanticContract.CurrentSemanticVersion,
                 semanticSource,
                 false,
                 Array.Empty<SemanticType>(),
@@ -104,9 +101,9 @@ public static class SemanticAnalyzer
             gameplayEventProjection.Callbacks);
 
         return new SemanticDocument(
-            CurrentSchemaVersion,
+            SemanticContract.CurrentSchemaVersion,
             "csharp",
-            CurrentSemanticVersion,
+            SemanticContract.CurrentSemanticVersion,
             semanticSource,
             succeeded,
             typeRegistry.Build(),

@@ -16,8 +16,9 @@ internal static class SemanticCallableTests
         GameplayCallbacksAreScopedToTheScriptHost();
         GameplayCallbacksRequireConcreteNonGenericBodies();
         DataLaneMetadataIsProjectedForMethodsAndAccessors();
+        BufferedWriteMetadataRequiresExecutableGeneratedExtern();
         InvalidDataLaneMetadataFailsClosed();
-        return 10;
+        return 11;
     }
 
     private static void DataLaneMetadataIsProjectedForMethodsAndAccessors()
@@ -62,8 +63,60 @@ internal static class SemanticCallableTests
             callable.AssociatedSymbolId is not null
             && callable.ReturnTypeId == "type:void"
             && callable.Parameters.Count == 1);
-        Assert(setter.Optimization == new SemanticCallableOptimization("buffered_write", 9),
-            "accessor data-lane metadata should retain its class and binding ordinal");
+        Assert(setter.HasBody && setter.Import is null && setter.Optimization is null,
+            "user-authored accessor bodies must not publish buffered-write fusion metadata");
+    }
+
+    private static void BufferedWriteMetadataRequiresExecutableGeneratedExtern()
+    {
+        const string source = "namespace Game { public static class Script { public static void Main() { } } }";
+        const string generatedSource = """
+            using System;
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript
+            {
+                [AttributeUsage(AttributeTargets.Method)]
+                internal sealed class AvidScriptDataLaneAttribute : Attribute
+                {
+                    internal AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal) { }
+                }
+
+                public readonly struct Target
+                {
+                    public readonly int Slot;
+                    public readonly int Generation;
+                }
+
+                internal static class Generated
+                {
+                    [AvidScriptDataLane("buffered_write", 23)]
+                    [DllImport("avidscript", EntryPoint = "avid_generated_property_set")]
+                    internal static extern void Set(Target target, int value);
+                }
+            }
+            """;
+        const string sourceId = "Scripts/GeneratedExternMetadata.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            frontend.Source.Sha256,
+            new[]
+            {
+                new SemanticReferenceSource(
+                    generatedSource,
+                    "generated://AvidScript.Bindings.generated.cs",
+                    IsExecutable: true),
+            });
+
+        SemanticCallable generatedSetter = document.Callables.Single(callable =>
+            callable.Import?.Name == "avid_generated_property_set");
+        Assert(document.Succeeded
+            && !generatedSetter.HasBody
+            && generatedSetter.Optimization == new SemanticCallableOptimization("buffered_write", 23),
+            "executable generated extern setters should retain verified buffered-write metadata");
     }
 
     private static void InvalidDataLaneMetadataFailsClosed()

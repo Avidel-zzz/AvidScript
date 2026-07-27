@@ -2203,6 +2203,7 @@ foreach ($RequiredClassReferenceOrdinalContract in @(
     }
 }
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
+$SemanticContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticContract.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
@@ -2374,12 +2375,18 @@ if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Sou
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'SemanticStateContractProjector.Project',
-    'SemanticGameplayEventProjector.Project',
-    'CurrentSchemaVersion = 7',
-    'CurrentSemanticVersion = "1.7"'
+    'SemanticGameplayEventProjector.Project'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
+    }
+}
+foreach ($RequiredSemanticContract in @(
+    'CurrentSchemaVersion = 8',
+    'CurrentSemanticVersion = "1.8"'
+)) {
+    if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
+        Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
     }
 }
 foreach ($RequiredReachabilityProjection in @(

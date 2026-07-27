@@ -41,8 +41,9 @@ internal static class SemanticCallableProjector
                 string methodId = SemanticSymbolProjector.GetSymbolId(method);
                 SemanticCallableImport? import = ProjectImport(method, diagnostics, unit);
                 SemanticCallableExport? export = ProjectExport(method, diagnostics, unit);
+                bool hasBody = bodyIds.Contains(methodId);
                 SemanticCallableOptimization? optimization =
-                    ProjectOptimization(method, diagnostics, unit);
+                    ProjectOptimization(method, import, hasBody, diagnostics, unit);
                 if (export is not null && !exportOwners.TryAdd(export.Name, method))
                 {
                     diagnostics.Add(CreateDiagnostic(
@@ -67,7 +68,7 @@ internal static class SemanticCallableProjector
                         .ToArray(),
                     method.IsStatic,
                     method.MethodKind == MethodKind.Constructor,
-                    bodyIds.Contains(methodId),
+                    hasBody,
                     method.AssociatedSymbol is { } associated
                         ? SemanticSymbolProjector.GetSymbolId(associated)
                         : null,
@@ -185,6 +186,8 @@ internal static class SemanticCallableProjector
 
     private static SemanticCallableOptimization? ProjectOptimization(
         IMethodSymbol method,
+        SemanticCallableImport? import,
+        bool hasBody,
         ICollection<SemanticDiagnostic> diagnostics,
         SemanticCompilationUnit unit)
     {
@@ -223,6 +226,15 @@ internal static class SemanticCallableProjector
                 "and a non-negative ordinal for non-'none' classes.",
                 method,
                 unit));
+            return null;
+        }
+
+        if (optimizationClass == "buffered_write"
+            && (unit.IsPrimary
+                || hasBody
+                || import is null
+                || !string.Equals(import.Module, "avidscript", StringComparison.Ordinal)))
+        {
             return null;
         }
 
