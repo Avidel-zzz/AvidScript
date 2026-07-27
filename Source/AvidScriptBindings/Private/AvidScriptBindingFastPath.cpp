@@ -16,7 +16,7 @@ bool IsTrivialInt32Property(
 	if (Property == nullptr
 		|| !Property->IsA<FIntProperty>()
 		|| Property->ArrayDim != 1
-		|| Property->ElementSize != sizeof(int32)
+		|| Property->GetElementSize() != sizeof(int32)
 		|| !Property->HasAllPropertyFlags(CPF_ZeroConstructor | CPF_NoDestructor))
 	{
 		return false;
