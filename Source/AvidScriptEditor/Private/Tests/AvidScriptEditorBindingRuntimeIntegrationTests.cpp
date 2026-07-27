@@ -4090,4 +4090,241 @@ bool FAvidScriptGeneratedCSharpDiagnosticsTest::RunTest(const FString& Parameter
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeTypedThunkTest,
+	"AvidScript.Editor.BindingRuntime.TypedThunk",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeTypedThunkTest::RunTest(const FString& Parameters)
+{
+	const FString TestClassPath =
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsTestObject");
+	const TArray<FAvidScriptReflectedFunctionSelection> Selections = {
+		{ TestClassPath, TEXT("FastPathAddInt32") },
+		{ TestClassPath, TEXT("FastPathMaxInt32") },
+		{ TestClassPath, TEXT("ReflectionFallbackAddFloat") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("Typed thunk test descriptor generates from three real UFUNCTIONs"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.typed_thunk"),
+			Selections,
+			DescriptorJson,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Typed thunk test descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+		TEXT("Typed thunk test package loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			Package,
+			LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorDetails);
+		return false;
+	}
+
+	const FAvidScriptBindingPackageInstrumentation LoadInstrumentation =
+		Package->GetInstrumentation();
+	TestEqual(
+		TEXT("Two different int32 UFUNCTIONs bind typed thunk plans"),
+		LoadInstrumentation.TypedThunkPlanCount,
+		2ull);
+	TestEqual(
+		TEXT("Unsupported float shape retains one reflection fallback plan"),
+		LoadInstrumentation.ReflectionFallbackPlanCount,
+		1ull);
+
+	const auto FindBinding =
+		[&Descriptor](const TCHAR* FunctionName)
+		{
+			return Descriptor.Bindings.FindByPredicate(
+				[FunctionName](const FAvidScriptBindingFunctionModel& Binding)
+				{
+					return Binding.UeFunction == FunctionName;
+				});
+		};
+	const FAvidScriptBindingFunctionModel* AddBinding =
+		FindBinding(TEXT("FastPathAddInt32"));
+	const FAvidScriptBindingFunctionModel* MaxBinding =
+		FindBinding(TEXT("FastPathMaxInt32"));
+	const FAvidScriptBindingFunctionModel* FloatBinding =
+		FindBinding(TEXT("ReflectionFallbackAddFloat"));
+	if (!TestNotNull(TEXT("Add binding is present"), AddBinding)
+		|| !TestNotNull(TEXT("Max binding is present"), MaxBinding)
+		|| !TestNotNull(TEXT("Float fallback binding is present"), FloatBinding))
+	{
+		return false;
+	}
+
+	EAvidScriptBindingFastPathKind AddFastPath =
+		EAvidScriptBindingFastPathKind::None;
+	EAvidScriptBindingFastPathKind MaxFastPath =
+		EAvidScriptBindingFastPathKind::None;
+	EAvidScriptBindingFastPathKind FloatFastPath =
+		EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
+	TestTrue(
+		TEXT("Add ordinal exposes fast path diagnostics"),
+		Package->TryGetFastPathKind(AddBinding->Ordinal, AddFastPath));
+	TestTrue(
+		TEXT("Max ordinal exposes fast path diagnostics"),
+		Package->TryGetFastPathKind(MaxBinding->Ordinal, MaxFastPath));
+	TestTrue(
+		TEXT("Float ordinal exposes fallback diagnostics"),
+		Package->TryGetFastPathKind(FloatBinding->Ordinal, FloatFastPath));
+	TestEqual(
+		TEXT("Different int32 functions share the same shape thunk"),
+		AddFastPath,
+		MaxFastPath);
+	TestEqual(
+		TEXT("Int32 pair uses the scalar pair thunk"),
+		AddFastPath,
+		EAvidScriptBindingFastPathKind::ScalarI32PairToI32);
+	TestEqual(
+		TEXT("Float shape remains on reflection fallback"),
+		FloatFastPath,
+		EAvidScriptBindingFastPathKind::None);
+
+	UClass* TestClass = LoadObject<UClass>(nullptr, *TestClassPath);
+	if (!TestNotNull(TEXT("Typed thunk test class loads"), TestClass))
+	{
+		return false;
+	}
+	UObject* Target = NewObject<UObject>(GetTransientPackage(), TestClass);
+	if (!TestNotNull(TEXT("Typed thunk test target is created"), Target))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle Handle =
+		Registry.RegisterObject(Target, RegisterResult);
+	if (!TestTrue(TEXT("Typed thunk target registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = Handle;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	FAvidScriptBindingRuntimeTestGuestMemory GuestMemory(128);
+	const auto Dispatch =
+		[&](const uint32 Ordinal, TConstArrayView<uint64> Arguments)
+		{
+			FAvidScriptDynamicHostCall Call;
+			Call.BindingOrdinal = Ordinal;
+			Call.Arguments = Arguments;
+			Call.GuestMemory = &GuestMemory;
+			FAvidScriptDynamicHostCallResult Result;
+			return Package->Dispatch(
+				Call,
+				Context,
+				Scratch,
+				Result);
+		};
+
+	constexpr uint32 AddResultAddress = 64;
+	const uint64 AddArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		AddResultAddress
+	};
+	TestTrue(
+		TEXT("Add executes through the typed thunk"),
+		Dispatch(AddBinding->Ordinal, MakeArrayView(AddArguments)));
+	TestEqual(
+		TEXT("Add typed thunk returns the expected value"),
+		GuestMemory.ReadValue<int32>(AddResultAddress),
+		42);
+
+	constexpr uint32 MaxResultAddress = 68;
+	const uint64 MaxArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		17,
+		29,
+		MaxResultAddress
+	};
+	TestTrue(
+		TEXT("Max executes through the shared typed thunk"),
+		Dispatch(MaxBinding->Ordinal, MakeArrayView(MaxArguments)));
+	TestEqual(
+		TEXT("Max typed thunk returns the expected value"),
+		GuestMemory.ReadValue<int32>(MaxResultAddress),
+		29);
+
+	constexpr uint32 FloatResultAddress = 72;
+	const uint64 FloatArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		MakeAvidScriptBindingRuntimeF32Cell(1.25f),
+		MakeAvidScriptBindingRuntimeF32Cell(2.5f),
+		FloatResultAddress
+	};
+	TestTrue(
+		TEXT("Unsupported float shape executes through reflection fallback"),
+		Dispatch(FloatBinding->Ordinal, MakeArrayView(FloatArguments)));
+	TestEqual(
+		TEXT("Reflection fallback preserves float semantics"),
+		GuestMemory.ReadValue<float>(FloatResultAddress),
+		3.75f);
+
+	constexpr uint32 StaleResultAddress = 76;
+	const int32 StaleSentinel = 0x12345678;
+	GuestMemory.WriteValue(StaleResultAddress, StaleSentinel);
+	const uint64 StaleArguments[] = {
+		Handle.Slot,
+		Handle.Generation + 1,
+		10,
+		20,
+		StaleResultAddress
+	};
+	TestFalse(
+		TEXT("Stale generation is rejected before typed thunk execution"),
+		Dispatch(AddBinding->Ordinal, MakeArrayView(StaleArguments)));
+	TestEqual(
+		TEXT("Rejected stale generation does not write Guest Memory"),
+		GuestMemory.ReadValue<int32>(StaleResultAddress),
+		StaleSentinel);
+
+	const FAvidScriptBindingPackageInstrumentation WarmInstrumentation =
+		Package->GetInstrumentation();
+	TestEqual(
+		TEXT("Warm typed thunk dispatch performs no class loads"),
+		WarmInstrumentation.ClassLoadCount,
+		LoadInstrumentation.ClassLoadCount);
+	TestEqual(
+		TEXT("Warm typed thunk dispatch performs no reflected name lookups"),
+		WarmInstrumentation.ReflectedNameLookupCount,
+		LoadInstrumentation.ReflectedNameLookupCount);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

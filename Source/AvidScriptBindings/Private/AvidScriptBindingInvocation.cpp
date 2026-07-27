@@ -1,5 +1,6 @@
 #include "AvidScriptBindingInvocation.h"
 
+#include "AvidScriptBindingFastPath.h"
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
 #include "AvidScriptObjectFactoryBinding.h"
@@ -79,6 +80,7 @@ struct FAvidScriptRuntimeBindingInvocationPlan
 	int32 ExpectedArgumentCount = 0;
 	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
 	FAvidScriptRuntimeBindingValuePlan ReturnValue;
+	UE::AvidScript::BindingPrivate::FFastPathPlan FastPath;
 };
 
 void SetAvidScriptBindingLoadFailure(
@@ -2572,6 +2574,46 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			return false;
 		}
 
+		TArray<
+			UE::AvidScript::BindingPrivate::FFastPathValueSpec,
+			TInlineAllocator<2>> FastPathParameters;
+		FastPathParameters.Reserve(Plan.Parameters.Num());
+		for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Plan.Parameters)
+		{
+			FastPathParameters.Add({
+				Parameter.Property,
+				Parameter.ArgumentOffset,
+				Parameter.Direction == EAvidScriptRuntimeBindingDirection::Value,
+				Parameter.Kind == EAvidScriptRuntimeBindingKind::Int32
+			});
+		}
+		UE::AvidScript::BindingPrivate::FFastPathBuildSpec FastPathSpec;
+		FastPathSpec.Function = Plan.Function;
+		FastPathSpec.FrameSize = Plan.FrameSize;
+		FastPathSpec.FrameAlignment = Plan.FrameAlignment;
+		FastPathSpec.ExpectedArgumentCount = Plan.ExpectedArgumentCount;
+		FastPathSpec.bStatic = Plan.bStatic;
+		FastPathSpec.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
+		FastPathSpec.bHasReloadEffect =
+			Plan.ReloadEffect != EAvidScriptBindingReloadEffect::None;
+		FastPathSpec.Parameters = FastPathParameters;
+		FastPathSpec.ReturnValue = {
+			Plan.ReturnValue.Property,
+			Plan.ReturnValue.ArgumentOffset,
+			false,
+			Plan.ReturnValue.Kind == EAvidScriptRuntimeBindingKind::Int32
+		};
+		if (UE::AvidScript::BindingPrivate::TryBuildFastPath(
+			FastPathSpec,
+			Plan.FastPath))
+		{
+			++Package->Impl->Instrumentation.TypedThunkPlanCount;
+		}
+		else
+		{
+			++Package->Impl->Instrumentation.ReflectionFallbackPlanCount;
+		}
+
 		Package->Impl->RequiredScratchSize = FMath::Max(
 			Package->Impl->RequiredScratchSize,
 			Plan.RequiredScratchSize);
@@ -2728,6 +2770,19 @@ const FAvidScriptVmBindingPackage& FAvidScriptBindingPackage::GetVmPackage() con
 const FAvidScriptBindingPackageInstrumentation& FAvidScriptBindingPackage::GetInstrumentation() const
 {
 	return Impl->Instrumentation;
+}
+
+bool FAvidScriptBindingPackage::TryGetFastPathKind(
+	const uint32 Ordinal,
+	EAvidScriptBindingFastPathKind& OutKind) const
+{
+	OutKind = EAvidScriptBindingFastPathKind::None;
+	if (!Impl->Plans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	OutKind = Impl->Plans[Ordinal].FastPath.Kind;
+	return true;
 }
 
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const
@@ -3016,6 +3071,38 @@ bool FAvidScriptBindingPackage::Dispatch(
 					Plan.DebugPath,
 					Details);
 			}
+			return false;
+		}
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		return true;
+	}
+
+	if (Plan.FastPath.IsBound())
+	{
+		if (!PrepareHostEffect())
+		{
+			return false;
+		}
+		FString FastPathErrorCategory;
+		FString FastPathErrorDetails;
+		if (!UE::AvidScript::BindingPrivate::DispatchFastPath(
+			Plan.FastPath,
+			*Target,
+			Call,
+			InvocationScratch,
+			FastPathErrorCategory,
+			FastPathErrorDetails))
+		{
+			SetAvidScriptBindingDispatchFailure(
+				OutResult,
+				FastPathErrorCategory.IsEmpty()
+					? FString(TEXT("binding_fast_path_failed"))
+					: FastPathErrorCategory,
+				Plan.DebugPath,
+				FastPathErrorDetails.IsEmpty()
+					? FString(TEXT("The cached typed thunk rejected the invocation."))
+					: FastPathErrorDetails);
 			return false;
 		}
 		OutResult.bSucceeded = true;

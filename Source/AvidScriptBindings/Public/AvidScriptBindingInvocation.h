@@ -13,6 +13,12 @@ class UClass;
 class UWorld;
 class IAvidScriptObjectOwnershipDomain;
 
+enum class EAvidScriptBindingFastPathKind : uint8
+{
+	None,
+	ScalarI32PairToI32
+};
+
 struct FAvidScriptBindingPackageLoadResult
 {
 	bool bSucceeded = false;
@@ -31,6 +37,8 @@ struct FAvidScriptBindingPackageInstrumentation
 {
 	uint64 ClassLoadCount = 0;
 	uint64 ReflectedNameLookupCount = 0;
+	uint64 TypedThunkPlanCount = 0;
+	uint64 ReflectionFallbackPlanCount = 0;
 };
 
 struct FAvidScriptBindingInvocationContext
@@ -61,6 +69,9 @@ public:
 	int32 GetDescriptorSchemaVersion() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
+	bool TryGetFastPathKind(
+		uint32 Ordinal,
+		EAvidScriptBindingFastPathKind& OutKind) const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetObjectTypeCount() const;
 	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;

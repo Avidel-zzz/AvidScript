@@ -9,4 +9,14 @@ UCLASS()
 class UAvidScriptBindingsTestObject : public UObject
 {
     GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
+	int32 FastPathAddInt32(int32 Left, int32 Right) const;
+
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
+	int32 FastPathMaxInt32(int32 Left, int32 Right) const;
+
+	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
+	float ReflectionFallbackAddFloat(float Left, float Right) const;
 };
