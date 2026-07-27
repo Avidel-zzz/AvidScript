@@ -1,8 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorGeneratedBindingService.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildPipeline.h"
 
@@ -1173,4 +1175,156 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest::RunT
 		Schema7LegacyResult.BindingSelectionHash);
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceGeneratedNativePropertyTest,
+	"AvidScript.Editor.CSharpProfileService.GeneratedNativeProperty",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceGeneratedNativePropertyTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(
+			GetAvidScriptCSharpProfileServiceTestRoot(),
+			TEXT("GeneratedNativeProperty")));
+	TestTrue(
+		TEXT("Generated property profile root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("GeneratedNativeProperty.cs")));
+	TestTrue(
+		TEXT("Generated property source can be written"),
+		FFileHelper::SaveStringToFile(
+			MakeAvidScriptCSharpProfileSourceText(),
+			*SourcePath));
+
+	const auto LoadProfile = [this, &TestRoot, &SourcePath](
+		const int32 SchemaVersion,
+		const TCHAR* Suffix,
+		const FString& GeneratedProperties,
+		FAvidScriptEditorCSharpProfileLoadResult& OutResult)
+	{
+		const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(
+			FPaths::Combine(
+				TestRoot,
+				FString::Printf(
+					TEXT("generated_property_v%d_%s.csharp-profile.json"),
+					SchemaVersion,
+					Suffix)));
+		const FString ProfileText = FString::Printf(
+			TEXT("{\n")
+			TEXT("  \"schema_version\": %d,\n")
+			TEXT("  \"language\": \"csharp\",\n")
+			TEXT("  \"source_path\": \"%s\",\n")
+			TEXT("  \"binding_profile\": {\n")
+			TEXT("    \"package_name\": \"avidscript.test.generated_property_profile\",\n")
+			TEXT("    \"classes\": [{\n")
+			TEXT("      \"class_path\": \"/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor\",\n")
+			TEXT("      \"include_properties\": [\"GeneratedPublicInt\"],\n")
+			TEXT("      \"writable_properties\": [\"GeneratedPublicInt\"],\n")
+			TEXT("      \"generated_native_properties\": %s\n")
+			TEXT("    }]\n")
+			TEXT("  }\n")
+			TEXT("}\n"),
+			SchemaVersion,
+			*SourcePath,
+			*GeneratedProperties);
+		TestTrue(
+			TEXT("Generated property profile fixture can be written"),
+			FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+		return FAvidScriptEditorCSharpProfileService::LoadProfile(
+			ProfilePath,
+			OutResult);
+	};
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema6Result;
+	TestFalse(
+		TEXT("Schema v6 rejects generated_native_properties"),
+		LoadProfile(
+			6,
+			TEXT("schema_rejected"),
+			TEXT("[\"GeneratedPublicInt\"]"),
+			Schema6Result));
+	TestEqual(
+		TEXT("Generated property schema rejection category is stable"),
+		Schema6Result.ErrorCategory,
+		FString(TEXT(
+			"binding_profile_generated_native_property_schema_unsupported")));
+
+	FAvidScriptEditorCSharpProfileLoadResult Schema7Result;
+	TestTrue(
+		TEXT("Schema v7 generated property profile resolves"),
+		LoadProfile(
+			7,
+			TEXT("accepted"),
+			TEXT("[\"GeneratedPublicInt\"]"),
+			Schema7Result));
+	if (Schema7Result.ResolvedBindingSelection.Classes.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Generated property authorization reaches resolved selection"),
+			Schema7Result.ResolvedBindingSelection.Classes[0]
+				.GeneratedNativeProperties.Num(),
+			1);
+	}
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	TestTrue(
+		TEXT("Schema v7 profile reaches generated property descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Schema7Result.ResolvedBindingSelection,
+			DescriptorJson,
+			SelectionResult,
+			DescriptorResult));
+	FAvidScriptGeneratedBindingPackageIr GeneratedPackage;
+	FAvidScriptEditorGeneratedBindingResult GeneratedResult;
+	TestTrue(
+		TEXT("Schema v7 profile descriptor reaches generated IR"),
+		FAvidScriptEditorGeneratedBindingService::BuildIr(
+			DescriptorJson,
+			GeneratedPackage,
+			GeneratedResult));
+	const FString ProjectFile =
+		FPaths::Combine(TestRoot, TEXT("GeneratedNativeProperty.uproject"));
+	TestTrue(
+		TEXT("Schema v7 generated property project descriptor is written"),
+		FFileHelper::SaveStringToFile(
+			TEXT("{\"FileVersion\":3,\"Modules\":[]}"),
+			*ProjectFile));
+	TestTrue(
+		TEXT("Schema v7 generated property IR reaches source"),
+		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
+			ProjectFile,
+			GeneratedPackage,
+			GeneratedResult));
+	FString GeneratedSource;
+	TestTrue(
+		TEXT("Schema v7 generated property source is readable"),
+		FFileHelper::LoadFileToString(
+			GeneratedSource,
+			*FPaths::Combine(
+				TestRoot,
+				TEXT("Source/AvidScriptGeneratedBindings/Private/AvidScriptGeneratedBindings.cpp"))));
+	TestTrue(
+		TEXT("Schema v7 generated property source uses direct public member access"),
+		GeneratedSource.Contains(
+			TEXT("TypedReceiver->GeneratedPublicInt")));
+
+	FAvidScriptEditorCSharpProfileLoadResult EmptyResult;
+	TestFalse(
+		TEXT("Generated property empty value fails closed"),
+		LoadProfile(
+			7,
+			TEXT("empty"),
+			TEXT("[\"\"]"),
+			EmptyResult));
+	TestEqual(
+		TEXT("Generated property empty value category is stable"),
+		EmptyResult.ErrorCategory,
+		FString(TEXT("binding_profile_array_value_invalid")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

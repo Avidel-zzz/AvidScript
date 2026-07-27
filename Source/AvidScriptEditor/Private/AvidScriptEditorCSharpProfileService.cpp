@@ -18,6 +18,8 @@ constexpr const TCHAR* AvidScriptNativeDirectAuthorizationSemantics =
 	TEXT("native_direct_functions asserts standard UHT exec-thunk provenance, accepts bypassing inherited/custom ProcessEvent, and must never auto-authorize Engine or third-party functions");
 constexpr const TCHAR* AvidScriptGeneratedNativeAuthorizationSemantics =
 	TEXT("generated_native_functions explicitly authorizes project-owned generated S1 call sites and must remain a selected, non-wildcard function subset");
+constexpr const TCHAR* AvidScriptGeneratedNativePropertyAuthorizationSemantics =
+	TEXT("generated_native_properties explicitly authorizes project-owned generated S1 property access and must remain a selected, non-wildcard include_properties subset without expanding writable_properties");
 
 FString NormalizeAvidScriptCSharpProfilePath(FString Path)
 {
@@ -290,6 +292,32 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 						Category,
 						TEXT("C# binding_profile generated_native_functions must be an array of non-empty strings."),
 						AvidScriptGeneratedNativeAuthorizationSemantics,
+						OutResult);
+					return false;
+				}
+			}
+			if (ClassObject->HasField(TEXT("generated_native_properties")))
+			{
+				if (SchemaVersion != 7)
+				{
+					SetAvidScriptCSharpProfileFailure(
+						TEXT("binding_profile_generated_native_property_schema_unsupported"),
+						TEXT("binding_profile classes generated_native_properties requires C# profile schema_version 7."),
+						AvidScriptGeneratedNativePropertyAuthorizationSemantics,
+						OutResult);
+					return false;
+				}
+				if (!TryGetAvidScriptCSharpProfileNameArray(
+						ClassObject,
+						TEXT("generated_native_properties"),
+						ClassSelection.GeneratedNativeProperties,
+						OutResult))
+				{
+					const FString Category = OutResult.ErrorCategory;
+					SetAvidScriptCSharpProfileFailure(
+						Category,
+						TEXT("C# binding_profile generated_native_properties must be an array of non-empty strings."),
+						AvidScriptGeneratedNativePropertyAuthorizationSemantics,
 						OutResult);
 					return false;
 				}

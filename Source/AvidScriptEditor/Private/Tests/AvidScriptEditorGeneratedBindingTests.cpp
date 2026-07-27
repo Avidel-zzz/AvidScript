@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptHash.h"
 
@@ -214,6 +215,93 @@ bool FAvidScriptEditorGeneratedBindingIdentityAndInputTest::RunTest(
 		TEXT("Traversal rejection category is stable"),
 		Result.ErrorCategory,
 		FString(TEXT("generated_binding_ir_invalid")));
+
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorGeneratedPropertyReachabilityTest,
+	"AvidScript.Editor.GeneratedBindings.PropertyReachability",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.generated.property.reachability");
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath =
+		TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor");
+	Rule.IncludeProperties.Add(TEXT("GeneratedPublicInt"));
+	Rule.WritableProperties.Add(TEXT("GeneratedPublicInt"));
+	Rule.GeneratedNativeProperties.Add(TEXT("GeneratedPublicInt"));
+	Profile.Classes.Add(MoveTemp(Rule));
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	TestTrue(
+		TEXT("Real profile reaches generated property descriptor"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			DescriptorJson,
+			SelectionResult,
+			DescriptorResult));
+
+	FAvidScriptGeneratedBindingPackageIr Package;
+	FAvidScriptEditorGeneratedBindingResult IrResult;
+	TestTrue(
+		TEXT("Generated property descriptor reaches IR"),
+		FAvidScriptEditorGeneratedBindingService::BuildIr(
+			DescriptorJson,
+			Package,
+			IrResult));
+	TestEqual(
+		TEXT("Generated property IR contains getter and setter"),
+		Package.Bindings.Num(),
+		2);
+	for (const FAvidScriptGeneratedBindingIr& Binding : Package.Bindings)
+	{
+		TestEqual(
+			TEXT("IR uses the reflected field token"),
+			Binding.FunctionName,
+			FString(TEXT("GeneratedPublicInt")));
+		TestEqual(
+			TEXT("IR keeps the property shape"),
+			Binding.Shape,
+			EAvidScriptGeneratedBindingShape::PropertyI32GetSet);
+	}
+
+	const FString TestRoot = FPaths::ProjectSavedDir()
+		/ TEXT("AvidScriptTests")
+		/ (TEXT("GeneratedProperty-")
+			+ FGuid::NewGuid().ToString(EGuidFormats::Digits));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	const FString ProjectFile = TestRoot / TEXT("GeneratedProperty.uproject");
+	TestTrue(
+		TEXT("Generated property temporary project is written"),
+		FFileHelper::SaveStringToFile(
+			TEXT("{\"FileVersion\":3,\"Modules\":[]}"),
+			*ProjectFile));
+	FAvidScriptEditorGeneratedBindingResult EmitResult;
+	TestTrue(
+		TEXT("Generated property IR reaches project source"),
+		FAvidScriptEditorGeneratedBindingService::EmitProjectModule(
+			ProjectFile,
+			Package,
+			EmitResult));
+	FString GeneratedSource;
+	TestTrue(
+		TEXT("Generated property source is readable"),
+		FFileHelper::LoadFileToString(
+			GeneratedSource,
+			*(TestRoot
+				/ TEXT("Source/AvidScriptGeneratedBindings/Private/AvidScriptGeneratedBindings.cpp"))));
+	TestTrue(
+		TEXT("Generated source directly accesses the public member"),
+		GeneratedSource.Contains(
+			TEXT("TypedReceiver->GeneratedPublicInt")));
 
 	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
 	return true;

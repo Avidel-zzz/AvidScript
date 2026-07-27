@@ -103,6 +103,24 @@ class AAvidScriptBindingRuntimeProcessEventTestActor : public AActor
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript")
+	int32 GeneratedPublicInt = 0;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript")
+	float GeneratedPublicFloat = 0.0f;
+
+	UFUNCTION(BlueprintSetter)
+	void SetGeneratedSetterInt(int32 Value)
+	{
+		GeneratedSetterInt = Value;
+	}
+
+	UPROPERTY(
+		BlueprintReadWrite,
+		BlueprintSetter = SetGeneratedSetterInt,
+		Category = "AvidScript")
+	int32 GeneratedSetterInt = 0;
+
 	UFUNCTION(BlueprintSetter)
 	void SetRoutedValue(float Value)
 	{
@@ -127,4 +145,11 @@ public:
 
 	int32 ProcessEventCallCount = 0;
 	int32 BlueprintSetterCallCount = 0;
+
+private:
+	UPROPERTY(
+		BlueprintReadOnly,
+		Category = "AvidScript",
+		meta = (AllowPrivateAccess = "true"))
+	int32 GeneratedPrivateInt = 0;
 };

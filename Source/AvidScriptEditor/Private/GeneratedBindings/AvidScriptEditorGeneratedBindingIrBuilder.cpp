@@ -1,7 +1,9 @@
 #include "GeneratedBindings/AvidScriptEditorGeneratedBindingIrBuilder.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
@@ -142,19 +144,16 @@ bool FAvidScriptEditorGeneratedBindingIrBuilder::Build(
 		}
 
 		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Binding.OwnerClass);
-		UFunction* Function = OwnerClass == nullptr
-			? nullptr
-			: OwnerClass->FindFunctionByName(*Binding.UeMember);
-		if (OwnerClass == nullptr || Function == nullptr
-			|| Function->GetOwnerClass() != OwnerClass)
+		if (OwnerClass == nullptr)
 		{
 			SetIrFailure(
 				OutResult,
-				TEXT("generated_owner_or_function_missing"),
+				TEXT("generated_owner_missing"),
 				Binding.OwnerClass + TEXT(".") + Binding.UeMember);
 			return false;
 		}
-		if (OwnerClass->HasAnyClassFlags(
+		if (!OwnerClass->HasAnyClassFlags(CLASS_Native)
+			|| OwnerClass->HasAnyClassFlags(
 				CLASS_CompiledFromBlueprint | CLASS_Interface))
 		{
 			SetIrFailure(
@@ -164,6 +163,80 @@ bool FAvidScriptEditorGeneratedBindingIrBuilder::Build(
 			return false;
 		}
 
+		const bool bPropertyBinding =
+			Binding.BindingKind == TEXT("property_get")
+			|| Binding.BindingKind == TEXT("property_set");
+		if (bPropertyBinding)
+		{
+			FProperty* Property =
+				FindFProperty<FProperty>(OwnerClass, *Binding.UeMember);
+			FString PropertyCategory;
+			FString PropertySource;
+			if (Property == nullptr
+				|| Property->GetOwnerStruct() != OwnerClass)
+			{
+				SetIrFailure(
+					OutResult,
+					TEXT("generated_property_missing"),
+					Binding.OwnerClass + TEXT(".") + Binding.UeMember);
+				return false;
+			}
+			if (Binding.GeneratedShape != TEXT("property_i32_get_set")
+				|| Binding.GeneratedReceiverMode != TEXT("self_bound")
+				|| Binding.HostImport.Signature != TEXT("(iii)i")
+				|| !Property->IsA<FIntProperty>()
+				|| !Property->HasAnyPropertyFlags(
+					CPF_NativeAccessSpecifierPublic)
+				|| Property->HasMetaData(TEXT("BlueprintGetter"))
+				|| Property->HasMetaData(TEXT("BlueprintSetter"))
+				|| !FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable(
+					Property,
+					PropertyCategory,
+					PropertySource))
+			{
+				SetIrFailure(
+					OutResult,
+					TEXT("generated_property_unsupported"),
+					Binding.OwnerClass + TEXT(".") + Binding.UeMember);
+				return false;
+			}
+			if (Binding.BindingKind == TEXT("property_set"))
+			{
+				FString DispatchMode;
+				FString WritePolicy;
+				if (!FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
+						Property,
+						DispatchMode,
+						WritePolicy,
+						PropertyCategory,
+						PropertySource)
+					|| DispatchMode != TEXT("cached_property_set")
+					|| WritePolicy != TEXT("direct"))
+				{
+					SetIrFailure(
+						OutResult,
+						TEXT("generated_property_write_unsupported"),
+						Binding.OwnerClass + TEXT(".") + Binding.UeMember);
+					return false;
+				}
+			}
+		}
+		else
+		{
+			UFunction* Function =
+				OwnerClass->FindFunctionByName(*Binding.UeMember);
+			if (Binding.BindingKind != TEXT("function")
+				|| Function == nullptr
+				|| Function->GetOwnerClass() != OwnerClass)
+			{
+				SetIrFailure(
+					OutResult,
+					TEXT("generated_function_missing"),
+					Binding.OwnerClass + TEXT(".") + Binding.UeMember);
+				return false;
+			}
+		}
+
 		FAvidScriptGeneratedBindingIr Ir;
 		Ir.StableId = Binding.StableId;
 		Ir.OwnerModule = OwnerClass->GetOutermost()->GetName();
@@ -171,7 +244,7 @@ bool FAvidScriptEditorGeneratedBindingIrBuilder::Build(
 		Ir.OwnerHeader = OwnerClass->GetMetaData(TEXT("ModuleRelativePath"));
 		Ir.OwnerCppType =
 			FString(OwnerClass->GetPrefixCPP()) + OwnerClass->GetName();
-		Ir.FunctionName = Function->GetName();
+		Ir.FunctionName = Binding.UeMember;
 		Ir.ImportModule = Binding.HostImport.Module;
 		Ir.ImportName = Binding.GeneratedImportName;
 		Ir.AbiSignature = Binding.HostImport.Signature;

@@ -347,6 +347,33 @@ bool ParseAvidScriptBindingFunction(
 	{
 		OutBinding.WritePolicy = TEXT("none");
 	}
+	if (SchemaVersion >= 8
+		&& OutBinding.DispatchMode == TEXT("generated_native_s1"))
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_shape"),
+				OutBinding.GeneratedShape,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_receiver_mode"),
+				OutBinding.GeneratedReceiverMode,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("generated_import_name"),
+				OutBinding.GeneratedImportName,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredInt(
+				Object,
+				TEXT("semantic_fallback_ordinal"),
+				OutBinding.SemanticFallbackOrdinal,
+				OutErrorSource))
+		{
+			return false;
+		}
+	}
 
 	if (SchemaVersion == 2)
 	{
@@ -992,32 +1019,6 @@ FString FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 	{
 		return BaseCanonicalIdentity;
 	}
-	if (OutBinding.DispatchMode == TEXT("generated_native_s1"))
-	{
-		if (!ReadAvidScriptBindingRequiredString(
-				Object,
-				TEXT("generated_shape"),
-				OutBinding.GeneratedShape,
-				OutErrorSource)
-			|| !ReadAvidScriptBindingRequiredString(
-				Object,
-				TEXT("generated_receiver_mode"),
-				OutBinding.GeneratedReceiverMode,
-				OutErrorSource)
-			|| !ReadAvidScriptBindingRequiredString(
-				Object,
-				TEXT("generated_import_name"),
-				OutBinding.GeneratedImportName,
-				OutErrorSource)
-			|| !ReadAvidScriptBindingRequiredInt(
-				Object,
-				TEXT("semantic_fallback_ordinal"),
-				OutBinding.SemanticFallbackOrdinal,
-				OutErrorSource))
-		{
-			return false;
-		}
-	}
 	FString Identity = BaseCanonicalIdentity + TEXT("::dispatch:") + DispatchMode;
 	if (DispatchMode == TEXT("generated_native_s1"))
 	{
@@ -1064,8 +1065,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 			? Binding.OwnerClass + TEXT(".") + Binding.UeMember
 			: Binding.BindingKind + TEXT(":") + Binding.OwnerClass + TEXT(".") + Binding.UeMember;
 		if (Package.SchemaVersion >= 8
-			&& Binding.BindingKind == TEXT("function")
-			&& Binding.DispatchMode != TEXT("cached_process_event"))
+			&& ((Binding.BindingKind == TEXT("function")
+					&& Binding.DispatchMode != TEXT("cached_process_event"))
+				|| Binding.DispatchMode == TEXT("generated_native_s1")))
 		{
 			Key += TEXT("|dispatch=") + Binding.DispatchMode;
 			if (Binding.DispatchMode == TEXT("generated_native_s1"))
@@ -1588,6 +1590,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				Binding,
 				OutErrorSource);
 		FString ExpectedGeneratedImport;
+		FString GeneratedSemanticIdentity;
 		if (bParsedBinding
 			&& Binding.DispatchMode == TEXT("generated_native_s1"))
 		{
@@ -1603,15 +1606,31 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					GeneratedSuffix,
 					ESearchCase::CaseSensitive))
 			{
-				const FString SemanticIdentity =
+				GeneratedSemanticIdentity =
 					Binding.CanonicalIdentity.LeftChop(
 						GeneratedSuffix.Len());
 				ExpectedGeneratedImport =
 					TEXT("avid_s1_")
 					+ FAvidScriptHash::Sha256HexUtf8(
-						SemanticIdentity).Left(16);
+						GeneratedSemanticIdentity).Left(16);
 			}
 		}
+		const bool bGeneratedProperty =
+			Binding.DispatchMode == TEXT("generated_native_s1")
+			&& Binding.GeneratedShape == TEXT("property_i32_get_set")
+			&& Binding.GeneratedReceiverMode == TEXT("self_bound");
+		const FString ExpectedPropertyGetIdentity =
+			Binding.OwnerClass
+			+ TEXT("::property_get:") + Binding.UeMember
+			+ TEXT("(") + Binding.ReturnValue.CanonicalType + TEXT(")");
+		const FString ExpectedPropertySetIdentity =
+			FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
+				Binding.OwnerClass,
+				Binding.UeMember,
+				Binding.Parameters.Num() == 1
+					? Binding.Parameters[0].CanonicalType
+					: FString(),
+				Binding.UeFunction);
 		if (!bParsedBinding
 			|| Binding.Ordinal != Index
 			|| (Binding.BindingKind == TEXT("function")
@@ -1624,8 +1643,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 							FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 								FString(),
 								TEXT("qualified_native_direct")),
-							ESearchCase::CaseSensitive))))
-			|| (Binding.BindingKind == TEXT("property_get") && Binding.DispatchMode != TEXT("cached_property_get"))
+							ESearchCase::CaseSensitive))
+					|| bGeneratedProperty))
+			|| (Binding.BindingKind == TEXT("property_get")
+				&& Binding.DispatchMode != TEXT("cached_property_get")
+				&& !bGeneratedProperty)
 			|| (Binding.BindingKind == TEXT("property_get")
 				&& (Binding.bStatic
 					|| !Binding.bConst
@@ -1633,7 +1655,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					|| Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None
 					|| !Binding.Parameters.IsEmpty()
 					|| Binding.ReturnValue.CanonicalType == TEXT("void")
-					|| Binding.HostImport.Signature != TEXT("(iii)i")))
+					|| Binding.HostImport.Signature != TEXT("(iii)i")
+					|| (bGeneratedProperty
+						&& (Binding.ReturnValue.CanonicalType != TEXT("scalar:i32")
+							|| GeneratedSemanticIdentity
+								!= ExpectedPropertyGetIdentity))))
 			|| (Binding.BindingKind == TEXT("property_set")
 				&& (Binding.bStatic
 					|| Binding.bConst
@@ -1646,13 +1672,17 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 							|| !Binding.UeFunction.IsEmpty())
 						&& (Binding.DispatchMode != TEXT("cached_blueprint_setter")
 							|| Binding.WritePolicy != TEXT("blueprint_setter")
-							|| Binding.UeFunction.IsEmpty()))
-					|| Binding.CanonicalIdentity
-						!= FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
-							Binding.OwnerClass,
-							Binding.UeMember,
-							Binding.Parameters[0].CanonicalType,
-							Binding.UeFunction)))
+							|| Binding.UeFunction.IsEmpty())
+						&& (!bGeneratedProperty
+							|| Binding.WritePolicy != TEXT("direct")
+							|| !Binding.UeFunction.IsEmpty()))
+					|| (bGeneratedProperty
+						? (Binding.Parameters[0].CanonicalType
+								!= TEXT("scalar:i32")
+							|| GeneratedSemanticIdentity
+								!= ExpectedPropertySetIdentity)
+						: Binding.CanonicalIdentity
+							!= ExpectedPropertySetIdentity)))
 			|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(Binding.CanonicalIdentity)
 			|| Binding.HostImport.Module != TEXT("avidscript")
 			|| (Binding.DispatchMode == TEXT("generated_native_s1")

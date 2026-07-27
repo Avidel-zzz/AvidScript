@@ -25,6 +25,7 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> IncludeProperties;
 	TArray<FName> ExcludeProperties;
 	TArray<FName> WritableProperties;
+	TArray<FName> GeneratedNativeProperties;
 	bool bDiscoverReadableProperties = false;
 };
 

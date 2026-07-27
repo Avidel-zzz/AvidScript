@@ -185,6 +185,46 @@ bool ResolveGeneratedFunctionShape(
 	return false;
 }
 
+bool ResolveGeneratedPropertyShape(
+	const UClass* OwnerClass,
+	const FProperty* Property,
+	FString& OutCategory)
+{
+	OutCategory.Reset();
+	if (!OwnerClass->HasAnyClassFlags(CLASS_Native)
+		|| OwnerClass->HasAnyClassFlags(
+			CLASS_CompiledFromBlueprint | CLASS_Interface))
+	{
+		OutCategory = TEXT("generated_native_property_owner_unsupported");
+		return false;
+	}
+	if (!Property->IsA<FIntProperty>())
+	{
+		OutCategory = TEXT("generated_native_property_type_unsupported");
+		return false;
+	}
+	if (!Property->HasAnyPropertyFlags(CPF_NativeAccessSpecifierPublic))
+	{
+		OutCategory = TEXT("generated_native_property_not_public");
+		return false;
+	}
+	if (Property->HasMetaData(TEXT("BlueprintGetter"))
+		|| Property->HasMetaData(TEXT("BlueprintSetter")))
+	{
+		OutCategory = TEXT("generated_native_property_accessor_unsupported");
+		return false;
+	}
+	const FString OwnerModule = OwnerClass->GetOutermost()->GetName()
+		.Replace(TEXT("/Script/"), TEXT(""));
+	if (OwnerModule.IsEmpty()
+		|| OwnerClass->GetMetaData(TEXT("ModuleRelativePath")).IsEmpty())
+	{
+		OutCategory = TEXT("generated_native_owner_identity_missing");
+		return false;
+	}
+	return true;
+}
+
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
 	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
@@ -304,6 +344,7 @@ bool GenerateBindingDescriptor(
 	const TArray<FAvidScriptReflectedFunctionSelection>& FunctionSelections,
 	const TSet<FString>& NativeDirectFunctionKeys,
 	const TSet<FString>& GeneratedNativeFunctionKeys,
+	const TSet<FString>& GeneratedNativePropertyKeys,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
@@ -531,7 +572,27 @@ bool GenerateBindingDescriptor(
 		Binding.Property = Property;
 		Binding.BindingKind = TEXT("property_get");
 		Binding.UeMember = Property->GetName();
-		Binding.DispatchMode = TEXT("cached_property_get");
+		const bool bGeneratedNative =
+			GeneratedNativePropertyKeys.Contains(SelectionKey);
+		if (bGeneratedNative)
+		{
+			FString EligibilityCategory;
+			if (!ResolveGeneratedPropertyShape(
+					OwnerClass,
+					Property,
+					EligibilityCategory))
+			{
+				SetFailure(
+					OutResult,
+					EligibilityCategory,
+					SelectionKey,
+					TEXT("Select a public native int32 property without Blueprint accessors."));
+				return false;
+			}
+		}
+		Binding.DispatchMode = bGeneratedNative
+			? FString(TEXT("generated_native_s1"))
+			: FString(TEXT("cached_property_get"));
 		FString ProjectionErrorSource;
 		if (!FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 			Property,
@@ -544,11 +605,33 @@ bool GenerateBindingDescriptor(
 		FinalizeType(Binding.Projection.ReturnValue.Type);
 		Binding.Projection.AbiSignature = TEXT("(iii)i");
 		Binding.ScriptName = Property->GetAuthoredName();
-		Binding.CanonicalIdentity = OwnerClass->GetPathName()
+		const FString SemanticCanonicalIdentity = OwnerClass->GetPathName()
 			+ TEXT("::property_get:") + Property->GetName()
 			+ TEXT("(") + Binding.Projection.ReturnValue.Type.CanonicalType + TEXT(")");
+		if (bGeneratedNative)
+		{
+			Binding.GeneratedShape = TEXT("property_i32_get_set");
+			Binding.GeneratedReceiverMode = TEXT("self_bound");
+			Binding.ImportName =
+				TEXT("avid_s1_")
+				+ HashSha256(SemanticCanonicalIdentity).Left(16);
+			Binding.CanonicalIdentity =
+				FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+					SemanticCanonicalIdentity,
+					Binding.DispatchMode,
+					Binding.GeneratedShape,
+					Binding.GeneratedReceiverMode,
+					Binding.ImportName);
+		}
+		else
+		{
+			Binding.CanonicalIdentity = SemanticCanonicalIdentity;
+		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
-		Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		if (!bGeneratedNative)
+		{
+			Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
+		}
 		Binding.ReloadEffect = EAvidScriptBindingReloadEffect::None;
 
 		if (Selection.bWritable)
@@ -597,15 +680,50 @@ bool GenerateBindingDescriptor(
 					TEXT(""))
 				+ TEXT(")i");
 			SetterBinding.ScriptName = Property->GetAuthoredName();
-			SetterBinding.CanonicalIdentity =
+			const FString SetterSemanticCanonicalIdentity =
 				FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
 					OwnerClass->GetPathName(),
 					Property->GetName(),
 					SetterBinding.Projection.Parameters[0].Type.CanonicalType,
 					SetterBinding.UeFunction);
+			if (bGeneratedNative)
+			{
+				if (SetterBinding.DispatchMode != TEXT("cached_property_set")
+					|| SetterBinding.WritePolicy != TEXT("direct")
+					|| !SetterBinding.UeFunction.IsEmpty())
+				{
+					SetFailure(
+						OutResult,
+						TEXT("generated_native_property_write_policy_unsupported"),
+						SelectionKey,
+						TEXT("Keep generated property setters on the direct write policy."));
+					return false;
+				}
+				SetterBinding.DispatchMode = TEXT("generated_native_s1");
+				SetterBinding.GeneratedShape = TEXT("property_i32_get_set");
+				SetterBinding.GeneratedReceiverMode = TEXT("self_bound");
+				SetterBinding.ImportName =
+					TEXT("avid_s1_")
+					+ HashSha256(SetterSemanticCanonicalIdentity).Left(16);
+				SetterBinding.CanonicalIdentity =
+					FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
+						SetterSemanticCanonicalIdentity,
+						SetterBinding.DispatchMode,
+						SetterBinding.GeneratedShape,
+						SetterBinding.GeneratedReceiverMode,
+						SetterBinding.ImportName);
+			}
+			else
+			{
+				SetterBinding.CanonicalIdentity =
+					SetterSemanticCanonicalIdentity;
+			}
 			SetterBinding.StableId = HashSha256(SetterBinding.CanonicalIdentity);
-			SetterBinding.ImportName = TEXT("avid_ue_")
-				+ SetterBinding.StableId.Left(16);
+			if (!bGeneratedNative)
+			{
+				SetterBinding.ImportName = TEXT("avid_ue_")
+					+ SetterBinding.StableId.Left(16);
+			}
 			SetterBinding.ReloadEffect =
 				EAvidScriptBindingReloadEffect::ReflectedProperty;
 			Bindings.Add(MoveTemp(SetterBinding));
@@ -663,19 +781,18 @@ bool GenerateBindingDescriptor(
 			return Binding.BindingKind == TEXT("function")
 				&& Binding.DispatchMode == TEXT("qualified_native_direct");
 		});
-	const bool bHasGeneratedNativeFunctions = Bindings.ContainsByPredicate(
+	const bool bHasGeneratedNativeBindings = Bindings.ContainsByPredicate(
 		[](const FResolvedBindingDescriptor& Binding)
 		{
-			return Binding.BindingKind == TEXT("function")
-				&& Binding.DispatchMode == TEXT("generated_native_s1");
+			return Binding.DispatchMode == TEXT("generated_native_s1");
 		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
-			|| bHasGeneratedNativeFunctions
+			|| bHasGeneratedNativeBindings
 		? 8
 		: ObjectFactories.IsEmpty()
 			? 6
 			: 7;
-	Package.GeneratorVersion = bHasGeneratedNativeFunctions
+	Package.GeneratorVersion = bHasGeneratedNativeBindings
 		? GeneratedNativeGeneratorVersion
 		: bHasNativeDirectFunctions
 		? NativeDirectGeneratorVersion
@@ -1094,6 +1211,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
 		FunctionSelections,
 		{},
 		{},
+		{},
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,
@@ -1212,6 +1330,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 	OutSelectionResult.bSucceeded = true;
 	TSet<FString> NativeDirectFunctionKeys;
 	TSet<FString> GeneratedNativeFunctionKeys;
+	TSet<FString> GeneratedNativePropertyKeys;
 	for (const FAvidScriptReflectedClassSelection& Rule : Profile.Classes)
 	{
 		for (const FName FunctionName : Rule.NativeDirectFunctions)
@@ -1223,6 +1342,12 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		{
 			GeneratedNativeFunctionKeys.Add(
 				MakeSelectionKey({ Rule.OwnerClassPath, FunctionName }));
+		}
+		for (const FName PropertyName : Rule.GeneratedNativeProperties)
+		{
+			GeneratedNativePropertyKeys.Add(
+				MakeDescriptorPropertySelectionKey(
+					{ Rule.OwnerClassPath, PropertyName, false }));
 		}
 	}
 	UClass* SelfClass = nullptr;
@@ -1246,6 +1371,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		FunctionSelections,
 		NativeDirectFunctionKeys,
 		GeneratedNativeFunctionKeys,
+		GeneratedNativePropertyKeys,
 		PropertySelections,
 		ClassReferences,
 		ObjectFactories,

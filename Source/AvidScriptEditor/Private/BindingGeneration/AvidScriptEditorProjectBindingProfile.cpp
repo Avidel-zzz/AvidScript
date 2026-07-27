@@ -127,7 +127,8 @@ bool NormalizeClassRule(
 		|| !NormalizeNames(Rule.GeneratedNativeFunctions, Rule.OwnerClassPath, TEXT("generated_native_functions"), OutResult)
 		|| !NormalizeNames(Rule.IncludeProperties, Rule.OwnerClassPath, TEXT("include_properties"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult)
-		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult))
+		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult)
+		|| !NormalizeNames(Rule.GeneratedNativeProperties, Rule.OwnerClassPath, TEXT("generated_native_properties"), OutResult))
 	{
 		return false;
 	}
@@ -195,6 +196,28 @@ bool NormalizeClassRule(
 				TEXT("member_filter_conflict"),
 				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
 				TEXT("Remove writable properties from the property exclude filter."));
+			return false;
+		}
+	}
+	for (const FName Name : Rule.GeneratedNativeProperties)
+	{
+		if (Name.ToString().Contains(TEXT("*"))
+			|| Name.ToString().Contains(TEXT("?")))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("generated_native_property_wildcard_unsupported"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Select each generated native property by exact reflected name."));
+			return false;
+		}
+		if (!Rule.IncludeProperties.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("generated_native_property_not_selected"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Add generated native properties to include_properties before granting S1 generation."));
 			return false;
 		}
 	}
@@ -319,6 +342,7 @@ void AppendRuleIdentity(
 	const bool bIncludeWritableProperties,
 	const bool bIncludeNativeDirectFunctions,
 	const bool bIncludeGeneratedNativeFunctions,
+	const bool bIncludeGeneratedNativeProperties,
 	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
@@ -348,6 +372,10 @@ void AppendRuleIdentity(
 	if (bIncludeGeneratedNativeFunctions)
 	{
 		Identity += TEXT("|gnf=") + JoinNames(Rule.GeneratedNativeFunctions);
+	}
+	if (bIncludeGeneratedNativeProperties)
+	{
+		Identity += TEXT("|gnp=") + JoinNames(Rule.GeneratedNativeProperties);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -870,9 +898,14 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		{
 			return !Rule.GeneratedNativeFunctions.IsEmpty();
 		});
+	const bool bHasGeneratedNativeProperties = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.GeneratedNativeProperties.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(bHasGeneratedNativeFunctions
+		+ FString(bHasGeneratedNativeFunctions || bHasGeneratedNativeProperties
 			? GeneratedNativeProfileResolverVersion
 			: bHasNativeDirectFunctions
 			? NativeDirectProfileResolverVersion
@@ -897,6 +930,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			bHasWritableProperties,
 			bHasNativeDirectFunctions,
 			bHasGeneratedNativeFunctions,
+			bHasGeneratedNativeProperties,
 			Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)

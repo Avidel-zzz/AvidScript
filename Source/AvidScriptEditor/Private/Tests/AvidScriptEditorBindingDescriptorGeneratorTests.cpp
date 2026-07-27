@@ -380,6 +380,185 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativeTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest,
+	"AvidScript.Editor.BindingDescriptor.GeneratedNativePropertyS1",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		TEXT("/Script/AvidScriptEditor.AvidScriptBindingRuntimeProcessEventTestActor");
+	const auto MakeProfile = [&OwnerPath](
+		const FName PropertyName,
+		const bool bWritable)
+	{
+		FAvidScriptBindingSelectionProfile Profile;
+		Profile.PackageName = TEXT("avidscript.generated.property.descriptor");
+		FAvidScriptReflectedClassSelection Rule;
+		Rule.OwnerClassPath = OwnerPath;
+		Rule.IncludeProperties.Add(PropertyName);
+		Rule.GeneratedNativeProperties.Add(PropertyName);
+		if (bWritable)
+		{
+			Rule.WritableProperties.Add(PropertyName);
+		}
+		Profile.Classes.Add(MoveTemp(Rule));
+		return Profile;
+	};
+	const auto Generate = [](
+		const FAvidScriptBindingSelectionProfile& Profile,
+		FString& OutJson,
+		FAvidScriptBindingDescriptorGenerateResult& OutResult)
+	{
+		FAvidScriptBindingSelectionResolveResult SelectionResult;
+		return FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			OutJson,
+			SelectionResult,
+			OutResult);
+	};
+
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	TestTrue(
+		TEXT("Public writable int32 property generates S1 getter and setter"),
+		Generate(
+			MakeProfile(TEXT("GeneratedPublicInt"), true),
+			DescriptorJson,
+			GenerateResult));
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Generated property descriptor satisfies parser contract"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(
+		TEXT("Generated writable property retains separate ordinals"),
+		Package.Bindings.Num(),
+		2);
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		TestEqual(
+			TEXT("Property dispatch uses generated S1"),
+			Binding.DispatchMode,
+			FString(TEXT("generated_native_s1")));
+		TestEqual(
+			TEXT("Property shape is explicit"),
+			Binding.GeneratedShape,
+			FString(TEXT("property_i32_get_set")));
+		TestEqual(
+			TEXT("Property receiver is self-bound"),
+			Binding.GeneratedReceiverMode,
+			FString(TEXT("self_bound")));
+		TestEqual(
+			TEXT("Property ABI remains facade-compatible"),
+			Binding.HostImport.Signature,
+			FString(TEXT("(iii)i")));
+		TestEqual(
+			TEXT("Semantic fallback retains the binding ordinal"),
+			Binding.SemanticFallbackOrdinal,
+			Binding.Ordinal);
+	}
+	if (Package.Bindings.Num() == 2)
+	{
+		TestNotEqual(
+			TEXT("Getter and setter retain separate stable ids"),
+			Package.Bindings[0].StableId,
+			Package.Bindings[1].StableId);
+		TestNotEqual(
+			TEXT("Getter and setter retain separate imports"),
+			Package.Bindings[0].GeneratedImportName,
+			Package.Bindings[1].GeneratedImportName);
+	}
+
+	FString GetterOnlyJson;
+	FAvidScriptBindingDescriptorGenerateResult GetterOnlyResult;
+	TestTrue(
+		TEXT("Generated authorization without writable authorization emits only a getter"),
+		Generate(
+			MakeProfile(TEXT("GeneratedPublicInt"), false),
+			GetterOnlyJson,
+			GetterOnlyResult));
+	TestTrue(
+		TEXT("Generated getter-only descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			GetterOnlyJson,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	if (TestEqual(
+		TEXT("Generated authorization does not expand write capability"),
+		Package.Bindings.Num(),
+		1))
+	{
+		TestEqual(
+			TEXT("The sole generated property binding is a getter"),
+			Package.Bindings[0].BindingKind,
+			FString(TEXT("property_get")));
+	}
+
+	FAvidScriptBindingSelectionProfile SemanticProfile =
+		MakeProfile(TEXT("GeneratedPublicInt"), true);
+	SemanticProfile.Classes[0].GeneratedNativeProperties.Empty();
+	FString SemanticJson;
+	FAvidScriptBindingDescriptorGenerateResult SemanticResult;
+	TestTrue(
+		TEXT("Semantic property baseline still generates"),
+		Generate(SemanticProfile, SemanticJson, SemanticResult));
+	TestNotEqual(
+		TEXT("Generated property authorization changes package hash"),
+		GenerateResult.PackageHash,
+		SemanticResult.PackageHash);
+
+	FString TamperedJson = DescriptorJson;
+	TamperedJson.ReplaceInline(
+		TEXT("\"generated_shape\":\"property_i32_get_set\""),
+		TEXT("\"generated_shape\":\"vector_value\""),
+		ESearchCase::CaseSensitive);
+	TestFalse(
+		TEXT("Generated property shape tamper fails closed"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			TamperedJson,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+
+	const struct
+	{
+		FName PropertyName;
+		bool bWritable;
+		const TCHAR* ExpectedCategory;
+	} Rejections[] = {
+		{ TEXT("GeneratedPrivateInt"), false, TEXT("generated_native_property_not_public") },
+		{ TEXT("GeneratedPublicFloat"), false, TEXT("generated_native_property_type_unsupported") },
+		{ TEXT("GeneratedSetterInt"), true, TEXT("generated_native_property_accessor_unsupported") }
+	};
+	for (const auto& Rejection : Rejections)
+	{
+		FAvidScriptBindingDescriptorGenerateResult RejectedResult;
+		TestFalse(
+			*FString::Printf(
+				TEXT("%s generated property is rejected"),
+				*Rejection.PropertyName.ToString()),
+			Generate(
+				MakeProfile(Rejection.PropertyName, Rejection.bWritable),
+				DescriptorJson,
+				RejectedResult));
+		TestEqual(
+			TEXT("Generated property rejection category is stable"),
+			RejectedResult.ErrorCategory,
+			FString(Rejection.ExpectedCategory));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest,
 	"AvidScript.Editor.BindingDescriptor.V7CanonicalSerializer",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

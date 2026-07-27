@@ -994,4 +994,71 @@ bool FAvidScriptEditorProjectBindingProfileNativeDirectIdentityTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorProjectBindingGeneratedNativePropertyProfileTest,
+	"AvidScript.Editor.ProjectBindingProfile.GeneratedNativePropertyAuthorization",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorProjectBindingGeneratedNativePropertyProfileTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptProjectBindingProfileSpec Spec;
+	Spec.PackageName = TEXT("avidscript.project.generated_property_profile");
+	Spec.ModulePaths.Add(TEXT("/Script/Engine"));
+	FAvidScriptReflectedClassSelection Rule;
+	Rule.OwnerClassPath = TEXT("/Script/Engine.Actor");
+	Rule.GeneratedNativeProperties.Add(TEXT("CustomTimeDilation"));
+	Spec.Classes.Add(Rule);
+
+	FAvidScriptBindingSelectionProfile Selection;
+	TArray<FAvidScriptProjectBindingClassSpec> ClassReferences;
+	FString SelectionHash;
+	FAvidScriptBindingSelectionResolveResult Result;
+	TestFalse(
+		TEXT("Generated property grant must be an include_properties subset"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Generated property subset failure category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("generated_native_property_not_selected")));
+
+	Spec.Classes[0].IncludeProperties.Add(TEXT("CustomTimeDilation"));
+	Spec.Classes[0].GeneratedNativeProperties[0] = TEXT("*");
+	TestFalse(
+		TEXT("Generated property wildcard fails closed"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Generated property wildcard category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("generated_native_property_wildcard_unsupported")));
+
+	Spec.Classes[0].GeneratedNativeProperties = {
+		TEXT("CustomTimeDilation"),
+		TEXT("CustomTimeDilation")
+	};
+	TestFalse(
+		TEXT("Duplicate generated properties fail closed"),
+		FAvidScriptEditorProjectBindingProfile::Resolve(
+			Spec,
+			Selection,
+			ClassReferences,
+			SelectionHash,
+			Result));
+	TestEqual(
+		TEXT("Duplicate generated property category is stable"),
+		Result.ErrorCategory,
+		FString(TEXT("duplicate_member_name")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
