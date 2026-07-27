@@ -542,8 +542,8 @@ function Test-SidecarProfile {
         'native_cpp',
         'puerts_v8_reflection',
         'puerts_v8_static',
-        'avidscript_wamr_interpreter',
-        'avidscript_wasmtime_jit'
+        'avidscript_wasmtime_semantic',
+        'avidscript_wasmtime_native_direct'
     )
     if ($Lanes.Count -ne $ExpectedLanes.Count -or $Workloads.Count -lt 1) {
         throw 'ASP54S2004 benchmark profile 必须包含五个 canonical lane 和至少一个 workload'
@@ -560,6 +560,30 @@ function Test-SidecarProfile {
         if ($Lanes[$Index] -cne $ExpectedLanes[$Index] -or
             [string]$Profile.lane_catalog[$Index].lane_id -cne $ExpectedLanes[$Index]) {
             throw "ASP54S2004 benchmark profile lane/catalog 顺序不匹配：index=$Index"
+        }
+    }
+    $SemanticLane = @($Profile.lane_catalog | Where-Object {
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+    })[0]
+    $DirectLane = @($Profile.lane_catalog | Where-Object {
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
+    })[0]
+    if ([string]$SemanticLane.backend_id -cne 'wasmtime.cranelift.jit' -or
+        [string]$DirectLane.backend_id -cne 'wasmtime.cranelift.jit' -or
+        [string]$SemanticLane.binding_invocation_mode -cne 'semantic_process_event' -or
+        [string]$DirectLane.binding_invocation_mode -cne 'qualified_native_direct') {
+        throw 'ASP54S2004 Wasmtime lane backend 或 binding invocation mode 无效'
+    }
+    foreach ($Property in @(
+        'runtime_id',
+        'runtime_version',
+        'source_wasm_sha256',
+        'execution_artifact_sha256',
+        'runtime_build_identity',
+        'runtime_artifact_sha256',
+        'backend_id')) {
+        if ([string]$SemanticLane.$Property -cne [string]$DirectLane.$Property) {
+            throw "ASP54S2004 Wasmtime lane 未共享 artifact provenance：field=$Property"
         }
     }
 }
@@ -824,9 +848,24 @@ function Test-SidecarLaneCatalog {
                 (Get-SidecarLaneIdentitySha256 -Entry $_)
         }
     ).Count -eq 0
+    $SemanticLane = @($ActualEntries | Where-Object {
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+    })[0]
+    $DirectLane = @($ActualEntries | Where-Object {
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
+    })[0]
+    $WasmtimeModesValid =
+        $null -ne $SemanticLane -and
+        $null -ne $DirectLane -and
+        [string]$SemanticLane.backend_id -ceq 'wasmtime.cranelift.jit' -and
+        [string]$DirectLane.backend_id -ceq 'wasmtime.cranelift.jit' -and
+        [string]$SemanticLane.binding_invocation_mode -ceq 'semantic_process_event' -and
+        [string]$DirectLane.binding_invocation_mode -ceq 'qualified_native_direct' -and
+        [string]$SemanticLane.lane_identity_sha256 -cne [string]$DirectLane.lane_identity_sha256
     if ($ActualSha256 -cne $ExpectedSha256 -or
         -not $ActualLaneIdentitiesValid -or
         -not $ExpectedLaneIdentitiesValid -or
+        -not $WasmtimeModesValid -or
         (Get-SidecarLaneCatalogSha256 -Catalog $ActualEntries) -cne $ActualSha256 -or
         (Get-SidecarLaneCatalogSha256 -Catalog $ExpectedEntries) -cne $ExpectedSha256 -or
         (ConvertTo-SidecarCanonicalJson -Value $ActualEntries) -cne
@@ -1084,6 +1123,7 @@ function Test-SidecarProcessResult {
             if ($null -eq $Sample.backend_info -or
                 [bool]$Sample.backend_info.fallback_used -or
                 [string]$Sample.backend_info.backend_id -cne [string]$LaneCatalogEntry.backend_id -or
+                [string]$Sample.backend_info.binding_invocation_mode -cne [string]$LaneCatalogEntry.binding_invocation_mode -or
                 [string]$Sample.backend_info.runtime_version -cne [string]$LaneCatalogEntry.runtime_version -or
                 [string]$Sample.backend_info.execution_mode -cne [string]$LaneCatalogEntry.execution_mode -or
                 [string]$Sample.backend_info.artifact_format -cne [string]$LaneCatalogEntry.execution_artifact_format -or
@@ -1094,6 +1134,17 @@ function Test-SidecarProcessResult {
                 [string]$Sample.backend_info.runtime_artifact_sha256 -cne [string]$LaneCatalogEntry.runtime_artifact_sha256) {
                 throw "ASP54S2054 raw result AvidScript backend provenance 不匹配：process=$ExpectedProcessRun lane=$Lane"
             }
+        }
+        if ($Lane -ceq 'avidscript_wasmtime_native_direct' -and
+            $Workload -cin @('scalar_add_int32', 'batch_scalar') -and
+            ([int64]$Sample.direct_hit_count -ne [int64]$Sample.iterations -or
+             [int64]$Sample.requested_direct_fallback_count -ne 0)) {
+            throw "ASP54S2057 direct scalar workload 出现 fallback 或缺少 direct hit：process=$ExpectedProcessRun workload=$Workload"
+        }
+        if ($Lane -ceq 'avidscript_wasmtime_semantic' -and
+            ([int64]$Sample.direct_hit_count -ne 0 -or
+             [int64]$Sample.requested_direct_fallback_count -ne 0)) {
+            throw "ASP54S2057 semantic lane 不得报告 direct 请求证据：process=$ExpectedProcessRun workload=$Workload"
         }
         $WorkloadIndex = [Array]::IndexOf([object[]]$ExpectedWorkloads, $Workload)
         $WilliamsOrder = Get-SidecarWilliamsLaneOrder `

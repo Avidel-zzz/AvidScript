@@ -16,8 +16,8 @@
     "native_cpp",
     "puerts_v8_reflection",
     "puerts_v8_static",
-    "avidscript_wamr_interpreter",
-    "avidscript_wasmtime_jit"
+    "avidscript_wasmtime_semantic",
+    "avidscript_wasmtime_native_direct"
   ],
   "lane_identity_algorithm": "canonical_json_utf8_sha256_v1",
   "lane_catalog": [
@@ -39,6 +39,7 @@
       "target_triple": "x86_64-pc-windows-msvc",
       "cpu_feature_policy": "host_default",
       "backend_id": null,
+      "binding_invocation_mode": null,
       "execution_mode": "native",
       "fallback_used": false
     },
@@ -60,6 +61,7 @@
       "target_triple": "x86_64-pc-windows-msvc",
       "cpu_feature_policy": "host_default",
       "backend_id": null,
+      "binding_invocation_mode": null,
       "execution_mode": "jit",
       "fallback_used": false
     },
@@ -81,32 +83,12 @@
       "target_triple": "x86_64-pc-windows-msvc",
       "cpu_feature_policy": "host_default",
       "backend_id": null,
+      "binding_invocation_mode": null,
       "execution_mode": "jit",
       "fallback_used": false
     },
     {
-      "lane_id": "avidscript_wamr_interpreter",
-      "runtime_id": "wamr",
-      "runtime_version": "2.4.4",
-      "execution_tier": "interpreter",
-      "adapter_id": "avidscript_runtime_session",
-      "wasm_workload_kind": "csharp_frontend_output",
-      "source_wasm_sha256": "${wasm_sha256}",
-      "execution_artifact_format": "wasm_bytecode",
-      "execution_artifact_sha256": "${wasm_sha256}",
-      "compiler_identity": "avidscript_csharp_frontend",
-      "compiler_flags": ["profile_phase53_perf", "deterministic"],
-      "runtime_build_config": "AVIDSCRIPT_WITH_WAMR=1;WAMR_BUILD_FAST_INTERP=1",
-      "runtime_build_identity": "${wamr_runtime_build_identity}",
-      "runtime_artifact_sha256": "${wamr_static_lib_sha256}",
-      "target_triple": "x86_64-pc-windows-msvc",
-      "cpu_feature_policy": "portable_wasm",
-      "backend_id": "wamr.interpreter",
-      "execution_mode": "interpreter",
-      "fallback_used": false
-    },
-    {
-      "lane_id": "avidscript_wasmtime_jit",
+      "lane_id": "avidscript_wasmtime_semantic",
       "runtime_id": "wasmtime",
       "runtime_version": "45.0.0",
       "execution_tier": "jit",
@@ -123,6 +105,29 @@
       "target_triple": "x86_64-pc-windows-msvc",
       "cpu_feature_policy": "host_default",
       "backend_id": "wasmtime.cranelift.jit",
+      "binding_invocation_mode": "semantic_process_event",
+      "execution_mode": "jit",
+      "fallback_used": false
+    },
+    {
+      "lane_id": "avidscript_wasmtime_native_direct",
+      "runtime_id": "wasmtime",
+      "runtime_version": "45.0.0",
+      "execution_tier": "jit",
+      "adapter_id": "avidscript_runtime_session",
+      "wasm_workload_kind": "csharp_frontend_output",
+      "source_wasm_sha256": "${wasm_sha256}",
+      "execution_artifact_format": "wasm_bytecode",
+      "execution_artifact_sha256": "${wasm_sha256}",
+      "compiler_identity": "avidscript_csharp_frontend",
+      "compiler_flags": ["profile_phase53_perf", "deterministic"],
+      "runtime_build_config": "AVIDSCRIPT_WITH_WASMTIME=1;Cranelift=1",
+      "runtime_build_identity": "${wasmtime_runtime_build_identity}",
+      "runtime_artifact_sha256": "${wasmtime_dll_sha256}",
+      "target_triple": "x86_64-pc-windows-msvc",
+      "cpu_feature_policy": "host_default",
+      "backend_id": "wasmtime.cranelift.jit",
+      "binding_invocation_mode": "qualified_native_direct",
       "execution_mode": "jit",
       "fallback_used": false
     }

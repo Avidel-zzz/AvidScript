@@ -23,7 +23,6 @@ function Assert-True {
         throw "ASP53ST1000 $Message"
     }
 }
-
 function Assert-Near {
     param(
         [Parameter(Mandatory = $true)][double]$Actual,
@@ -469,6 +468,19 @@ elseif ([string]$Request.mode -ceq 'timed') {
                 $CyclesPerOperation = 1 + $SampleIndex + ($LaneIndex * 100) + ($WorkloadIndex * 1000)
                 $LaneChecksum = $Checksum + $LaneIndex
                 $CatalogEntry = $Request.lane_catalog[$LaneIndex]
+                $DirectHitCount = 0
+                $RequestedDirectFallbackCount = 0
+                if ($Lane -ceq 'avidscript_wasmtime_native_direct') {
+                    if ($Workload -cin @('scalar_add_int32', 'batch_scalar')) {
+                        $DirectHitCount = $Iterations
+                    }
+                    elseif ($Workload -ceq 'property_get_set') {
+                        $RequestedDirectFallbackCount = $Iterations * 2
+                    }
+                    elseif ($Workload -cnotin @('callback_empty', 'callback_tick', 'pure_integer')) {
+                        $RequestedDirectFallbackCount = $Iterations
+                    }
+                }
                 $Sample = [ordered]@{
                     process_run = [int]$Request.process_run
                     lane = $Lane
@@ -487,11 +499,14 @@ elseif ([string]$Request.mode -ceq 'timed') {
                     expected_operation_call_count = $Iterations
                     host_import_call_count = [int64]($LaneIndex * $Iterations)
                     expected_host_import_call_count = [int64]($LaneIndex * $Iterations)
+                    direct_hit_count = [int64]$DirectHitCount
+                    requested_direct_fallback_count = [int64]$RequestedDirectFallbackCount
                     correct = $true
                 }
                 if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
                     $Sample['backend_info'] = [ordered]@{
                         backend_id = [string]$CatalogEntry.backend_id
+                        binding_invocation_mode = [string]$CatalogEntry.binding_invocation_mode
                         runtime_version = [string]$CatalogEntry.runtime_version
                         execution_mode = [string]$CatalogEntry.execution_mode
                         artifact_format = [string]$CatalogEntry.execution_artifact_format
@@ -741,11 +756,11 @@ Write-Output "假 Editor PID=$PID"
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Manifest.provenance.editor_file_version)) 'fixture attempt 未记录 editor 文件版本'
 
     $ExpectedLaneOrders = @(
-        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit',
-        'puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp',
-        'puerts_v8_static,avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection',
-        'avidscript_wamr_interpreter,avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection,puerts_v8_static',
-        'avidscript_wasmtime_jit,native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wamr_interpreter'
+        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct',
+        'puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp',
+        'puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection',
+        'avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static',
+        'avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic'
     )
     $ProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     $CalibrationProcess = Get-Content -LiteralPath (Join-Path $FirstAttempt $Manifest.calibration.process_metadata_path) -Raw | ConvertFrom-Json
@@ -922,8 +937,8 @@ Write-Output "假 Editor PID=$PID"
     $MixedIterationRequest = Copy-AttemptFixture $FirstAttempt 'mixed-iteration-request'
     $TimedRequestPath = Join-Path $MixedIterationRequest 'runs/02/request.json'
     $TimedRequest = Get-Content -LiteralPath $TimedRequestPath -Raw | ConvertFrom-Json
-    $TimedRequest.iteration_counts.scalar_noop.avidscript_wamr_interpreter =
-        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wamr_interpreter + 1
+    $TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_semantic =
+        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_semantic + 1
     Write-NewJson $TimedRequestPath $TimedRequest
     $MixedIterationManifestPath = Join-Path $MixedIterationRequest 'attempt.json'
     $MixedIterationManifest = Get-Content -LiteralPath $MixedIterationManifestPath -Raw | ConvertFrom-Json
@@ -1044,7 +1059,7 @@ Write-Output "假 Editor PID=$PID"
     $BadBackendIdentity = Copy-AndMutateRawResult $FirstAttempt 'bad-backend-identity' {
         param($Raw)
         $Sample = @($Raw.samples | Where-Object {
-            $_.lane -ceq 'avidscript_wasmtime_jit'
+            $_.lane -ceq 'avidscript_wasmtime_native_direct'
         })[0]
         $Sample.backend_info.runtime_version = 'wrong-runtime'
     }
@@ -1055,13 +1070,26 @@ Write-Output "假 Editor PID=$PID"
     $FallbackUsed = Copy-AndMutateRawResult $FirstAttempt 'fallback-used' {
         param($Raw)
         $Sample = @($Raw.samples | Where-Object {
-            $_.lane -ceq 'avidscript_wasmtime_jit'
+            $_.lane -ceq 'avidscript_wasmtime_native_direct'
         })[0]
         $Sample.backend_info.fallback_used = $true
     }
     Invoke-ExpectedFailure {
         & $AggregatorPath -AttemptPath $FallbackUsed -Mode Validate | Out-Null
     } 'ASP53S2005'
+
+    $DirectScalarFallback = Copy-AndMutateRawResult $FirstAttempt 'direct-scalar-fallback' {
+        param($Raw)
+        $Sample = @($Raw.samples | Where-Object {
+            $_.lane -ceq 'avidscript_wasmtime_native_direct' -and
+            $_.workload -ceq 'scalar_add_int32'
+        })[0]
+        $Sample.direct_hit_count = [int64]$Sample.iterations - 1
+        $Sample.requested_direct_fallback_count = 1
+    }
+    Invoke-ExpectedFailure {
+        & $AggregatorPath -AttemptPath $DirectScalarFallback -Mode Validate | Out-Null
+    } 'ASP54S2057'
 }
 finally {
     if (Test-Path -LiteralPath $FixtureRoot) {

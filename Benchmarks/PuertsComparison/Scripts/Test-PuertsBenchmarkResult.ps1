@@ -71,6 +71,21 @@ for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
     }
     $LaneIdentityById[$ExpectedLane] = [string]$CatalogEntry.lane_identity_sha256
 }
+$SemanticCatalog = @($Result.lane_catalog | Where-Object {
+    [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+})[0]
+$DirectCatalog = @($Result.lane_catalog | Where-Object {
+    [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
+})[0]
+if ($null -eq $SemanticCatalog -or
+    $null -eq $DirectCatalog -or
+    [string]$SemanticCatalog.backend_id -cne 'wasmtime.cranelift.jit' -or
+    [string]$DirectCatalog.backend_id -cne 'wasmtime.cranelift.jit' -or
+    [string]$SemanticCatalog.binding_invocation_mode -cne 'semantic_process_event' -or
+    [string]$DirectCatalog.binding_invocation_mode -cne 'qualified_native_direct' -or
+    [string]$SemanticCatalog.lane_identity_sha256 -ceq [string]$DirectCatalog.lane_identity_sha256) {
+    throw 'ASP54R1012 Wasmtime lane mode identity is missing or aliased'
+}
 
 $ExpectedCount = $ExpectedLanes.Count *
     $ExpectedWorkloads.Count *
@@ -98,6 +113,7 @@ foreach ($Sample in $Samples) {
         if ($null -eq $Sample.backend_info -or
             [bool]$Sample.backend_info.fallback_used -or
             [string]$Sample.backend_info.backend_id -cne [string]$CatalogEntry.backend_id -or
+            [string]$Sample.backend_info.binding_invocation_mode -cne [string]$CatalogEntry.binding_invocation_mode -or
             [string]$Sample.backend_info.runtime_version -cne [string]$CatalogEntry.runtime_version -or
             [string]$Sample.backend_info.execution_mode -cne [string]$CatalogEntry.execution_mode -or
             [string]$Sample.backend_info.artifact_format -cne [string]$CatalogEntry.execution_artifact_format -or
@@ -108,6 +124,12 @@ foreach ($Sample in $Samples) {
             [string]$Sample.backend_info.runtime_artifact_sha256 -cne [string]$CatalogEntry.runtime_artifact_sha256) {
             throw "ASP54R1013 AvidScript backend provenance mismatch: lane=$Lane"
         }
+    }
+    if ($Lane -ceq 'avidscript_wasmtime_native_direct' -and
+        $Workload -cin @('scalar_add_int32', 'batch_scalar') -and
+        ([int64]$Sample.direct_hit_count -ne [int64]$Sample.iterations -or
+         [int64]$Sample.requested_direct_fallback_count -ne 0)) {
+        throw "ASP54R1015 direct scalar evidence is invalid: workload=$Workload"
     }
     if ([int64]$Sample.checksum -ne [int64]$Sample.expected_checksum) {
         throw "ASP54R1014 lane-specific checksum oracle mismatch: lane=$Lane workload=$Workload"

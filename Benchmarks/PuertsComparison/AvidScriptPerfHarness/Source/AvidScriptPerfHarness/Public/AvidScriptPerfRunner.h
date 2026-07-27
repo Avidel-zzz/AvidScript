@@ -25,10 +25,10 @@ struct FAvidScriptPerfSmokeResult
 	uint32 NativeChecksum = 0;
 	uint32 PuertsReflectionChecksum = 0;
 	uint32 PuertsStaticChecksum = 0;
-	uint32 AvidScriptWamrChecksum = 0;
-	uint32 AvidScriptWasmtimeChecksum = 0;
-	uint64 AvidScriptWamrHostCallCount = 0;
-	uint64 AvidScriptWasmtimeHostCallCount = 0;
+	uint32 AvidScriptWasmtimeSemanticChecksum = 0;
+	uint32 AvidScriptWasmtimeNativeDirectChecksum = 0;
+	uint64 AvidScriptWasmtimeSemanticHostCallCount = 0;
+	uint64 AvidScriptWasmtimeNativeDirectHostCallCount = 0;
 	FString Error;
 };
 

@@ -34,18 +34,18 @@ bool FAvidScriptPerfFiveLaneCorrectnessTest::RunTest(const FString& Parameters)
 		Result.NativeChecksum);
 	TestEqual(
 		TEXT("AvidScript WAMR aggregate matches native"),
-		Result.AvidScriptWamrChecksum,
+		Result.AvidScriptWasmtimeSemanticChecksum,
 		Result.NativeChecksum);
 	TestEqual(
 		TEXT("AvidScript Wasmtime aggregate matches native"),
-		Result.AvidScriptWasmtimeChecksum,
+		Result.AvidScriptWasmtimeNativeDirectChecksum,
 		Result.NativeChecksum);
 	TestTrue(
 		TEXT("AvidScript WAMR lane records host calls"),
-		Result.AvidScriptWamrHostCallCount > 0);
+		Result.AvidScriptWasmtimeSemanticHostCallCount > 0);
 	TestTrue(
 		TEXT("AvidScript Wasmtime lane records host calls"),
-		Result.AvidScriptWasmtimeHostCallCount > 0);
+		Result.AvidScriptWasmtimeNativeDirectHostCallCount > 0);
 	return true;
 }
 

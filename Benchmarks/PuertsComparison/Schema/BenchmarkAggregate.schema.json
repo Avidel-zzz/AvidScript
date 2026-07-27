@@ -88,15 +88,15 @@
               "native_cpp",
               "puerts_v8_reflection",
               "puerts_v8_static",
-              "avidscript_wamr_interpreter",
-              "avidscript_wasmtime_jit"
+              "avidscript_wasmtime_semantic",
+              "avidscript_wasmtime_native_direct"
             ],
             "properties": {
               "native_cpp": { "type": "integer", "minimum": 1 },
               "puerts_v8_reflection": { "type": "integer", "minimum": 1 },
               "puerts_v8_static": { "type": "integer", "minimum": 1 },
-              "avidscript_wamr_interpreter": { "type": "integer", "minimum": 1 },
-              "avidscript_wasmtime_jit": { "type": "integer", "minimum": 1 }
+              "avidscript_wasmtime_semantic": { "type": "integer", "minimum": 1 },
+              "avidscript_wasmtime_native_direct": { "type": "integer", "minimum": 1 }
             }
           }
         }
@@ -368,6 +368,8 @@
         "expected_operation_call_count",
         "host_import_call_count",
         "expected_host_import_call_count",
+        "direct_hit_count",
+        "requested_direct_fallback_count",
         "correct"
       ],
       "properties": {
@@ -388,12 +390,14 @@
         "expected_operation_call_count": { "type": "integer", "minimum": 0 },
         "host_import_call_count": { "type": "integer", "minimum": 0 },
         "expected_host_import_call_count": { "type": "integer", "minimum": 0 },
+        "direct_hit_count": { "type": "integer", "minimum": 0 },
+        "requested_direct_fallback_count": { "type": "integer", "minimum": 0 },
         "correct": { "const": true },
         "backend_info": { "$ref": "#/$defs/backend_info" }
       },
       "allOf": [
         {
-          "if": { "properties": { "lane": { "enum": ["avidscript_wamr_interpreter", "avidscript_wasmtime_jit"] } } },
+          "if": { "properties": { "lane": { "enum": ["avidscript_wasmtime_semantic", "avidscript_wasmtime_native_direct"] } } },
           "then": { "required": ["backend_info"] },
           "else": { "properties": { "backend_info": false } }
         }
@@ -405,8 +409,8 @@
         "native_cpp",
         "puerts_v8_reflection",
         "puerts_v8_static",
-        "avidscript_wamr_interpreter",
-        "avidscript_wasmtime_jit"
+        "avidscript_wasmtime_semantic",
+        "avidscript_wasmtime_native_direct"
       ]
     },
     "lane_catalog": {
@@ -417,8 +421,8 @@
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "native_cpp" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_reflection" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
-        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wamr_interpreter" } } }] },
-        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_jit" } } }] }
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_semantic" }, "binding_invocation_mode": { "const": "semantic_process_event" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_native_direct" }, "binding_invocation_mode": { "const": "qualified_native_direct" } } }] }
       ],
       "items": false
     },
@@ -430,7 +434,7 @@
         "wasm_workload_kind", "source_wasm_sha256", "execution_artifact_format",
         "execution_artifact_sha256", "compiler_identity", "compiler_flags",
         "runtime_build_config", "runtime_build_identity", "runtime_artifact_sha256", "target_triple",
-        "cpu_feature_policy", "backend_id", "execution_mode", "fallback_used",
+        "cpu_feature_policy", "backend_id", "binding_invocation_mode", "execution_mode", "fallback_used",
         "lane_identity_sha256"
       ],
       "properties": {
@@ -451,6 +455,7 @@
         "target_triple": { "type": "string", "minLength": 1 },
         "cpu_feature_policy": { "type": "string", "minLength": 1 },
         "backend_id": { "type": ["string", "null"] },
+        "binding_invocation_mode": { "enum": [null, "semantic_process_event", "qualified_native_direct"] },
         "execution_mode": { "type": "string", "minLength": 1 },
         "fallback_used": { "const": false },
         "lane_identity_sha256": { "$ref": "#/$defs/sha256" }
@@ -460,12 +465,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "backend_id", "runtime_version", "execution_mode", "artifact_format",
+        "backend_id", "binding_invocation_mode", "runtime_version", "execution_mode", "artifact_format",
         "artifact_sha256", "source_wasm_sha256", "target_triple",
         "runtime_build_identity", "runtime_artifact_sha256", "fallback_used"
       ],
       "properties": {
         "backend_id": { "type": "string", "minLength": 1 },
+        "binding_invocation_mode": { "enum": ["semantic_process_event", "qualified_native_direct"] },
         "runtime_version": { "type": "string", "minLength": 1 },
         "execution_mode": { "enum": ["interpreter", "jit"] },
         "artifact_format": { "const": "wasm_bytecode" },

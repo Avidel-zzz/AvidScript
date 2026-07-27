@@ -51,8 +51,8 @@ $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
-    'avidscript_wamr_interpreter',
-    'avidscript_wasmtime_jit'
+    'avidscript_wasmtime_semantic',
+    'avidscript_wasmtime_native_direct'
 )
 Assert-True ([int]$BenchmarkProfile.schema_version -eq 2) `
     'benchmark profile must use schema v2'
@@ -124,8 +124,8 @@ foreach ($Method in @('ReflectVectorRefOut', 'NativeVectorRefOut')) {
 }
 Assert-True ($FixtureHeader.Contains('OperationCallCounts[10]')) `
     'fixture operation accounting must cover all ten stable workload ids'
-Assert-True ($StaticBindings.Contains('.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::NativeVectorRefOut))')) `
-    'static lane must bind the real native FVector ref/out method'
+Assert-True ($StaticBindings.Contains('.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorRefOut))')) `
+    'static lane must bind the same reflected FVector ref/out method'
 
 foreach ($Script in @($ReflectionScript, $StaticScript)) {
     foreach ($RefApi in @('puerts.$ref', 'puerts.$set', 'puerts.$unref')) {
@@ -185,8 +185,6 @@ foreach ($BalancedRow in @(
     Assert-True ($RunnerSource.Contains($BalancedRow)) "missing balanced lane row: $BalancedRow"
 }
 foreach ($SelectionContract in @(
-    'EAvidScriptVmBackendKind::Wamr',
-    'EAvidScriptVmExecutionMode::Interpreter',
     'EAvidScriptVmBackendKind::Wasmtime',
     'EAvidScriptVmExecutionMode::Jit',
     'EAvidScriptVmArtifactFormat::WasmBytecode',
@@ -197,9 +195,13 @@ foreach ($SelectionContract in @(
 Assert-True ($RunnerSource.Contains('SetBackendSelectionForTesting')) `
     'both AvidScript lanes must inject selection through RuntimeSession'
 Assert-True ($RunnerSource.Contains('wasmtime.cranelift.jit')) `
-    'Wasmtime lane must reject a runtime build identity mismatch'
-Assert-True ($RunnerSource.Contains('wamr.interpreter')) `
-    'WAMR lane must reject a runtime build identity mismatch'
+    'both headline Wasmtime lanes must reject a runtime build identity mismatch'
+Assert-True (-not $RunnerSource.Contains('EAvidScriptVmBackendKind::Wamr')) `
+    'formal PC runner must keep WAMR outside the headline matrix'
+Assert-True ($RunnerSource.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) `
+    'semantic Wasmtime session must configure its policy explicitly'
+Assert-True ($RunnerSource.Contains('EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect')) `
+    'direct Wasmtime session must configure its policy explicitly'
 Assert-True ($RunnerSource.Contains('Actual.RuntimeBuildIdentity.Equals(')) `
     'runtime build identity must be derived from actual backend evidence and compared with the catalog'
 foreach ($ObservedField in @('RuntimeBuildIdentity', 'RuntimeArtifactSha256')) {

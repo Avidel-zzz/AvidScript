@@ -66,6 +66,10 @@ Assert-True ($StaticBindings.Contains('puerts::DefineClass<AAvidScriptPerfFixtur
 foreach ($Operation in @('StaticNoOp', 'StaticAddInt32', 'StaticVectorValue', 'StaticObjectRoundtrip', 'StaticBatchAdd')) {
     Assert-True ($StaticBindings.Contains(".Method(`"$Operation`"")) "static lane is missing operation: $Operation"
 }
+foreach ($Method in @('ReflectNoOp', 'ReflectAddInt32', 'ReflectVectorValue', 'ReflectObjectRoundtrip', 'ReflectBatchAdd')) {
+    Assert-True ($StaticBindings.Contains("AAvidScriptPerfFixture::$Method")) "static lane must bind the reflected implementation: $Method"
+}
+Assert-True (-not $StaticBindings.Contains('AAvidScriptPerfFixture::Native')) 'static lane must not retain the old native-wrapper advantage'
 Assert-True ($StaticBindings.Contains('.Property("StaticScalarValue"')) 'static lane must benchmark a template-bound property'
 
 $ReflectionScript = Read-RequiredText 'AvidScriptPerfHarness/Content/JavaScript/reflection.js'
@@ -91,8 +95,8 @@ $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
-    'avidscript_wamr_interpreter',
-    'avidscript_wasmtime_jit'
+    'avidscript_wasmtime_semantic',
+    'avidscript_wasmtime_native_direct'
 )
 Assert-True ([int]$Profile.schema_version -eq 2) 'benchmark profile must use schema v2'
 Assert-True (@($Profile.lanes).Count -eq $ExpectedLanes.Count) 'benchmark profile must contain exactly five lanes'
@@ -102,6 +106,31 @@ for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
 Assert-True ([int]$Profile.process_runs -ge 5) 'benchmark profile requires at least five process runs'
 Assert-True ([int]$Profile.timed_samples -ge 30) 'benchmark profile requires at least thirty timed samples'
 Assert-True ([int]$Profile.seed -ge -16777216 -and [int]$Profile.seed -le 16777216) 'event ABI seed must remain exactly representable by float'
+$SemanticLane = @($Profile.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_semantic' })[0]
+$DirectLane = @($Profile.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_native_direct' })[0]
+Assert-True ([string]$SemanticLane.backend_id -ceq 'wasmtime.cranelift.jit') 'semantic lane must use Wasmtime Cranelift'
+Assert-True ([string]$DirectLane.backend_id -ceq 'wasmtime.cranelift.jit') 'direct lane must use Wasmtime Cranelift'
+Assert-True ([string]$SemanticLane.binding_invocation_mode -ceq 'semantic_process_event') 'semantic lane must publish semantic_process_event'
+Assert-True ([string]$DirectLane.binding_invocation_mode -ceq 'qualified_native_direct') 'direct lane must publish qualified_native_direct'
+foreach ($Property in @(
+    'runtime_id',
+    'runtime_version',
+    'source_wasm_sha256',
+    'execution_artifact_sha256',
+    'runtime_build_identity',
+    'runtime_artifact_sha256',
+    'backend_id')) {
+    Assert-True ([string]$SemanticLane.$Property -ceq [string]$DirectLane.$Property) "Wasmtime lanes must share $Property"
+}
+
+$Runner = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp'
+Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) 'runner must explicitly configure the semantic session'
+Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect')) 'runner must explicitly configure the direct session'
+Assert-True ($Runner.Contains('TryGetInvocationMode')) 'runner must query immutable package invocation plans before timing'
+Assert-True ($Runner.Contains('DirectHitCount')) 'runner must record direct-hit evidence'
+Assert-True ($Runner.Contains('RequestedDirectFallbackCount')) 'runner must record requested-direct fallback evidence'
+Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeSemantic')) 'runner must own an independent semantic Wasmtime session'
+Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeNativeDirect')) 'runner must own an independent direct Wasmtime session'
 
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
 $ResultSchema = Get-Content -LiteralPath $ResultSchemaPath -Raw | ConvertFrom-Json

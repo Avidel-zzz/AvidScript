@@ -14,13 +14,13 @@ namespace
 		FAvidScriptPerfStaticBindingRegistration()
 		{
 			puerts::DefineClass<AAvidScriptPerfFixture>()
-				.Method("StaticNoOp", MakeFunction(&AAvidScriptPerfFixture::NativeNoOp))
-				.Method("StaticAddInt32", MakeFunction(&AAvidScriptPerfFixture::NativeAddInt32))
+				.Method("StaticNoOp", MakeFunction(&AAvidScriptPerfFixture::ReflectNoOp))
+				.Method("StaticAddInt32", MakeFunction(&AAvidScriptPerfFixture::ReflectAddInt32))
 				.Property("StaticScalarValue", MakeProperty(&AAvidScriptPerfFixture::ScalarValue))
-				.Method("StaticVectorValue", MakeFunction(&AAvidScriptPerfFixture::NativeVectorValue))
-				.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::NativeVectorRefOut))
-				.Method("StaticObjectRoundtrip", MakeFunction(&AAvidScriptPerfFixture::NativeObjectRoundtrip))
-				.Method("StaticBatchAdd", MakeFunction(&AAvidScriptPerfFixture::NativeBatchAdd))
+				.Method("StaticVectorValue", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorValue))
+				.Method("StaticVectorRefOut", MakeFunction(&AAvidScriptPerfFixture::ReflectVectorRefOut))
+				.Method("StaticObjectRoundtrip", MakeFunction(&AAvidScriptPerfFixture::ReflectObjectRoundtrip))
+				.Method("StaticBatchAdd", MakeFunction(&AAvidScriptPerfFixture::ReflectBatchAdd))
 				.Register();
 		}
 	};

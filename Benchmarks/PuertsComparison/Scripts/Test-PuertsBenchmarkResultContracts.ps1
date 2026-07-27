@@ -26,7 +26,6 @@ function Assert-True {
         throw "ASP53RT1000 $Message"
     }
 }
-
 function Write-Json {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -54,8 +53,8 @@ try {
         'native_cpp',
         'puerts_v8_reflection',
         'puerts_v8_static',
-        'avidscript_wamr_interpreter',
-        'avidscript_wasmtime_jit'
+        'avidscript_wasmtime_semantic',
+        'avidscript_wasmtime_native_direct'
     )
     $TrackedProfile = Get-Content -LiteralPath $ProfileContractPath -Raw | ConvertFrom-Json
     Assert-True ([int]$TrackedProfile.schema_version -eq 2) 'tracked profile is not schema v2'
@@ -96,10 +95,10 @@ try {
         $CatalogEntry = [ordered]@{
             lane_id = $Lane
             runtime_id = if ($IsAvidScript) {
-                if ($Lane -ceq 'avidscript_wamr_interpreter') { 'wamr.interpreter' } else { 'wasmtime.cranelift.jit' }
+                'wasmtime'
             } else { $Lane }
             runtime_version = 'fixture-runtime'
-            execution_tier = if ($Lane -ceq 'avidscript_wasmtime_jit') { 'jit' } elseif ($IsAvidScript) { 'interpreter' } else { 'native_or_jit' }
+            execution_tier = if ($IsAvidScript) { 'jit' } else { 'native_or_jit' }
             adapter_id = if ($IsAvidScript) { 'avidscript_runtime_session' } else { $Lane }
             wasm_workload_kind = if ($IsAvidScript) { 'csharp_frontend_output' } else { 'not_applicable' }
             source_wasm_sha256 = if ($IsAvidScript) { 'a' * 64 } else { $null }
@@ -113,9 +112,14 @@ try {
             target_triple = 'x86_64-pc-windows-msvc'
             cpu_feature_policy = 'host_default'
             backend_id = if ($IsAvidScript) {
-                if ($Lane -ceq 'avidscript_wamr_interpreter') { 'wamr.interpreter' } else { 'wasmtime.cranelift.jit' }
+                'wasmtime.cranelift.jit'
             } else { $null }
-            execution_mode = if ($Lane -ceq 'avidscript_wasmtime_jit') { 'jit' } elseif ($IsAvidScript) { 'interpreter' } else { 'native_or_jit' }
+            binding_invocation_mode = if ($Lane -ceq 'avidscript_wasmtime_semantic') {
+                'semantic_process_event'
+            } elseif ($Lane -ceq 'avidscript_wasmtime_native_direct') {
+                'qualified_native_direct'
+            } else { $null }
+            execution_mode = if ($IsAvidScript) { 'jit' } else { 'native_or_jit' }
             fallback_used = $false
         }
         $CatalogEntry['lane_identity_sha256'] =
@@ -145,11 +149,16 @@ try {
                 elapsed_cycles = 5000
                 checksum = $ExpectedChecksum
                 expected_checksum = $ExpectedChecksum
+                direct_hit_count = 0
+                requested_direct_fallback_count = if ($Lane -ceq 'avidscript_wasmtime_native_direct') {
+                    $Iterations
+                } else { 0 }
                 correct = $true
             }
             if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
                 $Samples[-1]['backend_info'] = [ordered]@{
                     backend_id = [string]$Profile.lane_catalog[$LaneIndex].backend_id
+                    binding_invocation_mode = [string]$Profile.lane_catalog[$LaneIndex].binding_invocation_mode
                     runtime_version = 'fixture-runtime'
                     execution_mode = [string]$Profile.lane_catalog[$LaneIndex].execution_mode
                     artifact_format = 'wasm_bytecode'
