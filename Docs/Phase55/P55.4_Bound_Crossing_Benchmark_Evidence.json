@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "evidence_id": "phase55-bound-crossing-formal",
+  "generated_at_utc": "2026-07-29T00:00:00Z",
+  "data_boundary": "external_raw_evidence",
+  "raw_samples_included": false,
+  "private_paths_included": false,
+  "formal": {
+    "candidate": {
+      "commit": "ae27606c0f763480c50ff644bd100be62342eb50",
+      "tree": "5b603a2b4fa8101d9fcbfd1d64b6c8d897ed4b64",
+      "dirty": false
+    },
+    "environment": {
+      "ue_version": "5.8.0",
+      "target": "AvidTPSTemplateEditor",
+      "configuration": "Development",
+      "null_rhi": true,
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "os": "Windows 11 25H2"
+    },
+    "profiles": {
+      "gameplay": {
+        "process_runs": 5,
+        "warmup_samples": 5,
+        "timed_samples": 30,
+        "lanes": 6,
+        "workloads": 2,
+        "correctness_failures": 0
+      },
+      "micro": {
+        "process_runs": 5,
+        "warmup_samples": 5,
+        "timed_samples": 30,
+        "lanes": 6,
+        "workloads": 10,
+        "correctness_failures": 0
+      },
+      "controlled_runtime": {
+        "kernels": 12,
+        "process_runs": 5,
+        "formal_observations": 600,
+        "correctness_failures": 0,
+        "fallback_used": false
+      },
+      "physical_cost": {
+        "process_runs": 5,
+        "formal_observations": 750,
+        "correctness_failures": 0
+      }
+    },
+    "runtimes": {
+      "puerts_v8": {
+        "commit": "1977328c84661024be10a9e73640a74b278a7659",
+        "execution_mode": "jit",
+        "runtime_sha256": "db3f9f91ca167264b8ecaaa1ec2fc1fd35fec83e5262c88df14519b359712647"
+      },
+      "wasmtime": {
+        "version": "45.0.0",
+        "backend_id": "wasmtime.cranelift.jit",
+        "execution_mode": "jit",
+        "runtime_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42"
+      }
+    },
+    "source_evidence": {
+      "controlled_suite_sha256": "b341824f815062c9611cea39b63e4e21a5b99c36e8ed1ed6d3135e1792c5e860",
+      "physical_cost_sha256": "73959a21bb61bc21d7499cd375813d4cba436538b563da8c5ca827c5a818e917",
+      "gameplay_process_sha256": [
+        "73a9267e63afb8df24fc9f5abb8dab5305bf3209d73a3e7c7bba7175d022b300",
+        "31e3f643c675604895e3fbb9c4bac066fb5be1d2c60657780b01f06720a26111",
+        "e76734a690a7cd60f193d67b454472c9a66ec9e2092c0f0b5fec4ee59223b6cc",
+        "6d823909fd9a1b10901610854d5372714535aa729ba9a35ef2e7ecfbb5bf99f7",
+        "cab3ea3f636c9ea39e85b864604c261ddcf976f52f85391b310de841a4402626"
+      ],
+      "micro_process_sha256": [
+        "3313d82290bf9a1a3336c82bee991b15a95c29b2adb1cce2e03b3458103fd782",
+        "de7928af743b3cd6d7a3f3713ac30f3b1e50ec91e9238b53e3184e2d4674f428",
+        "e77b5d2450aeb337305ff50070db2ea7ca5b1a2b148c093a32e5a2629902ca6a",
+        "d308ad249ae96fcab5b6d0859d70902ad1bd9e8d0225635ce9535d06c96fa21d",
+        "26e0b081111c5888b90615b0656f93e694e1aad5c07e3759b6b4b89675f4c705"
+      ]
+    },
+    "controlled_runtime": {
+      "p50_wasmtime_over_v8_geometric_mean": 0.976968718639946,
+      "p95_wasmtime_over_v8_geometric_mean": 1.0108021908147269,
+      "p50_kernel_win_rate": 0.75,
+      "p95_kernel_win_rate": 0.5,
+      "leadership_gate_passed": false
+    },
+    "physical_cost_ns_per_iteration": {
+      "typed_empty_import_p95": 6.903,
+      "generic_minus_typed_empty_p95": 29.673,
+      "typed_i32_pair_minus_typed_empty_p95": -0.111,
+      "typed_empty_explained_ratio": 0.19952760365996325
+    },
+    "micro_p50_ns_per_operation": {
+      "scalar_add_int32": {
+        "avidscript_wasmtime_generated_s1": 52.95390625,
+        "puerts_v8_static": 31.719921875,
+        "candidate_over_puerts": 1.669421080501952
+      },
+      "property_get_set": {
+        "avidscript_wasmtime_generated_s1": 104.75,
+        "phase54_avidscript_baseline": 197.090625,
+        "improvement_over_phase54": 0.468518606605464
+      },
+      "callback_empty": {
+        "avidscript_wasmtime_generated_s1": 212.228125,
+        "puerts_best": 146.7875,
+        "phase54_avidscript_baseline": 385.8625,
+        "candidate_over_puerts": 1.445818785659542,
+        "improvement_over_phase54": 0.449990281512197
+      },
+      "vector_value": {
+        "avidscript_wasmtime_generated_s1": 58.8328593702254,
+        "phase54_avidscript_baseline": 199.96875,
+        "candidate_over_phase54": 0.2942102672053781
+      }
+    },
+    "gameplay_results": {
+      "small": {
+        "candidate_lane": "avidscript_wasmtime_generated_s1",
+        "candidate_p50_ns_per_operation": 87.1807391826923,
+        "candidate_median_process_p95_ns_per_operation": 97.01397235576923,
+        "puerts_v8_static_p50_ns_per_operation": 138.61678685897436,
+        "puerts_v8_static_median_process_p95_ns_per_operation": 250.45572916666666,
+        "candidate_over_puerts_p50": 0.6289334874814841,
+        "two_mad_separated": true
+      },
+      "dense": {
+        "candidate_lane": "avidscript_wasmtime_data_oriented",
+        "candidate_p50_ns_per_operation": 129.5166015625,
+        "candidate_median_process_p95_ns_per_operation": 144.60671164772728,
+        "puerts_v8_static_p50_ns_per_operation": 237.34019886363637,
+        "puerts_v8_static_median_process_p95_ns_per_operation": 395.2814275568182,
+        "candidate_over_puerts_p50": 0.5457002319144161,
+        "two_mad_separated": true
+      }
+    },
+    "gates": [
+      { "name": "wasmtime_v8_geo_ratio", "value": 1.0108021908147269, "maximum": 0.95, "pass": false },
+      { "name": "kernel_win_rate", "value": 0.5, "minimum": 0.6, "pass": false },
+      { "name": "semantic_vs_puerts_reflection", "value": 5.793332302197725, "maximum": 0.8, "pass": false },
+      { "name": "s1_scalar_ns", "value": 52.95390625, "maximum": 25.0, "pass": false },
+      { "name": "s1_vs_puerts_static", "value": 1.669421080501952, "maximum": 0.9, "pass": false },
+      { "name": "s1_property_ns", "value": 104.75, "maximum": 50.0, "pass": false },
+      { "name": "callback_ns", "value": 212.228125, "maximum": 150.0, "pass": false },
+      { "name": "callback_vs_puerts", "value": 1.445818785659542, "maximum": 0.85, "pass": false },
+      { "name": "vector_vs_phase54_baseline", "value": 0.2942102672053781, "maximum": 0.85, "pass": true },
+      { "name": "typed_empty_explained_ratio", "value": 0.19952760365996325, "minimum": 0.7, "pass": false },
+      { "name": "small_vs_best_puerts", "value": 0.6289334874814841, "maximum": 0.7, "pass": true },
+      { "name": "dense_vs_best_puerts", "value": 0.5457002319144161, "maximum": 0.7, "pass": true }
+    ],
+    "gate_summary": {
+      "passed": 3,
+      "failed": 9,
+      "absolute_leadership_achieved": false,
+      "gameplay_leadership_achieved": true
+    }
+  },
+  "verification": {
+    "candidate_provenance": "passed",
+    "ue58_no_clean_target_build": "passed",
+    "automation": "312/312 passed",
+    "generated_profile_prepare": "passed",
+    "semantic_profile_prepare": "passed",
+    "data_oriented_profile_prepare": "passed",
+    "formal_correctness": "0 failures",
+    "fallback_used": false
+  }
+}

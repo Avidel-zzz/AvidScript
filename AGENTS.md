@@ -1549,3 +1549,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first Phase 55 candidate UBT ran before the isolated worktree commit was integrated into the plugin directory referenced by the project, so it built the older main checkout and could not count as candidate evidence.
 - Prevention: before project UBT, compare the project-visible plugin `HEAD` with the intended evidence commit and integrate the reviewed candidate first; an isolated worktree build only counts when the project explicitly resolves that worktree.
+
+### 2026-07-29: audit every ABI consumer before formal sampling
+
+- Mistake: the split property ABI passed generator and primary runtime checks, but the real generated profile exposed a hard-coded legacy getter signature and the Data-Oriented lane still accepted only the legacy combined setter shape.
+- Prevention: every ABI shape change must enumerate generator, loader, prepared-call, semantic compatibility, Data-Oriented and lifecycle consumers, then load the semantic, generated and data-oriented C# profiles before formal sampling begins.
+
+### 2026-07-29: never infer a full commit identity from abbreviated output
+
+- Mistake: a follow-up command used a guessed expansion of an abbreviated commit hash and failed even though the intended commit existed.
+- Prevention: obtain candidate identity with `git rev-parse HEAD` and `git rev-parse 'HEAD^{tree}'`; copy those exact values into build, benchmark and evidence commands.
