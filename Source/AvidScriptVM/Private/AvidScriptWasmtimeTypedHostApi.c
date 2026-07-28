@@ -22,6 +22,18 @@ typedef struct AvidScriptWasmtimeSelfI32PairBridge
 	void* environment;
 } AvidScriptWasmtimeSelfI32PairBridge;
 
+typedef struct AvidScriptWasmtimeSelfPropertyI32GetBridge
+{
+	AvidScriptWasmtimeSelfPropertyI32GetCallback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfPropertyI32GetBridge;
+
+typedef struct AvidScriptWasmtimeSelfPropertyI32SetBridge
+{
+	AvidScriptWasmtimeSelfPropertyI32SetCallback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfPropertyI32SetBridge;
+
 typedef struct AvidScriptWasmtimeSelfGuestAddressBridge
 {
 	AvidScriptWasmtimeSelfGuestAddressCallback callback;
@@ -107,6 +119,44 @@ static wasm_trap_t* avidscript_wasmtime_self_i32_pair_trampoline(
 	if (count != 4)
 		return avidscript_wasmtime_typed_raw_arity_invalid();
 	if (bridge->callback(bridge->environment, args_and_results[0].i32, args_and_results[1].i32, args_and_results[2].i32, args_and_results[3].i32, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i32 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_self_property_i32_get_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfPropertyI32GetBridge* bridge = (AvidScriptWasmtimeSelfPropertyI32GetBridge*)environment;
+	int32_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i32, args_and_results[1].i32, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i32 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_self_property_i32_set_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfPropertyI32SetBridge* bridge = (AvidScriptWasmtimeSelfPropertyI32SetBridge*)environment;
+	int32_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 3)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i32, args_and_results[1].i32, args_and_results[2].i32, &value) != 0)
 		return avidscript_wasmtime_typed_host_failed();
 	args_and_results[0].i32 = value;
 	return NULL;
@@ -287,6 +337,40 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32_pair(
 	bridge->callback = callback;
 	bridge->environment = environment;
 	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 4, avidscript_wasmtime_self_i32_pair_trampoline, bridge, "Could not allocate the typed self-i32-pair function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyI32GetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfPropertyI32GetBridge* bridge = (AvidScriptWasmtimeSelfPropertyI32GetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure("Could not allocate the typed self-property-i32-get bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 2, avidscript_wasmtime_self_property_i32_get_trampoline, bridge, "Could not allocate the typed self-property-i32-get function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyI32SetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfPropertyI32SetBridge* bridge = (AvidScriptWasmtimeSelfPropertyI32SetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure("Could not allocate the typed self-property-i32-set bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 3, avidscript_wasmtime_self_property_i32_set_trampoline, bridge, "Could not allocate the typed self-property-i32-set function type.");
 }
 
 static AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_guest_address(
