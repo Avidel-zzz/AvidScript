@@ -56,6 +56,7 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::RegisterObject(
 	Slot.bOccupied = true;
 	ObjectToSlot.Add(ObjectKey, SlotIndex);
 	++LiveHandleCount;
+	AdvanceRevision();
 
 	const FAvidScriptObjectHandle Handle{ static_cast<uint32>(SlotIndex + 1), Slot.Generation };
 	SetSuccess(OutResult, Handle, Object, bIncludeObjectPath);
@@ -129,6 +130,7 @@ FAvidScriptObjectHandle FAvidScriptObjectRegistry::AcquireBorrowedObject(
 	Slot.bOccupied = true;
 	ObjectToSlot.Add(ObjectKey, SlotIndex);
 	++LiveHandleCount;
+	AdvanceRevision();
 
 	const FAvidScriptObjectHandle Handle{
 		static_cast<uint32>(SlotIndex + 1),
@@ -338,12 +340,26 @@ void FAvidScriptObjectRegistry::Reset()
 	ObjectToSlot.Reset();
 	LiveHandleCount = 0;
 	GenerationDomain = AdvanceGeneration(GenerationDomain);
+	AdvanceRevision();
+}
+
+uint64 FAvidScriptObjectRegistry::GetRevision() const
+{
+	check(IsInGameThread());
+	return Revision;
 }
 
 uint32 FAvidScriptObjectRegistry::AdvanceGeneration(uint32 Generation)
 {
 	const uint32 NextGeneration = Generation + 1;
 	return NextGeneration != 0 ? NextGeneration : 1;
+}
+
+void FAvidScriptObjectRegistry::AdvanceRevision()
+{
+	check(IsInGameThread());
+	const uint64 NextRevision = Revision + 1;
+	Revision = NextRevision != 0 ? NextRevision : 1;
 }
 
 void FAvidScriptObjectRegistry::ReleaseSlot(const int32 SlotIndex)
@@ -359,6 +375,7 @@ void FAvidScriptObjectRegistry::ReleaseSlot(const int32 SlotIndex)
 	FreeSlots.Add(SlotIndex);
 	check(LiveHandleCount > 0);
 	--LiveHandleCount;
+	AdvanceRevision();
 }
 
 void FAvidScriptObjectRegistry::SetSuccess(

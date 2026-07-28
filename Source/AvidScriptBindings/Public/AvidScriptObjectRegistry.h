@@ -91,12 +91,17 @@ public:
 		FAvidScriptObjectHandleResult& OutResult,
 		bool bIncludeObjectPath = true);
 	void Reset();
+	uint64 GetRevision() const;
 
 	int32 NumSlots() const { return Slots.Num(); }
 	int32 NumFreeSlots() const { return FreeSlots.Num(); }
 	int32 GetLiveHandleCount() const { return LiveHandleCount; }
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend struct FAvidScriptObjectRegistryTestAccessor;
+#endif
+
 	struct FSlot
 	{
 		TWeakObjectPtr<UObject> Object;
@@ -108,6 +113,7 @@ private:
 	};
 
 	static uint32 AdvanceGeneration(uint32 Generation);
+	void AdvanceRevision();
 	void ReleaseSlot(int32 SlotIndex);
 	static void SetSuccess(
 		FAvidScriptObjectHandleResult& OutResult,
@@ -127,4 +133,5 @@ private:
 	TMap<TObjectKey<UObject>, int32> ObjectToSlot;
 	int32 LiveHandleCount = 0;
 	uint32 GenerationDomain = 1;
+	uint64 Revision = 1;
 };
