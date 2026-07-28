@@ -657,6 +657,139 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 }
 
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	const uint32_t* cells,
+	size_t cell_count,
+	uint32_t* out_result_cells,
+	size_t result_cell_capacity,
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure)
+{
+	wasmtime_val_raw_t values[AVIDSCRIPT_WASMTIME_MAX_VALUES];
+	wasm_trap_t* trap = NULL;
+	wasmtime_error_t* error;
+	size_t parameter_index;
+	size_t result_index;
+	size_t cell_index = 0;
+	size_t result_cell_index = 0;
+	size_t value_count;
+	if (out_failure == NULL)
+	{
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	*out_failure = NULL;
+	if (store == NULL || function == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime store and resolved function are required.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	if (cell_count > 0 && cells == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime argument cells are required for a non-empty call frame.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	if (out_result_cell_count == NULL)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime result cell count output is required.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	*out_result_cell_count = 0;
+	if (cell_count != function->cell_count)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime call cell count does not match the resolved export ABI.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	if (function->result_cell_count > result_cell_capacity
+		|| (function->result_cell_count > 0 && out_result_cells == NULL))
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime result buffer is smaller than the resolved export ABI.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	for (parameter_index = 0; parameter_index < function->parameter_count; ++parameter_index)
+	{
+		uint64_t wide_bits;
+		switch (function->parameter_kinds[parameter_index])
+		{
+		case WASM_I32:
+			values[parameter_index].i32 = (int32_t)cells[cell_index++];
+			break;
+		case WASM_F32:
+			memcpy(&values[parameter_index].f32, &cells[cell_index], sizeof(float));
+			++cell_index;
+			break;
+		case WASM_I64:
+			wide_bits = (uint64_t)cells[cell_index]
+				| ((uint64_t)cells[cell_index + 1] << 32);
+			values[parameter_index].i64 = (int64_t)wide_bits;
+			cell_index += 2;
+			break;
+		case WASM_F64:
+			wide_bits = (uint64_t)cells[cell_index]
+				| ((uint64_t)cells[cell_index + 1] << 32);
+			memcpy(&values[parameter_index].f64, &wide_bits, sizeof(double));
+			cell_index += 2;
+			break;
+		default:
+			*out_failure = avidscript_wasmtime_local_failure(
+				"Wasmtime parameter kind is unsupported by the VM cell ABI.");
+			return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+		}
+	}
+	value_count = function->parameter_count > function->result_count
+		? function->parameter_count
+		: function->result_count;
+	error = wasmtime_func_call_unchecked(
+		store->context,
+		&function->value,
+		values,
+		value_count,
+		&trap);
+	if (error != NULL || trap != NULL)
+	{
+		*out_failure = avidscript_wasmtime_failure_new(error, trap);
+		return AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE;
+	}
+	for (result_index = 0; result_index < function->result_count; ++result_index)
+	{
+		uint64_t wide_bits;
+		switch (function->result_kinds[result_index])
+		{
+		case WASM_I32:
+			out_result_cells[result_cell_index++] = (uint32_t)values[result_index].i32;
+			break;
+		case WASM_F32:
+			memcpy(
+				&out_result_cells[result_cell_index++],
+				&values[result_index].f32,
+				sizeof(float));
+			break;
+		case WASM_I64:
+			wide_bits = (uint64_t)values[result_index].i64;
+			out_result_cells[result_cell_index++] = (uint32_t)wide_bits;
+			out_result_cells[result_cell_index++] = (uint32_t)(wide_bits >> 32);
+			break;
+		case WASM_F64:
+			memcpy(&wide_bits, &values[result_index].f64, sizeof(double));
+			out_result_cells[result_cell_index++] = (uint32_t)wide_bits;
+			out_result_cells[result_cell_index++] = (uint32_t)(wide_bits >> 32);
+			break;
+		default:
+			*out_failure = avidscript_wasmtime_local_failure(
+				"Wasmtime result kind is unsupported by the VM cell ABI.");
+			return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+		}
+	}
+	*out_result_cell_count = result_cell_index;
+	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
+}
+
 bool avidscript_wasmtime_memory_data(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeInstance* instance,
