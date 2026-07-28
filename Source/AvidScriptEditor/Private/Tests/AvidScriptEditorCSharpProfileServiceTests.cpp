@@ -1136,8 +1136,8 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest::RunT
 			TEXT("  \"binding_profile\": {\n")
 			TEXT("    \"package_name\": \"avidscript.test.generated_native_profile\",\n")
 			TEXT("    \"classes\": [{\n")
-			TEXT("      \"class_path\": \"/Script/Engine.Actor\",\n")
-			TEXT("      \"include_functions\": [\"K2_GetActorLocation\"]%s\n")
+			TEXT("      \"class_path\": \"/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject\",\n")
+			TEXT("      \"include_functions\": [\"ReservedHandleNames\"]%s\n")
 			TEXT("    }]\n")
 			TEXT("  }\n")
 			TEXT("}\n"),
@@ -1153,7 +1153,7 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest::RunT
 	};
 
 	const FString GeneratedField =
-		TEXT(",\n      \"generated_native_functions\": [\"K2_GetActorLocation\"]");
+		TEXT(",\n      \"generated_native_functions\": [\"ReservedHandleNames\"]");
 	FAvidScriptEditorCSharpProfileLoadResult Schema6Result;
 	TestFalse(
 		TEXT("Schema v6 rejects generated_native_functions"),
@@ -1190,7 +1190,7 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativeAuthorizationTest::RunT
 			TestEqual(
 				TEXT("Generated-native authorization reaches the resolved profile"),
 				ClassRule.GeneratedNativeFunctions[0],
-				FName(TEXT("K2_GetActorLocation")));
+				FName(TEXT("ReservedHandleNames")));
 		}
 	}
 	TestNotEqual(

@@ -777,6 +777,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 	}
 	else
 	{
+		OutResult.BackendInfo.Kind = ActiveBackendInfo.Kind;
+		OutResult.BackendInfo.ExecutionMode = ActiveBackendInfo.ExecutionMode;
+		OutResult.BackendInfo.ArtifactFormat = ActiveBackendInfo.ArtifactFormat;
+		OutResult.BackendInfo.Capabilities = ActiveBackendInfo.Capabilities;
 		OutResult.bTickCalled = false;
 		OutResult.ExportName.Reset();
 		OutResult.ImportModuleName.Reset();
@@ -885,10 +889,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 	}
 
 	OutResult.Metrics = Metrics;
-	if (bFullSnapshot)
-	{
-		CopyObservableStateToResult(OutResult);
-	}
+	CopyObservableStateToResult(OutResult);
 	return true;
 }
 

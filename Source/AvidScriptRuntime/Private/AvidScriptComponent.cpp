@@ -443,7 +443,7 @@ void UAvidScriptComponent::TickComponent(
 	{
 		FAvidScriptWasmSmokeResult Result;
 		const int32 PreviousTickCallCount = RuntimeStats.TickCallCount;
-		if (RuntimeSession->Tick(DeltaTime, Result))
+		if (RuntimeSession->TickLive(DeltaTime, Result))
 		{
 			const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
 			RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
@@ -464,7 +464,7 @@ void UAvidScriptComponent::TickComponent(
 					TEXT("AvidScript component tick | owner=%s | handle=%llu | module=%s | ticks=%d | tick_ms=%.4f"),
 					RuntimeStats.OwnerObjectPath.IsEmpty() ? TEXT("<none>") : *RuntimeStats.OwnerObjectPath,
 					RuntimeStats.OwnerHandle.ToUInt64(),
-					*Result.ModuleId,
+					*RuntimeStats.ModuleId,
 					RuntimeStats.TickCallCount,
 					Result.Metrics.TickCallMs);
 			}

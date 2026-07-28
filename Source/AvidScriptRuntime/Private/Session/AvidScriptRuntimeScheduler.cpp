@@ -27,6 +27,17 @@ void FAvidScriptRuntimeScheduler::Detach()
 
 bool FAvidScriptRuntimeScheduler::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
+	return Tick(
+		DeltaSeconds,
+		OutResult,
+		EAvidScriptWasmResultDetail::FullSnapshot);
+}
+
+bool FAvidScriptRuntimeScheduler::Tick(
+	const float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutResult,
+	const EAvidScriptWasmResultDetail ResultDetail)
+{
 	if (ActiveRuntime == nullptr)
 	{
 		SetSchedulerStateFailure(ActiveRuntime, OutResult);
@@ -36,7 +47,7 @@ bool FAvidScriptRuntimeScheduler::Tick(float DeltaSeconds, FAvidScriptWasmSmokeR
 	return ActiveRuntime->Tick(
 		DeltaSeconds,
 		OutResult,
-		EAvidScriptWasmResultDetail::FailureOnly);
+		ResultDetail);
 }
 
 EAvidScriptLifecycleState FAvidScriptRuntimeScheduler::GetLifecycleState() const

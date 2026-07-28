@@ -9,6 +9,10 @@ public:
 	void Detach();
 
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool Tick(
+		float DeltaSeconds,
+		FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail);
 	bool IsAttached() const { return ActiveRuntime != nullptr; }
 	bool IsAttachedTo(const FAvidScriptWasmRuntimeInstance* Runtime) const { return ActiveRuntime == Runtime; }
 	FAvidScriptWasmRuntimeInstance* GetActiveRuntime() const { return ActiveRuntime; }

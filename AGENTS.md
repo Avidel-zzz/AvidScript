@@ -1539,3 +1539,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: several read-only probes were packed into separator-heavy PowerShell invocations, making failure attribution and command audit unnecessarily ambiguous.
 - Prevention: every `shell_command` contains one logical command. Use separate tool calls for independent Git, file, status and test operations; pipelines that transform one command's output remain allowed, while `;`, `&&` and `||` composition remains prohibited.
+
+### 2026-07-29: reject shell separators before dispatch
+
+- Mistake: Phase 55 recovery again joined independent read-only Git and file probes with PowerShell semicolons despite the existing one-command rule.
+- Prevention: before dispatching any `shell_command`, scan the complete command string and reject it when it contains `;`, `&&` or `||`; status, diff, history and multi-file reads always use separate tool calls.
+
+### 2026-07-29: verify the project-visible candidate before UBT
+
+- Mistake: the first Phase 55 candidate UBT ran before the isolated worktree commit was integrated into the plugin directory referenced by the project, so it built the older main checkout and could not count as candidate evidence.
+- Prevention: before project UBT, compare the project-visible plugin `HEAD` with the intended evidence commit and integrate the reviewed candidate first; an isolated worktree build only counts when the project explicitly resolves that worktree.

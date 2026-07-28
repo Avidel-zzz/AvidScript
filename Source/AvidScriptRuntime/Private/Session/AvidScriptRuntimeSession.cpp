@@ -342,7 +342,27 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 
 bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	return TickLive(DeltaSeconds, OutResult);
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_tick"),
+			TEXT("tick was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(
+		ActiveGuestCallDepth,
+		ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (LiveExecutionObserverForTesting)
+	{
+		TFunction<void()> Observer =
+			MoveTemp(LiveExecutionObserverForTesting);
+		Observer();
+	}
+#endif
+	return Scheduler->Tick(DeltaSeconds, OutResult);
 }
 
 bool FAvidScriptRuntimeSession::DispatchEvent(
@@ -379,7 +399,10 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 		Observer();
 	}
 #endif
-	return Scheduler->Tick(DeltaSeconds, OutResult);
+	return Scheduler->Tick(
+		DeltaSeconds,
+		OutResult,
+		EAvidScriptWasmResultDetail::FailureOnly);
 }
 
 bool FAvidScriptRuntimeSession::DispatchEventLive(

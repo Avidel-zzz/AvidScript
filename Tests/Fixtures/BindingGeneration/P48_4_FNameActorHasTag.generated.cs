@@ -51,6 +51,19 @@ internal static class AvidScriptBindingPackage
     internal const string DescriptorHash = "285336c1bc133cd0fa72f2a7ebc96567d82eaea9c0e86a6f5527e61e76c7b92b";
 }
 
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
+internal sealed class AvidScriptDataLaneAttribute : Attribute
+{
+    internal AvidScriptDataLaneAttribute(string optimizationClass, int bindingOrdinal)
+    {
+        OptimizationClass = optimizationClass;
+        BindingOrdinal = bindingOrdinal;
+    }
+
+    internal string OptimizationClass { get; }
+    internal int BindingOrdinal { get; }
+}
+
 [StructLayout(LayoutKind.Sequential)]
 public readonly struct FVector
 {

@@ -242,6 +242,10 @@ bool WriteAvidScriptRealCancelFixture(
 		FPaths::Combine(TestRoot, TEXT("CancelableBuildLeaf.ps1")));
 	const FString BuildScriptPath = NormalizeAvidScriptRealCancelPath(
 		FPaths::Combine(TestRoot, TEXT("CancelableBuild.ps1")));
+	const FString PowerShellPath = NormalizeAvidScriptRealCancelPath(
+		FPaths::Combine(
+			FPlatformMisc::GetEnvironmentVariable(TEXT("SystemRoot")),
+			TEXT("System32/WindowsPowerShell/v1.0/powershell.exe")));
 	OutProfilePath = NormalizeAvidScriptRealCancelPath(
 		FPaths::Combine(TestRoot, TEXT("cancel.csharp-profile.json")));
 	OutReportPath = NormalizeAvidScriptRealCancelPath(
@@ -256,7 +260,8 @@ bool WriteAvidScriptRealCancelFixture(
 		FPaths::Combine(TestRoot, TEXT("leaf.pid")));
 	const FString TriggerPath = NormalizeAvidScriptRealCancelPath(
 		FPaths::Combine(OutWorkspaceRoot, TEXT("Trigger.cs")));
-	if (!IFileManager::Get().MakeDirectory(*OutWorkspaceRoot, true)
+	if (!FPaths::FileExists(PowerShellPath)
+		|| !IFileManager::Get().MakeDirectory(*OutWorkspaceRoot, true)
 		|| !IFileManager::Get().MakeDirectory(*OutputRoot, true))
 	{
 		return false;
@@ -270,10 +275,11 @@ Start-Sleep -Seconds 60
 	const FString ProjectText = FString::Printf(
 		TEXT(R"XML(<Project DefaultTargets="Hold" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Target Name="Hold">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;%s&quot; -PidPath &quot;%s&quot;" />
+    <Exec Command="&quot;%s&quot; -NoProfile -ExecutionPolicy Bypass -File &quot;%s&quot; -PidPath &quot;%s&quot;" />
   </Target>
 </Project>
 )XML"),
+		*PowerShellPath,
 		*LeafScriptPath,
 		*OutLeafPidPath);
 	const FString BuildScript = FString::Printf(
@@ -454,14 +460,31 @@ bool FAvidScriptEditorCSharpAutoLiveReloadRealCancelTest::RunTest(
 		}
 		FPlatformProcess::Sleep(0.01f);
 	}
+	const bool bDotNetChildRunning =
+		DotNetProcessId > 0
+		&& FPlatformProcess::IsApplicationRunning(DotNetProcessId);
+	const bool bLeafChildRunning =
+		LeafProcessId > 0
+		&& FPlatformProcess::IsApplicationRunning(LeafProcessId);
+	if (!bDotNetChildRunning || !bLeafChildRunning)
+	{
+		const FAvidScriptEditorCSharpLiveReloadServiceResult& DiagnosticResult =
+			Service.GetLastResult();
+		AddError(FString::Printf(
+			TEXT("Real cancel child launch diagnostic | status=%d | stage=%d | category=%s | cause=%s | message=%s | output=%s"),
+			static_cast<int32>(DiagnosticResult.Status),
+			static_cast<int32>(DiagnosticResult.AsyncProgress.Stage),
+			*DiagnosticResult.ErrorCategory,
+			*DiagnosticResult.CauseErrorCategory,
+			*DiagnosticResult.ErrorMessage,
+			*DiagnosticResult.AsyncProgress.LatestOutputLine));
+	}
 	TestTrue(
 		TEXT("Real cancel build launches dotnet child"),
-		DotNetProcessId > 0
-			&& FPlatformProcess::IsApplicationRunning(DotNetProcessId));
+		bDotNetChildRunning);
 	TestTrue(
 		TEXT("Real cancel build launches nested PowerShell child"),
-		LeafProcessId > 0
-			&& FPlatformProcess::IsApplicationRunning(LeafProcessId));
+		bLeafChildRunning);
 
 	const int32 TickCountBeforeCancel =
 		Component->GetRuntimeStats().TickCallCount;

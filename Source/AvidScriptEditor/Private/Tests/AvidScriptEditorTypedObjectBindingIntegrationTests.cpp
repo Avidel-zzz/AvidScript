@@ -895,7 +895,7 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		&& FrontendReport.bSemanticSucceeded
 		&& FrontendReport.bGuestIrSucceeded
 		&& FrontendReport.SemanticSchemaVersion >= 7
-		&& FrontendReport.GuestIrSchemaVersion == 1);
+		&& FrontendReport.GuestIrSchemaVersion == 2);
 	const FString SemanticPath =
 		ResolveAvidScriptTypedProjectApiArtifactPath(FrontendReport.SemanticArtifact);
 	const FString GuestIrPath =
