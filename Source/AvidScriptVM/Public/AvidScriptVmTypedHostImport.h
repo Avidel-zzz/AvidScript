@@ -9,6 +9,8 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	I32PairToI32,
 	SelfI32PairToI32,
 	SelfPropertyI32GetSet,
+	SelfPropertyI32Get,
+	SelfPropertyI32Set,
 	SelfVectorValue,
 	StableObjectRoundtrip,
 	CommandBufferSubmit
@@ -23,6 +25,63 @@ enum class EAvidScriptVmTypedHostStatus : uint8
 
 static_assert(sizeof(EAvidScriptVmTypedHostShape) == 1);
 static_assert(sizeof(EAvidScriptVmTypedHostStatus) == 1);
+
+using FAvidScriptVmPreparedSelfI32PairTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue);
+
+using FAvidScriptVmPreparedSelfPropertyI32GetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32& OutValue);
+
+using FAvidScriptVmPreparedSelfPropertyI32SetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value);
+
+struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
+{
+	void* Context = nullptr;
+	FAvidScriptVmPreparedSelfI32PairTarget SelfI32Pair = nullptr;
+	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
+	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
+
+	bool IsBoundForShape(const EAvidScriptVmTypedHostShape Shape) const
+	{
+		if (Context == nullptr)
+		{
+			return false;
+		}
+		switch (Shape)
+		{
+		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
+			return SelfI32Pair != nullptr;
+		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
+			return SelfPropertyI32Get != nullptr;
+		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
+			return SelfPropertyI32Set != nullptr;
+		default:
+			return false;
+		}
+	}
+
+	bool HasAnyTarget() const
+	{
+		return SelfI32Pair != nullptr
+			|| SelfPropertyI32Get != nullptr
+			|| SelfPropertyI32Set != nullptr;
+	}
+};
 
 class AVIDSCRIPTVM_API IAvidScriptVmTypedHostDispatcher
 {
@@ -85,4 +144,5 @@ struct AVIDSCRIPTVM_API FAvidScriptVmTypedHostImport
 	FString ImportName;
 	FString Signature;
 	EAvidScriptVmTypedHostShape Shape = EAvidScriptVmTypedHostShape::None;
+	FAvidScriptVmPreparedTypedHostTarget PreparedTarget;
 };

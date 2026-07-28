@@ -365,6 +365,77 @@ public:
 	int32 Bias = 0;
 };
 
+struct FPreparedSelfI32PairContext
+{
+	int32 CallCount = 0;
+	int32 LastSelfSlot = 0;
+	int32 LastSelfGeneration = 0;
+	int32 Bias = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokePreparedSelfI32PairForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	FPreparedSelfI32PairContext* Prepared =
+		static_cast<FPreparedSelfI32PairContext*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastSelfSlot = SelfSlot;
+	Prepared->LastSelfGeneration = SelfGeneration;
+	OutValue =
+		SelfSlot + SelfGeneration + Left + Right + Prepared->Bias;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+struct FPreparedPropertyI32Context
+{
+	int32 GetCallCount = 0;
+	int32 SetCallCount = 0;
+	int32 Value = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokePreparedPropertyI32GetForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	int32& OutValue)
+{
+	FPreparedPropertyI32Context* Prepared =
+		static_cast<FPreparedPropertyI32Context*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->GetCallCount;
+	OutValue = Prepared->Value + SelfSlot + SelfGeneration;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus InvokePreparedPropertyI32SetForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value)
+{
+	FPreparedPropertyI32Context* Prepared =
+		static_cast<FPreparedPropertyI32Context*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->SetCallCount;
+	Prepared->Value = Value + SelfSlot + SelfGeneration;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 bool ResolveAndCallTypedRun(
 	FAutomationTestBase& Test,
 	IAvidScriptVmBackend& Backend,
@@ -485,6 +556,140 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		CommandArguments,
 		30,
 		&FTypedHostDispatcher::CommandBufferCalls);
+
+	FAvidScriptVmError PreparedError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedBackend =
+		CreateTypedWasmtimeBackend(PreparedError);
+	FTypedHostDispatcher PreparedFallbackDispatcher;
+	PreparedFallbackDispatcher.Bias = 1000;
+	FPreparedSelfI32PairContext PreparedContext;
+	PreparedContext.Bias = 5;
+	FAvidScriptVmBindingPackage PreparedPackage =
+		MakeTypedBindingPackage(TEXT("(iiii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfI32PairToI32,
+			TEXT("(iiii)i"))
+	};
+	PreparedImports[0].PreparedTarget.Context = &PreparedContext;
+	PreparedImports[0].PreparedTarget.SelfI32Pair =
+		&InvokePreparedSelfI32PairForTest;
+	FAvidScriptVmLoadConfig PreparedConfig;
+	PreparedConfig.BindingPackage = &PreparedPackage;
+	PreparedConfig.TypedHostDispatcher = &PreparedFallbackDispatcher;
+	PreparedConfig.TypedHostImports = PreparedImports;
+	TestTrue(
+		TEXT("prepared typed fixture loads"),
+		PreparedBackend->Load(
+			BuildTypedHostFixture(SelfPairArguments),
+			TEXT("typed_prepared"),
+			PreparedConfig,
+			PreparedError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedBackend,
+		15,
+		PreparedError);
+	TestEqual(
+		TEXT("prepared target is called exactly once"),
+		PreparedContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("prepared target bypasses the virtual dispatcher"),
+		PreparedFallbackDispatcher.SelfI32PairCalls,
+		0);
+
+	FPreparedPropertyI32Context PreparedPropertyContext;
+	PreparedPropertyContext.Value = 20;
+	FAvidScriptVmError PreparedGetterError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedGetterBackend =
+		CreateTypedWasmtimeBackend(PreparedGetterError);
+	FAvidScriptVmBindingPackage PreparedGetterPackage =
+		MakeTypedBindingPackage(TEXT("(ii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedGetterImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfPropertyI32Get,
+			TEXT("(ii)i"))
+	};
+	PreparedGetterImports[0].PreparedTarget.Context =
+		&PreparedPropertyContext;
+	PreparedGetterImports[0].PreparedTarget.SelfPropertyI32Get =
+		&InvokePreparedPropertyI32GetForTest;
+	FAvidScriptVmLoadConfig PreparedGetterConfig;
+	PreparedGetterConfig.BindingPackage = &PreparedGetterPackage;
+	PreparedGetterConfig.TypedHostDispatcher = &PreparedFallbackDispatcher;
+	PreparedGetterConfig.TypedHostImports = PreparedGetterImports;
+	TestTrue(
+		TEXT("split prepared property getter loads"),
+		PreparedGetterBackend->Load(
+			BuildTypedHostFixture(TArray<int32>{2, 3}),
+			TEXT("typed_prepared_property_get"),
+			PreparedGetterConfig,
+			PreparedGetterError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedGetterBackend,
+		25,
+		PreparedGetterError);
+	TestEqual(
+		TEXT("split property getter calls the prepared target once"),
+		PreparedPropertyContext.GetCallCount,
+		1);
+
+	FAvidScriptVmError PreparedSetterError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedSetterBackend =
+		CreateTypedWasmtimeBackend(PreparedSetterError);
+	FAvidScriptVmBindingPackage PreparedSetterPackage =
+		MakeTypedBindingPackage(TEXT("(iii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedSetterImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfPropertyI32Set,
+			TEXT("(iii)i"))
+	};
+	PreparedSetterImports[0].PreparedTarget.Context =
+		&PreparedPropertyContext;
+	PreparedSetterImports[0].PreparedTarget.SelfPropertyI32Set =
+		&InvokePreparedPropertyI32SetForTest;
+	FAvidScriptVmLoadConfig PreparedSetterConfig;
+	PreparedSetterConfig.BindingPackage = &PreparedSetterPackage;
+	PreparedSetterConfig.TypedHostDispatcher = &PreparedFallbackDispatcher;
+	PreparedSetterConfig.TypedHostImports = PreparedSetterImports;
+	TestTrue(
+		TEXT("split prepared property setter loads"),
+		PreparedSetterBackend->Load(
+			BuildTypedHostFixture(TArray<int32>{2, 3, 17}),
+			TEXT("typed_prepared_property_set"),
+			PreparedSetterConfig,
+			PreparedSetterError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedSetterBackend,
+		1,
+		PreparedSetterError);
+	TestEqual(
+		TEXT("split property setter calls the prepared target once"),
+		PreparedPropertyContext.SetCallCount,
+		1);
+	TestEqual(
+		TEXT("split property setter forwards the scalar value without guest memory"),
+		PreparedPropertyContext.Value,
+		22);
+
+	TArray<FAvidScriptVmTypedHostImport> PartialPreparedImports =
+		PreparedImports;
+	PartialPreparedImports[0].PreparedTarget.SelfI32Pair = nullptr;
+	PreparedConfig.TypedHostImports = PartialPreparedImports;
+	TestFalse(
+		TEXT("partial prepared target rejects load"),
+		PreparedBackend->Load(
+			BuildTypedHostFixture(SelfPairArguments),
+			TEXT("typed_prepared_partial"),
+			PreparedConfig,
+			PreparedError));
+	TestEqual(
+		TEXT("partial prepared target category"),
+		PreparedError.Category,
+		FString(TEXT("typed_host_prepared_target_invalid")));
 
 	Dispatcher.Status = EAvidScriptVmTypedHostStatus::Rejected;
 	FAvidScriptVmExportHandle RejectHandle;

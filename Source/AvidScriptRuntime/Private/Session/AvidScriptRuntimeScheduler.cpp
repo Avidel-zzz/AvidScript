@@ -33,7 +33,10 @@ bool FAvidScriptRuntimeScheduler::Tick(float DeltaSeconds, FAvidScriptWasmSmokeR
 		return false;
 	}
 
-	return ActiveRuntime->Tick(DeltaSeconds, OutResult);
+	return ActiveRuntime->Tick(
+		DeltaSeconds,
+		OutResult,
+		EAvidScriptWasmResultDetail::FailureOnly);
 }
 
 EAvidScriptLifecycleState FAvidScriptRuntimeScheduler::GetLifecycleState() const

@@ -83,6 +83,20 @@ struct FAvidScriptBindingInvocationContext
 	FAvidScriptBindingInvocationInstrumentation* InvocationInstrumentation = nullptr;
 };
 
+struct FAvidScriptPreparedGeneratedBinding
+{
+	uint32 BindingOrdinal = MAX_uint32;
+	FAvidScriptGeneratedBindingLease Lease;
+	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	UClass* ExpectedClass = nullptr;
+	FProperty* ReflectedProperty = nullptr;
+	EAvidScriptBindingReloadEffect ReloadEffect =
+		EAvidScriptBindingReloadEffect::Unsupported;
+	bool bPropertyWrite = false;
+	bool bPropertyWriteHasFunction = false;
+	bool bRequiresWriteAccess = false;
+};
+
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingPackage
 {
 public:
@@ -123,6 +137,9 @@ public:
 	bool BuildTypedHostImports(
 		TArray<FAvidScriptVmTypedHostImport>& OutImports,
 		FString& OutError) const;
+	bool BuildPreparedGeneratedBindings(
+		TArray<FAvidScriptPreparedGeneratedBinding>& OutBindings,
+		FString& OutError) const;
 	bool TryGetGeneratedBinding(
 		uint32 Ordinal,
 		const FAvidScriptGeneratedBindingEntry*& OutEntry,
@@ -137,6 +154,11 @@ public:
 		bool& bOutRequiresWriteAccess) const;
 	bool PrepareGeneratedHostEffect(
 		uint32 Ordinal,
+		const FAvidScriptObjectHandle& ReceiverHandle,
+		UObject& Receiver,
+		const FAvidScriptBindingInvocationContext& Context) const;
+	bool PrepareGeneratedHostEffect(
+		const FAvidScriptPreparedGeneratedBinding& Binding,
 		const FAvidScriptObjectHandle& ReceiverHandle,
 		UObject& Receiver,
 		const FAvidScriptBindingInvocationContext& Context) const;

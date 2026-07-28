@@ -1471,6 +1471,29 @@ bool FAvidScriptRuntimeGeneratedSelfCapabilityBoundaryTest::RunTest(
 		ResolvedObject,
 		static_cast<UObject*>(SecondOwner.Get()));
 	Runtime.EndTypedCallbackEpochForTesting();
+	Runtime.BeginTypedCallbackEpochForTesting();
+	TestTrue(
+		TEXT("Stable registry revision permits Self reuse across callback epochs"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(SecondHandle.Slot),
+			static_cast<int32>(SecondHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	FAvidScriptObjectHandleResult ReleaseResult;
+	TestTrue(
+		TEXT("Second owner handle is released for revision invalidation"),
+		Registry.ReleaseHandle(
+			SecondHandle,
+			ReleaseResult,
+			false));
+	TestFalse(
+		TEXT("Registry revision invalidates a cached Self capability immediately"),
+		Runtime.ResolveSelfCapabilityForTesting(
+			static_cast<int32>(SecondHandle.Slot),
+			static_cast<int32>(SecondHandle.Generation),
+			UObject::StaticClass(),
+			ResolvedObject));
+	Runtime.EndTypedCallbackEpochForTesting();
 
 	TWeakObjectPtr<UWorld> StaleWorld;
 	{
@@ -1695,6 +1718,33 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 		TEXT("Typed import publication count is exact"),
 		TypedImports.Num(),
 		1);
+	TArray<FAvidScriptPreparedGeneratedBinding> PreparedBindings;
+	TestTrue(
+		TEXT("Active leases publish one complete prepared binding list"),
+		FunctionPackage->BuildPreparedGeneratedBindings(
+			PreparedBindings,
+			TypedImportError));
+	TestEqual(
+		TEXT("Prepared binding publication count is exact"),
+		PreparedBindings.Num(),
+		1);
+	TestEqual(
+		TEXT("Prepared binding freezes the ordinal"),
+		PreparedBindings[0].BindingOrdinal,
+		0u);
+	TestEqual(
+		TEXT("Prepared binding freezes the expected class"),
+		PreparedBindings[0].ExpectedClass,
+		AAvidScriptActorBindingTestActor::StaticClass());
+	TestTrue(
+		TEXT("Prepared binding retains host-effect semantics"),
+		FunctionPackage->PrepareGeneratedHostEffect(
+			PreparedBindings[0],
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
+	const FAvidScriptPreparedGeneratedBinding PreparedBinding =
+		PreparedBindings[0];
 	GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
 	TestFalse(
 		TEXT("Revocation between package load and backend load aborts publication"),
@@ -1708,6 +1758,21 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 		TEXT("Revoked typed import publication uses the stable category"),
 		TypedImportError,
 		FString(TEXT("generated_binding_unavailable")));
+	TestFalse(
+		TEXT("Revocation aborts prepared binding publication"),
+		FunctionPackage->BuildPreparedGeneratedBindings(
+			PreparedBindings,
+			TypedImportError));
+	TestTrue(
+		TEXT("Revoked prepared binding publication leaves no partial list"),
+		PreparedBindings.IsEmpty());
+	TestFalse(
+		TEXT("A previously prepared host-effect frame fails closed after revoke"),
+		FunctionPackage->PrepareGeneratedHostEffect(
+			PreparedBinding,
+			StableReceiverHandle,
+			*StableReceiver,
+			Context));
 	return true;
 }
 #endif

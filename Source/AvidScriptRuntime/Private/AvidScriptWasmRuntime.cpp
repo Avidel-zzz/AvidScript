@@ -8,9 +8,22 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWasmRuntime, Log, All);
 
+struct FAvidScriptPreparedGeneratedHostCall
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
+	FAvidScriptPreparedGeneratedBinding Binding;
+};
+
 namespace
 {
 constexpr uint32 AvidScriptWasmStackSize = 64 * 1024;
+const FString AvidScriptBeginPlayExportName(TEXT("avid_on_begin_play"));
+const FString AvidScriptTickExportName(TEXT("avid_on_tick"));
+const FString AvidScriptEventExportName(TEXT("avid_on_event"));
+const FString AvidScriptGameplayEventExportName(
+	TEXT("avid_on_gameplay_event"));
+const FString AvidScriptEndPlayExportName(TEXT("avid_on_end_play"));
+const FString AvidScriptTimerExportName(TEXT("avid_on_timer"));
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
@@ -214,19 +227,18 @@ bool CallVmExport(
 	IAvidScriptVmBackend* Backend,
 	FAvidScriptVmExportHandle& CachedHandle,
 	const FString& ModuleId,
-	const char* ExportName,
+	const FString& ExportName,
 	uint32 ArgCount,
 	const uint32* Args,
 	const FAvidScriptWasmDebugMap* DebugMap,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	const FString ExportNameText(UTF8_TO_TCHAR(ExportName));
 	if (Backend == nullptr)
 	{
 		FAvidScriptVmError Error;
 		Error.Category = TEXT("backend_unavailable");
 		Error.Details = TEXT("No VM backend is attached to the runtime instance.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
+		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
 		return false;
 	}
 
@@ -235,14 +247,14 @@ bool CallVmExport(
 		FAvidScriptVmError Error;
 		Error.Category = TEXT("invalid_arguments");
 		Error.Details = TEXT("The runtime call exceeds the VM fixed cell capacity.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
+		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
 		return false;
 	}
 
 	FAvidScriptVmError Error;
-	if (!CachedHandle.IsValid() && !Backend->ResolveExport(ExportNameText, CachedHandle, Error))
+	if (!CachedHandle.IsValid() && !Backend->ResolveExport(ExportName, CachedHandle, Error))
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
+		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
 		return false;
 	}
 
@@ -254,7 +266,7 @@ bool CallVmExport(
 	}
 	if (!Backend->Call(CachedHandle, Frame, Error))
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportNameText, Error, DebugMap);
+		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
 		return false;
 	}
 	return true;
@@ -278,6 +290,116 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
 FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
 {
 	Unload();
+}
+
+bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
+	FString& OutError)
+{
+	OutError.Reset();
+	TypedHostImports.Reset();
+	PreparedGeneratedHostCalls.Reset();
+	if (!BindingPackage.IsValid())
+	{
+		return true;
+	}
+	if (!BindingPackage->BuildTypedHostImports(TypedHostImports, OutError))
+	{
+		return false;
+	}
+
+	TArray<FAvidScriptPreparedGeneratedBinding> PreparedBindings;
+	if (!BindingPackage->BuildPreparedGeneratedBindings(
+			PreparedBindings,
+			OutError))
+	{
+		TypedHostImports.Reset();
+		return false;
+	}
+	if (PreparedBindings.Num() != TypedHostImports.Num())
+	{
+		TypedHostImports.Reset();
+		OutError = TEXT("generated_binding_prepared_count_mismatch");
+		return false;
+	}
+
+	PreparedGeneratedHostCalls.Reserve(PreparedBindings.Num());
+	for (int32 Index = 0; Index < TypedHostImports.Num(); ++Index)
+	{
+		FAvidScriptVmTypedHostImport& Import = TypedHostImports[Index];
+		const FAvidScriptPreparedGeneratedBinding& Binding =
+			PreparedBindings[Index];
+		if (Import.BindingOrdinal != Binding.BindingOrdinal
+			|| Binding.Entry == nullptr)
+		{
+			TypedHostImports.Reset();
+			PreparedGeneratedHostCalls.Reset();
+			OutError = TEXT("generated_binding_prepared_identity_mismatch");
+			return false;
+		}
+		if (Import.Shape
+				!= EAvidScriptVmTypedHostShape::SelfI32PairToI32
+			&& Import.Shape
+				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Get
+			&& Import.Shape
+				!= EAvidScriptVmTypedHostShape::SelfPropertyI32Set)
+		{
+			continue;
+		}
+		const bool bScalarShapeMatches =
+			Import.Shape == EAvidScriptVmTypedHostShape::SelfI32PairToI32
+			&& Binding.Entry->Shape
+				== EAvidScriptGeneratedBindingShape::I32PairToI32
+			&& Binding.Entry->I32PairCall != nullptr;
+		const bool bPropertyGetShapeMatches =
+			Import.Shape == EAvidScriptVmTypedHostShape::SelfPropertyI32Get
+			&& Binding.Entry->Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Get
+			&& Binding.Entry->PropertyI32GetCall != nullptr;
+		const bool bPropertySetShapeMatches =
+			Import.Shape == EAvidScriptVmTypedHostShape::SelfPropertyI32Set
+			&& Binding.Entry->Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Set
+			&& Binding.Entry->PropertyI32SetCall != nullptr;
+		if (Binding.Entry->ReceiverMode
+				!= EAvidScriptGeneratedReceiverMode::SelfBound
+			|| (!bScalarShapeMatches
+				&& !bPropertyGetShapeMatches
+				&& !bPropertySetShapeMatches))
+		{
+			TypedHostImports.Reset();
+			PreparedGeneratedHostCalls.Reset();
+			OutError = TEXT("generated_binding_prepared_shape_mismatch");
+			return false;
+		}
+
+		TUniquePtr<FAvidScriptPreparedGeneratedHostCall> Call =
+			MakeUnique<FAvidScriptPreparedGeneratedHostCall>();
+		Call->Runtime = this;
+		Call->Binding = Binding;
+		Import.PreparedTarget.Context = Call.Get();
+		switch (Import.Shape)
+		{
+		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
+			Import.PreparedTarget.SelfI32Pair =
+				&FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32Pair;
+			break;
+		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
+			Import.PreparedTarget.SelfPropertyI32Get =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedSelfPropertyI32Get;
+			break;
+		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
+			Import.PreparedTarget.SelfPropertyI32Set =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedSelfPropertyI32Set;
+			break;
+		default:
+			checkNoEntry();
+			break;
+		}
+		PreparedGeneratedHostCalls.Add(MoveTemp(Call));
+	}
+	return true;
 }
 
 bool FAvidScriptWasmRuntimeInstance::ReadStateBytes(
@@ -428,9 +550,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	{
 		BindingInvocationScratch.SetNumUninitialized(BindingPackage->GetRequiredScratchSize());
 		FString TypedImportError;
-		if (!BindingPackage->BuildTypedHostImports(
-				TypedHostImports,
-				TypedImportError))
+		if (!BuildPreparedTypedHostImports(TypedImportError))
 		{
 			SetFailure(
 				OutResult,
@@ -444,6 +564,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 			DebugMap.Reset();
 			BindingInvocationScratch.Reset();
 			TypedHostImports.Reset();
+			PreparedGeneratedHostCalls.Reset();
 			return false;
 		}
 	}
@@ -451,6 +572,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	{
 		BindingInvocationScratch.Reset();
 		TypedHostImports.Reset();
+		PreparedGeneratedHostCalls.Reset();
 	}
 
 	FAvidScriptVmLoadConfig Config;
@@ -475,6 +597,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		DebugMap.Reset();
 		BindingInvocationScratch.Reset();
 		TypedHostImports.Reset();
+		PreparedGeneratedHostCalls.Reset();
 		return false;
 	}
 
@@ -492,7 +615,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 }
 bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 	const TArray<FString>& RequiredExports,
-	FAvidScriptWasmSmokeResult& OutResult) const
+	FAvidScriptWasmSmokeResult& OutResult)
 {
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
@@ -523,6 +646,31 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 		{
 			SetFailureFromVmError(OutResult, ModuleId, RequiredExport, Error, DebugMap.Get());
 			return false;
+		}
+		if (RequiredExport == AvidScriptBeginPlayExportName)
+		{
+			BeginPlayExport = Handle;
+		}
+		else if (RequiredExport == AvidScriptTickExportName)
+		{
+			TickExport = Handle;
+		}
+		else if (RequiredExport == AvidScriptEndPlayExportName)
+		{
+			EndPlayExport = Handle;
+		}
+		else if (RequiredExport == AvidScriptTimerExportName)
+		{
+			TimerExport = Handle;
+		}
+		else if (RequiredExport == AvidScriptEventExportName)
+		{
+			EventExport = Handle;
+		}
+		else if (RequiredExport == AvidScriptGameplayEventExportName)
+		{
+			GameplayEventExport = Handle;
+			bGameplayEventExportLookupAttempted = true;
 		}
 	}
 	return true;
@@ -579,7 +727,7 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 		VmBackend.Get(),
 		BeginPlayExport,
 		ModuleId,
-		"avid_on_begin_play",
+		AvidScriptBeginPlayExportName,
 		0,
 		nullptr,
 		DebugMap.Get(),
@@ -610,7 +758,34 @@ bool FAvidScriptWasmRuntimeInstance::BeginPlay(FAvidScriptWasmSmokeResult& OutRe
 
 bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
+	return Tick(
+		DeltaSeconds,
+		OutResult,
+		EAvidScriptWasmResultDetail::FullSnapshot);
+}
+
+bool FAvidScriptWasmRuntimeInstance::Tick(
+	const float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutResult,
+	const EAvidScriptWasmResultDetail ResultDetail)
+{
+	const bool bFullSnapshot =
+		ResultDetail == EAvidScriptWasmResultDetail::FullSnapshot;
+	if (bFullSnapshot)
+	{
+		PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
+	}
+	else
+	{
+		OutResult.bTickCalled = false;
+		OutResult.ExportName.Reset();
+		OutResult.ImportModuleName.Reset();
+		OutResult.ImportName.Reset();
+		OutResult.ErrorCategory.Reset();
+		OutResult.NextAction.Reset();
+		OutResult.ErrorMessage.Reset();
+		OutResult.DiagnosticFrames.Reset();
+	}
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
 	OutResult.bModuleInstantiated = IsLoaded();
@@ -619,6 +794,13 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 
 	if (!IsLoaded())
 	{
+		if (!bFullSnapshot)
+		{
+			PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
+			OutResult.bRuntimeInitialized = false;
+			OutResult.bModuleLoaded = false;
+			OutResult.bModuleInstantiated = false;
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -632,6 +814,15 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 
 	if (LifecycleState.GetState() != EAvidScriptLifecycleState::Running)
 	{
+		if (!bFullSnapshot)
+		{
+			PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
+			OutResult.bRuntimeInitialized = IsLoaded();
+			OutResult.bModuleLoaded = IsLoaded();
+			OutResult.bModuleInstantiated = IsLoaded();
+			OutResult.bBeginPlayCalled = bHasBegunPlay;
+			OutResult.bEndPlayCalled = bHasEndedPlay;
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -656,7 +847,7 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		VmBackend.Get(),
 		TickExport,
 		ModuleId,
-		"avid_on_tick",
+		AvidScriptTickExportName,
 		UE_ARRAY_COUNT(TickArgs),
 		TickArgs,
 		DebugMap.Get(),
@@ -665,6 +856,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	if (!bTickCalled)
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		OutResult.ModuleId = ModuleId;
+		OutResult.BackendInfo = ActiveBackendInfo;
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
@@ -680,6 +873,8 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 
 	if (!ExecuteDueTimerCallbacks(OutResult))
 	{
+		OutResult.ModuleId = ModuleId;
+		OutResult.BackendInfo = ActiveBackendInfo;
 		OutResult.Metrics = Metrics;
 		OutResult.bTickCalled = true;
 		OutResult.TickCallCount = TickCallCount;
@@ -690,7 +885,10 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 	}
 
 	OutResult.Metrics = Metrics;
-	CopyObservableStateToResult(OutResult);
+	if (bFullSnapshot)
+	{
+		CopyObservableStateToResult(OutResult);
+	}
 	return true;
 }
 
@@ -742,7 +940,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 		VmBackend.Get(),
 		EventExport,
 		ModuleId,
-		"avid_on_event",
+		AvidScriptEventExportName,
 		UE_ARRAY_COUNT(EventArgs),
 		EventArgs,
 		DebugMap.Get(),
@@ -771,7 +969,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	constexpr const TCHAR* ExportName = TEXT("avid_on_gameplay_event");
+	const FString& ExportName = AvidScriptGameplayEventExportName;
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	OutResult.bRuntimeInitialized = IsLoaded();
 	OutResult.bModuleLoaded = IsLoaded();
@@ -857,10 +1055,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const double EventStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
 	const bool bGameplayEventCalled = CallVmExport(
-		VmBackend.Get(),
+			VmBackend.Get(),
 			GameplayEventExport,
 			ModuleId,
-			"avid_on_gameplay_event",
+			AvidScriptGameplayEventExportName,
 			UE_ARRAY_COUNT(EventArgs),
 		EventArgs,
 		DebugMap.Get(),
@@ -941,7 +1139,11 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 
 	bEndPlayAttempted = true;
 	FAvidScriptVmError EndPlayResolveError;
-	if (!EndPlayExport.IsValid() && !VmBackend->ResolveExport(TEXT("avid_on_end_play"), EndPlayExport, EndPlayResolveError))
+	if (!EndPlayExport.IsValid()
+		&& !VmBackend->ResolveExport(
+			AvidScriptEndPlayExportName,
+			EndPlayExport,
+			EndPlayResolveError))
 	{
 		Metrics.EndPlayCallMs = 0.0;
 		OutResult.Metrics = Metrics;
@@ -958,7 +1160,7 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 		VmBackend.Get(),
 		EndPlayExport,
 		ModuleId,
-		"avid_on_end_play",
+		AvidScriptEndPlayExportName,
 		0,
 		nullptr,
 		DebugMap.Get(),
@@ -1023,9 +1225,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 		VmBackend->Unload();
 		VmBackend.Reset();
 	}
+	PreparedGeneratedHostCalls.Reset();
+	TypedHostImports.Reset();
 	BindingPackage.Reset();
 	DebugMap.Reset();
-	TypedHostImports.Reset();
 	BindingInvocationScratch.Reset();
 	CallbackEpochStack.Reset();
 	InvalidateSelfCapability();
@@ -2176,7 +2379,7 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmo
 			VmBackend.Get(),
 			TimerExport,
 			ModuleId,
-			"avid_on_timer",
+			AvidScriptTimerExportName,
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
 			DebugMap.Get(),
@@ -2374,8 +2577,10 @@ bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
 	}
 
 	const uint64 CallbackEpoch = CallbackEpochStack.Last();
-	if (SelfCapability.CallbackEpoch == CallbackEpoch
-		&& SelfCapability.ReloadEpoch == ReloadEpoch
+	const uint64 RegistryRevision =
+		HostContext.ObjectRegistry->GetRevision();
+	if (SelfCapability.ReloadEpoch == ReloadEpoch
+		&& SelfCapability.RegistryRevision == RegistryRevision
 		&& SelfCapability.Handle == RequestedHandle)
 	{
 		OutObject = SelfCapability.Object.Get();
@@ -2402,6 +2607,7 @@ bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
 	SelfCapability.Handle = RequestedHandle;
 	SelfCapability.ReloadEpoch = ReloadEpoch;
 	SelfCapability.CallbackEpoch = CallbackEpoch;
+	SelfCapability.RegistryRevision = RegistryRevision;
 	OutObject = Object;
 	return true;
 }
@@ -2496,6 +2702,187 @@ FAvidScriptWasmRuntimeInstance::RecordGeneratedStatus(
 		++Instrumentation->GeneratedNativeS1RejectCount;
 	}
 	return EAvidScriptVmTypedHostStatus::Rejected;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32Pair(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutValue = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedSelfI32Pair(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		Left,
+		Right,
+		OutValue);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32Pair(
+	const FAvidScriptPreparedGeneratedHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Left,
+	const int32 Right,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
+	if (!IsInGameThread()
+		|| Call.Runtime != this
+		|| !BindingPackage.IsValid()
+		|| Binding.Entry == nullptr
+		|| Binding.Entry->I32PairCall == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			Binding.ExpectedClass,
+			Receiver)
+		|| !BindingPackage->PrepareGeneratedHostEffect(
+			Binding,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(
+		Binding.Entry->I32PairCall(*Receiver, Left, Right, OutValue));
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Get(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	int32& OutValue)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutValue = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedSelfPropertyI32Get(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		OutValue);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Get(
+	const FAvidScriptPreparedGeneratedHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
+	if (!IsInGameThread()
+		|| Call.Runtime != this
+		|| !BindingPackage.IsValid()
+		|| Binding.bPropertyWrite
+		|| Binding.Entry == nullptr
+		|| Binding.Entry->Shape
+			!= EAvidScriptGeneratedBindingShape::PropertyI32Get
+		|| Binding.Entry->PropertyI32GetCall == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			Binding.ExpectedClass,
+			Receiver)
+		|| !BindingPackage->PrepareGeneratedHostEffect(
+			Binding,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(
+		Binding.Entry->PropertyI32GetCall(*Receiver, OutValue));
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Set(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value)
+{
+	FAvidScriptPreparedGeneratedHostCall* Call =
+		static_cast<FAvidScriptPreparedGeneratedHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedSelfPropertyI32Set(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		Value);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Set(
+	const FAvidScriptPreparedGeneratedHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Value)
+{
+	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
+	if (!IsInGameThread()
+		|| Call.Runtime != this
+		|| !BindingPackage.IsValid()
+		|| !Binding.bPropertyWrite
+		|| Binding.Entry == nullptr
+		|| Binding.Entry->Shape
+			!= EAvidScriptGeneratedBindingShape::PropertyI32Set
+		|| Binding.Entry->PropertyI32SetCall == nullptr)
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!ResolveSelfCapability(
+			SelfSlot,
+			SelfGeneration,
+			Binding.ExpectedClass,
+			Receiver)
+		|| !BindingPackage->PrepareGeneratedHostEffect(
+			Binding,
+			HostContext.OwnerHandle,
+			*Receiver,
+			BindingInvocationContext))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(
+		Binding.Entry->PropertyI32SetCall(*Receiver, Value));
 }
 
 EAvidScriptVmTypedHostStatus

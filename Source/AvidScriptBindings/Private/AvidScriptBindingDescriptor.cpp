@@ -1004,6 +1004,8 @@ bool IsAvidScriptGeneratedShape(const FString& Value)
 {
 	return Value == TEXT("i32_pair_to_i32")
 		|| Value == TEXT("property_i32_get_set")
+		|| Value == TEXT("property_i32_get")
+		|| Value == TEXT("property_i32_set")
 		|| Value == TEXT("vector_value")
 		|| Value == TEXT("stable_object_roundtrip");
 }
@@ -1639,7 +1641,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		}
 		const bool bGeneratedProperty =
 			Binding.DispatchMode == TEXT("generated_native_s1")
-			&& Binding.GeneratedShape == TEXT("property_i32_get_set")
+			&& (Binding.GeneratedShape == TEXT("property_i32_get_set")
+				|| (Binding.BindingKind == TEXT("property_get")
+					&& Binding.GeneratedShape == TEXT("property_i32_get"))
+				|| (Binding.BindingKind == TEXT("property_set")
+					&& Binding.GeneratedShape == TEXT("property_i32_set")))
 			&& Binding.GeneratedReceiverMode == TEXT("self_bound");
 		const FString ExpectedPropertyGetIdentity =
 			Binding.OwnerClass
@@ -1677,7 +1683,10 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					|| Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None
 					|| !Binding.Parameters.IsEmpty()
 					|| Binding.ReturnValue.CanonicalType == TEXT("void")
-					|| Binding.HostImport.Signature != TEXT("(iii)i")
+					|| Binding.HostImport.Signature
+						!= (Binding.GeneratedShape == TEXT("property_i32_get")
+							? FString(TEXT("(ii)i"))
+							: FString(TEXT("(iii)i")))
 					|| (bGeneratedProperty
 						&& (Binding.ReturnValue.CanonicalType != TEXT("scalar:i32")
 							|| GeneratedSemanticIdentity

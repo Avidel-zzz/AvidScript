@@ -36,6 +36,12 @@ enum class EAvidScriptDynamicHostCallTimingPolicy : uint8
 	PerCall
 };
 
+enum class EAvidScriptWasmResultDetail : uint8
+{
+	FailureOnly,
+	FullSnapshot
+};
+
 struct FAvidScriptWasmSmokeResult
 {
 	bool bRuntimeInitialized = false;
@@ -93,12 +99,15 @@ struct FAvidScriptWasmTimerEntry
 	double DueTimeSeconds = 0.0;
 };
 
+struct FAvidScriptPreparedGeneratedHostCall;
+
 struct FAvidScriptSelfCapability
 {
 	TWeakObjectPtr<UObject> Object;
 	FAvidScriptObjectHandle Handle;
 	uint64 ReloadEpoch = 0;
 	uint64 CallbackEpoch = 0;
+	uint64 RegistryRevision = 0;
 };
 
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
@@ -129,9 +138,15 @@ public:
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 		FAvidScriptWasmSmokeResult& OutResult);
-	bool ValidateRequiredExports(const TArray<FString>& RequiredExports, FAvidScriptWasmSmokeResult& OutResult) const;
+	bool ValidateRequiredExports(
+		const TArray<FString>& RequiredExports,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool Tick(
+		float DeltaSeconds,
+		FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail);
 	bool EndPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
@@ -262,6 +277,41 @@ public:
 
 
 private:
+	bool BuildPreparedTypedHostImports(FString& OutError);
+	static EAvidScriptVmTypedHostStatus InvokePreparedSelfI32Pair(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue);
+	EAvidScriptVmTypedHostStatus DispatchPreparedSelfI32Pair(
+		const FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Left,
+		int32 Right,
+		int32& OutValue);
+	static EAvidScriptVmTypedHostStatus InvokePreparedSelfPropertyI32Get(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32& OutValue);
+	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Get(
+		const FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32& OutValue);
+	static EAvidScriptVmTypedHostStatus InvokePreparedSelfPropertyI32Set(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value);
+	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Set(
+		const FAvidScriptPreparedGeneratedHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 Value);
 	void BeginTypedCallbackEpoch();
 	void EndTypedCallbackEpoch();
 	void InvalidateSelfCapability();
@@ -334,6 +384,8 @@ private:
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
+	TArray<TUniquePtr<FAvidScriptPreparedGeneratedHostCall>>
+		PreparedGeneratedHostCalls;
 	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;

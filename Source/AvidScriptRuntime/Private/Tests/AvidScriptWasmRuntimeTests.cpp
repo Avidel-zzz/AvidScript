@@ -811,6 +811,25 @@ bool FAvidScriptPackagedTimingSmokeTest::RunTest(const FString& Parameters)
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay timing is captured")), Result.Metrics.BeginPlayCallMs >= 0.0);
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick export succeeds")), Runtime.Tick(1.0f / 60.0f, Result));
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick timing is captured")), Result.Metrics.TickCallMs >= 0.0);
+		Result.ErrorCategory = TEXT("stale_success_error");
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only Tick succeeds")),
+			Runtime.Tick(
+				1.0f / 60.0f,
+				Result,
+				EAvidScriptWasmResultDetail::FailureOnly));
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only success clears stale errors")),
+			Result.ErrorCategory.IsEmpty());
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only success updates Tick state")),
+			Result.bTickCalled && Result.TickCallCount == 2);
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing optional EndPlay is a no-op")), Runtime.EndPlay(Result));
 		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing EndPlay is not marked called")), Result.bEndPlayCalled);
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("missing EndPlay has zero call time")), Result.Metrics.EndPlayCallMs, 0.0);
@@ -874,10 +893,29 @@ bool FAvidScriptWasmErrorSmokeTest::RunTest(const FString& Parameters)
 			Runtime.LoadModule(GAvidScriptTrapTickWasmModule, UE_ARRAY_COUNT(GAvidScriptTrapTickWasmModule), TEXT("trap_tick"), Result));
 		TestAvidScriptRuntimeLaneIdentity(*this, Lane, Result);
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay succeeds before trap")), Runtime.BeginPlay(Result));
-		TestFalse(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick trap is reported")), Runtime.Tick(1.0f / 60.0f, Result));
+		TestFalse(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only Tick trap is reported")),
+			Runtime.Tick(
+				1.0f / 60.0f,
+				Result,
+				EAvidScriptWasmResultDetail::FailureOnly));
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap category")), Result.ErrorCategory, FString(TEXT("trap")));
 		TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap export name")), Result.ExportName, FString(TEXT("avid_on_tick")));
 		TestTrue(*AvidScriptRuntimeLaneLabel(Lane, TEXT("trap preserves stack frames")), !Result.DiagnosticFrames.IsEmpty());
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only trap materializes module identity")),
+			Result.ModuleId,
+			FString(TEXT("trap_tick")));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("failure-only trap materializes backend identity")),
+			Result.BackendInfo.Kind,
+			Lane.Selection.BackendKind);
 	}
 
 	return true;

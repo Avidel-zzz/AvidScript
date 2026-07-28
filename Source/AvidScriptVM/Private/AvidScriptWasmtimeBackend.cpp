@@ -287,6 +287,7 @@ struct FAvidScriptWasmtimeTypedHostContext
 	FString ModuleName;
 	FString ImportName;
 	EAvidScriptVmTypedHostShape Shape = EAvidScriptVmTypedHostShape::None;
+	FAvidScriptVmPreparedTypedHostTarget PreparedTarget;
 };
 
 struct FAvidScriptWasmtimeExportEntry
@@ -638,7 +639,7 @@ public:
 		size_t ResultCellCount = 0;
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
 		const AvidScriptWasmtimeCallStatus CallStatus =
-			avidscript_wasmtime_function_call_event(
+			avidscript_wasmtime_function_call_event_unchecked(
 			Store,
 			Entry.Function,
 			Frame.Cells,
@@ -1173,6 +1174,18 @@ public:
 		int32 Right,
 		int32& OutValue)
 	{
+		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			const EAvidScriptVmTypedHostStatus Status =
+				HostContext.PreparedTarget.SelfI32Pair(
+					HostContext.PreparedTarget.Context,
+					SelfSlot,
+					SelfGeneration,
+					Left,
+					Right,
+					OutValue);
+			return CompleteTypedInvocation(HostContext, Status);
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
@@ -1180,6 +1193,58 @@ public:
 		}
 		const EAvidScriptVmTypedHostStatus Status = TypedHostDispatcher->DispatchSelfI32PairToI32(
 			HostContext.BindingOrdinal, SelfSlot, SelfGeneration, Left, Right, OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedSelfPropertyI32Get(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		int32& OutValue)
+	{
+		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The split property getter has no prepared target."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext.PreparedTarget.SelfPropertyI32Get(
+				HostContext.PreparedTarget.Context,
+				SelfSlot,
+				SelfGeneration,
+				OutValue);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
+	int32 InvokeTypedSelfPropertyI32Set(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		int32& OutValue)
+	{
+		OutValue = 0;
+		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The split property setter has no prepared target."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext.PreparedTarget.SelfPropertyI32Set(
+				HostContext.PreparedTarget.Context,
+				SelfSlot,
+				SelfGeneration,
+				Value);
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			OutValue = 1;
+		}
 		return CompleteTypedInvocation(HostContext, Status);
 	}
 
@@ -1398,6 +1463,50 @@ private:
 			*HostContext, SelfSlot, SelfGeneration, GuestAddress, *OutValue);
 	}
 
+	static int32 TypedSelfPropertyI32GetCallback(
+		void* Environment,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->Backend == nullptr
+			|| OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfPropertyI32Get(
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			*OutValue);
+	}
+
+	static int32 TypedSelfPropertyI32SetCallback(
+		void* Environment,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Value,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->Backend == nullptr
+			|| OutValue == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfPropertyI32Set(
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			Value,
+			*OutValue);
+	}
+
 	static int32 TypedSelfVectorValueCallback(
 		void* Environment,
 		int32 SelfSlot,
@@ -1509,6 +1618,12 @@ private:
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:
 				ExpectedSignature = TEXT("(iii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
+				ExpectedSignature = TEXT("(ii)i");
+				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
+				ExpectedSignature = TEXT("(iii)i");
+				break;
 			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 				ExpectedSignature = TEXT("(iiiii)i");
 				break;
@@ -1534,6 +1649,29 @@ private:
 				OutError.ImportModuleName = Import.ModuleName;
 				OutError.ImportName = Import.ImportName;
 				OutError.Details = TEXT("Typed host metadata is incomplete or does not match its fixed shape signature.");
+				return false;
+			}
+			const int32 PreparedFunctionCount =
+				(Import.PreparedTarget.SelfI32Pair != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.SelfPropertyI32Get != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.SelfPropertyI32Set != nullptr ? 1 : 0);
+			const bool bHasPreparedContext =
+				Import.PreparedTarget.Context != nullptr;
+			const bool bRequiresPreparedTarget =
+				Import.Shape == EAvidScriptVmTypedHostShape::SelfPropertyI32Get
+				|| Import.Shape
+					== EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
+			if (bHasPreparedContext != (PreparedFunctionCount == 1)
+				|| (PreparedFunctionCount == 1
+					&& !Import.PreparedTarget.IsBoundForShape(Import.Shape))
+				|| (bRequiresPreparedTarget
+					&& !Import.PreparedTarget.IsBoundForShape(Import.Shape)))
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("typed_host_prepared_target_invalid");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details = TEXT("Prepared typed host targets must be complete and match their fixed shape.");
 				return false;
 			}
 			if (IsAvidScriptVmStaticHostImport(Import.ModuleName, Import.ImportName)
@@ -1580,6 +1718,7 @@ private:
 			HostContext->ModuleName = Import.ModuleName;
 			HostContext->ImportName = Import.ImportName;
 			HostContext->Shape = Import.Shape;
+			HostContext->PreparedTarget = Import.PreparedTarget;
 			FTCHARToUTF8 ModuleNameUtf8(*HostContext->ModuleName);
 			FTCHARToUTF8 ImportNameUtf8(*HostContext->ImportName);
 			FAvidScriptWasmtimeTypedHostContext* HostContextPointer = HostContext.Get();
@@ -1626,6 +1765,26 @@ private:
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedSelfPropertyI32GetSetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
+				DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_get(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfPropertyI32GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
+				DefineFailure = avidscript_wasmtime_linker_define_self_property_i32_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedSelfPropertyI32SetCallback,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:

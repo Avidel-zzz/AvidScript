@@ -112,6 +112,20 @@ bool TryParseAvidScriptGeneratedShape(
 		OutSignature = TEXT("(iii)i");
 		return true;
 	}
+	if (Shape == TEXT("property_i32_get"))
+	{
+		OutGeneratedShape = EAvidScriptGeneratedBindingShape::PropertyI32Get;
+		OutVmShape = EAvidScriptVmTypedHostShape::SelfPropertyI32Get;
+		OutSignature = TEXT("(ii)i");
+		return true;
+	}
+	if (Shape == TEXT("property_i32_set"))
+	{
+		OutGeneratedShape = EAvidScriptGeneratedBindingShape::PropertyI32Set;
+		OutVmShape = EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
+		OutSignature = TEXT("(iii)i");
+		return true;
+	}
 	if (Shape == TEXT("vector_value"))
 	{
 		OutGeneratedShape = EAvidScriptGeneratedBindingShape::VectorValue;
@@ -157,16 +171,24 @@ bool AttachAvidScriptGeneratedPlan(
 			TEXT("The generated binding shape is not supported by the typed runtime."));
 		return false;
 	}
+	const bool bLegacyGeneratedProperty =
+		GeneratedShape == EAvidScriptGeneratedBindingShape::PropertyI32GetSet;
+	const bool bGeneratedPropertyShapeMatches =
+		(Binding.BindingKind == TEXT("property_get")
+			&& (GeneratedShape == EAvidScriptGeneratedBindingShape::PropertyI32Get
+				|| bLegacyGeneratedProperty))
+		|| (Binding.BindingKind == TEXT("property_set")
+			&& (GeneratedShape == EAvidScriptGeneratedBindingShape::PropertyI32Set
+				|| bLegacyGeneratedProperty));
 	if ((Binding.BindingKind == TEXT("property_get")
 			|| Binding.BindingKind == TEXT("property_set"))
-		&& GeneratedShape
-			!= EAvidScriptGeneratedBindingShape::PropertyI32GetSet)
+		&& !bGeneratedPropertyShapeMatches)
 	{
 		SetAvidScriptBindingLoadFailure(
 			OutResult,
 			TEXT("generated_binding_mismatch"),
 			Binding.CanonicalIdentity,
-			TEXT("Generated property plans require the property_i32_get_set shape."));
+			TEXT("Generated property plans require the matching split property shape or the legacy property_i32_get_set shape."));
 		return false;
 	}
 	if (Binding.HostImport.Signature != TypedSignature)
@@ -530,6 +552,14 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 		}
 		if (Binding.GeneratedShape == TEXT("property_i32_get_set")
 			|| Binding.GeneratedShape == TEXT("vector_value"))
+		{
+			return TEXT("(iii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("property_i32_get"))
+		{
+			return TEXT("(ii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("property_i32_set"))
 		{
 			return TEXT("(iii)i");
 		}
@@ -1846,6 +1876,16 @@ FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
 			EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet;
 		Plan.TypedHostImport.Signature = TEXT("(iii)i");
 		break;
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		Plan.TypedHostImport.Shape =
+			EAvidScriptVmTypedHostShape::SelfPropertyI32Get;
+		Plan.TypedHostImport.Signature = TEXT("(ii)i");
+		break;
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
+		Plan.TypedHostImport.Shape =
+			EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
+		Plan.TypedHostImport.Signature = TEXT("(iii)i");
+		break;
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		Plan.TypedHostImport.Shape =
 			EAvidScriptVmTypedHostShape::SelfVectorValue;
@@ -3153,6 +3193,47 @@ bool FAvidScriptBindingPackage::BuildTypedHostImports(
 	return true;
 }
 
+bool FAvidScriptBindingPackage::BuildPreparedGeneratedBindings(
+	TArray<FAvidScriptPreparedGeneratedBinding>& OutBindings,
+	FString& OutError) const
+{
+	OutBindings.Reset();
+	OutError.Reset();
+	OutBindings.Reserve(
+		static_cast<int32>(Impl->Instrumentation.GeneratedNativeS1PlanCount));
+	for (int32 PlanIndex = 0; PlanIndex < Impl->Plans.Num(); ++PlanIndex)
+	{
+		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+			Impl->Plans[PlanIndex];
+		if (Plan.GeneratedEntry == nullptr)
+		{
+			continue;
+		}
+		if (Plan.GeneratedLease.GetEntry() != Plan.GeneratedEntry)
+		{
+			OutBindings.Reset();
+			OutError = TEXT("generated_binding_unavailable");
+			return false;
+		}
+
+		FAvidScriptPreparedGeneratedBinding& Binding =
+			OutBindings.AddDefaulted_GetRef();
+		Binding.BindingOrdinal = static_cast<uint32>(PlanIndex);
+		Binding.Lease = Plan.GeneratedLease;
+		Binding.Entry = Plan.GeneratedEntry;
+		Binding.ExpectedClass = Plan.OwnerClass;
+		Binding.ReflectedProperty = Plan.ReflectedProperty;
+		Binding.ReloadEffect = Plan.ReloadEffect;
+		Binding.bPropertyWrite =
+			Plan.Kind
+				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+		Binding.bPropertyWriteHasFunction =
+			Binding.bPropertyWrite && Plan.Function != nullptr;
+		Binding.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
+	}
+	return true;
+}
+
 bool FAvidScriptBindingPackage::TryGetGeneratedBinding(
 	const uint32 Ordinal,
 	const FAvidScriptGeneratedBindingEntry*& OutEntry,
@@ -3194,47 +3275,71 @@ bool FAvidScriptBindingPackage::PrepareGeneratedHostEffect(
 		return false;
 	}
 	const FAvidScriptRuntimeBindingInvocationPlan& Plan = Impl->Plans[Ordinal];
-	if (Plan.GeneratedEntry == nullptr
-		|| Plan.GeneratedLease.GetEntry() != Plan.GeneratedEntry)
+	FAvidScriptPreparedGeneratedBinding Binding;
+	Binding.BindingOrdinal = Ordinal;
+	Binding.Lease = Plan.GeneratedLease;
+	Binding.Entry = Plan.GeneratedEntry;
+	Binding.ExpectedClass = Plan.OwnerClass;
+	Binding.ReflectedProperty = Plan.ReflectedProperty;
+	Binding.ReloadEffect = Plan.ReloadEffect;
+	Binding.bPropertyWrite =
+		Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+	Binding.bPropertyWriteHasFunction =
+		Binding.bPropertyWrite && Plan.Function != nullptr;
+	Binding.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
+	return PrepareGeneratedHostEffect(
+		Binding,
+		ReceiverHandle,
+		Receiver,
+		Context);
+}
+
+bool FAvidScriptBindingPackage::PrepareGeneratedHostEffect(
+	const FAvidScriptPreparedGeneratedBinding& Binding,
+	const FAvidScriptObjectHandle& ReceiverHandle,
+	UObject& Receiver,
+	const FAvidScriptBindingInvocationContext& Context) const
+{
+	if (Binding.Entry == nullptr
+		|| Binding.Lease.GetEntry() != Binding.Entry)
 	{
 		return false;
 	}
-	if (Plan.bRequiresWriteAccess
+	if (Binding.bRequiresWriteAccess
 		&& Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
 	{
 		return false;
 	}
-	if (Context.HostEffectJournal == nullptr || !Plan.bRequiresWriteAccess)
+	if (Context.HostEffectJournal == nullptr || !Binding.bRequiresWriteAccess)
 	{
 		return true;
 	}
 	if (Context.ObjectRegistry == nullptr
-		|| Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported
-		|| (Plan.Kind
-				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
-			&& Plan.Function != nullptr))
+		|| Binding.ReloadEffect
+			== EAvidScriptBindingReloadEffect::Unsupported
+		|| Binding.bPropertyWriteHasFunction)
 	{
 		return false;
 	}
 
 	FAvidScriptBindingHostEffectPrepareResult PrepareResult;
-	if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite)
+	if (Binding.bPropertyWrite)
 	{
-		return Plan.ReloadEffect
+		return Binding.ReloadEffect
 				== EAvidScriptBindingReloadEffect::ReflectedProperty
-			&& Plan.ReflectedProperty != nullptr
+			&& Binding.ReflectedProperty != nullptr
 			&& Context.HostEffectJournal->PrepareReflectedProperty(
 				*Context.ObjectRegistry,
 				ReceiverHandle,
 				Receiver,
-				*Plan.ReflectedProperty,
+				*Binding.ReflectedProperty,
 				PrepareResult);
 	}
 	return Context.HostEffectJournal->PrepareEffect(
 		*Context.ObjectRegistry,
 		ReceiverHandle,
 		Receiver,
-		Plan.ReloadEffect,
+		Binding.ReloadEffect,
 		PrepareResult);
 }
 

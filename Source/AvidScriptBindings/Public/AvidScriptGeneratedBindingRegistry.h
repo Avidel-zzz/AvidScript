@@ -17,6 +17,16 @@ using FAvidScriptGeneratedPropertyI32Call = EAvidScriptVmTypedHostStatus (*)(
 	bool bWrite,
 	int32& InOutValue);
 
+using FAvidScriptGeneratedPropertyI32GetCall =
+	EAvidScriptVmTypedHostStatus (*)(
+		UObject& Receiver,
+		int32& OutValue);
+
+using FAvidScriptGeneratedPropertyI32SetCall =
+	EAvidScriptVmTypedHostStatus (*)(
+		UObject& Receiver,
+		int32 Value);
+
 using FAvidScriptGeneratedVectorValueCall = EAvidScriptVmTypedHostStatus (*)(
 	UObject& Receiver,
 	const FVector& InValue,
@@ -38,6 +48,8 @@ struct FAvidScriptGeneratedBindingEntry
 		EAvidScriptGeneratedReceiverMode::SelfBound;
 	FAvidScriptGeneratedI32PairCall I32PairCall = nullptr;
 	FAvidScriptGeneratedPropertyI32Call PropertyI32Call = nullptr;
+	FAvidScriptGeneratedPropertyI32GetCall PropertyI32GetCall = nullptr;
+	FAvidScriptGeneratedPropertyI32SetCall PropertyI32SetCall = nullptr;
 	FAvidScriptGeneratedVectorValueCall VectorValueCall = nullptr;
 	FAvidScriptGeneratedObjectRoundtripCall ObjectRoundtripCall = nullptr;
 };
