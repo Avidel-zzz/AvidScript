@@ -2737,7 +2737,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				Binding);
 			if (Binding.CanonicalIdentity != ExpectedIdentity
 				|| Binding.StableId != FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity)
-				|| Binding.HostImport.Signature != TEXT("(iii)i"))
+				|| Binding.HostImport.Signature
+					!= MakeAvidScriptRuntimeExpectedSignature(Binding))
 			{
 				SetAvidScriptBindingLoadFailure(
 					OutResult,
