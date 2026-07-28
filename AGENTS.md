@@ -1559,3 +1559,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a follow-up command used a guessed expansion of an abbreviated commit hash and failed even though the intended commit existed.
 - Prevention: obtain candidate identity with `git rev-parse HEAD` and `git rev-parse 'HEAD^{tree}'`; copy those exact values into build, benchmark and evidence commands.
+
+### 2026-07-29: commit the previous phase before starting the next phase
+
+- Mistake: Phase 55 started while the completed Phase 54 state file was still dirty, so the new phase captured that workflow-owned file as protected user work; the same startup commit then made it clean and rendered the Phase 55 freeze guard permanently unsatisfiable.
+- Prevention: close and commit the previous phase state first, verify that only genuine user-owned changes remain in `git status`, and only then run the next phase `start` command. Phase state files must never enter another phase's protected dirty baseline.
