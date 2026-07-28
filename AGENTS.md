@@ -1529,3 +1529,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: phase next-action derivation routed only Open/Fixing Blocker and Critical debt to `debt-update`, while the freeze transition also rejects Important debt. A valid state therefore advertised a `freeze` command guaranteed to fail.
 - Prevention: derive next actions from the same severity set used by the target transition guard. Phase workflow contracts add an Important debt after all batches complete and require `debt-update` to be the unique next action.
+
+### 2026-07-29: resume with phase status before other repository probes
+
+- Mistake: after a resumed performance-planning turn, repository inspection started before the mandatory phase status preflight, so the session did not establish the authoritative workflow state first.
+- Prevention: the first project command after every resume or context transition is `Build/InvokePhaseWorkflow.ps1 status -Phase <Number>` in the workflow owner worktree. Skill reads and non-project context may precede it, but no repository Git, file, build or test probe may do so.
+
+### 2026-07-29: keep shell calls to one logical command
+
+- Mistake: several read-only probes were packed into separator-heavy PowerShell invocations, making failure attribution and command audit unnecessarily ambiguous.
+- Prevention: every `shell_command` contains one logical command. Use separate tool calls for independent Git, file, status and test operations; pipelines that transform one command's output remain allowed, while `;`, `&&` and `||` composition remains prohibited.
