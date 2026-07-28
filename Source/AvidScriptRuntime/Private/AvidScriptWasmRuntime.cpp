@@ -34,6 +34,7 @@ constexpr int32 AvidScriptDataBridgeBudgetCheckStride = 32;
 struct FAvidScriptPreparedDataLaneWrite
 {
 	const FAvidScriptGeneratedBindingEntry* Entry = nullptr;
+	FAvidScriptGeneratedPropertyI32SetCall SetCall = nullptr;
 	FIntProperty* Property = nullptr;
 	UObject* Receiver = nullptr;
 	FAvidScriptObjectHandle ReceiverHandle;
@@ -1508,18 +1509,26 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 			IntProperty = PreviousPrepared->Property;
 			Receiver = PreviousPrepared->Receiver;
 		}
-		else if (!BindingPackage->TryGetGeneratedPropertyBinding(
+		else
+		{
+			const bool bBindingResolved =
+				BindingPackage->TryGetGeneratedPropertyBinding(
 					Command.BindingOrdinal,
 					Entry,
 					ExpectedClass,
 					ReflectedProperty,
-					bRequiresWriteAccess)
-				|| Entry == nullptr
-				|| Entry->Shape
-					!= EAvidScriptGeneratedBindingShape::PropertyI32GetSet
+					bRequiresWriteAccess);
+			const bool bSplitSetter = Entry != nullptr
+				&& Entry->Shape == EAvidScriptGeneratedBindingShape::PropertyI32Set
+				&& Entry->PropertyI32SetCall != nullptr;
+			const bool bLegacySetter = Entry != nullptr
+				&& Entry->Shape
+					== EAvidScriptGeneratedBindingShape::PropertyI32GetSet
+				&& Entry->PropertyI32Call != nullptr;
+			if (!bBindingResolved
+				|| (!bSplitSetter && !bLegacySetter)
 				|| Entry->ReceiverMode
 					!= EAvidScriptGeneratedReceiverMode::SelfBound
-				|| Entry->PropertyI32Call == nullptr
 				|| (bRequiresWriteAccess
 					&& HostContext.ActorWritePolicy
 						!= EAvidScriptActorWritePolicy::AllowWrites)
@@ -1529,16 +1538,18 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 					ExpectedClass,
 					Receiver)
 				|| (IntProperty = CastField<FIntProperty>(ReflectedProperty)) == nullptr)
-		{
-			++DataBridgeMetrics.RejectedBuffers;
-			SetPendingHostImportFailure(
-				TEXT("avidscript"),
-				TEXT("avid_data_lane_submit"),
-				FString::Printf(
-					TEXT("data_lane_binding_rejected at command[%d]."),
-					CommandIndex));
-			Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
-			return 0;
+			{
+				++DataBridgeMetrics.RejectedBuffers;
+				SetPendingHostImportFailure(
+					TEXT("avidscript"),
+					TEXT("avid_data_lane_submit"),
+					FString::Printf(
+						TEXT("data_lane_binding_rejected at command[%d]."),
+						CommandIndex));
+				Metrics.HostImportCallMs =
+					MeasureElapsedMs(HostImportStartSeconds);
+				return 0;
+			}
 		}
 
 		const uint64 PackedHandle = static_cast<uint64>(ReceiverHandle.Slot)
@@ -1564,6 +1575,7 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 		FAvidScriptPreparedDataLaneWrite& Prepared =
 			PreparedWrites.AddDefaulted_GetRef();
 		Prepared.Entry = Entry;
+		Prepared.SetCall = Entry->PropertyI32SetCall;
 		Prepared.Property = IntProperty;
 		Prepared.Receiver = Receiver;
 		Prepared.ReceiverHandle = ReceiverHandle;
@@ -1609,8 +1621,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 	{
 		FAvidScriptPreparedDataLaneWrite& Prepared = PreparedWrites[AppliedCount];
 		int32 Value = Prepared.Value;
-		const EAvidScriptVmTypedHostStatus Status =
-			Prepared.Entry->PropertyI32Call(*Prepared.Receiver, true, Value);
+		const EAvidScriptVmTypedHostStatus Status = Prepared.SetCall != nullptr
+			? Prepared.SetCall(*Prepared.Receiver, Value)
+			: Prepared.Entry->PropertyI32Call(*Prepared.Receiver, true, Value);
 		const bool bCheckApplyBudget =
 			(AppliedCount + 1) % AvidScriptDataBridgeBudgetCheckStride == 0
 			|| AppliedCount + 1 == PreparedWrites.Num();
