@@ -25,30 +25,57 @@
     },
     {
       "id": "P55.1",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "prepared host call cell、对象注册表 revision、revision-aware Self 缓存与 Tick FailureOnly 结果策略已实现；UE5.8 no-clean 构建及相关 Automation 已通过。",
+      "completed_at_utc": "2026-07-28T20:08:28.8067858+00:00"
     },
     {
       "id": "P55.2",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "split int32 getter/setter ABI、shape-driven 生成桥接和 Data-Oriented split setter 已实现；semantic、generated S1、data-oriented 三个真实 C# profile 加载与正确性通过。",
+      "completed_at_utc": "2026-07-28T20:08:42.1978718+00:00"
     },
     {
       "id": "P55.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Wasmtime lifecycle export 已在加载期验证并通过 unchecked typed call 执行；BeginPlay、Tick、EndPlay 共用静态导出名与分级结果详情，成功热路径减少快照复制且失败诊断完整。",
+      "completed_at_utc": "2026-07-28T20:08:57.9487720+00:00"
     },
     {
       "id": "P55.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "干净候选 b858a01 架构检查通过；UE5.8 no-clean 构建、Automation 312/312、三 profile、controlled runtime、physical crossing、micro 与 gameplay 正式矩阵全部通过正确性与 provenance。12 项性能 Gate 通过 3 项，完整结果已发布为中文报告与 compact evidence。",
+      "completed_at_utc": "2026-07-28T20:09:06.0114776+00:00"
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P55-D01",
+      "severity": "Important",
+      "found_batch": "P55.4",
+      "scope": "Generated S1 scalar、property 与 lifecycle callback 的完整 bound crossing 固定成本",
+      "evidence": "正式 Gate：scalar 52.95 ns 且为 Puerts Static 1.67x；property 104.75 ns；callback 212.23 ns 且为 Puerts 最快对照 1.45x。",
+      "deferral_reason": "Phase 55 已完成预绑定单元与 ABI 拆分，剩余成本需要跨 receiver、参数区、返回区、scheduler 和 backend 的融合调用帧，属于下一阶段架构范围。",
+      "remediation": "Phase 56 实现生成式 fused call frame、prepared receiver direct slot、reload slow path 分层与 lifecycle direct/batch entry，并按绝对 ns 与 Puerts 最快路径双 Gate 验收。",
+      "status": "Transferred",
+      "resolution_evidence": "Phase 55 compact evidence 已固定当前候选、正式数值与失败 Gate，Phase 56 不得回退语义覆盖或逐个手写 UE API。",
+      "target_phase": 56,
+      "transfer_reason": "需要以新一阶段的融合调用帧架构统一修改 VM、Bindings、Runtime 与 lifecycle 调度，并重新运行正式 competitor matrix。"
+    },
+    {
+      "id": "P55-D02",
+      "severity": "Important",
+      "found_batch": "P55.4",
+      "scope": "Wasmtime Cranelift JIT 的相同 WASM P95 领先与完整 crossing 成本归因",
+      "evidence": "正式 Gate：Wasmtime/V8 P95 几何均值 1.0108、P95 kernel win rate 0.50；typed empty 只能解释完整 crossing 成本 0.1995。",
+      "deferral_reason": "执行层 P50 已接近 V8，剩余问题涉及 Cranelift 配置、fuel/epoch/guard、线程调度及完整帧成本分解，需要独立 profiling 与受控实验。",
+      "remediation": "Phase 56 对 backend 配置与 tail latency 做逐项消融，加入完整 call frame 分段计数，并以 P95 几何均值不高于 0.95、kernel win rate 不低于 0.60 验收。",
+      "status": "Transferred",
+      "resolution_evidence": "Phase 55 已保存 controlled suite 与 physical crossing SHA-256、候选身份和失败门槛，作为 Phase 56 的可复现基线。",
+      "target_phase": 56,
+      "transfer_reason": "需要新的 backend 配置消融、tail profiling 和 call-frame 分段证据，不能在 Phase 55 已冻结的正式样本后用猜测调参。"
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -106,7 +133,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 55 -BatchId P55.1 -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-07-28T17:27:11.3437629+00:00"
+  "next_action": "freeze -Phase 55 -ReviewEvidence <text>",
+  "revision": 11,
+  "updated_at_utc": "2026-07-28T20:09:45.8285617+00:00"
 }
