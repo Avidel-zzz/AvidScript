@@ -79,6 +79,16 @@ bool TryParseShape(
 		OutShape = EAvidScriptGeneratedBindingShape::PropertyI32GetSet;
 		return true;
 	}
+	if (Value == TEXT("property_i32_get"))
+	{
+		OutShape = EAvidScriptGeneratedBindingShape::PropertyI32Get;
+		return true;
+	}
+	if (Value == TEXT("property_i32_set"))
+	{
+		OutShape = EAvidScriptGeneratedBindingShape::PropertyI32Set;
+		return true;
+	}
 	if (Value == TEXT("vector_value"))
 	{
 		OutShape = EAvidScriptGeneratedBindingShape::VectorValue;
@@ -181,9 +191,19 @@ bool FAvidScriptEditorGeneratedBindingIrBuilder::Build(
 					Binding.OwnerClass + TEXT(".") + Binding.UeMember);
 				return false;
 			}
-			if (Binding.GeneratedShape != TEXT("property_i32_get_set")
+			const bool bLegacyShape =
+				Binding.GeneratedShape == TEXT("property_i32_get_set")
+				&& Binding.HostImport.Signature == TEXT("(iii)i");
+			const bool bSplitGetter =
+				Binding.BindingKind == TEXT("property_get")
+				&& Binding.GeneratedShape == TEXT("property_i32_get")
+				&& Binding.HostImport.Signature == TEXT("(ii)i");
+			const bool bSplitSetter =
+				Binding.BindingKind == TEXT("property_set")
+				&& Binding.GeneratedShape == TEXT("property_i32_set")
+				&& Binding.HostImport.Signature == TEXT("(iii)i");
+			if ((!bLegacyShape && !bSplitGetter && !bSplitSetter)
 				|| Binding.GeneratedReceiverMode != TEXT("self_bound")
-				|| Binding.HostImport.Signature != TEXT("(iii)i")
 				|| !Property->IsA<FIntProperty>()
 				|| !Property->HasAnyPropertyFlags(
 					CPF_NativeAccessSpecifierPublic)

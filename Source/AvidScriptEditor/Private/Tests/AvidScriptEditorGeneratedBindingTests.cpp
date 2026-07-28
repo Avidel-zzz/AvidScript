@@ -98,6 +98,22 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 	PropertyBinding.AbiSignature = TEXT("(iii)i");
 	PropertyBinding.FunctionName = TEXT("GeneratedProperty");
 	Package.Bindings.Add(PropertyBinding);
+	FAvidScriptGeneratedBindingIr PropertyGetterBinding = MakeGeneratedBinding(
+		TEXT('6'),
+		TEXT("6666666666666666"));
+	PropertyGetterBinding.Shape =
+		EAvidScriptGeneratedBindingShape::PropertyI32Get;
+	PropertyGetterBinding.AbiSignature = TEXT("(ii)i");
+	PropertyGetterBinding.FunctionName = TEXT("GeneratedPropertyGetter");
+	Package.Bindings.Add(PropertyGetterBinding);
+	FAvidScriptGeneratedBindingIr PropertySetterBinding = MakeGeneratedBinding(
+		TEXT('7'),
+		TEXT("7777777777777777"));
+	PropertySetterBinding.Shape =
+		EAvidScriptGeneratedBindingShape::PropertyI32Set;
+	PropertySetterBinding.AbiSignature = TEXT("(iii)i");
+	PropertySetterBinding.FunctionName = TEXT("GeneratedPropertySetter");
+	Package.Bindings.Add(PropertySetterBinding);
 	FAvidScriptGeneratedBindingIr VectorBinding = MakeGeneratedBinding(
 		TEXT('4'),
 		TEXT("4444444444444444"));
@@ -152,13 +168,21 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 			&& SecondContents[2].Contains(TEXT("UnregisterPackage"))
 			&& SecondContents[2].Contains(TEXT("InvokeGenerated_0000"))
 			&& SecondContents[2].Contains(
-				TEXT("&InvokeGenerated_0000, nullptr, nullptr, nullptr"))
+				TEXT("&InvokeGenerated_0000, nullptr, nullptr, nullptr, nullptr, nullptr"))
 			&& SecondContents[2].Contains(
-				TEXT("nullptr, &InvokeGenerated_0002, nullptr, nullptr"))
+				TEXT("nullptr, &InvokeGenerated_0002, nullptr, nullptr, nullptr, nullptr"))
 			&& SecondContents[2].Contains(
-				TEXT("nullptr, nullptr, &InvokeGenerated_0003, nullptr"))
+				TEXT("nullptr, nullptr, nullptr, nullptr, &InvokeGenerated_0003, nullptr"))
 			&& SecondContents[2].Contains(
-				TEXT("nullptr, nullptr, nullptr, &InvokeGenerated_0004")));
+				TEXT("nullptr, nullptr, nullptr, nullptr, nullptr, &InvokeGenerated_0004"))
+			&& SecondContents[2].Contains(
+				TEXT("nullptr, nullptr, &InvokeGenerated_0005, nullptr, nullptr, nullptr"))
+			&& SecondContents[2].Contains(
+				TEXT("nullptr, nullptr, nullptr, &InvokeGenerated_0006, nullptr, nullptr"))
+			&& SecondContents[2].Contains(
+				TEXT("int32& OutValue"))
+			&& SecondContents[2].Contains(
+				TEXT("int32 Value")));
 	TestFalse(
 		TEXT("Generated call sites never use checked casts"),
 		SecondContents[2].Contains(TEXT("CastChecked")));
@@ -282,9 +306,11 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 			Binding.FunctionName,
 			FString(TEXT("GeneratedPublicInt")));
 		TestEqual(
-			TEXT("IR keeps the property shape"),
+			TEXT("IR keeps the direction-specific property shape"),
 			Binding.Shape,
-			EAvidScriptGeneratedBindingShape::PropertyI32GetSet);
+			Binding.AbiSignature == TEXT("(ii)i")
+				? EAvidScriptGeneratedBindingShape::PropertyI32Get
+				: EAvidScriptGeneratedBindingShape::PropertyI32Set);
 	}
 
 	FAvidScriptBindingPackageModel DescriptorPackage;
@@ -302,10 +328,16 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 		{
 			return Binding.BindingKind == TEXT("property_set");
 		});
+	const FAvidScriptBindingFunctionModel* Getter = DescriptorPackage.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.BindingKind == TEXT("property_get");
+		});
 	FString CSharpSource;
 	FString CSharpErrorCategory;
 	FString CSharpErrorSource;
 	TestNotNull(TEXT("Generated property setter model resolves"), Setter);
+	TestNotNull(TEXT("Generated property getter model resolves"), Getter);
 	TestTrue(
 		TEXT("Generated property descriptor reaches the C# facade"),
 		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
@@ -317,12 +349,29 @@ bool FAvidScriptEditorGeneratedPropertyReachabilityTest::RunTest(
 	TestTrue(
 		TEXT("C# facade declares the compile-time data lane attribute"),
 		CSharpSource.Contains(TEXT("internal sealed class AvidScriptDataLaneAttribute")));
+	if (Getter != nullptr)
+	{
+		TestTrue(
+			TEXT("C# generated getter returns the native int directly"),
+			CSharpSource.Contains(FString::Printf(
+				TEXT("return AvidScriptNative.Invoke%04d(this.Slot, this.Generation);"),
+				Getter->Ordinal))
+				&& CSharpSource.Contains(FString::Printf(
+					TEXT("internal static extern int Invoke%04d(int selfSlot, int selfGeneration);"),
+					Getter->Ordinal))
+				&& !CSharpSource.Contains(TEXT("out __returnValue")));
+	}
 	if (Setter != nullptr)
 	{
 		TestTrue(
 			TEXT("Generated int setter carries its real binding ordinal"),
 			CSharpSource.Contains(FString::Printf(
 				TEXT("[AvidScriptDataLane(\"buffered_write\", %d)]"),
+				Setter->Ordinal)));
+		TestTrue(
+			TEXT("C# generated setter passes one direct int value"),
+			CSharpSource.Contains(FString::Printf(
+				TEXT("internal static extern int Invoke%04d(int selfSlot, int selfGeneration, int value);"),
 				Setter->Ordinal)));
 	}
 

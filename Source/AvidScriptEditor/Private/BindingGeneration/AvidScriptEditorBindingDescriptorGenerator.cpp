@@ -25,7 +25,7 @@ constexpr const TCHAR* GeneratorVersion = TEXT("50.1.0");
 constexpr const TCHAR* ObjectFactoryGeneratorVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
-constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("54.6.0");
+constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("55.1.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -631,7 +631,8 @@ bool GenerateBindingDescriptor(
 			+ TEXT("(") + Binding.Projection.ReturnValue.Type.CanonicalType + TEXT(")");
 		if (bGeneratedNative)
 		{
-			Binding.GeneratedShape = TEXT("property_i32_get_set");
+			Binding.Projection.AbiSignature = TEXT("(ii)i");
+			Binding.GeneratedShape = TEXT("property_i32_get");
 			Binding.GeneratedReceiverMode = TEXT("self_bound");
 			Binding.ImportName =
 				TEXT("avid_s1_")
@@ -721,7 +722,7 @@ bool GenerateBindingDescriptor(
 					return false;
 				}
 				SetterBinding.DispatchMode = TEXT("generated_native_s1");
-				SetterBinding.GeneratedShape = TEXT("property_i32_get_set");
+				SetterBinding.GeneratedShape = TEXT("property_i32_set");
 				SetterBinding.GeneratedReceiverMode = TEXT("self_bound");
 				SetterBinding.ImportName =
 					TEXT("avid_s1_")

@@ -115,6 +115,10 @@ const TCHAR* ShapeToken(const EAvidScriptGeneratedBindingShape Shape)
 		return TEXT("EAvidScriptGeneratedBindingShape::I32PairToI32");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
 		return TEXT("EAvidScriptGeneratedBindingShape::PropertyI32GetSet");
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		return TEXT("EAvidScriptGeneratedBindingShape::PropertyI32Get");
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
+		return TEXT("EAvidScriptGeneratedBindingShape::PropertyI32Set");
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return TEXT("EAvidScriptGeneratedBindingShape::VectorValue");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
@@ -140,6 +144,10 @@ const TCHAR* ShapeManifestToken(
 		return TEXT("i32_pair_to_i32");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
 		return TEXT("property_i32_get_set");
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		return TEXT("property_i32_get");
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
+		return TEXT("property_i32_set");
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return TEXT("vector_value");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
@@ -276,6 +284,38 @@ FString RenderTypedCallSite(
 			*OwnerType,
 			*UeFunction,
 			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = Cast<%s>(&Receiver);\n")
+			TEXT("\tif (TypedReceiver == nullptr)\n")
+			TEXT("\t{\n")
+			TEXT("\t\treturn EAvidScriptVmTypedHostStatus::Rejected;\n")
+			TEXT("\t}\n")
+			TEXT("\tOutValue = TypedReceiver->%s;\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Value)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = Cast<%s>(&Receiver);\n")
+			TEXT("\tif (TypedReceiver == nullptr)\n")
+			TEXT("\t{\n")
+			TEXT("\t\treturn EAvidScriptVmTypedHostStatus::Rejected;\n")
+			TEXT("\t}\n")
+			TEXT("\tTypedReceiver->%s = Value;\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
 	default:
 		return FString();
 	}
@@ -320,6 +360,14 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::PropertyI32GetSet
 			? CallSite
 			: FString(TEXT("nullptr"));
+		const FString PropertyI32GetCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Get
+			? CallSite
+			: FString(TEXT("nullptr"));
+		const FString PropertyI32SetCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Set
+			? CallSite
+			: FString(TEXT("nullptr"));
 		const FString VectorValueCall = Binding.Shape
 				== EAvidScriptGeneratedBindingShape::VectorValue
 			? CallSite
@@ -329,7 +377,7 @@ FString RenderPrivateCpp(
 			? CallSite
 			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
-			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s },\n"),
+			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s },\n"),
 			*EscapeCppString(Binding.StableId),
 			*EscapeCppString(Package.PackageHash),
 			*EscapeCppString(Binding.DescriptorIdentity),
@@ -337,6 +385,8 @@ FString RenderPrivateCpp(
 			ReceiverToken(Binding.ReceiverMode),
 			*I32PairCall,
 			*PropertyI32Call,
+			*PropertyI32GetCall,
+			*PropertyI32SetCall,
 			*VectorValueCall,
 			*StableObjectCall);
 	}
@@ -546,8 +596,11 @@ const TCHAR* ExpectedGeneratedAbiSignature(
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
 		return TEXT("(iiii)i");
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
 	case EAvidScriptGeneratedBindingShape::VectorValue:
 		return TEXT("(iii)i");
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		return TEXT("(ii)i");
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
 		return TEXT("(iiiii)i");
 	default:

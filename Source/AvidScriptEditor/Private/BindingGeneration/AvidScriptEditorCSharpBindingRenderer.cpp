@@ -232,6 +232,14 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 		{
 			return TEXT("(iii)i");
 		}
+		if (Binding.GeneratedShape == TEXT("property_i32_get"))
+		{
+			return TEXT("(ii)i");
+		}
+		if (Binding.GeneratedShape == TEXT("property_i32_set"))
+		{
+			return TEXT("(iii)i");
+		}
 		if (Binding.GeneratedShape == TEXT("stable_object_roundtrip"))
 		{
 			return TEXT("(iiiii)i");
@@ -579,7 +587,8 @@ void AppendPropertySetterInterop(
 {
 	const bool bBufferedGeneratedI32 =
 		Setter.DispatchMode == TEXT("generated_native_s1")
-		&& Setter.GeneratedShape == TEXT("property_i32_get_set")
+		&& (Setter.GeneratedShape == TEXT("property_i32_set")
+			|| Setter.GeneratedShape == TEXT("property_i32_get_set"))
 		&& Setter.Parameters.Num() == 1
 		&& Setter.Parameters[0].CanonicalType == TEXT("scalar:i32");
 	if (bBufferedGeneratedI32)
@@ -642,28 +651,54 @@ bool RenderPropertyGetter(
 	}
 
 	const FString PropertyName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding.ScriptName);
+	const bool bDirectGeneratedI32Getter =
+		Binding.DispatchMode == TEXT("generated_native_s1")
+		&& Binding.GeneratedShape == TEXT("property_i32_get")
+		&& Binding.ReturnValue.CanonicalType == TEXT("scalar:i32")
+		&& StorageType == TEXT("int");
 	OutMethod.MethodLines.Append({
 		FString::Printf(TEXT("    public %s %s"), *PublicType, *PropertyName),
 		TEXT("    {"),
 		TEXT("        get"),
-		TEXT("        {"),
-		FString::Printf(TEXT("            %s __returnValue;"), *StorageType),
-		FString::Printf(
-			TEXT("            _ = AvidScriptNative.%s(this.Slot, this.Generation, out __returnValue);"),
-			*MakeNativeMethodName(Binding.Ordinal)),
-		TEXT("            return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"),
-		TEXT("        }")
+		TEXT("        {")
 	});
-	OutMethod.NativeLines.Append({
-		FString::Printf(
-			TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
-			*EscapeCSharpString(Binding.HostImport.Module),
-			*EscapeCSharpString(Binding.HostImport.Name)),
-		FString::Printf(
-			TEXT("    internal static extern int %s(int selfSlot, int selfGeneration, out %s returnValue);"),
-			*MakeNativeMethodName(Binding.Ordinal),
-			*StorageType)
-	});
+	if (bDirectGeneratedI32Getter)
+	{
+		OutMethod.MethodLines.Add(FString::Printf(
+			TEXT("            return AvidScriptNative.%s(this.Slot, this.Generation);"),
+			*MakeNativeMethodName(Binding.Ordinal)));
+		OutMethod.MethodLines.Add(TEXT("        }"));
+		OutMethod.NativeLines.Append({
+			FString::Printf(
+				TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name)),
+			FString::Printf(
+				TEXT("    internal static extern int %s(int selfSlot, int selfGeneration);"),
+				*MakeNativeMethodName(Binding.Ordinal))
+		});
+	}
+	else
+	{
+		OutMethod.MethodLines.Append({
+			FString::Printf(TEXT("            %s __returnValue;"), *StorageType),
+			FString::Printf(
+				TEXT("            _ = AvidScriptNative.%s(this.Slot, this.Generation, out __returnValue);"),
+				*MakeNativeMethodName(Binding.Ordinal)),
+			TEXT("            return ") + ConvertFromStorage(Binding.ReturnValue, TEXT("__returnValue")) + TEXT(";"),
+			TEXT("        }")
+		});
+		OutMethod.NativeLines.Append({
+			FString::Printf(
+				TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name)),
+			FString::Printf(
+				TEXT("    internal static extern int %s(int selfSlot, int selfGeneration, out %s returnValue);"),
+				*MakeNativeMethodName(Binding.Ordinal),
+				*StorageType)
+		});
+	}
 
 	if (Setter != nullptr)
 	{

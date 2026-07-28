@@ -542,15 +542,19 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 		TestEqual(
 			TEXT("Property shape is explicit"),
 			Binding.GeneratedShape,
-			FString(TEXT("property_i32_get_set")));
+			Binding.BindingKind == TEXT("property_get")
+				? FString(TEXT("property_i32_get"))
+				: FString(TEXT("property_i32_set")));
 		TestEqual(
 			TEXT("Property receiver is self-bound"),
 			Binding.GeneratedReceiverMode,
 			FString(TEXT("self_bound")));
 		TestEqual(
-			TEXT("Property ABI remains facade-compatible"),
+			TEXT("Property ABI is direction-specific"),
 			Binding.HostImport.Signature,
-			FString(TEXT("(iii)i")));
+			Binding.BindingKind == TEXT("property_get")
+				? FString(TEXT("(ii)i"))
+				: FString(TEXT("(iii)i")));
 		TestEqual(
 			TEXT("Semantic fallback retains the binding ordinal"),
 			Binding.SemanticFallbackOrdinal,
@@ -592,6 +596,14 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 			TEXT("The sole generated property binding is a getter"),
 			Package.Bindings[0].BindingKind,
 			FString(TEXT("property_get")));
+		TestEqual(
+			TEXT("Getter-only authorization uses the split getter shape"),
+			Package.Bindings[0].GeneratedShape,
+			FString(TEXT("property_i32_get")));
+		TestEqual(
+			TEXT("Getter-only authorization returns the native int directly"),
+			Package.Bindings[0].HostImport.Signature,
+			FString(TEXT("(ii)i")));
 	}
 
 	FAvidScriptBindingSelectionProfile SemanticProfile =
