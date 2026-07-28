@@ -8,9 +8,9 @@
   "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase55/P55.0_Bound_Crossing_Architecture.md",
-    "version": 1,
-    "sha256": "c4742e2b9e46e1f96d14d213469d30ec3866b7cc9922b2cd6ed461302fd3f866",
-    "revision_reason": "initial architecture freeze"
+    "version": 2,
+    "sha256": "08b6c4f74d710d7a59476ac7c07f266e5b34e014b48a24f34c745868c3d30d2a",
+    "revision_reason": "Independent review identified UE-to-WASM callback result materialization and export-name conversion as separate hot costs; architecture now includes prebound exports and failure-only success outcomes while preserving full diagnostics on failure."
   },
   "documents": {
     "plan": "Docs/Phase55/P55.0_Bound_Crossing_Implementation_Plan.md",
@@ -107,6 +107,6 @@
     }
   ],
   "next_action": "batch-complete -Phase 55 -BatchId P55.1 -Evidence <text>",
-  "revision": 2,
-  "updated_at_utc": "2026-07-28T17:21:18.6708389+00:00"
+  "revision": 3,
+  "updated_at_utc": "2026-07-28T17:27:11.3437629+00:00"
 }
