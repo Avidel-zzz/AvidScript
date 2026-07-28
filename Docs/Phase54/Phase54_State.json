@@ -69,10 +69,10 @@
       "evidence": "12-kernel P50 geo ratio 0.9772 and 9/12 wins; P95 geo ratio 1.0159 and 4/12 wins, below the <=0.95 and >=0.60 leadership gates.",
       "deferral_reason": "P54.6 formal matrix is complete and the remaining work is a measured optimization objective, not a correctness blocker.",
       "remediation": "Profile per-kernel P95 outliers, stabilize CPU and code layout, and optimize the Wasmtime execution configuration without weakening the same-WASM protocol.",
-      "status": "Open",
+      "status": "Transferred",
       "resolution_evidence": "",
-      "target_phase": null,
-      "transfer_reason": ""
+      "target_phase": 55,
+      "transfer_reason": "Phase 55 focuses first on scalar, property and callback crossing. Controlled-runtime P95 remains a separately tracked execution-tier debt and is not claimed resolved."
     },
     {
       "id": "P54-PERF-002",
@@ -82,10 +82,10 @@
       "evidence": "Generated S1 scalar is 54.12 ns versus Puerts Static 27.70 ns; property is 197.09 ns versus 60.42 ns; callback is 385.86 ns versus fastest Puerts 134.92 ns.",
       "deferral_reason": "Gameplay aggregation paths now lead and correctness is closed, but one-call latency needs a separate architecture-focused optimization batch.",
       "remediation": "Remove remaining receiver and registry lookups from proven generated shapes, add callback-specific typed dispatch, and batch property traffic while preserving semantic fallback.",
-      "status": "Open",
+      "status": "Transferred",
       "resolution_evidence": "",
-      "target_phase": null,
-      "transfer_reason": ""
+      "target_phase": 55,
+      "transfer_reason": "Phase 55 owns prepared call cells, split int32 property ABI, revision-aware Self resolution and verified unchecked lifecycle callbacks."
     }
   ],
   "review": {
@@ -139,7 +139,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "debt-update -Phase 54 -DebtId P54-PERF-001 -Status Verified -Evidence <text>",
-  "revision": 12,
-  "updated_at_utc": "2026-07-27T23:55:55.4581190+00:00"
+  "next_action": "freeze -Phase 54 -ReviewEvidence <text>",
+  "revision": 14,
+  "updated_at_utc": "2026-07-28T17:18:58.4827357+00:00"
 }
