@@ -20,7 +20,7 @@
     "kernel_wasm_sha256"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
     "attempt_id": { "type": "string", "format": "uuid" },
     "profile_sha256": { "$ref": "#/$defs/sha256" },

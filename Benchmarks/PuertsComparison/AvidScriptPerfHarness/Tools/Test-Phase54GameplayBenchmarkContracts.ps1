@@ -40,6 +40,18 @@ $gameplayFormal = Get-Content -LiteralPath (
 $gameplayDiagnostic = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54Gameplay.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
+$phase56MicroFormal = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56Micro.formal.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$phase56MicroFullResult = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56Micro.full-result.diagnostic.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$phase56GameplayFormal = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56Gameplay.formal.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$phase56GateSchema = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56GateResult.schema.json') -Raw |
+    ConvertFrom-Json -Depth 100
 $calibrationSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54SixLaneCalibration.schema.json') -Raw |
     ConvertFrom-Json -Depth 100
@@ -155,5 +167,66 @@ Assert-True (@($calibrationSchema.required) -ccontains 'request_sha256' -and
     $invokeText.Contains('$attemptId = [guid]::NewGuid()') -and
     $invokeText.Contains('[string]$result.request_sha256 -cne $requestSha256')) `
     '六通道 calibration/timed result 必须共享 attempt 并绑定各自 request SHA-256。'
+Assert-True (
+    [string]$phase56MicroFormal.callback_result_mode -ceq
+        'hot_failure_only' -and
+    [string]$phase56GameplayFormal.callback_result_mode -ceq
+        'hot_failure_only' -and
+    [string]$phase56MicroFullResult.callback_result_mode -ceq
+        'full_snapshot' -and
+    $runnerText.Contains('callback_result_mode')) `
+    'Phase56 正式档必须锁定热结果路径，并保留 full snapshot 消融档。'
+Assert-True (
+    $evaluatorText.Contains(
+        '$fusedHitCount =') -and
+    $evaluatorText.Contains(
+        '$fusedFastHitCount + $fusedRevalidateCount') -and
+    $evaluatorText.Contains(
+        'contains no measured call-site hits') -and
+    $evaluatorText.Contains(
+        'generated_journal_slow_path_count')) `
+    'Phase56 fused Gate 必须从 fast/revalidate 实测命中重建分母，并拒绝空测量与 journal 慢路径。'
+$phase56RequiredCounters = @(
+    'generated_fused_fast_hit_count',
+    'generated_fused_revalidate_count',
+    'generated_fused_call_site_prepare_count',
+    'generated_direct_read_prepare_count',
+    'generated_direct_write_prepare_count',
+    'generated_journal_slow_path_count'
+)
+Assert-True (
+    @($phase56RequiredCounters | Where-Object {
+        -not (@($processSchema.properties.samples.items.required) -ccontains $_)
+    }).Count -eq 0 -and
+    @($phase56RequiredCounters | Where-Object {
+        -not $evaluatorText.Contains("'$_'")
+    }).Count -eq 0) `
+    'Phase56 process schema 与 evaluator 必须共同拒绝缺失 fused 计数。'
+Assert-True (
+    $evaluatorText.Contains(
+        'Raw supplemental candidate, correctness, or fallback identity differs.') -and
+    $evaluatorText.Contains(
+        "status = 'not_measured'") -and
+    $evaluatorText.Contains(
+        'supplemental_candidate_match = $supplementalCandidateMatch')) `
+    'Phase56 evaluator 必须拒绝候选/fallback 不匹配，并将未测 Gate 标记为失败。'
+$phase56RequiredGates = @(
+    'prepared_export_ratio',
+    'physical_reconstruction_error_ratio',
+    'typed_empty_net_ns',
+    'fused_fast_hit_ratio',
+    'fused_revalidate_per_callback',
+    'direct_effect_prepare_count',
+    'journal_slow_path_count'
+)
+Assert-True (
+    @($phase56RequiredGates | Where-Object {
+        -not ($phase56GameplayFormal.gates.PSObject.Properties.Name -ccontains
+            $_)
+    }).Count -eq 0 -and
+    @($phase56RequiredGates | Where-Object {
+        -not (@($phase56GateSchema.properties.gates.required) -ccontains $_)
+    }).Count -eq 0) `
+    'Phase56 profile 与结果 schema 必须共同锁定七项分段 profiling Gate。'
 
-Write-Output 'Phase54 gameplay benchmark contracts passed: gates=3 identity=5 lanes=6 csharp_profiles=3 micro=10.'
+Write-Output 'Phase54/56 gameplay benchmark contracts passed: lanes=6 phase56_profiling_gates=7.'

@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "profile_id": "phase54.6-gameplay-formal-v1",
-  "evidence_class": "formal",
+  "profile_id": "phase56.gameplay-diagnostic-v1",
+  "evidence_class": "diagnostic",
   "callback_result_mode": "hot_failure_only",
-  "process_runs": 5,
-  "warmup_samples": 5,
-  "timed_samples": 30,
+  "process_runs": 1,
+  "warmup_samples": 1,
+  "timed_samples": 3,
   "seed": 1397313,
   "calibration": {
     "confirmation_samples": 3,
-    "minimum_sample_milliseconds": 5.0,
+    "minimum_sample_milliseconds": 1.0,
     "minimum_iterations": 1,
-    "maximum_iterations": 1048576
+    "maximum_iterations": 65536
   },
   "validity": {
     "data_lane_max_crossing_ratio": 0.5,
-    "require_clean_tree": true,
+    "require_clean_tree": false,
     "raw_samples_tracked": false
   },
   "lanes": [
@@ -90,7 +90,13 @@
       "maximum": 0.70,
       "lane": "avidscript_wasmtime_data_oriented"
     },
-    "typed_empty_explained_ratio": { "minimum": 0.70 }
+    "prepared_export_ratio": { "maximum": 0.95 },
+    "physical_reconstruction_error_ratio": { "maximum": 0.15 },
+    "typed_empty_net_ns": { "maximum": 12.0 },
+    "fused_fast_hit_ratio": { "minimum": 0.95 },
+    "fused_revalidate_per_callback": { "minimum": 1.0, "maximum": 1.0 },
+    "direct_effect_prepare_count": { "minimum": 1.0 },
+    "journal_slow_path_count": { "maximum": 0.0 }
   },
   "output": {
     "raw_process_samples": "external_evidence_only",

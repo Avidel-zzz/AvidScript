@@ -28,28 +28,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptPerfCostLadderOrderingTest::RunTest(const FString& Parameters)
 {
 	FAvidScriptPerfCostLadderDrivers Drivers;
-	Drivers.CachedExport = MakeChecksumDriver(1U);
-	Drivers.TypedEmptyImport = MakeChecksumDriver(2U);
-	Drivers.GenericEmptyImport = MakeChecksumDriver(3U);
-	Drivers.ImmutableEnvironmentDispatch = MakeChecksumDriver(4U);
+	Drivers.GuestLoopBaseline = MakeChecksumDriver(1U);
+	Drivers.GenericExport = MakeChecksumDriver(2U);
+	Drivers.PreparedExport = MakeChecksumDriver(3U);
+	Drivers.TypedEmptyImport = MakeChecksumDriver(4U);
+	Drivers.GenericEmptyImport = MakeChecksumDriver(5U);
+	Drivers.TypedI32PairImport = MakeChecksumDriver(6U);
 
 	TArray<FAvidScriptPerfCostLadderRecord> Records;
 	FString Error;
 	const FAvidScriptPerfCostLadderRequest Request{ 128, 1397313U };
 	TestTrue(TEXT("cost ladder accepts injected stage drivers"), FAvidScriptPerfCostLadder::Run(Request, Drivers, Records, Error));
-	TestEqual(TEXT("cost ladder record count"), Records.Num(), 5);
+	TestEqual(TEXT("cost ladder record count"), Records.Num(), 7);
 
 	const TArray<FName> ExpectedStages = {
 		TEXT("native_no_op"),
-		TEXT("cached_export"),
+		TEXT("guest_loop_baseline"),
+		TEXT("generic_export"),
+		TEXT("prepared_export"),
 		TEXT("typed_empty_import"),
 		TEXT("generic_empty_import"),
-		TEXT("immutable_environment_dispatch")
+		TEXT("typed_i32_pair_import")
 	};
 	for (int32 Index = 0; Index < Records.Num(); ++Index)
 	{
 		TestEqual(TEXT("stage ordering"), Records[Index].Stage, ExpectedStages[Index]);
-		TestEqual(TEXT("immutable iteration count"), Records[Index].Iterations, Request.Iterations);
+		TestEqual(TEXT("fixed iteration count"), Records[Index].Iterations, Request.Iterations);
 		TestTrue(TEXT("successful stage has timing"), Records[Index].ElapsedCycles > 0);
 		TestTrue(TEXT("successful stage is correct"), Records[Index].bCorrect);
 	}
@@ -69,39 +73,66 @@ bool FAvidScriptPerfCostLadderMissingDriverTest::RunTest(const FString& Paramete
 	FString Error;
 	const FAvidScriptPerfCostLadderRequest Request{ 8, 7U };
 	TestFalse(TEXT("missing runtime driver is not faked"), FAvidScriptPerfCostLadder::Run(Request, Drivers, Records, Error));
-	TestEqual(TEXT("missing cached export stops after native baseline"), Records.Num(), 2);
+	TestEqual(TEXT("missing guest loop stops after native baseline"), Records.Num(), 2);
 	TestFalse(TEXT("missing stage is marked incorrect"), Records.Last().bCorrect);
 	TestTrue(TEXT("missing driver error is explicit"), Error.Contains(TEXT("No measurement driver")));
 	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptPerfCostBudgetTest,
-	"AvidScript.PerformanceComparison.CostLadder.Budget",
+	FAvidScriptPerfCostReconciliationTest,
+	"AvidScript.PerformanceComparison.CostLadder.Reconciliation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptPerfCostBudgetTest::RunTest(const FString& Parameters)
+bool FAvidScriptPerfCostReconciliationTest::RunTest(
+	const FString& Parameters)
 {
-	FAvidScriptPerfCostBudgetInput Input;
-	Input.TypedEmptyP95Ns = 20.0;
-	Input.PuertsStaticScalarP50Ns = 25.0;
-	Input.GenericEmptyP95Ns = 120.0;
-	Input.ImmutableEnvironmentDispatchP95Ns = 45.0;
-	FAvidScriptPerfCostBudgetResult Result;
+	FAvidScriptPerfCostReconciliationInput Input;
+	Input.ObservedP50Ns = 120.0;
+	Input.BaselineP50Ns = 20.0;
+	Input.PairedDeltaP50Ns = 98.0;
+	Input.MaximumErrorRatio = 0.05;
+	FAvidScriptPerfCostReconciliationResult Result;
 	FString Error;
-	TestTrue(TEXT("valid budget evaluates"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
-	TestEqual(TEXT("typed to Puerts ratio"), Result.TypedToPuertsRatio, 0.8);
-	TestEqual(TEXT("generic crossing delta"), Result.GenericMinusTypedNs, 100.0);
-	TestEqual(TEXT("immutable dispatch delta"), Result.ImmutableDispatchMinusTypedNs, 25.0);
-	TestTrue(TEXT("70 percent stop-loss is inclusive"), Result.bSingleCallBudgetConstrained);
+	TestTrue(
+		TEXT("valid paired reconciliation evaluates"),
+		FAvidScriptPerfCostLadder::EvaluateReconciliation(
+			Input,
+			Result,
+			Error));
+	TestEqual(
+		TEXT("paired segments reconstruct P50"),
+		Result.ReconstructedP50Ns,
+		118.0);
+	TestEqual(
+		TEXT("reconciliation absolute error"),
+		Result.ReconstructionErrorNs,
+		2.0);
+	TestTrue(
+		TEXT("reconciliation is within tolerance"),
+		Result.bWithinTolerance);
 
-	Input.TypedEmptyP95Ns = 17.49;
-	TestTrue(TEXT("sub-threshold budget evaluates"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
-	TestFalse(TEXT("sub-threshold budget remains unconstrained"), Result.bSingleCallBudgetConstrained);
+	Input.PairedDeltaP50Ns = 80.0;
+	TestTrue(
+		TEXT("large reconstruction error still evaluates"),
+		FAvidScriptPerfCostLadder::EvaluateReconciliation(
+			Input,
+			Result,
+			Error));
+	TestFalse(
+		TEXT("large reconstruction error fails tolerance"),
+		Result.bWithinTolerance);
 
-	Input.PuertsStaticScalarP50Ns = 0.0;
-	TestFalse(TEXT("zero baseline rejects"), FAvidScriptPerfCostLadder::EvaluateBudget(Input, Result, Error));
-	TestTrue(TEXT("invalid budget has explicit error"), Error.Contains(TEXT("positive Puerts baseline")));
+	Input.ObservedP50Ns = 0.0;
+	TestFalse(
+		TEXT("zero observation rejects"),
+		FAvidScriptPerfCostLadder::EvaluateReconciliation(
+			Input,
+			Result,
+			Error));
+	TestTrue(
+		TEXT("invalid reconciliation has explicit error"),
+		Error.Contains(TEXT("positive observation")));
 	return true;
 }
 

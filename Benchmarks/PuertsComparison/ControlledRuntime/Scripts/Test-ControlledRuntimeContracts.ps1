@@ -317,7 +317,9 @@ Assert-True ([int]$PhysicalCostProfile.process_runs -eq 5 -and
 Assert-True ([string]::Join('|', @($PhysicalCostProfile.stages)) -ceq
     [string]::Join('|', @(
         'native_no_op',
-        'cached_export',
+        'guest_loop_baseline',
+        'generic_export',
+        'prepared_export',
         'typed_empty_import',
         'generic_empty_import',
         'typed_i32_pair_import'))) (
@@ -330,8 +332,12 @@ foreach ($Token in @(
     'ResolveExport(TEXT("run_cached")',
     'ResolveExport(TEXT("run_empty")',
     'ResolveExport(TEXT("run_i32_pair")',
+    'PrepareExportCall(',
+    'PreparedCachedExport',
     'FPlatformProcess::ExecutablePath()',
-    'host_import_count'
+    'host_import_count',
+    'export_call_count',
+    'Stage == TEXT("native_no_op")'
 )) {
     Assert-True ($PhysicalCostRunner.Contains($Token)) (
         "physical cost runner is missing token: $Token")

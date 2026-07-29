@@ -176,6 +176,18 @@ Assert-True ($RunnerSource.Contains('Session.DispatchEventHot(')) `
     'AvidScript callback_empty must invoke the failure-only hot Session path'
 Assert-True ($RunnerSource.Contains('Session.CaptureLiveSnapshot(DispatchResult)')) `
     'AvidScript callback observations must be materialized after timed dispatch'
+Assert-True ($RunnerSource.Contains('callback_result_mode')) `
+    'callback result materialization mode must be explicit in each request'
+foreach ($FusedCounter in @(
+    'generated_fused_fast_hit_count',
+    'generated_fused_revalidate_count',
+    'generated_fused_call_site_prepare_count',
+    'generated_direct_read_prepare_count',
+    'generated_direct_write_prepare_count',
+    'generated_journal_slow_path_count')) {
+    Assert-True ($RunnerSource.Contains($FusedCounter)) `
+        "runner must publish fused path counter: $FusedCounter"
+}
 Assert-True ($RunnerSource.Contains('PrepareCallbackWorkload')) `
     'callback state must be reset before dispatch'
 Assert-True ($RunnerSource.Contains('CollectCallbackWorkload')) `

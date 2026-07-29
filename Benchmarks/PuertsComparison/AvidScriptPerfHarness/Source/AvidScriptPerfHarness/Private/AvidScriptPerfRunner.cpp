@@ -542,6 +542,12 @@ namespace
 		uint64 LastGeneratedS1HitCount = 0;
 		uint64 LastGeneratedS1FallbackCount = 0;
 		uint64 LastGeneratedS1RejectCount = 0;
+		uint64 LastGeneratedFusedFastHitCount = 0;
+		uint64 LastGeneratedFusedRevalidateCount = 0;
+		uint64 LastGeneratedFusedCallSitePrepareCount = 0;
+		uint64 LastGeneratedDirectReadPrepareCount = 0;
+		uint64 LastGeneratedDirectWritePrepareCount = 0;
+		uint64 LastGeneratedJournalSlowPathCount = 0;
 		uint64 LastSemanticHitCount = 0;
 		uint64 LastDataBoundaryCrossingCount = 0;
 		uint64 LastDataAppliedCommandCount = 0;
@@ -551,6 +557,12 @@ namespace
 		uint64 CollectedGeneratedS1HitCount = 0;
 		uint64 CollectedGeneratedS1FallbackCount = 0;
 		uint64 CollectedGeneratedS1RejectCount = 0;
+		uint64 CollectedGeneratedFusedFastHitCount = 0;
+		uint64 CollectedGeneratedFusedRevalidateCount = 0;
+		uint64 CollectedGeneratedFusedCallSitePrepareCount = 0;
+		uint64 CollectedGeneratedDirectReadPrepareCount = 0;
+		uint64 CollectedGeneratedDirectWritePrepareCount = 0;
+		uint64 CollectedGeneratedJournalSlowPathCount = 0;
 		uint64 CollectedSemanticHitCount = 0;
 		uint64 CollectedDataBoundaryCrossingCount = 0;
 		uint64 CollectedDataAppliedCommandCount = 0;
@@ -802,6 +814,24 @@ namespace
 			LastGeneratedS1RejectCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.GeneratedNativeS1RejectCount;
+			LastGeneratedFusedFastHitCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedFastHitCount;
+			LastGeneratedFusedRevalidateCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedRevalidateCount;
+			LastGeneratedFusedCallSitePrepareCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedCallSitePrepareCount;
+			LastGeneratedDirectReadPrepareCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedDirectReadPrepareCount;
+			LastGeneratedDirectWritePrepareCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedDirectWritePrepareCount;
+			LastGeneratedJournalSlowPathCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedJournalSlowPathCount;
 			LastSemanticHitCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.SemanticProcessEventCount;
@@ -820,6 +850,12 @@ namespace
 			uint64& OutGeneratedS1HitCount,
 			uint64& OutGeneratedS1FallbackCount,
 			uint64& OutGeneratedS1RejectCount,
+			uint64& OutGeneratedFusedFastHitCount,
+			uint64& OutGeneratedFusedRevalidateCount,
+			uint64& OutGeneratedFusedCallSitePrepareCount,
+			uint64& OutGeneratedDirectReadPrepareCount,
+			uint64& OutGeneratedDirectWritePrepareCount,
+			uint64& OutGeneratedJournalSlowPathCount,
 			uint64& OutSemanticHitCount,
 			uint64& OutDataCommandCount,
 			uint64& OutDataCrossingCount,
@@ -831,6 +867,18 @@ namespace
 			OutGeneratedS1HitCount = CollectedGeneratedS1HitCount;
 			OutGeneratedS1FallbackCount = CollectedGeneratedS1FallbackCount;
 			OutGeneratedS1RejectCount = CollectedGeneratedS1RejectCount;
+			OutGeneratedFusedFastHitCount =
+				CollectedGeneratedFusedFastHitCount;
+			OutGeneratedFusedRevalidateCount =
+				CollectedGeneratedFusedRevalidateCount;
+			OutGeneratedFusedCallSitePrepareCount =
+				CollectedGeneratedFusedCallSitePrepareCount;
+			OutGeneratedDirectReadPrepareCount =
+				CollectedGeneratedDirectReadPrepareCount;
+			OutGeneratedDirectWritePrepareCount =
+				CollectedGeneratedDirectWritePrepareCount;
+			OutGeneratedJournalSlowPathCount =
+				CollectedGeneratedJournalSlowPathCount;
 			OutSemanticHitCount = CollectedSemanticHitCount;
 			OutDataCommandCount = CollectedDataAppliedCommandCount;
 			OutDataCrossingCount = CollectedDataBoundaryCrossingCount;
@@ -933,6 +981,24 @@ namespace
 			CollectedGeneratedS1RejectCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1RejectCount
 				- LastGeneratedS1RejectCount;
+			CollectedGeneratedFusedFastHitCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedFastHitCount
+				- LastGeneratedFusedFastHitCount;
+			CollectedGeneratedFusedRevalidateCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedRevalidateCount
+				- LastGeneratedFusedRevalidateCount;
+			CollectedGeneratedFusedCallSitePrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedCallSitePrepareCount
+				- LastGeneratedFusedCallSitePrepareCount;
+			CollectedGeneratedDirectReadPrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedDirectReadPrepareCount
+				- LastGeneratedDirectReadPrepareCount;
+			CollectedGeneratedDirectWritePrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedDirectWritePrepareCount
+				- LastGeneratedDirectWritePrepareCount;
+			CollectedGeneratedJournalSlowPathCount =
+				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCount
+				- LastGeneratedJournalSlowPathCount;
 			CollectedSemanticHitCount =
 				DispatchResult.BindingInstrumentation.SemanticProcessEventCount
 				- LastSemanticHitCount;
@@ -951,6 +1017,18 @@ namespace
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1FallbackCount;
 			LastGeneratedS1RejectCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1RejectCount;
+			LastGeneratedFusedFastHitCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedFastHitCount;
+			LastGeneratedFusedRevalidateCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedRevalidateCount;
+			LastGeneratedFusedCallSitePrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedFusedCallSitePrepareCount;
+			LastGeneratedDirectReadPrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedDirectReadPrepareCount;
+			LastGeneratedDirectWritePrepareCount =
+				DispatchResult.BindingInstrumentation.GeneratedDirectWritePrepareCount;
+			LastGeneratedJournalSlowPathCount =
+				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCount;
 			LastSemanticHitCount =
 				DispatchResult.BindingInstrumentation.SemanticProcessEventCount;
 			LastDataBoundaryCrossingCount =
@@ -993,6 +1071,7 @@ namespace
 		bool DispatchCallbackWorkload(
 			const EAvidScriptPerfWorkload Workload,
 			const int32 Iterations,
+			const bool bUseHotCallbackResults,
 			FAvidScriptWasmSmokeResult& OutDispatchResult,
 			FString& OutError)
 		{
@@ -1010,10 +1089,16 @@ namespace
 				}
 				for (int32 Index = 0; Index < Iterations; ++Index)
 				{
-					if (!Session.DispatchEventHot(
+					const bool bSucceeded = bUseHotCallbackResults
+						? Session.DispatchEventHot(
 							PackedWorkload,
 							static_cast<float>(Index),
-							OutDispatchResult))
+							OutDispatchResult)
+						: Session.DispatchEvent(
+							PackedWorkload,
+							static_cast<float>(Index),
+							OutDispatchResult);
+					if (!bSucceeded)
 					{
 						return false;
 					}
@@ -1024,9 +1109,14 @@ namespace
 			{
 				for (int32 Index = 0; Index < Iterations; ++Index)
 				{
-					if (!Session.TickHot(
+					const bool bSucceeded = bUseHotCallbackResults
+						? Session.TickHot(
 							PerfRunnerTickDeltaSeconds,
-							OutDispatchResult))
+							OutDispatchResult)
+						: Session.Tick(
+							PerfRunnerTickDeltaSeconds,
+							OutDispatchResult);
+					if (!bSucceeded)
 					{
 						return false;
 					}
@@ -1440,6 +1530,7 @@ namespace
 		int32 MaximumIterations = 0;
 		int32 CalibrationConfirmationSamples = 0;
 		double DataLaneMaxCrossingRatio = 0.0;
+		bool bUseHotCallbackResults = true;
 		TSharedPtr<FJsonObject> Provenance;
 		TArray<TSharedPtr<FJsonValue>> LaneCatalogJson;
 		TArray<FPerfLaneCatalogEntry, TInlineAllocator<PerfRunnerLaneCount>> LaneCatalog;
@@ -1468,6 +1559,12 @@ namespace
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
+		uint64 GeneratedFusedFastHitCount = 0;
+		uint64 GeneratedFusedRevalidateCount = 0;
+		uint64 GeneratedFusedCallSitePrepareCount = 0;
+		uint64 GeneratedDirectReadPrepareCount = 0;
+		uint64 GeneratedDirectWritePrepareCount = 0;
+		uint64 GeneratedJournalSlowPathCount = 0;
 		uint64 DataLaneCommandCount = 0;
 		uint64 DataLaneCrossingCount = 0;
 		uint64 DataLaneRejectedBufferCount = 0;
@@ -1510,6 +1607,12 @@ namespace
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
+		uint64 GeneratedFusedFastHitCount = 0;
+		uint64 GeneratedFusedRevalidateCount = 0;
+		uint64 GeneratedFusedCallSitePrepareCount = 0;
+		uint64 GeneratedDirectReadPrepareCount = 0;
+		uint64 GeneratedDirectWritePrepareCount = 0;
+		uint64 GeneratedJournalSlowPathCount = 0;
 		uint64 DataLaneCommandCount = 0;
 		uint64 DataLaneCrossingCount = 0;
 		uint64 DataLaneRejectedBufferCount = 0;
@@ -1806,6 +1909,33 @@ namespace
 				OutRequest.AttemptId,
 				OutError))
 		{
+			return false;
+		}
+		FString CallbackResultMode;
+		if (!TryGetRequiredString(
+				Root,
+				TEXT("callback_result_mode"),
+				CallbackResultMode,
+				OutError))
+		{
+			return false;
+		}
+		if (CallbackResultMode.Equals(
+				TEXT("hot_failure_only"),
+				ESearchCase::CaseSensitive))
+		{
+			OutRequest.bUseHotCallbackResults = true;
+		}
+		else if (CallbackResultMode.Equals(
+				TEXT("full_snapshot"),
+				ESearchCase::CaseSensitive))
+		{
+			OutRequest.bUseHotCallbackResults = false;
+		}
+		else
+		{
+			OutError = TEXT(
+				"request callback_result_mode must be 'hot_failure_only' or 'full_snapshot'");
 			return false;
 		}
 		FGuid AttemptId;
@@ -2569,6 +2699,7 @@ namespace
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
 		const uint32 Seed,
+		const bool bUseHotCallbackResults,
 		const bool bTimed,
 		FPerfLaneObservation& OutObservation,
 		FString& OutError)
@@ -2707,6 +2838,7 @@ namespace
 						SelectedAvidScript.DispatchCallbackWorkload(
 							Workload,
 							Iterations,
+							bUseHotCallbackResults,
 							AvidScriptCallbackDispatchResult,
 							OutError);
 					EndCycles = FPlatformTime::Cycles64();
@@ -2717,6 +2849,7 @@ namespace
 						SelectedAvidScript.DispatchCallbackWorkload(
 							Workload,
 							Iterations,
+							bUseHotCallbackResults,
 							AvidScriptCallbackDispatchResult,
 							OutError);
 				}
@@ -2824,6 +2957,12 @@ namespace
 				OutObservation.GeneratedS1HitCount,
 				OutObservation.GeneratedS1FallbackCount,
 				OutObservation.GeneratedS1RejectCount,
+				OutObservation.GeneratedFusedFastHitCount,
+				OutObservation.GeneratedFusedRevalidateCount,
+				OutObservation.GeneratedFusedCallSitePrepareCount,
+				OutObservation.GeneratedDirectReadPrepareCount,
+				OutObservation.GeneratedDirectWritePrepareCount,
+				OutObservation.GeneratedJournalSlowPathCount,
 				OutObservation.SemanticHitCount,
 				OutObservation.DataLaneCommandCount,
 				OutObservation.DataLaneCrossingCount,
@@ -2905,6 +3044,36 @@ namespace
 			 Observation.DataLaneCommandCount != 0 ||
 			 Observation.DataLaneCrossingCount != 0 ||
 			 Observation.DataLaneRejectedBufferCount != 0);
+		const bool bFusedLane =
+			Observation.Lane ==
+				EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1
+			|| bDataLane;
+		const uint64 ExpectedFusedGeneratedHits = bDataGameplay
+			? ExpectedDataGeneratedS1HitCount
+			: ExpectedGeneratedS1HitCount;
+		const bool bHasFusedCalls = ExpectedFusedGeneratedHits > 0;
+		const uint64 DirectPrepareCount =
+			Observation.GeneratedDirectReadPrepareCount
+			+ Observation.GeneratedDirectWritePrepareCount;
+		const bool bFusedPathInvalid = bFusedLane
+			? (Observation.GeneratedJournalSlowPathCount != 0
+				|| (bHasFusedCalls
+					&& (Observation.GeneratedFusedRevalidateCount != 1
+						|| Observation.GeneratedFusedFastHitCount + 1
+							!= ExpectedFusedGeneratedHits
+						|| Observation.GeneratedFusedCallSitePrepareCount == 0
+						|| DirectPrepareCount
+							!= Observation.GeneratedFusedCallSitePrepareCount))
+				|| (!bHasFusedCalls
+					&& (Observation.GeneratedFusedFastHitCount != 0
+						|| Observation.GeneratedFusedRevalidateCount != 0
+						|| Observation.GeneratedFusedCallSitePrepareCount != 0
+						|| DirectPrepareCount != 0)))
+			: (Observation.GeneratedFusedFastHitCount != 0
+				|| Observation.GeneratedFusedRevalidateCount != 0
+				|| Observation.GeneratedFusedCallSitePrepareCount != 0
+				|| DirectPrepareCount != 0
+				|| Observation.GeneratedJournalSlowPathCount != 0);
 		if (Oracle.OperationCallCount != ExpectedOperationCallCount ||
 			Observation.Checksum != Oracle.Checksum ||
 			Observation.FinalScalar != Oracle.FinalScalar ||
@@ -2915,7 +3084,8 @@ namespace
 			bSemanticInvalid ||
 			bGeneratedLaneDataInvalid ||
 			bDataGameplayInvalid ||
-			bDataMicroInvalid)
+			bDataMicroInvalid ||
+			bFusedPathInvalid)
 		{
 			OutError = FString::Printf(
 				TEXT("correctness failure lane=%s workload=%s iterations=%d ")
@@ -2928,7 +3098,10 @@ namespace
 				TEXT("expected_semantic_hit=%llu logical=%llu ")
 				TEXT("data_generated_expected=%llu data_commands=%llu ")
 				TEXT("data_commands_expected=%llu data_crossings=%llu ")
-				TEXT("data_crossings_expected=%llu data_rejected=%llu"),
+				TEXT("data_crossings_expected=%llu data_rejected=%llu ")
+				TEXT("fused_fast=%llu fused_revalidate=%llu ")
+				TEXT("fused_call_site_prepare=%llu direct_prepare=%llu ")
+				TEXT("journal_slow=%llu"),
 				GetPerfLaneName(Observation.Lane),
 				GetPerfWorkloadName(Workload),
 				Iterations,
@@ -2952,7 +3125,12 @@ namespace
 				ExpectedPropertyWriteCount,
 				Observation.DataLaneCrossingCount,
 				ExpectedDataCrossingCount,
-				Observation.DataLaneRejectedBufferCount);
+				Observation.DataLaneRejectedBufferCount,
+				Observation.GeneratedFusedFastHitCount,
+				Observation.GeneratedFusedRevalidateCount,
+				Observation.GeneratedFusedCallSitePrepareCount,
+				DirectPrepareCount,
+				Observation.GeneratedJournalSlowPathCount);
 			return false;
 		}
 		return true;
@@ -3001,6 +3179,7 @@ namespace
 					Request.Workloads[WorkloadIndex],
 					Iterations,
 					Seed,
+					Request.bUseHotCallbackResults,
 					bTimed,
 					Observation,
 					OutError) ||
@@ -3072,6 +3251,7 @@ namespace
 					Request.Workloads[WorkloadIndex],
 					Iterations,
 					Seed,
+					Request.bUseHotCallbackResults,
 					true,
 					Observation,
 					OutError) ||
@@ -3235,6 +3415,30 @@ namespace
 			Object,
 			TEXT("generated_s1_reject_count"),
 			Sample.GeneratedS1RejectCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_fused_fast_hit_count"),
+			Sample.GeneratedFusedFastHitCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_fused_revalidate_count"),
+			Sample.GeneratedFusedRevalidateCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_fused_call_site_prepare_count"),
+			Sample.GeneratedFusedCallSitePrepareCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_direct_read_prepare_count"),
+			Sample.GeneratedDirectReadPrepareCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_direct_write_prepare_count"),
+			Sample.GeneratedDirectWritePrepareCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_journal_slow_path_count"),
+			Sample.GeneratedJournalSlowPathCount);
 		SetExactUnsignedField(
 			Object,
 			TEXT("data_lane_command_count"),
@@ -3770,6 +3974,18 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 						Observation.GeneratedS1FallbackCount;
 					Sample.GeneratedS1RejectCount =
 						Observation.GeneratedS1RejectCount;
+					Sample.GeneratedFusedFastHitCount =
+						Observation.GeneratedFusedFastHitCount;
+					Sample.GeneratedFusedRevalidateCount =
+						Observation.GeneratedFusedRevalidateCount;
+					Sample.GeneratedFusedCallSitePrepareCount =
+						Observation.GeneratedFusedCallSitePrepareCount;
+					Sample.GeneratedDirectReadPrepareCount =
+						Observation.GeneratedDirectReadPrepareCount;
+					Sample.GeneratedDirectWritePrepareCount =
+						Observation.GeneratedDirectWritePrepareCount;
+					Sample.GeneratedJournalSlowPathCount =
+						Observation.GeneratedJournalSlowPathCount;
 					Sample.DataLaneCommandCount =
 						Observation.DataLaneCommandCount;
 					Sample.DataLaneCrossingCount =
@@ -3936,6 +4152,7 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 					Workload,
 					IterationsPerWorkload,
 					WorkloadSeed,
+					true,
 					false,
 					Observation,
 					Error) ||

@@ -16,7 +16,7 @@ THIRD_PARTY_INCLUDES_END
 
 namespace
 {
-	constexpr int32 CostSchemaVersion = 1;
+	constexpr int32 CostSchemaVersion = 2;
 	constexpr int32 EmptyOrdinal = 0;
 	constexpr int32 PairOrdinal = 1;
 
@@ -341,6 +341,43 @@ namespace
 		OutValue = Result.Cells[0];
 		return true;
 	}
+
+	bool CallExportRepeated(
+		IAvidScriptVmBackend& Backend,
+		const FAvidScriptVmExportHandle& Handle,
+		const FAvidScriptVmPreparedExportCall* PreparedCall,
+		const int32 Iterations,
+		const int32 Seed,
+		uint32& OutValue,
+		FString& OutError)
+	{
+		uint32 Value = static_cast<uint32>(Seed);
+		for (uint32 Index = 0;
+			Index < static_cast<uint32>(Iterations);
+			++Index)
+		{
+			FAvidScriptVmCallFrame Frame;
+			Frame.Cells[0] = 1;
+			Frame.Cells[1] = Value;
+			Frame.CellCount = 2;
+			FAvidScriptVmCallResult Result;
+			FAvidScriptVmError VmError;
+			const bool bCalled = PreparedCall != nullptr
+				? PreparedCall->Call(Frame, VmError, &Result)
+				: Backend.Call(Handle, Frame, VmError, &Result);
+			if (!bCalled || Result.CellCount != 1)
+			{
+				OutError = FString::Printf(
+					TEXT("Wasmtime repeated export call failed: %s | %s"),
+					*VmError.Category,
+					*VmError.Details);
+				return false;
+			}
+			Value = Result.Cells[0] + Index;
+		}
+		OutValue = Value;
+		return true;
+	}
 }
 
 bool FAvidScriptPerfCostRunner::RunFromFiles(
@@ -403,6 +440,19 @@ bool FAvidScriptPerfCostRunner::RunFromFiles(
 		OutError = FString::Printf(TEXT("Wasmtime cost export resolve failed: %s"), *VmError.Details);
 		return false;
 	}
+	FAvidScriptVmPreparedExportCall PreparedCachedExport;
+	if (!TypedBackend->PrepareExportCall(
+			CachedExport,
+			PreparedCachedExport,
+			VmError)
+		|| !PreparedCachedExport.IsValid())
+	{
+		OutError = FString::Printf(
+			TEXT("Wasmtime cost prepared export failed: %s | %s"),
+			*VmError.Category,
+			*VmError.Details);
+		return false;
+	}
 
 	auto RunStage = [&](const FString& Stage, const int32 Seed, uint32& OutValue)
 	{
@@ -411,9 +461,31 @@ bool FAvidScriptPerfCostRunner::RunFromFiles(
 			OutValue = RunCachedOracle(Request.Iterations, Seed);
 			return true;
 		}
-		if (Stage == TEXT("cached_export"))
+		if (Stage == TEXT("guest_loop_baseline"))
 		{
 			return CallExport(*TypedBackend, CachedExport, Request.Iterations, Seed, OutValue, OutError);
+		}
+		if (Stage == TEXT("generic_export"))
+		{
+			return CallExportRepeated(
+				*TypedBackend,
+				CachedExport,
+				nullptr,
+				Request.Iterations,
+				Seed,
+				OutValue,
+				OutError);
+		}
+		if (Stage == TEXT("prepared_export"))
+		{
+			return CallExportRepeated(
+				*TypedBackend,
+				CachedExport,
+				&PreparedCachedExport,
+				Request.Iterations,
+				Seed,
+				OutValue,
+				OutError);
 		}
 		if (Stage == TEXT("typed_empty_import"))
 		{
@@ -433,7 +505,9 @@ bool FAvidScriptPerfCostRunner::RunFromFiles(
 
 	const TArray<FString> Stages = {
 		TEXT("native_no_op"),
-		TEXT("cached_export"),
+		TEXT("guest_loop_baseline"),
+		TEXT("generic_export"),
+		TEXT("prepared_export"),
 		TEXT("typed_empty_import"),
 		TEXT("generic_empty_import"),
 		TEXT("typed_i32_pair_import")
@@ -495,6 +569,14 @@ bool FAvidScriptPerfCostRunner::RunFromFiles(
 				Stage.Contains(TEXT("import"))
 					? Request.Iterations
 					: 0);
+			Sample->SetNumberField(
+				TEXT("export_call_count"),
+				Stage == TEXT("generic_export")
+					|| Stage == TEXT("prepared_export")
+					? Request.Iterations
+					: Stage == TEXT("native_no_op")
+						? 0
+						: 1);
 			Samples.Add(MakeShared<FJsonValueObject>(Sample));
 		}
 	}

@@ -12,11 +12,11 @@
 
 | 批次 | 状态 | 结果 |
 | --- | --- | --- |
-| P56.0 | 进行中 | 架构、计划、workflow 与性能 Gate |
-| P56.1 | 待开始 | callback-epoch fused host cell |
-| P56.2 | 待开始 | prepared VM export |
-| P56.3 | 待开始 | lifecycle `TickHot` |
-| P56.4 | 待开始 | 分段 profiling 与正式 benchmark 合同 |
+| P56.0 | 已完成 | 架构、计划、workflow 与性能 Gate |
+| P56.1 | 已完成 | callback-epoch fused host cell |
+| P56.2 | 已完成 | prepared VM export |
+| P56.3 | 已完成 | lifecycle `TickHot` |
+| P56.4 | 已完成，待统一验收 | 分段 profiling 与正式 benchmark 合同 |
 | P56.5 | 待开始 | 集中审查、统一 Gate、债务、文档与发布 |
 
 ## 正式结论

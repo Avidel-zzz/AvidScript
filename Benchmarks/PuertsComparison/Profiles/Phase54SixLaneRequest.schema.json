@@ -5,6 +5,7 @@
   "required": [
     "schema_version",
     "mode",
+    "callback_result_mode",
     "attempt_id",
     "process_run",
     "lane_order",
@@ -20,6 +21,9 @@
   "properties": {
     "schema_version": { "const": 2 },
     "mode": { "enum": ["calibration", "timed"] },
+    "callback_result_mode": {
+      "enum": ["hot_failure_only", "full_snapshot"]
+    },
     "lane_order": { "$ref": "#/$defs/lanes" },
     "lanes": { "$ref": "#/$defs/lanes" },
     "lane_catalog_sha256": { "$ref": "#/$defs/sha256" },

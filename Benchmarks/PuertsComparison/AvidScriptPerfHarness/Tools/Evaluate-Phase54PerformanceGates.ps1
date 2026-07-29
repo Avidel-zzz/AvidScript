@@ -10,6 +10,8 @@ param(
 
     [string[]]$MicroProcessResultPath,
 
+    [string]$MicroProfilePath,
+
     [string]$PhysicalCostAggregatePath,
 
     [Parameter(Mandatory = $true)]
@@ -370,6 +372,8 @@ function New-GameplayGateResult {
 }
 
 $profile = Read-JsonFile -Path $ProfilePath
+$isPhase56 =
+    [string]$profile.profile_id -clike 'phase56.*'
 if ($profile.evidence_class -ceq 'formal') {
     if ($profile.process_runs -ne 5 -or
         $profile.warmup_samples -ne 5 -or
@@ -466,6 +470,12 @@ foreach ($result in $results) {
             'generated_s1_hit_count',
             'generated_s1_fallback_count',
             'generated_s1_reject_count',
+            'generated_fused_fast_hit_count',
+            'generated_fused_revalidate_count',
+            'generated_fused_call_site_prepare_count',
+            'generated_direct_read_prepare_count',
+            'generated_direct_write_prepare_count',
+            'generated_journal_slow_path_count',
             'data_lane_command_count',
             'data_lane_crossing_count',
             'data_lane_rejected_buffer_count',
@@ -514,6 +524,52 @@ foreach ($result in $results) {
             -Workload ([string]$sample.workload) `
             -Iterations ([uint64]$sample.iterations) `
             -LogicalOperationCount $logical
+        $isGameplayWorkload = [string]$sample.workload -in @(
+            'gameplay_frame_small',
+            'gameplay_frame_dense')
+        $isDataLane =
+            [string]$sample.lane -ceq
+                'avidscript_wasmtime_data_oriented'
+        $fusedPropertyWrites = $isGameplayWorkload ?
+            ([uint64]$sample.iterations *
+                [uint64]$workloadContract.property_write_operations_per_frame) :
+            0u
+        $expectedFusedHits =
+            $isDataLane -and $isGameplayWorkload ?
+                ($logical - $fusedPropertyWrites) :
+                $expectedGeneratedHits
+        $isFusedLane = [string]$sample.lane -in @(
+            'avidscript_wasmtime_generated_s1',
+            'avidscript_wasmtime_data_oriented')
+        $directPrepareCount =
+            [uint64]$sample.generated_direct_read_prepare_count +
+            [uint64]$sample.generated_direct_write_prepare_count
+        $fusedInvalid = if ($isFusedLane) {
+            [uint64]$sample.generated_journal_slow_path_count -ne 0 -or
+            ($expectedFusedHits -gt 0 -and (
+                [uint64]$sample.generated_fused_revalidate_count -ne 1 -or
+                [uint64]$sample.generated_fused_fast_hit_count + 1 -ne
+                    $expectedFusedHits -or
+                [uint64]$sample.generated_fused_call_site_prepare_count -eq 0 -or
+                $directPrepareCount -ne
+                    [uint64]$sample.generated_fused_call_site_prepare_count)) -or
+            ($expectedFusedHits -eq 0 -and (
+                [uint64]$sample.generated_fused_fast_hit_count -ne 0 -or
+                [uint64]$sample.generated_fused_revalidate_count -ne 0 -or
+                [uint64]$sample.generated_fused_call_site_prepare_count -ne 0 -or
+                $directPrepareCount -ne 0))
+        }
+        else {
+            [uint64]$sample.generated_fused_fast_hit_count -ne 0 -or
+            [uint64]$sample.generated_fused_revalidate_count -ne 0 -or
+            [uint64]$sample.generated_fused_call_site_prepare_count -ne 0 -or
+            $directPrepareCount -ne 0 -or
+            [uint64]$sample.generated_journal_slow_path_count -ne 0
+        }
+        if ($fusedInvalid) {
+            $validityErrors.Add(
+                "fused path mismatch process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
+        }
         $isAvidScriptLane =
             ([string]$sample.lane).StartsWith(
                 'avidscript_',
@@ -713,8 +769,16 @@ if ($supplementalProvided) {
         throw 'Raw supplemental candidate, correctness, or fallback identity differs.'
     }
 
-    $microProfilePath = Join-Path $comparisonRoot (
-        'Profiles/Phase54Micro.formal.json')
+    $microProfilePath = if (
+        [string]::IsNullOrWhiteSpace($MicroProfilePath)) {
+        Join-Path $comparisonRoot (
+            $isPhase56 ?
+                'Profiles/Phase56Micro.formal.json' :
+                'Profiles/Phase54Micro.formal.json')
+    }
+    else {
+        (Resolve-Path -LiteralPath $MicroProfilePath).Path
+    }
     $microStats = Get-Phase54MicroStatistics `
         -ResultPath $MicroProcessResultPath `
         -CanonicalProfilePath $microProfilePath `
@@ -757,6 +821,42 @@ if ($supplementalProvided) {
         throw 'Physical cost aggregate has no typed empty import metric.'
     }
 
+    $microRawResults = @($MicroProcessResultPath | ForEach-Object {
+        Read-JsonFile -Path $_
+    })
+    $fusedSamples = @($microRawResults.samples | Where-Object {
+        [string]$_.lane -in @(
+            'avidscript_wasmtime_generated_s1',
+            'avidscript_wasmtime_data_oriented') -and
+        [uint64]$_.generated_s1_hit_count -gt 0
+    })
+    [double]$fusedFastHitCount = [double](
+        $fusedSamples |
+            Measure-Object -Property generated_fused_fast_hit_count -Sum
+    ).Sum
+    [double]$fusedRevalidateCount = [double](
+        $fusedSamples |
+            Measure-Object -Property generated_fused_revalidate_count -Sum
+    ).Sum
+    [double]$directPrepareCount = [double](
+        $fusedSamples |
+            Measure-Object -Property generated_direct_read_prepare_count -Sum
+    ).Sum + [double](
+        $fusedSamples |
+            Measure-Object -Property generated_direct_write_prepare_count -Sum
+    ).Sum
+    [double]$journalSlowPathCount = [double](
+        $microRawResults.samples |
+            Measure-Object -Property generated_journal_slow_path_count -Sum
+    ).Sum
+    [double]$fusedHitCount =
+        $fusedFastHitCount + $fusedRevalidateCount
+    if ($isPhase56 -and (
+        $fusedSamples.Count -eq 0 -or
+        $fusedHitCount -le 0.0)) {
+        throw 'Phase56 fused-path evidence contains no measured call-site hits.'
+    }
+
     $supplementalGateInputs = [ordered]@{
         wasmtime_v8_geo_ratio = [Math]::Max(
             [double]$suite.leadership.p50_geometric_mean_ratio,
@@ -773,7 +873,25 @@ if ($supplementalProvided) {
             [Math]::Min($reflectionCallback, $staticCallback)
         vector_vs_phase54_baseline = $generatedVector /
             [double]$historicalVector[0].lanes.avidscript_wasmtime_jit.p50
-        typed_empty_explained_ratio =
+    }
+    if ($isPhase56) {
+        $supplementalGateInputs.prepared_export_ratio =
+            [double]$physical.cost_deltas.prepared_export_over_generic_p50
+        $supplementalGateInputs.physical_reconstruction_error_ratio =
+            [double]$physical.cost_deltas.max_reconstruction_error_ratio
+        $supplementalGateInputs.typed_empty_net_ns =
+            [double]$physical.cost_deltas.typed_empty_net_p50_ns
+        $supplementalGateInputs.fused_fast_hit_ratio =
+            $fusedFastHitCount / $fusedHitCount
+        $supplementalGateInputs.fused_revalidate_per_callback =
+            $fusedRevalidateCount / [double]$fusedSamples.Count
+        $supplementalGateInputs.direct_effect_prepare_count =
+            $directPrepareCount
+        $supplementalGateInputs.journal_slow_path_count =
+            $journalSlowPathCount
+    }
+    else {
+        $supplementalGateInputs.typed_empty_explained_ratio =
             [double]$typedMetric[0].process_p95_median_ns_per_iteration /
             $staticScalar
     }
@@ -813,9 +931,22 @@ $supplementalGateNames = @(
     's1_property_ns',
     'callback_ns',
     'callback_vs_puerts',
-    'vector_vs_phase54_baseline',
-    'typed_empty_explained_ratio'
+    'vector_vs_phase54_baseline'
 )
+if ($isPhase56) {
+    $supplementalGateNames += @(
+        'prepared_export_ratio',
+        'physical_reconstruction_error_ratio',
+        'typed_empty_net_ns',
+        'fused_fast_hit_ratio',
+        'fused_revalidate_per_callback',
+        'direct_effect_prepare_count',
+        'journal_slow_path_count'
+    )
+}
+else {
+    $supplementalGateNames += 'typed_empty_explained_ratio'
+}
 foreach ($name in $supplementalGateNames) {
     $value = $null
     if ($supplementalCandidateMatch -and
@@ -889,6 +1020,14 @@ $output = [ordered]@{
 }
 
 $json = $output | ConvertTo-Json -Depth 100
+$gateSchemaPath = Join-Path (
+    Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) (
+    $isPhase56 ?
+        'Profiles/Phase56GateResult.schema.json' :
+        'Profiles/Phase54GateResult.schema.json')
+if (-not ($json | Test-Json -SchemaFile $gateSchemaPath)) {
+    throw 'Generated performance gate result does not match its phase schema.'
+}
 [IO.File]::WriteAllText(
     $resolvedOutput,
     $json + [Environment]::NewLine,

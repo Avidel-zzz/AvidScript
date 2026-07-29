@@ -53,7 +53,9 @@ $profile = Get-Content -LiteralPath $resolvedProfilePath -Raw |
     ConvertFrom-Json -Depth 100
 $expectedStages = @(
     'native_no_op',
-    'cached_export',
+    'guest_loop_baseline',
+    'generic_export',
+    'prepared_export',
     'typed_empty_import',
     'generic_empty_import',
     'typed_i32_pair_import'
@@ -195,7 +197,7 @@ $results = @()
 $resultPaths = @()
 for ($processRun = 0; $processRun -lt [int]$profile.process_runs; ++$processRun) {
     $request = [ordered]@{
-        schema_version = 1
+        schema_version = 2
         benchmark_kind = 'physical_crossing_cost_ladder'
         attempt_id = $attemptId
         profile_sha256 = $profileSha256
@@ -250,8 +252,14 @@ for ($processRun = 0; $processRun -lt [int]$profile.process_runs; ++$processRun)
             'typed_empty_import',
             'generic_empty_import',
             'typed_i32_pair_import') ? [int]$profile.iterations : 0
+        $expectedExportCalls = $stage -in @(
+            'generic_export',
+            'prepared_export') ?
+                [int]$profile.iterations :
+                ($stage -ceq 'native_no_op' ? 0 : 1)
         if (@($stageSamples | Where-Object {
             [int]$_.host_import_count -ne $expectedCrossings -or
+            [int]$_.export_call_count -ne $expectedExportCalls -or
             -not [bool]$_.correct
         }).Count -gt 0) {
             throw "ASP54L4715 physical cost path count differs: $processRun/$stage"
@@ -306,13 +314,126 @@ function Find-StageMetric {
     param([string]$Stage)
     return @($crossProcessMetrics | Where-Object { [string]$_.stage -ceq $Stage })[0]
 }
-$cached = Find-StageMetric -Stage 'cached_export'
+$pairDefinitions = @(
+    [pscustomobject]@{
+        id = 'generic_export_minus_prepared_export'
+        observed = 'generic_export'
+        baseline = 'prepared_export'
+    },
+    [pscustomobject]@{
+        id = 'typed_empty_minus_guest_loop'
+        observed = 'typed_empty_import'
+        baseline = 'guest_loop_baseline'
+    },
+    [pscustomobject]@{
+        id = 'generic_empty_minus_typed_empty'
+        observed = 'generic_empty_import'
+        baseline = 'typed_empty_import'
+    },
+    [pscustomobject]@{
+        id = 'typed_i32_pair_minus_typed_empty'
+        observed = 'typed_i32_pair_import'
+        baseline = 'typed_empty_import'
+    }
+)
+$pairedProcessCosts = @()
+foreach ($result in $results) {
+    foreach ($pair in $pairDefinitions) {
+        $observedSamples = @($result.samples | Where-Object {
+            [string]$_.stage -ceq [string]$pair.observed
+        } | Sort-Object sample_index)
+        $baselineSamples = @($result.samples | Where-Object {
+            [string]$_.stage -ceq [string]$pair.baseline
+        } | Sort-Object sample_index)
+        if ($observedSamples.Count -ne $baselineSamples.Count -or
+            $observedSamples.Count -ne [int]$profile.timed_samples) {
+            throw "ASP56L4718 paired physical sample matrix differs: $($result.process_run)/$($pair.id)"
+        }
+        [double[]]$observedValues = @()
+        [double[]]$baselineValues = @()
+        [double[]]$pairedDeltas = @()
+        for ($sampleIndex = 0; $sampleIndex -lt $observedSamples.Count; ++$sampleIndex) {
+            if ([int]$observedSamples[$sampleIndex].sample_index -ne
+                [int]$baselineSamples[$sampleIndex].sample_index -or
+                [int]$observedSamples[$sampleIndex].seed -ne
+                [int]$baselineSamples[$sampleIndex].seed) {
+                throw "ASP56L4719 paired physical sample identity differs: $($result.process_run)/$($pair.id)"
+            }
+            $observedValue =
+                [double]$observedSamples[$sampleIndex].ns_per_iteration
+            $baselineValue =
+                [double]$baselineSamples[$sampleIndex].ns_per_iteration
+            $observedValues += $observedValue
+            $baselineValues += $baselineValue
+            $pairedDeltas += $observedValue - $baselineValue
+        }
+        $observedP50 = Get-Median -Values $observedValues
+        $baselineP50 = Get-Median -Values $baselineValues
+        $pairedDeltaP50 = Get-Median -Values $pairedDeltas
+        $reconstructed = $baselineP50 + $pairedDeltaP50
+        $errorRatio = [Math]::Abs($reconstructed - $observedP50) /
+            [Math]::Max($observedP50, 0.000001)
+        $pairedProcessCosts += [ordered]@{
+            process_run = [int]$result.process_run
+            pair = [string]$pair.id
+            observed_stage = [string]$pair.observed
+            baseline_stage = [string]$pair.baseline
+            sample_count = $observedSamples.Count
+            observed_p50_ns_per_iteration = $observedP50
+            baseline_p50_ns_per_iteration = $baselineP50
+            paired_delta_p50_ns_per_iteration = $pairedDeltaP50
+            reconstructed_p50_ns_per_iteration = $reconstructed
+            reconstruction_error_ratio = $errorRatio
+        }
+    }
+}
+$pairedCostMetrics = @()
+foreach ($pair in $pairDefinitions) {
+    $metrics = @($pairedProcessCosts | Where-Object {
+        [string]$_.pair -ceq [string]$pair.id
+    })
+    [double[]]$deltaValues = @($metrics | ForEach-Object {
+        [double]$_.paired_delta_p50_ns_per_iteration
+    })
+    [double[]]$errorValues = @($metrics | ForEach-Object {
+        [double]$_.reconstruction_error_ratio
+    })
+    $pairedCostMetrics += [ordered]@{
+        pair = [string]$pair.id
+        process_count = $metrics.Count
+        paired_delta_p50_median_ns_per_iteration =
+            Get-Median -Values $deltaValues
+        paired_delta_p95_ns_per_iteration =
+            Get-Percentile -Values $deltaValues -Percentile 0.95
+        reconstruction_error_p50_ratio =
+            Get-Median -Values $errorValues
+        reconstruction_error_p95_ratio =
+            Get-Percentile -Values $errorValues -Percentile 0.95
+    }
+}
+function Find-PairedMetric {
+    param([string]$Pair)
+    return @($pairedCostMetrics | Where-Object {
+        [string]$_.pair -ceq $Pair
+    })[0]
+}
+$guestLoop = Find-StageMetric -Stage 'guest_loop_baseline'
+$genericExport = Find-StageMetric -Stage 'generic_export'
+$preparedExport = Find-StageMetric -Stage 'prepared_export'
 $typed = Find-StageMetric -Stage 'typed_empty_import'
 $generic = Find-StageMetric -Stage 'generic_empty_import'
 $typedPair = Find-StageMetric -Stage 'typed_i32_pair_import'
+$preparedPair =
+    Find-PairedMetric -Pair 'generic_export_minus_prepared_export'
+$typedPairCost =
+    Find-PairedMetric -Pair 'typed_empty_minus_guest_loop'
+$genericPairCost =
+    Find-PairedMetric -Pair 'generic_empty_minus_typed_empty'
+$i32PairCost =
+    Find-PairedMetric -Pair 'typed_i32_pair_minus_typed_empty'
 $first = $results[0]
 $aggregate = [ordered]@{
-    schema_version = 1
+    schema_version = 2
     benchmark_kind = 'physical_crossing_cost_ladder'
     attempt_id = $attemptId
     profile_sha256 = $profileSha256
@@ -334,16 +455,24 @@ $aggregate = [ordered]@{
     observation_count = @($results.samples).Count
     process_metrics = $processMetrics
     cross_process_metrics = $crossProcessMetrics
+    paired_process_costs = $pairedProcessCosts
+    paired_cost_metrics = $pairedCostMetrics
     cost_deltas = [ordered]@{
-        typed_empty_over_cached_p95 =
-            [double]$typed.process_p95_p95_ns_per_iteration /
-            [double]$cached.process_p95_p95_ns_per_iteration
-        generic_minus_typed_empty_observed_p95_ns =
-            [double]$generic.process_p95_p95_ns_per_iteration -
-            [double]$typed.process_p95_p95_ns_per_iteration
-        typed_i32_pair_minus_typed_empty_observed_p95_ns =
-            [double]$typedPair.process_p95_p95_ns_per_iteration -
-            [double]$typed.process_p95_p95_ns_per_iteration
+        prepared_export_over_generic_p50 =
+            [double]$preparedExport.process_p50_median_ns_per_iteration /
+            [double]$genericExport.process_p50_median_ns_per_iteration
+        prepared_export_savings_p50_ns =
+            [double]$preparedPair.paired_delta_p50_median_ns_per_iteration
+        typed_empty_net_p50_ns =
+            [double]$typedPairCost.paired_delta_p50_median_ns_per_iteration
+        generic_minus_typed_empty_p50_ns =
+            [double]$genericPairCost.paired_delta_p50_median_ns_per_iteration
+        typed_i32_pair_minus_typed_empty_p50_ns =
+            [double]$i32PairCost.paired_delta_p50_median_ns_per_iteration
+        max_reconstruction_error_ratio = [double](
+            $pairedCostMetrics |
+                Measure-Object -Property reconstruction_error_p95_ratio -Maximum
+        ).Maximum
     }
     correctness_failures = 0
     fallback_used = $false
@@ -367,8 +496,10 @@ $aggregatePath = Join-Path $attemptPath 'aggregate.json'
     aggregate_path = $aggregatePath
     aggregate_sha256 = Get-SidecarFileSha256 -Path $aggregatePath
     typed_empty_p95_ns = [double]$typed.process_p95_p95_ns_per_iteration
-    generic_minus_typed_empty_observed_p95_ns =
-        [double]$aggregate.cost_deltas.generic_minus_typed_empty_observed_p95_ns
-    typed_i32_pair_minus_typed_empty_observed_p95_ns =
-        [double]$aggregate.cost_deltas.typed_i32_pair_minus_typed_empty_observed_p95_ns
+    prepared_export_over_generic_p50 =
+        [double]$aggregate.cost_deltas.prepared_export_over_generic_p50
+    typed_empty_net_p50_ns =
+        [double]$aggregate.cost_deltas.typed_empty_net_p50_ns
+    max_reconstruction_error_ratio =
+        [double]$aggregate.cost_deltas.max_reconstruction_error_ratio
 }

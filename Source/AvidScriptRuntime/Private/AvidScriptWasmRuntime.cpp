@@ -3189,6 +3189,20 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 		{
 			return false;
 		}
+		if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+				BindingInvocationContext.InvocationInstrumentation)
+		{
+			if (Call.EffectMode
+				== EAvidScriptPreparedHostEffectMode::DirectRead)
+			{
+				++Instrumentation->GeneratedDirectReadPrepareCount;
+			}
+			else if (Call.EffectMode
+				== EAvidScriptPreparedHostEffectMode::DirectWrite)
+			{
+				++Instrumentation->GeneratedDirectWritePrepareCount;
+			}
+		}
 		Call.PreparedCallbackEpoch = Frame.CallbackEpoch;
 		Call.PreparedReloadEpoch = ReloadEpoch;
 	}

@@ -16,13 +16,15 @@
     "observation_count",
     "process_metrics",
     "cross_process_metrics",
+    "paired_process_costs",
+    "paired_cost_metrics",
     "cost_deltas",
     "correctness_failures",
     "fallback_used",
     "result_sha256"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
     "attempt_id": { "type": "string", "format": "uuid" },
     "profile_sha256": { "$ref": "#/$defs/sha256" },
@@ -51,16 +53,16 @@
     },
     "process_runs": { "type": "integer", "minimum": 1 },
     "timed_samples_per_stage_per_process": { "type": "integer", "minimum": 1 },
-    "observation_count": { "type": "integer", "minimum": 5 },
+    "observation_count": { "type": "integer", "minimum": 7 },
     "process_metrics": {
       "type": "array",
-      "minItems": 5,
+      "minItems": 7,
       "items": { "$ref": "#/$defs/metric" }
     },
     "cross_process_metrics": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 7,
+      "maxItems": 7,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -84,18 +86,35 @@
         }
       }
     },
+    "paired_process_costs": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "$ref": "#/$defs/paired_process_cost" }
+    },
+    "paired_cost_metrics": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/paired_cost_metric" }
+    },
     "cost_deltas": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "typed_empty_over_cached_p95",
-        "generic_minus_typed_empty_observed_p95_ns",
-        "typed_i32_pair_minus_typed_empty_observed_p95_ns"
+        "prepared_export_over_generic_p50",
+        "prepared_export_savings_p50_ns",
+        "typed_empty_net_p50_ns",
+        "generic_minus_typed_empty_p50_ns",
+        "typed_i32_pair_minus_typed_empty_p50_ns",
+        "max_reconstruction_error_ratio"
       ],
       "properties": {
-        "typed_empty_over_cached_p95": { "type": "number", "minimum": 0 },
-        "generic_minus_typed_empty_observed_p95_ns": { "type": "number" },
-        "typed_i32_pair_minus_typed_empty_observed_p95_ns": { "type": "number" }
+        "prepared_export_over_generic_p50": { "type": "number", "minimum": 0 },
+        "prepared_export_savings_p50_ns": { "type": "number" },
+        "typed_empty_net_p50_ns": { "type": "number" },
+        "generic_minus_typed_empty_p50_ns": { "type": "number" },
+        "typed_i32_pair_minus_typed_empty_p50_ns": { "type": "number" },
+        "max_reconstruction_error_ratio": { "type": "number", "minimum": 0 }
       }
     },
     "correctness_failures": { "const": 0 },
@@ -120,6 +139,54 @@
         "p50_ns_per_iteration": { "type": "number", "minimum": 0 },
         "p95_ns_per_iteration": { "type": "number", "minimum": 0 },
         "mad_ns_per_iteration": { "type": "number", "minimum": 0 }
+      }
+    },
+    "paired_process_cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "process_run",
+        "pair",
+        "observed_stage",
+        "baseline_stage",
+        "sample_count",
+        "observed_p50_ns_per_iteration",
+        "baseline_p50_ns_per_iteration",
+        "paired_delta_p50_ns_per_iteration",
+        "reconstructed_p50_ns_per_iteration",
+        "reconstruction_error_ratio"
+      ],
+      "properties": {
+        "process_run": { "type": "integer", "minimum": 0 },
+        "pair": { "type": "string", "minLength": 1 },
+        "observed_stage": { "type": "string", "minLength": 1 },
+        "baseline_stage": { "type": "string", "minLength": 1 },
+        "sample_count": { "type": "integer", "minimum": 1 },
+        "observed_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
+        "baseline_p50_ns_per_iteration": { "type": "number", "minimum": 0 },
+        "paired_delta_p50_ns_per_iteration": { "type": "number" },
+        "reconstructed_p50_ns_per_iteration": { "type": "number" },
+        "reconstruction_error_ratio": { "type": "number", "minimum": 0 }
+      }
+    },
+    "paired_cost_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair",
+        "process_count",
+        "paired_delta_p50_median_ns_per_iteration",
+        "paired_delta_p95_ns_per_iteration",
+        "reconstruction_error_p50_ratio",
+        "reconstruction_error_p95_ratio"
+      ],
+      "properties": {
+        "pair": { "type": "string", "minLength": 1 },
+        "process_count": { "type": "integer", "minimum": 1 },
+        "paired_delta_p50_median_ns_per_iteration": { "type": "number" },
+        "paired_delta_p95_ns_per_iteration": { "type": "number" },
+        "reconstruction_error_p50_ratio": { "type": "number", "minimum": 0 },
+        "reconstruction_error_p95_ratio": { "type": "number", "minimum": 0 }
       }
     }
   }

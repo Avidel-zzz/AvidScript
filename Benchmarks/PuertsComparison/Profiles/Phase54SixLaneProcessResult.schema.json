@@ -59,6 +59,12 @@
           "generated_s1_hit_count",
           "generated_s1_fallback_count",
           "generated_s1_reject_count",
+          "generated_fused_fast_hit_count",
+          "generated_fused_revalidate_count",
+          "generated_fused_call_site_prepare_count",
+          "generated_direct_read_prepare_count",
+          "generated_direct_write_prepare_count",
+          "generated_journal_slow_path_count",
           "data_lane_command_count",
           "data_lane_crossing_count",
           "data_lane_rejected_buffer_count",
@@ -85,6 +91,12 @@
             ]
           },
           "elapsed_cycles": { "type": "integer", "minimum": 1 },
+          "generated_fused_fast_hit_count": { "type": "integer", "minimum": 0 },
+          "generated_fused_revalidate_count": { "type": "integer", "minimum": 0 },
+          "generated_fused_call_site_prepare_count": { "type": "integer", "minimum": 0 },
+          "generated_direct_read_prepare_count": { "type": "integer", "minimum": 0 },
+          "generated_direct_write_prepare_count": { "type": "integer", "minimum": 0 },
+          "generated_journal_slow_path_count": { "type": "integer", "minimum": 0 },
           "logical_operation_count": { "type": "integer", "minimum": 1 },
           "correct": { "const": true }
         }

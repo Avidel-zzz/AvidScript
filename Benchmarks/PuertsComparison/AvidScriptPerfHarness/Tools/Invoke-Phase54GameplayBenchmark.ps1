@@ -288,6 +288,8 @@ function New-Request {
         [int]$Profile.calibration.confirmation_samples
     $request.data_lane_max_crossing_ratio =
         [double]$Profile.validity.data_lane_max_crossing_ratio
+    $request.callback_result_mode =
+        [string]$Profile.callback_result_mode
     $request.iteration_counts = $IterationCounts
     $request.result_path = $ResultPath
     $request.result_write.temporary_path = "$ResultPath.tmp"
@@ -384,10 +386,13 @@ Assert-ExactSequence `
     -Expected $expectedLanes `
     -Label 'request template lane catalog'
 if ($profile.evidence_class -ceq 'formal') {
+    $profilePrefix = [string]$profile.profile_id -clike 'phase56.*' ?
+        'Phase56' :
+        'Phase54'
     $canonicalProfileName = @($profile.workloads).Count -eq
         $gameplayWorkloads.Count ?
-        'Phase54Gameplay.formal.json' :
-        'Phase54Micro.formal.json'
+        "$profilePrefix`Gameplay.formal.json" :
+        "$profilePrefix`Micro.formal.json"
     $canonicalProfilePath = Join-Path $schemaRoot $canonicalProfileName
     $canonicalTemplatePath = Join-Path $schemaRoot (
         'Phase54SixLaneRequest.template.json')

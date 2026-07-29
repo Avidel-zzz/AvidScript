@@ -5,10 +5,12 @@
 enum class EAvidScriptPerfCostStage : uint8
 {
 	NativeNoOp,
-	CachedExport,
+	GuestLoopBaseline,
+	GenericExport,
+	PreparedExport,
 	TypedEmptyImport,
 	GenericEmptyImport,
-	ImmutableEnvironmentDispatch
+	TypedI32PairImport
 };
 
 struct FAvidScriptPerfCostLadderRecord
@@ -30,26 +32,28 @@ using FAvidScriptPerfCostDriver = TFunction<bool(uint64, uint32, uint32&, FStrin
 
 struct FAvidScriptPerfCostLadderDrivers
 {
-	FAvidScriptPerfCostDriver CachedExport;
+	FAvidScriptPerfCostDriver GuestLoopBaseline;
+	FAvidScriptPerfCostDriver GenericExport;
+	FAvidScriptPerfCostDriver PreparedExport;
 	FAvidScriptPerfCostDriver TypedEmptyImport;
 	FAvidScriptPerfCostDriver GenericEmptyImport;
-	FAvidScriptPerfCostDriver ImmutableEnvironmentDispatch;
+	FAvidScriptPerfCostDriver TypedI32PairImport;
 };
 
-struct FAvidScriptPerfCostBudgetInput
+struct FAvidScriptPerfCostReconciliationInput
 {
-	double TypedEmptyP95Ns = 0.0;
-	double PuertsStaticScalarP50Ns = 0.0;
-	double GenericEmptyP95Ns = 0.0;
-	double ImmutableEnvironmentDispatchP95Ns = 0.0;
+	double ObservedP50Ns = 0.0;
+	double BaselineP50Ns = 0.0;
+	double PairedDeltaP50Ns = 0.0;
+	double MaximumErrorRatio = 0.15;
 };
 
-struct FAvidScriptPerfCostBudgetResult
+struct FAvidScriptPerfCostReconciliationResult
 {
-	double TypedToPuertsRatio = 0.0;
-	double GenericMinusTypedNs = 0.0;
-	double ImmutableDispatchMinusTypedNs = 0.0;
-	bool bSingleCallBudgetConstrained = false;
+	double ReconstructedP50Ns = 0.0;
+	double ReconstructionErrorNs = 0.0;
+	double ReconstructionErrorRatio = 0.0;
+	bool bWithinTolerance = false;
 };
 
 class AVIDSCRIPTPERFHARNESS_API FAvidScriptPerfCostLadder
@@ -63,8 +67,8 @@ public:
 
 	static FName GetStageName(EAvidScriptPerfCostStage Stage);
 
-	static bool EvaluateBudget(
-		const FAvidScriptPerfCostBudgetInput& Input,
-		FAvidScriptPerfCostBudgetResult& OutResult,
+	static bool EvaluateReconciliation(
+		const FAvidScriptPerfCostReconciliationInput& Input,
+		FAvidScriptPerfCostReconciliationResult& OutResult,
 		FString& OutError);
 };

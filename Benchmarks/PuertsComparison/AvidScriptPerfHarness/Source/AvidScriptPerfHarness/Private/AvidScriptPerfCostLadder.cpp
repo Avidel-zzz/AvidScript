@@ -62,10 +62,12 @@ bool FAvidScriptPerfCostLadder::Run(
 	};
 
 	return ExecuteStage(EAvidScriptPerfCostStage::NativeNoOp, Request, NativeNoOp, OutRecords, OutError)
-		&& ExecuteStage(EAvidScriptPerfCostStage::CachedExport, Request, Drivers.CachedExport, OutRecords, OutError)
+		&& ExecuteStage(EAvidScriptPerfCostStage::GuestLoopBaseline, Request, Drivers.GuestLoopBaseline, OutRecords, OutError)
+		&& ExecuteStage(EAvidScriptPerfCostStage::GenericExport, Request, Drivers.GenericExport, OutRecords, OutError)
+		&& ExecuteStage(EAvidScriptPerfCostStage::PreparedExport, Request, Drivers.PreparedExport, OutRecords, OutError)
 		&& ExecuteStage(EAvidScriptPerfCostStage::TypedEmptyImport, Request, Drivers.TypedEmptyImport, OutRecords, OutError)
 		&& ExecuteStage(EAvidScriptPerfCostStage::GenericEmptyImport, Request, Drivers.GenericEmptyImport, OutRecords, OutError)
-		&& ExecuteStage(EAvidScriptPerfCostStage::ImmutableEnvironmentDispatch, Request, Drivers.ImmutableEnvironmentDispatch, OutRecords, OutError);
+		&& ExecuteStage(EAvidScriptPerfCostStage::TypedI32PairImport, Request, Drivers.TypedI32PairImport, OutRecords, OutError);
 }
 
 FName FAvidScriptPerfCostLadder::GetStageName(const EAvidScriptPerfCostStage Stage)
@@ -74,46 +76,50 @@ FName FAvidScriptPerfCostLadder::GetStageName(const EAvidScriptPerfCostStage Sta
 	{
 	case EAvidScriptPerfCostStage::NativeNoOp:
 		return TEXT("native_no_op");
-	case EAvidScriptPerfCostStage::CachedExport:
-		return TEXT("cached_export");
+	case EAvidScriptPerfCostStage::GuestLoopBaseline:
+		return TEXT("guest_loop_baseline");
+	case EAvidScriptPerfCostStage::GenericExport:
+		return TEXT("generic_export");
+	case EAvidScriptPerfCostStage::PreparedExport:
+		return TEXT("prepared_export");
 	case EAvidScriptPerfCostStage::TypedEmptyImport:
 		return TEXT("typed_empty_import");
 	case EAvidScriptPerfCostStage::GenericEmptyImport:
 		return TEXT("generic_empty_import");
-	case EAvidScriptPerfCostStage::ImmutableEnvironmentDispatch:
-		return TEXT("immutable_environment_dispatch");
+	case EAvidScriptPerfCostStage::TypedI32PairImport:
+		return TEXT("typed_i32_pair_import");
 	default:
 		return NAME_None;
 	}
 }
 
-bool FAvidScriptPerfCostLadder::EvaluateBudget(
-	const FAvidScriptPerfCostBudgetInput& Input,
-	FAvidScriptPerfCostBudgetResult& OutResult,
+bool FAvidScriptPerfCostLadder::EvaluateReconciliation(
+	const FAvidScriptPerfCostReconciliationInput& Input,
+	FAvidScriptPerfCostReconciliationResult& OutResult,
 	FString& OutError)
 {
-	OutResult = FAvidScriptPerfCostBudgetResult();
+	OutResult = FAvidScriptPerfCostReconciliationResult();
 	OutError.Reset();
-	if (!FMath::IsFinite(Input.TypedEmptyP95Ns)
-		|| !FMath::IsFinite(Input.PuertsStaticScalarP50Ns)
-		|| !FMath::IsFinite(Input.GenericEmptyP95Ns)
-		|| !FMath::IsFinite(Input.ImmutableEnvironmentDispatchP95Ns)
-		|| Input.TypedEmptyP95Ns < 0.0
-		|| Input.PuertsStaticScalarP50Ns <= 0.0
-		|| Input.GenericEmptyP95Ns < 0.0
-		|| Input.ImmutableEnvironmentDispatchP95Ns < 0.0)
+	if (!FMath::IsFinite(Input.ObservedP50Ns)
+		|| !FMath::IsFinite(Input.BaselineP50Ns)
+		|| !FMath::IsFinite(Input.PairedDeltaP50Ns)
+		|| !FMath::IsFinite(Input.MaximumErrorRatio)
+		|| Input.ObservedP50Ns <= 0.0
+		|| Input.BaselineP50Ns < 0.0
+		|| Input.MaximumErrorRatio < 0.0)
 	{
-		OutError = TEXT("Cost budget inputs must be finite non-negative timings with a positive Puerts baseline.");
+		OutError = TEXT(
+			"Cost reconciliation requires finite paired P50 timings, a positive observation, and a non-negative tolerance.");
 		return false;
 	}
 
-	OutResult.TypedToPuertsRatio =
-		Input.TypedEmptyP95Ns / Input.PuertsStaticScalarP50Ns;
-	OutResult.GenericMinusTypedNs =
-		Input.GenericEmptyP95Ns - Input.TypedEmptyP95Ns;
-	OutResult.ImmutableDispatchMinusTypedNs =
-		Input.ImmutableEnvironmentDispatchP95Ns - Input.TypedEmptyP95Ns;
-	OutResult.bSingleCallBudgetConstrained =
-		OutResult.TypedToPuertsRatio >= 0.70;
+	OutResult.ReconstructedP50Ns =
+		Input.BaselineP50Ns + Input.PairedDeltaP50Ns;
+	OutResult.ReconstructionErrorNs = FMath::Abs(
+		OutResult.ReconstructedP50Ns - Input.ObservedP50Ns);
+	OutResult.ReconstructionErrorRatio =
+		OutResult.ReconstructionErrorNs / Input.ObservedP50Ns;
+	OutResult.bWithinTolerance =
+		OutResult.ReconstructionErrorRatio <= Input.MaximumErrorRatio;
 	return true;
 }

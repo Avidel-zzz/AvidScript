@@ -24,7 +24,7 @@
     "samples"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "benchmark_kind": { "const": "physical_crossing_cost_ladder" },
     "attempt_id": { "type": "string", "format": "uuid" },
     "request_sha256": { "$ref": "#/$defs/sha256" },
@@ -44,7 +44,7 @@
     "correctness_failures": { "const": 0 },
     "samples": {
       "type": "array",
-      "minItems": 5,
+      "minItems": 7,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -59,20 +59,23 @@
           "checksum",
           "expected_checksum",
           "correct",
-          "host_import_count"
+          "host_import_count",
+          "export_call_count"
         ],
         "properties": {
           "stage": {
             "enum": [
               "native_no_op",
-              "cached_export",
+              "guest_loop_baseline",
+              "generic_export",
+              "prepared_export",
               "typed_empty_import",
               "generic_empty_import",
               "typed_i32_pair_import"
             ]
           },
           "sample_index": { "type": "integer", "minimum": 0 },
-          "stage_position": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "stage_position": { "type": "integer", "minimum": 0, "maximum": 6 },
           "iterations": { "type": "integer", "minimum": 1 },
           "seed": { "type": "integer" },
           "duration_ns": { "type": "number", "exclusiveMinimum": 0 },
@@ -80,7 +83,8 @@
           "checksum": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
           "expected_checksum": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
           "correct": { "const": true },
-          "host_import_count": { "type": "integer", "minimum": 0 }
+          "host_import_count": { "type": "integer", "minimum": 0 },
+          "export_call_count": { "type": "integer", "minimum": 0 }
         }
       }
     }

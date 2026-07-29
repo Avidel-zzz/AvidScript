@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "profile_id": "phase54.6-micro-diagnostic-v1",
-  "evidence_class": "diagnostic",
+  "profile_id": "phase56.micro-formal-v1",
+  "evidence_class": "formal",
   "callback_result_mode": "hot_failure_only",
-  "process_runs": 1,
-  "warmup_samples": 1,
-  "timed_samples": 2,
+  "process_runs": 5,
+  "warmup_samples": 5,
+  "timed_samples": 30,
   "seed": 1397313,
   "calibration": {
-    "confirmation_samples": 1,
-    "minimum_sample_milliseconds": 0.25,
-    "minimum_iterations": 10,
-    "maximum_iterations": 1000000
+    "confirmation_samples": 3,
+    "minimum_sample_milliseconds": 5.0,
+    "minimum_iterations": 1000,
+    "maximum_iterations": 10000000
   },
   "validity": {
     "data_lane_max_crossing_ratio": 0.5,
-    "require_clean_tree": false,
+    "require_clean_tree": true,
     "raw_samples_tracked": false
   },
   "lanes": [

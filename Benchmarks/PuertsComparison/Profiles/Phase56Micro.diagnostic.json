@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "profile_id": "phase54.6-micro-diagnostic-v1",
+  "profile_id": "phase56.micro-diagnostic-v1",
   "evidence_class": "diagnostic",
   "callback_result_mode": "hot_failure_only",
   "process_runs": 1,

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Phase 56 fused crossing performance gates",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile",
+    "provenance",
+    "supplemental_evidence",
+    "source_process_result_sha256",
+    "validity",
+    "statistics_method",
+    "process_statistics",
+    "cross_process_statistics",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source_process_result_sha256": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "validity": {
+      "type": "object",
+      "required": ["valid", "errors"]
+    },
+    "supplemental_evidence": {
+      "type": "object",
+      "required": [
+        "provided",
+        "supplemental_candidate_match",
+        "process_avidscript_commit",
+        "process_avidscript_tree_sha",
+        "supplemental_avidscript_commit",
+        "supplemental_avidscript_tree_sha",
+        "reason"
+      ]
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wasmtime_v8_geo_ratio",
+        "kernel_win_rate",
+        "semantic_vs_puerts_reflection",
+        "s1_scalar_ns",
+        "s1_vs_puerts_static",
+        "s1_property_ns",
+        "callback_ns",
+        "callback_vs_puerts",
+        "vector_vs_phase54_baseline",
+        "prepared_export_ratio",
+        "physical_reconstruction_error_ratio",
+        "typed_empty_net_ns",
+        "fused_fast_hit_ratio",
+        "fused_revalidate_per_callback",
+        "direct_effect_prepare_count",
+        "journal_slow_path_count",
+        "small_vs_best_puerts",
+        "dense_vs_best_puerts"
+      ],
+      "properties": {
+        "wasmtime_v8_geo_ratio": { "$ref": "#/$defs/gate" },
+        "kernel_win_rate": { "$ref": "#/$defs/gate" },
+        "semantic_vs_puerts_reflection": { "$ref": "#/$defs/gate" },
+        "s1_scalar_ns": { "$ref": "#/$defs/gate" },
+        "s1_vs_puerts_static": { "$ref": "#/$defs/gate" },
+        "s1_property_ns": { "$ref": "#/$defs/gate" },
+        "callback_ns": { "$ref": "#/$defs/gate" },
+        "callback_vs_puerts": { "$ref": "#/$defs/gate" },
+        "vector_vs_phase54_baseline": { "$ref": "#/$defs/gate" },
+        "prepared_export_ratio": { "$ref": "#/$defs/gate" },
+        "physical_reconstruction_error_ratio": { "$ref": "#/$defs/gate" },
+        "typed_empty_net_ns": { "$ref": "#/$defs/gate" },
+        "fused_fast_hit_ratio": { "$ref": "#/$defs/gate" },
+        "fused_revalidate_per_callback": { "$ref": "#/$defs/gate" },
+        "direct_effect_prepare_count": { "$ref": "#/$defs/gate" },
+        "journal_slow_path_count": { "$ref": "#/$defs/gate" },
+        "small_vs_best_puerts": { "$ref": "#/$defs/gate" },
+        "dense_vs_best_puerts": { "$ref": "#/$defs/gate" }
+      }
+    }
+  },
+  "$defs": {
+    "gate": {
+      "type": "object",
+      "required": ["name", "status", "pass", "value", "threshold", "reason"],
+      "properties": {
+        "status": { "enum": ["pass", "fail", "not_measured"] },
+        "pass": { "type": "boolean" },
+        "value": { "type": ["number", "null"] },
+        "audit": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

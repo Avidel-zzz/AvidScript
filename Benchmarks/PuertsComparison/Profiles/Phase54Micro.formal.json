@@ -2,6 +2,7 @@
   "schema_version": 1,
   "profile_id": "phase54.6-micro-formal-v1",
   "evidence_class": "formal",
+  "callback_result_mode": "hot_failure_only",
   "process_runs": 5,
   "warmup_samples": 5,
   "timed_samples": 30,

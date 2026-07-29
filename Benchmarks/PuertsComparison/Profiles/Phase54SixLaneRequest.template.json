@@ -1,6 +1,7 @@
 {
   "schema_version": 2,
   "mode": "calibration",
+  "callback_result_mode": "hot_failure_only",
   "attempt_id": "00000000-0000-0000-0000-000000000000",
   "process_run": -1,
   "lane_order": [],

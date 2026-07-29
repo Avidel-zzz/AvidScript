@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "profile_id": "phase54.6-micro-diagnostic-v1",
+  "profile_id": "phase56.micro-full-result-diagnostic-v1",
   "evidence_class": "diagnostic",
-  "callback_result_mode": "hot_failure_only",
+  "callback_result_mode": "full_snapshot",
   "process_runs": 1,
   "warmup_samples": 1,
   "timed_samples": 2,
