@@ -2249,11 +2249,27 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 			InvalidatedReceiver.Get(),
 			HandleResult,
 			false);
-	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	FAvidScriptWasmRuntimeInstance InvalidationRuntime;
+	FAvidScriptWasmHostContext InvalidationContext = FusedContext;
+	InvalidationContext.OwnerHandle = InvalidatedReceiverHandle;
+	InvalidationRuntime.SetHostContext(InvalidationContext);
+	InvalidationRuntime.SetBindingPackageForTesting(FunctionPackage);
+	if (!TestTrue(
+			TEXT("Invalidation runtime publishes the fused call site"),
+			InvalidationRuntime.BuildPreparedTypedHostImportsForTesting(
+				PreparedImportError)))
+	{
+		AddError(PreparedImportError);
+		return false;
+	}
+	const FAvidScriptVmPreparedTypedHostTarget& InvalidationTarget =
+		InvalidationRuntime.GetPreparedTypedHostImportsForTesting()[0]
+			.PreparedTarget;
+	InvalidationRuntime.BeginTypedCallbackEpochForTesting();
 	TestEqual(
 		TEXT("Receiver invalidation fixture enters the fused path"),
-		FusedTarget.SelfI32Pair(
-			FusedTarget.Context,
+		InvalidationTarget.SelfI32Pair(
+			InvalidationTarget.Context,
 			static_cast<int32>(InvalidatedReceiverHandle.Slot),
 			static_cast<int32>(InvalidatedReceiverHandle.Generation),
 			4,
@@ -2263,15 +2279,15 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 	InvalidatedReceiver->MarkAsGarbage();
 	TestEqual(
 		TEXT("An invalid receiver fails closed in the same callback"),
-		FusedTarget.SelfI32Pair(
-			FusedTarget.Context,
+		InvalidationTarget.SelfI32Pair(
+			InvalidationTarget.Context,
 			static_cast<int32>(InvalidatedReceiverHandle.Slot),
 			static_cast<int32>(InvalidatedReceiverHandle.Generation),
 			6,
 			7,
 			FusedValue),
 		EAvidScriptVmTypedHostStatus::Rejected);
-	FusedRuntime.EndTypedCallbackEpochForTesting();
+	InvalidationRuntime.EndTypedCallbackEpochForTesting();
 
 	const FAvidScriptPreparedGeneratedBinding PreparedBinding =
 		PreparedBindings[0];

@@ -3233,7 +3233,9 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 			if (bCaptureTiming)
 			{
 				Instrumentation->GeneratedFusedFastHitCycles +=
-					FPlatformTime::Cycles64() - ResolveStartCycles;
+					FMath::Max<uint64>(
+						FPlatformTime::Cycles64() - ResolveStartCycles,
+						1);
 			}
 		}
 		OutReceiver = Frame.Receiver;
@@ -3263,7 +3265,9 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 	if (bCaptureTiming)
 	{
 		Instrumentation->GeneratedFusedRevalidateCycles +=
-			FPlatformTime::Cycles64() - ResolveStartCycles;
+			FMath::Max<uint64>(
+				FPlatformTime::Cycles64() - ResolveStartCycles,
+				1);
 	}
 	return true;
 }
@@ -3335,7 +3339,9 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 					BindingInvocationContext.InvocationInstrumentation)
 			{
 				Instrumentation->GeneratedFusedCallSitePrepareCycles +=
-					FPlatformTime::Cycles64() - PrepareStartCycles;
+					FMath::Max<uint64>(
+						FPlatformTime::Cycles64() - PrepareStartCycles,
+						1);
 			}
 		}
 	}
@@ -3368,7 +3374,9 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 				BindingInvocationContext.InvocationInstrumentation)
 		{
 			Instrumentation->GeneratedJournalSlowPathCycles +=
-				FPlatformTime::Cycles64() - JournalStartCycles;
+				FMath::Max<uint64>(
+					FPlatformTime::Cycles64() - JournalStartCycles,
+					1);
 		}
 	}
 	return bPrepared;
