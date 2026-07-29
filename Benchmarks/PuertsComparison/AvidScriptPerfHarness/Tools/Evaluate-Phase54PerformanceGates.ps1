@@ -534,14 +534,11 @@ foreach ($result in $results) {
         $isDataLane =
             [string]$sample.lane -ceq
                 'avidscript_wasmtime_data_oriented'
-        $fusedPropertyWrites = $isGameplayWorkload ?
-            ([uint64]$sample.iterations *
-                [uint64]$workloadContract.property_write_operations_per_frame) :
-            0u
-        $expectedFusedHits =
-            $isDataLane -and $isGameplayWorkload ?
-                ($logical - $fusedPropertyWrites) :
-                $expectedGeneratedHits
+        $expectedFusedHits = Get-ExpectedFusedGeneratedHits `
+            -Workload ([string]$sample.workload) `
+            -Iterations ([uint64]$sample.iterations) `
+            -WorkloadContract $workloadContract `
+            -DataLane $isDataLane
         $isFusedLane = [string]$sample.lane -in @(
             'avidscript_wasmtime_generated_s1',
             'avidscript_wasmtime_data_oriented')

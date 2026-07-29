@@ -1501,6 +1501,33 @@ namespace
 		}
 	}
 
+	uint64 GetExpectedFusedGeneratedHitCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations,
+		const bool bDataLane)
+	{
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+			return static_cast<uint64>(Iterations);
+		case EAvidScriptPerfWorkload::PropertyGetSet:
+			return static_cast<uint64>(Iterations) * 2u;
+		case EAvidScriptPerfWorkload::GameplayFrameSmall:
+		case EAvidScriptPerfWorkload::GameplayFrameDense:
+		{
+			const FAvidScriptGameplayFrameCounts Counts =
+				FAvidScriptGameplayFrameBenchmark::GetCounts(
+					Workload,
+					Iterations);
+			return bDataLane
+				? Counts.ScalarPropertyCount - Counts.PropertyWriteCount
+				: Counts.ScalarPropertyCount;
+		}
+		default:
+			return 0;
+		}
+	}
+
 	uint64 GetExpectedPropertyWriteCount(
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations)
@@ -3117,9 +3144,11 @@ namespace
 			Observation.Lane ==
 				EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1
 			|| bDataLane;
-		const uint64 ExpectedFusedGeneratedHits = bDataGameplay
-			? ExpectedDataGeneratedS1HitCount
-			: ExpectedGeneratedS1HitCount;
+		const uint64 ExpectedFusedGeneratedHits =
+			GetExpectedFusedGeneratedHitCount(
+				Workload,
+				Iterations,
+				bDataLane);
 		const bool bHasFusedCalls = ExpectedFusedGeneratedHits > 0;
 		const uint64 DirectPrepareCount =
 			Observation.GeneratedDirectReadPrepareCount

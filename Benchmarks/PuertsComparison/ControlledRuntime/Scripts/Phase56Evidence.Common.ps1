@@ -163,6 +163,42 @@ function New-FullCrossingReconstruction {
     }
 }
 
+function Get-ExpectedFusedGeneratedHits {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Workload,
+
+        [Parameter(Mandatory = $true)]
+        [uint64]$Iterations,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$WorkloadContract,
+
+        [Parameter(Mandatory = $true)]
+        [bool]$DataLane
+    )
+
+    if ($Workload -ceq 'scalar_add_int32') {
+        return $Iterations
+    }
+    if ($Workload -ceq 'property_get_set') {
+        return $Iterations * 2u
+    }
+    if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
+        [uint64]$scalarPropertyCount =
+            $Iterations *
+            [uint64]$WorkloadContract.logical_entities_per_frame *
+            [uint64]$WorkloadContract.scalar_property_operations_per_entity
+        if ($DataLane) {
+            return $scalarPropertyCount -
+                ($Iterations *
+                    [uint64]$WorkloadContract.property_write_operations_per_frame)
+        }
+        return $scalarPropertyCount
+    }
+    return 0u
+}
+
 function Test-PerformanceGateOverallPass {
     param(
         [Parameter(Mandatory = $true)]

@@ -128,6 +128,44 @@ $maximumReconstructionError = @(
 Assert-True ([double]$maximumReconstructionError.Maximum -eq 2.0) (
     'full reconstruction records must support property aggregation')
 
+$microContract = [pscustomobject]@{}
+Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'scalar_add_int32' `
+        -Iterations 10 `
+        -WorkloadContract $microContract `
+        -DataLane $false) -eq 10) (
+    'scalar generated calls must all use the fused typed-host path')
+Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'property_get_set' `
+        -Iterations 10 `
+        -WorkloadContract $microContract `
+        -DataLane $true) -eq 20) (
+    'property micro calls must remain fused in the data lane')
+Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'vector_value' `
+        -Iterations 10 `
+        -WorkloadContract $microContract `
+        -DataLane $false) -eq 0) (
+    'dynamic vector dispatch must not be reported as a fused typed-host call')
+
+$smallGameplayContract = [pscustomobject]@{
+    logical_entities_per_frame = 1
+    scalar_property_operations_per_entity = 64
+    property_write_operations_per_frame = 32
+}
+Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'gameplay_frame_small' `
+        -Iterations 3 `
+        -WorkloadContract $smallGameplayContract `
+        -DataLane $false) -eq 192) (
+    'generated gameplay must fuse scalar and property operations')
+Assert-True ((Get-ExpectedFusedGeneratedHits `
+        -Workload 'gameplay_frame_small' `
+        -Iterations 3 `
+        -WorkloadContract $smallGameplayContract `
+        -DataLane $true) -eq 96) (
+    'data gameplay must exclude command-buffered property writes from fused calls')
+
 $passingGates = [ordered]@{
     first = [pscustomobject]@{ status = 'pass'; pass = $true }
     second = [pscustomobject]@{ status = 'pass'; pass = $true }
