@@ -41,6 +41,7 @@
       "vector_operations_per_entity": 8,
       "object_operations_per_entity": 4,
       "event_operations_per_entity": 2,
+      "event_operations_per_frame": 2,
       "logical_operations_per_frame": 78,
       "actor_count": 1
     },
@@ -53,6 +54,7 @@
       "fixture_function_calls_per_frame": 7168,
       "vector_operations_per_entity": 2,
       "object_or_event_operations_per_entity": 1,
+      "event_operations_per_frame": 512,
       "logical_operations_per_frame": 11264,
       "actor_count": 1
     }

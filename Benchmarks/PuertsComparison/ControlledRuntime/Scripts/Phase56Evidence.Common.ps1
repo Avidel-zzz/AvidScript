@@ -178,7 +178,7 @@ function Get-ExpectedFusedGeneratedHits {
         [bool]$DataLane
     )
 
-    if ($Workload -ceq 'scalar_add_int32') {
+    if ($Workload -in @('scalar_add_int32', 'batch_scalar')) {
         return $Iterations
     }
     if ($Workload -ceq 'property_get_set') {
@@ -189,12 +189,16 @@ function Get-ExpectedFusedGeneratedHits {
             $Iterations *
             [uint64]$WorkloadContract.logical_entities_per_frame *
             [uint64]$WorkloadContract.scalar_property_operations_per_entity
+        [uint64]$eventCount =
+            $Iterations *
+            [uint64]$WorkloadContract.event_operations_per_frame
+        [uint64]$typedShapeCount = $scalarPropertyCount + $eventCount
         if ($DataLane) {
-            return $scalarPropertyCount -
+            return $typedShapeCount -
                 ($Iterations *
                     [uint64]$WorkloadContract.property_write_operations_per_frame)
         }
-        return $scalarPropertyCount
+        return $typedShapeCount
     }
     return 0u
 }

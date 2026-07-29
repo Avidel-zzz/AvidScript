@@ -1509,6 +1509,7 @@ namespace
 		switch (Workload)
 		{
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::BatchScalar:
 			return static_cast<uint64>(Iterations);
 		case EAvidScriptPerfWorkload::PropertyGetSet:
 			return static_cast<uint64>(Iterations) * 2u;
@@ -1519,9 +1520,11 @@ namespace
 				FAvidScriptGameplayFrameBenchmark::GetCounts(
 					Workload,
 					Iterations);
+			const uint64 TypedShapeCount =
+				Counts.ScalarPropertyCount + Counts.EventCount;
 			return bDataLane
-				? Counts.ScalarPropertyCount - Counts.PropertyWriteCount
-				: Counts.ScalarPropertyCount;
+				? TypedShapeCount - Counts.PropertyWriteCount
+				: TypedShapeCount;
 		}
 		default:
 			return 0;
