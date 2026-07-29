@@ -870,10 +870,7 @@ if ($supplementalProvided) {
         Read-JsonFile -Path $_
     })
     $fusedSamples = @($microRawResults.samples | Where-Object {
-        [string]$_.lane -in @(
-            'avidscript_wasmtime_generated_s1',
-            'avidscript_wasmtime_data_oriented') -and
-        [uint64]$_.generated_s1_hit_count -gt 0
+        Test-Phase56MeasuredFusedSample -Sample $_
     })
     [double]$fusedFastHitCount = [double](
         $fusedSamples |

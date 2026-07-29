@@ -203,6 +203,21 @@ function Get-ExpectedFusedGeneratedHits {
     return 0u
 }
 
+function Test-Phase56MeasuredFusedSample {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Sample
+    )
+
+    if ([string]$Sample.lane -notin @(
+        'avidscript_wasmtime_generated_s1',
+        'avidscript_wasmtime_data_oriented')) {
+        return $false
+    }
+    return [uint64]$Sample.generated_fused_fast_hit_count +
+        [uint64]$Sample.generated_fused_revalidate_count -gt 0
+}
+
 function Test-PerformanceGateOverallPass {
     param(
         [Parameter(Mandatory = $true)]

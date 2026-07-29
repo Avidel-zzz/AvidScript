@@ -192,6 +192,34 @@ Assert-True ((Get-ExpectedFusedGeneratedHits `
         -DataLane $true) -eq 9216) (
     'dense data gameplay fused count must exclude property commands exactly')
 
+$dynamicGeneratedSample = [pscustomobject]@{
+    lane = 'avidscript_wasmtime_generated_s1'
+    generated_s1_hit_count = 10
+    generated_fused_fast_hit_count = 0
+    generated_fused_revalidate_count = 0
+}
+$fusedGeneratedSample = [pscustomobject]@{
+    lane = 'avidscript_wasmtime_generated_s1'
+    generated_s1_hit_count = 10
+    generated_fused_fast_hit_count = 9
+    generated_fused_revalidate_count = 1
+}
+$semanticSample = [pscustomobject]@{
+    lane = 'avidscript_wasmtime_semantic'
+    generated_s1_hit_count = 0
+    generated_fused_fast_hit_count = 9
+    generated_fused_revalidate_count = 1
+}
+Assert-True (-not (Test-Phase56MeasuredFusedSample `
+        -Sample $dynamicGeneratedSample)) (
+    'dynamic generated hits must not dilute the fused callback denominator')
+Assert-True (Test-Phase56MeasuredFusedSample `
+        -Sample $fusedGeneratedSample) (
+    'observed fused typed-host calls must enter the callback denominator')
+Assert-True (-not (Test-Phase56MeasuredFusedSample `
+        -Sample $semanticSample)) (
+    'non-generated lanes must never enter the fused callback denominator')
+
 $passingGates = [ordered]@{
     first = [pscustomobject]@{ status = 'pass'; pass = $true }
     second = [pscustomobject]@{ status = 'pass'; pass = $true }
