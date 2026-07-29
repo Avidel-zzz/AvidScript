@@ -442,6 +442,20 @@ public:
 #endif
 	}
 
+	bool PrepareExportCall(
+		const FAvidScriptVmExportHandle& Handle,
+		FAvidScriptVmPreparedExportCall& OutCall,
+		FAvidScriptVmError& OutError) override
+	{
+		static_cast<void>(Handle);
+		OutCall = FAvidScriptVmPreparedExportCall();
+		OutError.Reset();
+		OutError.Category = TEXT("prepared_export_unsupported");
+		OutError.Details =
+			TEXT("The WAMR backend uses the validated generic Call path.");
+		return false;
+	}
+
 	bool Call(
 		const FAvidScriptVmExportHandle& Handle,
 		const FAvidScriptVmCallFrame& Frame,

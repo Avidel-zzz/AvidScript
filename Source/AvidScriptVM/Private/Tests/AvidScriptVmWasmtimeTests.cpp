@@ -517,17 +517,47 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("two unique export lookups"), Backend->GetExportLookupCount(), 2u);
 	TestEqual(TEXT("cached export slot"), CachedTickHandle.Slot, TickHandle.Slot);
 
+	FAvidScriptVmPreparedExportCall PreparedBegin;
+	FAvidScriptVmPreparedExportCall PreparedTick;
+	TestTrue(
+		TEXT("BeginPlay prepares a stable direct call"),
+		Backend->PrepareExportCall(BeginHandle, PreparedBegin, Error));
+	TestTrue(
+		TEXT("Tick prepares a stable direct call"),
+		Backend->PrepareExportCall(TickHandle, PreparedTick, Error));
+	TestTrue(TEXT("prepared BeginPlay is valid"), PreparedBegin.IsValid());
+	TestTrue(TEXT("prepared Tick is valid"), PreparedTick.IsValid());
+	TestEqual(
+		TEXT("prepared BeginPlay parameter count is exact"),
+		PreparedBegin.ParameterCellCount,
+		0u);
+	TestEqual(
+		TEXT("prepared Tick parameter count is exact"),
+		PreparedTick.ParameterCellCount,
+		1u);
+
 	TestTrue(TEXT("BeginPlay calls"), Backend->Call(BeginHandle, FAvidScriptVmCallFrame(), Error));
+	TestTrue(
+		TEXT("prepared BeginPlay calls"),
+		PreparedBegin.Call(FAvidScriptVmCallFrame(), Error));
 	FAvidScriptVmCallFrame TickFrame;
 	TickFrame.CellCount = 1;
 	const float DeltaSeconds = 1.0f / 60.0f;
 	FMemory::Memcpy(TickFrame.Cells, &DeltaSeconds, sizeof(float));
 	TestTrue(TEXT("Tick calls"), Backend->Call(TickHandle, TickFrame, Error));
+	TestTrue(TEXT("prepared Tick calls"), PreparedTick.Call(TickFrame, Error));
 
 	FAvidScriptVmCallFrame WrongFrame;
 	WrongFrame.CellCount = 2;
 	TestFalse(TEXT("cached invocation shape rejects wrong arity"), Backend->Call(TickHandle, WrongFrame, Error));
 	TestEqual(TEXT("wrong arity category"), Error.Category, FString(TEXT("invalid_arguments")));
+	TestFalse(
+		TEXT("prepared invocation rejects wrong arity"),
+		PreparedTick.Call(WrongFrame, Error));
+	TestEqual(
+		TEXT("prepared wrong arity category"),
+		Error.Category,
+		FString(TEXT("invalid_arguments")));
 
 	IAvidScriptVmGuestMemory* GuestMemory = Backend->GetGuestMemory();
 	if (!TestNotNull(TEXT("guest memory is exposed"), GuestMemory))
@@ -557,6 +587,13 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("backend unloads"), Backend->IsLoaded());
 	TestFalse(TEXT("stale handle rejects"), Backend->Call(BeginHandle, FAvidScriptVmCallFrame(), Error));
 	TestEqual(TEXT("stale category"), Error.Category, FString(TEXT("stale_export")));
+	TestFalse(
+		TEXT("stale prepared export rejects without dereferencing freed storage"),
+		PreparedBegin.Call(FAvidScriptVmCallFrame(), Error));
+	TestEqual(
+		TEXT("stale prepared category"),
+		Error.Category,
+		FString(TEXT("stale_export")));
 	Backend->Unload();
 
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };
@@ -609,11 +646,29 @@ bool FAvidScriptVmWasmtimeResultAbiTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("i32 result export resolves"),
 		Backend->ResolveExport(TEXT("result_test"), Handle, Error));
+	FAvidScriptVmPreparedExportCall PreparedResult;
+	TestTrue(
+		TEXT("i32 result export prepares"),
+		Backend->PrepareExportCall(Handle, PreparedResult, Error));
+	TestEqual(
+		TEXT("prepared i32 result count is exact"),
+		PreparedResult.ResultCellCount,
+		1u);
 	TestTrue(
 		TEXT("i32 result export calls"),
 		Backend->Call(Handle, FAvidScriptVmCallFrame(), Error, &Result));
 	TestEqual(TEXT("i32 result has one cell"), Result.CellCount, 1u);
 	TestEqual(TEXT("i32 result value is preserved"), Result.Cells[0], 7u);
+	TestTrue(
+		TEXT("prepared i32 result export calls"),
+		PreparedResult.Call(
+			FAvidScriptVmCallFrame(),
+			Error,
+			&Result));
+	TestEqual(
+		TEXT("prepared i32 result value is preserved"),
+		Result.Cells[0],
+		7u);
 
 	const uint64 I64Bits = 0x0123456789abcdefULL;
 	const TArray<uint8> I64Fixture =
@@ -869,10 +924,24 @@ bool FAvidScriptVmWasmtimeTrapAndReentrantUnloadTest::RunTest(const FString& Par
 	}
 	FAvidScriptVmExportHandle TrapHandle;
 	TestTrue(TEXT("trap export resolves"), Backend->ResolveExport(TEXT("avid_trap"), TrapHandle, Error));
+	FAvidScriptVmPreparedExportCall PreparedTrap;
+	TestTrue(
+		TEXT("trap export prepares"),
+		Backend->PrepareExportCall(TrapHandle, PreparedTrap, Error));
 	TestFalse(TEXT("guest trap fails"), Backend->Call(TrapHandle, FAvidScriptVmCallFrame(), Error));
 	TestEqual(TEXT("guest trap category"), Error.Category, FString(TEXT("trap")));
 	TestFalse(TEXT("guest trap details are nonempty"), Error.Details.IsEmpty());
 	TestTrue(TEXT("guest trap has structured frames"), !Error.StackFrames.IsEmpty());
+	TestFalse(
+		TEXT("prepared guest trap fails through the common diagnostic core"),
+		PreparedTrap.Call(FAvidScriptVmCallFrame(), Error));
+	TestEqual(
+		TEXT("prepared guest trap category"),
+		Error.Category,
+		FString(TEXT("trap")));
+	TestTrue(
+		TEXT("prepared guest trap has structured frames"),
+		!Error.StackFrames.IsEmpty());
 
 	FAvidScriptWasmtimeTestDispatcher Dispatcher;
 	Config.HostDispatcher = &Dispatcher;
@@ -880,8 +949,14 @@ bool FAvidScriptVmWasmtimeTrapAndReentrantUnloadTest::RunTest(const FString& Par
 	TestTrue(TEXT("reentrant fixture loads"), Backend->Load(AddFixture, TEXT("wasmtime_reentrant"), Config, Error));
 	FAvidScriptVmExportHandle BeginHandle;
 	TestTrue(TEXT("reentrant BeginPlay resolves"), Backend->ResolveExport(TEXT("avid_on_begin_play"), BeginHandle, Error));
+	FAvidScriptVmPreparedExportCall PreparedBegin;
+	TestTrue(
+		TEXT("reentrant BeginPlay prepares"),
+		Backend->PrepareExportCall(BeginHandle, PreparedBegin, Error));
 	Dispatcher.BackendToUnload = Backend.Get();
-	TestFalse(TEXT("reentrant unload fails active call safely"), Backend->Call(BeginHandle, FAvidScriptVmCallFrame(), Error));
+	TestFalse(
+		TEXT("prepared reentrant unload fails active call safely"),
+		PreparedBegin.Call(FAvidScriptVmCallFrame(), Error));
 	TestEqual(TEXT("reentrant unload category"), Error.Category, FString(TEXT("reentrant_unload")));
 	TestFalse(TEXT("deferred unload completes"), Backend->IsLoaded());
 	return true;

@@ -157,6 +157,63 @@ struct FAvidScriptVmCallResult
 	uint32 CellCount = 0;
 };
 
+using FAvidScriptVmPreparedExportInvoke = bool (*)(
+	void* Owner,
+	void* Target,
+	const FAvidScriptVmCallFrame& Frame,
+	FAvidScriptVmError& OutError,
+	FAvidScriptVmCallResult* OutResult);
+
+struct FAvidScriptVmPreparedExportCall
+{
+	void* Owner = nullptr;
+	void* Target = nullptr;
+	FAvidScriptVmPreparedExportInvoke InvokeFunction = nullptr;
+	uint32 ParameterCellCount = 0;
+	uint32 ResultCellCount = 0;
+
+	bool IsValid() const
+	{
+		return Owner != nullptr
+			&& Target != nullptr
+			&& InvokeFunction != nullptr
+			&& ParameterCellCount <= FAvidScriptVmCallFrame::MaxCells
+			&& ResultCellCount <= FAvidScriptVmCallResult::MaxCells;
+	}
+
+	bool Call(
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult = nullptr) const
+	{
+		if (!IsValid())
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("prepared_export_invalid");
+			OutError.Details =
+				TEXT("The prepared VM export call is not initialized.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		if (Frame.CellCount != ParameterCellCount)
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("invalid_arguments");
+			OutError.Details =
+				TEXT("The VM call frame does not match the prepared export signature.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		return InvokeFunction(Owner, Target, Frame, OutError, OutResult);
+	}
+};
+
 struct FAvidScriptHostCall
 {
 	EAvidScriptHostBindingId BindingId = EAvidScriptHostBindingId::Invalid;
@@ -340,6 +397,10 @@ public:
 	virtual bool ResolveExport(
 		const FString& ExportName,
 		FAvidScriptVmExportHandle& OutHandle,
+		FAvidScriptVmError& OutError) = 0;
+	virtual bool PrepareExportCall(
+		const FAvidScriptVmExportHandle& Handle,
+		FAvidScriptVmPreparedExportCall& OutCall,
 		FAvidScriptVmError& OutError) = 0;
 	virtual bool Call(
 		const FAvidScriptVmExportHandle& Handle,

@@ -231,9 +231,23 @@ void SetFailureFromVmError(
 	}
 }
 
+void CacheResolvedVmExport(
+	IAvidScriptVmBackend& Backend,
+	const FAvidScriptVmExportHandle& Handle,
+	FAvidScriptCachedVmExport& OutExport)
+{
+	OutExport.Handle = Handle;
+	OutExport.PreparedCall = FAvidScriptVmPreparedExportCall();
+	FAvidScriptVmError PrepareError;
+	Backend.PrepareExportCall(
+		Handle,
+		OutExport.PreparedCall,
+		PrepareError);
+}
+
 bool CallVmExport(
 	IAvidScriptVmBackend* Backend,
-	FAvidScriptVmExportHandle& CachedHandle,
+	FAvidScriptCachedVmExport& CachedExport,
 	const FString& ModuleId,
 	const FString& ExportName,
 	uint32 ArgCount,
@@ -260,10 +274,20 @@ bool CallVmExport(
 	}
 
 	FAvidScriptVmError Error;
-	if (!CachedHandle.IsValid() && !Backend->ResolveExport(ExportName, CachedHandle, Error))
+	if (!CachedExport.Handle.IsValid())
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
-		return false;
+		FAvidScriptVmExportHandle Handle;
+		if (!Backend->ResolveExport(ExportName, Handle, Error))
+		{
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				ExportName,
+				Error,
+				DebugMap);
+			return false;
+		}
+		CacheResolvedVmExport(*Backend, Handle, CachedExport);
 	}
 
 	FAvidScriptVmCallFrame Frame;
@@ -272,7 +296,16 @@ bool CallVmExport(
 	{
 		FMemory::Memcpy(Frame.Cells, Args, ArgCount * sizeof(uint32));
 	}
-	if (!Backend->Call(CachedHandle, Frame, Error))
+	const bool bCalled =
+		CachedExport.PreparedCall.InvokeFunction != nullptr
+		? CachedExport.PreparedCall.InvokeFunction(
+			CachedExport.PreparedCall.Owner,
+			CachedExport.PreparedCall.Target,
+			Frame,
+			Error,
+			nullptr)
+		: Backend->Call(CachedExport.Handle, Frame, Error);
+	if (!bCalled)
 	{
 		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
 		return false;
@@ -662,27 +695,30 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 		}
 		if (RequiredExport == AvidScriptBeginPlayExportName)
 		{
-			BeginPlayExport = Handle;
+			CacheResolvedVmExport(*VmBackend, Handle, BeginPlayExport);
 		}
 		else if (RequiredExport == AvidScriptTickExportName)
 		{
-			TickExport = Handle;
+			CacheResolvedVmExport(*VmBackend, Handle, TickExport);
 		}
 		else if (RequiredExport == AvidScriptEndPlayExportName)
 		{
-			EndPlayExport = Handle;
+			CacheResolvedVmExport(*VmBackend, Handle, EndPlayExport);
 		}
 		else if (RequiredExport == AvidScriptTimerExportName)
 		{
-			TimerExport = Handle;
+			CacheResolvedVmExport(*VmBackend, Handle, TimerExport);
 		}
 		else if (RequiredExport == AvidScriptEventExportName)
 		{
-			EventExport = Handle;
+			CacheResolvedVmExport(*VmBackend, Handle, EventExport);
 		}
 		else if (RequiredExport == AvidScriptGameplayEventExportName)
 		{
-			GameplayEventExport = Handle;
+			CacheResolvedVmExport(
+				*VmBackend,
+				Handle,
+				GameplayEventExport);
 			bGameplayEventExportLookupAttempted = true;
 		}
 	}
@@ -1037,7 +1073,8 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	{
 		bGameplayEventExportLookupAttempted = true;
 		FAvidScriptVmError ResolveError;
-		if (!VmBackend->ResolveExport(ExportName, GameplayEventExport, ResolveError) &&
+		FAvidScriptVmExportHandle Handle;
+		if (!VmBackend->ResolveExport(ExportName, Handle, ResolveError) &&
 			ResolveError.Category != TEXT("missing_export"))
 		{
 			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError, DebugMap.Get());
@@ -1045,9 +1082,16 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 			LifecycleState.MarkFaulted(LifecycleResult);
 			return false;
 		}
+		if (Handle.IsValid())
+		{
+			CacheResolvedVmExport(
+				*VmBackend,
+				Handle,
+				GameplayEventExport);
+		}
 	}
 
-	if (!GameplayEventExport.IsValid())
+	if (!GameplayEventExport.Handle.IsValid())
 	{
 		return true;
 	}
@@ -1153,19 +1197,25 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 
 	bEndPlayAttempted = true;
 	FAvidScriptVmError EndPlayResolveError;
-	if (!EndPlayExport.IsValid()
-		&& !VmBackend->ResolveExport(
-			AvidScriptEndPlayExportName,
-			EndPlayExport,
-			EndPlayResolveError))
+	if (!EndPlayExport.Handle.IsValid())
 	{
-		Metrics.EndPlayCallMs = 0.0;
-		OutResult.Metrics = Metrics;
-		CopyObservableStateToResult(OutResult);
-		bEndPlaySucceeded = true;
-		LifecycleState.TryTransition(EAvidScriptLifecycleState::Stopped, LifecycleResult);
-		CachedEndPlayResult = OutResult;
-		return true;
+		FAvidScriptVmExportHandle Handle;
+		if (!VmBackend->ResolveExport(
+				AvidScriptEndPlayExportName,
+				Handle,
+				EndPlayResolveError))
+		{
+			Metrics.EndPlayCallMs = 0.0;
+			OutResult.Metrics = Metrics;
+			CopyObservableStateToResult(OutResult);
+			bEndPlaySucceeded = true;
+			LifecycleState.TryTransition(
+				EAvidScriptLifecycleState::Stopped,
+				LifecycleResult);
+			CachedEndPlayResult = OutResult;
+			return true;
+		}
+		CacheResolvedVmExport(*VmBackend, Handle, EndPlayExport);
 	}
 
 	const double EndPlayStartSeconds = FPlatformTime::Seconds();

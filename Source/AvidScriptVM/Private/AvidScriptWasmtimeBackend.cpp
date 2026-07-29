@@ -502,7 +502,8 @@ public:
 		}
 		if (const uint32* ExistingIndex = ExportNameToIndex.Find(ExportName))
 		{
-			const FAvidScriptWasmtimeExportEntry& Existing = ExportEntries[*ExistingIndex];
+			const FAvidScriptWasmtimeExportEntry& Existing =
+				*ExportEntries[*ExistingIndex];
 			OutHandle.Slot = *ExistingIndex + 1;
 			OutHandle.Generation = Existing.Generation;
 			OutHandle.BackendInstanceIdentity = BackendInstanceIdentity;
@@ -564,18 +565,76 @@ public:
 			return false;
 		}
 
-		FAvidScriptWasmtimeExportEntry& Entry = ExportEntries.AddDefaulted_GetRef();
-		Entry.Name = ExportName;
-		Entry.Function = Function;
-		Entry.Generation = ExportGeneration;
-		Entry.CellCount = CellCount;
-		Entry.ResultCellCount = ResultCellCount;
-		const uint32 EntryIndex = static_cast<uint32>(ExportEntries.Num() - 1);
+		TUniquePtr<FAvidScriptWasmtimeExportEntry> Entry =
+			MakeUnique<FAvidScriptWasmtimeExportEntry>();
+		Entry->Name = ExportName;
+		Entry->Function = Function;
+		Entry->Generation = ExportGeneration;
+		Entry->CellCount = CellCount;
+		Entry->ResultCellCount = ResultCellCount;
+		const uint32 EntryIndex = static_cast<uint32>(ExportEntries.Num());
+		const uint32 EntryGeneration = Entry->Generation;
+		ExportEntries.Add(MoveTemp(Entry));
 		ExportNameToIndex.Add(ExportName, EntryIndex);
 
 		OutHandle.Slot = EntryIndex + 1;
-		OutHandle.Generation = Entry.Generation;
+		OutHandle.Generation = EntryGeneration;
 		OutHandle.BackendInstanceIdentity = BackendInstanceIdentity;
+		return true;
+#endif
+	}
+
+	bool PrepareExportCall(
+		const FAvidScriptVmExportHandle& Handle,
+		FAvidScriptVmPreparedExportCall& OutCall,
+		FAvidScriptVmError& OutError) override
+	{
+		OutCall = FAvidScriptVmPreparedExportCall();
+		OutError.Reset();
+#if !AVIDSCRIPT_WITH_WASMTIME
+		SetWasmtimeError(
+			OutError,
+			TEXT("backend_unavailable"),
+			TEXT("Wasmtime is unavailable for this target."));
+		return false;
+#else
+		if (!IsLoaded())
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_state"),
+				TEXT("PrepareExportCall requires a loaded VM instance."));
+			return false;
+		}
+		if (Handle.BackendInstanceIdentity != BackendInstanceIdentity
+			|| Handle.Slot == 0
+			|| Handle.Slot > static_cast<uint32>(ExportEntries.Num())
+			|| Handle.Generation != ExportGeneration)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The export handle cannot be prepared for this VM instance."));
+			return false;
+		}
+		FAvidScriptWasmtimeExportEntry* Entry =
+			ExportEntries[Handle.Slot - 1].Get();
+		if (Entry == nullptr
+			|| Entry->Generation != ExportGeneration
+			|| Entry->Function == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The resolved Wasmtime export entry is no longer active."));
+			return false;
+		}
+
+		OutCall.Owner = this;
+		OutCall.Target = Entry;
+		OutCall.InvokeFunction = &InvokePreparedExportCall;
+		OutCall.ParameterCellCount = Entry->CellCount;
+		OutCall.ResultCellCount = Entry->ResultCellCount;
 		return true;
 #endif
 	}
@@ -627,95 +686,24 @@ public:
 			SetWasmtimeError(OutError, TEXT("stale_export"), TEXT("The export handle is no longer valid."));
 			return false;
 		}
-		const FAvidScriptWasmtimeExportEntry& Entry = ExportEntries[Handle.Slot - 1];
-		if (Frame.CellCount != Entry.CellCount)
+		const FAvidScriptWasmtimeExportEntry* Entry =
+			ExportEntries[Handle.Slot - 1].Get();
+		if (Entry == nullptr
+			|| Entry->Generation != ExportGeneration
+			|| Entry->Function == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The cached Wasmtime export entry is no longer active."));
+			return false;
+		}
+		if (Frame.CellCount != Entry->CellCount)
 		{
 			SetWasmtimeError(OutError, TEXT("invalid_arguments"), TEXT("VM call frame does not match the cached export signature."));
 			return false;
 		}
-
-		++ActiveCallDepth;
-		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
-		size_t ResultCellCount = 0;
-		AvidScriptWasmtimeFailure* CallFailure = nullptr;
-		const AvidScriptWasmtimeCallStatus CallStatus =
-			avidscript_wasmtime_function_call_event_unchecked(
-			Store,
-			Entry.Function,
-			Frame.Cells,
-			Frame.CellCount,
-			Entry.ResultCellCount == 0 ? nullptr : ResultCells,
-			FAvidScriptVmCallResult::MaxCells,
-			&ResultCellCount,
-			&CallFailure);
-		const bool bCallFailed =
-			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
-		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
-		FString FailureDetails;
-		TArray<FAvidScriptVmStackFrame> StackFrames;
-		bool bWasTrap = false;
-		if (CallFailure != nullptr)
-		{
-			FailureDetails = ConsumeWasmtimeFailure(CallFailure, StackFrames, bWasTrap);
-		}
-		else if (bCallFailed)
-		{
-			FailureDetails =
-				CallStatus == AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE
-					? TEXT("Wasmtime rejected the local call ABI.")
-					: TEXT("Wasmtime failed without allocating a diagnostic.");
-		}
-
-		--ActiveCallDepth;
-		if (ActiveCallDepth == 0 && bUnloadDeferred)
-		{
-			PerformUnload();
-		}
-		if (bUnloadRequestedDuringCall)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("reentrant_unload"),
-				TEXT("VM unload was deferred until the active guest call unwound."));
-			return false;
-		}
-		if (bCallFailed)
-		{
-			if (bHasPendingHostFailure)
-			{
-				OutError.Reset();
-				OutError.Category = TEXT("host_import_failed");
-				OutError.ImportModuleName = PendingHostImportModuleName;
-				OutError.ImportName = PendingHostImportName;
-				OutError.Details = PendingHostFailureDetails;
-			}
-			else
-			{
-				SetWasmtimeError(
-					OutError,
-					bWasTrap ? TEXT("trap") : TEXT("invalid_arguments"),
-					FailureDetails.IsEmpty() ? TEXT("Wasmtime call failed without a diagnostic message.") : FailureDetails);
-			}
-			OutError.StackFrames = MoveTemp(StackFrames);
-			return false;
-		}
-		if (ResultCellCount != Entry.ResultCellCount)
-		{
-			SetWasmtimeError(
-				OutError,
-				TEXT("invalid_result"),
-				TEXT("Wasmtime returned a result cell count that differs from the resolved export ABI."));
-			return false;
-		}
-		if (OutResult != nullptr)
-		{
-			FMemory::Memcpy(
-				OutResult->Cells,
-				ResultCells,
-				ResultCellCount * sizeof(uint32));
-			OutResult->CellCount = static_cast<uint32>(ResultCellCount);
-		}
-		return true;
+		return InvokeResolvedExport(*Entry, Frame, OutError, OutResult);
 #endif
 	}
 
@@ -1326,6 +1314,164 @@ public:
 
 private:
 #if AVIDSCRIPT_WITH_WASMTIME
+	static bool InvokePreparedExportCall(
+		void* Owner,
+		void* Target,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		FAvidScriptWasmtimeBackend* Backend =
+			static_cast<FAvidScriptWasmtimeBackend*>(Owner);
+		FAvidScriptWasmtimeExportEntry* Entry =
+			static_cast<FAvidScriptWasmtimeExportEntry*>(Target);
+		if (Backend == nullptr || Entry == nullptr)
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("prepared_export_invalid");
+			OutError.Details =
+				TEXT("The prepared Wasmtime export target is invalid.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		return Backend->CallPreparedExport(
+			*Entry,
+			Frame,
+			OutError,
+			OutResult);
+	}
+
+	void ResetCallState(
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
+		bHasPendingHostFailure = false;
+		PendingHostImportModuleName.Reset();
+		PendingHostImportName.Reset();
+		PendingHostFailureDetails.Reset();
+	}
+
+	bool CallPreparedExport(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		ResetCallState(OutError, OutResult);
+		if (!IsLoaded()
+			|| Entry.Generation != ExportGeneration
+			|| Entry.Function == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The prepared Wasmtime export is no longer active."));
+			return false;
+		}
+		return InvokeResolvedExport(Entry, Frame, OutError, OutResult);
+	}
+
+	bool InvokeResolvedExport(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		++ActiveCallDepth;
+		uint32 ResultCells[FAvidScriptVmCallResult::MaxCells] = {};
+		size_t ResultCellCount = 0;
+		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const AvidScriptWasmtimeCallStatus CallStatus =
+			avidscript_wasmtime_function_call_event_unchecked(
+				Store,
+				Entry.Function,
+				Frame.Cells,
+				Frame.CellCount,
+				Entry.ResultCellCount == 0 ? nullptr : ResultCells,
+				FAvidScriptVmCallResult::MaxCells,
+				&ResultCellCount,
+				&CallFailure);
+		const bool bCallFailed =
+			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
+		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
+		FString FailureDetails;
+		TArray<FAvidScriptVmStackFrame> StackFrames;
+		bool bWasTrap = false;
+		if (CallFailure != nullptr)
+		{
+			FailureDetails =
+				ConsumeWasmtimeFailure(CallFailure, StackFrames, bWasTrap);
+		}
+		else if (bCallFailed)
+		{
+			FailureDetails =
+				CallStatus == AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE
+					? TEXT("Wasmtime rejected the local call ABI.")
+					: TEXT("Wasmtime failed without allocating a diagnostic.");
+		}
+
+		--ActiveCallDepth;
+		if (ActiveCallDepth == 0 && bUnloadDeferred)
+		{
+			PerformUnload();
+		}
+		if (bUnloadRequestedDuringCall)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("reentrant_unload"),
+				TEXT("VM unload was deferred until the active guest call unwound."));
+			return false;
+		}
+		if (bCallFailed)
+		{
+			if (bHasPendingHostFailure)
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("host_import_failed");
+				OutError.ImportModuleName = PendingHostImportModuleName;
+				OutError.ImportName = PendingHostImportName;
+				OutError.Details = PendingHostFailureDetails;
+			}
+			else
+			{
+				SetWasmtimeError(
+					OutError,
+					bWasTrap ? TEXT("trap") : TEXT("invalid_arguments"),
+					FailureDetails.IsEmpty()
+						? TEXT("Wasmtime call failed without a diagnostic message.")
+						: FailureDetails);
+			}
+			OutError.StackFrames = MoveTemp(StackFrames);
+			return false;
+		}
+		if (ResultCellCount != Entry.ResultCellCount)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_result"),
+				TEXT("Wasmtime returned a result cell count that differs from the resolved export ABI."));
+			return false;
+		}
+		if (OutResult != nullptr)
+		{
+			FMemory::Memcpy(
+				OutResult->Cells,
+				ResultCells,
+				ResultCellCount * sizeof(uint32));
+			OutResult->CellCount = static_cast<uint32>(ResultCellCount);
+		}
+		return true;
+	}
+
 	int32 CompleteTypedInvocation(
 		FAvidScriptWasmtimeTypedHostContext& HostContext,
 		EAvidScriptVmTypedHostStatus Status)
@@ -1999,12 +2145,22 @@ private:
 	void PerformUnload()
 	{
 #if AVIDSCRIPT_WITH_WASMTIME
-		for (FAvidScriptWasmtimeExportEntry& Entry : ExportEntries)
+		for (const TPair<FString, uint32>& ActiveExport :
+			ExportNameToIndex)
 		{
-			avidscript_wasmtime_function_delete(Entry.Function);
-			Entry.Function = nullptr;
+			if (ExportEntries.IsValidIndex(
+					static_cast<int32>(ActiveExport.Value)))
+			{
+				FAvidScriptWasmtimeExportEntry* Entry =
+					ExportEntries[ActiveExport.Value].Get();
+				if (Entry != nullptr && Entry->Function != nullptr)
+				{
+					avidscript_wasmtime_function_delete(
+						Entry->Function);
+					Entry->Function = nullptr;
+				}
+			}
 		}
-		ExportEntries.Reset();
 		if (Instance != nullptr)
 		{
 			avidscript_wasmtime_instance_delete(Instance);
@@ -2084,7 +2240,7 @@ private:
 	TArray<TUniquePtr<FAvidScriptWasmtimeDynamicHostContext>> DynamicHostContexts;
 	TArray<TUniquePtr<FAvidScriptWasmtimeTypedHostContext>> TypedHostContexts;
 	TSet<FString> TypedImportIdentityKeys;
-	TArray<FAvidScriptWasmtimeExportEntry> ExportEntries;
+	TArray<TUniquePtr<FAvidScriptWasmtimeExportEntry>> ExportEntries;
 #endif
 };
 } // namespace

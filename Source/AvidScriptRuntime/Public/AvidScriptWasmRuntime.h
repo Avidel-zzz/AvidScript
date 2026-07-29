@@ -119,6 +119,12 @@ struct FAvidScriptFusedCallbackFrame
 	uint64 RegistryRevision = 0;
 };
 
+struct FAvidScriptCachedVmExport
+{
+	FAvidScriptVmExportHandle Handle;
+	FAvidScriptVmPreparedExportCall PreparedCall;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 	: public IAvidScriptHostDispatcher
 	, public IAvidScriptVmTypedHostDispatcher
@@ -368,12 +374,12 @@ private:
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	FAvidScriptVmBackendSelection BackendSelection;
 	FAvidScriptVmBackendInfo ActiveBackendInfo;
-	FAvidScriptVmExportHandle BeginPlayExport;
-	FAvidScriptVmExportHandle TickExport;
-	FAvidScriptVmExportHandle EndPlayExport;
-	FAvidScriptVmExportHandle TimerExport;
-	FAvidScriptVmExportHandle EventExport;
-	FAvidScriptVmExportHandle GameplayEventExport;
+	FAvidScriptCachedVmExport BeginPlayExport;
+	FAvidScriptCachedVmExport TickExport;
+	FAvidScriptCachedVmExport EndPlayExport;
+	FAvidScriptCachedVmExport TimerExport;
+	FAvidScriptCachedVmExport EventExport;
+	FAvidScriptCachedVmExport GameplayEventExport;
 
 	bool bGameplayEventExportLookupAttempted = false;
 	bool bHasBegunPlay = false;

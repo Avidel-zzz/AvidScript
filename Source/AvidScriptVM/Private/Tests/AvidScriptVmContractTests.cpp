@@ -385,6 +385,17 @@ bool FAvidScriptWamrBackendSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("tick export resolves from cache"), Backend->ResolveExport(TEXT("avid_on_tick"), CachedTickHandle, Error));
 	TestEqual(TEXT("two unique WAMR lookups"), Backend->GetExportLookupCount(), 2u);
 	TestEqual(TEXT("cached tick slot"), CachedTickHandle.Slot, TickHandle.Slot);
+	FAvidScriptVmPreparedExportCall PreparedTick;
+	TestFalse(
+		TEXT("WAMR explicitly declines prepared export calls"),
+		Backend->PrepareExportCall(TickHandle, PreparedTick, Error));
+	TestFalse(
+		TEXT("WAMR leaves no partial prepared target"),
+		PreparedTick.IsValid());
+	TestEqual(
+		TEXT("WAMR prepared fallback category is stable"),
+		Error.Category,
+		FString(TEXT("prepared_export_unsupported")));
 
 	FAvidScriptVmCallFrame EmptyFrame;
 	FAvidScriptVmCallResult VoidResult;
