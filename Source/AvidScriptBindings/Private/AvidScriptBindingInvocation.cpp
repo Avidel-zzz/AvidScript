@@ -3301,26 +3301,15 @@ bool FAvidScriptBindingPackage::PrepareGeneratedHostEffect(
 	UObject& Receiver,
 	const FAvidScriptBindingInvocationContext& Context) const
 {
-	if (Binding.Entry == nullptr
-		|| Binding.Lease.GetEntry() != Binding.Entry)
+	const EAvidScriptPreparedHostEffectMode EffectMode =
+		ResolvePreparedHostEffectMode(Binding, Context);
+	if (EffectMode == EAvidScriptPreparedHostEffectMode::Rejected)
 	{
 		return false;
 	}
-	if (Binding.bRequiresWriteAccess
-		&& Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
-	{
-		return false;
-	}
-	if (Context.HostEffectJournal == nullptr || !Binding.bRequiresWriteAccess)
+	if (EffectMode != EAvidScriptPreparedHostEffectMode::Journaled)
 	{
 		return true;
-	}
-	if (Context.ObjectRegistry == nullptr
-		|| Binding.ReloadEffect
-			== EAvidScriptBindingReloadEffect::Unsupported
-		|| Binding.bPropertyWriteHasFunction)
-	{
-		return false;
 	}
 
 	FAvidScriptBindingHostEffectPrepareResult PrepareResult;
@@ -3342,6 +3331,43 @@ bool FAvidScriptBindingPackage::PrepareGeneratedHostEffect(
 		Receiver,
 		Binding.ReloadEffect,
 		PrepareResult);
+}
+
+EAvidScriptPreparedHostEffectMode
+FAvidScriptBindingPackage::ResolvePreparedHostEffectMode(
+	const FAvidScriptPreparedGeneratedBinding& Binding,
+	const FAvidScriptBindingInvocationContext& Context) const
+{
+	if (Binding.Entry == nullptr
+		|| Binding.Lease.GetEntry() != Binding.Entry)
+	{
+		return EAvidScriptPreparedHostEffectMode::Rejected;
+	}
+	if (Binding.bRequiresWriteAccess
+		&& Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
+	{
+		return EAvidScriptPreparedHostEffectMode::Rejected;
+	}
+	if (!Binding.bRequiresWriteAccess)
+	{
+		return EAvidScriptPreparedHostEffectMode::DirectRead;
+	}
+	if (Context.HostEffectJournal == nullptr)
+	{
+		return EAvidScriptPreparedHostEffectMode::DirectWrite;
+	}
+	if (Context.ObjectRegistry == nullptr
+		|| Binding.ReloadEffect
+			== EAvidScriptBindingReloadEffect::Unsupported
+		|| Binding.bPropertyWriteHasFunction
+		|| (Binding.bPropertyWrite
+			&& (Binding.ReloadEffect
+					!= EAvidScriptBindingReloadEffect::ReflectedProperty
+				|| Binding.ReflectedProperty == nullptr)))
+	{
+		return EAvidScriptPreparedHostEffectMode::Rejected;
+	}
+	return EAvidScriptPreparedHostEffectMode::Journaled;
 }
 
 bool FAvidScriptBindingPackage::TryGetGeneratedPropertyBinding(

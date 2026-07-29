@@ -110,6 +110,15 @@ struct FAvidScriptSelfCapability
 	uint64 RegistryRevision = 0;
 };
 
+struct FAvidScriptFusedCallbackFrame
+{
+	UObject* Receiver = nullptr;
+	FAvidScriptObjectHandle Handle;
+	uint64 CallbackEpoch = 0;
+	uint64 ReloadEpoch = 0;
+	uint64 RegistryRevision = 0;
+};
+
 class AVIDSCRIPTRUNTIME_API FAvidScriptWasmRuntimeInstance
 	: public IAvidScriptHostDispatcher
 	, public IAvidScriptVmTypedHostDispatcher
@@ -164,9 +173,20 @@ public:
 	{
 		BindingPackage = InBindingPackage;
 	}
+	bool BuildPreparedTypedHostImportsForTesting(FString& OutError)
+	{
+		return BuildPreparedTypedHostImports(OutError);
+	}
+	const TArray<FAvidScriptVmTypedHostImport>&
+	GetPreparedTypedHostImportsForTesting() const
+	{
+		return TypedHostImports;
+	}
 	uint64 GetActiveCallbackEpochForTesting() const
 	{
-		return CallbackEpochStack.IsEmpty() ? 0 : CallbackEpochStack.Last();
+		return FusedCallbackFrameStack.IsEmpty()
+			? 0
+			: FusedCallbackFrameStack.Last().CallbackEpoch;
 	}
 	bool ResolveSelfCapabilityForTesting(
 		int32 SelfSlot,
@@ -286,7 +306,7 @@ private:
 		int32 Right,
 		int32& OutValue);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfI32Pair(
-		const FAvidScriptPreparedGeneratedHostCall& Call,
+		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32 Left,
@@ -298,7 +318,7 @@ private:
 		int32 SelfGeneration,
 		int32& OutValue);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Get(
-		const FAvidScriptPreparedGeneratedHostCall& Call,
+		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32& OutValue);
@@ -308,10 +328,17 @@ private:
 		int32 SelfGeneration,
 		int32 Value);
 	EAvidScriptVmTypedHostStatus DispatchPreparedSelfPropertyI32Set(
-		const FAvidScriptPreparedGeneratedHostCall& Call,
+		FAvidScriptPreparedGeneratedHostCall& Call,
 		int32 SelfSlot,
 		int32 SelfGeneration,
 		int32 Value);
+	bool TryResolveFusedCallbackReceiver(
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		UObject*& OutReceiver);
+	bool PrepareFusedGeneratedHostEffect(
+		FAvidScriptPreparedGeneratedHostCall& Call,
+		UObject& Receiver);
 	void BeginTypedCallbackEpoch();
 	void EndTypedCallbackEpoch();
 	void InvalidateSelfCapability();
@@ -395,7 +422,8 @@ private:
 	FAvidScriptSelfCapability SelfCapability;
 	FAvidScriptDataBridgeBudget DataBridgeBudget;
 	FAvidScriptDataBridgeMetrics DataBridgeMetrics;
-	TArray<uint64, TInlineAllocator<4>> CallbackEpochStack;
+	TArray<FAvidScriptFusedCallbackFrame, TInlineAllocator<4>>
+		FusedCallbackFrameStack;
 	uint64 NextCallbackEpoch = 0;
 	uint64 ReloadEpoch = 0;
 };

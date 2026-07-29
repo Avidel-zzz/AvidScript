@@ -12,6 +12,13 @@ struct FAvidScriptPreparedGeneratedHostCall
 {
 	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
 	FAvidScriptPreparedGeneratedBinding Binding;
+	FAvidScriptGeneratedI32PairCall I32PairCall = nullptr;
+	FAvidScriptGeneratedPropertyI32GetCall PropertyI32GetCall = nullptr;
+	FAvidScriptGeneratedPropertyI32SetCall PropertyI32SetCall = nullptr;
+	uint64 PreparedCallbackEpoch = 0;
+	uint64 PreparedReloadEpoch = 0;
+	EAvidScriptPreparedHostEffectMode EffectMode =
+		EAvidScriptPreparedHostEffectMode::Rejected;
 };
 
 namespace
@@ -381,15 +388,20 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		switch (Import.Shape)
 		{
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
+			Call->I32PairCall = Binding.Entry->I32PairCall;
 			Import.PreparedTarget.SelfI32Pair =
 				&FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32Pair;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
+			Call->PropertyI32GetCall =
+				Binding.Entry->PropertyI32GetCall;
 			Import.PreparedTarget.SelfPropertyI32Get =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Get;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
+			Call->PropertyI32SetCall =
+				Binding.Entry->PropertyI32SetCall;
 			Import.PreparedTarget.SelfPropertyI32Set =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Set;
@@ -1232,7 +1244,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	BindingPackage.Reset();
 	DebugMap.Reset();
 	BindingInvocationScratch.Reset();
-	CallbackEpochStack.Reset();
+	FusedCallbackFrameStack.Reset();
 	InvalidateSelfCapability();
 	BeginPlayExport = {};
 	TickExport = {};
@@ -1419,7 +1431,7 @@ int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 	++HostImportCallCount;
 	++DataBridgeMetrics.BoundaryCrossings;
 	if (!IsInGameThread()
-		|| CallbackEpochStack.IsEmpty()
+		|| FusedCallbackFrameStack.IsEmpty()
 		|| !BindingPackage.IsValid()
 		|| HostContext.World.IsStale())
 	{
@@ -1431,7 +1443,8 @@ int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 		return 0;
 	}
 
-	const uint64 Epoch = CallbackEpochStack.Last();
+	const uint64 Epoch =
+		FusedCallbackFrameStack.Last().CallbackEpoch;
 	LastHostImportResult = static_cast<int32>(Epoch);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return static_cast<int64>(Epoch);
@@ -1450,9 +1463,9 @@ int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
 
 	FAvidScriptParsedCommandBuffer Buffer;
 	FAvidScriptCommandBufferParseResult ParseResult;
-	const uint64 ExpectedEpoch = CallbackEpochStack.IsEmpty()
+	const uint64 ExpectedEpoch = FusedCallbackFrameStack.IsEmpty()
 		? 0
-		: CallbackEpochStack.Last();
+		: FusedCallbackFrameStack.Last().CallbackEpoch;
 	if (!IsInGameThread()
 		|| !BindingPackage.IsValid()
 		|| HostContext.World.IsStale()
@@ -2544,7 +2557,9 @@ void FAvidScriptWasmRuntimeInstance::BeginTypedCallbackEpoch()
 	{
 		++NextCallbackEpoch;
 	}
-	CallbackEpochStack.Add(NextCallbackEpoch);
+	FAvidScriptFusedCallbackFrame& Frame =
+		FusedCallbackFrameStack.AddDefaulted_GetRef();
+	Frame.CallbackEpoch = NextCallbackEpoch;
 }
 
 void FAvidScriptWasmRuntimeInstance::InvalidateSelfCapability()
@@ -2559,9 +2574,9 @@ void FAvidScriptWasmRuntimeInstance::InvalidateSelfCapability()
 
 void FAvidScriptWasmRuntimeInstance::EndTypedCallbackEpoch()
 {
-	if (!CallbackEpochStack.IsEmpty())
+	if (!FusedCallbackFrameStack.IsEmpty())
 	{
-		CallbackEpochStack.Pop(EAllowShrinking::No);
+		FusedCallbackFrameStack.Pop(EAllowShrinking::No);
 	}
 }
 
@@ -2573,7 +2588,7 @@ bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
 {
 	OutObject = nullptr;
 	if (!IsInGameThread()
-		|| CallbackEpochStack.IsEmpty()
+		|| FusedCallbackFrameStack.IsEmpty()
 		|| HostContext.World.IsStale()
 		|| SelfSlot <= 0
 		|| SelfGeneration <= 0
@@ -2590,7 +2605,8 @@ bool FAvidScriptWasmRuntimeInstance::ResolveSelfCapability(
 		return false;
 	}
 
-	const uint64 CallbackEpoch = CallbackEpochStack.Last();
+	const uint64 CallbackEpoch =
+		FusedCallbackFrameStack.Last().CallbackEpoch;
 	const uint64 RegistryRevision =
 		HostContext.ObjectRegistry->GetRevision();
 	if (SelfCapability.ReloadEpoch == ReloadEpoch
@@ -2632,7 +2648,7 @@ UObject* FAvidScriptWasmRuntimeInstance::ResolveStableBorrow(
 	UClass* ExpectedClass) const
 {
 	if (!IsInGameThread()
-		|| CallbackEpochStack.IsEmpty()
+		|| FusedCallbackFrameStack.IsEmpty()
 		|| HostContext.World.IsStale()
 		|| Slot <= 0
 		|| Generation <= 0
@@ -2745,7 +2761,7 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32Pair(
 
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32Pair(
-	const FAvidScriptPreparedGeneratedHostCall& Call,
+	FAvidScriptPreparedGeneratedHostCall& Call,
 	const int32 SelfSlot,
 	const int32 SelfGeneration,
 	const int32 Left,
@@ -2753,32 +2769,22 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32Pair(
 	int32& OutValue)
 {
 	OutValue = 0;
-	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
-	if (!IsInGameThread()
-		|| Call.Runtime != this
-		|| !BindingPackage.IsValid()
-		|| Binding.Entry == nullptr
-		|| Binding.Entry->I32PairCall == nullptr)
+	if (Call.I32PairCall == nullptr)
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 	}
 
 	UObject* Receiver = nullptr;
-	if (!ResolveSelfCapability(
+	if (!TryResolveFusedCallbackReceiver(
 			SelfSlot,
 			SelfGeneration,
-			Binding.ExpectedClass,
 			Receiver)
-		|| !BindingPackage->PrepareGeneratedHostEffect(
-			Binding,
-			HostContext.OwnerHandle,
-			*Receiver,
-			BindingInvocationContext))
+		|| !PrepareFusedGeneratedHostEffect(Call, *Receiver))
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 	}
 	return RecordGeneratedStatus(
-		Binding.Entry->I32PairCall(*Receiver, Left, Right, OutValue));
+		Call.I32PairCall(*Receiver, Left, Right, OutValue));
 }
 
 EAvidScriptVmTypedHostStatus
@@ -2804,41 +2810,28 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Get(
 
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Get(
-	const FAvidScriptPreparedGeneratedHostCall& Call,
+	FAvidScriptPreparedGeneratedHostCall& Call,
 	const int32 SelfSlot,
 	const int32 SelfGeneration,
 	int32& OutValue)
 {
 	OutValue = 0;
-	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
-	if (!IsInGameThread()
-		|| Call.Runtime != this
-		|| !BindingPackage.IsValid()
-		|| Binding.bPropertyWrite
-		|| Binding.Entry == nullptr
-		|| Binding.Entry->Shape
-			!= EAvidScriptGeneratedBindingShape::PropertyI32Get
-		|| Binding.Entry->PropertyI32GetCall == nullptr)
+	if (Call.PropertyI32GetCall == nullptr)
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 	}
 
 	UObject* Receiver = nullptr;
-	if (!ResolveSelfCapability(
+	if (!TryResolveFusedCallbackReceiver(
 			SelfSlot,
 			SelfGeneration,
-			Binding.ExpectedClass,
 			Receiver)
-		|| !BindingPackage->PrepareGeneratedHostEffect(
-			Binding,
-			HostContext.OwnerHandle,
-			*Receiver,
-			BindingInvocationContext))
+		|| !PrepareFusedGeneratedHostEffect(Call, *Receiver))
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
 	}
 	return RecordGeneratedStatus(
-		Binding.Entry->PropertyI32GetCall(*Receiver, OutValue));
+		Call.PropertyI32GetCall(*Receiver, OutValue));
 }
 
 EAvidScriptVmTypedHostStatus
@@ -2863,40 +2856,145 @@ FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Set(
 
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfPropertyI32Set(
-	const FAvidScriptPreparedGeneratedHostCall& Call,
+	FAvidScriptPreparedGeneratedHostCall& Call,
 	const int32 SelfSlot,
 	const int32 SelfGeneration,
 	const int32 Value)
 {
-	const FAvidScriptPreparedGeneratedBinding& Binding = Call.Binding;
-	if (!IsInGameThread()
-		|| Call.Runtime != this
-		|| !BindingPackage.IsValid()
-		|| !Binding.bPropertyWrite
-		|| Binding.Entry == nullptr
-		|| Binding.Entry->Shape
-			!= EAvidScriptGeneratedBindingShape::PropertyI32Set
-		|| Binding.Entry->PropertyI32SetCall == nullptr)
+	if (Call.PropertyI32SetCall == nullptr)
 	{
 		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+
+	UObject* Receiver = nullptr;
+	if (!TryResolveFusedCallbackReceiver(
+			SelfSlot,
+			SelfGeneration,
+			Receiver)
+		|| !PrepareFusedGeneratedHostEffect(Call, *Receiver))
+	{
+		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+	}
+	return RecordGeneratedStatus(
+		Call.PropertyI32SetCall(*Receiver, Value));
+}
+
+bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	UObject*& OutReceiver)
+{
+	OutReceiver = nullptr;
+	if (!IsInGameThread()
+		|| FusedCallbackFrameStack.IsEmpty()
+		|| HostContext.World.IsStale()
+		|| SelfSlot <= 0
+		|| SelfGeneration <= 0
+		|| HostContext.ObjectRegistry == nullptr)
+	{
+		return false;
+	}
+
+	const FAvidScriptObjectHandle RequestedHandle{
+		static_cast<uint32>(SelfSlot),
+		static_cast<uint32>(SelfGeneration)
+	};
+	FAvidScriptFusedCallbackFrame& Frame =
+		FusedCallbackFrameStack.Last();
+	const uint64 RegistryRevision =
+		HostContext.ObjectRegistry->GetRevision();
+	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+		BindingInvocationContext.InvocationInstrumentation;
+	if (Frame.ReloadEpoch == ReloadEpoch
+		&& Frame.RegistryRevision == RegistryRevision
+		&& Frame.Handle == RequestedHandle
+		&& IsValid(Frame.Receiver))
+	{
+		if (Instrumentation != nullptr)
+		{
+			++Instrumentation->GeneratedFusedFastHitCount;
+		}
+		OutReceiver = Frame.Receiver;
+		return true;
+	}
+
+	if (Instrumentation != nullptr)
+	{
+		++Instrumentation->GeneratedFusedRevalidateCount;
 	}
 
 	UObject* Receiver = nullptr;
 	if (!ResolveSelfCapability(
 			SelfSlot,
 			SelfGeneration,
-			Binding.ExpectedClass,
-			Receiver)
-		|| !BindingPackage->PrepareGeneratedHostEffect(
-			Binding,
-			HostContext.OwnerHandle,
-			*Receiver,
-			BindingInvocationContext))
+			nullptr,
+			Receiver))
 	{
-		return RecordGeneratedStatus(EAvidScriptVmTypedHostStatus::Rejected);
+		return false;
 	}
-	return RecordGeneratedStatus(
-		Binding.Entry->PropertyI32SetCall(*Receiver, Value));
+
+	Frame.Receiver = Receiver;
+	Frame.Handle = RequestedHandle;
+	Frame.ReloadEpoch = ReloadEpoch;
+	Frame.RegistryRevision = RegistryRevision;
+	OutReceiver = Receiver;
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
+	FAvidScriptPreparedGeneratedHostCall& Call,
+	UObject& Receiver)
+{
+	const FAvidScriptFusedCallbackFrame& Frame =
+		FusedCallbackFrameStack.Last();
+	if (Call.PreparedCallbackEpoch != Frame.CallbackEpoch
+		|| Call.PreparedReloadEpoch != ReloadEpoch)
+	{
+		if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+				BindingInvocationContext.InvocationInstrumentation)
+		{
+			++Instrumentation->GeneratedFusedCallSitePrepareCount;
+		}
+		Call.PreparedCallbackEpoch = 0;
+		Call.PreparedReloadEpoch = 0;
+		Call.EffectMode = EAvidScriptPreparedHostEffectMode::Rejected;
+		if (!BindingPackage.IsValid()
+			|| Call.Binding.Entry == nullptr
+			|| (Call.Binding.ExpectedClass != nullptr
+				&& !Receiver.IsA(Call.Binding.ExpectedClass)))
+		{
+			return false;
+		}
+		Call.EffectMode =
+			BindingPackage->ResolvePreparedHostEffectMode(
+				Call.Binding,
+				BindingInvocationContext);
+		if (Call.EffectMode
+			== EAvidScriptPreparedHostEffectMode::Rejected)
+		{
+			return false;
+		}
+		Call.PreparedCallbackEpoch = Frame.CallbackEpoch;
+		Call.PreparedReloadEpoch = ReloadEpoch;
+	}
+	if (Call.EffectMode != EAvidScriptPreparedHostEffectMode::Journaled)
+	{
+		return Call.EffectMode
+			== EAvidScriptPreparedHostEffectMode::DirectRead
+			|| Call.EffectMode
+				== EAvidScriptPreparedHostEffectMode::DirectWrite;
+	}
+	if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+			BindingInvocationContext.InvocationInstrumentation)
+	{
+		++Instrumentation->GeneratedJournalSlowPathCount;
+	}
+	return BindingPackage.IsValid()
+		&& BindingPackage->PrepareGeneratedHostEffect(
+			Call.Binding,
+			HostContext.OwnerHandle,
+			Receiver,
+			BindingInvocationContext);
 }
 
 EAvidScriptVmTypedHostStatus
@@ -3269,7 +3367,7 @@ FAvidScriptWasmRuntimeInstance::DispatchStableObjectRoundtrip(
 			ExpectedClass == nullptr
 				? TEXT("<none>")
 				: *ExpectedClass->GetPathName(),
-			CallbackEpochStack.Num(),
+			FusedCallbackFrameStack.Num(),
 			HostContext.World.IsStale() ? 1 : 0);
 		return Reject(TEXT("receiver_stable_borrow"));
 	}

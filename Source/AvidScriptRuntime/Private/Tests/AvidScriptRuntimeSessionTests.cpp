@@ -1743,6 +1743,117 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 			StableReceiverHandle,
 			*StableReceiver,
 			Context));
+	TestEqual(
+		TEXT("Prepared write effect is classified for the direct lane"),
+		FunctionPackage->ResolvePreparedHostEffectMode(
+			PreparedBindings[0],
+			Context),
+		EAvidScriptPreparedHostEffectMode::DirectWrite);
+
+	FAvidScriptWasmRuntimeInstance FusedRuntime;
+	FAvidScriptBindingInvocationInstrumentation FusedInstrumentation;
+	FAvidScriptWasmHostContext FusedContext;
+	FusedContext.ObjectRegistry = &ObjectRegistry;
+	FusedContext.OwnerHandle = StableReceiverHandle;
+	FusedContext.ActorWritePolicy =
+		EAvidScriptActorWritePolicy::AllowWrites;
+	FusedContext.BindingInvocationInstrumentation =
+		&FusedInstrumentation;
+	FusedRuntime.SetHostContext(FusedContext);
+	FusedRuntime.SetBindingPackageForTesting(FunctionPackage);
+	FString PreparedImportError;
+	if (!TestTrue(
+			TEXT("Fused runtime publishes prepared typed imports"),
+			FusedRuntime.BuildPreparedTypedHostImportsForTesting(
+				PreparedImportError)))
+	{
+		AddError(PreparedImportError);
+		return false;
+	}
+	const TArray<FAvidScriptVmTypedHostImport>& FusedImports =
+		FusedRuntime.GetPreparedTypedHostImportsForTesting();
+	if (!TestEqual(
+			TEXT("Fused runtime publishes one prepared call site"),
+			FusedImports.Num(),
+			1))
+	{
+		return false;
+	}
+	const FAvidScriptVmPreparedTypedHostTarget& FusedTarget =
+		FusedImports[0].PreparedTarget;
+	int32 FusedValue = 0;
+	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("First fused call succeeds"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			2,
+			3,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	TestEqual(TEXT("First fused result is exact"), FusedValue, 5);
+	TestEqual(
+		TEXT("Second fused call reuses the callback receiver"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			5,
+			8,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	TestEqual(TEXT("Second fused result is exact"), FusedValue, 13);
+	TestEqual(
+		TEXT("One callback performs one receiver proof"),
+		FusedInstrumentation.GeneratedFusedRevalidateCount,
+		uint64(1));
+	TestEqual(
+		TEXT("The repeated call uses one receiver fast hit"),
+		FusedInstrumentation.GeneratedFusedFastHitCount,
+		uint64(1));
+	TestEqual(
+		TEXT("One call site is prepared once per callback"),
+		FusedInstrumentation.GeneratedFusedCallSitePrepareCount,
+		uint64(1));
+
+	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Nested callback receives an independent fused frame"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			1,
+			1,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	FusedRuntime.EndTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Outer callback frame is restored after nesting"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			3,
+			4,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	FusedRuntime.EndTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Nested callback performs one additional receiver proof"),
+		FusedInstrumentation.GeneratedFusedRevalidateCount,
+		uint64(2));
+	TestEqual(
+		TEXT("Restored outer callback reuses its receiver proof"),
+		FusedInstrumentation.GeneratedFusedFastHitCount,
+		uint64(2));
+	TestEqual(
+		TEXT("Nested entry and outer restoration reprepare the call site"),
+		FusedInstrumentation.GeneratedFusedCallSitePrepareCount,
+		uint64(3));
+
 	const FAvidScriptPreparedGeneratedBinding PreparedBinding =
 		PreparedBindings[0];
 	GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
@@ -1773,6 +1884,18 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 			StableReceiverHandle,
 			*StableReceiver,
 			Context));
+	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("A revoked fused call site fails closed before the thunk"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			1,
+			2,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Rejected);
+	FusedRuntime.EndTypedCallbackEpochForTesting();
 	return true;
 }
 #endif

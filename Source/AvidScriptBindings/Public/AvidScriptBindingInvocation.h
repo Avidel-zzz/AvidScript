@@ -67,6 +67,10 @@ struct FAvidScriptBindingInvocationInstrumentation
 	uint64 GeneratedNativeS1HitCount = 0;
 	uint64 GeneratedNativeS1FallbackCount = 0;
 	uint64 GeneratedNativeS1RejectCount = 0;
+	uint64 GeneratedFusedFastHitCount = 0;
+	uint64 GeneratedFusedRevalidateCount = 0;
+	uint64 GeneratedFusedCallSitePrepareCount = 0;
+	uint64 GeneratedJournalSlowPathCount = 0;
 };
 
 struct FAvidScriptBindingInvocationContext
@@ -95,6 +99,14 @@ struct FAvidScriptPreparedGeneratedBinding
 	bool bPropertyWrite = false;
 	bool bPropertyWriteHasFunction = false;
 	bool bRequiresWriteAccess = false;
+};
+
+enum class EAvidScriptPreparedHostEffectMode : uint8
+{
+	Rejected,
+	DirectRead,
+	DirectWrite,
+	Journaled
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingPackage
@@ -161,6 +173,9 @@ public:
 		const FAvidScriptPreparedGeneratedBinding& Binding,
 		const FAvidScriptObjectHandle& ReceiverHandle,
 		UObject& Receiver,
+		const FAvidScriptBindingInvocationContext& Context) const;
+	EAvidScriptPreparedHostEffectMode ResolvePreparedHostEffectMode(
+		const FAvidScriptPreparedGeneratedBinding& Binding,
 		const FAvidScriptBindingInvocationContext& Context) const;
 	bool TryFindFunctionOrdinal(
 		const UClass& OwnerClass,
