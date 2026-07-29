@@ -36,7 +36,21 @@
         "profile_id",
         "profile_sha256",
         "lane_catalog_sha256"
-      ]
+      ],
+      "properties": {
+        "editor_executable_sha256": { "$ref": "#/$defs/sha256" },
+        "harness_module_sha256": { "$ref": "#/$defs/sha256" },
+        "avidscript_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "avidscript_tree_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "avidscript_dirty": { "type": "boolean" },
+        "puerts_runtime_sha256": { "$ref": "#/$defs/sha256" },
+        "puerts_reflection_script_sha256": { "$ref": "#/$defs/sha256" },
+        "puerts_static_script_sha256": { "$ref": "#/$defs/sha256" },
+        "wasmtime_runtime_sha256": { "$ref": "#/$defs/sha256" },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "profile_sha256": { "$ref": "#/$defs/sha256" },
+        "lane_catalog_sha256": { "$ref": "#/$defs/sha256" }
+      }
     },
     "run_id": { "type": "string", "minLength": 1 },
     "process_run": { "type": "integer", "minimum": 0 },
@@ -65,6 +79,10 @@
           "generated_direct_read_prepare_count",
           "generated_direct_write_prepare_count",
           "generated_journal_slow_path_count",
+          "generated_fused_fast_hit_cycles",
+          "generated_fused_revalidate_cycles",
+          "generated_fused_call_site_prepare_cycles",
+          "generated_journal_slow_path_cycles",
           "data_lane_command_count",
           "data_lane_crossing_count",
           "data_lane_rejected_buffer_count",
@@ -73,6 +91,8 @@
           "correct"
         ],
         "properties": {
+          "process_run": { "type": "integer", "minimum": 0 },
+          "lane": { "type": "string", "minLength": 1 },
           "lane_identity_sha256": { "$ref": "#/$defs/sha256" },
           "workload": {
             "enum": [
@@ -90,13 +110,28 @@
               "gameplay_frame_dense"
             ]
           },
+          "sample_index": { "type": "integer", "minimum": 0 },
+          "iterations": { "type": "integer", "minimum": 1 },
           "elapsed_cycles": { "type": "integer", "minimum": 1 },
+          "checksum": { "type": "integer" },
+          "expected_checksum": { "type": "integer" },
+          "generated_s1_hit_count": { "type": "integer", "minimum": 0 },
+          "generated_s1_fallback_count": { "type": "integer", "minimum": 0 },
+          "generated_s1_reject_count": { "type": "integer", "minimum": 0 },
           "generated_fused_fast_hit_count": { "type": "integer", "minimum": 0 },
           "generated_fused_revalidate_count": { "type": "integer", "minimum": 0 },
           "generated_fused_call_site_prepare_count": { "type": "integer", "minimum": 0 },
           "generated_direct_read_prepare_count": { "type": "integer", "minimum": 0 },
           "generated_direct_write_prepare_count": { "type": "integer", "minimum": 0 },
           "generated_journal_slow_path_count": { "type": "integer", "minimum": 0 },
+          "generated_fused_fast_hit_cycles": { "type": "integer", "minimum": 0 },
+          "generated_fused_revalidate_cycles": { "type": "integer", "minimum": 0 },
+          "generated_fused_call_site_prepare_cycles": { "type": "integer", "minimum": 0 },
+          "generated_journal_slow_path_cycles": { "type": "integer", "minimum": 0 },
+          "data_lane_command_count": { "type": "integer", "minimum": 0 },
+          "data_lane_crossing_count": { "type": "integer", "minimum": 0 },
+          "data_lane_rejected_buffer_count": { "type": "integer", "minimum": 0 },
+          "semantic_hit_count": { "type": "integer", "minimum": 0 },
           "logical_operation_count": { "type": "integer", "minimum": 1 },
           "correct": { "const": true }
         }

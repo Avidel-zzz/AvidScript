@@ -73,6 +73,10 @@ struct FAvidScriptBindingInvocationInstrumentation
 	uint64 GeneratedDirectReadPrepareCount = 0;
 	uint64 GeneratedDirectWritePrepareCount = 0;
 	uint64 GeneratedJournalSlowPathCount = 0;
+	uint64 GeneratedFusedFastHitCycles = 0;
+	uint64 GeneratedFusedRevalidateCycles = 0;
+	uint64 GeneratedFusedCallSitePrepareCycles = 0;
+	uint64 GeneratedJournalSlowPathCycles = 0;
 };
 
 struct FAvidScriptBindingInvocationContext

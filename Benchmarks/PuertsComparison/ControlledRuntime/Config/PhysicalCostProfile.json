@@ -1,6 +1,7 @@
 {
   "schema_version": 2,
   "profile_id": "ue58-win64-phase56-physical-crossing-cost-v2",
+  "evidence_class": "formal",
   "benchmark_kind": "physical_crossing_cost_ladder",
   "process_runs": 5,
   "warmup_samples": 5,

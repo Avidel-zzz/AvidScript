@@ -20,6 +20,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$phase56ComparisonRoot = Split-Path -Parent (
+    Split-Path -Parent $PSScriptRoot)
+. (Join-Path $phase56ComparisonRoot (
+    'ControlledRuntime/Scripts/Phase56Evidence.Common.ps1'))
 
 function Read-JsonFile {
     param([string]$Path)
@@ -570,6 +574,14 @@ foreach ($result in $results) {
             $validityErrors.Add(
                 "fused path mismatch process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
         }
+        if ($profile.evidence_class -ceq 'formal' -and (
+            [uint64]$sample.generated_fused_fast_hit_cycles -ne 0 -or
+            [uint64]$sample.generated_fused_revalidate_cycles -ne 0 -or
+            [uint64]$sample.generated_fused_call_site_prepare_cycles -ne 0 -or
+            [uint64]$sample.generated_journal_slow_path_cycles -ne 0)) {
+            $validityErrors.Add(
+                "formal fused timing must stay disabled process=$($result.process_run) lane=$($sample.lane) workload=$($sample.workload)")
+        }
         $isAvidScriptLane =
             ([string]$sample.lane).StartsWith(
                 'avidscript_',
@@ -754,6 +766,42 @@ if ($supplementalProvided) {
     }
     $suite = $suiteJson | ConvertFrom-Json -Depth 100
     $physical = $physicalJson | ConvertFrom-Json -Depth 100
+    if ($isPhase56) {
+        $physicalProfilePath = Join-Path $controlledRoot (
+            'Config/PhysicalCostProfile.json')
+        $physicalProfile = Read-JsonFile -Path $physicalProfilePath
+        $physicalProfileSha256 = (
+            Get-FileHash -LiteralPath $physicalProfilePath -Algorithm SHA256
+        ).Hash.ToLowerInvariant()
+        Assert-PhysicalCostAggregateIdentity `
+            -Aggregate $physical `
+            -ExpectedProfile $physicalProfile `
+            -ExpectedProfileSha256 $physicalProfileSha256
+        $physicalStageCount = @($physicalProfile.stages).Count
+        $expectedPhysicalObservations =
+            [int]$physicalProfile.process_runs *
+            [int]$physicalProfile.timed_samples *
+            $physicalStageCount
+        $expectedPhysicalProcessMetrics =
+            [int]$physicalProfile.process_runs * $physicalStageCount
+        $expectedPairedProcessCosts =
+            [int]$physicalProfile.process_runs * 4
+        $expectedFullReconstructions =
+            [int]$physicalProfile.process_runs * 3
+        if ([int]$physical.observation_count -ne
+                $expectedPhysicalObservations -or
+            @($physical.process_metrics).Count -ne
+                $expectedPhysicalProcessMetrics -or
+            @($physical.cross_process_metrics).Count -ne
+                $physicalStageCount -or
+            @($physical.paired_process_costs).Count -ne
+                $expectedPairedProcessCosts -or
+            @($physical.paired_cost_metrics).Count -ne 4 -or
+            @($physical.full_crossing_reconstructions).Count -ne
+                $expectedFullReconstructions) {
+            throw 'Phase56 physical aggregate does not match the tracked formal profile and complete sample matrix.'
+        }
+    }
     $supplementalCommit = [string]$suite.candidate.commit
     $supplementalTree = [string]$suite.candidate.tree_sha
     if ($supplementalCommit -cne [string]$provenance.avidscript_commit -or
@@ -1018,6 +1066,15 @@ $output = [ordered]@{
     cross_process_statistics = @($crossProcessStatistics)
     gates = $gates
 }
+$failedGateNames = @($gates.GetEnumerator() | Where-Object {
+    -not [bool]$_.Value.pass
+} | ForEach-Object {
+    [string]$_.Key
+})
+$output.overall_pass = Test-PerformanceGateOverallPass `
+    -ValidityValid ($validityErrors.Count -eq 0) `
+    -Gates $gates
+$output.failed_gates = $failedGateNames
 
 $json = $output | ConvertTo-Json -Depth 100
 $gateSchemaPath = Join-Path (
@@ -1032,3 +1089,7 @@ if (-not ($json | Test-Json -SchemaFile $gateSchemaPath)) {
     $resolvedOutput,
     $json + [Environment]::NewLine,
     [Text.UTF8Encoding]::new($false))
+if (-not [bool]$output.overall_pass) {
+    throw "Performance gates failed closed: $(
+        [string]::Join(', ', $failedGateNames))"
+}

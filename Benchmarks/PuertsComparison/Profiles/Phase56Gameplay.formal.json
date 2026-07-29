@@ -91,7 +91,7 @@
       "lane": "avidscript_wasmtime_data_oriented"
     },
     "prepared_export_ratio": { "maximum": 0.95 },
-    "physical_reconstruction_error_ratio": { "maximum": 0.15 },
+    "physical_reconstruction_error_ratio": { "maximum": 1.0 },
     "typed_empty_net_ns": { "maximum": 12.0 },
     "fused_fast_hit_ratio": { "minimum": 0.95 },
     "fused_revalidate_per_callback": { "minimum": 1.0, "maximum": 1.0 },

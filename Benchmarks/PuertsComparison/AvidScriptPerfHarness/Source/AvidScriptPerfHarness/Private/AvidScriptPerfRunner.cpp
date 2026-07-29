@@ -548,6 +548,10 @@ namespace
 		uint64 LastGeneratedDirectReadPrepareCount = 0;
 		uint64 LastGeneratedDirectWritePrepareCount = 0;
 		uint64 LastGeneratedJournalSlowPathCount = 0;
+		uint64 LastGeneratedFusedFastHitCycles = 0;
+		uint64 LastGeneratedFusedRevalidateCycles = 0;
+		uint64 LastGeneratedFusedCallSitePrepareCycles = 0;
+		uint64 LastGeneratedJournalSlowPathCycles = 0;
 		uint64 LastSemanticHitCount = 0;
 		uint64 LastDataBoundaryCrossingCount = 0;
 		uint64 LastDataAppliedCommandCount = 0;
@@ -563,6 +567,10 @@ namespace
 		uint64 CollectedGeneratedDirectReadPrepareCount = 0;
 		uint64 CollectedGeneratedDirectWritePrepareCount = 0;
 		uint64 CollectedGeneratedJournalSlowPathCount = 0;
+		uint64 CollectedGeneratedFusedFastHitCycles = 0;
+		uint64 CollectedGeneratedFusedRevalidateCycles = 0;
+		uint64 CollectedGeneratedFusedCallSitePrepareCycles = 0;
+		uint64 CollectedGeneratedJournalSlowPathCycles = 0;
 		uint64 CollectedSemanticHitCount = 0;
 		uint64 CollectedDataBoundaryCrossingCount = 0;
 		uint64 CollectedDataAppliedCommandCount = 0;
@@ -587,6 +595,7 @@ namespace
 			const FString& ExpectedRuntimeBuildIdentity,
 			const FString& ExpectedRuntimeArtifactSha256,
 			const FString& ManifestRelativePath,
+			const bool bCaptureFusedTiming,
 			AAvidScriptPerfFixture& SharedFixture,
 			FString& OutError)
 		{
@@ -647,6 +656,10 @@ namespace
 			HostContext.BindingInvocationPolicy = InvocationPolicy;
 			HostContext.BindingInvocationInstrumentation =
 				&InvocationInstrumentation;
+			HostContext.DynamicHostCallTimingPolicy =
+				bCaptureFusedTiming
+					? EAvidScriptDynamicHostCallTimingPolicy::PerCall
+					: EAvidScriptDynamicHostCallTimingPolicy::Disabled;
 			Session.SetHostContext(HostContext);
 #if WITH_DEV_AUTOMATION_TESTS
 			Session.SetBackendSelectionForTesting(BackendSelection);
@@ -832,6 +845,18 @@ namespace
 			LastGeneratedJournalSlowPathCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.GeneratedJournalSlowPathCount;
+			LastGeneratedFusedFastHitCycles =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedFastHitCycles;
+			LastGeneratedFusedRevalidateCycles =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedRevalidateCycles;
+			LastGeneratedFusedCallSitePrepareCycles =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedFusedCallSitePrepareCycles;
+			LastGeneratedJournalSlowPathCycles =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.GeneratedJournalSlowPathCycles;
 			LastSemanticHitCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.SemanticProcessEventCount;
@@ -856,6 +881,10 @@ namespace
 			uint64& OutGeneratedDirectReadPrepareCount,
 			uint64& OutGeneratedDirectWritePrepareCount,
 			uint64& OutGeneratedJournalSlowPathCount,
+			uint64& OutGeneratedFusedFastHitCycles,
+			uint64& OutGeneratedFusedRevalidateCycles,
+			uint64& OutGeneratedFusedCallSitePrepareCycles,
+			uint64& OutGeneratedJournalSlowPathCycles,
 			uint64& OutSemanticHitCount,
 			uint64& OutDataCommandCount,
 			uint64& OutDataCrossingCount,
@@ -879,6 +908,14 @@ namespace
 				CollectedGeneratedDirectWritePrepareCount;
 			OutGeneratedJournalSlowPathCount =
 				CollectedGeneratedJournalSlowPathCount;
+			OutGeneratedFusedFastHitCycles =
+				CollectedGeneratedFusedFastHitCycles;
+			OutGeneratedFusedRevalidateCycles =
+				CollectedGeneratedFusedRevalidateCycles;
+			OutGeneratedFusedCallSitePrepareCycles =
+				CollectedGeneratedFusedCallSitePrepareCycles;
+			OutGeneratedJournalSlowPathCycles =
+				CollectedGeneratedJournalSlowPathCycles;
 			OutSemanticHitCount = CollectedSemanticHitCount;
 			OutDataCommandCount = CollectedDataAppliedCommandCount;
 			OutDataCrossingCount = CollectedDataBoundaryCrossingCount;
@@ -999,6 +1036,18 @@ namespace
 			CollectedGeneratedJournalSlowPathCount =
 				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCount
 				- LastGeneratedJournalSlowPathCount;
+			CollectedGeneratedFusedFastHitCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedFastHitCycles
+				- LastGeneratedFusedFastHitCycles;
+			CollectedGeneratedFusedRevalidateCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedRevalidateCycles
+				- LastGeneratedFusedRevalidateCycles;
+			CollectedGeneratedFusedCallSitePrepareCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedCallSitePrepareCycles
+				- LastGeneratedFusedCallSitePrepareCycles;
+			CollectedGeneratedJournalSlowPathCycles =
+				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCycles
+				- LastGeneratedJournalSlowPathCycles;
 			CollectedSemanticHitCount =
 				DispatchResult.BindingInstrumentation.SemanticProcessEventCount
 				- LastSemanticHitCount;
@@ -1029,6 +1078,14 @@ namespace
 				DispatchResult.BindingInstrumentation.GeneratedDirectWritePrepareCount;
 			LastGeneratedJournalSlowPathCount =
 				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCount;
+			LastGeneratedFusedFastHitCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedFastHitCycles;
+			LastGeneratedFusedRevalidateCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedRevalidateCycles;
+			LastGeneratedFusedCallSitePrepareCycles =
+				DispatchResult.BindingInstrumentation.GeneratedFusedCallSitePrepareCycles;
+			LastGeneratedJournalSlowPathCycles =
+				DispatchResult.BindingInstrumentation.GeneratedJournalSlowPathCycles;
 			LastSemanticHitCount =
 				DispatchResult.BindingInstrumentation.SemanticProcessEventCount;
 			LastDataBoundaryCrossingCount =
@@ -1565,6 +1622,10 @@ namespace
 		uint64 GeneratedDirectReadPrepareCount = 0;
 		uint64 GeneratedDirectWritePrepareCount = 0;
 		uint64 GeneratedJournalSlowPathCount = 0;
+		uint64 GeneratedFusedFastHitCycles = 0;
+		uint64 GeneratedFusedRevalidateCycles = 0;
+		uint64 GeneratedFusedCallSitePrepareCycles = 0;
+		uint64 GeneratedJournalSlowPathCycles = 0;
 		uint64 DataLaneCommandCount = 0;
 		uint64 DataLaneCrossingCount = 0;
 		uint64 DataLaneRejectedBufferCount = 0;
@@ -1613,6 +1674,10 @@ namespace
 		uint64 GeneratedDirectReadPrepareCount = 0;
 		uint64 GeneratedDirectWritePrepareCount = 0;
 		uint64 GeneratedJournalSlowPathCount = 0;
+		uint64 GeneratedFusedFastHitCycles = 0;
+		uint64 GeneratedFusedRevalidateCycles = 0;
+		uint64 GeneratedFusedCallSitePrepareCycles = 0;
+		uint64 GeneratedJournalSlowPathCycles = 0;
 		uint64 DataLaneCommandCount = 0;
 		uint64 DataLaneCrossingCount = 0;
 		uint64 DataLaneRejectedBufferCount = 0;
@@ -2963,6 +3028,10 @@ namespace
 				OutObservation.GeneratedDirectReadPrepareCount,
 				OutObservation.GeneratedDirectWritePrepareCount,
 				OutObservation.GeneratedJournalSlowPathCount,
+				OutObservation.GeneratedFusedFastHitCycles,
+				OutObservation.GeneratedFusedRevalidateCycles,
+				OutObservation.GeneratedFusedCallSitePrepareCycles,
+				OutObservation.GeneratedJournalSlowPathCycles,
 				OutObservation.SemanticHitCount,
 				OutObservation.DataLaneCommandCount,
 				OutObservation.DataLaneCrossingCount,
@@ -3441,6 +3510,22 @@ namespace
 			Sample.GeneratedJournalSlowPathCount);
 		SetExactUnsignedField(
 			Object,
+			TEXT("generated_fused_fast_hit_cycles"),
+			Sample.GeneratedFusedFastHitCycles);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_fused_revalidate_cycles"),
+			Sample.GeneratedFusedRevalidateCycles);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_fused_call_site_prepare_cycles"),
+			Sample.GeneratedFusedCallSitePrepareCycles);
+		SetExactUnsignedField(
+			Object,
+			TEXT("generated_journal_slow_path_cycles"),
+			Sample.GeneratedJournalSlowPathCycles);
+		SetExactUnsignedField(
+			Object,
 			TEXT("data_lane_command_count"),
 			Sample.DataLaneCommandCount);
 		SetExactUnsignedField(
@@ -3765,6 +3850,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			SemanticCatalog.RuntimeBuildIdentity,
 			SemanticCatalog.RuntimeArtifactSha256,
 			SemanticCatalog.ManifestRelativePath,
+			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
 	{
@@ -3787,6 +3873,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			GeneratedCatalog.RuntimeBuildIdentity,
 			GeneratedCatalog.RuntimeArtifactSha256,
 			GeneratedCatalog.ManifestRelativePath,
+			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
 	{
@@ -3809,6 +3896,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			DataCatalog.RuntimeBuildIdentity,
 			DataCatalog.RuntimeArtifactSha256,
 			DataCatalog.ManifestRelativePath,
+			!Request.bUseHotCallbackResults,
 			*Fixture,
 			OutError))
 	{
@@ -3986,6 +4074,14 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 						Observation.GeneratedDirectWritePrepareCount;
 					Sample.GeneratedJournalSlowPathCount =
 						Observation.GeneratedJournalSlowPathCount;
+					Sample.GeneratedFusedFastHitCycles =
+						Observation.GeneratedFusedFastHitCycles;
+					Sample.GeneratedFusedRevalidateCycles =
+						Observation.GeneratedFusedRevalidateCycles;
+					Sample.GeneratedFusedCallSitePrepareCycles =
+						Observation.GeneratedFusedCallSitePrepareCycles;
+					Sample.GeneratedJournalSlowPathCycles =
+						Observation.GeneratedJournalSlowPathCycles;
 					Sample.DataLaneCommandCount =
 						Observation.DataLaneCommandCount;
 					Sample.DataLaneCrossingCount =
@@ -4089,6 +4185,7 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			TEXT("AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/")
 				TEXT("profile_phase54_6_semantic.avidscript.json"),
+			false,
 			*Fixture,
 			Error))
 	{
@@ -4110,6 +4207,7 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 			FString(),
 			TEXT("AvidScriptCSharpGuest/Profiles/profile_phase54_6_generated_s1/")
 				TEXT("profile_phase54_6_generated_s1.avidscript.json"),
+			false,
 			*Fixture,
 			Error))
 	{

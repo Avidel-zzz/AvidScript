@@ -5,7 +5,7 @@
   "callback_result_mode": "hot_failure_only",
   "process_runs": 1,
   "warmup_samples": 1,
-  "timed_samples": 2,
+  "timed_samples": 5,
   "seed": 1397313,
   "calibration": {
     "confirmation_samples": 1,

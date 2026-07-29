@@ -3216,6 +3216,12 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 		HostContext.ObjectRegistry->GetRevision();
 	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 		BindingInvocationContext.InvocationInstrumentation;
+	const bool bCaptureTiming =
+		Instrumentation != nullptr
+		&& HostContext.DynamicHostCallTimingPolicy
+			== EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+	const uint64 ResolveStartCycles =
+		bCaptureTiming ? FPlatformTime::Cycles64() : 0;
 	if (Frame.ReloadEpoch == ReloadEpoch
 		&& Frame.RegistryRevision == RegistryRevision
 		&& Frame.Handle == RequestedHandle
@@ -3224,6 +3230,11 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 		if (Instrumentation != nullptr)
 		{
 			++Instrumentation->GeneratedFusedFastHitCount;
+			if (bCaptureTiming)
+			{
+				Instrumentation->GeneratedFusedFastHitCycles +=
+					FPlatformTime::Cycles64() - ResolveStartCycles;
+			}
 		}
 		OutReceiver = Frame.Receiver;
 		return true;
@@ -3249,6 +3260,11 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 	Frame.ReloadEpoch = ReloadEpoch;
 	Frame.RegistryRevision = RegistryRevision;
 	OutReceiver = Receiver;
+	if (bCaptureTiming)
+	{
+		Instrumentation->GeneratedFusedRevalidateCycles +=
+			FPlatformTime::Cycles64() - ResolveStartCycles;
+	}
 	return true;
 }
 
@@ -3268,6 +3284,11 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 	if (Call.PreparedCallbackEpoch != Frame.CallbackEpoch
 		|| Call.PreparedReloadEpoch != ReloadEpoch)
 	{
+		const bool bCaptureTiming =
+			HostContext.DynamicHostCallTimingPolicy
+				== EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+		const uint64 PrepareStartCycles =
+			bCaptureTiming ? FPlatformTime::Cycles64() : 0;
 		if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 				BindingInvocationContext.InvocationInstrumentation)
 		{
@@ -3308,6 +3329,15 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 		}
 		Call.PreparedCallbackEpoch = Frame.CallbackEpoch;
 		Call.PreparedReloadEpoch = ReloadEpoch;
+		if (bCaptureTiming)
+		{
+			if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+					BindingInvocationContext.InvocationInstrumentation)
+			{
+				Instrumentation->GeneratedFusedCallSitePrepareCycles +=
+					FPlatformTime::Cycles64() - PrepareStartCycles;
+			}
+		}
 	}
 	if (Call.EffectMode != EAvidScriptPreparedHostEffectMode::Journaled)
 	{
@@ -3321,12 +3351,27 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 	{
 		++Instrumentation->GeneratedJournalSlowPathCount;
 	}
-	return BindingPackage.IsValid()
+	const bool bCaptureTiming =
+		HostContext.DynamicHostCallTimingPolicy
+			== EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+	const uint64 JournalStartCycles =
+		bCaptureTiming ? FPlatformTime::Cycles64() : 0;
+	const bool bPrepared = BindingPackage.IsValid()
 		&& BindingPackage->PrepareGeneratedHostEffect(
 			Call.Binding,
 			HostContext.OwnerHandle,
 			Receiver,
 			BindingInvocationContext);
+	if (bCaptureTiming)
+	{
+		if (FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+				BindingInvocationContext.InvocationInstrumentation)
+		{
+			Instrumentation->GeneratedJournalSlowPathCycles +=
+				FPlatformTime::Cycles64() - JournalStartCycles;
+		}
+	}
+	return bPrepared;
 }
 
 EAvidScriptVmTypedHostStatus

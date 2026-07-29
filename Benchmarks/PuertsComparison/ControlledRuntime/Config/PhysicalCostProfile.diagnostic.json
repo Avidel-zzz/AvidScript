@@ -1,10 +1,11 @@
 {
   "schema_version": 2,
   "profile_id": "ue58-win64-phase56-physical-crossing-cost-diagnostic-v2",
+  "evidence_class": "diagnostic",
   "benchmark_kind": "physical_crossing_cost_ladder",
   "process_runs": 1,
   "warmup_samples": 1,
-  "timed_samples": 3,
+  "timed_samples": 5,
   "iterations": 1000,
   "seed": 1397313,
   "stages": [

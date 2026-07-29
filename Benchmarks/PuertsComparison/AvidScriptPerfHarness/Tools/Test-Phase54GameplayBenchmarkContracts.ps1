@@ -43,11 +43,17 @@ $gameplayDiagnostic = Get-Content -LiteralPath (
 $phase56MicroFormal = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56Micro.formal.json') -Raw |
     ConvertFrom-Json -Depth 100
+$phase56MicroDiagnostic = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56Micro.diagnostic.json') -Raw |
+    ConvertFrom-Json -Depth 100
 $phase56MicroFullResult = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56Micro.full-result.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
 $phase56GameplayFormal = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56Gameplay.formal.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$phase56GameplayDiagnostic = Get-Content -LiteralPath (
+    Join-Path $profileRoot 'Phase56Gameplay.diagnostic.json') -Raw |
     ConvertFrom-Json -Depth 100
 $phase56GateSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase56GateResult.schema.json') -Raw |
@@ -57,6 +63,20 @@ $calibrationSchema = Get-Content -LiteralPath (
     ConvertFrom-Json -Depth 100
 $processSchema = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54SixLaneProcessResult.schema.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$controlledRoot = Join-Path $comparisonRoot 'ControlledRuntime'
+$physicalScriptText = Get-Content -LiteralPath (
+    Join-Path $controlledRoot 'Scripts\Invoke-PhysicalCostLadder.ps1') -Raw
+$phase56EvidenceText = Get-Content -LiteralPath (
+    Join-Path $controlledRoot 'Scripts\Phase56Evidence.Common.ps1') -Raw
+$physicalFormal = Get-Content -LiteralPath (
+    Join-Path $controlledRoot 'Config\PhysicalCostProfile.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$physicalDiagnostic = Get-Content -LiteralPath (
+    Join-Path $controlledRoot 'Config\PhysicalCostProfile.diagnostic.json') -Raw |
+    ConvertFrom-Json -Depth 100
+$physicalAggregateSchema = Get-Content -LiteralPath (
+    Join-Path $controlledRoot 'Schema\PhysicalCostAggregate.schema.json') -Raw |
     ConvertFrom-Json -Depth 100
 $csharpProfileRoot = Join-Path $harnessRoot 'Content\CSharp'
 $semanticCSharpProfile = Get-Content -LiteralPath (
@@ -177,6 +197,36 @@ Assert-True (
     $runnerText.Contains('callback_result_mode')) `
     'Phase56 正式档必须锁定热结果路径，并保留 full snapshot 消融档。'
 Assert-True (
+    @(
+        $phase56MicroDiagnostic,
+        $phase56MicroFullResult,
+        $phase56GameplayDiagnostic,
+        $physicalDiagnostic
+    | Where-Object {
+        [int]$_.process_runs -ne 1 -or [int]$_.timed_samples -ne 5
+    }).Count -eq 0) `
+    'Phase56 所有 diagnostic profile 必须统一为 1 process x 5 timed samples。'
+Assert-True (
+    [string]$physicalFormal.evidence_class -ceq 'formal' -and
+    [string]$physicalDiagnostic.evidence_class -ceq 'diagnostic' -and
+    @($physicalAggregateSchema.required) -ccontains 'profile_id' -and
+    @($physicalAggregateSchema.required) -ccontains 'evidence_class' -and
+    @($physicalAggregateSchema.required) -ccontains
+        'full_crossing_reconstructions' -and
+    $evaluatorText.Contains(
+        'does not match the tracked formal profile and complete sample matrix')) `
+    'Phase56 physical aggregate 必须绑定 tracked formal profile 身份和完整样本矩阵。'
+Assert-True (
+    $physicalScriptText.Contains(
+        'Get-PairedRatioAggregate') -and
+    $physicalScriptText.Contains('$fullCrossingReconstructions') -and
+    $physicalScriptText.Contains('New-FullCrossingReconstruction') -and
+    $phase56EvidenceText.Contains(
+        '[Math]::Abs($ObservedP50) * 0.10') -and
+    [double]$phase56GameplayFormal.gates.
+        physical_reconstruction_error_ratio.maximum -eq 1.0) `
+    'Phase56 prepared ratio 必须按配对样本计算，完整 crossing 重建使用 max(5ns,10%) 误差预算。'
+Assert-True (
     $evaluatorText.Contains(
         '$fusedHitCount =') -and
     $evaluatorText.Contains(
@@ -194,6 +244,12 @@ $phase56RequiredCounters = @(
     'generated_direct_write_prepare_count',
     'generated_journal_slow_path_count'
 )
+$phase56RequiredTiming = @(
+    'generated_fused_fast_hit_cycles',
+    'generated_fused_revalidate_cycles',
+    'generated_fused_call_site_prepare_cycles',
+    'generated_journal_slow_path_cycles'
+)
 Assert-True (
     @($phase56RequiredCounters | Where-Object {
         -not (@($processSchema.properties.samples.items.required) -ccontains $_)
@@ -202,6 +258,25 @@ Assert-True (
         -not $evaluatorText.Contains("'$_'")
     }).Count -eq 0) `
     'Phase56 process schema 与 evaluator 必须共同拒绝缺失 fused 计数。'
+Assert-True (
+    @($phase56RequiredTiming | Where-Object {
+        -not (@($processSchema.properties.samples.items.required) -ccontains $_)
+    }).Count -eq 0 -and
+    @($phase56RequiredTiming | Where-Object {
+        -not $runnerText.Contains("TEXT(`"$_`")")
+    }).Count -eq 0 -and
+    $runnerText.Contains('!Request.bUseHotCallbackResults') -and
+    $runnerText.Contains(
+        'EAvidScriptDynamicHostCallTimingPolicy::PerCall') -and
+    $evaluatorText.Contains('formal fused timing must stay disabled')) `
+    'Phase56 full-result 诊断档必须发布真实 fused cycle，正式竞争档必须保持 timing 关闭。'
+Assert-True (
+    @($processSchema.properties.samples.items.required | Where-Object {
+        -not (
+            $processSchema.properties.samples.items.properties.PSObject.
+                Properties.Name -ccontains $_)
+    }).Count -eq 0) `
+    '六通道 process schema 必须为 evaluator 使用的每个 required sample 字段声明类型。'
 Assert-True (
     $evaluatorText.Contains(
         'Raw supplemental candidate, correctness, or fallback identity differs.') -and
@@ -228,5 +303,11 @@ Assert-True (
         -not (@($phase56GateSchema.properties.gates.required) -ccontains $_)
     }).Count -eq 0) `
     'Phase56 profile 与结果 schema 必须共同锁定七项分段 profiling Gate。'
+Assert-True (
+    @($phase56GateSchema.required) -ccontains 'overall_pass' -and
+    @($phase56GateSchema.required) -ccontains 'failed_gates' -and
+    $evaluatorText.Contains('Test-PerformanceGateOverallPass') -and
+    $evaluatorText.Contains('Performance gates failed closed')) `
+    'Phase56 evaluator 必须在写出完整报告后以 overall verdict 和非零退出码拒绝失败 Gate。'
 
 Write-Output 'Phase54/56 gameplay benchmark contracts passed: lanes=6 phase56_profiling_gates=7.'

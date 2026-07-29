@@ -2141,6 +2141,106 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 		TEXT("Nested entry and outer restoration reprepare the call site"),
 		FusedInstrumentation.GeneratedFusedCallSitePrepareCount,
 		uint64(3));
+	TestEqual(
+		TEXT("Production fused receiver path does not read the diagnostic clock"),
+		FusedInstrumentation.GeneratedFusedRevalidateCycles
+			+ FusedInstrumentation.GeneratedFusedFastHitCycles,
+		uint64(0));
+	TestEqual(
+		TEXT("Production call-site prepare does not read the diagnostic clock"),
+		FusedInstrumentation.GeneratedFusedCallSitePrepareCycles,
+		uint64(0));
+
+	FAvidScriptWasmRuntimeInstance DiagnosticRuntime;
+	FAvidScriptBindingInvocationInstrumentation DiagnosticInstrumentation;
+	FAvidScriptWasmHostContext DiagnosticContext = FusedContext;
+	DiagnosticContext.DynamicHostCallTimingPolicy =
+		EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+	DiagnosticContext.BindingInvocationInstrumentation =
+		&DiagnosticInstrumentation;
+	DiagnosticRuntime.SetHostContext(DiagnosticContext);
+	DiagnosticRuntime.SetBindingPackageForTesting(FunctionPackage);
+	if (!TestTrue(
+			TEXT("Diagnostic runtime publishes the fused call site"),
+			DiagnosticRuntime.BuildPreparedTypedHostImportsForTesting(
+				PreparedImportError)))
+	{
+		AddError(PreparedImportError);
+		return false;
+	}
+	const FAvidScriptVmPreparedTypedHostTarget& DiagnosticTarget =
+		DiagnosticRuntime.GetPreparedTypedHostImportsForTesting()[0]
+			.PreparedTarget;
+	DiagnosticRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Diagnostic first proof succeeds"),
+		DiagnosticTarget.SelfI32Pair(
+			DiagnosticTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			11,
+			13,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	TestEqual(
+		TEXT("Diagnostic fast hit succeeds"),
+		DiagnosticTarget.SelfI32Pair(
+			DiagnosticTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			17,
+			19,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	DiagnosticRuntime.EndTypedCallbackEpochForTesting();
+	TestTrue(
+		TEXT("Diagnostic first receiver proof records physical cycles"),
+		DiagnosticInstrumentation.GeneratedFusedRevalidateCycles > 0);
+	TestTrue(
+		TEXT("Diagnostic fused fast hit records physical cycles"),
+		DiagnosticInstrumentation.GeneratedFusedFastHitCycles > 0);
+	TestTrue(
+		TEXT("Diagnostic call-site prepare records physical cycles"),
+		DiagnosticInstrumentation.GeneratedFusedCallSitePrepareCycles > 0);
+
+	FAvidScriptWasmRuntimeInstance JournalRuntime;
+	FAvidScriptBindingInvocationInstrumentation JournalInstrumentation;
+	FAvidScriptWasmHostContext JournalContext = DiagnosticContext;
+	JournalContext.HostEffectJournal = &Journal;
+	JournalContext.BindingInvocationInstrumentation =
+		&JournalInstrumentation;
+	JournalRuntime.SetHostContext(JournalContext);
+	JournalRuntime.SetBindingPackageForTesting(FunctionPackage);
+	if (!TestTrue(
+			TEXT("Journal runtime publishes the fused call site"),
+			JournalRuntime.BuildPreparedTypedHostImportsForTesting(
+				PreparedImportError)))
+	{
+		AddError(PreparedImportError);
+		return false;
+	}
+	const FAvidScriptVmPreparedTypedHostTarget& JournalTarget =
+		JournalRuntime.GetPreparedTypedHostImportsForTesting()[0]
+			.PreparedTarget;
+	JournalRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Journaled fused write succeeds"),
+		JournalTarget.SelfI32Pair(
+			JournalTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			23,
+			29,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	JournalRuntime.EndTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Journal slow path is counted exactly once"),
+		JournalInstrumentation.GeneratedJournalSlowPathCount,
+		uint64(1));
+	TestTrue(
+		TEXT("Journal slow path records physical cycles"),
+		JournalInstrumentation.GeneratedJournalSlowPathCycles > 0);
 
 	TStrongObjectPtr<AAvidScriptActorBindingTestActor> InvalidatedReceiver(
 		NewObject<AAvidScriptActorBindingTestActor>());
