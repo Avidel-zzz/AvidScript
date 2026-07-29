@@ -210,6 +210,178 @@ bool FAvidScriptWasmEventSuccessAndLifecycleSmokeTest::RunTest(const FString& Pa
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptWasmHotLifecycleResultContractTest,
+	"AvidScript.Runtime.Event.HotLifecycleResultContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptWasmHotLifecycleResultContractTest::RunTest(
+	const FString& Parameters)
+{
+	const TArray<uint8> EventBytes = BuildEventFixture(false);
+	for (const FAvidScriptRuntimeBackendTestLane& Lane :
+		GetAvidScriptRuntimeBackendTestLanes())
+	{
+		FAvidScriptWasmRuntimeInstance Runtime(Lane.Selection);
+		FAvidScriptWasmSmokeResult SetupResult;
+		if (!TestTrue(
+				*AvidScriptRuntimeLaneLabel(
+					Lane,
+					TEXT("hot event fixture loads")),
+				Runtime.LoadModule(
+					EventBytes.GetData(),
+					EventBytes.Num(),
+					TEXT("hot_event"),
+					SetupResult))
+			|| !TestTrue(
+				*AvidScriptRuntimeLaneLabel(
+					Lane,
+					TEXT("hot event fixture begins")),
+				Runtime.BeginPlay(SetupResult)))
+		{
+			AddError(SetupResult.ErrorMessage);
+			continue;
+		}
+
+		FAvidScriptWasmSmokeResult Sentinel;
+		Sentinel.ModuleId = TEXT("untouched");
+		Sentinel.ErrorMessage = TEXT("sentinel");
+		Sentinel.TickCallCount = 777;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("hot Tick succeeds")),
+			Runtime.TickHot(1.0f / 60.0f, Sentinel));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot Tick leaves result storage untouched")),
+			Sentinel.ErrorMessage,
+			FString(TEXT("sentinel")));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot Tick leaves scalar result untouched")),
+			Sentinel.TickCallCount,
+			777);
+
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot event succeeds")),
+			Runtime.DispatchEventHot(9, 12.5f, Sentinel));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot event leaves result storage untouched")),
+			Sentinel.ModuleId,
+			FString(TEXT("untouched")));
+
+		const FAvidScriptWasmHotSnapshot HotSnapshot =
+			Runtime.GetHotSnapshot();
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot snapshot captures Tick count")),
+			HotSnapshot.TickCallCount,
+			1);
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot snapshot captures event count")),
+			HotSnapshot.EventCallbackCount,
+			1);
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("hot snapshot captures event id")),
+			HotSnapshot.LastEventId,
+			9);
+
+		TestFalse(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("invalid hot event fails closed")),
+			Runtime.DispatchEventHot(-1, 1.0f, Sentinel));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("invalid hot event materializes diagnostics")),
+			Sentinel.ErrorCategory,
+			FString(TEXT("invalid_argument")));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("invalid payload does not fault Runtime")),
+			Runtime.GetLifecycleState(),
+			EAvidScriptLifecycleState::Running);
+	}
+
+	const TArray<uint8> TypedBytes =
+		AvidScriptGameplayEventFixture::Build(false);
+	FAvidScriptWasmRuntimeInstance TypedRuntime;
+	FAvidScriptWasmSmokeResult TypedResult;
+	TestTrue(
+		TEXT("typed hot fixture loads"),
+		TypedRuntime.LoadModule(
+			TypedBytes.GetData(),
+			TypedBytes.Num(),
+			TEXT("hot_typed_event"),
+			TypedResult));
+	TestTrue(
+		TEXT("typed hot fixture begins"),
+		TypedRuntime.BeginPlay(TypedResult));
+	FAvidScriptGameplayEvent InputEvent;
+	InputEvent.Type = EAvidScriptGameplayEventType::Input;
+	InputEvent.PrimaryId = 3;
+	InputEvent.SecondaryId = 1;
+	InputEvent.VectorValue = FVector3f(0.5f, 0.0f, 0.0f);
+	TypedResult.ErrorMessage = TEXT("typed_sentinel");
+	TestTrue(
+		TEXT("typed gameplay event hot path succeeds"),
+		TypedRuntime.DispatchGameplayEventHot(InputEvent, TypedResult));
+	TestEqual(
+		TEXT("typed gameplay hot success leaves result untouched"),
+		TypedResult.ErrorMessage,
+		FString(TEXT("typed_sentinel")));
+	TestEqual(
+		TEXT("typed gameplay hot path records event"),
+		TypedRuntime.GetHotSnapshot().EventCallbackCount,
+		1);
+
+	const TArray<uint8> TrapBytes = BuildEventFixture(true);
+	FAvidScriptWasmRuntimeInstance TrapRuntime;
+	FAvidScriptWasmSmokeResult TrapResult;
+	TestTrue(
+		TEXT("hot trap fixture loads"),
+		TrapRuntime.LoadModule(
+			TrapBytes.GetData(),
+			TrapBytes.Num(),
+			TEXT("hot_event_trap"),
+			TrapResult));
+	TestTrue(
+		TEXT("hot trap fixture begins"),
+		TrapRuntime.BeginPlay(TrapResult));
+	TrapResult.ErrorMessage = TEXT("trap_sentinel");
+	TestFalse(
+		TEXT("hot trap fails closed"),
+		TrapRuntime.DispatchEventHot(7, 1.0f, TrapResult));
+	TestEqual(
+		TEXT("hot trap materializes category"),
+		TrapResult.ErrorCategory,
+		FString(TEXT("trap")));
+	TestEqual(
+		TEXT("hot trap materializes export"),
+		TrapResult.ExportName,
+		FString(TEXT("avid_on_event")));
+	TestTrue(
+		TEXT("hot trap materializes lifecycle snapshot"),
+		TrapResult.bBeginPlayCalled);
+	TestEqual(
+		TEXT("hot trap faults Runtime"),
+		TrapRuntime.GetLifecycleState(),
+		EAvidScriptLifecycleState::Faulted);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWasmEventTrapSmokeTest,
 	"AvidScript.Runtime.Event.TrapSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

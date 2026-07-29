@@ -245,46 +245,34 @@ void CacheResolvedVmExport(
 		PrepareError);
 }
 
-bool CallVmExport(
+bool InvokeVmExport(
 	IAvidScriptVmBackend* Backend,
 	FAvidScriptCachedVmExport& CachedExport,
-	const FString& ModuleId,
 	const FString& ExportName,
 	uint32 ArgCount,
 	const uint32* Args,
-	const FAvidScriptWasmDebugMap* DebugMap,
-	FAvidScriptWasmSmokeResult& OutResult)
+	FAvidScriptVmError& OutError)
 {
+	OutError = FAvidScriptVmError();
 	if (Backend == nullptr)
 	{
-		FAvidScriptVmError Error;
-		Error.Category = TEXT("backend_unavailable");
-		Error.Details = TEXT("No VM backend is attached to the runtime instance.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
+		OutError.Category = TEXT("backend_unavailable");
+		OutError.Details = TEXT("No VM backend is attached to the runtime instance.");
 		return false;
 	}
 
 	if (ArgCount > FAvidScriptVmCallFrame::MaxCells)
 	{
-		FAvidScriptVmError Error;
-		Error.Category = TEXT("invalid_arguments");
-		Error.Details = TEXT("The runtime call exceeds the VM fixed cell capacity.");
-		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
+		OutError.Category = TEXT("invalid_arguments");
+		OutError.Details = TEXT("The runtime call exceeds the VM fixed cell capacity.");
 		return false;
 	}
 
-	FAvidScriptVmError Error;
 	if (!CachedExport.Handle.IsValid())
 	{
 		FAvidScriptVmExportHandle Handle;
-		if (!Backend->ResolveExport(ExportName, Handle, Error))
+		if (!Backend->ResolveExport(ExportName, Handle, OutError))
 		{
-			SetFailureFromVmError(
-				OutResult,
-				ModuleId,
-				ExportName,
-				Error,
-				DebugMap);
 			return false;
 		}
 		CacheResolvedVmExport(*Backend, Handle, CachedExport);
@@ -302,15 +290,35 @@ bool CallVmExport(
 			CachedExport.PreparedCall.Owner,
 			CachedExport.PreparedCall.Target,
 			Frame,
-			Error,
+			OutError,
 			nullptr)
-		: Backend->Call(CachedExport.Handle, Frame, Error);
-	if (!bCalled)
+		: Backend->Call(CachedExport.Handle, Frame, OutError);
+	return bCalled;
+}
+
+bool CallVmExport(
+	IAvidScriptVmBackend* Backend,
+	FAvidScriptCachedVmExport& CachedExport,
+	const FString& ModuleId,
+	const FString& ExportName,
+	uint32 ArgCount,
+	const uint32* Args,
+	const FAvidScriptWasmDebugMap* DebugMap,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	FAvidScriptVmError Error;
+	if (InvokeVmExport(
+			Backend,
+			CachedExport,
+			ExportName,
+			ArgCount,
+			Args,
+			Error))
 	{
-		SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
-		return false;
+		return true;
 	}
-	return true;
+	SetFailureFromVmError(OutResult, ModuleId, ExportName, Error, DebugMap);
+	return false;
 }
 } // namespace
 
@@ -813,6 +821,16 @@ bool FAvidScriptWasmRuntimeInstance::Tick(float DeltaSeconds, FAvidScriptWasmSmo
 		EAvidScriptWasmResultDetail::FullSnapshot);
 }
 
+bool FAvidScriptWasmRuntimeInstance::TickHot(
+	const float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	return Tick(
+		DeltaSeconds,
+		OutFailure,
+		EAvidScriptWasmResultDetail::HotFailureOnly);
+}
+
 bool FAvidScriptWasmRuntimeInstance::Tick(
 	const float DeltaSeconds,
 	FAvidScriptWasmSmokeResult& OutResult,
@@ -820,11 +838,13 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 {
 	const bool bFullSnapshot =
 		ResultDetail == EAvidScriptWasmResultDetail::FullSnapshot;
+	const bool bHotFailureOnly =
+		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
 	if (bFullSnapshot)
 	{
 		PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	}
-	else
+	else if (!bHotFailureOnly)
 	{
 		OutResult.BackendInfo.Kind = ActiveBackendInfo.Kind;
 		OutResult.BackendInfo.ExecutionMode = ActiveBackendInfo.ExecutionMode;
@@ -839,11 +859,14 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		OutResult.ErrorMessage.Reset();
 		OutResult.DiagnosticFrames.Reset();
 	}
-	OutResult.bRuntimeInitialized = IsLoaded();
-	OutResult.bModuleLoaded = IsLoaded();
-	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
+	if (!bHotFailureOnly)
+	{
+		OutResult.bRuntimeInitialized = IsLoaded();
+		OutResult.bModuleLoaded = IsLoaded();
+		OutResult.bModuleInstantiated = IsLoaded();
+		OutResult.bBeginPlayCalled = bHasBegunPlay;
+		OutResult.bEndPlayCalled = bHasEndedPlay;
+	}
 
 	if (!IsLoaded())
 	{
@@ -896,19 +919,38 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 
 	const double TickStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
-	const bool bTickCalled = CallVmExport(
-		VmBackend.Get(),
-		TickExport,
-		ModuleId,
-		AvidScriptTickExportName,
-		UE_ARRAY_COUNT(TickArgs),
-		TickArgs,
-		DebugMap.Get(),
-		OutResult);
+	FAvidScriptVmError TickError;
+	const bool bTickCalled = bHotFailureOnly
+		? InvokeVmExport(
+			VmBackend.Get(),
+			TickExport,
+			AvidScriptTickExportName,
+			UE_ARRAY_COUNT(TickArgs),
+			TickArgs,
+			TickError)
+		: CallVmExport(
+			VmBackend.Get(),
+			TickExport,
+			ModuleId,
+			AvidScriptTickExportName,
+			UE_ARRAY_COUNT(TickArgs),
+			TickArgs,
+			DebugMap.Get(),
+			OutResult);
 	EndTypedCallbackEpoch();
 	if (!bTickCalled)
 	{
 		Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				AvidScriptTickExportName,
+				TickError,
+				DebugMap.Get());
+		}
 		OutResult.ModuleId = ModuleId;
 		OutResult.BackendInfo = ActiveBackendInfo;
 		OutResult.Metrics = Metrics;
@@ -920,12 +962,26 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 
 	Metrics.TickCallMs = MeasureElapsedMs(TickStartSeconds);
 	++TickCallCount;
-	OutResult.Metrics = Metrics;
-	OutResult.bTickCalled = true;
-	OutResult.TickCallCount = TickCallCount;
-
-	if (!ExecuteDueTimerCallbacks(OutResult))
+	if (!bHotFailureOnly)
 	{
+		OutResult.Metrics = Metrics;
+		OutResult.bTickCalled = true;
+		OutResult.TickCallCount = TickCallCount;
+	}
+
+	FAvidScriptVmError TimerError;
+	if (!ExecuteDueTimerCallbacks(TimerError))
+	{
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+		}
+		SetFailureFromVmError(
+			OutResult,
+			ModuleId,
+			AvidScriptTimerExportName,
+			TimerError,
+			DebugMap.Get());
 		OutResult.ModuleId = ModuleId;
 		OutResult.BackendInfo = ActiveBackendInfo;
 		OutResult.Metrics = Metrics;
@@ -937,8 +993,11 @@ bool FAvidScriptWasmRuntimeInstance::Tick(
 		return false;
 	}
 
-	OutResult.Metrics = Metrics;
-	CopyObservableStateToResult(OutResult);
+	if (!bHotFailureOnly)
+	{
+		OutResult.Metrics = Metrics;
+		CopyObservableStateToResult(OutResult);
+	}
 	return true;
 }
 
@@ -947,17 +1006,44 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	float Value,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
-	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
-	OutResult.bRuntimeInitialized = IsLoaded();
-	OutResult.bModuleLoaded = IsLoaded();
-	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
-	OutResult.TickCallCount = TickCallCount;
-	CopyObservableStateToResult(OutResult);
+	return DispatchEvent(
+		EventId,
+		Value,
+		OutResult,
+		EAvidScriptWasmResultDetail::FullSnapshot);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchEventHot(
+	const int32 EventId,
+	const float Value,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	return DispatchEvent(
+		EventId,
+		Value,
+		OutFailure,
+		EAvidScriptWasmResultDetail::HotFailureOnly);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
+	const int32 EventId,
+	const float Value,
+	FAvidScriptWasmSmokeResult& OutResult,
+	const EAvidScriptWasmResultDetail ResultDetail)
+{
+	const bool bHotFailureOnly =
+		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
+	if (!bHotFailureOnly)
+	{
+		CaptureSnapshot(OutResult);
+	}
 
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -970,6 +1056,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 
 	if (EventId < 0 || !FMath::IsFinite(Value))
 	{
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -986,19 +1076,38 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
-	const bool bEventCalled = CallVmExport(
-		VmBackend.Get(),
-		EventExport,
-		ModuleId,
-		AvidScriptEventExportName,
-		UE_ARRAY_COUNT(EventArgs),
-		EventArgs,
-		DebugMap.Get(),
-		OutResult);
+	FAvidScriptVmError EventError;
+	const bool bEventCalled = bHotFailureOnly
+		? InvokeVmExport(
+			VmBackend.Get(),
+			EventExport,
+			AvidScriptEventExportName,
+			UE_ARRAY_COUNT(EventArgs),
+			EventArgs,
+			EventError)
+		: CallVmExport(
+			VmBackend.Get(),
+			EventExport,
+			ModuleId,
+			AvidScriptEventExportName,
+			UE_ARRAY_COUNT(EventArgs),
+			EventArgs,
+			DebugMap.Get(),
+			OutResult);
 	EndTypedCallbackEpoch();
 	if (!bEventCalled)
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				AvidScriptEventExportName,
+				EventError,
+				DebugMap.Get());
+		}
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
@@ -1010,8 +1119,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	++EventCallbackCount;
 	LastEventId = EventId;
 	LastEventValue = Value;
-	OutResult.Metrics = Metrics;
-	CopyObservableStateToResult(OutResult);
+	if (!bHotFailureOnly)
+	{
+		OutResult.Metrics = Metrics;
+		CopyObservableStateToResult(OutResult);
+	}
 	return true;
 }
 
@@ -1019,18 +1131,41 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	return DispatchGameplayEvent(
+		Event,
+		OutResult,
+		EAvidScriptWasmResultDetail::FullSnapshot);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventHot(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	return DispatchGameplayEvent(
+		Event,
+		OutFailure,
+		EAvidScriptWasmResultDetail::HotFailureOnly);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutResult,
+	const EAvidScriptWasmResultDetail ResultDetail)
+{
 	const FString& ExportName = AvidScriptGameplayEventExportName;
-	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
-	OutResult.bRuntimeInitialized = IsLoaded();
-	OutResult.bModuleLoaded = IsLoaded();
-	OutResult.bModuleInstantiated = IsLoaded();
-	OutResult.bBeginPlayCalled = bHasBegunPlay;
-	OutResult.bEndPlayCalled = bHasEndedPlay;
-	OutResult.TickCallCount = TickCallCount;
-	CopyObservableStateToResult(OutResult);
+	const bool bHotFailureOnly =
+		ResultDetail == EAvidScriptWasmResultDetail::HotFailureOnly;
+	if (!bHotFailureOnly)
+	{
+		CaptureSnapshot(OutResult);
+	}
 
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -1053,6 +1188,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		!FMath::IsFinite(Event.VectorValue.Y) ||
 		!FMath::IsFinite(Event.VectorValue.Z))
 	{
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+		}
 		SetFailure(
 			OutResult,
 			ModuleId,
@@ -1077,6 +1216,10 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		if (!VmBackend->ResolveExport(ExportName, Handle, ResolveError) &&
 			ResolveError.Category != TEXT("missing_export"))
 		{
+			if (bHotFailureOnly)
+			{
+				CaptureSnapshot(OutResult);
+			}
 			SetFailureFromVmError(OutResult, ModuleId, ExportName, ResolveError, DebugMap.Get());
 			FAvidScriptLifecycleTransitionResult LifecycleResult;
 			LifecycleState.MarkFaulted(LifecycleResult);
@@ -1112,19 +1255,38 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 
 	const double EventStartSeconds = FPlatformTime::Seconds();
 	BeginTypedCallbackEpoch();
-	const bool bGameplayEventCalled = CallVmExport(
+	FAvidScriptVmError EventError;
+	const bool bGameplayEventCalled = bHotFailureOnly
+		? InvokeVmExport(
+			VmBackend.Get(),
+			GameplayEventExport,
+			AvidScriptGameplayEventExportName,
+			UE_ARRAY_COUNT(EventArgs),
+			EventArgs,
+			EventError)
+		: CallVmExport(
 			VmBackend.Get(),
 			GameplayEventExport,
 			ModuleId,
 			AvidScriptGameplayEventExportName,
 			UE_ARRAY_COUNT(EventArgs),
-		EventArgs,
-		DebugMap.Get(),
-		OutResult);
+			EventArgs,
+			DebugMap.Get(),
+			OutResult);
 	EndTypedCallbackEpoch();
 	if (!bGameplayEventCalled)
 	{
 		Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+		if (bHotFailureOnly)
+		{
+			CaptureSnapshot(OutResult);
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				AvidScriptGameplayEventExportName,
+				EventError,
+				DebugMap.Get());
+		}
 		OutResult.Metrics = Metrics;
 		CopyObservableStateToResult(OutResult);
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
@@ -1136,8 +1298,11 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	++EventCallbackCount;
 	LastEventId = EventTypeValue;
 	LastEventValue = Event.VectorValue.X;
-	OutResult.Metrics = Metrics;
-	CopyObservableStateToResult(OutResult);
+	if (!bHotFailureOnly)
+	{
+		OutResult.Metrics = Metrics;
+		CopyObservableStateToResult(OutResult);
+	}
 	return true;
 }
 
@@ -2442,8 +2607,10 @@ void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 	CompactTimerHeapIfNeeded();
 }
 
-bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmokeResult& OutResult)
+bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(
+	FAvidScriptVmError& OutError)
 {
+	OutError = FAvidScriptVmError();
 	for (const FAvidScriptWasmTimerEntry& Timer : DueTimerScratch)
 	{
 		uint32 TimerArgs[2] = {
@@ -2452,15 +2619,13 @@ bool FAvidScriptWasmRuntimeInstance::ExecuteDueTimerCallbacks(FAvidScriptWasmSmo
 		};
 		const double CallbackStartSeconds = FPlatformTime::Seconds();
 		BeginTypedCallbackEpoch();
-		const bool bTimerCalled = CallVmExport(
+		const bool bTimerCalled = InvokeVmExport(
 			VmBackend.Get(),
 			TimerExport,
-			ModuleId,
 			AvidScriptTimerExportName,
 			UE_ARRAY_COUNT(TimerArgs),
 			TimerArgs,
-			DebugMap.Get(),
-			OutResult);
+			OutError);
 		EndTypedCallbackEpoch();
 		if (!bTimerCalled)
 		{
@@ -3771,6 +3936,37 @@ void FAvidScriptWasmRuntimeInstance::CopyHostImportStateToResult(FAvidScriptWasm
 		HostContext.BindingInvocationInstrumentation == nullptr
 			? FAvidScriptBindingInvocationInstrumentation()
 			: *HostContext.BindingInvocationInstrumentation;
+}
+
+void FAvidScriptWasmRuntimeInstance::CaptureSnapshot(
+	FAvidScriptWasmSmokeResult& OutResult) const
+{
+	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
+	OutResult.bRuntimeInitialized = IsLoaded();
+	OutResult.bModuleLoaded = IsLoaded();
+	OutResult.bModuleInstantiated = IsLoaded();
+	OutResult.bBeginPlayCalled = bHasBegunPlay;
+	OutResult.bEndPlayCalled = bHasEndedPlay;
+	OutResult.TickCallCount = TickCallCount;
+	CopyObservableStateToResult(OutResult);
+}
+
+FAvidScriptWasmHotSnapshot
+FAvidScriptWasmRuntimeInstance::GetHotSnapshot() const
+{
+	FAvidScriptWasmHotSnapshot Snapshot;
+	Snapshot.bRuntimeLoaded = IsLoaded();
+	Snapshot.bBeginPlayCalled = bHasBegunPlay;
+	Snapshot.bEndPlayCalled = bHasEndedPlay;
+	Snapshot.TickCallCount = TickCallCount;
+	Snapshot.TimerCallbackCount = TimerCallbackCount;
+	Snapshot.LastTimerCallbackId = LastTimerCallbackId;
+	Snapshot.LastTimerHandle = LastTimerHandle;
+	Snapshot.EventCallbackCount = EventCallbackCount;
+	Snapshot.LastEventId = LastEventId;
+	Snapshot.LastEventValue = LastEventValue;
+	Snapshot.Metrics = Metrics;
+	return Snapshot;
 }
 
 void FAvidScriptWasmRuntimeInstance::CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const

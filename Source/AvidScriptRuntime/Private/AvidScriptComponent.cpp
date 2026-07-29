@@ -439,22 +439,25 @@ void UAvidScriptComponent::TickComponent(
 	};
 
 	if (RuntimeSession.IsValid() &&
-		RuntimeSession->GetSnapshot().LifecycleState == EAvidScriptLifecycleState::Running)
+		RuntimeSession->GetLiveLifecycleState() ==
+			EAvidScriptLifecycleState::Running)
 	{
-		FAvidScriptWasmSmokeResult Result;
+		FAvidScriptWasmSmokeResult Failure;
 		const int32 PreviousTickCallCount = RuntimeStats.TickCallCount;
-		if (RuntimeSession->TickLive(DeltaTime, Result))
+		if (RuntimeSession->TickHot(DeltaTime, Failure))
 		{
-			const FAvidScriptRuntimeSessionSnapshot Snapshot = RuntimeSession->GetSnapshot();
-			RuntimeStats.bRuntimeLoaded = Snapshot.bHasActiveRuntime;
-			RuntimeStats.bBeginPlayCalled = Result.bBeginPlayCalled;
+			const FAvidScriptWasmHotSnapshot Snapshot =
+				RuntimeSession->GetLiveHotSnapshot();
+			RuntimeStats.bRuntimeLoaded = Snapshot.bRuntimeLoaded;
+			RuntimeStats.bBeginPlayCalled = Snapshot.bBeginPlayCalled;
 			RuntimeStats.TickCallCount = Snapshot.TickCallCount;
-			RuntimeStats.TimerCallbackCount = Result.TimerCallbackCount;
-			RuntimeStats.LastTimerCallbackId = Result.LastTimerCallbackId;
-			RuntimeStats.LastTimerHandle = Result.LastTimerHandle;
-			RuntimeStats.Metrics = Result.Metrics;
-			RuntimeStats.ModuleId = Snapshot.ModuleId;
-			CopyComponentEventStats(Result, RuntimeStats);
+			RuntimeStats.TimerCallbackCount = Snapshot.TimerCallbackCount;
+			RuntimeStats.LastTimerCallbackId = Snapshot.LastTimerCallbackId;
+			RuntimeStats.LastTimerHandle = Snapshot.LastTimerHandle;
+			RuntimeStats.EventCallbackCount = Snapshot.EventCallbackCount;
+			RuntimeStats.LastEventId = Snapshot.LastEventId;
+			RuntimeStats.LastEventValue = Snapshot.LastEventValue;
+			RuntimeStats.Metrics = Snapshot.Metrics;
 
 			if (PreviousTickCallCount == 0 && RuntimeStats.TickCallCount > 0)
 			{
@@ -466,12 +469,12 @@ void UAvidScriptComponent::TickComponent(
 					RuntimeStats.OwnerHandle.ToUInt64(),
 					*RuntimeStats.ModuleId,
 					RuntimeStats.TickCallCount,
-					Result.Metrics.TickCallMs);
+					Snapshot.Metrics.TickCallMs);
 			}
 		}
 		else
 		{
-			RecordRuntimeFailure(Result);
+			RecordRuntimeFailure(Failure);
 			ReleaseRuntime();
 			SetComponentTickEnabled(false);
 		}

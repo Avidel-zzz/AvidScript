@@ -45,3 +45,36 @@ bool FAvidScriptRuntimeEventRouter::Dispatch(
 	}
 	return Runtime->DispatchGameplayEvent(Event, OutResult);
 }
+
+bool FAvidScriptRuntimeEventRouter::DispatchHot(
+	const int32 EventId,
+	const float Value,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();
+	if (Runtime == nullptr)
+	{
+		SetEventRouterStateFailure(
+			Scheduler,
+			TEXT("avid_on_event"),
+			OutFailure);
+		return false;
+	}
+	return Runtime->DispatchEventHot(EventId, Value, OutFailure);
+}
+
+bool FAvidScriptRuntimeEventRouter::DispatchHot(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();
+	if (Runtime == nullptr)
+	{
+		SetEventRouterStateFailure(
+			Scheduler,
+			TEXT("avid_on_gameplay_event"),
+			OutFailure);
+		return false;
+	}
+	return Runtime->DispatchGameplayEventHot(Event, OutFailure);
+}

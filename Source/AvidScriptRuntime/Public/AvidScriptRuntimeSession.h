@@ -56,8 +56,14 @@ public:
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
 	bool StopAndUnload(FAvidScriptWasmSmokeResult& OutResult);
 	bool TickLive(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool TickHot(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchEventLive(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEventHot(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchGameplayEventLive(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchGameplayEventHot(
+		const FAvidScriptGameplayEvent& Event,
+		FAvidScriptWasmSmokeResult& OutFailure);
+	bool CaptureLiveSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
 	void ClearHostContext();
@@ -70,6 +76,8 @@ public:
 	int32 GetLivePendingTimerCount() const;
 	int32 GetLiveTimerCallbackCount() const;
 	int32 GetLiveEventCallbackCount() const;
+	EAvidScriptLifecycleState GetLiveLifecycleState() const;
+	FAvidScriptWasmHotSnapshot GetLiveHotSnapshot() const;
 	FAvidScriptRuntimeSessionSnapshot GetSnapshot() const;
 	int32 GetSuccessfulReloadCount() const { return SuccessfulReloadCount; }
 	int32 GetRejectedReloadCount() const { return RejectedReloadCount; }

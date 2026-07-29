@@ -737,6 +737,94 @@ bool FAvidScriptRuntimeSessionStateMigrationRollbackTest::RunTest(const FString&
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionHotResultTest,
+	"AvidScript.Architecture.Session.HotResult",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionHotResultTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmReloadResult ReloadResult;
+	TestTrue(
+		TEXT("hot session starts"),
+		Session.LoadInitialModule(
+			GSessionCompatibleModule,
+			UE_ARRAY_COUNT(GSessionCompatibleModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(
+				TEXT("hot_session_v1")),
+			ReloadResult));
+
+	FAvidScriptWasmSmokeResult Sentinel;
+	Sentinel.ModuleId = TEXT("untouched");
+	Sentinel.ErrorMessage = TEXT("session_sentinel");
+	Sentinel.TickCallCount = 404;
+	TestTrue(
+		TEXT("session hot Tick succeeds"),
+		Session.TickHot(1.0f / 60.0f, Sentinel));
+	TestEqual(
+		TEXT("session hot Tick leaves result string untouched"),
+		Sentinel.ErrorMessage,
+		FString(TEXT("session_sentinel")));
+	TestEqual(
+		TEXT("session hot Tick leaves result scalar untouched"),
+		Sentinel.TickCallCount,
+		404);
+
+	const FAvidScriptWasmHotSnapshot HotSnapshot =
+		Session.GetLiveHotSnapshot();
+	TestTrue(
+		TEXT("session hot snapshot reports live Runtime"),
+		HotSnapshot.bRuntimeLoaded);
+	TestEqual(
+		TEXT("session hot snapshot records Tick"),
+		HotSnapshot.TickCallCount,
+		1);
+
+	FAvidScriptWasmSmokeResult CapturedResult;
+	TestTrue(
+		TEXT("session captures full observation outside hot call"),
+		Session.CaptureLiveSnapshot(CapturedResult));
+	TestEqual(
+		TEXT("captured observation identifies module"),
+		CapturedResult.ModuleId,
+		FString(TEXT("hot_session_v1")));
+	TestEqual(
+		TEXT("captured observation records Tick"),
+		CapturedResult.TickCallCount,
+		1);
+
+	TestTrue(
+		TEXT("hot session reload succeeds"),
+		Session.ReloadModule(
+			GSessionCompatibleModule,
+			UE_ARRAY_COUNT(GSessionCompatibleModule),
+			FAvidScriptWasmReloadManifest::MakeSmoke(
+				TEXT("hot_session_v2")),
+			ReloadResult));
+	TestTrue(
+		TEXT("reloaded session hot Tick succeeds"),
+		Session.TickHot(1.0f / 60.0f, Sentinel));
+	TestEqual(
+		TEXT("reloaded Runtime starts a fresh hot Tick count"),
+		Session.GetLiveHotSnapshot().TickCallCount,
+		1);
+
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(
+		TEXT("hot session stops"),
+		Session.StopAndUnload(StopResult));
+	TestFalse(
+		TEXT("hot Tick without Runtime fails closed"),
+		Session.TickHot(1.0f / 60.0f, Sentinel));
+	TestEqual(
+		TEXT("failed hot Tick materializes diagnostics"),
+		Sentinel.ErrorCategory,
+		FString(TEXT("invalid_state")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptRuntimeSessionCandidateBeginRollbackTest,
 	"AvidScript.Architecture.Session.CandidateBeginRollback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

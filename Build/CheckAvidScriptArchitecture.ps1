@@ -789,6 +789,30 @@ if (-not $RuntimeSessionSource.Contains('Scheduler->Tick(') -or
     -not $RuntimeSessionSource.Contains('EventRouter->Dispatch(')) {
     Add-Violation 'FAvidScriptRuntimeSession is missing Scheduler/EventRouter routing'
 }
+$RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
+$WasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
+$WasmRuntimeHotSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+foreach ($RequiredHotLifecycleContract in @(
+    'TickHot',
+    'DispatchEventHot',
+    'DispatchGameplayEventHot',
+    'CaptureLiveSnapshot',
+    'GetLiveHotSnapshot'
+)) {
+    if (-not $RuntimeSessionHeader.Contains($RequiredHotLifecycleContract) -or
+        -not $RuntimeSessionSource.Contains($RequiredHotLifecycleContract)) {
+        Add-Violation "FAvidScriptRuntimeSession hot lifecycle contract is missing $RequiredHotLifecycleContract"
+    }
+}
+if (-not $WasmRuntimeHeader.Contains('HotFailureOnly') -or
+    -not $WasmRuntimeHotSource.Contains('InvokeVmExport(') -or
+    -not $WasmRuntimeHotSource.Contains('if (!bHotFailureOnly)')) {
+    Add-Violation 'WASM Runtime hot lifecycle path must avoid success result materialization'
+}
+if (-not $ComponentSource.Contains('RuntimeSession->TickHot(') -or
+    -not $ComponentSource.Contains('RuntimeSession->GetLiveHotSnapshot()')) {
+    Add-Violation 'UAvidScriptComponent Tick must use the hot lifecycle result and POD snapshot paths'
+}
 
 $BindingSelectionTypes = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionTypes.h'
 $BindingSelectionResolverHeader = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionResolver.h'

@@ -170,8 +170,12 @@ Assert-True ($FixtureSource.Contains('#include "UEDataBinding.hpp"')) `
     'Puerts fixture bridge must directly include the UObject converter used by Runner.Action'
 Assert-True (-not $FixtureSource.Contains('Runner.Func<int32>(WorkloadId, Iterations, Seed)')) `
     'Puerts timed workload bridge must not convert a JS return checksum'
-Assert-True ($RunnerSource.Contains('Session.Tick(PerfRunnerTickDeltaSeconds')) `
-    'AvidScript callback_tick must invoke FAvidScriptRuntimeSession::Tick'
+Assert-True ($RunnerSource.Contains('Session.TickHot(')) `
+    'AvidScript callback_tick must invoke the failure-only hot Session path'
+Assert-True ($RunnerSource.Contains('Session.DispatchEventHot(')) `
+    'AvidScript callback_empty must invoke the failure-only hot Session path'
+Assert-True ($RunnerSource.Contains('Session.CaptureLiveSnapshot(DispatchResult)')) `
+    'AvidScript callback observations must be materialized after timed dispatch'
 Assert-True ($RunnerSource.Contains('PrepareCallbackWorkload')) `
     'callback state must be reset before dispatch'
 Assert-True ($RunnerSource.Contains('CollectCallbackWorkload')) `

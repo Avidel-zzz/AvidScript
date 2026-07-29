@@ -33,6 +33,18 @@ bool FAvidScriptRuntimeScheduler::Tick(float DeltaSeconds, FAvidScriptWasmSmokeR
 		EAvidScriptWasmResultDetail::FullSnapshot);
 }
 
+bool FAvidScriptRuntimeScheduler::TickHot(
+	const float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	if (ActiveRuntime == nullptr)
+	{
+		SetSchedulerStateFailure(ActiveRuntime, OutFailure);
+		return false;
+	}
+	return ActiveRuntime->TickHot(DeltaSeconds, OutFailure);
+}
+
 bool FAvidScriptRuntimeScheduler::Tick(
 	const float DeltaSeconds,
 	FAvidScriptWasmSmokeResult& OutResult,

@@ -15,6 +15,10 @@ public:
 
 	bool Dispatch(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool Dispatch(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchHot(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutFailure);
+	bool DispatchHot(
+		const FAvidScriptGameplayEvent& Event,
+		FAvidScriptWasmSmokeResult& OutFailure);
 
 private:
 	FAvidScriptRuntimeScheduler& Scheduler;

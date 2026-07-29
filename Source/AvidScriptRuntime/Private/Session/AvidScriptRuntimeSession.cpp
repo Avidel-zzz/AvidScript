@@ -405,6 +405,33 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 		EAvidScriptWasmResultDetail::FailureOnly);
 }
 
+bool FAvidScriptRuntimeSession::TickHot(
+	const float DeltaSeconds,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_tick"),
+			TEXT("tick was requested while another guest call or Runtime mutation is active"),
+			OutFailure);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(
+		ActiveGuestCallDepth,
+		ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (LiveExecutionObserverForTesting)
+	{
+		TFunction<void()> Observer =
+			MoveTemp(LiveExecutionObserverForTesting);
+		Observer();
+	}
+#endif
+	return Scheduler->TickHot(DeltaSeconds, OutFailure);
+}
+
 bool FAvidScriptRuntimeSession::DispatchEventLive(
 	int32 EventId,
 	float Value,
@@ -423,6 +450,26 @@ bool FAvidScriptRuntimeSession::DispatchEventLive(
 	return EventRouter->Dispatch(EventId, Value, OutResult);
 }
 
+bool FAvidScriptRuntimeSession::DispatchEventHot(
+	const int32 EventId,
+	const float Value,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_event"),
+			TEXT("event dispatch was requested while another guest call or Runtime mutation is active"),
+			OutFailure);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(
+		ActiveGuestCallDepth,
+		ActiveGuestCallDepth + 1);
+	return EventRouter->DispatchHot(EventId, Value, OutFailure);
+}
+
 bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult)
@@ -438,6 +485,41 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventLive(
 	}
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	return EventRouter->Dispatch(Event, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
+	const FAvidScriptGameplayEvent& Event,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("avid_on_gameplay_event"),
+			TEXT("gameplay event dispatch was requested while another guest call or Runtime mutation is active"),
+			OutFailure);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(
+		ActiveGuestCallDepth,
+		ActiveGuestCallDepth + 1);
+	return EventRouter->DispatchHot(Event, OutFailure);
+}
+
+bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
+	FAvidScriptWasmSmokeResult& OutResult) const
+{
+	if (!LiveRuntime)
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			TEXT("<snapshot>"),
+			TEXT("snapshot was requested without an active Runtime"),
+			OutResult);
+		return false;
+	}
+	LiveRuntime->CaptureSnapshot(OutResult);
+	return true;
 }
 
 bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResult)
@@ -551,6 +633,21 @@ int32 FAvidScriptRuntimeSession::GetLiveEventCallbackCount() const
 {
 	return Scheduler->GetEventCallbackCount();
 }
+
+EAvidScriptLifecycleState
+FAvidScriptRuntimeSession::GetLiveLifecycleState() const
+{
+	return Scheduler->GetLifecycleState();
+}
+
+FAvidScriptWasmHotSnapshot
+FAvidScriptRuntimeSession::GetLiveHotSnapshot() const
+{
+	return LiveRuntime
+		? LiveRuntime->GetHotSnapshot()
+		: FAvidScriptWasmHotSnapshot();
+}
+
 FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 {
 	FAvidScriptRuntimeSessionSnapshot Snapshot;

@@ -1010,9 +1010,9 @@ namespace
 				}
 				for (int32 Index = 0; Index < Iterations; ++Index)
 				{
-					if (!DispatchWorkload(
+					if (!Session.DispatchEventHot(
 							PackedWorkload,
-							static_cast<uint32>(Index),
+							static_cast<float>(Index),
 							OutDispatchResult))
 					{
 						return false;
@@ -1024,7 +1024,9 @@ namespace
 			{
 				for (int32 Index = 0; Index < Iterations; ++Index)
 				{
-					if (!Session.Tick(PerfRunnerTickDeltaSeconds, OutDispatchResult))
+					if (!Session.TickHot(
+							PerfRunnerTickDeltaSeconds,
+							OutDispatchResult))
 					{
 						return false;
 					}
@@ -1038,11 +1040,19 @@ namespace
 
 		bool CollectCallbackWorkload(
 			const bool bDispatchSucceeded,
-			const FAvidScriptWasmSmokeResult& DispatchResult,
+			FAvidScriptWasmSmokeResult& DispatchResult,
 			uint32& OutChecksum,
 			int32& OutHostImportCallCount,
 			FString& OutError)
 		{
+			if (bDispatchSucceeded &&
+				!Session.CaptureLiveSnapshot(DispatchResult))
+			{
+				OutError = FString::Printf(
+					TEXT("AvidScript callback snapshot failed: %s"),
+					*DispatchResult.ErrorMessage);
+				return false;
+			}
 			return CollectWorkloadResult(
 				bDispatchSucceeded,
 				DispatchResult,
@@ -2512,7 +2522,7 @@ namespace
 		const EAvidScriptPerfLane Lane,
 		const EAvidScriptPerfWorkload Workload,
 		const bool bAvidScriptDispatchSucceeded,
-		const FAvidScriptWasmSmokeResult& AvidScriptDispatchResult,
+		FAvidScriptWasmSmokeResult& AvidScriptDispatchResult,
 		FPerfLaneObservation& OutObservation,
 		FString& OutError)
 	{

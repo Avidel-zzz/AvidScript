@@ -9,6 +9,7 @@ public:
 	void Detach();
 
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
+	bool TickHot(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutFailure);
 	bool Tick(
 		float DeltaSeconds,
 		FAvidScriptWasmSmokeResult& OutResult,

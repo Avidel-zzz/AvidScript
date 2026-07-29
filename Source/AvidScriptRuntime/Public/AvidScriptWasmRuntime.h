@@ -39,7 +39,8 @@ enum class EAvidScriptDynamicHostCallTimingPolicy : uint8
 enum class EAvidScriptWasmResultDetail : uint8
 {
 	FailureOnly,
-	FullSnapshot
+	FullSnapshot,
+	HotFailureOnly
 };
 
 struct FAvidScriptWasmSmokeResult
@@ -75,6 +76,21 @@ struct FAvidScriptWasmSmokeResult
 	FAvidScriptWasmRuntimeMetrics Metrics;
 	FAvidScriptDataBridgeMetrics DataBridgeMetrics;
 	FAvidScriptBindingInvocationInstrumentation BindingInstrumentation;
+};
+
+struct FAvidScriptWasmHotSnapshot
+{
+	bool bRuntimeLoaded = false;
+	bool bBeginPlayCalled = false;
+	bool bEndPlayCalled = false;
+	int32 TickCallCount = 0;
+	int32 TimerCallbackCount = 0;
+	int32 LastTimerCallbackId = 0;
+	int32 LastTimerHandle = 0;
+	int32 EventCallbackCount = 0;
+	int32 LastEventId = 0;
+	float LastEventValue = 0.0f;
+	FAvidScriptWasmRuntimeMetrics Metrics;
 };
 
 struct FAvidScriptWasmHostContext
@@ -162,9 +178,16 @@ public:
 		float DeltaSeconds,
 		FAvidScriptWasmSmokeResult& OutResult,
 		EAvidScriptWasmResultDetail ResultDetail);
+	bool TickHot(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutFailure);
 	bool EndPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchEventHot(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchGameplayEventHot(
+		const FAvidScriptGameplayEvent& Event,
+		FAvidScriptWasmSmokeResult& OutFailure);
+	void CaptureSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
+	FAvidScriptWasmHotSnapshot GetHotSnapshot() const;
 	void Unload();
 	void Unload(FAvidScriptWasmSmokeResult& OutResult);
 	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
@@ -360,7 +383,16 @@ private:
 	EAvidScriptVmTypedHostStatus RecordGeneratedStatus(
 		EAvidScriptVmTypedHostStatus Status);
 	void CollectDueTimers(float DeltaSeconds);
-	bool ExecuteDueTimerCallbacks(FAvidScriptWasmSmokeResult& OutResult);
+	bool ExecuteDueTimerCallbacks(FAvidScriptVmError& OutError);
+	bool DispatchEvent(
+		int32 EventId,
+		float Value,
+		FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail);
+	bool DispatchGameplayEvent(
+		const FAvidScriptGameplayEvent& Event,
+		FAvidScriptWasmSmokeResult& OutResult,
+		EAvidScriptWasmResultDetail ResultDetail);
 	int32 AllocateTimerHandle();
 	void CompactTimerHeapIfNeeded();
 	void ResetTimerState();
