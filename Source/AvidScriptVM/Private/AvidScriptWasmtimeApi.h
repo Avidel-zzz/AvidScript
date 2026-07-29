@@ -114,6 +114,14 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
 	size_t result_cell_capacity,
 	size_t* out_result_cell_count,
 	AvidScriptWasmtimeFailure** out_failure);
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	const uint32_t* cells,
+	uint32_t* out_result_cells,
+	size_t result_cell_capacity,
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure);
 
 bool avidscript_wasmtime_memory_data(
 	AvidScriptWasmtimeStore* store,

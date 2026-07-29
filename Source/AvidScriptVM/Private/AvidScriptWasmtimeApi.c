@@ -657,11 +657,11 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 }
 
-AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
+static AvidScriptWasmtimeCallStatus
+avidscript_wasmtime_function_call_event_prepared_impl(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
 	const uint32_t* cells,
-	size_t cell_count,
 	uint32_t* out_result_cells,
 	size_t result_cell_capacity,
 	size_t* out_result_cell_count,
@@ -686,7 +686,7 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
 			"Wasmtime store and resolved function are required.");
 		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 	}
-	if (cell_count > 0 && cells == NULL)
+	if (function->cell_count > 0 && cells == NULL)
 	{
 		*out_failure = avidscript_wasmtime_local_failure(
 			"Wasmtime argument cells are required for a non-empty call frame.");
@@ -699,12 +699,6 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
 		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
 	}
 	*out_result_cell_count = 0;
-	if (cell_count != function->cell_count)
-	{
-		*out_failure = avidscript_wasmtime_local_failure(
-			"Wasmtime call cell count does not match the resolved export ABI.");
-		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
-	}
 	if (function->result_cell_count > result_cell_capacity
 		|| (function->result_cell_count > 0 && out_result_cells == NULL))
 	{
@@ -788,6 +782,56 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
 	}
 	*out_result_cell_count = result_cell_index;
 	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
+}
+
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	const uint32_t* cells,
+	size_t cell_count,
+	uint32_t* out_result_cells,
+	size_t result_cell_capacity,
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure)
+{
+	if (out_failure == NULL)
+	{
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	*out_failure = NULL;
+	if (function != NULL && cell_count != function->cell_count)
+	{
+		*out_failure = avidscript_wasmtime_local_failure(
+			"Wasmtime call cell count does not match the resolved export ABI.");
+		return AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE;
+	}
+	return avidscript_wasmtime_function_call_event_prepared_impl(
+		store,
+		function,
+		cells,
+		out_result_cells,
+		result_cell_capacity,
+		out_result_cell_count,
+		out_failure);
+}
+
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	const uint32_t* cells,
+	uint32_t* out_result_cells,
+	size_t result_cell_capacity,
+	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure)
+{
+	return avidscript_wasmtime_function_call_event_prepared_impl(
+		store,
+		function,
+		cells,
+		out_result_cells,
+		result_cell_capacity,
+		out_result_cell_count,
+		out_failure);
 }
 
 bool avidscript_wasmtime_memory_data(

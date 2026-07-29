@@ -130,6 +130,46 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	return Module;
 }
 
+TArray<uint8> BuildWasmtimeWideParameterFixture()
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+
+	TArray<uint8> Types;
+	AppendWasmtimeU32Leb(Types, 1);
+	Types.Add(0x60);
+	AppendWasmtimeU32Leb(
+		Types,
+		FAvidScriptVmCallFrame::MaxCells + 1);
+	for (uint32 Index = 0;
+		Index < FAvidScriptVmCallFrame::MaxCells + 1;
+		++Index)
+	{
+		Types.Add(0x7f);
+	}
+	Types.Add(0x00);
+	AppendWasmtimeSection(Module, 1, Types);
+
+	TArray<uint8> Functions;
+	AppendWasmtimeU32Leb(Functions, 1);
+	AppendWasmtimeU32Leb(Functions, 0);
+	AppendWasmtimeSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeString(Exports, "wide");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 0);
+	AppendWasmtimeSection(Module, 7, Exports);
+
+	TArray<uint8> Code;
+	AppendWasmtimeU32Leb(Code, 1);
+	const TArray<uint8> EmptyBody = { 0x00, 0x0b };
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(EmptyBody.Num()));
+	Code.Append(EmptyBody);
+	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
 TArray<uint8> BuildWasmtimeI32ImportFixture(const char* ImportName, int32 Input)
 {
 	TArray<uint8> Module = MakeWasmtimeModule();
@@ -599,6 +639,48 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };
 	TestFalse(TEXT("malformed WASM rejects"), Backend->Load(MakeArrayView(Malformed), TEXT("wasmtime_malformed"), Config, Error));
 	TestFalse(TEXT("malformed WASM reports details"), Error.Details.IsEmpty());
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeWideParameterExportTest,
+	"AvidScript.VM.Wasmtime.WideParameterExport",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeWideParameterExportTest::RunTest(
+	const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> Backend =
+		CreateWasmtimeBackendForTest(Error);
+	FAvidScriptVmLoadConfig Config;
+	const TArray<uint8> Bytecode =
+		BuildWasmtimeWideParameterFixture();
+	if (!LoadWasmtimeTestModule(
+			*this,
+			*Backend,
+			Bytecode,
+			Config,
+			Error))
+	{
+		return false;
+	}
+
+	FAvidScriptVmExportHandle Handle;
+	TestFalse(
+		TEXT("export wider than the fixed call frame rejects at resolution"),
+		Backend->ResolveExport(TEXT("wide"), Handle, Error));
+	TestEqual(
+		TEXT("wide export reports invalid_export"),
+		Error.Category,
+		FString(TEXT("invalid_export")));
+	TestFalse(
+		TEXT("wide export never publishes a resolvable handle"),
+		Handle.IsValid());
 	return true;
 #endif
 }

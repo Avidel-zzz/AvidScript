@@ -8,6 +8,7 @@
 #include "AvidScriptObjectRegistryTestTypes.h"
 #include "AvidScriptRuntimeSession.h"
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptWasmRuntimePrivate.h"
 #include "Session/AvidScriptRuntimeEventRouter.h"
 #include "Session/AvidScriptRuntimeScheduler.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
@@ -90,6 +91,124 @@ public:
 	EAvidScriptBindingReloadEffect LastEffect =
 		EAvidScriptBindingReloadEffect::None;
 	FProperty* LastProperty = nullptr;
+};
+
+class FPreparedExportCacheTestBackend final
+	: public IAvidScriptVmBackend
+{
+public:
+	enum class EPrepareMode
+	{
+		Supported,
+		Unsupported,
+		Failed
+	};
+
+	const FAvidScriptVmBackendInfo& GetBackendInfo() const override
+	{
+		return BackendInfo;
+	}
+
+	bool Load(
+		TArrayView<const uint8> Bytecode,
+		const FString& ModuleId,
+		const FAvidScriptVmLoadConfig& Config,
+		FAvidScriptVmError& OutError) override
+	{
+		static_cast<void>(Bytecode);
+		static_cast<void>(ModuleId);
+		static_cast<void>(Config);
+		OutError.Reset();
+		return true;
+	}
+
+	bool ResolveExport(
+		const FString& ExportName,
+		FAvidScriptVmExportHandle& OutHandle,
+		FAvidScriptVmError& OutError) override
+	{
+		static_cast<void>(ExportName);
+		OutError.Reset();
+		OutHandle = Handle;
+		return true;
+	}
+
+	bool PrepareExportCall(
+		const FAvidScriptVmExportHandle& InHandle,
+		FAvidScriptVmPreparedExportCall& OutCall,
+		FAvidScriptVmError& OutError) override
+	{
+		static_cast<void>(InHandle);
+		OutCall = FAvidScriptVmPreparedExportCall();
+		OutError.Reset();
+		if (PrepareMode == EPrepareMode::Unsupported)
+		{
+			OutError.Category = TEXT("prepared_export_unsupported");
+			OutError.Details = TEXT("test backend has no prepared path");
+			return false;
+		}
+		if (PrepareMode == EPrepareMode::Failed)
+		{
+			OutError.Category = TEXT("stale_export");
+			OutError.Details = TEXT("test backend rejected a stale handle");
+			return false;
+		}
+		OutCall.Owner = this;
+		OutCall.Target = this;
+		OutCall.InvokeFunction = &InvokePrepared;
+		OutCall.ParameterCellCount = PreparedParameterCellCount;
+		return true;
+	}
+
+	bool Call(
+		const FAvidScriptVmExportHandle& InHandle,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult) override
+	{
+		static_cast<void>(InHandle);
+		static_cast<void>(Frame);
+		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
+		return true;
+	}
+
+	void Unload() override {}
+	bool IsLoaded() const override { return true; }
+	uint32 GetExportLookupCount() const override { return 0; }
+	const FAvidScriptVmLoadMetrics& GetLoadMetrics() const override
+	{
+		return LoadMetrics;
+	}
+
+	static bool InvokePrepared(
+		void* Owner,
+		void* Target,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		static_cast<void>(Owner);
+		static_cast<void>(Target);
+		static_cast<void>(Frame);
+		OutError.Reset();
+		if (OutResult != nullptr)
+		{
+			*OutResult = FAvidScriptVmCallResult();
+		}
+		return true;
+	}
+
+	EPrepareMode PrepareMode = EPrepareMode::Supported;
+	uint32 PreparedParameterCellCount = 0;
+	FAvidScriptVmExportHandle Handle{1, 1, 1};
+
+private:
+	FAvidScriptVmBackendInfo BackendInfo;
+	FAvidScriptVmLoadMetrics LoadMetrics;
 };
 
 const uint8 GSessionCompatibleModule[] = {
@@ -428,6 +547,87 @@ void TestLiveManifestPreserved(
 	Test.TestTrue(TEXT("Live binding package identity is preserved"), After.LiveManifest.BindingPackage.Get() == Before.LiveManifest.BindingPackage.Get());
 	Test.TestTrue(TEXT("Live debug-map identity is preserved"), After.LiveManifest.DebugMap.Get() == Before.LiveManifest.DebugMap.Get());
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimePreparedExportCacheContractTest,
+	"AvidScript.Runtime.Session.PreparedExportCacheContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimePreparedExportCacheContractTest::RunTest(
+	const FString& Parameters)
+{
+	FPreparedExportCacheTestBackend Backend;
+	FAvidScriptCachedVmExport CachedExport;
+	FAvidScriptVmError Error;
+
+	Backend.PrepareMode =
+		FPreparedExportCacheTestBackend::EPrepareMode::Unsupported;
+	TestTrue(
+		TEXT("unsupported prepared calls fall back to the generic handle"),
+		AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+			Backend,
+			Backend.Handle,
+			0,
+			CachedExport,
+			Error));
+	TestTrue(
+		TEXT("unsupported fallback retains the resolved handle"),
+		CachedExport.Handle.IsValid());
+	TestFalse(
+		TEXT("unsupported fallback does not publish a prepared call"),
+		CachedExport.PreparedCall.IsValid());
+	TestTrue(
+		TEXT("unsupported fallback consumes its diagnostic"),
+		Error.Category.IsEmpty());
+
+	Backend.PrepareMode =
+		FPreparedExportCacheTestBackend::EPrepareMode::Failed;
+	TestFalse(
+		TEXT("non-unsupported prepare failures fail closed"),
+		AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+			Backend,
+			Backend.Handle,
+			0,
+			CachedExport,
+			Error));
+	TestEqual(
+		TEXT("prepare failure category is propagated"),
+		Error.Category,
+		FString(TEXT("stale_export")));
+	TestFalse(
+		TEXT("failed preparation does not retain a generic handle"),
+		CachedExport.Handle.IsValid());
+
+	Backend.PrepareMode =
+		FPreparedExportCacheTestBackend::EPrepareMode::Supported;
+	Backend.PreparedParameterCellCount = 1;
+	TestFalse(
+		TEXT("prepared signature mismatch fails at cache time"),
+		AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+			Backend,
+			Backend.Handle,
+			0,
+			CachedExport,
+			Error));
+	TestEqual(
+		TEXT("prepared signature mismatch uses invalid_export"),
+		Error.Category,
+		FString(TEXT("invalid_export")));
+
+	Backend.PreparedParameterCellCount = 0;
+	TestTrue(
+		TEXT("matching prepared signature caches successfully"),
+		AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+			Backend,
+			Backend.Handle,
+			0,
+			CachedExport,
+			Error));
+	TestTrue(
+		TEXT("matching prepared signature publishes a valid call"),
+		CachedExport.PreparedCall.IsValid());
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -1942,9 +2142,62 @@ bool FAvidScriptRuntimeGeneratedHostEffectBoundaryTest::RunTest(
 		FusedInstrumentation.GeneratedFusedCallSitePrepareCount,
 		uint64(3));
 
+	TStrongObjectPtr<AAvidScriptActorBindingTestActor> InvalidatedReceiver(
+		NewObject<AAvidScriptActorBindingTestActor>());
+	const FAvidScriptObjectHandle InvalidatedReceiverHandle =
+		ObjectRegistry.RegisterObject(
+			InvalidatedReceiver.Get(),
+			HandleResult,
+			false);
+	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Receiver invalidation fixture enters the fused path"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(InvalidatedReceiverHandle.Slot),
+			static_cast<int32>(InvalidatedReceiverHandle.Generation),
+			4,
+			5,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
+	InvalidatedReceiver->MarkAsGarbage();
+	TestEqual(
+		TEXT("An invalid receiver fails closed in the same callback"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(InvalidatedReceiverHandle.Slot),
+			static_cast<int32>(InvalidatedReceiverHandle.Generation),
+			6,
+			7,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Rejected);
+	FusedRuntime.EndTypedCallbackEpochForTesting();
+
 	const FAvidScriptPreparedGeneratedBinding PreparedBinding =
 		PreparedBindings[0];
+	FusedRuntime.BeginTypedCallbackEpochForTesting();
+	TestEqual(
+		TEXT("Revocation fixture enters the fused path"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			8,
+			9,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Succeeded);
 	GeneratedRegistry.UnregisterPackage(FunctionPackageHash);
+	TestEqual(
+		TEXT("A same-callback lease revoke fails closed before the thunk"),
+		FusedTarget.SelfI32Pair(
+			FusedTarget.Context,
+			static_cast<int32>(StableReceiverHandle.Slot),
+			static_cast<int32>(StableReceiverHandle.Generation),
+			10,
+			11,
+			FusedValue),
+		EAvidScriptVmTypedHostStatus::Rejected);
+	FusedRuntime.EndTypedCallbackEpochForTesting();
 	TestFalse(
 		TEXT("Revocation between package load and backend load aborts publication"),
 		FunctionPackage->BuildTypedHostImports(

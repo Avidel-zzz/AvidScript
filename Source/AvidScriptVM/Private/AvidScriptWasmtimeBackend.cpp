@@ -555,6 +555,15 @@ public:
 				TEXT("Wasmtime could not inspect or retain the export function."));
 			return false;
 		}
+		if (CellCount > FAvidScriptVmCallFrame::MaxCells)
+		{
+			avidscript_wasmtime_function_delete(Function);
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_export"),
+				TEXT("Wasmtime export parameter cells exceed the fixed VM call-frame capacity."));
+			return false;
+		}
 		if (ResultCellCount > FAvidScriptVmCallResult::MaxCells)
 		{
 			avidscript_wasmtime_function_delete(Function);
@@ -627,6 +636,15 @@ public:
 				OutError,
 				TEXT("stale_export"),
 				TEXT("The resolved Wasmtime export entry is no longer active."));
+			return false;
+		}
+		if (Entry->CellCount > FAvidScriptVmCallFrame::MaxCells
+			|| Entry->ResultCellCount > FAvidScriptVmCallResult::MaxCells)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_export"),
+				TEXT("The resolved Wasmtime export exceeds the fixed VM call capacity."));
 			return false;
 		}
 
@@ -1390,11 +1408,10 @@ private:
 		size_t ResultCellCount = 0;
 		AvidScriptWasmtimeFailure* CallFailure = nullptr;
 		const AvidScriptWasmtimeCallStatus CallStatus =
-			avidscript_wasmtime_function_call_event_unchecked(
+			avidscript_wasmtime_function_call_event_prepared(
 				Store,
 				Entry.Function,
 				Frame.Cells,
-				Frame.CellCount,
 				Entry.ResultCellCount == 0 ? nullptr : ResultCells,
 				FAvidScriptVmCallResult::MaxCells,
 				&ResultCellCount,

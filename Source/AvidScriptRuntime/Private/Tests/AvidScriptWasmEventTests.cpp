@@ -316,7 +316,38 @@ bool FAvidScriptWasmHotLifecycleResultContractTest::RunTest(
 
 	const TArray<uint8> TypedBytes =
 		AvidScriptGameplayEventFixture::Build(false);
+	UWorld* TypedWorld = nullptr;
+	if (!CreateTypedEventWorld(TypedWorld))
+	{
+		AddError(TEXT("Failed to create typed hot event world."));
+		return false;
+	}
+	AActor* TypedActor = SpawnTypedEventActor(TypedWorld);
+	if (TypedActor == nullptr)
+	{
+		AddError(TEXT("Failed to spawn typed hot event actor."));
+		DestroyTypedEventWorld(TypedWorld);
+		return false;
+	}
+	FAvidScriptObjectRegistry TypedRegistry;
+	FAvidScriptObjectHandleResult TypedRegisterResult;
+	const FAvidScriptObjectHandle TypedActorHandle =
+		TypedRegistry.RegisterObject(
+			TypedActor,
+			TypedRegisterResult);
+	if (!TestTrue(
+		TEXT("typed hot event actor registers"),
+		TypedRegisterResult.bSucceeded))
+	{
+		DestroyTypedEventWorld(TypedWorld);
+		return false;
+	}
 	FAvidScriptWasmRuntimeInstance TypedRuntime;
+	FAvidScriptWasmHostContext TypedHostContext;
+	TypedHostContext.ObjectRegistry = &TypedRegistry;
+	TypedHostContext.ActorWritePolicy =
+		EAvidScriptActorWritePolicy::AllowWrites;
+	TypedRuntime.SetHostContext(TypedHostContext);
 	FAvidScriptWasmSmokeResult TypedResult;
 	TestTrue(
 		TEXT("typed hot fixture loads"),
@@ -332,6 +363,7 @@ bool FAvidScriptWasmHotLifecycleResultContractTest::RunTest(
 	InputEvent.Type = EAvidScriptGameplayEventType::Input;
 	InputEvent.PrimaryId = 3;
 	InputEvent.SecondaryId = 1;
+	InputEvent.ObjectHandle = TypedActorHandle;
 	InputEvent.VectorValue = FVector3f(0.5f, 0.0f, 0.0f);
 	TypedResult.ErrorMessage = TEXT("typed_sentinel");
 	TestTrue(
@@ -345,6 +377,8 @@ bool FAvidScriptWasmHotLifecycleResultContractTest::RunTest(
 		TEXT("typed gameplay hot path records event"),
 		TypedRuntime.GetHotSnapshot().EventCallbackCount,
 		1);
+	TypedRuntime.Unload(TypedResult);
+	DestroyTypedEventWorld(TypedWorld);
 
 	const TArray<uint8> TrapBytes = BuildEventFixture(true);
 	FAvidScriptWasmRuntimeInstance TrapRuntime;

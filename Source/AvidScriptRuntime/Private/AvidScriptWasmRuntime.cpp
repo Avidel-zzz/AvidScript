@@ -1,4 +1,5 @@
 #include "AvidScriptWasmRuntime.h"
+#include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptSceneComponentBinding.h"
 #include "DataBridge/AvidScriptCommandBuffer.h"
@@ -20,6 +21,51 @@ struct FAvidScriptPreparedGeneratedHostCall
 	EAvidScriptPreparedHostEffectMode EffectMode =
 		EAvidScriptPreparedHostEffectMode::Rejected;
 };
+
+bool AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+	IAvidScriptVmBackend& Backend,
+	const FAvidScriptVmExportHandle& Handle,
+	const uint32 ExpectedParameterCellCount,
+	FAvidScriptCachedVmExport& OutExport,
+	FAvidScriptVmError& OutError)
+{
+	OutExport = FAvidScriptCachedVmExport();
+	OutError.Reset();
+	FAvidScriptVmPreparedExportCall PreparedCall;
+	if (!Backend.PrepareExportCall(
+			Handle,
+			PreparedCall,
+			OutError))
+	{
+		if (OutError.Category != TEXT("prepared_export_unsupported"))
+		{
+			return false;
+		}
+		OutExport.Handle = Handle;
+		OutError.Reset();
+		return true;
+	}
+	if (!PreparedCall.IsValid())
+	{
+		OutError.Reset();
+		OutError.Category = TEXT("prepared_export_invalid");
+		OutError.Details =
+			TEXT("The VM backend returned an invalid prepared export call.");
+		return false;
+	}
+	if (PreparedCall.ParameterCellCount != ExpectedParameterCellCount)
+	{
+		OutError.Reset();
+		OutError.Category = TEXT("invalid_export");
+		OutError.Details =
+			TEXT("The prepared VM export signature does not match the Runtime lifecycle ABI.");
+		return false;
+	}
+
+	OutExport.Handle = Handle;
+	OutExport.PreparedCall = PreparedCall;
+	return true;
+}
 
 namespace
 {
@@ -231,20 +277,6 @@ void SetFailureFromVmError(
 	}
 }
 
-void CacheResolvedVmExport(
-	IAvidScriptVmBackend& Backend,
-	const FAvidScriptVmExportHandle& Handle,
-	FAvidScriptCachedVmExport& OutExport)
-{
-	OutExport.Handle = Handle;
-	OutExport.PreparedCall = FAvidScriptVmPreparedExportCall();
-	FAvidScriptVmError PrepareError;
-	Backend.PrepareExportCall(
-		Handle,
-		OutExport.PreparedCall,
-		PrepareError);
-}
-
 bool InvokeVmExport(
 	IAvidScriptVmBackend* Backend,
 	FAvidScriptCachedVmExport& CachedExport,
@@ -275,7 +307,15 @@ bool InvokeVmExport(
 		{
 			return false;
 		}
-		CacheResolvedVmExport(*Backend, Handle, CachedExport);
+		if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+				*Backend,
+				Handle,
+				ArgCount,
+				CachedExport,
+				OutError))
+		{
+			return false;
+		}
 	}
 
 	FAvidScriptVmCallFrame Frame;
@@ -701,33 +741,52 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 			SetFailureFromVmError(OutResult, ModuleId, RequiredExport, Error, DebugMap.Get());
 			return false;
 		}
+		FAvidScriptCachedVmExport* CachedExport = nullptr;
+		uint32 ExpectedParameterCellCount = 0;
 		if (RequiredExport == AvidScriptBeginPlayExportName)
 		{
-			CacheResolvedVmExport(*VmBackend, Handle, BeginPlayExport);
+			CachedExport = &BeginPlayExport;
 		}
 		else if (RequiredExport == AvidScriptTickExportName)
 		{
-			CacheResolvedVmExport(*VmBackend, Handle, TickExport);
+			CachedExport = &TickExport;
+			ExpectedParameterCellCount = 1;
 		}
 		else if (RequiredExport == AvidScriptEndPlayExportName)
 		{
-			CacheResolvedVmExport(*VmBackend, Handle, EndPlayExport);
+			CachedExport = &EndPlayExport;
 		}
 		else if (RequiredExport == AvidScriptTimerExportName)
 		{
-			CacheResolvedVmExport(*VmBackend, Handle, TimerExport);
+			CachedExport = &TimerExport;
+			ExpectedParameterCellCount = 2;
 		}
 		else if (RequiredExport == AvidScriptEventExportName)
 		{
-			CacheResolvedVmExport(*VmBackend, Handle, EventExport);
+			CachedExport = &EventExport;
+			ExpectedParameterCellCount = 2;
 		}
 		else if (RequiredExport == AvidScriptGameplayEventExportName)
 		{
-			CacheResolvedVmExport(
+			CachedExport = &GameplayEventExport;
+			ExpectedParameterCellCount = 8;
+			bGameplayEventExportLookupAttempted = true;
+		}
+		if (CachedExport != nullptr
+			&& !AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
 				*VmBackend,
 				Handle,
-				GameplayEventExport);
-			bGameplayEventExportLookupAttempted = true;
+				ExpectedParameterCellCount,
+				*CachedExport,
+				Error))
+		{
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				RequiredExport,
+				Error,
+				DebugMap.Get());
+			return false;
 		}
 	}
 	return true;
@@ -1227,10 +1286,27 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 		}
 		if (Handle.IsValid())
 		{
-			CacheResolvedVmExport(
-				*VmBackend,
-				Handle,
-				GameplayEventExport);
+			if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+					*VmBackend,
+					Handle,
+					8,
+					GameplayEventExport,
+					ResolveError))
+			{
+				if (bHotFailureOnly)
+				{
+					CaptureSnapshot(OutResult);
+				}
+				SetFailureFromVmError(
+					OutResult,
+					ModuleId,
+					ExportName,
+					ResolveError,
+					DebugMap.Get());
+				FAvidScriptLifecycleTransitionResult LifecycleResult;
+				LifecycleState.MarkFaulted(LifecycleResult);
+				return false;
+			}
 		}
 	}
 
@@ -1380,7 +1456,27 @@ bool FAvidScriptWasmRuntimeInstance::EndPlay(FAvidScriptWasmSmokeResult& OutResu
 			CachedEndPlayResult = OutResult;
 			return true;
 		}
-		CacheResolvedVmExport(*VmBackend, Handle, EndPlayExport);
+		if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+				*VmBackend,
+				Handle,
+				0,
+				EndPlayExport,
+				EndPlayResolveError))
+		{
+			SetFailureFromVmError(
+				OutResult,
+				ModuleId,
+				AvidScriptEndPlayExportName,
+				EndPlayResolveError,
+				DebugMap.Get());
+			Metrics.EndPlayCallMs = 0.0;
+			OutResult.Metrics = Metrics;
+			CopyObservableStateToResult(OutResult);
+			LifecycleState.MarkFaulted(LifecycleResult);
+			bEndPlaySucceeded = false;
+			CachedEndPlayResult = OutResult;
+			return false;
+		}
 	}
 
 	const double EndPlayStartSeconds = FPlatformTime::Seconds();
@@ -3160,6 +3256,13 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 	FAvidScriptPreparedGeneratedHostCall& Call,
 	UObject& Receiver)
 {
+	if (Call.Binding.Lease.GetEntry() != Call.Binding.Entry)
+	{
+		Call.PreparedCallbackEpoch = 0;
+		Call.PreparedReloadEpoch = 0;
+		Call.EffectMode = EAvidScriptPreparedHostEffectMode::Rejected;
+		return false;
+	}
 	const FAvidScriptFusedCallbackFrame& Frame =
 		FusedCallbackFrameStack.Last();
 	if (Call.PreparedCallbackEpoch != Frame.CallbackEpoch
