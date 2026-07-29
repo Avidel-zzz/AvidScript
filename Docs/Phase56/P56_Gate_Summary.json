@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "phase_id": 56,
+  "run_id": "phase56-ea62340-20260729",
+  "status": "attested_with_transferred_performance_debt",
+  "verified": {
+    "commit": "ea623407fb003995c332b7399329af31aaee58ab",
+    "tree": "2bb1132bcb2b031a342571c143af9567cac50abe",
+    "state_sha256": "caa7969e2ac489eeb7111b667ad0cee478ce15e990df3d14feb043c0dffb4b8d"
+  },
+  "gate_report_sha256": "cdf55c82f82800b7ecd2a4b4ae2962025002e5162d8d2da44fd7f2382a20d578",
+  "checks": {
+    "architecture_clean": true,
+    "phase56_evidence_contracts": true,
+    "gameplay_contracts": true,
+    "controlled_runtime_contracts": true,
+    "warm_core_contracts": true,
+    "ue58_editor_build": true,
+    "automation_317_of_317": true,
+    "formal_evidence_valid": true
+  },
+  "performance": {
+    "gate_total": 18,
+    "gate_passed": 12,
+    "gate_failed": 6,
+    "overall_leadership_claim": false,
+    "small_gameplay_ratio_to_best_puerts": 0.46941458441395845,
+    "dense_gameplay_ratio_to_best_puerts": 0.5128887643597646,
+    "callback_ratio_to_puerts": 0.39090786395537164
+  },
+  "transferred_debt": [
+    {
+      "id": "P56-D001",
+      "target_phase": 57,
+      "scope": "Wasmtime/V8 controlled-runtime P95 领导性与 kernel 胜率"
+    },
+    {
+      "id": "P56-D002",
+      "target_phase": 57,
+      "scope": "Semantic reflection UE 交互性能"
+    },
+    {
+      "id": "P56-D003",
+      "target_phase": 57,
+      "scope": "Generated S1 scalar/property 绝对延迟"
+    },
+    {
+      "id": "P56-D004",
+      "target_phase": 57,
+      "scope": "Prepared export 独立收益"
+    }
+  ],
+  "invocations": {
+    "ubt": 4,
+    "automation": 3,
+    "full_gate": 2,
+    "budget_exception_recorded": true
+  },
+  "attested_at_utc": "2026-07-29T18:13:02.6479610+00:00"
+}

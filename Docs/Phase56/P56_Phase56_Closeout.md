@@ -1,6 +1,6 @@
 # Phase 56 融合调用帧收尾报告
 
-> 状态：正式矩阵完成，等待 Gate attestation
+> 状态：Gate 已证明，等待生成不可变 close evidence
 
 ## 阶段目标
 
@@ -37,3 +37,17 @@ Important 债务转交 Phase 57，因此 Phase 56 不宣称全面性能领先。
 
 - `Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md`
 - `Docs/Phase56/P56.5_Fused_Call_Frame_Benchmark_Evidence.json`
+
+## Gate 证明
+
+- Run ID：`phase56-ea62340-20260729`
+- Verified commit：`ea623407fb003995c332b7399329af31aaee58ab`
+- Verified tree：`2bb1132bcb2b031a342571c143af9567cac50abe`
+- 架构检查：精确 commit 的 clean worktree 通过
+- UE5.8 Editor build：通过
+- Automation：`317/317` 通过
+- 正式性能证据：有效，12/18 门禁通过，四项 Important 债务已转交 Phase 57
+
+机器可读的 attestation 摘要见
+`Docs/Phase56/P56_Gate_Summary.json`。阶段关闭本身由仓库外不可变
+`Phase56_Close.json` 记录，避免在 attestation commit 之后继续改写源码树。
