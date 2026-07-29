@@ -37,24 +37,77 @@
     },
     {
       "id": "P56.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "commit=3383e2f; architecture=passed-clean; warm-core-contract=passed; ue-build=deferred-to-P56.5; automation=deferred-to-P56.5",
+      "completed_at_utc": "2026-07-29T13:40:24.0107380+00:00"
     },
     {
       "id": "P56.4",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "commit=bb7934381e52f23b639598e237b07c71153a7824; tree=956ecaaabd382f5dcf54af61fc96d27cfd38e258; architecture=f704cb70f2de7116be0813f465304c0d651f94a35e48824da1f0bb22ef5f438e; contracts=warm_core,controlled_runtime,phase54_56_gameplay; ue_build=deferred_to_P56.5; automation=deferred_to_P56.5; benchmark=deferred_to_P56.5",
+      "completed_at_utc": "2026-07-29T14:24:23.2248680+00:00"
     },
     {
       "id": "P56.5",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "candidate=d82ed7aa997758fa7f6983c6a6996999a467d283 tree=227d45398c530269198e0833a361ba7a030c40f8; UE5.8 build=passed; Automation=317/317 succeeded; semantic/generated/data guests=loaded; diagnostic+formal micro/gameplay+physical+12-kernel=valid; gates=12/18 passed; four Important performance debts transferred to Phase57; Chinese report and compact evidence written",
+      "completed_at_utc": "2026-07-29T18:08:14.9396995+00:00"
     }
   ],
-  "debt": [],
+  "debt": [
+    {
+      "id": "P56-D001",
+      "severity": "Important",
+      "found_batch": "P56.5",
+      "scope": "Wasmtime/V8 controlled-runtime P95 领导性与 kernel 胜率未达目标",
+      "evidence": "正式矩阵 P95 几何均值比值 0.9958006 高于 0.95，P95 kernel 胜率 0.50 低于 0.60；证据见 P56.5 benchmark evidence",
+      "deferral_reason": "运行时功能与语义验证通过，缺口需要独立 backend/codegen 归因，无法在不重跑完整正式矩阵的情况下阶段内安全修正",
+      "remediation": "Phase 57 针对 hashing、branch、SIMD 和 tail jitter 做 Wasmtime 配置、IR 与调用约定分析，并用同一 12-kernel 加真实 gameplay 复验",
+      "status": "Transferred",
+      "resolution_evidence": "Phase56 正式 controlled-runtime 证据有效，未达项已在中文报告中冻结",
+      "target_phase": 57,
+      "transfer_reason": "Phase57 作为 backend 与 P95 领导性优化阶段继续处理"
+    },
+    {
+      "id": "P56-D002",
+      "severity": "Important",
+      "found_batch": "P56.5",
+      "scope": "Semantic reflection UE 交互路径显著落后 Puerts reflection",
+      "evidence": "正式 micro 比值 semantic/Puerts reflection 为 5.8190263，目标不高于 0.80；完整 gameplay semantic P50 仍为 456.91 至 500.92 ns/op",
+      "deferral_reason": "普通 UFUNCTION 覆盖与正确性已完成，优化需要缓存化 invocation plan 与通用封送设计，不能退化为手写 API",
+      "remediation": "Phase 57 为 UFunction 参数布局、对象解析、ProcessEvent frame 和返回封送建立通用缓存并保持 reflection fallback",
+      "status": "Transferred",
+      "resolution_evidence": "Phase56 正式 semantic 与 Puerts reflection 配对证据有效，缺口已冻结",
+      "target_phase": 57,
+      "transfer_reason": "Phase57 通用 UE reflection invocation plan 优化输入"
+    },
+    {
+      "id": "P56-D003",
+      "severity": "Important",
+      "found_batch": "P56.5",
+      "scope": "Generated S1 scalar 与 property 绝对延迟略高于 Phase56 目标",
+      "evidence": "正式 P50 scalar=27.0785 ns 高于 25 ns，property=54.3086 ns 高于 50 ns；相对 Puerts static 的 scalar 比值 0.8455 已通过",
+      "deferral_reason": "相对竞品和 gameplay 门禁已通过，剩余约 8% 需要在调用帧与结果传播层做定向 profiling",
+      "remediation": "Phase57 分解 host frame、typed result、store call 与 property read/write 成本，保持 generated ABI 通用性",
+      "status": "Transferred",
+      "resolution_evidence": "Phase56 scalar/property 正式绝对值与竞品比值证据有效，缺口已冻结",
+      "target_phase": 57,
+      "transfer_reason": "Phase57 继续压缩 Generated S1 固定成本"
+    },
+    {
+      "id": "P56-D004",
+      "severity": "Important",
+      "found_batch": "P56.5",
+      "scope": "Prepared export 相对 generic export 的独立收益未达 5% 目标",
+      "evidence": "物理分段 prepared/generic P50 比值为 0.9952381，目标不高于 0.95；typed empty net 4.0805 ns 与重建误差 0.0272 均有效",
+      "deferral_reason": "证据表明 export lookup 不是当前主要瓶颈，需要结合 call plumbing 决定继续优化还是简化抽象",
+      "remediation": "Phase57 对 prepared entry、frame 构造、store 上下文和间接调用做消融；若收益长期低于噪声则简化热路径",
+      "status": "Transferred",
+      "resolution_evidence": "Phase56 physical ladder 候选绑定且重建误差通过，prepared 收益缺口已冻结",
+      "target_phase": 57,
+      "transfer_reason": "Phase57 继续做调用层消融并决定优化或简化"
+    }
+  ],
   "review": {
     "completed": false,
     "evidence": "",
@@ -106,7 +159,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 56 -BatchId P56.3 -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-07-29T13:15:49.4608467+00:00"
+  "next_action": "freeze -Phase 56 -ReviewEvidence <text>",
+  "revision": 15,
+  "updated_at_utc": "2026-07-29T18:08:14.9418930+00:00"
 }

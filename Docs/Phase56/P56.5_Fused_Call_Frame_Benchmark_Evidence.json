@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "phase_id": 56,
+  "evidence_class": "formal",
+  "status": "valid_with_performance_debt",
+  "measured_candidate": {
+    "commit": "d82ed7aa997758fa7f6983c6a6996999a467d283",
+    "tree": "227d45398c530269198e0833a361ba7a030c40f8",
+    "dirty": false
+  },
+  "evaluator_revision": {
+    "commit": "5e1455799a90845f278767538ef5fc1071ba7365",
+    "runtime_changed_after_measurement": false,
+    "reason": "只修正 fused_revalidate_per_callback 的样本筛选，排除未走 fused typed shape 的 generated 样本"
+  },
+  "environment": {
+    "engine": "Unreal Engine 5.8 source build",
+    "platform": "Win64",
+    "configuration": "Development Editor",
+    "guest": "C# to WebAssembly",
+    "primary_vm": "Wasmtime 45 with Cranelift",
+    "competitor": "Puerts V8"
+  },
+  "protocol": {
+    "process_runs": 5,
+    "warmup_samples_per_process": 5,
+    "timed_samples_per_process": 30,
+    "percentile": "nearest_rank",
+    "primary_replicate": "process_summary",
+    "candidate_bound": true
+  },
+  "provenance": {
+    "gameplay_profile_sha256": "1dffffcc9854960f038fe820a35f3e3648fb3867b5874d8a9b73b02c43dd73f2",
+    "controlled_suite_sha256": "366b456b13380efce744760217ebb401030256d19299554caf2e70e14d6ba96a",
+    "physical_cost_sha256": "dabab633f9a42b6a563d71487cb67fef679b0155556083b5e8cec75bfe489d9f",
+    "micro_process_sha256": [
+      "fa8db8836cb376ac48eb01ac26bfb5b510c2bfec85cce0f837e0ab6142c8031e",
+      "26e63a1317799fb16c3fab8ed7efc5f1647532f4cb1fd7fbdd5883b2d0fd283b",
+      "effca9996b2bfbf34ba6851eb15145471546f92af3693081be2116f33081fc1c",
+      "cb121ac4b53babecdab9418ed876c891dfca8e5c0eec9b036d8a77a664db3e5",
+      "d26e92f3ca724ed4d7ead197545cb2d0de6d4f795f5abae9151147cb0836916b"
+    ],
+    "gameplay_process_sha256": [
+      "04998f671be141489b4c9df1f678753f8fc637bba2f0cf76044eff112e951896",
+      "73ccde8dce49119c8b9f736231dcb46a02324bac02a943959a5e1f610cbdfa7b",
+      "547dbff556e290bb49824040505febc4d6aa69446dae2f1c21d15870e18c92d8",
+      "6028adeb13f4a45afeaee22523a7d74ced6fc4e2ac52340eb355133ab7450b3d",
+      "e463bf1bb48c478696bc97b6a722937d0c378e1776afc097d207f80bb123c1c2"
+    ]
+  },
+  "headline_metrics": {
+    "small_generated_s1_ns_per_operation": {
+      "p50": 65.71639623397436,
+      "p95": 69.0742688301282,
+      "ratio_to_best_puerts": 0.46941458441395845
+    },
+    "dense_data_oriented_ns_per_operation": {
+      "p50": 121.88165838068181,
+      "p95": 126.1385830965909,
+      "ratio_to_best_puerts": 0.5128887643597646
+    },
+    "generated_s1_scalar_ns": 27.078515625,
+    "generated_s1_property_ns": 54.30859375,
+    "lifecycle_callback_ns": 67.88359375,
+    "typed_empty_net_ns": 4.0805,
+    "fused_fast_hit_ratio": 0.99999609375,
+    "fused_revalidate_per_callback": 1.0,
+    "prepared_export_over_generic_ratio": 0.9952381466758842,
+    "wasmtime_over_v8_p50_geomean_ratio": 0.976691,
+    "wasmtime_over_v8_p95_geomean_ratio": 0.9958005730861466,
+    "controlled_kernel_p95_win_rate": 0.5,
+    "semantic_over_puerts_reflection_ratio": 5.819026301063235
+  },
+  "gate_summary": {
+    "total": 18,
+    "passed": 12,
+    "failed": 6,
+    "validity_passed": true,
+    "overall_performance_passed": false
+  },
+  "passed_gates": [
+    "s1_vs_puerts_static",
+    "callback_ns",
+    "callback_vs_puerts",
+    "vector_vs_phase54_baseline",
+    "physical_reconstruction_error_ratio",
+    "typed_empty_net_ns",
+    "fused_fast_hit_ratio",
+    "fused_revalidate_per_callback",
+    "direct_effect_prepare_count",
+    "journal_slow_path_count",
+    "small_vs_best_puerts",
+    "dense_vs_best_puerts"
+  ],
+  "failed_gates": [
+    {
+      "id": "wasmtime_v8_geo_ratio",
+      "value": 0.9958005730861466,
+      "maximum": 0.95,
+      "target_phase": 57
+    },
+    {
+      "id": "kernel_win_rate",
+      "value": 0.5,
+      "minimum": 0.6,
+      "target_phase": 57
+    },
+    {
+      "id": "semantic_vs_puerts_reflection",
+      "value": 5.819026301063235,
+      "maximum": 0.8,
+      "target_phase": 57
+    },
+    {
+      "id": "s1_scalar_ns",
+      "value": 27.078515625,
+      "maximum": 25.0,
+      "target_phase": 57
+    },
+    {
+      "id": "s1_property_ns",
+      "value": 54.30859375,
+      "maximum": 50.0,
+      "target_phase": 57
+    },
+    {
+      "id": "prepared_export_ratio",
+      "value": 0.9952381466758842,
+      "maximum": 0.95,
+      "target_phase": 57
+    }
+  ],
+  "verification": {
+    "ue_build": "passed",
+    "generated_binding_incremental_build": "passed",
+    "automation": {
+      "found": 317,
+      "completed": 317,
+      "succeeded": 317,
+      "failed": 0,
+      "not_run": 0,
+      "queue_empty": true,
+      "test_exit": true,
+      "process_exit_code": 0
+    },
+    "architecture": "passed_clean_candidate_and_pending_exact_gate_refresh",
+    "static_contracts": "passed"
+  }
+}

@@ -89,6 +89,11 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-29 P56.5 发布型架构检查运行时机错误：在集成分支仍有未提交的 Runtime/Bindings 修改时调用 `CheckAvidScriptArchitecture.ps1`，检查器按设计因 evidence commit/tree 与输入字节不一致而拒绝，未产生架构结论。Prevention：该检查器只在候选提交完成且 `git status` 干净后运行；dirty 实现期使用 `git diff --check`、parser 与合同测试，禁止把发布身份检查当作 working-tree linter。
+- 2026-07-29 P56.5 Windows wildcard 路径禁令复发：检查 Phase 56 diagnostic profile 时把 `Profiles/Phase56*.diagnostic.json` 直接作为 `rg` 路径参数，Win32 在读取前以非法路径拒绝。Prevention：Windows 下 `rg` 的路径参数只允许已确认存在的字面目录或文件；文件名筛选固定使用 `-g 'Phase56*.diagnostic.json'`，提交命令前机械拒绝路径位置中的 `*` 和 `?`。
+- 2026-07-29 P56.5 benchmark harness 根目录再次猜测：已经通过仓库索引得到 `Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source`，后续检索仍额外传入不存在的根级 `Source/AvidScriptPerfHarness`，导致有效结果伴随路径错误退出。Prevention：一次索引确认 owner 后，后续命令逐字复用返回路径；benchmark harness 固定从 `Benchmarks/PuertsComparison/AvidScriptPerfHarness` 起查，禁止再拼接根级 `Source` 候选。
+- 2026-07-29 P56.5 Automation 汇报先于精确结果解析：完整进程以 exit 0 结束并报告 `315 tests performed` 后，先口头汇报为全部成功，随后统计日志才发现 `314 Success / 1 Fail`，失败项为 `HotLifecycleResultContract`。Prevention：Automation 完成后固定按顺序核对 performed、`Result={Success}`、`Result={Fail}`、Queue Empty 和 TestExit 五项，在五项统计完成前只能汇报“进程结束/队列执行完”，禁止把 exit 0 或 performed 数等同于全部通过。
+- 2026-07-29 P56.5 多路径脚本检索再次加入猜测目录：准备 Automation 入口时把不存在的仓库根 `Scripts` 与已确认的 `Build`、`Tools` 一起传给 `rg --files`，导致命令在返回部分命中的同时以路径错误退出。Prevention：未知脚本入口固定从仓库根单独执行 `rg --files` 后按文件名过滤，或先分别确认每个搜索根存在；禁止把推测目录混入多路径命令。
 - 2026-07-28 P54.6 `rg` 模式以连字符开头未加参数终止符：检索 `->Load(` 时 `rg` 把 pattern 当成 flag，在读取前失败。Prevention：任何可能以 `-` 开头的 pattern 固定使用 `rg ... -- '<pattern>' <paths>`；复杂符号模式优先单引号，`--` 必须位于 pattern 前。
 - 2026-07-28 P54.6 Console 测试项目误用 `dotnet test`：五个 `*.Tests.csproj` 实际是自带断言入口的 `OutputType=Exe`，`dotnet test` 以 exit 0 返回却没有执行任何用例；随后又在全新 worktree 无 `obj/project.assets.json` 时先加 `--no-restore`。Prevention：首次运行测试项目前读取 csproj；`Microsoft.NET.Test.Sdk` 项目用 `dotnet test`，console harness 固定用固定 SDK 的 `dotnet run --project ... --configuration Release` 完成必要 restore，只有已探测 assets 存在才用 `--no-restore`；证据必须包含 harness 自报用例数。
 - 2026-07-28 P54.6 Wasmtime license 合同直接哈希工作树字节：Windows `core.autocrlf` 把合法 LF 文本展开为 CRLF，合同错误报告 license drift。Prevention：文本依赖身份统一去 BOM 并规范化 CRLF/CR 为 LF 后再按 UTF-8 哈希；只有 archive、DLL、LIB、WASM 等二进制制品使用原始字节哈希。
@@ -1564,3 +1569,38 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: Phase 55 started while the completed Phase 54 state file was still dirty, so the new phase captured that workflow-owned file as protected user work; the same startup commit then made it clean and rendered the Phase 55 freeze guard permanently unsatisfiable.
 - Prevention: close and commit the previous phase state first, verify that only genuine user-owned changes remain in `git status`, and only then run the next phase `start` command. Phase state files must never enter another phase's protected dirty baseline.
+
+### 2026-07-29: benchmark preflight must prepare identity, directories and every guest lane
+
+- Mistake: early Phase 56 benchmark attempts used an abbreviated commit, referenced an output directory before creating it, and started before all semantic, generated and data-oriented C# artifacts were ready.
+- Prevention: one reviewed preflight resolves the full 40-character commit and tree, creates fresh output roots, generates every required guest artifact, completes any generated-binding build, and only then launches diagnostic or formal sampling.
+
+### 2026-07-29: owner-bound runtime fixtures must use the owner handle
+
+- Mistake: a runtime test invoked a `SelfBound` generated route through a non-owner fixture handle, so production ownership validation correctly rejected the test.
+- Prevention: tests for owner-bound routes use the session owner handle and keep non-owner handles only for explicit rejection coverage.
+
+### 2026-07-29: timing evidence must tolerate sub-tick measurements
+
+- Mistake: a physical timing test assumed every valid clock delta was greater than zero, which is false for extremely short operations at timer resolution.
+- Prevention: timing conversion uses a one-cycle floor where a positive duration is contractually required, and tests cover zero raw delta without changing measured ordering.
+
+### 2026-07-29: PowerShell aggregation records must be PSCustomObject values
+
+- Mistake: physical aggregation fed `OrderedDictionary` records to `Measure-Object`, so property grouping and numeric aggregation observed dictionary entries instead of records.
+- Prevention: emit `PSCustomObject` records at aggregation boundaries and keep a focused successful-path regression test for cardinality and numeric types.
+
+### 2026-07-29: generated binding hits are not automatically fused hits
+
+- Mistake: the Phase 56 evidence checker treated every generated S1 hit as fused, even though vector and object shapes intentionally use the dynamic path.
+- Prevention: derive expected fused calls from the exact typed ABI shape and workload composition; keep vector and object calls in generated totals without adding them to fused counters.
+
+### 2026-07-29: fused ratios must filter to samples that observed fused work
+
+- Mistake: the evaluator divided fused revalidations by callbacks from all generated samples, diluting the ratio with vector and object workloads that cannot enter the fused typed path.
+- Prevention: compute fused ratios only from samples whose fused call counters are present and positive, then assert the expected sample cardinality before evaluating the ratio.
+
+### 2026-07-29: evidence hashes must use bytes from the measured worktree
+
+- Mistake: a profile hash was first taken from another worktree whose line-ending materialization differed from the clean candidate, even though the logical JSON content matched.
+- Prevention: all profile and source hashes come from the exact candidate worktree used for sampling; another checkout may inspect content but must not substitute its materialized bytes in provenance.
