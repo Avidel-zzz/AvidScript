@@ -148,7 +148,7 @@ function New-FullCrossingReconstruction {
         [Math]::Abs($ObservedP50) * 0.10)
     [double]$normalizedBudgetRatio = $absoluteError / $allowedError
 
-    return [ordered]@{
+    return [pscustomobject][ordered]@{
         process_run = $ProcessRun
         target_stage = $TargetStage
         baseline_stage = $BaselineStage

@@ -121,6 +121,12 @@ $typedPairReconstruction = New-FullCrossingReconstruction `
 Assert-True ([double]$typedPairReconstruction.normalized_budget_ratio -eq 2.0 -and
     -not [bool]$typedPairReconstruction.within_budget) (
     'full reconstruction exceeding max(5ns, 10 percent) must fail')
+$maximumReconstructionError = @(
+    $genericReconstruction,
+    $typedPairReconstruction
+) | Measure-Object -Property normalized_budget_ratio -Maximum
+Assert-True ([double]$maximumReconstructionError.Maximum -eq 2.0) (
+    'full reconstruction records must support property aggregation')
 
 $passingGates = [ordered]@{
     first = [pscustomobject]@{ status = 'pass'; pass = $true }
