@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-31 P57.0 static contract schema assumption: the first frozen-threshold assertion addressed the controlled-runtime profile through a guessed `gates` property, while the tracked schema stores those values under `pc_leadership_gate`; the low-cost contract failed before any product build. Prevention: before adding JSON field assertions, read the tracked producer/profile and use its literal object path; do not infer a shared envelope from a different benchmark profile.
 - 2026-07-29 P56.5 发布型架构检查运行时机错误：在集成分支仍有未提交的 Runtime/Bindings 修改时调用 `CheckAvidScriptArchitecture.ps1`，检查器按设计因 evidence commit/tree 与输入字节不一致而拒绝，未产生架构结论。Prevention：该检查器只在候选提交完成且 `git status` 干净后运行；dirty 实现期使用 `git diff --check`、parser 与合同测试，禁止把发布身份检查当作 working-tree linter。
 - 2026-07-29 P56.5 Windows wildcard 路径禁令复发：检查 Phase 56 diagnostic profile 时把 `Profiles/Phase56*.diagnostic.json` 直接作为 `rg` 路径参数，Win32 在读取前以非法路径拒绝。Prevention：Windows 下 `rg` 的路径参数只允许已确认存在的字面目录或文件；文件名筛选固定使用 `-g 'Phase56*.diagnostic.json'`，提交命令前机械拒绝路径位置中的 `*` 和 `?`。
 - 2026-07-29 P56.5 benchmark harness 根目录再次猜测：已经通过仓库索引得到 `Benchmarks/PuertsComparison/AvidScriptPerfHarness/Source`，后续检索仍额外传入不存在的根级 `Source/AvidScriptPerfHarness`，导致有效结果伴随路径错误退出。Prevention：一次索引确认 owner 后，后续命令逐字复用返回路径；benchmark harness 固定从 `Benchmarks/PuertsComparison/AvidScriptPerfHarness` 起查，禁止再拼接根级 `Source` 候选。

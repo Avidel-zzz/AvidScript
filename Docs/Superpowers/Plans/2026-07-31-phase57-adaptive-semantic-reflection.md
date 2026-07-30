@@ -79,17 +79,15 @@
 Record the exact six Phase 56 values and thresholds, the current raw evidence hashes, the
 adaptive lane identity, and the forbidden benchmark mutations from the approved design.
 
-- [ ] **Step 2: Add static contract assertions**
+- [ ] **Step 2: Add static contract assertions for the frozen Phase 56 gates**
 
 Add assertions equivalent to:
 
 ```powershell
 Assert-True ($Evaluator.Contains("'semantic_vs_puerts_reflection'")) `
     'the semantic gate id must remain stable'
-Assert-True ($Evaluator.Contains('[double]$MaxSemanticOverPuertsReflection = 0.80')) `
+Assert-True ($FormalProfile.Contains('"semantic_vs_puerts_reflection": { "maximum": 0.80 }')) `
     'the semantic/Puerts threshold must remain 0.80'
-Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::AdaptiveSemantic')) `
-    'the formal semantic comparator must use the explicit adaptive policy'
 Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) `
     'strict ProcessEvent must remain available as a diagnostic path'
 ```
@@ -103,8 +101,8 @@ pwsh -NoProfile -File Benchmarks/PuertsComparison/AvidScriptPerfHarness/Tests/Te
 pwsh -NoProfile -File Benchmarks/PuertsComparison/Scripts/Test-PuertsBenchmarkArchitecture.ps1
 ```
 
-Expected before implementation: the adaptive-policy assertions fail because the enum and lane
-do not exist. This is a low-cost contract result, not a reason to build UE.
+Expected: all existing contracts and frozen-threshold assertions pass. Adaptive lane assertions
+are added together with the Task 5 implementation; no red test is committed.
 
 - [ ] **Step 4: Start the tracked phase**
 
@@ -485,6 +483,15 @@ Add:
 
 Keep the old `avidscript_wasmtime_semantic` / `semantic_process_event` identity available for
 strict diagnostics.
+
+Add the delayed static assertions in the same change so they pass on first commit:
+
+```powershell
+Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::AdaptiveSemantic')) `
+    'the formal adaptive comparator must use the explicit adaptive policy'
+Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) `
+    'strict ProcessEvent must remain available as a diagnostic path'
+```
 
 - [ ] **Step 2: Publish actual tier counters**
 

@@ -41,11 +41,31 @@ $AvidScriptProfile = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/Avid
     ConvertFrom-Json
 $BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Profiles/Phase54Gameplay.formal.json') |
     ConvertFrom-Json
+$Phase56FormalProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Profiles/Phase56Gameplay.formal.json') |
+    ConvertFrom-Json
+$ControlledRuntimeProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'ControlledRuntime/Config/ControlledRuntimeSuiteProfile.json') |
+    ConvertFrom-Json
 
 Assert-True ($RunnerHeader.Contains('RunWarmBenchmarkFromFiles')) `
     'runner must expose the warm benchmark file entrypoint'
 Assert-True ($RunnerHeader.Contains('RunFiveLaneCorrectnessSmoke')) `
     'runner must expose the canonical five-lane correctness smoke API'
+Assert-True ([double]$Phase56FormalProfile.gates.wasmtime_v8_geo_ratio.maximum -eq 0.95) `
+    'Phase 57 must preserve the 0.95 Wasmtime/V8 geomean gate'
+Assert-True ([double]$Phase56FormalProfile.gates.kernel_win_rate.minimum -eq 0.60) `
+    'Phase 57 must preserve the 0.60 controlled-kernel win-rate gate'
+Assert-True ([double]$Phase56FormalProfile.gates.semantic_vs_puerts_reflection.maximum -eq 0.80) `
+    'Phase 57 must preserve the 0.80 semantic/Puerts reflection gate'
+Assert-True ([double]$Phase56FormalProfile.gates.s1_scalar_ns.maximum -eq 25.0) `
+    'Phase 57 must preserve the 25 ns generated S1 scalar gate'
+Assert-True ([double]$Phase56FormalProfile.gates.s1_property_ns.maximum -eq 50.0) `
+    'Phase 57 must preserve the 50 ns generated S1 property gate'
+Assert-True ([double]$Phase56FormalProfile.gates.prepared_export_ratio.maximum -eq 0.95) `
+    'Phase 57 must preserve the 0.95 prepared export gate'
+Assert-True ([double]$ControlledRuntimeProfile.pc_leadership_gate.maximum_geometric_mean_ratio -eq 0.95) `
+    'the controlled-runtime suite must preserve its 0.95 geomean gate'
+Assert-True ([double]$ControlledRuntimeProfile.pc_leadership_gate.minimum_kernel_win_rate -eq 0.60) `
+    'the controlled-runtime suite must preserve its 0.60 kernel win-rate gate'
 
 $ExpectedLanes = @(
     'native_cpp',
