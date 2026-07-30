@@ -32,9 +32,9 @@
 **Interfaces:**
 - Consumes: Phase 56 的 `small_vs_best_puerts`、`dense_vs_best_puerts` 和
   `callback_vs_puerts` 正式比值。
-- Produces: README 可通过相对路径嵌入的透明背景 SVG。
+- Produces: README 可通过相对路径嵌入、自带中性深色背景的 SVG。
 
-- [ ] **Step 1: 读取冻结 evidence 并核对三个比值**
+- [x] **Step 1: 读取冻结 evidence 并核对三个比值**
 
 Run:
 
@@ -51,7 +51,7 @@ Expected:
 - Dense ratio `0.5128887643597646`
 - Callback latency `67.88359375 ns`
 
-- [ ] **Step 2: 创建横向归一化性能图**
+- [x] **Step 2: 创建横向归一化性能图**
 
 使用 `apply_patch` 创建 SVG，画布为 `960x430`，包含：
 
@@ -61,10 +61,10 @@ Expected:
 - 每组灰色 Puerts `1.000x` 条和绿色 AvidScript 条；
 - AvidScript 标签分别为 `0.469x`、`0.513x`、`0.391x`；
 - footer 标注“5 processes x 30 timed samples | UE5.8 Win64 Development”；
-- `<title>`、`<desc>` 和 `prefers-color-scheme: dark` 样式；
+- `<title>`、`<desc>` 和不依赖页面主题的稳定高对比度样式；
 - 禁止 `<script>`、外链、嵌入字体和个人路径。
 
-- [ ] **Step 3: 验证 SVG 合法性和安全边界**
+- [x] **Step 3: 验证 SVG 合法性和安全边界**
 
 Run:
 
@@ -79,10 +79,10 @@ Expected: `width=960`、`height=430`。
 Run:
 
 ```powershell
-rg -n "<script|https?://|[A-Z]:\\\\Users\\\\" Docs/Assets/README/phase56-gameplay-performance.svg
+rg -n "<script|(?:href|src)=[\"']https?://|[A-Z]:\\\\Users\\\\" Docs/Assets/README/phase56-gameplay-performance.svg
 ```
 
-Expected: exit code `1`，没有匹配。
+Expected: exit code `1`，除标准 SVG XML namespace 外不引用外部资源。
 
 ### Task 2: 重写 GitHub README
 
@@ -97,7 +97,7 @@ Expected: exit code `1`，没有匹配。
   `Docs/Assets/README/phase56-gameplay-performance.svg`。
 - Produces: GitHub 首页、C# 示例、性能表、架构图、快速开始和文档导航。
 
-- [ ] **Step 1: 记录当前 README 的过时断言**
+- [x] **Step 1: 记录当前 README 的过时断言**
 
 Run:
 
@@ -107,7 +107,7 @@ rg -n "主线使用.*WAMR|Phase 53|当前 WAMR interpreter" README.md
 
 Expected: 至少匹配三处，证明 README 仍是旧状态。
 
-- [ ] **Step 2: 重写标题和项目定位**
+- [x] **Step 2: 重写标题和项目定位**
 
 使用 `apply_patch` 重写 `README.md`：
 
@@ -116,7 +116,7 @@ Expected: 至少匹配三处，证明 README 仍是旧状态。
 - 用醒目引用块写明 `0.1.0 开发者预览`、当前平台和未完成平台；
 - 用四个平级要点说明 Generated Binding、WASM VM、UE 生命周期和证据驱动性能。
 
-- [ ] **Step 3: 加入真实 C# 闭环与能力矩阵**
+- [x] **Step 3: 加入真实 C# 闭环与能力矩阵**
 
 保留可编译风格的 `BeginPlay`/`Tick` 示例，并将能力分为：
 
@@ -128,7 +128,7 @@ Expected: 至少匹配三处，证明 README 仍是旧状态。
 
 不得把 arbitrary `UStruct`、容器、delegate、Cook/Shipping 或移动端写成已完成。
 
-- [ ] **Step 4: 加入正式性能段**
+- [x] **Step 4: 加入正式性能段**
 
 嵌入：
 
@@ -148,7 +148,7 @@ Expected: 至少匹配三处，证明 README 仍是旧状态。
 scalar `27.08 ns`、property `54.31 ns`、门禁 `12/18` 和 semantic
 reflection `5.819x`。文字明确“组合游戏逻辑热路径领先，不等于全面领先”。
 
-- [ ] **Step 5: 更新架构、调用路径和快速开始**
+- [x] **Step 5: 更新架构、调用路径和快速开始**
 
 新增两个 GitHub Mermaid `flowchart`：
 
@@ -164,7 +164,7 @@ pwsh -NoProfile -File Build/InstallWasmtimeDependency.ps1 -Mode Install
 UE 构建命令只使用 `$env:UE_ROOT`、`YourProjectEditor` 和
 `C:\Path\To\YourProject.uproject` 通用示例。WAMR 构建放在兼容后端说明中。
 
-- [ ] **Step 6: 更新边界、路线与文档导航**
+- [x] **Step 6: 更新边界、路线与文档导航**
 
 链接 Phase 56 实现报告、机器证据和 Gate 摘要。路线图按顺序列出：
 
@@ -185,7 +185,7 @@ UE 构建命令只使用 `$env:UE_ROOT`、`YourProjectEditor` 和
 - Consumes: Task 1 和 Task 2 的最终文档。
 - Produces: 可提交的链接、数据、格式和隐私检查结果。
 
-- [ ] **Step 1: 验证旧叙述已移除**
+- [x] **Step 1: 验证旧叙述已移除**
 
 Run:
 
@@ -195,7 +195,7 @@ rg -n "主线使用.*WAMR|Phase 53|当前 WAMR interpreter" README.md
 
 Expected: exit code `1`。
 
-- [ ] **Step 2: 验证关键新叙述存在**
+- [x] **Step 2: 验证关键新叙述存在**
 
 Run:
 
@@ -205,12 +205,12 @@ rg -n "Wasmtime 45|12/18|5\\.819x|0\\.469x|0\\.513x|0\\.391x|phase56-gameplay-pe
 
 Expected: 所有关键口径均至少出现一次。
 
-- [ ] **Step 3: 验证 README 相对链接**
+- [x] **Step 3: 验证 README 相对链接**
 
 从 `README.md` 提取非 HTTP、非锚点的 Markdown 链接与图片路径，去除可选锚点，
 逐个基于仓库根目录执行 `Test-Path -LiteralPath`。Expected: missing count `0`。
 
-- [ ] **Step 4: 验证 Mermaid 和围栏配对**
+- [x] **Step 4: 验证 Mermaid 和围栏配对**
 
 Run:
 
@@ -228,7 +228,7 @@ Run:
 
 Expected: 至少 `3`，与代码及 Mermaid 围栏结构人工复核一致。
 
-- [ ] **Step 5: 验证变更质量与隐私**
+- [x] **Step 5: 验证变更质量与隐私**
 
 Run:
 
@@ -247,7 +247,7 @@ git diff -- README.md Docs/Assets/README Docs/Superpowers |
 
 Expected: 没有匹配。
 
-- [ ] **Step 6: 精确暂存并检查受保护文件**
+- [x] **Step 6: 精确暂存并检查受保护文件**
 
 Stage only:
 
@@ -263,7 +263,7 @@ git diff --cached --name-status
 
 Expected: 仅 README、SVG 和实施计划；三个受保护路径不在 index 中。
 
-- [ ] **Step 7: 提交并推送**
+- [x] **Step 7: 提交并推送**
 
 Run:
 

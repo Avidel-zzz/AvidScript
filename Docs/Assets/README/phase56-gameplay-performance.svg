@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430"
+     role="img" aria-labelledby="title description">
+  <title id="title">Phase 56 游戏逻辑性能对比</title>
+  <desc id="description">
+    AvidScript 相对 Puerts 最快对应路径的归一化耗时。Small gameplay 为 0.469 倍，
+    Dense gameplay 为 0.513 倍，Lifecycle callback 为 0.391 倍。数值越低越好。
+  </desc>
+  <style>
+    .title { fill: #f0f6fc; font: 700 25px "Segoe UI", Arial, sans-serif; }
+    .subtitle { fill: #9da7b1; font: 14px "Segoe UI", Arial, sans-serif; }
+    .group { fill: #e6edf3; font: 600 15px "Segoe UI", Arial, sans-serif; }
+    .detail { fill: #9da7b1; font: 12px "Segoe UI", Arial, sans-serif; }
+    .value { fill: #e6edf3; font: 600 13px "Segoe UI", Arial, sans-serif; }
+    .axis { fill: #9da7b1; font: 11px "Segoe UI", Arial, sans-serif; }
+    .footer { fill: #8b949e; font: 12px "Segoe UI", Arial, sans-serif; }
+    .grid { stroke: #30363d; stroke-width: 1; }
+    .avid { fill: #26c596; }
+    .puerts { fill: #66717d; }
+    .legend-text { fill: #9da7b1; font: 12px "Segoe UI", Arial, sans-serif; }
+  </style>
+
+  <rect width="960" height="430" rx="12" fill="#0d1117"/>
+  <text class="title" x="36" y="40">Phase 56 游戏逻辑性能对比</text>
+  <text class="subtitle" x="36" y="65">相对 Puerts 最快对应路径，越低越好</text>
+
+  <rect class="avid" x="699" y="29" width="14" height="14" rx="2"/>
+  <text class="legend-text" x="720" y="41">AvidScript</text>
+  <rect class="puerts" x="808" y="29" width="14" height="14" rx="2"/>
+  <text class="legend-text" x="829" y="41">Puerts</text>
+
+  <line class="grid" x1="258" y1="82" x2="258" y2="366"/>
+  <line class="grid" x1="408" y1="82" x2="408" y2="366"/>
+  <line class="grid" x1="558" y1="82" x2="558" y2="366"/>
+  <line class="grid" x1="708" y1="82" x2="708" y2="366"/>
+  <line class="grid" x1="858" y1="82" x2="858" y2="366"/>
+
+  <text class="axis" x="258" y="382" text-anchor="middle">0</text>
+  <text class="axis" x="408" y="382" text-anchor="middle">0.25x</text>
+  <text class="axis" x="558" y="382" text-anchor="middle">0.50x</text>
+  <text class="axis" x="708" y="382" text-anchor="middle">0.75x</text>
+  <text class="axis" x="858" y="382" text-anchor="middle">1.00x</text>
+
+  <text class="group" x="36" y="121">Small gameplay</text>
+  <text class="detail" x="36" y="141">Generated S1</text>
+  <rect class="puerts" x="258" y="99" width="600" height="20" rx="3"/>
+  <text class="value" x="871" y="114">1.000x</text>
+  <rect class="avid" x="258" y="128" width="281.65" height="20" rx="3"/>
+  <text class="value" x="552" y="143">0.469x</text>
+
+  <text class="group" x="36" y="216">Dense gameplay</text>
+  <text class="detail" x="36" y="236">Data-Oriented</text>
+  <rect class="puerts" x="258" y="194" width="600" height="20" rx="3"/>
+  <text class="value" x="871" y="209">1.000x</text>
+  <rect class="avid" x="258" y="223" width="307.73" height="20" rx="3"/>
+  <text class="value" x="578" y="238">0.513x</text>
+
+  <text class="group" x="36" y="311">Lifecycle callback</text>
+  <text class="detail" x="36" y="331">Tick/Event hot result</text>
+  <rect class="puerts" x="258" y="289" width="600" height="20" rx="3"/>
+  <text class="value" x="871" y="304">1.000x</text>
+  <rect class="avid" x="258" y="318" width="234.54" height="20" rx="3"/>
+  <text class="value" x="505" y="333">0.391x</text>
+
+  <text class="footer" x="36" y="414">
+    5 processes x 30 timed samples | UE5.8 Win64 Development | lower is better
+  </text>
+</svg>
