@@ -12,6 +12,10 @@
 namespace
 {
 constexpr const TCHAR* WasmtimeDynamicImportName = TEXT("avid_ue_1111111111111111");
+constexpr const TCHAR* WasmtimeTypedGuestResultImportName =
+	TEXT("avid_s1_1111111111111111");
+constexpr const TCHAR* WasmtimeTypedGuestResultStableId =
+	TEXT("1111111111111111111111111111111111111111111111111111111111111111");
 
 void AppendWasmtimeU32Leb(TArray<uint8>& Bytes, uint32 Value)
 {
@@ -217,6 +221,66 @@ TArray<uint8> BuildWasmtimeI32ImportFixture(const char* ImportName, int32 Input)
 	return Module;
 }
 
+TArray<uint8> BuildWasmtimeSelfI32PairGuestResultFixture()
+{
+	TArray<uint8> Module = MakeWasmtimeModule();
+
+	TArray<uint8> Types;
+	AppendWasmtimeU32Leb(Types, 2);
+	const uint8 ImportType[] = {
+		0x60,
+		0x05,
+		0x7f,
+		0x7f,
+		0x7f,
+		0x7f,
+		0x7f,
+		0x01,
+		0x7f
+	};
+	Types.Append(ImportType, UE_ARRAY_COUNT(ImportType));
+	const uint8 ExportType[] = { 0x60, 0x00, 0x01, 0x7f };
+	Types.Append(ExportType, UE_ARRAY_COUNT(ExportType));
+	AppendWasmtimeSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendWasmtimeU32Leb(Imports, 1);
+	AppendWasmtimeString(Imports, "avidscript");
+	AppendWasmtimeString(Imports, "avid_s1_1111111111111111");
+	Imports.Add(0x00);
+	AppendWasmtimeU32Leb(Imports, 0);
+	AppendWasmtimeSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendWasmtimeU32Leb(Functions, 1);
+	AppendWasmtimeU32Leb(Functions, 1);
+	AppendWasmtimeSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeString(Exports, "run");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 1);
+	AppendWasmtimeSection(Module, 7, Exports);
+
+	TArray<uint8> Body;
+	Body.Add(0x00);
+	AppendWasmtimeI32Const(Body, 7);
+	AppendWasmtimeI32Const(Body, 11);
+	AppendWasmtimeI32Const(Body, 13);
+	AppendWasmtimeI32Const(Body, 17);
+	AppendWasmtimeI32Const(Body, 64);
+	Body.Add(0x10);
+	AppendWasmtimeU32Leb(Body, 0);
+	Body.Add(0x0b);
+	TArray<uint8> Code;
+	AppendWasmtimeU32Leb(Code, 1);
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(Body.Num()));
+	Code.Append(Body);
+	AppendWasmtimeSection(Module, 10, Code);
+	return Module;
+}
+
 FAvidScriptVmBindingPackage MakeWasmtimeDynamicPackage(uint32 TargetOrdinal, TCHAR HashCharacter)
 {
 	FAvidScriptVmBindingPackage Package;
@@ -239,6 +303,22 @@ FAvidScriptVmBindingPackage MakeWasmtimeDynamicPackage(uint32 TargetOrdinal, TCH
 	Import.ModuleName = TEXT("avidscript");
 	Import.ImportName = WasmtimeDynamicImportName;
 	Import.Signature = TEXT("(i)i");
+	Package.Imports.Add(MoveTemp(Import));
+	return Package;
+}
+
+FAvidScriptVmBindingPackage MakeWasmtimeTypedGuestResultPackage()
+{
+	FAvidScriptVmBindingPackage Package;
+	Package.PackageName = TEXT("avidscript.phase57.typed_guest_result");
+	Package.PackageHash = FString::ChrN(64, TEXT('5'));
+
+	FAvidScriptVmDynamicImport Import;
+	Import.StableId = WasmtimeTypedGuestResultStableId;
+	Import.Ordinal = 0;
+	Import.ModuleName = TEXT("avidscript");
+	Import.ImportName = WasmtimeTypedGuestResultImportName;
+	Import.Signature = TEXT("(iiiii)i");
 	Package.Imports.Add(MoveTemp(Import));
 	return Package;
 }
@@ -502,6 +582,117 @@ public:
 	bool bSawDynamicGuestMemory = false;
 	bool bFailDynamicCall = false;
 };
+
+class FAvidScriptWasmtimeTypedBridgeDispatcher final
+	: public IAvidScriptVmTypedHostDispatcher
+{
+public:
+	EAvidScriptVmTypedHostStatus DispatchEmptyI32(
+		uint32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchI32PairToI32(
+		uint32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchSelfI32PairToI32(
+		uint32,
+		int32,
+		int32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchSelfPropertyI32GetSet(
+		uint32,
+		int32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchSelfVectorValue(
+		uint32,
+		int32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchStableObjectRoundtrip(
+		uint32,
+		int32,
+		int32,
+		int32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	EAvidScriptVmTypedHostStatus DispatchCommandBufferSubmit(
+		uint32,
+		int32,
+		int32,
+		int32&) override
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+};
+
+struct FAvidScriptWasmtimeTypedGuestResultContext
+{
+	EAvidScriptVmTypedHostStatus Status =
+		EAvidScriptVmTypedHostStatus::Succeeded;
+	int32 OutStatus = 1;
+	int32 CallCount = 0;
+	int32 SelfSlot = 0;
+	int32 SelfGeneration = 0;
+	int32 Left = 0;
+	int32 Right = 0;
+	int32 GuestAddress = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokeWasmtimeTypedGuestResultForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 Left,
+	const int32 Right,
+	const int32 GuestAddress,
+	int32& OutStatus)
+{
+	FAvidScriptWasmtimeTypedGuestResultContext* TargetContext =
+		static_cast<FAvidScriptWasmtimeTypedGuestResultContext*>(Context);
+	if (TargetContext == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++TargetContext->CallCount;
+	TargetContext->SelfSlot = SelfSlot;
+	TargetContext->SelfGeneration = SelfGeneration;
+	TargetContext->Left = Left;
+	TargetContext->Right = Right;
+	TargetContext->GuestAddress = GuestAddress;
+	OutStatus = TargetContext->OutStatus;
+	return TargetContext->Status;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -982,6 +1173,133 @@ bool FAvidScriptVmWasmtimeDynamicImportsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("dynamic failure module"), Error.ImportModuleName, FString(TEXT("avidscript")));
 	TestEqual(TEXT("dynamic failure import"), Error.ImportName, FString(WasmtimeDynamicImportName));
 	TestEqual(TEXT("dynamic failure details"), Error.Details, FString(TEXT("wasmtime dynamic failure sentinel")));
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeTypedGuestResultBridgeTest,
+	"AvidScript.VM.Wasmtime.TypedGuestResultBridge",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeTypedGuestResultBridgeTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptWasmtimeTypedGuestResultContext TargetContext;
+	FAvidScriptVmPreparedTypedHostTarget PreparedTarget;
+	PreparedTarget.Context = &TargetContext;
+	PreparedTarget.SelfI32PairGuestResult =
+		&InvokeWasmtimeTypedGuestResultForTest;
+	TestTrue(
+		TEXT("guest-result target binds its exact shape"),
+		PreparedTarget.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32));
+	TestFalse(
+		TEXT("guest-result target does not bind the legacy pair shape"),
+		PreparedTarget.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfI32PairToI32));
+	TestTrue(
+		TEXT("guest-result target participates in any-target validation"),
+		PreparedTarget.HasAnyTarget());
+
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> Backend =
+		CreateWasmtimeBackendForTest(Error);
+	if (!TestNotNull(
+			TEXT("Wasmtime typed guest-result backend is created"),
+			Backend.Get()))
+	{
+		return false;
+	}
+
+	FAvidScriptVmBindingPackage Package =
+		MakeWasmtimeTypedGuestResultPackage();
+	FAvidScriptVmTypedHostImport Import;
+	Import.StableId = WasmtimeTypedGuestResultStableId;
+	Import.BindingOrdinal = 0;
+	Import.ModuleName = TEXT("avidscript");
+	Import.ImportName = WasmtimeTypedGuestResultImportName;
+	Import.Signature = TEXT("(iiiii)i");
+	Import.Shape =
+		EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
+	Import.PreparedTarget = PreparedTarget;
+	TArray<FAvidScriptVmTypedHostImport> Imports = { Import };
+	FAvidScriptWasmtimeTypedBridgeDispatcher Dispatcher;
+	FAvidScriptVmLoadConfig Config;
+	Config.BindingPackage = &Package;
+	Config.TypedHostDispatcher = &Dispatcher;
+	Config.TypedHostImports = Imports;
+
+	if (!TestTrue(
+			TEXT("typed guest-result fixture loads"),
+			Backend->Load(
+				BuildWasmtimeSelfI32PairGuestResultFixture(),
+				TEXT("typed_guest_result"),
+				Config,
+				Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+
+	FAvidScriptVmExportHandle RunHandle;
+	if (!TestTrue(
+			TEXT("typed guest-result export resolves"),
+			Backend->ResolveExport(TEXT("run"), RunHandle, Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	FAvidScriptVmCallResult Result;
+	TestTrue(
+		TEXT("typed guest-result success returns"),
+		Backend->Call(
+			RunHandle,
+			FAvidScriptVmCallFrame(),
+			Error,
+			&Result));
+	TestEqual(TEXT("success returns one status cell"), Result.CellCount, 1u);
+	TestEqual(
+		TEXT("success preserves the exact target status"),
+		static_cast<int32>(Result.Cells[0]),
+		1);
+	TestEqual(TEXT("prepared target is called once"), TargetContext.CallCount, 1);
+	TestEqual(TEXT("self slot is forwarded"), TargetContext.SelfSlot, 7);
+	TestEqual(
+		TEXT("self generation is forwarded"),
+		TargetContext.SelfGeneration,
+		11);
+	TestEqual(TEXT("left operand is forwarded"), TargetContext.Left, 13);
+	TestEqual(TEXT("right operand is forwarded"), TargetContext.Right, 17);
+	TestEqual(
+		TEXT("guest address is forwarded"),
+		TargetContext.GuestAddress,
+		64);
+
+	TargetContext.Status = EAvidScriptVmTypedHostStatus::Rejected;
+	TargetContext.OutStatus = 99;
+	TestFalse(
+		TEXT("typed guest-result rejection traps"),
+		Backend->Call(
+			RunHandle,
+			FAvidScriptVmCallFrame(),
+			Error,
+			&Result));
+	TestEqual(
+		TEXT("rejection category is host import failure"),
+		Error.Category,
+		FString(TEXT("host_import_failed")));
+	TestEqual(
+		TEXT("rejection identifies the typed import"),
+		Error.ImportName,
+		FString(WasmtimeTypedGuestResultImportName));
+	TestEqual(
+		TEXT("rejected target is called exactly once more"),
+		TargetContext.CallCount,
+		2);
 	return true;
 #endif
 }
