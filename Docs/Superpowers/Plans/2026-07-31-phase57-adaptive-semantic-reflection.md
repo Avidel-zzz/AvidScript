@@ -209,7 +209,6 @@ struct FAdaptivePlanBuildSpec
     int32 FrameAlignment = 1;
     bool bStatic = false;
     bool bRequiresWriteAccess = false;
-    bool bProjectPolicyAllowsNative = false;
 };
 
 struct FAdaptivePlan
@@ -230,8 +229,10 @@ bool TryBuildAdaptivePlan(
 ```
 
 The implementation must check native/final/public flags, all rejected semantic flags, native
-function pointer, exact POD property chain, frame links, owner class kind, script bytecode,
-frame size/alignment, and descriptor-level project policy. It must not inspect function names.
+function pointer, exact POD property chain, frame links, owner class kind, script bytecode, and
+frame size/alignment. It must not inspect function names. The runtime session's explicit
+`AdaptiveSemantic` policy is the project-level authorization; the default remains
+`SemanticProcessEvent`, so no per-API descriptor allowlist or schema field is added.
 
 - [ ] **Step 3: Publish the policy and instrumentation**
 

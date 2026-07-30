@@ -29,7 +29,9 @@ Phase 57 采用 **Adaptive Semantic** 作为与 Puerts Reflection fast 对标的
 - 严格 `SemanticProcessEvent` 模式永久保留，作为完整 UE 事件语义和独立诊断路径；
 - benchmark 和文档必须公开实际 invocation tier，不能把 fallback 或 generated S1
   统计为 adaptive native hit；
-- 自动资格判定基于函数 shape、flags、owner、descriptor provenance 和项目级策略，
+- 自动资格判定基于函数 shape、flags、owner 和 descriptor provenance；
+- session 显式选择 `AdaptiveSemantic` policy 即构成项目级授权，默认 policy 仍为
+  `SemanticProcessEvent`；
   不维护逐 API 手写实现或 benchmark 名称白名单。
 
 ## 3. 方案比较
@@ -132,11 +134,12 @@ provenance，不读取函数名。
 - 参数和返回值为已证明的 trivial POD layout；
 - 无 ref/out、默认参数、局部 frame 属性、构造或析构需求；
 - descriptor identity、package hash、selection hash 与当前 reflection snapshot 一致；
-- 项目级 adaptive policy 允许该 owner 范围使用标准 native invocation；
 - 调用位于 Game Thread，且不处于 GC、PostLoad 或 intra-frame debugging。
 
-任一加载期条件失败时只生成 strict plan。运行期 guard 失败时执行安全 fallback 或
-返回明确错误；不能继续使用失效 native pointer。
+任一加载期条件失败时只生成 strict plan。加载期 classifier 可以为全部满足结构证明
+的函数准备 candidate，但只有 session 显式选择 `AdaptiveSemantic` 时才能执行；
+这项 session policy 是统一项目授权，不要求逐 API 白名单。运行期 guard 失败时执行
+安全 fallback 或返回明确错误；不能继续使用失效 native pointer。
 
 ### 5.3 Prepared Reflection Call-Site
 
