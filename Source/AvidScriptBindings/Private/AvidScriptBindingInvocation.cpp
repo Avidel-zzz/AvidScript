@@ -3093,6 +3093,17 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	{
 		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
 			Package->Impl->Plans[PlanIndex];
+		if (Plan.GeneratedEntry == nullptr
+			&& Plan.FastPath.bAdaptiveNativeEligible)
+		{
+			++Package->Impl->Instrumentation
+				.AdaptivePreparedNativePlanCount;
+		}
+		else if (Plan.GeneratedEntry == nullptr)
+		{
+			++Package->Impl->Instrumentation
+				.AdaptiveStrictFallbackPlanCount;
+		}
 		if (Plan.FastPath.HighestInvocationMode
 			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
 		{
@@ -3166,6 +3177,39 @@ bool FAvidScriptBindingPackage::TryGetInvocationMode(
 	return true;
 }
 
+bool FAvidScriptBindingPackage::TryGetInvocationMode(
+	const uint32 Ordinal,
+	const EAvidScriptBindingInvocationPolicy Policy,
+	EAvidScriptBindingInvocationMode& OutMode) const
+{
+	OutMode = EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	if (!Impl->Plans.IsValidIndex(static_cast<int32>(Ordinal)))
+	{
+		return false;
+	}
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+		Impl->Plans[Ordinal];
+	if (Plan.GeneratedEntry != nullptr)
+	{
+		OutMode = EAvidScriptBindingInvocationMode::GeneratedNativeS1;
+	}
+	else if (Policy == EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Plan.FastPath.bAdaptiveNativeEligible)
+	{
+		OutMode =
+			EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
+	}
+	else if (Policy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+		&& Plan.FastPath.HighestInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
+	{
+		OutMode =
+			EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	}
+	return true;
+}
+
 bool FAvidScriptBindingPackage::BuildTypedHostImports(
 	TArray<FAvidScriptVmTypedHostImport>& OutImports,
 	FString& OutError) const
@@ -3231,6 +3275,152 @@ bool FAvidScriptBindingPackage::BuildPreparedGeneratedBindings(
 		Binding.bPropertyWriteHasFunction =
 			Binding.bPropertyWrite && Plan.Function != nullptr;
 		Binding.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
+	}
+	return true;
+}
+
+bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
+	TArray<FAvidScriptPreparedReflectionBinding>& OutBindings,
+	FString& OutError) const
+{
+	OutBindings.Reset();
+	OutError.Reset();
+	OutBindings.Reserve(
+		static_cast<int32>(
+			Impl->Instrumentation.AdaptivePreparedNativePlanCount
+			+ Impl->Instrumentation.AdaptiveStrictFallbackPlanCount));
+	const int32 ImportCount = Impl->VmPackage.Imports.Num();
+	for (int32 PlanIndex = 0;
+		PlanIndex < ImportCount
+			&& Impl->Plans.IsValidIndex(PlanIndex);
+		++PlanIndex)
+	{
+		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+			Impl->Plans[PlanIndex];
+		if (Plan.GeneratedEntry != nullptr
+			|| Plan.FastPath.Kind
+				!= EAvidScriptBindingFastPathKind::ScalarI32PairToI32)
+		{
+			continue;
+		}
+		const FAvidScriptVmDynamicImport& DynamicImport =
+			Impl->VmPackage.Imports[PlanIndex];
+		if (DynamicImport.Ordinal != static_cast<uint32>(PlanIndex)
+			|| DynamicImport.Signature != TEXT("(iiiii)i"))
+		{
+			OutBindings.Reset();
+			OutError = TEXT("prepared_reflection_import_mismatch");
+			return false;
+		}
+
+		FAvidScriptPreparedReflectionBinding& Binding =
+			OutBindings.AddDefaulted_GetRef();
+		Binding.BindingOrdinal = static_cast<uint32>(PlanIndex);
+		Binding.ExpectedClass = Plan.OwnerClass;
+		Binding.bAdaptiveNativeEligible =
+			Plan.FastPath.bAdaptiveNativeEligible;
+		Binding.TypedHostImport.StableId = DynamicImport.StableId;
+		Binding.TypedHostImport.BindingOrdinal =
+			static_cast<uint32>(PlanIndex);
+		Binding.TypedHostImport.ModuleName =
+			DynamicImport.ModuleName;
+		Binding.TypedHostImport.ImportName =
+			DynamicImport.ImportName;
+		Binding.TypedHostImport.Signature =
+			DynamicImport.Signature;
+		Binding.TypedHostImport.Shape =
+			EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
+	}
+	return true;
+}
+
+bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
+	const FAvidScriptPreparedReflectionBinding& Binding,
+	UObject& Receiver,
+	const int32 Left,
+	const int32 Right,
+	const FAvidScriptBindingInvocationContext& Context,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails) const
+{
+	OutValue = 0;
+	OutErrorCategory.Reset();
+	OutErrorDetails.Reset();
+	if (!Impl->Plans.IsValidIndex(
+			static_cast<int32>(Binding.BindingOrdinal)))
+	{
+		OutErrorCategory = TEXT("binding_ordinal_invalid");
+		OutErrorDetails =
+			TEXT("The prepared reflection binding ordinal is invalid.");
+		return false;
+	}
+	const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+		Impl->Plans[Binding.BindingOrdinal];
+	if (Plan.GeneratedEntry != nullptr
+		|| Plan.OwnerClass != Binding.ExpectedClass
+		|| Plan.FastPath.Kind
+			!= EAvidScriptBindingFastPathKind::ScalarI32PairToI32
+		|| Plan.FastPath.bAdaptiveNativeEligible
+			!= Binding.bAdaptiveNativeEligible
+		|| !Receiver.IsA(Plan.OwnerClass))
+	{
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call-site no longer matches its immutable plan.");
+		return false;
+	}
+
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	if (!UE::AvidScript::BindingPrivate::
+			InvokePreparedScalarI32PairToI32(
+				Plan.FastPath,
+				Receiver,
+				Left,
+				Right,
+				Context.InvocationPolicy,
+				OutValue,
+				ActualMode,
+				OutErrorCategory,
+				OutErrorDetails))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+		Context.InvocationInstrumentation;
+	if (Instrumentation == nullptr)
+	{
+		return true;
+	}
+	if (ActualMode
+		== EAvidScriptBindingInvocationMode::AdaptivePreparedNative)
+	{
+		++Instrumentation->AdaptivePreparedNativeHitCount;
+	}
+	else if (ActualMode
+		== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
+	{
+		++Instrumentation->QualifiedNativeDirectCount;
+	}
+	else
+	{
+		++Instrumentation->SemanticProcessEventCount;
+		if (Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic)
+		{
+			++Instrumentation->AdaptiveProcessEventFallbackCount;
+			if (Plan.FastPath.bAdaptiveNativeEligible)
+			{
+				++Instrumentation->AdaptiveGuardRejectCount;
+			}
+		}
+		else if (Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect)
+		{
+			++Instrumentation->RequestedNativeDirectFallbackCount;
+		}
 	}
 	return true;
 }
@@ -3520,11 +3710,12 @@ bool FAvidScriptBindingPackage::Dispatch(
 	const bool bRequestedNativeDirect =
 		Context.InvocationPolicy
 		== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
-	const bool bSelectedNativeDirect =
-		bRequestedNativeDirect
-		&& Plan.FastPath.IsBound()
-		&& Plan.FastPath.HighestInvocationMode
-			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	const bool bRequestedAdaptive =
+		Context.InvocationPolicy
+		== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
+	EAvidScriptBindingInvocationMode ActualInvocationMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	bool bAdaptiveGuardRejected = false;
 	ON_SCOPE_EXIT
 	{
 		FAvidScriptBindingInvocationInstrumentation* Instrumentation =
@@ -3533,15 +3724,30 @@ bool FAvidScriptBindingPackage::Dispatch(
 		{
 			return;
 		}
-		if (bSelectedNativeDirect)
+		if (ActualInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
 		{
 			++Instrumentation->QualifiedNativeDirectCount;
+			return;
+		}
+		if (ActualInvocationMode
+			== EAvidScriptBindingInvocationMode::AdaptivePreparedNative)
+		{
+			++Instrumentation->AdaptivePreparedNativeHitCount;
 			return;
 		}
 		++Instrumentation->SemanticProcessEventCount;
 		if (bRequestedNativeDirect)
 		{
 			++Instrumentation->RequestedNativeDirectFallbackCount;
+		}
+		if (bRequestedAdaptive)
+		{
+			++Instrumentation->AdaptiveProcessEventFallbackCount;
+			if (bAdaptiveGuardRejected)
+			{
+				++Instrumentation->AdaptiveGuardRejectCount;
+			}
 		}
 	};
 	if (Call.Arguments.Num() != Plan.ExpectedArgumentCount
@@ -3763,6 +3969,8 @@ bool FAvidScriptBindingPackage::Dispatch(
 			Call,
 			InvocationScratch,
 			Context.InvocationPolicy,
+			ActualInvocationMode,
+			bAdaptiveGuardRejected,
 			FastPathErrorCategory,
 			FastPathErrorDetails))
 		{

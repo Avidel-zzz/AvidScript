@@ -24,12 +24,14 @@ enum class EAvidScriptBindingFastPathKind : uint8
 enum class EAvidScriptBindingInvocationPolicy : uint8
 {
 	SemanticProcessEvent,
+	AdaptiveSemantic,
 	QualifiedNativeDirect
 };
 
 enum class EAvidScriptBindingInvocationMode : uint8
 {
 	SemanticProcessEvent,
+	AdaptivePreparedNative,
 	QualifiedNativeDirect,
 	GeneratedNativeS1
 };
@@ -54,6 +56,8 @@ struct FAvidScriptBindingPackageInstrumentation
 	uint64 ReflectedNameLookupCount = 0;
 	uint64 TypedThunkPlanCount = 0;
 	uint64 ReflectionFallbackPlanCount = 0;
+	uint64 AdaptivePreparedNativePlanCount = 0;
+	uint64 AdaptiveStrictFallbackPlanCount = 0;
 	uint64 QualifiedNativeDirectPlanCount = 0;
 	uint64 GeneratedNativeS1PlanCount = 0;
 	uint64 SemanticOnlyPlanCount = 0;
@@ -62,6 +66,9 @@ struct FAvidScriptBindingPackageInstrumentation
 struct FAvidScriptBindingInvocationInstrumentation
 {
 	uint64 SemanticProcessEventCount = 0;
+	uint64 AdaptivePreparedNativeHitCount = 0;
+	uint64 AdaptiveProcessEventFallbackCount = 0;
+	uint64 AdaptiveGuardRejectCount = 0;
 	uint64 QualifiedNativeDirectCount = 0;
 	uint64 RequestedNativeDirectFallbackCount = 0;
 	uint64 GeneratedNativeS1HitCount = 0;
@@ -105,6 +112,14 @@ struct FAvidScriptPreparedGeneratedBinding
 	bool bPropertyWrite = false;
 	bool bPropertyWriteHasFunction = false;
 	bool bRequiresWriteAccess = false;
+};
+
+struct FAvidScriptPreparedReflectionBinding
+{
+	uint32 BindingOrdinal = MAX_uint32;
+	FAvidScriptVmTypedHostImport TypedHostImport;
+	UClass* ExpectedClass = nullptr;
+	bool bAdaptiveNativeEligible = false;
 };
 
 enum class EAvidScriptPreparedHostEffectMode : uint8
@@ -152,12 +167,28 @@ public:
 	bool TryGetInvocationMode(
 		uint32 Ordinal,
 		EAvidScriptBindingInvocationMode& OutMode) const;
+	bool TryGetInvocationMode(
+		uint32 Ordinal,
+		EAvidScriptBindingInvocationPolicy Policy,
+		EAvidScriptBindingInvocationMode& OutMode) const;
 	bool BuildTypedHostImports(
 		TArray<FAvidScriptVmTypedHostImport>& OutImports,
 		FString& OutError) const;
 	bool BuildPreparedGeneratedBindings(
 		TArray<FAvidScriptPreparedGeneratedBinding>& OutBindings,
 		FString& OutError) const;
+	bool BuildPreparedReflectionBindings(
+		TArray<FAvidScriptPreparedReflectionBinding>& OutBindings,
+		FString& OutError) const;
+	bool InvokePreparedReflectionI32Pair(
+		const FAvidScriptPreparedReflectionBinding& Binding,
+		UObject& Receiver,
+		int32 Left,
+		int32 Right,
+		const FAvidScriptBindingInvocationContext& Context,
+		int32& OutValue,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails) const;
 	bool TryGetGeneratedBinding(
 		uint32 Ordinal,
 		const FAvidScriptGeneratedBindingEntry*& OutEntry,

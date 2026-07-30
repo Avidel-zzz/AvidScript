@@ -47,6 +47,7 @@ struct FFastPathPlan
 		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
 	UFunction* Function = nullptr;
 	UClass* NativeDirectOwnerClass = nullptr;
+	bool bAdaptiveNativeEligible = false;
 	FFastPathThunk SemanticThunk = nullptr;
 	FFastPathThunk NativeDirectThunk = nullptr;
 	int32 FrameSize = 0;
@@ -74,6 +75,19 @@ bool DispatchFastPath(
 	const FAvidScriptDynamicHostCall& Call,
 	TArray<uint8>& InvocationScratch,
 	EAvidScriptBindingInvocationPolicy InvocationPolicy,
+	EAvidScriptBindingInvocationMode& OutInvocationMode,
+	bool& bOutAdaptiveGuardRejected,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails);
+
+bool InvokePreparedScalarI32PairToI32(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	int32 Left,
+	int32 Right,
+	EAvidScriptBindingInvocationPolicy InvocationPolicy,
+	int32& OutValue,
+	EAvidScriptBindingInvocationMode& OutInvocationMode,
 	FString& OutErrorCategory,
 	FString& OutErrorDetails);
 } // namespace UE::AvidScript::BindingPrivate

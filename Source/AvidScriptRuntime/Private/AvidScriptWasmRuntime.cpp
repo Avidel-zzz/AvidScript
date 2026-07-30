@@ -22,6 +22,13 @@ struct FAvidScriptPreparedGeneratedHostCall
 		EAvidScriptPreparedHostEffectMode::Rejected;
 };
 
+struct FAvidScriptPreparedReflectionHostCall
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptPreparedReflectionBinding Binding;
+};
+
 bool AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
 	IAvidScriptVmBackend& Backend,
 	const FAvidScriptVmExportHandle& Handle,
@@ -387,6 +394,7 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	OutError.Reset();
 	TypedHostImports.Reset();
 	PreparedGeneratedHostCalls.Reset();
+	PreparedReflectionHostCalls.Reset();
 	if (!BindingPackage.IsValid())
 	{
 		return true;
@@ -402,11 +410,13 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			OutError))
 	{
 		TypedHostImports.Reset();
+		PreparedReflectionHostCalls.Reset();
 		return false;
 	}
 	if (PreparedBindings.Num() != TypedHostImports.Num())
 	{
 		TypedHostImports.Reset();
+		PreparedReflectionHostCalls.Reset();
 		OutError = TEXT("generated_binding_prepared_count_mismatch");
 		return false;
 	}
@@ -422,6 +432,7 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		{
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
+			PreparedReflectionHostCalls.Reset();
 			OutError = TEXT("generated_binding_prepared_identity_mismatch");
 			return false;
 		}
@@ -457,6 +468,7 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		{
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
+			PreparedReflectionHostCalls.Reset();
 			OutError = TEXT("generated_binding_prepared_shape_mismatch");
 			return false;
 		}
@@ -492,6 +504,51 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 			break;
 		}
 		PreparedGeneratedHostCalls.Add(MoveTemp(Call));
+	}
+
+	TArray<FAvidScriptPreparedReflectionBinding> ReflectionBindings;
+	if (!BindingPackage->BuildPreparedReflectionBindings(
+			ReflectionBindings,
+			OutError))
+	{
+		TypedHostImports.Reset();
+		PreparedGeneratedHostCalls.Reset();
+		PreparedReflectionHostCalls.Reset();
+		return false;
+	}
+	TypedHostImports.Reserve(
+		TypedHostImports.Num() + ReflectionBindings.Num());
+	PreparedReflectionHostCalls.Reserve(
+		ReflectionBindings.Num());
+	for (const FAvidScriptPreparedReflectionBinding& Binding
+		: ReflectionBindings)
+	{
+		if (Binding.BindingOrdinal == MAX_uint32
+			|| Binding.ExpectedClass == nullptr
+			|| Binding.TypedHostImport.Shape
+				!= EAvidScriptVmTypedHostShape::
+					SelfI32PairToGuestI32)
+		{
+			TypedHostImports.Reset();
+			PreparedGeneratedHostCalls.Reset();
+			PreparedReflectionHostCalls.Reset();
+			OutError =
+				TEXT("prepared_reflection_shape_mismatch");
+			return false;
+		}
+
+		TUniquePtr<FAvidScriptPreparedReflectionHostCall> Call =
+			MakeUnique<FAvidScriptPreparedReflectionHostCall>();
+		Call->Runtime = this;
+		Call->Package = BindingPackage;
+		Call->Binding = Binding;
+		FAvidScriptVmTypedHostImport& Import =
+			TypedHostImports.Add_GetRef(Binding.TypedHostImport);
+		Import.PreparedTarget.Context = Call.Get();
+		Import.PreparedTarget.SelfI32PairGuestResult =
+			&FAvidScriptWasmRuntimeInstance::
+				InvokePreparedReflectionSelfI32PairGuestResult;
+		PreparedReflectionHostCalls.Add(MoveTemp(Call));
 	}
 	return true;
 }
@@ -659,6 +716,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 			BindingInvocationScratch.Reset();
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
+			PreparedReflectionHostCalls.Reset();
 			return false;
 		}
 	}
@@ -667,6 +725,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		BindingInvocationScratch.Reset();
 		TypedHostImports.Reset();
 		PreparedGeneratedHostCalls.Reset();
+		PreparedReflectionHostCalls.Reset();
 	}
 
 	FAvidScriptVmLoadConfig Config;
@@ -692,6 +751,7 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 		BindingInvocationScratch.Reset();
 		TypedHostImports.Reset();
 		PreparedGeneratedHostCalls.Reset();
+		PreparedReflectionHostCalls.Reset();
 		return false;
 	}
 
@@ -1551,6 +1611,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 		VmBackend.Reset();
 	}
 	PreparedGeneratedHostCalls.Reset();
+	PreparedReflectionHostCalls.Reset();
 	TypedHostImports.Reset();
 	BindingPackage.Reset();
 	DebugMap.Reset();
@@ -3096,6 +3157,112 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32Pair(
 	}
 	return RecordGeneratedStatus(
 		Call.I32PairCall(*Receiver, Left, Right, OutValue));
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	InvokePreparedReflectionSelfI32PairGuestResult(
+		void* Context,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Left,
+		const int32 Right,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	FAvidScriptPreparedReflectionHostCall* Call =
+		static_cast<FAvidScriptPreparedReflectionHostCall*>(
+			Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutStatus = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->
+		DispatchPreparedReflectionSelfI32PairGuestResult(
+			*Call,
+			SelfSlot,
+			SelfGeneration,
+			Left,
+			Right,
+			GuestAddress,
+			OutStatus);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	DispatchPreparedReflectionSelfI32PairGuestResult(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 Left,
+		const int32 Right,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	++HostImportCallCount;
+	OutStatus = 0;
+	UObject* Receiver = nullptr;
+	if (!Call.Package.IsValid()
+		|| GuestAddress < 0
+		|| !TryResolveFusedCallbackReceiver(
+			SelfSlot,
+			SelfGeneration,
+			Receiver)
+		|| Receiver == nullptr
+		|| !Receiver->IsA(Call.Binding.ExpectedClass))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			TEXT("The prepared reflection receiver or call-site is unavailable."));
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	int32 ReturnValue = 0;
+	FString ErrorCategory;
+	FString ErrorDetails;
+	if (!Call.Package->InvokePreparedReflectionI32Pair(
+			Call.Binding,
+			*Receiver,
+			Left,
+			Right,
+			BindingInvocationContext,
+			ReturnValue,
+			ErrorCategory,
+			ErrorDetails))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			ErrorCategory.IsEmpty()
+				? ErrorDetails
+				: ErrorCategory + TEXT(": ") + ErrorDetails);
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend ? VmBackend->GetGuestMemory() : nullptr;
+	FString MemoryError;
+	if (GuestMemory == nullptr
+		|| !GuestMemory->WriteBytes(
+			static_cast<uint32>(GuestAddress),
+			MakeArrayView(
+				reinterpret_cast<const uint8*>(&ReturnValue),
+				sizeof(ReturnValue)),
+			MemoryError))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			MemoryError.IsEmpty()
+				? FString(TEXT("The prepared reflection return write failed."))
+				: MoveTemp(MemoryError));
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	OutStatus = 1;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 
 EAvidScriptVmTypedHostStatus

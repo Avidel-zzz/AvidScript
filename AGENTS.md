@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-31 P57.1 `rg` 连字符 pattern 规则复发：检索 `-Module=...` 时再次遗漏 `--`，`rg` 在读取文件前把 pattern 解析为参数并拒绝。Prevention：发送任何 `rg` 命令前检查 pattern 首字符；以 `-` 开头时固定写成 `rg <options> -- '<pattern>' <paths>`，即使只是文档或命令示例检索也不例外。
+- 2026-07-31 P57.1 宽补丁问题复发：首次把 adaptive reflection 的多个函数改动合并进一个跨区段 patch，其中一个上下文漂移后整包被原子拒绝；没有产生部分写入，但浪费了实现时间。Prevention：超过一个 owner 函数或跨越多个非连续区段的修改，固定按函数边界拆分；每个 patch 后立即复读该函数，再进入下一处，不以同属一个功能为由合并宽 patch。
 - 2026-07-31 P57.0 static contract schema assumption: the first frozen-threshold assertion addressed the controlled-runtime profile through a guessed `gates` property, while the tracked schema stores those values under `pc_leadership_gate`; the low-cost contract failed before any product build. Prevention: before adding JSON field assertions, read the tracked producer/profile and use its literal object path; do not infer a shared envelope from a different benchmark profile.
 - 2026-07-29 P56.5 发布型架构检查运行时机错误：在集成分支仍有未提交的 Runtime/Bindings 修改时调用 `CheckAvidScriptArchitecture.ps1`，检查器按设计因 evidence commit/tree 与输入字节不一致而拒绝，未产生架构结论。Prevention：该检查器只在候选提交完成且 `git status` 干净后运行；dirty 实现期使用 `git diff --check`、parser 与合同测试，禁止把发布身份检查当作 working-tree linter。
 - 2026-07-29 P56.5 Windows wildcard 路径禁令复发：检查 Phase 56 diagnostic profile 时把 `Profiles/Phase56*.diagnostic.json` 直接作为 `rg` 路径参数，Win32 在读取前以非法路径拒绝。Prevention：Windows 下 `rg` 的路径参数只允许已确认存在的字面目录或文件；文件名筛选固定使用 `-g 'Phase56*.diagnostic.json'`，提交命令前机械拒绝路径位置中的 `*` 和 `?`。

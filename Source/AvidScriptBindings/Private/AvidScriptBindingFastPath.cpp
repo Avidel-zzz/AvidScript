@@ -242,6 +242,114 @@ bool DispatchNativeDirectScalarI32PairToI32(
 		OutErrorCategory,
 		OutErrorDetails);
 }
+
+bool CanInvokePreparedNative(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	FString* OutErrorCategory,
+	FString* OutErrorDetails)
+{
+	const auto SetFailure = [OutErrorCategory, OutErrorDetails](
+		const TCHAR* Category,
+		const TCHAR* Details)
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = Category;
+		}
+		if (OutErrorDetails != nullptr)
+		{
+			*OutErrorDetails = Details;
+		}
+	};
+	if (!IsInGameThread())
+	{
+		SetFailure(
+			TEXT("binding_native_direct_wrong_thread"),
+			TEXT("Prepared native invocation requires the Game Thread."));
+		return false;
+	}
+	if (Target.GetClass() != Plan.NativeDirectOwnerClass)
+	{
+		SetFailure(
+			TEXT("binding_native_direct_exact_class_mismatch"),
+			TEXT("Prepared native invocation requires the target's exact class to match the function owner."));
+		return false;
+	}
+	if (IsGarbageCollecting())
+	{
+		SetFailure(
+			TEXT("binding_native_direct_gc_active"),
+			TEXT("Prepared native invocation is unavailable during garbage collection."));
+		return false;
+	}
+	if (FUObjectThreadContext::Get().IsRoutingPostLoad)
+	{
+		SetFailure(
+			TEXT("binding_native_direct_post_load_active"),
+			TEXT("Prepared native invocation is unavailable while routing PostLoad."));
+		return false;
+	}
+	if (GIntraFrameDebuggingGameThread)
+	{
+		SetFailure(
+			TEXT("binding_native_direct_debugging_active"),
+			TEXT("Prepared native invocation is unavailable during intra-frame debugging."));
+		return false;
+	}
+	return true;
+}
+
+bool InvokePreparedScalarFrame(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const int32 Left,
+	const int32 Right,
+	const bool bNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	alignas(int32) uint8 Frame[ScalarI32PairFrameSize] = {};
+	FMemory::Memcpy(
+		Frame + Plan.ParameterFrameOffsets[0],
+		&Left,
+		sizeof(Left));
+	FMemory::Memcpy(
+		Frame + Plan.ParameterFrameOffsets[1],
+		&Right,
+		sizeof(Right));
+	if (bNative)
+	{
+		FFrame Stack(
+			&Target,
+			Plan.Function,
+			Frame,
+			nullptr,
+			Plan.Function->ChildProperties);
+		Stack.Code = nullptr;
+		Plan.Function->Invoke(
+			&Target,
+			Stack,
+			Frame + Plan.ReturnFrameOffset);
+		if (Stack.bAbortingExecution)
+		{
+			OutErrorCategory = TEXT("binding_adaptive_native_aborted");
+			OutErrorDetails =
+				TEXT("The prepared native UFUNCTION invocation aborted execution.");
+			return false;
+		}
+	}
+	else
+	{
+		Target.ProcessEvent(Plan.Function, Frame);
+	}
+	FMemory::Memcpy(
+		&OutValue,
+		Frame + Plan.ReturnFrameOffset,
+		sizeof(OutValue));
+	return true;
+}
 } // namespace
 
 bool IsQualifiedNativeDirectFunction(const UFunction& Function)
@@ -368,11 +476,9 @@ bool TryBuildFastPath(
 	{
 		return false;
 	}
-	if (Spec.bQualifiedNativeDirectAuthorized
-		&& IsQualifiedNativeDirectFunction(*Spec.Function))
+	if (IsQualifiedNativeDirectFunction(*Spec.Function))
 	{
-		Candidate.HighestInvocationMode =
-			EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+		Candidate.bAdaptiveNativeEligible = true;
 		Candidate.NativeDirectOwnerClass = Spec.Function->GetOwnerClass();
 		Candidate.NativeDirectThunk =
 			&DispatchNativeDirectScalarI32PairToI32;
@@ -384,6 +490,11 @@ bool TryBuildFastPath(
 		}
 		Candidate.ReturnFrameOffset =
 			Spec.ReturnValue.Property->GetOffset_ForUFunction();
+		if (Spec.bQualifiedNativeDirectAuthorized)
+		{
+			Candidate.HighestInvocationMode =
+				EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+		}
 	}
 
 	OutPlan = Candidate;
@@ -396,58 +507,49 @@ bool DispatchFastPath(
 	const FAvidScriptDynamicHostCall& Call,
 	TArray<uint8>& InvocationScratch,
 	const EAvidScriptBindingInvocationPolicy InvocationPolicy,
+	EAvidScriptBindingInvocationMode& OutInvocationMode,
+	bool& bOutAdaptiveGuardRejected,
 	FString& OutErrorCategory,
 	FString& OutErrorDetails)
 {
 	OutErrorCategory.Reset();
 	OutErrorDetails.Reset();
+	OutInvocationMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	bOutAdaptiveGuardRejected = false;
 	check(Plan.IsBound());
 	FFastPathThunk Thunk = Plan.SemanticThunk;
-	if (InvocationPolicy
-			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+	const bool bQualifiedDirect =
+		InvocationPolicy
+				== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
 		&& Plan.HighestInvocationMode
-			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
+				== EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	const bool bAdaptiveDirect =
+		InvocationPolicy
+				== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Plan.bAdaptiveNativeEligible;
+	if (bQualifiedDirect || bAdaptiveDirect)
 	{
 		check(Plan.NativeDirectThunk != nullptr);
-		if (!IsInGameThread())
+		if (!CanInvokePreparedNative(
+				Plan,
+				Target,
+				bQualifiedDirect ? &OutErrorCategory : nullptr,
+				bQualifiedDirect ? &OutErrorDetails : nullptr))
 		{
-			OutErrorCategory = TEXT("binding_native_direct_wrong_thread");
-			OutErrorDetails =
-				TEXT("Qualified native direct invocation requires the Game Thread.");
-			return false;
+			if (bQualifiedDirect)
+			{
+				return false;
+			}
+			bOutAdaptiveGuardRejected = true;
 		}
-		if (Target.GetClass() != Plan.NativeDirectOwnerClass)
+		else
 		{
-			OutErrorCategory =
-				TEXT("binding_native_direct_exact_class_mismatch");
-			OutErrorDetails =
-				TEXT("Qualified native direct invocation requires the target's exact class to match the function owner.");
-			return false;
+			Thunk = Plan.NativeDirectThunk;
+			OutInvocationMode = bQualifiedDirect
+				? EAvidScriptBindingInvocationMode::QualifiedNativeDirect
+				: EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
 		}
-		if (IsGarbageCollecting())
-		{
-			OutErrorCategory = TEXT("binding_native_direct_gc_active");
-			OutErrorDetails =
-				TEXT("Qualified native direct invocation is unavailable during garbage collection.");
-			return false;
-		}
-		if (FUObjectThreadContext::Get().IsRoutingPostLoad)
-		{
-			OutErrorCategory =
-				TEXT("binding_native_direct_post_load_active");
-			OutErrorDetails =
-				TEXT("Qualified native direct invocation is unavailable while routing PostLoad.");
-			return false;
-		}
-		if (GIntraFrameDebuggingGameThread)
-		{
-			OutErrorCategory =
-				TEXT("binding_native_direct_debugging_active");
-			OutErrorDetails =
-				TEXT("Qualified native direct invocation is unavailable during intra-frame debugging.");
-			return false;
-		}
-		Thunk = Plan.NativeDirectThunk;
 	}
 
 	return Thunk(
@@ -455,6 +557,75 @@ bool DispatchFastPath(
 		Target,
 		Call,
 		InvocationScratch,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool InvokePreparedScalarI32PairToI32(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const int32 Left,
+	const int32 Right,
+	const EAvidScriptBindingInvocationPolicy InvocationPolicy,
+	int32& OutValue,
+	EAvidScriptBindingInvocationMode& OutInvocationMode,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutValue = 0;
+	OutInvocationMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	OutErrorCategory.Reset();
+	OutErrorDetails.Reset();
+	if (Plan.Kind != EAvidScriptBindingFastPathKind::ScalarI32PairToI32
+		|| Plan.Function == nullptr)
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call-site is not an int32 pair function.");
+		return false;
+	}
+
+	const bool bAdaptiveNative =
+		InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Plan.bAdaptiveNativeEligible
+		&& CanInvokePreparedNative(Plan, Target, nullptr, nullptr);
+	const bool bQualifiedNative =
+		InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+		&& Plan.HighestInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect
+		&& CanInvokePreparedNative(
+			Plan,
+			Target,
+			&OutErrorCategory,
+			&OutErrorDetails);
+	if (InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+		&& Plan.HighestInvocationMode
+			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect
+		&& !bQualifiedNative)
+	{
+		return false;
+	}
+	if (bAdaptiveNative)
+	{
+		OutInvocationMode =
+			EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
+	}
+	else if (bQualifiedNative)
+	{
+		OutInvocationMode =
+			EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+	}
+	return InvokePreparedScalarFrame(
+		Plan,
+		Target,
+		Left,
+		Right,
+		bAdaptiveNative || bQualifiedNative,
+		OutValue,
 		OutErrorCategory,
 		OutErrorDetails);
 }

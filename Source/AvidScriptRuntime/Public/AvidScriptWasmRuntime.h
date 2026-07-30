@@ -116,6 +116,7 @@ struct FAvidScriptWasmTimerEntry
 };
 
 struct FAvidScriptPreparedGeneratedHostCall;
+struct FAvidScriptPreparedReflectionHostCall;
 
 struct FAvidScriptSelfCapability
 {
@@ -341,6 +342,24 @@ private:
 		int32 Left,
 		int32 Right,
 		int32& OutValue);
+	static EAvidScriptVmTypedHostStatus
+		InvokePreparedReflectionSelfI32PairGuestResult(
+			void* Context,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 Left,
+			int32 Right,
+			int32 GuestAddress,
+			int32& OutStatus);
+	EAvidScriptVmTypedHostStatus
+		DispatchPreparedReflectionSelfI32PairGuestResult(
+			FAvidScriptPreparedReflectionHostCall& Call,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 Left,
+			int32 Right,
+			int32 GuestAddress,
+			int32& OutStatus);
 	static EAvidScriptVmTypedHostStatus InvokePreparedSelfPropertyI32Get(
 		void* Context,
 		int32 SelfSlot,
@@ -451,6 +470,8 @@ private:
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
 	TArray<TUniquePtr<FAvidScriptPreparedGeneratedHostCall>>
 		PreparedGeneratedHostCalls;
+	TArray<TUniquePtr<FAvidScriptPreparedReflectionHostCall>>
+		PreparedReflectionHostCalls;
 	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;

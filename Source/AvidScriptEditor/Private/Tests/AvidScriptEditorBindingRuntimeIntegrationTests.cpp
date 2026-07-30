@@ -4530,6 +4530,14 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		DirectInstrumentation.QualifiedNativeDirectPlanCount
 			+ DirectInstrumentation.SemanticOnlyPlanCount,
 		static_cast<uint64>(DirectLoadResult.BindingCount));
+	TestEqual(
+		TEXT("Two int32 plans qualify for adaptive prepared reflection"),
+		DirectInstrumentation.AdaptivePreparedNativePlanCount,
+		2ull);
+	TestEqual(
+		TEXT("Unsupported float remains an adaptive strict fallback"),
+		DirectInstrumentation.AdaptiveStrictFallbackPlanCount,
+		1ull);
 
 	EAvidScriptBindingInvocationMode AddMode =
 		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
@@ -4557,6 +4565,30 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	TestEqual(
 		TEXT("Unsupported float shape falls back to semantic ProcessEvent"),
 		FloatMode,
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent);
+	EAvidScriptBindingInvocationMode AdaptiveAddMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	EAvidScriptBindingInvocationMode AdaptiveFloatMode =
+		EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
+	TestTrue(
+		TEXT("Adaptive Add ordinal exposes its policy-specific mode"),
+		DirectPackage->TryGetInvocationMode(
+			AddBinding->Ordinal,
+			EAvidScriptBindingInvocationPolicy::AdaptiveSemantic,
+			AdaptiveAddMode));
+	TestTrue(
+		TEXT("Adaptive float ordinal exposes its strict fallback mode"),
+		DirectPackage->TryGetInvocationMode(
+			FloatBinding->Ordinal,
+			EAvidScriptBindingInvocationPolicy::AdaptiveSemantic,
+			AdaptiveFloatMode));
+	TestEqual(
+		TEXT("Adaptive Add uses prepared native reflection"),
+		AdaptiveAddMode,
+		EAvidScriptBindingInvocationMode::AdaptivePreparedNative);
+	TestEqual(
+		TEXT("Adaptive unsupported float remains ProcessEvent"),
+		AdaptiveFloatMode,
 		EAvidScriptBindingInvocationMode::SemanticProcessEvent);
 
 	EAvidScriptBindingInvocationMode InvalidMode =
@@ -4626,6 +4658,70 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	FAvidScriptBindingInvocationContext DirectContext = SemanticContext;
 	DirectContext.InvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
+	FAvidScriptBindingInvocationContext AdaptiveContext =
+		SemanticContext;
+	AdaptiveContext.InvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
+	TArray<FAvidScriptPreparedReflectionBinding>
+		PreparedReflectionBindings;
+	FString PreparedReflectionError;
+	TestTrue(
+		TEXT("Package publishes prepared reflection bindings"),
+		DirectPackage->BuildPreparedReflectionBindings(
+			PreparedReflectionBindings,
+			PreparedReflectionError));
+	TestEqual(
+		TEXT("Package publishes both int32 pair call-sites"),
+		PreparedReflectionBindings.Num(),
+		2);
+	const FAvidScriptPreparedReflectionBinding* PreparedAdd =
+		PreparedReflectionBindings.FindByPredicate(
+			[AddBinding](
+				const FAvidScriptPreparedReflectionBinding& Binding)
+			{
+				return Binding.BindingOrdinal
+					== AddBinding->Ordinal;
+			});
+	if (!TestNotNull(
+			TEXT("Prepared Add call-site is present"),
+			PreparedAdd))
+	{
+		return false;
+	}
+	int32 PreparedAdaptiveValue = 0;
+	FString PreparedErrorCategory;
+	FString PreparedErrorDetails;
+	TestTrue(
+		TEXT("Prepared Add invokes adaptive native reflection"),
+		DirectPackage->InvokePreparedReflectionI32Pair(
+			*PreparedAdd,
+			*Target,
+			19,
+			23,
+			AdaptiveContext,
+			PreparedAdaptiveValue,
+			PreparedErrorCategory,
+			PreparedErrorDetails));
+	TestEqual(
+		TEXT("Prepared adaptive Add returns 42"),
+		PreparedAdaptiveValue,
+		42);
+	int32 PreparedSemanticValue = 0;
+	TestTrue(
+		TEXT("Prepared Add preserves strict ProcessEvent policy"),
+		DirectPackage->InvokePreparedReflectionI32Pair(
+			*PreparedAdd,
+			*Target,
+			19,
+			23,
+			SemanticContext,
+			PreparedSemanticValue,
+			PreparedErrorCategory,
+			PreparedErrorDetails));
+	TestEqual(
+		TEXT("Prepared strict Add returns 42"),
+		PreparedSemanticValue,
+		42);
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(DirectPackage->GetRequiredScratchSize());
 	FAvidScriptBindingRuntimeTestGuestMemory GuestMemory(128);
@@ -4690,6 +4786,27 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		TEXT("Add policies expose the same host-call return"),
 		DirectAddResult.ReturnValue,
 		SemanticAddResult.ReturnValue);
+
+	constexpr uint32 AdaptiveAddAddress = 96;
+	const uint64 AdaptiveAddArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		19,
+		23,
+		AdaptiveAddAddress
+	};
+	FAvidScriptDynamicHostCallResult AdaptiveAddResult;
+	TestTrue(
+		TEXT("Adaptive Add executes through prepared native reflection"),
+		Dispatch(
+			AddBinding->Ordinal,
+			MakeArrayView(AdaptiveAddArguments),
+			AdaptiveContext,
+			AdaptiveAddResult));
+	TestEqual(
+		TEXT("Adaptive Add returns 42"),
+		GuestMemory.ReadValue<int32>(AdaptiveAddAddress),
+		42);
 
 	constexpr uint32 SemanticMaxAddress = 72;
 	constexpr uint32 DirectMaxAddress = 76;
@@ -4789,6 +4906,32 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		GuestMemory.ReadValue<int32>(GuardedDirectAddress),
 		GuardedDirectSentinel);
 
+	constexpr uint32 AdaptiveFallbackAddress = 100;
+	const uint64 AdaptiveFallbackArguments[] = {
+		Handle.Slot,
+		Handle.Generation,
+		31,
+		11,
+		AdaptiveFallbackAddress
+	};
+	{
+		TGuardValue<bool> DebuggingGuard(
+			GIntraFrameDebuggingGameThread,
+			true);
+		FAvidScriptDynamicHostCallResult AdaptiveFallbackResult;
+		TestTrue(
+			TEXT("Adaptive native guard falls back to ProcessEvent"),
+			Dispatch(
+				AddBinding->Ordinal,
+				MakeArrayView(AdaptiveFallbackArguments),
+				AdaptiveContext,
+				AdaptiveFallbackResult));
+	}
+	TestEqual(
+		TEXT("Adaptive guard fallback preserves the exact result"),
+		GuestMemory.ReadValue<int32>(AdaptiveFallbackAddress),
+		42);
+
 	constexpr uint32 StaleResultAddress = 92;
 	const int32 StaleSentinel = 0x24681357;
 	GuestMemory.WriteValue(StaleResultAddress, StaleSentinel);
@@ -4814,7 +4957,19 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	TestEqual(
 		TEXT("Instrumentation records successful semantic dispatches"),
 		InvocationInstrumentation.SemanticProcessEventCount,
-		3ull);
+		5ull);
+	TestEqual(
+		TEXT("Instrumentation records adaptive prepared native hits"),
+		InvocationInstrumentation.AdaptivePreparedNativeHitCount,
+		2ull);
+	TestEqual(
+		TEXT("Instrumentation records adaptive ProcessEvent fallback"),
+		InvocationInstrumentation.AdaptiveProcessEventFallbackCount,
+		1ull);
+	TestEqual(
+		TEXT("Instrumentation records adaptive runtime guard rejection"),
+		InvocationInstrumentation.AdaptiveGuardRejectCount,
+		1ull);
 	TestEqual(
 		TEXT("Instrumentation records actual qualified native-direct dispatches"),
 		InvocationInstrumentation.QualifiedNativeDirectCount,
