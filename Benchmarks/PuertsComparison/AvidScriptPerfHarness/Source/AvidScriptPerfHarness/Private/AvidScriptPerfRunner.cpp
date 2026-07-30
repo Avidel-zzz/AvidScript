@@ -539,6 +539,9 @@ namespace
 		FAvidScriptBindingInvocationInstrumentation InvocationInstrumentation;
 		uint64 LastQualifiedNativeDirectCount = 0;
 		uint64 LastRequestedNativeDirectFallbackCount = 0;
+		uint64 LastAdaptiveNativeHitCount = 0;
+		uint64 LastAdaptiveProcessEventFallbackCount = 0;
+		uint64 LastAdaptiveGuardRejectCount = 0;
 		uint64 LastGeneratedS1HitCount = 0;
 		uint64 LastGeneratedS1FallbackCount = 0;
 		uint64 LastGeneratedS1RejectCount = 0;
@@ -558,6 +561,9 @@ namespace
 		uint64 LastDataRejectedBufferCount = 0;
 		uint64 CollectedQualifiedNativeDirectCount = 0;
 		uint64 CollectedRequestedNativeDirectFallbackCount = 0;
+		uint64 CollectedAdaptiveNativeHitCount = 0;
+		uint64 CollectedAdaptiveProcessEventFallbackCount = 0;
+		uint64 CollectedAdaptiveGuardRejectCount = 0;
 		uint64 CollectedGeneratedS1HitCount = 0;
 		uint64 CollectedGeneratedS1FallbackCount = 0;
 		uint64 CollectedGeneratedS1RejectCount = 0;
@@ -688,6 +694,10 @@ namespace
 			}
 			bRequestsNativeDirect =
 				InvocationPolicy == EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
+			const bool bAdaptiveMode =
+				ExpectedBindingInvocationMode.Equals(
+					TEXT("adaptive_semantic"),
+					ESearchCase::CaseSensitive);
 			const bool bSemanticMode =
 				ExpectedBindingInvocationMode.Equals(
 					TEXT("semantic_process_event"),
@@ -700,9 +710,16 @@ namespace
 				ExpectedBindingInvocationMode.Equals(
 					TEXT("data_command_buffer"),
 					ESearchCase::CaseSensitive);
-			if ((!bSemanticMode && !bGeneratedMode && !bDataMode) ||
-				(bSemanticMode && bRequestsNativeDirect) ||
-				(!bSemanticMode && !bRequestsNativeDirect))
+			const bool bAdaptivePolicy =
+				InvocationPolicy ==
+					EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
+			const bool bSemanticPolicy =
+				InvocationPolicy ==
+					EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
+			if ((!bAdaptiveMode && !bSemanticMode && !bGeneratedMode && !bDataMode) ||
+				bAdaptiveMode != bAdaptivePolicy ||
+				bSemanticMode != bSemanticPolicy ||
+				(bGeneratedMode || bDataMode) != bRequestsNativeDirect)
 			{
 				OutError = TEXT("AvidScript benchmark binding invocation mode mismatch");
 				Session.UnloadLive();
@@ -712,15 +729,18 @@ namespace
 			EAvidScriptBindingInvocationMode ScalarMode =
 				EAvidScriptBindingInvocationMode::SemanticProcessEvent;
 			const EAvidScriptBindingInvocationMode ExpectedScalarMode =
-				bSemanticMode
-					? EAvidScriptBindingInvocationMode::SemanticProcessEvent
-					: EAvidScriptBindingInvocationMode::GeneratedNativeS1;
+				bAdaptiveMode
+					? EAvidScriptBindingInvocationMode::AdaptivePreparedNative
+					: bSemanticMode
+						? EAvidScriptBindingInvocationMode::SemanticProcessEvent
+						: EAvidScriptBindingInvocationMode::GeneratedNativeS1;
 			if (!Manifest.BindingPackage->TryFindFunctionOrdinal(
 					*AAvidScriptPerfFixture::StaticClass(),
 					FName(TEXT("ReflectAddInt32")),
 					ScalarOrdinal) ||
 				!Manifest.BindingPackage->TryGetInvocationMode(
 					ScalarOrdinal,
+					InvocationPolicy,
 					ScalarMode) ||
 				ScalarMode != ExpectedScalarMode)
 			{
@@ -818,6 +838,15 @@ namespace
 				InvocationInstrumentation.QualifiedNativeDirectCount;
 			LastRequestedNativeDirectFallbackCount =
 				InvocationInstrumentation.RequestedNativeDirectFallbackCount;
+			LastAdaptiveNativeHitCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.AdaptivePreparedNativeHitCount;
+			LastAdaptiveProcessEventFallbackCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.AdaptiveProcessEventFallbackCount;
+			LastAdaptiveGuardRejectCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.AdaptiveGuardRejectCount;
 			LastGeneratedS1HitCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.GeneratedNativeS1HitCount;
@@ -872,6 +901,9 @@ namespace
 		void GetInvocationEvidence(
 			uint64& OutDirectHitCount,
 			uint64& OutRequestedDirectFallbackCount,
+			uint64& OutAdaptiveNativeHitCount,
+			uint64& OutAdaptiveProcessEventFallbackCount,
+			uint64& OutAdaptiveGuardRejectCount,
 			uint64& OutGeneratedS1HitCount,
 			uint64& OutGeneratedS1FallbackCount,
 			uint64& OutGeneratedS1RejectCount,
@@ -893,6 +925,11 @@ namespace
 			OutDirectHitCount = CollectedQualifiedNativeDirectCount;
 			OutRequestedDirectFallbackCount =
 				CollectedRequestedNativeDirectFallbackCount;
+			OutAdaptiveNativeHitCount = CollectedAdaptiveNativeHitCount;
+			OutAdaptiveProcessEventFallbackCount =
+				CollectedAdaptiveProcessEventFallbackCount;
+			OutAdaptiveGuardRejectCount =
+				CollectedAdaptiveGuardRejectCount;
 			OutGeneratedS1HitCount = CollectedGeneratedS1HitCount;
 			OutGeneratedS1FallbackCount = CollectedGeneratedS1FallbackCount;
 			OutGeneratedS1RejectCount = CollectedGeneratedS1RejectCount;
@@ -1009,6 +1046,15 @@ namespace
 				InvocationInstrumentation.QualifiedNativeDirectCount;
 			LastRequestedNativeDirectFallbackCount =
 				InvocationInstrumentation.RequestedNativeDirectFallbackCount;
+			CollectedAdaptiveNativeHitCount =
+				DispatchResult.BindingInstrumentation.AdaptivePreparedNativeHitCount
+				- LastAdaptiveNativeHitCount;
+			CollectedAdaptiveProcessEventFallbackCount =
+				DispatchResult.BindingInstrumentation.AdaptiveProcessEventFallbackCount
+				- LastAdaptiveProcessEventFallbackCount;
+			CollectedAdaptiveGuardRejectCount =
+				DispatchResult.BindingInstrumentation.AdaptiveGuardRejectCount
+				- LastAdaptiveGuardRejectCount;
 			CollectedGeneratedS1HitCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1HitCount
 				- LastGeneratedS1HitCount;
@@ -1060,6 +1106,12 @@ namespace
 			CollectedDataRejectedBufferCount =
 				DispatchResult.DataBridgeMetrics.RejectedBuffers
 				- LastDataRejectedBufferCount;
+			LastAdaptiveNativeHitCount =
+				DispatchResult.BindingInstrumentation.AdaptivePreparedNativeHitCount;
+			LastAdaptiveProcessEventFallbackCount =
+				DispatchResult.BindingInstrumentation.AdaptiveProcessEventFallbackCount;
+			LastAdaptiveGuardRejectCount =
+				DispatchResult.BindingInstrumentation.AdaptiveGuardRejectCount;
 			LastGeneratedS1HitCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1HitCount;
 			LastGeneratedS1FallbackCount =
@@ -1643,6 +1695,9 @@ namespace
 		int32 ExpectedHostImportCallCount = 0;
 		uint64 DirectHitCount = 0;
 		uint64 RequestedDirectFallbackCount = 0;
+		uint64 AdaptiveNativeHitCount = 0;
+		uint64 AdaptiveProcessEventFallbackCount = 0;
+		uint64 AdaptiveGuardRejectCount = 0;
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
@@ -1695,6 +1750,9 @@ namespace
 		int32 ExpectedHostImportCallCount = 0;
 		uint64 DirectHitCount = 0;
 		uint64 RequestedDirectFallbackCount = 0;
+		uint64 AdaptiveNativeHitCount = 0;
+		uint64 AdaptiveProcessEventFallbackCount = 0;
+		uint64 AdaptiveGuardRejectCount = 0;
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
@@ -1745,7 +1803,7 @@ namespace
 		case EAvidScriptPerfLane::PuertsV8Static:
 			return TEXT("puerts_v8_static");
 		case EAvidScriptPerfLane::AvidScriptWasmtimeSemantic:
-			return TEXT("avidscript_wasmtime_semantic");
+			return TEXT("avidscript_wasmtime_adaptive_semantic");
 		case EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1:
 			return TEXT("avidscript_wasmtime_generated_s1");
 		case EAvidScriptPerfLane::AvidScriptWasmtimeDataOriented:
@@ -2210,7 +2268,7 @@ namespace
 		if (!SemanticEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
 			!GeneratedEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
 			!DataEntry.BackendId.Equals(TEXT("wasmtime.cranelift.jit"), ESearchCase::CaseSensitive) ||
-			!SemanticEntry.BindingInvocationMode.Equals(TEXT("semantic_process_event"), ESearchCase::CaseSensitive) ||
+			!SemanticEntry.BindingInvocationMode.Equals(TEXT("adaptive_semantic"), ESearchCase::CaseSensitive) ||
 			!GeneratedEntry.BindingInvocationMode.Equals(TEXT("generated_native_s1"), ESearchCase::CaseSensitive) ||
 			!DataEntry.BindingInvocationMode.Equals(TEXT("data_command_buffer"), ESearchCase::CaseSensitive) ||
 			SemanticEntry.LaneIdentitySha256.Equals(GeneratedEntry.LaneIdentitySha256, ESearchCase::CaseSensitive) ||
@@ -3049,6 +3107,9 @@ namespace
 			SelectedAvidScript.GetInvocationEvidence(
 				OutObservation.DirectHitCount,
 				OutObservation.RequestedDirectFallbackCount,
+				OutObservation.AdaptiveNativeHitCount,
+				OutObservation.AdaptiveProcessEventFallbackCount,
+				OutObservation.AdaptiveGuardRejectCount,
 				OutObservation.GeneratedS1HitCount,
 				OutObservation.GeneratedS1FallbackCount,
 				OutObservation.GeneratedS1RejectCount,
@@ -3088,6 +3149,26 @@ namespace
 		const bool bDataGameplay =
 			bDataLane &&
 			FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload);
+		FString BindingInvocationMode;
+		const bool bHasBindingInvocationMode =
+			Observation.BackendInfo.IsValid() &&
+			Observation.BackendInfo->TryGetStringField(
+				TEXT("binding_invocation_mode"),
+				BindingInvocationMode);
+		const bool bAdaptiveLane =
+			Observation.Lane ==
+				EAvidScriptPerfLane::AvidScriptWasmtimeSemantic &&
+			bHasBindingInvocationMode &&
+			BindingInvocationMode.Equals(
+				TEXT("adaptive_semantic"),
+				ESearchCase::CaseSensitive);
+		const bool bStrictSemanticLane =
+			Observation.Lane ==
+				EAvidScriptPerfLane::AvidScriptWasmtimeSemantic &&
+			bHasBindingInvocationMode &&
+			BindingInvocationMode.Equals(
+				TEXT("semantic_process_event"),
+				ESearchCase::CaseSensitive);
 		const int32 ExpectedHostImportCallCount =
 			IsAvidScriptPerfLane(Observation.Lane)
 				? (bDataLane
@@ -3113,9 +3194,16 @@ namespace
 			 Observation.GeneratedS1FallbackCount != 0 ||
 			 Observation.GeneratedS1RejectCount != 0);
 		const bool bSemanticInvalid =
-			Observation.Lane ==
-				EAvidScriptPerfLane::AvidScriptWasmtimeSemantic &&
+			bStrictSemanticLane &&
 			Observation.SemanticHitCount != ExpectedSemanticHitCount;
+		const bool bAdaptiveScalarInvalid =
+			bAdaptiveLane &&
+			Workload == EAvidScriptPerfWorkload::ScalarAddInt32 &&
+			(Observation.AdaptiveNativeHitCount != ExpectedLogicalOperationCount ||
+			 Observation.AdaptiveProcessEventFallbackCount != 0 ||
+			 Observation.AdaptiveGuardRejectCount != 0 ||
+			 Observation.SemanticHitCount != 0 ||
+			 Observation.GeneratedS1HitCount != 0);
 		const bool bGeneratedLaneDataInvalid =
 			Observation.Lane ==
 				EAvidScriptPerfLane::AvidScriptWasmtimeGeneratedS1 &&
@@ -3183,6 +3271,7 @@ namespace
 			Observation.LogicalOperationCount != ExpectedLogicalOperationCount ||
 			bGeneratedS1Invalid ||
 			bSemanticInvalid ||
+			bAdaptiveScalarInvalid ||
 			bGeneratedLaneDataInvalid ||
 			bDataGameplayInvalid ||
 			bDataMicroInvalid ||
@@ -3197,6 +3286,8 @@ namespace
 				TEXT("expected_generated_hit=%llu generated_fallback=%llu ")
 				TEXT("generated_reject=%llu semantic_hit=%llu ")
 				TEXT("expected_semantic_hit=%llu logical=%llu ")
+				TEXT("adaptive_native=%llu adaptive_fallback=%llu ")
+				TEXT("adaptive_guard_reject=%llu ")
 				TEXT("data_generated_expected=%llu data_commands=%llu ")
 				TEXT("data_commands_expected=%llu data_crossings=%llu ")
 				TEXT("data_crossings_expected=%llu data_rejected=%llu ")
@@ -3221,6 +3312,9 @@ namespace
 				Observation.SemanticHitCount,
 				ExpectedSemanticHitCount,
 				ExpectedLogicalOperationCount,
+				Observation.AdaptiveNativeHitCount,
+				Observation.AdaptiveProcessEventFallbackCount,
+				Observation.AdaptiveGuardRejectCount,
 				ExpectedDataGeneratedS1HitCount,
 				Observation.DataLaneCommandCount,
 				ExpectedPropertyWriteCount,
@@ -3504,6 +3598,18 @@ namespace
 			Object,
 			TEXT("requested_direct_fallback_count"),
 			Sample.RequestedDirectFallbackCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("adaptive_native_hit_count"),
+			Sample.AdaptiveNativeHitCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("adaptive_process_event_fallback_count"),
+			Sample.AdaptiveProcessEventFallbackCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("adaptive_guard_reject_count"),
+			Sample.AdaptiveGuardRejectCount);
 		SetExactUnsignedField(
 			Object,
 			TEXT("generated_s1_hit_count"),
@@ -3870,7 +3976,7 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 			EAvidScriptPerfLane::AvidScriptWasmtimeSemantic)];
 	if (!AvidScript.WasmtimeSemantic.Initialize(
 			WasmtimeSelection,
-			EAvidScriptBindingInvocationPolicy::SemanticProcessEvent,
+			EAvidScriptBindingInvocationPolicy::AdaptiveSemantic,
 			SemanticCatalog.BindingInvocationMode,
 			SemanticCatalog.BackendId,
 			SemanticCatalog.RuntimeVersion,
@@ -4088,6 +4194,12 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 					Sample.DirectHitCount = Observation.DirectHitCount;
 					Sample.RequestedDirectFallbackCount =
 						Observation.RequestedDirectFallbackCount;
+					Sample.AdaptiveNativeHitCount =
+						Observation.AdaptiveNativeHitCount;
+					Sample.AdaptiveProcessEventFallbackCount =
+						Observation.AdaptiveProcessEventFallbackCount;
+					Sample.AdaptiveGuardRejectCount =
+						Observation.AdaptiveGuardRejectCount;
 					Sample.GeneratedS1HitCount =
 						Observation.GeneratedS1HitCount;
 					Sample.GeneratedS1FallbackCount =

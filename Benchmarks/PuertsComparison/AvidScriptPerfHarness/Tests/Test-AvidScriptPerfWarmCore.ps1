@@ -22,6 +22,7 @@ $HarnessRoot = Split-Path -Parent $PSScriptRoot
 $SourceRoot = Join-Path $HarnessRoot 'Source/AvidScriptPerfHarness'
 $RunnerHeader = Get-SourceText (Join-Path $SourceRoot 'Public/AvidScriptPerfRunner.h')
 $RunnerSource = Get-SourceText (Join-Path $SourceRoot 'Private/AvidScriptPerfRunner.cpp')
+$GateEvaluator = Get-SourceText (Join-Path $HarnessRoot 'Tools/Evaluate-Phase54PerformanceGates.ps1')
 $VmBackendHeader = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Public/AvidScriptVmBackend.h')
 $WamrBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp')
 $WasmtimeBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp')
@@ -42,6 +43,8 @@ $AvidScriptProfile = Get-SourceText (Join-Path $HarnessRoot 'Content/CSharp/Avid
 $BenchmarkProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Profiles/Phase54Gameplay.formal.json') |
     ConvertFrom-Json
 $Phase56FormalProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Profiles/Phase56Gameplay.formal.json') |
+    ConvertFrom-Json
+$CompatibilityProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'Config/BenchmarkProfile.json') |
     ConvertFrom-Json
 $ControlledRuntimeProfile = Get-SourceText (Join-Path (Split-Path -Parent $HarnessRoot) 'ControlledRuntime/Config/ControlledRuntimeSuiteProfile.json') |
     ConvertFrom-Json
@@ -66,6 +69,26 @@ Assert-True ([double]$ControlledRuntimeProfile.pc_leadership_gate.maximum_geomet
     'the controlled-runtime suite must preserve its 0.95 geomean gate'
 Assert-True ([double]$ControlledRuntimeProfile.pc_leadership_gate.minimum_kernel_win_rate -eq 0.60) `
     'the controlled-runtime suite must preserve its 0.60 kernel win-rate gate'
+Assert-True (@($CompatibilityProfile.lanes) -ccontains 'avidscript_wasmtime_adaptive_semantic') `
+    'the benchmark profile must publish the explicit adaptive semantic lane'
+$AdaptiveCatalog = @(
+    $CompatibilityProfile.lane_catalog |
+        Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic' }
+)
+Assert-True ($AdaptiveCatalog.Count -eq 1) `
+    'the benchmark profile must contain exactly one adaptive semantic catalog entry'
+Assert-True ([string]$AdaptiveCatalog[0].binding_invocation_mode -ceq 'adaptive_semantic') `
+    'the adaptive semantic lane must publish adaptive_semantic invocation identity'
+Assert-True ($GateEvaluator.Contains("'semantic_vs_puerts_reflection'")) `
+    'the adaptive comparator must retain the semantic_vs_puerts_reflection gate id'
+Assert-True ($GateEvaluator.Contains("'avidscript_wasmtime_adaptive_semantic'")) `
+    'the semantic/Puerts gate numerator must use the adaptive semantic lane'
+Assert-True ($RunnerSource.Contains('EAvidScriptBindingInvocationPolicy::AdaptiveSemantic')) `
+    'the formal adaptive comparator must use the explicit adaptive policy'
+Assert-True ($RunnerSource.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) `
+    'strict ProcessEvent must remain available as a diagnostic path'
+Assert-True ($RunnerSource.Contains('EAvidScriptBindingInvocationMode::AdaptivePreparedNative')) `
+    'the formal adaptive scalar must verify the prepared native invocation mode'
 
 $ExpectedLanes = @(
     'native_cpp',
@@ -397,6 +420,9 @@ foreach ($Field in @(
     'expected_operation_call_count',
     'host_import_call_count',
     'expected_host_import_call_count',
+    'adaptive_native_hit_count',
+    'adaptive_process_event_fallback_count',
+    'adaptive_guard_reject_count',
     'generated_s1_hit_count',
     'generated_s1_fallback_count',
     'generated_s1_reject_count',
@@ -408,6 +434,12 @@ foreach ($Field in @(
     'correct')) {
     Assert-True ($RunnerSource.Contains("TEXT(`"$Field`")")) "sample JSON must include $Field"
 }
+Assert-True ($RunnerSource.Contains('AdaptiveNativeHitCount != ExpectedLogicalOperationCount')) `
+    'eligible adaptive scalar samples must require one native hit per logical operation'
+Assert-True ($RunnerSource.Contains('AdaptiveProcessEventFallbackCount != 0')) `
+    'eligible adaptive scalar samples must reject ProcessEvent fallback'
+Assert-True ($RunnerSource.Contains('GeneratedS1HitCount != 0')) `
+    'eligible adaptive scalar samples must reject generated S1 routing'
 
 Assert-True ($RunnerSource.Contains('WorkloadId += 2;')) `
     'data gameplay workloads must map internally from 10/11 to batch4 paths 12/13'

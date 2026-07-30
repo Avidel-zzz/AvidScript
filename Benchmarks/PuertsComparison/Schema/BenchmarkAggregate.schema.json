@@ -84,20 +84,26 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
+            "minProperties": 5,
+            "maxProperties": 5,
             "required": [
               "native_cpp",
               "puerts_v8_reflection",
               "puerts_v8_static",
-              "avidscript_wasmtime_semantic",
               "avidscript_wasmtime_native_direct"
             ],
             "properties": {
               "native_cpp": { "type": "integer", "minimum": 1 },
               "puerts_v8_reflection": { "type": "integer", "minimum": 1 },
               "puerts_v8_static": { "type": "integer", "minimum": 1 },
+              "avidscript_wasmtime_adaptive_semantic": { "type": "integer", "minimum": 1 },
               "avidscript_wasmtime_semantic": { "type": "integer", "minimum": 1 },
               "avidscript_wasmtime_native_direct": { "type": "integer", "minimum": 1 }
-            }
+            },
+            "oneOf": [
+              { "required": ["avidscript_wasmtime_adaptive_semantic"] },
+              { "required": ["avidscript_wasmtime_semantic"] }
+            ]
           }
         }
       }
@@ -392,14 +398,27 @@
         "expected_host_import_call_count": { "type": "integer", "minimum": 0 },
         "direct_hit_count": { "type": "integer", "minimum": 0 },
         "requested_direct_fallback_count": { "type": "integer", "minimum": 0 },
+        "adaptive_native_hit_count": { "type": "integer", "minimum": 0 },
+        "adaptive_process_event_fallback_count": { "type": "integer", "minimum": 0 },
+        "adaptive_guard_reject_count": { "type": "integer", "minimum": 0 },
         "correct": { "const": true },
         "backend_info": { "$ref": "#/$defs/backend_info" }
       },
       "allOf": [
         {
-          "if": { "properties": { "lane": { "enum": ["avidscript_wasmtime_semantic", "avidscript_wasmtime_native_direct"] } } },
+          "if": { "properties": { "lane": { "enum": ["avidscript_wasmtime_adaptive_semantic", "avidscript_wasmtime_semantic", "avidscript_wasmtime_native_direct"] } } },
           "then": { "required": ["backend_info"] },
           "else": { "properties": { "backend_info": false } }
+        },
+        {
+          "if": { "properties": { "lane": { "const": "avidscript_wasmtime_adaptive_semantic" } } },
+          "then": {
+            "required": [
+              "adaptive_native_hit_count",
+              "adaptive_process_event_fallback_count",
+              "adaptive_guard_reject_count"
+            ]
+          }
         }
       ]
     },
@@ -409,6 +428,7 @@
         "native_cpp",
         "puerts_v8_reflection",
         "puerts_v8_static",
+        "avidscript_wasmtime_adaptive_semantic",
         "avidscript_wasmtime_semantic",
         "avidscript_wasmtime_native_direct"
       ]
@@ -421,7 +441,17 @@
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "native_cpp" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_reflection" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
-        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_semantic" }, "binding_invocation_mode": { "const": "semantic_process_event" } } }] },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/lane_catalog_entry" },
+            {
+              "oneOf": [
+                { "properties": { "lane_id": { "const": "avidscript_wasmtime_adaptive_semantic" }, "binding_invocation_mode": { "const": "adaptive_semantic" } } },
+                { "properties": { "lane_id": { "const": "avidscript_wasmtime_semantic" }, "binding_invocation_mode": { "const": "semantic_process_event" } } }
+              ]
+            }
+          ]
+        },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_native_direct" }, "binding_invocation_mode": { "const": "qualified_native_direct" } } }] }
       ],
       "items": false
@@ -455,7 +485,7 @@
         "target_triple": { "type": "string", "minLength": 1 },
         "cpu_feature_policy": { "type": "string", "minLength": 1 },
         "backend_id": { "type": ["string", "null"] },
-        "binding_invocation_mode": { "enum": [null, "semantic_process_event", "qualified_native_direct"] },
+        "binding_invocation_mode": { "enum": [null, "adaptive_semantic", "semantic_process_event", "qualified_native_direct"] },
         "execution_mode": { "type": "string", "minLength": 1 },
         "fallback_used": { "const": false },
         "lane_identity_sha256": { "$ref": "#/$defs/sha256" }
@@ -471,7 +501,7 @@
       ],
       "properties": {
         "backend_id": { "type": "string", "minLength": 1 },
-        "binding_invocation_mode": { "enum": ["semantic_process_event", "qualified_native_direct"] },
+        "binding_invocation_mode": { "enum": ["adaptive_semantic", "semantic_process_event", "qualified_native_direct"] },
         "runtime_version": { "type": "string", "minLength": 1 },
         "execution_mode": { "enum": ["interpreter", "jit"] },
         "artifact_format": { "const": "wasm_bytecode" },

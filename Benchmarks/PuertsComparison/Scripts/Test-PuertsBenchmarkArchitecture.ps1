@@ -92,6 +92,7 @@ Assert-True ($AvidScriptProfile.binding_profile.self_class_path -ceq '/Script/Av
 
 $Profile = Read-RequiredText 'Profiles/Phase54Gameplay.formal.json' | ConvertFrom-Json
 $RequestTemplate = Read-RequiredText 'Profiles/Phase54SixLaneRequest.template.json' | ConvertFrom-Json
+$CompatibilityProfile = Read-RequiredText 'Config/BenchmarkProfile.json' | ConvertFrom-Json
 $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
@@ -124,8 +125,18 @@ foreach ($Property in @(
     Assert-True ([string]$SemanticLane.$Property -ceq [string]$GeneratedLane.$Property) "semantic/generated Wasmtime lanes must share $Property"
     Assert-True ([string]$SemanticLane.$Property -ceq [string]$DataLane.$Property) "semantic/data Wasmtime lanes must share $Property"
 }
+$AdaptiveLane = @(
+    $CompatibilityProfile.lane_catalog |
+        Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic' }
+)
+Assert-True ($AdaptiveLane.Count -eq 1) `
+    'compatibility benchmark profile must publish one adaptive semantic lane'
+Assert-True ([string]$AdaptiveLane[0].binding_invocation_mode -ceq 'adaptive_semantic') `
+    'adaptive semantic lane must publish adaptive_semantic'
 
 $Runner = Read-RequiredText 'AvidScriptPerfHarness/Source/AvidScriptPerfHarness/Private/AvidScriptPerfRunner.cpp'
+Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::AdaptiveSemantic')) `
+    'runner must explicitly configure the adaptive semantic session'
 Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::SemanticProcessEvent')) 'runner must explicitly configure the semantic session'
 Assert-True ($Runner.Contains('EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect')) 'runner must explicitly configure the direct session'
 Assert-True ($Runner.Contains('TryGetInvocationMode')) 'runner must query immutable package invocation plans before timing'
@@ -134,11 +145,35 @@ Assert-True ($Runner.Contains('RequestedDirectFallbackCount')) 'runner must reco
 Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeSemantic')) 'runner must own an independent semantic Wasmtime session'
 Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeGeneratedS1')) 'runner must own an independent generated Wasmtime session'
 Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeDataOriented')) 'runner must own an independent data-oriented Wasmtime session'
+foreach ($Field in @(
+    'adaptive_native_hit_count',
+    'adaptive_process_event_fallback_count',
+    'adaptive_guard_reject_count')) {
+    Assert-True ($Runner.Contains("TEXT(`"$Field`")")) "runner must publish $Field"
+}
 
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
 $ResultSchema = Get-Content -LiteralPath $ResultSchemaPath -Raw | ConvertFrom-Json
 Assert-True (@($ResultSchema.required) -ccontains 'provenance') 'result schema must require provenance'
 Assert-True (@($ResultSchema.required) -ccontains 'samples') 'result schema must require raw samples'
+$AdaptiveSchemaPaths = @(
+    'Schema/BenchmarkResult.schema.json',
+    'Schema/BenchmarkProcessResult.schema.json',
+    'Schema/BenchmarkProcessRequest.schema.json',
+    'Schema/BenchmarkAggregate.schema.json',
+    'Schema/BenchmarkCalibration.schema.json'
+)
+foreach ($RelativePath in $AdaptiveSchemaPaths) {
+    $Schema = Read-RequiredText $RelativePath | ConvertFrom-Json
+    Assert-True (@($Schema.'$defs'.lane_id.enum) -ccontains 'avidscript_wasmtime_adaptive_semantic') `
+        "$RelativePath must accept the adaptive semantic lane identity"
+    Assert-True (@($Schema.'$defs'.lane_id.enum) -ccontains 'avidscript_wasmtime_semantic') `
+        "$RelativePath must retain the strict semantic diagnostic identity"
+    Assert-True (@($Schema.'$defs'.lane_catalog_entry.properties.binding_invocation_mode.enum) -ccontains 'adaptive_semantic') `
+        "$RelativePath must accept adaptive_semantic invocation identity"
+    Assert-True (@($Schema.'$defs'.lane_catalog_entry.properties.binding_invocation_mode.enum) -ccontains 'semantic_process_event') `
+        "$RelativePath must retain semantic_process_event diagnostic identity"
+}
 
 $TrackedText = @(
     Get-ChildItem -LiteralPath $BenchmarkRoot -Recurse -File |

@@ -16,7 +16,7 @@
     "native_cpp",
     "puerts_v8_reflection",
     "puerts_v8_static",
-    "avidscript_wasmtime_semantic",
+    "avidscript_wasmtime_adaptive_semantic",
     "avidscript_wasmtime_native_direct"
   ],
   "lane_identity_algorithm": "canonical_json_utf8_sha256_v1",
@@ -88,7 +88,7 @@
       "fallback_used": false
     },
     {
-      "lane_id": "avidscript_wasmtime_semantic",
+      "lane_id": "avidscript_wasmtime_adaptive_semantic",
       "runtime_id": "wasmtime",
       "runtime_version": "45.0.0",
       "execution_tier": "jit",
@@ -98,14 +98,14 @@
       "execution_artifact_format": "wasm_bytecode",
       "execution_artifact_sha256": "${wasm_sha256}",
       "compiler_identity": "avidscript_csharp_frontend",
-      "compiler_flags": ["profile_phase53_perf", "deterministic"],
+      "compiler_flags": ["profile_phase53_perf", "deterministic", "adaptive_semantic"],
       "runtime_build_config": "AVIDSCRIPT_WITH_WASMTIME=1;Cranelift=1",
       "runtime_build_identity": "${wasmtime_runtime_build_identity}",
       "runtime_artifact_sha256": "${wasmtime_dll_sha256}",
       "target_triple": "x86_64-pc-windows-msvc",
       "cpu_feature_policy": "host_default",
       "backend_id": "wasmtime.cranelift.jit",
-      "binding_invocation_mode": "semantic_process_event",
+      "binding_invocation_mode": "adaptive_semantic",
       "execution_mode": "jit",
       "fallback_used": false
     },

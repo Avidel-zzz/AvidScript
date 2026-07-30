@@ -487,6 +487,13 @@ foreach ($result in $results) {
             'logical_operation_count',
             'checksum'
         )
+        if ([string]$sample.lane -ceq 'avidscript_wasmtime_adaptive_semantic') {
+            $requiredCounters += @(
+                'adaptive_native_hit_count',
+                'adaptive_process_event_fallback_count',
+                'adaptive_guard_reject_count'
+            )
+        }
         foreach ($counter in $requiredCounters) {
             if ($sample.PSObject.Properties.Name -notcontains $counter) {
                 $validityErrors.Add(
@@ -599,6 +606,18 @@ foreach ($result in $results) {
              [uint64]$sample.data_lane_rejected_buffer_count -ne 0)) {
             $validityErrors.Add(
                 "generated S1 path mismatch process=$($result.process_run) workload=$($sample.workload)")
+        }
+        if ($sample.lane -ceq 'avidscript_wasmtime_adaptive_semantic' -and
+            [string]$sample.workload -ceq 'scalar_add_int32' -and
+            ([uint64]$sample.adaptive_native_hit_count -ne $logical -or
+             [uint64]$sample.adaptive_process_event_fallback_count -ne 0 -or
+             [uint64]$sample.adaptive_guard_reject_count -ne 0 -or
+             [uint64]$sample.semantic_hit_count -ne 0 -or
+             [uint64]$sample.generated_s1_hit_count -ne 0 -or
+             [uint64]$sample.generated_s1_fallback_count -ne 0 -or
+             [uint64]$sample.generated_s1_reject_count -ne 0)) {
+            $validityErrors.Add(
+                "adaptive scalar path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
         if ($sample.lane -ceq 'avidscript_wasmtime_semantic' -and
             ([uint64]$sample.semantic_hit_count -ne $expectedSemanticHits -or
@@ -829,8 +848,8 @@ if ($supplementalProvided) {
         -CanonicalProfilePath $microProfilePath `
         -CandidateCommit $supplementalCommit `
         -CandidateTree $supplementalTree
-    $semanticScalar = Get-RequiredMicroP50 -Statistics $microStats `
-        -Lane 'avidscript_wasmtime_semantic' -Workload 'scalar_add_int32'
+    $adaptiveSemanticScalar = Get-RequiredMicroP50 -Statistics $microStats `
+        -Lane 'avidscript_wasmtime_adaptive_semantic' -Workload 'scalar_add_int32'
     $generatedScalar = Get-RequiredMicroP50 -Statistics $microStats `
         -Lane 'avidscript_wasmtime_generated_s1' -Workload 'scalar_add_int32'
     $reflectionScalar = Get-RequiredMicroP50 -Statistics $microStats `
@@ -906,7 +925,8 @@ if ($supplementalProvided) {
         kernel_win_rate = [Math]::Min(
             [double]$suite.leadership.p50_kernel_win_rate,
             [double]$suite.leadership.p95_kernel_win_rate)
-        semantic_vs_puerts_reflection = $semanticScalar / $reflectionScalar
+        semantic_vs_puerts_reflection =
+            $adaptiveSemanticScalar / $reflectionScalar
         s1_scalar_ns = $generatedScalar
         s1_vs_puerts_static = $generatedScalar / $staticScalar
         s1_property_ns = $generatedProperty

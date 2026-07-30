@@ -101,6 +101,7 @@
         "native_cpp",
         "puerts_v8_reflection",
         "puerts_v8_static",
+        "avidscript_wasmtime_adaptive_semantic",
         "avidscript_wasmtime_semantic",
         "avidscript_wasmtime_native_direct"
       ]
@@ -115,20 +116,26 @@
     "lane_iteration_counts": {
       "type": "object",
       "additionalProperties": false,
+      "minProperties": 5,
+      "maxProperties": 5,
       "required": [
         "native_cpp",
         "puerts_v8_reflection",
         "puerts_v8_static",
-        "avidscript_wasmtime_semantic",
         "avidscript_wasmtime_native_direct"
       ],
       "properties": {
         "native_cpp": { "type": "integer", "minimum": 1 },
         "puerts_v8_reflection": { "type": "integer", "minimum": 1 },
         "puerts_v8_static": { "type": "integer", "minimum": 1 },
+        "avidscript_wasmtime_adaptive_semantic": { "type": "integer", "minimum": 1 },
         "avidscript_wasmtime_semantic": { "type": "integer", "minimum": 1 },
         "avidscript_wasmtime_native_direct": { "type": "integer", "minimum": 1 }
-      }
+      },
+      "oneOf": [
+        { "required": ["avidscript_wasmtime_adaptive_semantic"] },
+        { "required": ["avidscript_wasmtime_semantic"] }
+      ]
     },
     "lane_catalog": {
       "type": "array",
@@ -138,7 +145,17 @@
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "native_cpp" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_reflection" } } }] },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "puerts_v8_static" } } }] },
-        { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_semantic" }, "binding_invocation_mode": { "const": "semantic_process_event" } } }] },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/lane_catalog_entry" },
+            {
+              "oneOf": [
+                { "properties": { "lane_id": { "const": "avidscript_wasmtime_adaptive_semantic" }, "binding_invocation_mode": { "const": "adaptive_semantic" } } },
+                { "properties": { "lane_id": { "const": "avidscript_wasmtime_semantic" }, "binding_invocation_mode": { "const": "semantic_process_event" } } }
+              ]
+            }
+          ]
+        },
         { "allOf": [{ "$ref": "#/$defs/lane_catalog_entry" }, { "properties": { "lane_id": { "const": "avidscript_wasmtime_native_direct" }, "binding_invocation_mode": { "const": "qualified_native_direct" } } }] }
       ],
       "items": false
@@ -173,7 +190,7 @@
         "cpu_feature_policy": { "type": "string", "minLength": 1 },
         "backend_id": { "type": ["string", "null"] },
         "binding_invocation_mode": {
-          "enum": [null, "semantic_process_event", "qualified_native_direct"]
+          "enum": [null, "adaptive_semantic", "semantic_process_event", "qualified_native_direct"]
         },
         "execution_mode": { "type": "string", "minLength": 1 },
         "fallback_used": { "const": false },
