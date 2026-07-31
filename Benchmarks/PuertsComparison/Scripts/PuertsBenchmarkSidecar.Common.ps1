@@ -637,7 +637,7 @@ function Get-SidecarAvidScriptRuntimeIdentity {
             "static_lib_sha256=$WamrSha256")
         wasmtime_dll_sha256 = $WasmtimeSha256
         wasmtime_runtime_build_identity = (
-            "wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;func_align=32;wasm32_memory_stable=1;dll_sha256=$WasmtimeSha256")
+            "wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=$WasmtimeSha256")
     }
 }
 
