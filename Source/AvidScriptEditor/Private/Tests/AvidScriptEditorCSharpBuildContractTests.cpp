@@ -2,9 +2,12 @@
 
 #include "AvidScriptEditorCSharpBuildService.h"
 
+#include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -72,6 +75,21 @@ FAvidScriptEditorCSharpBuildConfig MakeCSharpContractConfig(
 	Config.ManifestPath = FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(OutputRoot, Config.ArtifactStem);
 	Config.SemanticCacheRoot = NormalizeCSharpContractTestPath(FPaths::Combine(OutputRoot, TEXT("SemanticCache")));
 	return Config;
+}
+
+bool LoadCSharpContractJsonObject(
+	const FString& Path,
+	TSharedPtr<FJsonObject>& OutObject)
+{
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *Path))
+	{
+		return false;
+	}
+	return FJsonSerializer::Deserialize(
+		TJsonReaderFactory<>::Create(Json),
+		OutObject)
+		&& OutObject.IsValid();
 }
 } // namespace
 
@@ -199,6 +217,136 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 		FAvidScriptEditorCSharpBuildService::BuildProfile(UnknownLookupConfig, UnknownLookupResult));
 	TestEqual(TEXT("Unknown lookup category"),
 		UnknownLookupResult.ErrorCategory, FString(TEXT("report_contract_invalid")));
+
+	const FString MalformedArtifactBody = FString::Printf(TEXT(
+		"$WasmPath = Join-Path $OutputRoot ($ArtifactStem + '.wasm')\n"
+		"[byte[]]$WasmBytes = @(0, 97, 115, 109)\n"
+		"[System.IO.File]::WriteAllBytes($WasmPath, $WasmBytes)\n"
+		"$Sha = (Get-FileHash -LiteralPath $WasmPath -Algorithm SHA256).Hash.ToLowerInvariant()\n"
+		"$ManifestJson = '{\"schema_version\":1,\"wasm\":{\"file\":\"' + $ArtifactStem + '.wasm\",\"sha256\":\"' + $Sha + '\"},\"execution\":{\"format\":\"stale\"}}'\n"
+		"[System.IO.File]::WriteAllText($ManifestPath, $ManifestJson)\n"
+		"[System.IO.File]::WriteAllText($ReportPath, '%s')"),
+		*SuccessJson);
+
+	FAvidScriptEditorCSharpBuildConfig PreferConfig = MakeCSharpContractConfig(
+		TestRoot,
+		TEXT("PreferPrecompiledFallback"),
+		MalformedArtifactBody);
+	const FString PreferArtifactPath = FPaths::Combine(
+		PreferConfig.OutputRoot,
+		PreferConfig.ArtifactStem + TEXT(".wasmtime.cwasm"));
+	TestTrue(
+		TEXT("Prefer fallback stale artifact fixture writes"),
+		FFileHelper::SaveStringToFile(
+			TEXT("stale-precompiled-artifact"),
+			*PreferArtifactPath));
+	FAvidScriptEditorCSharpBuildResult PreferResult;
+	TestTrue(
+		TEXT("PreferPrecompiled keeps a valid canonical build on precompile failure"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(
+			PreferConfig,
+			PreferResult));
+	TestTrue(
+		TEXT("PreferPrecompiled fallback result succeeds"),
+		PreferResult.bSucceeded);
+	TestFalse(
+		TEXT("PreferPrecompiled fallback does not publish serialized bytes"),
+		PreferResult.bVmArtifactPublished);
+	TestEqual(
+		TEXT("PreferPrecompiled records the compiler failure category"),
+		PreferResult.VmArtifactFallbackCategory,
+		FString(TEXT("artifact_compile_failed")));
+	TestEqual(
+		TEXT("PreferPrecompiled selects Wasmtime JIT"),
+		PreferResult.VmArtifactSelectedBackend,
+		FString(TEXT("wasmtime.cranelift.jit")));
+	TestFalse(
+		TEXT("PreferPrecompiled removes stale cwasm on fallback"),
+		FPaths::FileExists(PreferArtifactPath));
+	TSharedPtr<FJsonObject> PreferManifest;
+	TestTrue(
+		TEXT("PreferPrecompiled fallback manifest remains valid"),
+		LoadCSharpContractJsonObject(
+			PreferConfig.ManifestPath,
+			PreferManifest));
+	if (PreferManifest.IsValid())
+	{
+		TestFalse(
+			TEXT("PreferPrecompiled fallback removes stale execution metadata"),
+			PreferManifest->HasField(TEXT("execution")));
+	}
+
+	FAvidScriptEditorCSharpBuildConfig RequireConfig = MakeCSharpContractConfig(
+		TestRoot,
+		TEXT("RequirePrecompiledRollback"),
+		MalformedArtifactBody);
+	RequireConfig.VmArtifactPolicy =
+		EAvidScriptEditorVmArtifactPolicy::RequirePrecompiled;
+	const FString RequireWasmPath = FPaths::Combine(
+		RequireConfig.OutputRoot,
+		RequireConfig.ArtifactStem + TEXT(".wasm"));
+	const FString RequireArtifactPath = FPaths::Combine(
+		RequireConfig.OutputRoot,
+		RequireConfig.ArtifactStem + TEXT(".wasmtime.cwasm"));
+	const FString PreviousReport = TEXT("previous-report");
+	const FString PreviousManifest = TEXT("previous-manifest");
+	const FString PreviousWasm = TEXT("previous-wasm");
+	const FString PreviousArtifact = TEXT("previous-cwasm");
+	TestTrue(
+		TEXT("Require rollback previous report writes"),
+		FFileHelper::SaveStringToFile(
+			PreviousReport,
+			*RequireConfig.ReportPath));
+	TestTrue(
+		TEXT("Require rollback previous manifest writes"),
+		FFileHelper::SaveStringToFile(
+			PreviousManifest,
+			*RequireConfig.ManifestPath));
+	TestTrue(
+		TEXT("Require rollback previous WASM writes"),
+		FFileHelper::SaveStringToFile(PreviousWasm, *RequireWasmPath));
+	TestTrue(
+		TEXT("Require rollback previous cwasm writes"),
+		FFileHelper::SaveStringToFile(
+			PreviousArtifact,
+			*RequireArtifactPath));
+	FAvidScriptEditorCSharpBuildResult RequireResult;
+	TestFalse(
+		TEXT("RequirePrecompiled fails when artifact compilation fails"),
+		FAvidScriptEditorCSharpBuildService::BuildProfile(
+			RequireConfig,
+			RequireResult));
+	TestEqual(
+		TEXT("RequirePrecompiled exposes a stable failure category"),
+		RequireResult.ErrorCategory,
+		FString(TEXT("vm_artifact_compile_failed")));
+	FString RestoredText;
+	TestTrue(
+		TEXT("Require rollback report can be read"),
+		FFileHelper::LoadFileToString(
+			RestoredText,
+			*RequireConfig.ReportPath));
+	TestEqual(TEXT("Require rollback restores report"), RestoredText, PreviousReport);
+	TestTrue(
+		TEXT("Require rollback manifest can be read"),
+		FFileHelper::LoadFileToString(
+			RestoredText,
+			*RequireConfig.ManifestPath));
+	TestEqual(
+		TEXT("Require rollback restores manifest"),
+		RestoredText,
+		PreviousManifest);
+	TestTrue(
+		TEXT("Require rollback WASM can be read"),
+		FFileHelper::LoadFileToString(RestoredText, *RequireWasmPath));
+	TestEqual(TEXT("Require rollback restores WASM"), RestoredText, PreviousWasm);
+	TestTrue(
+		TEXT("Require rollback cwasm can be read"),
+		FFileHelper::LoadFileToString(RestoredText, *RequireArtifactPath));
+	TestEqual(
+		TEXT("Require rollback restores cwasm"),
+		RestoredText,
+		PreviousArtifact);
 
 	return true;
 }

@@ -6,6 +6,7 @@
 #include "AvidScriptFrontendReport.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBindingSliceService.h"
+#include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
 
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -129,7 +130,8 @@ TArray<FString> GetAvidScriptCSharpCommittedArtifactPaths(
 	return {
 		Config.ReportPath,
 		Config.ManifestPath,
-		FPaths::Combine(Config.OutputRoot, Config.ArtifactStem + TEXT(".wasm"))
+		FPaths::Combine(Config.OutputRoot, Config.ArtifactStem + TEXT(".wasm")),
+		FAvidScriptEditorVmArtifactPublisher::MakeArtifactPath(Config)
 	};
 }
 
@@ -585,6 +587,8 @@ static bool PrepareAvidScriptCSharpBuildPipeline(
 			OutPlan.BootstrapConfig.ArtifactStem);
 	OutPlan.BootstrapConfig.RuntimeBindingPackagePath.Reset();
 	OutPlan.BootstrapConfig.PreparedBuildReportPath.Reset();
+	OutPlan.BootstrapConfig.VmArtifactPolicy =
+		EAvidScriptEditorVmArtifactPolicy::JitOnly;
 	OutPlan.BootstrapConfig.bOmitRuntimeBindingPackage = false;
 	return true;
 #else
@@ -753,6 +757,18 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 			OutResult);
 		return false;
 	};
+	auto PublishVmArtifactAndFinish = [&Plan, &OutResult, &FinishArtifactTransaction]()
+	{
+		bool bCommit = OutResult.bSucceeded;
+		if (bCommit
+			&& !FAvidScriptEditorVmArtifactPublisher::Publish(
+				Plan.FinalConfig,
+				OutResult))
+		{
+			bCommit = false;
+		}
+		return FinishArtifactTransaction(bCommit);
+	};
 
 	if (!Plan.bAutomaticBindingSlice)
 	{
@@ -761,7 +777,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 			Plan,
 			FAvidScriptCSharpBuildInvocationCounts::FromResult(FinalResult),
 			OutResult);
-		return FinishArtifactTransaction(FinalResult.bSucceeded);
+		return PublishVmArtifactAndFinish();
 	}
 
 	FAvidScriptEditorCSharpBuildResult AggregateResult = FinalResult;
@@ -790,7 +806,7 @@ bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(
 		Plan,
 		TotalInvocationCounts,
 		OutResult);
-	return FinishArtifactTransaction(FinalResult.bSucceeded);
+	return PublishVmArtifactAndFinish();
 }
 
 void FAvidScriptEditorCSharpBuildPipeline::Cleanup(

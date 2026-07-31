@@ -5,6 +5,13 @@
 
 #include "CoreMinimal.h"
 
+enum class EAvidScriptEditorVmArtifactPolicy : uint8
+{
+	JitOnly,
+	PreferPrecompiled,
+	RequirePrecompiled
+};
+
 struct FAvidScriptEditorCSharpBuildConfig
 {
 	FString SourcePath;
@@ -21,6 +28,8 @@ struct FAvidScriptEditorCSharpBuildConfig
 	FString ModuleId;
 	FString ArtifactStem;
 	FString Configuration = TEXT("Release");
+	EAvidScriptEditorVmArtifactPolicy VmArtifactPolicy =
+		EAvidScriptEditorVmArtifactPolicy::PreferPrecompiled;
 	bool bEnableDataLaneFusion = true;
 	bool bOmitRuntimeBindingPackage = false;
 	bool bDisableSemanticCache = false;
@@ -72,6 +81,20 @@ struct FAvidScriptEditorCSharpBuildResult
 	FString SemanticCacheDiagnosticMessage;
 	FString BindingSelectionHash;
 	bool bReusedAuthorizationBindingPackage = false;
+	bool bVmArtifactPublished = false;
+	bool bVmArtifactCacheHit = false;
+	double VmArtifactCompileMs = 0.0;
+	FString VmArtifactPath;
+	FString VmArtifactFormat;
+	FString VmArtifactSha256;
+	FString VmArtifactCanonicalSha256;
+	FString VmArtifactCompilerBuildIdentity;
+	FString VmArtifactTargetTriple;
+	FString VmArtifactAttestationId;
+	FString VmArtifactPolicy;
+	FString VmArtifactRequestedBackend;
+	FString VmArtifactSelectedBackend;
+	FString VmArtifactFallbackCategory;
 };
 
 class AVIDSCRIPTEDITOR_API FAvidScriptEditorCSharpBuildService

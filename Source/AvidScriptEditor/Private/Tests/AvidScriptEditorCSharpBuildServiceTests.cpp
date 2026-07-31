@@ -2,7 +2,9 @@
 
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "AvidScriptHash.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildInvoker.h"
+#include "CSharpBuild/AvidScriptEditorVmArtifactPublisher.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -147,6 +149,28 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(
 		TEXT("Custom C# profile publishes formal WASM"),
 		FPaths::FileExists(FPaths::Combine(Config.OutputRoot, TEXT("custom_mover.wasm"))));
+	TestTrue(
+		TEXT("Custom C# profile publishes a Wasmtime artifact"),
+		BuildResult.bVmArtifactPublished);
+	TestTrue(
+		TEXT("Custom C# profile Wasmtime artifact exists"),
+		FPaths::FileExists(BuildResult.VmArtifactPath));
+	TestEqual(
+		TEXT("Custom C# profile records the serialized format"),
+		BuildResult.VmArtifactFormat,
+		FString(TEXT("wasmtime_serialized_v1")));
+	TestEqual(
+		TEXT("Custom C# profile records an execution SHA-256"),
+		BuildResult.VmArtifactSha256.Len(),
+		64);
+	TestEqual(
+		TEXT("Custom C# profile records a session attestation"),
+		BuildResult.VmArtifactAttestationId.Len(),
+		32);
+	TestEqual(
+		TEXT("Custom C# profile selects the precompiled backend"),
+		BuildResult.VmArtifactSelectedBackend,
+		FString(TEXT("wasmtime.cranelift.precompiled")));
 
 	TSharedPtr<FJsonObject> ReportObject;
 	TestTrue(TEXT("Custom C# profile report is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ReportPath, ReportObject));
@@ -218,6 +242,29 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestTrue(TEXT("Custom C# profile manifest is valid JSON"), LoadAvidScriptCSharpBuildTestJsonObject(Config.ManifestPath, ManifestObject));
 	if (ManifestObject.IsValid())
 	{
+		const TSharedPtr<FJsonObject>* ExecutionObject = nullptr;
+		if (TestTrue(
+			TEXT("Custom manifest contains execution provenance"),
+			ManifestObject->TryGetObjectField(
+				TEXT("execution"),
+				ExecutionObject))
+			&& ExecutionObject != nullptr
+			&& ExecutionObject->IsValid())
+		{
+			TestEqual(
+				TEXT("Custom manifest execution identity matches result"),
+				(*ExecutionObject)->GetStringField(TEXT("sha256")),
+				BuildResult.VmArtifactSha256);
+			TestEqual(
+				TEXT("Custom manifest canonical identity matches result"),
+				(*ExecutionObject)->GetStringField(
+					TEXT("canonical_sha256")),
+				BuildResult.VmArtifactCanonicalSha256);
+			TestEqual(
+				TEXT("Custom manifest persists explicit policy"),
+				(*ExecutionObject)->GetStringField(TEXT("policy")),
+				FString(TEXT("prefer_precompiled")));
+		}
 		const TSharedPtr<FJsonObject>* ManifestBindingPackage = nullptr;
 		if (TestTrue(
 			TEXT("Custom manifest contains runtime binding package provenance"),
@@ -295,6 +342,78 @@ bool FAvidScriptEditorCSharpBuildServiceCustomProfileTest::RunTest(const FString
 	TestEqual(TEXT("Shared finalizer preserves WASM backend count"), FinalizedResult.WasmBackendInvocationCount, ExplicitResult.WasmBackendInvocationCount);
 	TestEqual(TEXT("Shared finalizer preserves cache lookup"), FinalizedResult.SemanticCacheLookup, ExplicitResult.SemanticCacheLookup);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBuildServiceJitOnlyArtifactTest,
+	"AvidScript.Editor.CSharpBuildService.JitOnlyArtifact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBuildServiceJitOnlyArtifactTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpBuildTestPath(
+		FPaths::Combine(
+			FPaths::ProjectSavedDir(),
+			TEXT("AvidScriptTests/CSharpProfiles/JitOnlyArtifact")));
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	TestTrue(
+		TEXT("JIT-only artifact test root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	FAvidScriptEditorCSharpBuildConfig Config;
+	Config.OutputRoot = TestRoot;
+	Config.ArtifactStem = TEXT("jit_only");
+	Config.ManifestPath = FPaths::Combine(
+		TestRoot,
+		TEXT("jit_only.avidscript.json"));
+	Config.VmArtifactPolicy = EAvidScriptEditorVmArtifactPolicy::JitOnly;
+	const FString WasmPath = FPaths::Combine(TestRoot, TEXT("jit_only.wasm"));
+	const TArray<uint8> WasmBytes = {
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
+	};
+	TestTrue(
+		TEXT("JIT-only canonical WASM writes"),
+		FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+	const FString ManifestJson = FString::Printf(
+		TEXT("{\"schema_version\":1,\"wasm\":{\"file\":\"jit_only.wasm\",\"sha256\":\"%s\"},")
+		TEXT("\"execution\":{\"format\":\"stale\"}}"),
+		*FAvidScriptHash::Sha256Hex(WasmBytes));
+	TestTrue(
+		TEXT("JIT-only manifest writes"),
+		FFileHelper::SaveStringToFile(ManifestJson, *Config.ManifestPath));
+	const FString ArtifactPath =
+		FAvidScriptEditorVmArtifactPublisher::MakeArtifactPath(Config);
+	TestTrue(
+		TEXT("JIT-only stale artifact writes"),
+		FFileHelper::SaveStringToFile(TEXT("stale"), *ArtifactPath));
+
+	FAvidScriptEditorCSharpBuildResult Result;
+	Result.bSucceeded = true;
+	TestTrue(
+		TEXT("JIT-only publication succeeds"),
+		FAvidScriptEditorVmArtifactPublisher::Publish(Config, Result));
+	TestTrue(TEXT("JIT-only result remains successful"), Result.bSucceeded);
+	TestFalse(
+		TEXT("JIT-only publication removes stale cwasm"),
+		FPaths::FileExists(ArtifactPath));
+	TestEqual(
+		TEXT("JIT-only publication records explicit fallback"),
+		Result.VmArtifactFallbackCategory,
+		FString(TEXT("jit_only")));
+	TSharedPtr<FJsonObject> PublishedManifest;
+	TestTrue(
+		TEXT("JIT-only manifest remains valid JSON"),
+		LoadAvidScriptCSharpBuildTestJsonObject(
+			Config.ManifestPath,
+			PublishedManifest));
+	if (PublishedManifest.IsValid())
+	{
+		TestFalse(
+			TEXT("JIT-only manifest removes execution provenance"),
+			PublishedManifest->HasField(TEXT("execution")));
+	}
 	return true;
 }
 
