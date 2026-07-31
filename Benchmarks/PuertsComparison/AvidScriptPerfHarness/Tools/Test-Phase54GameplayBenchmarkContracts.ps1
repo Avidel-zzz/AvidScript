@@ -156,11 +156,13 @@ Assert-True (
     'Runner 必须对 data-oriented lane 的实际 Host crossing 做精确计数校验。'
 Assert-True ($evaluatorText.Contains('function Get-ExpectedGeneratedHits') -and
     $evaluatorText.Contains('function Get-ExpectedSemanticHits') -and
+    $evaluatorText.Contains('function Get-ExpectedAdaptiveNativeHits') -and
+    $evaluatorText.Contains('$expectedAdaptiveFallbackHits') -and
     $evaluatorText.Contains('$expectedDataGeneratedHits') -and
     $evaluatorText.Contains('$expectedDataHostCalls') -and
     $evaluatorText.Contains('host import count mismatch') -and
     $evaluatorText.Contains('$isGameplay')) `
-    '统一 Gate 必须复现 semantic、generated S1、data micro/gameplay 与 Host crossing 的不同计数合同。'
+    '统一 Gate 必须复现 semantic、adaptive、generated S1、data micro/gameplay 与 Host crossing 的不同计数合同。'
 Assert-True ($evaluatorText.Contains('exact zero-based process_run sequence') -and
     $evaluatorText.Contains('share one non-empty run_id') -and
     $evaluatorText.Contains('distinct lowercase SHA-256 request identities') -and

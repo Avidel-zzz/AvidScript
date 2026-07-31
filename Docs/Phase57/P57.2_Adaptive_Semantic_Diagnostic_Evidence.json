@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.2",
+  "evidence_class": "diagnostic",
+  "captured_at_utc": "2026-07-31T02:04:00Z",
+  "candidate": {
+    "commit": "d60c2c98c7edd8b121517e9e46aff3215b35e3b0",
+    "tree": "1dd6e651ee299e50ea84bde3a510430202282b02",
+    "dirty": false
+  },
+  "inputs": {
+    "profile_id": "phase56.micro-diagnostic-v1",
+    "profile_sha256": "bd27f2b29aa50309efa5c031e1425ef825895c1584fd64112380ba222c0514b2",
+    "request_sha256": "995beaea7dba70031e4df8265e05f5fd6bbc704a46deb12d05143fd3ef9aaec8",
+    "result_sha256": "f69be64e84f6ca6827160add84385e080db4b12882a8853c0d0f31a981e5a1eb"
+  },
+  "validity": {
+    "total_timed_samples": 300,
+    "correct_timed_samples": 300,
+    "adaptive_timed_samples": 50,
+    "adaptive_native_hit_count": 25600,
+    "adaptive_process_event_fallback_count": 22400,
+    "adaptive_guard_reject_count": 0
+  },
+  "scalar_add_int32_p50_ns_per_operation": {
+    "native_cpp": 1.74,
+    "puerts_v8_reflection": 116.2891,
+    "puerts_v8_static": 32.66,
+    "avidscript_wasmtime_adaptive_semantic": 112.4219,
+    "avidscript_wasmtime_generated_s1": 28.11,
+    "avidscript_wasmtime_data_oriented": 28.39
+  },
+  "semantic_vs_puerts_reflection": {
+    "value": 0.9667,
+    "maximum": 0.8,
+    "pass": false
+  },
+  "limitations": [
+    "diagnostic single-process evidence",
+    "does not replace the five-process formal phase gate",
+    "raw samples remain external and are represented by SHA-256 only"
+  ]
+}

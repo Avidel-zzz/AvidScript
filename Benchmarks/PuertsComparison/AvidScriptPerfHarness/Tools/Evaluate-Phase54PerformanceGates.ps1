@@ -104,6 +104,32 @@ function Get-ExpectedSemanticHits {
     return 0u
 }
 
+function Get-ExpectedAdaptiveNativeHits {
+    param(
+        [string]$Workload,
+        [uint64]$Iterations,
+        [pscustomobject]$WorkloadContract
+    )
+
+    if ($Workload -in @('gameplay_frame_small', 'gameplay_frame_dense')) {
+        [uint64]$scalarPropertyOperationsPerFrame =
+            [uint64]$WorkloadContract.logical_entities_per_frame *
+            [uint64]$WorkloadContract.scalar_property_operations_per_entity
+        [uint64]$propertyWritesPerFrame =
+            [uint64]$WorkloadContract.property_write_operations_per_frame
+        [uint64]$eventOperationsPerFrame =
+            [uint64]$WorkloadContract.event_operations_per_frame
+        return $Iterations * (
+            $scalarPropertyOperationsPerFrame -
+            $propertyWritesPerFrame +
+            $eventOperationsPerFrame)
+    }
+    if ($Workload -in @('scalar_add_int32', 'batch_scalar')) {
+        return $Iterations
+    }
+    return 0u
+}
+
 function New-GateResult {
     param(
         [string]$Name,
@@ -535,6 +561,12 @@ foreach ($result in $results) {
             -Workload ([string]$sample.workload) `
             -Iterations ([uint64]$sample.iterations) `
             -LogicalOperationCount $logical
+        $expectedAdaptiveNativeHits = Get-ExpectedAdaptiveNativeHits `
+            -Workload ([string]$sample.workload) `
+            -Iterations ([uint64]$sample.iterations) `
+            -WorkloadContract $workloadContract
+        [uint64]$expectedAdaptiveFallbackHits =
+            $expectedSemanticHits - $expectedAdaptiveNativeHits
         $isGameplayWorkload = [string]$sample.workload -in @(
             'gameplay_frame_small',
             'gameplay_frame_dense')
@@ -549,6 +581,9 @@ foreach ($result in $results) {
         $isFusedLane = [string]$sample.lane -in @(
             'avidscript_wasmtime_generated_s1',
             'avidscript_wasmtime_data_oriented')
+        $isAdaptiveLane =
+            [string]$sample.lane -ceq
+                'avidscript_wasmtime_adaptive_semantic'
         $directPrepareCount =
             [uint64]$sample.generated_direct_read_prepare_count +
             [uint64]$sample.generated_direct_write_prepare_count
@@ -566,6 +601,23 @@ foreach ($result in $results) {
                 [uint64]$sample.generated_fused_revalidate_count -ne 0 -or
                 [uint64]$sample.generated_fused_call_site_prepare_count -ne 0 -or
                 $directPrepareCount -ne 0))
+        }
+        elseif ($isAdaptiveLane) {
+            if ($expectedAdaptiveNativeHits -gt 0) {
+                [uint64]$sample.generated_fused_revalidate_count -ne 1 -or
+                [uint64]$sample.generated_fused_fast_hit_count + 1 -ne
+                    $expectedAdaptiveNativeHits -or
+                [uint64]$sample.generated_fused_call_site_prepare_count -ne 0 -or
+                $directPrepareCount -ne 0 -or
+                [uint64]$sample.generated_journal_slow_path_count -ne 0
+            }
+            else {
+                [uint64]$sample.generated_fused_fast_hit_count -ne 0 -or
+                [uint64]$sample.generated_fused_revalidate_count -ne 0 -or
+                [uint64]$sample.generated_fused_call_site_prepare_count -ne 0 -or
+                $directPrepareCount -ne 0 -or
+                [uint64]$sample.generated_journal_slow_path_count -ne 0
+            }
         }
         else {
             [uint64]$sample.generated_fused_fast_hit_count -ne 0 -or
@@ -607,17 +659,22 @@ foreach ($result in $results) {
             $validityErrors.Add(
                 "generated S1 path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
-        if ($sample.lane -ceq 'avidscript_wasmtime_adaptive_semantic' -and
-            [string]$sample.workload -ceq 'scalar_add_int32' -and
-            ([uint64]$sample.adaptive_native_hit_count -ne $logical -or
-             [uint64]$sample.adaptive_process_event_fallback_count -ne 0 -or
+        if ($isAdaptiveLane -and
+            ([uint64]$sample.adaptive_native_hit_count -ne
+                $expectedAdaptiveNativeHits -or
+             [uint64]$sample.adaptive_process_event_fallback_count -ne
+                $expectedAdaptiveFallbackHits -or
              [uint64]$sample.adaptive_guard_reject_count -ne 0 -or
-             [uint64]$sample.semantic_hit_count -ne 0 -or
+             [uint64]$sample.semantic_hit_count -ne
+                $expectedAdaptiveFallbackHits -or
              [uint64]$sample.generated_s1_hit_count -ne 0 -or
              [uint64]$sample.generated_s1_fallback_count -ne 0 -or
-             [uint64]$sample.generated_s1_reject_count -ne 0)) {
+             [uint64]$sample.generated_s1_reject_count -ne 0 -or
+             [uint64]$sample.data_lane_command_count -ne 0 -or
+             [uint64]$sample.data_lane_crossing_count -ne 0 -or
+             [uint64]$sample.data_lane_rejected_buffer_count -ne 0)) {
             $validityErrors.Add(
-                "adaptive scalar path mismatch process=$($result.process_run) workload=$($sample.workload)")
+                "adaptive path mismatch process=$($result.process_run) workload=$($sample.workload)")
         }
         if ($sample.lane -ceq 'avidscript_wasmtime_semantic' -and
             ([uint64]$sample.semantic_hit_count -ne $expectedSemanticHits -or
