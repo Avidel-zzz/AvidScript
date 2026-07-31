@@ -199,6 +199,9 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new(void)
 	}
 	wasmtime_config_strategy_set(config, WASMTIME_STRATEGY_CRANELIFT);
 	wasmtime_config_cranelift_opt_level_set(config, WASMTIME_OPT_LEVEL_SPEED_AND_SIZE);
+	wasmtime_config_cranelift_flag_set(config, "has_avx", "false");
+	wasmtime_config_cranelift_flag_set(config, "has_avx2", "false");
+	wasmtime_config_cranelift_flag_set(config, "has_fma", "false");
 	wasmtime_config_memory_reservation_set(config, wasm32_address_space_bytes);
 	wasmtime_config_memory_may_move_set(config, false);
 #ifdef WASMTIME_FEATURE_COMPONENT_MODEL

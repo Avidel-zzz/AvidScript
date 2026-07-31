@@ -395,7 +395,7 @@ public:
 		}
 		BackendInfo.RuntimeArtifactSha256 = ObservedDllSha256;
 		BackendInfo.RuntimeBuildIdentity = FString::Printf(
-			TEXT("wasmtime-v%s;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=%s"),
+			TEXT("wasmtime-v%s;cranelift=1;opt=speed_and_size;isa=sse42;wasm32_memory_stable=1;dll_sha256=%s"),
 			*BackendInfo.RuntimeVersion,
 			*ObservedDllSha256);
 #endif
