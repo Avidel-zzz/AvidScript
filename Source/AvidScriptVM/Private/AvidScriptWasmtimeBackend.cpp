@@ -1,5 +1,6 @@
 #include "AvidScriptVmBackend.h"
 
+#include "AvidScriptHash.h"
 #include "AvidScriptVmStaticHostImports.h"
 #include "AvidScriptWasmtimeApi.h"
 #include "AvidScriptWasmtimeTypedHostApi.h"
@@ -159,16 +160,28 @@ FString MakeWasmtimeImportIdentityKey(const FString& ModuleName, const FString& 
 		+ ImportName;
 }
 
-FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo()
+FAvidScriptVmBackendInfo MakeWasmtimeBackendInfo(
+	EAvidScriptVmArtifactFormat ArtifactFormat)
 {
 	FAvidScriptVmBackendInfo Info;
 	Info.Kind = EAvidScriptVmBackendKind::Wasmtime;
-	Info.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
-	Info.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	Info.ExecutionMode = ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized
+		? EAvidScriptVmExecutionMode::Aot
+		: EAvidScriptVmExecutionMode::Jit;
+	Info.ArtifactFormat = ArtifactFormat;
 	Info.Capabilities = EAvidScriptVmCapability::GuestMemory
-		| EAvidScriptVmCapability::Jit
 		| EAvidScriptVmCapability::StructuredStack;
-	Info.StableBackendId = TEXT("wasmtime.cranelift.jit");
+	if (ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized)
+	{
+		Info.Capabilities |= EAvidScriptVmCapability::Aot
+			| EAvidScriptVmCapability::PrecompiledArtifact;
+		Info.StableBackendId = TEXT("wasmtime.cranelift.precompiled");
+	}
+	else
+	{
+		Info.Capabilities |= EAvidScriptVmCapability::Jit;
+		Info.StableBackendId = TEXT("wasmtime.cranelift.jit");
+	}
 	Info.RuntimeVersion = TEXT("45.0.0");
 #if PLATFORM_WINDOWS
 	Info.TargetTriple = TEXT("x86_64-pc-windows-msvc");
@@ -305,8 +318,9 @@ struct FAvidScriptWasmtimeExportEntry
 class FAvidScriptWasmtimeBackend final : public IAvidScriptVmBackend, public IAvidScriptVmGuestMemory
 {
 public:
-	FAvidScriptWasmtimeBackend()
-		: BackendInfo(MakeWasmtimeBackendInfo())
+	explicit FAvidScriptWasmtimeBackend(
+		EAvidScriptVmArtifactFormat ArtifactFormat)
+		: BackendInfo(MakeWasmtimeBackendInfo(ArtifactFormat))
 	{
 		AdvanceBackendInstanceIdentity();
 	}
@@ -327,6 +341,27 @@ public:
 		const FAvidScriptVmLoadConfig& Config,
 		FAvidScriptVmError& OutError) override
 	{
+		if (BackendInfo.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmBytecode)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_format_mismatch"),
+				TEXT("A precompiled Wasmtime backend requires LoadArtifact with canonical WASM provenance."));
+			return false;
+		}
+		return LoadArtifact(
+			FAvidScriptVmArtifactView::FromWasmBytecode(Bytecode),
+			InModuleId,
+			Config,
+			OutError);
+	}
+
+	bool LoadArtifact(
+		const FAvidScriptVmArtifactView& Artifact,
+		const FString& InModuleId,
+		const FAvidScriptVmLoadConfig& Config,
+		FAvidScriptVmError& OutError) override
+	{
 		OutError.Reset();
 		if (ActiveCallDepth > 0)
 		{
@@ -343,10 +378,67 @@ public:
 		SetWasmtimeError(OutError, TEXT("backend_unavailable"), TEXT("Wasmtime is unavailable for this target."));
 		return false;
 #else
-		if (Bytecode.IsEmpty())
+		if (Artifact.ArtifactFormat != BackendInfo.ArtifactFormat)
 		{
-			SetWasmtimeError(OutError, TEXT("invalid_bytecode"), TEXT("No WASM bytecode was provided."));
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_format_mismatch"),
+				TEXT("The artifact format does not match the selected Wasmtime backend."));
 			return false;
+		}
+		if (Artifact.ExecutionBytes.IsEmpty()
+			|| Artifact.CanonicalWasmBytes.IsEmpty())
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("invalid_artifact"),
+				TEXT("Execution and canonical WASM bytes must both be present."));
+			return false;
+		}
+		const bool bSerialized =
+			Artifact.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+		if (!bSerialized
+			&& (Artifact.ExecutionBytes.Num() != Artifact.CanonicalWasmBytes.Num()
+				|| FMemory::Memcmp(
+					Artifact.ExecutionBytes.GetData(),
+					Artifact.CanonicalWasmBytes.GetData(),
+					Artifact.ExecutionBytes.Num()) != 0))
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_identity_mismatch"),
+				TEXT("WASM execution bytes must match the canonical bytes that were validated."));
+			return false;
+		}
+		if (bSerialized)
+		{
+			if (Artifact.Trust != EAvidScriptVmArtifactTrust::VerifiedPackage)
+			{
+				SetWasmtimeError(
+					OutError,
+					TEXT("artifact_untrusted"),
+					TEXT("Wasmtime serialized modules are accepted only from a verified package manifest."));
+				return false;
+			}
+			if (Artifact.TargetTriple != BackendInfo.TargetTriple)
+			{
+				SetWasmtimeError(
+					OutError,
+					TEXT("artifact_target_mismatch"),
+					TEXT("The serialized module target triple does not match this backend."));
+				return false;
+			}
+			if (Artifact.ExecutionIdentity !=
+					FAvidScriptHash::Sha256Hex(Artifact.ExecutionBytes)
+				|| Artifact.CanonicalWasmIdentity !=
+					FAvidScriptHash::Sha256Hex(Artifact.CanonicalWasmBytes))
+			{
+				SetWasmtimeError(
+					OutError,
+					TEXT("artifact_identity_mismatch"),
+					TEXT("The serialized or canonical WASM SHA-256 differs from its package identity."));
+				return false;
+			}
 		}
 		if (Config.StackSize == 0 || Config.HeapSize == 0)
 		{
@@ -355,7 +447,10 @@ public:
 		}
 		FAvidScriptWasmModuleLayout ModuleLayout;
 		FString LayoutError;
-		if (!InspectAvidScriptWasmModuleLayout(Bytecode, ModuleLayout, LayoutError))
+		if (!InspectAvidScriptWasmModuleLayout(
+			Artifact.CanonicalWasmBytes,
+			ModuleLayout,
+			LayoutError))
 		{
 			SetWasmtimeError(OutError, TEXT("wasm_layout_invalid"), LayoutError);
 			return false;
@@ -399,6 +494,16 @@ public:
 			*BackendInfo.RuntimeVersion,
 			*ObservedDllSha256);
 #endif
+		if (bSerialized
+			&& Artifact.CompilerBuildIdentity != BackendInfo.RuntimeBuildIdentity)
+		{
+			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
+			SetWasmtimeError(
+				OutError,
+				TEXT("artifact_compiler_mismatch"),
+				TEXT("The serialized module compiler identity does not match the active Wasmtime engine."));
+			return false;
+		}
 		Engine = avidscript_wasmtime_engine_new();
 		LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 		if (Engine == nullptr)
@@ -408,11 +513,17 @@ public:
 		}
 
 		const double ModuleLoadStart = FPlatformTime::Seconds();
-		AvidScriptWasmtimeFailure* ModuleFailure = avidscript_wasmtime_module_new(
-			Engine,
-			Bytecode.GetData(),
-			static_cast<size_t>(Bytecode.Num()),
-			&Module);
+		AvidScriptWasmtimeFailure* ModuleFailure = bSerialized
+			? avidscript_wasmtime_module_deserialize(
+				Engine,
+				Artifact.ExecutionBytes.GetData(),
+				static_cast<size_t>(Artifact.ExecutionBytes.Num()),
+				&Module)
+			: avidscript_wasmtime_module_new(
+				Engine,
+				Artifact.CanonicalWasmBytes.GetData(),
+				static_cast<size_t>(Artifact.CanonicalWasmBytes.Num()),
+				&Module);
 		LoadMetrics.ModuleLoadMs = MeasureWasmtimeElapsedMs(ModuleLoadStart);
 		if (ModuleFailure != nullptr || Module == nullptr)
 		{
@@ -2506,7 +2617,8 @@ private:
 };
 } // namespace
 
-TUniquePtr<IAvidScriptVmBackend> CreateAvidScriptWasmtimeBackend()
+TUniquePtr<IAvidScriptVmBackend> CreateAvidScriptWasmtimeBackend(
+	EAvidScriptVmArtifactFormat ArtifactFormat)
 {
-	return MakeUnique<FAvidScriptWasmtimeBackend>();
+	return MakeUnique<FAvidScriptWasmtimeBackend>(ArtifactFormat);
 }

@@ -1,7 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "AvidScriptHash.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptVmResultFixtureBuilder.h"
+#include "AvidScriptWasmtimeApi.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -493,6 +495,92 @@ TUniquePtr<IAvidScriptVmBackend> CreateWasmtimeBackendForTest(FAvidScriptVmError
 	return CreateAvidScriptVmBackend(Selection, OutError);
 }
 
+TUniquePtr<IAvidScriptVmBackend> CreateWasmtimePrecompiledBackendForTest(
+	FAvidScriptVmError& OutError)
+{
+	FAvidScriptVmBackendSelection Selection;
+	Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	return CreateAvidScriptVmBackend(Selection, OutError);
+}
+
+#if AVIDSCRIPT_WITH_WASMTIME
+FString ConsumeWasmtimeTestFailure(AvidScriptWasmtimeFailure* Failure)
+{
+	if (Failure == nullptr)
+	{
+		return FString();
+	}
+	size_t MessageSize = 0;
+	const char* Message = avidscript_wasmtime_failure_message(
+		Failure,
+		&MessageSize);
+	const FUTF8ToTCHAR Converted(
+		Message,
+		static_cast<int32>(FMath::Min<size_t>(MessageSize, MAX_int32)));
+	const FString Details(Converted.Length(), Converted.Get());
+	avidscript_wasmtime_failure_delete(Failure);
+	return Details;
+}
+
+bool SerializeWasmtimeFixture(
+	TConstArrayView<uint8> Bytecode,
+	TArray<uint8>& OutSerialized,
+	FString& OutError)
+{
+	OutSerialized.Reset();
+	OutError.Reset();
+	AvidScriptWasmtimeEngine* Engine = avidscript_wasmtime_engine_new();
+	if (Engine == nullptr)
+	{
+		OutError = TEXT("Wasmtime test engine allocation failed.");
+		return false;
+	}
+
+	AvidScriptWasmtimeModule* Module = nullptr;
+	AvidScriptWasmtimeFailure* Failure = avidscript_wasmtime_module_new(
+		Engine,
+		Bytecode.GetData(),
+		static_cast<size_t>(Bytecode.Num()),
+		&Module);
+	if (Failure != nullptr || Module == nullptr)
+	{
+		OutError = Failure != nullptr
+			? ConsumeWasmtimeTestFailure(Failure)
+			: TEXT("Wasmtime test module allocation failed.");
+		avidscript_wasmtime_engine_delete(Engine);
+		return false;
+	}
+
+	uint8_t* SerializedBytes = nullptr;
+	size_t SerializedSize = 0;
+	Failure = avidscript_wasmtime_module_serialize(
+		Module,
+		&SerializedBytes,
+		&SerializedSize);
+	if (Failure != nullptr
+		|| SerializedBytes == nullptr
+		|| SerializedSize == 0
+		|| SerializedSize > static_cast<size_t>(MAX_int32))
+	{
+		OutError = Failure != nullptr
+			? ConsumeWasmtimeTestFailure(Failure)
+			: TEXT("Wasmtime produced an invalid serialized module.");
+		avidscript_wasmtime_serialized_bytes_delete(SerializedBytes);
+		avidscript_wasmtime_module_delete(Module);
+		avidscript_wasmtime_engine_delete(Engine);
+		return false;
+	}
+
+	OutSerialized.Append(SerializedBytes, static_cast<int32>(SerializedSize));
+	avidscript_wasmtime_serialized_bytes_delete(SerializedBytes);
+	avidscript_wasmtime_module_delete(Module);
+	avidscript_wasmtime_engine_delete(Engine);
+	return true;
+}
+#endif
+
 bool LoadWasmtimeTestModule(
 	FAutomationTestBase& Test,
 	IAvidScriptVmBackend& Backend,
@@ -886,6 +974,193 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };
 	TestFalse(TEXT("malformed WASM rejects"), Backend->Load(MakeArrayView(Malformed), TEXT("wasmtime_malformed"), Config, Error));
 	TestFalse(TEXT("malformed WASM reports details"), Error.Details.IsEmpty());
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimePrecompiledArtifactTest,
+	"AvidScript.VM.Wasmtime.PrecompiledArtifact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimePrecompiledArtifactTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptVmError Error;
+	TUniquePtr<IAvidScriptVmBackend> JitBackend =
+		CreateWasmtimeBackendForTest(Error);
+#if !AVIDSCRIPT_WITH_WASMTIME
+	TestNull(
+		TEXT("Wasmtime JIT is unavailable without its managed dependency"),
+		JitBackend.Get());
+	TUniquePtr<IAvidScriptVmBackend> PrecompiledBackend =
+		CreateWasmtimePrecompiledBackendForTest(Error);
+	TestNull(
+		TEXT("Wasmtime precompiled backend is unavailable without its managed dependency"),
+		PrecompiledBackend.Get());
+	return true;
+#else
+	if (!TestNotNull(TEXT("Wasmtime JIT backend is created"), JitBackend.Get()))
+	{
+		return false;
+	}
+
+	const TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
+	FAvidScriptVmLoadConfig Config;
+	if (!LoadWasmtimeTestModule(
+		*this,
+		*JitBackend,
+		Bytecode,
+		Config,
+		Error))
+	{
+		return false;
+	}
+	const FString CompilerBuildIdentity =
+		JitBackend->GetBackendInfo().RuntimeBuildIdentity;
+	const FString TargetTriple = JitBackend->GetBackendInfo().TargetTriple;
+	JitBackend->Unload();
+	const uint8 ForeignExecutionBytes[] = { 0x00, 0x61, 0x73, 0x6d };
+	FAvidScriptVmArtifactView MismatchedWasmArtifact =
+		FAvidScriptVmArtifactView::FromWasmBytecode(Bytecode);
+	MismatchedWasmArtifact.ExecutionBytes = MakeArrayView(ForeignExecutionBytes);
+	TestFalse(
+		TEXT("JIT artifact cannot separate executed and validated WASM bytes"),
+		JitBackend->LoadArtifact(
+			MismatchedWasmArtifact,
+			TEXT("wasmtime_jit_identity_mismatch"),
+			Config,
+			Error));
+	TestEqual(
+		TEXT("JIT identity mismatch category"),
+		Error.Category,
+		FString(TEXT("artifact_identity_mismatch")));
+
+	TArray<uint8> SerializedBytes;
+	FString SerializationError;
+	if (!TestTrue(
+		TEXT("Wasmtime module serializes with the production engine configuration"),
+		SerializeWasmtimeFixture(
+			Bytecode,
+			SerializedBytes,
+			SerializationError)))
+	{
+		AddError(SerializationError);
+		return false;
+	}
+
+	TUniquePtr<IAvidScriptVmBackend> PrecompiledBackend =
+		CreateWasmtimePrecompiledBackendForTest(Error);
+	if (!TestNotNull(
+		TEXT("Wasmtime precompiled backend is created"),
+		PrecompiledBackend.Get()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("precompiled backend has a stable identity"),
+		PrecompiledBackend->GetBackendInfo().StableBackendId,
+		FString(TEXT("wasmtime.cranelift.precompiled")));
+	TestTrue(
+		TEXT("precompiled backend advertises AOT"),
+		EnumHasAnyFlags(
+			PrecompiledBackend->GetBackendInfo().Capabilities,
+			EAvidScriptVmCapability::Aot));
+
+	TestFalse(
+		TEXT("precompiled backend rejects raw WASM loading"),
+		PrecompiledBackend->Load(
+			Bytecode,
+			TEXT("wasmtime_precompiled_raw"),
+			Config,
+			Error));
+	TestEqual(
+		TEXT("raw WASM rejection category"),
+		Error.Category,
+		FString(TEXT("artifact_format_mismatch")));
+
+	const FString SerializedIdentity =
+		FAvidScriptHash::Sha256Hex(SerializedBytes);
+	const FString CanonicalIdentity = FAvidScriptHash::Sha256Hex(Bytecode);
+	const FAvidScriptVmArtifactView VerifiedArtifact =
+		FAvidScriptVmArtifactView::FromWasmtimeSerialized(
+			SerializedBytes,
+			Bytecode,
+			SerializedIdentity,
+			CanonicalIdentity,
+			CompilerBuildIdentity,
+			TargetTriple,
+			EAvidScriptVmArtifactTrust::VerifiedPackage);
+
+	FAvidScriptVmArtifactView InvalidArtifact = VerifiedArtifact;
+	InvalidArtifact.Trust = EAvidScriptVmArtifactTrust::Untrusted;
+	TestFalse(
+		TEXT("untrusted serialized artifact is rejected"),
+		PrecompiledBackend->LoadArtifact(
+			InvalidArtifact,
+			TEXT("wasmtime_precompiled_untrusted"),
+			Config,
+			Error));
+	TestEqual(
+		TEXT("untrusted artifact category"),
+		Error.Category,
+		FString(TEXT("artifact_untrusted")));
+
+	InvalidArtifact = VerifiedArtifact;
+	InvalidArtifact.ExecutionIdentity = TEXT("invalid-sha256");
+	TestFalse(
+		TEXT("serialized artifact with a mismatched digest is rejected"),
+		PrecompiledBackend->LoadArtifact(
+			InvalidArtifact,
+			TEXT("wasmtime_precompiled_digest_mismatch"),
+			Config,
+			Error));
+	TestEqual(
+		TEXT("digest mismatch category"),
+		Error.Category,
+		FString(TEXT("artifact_identity_mismatch")));
+
+	InvalidArtifact = VerifiedArtifact;
+	InvalidArtifact.CompilerBuildIdentity = TEXT("foreign-wasmtime-build");
+	TestFalse(
+		TEXT("serialized artifact from another compiler build is rejected"),
+		PrecompiledBackend->LoadArtifact(
+			InvalidArtifact,
+			TEXT("wasmtime_precompiled_compiler_mismatch"),
+			Config,
+			Error));
+	TestEqual(
+		TEXT("compiler mismatch category"),
+		Error.Category,
+		FString(TEXT("artifact_compiler_mismatch")));
+
+	if (!TestTrue(
+		TEXT("verified serialized artifact loads"),
+		PrecompiledBackend->LoadArtifact(
+			VerifiedArtifact,
+			TEXT("wasmtime_precompiled_verified"),
+			Config,
+			Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("serialized module load time is measured"),
+		PrecompiledBackend->GetLoadMetrics().ModuleLoadMs > 0.0);
+	FAvidScriptVmExportHandle BeginPlayHandle;
+	TestTrue(
+		TEXT("precompiled BeginPlay export resolves"),
+		PrecompiledBackend->ResolveExport(
+			TEXT("avid_on_begin_play"),
+			BeginPlayHandle,
+			Error));
+	TestTrue(
+		TEXT("precompiled BeginPlay export executes"),
+		PrecompiledBackend->Call(
+			BeginPlayHandle,
+			FAvidScriptVmCallFrame(),
+			Error));
 	return true;
 #endif
 }

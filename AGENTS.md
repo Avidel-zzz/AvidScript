@@ -89,6 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-01 P57.7 集中安全复审晚于首次统一构建：WasmtimeSerialized 首次构建与 Automation 通过后，文档化接口时才发现手工构造的 `WasmBytecode` artifact 可令 execution bytes 与 canonical bytes 分离，必须补一次安全修复和增量验证。Prevention：涉及“双制品/来源/被验证输入与被执行输入”的接口，集中审查清单必须在首次阶段 Gate 前逐项核对 identity binding、byte ownership、trust producer 和实际 execution source；确认被检查字节与被执行字节不可分离后才启动统一构建。
+- 2026-08-01 P57.7 并行探测隔离规则写入后立即复发：对真实 `wasmtime.h` 执行可能无匹配的 `rg` 时，仍与 `Get-Item`、`git status` 放在同一编排脚本，`rg` exit 1 再次使整体结果丢失。Prevention：规则写入后的下一条命令必须先做一次机械自检；任何内容匹配探测都作为独立 `shell_command` 执行，确定性查询才允许并行，不能因路径已确认就忽略“无匹配”也是合法结果。
+- 2026-08-01 P57.7 已知路径规则复发并扩大并行失败面：检查 Wasmtime C API 声明时把不存在的根级 `ThirdParty` 与已确认的 `Source` 一并传给 `rg`，且该探测与四个确定性静态检查放在同一并行脚本中，单项 exit 1 使其余结果没有被完整回传。Prevention：未知 owner 必须先单独执行仓库级 `rg --files` 索引并从返回值选取字面路径；可能因“无匹配/路径不存在”返回非零的探测不得与确定性 Gate 共用一个会整体失败的编排单元。
 - 2026-08-01 P57.5 PowerShell statement pipeline 解析错误复发：两次把 `foreach (...) { ... } | Format-Table` 直接写成顶层语句，PowerShell 报 `An empty pipe element is not allowed`。Prevention：需要把 `foreach` 结果送入管道时，固定先写 `$rows = @(foreach (...) { ... })`，下一行再执行 `$rows | ...`；禁止依赖顶层 statement 后直接接管道。
 - 2026-08-01 P57.5 批量外部工具退出码被 `ForEach-Object` 掩盖：批量运行 `wasm-opt -O4` 时 SIMD 项因缺少 `--enable-simd` 失败，但后续文件成功使整个 PowerShell 命令最终 exit 0。Prevention：批量调用 native tool 后立即检查 `$LASTEXITCODE` 并在非零时 `throw`；批次结束还必须按预期文件数、每项摘要或独立 validator 验证产物，不能把 PowerShell 顶层 exit 0 当成每个子进程成功。
 - 2026-08-01 P57.5 已确认源码 owner 后仍加入猜测根：检索 Wasmtime 配置时同时传入不存在的仓库根 `ThirdParty`，随后检索上游源码又加入不存在的 `crates/runtime`，有效命中伴随路径错误退出。Prevention：首次由 `rg --files` 或 `git ls-tree` 确认 owner 后，后续命令只逐字复用已存在路径；未知范围从已确认父目录配合 `-g` 收窄，禁止再附加“可能存在”的并列根。

@@ -32,24 +32,23 @@ TUniquePtr<IAvidScriptVmBackend> CreateAvidScriptVmBackend(
 			TEXT("The requested VM backend is unavailable in this build."));
 		return nullptr;
 #else
-		if (Selection.ExecutionMode != EAvidScriptVmExecutionMode::Jit
-			&& Selection.ExecutionMode != EAvidScriptVmExecutionMode::Auto)
+		const bool bRequestsJit =
+			Selection.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmBytecode
+			&& (Selection.ExecutionMode == EAvidScriptVmExecutionMode::Jit
+				|| Selection.ExecutionMode == EAvidScriptVmExecutionMode::Auto);
+		const bool bRequestsPrecompiled =
+			Selection.ArtifactFormat == EAvidScriptVmArtifactFormat::WasmtimeSerialized
+			&& (Selection.ExecutionMode == EAvidScriptVmExecutionMode::Aot
+				|| Selection.ExecutionMode == EAvidScriptVmExecutionMode::Auto);
+		if (!bRequestsJit && !bRequestsPrecompiled)
 		{
 			SetFactoryError(
 				OutError,
 				TEXT("execution_mode_unavailable"),
-				TEXT("The Wasmtime backend supports Cranelift JIT execution only."));
+				TEXT("The Wasmtime execution mode does not match the requested artifact format."));
 			return nullptr;
 		}
-		if (Selection.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmBytecode)
-		{
-			SetFactoryError(
-				OutError,
-				TEXT("artifact_format_unavailable"),
-				TEXT("The Wasmtime JIT core accepts canonical WASM bytecode only."));
-			return nullptr;
-		}
-		return CreateAvidScriptWasmtimeBackend();
+		return CreateAvidScriptWasmtimeBackend(Selection.ArtifactFormat);
 #endif
 	}
 

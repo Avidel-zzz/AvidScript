@@ -67,6 +67,16 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_module_new(
 	const uint8_t* bytecode,
 	size_t bytecode_size,
 	AvidScriptWasmtimeModule** out_module);
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_deserialize(
+	AvidScriptWasmtimeEngine* engine,
+	const uint8_t* serialized_bytes,
+	size_t serialized_size,
+	AvidScriptWasmtimeModule** out_module);
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_serialize(
+	const AvidScriptWasmtimeModule* module,
+	uint8_t** out_serialized_bytes,
+	size_t* out_serialized_size);
+void avidscript_wasmtime_serialized_bytes_delete(uint8_t* serialized_bytes);
 void avidscript_wasmtime_module_delete(AvidScriptWasmtimeModule* module);
 
 AvidScriptWasmtimeStore* avidscript_wasmtime_store_new(AvidScriptWasmtimeEngine* engine);

@@ -60,9 +60,9 @@
       "severity": "Important",
       "found_batch": "P57.5",
       "scope": "Frozen 12-kernel Wasmtime/V8 P95 geomean and P95 kernel win-rate gates",
-      "evidence": "Phase 56 values were 0.9958005731 and 0.50; Phase 57 has not yet produced candidate-bound formal controlled-runtime evidence",
+      "evidence": "P57.6 frozen 12-kernel CPU0 formal: p50 geo 0.9821689140, p95 geo 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; aggregate SHA-256 2fdebb2a51399f41ea3813182ba6a96ab439e9e1572c93af376b164149cbf31f. P57.7 added a verified WasmtimeSerialized runtime consumer but did not change steady-state gate results.",
       "deferral_reason": "Isolated attribution follows closure of semantic, Generated S1, and prepared-export fixed costs",
-      "remediation": "Profile hashing, predictable branch, SIMD128, and P95 variance under the frozen controlled-runtime suite; optimize product Wasmtime configuration or generated workload code without changing kernel bytes",
+      "remediation": "Implement the trusted Editor precompiler and manifest provenance, expose compiler inlining through a controlled Wasmtime toolchain, then profile hashing, predictable branch, SIMD128, and p95 variance under the unchanged frozen controlled-runtime suite without changing kernel bytes.",
       "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
@@ -121,6 +121,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 9,
-  "updated_at_utc": "2026-07-31T19:46:17.8136509+00:00"
+  "revision": 10,
+  "updated_at_utc": "2026-07-31T20:05:24.7986771+00:00"
 }

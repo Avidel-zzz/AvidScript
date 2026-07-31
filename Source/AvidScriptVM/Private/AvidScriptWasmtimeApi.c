@@ -252,6 +252,68 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_module_new(
 	return NULL;
 }
 
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_deserialize(
+	AvidScriptWasmtimeEngine* engine,
+	const uint8_t* serialized_bytes,
+	size_t serialized_size,
+	AvidScriptWasmtimeModule** out_module)
+{
+	AvidScriptWasmtimeModule* module;
+	wasmtime_error_t* error;
+	*out_module = NULL;
+	module = (AvidScriptWasmtimeModule*)calloc(1, sizeof(*module));
+	if (module == NULL)
+	{
+		return NULL;
+	}
+	error = wasmtime_module_deserialize(
+		engine->value,
+		serialized_bytes,
+		serialized_size,
+		&module->value);
+	if (error != NULL)
+	{
+		free(module);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	*out_module = module;
+	return NULL;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_module_serialize(
+	const AvidScriptWasmtimeModule* module,
+	uint8_t** out_serialized_bytes,
+	size_t* out_serialized_size)
+{
+	wasm_byte_vec_t serialized;
+	wasmtime_error_t* error;
+	uint8_t* copied_bytes;
+	*out_serialized_bytes = NULL;
+	*out_serialized_size = 0;
+	error = wasmtime_module_serialize(module->value, &serialized);
+	if (error != NULL)
+	{
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	copied_bytes = (uint8_t*)malloc(serialized.size);
+	if (copied_bytes == NULL)
+	{
+		wasm_byte_vec_delete(&serialized);
+		return avidscript_wasmtime_local_failure(
+			"Wasmtime serialized module allocation failed.");
+	}
+	memcpy(copied_bytes, serialized.data, serialized.size);
+	*out_serialized_bytes = copied_bytes;
+	*out_serialized_size = serialized.size;
+	wasm_byte_vec_delete(&serialized);
+	return NULL;
+}
+
+void avidscript_wasmtime_serialized_bytes_delete(uint8_t* serialized_bytes)
+{
+	free(serialized_bytes);
+}
+
 void avidscript_wasmtime_module_delete(AvidScriptWasmtimeModule* module)
 {
 	if (module != NULL)

@@ -24,6 +24,12 @@ enum class EAvidScriptVmArtifactFormat : uint8
 	WasmtimeSerialized
 };
 
+enum class EAvidScriptVmArtifactTrust : uint8
+{
+	Untrusted,
+	VerifiedPackage
+};
+
 enum class EAvidScriptVmCapability : uint32
 {
 	None = 0,
@@ -64,7 +70,9 @@ struct FAvidScriptVmArtifactView
 	TArrayView<const uint8> CanonicalWasmBytes;
 	FString ExecutionIdentity;
 	FString CanonicalWasmIdentity;
+	FString CompilerBuildIdentity;
 	FString TargetTriple;
+	EAvidScriptVmArtifactTrust Trust = EAvidScriptVmArtifactTrust::Untrusted;
 
 	static FAvidScriptVmArtifactView FromWasmBytecode(
 		TArrayView<const uint8> WasmBytes,
@@ -75,6 +83,27 @@ struct FAvidScriptVmArtifactView
 		View.CanonicalWasmBytes = WasmBytes;
 		View.ExecutionIdentity = WasmIdentity;
 		View.CanonicalWasmIdentity = WasmIdentity;
+		return View;
+	}
+
+	static FAvidScriptVmArtifactView FromWasmtimeSerialized(
+		TArrayView<const uint8> SerializedBytes,
+		TArrayView<const uint8> WasmBytes,
+		const FString& SerializedIdentity,
+		const FString& WasmIdentity,
+		const FString& InCompilerBuildIdentity,
+		const FString& InTargetTriple,
+		EAvidScriptVmArtifactTrust InTrust)
+	{
+		FAvidScriptVmArtifactView View;
+		View.ExecutionBytes = SerializedBytes;
+		View.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+		View.CanonicalWasmBytes = WasmBytes;
+		View.ExecutionIdentity = SerializedIdentity;
+		View.CanonicalWasmIdentity = WasmIdentity;
+		View.CompilerBuildIdentity = InCompilerBuildIdentity;
+		View.TargetTriple = InTargetTriple;
+		View.Trust = InTrust;
 		return View;
 	}
 };
@@ -378,7 +407,8 @@ struct FAvidScriptVmLoadConfig
 };
 
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWamrBackend();
-AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWasmtimeBackend();
+AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptWasmtimeBackend(
+	EAvidScriptVmArtifactFormat ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode);
 AVIDSCRIPTVM_API TUniquePtr<class IAvidScriptVmBackend> CreateAvidScriptVmBackend(
 	const FAvidScriptVmBackendSelection& Selection,
 	FAvidScriptVmError& OutError);
@@ -394,6 +424,33 @@ public:
 		const FString& ModuleId,
 		const FAvidScriptVmLoadConfig& Config,
 		FAvidScriptVmError& OutError) = 0;
+	virtual bool LoadArtifact(
+		const FAvidScriptVmArtifactView& Artifact,
+		const FString& ModuleId,
+		const FAvidScriptVmLoadConfig& Config,
+		FAvidScriptVmError& OutError)
+	{
+		if (Artifact.ArtifactFormat != EAvidScriptVmArtifactFormat::WasmBytecode)
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("artifact_format_unavailable");
+			OutError.Details = TEXT("This VM backend does not support the requested precompiled artifact format.");
+			return false;
+		}
+		if (Artifact.ExecutionBytes.Num() != Artifact.CanonicalWasmBytes.Num()
+			|| (Artifact.ExecutionBytes.Num() > 0
+				&& FMemory::Memcmp(
+					Artifact.ExecutionBytes.GetData(),
+					Artifact.CanonicalWasmBytes.GetData(),
+					Artifact.ExecutionBytes.Num()) != 0))
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("artifact_identity_mismatch");
+			OutError.Details = TEXT("WASM execution bytes must match the canonical bytes that were validated.");
+			return false;
+		}
+		return Load(Artifact.CanonicalWasmBytes, ModuleId, Config, OutError);
+	}
 	virtual bool ResolveExport(
 		const FString& ExportName,
 		FAvidScriptVmExportHandle& OutHandle,

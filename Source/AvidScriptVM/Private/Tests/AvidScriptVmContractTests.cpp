@@ -153,6 +153,28 @@ bool FAvidScriptVmBackendInfoContractTest::RunTest(const FString& Parameters)
 		EAvidScriptVmArtifactFormat::WasmBytecode);
 	TestEqual(TEXT("WASM convenience execution identity"), Artifact.ExecutionIdentity, FString(TEXT("wasm-sha256")));
 	TestEqual(TEXT("WASM convenience canonical identity"), Artifact.CanonicalWasmIdentity, FString(TEXT("wasm-sha256")));
+	const uint8 SerializedBytes[] = { 0x7f, 0x45, 0x4c, 0x46 };
+	const FAvidScriptVmArtifactView SerializedArtifact =
+		FAvidScriptVmArtifactView::FromWasmtimeSerialized(
+			MakeArrayView(SerializedBytes),
+			MakeArrayView(WasmBytes),
+			TEXT("serialized-sha256"),
+			TEXT("wasm-sha256"),
+			TEXT("compiler-identity"),
+			TEXT("x86_64-pc-windows-msvc"),
+			EAvidScriptVmArtifactTrust::VerifiedPackage);
+	TestEqual(
+		TEXT("serialized convenience artifact format"),
+		SerializedArtifact.ArtifactFormat,
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+	TestEqual(
+		TEXT("serialized convenience compiler identity"),
+		SerializedArtifact.CompilerBuildIdentity,
+		FString(TEXT("compiler-identity")));
+	TestEqual(
+		TEXT("serialized convenience trust"),
+		SerializedArtifact.Trust,
+		EAvidScriptVmArtifactTrust::VerifiedPackage);
 	return true;
 }
 
@@ -193,11 +215,31 @@ bool FAvidScriptVmBackendFactorySelectionTest::RunTest(const FString& Parameters
 	TestNull(TEXT("Wasmtime interpreter mode is rejected"), Backend.Get());
 	TestEqual(TEXT("Wasmtime interpreter category"), Error.Category, FString(TEXT("execution_mode_unavailable")));
 
-	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
 	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
 	Backend = CreateAvidScriptVmBackend(Selection, Error);
-	TestNull(TEXT("Wasmtime serialized artifact is not accepted by the JIT core"), Backend.Get());
-	TestEqual(TEXT("Wasmtime serialized category"), Error.Category, FString(TEXT("artifact_format_unavailable")));
+	TestNotNull(TEXT("Wasmtime precompiled selection returns a backend"), Backend.Get());
+	if (Backend)
+	{
+		TestEqual(
+			TEXT("Wasmtime precompiled execution mode"),
+			Backend->GetBackendInfo().ExecutionMode,
+			EAvidScriptVmExecutionMode::Aot);
+		TestEqual(
+			TEXT("Wasmtime precompiled artifact format"),
+			Backend->GetBackendInfo().ArtifactFormat,
+			EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+		TestTrue(
+			TEXT("Wasmtime advertises precompiled artifacts"),
+			EnumHasAnyFlags(
+				Backend->GetBackendInfo().Capabilities,
+				EAvidScriptVmCapability::PrecompiledArtifact));
+	}
+
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Backend = CreateAvidScriptVmBackend(Selection, Error);
+	TestNull(TEXT("Wasmtime serialized artifact rejects JIT mode"), Backend.Get());
+	TestEqual(TEXT("Wasmtime serialized JIT category"), Error.Category, FString(TEXT("execution_mode_unavailable")));
 #else
 	TestNull(TEXT("unavailable Wasmtime backend is rejected"), Backend.Get());
 	TestEqual(TEXT("Wasmtime error category"), Error.Category, FString(TEXT("backend_unavailable")));
