@@ -37,14 +37,15 @@ bool FAvidScriptGeneratedBindingLease::IsActive() const
 {
 	return IsInGameThread()
 		&& State.IsValid()
-		&& State->bActive
-		&& State->Entries.IsValidIndex(EntryIndex);
+		&& ActivityFlag != nullptr
+		&& *ActivityFlag
+		&& CachedEntry != nullptr;
 }
 
 const FAvidScriptGeneratedBindingEntry*
 FAvidScriptGeneratedBindingLease::GetEntry() const
 {
-	return IsActive() ? &State->Entries[EntryIndex] : nullptr;
+	return IsActive() ? CachedEntry : nullptr;
 }
 
 FAvidScriptGeneratedBindingRegistry&
@@ -183,7 +184,8 @@ bool FAvidScriptGeneratedBindingRegistry::Acquire(
 			return false;
 		}
 		OutLease.State = *State;
-		OutLease.EntryIndex = Index;
+		OutLease.ActivityFlag = &(*State)->bActive;
+		OutLease.CachedEntry = &Entry;
 		return true;
 	}
 

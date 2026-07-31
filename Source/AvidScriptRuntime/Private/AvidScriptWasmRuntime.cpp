@@ -3380,7 +3380,7 @@ bool FAvidScriptWasmRuntimeInstance::TryResolveFusedCallbackReceiver(
 	FAvidScriptFusedCallbackFrame& Frame =
 		FusedCallbackFrameStack.Last();
 	const uint64 RegistryRevision =
-		HostContext.ObjectRegistry->GetRevision();
+		HostContext.ObjectRegistry->GetRevisionGameThreadFast();
 	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 		BindingInvocationContext.InvocationInstrumentation;
 	const bool bCaptureTiming =
@@ -3443,7 +3443,8 @@ bool FAvidScriptWasmRuntimeInstance::PrepareFusedGeneratedHostEffect(
 	FAvidScriptPreparedGeneratedHostCall& Call,
 	UObject& Receiver)
 {
-	if (Call.Binding.Lease.GetEntry() != Call.Binding.Entry)
+	if (Call.Binding.Lease.GetEntryGameThreadFast()
+		!= Call.Binding.Entry)
 	{
 		Call.PreparedCallbackEpoch = 0;
 		Call.PreparedReloadEpoch = 0;

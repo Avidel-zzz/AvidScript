@@ -61,12 +61,23 @@ class AVIDSCRIPTBINDINGS_API FAvidScriptGeneratedBindingLease
 public:
 	bool IsActive() const;
 	const FAvidScriptGeneratedBindingEntry* GetEntry() const;
+	FORCEINLINE const FAvidScriptGeneratedBindingEntry*
+	GetEntryGameThreadFast() const
+	{
+		checkSlow(IsInGameThread());
+		return ActivityFlag != nullptr
+				&& *ActivityFlag
+				&& CachedEntry != nullptr
+			? CachedEntry
+			: nullptr;
+	}
 
 private:
 	friend class FAvidScriptGeneratedBindingRegistry;
 
 	TSharedPtr<FAvidScriptGeneratedBindingPackageState> State;
-	int32 EntryIndex = INDEX_NONE;
+	const bool* ActivityFlag = nullptr;
+	const FAvidScriptGeneratedBindingEntry* CachedEntry = nullptr;
 };
 
 class AVIDSCRIPTBINDINGS_API FAvidScriptGeneratedBindingRegistry

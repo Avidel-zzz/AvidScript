@@ -1615,3 +1615,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a profile hash was first taken from another worktree whose line-ending materialization differed from the clean candidate, even though the logical JSON content matched.
 - Prevention: all profile and source hashes come from the exact candidate worktree used for sampling; another checkout may inspect content but must not substitute its materialized bytes in provenance.
+
+### 2026-07-31: public module layouts require producer and consumer relinks
+
+- Mistake: a public Bindings structure gained frozen fast-path fields, but the first scoped build targeted only Runtime. UBT recompiled the dependency library without relinking the Bindings DLL, so the focused test loaded mismatched structure layouts and reported unrelated identity failures.
+- Prevention: when a public cross-module type changes size or field layout, enumerate its producer and every binary consumer before testing. Build each affected module target in the same batch and verify their DLL timestamps before launching Automation.

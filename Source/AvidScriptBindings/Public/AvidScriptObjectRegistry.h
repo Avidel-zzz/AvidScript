@@ -92,6 +92,11 @@ public:
 		bool bIncludeObjectPath = true);
 	void Reset();
 	uint64 GetRevision() const;
+	FORCEINLINE uint64 GetRevisionGameThreadFast() const
+	{
+		checkSlow(IsInGameThread());
+		return Revision;
+	}
 
 	int32 NumSlots() const { return Slots.Num(); }
 	int32 NumFreeSlots() const { return FreeSlots.Num(); }
