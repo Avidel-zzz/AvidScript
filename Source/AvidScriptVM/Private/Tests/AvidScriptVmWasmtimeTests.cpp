@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptHash.h"
+#include "AvidScriptVmArtifact.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptVmResultFixtureBuilder.h"
 #include "AvidScriptWasmtimeApi.h"
@@ -1161,6 +1162,120 @@ bool FAvidScriptVmWasmtimePrecompiledArtifactTest::RunTest(
 			BeginPlayHandle,
 			FAvidScriptVmCallFrame(),
 			Error));
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeArtifactCompilerTest,
+	"AvidScript.VM.Wasmtime.ArtifactCompiler",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
+	const FString& Parameters)
+{
+	static uint32 ArtifactCompilerTestNonce = 0;
+	TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
+	TArray<uint8> NonceSection;
+	AppendWasmtimeString(NonceSection, "avidscript_artifact_compiler_test");
+	AppendWasmtimeU32Leb(NonceSection, ++ArtifactCompilerTestNonce);
+	AppendWasmtimeSection(Bytecode, 0, NonceSection);
+	FAvidScriptVmArtifactCompileRequest Request;
+	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Request.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Request.CanonicalWasmBytes = Bytecode;
+
+	FAvidScriptVmArtifactCompileResult FirstResult;
+#if !AVIDSCRIPT_WITH_WASMTIME
+	TestFalse(
+		TEXT("artifact compiler is unavailable without Wasmtime"),
+		CompileAvidScriptVmArtifact(Request, FirstResult));
+	TestEqual(
+		TEXT("unavailable artifact compiler category"),
+		FirstResult.Error.Category,
+		FString(TEXT("backend_unavailable")));
+	return true;
+#else
+	if (!TestTrue(
+			TEXT("production Wasmtime artifact compiles"),
+			CompileAvidScriptVmArtifact(Request, FirstResult)))
+	{
+		AddError(
+			FirstResult.Error.Category
+			+ TEXT(": ")
+			+ FirstResult.Error.Details);
+		return false;
+	}
+	TestTrue(TEXT("compile result succeeds"), FirstResult.bSucceeded);
+	TestFalse(TEXT("first compile is a cache miss"), FirstResult.bCacheHit);
+	TestFalse(
+		TEXT("serialized artifact bytes are present"),
+		FirstResult.Artifact.ExecutionBytes.IsEmpty());
+	TestEqual(
+		TEXT("canonical identity is exact"),
+		FirstResult.Artifact.CanonicalWasmIdentity,
+		FAvidScriptHash::Sha256Hex(Bytecode));
+	TestEqual(
+		TEXT("attestation id has fixed width"),
+		FirstResult.Artifact.AttestationId.Len(),
+		32);
+	TestEqual(
+		TEXT("attestation id is lowercase"),
+		FirstResult.Artifact.AttestationId,
+		FirstResult.Artifact.AttestationId.ToLower());
+	TestTrue(
+		TEXT("exact compiled tuple is authorized"),
+		AuthorizeAvidScriptVmArtifact(
+			FirstResult.Artifact.AttestationId,
+			FirstResult.Artifact));
+
+	FAvidScriptVmArtifactCompileResult CachedResult;
+	if (!TestTrue(
+			TEXT("same-process artifact compile succeeds"),
+			CompileAvidScriptVmArtifact(Request, CachedResult)))
+	{
+		AddError(
+			CachedResult.Error.Category
+			+ TEXT(": ")
+			+ CachedResult.Error.Details);
+		return false;
+	}
+	TestTrue(TEXT("second compile is a cache hit"), CachedResult.bCacheHit);
+	TestNotEqual(
+		TEXT("cache hit receives a fresh attestation"),
+		CachedResult.Artifact.AttestationId,
+		FirstResult.Artifact.AttestationId);
+	TestTrue(
+		TEXT("cached tuple is authorized"),
+		AuthorizeAvidScriptVmArtifact(
+			CachedResult.Artifact.AttestationId,
+			CachedResult.Artifact));
+
+	FAvidScriptVmOwnedArtifact MutatedArtifact = CachedResult.Artifact;
+	MutatedArtifact.ExecutionIdentity = TEXT("invalid-execution-sha256");
+	TestFalse(
+		TEXT("changed execution identity is rejected"),
+		AuthorizeAvidScriptVmArtifact(
+			CachedResult.Artifact.AttestationId,
+			MutatedArtifact));
+
+	MutatedArtifact = CachedResult.Artifact;
+	MutatedArtifact.CompilerBuildIdentity += TEXT("-foreign");
+	TestFalse(
+		TEXT("changed compiler identity is rejected"),
+		AuthorizeAvidScriptVmArtifact(
+			CachedResult.Artifact.AttestationId,
+			MutatedArtifact));
+
+	MutatedArtifact = CachedResult.Artifact;
+	MutatedArtifact.TargetTriple = TEXT("foreign-target");
+	TestFalse(
+		TEXT("changed target triple is rejected"),
+		AuthorizeAvidScriptVmArtifact(
+			CachedResult.Artifact.AttestationId,
+			MutatedArtifact));
 	return true;
 #endif
 }
