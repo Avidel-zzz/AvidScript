@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-31 P57.2 benchmark harness 构建 owner 假设：把仓库内 `AvidScriptPerfHarness` 源目录直接当成项目目标的常驻 module，执行 target-plus-`-Module=AvidScriptPerfHarness`；UBT 在编译前以 `Unable to find output items for module` 拒绝。Prevention：benchmark harness 必须先按其 tracked prepare/fixture 流程挂载到目标工程，再由该流程构建；`-Module` 只用于当前 `.uproject` 已启用且 action graph 可解析的模块，不能从源码目录名推断。
+- 2026-07-31 P57.2 跨 benchmark schema 指标名误用：给 P53 sidecar 加 adaptive hit 校验时，直接沿用 Phase54 aggregate 的 `logical_operation_count`，但该 process-result 合同的对应字段是 `operation_call_count`。Prevention：跨结果层新增校验前必须读取目标 schema 的 `required` 与 `properties`，逐字复用该层字段名；不能从相邻 runner、aggregate 或 phase contract 推导名称。
 - 2026-07-31 P57.1 `rg` 连字符 pattern 规则复发：检索 `-Module=...` 时再次遗漏 `--`，`rg` 在读取文件前把 pattern 解析为参数并拒绝。Prevention：发送任何 `rg` 命令前检查 pattern 首字符；以 `-` 开头时固定写成 `rg <options> -- '<pattern>' <paths>`，即使只是文档或命令示例检索也不例外。
 - 2026-07-31 P57.1 宽补丁问题复发：首次把 adaptive reflection 的多个函数改动合并进一个跨区段 patch，其中一个上下文漂移后整包被原子拒绝；没有产生部分写入，但浪费了实现时间。Prevention：超过一个 owner 函数或跨越多个非连续区段的修改，固定按函数边界拆分；每个 patch 后立即复读该函数，再进入下一处，不以同属一个功能为由合并宽 patch。
 - 2026-07-31 P57.0 static contract schema assumption: the first frozen-threshold assertion addressed the controlled-runtime profile through a guessed `gates` property, while the tracked schema stores those values under `pc_leadership_gate`; the low-cost contract failed before any product build. Prevention: before adding JSON field assertions, read the tracked producer/profile and use its literal object path; do not infer a shared envelope from a different benchmark profile.

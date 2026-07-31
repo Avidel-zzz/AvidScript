@@ -97,7 +97,7 @@ $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
-    'avidscript_wasmtime_semantic',
+    'avidscript_wasmtime_adaptive_semantic',
     'avidscript_wasmtime_generated_s1',
     'avidscript_wasmtime_data_oriented'
 )
@@ -109,13 +109,13 @@ for ($Index = 0; $Index -lt $ExpectedLanes.Count; ++$Index) {
 Assert-True ([int]$Profile.process_runs -ge 5) 'benchmark profile requires at least five process runs'
 Assert-True ([int]$Profile.timed_samples -ge 30) 'benchmark profile requires at least thirty timed samples'
 Assert-True ([int]$Profile.seed -ge -16777216 -and [int]$Profile.seed -le 16777216) 'event ABI seed must remain exactly representable by float'
-$SemanticLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_semantic' })[0]
+$SemanticLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic' })[0]
 $GeneratedLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_generated_s1' })[0]
 $DataLane = @($RequestTemplate.lane_catalog | Where-Object { $_.lane_id -ceq 'avidscript_wasmtime_data_oriented' })[0]
 Assert-True ([string]$SemanticLane.backend_id -ceq 'wasmtime.cranelift.jit') 'semantic lane must use Wasmtime Cranelift'
 Assert-True ([string]$GeneratedLane.backend_id -ceq 'wasmtime.cranelift.jit') 'generated lane must use Wasmtime Cranelift'
 Assert-True ([string]$DataLane.backend_id -ceq 'wasmtime.cranelift.jit') 'data lane must use Wasmtime Cranelift'
-Assert-True ([string]$SemanticLane.binding_invocation_mode -ceq 'semantic_process_event') 'semantic lane must publish semantic_process_event'
+Assert-True ([string]$SemanticLane.binding_invocation_mode -ceq 'adaptive_semantic') 'adaptive semantic lane must publish adaptive_semantic'
 Assert-True ([string]$GeneratedLane.binding_invocation_mode -ceq 'generated_native_s1') 'generated lane must publish generated_native_s1'
 Assert-True ([string]$DataLane.binding_invocation_mode -ceq 'data_command_buffer') 'data lane must publish data_command_buffer'
 foreach ($Property in @(

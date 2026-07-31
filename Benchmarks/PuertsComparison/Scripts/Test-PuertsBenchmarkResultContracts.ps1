@@ -53,7 +53,7 @@ try {
         'native_cpp',
         'puerts_v8_reflection',
         'puerts_v8_static',
-        'avidscript_wasmtime_semantic',
+        'avidscript_wasmtime_adaptive_semantic',
         'avidscript_wasmtime_native_direct'
     )
     $TrackedProfile = Get-Content -LiteralPath $ProfileContractPath -Raw | ConvertFrom-Json
@@ -114,8 +114,8 @@ try {
             backend_id = if ($IsAvidScript) {
                 'wasmtime.cranelift.jit'
             } else { $null }
-            binding_invocation_mode = if ($Lane -ceq 'avidscript_wasmtime_semantic') {
-                'semantic_process_event'
+            binding_invocation_mode = if ($Lane -ceq 'avidscript_wasmtime_adaptive_semantic') {
+                'adaptive_semantic'
             } elseif ($Lane -ceq 'avidscript_wasmtime_native_direct') {
                 'qualified_native_direct'
             } else { $null }
@@ -153,6 +153,9 @@ try {
                 requested_direct_fallback_count = if ($Lane -ceq 'avidscript_wasmtime_native_direct') {
                     $Iterations
                 } else { 0 }
+                adaptive_native_hit_count = 0
+                adaptive_process_event_fallback_count = 0
+                adaptive_guard_reject_count = 0
                 correct = $true
             }
             if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {

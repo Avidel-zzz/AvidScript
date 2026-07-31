@@ -72,7 +72,7 @@ for ($LaneIndex = 0; $LaneIndex -lt $ExpectedLanes.Count; ++$LaneIndex) {
     $LaneIdentityById[$ExpectedLane] = [string]$CatalogEntry.lane_identity_sha256
 }
 $SemanticCatalog = @($Result.lane_catalog | Where-Object {
-    [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+    [string]$_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic'
 })[0]
 $DirectCatalog = @($Result.lane_catalog | Where-Object {
     [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
@@ -81,7 +81,7 @@ if ($null -eq $SemanticCatalog -or
     $null -eq $DirectCatalog -or
     [string]$SemanticCatalog.backend_id -cne 'wasmtime.cranelift.jit' -or
     [string]$DirectCatalog.backend_id -cne 'wasmtime.cranelift.jit' -or
-    [string]$SemanticCatalog.binding_invocation_mode -cne 'semantic_process_event' -or
+    [string]$SemanticCatalog.binding_invocation_mode -cne 'adaptive_semantic' -or
     [string]$DirectCatalog.binding_invocation_mode -cne 'qualified_native_direct' -or
     [string]$SemanticCatalog.lane_identity_sha256 -ceq [string]$DirectCatalog.lane_identity_sha256) {
     throw 'ASP54R1012 Wasmtime lane mode identity is missing or aliased'

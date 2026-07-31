@@ -25,7 +25,7 @@ $expectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
-    'avidscript_wasmtime_semantic',
+    'avidscript_wasmtime_adaptive_semantic',
     'avidscript_wasmtime_generated_s1',
     'avidscript_wasmtime_data_oriented'
 )
@@ -206,7 +206,7 @@ function Resolve-RequestTemplateIdentity {
     $catalog[2].execution_artifact_sha256 = $staticScriptSha256
 
     $packageByLane = [ordered]@{
-        avidscript_wasmtime_semantic = $SemanticPackage
+        avidscript_wasmtime_adaptive_semantic = $SemanticPackage
         avidscript_wasmtime_generated_s1 = $GeneratedPackage
         avidscript_wasmtime_data_oriented = $DataPackage
     }
@@ -407,7 +407,7 @@ if ($profile.evidence_class -ceq 'formal') {
 }
 $semanticPackage = Get-ManifestBindingPackage `
     -ProjectRoot $projectRoot `
-    -ManifestRelativePath ([string]$profile.avidscript_artifacts.avidscript_wasmtime_semantic.manifest_relative_path)
+    -ManifestRelativePath ([string]$profile.avidscript_artifacts.avidscript_wasmtime_adaptive_semantic.manifest_relative_path)
 $generatedPackage = Get-ManifestBindingPackage `
     -ProjectRoot $projectRoot `
     -ManifestRelativePath ([string]$profile.avidscript_artifacts.avidscript_wasmtime_generated_s1.manifest_relative_path)

@@ -547,7 +547,7 @@ function Test-SidecarProfile {
         'native_cpp',
         'puerts_v8_reflection',
         'puerts_v8_static',
-        'avidscript_wasmtime_semantic',
+        'avidscript_wasmtime_adaptive_semantic',
         'avidscript_wasmtime_native_direct'
     )
     if ($Lanes.Count -ne $ExpectedLanes.Count -or $Workloads.Count -lt 1) {
@@ -568,14 +568,14 @@ function Test-SidecarProfile {
         }
     }
     $SemanticLane = @($Profile.lane_catalog | Where-Object {
-        [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic'
     })[0]
     $DirectLane = @($Profile.lane_catalog | Where-Object {
         [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
     })[0]
     if ([string]$SemanticLane.backend_id -cne 'wasmtime.cranelift.jit' -or
         [string]$DirectLane.backend_id -cne 'wasmtime.cranelift.jit' -or
-        [string]$SemanticLane.binding_invocation_mode -cne 'semantic_process_event' -or
+        [string]$SemanticLane.binding_invocation_mode -cne 'adaptive_semantic' -or
         [string]$DirectLane.binding_invocation_mode -cne 'qualified_native_direct') {
         throw 'ASP54S2004 Wasmtime lane backend 或 binding invocation mode 无效'
     }
@@ -854,7 +854,7 @@ function Test-SidecarLaneCatalog {
         }
     ).Count -eq 0
     $SemanticLane = @($ActualEntries | Where-Object {
-        [string]$_.lane_id -ceq 'avidscript_wasmtime_semantic'
+        [string]$_.lane_id -ceq 'avidscript_wasmtime_adaptive_semantic'
     })[0]
     $DirectLane = @($ActualEntries | Where-Object {
         [string]$_.lane_id -ceq 'avidscript_wasmtime_native_direct'
@@ -864,7 +864,7 @@ function Test-SidecarLaneCatalog {
         $null -ne $DirectLane -and
         [string]$SemanticLane.backend_id -ceq 'wasmtime.cranelift.jit' -and
         [string]$DirectLane.backend_id -ceq 'wasmtime.cranelift.jit' -and
-        [string]$SemanticLane.binding_invocation_mode -ceq 'semantic_process_event' -and
+        [string]$SemanticLane.binding_invocation_mode -ceq 'adaptive_semantic' -and
         [string]$DirectLane.binding_invocation_mode -ceq 'qualified_native_direct' -and
         [string]$SemanticLane.lane_identity_sha256 -cne [string]$DirectLane.lane_identity_sha256
     if ($ActualSha256 -cne $ExpectedSha256 -or
@@ -1146,10 +1146,18 @@ function Test-SidecarProcessResult {
              [int64]$Sample.requested_direct_fallback_count -ne 0)) {
             throw "ASP54S2057 direct scalar workload 出现 fallback 或缺少 direct hit：process=$ExpectedProcessRun workload=$Workload"
         }
-        if ($Lane -ceq 'avidscript_wasmtime_semantic' -and
+        if ($Lane -ceq 'avidscript_wasmtime_adaptive_semantic' -and
             ([int64]$Sample.direct_hit_count -ne 0 -or
              [int64]$Sample.requested_direct_fallback_count -ne 0)) {
-            throw "ASP54S2057 semantic lane 不得报告 direct 请求证据：process=$ExpectedProcessRun workload=$Workload"
+            throw "ASP54S2057 adaptive semantic lane 不得报告 direct 请求证据：process=$ExpectedProcessRun workload=$Workload"
+        }
+        if ($Lane -ceq 'avidscript_wasmtime_adaptive_semantic' -and
+            $Workload -ceq 'scalar_add_int32' -and
+            ([int64]$Sample.adaptive_native_hit_count -ne
+                [int64]$Sample.operation_call_count -or
+             [int64]$Sample.adaptive_process_event_fallback_count -ne 0 -or
+             [int64]$Sample.adaptive_guard_reject_count -ne 0)) {
+            throw "ASP54S2057 adaptive scalar workload 出现 fallback 或缺少 native hit：process=$ExpectedProcessRun workload=$Workload"
         }
         $WorkloadIndex = [Array]::IndexOf([object[]]$ExpectedWorkloads, $Workload)
         $WilliamsOrder = Get-SidecarWilliamsLaneOrder `

@@ -22,7 +22,7 @@
     "native_cpp",
     "puerts_v8_reflection",
     "puerts_v8_static",
-    "avidscript_wasmtime_semantic",
+    "avidscript_wasmtime_adaptive_semantic",
     "avidscript_wasmtime_generated_s1",
     "avidscript_wasmtime_data_oriented"
   ],
@@ -51,8 +51,8 @@
     "batch_scalar": { "fixture_function_calls_per_frame": 1 }
   },
   "avidscript_artifacts": {
-    "avidscript_wasmtime_semantic": {
-      "binding_invocation_mode": "semantic_process_event",
+    "avidscript_wasmtime_adaptive_semantic": {
+      "binding_invocation_mode": "adaptive_semantic",
       "manifest_relative_path": "AvidScriptCSharpGuest/Profiles/profile_phase54_6_semantic/profile_phase54_6_semantic.avidscript.json"
     },
     "avidscript_wasmtime_generated_s1": {

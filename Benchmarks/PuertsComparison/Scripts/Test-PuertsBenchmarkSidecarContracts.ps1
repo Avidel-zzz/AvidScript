@@ -472,6 +472,7 @@ elseif ([string]$Request.mode -ceq 'timed') {
                 $CatalogEntry = $Request.lane_catalog[$LaneIndex]
                 $DirectHitCount = 0
                 $RequestedDirectFallbackCount = 0
+                $AdaptiveNativeHitCount = 0
                 if ($Lane -ceq 'avidscript_wasmtime_native_direct') {
                     if ($Workload -cin @('scalar_add_int32', 'batch_scalar')) {
                         $DirectHitCount = $Iterations
@@ -482,6 +483,10 @@ elseif ([string]$Request.mode -ceq 'timed') {
                     elseif ($Workload -cnotin @('callback_empty', 'callback_tick', 'pure_integer')) {
                         $RequestedDirectFallbackCount = $Iterations
                     }
+                }
+                elseif ($Lane -ceq 'avidscript_wasmtime_adaptive_semantic' -and
+                    $Workload -ceq 'scalar_add_int32') {
+                    $AdaptiveNativeHitCount = $Iterations
                 }
                 $Sample = [ordered]@{
                     process_run = [int]$Request.process_run
@@ -503,6 +508,9 @@ elseif ([string]$Request.mode -ceq 'timed') {
                     expected_host_import_call_count = [int64]($LaneIndex * $Iterations)
                     direct_hit_count = [int64]$DirectHitCount
                     requested_direct_fallback_count = [int64]$RequestedDirectFallbackCount
+                    adaptive_native_hit_count = [int64]$AdaptiveNativeHitCount
+                    adaptive_process_event_fallback_count = 0
+                    adaptive_guard_reject_count = 0
                     correct = $true
                 }
                 if ($Lane.StartsWith('avidscript_', [System.StringComparison]::Ordinal)) {
@@ -758,11 +766,11 @@ Write-Output "假 Editor PID=$PID"
     Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Manifest.provenance.editor_file_version)) 'fixture attempt 未记录 editor 文件版本'
 
     $ExpectedLaneOrders = @(
-        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct',
-        'puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp',
-        'puerts_v8_static,avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection',
-        'avidscript_wasmtime_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static',
-        'avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_semantic'
+        'native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_adaptive_semantic,avidscript_wasmtime_native_direct',
+        'puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_adaptive_semantic,avidscript_wasmtime_native_direct,native_cpp',
+        'puerts_v8_static,avidscript_wasmtime_adaptive_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection',
+        'avidscript_wasmtime_adaptive_semantic,avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static',
+        'avidscript_wasmtime_native_direct,native_cpp,puerts_v8_reflection,puerts_v8_static,avidscript_wasmtime_adaptive_semantic'
     )
     $ProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     $CalibrationProcess = Get-Content -LiteralPath (Join-Path $FirstAttempt $Manifest.calibration.process_metadata_path) -Raw | ConvertFrom-Json
@@ -939,8 +947,8 @@ Write-Output "假 Editor PID=$PID"
     $MixedIterationRequest = Copy-AttemptFixture $FirstAttempt 'mixed-iteration-request'
     $TimedRequestPath = Join-Path $MixedIterationRequest 'runs/02/request.json'
     $TimedRequest = Get-Content -LiteralPath $TimedRequestPath -Raw | ConvertFrom-Json
-    $TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_semantic =
-        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_semantic + 1
+    $TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_adaptive_semantic =
+        [int64]$TimedRequest.iteration_counts.scalar_noop.avidscript_wasmtime_adaptive_semantic + 1
     Write-NewJson $TimedRequestPath $TimedRequest
     $MixedIterationManifestPath = Join-Path $MixedIterationRequest 'attempt.json'
     $MixedIterationManifest = Get-Content -LiteralPath $MixedIterationManifestPath -Raw | ConvertFrom-Json

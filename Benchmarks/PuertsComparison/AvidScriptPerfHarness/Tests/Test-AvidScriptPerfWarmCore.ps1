@@ -94,7 +94,7 @@ $ExpectedLanes = @(
     'native_cpp',
     'puerts_v8_reflection',
     'puerts_v8_static',
-    'avidscript_wasmtime_semantic',
+    'avidscript_wasmtime_adaptive_semantic',
     'avidscript_wasmtime_generated_s1',
     'avidscript_wasmtime_data_oriented'
 )
