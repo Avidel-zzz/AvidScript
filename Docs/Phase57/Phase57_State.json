@@ -37,9 +37,9 @@
     },
     {
       "id": "P57.3",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "Wasmtime memory handle cache; UE5.8 AvidScriptVM 5-action build passed; Wasmtime Lifecycle 1/1 passed; clean candidate 3f9a5aa/9621f230 diagnostic 300/300 correct; Adaptive 89.5508ns vs Puerts Reflection 120.4688ns, ratio 0.74335 <= 0.80",
+      "completed_at_utc": "2026-07-31T02:52:11.4020069+00:00"
     },
     {
       "id": "P57.4",
@@ -106,7 +106,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 57 -BatchId P57.3 -Evidence <text>",
-  "revision": 4,
-  "updated_at_utc": "2026-07-31T02:16:11.7002739+00:00"
+  "next_action": "batch-complete -Phase 57 -BatchId P57.4 -Evidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-07-31T02:52:11.4041533+00:00"
 }
