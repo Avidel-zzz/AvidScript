@@ -440,6 +440,10 @@ Assert-True ($RunnerSource.Contains('AdaptiveProcessEventFallbackCount != 0')) `
     'eligible adaptive scalar samples must reject ProcessEvent fallback'
 Assert-True ($RunnerSource.Contains('GeneratedS1HitCount != 0')) `
     'eligible adaptive scalar samples must reject generated S1 routing'
+Assert-True ($RunnerSource.Contains('bAdaptiveFusedReceiverInvalid')) `
+    'eligible adaptive scalar samples must validate the shared fused receiver cache'
+Assert-True ($RunnerSource.Contains('GeneratedFusedFastHitCount + 1')) `
+    'eligible adaptive scalar samples must require one revalidation followed by cache hits'
 
 Assert-True ($RunnerSource.Contains('WorkloadId += 2;')) `
     'data gameplay workloads must map internally from 10/11 to batch4 paths 12/13'

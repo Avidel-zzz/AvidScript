@@ -3244,6 +3244,15 @@ namespace
 		const uint64 DirectPrepareCount =
 			Observation.GeneratedDirectReadPrepareCount
 			+ Observation.GeneratedDirectWritePrepareCount;
+		const bool bAdaptiveFusedReceiverInvalid =
+			bAdaptiveLane
+			&& Workload == EAvidScriptPerfWorkload::ScalarAddInt32
+			&& (Observation.GeneratedFusedRevalidateCount != 1
+				|| Observation.GeneratedFusedFastHitCount + 1
+					!= ExpectedLogicalOperationCount
+				|| Observation.GeneratedFusedCallSitePrepareCount != 0
+				|| DirectPrepareCount != 0
+				|| Observation.GeneratedJournalSlowPathCount != 0);
 		const bool bFusedPathInvalid = bFusedLane
 			? (Observation.GeneratedJournalSlowPathCount != 0
 				|| (bHasFusedCalls
@@ -3258,11 +3267,14 @@ namespace
 						|| Observation.GeneratedFusedRevalidateCount != 0
 						|| Observation.GeneratedFusedCallSitePrepareCount != 0
 						|| DirectPrepareCount != 0)))
-			: (Observation.GeneratedFusedFastHitCount != 0
-				|| Observation.GeneratedFusedRevalidateCount != 0
-				|| Observation.GeneratedFusedCallSitePrepareCount != 0
-				|| DirectPrepareCount != 0
-				|| Observation.GeneratedJournalSlowPathCount != 0);
+			: (bAdaptiveLane
+				&& Workload == EAvidScriptPerfWorkload::ScalarAddInt32)
+				? bAdaptiveFusedReceiverInvalid
+				: (Observation.GeneratedFusedFastHitCount != 0
+					|| Observation.GeneratedFusedRevalidateCount != 0
+					|| Observation.GeneratedFusedCallSitePrepareCount != 0
+					|| DirectPrepareCount != 0
+					|| Observation.GeneratedJournalSlowPathCount != 0);
 		if (Oracle.OperationCallCount != ExpectedOperationCallCount ||
 			Observation.Checksum != Oracle.Checksum ||
 			Observation.FinalScalar != Oracle.FinalScalar ||
