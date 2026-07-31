@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "scope": "controlled_runtime_frozen_suite",
+  "evidence_level": "formal",
+  "candidate": {
+    "commit": "d144d6ed931daacf3431e7de34977fa76a8657ba",
+    "tree_sha": "e5e6f0c064debd554028bb28b1fb30804aea2f1c",
+    "clean": true
+  },
+  "protocol": {
+    "profile_sha256": "2d839bf2e03c9e83624d812356bc42396a44ade5c108ccfd177c2f5a9836281c",
+    "suite_contract_sha256": "7338e1cf4078456a9a63b9ddf2b6fabbeb9cd61823b9a37d1cd0bde1653ac94d",
+    "kernel_count": 12,
+    "process_runs": 5,
+    "warmup_samples": 5,
+    "timed_samples": 30,
+    "processor_affinity_mask": 1,
+    "engine_version": "5.8.0",
+    "engine_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311"
+  },
+  "aggregate": {
+    "sha256": "2fdebb2a51399f41ea3813182ba6a96ab439e9e1572c93af376b164149cbf31f",
+    "p50_geometric_mean_ratio": 0.982168914016656,
+    "p95_geometric_mean_ratio": 1.04307293366806,
+    "mad_geometric_mean_ratio": 0.932843676365422,
+    "p50_kernel_win_rate": 0.666666666666667,
+    "p95_kernel_win_rate": 0.583333333333333,
+    "correctness_failures": 0,
+    "fallback_used": false,
+    "leadership_gate_passed": false
+  },
+  "kernel_results": [
+    { "kernel_id": "data_branch", "p50": 1.0036415875536833, "p95": 1.0257087166887933, "mad": 0.8966754966887366 },
+    { "kernel_id": "hashing", "p50": 1.0108725039589046, "p95": 1.025278918647924, "mad": 0.830394736842074 },
+    { "kernel_id": "internal_call", "p50": 0.9695960208239287, "p95": 0.9568143578238923, "mad": 0.8606251559093754 },
+    { "kernel_id": "mixed_gameplay", "p50": 0.9178151363322046, "p95": 0.9394799248810846, "mad": 0.5913941783499855 },
+    { "kernel_id": "parallel_integer", "p50": 0.9987542355070049, "p95": 1.6803903781164955, "mad": 0.9788583509513616 },
+    { "kernel_id": "predictable_branch", "p50": 1.0098700616947072, "p95": 1.019656741988788, "mad": 0.8729619565217348 },
+    { "kernel_id": "random_memory", "p50": 0.9635057310864522, "p95": 0.9766863208047034, "mad": 0.9317507418397575 },
+    { "kernel_id": "scalar_float", "p50": 0.9772966848923698, "p95": 0.9801209772140006, "mad": 0.8842105263158019 },
+    { "kernel_id": "sequential_memory", "p50": 0.9812543362165325, "p95": 0.988390108253054, "mad": 0.7846164891462077 },
+    { "kernel_id": "serial_integer", "p50": 0.9671554745284, "p95": 0.9749212257458219, "mad": 1.1713271909840457 },
+    { "kernel_id": "simd128", "p50": 1.0081470013451435, "p95": 1.1225613188197021, "mad": 1.2520309951060304 },
+    { "kernel_id": "small_struct", "p50": 0.9822149389798484, "p95": 0.9889808724578514, "mad": 1.4144062242330362 }
+  ],
+  "tail_attribution": {
+    "median_process_p95_geometric_mean_ratio": 0.973795074804243,
+    "parallel_integer_max_process_p95_ratio": 1.6803903781164955,
+    "simd128_max_process_p95_ratio": 1.1225613188197021
+  }
+}

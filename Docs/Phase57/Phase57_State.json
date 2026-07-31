@@ -63,7 +63,7 @@
       "evidence": "Phase 56 values were 0.9958005731 and 0.50; Phase 57 has not yet produced candidate-bound formal controlled-runtime evidence",
       "deferral_reason": "Isolated attribution follows closure of semantic, Generated S1, and prepared-export fixed costs",
       "remediation": "Profile hashing, predictable branch, SIMD128, and P95 variance under the frozen controlled-runtime suite; optimize product Wasmtime configuration or generated workload code without changing kernel bytes",
-      "status": "Open",
+      "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
       "transfer_reason": ""
@@ -121,6 +121,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 8,
-  "updated_at_utc": "2026-07-31T14:42:25.6375241+00:00"
+  "revision": 9,
+  "updated_at_utc": "2026-07-31T19:46:17.8136509+00:00"
 }
