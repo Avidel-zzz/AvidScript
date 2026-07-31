@@ -12,7 +12,7 @@
   "seed": 1397313,
   "target_triple": "x86_64-pc-windows-msvc",
   "suite_contract": "Kernel/phase54_suite.contract.json",
-  "suite_contract_sha256": "b9792ff991bef7500789a1b33cc330046fd68331ae3b41f30432e38ad124b858",
+  "suite_contract_sha256": "55e370aaff4d68395314dae51dbeb37b3a9a9f1dcaa79c5913f0e784ce808b7f",
   "kernel_ids": [
     "data_branch",
     "hashing",

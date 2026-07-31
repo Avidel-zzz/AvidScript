@@ -15,72 +15,72 @@
       "kernel_id": "data_branch",
       "wat_path": "suite_data_branch.wat",
       "wasm_path": "suite_data_branch.wasm",
-      "wat_normalized_sha256": "af8d6711415a0937ee126aace6ccdf5f16f74b2fba4175e9e3beb419c218ea99",
-      "wasm_sha256": "194666ed9032ec40052675ea7d5fb46b8bded2f980872232843ca2be2383cc5f",
+      "wat_normalized_sha256": "d8e8784fdb3a1caefe519288d157602789480196bb3206fa06e3c68109dd6b02",
+      "wasm_sha256": "7fcf4e7b71a690c203ba0fb8463b869f649b4e390b1cf671b88d0a6d561a6a2f",
       "features": ["mvp", "i32", "data_dependent_branch"]
     },
     {
       "kernel_id": "hashing",
       "wat_path": "suite_hashing.wat",
       "wasm_path": "suite_hashing.wasm",
-      "wat_normalized_sha256": "8e3c5a884994ba7f53b4981d688513eb9e33eb955e70ac202657fa29aaaf4384",
-      "wasm_sha256": "4fe29a62c9b2942d89777e0d6663ee17bdeb4855d0ae31b47dff19ea53cb332b",
+      "wat_normalized_sha256": "575f0192ebfa3738cf994e89c209aade8fffbf3f28b2a5df28ec8f695fbe93c2",
+      "wasm_sha256": "b5f4661b968b903b4c9d13c644de9b4809bd015d1bd93dae5905e8ca07a854cf",
       "features": ["mvp", "i32", "hashing"]
     },
     {
       "kernel_id": "internal_call",
       "wat_path": "suite_internal_call.wat",
       "wasm_path": "suite_internal_call.wasm",
-      "wat_normalized_sha256": "a0b27045943a0e9916db8f2dc7d2a401e1da2f040b6e3fb1c00c1cf184c408b9",
-      "wasm_sha256": "8b582919415df8d756ac8e4407aec5a5f7f185a2408e688e30b09a69fa65639f",
+      "wat_normalized_sha256": "0273577338d232f76ec9913f13416370c737d9aaf527cbb919ce0ea688302385",
+      "wasm_sha256": "a4f89e8111023c36072bfc98fd2e15f8a4d3d803c9c2854c3fa2065d507149f7",
       "features": ["mvp", "i32", "internal_call"]
     },
     {
       "kernel_id": "mixed_gameplay",
       "wat_path": "suite_mixed_gameplay.wat",
       "wasm_path": "suite_mixed_gameplay.wasm",
-      "wat_normalized_sha256": "ff6066c9542570d1f82fcac3c67a824de15316c133a199db4f63007248abe83a",
-      "wasm_sha256": "fb1d7f014e038b8946777fbd39dcfecb3e37535466e9ba3f2a5c9a8fdbcb222c",
+      "wat_normalized_sha256": "bcb6954e0b6c54c5ccb1ec21df9fe883ef981494f7c043146c61cc73c78e84e1",
+      "wasm_sha256": "bb15d61253ff0f12886e0a022821b2b20a7d94d895d8481a5d02ad6324d53665",
       "features": ["mvp", "i32", "f32", "memory", "mixed_gameplay"]
     },
     {
       "kernel_id": "parallel_integer",
       "wat_path": "suite_parallel_integer.wat",
       "wasm_path": "suite_parallel_integer.wasm",
-      "wat_normalized_sha256": "2d20e158ee9bacc4694a66ceb787e6ca78508af5ec3e5ebfefd07190cec5178d",
-      "wasm_sha256": "3a16f1cfcacc3a57e659afea7916699ab660fe9e313af41543c7af1edc294e2f",
+      "wat_normalized_sha256": "abdd4900f1ebd31496b39d66f91a31d50f7346830d24a8bbff5015237d7ba111",
+      "wasm_sha256": "2bfdf440d1e0ceeabfc8ee5b1282cb7d6f1a0e242bbd68ae2211b2c8c9e09103",
       "features": ["mvp", "i32", "independent_chains"]
     },
     {
       "kernel_id": "predictable_branch",
       "wat_path": "suite_predictable_branch.wat",
       "wasm_path": "suite_predictable_branch.wasm",
-      "wat_normalized_sha256": "3836af993f39655bbefbf82f4894192f65880ccd2a196beb5be575ba0979c44a",
-      "wasm_sha256": "072aaf3095fd93fd7bd6ae70ded07bd200246e13e6c20274e9f136a6163f1431",
+      "wat_normalized_sha256": "75ae0112698a006153506cd45266d71ccb4d669f08d69ed05da2793dfefb081c",
+      "wasm_sha256": "bbf872105cc947c924884ff3a06ce1498deace56d2ba57f190174d08a18bed37",
       "features": ["mvp", "i32", "predictable_branch"]
     },
     {
       "kernel_id": "random_memory",
       "wat_path": "suite_random_memory.wat",
       "wasm_path": "suite_random_memory.wasm",
-      "wat_normalized_sha256": "5db394e96d927474c43d553b3b0c939042da2e0ebdacb0796b19cf8e71fade83",
-      "wasm_sha256": "68736fe80a075ae64d259dc4206c145ad24d7c394a65d4cfebf26ee333adf3b5",
+      "wat_normalized_sha256": "edafc3f96bc0437c44fe57c9a2d7bcd2b305c253937478336d7ce9a86937f433",
+      "wasm_sha256": "ae53f5e762813c6cf64c8cf10fe216ad926e11e1b41df32958996ad252d5a9c9",
       "features": ["mvp", "i32", "memory", "random_access"]
     },
     {
       "kernel_id": "scalar_float",
       "wat_path": "suite_scalar_float.wat",
       "wasm_path": "suite_scalar_float.wasm",
-      "wat_normalized_sha256": "7530b1bbb823785f269417a9367db22778b3fcfe50e787f0430d09df3b676b58",
-      "wasm_sha256": "a205b890a8e846391beced4f4a042608d8a1247ca4c98b58aced2ce8d1b72923",
+      "wat_normalized_sha256": "25c3cb02f5dbefcf2262680a66bb0b2d9dfb1bc7320ee568ccce4c78f599ea84",
+      "wasm_sha256": "ed7a2b99e4608af54ef5ae1facdbe5625a26705ceea4d262446fe86e3382e56f",
       "features": ["mvp", "i32", "f32"]
     },
     {
       "kernel_id": "sequential_memory",
       "wat_path": "suite_sequential_memory.wat",
       "wasm_path": "suite_sequential_memory.wasm",
-      "wat_normalized_sha256": "8643e9305373daaca35c2399966a48670538afb53d3f6668a543f8dc60a85c00",
-      "wasm_sha256": "2927034a4330dd602c30744678c09a00da5b46b294d20e224da4d880abb447cb",
+      "wat_normalized_sha256": "9a07652a84efb88550152fc465935691ecf9a6c0ef71c539d01aec7b30634cbf",
+      "wasm_sha256": "54131465c79185df792d0dc676a3ccb3b6cb799b0cd1de9267acbc6020cc0534",
       "features": ["mvp", "i32", "memory", "sequential_access"]
     },
     {
@@ -95,8 +95,8 @@
       "kernel_id": "simd128",
       "wat_path": "suite_simd128.wat",
       "wasm_path": "suite_simd128.wasm",
-      "wat_normalized_sha256": "e1a49027ed7c463421931cfbc929c6a8f6fb24b4d4bf3e81dcfbbc83c8cb392c",
-      "wasm_sha256": "d93e83b5af8d5aad98781874253d77f67ff4ac13e19c248e63060621d63a70c4",
+      "wat_normalized_sha256": "ce22c9b48f7370d43c1642617db766c08ab1999846f24facfcd31b8f8c5db3b8",
+      "wasm_sha256": "9aa0fe32843594d51d1bc8bbe589895255c37e1e2795163a033d38c627bf3cad",
       "features": ["simd128"],
       "feature_gate": "all compared runtime lanes must load SIMD128 without fallback"
     },
@@ -104,8 +104,8 @@
       "kernel_id": "small_struct",
       "wat_path": "suite_small_struct.wat",
       "wasm_path": "suite_small_struct.wasm",
-      "wat_normalized_sha256": "1af98e609268ae09ed17844a886ee33f8a416535d34fa259c1d5243e74ab5d7a",
-      "wasm_sha256": "698013effb8261e8132ffe030da4ffc9e7730dc3a53664dac14efb17df4d4175",
+      "wat_normalized_sha256": "89260a85adc15cef34fd3d093c925f839b452732857787e829242568d01499d0",
+      "wasm_sha256": "67bf2b68554d77af75377e60ba2df732e0c108fcc94e6cd9b5c87d0c9ccae1f0",
       "features": ["mvp", "i32", "memory", "small_struct"]
     }
   ]

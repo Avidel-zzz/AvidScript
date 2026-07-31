@@ -9,10 +9,11 @@
     i32.const 0x811c9dc5
     local.set $hash
     block $done
-      local.get $iterations
-      i32.eqz
-      br_if $done
       loop $next
+        local.get $index
+        local.get $iterations
+        i32.ge_u
+        br_if $done
         local.get $value
         i32.const 13
         i32.rotl
@@ -35,10 +36,7 @@
         i32.const 1
         i32.add
         local.set $index
-        local.get $index
-        local.get $iterations
-        i32.lt_u
-        br_if $next
+        br $next
       end
     end
     i32.const 0
