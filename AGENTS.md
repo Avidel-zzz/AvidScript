@@ -1683,3 +1683,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a parallel candidate identity probe again passed unquoted `HEAD^{tree}` through PowerShell; the shell emitted an encoded script-block argument and Git rejected the synthetic revision, invalidating the whole parallel result.
 - Prevention: stop typing brace revision expressions in phase workflows. Read the commit with `git rev-parse HEAD` and the tree with `git show -s --format=%T HEAD` as separate commands; treat any failed sibling in a parallel identity probe as no evidence.
+
+### 2026-07-31: Phase 57.8 Runtime Unity helper collision recurrence
+
+- Mistake: the new Runtime artifact loader introduced generic anonymous helpers `IsLowercaseSha256` and `IsLowercaseAttestationId`; the first collided with the existing reload loader when UBT merged both `.cpp` files into one Unity translation unit, failing the concentrated build with C2084.
+- Prevention: every new Runtime `.cpp` anonymous helper uses an owner-qualified name from its first draft, such as `IsRuntimeArtifactLowercaseSha256`. Before staging a new source file, search its helper names across the entire owning module with literal-root `rg`; the standard Unity-enabled project build remains the compilation gate.

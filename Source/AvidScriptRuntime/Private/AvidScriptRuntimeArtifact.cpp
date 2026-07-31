@@ -62,7 +62,7 @@ void SetArtifactLoadFailure(
 		*NextAction);
 }
 
-bool IsLowercaseSha256(const FString& Value)
+bool IsRuntimeArtifactLowercaseSha256(const FString& Value)
 {
 	if (Value.Len() != 64 || Value != Value.ToLower())
 	{
@@ -78,7 +78,7 @@ bool IsLowercaseSha256(const FString& Value)
 	return true;
 }
 
-bool IsLowercaseAttestationId(const FString& Value)
+bool IsRuntimeArtifactLowercaseAttestationId(const FString& Value)
 {
 	if (Value.Len() != 32 || Value != Value.ToLower())
 	{
@@ -325,9 +325,9 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 		|| (Policy != TEXT("prefer_precompiled")
 			&& Policy != TEXT("require_precompiled"))
 		|| Fallback != TEXT("wasmtime_jit")
-		|| !IsLowercaseSha256(ExecutionSha256)
-		|| !IsLowercaseSha256(CanonicalSha256)
-		|| !IsLowercaseAttestationId(AttestationId))
+		|| !IsRuntimeArtifactLowercaseSha256(ExecutionSha256)
+		|| !IsRuntimeArtifactLowercaseSha256(CanonicalSha256)
+		|| !IsRuntimeArtifactLowercaseAttestationId(AttestationId))
 	{
 		SetArtifactLoadFailure(
 			OutResult,
