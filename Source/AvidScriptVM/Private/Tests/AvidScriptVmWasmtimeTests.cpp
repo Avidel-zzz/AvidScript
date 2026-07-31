@@ -84,18 +84,21 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	TArray<uint8> Module = MakeWasmtimeModule();
 
 	TArray<uint8> Types;
-	AppendWasmtimeU32Leb(Types, 2);
+	AppendWasmtimeU32Leb(Types, 3);
 	const uint8 EmptyType[] = { 0x60, 0x00, 0x00 };
 	Types.Append(EmptyType, UE_ARRAY_COUNT(EmptyType));
 	const uint8 TickType[] = { 0x60, 0x01, 0x7d, 0x00 };
 	Types.Append(TickType, UE_ARRAY_COUNT(TickType));
+	const uint8 GrowType[] = { 0x60, 0x00, 0x01, 0x7f };
+	Types.Append(GrowType, UE_ARRAY_COUNT(GrowType));
 	AppendWasmtimeSection(Module, 1, Types);
 
 	TArray<uint8> Functions;
-	AppendWasmtimeU32Leb(Functions, 3);
+	AppendWasmtimeU32Leb(Functions, 4);
 	AppendWasmtimeU32Leb(Functions, 0);
 	AppendWasmtimeU32Leb(Functions, 1);
 	AppendWasmtimeU32Leb(Functions, 0);
+	AppendWasmtimeU32Leb(Functions, 2);
 	AppendWasmtimeSection(Module, 3, Functions);
 
 	TArray<uint8> Memory;
@@ -105,7 +108,7 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	AppendWasmtimeSection(Module, 5, Memory);
 
 	TArray<uint8> Exports;
-	AppendWasmtimeU32Leb(Exports, 4);
+	AppendWasmtimeU32Leb(Exports, 5);
 	AppendWasmtimeString(Exports, "avid_on_begin_play");
 	Exports.Add(0x00);
 	AppendWasmtimeU32Leb(Exports, 0);
@@ -118,10 +121,13 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	AppendWasmtimeString(Exports, "memory");
 	Exports.Add(0x02);
 	AppendWasmtimeU32Leb(Exports, 0);
+	AppendWasmtimeString(Exports, "avid_grow_memory");
+	Exports.Add(0x00);
+	AppendWasmtimeU32Leb(Exports, 3);
 	AppendWasmtimeSection(Module, 7, Exports);
 
 	TArray<uint8> Code;
-	AppendWasmtimeU32Leb(Code, 3);
+	AppendWasmtimeU32Leb(Code, 4);
 	const TArray<uint8> EmptyBody = { 0x00, 0x0b };
 	AppendWasmtimeU32Leb(Code, static_cast<uint32>(EmptyBody.Num()));
 	Code.Append(EmptyBody);
@@ -130,6 +136,9 @@ TArray<uint8> BuildWasmtimeLifecycleFixture()
 	const TArray<uint8> TrapBody = { 0x00, 0x00, 0x0b };
 	AppendWasmtimeU32Leb(Code, static_cast<uint32>(TrapBody.Num()));
 	Code.Append(TrapBody);
+	const TArray<uint8> GrowBody = { 0x00, 0x41, 0x01, 0x40, 0x00, 0x0b };
+	AppendWasmtimeU32Leb(Code, static_cast<uint32>(GrowBody.Num()));
+	Code.Append(GrowBody);
 	AppendWasmtimeSection(Module, 10, Code);
 	return Module;
 }
@@ -805,6 +814,35 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("guest range wraparound is rejected"), GuestMemory->ReadBytes(MAX_uint32 - 1, Read, MemoryError));
 	TestTrue(TEXT("guest range failure is stable"), MemoryError.Contains(TEXT("guest_memory_invalid")));
 
+	FAvidScriptVmExportHandle GrowMemoryHandle;
+	TestTrue(
+		TEXT("memory grow export resolves"),
+		Backend->ResolveExport(
+			TEXT("avid_grow_memory"),
+			GrowMemoryHandle,
+			Error));
+	TestTrue(
+		TEXT("memory grow export calls"),
+		Backend->Call(
+			GrowMemoryHandle,
+			FAvidScriptVmCallFrame(),
+			Error));
+	constexpr uint32 SecondPageAddress = 64u * 1024u;
+	Read.Init(0, Written.Num());
+	TestTrue(
+		TEXT("cached memory handle writes after guest memory grow"),
+		GuestMemory->WriteBytes(
+			SecondPageAddress,
+			Written,
+			MemoryError));
+	TestTrue(
+		TEXT("cached memory handle reads after guest memory grow"),
+		GuestMemory->ReadBytes(
+			SecondPageAddress,
+			Read,
+			MemoryError));
+	TestEqual(TEXT("grown guest bytes round trip"), Read, Written);
+
 	FAvidScriptVmExportHandle MissingHandle;
 	TestFalse(TEXT("missing export rejects"), Backend->ResolveExport(TEXT("missing"), MissingHandle, Error));
 	TestEqual(TEXT("missing export category"), Error.Category, FString(TEXT("missing_export")));
@@ -825,6 +863,24 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("stale prepared category"),
 		Error.Category,
 		FString(TEXT("stale_export")));
+	Backend->Unload();
+
+	TestTrue(
+		TEXT("backend reloads with a fresh cached memory handle"),
+		Backend->Load(
+			Bytecode,
+			TEXT("wasmtime_reloaded"),
+			Config,
+			Error));
+	GuestMemory = Backend->GetGuestMemory();
+	Read.Init(0, Written.Num());
+	TestTrue(
+		TEXT("reloaded guest memory write succeeds"),
+		GuestMemory->WriteBytes(32, Written, MemoryError));
+	TestTrue(
+		TEXT("reloaded guest memory read succeeds"),
+		GuestMemory->ReadBytes(32, Read, MemoryError));
+	TestEqual(TEXT("reloaded guest bytes round trip"), Read, Written);
 	Backend->Unload();
 
 	const uint8 Malformed[] = { 0x00, 0x61, 0x73, 0x6d };

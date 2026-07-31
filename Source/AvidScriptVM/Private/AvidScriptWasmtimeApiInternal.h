@@ -30,6 +30,8 @@ struct AvidScriptWasmtimeLinker
 struct AvidScriptWasmtimeInstance
 {
 	wasmtime_instance_t value;
+	wasmtime_memory_t exported_memory;
+	bool has_exported_memory;
 };
 
 struct AvidScriptWasmtimeFunction

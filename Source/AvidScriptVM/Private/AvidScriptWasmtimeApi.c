@@ -398,6 +398,23 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_instantiate(
 		free(instance);
 		return avidscript_wasmtime_failure_new(error, trap);
 	}
+	{
+		wasmtime_extern_t memory;
+		if (wasmtime_instance_export_get(
+				store->context,
+				&instance->value,
+				"memory",
+				6,
+				&memory))
+		{
+			if (memory.kind == WASMTIME_EXTERN_MEMORY)
+			{
+				instance->exported_memory = memory.of.memory;
+				instance->has_exported_memory = true;
+			}
+			wasmtime_extern_delete(&memory);
+		}
+	}
 	*out_instance = instance;
 	return NULL;
 }
@@ -846,6 +863,13 @@ bool avidscript_wasmtime_memory_data(
 	bool found;
 	*out_data = NULL;
 	*out_size = 0;
+	if (store != NULL && instance != NULL && instance->has_exported_memory)
+	{
+		context = store->context;
+		*out_data = wasmtime_memory_data(context, &instance->exported_memory);
+		*out_size = wasmtime_memory_data_size(context, &instance->exported_memory);
+		return *out_data != NULL;
+	}
 	if (caller != NULL)
 	{
 		found = wasmtime_caller_export_get((wasmtime_caller_t*)caller, "memory", 6, &item);
