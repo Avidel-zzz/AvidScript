@@ -294,6 +294,8 @@ struct FAvidScriptWasmtimeExportEntry
 {
 	FString Name;
 	AvidScriptWasmtimeFunction* Function = nullptr;
+	AvidScriptWasmtimePreparedCallShape PreparedCallShape =
+		AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC;
 	uint32 Generation = 0;
 	uint32 CellCount = 0;
 	uint32 ResultCellCount = 0;
@@ -578,6 +580,8 @@ public:
 			MakeUnique<FAvidScriptWasmtimeExportEntry>();
 		Entry->Name = ExportName;
 		Entry->Function = Function;
+		Entry->PreparedCallShape =
+			avidscript_wasmtime_function_prepared_call_shape(Function);
 		Entry->Generation = ExportGeneration;
 		Entry->CellCount = CellCount;
 		Entry->ResultCellCount = ResultCellCount;
@@ -650,7 +654,11 @@ public:
 
 		OutCall.Owner = this;
 		OutCall.Target = Entry;
-		OutCall.InvokeFunction = &InvokePreparedExportCall;
+		OutCall.InvokeFunction =
+			Entry->PreparedCallShape
+				== AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32
+			? &InvokePreparedI32I32ToI32ExportCall
+			: &InvokePreparedExportCall;
 		OutCall.ParameterCellCount = Entry->CellCount;
 		OutCall.ResultCellCount = Entry->ResultCellCount;
 		return true;
@@ -1391,6 +1399,36 @@ private:
 			OutResult);
 	}
 
+	static bool InvokePreparedI32I32ToI32ExportCall(
+		void* Owner,
+		void* Target,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		FAvidScriptWasmtimeBackend* Backend =
+			static_cast<FAvidScriptWasmtimeBackend*>(Owner);
+		FAvidScriptWasmtimeExportEntry* Entry =
+			static_cast<FAvidScriptWasmtimeExportEntry*>(Target);
+		if (Backend == nullptr || Entry == nullptr)
+		{
+			OutError.Reset();
+			OutError.Category = TEXT("prepared_export_invalid");
+			OutError.Details =
+				TEXT("The prepared Wasmtime export target is invalid.");
+			if (OutResult != nullptr)
+			{
+				*OutResult = FAvidScriptVmCallResult();
+			}
+			return false;
+		}
+		return Backend->CallPreparedI32I32ToI32Export(
+			*Entry,
+			Frame,
+			OutError,
+			OutResult);
+	}
+
 	void ResetCallState(
 		FAvidScriptVmError& OutError,
 		FAvidScriptVmCallResult* OutResult)
@@ -1426,6 +1464,45 @@ private:
 		return InvokeResolvedExport(Entry, Frame, OutError, OutResult);
 	}
 
+	bool CallPreparedI32I32ToI32Export(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const FAvidScriptVmCallFrame& Frame,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
+		ResetCallState(OutError, OutResult);
+		if (Entry.Generation != ExportGeneration
+			|| Entry.Function == nullptr)
+		{
+			SetWasmtimeError(
+				OutError,
+				TEXT("stale_export"),
+				TEXT("The prepared Wasmtime export is no longer active."));
+			return false;
+		}
+
+		++ActiveCallDepth;
+		int32 Result = 0;
+		AvidScriptWasmtimeFailure* CallFailure = nullptr;
+		const AvidScriptWasmtimeCallStatus CallStatus =
+			avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
+				Store,
+				Entry.Function,
+				static_cast<int32>(Frame.Cells[0]),
+				static_cast<int32>(Frame.Cells[1]),
+				&Result,
+				&CallFailure);
+		const uint32 ResultCell = static_cast<uint32>(Result);
+		return CompleteResolvedExportCall(
+			Entry,
+			CallStatus,
+			CallFailure,
+			&ResultCell,
+			CallStatus == AVIDSCRIPT_WASMTIME_CALL_SUCCESS ? 1 : 0,
+			OutError,
+			OutResult);
+	}
+
 	bool InvokeResolvedExport(
 		const FAvidScriptWasmtimeExportEntry& Entry,
 		const FAvidScriptVmCallFrame& Frame,
@@ -1445,6 +1522,25 @@ private:
 				FAvidScriptVmCallResult::MaxCells,
 				&ResultCellCount,
 				&CallFailure);
+		return CompleteResolvedExportCall(
+			Entry,
+			CallStatus,
+			CallFailure,
+			ResultCells,
+			ResultCellCount,
+			OutError,
+			OutResult);
+	}
+
+	bool CompleteResolvedExportCall(
+		const FAvidScriptWasmtimeExportEntry& Entry,
+		const AvidScriptWasmtimeCallStatus CallStatus,
+		AvidScriptWasmtimeFailure* CallFailure,
+		const uint32* ResultCells,
+		const size_t ResultCellCount,
+		FAvidScriptVmError& OutError,
+		FAvidScriptVmCallResult* OutResult)
+	{
 		const bool bCallFailed =
 			CallStatus != AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 		const bool bUnloadRequestedDuringCall = bUnloadDeferred;
@@ -1509,10 +1605,13 @@ private:
 		}
 		if (OutResult != nullptr)
 		{
-			FMemory::Memcpy(
-				OutResult->Cells,
-				ResultCells,
-				ResultCellCount * sizeof(uint32));
+			if (ResultCellCount > 0)
+			{
+				FMemory::Memcpy(
+					OutResult->Cells,
+					ResultCells,
+					ResultCellCount * sizeof(uint32));
+			}
 			OutResult->CellCount = static_cast<uint32>(ResultCellCount);
 		}
 		return true;

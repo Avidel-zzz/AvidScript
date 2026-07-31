@@ -541,6 +541,21 @@ void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function)
 	free(function);
 }
 
+AvidScriptWasmtimePreparedCallShape avidscript_wasmtime_function_prepared_call_shape(
+	const AvidScriptWasmtimeFunction* function)
+{
+	if (function != NULL
+		&& function->parameter_count == 2
+		&& function->result_count == 1
+		&& function->parameter_kinds[0] == WASM_I32
+		&& function->parameter_kinds[1] == WASM_I32
+		&& function->result_kinds[0] == WASM_I32)
+	{
+		return AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32;
+	}
+	return AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC;
+}
+
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
@@ -849,6 +864,36 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
 		result_cell_capacity,
 		out_result_cell_count,
 		out_failure);
+}
+
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	int32_t first,
+	int32_t second,
+	int32_t* out_result,
+	AvidScriptWasmtimeFailure** out_failure)
+{
+	wasmtime_val_raw_t values[2];
+	wasm_trap_t* trap = NULL;
+	wasmtime_error_t* error;
+
+	*out_failure = NULL;
+	values[0].i32 = first;
+	values[1].i32 = second;
+	error = wasmtime_func_call_unchecked(
+		store->context,
+		&function->value,
+		values,
+		2,
+		&trap);
+	if (error != NULL || trap != NULL)
+	{
+		*out_failure = avidscript_wasmtime_failure_new(error, trap);
+		return AVIDSCRIPT_WASMTIME_CALL_RUNTIME_FAILURE;
+	}
+	*out_result = values[0].i32;
+	return AVIDSCRIPT_WASMTIME_CALL_SUCCESS;
 }
 
 bool avidscript_wasmtime_memory_data(

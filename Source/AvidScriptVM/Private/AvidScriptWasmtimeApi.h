@@ -25,6 +25,12 @@ typedef enum AvidScriptWasmtimeCallStatus
 	AVIDSCRIPT_WASMTIME_CALL_LOCAL_FAILURE = 2
 } AvidScriptWasmtimeCallStatus;
 
+typedef enum AvidScriptWasmtimePreparedCallShape
+{
+	AVIDSCRIPT_WASMTIME_PREPARED_CALL_GENERIC = 0,
+	AVIDSCRIPT_WASMTIME_PREPARED_CALL_I32_I32_TO_I32 = 1
+} AvidScriptWasmtimePreparedCallShape;
+
 typedef enum AvidScriptWasmtimeValueKind
 {
 	AVIDSCRIPT_WASMTIME_I32 = 0,
@@ -96,6 +102,8 @@ int avidscript_wasmtime_instance_resolve_event_export(
 	uint32_t* out_parameter_cell_count,
 	uint32_t* out_result_cell_count);
 void avidscript_wasmtime_function_delete(AvidScriptWasmtimeFunction* function);
+AvidScriptWasmtimePreparedCallShape avidscript_wasmtime_function_prepared_call_shape(
+	const AvidScriptWasmtimeFunction* function);
 AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event(
 	AvidScriptWasmtimeStore* store,
 	AvidScriptWasmtimeFunction* function,
@@ -121,6 +129,13 @@ AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_event_prepared(
 	uint32_t* out_result_cells,
 	size_t result_cell_capacity,
 	size_t* out_result_cell_count,
+	AvidScriptWasmtimeFailure** out_failure);
+AvidScriptWasmtimeCallStatus avidscript_wasmtime_function_call_i32_i32_to_i32_prepared_unchecked(
+	AvidScriptWasmtimeStore* store,
+	AvidScriptWasmtimeFunction* function,
+	int32_t first,
+	int32_t second,
+	int32_t* out_result,
 	AvidScriptWasmtimeFailure** out_failure);
 
 bool avidscript_wasmtime_memory_data(
