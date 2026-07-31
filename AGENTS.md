@@ -1625,3 +1625,23 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a Phase 57 diagnostic invocation repeated the documented error of passing a fresh output path before creating the directory. The benchmark preflight rejected it before Unreal launched.
 - Prevention: treat output-root creation as part of the immutable benchmark parameter block. Verify the fresh directory exists immediately before invoking the runner, rather than relying on the runner to create it.
+
+### 2026-07-31: generated project modules are public ABI consumers
+
+- Mistake: after extending `FAvidScriptGeneratedBindingEntry`, the candidate build relinked Bindings, Runtime, and Editor but launched the project with an older `AvidScriptGeneratedBindings.dll`. Its static entry array used the previous stride and crashed while registering the package before the headless generator could run.
+- Prevention: public generated-binding layout changes must include every project-generated module in the consumer relink set. Rebuild the existing generated module before the first Editor launch, run regeneration, then rebuild it again from the new source before tests or benchmarks.
+
+### 2026-07-31: separator rejection also applies inside orchestration scripts
+
+- Mistake: a read-only Git identity probe embedded two commands with a semicolon inside a `shell_command` dispatched by the JavaScript orchestration layer, repeating the one-logical-command violation.
+- Prevention: inspect every nested `shell_command.command` string before dispatch. Commit and tree identity use separate calls such as `git rev-parse HEAD` and `git show -s --format=%T HEAD`; orchestration does not relax the separator ban.
+
+### 2026-07-31: generate native bindings from the declared source package
+
+- Mistake: the first trusted-thunk regeneration used a runtime-slice descriptor whose package hash was `8a58...`, even though its `generated_source_package_hash` declared the complete source package `4ac4...`. The generated DLL registered the slice identity, so runtime correctly rejected it as unavailable.
+- Prevention: before generating C++, read `generated_source_package_hash`. When present, resolve and generate from that complete package descriptor; derived runtime slices consume the registered source package and must never replace its native module identity.
+
+### 2026-07-31: formal multiprocess benchmarks need a phase-scale timeout
+
+- Mistake: the five-process Phase 56 formal micro benchmark was launched with a 120-second shell timeout. The orchestration host timed out while its final Editor child was still completing, invalidating the attempt before aggregation.
+- Prevention: diagnostic one-process runs may use a short bound, but formal calibration plus five-process runs use at least a 10-minute outer timeout. After any host timeout, wait for owned Editor children to exit and restart from a fresh output directory.

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.4",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-07-31T13:58:00Z",
+  "candidate": {
+    "commit": "a5a94705e4874c5a5a10b3be30502a00cd0c159e",
+    "tree": "fec6783826ca24bdc1572477f2628c87c0f7232a",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit",
+    "puerts_commit": "1977328c84661024be10a9e73640a74b278a7659"
+  },
+  "inputs": {
+    "profile_id": "phase56.micro-formal-v1",
+    "profile_sha256": "b2ad01f8c510203057786ded156e96e60c14ed3bcd11dabd4779f871aca2ee3c",
+    "request_template_sha256": "25ea5a401f5801271a8407a7987291cd6db969a5f2a976997c00373e1c58f58"
+  },
+  "method": {
+    "calibration_processes": 1,
+    "timed_processes": 5,
+    "warmup_samples_per_process": 5,
+    "timed_samples_per_cell": 30,
+    "total_timed_samples": 9000,
+    "cross_process_statistic": "nearest_rank_p50_of_per_process_nearest_rank_p50"
+  },
+  "metrics": {
+    "s1_scalar_ns": {
+      "value": 17.83,
+      "maximum": 25.0,
+      "pass": true
+    },
+    "s1_property_ns": {
+      "value": 33.76,
+      "maximum": 50.0,
+      "pass": true
+    },
+    "adaptive_semantic_scalar_ns": 64.26,
+    "puerts_reflection_scalar_ns": 105.94,
+    "semantic_vs_puerts_reflection": {
+      "value": 0.606569756465924,
+      "maximum": 0.8,
+      "pass": true
+    }
+  },
+  "per_process_p50_ns": {
+    "avidscript_wasmtime_generated_s1_scalar_add_int32": [17.83, 17.69, 18.0, 17.91, 17.6],
+    "avidscript_wasmtime_generated_s1_property_get_set": [34.01, 33.83, 33.76, 33.6, 33.54],
+    "avidscript_wasmtime_adaptive_semantic_scalar_add_int32": [63.75, 69.8, 64.26, 65.96, 63.41],
+    "puerts_v8_reflection_scalar_add_int32": [105.94, 108.02, 103.74, 106.01, 104.43]
+  },
+  "validity": {
+    "timed_process_result_files": 5,
+    "correctness_failures": 0,
+    "targeted_generated_samples": 300,
+    "path_validation_failures": 0,
+    "fallback_count": 0,
+    "guard_reject_count": 0,
+    "journal_slow_path_count": 0
+  },
+  "artifacts": {
+    "generated_binding_count": 7,
+    "generated_source_sha256": "21b471166e3a248bc8a708a34091040f30e1ed72b9c2640197a6c72ae931be08",
+    "generated_module_dll_sha256": "32e30fd273f2a4aff258b3cfe9e4d398c842e8132bc4660ddc70bbda1b0b09e",
+    "benchmark_source_digest_sha256": "b16b0a4612e8d73cd46aabeaa60263b248cb719445c8644262f5f590ae3e39f",
+    "benchmark_source_file_count": 55
+  },
+  "result_sha256": {
+    "calibration": "c7f6646991f8eb49b70b3584323f2c6be483976dcc76aa01aacfd7be06fdbe18",
+    "process_00": "b7ae27714d42040d18bcffbbc016cab6f830daf4a58adf2fa8ac613aa19a5263",
+    "process_01": "965aa91127191fecd30ba640ada1ce41a66b2f30484d17604b9ad930791570be",
+    "process_02": "977d5a9a86578844206bdc4110d54d49c24720772054b41b99d8b7e35e2e0304",
+    "process_03": "76e3d6f55d639fa09043ffa1a530dfae9dbc8a0775117e43cb9812585e44a632",
+    "process_04": "b7fb41cd409290adc2fa0fa095f09ba68dba99e09daa8a69aafc6f7059dd4a3c"
+  },
+  "verification": {
+    "affected_module_build": "AvidScriptBindings, AvidScriptRuntime and AvidScriptEditor succeeded",
+    "wasmtime_automation": "8/8 succeeded",
+    "generated_bindings_automation": "5/5 succeeded",
+    "host_effect_boundary_automation": "1/1 succeeded",
+    "clean_candidate_build": "14 actions succeeded",
+    "generated_module_pre_generation_relink": "5 actions succeeded",
+    "generated_module_post_generation_relink": "3 actions succeeded",
+    "headless_generation": "7 bindings generated successfully",
+    "clean_candidate_architecture_check": "passed"
+  },
+  "raw_evidence": {
+    "tracking": "external_not_committed",
+    "label": "phase57-p57.4-formal-trusted-thunks-20260731T1358Z-0013"
+  }
+}
