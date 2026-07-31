@@ -1553,6 +1553,30 @@ namespace
 		}
 	}
 
+	uint64 GetExpectedAdaptiveNativeHitCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		if (FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload))
+		{
+			const FAvidScriptGameplayFrameCounts Counts =
+				FAvidScriptGameplayFrameBenchmark::GetCounts(
+					Workload,
+					Iterations);
+			return Counts.ScalarPropertyCount
+				- Counts.PropertyWriteCount
+				+ Counts.EventCount;
+		}
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::BatchScalar:
+			return static_cast<uint64>(Iterations);
+		default:
+			return 0;
+		}
+	}
+
 	uint64 GetExpectedFusedGeneratedHitCount(
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
@@ -3181,6 +3205,10 @@ namespace
 			GetExpectedGeneratedS1HitCount(Workload, Iterations);
 		const uint64 ExpectedSemanticHitCount =
 			GetExpectedSemanticHitCount(Workload, Iterations);
+		const uint64 ExpectedAdaptiveNativeHitCount =
+			GetExpectedAdaptiveNativeHitCount(Workload, Iterations);
+		const uint64 ExpectedAdaptiveFallbackCount =
+			ExpectedSemanticHitCount - ExpectedAdaptiveNativeHitCount;
 		const uint64 ExpectedPropertyWriteCount =
 			GetExpectedPropertyWriteCount(Workload, Iterations);
 		const uint64 ExpectedDataGeneratedS1HitCount =
@@ -3196,13 +3224,14 @@ namespace
 		const bool bSemanticInvalid =
 			bStrictSemanticLane &&
 			Observation.SemanticHitCount != ExpectedSemanticHitCount;
-		const bool bAdaptiveScalarInvalid =
+		const bool bAdaptiveInvalid =
 			bAdaptiveLane &&
-			Workload == EAvidScriptPerfWorkload::ScalarAddInt32 &&
-			(Observation.AdaptiveNativeHitCount != ExpectedLogicalOperationCount ||
-			 Observation.AdaptiveProcessEventFallbackCount != 0 ||
+			(Observation.AdaptiveNativeHitCount !=
+					ExpectedAdaptiveNativeHitCount ||
+			 Observation.AdaptiveProcessEventFallbackCount !=
+					ExpectedAdaptiveFallbackCount ||
 			 Observation.AdaptiveGuardRejectCount != 0 ||
-			 Observation.SemanticHitCount != 0 ||
+			 Observation.SemanticHitCount != ExpectedAdaptiveFallbackCount ||
 			 Observation.GeneratedS1HitCount != 0);
 		const bool bGeneratedLaneDataInvalid =
 			Observation.Lane ==
@@ -3246,13 +3275,18 @@ namespace
 			+ Observation.GeneratedDirectWritePrepareCount;
 		const bool bAdaptiveFusedReceiverInvalid =
 			bAdaptiveLane
-			&& Workload == EAvidScriptPerfWorkload::ScalarAddInt32
-			&& (Observation.GeneratedFusedRevalidateCount != 1
-				|| Observation.GeneratedFusedFastHitCount + 1
-					!= ExpectedLogicalOperationCount
-				|| Observation.GeneratedFusedCallSitePrepareCount != 0
-				|| DirectPrepareCount != 0
-				|| Observation.GeneratedJournalSlowPathCount != 0);
+			&& (ExpectedAdaptiveNativeHitCount > 0
+				? (Observation.GeneratedFusedRevalidateCount != 1
+					|| Observation.GeneratedFusedFastHitCount + 1
+						!= ExpectedAdaptiveNativeHitCount
+					|| Observation.GeneratedFusedCallSitePrepareCount != 0
+					|| DirectPrepareCount != 0
+					|| Observation.GeneratedJournalSlowPathCount != 0)
+				: (Observation.GeneratedFusedFastHitCount != 0
+					|| Observation.GeneratedFusedRevalidateCount != 0
+					|| Observation.GeneratedFusedCallSitePrepareCount != 0
+					|| DirectPrepareCount != 0
+					|| Observation.GeneratedJournalSlowPathCount != 0));
 		const bool bFusedPathInvalid = bFusedLane
 			? (Observation.GeneratedJournalSlowPathCount != 0
 				|| (bHasFusedCalls
@@ -3267,8 +3301,7 @@ namespace
 						|| Observation.GeneratedFusedRevalidateCount != 0
 						|| Observation.GeneratedFusedCallSitePrepareCount != 0
 						|| DirectPrepareCount != 0)))
-			: (bAdaptiveLane
-				&& Workload == EAvidScriptPerfWorkload::ScalarAddInt32)
+			: bAdaptiveLane
 				? bAdaptiveFusedReceiverInvalid
 				: (Observation.GeneratedFusedFastHitCount != 0
 					|| Observation.GeneratedFusedRevalidateCount != 0
@@ -3283,7 +3316,7 @@ namespace
 			Observation.LogicalOperationCount != ExpectedLogicalOperationCount ||
 			bGeneratedS1Invalid ||
 			bSemanticInvalid ||
-			bAdaptiveScalarInvalid ||
+			bAdaptiveInvalid ||
 			bGeneratedLaneDataInvalid ||
 			bDataGameplayInvalid ||
 			bDataMicroInvalid ||

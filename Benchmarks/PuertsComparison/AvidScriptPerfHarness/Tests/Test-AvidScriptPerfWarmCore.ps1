@@ -434,16 +434,16 @@ foreach ($Field in @(
     'correct')) {
     Assert-True ($RunnerSource.Contains("TEXT(`"$Field`")")) "sample JSON must include $Field"
 }
-Assert-True ($RunnerSource.Contains('AdaptiveNativeHitCount != ExpectedLogicalOperationCount')) `
-    'eligible adaptive scalar samples must require one native hit per logical operation'
-Assert-True ($RunnerSource.Contains('AdaptiveProcessEventFallbackCount != 0')) `
-    'eligible adaptive scalar samples must reject ProcessEvent fallback'
+Assert-True ($RunnerSource.Contains('GetExpectedAdaptiveNativeHitCount')) `
+    'adaptive correctness must derive native hits from the complete workload shape'
+Assert-True ($RunnerSource.Contains('ExpectedAdaptiveFallbackCount')) `
+    'adaptive correctness must account for noneligible ProcessEvent operations'
 Assert-True ($RunnerSource.Contains('GeneratedS1HitCount != 0')) `
-    'eligible adaptive scalar samples must reject generated S1 routing'
+    'adaptive samples must reject generated S1 routing'
 Assert-True ($RunnerSource.Contains('bAdaptiveFusedReceiverInvalid')) `
-    'eligible adaptive scalar samples must validate the shared fused receiver cache'
+    'adaptive prepared samples must validate the shared fused receiver cache'
 Assert-True ($RunnerSource.Contains('GeneratedFusedFastHitCount + 1')) `
-    'eligible adaptive scalar samples must require one revalidation followed by cache hits'
+    'adaptive prepared samples must require one revalidation followed by cache hits'
 
 Assert-True ($RunnerSource.Contains('WorkloadId += 2;')) `
     'data gameplay workloads must map internally from 10/11 to batch4 paths 12/13'
