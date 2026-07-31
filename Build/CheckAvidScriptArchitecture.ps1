@@ -654,9 +654,16 @@ foreach ($RequiredRuntimeArtifactContract in @(
 Test-RequiredTokenSequence $RuntimeArtifactSource @(
     'FAvidScriptWasmReloadManifestLoader::LoadFromFile',
     'RootObject->HasField(TEXT("execution"))',
+    'AuthorizeAvidScriptVmArtifact') `
+    'Runtime artifact loader must validate canonical WASM before authorizing serialized execution bytes'
+Test-RequiredTokenSequence $RuntimeSource @(
+    'Artifact.ArtifactFormat ==',
     'AuthorizeAvidScriptVmArtifact',
-    'EAvidScriptVmArtifactTrust::VerifiedPackage') `
-    'Runtime must validate canonical WASM before authorizing and trusting serialized execution bytes'
+    'return LoadArtifactView(',
+    'Artifact.MakeView(',
+    'EAvidScriptVmArtifactTrust::VerifiedPackage',
+    'EAvidScriptVmArtifactTrust::Untrusted') `
+    'Runtime instance must reauthorize an owned serialized artifact before promoting its execution view to verified trust'
 foreach ($RequiredRuntimeArtifactLoadContract in @(
     'LoadArtifactView',
     'VmBackend->LoadArtifact',
@@ -1945,11 +1952,11 @@ $RuntimeSessionImportSlice = Get-SourceSlice `
     'bool FAvidScriptRuntimeSession::ValidateExpectedOwner(' `
     'direct Runtime Session import authorization'
 Test-RequiredTokenSequence $RuntimeSessionImportSlice @(
-    'if (Bytecode == nullptr || BytecodeSize <= 0)',
+    'if (Artifact.VmArtifact.CanonicalWasmBytes.IsEmpty()',
     'if (!InspectAndValidateAvidScriptWasmImportContract(',
     'ImportContractResult.ErrorCategory',
-    'CandidateRuntime->LoadModule('
-) 'direct Runtime Session must reject invalid bytecode and authorize actual imports before VM load'
+    'CandidateRuntime->LoadArtifact('
+) 'direct Runtime Session must reject invalid artifacts and authorize actual imports before VM load'
 
 $WamrBackendLoadSlice = Get-SourceSlice `
     $WamrBackendSource `

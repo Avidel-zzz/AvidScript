@@ -1678,3 +1678,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a parallel source probe passed `Source/AvidScriptVM/Private/Tests/*.h` as an `rg` path argument; Win32 rejected that branch with OS error 123 and the orchestration call reported failure despite useful sibling output.
 - Prevention: before dispatching parallel probes, mechanically reject `*` or `?` in every `rg` path position. Search literal roots such as `Source/AvidScriptVM/Private/Tests` and apply filename filters only through `-g '*.h'`; any failed sibling makes the whole probe non-evidence.
+
+### 2026-07-31: Phase 57.8 unquoted Git tree expression recurrence
+
+- Mistake: a parallel candidate identity probe again passed unquoted `HEAD^{tree}` through PowerShell; the shell emitted an encoded script-block argument and Git rejected the synthetic revision, invalidating the whole parallel result.
+- Prevention: stop typing brace revision expressions in phase workflows. Read the commit with `git rev-parse HEAD` and the tree with `git show -s --format=%T HEAD` as separate commands; treat any failed sibling in a parallel identity probe as no evidence.
