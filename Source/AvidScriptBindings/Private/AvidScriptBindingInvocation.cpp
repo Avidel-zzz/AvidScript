@@ -3317,6 +3317,7 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 			OutBindings.AddDefaulted_GetRef();
 		Binding.BindingOrdinal = static_cast<uint32>(PlanIndex);
 		Binding.ExpectedClass = Plan.OwnerClass;
+		Binding.ImmutablePlanIdentity = &Plan;
 		Binding.bAdaptiveNativeEligible =
 			Plan.FastPath.bAdaptiveNativeEligible;
 		Binding.TypedHostImport.StableId = DynamicImport.StableId;
@@ -3357,13 +3358,13 @@ bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
 	}
 	const FAvidScriptRuntimeBindingInvocationPlan& Plan =
 		Impl->Plans[Binding.BindingOrdinal];
-	if (Plan.GeneratedEntry != nullptr
-		|| Plan.OwnerClass != Binding.ExpectedClass
-		|| Plan.FastPath.Kind
-			!= EAvidScriptBindingFastPathKind::ScalarI32PairToI32
-		|| Plan.FastPath.bAdaptiveNativeEligible
-			!= Binding.bAdaptiveNativeEligible
-		|| !Receiver.IsA(Plan.OwnerClass))
+	const bool bPreparedAdaptiveNative =
+		Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Plan.FastPath.bAdaptiveNativeEligible;
+	if (Binding.ImmutablePlanIdentity != &Plan
+		|| (!bPreparedAdaptiveNative
+			&& !Receiver.IsA(Plan.OwnerClass)))
 	{
 		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
 		OutErrorDetails =

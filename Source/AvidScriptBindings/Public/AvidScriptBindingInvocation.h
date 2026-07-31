@@ -119,6 +119,7 @@ struct FAvidScriptPreparedReflectionBinding
 	uint32 BindingOrdinal = MAX_uint32;
 	FAvidScriptVmTypedHostImport TypedHostImport;
 	UClass* ExpectedClass = nullptr;
+	const void* ImmutablePlanIdentity = nullptr;
 	bool bAdaptiveNativeEligible = false;
 };
 

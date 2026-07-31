@@ -525,6 +525,7 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	{
 		if (Binding.BindingOrdinal == MAX_uint32
 			|| Binding.ExpectedClass == nullptr
+			|| Binding.ImmutablePlanIdentity == nullptr
 			|| Binding.TypedHostImport.Shape
 				!= EAvidScriptVmTypedHostShape::
 					SelfI32PairToGuestI32)
@@ -3209,8 +3210,7 @@ FAvidScriptWasmRuntimeInstance::
 			SelfSlot,
 			SelfGeneration,
 			Receiver)
-		|| Receiver == nullptr
-		|| !Receiver->IsA(Call.Binding.ExpectedClass))
+		|| Receiver == nullptr)
 	{
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,

@@ -328,7 +328,16 @@ bool InvokePreparedScalarFrame(
 			nullptr,
 			Plan.Function->ChildProperties);
 		Stack.Code = nullptr;
-		Plan.Function->Invoke(
+		checkSlow(
+			!Plan.Function->GetOwnerClass()->IsChildOf(
+				UInterface::StaticClass()));
+		FNativeFuncPtr NativeFunction =
+			Plan.Function->GetNativeFunc();
+		checkSlow(NativeFunction != nullptr);
+		TGuardValue<UFunction*> NativeFunctionGuard(
+			Stack.CurrentNativeFunction,
+			Plan.Function);
+		NativeFunction(
 			&Target,
 			Stack,
 			Frame + Plan.ReturnFrameOffset);
@@ -591,6 +600,10 @@ bool InvokePreparedScalarI32PairToI32(
 			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
 		&& Plan.bAdaptiveNativeEligible
 		&& CanInvokePreparedNative(Plan, Target, nullptr, nullptr);
+	const bool bAdaptiveRequested =
+		InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Plan.bAdaptiveNativeEligible;
 	const bool bQualifiedNative =
 		InvocationPolicy
 			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
@@ -607,6 +620,16 @@ bool InvokePreparedScalarI32PairToI32(
 			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect
 		&& !bQualifiedNative)
 	{
+		return false;
+	}
+	if (bAdaptiveRequested
+		&& !bAdaptiveNative
+		&& !Target.IsA(Plan.NativeDirectOwnerClass))
+	{
+		OutErrorCategory =
+			TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails =
+			TEXT("The adaptive fallback receiver is incompatible with the function owner.");
 		return false;
 	}
 	if (bAdaptiveNative)

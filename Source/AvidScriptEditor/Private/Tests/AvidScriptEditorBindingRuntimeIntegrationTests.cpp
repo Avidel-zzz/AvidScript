@@ -4688,6 +4688,30 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 	{
 		return false;
 	}
+	TestNotNull(
+		TEXT("Prepared Add carries immutable plan identity"),
+		PreparedAdd->ImmutablePlanIdentity);
+	FAvidScriptPreparedReflectionBinding ForgedPreparedAdd =
+		*PreparedAdd;
+	ForgedPreparedAdd.ImmutablePlanIdentity = nullptr;
+	int32 ForgedPreparedValue = 0;
+	FString ForgedPreparedErrorCategory;
+	FString ForgedPreparedErrorDetails;
+	TestFalse(
+		TEXT("Prepared Add rejects a forged immutable plan identity"),
+		DirectPackage->InvokePreparedReflectionI32Pair(
+			ForgedPreparedAdd,
+			*Target,
+			19,
+			23,
+			AdaptiveContext,
+			ForgedPreparedValue,
+			ForgedPreparedErrorCategory,
+			ForgedPreparedErrorDetails));
+	TestEqual(
+		TEXT("Forged prepared identity reports stable category"),
+		ForgedPreparedErrorCategory,
+		FString(TEXT("binding_prepared_identity_mismatch")));
 	int32 PreparedAdaptiveValue = 0;
 	FString PreparedErrorCategory;
 	FString PreparedErrorDetails;
