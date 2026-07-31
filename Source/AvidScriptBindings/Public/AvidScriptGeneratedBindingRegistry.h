@@ -52,6 +52,11 @@ struct FAvidScriptGeneratedBindingEntry
 	FAvidScriptGeneratedPropertyI32SetCall PropertyI32SetCall = nullptr;
 	FAvidScriptGeneratedVectorValueCall VectorValueCall = nullptr;
 	FAvidScriptGeneratedObjectRoundtripCall ObjectRoundtripCall = nullptr;
+	FAvidScriptGeneratedI32PairCall PreparedI32PairCall = nullptr;
+	FAvidScriptGeneratedPropertyI32GetCall
+		PreparedPropertyI32GetCall = nullptr;
+	FAvidScriptGeneratedPropertyI32SetCall
+		PreparedPropertyI32SetCall = nullptr;
 };
 
 struct FAvidScriptGeneratedBindingPackageState;

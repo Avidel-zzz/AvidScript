@@ -16,21 +16,45 @@ bool IsAvidScriptGeneratedCallSiteValid(
 	{
 		return false;
 	}
+	if ((Entry.PreparedI32PairCall != nullptr
+			&& Entry.I32PairCall == nullptr)
+		|| (Entry.PreparedPropertyI32GetCall != nullptr
+			&& Entry.PropertyI32GetCall == nullptr)
+		|| (Entry.PreparedPropertyI32SetCall != nullptr
+			&& Entry.PropertyI32SetCall == nullptr))
+	{
+		return false;
+	}
 
 	switch (Entry.Shape)
 	{
 	case EAvidScriptGeneratedBindingShape::I32PairToI32:
-		return Entry.I32PairCall != nullptr;
+		return Entry.I32PairCall != nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32GetSet:
-		return Entry.PropertyI32Call != nullptr;
+		return Entry.PropertyI32Call != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
-		return Entry.PropertyI32GetCall != nullptr;
+		return Entry.PropertyI32GetCall != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
-		return Entry.PropertyI32SetCall != nullptr;
+		return Entry.PropertyI32SetCall != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::VectorValue:
-		return Entry.VectorValueCall != nullptr;
+		return Entry.VectorValueCall != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	case EAvidScriptGeneratedBindingShape::StableObjectRoundtrip:
-		return Entry.ObjectRoundtripCall != nullptr;
+		return Entry.ObjectRoundtripCall != nullptr
+			&& Entry.PreparedI32PairCall == nullptr
+			&& Entry.PreparedPropertyI32GetCall == nullptr
+			&& Entry.PreparedPropertyI32SetCall == nullptr;
 	default:
 		return false;
 	}

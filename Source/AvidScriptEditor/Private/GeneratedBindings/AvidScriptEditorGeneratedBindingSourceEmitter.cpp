@@ -321,6 +321,57 @@ FString RenderTypedCallSite(
 	}
 }
 
+FString RenderPreparedTypedCallSite(
+	const FAvidScriptGeneratedBindingIr& Binding,
+	const int32 Index)
+{
+	const FString FunctionName =
+		FString::Printf(TEXT("InvokePreparedGenerated_%04d"), Index);
+	const FString OwnerType = Binding.OwnerCppType;
+	const FString UeFunction = Binding.FunctionName;
+	switch (Binding.Shape)
+	{
+	case EAvidScriptGeneratedBindingShape::I32PairToI32:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Left, int32 Right, int32& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tOutValue = TypedReceiver->%s(Left, Right);\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::PropertyI32Get:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32& OutValue)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tOutValue = TypedReceiver->%s;\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
+	case EAvidScriptGeneratedBindingShape::PropertyI32Set:
+		return FString::Printf(
+			TEXT("static EAvidScriptVmTypedHostStatus %s(UObject& Receiver, int32 Value)\n")
+			TEXT("{\n")
+			TEXT("\t%s* TypedReceiver = static_cast<%s*>(&Receiver);\n")
+			TEXT("\tTypedReceiver->%s = Value;\n")
+			TEXT("\treturn EAvidScriptVmTypedHostStatus::Succeeded;\n")
+			TEXT("}\n\n"),
+			*FunctionName,
+			*OwnerType,
+			*OwnerType,
+			*UeFunction);
+	default:
+		return FString();
+	}
+}
+
 FString RenderPrivateCpp(
 	const FAvidScriptGeneratedBindingPackageIr& Package)
 {
@@ -345,6 +396,8 @@ FString RenderPrivateCpp(
 	for (int32 Index = 0; Index < Package.Bindings.Num(); ++Index)
 	{
 		Result += RenderTypedCallSite(Package.Bindings[Index], Index);
+		Result +=
+			RenderPreparedTypedCallSite(Package.Bindings[Index], Index);
 	}
 	Result += TEXT("const FAvidScriptGeneratedBindingEntry GeneratedEntries[] =\n{\n");
 	for (int32 Index = 0; Index < Package.Bindings.Num(); ++Index)
@@ -352,6 +405,10 @@ FString RenderPrivateCpp(
 		const FAvidScriptGeneratedBindingIr& Binding = Package.Bindings[Index];
 		const FString CallSite =
 			FString::Printf(TEXT("&InvokeGenerated_%04d"), Index);
+		const FString PreparedCallSite =
+			FString::Printf(
+				TEXT("&InvokePreparedGenerated_%04d"),
+				Index);
 		const FString I32PairCall = Binding.Shape
 				== EAvidScriptGeneratedBindingShape::I32PairToI32
 			? CallSite
@@ -376,8 +433,20 @@ FString RenderPrivateCpp(
 				== EAvidScriptGeneratedBindingShape::StableObjectRoundtrip
 			? CallSite
 			: FString(TEXT("nullptr"));
+		const FString PreparedI32PairCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::I32PairToI32
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
+		const FString PreparedPropertyI32GetCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Get
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
+		const FString PreparedPropertyI32SetCall = Binding.Shape
+				== EAvidScriptGeneratedBindingShape::PropertyI32Set
+			? PreparedCallSite
+			: FString(TEXT("nullptr"));
 		Result += FString::Printf(
-			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s },\n"),
+			TEXT("\t{ TEXT(\"%s\"), TEXT(\"%s\"), TEXT(\"%s\"), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s },\n"),
 			*EscapeCppString(Binding.StableId),
 			*EscapeCppString(Package.PackageHash),
 			*EscapeCppString(Binding.DescriptorIdentity),
@@ -388,7 +457,10 @@ FString RenderPrivateCpp(
 			*PropertyI32GetCall,
 			*PropertyI32SetCall,
 			*VectorValueCall,
-			*StableObjectCall);
+			*StableObjectCall,
+			*PreparedI32PairCall,
+			*PreparedPropertyI32GetCall,
+			*PreparedPropertyI32SetCall);
 	}
 	Result += TEXT("};\n} // namespace\n\n");
 	Result +=

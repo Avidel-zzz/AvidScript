@@ -481,20 +481,27 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		switch (Import.Shape)
 		{
 		case EAvidScriptVmTypedHostShape::SelfI32PairToI32:
-			Call->I32PairCall = Binding.Entry->I32PairCall;
+			Call->I32PairCall =
+				Binding.Entry->PreparedI32PairCall != nullptr
+				? Binding.Entry->PreparedI32PairCall
+				: Binding.Entry->I32PairCall;
 			Import.PreparedTarget.SelfI32Pair =
 				&FAvidScriptWasmRuntimeInstance::InvokePreparedSelfI32Pair;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
 			Call->PropertyI32GetCall =
-				Binding.Entry->PropertyI32GetCall;
+				Binding.Entry->PreparedPropertyI32GetCall != nullptr
+				? Binding.Entry->PreparedPropertyI32GetCall
+				: Binding.Entry->PropertyI32GetCall;
 			Import.PreparedTarget.SelfPropertyI32Get =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Get;
 			break;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 			Call->PropertyI32SetCall =
-				Binding.Entry->PropertyI32SetCall;
+				Binding.Entry->PreparedPropertyI32SetCall != nullptr
+				? Binding.Entry->PreparedPropertyI32SetCall
+				: Binding.Entry->PropertyI32SetCall;
 			Import.PreparedTarget.SelfPropertyI32Set =
 				&FAvidScriptWasmRuntimeInstance::
 					InvokePreparedSelfPropertyI32Set;

@@ -168,6 +168,8 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 			&& SecondContents[2].Contains(TEXT("UnregisterPackage"))
 			&& SecondContents[2].Contains(TEXT("InvokeGenerated_0000"))
 			&& SecondContents[2].Contains(
+				TEXT("InvokePreparedGenerated_0000"))
+			&& SecondContents[2].Contains(
 				TEXT("&InvokeGenerated_0000, nullptr, nullptr, nullptr, nullptr, nullptr"))
 			&& SecondContents[2].Contains(
 				TEXT("nullptr, &InvokeGenerated_0002, nullptr, nullptr, nullptr, nullptr"))
@@ -182,7 +184,8 @@ bool FAvidScriptEditorGeneratedBindingDeterminismTest::RunTest(
 			&& SecondContents[2].Contains(
 				TEXT("int32& OutValue"))
 			&& SecondContents[2].Contains(
-				TEXT("int32 Value")));
+				TEXT("int32 Value"))
+			&& SecondContents[2].Contains(TEXT("static_cast<")));
 	TestFalse(
 		TEXT("Generated call sites never use checked casts"),
 		SecondContents[2].Contains(TEXT("CastChecked")));
