@@ -1535,6 +1535,21 @@ private:
 		return 1;
 	}
 
+	static FORCEINLINE int32 CompletePreparedTypedInvocation(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		const EAvidScriptVmTypedHostStatus Status)
+	{
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			return 0;
+		}
+		return HostContext.Backend != nullptr
+			? HostContext.Backend->CompleteTypedInvocation(
+				HostContext,
+				Status)
+			: 1;
+	}
+
 	void RecordPendingHostFailure(
 		const FString& ModuleName,
 		const FString& ImportName,
@@ -1630,13 +1645,38 @@ private:
 		int32 Right,
 		int32* OutValue)
 	{
-		FAvidScriptWasmtimeTypedHostContext* HostContext = static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr || HostContext->Backend == nullptr || OutValue == nullptr)
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutValue == nullptr)
+		{
+			return 1;
+		}
+		if (HostContext->PreparedTarget.SelfI32Pair != nullptr
+			&& HostContext->PreparedTarget.Context != nullptr)
+		{
+			const EAvidScriptVmTypedHostStatus Status =
+				HostContext->PreparedTarget.SelfI32Pair(
+					HostContext->PreparedTarget.Context,
+					SelfSlot,
+					SelfGeneration,
+					Left,
+					Right,
+					*OutValue);
+			return CompletePreparedTypedInvocation(
+				*HostContext,
+				Status);
+		}
+		if (HostContext->Backend == nullptr)
 		{
 			return 1;
 		}
 		return HostContext->Backend->InvokeTypedSelfI32Pair(
-			*HostContext, SelfSlot, SelfGeneration, Left, Right, *OutValue);
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			Left,
+			Right,
+			*OutValue);
 	}
 
 	static int32 TypedSelfI32PairGuestResultCallback(
@@ -1690,17 +1730,29 @@ private:
 	{
 		FAvidScriptWasmtimeTypedHostContext* HostContext =
 			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr
-			|| HostContext->Backend == nullptr
-			|| OutValue == nullptr)
+		if (HostContext == nullptr || OutValue == nullptr)
 		{
 			return 1;
 		}
-		return HostContext->Backend->InvokeTypedSelfPropertyI32Get(
-			*HostContext,
+		const FAvidScriptVmPreparedSelfPropertyI32GetTarget Target =
+			HostContext->PreparedTarget.SelfPropertyI32Get;
+		if (Target == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr)
+		{
+			return HostContext->Backend != nullptr
+				? HostContext->Backend->InvokeTypedSelfPropertyI32Get(
+					*HostContext,
+					SelfSlot,
+					SelfGeneration,
+					*OutValue)
+				: 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = Target(
+			HostContext->PreparedTarget.Context,
 			SelfSlot,
 			SelfGeneration,
 			*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
 	static int32 TypedSelfPropertyI32SetCallback(
@@ -1712,18 +1764,35 @@ private:
 	{
 		FAvidScriptWasmtimeTypedHostContext* HostContext =
 			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
-		if (HostContext == nullptr
-			|| HostContext->Backend == nullptr
-			|| OutValue == nullptr)
+		if (HostContext == nullptr || OutValue == nullptr)
 		{
 			return 1;
 		}
-		return HostContext->Backend->InvokeTypedSelfPropertyI32Set(
-			*HostContext,
+		*OutValue = 0;
+		const FAvidScriptVmPreparedSelfPropertyI32SetTarget Target =
+			HostContext->PreparedTarget.SelfPropertyI32Set;
+		if (Target == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr)
+		{
+			return HostContext->Backend != nullptr
+				? HostContext->Backend->InvokeTypedSelfPropertyI32Set(
+					*HostContext,
+					SelfSlot,
+					SelfGeneration,
+					Value,
+					*OutValue)
+				: 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status = Target(
+			HostContext->PreparedTarget.Context,
 			SelfSlot,
 			SelfGeneration,
-			Value,
-			*OutValue);
+			Value);
+		if (Status == EAvidScriptVmTypedHostStatus::Succeeded)
+		{
+			*OutValue = 1;
+		}
+		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
 	static int32 TypedSelfVectorValueCallback(

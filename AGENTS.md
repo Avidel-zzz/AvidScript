@@ -1620,3 +1620,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a public Bindings structure gained frozen fast-path fields, but the first scoped build targeted only Runtime. UBT recompiled the dependency library without relinking the Bindings DLL, so the focused test loaded mismatched structure layouts and reported unrelated identity failures.
 - Prevention: when a public cross-module type changes size or field layout, enumerate its producer and every binary consumer before testing. Build each affected module target in the same batch and verify their DLL timestamps before launching Automation.
+
+### 2026-07-31: benchmark output-root preflight recurrence
+
+- Mistake: a Phase 57 diagnostic invocation repeated the documented error of passing a fresh output path before creating the directory. The benchmark preflight rejected it before Unreal launched.
+- Prevention: treat output-root creation as part of the immutable benchmark parameter block. Verify the fresh directory exists immediately before invoking the runner, rather than relying on the runner to create it.
