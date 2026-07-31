@@ -31,9 +31,9 @@
     },
     {
       "id": "P57.2",
-      "status": "Pending",
-      "evidence": "",
-      "completed_at_utc": null
+      "status": "Completed",
+      "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
+      "completed_at_utc": "2026-07-31T02:16:11.6980931+00:00"
     },
     {
       "id": "P57.3",
@@ -106,7 +106,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "batch-complete -Phase 57 -BatchId P57.2 -Evidence <text>",
-  "revision": 3,
-  "updated_at_utc": "2026-07-30T18:04:44.9331404+00:00"
+  "next_action": "batch-complete -Phase 57 -BatchId P57.3 -Evidence <text>",
+  "revision": 4,
+  "updated_at_utc": "2026-07-31T02:16:11.7002739+00:00"
 }
