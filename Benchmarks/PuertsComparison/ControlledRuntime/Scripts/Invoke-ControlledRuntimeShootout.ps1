@@ -30,10 +30,15 @@ param(
 
     [switch]$AllowNonFormalProfile,
 
+    [long]$ProcessorAffinityMask = 1,
+
     [string[]]$AdditionalEditorArguments = @()
 )
 
 $ErrorActionPreference = 'Stop'
+if ($ProcessorAffinityMask -le 0) {
+    throw 'ASP54S4309 processor affinity mask must select at least one logical processor'
+}
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ControlledRoot = Split-Path -Parent $ScriptRoot
 $PuertsComparisonRoot = Split-Path -Parent $ControlledRoot
@@ -233,6 +238,11 @@ function Invoke-ControlledProcess {
     if (-not $Process.Start()) {
         throw 'ASP54S4307 controlled Editor process could not start'
     }
+    $Process.ProcessorAffinity = [IntPtr]$ProcessorAffinityMask
+    if ($Process.ProcessorAffinity.ToInt64() -ne $ProcessorAffinityMask) {
+        $Process.Kill($true)
+        throw 'ASP54S4309 controlled Editor process affinity could not be applied'
+    }
     $StdoutTask = $Process.StandardOutput.ReadToEndAsync()
     $StderrTask = $Process.StandardError.ReadToEndAsync()
     $Process.WaitForExit()
@@ -358,6 +368,7 @@ $Attempt = [ordered]@{
         tree_sha = $AvidScriptTreeSha
         clean = $true
     }
+    processor_affinity_mask = ('0x{0:x}' -f $ProcessorAffinityMask)
     engine = [ordered]@{
         version = $EngineVersion
         build_id = $EngineBuildId
