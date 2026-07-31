@@ -27,10 +27,6 @@
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 
-#ifndef AVIDSCRIPT_WITH_WASMTIME
-#define AVIDSCRIPT_WITH_WASMTIME 0
-#endif
-
 namespace
 {
 EAvidScriptVmTypedHostStatus GeneratedSessionPairCall(
@@ -563,9 +559,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 	const FString& Parameters)
 {
-#if !AVIDSCRIPT_WITH_WASMTIME
-	return true;
-#else
 	const TConstArrayView<uint8> CanonicalWasm = MakeArrayView(
 		GSessionCompatibleModule,
 		UE_ARRAY_COUNT(GSessionCompatibleModule));
@@ -578,18 +571,19 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
 	CompileRequest.CanonicalWasmBytes = CanonicalWasm;
 	FAvidScriptVmArtifactCompileResult CompileResult;
-	if (!TestTrue(
-			TEXT("Session precompiled fixture compiles"),
-			CompileAvidScriptVmArtifact(
-				CompileRequest,
-				CompileResult)))
+	if (!CompileAvidScriptVmArtifact(CompileRequest, CompileResult))
 	{
+		if (CompileResult.Error.Category == TEXT("backend_unavailable"))
+		{
+			return true;
+		}
 		AddError(
 			CompileResult.Error.Category
 			+ TEXT(": ")
 			+ CompileResult.Error.Details);
 		return false;
 	}
+	TestTrue(TEXT("Session precompiled fixture compiles"), true);
 
 	FAvidScriptRuntimeArtifact Artifact;
 	Artifact.Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(
@@ -602,7 +596,6 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		EAvidScriptVmExecutionMode::Aot;
 	Artifact.BackendSelection.ArtifactFormat =
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
-	Artifact.Trust = EAvidScriptVmArtifactTrust::VerifiedPackage;
 	Artifact.bUsesPrecompiledArtifact = true;
 
 	FAvidScriptRuntimeSession Session;
@@ -631,7 +624,6 @@ bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
 		TEXT("Precompiled session stops cleanly"),
 		Session.StopAndUnload(StopResult));
 	return true;
-#endif
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

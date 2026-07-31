@@ -1668,3 +1668,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a Runtime owner search passed Git's `:!path` exclusion syntax as an `rg` positional path, so ripgrep found the intended symbols but then exited with an invalid Windows path error.
 - Prevention: ripgrep exclusions use `-g '!relative/path'`; Git pathspecs such as `:!path` are valid only for Git commands. Keep an exclusion probe standalone until its syntax succeeds.
+
+### 2026-07-31: architecture checker PowerShell 7 host recurrence
+
+- Mistake: the Phase 57.8 working-tree architecture probe launched `CheckAvidScriptArchitecture.ps1` with Windows PowerShell 5.1 even though the repository already records that its leading-pipe syntax requires PowerShell 7; parsing failed before any architecture assertion ran.
+- Prevention: resolve `Get-Command pwsh` once and run architecture/parser gates with `pwsh -NoProfile`. Reserve `powershell.exe` for explicit Windows PowerShell compatibility contracts only; a 5.1 parser failure is never product evidence.

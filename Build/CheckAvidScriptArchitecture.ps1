@@ -368,6 +368,9 @@ if (-not $WasmtimeInstaller.Contains('WASMTIME_FEATURE_CRANELIFT')) {
 }
 
 $VmContractHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
+$VmArtifactHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmArtifact.h'
+$VmArtifactCompilerSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmArtifactCompiler.cpp'
+$WasmtimeRuntimeSupportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeRuntimeSupport.cpp'
 foreach ($RequiredBatchContract in @(
     'ActorGetTransformBatch',
     'InputCells',
@@ -378,6 +381,34 @@ foreach ($RequiredBatchContract in @(
         Add-Violation "VM batch contract is missing $RequiredBatchContract"
     }
 }
+foreach ($RequiredArtifactContract in @(
+    'FAvidScriptVmOwnedArtifact',
+    'CompileAvidScriptVmArtifact',
+    'AuthorizeAvidScriptVmArtifact',
+    'AttestationId')) {
+    if (-not $VmArtifactHeader.Contains($RequiredArtifactContract)) {
+        Add-Violation "VM owned-artifact contract is missing $RequiredArtifactContract"
+    }
+}
+foreach ($RequiredArtifactCompilerContract in @(
+    'ArtifactCacheCapacity = 32',
+    'AttestationRegistryCapacity = 32',
+    'avidscript_wasmtime_module_serialize',
+    'RegisterArtifactAttestationLocked',
+    'FAvidScriptHash::Sha256Hex')) {
+    if (-not $VmArtifactCompilerSource.Contains($RequiredArtifactCompilerContract)) {
+        Add-Violation "VM artifact compiler is missing $RequiredArtifactCompilerContract"
+    }
+}
+foreach ($RequiredRuntimeIdentityContract in @(
+    'ResolveAvidScriptWasmtimeRuntimeIdentity',
+    'AVIDSCRIPT_WASMTIME_DLL_SHA256',
+    'GWasmtimeDllHandle',
+    'RuntimeBuildIdentity')) {
+    if (-not $WasmtimeRuntimeSupportSource.Contains($RequiredRuntimeIdentityContract)) {
+        Add-Violation "Wasmtime runtime identity owner is missing $RequiredRuntimeIdentityContract"
+    }
+}
 $WamrBuildScript = Read-RequiredFile 'Build/BuildWAMRWin64.cmd'
 $WamrCommonCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/common/iwasm_common.cmake'
 $WamrRuntimeCMake = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/build-scripts/runtime_lib.cmake'
@@ -386,6 +417,11 @@ $WasmtimeShimHeader = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptW
 $WasmtimeShimSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c'
 $WasmtimeShimInternal = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApiInternal.h'
 $WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp'
+if ($WasmtimeBackendSource.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256') -or
+    $WasmtimeBackendSource.Contains('EnsureWasmtimeDllLoaded') -or
+    -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeRuntimeIdentity')) {
+    Add-Violation 'Wasmtime backend must consume the shared runtime identity owner without duplicating DLL identity logic'
+}
 $StaticHostImportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp'
 $WamrCallStackSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrCallStack.cpp'
 $WamrFastInterpreterSource = Read-RequiredFile 'Source/ThirdParty/WAMR/upstream/core/iwasm/interpreter/wasm_interp_fast.c'
@@ -551,12 +587,76 @@ $EditorBuild = Read-RequiredFile 'Source/AvidScriptEditor/AvidScriptEditor.Build
 if ($EditorBuild.Contains('"Wasmtime"')) {
     Add-Violation 'AvidScriptEditor must not depend directly on Wasmtime'
 }
+$EditorArtifactPublisherSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorVmArtifactPublisher.cpp'
+$EditorCSharpBuildPipelineSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpBuild/AvidScriptEditorCSharpBuildPipeline.cpp'
+$CSharpGuestBuildScript = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
+foreach ($RequiredEditorArtifactContract in @(
+    'CompileAvidScriptVmArtifact',
+    'wasmtime_serialized_v1',
+    'canonical_sha256',
+    'compiler_build_identity',
+    'attestation_id',
+    'RemoveStaleArtifact',
+    'WriteManifestAtomic')) {
+    if (-not $EditorArtifactPublisherSource.Contains($RequiredEditorArtifactContract)) {
+        Add-Violation "Editor VM artifact publisher is missing $RequiredEditorArtifactContract"
+    }
+}
+if ($CSharpGuestBuildScript.Contains('.cwasm') -or
+    $CSharpGuestBuildScript.Contains('wasmtime compile')) {
+    Add-Violation 'C# PowerShell build must not bypass the native Editor VM artifact publisher'
+}
+foreach ($RequiredEditorArtifactTransactionContract in @(
+    'FAvidScriptEditorVmArtifactPublisher::MakeArtifactPath',
+    'EAvidScriptEditorVmArtifactPolicy::JitOnly',
+    'FAvidScriptEditorVmArtifactPublisher::Publish')) {
+    if (-not $EditorCSharpBuildPipelineSource.Contains($RequiredEditorArtifactTransactionContract)) {
+        Add-Violation "Editor C# artifact transaction is missing $RequiredEditorArtifactTransactionContract"
+    }
+}
+$EditorCompleteFinalSlice = Get-SourceSlice `
+    $EditorCSharpBuildPipelineSource `
+    'bool FAvidScriptEditorCSharpBuildPipeline::CompleteFinal(' `
+    'void FAvidScriptEditorCSharpBuildPipeline::Cleanup('
+Test-RequiredTokenSequence $EditorCompleteFinalSlice @(
+    'FAvidScriptEditorVmArtifactPublisher::Publish',
+    'FinishArtifactTransaction(bCommit)') `
+    'Editor must publish the VM artifact before committing the existing C# artifact transaction'
 
 $RuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $RuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+$RuntimeArtifactHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeArtifact.h'
+$RuntimeArtifactSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeArtifact.cpp'
 $RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
 $RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
 $RuntimeBackendLaneHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptRuntimeBackendTestLanes.h'
+foreach ($RequiredRuntimeArtifactContract in @(
+    'FAvidScriptRuntimeArtifact',
+    'FAvidScriptRuntimeArtifactLoader',
+    'FAvidScriptVmOwnedArtifact',
+    'FAvidScriptVmBackendSelection')) {
+    if (-not $RuntimeArtifactHeader.Contains($RequiredRuntimeArtifactContract)) {
+        Add-Violation "Runtime artifact contract is missing $RequiredRuntimeArtifactContract"
+    }
+}
+Test-RequiredTokenSequence $RuntimeArtifactSource @(
+    'FAvidScriptWasmReloadManifestLoader::LoadFromFile',
+    'RootObject->HasField(TEXT("execution"))',
+    'AuthorizeAvidScriptVmArtifact',
+    'EAvidScriptVmArtifactTrust::VerifiedPackage') `
+    'Runtime must validate canonical WASM before authorizing and trusting serialized execution bytes'
+foreach ($RequiredRuntimeArtifactLoadContract in @(
+    'LoadArtifactView',
+    'VmBackend->LoadArtifact',
+    'AuthorizeAvidScriptVmArtifact',
+    'EAvidScriptVmArtifactTrust::Untrusted',
+    'Artifact.VmArtifact.CanonicalWasmBytes',
+    'Artifact.BackendSelection')) {
+    if (-not $RuntimeSource.Contains($RequiredRuntimeArtifactLoadContract) -and
+        -not $RuntimeSessionSource.Contains($RequiredRuntimeArtifactLoadContract)) {
+        Add-Violation "Runtime artifact lifecycle is missing $RequiredRuntimeArtifactLoadContract"
+    }
+}
 foreach ($RequiredRuntimeSessionToken in @(
     'SetBackendSelectionForTesting',
     'BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wamr',
@@ -740,6 +840,17 @@ if (-not $RuntimeSource.Contains('DebugMap->MapFrames')) {
 
 $ComponentHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptComponent.h'
 $ComponentSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptComponent.cpp'
+foreach ($RequiredComponentArtifactContract in @(
+    'FAvidScriptRuntimeArtifactLoader::LoadFromFile',
+    'RuntimeSession->LoadInitialArtifact',
+    'RuntimeSession->ReloadArtifact')) {
+    if (-not $ComponentSource.Contains($RequiredComponentArtifactContract)) {
+        Add-Violation "UAvidScriptComponent artifact lifecycle is missing $RequiredComponentArtifactContract"
+    }
+}
+if ($ComponentSource.Contains('FAvidScriptWasmReloadManifestLoader::LoadFromFile')) {
+    Add-Violation 'UAvidScriptComponent must not bypass RuntimeArtifactLoader with the bytecode-only manifest loader'
+}
 if ($ComponentHeader -match 'TUniquePtr\s*<\s*FAvidScriptWasmRuntimeInstance\s*>') {
     Add-Violation 'UAvidScriptComponent must own FAvidScriptRuntimeSession instead of a raw runtime instance'
 }

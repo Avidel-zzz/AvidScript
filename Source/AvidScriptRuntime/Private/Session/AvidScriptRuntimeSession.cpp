@@ -826,7 +826,6 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 
 	if (!CandidateRuntime->LoadArtifact(
 		Artifact.VmArtifact,
-		Artifact.Trust,
 		Manifest.ModuleId,
 		Manifest.BindingPackage,
 		Manifest.DebugMap,

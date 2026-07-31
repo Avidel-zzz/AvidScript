@@ -8,7 +8,6 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeArtifact
 	FAvidScriptWasmReloadManifest Manifest;
 	FAvidScriptVmOwnedArtifact VmArtifact;
 	FAvidScriptVmBackendSelection BackendSelection;
-	EAvidScriptVmArtifactTrust Trust = EAvidScriptVmArtifactTrust::Untrusted;
 	FString RequestedBackend;
 	FString SelectedBackend;
 	FString FallbackCategory;

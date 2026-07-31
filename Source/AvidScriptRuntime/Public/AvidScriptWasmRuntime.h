@@ -173,7 +173,6 @@ public:
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool LoadArtifact(
 		const FAvidScriptVmOwnedArtifact& Artifact,
-		EAvidScriptVmArtifactTrust Trust,
 		const FString& InModuleId,
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,

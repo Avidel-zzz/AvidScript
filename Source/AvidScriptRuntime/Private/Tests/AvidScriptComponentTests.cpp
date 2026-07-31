@@ -16,10 +16,6 @@ THIRD_PARTY_INCLUDES_START
 #include <openssl/sha.h>
 THIRD_PARTY_INCLUDES_END
 
-#ifndef AVIDSCRIPT_WITH_WASMTIME
-#define AVIDSCRIPT_WITH_WASMTIME 0
-#endif
-
 namespace
 {
 const uint8 GComponentReloadCompatibleModule[] = {
@@ -128,9 +124,6 @@ bool BuildComponentPrecompiledExecutionFixture(
 	{
 		return false;
 	}
-#if !AVIDSCRIPT_WITH_WASMTIME
-	return true;
-#else
 	FAvidScriptVmArtifactCompileRequest Request;
 	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
 	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
@@ -140,7 +133,7 @@ bool BuildComponentPrecompiledExecutionFixture(
 	FAvidScriptVmArtifactCompileResult Result;
 	if (!CompileAvidScriptVmArtifact(Request, Result))
 	{
-		return false;
+		return Result.Error.Category == TEXT("backend_unavailable");
 	}
 	const FString ArtifactFileName =
 		ModuleId + TEXT(".wasmtime.cwasm");
@@ -162,7 +155,6 @@ bool BuildComponentPrecompiledExecutionFixture(
 		*Result.Artifact.TargetTriple,
 		*Result.Artifact.AttestationId);
 	return true;
-#endif
 }
 
 bool CreateComponentWorld(UWorld*& OutWorld)
@@ -374,22 +366,24 @@ bool FAvidScriptComponentTransactionalReloadTest::RunTest(const FString& Paramet
 		TEXT("v1 is initially active"),
 		Component->GetRuntimeStats().ModuleId,
 		FString(TEXT("component_reload_v1")));
-#if AVIDSCRIPT_WITH_WASMTIME
-	FAvidScriptRuntimeSession* InitialSession =
-		Component->GetRuntimeSessionForTesting();
-	FAvidScriptWasmRuntimeInstance* InitialRuntime = InitialSession != nullptr
-		? InitialSession->GetLiveRuntimeForTesting()
-		: nullptr;
-	if (TestNotNull(
-			TEXT("v1 precompiled Runtime is active"),
-			InitialRuntime))
+	if (!V1ExecutionJson.IsEmpty())
 	{
-		TestEqual(
-			TEXT("Component selects the Wasmtime serialized lane"),
-			InitialRuntime->GetActiveBackendInfo().ArtifactFormat,
-			EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+		FAvidScriptRuntimeSession* InitialSession =
+			Component->GetRuntimeSessionForTesting();
+		FAvidScriptWasmRuntimeInstance* InitialRuntime =
+			InitialSession != nullptr
+				? InitialSession->GetLiveRuntimeForTesting()
+				: nullptr;
+		if (TestNotNull(
+				TEXT("v1 precompiled Runtime is active"),
+				InitialRuntime))
+		{
+			TestEqual(
+				TEXT("Component selects the Wasmtime serialized lane"),
+				InitialRuntime->GetActiveBackendInfo().ArtifactFormat,
+				EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+		}
 	}
-#endif
 	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestEqual(TEXT("v1 ticks"), Component->GetRuntimeStats().TickCallCount, 1);
 

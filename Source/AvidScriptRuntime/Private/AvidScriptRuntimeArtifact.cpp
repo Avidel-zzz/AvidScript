@@ -422,7 +422,6 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	OutArtifact.Manifest = MoveTemp(Manifest);
 	OutArtifact.VmArtifact = MoveTemp(VmArtifact);
 	OutArtifact.BackendSelection = MakeWasmtimePrecompiledSelection();
-	OutArtifact.Trust = EAvidScriptVmArtifactTrust::VerifiedPackage;
 	OutArtifact.RequestedBackend = TEXT("wasmtime.cranelift.precompiled");
 	OutArtifact.SelectedBackend = TEXT("wasmtime.cranelift.precompiled");
 	OutArtifact.ExecutionPolicy = Policy;
