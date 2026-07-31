@@ -87,8 +87,8 @@
       "kernel_id": "serial_integer",
       "wat_path": "suite_serial_integer.wat",
       "wasm_path": "suite_serial_integer.wasm",
-      "wat_normalized_sha256": "c9c6b1b15ff51e660bb13c0b1048ab37bf2042fb1b5b280d68ad41605cd4b706",
-      "wasm_sha256": "24f3b1ec83a40dec5e8197eb4b0158e35608e37252a885d46c45645eaef8d881",
+      "wat_normalized_sha256": "03f1cec804035737224741341b329452d3355476333849b25c9832f00cb8c8af",
+      "wasm_sha256": "8f4ab96afca05ee78165af042a5ee0437f832c47d74da9aaecea978d5901b6ff",
       "features": ["mvp", "i32", "serial_dependency"]
     },
     {
