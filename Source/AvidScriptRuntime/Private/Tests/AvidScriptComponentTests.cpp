@@ -3,6 +3,7 @@
 #include "AvidScriptComponent.h"
 
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "AvidScriptVmArtifact.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
@@ -14,6 +15,10 @@
 THIRD_PARTY_INCLUDES_START
 #include <openssl/sha.h>
 THIRD_PARTY_INCLUDES_END
+
+#ifndef AVIDSCRIPT_WITH_WASMTIME
+#define AVIDSCRIPT_WITH_WASMTIME 0
+#endif
 
 namespace
 {
@@ -74,7 +79,8 @@ bool WriteComponentReloadFixture(
 	const FString& ModuleId,
 	const uint8* Bytecode,
 	const int32 BytecodeSize,
-	FString& OutManifestPath)
+	FString& OutManifestPath,
+	const FString& ExecutionJson = FString())
 {
 	if (!IFileManager::Get().MakeDirectory(*Root, true))
 	{
@@ -90,6 +96,9 @@ bool WriteComponentReloadFixture(
 		return false;
 	}
 
+	const FString ExecutionField = ExecutionJson.IsEmpty()
+		? FString()
+		: FString::Printf(TEXT("  \"execution\": %s,\n"), *ExecutionJson);
 	const FString ManifestJson = FString::Printf(
 		TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
@@ -97,13 +106,63 @@ bool WriteComponentReloadFixture(
 		TEXT("  \"abi_version\": 1,\n")
 		TEXT("  \"language\": \"wasm\",\n")
 		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
+		TEXT("%s")
 		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
 		TEXT("  \"required_imports\": [{ \"module\": \"avidscript\", \"name\": \"host_add_i32\" }]\n")
 		TEXT("}\n"),
 		*ModuleId,
 		*WasmFileName,
-		*ComputeComponentReloadSha256(WasmBytes));
+		*ComputeComponentReloadSha256(WasmBytes),
+		*ExecutionField);
 	return FFileHelper::SaveStringToFile(ManifestJson, *OutManifestPath);
+}
+
+bool BuildComponentPrecompiledExecutionFixture(
+	const FString& Root,
+	const FString& ModuleId,
+	TConstArrayView<uint8> CanonicalWasm,
+	FString& OutExecutionJson)
+{
+	OutExecutionJson.Reset();
+	if (!IFileManager::Get().MakeDirectory(*Root, true))
+	{
+		return false;
+	}
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FAvidScriptVmArtifactCompileRequest Request;
+	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Request.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Request.CanonicalWasmBytes = CanonicalWasm;
+	FAvidScriptVmArtifactCompileResult Result;
+	if (!CompileAvidScriptVmArtifact(Request, Result))
+	{
+		return false;
+	}
+	const FString ArtifactFileName =
+		ModuleId + TEXT(".wasmtime.cwasm");
+	if (!FFileHelper::SaveArrayToFile(
+			Result.Artifact.ExecutionBytes,
+			*FPaths::Combine(Root, ArtifactFileName)))
+	{
+		return false;
+	}
+	OutExecutionJson = FString::Printf(
+		TEXT("{\"format\":\"wasmtime_serialized_v1\",\"file\":\"%s\",")
+		TEXT("\"sha256\":\"%s\",\"canonical_sha256\":\"%s\",")
+		TEXT("\"compiler_build_identity\":\"%s\",\"target_triple\":\"%s\",")
+		TEXT("\"attestation_id\":\"%s\",\"policy\":\"prefer_precompiled\",\"fallback\":\"wasmtime_jit\"}"),
+		*ArtifactFileName,
+		*Result.Artifact.ExecutionIdentity,
+		*Result.Artifact.CanonicalWasmIdentity,
+		*Result.Artifact.CompilerBuildIdentity,
+		*Result.Artifact.TargetTriple,
+		*Result.Artifact.AttestationId);
+	return true;
+#endif
 }
 
 bool CreateComponentWorld(UWorld*& OutWorld)
@@ -250,12 +309,27 @@ bool FAvidScriptComponentTransactionalReloadTest::RunTest(const FString& Paramet
 	FString ManifestV1Path;
 	FString ManifestV2Path;
 	FString TrapManifestPath;
+	FString V1ExecutionJson;
+	if (!TestTrue(
+			TEXT("v1 precompiled execution fixture writes"),
+			BuildComponentPrecompiledExecutionFixture(
+				FixtureRoot,
+				TEXT("component_reload_v1"),
+				MakeArrayView(
+					GComponentReloadCompatibleModule,
+					UE_ARRAY_COUNT(GComponentReloadCompatibleModule)),
+				V1ExecutionJson)))
+	{
+		IFileManager::Get().DeleteDirectory(*FixtureRoot, false, true);
+		return true;
+	}
 	if (!TestTrue(TEXT("v1 fixture writes"), WriteComponentReloadFixture(
 			FixtureRoot,
 			TEXT("component_reload_v1"),
 			GComponentReloadCompatibleModule,
 			UE_ARRAY_COUNT(GComponentReloadCompatibleModule),
-			ManifestV1Path)) ||
+			ManifestV1Path,
+			V1ExecutionJson)) ||
 		!TestTrue(TEXT("v2 fixture writes"), WriteComponentReloadFixture(
 			FixtureRoot,
 			TEXT("component_reload_v2"),
@@ -300,6 +374,22 @@ bool FAvidScriptComponentTransactionalReloadTest::RunTest(const FString& Paramet
 		TEXT("v1 is initially active"),
 		Component->GetRuntimeStats().ModuleId,
 		FString(TEXT("component_reload_v1")));
+#if AVIDSCRIPT_WITH_WASMTIME
+	FAvidScriptRuntimeSession* InitialSession =
+		Component->GetRuntimeSessionForTesting();
+	FAvidScriptWasmRuntimeInstance* InitialRuntime = InitialSession != nullptr
+		? InitialSession->GetLiveRuntimeForTesting()
+		: nullptr;
+	if (TestNotNull(
+			TEXT("v1 precompiled Runtime is active"),
+			InitialRuntime))
+	{
+		TestEqual(
+			TEXT("Component selects the Wasmtime serialized lane"),
+			InitialRuntime->GetActiveBackendInfo().ArtifactFormat,
+			EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+	}
+#endif
 	Component->TickComponent(1.0f / 60.0f, LEVELTICK_All, nullptr);
 	TestEqual(TEXT("v1 ticks"), Component->GetRuntimeStats().TickCallCount, 1);
 

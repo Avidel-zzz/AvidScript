@@ -3,8 +3,10 @@
 #include "AvidScriptWasmReload.h"
 
 #include "AvidScriptRuntimeBackendTestLanes.h"
+#include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "AvidScriptVmArtifact.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -18,6 +20,10 @@
 THIRD_PARTY_INCLUDES_START
 #include <openssl/sha.h>
 THIRD_PARTY_INCLUDES_END
+
+#ifndef AVIDSCRIPT_WITH_WASMTIME
+#define AVIDSCRIPT_WITH_WASMTIME 0
+#endif
 
 namespace
 {
@@ -111,11 +117,15 @@ bool WriteReloadManifestFixture(
 	const FString& WasmSha256,
 	const FString& StateMigrationJson = FString(),
 	const FString& RequiredImportsJson =
-		TEXT("[{ \"module\": \"avidscript\", \"name\": \"host_add_i32\" }]"))
+		TEXT("[{ \"module\": \"avidscript\", \"name\": \"host_add_i32\" }]"),
+	const FString& ExecutionJson = FString())
 {
 	const FString StateMigrationField = StateMigrationJson.IsEmpty()
 		? FString()
 		: FString::Printf(TEXT("  \"state_migration\": %s,\n"), *StateMigrationJson);
+	const FString ExecutionField = ExecutionJson.IsEmpty()
+		? FString()
+		: FString::Printf(TEXT("  \"execution\": %s,\n"), *ExecutionJson);
 	const FString ManifestJson = FString::Printf(
 		TEXT("{\n")
 		TEXT("  \"schema_version\": 1,\n")
@@ -125,6 +135,7 @@ bool WriteReloadManifestFixture(
 		TEXT("  \"source\": { \"file\": \"Generated/manifest_smoke.d\" },\n")
 		TEXT("%s")
 		TEXT("  \"wasm\": { \"file\": \"%s\", \"sha256\": \"%s\" },\n")
+		TEXT("%s")
 		TEXT("  \"required_exports\": [\"avid_on_begin_play\", \"avid_on_tick\"],\n")
 		TEXT("  \"required_imports\": %s,\n")
 		TEXT("  \"toolchain\": { \"compiler\": \"ldc2\", \"version\": \"1.42.0\", \"target\": \"wasm32-unknown-unknown-wasm\", \"linker\": \"ldc2-internal-lld\" }\n")
@@ -133,9 +144,37 @@ bool WriteReloadManifestFixture(
 		*StateMigrationField,
 		*ProjectRelativeJsonPathForReloadManifestTest(WasmPath),
 		*WasmSha256,
+		*ExecutionField,
 		*RequiredImportsJson);
 
 	return FFileHelper::SaveStringToFile(ManifestJson, *ManifestPath);
+}
+
+FString MakeReloadExecutionJson(
+	const FAvidScriptVmOwnedArtifact& Artifact,
+	const FString& FileName,
+	const FString& Policy,
+	const FString& ExecutionSha256 = FString(),
+	const FString& TargetTriple = FString(),
+	const FString& AttestationId = FString(),
+	const FString& CompilerBuildIdentity = FString())
+{
+	return FString::Printf(
+		TEXT("{\"format\":\"wasmtime_serialized_v1\",\"file\":\"%s\",")
+		TEXT("\"sha256\":\"%s\",\"canonical_sha256\":\"%s\",")
+		TEXT("\"compiler_build_identity\":\"%s\",\"target_triple\":\"%s\",")
+		TEXT("\"attestation_id\":\"%s\",\"policy\":\"%s\",\"fallback\":\"wasmtime_jit\"}"),
+		*FileName,
+		ExecutionSha256.IsEmpty()
+			? *Artifact.ExecutionIdentity
+			: *ExecutionSha256,
+		*Artifact.CanonicalWasmIdentity,
+		CompilerBuildIdentity.IsEmpty()
+			? *Artifact.CompilerBuildIdentity
+			: *CompilerBuildIdentity,
+		TargetTriple.IsEmpty() ? *Artifact.TargetTriple : *TargetTriple,
+		AttestationId.IsEmpty() ? *Artifact.AttestationId : *AttestationId,
+		*Policy);
 }
 
 bool LoadReloadDynamicImportFixture(TArray<uint8>& OutBytecode)
@@ -830,6 +869,240 @@ bool FAvidScriptReloadManifestLoadsWasmSmokeTest::RunTest(const FString& Paramet
 	TestEqual(TEXT("Loaded byte size"), LoadedBytecode.Num(), WasmBytes.Num());
 
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeArtifactLoaderTest,
+	"AvidScript.Reload.RuntimeArtifactLoader",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeArtifactLoaderTest::RunTest(const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	FString TestRoot = FPaths::Combine(
+		GetReloadManifestTestRoot(),
+		TEXT("RuntimeArtifact"));
+	TestRoot = NormalizeReloadTestFullPath(TestRoot);
+	IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	TestTrue(
+		TEXT("Runtime artifact test root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+
+	const FString WasmPath = FPaths::Combine(
+		TestRoot,
+		TEXT("runtime_artifact.wasm"));
+	const FString ManifestPath = FPaths::Combine(
+		TestRoot,
+		TEXT("runtime_artifact.avidscript.json"));
+	const FString ArtifactFileName =
+		TEXT("runtime_artifact.wasmtime.cwasm");
+	const FString ArtifactPath = FPaths::Combine(
+		TestRoot,
+		ArtifactFileName);
+	TArray<uint8> WasmBytes;
+	WasmBytes.Append(
+		GAvidScriptReloadCompatibleWasmModule,
+		UE_ARRAY_COUNT(GAvidScriptReloadCompatibleWasmModule));
+	TestTrue(
+		TEXT("Runtime artifact canonical WASM writes"),
+		FFileHelper::SaveArrayToFile(WasmBytes, *WasmPath));
+
+	FAvidScriptVmArtifactCompileRequest CompileRequest;
+	CompileRequest.Selection.BackendKind =
+		EAvidScriptVmBackendKind::Wasmtime;
+	CompileRequest.Selection.ExecutionMode =
+		EAvidScriptVmExecutionMode::Aot;
+	CompileRequest.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	CompileRequest.CanonicalWasmBytes = WasmBytes;
+	FAvidScriptVmArtifactCompileResult CompileResult;
+	if (!TestTrue(
+			TEXT("Runtime artifact fixture precompiles"),
+			CompileAvidScriptVmArtifact(
+				CompileRequest,
+				CompileResult)))
+	{
+		AddError(
+			CompileResult.Error.Category
+			+ TEXT(": ")
+			+ CompileResult.Error.Details);
+		return false;
+	}
+	TestTrue(
+		TEXT("Runtime artifact serialized bytes write"),
+		FFileHelper::SaveArrayToFile(
+			CompileResult.Artifact.ExecutionBytes,
+			*ArtifactPath));
+
+	auto WriteExecutionManifest = [this,
+		&ManifestPath,
+		&WasmPath,
+		&WasmBytes](const FString& ExecutionJson)
+	{
+		return TestTrue(
+			TEXT("Runtime execution manifest writes"),
+			WriteReloadManifestFixture(
+				ManifestPath,
+				TEXT("runtime_artifact"),
+				WasmPath,
+				ComputeReloadTestSha256Hex(WasmBytes),
+				FString(),
+				TEXT("[]"),
+				ExecutionJson));
+	};
+
+	const FString ValidExecutionJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("prefer_precompiled"));
+	if (!WriteExecutionManifest(ValidExecutionJson))
+	{
+		return false;
+	}
+	FAvidScriptRuntimeArtifact RuntimeArtifact;
+	FAvidScriptRuntimeArtifactLoadResult LoadResult;
+	TestTrue(
+		TEXT("Authorized runtime artifact loads"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestTrue(
+		TEXT("Authorized runtime artifact selects precompiled execution"),
+		LoadResult.bUsesPrecompiledArtifact);
+	TestEqual(
+		TEXT("Authorized runtime artifact selects Wasmtime serialized"),
+		RuntimeArtifact.BackendSelection.ArtifactFormat,
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+	TestEqual(
+		TEXT("Authorized runtime artifact receives verified trust"),
+		RuntimeArtifact.Trust,
+		EAvidScriptVmArtifactTrust::VerifiedPackage);
+
+	const FString MissingAttestationJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("prefer_precompiled"),
+		FString(),
+		FString(),
+		TEXT("00000000000000000000000000000000"));
+	WriteExecutionManifest(MissingAttestationJson);
+	TestTrue(
+		TEXT("PreferPrecompiled falls back when attestation expires"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestTrue(TEXT("Expired attestation records JIT fallback"), LoadResult.bFellBackToJit);
+	TestEqual(
+		TEXT("Expired attestation selects Wasmtime JIT"),
+		RuntimeArtifact.BackendSelection.ExecutionMode,
+		EAvidScriptVmExecutionMode::Jit);
+
+	const FString DigestMismatchJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("prefer_precompiled"),
+		TEXT("0000000000000000000000000000000000000000000000000000000000000000"));
+	WriteExecutionManifest(DigestMismatchJson);
+	TestTrue(
+		TEXT("PreferPrecompiled falls back on cwasm digest mismatch"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("Digest mismatch has a stable fallback category"),
+		LoadResult.FallbackCategory,
+		FString(TEXT("execution_identity_mismatch")));
+
+	const FString CompilerMismatchJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("prefer_precompiled"),
+		FString(),
+		FString(),
+		FString(),
+		TEXT("foreign-compiler-build"));
+	WriteExecutionManifest(CompilerMismatchJson);
+	TestTrue(
+		TEXT("PreferPrecompiled falls back on compiler mismatch"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("Compiler mismatch is rejected before deserialize"),
+		LoadResult.FallbackCategory,
+		FString(TEXT("execution_attestation_invalid")));
+
+	const FString TargetMismatchJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("prefer_precompiled"),
+		FString(),
+		TEXT("foreign-target"));
+	WriteExecutionManifest(TargetMismatchJson);
+	TestTrue(
+		TEXT("PreferPrecompiled falls back on target mismatch"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("Target mismatch has a stable fallback category"),
+		LoadResult.FallbackCategory,
+		FString(TEXT("execution_target_mismatch")));
+
+	const FString RequireMissingAttestationJson = MakeReloadExecutionJson(
+		CompileResult.Artifact,
+		ArtifactFileName,
+		TEXT("require_precompiled"),
+		FString(),
+		FString(),
+		TEXT("00000000000000000000000000000000"));
+	WriteExecutionManifest(RequireMissingAttestationJson);
+	TestFalse(
+		TEXT("RequirePrecompiled rejects an expired attestation"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("RequirePrecompiled attestation rejection is stable"),
+		LoadResult.CanonicalResult.ErrorCategory,
+		FString(TEXT("execution_attestation_invalid")));
+
+	const TArray<uint8> MalformedCanonical = {
+		0x00, 0x61, 0x73, 0x6d
+	};
+	TestTrue(
+		TEXT("Malformed canonical fixture writes"),
+		FFileHelper::SaveArrayToFile(MalformedCanonical, *WasmPath));
+	TestTrue(
+		TEXT("Malformed canonical manifest writes"),
+		WriteReloadManifestFixture(
+			ManifestPath,
+			TEXT("runtime_artifact_malformed"),
+			WasmPath,
+			ComputeReloadTestSha256Hex(MalformedCanonical),
+			FString(),
+			TEXT("[]"),
+			ValidExecutionJson));
+	TestFalse(
+		TEXT("Canonical validation rejects before serialized selection"),
+		FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+			ManifestPath,
+			RuntimeArtifact,
+			LoadResult));
+	TestEqual(
+		TEXT("Canonical layout failure remains authoritative"),
+		LoadResult.CanonicalResult.ErrorCategory,
+		FString(TEXT("wasm_layout_invalid")));
+	return true;
+#endif
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

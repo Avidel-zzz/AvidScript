@@ -678,6 +678,42 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 	FAvidScriptWasmSmokeResult& OutResult)
 {
+	TArrayView<const uint8> BytecodeView;
+	if (Bytecode != nullptr && BytecodeSize > 0)
+	{
+		BytecodeView = MakeArrayView(Bytecode, BytecodeSize);
+	}
+	return LoadArtifactView(
+		FAvidScriptVmArtifactView::FromWasmBytecode(BytecodeView),
+		InModuleId,
+		InBindingPackage,
+		InDebugMap,
+		OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::LoadArtifact(
+	const FAvidScriptVmOwnedArtifact& Artifact,
+	EAvidScriptVmArtifactTrust Trust,
+	const FString& InModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	return LoadArtifactView(
+		Artifact.MakeView(Trust),
+		InModuleId,
+		InBindingPackage,
+		InDebugMap,
+		OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
+	const FAvidScriptVmArtifactView& Artifact,
+	const FString& InModuleId,
+	const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+	const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
 	Unload();
 	Metrics = FAvidScriptWasmRuntimeMetrics();
 	DataBridgeMetrics = FAvidScriptDataBridgeMetrics();
@@ -687,9 +723,10 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	PrepareResult(OutResult, ModuleId, ActiveBackendInfo, Metrics);
 	CopyHostImportStateToResult(OutResult);
 
-	if (Bytecode == nullptr || BytecodeSize <= 0)
+	if (Artifact.ExecutionBytes.IsEmpty()
+		|| Artifact.CanonicalWasmBytes.IsEmpty())
 	{
-		SetFailure(OutResult, ModuleId, TEXT("<module>"), TEXT("invalid_bytecode"), TEXT("No WASM bytecode was provided"), TEXT("provide a non-empty WASM module buffer"));
+		SetFailure(OutResult, ModuleId, TEXT("<module>"), TEXT("invalid_bytecode"), TEXT("No VM artifact bytes were provided"), TEXT("provide a non-empty canonical WASM or verified precompiled artifact"));
 		return false;
 	}
 
@@ -741,7 +778,11 @@ bool FAvidScriptWasmRuntimeInstance::LoadModule(
 	Config.TypedHostDispatcher = this;
 	Config.TypedHostImports = TypedHostImports;
 	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
-	const bool bLoaded = VmBackend->Load(MakeArrayView(Bytecode, BytecodeSize), ModuleId, Config, Error);
+	const bool bLoaded = VmBackend->LoadArtifact(
+		Artifact,
+		ModuleId,
+		Config,
+		Error);
 	ActiveBackendInfo = VmBackend->GetBackendInfo();
 	OutResult.BackendInfo = ActiveBackendInfo;
 	const FAvidScriptVmLoadMetrics& LoadMetrics = VmBackend->GetLoadMetrics();

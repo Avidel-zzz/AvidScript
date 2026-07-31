@@ -5,6 +5,7 @@
 #include "AvidScriptWasmDiagnostics.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
+#include "AvidScriptVmArtifact.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptObjectOwnership.h"
@@ -170,6 +171,13 @@ public:
 		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 		FAvidScriptWasmSmokeResult& OutResult);
+	bool LoadArtifact(
+		const FAvidScriptVmOwnedArtifact& Artifact,
+		EAvidScriptVmArtifactTrust Trust,
+		const FString& InModuleId,
+		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool ValidateRequiredExports(
 		const TArray<FString>& RequiredExports,
 		FAvidScriptWasmSmokeResult& OutResult);
@@ -240,6 +248,10 @@ public:
 #endif
 
 	bool IsLoaded() const;
+	const FAvidScriptVmBackendInfo& GetActiveBackendInfo() const
+	{
+		return ActiveBackendInfo;
+	}
 	EAvidScriptLifecycleState GetLifecycleState() const { return LifecycleState.GetState(); }
 	bool HasBegunPlay() const { return bHasBegunPlay; }
 	int32 GetTickCallCount() const { return TickCallCount; }
@@ -327,6 +339,12 @@ public:
 
 
 private:
+	bool LoadArtifactView(
+		const FAvidScriptVmArtifactView& Artifact,
+		const FString& InModuleId,
+		const TSharedPtr<const FAvidScriptBindingPackage>& InBindingPackage,
+		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool BuildPreparedTypedHostImports(FString& OutError);
 	static EAvidScriptVmTypedHostStatus InvokePreparedSelfI32Pair(
 		void* Context,

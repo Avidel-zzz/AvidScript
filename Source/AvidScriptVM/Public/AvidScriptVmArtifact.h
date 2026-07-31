@@ -18,7 +18,11 @@ struct FAvidScriptVmOwnedArtifact
 		EAvidScriptVmArtifactTrust Trust) const
 	{
 		FAvidScriptVmArtifactView View;
-		View.ExecutionBytes = ExecutionBytes;
+		View.ExecutionBytes =
+			ArtifactFormat == EAvidScriptVmArtifactFormat::WasmBytecode
+				&& ExecutionBytes.IsEmpty()
+			? MakeArrayView(CanonicalWasmBytes)
+			: MakeArrayView(ExecutionBytes);
 		View.ArtifactFormat = ArtifactFormat;
 		View.CanonicalWasmBytes = CanonicalWasmBytes;
 		View.ExecutionIdentity = ExecutionIdentity;

@@ -6,7 +6,9 @@
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectRegistryTestTypes.h"
+#include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "AvidScriptVmArtifact.h"
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptWasmRuntimePrivate.h"
 #include "Session/AvidScriptRuntimeEventRouter.h"
@@ -24,6 +26,10 @@
 #include "UObject/UObjectGlobals.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
+
+#ifndef AVIDSCRIPT_WITH_WASMTIME
+#define AVIDSCRIPT_WITH_WASMTIME 0
+#endif
 
 namespace
 {
@@ -547,6 +553,85 @@ void TestLiveManifestPreserved(
 	Test.TestTrue(TEXT("Live binding package identity is preserved"), After.LiveManifest.BindingPackage.Get() == Before.LiveManifest.BindingPackage.Get());
 	Test.TestTrue(TEXT("Live debug-map identity is preserved"), After.LiveManifest.DebugMap.Get() == Before.LiveManifest.DebugMap.Get());
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeSessionPrecompiledArtifactTest,
+	"AvidScript.Runtime.Session.PrecompiledArtifact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeSessionPrecompiledArtifactTest::RunTest(
+	const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	return true;
+#else
+	const TConstArrayView<uint8> CanonicalWasm = MakeArrayView(
+		GSessionCompatibleModule,
+		UE_ARRAY_COUNT(GSessionCompatibleModule));
+	FAvidScriptVmArtifactCompileRequest CompileRequest;
+	CompileRequest.Selection.BackendKind =
+		EAvidScriptVmBackendKind::Wasmtime;
+	CompileRequest.Selection.ExecutionMode =
+		EAvidScriptVmExecutionMode::Aot;
+	CompileRequest.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	CompileRequest.CanonicalWasmBytes = CanonicalWasm;
+	FAvidScriptVmArtifactCompileResult CompileResult;
+	if (!TestTrue(
+			TEXT("Session precompiled fixture compiles"),
+			CompileAvidScriptVmArtifact(
+				CompileRequest,
+				CompileResult)))
+	{
+		AddError(
+			CompileResult.Error.Category
+			+ TEXT(": ")
+			+ CompileResult.Error.Details);
+		return false;
+	}
+
+	FAvidScriptRuntimeArtifact Artifact;
+	Artifact.Manifest = FAvidScriptWasmReloadManifest::MakeSmoke(
+		TEXT("session_precompiled"));
+	Artifact.Manifest.Language = TEXT("CSharp");
+	Artifact.VmArtifact = CompileResult.Artifact;
+	Artifact.BackendSelection.BackendKind =
+		EAvidScriptVmBackendKind::Wasmtime;
+	Artifact.BackendSelection.ExecutionMode =
+		EAvidScriptVmExecutionMode::Aot;
+	Artifact.BackendSelection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Artifact.Trust = EAvidScriptVmArtifactTrust::VerifiedPackage;
+	Artifact.bUsesPrecompiledArtifact = true;
+
+	FAvidScriptRuntimeSession Session;
+	FAvidScriptWasmReloadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Session loads the verified precompiled artifact"),
+			Session.LoadInitialArtifact(Artifact, LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ") + LoadResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(TEXT("Session activates the precompiled runtime"), Session.IsLiveLoaded());
+	TestTrue(
+		TEXT("Precompiled session invokes BeginPlay"),
+		LoadResult.RuntimeResult.bBeginPlayCalled);
+	TestEqual(
+		TEXT("Session runtime reports Wasmtime serialized format"),
+		LoadResult.RuntimeResult.BackendInfo.ArtifactFormat,
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized);
+	TestEqual(
+		TEXT("Session runtime reports AOT execution"),
+		LoadResult.RuntimeResult.BackendInfo.ExecutionMode,
+		EAvidScriptVmExecutionMode::Aot);
+	FAvidScriptWasmSmokeResult StopResult;
+	TestTrue(
+		TEXT("Precompiled session stops cleanly"),
+		Session.StopAndUnload(StopResult));
+	return true;
+#endif
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(

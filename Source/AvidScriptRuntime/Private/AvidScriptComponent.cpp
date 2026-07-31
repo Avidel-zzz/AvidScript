@@ -1,5 +1,6 @@
 #include "AvidScriptComponent.h"
 
+#include "AvidScriptRuntimeArtifact.h"
 
 #include "GameFramework/Actor.h"
 #include "Misc/Paths.h"
@@ -142,19 +143,21 @@ bool UAvidScriptComponent::LoadConfiguredScriptModule(FAvidScriptWasmSmokeResult
 	}
 	else
 	{
-		FAvidScriptWasmReloadManifest Manifest;
-		TArray<uint8> Bytecode;
-		FAvidScriptWasmReloadManifestLoadResult LoadResult;
-		if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(RuntimeStats.ScriptManifestPath, Manifest, Bytecode, LoadResult))
+		FAvidScriptRuntimeArtifact Artifact;
+		FAvidScriptRuntimeArtifactLoadResult LoadResult;
+		if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+				RuntimeStats.ScriptManifestPath,
+				Artifact,
+				LoadResult))
 		{
-			SetComponentManifestLoadFailure(LoadResult, OutResult);
+			SetComponentManifestLoadFailure(
+				LoadResult.CanonicalResult,
+				OutResult);
 			return false;
 		}
 
-		bLoaded = RuntimeSession->LoadInitialModule(
-			Bytecode.GetData(),
-			Bytecode.Num(),
-			Manifest,
+		bLoaded = RuntimeSession->LoadInitialArtifact(
+			Artifact,
 			SessionResult);
 	}
 
@@ -223,16 +226,17 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 		return false;
 	}
 
-	FAvidScriptWasmReloadManifest Manifest;
-	TArray<uint8> Bytecode;
-	FAvidScriptWasmReloadManifestLoadResult LoadResult;
-	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+	FAvidScriptRuntimeArtifact Artifact;
+	FAvidScriptRuntimeArtifactLoadResult LoadResult;
+	if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 			CandidateManifestPath,
-			Manifest,
-			Bytecode,
+			Artifact,
 			LoadResult))
 	{
-		SetComponentReloadManifestLoadFailure(LoadResult, PreviousSnapshot.ModuleId, OutResult);
+		SetComponentReloadManifestLoadFailure(
+			LoadResult.CanonicalResult,
+			PreviousSnapshot.ModuleId,
+			OutResult);
 		++RuntimeStats.RejectedReloadCount;
 		RuntimeStats.LastErrorMessage = OutResult.ErrorMessage;
 		RuntimeStats.bRuntimeLoaded = PreviousSnapshot.bHasActiveRuntime;
@@ -241,11 +245,7 @@ bool UAvidScriptComponent::ReloadConfiguredScript(FAvidScriptWasmReloadResult& O
 		return false;
 	}
 
-	if (!RuntimeSession->ReloadModule(
-			Bytecode.GetData(),
-			Bytecode.Num(),
-			Manifest,
-			OutResult))
+	if (!RuntimeSession->ReloadArtifact(Artifact, OutResult))
 	{
 		const FAvidScriptRuntimeSessionSnapshot RejectedSnapshot = RuntimeSession->GetSnapshot();
 		++RuntimeStats.RejectedReloadCount;

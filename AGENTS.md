@@ -1663,3 +1663,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: while updating a temporary benchmark-project marker, a short commit ID was expanded with an assumed suffix before the exact object ID had been queried. The benchmark had not started and provenance would have rejected the marker, but the value was still fabricated.
 - Prevention: every candidate marker, evidence file, or attestation must obtain the full commit with `git rev-parse HEAD` and the tree with `git show -s --format=%T HEAD` in separate commands. Never type or infer the remaining characters of a Git object ID.
+
+### 2026-07-31: do not pass Git pathspec exclusions to ripgrep
+
+- Mistake: a Runtime owner search passed Git's `:!path` exclusion syntax as an `rg` positional path, so ripgrep found the intended symbols but then exited with an invalid Windows path error.
+- Prevention: ripgrep exclusions use `-g '!relative/path'`; Git pathspecs such as `:!path` are valid only for Git commands. Keep an exclusion probe standalone until its syntax succeeds.

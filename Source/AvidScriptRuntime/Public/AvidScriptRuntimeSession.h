@@ -7,6 +7,7 @@ class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
 class IAvidScriptBindingHostEffectJournal;
+struct FAvidScriptRuntimeArtifact;
 
 struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 {
@@ -49,6 +50,12 @@ public:
 		const uint8* Bytecode,
 		int32 BytecodeSize,
 		const FAvidScriptWasmReloadManifest& Manifest,
+		FAvidScriptWasmReloadResult& OutResult);
+	bool LoadInitialArtifact(
+		const FAvidScriptRuntimeArtifact& Artifact,
+		FAvidScriptWasmReloadResult& OutResult);
+	bool ReloadArtifact(
+		const FAvidScriptRuntimeArtifact& Artifact,
 		FAvidScriptWasmReloadResult& OutResult);
 
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
@@ -115,9 +122,7 @@ private:
 		FAvidScriptWasmReloadResult& OutResult) const;
 
 	bool BuildValidatedRuntime(
-		const uint8* Bytecode,
-		int32 BytecodeSize,
-		const FAvidScriptWasmReloadManifest& Manifest,
+		const FAvidScriptRuntimeArtifact& Artifact,
 		TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 		FAvidScriptWasmReloadResult& OutResult) const;
 	bool ValidateExpectedOwner(

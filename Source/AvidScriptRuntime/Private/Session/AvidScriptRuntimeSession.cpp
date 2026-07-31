@@ -1,5 +1,7 @@
 #include "AvidScriptRuntimeSession.h"
 
+#include "AvidScriptRuntimeArtifact.h"
+
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
 #include "GameFramework/Actor.h"
@@ -161,6 +163,24 @@ bool FAvidScriptRuntimeSession::LoadInitialModule(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	TConstArrayView<uint8> BytecodeView;
+	if (Bytecode != nullptr && BytecodeSize > 0)
+	{
+		BytecodeView = MakeArrayView(Bytecode, BytecodeSize);
+	}
+	const FAvidScriptRuntimeArtifact Artifact =
+		FAvidScriptRuntimeArtifact::FromCanonicalWasm(
+			Manifest,
+			BytecodeView,
+			BackendSelection);
+	return LoadInitialArtifact(Artifact, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::LoadInitialArtifact(
+	const FAvidScriptRuntimeArtifact& Artifact,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
 	if (IsOperationActive())
@@ -181,7 +201,7 @@ bool FAvidScriptRuntimeSession::LoadInitialModule(
 	}
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime;
-	if (!BuildValidatedRuntime(Bytecode, BytecodeSize, Manifest, CandidateRuntime, OutResult))
+	if (!BuildValidatedRuntime(Artifact, CandidateRuntime, OutResult))
 	{
 		OutResult.ActiveModuleId = PreviousModuleId;
 		return false;
@@ -204,6 +224,24 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 	const FAvidScriptWasmReloadManifest& Manifest,
 	FAvidScriptWasmReloadResult& OutResult)
 {
+	TConstArrayView<uint8> BytecodeView;
+	if (Bytecode != nullptr && BytecodeSize > 0)
+	{
+		BytecodeView = MakeArrayView(Bytecode, BytecodeSize);
+	}
+	const FAvidScriptRuntimeArtifact Artifact =
+		FAvidScriptRuntimeArtifact::FromCanonicalWasm(
+			Manifest,
+			BytecodeView,
+			BackendSelection);
+	return ReloadArtifact(Artifact, OutResult);
+}
+
+bool FAvidScriptRuntimeSession::ReloadArtifact(
+	const FAvidScriptRuntimeArtifact& Artifact,
+	FAvidScriptWasmReloadResult& OutResult)
+{
+	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
 	const FString PreviousModuleId = GetLiveModuleId();
 	ResetReloadResult(OutResult, PreviousModuleId, Manifest.ModuleId, PreviousModuleId);
 	if (IsOperationActive())
@@ -228,7 +266,7 @@ bool FAvidScriptRuntimeSession::ReloadModule(
 	}
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime;
-	if (!BuildValidatedRuntime(Bytecode, BytecodeSize, Manifest, CandidateRuntime, OutResult))
+	if (!BuildValidatedRuntime(Artifact, CandidateRuntime, OutResult))
 	{
 		++RejectedReloadCount;
 		MarkRejectedReloadWithRollback(PreviousModuleId, OutResult);
@@ -724,13 +762,15 @@ bool FAvidScriptRuntimeSession::ValidateManifest(
 }
 
 bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
-	const uint8* Bytecode,
-	int32 BytecodeSize,
-	const FAvidScriptWasmReloadManifest& Manifest,
+	const FAvidScriptRuntimeArtifact& Artifact,
 	TUniquePtr<FAvidScriptWasmRuntimeInstance>& OutRuntime,
 	FAvidScriptWasmReloadResult& OutResult) const
 {
-	if (Bytecode == nullptr || BytecodeSize <= 0)
+	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
+	if (Artifact.VmArtifact.CanonicalWasmBytes.IsEmpty()
+		|| (Artifact.VmArtifact.ArtifactFormat !=
+				EAvidScriptVmArtifactFormat::WasmBytecode
+			&& Artifact.VmArtifact.ExecutionBytes.IsEmpty()))
 	{
 		SetReloadFailure(
 			OutResult,
@@ -743,7 +783,7 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 
 	FAvidScriptWasmImportContractResult ImportContractResult;
 	if (!InspectAndValidateAvidScriptWasmImportContract(
-			MakeArrayView(Bytecode, BytecodeSize),
+			Artifact.VmArtifact.CanonicalWasmBytes,
 			Manifest,
 			ImportContractResult))
 	{
@@ -781,12 +821,12 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	}
 
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
-		MakeUnique<FAvidScriptWasmRuntimeInstance>(BackendSelection);
+		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 
-	if (!CandidateRuntime->LoadModule(
-		Bytecode,
-		BytecodeSize,
+	if (!CandidateRuntime->LoadArtifact(
+		Artifact.VmArtifact,
+		Artifact.Trust,
 		Manifest.ModuleId,
 		Manifest.BindingPackage,
 		Manifest.DebugMap,
