@@ -15,6 +15,8 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogAvidScriptEditor, Log, All);
 
+class IConsoleObject;
+
 class FAvidScriptEditorModule final : public IModuleInterface
 {
 public:
@@ -104,6 +106,9 @@ public:
 	bool IsCSharpWorkspaceLiveReloadRunning() const;
 
 private:
+	void RegisterConsoleCommands();
+	void UnregisterConsoleCommands();
+	void HandleGenerateBindingsConsoleCommand(const TArray<FString>& Arguments);
 	void RegisterMenus();
 	void HandleRunSampleCommand();
 	void HandleBindCSharpActorLifecycleReport();
@@ -117,5 +122,6 @@ private:
 
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;
+	IConsoleObject* GenerateBindingsConsoleCommand = nullptr;
 	FDelegateHandle ToolMenusStartupCallbackHandle;
 };

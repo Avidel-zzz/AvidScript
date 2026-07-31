@@ -1,9 +1,11 @@
 #include "AvidScriptEditorModule.h"
 
 #include "AvidScriptComponent.h"
+#include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
 #include "GameFramework/Actor.h"
+#include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -177,6 +179,7 @@ void FAvidScriptEditorModule::StartupModule()
 	{
 		CSharpLiveReloadService = MakeUnique<FAvidScriptEditorCSharpLiveReloadService>();
 	}
+	RegisterConsoleCommands();
 	ToolMenusStartupCallbackHandle = UToolMenus::RegisterStartupCallback(
 		FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FAvidScriptEditorModule::RegisterMenus));
 
@@ -185,6 +188,8 @@ void FAvidScriptEditorModule::StartupModule()
 
 void FAvidScriptEditorModule::ShutdownModule()
 {
+	UnregisterConsoleCommands();
+
 	if (CSharpLiveReloadService)
 	{
 		CSharpLiveReloadService->Stop();
@@ -205,6 +210,68 @@ void FAvidScriptEditorModule::ShutdownModule()
 	CommandLauncher.Reset();
 
 	UE_LOG(LogAvidScriptEditor, Display, TEXT("AvidScriptEditor module stopped."));
+}
+
+void FAvidScriptEditorModule::RegisterConsoleCommands()
+{
+	GenerateBindingsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("AvidScript.GenerateBindings"),
+		TEXT("Generate the project binding module from a descriptor file. Usage: AvidScript.GenerateBindings <descriptor>"),
+		FConsoleCommandWithArgsDelegate::CreateRaw(
+			this,
+			&FAvidScriptEditorModule::HandleGenerateBindingsConsoleCommand),
+		ECVF_Default);
+}
+
+void FAvidScriptEditorModule::UnregisterConsoleCommands()
+{
+	if (GenerateBindingsConsoleCommand != nullptr)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(GenerateBindingsConsoleCommand);
+		GenerateBindingsConsoleCommand = nullptr;
+	}
+}
+
+void FAvidScriptEditorModule::HandleGenerateBindingsConsoleCommand(
+	const TArray<FString>& Arguments)
+{
+	if (Arguments.Num() != 1)
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Error,
+			TEXT("AvidScript.GenerateBindings requires exactly one descriptor path."));
+		return;
+	}
+
+	const FString DescriptorPath = NormalizeAvidScriptEditorModulePath(
+		FPaths::IsRelative(Arguments[0])
+			? FPaths::Combine(FPaths::ProjectDir(), Arguments[0])
+			: Arguments[0]);
+	FAvidScriptEditorGeneratedBindingResult Result;
+	if (!FAvidScriptEditorGeneratedBindingService::GenerateProjectModuleFromDescriptorFile(
+			FPaths::GetProjectFilePath(),
+			DescriptorPath,
+			Result))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Error,
+			TEXT("AvidScript.GenerateBindings failed. category=%s source=%s error=%s"),
+			*Result.ErrorCategory,
+			*Result.ErrorSource,
+			*Result.ErrorMessage);
+		return;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Display,
+		TEXT("AvidScript.GenerateBindings succeeded. package=%s bindings=%d reused=%s output=%s"),
+		*Result.PackageHash,
+		Result.BindingCount,
+		Result.bReusedExistingModule ? TEXT("true") : TEXT("false"),
+		*Result.OutputDirectory);
 }
 
 FName FAvidScriptEditorModule::GetToolMenuOwnerName()
