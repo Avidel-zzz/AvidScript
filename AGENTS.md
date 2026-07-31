@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-31 P57.3 diagnostic profile 误用 formal evaluator：在 Phase56 Micro diagnostic runner 已成功后，直接调用要求 profile 存在 `gates` 对象的 `Evaluate-Phase54PerformanceGates.ps1`，脚本在生成输出前按合同拒绝。Prevention：运行 evaluator 前必须读取其 profile 前置条件；diagnostic 只使用 runner correctness 与同轮 nearest-rank 比值，formal evaluator 只接收具有完整 Gate 配置的 formal profile，禁止为了复用脚本临时补造 `gates`。
 - 2026-07-31 P57.2 PowerShell 双引号破坏 `rg` 正则：检索脚本中的 `switch ($Mode)` 时把含 `$Mode` 的 regex 放在双引号命令中，PowerShell 先展开空变量，导致 `rg` 收到未闭合分组。Prevention：包含 `$`、反斜线、括号或 PowerShell token 的 `rg` pattern 固定使用单引号；复杂 alternation 优先拆成多个字面检索，禁止依靠多层反斜线转义。
 - 2026-07-31 P57.2 Adaptive benchmark 共享 instrumentation 漏审：首次运行 Micro diagnostic 时，校验器错误地把 `TryResolveFusedCallbackReceiver` 的共享接收者缓存计数视为仅属于 Generated/Data lane，导致 `adaptive_native=10` 且业务结果完全正确时仍被判失败。Prevention：新增执行 lane 时必须逐项审计其复用的跨路径 instrumentation，并让 correctness oracle 明确声明允许值，不能仅检查新加的专属计数器。
 - 2026-07-31 P57.2 Adaptive correctness 首次修正范围过窄：根据第一个失败样本把 prepared-native 期望硬编码为 `ScalarAddInt32`，下一次运行才暴露 `BatchScalar` 及 gameplay 也复用相同 typed shape。Prevention：benchmark oracle 必须从 guest workload 映射和 binding eligibility 推导统一的 expected-count 函数，禁止根据首个失败 workload 名逐项放行。
