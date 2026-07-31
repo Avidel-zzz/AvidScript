@@ -1281,6 +1281,232 @@ bool FAvidScriptVmWasmtimeArtifactCompilerTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimePrecompiledStartupDiagnosticTest,
+	"AvidScript.VM.Wasmtime.PrecompiledStartupDiagnostic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimePrecompiledStartupDiagnosticTest::RunTest(
+	const FString& Parameters)
+{
+#if !AVIDSCRIPT_WITH_WASMTIME
+	FAvidScriptVmArtifactCompileRequest Request;
+	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Request.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	const TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
+	Request.CanonicalWasmBytes = Bytecode;
+	FAvidScriptVmArtifactCompileResult Result;
+	TestFalse(
+		TEXT("startup diagnostic is unavailable without Wasmtime"),
+		CompileAvidScriptVmArtifact(Request, Result));
+	TestEqual(
+		TEXT("startup diagnostic unavailable category"),
+		Result.Error.Category,
+		FString(TEXT("backend_unavailable")));
+	return true;
+#else
+	static uint32 StartupDiagnosticNonce = 0;
+	TArray<uint8> Bytecode = BuildWasmtimeLifecycleFixture();
+	TArray<uint8> NonceSection;
+	AppendWasmtimeString(NonceSection, "avidscript_precompiled_startup_diagnostic");
+	AppendWasmtimeU32Leb(NonceSection, ++StartupDiagnosticNonce);
+	AppendWasmtimeSection(Bytecode, 0, NonceSection);
+
+	FAvidScriptVmArtifactCompileRequest Request;
+	Request.Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Request.Selection.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	Request.Selection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	Request.CanonicalWasmBytes = Bytecode;
+
+	FAvidScriptVmArtifactCompileResult MissResult;
+	if (!TestTrue(
+			TEXT("startup diagnostic artifact compiles on cache miss"),
+			CompileAvidScriptVmArtifact(Request, MissResult)))
+	{
+		AddError(MissResult.Error.Category + TEXT(": ") + MissResult.Error.Details);
+		return false;
+	}
+	TestFalse(TEXT("diagnostic first compile is a cache miss"), MissResult.bCacheHit);
+
+	FAvidScriptVmArtifactCompileResult HitResult;
+	if (!TestTrue(
+			TEXT("startup diagnostic artifact compiles on cache hit"),
+			CompileAvidScriptVmArtifact(Request, HitResult)))
+	{
+		AddError(HitResult.Error.Category + TEXT(": ") + HitResult.Error.Details);
+		return false;
+	}
+	TestTrue(TEXT("diagnostic second compile is a cache hit"), HitResult.bCacheHit);
+	if (!TestTrue(
+			TEXT("diagnostic cache-hit artifact remains authorized"),
+			AuthorizeAvidScriptVmArtifact(
+				HitResult.Artifact.AttestationId,
+				HitResult.Artifact)))
+	{
+		return false;
+	}
+
+	struct FStartupSamples
+	{
+		TArray<double> RuntimeInitMs;
+		TArray<double> ModuleLoadMs;
+		TArray<double> ModuleInstantiateMs;
+		TArray<double> ExecEnvCreateMs;
+		TArray<double> TotalMs;
+	};
+	FStartupSamples JitSamples;
+	FStartupSamples SerializedSamples;
+	int32 BeginPlayCalls = 0;
+	FAvidScriptVmLoadConfig Config;
+	FAvidScriptVmError Error;
+
+	auto LoadSample = [
+		this,
+		&Bytecode,
+		&HitResult,
+		&Config,
+		&Error,
+		&BeginPlayCalls](
+			bool bSerialized,
+			int32 SampleIndex,
+			bool bRecord,
+			FStartupSamples& Samples) -> bool
+	{
+		TUniquePtr<IAvidScriptVmBackend> Backend = bSerialized
+			? CreateWasmtimePrecompiledBackendForTest(Error)
+			: CreateWasmtimeBackendForTest(Error);
+		if (!TestNotNull(
+				bSerialized
+					? TEXT("serialized diagnostic backend is created")
+					: TEXT("JIT diagnostic backend is created"),
+				Backend.Get()))
+		{
+			return false;
+		}
+
+		const FAvidScriptVmArtifactView Artifact = bSerialized
+			? HitResult.Artifact.MakeView(
+				EAvidScriptVmArtifactTrust::VerifiedPackage)
+			: FAvidScriptVmArtifactView::FromWasmBytecode(Bytecode);
+		if (!Backend->LoadArtifact(
+				Artifact,
+				FString::Printf(
+					TEXT("p57_8_%s_startup_%d"),
+					bSerialized ? TEXT("serialized") : TEXT("jit"),
+					SampleIndex),
+				Config,
+				Error))
+		{
+			AddError(Error.Category + TEXT(": ") + Error.Details);
+			return false;
+		}
+
+		FAvidScriptVmExportHandle BeginPlayHandle;
+		if (!Backend->ResolveExport(
+				TEXT("avid_on_begin_play"),
+				BeginPlayHandle,
+				Error)
+			|| !Backend->Call(
+				BeginPlayHandle,
+				FAvidScriptVmCallFrame(),
+				Error))
+		{
+			AddError(Error.Category + TEXT(": ") + Error.Details);
+			return false;
+		}
+		++BeginPlayCalls;
+
+		if (bRecord)
+		{
+			const FAvidScriptVmLoadMetrics& Metrics = Backend->GetLoadMetrics();
+			Samples.RuntimeInitMs.Add(Metrics.RuntimeInitMs);
+			Samples.ModuleLoadMs.Add(Metrics.ModuleLoadMs);
+			Samples.ModuleInstantiateMs.Add(Metrics.ModuleInstantiateMs);
+			Samples.ExecEnvCreateMs.Add(Metrics.ExecEnvCreateMs);
+			Samples.TotalMs.Add(
+				Metrics.RuntimeInitMs
+				+ Metrics.ModuleLoadMs
+				+ Metrics.ModuleInstantiateMs
+				+ Metrics.ExecEnvCreateMs);
+		}
+		return true;
+	};
+
+	constexpr int32 WarmupCount = 1;
+	constexpr int32 SampleCount = 9;
+	for (int32 Iteration = -WarmupCount; Iteration < SampleCount; ++Iteration)
+	{
+		const bool bRecord = Iteration >= 0;
+		const bool bSerializedFirst = (Iteration & 1) != 0;
+		if (bSerializedFirst)
+		{
+			if (!LoadSample(true, Iteration, bRecord, SerializedSamples)
+				|| !LoadSample(false, Iteration, bRecord, JitSamples))
+			{
+				return false;
+			}
+		}
+		else if (!LoadSample(false, Iteration, bRecord, JitSamples)
+			|| !LoadSample(true, Iteration, bRecord, SerializedSamples))
+		{
+			return false;
+		}
+	}
+
+	auto Median = [](TArray<double> Samples) -> double
+	{
+		Samples.Sort();
+		return Samples[Samples.Num() / 2];
+	};
+	const double JitRuntimeInitP50 = Median(JitSamples.RuntimeInitMs);
+	const double JitModuleLoadP50 = Median(JitSamples.ModuleLoadMs);
+	const double JitInstantiateP50 = Median(JitSamples.ModuleInstantiateMs);
+	const double JitExecEnvP50 = Median(JitSamples.ExecEnvCreateMs);
+	const double JitTotalP50 = Median(JitSamples.TotalMs);
+	const double SerializedRuntimeInitP50 = Median(SerializedSamples.RuntimeInitMs);
+	const double SerializedModuleLoadP50 = Median(SerializedSamples.ModuleLoadMs);
+	const double SerializedInstantiateP50 = Median(SerializedSamples.ModuleInstantiateMs);
+	const double SerializedExecEnvP50 = Median(SerializedSamples.ExecEnvCreateMs);
+	const double SerializedTotalP50 = Median(SerializedSamples.TotalMs);
+	const double ModuleLoadRatio = JitModuleLoadP50 > 0.0
+		? SerializedModuleLoadP50 / JitModuleLoadP50
+		: TNumericLimits<double>::Max();
+
+	AddInfo(FString::Printf(
+		TEXT("AvidScript.P57.8.StartupDiagnostic samples=%d warmups=%d cache_miss=%d cache_miss_compile_ms=%.6f cache_hit=%d cache_hit_compile_ms=%.6f begin_play_calls=%d jit_runtime_init_p50_ms=%.6f jit_module_load_p50_ms=%.6f jit_instantiate_p50_ms=%.6f jit_exec_env_p50_ms=%.6f jit_total_p50_ms=%.6f serialized_runtime_init_p50_ms=%.6f serialized_module_load_p50_ms=%.6f serialized_instantiate_p50_ms=%.6f serialized_exec_env_p50_ms=%.6f serialized_total_p50_ms=%.6f serialized_jit_module_load_ratio=%.6f target_ratio=0.500000"),
+		SampleCount,
+		WarmupCount,
+		MissResult.bCacheHit ? 0 : 1,
+		MissResult.CompileMs,
+		HitResult.bCacheHit ? 1 : 0,
+		HitResult.CompileMs,
+		BeginPlayCalls,
+		JitRuntimeInitP50,
+		JitModuleLoadP50,
+		JitInstantiateP50,
+		JitExecEnvP50,
+		JitTotalP50,
+		SerializedRuntimeInitP50,
+		SerializedModuleLoadP50,
+		SerializedInstantiateP50,
+		SerializedExecEnvP50,
+		SerializedTotalP50,
+		ModuleLoadRatio));
+
+	TestEqual(
+		TEXT("every startup sample executes BeginPlay"),
+		BeginPlayCalls,
+		(WarmupCount + SampleCount) * 2);
+	TestTrue(
+		TEXT("serialized module-load P50 is at most half of JIT"),
+		ModuleLoadRatio <= 0.50);
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmWasmtimeWideParameterExportTest,
 	"AvidScript.VM.Wasmtime.WideParameterExport",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

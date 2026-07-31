@@ -1673,3 +1673,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the Phase 57.8 working-tree architecture probe launched `CheckAvidScriptArchitecture.ps1` with Windows PowerShell 5.1 even though the repository already records that its leading-pipe syntax requires PowerShell 7; parsing failed before any architecture assertion ran.
 - Prevention: resolve `Get-Command pwsh` once and run architecture/parser gates with `pwsh -NoProfile`. Reserve `powershell.exe` for explicit Windows PowerShell compatibility contracts only; a 5.1 parser failure is never product evidence.
+
+### 2026-07-31: Phase 57.8 Windows rg wildcard recurrence
+
+- Mistake: a parallel source probe passed `Source/AvidScriptVM/Private/Tests/*.h` as an `rg` path argument; Win32 rejected that branch with OS error 123 and the orchestration call reported failure despite useful sibling output.
+- Prevention: before dispatching parallel probes, mechanically reject `*` or `?` in every `rg` path position. Search literal roots such as `Source/AvidScriptVM/Private/Tests` and apply filename filters only through `-g '*.h'`; any failed sibling makes the whole probe non-evidence.

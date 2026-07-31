@@ -371,6 +371,7 @@ $VmContractHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBa
 $VmArtifactHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmArtifact.h'
 $VmArtifactCompilerSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmArtifactCompiler.cpp'
 $WasmtimeRuntimeSupportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeRuntimeSupport.cpp'
+$VmWasmtimeTests = Read-RequiredFile 'Source/AvidScriptVM/Private/Tests/AvidScriptVmWasmtimeTests.cpp'
 foreach ($RequiredBatchContract in @(
     'ActorGetTransformBatch',
     'InputCells',
@@ -398,6 +399,17 @@ foreach ($RequiredArtifactCompilerContract in @(
     'FAvidScriptHash::Sha256Hex')) {
     if (-not $VmArtifactCompilerSource.Contains($RequiredArtifactCompilerContract)) {
         Add-Violation "VM artifact compiler is missing $RequiredArtifactCompilerContract"
+    }
+}
+foreach ($RequiredStartupDiagnosticContract in @(
+    'AvidScript.VM.Wasmtime.PrecompiledStartupDiagnostic',
+    'SampleCount = 9',
+    'cache_miss_compile_ms=',
+    'serialized_jit_module_load_ratio=',
+    'ModuleLoadRatio <= 0.50',
+    'every startup sample executes BeginPlay')) {
+    if (-not $VmWasmtimeTests.Contains($RequiredStartupDiagnosticContract)) {
+        Add-Violation "Wasmtime precompiled startup diagnostic is missing $RequiredStartupDiagnosticContract"
     }
 }
 foreach ($RequiredRuntimeIdentityContract in @(
