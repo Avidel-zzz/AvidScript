@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.5",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-07-31T14:33:58Z",
+  "candidate": {
+    "commit": "a27071fbf765bc000efa62eb73fec4589cb11cd3",
+    "tree": "d4f8eae1fd8c2e3e7e88178705a6cf4258064223",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "platform": "Win64",
+    "configuration": "Development Editor",
+    "runtime_id": "wasmtime.cranelift.jit",
+    "runtime_version": "45.0.0",
+    "runtime_artifact_sha256": "0d69ab029209af6a97ca2e53b3f21c6a22c886e8000144fbd3f2e66b66d88d42"
+  },
+  "inputs": {
+    "profile_id": "ue58-win64-phase56-physical-crossing-cost-v2",
+    "profile_sha256": "fe08c8dde2449d2ca0d187950c9524aa6b8b7a090085deb079bcf01878e609f6",
+    "kernel_wasm_sha256": "0dbe3695a84035c18646602836c5821caebba44db32c75025814bff25ca04901",
+    "engine_executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311"
+  },
+  "method": {
+    "process_runs": 5,
+    "warmup_samples_per_stage_per_process": 5,
+    "timed_samples_per_stage_per_process": 30,
+    "observation_count": 1050,
+    "aggregation": "same_process_paired_ratio_then_cross_process_nearest_rank_p50"
+  },
+  "baseline_diagnostic": {
+    "candidate_commit": "a5a94705e4874c5a5a10b3be30502a00cd0c159e",
+    "aggregate_sha256": "1b4a0bb19a76da1d3475f63be74e576e80233c8d613fa511ed49a90488a8b4d8",
+    "generic_export_p50_ns": 34.0,
+    "prepared_export_p50_ns": 33.9,
+    "prepared_export_ratio": 0.9970414201183434
+  },
+  "optimized_diagnostic": {
+    "aggregate_sha256": "47d6b1c0961c3fa3c2c52eced2c8f1fc693b6c1feddb1009c124b3507e44f957",
+    "generic_export_p50_ns": 28.8,
+    "prepared_export_p50_ns": 26.0,
+    "prepared_export_ratio": 0.9090909090909091
+  },
+  "formal_metrics": {
+    "prepared_export_ratio": {
+      "value": 0.9052217193042671,
+      "maximum": 0.95,
+      "pass": true
+    },
+    "prepared_export_savings_p50_ns": 2.497499999999997,
+    "typed_empty_net_p50_ns": {
+      "value": 4.0875,
+      "maximum": 12.0,
+      "pass": true
+    },
+    "max_reconstruction_error_ratio": {
+      "value": 0.04170000000000016,
+      "maximum": 0.1,
+      "pass": true
+    }
+  },
+  "per_process": [
+    {
+      "process_run": 0,
+      "generic_export_p50_ns": 26.762999999999998,
+      "prepared_export_p50_ns": 24.296,
+      "paired_ratio": 0.9025356344943662,
+      "paired_savings_p50_ns": 2.5915
+    },
+    {
+      "process_run": 1,
+      "generic_export_p50_ns": 26.435999999999996,
+      "prepared_export_p50_ns": 24.088,
+      "paired_ratio": 0.9114919897758051,
+      "paired_savings_p50_ns": 2.3389999999999986
+    },
+    {
+      "process_run": 2,
+      "generic_export_p50_ns": 26.4245,
+      "prepared_export_p50_ns": 25.996499999999997,
+      "paired_ratio": 0.9832032451668368,
+      "paired_savings_p50_ns": 0.4430000000000014
+    },
+    {
+      "process_run": 3,
+      "generic_export_p50_ns": 27.0005,
+      "prepared_export_p50_ns": 23.6235,
+      "paired_ratio": 0.8756787919363238,
+      "paired_savings_p50_ns": 3.3424999999999976
+    },
+    {
+      "process_run": 4,
+      "generic_export_p50_ns": 26.323,
+      "prepared_export_p50_ns": 23.8525,
+      "paired_ratio": 0.9052217193042671,
+      "paired_savings_p50_ns": 2.497499999999997
+    }
+  ],
+  "validity": {
+    "correctness_failures": 0,
+    "fallback_used": false,
+    "result_file_count": 5,
+    "all_result_files_valid": true
+  },
+  "formal_artifacts": {
+    "aggregate_sha256": "675966b80c3b7ffd9bbc45ff4736bd6d7fbed7ae73b95b9824cdea2b5829cb5d",
+    "result_sha256": [
+      "dab74c401b898cd6363e2903cbf23930b13c6057477eadd40a1818509df5ae86",
+      "ebf49cd22e2c7812e177e87d2dfd1f500e2de9bb6113ea7b1ea32e31c0e2c2aa",
+      "ed0711cb2f8c70040a4b62fa0314738d3f32bf43430737b85e8ebeeb5543f187",
+      "a453308e57d531900d7fc64834ba661193c3bd6223d73e5fd74247191e979fd6",
+      "5b17e6969c434749d4f92fd19b38c5947a55df3a684a49ab437d783c1b45e79c"
+    ],
+    "raw_evidence_tracking": "external_not_committed",
+    "raw_evidence_label": "cost-20260731T1433583446461Z-6f7e9299670349218b6218563a92dc59"
+  },
+  "verification": {
+    "main_vm_module_build": "5 actions succeeded",
+    "clean_candidate_vm_module_build": "5 actions succeeded",
+    "wasmtime_automation": "8/8 succeeded",
+    "clean_candidate_architecture_check": "passed",
+    "architecture_checker_sha256": "27d3150e2b6aa31e3deeb8cb991a9b773862bd5814cf513dc022a97228468542"
+  }
+}

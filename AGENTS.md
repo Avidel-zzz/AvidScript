@@ -1645,3 +1645,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the five-process Phase 56 formal micro benchmark was launched with a 120-second shell timeout. The orchestration host timed out while its final Editor child was still completing, invalidating the attempt before aggregation.
 - Prevention: diagnostic one-process runs may use a short bound, but formal calibration plus five-process runs use at least a 10-minute outer timeout. After any host timeout, wait for owned Editor children to exit and restart from a fresh output directory.
+
+### 2026-07-31: never infer a full Git object ID from its short form
+
+- Mistake: while updating a temporary benchmark-project marker, a short commit ID was expanded with an assumed suffix before the exact object ID had been queried. The benchmark had not started and provenance would have rejected the marker, but the value was still fabricated.
+- Prevention: every candidate marker, evidence file, or attestation must obtain the full commit with `git rev-parse HEAD` and the tree with `git show -s --format=%T HEAD` in separate commands. Never type or infer the remaining characters of a Git object ID.
