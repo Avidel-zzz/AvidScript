@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "toolchain_id",
+    "platform",
+    "upstream",
+    "patch",
+    "rust",
+    "install",
+    "layout",
+    "compiler_profile",
+    "license"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "toolchain_id": { "const": "avidscript-wasmtime-v45.0.0-patchset.1-win64" },
+    "platform": { "const": "Win64" },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit", "source_archive"],
+      "properties": {
+        "version": { "const": "v45.0.0" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "source_archive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "url", "size_bytes", "sha256", "root"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "pattern": "^https://github\\.com/bytecodealliance/wasmtime/archive/[0-9a-f]{40}\\.zip$" },
+            "size_bytes": { "type": "integer", "minimum": 1 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "root": { "type": "string", "pattern": "^wasmtime-[0-9a-f]{40}$" }
+          }
+        }
+      }
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "canonical_sha256", "export_symbol", "api_revision"],
+      "properties": {
+        "relative_path": { "type": "string", "minLength": 1 },
+        "canonical_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "export_symbol": { "const": "avidscript_wasmtime_config_compiler_inlining_set" },
+        "api_revision": { "const": 1 }
+      }
+    },
+    "rust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolchain", "minimum_rustc", "package", "build_profile", "features", "cmake_arguments", "source_date_epoch"],
+      "properties": {
+        "toolchain": { "const": "1.93.0-x86_64-pc-windows-msvc" },
+        "minimum_rustc": { "const": "1.93.0" },
+        "package": { "const": "wasmtime-c-api" },
+        "build_profile": { "const": "fastest-runtime" },
+        "features": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cmake_arguments": {
+          "type": "array",
+          "minItems": 9,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_date_epoch": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "managed_marker_name"],
+      "properties": {
+        "relative_path": { "const": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1" },
+        "managed_marker_name": { "const": ".avidscript-wasmtime-performance-managed.json" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include_relative_path", "dll_relative_path", "import_library_relative_path", "license_relative_path"],
+      "properties": {
+        "include_relative_path": { "const": "include" },
+        "dll_relative_path": { "const": "lib/wasmtime.dll" },
+        "import_library_relative_path": { "const": "lib/wasmtime.dll.lib" },
+        "license_relative_path": { "const": "LICENSE" }
+      }
+    },
+    "compiler_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization"],
+      "properties": {
+        "id": { "const": "cranelift-x86_64-v3-inlining-v1" },
+        "strategy": { "const": "cranelift" },
+        "optimization": { "const": "speed_and_size" },
+        "register_allocator": { "const": "backtracking" },
+        "inlining": { "const": "all" },
+        "cpu": { "const": "x86-64-v3" },
+        "wasm32_memory_reservation_bytes": { "const": 4294967296 },
+        "memory_may_move": { "const": false },
+        "spectre_mitigation": { "const": true },
+        "nan_canonicalization": { "const": false }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expression", "tracked_file"],
+      "properties": {
+        "expression": { "const": "Apache-2.0 WITH LLVM-exception" },
+        "tracked_file": { "const": "Source/ThirdParty/Wasmtime/LICENSE.txt" }
+      }
+    }
+  }
+}

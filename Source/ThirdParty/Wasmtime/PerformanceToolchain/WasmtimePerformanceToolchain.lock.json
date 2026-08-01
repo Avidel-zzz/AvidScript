@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "toolchain_id": "avidscript-wasmtime-v45.0.0-patchset.1-win64",
+  "platform": "Win64",
+  "upstream": {
+    "version": "v45.0.0",
+    "commit": "377cd917af258d932d55b201a646917ecf193639",
+    "source_archive": {
+      "name": "wasmtime-377cd917af258d932d55b201a646917ecf193639.zip",
+      "url": "https://github.com/bytecodealliance/wasmtime/archive/377cd917af258d932d55b201a646917ecf193639.zip",
+      "size_bytes": 30796505,
+      "sha256": "ec48aaa650ecca1b7b8f3c6deaee0067676cb2e201721aa0e6397f15149baff0",
+      "root": "wasmtime-377cd917af258d932d55b201a646917ecf193639"
+    }
+  },
+  "patch": {
+    "relative_path": "Source/ThirdParty/Wasmtime/PerformanceToolchain/avidscript-wasmtime-v45-inlining.patch",
+    "canonical_sha256": "84a7fc654be125c128143348999387ad742600fef7f03c682076bfb94bee9553",
+    "export_symbol": "avidscript_wasmtime_config_compiler_inlining_set",
+    "api_revision": 1
+  },
+  "rust": {
+    "toolchain": "1.93.0-x86_64-pc-windows-msvc",
+    "minimum_rustc": "1.93.0",
+    "package": "wasmtime-c-api",
+    "build_profile": "fastest-runtime",
+    "features": [
+      "cranelift",
+      "parallel-compilation",
+      "disable-logging"
+    ],
+    "cmake_arguments": [
+      "-G",
+      "Ninja",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DWASMTIME_FASTEST_RUNTIME=ON",
+      "-DWASMTIME_DISABLE_ALL_FEATURES=ON",
+      "-DWASMTIME_FEATURE_CRANELIFT=ON",
+      "-DWASMTIME_FEATURE_PARALLEL_COMPILATION=ON",
+      "-DWASMTIME_FEATURE_DISABLE_LOGGING=ON"
+    ],
+    "source_date_epoch": 1779385346
+  },
+  "install": {
+    "relative_path": "Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1",
+    "managed_marker_name": ".avidscript-wasmtime-performance-managed.json"
+  },
+  "layout": {
+    "include_relative_path": "include",
+    "dll_relative_path": "lib/wasmtime.dll",
+    "import_library_relative_path": "lib/wasmtime.dll.lib",
+    "license_relative_path": "LICENSE"
+  },
+  "compiler_profile": {
+    "id": "cranelift-x86_64-v3-inlining-v1",
+    "strategy": "cranelift",
+    "optimization": "speed_and_size",
+    "register_allocator": "backtracking",
+    "inlining": "all",
+    "cpu": "x86-64-v3",
+    "wasm32_memory_reservation_bytes": 4294967296,
+    "memory_may_move": false,
+    "spectre_mitigation": true,
+    "nan_canonicalization": false
+  },
+  "license": {
+    "expression": "Apache-2.0 WITH LLVM-exception",
+    "tracked_file": "Source/ThirdParty/Wasmtime/LICENSE.txt"
+  }
+}

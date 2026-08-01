@@ -1,0 +1,54 @@
+diff --git a/crates/c-api/include/wasmtime/config.h b/crates/c-api/include/wasmtime/config.h
+index 1575fca..ecd9b24 100644
+--- a/crates/c-api/include/wasmtime/config.h
++++ b/crates/c-api/include/wasmtime/config.h
+@@ -129,0 +130,10 @@ enum wasmtime_regalloc_algorithm_enum { // RegallocAlgorithm
++/**
++ * \brief AvidScript's controlled compiler inlining modes.
++ */
++typedef uint8_t avidscript_wasmtime_inlining_t;
++
++enum avidscript_wasmtime_inlining_enum {
++  AVIDSCRIPT_WASMTIME_INLINING_NONE,
++  AVIDSCRIPT_WASMTIME_INLINING_ALL,
++};
++
+@@ -401,0 +412,7 @@ WASMTIME_CONFIG_PROP(void, cranelift_regalloc_algorithm,
++/**
++ * \brief Configures Wasmtime compiler inlining for AvidScript's controlled
++ * performance toolchain.
++ */
++WASM_API_EXTERN void avidscript_wasmtime_config_compiler_inlining_set(
++    wasm_config_t *, avidscript_wasmtime_inlining_t);
++
+diff --git a/crates/c-api/src/config.rs b/crates/c-api/src/config.rs
+index abecac5..27b7048 100644
+--- a/crates/c-api/src/config.rs
++++ b/crates/c-api/src/config.rs
+@@ -10,2 +10,2 @@ use wasmtime::{
+-    Config, LinearMemory, MemoryCreator, OptLevel, ProfilingStrategy, RegallocAlgorithm, Result,
+-    Strategy,
++    Config, Inlining, LinearMemory, MemoryCreator, OptLevel, ProfilingStrategy,
++    RegallocAlgorithm, Result, Strategy,
+@@ -56,0 +57,7 @@ pub enum wasmtime_regalloc_algorithm_t {
++#[repr(u8)]
++#[derive(Clone)]
++pub enum avidscript_wasmtime_inlining_t {
++    AVIDSCRIPT_WASMTIME_INLINING_NONE,
++    AVIDSCRIPT_WASMTIME_INLINING_ALL,
++}
++
+@@ -233,0 +241,13 @@ pub extern "C" fn wasmtime_config_cranelift_regalloc_algorithm_set(
++#[unsafe(no_mangle)]
++#[cfg(feature = "cranelift")]
++pub extern "C" fn avidscript_wasmtime_config_compiler_inlining_set(
++    c: &mut wasm_config_t,
++    mode: avidscript_wasmtime_inlining_t,
++) {
++    use avidscript_wasmtime_inlining_t::*;
++    c.config.compiler_inlining(match mode {
++        AVIDSCRIPT_WASMTIME_INLINING_NONE => Inlining::No,
++        AVIDSCRIPT_WASMTIME_INLINING_ALL => Inlining::Yes,
++    });
++}
++
