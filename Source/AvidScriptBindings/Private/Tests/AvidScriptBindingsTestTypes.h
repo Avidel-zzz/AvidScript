@@ -5,6 +5,47 @@
 
 #include "AvidScriptBindingsTestTypes.generated.h"
 
+UENUM(BlueprintType)
+enum class EAvidScriptBindingsStructMode : uint8
+{
+	Primary,
+	Secondary
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptBindingsNestedStruct
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	int32 Count = 0;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	float Ratio = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptBindingsRecursiveStruct
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	bool bEnabled = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	EAvidScriptBindingsStructMode Mode =
+		EAvidScriptBindingsStructMode::Primary;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FVector Position = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	TObjectPtr<UObject> Target;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FAvidScriptBindingsNestedStruct Nested;
+};
+
 UCLASS()
 class UAvidScriptBindingsTestObject : public UObject
 {
@@ -28,6 +69,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
 	UObject* FastPathObjectRoundtrip(UObject* Value) const;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FAvidScriptBindingsRecursiveStruct RecursiveStructProperty;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsRecursiveStruct RecursiveStructRoundtrip(
+		const FAvidScriptBindingsRecursiveStruct& Input,
+		UPARAM(ref) FAvidScriptBindingsRecursiveStruct& InOut,
+		FAvidScriptBindingsRecursiveStruct& OutValue) const;
 };
 
 UCLASS()

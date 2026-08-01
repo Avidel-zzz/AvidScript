@@ -32,3 +32,19 @@ UObject* UAvidScriptBindingsTestObject::FastPathObjectRoundtrip(
 {
 	return Value;
 }
+
+FAvidScriptBindingsRecursiveStruct
+UAvidScriptBindingsTestObject::RecursiveStructRoundtrip(
+	const FAvidScriptBindingsRecursiveStruct& Input,
+	FAvidScriptBindingsRecursiveStruct& InOut,
+	FAvidScriptBindingsRecursiveStruct& OutValue) const
+{
+	OutValue = Input;
+	InOut.bEnabled = Input.bEnabled;
+	InOut.Mode = Input.Mode;
+	InOut.Position += Input.Position;
+	InOut.Target = Input.Target;
+	InOut.Nested.Count += Input.Nested.Count;
+	InOut.Nested.Ratio += Input.Nested.Ratio;
+	return InOut;
+}
