@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.10",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-08-01T06:26:05.708Z",
+  "candidate": {
+    "commit": "1d0fc20bf4da0e81b3ea3637381e1aa98465b64a",
+    "tree": "dccfa161675aea2b73ff804f1ae8e6a128e1b7af",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "cpu": "Intel Core Ultra 7 265K",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit",
+    "wasmtime_runtime_sha256": "725fc0605a773046a5e23bfbe5f4d7eeb8de30cc91f33994abd5f40a9251ca14",
+    "puerts_commit": "1977328c84661024be10a9e73640a74b278a7659",
+    "puerts_runtime_sha256": "94e5230ff099c65ff582f9753d714d6bdab9469ccc483282de741f40eb030a74"
+  },
+  "inputs": {
+    "profile_id": "phase56.micro-formal-v1",
+    "profile_sha256": "b2ad01f8c510203057786ded156e96e60c14ed3bcd11dabd4779f871aca2ee3c",
+    "request_template_sha256": "25ea5a401f5801271a8407a7987291cd6db969a5f2a976997c00373e1c58f58",
+    "semantic_wasm_sha256": "debb2b928db9ce30ab7fcd69bb37123246e40145a1bca65262c210733b61a03d",
+    "semantic_manifest_sha256": "0d56bbdc689e288eb63e5b5bbf4552923ad36fef3285dda9001a169e396266ae",
+    "lane_catalog_sha256": "9c385dc9a22c6c2025f20d3f69f327292d7c41024c2e9eb4d61f954f5798d1e7"
+  },
+  "method": {
+    "run_id": "e477c145-2eec-4b9b-80e5-fe9313b4b853",
+    "calibration_processes": 1,
+    "timed_processes": 5,
+    "warmup_samples_per_process": 5,
+    "timed_samples_per_cell": 30,
+    "total_timed_samples": 9000,
+    "cross_process_statistic": "nearest_rank_p50_of_per_process_nearest_rank_p50"
+  },
+  "coverage": {
+    "prepared_shapes": [
+      "I32PairToI32",
+      "PropertyI32Get",
+      "PropertyI32Set",
+      "VectorValueByValue",
+      "VectorValueConstReference",
+      "ObjectRoundtrip"
+    ],
+    "selection": "metadata_and_frame_shape_only",
+    "function_name_special_cases": 0,
+    "legacy_guest_abi_changed": false
+  },
+  "metrics": {
+    "scalar_add_int32": {
+      "avidscript_ns": 55.12109375,
+      "puerts_reflection_ns": 107.0734375,
+      "ratio": 0.5147970872794665,
+      "lead_percent": 48.52029127205335,
+      "pass": true
+    },
+    "property_get_set": {
+      "avidscript_ns": 71.55859375,
+      "puerts_reflection_ns": 103.1296875,
+      "ratio": 0.6938699756071693,
+      "lead_percent": 30.613002439283065,
+      "pass": true
+    },
+    "vector_value": {
+      "avidscript_ns": 66.75703125,
+      "puerts_reflection_ns": 1222.5875,
+      "ratio": 0.05460307033238929,
+      "lead_percent": 94.53969296676107,
+      "pass": true
+    },
+    "object_roundtrip": {
+      "avidscript_ns": 68.71328125,
+      "puerts_reflection_ns": 131.4828125,
+      "ratio": 0.5226027641445531,
+      "lead_percent": 47.73972358554469,
+      "pass": true
+    },
+    "all_prepared_shapes_lead_puerts_reflection": true
+  },
+  "validity": {
+    "timed_process_result_files": 5,
+    "timed_samples": 9000,
+    "correctness_failures": 0,
+    "targeted_prepared_samples": 600,
+    "adaptive_native_hits": 96000000,
+    "adaptive_process_event_fallbacks": 0,
+    "adaptive_guard_rejects": 0,
+    "fused_fast_hits": 95999400,
+    "fused_revalidations": 600
+  },
+  "route_counts": {
+    "scalar_add_int32": {
+      "samples": 150,
+      "logical_operations": 19200000,
+      "native_hits": 19200000,
+      "fallbacks": 0
+    },
+    "property_get_set": {
+      "samples": 150,
+      "logical_operations": 19200000,
+      "native_hits": 38400000,
+      "fallbacks": 0
+    },
+    "vector_value": {
+      "samples": 150,
+      "logical_operations": 19200000,
+      "native_hits": 19200000,
+      "fallbacks": 0
+    },
+    "object_roundtrip": {
+      "samples": 150,
+      "logical_operations": 19200000,
+      "native_hits": 19200000,
+      "fallbacks": 0
+    }
+  },
+  "request_sha256": [
+    "221ef798089fd56b9852312b369a380b60f992de9155b4f1120c36ddebb7c58e",
+    "13a2fa50b006d5ffa7245b309c7ca163fa68d3fd7dacaf3b437ec84546aee0b7",
+    "a1ca8fc23ac57dd4116af06545e4796f5b589939979d142247970b22fa274437",
+    "60879580e8a40de81e33468b955768237c0d31bb0bf7bffec435c6899842dabd",
+    "ac0d6b8935a5c9a79d0c73fe0c5b8ed58f2d9786f01e8a90f977c1ceea71d20d"
+  ],
+  "result_sha256": {
+    "calibration": "bfade580cfad6ef8e424b6f5debd2c5396f652fa46e470e94fb34ef50af8cfa3",
+    "process_00": "39d918c6ae514229ba304fc0d756de318984eb93b8623e1f059d544fee8fae8d",
+    "process_01": "7b4ca18b2056ca5d371dab923912a562b424d8b6c42104e0da61b52dbfa23e34",
+    "process_02": "f36d1196a935639564342ca68eee9844c79640e91db13ba08d566194f6e4b65e",
+    "process_03": "807891fea5818089462cdcc2ed7098c9d06856cf2ab92de3df11cef704104fa7",
+    "process_04": "c383d7c13a76ca128ddc0c39cd0683a79892acc26d512711edf930b8eb74a016"
+  },
+  "verification": {
+    "main_no_clean_build": "succeeded; 37 actions; 61.09 seconds",
+    "isolated_benchmark_target_build": "succeeded",
+    "focused_automation": "4/4 succeeded",
+    "full_avidscript_automation": "326/326 succeeded; 0 failed",
+    "architecture_check": "clean source candidate passed",
+    "puerts_benchmark_architecture": "passed",
+    "phase54_56_benchmark_contracts": "passed",
+    "warm_core_contracts": "passed",
+    "wasmtime_dependency_contracts": "passed",
+    "wasmtime_performance_toolchain_contracts": "55 assertions passed"
+  },
+  "raw_evidence": {
+    "tracking": "external_not_committed",
+    "label": "p57.10-micro-formal-1d0fc20"
+  }
+}
