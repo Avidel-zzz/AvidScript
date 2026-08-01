@@ -26,6 +26,7 @@ constexpr const TCHAR* ObjectFactoryGeneratorVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("55.1.0");
+constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -247,7 +248,22 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
 	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 		Type.CanonicalType,
-		Type.EnumValues);
+		Type.EnumValues,
+		Type.StructFields);
+}
+
+void AddProjectedTypeAndChildren(
+	const FAvidScriptProjectedBindingType& Type,
+	TMap<FString, FAvidScriptProjectedBindingType>& TypesByCanonicalName)
+{
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Child : Type.StructFieldTypes)
+	{
+		if (Child.IsValid())
+		{
+			AddProjectedTypeAndChildren(*Child, TypesByCanonicalName);
+		}
+	}
+	TypesByCanonicalName.FindOrAdd(Type.CanonicalType) = Type;
 }
 
 FAvidScriptBindingValueModel MakeBindingValueModel(
@@ -773,14 +789,14 @@ bool GenerateBindingDescriptor(
 
 		FAvidScriptProjectedBindingType OwnerType = FAvidScriptEditorReflectedTypePolicy::MakeObjectType(Binding.OwnerClass);
 		FinalizeType(OwnerType);
-		TypesByCanonicalName.FindOrAdd(OwnerType.CanonicalType) = MoveTemp(OwnerType);
+		AddProjectedTypeAndChildren(OwnerType, TypesByCanonicalName);
 		if (!Binding.Projection.ReturnValue.Type.bVoid)
 		{
-			TypesByCanonicalName.FindOrAdd(Binding.Projection.ReturnValue.Type.CanonicalType) = Binding.Projection.ReturnValue.Type;
+			AddProjectedTypeAndChildren(Binding.Projection.ReturnValue.Type, TypesByCanonicalName);
 		}
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
 		{
-			TypesByCanonicalName.FindOrAdd(Parameter.Type.CanonicalType) = Parameter.Type;
+			AddProjectedTypeAndChildren(Parameter.Type, TypesByCanonicalName);
 		}
 	}
 
@@ -808,13 +824,24 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.DispatchMode == TEXT("generated_native_s1");
 		});
+	const bool bHasStructWireTypes = Types.ContainsByPredicate(
+		[](const FAvidScriptProjectedBindingType& Type)
+		{
+			return Type.Kind == TEXT("struct_wire");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
 		: ObjectFactories.IsEmpty()
 			? 6
 			: 7;
-	Package.GeneratorVersion = bHasGeneratedNativeBindings
+	if (bHasStructWireTypes)
+	{
+		Package.SchemaVersion = 9;
+	}
+	Package.GeneratorVersion = bHasStructWireTypes
+		? StructWireGeneratorVersion
+		: bHasGeneratedNativeBindings
 		? GeneratedNativeGeneratorVersion
 		: bHasNativeDirectFunctions
 		? NativeDirectGeneratorVersion
@@ -837,6 +864,7 @@ bool GenerateBindingDescriptor(
 		TypeModel.Alignment = Type.Alignment;
 		TypeModel.AbiTypes = Type.AbiValueTypes;
 		TypeModel.EnumValues = Type.EnumValues;
+		TypeModel.StructFields = Type.StructFields;
 		Package.Types.Add(MoveTemp(TypeModel));
 	}
 	for (const FResolvedBindingDescriptor& Binding : Bindings)

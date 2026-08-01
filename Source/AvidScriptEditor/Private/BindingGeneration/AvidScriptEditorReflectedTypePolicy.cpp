@@ -145,6 +145,41 @@ void AppendAbiTypes(const FAvidScriptProjectedBindingValue& Value, TArray<FStrin
 	}
 	OutTypes.Append(Value.Type.AbiValueTypes);
 }
+
+void FinalizeProjectedType(FAvidScriptProjectedBindingType& Type)
+{
+	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+		Type.CanonicalType,
+		Type.EnumValues,
+		Type.StructFields);
+}
+
+bool IsUnsafeStructField(const FProperty* Property)
+{
+	return Property == nullptr
+		|| !Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
+		|| Property->HasAnyPropertyFlags(
+			CPF_Transient | CPF_EditorOnly | CPF_InstancedReference
+				| CPF_ContainsInstancedReference)
+		|| Property->IsA<FNameProperty>()
+		|| Property->IsA<FStrProperty>()
+		|| Property->IsA<FTextProperty>()
+		|| Property->IsA<FArrayProperty>()
+		|| Property->IsA<FSetProperty>()
+		|| Property->IsA<FMapProperty>()
+		|| Property->IsA<FDelegateProperty>()
+		|| Property->IsA<FMulticastDelegateProperty>()
+		|| Property->IsA<FSoftObjectProperty>()
+		|| Property->IsA<FWeakObjectProperty>()
+		|| Property->IsA<FLazyObjectProperty>();
+}
+
+int32 AlignStructWireOffset(const int32 Offset, const int32 Alignment)
+{
+	return Alignment > 1
+		? ((Offset + Alignment - 1) / Alignment) * Alignment
+		: Offset;
+}
 } // namespace
 
 FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeVoidType()
@@ -181,7 +216,15 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 	const FProperty* ReturnProperty = Function->GetReturnProperty();
 	if (ReturnProperty != nullptr)
 	{
-		if (!ProjectProperty(ReturnProperty, OutProjection.ReturnValue, OutErrorSource))
+		int32 StructNodes = 0;
+		TSet<const UScriptStruct*> ActiveStructs;
+		if (!ProjectProperty(
+				ReturnProperty,
+				OutProjection.ReturnValue,
+				OutErrorSource,
+				0,
+				StructNodes,
+				ActiveStructs))
 		{
 			return false;
 		}
@@ -202,7 +245,15 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 		}
 
 		FAvidScriptProjectedBindingValue Value;
-		if (!ProjectProperty(Property, Value, OutErrorSource))
+		int32 StructNodes = 0;
+		TSet<const UScriptStruct*> ActiveStructs;
+		if (!ProjectProperty(
+				Property,
+				Value,
+				OutErrorSource,
+				0,
+				StructNodes,
+				ActiveStructs))
 		{
 			return false;
 		}
@@ -251,7 +302,15 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 		OutErrorSource = TEXT("FName:return");
 		return false;
 	}
-	if (!ProjectProperty(Property, OutValue, OutErrorSource))
+	int32 StructNodes = 0;
+	TSet<const UScriptStruct*> ActiveStructs;
+	if (!ProjectProperty(
+			Property,
+			OutValue,
+			OutErrorSource,
+			0,
+			StructNodes,
+			ActiveStructs))
 	{
 		return false;
 	}
@@ -263,7 +322,10 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 	const FProperty* Property,
 	FAvidScriptProjectedBindingValue& OutValue,
-	FString& OutErrorSource)
+	FString& OutErrorSource,
+	const int32 StructDepth,
+	int32& InOutStructNodes,
+	TSet<const UScriptStruct*>& ActiveStructs)
 {
 	OutValue = FAvidScriptProjectedBindingValue();
 	OutValue.Name = Property->GetName();
@@ -317,9 +379,75 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 			OutValue.Type = MoveTemp(Type);
 			return true;
 		}
+		if (StructProperty->Struct == nullptr
+			|| StructDepth >= 8
+			|| ActiveStructs.Contains(StructProperty->Struct))
+		{
+			OutErrorSource = Type.CppType;
+			return false;
+		}
 
-		OutErrorSource = Type.CppType;
-		return false;
+		ActiveStructs.Add(StructProperty->Struct);
+		Type.CanonicalType = TEXT("struct_wire:") + StructProperty->Struct->GetPathName();
+		Type.Kind = TEXT("struct_wire");
+		Type.AbiValueTypes = { TEXT("i") };
+		Type.Alignment = 1;
+		int32 WireOffset = 0;
+		for (TFieldIterator<FProperty> It(StructProperty->Struct); It; ++It)
+		{
+			const FProperty* FieldProperty = *It;
+			if (IsUnsafeStructField(FieldProperty) || ++InOutStructNodes > 128)
+			{
+				ActiveStructs.Remove(StructProperty->Struct);
+				OutErrorSource = StructProperty->Struct->GetPathName()
+					+ TEXT(".") + (FieldProperty == nullptr ? TEXT("<invalid>") : FieldProperty->GetName());
+				return false;
+			}
+
+			FAvidScriptProjectedBindingValue FieldValue;
+			if (!ProjectProperty(
+					FieldProperty,
+					FieldValue,
+					OutErrorSource,
+					StructDepth + 1,
+					InOutStructNodes,
+					ActiveStructs))
+			{
+				ActiveStructs.Remove(StructProperty->Struct);
+				OutErrorSource = StructProperty->Struct->GetPathName() + TEXT(".")
+					+ FieldProperty->GetName() + TEXT(":") + OutErrorSource;
+				return false;
+			}
+			if (FieldValue.Type.Kind == TEXT("name_utf8") || FieldValue.Type.bVoid
+				|| FieldValue.Type.Size <= 0 || FieldValue.Type.Alignment <= 0)
+			{
+				ActiveStructs.Remove(StructProperty->Struct);
+				OutErrorSource = StructProperty->Struct->GetPathName() + TEXT(".") + FieldProperty->GetName();
+				return false;
+			}
+			WireOffset = AlignStructWireOffset(WireOffset, FieldValue.Type.Alignment);
+			if (WireOffset < 0 || FieldValue.Type.Size > 4096 - WireOffset)
+			{
+				ActiveStructs.Remove(StructProperty->Struct);
+				OutErrorSource = StructProperty->Struct->GetPathName();
+				return false;
+			}
+			FinalizeProjectedType(FieldValue.Type);
+			Type.StructFields.Add({ FieldProperty->GetName(), FieldValue.Type.StableId, WireOffset });
+			Type.StructFieldTypes.Add(MakeShared<FAvidScriptProjectedBindingType>(MoveTemp(FieldValue.Type)));
+			WireOffset += Type.StructFieldTypes.Last()->Size;
+			Type.Alignment = FMath::Max(Type.Alignment, Type.StructFieldTypes.Last()->Alignment);
+		}
+		ActiveStructs.Remove(StructProperty->Struct);
+		Type.Size = AlignStructWireOffset(WireOffset, Type.Alignment);
+		if (Type.StructFields.IsEmpty() || Type.Size <= 0 || Type.Size > 4096)
+		{
+			OutErrorSource = Type.CppType;
+			return false;
+		}
+		FinalizeProjectedType(Type);
+		OutValue.Type = MoveTemp(Type);
+		return true;
 	}
 
 	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))

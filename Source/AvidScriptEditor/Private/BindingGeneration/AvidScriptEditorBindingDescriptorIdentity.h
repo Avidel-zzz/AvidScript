@@ -7,11 +7,13 @@ class FAvidScriptEditorBindingDescriptorIdentity
 public:
 	static FString MakeTypeIdentity(
 		const FString& CanonicalType,
-		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
-		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
 
 	static FString MakeObjectFactoryIdentity(
 		const FString& ClassReferenceId,

@@ -10,6 +10,13 @@ struct FAvidScriptBindingEnumValue
 	int64 Value = 0;
 };
 
+struct FAvidScriptBindingStructFieldModel
+{
+	FString Name;
+	FString TypeId;
+	int32 WireOffset = 0;
+};
+
 struct FAvidScriptBindingTypeModel
 {
 	FString StableId;
@@ -20,6 +27,7 @@ struct FAvidScriptBindingTypeModel
 	int32 Alignment = 0;
 	TArray<FString> AbiTypes;
 	TArray<FAvidScriptBindingEnumValue> EnumValues;
+	TArray<FAvidScriptBindingStructFieldModel> StructFields;
 	int32 ObjectTypeOrdinal = INDEX_NONE;
 	FString ClassPath;
 	FString BaseTypeId;
@@ -127,11 +135,13 @@ class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorIdentity
 public:
 	static FString MakeTypeIdentity(
 		const FString& CanonicalType,
-		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
-		const TArray<FAvidScriptBindingEnumValue>& EnumValues);
+		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
 
 	static FString MakeClassReferenceIdentity(
 		const FString& ClassPath,

@@ -6,6 +6,7 @@
 class FProperty;
 class UClass;
 class UFunction;
+class UScriptStruct;
 
 struct FAvidScriptProjectedBindingType
 {
@@ -17,6 +18,8 @@ struct FAvidScriptProjectedBindingType
 	int32 Alignment = 1;
 	TArray<FString> AbiValueTypes;
 	TArray<FAvidScriptBindingEnumValue> EnumValues;
+	TArray<FAvidScriptBindingStructFieldModel> StructFields;
+	TArray<TSharedPtr<FAvidScriptProjectedBindingType>> StructFieldTypes;
 	bool bVoid = false;
 };
 
@@ -55,5 +58,8 @@ private:
 	static bool ProjectProperty(
 		const FProperty* Property,
 		FAvidScriptProjectedBindingValue& OutValue,
-		FString& OutErrorSource);
+		FString& OutErrorSource,
+		int32 StructDepth,
+		int32& InOutStructNodes,
+		TSet<const UScriptStruct*>& ActiveStructs);
 };

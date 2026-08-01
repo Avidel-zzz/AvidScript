@@ -142,6 +142,19 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			}
 			Writer->WriteArrayEnd();
 		}
+		if (Package.SchemaVersion >= 9 && Type.Kind == TEXT("struct_wire"))
+		{
+			Writer->WriteArrayStart(TEXT("fields"));
+			for (const FAvidScriptBindingStructFieldModel& Field : Type.StructFields)
+			{
+				Writer->WriteObjectStart();
+				Writer->WriteValue(TEXT("name"), Field.Name);
+				Writer->WriteValue(TEXT("type_id"), Field.TypeId);
+				Writer->WriteValue(TEXT("wire_offset"), Field.WireOffset);
+				Writer->WriteObjectEnd();
+			}
+			Writer->WriteArrayEnd();
+		}
 		Writer->WriteObjectEnd();
 	}
 	Writer->WriteArrayEnd();

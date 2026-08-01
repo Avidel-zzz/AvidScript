@@ -58,6 +58,21 @@ TSharedPtr<FJsonObject> FindBinding(
 	return nullptr;
 }
 
+TSharedPtr<FJsonObject> FindType(
+	const TArray<TSharedPtr<FJsonValue>>& Types,
+	const FString& CanonicalType)
+{
+	for (const TSharedPtr<FJsonValue>& Value : Types)
+	{
+		const TSharedPtr<FJsonObject> Type = Value.IsValid() ? Value->AsObject() : nullptr;
+		if (Type.IsValid() && Type->GetStringField(TEXT("canonical_type")) == CanonicalType)
+		{
+			return Type;
+		}
+	}
+	return nullptr;
+}
+
 bool IsDescriptorLowerHexSha256(const FString& Value)
 {
 	if (Value.Len() != 64)
@@ -2869,6 +2884,125 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 			Result));
 	TestEqual(TEXT("Missing function reports stable category"), Result.ErrorCategory, FString(TEXT("function_missing")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorStructWireTest,
+	"AvidScript.Editor.BindingDescriptor.StructWire",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Parameters)
+{
+	const FString OwnerPath = UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	FString Json;
+	FAvidScriptBindingDescriptorGenerateResult Result;
+	TestTrue(
+		TEXT("Nested fixed-width USTRUCT descriptor generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.struct_wire"),
+			{ { OwnerPath, TEXT("StructWireRoundTrip") } },
+			Json,
+			Result));
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Nested fixed-width USTRUCT descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(Json, Package, ErrorCategory, ErrorSource)))
+	{
+		return true;
+	}
+	TestEqual(TEXT("Struct-wire descriptor uses schema v9"), Package.SchemaVersion, 9);
+	TestEqual(
+		TEXT("Struct-wire descriptor uses the recursive generator version"),
+		Package.GeneratorVersion,
+		FString(TEXT("57.11B1.0")));
+
+	TSharedPtr<FJsonObject> Root;
+	if (!ParseDescriptor(Json, Root) || !Root.IsValid())
+	{
+		AddError(TEXT("Struct-wire descriptor could not be decoded for fixture assertions."));
+		return true;
+	}
+	const TArray<TSharedPtr<FJsonValue>>& Types = Root->GetArrayField(TEXT("types"));
+	const TSharedPtr<FJsonObject> RootType = FindType(
+		Types,
+		TEXT("struct_wire:") + FAvidScriptStructWireRootTestType::StaticStruct()->GetPathName());
+	const TSharedPtr<FJsonObject> NestedType = FindType(
+		Types,
+		TEXT("struct_wire:") + FAvidScriptStructWireNestedTestType::StaticStruct()->GetPathName());
+	TestNotNull(TEXT("Root struct-wire type is present"), RootType.Get());
+	TestNotNull(TEXT("Nested struct-wire type is present"), NestedType.Get());
+	if (!RootType.IsValid() || !NestedType.IsValid())
+	{
+		return true;
+	}
+	TestEqual(TEXT("Root struct kind is struct_wire"), RootType->GetStringField(TEXT("kind")), FString(TEXT("struct_wire")));
+	TestEqual(TEXT("Root struct ABI is address-only"), RootType->GetArrayField(TEXT("abi_types")).Num(), 1);
+	const TArray<TSharedPtr<FJsonValue>>& RootFields = RootType->GetArrayField(TEXT("fields"));
+	const TArray<TSharedPtr<FJsonValue>>& NestedFields = NestedType->GetArrayField(TEXT("fields"));
+	TestEqual(TEXT("Root struct projects nested and scalar fields"), RootFields.Num(), 2);
+	TestEqual(TEXT("Nested struct projects safe leaf fields"), NestedFields.Num(), 4);
+	if (RootFields.Num() == 2 && NestedFields.Num() == 4)
+	{
+		const TSharedPtr<FJsonObject> NestedField = RootFields[0]->AsObject();
+		TestEqual(TEXT("Nested field retains reflection name"), NestedField->GetStringField(TEXT("name")), FString(TEXT("Nested")));
+		TestEqual(TEXT("Nested field starts at wire offset zero"), static_cast<int32>(NestedField->GetNumberField(TEXT("wire_offset"))), 0);
+		TestEqual(TEXT("Nested scalar fixture field is Count"), NestedFields[0]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Count")));
+		TestEqual(TEXT("Nested enum fixture field is Mode"), NestedFields[1]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Mode")));
+		TestEqual(TEXT("Nested FVector fixture field is Location"), NestedFields[2]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Location")));
+		TestEqual(TEXT("Nested UObject fixture field is Target"), NestedFields[3]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Target")));
+
+		const double OriginalRootAlignment = RootType->GetNumberField(TEXT("alignment"));
+		const double OriginalRootSize = RootType->GetNumberField(TEXT("size"));
+		NestedField->SetNumberField(TEXT("wire_offset"), 4);
+		FString TamperedJson;
+		FAvidScriptBindingPackageModel TamperedPackage;
+		TestTrue(TEXT("Struct-wire offset tamper serializes"), SerializeDescriptor(Root, TamperedJson));
+		TestFalse(
+			TEXT("Struct-wire offset tamper fails closed"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				TamperedJson,
+				TamperedPackage,
+				ErrorCategory,
+				ErrorSource));
+
+		NestedField->SetNumberField(TEXT("wire_offset"), 0);
+		RootType->SetNumberField(TEXT("alignment"), 1);
+		TestTrue(TEXT("Struct-wire alignment tamper serializes"), SerializeDescriptor(Root, TamperedJson));
+		TestFalse(
+			TEXT("Struct-wire smaller parent alignment fails closed"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				TamperedJson,
+				TamperedPackage,
+				ErrorCategory,
+				ErrorSource));
+		TestEqual(TEXT("Parent alignment tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
+
+		RootType->SetNumberField(TEXT("alignment"), OriginalRootAlignment);
+		RootType->SetNumberField(TEXT("size"), OriginalRootSize + OriginalRootAlignment);
+		TestTrue(TEXT("Struct-wire size tamper serializes"), SerializeDescriptor(Root, TamperedJson));
+		TestFalse(
+			TEXT("Struct-wire trailing parent size fails closed"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				TamperedJson,
+				TamperedPackage,
+				ErrorCategory,
+				ErrorSource));
+		TestEqual(TEXT("Parent size tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
+	}
+
+	TestFalse(
+		TEXT("Unsafe FString struct field is rejected"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.struct_wire_unsafe"),
+			{ { OwnerPath, TEXT("StructWireUnsafe") } },
+			Json,
+			Result));
+	TestEqual(TEXT("Unsafe struct field reports property rejection"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
+	TestTrue(TEXT("Unsafe struct field source includes reflected field"), Result.ErrorSource.Contains(TEXT("Label")));
 	return true;
 }
 

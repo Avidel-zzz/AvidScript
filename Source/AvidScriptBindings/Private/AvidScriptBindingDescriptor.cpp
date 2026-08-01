@@ -179,6 +179,64 @@ bool ReadAvidScriptBindingEnumValues(
 	return true;
 }
 
+bool ReadAvidScriptBindingStructFields(
+	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
+	const FString& Kind,
+	TArray<FAvidScriptBindingStructFieldModel>& OutFields,
+	FString& OutErrorSource)
+{
+	OutFields.Reset();
+	if (SchemaVersion < 9)
+	{
+		if (Object.IsValid() && Object->HasField(TEXT("fields")))
+		{
+			OutErrorSource = TEXT("fields");
+			return false;
+		}
+		return true;
+	}
+	if (Kind != TEXT("struct_wire"))
+	{
+		if (Object.IsValid() && Object->HasField(TEXT("fields")))
+		{
+			OutErrorSource = TEXT("fields");
+			return false;
+		}
+		return true;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+	if (!Object.IsValid()
+		|| !Object->TryGetArrayField(TEXT("fields"), Values)
+		|| Values == nullptr
+		|| Values->IsEmpty())
+	{
+		OutErrorSource = TEXT("fields");
+		return false;
+	}
+
+	TSet<FString> Names;
+	for (const TSharedPtr<FJsonValue>& Value : *Values)
+	{
+		const TSharedPtr<FJsonObject> FieldObject = Value.IsValid() ? Value->AsObject() : nullptr;
+		FAvidScriptBindingStructFieldModel Field;
+		if (!ReadAvidScriptBindingRequiredString(FieldObject, TEXT("name"), Field.Name, OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(FieldObject, TEXT("type_id"), Field.TypeId, OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredInt(FieldObject, TEXT("wire_offset"), Field.WireOffset, OutErrorSource)
+			|| !IsAvidScriptBindingLowerSha256(Field.TypeId)
+			|| Field.WireOffset < 0
+			|| Names.Contains(Field.Name))
+		{
+			OutErrorSource = TEXT("fields");
+			return false;
+		}
+		Names.Add(Field.Name);
+		OutFields.Add(MoveTemp(Field));
+	}
+	return true;
+}
+
 bool ParseAvidScriptBindingType(
 	const TSharedPtr<FJsonObject>& Object,
 	const int32 SchemaVersion,
@@ -193,11 +251,19 @@ bool ParseAvidScriptBindingType(
 		|| !ReadAvidScriptBindingRequiredInt(Object, TEXT("alignment"), OutType.Alignment, OutErrorSource)
 		|| !ReadAvidScriptBindingStringArray(Object, TEXT("abi_types"), OutType.AbiTypes, OutErrorSource, false)
 		|| !ReadAvidScriptBindingEnumValues(Object, OutType.Kind, OutType.EnumValues, OutErrorSource)
+		|| !ReadAvidScriptBindingStructFields(
+			Object,
+			SchemaVersion,
+			OutType.Kind,
+			OutType.StructFields,
+			OutErrorSource)
 		|| !IsAvidScriptBindingLowerSha256(OutType.StableId)
 		|| OutType.StableId != FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 			OutType.CanonicalType,
-			OutType.EnumValues)
+			OutType.EnumValues,
+			OutType.StructFields)
 		|| (OutType.Kind == TEXT("enum")) != OutType.CanonicalType.StartsWith(TEXT("enum:"))
+		|| (OutType.Kind == TEXT("struct_wire")) != OutType.CanonicalType.StartsWith(TEXT("struct_wire:"))
 		|| OutType.Size <= 0
 		|| OutType.Alignment <= 0)
 	{
@@ -234,6 +300,112 @@ bool ParseAvidScriptBindingType(
 					|| OutType.CanonicalType != TEXT("object:") + OutType.ClassPath)))
 		{
 			return false;
+		}
+	}
+	return true;
+}
+
+bool ValidateAvidScriptBindingStructWireGraph(
+	const TArray<FAvidScriptBindingTypeModel>& Types,
+	FString& OutErrorSource)
+{
+	if (!Types.ContainsByPredicate([](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("struct_wire");
+		}))
+	{
+		return true;
+	}
+
+	TMap<FString, const FAvidScriptBindingTypeModel*> TypesById;
+	for (const FAvidScriptBindingTypeModel& Type : Types)
+	{
+		TypesById.Add(Type.StableId, &Type);
+	}
+	const auto IsSafeLeaf = [](const FAvidScriptBindingTypeModel& Type)
+	{
+		return Type.Kind == TEXT("scalar")
+			|| Type.Kind == TEXT("enum")
+			|| Type.Kind == TEXT("object_handle")
+			|| (Type.Kind == TEXT("struct")
+				&& (Type.CanonicalType == TEXT("struct:/Script/CoreUObject.Vector")
+					|| Type.CanonicalType == TEXT("struct:/Script/CoreUObject.Rotator")
+					|| Type.CanonicalType == TEXT("struct:/Script/CoreUObject.Transform")));
+	};
+
+	TSet<FString> ActiveTypes;
+	TFunction<bool(const FAvidScriptBindingTypeModel&, int32, int32&)> ValidateType;
+	ValidateType = [&TypesById, &IsSafeLeaf, &ActiveTypes, &ValidateType, &OutErrorSource](
+		const FAvidScriptBindingTypeModel& Type,
+		const int32 Depth,
+		int32& InOutNodes)
+	{
+		if (IsSafeLeaf(Type))
+		{
+			return true;
+		}
+		if (Type.Kind != TEXT("struct_wire")
+			|| Depth > 8
+			|| Type.Size > 4096
+			|| Type.Alignment <= 0
+			|| Type.Size % Type.Alignment != 0
+			|| Type.AbiTypes.Num() != 1
+			|| Type.AbiTypes[0] != TEXT("i")
+			|| ActiveTypes.Contains(Type.StableId))
+		{
+			OutErrorSource = TEXT("types.fields");
+			return false;
+		}
+
+		ActiveTypes.Add(Type.StableId);
+		int32 PreviousEnd = 0;
+		int32 ExpectedAlignment = 1;
+		for (const FAvidScriptBindingStructFieldModel& Field : Type.StructFields)
+		{
+			++InOutNodes;
+			const FAvidScriptBindingTypeModel* const Child = TypesById.FindRef(Field.TypeId);
+			if (InOutNodes > 128
+				|| Child == nullptr
+				|| Child->Alignment <= 0
+				|| Child->Alignment > 4096
+				|| Child->Size <= 0
+				|| Child->Size > 4096
+				|| Field.WireOffset % Child->Alignment != 0
+				|| Field.WireOffset < PreviousEnd
+				|| Field.WireOffset > 4096
+				|| Child->Size > 4096 - Field.WireOffset
+				|| !ValidateType(*Child, Depth + 1, InOutNodes))
+			{
+				ActiveTypes.Remove(Type.StableId);
+				OutErrorSource = TEXT("types.fields");
+				return false;
+			}
+			PreviousEnd = Field.WireOffset + Child->Size;
+			ExpectedAlignment = FMath::Max(ExpectedAlignment, Child->Alignment);
+		}
+		const int32 Remainder = PreviousEnd % ExpectedAlignment;
+		const int32 Padding = Remainder == 0 ? 0 : ExpectedAlignment - Remainder;
+		if (Padding > 4096 - PreviousEnd
+			|| Type.Alignment != ExpectedAlignment
+			|| Type.Size != PreviousEnd + Padding)
+		{
+			ActiveTypes.Remove(Type.StableId);
+			OutErrorSource = TEXT("types.fields");
+			return false;
+		}
+		ActiveTypes.Remove(Type.StableId);
+		return true;
+	};
+
+	for (const FAvidScriptBindingTypeModel& Type : Types)
+	{
+		if (Type.Kind == TEXT("struct_wire"))
+		{
+			int32 Nodes = 0;
+			if (!ValidateType(Type, 1, Nodes))
+			{
+				return false;
+			}
 		}
 	}
 	return true;
@@ -887,7 +1059,8 @@ bool FAvidScriptBindingDescriptorTypeGraph::IsDerivedFromClassPath(
 
 FString FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 	const FString& CanonicalType,
-	const TArray<FAvidScriptBindingEnumValue>& EnumValues)
+	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+	const TArray<FAvidScriptBindingStructFieldModel>& StructFields)
 {
 	FString Identity = CanonicalType;
 	for (const FAvidScriptBindingEnumValue& EnumValue : EnumValues)
@@ -898,14 +1071,27 @@ FString FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 			*EnumValue.Name,
 			EnumValue.Value);
 	}
+	for (const FAvidScriptBindingStructFieldModel& Field : StructFields)
+	{
+		Identity += FString::Printf(
+			TEXT("|field:%d:%s:%s:%d"),
+			Field.Name.Len(),
+			*Field.Name,
+			*Field.TypeId,
+			Field.WireOffset);
+	}
 	return Identity;
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 	const FString& CanonicalType,
-	const TArray<FAvidScriptBindingEnumValue>& EnumValues)
+	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
+	const TArray<FAvidScriptBindingStructFieldModel>& StructFields)
 {
-	return FAvidScriptHash::Sha256HexUtf8(MakeTypeIdentity(CanonicalType, EnumValues));
+	return FAvidScriptHash::Sha256HexUtf8(MakeTypeIdentity(
+		CanonicalType,
+		EnumValues,
+		StructFields));
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeClassReferenceIdentity(
@@ -1091,7 +1277,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 8
+	FString Identity(Package.SchemaVersion >= 9
+		? TEXT("descriptor_selection_v9")
+		: Package.SchemaVersion >= 8
 		? TEXT("descriptor_selection_v8")
 		: Package.SchemaVersion >= 7
 			? TEXT("descriptor_selection_v7")
@@ -1132,6 +1320,23 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 				FString::FromInt(Type.ObjectTypeOrdinal));
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_class_path"), Type.ClassPath);
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("object_base_type_id"), Type.BaseTypeId);
+		}
+	}
+	if (Package.SchemaVersion >= 9)
+	{
+		for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+		{
+			if (Type.Kind != TEXT("struct_wire"))
+			{
+				continue;
+			}
+			AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_type_id"), Type.StableId);
+			for (const FAvidScriptBindingStructFieldModel& Field : Type.StructFields)
+			{
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_name"), Field.Name);
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_type_id"), Field.TypeId);
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_wire_offset"), FString::FromInt(Field.WireOffset));
+			}
 		}
 	}
 	for (const FAvidScriptBindingClassReferenceModel& Reference : Package.ClassReferences)
@@ -1224,7 +1429,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 8
+	FString Identity(Package.SchemaVersion >= 9
+		? TEXT("descriptor_package_v9")
+		: Package.SchemaVersion >= 8
 		? TEXT("descriptor_package_v8")
 		: Package.SchemaVersion >= 7
 			? TEXT("descriptor_package_v7")
@@ -1279,6 +1486,15 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		{
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("enum_name"), EnumValue.Name);
 			AppendAvidScriptBindingIdentityField(Identity, TEXT("enum_value"), FString::Printf(TEXT("%lld"), EnumValue.Value));
+		}
+		if (Package.SchemaVersion >= 9 && Type.Kind == TEXT("struct_wire"))
+		{
+			for (const FAvidScriptBindingStructFieldModel& Field : Type.StructFields)
+			{
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_name"), Field.Name);
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_type_id"), Field.TypeId);
+				AppendAvidScriptBindingIdentityField(Identity, TEXT("struct_wire_field_wire_offset"), FString::FromInt(Field.WireOffset));
+			}
 		}
 		if (Package.SchemaVersion >= 6)
 		{
@@ -1425,7 +1641,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 5
 			&& OutPackage.SchemaVersion != 6
 			&& OutPackage.SchemaVersion != 7
-			&& OutPackage.SchemaVersion != 8)
+			&& OutPackage.SchemaVersion != 8
+			&& OutPackage.SchemaVersion != 9)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -1445,7 +1662,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 5
 				&& OutPackage.SchemaVersion != 6
 				&& OutPackage.SchemaVersion != 7
-				&& OutPackage.SchemaVersion != 8)
+				&& OutPackage.SchemaVersion != 8
+				&& OutPackage.SchemaVersion != 9)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -1548,6 +1766,11 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		CanonicalTypes.Add(Type.CanonicalType);
 		TypesByCanonical.Add(Type.CanonicalType, Type);
 		OutPackage.Types.Add(MoveTemp(Type));
+	}
+	if (!ValidateAvidScriptBindingStructWireGraph(OutPackage.Types, OutErrorSource))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		return false;
 	}
 	if (Root->HasField(TEXT("active_object_type_ordinals")))
 	{

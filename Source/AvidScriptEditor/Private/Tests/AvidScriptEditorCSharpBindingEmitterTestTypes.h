@@ -13,6 +13,45 @@ enum class EAvidScriptCSharpEmitterTestMode : uint8
 	Secondary
 };
 
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireNestedTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 Count = 0;
+
+	UPROPERTY(BlueprintReadWrite)
+	EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode::Primary;
+
+	UPROPERTY(BlueprintReadWrite)
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite)
+	UObject* Target = nullptr;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireRootTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FAvidScriptStructWireNestedTestType Nested;
+
+	UPROPERTY(BlueprintReadWrite)
+	float Weight = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireUnsafeTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	FString Label;
+};
+
 UCLASS()
 class UAvidScriptCSharpBindingEmitterTestObject : public UObject
 {
@@ -87,6 +126,20 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ConstRefFName(const FName& InName)
 	{
+	}
+
+	UFUNCTION(BlueprintPure)
+	FAvidScriptStructWireRootTestType StructWireRoundTrip(
+		FAvidScriptStructWireRootTestType Value) const
+	{
+		return Value;
+	}
+
+	UFUNCTION(BlueprintPure)
+	FAvidScriptStructWireUnsafeTestType StructWireUnsafe(
+		FAvidScriptStructWireUnsafeTestType Value) const
+	{
+		return Value;
 	}
 };
 
