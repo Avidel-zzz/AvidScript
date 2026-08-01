@@ -8,12 +8,20 @@ class UFunction;
 
 namespace UE::AvidScript::BindingPrivate
 {
+enum class EFastPathValueKind : uint8
+{
+	Unsupported,
+	Int32,
+	Vector,
+	Object
+};
+
 struct FFastPathValueSpec
 {
 	FProperty* Property = nullptr;
 	int32 ArgumentOffset = INDEX_NONE;
-	bool bIsValue = false;
-	bool bIsInt32 = false;
+	EFastPathValueKind Kind = EFastPathValueKind::Unsupported;
+	bool bIsInput = false;
 };
 
 struct FFastPathBuildSpec
@@ -47,6 +55,7 @@ struct FFastPathPlan
 		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
 	UFunction* Function = nullptr;
 	UClass* NativeDirectOwnerClass = nullptr;
+	FNativeFuncPtr NativeFunction = nullptr;
 	bool bAdaptiveNativeEligible = false;
 	FFastPathThunk SemanticThunk = nullptr;
 	FFastPathThunk NativeDirectThunk = nullptr;
@@ -88,6 +97,38 @@ bool InvokePreparedScalarI32PairToI32(
 	EAvidScriptBindingInvocationPolicy InvocationPolicy,
 	int32& OutValue,
 	EAvidScriptBindingInvocationMode& OutInvocationMode,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails);
+
+bool ValidatePreparedNativeCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target);
+
+bool InvokePreparedScalarI32PairCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	int32 Left,
+	int32 Right,
+	bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails);
+
+bool InvokePreparedVectorCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const FVector& Input,
+	bool bUseNative,
+	FVector& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails);
+
+bool InvokePreparedObjectCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	UObject* Input,
+	bool bUseNative,
+	UObject*& OutValue,
 	FString& OutErrorCategory,
 	FString& OutErrorDetails);
 } // namespace UE::AvidScript::BindingPrivate

@@ -36,6 +36,16 @@ typedef int32_t (*AvidScriptWasmtimeSelfI32PairGuestResultCallback)(
 	int32_t guest_address,
 	int32_t* out_status);
 
+typedef int32_t (*AvidScriptWasmtimeSelfF32TripleGuestVectorCallback)(
+	void* environment,
+	int32_t self_slot,
+	int32_t self_generation,
+	float x,
+	float y,
+	float z,
+	int32_t guest_address,
+	int32_t* out_status);
+
 typedef int32_t (*AvidScriptWasmtimeSelfPropertyI32GetCallback)(
 	void* environment,
 	int32_t self_slot,
@@ -99,6 +109,15 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32_pair_guest
 	const char* import_name,
 	size_t import_name_size,
 	AvidScriptWasmtimeSelfI32PairGuestResultCallback callback,
+	void* environment);
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_f32_triple_guest_vector(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfF32TripleGuestVectorCallback callback,
 	void* environment);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get(

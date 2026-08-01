@@ -31,6 +31,12 @@ $ForbiddenMatches = @(
         Select-String -Pattern 'Puerts|FJsEnv|JsObject\.h|Binding\.hpp'
 )
 Assert-True ($ForbiddenMatches.Count -eq 0) 'production AvidScript modules must not depend on Puerts'
+$PreparedFixtureSpecialCases = @(
+    Get-ChildItem -LiteralPath $ProductionSourceRoot -Recurse -File -Include '*.h', '*.cpp', '*.c' |
+        Select-String -Pattern 'ReflectAddInt32|ReflectSetScalar|ReflectGetScalar|ReflectVectorValue|ReflectObjectRoundtrip|ReflectBatchAdd'
+)
+Assert-True ($PreparedFixtureSpecialCases.Count -eq 0) `
+    'production prepared reflection must compile ABI shapes without benchmark fixture API-name special cases'
 
 $Plugin = Read-RequiredText 'AvidScriptPerfHarness/AvidScriptPerfHarness.uplugin' | ConvertFrom-Json
 $PluginNames = @($Plugin.Plugins | ForEach-Object { [string]$_.Name })

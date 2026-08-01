@@ -18,7 +18,9 @@ class IAvidScriptObjectOwnershipDomain;
 enum class EAvidScriptBindingFastPathKind : uint8
 {
 	None,
-	ScalarI32PairToI32
+	ScalarI32PairToI32,
+	VectorValueToVector,
+	ObjectToObject
 };
 
 enum class EAvidScriptBindingInvocationPolicy : uint8
@@ -114,13 +116,66 @@ struct FAvidScriptPreparedGeneratedBinding
 	bool bRequiresWriteAccess = false;
 };
 
+using FAvidScriptPreparedReflectionNativeGuard =
+	bool (*)(const void* InvocationCell, UObject& Receiver);
+
+using FAvidScriptPreparedReflectionI32PairCall =
+	bool (*)(
+		const void* InvocationCell,
+		UObject& Receiver,
+		int32 Left,
+		int32 Right,
+		bool bUseNative,
+		int32& OutValue,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
+
+using FAvidScriptPreparedReflectionVectorCall =
+	bool (*)(
+		const void* InvocationCell,
+		UObject& Receiver,
+		const FVector& Input,
+		bool bUseNative,
+		FVector& OutValue,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
+
+using FAvidScriptPreparedReflectionObjectCall =
+	bool (*)(
+		const void* InvocationCell,
+		UObject& Receiver,
+		UObject* Input,
+		bool bUseNative,
+		UObject*& OutValue,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
+
+using FAvidScriptPreparedReflectionPropertyI32Get =
+	bool (*)(const void* InvocationCell, UObject& Receiver, int32& OutValue);
+
+using FAvidScriptPreparedReflectionPropertyI32Set =
+	bool (*)(const void* InvocationCell, UObject& Receiver, int32 Value);
+
 struct FAvidScriptPreparedReflectionBinding
 {
 	uint32 BindingOrdinal = MAX_uint32;
 	FAvidScriptVmTypedHostImport TypedHostImport;
 	UClass* ExpectedClass = nullptr;
 	const void* ImmutablePlanIdentity = nullptr;
+	FAvidScriptPreparedReflectionNativeGuard NativeGuard = nullptr;
+	FAvidScriptPreparedReflectionI32PairCall I32PairCall = nullptr;
+	FAvidScriptPreparedReflectionVectorCall VectorCall = nullptr;
+	FAvidScriptPreparedReflectionObjectCall ObjectCall = nullptr;
+	FAvidScriptPreparedReflectionPropertyI32Get PropertyI32Get = nullptr;
+	FAvidScriptPreparedReflectionPropertyI32Set PropertyI32Set = nullptr;
+	UClass* ExpectedObjectClass = nullptr;
+	FProperty* ReflectedProperty = nullptr;
+	EAvidScriptBindingReloadEffect ReloadEffect =
+		EAvidScriptBindingReloadEffect::Unsupported;
 	bool bAdaptiveNativeEligible = false;
+	bool bQualifiedNativeEligible = false;
+	bool bPropertyWrite = false;
+	bool bRequiresWriteAccess = false;
 };
 
 enum class EAvidScriptPreparedHostEffectMode : uint8

@@ -20,3 +20,15 @@ float UAvidScriptBindingsTestObject::ReflectionFallbackAddFloat(
 {
 	return Left + Right;
 }
+
+FVector UAvidScriptBindingsTestObject::FastPathVectorValue(
+	const FVector Value) const
+{
+	return Value * 2.0 + FVector(1.0, 1.0, 1.0);
+}
+
+UObject* UAvidScriptBindingsTestObject::FastPathObjectRoundtrip(
+	UObject* Value) const
+{
+	return Value;
+}

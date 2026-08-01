@@ -135,6 +135,8 @@ struct FAvidScriptFusedCallbackFrame
 	uint64 CallbackEpoch = 0;
 	uint64 ReloadEpoch = 0;
 	uint64 RegistryRevision = 0;
+	const void* PreparedReflectionGuardIdentity = nullptr;
+	bool bPreparedReflectionNativeGuardAllowed = false;
 };
 
 struct FAvidScriptCachedVmExport
@@ -377,6 +379,69 @@ private:
 			int32 Right,
 			int32 GuestAddress,
 			int32& OutStatus);
+	static EAvidScriptVmTypedHostStatus
+		InvokePreparedReflectionSelfGuestAddress(
+			void* Context,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 GuestAddressOrValue,
+			int32& OutStatus);
+	EAvidScriptVmTypedHostStatus
+		DispatchPreparedReflectionSelfGuestAddress(
+			FAvidScriptPreparedReflectionHostCall& Call,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 GuestAddressOrValue,
+			int32& OutStatus);
+	static EAvidScriptVmTypedHostStatus
+		InvokePreparedReflectionSelfF32TripleGuestVector(
+			void* Context,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			float X,
+			float Y,
+			float Z,
+			int32 GuestAddress,
+			int32& OutStatus);
+	EAvidScriptVmTypedHostStatus
+		DispatchPreparedReflectionSelfF32TripleGuestVector(
+			FAvidScriptPreparedReflectionHostCall& Call,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			float X,
+			float Y,
+			float Z,
+			int32 GuestAddress,
+			int32& OutStatus);
+	static EAvidScriptVmTypedHostStatus
+		InvokePreparedReflectionStableObjectRoundtrip(
+			void* Context,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 ObjectSlot,
+			int32 ObjectGeneration,
+			int32 GuestAddress,
+			int32& OutStatus);
+	EAvidScriptVmTypedHostStatus
+		DispatchPreparedReflectionStableObjectRoundtrip(
+			FAvidScriptPreparedReflectionHostCall& Call,
+			int32 SelfSlot,
+			int32 SelfGeneration,
+			int32 ObjectSlot,
+			int32 ObjectGeneration,
+			int32 GuestAddress,
+			int32& OutStatus);
+	bool ResolvePreparedReflectionCallMode(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		UObject*& OutReceiver,
+		bool& bOutUseNative,
+		EAvidScriptBindingInvocationMode& OutMode,
+		bool& bOutAdaptiveGuardRejected);
+	void RecordPreparedReflectionInvocation(
+		EAvidScriptBindingInvocationMode Mode,
+		bool bAdaptiveGuardRejected);
 	static EAvidScriptVmTypedHostStatus InvokePreparedSelfPropertyI32Get(
 		void* Context,
 		int32 SelfSlot,

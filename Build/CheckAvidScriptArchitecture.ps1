@@ -2678,8 +2678,93 @@ $HostEffectTransactionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Priva
 $WasmRuntimeHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$BindingFastPathSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingFastPath.cpp'
+$WasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+$VmTypedHostHeader = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmTypedHostImport.h'
+$WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp'
+$WasmtimeTypedHostApiSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeTypedHostApi.c'
 $VmBackendContractSource = Read-RequiredFile 'Source/AvidScriptVM/Public/AvidScriptVmBackend.h'
 $WamrBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp'
+foreach ($PreparedReflectionContract in @(
+    'FAvidScriptPreparedReflectionNativeGuard',
+    'FAvidScriptPreparedReflectionVectorCall',
+    'FAvidScriptPreparedReflectionObjectCall',
+    'FAvidScriptPreparedReflectionPropertyI32Get',
+    'ImmutablePlanIdentity'
+)) {
+    if (-not $BindingInvocationHeader.Contains($PreparedReflectionContract)) {
+        Add-Violation "prepared reflection public call cell is missing $PreparedReflectionContract"
+    }
+}
+foreach ($PreparedShapeContract in @(
+    'SelfI32PairToGuestI32',
+    'SelfF32TripleToGuestVector',
+    'SelfPropertyI32GetSet',
+    'StableObjectRoundtrip'
+)) {
+    if (-not $VmTypedHostHeader.Contains($PreparedShapeContract)) {
+        Add-Violation "VM prepared reflection shape is missing $PreparedShapeContract"
+    }
+}
+$PreparedReflectionRuntimeSlice = Get-SourceSlice `
+    -Source $WasmRuntimeSource `
+    -StartToken 'FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(' `
+    -EndToken 'FAvidScriptWasmRuntimeInstance::InvokePreparedSelfPropertyI32Get(' `
+    -Description 'prepared reflection Runtime hot path'
+foreach ($RequiredPreparedRuntimeContract in @(
+    'Call.Binding.I32PairCall(',
+    'Call.Binding.PropertyI32Get(',
+    'Call.Binding.PropertyI32Set(',
+    'Call.Binding.VectorCall(',
+    'Call.Binding.ObjectCall(',
+    'RecordPreparedReflectionInvocation('
+)) {
+    if (-not $PreparedReflectionRuntimeSlice.Contains($RequiredPreparedRuntimeContract)) {
+        Add-Violation "prepared reflection Runtime hot path is missing $RequiredPreparedRuntimeContract"
+    }
+}
+foreach ($ForbiddenPreparedRuntimeLookup in @(
+    'InvokePreparedReflectionI32Pair(',
+    'BindingOrdinal',
+    'Impl->Plans[',
+    'FindByPredicate'
+)) {
+    if ($PreparedReflectionRuntimeSlice.Contains($ForbiddenPreparedRuntimeLookup)) {
+        Add-Violation "prepared reflection Runtime hot path must not perform package or ordinal lookup: $ForbiddenPreparedRuntimeLookup"
+    }
+}
+foreach ($RequiredPreparedBindingContract in @(
+    'InvokePreparedScalarI32PairCallCell',
+    'InvokePreparedVectorCallCell',
+    'InvokePreparedObjectCallCell',
+    'ReadAvidScriptPreparedReflectionPropertyI32',
+    'WriteAvidScriptPreparedReflectionPropertyI32'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredPreparedBindingContract) -and
+        -not $BindingFastPathSource.Contains($RequiredPreparedBindingContract)) {
+        Add-Violation "Bindings prepared reflection compiler is missing $RequiredPreparedBindingContract"
+    }
+}
+foreach ($RequiredPreparedWasmtimeContract in @(
+    'SelfF32TripleToGuestVector',
+    'TypedSelfF32TripleGuestVectorCallback',
+    'avidscript_wasmtime_linker_define_self_f32_triple_guest_vector'
+)) {
+    if (-not $WasmtimeBackendSource.Contains($RequiredPreparedWasmtimeContract) -and
+        -not $WasmtimeTypedHostApiSource.Contains($RequiredPreparedWasmtimeContract)) {
+        Add-Violation "Wasmtime prepared reflection bridge is missing $RequiredPreparedWasmtimeContract"
+    }
+}
+foreach ($ForbiddenVmPreparedDependency in @(
+    'AvidScriptBindingInvocation',
+    'FAvidScriptBindingPackage',
+    'FAvidScriptWasmRuntimeInstance'
+)) {
+    if ($WasmtimeBackendSource.Contains($ForbiddenVmPreparedDependency) -or
+        $WasmtimeTypedHostApiSource.Contains($ForbiddenVmPreparedDependency)) {
+        Add-Violation "VM prepared reflection bridge crosses its ownership boundary: $ForbiddenVmPreparedDependency"
+    }
+}
 foreach ($RequiredStateSchemaContract in @(
     'CSharpGuestStateSchemaProjector',
     'CSharpGuestStateContractResolver',

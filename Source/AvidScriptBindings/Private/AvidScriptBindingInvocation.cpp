@@ -284,6 +284,158 @@ void SetAvidScriptBindingDispatchFailure(
 		*Details);
 }
 
+bool ValidateAvidScriptPreparedReflectionNativeGuard(
+	const void* InvocationCell,
+	UObject& Receiver)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	return Plan != nullptr
+		&& UE::AvidScript::BindingPrivate::ValidatePreparedNativeCallCell(
+			Plan->FastPath,
+			Receiver);
+}
+
+bool InvokeAvidScriptPreparedReflectionI32PairCall(
+	const void* InvocationCell,
+	UObject& Receiver,
+	const int32 Left,
+	const int32 Right,
+	const bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	if (Plan == nullptr)
+	{
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails = TEXT("The prepared reflection call cell is unavailable.");
+		return false;
+	}
+	return UE::AvidScript::BindingPrivate::
+		InvokePreparedScalarI32PairCallCell(
+			Plan->FastPath,
+			Receiver,
+			Left,
+			Right,
+			bUseNative,
+			OutValue,
+			OutErrorCategory,
+			OutErrorDetails);
+}
+
+bool InvokeAvidScriptPreparedReflectionVectorCall(
+	const void* InvocationCell,
+	UObject& Receiver,
+	const FVector& Input,
+	const bool bUseNative,
+	FVector& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	if (Plan == nullptr)
+	{
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails = TEXT("The prepared FVector call cell is unavailable.");
+		return false;
+	}
+	return UE::AvidScript::BindingPrivate::InvokePreparedVectorCallCell(
+		Plan->FastPath,
+		Receiver,
+		Input,
+		bUseNative,
+		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool InvokeAvidScriptPreparedReflectionObjectCall(
+	const void* InvocationCell,
+	UObject& Receiver,
+	UObject* Input,
+	const bool bUseNative,
+	UObject*& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	if (Plan == nullptr)
+	{
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
+		OutErrorDetails = TEXT("The prepared UObject call cell is unavailable.");
+		return false;
+	}
+	return UE::AvidScript::BindingPrivate::InvokePreparedObjectCallCell(
+		Plan->FastPath,
+		Receiver,
+		Input,
+		bUseNative,
+		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool ReadAvidScriptPreparedReflectionPropertyI32(
+	const void* InvocationCell,
+	UObject& Receiver,
+	int32& OutValue)
+{
+	OutValue = 0;
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	const FIntProperty* Property = Plan == nullptr
+		? nullptr
+		: CastField<FIntProperty>(Plan->ReflectedProperty);
+	if (Property == nullptr || !Receiver.IsA(Plan->OwnerClass))
+	{
+		return false;
+	}
+	OutValue = Property->GetPropertyValue_InContainer(&Receiver);
+	return true;
+}
+
+bool WriteAvidScriptPreparedReflectionPropertyI32(
+	const void* InvocationCell,
+	UObject& Receiver,
+	const int32 Value)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	FIntProperty* Property = Plan == nullptr
+		? nullptr
+		: CastField<FIntProperty>(Plan->ReflectedProperty);
+	if (Property == nullptr || !Receiver.IsA(Plan->OwnerClass))
+	{
+		return false;
+	}
+	Property->SetPropertyValue_InContainer(&Receiver, Value);
+	return true;
+}
+
+UE::AvidScript::BindingPrivate::EFastPathValueKind
+GetAvidScriptFastPathValueKind(
+	const EAvidScriptRuntimeBindingKind Kind)
+{
+	using EFastPathValueKind =
+		UE::AvidScript::BindingPrivate::EFastPathValueKind;
+	switch (Kind)
+	{
+	case EAvidScriptRuntimeBindingKind::Int32:
+		return EFastPathValueKind::Int32;
+	case EAvidScriptRuntimeBindingKind::Vector:
+		return EFastPathValueKind::Vector;
+	case EAvidScriptRuntimeBindingKind::Object:
+		return EFastPathValueKind::Object;
+	default:
+		return EFastPathValueKind::Unsupported;
+	}
+}
+
 bool IsAvidScriptRuntimeFunctionAllowed(const UFunction* Function)
 {
 	return Function != nullptr
@@ -2933,8 +3085,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			FastPathParameters.Add({
 				Parameter.Property,
 				Parameter.ArgumentOffset,
-				Parameter.Direction == EAvidScriptRuntimeBindingDirection::Value,
-				Parameter.Kind == EAvidScriptRuntimeBindingKind::Int32
+				GetAvidScriptFastPathValueKind(Parameter.Kind),
+				Parameter.Direction == EAvidScriptRuntimeBindingDirection::Value
+					|| Parameter.Direction
+						== EAvidScriptRuntimeBindingDirection::ConstRef
 			});
 		}
 		UE::AvidScript::BindingPrivate::FFastPathBuildSpec FastPathSpec;
@@ -2952,8 +3106,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		FastPathSpec.ReturnValue = {
 			Plan.ReturnValue.Property,
 			Plan.ReturnValue.ArgumentOffset,
-			false,
-			Plan.ReturnValue.Kind == EAvidScriptRuntimeBindingKind::Int32
+			GetAvidScriptFastPathValueKind(Plan.ReturnValue.Kind),
+			false
 		};
 		if (UE::AvidScript::BindingPrivate::TryBuildFastPath(
 			FastPathSpec,
@@ -3285,11 +3439,8 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 {
 	OutBindings.Reset();
 	OutError.Reset();
-	OutBindings.Reserve(
-		static_cast<int32>(
-			Impl->Instrumentation.AdaptivePreparedNativePlanCount
-			+ Impl->Instrumentation.AdaptiveStrictFallbackPlanCount));
 	const int32 ImportCount = Impl->VmPackage.Imports.Num();
+	OutBindings.Reserve(ImportCount);
 	for (int32 PlanIndex = 0;
 		PlanIndex < ImportCount
 			&& Impl->Plans.IsValidIndex(PlanIndex);
@@ -3297,16 +3448,45 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 	{
 		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
 			Impl->Plans[PlanIndex];
-		if (Plan.GeneratedEntry != nullptr
-			|| Plan.FastPath.Kind
-				!= EAvidScriptBindingFastPathKind::ScalarI32PairToI32)
+		if (Plan.GeneratedEntry != nullptr)
+		{
+			continue;
+		}
+		const bool bScalar = Plan.FastPath.Kind
+			== EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
+		const bool bVector = Plan.FastPath.Kind
+			== EAvidScriptBindingFastPathKind::VectorValueToVector;
+		const bool bObject = Plan.FastPath.Kind
+			== EAvidScriptBindingFastPathKind::ObjectToObject;
+		const bool bPropertyRead =
+			Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyRead
+			&& Plan.Function == nullptr
+			&& Plan.ReflectedProperty != nullptr
+			&& Plan.ReturnValue.Kind == EAvidScriptRuntimeBindingKind::Int32;
+		const bool bPropertyWrite =
+			Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+			&& Plan.Function == nullptr
+			&& Plan.ReflectedProperty != nullptr
+			&& Plan.Parameters.Num() == 1
+			&& Plan.Parameters[0].Kind
+				== EAvidScriptRuntimeBindingKind::Int32;
+		if (!bScalar
+			&& !bVector
+			&& !bObject
+			&& !bPropertyRead
+			&& !bPropertyWrite)
 		{
 			continue;
 		}
 		const FAvidScriptVmDynamicImport& DynamicImport =
 			Impl->VmPackage.Imports[PlanIndex];
+		const TCHAR* ExpectedSignature = bVector
+			? TEXT("(iifffi)i")
+			: (bPropertyRead || bPropertyWrite)
+				? TEXT("(iii)i")
+				: TEXT("(iiiii)i");
 		if (DynamicImport.Ordinal != static_cast<uint32>(PlanIndex)
-			|| DynamicImport.Signature != TEXT("(iiiii)i"))
+			|| DynamicImport.Signature != ExpectedSignature)
 		{
 			OutBindings.Reset();
 			OutError = TEXT("prepared_reflection_import_mismatch");
@@ -3320,6 +3500,15 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 		Binding.ImmutablePlanIdentity = &Plan;
 		Binding.bAdaptiveNativeEligible =
 			Plan.FastPath.bAdaptiveNativeEligible;
+		Binding.bQualifiedNativeEligible =
+			Plan.FastPath.HighestInvocationMode
+				== EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
+		Binding.ExpectedObjectClass =
+			bObject ? Plan.Parameters[0].ObjectClass : nullptr;
+		Binding.ReflectedProperty = Plan.ReflectedProperty;
+		Binding.ReloadEffect = Plan.ReloadEffect;
+		Binding.bPropertyWrite = bPropertyWrite;
+		Binding.bRequiresWriteAccess = Plan.bRequiresWriteAccess;
 		Binding.TypedHostImport.StableId = DynamicImport.StableId;
 		Binding.TypedHostImport.BindingOrdinal =
 			static_cast<uint32>(PlanIndex);
@@ -3329,8 +3518,44 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 			DynamicImport.ImportName;
 		Binding.TypedHostImport.Signature =
 			DynamicImport.Signature;
-		Binding.TypedHostImport.Shape =
-			EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
+		if (bScalar)
+		{
+			Binding.NativeGuard =
+				&ValidateAvidScriptPreparedReflectionNativeGuard;
+			Binding.I32PairCall =
+				&InvokeAvidScriptPreparedReflectionI32PairCall;
+			Binding.TypedHostImport.Shape =
+				EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
+		}
+		else if (bVector)
+		{
+			Binding.NativeGuard =
+				&ValidateAvidScriptPreparedReflectionNativeGuard;
+			Binding.VectorCall =
+				&InvokeAvidScriptPreparedReflectionVectorCall;
+			Binding.TypedHostImport.Shape =
+				EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector;
+		}
+		else if (bObject)
+		{
+			Binding.NativeGuard =
+				&ValidateAvidScriptPreparedReflectionNativeGuard;
+			Binding.ObjectCall =
+				&InvokeAvidScriptPreparedReflectionObjectCall;
+			Binding.TypedHostImport.Shape =
+				EAvidScriptVmTypedHostShape::StableObjectRoundtrip;
+		}
+		else
+		{
+			Binding.PropertyI32Get = bPropertyRead
+				? &ReadAvidScriptPreparedReflectionPropertyI32
+				: nullptr;
+			Binding.PropertyI32Set = bPropertyWrite
+				? &WriteAvidScriptPreparedReflectionPropertyI32
+				: nullptr;
+			Binding.TypedHostImport.Shape =
+				EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet;
+		}
 	}
 	return true;
 }
@@ -3348,23 +3573,50 @@ bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
 	OutValue = 0;
 	OutErrorCategory.Reset();
 	OutErrorDetails.Reset();
-	if (!Impl->Plans.IsValidIndex(
-			static_cast<int32>(Binding.BindingOrdinal)))
+	if (Binding.ImmutablePlanIdentity == nullptr
+		|| Binding.ExpectedClass == nullptr
+		|| Binding.NativeGuard == nullptr
+		|| Binding.I32PairCall == nullptr)
 	{
-		OutErrorCategory = TEXT("binding_ordinal_invalid");
+		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
 		OutErrorDetails =
-			TEXT("The prepared reflection binding ordinal is invalid.");
+			TEXT("The prepared reflection binding has no immutable call cell.");
 		return false;
 	}
-	const FAvidScriptRuntimeBindingInvocationPlan& Plan =
-		Impl->Plans[Binding.BindingOrdinal];
-	const bool bPreparedAdaptiveNative =
+
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	const bool bAdaptiveRequested =
 		Context.InvocationPolicy
 			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
-		&& Plan.FastPath.bAdaptiveNativeEligible;
-	if (Binding.ImmutablePlanIdentity != &Plan
-		|| (!bPreparedAdaptiveNative
-			&& !Receiver.IsA(Plan.OwnerClass)))
+		&& Binding.bAdaptiveNativeEligible;
+	const bool bQualifiedRequested =
+		Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+		&& Binding.bQualifiedNativeEligible;
+	if (bAdaptiveRequested || bQualifiedRequested)
+	{
+		bUseNative = Binding.NativeGuard(
+			Binding.ImmutablePlanIdentity,
+			Receiver);
+		bAdaptiveGuardRejected = bAdaptiveRequested && !bUseNative;
+		if (bQualifiedRequested && !bUseNative)
+		{
+			OutErrorCategory = TEXT("binding_prepared_native_guard_rejected");
+			OutErrorDetails =
+				TEXT("The qualified prepared reflection native guard rejected the receiver.");
+			return false;
+		}
+		if (bUseNative)
+		{
+			ActualMode = bQualifiedRequested
+				? EAvidScriptBindingInvocationMode::QualifiedNativeDirect
+				: EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
+		}
+	}
+	if (!bUseNative && !Receiver.IsA(Binding.ExpectedClass))
 	{
 		OutErrorCategory = TEXT("binding_prepared_identity_mismatch");
 		OutErrorDetails =
@@ -3372,19 +3624,15 @@ bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
 		return false;
 	}
 
-	EAvidScriptBindingInvocationMode ActualMode =
-		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
-	if (!UE::AvidScript::BindingPrivate::
-			InvokePreparedScalarI32PairToI32(
-				Plan.FastPath,
-				Receiver,
-				Left,
-				Right,
-				Context.InvocationPolicy,
-				OutValue,
-				ActualMode,
-				OutErrorCategory,
-				OutErrorDetails))
+	if (!Binding.I32PairCall(
+			Binding.ImmutablePlanIdentity,
+			Receiver,
+			Left,
+			Right,
+			bUseNative,
+			OutValue,
+			OutErrorCategory,
+			OutErrorDetails))
 	{
 		return false;
 	}
@@ -3412,7 +3660,7 @@ bool FAvidScriptBindingPackage::InvokePreparedReflectionI32Pair(
 			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic)
 		{
 			++Instrumentation->AdaptiveProcessEventFallbackCount;
-			if (Plan.FastPath.bAdaptiveNativeEligible)
+			if (bAdaptiveGuardRejected)
 			{
 				++Instrumentation->AdaptiveGuardRejectCount;
 			}

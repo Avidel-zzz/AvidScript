@@ -1255,6 +1255,37 @@ public:
 		return CompleteTypedInvocation(HostContext, Status);
 	}
 
+	int32 InvokeTypedSelfF32TripleGuestVector(
+		FAvidScriptWasmtimeTypedHostContext& HostContext,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const float X,
+		const float Y,
+		const float Z,
+		const int32 GuestAddress,
+		int32& OutStatus)
+	{
+		if (!HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			RecordPendingHostFailure(
+				HostContext.ModuleName,
+				HostContext.ImportName,
+				TEXT("The typed FVector guest-result import has no prepared target."));
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext.PreparedTarget.SelfF32TripleGuestVector(
+				HostContext.PreparedTarget.Context,
+				SelfSlot,
+				SelfGeneration,
+				X,
+				Y,
+				Z,
+				GuestAddress,
+				OutStatus);
+		return CompleteTypedInvocation(HostContext, Status);
+	}
+
 	int32 InvokeTypedSelfPropertyI32Get(
 		FAvidScriptWasmtimeTypedHostContext& HostContext,
 		const int32 SelfSlot,
@@ -1856,6 +1887,35 @@ private:
 			*OutStatus);
 	}
 
+	static int32 TypedSelfF32TripleGuestVectorCallback(
+		void* Environment,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const float X,
+		const float Y,
+		const float Z,
+		const int32 GuestAddress,
+		int32* OutStatus)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->Backend == nullptr
+			|| OutStatus == nullptr)
+		{
+			return 1;
+		}
+		return HostContext->Backend->InvokeTypedSelfF32TripleGuestVector(
+			*HostContext,
+			SelfSlot,
+			SelfGeneration,
+			X,
+			Y,
+			Z,
+			GuestAddress,
+			*OutStatus);
+	}
+
 	static int32 TypedSelfPropertyI32GetSetCallback(
 		void* Environment,
 		int32 SelfSlot,
@@ -2055,6 +2115,9 @@ private:
 			case EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32:
 				ExpectedSignature = TEXT("(iiiii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector:
+				ExpectedSignature = TEXT("(iifffi)i");
+				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:
 				ExpectedSignature = TEXT("(iii)i");
@@ -2097,6 +2160,9 @@ private:
 				+ (Import.PreparedTarget.SelfI32PairGuestResult != nullptr
 					? 1
 					: 0)
+				+ (Import.PreparedTarget.SelfF32TripleGuestVector != nullptr
+					? 1
+					: 0)
 				+ (Import.PreparedTarget.SelfGuestAddress != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.StableObjectRoundtrip != nullptr
 					? 1
@@ -2108,6 +2174,8 @@ private:
 			const bool bRequiresPreparedTarget =
 				Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32
+				|| Import.Shape
+					== EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfPropertyI32Get
 				|| Import.Shape
@@ -2217,6 +2285,17 @@ private:
 						ImportNameUtf8.Get(),
 						static_cast<size_t>(ImportNameUtf8.Length()),
 						&TypedSelfI32PairGuestResultCallback,
+						HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector:
+				DefineFailure =
+					avidscript_wasmtime_linker_define_self_f32_triple_guest_vector(
+						Linker,
+						ModuleNameUtf8.Get(),
+						static_cast<size_t>(ModuleNameUtf8.Length()),
+						ImportNameUtf8.Get(),
+						static_cast<size_t>(ImportNameUtf8.Length()),
+						&TypedSelfF32TripleGuestVectorCallback,
 						HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:

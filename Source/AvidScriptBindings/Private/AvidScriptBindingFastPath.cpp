@@ -12,6 +12,7 @@ namespace UE::AvidScript::BindingPrivate
 namespace
 {
 constexpr int32 ScalarI32PairFrameSize = 3 * sizeof(int32);
+constexpr int32 PreparedTrivialFrameCapacity = 128;
 
 bool HasEditorClassGenerator(const UClass& Class)
 {
@@ -300,6 +301,121 @@ bool CanInvokePreparedNative(
 	return true;
 }
 
+bool IsTrivialVectorProperty(
+	const FProperty* Property,
+	const int32 FrameSize,
+	int32& OutFrameOffset)
+{
+	OutFrameOffset = INDEX_NONE;
+	const FStructProperty* StructProperty =
+		CastField<FStructProperty>(Property);
+	const int32 PropertyAlignment =
+		Property == nullptr ? 0 : Property->GetMinAlignment();
+	if (StructProperty == nullptr
+		|| StructProperty->Struct != TBaseStructure<FVector>::Get()
+		|| Property->ArrayDim != 1
+		|| Property->GetElementSize() != sizeof(FVector)
+		|| Property->GetSize() != sizeof(FVector)
+		|| PropertyAlignment <= 0
+		|| PropertyAlignment > alignof(FVector)
+		|| !Property->HasAllPropertyFlags(
+			CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor))
+	{
+		return false;
+	}
+
+	const int32 FrameOffset = Property->GetOffset_ForInternal();
+	if (FrameOffset < 0
+		|| FrameOffset % PropertyAlignment != 0
+		|| FrameSize < static_cast<int32>(sizeof(FVector))
+		|| FrameOffset > FrameSize - static_cast<int32>(sizeof(FVector)))
+	{
+		return false;
+	}
+	OutFrameOffset = FrameOffset;
+	return true;
+}
+
+bool IsTrivialObjectProperty(
+	const FProperty* Property,
+	const int32 FrameSize,
+	int32& OutFrameOffset)
+{
+	OutFrameOffset = INDEX_NONE;
+	const FObjectPropertyBase* ObjectProperty =
+		CastField<FObjectPropertyBase>(Property);
+	const int32 PropertyAlignment =
+		Property == nullptr ? 0 : Property->GetMinAlignment();
+	if (ObjectProperty == nullptr
+		|| ObjectProperty->PropertyClass == nullptr
+		|| Property->ArrayDim != 1
+		|| Property->GetElementSize() != sizeof(UObject*)
+		|| Property->GetSize() != sizeof(UObject*)
+		|| PropertyAlignment <= 0
+		|| PropertyAlignment > alignof(UObject*)
+		|| !Property->HasAllPropertyFlags(
+			CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor))
+	{
+		return false;
+	}
+
+	const int32 FrameOffset = Property->GetOffset_ForInternal();
+	if (FrameOffset < 0
+		|| FrameOffset % PropertyAlignment != 0
+		|| FrameSize < static_cast<int32>(sizeof(UObject*))
+		|| FrameOffset > FrameSize - static_cast<int32>(sizeof(UObject*)))
+	{
+		return false;
+	}
+	OutFrameOffset = FrameOffset;
+	return true;
+}
+
+bool IsPreparedNativeFunctionBase(
+	const UFunction& Function,
+	const int32 ExpectedParameterCount,
+	const int32 ExpectedFrameSize)
+{
+	const EFunctionFlags RequiredFlags =
+		FUNC_Native | FUNC_Final | FUNC_Public;
+	const EFunctionFlags RejectedFlags =
+		FUNC_NetFuncFlags
+		| FUNC_NetRequest
+		| FUNC_NetResponse
+		| FUNC_NetValidate
+		| FUNC_Event
+		| FUNC_BlueprintEvent
+		| FUNC_Delegate
+		| FUNC_MulticastDelegate
+		| FUNC_Exec
+		| FUNC_Static
+		| FUNC_BlueprintAuthorityOnly
+		| FUNC_BlueprintCosmetic
+		| FUNC_EditorOnly
+		| FUNC_UbergraphFunction
+		| FUNC_DLLImport
+		| FUNC_HasOutParms
+		| FUNC_HasDefaults;
+	const UClass* OwnerClass = Function.GetOwnerClass();
+	return Function.HasAllFunctionFlags(RequiredFlags)
+		&& !Function.HasAnyFunctionFlags(RejectedFlags)
+		&& Function.GetNativeFunc() != nullptr
+		&& OwnerClass != nullptr
+		&& OwnerClass->HasAllClassFlags(CLASS_Native)
+		&& !OwnerClass->HasAnyClassFlags(
+			CLASS_Interface | CLASS_CompiledFromBlueprint)
+		&& !HasEditorClassGenerator(*OwnerClass)
+		&& Function.GetSuperFunction() == nullptr
+		&& Function.Script.IsEmpty()
+		&& Function.NumParms == ExpectedParameterCount
+		&& Function.ParmsSize == ExpectedFrameSize
+		&& Function.PropertiesSize == ExpectedFrameSize
+		&& Function.GetStructureSize() == ExpectedFrameSize
+		&& Function.FirstPropertyToInit == nullptr
+		&& Function.PostConstructLink == nullptr
+		&& Function.DestructorLink == nullptr;
+}
+
 bool InvokePreparedScalarFrame(
 	const FFastPathPlan& Plan,
 	UObject& Target,
@@ -331,8 +447,7 @@ bool InvokePreparedScalarFrame(
 		checkSlow(
 			!Plan.Function->GetOwnerClass()->IsChildOf(
 				UInterface::StaticClass()));
-		FNativeFuncPtr NativeFunction =
-			Plan.Function->GetNativeFunc();
+		FNativeFuncPtr NativeFunction = Plan.NativeFunction;
 		checkSlow(NativeFunction != nullptr);
 		TGuardValue<UFunction*> NativeFunctionGuard(
 			Stack.CurrentNativeFunction,
@@ -357,6 +472,71 @@ bool InvokePreparedScalarFrame(
 		&OutValue,
 		Frame + Plan.ReturnFrameOffset,
 		sizeof(OutValue));
+	return true;
+}
+
+bool InvokePreparedTrivialFrame(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const void* Input,
+	const int32 InputSize,
+	const bool bNative,
+	void* OutValue,
+	const int32 OutputSize,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	alignas(16) uint8 Frame[PreparedTrivialFrameCapacity] = {};
+	if (Plan.Function == nullptr
+		|| Plan.FrameSize <= 0
+		|| Plan.FrameSize > PreparedTrivialFrameCapacity
+		|| Plan.FrameAlignment > 16
+		|| Plan.ParameterFrameOffsets[0] < 0
+		|| Plan.ParameterFrameOffsets[0] > Plan.FrameSize - InputSize
+		|| Plan.ReturnFrameOffset < 0
+		|| Plan.ReturnFrameOffset > Plan.FrameSize - OutputSize
+		|| (bNative && Plan.NativeFunction == nullptr))
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails = TEXT("The prepared trivial reflection frame is invalid.");
+		return false;
+	}
+	FMemory::Memcpy(
+		Frame + Plan.ParameterFrameOffsets[0],
+		Input,
+		InputSize);
+	if (bNative)
+	{
+		FFrame Stack(
+			&Target,
+			Plan.Function,
+			Frame,
+			nullptr,
+			Plan.Function->ChildProperties);
+		Stack.Code = nullptr;
+		TGuardValue<UFunction*> NativeFunctionGuard(
+			Stack.CurrentNativeFunction,
+			Plan.Function);
+		Plan.NativeFunction(
+			&Target,
+			Stack,
+			Frame + Plan.ReturnFrameOffset);
+		if (Stack.bAbortingExecution)
+		{
+			OutErrorCategory = TEXT("binding_adaptive_native_aborted");
+			OutErrorDetails =
+				TEXT("The prepared native UFUNCTION invocation aborted execution.");
+			return false;
+		}
+	}
+	else
+	{
+		Target.ProcessEvent(Plan.Function, Frame);
+	}
+	FMemory::Memcpy(
+		OutValue,
+		Frame + Plan.ReturnFrameOffset,
+		OutputSize);
 	return true;
 }
 } // namespace
@@ -434,12 +614,10 @@ bool TryBuildFastPath(
 		|| Spec.bStatic
 		|| Spec.bRequiresWriteAccess
 		|| Spec.bHasReloadEffect
-		|| Spec.ExpectedArgumentCount != 5
-		|| Spec.Parameters.Num() != 2
 		|| Spec.FrameSize <= 0
+		|| Spec.FrameSize > PreparedTrivialFrameCapacity
 		|| !FMath::IsPowerOfTwo(Spec.FrameAlignment)
-		|| !Spec.ReturnValue.bIsInt32
-		|| Spec.ReturnValue.ArgumentOffset != 4)
+		|| Spec.FrameAlignment > 16)
 	{
 		return false;
 	}
@@ -452,46 +630,120 @@ bool TryBuildFastPath(
 			++ReflectedParameterCount;
 		}
 	}
-	if (ReflectedParameterCount != 3)
+	if (ReflectedParameterCount != Spec.Parameters.Num() + 1)
 	{
 		return false;
 	}
 
 	FFastPathPlan Candidate;
-	Candidate.Kind = EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
 	Candidate.Function = Spec.Function;
-	Candidate.SemanticThunk = &DispatchSemanticScalarI32PairToI32;
 	Candidate.FrameSize = Spec.FrameSize;
 	Candidate.FrameAlignment = Spec.FrameAlignment;
 	Candidate.ReturnGuestArgumentOffset = Spec.ReturnValue.ArgumentOffset;
-	for (int32 ParameterIndex = 0; ParameterIndex < 2; ++ParameterIndex)
+	const bool bScalarShape =
+		Spec.ExpectedArgumentCount == 5
+		&& Spec.Parameters.Num() == 2
+		&& Spec.ReturnValue.Kind == EFastPathValueKind::Int32
+		&& Spec.ReturnValue.ArgumentOffset == 4;
+	const bool bVectorShape =
+		Spec.ExpectedArgumentCount == 6
+		&& Spec.Parameters.Num() == 1
+		&& Spec.Parameters[0].Kind == EFastPathValueKind::Vector
+		&& Spec.Parameters[0].bIsInput
+		&& Spec.Parameters[0].ArgumentOffset == 2
+		&& Spec.ReturnValue.Kind == EFastPathValueKind::Vector
+		&& Spec.ReturnValue.ArgumentOffset == 5;
+	const bool bObjectShape =
+		Spec.ExpectedArgumentCount == 5
+		&& Spec.Parameters.Num() == 1
+		&& Spec.Parameters[0].Kind == EFastPathValueKind::Object
+		&& Spec.Parameters[0].bIsInput
+		&& Spec.Parameters[0].ArgumentOffset == 2
+		&& Spec.ReturnValue.Kind == EFastPathValueKind::Object
+		&& Spec.ReturnValue.ArgumentOffset == 4;
+	if (bScalarShape)
 	{
-		const FFastPathValueSpec& Parameter = Spec.Parameters[ParameterIndex];
-		if (!Parameter.bIsValue
-			|| !Parameter.bIsInt32
-			|| Parameter.ArgumentOffset != 2 + ParameterIndex
-			|| !IsTrivialInt32Property(
-				Parameter.Property,
-				Spec.FrameSize,
-				Candidate.ParameterFrameOffsets[ParameterIndex]))
+		Candidate.Kind =
+			EAvidScriptBindingFastPathKind::ScalarI32PairToI32;
+		Candidate.SemanticThunk = &DispatchSemanticScalarI32PairToI32;
+		for (int32 ParameterIndex = 0; ParameterIndex < 2; ++ParameterIndex)
+		{
+			const FFastPathValueSpec& Parameter =
+				Spec.Parameters[ParameterIndex];
+			if (!Parameter.bIsInput
+				|| Parameter.Kind != EFastPathValueKind::Int32
+				|| Parameter.ArgumentOffset != 2 + ParameterIndex
+				|| !IsTrivialInt32Property(
+					Parameter.Property,
+					Spec.FrameSize,
+					Candidate.ParameterFrameOffsets[ParameterIndex]))
+			{
+				return false;
+			}
+		}
+		if (!IsTrivialInt32Property(
+			Spec.ReturnValue.Property,
+			Spec.FrameSize,
+			Candidate.ReturnFrameOffset))
 		{
 			return false;
 		}
 	}
-	if (!IsTrivialInt32Property(
-		Spec.ReturnValue.Property,
-		Spec.FrameSize,
-		Candidate.ReturnFrameOffset))
+	else if (bVectorShape)
+	{
+		Candidate.Kind =
+			EAvidScriptBindingFastPathKind::VectorValueToVector;
+		if (!IsTrivialVectorProperty(
+				Spec.Parameters[0].Property,
+				Spec.FrameSize,
+				Candidate.ParameterFrameOffsets[0])
+			|| !IsTrivialVectorProperty(
+				Spec.ReturnValue.Property,
+				Spec.FrameSize,
+				Candidate.ReturnFrameOffset))
+		{
+			return false;
+		}
+	}
+	else if (bObjectShape)
+	{
+		Candidate.Kind = EAvidScriptBindingFastPathKind::ObjectToObject;
+		if (!IsTrivialObjectProperty(
+				Spec.Parameters[0].Property,
+				Spec.FrameSize,
+				Candidate.ParameterFrameOffsets[0])
+			|| !IsTrivialObjectProperty(
+				Spec.ReturnValue.Property,
+				Spec.FrameSize,
+				Candidate.ReturnFrameOffset))
+		{
+			return false;
+		}
+	}
+	else
 	{
 		return false;
 	}
-	if (IsQualifiedNativeDirectFunction(*Spec.Function))
+
+	const bool bQualifiedNative = bScalarShape
+		? IsQualifiedNativeDirectFunction(*Spec.Function)
+		: IsPreparedNativeFunctionBase(
+			*Spec.Function,
+			Spec.Parameters.Num() + 1,
+			Spec.FrameSize);
+	if (bQualifiedNative)
 	{
 		Candidate.bAdaptiveNativeEligible = true;
 		Candidate.NativeDirectOwnerClass = Spec.Function->GetOwnerClass();
-		Candidate.NativeDirectThunk =
-			&DispatchNativeDirectScalarI32PairToI32;
-		for (int32 ParameterIndex = 0; ParameterIndex < 2; ++ParameterIndex)
+		Candidate.NativeFunction = Spec.Function->GetNativeFunc();
+		if (bScalarShape)
+		{
+			Candidate.NativeDirectThunk =
+				&DispatchNativeDirectScalarI32PairToI32;
+		}
+		for (int32 ParameterIndex = 0;
+			ParameterIndex < Spec.Parameters.Num();
+			++ParameterIndex)
 		{
 			Candidate.ParameterFrameOffsets[ParameterIndex] =
 				Spec.Parameters[ParameterIndex].Property
@@ -649,6 +901,107 @@ bool InvokePreparedScalarI32PairToI32(
 		Right,
 		bAdaptiveNative || bQualifiedNative,
 		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool ValidatePreparedNativeCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target)
+{
+	return Plan.Kind != EAvidScriptBindingFastPathKind::None
+		&& Plan.bAdaptiveNativeEligible
+		&& CanInvokePreparedNative(Plan, Target, nullptr, nullptr);
+}
+
+bool InvokePreparedScalarI32PairCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const int32 Left,
+	const int32 Right,
+	const bool bUseNative,
+	int32& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutValue = 0;
+	if (Plan.Kind != EAvidScriptBindingFastPathKind::ScalarI32PairToI32
+		|| Plan.Function == nullptr
+		|| (bUseNative && !Plan.bAdaptiveNativeEligible))
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call cell is not an int32 pair function.");
+		return false;
+	}
+
+	return InvokePreparedScalarFrame(
+		Plan,
+		Target,
+		Left,
+		Right,
+		bUseNative,
+		OutValue,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool InvokePreparedVectorCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	const FVector& Input,
+	const bool bUseNative,
+	FVector& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutValue = FVector::ZeroVector;
+	if (Plan.Kind != EAvidScriptBindingFastPathKind::VectorValueToVector
+		|| (bUseNative && !Plan.bAdaptiveNativeEligible))
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call cell is not a FVector value function.");
+		return false;
+	}
+	return InvokePreparedTrivialFrame(
+		Plan,
+		Target,
+		&Input,
+		sizeof(Input),
+		bUseNative,
+		&OutValue,
+		sizeof(OutValue),
+		OutErrorCategory,
+		OutErrorDetails);
+}
+
+bool InvokePreparedObjectCallCell(
+	const FFastPathPlan& Plan,
+	UObject& Target,
+	UObject* Input,
+	const bool bUseNative,
+	UObject*& OutValue,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutValue = nullptr;
+	if (Plan.Kind != EAvidScriptBindingFastPathKind::ObjectToObject
+		|| (bUseNative && !Plan.bAdaptiveNativeEligible))
+	{
+		OutErrorCategory = TEXT("binding_prepared_shape_mismatch");
+		OutErrorDetails =
+			TEXT("The prepared reflection call cell is not a UObject roundtrip function.");
+		return false;
+	}
+	return InvokePreparedTrivialFrame(
+		Plan,
+		Target,
+		&Input,
+		sizeof(Input),
+		bUseNative,
+		&OutValue,
+		sizeof(OutValue),
 		OutErrorCategory,
 		OutErrorDetails);
 }

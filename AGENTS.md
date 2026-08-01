@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-07-31 P57.10 设计冻结时采纳了“semantic FVector 可以复用 generated `SelfVectorValue (iii)i`”的只读分析结论，随后读取实际物化的 binding descriptor 才确认 semantic `const FVector& -> FVector` ABI 是 `(iifffi)i`；generated packed guest-address ABI 与 semantic expanded f32 ABI 被错误混为同一 shape。同时 profile 中声明的 benchmark `Saved` 相对路径和不存在的源码模块路径被当作当前工作树已物化路径读取。Prevention：任何 typed shape 冻结前必须同时核对 renderer 规则、实际 descriptor `host_import.signature` 与 VM linker signature，generated/semantic 即使 UE 类型相同也不得推定 ABI 相同；配置中的输出路径先通过当前候选 `rg --files` 证明存在，源码 owner 只能从 `Get-ChildItem Source` 的实际模块清单选择。
 - 2026-07-31 P57.10 热路径探索首次把未确认存在的 `Source/AvidScriptBindings/Public/AvidScriptBindingFastPath.h` 放进 `Promise.all`，单项读取失败使同批其余确定性结果没有返回；随后又把不存在的 `Source/AvidScriptPerfHarness` 与 `Benchmarks/PuertsComparison/AvidScriptCSharpGuest` 加入检索，并在一次 Git 状态命令中用分号串联三个动作。Prevention：并行读取必须逐项转为 settled result，任一失败不得取消同批成功输出；新路径只能从刚取得的 `rg --files` 或父目录字面清单复制；一条 `shell_command` 只执行一个逻辑动作，禁止 `;`、`&&`、`||`，已知规则复发时在下一批命令发送前机械检查路径与分隔符。
 - 2026-08-01 P57.9 compiler profile resolver 取代旧 runtime identity resolver 后，首次干净架构检查仍只匹配 `ResolveAvidScriptWasmtimeRuntimeIdentity`，误报 backend 重复 DLL identity；实现没有重复逻辑，但阶段计划在架构检查真正通过前已把该 checklist 标记完成。Prevention：共享 owner 接口演进必须原子更新架构门禁，检查 backend 与 artifact compiler 都消费新 resolver、RuntimeSupport 独占 DLL export/identity wiring、CompilerProfile 独占 identity 字符串；checklist 只能在干净候选实际通过后勾选，不能根据预期提前完成。
 - 2026-08-01 P57.9 正式 controlled-runtime 隔离工程首次只执行 `-Module=AvidScriptPerfHarness`；UBT 为 AvidScript 依赖模块生成了 `.lib`，但没有在候选插件 `Binaries/Win64` 链接其 DLL，calibration 进程在 commandlet 注册前以 exit 1 退出且没有 result。Prevention：新 benchmark 工程先用 Harness module build 暴露局部编译错误，随后必须无 `-Module` 构建完整 `AvidTPSTemplateEditor` target；正式 runner 前逐项确认 Harness 与候选 VM/Runtime/Bindings/Editor DLL 均存在，不得把依赖 `.lib` 成功当成可启动目标闭环，仍禁止清理 Editor target。
@@ -1708,3 +1709,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: new Editor fallback fixtures called `Get-FileHash` inside `powershell.exe` launched by Unreal Automation. That child process could not auto-load `Microsoft.PowerShell.Utility`, so both fixtures exited before reaching the VM artifact publisher even though an interactive shell exposed the cmdlet.
 - Prevention: generated Automation scripts depend only on PowerShell language primitives and explicitly constructed .NET APIs. Prefer computing deterministic fixture hashes in C++ with `FAvidScriptHash`; every external-process assertion logs exit code, category, stdout and stderr on failure.
+
+### 2026-08-01: verify declarations after multi-function replacements
+
+- Mistake: a large Runtime replacement retained the previous function's `EAvidScriptVmTypedHostStatus` token while defining `ResolvePreparedReflectionCallMode`, whose declaration and boolean contract require `bool`.
+- Prevention: after every multi-function patch, compare each touched definition against its declaration with a focused symbol search before adding callers; do not defer signature consistency to the concentrated build.

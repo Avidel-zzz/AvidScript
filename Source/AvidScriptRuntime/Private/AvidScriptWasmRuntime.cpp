@@ -530,12 +530,33 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	for (const FAvidScriptPreparedReflectionBinding& Binding
 		: ReflectionBindings)
 	{
+		const bool bScalar = Binding.TypedHostImport.Shape
+			== EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32;
+		const bool bProperty = Binding.TypedHostImport.Shape
+			== EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet;
+		const bool bVector = Binding.TypedHostImport.Shape
+			== EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector;
+		const bool bObject = Binding.TypedHostImport.Shape
+			== EAvidScriptVmTypedHostShape::StableObjectRoundtrip;
+		const bool bShapeTargetMatches =
+			(bScalar
+				&& Binding.NativeGuard != nullptr
+				&& Binding.I32PairCall != nullptr)
+			|| (bProperty
+				&& ((Binding.bPropertyWrite
+						&& Binding.PropertyI32Set != nullptr)
+					|| (!Binding.bPropertyWrite
+						&& Binding.PropertyI32Get != nullptr)))
+			|| (bVector
+				&& Binding.NativeGuard != nullptr
+				&& Binding.VectorCall != nullptr)
+			|| (bObject
+				&& Binding.NativeGuard != nullptr
+				&& Binding.ObjectCall != nullptr);
 		if (Binding.BindingOrdinal == MAX_uint32
 			|| Binding.ExpectedClass == nullptr
 			|| Binding.ImmutablePlanIdentity == nullptr
-			|| Binding.TypedHostImport.Shape
-				!= EAvidScriptVmTypedHostShape::
-					SelfI32PairToGuestI32)
+			|| !bShapeTargetMatches)
 		{
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
@@ -553,9 +574,30 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		FAvidScriptVmTypedHostImport& Import =
 			TypedHostImports.Add_GetRef(Binding.TypedHostImport);
 		Import.PreparedTarget.Context = Call.Get();
-		Import.PreparedTarget.SelfI32PairGuestResult =
-			&FAvidScriptWasmRuntimeInstance::
-				InvokePreparedReflectionSelfI32PairGuestResult;
+		if (bScalar)
+		{
+			Import.PreparedTarget.SelfI32PairGuestResult =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedReflectionSelfI32PairGuestResult;
+		}
+		else if (bProperty)
+		{
+			Import.PreparedTarget.SelfGuestAddress =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedReflectionSelfGuestAddress;
+		}
+		else if (bVector)
+		{
+			Import.PreparedTarget.SelfF32TripleGuestVector =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedReflectionSelfF32TripleGuestVector;
+		}
+		else
+		{
+			Import.PreparedTarget.StableObjectRoundtrip =
+				&FAvidScriptWasmRuntimeInstance::
+					InvokePreparedReflectionStableObjectRoundtrip;
+		}
 		PreparedReflectionHostCalls.Add(MoveTemp(Call));
 	}
 	return true;
@@ -3216,6 +3258,123 @@ FAvidScriptWasmRuntimeInstance::DispatchPreparedSelfI32Pair(
 		Call.I32PairCall(*Receiver, Left, Right, OutValue));
 }
 
+bool
+FAvidScriptWasmRuntimeInstance::ResolvePreparedReflectionCallMode(
+	FAvidScriptPreparedReflectionHostCall& Call,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	UObject*& OutReceiver,
+	bool& bOutUseNative,
+	EAvidScriptBindingInvocationMode& OutMode,
+	bool& bOutAdaptiveGuardRejected)
+{
+	OutReceiver = nullptr;
+	bOutUseNative = false;
+	bOutAdaptiveGuardRejected = false;
+	OutMode = EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	if (!Call.Package.IsValid()
+		|| !TryResolveFusedCallbackReceiver(
+			SelfSlot,
+			SelfGeneration,
+			OutReceiver)
+		|| OutReceiver == nullptr)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			TEXT("The prepared reflection receiver or call cell is unavailable."));
+		return false;
+	}
+
+	const bool bAdaptiveRequested =
+		BindingInvocationContext.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic
+		&& Call.Binding.bAdaptiveNativeEligible;
+	const bool bQualifiedRequested =
+		BindingInvocationContext.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect
+		&& Call.Binding.bQualifiedNativeEligible;
+	if (bAdaptiveRequested || bQualifiedRequested)
+	{
+		FAvidScriptFusedCallbackFrame& Frame =
+			FusedCallbackFrameStack.Last();
+		if (Frame.PreparedReflectionGuardIdentity
+			!= Call.Binding.ImmutablePlanIdentity)
+		{
+			Frame.PreparedReflectionGuardIdentity =
+				Call.Binding.ImmutablePlanIdentity;
+			Frame.bPreparedReflectionNativeGuardAllowed =
+				Call.Binding.NativeGuard != nullptr
+				&& Call.Binding.NativeGuard(
+					Call.Binding.ImmutablePlanIdentity,
+					*OutReceiver);
+		}
+		bOutUseNative = Frame.bPreparedReflectionNativeGuardAllowed;
+		bOutAdaptiveGuardRejected =
+			bAdaptiveRequested && !bOutUseNative;
+		if (bQualifiedRequested && !bOutUseNative)
+		{
+			SetPendingHostImportFailure(
+				Call.Binding.TypedHostImport.ModuleName,
+				Call.Binding.TypedHostImport.ImportName,
+				TEXT("The qualified prepared reflection native guard rejected the receiver."));
+			return false;
+		}
+		if (bOutUseNative)
+		{
+			OutMode = bQualifiedRequested
+				? EAvidScriptBindingInvocationMode::QualifiedNativeDirect
+				: EAvidScriptBindingInvocationMode::AdaptivePreparedNative;
+		}
+	}
+	if (!bOutUseNative && !OutReceiver->IsA(Call.Binding.ExpectedClass))
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			TEXT("The prepared reflection receiver is incompatible with the call cell."));
+		return false;
+	}
+	return true;
+}
+
+void FAvidScriptWasmRuntimeInstance::RecordPreparedReflectionInvocation(
+	const EAvidScriptBindingInvocationMode Mode,
+	const bool bAdaptiveGuardRejected)
+{
+	FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+		BindingInvocationContext.InvocationInstrumentation;
+	if (Instrumentation == nullptr)
+	{
+		return;
+	}
+	if (Mode == EAvidScriptBindingInvocationMode::AdaptivePreparedNative)
+	{
+		++Instrumentation->AdaptivePreparedNativeHitCount;
+		return;
+	}
+	if (Mode == EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
+	{
+		++Instrumentation->QualifiedNativeDirectCount;
+		return;
+	}
+	++Instrumentation->SemanticProcessEventCount;
+	if (BindingInvocationContext.InvocationPolicy
+		== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic)
+	{
+		++Instrumentation->AdaptiveProcessEventFallbackCount;
+		if (bAdaptiveGuardRejected)
+		{
+			++Instrumentation->AdaptiveGuardRejectCount;
+		}
+	}
+	else if (BindingInvocationContext.InvocationPolicy
+		== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect)
+	{
+		++Instrumentation->RequestedNativeDirectFallbackCount;
+	}
+}
+
 EAvidScriptVmTypedHostStatus
 FAvidScriptWasmRuntimeInstance::
 	InvokePreparedReflectionSelfI32PairGuestResult(
@@ -3259,14 +3418,7 @@ FAvidScriptWasmRuntimeInstance::
 {
 	++HostImportCallCount;
 	OutStatus = 0;
-	UObject* Receiver = nullptr;
-	if (!Call.Package.IsValid()
-		|| GuestAddress < 0
-		|| !TryResolveFusedCallbackReceiver(
-			SelfSlot,
-			SelfGeneration,
-			Receiver)
-		|| Receiver == nullptr)
+	if (GuestAddress < 0)
 	{
 		SetPendingHostImportFailure(
 			Call.Binding.TypedHostImport.ModuleName,
@@ -3275,15 +3427,32 @@ FAvidScriptWasmRuntimeInstance::
 		return EAvidScriptVmTypedHostStatus::Rejected;
 	}
 
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	UObject* Receiver = nullptr;
+	if (!ResolvePreparedReflectionCallMode(
+			Call,
+			SelfSlot,
+			SelfGeneration,
+			Receiver,
+			bUseNative,
+			ActualMode,
+			bAdaptiveGuardRejected))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
 	int32 ReturnValue = 0;
 	FString ErrorCategory;
 	FString ErrorDetails;
-	if (!Call.Package->InvokePreparedReflectionI32Pair(
-			Call.Binding,
+	if (!Call.Binding.I32PairCall(
+			Call.Binding.ImmutablePlanIdentity,
 			*Receiver,
 			Left,
 			Right,
-			BindingInvocationContext,
+			bUseNative,
 			ReturnValue,
 			ErrorCategory,
 			ErrorDetails))
@@ -3318,6 +3487,469 @@ FAvidScriptWasmRuntimeInstance::
 	}
 
 	OutStatus = 1;
+	RecordPreparedReflectionInvocation(
+		ActualMode,
+		bAdaptiveGuardRejected);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	InvokePreparedReflectionSelfGuestAddress(
+		void* Context,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 GuestAddressOrValue,
+		int32& OutStatus)
+{
+	FAvidScriptPreparedReflectionHostCall* Call =
+		static_cast<FAvidScriptPreparedReflectionHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutStatus = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->DispatchPreparedReflectionSelfGuestAddress(
+		*Call,
+		SelfSlot,
+		SelfGeneration,
+		GuestAddressOrValue,
+		OutStatus);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	DispatchPreparedReflectionSelfGuestAddress(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 GuestAddressOrValue,
+		int32& OutStatus)
+{
+	++HostImportCallCount;
+	OutStatus = 0;
+	const auto Reject = [this, &Call](const FString& Details)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			Details);
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	};
+
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	UObject* Receiver = nullptr;
+	if (!ResolvePreparedReflectionCallMode(
+			Call,
+			SelfSlot,
+			SelfGeneration,
+			Receiver,
+			bUseNative,
+			ActualMode,
+			bAdaptiveGuardRejected))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	TArrayView<uint8> OutputBytes;
+	FString MemoryError;
+	if (!Call.Binding.bPropertyWrite
+		&& (GuestAddressOrValue < 0
+			|| GuestMemory == nullptr
+			|| !GuestMemory->BorrowMutableBytes(
+				static_cast<uint32>(GuestAddressOrValue),
+				sizeof(int32),
+				alignof(int32),
+				OutputBytes,
+				MemoryError)))
+	{
+		return Reject(
+			MemoryError.IsEmpty()
+				? FString(TEXT("The prepared reflection property output buffer is unavailable."))
+				: MoveTemp(MemoryError));
+	}
+
+	if (Call.Binding.bRequiresWriteAccess
+		&& BindingInvocationContext.WritePolicy
+			!= EAvidScriptActorWritePolicy::AllowWrites)
+	{
+		return Reject(
+			TEXT("binding_write_denied: The reflected property requires an explicitly writable host context."));
+	}
+	if (Call.Binding.bPropertyWrite
+		&& BindingInvocationContext.HostEffectJournal != nullptr)
+	{
+		if (BindingInvocationContext.ObjectRegistry == nullptr
+			|| Call.Binding.ReloadEffect
+				!= EAvidScriptBindingReloadEffect::ReflectedProperty
+			|| Call.Binding.ReflectedProperty == nullptr)
+		{
+			return Reject(
+				TEXT("binding_reload_effect_unsupported: The prepared property write has no reversible journal adapter."));
+		}
+		FAvidScriptBindingHostEffectPrepareResult PrepareResult;
+		const FAvidScriptObjectHandle ReceiverHandle{
+			static_cast<uint32>(SelfSlot),
+			static_cast<uint32>(SelfGeneration)
+		};
+		if (!BindingInvocationContext.HostEffectJournal->
+				PrepareReflectedProperty(
+					*BindingInvocationContext.ObjectRegistry,
+					ReceiverHandle,
+					*Receiver,
+					*Call.Binding.ReflectedProperty,
+					PrepareResult))
+		{
+			const FString Category = PrepareResult.ErrorCategory.IsEmpty()
+				? FString(TEXT("binding_host_effect_prepare_failed"))
+				: PrepareResult.ErrorCategory;
+			const FString Details = PrepareResult.ErrorDetails.IsEmpty()
+				? FString(TEXT("The prepared property write could not be journaled."))
+				: PrepareResult.ErrorDetails;
+			return Reject(Category + TEXT(": ") + Details);
+		}
+	}
+
+	if (Call.Binding.bPropertyWrite)
+	{
+		if (Call.Binding.PropertyI32Set == nullptr
+			|| !Call.Binding.PropertyI32Set(
+				Call.Binding.ImmutablePlanIdentity,
+				*Receiver,
+				GuestAddressOrValue))
+		{
+			return Reject(
+				TEXT("binding_property_write_failed: The prepared property call cell rejected the write."));
+		}
+	}
+	else
+	{
+		int32 Value = 0;
+		if (Call.Binding.PropertyI32Get == nullptr
+			|| !Call.Binding.PropertyI32Get(
+				Call.Binding.ImmutablePlanIdentity,
+				*Receiver,
+				Value))
+		{
+			return Reject(
+				TEXT("binding_property_read_failed: The prepared property call cell rejected the read."));
+		}
+		StoreAvidScriptLittleEndianU32(
+			OutputBytes,
+			0,
+			static_cast<uint32>(Value));
+	}
+
+	OutStatus = 1;
+	RecordPreparedReflectionInvocation(
+		ActualMode,
+		bAdaptiveGuardRejected);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	InvokePreparedReflectionSelfF32TripleGuestVector(
+		void* Context,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const float X,
+		const float Y,
+		const float Z,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	FAvidScriptPreparedReflectionHostCall* Call =
+		static_cast<FAvidScriptPreparedReflectionHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutStatus = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->
+		DispatchPreparedReflectionSelfF32TripleGuestVector(
+			*Call,
+			SelfSlot,
+			SelfGeneration,
+			X,
+			Y,
+			Z,
+			GuestAddress,
+			OutStatus);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	DispatchPreparedReflectionSelfF32TripleGuestVector(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const float X,
+		const float Y,
+		const float Z,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	++HostImportCallCount;
+	OutStatus = 0;
+	const auto Reject = [this, &Call](const FString& Details)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			Details);
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	};
+	if (GuestAddress < 0
+		|| !FMath::IsFinite(X)
+		|| !FMath::IsFinite(Y)
+		|| !FMath::IsFinite(Z))
+	{
+		return Reject(
+			TEXT("The prepared reflection vector input or output address is invalid."));
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	TArrayView<uint8> OutputBytes;
+	FString MemoryError;
+	if (GuestMemory == nullptr
+		|| !GuestMemory->BorrowMutableBytes(
+			static_cast<uint32>(GuestAddress),
+			3 * sizeof(float),
+			alignof(float),
+			OutputBytes,
+			MemoryError))
+	{
+		return Reject(
+			MemoryError.IsEmpty()
+				? FString(TEXT("The prepared reflection vector output buffer is unavailable."))
+				: MoveTemp(MemoryError));
+	}
+
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	UObject* Receiver = nullptr;
+	if (!ResolvePreparedReflectionCallMode(
+			Call,
+			SelfSlot,
+			SelfGeneration,
+			Receiver,
+			bUseNative,
+			ActualMode,
+			bAdaptiveGuardRejected))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	FVector ReturnValue = FVector::ZeroVector;
+	FString ErrorCategory;
+	FString ErrorDetails;
+	if (Call.Binding.VectorCall == nullptr
+		|| !Call.Binding.VectorCall(
+			Call.Binding.ImmutablePlanIdentity,
+			*Receiver,
+			FVector(
+				static_cast<double>(X),
+				static_cast<double>(Y),
+				static_cast<double>(Z)),
+			bUseNative,
+			ReturnValue,
+			ErrorCategory,
+			ErrorDetails))
+	{
+		return Reject(
+			ErrorCategory.IsEmpty()
+				? ErrorDetails
+				: ErrorCategory + TEXT(": ") + ErrorDetails);
+	}
+
+	StoreAvidScriptLittleEndianF32(
+		OutputBytes,
+		0,
+		static_cast<float>(ReturnValue.X));
+	StoreAvidScriptLittleEndianF32(
+		OutputBytes,
+		4,
+		static_cast<float>(ReturnValue.Y));
+	StoreAvidScriptLittleEndianF32(
+		OutputBytes,
+		8,
+		static_cast<float>(ReturnValue.Z));
+	OutStatus = 1;
+	RecordPreparedReflectionInvocation(
+		ActualMode,
+		bAdaptiveGuardRejected);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	InvokePreparedReflectionStableObjectRoundtrip(
+		void* Context,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 ObjectSlot,
+		const int32 ObjectGeneration,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	FAvidScriptPreparedReflectionHostCall* Call =
+		static_cast<FAvidScriptPreparedReflectionHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutStatus = 0;
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	return Call->Runtime->
+		DispatchPreparedReflectionStableObjectRoundtrip(
+			*Call,
+			SelfSlot,
+			SelfGeneration,
+			ObjectSlot,
+			ObjectGeneration,
+			GuestAddress,
+			OutStatus);
+}
+
+EAvidScriptVmTypedHostStatus
+FAvidScriptWasmRuntimeInstance::
+	DispatchPreparedReflectionStableObjectRoundtrip(
+		FAvidScriptPreparedReflectionHostCall& Call,
+		const int32 SelfSlot,
+		const int32 SelfGeneration,
+		const int32 ObjectSlot,
+		const int32 ObjectGeneration,
+		const int32 GuestAddress,
+		int32& OutStatus)
+{
+	++HostImportCallCount;
+	OutStatus = 0;
+	const auto Reject = [this, &Call](const FString& Details)
+	{
+		SetPendingHostImportFailure(
+			Call.Binding.TypedHostImport.ModuleName,
+			Call.Binding.TypedHostImport.ImportName,
+			Details);
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	};
+	if (GuestAddress < 0)
+	{
+		return Reject(
+			TEXT("The prepared reflection object output address is invalid."));
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	TArrayView<uint8> OutputBytes;
+	FString MemoryError;
+	if (GuestMemory == nullptr
+		|| !GuestMemory->BorrowMutableBytes(
+			static_cast<uint32>(GuestAddress),
+			2 * sizeof(uint32),
+			alignof(uint32),
+			OutputBytes,
+			MemoryError))
+	{
+		return Reject(
+			MemoryError.IsEmpty()
+				? FString(TEXT("The prepared reflection object output buffer is unavailable."))
+				: MoveTemp(MemoryError));
+	}
+
+	bool bUseNative = false;
+	bool bAdaptiveGuardRejected = false;
+	EAvidScriptBindingInvocationMode ActualMode =
+		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
+	UObject* Receiver = nullptr;
+	if (!ResolvePreparedReflectionCallMode(
+			Call,
+			SelfSlot,
+			SelfGeneration,
+			Receiver,
+			bUseNative,
+			ActualMode,
+			bAdaptiveGuardRejected))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+
+	UObject* InputObject = nullptr;
+	if (ObjectSlot != 0 || ObjectGeneration != 0)
+	{
+		InputObject = ResolveStableBorrow(
+			ObjectSlot,
+			ObjectGeneration,
+			Call.Binding.ExpectedObjectClass);
+		if (InputObject == nullptr)
+		{
+			return Reject(
+				TEXT("The prepared reflection input object capability is invalid."));
+		}
+	}
+
+	UObject* OutputObject = nullptr;
+	FString ErrorCategory;
+	FString ErrorDetails;
+	if (Call.Binding.ObjectCall == nullptr
+		|| !Call.Binding.ObjectCall(
+			Call.Binding.ImmutablePlanIdentity,
+			*Receiver,
+			InputObject,
+			bUseNative,
+			OutputObject,
+			ErrorCategory,
+			ErrorDetails))
+	{
+		return Reject(
+			ErrorCategory.IsEmpty()
+				? ErrorDetails
+				: ErrorCategory + TEXT(": ") + ErrorDetails);
+	}
+
+	FAvidScriptObjectHandle OutputHandle;
+	if (OutputObject != nullptr)
+	{
+		if (BindingInvocationContext.ObjectRegistry == nullptr
+			|| BindingInvocationContext.ObjectOwnership == nullptr)
+		{
+			return Reject(
+				TEXT("The prepared reflection object result requires registry and ownership services."));
+		}
+		FAvidScriptObjectHandleResult BorrowResult;
+		if (!BindingInvocationContext.ObjectOwnership->Borrow(
+				*BindingInvocationContext.ObjectRegistry,
+				*OutputObject,
+				BorrowResult)
+			|| !BorrowResult.Handle.IsValid())
+		{
+			return Reject(
+				BorrowResult.ErrorMessage.IsEmpty()
+					? FString(TEXT("The prepared reflection object result could not be borrowed."))
+					: BorrowResult.ErrorMessage);
+		}
+		OutputHandle = BorrowResult.Handle;
+	}
+
+	StoreAvidScriptLittleEndianU32(
+		OutputBytes,
+		0,
+		OutputHandle.Slot);
+	StoreAvidScriptLittleEndianU32(
+		OutputBytes,
+		4,
+		OutputHandle.Generation);
+	OutStatus = 1;
+	RecordPreparedReflectionInvocation(
+		ActualMode,
+		bAdaptiveGuardRejected);
 	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 

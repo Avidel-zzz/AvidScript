@@ -28,6 +28,12 @@ typedef struct AvidScriptWasmtimeSelfI32PairGuestResultBridge
 	void* environment;
 } AvidScriptWasmtimeSelfI32PairGuestResultBridge;
 
+typedef struct AvidScriptWasmtimeSelfF32TripleGuestVectorBridge
+{
+	AvidScriptWasmtimeSelfF32TripleGuestVectorCallback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfF32TripleGuestVectorBridge;
+
 typedef struct AvidScriptWasmtimeSelfPropertyI32GetBridge
 {
 	AvidScriptWasmtimeSelfPropertyI32GetCallback callback;
@@ -151,6 +157,34 @@ static wasm_trap_t* avidscript_wasmtime_self_i32_pair_guest_result_trampoline(
 			args_and_results[2].i32,
 			args_and_results[3].i32,
 			args_and_results[4].i32,
+			&status) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i32 = status;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_self_f32_triple_guest_vector_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfF32TripleGuestVectorBridge* bridge =
+		(AvidScriptWasmtimeSelfF32TripleGuestVectorBridge*)environment;
+	int32_t status = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 6)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i32,
+			args_and_results[1].i32,
+			args_and_results[2].f32,
+			args_and_results[3].f32,
+			args_and_results[4].f32,
+			args_and_results[5].i32,
 			&status) != 0)
 		return avidscript_wasmtime_typed_host_failed();
 	args_and_results[0].i32 = status;
@@ -397,6 +431,63 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_i32_pair_guest
 		avidscript_wasmtime_self_i32_pair_guest_result_trampoline,
 		bridge,
 		"Could not allocate the typed self-i32-pair guest-result function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_f32_triple_guest_vector(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfF32TripleGuestVectorCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfF32TripleGuestVectorBridge* bridge =
+		(AvidScriptWasmtimeSelfF32TripleGuestVectorBridge*)calloc(
+			1,
+			sizeof(*bridge));
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-f32-triple guest-vector bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	wasm_valtype_vec_new_uninitialized(&parameters, 6);
+	parameters.data[0] = wasm_valtype_new_i32();
+	parameters.data[1] = wasm_valtype_new_i32();
+	parameters.data[2] = wasm_valtype_new_f32();
+	parameters.data[3] = wasm_valtype_new_f32();
+	parameters.data[4] = wasm_valtype_new_f32();
+	parameters.data[5] = wasm_valtype_new_i32();
+	wasm_valtype_vec_new_uninitialized(&results, 1);
+	results.data[0] = wasm_valtype_new_i32();
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-f32-triple guest-vector function type.");
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		avidscript_wasmtime_self_f32_triple_guest_vector_trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
 }
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get(

@@ -28,6 +28,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -179,6 +180,103 @@ TArray<uint8> BuildAvidScriptPropertyBenchmarkModule(
 	TArray<uint8> Code;
 	AppendAvidScriptPropertyBenchmarkU32Leb(Code, 2);
 	AppendAvidScriptPropertyBenchmarkU32Leb(Code, BeginPlayBody.Num());
+	Code.Append(BeginPlayBody);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Code, TickBody.Num());
+	Code.Append(TickBody);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 10, Code);
+	return Module;
+}
+
+TArray<uint8> BuildAvidScriptPreparedI32PropertyModule(
+	const FAvidScriptBindingHostImportModel& GetterImport,
+	const FAvidScriptBindingHostImportModel& SetterImport,
+	const FAvidScriptObjectHandle& OwnerHandle)
+{
+	TArray<uint8> Module = {
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
+	};
+	TArray<uint8> Types;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Types, 3);
+	Types.Append({
+		0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
+		0x60, 0x00, 0x00,
+		0x60, 0x01, 0x7d, 0x00
+	});
+	AppendAvidScriptPropertyBenchmarkSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Imports, 2);
+	AppendAvidScriptPropertyBenchmarkString(Imports, GetterImport.Module);
+	AppendAvidScriptPropertyBenchmarkString(Imports, GetterImport.Name);
+	Imports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Imports, 0);
+	AppendAvidScriptPropertyBenchmarkString(Imports, SetterImport.Module);
+	AppendAvidScriptPropertyBenchmarkString(Imports, SetterImport.Name);
+	Imports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Imports, 0);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 2);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 1);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Functions, 2);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 3, Functions);
+
+	TArray<uint8> Memory = { 0x01, 0x00, 0x01 };
+	AppendAvidScriptPropertyBenchmarkSection(Module, 5, Memory);
+
+	TArray<uint8> Exports;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 3);
+	AppendAvidScriptPropertyBenchmarkString(Exports, TEXT("memory"));
+	Exports.Add(0x02);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 0);
+	AppendAvidScriptPropertyBenchmarkString(
+		Exports,
+		TEXT("avid_on_begin_play"));
+	Exports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 2);
+	AppendAvidScriptPropertyBenchmarkString(Exports, TEXT("avid_on_tick"));
+	Exports.Add(0x00);
+	AppendAvidScriptPropertyBenchmarkU32Leb(Exports, 3);
+	AppendAvidScriptPropertyBenchmarkSection(Module, 7, Exports);
+
+	const auto AppendOwner = [&OwnerHandle](TArray<uint8>& Body)
+	{
+		Body.Add(0x41);
+		AppendAvidScriptPropertyBenchmarkI32Leb(
+			Body,
+			static_cast<int32>(OwnerHandle.Slot));
+		Body.Add(0x41);
+		AppendAvidScriptPropertyBenchmarkI32Leb(
+			Body,
+			static_cast<int32>(OwnerHandle.Generation));
+	};
+	TArray<uint8> BeginPlayBody;
+	AppendAvidScriptPropertyBenchmarkU32Leb(BeginPlayBody, 0);
+	AppendOwner(BeginPlayBody);
+	BeginPlayBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(BeginPlayBody, 41);
+	BeginPlayBody.Append({ 0x10, 0x01, 0x1a, 0x0b });
+
+	TArray<uint8> TickBody;
+	AppendAvidScriptPropertyBenchmarkU32Leb(TickBody, 0);
+	AppendOwner(TickBody);
+	TickBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 32);
+	TickBody.Append({ 0x10, 0x00, 0x1a });
+	AppendOwner(TickBody);
+	TickBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 32);
+	TickBody.Append({ 0x28, 0x02, 0x00 });
+	TickBody.Add(0x41);
+	AppendAvidScriptPropertyBenchmarkI32Leb(TickBody, 1);
+	TickBody.Append({ 0x6a, 0x10, 0x01, 0x1a, 0x0b });
+
+	TArray<uint8> Code;
+	AppendAvidScriptPropertyBenchmarkU32Leb(Code, 2);
+	AppendAvidScriptPropertyBenchmarkU32Leb(
+		Code,
+		BeginPlayBody.Num());
 	Code.Append(BeginPlayBody);
 	AppendAvidScriptPropertyBenchmarkU32Leb(Code, TickBody.Num());
 	Code.Append(TickBody);
@@ -5007,6 +5105,405 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		TEXT("Direct authorization for Actor functions accepts bypassing "
 			"AActor::ProcessEvent S3 guards; equal observable returns here "
 			"do not claim full semantic equivalence."));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPreparedReflectionBroadShapeTest,
+	"AvidScript.Editor.BindingRuntime.PreparedReflectionBroadShape",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPreparedReflectionBroadShapeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestClassPath =
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsTestObject");
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName =
+		TEXT("avidscript.test.prepared_reflection_broad_shape");
+	FAvidScriptReflectedClassSelection ClassSelection;
+	ClassSelection.OwnerClassPath = TestClassPath;
+	ClassSelection.IncludeFunctions = {
+		TEXT("FastPathVectorValue"),
+		TEXT("FastPathObjectRoundtrip")
+	};
+	ClassSelection.NativeDirectFunctions =
+		ClassSelection.IncludeFunctions;
+	Profile.Classes.Add(MoveTemp(ClassSelection));
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Broad prepared reflection descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Broad prepared reflection descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Broad prepared reflection package loads"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(
+			LoadResult.ErrorCategory
+			+ TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	TArray<FAvidScriptPreparedReflectionBinding> PreparedBindings;
+	FString PreparedError;
+	if (!TestTrue(
+			TEXT("Broad package publishes prepared reflection call cells"),
+			Package->BuildPreparedReflectionBindings(
+				PreparedBindings,
+				PreparedError)))
+	{
+		AddError(PreparedError);
+		return false;
+	}
+	if (!TestEqual(
+			TEXT("Broad package publishes vector and object call cells"),
+			PreparedBindings.Num(),
+			2))
+	{
+		return false;
+	}
+
+	const auto FindModel = [&Descriptor](const TCHAR* FunctionName)
+	{
+		return Descriptor.Bindings.FindByPredicate(
+			[FunctionName](
+				const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeFunction == FunctionName;
+			});
+	};
+	const FAvidScriptBindingFunctionModel* VectorModel =
+		FindModel(TEXT("FastPathVectorValue"));
+	const FAvidScriptBindingFunctionModel* ObjectModel =
+		FindModel(TEXT("FastPathObjectRoundtrip"));
+	if (!TestNotNull(TEXT("Vector binding model is present"), VectorModel)
+		|| !TestNotNull(TEXT("Object binding model is present"), ObjectModel))
+	{
+		return false;
+	}
+	const auto FindPrepared = [&PreparedBindings](const int32 Ordinal)
+	{
+		return PreparedBindings.FindByPredicate(
+			[Ordinal](const FAvidScriptPreparedReflectionBinding& Binding)
+			{
+				return Binding.BindingOrdinal
+					== static_cast<uint32>(Ordinal);
+			});
+	};
+	const FAvidScriptPreparedReflectionBinding* VectorBinding =
+		FindPrepared(VectorModel->Ordinal);
+	const FAvidScriptPreparedReflectionBinding* ObjectBinding =
+		FindPrepared(ObjectModel->Ordinal);
+	if (!TestNotNull(TEXT("Prepared vector call cell is present"), VectorBinding)
+		|| !TestNotNull(TEXT("Prepared object call cell is present"), ObjectBinding))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Vector call cell uses expanded-f32 semantic ABI"),
+		VectorBinding->TypedHostImport.Shape,
+		EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector);
+	TestEqual(
+		TEXT("Object call cell uses stable object ABI"),
+		ObjectBinding->TypedHostImport.Shape,
+		EAvidScriptVmTypedHostShape::StableObjectRoundtrip);
+	TestNotNull(TEXT("Vector call cell has a direct target"), VectorBinding->VectorCall);
+	TestNotNull(TEXT("Object call cell has a direct target"), ObjectBinding->ObjectCall);
+
+	UClass* TestClass = LoadObject<UClass>(nullptr, *TestClassPath);
+	UObject* Target = TestClass == nullptr
+		? nullptr
+		: NewObject<UObject>(GetTransientPackage(), TestClass);
+	if (!TestNotNull(TEXT("Broad prepared target is created"), Target))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Vector native guard accepts the exact reflected class"),
+		VectorBinding->NativeGuard != nullptr
+			&& VectorBinding->NativeGuard(
+				VectorBinding->ImmutablePlanIdentity,
+				*Target));
+	TestTrue(
+		TEXT("Object native guard accepts the exact reflected class"),
+		ObjectBinding->NativeGuard != nullptr
+			&& ObjectBinding->NativeGuard(
+				ObjectBinding->ImmutablePlanIdentity,
+				*Target));
+
+	FString ErrorCategory;
+	FString ErrorDetails;
+	FVector SemanticVector = FVector::ZeroVector;
+	FVector NativeVector = FVector::ZeroVector;
+	TestTrue(
+		TEXT("Prepared vector ProcessEvent entry succeeds"),
+		VectorBinding->VectorCall(
+			VectorBinding->ImmutablePlanIdentity,
+			*Target,
+			FVector(1.0, 2.0, 3.0),
+			false,
+			SemanticVector,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(
+		TEXT("Prepared vector native entry succeeds"),
+		VectorBinding->VectorCall(
+			VectorBinding->ImmutablePlanIdentity,
+			*Target,
+			FVector(1.0, 2.0, 3.0),
+			true,
+			NativeVector,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(
+		TEXT("Prepared vector entries preserve the reflected result"),
+		SemanticVector.Equals(FVector(3.0, 5.0, 7.0))
+			&& NativeVector.Equals(SemanticVector));
+
+	UObject* InputObject = NewObject<UObject>();
+	UObject* SemanticObject = nullptr;
+	UObject* NativeObject = nullptr;
+	TestTrue(
+		TEXT("Prepared object ProcessEvent entry succeeds"),
+		ObjectBinding->ObjectCall(
+			ObjectBinding->ImmutablePlanIdentity,
+			*Target,
+			InputObject,
+			false,
+			SemanticObject,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(
+		TEXT("Prepared object native entry succeeds"),
+		ObjectBinding->ObjectCall(
+			ObjectBinding->ImmutablePlanIdentity,
+			*Target,
+			InputObject,
+			true,
+			NativeObject,
+			ErrorCategory,
+			ErrorDetails));
+	TestTrue(
+		TEXT("Prepared object entries preserve stable identity"),
+		SemanticObject == InputObject && NativeObject == InputObject);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorPreparedReflectionPropertyRuntimeTest,
+	"AvidScript.Editor.BindingRuntime.PreparedReflectionPropertyRuntime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestClassPath =
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsTestObject");
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ TestClassPath, TEXT("FastPathInt32Property"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Prepared int32 property descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::
+				GenerateWithReadableProperties(
+					TEXT("avidscript.test.prepared_reflection_property"),
+					{},
+					Properties,
+					DescriptorJson,
+					GenerateResult)))
+	{
+		AddError(
+			GenerateResult.ErrorCategory
+			+ TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Prepared int32 property descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const FAvidScriptBindingFunctionModel* Getter =
+		Descriptor.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.BindingKind == TEXT("property_get");
+			});
+	const FAvidScriptBindingFunctionModel* Setter =
+		Descriptor.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.BindingKind == TEXT("property_set");
+			});
+	if (!TestNotNull(TEXT("Prepared int32 getter resolves"), Getter)
+		|| !TestNotNull(TEXT("Prepared int32 setter resolves"), Setter))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Prepared int32 getter freezes the combined property ABI"),
+		Getter->HostImport.Signature,
+		FString(TEXT("(iii)i")));
+	TestEqual(
+		TEXT("Prepared int32 setter freezes the combined property ABI"),
+		Setter->HostImport.Signature,
+		FString(TEXT("(iii)i")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Prepared int32 property package loads"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(
+			LoadResult.ErrorCategory
+			+ TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UClass* TestClass = LoadObject<UClass>(nullptr, *TestClassPath);
+	TStrongObjectPtr<UObject> Target(
+		TestClass == nullptr
+			? nullptr
+			: NewObject<UObject>(GetTransientPackage(), TestClass));
+	FIntProperty* Property = TestClass == nullptr
+		? nullptr
+		: FindFProperty<FIntProperty>(
+			TestClass,
+			FName(TEXT("FastPathInt32Property")));
+	if (!TestNotNull(TEXT("Prepared property target is created"), Target.Get())
+		|| !TestNotNull(TEXT("Prepared int32 property resolves"), Property))
+	{
+		return false;
+	}
+	Property->SetPropertyValue_InContainer(Target.Get(), 0);
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle Handle = Registry.RegisterObject(
+		Target.Get(),
+		RegisterResult,
+		false);
+	if (!TestTrue(
+			TEXT("Prepared property target registers"),
+			RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptBindingInvocationInstrumentation Instrumentation;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &Registry;
+	HostContext.OwnerHandle = Handle;
+	HostContext.ActorWritePolicy =
+		EAvidScriptActorWritePolicy::AllowWrites;
+	HostContext.BindingInvocationPolicy =
+		EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
+	HostContext.BindingInvocationInstrumentation = &Instrumentation;
+
+	const TArray<uint8> Bytecode =
+		BuildAvidScriptPreparedI32PropertyModule(
+			Getter->HostImport,
+			Setter->HostImport,
+			Handle);
+	FAvidScriptVmBackendSelection BackendSelection;
+	BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	BackendSelection.ArtifactFormat =
+		EAvidScriptVmArtifactFormat::WasmBytecode;
+	BackendSelection.bAllowFallback = false;
+	FAvidScriptWasmRuntimeInstance Runtime(BackendSelection);
+	Runtime.SetHostContext(HostContext);
+	FAvidScriptWasmSmokeResult Result;
+	if (!TestTrue(
+			TEXT("Prepared property WASM module loads"),
+			Runtime.LoadModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				TEXT("prepared_reflection_property_runtime"),
+				Package,
+				Result)))
+	{
+		AddError(Result.ErrorCategory + TEXT(": ") + Result.ErrorMessage);
+		return false;
+	}
+	const TArray<FAvidScriptVmTypedHostImport>& PreparedImports =
+		Runtime.GetPreparedTypedHostImportsForTesting();
+	TestEqual(
+		TEXT("Runtime publishes both prepared property call cells"),
+		PreparedImports.Num(),
+		2);
+	TestTrue(
+		TEXT("BeginPlay executes the prepared property setter"),
+		Runtime.BeginPlay(Result));
+	TestEqual(
+		TEXT("Prepared setter writes the reflected property"),
+		Property->GetPropertyValue_InContainer(Target.Get()),
+		41);
+	TestTrue(
+		TEXT("Tick executes prepared property getter and setter"),
+		Runtime.Tick(0.016f, Result));
+	TestEqual(
+		TEXT("Prepared getter guest layout feeds the next property write"),
+		Property->GetPropertyValue_InContainer(Target.Get()),
+		42);
+	TestEqual(
+		TEXT("Prepared property calls retain semantic instrumentation"),
+		Instrumentation.SemanticProcessEventCount,
+		3ull);
+	TestEqual(
+		TEXT("Adaptive property calls record strict semantic fallback"),
+		Instrumentation.AdaptiveProcessEventFallbackCount,
+		3ull);
+	Runtime.Unload();
 	return true;
 }
 

@@ -68,6 +68,18 @@ void AppendTypedI32Const(TArray<uint8>& Bytes, int32 Value)
 	AppendTypedI32Leb(Bytes, Value);
 }
 
+void AppendTypedF32Const(TArray<uint8>& Bytes, const float Value)
+{
+	Bytes.Add(0x43);
+	uint32 Bits = 0;
+	static_assert(sizeof(Bits) == sizeof(Value));
+	FMemory::Memcpy(&Bits, &Value, sizeof(Bits));
+	Bytes.Add(static_cast<uint8>(Bits));
+	Bytes.Add(static_cast<uint8>(Bits >> 8));
+	Bytes.Add(static_cast<uint8>(Bits >> 16));
+	Bytes.Add(static_cast<uint8>(Bits >> 24));
+}
+
 TArray<uint8> BuildTypedHostFixture(bool bPairImport, int32 Left = 0, int32 Right = 0)
 {
 	TArray<uint8> Module;
@@ -174,6 +186,71 @@ TArray<uint8> BuildTypedHostFixture(TConstArrayView<int32> Arguments)
 	{
 		AppendTypedI32Const(Body, Argument);
 	}
+	Body.Add(0x10);
+	AppendTypedU32Leb(Body, 0);
+	Body.Add(0x0b);
+	TArray<uint8> Code;
+	AppendTypedU32Leb(Code, 1);
+	AppendTypedU32Leb(Code, static_cast<uint32>(Body.Num()));
+	Code.Append(Body);
+	AppendTypedSection(Module, 10, Code);
+	return Module;
+}
+
+TArray<uint8> BuildTypedF32TripleGuestVectorFixture(
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const float X,
+	const float Y,
+	const float Z,
+	const int32 GuestAddress)
+{
+	TArray<uint8> Module;
+	const uint8 Header[] = {
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00
+	};
+	Module.Append(Header, UE_ARRAY_COUNT(Header));
+
+	TArray<uint8> Types;
+	AppendTypedU32Leb(Types, 2);
+	const uint8 ImportType[] = {
+		0x60, 0x06,
+		0x7f, 0x7f, 0x7d, 0x7d, 0x7d, 0x7f,
+		0x01, 0x7f
+	};
+	Types.Append(ImportType, UE_ARRAY_COUNT(ImportType));
+	const uint8 ExportType[] = { 0x60, 0x00, 0x01, 0x7f };
+	Types.Append(ExportType, UE_ARRAY_COUNT(ExportType));
+	AppendTypedSection(Module, 1, Types);
+
+	TArray<uint8> Imports;
+	AppendTypedU32Leb(Imports, 1);
+	AppendTypedString(Imports, "avidscript");
+	AppendTypedString(Imports, "avid_s1_1111111111111111");
+	Imports.Add(0x00);
+	AppendTypedU32Leb(Imports, 0);
+	AppendTypedSection(Module, 2, Imports);
+
+	TArray<uint8> Functions;
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedU32Leb(Functions, 1);
+	AppendTypedSection(Module, 3, Functions);
+
+	TArray<uint8> Exports;
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedString(Exports, "run");
+	Exports.Add(0x00);
+	AppendTypedU32Leb(Exports, 1);
+	AppendTypedSection(Module, 7, Exports);
+
+	TArray<uint8> Body;
+	Body.Add(0x00);
+	AppendTypedI32Const(Body, SelfSlot);
+	AppendTypedI32Const(Body, SelfGeneration);
+	AppendTypedF32Const(Body, X);
+	AppendTypedF32Const(Body, Y);
+	AppendTypedF32Const(Body, Z);
+	AppendTypedI32Const(Body, GuestAddress);
 	Body.Add(0x10);
 	AppendTypedU32Leb(Body, 0);
 	Body.Add(0x0b);
@@ -425,6 +502,46 @@ EAvidScriptVmTypedHostStatus InvokePreparedSelfGuestAddressForTest(
 	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 
+struct FPreparedSelfF32TripleGuestVectorContext
+{
+	int32 CallCount = 0;
+	int32 LastSelfSlot = 0;
+	int32 LastSelfGeneration = 0;
+	float LastX = 0.0f;
+	float LastY = 0.0f;
+	float LastZ = 0.0f;
+	int32 LastGuestAddress = 0;
+	int32 Status = 0;
+};
+
+EAvidScriptVmTypedHostStatus
+InvokePreparedSelfF32TripleGuestVectorForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const float X,
+	const float Y,
+	const float Z,
+	const int32 GuestAddress,
+	int32& OutStatus)
+{
+	FPreparedSelfF32TripleGuestVectorContext* Prepared =
+		static_cast<FPreparedSelfF32TripleGuestVectorContext*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastSelfSlot = SelfSlot;
+	Prepared->LastSelfGeneration = SelfGeneration;
+	Prepared->LastX = X;
+	Prepared->LastY = Y;
+	Prepared->LastZ = Z;
+	Prepared->LastGuestAddress = GuestAddress;
+	OutStatus = Prepared->Status;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 struct FPreparedStableObjectRoundtripContext
 {
 	int32 CallCount = 0;
@@ -571,6 +688,19 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("combined property rejects a stable-object target"),
 		PreparedStableTargetContract.IsBoundForShape(
 			EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet));
+	FPreparedSelfF32TripleGuestVectorContext PreparedVectorContractContext;
+	FAvidScriptVmPreparedTypedHostTarget PreparedVectorTargetContract;
+	PreparedVectorTargetContract.Context = &PreparedVectorContractContext;
+	PreparedVectorTargetContract.SelfF32TripleGuestVector =
+		&InvokePreparedSelfF32TripleGuestVectorForTest;
+	TestTrue(
+		TEXT("semantic FVector binds its expanded-f32 prepared target"),
+		PreparedVectorTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector));
+	TestFalse(
+		TEXT("packed FVector rejects the expanded-f32 prepared target"),
+		PreparedVectorTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfVectorValue));
 
 	FAvidScriptVmError Error;
 	TUniquePtr<IAvidScriptVmBackend> Backend = CreateTypedWasmtimeBackend(Error);
@@ -704,6 +834,74 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("prepared target bypasses the virtual dispatcher"),
 		PreparedFallbackDispatcher.SelfI32PairCalls,
 		0);
+
+	FAvidScriptVmError PreparedVectorError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedVectorBackend =
+		CreateTypedWasmtimeBackend(PreparedVectorError);
+	FPreparedSelfF32TripleGuestVectorContext PreparedVectorContext;
+	PreparedVectorContext.Status = 73;
+	FAvidScriptVmBindingPackage PreparedVectorPackage =
+		MakeTypedBindingPackage(TEXT("(iifffi)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedVectorImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfF32TripleToGuestVector,
+			TEXT("(iifffi)i"))
+	};
+	PreparedVectorImports[0].PreparedTarget.Context =
+		&PreparedVectorContext;
+	PreparedVectorImports[0].PreparedTarget.SelfF32TripleGuestVector =
+		&InvokePreparedSelfF32TripleGuestVectorForTest;
+	FAvidScriptVmLoadConfig PreparedVectorConfig;
+	PreparedVectorConfig.BindingPackage = &PreparedVectorPackage;
+	PreparedVectorConfig.TypedHostDispatcher =
+		&PreparedFallbackDispatcher;
+	PreparedVectorConfig.TypedHostImports = PreparedVectorImports;
+	TestTrue(
+		TEXT("expanded-f32 prepared FVector fixture loads"),
+		PreparedVectorBackend->Load(
+			BuildTypedF32TripleGuestVectorFixture(
+				2,
+				3,
+				1.25f,
+				-2.5f,
+				4.0f,
+				64),
+			TEXT("typed_prepared_f32_triple_vector"),
+			PreparedVectorConfig,
+			PreparedVectorError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedVectorBackend,
+		73,
+		PreparedVectorError);
+	TestEqual(
+		TEXT("expanded-f32 target is called exactly once"),
+		PreparedVectorContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("expanded-f32 target receives self slot"),
+		PreparedVectorContext.LastSelfSlot,
+		2);
+	TestEqual(
+		TEXT("expanded-f32 target receives self generation"),
+		PreparedVectorContext.LastSelfGeneration,
+		3);
+	TestEqual(
+		TEXT("expanded-f32 target receives X"),
+		PreparedVectorContext.LastX,
+		1.25f);
+	TestEqual(
+		TEXT("expanded-f32 target receives Y"),
+		PreparedVectorContext.LastY,
+		-2.5f);
+	TestEqual(
+		TEXT("expanded-f32 target receives Z"),
+		PreparedVectorContext.LastZ,
+		4.0f);
+	TestEqual(
+		TEXT("expanded-f32 target receives guest address"),
+		PreparedVectorContext.LastGuestAddress,
+		64);
 
 	auto VerifyPreparedSelfGuestAddressShape = [this, &SelfAddressArguments](
 		const EAvidScriptVmTypedHostShape Shape,
