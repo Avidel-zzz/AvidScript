@@ -429,9 +429,16 @@ $WasmtimeShimHeader = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptW
 $WasmtimeShimSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApi.c'
 $WasmtimeShimInternal = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeApiInternal.h'
 $WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp'
+$WasmtimeArtifactCompilerSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmArtifactCompiler.cpp'
+$WasmtimeRuntimeSupportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeRuntimeSupport.cpp'
+$WasmtimeCompilerProfileSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeCompilerProfile.cpp'
 if ($WasmtimeBackendSource.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256') -or
     $WasmtimeBackendSource.Contains('EnsureWasmtimeDllLoaded') -or
-    -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeRuntimeIdentity')) {
+    -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeCompilerProfile') -or
+    -not $WasmtimeArtifactCompilerSource.Contains('ResolveAvidScriptWasmtimeCompilerProfile') -or
+    -not $WasmtimeRuntimeSupportSource.Contains('FPlatformProcess::GetDllExport') -or
+    -not $WasmtimeRuntimeSupportSource.Contains('BuildAvidScriptWasmtimeCompilerIdentity') -or
+    -not $WasmtimeCompilerProfileSource.Contains('wasmtime-v%s+avidscript.1')) {
     Add-Violation 'Wasmtime backend must consume the shared runtime identity owner without duplicating DLL identity logic'
 }
 $StaticHostImportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmStaticHostImports.cpp'
