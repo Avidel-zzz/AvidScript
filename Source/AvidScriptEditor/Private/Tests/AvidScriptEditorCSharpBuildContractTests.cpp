@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptHash.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -218,14 +219,18 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 	TestEqual(TEXT("Unknown lookup category"),
 		UnknownLookupResult.ErrorCategory, FString(TEXT("report_contract_invalid")));
 
+	const uint8 MalformedWasmBytes[] = { 0, 97, 115, 109 };
+	const FString MalformedWasmSha256 =
+		FAvidScriptHash::Sha256Hex(MakeArrayView(MalformedWasmBytes));
 	const FString MalformedArtifactBody = FString::Printf(TEXT(
 		"$WasmPath = Join-Path $OutputRoot ($ArtifactStem + '.wasm')\n"
 		"[byte[]]$WasmBytes = @(0, 97, 115, 109)\n"
 		"[System.IO.File]::WriteAllBytes($WasmPath, $WasmBytes)\n"
-		"$Sha = (Get-FileHash -LiteralPath $WasmPath -Algorithm SHA256).Hash.ToLowerInvariant()\n"
+		"$Sha = '%s'\n"
 		"$ManifestJson = '{\"schema_version\":1,\"wasm\":{\"file\":\"' + $ArtifactStem + '.wasm\",\"sha256\":\"' + $Sha + '\"},\"execution\":{\"format\":\"stale\"}}'\n"
 		"[System.IO.File]::WriteAllText($ManifestPath, $ManifestJson)\n"
 		"[System.IO.File]::WriteAllText($ReportPath, '%s')"),
+		*MalformedWasmSha256,
 		*SuccessJson);
 
 	FAvidScriptEditorCSharpBuildConfig PreferConfig = MakeCSharpContractConfig(
@@ -241,11 +246,23 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 			TEXT("stale-precompiled-artifact"),
 			*PreferArtifactPath));
 	FAvidScriptEditorCSharpBuildResult PreferResult;
-	TestTrue(
-		TEXT("PreferPrecompiled keeps a valid canonical build on precompile failure"),
+	const bool bPreferBuildSucceeded =
 		FAvidScriptEditorCSharpBuildService::BuildProfile(
 			PreferConfig,
-			PreferResult));
+			PreferResult);
+	if (!bPreferBuildSucceeded)
+	{
+		AddInfo(FString::Printf(
+			TEXT("P57.8 PreferPrecompiled diagnostic | exit=%d | category=%s | message=%s | stdout=%s | stderr=%s"),
+			PreferResult.ProcessExitCode,
+			*PreferResult.ErrorCategory,
+			*PreferResult.ErrorMessage,
+			*PreferResult.Stdout,
+			*PreferResult.Stderr));
+	}
+	TestTrue(
+		TEXT("PreferPrecompiled keeps a valid canonical build on precompile failure"),
+		bPreferBuildSucceeded);
 	TestTrue(
 		TEXT("PreferPrecompiled fallback result succeeds"),
 		PreferResult.bSucceeded);
@@ -311,11 +328,25 @@ bool FAvidScriptEditorCSharpBuildSuccessContractTest::RunTest(const FString& Par
 			PreviousArtifact,
 			*RequireArtifactPath));
 	FAvidScriptEditorCSharpBuildResult RequireResult;
-	TestFalse(
-		TEXT("RequirePrecompiled fails when artifact compilation fails"),
+	const bool bRequireBuildSucceeded =
 		FAvidScriptEditorCSharpBuildService::BuildProfile(
 			RequireConfig,
-			RequireResult));
+			RequireResult);
+	if (bRequireBuildSucceeded
+		|| RequireResult.ErrorCategory != TEXT("vm_artifact_compile_failed"))
+	{
+		AddInfo(FString::Printf(
+			TEXT("P57.8 RequirePrecompiled diagnostic | succeeded=%d | exit=%d | category=%s | message=%s | stdout=%s | stderr=%s"),
+			bRequireBuildSucceeded ? 1 : 0,
+			RequireResult.ProcessExitCode,
+			*RequireResult.ErrorCategory,
+			*RequireResult.ErrorMessage,
+			*RequireResult.Stdout,
+			*RequireResult.Stderr));
+	}
+	TestFalse(
+		TEXT("RequirePrecompiled fails when artifact compilation fails"),
+		bRequireBuildSucceeded);
 	TestEqual(
 		TEXT("RequirePrecompiled exposes a stable failure category"),
 		RequireResult.ErrorCategory,

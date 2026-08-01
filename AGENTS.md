@@ -1688,3 +1688,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the new Runtime artifact loader introduced generic anonymous helpers `IsLowercaseSha256` and `IsLowercaseAttestationId`; the first collided with the existing reload loader when UBT merged both `.cpp` files into one Unity translation unit, failing the concentrated build with C2084.
 - Prevention: every new Runtime `.cpp` anonymous helper uses an owner-qualified name from its first draft, such as `IsRuntimeArtifactLowercaseSha256`. Before staging a new source file, search its helper names across the entire owning module with literal-root `rg`; the standard Unity-enabled project build remains the compilation gate.
+
+### 2026-08-01: Phase 57.8 Automation PowerShell module assumption
+
+- Mistake: new Editor fallback fixtures called `Get-FileHash` inside `powershell.exe` launched by Unreal Automation. That child process could not auto-load `Microsoft.PowerShell.Utility`, so both fixtures exited before reaching the VM artifact publisher even though an interactive shell exposed the cmdlet.
+- Prevention: generated Automation scripts depend only on PowerShell language primitives and explicitly constructed .NET APIs. Prefer computing deterministic fixture hashes in C++ with `FAvidScriptHash`; every external-process assertion logs exit code, category, stdout and stderr on failure.
