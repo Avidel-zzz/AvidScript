@@ -29,3 +29,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
 	UObject* FastPathObjectRoundtrip(UObject* Value) const;
 };
+
+UCLASS()
+class UAvidScriptBindingsDerivedTestObject final
+	: public UAvidScriptBindingsTestObject
+{
+	GENERATED_BODY()
+};

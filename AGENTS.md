@@ -1714,3 +1714,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a large Runtime replacement retained the previous function's `EAvidScriptVmTypedHostStatus` token while defining `ResolvePreparedReflectionCallMode`, whose declaration and boolean contract require `bool`.
 - Prevention: after every multi-function patch, compare each touched definition against its declaration with a focused symbol search before adding callers; do not defer signature consistency to the concentrated build.
+
+### 2026-08-01: Windows rg wildcard recurrence during Gate discovery
+
+- Mistake: a parallel Gate-history probe passed `Docs/Phase57/P57.9*` and `P57.8*` as positional paths, so Win32 rejected the wildcard path and invalidated every sibling result.
+- Prevention: Gate discovery uses the literal `Docs/Phase57` root with `-g 'P57.9*'` and `-g 'P57.8*'`; inspect every positional `rg` path for `*` or `?` before dispatching a parallel group.
+
+### 2026-08-01: adaptive fallback tests must respect ProcessEvent guards
+
+- Mistake: the P57.1 adaptive fallback fixture expected `ProcessEvent` to execute while `GIntraFrameDebuggingGameThread` was true, but UE 5.8 deliberately returns before native dispatch while the game thread is paused at a breakpoint.
+- Prevention: exercise semantic fallback with a condition that permits `ProcessEvent`, such as an exact-class native guard rejection on a compatible derived receiver. Debugger, GC, PostLoad, and thread guards must be tested against their actual engine semantics rather than used as result-preserving fallback fixtures.
+
+### 2026-08-01: decode UE reflection flags from the active engine source
+
+- Mistake: the first P57.10 BroadShape diagnosis read the `0x00800000` function-flag delta as `FUNC_HasOutParms`; UE 5.8 defines it as `FUNC_HasDefaults`, while `FUNC_HasOutParms` is `0x00400000`.
+- Prevention: before changing a reflection safety guard from generated hexadecimal metadata, decode every differing bit against `C:\UnrealEngine\Engine\Source\Runtime\CoreUObject\Public\UObject\Script.h`. Keep true out-parameter rejection independent from fully supplied trivial struct parameters that carry `FUNC_HasDefaults`.

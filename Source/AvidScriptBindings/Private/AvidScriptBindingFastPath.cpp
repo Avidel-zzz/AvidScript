@@ -303,6 +303,8 @@ bool CanInvokePreparedNative(
 
 bool IsTrivialVectorProperty(
 	const FProperty* Property,
+	const UFunction& Function,
+	const bool bReturnValue,
 	const int32 FrameSize,
 	int32& OutFrameOffset)
 {
@@ -318,6 +320,15 @@ bool IsTrivialVectorProperty(
 		|| Property->GetSize() != sizeof(FVector)
 		|| PropertyAlignment <= 0
 		|| PropertyAlignment > alignof(FVector)
+		|| Property->GetOwnerStruct() != &Function
+		|| !Property->HasAllPropertyFlags(
+			bReturnValue
+				? CPF_Parm | CPF_OutParm | CPF_ReturnParm
+				: CPF_Parm)
+		|| Property->HasAnyPropertyFlags(
+			bReturnValue
+				? CPF_ReferenceParm | CPF_ConstParm
+				: CPF_OutParm | CPF_ReturnParm | CPF_ReferenceParm | CPF_ConstParm)
 		|| !Property->HasAllPropertyFlags(
 			CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor))
 	{
@@ -338,23 +349,34 @@ bool IsTrivialVectorProperty(
 
 bool IsTrivialObjectProperty(
 	const FProperty* Property,
+	const UFunction& Function,
+	const bool bReturnValue,
 	const int32 FrameSize,
 	int32& OutFrameOffset)
 {
 	OutFrameOffset = INDEX_NONE;
-	const FObjectPropertyBase* ObjectProperty =
-		CastField<FObjectPropertyBase>(Property);
+	const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property);
 	const int32 PropertyAlignment =
 		Property == nullptr ? 0 : Property->GetMinAlignment();
 	if (ObjectProperty == nullptr
+		|| Property->GetClass() != FObjectProperty::StaticClass()
 		|| ObjectProperty->PropertyClass == nullptr
 		|| Property->ArrayDim != 1
 		|| Property->GetElementSize() != sizeof(UObject*)
 		|| Property->GetSize() != sizeof(UObject*)
 		|| PropertyAlignment <= 0
 		|| PropertyAlignment > alignof(UObject*)
+		|| Property->GetOwnerStruct() != &Function
 		|| !Property->HasAllPropertyFlags(
-			CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor))
+			bReturnValue
+				? CPF_Parm | CPF_OutParm | CPF_ReturnParm
+				: CPF_Parm)
+		|| Property->HasAnyPropertyFlags(
+			(bReturnValue
+				? CPF_ReferenceParm | CPF_ConstParm
+				: CPF_OutParm | CPF_ReturnParm | CPF_ReferenceParm | CPF_ConstParm)
+			| CPF_TObjectPtr
+			| CPF_UObjectWrapper))
 	{
 		return false;
 	}
@@ -394,8 +416,7 @@ bool IsPreparedNativeFunctionBase(
 		| FUNC_EditorOnly
 		| FUNC_UbergraphFunction
 		| FUNC_DLLImport
-		| FUNC_HasOutParms
-		| FUNC_HasDefaults;
+		| FUNC_HasOutParms;
 	const UClass* OwnerClass = Function.GetOwnerClass();
 	return Function.HasAllFunctionFlags(RequiredFlags)
 		&& !Function.HasAnyFunctionFlags(RejectedFlags)
@@ -695,10 +716,14 @@ bool TryBuildFastPath(
 			EAvidScriptBindingFastPathKind::VectorValueToVector;
 		if (!IsTrivialVectorProperty(
 				Spec.Parameters[0].Property,
+				*Spec.Function,
+				false,
 				Spec.FrameSize,
 				Candidate.ParameterFrameOffsets[0])
 			|| !IsTrivialVectorProperty(
 				Spec.ReturnValue.Property,
+				*Spec.Function,
+				true,
 				Spec.FrameSize,
 				Candidate.ReturnFrameOffset))
 		{
@@ -710,10 +735,14 @@ bool TryBuildFastPath(
 		Candidate.Kind = EAvidScriptBindingFastPathKind::ObjectToObject;
 		if (!IsTrivialObjectProperty(
 				Spec.Parameters[0].Property,
+				*Spec.Function,
+				false,
 				Spec.FrameSize,
 				Candidate.ParameterFrameOffsets[0])
 			|| !IsTrivialObjectProperty(
 				Spec.ReturnValue.Property,
+				*Spec.Function,
+				true,
 				Spec.FrameSize,
 				Candidate.ReturnFrameOffset))
 		{
@@ -724,10 +753,20 @@ bool TryBuildFastPath(
 	{
 		return false;
 	}
+	if (Spec.Function->GetReturnProperty() != Spec.ReturnValue.Property)
+	{
+		return false;
+	}
 
+	const bool bBroadNativeFieldLayout =
+		!bScalarShape
+		&& Spec.Function->ChildProperties == Spec.Parameters[0].Property
+		&& Spec.Parameters[0].Property->Next == Spec.ReturnValue.Property
+		&& Spec.ReturnValue.Property->Next == nullptr;
 	const bool bQualifiedNative = bScalarShape
 		? IsQualifiedNativeDirectFunction(*Spec.Function)
-		: IsPreparedNativeFunctionBase(
+		: bBroadNativeFieldLayout
+		&& IsPreparedNativeFunctionBase(
 			*Spec.Function,
 			Spec.Parameters.Num() + 1,
 			Spec.FrameSize);

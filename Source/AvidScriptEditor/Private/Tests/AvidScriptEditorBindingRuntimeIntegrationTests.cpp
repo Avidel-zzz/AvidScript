@@ -5029,28 +5029,48 @@ bool FAvidScriptEditorBindingRuntimeQualifiedNativeDirectTest::RunTest(
 		GuardedDirectSentinel);
 
 	constexpr uint32 AdaptiveFallbackAddress = 100;
+	UClass* DerivedTestClass = LoadObject<UClass>(
+		nullptr,
+		TEXT("/Script/AvidScriptBindings.AvidScriptBindingsDerivedTestObject"));
+	UObject* DerivedTarget = DerivedTestClass == nullptr
+		? nullptr
+		: NewObject<UObject>(GetTransientPackage(), DerivedTestClass);
+	if (!TestNotNull(
+			TEXT("Adaptive fallback derived target is created"),
+			DerivedTarget))
+	{
+		return false;
+	}
+	FAvidScriptObjectHandleResult DerivedRegisterResult;
+	const FAvidScriptObjectHandle DerivedHandle = Registry.RegisterObject(
+		DerivedTarget,
+		DerivedRegisterResult);
+	if (!TestTrue(
+			TEXT("Adaptive fallback derived target registers"),
+			DerivedRegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptBindingInvocationContext DerivedAdaptiveContext =
+		AdaptiveContext;
+	DerivedAdaptiveContext.OwnerHandle = DerivedHandle;
 	const uint64 AdaptiveFallbackArguments[] = {
-		Handle.Slot,
-		Handle.Generation,
+		DerivedHandle.Slot,
+		DerivedHandle.Generation,
 		31,
 		11,
 		AdaptiveFallbackAddress
 	};
-	{
-		TGuardValue<bool> DebuggingGuard(
-			GIntraFrameDebuggingGameThread,
-			true);
-		FAvidScriptDynamicHostCallResult AdaptiveFallbackResult;
-		TestTrue(
-			TEXT("Adaptive native guard falls back to ProcessEvent"),
-			Dispatch(
-				AddBinding->Ordinal,
-				MakeArrayView(AdaptiveFallbackArguments),
-				AdaptiveContext,
-				AdaptiveFallbackResult));
-	}
+	FAvidScriptDynamicHostCallResult AdaptiveFallbackResult;
+	TestTrue(
+		TEXT("Adaptive exact-class guard falls back to ProcessEvent"),
+		Dispatch(
+			AddBinding->Ordinal,
+			MakeArrayView(AdaptiveFallbackArguments),
+			DerivedAdaptiveContext,
+			AdaptiveFallbackResult));
 	TestEqual(
-		TEXT("Adaptive guard fallback preserves the exact result"),
+		TEXT("Adaptive exact-class fallback preserves the exact result"),
 		GuestMemory.ReadValue<int32>(AdaptiveFallbackAddress),
 		42);
 
@@ -5251,12 +5271,38 @@ bool FAvidScriptEditorPreparedReflectionBroadShapeTest::RunTest(
 	{
 		return false;
 	}
+	const bool bVectorNativeGuardAllowed =
+		VectorBinding->NativeGuard != nullptr
+		&& VectorBinding->NativeGuard(
+			VectorBinding->ImmutablePlanIdentity,
+			*Target);
+	if (!bVectorNativeGuardAllowed)
+	{
+		const UFunction* VectorFunction = TestClass->FindFunctionByName(
+			TEXT("FastPathVectorValue"));
+		if (VectorFunction != nullptr)
+		{
+			AddInfo(FString::Printf(
+				TEXT("Vector native diagnostic: flags=0x%08x native=%d owner_native=%d "
+					"num_parms=%d parms=%d properties=%d structure=%d alignment=%d "
+					"script=%d first_init=%d post_construct=%d destructor=%d"),
+				static_cast<uint32>(VectorFunction->FunctionFlags),
+				VectorFunction->GetNativeFunc() != nullptr,
+				TestClass->HasAllClassFlags(CLASS_Native),
+				VectorFunction->NumParms,
+				VectorFunction->ParmsSize,
+				VectorFunction->PropertiesSize,
+				VectorFunction->GetStructureSize(),
+				VectorFunction->GetMinAlignment(),
+				VectorFunction->Script.Num(),
+				VectorFunction->FirstPropertyToInit != nullptr,
+				VectorFunction->PostConstructLink != nullptr,
+				VectorFunction->DestructorLink != nullptr));
+		}
+	}
 	TestTrue(
 		TEXT("Vector native guard accepts the exact reflected class"),
-		VectorBinding->NativeGuard != nullptr
-			&& VectorBinding->NativeGuard(
-				VectorBinding->ImmutablePlanIdentity,
-				*Target));
+		bVectorNativeGuardAllowed);
 	TestTrue(
 		TEXT("Object native guard accepts the exact reflected class"),
 		ObjectBinding->NativeGuard != nullptr
@@ -5293,7 +5339,7 @@ bool FAvidScriptEditorPreparedReflectionBroadShapeTest::RunTest(
 		SemanticVector.Equals(FVector(3.0, 5.0, 7.0))
 			&& NativeVector.Equals(SemanticVector));
 
-	UObject* InputObject = NewObject<UObject>();
+	UObject* InputObject = NewObject<UObject>(GetTransientPackage(), TestClass);
 	UObject* SemanticObject = nullptr;
 	UObject* NativeObject = nullptr;
 	TestTrue(
