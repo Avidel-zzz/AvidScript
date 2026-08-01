@@ -1314,6 +1314,17 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			const EAvidScriptVmTypedHostStatus Status =
+				HostContext.PreparedTarget.SelfGuestAddress(
+					HostContext.PreparedTarget.Context,
+					SelfSlot,
+					SelfGeneration,
+					GuestAddress,
+					OutValue);
+			return CompleteTypedInvocation(HostContext, Status);
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
@@ -1331,6 +1342,17 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			const EAvidScriptVmTypedHostStatus Status =
+				HostContext.PreparedTarget.SelfGuestAddress(
+					HostContext.PreparedTarget.Context,
+					SelfSlot,
+					SelfGeneration,
+					GuestAddress,
+					OutValue);
+			return CompleteTypedInvocation(HostContext, Status);
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
@@ -1350,6 +1372,19 @@ public:
 		int32 GuestAddress,
 		int32& OutValue)
 	{
+		if (HostContext.PreparedTarget.IsBoundForShape(HostContext.Shape))
+		{
+			const EAvidScriptVmTypedHostStatus Status =
+				HostContext.PreparedTarget.StableObjectRoundtrip(
+					HostContext.PreparedTarget.Context,
+					SelfSlot,
+					SelfGeneration,
+					ObjectSlot,
+					ObjectGeneration,
+					GuestAddress,
+					OutValue);
+			return CompleteTypedInvocation(HostContext, Status);
+		}
 		if (TypedHostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(HostContext.ModuleName, HostContext.ImportName, TEXT("The typed host dispatcher is unavailable."));
@@ -2060,6 +2095,10 @@ private:
 			const int32 PreparedFunctionCount =
 				(Import.PreparedTarget.SelfI32Pair != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.SelfI32PairGuestResult != nullptr
+					? 1
+					: 0)
+				+ (Import.PreparedTarget.SelfGuestAddress != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.StableObjectRoundtrip != nullptr
 					? 1
 					: 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Get != nullptr ? 1 : 0)

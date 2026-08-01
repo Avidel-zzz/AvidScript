@@ -395,6 +395,67 @@ EAvidScriptVmTypedHostStatus InvokePreparedSelfI32PairForTest(
 	return EAvidScriptVmTypedHostStatus::Succeeded;
 }
 
+struct FPreparedSelfGuestAddressContext
+{
+	int32 CallCount = 0;
+	int32 LastSelfSlot = 0;
+	int32 LastSelfGeneration = 0;
+	int32 LastGuestAddress = 0;
+	int32 Bias = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokePreparedSelfGuestAddressForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	FPreparedSelfGuestAddressContext* Prepared =
+		static_cast<FPreparedSelfGuestAddressContext*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastSelfSlot = SelfSlot;
+	Prepared->LastSelfGeneration = SelfGeneration;
+	Prepared->LastGuestAddress = GuestAddress;
+	OutValue = SelfSlot + SelfGeneration + GuestAddress + Prepared->Bias;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+struct FPreparedStableObjectRoundtripContext
+{
+	int32 CallCount = 0;
+	int32 LastObjectSlot = 0;
+	int32 LastObjectGeneration = 0;
+	int32 Bias = 0;
+};
+
+EAvidScriptVmTypedHostStatus InvokePreparedStableObjectRoundtripForTest(
+	void* Context,
+	const int32 SelfSlot,
+	const int32 SelfGeneration,
+	const int32 ObjectSlot,
+	const int32 ObjectGeneration,
+	const int32 GuestAddress,
+	int32& OutValue)
+{
+	FPreparedStableObjectRoundtripContext* Prepared =
+		static_cast<FPreparedStableObjectRoundtripContext*>(Context);
+	if (Prepared == nullptr)
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	++Prepared->CallCount;
+	Prepared->LastObjectSlot = ObjectSlot;
+	Prepared->LastObjectGeneration = ObjectGeneration;
+	OutValue = SelfSlot + SelfGeneration + ObjectSlot + ObjectGeneration
+		+ GuestAddress + Prepared->Bias;
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
 struct FPreparedPropertyI32Context
 {
 	int32 GetCallCount = 0;
@@ -466,6 +527,51 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 {
+	FPreparedSelfGuestAddressContext PreparedTargetContractContext;
+	FAvidScriptVmPreparedTypedHostTarget PreparedTargetContract;
+	TestFalse(
+		TEXT("empty prepared target reports no callable"),
+		PreparedTargetContract.HasAnyTarget());
+	PreparedTargetContract.Context = &PreparedTargetContractContext;
+	PreparedTargetContract.SelfGuestAddress =
+		&InvokePreparedSelfGuestAddressForTest;
+	TestTrue(
+		TEXT("complete self-address target reports a callable"),
+		PreparedTargetContract.HasAnyTarget());
+	TestTrue(
+		TEXT("combined property binds the self-address target"),
+		PreparedTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet));
+	TestTrue(
+		TEXT("vector value binds the self-address target"),
+		PreparedTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfVectorValue));
+	TestFalse(
+		TEXT("stable object rejects a self-address target"),
+		PreparedTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::StableObjectRoundtrip));
+	PreparedTargetContract.Context = nullptr;
+	TestFalse(
+		TEXT("prepared target without context is incomplete"),
+		PreparedTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfVectorValue));
+	FPreparedStableObjectRoundtripContext PreparedStableContractContext;
+	FAvidScriptVmPreparedTypedHostTarget PreparedStableTargetContract;
+	PreparedStableTargetContract.Context = &PreparedStableContractContext;
+	PreparedStableTargetContract.StableObjectRoundtrip =
+		&InvokePreparedStableObjectRoundtripForTest;
+	TestTrue(
+		TEXT("complete stable-object target reports a callable"),
+		PreparedStableTargetContract.HasAnyTarget());
+	TestTrue(
+		TEXT("stable object binds its prepared target"),
+		PreparedStableTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::StableObjectRoundtrip));
+	TestFalse(
+		TEXT("combined property rejects a stable-object target"),
+		PreparedStableTargetContract.IsBoundForShape(
+			EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet));
+
 	FAvidScriptVmError Error;
 	TUniquePtr<IAvidScriptVmBackend> Backend = CreateTypedWasmtimeBackend(Error);
 #if !AVIDSCRIPT_WITH_WASMTIME
@@ -598,6 +704,151 @@ bool FAvidScriptVmWasmtimeTypedHostTest::RunTest(const FString& Parameters)
 		TEXT("prepared target bypasses the virtual dispatcher"),
 		PreparedFallbackDispatcher.SelfI32PairCalls,
 		0);
+
+	auto VerifyPreparedSelfGuestAddressShape = [this, &SelfAddressArguments](
+		const EAvidScriptVmTypedHostShape Shape,
+		int32 FTypedHostDispatcher::* DispatcherCallCount)
+	{
+		FAvidScriptVmError ShapeError;
+		TUniquePtr<IAvidScriptVmBackend> ShapeBackend =
+			CreateTypedWasmtimeBackend(ShapeError);
+		FTypedHostDispatcher ShapeFallbackDispatcher;
+		ShapeFallbackDispatcher.Bias = 1000;
+		FPreparedSelfGuestAddressContext ShapePreparedContext;
+		ShapePreparedContext.Bias = 7;
+		FAvidScriptVmBindingPackage ShapePackage =
+			MakeTypedBindingPackage(TEXT("(iii)i"));
+		TArray<FAvidScriptVmTypedHostImport> ShapeImports = {
+			MakeTypedImport(Shape, TEXT("(iii)i"))
+		};
+		ShapeImports[0].PreparedTarget.Context = &ShapePreparedContext;
+		ShapeImports[0].PreparedTarget.SelfGuestAddress =
+			&InvokePreparedSelfGuestAddressForTest;
+		FAvidScriptVmLoadConfig ShapeConfig;
+		ShapeConfig.BindingPackage = &ShapePackage;
+		ShapeConfig.TypedHostDispatcher = &ShapeFallbackDispatcher;
+		ShapeConfig.TypedHostImports = ShapeImports;
+		if (!TestTrue(
+			TEXT("prepared self-address fixture loads"),
+			ShapeBackend->Load(
+				BuildTypedHostFixture(SelfAddressArguments),
+				TEXT("typed_prepared_self_address"),
+				ShapeConfig,
+				ShapeError)))
+		{
+			AddError(ShapeError.Category + TEXT(": ") + ShapeError.Details);
+			return;
+		}
+		ResolveAndCallTypedRun(*this, *ShapeBackend, 25, ShapeError);
+		TestEqual(
+			TEXT("prepared self-address target is called exactly once"),
+			ShapePreparedContext.CallCount,
+			1);
+		TestEqual(
+			TEXT("prepared self-address target receives self slot"),
+			ShapePreparedContext.LastSelfSlot,
+			5);
+		TestEqual(
+			TEXT("prepared self-address target receives self generation"),
+			ShapePreparedContext.LastSelfGeneration,
+			6);
+		TestEqual(
+			TEXT("prepared self-address target receives guest address"),
+			ShapePreparedContext.LastGuestAddress,
+			7);
+		TestEqual(
+			TEXT("prepared self-address target bypasses the dispatcher"),
+			ShapeFallbackDispatcher.*DispatcherCallCount,
+			0);
+	};
+	VerifyPreparedSelfGuestAddressShape(
+		EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet,
+		&FTypedHostDispatcher::SelfPropertyCalls);
+	VerifyPreparedSelfGuestAddressShape(
+		EAvidScriptVmTypedHostShape::SelfVectorValue,
+		&FTypedHostDispatcher::SelfVectorCalls);
+
+	FAvidScriptVmError PreparedStableError;
+	TUniquePtr<IAvidScriptVmBackend> PreparedStableBackend =
+		CreateTypedWasmtimeBackend(PreparedStableError);
+	FTypedHostDispatcher PreparedStableFallbackDispatcher;
+	PreparedStableFallbackDispatcher.Bias = 1000;
+	FPreparedStableObjectRoundtripContext PreparedStableContext;
+	PreparedStableContext.Bias = 9;
+	FAvidScriptVmBindingPackage PreparedStablePackage =
+		MakeTypedBindingPackage(TEXT("(iiiii)i"));
+	TArray<FAvidScriptVmTypedHostImport> PreparedStableImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::StableObjectRoundtrip,
+			TEXT("(iiiii)i"))
+	};
+	PreparedStableImports[0].PreparedTarget.Context =
+		&PreparedStableContext;
+	PreparedStableImports[0].PreparedTarget.StableObjectRoundtrip =
+		&InvokePreparedStableObjectRoundtripForTest;
+	FAvidScriptVmLoadConfig PreparedStableConfig;
+	PreparedStableConfig.BindingPackage = &PreparedStablePackage;
+	PreparedStableConfig.TypedHostDispatcher =
+		&PreparedStableFallbackDispatcher;
+	PreparedStableConfig.TypedHostImports = PreparedStableImports;
+	TestTrue(
+		TEXT("prepared stable-object fixture loads"),
+		PreparedStableBackend->Load(
+			BuildTypedHostFixture(StableObjectArguments),
+			TEXT("typed_prepared_stable_object"),
+			PreparedStableConfig,
+			PreparedStableError));
+	ResolveAndCallTypedRun(
+		*this,
+		*PreparedStableBackend,
+		59,
+		PreparedStableError);
+	TestEqual(
+		TEXT("prepared stable-object target is called exactly once"),
+		PreparedStableContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("prepared stable-object target receives object slot"),
+		PreparedStableContext.LastObjectSlot,
+		10);
+	TestEqual(
+		TEXT("prepared stable-object target receives object generation"),
+		PreparedStableContext.LastObjectGeneration,
+		11);
+	TestEqual(
+		TEXT("prepared stable-object target bypasses the dispatcher"),
+		PreparedStableFallbackDispatcher.StableObjectCalls,
+		0);
+
+	FAvidScriptVmError ShapeMismatchError;
+	TUniquePtr<IAvidScriptVmBackend> ShapeMismatchBackend =
+		CreateTypedWasmtimeBackend(ShapeMismatchError);
+	FAvidScriptVmBindingPackage ShapeMismatchPackage =
+		MakeTypedBindingPackage(TEXT("(iii)i"));
+	TArray<FAvidScriptVmTypedHostImport> ShapeMismatchImports = {
+		MakeTypedImport(
+			EAvidScriptVmTypedHostShape::SelfVectorValue,
+			TEXT("(iii)i"))
+	};
+	ShapeMismatchImports[0].PreparedTarget.Context = &PreparedStableContext;
+	ShapeMismatchImports[0].PreparedTarget.StableObjectRoundtrip =
+		&InvokePreparedStableObjectRoundtripForTest;
+	FAvidScriptVmLoadConfig ShapeMismatchConfig;
+	ShapeMismatchConfig.BindingPackage = &ShapeMismatchPackage;
+	ShapeMismatchConfig.TypedHostDispatcher =
+		&PreparedStableFallbackDispatcher;
+	ShapeMismatchConfig.TypedHostImports = ShapeMismatchImports;
+	TestFalse(
+		TEXT("prepared target shape mismatch rejects load"),
+		ShapeMismatchBackend->Load(
+			BuildTypedHostFixture(SelfAddressArguments),
+			TEXT("typed_prepared_shape_mismatch"),
+			ShapeMismatchConfig,
+			ShapeMismatchError));
+	TestEqual(
+		TEXT("prepared target shape mismatch category"),
+		ShapeMismatchError.Category,
+		FString(TEXT("typed_host_prepared_target_invalid")));
 
 	FPreparedPropertyI32Context PreparedPropertyContext;
 	PreparedPropertyContext.Value = 20;

@@ -46,6 +46,24 @@ using FAvidScriptVmPreparedSelfI32PairGuestResultTarget =
 		int32 GuestAddress,
 		int32& OutStatus);
 
+using FAvidScriptVmPreparedSelfGuestAddressTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
+
+using FAvidScriptVmPreparedStableObjectRoundtripTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int32 SelfSlot,
+		int32 SelfGeneration,
+		int32 ObjectSlot,
+		int32 ObjectGeneration,
+		int32 GuestAddress,
+		int32& OutValue);
+
 using FAvidScriptVmPreparedSelfPropertyI32GetTarget =
 	EAvidScriptVmTypedHostStatus (*)(
 		void* Context,
@@ -66,6 +84,9 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 	FAvidScriptVmPreparedSelfI32PairTarget SelfI32Pair = nullptr;
 	FAvidScriptVmPreparedSelfI32PairGuestResultTarget
 		SelfI32PairGuestResult = nullptr;
+	FAvidScriptVmPreparedSelfGuestAddressTarget SelfGuestAddress = nullptr;
+	FAvidScriptVmPreparedStableObjectRoundtripTarget StableObjectRoundtrip =
+		nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
 
@@ -81,6 +102,11 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfI32Pair != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfI32PairToGuestI32:
 			return SelfI32PairGuestResult != nullptr;
+		case EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet:
+		case EAvidScriptVmTypedHostShape::SelfVectorValue:
+			return SelfGuestAddress != nullptr;
+		case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
+			return StableObjectRoundtrip != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Get:
 			return SelfPropertyI32Get != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
@@ -94,6 +120,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 	{
 		return SelfI32Pair != nullptr
 			|| SelfI32PairGuestResult != nullptr
+			|| SelfGuestAddress != nullptr
+			|| StableObjectRoundtrip != nullptr
 			|| SelfPropertyI32Get != nullptr
 			|| SelfPropertyI32Set != nullptr;
 	}
