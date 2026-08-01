@@ -261,7 +261,13 @@ bool ParseAvidScriptBindingType(
 		|| OutType.StableId != FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 			OutType.CanonicalType,
 			OutType.EnumValues,
-			OutType.StructFields)
+			OutType.StructFields,
+			SchemaVersion >= 9 && OutType.Kind == TEXT("struct_wire")
+				? OutType.Size
+				: INDEX_NONE,
+			SchemaVersion >= 9 && OutType.Kind == TEXT("struct_wire")
+				? OutType.Alignment
+				: INDEX_NONE)
 		|| (OutType.Kind == TEXT("enum")) != OutType.CanonicalType.StartsWith(TEXT("enum:"))
 		|| (OutType.Kind == TEXT("struct_wire")) != OutType.CanonicalType.StartsWith(TEXT("struct_wire:"))
 		|| OutType.Size <= 0

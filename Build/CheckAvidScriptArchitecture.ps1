@@ -1110,6 +1110,7 @@ foreach ($RequiredStructWireDescriptorContract in @(
 	'IsAvidScriptBindingPowerOfTwo',
 	'IsCanonicalAvidScriptBindingStructWireLeaf',
 	'ExpectedWireOffset',
+	'SchemaVersion >= 9 && OutType.Kind == TEXT("struct_wire")',
     'Depth > 8',
     'InOutNodes > 128',
     'Type.Size > 4096',
