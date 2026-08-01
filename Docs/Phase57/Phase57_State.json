@@ -14,7 +14,10 @@
   },
   "documents": {
     "plan": "Docs/Superpowers/Plans/2026-07-31-phase57-adaptive-semantic-reflection.md",
-    "closeout": "Docs/Phase57/P57.5_Adaptive_Semantic_Implementation_Report.md"
+    "closeout": "Docs/Phase57/P57.5_Adaptive_Semantic_Implementation_Report.md",
+    "p57_8_spec": "Docs/Superpowers/Specs/2026-08-01-phase57-editor-precompiled-artifact-pipeline-design.md",
+    "p57_8_plan": "Docs/Superpowers/Plans/2026-08-01-phase57-editor-precompiled-artifact-pipeline.md",
+    "latest_evidence": "Docs/Phase57/P57.8_Editor_Precompiled_Artifact_Pipeline.md"
   },
   "batches": [
     {
@@ -52,6 +55,24 @@
       "status": "Completed",
       "evidence": "Shape-specialized prepared export; formal 5-process paired ratio 0.9052217193 <= 0.95; 1050 observations valid; VM Automation 8/8 and clean architecture check passed",
       "completed_at_utc": "2026-07-31T14:41:24.3403005+00:00"
+    },
+    {
+      "id": "P57.6",
+      "status": "Completed",
+      "evidence": "Frozen 12-kernel CPU0 formal attribution completed without changing kernels: p50 geomean 0.9821689140, p95 geomean 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; controlled leadership remains Fixing.",
+      "completed_at_utc": "2026-07-31T19:46:09.0000000+00:00"
+    },
+    {
+      "id": "P57.7",
+      "status": "Completed",
+      "evidence": "WasmtimeSerialized runtime consumer, canonical/execution split, compiler identity and fail-closed backend provenance completed; UE5.8 build, 24/24 Automation and clean architecture check passed.",
+      "completed_at_utc": "2026-07-31T20:16:41.0000000+00:00"
+    },
+    {
+      "id": "P57.8",
+      "status": "Completed",
+      "evidence": "Win64 Editor precompiler, 32-entry cache/attestation, transactional cwasm+manifest publication, Runtime loader/session/component integration completed; UE5.8 no-clean build passed; focused Automation 26/26; paired startup serialized/JIT ModuleLoadMs P50 ratio 0.070559 with 20/20 BeginPlay calls; clean candidate 76059e7/b85af12 architecture check passed.",
+      "completed_at_utc": "2026-08-01T00:45:12.5274341+00:00"
     }
   ],
   "debt": [
@@ -60,9 +81,9 @@
       "severity": "Important",
       "found_batch": "P57.5",
       "scope": "Frozen 12-kernel Wasmtime/V8 P95 geomean and P95 kernel win-rate gates",
-      "evidence": "P57.6 frozen 12-kernel CPU0 formal: p50 geo 0.9821689140, p95 geo 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; aggregate SHA-256 2fdebb2a51399f41ea3813182ba6a96ab439e9e1572c93af376b164149cbf31f. P57.7 added a verified WasmtimeSerialized runtime consumer but did not change steady-state gate results.",
+      "evidence": "P57.6 frozen 12-kernel CPU0 formal: p50 geo 0.9821689140, p95 geo 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; aggregate SHA-256 2fdebb2a51399f41ea3813182ba6a96ab439e9e1572c93af376b164149cbf31f. P57.7 added a verified WasmtimeSerialized runtime consumer. P57.8 added the trusted Editor producer and reached serialized/JIT ModuleLoadMs P50 ratio 0.070559, but neither batch changed or reran the frozen steady-state gate.",
       "deferral_reason": "Isolated attribution follows closure of semantic, Generated S1, and prepared-export fixed costs",
-      "remediation": "Implement the trusted Editor precompiler and manifest provenance, expose compiler inlining through a controlled Wasmtime toolchain, then profile hashing, predictable branch, SIMD128, and p95 variance under the unchanged frozen controlled-runtime suite without changing kernel bytes.",
+      "remediation": "Expose compiler inlining and codegen controls through a controlled Wasmtime toolchain, bind every option into compiler identity, then profile hashing, predictable branch, SIMD128, and p95 variance under the unchanged frozen controlled-runtime suite without changing kernel bytes.",
       "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
@@ -80,9 +101,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 0,
-    "automation": 0,
-    "full_gate": 0
+    "ubt": 4,
+    "automation": 5,
+    "full_gate": 3
   },
   "freeze": {
     "source_commit": "",
@@ -120,7 +141,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 10,
-  "updated_at_utc": "2026-07-31T20:05:24.7986771+00:00"
+  "next_action": "Plan and implement P57.9 controlled Wasmtime compiler/toolchain optimization; keep frozen 12-kernel inputs unchanged and mark P57-D06 Verified only after the formal gate passes.",
+  "revision": 11,
+  "updated_at_utc": "2026-08-01T00:45:12.5274341+00:00"
 }
