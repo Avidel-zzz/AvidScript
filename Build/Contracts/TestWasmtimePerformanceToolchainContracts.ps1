@@ -85,7 +85,9 @@ Assert-True ($PatchSha256 -ceq [string]$Lock.patch.canonical_sha256) `
     'patch digest differs from the lock'
 $PatchText = Get-Content -LiteralPath $PatchPath -Raw
 $PatchedFiles = @(
-    [regex]::Matches($PatchText, '(?m)^diff --git a/(?<path>\S+) b/\S+$') |
+    [regex]::Matches(
+        $PatchText,
+        '(?m)^diff --git a/(?<path>\S+) b/[^\r\n]+\r?$') |
         ForEach-Object { $_.Groups['path'].Value })
 Assert-True ($PatchedFiles.Count -eq 2) 'patch must touch exactly two upstream C API files'
 Assert-True ($PatchedFiles -contains 'crates/c-api/src/config.rs') `

@@ -1794,3 +1794,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: `Phase56Micro.formal.json` was passed as the primary profile to `Evaluate-Phase54PerformanceGates.ps1`, but the evaluator's primary profile is Gameplay and requires a `gates` object; Micro evidence is consumed by `Get-Phase54MicroStatistics` through supplemental inputs.
 - Prevention: use the frozen Micro runner for raw sampling, then aggregate Micro-only shape statistics with `Get-Phase54MicroStatistics`. Invoke the overall evaluator only with the matching Gameplay profile plus all candidate-matched supplemental evidence.
+
+### 2026-08-01: full Automation requires the canonical project fixtures
+
+- Mistake: the first P57.10 full `AvidScript` Automation run used the minimal benchmark project. That project intentionally contained only performance artifacts, so lifecycle manifests, binding-schema inputs, and TPS content tests produced environment failures unrelated to the candidate code.
+- Prevention: use the isolated benchmark project only for performance and benchmark-specific focused tests. Run the complete plugin Automation suite from the canonical project after confirming its generated lifecycle manifests and required content assets exist; a fixture-incomplete run is diagnostic only and must not be reported as a regression or final Gate.
+
+### 2026-08-01: assign PowerShell foreach output before piping
+
+- Mistake: two diagnostic one-liners piped directly after a `foreach (...) { ... }` statement, which PowerShell parsed as an empty pipeline element.
+- Prevention: capture statement output first (`$Rows = foreach (...) { ... }`) and pipe `$Rows` in a separate statement. Reserve direct pipelines for expressions that PowerShell accepts as pipeline elements.
+
+### 2026-08-01: patch contracts must tolerate checkout line endings
+
+- Mistake: the Wasmtime toolchain contract canonicalized CRLF for the locked patch hash but used an LF-only `diff --git` regex. A clean worktree created under `core.autocrlf` therefore rejected the same tracked patch blob before running the real contract assertions.
+- Prevention: every parser for canonicalized text accepts both CRLF and LF, and clean detached worktree Gate coverage is the portability regression test. Hash normalization and structural parsing must use the same line-ending model.
