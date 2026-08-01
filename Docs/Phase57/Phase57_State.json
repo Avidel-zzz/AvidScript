@@ -7,17 +7,14 @@
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Superpowers/Specs/2026-07-31-phase57-adaptive-semantic-reflection-design.md",
-    "version": 1,
-    "sha256": "a7a9af45101b254b344f4fa658545282898f7a5ffc3dba770ff24cde82a7c140",
-    "revision_reason": "initial architecture freeze"
+    "path": "Docs/Superpowers/Specs/2026-08-01-phase57-editor-precompiled-artifact-pipeline-design.md",
+    "version": 2,
+    "sha256": "f6cdcc527f8ea1b934c0983ac0a169c4b8201118a67a06bf0ae4f3a48571949d",
+    "revision_reason": "P57.8 froze the Editor precompiled artifact pipeline and runtime trust chain"
   },
   "documents": {
-    "plan": "Docs/Superpowers/Plans/2026-07-31-phase57-adaptive-semantic-reflection.md",
-    "closeout": "Docs/Phase57/P57.5_Adaptive_Semantic_Implementation_Report.md",
-    "p57_8_spec": "Docs/Superpowers/Specs/2026-08-01-phase57-editor-precompiled-artifact-pipeline-design.md",
-    "p57_8_plan": "Docs/Superpowers/Plans/2026-08-01-phase57-editor-precompiled-artifact-pipeline.md",
-    "latest_evidence": "Docs/Phase57/P57.8_Editor_Precompiled_Artifact_Pipeline.md"
+    "plan": "Docs/Superpowers/Plans/2026-08-01-phase57-editor-precompiled-artifact-pipeline.md",
+    "closeout": "Docs/Phase57/P57.8_Editor_Precompiled_Artifact_Pipeline.md"
   },
   "batches": [
     {
@@ -141,7 +138,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "Plan and implement P57.9 controlled Wasmtime compiler/toolchain optimization; keep frozen 12-kernel inputs unchanged and mark P57-D06 Verified only after the formal gate passes.",
-  "revision": 11,
-  "updated_at_utc": "2026-08-01T00:45:12.5274341+00:00"
+  "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
+  "revision": 12,
+  "updated_at_utc": "2026-08-01T00:52:00.7636868+00:00"
 }
