@@ -22,7 +22,7 @@ float UAvidScriptBindingsTestObject::ReflectionFallbackAddFloat(
 }
 
 FVector UAvidScriptBindingsTestObject::FastPathVectorValue(
-	const FVector Value) const
+	const FVector& Value) const
 {
 	return Value * 2.0 + FVector(1.0, 1.0, 1.0);
 }

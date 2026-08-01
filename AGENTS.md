@@ -1774,3 +1774,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a Wasmtime source lookup again passed `AvidScriptWasmtimeApi.*` as a positional Windows path, producing OS error 123 and invalidating the probe.
 - Prevention: positional paths are always literal directories or files. Filename patterns belong only in `-g 'AvidScriptWasmtimeApi.*'`, even for quick diagnostics already covered by an earlier recurrence note.
+
+### 2026-08-01: performance fixtures must preserve UFUNCTION parameter qualifiers
+
+- Mistake: the prepared FVector automation fixture used a by-value parameter while the formal benchmark fixture used `const FVector&`, so the test passed without exercising UE 5.8's `CPF_OutParm | CPF_ReferenceParm | CPF_ConstParm` layout and its required `FOutParmRec` chain.
+- Prevention: reflection performance fixtures mirror the formal UFUNCTION signature exactly, including const/reference/out qualifiers. A newly qualified prepared shape must first fail through the real generated thunk, then prove both ProcessEvent and native results before formal sampling.

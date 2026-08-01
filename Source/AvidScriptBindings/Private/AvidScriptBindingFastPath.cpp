@@ -330,6 +330,24 @@ bool IsTrivialVectorProperty(
 		CastField<FStructProperty>(Property);
 	const int32 PropertyAlignment =
 		Property == nullptr ? 0 : Property->GetMinAlignment();
+	const bool bInputByValue =
+		!bReturnValue
+		&& Property != nullptr
+		&& Property->HasAllPropertyFlags(CPF_Parm)
+		&& !Property->HasAnyPropertyFlags(
+			CPF_OutParm | CPF_ReturnParm | CPF_ReferenceParm | CPF_ConstParm);
+	const bool bInputByConstReference =
+		!bReturnValue
+		&& Property != nullptr
+		&& Property->HasAllPropertyFlags(
+			CPF_Parm | CPF_OutParm | CPF_ReferenceParm | CPF_ConstParm)
+		&& !Property->HasAnyPropertyFlags(CPF_ReturnParm);
+	const bool bReturnFlagsValid =
+		bReturnValue
+		&& Property != nullptr
+		&& Property->HasAllPropertyFlags(
+			CPF_Parm | CPF_OutParm | CPF_ReturnParm)
+		&& !Property->HasAnyPropertyFlags(CPF_ReferenceParm | CPF_ConstParm);
 	if (StructProperty == nullptr
 		|| StructProperty->Struct != TBaseStructure<FVector>::Get()
 		|| Property->ArrayDim != 1
@@ -338,14 +356,7 @@ bool IsTrivialVectorProperty(
 		|| PropertyAlignment <= 0
 		|| PropertyAlignment > alignof(FVector)
 		|| Property->GetOwnerStruct() != &Function
-		|| !Property->HasAllPropertyFlags(
-			bReturnValue
-				? CPF_Parm | CPF_OutParm | CPF_ReturnParm
-				: CPF_Parm)
-		|| Property->HasAnyPropertyFlags(
-			bReturnValue
-				? CPF_ReferenceParm | CPF_ConstParm
-				: CPF_OutParm | CPF_ReturnParm | CPF_ReferenceParm | CPF_ConstParm)
+		|| (!bInputByValue && !bInputByConstReference && !bReturnFlagsValid)
 		|| !Property->HasAllPropertyFlags(
 			CPF_ZeroConstructor | CPF_IsPlainOldData | CPF_NoDestructor))
 	{
@@ -413,7 +424,8 @@ bool IsTrivialObjectProperty(
 bool IsPreparedNativeFunctionBase(
 	const UFunction& Function,
 	const int32 ExpectedParameterCount,
-	const int32 ExpectedFrameSize)
+	const int32 ExpectedFrameSize,
+	const bool bHasSupportedOutParameters)
 {
 	const EFunctionFlags RequiredFlags =
 		FUNC_Native | FUNC_Final | FUNC_Public;
@@ -432,11 +444,12 @@ bool IsPreparedNativeFunctionBase(
 		| FUNC_BlueprintCosmetic
 		| FUNC_EditorOnly
 		| FUNC_UbergraphFunction
-		| FUNC_DLLImport
-		| FUNC_HasOutParms;
+		| FUNC_DLLImport;
 	const UClass* OwnerClass = Function.GetOwnerClass();
 	return Function.HasAllFunctionFlags(RequiredFlags)
 		&& !Function.HasAnyFunctionFlags(RejectedFlags)
+		&& (bHasSupportedOutParameters
+			|| !Function.HasAnyFunctionFlags(FUNC_HasOutParms))
 		&& Function.GetNativeFunc() != nullptr
 		&& OwnerClass != nullptr
 		&& OwnerClass->HasAllClassFlags(CLASS_Native)
@@ -552,6 +565,14 @@ bool InvokePreparedTrivialFrame(
 			nullptr,
 			Plan.Function->ChildProperties);
 		Stack.Code = nullptr;
+		FOutParmRec InputOutParm = {};
+		if (Plan.InputOutParmProperty != nullptr)
+		{
+			InputOutParm.Property = Plan.InputOutParmProperty;
+			InputOutParm.PropAddr =
+				Frame + Plan.ParameterFrameOffsets[0];
+			Stack.OutParms = &InputOutParm;
+		}
 		TGuardValue<UFunction*> NativeFunctionGuard(
 			Stack.CurrentNativeFunction,
 			Plan.Function);
@@ -746,6 +767,10 @@ bool TryBuildFastPath(
 		{
 			return false;
 		}
+		if (Spec.Parameters[0].Property->HasAnyPropertyFlags(CPF_OutParm))
+		{
+			Candidate.InputOutParmProperty = Spec.Parameters[0].Property;
+		}
 	}
 	else if (bObjectShape)
 	{
@@ -786,7 +811,8 @@ bool TryBuildFastPath(
 		&& IsPreparedNativeFunctionBase(
 			*Spec.Function,
 			Spec.Parameters.Num() + 1,
-			Spec.FrameSize);
+			Spec.FrameSize,
+			Candidate.InputOutParmProperty != nullptr);
 	if (bQualifiedNative)
 	{
 		Candidate.bAdaptiveNativeEligible = true;

@@ -24,7 +24,7 @@ public:
 	float ReflectionFallbackAddFloat(float Left, float Right) const;
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
-	FVector FastPathVectorValue(FVector Value) const;
+	FVector FastPathVectorValue(const FVector& Value) const;
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Tests")
 	UObject* FastPathObjectRoundtrip(UObject* Value) const;

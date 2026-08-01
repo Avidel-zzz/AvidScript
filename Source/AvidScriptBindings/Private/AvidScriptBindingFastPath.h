@@ -56,6 +56,7 @@ struct FFastPathPlan
 	UFunction* Function = nullptr;
 	UClass* NativeDirectOwnerClass = nullptr;
 	FNativeFuncPtr NativeFunction = nullptr;
+	FProperty* InputOutParmProperty = nullptr;
 	bool bAdaptiveNativeEligible = false;
 	FFastPathThunk SemanticThunk = nullptr;
 	FFastPathThunk NativeDirectThunk = nullptr;
