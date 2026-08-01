@@ -130,18 +130,30 @@ public:
 		const FString& ClassPath);
 };
 
+class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorLayout
+{
+public:
+	static bool ValidateStructWireGraph(
+		const TArray<FAvidScriptBindingTypeModel>& Types,
+		FString& OutErrorSource);
+};
+
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorIdentity
 {
 public:
 	static FString MakeTypeIdentity(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
-		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
+		int32 WireSize = INDEX_NONE,
+		int32 WireAlignment = INDEX_NONE);
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
-		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {});
+		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
+		int32 WireSize = INDEX_NONE,
+		int32 WireAlignment = INDEX_NONE);
 
 	static FString MakeClassReferenceIdentity(
 		const FString& ClassPath,

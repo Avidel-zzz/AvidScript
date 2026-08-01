@@ -1300,6 +1300,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
 {
+	OutSource.Empty();
 	TArray<const FAvidScriptBindingClassReferenceModel*>
 		ActorLifecycleClassReferences;
 	TSet<FString> FactoryClassReferenceIds;
@@ -1457,6 +1458,14 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			CSharpTypeNames.Add(Name);
 			bDescriptorHasActorProxy |= Type.Kind == TEXT("object_handle") && Name == TEXT("AActor");
 		}
+	}
+	if (Package.SchemaVersion >= 9
+		&& !FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph(
+			Package.Types,
+			OutErrorSource))
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		return false;
 	}
 	const FAvidScriptBindingTypeModel* const ActorType = FindRenderedType(
 		TypesByCanonical,

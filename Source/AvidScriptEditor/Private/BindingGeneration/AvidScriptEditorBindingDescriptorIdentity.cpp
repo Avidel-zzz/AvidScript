@@ -3,23 +3,31 @@
 FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeIdentity(
 	const FString& CanonicalType,
 	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
-	const TArray<FAvidScriptBindingStructFieldModel>& StructFields)
+	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
+	const int32 WireSize,
+	const int32 WireAlignment)
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 		CanonicalType,
 		EnumValues,
-		StructFields);
+		StructFields,
+		WireSize,
+		WireAlignment);
 }
 
 FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 	const FString& CanonicalType,
 	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
-	const TArray<FAvidScriptBindingStructFieldModel>& StructFields)
+	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
+	const int32 WireSize,
+	const int32 WireAlignment)
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 		CanonicalType,
 		EnumValues,
-		StructFields);
+		StructFields,
+		WireSize,
+		WireAlignment);
 }
 
 FString FAvidScriptEditorBindingDescriptorIdentity::MakeObjectFactoryIdentity(

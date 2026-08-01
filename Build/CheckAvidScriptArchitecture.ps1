@@ -1045,6 +1045,8 @@ $ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/
 $ReflectedTypePolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedTypePolicy.cpp'
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
 $BindingDescriptorModelSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorModel.cpp'
+$EditorBindingDescriptorIdentityHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.h'
+$EditorBindingDescriptorIdentitySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
 $ObjectFactoryPolicyHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectFactoryPolicy.h'
@@ -1102,11 +1104,17 @@ if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedProp
 }
 foreach ($RequiredStructWireDescriptorContract in @(
     'FAvidScriptBindingStructFieldModel',
+	'FAvidScriptBindingDescriptorLayout',
     'StructFields',
     'ValidateAvidScriptBindingStructWireGraph',
+	'IsAvidScriptBindingPowerOfTwo',
+	'IsCanonicalAvidScriptBindingStructWireLeaf',
+	'ExpectedWireOffset',
     'Depth > 8',
     'InOutNodes > 128',
     'Type.Size > 4096',
+	'TEXT("struct_wire_type_size")',
+	'TEXT("struct_wire_type_alignment")',
     'TEXT("descriptor_selection_v9")',
     'TEXT("descriptor_package_v9")'
 )) {
@@ -1114,6 +1122,16 @@ foreach ($RequiredStructWireDescriptorContract in @(
         -not $BindingDescriptorSource.Contains($RequiredStructWireDescriptorContract)) {
         Add-Violation "schema v9 recursive struct descriptor is missing $RequiredStructWireDescriptorContract"
     }
+}
+foreach ($RequiredStructWireIdentityContract in @(
+	'WireSize',
+	'WireAlignment'
+)) {
+	if (-not $BindingDescriptorHeader.Contains($RequiredStructWireIdentityContract) -or
+		-not $EditorBindingDescriptorIdentityHeader.Contains($RequiredStructWireIdentityContract) -or
+		-not $EditorBindingDescriptorIdentitySource.Contains($RequiredStructWireIdentityContract)) {
+		Add-Violation "schema v9 struct-wire identity must bind and forward $RequiredStructWireIdentityContract"
+	}
 }
 foreach ($RequiredStructWireProjectionContract in @(
     'TEXT("struct_wire:")',
@@ -1128,9 +1146,10 @@ foreach ($RequiredStructWireProjectionContract in @(
         Add-Violation "schema v9 recursive struct projection is missing $RequiredStructWireProjectionContract"
     }
 }
-if (-not $BindingDescriptorModelSource.Contains('Writer->WriteArrayStart(TEXT("fields"))') -or
+if (-not $BindingDescriptorModelSource.Contains('FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph') -or
+	-not $BindingDescriptorModelSource.Contains('Writer->WriteArrayStart(TEXT("fields"))') -or
     -not $BindingDescriptorModelSource.Contains('Writer->WriteValue(TEXT("wire_offset"), Field.WireOffset)')) {
-    Add-Violation 'schema v9 serializer must publish the immutable recursive struct field graph'
+    Add-Violation 'schema v9 serializer must validate and publish the immutable recursive struct field graph'
 }
 foreach ($RequiredProfileGeneratorContract in @('MakeEngineGameplayProfile', 'GenerateFromProfile')) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredProfileGeneratorContract)) {
@@ -1725,6 +1744,8 @@ foreach ($RequiredLegacyClassReferenceRendererContract in @(
 foreach ($RequiredStructWireRendererContract in @(
     'AppendStructWireDeclarations',
     'FindRenderedTypeById',
+	'FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph',
+	'OutSource.Empty()',
     '[StructLayout(LayoutKind.Explicit, Size = %d)]',
     '[FieldOffset(%d)]',
 	'__avidscript_bool_%d',

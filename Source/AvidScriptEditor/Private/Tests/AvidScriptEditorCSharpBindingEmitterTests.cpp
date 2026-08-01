@@ -41,6 +41,41 @@ bool SerializeJsonObject(const TSharedRef<FJsonObject>& Object, FString& OutJson
 	return FJsonSerializer::Serialize(Object, Writer);
 }
 
+bool SerializeTamperedDescriptorType(
+	const FString& DescriptorJson,
+	const FAvidScriptBindingPackageModel& TamperedPackage,
+	const FString& CanonicalType,
+	TFunctionRef<void(FJsonObject&)> MutateType,
+	FString& OutJson)
+{
+	TSharedPtr<FJsonObject> Root;
+	if (!ParseJsonObject(DescriptorJson, Root))
+	{
+		return false;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* TypeValues = nullptr;
+	if (!Root->TryGetArrayField(TEXT("types"), TypeValues) || TypeValues == nullptr)
+	{
+		return false;
+	}
+	for (const TSharedPtr<FJsonValue>& TypeValue : *TypeValues)
+	{
+		const TSharedPtr<FJsonObject> TypeObject = TypeValue.IsValid()
+			? TypeValue->AsObject()
+			: nullptr;
+		if (TypeObject.IsValid()
+			&& TypeObject->GetStringField(TEXT("canonical_type")) == CanonicalType)
+		{
+			MutateType(*TypeObject);
+			Root->SetStringField(TEXT("selection_hash"), TamperedPackage.SelectionHash);
+			Root->SetStringField(TEXT("package_hash"), TamperedPackage.PackageHash);
+			return SerializeJsonObject(Root.ToSharedRef(), OutJson);
+		}
+	}
+	return false;
+}
+
 FString MakePackageTestRoot()
 {
 	return FPaths::ConvertRelativePathToFull(FPaths::Combine(
@@ -340,6 +375,180 @@ bool FAvidScriptEditorCSharpBindingEmitterStructWireTest::RunTest(const FString&
 			SecondErrorCategory,
 			SecondErrorSource));
 	TestEqual(TEXT("Recursive fixed-width USTRUCT source is deterministic"), SecondSource, FirstSource);
+
+	const FAvidScriptBindingTypeModel* const OriginalRootType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("struct_wire")
+				&& Type.CppType == TEXT("FAvidScriptStructWireRootTestType");
+		});
+	if (!TestNotNull(TEXT("Struct-wire root type is available for identity checks"), OriginalRootType))
+	{
+		return false;
+	}
+	const FString OriginalLayoutStableId = FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+		OriginalRootType->CanonicalType,
+		OriginalRootType->EnumValues,
+		OriginalRootType->StructFields,
+		OriginalRootType->Size,
+		OriginalRootType->Alignment);
+	TestTrue(
+		TEXT("Struct-wire stable identity changes with wire size"),
+		OriginalLayoutStableId != FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			OriginalRootType->CanonicalType,
+			OriginalRootType->EnumValues,
+			OriginalRootType->StructFields,
+			OriginalRootType->Size + 4,
+			OriginalRootType->Alignment));
+	TestTrue(
+		TEXT("Struct-wire stable identity changes with wire alignment"),
+		OriginalLayoutStableId != FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			OriginalRootType->CanonicalType,
+			OriginalRootType->EnumValues,
+			OriginalRootType->StructFields,
+			OriginalRootType->Size,
+			OriginalRootType->Alignment * 2));
+
+	const auto ExpectParserLayoutTamperRejected = [this, &DescriptorJson, &Package](
+		const FString& Label,
+		const FString& CanonicalType,
+		TFunctionRef<void(FAvidScriptBindingTypeModel&)> MutateModel,
+		TFunctionRef<void(FJsonObject&)> MutateJson)
+	{
+		FAvidScriptBindingPackageModel TamperedPackage = Package;
+		FAvidScriptBindingTypeModel* Type = TamperedPackage.Types.FindByPredicate(
+			[&CanonicalType](const FAvidScriptBindingTypeModel& Candidate)
+			{
+				return Candidate.CanonicalType == CanonicalType;
+			});
+		if (!TestNotNull(Label + TEXT(" type exists"), Type))
+		{
+			return;
+		}
+		MutateModel(*Type);
+		TamperedPackage.SelectionHash =
+			FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(TamperedPackage);
+		TamperedPackage.PackageHash =
+			FAvidScriptBindingDescriptorIdentity::MakePackageHash(TamperedPackage);
+
+		FString TamperedJson;
+		if (!TestTrue(
+				Label + TEXT(" descriptor JSON is rewritten with valid outer hashes"),
+				SerializeTamperedDescriptorType(
+					DescriptorJson,
+					TamperedPackage,
+					CanonicalType,
+					MutateJson,
+					TamperedJson)))
+		{
+			return;
+		}
+		FAvidScriptBindingPackageModel ParsedTamper;
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestFalse(
+			Label + TEXT(" parser rejects canonical-layout tamper"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				TamperedJson,
+				ParsedTamper,
+				ErrorCategory,
+				ErrorSource));
+	};
+	ExpectParserLayoutTamperRejected(
+		TEXT("Struct-wire bool alignment tamper"),
+		TEXT("scalar:bool"),
+		[](FAvidScriptBindingTypeModel& Type) { Type.Alignment = 2; },
+		[](FJsonObject& Type) { Type.SetNumberField(TEXT("alignment"), 2); });
+	ExpectParserLayoutTamperRejected(
+		TEXT("Struct-wire bool size tamper"),
+		TEXT("scalar:bool"),
+		[](FAvidScriptBindingTypeModel& Type) { Type.Size = 1; },
+		[](FJsonObject& Type) { Type.SetNumberField(TEXT("size"), 1); });
+	ExpectParserLayoutTamperRejected(
+		TEXT("Struct-wire parent size tamper"),
+		OriginalRootType->CanonicalType,
+		[](FAvidScriptBindingTypeModel& Type) { Type.Size += 4; },
+		[](FJsonObject& Type)
+		{
+			Type.SetNumberField(TEXT("size"), Type.GetNumberField(TEXT("size")) + 4);
+		});
+	ExpectParserLayoutTamperRejected(
+		TEXT("Struct-wire parent alignment tamper"),
+		OriginalRootType->CanonicalType,
+		[](FAvidScriptBindingTypeModel& Type) { Type.Alignment *= 2; },
+		[](FJsonObject& Type)
+		{
+			Type.SetNumberField(TEXT("alignment"), Type.GetNumberField(TEXT("alignment")) * 2);
+		});
+
+	const auto ExpectRendererLayoutTamperRejected = [this, &Package](
+		const FString& Label,
+		TFunctionRef<void(FAvidScriptBindingPackageModel&)> Mutate)
+	{
+		FAvidScriptBindingPackageModel TamperedPackage = Package;
+		Mutate(TamperedPackage);
+		FString TamperedSource(TEXT("stale-source"));
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestFalse(
+			Label + TEXT(" renderer fails closed"),
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				TamperedPackage,
+				TEXT("struct-wire-layout-tamper"),
+				TamperedSource,
+				ErrorCategory,
+				ErrorSource));
+		TestEqual(
+			Label + TEXT(" renderer emits no partial source"),
+			TamperedSource,
+			FString());
+	};
+	ExpectRendererLayoutTamperRejected(
+		TEXT("Struct-wire bool alignment tamper"),
+		[](FAvidScriptBindingPackageModel& TamperedPackage)
+		{
+			TamperedPackage.Types.FindByPredicate([](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CanonicalType == TEXT("scalar:bool");
+			})->Alignment = 2;
+		});
+	ExpectRendererLayoutTamperRejected(
+		TEXT("Struct-wire bool size tamper"),
+		[](FAvidScriptBindingPackageModel& TamperedPackage)
+		{
+			TamperedPackage.Types.FindByPredicate([](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CanonicalType == TEXT("scalar:bool");
+			})->Size = 1;
+		});
+	ExpectRendererLayoutTamperRejected(
+		TEXT("Struct-wire field gap tamper"),
+		[](FAvidScriptBindingPackageModel& TamperedPackage)
+		{
+			FAvidScriptBindingTypeModel* Type = TamperedPackage.Types.FindByPredicate([](const FAvidScriptBindingTypeModel& Candidate)
+			{
+				return Candidate.CppType == TEXT("FAvidScriptStructWireRootTestType");
+			});
+			Type->StructFields[2].WireOffset += 1;
+		});
+	ExpectRendererLayoutTamperRejected(
+		TEXT("Struct-wire parent size tamper"),
+		[](FAvidScriptBindingPackageModel& TamperedPackage)
+		{
+			TamperedPackage.Types.FindByPredicate([](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CppType == TEXT("FAvidScriptStructWireRootTestType");
+			})->Size += 4;
+		});
+	ExpectRendererLayoutTamperRejected(
+		TEXT("Struct-wire parent alignment tamper"),
+		[](FAvidScriptBindingPackageModel& TamperedPackage)
+		{
+			TamperedPackage.Types.FindByPredicate([](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CppType == TEXT("FAvidScriptStructWireRootTestType");
+			})->Alignment *= 2;
+		});
 
 	FAvidScriptBindingPackageModel Tampered = Package;
 	FAvidScriptBindingTypeModel* RootType = Tampered.Types.FindByPredicate(

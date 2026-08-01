@@ -54,6 +54,14 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 	FString& OutJson)
 {
 	OutJson.Empty();
+	FString StructWireLayoutError;
+	if (Package.SchemaVersion >= 9
+		&& !FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph(
+			Package.Types,
+			StructWireLayoutError))
+	{
+		return false;
+	}
 	const FString NativeDirectIdentitySuffix =
 		FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 			FString(),
