@@ -190,7 +190,7 @@ bool FAvidScriptEditorBindingSelectionFilteredCompatibilityTest::RunTest(const F
 	Profile.PackageName = TEXT("avidscript.engine.filtered");
 	FAvidScriptReflectedClassSelection ActorRule;
 	ActorRule.OwnerClassPath = TEXT("/Script/Engine.Actor");
-	ActorRule.IncludeFunctions = { TEXT("K2_GetActorLocation"), TEXT("K2_SetActorLocation") };
+	ActorRule.IncludeFunctions = { TEXT("GetAttachedActors"), TEXT("K2_GetActorLocation") };
 	Profile.Classes.Add(MoveTemp(ActorRule));
 
 	TArray<FAvidScriptReflectedFunctionSelection> Selections;
@@ -209,8 +209,8 @@ bool FAvidScriptEditorBindingSelectionFilteredCompatibilityTest::RunTest(const F
 	{
 		TestFalse(TEXT("Discovery compatibility issue is non-fatal"), Result.Issues[0].bFatal);
 		TestEqual(TEXT("Unsupported signature has stable category"), Result.Issues[0].Category, FString(TEXT("unsupported_property")));
-		TestEqual(TEXT("Rejected function is identified"), Result.Issues[0].FunctionName, FName(TEXT("K2_SetActorLocation")));
-		TestTrue(TEXT("Unsupported FHitResult is identified"), Result.Issues[0].Source.Contains(TEXT("FHitResult")));
+		TestEqual(TEXT("Rejected function is identified"), Result.Issues[0].FunctionName, FName(TEXT("GetAttachedActors")));
+		TestEqual(TEXT("Unsupported TArray is identified exactly"), Result.Issues[0].Source, FString(TEXT("TArray")));
 	}
 
 	return true;
@@ -508,7 +508,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 340 functions including FName inputs"), FirstSelectionResult.AcceptedFunctionCount, 340);
+	TestEqual(TEXT("Gameplay profile accepts 349 functions including nine schema v9 struct-wire additions"), FirstSelectionResult.AcceptedFunctionCount, 349);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),

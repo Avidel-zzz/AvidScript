@@ -1276,11 +1276,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Unsupported schema version identifies its header field"),
+		TEXT("Schema v10 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 9);
+			Root->SetNumberField(TEXT("schema_version"), 10);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2859,17 +2859,17 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 
 	const FAvidScriptReflectedFunctionSelection UnsupportedSelection{
 		TEXT("/Script/Engine.Actor"),
-		TEXT("K2_SetActorLocation")
+		TEXT("GetAttachedActors")
 	};
 	TestFalse(
-		TEXT("Unsupported FHitResult projection fails closed"),
+		TEXT("Unsupported TArray projection fails closed"),
 		FAvidScriptEditorBindingDescriptorGenerator::Generate(
 			TEXT("avidscript.engine.core"),
 			{ UnsupportedSelection },
 			Json,
 			Result));
-	TestEqual(TEXT("Unsupported struct reports property category"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
-	TestTrue(TEXT("Unsupported property identifies FHitResult"), Result.ErrorSource.Contains(TEXT("FHitResult")));
+	TestEqual(TEXT("Unsupported container reports property category"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
+	TestEqual(TEXT("Unsupported property identifies TArray exactly"), Result.ErrorSource, FString(TEXT("TArray")));
 
 	const FAvidScriptReflectedFunctionSelection MissingSelection{
 		TEXT("/Script/Engine.Actor"),
