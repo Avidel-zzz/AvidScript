@@ -11,6 +11,8 @@
 #include "AvidScriptBindingsTestTypes.h"
 
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
+#include "UObject/Script.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
@@ -85,6 +87,7 @@ public:
 	bool Adopt(FAvidScriptObjectRegistry&, UObject&, const FAvidScriptObjectHandle&, EAvidScriptObjectFactoryKind, FAvidScriptObjectHandleResult&) override { return false; }
 	bool Borrow(FAvidScriptObjectRegistry& Registry, UObject& Object, FAvidScriptObjectHandleResult& OutResult) override
 	{
+		++BorrowCount;
 		OutResult.Handle = Registry.AcquireBorrowedObject(&Object, OutResult, false);
 		return OutResult.Handle.IsValid();
 	}
@@ -94,6 +97,8 @@ public:
 	}
 	bool Owns(const FAvidScriptObjectHandle&, const UObject*) const override { return false; }
 	void Cleanup(FAvidScriptObjectRegistry&) override {}
+
+	int32 BorrowCount = 0;
 };
 
 using namespace UE::AvidScript::BindingPrivate;
@@ -132,6 +137,19 @@ FValueCodecProgram MakeRecursiveStructCodec(FProperty* Property, EValueCodecDire
 		Child.WireOffset = Nested.Children.Num() == 1 ? 0 : 4; Child.WireSize = 4; Child.WireAlignment = 4; Child.GuestStorageSize = 4; Child.Name = Leaf.Key;
 	}
 	return Program;
+}
+
+FNativeFuncPtr GRecursiveStructOriginalNative = nullptr;
+int32 GRecursiveStructNativeInvocationCount = 0;
+
+void CountRecursiveStructNativeInvocation(
+	UObject* Context,
+	FFrame& Stack,
+	RESULT_DECL)
+{
+	++GRecursiveStructNativeInvocationCount;
+	check(GRecursiveStructOriginalNative != nullptr);
+	GRecursiveStructOriginalNative(Context, Stack, RESULT_PARAM);
 }
 } // namespace
 
@@ -395,10 +413,91 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	TArray<uint8> Scratch;
 	Scratch.SetNumUninitialized(Program.RequiredScratchSize);
 	UAvidScriptBindingsTestObject* Receiver = NewObject<UAvidScriptBindingsTestObject>();
-	const uint64 Arguments[] = { 0, 0, 32, 96, 160, 224 };
 	FAvidScriptDynamicHostCallResult Result;
+
+	const FNativeFuncPtr OriginalNative = Function->GetNativeFunc();
+	if (!TestTrue(TEXT("Recursive fixture has a native implementation"), OriginalNative != nullptr))
+	{
+		return false;
+	}
+	GRecursiveStructOriginalNative = OriginalNative;
+	GRecursiveStructNativeInvocationCount = 0;
+	{
+		Function->SetNativeFunc(&CountRecursiveStructNativeInvocation);
+		ON_SCOPE_EXIT
+		{
+			Function->SetNativeFunc(OriginalNative);
+			GRecursiveStructOriginalNative = nullptr;
+		};
+
+		const int32 InitialBorrowCount = Ownership.BorrowCount;
+		const int32 InitialLiveHandleCount = Registry.GetLiveHandleCount();
+		const TArray<uint8> SameAddressGuestSnapshot = GuestMemory.Bytes;
+		const uint64 SameAddressArguments[] = { 0, 0, 32, 96, 160, 160 };
+		TestFalse(
+			TEXT("Identical out and return ranges fail before ProcessEvent"),
+			InvokePreparedDynamicReflection(
+				&Cell,
+				*Receiver,
+				SameAddressArguments,
+				&GuestMemory,
+				Context,
+				Scratch,
+				Result));
+		TestTrue(
+			TEXT("Identical output ranges report the overlap contract"),
+			Result.Details.Contains(TEXT("binding_guest_output_overlap")));
+		TestEqual(
+			TEXT("Identical output ranges do not execute the function"),
+			GRecursiveStructNativeInvocationCount,
+			0);
+		TestEqual(
+			TEXT("Identical output ranges do not acquire object borrows"),
+			Ownership.BorrowCount,
+			InitialBorrowCount);
+		TestEqual(
+			TEXT("Identical output ranges do not create ownership leases"),
+			Registry.GetLiveHandleCount(),
+			InitialLiveHandleCount);
+		TestTrue(
+			TEXT("Identical output ranges leave guest memory unchanged"),
+			GuestMemory.Bytes == SameAddressGuestSnapshot);
+
+		const TArray<uint8> PartialGuestSnapshot = GuestMemory.Bytes;
+		const uint64 PartialArguments[] = { 0, 0, 32, 96, 160, 180 };
+		TestFalse(
+			TEXT("Partially overlapping out and return ranges fail before ProcessEvent"),
+			InvokePreparedDynamicReflection(
+				&Cell,
+				*Receiver,
+				PartialArguments,
+				&GuestMemory,
+				Context,
+				Scratch,
+				Result));
+		TestTrue(
+			TEXT("Partial output overlap reports the overlap contract"),
+			Result.Details.Contains(TEXT("binding_guest_output_overlap")));
+		TestEqual(
+			TEXT("Partial output overlap does not execute the function"),
+			GRecursiveStructNativeInvocationCount,
+			0);
+		TestEqual(
+			TEXT("Partial output overlap does not acquire object borrows"),
+			Ownership.BorrowCount,
+			InitialBorrowCount);
+		TestEqual(
+			TEXT("Partial output overlap does not create ownership leases"),
+			Registry.GetLiveHandleCount(),
+			InitialLiveHandleCount);
+		TestTrue(
+			TEXT("Partial output overlap leaves guest memory unchanged"),
+			GuestMemory.Bytes == PartialGuestSnapshot);
+	}
+
+	const uint64 Arguments[] = { 0, 0, 32, 96, 132, 168 };
 	if (!TestTrue(
-		TEXT("Recursive prepared ProcessEvent succeeds"),
+		TEXT("Adjacent ref, out and return ranges remain valid"),
 		InvokePreparedDynamicReflection(&Cell, *Receiver, Arguments, &GuestMemory, Context, Scratch, Result)))
 	{
 		AddError(Result.Details);
@@ -413,8 +512,8 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	TestEqual(TEXT("Prepared path records one ProcessEvent"), Instrumentation.SemanticProcessEventCount, 1ull);
 	uint32 OutputSlot = 0;
 	uint32 OutputGeneration = 0;
-	FMemory::Memcpy(&OutputSlot, GuestMemory.Bytes.GetData() + 160 + 20, 4);
-	FMemory::Memcpy(&OutputGeneration, GuestMemory.Bytes.GetData() + 160 + 24, 4);
+	FMemory::Memcpy(&OutputSlot, GuestMemory.Bytes.GetData() + 132 + 20, 4);
+	FMemory::Memcpy(&OutputGeneration, GuestMemory.Bytes.GetData() + 132 + 24, 4);
 	UObject* ResolvedOutput = nullptr;
 	FString ResolveDetails;
 	TestTrue(TEXT("Nested object output publishes a capability"), ResolveObjectHandle(OutputSlot, OutputGeneration, UObject::StaticClass(), Context, false, ResolvedOutput, ResolveDetails));

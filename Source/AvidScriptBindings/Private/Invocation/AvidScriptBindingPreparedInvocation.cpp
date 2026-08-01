@@ -31,6 +31,13 @@ bool IsReflectedProgram(const FInvocationCodecProgram& Program)
 			|| Program.Kind
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite);
 }
+
+struct FGuestOutputRange
+{
+	uint64 Begin = 0;
+	uint64 End = 0;
+	FString Source;
+};
 } // namespace
 
 bool InvokePreparedDynamicReflection(
@@ -400,6 +407,121 @@ bool InvokePreparedDynamicReflection(
 			TEXT("The prepared ProcessEvent program has no UFunction."));
 		return false;
 	}
+
+	TArray<uint32, TInlineAllocator<16>> ParameterGuestAddresses;
+	ParameterGuestAddresses.SetNumZeroed(Program->Parameters.Num());
+	uint32 ReturnGuestAddress = 0;
+	TArray<FGuestOutputRange, TInlineAllocator<16>> WritableGuestRanges;
+	const auto PreflightGuestOutput = [&Arguments,
+		GuestMemory,
+		&OutResult,
+		&Details,
+		&WritableGuestRanges](
+		const FValueCodecProgram& Value,
+		const FString& FailureCategory,
+		const FString& Source,
+		uint32& OutGuestAddress)
+	{
+		OutGuestAddress = 0;
+		if (GuestMemory == nullptr || Value.GuestStorageSize <= 0)
+		{
+			Details = GuestMemory == nullptr
+				? TEXT("Writable guest output requires guest memory.")
+				: TEXT("The cached guest output storage size is invalid.");
+			SetDispatchFailure(
+				OutResult,
+				FailureCategory,
+				Source,
+				Details);
+			return false;
+		}
+
+		const uint64 Begin = Arguments[Value.ArgumentOffset];
+		const uint64 StorageSize = static_cast<uint64>(Value.GuestStorageSize);
+		if (Begin > MAX_uint64 - StorageSize)
+		{
+			Details = TEXT("The guest output address range overflows 64-bit arithmetic.");
+			SetDispatchFailure(
+				OutResult,
+				FailureCategory,
+				Source,
+				Details);
+			return false;
+		}
+		const uint64 End = Begin + StorageSize;
+		if (!ResolveGuestAddress(
+				Begin,
+				static_cast<uint32>(StorageSize),
+				OutGuestAddress,
+				Details)
+			|| !PreflightValueOutput(
+				Value,
+				OutGuestAddress,
+				*GuestMemory,
+				Details))
+		{
+			SetDispatchFailure(
+				OutResult,
+				FailureCategory,
+				Source,
+				Details);
+			return false;
+		}
+
+		for (const FGuestOutputRange& Existing : WritableGuestRanges)
+		{
+			if (Begin < Existing.End && Existing.Begin < End)
+			{
+				Details = FString::Printf(
+					TEXT("Writable guest output '%s' range [%llu, %llu) overlaps '%s' range [%llu, %llu)."),
+					*Source,
+					static_cast<unsigned long long>(Begin),
+					static_cast<unsigned long long>(End),
+					*Existing.Source,
+					static_cast<unsigned long long>(Existing.Begin),
+					static_cast<unsigned long long>(Existing.End));
+				SetDispatchFailure(
+					OutResult,
+					TEXT("binding_guest_output_overlap"),
+					Source,
+					Details);
+				return false;
+			}
+		}
+		WritableGuestRanges.Add(FGuestOutputRange{ Begin, End, Source });
+		return true;
+	};
+
+	for (int32 ParameterIndex = 0;
+		ParameterIndex < Program->Parameters.Num();
+		++ParameterIndex)
+	{
+		const FValueCodecProgram& Parameter =
+			Program->Parameters[ParameterIndex];
+		if (Parameter.Direction != EValueCodecDirection::Ref
+			&& Parameter.Direction != EValueCodecDirection::Out)
+		{
+			continue;
+		}
+		if (!PreflightGuestOutput(
+				Parameter,
+				TEXT("binding_guest_output_preflight_failed"),
+				Program->DebugPath + TEXT(":") + Parameter.Name,
+				ParameterGuestAddresses[ParameterIndex]))
+		{
+			return false;
+		}
+	}
+	if (Program->ReturnValue.Kind != EValueCodecKind::Void
+		&& !PreflightGuestOutput(
+			Program->ReturnValue,
+			TEXT("binding_return_preflight_failed"),
+			Program->DebugPath,
+			ReturnGuestAddress))
+	{
+		return false;
+	}
+
 	const UPTRINT ScratchAddress =
 		reinterpret_cast<UPTRINT>(InvocationScratch.GetData());
 	const UPTRINT FrameAddress = Align(
@@ -423,70 +545,20 @@ bool InvokePreparedDynamicReflection(
 		Program->Function->DestroyStruct(Frame);
 	};
 
-	for (const FValueCodecProgram& Parameter : Program->Parameters)
+	for (int32 ParameterIndex = 0;
+		ParameterIndex < Program->Parameters.Num();
+		++ParameterIndex)
 	{
-		if (Parameter.Direction != EValueCodecDirection::Ref
-			&& Parameter.Direction != EValueCodecDirection::Out)
-		{
-			continue;
-		}
-		uint32 GuestAddress = 0;
-		if (GuestMemory == nullptr
-			|| !ResolveGuestAddress(
-				Arguments[Parameter.ArgumentOffset],
-				static_cast<uint32>(Parameter.WireSize),
-				GuestAddress,
-				Details)
-			|| !PreflightValueOutput(
-				Parameter,
-				GuestAddress,
-				*GuestMemory,
-				Details))
-		{
-			SetDispatchFailure(
-				OutResult,
-				TEXT("binding_guest_output_preflight_failed"),
-				Program->DebugPath + TEXT(":") + Parameter.Name,
-				Details);
-			return false;
-		}
-	}
-	if (Program->ReturnValue.Kind != EValueCodecKind::Void)
-	{
-		uint32 GuestAddress = 0;
-		if (GuestMemory == nullptr
-			|| !ResolveGuestAddress(
-				Arguments[Program->ReturnValue.ArgumentOffset],
-				static_cast<uint32>(Program->ReturnValue.WireSize),
-				GuestAddress,
-				Details)
-			|| !PreflightValueOutput(
-				Program->ReturnValue,
-				GuestAddress,
-				*GuestMemory,
-				Details))
-		{
-			SetDispatchFailure(
-				OutResult,
-				TEXT("binding_return_preflight_failed"),
-				Program->DebugPath,
-				Details);
-			return false;
-		}
-	}
-
-	for (const FValueCodecProgram& Parameter : Program->Parameters)
-	{
+		const FValueCodecProgram& Parameter =
+			Program->Parameters[ParameterIndex];
 		if (Parameter.Direction == EValueCodecDirection::Ref
 			|| Parameter.Direction == EValueCodecDirection::Out)
 		{
 			if (Parameter.Direction == EValueCodecDirection::Ref
 				&& (GuestMemory == nullptr
-					|| Arguments[Parameter.ArgumentOffset] > MAX_uint32
 					|| !SetValueFromGuest(
 						Parameter,
-						static_cast<uint32>(
-							Arguments[Parameter.ArgumentOffset]),
+						ParameterGuestAddresses[ParameterIndex],
 						*GuestMemory,
 						InvocationContext,
 						Frame,
@@ -536,15 +608,18 @@ bool InvokePreparedDynamicReflection(
 		}
 	};
 
-	for (const FValueCodecProgram& Parameter : Program->Parameters)
+	for (int32 ParameterIndex = 0;
+		ParameterIndex < Program->Parameters.Num();
+		++ParameterIndex)
 	{
+		const FValueCodecProgram& Parameter =
+			Program->Parameters[ParameterIndex];
 		if ((Parameter.Direction == EValueCodecDirection::Ref
 				|| Parameter.Direction == EValueCodecDirection::Out)
 			&& (GuestMemory == nullptr
 				|| !WriteValueToGuest(
 					Parameter,
-					static_cast<uint32>(
-						Arguments[Parameter.ArgumentOffset]),
+					ParameterGuestAddresses[ParameterIndex],
 					*GuestMemory,
 					InvocationContext,
 					Frame,
@@ -564,8 +639,7 @@ bool InvokePreparedDynamicReflection(
 		&& (GuestMemory == nullptr
 			|| !WriteValueToGuest(
 				Program->ReturnValue,
-				static_cast<uint32>(
-					Arguments[Program->ReturnValue.ArgumentOffset]),
+				ReturnGuestAddress,
 				*GuestMemory,
 				InvocationContext,
 				Frame,
