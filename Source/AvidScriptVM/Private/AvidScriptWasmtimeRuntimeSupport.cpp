@@ -1,5 +1,7 @@
 #include "AvidScriptWasmtimeRuntimeSupport.h"
 
+#include "AvidScriptWasmtimeCompilerProfile.h"
+
 #include "HAL/CriticalSection.h"
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
@@ -23,6 +25,7 @@ namespace
 FCriticalSection GWasmtimeDllCriticalSection;
 void* GWasmtimeDllHandle = nullptr;
 FString GWasmtimeObservedDllSha256;
+void* GWasmtimeCompilerInliningExport = nullptr;
 
 #if AVIDSCRIPT_WITH_WASMTIME && PLATFORM_WINDOWS
 bool GetWasmtimeDllSha256(
@@ -80,10 +83,14 @@ bool EnsureWasmtimeDllLoaded(
 			TEXT("Binaries/Win64/wasmtime.dll")),
 		FPaths::Combine(
 			Plugin->GetBaseDir(),
+			TEXT("Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1/lib/wasmtime.dll")),
+		FPaths::Combine(
+			Plugin->GetBaseDir(),
 			TEXT("Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0/lib/wasmtime.dll"))
 	};
 	const FString ExpectedDllSha256 =
 		FString(UTF8_TO_TCHAR(AVIDSCRIPT_WASMTIME_DLL_SHA256)).ToLower();
+	TArray<FString, TInlineAllocator<3>> RejectedCandidates;
 	for (const FString& Candidate : Candidates)
 	{
 		if (!FPaths::FileExists(Candidate))
@@ -102,21 +109,40 @@ bool EnsureWasmtimeDllLoaded(
 				ExpectedDllSha256,
 				ESearchCase::CaseSensitive))
 		{
-			OutError = FString::Printf(
-				TEXT("The Wasmtime DLL SHA-256 does not match the linked managed artifact: ")
-				TEXT("path=%s expected=%s observed=%s"),
+			RejectedCandidates.Add(FString::Printf(
+				TEXT("path=%s observed=%s"),
 				*Candidate,
-				*ExpectedDllSha256,
-				*ObservedDllSha256);
-			return false;
+				*ObservedDllSha256));
+			continue;
 		}
 		GWasmtimeDllHandle = FPlatformProcess::GetDllHandle(*Candidate);
 		if (GWasmtimeDllHandle != nullptr)
 		{
+			GWasmtimeCompilerInliningExport = FPlatformProcess::GetDllExport(
+				GWasmtimeDllHandle,
+				TEXT("avidscript_wasmtime_config_compiler_inlining_set"));
+			if (GWasmtimeCompilerInliningExport == nullptr)
+			{
+				FPlatformProcess::FreeDllHandle(GWasmtimeDllHandle);
+				GWasmtimeDllHandle = nullptr;
+				OutError = FString::Printf(
+					TEXT("The verified Wasmtime DLL lacks the AvidScript compiler inlining extension: %s"),
+					*Candidate);
+				return false;
+			}
 			GWasmtimeObservedDllSha256 = ObservedDllSha256;
 			OutObservedDllSha256 = ObservedDllSha256;
 			return true;
 		}
+	}
+	if (!RejectedCandidates.IsEmpty())
+	{
+		OutError = FString::Printf(
+			TEXT("No Wasmtime DLL candidate matches the linked managed artifact: ")
+			TEXT("expected=%s rejected=[%s]"),
+			*ExpectedDllSha256,
+			*FString::Join(RejectedCandidates, TEXT("; ")));
+		return false;
 	}
 	OutError = TEXT(
 		"The locked Wasmtime v45 DLL could not be loaded from the plugin deployment or managed dependency layout.");
@@ -140,25 +166,80 @@ bool ResolveAvidScriptWasmtimeRuntimeIdentity(
 	FAvidScriptVmBackendInfo& InOutInfo,
 	FString& OutError)
 {
+	AvidScriptWasmtimeEngineProfile IgnoredProfile = {};
+	return ResolveAvidScriptWasmtimeCompilerProfile(
+		InOutInfo,
+		IgnoredProfile,
+		OutError);
+}
+
+bool ResolveAvidScriptWasmtimeCompilerProfile(
+	FAvidScriptVmBackendInfo& InOutInfo,
+	AvidScriptWasmtimeEngineProfile& OutProfile,
+	FString& OutError,
+	FString* OutErrorCategory)
+{
 	OutError.Reset();
+	OutProfile = {};
+	if (OutErrorCategory != nullptr)
+	{
+		OutErrorCategory->Reset();
+	}
 	InitializeAvidScriptWasmtimeRuntimeDescriptor(InOutInfo);
 #if !AVIDSCRIPT_WITH_WASMTIME
-	OutError = TEXT("Wasmtime is unavailable for this target.");
+	if (OutErrorCategory != nullptr)
+	{
+		*OutErrorCategory = TEXT("compiler_toolchain_unavailable");
+	}
+	OutError = TEXT("The AvidScript Wasmtime compiler toolchain is unavailable for this target.");
 	return false;
 #elif !PLATFORM_WINDOWS
+	if (OutErrorCategory != nullptr)
+	{
+		*OutErrorCategory = TEXT("platform_unsupported");
+	}
 	OutError = TEXT("Wasmtime artifact production currently supports Win64 only.");
 	return false;
 #else
 	FString ObservedDllSha256;
 	if (!EnsureWasmtimeDllLoaded(ObservedDllSha256, OutError))
 	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = OutError.Contains(TEXT("compiler inlining extension"))
+				? TEXT("compiler_extension_missing")
+				: TEXT("compiler_toolchain_unavailable");
+		}
 		return false;
 	}
+	if (GWasmtimeCompilerInliningExport == nullptr)
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("compiler_extension_missing");
+		}
+		OutError = TEXT("The AvidScript Wasmtime compiler extension is unavailable.");
+		return false;
+	}
+	if (!ValidateAvidScriptWasmtimeCompilerCpuProfile(OutError))
+	{
+		if (OutErrorCategory != nullptr)
+		{
+			*OutErrorCategory = TEXT("cpu_profile_unsupported");
+		}
+		return false;
+	}
+	const FAvidScriptWasmtimeCompilerProfile& CompilerProfile =
+		GetAvidScriptWasmtimeCompilerProfile();
+	OutProfile = CompilerProfile.EngineProfile;
+	OutProfile.CompilerInliningSetter =
+		reinterpret_cast<AvidScriptWasmtimeCompilerInliningSetter>(
+			GWasmtimeCompilerInliningExport);
+	InOutInfo.TargetTriple = CompilerProfile.TargetTriple;
 	InOutInfo.RuntimeArtifactSha256 = ObservedDllSha256;
-	InOutInfo.RuntimeBuildIdentity = FString::Printf(
-		TEXT("wasmtime-v%s;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=%s"),
-		*InOutInfo.RuntimeVersion,
-		*ObservedDllSha256);
+	InOutInfo.RuntimeBuildIdentity = BuildAvidScriptWasmtimeCompilerIdentity(
+		InOutInfo.RuntimeVersion,
+		ObservedDllSha256);
 	return true;
 #endif
 }

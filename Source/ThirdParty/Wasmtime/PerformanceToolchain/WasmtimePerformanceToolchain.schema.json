@@ -66,7 +66,7 @@
         },
         "cmake_arguments": {
           "type": "array",
-          "minItems": 9,
+          "minItems": 11,
           "items": { "type": "string", "minLength": 1 }
         },
         "source_date_epoch": { "type": "integer", "minimum": 1 }
@@ -95,7 +95,7 @@
     "compiler_profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization"],
+      "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization", "wasm_gc", "gc_collector"],
       "properties": {
         "id": { "const": "cranelift-x86_64-v3-inlining-v1" },
         "strategy": { "const": "cranelift" },
@@ -106,7 +106,9 @@
         "wasm32_memory_reservation_bytes": { "const": 4294967296 },
         "memory_may_move": { "const": false },
         "spectre_mitigation": { "const": true },
-        "nan_canonicalization": { "const": false }
+        "nan_canonicalization": { "const": false },
+        "wasm_gc": { "const": true },
+        "gc_collector": { "const": "drc" }
       }
     },
     "license": {

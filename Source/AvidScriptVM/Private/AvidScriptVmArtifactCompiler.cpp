@@ -190,14 +190,20 @@ bool CompileAvidScriptVmArtifact(
 	RuntimeInfo.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
 	RuntimeInfo.ArtifactFormat =
 		EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	AvidScriptWasmtimeEngineProfile CompilerProfile = {};
 	FString RuntimeIdentityError;
-	if (!ResolveAvidScriptWasmtimeRuntimeIdentity(
+	FString CompilerProfileErrorCategory;
+	if (!ResolveAvidScriptWasmtimeCompilerProfile(
 			RuntimeInfo,
-			RuntimeIdentityError))
+			CompilerProfile,
+			RuntimeIdentityError,
+			&CompilerProfileErrorCategory))
 	{
 		SetCompileError(
 			OutResult,
-			TEXT("runtime_init_failed"),
+			CompilerProfileErrorCategory.IsEmpty()
+				? TEXT("runtime_init_failed")
+				: *CompilerProfileErrorCategory,
 			RuntimeIdentityError,
 			StartSeconds);
 		return false;
@@ -229,13 +235,14 @@ bool CompileAvidScriptVmArtifact(
 		}
 	}
 
-	AvidScriptWasmtimeEngine* Engine = avidscript_wasmtime_engine_new();
+	AvidScriptWasmtimeEngine* Engine =
+		avidscript_wasmtime_engine_new_with_profile(&CompilerProfile);
 	if (Engine == nullptr)
 	{
 		SetCompileError(
 			OutResult,
-			TEXT("runtime_init_failed"),
-			TEXT("Wasmtime could not create a Cranelift engine."),
+			TEXT("compiler_profile_invalid"),
+			TEXT("Wasmtime could not create the controlled Cranelift engine."),
 			StartSeconds);
 		return false;
 	}

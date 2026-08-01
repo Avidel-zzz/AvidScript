@@ -219,6 +219,100 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new(void)
 	return engine;
 }
 
+AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
+	const AvidScriptWasmtimeEngineProfile* profile)
+{
+	wasm_config_t* config;
+	AvidScriptWasmtimeEngine* engine;
+	wasmtime_error_t* target_error;
+	if (profile == NULL
+		|| profile->SchemaVersion != 1
+		|| profile->Strategy != AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT
+		|| profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE
+		|| profile->RegisterAllocator != AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING
+		|| profile->Inlining != AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL
+		|| profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3
+		|| profile->Wasm32MemoryReservationBytes == 0
+		|| !profile->bWasmGc
+		|| profile->CompilerInliningSetter == NULL)
+	{
+		return NULL;
+	}
+	config = wasm_config_new();
+	if (config == NULL)
+	{
+		return NULL;
+	}
+	wasmtime_config_strategy_set(config, WASMTIME_STRATEGY_CRANELIFT);
+	wasmtime_config_cranelift_opt_level_set(
+		config,
+		WASMTIME_OPT_LEVEL_SPEED_AND_SIZE);
+	wasmtime_config_cranelift_regalloc_algorithm_set(
+		config,
+		WASMTIME_REGALLOC_BACKTRACKING);
+	wasmtime_config_cranelift_debug_verifier_set(config, false);
+	wasmtime_config_cranelift_nan_canonicalization_set(
+		config,
+		profile->bNanCanonicalization);
+#ifdef WASMTIME_FEATURE_GC
+	wasmtime_config_wasm_gc_set(config, profile->bWasmGc);
+#else
+	wasm_config_delete(config);
+	return NULL;
+#endif
+	wasmtime_config_cranelift_flag_set(
+		config,
+		"enable_alias_analysis",
+		"true");
+	wasmtime_config_cranelift_flag_set(
+		config,
+		"enable_heap_access_spectre_mitigation",
+		profile->bSpectreMitigation ? "true" : "false");
+	wasmtime_config_cranelift_flag_set(
+		config,
+		"enable_table_access_spectre_mitigation",
+		profile->bSpectreMitigation ? "true" : "false");
+	target_error = wasmtime_config_target_set(
+		config,
+		"x86_64-pc-windows-msvc");
+	if (target_error != NULL)
+	{
+		wasmtime_error_delete(target_error);
+		wasm_config_delete(config);
+		return NULL;
+	}
+	wasmtime_config_cranelift_flag_enable(config, "x86-64-v3");
+	profile->CompilerInliningSetter(
+		config,
+		(uint8_t)profile->Inlining);
+	wasmtime_config_memory_reservation_set(
+		config,
+		profile->Wasm32MemoryReservationBytes);
+	wasmtime_config_memory_may_move_set(config, profile->bMemoryMayMove);
+	wasmtime_config_signals_based_traps_set(config, true);
+#ifdef WASMTIME_FEATURE_PARALLEL_COMPILATION
+	wasmtime_config_parallel_compilation_set(
+		config,
+		profile->bParallelCompilation);
+#endif
+#ifdef WASMTIME_FEATURE_COMPONENT_MODEL
+	wasmtime_config_wasm_component_model_set(config, false);
+#endif
+	engine = (AvidScriptWasmtimeEngine*)calloc(1, sizeof(*engine));
+	if (engine == NULL)
+	{
+		wasm_config_delete(config);
+		return NULL;
+	}
+	engine->value = wasm_engine_new_with_config(config);
+	if (engine->value == NULL)
+	{
+		free(engine);
+		return NULL;
+	}
+	return engine;
+}
+
 void avidscript_wasmtime_engine_delete(AvidScriptWasmtimeEngine* engine)
 {
 	if (engine != NULL)

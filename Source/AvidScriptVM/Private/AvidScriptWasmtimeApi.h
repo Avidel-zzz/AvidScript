@@ -18,6 +18,53 @@ typedef struct AvidScriptWasmtimeFunction AvidScriptWasmtimeFunction;
 typedef struct AvidScriptWasmtimeCaller AvidScriptWasmtimeCaller;
 typedef struct AvidScriptWasmtimeFailure AvidScriptWasmtimeFailure;
 
+typedef enum AvidScriptWasmtimeCompilerStrategy
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT = 0
+} AvidScriptWasmtimeCompilerStrategy;
+
+typedef enum AvidScriptWasmtimeOptimization
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE = 0
+} AvidScriptWasmtimeOptimization;
+
+typedef enum AvidScriptWasmtimeRegisterAllocator
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING = 0
+} AvidScriptWasmtimeRegisterAllocator;
+
+typedef enum AvidScriptWasmtimeInliningMode
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_INLINING_NONE = 0,
+	AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL = 1
+} AvidScriptWasmtimeInliningMode;
+
+typedef enum AvidScriptWasmtimeCpuProfile
+{
+	AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3 = 0
+} AvidScriptWasmtimeCpuProfile;
+
+typedef void (*AvidScriptWasmtimeCompilerInliningSetter)(
+	void* config,
+	uint8_t mode);
+
+typedef struct AvidScriptWasmtimeEngineProfile
+{
+	uint32_t SchemaVersion;
+	AvidScriptWasmtimeCompilerStrategy Strategy;
+	AvidScriptWasmtimeOptimization Optimization;
+	AvidScriptWasmtimeRegisterAllocator RegisterAllocator;
+	AvidScriptWasmtimeInliningMode Inlining;
+	AvidScriptWasmtimeCpuProfile CpuProfile;
+	uint64_t Wasm32MemoryReservationBytes;
+	bool bMemoryMayMove;
+	bool bSpectreMitigation;
+	bool bNanCanonicalization;
+	bool bParallelCompilation;
+	bool bWasmGc;
+	AvidScriptWasmtimeCompilerInliningSetter CompilerInliningSetter;
+} AvidScriptWasmtimeEngineProfile;
+
 typedef enum AvidScriptWasmtimeCallStatus
 {
 	AVIDSCRIPT_WASMTIME_CALL_SUCCESS = 0,
@@ -60,6 +107,8 @@ typedef bool (*AvidScriptWasmtimeHostCallback)(
 	size_t result_count);
 
 AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new(void);
+AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
+	const AvidScriptWasmtimeEngineProfile* profile);
 void avidscript_wasmtime_engine_delete(AvidScriptWasmtimeEngine* engine);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_module_new(

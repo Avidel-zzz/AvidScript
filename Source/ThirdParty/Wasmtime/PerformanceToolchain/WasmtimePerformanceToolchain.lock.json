@@ -27,17 +27,23 @@
     "features": [
       "cranelift",
       "parallel-compilation",
+      "gc",
+      "gc-drc",
       "disable-logging"
     ],
     "cmake_arguments": [
       "-G",
-      "Ninja",
+      "Visual Studio 17 2022",
+      "-A",
+      "x64",
       "-DBUILD_SHARED_LIBS=ON",
       "-DCMAKE_BUILD_TYPE=Release",
       "-DWASMTIME_FASTEST_RUNTIME=ON",
       "-DWASMTIME_DISABLE_ALL_FEATURES=ON",
       "-DWASMTIME_FEATURE_CRANELIFT=ON",
       "-DWASMTIME_FEATURE_PARALLEL_COMPILATION=ON",
+      "-DWASMTIME_FEATURE_GC=ON",
+      "-DWASMTIME_FEATURE_GC_DRC=ON",
       "-DWASMTIME_FEATURE_DISABLE_LOGGING=ON"
     ],
     "source_date_epoch": 1779385346
@@ -62,7 +68,9 @@
     "wasm32_memory_reservation_bytes": 4294967296,
     "memory_may_move": false,
     "spectre_mitigation": true,
-    "nan_canonicalization": false
+    "nan_canonicalization": false,
+    "wasm_gc": true,
+    "gc_collector": "drc"
   },
   "license": {
     "expression": "Apache-2.0 WITH LLVM-exception",

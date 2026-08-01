@@ -129,7 +129,7 @@ Assert-True ($invokeText.Contains('Assert-SidecarBenchmarkProjectProvenance') -a
     $invokeText.Contains('$harnessModulePath = Join-Path $harnessRoot') -and
     $invokeText.Contains('UnrealEditor-AvidScriptPerfHarness.dll') -and
     $invokeText.Contains('requires the tracked profile and request template bytes') -and
-    $invokeText.Contains('wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=')) `
+    $invokeText.Contains('Get-SidecarWasmtimeCompilerIdentity')) `
     'Formal 六通道必须锁定项目、Puerts、Harness DLL、profile/template 与真实 Wasmtime build identity。'
 Assert-True ($invokeText.Contains('Get-SidecarLaneIdentitySha256') -and
     $invokeText.Contains('Get-SidecarLaneCatalogSha256')) `

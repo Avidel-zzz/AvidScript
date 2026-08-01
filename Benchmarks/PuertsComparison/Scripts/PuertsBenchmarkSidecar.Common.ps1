@@ -593,6 +593,46 @@ function Test-SidecarProfile {
     }
 }
 
+function Get-SidecarWasmtimeCompilerIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$DllSha256
+    )
+
+    $SourcePluginRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $PSScriptRoot '../../..'))
+    $LockPath = Join-Path $SourcePluginRoot (
+        'Source/ThirdParty/Wasmtime/PerformanceToolchain/' +
+        'WasmtimePerformanceToolchain.lock.json')
+    $Lock = Read-SidecarJson -Path $LockPath -Code 'ASP57S2057'
+    $Profile = $Lock.compiler_profile
+    if ([string]$Lock.upstream.version -cne 'v45.0.0' -or
+        [int]$Lock.patch.api_revision -ne 1 -or
+        [string]$Profile.strategy -cne 'cranelift' -or
+        [string]$Profile.optimization -cne 'speed_and_size' -or
+        [string]$Profile.register_allocator -cne 'backtracking' -or
+        [string]$Profile.inlining -cne 'all' -or
+        [string]$Profile.cpu -cne 'x86-64-v3' -or
+        [uint64]$Profile.wasm32_memory_reservation_bytes -ne [uint64]4294967296 -or
+        [bool]$Profile.memory_may_move -or
+        -not [bool]$Profile.spectre_mitigation -or
+        [bool]$Profile.nan_canonicalization -or
+        -not [bool]$Profile.wasm_gc -or
+        [string]$Profile.gc_collector -cne 'drc' -or
+        [string]$Lock.rust.build_profile -cne 'fastest-runtime' -or
+        -not (@($Lock.rust.features) -contains 'parallel-compilation') -or
+        -not (@($Lock.rust.features) -contains 'gc') -or
+        -not (@($Lock.rust.features) -contains 'gc-drc')) {
+        throw 'ASP57S2057 Wasmtime compiler profile differs from the frozen runtime identity contract'
+    }
+    return (
+        'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
+        'opt=speed_and_size;regalloc=backtracking;inlining=all;' +
+        'cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;' +
+        'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
+        'wasm_gc=on;gc_collector=drc;' +
+        "runtime_profile=fastest-runtime;dll_sha256=$DllSha256")
+}
+
 function Get-SidecarAvidScriptRuntimeIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$PluginRoot
@@ -616,6 +656,7 @@ function Get-SidecarAvidScriptRuntimeIdentity {
         throw 'ASP54S2056 WAMR linked static runtime artifact is missing'
     }
     $WasmtimeCandidates = @(
+        (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0-avidscript.1/lib/wasmtime.dll'),
         (Join-Path $ResolvedPluginRoot 'Binaries/Win64/wasmtime.dll'),
         (Join-Path $ResolvedPluginRoot 'Source/ThirdParty/Wasmtime/installed/Win64/v45.0.0/lib/wasmtime.dll')
     )
@@ -636,8 +677,8 @@ function Get-SidecarAvidScriptRuntimeIdentity {
             'wamr-v2.4.4;config=interp=1,fast_interp=1,aot=0,jit=0,fast_jit=0,simd=1,simde=1;' +
             "static_lib_sha256=$WamrSha256")
         wasmtime_dll_sha256 = $WasmtimeSha256
-        wasmtime_runtime_build_identity = (
-            "wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=$WasmtimeSha256")
+        wasmtime_runtime_build_identity = Get-SidecarWasmtimeCompilerIdentity `
+            -DllSha256 $WasmtimeSha256
     }
 }
 

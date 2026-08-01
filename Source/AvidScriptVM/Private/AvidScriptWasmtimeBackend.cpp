@@ -367,12 +367,21 @@ public:
 		const double RuntimeInitStart = FPlatformTime::Seconds();
 #if PLATFORM_WINDOWS
 		FString DllLoadError;
-		if (!ResolveAvidScriptWasmtimeRuntimeIdentity(
+		FString CompilerProfileErrorCategory;
+		AvidScriptWasmtimeEngineProfile CompilerProfile = {};
+		if (!ResolveAvidScriptWasmtimeCompilerProfile(
 				BackendInfo,
-				DllLoadError))
+				CompilerProfile,
+				DllLoadError,
+				&CompilerProfileErrorCategory))
 		{
 			LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
-			SetWasmtimeError(OutError, TEXT("runtime_init_failed"), DllLoadError);
+			SetWasmtimeError(
+				OutError,
+				CompilerProfileErrorCategory.IsEmpty()
+					? TEXT("runtime_init_failed")
+					: *CompilerProfileErrorCategory,
+				DllLoadError);
 			return false;
 		}
 #else
@@ -396,11 +405,15 @@ public:
 				TEXT("The serialized module compiler identity does not match the active Wasmtime engine."));
 			return false;
 		}
-		Engine = avidscript_wasmtime_engine_new();
+		Engine = avidscript_wasmtime_engine_new_with_profile(
+			&CompilerProfile);
 		LoadMetrics.RuntimeInitMs = MeasureWasmtimeElapsedMs(RuntimeInitStart);
 		if (Engine == nullptr)
 		{
-			SetWasmtimeError(OutError, TEXT("runtime_init_failed"), TEXT("Wasmtime could not create a Cranelift engine."));
+			SetWasmtimeError(
+				OutError,
+				TEXT("compiler_profile_invalid"),
+				TEXT("Wasmtime could not create the controlled Cranelift engine."));
 			return false;
 		}
 

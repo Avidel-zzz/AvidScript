@@ -218,8 +218,8 @@ function Resolve-RequestTemplateIdentity {
         ].Value
         $entry.source_wasm_sha256 = [string]$package.wasm_sha256
         $entry.execution_artifact_sha256 = [string]$package.wasm_sha256
-        $entry.runtime_build_identity =
-            "wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=$wasmtimeRuntimeSha256"
+        $entry.runtime_build_identity = Get-SidecarWasmtimeCompilerIdentity `
+            -DllSha256 $wasmtimeRuntimeSha256
         $entry.runtime_artifact_sha256 = $wasmtimeRuntimeSha256
         $entry.manifest_relative_path = [string]$artifact.manifest_relative_path
     }

@@ -5,6 +5,8 @@
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptVmResultFixtureBuilder.h"
 #include "AvidScriptWasmtimeApi.h"
+#include "AvidScriptWasmtimeCompilerProfile.h"
+#include "AvidScriptWasmtimeRuntimeSupport.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -532,7 +534,20 @@ bool SerializeWasmtimeFixture(
 {
 	OutSerialized.Reset();
 	OutError.Reset();
-	AvidScriptWasmtimeEngine* Engine = avidscript_wasmtime_engine_new();
+	FAvidScriptVmBackendInfo RuntimeInfo;
+	RuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
+	RuntimeInfo.ExecutionMode = EAvidScriptVmExecutionMode::Aot;
+	RuntimeInfo.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmtimeSerialized;
+	AvidScriptWasmtimeEngineProfile CompilerProfile = {};
+	if (!ResolveAvidScriptWasmtimeCompilerProfile(
+			RuntimeInfo,
+			CompilerProfile,
+			OutError))
+	{
+		return false;
+	}
+	AvidScriptWasmtimeEngine* Engine =
+		avidscript_wasmtime_engine_new_with_profile(&CompilerProfile);
 	if (Engine == nullptr)
 	{
 		OutError = TEXT("Wasmtime test engine allocation failed.");
@@ -794,6 +809,96 @@ EAvidScriptVmTypedHostStatus InvokeWasmtimeTypedGuestResultForTest(
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmWasmtimeCompilerProfileTest,
+	"AvidScript.VM.Wasmtime.CompilerProfile",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
+	const FString& Parameters)
+{
+	const FAvidScriptWasmtimeCompilerProfile& DeclaredProfile =
+		GetAvidScriptWasmtimeCompilerProfile();
+	TestEqual(
+		TEXT("compiler profile id"),
+		DeclaredProfile.Id,
+		FString(TEXT("cranelift-x86_64-v3-inlining-v1")));
+	TestEqual(
+		TEXT("compiler target triple"),
+		DeclaredProfile.TargetTriple,
+		FString(TEXT("x86_64-pc-windows-msvc")));
+	TestEqual(
+		TEXT("compiler CPU profile"),
+		DeclaredProfile.CpuProfile,
+		FString(TEXT("x86-64-v3")));
+	TestTrue(
+		TEXT("Spectre mitigation remains enabled"),
+		DeclaredProfile.EngineProfile.bSpectreMitigation);
+	TestFalse(
+		TEXT("NaN canonicalization remains disabled"),
+		DeclaredProfile.EngineProfile.bNanCanonicalization);
+	TestTrue(
+		TEXT("Wasm GC compatibility remains enabled"),
+		DeclaredProfile.EngineProfile.bWasmGc);
+
+	FAvidScriptVmBackendInfo RuntimeInfo;
+	RuntimeInfo.Kind = EAvidScriptVmBackendKind::Wasmtime;
+	RuntimeInfo.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	RuntimeInfo.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	AvidScriptWasmtimeEngineProfile ResolvedProfile = {};
+	FString Error;
+	FString ErrorCategory;
+	const bool bResolved = ResolveAvidScriptWasmtimeCompilerProfile(
+		RuntimeInfo,
+		ResolvedProfile,
+		Error,
+		&ErrorCategory);
+#if !AVIDSCRIPT_WITH_WASMTIME
+	TestFalse(TEXT("compiler profile is unavailable without Wasmtime"), bResolved);
+	TestEqual(
+		TEXT("unavailable toolchain category"),
+		ErrorCategory,
+		FString(TEXT("compiler_toolchain_unavailable")));
+	return true;
+#else
+	if (!TestTrue(TEXT("compiler profile resolves"), bResolved))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestTrue(
+		TEXT("compiler inlining extension resolves"),
+		ResolvedProfile.CompilerInliningSetter != nullptr);
+	TestTrue(
+		TEXT("runtime identity binds compiler inlining"),
+		RuntimeInfo.RuntimeBuildIdentity.Contains(
+			TEXT("inlining=all"),
+			ESearchCase::CaseSensitive));
+	TestTrue(
+		TEXT("runtime identity binds the CPU profile"),
+		RuntimeInfo.RuntimeBuildIdentity.Contains(
+			TEXT("cpu=x86-64-v3"),
+			ESearchCase::CaseSensitive));
+	TestTrue(
+		TEXT("runtime identity binds Wasm GC compatibility"),
+		RuntimeInfo.RuntimeBuildIdentity.Contains(
+			TEXT("wasm_gc=on;gc_collector=drc"),
+			ESearchCase::CaseSensitive));
+	AvidScriptWasmtimeEngine* Engine =
+		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile);
+	if (!TestNotNull(TEXT("controlled compiler engine is created"), Engine))
+	{
+		return false;
+	}
+	avidscript_wasmtime_engine_delete(Engine);
+	ResolvedProfile.CompilerInliningSetter = nullptr;
+	TestNull(
+		TEXT("profile without the verified extension fails closed"),
+		avidscript_wasmtime_engine_new_with_profile(&ResolvedProfile));
+	return true;
+#endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmWasmtimeLifecycleTest,
 	"AvidScript.VM.Wasmtime.Lifecycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -830,7 +935,12 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("runtime build identity binds the loaded DLL"),
 		LoadedInfo.RuntimeBuildIdentity,
 		FString::Printf(
-			TEXT("wasmtime-v45.0.0;cranelift=1;opt=speed_and_size;wasm32_memory_stable=1;dll_sha256=%s"),
+			TEXT("wasmtime-v45.0.0+avidscript.1;strategy=cranelift;")
+			TEXT("opt=speed_and_size;regalloc=backtracking;inlining=all;")
+			TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
+			TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
+			TEXT("wasm_gc=on;gc_collector=drc;")
+			TEXT("runtime_profile=fastest-runtime;dll_sha256=%s"),
 			*LoadedInfo.RuntimeArtifactSha256));
 	TestTrue(TEXT("RuntimeInitMs is measured"), Backend->GetLoadMetrics().RuntimeInitMs > 0.0);
 	TestTrue(TEXT("ModuleLoadMs is measured"), Backend->GetLoadMetrics().ModuleLoadMs > 0.0);

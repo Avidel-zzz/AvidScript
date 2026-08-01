@@ -357,7 +357,7 @@ if ($Mode -eq 'Remove') {
     exit 0
 }
 
-foreach ($CommandName in @('cmake', 'ninja', 'git', 'rustc', 'cargo')) {
+foreach ($CommandName in @('cmake', 'git', 'rustc', 'cargo')) {
     if ($null -eq (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
         throw "ASP57W1701 required build tool is unavailable: $CommandName"
     }
@@ -375,12 +375,15 @@ $SourceRoot = Get-PreparedSource -Lock $Lock `
 $BuildRoot = Join-Path $CacheRoot "build/$($Lock.toolchain_id)"
 $CargoTargetRoot = Join-Path $CacheRoot 'cargo-target'
 $StagingRoot = Join-Path $CacheRoot "staging/$($Lock.toolchain_id)"
-$env:CARGO_TARGET_DIR = $CargoTargetRoot
+$env:CARGO_TARGET_DIR = $CargoTargetRoot.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
 $env:SOURCE_DATE_EPOCH = [string]$Lock.rust.source_date_epoch
 foreach ($OwnedPath in @($BuildRoot, $StagingRoot)) {
     $OwnedParent = Split-Path -Parent $OwnedPath
     New-Item -ItemType Directory -Force -Path $OwnedParent | Out-Null
     Assert-PathWithin -Root $CacheRoot -Path $OwnedPath -Code 'ASP57W1703'
+}
+if (Test-Path -LiteralPath $BuildRoot) {
+    Remove-Item -LiteralPath $BuildRoot -Recurse -Force
 }
 if (Test-Path -LiteralPath $StagingRoot) {
     Remove-Item -LiteralPath $StagingRoot -Recurse -Force
@@ -393,10 +396,10 @@ $CMakeArguments = @(
 Invoke-NativeTool -Executable 'cmake' -Arguments $CMakeArguments `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1704'
 Invoke-NativeTool -Executable 'cmake' `
-    -Arguments @('--build', $BuildRoot, '--parallel', '8') `
+    -Arguments @('--build', $BuildRoot, '--config', 'Release', '--parallel', '8') `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1705'
 Invoke-NativeTool -Executable 'cmake' `
-    -Arguments @('--install', $BuildRoot) `
+    -Arguments @('--install', $BuildRoot, '--config', 'Release') `
     -WorkingDirectory $SourceRoot -Code 'ASP57W1706'
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') `
     -Destination (Join-Path $StagingRoot ([string]$Lock.layout.license_relative_path))
