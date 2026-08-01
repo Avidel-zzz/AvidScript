@@ -14,7 +14,7 @@
   },
   "documents": {
     "plan": "Docs/Superpowers/Plans/2026-08-01-phase57-editor-precompiled-artifact-pipeline.md",
-    "closeout": "Docs/Phase57/P57.8_Editor_Precompiled_Artifact_Pipeline.md"
+    "closeout": "Docs/Phase57/P57.9_Controlled_Wasmtime_Toolchain.md"
   },
   "batches": [
     {
@@ -78,9 +78,9 @@
       "severity": "Important",
       "found_batch": "P57.5",
       "scope": "Frozen 12-kernel Wasmtime/V8 P95 geomean and P95 kernel win-rate gates",
-      "evidence": "P57.6 frozen 12-kernel CPU0 formal: p50 geo 0.9821689140, p95 geo 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; aggregate SHA-256 2fdebb2a51399f41ea3813182ba6a96ab439e9e1572c93af376b164149cbf31f. P57.7 added a verified WasmtimeSerialized runtime consumer. P57.8 added the trusted Editor producer and reached serialized/JIT ModuleLoadMs P50 ratio 0.070559, but neither batch changed or reran the frozen steady-state gate.",
+      "evidence": "P57.9 controlled Wasmtime toolchain formal on clean 598fdf0/2ccfc8c: p50 geo 0.9797725739, p95 geo 1.0267275918, MAD geo 0.9238574065, p50/p95 win rate 0.6667/0.4167, correctness 0, fallback false; aggregate SHA-256 245d1d22ac45132a55b25d306f7fe02a75ebdf975e804cf9dcaea2b94d0b1979. Toolchain/profile/provenance are complete, but the unchanged leadership gate remains red.",
       "deferral_reason": "Isolated attribution follows closure of semantic, Generated S1, and prepared-export fixed costs",
-      "remediation": "Expose compiler inlining and codegen controls through a controlled Wasmtime toolchain, bind every option into compiler identity, then profile hashing, predictable branch, SIMD128, and p95 variance under the unchanged frozen controlled-runtime suite without changing kernel bytes.",
+      "remediation": "Keep the controlled Wasmtime profile as the reproducible baseline. Move optimization budget to Semantic/reflection boundary fusion and compile-time specialization; any further pure execution attempt must use an LLVM AOT or equivalent codegen backend and rerun the unchanged frozen suite without changing kernel bytes or thresholds.",
       "status": "Fixing",
       "resolution_evidence": "",
       "target_phase": null,
@@ -139,6 +139,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 12,
-  "updated_at_utc": "2026-08-01T00:52:00.7636868+00:00"
+  "revision": 13,
+  "updated_at_utc": "2026-08-01T02:40:39.8207145+00:00"
 }

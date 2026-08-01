@@ -33,12 +33,12 @@
 - Produces: export `avidscript_wasmtime_config_compiler_inlining_set`。
 - Consumes: pinned Wasmtime commit `377cd917af258d932d55b201a646917ecf193639`。
 
-- [ ] 固定源码 URL/SHA、patch SHA、Cargo features、Rust version 和输出布局。
-- [ ] 补丁只增加 `Inlining::No/Yes` 的 C ABI 映射与头文件声明。
-- [ ] Builder 使用内容寻址下载目录和独立 `target` cache，逐项检查 native tool 退出码。
-- [ ] 发布前验证 DLL、import library、headers、license、扩展 export 和 managed marker。
-- [ ] 合同测试验证 lock schema、路径约束、补丁摘要、命令参数和 `.gitignore` 覆盖。
-- [ ] 运行 PowerShell parser 与合同测试，提交 `build(P57.9): add reproducible Wasmtime performance toolchain`。
+- [x] 固定源码 URL/SHA、patch SHA、Cargo features、Rust version 和输出布局。
+- [x] 补丁只增加 `Inlining::No/Yes` 的 C ABI 映射与头文件声明。
+- [x] Builder 使用内容寻址下载目录和独立 `target` cache，逐项检查 native tool 退出码。
+- [x] 发布前验证 DLL、import library、headers、license、扩展 export 和 managed marker。
+- [x] 合同测试验证 lock schema、路径约束、补丁摘要、命令参数和 `.gitignore` 覆盖。
+- [x] 运行 PowerShell parser 与合同测试，提交 `build(P57.9): add reproducible Wasmtime performance toolchain`。
 
 ### Task 2: 建立统一 compiler profile 与 engine factory
 
@@ -56,12 +56,12 @@
 - Produces: `avidscript_wasmtime_engine_new_with_profile(const AvidScriptWasmtimeEngineProfile*)`。
 - Produces: stable compiler identity and extension function pointer from the verified DLL。
 
-- [ ] 定义固定 profile 字段和无堆分配的 C engine profile POD。
-- [ ] 在 Win64 使用 CPUID 验证 x86-64-v3，并把缺失能力返回结构化错误。
-- [ ] RuntimeSupport 在 DLL SHA 验证后动态解析扩展，禁止未验证 handle 提供函数指针。
-- [ ] C engine factory 应用 strategy、opt、regalloc、inlining、CPU preset、memory 与 semantic flags。
-- [ ] Build.cs 优先选择 performance managed layout，官方 layout 只保留诊断 fallback。
-- [ ] 运行静态检查与 `git diff --check`，提交 `feat(P57.9): add identity-bound Wasmtime compiler profile`。
+- [x] 定义固定 profile 字段和无堆分配的 C engine profile POD。
+- [x] 在 Win64 使用 CPUID 验证 x86-64-v3，并把缺失能力返回结构化错误。
+- [x] RuntimeSupport 在 DLL SHA 验证后动态解析扩展，禁止未验证 handle 提供函数指针。
+- [x] C engine factory 应用 strategy、opt、regalloc、inlining、CPU preset、memory 与 semantic flags。
+- [x] Build.cs 优先选择 performance managed layout，官方 layout 只保留诊断 fallback。
+- [x] 运行静态检查与 `git diff --check`，提交 `feat(P57.9): add identity-bound Wasmtime compiler profile`。
 
 ### Task 3: 统一 JIT、AOT compiler 与 provenance
 
@@ -75,11 +75,11 @@
 - Consumes: Task 2 engine factory and identity。
 - Preserves: `CompileAvidScriptVmArtifact`、artifact cache、attestation 和 P57.8 runtime authorization public contracts。
 
-- [ ] JIT backend 和 artifact compiler 只通过共享 profile 创建 engine。
-- [ ] compiler identity、cache key、artifact、manifest 和 runtime comparison 使用同一完整字符串。
-- [ ] 增加缺扩展、CPU 不兼容、identity mismatch、JIT/serialized 配置一致性测试。
-- [ ] 更新依赖合同，证明 performance runtime 与官方 fallback 不会被错误混用。
-- [ ] 提交 `feat(P57.9): enforce compiler profile across JIT and serialized artifacts`。
+- [x] JIT backend 和 artifact compiler 只通过共享 profile 创建 engine。
+- [x] compiler identity、cache key、artifact、manifest 和 runtime comparison 使用同一完整字符串。
+- [x] 增加缺扩展、CPU 不兼容、identity mismatch、JIT/serialized 配置一致性测试。
+- [x] 更新依赖合同，证明 performance runtime 与官方 fallback 不会被错误混用。
+- [x] 提交 `feat(P57.9): enforce compiler profile across JIT and serialized artifacts`。
 
 ### Task 4: 构建工具链并完成统一 Gate
 
@@ -93,10 +93,10 @@
 - Consumes: Tasks 1-3 integrated candidate。
 - Produces: immutable build, Automation, controlled-runtime and architecture evidence。
 
-- [ ] 在后台构建 performance toolchain；等待期间完成静态合同和 provenance 更新。
-- [ ] 对 VM、Runtime、Editor 直接消费者执行一次 UE5.8 no-clean 增量构建。
-- [ ] 一次运行 P57.8/P57.9 聚焦 Automation，精确统计 found/started/success/fail/exit。
-- [ ] 在冻结 suite 上执行 5 进程正式 shootout，发布同轮 Puerts/Wasmtime aggregate。
-- [ ] 若全部阈值通过，将 `P57-D06-ControlledLeadership` 标记 `Verified`；否则保持 `Fixing` 并记录逐 kernel 归因。
-- [ ] 在干净候选树运行架构检查，写中文收尾报告与状态快照。
-- [ ] 提交 `docs(P57.9): record controlled Wasmtime toolchain evidence`。
+- [x] 在后台构建 performance toolchain；等待期间完成静态合同和 provenance 更新。
+- [x] 对 VM、Runtime、Editor 直接消费者执行一次 UE5.8 no-clean 增量构建。
+- [x] 一次运行 P57.8/P57.9 聚焦 Automation，精确统计 found/started/success/fail/exit。
+- [x] 在冻结 suite 上执行 5 进程正式 shootout，发布同轮 Puerts/Wasmtime aggregate。
+- [x] 若全部阈值通过，将 `P57-D06-ControlledLeadership` 标记 `Verified`；否则保持 `Fixing` 并记录逐 kernel 归因。
+- [x] 在干净候选树运行架构检查，写中文收尾报告与状态快照。
+- [x] 提交 `docs(P57.9): record controlled Wasmtime toolchain evidence`。

@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "benchmark_kind": "identical_wasm_kernel_suite",
+  "profile_sha256": "2d839bf2e03c9e83624d812356bc42396a44ade5c108ccfd177c2f5a9836281c",
+  "suite_contract_sha256": "7338e1cf4078456a9a63b9ddf2b6fabbeb9cd61823b9a37d1cd0bde1653ac94d",
+  "candidate": {
+    "commit": "598fdf0b498436348b3a6ac27a8affb3e1f82d2f",
+    "tree_sha": "2ccfc8ce36137a549fe117ee446a5d4be5c56cc8",
+    "clean": true
+  },
+  "engine": {
+    "version": "5.8.0",
+    "build_id": "5.8.0;sha256=46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311",
+    "executable_sha256": "46af26eab20731724b31cb5d829adfeeae5b4fdcdbe970e32a2e40ba201bd311"
+  },
+  "kernel_count": 12,
+  "kernel_results": [
+    {
+      "kernel_id": "data_branch",
+      "kernel_wasm_sha256": "7fcf4e7b71a690c203ba0fb8463b869f649b4e390b1cf671b88d0a6d561a6a2f",
+      "aggregate_sha256": "87c492eb60921db126b408d6e06cdf573d268cdf71c81e0a38a6849b55ea5ee9",
+      "wasmtime_over_v8_p50": 1.0005576280586435,
+      "wasmtime_over_v8_p95": 1.2999603221833747,
+      "wasmtime_over_v8_mad": 0.6959322002118727,
+      "p50_win": false,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "hashing",
+      "kernel_wasm_sha256": "b5f4661b968b903b4c9d13c644de9b4809bd015d1bd93dae5905e8ca07a854cf",
+      "aggregate_sha256": "699f4f3bcdeda3f67a58d8553902c68990b30e12bd4b9a995f10f99425e361bf",
+      "wasmtime_over_v8_p50": 1.014040739200405,
+      "wasmtime_over_v8_p95": 1.0346997640066429,
+      "wasmtime_over_v8_mad": 1.5158264417459186,
+      "p50_win": false,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "internal_call",
+      "kernel_wasm_sha256": "a4f89e8111023c36072bfc98fd2e15f8a4d3d803c9c2854c3fa2065d507149f7",
+      "aggregate_sha256": "751d2242e4d7f976c0f31d85be1594dde4b07ab4994a234b632cc4ddcc23e81e",
+      "wasmtime_over_v8_p50": 0.9577144696461958,
+      "wasmtime_over_v8_p95": 1.0017289893887515,
+      "wasmtime_over_v8_mad": 0.6526418786692739,
+      "p50_win": true,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "mixed_gameplay",
+      "kernel_wasm_sha256": "bb15d61253ff0f12886e0a022821b2b20a7d94d895d8481a5d02ad6324d53665",
+      "aggregate_sha256": "906fbdde83596fff79cbb2302c9db088270360539d50d9f520567adfa20b15c7",
+      "wasmtime_over_v8_p50": 0.9212141575866428,
+      "wasmtime_over_v8_p95": 0.9558049064493079,
+      "wasmtime_over_v8_mad": 1.3949671066144802,
+      "p50_win": true,
+      "p95_win": true,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "parallel_integer",
+      "kernel_wasm_sha256": "2bfdf440d1e0ceeabfc8ee5b1282cb7d6f1a0e242bbd68ae2211b2c8c9e09103",
+      "aggregate_sha256": "2527ad24ad8dd06eca9a04248eb4c6b5ea3538d767df7161028af757d876b107",
+      "wasmtime_over_v8_p50": 0.9914023612301248,
+      "wasmtime_over_v8_p95": 1.0519402910269475,
+      "wasmtime_over_v8_mad": 0.8024643874643885,
+      "p50_win": true,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "predictable_branch",
+      "kernel_wasm_sha256": "bbf872105cc947c924884ff3a06ce1498deace56d2ba57f190174d08a18bed37",
+      "aggregate_sha256": "55c412abae25898e920995143411e0d2e64f3c09f78d911cecfeb878bd54b0de",
+      "wasmtime_over_v8_p50": 1.0104447824974792,
+      "wasmtime_over_v8_p95": 1.0322861422614469,
+      "wasmtime_over_v8_mad": 1.3680654016712577,
+      "p50_win": false,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "random_memory",
+      "kernel_wasm_sha256": "ae53f5e762813c6cf64c8cf10fe216ad926e11e1b41df32958996ad252d5a9c9",
+      "aggregate_sha256": "f354608cb8e6c5c7f87d0675dd28b391bdff9ac2ea81b282d5dc09adb665403e",
+      "wasmtime_over_v8_p50": 0.9627899867385012,
+      "wasmtime_over_v8_p95": 0.9718723293575594,
+      "wasmtime_over_v8_mad": 0.7544212999770371,
+      "p50_win": true,
+      "p95_win": true,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "scalar_float",
+      "kernel_wasm_sha256": "ed7a2b99e4608af54ef5ae1facdbe5625a26705ceea4d262446fe86e3382e56f",
+      "aggregate_sha256": "4f4e8ca10b7782049b4fa497b8f93a1adb65e6574531507181d38e4ff231134f",
+      "wasmtime_over_v8_p50": 0.974091993354055,
+      "wasmtime_over_v8_p95": 0.9705022459727385,
+      "wasmtime_over_v8_mad": 1.0899122807017834,
+      "p50_win": true,
+      "p95_win": true,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "sequential_memory",
+      "kernel_wasm_sha256": "54131465c79185df792d0dc676a3ccb3b6cb799b0cd1de9267acbc6020cc0534",
+      "aggregate_sha256": "39f821026428bf92398ca2d83169c48a46a650c6eb51f51376a1968b895b8322",
+      "wasmtime_over_v8_p50": 0.9779362911240795,
+      "wasmtime_over_v8_p95": 1.0062236157413091,
+      "wasmtime_over_v8_mad": 0.5883943825487137,
+      "p50_win": true,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "serial_integer",
+      "kernel_wasm_sha256": "8f4ab96afca05ee78165af042a5ee0437f832c47d74da9aaecea978d5901b6ff",
+      "aggregate_sha256": "26d0aee285403b1b92cc31e0a63067a2eca8a7577dd0f563649e7763e6ce514f",
+      "wasmtime_over_v8_p50": 0.9634694152502931,
+      "wasmtime_over_v8_p95": 0.9841648600856245,
+      "wasmtime_over_v8_mad": 0.7302896146824053,
+      "p50_win": true,
+      "p95_win": true,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "simd128",
+      "kernel_wasm_sha256": "9aa0fe32843594d51d1bc8bbe589895255c37e1e2795163a033d38c627bf3cad",
+      "aggregate_sha256": "3deacb2ee647be8d97f0536f80226cc78ebb74af2fe5d9dfc0372d3208f82fac",
+      "wasmtime_over_v8_p50": 1.0073636504612264,
+      "wasmtime_over_v8_p95": 1.0536979006285434,
+      "wasmtime_over_v8_mad": 1.1559964412811479,
+      "p50_win": false,
+      "p95_win": false,
+      "correctness_failures": 0,
+      "fallback_used": false
+    },
+    {
+      "kernel_id": "small_struct",
+      "kernel_wasm_sha256": "67bf2b68554d77af75377e60ba2df732e0c108fcc94e6cd9b5c87d0c9ccae1f0",
+      "aggregate_sha256": "9cf72f799346287dbda93cb32afa14e717cbd58e839044777a4685256b7cfa55",
+      "wasmtime_over_v8_p50": 0.9803481472863707,
+      "wasmtime_over_v8_p95": 0.9970649044752683,
+      "wasmtime_over_v8_mad": 0.8977300613496902,
+      "p50_win": true,
+      "p95_win": true,
+      "correctness_failures": 0,
+      "fallback_used": false
+    }
+  ],
+  "leadership": {
+    "maximum_geometric_mean_ratio": 0.95,
+    "maximum_mad_geometric_mean_ratio": 1.25,
+    "minimum_kernel_win_rate": 0.6,
+    "p50_geometric_mean_ratio": 0.979772573872088,
+    "p95_geometric_mean_ratio": 1.0267275917835774,
+    "mad_geometric_mean_ratio": 0.923857406471059,
+    "p50_kernel_win_rate": 0.6666666666666666,
+    "p95_kernel_win_rate": 0.4166666666666667,
+    "passed": false
+  },
+  "correctness_failures": 0,
+  "fallback_used": false
+}
