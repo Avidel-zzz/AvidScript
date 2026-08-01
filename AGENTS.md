@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-01 P57.9 上游 sparse checkout 路径再次依赖猜测：未先列出 `C:\tmp\wasmtime-v45-meta\crates` 就读取推测的 `crates/c-api/src`，导致路径不存在。Prevention：即使熟悉上游仓库，也必须先对已确认父目录运行一次字面目录清单或 `git ls-tree`；只有实际输出中的 child 才能加入 sparse checkout 或后续读取命令。
 - 2026-08-01 P57.8 状态快照只做通用 JSON 解析便提交：`documents` 被加入 `p57_8_spec`、`p57_8_plan`、`latest_evidence` 三个 schema 外字段，`next_action` 也被手写成自然语言，随后 `InvokePhaseWorkflow.ps1 status` 以 `ASPW1002` 拒绝。Prevention：任何 `Phase*_State.json` 手工修改在暂存和提交前必须运行 `pwsh -NoProfile -File Build/InvokePhaseWorkflow.ps1 status -Phase <N>`；阶段演进只使用合同内的 `architecture.path/version/sha256/revision_reason` 与 `documents.plan/closeout`，`next_action` 必须逐字采用状态机计算结果，通用 `ConvertFrom-Json` 不能替代 schema Gate。
 - 2026-08-01 P57.9 Windows wildcard 路径禁令再次复发：检索已确认的 `Build/PhaseWorkflow` 时又把 `Build/PhaseWorkflow*` 作为 `rg` 路径参数，导致 Win32 路径错误并污染有效命中。Prevention：`rg` 路径位只允许刚由目录清单确认的字面路径；文件筛选一律使用 `-g`，发送前机械检查所有路径参数不含 `*` 或 `?`。
 - 2026-08-01 P57.8 字面目录表规则写入后立即猜测子目录：尚未列出 `Source/AvidScriptRuntime/Private` 就假定存在 `Private/Reload`，并把该命令加入确定性并行组，导致整组结果被路径错误丢弃。Prevention：目录探索强制串行两步：第一条命令只能 `Get-ChildItem -Name <已确认父目录>`；模型必须从该条实际输出复制子目录或文件名后，下一条才可读取，任何未出现在刚刚输出中的子路径禁止发送。
