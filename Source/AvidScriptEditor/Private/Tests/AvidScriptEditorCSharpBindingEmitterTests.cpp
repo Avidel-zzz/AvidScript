@@ -186,6 +186,187 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterStructWireTest,
+	"AvidScript.Editor.CSharpBindingEmitter.StructWire",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterStructWireTest::RunTest(const FString& Parameters)
+{
+	const FString OwnerPath = UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("Recursive fixed-width USTRUCT descriptor generates for C# emission"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.struct_wire.csharp"),
+				{ { OwnerPath, TEXT("StructWireRoundTrip") } },
+				DescriptorJson,
+				DescriptorResult)))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ParseErrorCategory;
+	FString ParseErrorSource;
+	if (!TestTrue(
+			TEXT("Recursive fixed-width USTRUCT descriptor parses for C# emission"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ParseErrorCategory,
+				ParseErrorSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Recursive fixed-width USTRUCT descriptor uses schema v9"), Package.SchemaVersion, 9);
+	if (!TestEqual(TEXT("Recursive fixed-width USTRUCT fixture has one source binding"), Package.Bindings.Num(), 1))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingFunctionModel& RoundTrip = Package.Bindings[0];
+	if (!TestTrue(
+			TEXT("Recursive fixed-width USTRUCT fixture has one source parameter"),
+			RoundTrip.Parameters.Num() == 1))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingFunctionModel Directions = RoundTrip;
+	Directions.Ordinal = 1;
+	Directions.ScriptName = TEXT("StructWireDirections");
+	Directions.UeMember = TEXT("StructWireDirections");
+	Directions.CanonicalIdentity = TEXT("test.struct_wire.directions");
+	Directions.HostImport.Name = TEXT("test_struct_wire_directions");
+	Directions.Parameters[0].Name = TEXT("Value");
+	FAvidScriptBindingValueModel ConstReference = Directions.Parameters[0];
+	ConstReference.Name = TEXT("ConstReference");
+	ConstReference.Direction = TEXT("const_ref");
+	FAvidScriptBindingValueModel InOut = Directions.Parameters[0];
+	InOut.Name = TEXT("InOut");
+	InOut.Direction = TEXT("ref");
+	FAvidScriptBindingValueModel Output = Directions.Parameters[0];
+	Output.Name = TEXT("Output");
+	Output.Direction = TEXT("out");
+	Directions.Parameters = { Directions.Parameters[0], ConstReference, InOut, Output };
+	Directions.HostImport.Signature = TEXT("(iiiiiii)i");
+	Package.Bindings.Add(Directions);
+
+	FAvidScriptBindingFunctionModel Getter = RoundTrip;
+	Getter.Ordinal = 2;
+	Getter.BindingKind = TEXT("property_get");
+	Getter.ScriptName = TEXT("StructWireProperty");
+	Getter.UeMember = TEXT("StructWireProperty");
+	Getter.CanonicalIdentity = TEXT("test.struct_wire.property_get");
+	Getter.HostImport.Name = TEXT("test_struct_wire_property_get");
+	Getter.HostImport.Signature = TEXT("(iii)i");
+	Getter.Parameters.Reset();
+	Package.Bindings.Add(Getter);
+
+	FAvidScriptBindingFunctionModel Setter = RoundTrip;
+	Setter.Ordinal = 3;
+	Setter.BindingKind = TEXT("property_set");
+	Setter.bConst = false;
+	Setter.ScriptName = TEXT("StructWireProperty");
+	Setter.UeMember = TEXT("StructWireProperty");
+	Setter.CanonicalIdentity = TEXT("test.struct_wire.property_set");
+	Setter.HostImport.Name = TEXT("test_struct_wire_property_set");
+	Setter.HostImport.Signature = TEXT("(iii)i");
+	Setter.ReturnValue = {};
+	Setter.ReturnValue.CanonicalType = TEXT("void");
+	Setter.Parameters[0].Name = TEXT("Value");
+	Setter.Parameters[0].Direction = TEXT("value");
+	Package.Bindings.Add(Setter);
+
+	FString FirstSource;
+	FString FirstErrorCategory;
+	FString FirstErrorSource;
+	if (!TestTrue(
+			TEXT("Recursive fixed-width USTRUCT facade emits"),
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				Package,
+				TEXT("struct-wire-descriptor-hash"),
+				FirstSource,
+				FirstErrorCategory,
+				FirstErrorSource)))
+	{
+		AddError(FirstErrorCategory + TEXT(": ") + FirstErrorSource);
+		return false;
+	}
+	TestTrue(
+		TEXT("Nested struct-wire type has its exact explicit layout"),
+		FirstSource.Contains(TEXT("[StructLayout(LayoutKind.Explicit, Size = 28)]\npublic readonly struct FAvidScriptStructWireNestedTestType")));
+	TestTrue(
+		TEXT("Root struct-wire type has its exact explicit layout"),
+		FirstSource.Contains(TEXT("[StructLayout(LayoutKind.Explicit, Size = 32)]\npublic readonly struct FAvidScriptStructWireRootTestType")));
+	TestTrue(TEXT("Nested struct-wire scalar field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(0)]\n    public readonly int Count;")));
+	TestTrue(TEXT("Nested struct-wire enum field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(4)]\n    public readonly EAvidScriptCSharpEmitterTestMode Mode;")));
+	TestTrue(TEXT("Nested struct-wire FVector field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(8)]\n    public readonly FVector Location;")));
+	TestTrue(TEXT("Nested struct-wire object field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(20)]\n    public readonly UObject Target;")));
+	TestTrue(TEXT("Root struct-wire nested field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(0)]\n    public readonly FAvidScriptStructWireNestedTestType Nested;")));
+	TestTrue(TEXT("Root struct-wire scalar field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(28)]\n    public readonly float Weight;")));
+	TestTrue(
+		TEXT("Struct-wire method keeps ordinary public value types with mixed directions"),
+		FirstSource.Contains(TEXT("public FAvidScriptStructWireRootTestType StructWireDirections(FAvidScriptStructWireRootTestType Value, FAvidScriptStructWireRootTestType ConstReference, ref FAvidScriptStructWireRootTestType InOut, out FAvidScriptStructWireRootTestType Output)")));
+	TestTrue(
+		TEXT("Struct-wire method maps value and const-ref inputs to native in parameters"),
+		FirstSource.Contains(TEXT("in FAvidScriptStructWireRootTestType p0_Value, in FAvidScriptStructWireRootTestType p1_ConstReference")));
+	TestTrue(
+		TEXT("Struct-wire method maps ref out and return to native by-reference parameters"),
+		FirstSource.Contains(TEXT("ref FAvidScriptStructWireRootTestType p2_InOut, out FAvidScriptStructWireRootTestType p3_Output, out FAvidScriptStructWireRootTestType returnValue")));
+	TestTrue(
+		TEXT("Struct-wire method invokes native value and const-ref inputs with in"),
+		FirstSource.Contains(TEXT("in Value, in ConstReference, ref InOut, out Output, out __returnValue")));
+	TestTrue(
+		TEXT("Struct-wire property getter uses native out storage"),
+		FirstSource.Contains(TEXT("Invoke0002(int selfSlot, int selfGeneration, out FAvidScriptStructWireRootTestType returnValue)")));
+	TestTrue(
+		TEXT("Struct-wire property setter uses native in storage"),
+		FirstSource.Contains(TEXT("Invoke0003(int selfSlot, int selfGeneration, in FAvidScriptStructWireRootTestType value)")));
+
+	FString SecondSource;
+	FString SecondErrorCategory;
+	FString SecondErrorSource;
+	TestTrue(
+		TEXT("Recursive fixed-width USTRUCT facade emits deterministically"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			Package,
+			TEXT("struct-wire-descriptor-hash"),
+			SecondSource,
+			SecondErrorCategory,
+			SecondErrorSource));
+	TestEqual(TEXT("Recursive fixed-width USTRUCT source is deterministic"), SecondSource, FirstSource);
+
+	FAvidScriptBindingPackageModel Tampered = Package;
+	FAvidScriptBindingTypeModel* RootType = Tampered.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.Kind == TEXT("struct_wire")
+				&& Type.CppType == TEXT("FAvidScriptStructWireRootTestType");
+		});
+	if (!TestNotNull(TEXT("Recursive fixed-width USTRUCT root type remains available for tamper"), RootType))
+	{
+		return false;
+	}
+	RootType->StructFields[0].TypeId = TEXT("missing-struct-wire-child-id");
+	FString TamperedSource;
+	FString TamperedErrorCategory;
+	FString TamperedErrorSource;
+	TestFalse(
+		TEXT("Struct-wire child type-id tamper fails closed"),
+		FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+			Tampered,
+			TEXT("struct-wire-descriptor-hash"),
+			TamperedSource,
+			TamperedErrorCategory,
+			TamperedErrorSource));
+	TestEqual(TEXT("Struct-wire child type-id tamper reports descriptor contract failure"), TamperedErrorCategory, FString(TEXT("descriptor_contract_invalid")));
+	TestTrue(TEXT("Struct-wire child type-id tamper emits no partial source"), TamperedSource.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorCSharpBindingEmitterClassReferenceTest,
 	"AvidScript.Editor.CSharpBindingEmitter.ClassReference",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -52,6 +52,14 @@ const FAvidScriptBindingTypeModel* FindRenderedType(
 	return Type == nullptr ? nullptr : *Type;
 }
 
+const FAvidScriptBindingTypeModel* FindRenderedTypeById(
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	const FString& TypeId)
+{
+	const FAvidScriptBindingTypeModel* const* Type = TypesById.Find(TypeId);
+	return Type == nullptr ? nullptr : *Type;
+}
+
 bool IsExactFNameDescriptor(
 	const FAvidScriptBindingValueModel& Value,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical)
@@ -71,9 +79,50 @@ bool IsExactFNameDescriptor(
 		&& Type->AbiTypes == TArray<FString>{ TEXT("i") };
 }
 
+bool IsKnownExpandedStruct(const FAvidScriptBindingTypeModel& Type)
+{
+	return Type.Kind == TEXT("struct")
+		&& (Type.CppType == TEXT("FVector")
+			|| Type.CppType == TEXT("FRotator")
+			|| Type.CppType == TEXT("FTransform"));
+}
+
+bool ResolveCSharpType(
+	const FAvidScriptBindingTypeModel& Type,
+	FString& OutType,
+	FString& OutErrorSource)
+{
+	if (Type.CanonicalType == TEXT("scalar:bool")) { OutType = TEXT("bool"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:f32")) { OutType = TEXT("float"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:f64")) { OutType = TEXT("double"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:i8")) { OutType = TEXT("sbyte"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:u8")) { OutType = TEXT("byte"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:i16")) { OutType = TEXT("short"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:u16")) { OutType = TEXT("ushort"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:i32")) { OutType = TEXT("int"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:u32")) { OutType = TEXT("uint"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:i64")) { OutType = TEXT("long"); return Type.Kind == TEXT("scalar"); }
+	if (Type.CanonicalType == TEXT("scalar:u64")) { OutType = TEXT("ulong"); return Type.Kind == TEXT("scalar"); }
+	if (Type.Kind == TEXT("enum") || Type.Kind == TEXT("object_handle") || IsKnownExpandedStruct(Type))
+	{
+		OutType = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type.CppType);
+		return !OutType.IsEmpty();
+	}
+	if (Type.Kind == TEXT("struct_wire")
+		&& Type.CanonicalType.StartsWith(TEXT("struct_wire:"))
+		&& Type.AbiTypes == TArray<FString>{ TEXT("i") })
+	{
+		OutType = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type.CppType);
+		return !OutType.IsEmpty();
+	}
+	OutErrorSource = Type.StableId.IsEmpty() ? Type.CanonicalType : Type.StableId;
+	return false;
+}
+
 bool ResolveCSharpType(
 	const FAvidScriptBindingValueModel& Value,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FString& OutType,
 	FString& OutErrorSource)
 {
@@ -103,6 +152,20 @@ bool ResolveCSharpType(
 		OutType = TEXT("string");
 		return true;
 	}
+	if (Value.Kind == TEXT("struct_wire"))
+	{
+		const FAvidScriptBindingTypeModel* Type = FindRenderedTypeById(TypesById, Value.TypeId);
+		if (Type == nullptr
+			|| Type->CanonicalType != Value.CanonicalType
+			|| Type->Kind != Value.Kind
+			|| Type->CppType != Value.CppType
+			|| Type->AbiTypes != Value.AbiTypes)
+		{
+			OutErrorSource = Value.TypeId;
+			return false;
+		}
+		return ResolveCSharpType(*Type, OutType, OutErrorSource);
+	}
 	if (Value.Kind == TEXT("enum") || Value.Kind == TEXT("object_handle") || Value.Kind == TEXT("struct"))
 	{
 		OutType = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Value.CppType);
@@ -115,6 +178,7 @@ bool ResolveCSharpType(
 bool ResolveStorageType(
 	const FAvidScriptBindingValueModel& Value,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FString& OutType,
 	FString& OutErrorSource)
 {
@@ -128,7 +192,7 @@ bool ResolveStorageType(
 		OutType = TEXT("int");
 		return true;
 	}
-	return ResolveCSharpType(Value, TypesByCanonical, OutType, OutErrorSource);
+	return ResolveCSharpType(Value, TypesByCanonical, TypesById, OutType, OutErrorSource);
 }
 
 bool ResolveComponents(
@@ -272,6 +336,7 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 bool RenderMethod(
 	const FAvidScriptBindingFunctionModel& Binding,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FCSharpRenderedMethod& OutMethod,
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
@@ -284,7 +349,7 @@ bool RenderMethod(
 	}
 
 	FString ReturnType;
-	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, ReturnType, OutErrorSource))
+	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, TypesById, ReturnType, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
@@ -317,7 +382,7 @@ bool RenderMethod(
 	{
 		const FAvidScriptBindingValueModel& Parameter = Binding.Parameters[ParameterIndex];
 		FString PublicType;
-		if (!ResolveCSharpType(Parameter, TypesByCanonical, PublicType, OutErrorSource))
+		if (!ResolveCSharpType(Parameter, TypesByCanonical, TypesById, PublicType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -358,7 +423,7 @@ bool RenderMethod(
 		if (Parameter.Direction == TEXT("ref") || Parameter.Direction == TEXT("out"))
 		{
 			FString StorageType;
-			if (!ResolveStorageType(Parameter, TypesByCanonical, StorageType, OutErrorSource))
+			if (!ResolveStorageType(Parameter, TypesByCanonical, TypesById, StorageType, OutErrorSource))
 			{
 				OutErrorCategory = TEXT("unsupported_csharp_type");
 				return false;
@@ -416,9 +481,15 @@ bool RenderMethod(
 			}
 			continue;
 		}
+		if (Parameter.Kind == TEXT("struct_wire"))
+		{
+			NativeParameters.Add(FString::Printf(TEXT("in %s p%d_%s"), *PublicType, ParameterIndex, *PublicName.Replace(TEXT("@"), TEXT(""))));
+			NativeArguments.Add(TEXT("in ") + PublicName);
+			continue;
+		}
 
 		FString StorageType;
-		if (!ResolveStorageType(Parameter, TypesByCanonical, StorageType, OutErrorSource))
+		if (!ResolveStorageType(Parameter, TypesByCanonical, TypesById, StorageType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -440,7 +511,7 @@ bool RenderMethod(
 		&& !bGeneratedVectorValue)
 	{
 		FString StorageType;
-		if (!ResolveStorageType(Binding.ReturnValue, TypesByCanonical, StorageType, OutErrorSource))
+		if (!ResolveStorageType(Binding.ReturnValue, TypesByCanonical, TypesById, StorageType, OutErrorSource))
 		{
 			OutErrorCategory = TEXT("unsupported_csharp_type");
 			return false;
@@ -507,6 +578,7 @@ bool RenderMethod(
 bool BuildPropertySetterInterop(
 	const FAvidScriptBindingFunctionModel& Setter,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FString& OutPublicType,
 	TArray<FString>& OutNativeParameters,
 	TArray<FString>& OutNativeArguments,
@@ -528,6 +600,7 @@ bool BuildPropertySetterInterop(
 	if (!ResolveCSharpType(
 			Setter.Parameters[0],
 			TypesByCanonical,
+			TypesById,
 			OutPublicType,
 			OutErrorSource))
 	{
@@ -561,12 +634,18 @@ bool BuildPropertySetterInterop(
 			OutNativeArguments.Add(TEXT("value") + Component.Access);
 		}
 	}
+	else if (Value.Kind == TEXT("struct_wire"))
+	{
+		OutNativeParameters.Add(TEXT("in ") + OutPublicType + TEXT(" value"));
+		OutNativeArguments.Add(TEXT("in value"));
+	}
 	else
 	{
 		FString StorageType;
 		if (!ResolveStorageType(
 				Value,
 				TypesByCanonical,
+				TypesById,
 				StorageType,
 				OutErrorSource))
 		{
@@ -628,6 +707,7 @@ bool RenderPropertyGetter(
 	const FAvidScriptBindingFunctionModel& Binding,
 	const FAvidScriptBindingFunctionModel* Setter,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FCSharpRenderedMethod& OutMethod,
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
@@ -643,8 +723,8 @@ bool RenderPropertyGetter(
 	}
 	FString PublicType;
 	FString StorageType;
-	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, PublicType, OutErrorSource)
-		|| !ResolveStorageType(Binding.ReturnValue, TypesByCanonical, StorageType, OutErrorSource))
+	if (!ResolveCSharpType(Binding.ReturnValue, TypesByCanonical, TypesById, PublicType, OutErrorSource)
+		|| !ResolveStorageType(Binding.ReturnValue, TypesByCanonical, TypesById, StorageType, OutErrorSource))
 	{
 		OutErrorCategory = TEXT("unsupported_csharp_type");
 		return false;
@@ -719,6 +799,7 @@ bool RenderPropertyGetter(
 		if (!BuildPropertySetterInterop(
 				*Setter,
 				TypesByCanonical,
+				TypesById,
 				SetterPublicType,
 				NativeParameters,
 				NativeArguments,
@@ -747,6 +828,7 @@ bool RenderPropertyGetter(
 bool RenderPropertySetter(
 	const FAvidScriptBindingFunctionModel& Setter,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
 	FCSharpRenderedMethod& OutMethod,
 	FString& OutErrorCategory,
 	FString& OutErrorSource)
@@ -757,6 +839,7 @@ bool RenderPropertySetter(
 	if (!BuildPropertySetterInterop(
 			Setter,
 			TypesByCanonical,
+			TypesById,
 			PublicType,
 			NativeParameters,
 			NativeArguments,
@@ -904,6 +987,130 @@ void AppendTransform(TArray<FString>& Lines)
 		TEXT("}"),
 		TEXT("")
 	});
+}
+
+bool AppendStructWireDeclarations(
+	const FAvidScriptBindingPackageModel& Package,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	TArray<FString>& Lines,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	TArray<const FAvidScriptBindingTypeModel*> StructWireTypes;
+	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
+	{
+		if (Type.Kind == TEXT("struct_wire"))
+		{
+			StructWireTypes.Add(&Type);
+		}
+	}
+	StructWireTypes.Sort([](const FAvidScriptBindingTypeModel& Left, const FAvidScriptBindingTypeModel& Right)
+	{
+		return Left.CanonicalType < Right.CanonicalType;
+	});
+
+	TSet<FString> ActiveTypeIds;
+	TSet<FString> EmittedTypeIds;
+	TFunction<bool(const FAvidScriptBindingTypeModel*)> AppendType;
+	AppendType = [&AppendType, &ActiveTypeIds, &EmittedTypeIds, &TypesById, &Lines, &OutErrorCategory, &OutErrorSource](
+		const FAvidScriptBindingTypeModel* Type)
+	{
+		if (Type == nullptr
+			|| Type->Kind != TEXT("struct_wire")
+			|| Type->StableId.IsEmpty()
+			|| !Type->CanonicalType.StartsWith(TEXT("struct_wire:"))
+			|| Type->AbiTypes != TArray<FString>{ TEXT("i") })
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Type == nullptr ? TEXT("types.fields") : Type->StableId;
+			return false;
+		}
+		if (EmittedTypeIds.Contains(Type->StableId))
+		{
+			return true;
+		}
+		if (ActiveTypeIds.Contains(Type->StableId))
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Type->StableId;
+			return false;
+		}
+
+		ActiveTypeIds.Add(Type->StableId);
+		TArray<FString> FieldTypes;
+		TArray<FString> FieldNames;
+		TSet<FString> SeenFieldNames;
+		for (const FAvidScriptBindingStructFieldModel& Field : Type->StructFields)
+		{
+			const FAvidScriptBindingTypeModel* ChildType = FindRenderedTypeById(TypesById, Field.TypeId);
+			if (ChildType == nullptr)
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = TEXT("types.fields");
+				return false;
+			}
+			FString FieldType;
+			if (!ResolveCSharpType(*ChildType, FieldType, OutErrorSource))
+			{
+				OutErrorCategory = TEXT("unsupported_csharp_type");
+				return false;
+			}
+			const FString FieldName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Field.Name);
+			if (FieldName.IsEmpty() || FieldName == FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type->CppType) || SeenFieldNames.Contains(FieldName))
+			{
+				OutErrorCategory = TEXT("csharp_member_collision");
+				OutErrorSource = Type->CanonicalType + TEXT(".") + FieldName;
+				return false;
+			}
+			SeenFieldNames.Add(FieldName);
+			if (ChildType->Kind == TEXT("struct_wire") && !AppendType(ChildType))
+			{
+				return false;
+			}
+			FieldTypes.Add(MoveTemp(FieldType));
+			FieldNames.Add(FieldName);
+		}
+
+		ActiveTypeIds.Remove(Type->StableId);
+		EmittedTypeIds.Add(Type->StableId);
+		const FString TypeName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type->CppType);
+		Lines.Add(FString::Printf(TEXT("[StructLayout(LayoutKind.Explicit, Size = %d)]"), Type->Size));
+		Lines.Add(TEXT("public readonly struct ") + TypeName);
+		Lines.Add(TEXT("{"));
+		for (int32 FieldIndex = 0; FieldIndex < Type->StructFields.Num(); ++FieldIndex)
+		{
+			Lines.Add(FString::Printf(TEXT("    [FieldOffset(%d)]"), Type->StructFields[FieldIndex].WireOffset));
+			Lines.Add(TEXT("    public readonly ") + FieldTypes[FieldIndex] + TEXT(" ") + FieldNames[FieldIndex] + TEXT(";"));
+		}
+		if (!Type->StructFields.IsEmpty())
+		{
+			TArray<FString> Parameters;
+			for (int32 FieldIndex = 0; FieldIndex < FieldTypes.Num(); ++FieldIndex)
+			{
+				Parameters.Add(FieldTypes[FieldIndex] + TEXT(" ") + FieldNames[FieldIndex]);
+			}
+			Lines.Add(TEXT(""));
+			Lines.Add(TEXT("    public ") + TypeName + TEXT("(") + FString::Join(Parameters, TEXT(", ")) + TEXT(")"));
+			Lines.Add(TEXT("    {"));
+			for (const FString& FieldName : FieldNames)
+			{
+				Lines.Add(TEXT("        this.") + FieldName + TEXT(" = ") + FieldName + TEXT(";"));
+			}
+			Lines.Add(TEXT("    }"));
+		}
+		Lines.Add(TEXT("}"));
+		Lines.Add(TEXT(""));
+		return true;
+	};
+
+	for (const FAvidScriptBindingTypeModel* Type : StructWireTypes)
+	{
+		if (!AppendType(Type))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 void AppendObjectHandleProxy(
@@ -1189,9 +1396,17 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	bool bDescriptorHasActorProxy = false;
 	for (const FAvidScriptBindingTypeModel& Type : Package.Types)
 	{
+		if (Type.StableId.IsEmpty()
+			|| TypesByCanonical.Contains(Type.CanonicalType)
+			|| TypesById.Contains(Type.StableId))
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Type.StableId.IsEmpty() ? Type.CanonicalType : Type.StableId;
+			return false;
+		}
 		TypesByCanonical.Add(Type.CanonicalType, &Type);
 		TypesById.Add(Type.StableId, &Type);
-		if (Type.Kind == TEXT("struct") || Type.Kind == TEXT("object_handle") || Type.Kind == TEXT("enum"))
+		if (Type.Kind == TEXT("struct") || Type.Kind == TEXT("struct_wire") || Type.Kind == TEXT("object_handle") || Type.Kind == TEXT("enum"))
 		{
 			const FString Name = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Type.CppType);
 			if (CSharpTypeNames.Contains(Name))
@@ -1452,6 +1667,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				Binding,
 				PropertySetters.FindRef(PropertyKey),
 				TypesByCanonical,
+				TypesById,
 				Rendered,
 				OutErrorCategory,
 				OutErrorSource)
@@ -1459,12 +1675,14 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				? RenderPropertySetter(
 					Binding,
 					TypesByCanonical,
+					TypesById,
 					Rendered,
 					OutErrorCategory,
 					OutErrorSource)
 				: RenderMethod(
 					Binding,
 					TypesByCanonical,
+					TypesById,
 					Rendered,
 					OutErrorCategory,
 					OutErrorSource);
@@ -1747,6 +1965,15 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		Lines.Add(TEXT("}"));
 		Lines.Add(TEXT(""));
+	}
+	if (!AppendStructWireDeclarations(
+			Package,
+			TypesById,
+			Lines,
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
 	}
 
 	if (SelfType != nullptr || bHasLifecycleBindings || bHasObjectFactoryBindings)
