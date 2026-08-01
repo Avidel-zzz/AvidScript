@@ -562,7 +562,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 5
 			&& DescriptorSchemaVersion != 6
 			&& DescriptorSchemaVersion != 7
-			&& DescriptorSchemaVersion != 8)
+			&& DescriptorSchemaVersion != 8
+			&& DescriptorSchemaVersion != 9)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))

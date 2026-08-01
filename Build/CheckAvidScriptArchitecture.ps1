@@ -1040,6 +1040,7 @@ $PropertySelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Pr
 $ReflectedFunctionPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.cpp'
 $ReflectedPropertyPolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.cpp'
 $ReflectedTypePolicyHeader = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedTypePolicy.h'
+$ReflectedTypePolicySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorReflectedTypePolicy.cpp'
 $BindingDescriptorGeneratorSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorGenerator.cpp'
 $BindingDescriptorModelSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorModel.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
@@ -1096,6 +1097,38 @@ if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedProp
     -not $ReflectedPropertyPolicySource.Contains('cached_blueprint_setter') -or
     -not $ReflectedTypePolicyHeader.Contains('ProjectReadableProperty')) {
     Add-Violation 'reflected property eligibility and write routing must remain in the shared reflected property policy'
+}
+foreach ($RequiredStructWireDescriptorContract in @(
+    'FAvidScriptBindingStructFieldModel',
+    'StructFields',
+    'ValidateAvidScriptBindingStructWireGraph',
+    'Depth > 8',
+    'InOutNodes > 128',
+    'Type.Size > 4096',
+    'TEXT("descriptor_selection_v9")',
+    'TEXT("descriptor_package_v9")'
+)) {
+    if (-not $BindingDescriptorHeader.Contains($RequiredStructWireDescriptorContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredStructWireDescriptorContract)) {
+        Add-Violation "schema v9 recursive struct descriptor is missing $RequiredStructWireDescriptorContract"
+    }
+}
+foreach ($RequiredStructWireProjectionContract in @(
+    'TEXT("struct_wire:")',
+    'StructDepth >= 8',
+    '++InOutStructNodes > 128',
+    'FieldValue.Type.Size > 4096 - WireOffset',
+    'Package.SchemaVersion = 9',
+    'TypeModel.StructFields = Type.StructFields'
+)) {
+    if (-not $ReflectedTypePolicySource.Contains($RequiredStructWireProjectionContract) -and
+        -not $BindingDescriptorGeneratorSource.Contains($RequiredStructWireProjectionContract)) {
+        Add-Violation "schema v9 recursive struct projection is missing $RequiredStructWireProjectionContract"
+    }
+}
+if (-not $BindingDescriptorModelSource.Contains('Writer->WriteArrayStart(TEXT("fields"))') -or
+    -not $BindingDescriptorModelSource.Contains('Writer->WriteValue(TEXT("wire_offset"), Field.WireOffset)')) {
+    Add-Violation 'schema v9 serializer must publish the immutable recursive struct field graph'
 }
 foreach ($RequiredProfileGeneratorContract in @('MakeEngineGameplayProfile', 'GenerateFromProfile')) {
     if (-not $BindingDescriptorGeneratorSource.Contains($RequiredProfileGeneratorContract)) {
@@ -1555,10 +1588,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..8) {
+foreach ($RequiredDescriptorSchemaVersion in 2..9) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v8 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v9 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1589,8 +1622,9 @@ foreach ($ActiveObjectTypePackageContract in @(
 if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 8')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v8 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 8') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 9')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v9 typed object packages'
 }
 foreach ($RequiredRuntimeManifestImportContract in @(
     'avidscript.owner_get_handle.v1',

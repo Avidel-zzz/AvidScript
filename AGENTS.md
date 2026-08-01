@@ -89,6 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-02 P57.11B1 PowerShell parser 预检首次把含 `$errors` 的脚本放进双引号 `pwsh -Command`，变量被外层 PowerShell 提前展开，产生空 `[ref]` 与 empty pipe ParserError。Prevention：从 PowerShell 启动嵌套 `pwsh -Command` 时，整个子脚本使用单引号保护，内部字面字符串使用双引号；Parser API 固定初始化 `$tokens/$errors` 并传 `[ref]$tokens`、`[ref]$errors`。
+- 2026-08-02 P57.11B1 Gate 准备再次把可能以 exit 1 表示“无匹配”的 `rg` 与三个确定性 `Get-Content` 放进同一并行编排，导致有效输出整体丢弃，复发了仓库已有的探测隔离错误。Prevention：`rg`/`Select-String` 等内容探测一律独立调用；只有已知存在且预期 exit 0 的字面文件读取可组成 `Promise.all`，发送并行组前机械检查每个命令的合法非零语义。
+- 2026-08-02 P57.11B1 计划首次写入了不存在的 `Source/AvidScriptBindings/Private/Tests/AvidScriptBindingDescriptorTests.cpp`，并在查找既有 C# golden 时猜测了不存在的 Editor 私有 Fixtures 目录；实际 Bindings 测试 owner 是 `AvidScriptBindingsBoundaryTests.cpp`，golden 位于仓库级 `Tests/Fixtures/BindingGeneration`。Prevention：阶段计划中的每个 Modify/Test 路径必须先由对应父目录的 `rg --files` 输出证明存在；计划新增文件必须明确标为 Create，禁止把概念 owner 或历史目录结构写成已存在路径。
 - 2026-08-01 P57.11A 收口时再次猜测文档/源码文件名，先后使用了不存在的旧设计名、Runtime 根级 session/types 路径和错误的 P57.10 evidence 文件名。Prevention：读取任何非刚创建文件前，先以已确认父目录执行 `rg --files <parent>`，再从输出逐字复制路径；恢复摘要里的概念名也不能替代当前工作树索引。
 - 2026-08-01 P57.11A benchmark Harness junction 一度仍指向旧 worktree，使 UBT 验证了 Phase53 源码而非当前候选。Prevention：每次 benchmark build 或 Automation 前先运行 Harness installer `Verify`，并断言 junction source 等于当前 canonical `Benchmarks/PuertsComparison/AvidScriptPerfHarness`；验证失败时先修挂载，不解释构建结果。
 - 2026-08-01 P57.11A 混用了 UBT 与 Editor runtime 的插件开关：UBT 使用单数 `-EnablePlugin=`，Editor runtime 使用复数 `-EnablePlugins=`；错误的 runtime 单数参数导致目标测试数量为 0。Prevention：构建和运行命令分别从 tracked harness 命令模板复制开关，启动后首先核对插件加载日志和 `Found N`，`Found 0` 视为配置失败而非测试通过。
