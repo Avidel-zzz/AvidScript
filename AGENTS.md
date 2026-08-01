@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-02 P57.11B1 focused Automation 首次漏传 runtime 复数开关 `-EnablePlugins=AvidScriptPerfHarness`，导致依赖 Harness 的 `AvidScriptGeneratedBindings` 在测试发现前加载失败；修正后进程 exit 0 但 4 项中仍有 1 项 `Result={Fail}`，证明进程码不能替代结果解析。失败夹具还直接 `NewObject<UObject>()`，UE5.8 把抽象 UObject 实例化记录为 ensure。Prevention：所有主工程 Automation 从 tracked runtime 模板复制复数插件开关；验收同时解析 found/completed/每项 Result/Queue Empty/TestExit；需要普通 UObject capability 的测试使用插件内具体 UCLASS，禁止实例化 UObject 基类。
 - 2026-08-02 P57.11B1 Gate 入口把可能抛出 junction mismatch 的 Harness `Verify`、可能无进程的 `Get-Process` 与 Git 确定性读取放入同一并行组，再次造成有效状态输出丢弃。Prevention：环境前置条件与进程探测都按“可失败探测”独立执行；只有 Harness Verify 明确成功后才并行纯 Git/文件读取，禁止为了少一次 tool call 扩大失败域。
 - 2026-08-02 P57.11B1 首次统一构建发现 recursive compiler 在 `AvidScriptBindingInvocation.cpp` 匿名命名空间中直接使用 `FValueCodecProgram/EValueCodecKind`，但该 translation unit 只通过 `FAvidScriptRuntimeBindingValuePlan/EAvidScriptRuntimeBindingKind` alias 暴露私有类型，造成级联未声明错误；测试同时把 `WriteBytes` 参数命名为成员 `Bytes` 并使用了错误的非 const package shared pointer。Prevention：跨私有命名空间实现必须复用 translation unit 已定义 alias 或写完整限定名；测试 override 参数不得遮蔽成员；调用公开签名前先逐字核对 const/shared-pointer 类型，统一构建的首轮 error list 按首个根错误修复，不逐条追级联诊断。
 - 2026-08-02 P57.11B1 在已知存在 protected dirty baseline 的主工作树上仍执行无 pathspec 的 `git diff --check`，用户文件中的既有尾随空格使并行检查整体返回非零。Prevention：主工作树只对本批次 owned path 清单执行 scoped `git diff --check -- <paths>`；全树 diff/check 与 architecture evidence 仅在 detached clean candidate 执行，禁止修改受保护文件来消除噪声。

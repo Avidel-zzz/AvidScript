@@ -368,7 +368,7 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	FAvidScriptBoundaryGuestMemory GuestMemory;
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptBoundaryOwnership Ownership;
-	UObject* Target = NewObject<UObject>();
+	UObject* Target = NewObject<UAvidScriptBindingsTestObject>();
 	FAvidScriptObjectHandleResult HandleResult;
 	const FAvidScriptObjectHandle TargetHandle = Registry.RegisterObject(Target, HandleResult, false);
 	const auto StoreInput = [&GuestMemory, TargetHandle](const uint32 Address, const int32 Count, const float Ratio, const float X)
