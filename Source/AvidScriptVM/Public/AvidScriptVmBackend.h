@@ -318,6 +318,29 @@ struct FAvidScriptDynamicHostCallResult
 	FString Details;
 };
 
+using FAvidScriptVmPreparedDynamicHostInvoke =
+	bool (*)(
+		void* Context,
+		TConstArrayView<uint64> Arguments,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		FAvidScriptDynamicHostCallResult& OutResult);
+
+struct FAvidScriptVmPreparedDynamicHostTarget
+{
+	void* Context = nullptr;
+	FAvidScriptVmPreparedDynamicHostInvoke Invoke = nullptr;
+
+	bool IsBound() const
+	{
+		return Context != nullptr && Invoke != nullptr;
+	}
+
+	bool IsEmpty() const
+	{
+		return Context == nullptr && Invoke == nullptr;
+	}
+};
+
 class AVIDSCRIPTVM_API IAvidScriptHostDispatcher
 {
 public:
@@ -368,6 +391,7 @@ struct FAvidScriptVmDynamicImport
 	FString ModuleName;
 	FString ImportName;
 	FString Signature;
+	FAvidScriptVmPreparedDynamicHostTarget PreparedTarget;
 };
 
 struct FAvidScriptVmBindingPackage

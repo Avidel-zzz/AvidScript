@@ -696,6 +696,42 @@ public:
 	bool bFailDynamicCall = false;
 };
 
+struct FAvidScriptWasmtimePreparedDynamicContext
+{
+	int32 CallCount = 0;
+	int32 LastArgument = 0;
+	bool bSawGuestMemory = false;
+	bool bReject = false;
+};
+
+bool InvokeWasmtimePreparedDynamicForTest(
+	void* OpaqueContext,
+	const TConstArrayView<uint64> Arguments,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	FAvidScriptWasmtimePreparedDynamicContext* Context =
+		static_cast<FAvidScriptWasmtimePreparedDynamicContext*>(OpaqueContext);
+	if (Context == nullptr)
+	{
+		return false;
+	}
+	++Context->CallCount;
+	(void)GuestMemory;
+	Context->LastArgument = Arguments.IsEmpty()
+		? 0
+		: static_cast<int32>(Arguments[0]);
+	Context->bSawGuestMemory = true;
+	if (Context->bReject)
+	{
+		OutResult.Details = TEXT("wasmtime prepared dynamic rejection sentinel");
+		return false;
+	}
+	OutResult.bSucceeded = true;
+	OutResult.ReturnValue = Context->LastArgument + 2;
+	return true;
+}
+
 class FAvidScriptWasmtimeTypedBridgeDispatcher final
 	: public IAvidScriptVmTypedHostDispatcher
 {
@@ -1955,6 +1991,78 @@ bool FAvidScriptVmWasmtimeDynamicImportsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("dynamic failure module"), Error.ImportModuleName, FString(TEXT("avidscript")));
 	TestEqual(TEXT("dynamic failure import"), Error.ImportName, FString(WasmtimeDynamicImportName));
 	TestEqual(TEXT("dynamic failure details"), Error.Details, FString(TEXT("wasmtime dynamic failure sentinel")));
+
+	FAvidScriptVmBindingPackage PreparedPackage =
+		MakeWasmtimeDynamicPackage(0, TEXT('c'));
+	FAvidScriptWasmtimePreparedDynamicContext PreparedContext;
+	PreparedPackage.Imports[0].PreparedTarget.Context = &PreparedContext;
+	PreparedPackage.Imports[0].PreparedTarget.Invoke =
+		&InvokeWasmtimePreparedDynamicForTest;
+	FAvidScriptWasmtimeTestDispatcher PreparedDispatcher;
+	FAvidScriptVmLoadConfig PreparedConfig;
+	PreparedConfig.HostDispatcher = &PreparedDispatcher;
+	PreparedConfig.BindingPackage = &PreparedPackage;
+	TUniquePtr<IAvidScriptVmBackend> PreparedBackend =
+		CreateWasmtimeBackendForTest(Error);
+	if (!TestTrue(
+			TEXT("prepared dynamic package loads"),
+			PreparedBackend->Load(
+				Fixture,
+				TEXT("wasmtime_dynamic_prepared"),
+				PreparedConfig,
+				Error)))
+	{
+		AddError(Error.Category + TEXT(": ") + Error.Details);
+		return false;
+	}
+	FAvidScriptVmExportHandle PreparedBeginPlay;
+	TestTrue(
+		TEXT("prepared dynamic BeginPlay resolves"),
+		PreparedBackend->ResolveExport(
+			TEXT("avid_on_begin_play"),
+			PreparedBeginPlay,
+			Error));
+	TestTrue(
+		TEXT("prepared dynamic callback succeeds"),
+		PreparedBackend->Call(
+			PreparedBeginPlay,
+			FAvidScriptVmCallFrame(),
+			Error));
+	TestEqual(
+		TEXT("prepared target receives one call"),
+		PreparedContext.CallCount,
+		1);
+	TestEqual(
+		TEXT("prepared target preserves the raw argument"),
+		PreparedContext.LastArgument,
+		41);
+	TestTrue(
+		TEXT("prepared target receives active guest memory"),
+		PreparedContext.bSawGuestMemory);
+	TestEqual(
+		TEXT("prepared target bypasses the dispatcher"),
+		PreparedDispatcher.DynamicCallCount,
+		0);
+
+	PreparedContext.bReject = true;
+	TestFalse(
+		TEXT("prepared dynamic rejection traps"),
+		PreparedBackend->Call(
+			PreparedBeginPlay,
+			FAvidScriptVmCallFrame(),
+			Error));
+	TestEqual(
+		TEXT("prepared rejection does not replay through dispatcher"),
+		PreparedDispatcher.DynamicCallCount,
+		0);
+	TestEqual(
+		TEXT("prepared rejection calls the target exactly once"),
+		PreparedContext.CallCount,
+		2);
+	TestEqual(
+		TEXT("prepared rejection details are preserved"),
+		Error.Details,
+		FString(TEXT("wasmtime prepared dynamic rejection sentinel")));
 	return true;
 #endif
 }

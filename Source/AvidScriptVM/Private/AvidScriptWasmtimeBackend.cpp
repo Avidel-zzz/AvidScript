@@ -176,6 +176,7 @@ struct FAvidScriptWasmtimeDynamicHostContext
 	FString ImportName;
 	FString CompactSignature;
 	FAvidScriptVmAbiSignature Signature;
+	FAvidScriptVmPreparedDynamicHostTarget PreparedTarget;
 };
 
 struct FAvidScriptWasmtimeTypedHostContext
@@ -1090,7 +1091,8 @@ public:
 			}
 		}
 
-		if (HostDispatcher == nullptr)
+		const bool bHasPreparedTarget = HostContext.PreparedTarget.IsBound();
+		if (!bHasPreparedTarget && HostDispatcher == nullptr)
 		{
 			RecordPendingHostFailure(
 				HostContext.ModuleName,
@@ -1099,23 +1101,39 @@ public:
 			return false;
 		}
 
-		FAvidScriptDynamicHostCall Call;
-		Call.BindingOrdinal = HostContext.Ordinal;
-		Call.Arguments = MakeArrayView(ArgumentCells, static_cast<int32>(ArgumentCount));
-		Call.GuestMemory = this;
+		const TConstArrayView<uint64> ArgumentView = MakeArrayView(
+			ArgumentCells,
+			static_cast<int32>(ArgumentCount));
 		FAvidScriptDynamicHostCallResult Result;
-		AvidScriptWasmtimeCaller* PreviousCaller = ActiveCaller;
-		ActiveCaller = Caller;
-		const bool bSucceeded =
-			HostDispatcher->DispatchDynamicHostCall(Call, Result) && Result.bSucceeded;
-		ActiveCaller = PreviousCaller;
+		TGuardValue<AvidScriptWasmtimeCaller*> CallerGuard(ActiveCaller, Caller);
+		bool bSucceeded = false;
+		if (bHasPreparedTarget)
+		{
+			bSucceeded = HostContext.PreparedTarget.Invoke(
+				HostContext.PreparedTarget.Context,
+				ArgumentView,
+				*this,
+				Result) && Result.bSucceeded;
+		}
+		else
+		{
+			FAvidScriptDynamicHostCall Call;
+			Call.BindingOrdinal = HostContext.Ordinal;
+			Call.Arguments = ArgumentView;
+			Call.GuestMemory = this;
+			bSucceeded =
+				HostDispatcher->DispatchDynamicHostCall(Call, Result)
+				&& Result.bSucceeded;
+		}
 		if (!bSucceeded)
 		{
 			RecordPendingHostFailure(
 				HostContext.ModuleName,
 				HostContext.ImportName,
 				Result.Details.IsEmpty()
-					? TEXT("Wasmtime dynamic host dispatcher rejected the call.")
+					? bHasPreparedTarget
+						? TEXT("Wasmtime prepared dynamic host target rejected the call.")
+						: TEXT("Wasmtime dynamic host dispatcher rejected the call.")
 					: MoveTemp(Result.Details));
 			return false;
 		}
@@ -2473,6 +2491,18 @@ private:
 			HostContext->ModuleName = Import.ModuleName;
 			HostContext->ImportName = Import.ImportName;
 			HostContext->CompactSignature = Import.Signature;
+			if (!Import.PreparedTarget.IsEmpty()
+				&& !Import.PreparedTarget.IsBound())
+			{
+				OutError.Reset();
+				OutError.Category = TEXT("host_import_registration_failed");
+				OutError.ImportModuleName = Import.ModuleName;
+				OutError.ImportName = Import.ImportName;
+				OutError.Details =
+					TEXT("The prepared dynamic host target is partially bound.");
+				return false;
+			}
+			HostContext->PreparedTarget = Import.PreparedTarget;
 			FString ParseError;
 			if (!ParseAvidScriptVmAbiSignature(
 				Import.Signature,
