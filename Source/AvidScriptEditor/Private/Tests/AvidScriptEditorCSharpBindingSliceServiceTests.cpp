@@ -243,7 +243,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		GeneratedRegistry.UnregisterPackage(AuthorizationModel.PackageHash);
 	};
-	TestEqual(TEXT("Native-direct authorization descriptor is schema v8"), AuthorizationModel.SchemaVersion, 8);
+	TestEqual(TEXT("Recursive-struct authorization descriptor is schema v9"), AuthorizationModel.SchemaVersion, 9);
 	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(
