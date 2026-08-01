@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.11A",
+  "evidence_class": "validation",
+  "captured_at_utc": "2026-08-01T09:30:05.410Z",
+  "candidate": {
+    "commit": "078e16f6648ec063c4bb91442e3f16f0f3d636d8",
+    "tree": "b50544abd0df5a85279c02995abe20b2c8c2e07d",
+    "dirty": false,
+    "architecture_checker_sha256": "984a872cf0b0f64985ea23c76a8aac7e80bc4e6357d707d26fe61da2cb273d03"
+  },
+  "implementation": {
+    "vm_contract_commit": "7f1de7f7035889279b5de3cd3874df1ee7f70491",
+    "integration_commit": "078e16f6648ec063c4bb91442e3f16f0f3d636d8",
+    "prepared_dynamic_contract": true,
+    "generic_reflected_functions": true,
+    "generic_reflected_properties": true,
+    "typed_import_precedence_preserved": true,
+    "ordinal_success_path_lookup_removed": true,
+    "function_name_selection": false,
+    "per_api_wrappers_added": false
+  },
+  "routing": {
+    "prepared_dynamic_workloads": [
+      "scalar_noop",
+      "vector_ref_out"
+    ],
+    "typed_precedence_workloads": [
+      "scalar_add_int32",
+      "property_get_set",
+      "vector_value",
+      "object_roundtrip",
+      "batch_scalar",
+      "gameplay_actor_transform",
+      "gameplay_damage_event"
+    ],
+    "prepared_dynamic_expected_hits": "exact workload iteration count for generic ABI workloads; zero when a narrower exact typed import owns the identity",
+    "runtime_target_fixture": {
+      "success_hit_count": 1,
+      "success_fallback_count": 0,
+      "success_reject_count": 0,
+      "invalid_frame_reject_count": 1,
+      "invalid_frame_fallback_count": 0
+    }
+  },
+  "validation": {
+    "ue58_no_clean_editor_target": {
+      "target": "AvidTPSTemplateEditor",
+      "platform": "Win64",
+      "configuration": "Development",
+      "succeeded": true,
+      "final_relevant_actions": 4
+    },
+    "focused_runtime_automation": {
+      "test": "AvidScript.Runtime.Binding.PreparedDynamicPackage",
+      "found": 1,
+      "succeeded": 1,
+      "failed": 0
+    },
+    "five_lane_correctness": {
+      "test": "AvidScript.PerformanceComparison.FiveLane.Correctness",
+      "workloads": 12,
+      "succeeded": true
+    },
+    "full_avidscript_automation": {
+      "found": 333,
+      "succeeded": 333,
+      "failed": 0,
+      "exit_code": 0,
+      "final_marker": "TEST COMPLETE"
+    },
+    "architecture": {
+      "succeeded": true,
+      "clean_inputs": true,
+      "boundaries": [
+        "Core",
+        "Bindings",
+        "VM",
+        "Runtime"
+      ]
+    },
+    "static_contracts": [
+      "Puerts benchmark architecture",
+      "Puerts benchmark result contracts",
+      "Puerts benchmark sidecar contracts",
+      "warm benchmark core contracts",
+      "Phase54 and Phase56 gameplay contracts",
+      "Phase56 evidence contracts",
+      "Wasmtime dependency contracts",
+      "Wasmtime performance toolchain contracts: 55 assertions"
+    ]
+  },
+  "performance_claim": {
+    "new_formal_measurement": false,
+    "thresholds_changed": false,
+    "note": "P57.11A is an architecture and routing batch; formal performance remeasurement is deferred to P57.11C."
+  },
+  "open_debt": [
+    "P57-D06-ControlledLeadership"
+  ],
+  "raw_evidence": {
+    "tracking": "external_not_committed",
+    "personal_paths_committed": false
+  }
+}

@@ -13,8 +13,8 @@
     "revision_reason": "P57.8 froze the Editor precompiled artifact pipeline and runtime trust chain"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.10_Prepared_Reflection_Invocation_Cell_Plan.md",
-    "closeout": "Docs/Phase57/P57.10_Prepared_Reflection_Invocation_Cell.md"
+    "plan": "Docs/Phase57/P57.11A_Prepared_Generic_Bridge_Plan.md",
+    "closeout": "Docs/Phase57/P57.11A_Prepared_Generic_Bridge.md"
   },
   "batches": [
     {
@@ -82,6 +82,12 @@
       "status": "Completed",
       "evidence": "Immutable prepared reflection invocation cells now cover scalar, property i32, FVector value/const-ref and UObject roundtrip without API-name special cases; formal Adaptive/Puerts Reflection ratios are 0.51480/0.69387/0.05460/0.52260; 9000/9000 samples valid; focused Automation 4/4 and full AvidScript Automation 326/326 passed.",
       "completed_at_utc": "2026-08-01T06:26:05.7080000+00:00"
+    },
+    {
+      "id": "P57.11A",
+      "status": "Completed",
+      "evidence": "commit 078e16f; generic reflected function/property calls now use exact-identity prepared dynamic targets with immutable codec programs and package-bound lifecycle; Runtime hit/reject/fallback fixture, UE5.8 no-clean build, five-lane 12-workload correctness, full AvidScript Automation 333/333, static contracts and clean architecture candidate all passed.",
+      "completed_at_utc": "2026-08-01T17:30:05.4103750+08:00"
     }
   ],
   "debt": [
@@ -150,7 +156,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "Plan P57.11 metadata-driven value codecs and arbitrary UFUNCTION parameter-graph compilation without per-API wrappers.",
-  "revision": 14,
-  "updated_at_utc": "2026-08-01T06:26:05.7080000+00:00"
+  "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
+  "revision": 15,
+  "updated_at_utc": "2026-08-01T17:30:05.4103750+08:00"
 }
