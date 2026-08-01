@@ -26,6 +26,7 @@ $GateEvaluator = Get-SourceText (Join-Path $HarnessRoot 'Tools/Evaluate-Phase54P
 $VmBackendHeader = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Public/AvidScriptVmBackend.h')
 $WamrBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWamrBackend.cpp')
 $WasmtimeBackendSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWasmtimeBackend.cpp')
+$WasmtimeRuntimeSupportSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptVM/Private/AvidScriptWasmtimeRuntimeSupport.cpp')
 $WasmRuntimeSource = Get-SourceText (Join-Path $HarnessRoot '../../../Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp')
 $WamrBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/WAMR/WAMR.Build.cs')
 $WasmtimeBuildRules = Get-SourceText (Join-Path $HarnessRoot '../../../Source/ThirdParty/Wasmtime/Wasmtime.Build.cs')
@@ -285,7 +286,11 @@ Assert-True ($WamrBackendSource.Contains('AVIDSCRIPT_WAMR_STATIC_LIB_SHA256')) `
     'WAMR backend identity must bind the linked static runtime artifact'
 Assert-True ($WamrBuildRules.Contains('ComputeFileSha256')) `
     'WAMR build rules must hash the selected static runtime artifact'
-Assert-True ($WasmtimeBackendSource.Contains('ObservedDllSha256')) `
+Assert-True ($WasmtimeBackendSource.Contains(
+        'InitializeAvidScriptWasmtimeRuntimeDescriptor')) `
+	'Wasmtime backend must delegate runtime identity to the support boundary'
+Assert-True ($WasmtimeRuntimeSupportSource.Contains('ObservedDllSha256') -and
+    $WasmtimeRuntimeSupportSource.Contains('RuntimeArtifactSha256')) `
     'Wasmtime backend must expose the DLL hash observed at its load boundary'
 Assert-True ($WasmtimeBuildRules.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256')) `
     'Wasmtime build rules must bind the managed DLL hash into the backend'

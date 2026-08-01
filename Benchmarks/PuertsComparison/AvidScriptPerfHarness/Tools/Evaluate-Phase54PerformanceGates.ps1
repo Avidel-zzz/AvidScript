@@ -115,16 +115,20 @@ function Get-ExpectedAdaptiveNativeHits {
         [uint64]$scalarPropertyOperationsPerFrame =
             [uint64]$WorkloadContract.logical_entities_per_frame *
             [uint64]$WorkloadContract.scalar_property_operations_per_entity
-        [uint64]$propertyWritesPerFrame =
-            [uint64]$WorkloadContract.property_write_operations_per_frame
         [uint64]$eventOperationsPerFrame =
             [uint64]$WorkloadContract.event_operations_per_frame
         return $Iterations * (
-            $scalarPropertyOperationsPerFrame -
-            $propertyWritesPerFrame +
+            $scalarPropertyOperationsPerFrame +
             $eventOperationsPerFrame)
     }
-    if ($Workload -in @('scalar_add_int32', 'batch_scalar')) {
+    if ($Workload -ceq 'property_get_set') {
+        return $Iterations * 2u
+    }
+    if ($Workload -in @(
+        'scalar_add_int32',
+        'vector_value',
+        'object_roundtrip',
+        'batch_scalar')) {
         return $Iterations
     }
     return 0u

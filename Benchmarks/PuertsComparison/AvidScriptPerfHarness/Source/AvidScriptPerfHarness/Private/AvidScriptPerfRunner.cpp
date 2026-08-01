@@ -1564,14 +1564,17 @@ namespace
 					Workload,
 					Iterations);
 			return Counts.ScalarPropertyCount
-				- Counts.PropertyWriteCount
 				+ Counts.EventCount;
 		}
 		switch (Workload)
 		{
 		case EAvidScriptPerfWorkload::ScalarAddInt32:
+		case EAvidScriptPerfWorkload::VectorValue:
+		case EAvidScriptPerfWorkload::ObjectRoundtrip:
 		case EAvidScriptPerfWorkload::BatchScalar:
 			return static_cast<uint64>(Iterations);
+		case EAvidScriptPerfWorkload::PropertyGetSet:
+			return static_cast<uint64>(Iterations) * 2u;
 		default:
 			return 0;
 		}

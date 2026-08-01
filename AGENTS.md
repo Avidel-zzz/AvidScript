@@ -1754,3 +1754,23 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: a temporary interpolated Build.cs probe escaped string literals inside an interpolation expression, producing a C# rules syntax error before the intended path diagnostics ran.
 - Prevention: compute diagnostic booleans in local variables and interpolate only identifiers; immediately restore temporary rules instrumentation after the single evidence run.
+
+### 2026-08-01: extend benchmark route oracles with prepared coverage
+
+- Mistake: P57.10 enabled adaptive direct property cells, but the frozen benchmark correctness oracle still declared only scalar and batch workloads native-eligible, so it rejected correct values and zero fallbacks before timing.
+- Prevention: a new prepared shape updates the C++ calibration oracle, the PowerShell evidence evaluator, and their parity contract in the same source commit. Workloads and thresholds remain frozen; only the expected route counters change to match implemented behavior.
+
+### 2026-08-01: re-read arithmetic expressions after term removal
+
+- Mistake: while removing the property-write subtraction from the PowerShell route oracle, the first patch left the adjacent subtraction operator in front of the event term.
+- Prevention: after deleting a term from a multiline arithmetic expression, read the complete expression from disk and run the contract immediately; never infer the resulting operator sequence from patch context alone.
+
+### 2026-08-01: static contracts follow the current code owner
+
+- Mistake: the warm-core contract still searched `AvidScriptWasmtimeBackend.cpp` for observed DLL hashing after load-boundary identity moved to `AvidScriptWasmtimeRuntimeSupport.cpp`.
+- Prevention: when production ownership moves, update static source contracts in the same change. Assert the delegating call at the consumer and the security-critical behavior at the new owner instead of weakening or deleting the check.
+
+### 2026-08-01: Windows rg wildcard recurrence during Wasmtime lookup
+
+- Mistake: a Wasmtime source lookup again passed `AvidScriptWasmtimeApi.*` as a positional Windows path, producing OS error 123 and invalidating the probe.
+- Prevention: positional paths are always literal directories or files. Filename patterns belong only in `-g 'AvidScriptWasmtimeApi.*'`, even for quick diagnostics already covered by an earlier recurrence note.

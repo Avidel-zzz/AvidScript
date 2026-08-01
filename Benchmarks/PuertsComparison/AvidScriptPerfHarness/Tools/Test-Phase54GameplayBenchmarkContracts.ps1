@@ -24,6 +24,12 @@ $harnessRoot = Split-Path -Parent $toolsRoot
 $comparisonRoot = Split-Path -Parent $harnessRoot
 $runnerText = Get-Content -LiteralPath (
     Join-Path $harnessRoot 'Source\AvidScriptPerfHarness\Private\AvidScriptPerfRunner.cpp') -Raw
+$runnerAdaptiveMatrix = [regex]::Match(
+    $runnerText,
+    '(?s)uint64 GetExpectedAdaptiveNativeHitCount\(.*?(?=\r?\n\s*uint64 GetExpectedFusedGeneratedHitCount\()').Value
+$evaluatorAdaptiveMatrix = [regex]::Match(
+    $evaluatorText,
+    '(?s)function Get-ExpectedAdaptiveNativeHits \{.*?(?=\r?\nfunction New-GateResult \{)').Value
 $profileRoot = Join-Path $comparisonRoot 'Profiles'
 $requestTemplate = Get-Content -LiteralPath (
     Join-Path $profileRoot 'Phase54SixLaneRequest.template.json') -Raw |
@@ -163,6 +169,20 @@ Assert-True ($evaluatorText.Contains('function Get-ExpectedGeneratedHits') -and
     $evaluatorText.Contains('host import count mismatch') -and
     $evaluatorText.Contains('$isGameplay')) `
     '统一 Gate 必须复现 semantic、adaptive、generated S1、data micro/gameplay 与 Host crossing 的不同计数合同。'
+foreach ($preparedWorkload in @(
+    'PropertyGetSet',
+    'VectorValue',
+    'ObjectRoundtrip')) {
+    Assert-True ($runnerAdaptiveMatrix.Contains($preparedWorkload)) `
+        "Runner adaptive native oracle 必须覆盖 $preparedWorkload。"
+}
+foreach ($preparedWorkload in @(
+    'property_get_set',
+    'vector_value',
+    'object_roundtrip')) {
+    Assert-True ($evaluatorAdaptiveMatrix.Contains($preparedWorkload)) `
+        "统一 Gate adaptive native oracle 必须覆盖 $preparedWorkload。"
+}
 Assert-True ($evaluatorText.Contains('exact zero-based process_run sequence') -and
     $evaluatorText.Contains('share one non-empty run_id') -and
     $evaluatorText.Contains('distinct lowercase SHA-256 request identities') -and
