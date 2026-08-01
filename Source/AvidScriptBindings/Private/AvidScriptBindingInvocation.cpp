@@ -639,6 +639,59 @@ int32 GetAvidScriptRuntimeGuestStorageSize(EAvidScriptRuntimeBindingKind Kind)
 	}
 }
 
+int32 GetAvidScriptRuntimeGuestStorageAlignment(EAvidScriptRuntimeBindingKind Kind)
+{
+	switch (Kind)
+	{
+	case EAvidScriptRuntimeBindingKind::Int8:
+	case EAvidScriptRuntimeBindingKind::UInt8:
+		return 1;
+	case EAvidScriptRuntimeBindingKind::Int16:
+	case EAvidScriptRuntimeBindingKind::UInt16:
+		return 2;
+	case EAvidScriptRuntimeBindingKind::Bool:
+	case EAvidScriptRuntimeBindingKind::Int32:
+	case EAvidScriptRuntimeBindingKind::UInt32:
+	case EAvidScriptRuntimeBindingKind::Float:
+	case EAvidScriptRuntimeBindingKind::Enum:
+	case EAvidScriptRuntimeBindingKind::Object:
+	case EAvidScriptRuntimeBindingKind::Vector:
+	case EAvidScriptRuntimeBindingKind::Rotator:
+	case EAvidScriptRuntimeBindingKind::Transform:
+		return 4;
+	case EAvidScriptRuntimeBindingKind::Int64:
+	case EAvidScriptRuntimeBindingKind::UInt64:
+	case EAvidScriptRuntimeBindingKind::Double:
+		return 8;
+	default:
+		return 0;
+	}
+}
+
+bool MatchesAvidScriptRuntimeCanonicalLeafStorage(
+	const FAvidScriptBindingTypeModel& Type,
+	const EAvidScriptRuntimeBindingKind Kind,
+	const UClass* ObjectClass)
+{
+	const int32 ExpectedSize = GetAvidScriptRuntimeGuestStorageSize(Kind);
+	const int32 ExpectedAlignment = GetAvidScriptRuntimeGuestStorageAlignment(Kind);
+	if (ExpectedSize <= 0 || ExpectedAlignment <= 0
+		|| Type.Size != ExpectedSize || Type.Alignment != ExpectedAlignment)
+	{
+		return false;
+	}
+
+	if (Kind == EAvidScriptRuntimeBindingKind::Object)
+	{
+		return ObjectClass != nullptr
+			&& Type.ObjectTypeOrdinal != INDEX_NONE
+			&& Type.ClassPath == ObjectClass->GetPathName()
+			&& Type.CanonicalType == TEXT("object:") + Type.ClassPath
+			&& Type.AbiTypes == TArray<FString>({ TEXT("i"), TEXT("i") });
+	}
+	return true;
+}
+
 int32 GetAvidScriptRuntimeArgumentWidth(
 	const FAvidScriptBindingValueModel& Model,
 	EAvidScriptRuntimeBindingDirection Direction)
@@ -701,7 +754,7 @@ bool BuildAvidScriptStructWireProgram(
 	TArray<FProperty*, TInlineAllocator<128>> ReflectedFields;
 	for (TFieldIterator<FProperty> It(
 		StructProperty->Struct,
-		EFieldIteratorFlags::ExcludeSuper); It; ++It)
+		EFieldIteratorFlags::IncludeSuper); It; ++It)
 	{
 		ReflectedFields.Add(*It);
 	}
@@ -727,15 +780,10 @@ bool BuildAvidScriptStructWireProgram(
 		const FAvidScriptBindingTypeModel* ChildType = DeclaredTypesById.FindRef(Field.TypeId);
 		if (++InOutNodes > 128 || ChildType == nullptr
 			|| ReflectedField == nullptr
-			|| ReflectedField->GetOwnerStruct() != StructProperty->Struct
+			|| ReflectedField->GetOwnerStruct() == nullptr
+			|| !StructProperty->Struct->IsChildOf(ReflectedField->GetOwnerStruct())
 			|| ReflectedField->GetName() != Field.Name
-			|| !IsAvidScriptStructWireFieldSafe(ReflectedField)
-			|| ChildType->Size <= 0 || ChildType->Size > 4096
-			|| ChildType->Alignment <= 0 || ChildType->Alignment > 4096
-			|| Field.WireOffset < PreviousEnd
-			|| Field.WireOffset % ChildType->Alignment != 0
-			|| Field.WireOffset > Type.Size
-			|| ChildType->Size > Type.Size - Field.WireOffset)
+			|| !IsAvidScriptStructWireFieldSafe(ReflectedField))
 		{
 			ActiveTypes.Remove(Type.StableId);
 			OutDetails = TEXT("The reflected struct field graph no longer matches its fixed wire layout.");
@@ -784,15 +832,33 @@ bool BuildAvidScriptStructWireProgram(
 				Child.Kind,
 				Child.ObjectClass)
 				|| Child.Kind == EAvidScriptRuntimeBindingKind::Name
-				|| GetAvidScriptRuntimeGuestStorageSize(Child.Kind) != ChildType->Size)
+				|| !MatchesAvidScriptRuntimeCanonicalLeafStorage(
+					*ChildType,
+					Child.Kind,
+					Child.ObjectClass))
 			{
 				ActiveTypes.Remove(Type.StableId);
 				OutDetails = TEXT("A reflected struct field is not a supported fixed-width leaf.");
 				return false;
 			}
+			Child.WireSize = GetAvidScriptRuntimeGuestStorageSize(Child.Kind);
+			Child.WireAlignment = GetAvidScriptRuntimeGuestStorageAlignment(Child.Kind);
+			Child.GuestStorageSize = Child.WireSize;
 		}
-		PreviousEnd = Field.WireOffset + ChildType->Size;
-		ExpectedAlignment = FMath::Max(ExpectedAlignment, ChildType->Alignment);
+		if (Child.WireSize <= 0 || Child.WireSize > 4096
+			|| Child.WireAlignment <= 0 || Child.WireAlignment > 4096
+			|| Field.WireOffset < PreviousEnd
+			|| Field.WireOffset % Child.WireAlignment != 0
+			|| Field.WireOffset > Type.Size
+			|| Child.WireSize > Type.Size - Field.WireOffset)
+		{
+			ActiveTypes.Remove(Type.StableId);
+			OutDetails = TEXT("The reflected struct field graph no longer matches its fixed wire layout.");
+			return false;
+		}
+		Child.WireOffset = Field.WireOffset;
+		PreviousEnd = Field.WireOffset + Child.WireSize;
+		ExpectedAlignment = FMath::Max(ExpectedAlignment, Child.WireAlignment);
 	}
 	ActiveTypes.Remove(Type.StableId);
 	const int32 ExpectedSize = Align(PreviousEnd, ExpectedAlignment);

@@ -148,15 +148,26 @@ void AppendAbiTypes(const FAvidScriptProjectedBindingValue& Value, TArray<FStrin
 
 void FinalizeProjectedType(FAvidScriptProjectedBindingType& Type)
 {
-	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
-		Type.CanonicalType,
-		Type.EnumValues,
-		Type.StructFields);
+	Type.StableId = Type.Kind == TEXT("struct_wire")
+		? FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+			Type.CanonicalType,
+			Type.EnumValues,
+			Type.StructFields,
+			Type.Size,
+			Type.Alignment)
+		: FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+			Type.CanonicalType,
+			Type.EnumValues,
+			Type.StructFields);
 }
 
-bool IsUnsafeStructField(const FProperty* Property)
+bool IsUnsafeStructField(const FProperty* Property, const UScriptStruct* Struct)
 {
 	return Property == nullptr
+		|| Struct == nullptr
+		|| Property->ArrayDim != 1
+		|| Property->GetOwnerStruct() == nullptr
+		|| !Struct->IsChildOf(Property->GetOwnerStruct())
 		|| !Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
 		|| Property->HasAnyPropertyFlags(
 			CPF_Transient | CPF_EditorOnly | CPF_InstancedReference
@@ -201,6 +212,7 @@ FAvidScriptProjectedBindingType FAvidScriptEditorReflectedTypePolicy::MakeObject
 	Type.Size = 8;
 	Type.Alignment = 4;
 	Type.AbiValueTypes = { TEXT("i"), TEXT("i") };
+	Type.ObjectClass = ObjectClass;
 	return Type;
 }
 
@@ -330,6 +342,14 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 	OutValue = FAvidScriptProjectedBindingValue();
 	OutValue.Name = Property->GetName();
 	OutValue.Direction = GetPropertyDirection(Property);
+	if (Property->ArrayDim != 1)
+	{
+		OutErrorSource = FString::Printf(
+			TEXT("fixed_array:%s[%d]"),
+			*Property->GetName(),
+			Property->ArrayDim);
+		return false;
+	}
 
 	if (Property->IsA<FNameProperty>())
 	{
@@ -393,10 +413,24 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		Type.AbiValueTypes = { TEXT("i") };
 		Type.Alignment = 1;
 		int32 WireOffset = 0;
-		for (TFieldIterator<FProperty> It(StructProperty->Struct); It; ++It)
+		for (TFieldIterator<FProperty> It(
+			StructProperty->Struct,
+			EFieldIteratorFlags::IncludeSuper); It; ++It)
 		{
 			const FProperty* FieldProperty = *It;
-			if (IsUnsafeStructField(FieldProperty) || ++InOutStructNodes > 128)
+			if (FieldProperty != nullptr && FieldProperty->ArrayDim != 1)
+			{
+				ActiveStructs.Remove(StructProperty->Struct);
+				OutErrorSource = FString::Printf(
+					TEXT("%s.%s:fixed_array:%s[%d]"),
+					*StructProperty->Struct->GetPathName(),
+					*FieldProperty->GetName(),
+					*FieldProperty->GetName(),
+					FieldProperty->ArrayDim);
+				return false;
+			}
+			if (IsUnsafeStructField(FieldProperty, StructProperty->Struct)
+				|| ++InOutStructNodes > 128)
 			{
 				ActiveStructs.Remove(StructProperty->Struct);
 				OutErrorSource = StructProperty->Struct->GetPathName()

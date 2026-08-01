@@ -6,6 +6,9 @@
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
 
+class UActorComponent;
+class UMaterialInterface;
+
 UENUM()
 enum class EAvidScriptCSharpEmitterTestMode : uint8
 {
@@ -56,6 +59,45 @@ struct FAvidScriptStructWireUnsafeTestType
 
 	UPROPERTY(BlueprintReadWrite)
 	FString Label;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireObjectLeafTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	UActorComponent* Component = nullptr;
+
+	UPROPERTY(BlueprintReadWrite)
+	UMaterialInterface* Material = nullptr;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireBaseTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	int32 BaseCount = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireDerivedTestType : public FAvidScriptStructWireBaseTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite)
+	float DerivedWeight = 0.0f;
+};
+
+USTRUCT(BlueprintType)
+struct FAvidScriptStructWireFixedArrayTestType
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Values[2]{};
 };
 
 UCLASS()
@@ -144,6 +186,27 @@ public:
 	UFUNCTION(BlueprintPure)
 	FAvidScriptStructWireUnsafeTestType StructWireUnsafe(
 		FAvidScriptStructWireUnsafeTestType Value) const
+	{
+		return Value;
+	}
+
+	UFUNCTION(BlueprintPure)
+	FAvidScriptStructWireObjectLeafTestType StructWireObjectLeaves(
+		FAvidScriptStructWireObjectLeafTestType Value) const
+	{
+		return Value;
+	}
+
+	UFUNCTION(BlueprintPure)
+	FAvidScriptStructWireDerivedTestType StructWireInheritedRoundTrip(
+		FAvidScriptStructWireDerivedTestType Value) const
+	{
+		return Value;
+	}
+
+	UFUNCTION(BlueprintPure)
+	FAvidScriptStructWireFixedArrayTestType StructWireFixedArray(
+		FAvidScriptStructWireFixedArrayTestType Value) const
 	{
 		return Value;
 	}

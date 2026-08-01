@@ -3,8 +3,11 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
+#include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 
 #include "Misc/AutomationTest.h"
+#include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -22,6 +25,61 @@ FString MakeBindingSelectionIssueTestKey(const FAvidScriptBindingSelectionIssue&
 		+ Issue.Category
 		+ TEXT(":")
 		+ Issue.Source;
+}
+
+bool ContainsStructWireType(const FAvidScriptProjectedBindingType& Type)
+{
+	if (Type.Kind == TEXT("struct_wire"))
+	{
+		return true;
+	}
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Child : Type.StructFieldTypes)
+	{
+		if (Child.IsValid() && ContainsStructWireType(*Child))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool CollectStructWireSelectionKeys(
+	const TArray<FAvidScriptReflectedFunctionSelection>& Selections,
+	TSet<FString>& OutKeys,
+	FString& OutError)
+{
+	OutKeys.Reset();
+	OutError.Reset();
+	for (const FAvidScriptReflectedFunctionSelection& Selection : Selections)
+	{
+		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
+		UFunction* Function = OwnerClass == nullptr
+			? nullptr
+			: OwnerClass->FindFunctionByName(Selection.FunctionName);
+		FAvidScriptProjectedFunction Projection;
+		FString ProjectionError;
+		if (Function == nullptr
+			|| !FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
+				Function,
+				Function->HasAnyFunctionFlags(FUNC_Static),
+				Projection,
+				ProjectionError))
+		{
+			OutError = MakeBindingSelectionTestKey(Selection) + TEXT(":") + ProjectionError;
+			return false;
+		}
+
+		bool bContainsStructWire = ContainsStructWireType(Projection.ReturnValue.Type);
+		for (const FAvidScriptProjectedBindingValue& Parameter : Projection.Parameters)
+		{
+			bContainsStructWire |= ContainsStructWireType(Parameter.Type);
+		}
+		if (bContainsStructWire)
+		{
+			OutKeys.Add(MakeBindingSelectionTestKey(Selection));
+		}
+	}
+	return true;
 }
 } // namespace
 
@@ -138,6 +196,48 @@ bool FAvidScriptEditorBindingSelectionGameplayProfileTest::RunTest(const FString
 			return Selection.OwnerClassPath == TEXT("/Script/Engine.Pawn")
 				&& Selection.FunctionName == TEXT("K2_GetActorLocation");
 		}));
+
+	const TSet<FString> ExpectedStructWireSelections = {
+		TEXT("/Script/Engine.PrimitiveComponent.GetWalkableSlopeOverride"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetCustomPrimitiveDataVector2"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetCustomPrimitiveDataVector4"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetDefaultCustomPrimitiveDataVector2"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetDefaultCustomPrimitiveDataVector4"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetVectorParameterForCustomPrimitiveData"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetVectorParameterForDefaultCustomPrimitiveData"),
+		TEXT("/Script/Engine.PrimitiveComponent.SetWalkableSlopeOverride"),
+		TEXT("/Script/Engine.SceneComponent.GetSocketQuaternion")
+	};
+	TSet<FString> ActualStructWireSelections;
+	FString StructWireCollectionError;
+	if (TestTrue(
+		TEXT("Gameplay struct-wire selection set can be projected"),
+		CollectStructWireSelectionKeys(
+			FirstSelections,
+			ActualStructWireSelections,
+			StructWireCollectionError)))
+	{
+		TestEqual(
+			TEXT("Gameplay profile exposes exactly the nine reviewed struct-wire APIs"),
+			ActualStructWireSelections.Num(),
+			ExpectedStructWireSelections.Num());
+		for (const FString& ExpectedSelection : ExpectedStructWireSelections)
+		{
+			TestTrue(
+				FString::Printf(TEXT("Gameplay struct-wire set contains %s"), *ExpectedSelection),
+				ActualStructWireSelections.Contains(ExpectedSelection));
+		}
+		for (const FString& ActualSelection : ActualStructWireSelections)
+		{
+			TestTrue(
+				FString::Printf(TEXT("Gameplay struct-wire set authorizes only reviewed API %s"), *ActualSelection),
+				ExpectedStructWireSelections.Contains(ActualSelection));
+		}
+	}
+	else
+	{
+		AddError(TEXT("Struct-wire selection projection failed: ") + StructWireCollectionError);
+	}
 
 	TArray<FAvidScriptReflectedFunctionSelection> SecondSelections;
 	FAvidScriptBindingSelectionResolveResult SecondResult;

@@ -246,10 +246,17 @@ bool ResolveGeneratedPropertyShape(
 
 void FinalizeType(FAvidScriptProjectedBindingType& Type)
 {
-	Type.StableId = FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
-		Type.CanonicalType,
-		Type.EnumValues,
-		Type.StructFields);
+	Type.StableId = Type.Kind == TEXT("struct_wire")
+		? FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+			Type.CanonicalType,
+			Type.EnumValues,
+			Type.StructFields,
+			Type.Size,
+			Type.Alignment)
+		: FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+			Type.CanonicalType,
+			Type.EnumValues,
+			Type.StructFields);
 }
 
 void AddProjectedTypeAndChildren(
@@ -351,24 +358,19 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties
 
 namespace
 {
-void AddObjectHandleClass(const FProperty* Property, TArray<UClass*>& OutHandleClasses)
+void AddProjectedObjectHandleClasses(
+	const FAvidScriptProjectedBindingType& Type,
+	TArray<UClass*>& OutHandleClasses)
 {
-	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
+	if (Type.Kind == TEXT("object_handle") && Type.ObjectClass != nullptr)
 	{
-		OutHandleClasses.Add(ObjectProperty->PropertyClass);
+		OutHandleClasses.AddUnique(const_cast<UClass*>(Type.ObjectClass));
 	}
-}
-
-void AddObjectHandleClasses(const UFunction* Function, TArray<UClass*>& OutHandleClasses)
-{
-	AddObjectHandleClass(Function->GetReturnProperty(), OutHandleClasses);
-	for (TFieldIterator<FProperty> It(Function); It; ++It)
+	for (const TSharedPtr<FAvidScriptProjectedBindingType>& Child : Type.StructFieldTypes)
 	{
-		const FProperty* Property = *It;
-		if (Property->HasAnyPropertyFlags(CPF_Parm)
-			&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		if (Child.IsValid())
 		{
-			AddObjectHandleClass(Property, OutHandleClasses);
+			AddProjectedObjectHandleClasses(*Child, OutHandleClasses);
 		}
 	}
 }
@@ -963,15 +965,17 @@ bool GenerateBindingDescriptor(
 	{
 		if (Binding.Function == nullptr || !Binding.Function->HasAnyFunctionFlags(FUNC_Static))
 		{
-			HandleClasses.Add(Binding.OwnerClass);
+			HandleClasses.AddUnique(Binding.OwnerClass);
 		}
-		if (Binding.Function != nullptr)
+		if (!Binding.Projection.ReturnValue.Type.bVoid)
 		{
-			AddObjectHandleClasses(Binding.Function, HandleClasses);
+			AddProjectedObjectHandleClasses(
+				Binding.Projection.ReturnValue.Type,
+				HandleClasses);
 		}
-		else
+		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
 		{
-			AddObjectHandleClass(Binding.Property, HandleClasses);
+			AddProjectedObjectHandleClasses(Parameter.Type, HandleClasses);
 		}
 	}
 	FAvidScriptEditorObjectTypeGraph ObjectTypeGraph;

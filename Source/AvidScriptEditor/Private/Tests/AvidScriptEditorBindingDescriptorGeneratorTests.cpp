@@ -7,6 +7,7 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
+#include "BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "Algo/Reverse.h"
 #include "Components/ActorComponent.h"
@@ -14,6 +15,7 @@
 #include "Dom/JsonObject.h"
 #include "Engine/StaticMeshActor.h"
 #include "GameFramework/Actor.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
 #include "Serialization/JsonReader.h"
@@ -2919,6 +2921,24 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 		TEXT("Struct-wire descriptor uses the recursive generator version"),
 		Package.GeneratorVersion,
 		FString(TEXT("57.11B1.0")));
+	const FAvidScriptBindingTypeModel* ParsedRootType = Package.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.CanonicalType == TEXT("struct_wire:")
+				+ FAvidScriptStructWireRootTestType::StaticStruct()->GetPathName();
+		});
+	if (TestNotNull(TEXT("Parsed root struct-wire type is present"), ParsedRootType))
+	{
+		TestEqual(
+			TEXT("Schema v9 struct stable id binds size and alignment"),
+			ParsedRootType->StableId,
+			FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
+				ParsedRootType->CanonicalType,
+				ParsedRootType->EnumValues,
+				ParsedRootType->StructFields,
+				ParsedRootType->Size,
+				ParsedRootType->Alignment));
+	}
 
 	TSharedPtr<FJsonObject> Root;
 	if (!ParseDescriptor(Json, Root) || !Root.IsValid())
@@ -3010,7 +3030,113 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 			TEXT("Schema v9 runtime package exposes a prepared recursive codec target"),
 			RuntimePackage->BuildPreparedDynamicBindings(PreparedBindings, PreparedError));
 		TestEqual(TEXT("Schema v9 fixture has one prepared recursive target"), PreparedBindings.Num(), 1);
+		if (PreparedBindings.Num() == 1)
+		{
+			TestEqual(
+				TEXT("Prepared recursive target retains its expected receiver class"),
+				PreparedBindings[0].ExpectedClass,
+				UAvidScriptCSharpBindingEmitterTestObject::StaticClass());
+		}
 	}
+
+	FString ObjectLeafJson;
+	FAvidScriptBindingDescriptorGenerateResult ObjectLeafResult;
+	TestTrue(
+		TEXT("Nested non-owner object leaves generate"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.struct_wire_object_leaves"),
+			{ { OwnerPath, TEXT("StructWireObjectLeaves") } },
+			ObjectLeafJson,
+			ObjectLeafResult));
+	FAvidScriptBindingPackageModel ObjectLeafPackage;
+	TestTrue(
+		TEXT("Nested object-leaf descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			ObjectLeafJson,
+			ObjectLeafPackage,
+			ErrorCategory,
+			ErrorSource));
+	TSharedPtr<const FAvidScriptBindingPackage> ObjectLeafRuntimePackage;
+	TestTrue(
+		TEXT("Nested object-leaf descriptor loads"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			ObjectLeafJson,
+			ObjectLeafRuntimePackage,
+			LoadResult));
+	if (ObjectLeafRuntimePackage.IsValid())
+	{
+		TArray<FAvidScriptPreparedDynamicBinding> PreparedBindings;
+		FString PreparedError;
+		TestTrue(
+			TEXT("Nested object-leaf codec prepares"),
+			ObjectLeafRuntimePackage->BuildPreparedDynamicBindings(
+				PreparedBindings,
+				PreparedError));
+		TestEqual(TEXT("Nested object-leaf package has one prepared target"), PreparedBindings.Num(), 1);
+		for (UClass* ExpectedObjectClass : {
+			UActorComponent::StaticClass(),
+			UMaterialInterface::StaticClass() })
+		{
+			const FAvidScriptBindingTypeModel* ObjectType = ObjectLeafPackage.Types.FindByPredicate(
+				[ExpectedObjectClass](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.ClassPath == ExpectedObjectClass->GetPathName();
+				});
+			if (TestNotNull(
+				*FString::Printf(TEXT("Nested object leaf publishes %s"), *ExpectedObjectClass->GetPathName()),
+				ObjectType))
+			{
+				TestNotEqual(TEXT("Nested object leaf has a class ordinal"), ObjectType->ObjectTypeOrdinal, INDEX_NONE);
+				UClass* ResolvedClass = nullptr;
+				TestTrue(
+					TEXT("Runtime resolves nested object expected class"),
+					ObjectLeafRuntimePackage->TryResolveObjectType(
+						static_cast<uint32>(ObjectType->ObjectTypeOrdinal),
+						ResolvedClass));
+				TestEqual(TEXT("Nested object expected class is exact"), ResolvedClass, ExpectedObjectClass);
+			}
+		}
+	}
+
+	FString InheritedJson;
+	FAvidScriptBindingDescriptorGenerateResult InheritedResult;
+	TestTrue(
+		TEXT("Struct-wire projection includes reflected super fields"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.struct_wire_inherited"),
+			{ { OwnerPath, TEXT("StructWireInheritedRoundTrip") } },
+			InheritedJson,
+			InheritedResult));
+	FAvidScriptBindingPackageModel InheritedPackage;
+	TestTrue(
+		TEXT("Inherited struct-wire descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			InheritedJson,
+			InheritedPackage,
+			ErrorCategory,
+			ErrorSource));
+	const FAvidScriptBindingTypeModel* InheritedType = InheritedPackage.Types.FindByPredicate(
+		[](const FAvidScriptBindingTypeModel& Type)
+		{
+			return Type.CanonicalType == TEXT("struct_wire:")
+				+ FAvidScriptStructWireDerivedTestType::StaticStruct()->GetPathName();
+		});
+	if (TestNotNull(TEXT("Inherited struct-wire type is published"), InheritedType))
+	{
+		TestEqual(TEXT("Inherited struct contains base and derived fields"), InheritedType->StructFields.Num(), 2);
+		if (InheritedType->StructFields.Num() == 2)
+		{
+			TestEqual(TEXT("Base field is retained"), InheritedType->StructFields[0].Name, FString(TEXT("BaseCount")));
+			TestEqual(TEXT("Derived field is retained"), InheritedType->StructFields[1].Name, FString(TEXT("DerivedWeight")));
+		}
+	}
+	TSharedPtr<const FAvidScriptBindingPackage> InheritedRuntimePackage;
+	TestTrue(
+		TEXT("Runtime accepts the same inherited field set as the Editor"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			InheritedJson,
+			InheritedRuntimePackage,
+			LoadResult));
 
 	TestFalse(
 		TEXT("Unsafe FString struct field is rejected"),
@@ -3021,6 +3147,18 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 			Result));
 	TestEqual(TEXT("Unsafe struct field reports property rejection"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
 	TestTrue(TEXT("Unsafe struct field source includes reflected field"), Result.ErrorSource.Contains(TEXT("Label")));
+
+	TestFalse(
+		TEXT("Fixed-array struct field is rejected during Editor projection"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.struct_wire_fixed_array"),
+			{ { OwnerPath, TEXT("StructWireFixedArray") } },
+			Json,
+			Result));
+	TestEqual(TEXT("Fixed-array field reports property rejection"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
+	TestTrue(
+		TEXT("Fixed-array field uses a stable diagnostic"),
+		Result.ErrorSource.EndsWith(TEXT(".Values:fixed_array:Values[2]")));
 	return true;
 }
 
