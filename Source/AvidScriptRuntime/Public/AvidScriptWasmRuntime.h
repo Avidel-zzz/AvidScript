@@ -118,6 +118,7 @@ struct FAvidScriptWasmTimerEntry
 
 struct FAvidScriptPreparedGeneratedHostCall;
 struct FAvidScriptPreparedReflectionHostCall;
+struct FAvidScriptPreparedDynamicHostCall;
 
 struct FAvidScriptSelfCapability
 {
@@ -214,12 +215,30 @@ public:
 	}
 	bool BuildPreparedTypedHostImportsForTesting(FString& OutError)
 	{
+		if (BindingPackage.IsValid())
+		{
+			BindingInvocationScratch.SetNumUninitialized(
+				BindingPackage->GetRequiredScratchSize());
+		}
+		else
+		{
+			BindingInvocationScratch.Reset();
+		}
 		return BuildPreparedTypedHostImports(OutError);
 	}
 	const TArray<FAvidScriptVmTypedHostImport>&
 	GetPreparedTypedHostImportsForTesting() const
 	{
 		return TypedHostImports;
+	}
+	const FAvidScriptVmBindingPackage&
+	GetPreparedVmBindingPackageForTesting() const
+	{
+		return PreparedVmBindingPackage;
+	}
+	int32 GetPreparedDynamicHostCallCountForTesting() const
+	{
+		return PreparedDynamicHostCalls.Num();
 	}
 	uint64 GetActiveCallbackEpochForTesting() const
 	{
@@ -347,6 +366,17 @@ private:
 		const TSharedPtr<const FAvidScriptWasmDebugMap>& InDebugMap,
 		FAvidScriptWasmSmokeResult& OutResult);
 	bool BuildPreparedTypedHostImports(FString& OutError);
+	bool BuildPreparedDynamicHostImports(FString& OutError);
+	static bool InvokePreparedDynamicHost(
+		void* Context,
+		TConstArrayView<uint64> Arguments,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		FAvidScriptDynamicHostCallResult& OutResult);
+	bool DispatchPreparedDynamicHost(
+		FAvidScriptPreparedDynamicHostCall& Call,
+		TConstArrayView<uint64> Arguments,
+		IAvidScriptVmGuestMemory& GuestMemory,
+		FAvidScriptDynamicHostCallResult& OutResult);
 	static EAvidScriptVmTypedHostStatus InvokePreparedSelfI32Pair(
 		void* Context,
 		int32 SelfSlot,
@@ -554,6 +584,9 @@ private:
 		PreparedGeneratedHostCalls;
 	TArray<TUniquePtr<FAvidScriptPreparedReflectionHostCall>>
 		PreparedReflectionHostCalls;
+	FAvidScriptVmBindingPackage PreparedVmBindingPackage;
+	TArray<TUniquePtr<FAvidScriptPreparedDynamicHostCall>>
+		PreparedDynamicHostCalls;
 	TArray<uint8> BindingInvocationScratch;
 	TArray<FAvidScriptObjectHandle> TransformBatchHandleScratch;
 	TArray<FAvidScriptActorTransformSnapshot> TransformBatchSnapshotScratch;

@@ -401,6 +401,9 @@
         "adaptive_native_hit_count": { "type": "integer", "minimum": 0 },
         "adaptive_process_event_fallback_count": { "type": "integer", "minimum": 0 },
         "adaptive_guard_reject_count": { "type": "integer", "minimum": 0 },
+        "prepared_dynamic_hit_count": { "type": "integer", "minimum": 0 },
+        "prepared_dynamic_fallback_count": { "type": "integer", "minimum": 0 },
+        "prepared_dynamic_reject_count": { "type": "integer", "minimum": 0 },
         "correct": { "const": true },
         "backend_info": { "$ref": "#/$defs/backend_info" }
       },

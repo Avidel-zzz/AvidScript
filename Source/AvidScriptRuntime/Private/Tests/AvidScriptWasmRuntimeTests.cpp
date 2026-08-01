@@ -16,6 +16,29 @@
 
 namespace
 {
+class FAvidScriptRuntimeGuestMemory final : public IAvidScriptVmGuestMemory
+{
+public:
+	bool ReadBytes(
+		uint32 GuestAddress,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) override
+	{
+		OutError.Reset();
+		FMemory::Memzero(OutBytes.GetData(), OutBytes.Num());
+		return true;
+	}
+
+	bool WriteBytes(
+		uint32 GuestAddress,
+		TConstArrayView<uint8> Bytes,
+		FString& OutError) override
+	{
+		OutError.Reset();
+		return true;
+	}
+};
+
 const uint8 GAvidScriptMissingTickWasmModule[] = {
 	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 	0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
@@ -757,6 +780,151 @@ bool FAvidScriptBindingDescriptorLegacyIdentityTest::RunTest(const FString& Para
 			FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package),
 			FString(ExpectedPackageHashes[SchemaVersion]));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimePreparedDynamicPackageTest,
+	"AvidScript.Runtime.Binding.PreparedDynamicPackage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimePreparedDynamicPackageTest::RunTest(
+	const FString& Parameters)
+{
+	UClass* ExpectedClass = AActor::StaticClass();
+	UFunction* Function = ExpectedClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(AActor, K2_GetActorLocation));
+	const TSharedPtr<const FAvidScriptBindingPackage> Package =
+		FAvidScriptBindingPackage::MakePreparedDynamicPlanForTesting(
+			TEXT("runtime-prepared-dynamic-test"),
+			TEXT("avid_runtime_prepared_dynamic_test"),
+			TEXT("(iii)i"),
+			ExpectedClass,
+			Function,
+			3,
+			64,
+			true,
+			false);
+	if (!TestTrue(TEXT("Prepared Runtime package is created"), Package.IsValid()))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry ObjectRegistry;
+	FAvidScriptObjectHandleResult HandleResult;
+	const FAvidScriptObjectHandle ReceiverHandle =
+		ObjectRegistry.RegisterObject(
+			ExpectedClass->GetDefaultObject(),
+			HandleResult,
+			true);
+	if (!TestTrue(
+			TEXT("Prepared Runtime receiver registration succeeds"),
+			HandleResult.bSucceeded && ReceiverHandle.IsValid()))
+	{
+		return false;
+	}
+
+	FAvidScriptBindingInvocationInstrumentation Instrumentation;
+	FAvidScriptWasmHostContext HostContext;
+	HostContext.ObjectRegistry = &ObjectRegistry;
+	HostContext.OwnerHandle = ReceiverHandle;
+	HostContext.BindingInvocationInstrumentation = &Instrumentation;
+	FAvidScriptWasmRuntimeInstance Runtime;
+	Runtime.SetHostContext(HostContext);
+	Runtime.SetBindingPackageForTesting(Package);
+	FString Error;
+	if (!TestTrue(
+			TEXT("Runtime binds prepared dynamic imports"),
+			Runtime.BuildPreparedTypedHostImportsForTesting(Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	const FAvidScriptVmBindingPackage& PreparedPackage =
+		Runtime.GetPreparedVmBindingPackageForTesting();
+	if (!TestEqual(
+			TEXT("Runtime preserves one canonical dynamic import"),
+			PreparedPackage.Imports.Num(),
+			1))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Runtime installs the prepared target"),
+		PreparedPackage.Imports[0].PreparedTarget.IsBound());
+	TestEqual(
+		TEXT("Runtime owns one stable prepared call context"),
+		Runtime.GetPreparedDynamicHostCallCountForTesting(),
+		1);
+
+	const FAvidScriptVmPreparedDynamicHostTarget PreparedTarget =
+		PreparedPackage.Imports[0].PreparedTarget;
+	FAvidScriptRuntimeGuestMemory GuestMemory;
+	const uint64 Arguments[] = {
+		ReceiverHandle.Slot,
+		ReceiverHandle.Generation,
+		0
+	};
+	FAvidScriptDynamicHostCallResult CallResult;
+	const bool bPreparedCallSucceeded = PreparedTarget.Invoke(
+		PreparedTarget.Context,
+		MakeArrayView(Arguments),
+		GuestMemory,
+		CallResult);
+	if (!bPreparedCallSucceeded)
+	{
+		AddError(FString::Printf(
+			TEXT("Prepared Runtime target failure: %s"),
+			*CallResult.Details));
+	}
+	TestTrue(
+		TEXT("Prepared Runtime target executes without the ordinal facade"),
+		bPreparedCallSucceeded);
+	TestTrue(
+		TEXT("Prepared Runtime target reports success"),
+		CallResult.bSucceeded);
+	TestEqual(
+		TEXT("Prepared Runtime target records one direct hit"),
+		Instrumentation.PreparedDynamicHitCount,
+		uint64(1));
+	TestEqual(
+		TEXT("Prepared Runtime target does not enter the ordinal fallback"),
+		Instrumentation.PreparedDynamicFallbackCount,
+		uint64(0));
+	TestEqual(
+		TEXT("Successful prepared Runtime target records no rejection"),
+		Instrumentation.PreparedDynamicRejectCount,
+		uint64(0));
+
+	TestFalse(
+		TEXT("Prepared Runtime target rejects an incompatible argument frame"),
+		PreparedTarget.Invoke(
+			PreparedTarget.Context,
+			MakeArrayView(Arguments, 2),
+			GuestMemory,
+			CallResult));
+	TestEqual(
+		TEXT("Rejected prepared Runtime target is counted exactly once"),
+		Instrumentation.PreparedDynamicRejectCount,
+		uint64(1));
+	TestEqual(
+		TEXT("Rejected prepared Runtime target is never replayed through fallback"),
+		Instrumentation.PreparedDynamicFallbackCount,
+		uint64(0));
+
+	Runtime.SetBindingPackageForTesting(
+		TSharedPtr<const FAvidScriptBindingPackage>());
+	TestTrue(
+		TEXT("Rebuild without a package clears prepared state"),
+		Runtime.BuildPreparedTypedHostImportsForTesting(Error));
+	TestEqual(
+		TEXT("Prepared VM package clears on replacement"),
+		Runtime.GetPreparedVmBindingPackageForTesting().Imports.Num(),
+		0);
+	TestEqual(
+		TEXT("Prepared call contexts clear on replacement"),
+		Runtime.GetPreparedDynamicHostCallCountForTesting(),
+		0);
 	return true;
 }
 

@@ -11,6 +11,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 class UClass;
+class UFunction;
 class FProperty;
 class UWorld;
 class IAvidScriptObjectOwnershipDomain;
@@ -67,6 +68,9 @@ struct FAvidScriptBindingPackageInstrumentation
 
 struct FAvidScriptBindingInvocationInstrumentation
 {
+	uint64 PreparedDynamicHitCount = 0;
+	uint64 PreparedDynamicFallbackCount = 0;
+	uint64 PreparedDynamicRejectCount = 0;
 	uint64 SemanticProcessEventCount = 0;
 	uint64 AdaptivePreparedNativeHitCount = 0;
 	uint64 AdaptiveProcessEventFallbackCount = 0;
@@ -178,6 +182,32 @@ struct FAvidScriptPreparedReflectionBinding
 	bool bRequiresWriteAccess = false;
 };
 
+using FAvidScriptPreparedDynamicInvoke =
+	bool (*)(
+		const void* InvocationCell,
+		UObject& Receiver,
+		TConstArrayView<uint64> Arguments,
+		IAvidScriptVmGuestMemory* GuestMemory,
+		const FAvidScriptBindingInvocationContext& InvocationContext,
+		TArray<uint8>& InvocationScratch,
+		FAvidScriptDynamicHostCallResult& OutResult);
+
+struct FAvidScriptPreparedDynamicBinding
+{
+	uint32 BindingOrdinal = MAX_uint32;
+	FString StableId;
+	FString ModuleName;
+	FString ImportName;
+	FString Signature;
+	const void* ImmutableInvocationCell = nullptr;
+	UClass* ExpectedClass = nullptr;
+	int32 ExpectedArgumentCount = 0;
+	int32 RequiredScratchSize = 0;
+	FAvidScriptPreparedDynamicInvoke Invoke = nullptr;
+	bool bRequiresGuestMemory = false;
+	bool bStatic = false;
+};
+
 enum class EAvidScriptPreparedHostEffectMode : uint8
 {
 	Rejected,
@@ -210,6 +240,17 @@ public:
 			bool bPropertyWrite,
 			bool bRequiresWriteAccess,
 			EAvidScriptBindingReloadEffect ReloadEffect);
+	static TSharedPtr<const FAvidScriptBindingPackage>
+		MakePreparedDynamicPlanForTesting(
+			const FString& StableId,
+			const FString& ImportName,
+			const FString& Signature,
+			UClass* ExpectedClass,
+			UFunction* Function,
+			int32 ExpectedArgumentCount,
+			int32 RequiredScratchSize,
+			bool bRequiresGuestMemory,
+			bool bStatic);
 #endif
 
 	const FString& GetPackageName() const;
@@ -235,6 +276,9 @@ public:
 		FString& OutError) const;
 	bool BuildPreparedReflectionBindings(
 		TArray<FAvidScriptPreparedReflectionBinding>& OutBindings,
+		FString& OutError) const;
+	bool BuildPreparedDynamicBindings(
+		TArray<FAvidScriptPreparedDynamicBinding>& OutBindings,
 		FString& OutError) const;
 	bool InvokePreparedReflectionI32Pair(
 		const FAvidScriptPreparedReflectionBinding& Binding,

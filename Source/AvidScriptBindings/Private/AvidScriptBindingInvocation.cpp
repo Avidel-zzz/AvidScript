@@ -3,16 +3,16 @@
 #include "AvidScriptBindingFastPath.h"
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptHash.h"
+#include "Invocation/AvidScriptBindingCodecProgram.h"
+#include "Invocation/AvidScriptBindingPreparedInvocation.h"
 #include "AvidScriptObjectFactoryBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptSceneAttachmentBinding.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
-#include "Containers/StringConv.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/EngineVersion.h"
-#include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
@@ -20,71 +20,14 @@
 
 namespace
 {
-enum class EAvidScriptRuntimeBindingDirection : uint8
-{
-	Value,
-	ConstRef,
-	Ref,
-	Out,
-	Return
-};
-
-enum class EAvidScriptRuntimeBindingKind : uint8
-{
-	Void,
-	Bool,
-	Int8,
-	UInt8,
-	Int16,
-	UInt16,
-	Int32,
-	UInt32,
-	Int64,
-	UInt64,
-	Float,
-	Double,
-	Enum,
-	Name,
-	Object,
-	Vector,
-	Rotator,
-	Transform
-};
-
-struct FAvidScriptRuntimeBindingValuePlan
-{
-	FProperty* Property = nullptr;
-	UClass* ObjectClass = nullptr;
-	EAvidScriptRuntimeBindingDirection Direction = EAvidScriptRuntimeBindingDirection::Value;
-	EAvidScriptRuntimeBindingKind Kind = EAvidScriptRuntimeBindingKind::Void;
-	int32 ArgumentOffset = INDEX_NONE;
-	int32 ArgumentWidth = 0;
-	int32 GuestStorageSize = 0;
-	FString Name;
-};
-
-struct FAvidScriptRuntimeBindingInvocationPlan
-{
-	EAvidScriptBindingInvocationKind Kind = EAvidScriptBindingInvocationKind::ReflectedFunction;
-	UClass* OwnerClass = nullptr;
-	UFunction* Function = nullptr;
-	FProperty* ReflectedProperty = nullptr;
-	FString DebugPath;
-	bool bStatic = false;
-	bool bRequiresWriteAccess = false;
-	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
-	bool bRequiresGuestMemory = false;
-	int32 FrameSize = 0;
-	int32 FrameAlignment = 1;
-	int32 RequiredScratchSize = 0;
-	int32 ExpectedArgumentCount = 0;
-	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
-	FAvidScriptRuntimeBindingValuePlan ReturnValue;
-	UE::AvidScript::BindingPrivate::FFastPathPlan FastPath;
-	FAvidScriptGeneratedBindingLease GeneratedLease;
-	const FAvidScriptGeneratedBindingEntry* GeneratedEntry = nullptr;
-	FAvidScriptVmTypedHostImport TypedHostImport;
-};
+using EAvidScriptRuntimeBindingDirection =
+	UE::AvidScript::BindingPrivate::EValueCodecDirection;
+using EAvidScriptRuntimeBindingKind =
+	UE::AvidScript::BindingPrivate::EValueCodecKind;
+using FAvidScriptRuntimeBindingValuePlan =
+	UE::AvidScript::BindingPrivate::FValueCodecProgram;
+using FAvidScriptRuntimeBindingInvocationPlan =
+	UE::AvidScript::BindingPrivate::FInvocationCodecProgram;
 
 void SetAvidScriptBindingLoadFailure(
 	FAvidScriptBindingPackageLoadResult& OutResult,
@@ -840,484 +783,6 @@ FString MakeAvidScriptRuntimePackageHash(const FAvidScriptBindingPackageModel& P
 	return FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 }
 
-bool ReadAvidScriptRuntimeF32(uint64 Cell, float& OutValue)
-{
-	const uint32 Bits = static_cast<uint32>(Cell);
-	FMemory::Memcpy(&OutValue, &Bits, sizeof(OutValue));
-	return FMath::IsFinite(OutValue);
-}
-
-bool ReadAvidScriptRuntimeF64(uint64 Cell, double& OutValue)
-{
-	FMemory::Memcpy(&OutValue, &Cell, sizeof(OutValue));
-	return FMath::IsFinite(OutValue);
-}
-
-bool ResolveAvidScriptRuntimeHandle(
-	uint32 Slot,
-	uint32 Generation,
-	UClass* ExpectedClass,
-	const FAvidScriptBindingInvocationContext& Context,
-	bool bAllowNull,
-	UObject*& OutObject,
-	FString& OutDetails)
-{
-	OutObject = nullptr;
-	if (Slot == 0 && Generation == 0 && bAllowNull)
-	{
-		return true;
-	}
-	if (Slot == 0 || Generation == 0 || Context.ObjectRegistry == nullptr)
-	{
-		OutDetails = TEXT("The binding call supplied an invalid UObject handle or has no object registry.");
-		return false;
-	}
-	FAvidScriptObjectHandleResult ResolveResult;
-	OutObject = Context.ObjectRegistry->ResolveObject(
-		{ Slot, Generation },
-		ResolveResult,
-		false);
-	if (OutObject == nullptr)
-	{
-		Context.ObjectRegistry->ResolveObject(
-			{ Slot, Generation },
-			ResolveResult,
-			true);
-		OutDetails = ResolveResult.ErrorMessage;
-		return false;
-	}
-	if (ExpectedClass != nullptr && !OutObject->IsA(ExpectedClass))
-	{
-		OutDetails = FString::Printf(
-			TEXT("Resolved object '%s' is not a '%s'."),
-			*OutObject->GetPathName(),
-			*ExpectedClass->GetPathName());
-		OutObject = nullptr;
-		return false;
-	}
-	return true;
-}
-
-bool SetAvidScriptRuntimeNumericValue(
-	const FAvidScriptRuntimeBindingValuePlan& Plan,
-	void* Frame,
-	uint64 Cell,
-	FString& OutDetails)
-{
-	void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Frame);
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Bool)
-	{
-		CastFieldChecked<FBoolProperty>(Plan.Property)->SetPropertyValue(Value, static_cast<uint32>(Cell) != 0);
-		return true;
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Float)
-	{
-		float Number = 0.0f;
-		if (!ReadAvidScriptRuntimeF32(Cell, Number))
-		{
-			OutDetails = TEXT("The binding call supplied a non-finite float.");
-			return false;
-		}
-		CastFieldChecked<FFloatProperty>(Plan.Property)->SetPropertyValue(Value, Number);
-		return true;
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Double)
-	{
-		double Number = 0.0;
-		if (!ReadAvidScriptRuntimeF64(Cell, Number))
-		{
-			OutDetails = TEXT("The binding call supplied a non-finite double.");
-			return false;
-		}
-		CastFieldChecked<FDoubleProperty>(Plan.Property)->SetPropertyValue(Value, Number);
-		return true;
-	}
-
-	FNumericProperty* NumericProperty = CastField<FNumericProperty>(Plan.Property);
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Enum)
-	{
-		if (FEnumProperty* EnumProperty = CastField<FEnumProperty>(Plan.Property))
-		{
-			NumericProperty = EnumProperty->GetUnderlyingProperty();
-		}
-	}
-	if (NumericProperty == nullptr)
-	{
-		OutDetails = TEXT("The cached numeric property plan is invalid.");
-		return false;
-	}
-	uint64 ValueBits = Cell;
-	switch (Plan.Kind)
-	{
-	case EAvidScriptRuntimeBindingKind::Int8: ValueBits = static_cast<uint64>(static_cast<int64>(static_cast<int8>(Cell))); break;
-	case EAvidScriptRuntimeBindingKind::UInt8: ValueBits = static_cast<uint8>(Cell); break;
-	case EAvidScriptRuntimeBindingKind::Int16: ValueBits = static_cast<uint64>(static_cast<int64>(static_cast<int16>(Cell))); break;
-	case EAvidScriptRuntimeBindingKind::UInt16: ValueBits = static_cast<uint16>(Cell); break;
-	case EAvidScriptRuntimeBindingKind::Int32:
-	case EAvidScriptRuntimeBindingKind::Enum:
-		ValueBits = static_cast<uint64>(static_cast<int64>(static_cast<int32>(Cell)));
-		break;
-	case EAvidScriptRuntimeBindingKind::UInt32: ValueBits = static_cast<uint32>(Cell); break;
-	case EAvidScriptRuntimeBindingKind::Int64: ValueBits = static_cast<uint64>(static_cast<int64>(Cell)); break;
-	case EAvidScriptRuntimeBindingKind::UInt64: break;
-	default:
-		OutDetails = TEXT("The cached numeric kind is unsupported.");
-		return false;
-	}
-	NumericProperty->SetIntPropertyValue(Value, ValueBits);
-	return true;
-}
-
-bool SetAvidScriptRuntimeNameValue(
-	const FAvidScriptRuntimeBindingValuePlan& Plan,
-	const uint32 GuestAddress,
-	IAvidScriptVmGuestMemory& GuestMemory,
-	void* Frame,
-	FString& OutDetails)
-{
-	uint8 LengthBytes[sizeof(int32)] = {};
-	if (GuestAddress > MAX_uint32 - sizeof(LengthBytes)
-		|| !GuestMemory.ReadBytes(GuestAddress, MakeArrayView(LengthBytes), OutDetails))
-	{
-		if (OutDetails.IsEmpty())
-		{
-			OutDetails = TEXT("The FName length prefix is outside guest memory.");
-		}
-		return false;
-	}
-
-	const uint32 UnsignedLength = static_cast<uint32>(LengthBytes[0])
-		| (static_cast<uint32>(LengthBytes[1]) << 8)
-		| (static_cast<uint32>(LengthBytes[2]) << 16)
-		| (static_cast<uint32>(LengthBytes[3]) << 24);
-	static constexpr int32 MaxUtf8Bytes = NAME_SIZE * 4;
-	if (UnsignedLength > static_cast<uint32>(MaxUtf8Bytes))
-	{
-		OutDetails = FString::Printf(
-			TEXT("The FName UTF-8 byte length must be between 0 and %d."),
-			MaxUtf8Bytes);
-		return false;
-	}
-	const int32 PayloadLength = static_cast<int32>(UnsignedLength);
-
-	const uint32 StoredSize = static_cast<uint32>(PayloadLength) + 1;
-	const uint64 PayloadAddress64 = static_cast<uint64>(GuestAddress) + sizeof(LengthBytes);
-	const uint64 PayloadEnd64 = PayloadAddress64 + StoredSize;
-	if (PayloadEnd64 > static_cast<uint64>(MAX_uint32) + 1)
-	{
-		OutDetails = TEXT("The FName payload address overflows guest memory.");
-		return false;
-	}
-	const uint32 PayloadAddress = static_cast<uint32>(PayloadAddress64);
-	TArray<uint8, TInlineAllocator<256>> Payload;
-	Payload.SetNumUninitialized(StoredSize);
-	if (!GuestMemory.ReadBytes(PayloadAddress, MakeArrayView(Payload), OutDetails))
-	{
-		if (OutDetails.IsEmpty())
-		{
-			OutDetails = TEXT("The FName payload is outside guest memory.");
-		}
-		return false;
-	}
-	if (Payload[PayloadLength] != 0)
-	{
-		OutDetails = TEXT("The FName payload is not followed by a zero terminator.");
-		return false;
-	}
-	for (int32 Index = 0; Index < PayloadLength; ++Index)
-	{
-		if (Payload[Index] == 0)
-		{
-			OutDetails = TEXT("The FName UTF-8 payload contains an embedded NUL byte.");
-			return false;
-		}
-	}
-
-	const ANSICHAR* Utf8 = reinterpret_cast<const ANSICHAR*>(Payload.GetData());
-	const FUTF8ToTCHAR Converted(Utf8, PayloadLength);
-	if (Converted.Length() >= NAME_SIZE)
-	{
-		OutDetails = FString::Printf(
-			TEXT("The decoded FName must contain fewer than %d TCHAR code units."),
-			NAME_SIZE);
-		return false;
-	}
-	const FTCHARToUTF8 RoundTrip(Converted.Get(), Converted.Length());
-	if (RoundTrip.Length() != PayloadLength
-		|| (PayloadLength > 0
-			&& FMemory::Memcmp(RoundTrip.Get(), Payload.GetData(), PayloadLength) != 0))
-	{
-		OutDetails = TEXT("The FName payload is not canonical valid UTF-8.");
-		return false;
-	}
-
-	void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Frame);
-	const FName Name = Converted.Length() == 0
-		? NAME_None
-		: FName(Converted.Length(), Converted.Get(), FNAME_Add);
-	CastFieldChecked<FNameProperty>(Plan.Property)->SetPropertyValue(Value, Name);
-	return true;
-}
-
-bool SetAvidScriptRuntimeValueFromCells(
-	const FAvidScriptRuntimeBindingValuePlan& Plan,
-	TConstArrayView<uint64> Cells,
-	IAvidScriptVmGuestMemory* GuestMemory,
-	const FAvidScriptBindingInvocationContext& Context,
-	void* Frame,
-	FString& OutDetails)
-{
-	if (Cells.Num() != Plan.ArgumentWidth || Plan.Property == nullptr)
-	{
-		OutDetails = TEXT("The dynamic binding frame width does not match the cached value plan.");
-		return false;
-	}
-	if (Plan.Kind <= EAvidScriptRuntimeBindingKind::Enum)
-	{
-		return SetAvidScriptRuntimeNumericValue(Plan, Frame, Cells[0], OutDetails);
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name)
-	{
-		if (GuestMemory == nullptr)
-		{
-			OutDetails = TEXT("The FName input requires guest memory.");
-			return false;
-		}
-		if (Cells[0] > MAX_uint32)
-		{
-			OutDetails = TEXT("The FName guest address does not fit the 32-bit guest address space.");
-			return false;
-		}
-		return SetAvidScriptRuntimeNameValue(
-			Plan,
-			static_cast<uint32>(Cells[0]),
-			*GuestMemory,
-			Frame,
-			OutDetails);
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
-	{
-		UObject* Object = nullptr;
-		if (!ResolveAvidScriptRuntimeHandle(
-			static_cast<uint32>(Cells[0]),
-			static_cast<uint32>(Cells[1]),
-			Plan.ObjectClass,
-			Context,
-			true,
-			Object,
-			OutDetails))
-		{
-			return false;
-		}
-		CastFieldChecked<FObjectPropertyBase>(Plan.Property)->SetObjectPropertyValue_InContainer(Frame, Object);
-		return true;
-	}
-
-	TArray<float, TInlineAllocator<9>> Components;
-	Components.SetNumUninitialized(Cells.Num());
-	for (int32 Index = 0; Index < Cells.Num(); ++Index)
-	{
-		if (!ReadAvidScriptRuntimeF32(Cells[Index], Components[Index]))
-		{
-			OutDetails = TEXT("The binding call supplied a non-finite struct component.");
-			return false;
-		}
-	}
-	void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Frame);
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Vector)
-	{
-		*static_cast<FVector*>(Value) = FVector(Components[0], Components[1], Components[2]);
-		return true;
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Rotator)
-	{
-		*static_cast<FRotator*>(Value) = FRotator(Components[0], Components[1], Components[2]);
-		return true;
-	}
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Transform)
-	{
-		*static_cast<FTransform*>(Value) = FTransform(
-			FRotator(Components[3], Components[4], Components[5]),
-			FVector(Components[0], Components[1], Components[2]),
-			FVector(Components[6], Components[7], Components[8]));
-		return true;
-	}
-	OutDetails = TEXT("The cached struct kind is unsupported.");
-	return false;
-}
-
-bool SetAvidScriptRuntimeValueFromGuest(
-	const FAvidScriptRuntimeBindingValuePlan& Plan,
-	uint32 GuestAddress,
-	IAvidScriptVmGuestMemory& GuestMemory,
-	const FAvidScriptBindingInvocationContext& Context,
-	void* Frame,
-	FString& OutDetails)
-{
-	uint8 Bytes[36] = {};
-	if (Plan.GuestStorageSize <= 0 || Plan.GuestStorageSize > UE_ARRAY_COUNT(Bytes)
-		|| !GuestMemory.ReadBytes(GuestAddress, MakeArrayView(Bytes, Plan.GuestStorageSize), OutDetails))
-	{
-		if (OutDetails.IsEmpty())
-		{
-			OutDetails = TEXT("The cached guest storage size is invalid.");
-		}
-		return false;
-	}
-
-	TArray<uint64, TInlineAllocator<9>> Cells;
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
-	{
-		uint32 Slot = 0;
-		uint32 Generation = 0;
-		FMemory::Memcpy(&Slot, Bytes, sizeof(Slot));
-		FMemory::Memcpy(&Generation, Bytes + sizeof(Slot), sizeof(Generation));
-		Cells = { Slot, Generation };
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Vector
-		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Rotator
-		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Transform)
-	{
-		const int32 ComponentCount = Plan.GuestStorageSize / sizeof(float);
-		for (int32 Index = 0; Index < ComponentCount; ++Index)
-		{
-			uint32 Bits = 0;
-			FMemory::Memcpy(&Bits, Bytes + Index * sizeof(float), sizeof(Bits));
-			Cells.Add(Bits);
-		}
-	}
-	else
-	{
-		uint64 Cell = 0;
-		FMemory::Memcpy(&Cell, Bytes, Plan.GuestStorageSize);
-		Cells.Add(Cell);
-	}
-
-	FAvidScriptRuntimeBindingValuePlan ValuePlan = Plan;
-	ValuePlan.ArgumentWidth = Cells.Num();
-	return SetAvidScriptRuntimeValueFromCells(
-		ValuePlan,
-		Cells,
-		&GuestMemory,
-		Context,
-		Frame,
-		OutDetails);
-}
-
-bool WriteAvidScriptRuntimeValueToGuest(
-	const FAvidScriptRuntimeBindingValuePlan& Plan,
-	uint32 GuestAddress,
-	IAvidScriptVmGuestMemory& GuestMemory,
-	const FAvidScriptBindingInvocationContext& Context,
-	void* Frame,
-	FString& OutDetails)
-{
-	uint8 Bytes[36] = {};
-	const void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Frame);
-	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Bool)
-	{
-		const int32 Stored = CastFieldChecked<FBoolProperty>(Plan.Property)->GetPropertyValue(Value) ? 1 : 0;
-		FMemory::Memcpy(Bytes, &Stored, sizeof(Stored));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Float)
-	{
-		const float Stored = CastFieldChecked<FFloatProperty>(Plan.Property)->GetPropertyValue(Value);
-		FMemory::Memcpy(Bytes, &Stored, sizeof(Stored));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Double)
-	{
-		const double Stored = CastFieldChecked<FDoubleProperty>(Plan.Property)->GetPropertyValue(Value);
-		FMemory::Memcpy(Bytes, &Stored, sizeof(Stored));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
-	{
-		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Plan.Property)->GetObjectPropertyValue_InContainer(Frame);
-		FAvidScriptObjectHandle Handle;
-		if (Object != nullptr)
-		{
-			if (Context.ObjectRegistry == nullptr || Context.ObjectOwnership == nullptr)
-			{
-				OutDetails = TEXT("The binding call cannot publish a UObject result without registry and ownership services.");
-				return false;
-			}
-			FAvidScriptObjectHandleResult BorrowResult;
-			if (!Context.ObjectOwnership->Borrow(
-					*Context.ObjectRegistry,
-					*Object,
-					BorrowResult))
-			{
-				OutDetails = BorrowResult.ErrorMessage;
-				return false;
-			}
-			Handle = BorrowResult.Handle;
-		}
-		FMemory::Memcpy(Bytes, &Handle.Slot, sizeof(Handle.Slot));
-		FMemory::Memcpy(Bytes + sizeof(Handle.Slot), &Handle.Generation, sizeof(Handle.Generation));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Vector)
-	{
-		const FVector& Stored = *static_cast<const FVector*>(Value);
-		const float Components[3] = {
-			static_cast<float>(Stored.X),
-			static_cast<float>(Stored.Y),
-			static_cast<float>(Stored.Z)
-		};
-		FMemory::Memcpy(Bytes, Components, sizeof(Components));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Rotator)
-	{
-		const FRotator& Stored = *static_cast<const FRotator*>(Value);
-		const float Components[3] = {
-			static_cast<float>(Stored.Pitch),
-			static_cast<float>(Stored.Yaw),
-			static_cast<float>(Stored.Roll)
-		};
-		FMemory::Memcpy(Bytes, Components, sizeof(Components));
-	}
-	else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Transform)
-	{
-		const FTransform& Stored = *static_cast<const FTransform*>(Value);
-		const FVector Translation = Stored.GetTranslation();
-		const FRotator Rotation = Stored.Rotator();
-		const FVector Scale = Stored.GetScale3D();
-		const float Components[9] = {
-			static_cast<float>(Translation.X),
-			static_cast<float>(Translation.Y),
-			static_cast<float>(Translation.Z),
-			static_cast<float>(Rotation.Pitch),
-			static_cast<float>(Rotation.Yaw),
-			static_cast<float>(Rotation.Roll),
-			static_cast<float>(Scale.X),
-			static_cast<float>(Scale.Y),
-			static_cast<float>(Scale.Z)
-		};
-		FMemory::Memcpy(Bytes, Components, sizeof(Components));
-	}
-	else
-	{
-		const FNumericProperty* NumericProperty = CastField<FNumericProperty>(Plan.Property);
-		if (Plan.Kind == EAvidScriptRuntimeBindingKind::Enum)
-		{
-			if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Plan.Property))
-			{
-				NumericProperty = EnumProperty->GetUnderlyingProperty();
-			}
-		}
-		if (NumericProperty == nullptr)
-		{
-			OutDetails = TEXT("The cached numeric output property plan is invalid.");
-			return false;
-		}
-		const uint64 Stored = NumericProperty->GetUnsignedIntPropertyValue(Value);
-		FMemory::Memcpy(Bytes, &Stored, Plan.GuestStorageSize);
-	}
-
-	return GuestMemory.WriteBytes(
-		GuestAddress,
-		MakeArrayView(static_cast<const uint8*>(Bytes), Plan.GuestStorageSize),
-		OutDetails);
-}
-
 bool BuildAvidScriptRuntimeValuePlan(
 	FProperty* Property,
 	const FAvidScriptBindingValueModel& Model,
@@ -1975,6 +1440,9 @@ struct FAvidScriptBindingPackage::FImpl
 	int32 DescriptorSchemaVersion = 0;
 	FAvidScriptVmBindingPackage VmPackage;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
+	TArray<TUniquePtr<
+		UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>>
+		PreparedDynamicCells;
 	TArray<UClass*> ObjectTypePlans;
 	UClass* ExpectedSelfClass = nullptr;
 	TArray<FClassReferencePlan> ClassReferencePlans;
@@ -2068,6 +1536,63 @@ FAvidScriptBindingPackage::MakeGeneratedPlanForTesting(
 	}
 	Package->Impl->Instrumentation.GeneratedNativeS1PlanCount = 1;
 	Package->Impl->Plans.Add(MoveTemp(Plan));
+	return Package;
+}
+
+TSharedPtr<const FAvidScriptBindingPackage>
+FAvidScriptBindingPackage::MakePreparedDynamicPlanForTesting(
+	const FString& StableId,
+	const FString& ImportName,
+	const FString& Signature,
+	UClass* ExpectedClass,
+	UFunction* Function,
+	const int32 ExpectedArgumentCount,
+	const int32 RequiredScratchSize,
+	const bool bRequiresGuestMemory,
+	const bool bStatic)
+{
+	if (StableId.IsEmpty()
+		|| ImportName.IsEmpty()
+		|| Signature.IsEmpty()
+		|| ExpectedClass == nullptr
+		|| Function == nullptr
+		|| ExpectedArgumentCount < 0
+		|| RequiredScratchSize < 0)
+	{
+		return nullptr;
+	}
+
+	TSharedPtr<FAvidScriptBindingPackage> Package =
+		MakeShareable(new FAvidScriptBindingPackage());
+	Package->Impl->PackageName = TEXT("avidscript.test.prepared_dynamic");
+	Package->Impl->PackageHash = StableId;
+	Package->Impl->VmPackage.PackageName = Package->Impl->PackageName;
+	Package->Impl->VmPackage.PackageHash = Package->Impl->PackageHash;
+	FAvidScriptRuntimeBindingInvocationPlan& Program =
+		Package->Impl->Plans.AddDefaulted_GetRef();
+	Program.Kind = EAvidScriptBindingInvocationKind::ReflectedFunction;
+	Program.OwnerClass = ExpectedClass;
+	Program.Function = Function;
+	Program.DebugPath = Function->GetPathName();
+	Program.bStatic = bStatic;
+	Program.bRequiresGuestMemory = bRequiresGuestMemory;
+	Program.ExpectedArgumentCount = ExpectedArgumentCount;
+	Program.RequiredScratchSize = RequiredScratchSize;
+	Package->Impl->RequiredScratchSize = RequiredScratchSize;
+	Package->Impl->VmPackage.Imports.Add({
+		StableId,
+		0,
+		TEXT("avidscript"),
+		ImportName,
+		Signature
+	});
+	TUniquePtr<
+		UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell> Cell =
+		MakeUnique<
+			UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>();
+	Cell->Program = &Program;
+	Cell->BindingOrdinal = 0;
+	Package->Impl->PreparedDynamicCells.Add(MoveTemp(Cell));
 	return Package;
 }
 #endif
@@ -3284,6 +2809,33 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 	}
 
+	Package->Impl->PreparedDynamicCells.Reserve(Model.Bindings.Num());
+	for (int32 PlanIndex = 0; PlanIndex < Model.Bindings.Num(); ++PlanIndex)
+	{
+		const FAvidScriptRuntimeBindingInvocationPlan& Plan =
+			Package->Impl->Plans[PlanIndex];
+		const bool bReflected =
+			Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedFunction
+			|| Plan.Kind
+				== EAvidScriptBindingInvocationKind::ReflectedPropertyRead
+			|| Plan.Kind
+				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+		if (!bReflected
+			|| Plan.OwnerClass == nullptr
+			|| Plan.GeneratedEntry != nullptr)
+		{
+			continue;
+		}
+
+		TUniquePtr<
+			UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell> Cell =
+			MakeUnique<
+				UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>();
+		Cell->Program = &Plan;
+		Cell->BindingOrdinal = static_cast<uint32>(PlanIndex);
+		Package->Impl->PreparedDynamicCells.Add(MoveTemp(Cell));
+	}
+
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Model.Bindings.Num();
 	OutResult.ClassReferenceCount = Package->Impl->ClassReferencePlans.Num();
@@ -3575,6 +3127,60 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 			Binding.TypedHostImport.Shape =
 				EAvidScriptVmTypedHostShape::SelfPropertyI32GetSet;
 		}
+	}
+	return true;
+}
+
+bool FAvidScriptBindingPackage::BuildPreparedDynamicBindings(
+	TArray<FAvidScriptPreparedDynamicBinding>& OutBindings,
+	FString& OutError) const
+{
+	OutBindings.Reset();
+	OutError.Reset();
+	OutBindings.Reserve(Impl->PreparedDynamicCells.Num());
+	for (const TUniquePtr<
+			UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>& Cell
+		: Impl->PreparedDynamicCells)
+	{
+		if (!Cell.IsValid()
+			|| Cell->Program == nullptr
+			|| !Impl->VmPackage.Imports.IsValidIndex(
+				static_cast<int32>(Cell->BindingOrdinal)))
+		{
+			OutBindings.Reset();
+			OutError = TEXT("prepared_dynamic_cell_invalid");
+			return false;
+		}
+		const FAvidScriptRuntimeBindingInvocationPlan& Program =
+			*Cell->Program;
+		const FAvidScriptVmDynamicImport& Import =
+			Impl->VmPackage.Imports[
+				static_cast<int32>(Cell->BindingOrdinal)];
+		if (Import.Ordinal != Cell->BindingOrdinal
+			|| Program.OwnerClass == nullptr
+			|| Program.ExpectedArgumentCount < 0
+			|| Program.RequiredScratchSize < 0)
+		{
+			OutBindings.Reset();
+			OutError = TEXT("prepared_dynamic_import_mismatch");
+			return false;
+		}
+
+		FAvidScriptPreparedDynamicBinding& Binding =
+			OutBindings.AddDefaulted_GetRef();
+		Binding.BindingOrdinal = Cell->BindingOrdinal;
+		Binding.StableId = Import.StableId;
+		Binding.ModuleName = Import.ModuleName;
+		Binding.ImportName = Import.ImportName;
+		Binding.Signature = Import.Signature;
+		Binding.ImmutableInvocationCell = Cell.Get();
+		Binding.ExpectedClass = Program.OwnerClass;
+		Binding.ExpectedArgumentCount = Program.ExpectedArgumentCount;
+		Binding.RequiredScratchSize = Program.RequiredScratchSize;
+		Binding.Invoke = &UE::AvidScript::BindingPrivate::
+			InvokePreparedDynamicReflection;
+		Binding.bRequiresGuestMemory = Program.bRequiresGuestMemory;
+		Binding.bStatic = Program.bStatic;
 	}
 	return true;
 }
@@ -3975,48 +3581,29 @@ bool FAvidScriptBindingPackage::Dispatch(
 		return false;
 	}
 	const FAvidScriptRuntimeBindingInvocationPlan& Plan = Impl->Plans[Call.BindingOrdinal];
-	const bool bRequestedNativeDirect =
-		Context.InvocationPolicy
-		== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect;
-	const bool bRequestedAdaptive =
-		Context.InvocationPolicy
-		== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic;
-	EAvidScriptBindingInvocationMode ActualInvocationMode =
-		EAvidScriptBindingInvocationMode::SemanticProcessEvent;
-	bool bAdaptiveGuardRejected = false;
-	ON_SCOPE_EXIT
+	const auto CompleteSpecialDispatch =
+		[&Context, &OutResult](const bool bDispatched)
 	{
 		FAvidScriptBindingInvocationInstrumentation* Instrumentation =
 			Context.InvocationInstrumentation;
-		if (Instrumentation == nullptr || !OutResult.bSucceeded)
+		if (Instrumentation == nullptr
+			|| !bDispatched
+			|| !OutResult.bSucceeded)
 		{
-			return;
-		}
-		if (ActualInvocationMode
-			== EAvidScriptBindingInvocationMode::QualifiedNativeDirect)
-		{
-			++Instrumentation->QualifiedNativeDirectCount;
-			return;
-		}
-		if (ActualInvocationMode
-			== EAvidScriptBindingInvocationMode::AdaptivePreparedNative)
-		{
-			++Instrumentation->AdaptivePreparedNativeHitCount;
-			return;
+			return bDispatched;
 		}
 		++Instrumentation->SemanticProcessEventCount;
-		if (bRequestedNativeDirect)
+		if (Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::QualifiedNativeDirect)
 		{
 			++Instrumentation->RequestedNativeDirectFallbackCount;
 		}
-		if (bRequestedAdaptive)
+		if (Context.InvocationPolicy
+			== EAvidScriptBindingInvocationPolicy::AdaptiveSemantic)
 		{
 			++Instrumentation->AdaptiveProcessEventFallbackCount;
-			if (bAdaptiveGuardRejected)
-			{
-				++Instrumentation->AdaptiveGuardRejectCount;
-			}
 		}
+		return bDispatched;
 	};
 	if (Call.Arguments.Num() != Plan.ExpectedArgumentCount
 		|| (Plan.bRequiresGuestMemory && Call.GuestMemory == nullptr))
@@ -4041,22 +3628,45 @@ bool FAvidScriptBindingPackage::Dispatch(
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectDestroyActor
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectIsA)
 	{
-		return DispatchAvidScriptObjectLifecycle(*this, Plan, Call, Context, OutResult);
+		return CompleteSpecialDispatch(
+			DispatchAvidScriptObjectLifecycle(
+				*this,
+				Plan,
+				Call,
+				Context,
+				OutResult));
 	}
 	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectTypeIsA)
 	{
-		return DispatchAvidScriptObjectType(*this, Plan, Call, Context, OutResult);
+		return CompleteSpecialDispatch(
+			DispatchAvidScriptObjectType(
+				*this,
+				Plan,
+				Call,
+				Context,
+				OutResult));
 	}
 	if (Plan.Kind == EAvidScriptBindingInvocationKind::ObjectConstruct
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ObjectRelease
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::ActorFindComponent)
 	{
-		return DispatchAvidScriptObjectFactory(*this, Plan, Call, Context, OutResult);
+		return CompleteSpecialDispatch(
+			DispatchAvidScriptObjectFactory(
+				*this,
+				Plan,
+				Call,
+				Context,
+				OutResult));
 	}
 	if (Plan.Kind == EAvidScriptBindingInvocationKind::SceneComponentAttach
 		|| Plan.Kind == EAvidScriptBindingInvocationKind::SceneComponentDetach)
 	{
-		return DispatchAvidScriptSceneAttachment(Plan, Call, Context, OutResult);
+		return CompleteSpecialDispatch(
+			DispatchAvidScriptSceneAttachment(
+				Plan,
+				Call,
+				Context,
+				OutResult));
 	}
 
 	UObject* Target = nullptr;
@@ -4065,7 +3675,7 @@ bool FAvidScriptBindingPackage::Dispatch(
 	{
 		Target = Plan.OwnerClass->GetDefaultObject();
 	}
-	else if (!ResolveAvidScriptRuntimeHandle(
+	else if (!UE::AvidScript::BindingPrivate::ResolveObjectHandle(
 		static_cast<uint32>(Call.Arguments[0]),
 		static_cast<uint32>(Call.Arguments[1]),
 		Plan.OwnerClass,
@@ -4090,280 +3700,16 @@ bool FAvidScriptBindingPackage::Dispatch(
 			TEXT("The cached invocation target is null."));
 		return false;
 	}
-	if (Plan.bRequiresWriteAccess && Context.WritePolicy != EAvidScriptActorWritePolicy::AllowWrites)
-	{
-		SetAvidScriptBindingDispatchFailure(
-			OutResult,
-			TEXT("binding_write_denied"),
-			Plan.DebugPath,
-			TEXT("The reflected binding requires an explicitly writable host context."));
-		return false;
-	}
-	const auto PrepareHostEffect = [&]()
-	{
-		if (Context.HostEffectJournal == nullptr || !Plan.bRequiresWriteAccess)
-		{
-			return true;
-		}
-		if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
-			&& Plan.Function != nullptr)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_reload_effect_unsupported"),
-				Plan.DebugPath,
-				TEXT("BlueprintSetter candidate reload is not reversible because ProcessEvent may produce additional host effects."));
-			return false;
-		}
-		if (Plan.ReloadEffect == EAvidScriptBindingReloadEffect::Unsupported)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_reload_effect_unsupported"),
-				Plan.DebugPath,
-				TEXT("The reflected write has no reversible candidate reload adapter."));
-			return false;
-		}
-		if (Context.ObjectRegistry == nullptr)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_host_effect_registry_missing"),
-				Plan.DebugPath,
-				TEXT("The candidate host effect journal requires an object registry."));
-			return false;
-		}
-
-		const FAvidScriptObjectHandle EffectHandle = Plan.bStatic
-			? Context.OwnerHandle
-			: FAvidScriptObjectHandle{
-				static_cast<uint32>(Call.Arguments[0]),
-				static_cast<uint32>(Call.Arguments[1])
-			};
-		FAvidScriptBindingHostEffectPrepareResult PrepareResult;
-		const bool bPrepared = Plan.ReloadEffect
-			== EAvidScriptBindingReloadEffect::ReflectedProperty
-			? Plan.ReflectedProperty != nullptr
-				&& Context.HostEffectJournal->PrepareReflectedProperty(
-					*Context.ObjectRegistry,
-					EffectHandle,
-					*Target,
-					*Plan.ReflectedProperty,
-					PrepareResult)
-			: Context.HostEffectJournal->PrepareEffect(
-				*Context.ObjectRegistry,
-				EffectHandle,
-				*Target,
-				Plan.ReloadEffect,
-				PrepareResult);
-		if (!bPrepared)
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				PrepareResult.ErrorCategory.IsEmpty()
-					? FString(TEXT("binding_host_effect_prepare_failed"))
-					: PrepareResult.ErrorCategory,
-				PrepareResult.ErrorSource.IsEmpty()
-					? Plan.DebugPath
-					: PrepareResult.ErrorSource,
-				PrepareResult.ErrorDetails.IsEmpty()
-					? FString(TEXT("The candidate host effect could not be prepared."))
-					: PrepareResult.ErrorDetails);
-			return false;
-		}
-		return true;
+	const UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell Cell{
+		&Plan,
+		Call.BindingOrdinal
 	};
-	if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyRead)
-	{
-		if (!WriteAvidScriptRuntimeValueToGuest(
-			Plan.ReturnValue,
-			static_cast<uint32>(Call.Arguments[Plan.ReturnValue.ArgumentOffset]),
-			*Call.GuestMemory,
-			Context,
-			Target,
-			Details))
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_property_read_failed"),
-				Plan.DebugPath,
-				Details);
-			return false;
-		}
-		OutResult.bSucceeded = true;
-		OutResult.ReturnValue = 1;
-		return true;
-	}
-	if (Plan.Kind == EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
-		&& Plan.Function == nullptr)
-	{
-		if (!PrepareHostEffect()
-			|| !SetAvidScriptRuntimeValueFromCells(
-				Plan.Parameters[0],
-				Call.Arguments.Slice(
-					Plan.Parameters[0].ArgumentOffset,
-					Plan.Parameters[0].ArgumentWidth),
-				Call.GuestMemory,
-				Context,
-				Target,
-				Details))
-		{
-			if (OutResult.Details.IsEmpty())
-			{
-				SetAvidScriptBindingDispatchFailure(
-					OutResult,
-					TEXT("binding_property_write_failed"),
-					Plan.DebugPath,
-					Details);
-			}
-			return false;
-		}
-		OutResult.bSucceeded = true;
-		OutResult.ReturnValue = 1;
-		return true;
-	}
-
-	if (Plan.FastPath.IsBound())
-	{
-		if (!PrepareHostEffect())
-		{
-			return false;
-		}
-		FString FastPathErrorCategory;
-		FString FastPathErrorDetails;
-		if (!UE::AvidScript::BindingPrivate::DispatchFastPath(
-			Plan.FastPath,
-			*Target,
-			Call,
-			InvocationScratch,
-			Context.InvocationPolicy,
-			ActualInvocationMode,
-			bAdaptiveGuardRejected,
-			FastPathErrorCategory,
-			FastPathErrorDetails))
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				FastPathErrorCategory.IsEmpty()
-					? FString(TEXT("binding_fast_path_failed"))
-					: FastPathErrorCategory,
-				Plan.DebugPath,
-				FastPathErrorDetails.IsEmpty()
-					? FString(TEXT("The cached typed thunk rejected the invocation."))
-					: FastPathErrorDetails);
-			return false;
-		}
-		OutResult.bSucceeded = true;
-		OutResult.ReturnValue = 1;
-		return true;
-	}
-
-	const UPTRINT ScratchAddress = reinterpret_cast<UPTRINT>(InvocationScratch.GetData());
-	const UPTRINT FrameAddress = Align(ScratchAddress, static_cast<UPTRINT>(Plan.FrameAlignment));
-	const int32 FrameOffset = static_cast<int32>(FrameAddress - ScratchAddress);
-	if (FrameOffset + Plan.FrameSize > InvocationScratch.Num())
-	{
-		SetAvidScriptBindingDispatchFailure(
-			OutResult,
-			TEXT("binding_scratch_alignment_failed"),
-			Plan.DebugPath,
-			TEXT("The runtime invocation scratch could not satisfy the cached frame alignment."));
-		return false;
-	}
-	void* Frame = reinterpret_cast<void*>(FrameAddress);
-	Plan.Function->InitializeStruct(Frame);
-	ON_SCOPE_EXIT
-	{
-		Plan.Function->DestroyStruct(Frame);
-	};
-
-	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Plan.Parameters)
-	{
-		if (Parameter.Direction == EAvidScriptRuntimeBindingDirection::Ref
-			|| Parameter.Direction == EAvidScriptRuntimeBindingDirection::Out)
-		{
-			if (Parameter.Direction == EAvidScriptRuntimeBindingDirection::Ref
-				&& !SetAvidScriptRuntimeValueFromGuest(
-					Parameter,
-					static_cast<uint32>(Call.Arguments[Parameter.ArgumentOffset]),
-					*Call.GuestMemory,
-					Context,
-					Frame,
-					Details))
-			{
-				SetAvidScriptBindingDispatchFailure(
-					OutResult,
-					TEXT("binding_guest_read_failed"),
-					Plan.DebugPath + TEXT(":") + Parameter.Name,
-					Details);
-				return false;
-			}
-			continue;
-		}
-
-		if (!SetAvidScriptRuntimeValueFromCells(
-			Parameter,
-			Call.Arguments.Slice(Parameter.ArgumentOffset, Parameter.ArgumentWidth),
-			Call.GuestMemory,
-			Context,
-			Frame,
-			Details))
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_argument_invalid"),
-				Plan.DebugPath + TEXT(":") + Parameter.Name,
-				Details);
-			return false;
-		}
-	}
-
-	if (!PrepareHostEffect())
-	{
-		return false;
-	}
-
-	Target->ProcessEvent(Plan.Function, Frame);
-
-	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Plan.Parameters)
-	{
-		if ((Parameter.Direction == EAvidScriptRuntimeBindingDirection::Ref
-			|| Parameter.Direction == EAvidScriptRuntimeBindingDirection::Out)
-			&& !WriteAvidScriptRuntimeValueToGuest(
-				Parameter,
-				static_cast<uint32>(Call.Arguments[Parameter.ArgumentOffset]),
-				*Call.GuestMemory,
-				Context,
-				Frame,
-				Details))
-		{
-			SetAvidScriptBindingDispatchFailure(
-				OutResult,
-				TEXT("binding_guest_write_failed"),
-				Plan.DebugPath + TEXT(":") + Parameter.Name,
-				Details);
-			return false;
-		}
-	}
-
-	if (Plan.ReturnValue.Kind != EAvidScriptRuntimeBindingKind::Void
-		&& !WriteAvidScriptRuntimeValueToGuest(
-			Plan.ReturnValue,
-			static_cast<uint32>(Call.Arguments[Plan.ReturnValue.ArgumentOffset]),
-			*Call.GuestMemory,
-			Context,
-			Frame,
-			Details))
-	{
-		SetAvidScriptBindingDispatchFailure(
-			OutResult,
-			TEXT("binding_return_write_failed"),
-			Plan.DebugPath,
-			Details);
-		return false;
-	}
-
-	OutResult.bSucceeded = true;
-	OutResult.ReturnValue = 1;
-	return true;
+	return UE::AvidScript::BindingPrivate::InvokePreparedDynamicReflection(
+		&Cell,
+		*Target,
+		Call.Arguments,
+		Call.GuestMemory,
+		Context,
+		InvocationScratch,
+		OutResult);
 }

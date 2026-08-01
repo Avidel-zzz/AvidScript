@@ -29,6 +29,13 @@ struct FAvidScriptPreparedReflectionHostCall
 	FAvidScriptPreparedReflectionBinding Binding;
 };
 
+struct FAvidScriptPreparedDynamicHostCall
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = nullptr;
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptPreparedDynamicBinding Binding;
+};
+
 bool AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
 	IAvidScriptVmBackend& Backend,
 	const FAvidScriptVmExportHandle& Handle,
@@ -395,6 +402,8 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	TypedHostImports.Reset();
 	PreparedGeneratedHostCalls.Reset();
 	PreparedReflectionHostCalls.Reset();
+	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+	PreparedDynamicHostCalls.Reset();
 	if (!BindingPackage.IsValid())
 	{
 		return true;
@@ -599,6 +608,77 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 					InvokePreparedReflectionStableObjectRoundtrip;
 		}
 		PreparedReflectionHostCalls.Add(MoveTemp(Call));
+	}
+	if (!BuildPreparedDynamicHostImports(OutError))
+	{
+		TypedHostImports.Reset();
+		PreparedGeneratedHostCalls.Reset();
+		PreparedReflectionHostCalls.Reset();
+		PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+		PreparedDynamicHostCalls.Reset();
+		return false;
+	}
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::BuildPreparedDynamicHostImports(
+	FString& OutError)
+{
+	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+	PreparedDynamicHostCalls.Reset();
+	if (!BindingPackage.IsValid())
+	{
+		return true;
+	}
+
+	PreparedVmBindingPackage = BindingPackage->GetVmPackage();
+	TArray<FAvidScriptPreparedDynamicBinding> PreparedBindings;
+	if (!BindingPackage->BuildPreparedDynamicBindings(
+			PreparedBindings,
+			OutError))
+	{
+		PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+		return false;
+	}
+
+	PreparedDynamicHostCalls.Reserve(PreparedBindings.Num());
+	for (const FAvidScriptPreparedDynamicBinding& Binding : PreparedBindings)
+	{
+		const int32 ImportIndex = static_cast<int32>(Binding.BindingOrdinal);
+		if (!PreparedVmBindingPackage.Imports.IsValidIndex(ImportIndex))
+		{
+			OutError = TEXT("prepared_dynamic_import_ordinal_invalid");
+			PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+			PreparedDynamicHostCalls.Reset();
+			return false;
+		}
+		FAvidScriptVmDynamicImport& Import =
+			PreparedVmBindingPackage.Imports[ImportIndex];
+		if (Import.Ordinal != Binding.BindingOrdinal
+			|| Import.StableId != Binding.StableId
+			|| Import.ModuleName != Binding.ModuleName
+			|| Import.ImportName != Binding.ImportName
+			|| Import.Signature != Binding.Signature
+			|| !Import.PreparedTarget.IsEmpty()
+			|| Binding.ImmutableInvocationCell == nullptr
+			|| Binding.ExpectedClass == nullptr
+			|| Binding.Invoke == nullptr)
+		{
+			OutError = TEXT("prepared_dynamic_import_identity_mismatch");
+			PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+			PreparedDynamicHostCalls.Reset();
+			return false;
+		}
+
+		TUniquePtr<FAvidScriptPreparedDynamicHostCall> Call =
+			MakeUnique<FAvidScriptPreparedDynamicHostCall>();
+		Call->Runtime = this;
+		Call->Package = BindingPackage;
+		Call->Binding = Binding;
+		Import.PreparedTarget.Context = Call.Get();
+		Import.PreparedTarget.Invoke =
+			&FAvidScriptWasmRuntimeInstance::InvokePreparedDynamicHost;
+		PreparedDynamicHostCalls.Add(MoveTemp(Call));
 	}
 	return true;
 }
@@ -812,6 +892,8 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 			TypedHostImports.Reset();
 			PreparedGeneratedHostCalls.Reset();
 			PreparedReflectionHostCalls.Reset();
+			PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+			PreparedDynamicHostCalls.Reset();
 			return false;
 		}
 	}
@@ -821,13 +903,17 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		TypedHostImports.Reset();
 		PreparedGeneratedHostCalls.Reset();
 		PreparedReflectionHostCalls.Reset();
+		PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+		PreparedDynamicHostCalls.Reset();
 	}
 
 	FAvidScriptVmLoadConfig Config;
 	Config.HostDispatcher = this;
 	Config.TypedHostDispatcher = this;
 	Config.TypedHostImports = TypedHostImports;
-	Config.BindingPackage = BindingPackage.IsValid() ? &BindingPackage->GetVmPackage() : nullptr;
+	Config.BindingPackage = BindingPackage.IsValid()
+		? &PreparedVmBindingPackage
+		: nullptr;
 	const bool bLoaded = VmBackend->LoadArtifact(
 		Artifact,
 		ModuleId,
@@ -851,6 +937,8 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 		TypedHostImports.Reset();
 		PreparedGeneratedHostCalls.Reset();
 		PreparedReflectionHostCalls.Reset();
+		PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+		PreparedDynamicHostCalls.Reset();
 		return false;
 	}
 
@@ -1711,6 +1799,8 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	}
 	PreparedGeneratedHostCalls.Reset();
 	PreparedReflectionHostCalls.Reset();
+	PreparedVmBindingPackage = FAvidScriptVmBindingPackage();
+	PreparedDynamicHostCalls.Reset();
 	TypedHostImports.Reset();
 	BindingPackage.Reset();
 	DebugMap.Reset();
@@ -4780,10 +4870,169 @@ FAvidScriptWasmRuntimeInstance::DispatchCommandBufferSubmit(
 		: EAvidScriptVmTypedHostStatus::Rejected;
 }
 
+bool FAvidScriptWasmRuntimeInstance::InvokePreparedDynamicHost(
+	void* Context,
+	const TConstArrayView<uint64> Arguments,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	FAvidScriptPreparedDynamicHostCall* Call =
+		static_cast<FAvidScriptPreparedDynamicHostCall*>(Context);
+	if (Call == nullptr || Call->Runtime == nullptr)
+	{
+		OutResult = FAvidScriptDynamicHostCallResult();
+		OutResult.Details =
+			TEXT("prepared_dynamic_context_invalid: the Runtime call context is unavailable.");
+		return false;
+	}
+	return Call->Runtime->DispatchPreparedDynamicHost(
+		*Call,
+		Arguments,
+		GuestMemory,
+		OutResult);
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDynamicHost(
+	FAvidScriptPreparedDynamicHostCall& Call,
+	const TConstArrayView<uint64> Arguments,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	bool bPreparedSucceeded = false;
+	ON_SCOPE_EXIT
+	{
+		FAvidScriptBindingInvocationInstrumentation* Instrumentation =
+			BindingInvocationContext.InvocationInstrumentation;
+		if (Instrumentation != nullptr)
+		{
+			if (bPreparedSucceeded)
+			{
+				++Instrumentation->PreparedDynamicHitCount;
+			}
+			else
+			{
+				++Instrumentation->PreparedDynamicRejectCount;
+			}
+		}
+	};
+	const bool bCaptureTiming =
+		HostContext.DynamicHostCallTimingPolicy
+		== EAvidScriptDynamicHostCallTimingPolicy::PerCall;
+	const double HostImportStartSeconds =
+		bCaptureTiming ? FPlatformTime::Seconds() : 0.0;
+	ON_SCOPE_EXIT
+	{
+		if (bCaptureTiming)
+		{
+			Metrics.HostImportCallMs += MeasureElapsedMs(HostImportStartSeconds);
+			++Metrics.TimedDynamicHostCallCount;
+		}
+	};
+
+	++HostImportCallCount;
+	LastHostImportInput = static_cast<int32>(Call.Binding.BindingOrdinal);
+	LastHostImportResult = 0;
+	OutResult = FAvidScriptDynamicHostCallResult();
+	if (!BindingPackage.IsValid()
+		|| Call.Package.Get() != BindingPackage.Get()
+		|| Call.Binding.ImmutableInvocationCell == nullptr
+		|| Call.Binding.ExpectedClass == nullptr
+		|| Call.Binding.Invoke == nullptr)
+	{
+		OutResult.Details =
+			TEXT("prepared_dynamic_context_stale: the prepared binding package is no longer active.");
+		return false;
+	}
+	if (Arguments.Num() != Call.Binding.ExpectedArgumentCount
+		|| BindingInvocationScratch.Num()
+			< Call.Binding.RequiredScratchSize)
+	{
+		OutResult.Details =
+			TEXT("binding_frame_mismatch: arguments, guest memory, or scratch do not match the prepared call.");
+		return false;
+	}
+
+	UObject* Receiver = nullptr;
+	if (Call.Binding.bStatic)
+	{
+		Receiver = Call.Binding.ExpectedClass->GetDefaultObject();
+	}
+	else
+	{
+		if (Arguments.Num() < 2
+			|| Arguments[0] > MAX_uint32
+			|| Arguments[1] > MAX_uint32)
+		{
+			OutResult.Details =
+				TEXT("binding_target_invalid: the prepared receiver handle is outside the 32-bit ABI.");
+			return false;
+		}
+		const uint32 Slot = static_cast<uint32>(Arguments[0]);
+		const uint32 Generation = static_cast<uint32>(Arguments[1]);
+		const bool bCanUseSelfCache =
+			Slot <= static_cast<uint32>(MAX_int32)
+			&& Generation <= static_cast<uint32>(MAX_int32)
+			&& HostContext.OwnerHandle.Slot == Slot
+			&& HostContext.OwnerHandle.Generation == Generation;
+		if (!bCanUseSelfCache
+			|| !ResolveSelfCapability(
+				static_cast<int32>(Slot),
+				static_cast<int32>(Generation),
+				Call.Binding.ExpectedClass,
+				Receiver))
+		{
+			if (HostContext.ObjectRegistry == nullptr
+				|| Slot == 0
+				|| Generation == 0)
+			{
+				OutResult.Details =
+					TEXT("binding_target_invalid: no object registry is available for the prepared receiver.");
+				return false;
+			}
+			FAvidScriptObjectHandleResult ResolveResult;
+			Receiver = HostContext.ObjectRegistry->ResolveObject(
+				{ Slot, Generation },
+				ResolveResult,
+				false);
+			if (Receiver == nullptr
+				|| !Receiver->IsA(Call.Binding.ExpectedClass))
+			{
+				OutResult.Details = ResolveResult.ErrorMessage.IsEmpty()
+					? FString(TEXT("binding_target_invalid: the prepared receiver does not match its owner class."))
+					: MoveTemp(ResolveResult.ErrorMessage);
+				return false;
+			}
+		}
+	}
+	if (Receiver == nullptr)
+	{
+		OutResult.Details =
+			TEXT("binding_target_invalid: the prepared receiver is null.");
+		return false;
+	}
+
+	const bool bSucceeded = Call.Binding.Invoke(
+		Call.Binding.ImmutableInvocationCell,
+		*Receiver,
+		Arguments,
+		&GuestMemory,
+		BindingInvocationContext,
+		BindingInvocationScratch,
+		OutResult);
+	bPreparedSucceeded = bSucceeded && OutResult.bSucceeded;
+	LastHostImportResult = OutResult.ReturnValue;
+	return bPreparedSucceeded;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchDynamicHostCall(
 	const FAvidScriptDynamicHostCall& Call,
 	FAvidScriptDynamicHostCallResult& OutResult)
 {
+	if (BindingInvocationContext.InvocationInstrumentation != nullptr)
+	{
+		++BindingInvocationContext.InvocationInstrumentation
+			->PreparedDynamicFallbackCount;
+	}
 	const bool bCaptureTiming =
 		HostContext.DynamicHostCallTimingPolicy
 		== EAvidScriptDynamicHostCallTimingPolicy::PerCall;

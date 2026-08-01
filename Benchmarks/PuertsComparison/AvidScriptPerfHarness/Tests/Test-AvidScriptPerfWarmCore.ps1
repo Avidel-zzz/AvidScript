@@ -445,8 +445,9 @@ Assert-True ($RunnerSource.Contains('ExpectedAdaptiveFallbackCount')) `
     'adaptive correctness must account for noneligible ProcessEvent operations'
 Assert-True ($RunnerSource.Contains('GeneratedS1HitCount != 0')) `
     'adaptive samples must reject generated S1 routing'
-Assert-True ($RunnerSource.Contains('bAdaptiveFusedReceiverInvalid')) `
-    'adaptive prepared samples must validate the shared fused receiver cache'
+Assert-True ($RunnerSource.Contains('GetExpectedPreparedReflectionReceiverHitCount') -and
+    $RunnerSource.Contains('bPreparedReflectionReceiverInvalid')) `
+    'prepared reflection samples must validate the shared fused receiver cache independently from native eligibility'
 Assert-True ($RunnerSource.Contains('GeneratedFusedFastHitCount + 1')) `
     'adaptive prepared samples must require one revalidation followed by cache hits'
 

@@ -542,6 +542,9 @@ namespace
 		uint64 LastAdaptiveNativeHitCount = 0;
 		uint64 LastAdaptiveProcessEventFallbackCount = 0;
 		uint64 LastAdaptiveGuardRejectCount = 0;
+		uint64 LastPreparedDynamicHitCount = 0;
+		uint64 LastPreparedDynamicFallbackCount = 0;
+		uint64 LastPreparedDynamicRejectCount = 0;
 		uint64 LastGeneratedS1HitCount = 0;
 		uint64 LastGeneratedS1FallbackCount = 0;
 		uint64 LastGeneratedS1RejectCount = 0;
@@ -564,6 +567,9 @@ namespace
 		uint64 CollectedAdaptiveNativeHitCount = 0;
 		uint64 CollectedAdaptiveProcessEventFallbackCount = 0;
 		uint64 CollectedAdaptiveGuardRejectCount = 0;
+		uint64 CollectedPreparedDynamicHitCount = 0;
+		uint64 CollectedPreparedDynamicFallbackCount = 0;
+		uint64 CollectedPreparedDynamicRejectCount = 0;
 		uint64 CollectedGeneratedS1HitCount = 0;
 		uint64 CollectedGeneratedS1FallbackCount = 0;
 		uint64 CollectedGeneratedS1RejectCount = 0;
@@ -847,6 +853,15 @@ namespace
 			LastAdaptiveGuardRejectCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.AdaptiveGuardRejectCount;
+			LastPreparedDynamicHitCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.PreparedDynamicHitCount;
+			LastPreparedDynamicFallbackCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.PreparedDynamicFallbackCount;
+			LastPreparedDynamicRejectCount =
+				ReloadResult.RuntimeResult.BindingInstrumentation
+					.PreparedDynamicRejectCount;
 			LastGeneratedS1HitCount =
 				ReloadResult.RuntimeResult.BindingInstrumentation
 					.GeneratedNativeS1HitCount;
@@ -904,6 +919,9 @@ namespace
 			uint64& OutAdaptiveNativeHitCount,
 			uint64& OutAdaptiveProcessEventFallbackCount,
 			uint64& OutAdaptiveGuardRejectCount,
+			uint64& OutPreparedDynamicHitCount,
+			uint64& OutPreparedDynamicFallbackCount,
+			uint64& OutPreparedDynamicRejectCount,
 			uint64& OutGeneratedS1HitCount,
 			uint64& OutGeneratedS1FallbackCount,
 			uint64& OutGeneratedS1RejectCount,
@@ -930,6 +948,12 @@ namespace
 				CollectedAdaptiveProcessEventFallbackCount;
 			OutAdaptiveGuardRejectCount =
 				CollectedAdaptiveGuardRejectCount;
+			OutPreparedDynamicHitCount =
+				CollectedPreparedDynamicHitCount;
+			OutPreparedDynamicFallbackCount =
+				CollectedPreparedDynamicFallbackCount;
+			OutPreparedDynamicRejectCount =
+				CollectedPreparedDynamicRejectCount;
 			OutGeneratedS1HitCount = CollectedGeneratedS1HitCount;
 			OutGeneratedS1FallbackCount = CollectedGeneratedS1FallbackCount;
 			OutGeneratedS1RejectCount = CollectedGeneratedS1RejectCount;
@@ -1054,7 +1078,16 @@ namespace
 				- LastAdaptiveProcessEventFallbackCount;
 			CollectedAdaptiveGuardRejectCount =
 				DispatchResult.BindingInstrumentation.AdaptiveGuardRejectCount
-				- LastAdaptiveGuardRejectCount;
+					- LastAdaptiveGuardRejectCount;
+			CollectedPreparedDynamicHitCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicHitCount
+					- LastPreparedDynamicHitCount;
+			CollectedPreparedDynamicFallbackCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicFallbackCount
+					- LastPreparedDynamicFallbackCount;
+			CollectedPreparedDynamicRejectCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicRejectCount
+					- LastPreparedDynamicRejectCount;
 			CollectedGeneratedS1HitCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1HitCount
 				- LastGeneratedS1HitCount;
@@ -1112,6 +1145,12 @@ namespace
 				DispatchResult.BindingInstrumentation.AdaptiveProcessEventFallbackCount;
 			LastAdaptiveGuardRejectCount =
 				DispatchResult.BindingInstrumentation.AdaptiveGuardRejectCount;
+			LastPreparedDynamicHitCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicHitCount;
+			LastPreparedDynamicFallbackCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicFallbackCount;
+			LastPreparedDynamicRejectCount =
+				DispatchResult.BindingInstrumentation.PreparedDynamicRejectCount;
 			LastGeneratedS1HitCount =
 				DispatchResult.BindingInstrumentation.GeneratedNativeS1HitCount;
 			LastGeneratedS1FallbackCount =
@@ -1580,6 +1619,31 @@ namespace
 		}
 	}
 
+	uint64 GetExpectedPreparedDynamicHitCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		check(Iterations > 0);
+		switch (Workload)
+		{
+		case EAvidScriptPerfWorkload::ScalarNoOp:
+		case EAvidScriptPerfWorkload::VectorRefOut:
+			return static_cast<uint64>(Iterations);
+		default:
+			// Other benchmark reflection shapes have narrower prepared typed imports.
+			return 0;
+		}
+	}
+
+	uint64 GetExpectedPreparedReflectionReceiverHitCount(
+		const EAvidScriptPerfWorkload Workload,
+		const int32 Iterations)
+	{
+		return FAvidScriptGameplayFrameBenchmark::IsGameplayWorkload(Workload)
+			? GetExpectedLogicalOperationCount(Workload, Iterations)
+			: GetExpectedAdaptiveNativeHitCount(Workload, Iterations);
+	}
+
 	uint64 GetExpectedFusedGeneratedHitCount(
 		const EAvidScriptPerfWorkload Workload,
 		const int32 Iterations,
@@ -1725,6 +1789,9 @@ namespace
 		uint64 AdaptiveNativeHitCount = 0;
 		uint64 AdaptiveProcessEventFallbackCount = 0;
 		uint64 AdaptiveGuardRejectCount = 0;
+		uint64 PreparedDynamicHitCount = 0;
+		uint64 PreparedDynamicFallbackCount = 0;
+		uint64 PreparedDynamicRejectCount = 0;
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
@@ -1780,6 +1847,9 @@ namespace
 		uint64 AdaptiveNativeHitCount = 0;
 		uint64 AdaptiveProcessEventFallbackCount = 0;
 		uint64 AdaptiveGuardRejectCount = 0;
+		uint64 PreparedDynamicHitCount = 0;
+		uint64 PreparedDynamicFallbackCount = 0;
+		uint64 PreparedDynamicRejectCount = 0;
 		uint64 GeneratedS1HitCount = 0;
 		uint64 GeneratedS1FallbackCount = 0;
 		uint64 GeneratedS1RejectCount = 0;
@@ -3137,6 +3207,9 @@ namespace
 				OutObservation.AdaptiveNativeHitCount,
 				OutObservation.AdaptiveProcessEventFallbackCount,
 				OutObservation.AdaptiveGuardRejectCount,
+				OutObservation.PreparedDynamicHitCount,
+				OutObservation.PreparedDynamicFallbackCount,
+				OutObservation.PreparedDynamicRejectCount,
 				OutObservation.GeneratedS1HitCount,
 				OutObservation.GeneratedS1FallbackCount,
 				OutObservation.GeneratedS1RejectCount,
@@ -3210,6 +3283,12 @@ namespace
 			GetExpectedSemanticHitCount(Workload, Iterations);
 		const uint64 ExpectedAdaptiveNativeHitCount =
 			GetExpectedAdaptiveNativeHitCount(Workload, Iterations);
+		const uint64 ExpectedPreparedDynamicHitCount =
+			GetExpectedPreparedDynamicHitCount(Workload, Iterations);
+		const uint64 ExpectedPreparedReflectionReceiverHitCount =
+			GetExpectedPreparedReflectionReceiverHitCount(
+				Workload,
+				Iterations);
 		const uint64 ExpectedAdaptiveFallbackCount =
 			ExpectedSemanticHitCount - ExpectedAdaptiveNativeHitCount;
 		const uint64 ExpectedPropertyWriteCount =
@@ -3227,6 +3306,12 @@ namespace
 		const bool bSemanticInvalid =
 			bStrictSemanticLane &&
 			Observation.SemanticHitCount != ExpectedSemanticHitCount;
+		const bool bPreparedDynamicInvalid =
+			IsAvidScriptPerfLane(Observation.Lane) &&
+			(Observation.PreparedDynamicHitCount !=
+					ExpectedPreparedDynamicHitCount ||
+			 Observation.PreparedDynamicFallbackCount != 0 ||
+			 Observation.PreparedDynamicRejectCount != 0);
 		const bool bAdaptiveInvalid =
 			bAdaptiveLane &&
 			(Observation.AdaptiveNativeHitCount !=
@@ -3276,12 +3361,12 @@ namespace
 		const uint64 DirectPrepareCount =
 			Observation.GeneratedDirectReadPrepareCount
 			+ Observation.GeneratedDirectWritePrepareCount;
-		const bool bAdaptiveFusedReceiverInvalid =
-			bAdaptiveLane
-			&& (ExpectedAdaptiveNativeHitCount > 0
+		const bool bPreparedReflectionReceiverInvalid =
+			(bAdaptiveLane || bStrictSemanticLane)
+			&& (ExpectedPreparedReflectionReceiverHitCount > 0
 				? (Observation.GeneratedFusedRevalidateCount != 1
 					|| Observation.GeneratedFusedFastHitCount + 1
-						!= ExpectedAdaptiveNativeHitCount
+						!= ExpectedPreparedReflectionReceiverHitCount
 					|| Observation.GeneratedFusedCallSitePrepareCount != 0
 					|| DirectPrepareCount != 0
 					|| Observation.GeneratedJournalSlowPathCount != 0)
@@ -3304,8 +3389,8 @@ namespace
 						|| Observation.GeneratedFusedRevalidateCount != 0
 						|| Observation.GeneratedFusedCallSitePrepareCount != 0
 						|| DirectPrepareCount != 0)))
-			: bAdaptiveLane
-				? bAdaptiveFusedReceiverInvalid
+			: (bAdaptiveLane || bStrictSemanticLane)
+				? bPreparedReflectionReceiverInvalid
 				: (Observation.GeneratedFusedFastHitCount != 0
 					|| Observation.GeneratedFusedRevalidateCount != 0
 					|| Observation.GeneratedFusedCallSitePrepareCount != 0
@@ -3319,6 +3404,7 @@ namespace
 			Observation.LogicalOperationCount != ExpectedLogicalOperationCount ||
 			bGeneratedS1Invalid ||
 			bSemanticInvalid ||
+			bPreparedDynamicInvalid ||
 			bAdaptiveInvalid ||
 			bGeneratedLaneDataInvalid ||
 			bDataGameplayInvalid ||
@@ -3334,6 +3420,9 @@ namespace
 				TEXT("expected_generated_hit=%llu generated_fallback=%llu ")
 				TEXT("generated_reject=%llu semantic_hit=%llu ")
 				TEXT("expected_semantic_hit=%llu logical=%llu ")
+				TEXT("prepared_dynamic_hit=%llu ")
+				TEXT("prepared_dynamic_fallback=%llu ")
+				TEXT("prepared_dynamic_reject=%llu ")
 				TEXT("adaptive_native=%llu adaptive_fallback=%llu ")
 				TEXT("adaptive_guard_reject=%llu ")
 				TEXT("data_generated_expected=%llu data_commands=%llu ")
@@ -3360,6 +3449,9 @@ namespace
 				Observation.SemanticHitCount,
 				ExpectedSemanticHitCount,
 				ExpectedLogicalOperationCount,
+				Observation.PreparedDynamicHitCount,
+				Observation.PreparedDynamicFallbackCount,
+				Observation.PreparedDynamicRejectCount,
 				Observation.AdaptiveNativeHitCount,
 				Observation.AdaptiveProcessEventFallbackCount,
 				Observation.AdaptiveGuardRejectCount,
@@ -3658,6 +3750,18 @@ namespace
 			Object,
 			TEXT("adaptive_guard_reject_count"),
 			Sample.AdaptiveGuardRejectCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("prepared_dynamic_hit_count"),
+			Sample.PreparedDynamicHitCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("prepared_dynamic_fallback_count"),
+			Sample.PreparedDynamicFallbackCount);
+		SetExactUnsignedField(
+			Object,
+			TEXT("prepared_dynamic_reject_count"),
+			Sample.PreparedDynamicRejectCount);
 		SetExactUnsignedField(
 			Object,
 			TEXT("generated_s1_hit_count"),
@@ -4248,6 +4352,12 @@ bool FAvidScriptPerfRunner::RunWarmBenchmarkFromFiles(
 						Observation.AdaptiveProcessEventFallbackCount;
 					Sample.AdaptiveGuardRejectCount =
 						Observation.AdaptiveGuardRejectCount;
+					Sample.PreparedDynamicHitCount =
+						Observation.PreparedDynamicHitCount;
+					Sample.PreparedDynamicFallbackCount =
+						Observation.PreparedDynamicFallbackCount;
+					Sample.PreparedDynamicRejectCount =
+						Observation.PreparedDynamicRejectCount;
 					Sample.GeneratedS1HitCount =
 						Observation.GeneratedS1HitCount;
 					Sample.GeneratedS1FallbackCount =
@@ -4407,7 +4517,8 @@ bool FAvidScriptPerfRunner::RunFiveLaneCorrectnessSmoke(
 		return false;
 	}
 
-	constexpr int32 WorkloadCount = 10;
+	constexpr int32 WorkloadCount =
+		static_cast<int32>(EAvidScriptPerfWorkload::Count);
 	constexpr int32 SmokeLaneCount = 5;
 	uint32 NativeAggregate = 0;
 	uint32 ReflectionAggregate = 0;

@@ -154,9 +154,20 @@ Assert-True ($Runner.Contains('FAvidScriptLane WasmtimeDataOriented')) 'runner m
 foreach ($Field in @(
     'adaptive_native_hit_count',
     'adaptive_process_event_fallback_count',
-    'adaptive_guard_reject_count')) {
+    'adaptive_guard_reject_count',
+    'prepared_dynamic_hit_count',
+    'prepared_dynamic_fallback_count',
+    'prepared_dynamic_reject_count')) {
     Assert-True ($Runner.Contains("TEXT(`"$Field`")")) "runner must publish $Field"
 }
+Assert-True ($Runner.Contains('const bool bPreparedDynamicInvalid')) `
+    'runner must own a prepared dynamic route oracle'
+Assert-True ($Runner.Contains('GetExpectedPreparedDynamicHitCount') -and
+    $Runner.Contains('Observation.PreparedDynamicHitCount !=') -and
+    $Runner.Contains('ExpectedPreparedDynamicHitCount')) `
+    'correctness must enforce the workload-specific prepared dynamic route count'
+Assert-True ($Runner.Contains('bSemanticInvalid ||') -and $Runner.Contains('bPreparedDynamicInvalid ||')) `
+    'prepared dynamic route validity must participate in benchmark correctness'
 
 $ResultSchemaPath = Join-Path $BenchmarkRoot 'Schema/BenchmarkResult.schema.json'
 $ResultSchema = Get-Content -LiteralPath $ResultSchemaPath -Raw | ConvertFrom-Json

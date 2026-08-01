@@ -331,6 +331,10 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
     '\b(UObject|AActor|USceneComponent|FVector|FRotator|FTransform)\b'
 )
 
+Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM' @(
+    '\b(UFunction|FProperty|FAvidScriptObjectRegistry)\b'
+)
+
 $WasmtimeBuild = Read-RequiredFile 'Source/ThirdParty/Wasmtime/Wasmtime.Build.cs'
 $WasmtimeLock = Read-RequiredFile 'Source/ThirdParty/Wasmtime/WasmtimeDependency.lock.json'
 $WasmtimeInstaller = Read-RequiredFile 'Build/InstallWasmtimeDependency.ps1'
@@ -432,6 +436,22 @@ $WasmtimeBackendSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScri
 $WasmtimeArtifactCompilerSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptVmArtifactCompiler.cpp'
 $WasmtimeRuntimeSupportSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeRuntimeSupport.cpp'
 $WasmtimeCompilerProfileSource = Read-RequiredFile 'Source/AvidScriptVM/Private/AvidScriptWasmtimeCompilerProfile.cpp'
+$WasmtimeDynamicDispatchSlice = Get-SourceSlice `
+    $WasmtimeBackendSource `
+    'bool InvokeDynamicHostImport(' `
+    'int32 InvokeTypedEmptyI32('
+Test-RequiredTokenSequence $WasmtimeDynamicDispatchSlice @(
+    'HostContext.PreparedTarget.IsBound()',
+    'HostContext.PreparedTarget.Invoke(',
+    'else',
+    'HostDispatcher->DispatchDynamicHostCall') `
+    'Wasmtime dynamic dispatch must prefer a prepared target and use the dispatcher only when unbound'
+$DynamicDispatcherCalls = [regex]::Matches(
+    $WasmtimeDynamicDispatchSlice,
+    'HostDispatcher->DispatchDynamicHostCall').Count
+if ($DynamicDispatcherCalls -ne 1) {
+    Add-Violation 'Wasmtime prepared dynamic rejection must not replay through the dispatcher'
+}
 if ($WasmtimeBackendSource.Contains('AVIDSCRIPT_WASMTIME_DLL_SHA256') -or
     $WasmtimeBackendSource.Contains('EnsureWasmtimeDllLoaded') -or
     -not $WasmtimeBackendSource.Contains('ResolveAvidScriptWasmtimeCompilerProfile') -or
@@ -649,6 +669,67 @@ $RuntimeArtifactSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Avi
 $RuntimeSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptRuntimeSession.h'
 $RuntimeSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptRuntimeSession.cpp'
 $RuntimeBackendLaneHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptRuntimeBackendTestLanes.h'
+$RuntimeWasmTests = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptWasmRuntimeTests.cpp'
+$BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
+$BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$BindingCodecProgram = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
+$BindingPreparedInvocation = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
+foreach ($RequiredPreparedDynamicContract in @(
+    'FAvidScriptVmPreparedDynamicHostTarget',
+    'FAvidScriptVmDynamicImport',
+    'PreparedTarget')) {
+    if (-not $VmContractHeader.Contains($RequiredPreparedDynamicContract)) {
+        Add-Violation "VM prepared dynamic contract is missing $RequiredPreparedDynamicContract"
+    }
+}
+foreach ($RequiredPreparedBindingContract in @(
+    'FAvidScriptPreparedDynamicBinding',
+    'BuildPreparedDynamicBindings')) {
+    if (-not $BindingInvocationHeader.Contains($RequiredPreparedBindingContract) -and
+        -not $BindingInvocationSource.Contains($RequiredPreparedBindingContract)) {
+        Add-Violation "Bindings prepared dynamic contract is missing $RequiredPreparedBindingContract"
+    }
+}
+foreach ($RequiredCodecToken in @(
+    'SetValueFromCells',
+    'SetValueFromGuest',
+    'WriteValueToGuest')) {
+    if (-not $BindingCodecProgram.Contains($RequiredCodecToken)) {
+        Add-Violation "Bindings codec program is missing $RequiredCodecToken"
+    }
+}
+foreach ($RequiredPreparedExecutorToken in @(
+    'InvokePreparedDynamicReflection',
+    'ProcessEvent',
+    'DispatchFastPath')) {
+    if (-not $BindingPreparedInvocation.Contains($RequiredPreparedExecutorToken)) {
+        Add-Violation "Bindings prepared executor is missing $RequiredPreparedExecutorToken"
+    }
+}
+$PreparedDynamicBuildSlice = Get-SourceSlice `
+    $RuntimeSource `
+    'bool FAvidScriptWasmRuntimeInstance::BuildPreparedDynamicHostImports(' `
+    'bool FAvidScriptWasmRuntimeInstance::ReadStateBytes('
+Test-RequiredTokenSequence $PreparedDynamicBuildSlice @(
+    'PreparedVmBindingPackage = BindingPackage->GetVmPackage()',
+    'BuildPreparedDynamicBindings',
+    'Import.Ordinal != Binding.BindingOrdinal',
+    'Import.StableId != Binding.StableId',
+    'Import.ModuleName != Binding.ModuleName',
+    'Import.ImportName != Binding.ImportName',
+    'Import.Signature != Binding.Signature',
+    'Import.PreparedTarget.Context = Call.Get()',
+    'Import.PreparedTarget.Invoke =') `
+    'Runtime must bind prepared dynamic targets by immutable import identity'
+if ($PreparedDynamicBuildSlice -match 'Import(Name|StableId)\s*==\s*TEXT\(') {
+    Add-Violation 'Runtime prepared dynamic binding must not select targets by API name'
+}
+Test-RequiredTokenSequence $RuntimeWasmTests @(
+    'PreparedTarget.Invoke(',
+    'Instrumentation.PreparedDynamicHitCount',
+    'Instrumentation.PreparedDynamicFallbackCount',
+    'Instrumentation.PreparedDynamicRejectCount') `
+    'Runtime prepared dynamic Automation must execute the target and prove hit fallback reject routing'
 foreach ($RequiredRuntimeArtifactContract in @(
     'FAvidScriptRuntimeArtifact',
     'FAvidScriptRuntimeArtifactLoader',
@@ -1172,20 +1253,21 @@ foreach ($RequiredPropertyDescriptorGeneratorContract in @(
 foreach ($RequiredPropertyRuntimeContract in @(
     'FindFProperty<FProperty>',
     'Plan.ReflectedProperty',
-    'WriteAvidScriptRuntimeValueToGuest',
+    'WriteValueToGuest',
     'binding_property_read_failed',
     'EAvidScriptBindingInvocationKind::ReflectedPropertyWrite',
     'cached_property_set',
     'cached_blueprint_setter',
     'PrepareReflectedProperty',
-    'SetAvidScriptRuntimeValueFromCells',
+    'SetValueFromCells',
     'BlueprintSetter candidate reload is not reversible',
     'Binding.UeFunction != BlueprintSetterName',
     'binding_property_blueprint_setter_mismatch',
     'binding_property_write_policy_mismatch',
     'binding_property_write_failed'
 )) {
-    if (-not $BindingInvocationSource.Contains($RequiredPropertyRuntimeContract)) {
+    if (-not $BindingInvocationSource.Contains($RequiredPropertyRuntimeContract) -and
+        -not $BindingPreparedInvocation.Contains($RequiredPropertyRuntimeContract)) {
         Add-Violation "cached property runtime is missing $RequiredPropertyRuntimeContract"
     }
 }
@@ -2914,10 +2996,10 @@ if (-not $WasmRuntimeHeader.Contains('IAvidScriptBindingHostEffectJournal* HostE
 if (-not $RuntimeSource.Contains('InvocationContext.HostEffectJournal = HostContext.HostEffectJournal')) {
     Add-Violation 'Wasm dynamic host calls must forward the candidate host effect journal into binding invocation'
 }
-$DynamicPrepareIndex = $BindingInvocationSource.IndexOf('Context.HostEffectJournal->PrepareEffect(')
-$ReflectedPropertyPrepareIndex = $BindingInvocationSource.IndexOf('Context.HostEffectJournal->PrepareReflectedProperty(')
-$DynamicProcessEventIndex = $BindingInvocationSource.IndexOf('Target->ProcessEvent(Plan.Function, Frame)')
-if (-not $BindingInvocationSource.Contains('binding_reload_effect_unsupported') -or
+$DynamicPrepareIndex = $BindingPreparedInvocation.IndexOf('InvocationContext.HostEffectJournal->PrepareEffect(')
+$ReflectedPropertyPrepareIndex = $BindingPreparedInvocation.IndexOf('->PrepareReflectedProperty(')
+$DynamicProcessEventIndex = $BindingPreparedInvocation.IndexOf('Receiver.ProcessEvent(Program->Function, Frame)')
+if (-not $BindingPreparedInvocation.Contains('binding_reload_effect_unsupported') -or
     $DynamicPrepareIndex -lt 0 -or
     $ReflectedPropertyPrepareIndex -lt 0 -or
     $DynamicProcessEventIndex -lt 0 -or

@@ -22,6 +22,7 @@ public class AvidScriptPerfHarness : ModuleRules
             "AvidScriptVM",
             "Json",
             "JsonUtilities",
+            "OpenSSL",
             "Projects",
             "SSL"
         });
