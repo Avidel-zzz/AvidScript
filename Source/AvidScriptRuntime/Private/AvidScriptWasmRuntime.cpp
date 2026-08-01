@@ -3882,16 +3882,32 @@ FAvidScriptWasmRuntimeInstance::
 	}
 
 	UObject* InputObject = nullptr;
+	const FAvidScriptObjectHandle InputHandle{
+		static_cast<uint32>(ObjectSlot),
+		static_cast<uint32>(ObjectGeneration)
+	};
 	if (ObjectSlot != 0 || ObjectGeneration != 0)
 	{
-		InputObject = ResolveStableBorrow(
-			ObjectSlot,
-			ObjectGeneration,
-			Call.Binding.ExpectedObjectClass);
+		const bool bInputAliasesReceiver =
+			ObjectSlot == SelfSlot
+			&& ObjectGeneration == SelfGeneration;
+		InputObject = bInputAliasesReceiver
+			? Receiver
+			: ResolveStableBorrow(
+				ObjectSlot,
+				ObjectGeneration,
+				Call.Binding.ExpectedObjectClass);
 		if (InputObject == nullptr)
 		{
 			return Reject(
 				TEXT("The prepared reflection input object capability is invalid."));
+		}
+		if (bInputAliasesReceiver
+			&& Call.Binding.ExpectedObjectClass != nullptr
+			&& !InputObject->IsA(Call.Binding.ExpectedObjectClass))
+		{
+			return Reject(
+				TEXT("The prepared reflection input object type is invalid."));
 		}
 	}
 
@@ -3917,25 +3933,39 @@ FAvidScriptWasmRuntimeInstance::
 	FAvidScriptObjectHandle OutputHandle;
 	if (OutputObject != nullptr)
 	{
-		if (BindingInvocationContext.ObjectRegistry == nullptr
+		if (OutputObject == InputObject && InputHandle.IsValid())
+		{
+			OutputHandle = InputHandle;
+		}
+		else if (OutputObject == Receiver)
+		{
+			OutputHandle = {
+				static_cast<uint32>(SelfSlot),
+				static_cast<uint32>(SelfGeneration)
+			};
+		}
+		else if (BindingInvocationContext.ObjectRegistry == nullptr
 			|| BindingInvocationContext.ObjectOwnership == nullptr)
 		{
 			return Reject(
 				TEXT("The prepared reflection object result requires registry and ownership services."));
 		}
-		FAvidScriptObjectHandleResult BorrowResult;
-		if (!BindingInvocationContext.ObjectOwnership->Borrow(
-				*BindingInvocationContext.ObjectRegistry,
-				*OutputObject,
-				BorrowResult)
-			|| !BorrowResult.Handle.IsValid())
+		else
 		{
-			return Reject(
-				BorrowResult.ErrorMessage.IsEmpty()
-					? FString(TEXT("The prepared reflection object result could not be borrowed."))
-					: BorrowResult.ErrorMessage);
+			FAvidScriptObjectHandleResult BorrowResult;
+			if (!BindingInvocationContext.ObjectOwnership->Borrow(
+					*BindingInvocationContext.ObjectRegistry,
+					*OutputObject,
+					BorrowResult)
+				|| !BorrowResult.Handle.IsValid())
+			{
+				return Reject(
+					BorrowResult.ErrorMessage.IsEmpty()
+						? FString(TEXT("The prepared reflection object result could not be borrowed."))
+						: BorrowResult.ErrorMessage);
+			}
+			OutputHandle = BorrowResult.Handle;
 		}
-		OutputHandle = BorrowResult.Handle;
 	}
 
 	StoreAvidScriptLittleEndianU32(

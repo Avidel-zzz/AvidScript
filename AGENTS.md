@@ -1779,3 +1779,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the prepared FVector automation fixture used a by-value parameter while the formal benchmark fixture used `const FVector&`, so the test passed without exercising UE 5.8's `CPF_OutParm | CPF_ReferenceParm | CPF_ConstParm` layout and its required `FOutParmRec` chain.
 - Prevention: reflection performance fixtures mirror the formal UFUNCTION signature exactly, including const/reference/out qualifiers. A newly qualified prepared shape must first fail through the real generated thunk, then prove both ProcessEvent and native results before formal sampling.
+
+### 2026-08-01: quote Git peel expressions in PowerShell
+
+- Mistake: `git rev-parse HEAD^{tree}` was passed to PowerShell without quoting, so PowerShell interpreted the brace expression and Git received an encoded stray argument.
+- Prevention: always single-quote Git peel expressions in PowerShell, for example `git rev-parse 'HEAD^{tree}'` and `git rev-parse 'HEAD^{commit}'`.
+
+### 2026-08-01: create an empty formal benchmark output directory
+
+- Mistake: the first P57.10 formal runner invocation used a fresh path that did not yet exist, while the sidecar contract requires an existing output directory and rejected the run before Editor startup.
+- Prevention: create a unique empty formal output directory immediately before invoking `Invoke-Phase54GameplayBenchmark.ps1`; never reuse a directory containing requests or results.
+
+### 2026-08-01: Micro results are supplemental evaluator input
+
+- Mistake: `Phase56Micro.formal.json` was passed as the primary profile to `Evaluate-Phase54PerformanceGates.ps1`, but the evaluator's primary profile is Gameplay and requires a `gates` object; Micro evidence is consumed by `Get-Phase54MicroStatistics` through supplemental inputs.
+- Prevention: use the frozen Micro runner for raw sampling, then aggregate Micro-only shape statistics with `Get-Phase54MicroStatistics`. Invoke the overall evaluator only with the matching Gameplay profile plus all candidate-matched supplemental evidence.
