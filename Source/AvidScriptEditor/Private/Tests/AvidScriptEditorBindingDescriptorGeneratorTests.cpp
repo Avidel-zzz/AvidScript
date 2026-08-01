@@ -3086,7 +3086,9 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 				*FString::Printf(TEXT("Nested object leaf publishes %s"), *ExpectedObjectClass->GetPathName()),
 				ObjectType))
 			{
-				TestNotEqual(TEXT("Nested object leaf has a class ordinal"), ObjectType->ObjectTypeOrdinal, INDEX_NONE);
+				TestTrue(
+					TEXT("Nested object leaf has a class ordinal"),
+					ObjectType->ObjectTypeOrdinal != INDEX_NONE);
 				UClass* ResolvedClass = nullptr;
 				TestTrue(
 					TEXT("Runtime resolves nested object expected class"),
