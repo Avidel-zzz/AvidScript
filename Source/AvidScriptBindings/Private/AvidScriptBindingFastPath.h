@@ -104,6 +104,12 @@ bool ValidatePreparedNativeCallCell(
 	const FFastPathPlan& Plan,
 	UObject& Target);
 
+bool ValidatePreparedNativeTarget(
+	const UClass* ExpectedClass,
+	UObject& Target,
+	FString* OutErrorCategory = nullptr,
+	FString* OutErrorDetails = nullptr);
+
 bool InvokePreparedScalarI32PairCallCell(
 	const FFastPathPlan& Plan,
 	UObject& Target,

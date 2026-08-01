@@ -250,6 +250,20 @@ bool CanInvokePreparedNative(
 	FString* OutErrorCategory,
 	FString* OutErrorDetails)
 {
+	return ValidatePreparedNativeTarget(
+		Plan.NativeDirectOwnerClass,
+		Target,
+		OutErrorCategory,
+		OutErrorDetails);
+}
+} // namespace
+
+bool ValidatePreparedNativeTarget(
+	const UClass* ExpectedClass,
+	UObject& Target,
+	FString* OutErrorCategory,
+	FString* OutErrorDetails)
+{
 	const auto SetFailure = [OutErrorCategory, OutErrorDetails](
 		const TCHAR* Category,
 		const TCHAR* Details)
@@ -270,7 +284,7 @@ bool CanInvokePreparedNative(
 			TEXT("Prepared native invocation requires the Game Thread."));
 		return false;
 	}
-	if (Target.GetClass() != Plan.NativeDirectOwnerClass)
+	if (ExpectedClass == nullptr || Target.GetClass() != ExpectedClass)
 	{
 		SetFailure(
 			TEXT("binding_native_direct_exact_class_mismatch"),
@@ -300,6 +314,9 @@ bool CanInvokePreparedNative(
 	}
 	return true;
 }
+
+namespace
+{
 
 bool IsTrivialVectorProperty(
 	const FProperty* Property,

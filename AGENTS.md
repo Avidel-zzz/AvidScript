@@ -1729,3 +1729,28 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.10 BroadShape diagnosis read the `0x00800000` function-flag delta as `FUNC_HasOutParms`; UE 5.8 defines it as `FUNC_HasDefaults`, while `FUNC_HasOutParms` is `0x00400000`.
 - Prevention: before changing a reflection safety guard from generated hexadecimal metadata, decode every differing bit against `C:\UnrealEngine\Engine\Source\Runtime\CoreUObject\Public\UObject\Script.h`. Keep true out-parameter rejection independent from fully supplied trivial struct parameters that carry `FUNC_HasDefaults`.
+
+### 2026-08-01: isolated benchmark worktrees need ignored SDK restoration
+
+- Mistake: the first P57.10 clean benchmark-project build started before the ignored `Source/ThirdParty/Wasmtime/installed` payload was restored into the candidate worktree, so the Wasmtime C bridge failed on missing `wasmtime.h` after unrelated modules had already compiled.
+- Prevention: immediately after creating or switching a benchmark worktree, restore each lock-governed ignored SDK from the verified local install, run its dependency/hash contracts, and only then create or build the junction-based benchmark project. A clean Git status proves tracked provenance, not local SDK completeness.
+
+### 2026-08-01: use the active benchmark profile runner
+
+- Mistake: the first P57.10 formal attempt used the legacy Phase 53 sidecar with the current Phase 56 harness, so its request omitted the required `callback_result_mode` field and calibration exited before timing.
+- Prevention: resolve the runner from the frozen profile family before launch. Phase 56 micro/gameplay profiles use `Invoke-Phase54GameplayBenchmark.ps1` with the tracked six-lane request template; run the matching contract before treating a sidecar as formal.
+
+### 2026-08-01: isolated benchmark projects must load generated modules
+
+- Mistake: the fresh benchmark `.uproject` initially omitted the already-generated `AvidScriptGeneratedBindings` module, so generated package registration never ran even though the source package hash and guest descriptor matched.
+- Prevention: before the first benchmark launch, verify every manifest-required generated source module is declared in the isolated `.uproject`, linked for the candidate, and loaded. Copying Saved guest/package artifacts alone is insufficient.
+
+### 2026-08-01: direct property cells need explicit native eligibility
+
+- Mistake: prepared `FIntProperty` getter/setter cells performed direct reflected memory access but inherited eligibility only from function fast-path state, causing valid direct calls to be counted as strict ProcessEvent fallback.
+- Prevention: each non-function prepared shape owns an explicit safety guard and eligibility proof. Performance correctness tests assert both observable values and invocation-mode counters before formal sampling.
+
+### 2026-08-01: precompute values in temporary Build.cs diagnostics
+
+- Mistake: a temporary interpolated Build.cs probe escaped string literals inside an interpolation expression, producing a C# rules syntax error before the intended path diagnostics ran.
+- Prevention: compute diagnostic booleans in local variables and interpolate only identifiers; immediately restore temporary rules instrumentation after the single evidence run.

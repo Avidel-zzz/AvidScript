@@ -296,6 +296,21 @@ bool ValidateAvidScriptPreparedReflectionNativeGuard(
 			Receiver);
 }
 
+bool ValidateAvidScriptPreparedReflectionPropertyGuard(
+	const void* InvocationCell,
+	UObject& Receiver)
+{
+	const auto* Plan = static_cast<const
+		FAvidScriptRuntimeBindingInvocationPlan*>(InvocationCell);
+	return Plan != nullptr
+		&& Plan->OwnerClass != nullptr
+		&& CastField<FIntProperty>(Plan->ReflectedProperty) != nullptr
+		&& Plan->ReflectedProperty->GetOwnerStruct() == Plan->OwnerClass
+		&& UE::AvidScript::BindingPrivate::ValidatePreparedNativeTarget(
+			Plan->OwnerClass,
+			Receiver);
+}
+
 bool InvokeAvidScriptPreparedReflectionI32PairCall(
 	const void* InvocationCell,
 	UObject& Receiver,
@@ -3499,7 +3514,9 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 		Binding.ExpectedClass = Plan.OwnerClass;
 		Binding.ImmutablePlanIdentity = &Plan;
 		Binding.bAdaptiveNativeEligible =
-			Plan.FastPath.bAdaptiveNativeEligible;
+			Plan.FastPath.bAdaptiveNativeEligible
+			|| bPropertyRead
+			|| bPropertyWrite;
 		Binding.bQualifiedNativeEligible =
 			Plan.FastPath.HighestInvocationMode
 				== EAvidScriptBindingInvocationMode::QualifiedNativeDirect;
@@ -3547,6 +3564,8 @@ bool FAvidScriptBindingPackage::BuildPreparedReflectionBindings(
 		}
 		else
 		{
+			Binding.NativeGuard =
+				&ValidateAvidScriptPreparedReflectionPropertyGuard;
 			Binding.PropertyI32Get = bPropertyRead
 				? &ReadAvidScriptPreparedReflectionPropertyI32
 				: nullptr;

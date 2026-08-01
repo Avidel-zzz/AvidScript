@@ -5542,13 +5542,17 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		Property->GetPropertyValue_InContainer(Target.Get()),
 		42);
 	TestEqual(
-		TEXT("Prepared property calls retain semantic instrumentation"),
-		Instrumentation.SemanticProcessEventCount,
+		TEXT("Prepared property calls record adaptive direct hits"),
+		Instrumentation.AdaptivePreparedNativeHitCount,
 		3ull);
 	TestEqual(
-		TEXT("Adaptive property calls record strict semantic fallback"),
+		TEXT("Prepared property calls avoid semantic fallback"),
 		Instrumentation.AdaptiveProcessEventFallbackCount,
-		3ull);
+		0ull);
+	TestEqual(
+		TEXT("Prepared property calls avoid semantic dispatch accounting"),
+		Instrumentation.SemanticProcessEventCount,
+		0ull);
 	Runtime.Unload();
 	return true;
 }
