@@ -2997,7 +2997,7 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 		TestEqual(TEXT("Parent size tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
 	}
 
-	TSharedPtr<FAvidScriptBindingPackage> RuntimePackage;
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	TestTrue(
 		TEXT("Schema v9 struct-wire descriptor compiles into an immutable runtime package"),

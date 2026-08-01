@@ -41,17 +41,20 @@ public:
 
 	bool WriteBytes(
 		uint32 GuestAddress,
-		TConstArrayView<uint8> Bytes,
+		TConstArrayView<uint8> InBytes,
 		FString& OutError) override
 	{
 		if (GuestAddress > static_cast<uint32>(this->Bytes.Num())
-			|| Bytes.Num() > this->Bytes.Num() - static_cast<int32>(GuestAddress))
+			|| InBytes.Num() > this->Bytes.Num() - static_cast<int32>(GuestAddress))
 		{
 			OutError = TEXT("guest write range");
 			return false;
 		}
 		OutError.Reset();
-		FMemory::Memcpy(this->Bytes.GetData() + GuestAddress, Bytes.GetData(), Bytes.Num());
+		FMemory::Memcpy(
+			this->Bytes.GetData() + GuestAddress,
+			InBytes.GetData(),
+			InBytes.Num());
 		return true;
 	}
 

@@ -682,7 +682,7 @@ bool BuildAvidScriptStructWireProgram(
 	const int32 Depth,
 	int32& InOutNodes,
 	TSet<FString>& ActiveTypes,
-	FValueCodecProgram& OutProgram,
+	FAvidScriptRuntimeBindingValuePlan& OutProgram,
 	FString& OutDetails)
 {
 	FStructProperty* StructProperty = CastField<FStructProperty>(Property);
@@ -712,7 +712,7 @@ bool BuildAvidScriptStructWireProgram(
 	}
 
 	ActiveTypes.Add(Type.StableId);
-	OutProgram.Kind = EValueCodecKind::StructWire;
+	OutProgram.Kind = EAvidScriptRuntimeBindingKind::StructWire;
 	OutProgram.StructType = StructProperty->Struct;
 	OutProgram.WireSize = Type.Size;
 	OutProgram.WireAlignment = Type.Alignment;
@@ -742,7 +742,8 @@ bool BuildAvidScriptStructWireProgram(
 			return false;
 		}
 
-		FValueCodecProgram& Child = OutProgram.Children.AddDefaulted_GetRef();
+		FAvidScriptRuntimeBindingValuePlan& Child =
+			OutProgram.Children.AddDefaulted_GetRef();
 		Child.Property = ReflectedField;
 		Child.Name = Field.Name;
 		Child.WireOffset = Field.WireOffset;
@@ -782,7 +783,7 @@ bool BuildAvidScriptStructWireProgram(
 				ChildType,
 				Child.Kind,
 				Child.ObjectClass)
-				|| Child.Kind == EValueCodecKind::Name
+				|| Child.Kind == EAvidScriptRuntimeBindingKind::Name
 				|| GetAvidScriptRuntimeGuestStorageSize(Child.Kind) != ChildType->Size)
 			{
 				ActiveTypes.Remove(Type.StableId);
