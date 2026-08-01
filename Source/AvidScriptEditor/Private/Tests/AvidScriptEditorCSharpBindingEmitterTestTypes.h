@@ -40,6 +40,12 @@ struct FAvidScriptStructWireRootTestType
 	FAvidScriptStructWireNestedTestType Nested;
 
 	UPROPERTY(BlueprintReadWrite)
+	bool bEnabled = false;
+
+	UPROPERTY(BlueprintReadWrite)
+	uint8 Level = 0;
+
+	UPROPERTY(BlueprintReadWrite)
 	float Weight = 0.0f;
 };
 

@@ -421,6 +421,89 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	TestFalse(TEXT("Oversized return address fails before ProcessEvent"), InvokePreparedDynamicReflection(&Cell, *Receiver, MalformedArguments, &GuestMemory, Context, Scratch, Result));
 	TestTrue(TEXT("Malformed address reports return preflight"), Result.Details.Contains(TEXT("binding_return_preflight_failed")));
 	TestEqual(TEXT("Malformed address does not replay ProcessEvent"), Instrumentation.SemanticProcessEventCount, 1ull);
+
+	FProperty* RecursiveProperty = FindFProperty<FProperty>(
+		UAvidScriptBindingsTestObject::StaticClass(),
+		TEXT("RecursiveStructProperty"));
+	if (!TestNotNull(TEXT("Recursive struct property reflects"), RecursiveProperty))
+	{
+		return false;
+	}
+	FInvocationCodecProgram PropertyWriteProgram;
+	PropertyWriteProgram.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+	PropertyWriteProgram.OwnerClass = UAvidScriptBindingsTestObject::StaticClass();
+	PropertyWriteProgram.ReflectedProperty = RecursiveProperty;
+	PropertyWriteProgram.DebugPath = RecursiveProperty->GetPathName();
+	PropertyWriteProgram.FrameSize = CastFieldChecked<FStructProperty>(RecursiveProperty)->Struct->GetStructureSize();
+	PropertyWriteProgram.FrameAlignment = FMath::Max(
+		1,
+		CastFieldChecked<FStructProperty>(RecursiveProperty)->Struct->GetMinAlignment());
+	PropertyWriteProgram.RequiredScratchSize =
+		PropertyWriteProgram.FrameSize + PropertyWriteProgram.FrameAlignment - 1;
+	PropertyWriteProgram.ExpectedArgumentCount = 3;
+	PropertyWriteProgram.bRequiresGuestMemory = true;
+	PropertyWriteProgram.Parameters.Add(
+		MakeRecursiveStructCodec(RecursiveProperty, EValueCodecDirection::Value, 2));
+	FPreparedDynamicInvocationCell PropertyWriteCell{ &PropertyWriteProgram, 0 };
+	const uint64 PropertyWriteArguments[] = { 0, 0, 32 };
+	TestTrue(
+		TEXT("Recursive direct property write commits from a fully decoded temporary"),
+		InvokePreparedDynamicReflection(
+			&PropertyWriteCell,
+			*Receiver,
+			PropertyWriteArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Recursive property write commits nested count"), Receiver->RecursiveStructProperty.Nested.Count, 3);
+	TestEqual(TEXT("Recursive property write commits FVector"), Receiver->RecursiveStructProperty.Position.X, 2.0);
+
+	StoreInput(288, 99, 9.0f, 20.0f);
+	const uint32 InvalidSlot = MAX_uint32;
+	const uint32 InvalidGeneration = MAX_uint32;
+	FMemory::Memcpy(GuestMemory.Bytes.GetData() + 288 + 20, &InvalidSlot, 4);
+	FMemory::Memcpy(GuestMemory.Bytes.GetData() + 288 + 24, &InvalidGeneration, 4);
+	const uint64 InvalidPropertyWriteArguments[] = { 0, 0, 288 };
+	TestFalse(
+		TEXT("Recursive property write rejects an invalid nested object capability"),
+		InvokePreparedDynamicReflection(
+			&PropertyWriteCell,
+			*Receiver,
+			InvalidPropertyWriteArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(
+		TEXT("Failed recursive property decode leaves the destination unchanged"),
+		Receiver->RecursiveStructProperty.Nested.Count,
+		3);
+
+	FInvocationCodecProgram PropertyReadProgram;
+	PropertyReadProgram.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyRead;
+	PropertyReadProgram.OwnerClass = UAvidScriptBindingsTestObject::StaticClass();
+	PropertyReadProgram.ReflectedProperty = RecursiveProperty;
+	PropertyReadProgram.DebugPath = RecursiveProperty->GetPathName();
+	PropertyReadProgram.ExpectedArgumentCount = 3;
+	PropertyReadProgram.bRequiresGuestMemory = true;
+	PropertyReadProgram.ReturnValue =
+		MakeRecursiveStructCodec(RecursiveProperty, EValueCodecDirection::Return, 2);
+	FPreparedDynamicInvocationCell PropertyReadCell{ &PropertyReadProgram, 0 };
+	const uint64 PropertyReadArguments[] = { 0, 0, 352 };
+	TestTrue(
+		TEXT("Recursive direct property read encodes the fixed wire graph"),
+		InvokePreparedDynamicReflection(
+			&PropertyReadCell,
+			*Receiver,
+			PropertyReadArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	int32 PropertyReadCount = 0;
+	FMemory::Memcpy(&PropertyReadCount, GuestMemory.Bytes.GetData() + 352 + 28, 4);
+	TestEqual(TEXT("Recursive property read preserves nested count"), PropertyReadCount, 3);
 	return true;
 }
 

@@ -299,13 +299,16 @@ bool FAvidScriptEditorCSharpBindingEmitterStructWireTest::RunTest(const FString&
 		FirstSource.Contains(TEXT("[StructLayout(LayoutKind.Explicit, Size = 28)]\npublic readonly struct FAvidScriptStructWireNestedTestType")));
 	TestTrue(
 		TEXT("Root struct-wire type has its exact explicit layout"),
-		FirstSource.Contains(TEXT("[StructLayout(LayoutKind.Explicit, Size = 32)]\npublic readonly struct FAvidScriptStructWireRootTestType")));
+		FirstSource.Contains(TEXT("[StructLayout(LayoutKind.Explicit, Size = 40)]\npublic readonly struct FAvidScriptStructWireRootTestType")));
 	TestTrue(TEXT("Nested struct-wire scalar field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(0)]\n    public readonly int Count;")));
 	TestTrue(TEXT("Nested struct-wire enum field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(4)]\n    public readonly EAvidScriptCSharpEmitterTestMode Mode;")));
 	TestTrue(TEXT("Nested struct-wire FVector field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(8)]\n    public readonly FVector Location;")));
 	TestTrue(TEXT("Nested struct-wire object field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(20)]\n    public readonly UObject Target;")));
 	TestTrue(TEXT("Root struct-wire nested field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(0)]\n    public readonly FAvidScriptStructWireNestedTestType Nested;")));
-	TestTrue(TEXT("Root struct-wire scalar field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(28)]\n    public readonly float Weight;")));
+	TestTrue(TEXT("Root struct-wire bool uses four-byte wire storage"), FirstSource.Contains(TEXT("[FieldOffset(28)]\n    private readonly int __avidscript_bool_1;\n    public bool bEnabled => __avidscript_bool_1 != 0;")));
+	TestTrue(TEXT("Root struct-wire byte retains its post-bool offset"), FirstSource.Contains(TEXT("[FieldOffset(32)]\n    public readonly byte Level;")));
+	TestTrue(TEXT("Root struct-wire scalar field has its wire offset"), FirstSource.Contains(TEXT("[FieldOffset(36)]\n    public readonly float Weight;")));
+	TestTrue(TEXT("Root struct-wire bool constructor stores i32 wire truth"), FirstSource.Contains(TEXT("this.__avidscript_bool_1 = bEnabled ? 1 : 0;")));
 	TestTrue(
 		TEXT("Struct-wire method keeps ordinary public value types with mixed directions"),
 		FirstSource.Contains(TEXT("public FAvidScriptStructWireRootTestType StructWireDirections(FAvidScriptStructWireRootTestType Value, FAvidScriptStructWireRootTestType ConstReference, ref FAvidScriptStructWireRootTestType InOut, out FAvidScriptStructWireRootTestType Output)")));

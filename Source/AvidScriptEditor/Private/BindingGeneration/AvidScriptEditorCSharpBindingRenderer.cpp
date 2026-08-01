@@ -1039,6 +1039,7 @@ bool AppendStructWireDeclarations(
 		ActiveTypeIds.Add(Type->StableId);
 		TArray<FString> FieldTypes;
 		TArray<FString> FieldNames;
+		TArray<bool> FieldUsesBoolWireStorage;
 		TSet<FString> SeenFieldNames;
 		for (const FAvidScriptBindingStructFieldModel& Field : Type->StructFields)
 		{
@@ -1069,6 +1070,29 @@ bool AppendStructWireDeclarations(
 			}
 			FieldTypes.Add(MoveTemp(FieldType));
 			FieldNames.Add(FieldName);
+			FieldUsesBoolWireStorage.Add(
+				ChildType->Kind == TEXT("scalar")
+				&& ChildType->CanonicalType == TEXT("scalar:bool")
+				&& ChildType->Size == 4
+				&& ChildType->Alignment == 4);
+		}
+		TArray<FString> FieldStorageNames;
+		FieldStorageNames.SetNum(FieldNames.Num());
+		for (int32 FieldIndex = 0; FieldIndex < FieldNames.Num(); ++FieldIndex)
+		{
+			if (!FieldUsesBoolWireStorage[FieldIndex])
+			{
+				continue;
+			}
+			FieldStorageNames[FieldIndex] = FString::Printf(
+				TEXT("__avidscript_bool_%d"),
+				FieldIndex);
+			if (SeenFieldNames.Contains(FieldStorageNames[FieldIndex]))
+			{
+				OutErrorCategory = TEXT("csharp_member_collision");
+				OutErrorSource = Type->CanonicalType + TEXT(".") + FieldStorageNames[FieldIndex];
+				return false;
+			}
 		}
 
 		ActiveTypeIds.Remove(Type->StableId);
@@ -1080,7 +1104,15 @@ bool AppendStructWireDeclarations(
 		for (int32 FieldIndex = 0; FieldIndex < Type->StructFields.Num(); ++FieldIndex)
 		{
 			Lines.Add(FString::Printf(TEXT("    [FieldOffset(%d)]"), Type->StructFields[FieldIndex].WireOffset));
-			Lines.Add(TEXT("    public readonly ") + FieldTypes[FieldIndex] + TEXT(" ") + FieldNames[FieldIndex] + TEXT(";"));
+			if (FieldUsesBoolWireStorage[FieldIndex])
+			{
+				Lines.Add(TEXT("    private readonly int ") + FieldStorageNames[FieldIndex] + TEXT(";"));
+				Lines.Add(TEXT("    public bool ") + FieldNames[FieldIndex] + TEXT(" => ") + FieldStorageNames[FieldIndex] + TEXT(" != 0;"));
+			}
+			else
+			{
+				Lines.Add(TEXT("    public readonly ") + FieldTypes[FieldIndex] + TEXT(" ") + FieldNames[FieldIndex] + TEXT(";"));
+			}
 		}
 		if (!Type->StructFields.IsEmpty())
 		{
@@ -1092,9 +1124,16 @@ bool AppendStructWireDeclarations(
 			Lines.Add(TEXT(""));
 			Lines.Add(TEXT("    public ") + TypeName + TEXT("(") + FString::Join(Parameters, TEXT(", ")) + TEXT(")"));
 			Lines.Add(TEXT("    {"));
-			for (const FString& FieldName : FieldNames)
+			for (int32 FieldIndex = 0; FieldIndex < FieldNames.Num(); ++FieldIndex)
 			{
-				Lines.Add(TEXT("        this.") + FieldName + TEXT(" = ") + FieldName + TEXT(";"));
+				if (FieldUsesBoolWireStorage[FieldIndex])
+				{
+					Lines.Add(TEXT("        this.") + FieldStorageNames[FieldIndex] + TEXT(" = ") + FieldNames[FieldIndex] + TEXT(" ? 1 : 0;"));
+				}
+				else
+				{
+					Lines.Add(TEXT("        this.") + FieldNames[FieldIndex] + TEXT(" = ") + FieldNames[FieldIndex] + TEXT(";"));
+				}
 			}
 			Lines.Add(TEXT("    }"));
 		}

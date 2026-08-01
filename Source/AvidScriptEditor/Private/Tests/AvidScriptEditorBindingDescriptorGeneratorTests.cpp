@@ -2943,13 +2943,16 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 	TestEqual(TEXT("Root struct ABI is address-only"), RootType->GetArrayField(TEXT("abi_types")).Num(), 1);
 	const TArray<TSharedPtr<FJsonValue>>& RootFields = RootType->GetArrayField(TEXT("fields"));
 	const TArray<TSharedPtr<FJsonValue>>& NestedFields = NestedType->GetArrayField(TEXT("fields"));
-	TestEqual(TEXT("Root struct projects nested and scalar fields"), RootFields.Num(), 2);
+	TestEqual(TEXT("Root struct projects nested, bool, byte and scalar fields"), RootFields.Num(), 4);
 	TestEqual(TEXT("Nested struct projects safe leaf fields"), NestedFields.Num(), 4);
-	if (RootFields.Num() == 2 && NestedFields.Num() == 4)
+	if (RootFields.Num() == 4 && NestedFields.Num() == 4)
 	{
 		const TSharedPtr<FJsonObject> NestedField = RootFields[0]->AsObject();
 		TestEqual(TEXT("Nested field retains reflection name"), NestedField->GetStringField(TEXT("name")), FString(TEXT("Nested")));
 		TestEqual(TEXT("Nested field starts at wire offset zero"), static_cast<int32>(NestedField->GetNumberField(TEXT("wire_offset"))), 0);
+		TestEqual(TEXT("Bool field follows nested wire payload"), static_cast<int32>(RootFields[1]->AsObject()->GetNumberField(TEXT("wire_offset"))), 28);
+		TestEqual(TEXT("Byte field does not collapse bool wire width"), static_cast<int32>(RootFields[2]->AsObject()->GetNumberField(TEXT("wire_offset"))), 32);
+		TestEqual(TEXT("Float field remains aligned after bool and byte"), static_cast<int32>(RootFields[3]->AsObject()->GetNumberField(TEXT("wire_offset"))), 36);
 		TestEqual(TEXT("Nested scalar fixture field is Count"), NestedFields[0]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Count")));
 		TestEqual(TEXT("Nested enum fixture field is Mode"), NestedFields[1]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Mode")));
 		TestEqual(TEXT("Nested FVector fixture field is Location"), NestedFields[2]->AsObject()->GetStringField(TEXT("name")), FString(TEXT("Location")));
@@ -2992,6 +2995,21 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 				ErrorCategory,
 				ErrorSource));
 		TestEqual(TEXT("Parent size tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
+	}
+
+	TSharedPtr<FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Schema v9 struct-wire descriptor compiles into an immutable runtime package"),
+		FAvidScriptBindingPackage::LoadDescriptor(Json, RuntimePackage, LoadResult));
+	if (RuntimePackage.IsValid())
+	{
+		TArray<FAvidScriptPreparedDynamicBinding> PreparedBindings;
+		FString PreparedError;
+		TestTrue(
+			TEXT("Schema v9 runtime package exposes a prepared recursive codec target"),
+			RuntimePackage->BuildPreparedDynamicBindings(PreparedBindings, PreparedError));
+		TestEqual(TEXT("Schema v9 fixture has one prepared recursive target"), PreparedBindings.Num(), 1);
 	}
 
 	TestFalse(

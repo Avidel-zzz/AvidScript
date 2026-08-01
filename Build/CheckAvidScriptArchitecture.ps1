@@ -672,6 +672,8 @@ $RuntimeBackendLaneHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/
 $RuntimeWasmTests = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptWasmRuntimeTests.cpp'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$BindingCodecProgramSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
+$BindingPreparedInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
 $BindingCodecProgram = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
 $BindingPreparedInvocation = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
 foreach ($RequiredPreparedDynamicContract in @(
@@ -1718,6 +1720,29 @@ foreach ($RequiredLegacyClassReferenceRendererContract in @(
     'class_references.base_class_path')) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredLegacyClassReferenceRendererContract)) {
         Add-Violation "C# binding renderer must preserve schema v5 class-reference emission from base_class_path: $RequiredLegacyClassReferenceRendererContract"
+    }
+}
+foreach ($RequiredStructWireRendererContract in @(
+    'AppendStructWireDeclarations',
+    'FindRenderedTypeById',
+    '[StructLayout(LayoutKind.Explicit, Size = %d)]',
+    '[FieldOffset(%d)]',
+	'__avidscript_bool_%d',
+	'ChildType->Size == 4',
+    'Type.Kind == TEXT("struct_wire")',
+    'NativeParameters.Add(TEXT("in ") + OutPublicType + TEXT(" value"))'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredStructWireRendererContract)) {
+        Add-Violation "C# schema v9 recursive struct renderer is missing $RequiredStructWireRendererContract"
+    }
+}
+foreach ($ForbiddenStructWireRendererSpecialCase in @(
+    'StructWireRoundTrip',
+    'FAvidScriptStructWire',
+    'test_struct_wire'
+)) {
+    if ($CSharpBindingRendererSource.Contains($ForbiddenStructWireRendererSpecialCase)) {
+        Add-Violation "C# schema v9 recursive struct renderer must not select fixture or API names: $ForbiddenStructWireRendererSpecialCase"
     }
 }
 if ($BindingInvocationSource.Contains('CustomTimeDilation') -or
@@ -2860,6 +2885,36 @@ foreach ($RequiredPreparedBindingContract in @(
         -not $BindingFastPathSource.Contains($RequiredPreparedBindingContract)) {
         Add-Violation "Bindings prepared reflection compiler is missing $RequiredPreparedBindingContract"
     }
+}
+foreach ($RequiredStructWireExecutorContract in @(
+    'EValueCodecKind::StructWire',
+    'BuildAvidScriptStructWireProgram',
+    'SetStructValueFromGuest',
+    'ResolveGuestAddress',
+    'PreflightValueOutput',
+    'FCodecOutputTransaction',
+    'OutputTransaction.Rollback',
+    'CopyCompleteValue'
+)) {
+    if (-not $BindingInvocationSource.Contains($RequiredStructWireExecutorContract) -and
+        -not $BindingCodecProgramSource.Contains($RequiredStructWireExecutorContract) -and
+        -not $BindingPreparedInvocationSource.Contains($RequiredStructWireExecutorContract)) {
+        Add-Violation "Bindings schema v9 recursive struct executor is missing $RequiredStructWireExecutorContract"
+    }
+}
+foreach ($ForbiddenStructWireExecutorSpecialCase in @(
+    'RecursiveStructRoundtrip',
+    'FAvidScriptBindingsRecursiveStruct',
+    'RecursiveStructProperty'
+)) {
+    if ($BindingInvocationSource.Contains($ForbiddenStructWireExecutorSpecialCase) -or
+        $BindingCodecProgramSource.Contains($ForbiddenStructWireExecutorSpecialCase) -or
+        $BindingPreparedInvocationSource.Contains($ForbiddenStructWireExecutorSpecialCase)) {
+        Add-Violation "Bindings schema v9 recursive struct executor must not select fixture or API names: $ForbiddenStructWireExecutorSpecialCase"
+    }
+}
+if ($BindingCodecProgramSource.Contains('#if 0')) {
+    Add-Violation 'Bindings codec production source must not retain disabled implementation blocks'
 }
 foreach ($RequiredPreparedWasmtimeContract in @(
     'SelfF32TripleToGuestVector',
