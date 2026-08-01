@@ -237,11 +237,21 @@ bool InvokePreparedDynamicReflection(
 	if (Program->Kind
 		== EAvidScriptBindingInvocationKind::ReflectedPropertyRead)
 	{
+		uint32 GuestAddress = 0;
 		if (GuestMemory == nullptr
+			|| !ResolveGuestAddress(
+				Arguments[Program->ReturnValue.ArgumentOffset],
+				static_cast<uint32>(Program->ReturnValue.WireSize),
+				GuestAddress,
+				Details)
+			|| !PreflightValueOutput(
+				Program->ReturnValue,
+				GuestAddress,
+				*GuestMemory,
+				Details)
 			|| !WriteValueToGuest(
 				Program->ReturnValue,
-				static_cast<uint32>(
-					Arguments[Program->ReturnValue.ArgumentOffset]),
+				GuestAddress,
 				*GuestMemory,
 				InvocationContext,
 				&Receiver,
@@ -262,6 +272,64 @@ bool InvokePreparedDynamicReflection(
 			== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
 		&& Program->Function == nullptr)
 	{
+		if (Program->Parameters[0].Kind == EValueCodecKind::StructWire)
+		{
+			uint32 GuestAddress = 0;
+			const UPTRINT ScratchAddress = reinterpret_cast<UPTRINT>(InvocationScratch.GetData());
+			const UPTRINT ValueAddress = Align(
+				ScratchAddress,
+				static_cast<UPTRINT>(Program->FrameAlignment));
+			void* TemporaryValue = reinterpret_cast<void*>(ValueAddress);
+			if (GuestMemory == nullptr
+				|| Program->Parameters[0].StructType == nullptr
+				|| ValueAddress - ScratchAddress + Program->FrameSize
+					> static_cast<UPTRINT>(InvocationScratch.Num())
+				|| !ResolveGuestAddress(
+					Arguments[Program->Parameters[0].ArgumentOffset],
+					static_cast<uint32>(Program->Parameters[0].WireSize),
+					GuestAddress,
+					Details))
+			{
+				SetDispatchFailure(
+					OutResult,
+					TEXT("binding_property_write_failed"),
+					Program->DebugPath,
+					Details.IsEmpty() ? TEXT("The temporary struct property frame is invalid.") : Details);
+				return false;
+			}
+			Program->Parameters[0].StructType->InitializeStruct(TemporaryValue);
+			ON_SCOPE_EXIT
+			{
+				Program->Parameters[0].StructType->DestroyStruct(TemporaryValue);
+			};
+			if (!SetStructValueFromGuest(
+					Program->Parameters[0],
+					GuestAddress,
+					*GuestMemory,
+					InvocationContext,
+					TemporaryValue,
+					Details)
+				|| !PrepareHostEffect())
+			{
+				if (OutResult.Details.IsEmpty())
+				{
+					SetDispatchFailure(
+						OutResult,
+						TEXT("binding_property_write_failed"),
+						Program->DebugPath,
+						Details);
+				}
+				return false;
+			}
+			void* Destination = Program->Parameters[0].Property
+				->ContainerPtrToValuePtr<void>(&Receiver);
+			Program->Parameters[0].Property->CopyCompleteValue(
+				Destination,
+				TemporaryValue);
+			OutResult.bSucceeded = true;
+			OutResult.ReturnValue = 1;
+			return true;
+		}
 		if (!PrepareHostEffect()
 			|| !SetValueFromCells(
 				Program->Parameters[0],
@@ -357,11 +425,64 @@ bool InvokePreparedDynamicReflection(
 
 	for (const FValueCodecProgram& Parameter : Program->Parameters)
 	{
+		if (Parameter.Direction != EValueCodecDirection::Ref
+			&& Parameter.Direction != EValueCodecDirection::Out)
+		{
+			continue;
+		}
+		uint32 GuestAddress = 0;
+		if (GuestMemory == nullptr
+			|| !ResolveGuestAddress(
+				Arguments[Parameter.ArgumentOffset],
+				static_cast<uint32>(Parameter.WireSize),
+				GuestAddress,
+				Details)
+			|| !PreflightValueOutput(
+				Parameter,
+				GuestAddress,
+				*GuestMemory,
+				Details))
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_guest_output_preflight_failed"),
+				Program->DebugPath + TEXT(":") + Parameter.Name,
+				Details);
+			return false;
+		}
+	}
+	if (Program->ReturnValue.Kind != EValueCodecKind::Void)
+	{
+		uint32 GuestAddress = 0;
+		if (GuestMemory == nullptr
+			|| !ResolveGuestAddress(
+				Arguments[Program->ReturnValue.ArgumentOffset],
+				static_cast<uint32>(Program->ReturnValue.WireSize),
+				GuestAddress,
+				Details)
+			|| !PreflightValueOutput(
+				Program->ReturnValue,
+				GuestAddress,
+				*GuestMemory,
+				Details))
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_return_preflight_failed"),
+				Program->DebugPath,
+				Details);
+			return false;
+		}
+	}
+
+	for (const FValueCodecProgram& Parameter : Program->Parameters)
+	{
 		if (Parameter.Direction == EValueCodecDirection::Ref
 			|| Parameter.Direction == EValueCodecDirection::Out)
 		{
 			if (Parameter.Direction == EValueCodecDirection::Ref
 				&& (GuestMemory == nullptr
+					|| Arguments[Parameter.ArgumentOffset] > MAX_uint32
 					|| !SetValueFromGuest(
 						Parameter,
 						static_cast<uint32>(
@@ -405,6 +526,15 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 	Receiver.ProcessEvent(Program->Function, Frame);
+	FCodecOutputTransaction OutputTransaction;
+	bool bOutputCommitted = false;
+	ON_SCOPE_EXIT
+	{
+		if (!bOutputCommitted)
+		{
+			OutputTransaction.Rollback(InvocationContext);
+		}
+	};
 
 	for (const FValueCodecProgram& Parameter : Program->Parameters)
 	{
@@ -418,7 +548,8 @@ bool InvokePreparedDynamicReflection(
 					*GuestMemory,
 					InvocationContext,
 					Frame,
-					Details)))
+					Details,
+					&OutputTransaction)))
 		{
 			SetDispatchFailure(
 				OutResult,
@@ -438,7 +569,8 @@ bool InvokePreparedDynamicReflection(
 				*GuestMemory,
 				InvocationContext,
 				Frame,
-				Details)))
+				Details,
+				&OutputTransaction)))
 	{
 		SetDispatchFailure(
 			OutResult,
@@ -448,6 +580,8 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 
+	OutputTransaction.Commit();
+	bOutputCommitted = true;
 	OutResult.bSucceeded = true;
 	OutResult.ReturnValue = 1;
 	return true;

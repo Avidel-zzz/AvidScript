@@ -216,7 +216,320 @@ bool SetNameValue(
 		Name);
 	return true;
 }
+
+bool DecodeWireValue(
+	const FValueCodecProgram& Program,
+	const TConstArrayView<uint8> Wire,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Container,
+	FString& OutDetails);
+
+bool DecodeStructChildren(
+	const FValueCodecProgram& Program,
+	const TConstArrayView<uint8> Wire,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* StructValue,
+	FString& OutDetails)
+{
+	if (Program.Kind != EValueCodecKind::StructWire
+		|| Program.StructType == nullptr
+		|| Wire.Num() != Program.WireSize)
+	{
+		OutDetails = TEXT("The cached struct wire decode program is invalid.");
+		return false;
+	}
+	for (const FValueCodecProgram& Child : Program.Children)
+	{
+		if (Child.WireOffset < 0 || Child.WireSize <= 0
+			|| Child.WireOffset > Wire.Num()
+			|| Child.WireSize > Wire.Num() - Child.WireOffset
+			|| !DecodeWireValue(
+				Child,
+				Wire.Slice(Child.WireOffset, Child.WireSize),
+				Context,
+				StructValue,
+				OutDetails))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool DecodeWireValue(
+	const FValueCodecProgram& Program,
+	const TConstArrayView<uint8> Wire,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Container,
+	FString& OutDetails)
+{
+	if (Program.Property == nullptr || Wire.Num() != Program.WireSize)
+	{
+		OutDetails = TEXT("The cached wire decode leaf is invalid.");
+		return false;
+	}
+	if (Program.Kind == EValueCodecKind::StructWire)
+	{
+		return DecodeStructChildren(
+			Program,
+			Wire,
+			Context,
+			Program.Property->ContainerPtrToValuePtr<void>(Container),
+			OutDetails);
+	}
+	if (Program.Kind <= EValueCodecKind::Enum)
+	{
+		uint64 Cell = 0;
+		if (Wire.Num() > static_cast<int32>(sizeof(Cell)))
+		{
+			OutDetails = TEXT("The numeric wire leaf is wider than one value cell.");
+			return false;
+		}
+		FMemory::Memcpy(&Cell, Wire.GetData(), Wire.Num());
+		return SetNumericValue(Program, Container, Cell, OutDetails);
+	}
+	if (Program.Kind == EValueCodecKind::Object)
+	{
+		if (Wire.Num() != 8)
+		{
+			OutDetails = TEXT("The object wire leaf must be eight bytes.");
+			return false;
+		}
+		uint32 Slot = 0;
+		uint32 Generation = 0;
+		FMemory::Memcpy(&Slot, Wire.GetData(), sizeof(Slot));
+		FMemory::Memcpy(&Generation, Wire.GetData() + sizeof(Slot), sizeof(Generation));
+		UObject* Object = nullptr;
+		if (!ResolveObjectHandle(
+			Slot,
+			Generation,
+			Program.ObjectClass,
+			Context,
+			true,
+			Object,
+			OutDetails))
+		{
+			return false;
+		}
+		CastFieldChecked<FObjectPropertyBase>(Program.Property)
+			->SetObjectPropertyValue_InContainer(Container, Object);
+		return true;
+	}
+	const int32 ComponentCount = Program.Kind == EValueCodecKind::Transform ? 9 : 3;
+	if ((Program.Kind != EValueCodecKind::Vector
+			&& Program.Kind != EValueCodecKind::Rotator
+			&& Program.Kind != EValueCodecKind::Transform)
+		|| Wire.Num() != ComponentCount * static_cast<int32>(sizeof(float)))
+	{
+		OutDetails = TEXT("The cached struct wire leaf is unsupported.");
+		return false;
+	}
+	float Components[9] = {};
+	FMemory::Memcpy(Components, Wire.GetData(), Wire.Num());
+	for (int32 Index = 0; Index < ComponentCount; ++Index)
+	{
+		if (!FMath::IsFinite(Components[Index]))
+		{
+			OutDetails = TEXT("The struct wire leaf contains a non-finite component.");
+			return false;
+		}
+	}
+	void* Value = Program.Property->ContainerPtrToValuePtr<void>(Container);
+	if (Program.Kind == EValueCodecKind::Vector)
+	{
+		*static_cast<FVector*>(Value) = FVector(Components[0], Components[1], Components[2]);
+	}
+	else if (Program.Kind == EValueCodecKind::Rotator)
+	{
+		*static_cast<FRotator*>(Value) = FRotator(Components[0], Components[1], Components[2]);
+	}
+	else
+	{
+		*static_cast<FTransform*>(Value) = FTransform(
+			FRotator(Components[3], Components[4], Components[5]),
+			FVector(Components[0], Components[1], Components[2]),
+			FVector(Components[6], Components[7], Components[8]));
+	}
+	return true;
+}
+
+bool ReadWireBlob(
+	const uint32 GuestAddress,
+	const FValueCodecProgram& Program,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	TConstArrayView<uint8>& OutWire,
+	TArray<uint8, TInlineAllocator<4096>>& Fallback,
+	FString& OutDetails)
+{
+	if (Program.WireSize <= 0 || Program.WireSize > 4096)
+	{
+		OutDetails = TEXT("The cached wire blob size is invalid.");
+		return false;
+	}
+	FString BorrowError;
+	if (GuestMemory.BorrowReadOnlyBytes(
+		GuestAddress,
+		static_cast<uint32>(Program.WireSize),
+		static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
+		OutWire,
+		BorrowError))
+	{
+		return OutWire.Num() == Program.WireSize;
+	}
+	Fallback.SetNumUninitialized(Program.WireSize);
+	if (!GuestMemory.ReadBytes(GuestAddress, MakeArrayView(Fallback), OutDetails))
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = BorrowError;
+		}
+		return false;
+	}
+	OutWire = MakeArrayView(Fallback);
+	return true;
+}
+
+bool EncodeWireValue(
+	const FValueCodecProgram& Program,
+	TArrayView<uint8> Wire,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Container,
+	FCodecOutputTransaction& Transaction,
+	FString& OutDetails)
+{
+	if (Program.Property == nullptr || Wire.Num() != Program.WireSize)
+	{
+		OutDetails = TEXT("The cached wire encode leaf is invalid.");
+		return false;
+	}
+	const void* Value = Program.Property->ContainerPtrToValuePtr<void>(Container);
+	if (Program.Kind == EValueCodecKind::StructWire)
+	{
+		for (const FValueCodecProgram& Child : Program.Children)
+		{
+			if (Child.WireOffset < 0 || Child.WireSize <= 0
+				|| Child.WireOffset > Wire.Num()
+				|| Child.WireSize > Wire.Num() - Child.WireOffset
+				|| !EncodeWireValue(
+					Child,
+					Wire.Slice(Child.WireOffset, Child.WireSize),
+					Context,
+					const_cast<void*>(Value),
+					Transaction,
+					OutDetails))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Bool)
+	{
+		const int32 Stored = CastFieldChecked<FBoolProperty>(Program.Property)->GetPropertyValue(Value) ? 1 : 0;
+		FMemory::Memcpy(Wire.GetData(), &Stored, sizeof(Stored));
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Float)
+	{
+		const float Stored = CastFieldChecked<FFloatProperty>(Program.Property)->GetPropertyValue(Value);
+		FMemory::Memcpy(Wire.GetData(), &Stored, sizeof(Stored));
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Double)
+	{
+		const double Stored = CastFieldChecked<FDoubleProperty>(Program.Property)->GetPropertyValue(Value);
+		FMemory::Memcpy(Wire.GetData(), &Stored, sizeof(Stored));
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Object)
+	{
+		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Program.Property)
+			->GetObjectPropertyValue_InContainer(Container);
+		FAvidScriptObjectHandle Handle;
+		if (Object != nullptr)
+		{
+			if (Program.ObjectClass == nullptr || !Object->IsA(Program.ObjectClass)
+				|| Context.ObjectRegistry == nullptr || Context.ObjectOwnership == nullptr)
+			{
+				OutDetails = TEXT("The UObject output does not satisfy the cached property class or capability services.");
+				return false;
+			}
+			FAvidScriptObjectHandleResult BorrowResult;
+			if (!Context.ObjectOwnership->Borrow(*Context.ObjectRegistry, *Object, BorrowResult))
+			{
+				OutDetails = BorrowResult.ErrorMessage;
+				return false;
+			}
+			Handle = BorrowResult.Handle;
+			Transaction.BorrowedHandles.Add(Handle);
+		}
+		FMemory::Memcpy(Wire.GetData(), &Handle.Slot, sizeof(Handle.Slot));
+		FMemory::Memcpy(Wire.GetData() + sizeof(Handle.Slot), &Handle.Generation, sizeof(Handle.Generation));
+		return true;
+	}
+	if (Program.Kind == EValueCodecKind::Vector
+		|| Program.Kind == EValueCodecKind::Rotator
+		|| Program.Kind == EValueCodecKind::Transform)
+	{
+		float Components[9] = {};
+		if (Program.Kind == EValueCodecKind::Vector)
+		{
+			const FVector& Stored = *static_cast<const FVector*>(Value);
+			Components[0] = static_cast<float>(Stored.X); Components[1] = static_cast<float>(Stored.Y); Components[2] = static_cast<float>(Stored.Z);
+		}
+		else if (Program.Kind == EValueCodecKind::Rotator)
+		{
+			const FRotator& Stored = *static_cast<const FRotator*>(Value);
+			Components[0] = static_cast<float>(Stored.Pitch); Components[1] = static_cast<float>(Stored.Yaw); Components[2] = static_cast<float>(Stored.Roll);
+		}
+		else
+		{
+			const FTransform& Stored = *static_cast<const FTransform*>(Value);
+			const FVector Translation = Stored.GetTranslation(); const FRotator Rotation = Stored.Rotator(); const FVector Scale = Stored.GetScale3D();
+			Components[0] = static_cast<float>(Translation.X); Components[1] = static_cast<float>(Translation.Y); Components[2] = static_cast<float>(Translation.Z);
+			Components[3] = static_cast<float>(Rotation.Pitch); Components[4] = static_cast<float>(Rotation.Yaw); Components[5] = static_cast<float>(Rotation.Roll);
+			Components[6] = static_cast<float>(Scale.X); Components[7] = static_cast<float>(Scale.Y); Components[8] = static_cast<float>(Scale.Z);
+		}
+		FMemory::Memcpy(Wire.GetData(), Components, Wire.Num());
+		return true;
+	}
+	const FNumericProperty* Numeric = CastField<FNumericProperty>(Program.Property);
+	if (Program.Kind == EValueCodecKind::Enum)
+	{
+		if (const FEnumProperty* Enum = CastField<FEnumProperty>(Program.Property))
+		{
+			Numeric = Enum->GetUnderlyingProperty();
+		}
+	}
+	if (Numeric == nullptr || Wire.Num() > static_cast<int32>(sizeof(uint64)))
+	{
+		OutDetails = TEXT("The cached numeric wire output leaf is invalid.");
+		return false;
+	}
+	const uint64 Stored = Numeric->GetUnsignedIntPropertyValue(Value);
+	FMemory::Memcpy(Wire.GetData(), &Stored, Wire.Num());
+	return true;
+}
 } // namespace
+
+void FCodecOutputTransaction::Commit()
+{
+	BorrowedHandles.Reset();
+}
+
+void FCodecOutputTransaction::Rollback(
+	const FAvidScriptBindingInvocationContext& Context)
+{
+	if (Context.ObjectRegistry != nullptr && Context.ObjectOwnership != nullptr)
+	{
+		for (int32 Index = BorrowedHandles.Num() - 1; Index >= 0; --Index)
+		{
+			FAvidScriptObjectHandleResult Result;
+			Context.ObjectOwnership->Release(BorrowedHandles[Index], *Context.ObjectRegistry, Result);
+		}
+	}
+	BorrowedHandles.Reset();
+}
 
 bool ResolveObjectHandle(
 	const uint32 Slot,
@@ -281,6 +594,30 @@ bool SetValueFromCells(
 	if (Program.Kind <= EValueCodecKind::Enum)
 	{
 		return SetNumericValue(Program, Frame, Cells[0], OutDetails);
+	}
+	if (Program.Kind == EValueCodecKind::StructWire)
+	{
+		uint32 GuestAddress = 0;
+		if (GuestMemory == nullptr
+			|| !ResolveGuestAddress(
+				Cells[0],
+				static_cast<uint32>(Program.WireSize),
+				GuestAddress,
+				OutDetails))
+		{
+			if (OutDetails.IsEmpty())
+			{
+				OutDetails = TEXT("The struct wire input requires guest memory.");
+			}
+			return false;
+		}
+		return SetValueFromGuest(
+			Program,
+			GuestAddress,
+			*GuestMemory,
+			Context,
+			Frame,
+			OutDetails);
 	}
 	if (Program.Kind == EValueCodecKind::Name)
 	{
@@ -365,65 +702,80 @@ bool SetValueFromGuest(
 	void* Frame,
 	FString& OutDetails)
 {
-	uint8 Bytes[36] = {};
-	if (Program.GuestStorageSize <= 0
-		|| Program.GuestStorageSize > UE_ARRAY_COUNT(Bytes)
-		|| !GuestMemory.ReadBytes(
-			GuestAddress,
-			MakeArrayView(Bytes, Program.GuestStorageSize),
-			OutDetails))
+	TConstArrayView<uint8> Wire;
+	TArray<uint8, TInlineAllocator<4096>> Fallback;
+	if (!ReadWireBlob(GuestAddress, Program, GuestMemory, Wire, Fallback, OutDetails))
+	{
+		return false;
+	}
+	return DecodeWireValue(Program, Wire, Context, Frame, OutDetails);
+}
+
+bool SetStructValueFromGuest(
+	const FValueCodecProgram& Program,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* StructValue,
+	FString& OutDetails)
+{
+	TConstArrayView<uint8> Wire;
+	TArray<uint8, TInlineAllocator<4096>> Fallback;
+	return ReadWireBlob(GuestAddress, Program, GuestMemory, Wire, Fallback, OutDetails)
+		&& DecodeStructChildren(Program, Wire, Context, StructValue, OutDetails);
+}
+
+bool ResolveGuestAddress(
+	const uint64 Cell,
+	const uint32 ByteCount,
+	uint32& OutGuestAddress,
+	FString& OutDetails)
+{
+	OutGuestAddress = 0;
+	if (Cell > MAX_uint32
+		|| ByteCount == 0
+		|| Cell + static_cast<uint64>(ByteCount) > static_cast<uint64>(MAX_uint32) + 1)
+	{
+		OutDetails = TEXT("The guest address range does not fit the 32-bit guest address space.");
+		return false;
+	}
+	OutGuestAddress = static_cast<uint32>(Cell);
+	return true;
+}
+
+bool PreflightValueOutput(
+	const FValueCodecProgram& Program,
+	const uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FString& OutDetails)
+{
+	if (Program.WireSize <= 0 || Program.WireSize > 4096)
+	{
+		OutDetails = TEXT("The cached output wire size is invalid.");
+		return false;
+	}
+	TArrayView<uint8> Borrowed;
+	FString BorrowError;
+	if (GuestMemory.BorrowMutableBytes(
+		GuestAddress,
+		static_cast<uint32>(Program.WireSize),
+		static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
+		Borrowed,
+		BorrowError))
+	{
+		return Borrowed.Num() == Program.WireSize;
+	}
+	TArray<uint8, TInlineAllocator<4096>> Probe;
+	Probe.SetNumUninitialized(Program.WireSize);
+	if (!GuestMemory.ReadBytes(GuestAddress, MakeArrayView(Probe), OutDetails))
 	{
 		if (OutDetails.IsEmpty())
 		{
-			OutDetails = TEXT("The cached guest storage size is invalid.");
+			OutDetails = BorrowError;
 		}
 		return false;
 	}
-
-	TArray<uint64, TInlineAllocator<9>> Cells;
-	if (Program.Kind == EValueCodecKind::Object)
-	{
-		uint32 Slot = 0;
-		uint32 Generation = 0;
-		FMemory::Memcpy(&Slot, Bytes, sizeof(Slot));
-		FMemory::Memcpy(
-			&Generation,
-			Bytes + sizeof(Slot),
-			sizeof(Generation));
-		Cells = { Slot, Generation };
-	}
-	else if (Program.Kind == EValueCodecKind::Vector
-		|| Program.Kind == EValueCodecKind::Rotator
-		|| Program.Kind == EValueCodecKind::Transform)
-	{
-		const int32 ComponentCount =
-			Program.GuestStorageSize / sizeof(float);
-		for (int32 Index = 0; Index < ComponentCount; ++Index)
-		{
-			uint32 Bits = 0;
-			FMemory::Memcpy(
-				&Bits,
-				Bytes + Index * sizeof(float),
-				sizeof(Bits));
-			Cells.Add(Bits);
-		}
-	}
-	else
-	{
-		uint64 Cell = 0;
-		FMemory::Memcpy(&Cell, Bytes, Program.GuestStorageSize);
-		Cells.Add(Cell);
-	}
-
-	FValueCodecProgram ValueProgram = Program;
-	ValueProgram.ArgumentWidth = Cells.Num();
-	return SetValueFromCells(
-		ValueProgram,
-		Cells,
-		&GuestMemory,
-		Context,
-		Frame,
-		OutDetails);
+	return true;
 }
 
 bool WriteValueToGuest(
@@ -432,8 +784,64 @@ bool WriteValueToGuest(
 	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	void* Frame,
-	FString& OutDetails)
+	FString& OutDetails,
+	FCodecOutputTransaction* Transaction)
 {
+	FCodecOutputTransaction LocalTransaction;
+	FCodecOutputTransaction& ActiveTransaction = Transaction == nullptr
+		? LocalTransaction
+		: *Transaction;
+	TArray<uint8, TInlineAllocator<4096>> Bytes;
+	if (Program.WireSize <= 0 || Program.WireSize > 4096)
+	{
+		OutDetails = TEXT("The cached output wire size is invalid.");
+		return false;
+	}
+	Bytes.SetNumZeroed(Program.WireSize);
+	if (!EncodeWireValue(
+		Program,
+		MakeArrayView(Bytes),
+		Context,
+		Frame,
+		ActiveTransaction,
+		OutDetails))
+	{
+		if (Transaction == nullptr)
+		{
+			LocalTransaction.Rollback(Context);
+		}
+		return false;
+	}
+
+	TArrayView<uint8> Borrowed;
+	FString BorrowError;
+	const bool bBorrowed = GuestMemory.BorrowMutableBytes(
+		GuestAddress,
+		static_cast<uint32>(Bytes.Num()),
+		static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
+		Borrowed,
+		BorrowError);
+	const bool bWritten = bBorrowed && Borrowed.Num() == Bytes.Num()
+		? (FMemory::Memcpy(Borrowed.GetData(), Bytes.GetData(), Bytes.Num()), true)
+		: GuestMemory.WriteBytes(GuestAddress, MakeArrayView(Bytes), OutDetails);
+	if (!bWritten)
+	{
+		if (OutDetails.IsEmpty())
+		{
+			OutDetails = BorrowError;
+		}
+		if (Transaction == nullptr)
+		{
+			LocalTransaction.Rollback(Context);
+		}
+		return false;
+	}
+	if (Transaction == nullptr)
+	{
+		LocalTransaction.Commit();
+	}
+	return true;
+#if 0
 	uint8 Bytes[36] = {};
 	const void* Value = Program.Property->ContainerPtrToValuePtr<void>(Frame);
 	if (Program.Kind == EValueCodecKind::Bool)
@@ -555,5 +963,6 @@ bool WriteValueToGuest(
 			static_cast<const uint8*>(Bytes),
 			Program.GuestStorageSize),
 		OutDetails);
+#endif
 }
 } // namespace UE::AvidScript::BindingPrivate

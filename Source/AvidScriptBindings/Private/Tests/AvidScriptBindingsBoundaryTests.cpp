@@ -3,7 +3,10 @@
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptObjectOwnership.h"
 #include "AvidScriptSceneComponentBinding.h"
+#include "Invocation/AvidScriptBindingCodecProgram.h"
+#include "Invocation/AvidScriptBindingPreparedInvocation.h"
 
 #include "AvidScriptBindingsTestTypes.h"
 
@@ -15,13 +18,24 @@ namespace
 class FAvidScriptBoundaryGuestMemory final : public IAvidScriptVmGuestMemory
 {
 public:
+	FAvidScriptBoundaryGuestMemory()
+	{
+		Bytes.SetNumZeroed(512);
+	}
+
 	bool ReadBytes(
 		uint32 GuestAddress,
 		TArrayView<uint8> OutBytes,
 		FString& OutError) override
 	{
+		if (GuestAddress > static_cast<uint32>(Bytes.Num())
+			|| OutBytes.Num() > Bytes.Num() - static_cast<int32>(GuestAddress))
+		{
+			OutError = TEXT("guest read range");
+			return false;
+		}
 		OutError.Reset();
-		FMemory::Memzero(OutBytes.GetData(), OutBytes.Num());
+		FMemory::Memcpy(OutBytes.GetData(), Bytes.GetData() + GuestAddress, OutBytes.Num());
 		return true;
 	}
 
@@ -30,10 +44,92 @@ public:
 		TConstArrayView<uint8> Bytes,
 		FString& OutError) override
 	{
+		if (GuestAddress > static_cast<uint32>(this->Bytes.Num())
+			|| Bytes.Num() > this->Bytes.Num() - static_cast<int32>(GuestAddress))
+		{
+			OutError = TEXT("guest write range");
+			return false;
+		}
 		OutError.Reset();
+		FMemory::Memcpy(this->Bytes.GetData() + GuestAddress, Bytes.GetData(), Bytes.Num());
 		return true;
 	}
+
+	bool BorrowReadOnlyBytes(uint32 Address, uint32 Count, uint32 Alignment, TConstArrayView<uint8>& OutBytes, FString& OutError) override
+	{
+		if (Address > static_cast<uint32>(Bytes.Num()) || Count > static_cast<uint32>(Bytes.Num()) - Address)
+		{
+			OutError = TEXT("guest borrow range"); return false;
+		}
+		OutBytes = MakeArrayView(Bytes).Slice(Address, Count); OutError.Reset(); return true;
+	}
+
+	bool BorrowMutableBytes(uint32 Address, uint32 Count, uint32 Alignment, TArrayView<uint8>& OutBytes, FString& OutError) override
+	{
+		if (Address > static_cast<uint32>(Bytes.Num()) || Count > static_cast<uint32>(Bytes.Num()) - Address)
+		{
+			OutError = TEXT("guest borrow range"); return false;
+		}
+		OutBytes = MakeArrayView(Bytes).Slice(Address, Count); OutError.Reset(); return true;
+	}
+
+	TArray<uint8> Bytes;
 };
+
+class FAvidScriptBoundaryOwnership final : public IAvidScriptObjectOwnershipDomain
+{
+public:
+	bool Adopt(FAvidScriptObjectRegistry&, UObject&, const FAvidScriptObjectHandle&, EAvidScriptObjectFactoryKind, FAvidScriptObjectHandleResult&) override { return false; }
+	bool Borrow(FAvidScriptObjectRegistry& Registry, UObject& Object, FAvidScriptObjectHandleResult& OutResult) override
+	{
+		OutResult.Handle = Registry.AcquireBorrowedObject(&Object, OutResult, false);
+		return OutResult.Handle.IsValid();
+	}
+	bool Release(const FAvidScriptObjectHandle& Handle, FAvidScriptObjectRegistry& Registry, FAvidScriptObjectHandleResult& OutResult) override
+	{
+		return Registry.ReleaseBorrowedHandle(Handle, OutResult, false);
+	}
+	bool Owns(const FAvidScriptObjectHandle&, const UObject*) const override { return false; }
+	void Cleanup(FAvidScriptObjectRegistry&) override {}
+};
+
+using namespace UE::AvidScript::BindingPrivate;
+
+FValueCodecProgram MakeRecursiveStructCodec(FProperty* Property, EValueCodecDirection Direction, int32 ArgumentOffset)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.StructType = CastFieldChecked<FStructProperty>(Property)->Struct;
+	Program.Direction = Direction;
+	Program.Kind = EValueCodecKind::StructWire;
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = 1;
+	Program.GuestStorageSize = 36;
+	Program.WireSize = 36;
+	Program.WireAlignment = 4;
+	Program.Name = Property->GetName();
+	const auto AddLeaf = [&Program](FProperty* Field, EValueCodecKind Kind, int32 Offset, int32 Size, UClass* ObjectClass = nullptr)
+	{
+		FValueCodecProgram& Child = Program.Children.AddDefaulted_GetRef();
+		Child.Property = Field; Child.Kind = Kind; Child.ObjectClass = ObjectClass;
+		Child.WireOffset = Offset; Child.WireSize = Size; Child.WireAlignment = 4; Child.GuestStorageSize = Size; Child.Name = Field->GetName();
+	};
+	AddLeaf(FindFProperty<FProperty>(Program.StructType, TEXT("bEnabled")), EValueCodecKind::Bool, 0, 4);
+	AddLeaf(FindFProperty<FProperty>(Program.StructType, TEXT("Mode")), EValueCodecKind::Enum, 4, 4);
+	AddLeaf(FindFProperty<FProperty>(Program.StructType, TEXT("Position")), EValueCodecKind::Vector, 8, 12);
+	AddLeaf(FindFProperty<FProperty>(Program.StructType, TEXT("Target")), EValueCodecKind::Object, 20, 8, UObject::StaticClass());
+	FProperty* NestedProperty = FindFProperty<FProperty>(Program.StructType, TEXT("Nested"));
+	FValueCodecProgram& Nested = Program.Children.AddDefaulted_GetRef();
+	Nested.Property = NestedProperty; Nested.StructType = CastFieldChecked<FStructProperty>(NestedProperty)->Struct;
+	Nested.Kind = EValueCodecKind::StructWire; Nested.WireOffset = 28; Nested.WireSize = 8; Nested.WireAlignment = 4; Nested.GuestStorageSize = 8; Nested.Name = TEXT("Nested");
+	for (const TPair<FString, EValueCodecKind>& Leaf : { TPair<FString, EValueCodecKind>(TEXT("Count"), EValueCodecKind::Int32), TPair<FString, EValueCodecKind>(TEXT("Ratio"), EValueCodecKind::Float) })
+	{
+		FValueCodecProgram& Child = Nested.Children.AddDefaulted_GetRef();
+		Child.Property = FindFProperty<FProperty>(Nested.StructType, *Leaf.Key); Child.Kind = Leaf.Value;
+		Child.WireOffset = Nested.Children.Num() == 1 ? 0 : 4; Child.WireSize = 4; Child.WireAlignment = 4; Child.GuestStorageSize = 4; Child.Name = Leaf.Key;
+	}
+	return Program;
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -222,6 +318,109 @@ bool FAvidScriptPreparedDynamicBoundaryTest::RunTest(
 	TestTrue(
 		TEXT("Stale owner reports the target contract"),
 		Result.Details.Contains(TEXT("binding_target_invalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRecursiveStructCodecBoundaryTest,
+	"AvidScript.Bindings.PreparedDynamic.RecursiveStructCodec",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Parameters)
+{
+	UFunction* Function = UAvidScriptBindingsTestObject::StaticClass()->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(UAvidScriptBindingsTestObject, RecursiveStructRoundtrip));
+	if (!TestNotNull(TEXT("Recursive fixture function reflects"), Function))
+	{
+		return false;
+	}
+	TArray<FProperty*> ParametersByOrder;
+	for (TFieldIterator<FProperty> It(Function); It; ++It)
+	{
+		if (It->HasAnyPropertyFlags(CPF_Parm))
+		{
+			ParametersByOrder.Add(*It);
+		}
+	}
+	if (!TestEqual(TEXT("Recursive fixture has three parameters and return"), ParametersByOrder.Num(), 4))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram Program;
+	Program.OwnerClass = UAvidScriptBindingsTestObject::StaticClass();
+	Program.Function = Function;
+	Program.DebugPath = Function->GetPathName();
+	Program.FrameSize = Function->GetStructureSize();
+	Program.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
+	Program.RequiredScratchSize = Program.FrameSize + Program.FrameAlignment - 1;
+	Program.ExpectedArgumentCount = 6;
+	Program.bRequiresGuestMemory = true;
+	Program.Parameters.Add(MakeRecursiveStructCodec(ParametersByOrder[0], EValueCodecDirection::ConstRef, 2));
+	Program.Parameters.Add(MakeRecursiveStructCodec(ParametersByOrder[1], EValueCodecDirection::Ref, 3));
+	Program.Parameters.Add(MakeRecursiveStructCodec(ParametersByOrder[2], EValueCodecDirection::Out, 4));
+	Program.ReturnValue = MakeRecursiveStructCodec(ParametersByOrder[3], EValueCodecDirection::Return, 5);
+	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
+
+	FAvidScriptBoundaryGuestMemory GuestMemory;
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptBoundaryOwnership Ownership;
+	UObject* Target = NewObject<UObject>();
+	FAvidScriptObjectHandleResult HandleResult;
+	const FAvidScriptObjectHandle TargetHandle = Registry.RegisterObject(Target, HandleResult, false);
+	const auto StoreInput = [&GuestMemory, TargetHandle](const uint32 Address, const int32 Count, const float Ratio, const float X)
+	{
+		int32 Enabled = 1;
+		int32 Mode = static_cast<int32>(EAvidScriptBindingsStructMode::Secondary);
+		const float Position[3] = { X, X + 1.0f, X + 2.0f };
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address, &Enabled, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 4, &Mode, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 8, Position, 12);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 20, &TargetHandle.Slot, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 24, &TargetHandle.Generation, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 28, &Count, 4);
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address + 32, &Ratio, 4);
+	};
+	StoreInput(32, 3, 1.5f, 2.0f);
+	StoreInput(96, 4, 2.5f, 10.0f);
+
+	FAvidScriptBindingInvocationInstrumentation Instrumentation;
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.ObjectOwnership = &Ownership;
+	Context.InvocationInstrumentation = &Instrumentation;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Program.RequiredScratchSize);
+	UAvidScriptBindingsTestObject* Receiver = NewObject<UAvidScriptBindingsTestObject>();
+	const uint64 Arguments[] = { 0, 0, 32, 96, 160, 224 };
+	FAvidScriptDynamicHostCallResult Result;
+	if (!TestTrue(
+		TEXT("Recursive prepared ProcessEvent succeeds"),
+		InvokePreparedDynamicReflection(&Cell, *Receiver, Arguments, &GuestMemory, Context, Scratch, Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	int32 InOutCount = 0;
+	float InOutRatio = 0.0f;
+	FMemory::Memcpy(&InOutCount, GuestMemory.Bytes.GetData() + 96 + 28, 4);
+	FMemory::Memcpy(&InOutRatio, GuestMemory.Bytes.GetData() + 96 + 32, 4);
+	TestEqual(TEXT("Nested ref count encodes"), InOutCount, 7);
+	TestEqual(TEXT("Nested ref ratio encodes"), InOutRatio, 4.0f);
+	TestEqual(TEXT("Prepared path records one ProcessEvent"), Instrumentation.SemanticProcessEventCount, 1ull);
+	uint32 OutputSlot = 0;
+	uint32 OutputGeneration = 0;
+	FMemory::Memcpy(&OutputSlot, GuestMemory.Bytes.GetData() + 160 + 20, 4);
+	FMemory::Memcpy(&OutputGeneration, GuestMemory.Bytes.GetData() + 160 + 24, 4);
+	UObject* ResolvedOutput = nullptr;
+	FString ResolveDetails;
+	TestTrue(TEXT("Nested object output publishes a capability"), ResolveObjectHandle(OutputSlot, OutputGeneration, UObject::StaticClass(), Context, false, ResolvedOutput, ResolveDetails));
+	TestEqual(TEXT("Nested object output resolves to the fixture target"), ResolvedOutput, Target);
+
+	const uint64 MalformedArguments[] = { 0, 0, 32, 96, 160, static_cast<uint64>(MAX_uint32) + 1 };
+	TestFalse(TEXT("Oversized return address fails before ProcessEvent"), InvokePreparedDynamicReflection(&Cell, *Receiver, MalformedArguments, &GuestMemory, Context, Scratch, Result));
+	TestTrue(TEXT("Malformed address reports return preflight"), Result.Details.Contains(TEXT("binding_return_preflight_failed")));
+	TestEqual(TEXT("Malformed address does not replay ProcessEvent"), Instrumentation.SemanticProcessEventCount, 1ull);
 	return true;
 }
 

@@ -389,6 +389,8 @@ GetAvidScriptFastPathValueKind(
 		return EFastPathValueKind::Vector;
 	case EAvidScriptRuntimeBindingKind::Object:
 		return EFastPathValueKind::Object;
+	case EAvidScriptRuntimeBindingKind::StructWire:
+		return EFastPathValueKind::Unsupported;
 	default:
 		return EFastPathValueKind::Unsupported;
 	}
@@ -652,6 +654,155 @@ int32 GetAvidScriptRuntimeArgumentWidth(
 		: Model.AbiTypes.Num();
 }
 
+bool IsAvidScriptStructWireFieldSafe(const FProperty* Property)
+{
+	return Property != nullptr
+		&& Property->ArrayDim == 1
+		&& Property->HasAnyPropertyFlags(CPF_BlueprintVisible)
+		&& !Property->HasAnyPropertyFlags(
+			CPF_Transient | CPF_EditorOnly | CPF_InstancedReference
+				| CPF_ContainsInstancedReference)
+		&& !Property->IsA<FNameProperty>()
+		&& !Property->IsA<FStrProperty>()
+		&& !Property->IsA<FTextProperty>()
+		&& !Property->IsA<FArrayProperty>()
+		&& !Property->IsA<FSetProperty>()
+		&& !Property->IsA<FMapProperty>()
+		&& !Property->IsA<FDelegateProperty>()
+		&& !Property->IsA<FMulticastDelegateProperty>()
+		&& !Property->IsA<FSoftObjectProperty>()
+		&& !Property->IsA<FWeakObjectProperty>()
+		&& !Property->IsA<FLazyObjectProperty>();
+}
+
+bool BuildAvidScriptStructWireProgram(
+	FProperty* Property,
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
+	const int32 Depth,
+	int32& InOutNodes,
+	TSet<FString>& ActiveTypes,
+	FValueCodecProgram& OutProgram,
+	FString& OutDetails)
+{
+	FStructProperty* StructProperty = CastField<FStructProperty>(Property);
+	if (StructProperty == nullptr || StructProperty->Struct == nullptr
+		|| Type.Kind != TEXT("struct_wire")
+		|| Type.CanonicalType != TEXT("struct_wire:") + StructProperty->Struct->GetPathName()
+		|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+		|| Type.Size <= 0 || Type.Size > 4096
+		|| Type.Alignment <= 0 || Type.Alignment > 4096
+		|| Depth > 8 || ActiveTypes.Contains(Type.StableId))
+	{
+		OutDetails = TEXT("The reflected struct no longer matches its fixed wire type.");
+		return false;
+	}
+
+	TArray<FProperty*, TInlineAllocator<128>> ReflectedFields;
+	for (TFieldIterator<FProperty> It(
+		StructProperty->Struct,
+		EFieldIteratorFlags::ExcludeSuper); It; ++It)
+	{
+		ReflectedFields.Add(*It);
+	}
+	if (ReflectedFields.Num() != Type.StructFields.Num())
+	{
+		OutDetails = TEXT("The reflected struct field count changed since descriptor generation.");
+		return false;
+	}
+
+	ActiveTypes.Add(Type.StableId);
+	OutProgram.Kind = EValueCodecKind::StructWire;
+	OutProgram.StructType = StructProperty->Struct;
+	OutProgram.WireSize = Type.Size;
+	OutProgram.WireAlignment = Type.Alignment;
+	OutProgram.GuestStorageSize = Type.Size;
+	OutProgram.Children.Reset(Type.StructFields.Num());
+	int32 PreviousEnd = 0;
+	int32 ExpectedAlignment = 1;
+	for (int32 Index = 0; Index < Type.StructFields.Num(); ++Index)
+	{
+		const FAvidScriptBindingStructFieldModel& Field = Type.StructFields[Index];
+		FProperty* ReflectedField = ReflectedFields[Index];
+		const FAvidScriptBindingTypeModel* ChildType = DeclaredTypesById.FindRef(Field.TypeId);
+		if (++InOutNodes > 128 || ChildType == nullptr
+			|| ReflectedField == nullptr
+			|| ReflectedField->GetOwnerStruct() != StructProperty->Struct
+			|| ReflectedField->GetName() != Field.Name
+			|| !IsAvidScriptStructWireFieldSafe(ReflectedField)
+			|| ChildType->Size <= 0 || ChildType->Size > 4096
+			|| ChildType->Alignment <= 0 || ChildType->Alignment > 4096
+			|| Field.WireOffset < PreviousEnd
+			|| Field.WireOffset % ChildType->Alignment != 0
+			|| Field.WireOffset > Type.Size
+			|| ChildType->Size > Type.Size - Field.WireOffset)
+		{
+			ActiveTypes.Remove(Type.StableId);
+			OutDetails = TEXT("The reflected struct field graph no longer matches its fixed wire layout.");
+			return false;
+		}
+
+		FValueCodecProgram& Child = OutProgram.Children.AddDefaulted_GetRef();
+		Child.Property = ReflectedField;
+		Child.Name = Field.Name;
+		Child.WireOffset = Field.WireOffset;
+		Child.WireSize = ChildType->Size;
+		Child.WireAlignment = ChildType->Alignment;
+		Child.GuestStorageSize = ChildType->Size;
+		if (ChildType->Kind == TEXT("struct_wire"))
+		{
+			if (!BuildAvidScriptStructWireProgram(
+				ReflectedField,
+				*ChildType,
+				DeclaredTypesById,
+				Depth + 1,
+				InOutNodes,
+				ActiveTypes,
+				Child,
+				OutDetails))
+			{
+				ActiveTypes.Remove(Type.StableId);
+				return false;
+			}
+			Child.WireOffset = Field.WireOffset;
+		}
+		else
+		{
+			FAvidScriptBindingValueModel ChildModel;
+			ChildModel.Name = Field.Name;
+			ChildModel.Direction = TEXT("value");
+			ChildModel.CanonicalType = ChildType->CanonicalType;
+			ChildModel.TypeId = ChildType->StableId;
+			ChildModel.Kind = ChildType->Kind;
+			ChildModel.CppType = ChildType->CppType;
+			ChildModel.AbiTypes = ChildType->AbiTypes;
+			if (!ResolveAvidScriptRuntimeKind(
+				ReflectedField,
+				ChildModel,
+				ChildType,
+				Child.Kind,
+				Child.ObjectClass)
+				|| Child.Kind == EValueCodecKind::Name
+				|| GetAvidScriptRuntimeGuestStorageSize(Child.Kind) != ChildType->Size)
+			{
+				ActiveTypes.Remove(Type.StableId);
+				OutDetails = TEXT("A reflected struct field is not a supported fixed-width leaf.");
+				return false;
+			}
+		}
+		PreviousEnd = Field.WireOffset + ChildType->Size;
+		ExpectedAlignment = FMath::Max(ExpectedAlignment, ChildType->Alignment);
+	}
+	ActiveTypes.Remove(Type.StableId);
+	const int32 ExpectedSize = Align(PreviousEnd, ExpectedAlignment);
+	if (Type.Alignment != ExpectedAlignment || Type.Size != ExpectedSize)
+	{
+		OutDetails = TEXT("The struct wire aggregate size or alignment changed.");
+		return false;
+	}
+	return true;
+}
+
 FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionModel& Binding)
 {
 	if (Binding.DispatchMode == TEXT("generated_native_s1"))
@@ -786,7 +937,7 @@ FString MakeAvidScriptRuntimePackageHash(const FAvidScriptBindingPackageModel& P
 bool BuildAvidScriptRuntimeValuePlan(
 	FProperty* Property,
 	const FAvidScriptBindingValueModel& Model,
-	const FAvidScriptBindingTypeModel* DeclaredType,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
 	int32 ArgumentOffset,
 	FAvidScriptRuntimeBindingValuePlan& OutPlan,
 	FString& OutDetails)
@@ -795,8 +946,35 @@ bool BuildAvidScriptRuntimeValuePlan(
 	OutPlan.Property = Property;
 	OutPlan.ArgumentOffset = ArgumentOffset;
 	OutPlan.Name = Model.Name;
-	if (!ParseAvidScriptRuntimeDirection(Model.Direction, OutPlan.Direction)
-		|| !ResolveAvidScriptRuntimeKind(
+	const FAvidScriptBindingTypeModel* DeclaredType = Model.CanonicalType == TEXT("void")
+		? nullptr
+		: DeclaredTypesById.FindRef(Model.TypeId);
+	if (!ParseAvidScriptRuntimeDirection(Model.Direction, OutPlan.Direction))
+	{
+		OutDetails = TEXT("The descriptor value direction is invalid.");
+		return false;
+	}
+	if (Model.Kind == TEXT("struct_wire"))
+	{
+		int32 Nodes = 0;
+		TSet<FString> ActiveTypes;
+		if (DeclaredType == nullptr
+			|| !BuildAvidScriptStructWireProgram(
+				Property,
+				*DeclaredType,
+				DeclaredTypesById,
+				1,
+				Nodes,
+				ActiveTypes,
+				OutPlan,
+				OutDetails))
+		{
+			return false;
+		}
+		OutPlan.ArgumentWidth = 1;
+		return true;
+	}
+	if (!ResolveAvidScriptRuntimeKind(
 			Property,
 			Model,
 			DeclaredType,
@@ -811,6 +989,8 @@ bool BuildAvidScriptRuntimeValuePlan(
 	}
 	OutPlan.ArgumentWidth = GetAvidScriptRuntimeArgumentWidth(Model, OutPlan.Direction);
 	OutPlan.GuestStorageSize = GetAvidScriptRuntimeGuestStorageSize(OutPlan.Kind);
+	OutPlan.WireSize = OutPlan.GuestStorageSize;
+	OutPlan.WireAlignment = DeclaredType == nullptr ? 1 : DeclaredType->Alignment;
 	return OutPlan.ArgumentWidth > 0 || OutPlan.Kind == EAvidScriptRuntimeBindingKind::Void;
 }
 
@@ -1641,15 +1821,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			TEXT("Selection or package identity does not match the descriptor contents."));
 		return false;
 	}
-	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesByCanonical;
 	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesById;
 	TMap<FString, const FAvidScriptBindingTypeModel*> DeclaredTypesByClassPath;
-	DeclaredTypesByCanonical.Reserve(Model.Types.Num());
 	DeclaredTypesById.Reserve(Model.Types.Num());
 	DeclaredTypesByClassPath.Reserve(Model.Types.Num());
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
-		DeclaredTypesByCanonical.Add(Type.CanonicalType, &Type);
 		DeclaredTypesById.Add(Type.StableId, &Type);
 		if (!Type.ClassPath.IsEmpty())
 		{
@@ -2260,8 +2437,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 					Property,
 					Binding.Parameters[0],
-					DeclaredTypesByCanonical.FindRef(
-						Binding.Parameters[0].CanonicalType),
+					DeclaredTypesById,
 					2,
 					PropertyValuePlan,
 					ValueDetails))
@@ -2305,8 +2481,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				if (!BuildAvidScriptRuntimeValuePlan(
 						SetterParameters[0],
 						Binding.Parameters[0],
-						DeclaredTypesByCanonical.FindRef(
-							Binding.Parameters[0].CanonicalType),
+						DeclaredTypesById,
 						2,
 						Plan.Parameters.AddDefaulted_GetRef(),
 						ValueDetails))
@@ -2329,7 +2504,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 					nullptr,
 					Binding.ReturnValue,
-					nullptr,
+					DeclaredTypesById,
 					ReturnOffset,
 					Plan.ReturnValue,
 					ReturnDetails))
@@ -2343,7 +2518,17 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 			Plan.ExpectedArgumentCount = ReturnOffset;
 			Plan.bRequiresGuestMemory =
-				Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Name;
+				Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Name
+				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::StructWire;
+			if (BlueprintSetter == nullptr
+				&& Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::StructWire)
+			{
+				Plan.FrameSize = Plan.Parameters[0].StructType->GetStructureSize();
+				Plan.FrameAlignment = FMath::Max(
+					1,
+					Plan.Parameters[0].StructType->GetMinAlignment());
+				Plan.RequiredScratchSize = Plan.FrameSize + Plan.FrameAlignment - 1;
+			}
 			const FString ExpectedIdentity =
 				MakeAvidScriptRuntimePropertySetCanonicalIdentity(
 					OwnerClass,
@@ -2411,7 +2596,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 				Property,
 				Binding.ReturnValue,
-				DeclaredTypesByCanonical.FindRef(Binding.ReturnValue.CanonicalType),
+				DeclaredTypesById,
 				2,
 				Plan.ReturnValue,
 				ReturnDetails))
@@ -2557,7 +2742,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (!BuildAvidScriptRuntimeValuePlan(
 				Property,
 				Parameter,
-				DeclaredTypesByCanonical.FindRef(Parameter.CanonicalType),
+				DeclaredTypesById,
 				ArgumentOffset,
 				ValuePlan,
 				Details))
@@ -2572,7 +2757,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			ArgumentOffset += ValuePlan.ArgumentWidth;
 			Plan.bRequiresGuestMemory |= ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Ref
 				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out
-				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name;
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
 		}
 
@@ -2581,7 +2767,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		if (!BuildAvidScriptRuntimeValuePlan(
 			ReturnProperty,
 			Binding.ReturnValue,
-			DeclaredTypesByCanonical.FindRef(Binding.ReturnValue.CanonicalType),
+			DeclaredTypesById,
 			ArgumentOffset,
 			Plan.ReturnValue,
 			ReturnDetails))

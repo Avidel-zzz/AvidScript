@@ -4,6 +4,7 @@
 #include "AvidScriptBindingInvocationKind.h"
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
+#include "AvidScriptObjectRegistry.h"
 #include "AvidScriptVmBackend.h"
 #include "CoreMinimal.h"
 
@@ -11,6 +12,7 @@ class FProperty;
 class UClass;
 class UFunction;
 class UObject;
+class UScriptStruct;
 class IAvidScriptVmGuestMemory;
 struct FAvidScriptBindingInvocationContext;
 
@@ -44,19 +46,33 @@ enum class EValueCodecKind : uint8
 	Object,
 	Vector,
 	Rotator,
-	Transform
+	Transform,
+	StructWire
 };
 
 struct FValueCodecProgram
 {
 	FProperty* Property = nullptr;
 	UClass* ObjectClass = nullptr;
+	UScriptStruct* StructType = nullptr;
 	EValueCodecDirection Direction = EValueCodecDirection::Value;
 	EValueCodecKind Kind = EValueCodecKind::Void;
 	int32 ArgumentOffset = INDEX_NONE;
 	int32 ArgumentWidth = 0;
 	int32 GuestStorageSize = 0;
+	int32 WireOffset = 0;
+	int32 WireSize = 0;
+	int32 WireAlignment = 1;
 	FString Name;
+	TArray<FValueCodecProgram> Children;
+};
+
+struct FCodecOutputTransaction
+{
+	TArray<FAvidScriptObjectHandle, TInlineAllocator<128>> BorrowedHandles;
+
+	void Commit();
+	void Rollback(const FAvidScriptBindingInvocationContext& Context);
 };
 
 struct FInvocationCodecProgram
@@ -109,11 +125,32 @@ bool SetValueFromGuest(
 	void* Frame,
 	FString& OutDetails);
 
+bool SetStructValueFromGuest(
+	const FValueCodecProgram& Program,
+	uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* StructValue,
+	FString& OutDetails);
+
+bool ResolveGuestAddress(
+	uint64 Cell,
+	uint32 ByteCount,
+	uint32& OutGuestAddress,
+	FString& OutDetails);
+
+bool PreflightValueOutput(
+	const FValueCodecProgram& Program,
+	uint32 GuestAddress,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	FString& OutDetails);
+
 bool WriteValueToGuest(
 	const FValueCodecProgram& Program,
 	uint32 GuestAddress,
 	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	void* Frame,
-	FString& OutDetails);
+	FString& OutDetails,
+	FCodecOutputTransaction* Transaction = nullptr);
 } // namespace UE::AvidScript::BindingPrivate
