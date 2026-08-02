@@ -382,12 +382,14 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance()
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
 	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	BackendSelection.bAllowFallback = true;
+	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
 FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
 	const FAvidScriptVmBackendSelection& InBackendSelection)
 	: BackendSelection(InBackendSelection)
 {
+	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
 FAvidScriptWasmRuntimeInstance::~FAvidScriptWasmRuntimeInstance()
@@ -1806,6 +1808,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	DebugMap.Reset();
 	BindingInvocationScratch.Reset();
 	FusedCallbackFrameStack.Reset();
+	Utf8ValueHeap.Reset();
 	InvalidateSelfCapability();
 	BeginPlayExport = {};
 	TickExport = {};
@@ -1860,6 +1863,7 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 	HostContext = InHostContext;
 	BindingInvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
 	BindingInvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
+	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 	BindingInvocationContext.OwnerHandle = HostContext.OwnerHandle;
 	BindingInvocationContext.World = HostContext.World;
 	BindingInvocationContext.WritePolicy = HostContext.ActorWritePolicy;
@@ -1874,6 +1878,7 @@ void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 	InvalidateSelfCapability();
 	HostContext = FAvidScriptWasmHostContext();
 	BindingInvocationContext = FAvidScriptBindingInvocationContext();
+	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleOwnerGetSlotImport()

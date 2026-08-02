@@ -1090,6 +1090,69 @@ bool FAvidScriptWasmErrorSmokeTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeUtf8ValueHeapLifecycleTest,
+	"AvidScript.Runtime.Utf8ValueHeap.Lifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeUtf8ValueHeapLifecycleTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptUtf8ValueHeap& Heap = Runtime.GetUtf8ValueHeapForTesting();
+	TestEqual(
+		TEXT("Default runtime binding context owns the session UTF-8 heap"),
+		Runtime.GetBindingInvocationContextForTesting().Utf8ValueHeap,
+		&Heap);
+
+	FAvidScriptWasmHostContext HostContext;
+	Runtime.SetHostContext(HostContext);
+	TestEqual(
+		TEXT("SetHostContext preserves the runtime-owned UTF-8 heap"),
+		Runtime.GetBindingInvocationContextForTesting().Utf8ValueHeap,
+		&Heap);
+	Runtime.ClearHostContext();
+	TestEqual(
+		TEXT("ClearHostContext preserves the runtime-owned UTF-8 heap"),
+		Runtime.GetBindingInvocationContextForTesting().Utf8ValueHeap,
+		&Heap);
+
+	FAvidScriptUtf8ValueReservation Reservation;
+	FString Error;
+	if (!TestTrue(TEXT("Runtime heap reserves a value"), Heap.Reserve(Reservation, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	const uint8 Bytes[] = { 's', 'e', 's', 's', 'i', 'o', 'n' };
+	uint32 Token = 0;
+	bool bCreated = false;
+	if (!TestTrue(
+			TEXT("Runtime heap publishes a value"),
+			Heap.InternReserved(
+				Reservation,
+				MakeArrayView(Bytes),
+				Token,
+				bCreated,
+				Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestTrue(TEXT("Runtime heap value is newly created"), bCreated);
+	TConstArrayView<uint8> Resolved;
+	TestTrue(TEXT("Runtime heap token resolves before unload"), Heap.Resolve(Token, Resolved, Error));
+
+	Runtime.Unload();
+	TestEqual(TEXT("Unload releases all UTF-8 heap values"), Heap.GetLiveValueCount(), 0);
+	TestFalse(TEXT("Unload invalidates prior session tokens"), Heap.Resolve(Token, Resolved, Error));
+	TestEqual(
+		TEXT("Unload keeps the binding context wired for a future module"),
+		Runtime.GetBindingInvocationContextForTesting().Utf8ValueHeap,
+		&Heap);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWorldSubsystemLifecycleSmokeTest,
 	"AvidScript.Runtime.WorldSubsystemLifecycleSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

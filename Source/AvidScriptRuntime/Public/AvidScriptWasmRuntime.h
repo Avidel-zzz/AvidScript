@@ -9,6 +9,7 @@
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptObjectOwnership.h"
+#include "AvidScriptUtf8ValueHeap.h"
 
 #include "CoreMinimal.h"
 
@@ -260,6 +261,15 @@ public:
 	}
 	uint64 GetReloadEpochForTesting() const { return ReloadEpoch; }
 	int32 GetHostImportCallCountForTesting() const { return HostImportCallCount; }
+	FAvidScriptUtf8ValueHeap& GetUtf8ValueHeapForTesting()
+	{
+		return Utf8ValueHeap;
+	}
+	const FAvidScriptBindingInvocationContext&
+	GetBindingInvocationContextForTesting() const
+	{
+		return BindingInvocationContext;
+	}
 	EAvidScriptVmTypedHostStatus RecordGeneratedStatusForTesting(
 		EAvidScriptVmTypedHostStatus Status)
 	{
@@ -576,6 +586,7 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptUtf8ValueHeap Utf8ValueHeap;
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
