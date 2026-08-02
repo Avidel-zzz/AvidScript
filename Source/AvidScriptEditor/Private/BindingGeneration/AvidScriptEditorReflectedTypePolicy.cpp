@@ -309,11 +309,6 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectReadableProperty(
 	{
 		return false;
 	}
-	if (Property->IsA<FNameProperty>())
-	{
-		OutErrorSource = TEXT("FName:return");
-		return false;
-	}
 	int32 StructNodes = 0;
 	TSet<const UScriptStruct*> ActiveStructs;
 	if (!ProjectProperty(
@@ -353,14 +348,19 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 
 	if (Property->IsA<FNameProperty>())
 	{
-		if (OutValue.Direction != TEXT("value") && OutValue.Direction != TEXT("const_ref"))
-		{
-			OutErrorSource = TEXT("FName:") + OutValue.Direction;
-			return false;
-		}
 		OutValue.Type.CanonicalType = TEXT("name:fname");
 		OutValue.Type.Kind = TEXT("name_utf8");
 		OutValue.Type.CppType = TEXT("FName");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		return true;
+	}
+	if (Property->IsA<FStrProperty>())
+	{
+		OutValue.Type.CanonicalType = TEXT("string:fstring");
+		OutValue.Type.Kind = TEXT("string_utf8");
+		OutValue.Type.CppType = TEXT("FString");
 		OutValue.Type.Size = 4;
 		OutValue.Type.Alignment = 4;
 		OutValue.Type.AbiValueTypes = { TEXT("i") };
@@ -452,7 +452,7 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 					+ FieldProperty->GetName() + TEXT(":") + OutErrorSource;
 				return false;
 			}
-			if (FieldValue.Type.Kind == TEXT("name_utf8") || FieldValue.Type.bVoid
+			if (FieldValue.Type.Kind == TEXT("name_utf8") || FieldValue.Type.Kind == TEXT("string_utf8") || FieldValue.Type.bVoid
 				|| FieldValue.Type.Size <= 0 || FieldValue.Type.Alignment <= 0)
 			{
 				ActiveStructs.Remove(StructProperty->Struct);

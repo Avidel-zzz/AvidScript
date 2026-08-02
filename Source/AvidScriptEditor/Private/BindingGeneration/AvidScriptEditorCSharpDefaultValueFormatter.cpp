@@ -151,6 +151,47 @@ bool IsStrictDecimalFloat(const FString& Input)
 	return Index == Value.Len();
 }
 
+bool TryFormatUtf8StringDefault(const FAvidScriptBindingValueModel& Value, FString& OutExpression)
+{
+	const bool bIsFName = Value.CanonicalType == TEXT("name:fname")
+		&& Value.Kind == TEXT("name_utf8") && Value.CppType == TEXT("FName");
+	const bool bIsFString = Value.CanonicalType == TEXT("string:fstring")
+		&& Value.Kind == TEXT("string_utf8") && Value.CppType == TEXT("FString");
+	if ((!bIsFName && !bIsFString)
+		|| (Value.Direction != TEXT("value") && Value.Direction != TEXT("const_ref")))
+	{
+		return false;
+	}
+
+	FString Escaped;
+	Escaped.Reserve(Value.DefaultValue.Len() + 2);
+	Escaped.AppendChar(TEXT('"'));
+	for (const TCHAR Character : Value.DefaultValue)
+	{
+		switch (Character)
+		{
+		case TEXT('\\'): Escaped += TEXT("\\\\"); break;
+		case TEXT('"'): Escaped += TEXT("\\\""); break;
+		case TEXT('\r'): Escaped += TEXT("\\r"); break;
+		case TEXT('\n'): Escaped += TEXT("\\n"); break;
+		case TEXT('\t'): Escaped += TEXT("\\t"); break;
+		default:
+			if (Character < TEXT(' '))
+			{
+				Escaped += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(Character));
+			}
+			else
+			{
+				Escaped.AppendChar(Character);
+			}
+			break;
+		}
+	}
+	Escaped.AppendChar(TEXT('"'));
+	OutExpression = MoveTemp(Escaped);
+	return true;
+}
+
 } // namespace
 
 bool FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(
@@ -161,6 +202,10 @@ bool FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(
 	if (!Value.bHasDefault || Value.Direction == TEXT("ref") || Value.Direction == TEXT("out"))
 	{
 		return false;
+	}
+	if (TryFormatUtf8StringDefault(Value, OutExpression))
+	{
+		return true;
 	}
 	if (Value.CanonicalType == TEXT("scalar:bool"))
 	{

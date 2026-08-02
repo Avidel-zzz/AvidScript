@@ -106,8 +106,11 @@ class UAvidScriptCSharpBindingEmitterTestObject : public UObject
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(BlueprintReadOnly, VisibleAnywhere)
+	UPROPERTY(BlueprintReadWrite)
 	FName ReadableFName = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite)
+	FString ReadableFString;
 
 	UFUNCTION(BlueprintPure)
 	int32 ReservedHandleNames(int32 Slot, int32 Generation) const
@@ -174,6 +177,35 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ConstRefFName(const FName& InName)
 	{
+	}
+
+	UFUNCTION(BlueprintPure)
+	FString ReturnFString() const
+	{
+		return TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void OutFString(FString& OutString)
+	{
+		OutString = TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void RefFString(UPARAM(ref) FString& InOutString)
+	{
+		InOutString += TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void ConstRefFString(const FString& InString)
+	{
+	}
+
+	UFUNCTION(BlueprintPure, meta = (CPP_Default_Value = "Avid"))
+	FString FStringValueDefault(FString Value) const
+	{
+		return Value;
 	}
 
 	UFUNCTION(BlueprintPure)

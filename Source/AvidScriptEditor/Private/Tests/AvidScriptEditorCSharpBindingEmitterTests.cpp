@@ -11,6 +11,7 @@
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
+#include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
 #include "BindingGeneration/AvidScriptEditorCSharpStateContractRenderer.h"
 
@@ -103,6 +104,25 @@ FString ExtractTypedProjectFacadeSurface(const FString& Source)
 	const FString StartToken = TEXT("[StructLayout(LayoutKind.Sequential)]\npublic readonly struct TSubclassOfAActor");
 	const int32 StartIndex = Source.Find(StartToken);
 	return StartIndex == INDEX_NONE ? FString() : Source.Mid(StartIndex);
+}
+
+FString ExtractNameStringProjectionSurface(const FString& Source)
+{
+	TArray<FString> Lines;
+	Source.ParseIntoArrayLines(Lines);
+	TArray<FString> ProjectionLines;
+	for (FString& Line : Lines)
+	{
+		Line.TrimStartAndEndInline();
+		if (Line.StartsWith(TEXT("public "))
+			&& (Line.Contains(TEXT("FName")) || Line.Contains(TEXT("FString"))
+				|| Line.Contains(TEXT("ReadableF"))))
+		{
+			ProjectionLines.Add(MoveTemp(Line));
+		}
+	}
+	ProjectionLines.Sort();
+	return FString::Join(ProjectionLines, TEXT("\n"));
 }
 
 } // namespace
@@ -1867,6 +1887,170 @@ bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Para
 		TestTrue(TEXT("Tampered FName metadata has a stable rejection category: ") + Mutation,
 			ErrorCategory == TEXT("unsupported_csharp_type") || ErrorCategory == TEXT("abi_signature_mismatch"));
 		TestTrue(TEXT("Tampered FName metadata emits no partial source: ") + Mutation, TamperedSource.IsEmpty());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterNameStringTest,
+	"AvidScript.Editor.CSharpBindingEmitter.NameString",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterNameStringTest::RunTest(const FString& Parameters)
+{
+	const FString OwnerPath = UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{ OwnerPath, TEXT("ReturnFName") },
+		{ OwnerPath, TEXT("OutFName") },
+		{ OwnerPath, TEXT("RefFName") },
+		{ OwnerPath, TEXT("ConstRefFName") },
+		{ OwnerPath, TEXT("ReturnFString") },
+		{ OwnerPath, TEXT("OutFString") },
+		{ OwnerPath, TEXT("RefFString") },
+		{ OwnerPath, TEXT("ConstRefFString") },
+		{ OwnerPath, TEXT("FStringValueDefault") }
+	};
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ OwnerPath, TEXT("ReadableFName"), true },
+		{ OwnerPath, TEXT("ReadableFString"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("FName and FString descriptor generates for C# emission"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+				TEXT("avidscript.engine.name_string.roundtrip"),
+				Functions,
+				Properties,
+				DescriptorJson,
+				DescriptorResult)))
+	{
+		return false;
+	}
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+			TEXT("FName and FString descriptor emits C#"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(DescriptorJson, Source, Manifest, EmitResult)))
+	{
+		AddError(EmitResult.ErrorCategory + TEXT(": ") + EmitResult.ErrorMessage);
+		return false;
+	}
+	FString RepeatedSource;
+	FString RepeatedManifest;
+	FAvidScriptCSharpBindingEmitResult RepeatedEmitResult;
+	TestTrue(TEXT("Repeated FName and FString emission succeeds"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			RepeatedSource,
+			RepeatedManifest,
+			RepeatedEmitResult));
+	TestEqual(TEXT("FName and FString generated source is deterministic"), RepeatedSource, Source);
+	TestEqual(TEXT("FName and FString generated manifest is deterministic"), RepeatedManifest, Manifest);
+	TestTrue(TEXT("FName return is rendered as string"), Source.Contains(TEXT("public string ReturnFName()")));
+	TestTrue(TEXT("FName out is rendered as string"), Source.Contains(TEXT("OutFName(out string OutName)")));
+	TestTrue(TEXT("FName ref is rendered as string"), Source.Contains(TEXT("RefFName(ref string InOutName)")));
+	TestTrue(TEXT("FName const-ref is rendered as string"), Source.Contains(TEXT("ConstRefFName(string InName)")));
+	TestTrue(TEXT("FString return is rendered as string"), Source.Contains(TEXT("public string ReturnFString()")));
+	TestTrue(TEXT("FString out is rendered as string"), Source.Contains(TEXT("OutFString(out string OutString)")));
+	TestTrue(TEXT("FString ref is rendered as string"), Source.Contains(TEXT("RefFString(ref string InOutString)")));
+	TestTrue(TEXT("FString const-ref is rendered as string"), Source.Contains(TEXT("ConstRefFString(string InString)")));
+	TestTrue(TEXT("FString value default is emitted as a C# string literal"), Source.Contains(TEXT("FStringValueDefault(string Value = \"Avid\")")));
+	TestTrue(TEXT("FName property renders string get and set"), Source.Contains(TEXT("public string ReadableFName\n    {\n        get")) && Source.Contains(TEXT("set\n        {")));
+	TestTrue(TEXT("FString property renders string get and set"), Source.Contains(TEXT("public string ReadableFString\n    {\n        get")) && Source.Contains(TEXT("set\n        {")));
+	TestTrue(TEXT("FName out uses string address storage"), Source.Contains(TEXT("out string p0_OutName")));
+	TestTrue(TEXT("FString out uses string address storage"), Source.Contains(TEXT("out string p0_OutString")));
+
+	FAvidScriptBindingValueModel DefaultValue;
+	DefaultValue.bHasDefault = true;
+	DefaultValue.Direction = TEXT("value");
+	DefaultValue.CanonicalType = TEXT("string:fstring");
+	DefaultValue.Kind = TEXT("string_utf8");
+	DefaultValue.CppType = TEXT("FString");
+	DefaultValue.DefaultValue = TEXT("Escaped \\\"value\\\" \\\\ slash\n");
+	FString FormattedDefault;
+	const TMap<FString, const FAvidScriptBindingTypeModel*> NoTypes;
+	TestTrue(TEXT("FString default formatter escapes C# syntax losslessly"),
+		FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(DefaultValue, NoTypes, FormattedDefault));
+	TestEqual(TEXT("FString default formatter preserves escaped content"),
+		FormattedDefault,
+		FString(TEXT("\"Escaped \\\\\\\"value\\\\\\\" \\\\\\\\ slash\\n\"")));
+	DefaultValue.Direction = TEXT("const_ref");
+	DefaultValue.CanonicalType = TEXT("name:fname");
+	DefaultValue.Kind = TEXT("name_utf8");
+	DefaultValue.CppType = TEXT("FName");
+	TestTrue(TEXT("FName const-ref default formatter emits a C# string literal"),
+		FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(DefaultValue, NoTypes, FormattedDefault));
+	TestEqual(TEXT("FName default formatter preserves escaped content"),
+		FormattedDefault,
+		FString(TEXT("\"Escaped \\\\\\\"value\\\\\\\" \\\\\\\\ slash\\n\"")));
+	DefaultValue.Direction = TEXT("ref");
+	DefaultValue.CanonicalType = TEXT("string:fstring");
+	DefaultValue.Kind = TEXT("string_utf8");
+	DefaultValue.CppType = TEXT("FString");
+	TestFalse(TEXT("FString ref does not receive a C# default"),
+		FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(DefaultValue, NoTypes, FormattedDefault));
+	DefaultValue.Direction = TEXT("out");
+	TestFalse(TEXT("FString out does not receive a C# default"),
+		FAvidScriptEditorCSharpDefaultValueFormatter::TryFormat(DefaultValue, NoTypes, FormattedDefault));
+
+	const FString FixturePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Tests/Fixtures/BindingGeneration/P57_11B2_NameStringRoundtrip.generated.cs")));
+	FString FixtureSource;
+	if (!TestTrue(TEXT("Name/string generated facade fixture loads"), FFileHelper::LoadFileToString(FixtureSource, *FixturePath)))
+	{
+		return false;
+	}
+	FixtureSource.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+	TArray<FString> FixtureLines;
+	FixtureSource.ParseIntoArrayLines(FixtureLines);
+	TArray<FString> ExpectedProjectionLines;
+	for (FString FixtureLine : FixtureLines)
+	{
+		FixtureLine.TrimStartAndEndInline();
+		if (FixtureLine.StartsWith(TEXT("// ")))
+		{
+			ExpectedProjectionLines.Add(FixtureLine.RightChop(3));
+		}
+	}
+	ExpectedProjectionLines.Sort();
+	TestEqual(TEXT("Name/string generated facade matches the deterministic projection fixture"),
+		ExtractNameStringProjectionSurface(Source),
+		FString::Join(ExpectedProjectionLines, TEXT("\n")));
+
+	FAvidScriptBindingPackageModel Package;
+	FString ParseErrorCategory;
+	FString ParseErrorSource;
+	if (!TestTrue(TEXT("Name/string descriptor parses into a renderer package"),
+		FAvidScriptBindingDescriptorParser::Parse(DescriptorJson, Package, ParseErrorCategory, ParseErrorSource)))
+	{
+		return false;
+	}
+	for (const FString& CanonicalType : { TEXT("name:fname"), TEXT("string:fstring") })
+	{
+		FAvidScriptBindingPackageModel Tampered = Package;
+		FAvidScriptBindingTypeModel* Type = Tampered.Types.FindByPredicate(
+			[&CanonicalType](const FAvidScriptBindingTypeModel& Candidate) { return Candidate.CanonicalType == CanonicalType; });
+		TestNotNull(TEXT("String type remains available for tamper: ") + CanonicalType, Type);
+		if (Type == nullptr)
+		{
+			continue;
+		}
+		Type->AbiTypes = { TEXT("f") };
+		FString TamperedSource;
+		FString ErrorCategory;
+		FString ErrorSource;
+		TestFalse(TEXT("Tampered string ABI fails closed: ") + CanonicalType,
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				Tampered,
+				TEXT("name-string-descriptor-hash"),
+				TamperedSource,
+				ErrorCategory,
+				ErrorSource));
+		TestTrue(TEXT("Tampered string ABI emits no partial source: ") + CanonicalType, TamperedSource.IsEmpty());
 	}
 	return true;
 }

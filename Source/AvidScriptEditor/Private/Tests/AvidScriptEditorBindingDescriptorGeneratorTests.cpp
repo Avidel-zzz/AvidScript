@@ -2646,50 +2646,62 @@ bool FAvidScriptEditorBindingDescriptorFNameProjectionTest::RunTest(const FStrin
 	}
 
 	const FString FixtureOwner = TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject");
-	FString PropertyJson;
-	FAvidScriptBindingDescriptorGenerateResult PropertyResult;
-	TestFalse(
-		TEXT("Readable FName property return fails closed"),
-		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
-			TEXT("avidscript.engine.fname.property"),
-			{},
-			{ { FixtureOwner, TEXT("ReadableFName") } },
-			PropertyJson,
-			PropertyResult));
-	TestEqual(TEXT("Readable FName property has a type category"),
-		PropertyResult.ErrorCategory, FString(TEXT("unsupported_property_type")));
-	TestTrue(TEXT("Readable FName property identifies the return direction"),
-		PropertyResult.ErrorSource.Contains(TEXT("FName:return")));
-
-	for (const FString& FunctionName : { TEXT("ReturnFName"), TEXT("OutFName"), TEXT("RefFName") })
-	{
-		FString RejectedJson;
-		FAvidScriptBindingDescriptorGenerateResult RejectedResult;
-		TestFalse(
-			TEXT("Unsupported FName direction fails closed: ") + FunctionName,
-			FAvidScriptEditorBindingDescriptorGenerator::Generate(
-				TEXT("avidscript.engine.fname.rejected"),
-				{ { FixtureOwner, FName(*FunctionName) } },
-				RejectedJson,
-				RejectedResult));
-		TestEqual(TEXT("Unsupported FName direction has a type category: ") + FunctionName,
-			RejectedResult.ErrorCategory, FString(TEXT("unsupported_property_type")));
-		const FString ExpectedDirection = FunctionName == TEXT("ReturnFName")
-			? TEXT("return")
-			: (FunctionName == TEXT("OutFName") ? TEXT("out") : TEXT("ref"));
-		TestTrue(TEXT("Unsupported FName direction identifies the exact direction: ") + FunctionName,
-			RejectedResult.ErrorSource.EndsWith(TEXT("FName:") + ExpectedDirection));
-	}
-
-	FString ConstRefJson;
-	FAvidScriptBindingDescriptorGenerateResult ConstRefResult;
+	const TArray<FAvidScriptReflectedFunctionSelection> StringSelections = {
+		{ FixtureOwner, TEXT("ReturnFName") },
+		{ FixtureOwner, TEXT("OutFName") },
+		{ FixtureOwner, TEXT("RefFName") },
+		{ FixtureOwner, TEXT("ConstRefFName") },
+		{ FixtureOwner, TEXT("ReturnFString") },
+		{ FixtureOwner, TEXT("OutFString") },
+		{ FixtureOwner, TEXT("RefFString") },
+		{ FixtureOwner, TEXT("ConstRefFString") },
+		{ FixtureOwner, TEXT("FStringValueDefault") }
+	};
+	const TArray<FAvidScriptReflectedPropertySelection> StringProperties = {
+		{ FixtureOwner, TEXT("ReadableFName"), true },
+		{ FixtureOwner, TEXT("ReadableFString"), true }
+	};
+	FString StringJson;
+	FAvidScriptBindingDescriptorGenerateResult StringResult;
 	TestTrue(
-		TEXT("Const FName reference input remains supported"),
-		FAvidScriptEditorBindingDescriptorGenerator::Generate(
-			TEXT("avidscript.engine.fname.constref"),
-			{ { FixtureOwner, TEXT("ConstRefFName") } },
-			ConstRefJson,
-			ConstRefResult));
+		TEXT("FName and FString functions and properties project in every supported direction"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateWithReadableProperties(
+			TEXT("avidscript.engine.name_string"),
+			StringSelections,
+			StringProperties,
+			StringJson,
+			StringResult));
+
+	TSharedPtr<FJsonObject> StringRoot;
+	if (TestTrue(TEXT("FName and FString descriptor parses"), ParseDescriptor(StringJson, StringRoot)) && StringRoot.IsValid())
+	{
+		const auto AssertStringType = [this, &StringRoot](const FString& CanonicalType, const FString& Kind, const FString& CppType)
+		{
+			const TSharedPtr<FJsonObject> Type = FindType(StringRoot->GetArrayField(TEXT("types")), CanonicalType);
+			TestNotNull(TEXT("String type descriptor is present: ") + CanonicalType, Type.Get());
+			if (!Type.IsValid())
+			{
+				return;
+			}
+			TestEqual(TEXT("String type kind is exact: ") + CanonicalType, Type->GetStringField(TEXT("kind")), Kind);
+			TestEqual(TEXT("String type C++ name is exact: ") + CanonicalType, Type->GetStringField(TEXT("cpp_type")), CppType);
+			TestEqual(TEXT("String type size is exact: ") + CanonicalType, Type->GetIntegerField(TEXT("size")), 4);
+			TestEqual(TEXT("String type alignment is exact: ") + CanonicalType, Type->GetIntegerField(TEXT("alignment")), 4);
+			const TArray<TSharedPtr<FJsonValue>>& AbiTypes = Type->GetArrayField(TEXT("abi_types"));
+			TestTrue(TEXT("String type ABI is one address cell: ") + CanonicalType,
+				AbiTypes.Num() == 1 && AbiTypes[0]->AsString() == TEXT("i"));
+		};
+		AssertStringType(TEXT("name:fname"), TEXT("name_utf8"), TEXT("FName"));
+		AssertStringType(TEXT("string:fstring"), TEXT("string_utf8"), TEXT("FString"));
+
+		for (const FAvidScriptReflectedFunctionSelection& Selection : StringSelections)
+		{
+			const FString FunctionName = Selection.FunctionName.ToString();
+			const TSharedPtr<FJsonObject> Binding = FindBinding(StringRoot->GetArrayField(TEXT("bindings")), FixtureOwner, FunctionName);
+			TestNotNull(TEXT("String function binding projects: ") + FunctionName, Binding.Get());
+		}
+		TestTrue(TEXT("String projection does not raise the descriptor schema"), StringRoot->GetIntegerField(TEXT("schema_version")) <= 9);
+	}
 	return true;
 }
 

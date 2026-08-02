@@ -60,20 +60,25 @@ const FAvidScriptBindingTypeModel* FindRenderedTypeById(
 	return Type == nullptr ? nullptr : *Type;
 }
 
-bool IsExactFNameDescriptor(
+bool IsExactUtf8StringDescriptor(
 	const FAvidScriptBindingValueModel& Value,
-	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical)
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TCHAR* CanonicalType,
+	const TCHAR* Kind,
+	const TCHAR* CppType)
 {
-	const FAvidScriptBindingTypeModel* Type = FindRenderedType(TypesByCanonical, TEXT("name:fname"));
-	return Value.CanonicalType == TEXT("name:fname")
-		&& Value.Kind == TEXT("name_utf8")
-		&& Value.CppType == TEXT("FName")
-		&& (Value.Direction == TEXT("value") || Value.Direction == TEXT("const_ref"))
+	const FAvidScriptBindingTypeModel* Type = FindRenderedType(TypesByCanonical, CanonicalType);
+	return Value.CanonicalType == CanonicalType
+		&& Value.Kind == Kind
+		&& Value.CppType == CppType
+		&& (Value.Direction == TEXT("value") || Value.Direction == TEXT("const_ref")
+			|| Value.Direction == TEXT("ref") || Value.Direction == TEXT("out")
+			|| Value.Direction == TEXT("return"))
 		&& Value.AbiTypes == TArray<FString>{ TEXT("i") }
 		&& Type != nullptr
-		&& Type->CanonicalType == TEXT("name:fname")
-		&& Type->Kind == TEXT("name_utf8")
-		&& Type->CppType == TEXT("FName")
+		&& Type->CanonicalType == CanonicalType
+		&& Type->Kind == Kind
+		&& Type->CppType == CppType
 		&& Type->Size == 4
 		&& Type->Alignment == 4
 		&& Type->AbiTypes == TArray<FString>{ TEXT("i") };
@@ -144,7 +149,27 @@ bool ResolveCSharpType(
 	if (Value.CanonicalType == TEXT("scalar:u64")) { OutType = TEXT("ulong"); return true; }
 	if (Value.CanonicalType == TEXT("name:fname"))
 	{
-		if (!IsExactFNameDescriptor(Value, TypesByCanonical))
+		if (!IsExactUtf8StringDescriptor(
+				Value,
+				TypesByCanonical,
+				TEXT("name:fname"),
+				TEXT("name_utf8"),
+				TEXT("FName")))
+		{
+			OutErrorSource = Value.CanonicalType;
+			return false;
+		}
+		OutType = TEXT("string");
+		return true;
+	}
+	if (Value.CanonicalType == TEXT("string:fstring"))
+	{
+		if (!IsExactUtf8StringDescriptor(
+				Value,
+				TypesByCanonical,
+				TEXT("string:fstring"),
+				TEXT("string_utf8"),
+				TEXT("FString")))
 		{
 			OutErrorSource = Value.CanonicalType;
 			return false;
