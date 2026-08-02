@@ -1251,6 +1251,8 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 		FAvidScriptWasmHostContext HostContext;
 		HostContext.ObjectRegistry = &Registry;
 		HostContext.OwnerHandle = OwnerHandle;
+		HostContext.ActorWritePolicy =
+			EAvidScriptActorWritePolicy::AllowWrites;
 
 		FAvidScriptWasmReloadSession Session;
 		Session.SetBackendSelectionForTesting(Lane.Selection);
