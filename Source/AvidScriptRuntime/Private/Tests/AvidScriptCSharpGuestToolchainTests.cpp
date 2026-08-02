@@ -1206,7 +1206,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 	InitialName.AppendChar(static_cast<TCHAR>(0x540d));
 	FString InitialString(TEXT("Input_String_"));
 	InitialString.AppendChar(static_cast<TCHAR>(0x503c));
-	const FString NoneName = NAME_None.ToString();
+	const FString NoneName = FName(NAME_None).ToString();
 
 	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
 	{
