@@ -332,7 +332,9 @@ Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM/Public' @(
 )
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptVM' @(
-    '\b(UFunction|FProperty|FAvidScriptObjectRegistry)\b'
+    '\b(UFunction|FProperty|FAvidScriptObjectRegistry|FNameProperty|FStrProperty|FAvidScriptUtf8ValueHeap)\b',
+    '\bFName\b',
+    '\b(name_utf8|string_utf8)\b'
 )
 
 $WasmtimeBuild = Read-RequiredFile 'Source/ThirdParty/Wasmtime/Wasmtime.Build.cs'
@@ -672,6 +674,9 @@ $RuntimeBackendLaneHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/
 $RuntimeWasmTests = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptWasmRuntimeTests.cpp'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$Utf8ValueHeapHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptUtf8ValueHeap.h'
+$Utf8ValueHeapSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptUtf8ValueHeap.cpp'
+$BindingCodecProgramHeader = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.h'
 $BindingCodecProgramSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
 $BindingPreparedInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
 $BindingCodecProgram = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
@@ -2937,6 +2942,62 @@ foreach ($ForbiddenStructWireExecutorSpecialCase in @(
 }
 if ($BindingCodecProgramSource.Contains('#if 0')) {
     Add-Violation 'Bindings codec production source must not retain disabled implementation blocks'
+}
+foreach ($RequiredUtf8HeapContract in @(
+    'MaxValueBytes = 1024u * 1024u',
+    'MaxSlots = MAX_uint16',
+    'TokenToSlots',
+    'GNextUtf8ValueCapability',
+    'utf8_value_token_space_exhausted',
+    'IsCanonicalUtf8'
+)) {
+    if (-not $Utf8ValueHeapHeader.Contains($RequiredUtf8HeapContract) -and
+        -not $Utf8ValueHeapSource.Contains($RequiredUtf8HeapContract)) {
+        Add-Violation "Bindings variable UTF-8 heap is missing $RequiredUtf8HeapContract"
+    }
+}
+foreach ($RequiredUtf8CodecContract in @(
+    'EValueCodecKind::Name',
+    'EValueCodecKind::String',
+    'ReadLinearUtf8Payload',
+    'SetUtf8Value',
+    'InternNextUtf8Value',
+    'FPreparedValueOutput',
+    'PublishValueOutput'
+)) {
+    if (-not $BindingCodecProgramHeader.Contains($RequiredUtf8CodecContract) -and
+        -not $BindingCodecProgramSource.Contains($RequiredUtf8CodecContract) -and
+        -not $BindingPreparedInvocationSource.Contains($RequiredUtf8CodecContract)) {
+        Add-Violation "Bindings variable UTF-8 codec is missing $RequiredUtf8CodecContract"
+    }
+}
+foreach ($RequiredRuntimeUtf8OwnershipContract in @(
+    'FAvidScriptUtf8ValueHeap Utf8ValueHeap',
+    'BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap',
+    'Utf8ValueHeap.Reset()'
+)) {
+    if (-not $RuntimeHeader.Contains($RequiredRuntimeUtf8OwnershipContract) -and
+        -not $RuntimeSource.Contains($RequiredRuntimeUtf8OwnershipContract)) {
+        Add-Violation "Runtime UTF-8 heap ownership is missing $RequiredRuntimeUtf8OwnershipContract"
+    }
+}
+$AtomicGuestOutputSlice = Get-SourceSlice `
+    -Source $BindingPreparedInvocationSource `
+    -StartToken 'TArray<uint32, TInlineAllocator<16>> ParameterGuestAddresses;' `
+    -EndToken '} // namespace UE::AvidScript::BindingPrivate' `
+    -Description 'prepared reflected atomic guest output path'
+Test-RequiredTokenSequence `
+    -Source $AtomicGuestOutputSlice `
+    -Tokens @(
+        'PreflightValueOutput(',
+        'PrepareHostEffect()',
+        'Receiver.ProcessEvent(',
+        'WriteValueToGuest(',
+        'PublishValueOutput(',
+        'OutputTransaction.Commit()') `
+    -Description 'prepared reflected atomic guest output path'
+if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {
+    Add-Violation 'Bindings output publication must use secured mutable ranges instead of fallible WriteBytes calls'
 }
 foreach ($RequiredPreparedWasmtimeContract in @(
     'SelfF32TripleToGuestVector',
