@@ -1090,9 +1090,9 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			TEXT("used_import_count"),
 			UsedBindingImportCount));
 	TestEqual(
-		TEXT("C# reachability retains exactly the twelve exercised UFUNCTION/property imports"),
+		TEXT("C# reachability retains twelve bindings plus the owner capability import"),
 		UsedBindingImportCount,
-		12);
+		13);
 
 	FString ManifestArtifactPath;
 	FString GuestIrArtifactPath;
