@@ -26,7 +26,7 @@ bool InternUtf8(
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptUtf8ValueHeapTest,
-	"AvidScript.Bindings.Utf8ValueHeap",
+	"AvidScript.Bindings.Utf8ValueHeap.Core",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FAvidScriptUtf8ValueHeapTest::RunTest(const FString& Parameters)
