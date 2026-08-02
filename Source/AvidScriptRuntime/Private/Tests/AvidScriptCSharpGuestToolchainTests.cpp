@@ -14,8 +14,11 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -172,6 +175,53 @@ FString GetCSharpToolchainReportPath()
 	ReportPath = FPaths::ConvertRelativePathToFull(ReportPath);
 	FPaths::NormalizeFilename(ReportPath);
 	return ReportPath;
+}
+
+FString GetCSharpNameStringToolchainReportPath()
+{
+	FString ReportPath = FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest"),
+		TEXT("P57_11B2_NameStringRoundtrip"),
+		TEXT("name_string_roundtrip.csharp.report.json"));
+	ReportPath = FPaths::ConvertRelativePathToFull(ReportPath);
+	FPaths::NormalizeFilename(ReportPath);
+	return ReportPath;
+}
+
+FString GetCSharpNameStringSourcePath()
+{
+	FString SourcePath = FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript"),
+		TEXT("Source"),
+		TEXT("AvidScriptRuntime"),
+		TEXT("Private"),
+		TEXT("Tests"),
+		TEXT("Fixtures"),
+		TEXT("P57_11B2_NameStringRoundtrip.cs"));
+	SourcePath = FPaths::ConvertRelativePathToFull(SourcePath);
+	FPaths::NormalizeFilename(SourcePath);
+	return SourcePath;
+}
+
+bool ReadCSharpNameStringProperties(
+	UObject& Object,
+	FString& OutName,
+	FString& OutString)
+{
+	const FNameProperty* const NameProperty =
+		FindFProperty<FNameProperty>(Object.GetClass(), TEXT("ReadableFName"));
+	const FStrProperty* const StringProperty =
+		FindFProperty<FStrProperty>(Object.GetClass(), TEXT("ReadableFString"));
+	if (NameProperty == nullptr || StringProperty == nullptr)
+	{
+		return false;
+	}
+
+	OutName = NameProperty->GetPropertyValue_InContainer(&Object).ToString();
+	OutString = StringProperty->GetPropertyValue_InContainer(&Object);
+	return true;
 }
 
 FString ResolveCSharpReportArtifactPath(const FString& ArtifactPath)
@@ -933,6 +983,349 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpNameStringUFunctionEndToEndTest,
+	"AvidScript.Guest.CSharp.NameStringUFunctionEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
+	const FString& Parameters)
+{
+	const FString ReportPath = GetCSharpNameStringToolchainReportPath();
+	if (!FPaths::FileExists(ReportPath))
+	{
+		AddError(FString::Printf(
+			TEXT("Phase 57.11B2 C# report is missing; stage the generated binding package and run BuildCSharpActorLifecycle.ps1 before Automation. report=%s"),
+			*ReportPath));
+		return true;
+	}
+
+	FString ReportJson;
+	if (!FFileHelper::LoadFileToString(ReportJson, *ReportPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read Phase 57.11B2 C# report: %s"), *ReportPath));
+		return true;
+	}
+
+	TSharedPtr<FJsonObject> Report;
+	const TSharedRef<TJsonReader<>> ReportReader =
+		TJsonReaderFactory<>::Create(ReportJson);
+	if (!FJsonSerializer::Deserialize(ReportReader, Report) || !Report.IsValid())
+	{
+		AddError(FString::Printf(TEXT("Phase 57.11B2 C# report is invalid JSON: %s"), *ReportPath));
+		return true;
+	}
+
+	if (!TestEqual(
+			TEXT("Phase 57.11B2 source builds through the formal direct ABI toolchain"),
+			Report->GetStringField(TEXT("result")),
+			FString(TEXT("direct_abi_built"))))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FJsonObject>* SourceObjectPtr = nullptr;
+	const TSharedPtr<FJsonObject>* BindingPackageObjectPtr = nullptr;
+	const TSharedPtr<FJsonObject>* ArtifactsObjectPtr = nullptr;
+	if (!Report->TryGetObjectField(TEXT("source"), SourceObjectPtr)
+		|| SourceObjectPtr == nullptr || !SourceObjectPtr->IsValid()
+		|| !Report->TryGetObjectField(TEXT("binding_package"), BindingPackageObjectPtr)
+		|| BindingPackageObjectPtr == nullptr || !BindingPackageObjectPtr->IsValid()
+		|| !Report->TryGetObjectField(TEXT("artifacts"), ArtifactsObjectPtr)
+		|| ArtifactsObjectPtr == nullptr || !ArtifactsObjectPtr->IsValid())
+	{
+		AddError(TEXT("Phase 57.11B2 report is missing source, binding package, or artifact metadata."));
+		return true;
+	}
+
+	const FString ExpectedSourcePath = GetCSharpNameStringSourcePath();
+	const FString ReportSourcePath = ResolveCSharpReportArtifactPath(
+		(*SourceObjectPtr)->GetStringField(TEXT("file")));
+	TestEqual(
+		TEXT("Formal Roslyn input is the Phase 57.11B2 C# fixture"),
+		ReportSourcePath,
+		ExpectedSourcePath);
+
+	FString ReferenceSourceArtifactPath;
+	(*BindingPackageObjectPtr)->TryGetStringField(
+		TEXT("reference_source_file"),
+		ReferenceSourceArtifactPath);
+	const FString ReferenceSourcePath =
+		ResolveCSharpReportArtifactPath(ReferenceSourceArtifactPath);
+	if (!TestTrue(
+			TEXT("Build report retains the generated C# facade source"),
+			!ReferenceSourcePath.IsEmpty() && FPaths::FileExists(ReferenceSourcePath)))
+	{
+		return true;
+	}
+
+	FString GeneratedFacade;
+	if (!FFileHelper::LoadFileToString(GeneratedFacade, *ReferenceSourcePath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read generated C# facade: %s"), *ReferenceSourcePath));
+		return true;
+	}
+	TestTrue(TEXT("Generated facade exposes FName input"),
+		GeneratedFacade.Contains(TEXT("ConstRefFName(string InName)")));
+	TestTrue(TEXT("Generated facade exposes FString input"),
+		GeneratedFacade.Contains(TEXT("ConstRefFString(string InString)")));
+	TestTrue(TEXT("Generated facade exposes FName ref/out/return"),
+		GeneratedFacade.Contains(TEXT("RefFName(ref string InOutName)"))
+		&& GeneratedFacade.Contains(TEXT("OutFName(out string OutName)"))
+		&& GeneratedFacade.Contains(TEXT("public string ReturnFName()")));
+	TestTrue(TEXT("Generated facade exposes FString ref/out/return"),
+		GeneratedFacade.Contains(TEXT("RefFString(ref string InOutString)"))
+		&& GeneratedFacade.Contains(TEXT("OutFString(out string OutString)"))
+		&& GeneratedFacade.Contains(TEXT("public string ReturnFString()")));
+	TestTrue(TEXT("Generated facade exposes FName and FString properties"),
+		GeneratedFacade.Contains(TEXT("public string ReadableFName"))
+		&& GeneratedFacade.Contains(TEXT("public string ReadableFString")));
+
+	int32 UsedBindingImportCount = 0;
+	TestTrue(
+		TEXT("Build report records the generated binding import slice"),
+		(*BindingPackageObjectPtr)->TryGetNumberField(
+			TEXT("used_import_count"),
+			UsedBindingImportCount));
+	TestEqual(
+		TEXT("C# reachability retains exactly the twelve exercised UFUNCTION/property imports"),
+		UsedBindingImportCount,
+		12);
+
+	FString ManifestArtifactPath;
+	FString GuestIrArtifactPath;
+	FString WasmArtifactPath;
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("manifest_file"), ManifestArtifactPath);
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("guest_ir_file"), GuestIrArtifactPath);
+	(*ArtifactsObjectPtr)->TryGetStringField(TEXT("wasm_file"), WasmArtifactPath);
+	const FString ManifestPath = ResolveCSharpReportArtifactPath(ManifestArtifactPath);
+	const FString GuestIrPath = ResolveCSharpReportArtifactPath(GuestIrArtifactPath);
+	const FString WasmPath = ResolveCSharpReportArtifactPath(WasmArtifactPath);
+	if (!TestTrue(TEXT("Formal Roslyn/Guest compiler writes Guest IR"),
+			!GuestIrPath.IsEmpty() && FPaths::FileExists(GuestIrPath))
+		|| !TestTrue(TEXT("Formal Guest IR backend writes Wasm"),
+			!WasmPath.IsEmpty() && FPaths::FileExists(WasmPath))
+		|| !TestTrue(TEXT("Formal build writes the runtime manifest"),
+			!ManifestPath.IsEmpty() && FPaths::FileExists(ManifestPath)))
+	{
+		return true;
+	}
+
+	FString GuestIrJson;
+	if (!FFileHelper::LoadFileToString(GuestIrJson, *GuestIrPath))
+	{
+		AddError(FString::Printf(TEXT("Failed to read Phase 57.11B2 Guest IR: %s"), *GuestIrPath));
+		return true;
+	}
+	TSharedPtr<FJsonObject> GuestIr;
+	const TSharedRef<TJsonReader<>> GuestIrReader =
+		TJsonReaderFactory<>::Create(GuestIrJson);
+	if (!FJsonSerializer::Deserialize(
+			GuestIrReader,
+			GuestIr)
+		|| !GuestIr.IsValid())
+	{
+		AddError(FString::Printf(TEXT("Phase 57.11B2 Guest IR is invalid: %s"), *GuestIrPath));
+		return true;
+	}
+	TestEqual(TEXT("Phase 57.11B2 Guest IR schema"),
+		GuestIr->GetIntegerField(TEXT("schema_version")), 2);
+	TestEqual(TEXT("Phase 57.11B2 Guest IR version"),
+		GuestIr->GetStringField(TEXT("ir_version")), FString(TEXT("1.1")));
+	TestTrue(TEXT("Phase 57.11B2 Guest IR lowering succeeds"),
+		GuestIr->GetBoolField(TEXT("succeeded")));
+
+	const TArray<TSharedPtr<FJsonValue>>* GuestImports = nullptr;
+	int32 DynamicBindingImportCount = 0;
+	if (GuestIr->TryGetArrayField(TEXT("imports"), GuestImports)
+		&& GuestImports != nullptr)
+	{
+		for (const TSharedPtr<FJsonValue>& ImportValue : *GuestImports)
+		{
+			const TSharedPtr<FJsonObject> Import = ImportValue.IsValid()
+				? ImportValue->AsObject()
+				: nullptr;
+			if (Import.IsValid()
+				&& Import->GetStringField(TEXT("module")) == TEXT("avidscript")
+				&& Import->GetStringField(TEXT("name")).StartsWith(TEXT("avid_ue_")))
+			{
+				++DynamicBindingImportCount;
+			}
+		}
+	}
+	TestEqual(
+		TEXT("Guest IR directly imports every exercised generated binding"),
+		DynamicBindingImportCount,
+		12);
+
+	FModuleManager::LoadModulePtr<IModuleInterface>(TEXT("AvidScriptEditor"));
+	UClass* const FixtureClass = FindObject<UClass>(
+		nullptr,
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"));
+	if (!TestNotNull(TEXT("Phase 57.11B2 reflected UFUNCTION fixture class loads"), FixtureClass))
+	{
+		return true;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return true;
+	}
+	if (!TestTrue(
+			TEXT("Runtime manifest loads a verified generated binding package"),
+			Manifest.BindingPackage.IsValid()))
+	{
+		return true;
+	}
+
+	TestEqual(
+		TEXT("Generated package binds the exact UFUNCTION fixture owner"),
+		Manifest.BindingPackage->GetExpectedSelfClass(),
+		FixtureClass);
+
+	TArray<FAvidScriptRuntimeBackendTestLane> Lanes =
+		GetAvidScriptRuntimeBackendTestLanes();
+	if (!TestEqual(
+			TEXT("Phase 57.11B2 end-to-end gate requires WAMR and Wasmtime"),
+			Lanes.Num(),
+			2))
+	{
+		return true;
+	}
+
+	FString InitialName(TEXT("Input_Name_"));
+	InitialName.AppendChar(static_cast<TCHAR>(0x540d));
+	FString InitialString(TEXT("Input_String_"));
+	InitialString.AppendChar(static_cast<TCHAR>(0x503c));
+	const FString NoneName = NAME_None.ToString();
+
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
+	{
+		AddInfo(AvidScriptRuntimeLaneLabel(
+			Lane,
+			TEXT("running generated C# FName/FString UFUNCTION oracle")));
+		UObject* const FixtureObject = NewObject<UObject>(
+			GetTransientPackage(),
+			FixtureClass);
+		if (!TestNotNull(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("UFUNCTION fixture instance creates")),
+				FixtureObject))
+		{
+			continue;
+		}
+
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptObjectHandleResult RegisterResult;
+		const FAvidScriptObjectHandle OwnerHandle =
+			Registry.RegisterObject(FixtureObject, RegisterResult);
+		if (!TestTrue(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("UFUNCTION fixture registers")),
+				RegisterResult.bSucceeded))
+		{
+			continue;
+		}
+
+		FAvidScriptWasmHostContext HostContext;
+		HostContext.ObjectRegistry = &Registry;
+		HostContext.OwnerHandle = OwnerHandle;
+
+		FAvidScriptWasmReloadSession Session;
+		Session.SetBackendSelectionForTesting(Lane.Selection);
+		Session.SetHostContext(HostContext);
+		FAvidScriptWasmReloadResult ReloadResult;
+		if (!Session.LoadInitialModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				Manifest,
+				ReloadResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *ReloadResult.ErrorMessage));
+			continue;
+		}
+
+		auto TestProperties = [this, &Lane, FixtureObject](
+			const TCHAR* Stage,
+			const FString& ExpectedName,
+			const FString& ExpectedString)
+		{
+			FString ActualName;
+			FString ActualString;
+			const bool bRead = ReadCSharpNameStringProperties(
+				*FixtureObject,
+				ActualName,
+				ActualString);
+			TestTrue(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("reflected string properties read")),
+				bRead);
+			if (bRead)
+			{
+				TestEqual(
+					*AvidScriptRuntimeLaneLabel(Lane, *FString::Printf(TEXT("%s FName"), Stage)),
+					ActualName,
+					ExpectedName);
+				TestEqual(
+					*AvidScriptRuntimeLaneLabel(Lane, *FString::Printf(TEXT("%s FString"), Stage)),
+					ActualString,
+					ExpectedString);
+			}
+		};
+
+		TestProperties(TEXT("property set"), InitialName, InitialString);
+		FAvidScriptWasmSmokeResult TickResult;
+		if (!Session.TickLive(1.0f / 60.0f, TickResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
+			continue;
+		}
+		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		TestProperties(TEXT("property get and const-ref input"), InitialName, InitialString);
+
+		if (!Session.TickLive(1.0f / 60.0f, TickResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
+			continue;
+		}
+		TestProperties(
+			TEXT("ref output"),
+			NoneName,
+			InitialString + TEXT("Avid"));
+
+		if (!Session.TickLive(1.0f / 60.0f, TickResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
+			continue;
+		}
+		TestProperties(TEXT("out output"), NoneName, TEXT("Avid"));
+
+		if (!Session.TickLive(1.0f / 60.0f, TickResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
+			continue;
+		}
+		TestProperties(TEXT("return output"), NoneName, TEXT("Avid"));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("all four scripted stages tick")),
+			Session.GetLiveTickCallCount(),
+			4);
+
+		FAvidScriptWasmSmokeResult EndPlayResult;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("C# EndPlay completes")),
+			Session.EndPlayLive(EndPlayResult));
+	}
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptCSharpToolchainReportSmokeTest,
 	"AvidScript.Guest.CSharp.ToolchainReportSmoke",

@@ -1,0 +1,36 @@
+{
+  "schema_version": 5,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B2_NameStringRoundtrip.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_p57_11b2_name_string_roundtrip",
+  "artifact_stem": "name_string_roundtrip",
+  "output_root": "Saved/AvidScriptCSharpGuest/P57_11B2_NameStringRoundtrip",
+  "report_path": "Saved/AvidScriptCSharpGuest/P57_11B2_NameStringRoundtrip/name_string_roundtrip.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/P57_11B2_NameStringRoundtrip/name_string_roundtrip.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.test.p57_11b2.name_string_roundtrip",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject",
+        "include_functions": [
+          "ReturnFName",
+          "OutFName",
+          "RefFName",
+          "ConstRefFName",
+          "ReturnFString",
+          "OutFString",
+          "RefFString",
+          "ConstRefFString"
+        ],
+        "writable_properties": [
+          "ReadableFName",
+          "ReadableFString"
+        ]
+      }
+    ]
+  }
+}
