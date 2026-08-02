@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.11B2",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-08-02T08:59:15.7248701+00:00",
+  "candidate": {
+    "main_commit": "e961cb7bdb2fc36f4114855d8529d3fb8c6f8169",
+    "clean_commit": "ef41ce63e68ebbd9e4286962432680723129f85b",
+    "tree": "7ffabe65931e116d82ab846e090267b562238dd6",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit"
+  },
+  "coverage": {
+    "descriptor_schema_version": 9,
+    "ue_types": [
+      "FName",
+      "FString"
+    ],
+    "directions": [
+      "value",
+      "const_ref",
+      "ref",
+      "out",
+      "return",
+      "property_get",
+      "property_set"
+    ],
+    "csharp_public_type": "string",
+    "gameplay_accepted_functions": 352,
+    "gameplay_generated_bindings": 354,
+    "gameplay_authorization_imports": 356,
+    "new_gameplay_fname_return_apis": [
+      "/Script/Engine.Actor::GetAttachParentSocketName",
+      "/Script/Engine.SceneComponent::GetAttachSocketName",
+      "/Script/Engine.PrimitiveComponent::GetCollisionProfileName"
+    ],
+    "removed_gameplay_bindings": 0,
+    "function_name_special_cases": 0,
+    "vm_string_type_branches": 0
+  },
+  "heap_contract": {
+    "wire_reference": "i32",
+    "token_layout": "1-bit tag + 31-bit process-unique capability id",
+    "token_reuse": false,
+    "maximum_live_values_per_session": 65535,
+    "maximum_value_bytes": 1048576,
+    "process_id_exhaustion": "fail_closed",
+    "cross_session_resolution": "rejected",
+    "reset_stale_resolution": "rejected",
+    "output_publication": "preflighted_and_atomic"
+  },
+  "e2e_metrics_per_backend": {
+    "backends": [
+      "WAMR",
+      "Wasmtime"
+    ],
+    "literal_inputs": 2,
+    "output_publications": 8,
+    "unique_live_values": 5,
+    "intern_hits": 3,
+    "ref_roundtrips": 2,
+    "reservation_count_after_each_call": 0,
+    "live_value_progression": [
+      0,
+      2,
+      4,
+      5,
+      5
+    ]
+  },
+  "performance_regression": {
+    "measurement_policy": "frozen P57.11B1 formal metrics; B2 static route contract rerun",
+    "string_throughput_claimed": false,
+    "scalar_ratio_to_puerts_reflection": 0.5140874096536293,
+    "property_ratio_to_puerts_reflection": 0.6614361339056836,
+    "vector_ratio_to_puerts_reflection": 0.05573060724163943,
+    "object_ratio_to_puerts_reflection": 0.531674127126231,
+    "all_prepared_shapes_lead_puerts_reflection": true
+  },
+  "verification": {
+    "main_no_clean_build": "succeeded; 5 actions; 48.2 seconds; no Editor target clean",
+    "csharp_guest_tests": "79/79 passed",
+    "wasm_backend_tests": "14/14 passed",
+    "name_string_runtime_e2e": "1/1 succeeded on WAMR and Wasmtime; queue empty and TestExit observed",
+    "full_avidscript_automation": "341 found; 341 performed; 341 succeeded; 0 failed; 0 Automation errors; queue empty and TestExit observed",
+    "architecture_check": "clean candidate passed",
+    "architecture_checker_sha256": "ec8cc26b1cf10fb8efdd0c60aedbe3f9a5fb4f1889d30810531fb888a2ffbc24",
+    "warm_benchmark_static_contract": "passed; commandlet=1 lanes=6 avidscript_backends=3 workloads=12 gameplay=2 timing=cycles64 validation=1"
+  },
+  "log_sha256": {
+    "main_no_clean_build": "8d05a1d1e34171e698fd42e1a3074e3562a407824c2a33e8a3c5c1881e4f6892",
+    "full_avidscript_automation": "7b9e07bf63198f8da209276aa108a5e1a3f54eb8cfef7c340aad2a6adfe41039",
+    "name_string_runtime_e2e": "a8563fed876c89dc08492419e1bf9f9d8e832c9f0fa6f9cc7c434b1a9fbbc98f",
+    "csharp_guest_tests": "a7b3a4b4dca1d25e6247930fa0432cdff7714dc8e6bfcefb4289d4d4e8c2fb25",
+    "wasm_backend_tests": "c084f6d3c104c05689cabfaaca1e1b9db3c41bdb50f6d22997de874b575abc07",
+    "warm_benchmark_static_contract": "49fb9fc0453d67a3f635e56865fda7ef043eb2bc1be173c5dbf45fa00960cb87",
+    "architecture_check": "e708acf1a490bb997bf3210e17bdd34a460ef0d5f23395c7b088c07f3452cfb8"
+  },
+  "review_closure": {
+    "process_unique_capability_boundary": "fixed",
+    "atomic_multi_output_publication": "fixed",
+    "binding_value_direction_validation": "fixed",
+    "actor_world_play_initialization": "fixed",
+    "editor_test_guest_mutable_borrow": "fixed",
+    "gameplay_profile_count_drift": "fixed",
+    "struct_wire_fixture_return_direction": "fixed"
+  },
+  "protected_dirty_paths_excluded": 3
+}
