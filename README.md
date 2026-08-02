@@ -10,12 +10,13 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 56" src="https://img.shields.io/badge/Status-Phase%2056-159957">
+  <img alt="Phase 57.11B2" src="https://img.shields.io/badge/Status-Phase%2057.11B2-159957">
+  <img alt="Automation 341/341" src="https://img.shields.io/badge/Automation-341%2F341-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
 将 C# 编译为轻量 WASM Guest，通过生成式 Binding 接入 `BeginPlay`、`Tick`、
-Timer、Overlap 和普通 `UFUNCTION`，在 UE 中编写真实游戏逻辑。
+Timer、Overlap、普通 `UFUNCTION` 与 `UPROPERTY`，在 UE 中编写真实游戏逻辑。
 
 </div>
 
@@ -31,7 +32,8 @@ Timer、Overlap 和普通 `UFUNCTION`，在 UE 中编写真实游戏逻辑。
 - **C# 游戏逻辑，WASM 运行边界**：Roslyn 语义前端生成 AvidScript Guest IR，
   再输出 WebAssembly；PC 主后端使用 Wasmtime Cranelift。
 - **接入 UE 生命周期**：脚本可以响应 `BeginPlay`、`Tick`、`EndPlay`、Timer、
-  Gameplay Event 与 Overlap，并使用 Actor、Component 和常用 UE 值类型。
+  Gameplay Event 与 Overlap，并使用 Actor、Component、递归固定宽度 `USTRUCT`、
+  `FName`、`FString` 和常用 UE 值类型。
 - **性能结论可复核**：同机、同 workload 对比 Puerts V8；候选 commit、profile、
   进程样本、P50/P95 和未达门禁均进入机器可读 evidence。
 
@@ -91,60 +93,111 @@ public static class GameScript
 完整可运行版本见
 [TypedProjectApi](Samples/CSharp/TypedProjectApi/TypedProjectApiScript.cs)。
 
+### FName、FString 与自定义 UFUNCTION
+
+`FName` 和 `FString` 在生成的 C# facade 中统一呈现为 `string`。value、const-ref、
+ref、out、return 与属性读写共用同一个通用 codec，不需要为项目函数手写 wrapper：
+
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+public static void Tick(float deltaSeconds)
+{
+    AMyGameplayActor self = UE.Self;
+
+    string displayName = self.DisplayName;
+    self.NormalizeName(ref displayName);
+    self.BuildStatusText(out string status);
+
+    self.DisplayName = displayName;
+    self.StatusText = status;
+    self.LastSocketName = self.GetAttachParentSocketName();
+}
+```
+
+这里的 `AMyGameplayActor` 代表项目 Reflection 生成的 facade。仓库内双后端真实闭环见
+[NameStringRoundtrip fixture](Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B2_NameStringRoundtrip.cs)。
+
 ## 当前能力
 
 | 领域 | 已实现 |
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由 |
-| 生成式 Binding | Profile 授权的普通 `UFUNCTION`、属性、Generated S1 typed fast path、semantic fallback |
-| UE 值类型 | `FVector`、`FRotator`、`FTransform`、`FName` 等已定义 ABI 类型 |
+| 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
+| UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
+| 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
+| 变长字符串 | Session-owned UTF-8 capability heap；跨调用 intern；reload/跨 Runtime 失效；多输出原子发布 |
 | UObject / Actor | typed `UE.Self`、generational handle、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
 | Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
 | 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
 | 热重载 | C# 候选加载、显式状态迁移、失败回滚、调试映射 |
-| 调用完整性 | Binding package、WASM import、prepared semantic 与 Runtime Session 多层 provenance |
+| 调用完整性 | Binding package、WASM import、immutable codec program、prepared target 与 Runtime Session 多层 provenance |
 | 性能热路径 | callback-epoch fused host cell、prepared export、`TickHot` / Event hot result |
-| VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端与移动端候选 |
+| VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端；同一 C# Guest 双后端验证 |
+
+当前 UE5.8 EngineGameplay profile 精确接受 `352` 个函数与 `2` 个属性，生成 `354` 个
+reflection binding；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
+可以加入自己的 UCLASS/UFUNCTION，只要类型可由现有 descriptor/codec 表达，就会自动生成。
 
 生成 API 的覆盖范围由项目 profile、UE Reflection 结果和当前 ABI 类型能力共同决定。
 普通反射路径不会因为 fast path 缺失而静默调用错误入口。
 
 ## 性能
 
-Phase 56 使用 UE5.8 Win64 Development，在同一候选、同一机器上比较 AvidScript
-Wasmtime 与 Puerts V8。正式协议为 **5 个独立进程**，每进程 **5 次 warmup +
-30 次 timed sample**，以下数值均为跨进程统计，**越低越好**。
+性能数据按测试层次分开报告。**UE 交互、完整游戏 workload 与纯 Wasm 执行不是同一
+benchmark，不能互相替代。** 所有正式对比均使用 UE5.8 Win64 Development、冻结 workload
+和同机 Puerts V8；比率小于 `1.0x` 表示 AvidScript 更快。
+
+### Phase 57：通用 UE 交互
+
+Phase 57 将原本昂贵的 Semantic reflection 路径重构为加载期冻结的 prepared reflection
+invocation cell 与不可变 codec program。正式协议为 **5 个独立进程**、每进程 **5 次
+warmup + 30 次 timed sample**，共 `9000/9000` 个有效 timed sample。
+
+![Phase 57 Prepared Reflection 性能对比](Docs/Assets/README/phase57-prepared-reflection-performance.svg)
+
+| UE 交互场景 | AvidScript P50 | Puerts Reflection P50 | 比率 | AvidScript 领先 |
+| --- | ---: | ---: | ---: | ---: |
+| Scalar UFUNCTION | `54.57 ns` | `106.15 ns` | **`0.514x`** | **48.59%** |
+| Property get/set | `68.14 ns` | `103.01 ns` | **`0.661x`** | **33.86%** |
+| FVector value | `66.49 ns` | `1193.10 ns` | **`0.056x`** | **94.43%** |
+| UObject roundtrip | `69.60 ns` | `130.90 ns` | **`0.532x`** | **46.83%** |
+
+四个已冻结 prepared shape 均领先 Puerts Reflection，目标样本产生 `96,000,000` 次 native
+hit，fallback 与 guard reject 都为 0。P57.11B2 没有重新计时字符串吞吐；它只复跑静态
+路由合同并完成 WAMR/Wasmtime 字符串正确性闭环，因此 README 不对 FName/FString 性能做
+未经测量的外推。
+
+### Phase 56：完整游戏 workload
+
+Phase 56 的 Generated S1、Data-Oriented 与生命周期热路径仍是可复核的历史正式基线：
 
 ![Phase 56 游戏逻辑性能对比](Docs/Assets/README/phase56-gameplay-performance.svg)
 
-| 场景 | AvidScript P50 | Puerts 最快对应路径 P50 | AvidScript / Puerts | 结论 |
-| --- | ---: | ---: | ---: | --- |
-| Small gameplay | `65.72 ns/op` | `139.996 ns/op` | **`0.469x`** | 约低 53.1% |
-| Dense gameplay | `121.88 ns/op` | `237.638 ns/op` | **`0.513x`** | 约低 48.7% |
-| Lifecycle callback | `67.88 ns` | `173.66 ns` | **`0.391x`** | 约低 60.9% |
+| 场景 | AvidScript P50 | Puerts 最快对应路径 P50 | 比率 | AvidScript 领先 |
+| --- | ---: | ---: | ---: | ---: |
+| Small gameplay | `65.72 ns/op` | `139.996 ns/op` | **`0.469x`** | **53.1%** |
+| Dense gameplay | `121.88 ns/op` | `237.638 ns/op` | **`0.513x`** | **48.7%** |
+| Lifecycle callback | `67.88 ns` | `173.66 ns` | **`0.391x`** | **60.9%** |
 
-### 跨界与执行层
+### Wasmtime 与 V8 纯执行层
 
-| 指标 | 正式结果 | 说明 |
-| --- | ---: | --- |
-| Typed empty host crossing | `4.08 ns` | 纯 typed 跨界净成本 |
-| Generated S1 scalar | `27.08 ns` | 相对 Puerts static 为 `0.845x`，绝对目标 `25 ns` 未达 |
-| Generated S1 property | `54.31 ns` | 绝对目标 `50 ns` 未达 |
-| Wasmtime / V8 P50 几何均值 | `0.977x` | Wasmtime 平均约低 2.3% |
-| Wasmtime / V8 P95 几何均值 | `0.996x` | 尾延迟基本持平，未达 `0.95x` 目标 |
-| Semantic / Puerts reflection | `5.819x` | 当前最重要的 UE 通用交互瓶颈 |
+冻结的 12-kernel controlled suite 当前为：P50 几何均值 `0.9798x`、P95 几何均值
+`1.0267x`，P50/P95 kernel win rate 为 `66.7% / 41.7%`。这表示 Wasmtime P50 整体接近
+V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLeadership` 仍保持
+`Fixing`。AvidScript 当前领先主要来自更低成本的生成式 UE 边界，而不是宣称 Wasmtime
+对 V8 的所有纯计算都绝对领先。
 
-性能门禁通过率为 **12/18**，即 18 项中 12 项通过、6 项未通过。目前可以确认的是
-Generated S1、Data-Oriented 与 lifecycle 热路径在选定游戏 workload 上领先；这不等于
-Wasmtime 全面领先 V8，也不等于所有 UE reflection 调用已经领先 Puerts。
+正式证据与详细口径：
 
-被测运行时候选：
-[`d82ed7a`](https://github.com/Avidel-zzz/AvidScript/commit/d82ed7aa997758fa7f6983c6a6996999a467d283)。
-完整统计口径与未达项：
+- [P57.11B2 FName/FString 与完整验收证据](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Evidence.json)
+- [P57.11B1 Prepared Reflection 正式性能证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)
+- [P57.9 Wasmtime/V8 controlled toolchain](Docs/Phase57/P57.9_Controlled_Wasmtime_Toolchain.md)
+- [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
 
-- [Phase 56 中文实现与性能报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
-- [Phase 56 机器可读证据](Docs/Phase56/P56.5_Fused_Call_Frame_Benchmark_Evidence.json)
-- [Phase 56 Gate 摘要](Docs/Phase56/P56_Gate_Summary.json)
+正式性能候选：
+[`4c10239`](https://github.com/Avidel-zzz/AvidScript/commit/4c1023989596bba112de345b5533546655559df7)；
+当前功能候选：
+[`b981422`](https://github.com/Avidel-zzz/AvidScript/commit/b981422f32be3c9b91bcb36bc06408c20689ae32)。
 
 ## 架构
 
@@ -163,14 +216,17 @@ flowchart LR
     Wasm -. compatibility .-> WAMR["WAMR<br/>兼容 / 移动端候选"]
     Wasmtime --> Runtime["AvidScriptRuntime<br/>Session + Lifecycle"]
     WAMR --> Runtime
-    Package --> Runtime
-    Runtime --> UE["Unreal Engine 5.8"]
+    Runtime --> Executor["AvidScriptBindings<br/>Prepared Executor"]
+    Runtime --> Heap["Session UTF-8<br/>Capability Heap"]
+    Package --> Executor
+    Heap --> Executor
+    Executor --> UE["Unreal Engine 5.8"]
 ```
 
 | 模块 | 职责 |
 | --- | --- |
 | `AvidScriptCore` | 后端无关 ABI、错误、诊断与基础合同 |
-| `AvidScriptBindings` | UE typed binding、descriptor、授权和缓存调用计划 |
+| `AvidScriptBindings` | UE typed binding、descriptor、不可变 codec、prepared executor 与 value heap |
 | `AvidScriptVM` | Wasmtime/WAMR 后端、WASM 校验、Guest Memory 与 Host crossing |
 | `AvidScriptRuntime` | Session、生命周期、对象 registry、事件、事务与热重载 |
 | `AvidScriptEditor` | Reflection/profile、代码生成、C# 构建和 Editor 集成 |
@@ -190,15 +246,16 @@ flowchart TD
     Frame --> Typed["Typed Host ABI"]
     Typed --> Target["冻结的 UE Target"]
 
-    Decision -- No --> Semantic["Semantic Reflection Fallback"]
-    Semantic --> Cached["Cached Invocation Plan"]
-    Cached --> Marshal["通用参数封送"]
-    Marshal --> ProcessEvent["UE ProcessEvent"]
+    Decision -- No --> Dynamic["Prepared Dynamic Target"]
+    Dynamic --> Codec["Immutable Codec Program"]
+    Codec --> ProcessEvent["UE ProcessEvent"]
+    Dynamic -. Guard reject .-> Strict["Strict Semantic Fallback"]
+    Strict --> ProcessEvent
 ```
 
-Fast path 是由 descriptor 和 ABI shape 生成的通用机制，不要求为每个
-`UFUNCTION` 手写 C++ wrapper。尚未支持的类型会在生成或加载阶段失败关闭，
-而不是进入未经验证的动态调用。
+Generated 与 prepared path 都由 descriptor、真实反射 identity 和 ABI shape 生成，
+不要求为每个 `UFUNCTION` 手写 C++ wrapper。输出范围、对象 capability 与变长值容量会在
+`ProcessEvent` 前预检；尚未支持的类型在生成或加载阶段失败关闭，而不是进入未经验证的调用。
 
 ## 环境要求
 
@@ -281,19 +338,21 @@ cmd /c Build\BuildWAMRWin64.cmd
 ## 当前边界
 
 - 还不是完整 UE API 类型系统，只覆盖 descriptor 可表达且 ABI 已实现的类型；
-- arbitrary `UStruct`、容器、delegate 和 Blueprint 图中新声明函数尚未完整支持；
+- 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
+- `TArray`、`TSet`、`TMap`、delegate、latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+- `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
-- semantic reflection 保证通用 fallback，但高频 `Tick` 内应优先使用 Generated S1；
+- 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
+- UTF-8 heap 当前按 Session/reset 回收，不提供 guest 主动 release 或长期 GC；
 - Cook、Shipping、崩溃隔离、Android 与 iOS 尚未完成正式验收；
 - 正式竞品矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
 
-1. 为 semantic reflection 建立通用缓存化 invocation plan，降低普通
-   `UFUNCTION` 的参数布局、对象解析和 `ProcessEvent` 封送成本；
-2. 继续压缩 Generated S1 scalar/property 固定成本与 Wasmtime P95 尾延迟；
-3. 完成 Cook、Shipping、包体和故障隔离验证；
-4. 推进 Android/iOS AOT 与 WAMR/其他移动后端适配。
+1. 建立通用 `TArray<T>`/容器 descriptor 与 session value capability，并补齐显式释放和长期生命周期统计；
+2. 扩展 delegate、latent、RPC、interface dispatch 与 `FText` 等 UE 调用语义；
+3. 冻结字符串/container benchmark，继续压缩 Generated/prepared 固定成本与 Wasmtime P95 尾延迟；
+4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
 
 路线图只表示后续工程顺序，不代表对应平台已经可用。
 
@@ -306,7 +365,9 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-Phase 56 的完整 AvidScript Automation 为 **317/317 通过**。
+当前 Phase 57.11B2 完整 AvidScript Automation 为 **341/341 通过**，另有 C# Guest
+`79/79`、Wasm backend `14/14` 与 clean architecture Gate。最新阶段报告见
+[P57.11B2 中文报告](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap.md)。
 
 工程规则：
 

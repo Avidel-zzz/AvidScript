@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"
+     role="img" aria-labelledby="title description">
+  <title id="title">Phase 57 Prepared Reflection 性能对比</title>
+  <desc id="description">
+    AvidScript 相对 Puerts Reflection 的归一化 P50。Scalar UFUNCTION 为 0.514 倍，
+    Property get/set 为 0.661 倍，FVector value 为 0.056 倍，UObject roundtrip 为
+    0.532 倍。数值越低越好。
+  </desc>
+  <style>
+    .title { fill: #f0f6fc; font: 700 25px "Segoe UI", Arial, sans-serif; }
+    .subtitle { fill: #9da7b1; font: 14px "Segoe UI", Arial, sans-serif; }
+    .group { fill: #e6edf3; font: 600 15px "Segoe UI", Arial, sans-serif; }
+    .detail { fill: #9da7b1; font: 12px "Segoe UI", Arial, sans-serif; }
+    .value { fill: #e6edf3; font: 600 13px "Segoe UI", Arial, sans-serif; }
+    .lead { fill: #26c596; font: 600 12px "Segoe UI", Arial, sans-serif; }
+    .axis { fill: #9da7b1; font: 11px "Segoe UI", Arial, sans-serif; }
+    .footer { fill: #8b949e; font: 12px "Segoe UI", Arial, sans-serif; }
+    .grid { stroke: #30363d; stroke-width: 1; }
+    .avid { fill: #26c596; }
+    .puerts { fill: #66717d; }
+    .legend-text { fill: #9da7b1; font: 12px "Segoe UI", Arial, sans-serif; }
+  </style>
+
+  <rect width="960" height="540" rx="12" fill="#0d1117"/>
+  <text class="title" x="36" y="40">Phase 57 Prepared Reflection</text>
+  <text class="subtitle" x="36" y="65">P50 相对 Puerts Reflection，越低越好</text>
+
+  <rect class="avid" x="699" y="29" width="14" height="14" rx="2"/>
+  <text class="legend-text" x="720" y="41">AvidScript</text>
+  <rect class="puerts" x="808" y="29" width="14" height="14" rx="2"/>
+  <text class="legend-text" x="829" y="41">Puerts</text>
+
+  <line class="grid" x1="285" y1="82" x2="285" y2="472"/>
+  <line class="grid" x1="425" y1="82" x2="425" y2="472"/>
+  <line class="grid" x1="565" y1="82" x2="565" y2="472"/>
+  <line class="grid" x1="705" y1="82" x2="705" y2="472"/>
+  <line class="grid" x1="845" y1="82" x2="845" y2="472"/>
+
+  <text class="axis" x="285" y="488" text-anchor="middle">0</text>
+  <text class="axis" x="425" y="488" text-anchor="middle">0.25x</text>
+  <text class="axis" x="565" y="488" text-anchor="middle">0.50x</text>
+  <text class="axis" x="705" y="488" text-anchor="middle">0.75x</text>
+  <text class="axis" x="845" y="488" text-anchor="middle">1.00x</text>
+
+  <text class="group" x="36" y="116">Scalar UFUNCTION</text>
+  <text class="detail" x="36" y="136">54.57 ns vs 106.15 ns</text>
+  <rect class="puerts" x="285" y="94" width="560" height="18" rx="3"/>
+  <rect class="avid" x="285" y="121" width="287.89" height="18" rx="3"/>
+  <text class="value" x="585" y="135">0.514x</text>
+  <text class="lead" x="36" y="155">领先 48.59%</text>
+
+  <text class="group" x="36" y="218">Property get/set</text>
+  <text class="detail" x="36" y="238">68.14 ns vs 103.01 ns</text>
+  <rect class="puerts" x="285" y="196" width="560" height="18" rx="3"/>
+  <rect class="avid" x="285" y="223" width="370.40" height="18" rx="3"/>
+  <text class="value" x="668" y="237">0.661x</text>
+  <text class="lead" x="36" y="257">领先 33.86%</text>
+
+  <text class="group" x="36" y="320">FVector value</text>
+  <text class="detail" x="36" y="340">66.49 ns vs 1193.10 ns</text>
+  <rect class="puerts" x="285" y="298" width="560" height="18" rx="3"/>
+  <rect class="avid" x="285" y="325" width="31.21" height="18" rx="3"/>
+  <text class="value" x="329" y="339">0.056x</text>
+  <text class="lead" x="36" y="359">领先 94.43%</text>
+
+  <text class="group" x="36" y="422">UObject roundtrip</text>
+  <text class="detail" x="36" y="442">69.60 ns vs 130.90 ns</text>
+  <rect class="puerts" x="285" y="400" width="560" height="18" rx="3"/>
+  <rect class="avid" x="285" y="427" width="297.74" height="18" rx="3"/>
+  <text class="value" x="595" y="441">0.532x</text>
+  <text class="lead" x="36" y="461">领先 46.83%</text>
+
+  <text class="footer" x="36" y="520">
+    5 processes x 30 timed samples | 9000/9000 valid | UE5.8 Win64 Development
+  </text>
+</svg>
