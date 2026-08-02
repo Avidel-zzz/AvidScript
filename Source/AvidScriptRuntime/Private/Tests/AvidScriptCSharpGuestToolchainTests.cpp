@@ -225,6 +225,31 @@ bool ReadCSharpNameStringProperties(
 	return true;
 }
 
+bool InvokeCSharpReturnStringOracle(UObject& Object, FString& OutString)
+{
+	OutString.Reset();
+	UFunction* const Function = Object.FindFunction(TEXT("ReturnFString"));
+	const FStrProperty* const ReturnProperty = Function == nullptr
+		? nullptr
+		: CastField<FStrProperty>(Function->GetReturnProperty());
+	if (Function == nullptr || ReturnProperty == nullptr)
+	{
+		return false;
+	}
+
+	const int32 Alignment = FMath::Max(1, Function->GetMinAlignment());
+	TArray<uint8> Scratch;
+	Scratch.SetNumZeroed(Function->GetStructureSize() + Alignment - 1);
+	void* const Frame = reinterpret_cast<void*>(Align(
+		reinterpret_cast<UPTRINT>(Scratch.GetData()),
+		static_cast<UPTRINT>(Alignment)));
+	Function->InitializeStruct(Frame);
+	Object.ProcessEvent(Function, Frame);
+	OutString = ReturnProperty->GetPropertyValue_InContainer(Frame);
+	Function->DestroyStruct(Frame);
+	return true;
+}
+
 FString ResolveCSharpReportArtifactPath(const FString& ArtifactPath)
 {
 	if (ArtifactPath.IsEmpty())
@@ -259,6 +284,7 @@ bool CreateCSharpContractWorld(UWorld*& OutWorld)
 
 	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
 	WorldContext.SetCurrentWorld(OutWorld);
+	OutWorld->InitializeActorsForPlay(FURL());
 	return true;
 }
 
@@ -1236,6 +1262,14 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 		{
 			continue;
 		}
+		FString DirectReturnString;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("direct ProcessEvent string oracle invokes")),
+			InvokeCSharpReturnStringOracle(*FixtureObject, DirectReturnString));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("direct ProcessEvent string oracle returns value")),
+			DirectReturnString,
+			FString(TEXT("Avid")));
 
 		FAvidScriptObjectRegistry Registry;
 		FAvidScriptObjectHandleResult RegisterResult;
@@ -1267,6 +1301,28 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			AddError(AvidScriptRuntimeLaneLabel(Lane, *ReloadResult.ErrorMessage));
 			continue;
 		}
+		auto AddHeapInfo = [this, &Lane, &Session](const TCHAR* Stage)
+		{
+			FAvidScriptWasmRuntimeInstance* const Runtime =
+				Session.GetLiveRuntimeForTesting();
+			if (Runtime == nullptr)
+			{
+				AddError(AvidScriptRuntimeLaneLabel(
+					Lane,
+					TEXT("UTF-8 heap diagnostics require a live runtime")));
+				return;
+			}
+			const FAvidScriptUtf8ValueHeap& Heap =
+				Runtime->GetUtf8ValueHeapForTesting();
+			AddInfo(AvidScriptRuntimeLaneLabel(
+				Lane,
+				*FString::Printf(
+					TEXT("%s UTF-8 heap live=%d reserved=%d"),
+					Stage,
+					Heap.GetLiveValueCount(),
+					Heap.GetReservedValueCount())));
+		};
+		AddHeapInfo(TEXT("begin play"));
 
 		auto TestProperties = [this, &Lane, FixtureObject](
 			const TCHAR* Stage,
@@ -1303,6 +1359,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			continue;
 		}
 		TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
+		AddHeapInfo(TEXT("property get"));
 		TestProperties(TEXT("property get and const-ref input"), InitialName, InitialString);
 
 		if (!Session.TickLive(1.0f / 60.0f, TickResult))
@@ -1310,6 +1367,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
 			continue;
 		}
+		AddHeapInfo(TEXT("ref output"));
 		TestProperties(
 			TEXT("ref output"),
 			NoneName,
@@ -1320,6 +1378,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
 			continue;
 		}
+		AddHeapInfo(TEXT("out output"));
 		TestProperties(TEXT("out output"), NoneName, TEXT("Avid"));
 
 		if (!Session.TickLive(1.0f / 60.0f, TickResult))
@@ -1327,6 +1386,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
 			continue;
 		}
+		AddHeapInfo(TEXT("return output"));
 		TestProperties(TEXT("return output"), NoneName, TEXT("Avid"));
 		TestEqual(
 			*AvidScriptRuntimeLaneLabel(Lane, TEXT("all four scripted stages tick")),
