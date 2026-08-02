@@ -1851,7 +1851,7 @@ bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Para
 	}
 	for (const FString& Mutation : {
 		TEXT("canonical"), TEXT("kind"), TEXT("cpp_type"), TEXT("size"), TEXT("alignment"), TEXT("abi"),
-		TEXT("direction_ref"), TEXT("direction_out"), TEXT("direction_return") })
+		TEXT("direction_return") })
 	{
 		FAvidScriptBindingPackageModel Tampered = Package;
 		FAvidScriptBindingTypeModel* FNameType = Tampered.Types.FindByPredicate(
@@ -1870,8 +1870,6 @@ bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Para
 		else if (Mutation == TEXT("size")) { FNameType->Size = 8; }
 		else if (Mutation == TEXT("alignment")) { FNameType->Alignment = 8; }
 		else if (Mutation == TEXT("abi")) { FNameType->AbiTypes = { TEXT("f") }; FNameValue->AbiTypes = FNameType->AbiTypes; }
-		else if (Mutation == TEXT("direction_ref")) { FNameValue->Direction = TEXT("ref"); }
-		else if (Mutation == TEXT("direction_out")) { FNameValue->Direction = TEXT("out"); }
 		else { FNameValue->Direction = TEXT("return"); }
 
 		FString TamperedSource;
@@ -1884,8 +1882,17 @@ bool FAvidScriptEditorCSharpBindingEmitterFNameTest::RunTest(const FString& Para
 				TamperedSource,
 				ErrorCategory,
 				ErrorSource));
-		TestTrue(TEXT("Tampered FName metadata has a stable rejection category: ") + Mutation,
-			ErrorCategory == TEXT("unsupported_csharp_type") || ErrorCategory == TEXT("abi_signature_mismatch"));
+		if (Mutation == TEXT("direction_return"))
+		{
+			TestEqual(TEXT("Parameter return direction reports a descriptor contract failure"),
+				ErrorCategory,
+				FString(TEXT("descriptor_contract_invalid")));
+		}
+		else
+		{
+			TestTrue(TEXT("Tampered FName metadata has a stable rejection category: ") + Mutation,
+				ErrorCategory == TEXT("unsupported_csharp_type") || ErrorCategory == TEXT("abi_signature_mismatch"));
+		}
 		TestTrue(TEXT("Tampered FName metadata emits no partial source: ") + Mutation, TamperedSource.IsEmpty());
 	}
 	return true;
@@ -2028,6 +2035,105 @@ bool FAvidScriptEditorCSharpBindingEmitterNameStringTest::RunTest(const FString&
 		FAvidScriptBindingDescriptorParser::Parse(DescriptorJson, Package, ParseErrorCategory, ParseErrorSource)))
 	{
 		return false;
+	}
+	for (const FString& CanonicalType : { TEXT("name:fname"), TEXT("string:fstring") })
+	{
+		const FString TypeName = CanonicalType == TEXT("name:fname") ? TEXT("FName") : TEXT("FString");
+		for (const FString& Direction : { TEXT("ref"), TEXT("out") })
+		{
+			const FString ScriptName = (Direction == TEXT("ref") ? TEXT("Ref") : TEXT("Out")) + TypeName;
+			const FAvidScriptBindingFunctionModel* Binding = Package.Bindings.FindByPredicate(
+				[&ScriptName](const FAvidScriptBindingFunctionModel& Candidate)
+				{
+					return Candidate.ScriptName == ScriptName;
+				});
+			TestNotNull(TEXT("UTF-8 parameter binding is present: ") + ScriptName, Binding);
+			if (Binding != nullptr)
+			{
+				const FAvidScriptBindingValueModel* Value = Binding->Parameters.FindByPredicate(
+					[&CanonicalType](const FAvidScriptBindingValueModel& Candidate)
+					{
+						return Candidate.CanonicalType == CanonicalType;
+					});
+				TestNotNull(TEXT("UTF-8 parameter descriptor is present: ") + ScriptName, Value);
+				if (Value != nullptr)
+				{
+					TestEqual(TEXT("UTF-8 parameter direction remains legal: ") + ScriptName, Value->Direction, Direction);
+				}
+			}
+		}
+
+		const FString ReturnScriptName = TEXT("Return") + TypeName;
+		const FAvidScriptBindingFunctionModel* ReturnBinding = Package.Bindings.FindByPredicate(
+			[&ReturnScriptName](const FAvidScriptBindingFunctionModel& Candidate)
+			{
+				return Candidate.ScriptName == ReturnScriptName;
+			});
+		TestNotNull(TEXT("UTF-8 return binding is present: ") + ReturnScriptName, ReturnBinding);
+		if (ReturnBinding != nullptr)
+		{
+			TestEqual(TEXT("UTF-8 return descriptor uses return direction: ") + ReturnScriptName,
+				ReturnBinding->ReturnValue.Direction,
+				FString(TEXT("return")));
+		}
+
+		FAvidScriptBindingPackageModel ParameterTampered = Package;
+		FAvidScriptBindingFunctionModel* ParameterBinding = ParameterTampered.Bindings.FindByPredicate(
+			[&TypeName](const FAvidScriptBindingFunctionModel& Candidate)
+			{
+				return Candidate.ScriptName == TEXT("Ref") + TypeName;
+			});
+		TestNotNull(TEXT("UTF-8 parameter binding remains available for direction tamper: ") + TypeName, ParameterBinding);
+		if (ParameterBinding != nullptr && !ParameterBinding->Parameters.IsEmpty())
+		{
+			ParameterBinding->Parameters[0].Direction = TEXT("return");
+			FString TamperedSource;
+			FString ErrorCategory;
+			FString ErrorSource;
+			TestFalse(TEXT("UTF-8 parameter rejects return direction: ") + TypeName,
+				FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+					ParameterTampered,
+					TEXT("name-string-parameter-direction-hash"),
+					TamperedSource,
+					ErrorCategory,
+					ErrorSource));
+			TestEqual(TEXT("UTF-8 parameter direction reports a stable category: ") + TypeName,
+				ErrorCategory,
+				FString(TEXT("descriptor_contract_invalid")));
+			TestEqual(TEXT("UTF-8 parameter direction reports a stable source: ") + TypeName,
+				ErrorSource,
+				ParameterBinding->CanonicalIdentity + TEXT(".parameters[0].direction"));
+			TestTrue(TEXT("UTF-8 parameter direction emits no partial source: ") + TypeName, TamperedSource.IsEmpty());
+		}
+
+		FAvidScriptBindingPackageModel ReturnTampered = Package;
+		FAvidScriptBindingFunctionModel* InvalidReturnBinding = ReturnTampered.Bindings.FindByPredicate(
+			[&ReturnScriptName](const FAvidScriptBindingFunctionModel& Candidate)
+			{
+				return Candidate.ScriptName == ReturnScriptName;
+			});
+		TestNotNull(TEXT("UTF-8 return binding remains available for direction tamper: ") + TypeName, InvalidReturnBinding);
+		if (InvalidReturnBinding != nullptr)
+		{
+			InvalidReturnBinding->ReturnValue.Direction = TEXT("value");
+			FString TamperedSource;
+			FString ErrorCategory;
+			FString ErrorSource;
+			TestFalse(TEXT("UTF-8 return rejects parameter direction: ") + TypeName,
+				FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+					ReturnTampered,
+					TEXT("name-string-return-direction-hash"),
+					TamperedSource,
+					ErrorCategory,
+					ErrorSource));
+			TestEqual(TEXT("UTF-8 return direction reports a stable category: ") + TypeName,
+				ErrorCategory,
+				FString(TEXT("descriptor_contract_invalid")));
+			TestEqual(TEXT("UTF-8 return direction reports a stable source: ") + TypeName,
+				ErrorSource,
+				InvalidReturnBinding->CanonicalIdentity + TEXT(".return.direction"));
+			TestTrue(TEXT("UTF-8 return direction emits no partial source: ") + TypeName, TamperedSource.IsEmpty());
+		}
 	}
 	for (const FString& CanonicalType : { TEXT("name:fname"), TEXT("string:fstring") })
 	{

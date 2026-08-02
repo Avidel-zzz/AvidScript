@@ -71,9 +71,6 @@ bool IsExactUtf8StringDescriptor(
 	return Value.CanonicalType == CanonicalType
 		&& Value.Kind == Kind
 		&& Value.CppType == CppType
-		&& (Value.Direction == TEXT("value") || Value.Direction == TEXT("const_ref")
-			|| Value.Direction == TEXT("ref") || Value.Direction == TEXT("out")
-			|| Value.Direction == TEXT("return"))
 		&& Value.AbiTypes == TArray<FString>{ TEXT("i") }
 		&& Type != nullptr
 		&& Type->CanonicalType == CanonicalType
@@ -82,6 +79,34 @@ bool IsExactUtf8StringDescriptor(
 		&& Type->Size == 4
 		&& Type->Alignment == 4
 		&& Type->AbiTypes == TArray<FString>{ TEXT("i") };
+}
+
+bool ValidateBindingValueDirections(
+	const FAvidScriptBindingFunctionModel& Binding,
+	FString& OutErrorSource)
+{
+	for (int32 ParameterIndex = 0; ParameterIndex < Binding.Parameters.Num(); ++ParameterIndex)
+	{
+		const FString& Direction = Binding.Parameters[ParameterIndex].Direction;
+		if (Direction != TEXT("value")
+			&& Direction != TEXT("const_ref")
+			&& Direction != TEXT("ref")
+			&& Direction != TEXT("out"))
+		{
+			OutErrorSource = FString::Printf(
+				TEXT("%s.parameters[%d].direction"),
+				*Binding.CanonicalIdentity,
+				ParameterIndex);
+			return false;
+		}
+	}
+
+	if (Binding.ReturnValue.Direction != TEXT("return"))
+	{
+		OutErrorSource = Binding.CanonicalIdentity + TEXT(".return.direction");
+		return false;
+	}
+	return true;
 }
 
 bool IsKnownExpandedStruct(const FAvidScriptBindingTypeModel& Type)
@@ -1630,6 +1655,11 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	TMap<FString, const FAvidScriptBindingFunctionModel*> PropertySetters;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
+		if (!ValidateBindingValueDirections(Binding, OutErrorSource))
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			return false;
+		}
 		if (FindRenderedType(TypesByCanonical, TEXT("object:") + Binding.OwnerClass) == nullptr)
 		{
 			OutErrorCategory = TEXT("descriptor_contract_invalid");
