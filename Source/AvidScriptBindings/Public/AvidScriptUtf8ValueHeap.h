@@ -41,21 +41,14 @@ private:
 	{
 		TArray<uint8> Bytes;
 		uint32 Hash = 0;
-		uint16 Generation = 1;
+		uint32 Token = 0;
 		bool bReserved = false;
 		bool bOccupied = false;
 	};
 
 	static constexpr uint32 TokenTag = 0x80000000u;
-	static constexpr uint32 GenerationMask = 0x7fffu;
-	static constexpr uint32 SlotMask = 0xffffu;
 
-	static uint16 AdvanceGeneration(uint16 Generation);
-	static uint32 EncodeToken(int32 SlotIndex, uint16 Generation);
-	static bool DecodeToken(
-		uint32 Token,
-		int32& OutSlotIndex,
-		uint16& OutGeneration);
+	static uint32 AllocateToken();
 	static bool IsCanonicalUtf8(
 		TConstArrayView<uint8> Bytes,
 		FString& OutError);
@@ -73,8 +66,8 @@ private:
 
 	TArray<FSlot> Slots;
 	TArray<int32> FreeSlots;
+	TMap<uint32, int32> TokenToSlots;
 	TMap<uint32, TArray<int32>> HashToSlots;
-	uint16 GenerationDomain = 1;
 	int32 LiveValueCount = 0;
 	int32 ReservedValueCount = 0;
 };

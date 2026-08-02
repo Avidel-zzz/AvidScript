@@ -38,6 +38,16 @@ struct FGuestOutputRange
 	uint64 End = 0;
 	FString Source;
 };
+
+struct FGuestOutputTarget
+{
+	const FValueCodecProgram* Value = nullptr;
+	uint32 GuestAddress = 0;
+	FString PreflightFailureCategory;
+	FString EncodeFailureCategory;
+	FString Source;
+	FPreparedValueOutput PreparedOutput;
+};
 } // namespace
 
 bool InvokePreparedDynamicReflection(
@@ -246,6 +256,7 @@ bool InvokePreparedDynamicReflection(
 	{
 		uint32 GuestAddress = 0;
 		FCodecOutputTransaction OutputTransaction;
+		FPreparedValueOutput PreparedOutput;
 		bool bOutputCommitted = false;
 		ON_SCOPE_EXIT
 		{
@@ -266,15 +277,15 @@ bool InvokePreparedDynamicReflection(
 				*GuestMemory,
 				InvocationContext,
 				OutputTransaction,
+				PreparedOutput,
 				Details)
 			|| !WriteValueToGuest(
 				Program->ReturnValue,
-				GuestAddress,
-				*GuestMemory,
 				InvocationContext,
 				&Receiver,
-				Details,
-				&OutputTransaction))
+				OutputTransaction,
+				PreparedOutput,
+				Details))
 		{
 			SetDispatchFailure(
 				OutResult,
@@ -283,6 +294,7 @@ bool InvokePreparedDynamicReflection(
 				Details);
 			return false;
 		}
+		PublishValueOutput(PreparedOutput);
 		OutputTransaction.Commit();
 		bOutputCommitted = true;
 		OutResult.bSucceeded = true;
@@ -426,6 +438,7 @@ bool InvokePreparedDynamicReflection(
 	ParameterGuestAddresses.SetNumZeroed(Program->Parameters.Num());
 	uint32 ReturnGuestAddress = 0;
 	TArray<FGuestOutputRange, TInlineAllocator<16>> WritableGuestRanges;
+	TArray<FGuestOutputTarget, TInlineAllocator<16>> OutputTargets;
 	FCodecOutputTransaction OutputTransaction;
 	bool bOutputCommitted = false;
 	ON_SCOPE_EXIT
@@ -437,13 +450,13 @@ bool InvokePreparedDynamicReflection(
 	};
 	const auto PreflightGuestOutput = [&Arguments,
 		GuestMemory,
-		&InvocationContext,
 		&OutResult,
 		&Details,
 		&WritableGuestRanges,
-		&OutputTransaction](
+		&OutputTargets](
 		const FValueCodecProgram& Value,
-		const FString& FailureCategory,
+		const FString& PreflightFailureCategory,
+		const FString& EncodeFailureCategory,
 		const FString& Source,
 		uint32& OutGuestAddress)
 	{
@@ -455,7 +468,7 @@ bool InvokePreparedDynamicReflection(
 				: TEXT("The cached guest output storage size is invalid.");
 			SetDispatchFailure(
 				OutResult,
-				FailureCategory,
+				PreflightFailureCategory,
 				Source,
 				Details);
 			return false;
@@ -468,7 +481,7 @@ bool InvokePreparedDynamicReflection(
 			Details = TEXT("The guest output address range overflows 64-bit arithmetic.");
 			SetDispatchFailure(
 				OutResult,
-				FailureCategory,
+				PreflightFailureCategory,
 				Source,
 				Details);
 			return false;
@@ -478,18 +491,11 @@ bool InvokePreparedDynamicReflection(
 				Begin,
 				static_cast<uint32>(StorageSize),
 				OutGuestAddress,
-				Details)
-			|| !PreflightValueOutput(
-				Value,
-				OutGuestAddress,
-				*GuestMemory,
-				InvocationContext,
-				OutputTransaction,
 				Details))
 		{
 			SetDispatchFailure(
 				OutResult,
-				FailureCategory,
+				PreflightFailureCategory,
 				Source,
 				Details);
 			return false;
@@ -516,6 +522,12 @@ bool InvokePreparedDynamicReflection(
 			}
 		}
 		WritableGuestRanges.Add(FGuestOutputRange{ Begin, End, Source });
+		FGuestOutputTarget& Target = OutputTargets.AddDefaulted_GetRef();
+		Target.Value = &Value;
+		Target.GuestAddress = OutGuestAddress;
+		Target.PreflightFailureCategory = PreflightFailureCategory;
+		Target.EncodeFailureCategory = EncodeFailureCategory;
+		Target.Source = Source;
 		return true;
 	};
 
@@ -533,6 +545,7 @@ bool InvokePreparedDynamicReflection(
 		if (!PreflightGuestOutput(
 				Parameter,
 				TEXT("binding_guest_output_preflight_failed"),
+				TEXT("binding_guest_write_failed"),
 				Program->DebugPath + TEXT(":") + Parameter.Name,
 				ParameterGuestAddresses[ParameterIndex]))
 		{
@@ -543,6 +556,7 @@ bool InvokePreparedDynamicReflection(
 		&& !PreflightGuestOutput(
 			Program->ReturnValue,
 			TEXT("binding_return_preflight_failed"),
+			TEXT("binding_return_write_failed"),
 			Program->DebugPath,
 			ReturnGuestAddress))
 	{
@@ -620,56 +634,57 @@ bool InvokePreparedDynamicReflection(
 		}
 	}
 
+	for (FGuestOutputTarget& Target : OutputTargets)
+	{
+		if (Target.Value == nullptr
+			|| GuestMemory == nullptr
+			|| !PreflightValueOutput(
+				*Target.Value,
+				Target.GuestAddress,
+				*GuestMemory,
+				InvocationContext,
+				OutputTransaction,
+				Target.PreparedOutput,
+				Details))
+		{
+			SetDispatchFailure(
+				OutResult,
+				Target.PreflightFailureCategory,
+				Target.Source,
+				Details);
+			return false;
+		}
+	}
+
 	if (!PrepareHostEffect())
 	{
 		return false;
 	}
 	Receiver.ProcessEvent(Program->Function, Frame);
 
-	for (int32 ParameterIndex = 0;
-		ParameterIndex < Program->Parameters.Num();
-		++ParameterIndex)
+	for (FGuestOutputTarget& Target : OutputTargets)
 	{
-		const FValueCodecProgram& Parameter =
-			Program->Parameters[ParameterIndex];
-		if ((Parameter.Direction == EValueCodecDirection::Ref
-				|| Parameter.Direction == EValueCodecDirection::Out)
-			&& (GuestMemory == nullptr
-				|| !WriteValueToGuest(
-					Parameter,
-					ParameterGuestAddresses[ParameterIndex],
-					*GuestMemory,
-					InvocationContext,
-					Frame,
-					Details,
-					&OutputTransaction)))
+		if (Target.Value == nullptr
+			|| !WriteValueToGuest(
+				*Target.Value,
+				InvocationContext,
+				Frame,
+				OutputTransaction,
+				Target.PreparedOutput,
+				Details))
 		{
 			SetDispatchFailure(
 				OutResult,
-				TEXT("binding_guest_write_failed"),
-				Program->DebugPath + TEXT(":") + Parameter.Name,
+				Target.EncodeFailureCategory,
+				Target.Source,
 				Details);
 			return false;
 		}
 	}
 
-	if (Program->ReturnValue.Kind != EValueCodecKind::Void
-		&& (GuestMemory == nullptr
-			|| !WriteValueToGuest(
-				Program->ReturnValue,
-				ReturnGuestAddress,
-				*GuestMemory,
-				InvocationContext,
-				Frame,
-				Details,
-				&OutputTransaction)))
+	for (FGuestOutputTarget& Target : OutputTargets)
 	{
-		SetDispatchFailure(
-			OutResult,
-			TEXT("binding_return_write_failed"),
-			Program->DebugPath,
-			Details);
-		return false;
+		PublishValueOutput(Target.PreparedOutput);
 	}
 
 	OutputTransaction.Commit();

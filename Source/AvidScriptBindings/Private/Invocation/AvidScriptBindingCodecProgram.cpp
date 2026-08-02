@@ -1005,41 +1005,34 @@ bool PreflightValueOutput(
 	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	FCodecOutputTransaction& Transaction,
+	FPreparedValueOutput& OutPreparedOutput,
 	FString& OutDetails)
 {
+	OutPreparedOutput = FPreparedValueOutput();
 	if (Program.WireSize <= 0 || Program.WireSize > 4096)
 	{
 		OutDetails = TEXT("The cached output wire size is invalid.");
 		return false;
 	}
-	TArrayView<uint8> Borrowed;
-	FString BorrowError;
-	if (GuestMemory.BorrowMutableBytes(
-		GuestAddress,
-		static_cast<uint32>(Program.WireSize),
-		static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
-		Borrowed,
-		BorrowError))
-	{
-		if (Borrowed.Num() != Program.WireSize)
-		{
-			OutDetails = TEXT("The borrowed guest output range has the wrong size.");
-			return false;
-		}
-		return (Program.Kind != EValueCodecKind::Name
-				&& Program.Kind != EValueCodecKind::String)
-			|| Transaction.ReserveUtf8Value(Context, OutDetails);
-	}
-	TArray<uint8, TInlineAllocator<4096>> Probe;
-	Probe.SetNumUninitialized(Program.WireSize);
-	if (!GuestMemory.ReadBytes(GuestAddress, MakeArrayView(Probe), OutDetails))
+	if (!GuestMemory.BorrowMutableBytes(
+			GuestAddress,
+			static_cast<uint32>(Program.WireSize),
+			static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
+			OutPreparedOutput.GuestBytes,
+			OutDetails))
 	{
 		if (OutDetails.IsEmpty())
 		{
-			OutDetails = BorrowError;
+			OutDetails = TEXT("The guest output provider cannot secure a mutable range for atomic publication.");
 		}
 		return false;
 	}
+	if (OutPreparedOutput.GuestBytes.Num() != Program.WireSize)
+	{
+		OutDetails = TEXT("The borrowed guest output range has the wrong size.");
+		return false;
+	}
+	OutPreparedOutput.EncodedBytes.SetNumZeroed(Program.WireSize);
 	return (Program.Kind != EValueCodecKind::Name
 			&& Program.Kind != EValueCodecKind::String)
 		|| Transaction.ReserveUtf8Value(Context, OutDetails);
@@ -1047,66 +1040,34 @@ bool PreflightValueOutput(
 
 bool WriteValueToGuest(
 	const FValueCodecProgram& Program,
-	const uint32 GuestAddress,
-	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	void* Frame,
-	FString& OutDetails,
-	FCodecOutputTransaction* Transaction)
+	FCodecOutputTransaction& Transaction,
+	FPreparedValueOutput& PreparedOutput,
+	FString& OutDetails)
 {
-	FCodecOutputTransaction LocalTransaction;
-	FCodecOutputTransaction& ActiveTransaction = Transaction == nullptr
-		? LocalTransaction
-		: *Transaction;
-	TArray<uint8, TInlineAllocator<4096>> Bytes;
-	if (Program.WireSize <= 0 || Program.WireSize > 4096)
+	if (Program.WireSize <= 0
+		|| PreparedOutput.GuestBytes.Num() != Program.WireSize
+		|| PreparedOutput.EncodedBytes.Num() != Program.WireSize)
 	{
-		OutDetails = TEXT("The cached output wire size is invalid.");
+		OutDetails = TEXT("The prepared guest output does not match the cached wire size.");
 		return false;
 	}
-	Bytes.SetNumZeroed(Program.WireSize);
-	if (!EncodeWireValue(
+	return EncodeWireValue(
 		Program,
-		MakeArrayView(Bytes),
+		MakeArrayView(PreparedOutput.EncodedBytes),
 		Context,
 		Frame,
-		ActiveTransaction,
-		OutDetails))
-	{
-		if (Transaction == nullptr)
-		{
-			LocalTransaction.Rollback(Context);
-		}
-		return false;
-	}
+		Transaction,
+		OutDetails);
+}
 
-	TArrayView<uint8> Borrowed;
-	FString BorrowError;
-	const bool bBorrowed = GuestMemory.BorrowMutableBytes(
-		GuestAddress,
-		static_cast<uint32>(Bytes.Num()),
-		static_cast<uint32>(FMath::Max(1, Program.WireAlignment)),
-		Borrowed,
-		BorrowError);
-	const bool bWritten = bBorrowed && Borrowed.Num() == Bytes.Num()
-		? (FMemory::Memcpy(Borrowed.GetData(), Bytes.GetData(), Bytes.Num()), true)
-		: GuestMemory.WriteBytes(GuestAddress, MakeArrayView(Bytes), OutDetails);
-	if (!bWritten)
-	{
-		if (OutDetails.IsEmpty())
-		{
-			OutDetails = BorrowError;
-		}
-		if (Transaction == nullptr)
-		{
-			LocalTransaction.Rollback(Context);
-		}
-		return false;
-	}
-	if (Transaction == nullptr)
-	{
-		LocalTransaction.Commit();
-	}
-	return true;
+void PublishValueOutput(FPreparedValueOutput& PreparedOutput)
+{
+	check(PreparedOutput.GuestBytes.Num() == PreparedOutput.EncodedBytes.Num());
+	FMemory::Memcpy(
+		PreparedOutput.GuestBytes.GetData(),
+		PreparedOutput.EncodedBytes.GetData(),
+		PreparedOutput.EncodedBytes.Num());
 }
 } // namespace UE::AvidScript::BindingPrivate

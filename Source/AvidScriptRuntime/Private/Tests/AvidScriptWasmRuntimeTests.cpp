@@ -1142,6 +1142,31 @@ bool FAvidScriptRuntimeUtf8ValueHeapLifecycleTest::RunTest(
 	TConstArrayView<uint8> Resolved;
 	TestTrue(TEXT("Runtime heap token resolves before unload"), Heap.Resolve(Token, Resolved, Error));
 
+	FAvidScriptWasmRuntimeInstance OtherRuntime;
+	FAvidScriptUtf8ValueHeap& OtherHeap =
+		OtherRuntime.GetUtf8ValueHeapForTesting();
+	FAvidScriptUtf8ValueReservation OtherReservation;
+	uint32 OtherToken = 0;
+	const uint8 OtherBytes[] = { 'o', 't', 'h', 'e', 'r' };
+	if (!TestTrue(
+			TEXT("Second runtime heap reserves independently"),
+			OtherHeap.Reserve(OtherReservation, Error))
+		|| !TestTrue(
+			TEXT("Second runtime heap publishes independently"),
+			OtherHeap.InternReserved(
+				OtherReservation,
+				MakeArrayView(OtherBytes),
+				OtherToken,
+				bCreated,
+				Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	TestNotEqual(TEXT("Runtime heaps issue distinct capabilities"), OtherToken, Token);
+	TestFalse(TEXT("First runtime rejects second runtime capability"), Heap.Resolve(OtherToken, Resolved, Error));
+	TestFalse(TEXT("Second runtime rejects first runtime capability"), OtherHeap.Resolve(Token, Resolved, Error));
+
 	Runtime.Unload();
 	TestEqual(TEXT("Unload releases all UTF-8 heap values"), Heap.GetLiveValueCount(), 0);
 	TestFalse(TEXT("Unload invalidates prior session tokens"), Heap.Resolve(Token, Resolved, Error));

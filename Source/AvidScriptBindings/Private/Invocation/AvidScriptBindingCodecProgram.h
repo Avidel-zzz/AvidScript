@@ -90,6 +90,12 @@ struct FCodecOutputTransaction
 	void Rollback(const FAvidScriptBindingInvocationContext& Context);
 };
 
+struct FPreparedValueOutput
+{
+	TArrayView<uint8> GuestBytes;
+	TArray<uint8> EncodedBytes;
+};
+
 struct FInvocationCodecProgram
 {
 	EAvidScriptBindingInvocationKind Kind =
@@ -160,14 +166,16 @@ bool PreflightValueOutput(
 	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	FCodecOutputTransaction& Transaction,
+	FPreparedValueOutput& OutPreparedOutput,
 	FString& OutDetails);
 
 bool WriteValueToGuest(
 	const FValueCodecProgram& Program,
-	uint32 GuestAddress,
-	IAvidScriptVmGuestMemory& GuestMemory,
 	const FAvidScriptBindingInvocationContext& Context,
 	void* Frame,
-	FString& OutDetails,
-	FCodecOutputTransaction* Transaction = nullptr);
+	FCodecOutputTransaction& Transaction,
+	FPreparedValueOutput& PreparedOutput,
+	FString& OutDetails);
+
+void PublishValueOutput(FPreparedValueOutput& PreparedOutput);
 } // namespace UE::AvidScript::BindingPrivate

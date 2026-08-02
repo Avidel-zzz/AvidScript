@@ -919,11 +919,10 @@ bool FAvidScriptUtf8ValueBindingBoundaryTest::RunTest(
 		EValueCodecKind::String);
 	FPreparedDynamicInvocationCell StringReadCell{ &StringReadProgram, 0 };
 	FAvidScriptBoundaryGuestMemory FailingGuestMemory;
-	FailingGuestMemory.FailMutableBorrowCall = 2;
-	FailingGuestMemory.bRejectWrites = true;
+	FailingGuestMemory.FailMutableBorrowCall = 1;
 	const uint64 FailedReadArguments[] = { 0, 0, 64 };
 	TestFalse(
-		TEXT("Guest write failure rolls back a created UTF-8 token"),
+		TEXT("Unavailable mutable output range fails before encoding"),
 		InvokePreparedDynamicReflection(
 			&StringReadCell,
 			*Receiver,
@@ -932,8 +931,68 @@ bool FAvidScriptUtf8ValueBindingBoundaryTest::RunTest(
 			Context,
 			Scratch,
 			Result));
-	TestEqual(TEXT("Failed write leaves no live UTF-8 values"), Heap.GetLiveValueCount(), 0);
-	TestEqual(TEXT("Failed write releases its UTF-8 reservation"), Heap.GetReservedValueCount(), 0);
+	TestEqual(TEXT("Failed preflight leaves no live UTF-8 values"), Heap.GetLiveValueCount(), 0);
+	TestEqual(TEXT("Failed preflight creates no UTF-8 reservation"), Heap.GetReservedValueCount(), 0);
+
+	TArray<uint8> LargeInput;
+	TArray<uint8> LargeRef;
+	LargeInput.Init(static_cast<uint8>('a'), FAvidScriptUtf8ValueHeap::MaxValueBytes / 2u);
+	LargeRef.Init(static_cast<uint8>('b'), FAvidScriptUtf8ValueHeap::MaxValueBytes / 2u);
+	const auto InternLargeValue = [this, &Heap](
+		const TConstArrayView<uint8> Bytes,
+		uint32& OutToken)
+	{
+		FString InternError;
+		FAvidScriptUtf8ValueReservation Reservation;
+		bool bCreatedValue = false;
+		return TestTrue(
+			TEXT("Large atomic-output input reserves a capability"),
+			Heap.Reserve(Reservation, InternError))
+			&& TestTrue(
+				TEXT("Large atomic-output input interns"),
+				Heap.InternReserved(
+					Reservation,
+					Bytes,
+					OutToken,
+					bCreatedValue,
+					InternError));
+	};
+	uint32 LargeInputToken = 0;
+	uint32 LargeRefToken = 0;
+	if (!InternLargeValue(LargeInput, LargeInputToken)
+		|| !InternLargeValue(LargeRef, LargeRefToken))
+	{
+		return false;
+	}
+	StoreValueReference(320, 128);
+	StoreValueReference(324, LargeRefToken);
+	StoreValueReference(328, 0x11223344u);
+	StoreValueReference(332, 0x55667788u);
+	TArray<uint8> OutputSnapshot;
+	OutputSnapshot.Append(GuestMemory.Bytes.GetData() + 320, 16);
+	const uint64 AtomicFailureArguments[] = {
+		0, 0, 16, LargeInputToken, 320, 324, 328, 332
+	};
+	TestFalse(
+		TEXT("A later oversized UTF-8 output rejects the whole publication"),
+		InvokePreparedDynamicReflection(
+			&Cell,
+			*Receiver,
+			AtomicFailureArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Atomic encode failure occurs after game logic"), Receiver->Utf8InvocationCount, 2);
+	TestTrue(
+		TEXT("Atomic encode failure leaves every guest output byte unchanged"),
+		FMemory::Memcmp(
+			GuestMemory.Bytes.GetData() + 320,
+			OutputSnapshot.GetData(),
+			OutputSnapshot.Num()) == 0);
+	TestEqual(TEXT("Atomic rollback retains only the two input values"), Heap.GetLiveValueCount(), 2);
+	TestEqual(TEXT("Atomic rollback releases every output reservation"), Heap.GetReservedValueCount(), 0);
+	Heap.Reset();
 	return true;
 }
 

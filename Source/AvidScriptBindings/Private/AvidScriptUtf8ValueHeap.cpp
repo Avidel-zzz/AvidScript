@@ -3,6 +3,13 @@
 #include "Containers/StringConv.h"
 #include "Misc/Crc.h"
 
+#include <atomic>
+
+namespace
+{
+std::atomic<uint64> GNextUtf8ValueCapability{ 1 };
+}
+
 bool FAvidScriptUtf8ValueHeap::IsHeapToken(const uint32 ValueReference)
 {
 	return (ValueReference & TokenTag) != 0;
@@ -18,7 +25,15 @@ bool FAvidScriptUtf8ValueHeap::Reserve(
 	int32 SlotIndex = INDEX_NONE;
 	if (!FreeSlots.IsEmpty())
 	{
-		SlotIndex = FreeSlots.Pop(EAllowShrinking::No);
+		SlotIndex = FreeSlots.Last();
+		if (!Slots.IsValidIndex(SlotIndex)
+			|| Slots[SlotIndex].bReserved
+			|| Slots[SlotIndex].bOccupied
+			|| Slots[SlotIndex].Token != 0)
+		{
+			OutError = TEXT("utf8_value_heap_corrupt: a free UTF-8 value slot is not reusable.");
+			return false;
+		}
 	}
 	else
 	{
@@ -27,19 +42,29 @@ bool FAvidScriptUtf8ValueHeap::Reserve(
 			OutError = TEXT("utf8_value_heap_exhausted: the session has no free UTF-8 value slots.");
 			return false;
 		}
-		SlotIndex = Slots.AddDefaulted();
-		Slots[SlotIndex].Generation = GenerationDomain;
+		SlotIndex = Slots.Num();
 	}
 
-	FSlot& Slot = Slots[SlotIndex];
-	if (Slot.bReserved || Slot.bOccupied || Slot.Generation == 0)
+	const uint32 Token = AllocateToken();
+	if (Token == 0)
 	{
-		OutError = TEXT("utf8_value_heap_corrupt: a free UTF-8 value slot is not reusable.");
+		OutError = TEXT("utf8_value_token_space_exhausted: the process has exhausted UTF-8 capability tokens.");
 		return false;
 	}
+	if (!FreeSlots.IsEmpty())
+	{
+		FreeSlots.Pop(EAllowShrinking::No);
+	}
+	else
+	{
+		Slots.AddDefaulted();
+	}
+	FSlot& Slot = Slots[SlotIndex];
+	Slot.Token = Token;
 	Slot.bReserved = true;
+	TokenToSlots.Add(Token, SlotIndex);
 	++ReservedValueCount;
-	OutReservation.Token = EncodeToken(SlotIndex, Slot.Generation);
+	OutReservation.Token = Token;
 	OutReservation.bActive = true;
 	return true;
 }
@@ -100,7 +125,7 @@ bool FAvidScriptUtf8ValueHeap::InternReserved(
 						Utf8Bytes.GetData(),
 						Utf8Bytes.Num()) == 0))
 			{
-				OutToken = EncodeToken(CandidateIndex, Candidate.Generation);
+				OutToken = Candidate.Token;
 				ReleaseSlot(ReservedSlotIndex);
 				Reservation = FAvidScriptUtf8ValueReservation();
 				return true;
@@ -178,51 +203,20 @@ void FAvidScriptUtf8ValueHeap::Reset()
 {
 	Slots.Reset();
 	FreeSlots.Reset();
+	TokenToSlots.Reset();
 	HashToSlots.Reset();
 	LiveValueCount = 0;
 	ReservedValueCount = 0;
-	GenerationDomain = AdvanceGeneration(GenerationDomain);
 }
 
-uint16 FAvidScriptUtf8ValueHeap::AdvanceGeneration(const uint16 Generation)
+uint32 FAvidScriptUtf8ValueHeap::AllocateToken()
 {
-	const uint16 Next = static_cast<uint16>(
-		(static_cast<uint32>(Generation) + 1u) & GenerationMask);
-	return Next == 0 ? 1 : Next;
-}
-
-uint32 FAvidScriptUtf8ValueHeap::EncodeToken(
-	const int32 SlotIndex,
-	const uint16 Generation)
-{
-	check(SlotIndex >= 0 && SlotIndex < MaxSlots);
-	check(Generation > 0 && Generation <= GenerationMask);
-	return TokenTag
-		| (static_cast<uint32>(Generation) << 16)
-		| static_cast<uint32>(SlotIndex + 1);
-}
-
-bool FAvidScriptUtf8ValueHeap::DecodeToken(
-	const uint32 Token,
-	int32& OutSlotIndex,
-	uint16& OutGeneration)
-{
-	OutSlotIndex = INDEX_NONE;
-	OutGeneration = 0;
-	if (!IsHeapToken(Token))
-	{
-		return false;
-	}
-	const uint32 EncodedSlot = Token & SlotMask;
-	const uint32 EncodedGeneration =
-		(Token >> 16) & GenerationMask;
-	if (EncodedSlot == 0 || EncodedGeneration == 0)
-	{
-		return false;
-	}
-	OutSlotIndex = static_cast<int32>(EncodedSlot - 1);
-	OutGeneration = static_cast<uint16>(EncodedGeneration);
-	return true;
+	const uint64 Capability = GNextUtf8ValueCapability.fetch_add(
+		1,
+		std::memory_order_relaxed);
+	return Capability <= static_cast<uint64>(~TokenTag)
+		? TokenTag | static_cast<uint32>(Capability)
+		: 0;
 }
 
 bool FAvidScriptUtf8ValueHeap::IsCanonicalUtf8(
@@ -265,14 +259,20 @@ bool FAvidScriptUtf8ValueHeap::ResolveSlot(
 	int32& OutSlotIndex,
 	const FSlot*& OutSlot) const
 {
+	OutSlotIndex = INDEX_NONE;
 	OutSlot = nullptr;
-	uint16 Generation = 0;
-	if (!DecodeToken(Token, OutSlotIndex, Generation)
-		|| !Slots.IsValidIndex(OutSlotIndex)
-		|| Slots[OutSlotIndex].Generation != Generation)
+	if (!IsHeapToken(Token))
 	{
 		return false;
 	}
+	const int32* SlotIndex = TokenToSlots.Find(Token);
+	if (SlotIndex == nullptr
+		|| !Slots.IsValidIndex(*SlotIndex)
+		|| Slots[*SlotIndex].Token != Token)
+	{
+		return false;
+	}
+	OutSlotIndex = *SlotIndex;
 	OutSlot = &Slots[OutSlotIndex];
 	return true;
 }
@@ -296,7 +296,8 @@ void FAvidScriptUtf8ValueHeap::ReleaseSlot(const int32 SlotIndex)
 	Slot.Hash = 0;
 	Slot.bReserved = false;
 	Slot.bOccupied = false;
-	Slot.Generation = AdvanceGeneration(Slot.Generation);
+	TokenToSlots.Remove(Slot.Token);
+	Slot.Token = 0;
 	FreeSlots.Add(SlotIndex);
 }
 

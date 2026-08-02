@@ -68,6 +68,23 @@ bool FAvidScriptUtf8ValueHeapTest::RunTest(const FString& Parameters)
 				UnicodeBytes,
 				UE_ARRAY_COUNT(UnicodeBytes)) == 0);
 
+	FAvidScriptUtf8ValueHeap OtherHeap;
+	const uint8 OtherBytes[] = { 0x6f, 0x74, 0x68, 0x65, 0x72 };
+	uint32 OtherToken = 0;
+	TestTrue(
+		TEXT("A second runtime heap can intern independently"),
+		InternUtf8(OtherHeap, OtherBytes, OtherToken, bCreated, Error));
+	TestNotEqual(
+		TEXT("Runtime heaps receive distinct process capabilities"),
+		OtherToken,
+		UnicodeToken);
+	TestFalse(
+		TEXT("A token from the first runtime fails in the second runtime"),
+		OtherHeap.Resolve(UnicodeToken, Resolved, Error));
+	TestFalse(
+		TEXT("A token from the second runtime fails in the first runtime"),
+		Heap.Resolve(OtherToken, Resolved, Error));
+
 	FAvidScriptUtf8ValueReservation ReleasedReservation;
 	TestTrue(TEXT("Reservation can be acquired"), Heap.Reserve(ReleasedReservation, Error));
 	const uint32 ReleasedToken = ReleasedReservation.Token;
@@ -111,7 +128,7 @@ bool FAvidScriptUtf8ValueHeapTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Released live slot can be reused"),
 		InternUtf8(Heap, UnicodeBytes, ReusedToken, bCreated, Error));
-	TestNotEqual(TEXT("Reused live slot advances generation"), ReusedToken, UnicodeToken);
+	TestNotEqual(TEXT("Reused live slot receives a fresh capability"), ReusedToken, UnicodeToken);
 
 	const uint32 BeforeResetToken = ReusedToken;
 	Heap.Reset();
@@ -121,7 +138,7 @@ bool FAvidScriptUtf8ValueHeapTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Heap accepts values after reset"),
 		InternUtf8(Heap, UnicodeBytes, AfterResetToken, bCreated, Error));
-	TestNotEqual(TEXT("Reset advances the generation domain"), AfterResetToken, BeforeResetToken);
+	TestNotEqual(TEXT("Reset cannot reuse an old capability"), AfterResetToken, BeforeResetToken);
 
 	FAvidScriptUtf8ValueHeap ExhaustionHeap;
 	TArray<FAvidScriptUtf8ValueReservation> Reservations;
