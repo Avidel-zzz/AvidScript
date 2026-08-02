@@ -1839,3 +1839,23 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the Wasmtime toolchain contract canonicalized CRLF for the locked patch hash but used an LF-only `diff --git` regex. A clean worktree created under `core.autocrlf` therefore rejected the same tracked patch blob before running the real contract assertions.
 - Prevention: every parser for canonicalized text accepts both CRLF and LF, and clean detached worktree Gate coverage is the portability regression test. Hash normalization and structural parsing must use the same line-ending model.
+
+### 2026-08-02: reflected Actor fixtures require a play-initialized world
+
+- Mistake: the P57.11B2 end-to-end fixture repeated the known uninitialized-world error: it spawned an Actor after `CreateWorld` and `SetCurrentWorld` but omitted `InitializeActorsForPlay`, so `AActor::ProcessEvent` silently left ref/out/return frames at their defaults in both VM backends.
+- Prevention: every reflected Actor oracle uses the fixed lifecycle `CreateWorld -> CreateNewWorldContext -> SetCurrentWorld -> InitializeActorsForPlay -> SpawnActor`. Before debugging codecs or guest memory, invoke one native return UFUNCTION through `ProcessEvent` and verify a non-default result.
+
+### 2026-08-02: architecture checks always use PowerShell 7
+
+- Mistake: the P57.11B2 clean architecture run repeated the Windows PowerShell 5.1 launcher error even though the checker uses PowerShell 7 leading-pipe syntax; parsing failed before any architecture assertion ran.
+- Prevention: architecture and parser gates are launched only with `pwsh -NoProfile`. `powershell.exe` is reserved for an explicit 5.1 compatibility contract and its parser result never counts as product evidence.
+
+### 2026-08-02: repository .NET tests use the pinned SDK launcher
+
+- Mistake: the first P57.11B2 C# Guest test used UE 5.8's bundled .NET 10 launcher, while `global.json` disables roll-forward and pins 8.0.416; execution stopped before compilation.
+- Prevention: before any repository .NET build or test, resolve and print `$env:USERPROFILE\.dotnet\dotnet.exe --version`, require 8.0.416, and use that executable for the whole producer-to-consumer test sequence.
+
+### 2026-08-02: Automation leaf names cannot also be parent groups
+
+- Mistake: `AvidScript.Bindings.Utf8ValueHeap` was registered as a runnable test and as the parent of `.CrossInvocation`; UE Automation discovered only the child, leaving the core heap contract outside the focused gate.
+- Prevention: every Automation test has a leaf suffix such as `.Core`, `.Lifecycle`, or `.CrossInvocation`. Before phase closeout, run the intended parent filter once and verify the found count includes every expected leaf.

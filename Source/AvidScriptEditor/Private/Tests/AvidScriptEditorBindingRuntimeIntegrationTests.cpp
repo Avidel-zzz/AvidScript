@@ -421,6 +421,29 @@ public:
 		return true;
 	}
 
+	bool BorrowMutableBytes(
+		const uint32 GuestAddress,
+		const uint32 ByteCount,
+		const uint32 Alignment,
+		TArrayView<uint8>& OutBytes,
+		FString& OutError) override
+	{
+		OutBytes = TArrayView<uint8>();
+		OutError.Reset();
+		if (Alignment == 0
+			|| !FMath::IsPowerOfTwo(Alignment)
+			|| GuestAddress % Alignment != 0
+			|| !IsRangeValid(GuestAddress, ByteCount))
+		{
+			OutError = TEXT("test guest mutable borrow alignment or range is invalid");
+			return false;
+		}
+		OutBytes = MakeArrayView(Bytes).Slice(
+			static_cast<int32>(GuestAddress),
+			static_cast<int32>(ByteCount));
+		return true;
+	}
+
 	template <typename ValueType>
 	ValueType ReadValue(const uint32 GuestAddress) const
 	{
@@ -937,9 +960,9 @@ bool AcceptAvidScriptGeneratedBindingLifecycleBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 351 generated bindings and two shared capabilities"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 354 generated bindings and two shared capabilities"), *BuildLabel),
 		AuthorizationImports->Num(),
-		353);
+		356);
 
 	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
 	if (!Test.TestTrue(
@@ -1219,9 +1242,9 @@ bool AcceptAvidScriptProjectGameplayWorkspaceBuild(
 		return false;
 	}
 	Test.TestEqual(
-		*FString::Printf(TEXT("%s authorization ceiling contains 351 gameplay bindings and two shared capabilities"), *BuildLabel),
+		*FString::Printf(TEXT("%s authorization ceiling contains 354 gameplay bindings and two shared capabilities"), *BuildLabel),
 		AuthorizationImports->Num(),
-		353);
+		356);
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;

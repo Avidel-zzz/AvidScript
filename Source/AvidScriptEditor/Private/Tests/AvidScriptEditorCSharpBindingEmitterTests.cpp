@@ -332,6 +332,7 @@ bool FAvidScriptEditorCSharpBindingEmitterStructWireTest::RunTest(const FString&
 	Setter.HostImport.Signature = TEXT("(iii)i");
 	Setter.ReturnValue = {};
 	Setter.ReturnValue.CanonicalType = TEXT("void");
+	Setter.ReturnValue.Direction = TEXT("return");
 	Setter.Parameters[0].Name = TEXT("Value");
 	Setter.Parameters[0].Direction = TEXT("value");
 	Package.Bindings.Add(Setter);
@@ -1525,7 +1526,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 351);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 354);
 	TSharedPtr<FJsonObject> DescriptorObject;
 	TestTrue(TEXT("Gameplay descriptor parses"), ParseJsonObject(DescriptorJson, DescriptorObject));
 	if (DescriptorObject.IsValid())
@@ -1637,9 +1638,9 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	if (ManifestObject.IsValid())
 	{
 		TestEqual(
-			TEXT("Gameplay manifest declares 351 reflected imports and two shared capabilities"),
+			TEXT("Gameplay manifest declares 354 reflected imports and two shared capabilities"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			353);
+			356);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();

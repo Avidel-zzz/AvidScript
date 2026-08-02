@@ -608,7 +608,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 349 functions including nine schema v9 struct-wire additions"), FirstSelectionResult.AcceptedFunctionCount, 349);
+	TestEqual(TEXT("Gameplay profile accepts 352 functions including nine schema v9 struct-wire and three FName return additions"), FirstSelectionResult.AcceptedFunctionCount, 352);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),
