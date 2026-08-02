@@ -505,7 +505,6 @@ bool ResolveAvidScriptRuntimeKind(
 	if (Model.CanonicalType == TEXT("name:fname"))
 	{
 		if (!Property->IsA<FNameProperty>()
-			|| (Model.Direction != TEXT("value") && Model.Direction != TEXT("const_ref"))
 			|| Model.Kind != TEXT("name_utf8")
 			|| Model.CppType != TEXT("FName")
 			|| Model.AbiTypes != TArray<FString>({ TEXT("i") })
@@ -520,6 +519,25 @@ bool ResolveAvidScriptRuntimeKind(
 			return false;
 		}
 		OutKind = EAvidScriptRuntimeBindingKind::Name;
+		return true;
+	}
+	if (Model.CanonicalType == TEXT("string:fstring"))
+	{
+		if (!Property->IsA<FStrProperty>()
+			|| Model.Kind != TEXT("string_utf8")
+			|| Model.CppType != TEXT("FString")
+			|| Model.AbiTypes != TArray<FString>({ TEXT("i") })
+			|| DeclaredType == nullptr
+			|| DeclaredType->CanonicalType != TEXT("string:fstring")
+			|| DeclaredType->Kind != TEXT("string_utf8")
+			|| DeclaredType->CppType != TEXT("FString")
+			|| DeclaredType->Size != 4
+			|| DeclaredType->Alignment != 4
+			|| DeclaredType->AbiTypes != TArray<FString>({ TEXT("i") }))
+		{
+			return false;
+		}
+		OutKind = EAvidScriptRuntimeBindingKind::String;
 		return true;
 	}
 
@@ -617,6 +635,8 @@ int32 GetAvidScriptRuntimeGuestStorageSize(EAvidScriptRuntimeBindingKind Kind)
 	case EAvidScriptRuntimeBindingKind::UInt32:
 	case EAvidScriptRuntimeBindingKind::Float:
 	case EAvidScriptRuntimeBindingKind::Enum:
+	case EAvidScriptRuntimeBindingKind::Name:
+	case EAvidScriptRuntimeBindingKind::String:
 		return 4;
 	case EAvidScriptRuntimeBindingKind::Int8:
 	case EAvidScriptRuntimeBindingKind::UInt8:
@@ -654,6 +674,8 @@ int32 GetAvidScriptRuntimeGuestStorageAlignment(EAvidScriptRuntimeBindingKind Ki
 	case EAvidScriptRuntimeBindingKind::UInt32:
 	case EAvidScriptRuntimeBindingKind::Float:
 	case EAvidScriptRuntimeBindingKind::Enum:
+	case EAvidScriptRuntimeBindingKind::Name:
+	case EAvidScriptRuntimeBindingKind::String:
 	case EAvidScriptRuntimeBindingKind::Object:
 	case EAvidScriptRuntimeBindingKind::Vector:
 	case EAvidScriptRuntimeBindingKind::Rotator:
@@ -832,6 +854,7 @@ bool BuildAvidScriptStructWireProgram(
 				Child.Kind,
 				Child.ObjectClass)
 				|| Child.Kind == EAvidScriptRuntimeBindingKind::Name
+				|| Child.Kind == EAvidScriptRuntimeBindingKind::String
 				|| !MatchesAvidScriptRuntimeCanonicalLeafStorage(
 					*ChildType,
 					Child.Kind,
@@ -2586,6 +2609,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Plan.ExpectedArgumentCount = ReturnOffset;
 			Plan.bRequiresGuestMemory =
 				Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Name
+				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::String
 				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::StructWire;
 			if (BlueprintSetter == nullptr
 				&& Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::StructWire)
@@ -2825,6 +2849,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Plan.bRequiresGuestMemory |= ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Ref
 				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::String
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
 		}

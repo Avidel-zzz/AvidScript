@@ -15,6 +15,7 @@ class UFunction;
 class FProperty;
 class UWorld;
 class IAvidScriptObjectOwnershipDomain;
+class FAvidScriptUtf8ValueHeap;
 
 enum class EAvidScriptBindingFastPathKind : uint8
 {
@@ -96,6 +97,7 @@ struct FAvidScriptBindingInvocationContext
 {
 	FAvidScriptObjectRegistry* ObjectRegistry = nullptr;
 	IAvidScriptObjectOwnershipDomain* ObjectOwnership = nullptr;
+	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
 	FAvidScriptObjectHandle OwnerHandle;
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;

@@ -245,6 +245,15 @@ bool InvokePreparedDynamicReflection(
 		== EAvidScriptBindingInvocationKind::ReflectedPropertyRead)
 	{
 		uint32 GuestAddress = 0;
+		FCodecOutputTransaction OutputTransaction;
+		bool bOutputCommitted = false;
+		ON_SCOPE_EXIT
+		{
+			if (!bOutputCommitted)
+			{
+				OutputTransaction.Rollback(InvocationContext);
+			}
+		};
 		if (GuestMemory == nullptr
 			|| !ResolveGuestAddress(
 				Arguments[Program->ReturnValue.ArgumentOffset],
@@ -255,6 +264,8 @@ bool InvokePreparedDynamicReflection(
 				Program->ReturnValue,
 				GuestAddress,
 				*GuestMemory,
+				InvocationContext,
+				OutputTransaction,
 				Details)
 			|| !WriteValueToGuest(
 				Program->ReturnValue,
@@ -262,7 +273,8 @@ bool InvokePreparedDynamicReflection(
 				*GuestMemory,
 				InvocationContext,
 				&Receiver,
-				Details))
+				Details,
+				&OutputTransaction))
 		{
 			SetDispatchFailure(
 				OutResult,
@@ -271,6 +283,8 @@ bool InvokePreparedDynamicReflection(
 				Details);
 			return false;
 		}
+		OutputTransaction.Commit();
+		bOutputCommitted = true;
 		OutResult.bSucceeded = true;
 		OutResult.ReturnValue = 1;
 		return true;
@@ -412,11 +426,22 @@ bool InvokePreparedDynamicReflection(
 	ParameterGuestAddresses.SetNumZeroed(Program->Parameters.Num());
 	uint32 ReturnGuestAddress = 0;
 	TArray<FGuestOutputRange, TInlineAllocator<16>> WritableGuestRanges;
+	FCodecOutputTransaction OutputTransaction;
+	bool bOutputCommitted = false;
+	ON_SCOPE_EXIT
+	{
+		if (!bOutputCommitted)
+		{
+			OutputTransaction.Rollback(InvocationContext);
+		}
+	};
 	const auto PreflightGuestOutput = [&Arguments,
 		GuestMemory,
+		&InvocationContext,
 		&OutResult,
 		&Details,
-		&WritableGuestRanges](
+		&WritableGuestRanges,
+		&OutputTransaction](
 		const FValueCodecProgram& Value,
 		const FString& FailureCategory,
 		const FString& Source,
@@ -458,6 +483,8 @@ bool InvokePreparedDynamicReflection(
 				Value,
 				OutGuestAddress,
 				*GuestMemory,
+				InvocationContext,
+				OutputTransaction,
 				Details))
 		{
 			SetDispatchFailure(
@@ -598,15 +625,6 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 	Receiver.ProcessEvent(Program->Function, Frame);
-	FCodecOutputTransaction OutputTransaction;
-	bool bOutputCommitted = false;
-	ON_SCOPE_EXIT
-	{
-		if (!bOutputCommitted)
-		{
-			OutputTransaction.Rollback(InvocationContext);
-		}
-	};
 
 	for (int32 ParameterIndex = 0;
 		ParameterIndex < Program->Parameters.Num();

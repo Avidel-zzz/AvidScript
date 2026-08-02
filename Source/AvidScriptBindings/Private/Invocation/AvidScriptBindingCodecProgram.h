@@ -5,6 +5,7 @@
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
 #include "AvidScriptObjectRegistry.h"
+#include "AvidScriptUtf8ValueHeap.h"
 #include "AvidScriptVmBackend.h"
 #include "CoreMinimal.h"
 
@@ -43,6 +44,7 @@ enum class EValueCodecKind : uint8
 	Double,
 	Enum,
 	Name,
+	String,
 	Object,
 	Vector,
 	Rotator,
@@ -70,7 +72,20 @@ struct FValueCodecProgram
 struct FCodecOutputTransaction
 {
 	TArray<FAvidScriptObjectHandle, TInlineAllocator<128>> BorrowedHandles;
+	TArray<FAvidScriptUtf8ValueReservation, TInlineAllocator<16>>
+		Utf8Reservations;
+	TArray<uint32, TInlineAllocator<16>> CreatedUtf8Tokens;
+	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
+	int32 NextUtf8Reservation = 0;
 
+	bool ReserveUtf8Value(
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutDetails);
+	bool InternNextUtf8Value(
+		TConstArrayView<uint8> Bytes,
+		const FAvidScriptBindingInvocationContext& Context,
+		uint32& OutToken,
+		FString& OutDetails);
 	void Commit();
 	void Rollback(const FAvidScriptBindingInvocationContext& Context);
 };
@@ -143,6 +158,8 @@ bool PreflightValueOutput(
 	const FValueCodecProgram& Program,
 	uint32 GuestAddress,
 	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	FCodecOutputTransaction& Transaction,
 	FString& OutDetails);
 
 bool WriteValueToGuest(

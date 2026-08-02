@@ -73,11 +73,28 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
 	FAvidScriptBindingsRecursiveStruct RecursiveStructProperty;
 
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FName Utf8NameProperty;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FString Utf8StringProperty;
+
+	UPROPERTY()
+	int32 Utf8InvocationCount = 0;
+
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Tests")
 	FAvidScriptBindingsRecursiveStruct RecursiveStructRoundtrip(
 		const FAvidScriptBindingsRecursiveStruct& Input,
 		UPARAM(ref) FAvidScriptBindingsRecursiveStruct& InOut,
 		FAvidScriptBindingsRecursiveStruct& OutValue) const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Tests")
+	FString Utf8Roundtrip(
+		const FName& InputName,
+		const FString& InputString,
+		UPARAM(ref) FName& InOutName,
+		UPARAM(ref) FString& InOutString,
+		FName& OutName);
 };
 
 UCLASS()

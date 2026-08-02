@@ -48,3 +48,17 @@ UAvidScriptBindingsTestObject::RecursiveStructRoundtrip(
 	InOut.Nested.Ratio += Input.Nested.Ratio;
 	return InOut;
 }
+
+FString UAvidScriptBindingsTestObject::Utf8Roundtrip(
+	const FName& InputName,
+	const FString& InputString,
+	FName& InOutName,
+	FString& InOutString,
+	FName& OutName)
+{
+	++Utf8InvocationCount;
+	OutName = InputName;
+	InOutName = FName(*(InOutName.ToString() + TEXT("_Touched")));
+	InOutString += TEXT("|") + InputString;
+	return InputName.ToString() + TEXT(":") + InputString;
+}

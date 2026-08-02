@@ -5,11 +5,13 @@
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectOwnership.h"
 #include "AvidScriptSceneComponentBinding.h"
+#include "AvidScriptUtf8ValueHeap.h"
 #include "Invocation/AvidScriptBindingCodecProgram.h"
 #include "Invocation/AvidScriptBindingPreparedInvocation.h"
 
 #include "AvidScriptBindingsTestTypes.h"
 
+#include "Containers/StringConv.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Script.h"
@@ -46,6 +48,11 @@ public:
 		TConstArrayView<uint8> InBytes,
 		FString& OutError) override
 	{
+		if (bRejectWrites)
+		{
+			OutError = TEXT("guest write rejected");
+			return false;
+		}
 		if (GuestAddress > static_cast<uint32>(this->Bytes.Num())
 			|| InBytes.Num() > this->Bytes.Num() - static_cast<int32>(GuestAddress))
 		{
@@ -71,6 +78,13 @@ public:
 
 	bool BorrowMutableBytes(uint32 Address, uint32 Count, uint32 Alignment, TArrayView<uint8>& OutBytes, FString& OutError) override
 	{
+		++MutableBorrowCallCount;
+		if (MutableBorrowCallCount == FailMutableBorrowCall)
+		{
+			OutBytes = TArrayView<uint8>();
+			OutError = TEXT("guest mutable borrow rejected");
+			return false;
+		}
 		if (Address > static_cast<uint32>(Bytes.Num()) || Count > static_cast<uint32>(Bytes.Num()) - Address)
 		{
 			OutError = TEXT("guest borrow range"); return false;
@@ -79,6 +93,9 @@ public:
 	}
 
 	TArray<uint8> Bytes;
+	int32 MutableBorrowCallCount = 0;
+	int32 FailMutableBorrowCall = INDEX_NONE;
+	bool bRejectWrites = false;
 };
 
 class FAvidScriptBoundaryOwnership final : public IAvidScriptObjectOwnershipDomain
@@ -136,6 +153,25 @@ FValueCodecProgram MakeRecursiveStructCodec(FProperty* Property, EValueCodecDire
 		Child.Property = FindFProperty<FProperty>(Nested.StructType, *Leaf.Key); Child.Kind = Leaf.Value;
 		Child.WireOffset = Nested.Children.Num() == 1 ? 0 : 4; Child.WireSize = 4; Child.WireAlignment = 4; Child.GuestStorageSize = 4; Child.Name = Leaf.Key;
 	}
+	return Program;
+}
+
+FValueCodecProgram MakeUtf8Codec(
+	FProperty* Property,
+	const EValueCodecDirection Direction,
+	const int32 ArgumentOffset,
+	const EValueCodecKind Kind)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.Direction = Direction;
+	Program.Kind = Kind;
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = 1;
+	Program.GuestStorageSize = sizeof(uint32);
+	Program.WireSize = sizeof(uint32);
+	Program.WireAlignment = alignof(uint32);
+	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
 	return Program;
 }
 
@@ -606,6 +642,298 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	int32 PropertyReadCount = 0;
 	FMemory::Memcpy(&PropertyReadCount, GuestMemory.Bytes.GetData() + 352 + 28, 4);
 	TestEqual(TEXT("Recursive property read preserves nested count"), PropertyReadCount, 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptUtf8ValueBindingBoundaryTest,
+	"AvidScript.Bindings.Utf8ValueHeap.CrossInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptUtf8ValueBindingBoundaryTest::RunTest(
+	const FString& Parameters)
+{
+	UClass* ExpectedClass = UAvidScriptBindingsTestObject::StaticClass();
+	UFunction* Function = ExpectedClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			UAvidScriptBindingsTestObject,
+			Utf8Roundtrip));
+	if (!TestNotNull(TEXT("UTF-8 fixture function reflects"), Function))
+	{
+		return false;
+	}
+	FProperty* InputNameProperty = FindFProperty<FProperty>(Function, TEXT("InputName"));
+	FProperty* InputStringProperty = FindFProperty<FProperty>(Function, TEXT("InputString"));
+	FProperty* InOutNameProperty = FindFProperty<FProperty>(Function, TEXT("InOutName"));
+	FProperty* InOutStringProperty = FindFProperty<FProperty>(Function, TEXT("InOutString"));
+	FProperty* OutNameProperty = FindFProperty<FProperty>(Function, TEXT("OutName"));
+	FProperty* ReturnProperty = Function->GetReturnProperty();
+	if (!TestNotNull(TEXT("UTF-8 input FName reflects"), InputNameProperty)
+		|| !TestNotNull(TEXT("UTF-8 input FString reflects"), InputStringProperty)
+		|| !TestNotNull(TEXT("UTF-8 ref FName reflects"), InOutNameProperty)
+		|| !TestNotNull(TEXT("UTF-8 ref FString reflects"), InOutStringProperty)
+		|| !TestNotNull(TEXT("UTF-8 out FName reflects"), OutNameProperty)
+		|| !TestNotNull(TEXT("UTF-8 FString return reflects"), ReturnProperty))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram Program;
+	Program.OwnerClass = ExpectedClass;
+	Program.Function = Function;
+	Program.DebugPath = Function->GetPathName();
+	Program.FrameSize = Function->GetStructureSize();
+	Program.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
+	Program.RequiredScratchSize = Program.FrameSize + Program.FrameAlignment - 1;
+	Program.ExpectedArgumentCount = 8;
+	Program.bRequiresGuestMemory = true;
+	Program.Parameters.Add(MakeUtf8Codec(InputNameProperty, EValueCodecDirection::ConstRef, 2, EValueCodecKind::Name));
+	Program.Parameters.Add(MakeUtf8Codec(InputStringProperty, EValueCodecDirection::ConstRef, 3, EValueCodecKind::String));
+	Program.Parameters.Add(MakeUtf8Codec(InOutNameProperty, EValueCodecDirection::Ref, 4, EValueCodecKind::Name));
+	Program.Parameters.Add(MakeUtf8Codec(InOutStringProperty, EValueCodecDirection::Ref, 5, EValueCodecKind::String));
+	Program.Parameters.Add(MakeUtf8Codec(OutNameProperty, EValueCodecDirection::Out, 6, EValueCodecKind::Name));
+	Program.ReturnValue = MakeUtf8Codec(ReturnProperty, EValueCodecDirection::Return, 7, EValueCodecKind::String);
+	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
+
+	FAvidScriptBoundaryGuestMemory GuestMemory;
+	const auto StoreLinearUtf8 = [&GuestMemory](
+		const uint32 Address,
+		const TConstArrayView<uint8> Bytes)
+	{
+		const uint32 Length = static_cast<uint32>(Bytes.Num());
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address, &Length, sizeof(Length));
+		if (!Bytes.IsEmpty())
+		{
+			FMemory::Memcpy(
+				GuestMemory.Bytes.GetData() + Address + sizeof(Length),
+				Bytes.GetData(),
+				Bytes.Num());
+		}
+		GuestMemory.Bytes[Address + sizeof(Length) + Bytes.Num()] = 0;
+	};
+	const auto StoreValueReference = [&GuestMemory](
+		const uint32 Address,
+		const uint32 ValueReference)
+	{
+		FMemory::Memcpy(
+			GuestMemory.Bytes.GetData() + Address,
+			&ValueReference,
+			sizeof(ValueReference));
+	};
+	const uint8 InputNameUtf8[] = { 'P', 'l', 'a', 'y', 'e', 'r' };
+	const uint8 InputStringUtf8[] = {
+		'h', 'e', 'l', 'l', 'o',
+		0xe4, 0xb8, 0x96, 0xe7, 0x95, 0x8c
+	};
+	const uint8 RefNameUtf8[] = { 'S', 'e', 'e', 'd' };
+	const uint8 RefStringUtf8[] = { 'b', 'a', 's', 'e' };
+	StoreLinearUtf8(16, MakeArrayView(InputNameUtf8));
+	StoreLinearUtf8(64, MakeArrayView(InputStringUtf8));
+	StoreLinearUtf8(128, MakeArrayView(RefNameUtf8));
+	StoreLinearUtf8(192, MakeArrayView(RefStringUtf8));
+	StoreValueReference(320, 128);
+	StoreValueReference(324, 192);
+
+	FAvidScriptUtf8ValueHeap Heap;
+	FAvidScriptBindingInvocationContext Context;
+	Context.Utf8ValueHeap = &Heap;
+	TArray<uint8> Scratch;
+	Scratch.SetNumZeroed(Program.RequiredScratchSize);
+	UAvidScriptBindingsTestObject* Receiver = NewObject<UAvidScriptBindingsTestObject>();
+	FAvidScriptDynamicHostCallResult Result;
+	const uint64 OverlapArguments[] = { 0, 0, 16, 64, 320, 324, 328, 328 };
+	TestFalse(
+		TEXT("Overlapping UTF-8 outputs fail before ProcessEvent"),
+		InvokePreparedDynamicReflection(
+			&Cell,
+			*Receiver,
+			OverlapArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Overlapping UTF-8 outputs do not invoke game logic"), Receiver->Utf8InvocationCount, 0);
+	TestEqual(TEXT("Overlap rollback releases UTF-8 reservations"), Heap.GetReservedValueCount(), 0);
+	TestEqual(TEXT("Overlap rollback publishes no UTF-8 values"), Heap.GetLiveValueCount(), 0);
+
+	const uint64 Arguments[] = { 0, 0, 16, 64, 320, 324, 328, 332 };
+	if (!TestTrue(
+			TEXT("UTF-8 function accepts linear inputs and returns heap tokens"),
+			InvokePreparedDynamicReflection(
+				&Cell,
+				*Receiver,
+				Arguments,
+				&GuestMemory,
+				Context,
+				Scratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestEqual(TEXT("Successful UTF-8 call invokes game logic once"), Receiver->Utf8InvocationCount, 1);
+
+	uint32 InOutNameToken = 0;
+	uint32 InOutStringToken = 0;
+	uint32 OutNameToken = 0;
+	uint32 ReturnToken = 0;
+	FMemory::Memcpy(&InOutNameToken, GuestMemory.Bytes.GetData() + 320, sizeof(uint32));
+	FMemory::Memcpy(&InOutStringToken, GuestMemory.Bytes.GetData() + 324, sizeof(uint32));
+	FMemory::Memcpy(&OutNameToken, GuestMemory.Bytes.GetData() + 328, sizeof(uint32));
+	FMemory::Memcpy(&ReturnToken, GuestMemory.Bytes.GetData() + 332, sizeof(uint32));
+	TestTrue(TEXT("Ref FName output is a heap token"), FAvidScriptUtf8ValueHeap::IsHeapToken(InOutNameToken));
+	TestTrue(TEXT("Ref FString output is a heap token"), FAvidScriptUtf8ValueHeap::IsHeapToken(InOutStringToken));
+	TestTrue(TEXT("Out FName output is a heap token"), FAvidScriptUtf8ValueHeap::IsHeapToken(OutNameToken));
+	TestTrue(TEXT("FString return is a heap token"), FAvidScriptUtf8ValueHeap::IsHeapToken(ReturnToken));
+
+	const auto ResolveTokenString = [&Heap](const uint32 Token, FString& OutValue)
+	{
+		TConstArrayView<uint8> Bytes;
+		FString Error;
+		if (!Heap.Resolve(Token, Bytes, Error))
+		{
+			return false;
+		}
+		static constexpr ANSICHAR Empty[] = "";
+		const ANSICHAR* Utf8 = Bytes.IsEmpty()
+			? Empty
+			: reinterpret_cast<const ANSICHAR*>(Bytes.GetData());
+		const FUTF8ToTCHAR Converted(Utf8, Bytes.Num());
+		OutValue = FString(Converted.Length(), Converted.Get());
+		return true;
+	};
+	const FUTF8ToTCHAR InputStringConverted(
+		reinterpret_cast<const ANSICHAR*>(InputStringUtf8),
+		UE_ARRAY_COUNT(InputStringUtf8));
+	const FString InputStringValue(
+		InputStringConverted.Length(),
+		InputStringConverted.Get());
+	FString Resolved;
+	TestTrue(TEXT("Ref FName token resolves"), ResolveTokenString(InOutNameToken, Resolved));
+	TestEqual(TEXT("Ref FName token preserves mutation"), Resolved, FString(TEXT("Seed_Touched")));
+	TestTrue(TEXT("Ref FString token resolves"), ResolveTokenString(InOutStringToken, Resolved));
+	TestEqual(TEXT("Ref FString token preserves mutation"), Resolved, FString(TEXT("base|")) + InputStringValue);
+	TestTrue(TEXT("Out FName token resolves"), ResolveTokenString(OutNameToken, Resolved));
+	TestEqual(TEXT("Out FName token preserves value"), Resolved, FString(TEXT("Player")));
+	TestTrue(TEXT("FString return token resolves"), ResolveTokenString(ReturnToken, Resolved));
+	TestEqual(TEXT("FString return token preserves value"), Resolved, FString(TEXT("Player:")) + InputStringValue);
+
+	FProperty* StringProperty = FindFProperty<FProperty>(ExpectedClass, TEXT("Utf8StringProperty"));
+	if (!TestNotNull(TEXT("UTF-8 FString property reflects"), StringProperty))
+	{
+		return false;
+	}
+	FInvocationCodecProgram StringWriteProgram;
+	StringWriteProgram.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+	StringWriteProgram.OwnerClass = ExpectedClass;
+	StringWriteProgram.ReflectedProperty = StringProperty;
+	StringWriteProgram.DebugPath = StringProperty->GetPathName();
+	StringWriteProgram.ExpectedArgumentCount = 3;
+	StringWriteProgram.bRequiresGuestMemory = true;
+	StringWriteProgram.Parameters.Add(MakeUtf8Codec(
+		StringProperty,
+		EValueCodecDirection::Value,
+		2,
+		EValueCodecKind::String));
+	FPreparedDynamicInvocationCell StringWriteCell{ &StringWriteProgram, 0 };
+	const uint64 TokenWriteArguments[] = { 0, 0, ReturnToken };
+	TestTrue(
+		TEXT("A second invocation accepts a FString heap token"),
+		InvokePreparedDynamicReflection(
+			&StringWriteCell,
+			*Receiver,
+			TokenWriteArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(
+		TEXT("Token input reaches the reflected FString property"),
+		Receiver->Utf8StringProperty,
+		FString(TEXT("Player:")) + InputStringValue);
+
+	Receiver->Utf8StringProperty = TEXT("unchanged");
+	FAvidScriptBindingInvocationContext MissingHeapContext = Context;
+	MissingHeapContext.Utf8ValueHeap = nullptr;
+	TestFalse(
+		TEXT("Heap token input rejects a missing session heap"),
+		InvokePreparedDynamicReflection(
+			&StringWriteCell,
+			*Receiver,
+			TokenWriteArguments,
+			&GuestMemory,
+			MissingHeapContext,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Missing heap leaves FString unchanged"), Receiver->Utf8StringProperty, FString(TEXT("unchanged")));
+	const uint64 ForgedTokenArguments[] = { 0, 0, MAX_uint32 };
+	TestFalse(
+		TEXT("Forged UTF-8 heap token is rejected"),
+		InvokePreparedDynamicReflection(
+			&StringWriteCell,
+			*Receiver,
+			ForgedTokenArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	Heap.Reset();
+	TestFalse(
+		TEXT("Token from a reset session is stale"),
+		InvokePreparedDynamicReflection(
+			&StringWriteCell,
+			*Receiver,
+			TokenWriteArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+
+	const uint8 EmbeddedNulUtf8[] = { 'a', 0, 'b' };
+	StoreLinearUtf8(400, MakeArrayView(EmbeddedNulUtf8));
+	const uint64 LinearStringArguments[] = { 0, 0, 400 };
+	TestTrue(
+		TEXT("FString linear input permits an embedded NUL"),
+		InvokePreparedDynamicReflection(
+			&StringWriteCell,
+			*Receiver,
+			LinearStringArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Embedded NUL FString preserves its explicit length"), Receiver->Utf8StringProperty.Len(), 3);
+	TestEqual(TEXT("Embedded NUL FString preserves trailing data"), Receiver->Utf8StringProperty[2], TCHAR('b'));
+
+	FInvocationCodecProgram StringReadProgram;
+	StringReadProgram.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyRead;
+	StringReadProgram.OwnerClass = ExpectedClass;
+	StringReadProgram.ReflectedProperty = StringProperty;
+	StringReadProgram.DebugPath = StringProperty->GetPathName();
+	StringReadProgram.ExpectedArgumentCount = 3;
+	StringReadProgram.bRequiresGuestMemory = true;
+	StringReadProgram.ReturnValue = MakeUtf8Codec(
+		StringProperty,
+		EValueCodecDirection::Return,
+		2,
+		EValueCodecKind::String);
+	FPreparedDynamicInvocationCell StringReadCell{ &StringReadProgram, 0 };
+	FAvidScriptBoundaryGuestMemory FailingGuestMemory;
+	FailingGuestMemory.FailMutableBorrowCall = 2;
+	FailingGuestMemory.bRejectWrites = true;
+	const uint64 FailedReadArguments[] = { 0, 0, 64 };
+	TestFalse(
+		TEXT("Guest write failure rolls back a created UTF-8 token"),
+		InvokePreparedDynamicReflection(
+			&StringReadCell,
+			*Receiver,
+			FailedReadArguments,
+			&FailingGuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Failed write leaves no live UTF-8 values"), Heap.GetLiveValueCount(), 0);
+	TestEqual(TEXT("Failed write releases its UTF-8 reservation"), Heap.GetReservedValueCount(), 0);
 	return true;
 }
 

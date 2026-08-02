@@ -116,13 +116,16 @@ bool SetNumericValue(
 	return true;
 }
 
-bool SetNameValue(
-	const FValueCodecProgram& Program,
+bool ReadLinearUtf8Payload(
+	const TCHAR* ValueLabel,
 	const uint32 GuestAddress,
+	const uint32 MaxUtf8Bytes,
 	IAvidScriptVmGuestMemory& GuestMemory,
-	void* Frame,
+	TConstArrayView<uint8>& OutPayload,
+	TArray<uint8, TInlineAllocator<256>>& Storage,
 	FString& OutDetails)
 {
+	OutPayload = TConstArrayView<uint8>();
 	uint8 LengthBytes[sizeof(int32)] = {};
 	if (GuestAddress > MAX_uint32 - sizeof(LengthBytes)
 		|| !GuestMemory.ReadBytes(
@@ -132,7 +135,9 @@ bool SetNameValue(
 	{
 		if (OutDetails.IsEmpty())
 		{
-			OutDetails = TEXT("The FName length prefix is outside guest memory.");
+			OutDetails = FString::Printf(
+				TEXT("The %s length prefix is outside guest memory."),
+				ValueLabel);
 		}
 		return false;
 	}
@@ -141,54 +146,148 @@ bool SetNameValue(
 		| (static_cast<uint32>(LengthBytes[1]) << 8)
 		| (static_cast<uint32>(LengthBytes[2]) << 16)
 		| (static_cast<uint32>(LengthBytes[3]) << 24);
-	static constexpr int32 MaxUtf8Bytes = NAME_SIZE * 4;
-	if (UnsignedLength > static_cast<uint32>(MaxUtf8Bytes))
+	if (UnsignedLength > MaxUtf8Bytes)
 	{
 		OutDetails = FString::Printf(
-			TEXT("The FName UTF-8 byte length must be between 0 and %d."),
+			TEXT("The %s UTF-8 byte length must be between 0 and %u."),
+			ValueLabel,
 			MaxUtf8Bytes);
 		return false;
 	}
-	const int32 PayloadLength = static_cast<int32>(UnsignedLength);
-	const uint32 StoredSize = static_cast<uint32>(PayloadLength) + 1;
+	const uint32 StoredSize = UnsignedLength + 1u;
 	const uint64 PayloadAddress64 =
 		static_cast<uint64>(GuestAddress) + sizeof(LengthBytes);
 	if (PayloadAddress64 + StoredSize > static_cast<uint64>(MAX_uint32) + 1)
 	{
-		OutDetails = TEXT("The FName payload address overflows guest memory.");
+		OutDetails = FString::Printf(
+			TEXT("The %s payload address overflows guest memory."),
+			ValueLabel);
 		return false;
 	}
 
-	TArray<uint8, TInlineAllocator<256>> Payload;
-	Payload.SetNumUninitialized(StoredSize);
+	Storage.SetNumUninitialized(static_cast<int32>(StoredSize));
 	if (!GuestMemory.ReadBytes(
 			static_cast<uint32>(PayloadAddress64),
-			MakeArrayView(Payload),
+			MakeArrayView(Storage),
 			OutDetails))
 	{
 		if (OutDetails.IsEmpty())
 		{
-			OutDetails = TEXT("The FName payload is outside guest memory.");
+			OutDetails = FString::Printf(
+				TEXT("The %s payload is outside guest memory."),
+				ValueLabel);
 		}
 		return false;
 	}
-	if (Payload[PayloadLength] != 0)
+	if (Storage[static_cast<int32>(UnsignedLength)] != 0)
 	{
-		OutDetails = TEXT("The FName payload is not followed by a zero terminator.");
+		OutDetails = FString::Printf(
+			TEXT("The %s payload is not followed by a zero terminator."),
+			ValueLabel);
 		return false;
 	}
-	for (int32 Index = 0; Index < PayloadLength; ++Index)
+	OutPayload = MakeArrayView(Storage).Left(
+		static_cast<int32>(UnsignedLength));
+	return true;
+}
+
+bool ResolveUtf8Payload(
+	const TCHAR* ValueLabel,
+	const uint32 ValueReference,
+	const uint32 MaxUtf8Bytes,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	TConstArrayView<uint8>& OutPayload,
+	TArray<uint8, TInlineAllocator<256>>& Storage,
+	FString& OutDetails)
+{
+	if (!FAvidScriptUtf8ValueHeap::IsHeapToken(ValueReference))
 	{
-		if (Payload[Index] == 0)
+		return ReadLinearUtf8Payload(
+			ValueLabel,
+			ValueReference,
+			MaxUtf8Bytes,
+			GuestMemory,
+			OutPayload,
+			Storage,
+			OutDetails);
+	}
+	if (Context.Utf8ValueHeap == nullptr)
+	{
+		OutDetails = FString::Printf(
+			TEXT("The %s token has no UTF-8 value heap in this runtime session."),
+			ValueLabel);
+		return false;
+	}
+	if (!Context.Utf8ValueHeap->Resolve(
+			ValueReference,
+			OutPayload,
+			OutDetails))
+	{
+		return false;
+	}
+	if (OutPayload.Num() < 0
+		|| static_cast<uint32>(OutPayload.Num()) > MaxUtf8Bytes)
+	{
+		OutDetails = FString::Printf(
+			TEXT("The %s heap value exceeds its UTF-8 byte limit."),
+			ValueLabel);
+		return false;
+	}
+	return true;
+}
+
+bool SetUtf8Value(
+	const FValueCodecProgram& Program,
+	const uint32 ValueReference,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Frame,
+	FString& OutDetails)
+{
+	const bool bName = Program.Kind == EValueCodecKind::Name;
+	if ((!bName && Program.Kind != EValueCodecKind::String)
+		|| Program.Property == nullptr)
+	{
+		OutDetails = TEXT("The cached UTF-8 value program is invalid.");
+		return false;
+	}
+	const TCHAR* ValueLabel = bName ? TEXT("FName") : TEXT("FString");
+	const uint32 MaxUtf8Bytes = bName
+		? static_cast<uint32>(NAME_SIZE * 4)
+		: FAvidScriptUtf8ValueHeap::MaxValueBytes;
+	TConstArrayView<uint8> Payload;
+	TArray<uint8, TInlineAllocator<256>> Storage;
+	if (!ResolveUtf8Payload(
+			ValueLabel,
+			ValueReference,
+			MaxUtf8Bytes,
+			GuestMemory,
+			Context,
+			Payload,
+			Storage,
+			OutDetails))
+	{
+		return false;
+	}
+	if (bName)
+	{
+		for (const uint8 Byte : Payload)
 		{
-			OutDetails = TEXT("The FName UTF-8 payload contains an embedded NUL byte.");
-			return false;
+			if (Byte == 0)
+			{
+				OutDetails = TEXT("The FName UTF-8 payload contains an embedded NUL byte.");
+				return false;
+			}
 		}
 	}
 
-	const ANSICHAR* Utf8 = reinterpret_cast<const ANSICHAR*>(Payload.GetData());
-	const FUTF8ToTCHAR Converted(Utf8, PayloadLength);
-	if (Converted.Length() >= NAME_SIZE)
+	static constexpr ANSICHAR Empty[] = "";
+	const ANSICHAR* Utf8 = Payload.IsEmpty()
+		? Empty
+		: reinterpret_cast<const ANSICHAR*>(Payload.GetData());
+	const FUTF8ToTCHAR Converted(Utf8, Payload.Num());
+	if (bName && Converted.Length() >= NAME_SIZE)
 	{
 		OutDetails = FString::Printf(
 			TEXT("The decoded FName must contain fewer than %d TCHAR code units."),
@@ -196,24 +295,35 @@ bool SetNameValue(
 		return false;
 	}
 	const FTCHARToUTF8 RoundTrip(Converted.Get(), Converted.Length());
-	if (RoundTrip.Length() != PayloadLength
-		|| (PayloadLength > 0
+	if (RoundTrip.Length() != Payload.Num()
+		|| (!Payload.IsEmpty()
 			&& FMemory::Memcmp(
 				RoundTrip.Get(),
 				Payload.GetData(),
-				PayloadLength) != 0))
+				Payload.Num()) != 0))
 	{
-		OutDetails = TEXT("The FName payload is not canonical valid UTF-8.");
+		OutDetails = FString::Printf(
+			TEXT("The %s payload is not canonical valid UTF-8."),
+			ValueLabel);
 		return false;
 	}
 
 	void* Value = Program.Property->ContainerPtrToValuePtr<void>(Frame);
-	const FName Name = Converted.Length() == 0
-		? NAME_None
-		: FName(Converted.Length(), Converted.Get(), FNAME_Add);
-	CastFieldChecked<FNameProperty>(Program.Property)->SetPropertyValue(
-		Value,
-		Name);
+	if (bName)
+	{
+		const FName Name = Converted.Length() == 0
+			? NAME_None
+			: FName(Converted.Length(), Converted.Get(), FNAME_Add);
+		CastFieldChecked<FNameProperty>(Program.Property)->SetPropertyValue(
+			Value,
+			Name);
+	}
+	else
+	{
+		CastFieldChecked<FStrProperty>(Program.Property)->SetPropertyValue(
+			Value,
+			FString(Converted.Length(), Converted.Get()));
+	}
 	return true;
 }
 
@@ -441,6 +551,48 @@ bool EncodeWireValue(
 		FMemory::Memcpy(Wire.GetData(), &Stored, sizeof(Stored));
 		return true;
 	}
+	if (Program.Kind == EValueCodecKind::Name
+		|| Program.Kind == EValueCodecKind::String)
+	{
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32)))
+		{
+			OutDetails = TEXT("The cached UTF-8 output wire must contain one i32 value reference.");
+			return false;
+		}
+		FString Stored;
+		if (Program.Kind == EValueCodecKind::Name)
+		{
+			CastFieldChecked<FNameProperty>(Program.Property)
+				->GetPropertyValue(Value).ToString(Stored);
+		}
+		else
+		{
+			Stored = CastFieldChecked<FStrProperty>(Program.Property)
+				->GetPropertyValue(Value);
+		}
+		const FTCHARToUTF8 Utf8(*Stored, Stored.Len());
+		if (Utf8.Length() < 0
+			|| static_cast<uint32>(Utf8.Length())
+				> FAvidScriptUtf8ValueHeap::MaxValueBytes)
+		{
+			OutDetails = TEXT("The UTF-8 output exceeds the 1 MiB session value limit.");
+			return false;
+		}
+		const TConstArrayView<uint8> Bytes(
+			reinterpret_cast<const uint8*>(Utf8.Get()),
+			Utf8.Length());
+		uint32 Token = 0;
+		if (!Transaction.InternNextUtf8Value(
+				Bytes,
+				Context,
+				Token,
+				OutDetails))
+		{
+			return false;
+		}
+		FMemory::Memcpy(Wire.GetData(), &Token, sizeof(Token));
+		return true;
+	}
 	if (Program.Kind == EValueCodecKind::Object)
 	{
 		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Program.Property)
@@ -514,7 +666,76 @@ bool EncodeWireValue(
 
 void FCodecOutputTransaction::Commit()
 {
+	if (Utf8ValueHeap != nullptr)
+	{
+		for (FAvidScriptUtf8ValueReservation& Reservation : Utf8Reservations)
+		{
+			Utf8ValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
+	Utf8Reservations.Reset();
+	CreatedUtf8Tokens.Reset();
+	Utf8ValueHeap = nullptr;
+	NextUtf8Reservation = 0;
+}
+
+bool FCodecOutputTransaction::ReserveUtf8Value(
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutDetails)
+{
+	if (Context.Utf8ValueHeap == nullptr)
+	{
+		OutDetails = TEXT("The UTF-8 output requires a session value heap.");
+		return false;
+	}
+	if (Utf8ValueHeap != nullptr && Utf8ValueHeap != Context.Utf8ValueHeap)
+	{
+		OutDetails = TEXT("The UTF-8 output transaction cannot span runtime sessions.");
+		return false;
+	}
+	Utf8ValueHeap = Context.Utf8ValueHeap;
+	FAvidScriptUtf8ValueReservation& Reservation =
+		Utf8Reservations.AddDefaulted_GetRef();
+	if (!Utf8ValueHeap->Reserve(Reservation, OutDetails))
+	{
+		Utf8Reservations.Pop(EAllowShrinking::No);
+		return false;
+	}
+	return true;
+}
+
+bool FCodecOutputTransaction::InternNextUtf8Value(
+	const TConstArrayView<uint8> Bytes,
+	const FAvidScriptBindingInvocationContext& Context,
+	uint32& OutToken,
+	FString& OutDetails)
+{
+	OutToken = 0;
+	if (Utf8ValueHeap == nullptr
+		|| Utf8ValueHeap != Context.Utf8ValueHeap
+		|| !Utf8Reservations.IsValidIndex(NextUtf8Reservation))
+	{
+		OutDetails = TEXT("The UTF-8 output has no matching preflight reservation.");
+		return false;
+	}
+	FAvidScriptUtf8ValueReservation& Reservation =
+		Utf8Reservations[NextUtf8Reservation++];
+	bool bCreated = false;
+	if (!Utf8ValueHeap->InternReserved(
+			Reservation,
+			Bytes,
+			OutToken,
+			bCreated,
+			OutDetails))
+	{
+		return false;
+	}
+	if (bCreated)
+	{
+		CreatedUtf8Tokens.Add(OutToken);
+	}
+	return true;
 }
 
 void FCodecOutputTransaction::Rollback(
@@ -528,7 +749,22 @@ void FCodecOutputTransaction::Rollback(
 			Context.ObjectOwnership->Release(BorrowedHandles[Index], *Context.ObjectRegistry, Result);
 		}
 	}
+	if (Utf8ValueHeap != nullptr)
+	{
+		for (int32 Index = CreatedUtf8Tokens.Num() - 1; Index >= 0; --Index)
+		{
+			Utf8ValueHeap->RemoveCreatedValue(CreatedUtf8Tokens[Index]);
+		}
+		for (FAvidScriptUtf8ValueReservation& Reservation : Utf8Reservations)
+		{
+			Utf8ValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
+	Utf8Reservations.Reset();
+	CreatedUtf8Tokens.Reset();
+	Utf8ValueHeap = nullptr;
+	NextUtf8Reservation = 0;
 }
 
 bool ResolveObjectHandle(
@@ -619,23 +855,25 @@ bool SetValueFromCells(
 			Frame,
 			OutDetails);
 	}
-	if (Program.Kind == EValueCodecKind::Name)
+	if (Program.Kind == EValueCodecKind::Name
+		|| Program.Kind == EValueCodecKind::String)
 	{
 		if (GuestMemory == nullptr)
 		{
-			OutDetails = TEXT("The FName input requires guest memory.");
+			OutDetails = TEXT("The UTF-8 input requires guest memory.");
 			return false;
 		}
 		if (Cells[0] > MAX_uint32)
 		{
 			OutDetails =
-				TEXT("The FName guest address does not fit the 32-bit guest address space.");
+				TEXT("The UTF-8 value reference does not fit the 32-bit guest address space.");
 			return false;
 		}
-		return SetNameValue(
+		return SetUtf8Value(
 			Program,
 			static_cast<uint32>(Cells[0]),
 			*GuestMemory,
+			Context,
 			Frame,
 			OutDetails);
 	}
@@ -708,6 +946,24 @@ bool SetValueFromGuest(
 	{
 		return false;
 	}
+	if (Program.Kind == EValueCodecKind::Name
+		|| Program.Kind == EValueCodecKind::String)
+	{
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32)))
+		{
+			OutDetails = TEXT("The cached UTF-8 guest storage must contain one i32 value reference.");
+			return false;
+		}
+		uint32 ValueReference = 0;
+		FMemory::Memcpy(&ValueReference, Wire.GetData(), sizeof(ValueReference));
+		return SetUtf8Value(
+			Program,
+			ValueReference,
+			GuestMemory,
+			Context,
+			Frame,
+			OutDetails);
+	}
 	return DecodeWireValue(Program, Wire, Context, Frame, OutDetails);
 }
 
@@ -747,6 +1003,8 @@ bool PreflightValueOutput(
 	const FValueCodecProgram& Program,
 	const uint32 GuestAddress,
 	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	FCodecOutputTransaction& Transaction,
 	FString& OutDetails)
 {
 	if (Program.WireSize <= 0 || Program.WireSize > 4096)
@@ -763,7 +1021,14 @@ bool PreflightValueOutput(
 		Borrowed,
 		BorrowError))
 	{
-		return Borrowed.Num() == Program.WireSize;
+		if (Borrowed.Num() != Program.WireSize)
+		{
+			OutDetails = TEXT("The borrowed guest output range has the wrong size.");
+			return false;
+		}
+		return (Program.Kind != EValueCodecKind::Name
+				&& Program.Kind != EValueCodecKind::String)
+			|| Transaction.ReserveUtf8Value(Context, OutDetails);
 	}
 	TArray<uint8, TInlineAllocator<4096>> Probe;
 	Probe.SetNumUninitialized(Program.WireSize);
@@ -775,7 +1040,9 @@ bool PreflightValueOutput(
 		}
 		return false;
 	}
-	return true;
+	return (Program.Kind != EValueCodecKind::Name
+			&& Program.Kind != EValueCodecKind::String)
+		|| Transaction.ReserveUtf8Value(Context, OutDetails);
 }
 
 bool WriteValueToGuest(
