@@ -10,6 +10,8 @@
 #include "AvidScriptSceneAttachmentBinding.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
+#include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorCSharpDefaultValueFormatter.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingRenderer.h"
@@ -2158,6 +2160,39 @@ bool FAvidScriptEditorCSharpBindingEmitterNameStringTest::RunTest(const FString&
 				ErrorSource));
 		TestTrue(TEXT("Tampered string ABI emits no partial source: ") + CanonicalType, TamperedSource.IsEmpty());
 	}
+
+	const FString ProfilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B2_NameStringRoundtrip.csharp-profile.json")));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Name/string C# end-to-end profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Name/string C# fixture builds through the production profile pipeline"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult),
+				BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestTrue(
+		TEXT("Name/string C# profile publishes its formal report"),
+		FPaths::FileExists(BuildResult.ReportPath));
+	TestTrue(
+		TEXT("Name/string C# profile publishes its runtime manifest"),
+		FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(
+		TEXT("Name/string C# profile publishes its runtime binding package"),
+		FPaths::FileExists(BuildResult.BindingPackagePath));
 	return true;
 }
 
