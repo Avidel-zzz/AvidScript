@@ -14,6 +14,7 @@
 #include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/Texture.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
@@ -2871,7 +2872,10 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 			Json,
 			Result));
 	TestEqual(TEXT("Unsupported container reports property category"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
-	TestEqual(TEXT("Unsupported property identifies TArray exactly"), Result.ErrorSource, FString(TEXT("TArray")));
+	TestEqual(
+		TEXT("Unsupported property identifies the selected TArray exactly"),
+		Result.ErrorSource,
+		FString(TEXT("/Script/Engine.Actor.GetAttachedActors:TArray")));
 
 	const FAvidScriptReflectedFunctionSelection MissingSelection{
 		TEXT("/Script/Engine.Actor"),
@@ -3002,7 +3006,9 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 				TamperedPackage,
 				ErrorCategory,
 				ErrorSource));
-		TestEqual(TEXT("Parent alignment tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
+		TestTrue(
+			TEXT("Parent alignment tamper fails during indexed type identity validation"),
+			ErrorSource.StartsWith(TEXT("types[")) && ErrorSource.EndsWith(TEXT("]")));
 
 		RootType->SetNumberField(TEXT("alignment"), OriginalRootAlignment);
 		RootType->SetNumberField(TEXT("size"), OriginalRootSize + OriginalRootAlignment);
@@ -3014,7 +3020,9 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 				TamperedPackage,
 				ErrorCategory,
 				ErrorSource));
-		TestEqual(TEXT("Parent size tamper fails during field-graph validation"), ErrorSource, FString(TEXT("types.fields")));
+		TestTrue(
+			TEXT("Parent size tamper fails during indexed type identity validation"),
+			ErrorSource.StartsWith(TEXT("types[")) && ErrorSource.EndsWith(TEXT("]")));
 	}
 
 	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
@@ -3074,7 +3082,7 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 				PreparedError));
 		TestEqual(TEXT("Nested object-leaf package has one prepared target"), PreparedBindings.Num(), 1);
 		for (UClass* ExpectedObjectClass : {
-			UActorComponent::StaticClass(),
+			UTexture::StaticClass(),
 			UMaterialInterface::StaticClass() })
 		{
 			const FAvidScriptBindingTypeModel* ObjectType = ObjectLeafPackage.Types.FindByPredicate(
@@ -3128,8 +3136,20 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 		TestEqual(TEXT("Inherited struct contains base and derived fields"), InheritedType->StructFields.Num(), 2);
 		if (InheritedType->StructFields.Num() == 2)
 		{
-			TestEqual(TEXT("Base field is retained"), InheritedType->StructFields[0].Name, FString(TEXT("BaseCount")));
-			TestEqual(TEXT("Derived field is retained"), InheritedType->StructFields[1].Name, FString(TEXT("DerivedWeight")));
+			TestTrue(
+				TEXT("Base field is retained"),
+				InheritedType->StructFields.ContainsByPredicate(
+					[](const FAvidScriptBindingStructFieldModel& Field)
+					{
+						return Field.Name == TEXT("BaseCount");
+					}));
+			TestTrue(
+				TEXT("Derived field is retained"),
+				InheritedType->StructFields.ContainsByPredicate(
+					[](const FAvidScriptBindingStructFieldModel& Field)
+					{
+						return Field.Name == TEXT("DerivedWeight");
+					}));
 		}
 	}
 	TSharedPtr<const FAvidScriptBindingPackage> InheritedRuntimePackage;

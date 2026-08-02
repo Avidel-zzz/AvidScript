@@ -6,8 +6,8 @@
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
 
-class UActorComponent;
 class UMaterialInterface;
+class UTexture;
 
 UENUM()
 enum class EAvidScriptCSharpEmitterTestMode : uint8
@@ -67,7 +67,7 @@ struct FAvidScriptStructWireObjectLeafTestType
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadWrite)
-	UActorComponent* Component = nullptr;
+	UTexture* Texture = nullptr;
 
 	UPROPERTY(BlueprintReadWrite)
 	UMaterialInterface* Material = nullptr;
