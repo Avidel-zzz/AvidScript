@@ -245,6 +245,65 @@ public:
 };
 
 UCLASS()
+class AAvidScriptCSharpNameStringTestActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadWrite)
+	FName ReadableFName = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite)
+	FString ReadableFString;
+
+	UFUNCTION(BlueprintPure)
+	FName ReturnFName() const
+	{
+		return NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void OutFName(FName& OutName)
+	{
+		OutName = NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void RefFName(UPARAM(ref) FName& InOutName)
+	{
+		InOutName = NAME_None;
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void ConstRefFName(const FName& InName)
+	{
+	}
+
+	UFUNCTION(BlueprintPure)
+	FString ReturnFString() const
+	{
+		return TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void OutFString(FString& OutString)
+	{
+		OutString = TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void RefFString(UPARAM(ref) FString& InOutString)
+	{
+		InOutString += TEXT("Avid");
+	}
+
+	UFUNCTION(BlueprintCallable)
+	void ConstRefFString(const FString& InString)
+	{
+	}
+};
+
+UCLASS()
 class UAvidScriptCSharpBindingEmitterStaticOwnerTestObject : public UObject
 {
 	GENERATED_BODY()

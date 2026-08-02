@@ -12,10 +12,10 @@
   "configuration": "Release",
   "binding_profile": {
     "package_name": "avidscript.test.p57_11b2.name_string_roundtrip",
-    "self_class_path": "/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptCSharpNameStringTestActor",
     "classes": [
       {
-        "class_path": "/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject",
+        "class_path": "/Script/AvidScriptEditor.AvidScriptCSharpNameStringTestActor",
         "include_functions": [
           "ReturnFName",
           "OutFName",

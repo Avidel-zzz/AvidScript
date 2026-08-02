@@ -11,7 +11,7 @@ public static class NameStringRoundtripScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
     public static void BeginPlay()
     {
-        UAvidScriptCSharpBindingEmitterTestObject self = UE.Self;
+        AAvidScriptCSharpNameStringTestActor self = UE.Self;
         self.ReadableFName = "Input_Name_\u540d";
         self.ReadableFString = "Input_String_\u503c";
         Step = 0;
@@ -20,7 +20,7 @@ public static class NameStringRoundtripScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
     public static void Tick(float deltaSeconds)
     {
-        UAvidScriptCSharpBindingEmitterTestObject self = UE.Self;
+        AAvidScriptCSharpNameStringTestActor self = UE.Self;
         if (Step == 0)
         {
             string name = self.ReadableFName;

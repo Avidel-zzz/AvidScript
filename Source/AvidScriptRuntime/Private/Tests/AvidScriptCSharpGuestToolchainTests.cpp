@@ -14,6 +14,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -1162,7 +1163,7 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 	FModuleManager::LoadModulePtr<IModuleInterface>(TEXT("AvidScriptEditor"));
 	UClass* const FixtureClass = FindObject<UClass>(
 		nullptr,
-		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpBindingEmitterTestObject"));
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpNameStringTestActor"));
 	if (!TestNotNull(TEXT("Phase 57.11B2 reflected UFUNCTION fixture class loads"), FixtureClass))
 	{
 		return true;
@@ -1207,15 +1208,28 @@ bool FAvidScriptCSharpNameStringUFunctionEndToEndTest::RunTest(
 	FString InitialString(TEXT("Input_String_"));
 	InitialString.AppendChar(static_cast<TCHAR>(0x503c));
 	const FString NoneName = FName(NAME_None).ToString();
+	UWorld* FixtureWorld = nullptr;
+	if (!TestTrue(
+			TEXT("Phase 57.11B2 UFUNCTION fixture world creates"),
+			CreateCSharpContractWorld(FixtureWorld)))
+	{
+		return true;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyCSharpContractWorld(FixtureWorld);
+	};
 
 	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
 	{
 		AddInfo(AvidScriptRuntimeLaneLabel(
 			Lane,
 			TEXT("running generated C# FName/FString UFUNCTION oracle")));
-		UObject* const FixtureObject = NewObject<UObject>(
-			GetTransientPackage(),
-			FixtureClass);
+		FActorSpawnParameters SpawnParameters;
+		AActor* const FixtureObject = FixtureWorld->SpawnActor<AActor>(
+			FixtureClass,
+			FTransform::Identity,
+			SpawnParameters);
 		if (!TestNotNull(
 				*AvidScriptRuntimeLaneLabel(Lane, TEXT("UFUNCTION fixture instance creates")),
 				FixtureObject))
