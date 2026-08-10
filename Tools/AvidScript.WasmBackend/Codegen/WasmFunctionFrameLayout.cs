@@ -11,13 +11,17 @@ internal sealed class WasmFunctionFrameLayout
 
     private WasmFunctionFrameLayout(
         IReadOnlyDictionary<string, int> offsets,
+        int? arrayElementScratchOffset,
         int frameSize)
     {
         this.offsets = offsets;
+        ArrayElementScratchOffset = arrayElementScratchOffset;
         FrameSize = frameSize;
     }
 
     public int FrameSize { get; }
+
+    public int? ArrayElementScratchOffset { get; }
 
     public static WasmFunctionFrameLayout Create(
         GuestFunction function,
@@ -54,8 +58,29 @@ internal sealed class WasmFunctionFrameLayout
             }
         }
 
+        bool hasArrayCapabilityAccess = moduleLayout.FunctionIndices.ContainsKey(
+                GuestArrayCapabilityIntrinsics.LoadImportId)
+            || moduleLayout.FunctionIndices.ContainsKey(
+                GuestArrayCapabilityIntrinsics.StoreImportId);
+        GuestType[] arrayElementTypes = hasArrayCapabilityAccess
+            ? function.Blocks
+                .SelectMany(block => block.Instructions)
+                .Where(instruction => instruction.Op is "array_load" or "array_store")
+                .Select(instruction => moduleLayout.Types[instruction.TargetId!])
+                .ToArray()
+            : Array.Empty<GuestType>();
+        int? arrayElementScratchOffset = null;
+        if (arrayElementTypes.Length != 0)
+        {
+            int scratchAlignment = arrayElementTypes.Max(type => type.Alignment);
+            int scratchSize = arrayElementTypes.Max(type => type.Size);
+            int offset = AlignUp(cursor, scratchAlignment);
+            arrayElementScratchOffset = offset;
+            cursor = checked(offset + scratchSize);
+        }
+
         int frameSize = cursor == 0 ? 0 : AlignUp(cursor, 16);
-        return new WasmFunctionFrameLayout(offsets, frameSize);
+        return new WasmFunctionFrameLayout(offsets, arrayElementScratchOffset, frameSize);
     }
 
     public bool HasSlot(string valueId)

@@ -25,6 +25,8 @@ internal static class CSharpOperationLowerer
             "argument" or "expression_statement" or "parenthesized" => LowerWrapper(
                 context, operation, blockOrdinal, instructions),
             "array_creation" => LowerConstantArray(context, operation, blockOrdinal, instructions),
+            "array_element_reference" => LowerArrayElementLoad(
+                context, operation, blockOrdinal, instructions),
             "assignment" => LowerAssignment(context, operation, blockOrdinal, instructions),
             "binary" => LowerBinary(context, operation, blockOrdinal, instructions),
             "compound_assignment" => LowerCompoundAssignment(context, operation, blockOrdinal, instructions),
@@ -45,7 +47,7 @@ internal static class CSharpOperationLowerer
                 context, operation, blockOrdinal, instructions),
             "object_creation" => CSharpCallOperationLowerer.LowerObjectCreation(
                 context, operation, blockOrdinal, instructions),
-            "property_reference" => CSharpCallOperationLowerer.LowerProperty(
+            "property_reference" => LowerPropertyReference(
                 context, operation, blockOrdinal, instructions),
             "unary" => LowerUnary(context, operation, blockOrdinal, instructions),
             _ => Unsupported(context, operation, blockOrdinal),
@@ -66,6 +68,130 @@ internal static class CSharpOperationLowerer
         return LowerValue(context, operation.Children[0], blockOrdinal, instructions);
     }
 
+    private static GuestRegister? LowerArrayElementLoad(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (!TryLowerArrayElementOperands(
+                context,
+                operation,
+                blockOrdinal,
+                instructions,
+                out GuestRegister array,
+                out GuestRegister index,
+                out GuestType elementType))
+        {
+            return null;
+        }
+
+        GuestRegister? result = context.CreateTemporary(operation.TypeId, blockOrdinal);
+        if (result is null
+            || !string.Equals(result.TypeId, elementType.Id, StringComparison.Ordinal))
+        {
+            return result is null
+                ? null
+                : Malformed(context, operation, blockOrdinal);
+        }
+
+        instructions.Add(new GuestInstruction(
+            "array_load",
+            result.Id,
+            new[] { array.Id, index.Id },
+            elementType.Id,
+            null,
+            null));
+        return result;
+    }
+
+    private static bool TryLowerArrayElementOperands(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions,
+        out GuestRegister array,
+        out GuestRegister index,
+        out GuestType elementType)
+    {
+        array = null!;
+        index = null!;
+        elementType = null!;
+        if (operation.Children.Count != 2)
+        {
+            Malformed(context, operation, blockOrdinal);
+            return false;
+        }
+
+        GuestRegister? loweredArray = LowerValue(
+            context, operation.Children[0], blockOrdinal, instructions);
+        GuestRegister? loweredIndex = loweredArray is null
+            ? null
+            : LowerValue(context, operation.Children[1], blockOrdinal, instructions);
+        if (loweredArray is null
+            || loweredIndex is null
+            || !context.TryGetGuestType(loweredArray.TypeId, out GuestType arrayType)
+            || !string.Equals(arrayType.Kind, "array", StringComparison.Ordinal)
+            || arrayType.ElementTypeId is null
+            || !context.TryGetGuestType(arrayType.ElementTypeId, out GuestType loweredElementType)
+            || !context.TryGetGuestType(loweredIndex.TypeId, out GuestType indexType)
+            || indexType.Kind is not ("scalar" or "enum")
+            || !string.Equals(indexType.Storage, "i32", StringComparison.Ordinal)
+            || indexType.Size != 4)
+        {
+            Malformed(context, operation, blockOrdinal);
+            return false;
+        }
+
+        array = loweredArray;
+        index = loweredIndex;
+        elementType = loweredElementType;
+        return true;
+    }
+
+    private static GuestRegister? LowerPropertyReference(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (!string.Equals(
+                operation.SymbolId,
+                CSharpGuestIds.ArrayLengthPropertyId,
+                StringComparison.Ordinal)
+            || operation.Children.Count != 1
+            || !context.TryGetGuestType(operation.Children[0].TypeId, out GuestType arrayType)
+            || !string.Equals(arrayType.Kind, "array", StringComparison.Ordinal))
+        {
+            return CSharpCallOperationLowerer.LowerProperty(
+                context, operation, blockOrdinal, instructions);
+        }
+
+        GuestRegister? array = LowerValue(
+            context, operation.Children[0], blockOrdinal, instructions);
+        GuestRegister? result = array is null
+            ? null
+            : context.CreateTemporary(operation.TypeId, blockOrdinal);
+        if (array is null
+            || result is null
+            || !context.TryGetGuestType(result.TypeId, out GuestType resultType)
+            || !string.Equals(resultType.Kind, "scalar", StringComparison.Ordinal)
+            || !string.Equals(resultType.Storage, "i32", StringComparison.Ordinal)
+            || resultType.Size != 4)
+        {
+            return Malformed(context, operation, blockOrdinal);
+        }
+
+        instructions.Add(new GuestInstruction(
+            "array_length",
+            result.Id,
+            new[] { array.Id },
+            null,
+            null,
+            null));
+        return result;
+    }
+
     private static GuestRegister? LowerAssignment(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,
@@ -78,6 +204,43 @@ internal static class CSharpOperationLowerer
         }
 
         SemanticOperation target = operation.Children[0];
+        if (target.Kind == "array_element_reference")
+        {
+            if (!TryLowerArrayElementOperands(
+                    context,
+                    target,
+                    blockOrdinal,
+                    instructions,
+                    out GuestRegister array,
+                    out GuestRegister index,
+                    out GuestType elementType))
+            {
+                return null;
+            }
+
+            GuestRegister? elementValue = LowerValue(
+                context,
+                operation.Children[1],
+                blockOrdinal,
+                instructions);
+            if (elementValue is null
+                || !string.Equals(elementValue.TypeId, elementType.Id, StringComparison.Ordinal))
+            {
+                return elementValue is null
+                    ? null
+                    : Malformed(context, operation, blockOrdinal);
+            }
+
+            instructions.Add(new GuestInstruction(
+                "array_store",
+                null,
+                new[] { array.Id, index.Id, elementValue.Id },
+                elementType.Id,
+                null,
+                null));
+            return elementValue;
+        }
+
         if (target.Kind == "property_reference")
         {
             GuestRegister? receiver = CSharpCallOperationLowerer.LowerPropertyReceiver(
@@ -783,16 +946,22 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
-        SemanticOperation? initializer = operation.Children.Count == 1
-            && operation.Children[0].Kind == "array_initializer"
-                ? operation.Children[0]
-                : null;
-        if (initializer is null || operation.TypeId is null)
+        SemanticOperation[] initializers = operation.Children
+            .Where(child => child.Kind == "array_initializer")
+            .Take(2)
+            .ToArray();
+        bool hasOnlyConstantDimensions = operation.Children
+            .Where(child => child.Kind != "array_initializer")
+            .All(child => child.Kind == "literal" && child.Constant is not null);
+        if (initializers.Length != 1
+            || !hasOnlyConstantDimensions
+            || operation.TypeId is null)
         {
             context.Add("ASCG1004", $"Block {blockOrdinal} supports only constant array initializers.");
             return null;
         }
 
+        SemanticOperation initializer = initializers[0];
         List<GuestConstant> elements = new();
         foreach (SemanticOperation element in initializer.Children)
         {

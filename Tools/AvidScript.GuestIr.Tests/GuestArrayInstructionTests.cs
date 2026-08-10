@@ -8,26 +8,36 @@ internal static class GuestArrayInstructionTests
     {
         ArrayLoadAndStoreAreTypeChecked();
         InvalidArrayIndexIsRejected();
-        return 2;
+        InvalidArrayLengthResultIsRejected();
+        return 3;
     }
 
     private static void ArrayLoadAndStoreAreTypeChecked()
     {
-        GuestValidationResult result = GuestModuleValidator.Validate(CreateArrayModule(false));
+        GuestValidationResult result = GuestModuleValidator.Validate(CreateArrayModule(false, false));
 
-        Assert(result.Succeeded, "typed array load and store should validate");
+        Assert(result.Succeeded, "typed array length, load, and store should validate");
     }
 
     private static void InvalidArrayIndexIsRejected()
     {
-        GuestValidationResult result = GuestModuleValidator.Validate(CreateArrayModule(true));
+        GuestValidationResult result = GuestModuleValidator.Validate(CreateArrayModule(true, false));
 
         Assert(!result.Succeeded, "non-i32 array index should be rejected");
         Assert(result.Diagnostics.Any(item => item.Code == "ASIR1008"),
             "invalid array index should report ASIR1008");
     }
 
-    private static GuestModule CreateArrayModule(bool invalidIndex)
+    private static void InvalidArrayLengthResultIsRejected()
+    {
+        GuestValidationResult result = GuestModuleValidator.Validate(CreateArrayModule(false, true));
+
+        Assert(!result.Succeeded, "non-i32 array length result should be rejected");
+        Assert(result.Diagnostics.Any(item => item.Code == "ASIR1008"),
+            "invalid array length result should report ASIR1008");
+    }
+
+    private static GuestModule CreateArrayModule(bool invalidIndex, bool invalidLength)
     {
         GuestModule module = GuestModuleValidationTests.CreateMinimalModule();
         GuestType arrayType = new(
@@ -49,7 +59,13 @@ internal static class GuestArrayInstructionTests
                     invalidIndex ? arrayType.Id : "type:int32"),
                 new GuestRegister("value:input", "type:int32"),
             },
-            new[] { new GuestRegister("value:result", "type:int32") },
+            new[]
+            {
+                new GuestRegister("value:result", "type:int32"),
+                new GuestRegister(
+                    "value:length",
+                    invalidLength ? arrayType.Id : "type:int32"),
+            },
             "type:int32",
             "block:entry",
             new[]
@@ -70,6 +86,13 @@ internal static class GuestArrayInstructionTests
                             "value:result",
                             new[] { "value:array", "value:index" },
                             "type:int32",
+                            null,
+                            null),
+                        new GuestInstruction(
+                            "array_length",
+                            "value:length",
+                            new[] { "value:array" },
+                            null,
                             null,
                             null),
                     },

@@ -73,6 +73,10 @@ internal static class GuestInstructionValidator
                 GuestArrayInstructionValidator.ValidateLoad(
                     context, function, instruction, result, operands);
                 break;
+            case "array_length":
+                GuestArrayInstructionValidator.ValidateLength(
+                    context, function, instruction, result, operands);
+                break;
             case "array_store":
                 GuestArrayInstructionValidator.ValidateStore(
                     context, function, instruction, result, operands);

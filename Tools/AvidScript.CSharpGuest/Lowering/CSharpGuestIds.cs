@@ -3,6 +3,9 @@ namespace AvidScript.CSharpGuest;
 internal static class CSharpGuestIds
 {
     public const string AddressTypeId = "type:address";
+    public const string Int32TypeId = "type:int32";
+    public const string ArrayLengthPropertyId =
+        "symbol:property:global::System.Array.Length:int32";
     public const string GameplayEventExportName = "avid_on_gameplay_event";
     public const string GameplayEventFunctionId = "function:synthetic:gameplay_event";
 

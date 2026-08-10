@@ -73,6 +73,11 @@ public static class CSharpGuestLowerer
         {
             functions.Add(gameplayEvents.Function);
         }
+        imports = AppendArrayCapabilityImports(
+            imports,
+            functions,
+            guestTypes,
+            diagnostics);
 
         List<GuestExport> exports = LowerExports(document, functions, diagnostics).ToList();
         if (gameplayEvents is not null)
@@ -237,6 +242,71 @@ public static class CSharpGuestLowerer
         }
 
         return imports.ToArray();
+    }
+
+    private static GuestImport[] AppendArrayCapabilityImports(
+        IReadOnlyList<GuestImport> imports,
+        IReadOnlyList<GuestFunction> functions,
+        IReadOnlyDictionary<string, GuestType> guestTypes,
+        List<GuestDiagnostic> diagnostics)
+    {
+        HashSet<string> operations = functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .Select(instruction => instruction.Op)
+            .Where(op => op is "array_length" or "array_load" or "array_store")
+            .ToHashSet(StringComparer.Ordinal);
+        if (operations.Count == 0)
+        {
+            return imports.ToArray();
+        }
+
+        if (!guestTypes.ContainsKey(CSharpGuestIds.Int32TypeId)
+            || !guestTypes.ContainsKey(CSharpGuestIds.AddressTypeId))
+        {
+            Add(diagnostics, "ASCG1003", "Array capability intrinsics require canonical i32 and address types.");
+            return imports.ToArray();
+        }
+
+        List<GuestImport> result = imports.ToList();
+        if (operations.Contains("array_length"))
+        {
+            result.Add(new GuestImport(
+                GuestArrayCapabilityIntrinsics.LengthImportId,
+                GuestArrayCapabilityIntrinsics.Module,
+                GuestArrayCapabilityIntrinsics.LengthImportName,
+                new[] { CSharpGuestIds.Int32TypeId },
+                CSharpGuestIds.Int32TypeId));
+        }
+
+        string[] accessParameters =
+        {
+            CSharpGuestIds.Int32TypeId,
+            CSharpGuestIds.Int32TypeId,
+            CSharpGuestIds.AddressTypeId,
+            CSharpGuestIds.Int32TypeId,
+        };
+        if (operations.Contains("array_load"))
+        {
+            result.Add(new GuestImport(
+                GuestArrayCapabilityIntrinsics.LoadImportId,
+                GuestArrayCapabilityIntrinsics.Module,
+                GuestArrayCapabilityIntrinsics.LoadImportName,
+                accessParameters,
+                CSharpGuestIds.Int32TypeId));
+        }
+
+        if (operations.Contains("array_store"))
+        {
+            result.Add(new GuestImport(
+                GuestArrayCapabilityIntrinsics.StoreImportId,
+                GuestArrayCapabilityIntrinsics.Module,
+                GuestArrayCapabilityIntrinsics.StoreImportName,
+                accessParameters,
+                CSharpGuestIds.Int32TypeId));
+        }
+
+        return result.ToArray();
     }
 
     private static GuestFunction[] LowerFunctions(

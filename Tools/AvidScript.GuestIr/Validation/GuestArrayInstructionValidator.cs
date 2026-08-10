@@ -5,6 +5,31 @@ namespace AvidScript.GuestIr;
 
 internal static class GuestArrayInstructionValidator
 {
+    public static void ValidateLength(
+        GuestValidationContext context,
+        GuestFunction function,
+        GuestInstruction instruction,
+        GuestRegister? result,
+        IReadOnlyList<GuestRegister?> operands)
+    {
+        bool valid = instruction.OperatorKind is null
+            && instruction.Constant is null
+            && instruction.TargetId is null
+            && result is not null
+            && operands.Count == 1
+            && operands[0] is not null
+            && context.Types.TryGetValue(operands[0]!.TypeId, out GuestType? arrayType)
+            && string.Equals(arrayType.Kind, "array", StringComparison.Ordinal)
+            && context.Types.TryGetValue(result.TypeId, out GuestType? resultType)
+            && string.Equals(resultType.Kind, "scalar", StringComparison.Ordinal)
+            && string.Equals(resultType.Storage, "i32", StringComparison.Ordinal)
+            && resultType.Size == 4;
+        if (!valid)
+        {
+            Add(context, function, instruction);
+        }
+    }
+
     public static void ValidateLoad(
         GuestValidationContext context,
         GuestFunction function,
