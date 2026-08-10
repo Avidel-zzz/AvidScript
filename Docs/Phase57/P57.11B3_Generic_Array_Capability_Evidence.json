@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.11B3",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-08-10T17:08:38.1622325+00:00",
+  "candidate": {
+    "implementation_commit": "b89cc90bd7611e47f1f18d044804867d48ba3a22",
+    "implementation_parent": "9564ece7af265fedc9d729b7ddde6148dbdeb916",
+    "tree": "09bbf68f12200762765eddff34f3a3183b97e72d",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit"
+  },
+  "coverage": {
+    "descriptor_schema_version": 10,
+    "ue_container": "TArray<T>",
+    "csharp_public_type": "T[]",
+    "rank": 1,
+    "directions": [
+      "value",
+      "const_ref",
+      "ref",
+      "out",
+      "return",
+      "property_get",
+      "property_set"
+    ],
+    "supported_element_categories": [
+      "scalar",
+      "enum",
+      "FVector",
+      "FRotator",
+      "FTransform",
+      "object_handle",
+      "fixed_struct_wire"
+    ],
+    "rejected_element_categories": [
+      "nested_array",
+      "FName",
+      "FString",
+      "FText",
+      "TSet",
+      "TMap"
+    ],
+    "gameplay_generated_bindings": 371,
+    "gameplay_authorization_imports": 377,
+    "function_name_special_cases": 0,
+    "vm_array_type_branches": 0
+  },
+  "capability_contract": {
+    "wire_reference": "i32",
+    "token_layout": "1-bit tag + 31-bit process-unique capability id",
+    "allocator_shared_with_utf8_heap": true,
+    "token_reuse": false,
+    "maximum_elements_per_array": 4096,
+    "maximum_value_bytes": 1048576,
+    "maximum_slots_per_session": 65535,
+    "cross_session_resolution": "rejected",
+    "reset_stale_resolution": "rejected",
+    "explicit_release": true,
+    "output_publication": "preflighted_staged_and_atomic",
+    "shared_imports": [
+      {
+        "stable_id": "avidscript.value_array_length.v1",
+        "name": "avid_value_array_length",
+        "signature": "(i)i"
+      },
+      {
+        "stable_id": "avidscript.value_array_load.v1",
+        "name": "avid_value_array_load",
+        "signature": "(iiii)i"
+      },
+      {
+        "stable_id": "avidscript.value_array_store.v1",
+        "name": "avid_value_array_store",
+        "signature": "(iiii)i"
+      },
+      {
+        "stable_id": "avidscript.value_release.v1",
+        "name": "avid_value_release",
+        "signature": "(i)i"
+      }
+    ]
+  },
+  "e2e": {
+    "automation_test": "AvidScript.Guest.CSharp.ArrayUFunctionEndToEnd",
+    "backends": [
+      "WAMR",
+      "Wasmtime"
+    ],
+    "input": [1, 2],
+    "inout_input": [10],
+    "property_result": [11, 1, 2],
+    "operations": [
+      "construct",
+      "ufunction_value",
+      "ufunction_ref",
+      "ufunction_out",
+      "ufunction_return",
+      "length",
+      "element_load",
+      "element_store",
+      "property_set",
+      "explicit_release"
+    ],
+    "released_capabilities": 3,
+    "live_array_values_after_tick": 0
+  },
+  "performance_regression": {
+    "measurement_policy": "frozen P57.11B1 prepared-reflection metrics; no new array timing",
+    "array_throughput_claimed": false,
+    "scalar_ratio_to_puerts_reflection": 0.5140874096536293,
+    "property_ratio_to_puerts_reflection": 0.6614361339056836,
+    "vector_ratio_to_puerts_reflection": 0.05573060724163943,
+    "object_ratio_to_puerts_reflection": 0.531674127126231,
+    "known_array_hot_path_debt": "one host crossing per Length/load/store operation"
+  },
+  "verification": {
+    "powershell_parser": "3/3 changed scripts passed",
+    "guest_ir_tests": "35/35 passed",
+    "wasm_backend_tests": "15/15 passed",
+    "csharp_guest_tests": "81/81 passed",
+    "main_no_clean_build": "succeeded; final target 1 metadata action; 2.62 seconds; no Editor target clean",
+    "array_runtime_e2e": "1/1 succeeded on WAMR and Wasmtime; property result [11,1,2]; live array values 0",
+    "full_avidscript_automation": "345 found; 345 performed; 345 succeeded; 0 failed; queue empty and TestExit observed; process exit 0",
+    "architecture_check": "clean candidate passed",
+    "architecture_checker_sha256": "87c2f55708bf6302c9a6618265782349c0df27469c8f7805d7f088e3cba752d9"
+  },
+  "log_sha256": {
+    "main_no_clean_build": "c1f6aa3e89685230567efae5de76ae696b33e14ffca197a316d8c629d337dd27",
+    "array_runtime_e2e": "c56b7811357a392fd31585d70c28f73c21c7a00d7557dedee988d42b661aafc1",
+    "full_avidscript_automation": "af7708f0dfd8029ebe2249dc62956c11e1f661cab3fb53503753bc2d3fd0df3b",
+    "architecture_check": "41d4dcea50cdb85637d7c2a3946c8d493b509c855ac05e76b5962ea7b82dab3e"
+  },
+  "review_closure": {
+    "shared_process_unique_value_tokens": "closed",
+    "atomic_array_output_publication": "closed",
+    "complete_shared_import_set": "closed",
+    "schema_v10_element_type_closure": "closed",
+    "dual_backend_csharp_gameplay": "closed",
+    "explicit_array_release": "closed"
+  },
+  "protected_dirty_paths_excluded": 3
+}

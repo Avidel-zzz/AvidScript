@@ -7,14 +7,14 @@
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Superpowers/Specs/2026-08-01-phase57-editor-precompiled-artifact-pipeline-design.md",
-    "version": 2,
-    "sha256": "f6cdcc527f8ea1b934c0983ac0a169c4b8201118a67a06bf0ae4f3a48571949d",
-    "revision_reason": "P57.8 froze the Editor precompiled artifact pipeline and runtime trust chain"
+    "path": "Docs/Superpowers/Specs/2026-08-11-phase57-generic-array-capability-design.md",
+    "version": 3,
+    "sha256": "24772bea1ffad46cac95f9b596aa38af499274816e930dd9b14399cb79d02549",
+    "revision_reason": "P57.11B3 froze schema v10 array type graphs, shared value capabilities, explicit release, and the dual-backend C# array contract"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Plan.md",
-    "closeout": "Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap.md"
+    "plan": "Docs/Phase57/P57.11B3_Generic_Array_Capability_Plan.md",
+    "closeout": "Docs/Phase57/P57.11B3_Generic_Array_Capability.md"
   },
   "batches": [
     {
@@ -100,6 +100,12 @@
       "status": "Completed",
       "evidence": "Session-owned process-unique UTF-8 capability heap and atomic output publication now cover FName/FString value/const-ref/ref/out/return plus property get/set without API-name special cases; generated C# string facade executed on WAMR and Wasmtime; UE5.8 no-clean build passed, C# Guest 79/79 and Wasm backend 14/14 passed, full AvidScript Automation 341/341 passed, warm static contract and clean architecture candidate ef41ce6/7ffabe6 passed.",
       "completed_at_utc": "2026-08-02T08:59:15.7248701+00:00"
+    },
+    {
+      "id": "P57.11B3",
+      "status": "Completed",
+      "evidence": "Schema v10 one-dimensional TArray<T> projection now covers C# T[] function value/const-ref/ref/out/return, property get/set, Length/load/store, bounded session capability ownership, atomic publication, and explicit release without per-API wrappers; WAMR and Wasmtime produced [11,1,2] and drained live array values to zero; Guest IR 35/35, Wasm backend 15/15, C# Guest 81/81, UE5.8 no-clean target, full AvidScript Automation 345/345, and clean b89cc90/09bbf68 architecture gate passed.",
+      "completed_at_utc": "2026-08-10T17:08:38.1622325+00:00"
     }
   ],
   "debt": [
@@ -119,8 +125,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.11B2 review closed process capability uniqueness, atomic multi-output publication, descriptor direction validation, Actor play initialization, Editor mutable-borrow test parity, exact +3 FName gameplay coverage drift, and StructWire fixture direction; final full Automation and clean architecture gate passed.",
-    "completed_at_utc": "2026-08-02T08:59:15.7248701+00:00"
+    "evidence": "Centralized P57.11B3 review closed shared process-unique value tokens, bounded array ownership, schema v10 element closure, atomic ref/out/return publication, exact four-capability manifest authorization, explicit release, and WAMR/Wasmtime C# gameplay parity; final full Automation and clean architecture gate passed.",
+    "completed_at_utc": "2026-08-10T17:08:38.1622325+00:00"
   },
   "budgets": {
     "ubt": 3,
@@ -133,20 +139,20 @@
     "full_gate": 4
   },
   "freeze": {
-    "source_commit": "e961cb7bdb2fc36f4114855d8529d3fb8c6f8169",
-    "source_tree": "7ffabe65931e116d82ab846e090267b562238dd6",
+    "source_commit": "b89cc90bd7611e47f1f18d044804867d48ba3a22",
+    "source_tree": "09bbf68f12200762765eddff34f3a3183b97e72d",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Evidence.json",
-    "at_utc": "2026-08-02T08:59:15.7248701+00:00"
+    "review_evidence": "Docs/Phase57/P57.11B3_Generic_Array_Capability_Evidence.json",
+    "at_utc": "2026-08-10T17:08:38.1622325+00:00"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_11B2_Architecture_final.log",
-    "report_sha256": "e708acf1a490bb997bf3210e17bdd34a460ef0d5f23395c7b088c07f3452cfb8",
-    "run_id": "P57.11B2-clean-architecture-final",
-    "verified_commit": "ef41ce63e68ebbd9e4286962432680723129f85b",
-    "verified_tree": "7ffabe65931e116d82ab846e090267b562238dd6",
-    "attestation_parent": "e961cb7bdb2fc36f4114855d8529d3fb8c6f8169",
-    "attested_at_utc": "2026-08-02T08:59:15.7248701+00:00"
+    "report_path": "external:C:/tmp/AvidScript_P57_11B3_Architecture_b89cc90.log",
+    "report_sha256": "41d4dcea50cdb85637d7c2a3946c8d493b509c855ac05e76b5962ea7b82dab3e",
+    "run_id": "P57.11B3-clean-architecture-final",
+    "verified_commit": "b89cc90bd7611e47f1f18d044804867d48ba3a22",
+    "verified_tree": "09bbf68f12200762765eddff34f3a3183b97e72d",
+    "attestation_parent": "9564ece7af265fedc9d729b7ddde6148dbdeb916",
+    "attested_at_utc": "2026-08-10T17:08:38.1622325+00:00"
   },
   "protected_dirty": [
     {
@@ -168,7 +174,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "plan P57.11B3 generic container value capabilities, beginning with bounded TArray<T> descriptor/lifecycle design and no per-API wrappers",
-  "revision": 17,
-  "updated_at_utc": "2026-08-02T08:59:15.7248701+00:00"
+  "next_action": "plan P57.11C array bulk-access ABI and frozen Puerts comparison, then extend string elements, nested containers, TSet/TMap, and independent delegate/latent/RPC semantics",
+  "revision": 18,
+  "updated_at_utc": "2026-08-10T17:08:38.1622325+00:00"
 }

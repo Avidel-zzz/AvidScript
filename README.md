@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.11B2" src="https://img.shields.io/badge/Status-Phase%2057.11B2-159957">
-  <img alt="Automation 341/341" src="https://img.shields.io/badge/Automation-341%2F341-26A269">
+  <img alt="Phase 57.11B3" src="https://img.shields.io/badge/Status-Phase%2057.11B3-159957">
+  <img alt="Automation 345/345" src="https://img.shields.io/badge/Automation-345%2F345-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -33,7 +33,7 @@ Timer、Overlap、普通 `UFUNCTION` 与 `UPROPERTY`，在 UE 中编写真实游
   再输出 WebAssembly；PC 主后端使用 Wasmtime Cranelift。
 - **接入 UE 生命周期**：脚本可以响应 `BeginPlay`、`Tick`、`EndPlay`、Timer、
   Gameplay Event 与 Overlap，并使用 Actor、Component、递归固定宽度 `USTRUCT`、
-  `FName`、`FString` 和常用 UE 值类型。
+  `FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型。
 - **性能结论可复核**：同机、同 workload 对比 Puerts V8；候选 commit、profile、
   进程样本、P50/P95 和未达门禁均进入机器可读 evidence。
 
@@ -117,6 +117,31 @@ public static void Tick(float deltaSeconds)
 这里的 `AMyGameplayActor` 代表项目 Reflection 生成的 facade。仓库内双后端真实闭环见
 [NameStringRoundtrip fixture](Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B2_NameStringRoundtrip.cs)。
 
+### TArray 与显式值释放
+
+满足元素安全合同的一维 `TArray<T>` 会生成 C# `T[]`。函数 value/ref/out/return、属性读写、
+`Length` 和索引访问使用同一套 schema v10 类型图：
+
+```csharp
+int[] input = new int[] { 1, 2 };
+int[] inOut = new int[] { 10 };
+int[] result = self.IntArrayRoundTrip(input, ref inOut, out int[] output);
+
+if (result.Length > 0)
+{
+    result[0] += 1;
+}
+
+self.ReadableIntArray = result;
+AvidScriptValue.Release(inOut);
+AvidScriptValue.Release(output);
+AvidScriptValue.Release(result);
+```
+
+这条路径已用同一个 C# Guest 在 WAMR 与 Wasmtime 执行，UE property 最终得到
+`[11, 1, 2]`，显式释放后 live array capability 为 0。完整 fixture 见
+[ArrayRoundtrip](Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B3_ArrayRoundtrip.cs)。
+
 ## 当前能力
 
 | 领域 | 已实现 |
@@ -126,6 +151,7 @@ public static void Tick(float deltaSeconds)
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
 | 变长字符串 | Session-owned UTF-8 capability heap；跨调用 intern；reload/跨 Runtime 失效；多输出原子发布 |
+| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、Length/load/store 与显式 Release |
 | UObject / Actor | typed `UE.Self`、generational handle、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
 | Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
 | 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
@@ -134,8 +160,8 @@ public static void Tick(float deltaSeconds)
 | 性能热路径 | callback-epoch fused host cell、prepared export、`TickHot` / Event hot result |
 | VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端；同一 C# Guest 双后端验证 |
 
-当前 UE5.8 EngineGameplay profile 精确接受 `352` 个函数与 `2` 个属性，生成 `354` 个
-reflection binding；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
+当前 UE5.8 EngineGameplay profile 生成 `371` 个 reflection binding，加上 object/owner 与
+四个 value capability，manifest 授权 `377` 个 import；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
 可以加入自己的 UCLASS/UFUNCTION，只要类型可由现有 descriptor/codec 表达，就会自动生成。
 
 生成 API 的覆盖范围由项目 profile、UE Reflection 结果和当前 ABI 类型能力共同决定。
@@ -163,9 +189,9 @@ warmup + 30 次 timed sample**，共 `9000/9000` 个有效 timed sample。
 | UObject roundtrip | `69.60 ns` | `130.90 ns` | **`0.532x`** | **46.83%** |
 
 四个已冻结 prepared shape 均领先 Puerts Reflection，目标样本产生 `96,000,000` 次 native
-hit，fallback 与 guard reject 都为 0。P57.11B2 没有重新计时字符串吞吐；它只复跑静态
-路由合同并完成 WAMR/Wasmtime 字符串正确性闭环，因此 README 不对 FName/FString 性能做
-未经测量的外推。
+hit，fallback 与 guard reject 都为 0。P57.11B2/B3 没有重新计时字符串或数组吞吐；B3
+完成的是 WAMR/Wasmtime 数组正确性与显式生命周期闭环。当前索引 load/store 仍是逐元素
+host crossing，因此 README 不把上表外推成字符串或数组性能结论。
 
 ### Phase 56：完整游戏 workload
 
@@ -189,6 +215,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 
 正式证据与详细口径：
 
+- [P57.11B3 通用数组与完整验收证据](Docs/Phase57/P57.11B3_Generic_Array_Capability_Evidence.json)
 - [P57.11B2 FName/FString 与完整验收证据](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Evidence.json)
 - [P57.11B1 Prepared Reflection 正式性能证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)
 - [P57.9 Wasmtime/V8 controlled toolchain](Docs/Phase57/P57.9_Controlled_Wasmtime_Toolchain.md)
@@ -197,7 +224,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 正式性能候选：
 [`4c10239`](https://github.com/Avidel-zzz/AvidScript/commit/4c1023989596bba112de345b5533546655559df7)；
 当前功能候选：
-[`b981422`](https://github.com/Avidel-zzz/AvidScript/commit/b981422f32be3c9b91bcb36bc06408c20689ae32)。
+[`b89cc90`](https://github.com/Avidel-zzz/AvidScript/commit/b89cc90bd7611e47f1f18d044804867d48ba3a22)。
 
 ## 架构
 
@@ -217,9 +244,11 @@ flowchart LR
     Wasmtime --> Runtime["AvidScriptRuntime<br/>Session + Lifecycle"]
     WAMR --> Runtime
     Runtime --> Executor["AvidScriptBindings<br/>Prepared Executor"]
-    Runtime --> Heap["Session UTF-8<br/>Capability Heap"]
+    Runtime --> Utf8Heap["Session UTF-8<br/>Capability Heap"]
+    Runtime --> ArrayHeap["Session Array<br/>Capability Heap"]
     Package --> Executor
-    Heap --> Executor
+    Utf8Heap --> Executor
+    ArrayHeap --> Executor
     Executor --> UE["Unreal Engine 5.8"]
 ```
 
@@ -339,17 +368,18 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 - 还不是完整 UE API 类型系统，只覆盖 descriptor 可表达且 ABI 已实现的类型；
 - 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
-- `TArray`、`TSet`、`TMap`、delegate、latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+- 一维 `TArray<T>` 已支持首批固定元素类型；nested array、字符串元素、`TSet`、`TMap` 尚未支持；
+- delegate、latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
-- UTF-8 heap 当前按 Session/reset 回收，不提供 guest 主动 release 或长期 GC；
+- 数组 capability 已提供显式 `Release`；UTF-8 heap 仍以 Session/reset 为主要回收边界；
 - Cook、Shipping、崩溃隔离、Android 与 iOS 尚未完成正式验收；
 - 正式竞品矩阵目前覆盖 Puerts V8，尚未同口径覆盖 UnLua 与 AngelScript。
 
 ## 路线图
 
-1. 建立通用 `TArray<T>`/容器 descriptor 与 session value capability，并补齐显式释放和长期生命周期统计；
+1. 冻结数组 benchmark 与批量访问 ABI，减少逐元素 host crossing，并扩展 string/nested container、TSet/TMap；
 2. 扩展 delegate、latent、RPC、interface dispatch 与 `FText` 等 UE 调用语义；
 3. 冻结字符串/container benchmark，继续压缩 Generated/prepared 固定成本与 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -365,9 +395,9 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前 Phase 57.11B2 完整 AvidScript Automation 为 **341/341 通过**，另有 C# Guest
-`79/79`、Wasm backend `14/14` 与 clean architecture Gate。最新阶段报告见
-[P57.11B2 中文报告](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap.md)。
+当前 Phase 57.11B3 完整 AvidScript Automation 为 **345/345 通过**，另有 Guest IR
+`35/35`、C# Guest `81/81`、Wasm backend `15/15` 与 clean architecture Gate。最新阶段报告见
+[P57.11B3 中文报告](Docs/Phase57/P57.11B3_Generic_Array_Capability.md)。
 
 工程规则：
 
