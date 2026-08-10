@@ -1526,7 +1526,7 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 			Manifest,
 			EmitResult));
 	TestTrue(TEXT("Gameplay profile C# emit succeeds"), EmitResult.bSucceeded);
-	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 354);
+	TestEqual(TEXT("Gameplay profile preserves every accepted binding"), EmitResult.BindingCount, 371);
 	TSharedPtr<FJsonObject> DescriptorObject;
 	TestTrue(TEXT("Gameplay descriptor parses"), ParseJsonObject(DescriptorJson, DescriptorObject));
 	if (DescriptorObject.IsValid())
@@ -1638,9 +1638,9 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	if (ManifestObject.IsValid())
 	{
 		TestEqual(
-			TEXT("Gameplay manifest declares 354 reflected imports and two shared capabilities"),
+			TEXT("Gameplay manifest declares 371 reflected imports and three shared capabilities"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			356);
+			377);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();
@@ -2405,6 +2405,124 @@ bool FAvidScriptEditorCSharpBindingEmitterFailureAndPublishTest::RunTest(const F
 		FAvidScriptEditorCSharpBindingEmitter::PublishDefault(ProjectPublishResult));
 	TestTrue(TEXT("Project reference source exists"), FPaths::FileExists(ProjectPublishResult.ReferenceSourcePath));
 	AddInfo(FString::Printf(TEXT("Generated C# reference source: %s"), *ProjectPublishResult.ReferenceSourcePath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingEmitterArrayTest,
+	"AvidScript.Editor.CSharpBindingEmitter.Array",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingEmitterArrayTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		UAvidScriptCSharpBindingEmitterTestObject::StaticClass()->GetPathName();
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult DescriptorResult;
+	if (!TestTrue(
+			TEXT("TArray UFUNCTION descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.array.csharp"),
+				{ { OwnerPath, TEXT("IntArrayRoundTrip") } },
+				DescriptorJson,
+				DescriptorResult)))
+	{
+		AddError(DescriptorResult.ErrorCategory + TEXT(": ") + DescriptorResult.ErrorMessage);
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Descriptor;
+	if (!TestTrue(TEXT("TArray descriptor parses"), ParseJsonObject(DescriptorJson, Descriptor))
+		|| !Descriptor.IsValid())
+	{
+		return false;
+	}
+	TestEqual(TEXT("TArray activates descriptor schema 10"), Descriptor->GetIntegerField(TEXT("schema_version")), 10);
+	const TSharedPtr<FJsonValue>* ArrayTypeValue =
+		Descriptor->GetArrayField(TEXT("types")).FindByPredicate(
+			[](const TSharedPtr<FJsonValue>& Value)
+			{
+				const TSharedPtr<FJsonObject> Type = Value->AsObject();
+				return Type.IsValid()
+					&& Type->GetStringField(TEXT("kind")) == TEXT("array");
+			});
+	if (TestNotNull(TEXT("Descriptor contains one array type"), ArrayTypeValue))
+	{
+		const TSharedPtr<FJsonObject> ArrayType = (*ArrayTypeValue)->AsObject();
+		TestEqual(TEXT("Array canonical type is stable"), ArrayType->GetStringField(TEXT("canonical_type")), FString(TEXT("array:tarray<scalar:i32>")));
+		TestTrue(TEXT("Array descriptor links its element type"), ArrayType->GetStringField(TEXT("element_type_id")).Len() == 64);
+		TestEqual(TEXT("Array descriptor uses one i32 reference"), ArrayType->GetArrayField(TEXT("abi_types"))[0]->AsString(), FString(TEXT("i")));
+	}
+
+	FString Source;
+	FString Manifest;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	if (!TestTrue(
+			TEXT("TArray descriptor emits a C# facade"),
+			FAvidScriptEditorCSharpBindingEmitter::Emit(
+				DescriptorJson,
+				Source,
+				Manifest,
+				EmitResult)))
+	{
+		AddError(EmitResult.ErrorCategory + TEXT(": ") + EmitResult.ErrorMessage);
+		return false;
+	}
+	TestTrue(
+		TEXT("Generated UFUNCTION surface uses standard C# arrays"),
+		Source.Contains(TEXT("public int[] IntArrayRoundTrip(int[] Input, ref int[] InOut, out int[] OutValue)")));
+	TestTrue(
+		TEXT("Generated native ABI preserves array refs and outputs"),
+		Source.Contains(TEXT("int[] p0, ref int[] p1_InOut, out int[] p2_OutValue, out int[] returnValue")));
+	TestTrue(
+		TEXT("Generated facade exposes explicit array capability release"),
+		Source.Contains(TEXT("public static bool Release(int[] value)")));
+	TestTrue(
+		TEXT("Generated facade imports the shared value release service"),
+		Source.Contains(TEXT("EntryPoint = \"avid_value_release\"")));
+	TSharedPtr<FJsonObject> ManifestObject;
+	if (TestTrue(TEXT("Array package manifest parses"), ParseJsonObject(Manifest, ManifestObject))
+		&& ManifestObject.IsValid())
+	{
+		TestTrue(
+			TEXT("Array package manifest authorizes the shared release import"),
+			ManifestObject->GetArrayField(TEXT("required_imports")).ContainsByPredicate(
+				[](const TSharedPtr<FJsonValue>& Value)
+				{
+					const TSharedPtr<FJsonObject> Import = Value->AsObject();
+					return Import.IsValid()
+						&& Import->GetStringField(TEXT("name")) == TEXT("avid_value_release")
+						&& Import->GetStringField(TEXT("signature")) == TEXT("(i)i");
+				}));
+	}
+
+	const FString ProfilePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectPluginsDir(),
+		TEXT("AvidScript/Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B3_ArrayRoundtrip.csharp-profile.json")));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Array C# end-to-end profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Array C# fixture builds through the production profile pipeline"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult),
+				BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestTrue(TEXT("Array C# profile publishes its formal report"), FPaths::FileExists(BuildResult.ReportPath));
+	TestTrue(TEXT("Array C# profile publishes its runtime manifest"), FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(TEXT("Array C# profile publishes its runtime binding package"), FPaths::FileExists(BuildResult.BindingPackagePath));
 	return true;
 }
 

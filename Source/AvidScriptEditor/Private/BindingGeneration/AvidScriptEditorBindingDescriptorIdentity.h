@@ -10,14 +10,16 @@ public:
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
-		int32 WireAlignment = INDEX_NONE);
+		int32 WireAlignment = INDEX_NONE,
+		const FString& ElementTypeId = FString());
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
-		int32 WireAlignment = INDEX_NONE);
+		int32 WireAlignment = INDEX_NONE,
+		const FString& ElementTypeId = FString());
 
 	static FString MakeObjectFactoryIdentity(
 		const FString& ClassReferenceId,

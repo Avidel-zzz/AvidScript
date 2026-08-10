@@ -56,7 +56,7 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 	OutJson.Empty();
 	FString StructWireLayoutError;
 	if (Package.SchemaVersion >= 9
-		&& !FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph(
+		&& !FAvidScriptBindingDescriptorLayout::ValidateTypeGraph(
 			Package.Types,
 			StructWireLayoutError))
 	{
@@ -162,6 +162,10 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 				Writer->WriteObjectEnd();
 			}
 			Writer->WriteArrayEnd();
+		}
+		if (Package.SchemaVersion >= 10 && Type.Kind == TEXT("array"))
+		{
+			Writer->WriteValue(TEXT("element_type_id"), Type.ElementTypeId);
 		}
 		Writer->WriteObjectEnd();
 	}

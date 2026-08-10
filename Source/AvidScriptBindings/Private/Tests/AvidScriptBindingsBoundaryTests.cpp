@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptActorBinding.h"
+#include "AvidScriptArrayValueHeap.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptObjectOwnership.h"
@@ -172,6 +173,34 @@ FValueCodecProgram MakeUtf8Codec(
 	Program.WireSize = sizeof(uint32);
 	Program.WireAlignment = alignof(uint32);
 	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
+	return Program;
+}
+
+FValueCodecProgram MakeIntArrayCodec(
+	FProperty* Property,
+	const EValueCodecDirection Direction,
+	const int32 ArgumentOffset)
+{
+	FValueCodecProgram Program;
+	Program.Property = Property;
+	Program.Direction = Direction;
+	Program.Kind = EValueCodecKind::Array;
+	Program.TypeId = FString::ChrN(64, TEXT('a'));
+	Program.ArgumentOffset = ArgumentOffset;
+	Program.ArgumentWidth = 1;
+	Program.GuestStorageSize = sizeof(uint32);
+	Program.WireSize = sizeof(uint32);
+	Program.WireAlignment = alignof(uint32);
+	Program.Name = Property == nullptr ? TEXT("ReturnValue") : Property->GetName();
+
+	FArrayProperty* ArrayProperty = CastFieldChecked<FArrayProperty>(Property);
+	FValueCodecProgram& Element = Program.Children.AddDefaulted_GetRef();
+	Element.Property = ArrayProperty->Inner;
+	Element.Kind = EValueCodecKind::Int32;
+	Element.GuestStorageSize = sizeof(int32);
+	Element.WireSize = sizeof(int32);
+	Element.WireAlignment = alignof(int32);
+	Element.Name = TEXT("Element");
 	return Program;
 }
 
@@ -642,6 +671,188 @@ bool FAvidScriptRecursiveStructCodecBoundaryTest::RunTest(const FString& Paramet
 	int32 PropertyReadCount = 0;
 	FMemory::Memcpy(&PropertyReadCount, GuestMemory.Bytes.GetData() + 352 + 28, 4);
 	TestEqual(TEXT("Recursive property read preserves nested count"), PropertyReadCount, 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptArrayValueBindingBoundaryTest,
+	"AvidScript.Bindings.ArrayValueHeap.CrossInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptArrayValueBindingBoundaryTest::RunTest(
+	const FString& Parameters)
+{
+	UClass* ExpectedClass = UAvidScriptBindingsTestObject::StaticClass();
+	UFunction* Function = ExpectedClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			UAvidScriptBindingsTestObject,
+			IntArrayRoundtrip));
+	if (!TestNotNull(TEXT("Array fixture function reflects"), Function))
+	{
+		return false;
+	}
+	FProperty* InputProperty = FindFProperty<FProperty>(Function, TEXT("Input"));
+	FProperty* InOutProperty = FindFProperty<FProperty>(Function, TEXT("InOut"));
+	FProperty* OutProperty = FindFProperty<FProperty>(Function, TEXT("OutValue"));
+	FProperty* ReturnProperty = Function->GetReturnProperty();
+	if (!TestNotNull(TEXT("Array input reflects"), InputProperty)
+		|| !TestNotNull(TEXT("Array ref input reflects"), InOutProperty)
+		|| !TestNotNull(TEXT("Array output reflects"), OutProperty)
+		|| !TestNotNull(TEXT("Array return reflects"), ReturnProperty))
+	{
+		return false;
+	}
+
+	FInvocationCodecProgram Program;
+	Program.OwnerClass = ExpectedClass;
+	Program.Function = Function;
+	Program.DebugPath = Function->GetPathName();
+	Program.FrameSize = Function->GetStructureSize();
+	Program.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
+	Program.RequiredScratchSize = Program.FrameSize + Program.FrameAlignment - 1;
+	Program.ExpectedArgumentCount = 6;
+	Program.bRequiresGuestMemory = true;
+	Program.Parameters.Add(MakeIntArrayCodec(InputProperty, EValueCodecDirection::ConstRef, 2));
+	Program.Parameters.Add(MakeIntArrayCodec(InOutProperty, EValueCodecDirection::Ref, 3));
+	Program.Parameters.Add(MakeIntArrayCodec(OutProperty, EValueCodecDirection::Out, 4));
+	Program.ReturnValue = MakeIntArrayCodec(ReturnProperty, EValueCodecDirection::Return, 5);
+	FPreparedDynamicInvocationCell Cell{ &Program, 0 };
+
+	FAvidScriptBoundaryGuestMemory GuestMemory;
+	const auto StoreLinearArray = [&GuestMemory](
+		const uint32 Address,
+		const TConstArrayView<int32> Values)
+	{
+		const int32 Count = Values.Num();
+		FMemory::Memcpy(GuestMemory.Bytes.GetData() + Address, &Count, sizeof(Count));
+		if (!Values.IsEmpty())
+		{
+			FMemory::Memcpy(
+				GuestMemory.Bytes.GetData() + Address + sizeof(Count),
+				Values.GetData(),
+				Values.Num() * sizeof(int32));
+		}
+	};
+	const auto StoreValueReference = [&GuestMemory](
+		const uint32 Address,
+		const uint32 ValueReference)
+	{
+		FMemory::Memcpy(
+			GuestMemory.Bytes.GetData() + Address,
+			&ValueReference,
+			sizeof(ValueReference));
+	};
+	const int32 InputValues[] = { 1, 2 };
+	const int32 RefValues[] = { 10 };
+	StoreLinearArray(32, MakeArrayView(InputValues));
+	StoreLinearArray(96, MakeArrayView(RefValues));
+	StoreValueReference(320, 96);
+
+	FAvidScriptArrayValueHeap Heap;
+	FAvidScriptBindingInvocationContext Context;
+	Context.ArrayValueHeap = &Heap;
+	TArray<uint8> Scratch;
+	Scratch.SetNumZeroed(Program.RequiredScratchSize);
+	UAvidScriptBindingsTestObject* Receiver =
+		NewObject<UAvidScriptBindingsTestObject>();
+	FAvidScriptDynamicHostCallResult Result;
+	const uint64 Arguments[] = { 0, 0, 32, 320, 324, 328 };
+	if (!TestTrue(
+			TEXT("Array function accepts linear values and publishes capabilities"),
+			InvokePreparedDynamicReflection(
+				&Cell,
+				*Receiver,
+				Arguments,
+				&GuestMemory,
+				Context,
+				Scratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+
+	uint32 InOutToken = 0;
+	uint32 OutToken = 0;
+	uint32 ReturnToken = 0;
+	FMemory::Memcpy(&InOutToken, GuestMemory.Bytes.GetData() + 320, sizeof(uint32));
+	FMemory::Memcpy(&OutToken, GuestMemory.Bytes.GetData() + 324, sizeof(uint32));
+	FMemory::Memcpy(&ReturnToken, GuestMemory.Bytes.GetData() + 328, sizeof(uint32));
+	TestTrue(TEXT("Ref array returns a capability"), InOutToken > MAX_int32);
+	TestTrue(TEXT("Out array returns a capability"), OutToken > MAX_int32);
+	TestTrue(TEXT("Return array returns a capability"), ReturnToken > MAX_int32);
+	TestEqual(TEXT("Three array outputs remain live for cross-invocation use"), Heap.GetStats().LiveValues, 3);
+
+	const auto ResolveIntArray = [&Heap](
+		const uint32 Token,
+		TArray<int32>& OutValues)
+	{
+		FAvidScriptArrayValueView View;
+		FString Error;
+		if (!Heap.Resolve(Token, FString::ChrN(64, TEXT('a')), View, Error)
+			|| View.ElementStride != sizeof(int32))
+		{
+			return false;
+		}
+		OutValues.SetNumUninitialized(View.ElementCount);
+		if (!OutValues.IsEmpty())
+		{
+			FMemory::Memcpy(
+				OutValues.GetData(),
+				View.Bytes.GetData(),
+				View.Bytes.Num());
+		}
+		return true;
+	};
+	TArray<int32> Resolved;
+	TestTrue(TEXT("Ref array capability resolves"), ResolveIntArray(InOutToken, Resolved));
+	TestEqual(TEXT("Ref array preserves appended value count"), Resolved.Num(), 3);
+	if (!Resolved.IsEmpty())
+	{
+		TestEqual(TEXT("Ref array preserves first value"), Resolved[0], 10);
+	}
+	TestTrue(TEXT("Out array capability resolves"), ResolveIntArray(OutToken, Resolved));
+	TestEqual(TEXT("Out array preserves input count"), Resolved.Num(), 2);
+	TestTrue(TEXT("Return array capability resolves"), ResolveIntArray(ReturnToken, Resolved));
+	TestEqual(TEXT("Return array preserves appended value count"), Resolved.Num(), 3);
+
+	FProperty* ArrayProperty = FindFProperty<FProperty>(ExpectedClass, TEXT("IntArrayProperty"));
+	if (!TestNotNull(TEXT("Array property reflects"), ArrayProperty))
+	{
+		return false;
+	}
+	FInvocationCodecProgram PropertyWriteProgram;
+	PropertyWriteProgram.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyWrite;
+	PropertyWriteProgram.OwnerClass = ExpectedClass;
+	PropertyWriteProgram.ReflectedProperty = ArrayProperty;
+	PropertyWriteProgram.DebugPath = ArrayProperty->GetPathName();
+	PropertyWriteProgram.ExpectedArgumentCount = 3;
+	PropertyWriteProgram.bRequiresGuestMemory = true;
+	PropertyWriteProgram.Parameters.Add(
+		MakeIntArrayCodec(ArrayProperty, EValueCodecDirection::Value, 2));
+	FPreparedDynamicInvocationCell PropertyWriteCell{ &PropertyWriteProgram, 0 };
+	const uint64 TokenWriteArguments[] = { 0, 0, ReturnToken };
+	TestTrue(
+		TEXT("A later invocation accepts the returned array capability"),
+		InvokePreparedDynamicReflection(
+			&PropertyWriteCell,
+			*Receiver,
+			TokenWriteArguments,
+			&GuestMemory,
+			Context,
+			Scratch,
+			Result));
+	TestEqual(TEXT("Capability input reaches the reflected array property"), Receiver->IntArrayProperty.Num(), 3);
+
+	FString ReleaseError;
+	TestTrue(TEXT("Ref array capability releases explicitly"), Heap.ReleaseValue(InOutToken, ReleaseError));
+	TestTrue(TEXT("Out array capability releases explicitly"), Heap.ReleaseValue(OutToken, ReleaseError));
+	TestTrue(TEXT("Return array capability releases explicitly"), Heap.ReleaseValue(ReturnToken, ReleaseError));
+	TestEqual(TEXT("Explicit release leaves no live array capabilities"), Heap.GetStats().LiveValues, 0);
+	FAvidScriptArrayValueView StaleView;
+	TestFalse(
+		TEXT("Released array capability becomes stale"),
+		Heap.Resolve(ReturnToken, FString(), StaleView, ReleaseError));
 	return true;
 }
 

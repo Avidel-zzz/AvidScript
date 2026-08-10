@@ -296,22 +296,16 @@ bool FAvidScriptEditorBindingSelectionFilteredCompatibilityTest::RunTest(const F
 	TArray<FAvidScriptReflectedFunctionSelection> Selections;
 	FAvidScriptBindingSelectionResolveResult Result;
 	TestTrue(
-		TEXT("Class discovery skips unsupported functions without rejecting compatible peers"),
+		TEXT("Class discovery accepts scalar and bounded array functions together"),
 		FAvidScriptEditorBindingSelectionResolver::Resolve(Profile, Selections, Result));
 	TestEqual(TEXT("Filtered profile observes two candidates"), Result.CandidateFunctionCount, 2);
-	TestEqual(TEXT("Filtered profile accepts one function"), Selections.Num(), 1);
-	TestEqual(TEXT("Filtered profile reports one rejected function"), Result.RejectedFunctionCount, 1);
-	if (Selections.Num() == 1)
-	{
-		TestEqual(TEXT("Supported function is retained"), Selections[0].FunctionName, FName(TEXT("K2_GetActorLocation")));
-	}
-	if (Result.Issues.Num() == 1)
-	{
-		TestFalse(TEXT("Discovery compatibility issue is non-fatal"), Result.Issues[0].bFatal);
-		TestEqual(TEXT("Unsupported signature has stable category"), Result.Issues[0].Category, FString(TEXT("unsupported_property")));
-		TestEqual(TEXT("Rejected function is identified"), Result.Issues[0].FunctionName, FName(TEXT("GetAttachedActors")));
-		TestEqual(TEXT("Unsupported TArray is identified exactly"), Result.Issues[0].Source, FString(TEXT("TArray")));
-	}
+	TestEqual(TEXT("Filtered profile accepts both functions"), Selections.Num(), 2);
+	TestEqual(TEXT("Filtered profile rejects no supported function"), Result.RejectedFunctionCount, 0);
+	TestTrue(TEXT("TArray function is retained"), Selections.ContainsByPredicate(
+		[](const FAvidScriptReflectedFunctionSelection& Selection)
+		{
+			return Selection.FunctionName == FName(TEXT("GetAttachedActors"));
+		}));
 
 	return true;
 }
@@ -608,7 +602,7 @@ bool FAvidScriptEditorBindingSelectionProfileDescriptorTest::RunTest(const FStri
 			FirstJson,
 			FirstSelectionResult,
 			FirstDescriptorResult));
-	TestEqual(TEXT("Gameplay profile accepts 352 functions including nine schema v9 struct-wire and three FName return additions"), FirstSelectionResult.AcceptedFunctionCount, 352);
+	TestEqual(TEXT("Gameplay profile accepts 369 functions including bounded TArray APIs"), FirstSelectionResult.AcceptedFunctionCount, 369);
 	TestEqual(TEXT("Gameplay profile accepts two readable properties"), FirstSelectionResult.AcceptedPropertyCount, 2);
 	TestEqual(
 		TEXT("Descriptor binding count matches all accepted reflected members"),

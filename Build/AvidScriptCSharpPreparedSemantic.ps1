@@ -88,30 +88,34 @@ function Assert-AvidScriptPreparedSemanticUsedImports {
         $Module = [string]$Import.module
         $Name = [string]$Import.name
         $Signature = [string]$Import.signature
+        $Key = "$Module`n$Name"
+        $ExpectedImport = if ($ExpectedImportsByKey.ContainsKey($Key)) {
+            $ExpectedImportsByKey[$Key]
+        }
+        else {
+            $null
+        }
         $IsReflectedOrSharedDynamicImport =
             (Test-AvidScriptBindingSha256 $StableId) -and $Ordinal -ge 0
-        $IsPackedOwnerImport =
-            $StableId -ceq "avidscript.owner_get_handle.v1" -and
+        $IsDeclaredSharedCapability =
+            $null -ne $ExpectedImport -and
             $Ordinal -eq -1 -and
-            $Module -ceq "avidscript" -and
-            $Name -ceq "avid_owner_get_handle" -and
-            $Signature -ceq "()I" -and
-            [int]$ExpectedAuthorizationPackage.DescriptorSchemaVersion -ge 6 -and
-            -not [string]::IsNullOrWhiteSpace(
-                [string]$ExpectedAuthorizationPackage.SelfTypeId)
+            [string]$ExpectedImport.StableId -ceq $StableId -and
+            [string]$ExpectedImport.Module -ceq $Module -and
+            [string]$ExpectedImport.Name -ceq $Name -and
+            [string]$ExpectedImport.Signature -ceq $Signature
         Assert-AvidScriptPreparedSemantic `
             -Condition ($HasOrdinal -and
                 $Import.stable_id -is [string] -and
                 $Import.module -is [string] -and
                 $Import.name -is [string] -and
                 $Import.signature -is [string] -and
-                ($IsReflectedOrSharedDynamicImport -or $IsPackedOwnerImport) -and
+                ($IsReflectedOrSharedDynamicImport -or $IsDeclaredSharedCapability) -and
                 -not [string]::IsNullOrWhiteSpace($Module) -and
                 -not [string]::IsNullOrWhiteSpace($Name) -and
                 -not [string]::IsNullOrWhiteSpace($Signature)) `
             -Code "ASBI4402" `
             -Message "Prepared binding_authorization.used_imports contains invalid identity fields."
-        $Key = "$Module`n$Name"
         Assert-AvidScriptPreparedSemantic `
             -Condition ($SeenKeys.Add($Key)) `
             -Code "ASBI4402" `

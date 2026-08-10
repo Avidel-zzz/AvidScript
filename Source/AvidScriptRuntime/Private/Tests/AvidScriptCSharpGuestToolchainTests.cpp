@@ -206,6 +206,43 @@ FString GetCSharpNameStringSourcePath()
 	return SourcePath;
 }
 
+FString GetCSharpArrayToolchainReportPath()
+{
+	FString ReportPath = FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptCSharpGuest"),
+		TEXT("P57_11B3_ArrayRoundtrip"),
+		TEXT("array_roundtrip.csharp.report.json"));
+	ReportPath = FPaths::ConvertRelativePathToFull(ReportPath);
+	FPaths::NormalizeFilename(ReportPath);
+	return ReportPath;
+}
+
+bool ReadCSharpIntArrayProperty(
+	UObject& Object,
+	TArray<int32>& OutValues)
+{
+	OutValues.Reset();
+	const FArrayProperty* const ArrayProperty =
+		FindFProperty<FArrayProperty>(Object.GetClass(), TEXT("ReadableIntArray"));
+	const FIntProperty* const ElementProperty = ArrayProperty == nullptr
+		? nullptr
+		: CastField<FIntProperty>(ArrayProperty->Inner);
+	if (ArrayProperty == nullptr || ElementProperty == nullptr)
+	{
+		return false;
+	}
+	const void* const ArrayValue =
+		ArrayProperty->ContainerPtrToValuePtr<void>(&Object);
+	FScriptArrayHelper Helper(ArrayProperty, ArrayValue);
+	OutValues.Reserve(Helper.Num());
+	for (int32 Index = 0; Index < Helper.Num(); ++Index)
+	{
+		OutValues.Add(ElementProperty->GetPropertyValue(Helper.GetRawPtr(Index)));
+	}
+	return true;
+}
+
 bool ReadCSharpNameStringProperties(
 	UObject& Object,
 	FString& OutName,
@@ -1007,6 +1044,232 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("C# EndPlay source calls export"), EndPlayResult.bEndPlayCalled);
 
 	DestroyCSharpContractWorld(World);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptCSharpArrayUFunctionEndToEndTest,
+	"AvidScript.Guest.CSharp.ArrayUFunctionEndToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptCSharpArrayUFunctionEndToEndTest::RunTest(
+	const FString& Parameters)
+{
+	const FString ReportPath = GetCSharpArrayToolchainReportPath();
+	if (!FPaths::FileExists(ReportPath))
+	{
+		AddError(FString::Printf(
+			TEXT("P57.11B3 C# array report is missing; run the Editor array emitter test first. report=%s"),
+			*ReportPath));
+		return true;
+	}
+
+	FString ReportJson;
+	TSharedPtr<FJsonObject> Report;
+	if (!FFileHelper::LoadFileToString(ReportJson, *ReportPath)
+		|| !FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(ReportJson),
+			Report)
+		|| !Report.IsValid())
+	{
+		AddError(TEXT("P57.11B3 C# array report is unreadable or invalid."));
+		return true;
+	}
+	if (!TestEqual(
+			TEXT("P57.11B3 array source builds through the formal toolchain"),
+			Report->GetStringField(TEXT("result")),
+			FString(TEXT("direct_abi_built"))))
+	{
+		return true;
+	}
+
+	const TSharedPtr<FJsonObject>* Artifacts = nullptr;
+	if (!Report->TryGetObjectField(TEXT("artifacts"), Artifacts)
+		|| Artifacts == nullptr
+		|| !Artifacts->IsValid())
+	{
+		AddError(TEXT("P57.11B3 C# array report has no artifact metadata."));
+		return true;
+	}
+	const FString ManifestPath = ResolveCSharpReportArtifactPath(
+		(*Artifacts)->GetStringField(TEXT("manifest_file")));
+	const FString GuestIrPath = ResolveCSharpReportArtifactPath(
+		(*Artifacts)->GetStringField(TEXT("guest_ir_file")));
+	if (!TestTrue(TEXT("P57.11B3 array manifest exists"), FPaths::FileExists(ManifestPath))
+		|| !TestTrue(TEXT("P57.11B3 array Guest IR exists"), FPaths::FileExists(GuestIrPath)))
+	{
+		return true;
+	}
+
+	FString GuestIrJson;
+	TSharedPtr<FJsonObject> GuestIr;
+	if (!FFileHelper::LoadFileToString(GuestIrJson, *GuestIrPath)
+		|| !FJsonSerializer::Deserialize(
+			TJsonReaderFactory<>::Create(GuestIrJson),
+			GuestIr)
+		|| !GuestIr.IsValid())
+	{
+		AddError(TEXT("P57.11B3 array Guest IR is unreadable or invalid."));
+		return true;
+	}
+	TSet<FString> ImportNames;
+	for (const TSharedPtr<FJsonValue>& ImportValue :
+		GuestIr->GetArrayField(TEXT("imports")))
+	{
+		const TSharedPtr<FJsonObject> Import = ImportValue->AsObject();
+		if (Import.IsValid()
+			&& Import->GetStringField(TEXT("module")) == TEXT("avidscript"))
+		{
+			ImportNames.Add(Import->GetStringField(TEXT("name")));
+		}
+	}
+	for (const TCHAR* RequiredImport : {
+		TEXT("avid_value_array_length"),
+		TEXT("avid_value_array_load"),
+		TEXT("avid_value_array_store"),
+		TEXT("avid_value_release") })
+	{
+		const FString RequiredImportName(RequiredImport);
+		TestTrue(
+			TEXT("P57.11B3 Guest IR contains ") + RequiredImportName,
+			ImportNames.Contains(RequiredImportName));
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+			ManifestPath,
+			Manifest,
+			Bytecode,
+			ManifestLoadResult))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return true;
+	}
+
+	FModuleManager::LoadModulePtr<IModuleInterface>(TEXT("AvidScriptEditor"));
+	UClass* const FixtureClass = FindObject<UClass>(
+		nullptr,
+		TEXT("/Script/AvidScriptEditor.AvidScriptCSharpNameStringTestActor"));
+	if (!TestNotNull(TEXT("P57.11B3 reflected array fixture class loads"), FixtureClass))
+	{
+		return true;
+	}
+	if (!TestTrue(
+			TEXT("P57.11B3 manifest carries a verified binding package"),
+			Manifest.BindingPackage.IsValid()))
+	{
+		return true;
+	}
+	TestEqual(
+		TEXT("P57.11B3 package binds the exact array fixture owner"),
+		Manifest.BindingPackage->GetExpectedSelfClass(),
+		FixtureClass);
+
+	TArray<FAvidScriptRuntimeBackendTestLane> Lanes =
+		GetAvidScriptRuntimeBackendTestLanes();
+	if (!TestEqual(TEXT("P57.11B3 array gate requires WAMR and Wasmtime"), Lanes.Num(), 2))
+	{
+		return true;
+	}
+	for (const FAvidScriptRuntimeBackendTestLane& Lane : Lanes)
+	{
+		UWorld* FixtureWorld = nullptr;
+		if (!TestTrue(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("array fixture world creates")),
+				CreateCSharpContractWorld(FixtureWorld)))
+		{
+			continue;
+		}
+		ON_SCOPE_EXIT
+		{
+			DestroyCSharpContractWorld(FixtureWorld);
+		};
+		FActorSpawnParameters SpawnParameters;
+		UObject* const FixtureObject = FixtureWorld->SpawnActor<AActor>(
+			FixtureClass,
+			FTransform::Identity,
+			SpawnParameters);
+		if (!TestNotNull(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("array fixture instance creates")),
+				FixtureObject))
+		{
+			continue;
+		}
+		FAvidScriptObjectRegistry Registry;
+		FAvidScriptObjectHandleResult RegisterResult;
+		const FAvidScriptObjectHandle OwnerHandle =
+			Registry.RegisterObject(FixtureObject, RegisterResult);
+		if (!TestTrue(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("array fixture registers")),
+				RegisterResult.bSucceeded))
+		{
+			continue;
+		}
+
+		FAvidScriptWasmHostContext HostContext;
+		HostContext.ObjectRegistry = &Registry;
+		HostContext.OwnerHandle = OwnerHandle;
+		HostContext.ActorWritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+		FAvidScriptWasmReloadSession Session;
+		Session.SetBackendSelectionForTesting(Lane.Selection);
+		Session.SetHostContext(HostContext);
+		FAvidScriptWasmReloadResult ReloadResult;
+		if (!Session.LoadInitialModule(
+				Bytecode.GetData(),
+				Bytecode.Num(),
+				Manifest,
+				ReloadResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *ReloadResult.ErrorMessage));
+			continue;
+		}
+
+		TArray<int32> Values;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay array property reads")),
+			ReadCSharpIntArrayProperty(*FixtureObject, Values));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("BeginPlay array property count")),
+			Values.Num(),
+			0);
+
+		FAvidScriptWasmSmokeResult TickResult;
+		if (!Session.TickLive(1.0f / 60.0f, TickResult))
+		{
+			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
+			continue;
+		}
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array property reads")),
+			ReadCSharpIntArrayProperty(*FixtureObject, Values));
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array property count")),
+			Values.Num(),
+			3);
+		if (Values.Num() == 3)
+		{
+			TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array element 0")), Values[0], 11);
+			TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array element 1")), Values[1], 1);
+			TestEqual(*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array element 2")), Values[2], 2);
+		}
+		FAvidScriptWasmRuntimeInstance* const Runtime =
+			Session.GetLiveRuntimeForTesting();
+		if (TestNotNull(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("array runtime remains live")),
+				Runtime))
+		{
+			TestEqual(
+				*AvidScriptRuntimeLaneLabel(Lane, TEXT("explicit release drains array capabilities")),
+				Runtime->GetArrayValueHeapForTesting().GetStats().LiveValues,
+				0);
+		}
+		FAvidScriptWasmSmokeResult EndPlayResult;
+		TestTrue(
+			*AvidScriptRuntimeLaneLabel(Lane, TEXT("array EndPlay succeeds")),
+			Session.EndPlayLive(EndPlayResult));
 	}
 	return true;
 }

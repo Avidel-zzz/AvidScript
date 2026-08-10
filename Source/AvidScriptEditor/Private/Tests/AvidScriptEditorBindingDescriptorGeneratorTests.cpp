@@ -1279,11 +1279,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v10 above the current maximum identifies its header field"),
+		TEXT("Schema v11 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 10);
+			Root->SetNumberField(TEXT("schema_version"), 11);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2876,18 +2876,24 @@ bool FAvidScriptEditorBindingDescriptorV3FailureTest::RunTest(const FString& Par
 		TEXT("/Script/Engine.Actor"),
 		TEXT("GetAttachedActors")
 	};
-	TestFalse(
-		TEXT("Unsupported TArray projection fails closed"),
+	TestTrue(
+		TEXT("Supported TArray projection generates schema 10"),
 		FAvidScriptEditorBindingDescriptorGenerator::Generate(
 			TEXT("avidscript.engine.core"),
 			{ UnsupportedSelection },
 			Json,
 			Result));
-	TestEqual(TEXT("Unsupported container reports property category"), Result.ErrorCategory, FString(TEXT("unsupported_property")));
-	TestEqual(
-		TEXT("Unsupported property identifies the selected TArray exactly"),
-		Result.ErrorSource,
-		FString(TEXT("/Script/Engine.Actor.GetAttachedActors:TArray")));
+	FAvidScriptBindingPackageModel ArrayPackage;
+	FString ArrayErrorCategory;
+	FString ArrayErrorSource;
+	TestTrue(
+		TEXT("Generated TArray descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			Json,
+			ArrayPackage,
+			ArrayErrorCategory,
+			ArrayErrorSource));
+	TestEqual(TEXT("TArray descriptor activates schema 10"), ArrayPackage.SchemaVersion, 10);
 
 	const FAvidScriptReflectedFunctionSelection MissingSelection{
 		TEXT("/Script/Engine.Actor"),

@@ -382,6 +382,7 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance()
 	BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Auto;
 	BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	BackendSelection.bAllowFallback = true;
+	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
@@ -389,6 +390,7 @@ FAvidScriptWasmRuntimeInstance::FAvidScriptWasmRuntimeInstance(
 	const FAvidScriptVmBackendSelection& InBackendSelection)
 	: BackendSelection(InBackendSelection)
 {
+	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
@@ -1808,6 +1810,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	DebugMap.Reset();
 	BindingInvocationScratch.Reset();
 	FusedCallbackFrameStack.Reset();
+	ArrayValueHeap.Reset();
 	Utf8ValueHeap.Reset();
 	InvalidateSelfCapability();
 	BeginPlayExport = {};
@@ -1863,6 +1866,7 @@ void FAvidScriptWasmRuntimeInstance::SetHostContext(const FAvidScriptWasmHostCon
 	HostContext = InHostContext;
 	BindingInvocationContext.ObjectRegistry = HostContext.ObjectRegistry;
 	BindingInvocationContext.ObjectOwnership = HostContext.ObjectOwnership;
+	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 	BindingInvocationContext.OwnerHandle = HostContext.OwnerHandle;
 	BindingInvocationContext.World = HostContext.World;
@@ -1878,6 +1882,7 @@ void FAvidScriptWasmRuntimeInstance::ClearHostContext()
 	InvalidateSelfCapability();
 	HostContext = FAvidScriptWasmHostContext();
 	BindingInvocationContext = FAvidScriptBindingInvocationContext();
+	BindingInvocationContext.ArrayValueHeap = &ArrayValueHeap;
 	BindingInvocationContext.Utf8ValueHeap = &Utf8ValueHeap;
 }
 
@@ -2014,6 +2019,126 @@ int64 FAvidScriptWasmRuntimeInstance::HandleDataLaneGetEpochImport()
 	LastHostImportResult = static_cast<int32>(Epoch);
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return static_cast<int64>(Epoch);
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLengthImport(const int32 Token)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	FAvidScriptArrayValueView Value;
+	FString Error;
+	if (!ArrayValueHeap.Resolve(static_cast<uint32>(Token), FString(), Value, Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_array_length"),
+			MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = Value.ElementCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Value.ElementCount;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayLoadImport(
+	const int32 Token,
+	const int32 ElementIndex,
+	const TArrayView<uint8> OutBytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	FString Error;
+	if (!ArrayValueHeap.ReadElement(
+			static_cast<uint32>(Token),
+			ElementIndex,
+			OutBytes,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_array_load"),
+			MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayStoreImport(
+	const int32 Token,
+	const int32 ElementIndex,
+	const TConstArrayView<uint8> Bytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	FString Error;
+	if (!ArrayValueHeap.WriteElement(
+			static_cast<uint32>(Token),
+			ElementIndex,
+			Bytes,
+			Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_array_store"),
+			MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueReleaseImport(const int32 Token)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	// Guest-owned linear arrays do not require host cleanup.
+	if (Token >= 0)
+	{
+		LastHostImportResult = 1;
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 1;
+	}
+
+	FString ArrayError;
+	FString Utf8Error;
+	if (!ArrayValueHeap.ReleaseValue(static_cast<uint32>(Token), ArrayError)
+		&& !Utf8ValueHeap.ReleaseValue(static_cast<uint32>(Token), Utf8Error))
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("avid_value_release"),
+			FString::Printf(
+				TEXT("value_token_stale: the capability is invalid or stale. array=[%s] utf8=[%s]"),
+				*ArrayError,
+				*Utf8Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
 }
 
 int32 FAvidScriptWasmRuntimeInstance::HandleDataLaneSubmitImport(
@@ -5129,6 +5254,32 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleDataLaneSubmitImport(Call.InputBytes);
 		return Finish(Value, Value > 0);
+	}
+	case EAvidScriptHostBindingId::ValueArrayLength:
+	{
+		const int32 Value = HandleValueArrayLengthImport(Call.IntArgs[0]);
+		return Finish(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ValueArrayLoad:
+	{
+		const int32 Value = HandleValueArrayLoadImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.OutputBytes);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueArrayStore:
+	{
+		const int32 Value = HandleValueArrayStoreImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.InputBytes);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueRelease:
+	{
+		const int32 Value = HandleValueReleaseImport(Call.IntArgs[0]);
+		return Finish(Value, Value != 0);
 	}
 	case EAvidScriptHostBindingId::TimerSetOnce:
 	{

@@ -5,6 +5,7 @@
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptObjectTypeBinding.h"
 #include "AvidScriptSceneAttachmentBinding.h"
+#include "AvidScriptValueCapability.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
@@ -219,6 +220,20 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 			RequiredTypeIds.Add(Type->BaseTypeId);
 			PendingTypeIds.Add(Type->BaseTypeId);
 		}
+		if (!Type->ElementTypeId.IsEmpty()
+			&& !RequiredTypeIds.Contains(Type->ElementTypeId))
+		{
+			RequiredTypeIds.Add(Type->ElementTypeId);
+			PendingTypeIds.Add(Type->ElementTypeId);
+		}
+		for (const FAvidScriptBindingStructFieldModel& Field : Type->StructFields)
+		{
+			if (!RequiredTypeIds.Contains(Field.TypeId))
+			{
+				RequiredTypeIds.Add(Field.TypeId);
+				PendingTypeIds.Add(Field.TypeId);
+			}
+		}
 	}
 
 	SliceModel.Types.Reset();
@@ -391,8 +406,22 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			&& Import.Module == TEXT("avidscript")
 			&& Import.Name == TEXT("avid_owner_get_handle")
 			&& Import.Signature == TEXT("()I");
+		const FAvidScriptValueCapabilityImportSpec* ValueCapabilitySpec =
+			FAvidScriptValueCapability::GetArrayImportSpecs().FindByPredicate(
+				[&Import](const FAvidScriptValueCapabilityImportSpec& Spec)
+				{
+					return Import.StableId == Spec.StableId;
+				});
+		const bool bHasValueCapabilityStableId = ValueCapabilitySpec != nullptr;
+		const bool bIsValueCapability =
+			bHasValueCapabilityStableId
+			&& Import.Ordinal == INDEX_NONE
+			&& Import.Module == ValueCapabilitySpec->ModuleName
+			&& Import.Name == ValueCapabilitySpec->ImportName
+			&& Import.Signature == ValueCapabilitySpec->Signature;
 		if (!IsAvidScriptCSharpBindingSliceStableId(Import.StableId)
-			&& !bHasPackedOwnerStableId)
+			&& !bHasPackedOwnerStableId
+			&& !bHasValueCapabilityStableId)
 		{
 			SetAvidScriptCSharpBindingSliceFailure(
 				OutResult,
@@ -556,6 +585,24 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			continue;
 		}
 		if (bHasPackedOwnerStableId)
+		{
+			SetAvidScriptCSharpBindingSliceFailure(
+				OutResult,
+				TEXT("slice_import_identity_mismatch"),
+				Import.StableId,
+				TEXT("rerun bootstrap with untampered import provenance"));
+			return false;
+		}
+		if (bIsValueCapability
+			&& AuthorizationModel.Types.ContainsByPredicate(
+				[](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.Kind == TEXT("array");
+				}))
+		{
+			continue;
+		}
+		if (bHasValueCapabilityStableId)
 		{
 			SetAvidScriptCSharpBindingSliceFailure(
 				OutResult,

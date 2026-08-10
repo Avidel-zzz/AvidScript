@@ -208,6 +208,17 @@ public:
 		return Value;
 	}
 
+	UFUNCTION(BlueprintCallable)
+	TArray<int32> IntArrayRoundTrip(
+		const TArray<int32>& Input,
+		UPARAM(ref) TArray<int32>& InOut,
+		TArray<int32>& OutValue) const
+	{
+		OutValue = Input;
+		InOut.Append(Input);
+		return InOut;
+	}
+
 	UFUNCTION(BlueprintPure)
 	FAvidScriptStructWireRootTestType StructWireRoundTrip(
 		FAvidScriptStructWireRootTestType Value) const
@@ -256,6 +267,9 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 	FString ReadableFString;
 
+	UPROPERTY(BlueprintReadWrite)
+	TArray<int32> ReadableIntArray;
+
 	UFUNCTION(BlueprintPure)
 	FName ReturnFName() const
 	{
@@ -300,6 +314,17 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ConstRefFString(const FString& InString)
 	{
+	}
+
+	UFUNCTION(BlueprintCallable)
+	TArray<int32> IntArrayRoundTrip(
+		const TArray<int32>& Input,
+		UPARAM(ref) TArray<int32>& InOut,
+		TArray<int32>& OutValue) const
+	{
+		OutValue = Input;
+		InOut.Append(Input);
+		return InOut;
 	}
 };
 

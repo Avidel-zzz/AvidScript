@@ -893,6 +893,109 @@ bool BuildAvidScriptStructWireProgram(
 	return true;
 }
 
+bool BuildAvidScriptArrayProgram(
+	FProperty* Property,
+	const FAvidScriptBindingTypeModel& Type,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& DeclaredTypesById,
+	FAvidScriptRuntimeBindingValuePlan& OutProgram,
+	FString& OutDetails)
+{
+	FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property);
+	const FAvidScriptBindingTypeModel* ElementType =
+		DeclaredTypesById.FindRef(Type.ElementTypeId);
+	if (ArrayProperty == nullptr
+		|| ArrayProperty->Inner == nullptr
+		|| Type.Kind != TEXT("array")
+		|| !Type.CanonicalType.StartsWith(TEXT("array:tarray<"))
+		|| Type.AbiTypes != TArray<FString>({ TEXT("i") })
+		|| Type.Size != 4
+		|| Type.Alignment != 4
+		|| ElementType == nullptr
+		|| ElementType->Kind == TEXT("array")
+		|| ElementType->Kind == TEXT("name_utf8")
+		|| ElementType->Kind == TEXT("string_utf8"))
+	{
+		OutDetails = TEXT("The reflected array no longer matches its bounded descriptor type.");
+		return false;
+	}
+
+	OutProgram.Kind = EAvidScriptRuntimeBindingKind::Array;
+	OutProgram.TypeId = Type.StableId;
+	OutProgram.WireSize = 4;
+	OutProgram.WireAlignment = 4;
+	OutProgram.GuestStorageSize = 4;
+	FAvidScriptRuntimeBindingValuePlan& Element =
+		OutProgram.Children.AddDefaulted_GetRef();
+	Element.Property = ArrayProperty->Inner;
+	Element.Name = TEXT("element");
+	Element.TypeId = ElementType->StableId;
+	Element.WireSize = ElementType->Size;
+	Element.WireAlignment = ElementType->Alignment;
+	Element.GuestStorageSize = ElementType->Size;
+	if (ElementType->Kind == TEXT("struct_wire"))
+	{
+		int32 Nodes = 0;
+		TSet<FString> ActiveTypes;
+		if (!BuildAvidScriptStructWireProgram(
+				ArrayProperty->Inner,
+				*ElementType,
+				DeclaredTypesById,
+				1,
+				Nodes,
+				ActiveTypes,
+				Element,
+				OutDetails))
+		{
+			return false;
+		}
+		Element.TypeId = ElementType->StableId;
+	}
+	else
+	{
+		FAvidScriptBindingValueModel ElementModel;
+		ElementModel.Name = TEXT("element");
+		ElementModel.Direction = TEXT("value");
+		ElementModel.CanonicalType = ElementType->CanonicalType;
+		ElementModel.TypeId = ElementType->StableId;
+		ElementModel.Kind = ElementType->Kind;
+		ElementModel.CppType = ElementType->CppType;
+		ElementModel.AbiTypes = ElementType->AbiTypes;
+		if (!ResolveAvidScriptRuntimeKind(
+				ArrayProperty->Inner,
+				ElementModel,
+				ElementType,
+				Element.Kind,
+				Element.ObjectClass)
+			|| Element.Kind == EAvidScriptRuntimeBindingKind::Void
+			|| Element.Kind == EAvidScriptRuntimeBindingKind::Name
+			|| Element.Kind == EAvidScriptRuntimeBindingKind::String
+			|| !MatchesAvidScriptRuntimeCanonicalLeafStorage(
+				*ElementType,
+				Element.Kind,
+				Element.ObjectClass))
+		{
+			OutDetails = TEXT("The reflected array element is not a supported fixed-width value.");
+			return false;
+		}
+		Element.WireSize = GetAvidScriptRuntimeGuestStorageSize(Element.Kind);
+		Element.WireAlignment = GetAvidScriptRuntimeGuestStorageAlignment(Element.Kind);
+		Element.GuestStorageSize = Element.WireSize;
+	}
+	const int32 ElementStride = Align(Element.WireSize, Element.WireAlignment);
+	if (Element.WireSize <= 0
+		|| Element.WireAlignment <= 0
+		|| Element.WireAlignment > 16
+		|| ElementStride <= 0
+		|| static_cast<int64>(ElementStride)
+			* FAvidScriptArrayValueHeap::MaxElements
+			> FAvidScriptArrayValueHeap::MaxValueBytes)
+	{
+		OutDetails = TEXT("The reflected array element exceeds the bounded value layout.");
+		return false;
+	}
+	return true;
+}
+
 FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionModel& Binding)
 {
 	if (Binding.DispatchMode == TEXT("generated_native_s1"))
@@ -1056,6 +1159,21 @@ bool BuildAvidScriptRuntimeValuePlan(
 				1,
 				Nodes,
 				ActiveTypes,
+				OutPlan,
+				OutDetails))
+		{
+			return false;
+		}
+		OutPlan.ArgumentWidth = 1;
+		return true;
+	}
+	if (Model.Kind == TEXT("array"))
+	{
+		if (DeclaredType == nullptr
+			|| !BuildAvidScriptArrayProgram(
+				Property,
+				*DeclaredType,
+				DeclaredTypesById,
 				OutPlan,
 				OutDetails))
 		{
@@ -2609,6 +2727,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Plan.ExpectedArgumentCount = ReturnOffset;
 			Plan.bRequiresGuestMemory =
 				Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Name
+				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::Array
 				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::String
 				|| Plan.Parameters[0].Kind == EAvidScriptRuntimeBindingKind::StructWire;
 			if (BlueprintSetter == nullptr
@@ -2850,7 +2969,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				|| ValuePlan.Direction == EAvidScriptRuntimeBindingDirection::Out
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Name
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::String
-				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire;
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire
+				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Array;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
 		}
 

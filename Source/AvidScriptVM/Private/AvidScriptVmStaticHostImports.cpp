@@ -26,11 +26,15 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::TimerSetOnce, "timer_set_once", "(fi)i", true },
 	{ EAvidScriptHostBindingId::TimerCancel, "timer_cancel", "(i)i", true },
 	{ EAvidScriptHostBindingId::DataLaneGetEpoch, "avid_data_lane_epoch", "()I", false },
-	{ EAvidScriptHostBindingId::DataLaneSubmit, "avid_data_lane_submit", "(ii)i", false }
+	{ EAvidScriptHostBindingId::DataLaneSubmit, "avid_data_lane_submit", "(ii)i", false },
+	{ EAvidScriptHostBindingId::ValueArrayLength, "avid_value_array_length", "(i)i", false },
+	{ EAvidScriptHostBindingId::ValueArrayLoad, "avid_value_array_load", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ValueArrayStore, "avid_value_array_store", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ValueRelease, "avid_value_release", "(i)i", false }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::DataLaneSubmit),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ValueRelease),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -188,6 +192,8 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::HostAddI32:
 	case EAvidScriptHostBindingId::HostFailI32:
 	case EAvidScriptHostBindingId::TimerCancel:
+	case EAvidScriptHostBindingId::ValueArrayLength:
+	case EAvidScriptHostBindingId::ValueRelease:
 		Call.IntArgs[0] = Arguments[0].I32;
 		break;
 	case EAvidScriptHostBindingId::ActorGetLocation:
@@ -254,6 +260,64 @@ bool InvokeAvidScriptVmStaticHostImport(
 		}
 		Call.GuestAddress = static_cast<uint32>(GuestAddress);
 		Call.IntArgs[0] = ByteCount;
+		break;
+	}
+	case EAvidScriptHostBindingId::ValueArrayLoad:
+	case EAvidScriptHostBindingId::ValueArrayStore:
+	{
+		const int32 Token = Arguments[0].I32;
+		const int32 ElementIndex = Arguments[1].I32;
+		const int32 GuestAddress = Arguments[2].I32;
+		const int32 ByteCount = Arguments[3].I32;
+		if (ElementIndex < 0 || ByteCount <= 0 || ByteCount > 4096)
+		{
+			return FailStaticCall(
+				OutFailureDetails,
+				TEXT("value_array_invalid: element index or byte count is outside the supported range."));
+		}
+		if (!ValidateGuestRange(
+				GuestAddress,
+				static_cast<uint64>(ByteCount),
+				1,
+				1,
+				TEXT("array element"),
+				OutFailureDetails))
+		{
+			return false;
+		}
+
+		FString MemoryError;
+		if (Import.BindingId == EAvidScriptHostBindingId::ValueArrayLoad)
+		{
+			if (!GuestMemory.BorrowMutableBytes(
+					static_cast<uint32>(GuestAddress),
+					static_cast<uint32>(ByteCount),
+					1,
+					Call.OutputBytes,
+					MemoryError))
+			{
+				OutFailureDetails = MemoryError.IsEmpty()
+					? TEXT("guest_memory_invalid: array element output borrow failed.")
+					: MoveTemp(MemoryError);
+				return false;
+			}
+		}
+		else if (!GuestMemory.BorrowReadOnlyBytes(
+				static_cast<uint32>(GuestAddress),
+				static_cast<uint32>(ByteCount),
+				1,
+				Call.InputBytes,
+				MemoryError))
+		{
+			OutFailureDetails = MemoryError.IsEmpty()
+				? TEXT("guest_memory_invalid: array element input borrow failed.")
+				: MoveTemp(MemoryError);
+			return false;
+		}
+		Call.GuestAddress = static_cast<uint32>(GuestAddress);
+		Call.IntArgs[0] = Token;
+		Call.IntArgs[1] = ElementIndex;
+		Call.IntArgs[2] = ByteCount;
 		break;
 	}
 	case EAvidScriptHostBindingId::ActorGetTransformBatch:

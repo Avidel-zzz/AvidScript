@@ -5,14 +5,16 @@ FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeIdentity(
 	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
 	const int32 WireSize,
-	const int32 WireAlignment)
+	const int32 WireAlignment,
+	const FString& ElementTypeId)
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeTypeIdentity(
 		CanonicalType,
 		EnumValues,
 		StructFields,
 		WireSize,
-		WireAlignment);
+		WireAlignment,
+		ElementTypeId);
 }
 
 FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
@@ -20,14 +22,16 @@ FString FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 	const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 	const TArray<FAvidScriptBindingStructFieldModel>& StructFields,
 	const int32 WireSize,
-	const int32 WireAlignment)
+	const int32 WireAlignment,
+	const FString& ElementTypeId)
 {
 	return FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
 		CanonicalType,
 		EnumValues,
 		StructFields,
 		WireSize,
-		WireAlignment);
+		WireAlignment,
+		ElementTypeId);
 }
 
 FString FAvidScriptEditorBindingDescriptorIdentity::MakeObjectFactoryIdentity(

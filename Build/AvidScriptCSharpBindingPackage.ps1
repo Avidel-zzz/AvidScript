@@ -337,7 +337,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 6 -and
         $DescriptorSchemaVersion -ne 7 -and
         $DescriptorSchemaVersion -ne 8 -and
-        $DescriptorSchemaVersion -ne 9) -or
+        $DescriptorSchemaVersion -ne 9 -and
+        $DescriptorSchemaVersion -ne 10) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
@@ -415,6 +416,12 @@ function Resolve-AvidScriptCSharpBindingPackage {
     $ImportKeys = [System.Collections.Generic.HashSet[string]]::new(
         [System.StringComparer]::Ordinal)
     $SeenPackedOwner = $false
+    $ValueCapabilityImports = @{
+        'avidscript.value_array_length.v1' = @('avid_value_array_length', '(i)i')
+        'avidscript.value_array_load.v1' = @('avid_value_array_load', '(iiii)i')
+        'avidscript.value_array_store.v1' = @('avid_value_array_store', '(iiii)i')
+        'avidscript.value_release.v1' = @('avid_value_release', '(i)i')
+    }
     foreach ($Import in @($Manifest.required_imports)) {
         $Ordinal = 0
         $HasOrdinal = Try-GetAvidScriptBindingJsonInt32 `
@@ -431,6 +438,13 @@ function Resolve-AvidScriptCSharpBindingPackage {
             $Module -ceq 'avidscript' -and
             $Name -ceq 'avid_owner_get_handle' -and
             $Signature -ceq '()I'
+        $ValueCapabilityIdentity = $ValueCapabilityImports[$StableId]
+        $IsValueCapabilityImport =
+            $null -ne $ValueCapabilityIdentity -and
+            $Ordinal -eq -1 -and
+            $Module -ceq 'avidscript' -and
+            $Name -ceq [string]$ValueCapabilityIdentity[0] -and
+            $Signature -ceq [string]$ValueCapabilityIdentity[1]
         if (-not $HasOrdinal -or
             $Import.stable_id -isnot [string] -or
             $Import.module -isnot [string] -or
@@ -439,7 +453,9 @@ function Resolve-AvidScriptCSharpBindingPackage {
             [string]::IsNullOrWhiteSpace($Module) -or
             [string]::IsNullOrWhiteSpace($Name) -or
             [string]::IsNullOrWhiteSpace($Signature) -or
-            (-not $IsReflectedImport -and -not $IsPackedOwnerImport)) {
+            (-not $IsReflectedImport -and
+                -not $IsPackedOwnerImport -and
+                -not $IsValueCapabilityImport)) {
             throw "Binding package required_imports contains invalid identity, ordinal, module, name, or signature data."
         }
         if ($IsPackedOwnerImport) {

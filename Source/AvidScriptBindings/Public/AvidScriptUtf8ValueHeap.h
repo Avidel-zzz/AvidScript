@@ -29,6 +29,7 @@ public:
 		uint32 Token,
 		TConstArrayView<uint8>& OutUtf8Bytes,
 		FString& OutError) const;
+	bool ReleaseValue(uint32 Token, FString& OutError);
 	void ReleaseReservation(FAvidScriptUtf8ValueReservation& Reservation);
 	void RemoveCreatedValue(uint32 Token);
 	void Reset();
@@ -46,9 +47,6 @@ private:
 		bool bOccupied = false;
 	};
 
-	static constexpr uint32 TokenTag = 0x80000000u;
-
-	static uint32 AllocateToken();
 	static bool IsCanonicalUtf8(
 		TConstArrayView<uint8> Bytes,
 		FString& OutError);

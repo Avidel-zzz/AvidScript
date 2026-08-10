@@ -1,0 +1,21 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+struct FAvidScriptValueCapabilityImportSpec
+{
+	const TCHAR* StableId = nullptr;
+	const TCHAR* ModuleName = nullptr;
+	const TCHAR* ImportName = nullptr;
+	const TCHAR* Signature = nullptr;
+};
+
+class AVIDSCRIPTBINDINGS_API FAvidScriptValueCapability
+{
+public:
+	static constexpr uint32 TokenTag = 0x80000000u;
+
+	static bool IsToken(uint32 ValueReference);
+	static uint32 AllocateToken();
+	static TConstArrayView<FAvidScriptValueCapabilityImportSpec> GetArrayImportSpecs();
+};

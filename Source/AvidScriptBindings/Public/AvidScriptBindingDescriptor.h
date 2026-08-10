@@ -28,6 +28,7 @@ struct FAvidScriptBindingTypeModel
 	TArray<FString> AbiTypes;
 	TArray<FAvidScriptBindingEnumValue> EnumValues;
 	TArray<FAvidScriptBindingStructFieldModel> StructFields;
+	FString ElementTypeId;
 	int32 ObjectTypeOrdinal = INDEX_NONE;
 	FString ClassPath;
 	FString BaseTypeId;
@@ -133,6 +134,10 @@ public:
 class AVIDSCRIPTBINDINGS_API FAvidScriptBindingDescriptorLayout
 {
 public:
+	static bool ValidateTypeGraph(
+		const TArray<FAvidScriptBindingTypeModel>& Types,
+		FString& OutErrorSource);
+
 	static bool ValidateStructWireGraph(
 		const TArray<FAvidScriptBindingTypeModel>& Types,
 		FString& OutErrorSource);
@@ -146,14 +151,16 @@ public:
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
-		int32 WireAlignment = INDEX_NONE);
+		int32 WireAlignment = INDEX_NONE,
+		const FString& ElementTypeId = FString());
 
 	static FString MakeTypeStableId(
 		const FString& CanonicalType,
 		const TArray<FAvidScriptBindingEnumValue>& EnumValues,
 		const TArray<FAvidScriptBindingStructFieldModel>& StructFields = {},
 		int32 WireSize = INDEX_NONE,
-		int32 WireAlignment = INDEX_NONE);
+		int32 WireAlignment = INDEX_NONE,
+		const FString& ElementTypeId = FString());
 
 	static FString MakeClassReferenceIdentity(
 		const FString& ClassPath,

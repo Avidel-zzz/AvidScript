@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-11 P57.11B3 首版 Runtime value-capability 去重把 `TSet::Add` 当作 `bool` 拼入校验表达式，UE5.8 实际返回 `FSetElementId`，导致集中增量编译失败。Prevention：需要“检查后插入”的 UE `TSet` 逻辑固定先用 `Contains` 形成布尔条件，校验通过后再单独调用 `Add`；容器 API 返回类型不能按 STL 习惯推断。
+
 - 2026-08-02 P57.11B1 在 canonical 主工程构建之后又构建隔离 benchmark 工程，后者刷新了源码版 UE 的全局 `UnrealEditor.version/modules BuildId`；主工程 DLL 虽已存在，旧 manifest 仍被 Editor 判为 out-of-date，Automation 在发现测试前退出。Prevention：使用同一源码引擎完成任何隔离工程 target build 后，启动 canonical Automation 前必须再执行一次主工程 no-clean 增量 target build，并核对主工程 `UnrealEditor.modules` 的 `BuildId` 与引擎一致；禁止通过清理 Editor target 修复 metadata 漂移。
 - 2026-08-02 P57.11B1 再次在一条 PowerShell `shell_command` 中用分号拼接 UE 进程与内存状态读取，违反“一调用一逻辑动作”规则。Prevention：即使两个读取都无副作用，也必须在 JavaScript 编排层分别调用；发送命令前扫描顶层 `;`、`&&`、`||`，只允许单个 PowerShell 脚本内部为同一计算目标组织多行语句。
 - 2026-08-02 P57.11B1 新建正式 benchmark project 时把 `HarnessPluginPath` 指向主工程独立插件，sidecar 安全检查因 harness 不在候选 worktree 内而拒绝。Prevention：`New-PuertsBenchmarkProject.ps1` 的 harness 固定使用当前 clean candidate 下的 `Benchmarks/PuertsComparison/AvidScriptPerfHarness`；AvidScript commit/tree、harness 源码与 runner 必须来自同一候选。
@@ -1859,3 +1861,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: `AvidScript.Bindings.Utf8ValueHeap` was registered as a runnable test and as the parent of `.CrossInvocation`; UE Automation discovered only the child, leaving the core heap contract outside the focused gate.
 - Prevention: every Automation test has a leaf suffix such as `.Core`, `.Lifecycle`, or `.CrossInvocation`. Before phase closeout, run the intended parent filter once and verify the found count includes every expected leaf.
+
+### 2026-08-11: descriptor type closure does not belong in selection identity
+
+- Mistake: the first P57.11B3 schema 10 implementation appended array type and element IDs to `selection_hash`. Runtime binding slices intentionally preserve the authorization selection identity while pruning inactive type closure, so this made valid slices fail with `slice_package_identity_mismatch`.
+- Prevention: `selection_hash` binds reflected member selection and class/factory policy only. Type layout, array element edges, and pruned runtime closure belong in type stable IDs and `package_hash`. Before extending either hash, verify authorization package, runtime slice, and reload identity invariants together.
+
+### 2026-08-11: C# profile self classes must be Actor-derived
+
+- Mistake: the first P57.11B3 end-to-end profile used the convenient UObject emitter fixture as `binding_profile.self_class_path`; profile validation correctly rejected it with `self_class_not_actor` before producing the C# report.
+- Prevention: profile-driven lifecycle fixtures select an `AActor`-derived self class before source or report paths are added. UObject fixtures remain valid for descriptor and codec unit boundaries, but do not serve as project profile owners.

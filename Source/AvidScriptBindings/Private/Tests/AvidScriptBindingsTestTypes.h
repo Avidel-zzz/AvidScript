@@ -79,6 +79,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
 	FString Utf8StringProperty;
 
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	TArray<int32> IntArrayProperty;
+
 	UPROPERTY()
 	int32 Utf8InvocationCount = 0;
 
@@ -95,6 +98,12 @@ public:
 		UPARAM(ref) FName& InOutName,
 		UPARAM(ref) FString& InOutString,
 		FName& OutName);
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Tests")
+	TArray<int32> IntArrayRoundtrip(
+		const TArray<int32>& Input,
+		UPARAM(ref) TArray<int32>& InOut,
+		TArray<int32>& OutValue) const;
 };
 
 UCLASS()

@@ -426,6 +426,113 @@ int32_t DataLaneSubmit(wasm_exec_env_t ExecEnv, int32_t GuestAddress, int32_t By
 	return Dispatch(ExecEnv, ImportName, Call, Result) ? Result.ReturnValue : 0;
 }
 
+int32_t ValueArrayLength(wasm_exec_env_t ExecEnv, int32_t Token)
+{
+	return DispatchI32(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueArrayLength,
+		StaticImportName(EAvidScriptHostBindingId::ValueArrayLength),
+		Token);
+}
+
+int32_t DispatchValueArrayAccess(
+	wasm_exec_env_t ExecEnv,
+	const EAvidScriptHostBindingId BindingId,
+	const int32_t Token,
+	const int32_t ElementIndex,
+	const int32_t GuestAddress,
+	const int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(BindingId);
+	if (ElementIndex < 0 || ByteCount <= 0 || ByteCount > 4096)
+	{
+		Fail(
+			ExecEnv,
+			GetBridge(ExecEnv),
+			ImportName,
+			TEXT("The array element index or byte count is outside the supported range."));
+		return 0;
+	}
+
+	void* NativeAddress = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("array element"),
+			GuestAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeAddress))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = BindingId;
+	Call.GuestAddress = static_cast<uint32>(GuestAddress);
+	Call.IntArgs[0] = Token;
+	Call.IntArgs[1] = ElementIndex;
+	Call.IntArgs[2] = ByteCount;
+	if (BindingId == EAvidScriptHostBindingId::ValueArrayLoad)
+	{
+		Call.OutputBytes = MakeArrayView(
+			static_cast<uint8*>(NativeAddress),
+			ByteCount);
+	}
+	else
+	{
+		Call.InputBytes = MakeArrayView(
+			static_cast<const uint8*>(NativeAddress),
+			ByteCount);
+	}
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ValueArrayLoad(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t ElementIndex,
+	int32_t GuestAddress,
+	int32_t ByteCount)
+{
+	return DispatchValueArrayAccess(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueArrayLoad,
+		Token,
+		ElementIndex,
+		GuestAddress,
+		ByteCount);
+}
+
+int32_t ValueArrayStore(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t ElementIndex,
+	int32_t GuestAddress,
+	int32_t ByteCount)
+{
+	return DispatchValueArrayAccess(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueArrayStore,
+		Token,
+		ElementIndex,
+		GuestAddress,
+		ByteCount);
+}
+
+int32_t ValueRelease(wasm_exec_env_t ExecEnv, int32_t Token)
+{
+	return DispatchI32(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueRelease,
+		StaticImportName(EAvidScriptHostBindingId::ValueRelease),
+		Token);
+}
+
 int32_t TimerSetOnce(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
 {
 	FAvidScriptHostCall Call;
@@ -465,6 +572,10 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);
+	case EAvidScriptHostBindingId::ValueArrayLength: return reinterpret_cast<void*>(ValueArrayLength);
+	case EAvidScriptHostBindingId::ValueArrayLoad: return reinterpret_cast<void*>(ValueArrayLoad);
+	case EAvidScriptHostBindingId::ValueArrayStore: return reinterpret_cast<void*>(ValueArrayStore);
+	case EAvidScriptHostBindingId::ValueRelease: return reinterpret_cast<void*>(ValueRelease);
 	default: return nullptr;
 	}
 }

@@ -243,7 +243,7 @@ bool FAvidScriptEditorCSharpBindingSliceServiceContractsTest::RunTest(const FStr
 	{
 		GeneratedRegistry.UnregisterPackage(AuthorizationModel.PackageHash);
 	};
-	TestEqual(TEXT("Recursive-struct authorization descriptor is schema v9"), AuthorizationModel.SchemaVersion, 9);
+	TestEqual(TEXT("Gameplay authorization descriptor activates schema v10 arrays"), AuthorizationModel.SchemaVersion, 10);
 	TestEqual(TEXT("Authorization descriptor contains one class reference"), AuthorizationModel.ClassReferences.Num(), 1);
 	TestEqual(TEXT("Authorization getter has no reload effect"), GetScale->ReloadEffect, EAvidScriptBindingReloadEffect::None);
 	TestEqual(

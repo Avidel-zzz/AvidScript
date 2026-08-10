@@ -158,7 +158,12 @@ void FinalizeProjectedType(FAvidScriptProjectedBindingType& Type)
 		: FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 			Type.CanonicalType,
 			Type.EnumValues,
-			Type.StructFields);
+			Type.StructFields,
+			INDEX_NONE,
+			INDEX_NONE,
+			Type.Kind == TEXT("array") && Type.ElementType.IsValid()
+				? Type.ElementType->StableId
+				: FString());
 }
 
 bool IsUnsafeStructField(const FProperty* Property, const UScriptStruct* Struct)
@@ -364,6 +369,46 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectProperty(
 		OutValue.Type.Size = 4;
 		OutValue.Type.Alignment = 4;
 		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		return true;
+	}
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		if (ArrayProperty->Inner == nullptr || StructDepth >= 8)
+		{
+			OutErrorSource = Property->GetCPPType();
+			return false;
+		}
+		FAvidScriptProjectedBindingValue ElementValue;
+		if (!ProjectProperty(
+				ArrayProperty->Inner,
+				ElementValue,
+				OutErrorSource,
+				StructDepth + 1,
+				InOutStructNodes,
+				ActiveStructs)
+			|| ElementValue.Type.bVoid
+			|| ElementValue.Type.Kind == TEXT("array")
+			|| ElementValue.Type.Kind == TEXT("name_utf8")
+			|| ElementValue.Type.Kind == TEXT("string_utf8")
+			|| ElementValue.Type.Size <= 0
+			|| ElementValue.Type.Alignment <= 0
+			|| ElementValue.Type.Alignment > 16)
+		{
+			OutErrorSource = Property->GetName() + TEXT(":") + OutErrorSource;
+			return false;
+		}
+		FinalizeProjectedType(ElementValue.Type);
+		OutValue.Type.CanonicalType = TEXT("array:tarray<")
+			+ ElementValue.Type.CanonicalType + TEXT(">");
+		OutValue.Type.Kind = TEXT("array");
+		OutValue.Type.CppType = TEXT("TArray<")
+			+ ElementValue.Type.CppType + TEXT(">");
+		OutValue.Type.Size = 4;
+		OutValue.Type.Alignment = 4;
+		OutValue.Type.AbiValueTypes = { TEXT("i") };
+		OutValue.Type.ElementType = MakeShared<FAvidScriptProjectedBindingType>(
+			MoveTemp(ElementValue.Type));
+		FinalizeProjectedType(OutValue.Type);
 		return true;
 	}
 

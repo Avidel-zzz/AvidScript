@@ -1178,6 +1178,90 @@ bool FAvidScriptRuntimeUtf8ValueHeapLifecycleTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptRuntimeArrayValueHeapLifecycleTest,
+	"AvidScript.Runtime.ArrayValueHeap.Lifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptRuntimeArrayValueHeapLifecycleTest::RunTest(
+	const FString& Parameters)
+{
+	FAvidScriptWasmRuntimeInstance Runtime;
+	FAvidScriptArrayValueHeap& Heap = Runtime.GetArrayValueHeapForTesting();
+	TestEqual(
+		TEXT("Default runtime binding context owns the session array heap"),
+		Runtime.GetBindingInvocationContextForTesting().ArrayValueHeap,
+		&Heap);
+
+	FAvidScriptArrayValueReservation Reservation;
+	FString Error;
+	if (!TestTrue(TEXT("Runtime array heap reserves a value"), Heap.Reserve(Reservation, Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+	const int32 Values[] = { 3, 5, 8 };
+	uint32 Token = 0;
+	if (!TestTrue(
+			TEXT("Runtime array heap publishes a value"),
+			Heap.PublishReserved(
+				Reservation,
+				FString::ChrN(64, TEXT('a')),
+				UE_ARRAY_COUNT(Values),
+				sizeof(int32),
+				alignof(int32),
+				MakeArrayView(
+					reinterpret_cast<const uint8*>(Values),
+					sizeof(Values)),
+				Token,
+				Error)))
+	{
+		AddError(Error);
+		return false;
+	}
+
+	FAvidScriptHostCall Call;
+	FAvidScriptHostCallResult Result;
+	Call.BindingId = EAvidScriptHostBindingId::ValueArrayLength;
+	Call.IntArgs[0] = static_cast<int32>(Token);
+	TestTrue(TEXT("Runtime dispatches array length"), Runtime.DispatchHostCall(Call, Result));
+	TestEqual(TEXT("Array length import returns the element count"), Result.ReturnValue, 3);
+
+	int32 LoadedValue = 0;
+	Call = FAvidScriptHostCall();
+	Call.BindingId = EAvidScriptHostBindingId::ValueArrayLoad;
+	Call.IntArgs[0] = static_cast<int32>(Token);
+	Call.IntArgs[1] = 1;
+	Call.OutputBytes = MakeArrayView(
+		reinterpret_cast<uint8*>(&LoadedValue),
+		sizeof(LoadedValue));
+	TestTrue(TEXT("Runtime dispatches array element load"), Runtime.DispatchHostCall(Call, Result));
+	TestEqual(TEXT("Array load returns the selected element"), LoadedValue, 5);
+
+	const int32 StoredValue = 13;
+	Call = FAvidScriptHostCall();
+	Call.BindingId = EAvidScriptHostBindingId::ValueArrayStore;
+	Call.IntArgs[0] = static_cast<int32>(Token);
+	Call.IntArgs[1] = 1;
+	Call.InputBytes = MakeArrayView(
+		reinterpret_cast<const uint8*>(&StoredValue),
+		sizeof(StoredValue));
+	TestTrue(TEXT("Runtime dispatches array element store"), Runtime.DispatchHostCall(Call, Result));
+	LoadedValue = 0;
+	TestTrue(TEXT("Stored array element reads back"), Heap.ReadElement(Token, 1, MakeArrayView(reinterpret_cast<uint8*>(&LoadedValue), sizeof(LoadedValue)), Error));
+	TestEqual(TEXT("Array store updates the session capability"), LoadedValue, 13);
+
+	Call = FAvidScriptHostCall();
+	Call.BindingId = EAvidScriptHostBindingId::ValueRelease;
+	Call.IntArgs[0] = static_cast<int32>(Token);
+	TestTrue(TEXT("Runtime dispatches explicit value release"), Runtime.DispatchHostCall(Call, Result));
+	TestEqual(TEXT("Explicit release returns success"), Result.ReturnValue, 1);
+	TestEqual(TEXT("Explicit release removes the live value"), Heap.GetStats().LiveValues, 0);
+	TestFalse(TEXT("A released capability fails closed"), Runtime.DispatchHostCall(Call, Result));
+	TestTrue(TEXT("A released capability reports stale identity"), Result.Details.Contains(TEXT("value_token_stale")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptWorldSubsystemLifecycleSmokeTest,
 	"AvidScript.Runtime.WorldSubsystemLifecycleSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

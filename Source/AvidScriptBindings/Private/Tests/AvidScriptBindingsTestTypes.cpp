@@ -62,3 +62,13 @@ FString UAvidScriptBindingsTestObject::Utf8Roundtrip(
 	InOutString += TEXT("|") + InputString;
 	return InputName.ToString() + TEXT(":") + InputString;
 }
+
+TArray<int32> UAvidScriptBindingsTestObject::IntArrayRoundtrip(
+	const TArray<int32>& Input,
+	TArray<int32>& InOut,
+	TArray<int32>& OutValue) const
+{
+	OutValue = Input;
+	InOut.Append(Input);
+	return InOut;
+}

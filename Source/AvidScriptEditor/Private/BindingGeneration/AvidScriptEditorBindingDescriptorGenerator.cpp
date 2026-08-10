@@ -27,6 +27,7 @@ constexpr const TCHAR* WritablePropertyGeneratorVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("55.1.0");
 constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
+constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -256,7 +257,12 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 		: FAvidScriptEditorBindingDescriptorIdentity::MakeTypeStableId(
 			Type.CanonicalType,
 			Type.EnumValues,
-			Type.StructFields);
+			Type.StructFields,
+			INDEX_NONE,
+			INDEX_NONE,
+			Type.Kind == TEXT("array") && Type.ElementType.IsValid()
+				? Type.ElementType->StableId
+				: FString());
 }
 
 void AddProjectedTypeAndChildren(
@@ -269,6 +275,10 @@ void AddProjectedTypeAndChildren(
 		{
 			AddProjectedTypeAndChildren(*Child, TypesByCanonicalName);
 		}
+	}
+	if (Type.ElementType.IsValid())
+	{
+		AddProjectedTypeAndChildren(*Type.ElementType, TypesByCanonicalName);
 	}
 	TypesByCanonicalName.FindOrAdd(Type.CanonicalType) = Type;
 }
@@ -372,6 +382,10 @@ void AddProjectedObjectHandleClasses(
 		{
 			AddProjectedObjectHandleClasses(*Child, OutHandleClasses);
 		}
+	}
+	if (Type.ElementType.IsValid())
+	{
+		AddProjectedObjectHandleClasses(*Type.ElementType, OutHandleClasses);
 	}
 }
 
@@ -831,6 +845,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Type.Kind == TEXT("struct_wire");
 		});
+	const bool bHasArrayTypes = Types.ContainsByPredicate(
+		[](const FAvidScriptProjectedBindingType& Type)
+		{
+			return Type.Kind == TEXT("array");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -841,7 +860,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 9;
 	}
-	Package.GeneratorVersion = bHasStructWireTypes
+	if (bHasArrayTypes)
+	{
+		Package.SchemaVersion = 10;
+	}
+	Package.GeneratorVersion = bHasArrayTypes
+		? ArrayGeneratorVersion
+		: bHasStructWireTypes
 		? StructWireGeneratorVersion
 		: bHasGeneratedNativeBindings
 		? GeneratedNativeGeneratorVersion
@@ -867,6 +892,9 @@ bool GenerateBindingDescriptor(
 		TypeModel.AbiTypes = Type.AbiValueTypes;
 		TypeModel.EnumValues = Type.EnumValues;
 		TypeModel.StructFields = Type.StructFields;
+		TypeModel.ElementTypeId = Type.ElementType.IsValid()
+			? Type.ElementType->StableId
+			: FString();
 		Package.Types.Add(MoveTemp(TypeModel));
 	}
 	for (const FResolvedBindingDescriptor& Binding : Bindings)

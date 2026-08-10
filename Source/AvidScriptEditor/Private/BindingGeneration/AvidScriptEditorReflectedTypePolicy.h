@@ -20,6 +20,7 @@ struct FAvidScriptProjectedBindingType
 	TArray<FAvidScriptBindingEnumValue> EnumValues;
 	TArray<FAvidScriptBindingStructFieldModel> StructFields;
 	TArray<TSharedPtr<FAvidScriptProjectedBindingType>> StructFieldTypes;
+	TSharedPtr<FAvidScriptProjectedBindingType> ElementType;
 	const UClass* ObjectClass = nullptr;
 	bool bVoid = false;
 };

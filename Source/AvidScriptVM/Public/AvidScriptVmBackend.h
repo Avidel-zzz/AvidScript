@@ -130,7 +130,11 @@ enum class EAvidScriptHostBindingId : uint16
 	TimerSetOnce,
 	TimerCancel,
 	DataLaneGetEpoch,
-	DataLaneSubmit
+	DataLaneSubmit,
+	ValueArrayLength,
+	ValueArrayLoad,
+	ValueArrayStore,
+	ValueRelease
 };
 
 struct FAvidScriptVmStackFrame
@@ -253,6 +257,7 @@ struct FAvidScriptHostCall
 	// Views borrow validated guest memory and are valid only during synchronous dispatch.
 	TConstArrayView<uint32> InputCells;
 	TConstArrayView<uint8> InputBytes;
+	TArrayView<uint8> OutputBytes;
 	TArrayView<float> OutputFloats;
 };
 

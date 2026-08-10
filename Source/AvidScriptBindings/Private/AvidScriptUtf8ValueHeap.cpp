@@ -1,18 +1,13 @@
 #include "AvidScriptUtf8ValueHeap.h"
 
+#include "AvidScriptValueCapability.h"
+
 #include "Containers/StringConv.h"
 #include "Misc/Crc.h"
 
-#include <atomic>
-
-namespace
-{
-std::atomic<uint64> GNextUtf8ValueCapability{ 1 };
-}
-
 bool FAvidScriptUtf8ValueHeap::IsHeapToken(const uint32 ValueReference)
 {
-	return (ValueReference & TokenTag) != 0;
+	return FAvidScriptValueCapability::IsToken(ValueReference);
 }
 
 bool FAvidScriptUtf8ValueHeap::Reserve(
@@ -45,7 +40,7 @@ bool FAvidScriptUtf8ValueHeap::Reserve(
 		SlotIndex = Slots.Num();
 	}
 
-	const uint32 Token = AllocateToken();
+	const uint32 Token = FAvidScriptValueCapability::AllocateToken();
 	if (Token == 0)
 	{
 		OutError = TEXT("utf8_value_token_space_exhausted: the process has exhausted UTF-8 capability tokens.");
@@ -169,6 +164,24 @@ bool FAvidScriptUtf8ValueHeap::Resolve(
 	return true;
 }
 
+bool FAvidScriptUtf8ValueHeap::ReleaseValue(
+	const uint32 Token,
+	FString& OutError)
+{
+	OutError.Reset();
+	int32 SlotIndex = INDEX_NONE;
+	FSlot* Slot = nullptr;
+	if (!ResolveSlot(Token, SlotIndex, Slot)
+		|| Slot == nullptr || !Slot->bOccupied || Slot->bReserved)
+	{
+		OutError = TEXT("utf8_value_token_stale: the UTF-8 value token is invalid or stale.");
+		return false;
+	}
+	RemoveHashIndex(Slot->Hash, SlotIndex);
+	ReleaseSlot(SlotIndex);
+	return true;
+}
+
 void FAvidScriptUtf8ValueHeap::ReleaseReservation(
 	FAvidScriptUtf8ValueReservation& Reservation)
 {
@@ -207,16 +220,6 @@ void FAvidScriptUtf8ValueHeap::Reset()
 	HashToSlots.Reset();
 	LiveValueCount = 0;
 	ReservedValueCount = 0;
-}
-
-uint32 FAvidScriptUtf8ValueHeap::AllocateToken()
-{
-	const uint64 Capability = GNextUtf8ValueCapability.fetch_add(
-		1,
-		std::memory_order_relaxed);
-	return Capability <= static_cast<uint64>(~TokenTag)
-		? TokenTag | static_cast<uint32>(Capability)
-		: 0;
 }
 
 bool FAvidScriptUtf8ValueHeap::IsCanonicalUtf8(

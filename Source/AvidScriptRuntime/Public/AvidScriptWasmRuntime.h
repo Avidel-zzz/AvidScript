@@ -8,6 +8,7 @@
 #include "AvidScriptVmArtifact.h"
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptActorBinding.h"
+#include "AvidScriptArrayValueHeap.h"
 #include "AvidScriptObjectOwnership.h"
 #include "AvidScriptUtf8ValueHeap.h"
 
@@ -265,6 +266,10 @@ public:
 	{
 		return Utf8ValueHeap;
 	}
+	FAvidScriptArrayValueHeap& GetArrayValueHeapForTesting()
+	{
+		return ArrayValueHeap;
+	}
 	const FAvidScriptBindingInvocationContext&
 	GetBindingInvocationContextForTesting() const
 	{
@@ -300,6 +305,10 @@ public:
 	int64 HandleOwnerGetHandleImport();
 	int64 HandleDataLaneGetEpochImport();
 	int32 HandleDataLaneSubmitImport(TConstArrayView<uint8> Bytes);
+	int32 HandleValueArrayLengthImport(int32 Token);
+	int32 HandleValueArrayLoadImport(int32 Token, int32 ElementIndex, TArrayView<uint8> OutBytes);
+	int32 HandleValueArrayStoreImport(int32 Token, int32 ElementIndex, TConstArrayView<uint8> Bytes);
+	int32 HandleValueReleaseImport(int32 Token);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
@@ -586,6 +595,7 @@ private:
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;
+	FAvidScriptArrayValueHeap ArrayValueHeap;
 	FAvidScriptUtf8ValueHeap Utf8ValueHeap;
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;

@@ -4,6 +4,7 @@
 #include "Validation/AvidScriptWasmImportPolicy.h"
 
 #include "AvidScriptVmBackend.h"
+#include "AvidScriptValueCapability.h"
 #include "AvidScriptWasmModuleLayout.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -563,7 +564,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 6
 			&& DescriptorSchemaVersion != 7
 			&& DescriptorSchemaVersion != 8
-			&& DescriptorSchemaVersion != 9)
+			&& DescriptorSchemaVersion != 9
+			&& DescriptorSchemaVersion != 10)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -682,6 +684,7 @@ bool ValidateBindingPackageManifest(
 
 	TMap<FString, FAvidScriptVmDynamicImport> DeclaredImports;
 	bool bSeenPackedOwner = false;
+	TSet<FString> SeenValueCapabilities;
 	for (const TSharedPtr<FJsonValue>& ImportValue : *RequiredImportValues)
 	{
 		const TSharedPtr<FJsonObject> ImportObject = ImportValue.IsValid()
@@ -731,6 +734,33 @@ bool ValidateBindingPackageManifest(
 			bSeenPackedOwner = true;
 			continue;
 		}
+		const FAvidScriptValueCapabilityImportSpec* ValueCapabilitySpec =
+			FAvidScriptValueCapability::GetArrayImportSpecs().FindByPredicate(
+				[&StableId](const FAvidScriptValueCapabilityImportSpec& Spec)
+				{
+					return StableId == Spec.StableId;
+				});
+		if (ValueCapabilitySpec != nullptr)
+		{
+			const bool bIsValidValueCapability =
+				DescriptorSchemaVersion >= 10
+				&& Ordinal == INDEX_NONE
+				&& ModuleName == ValueCapabilitySpec->ModuleName
+				&& ImportName == ValueCapabilitySpec->ImportName
+				&& Signature == ValueCapabilitySpec->Signature
+				&& !SeenValueCapabilities.Contains(StableId);
+			if (!bIsValidValueCapability)
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("binding_package_invalid"),
+					TEXT("package.json required_imports contains an invalid or duplicate value capability"),
+					TEXT("republish the generated binding package"));
+				return false;
+			}
+			SeenValueCapabilities.Add(StableId);
+			continue;
+		}
 		if (Ordinal < 0)
 		{
 			SetManifestLoadFailure(
@@ -758,6 +788,17 @@ bool ValidateBindingPackageManifest(
 		DeclaredImport.ImportName = MoveTemp(ImportName);
 		DeclaredImport.Signature = MoveTemp(Signature);
 		DeclaredImports.Add(ImportKey, MoveTemp(DeclaredImport));
+	}
+	if (!SeenValueCapabilities.IsEmpty()
+		&& SeenValueCapabilities.Num()
+			!= FAvidScriptValueCapability::GetArrayImportSpecs().Num())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json required_imports contains an incomplete value capability set"),
+			TEXT("republish the generated binding package"));
+		return false;
 	}
 
 	if (bSeenPackedOwner

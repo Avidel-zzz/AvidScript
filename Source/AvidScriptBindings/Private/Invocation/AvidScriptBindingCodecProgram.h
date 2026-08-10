@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptBindingFastPath.h"
+#include "AvidScriptArrayValueHeap.h"
 #include "AvidScriptBindingInvocationKind.h"
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
@@ -49,7 +50,8 @@ enum class EValueCodecKind : uint8
 	Vector,
 	Rotator,
 	Transform,
-	StructWire
+	StructWire,
+	Array
 };
 
 struct FValueCodecProgram
@@ -66,6 +68,7 @@ struct FValueCodecProgram
 	int32 WireSize = 0;
 	int32 WireAlignment = 1;
 	FString Name;
+	FString TypeId;
 	TArray<FValueCodecProgram> Children;
 };
 
@@ -75,13 +78,30 @@ struct FCodecOutputTransaction
 	TArray<FAvidScriptUtf8ValueReservation, TInlineAllocator<16>>
 		Utf8Reservations;
 	TArray<uint32, TInlineAllocator<16>> CreatedUtf8Tokens;
+	TArray<FAvidScriptArrayValueReservation, TInlineAllocator<16>>
+		ArrayReservations;
+	TArray<uint32, TInlineAllocator<16>> CreatedArrayTokens;
 	FAvidScriptUtf8ValueHeap* Utf8ValueHeap = nullptr;
+	FAvidScriptArrayValueHeap* ArrayValueHeap = nullptr;
 	int32 NextUtf8Reservation = 0;
+	int32 NextArrayReservation = 0;
 
 	bool ReserveUtf8Value(
 		const FAvidScriptBindingInvocationContext& Context,
 		FString& OutDetails);
 	bool InternNextUtf8Value(
+		TConstArrayView<uint8> Bytes,
+		const FAvidScriptBindingInvocationContext& Context,
+		uint32& OutToken,
+		FString& OutDetails);
+	bool ReserveArrayValue(
+		const FAvidScriptBindingInvocationContext& Context,
+		FString& OutDetails);
+	bool PublishNextArrayValue(
+		const FString& TypeId,
+		int32 ElementCount,
+		int32 ElementStride,
+		int32 ElementAlignment,
 		TConstArrayView<uint8> Bytes,
 		const FAvidScriptBindingInvocationContext& Context,
 		uint32& OutToken,

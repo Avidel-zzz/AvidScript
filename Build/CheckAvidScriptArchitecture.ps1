@@ -676,6 +676,8 @@ $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/A
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
 $Utf8ValueHeapHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptUtf8ValueHeap.h'
 $Utf8ValueHeapSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptUtf8ValueHeap.cpp'
+$ValueCapabilityHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptValueCapability.h'
+$ValueCapabilitySource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptValueCapability.cpp'
 $BindingCodecProgramHeader = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.h'
 $BindingCodecProgramSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingCodecProgram.cpp'
 $BindingPreparedInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
@@ -1152,7 +1154,7 @@ foreach ($RequiredStructWireProjectionContract in @(
         Add-Violation "schema v9 recursive struct projection is missing $RequiredStructWireProjectionContract"
     }
 }
-if (-not $BindingDescriptorModelSource.Contains('FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph') -or
+if (-not $BindingDescriptorModelSource.Contains('FAvidScriptBindingDescriptorLayout::ValidateTypeGraph') -or
 	-not $BindingDescriptorModelSource.Contains('Writer->WriteArrayStart(TEXT("fields"))') -or
     -not $BindingDescriptorModelSource.Contains('Writer->WriteValue(TEXT("wire_offset"), Field.WireOffset)')) {
     Add-Violation 'schema v9 serializer must validate and publish the immutable recursive struct field graph'
@@ -1615,10 +1617,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..9) {
+foreach ($RequiredDescriptorSchemaVersion in 2..10) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v9 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v10 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1631,6 +1633,17 @@ foreach ($PackedOwnerContract in @(
 	'packed owner capability requires descriptor schema v6 or newer with a non-empty self_type_id')) {
     if (-not $CSharpBindingPackageSource.Contains($PackedOwnerContract)) {
         Add-Violation "C# binding package resolver must validate the packed owner intrinsic exactly: $PackedOwnerContract"
+    }
+}
+foreach ($RequiredValueCapabilityPackageContract in @(
+    'avidscript.value_array_length.v1',
+    'avidscript.value_array_load.v1',
+    'avidscript.value_array_store.v1',
+    'avidscript.value_release.v1',
+    '$IsValueCapabilityImport',
+    '$ValueCapabilityImports[$StableId]')) {
+    if (-not $CSharpBindingPackageSource.Contains($RequiredValueCapabilityPackageContract)) {
+        Add-Violation "C# binding package resolver must validate the shared value capability set exactly: $RequiredValueCapabilityPackageContract"
     }
 }
 foreach ($ActiveObjectTypePackageContract in @(
@@ -1650,12 +1663,16 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 6') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 8') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 9')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v9 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 9') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 10')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v10 typed object packages'
 }
 foreach ($RequiredRuntimeManifestImportContract in @(
     'avidscript.owner_get_handle.v1',
     'bSeenPackedOwner',
+    'FAvidScriptValueCapability::GetArrayImportSpecs()',
+    'SeenValueCapabilities',
+    'incomplete value capability set',
     'TryGetInt32Field(*ImportObject, TEXT("ordinal"), Ordinal)',
 	'DescriptorSchemaVersion < 6',
     'GetExpectedSelfClass() == nullptr',
@@ -1750,7 +1767,7 @@ foreach ($RequiredLegacyClassReferenceRendererContract in @(
 foreach ($RequiredStructWireRendererContract in @(
     'AppendStructWireDeclarations',
     'FindRenderedTypeById',
-	'FAvidScriptBindingDescriptorLayout::ValidateStructWireGraph',
+	'FAvidScriptBindingDescriptorLayout::ValidateTypeGraph',
 	'OutSource.Empty()',
     '[StructLayout(LayoutKind.Explicit, Size = %d)]',
     '[FieldOffset(%d)]',
@@ -1915,11 +1932,22 @@ $CanonicalStaticImportNames = @(
     'timer_set_once',
     'timer_cancel',
     'avid_data_lane_epoch',
-    'avid_data_lane_submit'
+    'avid_data_lane_submit',
+    'avid_value_array_length',
+    'avid_value_array_load',
+    'avid_value_array_store',
+    'avid_value_release'
 )
 $CompatibilityStaticImportNames = @(
     $CanonicalStaticImportNames | Where-Object {
-        $_ -notin @('avid_owner_get_handle', 'avid_data_lane_epoch', 'avid_data_lane_submit')
+        $_ -notin @(
+            'avid_owner_get_handle',
+            'avid_data_lane_epoch',
+            'avid_data_lane_submit',
+            'avid_value_array_length',
+            'avid_value_array_load',
+            'avid_value_array_store',
+            'avid_value_release')
     })
 
 $StaticHostCatalogRecords = @(
@@ -2082,6 +2110,7 @@ foreach ($RequiredObjectTypeManifestContract in @(
 foreach ($RequiredSliceCapabilityContract in @(
     'FAvidScriptEditorCSharpBindingRenderer::GetManifestImportCount(AuthorizationModel)',
     'FAvidScriptObjectTypeBindings::GetSpecs()',
+    'FAvidScriptValueCapability::GetArrayImportSpecs()',
     'avidscript.owner_get_handle.v1',
     'slice_import_identity_mismatch')) {
     if (-not $CSharpBindingSliceSource.Contains($RequiredSliceCapabilityContract)) {
@@ -2188,7 +2217,8 @@ $AllowedFixedRendererImports = @(
     'avid_owner_get_handle',
     'avid_object_type_is_a',
     'timer_set_once',
-    'timer_cancel'
+    'timer_cancel',
+    'avid_value_release'
 )
 $FixedRendererImports = @(
     [regex]::Matches(
@@ -2647,16 +2677,17 @@ foreach ($RequiredPreparedHelperContract in @(
         Add-Violation "prepared semantic helper is missing validation contract $RequiredPreparedHelperContract"
     }
 }
-foreach ($RequiredPreparedOwnerContract in @(
-    'avidscript.owner_get_handle.v1',
+foreach ($RequiredPreparedSharedCapabilityContract in @(
     '$Ordinal -eq -1',
-    'avid_owner_get_handle',
-    '$Signature -ceq "()I"',
     'Try-GetAvidScriptBindingJsonInt32',
-	'$ExpectedAuthorizationPackage.DescriptorSchemaVersion -ge 6',
-    '$ExpectedAuthorizationPackage.SelfTypeId')) {
-    if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedOwnerContract)) {
-        Add-Violation "prepared semantic helper must validate packed owner provenance exactly: $RequiredPreparedOwnerContract"
+	'$IsDeclaredSharedCapability',
+	'$ExpectedImportsByKey.ContainsKey($Key)',
+	'$ExpectedImport.StableId -ceq $StableId',
+	'$ExpectedImport.Module -ceq $Module',
+	'$ExpectedImport.Name -ceq $Name',
+	'$ExpectedImport.Signature -ceq $Signature')) {
+    if (-not $CSharpPreparedSemanticSource.Contains($RequiredPreparedSharedCapabilityContract)) {
+        Add-Violation "prepared semantic helper must validate declared shared capability provenance exactly: $RequiredPreparedSharedCapabilityContract"
     }
 }
 foreach ($RequiredPreparedPublicationContract in @(
@@ -2943,11 +2974,29 @@ foreach ($ForbiddenStructWireExecutorSpecialCase in @(
 if ($BindingCodecProgramSource.Contains('#if 0')) {
     Add-Violation 'Bindings codec production source must not retain disabled implementation blocks'
 }
+foreach ($RequiredValueCapabilityCatalogContract in @(
+    'FAvidScriptValueCapabilityImportSpec',
+    'FAvidScriptValueCapability::GetArrayImportSpecs()',
+    'avidscript.value_array_length.v1',
+    'avid_value_array_length',
+    '(i)i',
+    'avidscript.value_array_load.v1',
+    'avid_value_array_load',
+    '(iiii)i',
+    'avidscript.value_array_store.v1',
+    'avid_value_array_store',
+    'avidscript.value_release.v1',
+    'avid_value_release')) {
+    if (-not $ValueCapabilityHeader.Contains($RequiredValueCapabilityCatalogContract) -and
+        -not $ValueCapabilitySource.Contains($RequiredValueCapabilityCatalogContract)) {
+        Add-Violation "Bindings shared value capability catalog is missing $RequiredValueCapabilityCatalogContract"
+    }
+}
 foreach ($RequiredUtf8HeapContract in @(
     'MaxValueBytes = 1024u * 1024u',
     'MaxSlots = MAX_uint16',
     'TokenToSlots',
-    'GNextUtf8ValueCapability',
+    'FAvidScriptValueCapability::AllocateToken',
     'utf8_value_token_space_exhausted',
     'IsCanonicalUtf8'
 )) {

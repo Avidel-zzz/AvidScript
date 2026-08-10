@@ -1,5 +1,7 @@
 #include "Invocation/AvidScriptBindingCodecProgram.h"
 
+#include "AvidScriptValueCapability.h"
+
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptObjectOwnership.h"
 #include "Containers/StringConv.h"
@@ -533,6 +535,68 @@ bool EncodeWireValue(
 		}
 		return true;
 	}
+	if (Program.Kind == EValueCodecKind::Array)
+	{
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32))
+			|| Program.Children.Num() != 1
+			|| Program.TypeId.IsEmpty())
+		{
+			OutDetails = TEXT("The cached array output descriptor is invalid.");
+			return false;
+		}
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Program.Property);
+		const FValueCodecProgram& Element = Program.Children[0];
+		const int32 ElementStride = Align(Element.WireSize, Element.WireAlignment);
+		if (ArrayProperty == nullptr
+			|| ArrayProperty->Inner != Element.Property
+			|| ElementStride <= 0)
+		{
+			OutDetails = TEXT("The reflected array element layout changed after preparation.");
+			return false;
+		}
+		const void* ArrayValue = Program.Property->ContainerPtrToValuePtr<void>(Container);
+		FScriptArrayHelper Helper(ArrayProperty, ArrayValue);
+		if (Helper.Num() < 0
+			|| Helper.Num() > FAvidScriptArrayValueHeap::MaxElements
+			|| static_cast<int64>(Helper.Num()) * ElementStride
+				> FAvidScriptArrayValueHeap::MaxValueBytes)
+		{
+			OutDetails = TEXT("The reflected array output exceeds the bounded session value limit.");
+			return false;
+		}
+		TArray<uint8> ArrayBytes;
+		ArrayBytes.SetNumZeroed(Helper.Num() * ElementStride);
+		for (int32 Index = 0; Index < Helper.Num(); ++Index)
+		{
+			if (!EncodeWireValue(
+					Element,
+					MakeArrayView(ArrayBytes).Slice(
+						Index * ElementStride,
+						Element.WireSize),
+					Context,
+					Helper.GetRawPtr(Index),
+					Transaction,
+					OutDetails))
+			{
+				return false;
+			}
+		}
+		uint32 Token = 0;
+		if (!Transaction.PublishNextArrayValue(
+				Program.TypeId,
+				Helper.Num(),
+				ElementStride,
+				Element.WireAlignment,
+				ArrayBytes,
+				Context,
+				Token,
+				OutDetails))
+		{
+			return false;
+		}
+		FMemory::Memcpy(Wire.GetData(), &Token, sizeof(Token));
+		return true;
+	}
 	if (Program.Kind == EValueCodecKind::Bool)
 	{
 		const int32 Stored = CastFieldChecked<FBoolProperty>(Program.Property)->GetPropertyValue(Value) ? 1 : 0;
@@ -673,11 +737,22 @@ void FCodecOutputTransaction::Commit()
 			Utf8ValueHeap->ReleaseReservation(Reservation);
 		}
 	}
+	if (ArrayValueHeap != nullptr)
+	{
+		for (FAvidScriptArrayValueReservation& Reservation : ArrayReservations)
+		{
+			ArrayValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
 	Utf8Reservations.Reset();
 	CreatedUtf8Tokens.Reset();
 	Utf8ValueHeap = nullptr;
 	NextUtf8Reservation = 0;
+	ArrayReservations.Reset();
+	CreatedArrayTokens.Reset();
+	ArrayValueHeap = nullptr;
+	NextArrayReservation = 0;
 }
 
 bool FCodecOutputTransaction::ReserveUtf8Value(
@@ -738,6 +813,203 @@ bool FCodecOutputTransaction::InternNextUtf8Value(
 	return true;
 }
 
+bool FCodecOutputTransaction::ReserveArrayValue(
+	const FAvidScriptBindingInvocationContext& Context,
+	FString& OutDetails)
+{
+	if (Context.ArrayValueHeap == nullptr)
+	{
+		OutDetails = TEXT("The array output requires a session value heap.");
+		return false;
+	}
+	if (ArrayValueHeap != nullptr && ArrayValueHeap != Context.ArrayValueHeap)
+	{
+		OutDetails = TEXT("The array output transaction cannot span runtime sessions.");
+		return false;
+	}
+	ArrayValueHeap = Context.ArrayValueHeap;
+	FAvidScriptArrayValueReservation& Reservation =
+		ArrayReservations.AddDefaulted_GetRef();
+	if (!ArrayValueHeap->Reserve(Reservation, OutDetails))
+	{
+		ArrayReservations.Pop(EAllowShrinking::No);
+		return false;
+	}
+	return true;
+}
+
+bool SetArrayValue(
+	const FValueCodecProgram& Program,
+	const uint32 ValueReference,
+	IAvidScriptVmGuestMemory& GuestMemory,
+	const FAvidScriptBindingInvocationContext& Context,
+	void* Container,
+	FString& OutDetails)
+{
+	FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Program.Property);
+	if (ArrayProperty == nullptr
+		|| Program.Children.Num() != 1
+		|| Program.TypeId.IsEmpty())
+	{
+		OutDetails = TEXT("The cached array input descriptor is invalid.");
+		return false;
+	}
+	const FValueCodecProgram& Element = Program.Children[0];
+	const int32 ElementStride = Align(Element.WireSize, Element.WireAlignment);
+	if (ElementStride <= 0 || Element.WireAlignment <= 0)
+	{
+		OutDetails = TEXT("The cached array element layout is invalid.");
+		return false;
+	}
+
+	int32 ElementCount = 0;
+	TConstArrayView<uint8> Payload;
+	TArray<uint8> Fallback;
+	if (FAvidScriptValueCapability::IsToken(ValueReference))
+	{
+		FAvidScriptArrayValueView Value;
+		if (Context.ArrayValueHeap == nullptr
+			|| !Context.ArrayValueHeap->Resolve(
+				ValueReference,
+				Program.TypeId,
+				Value,
+				OutDetails)
+			|| Value.ElementStride != ElementStride
+			|| Value.ElementAlignment != Element.WireAlignment)
+		{
+			if (OutDetails.IsEmpty())
+			{
+				OutDetails = TEXT("The array capability does not match the prepared element layout.");
+			}
+			return false;
+		}
+		ElementCount = Value.ElementCount;
+		Payload = Value.Bytes;
+	}
+	else if (ValueReference != 0)
+	{
+		uint8 CountBytes[sizeof(int32)] = {};
+		if (!GuestMemory.ReadBytes(
+				ValueReference,
+				MakeArrayView(CountBytes),
+				OutDetails))
+		{
+			return false;
+		}
+		FMemory::Memcpy(&ElementCount, CountBytes, sizeof(ElementCount));
+		const int32 PayloadAlignment = FMath::Max(4, Element.WireAlignment);
+		const uint32 PayloadOffset = static_cast<uint32>(Align(4, PayloadAlignment));
+		const uint64 ByteCount = static_cast<uint64>(ElementCount) * ElementStride;
+		const uint64 PayloadAddress = static_cast<uint64>(ValueReference) + PayloadOffset;
+		if (ElementCount < 0
+			|| ElementCount > FAvidScriptArrayValueHeap::MaxElements
+			|| ByteCount > FAvidScriptArrayValueHeap::MaxValueBytes
+			|| ValueReference % static_cast<uint32>(PayloadAlignment) != 0
+			|| PayloadAddress + ByteCount > static_cast<uint64>(MAX_uint32) + 1)
+		{
+			OutDetails = TEXT("The linear array input exceeds the bounded canonical layout.");
+			return false;
+		}
+		if (ByteCount > 0)
+		{
+			FString BorrowError;
+			if (!GuestMemory.BorrowReadOnlyBytes(
+					static_cast<uint32>(PayloadAddress),
+					static_cast<uint32>(ByteCount),
+					static_cast<uint32>(Element.WireAlignment),
+					Payload,
+					BorrowError))
+			{
+				Fallback.SetNumUninitialized(static_cast<int32>(ByteCount));
+				if (!GuestMemory.ReadBytes(
+						static_cast<uint32>(PayloadAddress),
+						MakeArrayView(Fallback),
+						OutDetails))
+				{
+					if (OutDetails.IsEmpty())
+					{
+						OutDetails = MoveTemp(BorrowError);
+					}
+					return false;
+				}
+				Payload = MakeArrayView(Fallback);
+			}
+		}
+	}
+	if (Payload.Num() != ElementCount * ElementStride)
+	{
+		OutDetails = TEXT("The array input payload byte count is inconsistent.");
+		return false;
+	}
+
+	TArray<uint8> TemporaryStorage;
+	const int32 PropertyAlignment = FMath::Max(1, ArrayProperty->GetMinAlignment());
+	TemporaryStorage.SetNumZeroed(ArrayProperty->GetSize() + PropertyAlignment - 1);
+	const UPTRINT RawTemporaryAddress =
+		reinterpret_cast<UPTRINT>(TemporaryStorage.GetData());
+	void* TemporaryValue = reinterpret_cast<void*>(Align(
+		RawTemporaryAddress,
+		static_cast<UPTRINT>(PropertyAlignment)));
+	ArrayProperty->InitializeValue(TemporaryValue);
+	ON_SCOPE_EXIT
+	{
+		ArrayProperty->DestroyValue(TemporaryValue);
+	};
+	FScriptArrayHelper TemporaryArray(ArrayProperty, TemporaryValue);
+	TemporaryArray.Resize(ElementCount);
+	for (int32 Index = 0; Index < ElementCount; ++Index)
+	{
+		if (!DecodeWireValue(
+				Element,
+				Payload.Slice(Index * ElementStride, Element.WireSize),
+				Context,
+				TemporaryArray.GetRawPtr(Index),
+				OutDetails))
+		{
+			return false;
+		}
+	}
+	void* Destination = Program.Property->ContainerPtrToValuePtr<void>(Container);
+	ArrayProperty->CopyCompleteValue(Destination, TemporaryValue);
+	return true;
+}
+
+bool FCodecOutputTransaction::PublishNextArrayValue(
+	const FString& TypeId,
+	const int32 ElementCount,
+	const int32 ElementStride,
+	const int32 ElementAlignment,
+	const TConstArrayView<uint8> Bytes,
+	const FAvidScriptBindingInvocationContext& Context,
+	uint32& OutToken,
+	FString& OutDetails)
+{
+	OutToken = 0;
+	if (ArrayValueHeap == nullptr
+		|| ArrayValueHeap != Context.ArrayValueHeap
+		|| !ArrayReservations.IsValidIndex(NextArrayReservation))
+	{
+		OutDetails = TEXT("The array output has no matching preflight reservation.");
+		return false;
+	}
+	FAvidScriptArrayValueReservation& Reservation =
+		ArrayReservations[NextArrayReservation++];
+	if (!ArrayValueHeap->PublishReserved(
+			Reservation,
+			TypeId,
+			ElementCount,
+			ElementStride,
+			ElementAlignment,
+			Bytes,
+			OutToken,
+			OutDetails))
+	{
+		return false;
+	}
+	CreatedArrayTokens.Add(OutToken);
+	return true;
+}
+
 void FCodecOutputTransaction::Rollback(
 	const FAvidScriptBindingInvocationContext& Context)
 {
@@ -760,11 +1032,26 @@ void FCodecOutputTransaction::Rollback(
 			Utf8ValueHeap->ReleaseReservation(Reservation);
 		}
 	}
+	if (ArrayValueHeap != nullptr)
+	{
+		for (int32 Index = CreatedArrayTokens.Num() - 1; Index >= 0; --Index)
+		{
+			ArrayValueHeap->RemoveCreatedValue(CreatedArrayTokens[Index]);
+		}
+		for (FAvidScriptArrayValueReservation& Reservation : ArrayReservations)
+		{
+			ArrayValueHeap->ReleaseReservation(Reservation);
+		}
+	}
 	BorrowedHandles.Reset();
 	Utf8Reservations.Reset();
 	CreatedUtf8Tokens.Reset();
 	Utf8ValueHeap = nullptr;
 	NextUtf8Reservation = 0;
+	ArrayReservations.Reset();
+	CreatedArrayTokens.Reset();
+	ArrayValueHeap = nullptr;
+	NextArrayReservation = 0;
 }
 
 bool ResolveObjectHandle(
@@ -850,6 +1137,21 @@ bool SetValueFromCells(
 		return SetValueFromGuest(
 			Program,
 			GuestAddress,
+			*GuestMemory,
+			Context,
+			Frame,
+			OutDetails);
+	}
+	if (Program.Kind == EValueCodecKind::Array)
+	{
+		if (GuestMemory == nullptr || Cells[0] > MAX_uint32)
+		{
+			OutDetails = TEXT("The array input requires a 32-bit guest value reference.");
+			return false;
+		}
+		return SetArrayValue(
+			Program,
+			static_cast<uint32>(Cells[0]),
 			*GuestMemory,
 			Context,
 			Frame,
@@ -964,6 +1266,23 @@ bool SetValueFromGuest(
 			Frame,
 			OutDetails);
 	}
+	if (Program.Kind == EValueCodecKind::Array)
+	{
+		if (Wire.Num() != static_cast<int32>(sizeof(uint32)))
+		{
+			OutDetails = TEXT("The cached array guest storage must contain one i32 value reference.");
+			return false;
+		}
+		uint32 ValueReference = 0;
+		FMemory::Memcpy(&ValueReference, Wire.GetData(), sizeof(ValueReference));
+		return SetArrayValue(
+			Program,
+			ValueReference,
+			GuestMemory,
+			Context,
+			Frame,
+			OutDetails);
+	}
 	return DecodeWireValue(Program, Wire, Context, Frame, OutDetails);
 }
 
@@ -1033,6 +1352,10 @@ bool PreflightValueOutput(
 		return false;
 	}
 	OutPreparedOutput.EncodedBytes.SetNumZeroed(Program.WireSize);
+	if (Program.Kind == EValueCodecKind::Array)
+	{
+		return Transaction.ReserveArrayValue(Context, OutDetails);
+	}
 	return (Program.Kind != EValueCodecKind::Name
 			&& Program.Kind != EValueCodecKind::String)
 		|| Transaction.ReserveUtf8Value(Context, OutDetails);
