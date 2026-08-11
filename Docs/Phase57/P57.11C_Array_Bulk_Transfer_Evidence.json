@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.11C",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-08-11T14:28:46.8901123Z",
+  "candidate": {
+    "implementation_commit": "bba11da0cdb93a97ab434824ac0517256704ec3e",
+    "implementation_parent": "e79f05d96cb8fd5971f61ca9832847e2f429e45f",
+    "tree": "02354375b1938360b41bae9782f276251520d678",
+    "dirty": false
+  },
+  "environment": {
+    "ue_version": "5.8.0",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit",
+    "puerts_runtime": "V8"
+  },
+  "coverage": {
+    "descriptor_schema_version": 10,
+    "ue_container": "TArray<T>",
+    "csharp_public_type": "T[]",
+    "gameplay_generated_bindings": 371,
+    "gameplay_authorization_imports": 379,
+    "function_name_special_cases": 0,
+    "vm_array_type_branches": 0,
+    "legacy_four_import_packages_accepted": true,
+    "new_six_import_packages_required": true
+  },
+  "range_capability_contract": {
+    "maximum_elements_per_array": 4096,
+    "maximum_value_bytes": 1048576,
+    "maximum_slots_per_session": 65535,
+    "shared_imports": [
+      { "stable_id": "avidscript.value_array_length.v1", "name": "avid_value_array_length", "signature": "(i)i" },
+      { "stable_id": "avidscript.value_array_load.v1", "name": "avid_value_array_load", "signature": "(iiii)i" },
+      { "stable_id": "avidscript.value_array_store.v1", "name": "avid_value_array_store", "signature": "(iiii)i" },
+      { "stable_id": "avidscript.value_release.v1", "name": "avid_value_release", "signature": "(i)i" },
+      { "stable_id": "avidscript.value_array_read_range.v1", "name": "avid_value_array_read_range", "signature": "(iiiii)i" },
+      { "stable_id": "avidscript.value_array_write_range.v1", "name": "avid_value_array_write_range", "signature": "(iiiii)i" }
+    ],
+    "guest_layout": "i32 length header plus aligned fixed-width payload",
+    "range_validation": "int64 bounds, payload alignment, guest address space, capability ownership",
+    "borrow_lifetime": "synchronous host dispatch only"
+  },
+  "e2e": {
+    "automation_test": "AvidScript.Guest.CSharp.ArrayUFunctionEndToEnd",
+    "backends": ["WAMR", "Wasmtime"],
+    "operations": ["snapshot", "guest_modify", "flush", "element_verify", "property_set", "explicit_release"],
+    "property_result": [11, 1, 2],
+    "live_array_values_after_tick": 0,
+    "guest_ir_required_import_count": 9
+  },
+  "performance": {
+    "contract": "phase57_array_result.v1",
+    "measurement_level": "formal",
+    "process_runs": 5,
+    "warmup_samples_per_process": 8,
+    "timed_samples_per_process": 21,
+    "total_timed_samples": 1890,
+    "sizes": [1, 4, 16, 64, 256, 1024],
+    "correctness": "full FNV-1a final-array hash matched for every lane, size, process, and sample",
+    "internal_gate": "bulk_over_element <= 0.80 for N >= 64",
+    "internal_gate_passed": true,
+    "headline_semantics": "held-capability bulk data lane versus Puerts UE TArray reflection roundtrip; allocation policies differ and are explicit",
+    "puerts_representation": "UE.NewArray(UE.BuiltinInt) TArray wrapper",
+    "rows": [
+      { "size": 1, "puerts_p50_ns": 532.300, "element_p50_ns": 288.037, "bulk_p50_ns": 380.322, "bulk_over_element": 1.32039, "bulk_over_puerts": 0.71449 },
+      { "size": 4, "puerts_p50_ns": 709.912, "element_p50_ns": 1162.475, "bulk_p50_ns": 381.397, "bulk_over_element": 0.32809, "bulk_over_puerts": 0.53724 },
+      { "size": 16, "puerts_p50_ns": 1407.030, "element_p50_ns": 4602.638, "bulk_p50_ns": 391.943, "bulk_over_element": 0.08516, "bulk_over_puerts": 0.27856 },
+      { "size": 64, "puerts_p50_ns": 4291.207, "element_p50_ns": 18532.621, "bulk_p50_ns": 434.768, "bulk_over_element": 0.02346, "bulk_over_puerts": 0.10132 },
+      { "size": 256, "puerts_p50_ns": 15216.414, "element_p50_ns": 73345.320, "bulk_p50_ns": 592.991, "bulk_over_element": 0.00808, "bulk_over_puerts": 0.03897 },
+      { "size": 1024, "puerts_p50_ns": 64137.508, "element_p50_ns": 295059.406, "bulk_p50_ns": 1221.895, "bulk_over_element": 0.00414, "bulk_over_puerts": 0.01905 }
+    ],
+    "profile_sha256": "001acda2ea7df4bf1c2b886cb6c6a538facda2a67c70844f017315f089460a7a",
+    "aggregate_sha256": "3e88dd19ee4d8b409c3de26ccaf3d9a95f40ee6ef27cab11629dadf757db7fa4"
+  },
+  "verification": {
+    "guest_ir_tests": "35/35 passed",
+    "wasm_backend_tests": "15/15 passed",
+    "csharp_guest_tests": "81/81 passed",
+    "main_no_clean_build": "succeeded; final integration target 3 actions; no Editor target clean",
+    "full_avidscript_automation": "346 found; 346 performed; 346 succeeded; 0 failed; 0 Automation errors; queue empty and TestExit observed",
+    "array_benchmark_contracts": "passed",
+    "array_formal": "5 processes; 1890 timed samples; correctness and internal gate passed",
+    "architecture_check": "clean candidate passed",
+    "architecture_checker_sha256": "7fb10186dd34abdac1d18f51ed27ba18b2cf75d95e3593caa72cca4a339a8328"
+  },
+  "log_sha256": {
+    "main_no_clean_build": "206a72ccd30f0c252585c074d57b35534ad308fce5334bb24376f9f7000eb55e",
+    "full_avidscript_automation": "02ad581e4bf4a0e69fa987d8186446497435fda6ac6312c8278dc61c71e42267",
+    "architecture_check": "b0f1557e82d45cf4f357d6ae2948a14afb16220e22c08cf775d79e1b96ffc28d"
+  },
+  "review_closure": {
+    "range_import_authorization": "closed",
+    "legacy_package_compatibility": "closed",
+    "bounded_range_memory": "closed",
+    "dual_backend_csharp_bulk": "closed",
+    "puerts_real_tarray_correctness": "closed",
+    "automatic_snapshot_and_dirty_flush": "deferred_to_P57.11D"
+  },
+  "protected_dirty_paths_excluded": 3
+}

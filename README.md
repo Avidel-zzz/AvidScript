@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.11B3" src="https://img.shields.io/badge/Status-Phase%2057.11B3-159957">
-  <img alt="Automation 345/345" src="https://img.shields.io/badge/Automation-345%2F345-26A269">
+  <img alt="Phase 57.11C" src="https://img.shields.io/badge/Status-Phase%2057.11C-159957">
+  <img alt="Automation 346/346" src="https://img.shields.io/badge/Automation-346%2F346-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -127,9 +127,11 @@ int[] input = new int[] { 1, 2 };
 int[] inOut = new int[] { 10 };
 int[] result = self.IntArrayRoundTrip(input, ref inOut, out int[] output);
 
-if (result.Length > 0)
+int[] local = new int[] { 0, 0, 0 };
+if (AvidScriptArray.Snapshot(result, 0, local, 0, result.Length))
 {
-    result[0] += 1;
+    local[0] += 1;
+    AvidScriptArray.Flush(local, 0, result, 0, local.Length);
 }
 
 self.ReadableIntArray = result;
@@ -139,7 +141,8 @@ AvidScriptValue.Release(result);
 ```
 
 这条路径已用同一个 C# Guest 在 WAMR 与 Wasmtime 执行，UE property 最终得到
-`[11, 1, 2]`，显式释放后 live array capability 为 0。完整 fixture 见
+`[11, 1, 2]`，显式释放后 live array capability 为 0。`Snapshot`/`Flush` 将 N 个元素的
+host crossing 从 N 次压缩为 1 次；完整 fixture 见
 [ArrayRoundtrip](Source/AvidScriptRuntime/Private/Tests/Fixtures/P57_11B3_ArrayRoundtrip.cs)。
 
 ## 当前能力
@@ -151,7 +154,7 @@ AvidScriptValue.Release(result);
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
 | 变长字符串 | Session-owned UTF-8 capability heap；跨调用 intern；reload/跨 Runtime 失效；多输出原子发布 |
-| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、Length/load/store 与显式 Release |
+| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、Length/load/store、bulk Snapshot/Flush 与显式 Release |
 | UObject / Actor | typed `UE.Self`、generational handle、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
 | Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
 | 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
@@ -161,7 +164,7 @@ AvidScriptValue.Release(result);
 | VM 后端 | Win64 Wasmtime 45 主后端；WAMR 兼容后端；同一 C# Guest 双后端验证 |
 
 当前 UE5.8 EngineGameplay profile 生成 `371` 个 reflection binding，加上 object/owner 与
-四个 value capability，manifest 授权 `377` 个 import；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
+六个 value capability，manifest 授权 `379` 个 import；这代表默认 gameplay surface，不等于完整 UE API 总量。项目 profile
 可以加入自己的 UCLASS/UFUNCTION，只要类型可由现有 descriptor/codec 表达，就会自动生成。
 
 生成 API 的覆盖范围由项目 profile、UE Reflection 结果和当前 ABI 类型能力共同决定。
@@ -189,9 +192,30 @@ warmup + 30 次 timed sample**，共 `9000/9000` 个有效 timed sample。
 | UObject roundtrip | `69.60 ns` | `130.90 ns` | **`0.532x`** | **46.83%** |
 
 四个已冻结 prepared shape 均领先 Puerts Reflection，目标样本产生 `96,000,000` 次 native
-hit，fallback 与 guard reject 都为 0。P57.11B2/B3 没有重新计时字符串或数组吞吐；B3
-完成的是 WAMR/Wasmtime 数组正确性与显式生命周期闭环。当前索引 load/store 仍是逐元素
-host crossing，因此 README 不把上表外推成字符串或数组性能结论。
+hit，fallback 与 guard reject 都为 0。该表仍只代表对应 prepared shape，不外推到字符串或
+container；数组使用下面独立的 P57.11C 协议。
+
+### Phase 57.11C：数组批量数据通道
+
+P57.11C 使用 5 个独立进程、每进程 8 次 warmup + 21 次 timed sample，共 `1890` 个
+样本。Puerts lane 使用真实 `UE.NewArray(UE.BuiltinInt)` 和 UE `TArray<int32>` Reflection
+往返；AvidScript lane 使用 Wasmtime Guest 对已持有 capability 执行完整 read、变换和 write。
+
+![Phase 57.11C 数组批量性能对比](Docs/Assets/README/phase57-array-bulk-performance.svg)
+
+| 元素数 | AvidScript bulk P50 | Puerts TArray P50 | 比率 | AvidScript 加速 |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | `380.322 ns` | `532.300 ns` | **`0.714x`** | **1.40x** |
+| 4 | `381.397 ns` | `709.912 ns` | **`0.537x`** | **1.86x** |
+| 16 | `391.943 ns` | `1407.030 ns` | **`0.279x`** | **3.59x** |
+| 64 | `434.768 ns` | `4291.207 ns` | **`0.101x`** | **9.87x** |
+| 256 | `592.991 ns` | `15216.414 ns` | **`0.039x`** | **25.66x** |
+| 1024 | `1221.895 ns` | `64137.508 ns` | **`0.019x`** | **52.49x** |
+
+完整输出 hash 与 `N>=64` 的 bulk/element `<=0.80x` 门禁均通过。这里比较的是容器数据
+通道，不是同一个 UFUNCTION 的端到端调用：AvidScript capability 在计时前建立，Puerts
+计时包含 TArray 参数/返回值分配和 wrapper 访问。完整口径见
+[P57.11C 中文报告](Docs/Phase57/P57.11C_Array_Bulk_Transfer.md)。
 
 ### Phase 56：完整游戏 workload
 
@@ -216,6 +240,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 正式证据与详细口径：
 
 - [P57.11B3 通用数组与完整验收证据](Docs/Phase57/P57.11B3_Generic_Array_Capability_Evidence.json)
+- [P57.11C 数组批量传输与正式性能证据](Docs/Phase57/P57.11C_Array_Bulk_Transfer_Evidence.json)
 - [P57.11B2 FName/FString 与完整验收证据](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Evidence.json)
 - [P57.11B1 Prepared Reflection 正式性能证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)
 - [P57.9 Wasmtime/V8 controlled toolchain](Docs/Phase57/P57.9_Controlled_Wasmtime_Toolchain.md)
@@ -224,7 +249,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 正式性能候选：
 [`4c10239`](https://github.com/Avidel-zzz/AvidScript/commit/4c1023989596bba112de345b5533546655559df7)；
 当前功能候选：
-[`b89cc90`](https://github.com/Avidel-zzz/AvidScript/commit/b89cc90bd7611e47f1f18d044804867d48ba3a22)。
+[`bba11da`](https://github.com/Avidel-zzz/AvidScript/commit/bba11da0cdb93a97ab434824ac0517256704ec3e)。
 
 ## 架构
 
@@ -379,7 +404,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 冻结数组 benchmark 与批量访问 ABI，减少逐元素 host crossing，并扩展 string/nested container、TSet/TMap；
+1. 建立 bounded Guest allocator 与编译期 array access region，让普通 C# 循环自动 Snapshot/dirty Flush；
 2. 扩展 delegate、latent、RPC、interface dispatch 与 `FText` 等 UE 调用语义；
 3. 冻结字符串/container benchmark，继续压缩 Generated/prepared 固定成本与 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -395,9 +420,10 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前 Phase 57.11B3 完整 AvidScript Automation 为 **345/345 通过**，另有 Guest IR
-`35/35`、C# Guest `81/81`、Wasm backend `15/15` 与 clean architecture Gate。最新阶段报告见
-[P57.11B3 中文报告](Docs/Phase57/P57.11B3_Generic_Array_Capability.md)。
+当前 Phase 57.11C 完整 AvidScript Automation 为 **346/346 通过**，另有 Guest IR
+`35/35`、C# Guest `81/81`、Wasm backend `15/15`、数组 formal `1890/1890` 样本与 clean
+architecture Gate。最新阶段报告见
+[P57.11C 中文报告](Docs/Phase57/P57.11C_Array_Bulk_Transfer.md)。
 
 工程规则：
 

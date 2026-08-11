@@ -7,14 +7,14 @@
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Superpowers/Specs/2026-08-11-phase57-generic-array-capability-design.md",
-    "version": 3,
-    "sha256": "24772bea1ffad46cac95f9b596aa38af499274816e930dd9b14399cb79d02549",
-    "revision_reason": "P57.11B3 froze schema v10 array type graphs, shared value capabilities, explicit release, and the dual-backend C# array contract"
+    "path": "Docs/Superpowers/Specs/2026-08-11-phase57-array-bulk-transfer-design.md",
+    "version": 4,
+    "sha256": "ff62117557740a592862ce30543c8b57796467d4cfb4ccfbe747ca79d379b48a",
+    "revision_reason": "P57.11C froze the six-import range ABI, bounded guest-memory transfer, explicit C# Snapshot/Flush surface, and the dedicated Puerts TArray performance protocol"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.11B3_Generic_Array_Capability_Plan.md",
-    "closeout": "Docs/Phase57/P57.11B3_Generic_Array_Capability.md"
+    "plan": "Docs/Phase57/P57.11C_Array_Bulk_Transfer_Plan.md",
+    "closeout": "Docs/Phase57/P57.11C_Array_Bulk_Transfer.md"
   },
   "batches": [
     {
@@ -106,6 +106,12 @@
       "status": "Completed",
       "evidence": "Schema v10 one-dimensional TArray<T> projection now covers C# T[] function value/const-ref/ref/out/return, property get/set, Length/load/store, bounded session capability ownership, atomic publication, and explicit release without per-API wrappers; WAMR and Wasmtime produced [11,1,2] and drained live array values to zero; Guest IR 35/35, Wasm backend 15/15, C# Guest 81/81, UE5.8 no-clean target, full AvidScript Automation 345/345, and clean b89cc90/09bbf68 architecture gate passed.",
       "completed_at_utc": "2026-08-10T17:08:38.1622325+00:00"
+    },
+    {
+      "id": "P57.11C",
+      "status": "Completed",
+      "evidence": "Six-import bounded range ABI and generated C# Snapshot/Flush now reduce N element host crossings to one without API-name special cases; WAMR and Wasmtime produced [11,1,2] and drained live arrays to zero; Guest IR 35/35, Wasm backend 15/15, C# Guest 81/81, full Automation 346/346, Phase57Array formal 1890/1890 full-hash samples and internal gate passed; bulk/Puerts TArray P50 ratio ranges from 0.71449 at N=1 to 0.01905 at N=1024; clean bba11da/02354375 architecture gate passed.",
+      "completed_at_utc": "2026-08-11T14:28:46.8901123Z"
     }
   ],
   "debt": [
@@ -125,34 +131,34 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.11B3 review closed shared process-unique value tokens, bounded array ownership, schema v10 element closure, atomic ref/out/return publication, exact four-capability manifest authorization, explicit release, and WAMR/Wasmtime C# gameplay parity; final full Automation and clean architecture gate passed.",
-    "completed_at_utc": "2026-08-10T17:08:38.1622325+00:00"
+    "evidence": "Centralized P57.11C review closed exact six-import authorization, legacy four-import compatibility, bounded aligned range transfer, WAMR/Wasmtime C# bulk parity, real Puerts UE.NewArray TArray correctness, full-hash performance provenance, and honest allocation/semantic boundaries; final full Automation, formal array benchmark, and clean architecture gate passed.",
+    "completed_at_utc": "2026-08-11T14:28:46.8901123Z"
   },
   "budgets": {
-    "ubt": 3,
+    "ubt": 2,
     "automation": 2,
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 5,
-    "automation": 6,
-    "full_gate": 4
+    "ubt": 2,
+    "automation": 2,
+    "full_gate": 3
   },
   "freeze": {
-    "source_commit": "b89cc90bd7611e47f1f18d044804867d48ba3a22",
-    "source_tree": "09bbf68f12200762765eddff34f3a3183b97e72d",
+    "source_commit": "bba11da0cdb93a97ab434824ac0517256704ec3e",
+    "source_tree": "02354375b1938360b41bae9782f276251520d678",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.11B3_Generic_Array_Capability_Evidence.json",
-    "at_utc": "2026-08-10T17:08:38.1622325+00:00"
+    "review_evidence": "Docs/Phase57/P57.11C_Array_Bulk_Transfer_Evidence.json",
+    "at_utc": "2026-08-11T14:28:46.8901123Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_11B3_Architecture_b89cc90.log",
-    "report_sha256": "41d4dcea50cdb85637d7c2a3946c8d493b509c855ac05e76b5962ea7b82dab3e",
-    "run_id": "P57.11B3-clean-architecture-final",
-    "verified_commit": "b89cc90bd7611e47f1f18d044804867d48ba3a22",
-    "verified_tree": "09bbf68f12200762765eddff34f3a3183b97e72d",
-    "attestation_parent": "9564ece7af265fedc9d729b7ddde6148dbdeb916",
-    "attested_at_utc": "2026-08-10T17:08:38.1622325+00:00"
+    "report_path": "external:C:/tmp/AvidScript_P57_11C_Architecture_bba11da.log",
+    "report_sha256": "b0f1557e82d45cf4f357d6ae2948a14afb16220e22c08cf775d79e1b96ffc28d",
+    "run_id": "P57.11C-clean-architecture-final",
+    "verified_commit": "bba11da0cdb93a97ab434824ac0517256704ec3e",
+    "verified_tree": "02354375b1938360b41bae9782f276251520d678",
+    "attestation_parent": "e79f05d96cb8fd5971f61ca9832847e2f429e45f",
+    "attested_at_utc": "2026-08-11T14:28:46.8901123Z"
   },
   "protected_dirty": [
     {
@@ -174,7 +180,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "plan P57.11C array bulk-access ABI and frozen Puerts comparison, then extend string elements, nested containers, TSet/TMap, and independent delegate/latent/RPC semantics",
-  "revision": 18,
-  "updated_at_utc": "2026-08-10T17:08:38.1622325+00:00"
+  "next_action": "plan P57.11D bounded Guest allocator and compiler-managed array access regions, then extend string elements, nested containers, TSet/TMap, and independent delegate/latent/RPC semantics",
+  "revision": 19,
+  "updated_at_utc": "2026-08-11T14:28:46.8901123Z"
 }

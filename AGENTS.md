@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-11 P57.11C 文档收尾校验再次把“预期可能无匹配”的 README 旧值搜索与确定性 JSON/status 读取放入同一并行组，令无匹配 exit 1 吞掉其余输出。Prevention：从本记录起，任何用于证明“零命中”的 `rg` 都必须独立调用；并行编排只接受已经证明必定 exit 0 的命令，不再把无匹配搜索视为普通只读检查。
+- 2026-08-11 P57.11C 收尾时把 clean worktree 的 CRLF checkout 文件 SHA 当成正式 benchmark profile SHA，而 runner 实际绑定的是主工作区 LF 字节，两个 hash 不同。Prevention：benchmark evidence 的 profile/result identity 必须直接读取正式 aggregate 内记录的 `profile_sha256`，再与 runner 当时使用的字面 profile 文件复核；clean candidate 文件 hash 只用于该 candidate 自身，不跨 checkout 代填 provenance。
 - 2026-08-11 P57.11C 首版数组 benchmark 的静态合同把普通 JS `Array` 误认成 Puerts 的 UE `TArray` wrapper；contract smoke 通过，但真实 commandlet 在 `N=1` 返回空数组并被 full-hash oracle 拒绝。Prevention：Puerts container headline 必须使用固定版本公开的 `UE.NewArray(UE.Builtin*)` 与 `Num/Get/Add` API，并在任何计时数据发布前先通过每个 size 的真实 marshal/full-hash correctness。
 - 2026-08-11 P57.11C 调查上述失败时再次猜测 Puerts checkout 存在 `README.md`、`doc` 与 `unreal` 路径，使并行搜索整体失败。Prevention：第三方 checkout 也适用路径索引规则；先枚举仓库根或 `rg --files`，只把已确认存在的目录交给并行搜索。
 - 2026-08-11 P57.11C Gate 准备时把可能返回非零的 UE/dotnet 进程探测与内存、Git 读取放入同一个 `Promise.all`，再次丢失了其余有效输出。Prevention：进程、内容匹配和可选文件探测必须各自独立执行并显式处理“无结果”；只有合同保证 exit 0 的确定性读取才允许组成并行组。
