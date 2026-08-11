@@ -134,6 +134,8 @@ enum class EAvidScriptHostBindingId : uint16
 	ValueArrayLength,
 	ValueArrayLoad,
 	ValueArrayStore,
+	ValueArrayReadRange,
+	ValueArrayWriteRange,
 	ValueRelease
 };
 

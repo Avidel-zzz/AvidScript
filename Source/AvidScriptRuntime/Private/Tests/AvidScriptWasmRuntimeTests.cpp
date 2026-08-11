@@ -1250,6 +1250,61 @@ bool FAvidScriptRuntimeArrayValueHeapLifecycleTest::RunTest(
 	TestTrue(TEXT("Stored array element reads back"), Heap.ReadElement(Token, 1, MakeArrayView(reinterpret_cast<uint8*>(&LoadedValue), sizeof(LoadedValue)), Error));
 	TestEqual(TEXT("Array store updates the session capability"), LoadedValue, 13);
 
+	int32 RangeValues[] = { 0, 0 };
+	TestTrue(
+		TEXT("Array heap reads a contiguous range"),
+		Heap.ReadRange(
+			Token,
+			0,
+			UE_ARRAY_COUNT(RangeValues),
+			MakeArrayView(
+				reinterpret_cast<uint8*>(RangeValues),
+				sizeof(RangeValues)),
+			Error));
+	TestEqual(TEXT("Range read preserves first value"), RangeValues[0], 3);
+	TestEqual(TEXT("Range read preserves second value"), RangeValues[1], 13);
+	const int32 ReplacementRange[] = { 21, 34 };
+	TestTrue(
+		TEXT("Array heap writes a contiguous range"),
+		Heap.WriteRange(
+			Token,
+			1,
+			UE_ARRAY_COUNT(ReplacementRange),
+			MakeArrayView(
+				reinterpret_cast<const uint8*>(ReplacementRange),
+				sizeof(ReplacementRange)),
+			Error));
+	RangeValues[0] = 0;
+	RangeValues[1] = 0;
+	TestTrue(
+		TEXT("Written range reads back"),
+		Heap.ReadRange(
+			Token,
+			1,
+			UE_ARRAY_COUNT(RangeValues),
+			MakeArrayView(
+				reinterpret_cast<uint8*>(RangeValues),
+				sizeof(RangeValues)),
+			Error));
+	TestEqual(TEXT("Range write preserves first replacement"), RangeValues[0], 21);
+	TestEqual(TEXT("Range write preserves second replacement"), RangeValues[1], 34);
+	TestTrue(
+		TEXT("Empty range at the array end is valid"),
+		Heap.ReadRange(Token, 3, 0, TArrayView<uint8>(), Error));
+	TestFalse(
+		TEXT("Range extending past the array fails closed"),
+		Heap.ReadRange(
+			Token,
+			2,
+			2,
+			MakeArrayView(
+				reinterpret_cast<uint8*>(RangeValues),
+				sizeof(RangeValues)),
+			Error));
+	TestTrue(
+		TEXT("Rejected range reports the bounded range category"),
+		Error.Contains(TEXT("array_value_range_invalid")));
+
 	Call = FAvidScriptHostCall();
 	Call.BindingId = EAvidScriptHostBindingId::ValueRelease;
 	Call.IntArgs[0] = static_cast<int32>(Token);

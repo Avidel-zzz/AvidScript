@@ -1640,6 +1640,8 @@ foreach ($RequiredValueCapabilityPackageContract in @(
     'avidscript.value_array_load.v1',
     'avidscript.value_array_store.v1',
     'avidscript.value_release.v1',
+    'avidscript.value_array_read_range.v1',
+    'avidscript.value_array_write_range.v1',
     '$IsValueCapabilityImport',
     '$ValueCapabilityImports[$StableId]')) {
     if (-not $CSharpBindingPackageSource.Contains($RequiredValueCapabilityPackageContract)) {
@@ -1936,6 +1938,8 @@ $CanonicalStaticImportNames = @(
     'avid_value_array_length',
     'avid_value_array_load',
     'avid_value_array_store',
+    'avid_value_array_read_range',
+    'avid_value_array_write_range',
     'avid_value_release'
 )
 $CompatibilityStaticImportNames = @(
@@ -1947,6 +1951,8 @@ $CompatibilityStaticImportNames = @(
             'avid_value_array_length',
             'avid_value_array_load',
             'avid_value_array_store',
+            'avid_value_array_read_range',
+            'avid_value_array_write_range',
             'avid_value_release')
     })
 
@@ -2218,6 +2224,8 @@ $AllowedFixedRendererImports = @(
     'avid_object_type_is_a',
     'timer_set_once',
     'timer_cancel',
+    'avid_value_array_read_range',
+    'avid_value_array_write_range',
     'avid_value_release'
 )
 $FixedRendererImports = @(
@@ -2985,6 +2993,11 @@ foreach ($RequiredValueCapabilityCatalogContract in @(
     '(iiii)i',
     'avidscript.value_array_store.v1',
     'avid_value_array_store',
+    'avidscript.value_array_read_range.v1',
+    'avid_value_array_read_range',
+    '(iiiii)i',
+    'avidscript.value_array_write_range.v1',
+    'avid_value_array_write_range',
     'avidscript.value_release.v1',
     'avid_value_release')) {
     if (-not $ValueCapabilityHeader.Contains($RequiredValueCapabilityCatalogContract) -and

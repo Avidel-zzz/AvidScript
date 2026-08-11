@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/Phase57ArrayResult.schema.json",
+  "title": "AvidScript Phase 57 Array Benchmark Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract", "profile_id", "profile_sha256", "measurement_level",
+    "sizes", "process_results", "statistics", "headline", "internal_gate",
+    "correctness"
+  ],
+  "properties": {
+    "contract": { "const": "phase57_array_result.v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "measurement_level": { "enum": ["diagnostic", "formal"] },
+    "sizes": { "const": [1, 4, 16, 64, 256, 1024] },
+    "process_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/process_result" }
+    },
+    "statistics": {
+      "type": "array",
+      "minItems": 18,
+      "items": { "$ref": "#/$defs/statistic" }
+    },
+    "headline": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["size", "avidscript_bulk_over_puerts_reflection"],
+        "properties": {
+          "size": { "enum": [1, 4, 16, 64, 256, 1024] },
+          "avidscript_bulk_over_puerts_reflection": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "internal_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "minimum_size", "maximum", "passed", "rows"],
+      "properties": {
+        "classification": { "const": "diagnostic_only" },
+        "minimum_size": { "const": 64 },
+        "maximum": { "const": 0.8 },
+        "passed": { "type": "boolean" },
+        "rows": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["size", "bulk_over_element", "passed"],
+            "properties": {
+              "size": { "enum": [64, 256, 1024] },
+              "bulk_over_element": { "type": "number", "exclusiveMinimum": 0 },
+              "passed": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "correctness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "full_hash_algorithm", "mismatches"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "full_hash_algorithm": { "const": "fnv1a32_all_final_elements_v1" },
+        "mismatches": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane", "size", "sample_index", "logical_calls", "elements",
+        "bytes", "host_crossings", "elapsed_ns", "ns_per_logical_call",
+        "ns_per_element", "full_hash"
+      ],
+      "properties": {
+        "lane": {
+          "enum": [
+            "puerts_v8_reflection_tarray",
+            "avidscript_wasmtime_element",
+            "avidscript_wasmtime_bulk"
+          ]
+        },
+        "size": { "enum": [1, 4, 16, 64, 256, 1024] },
+        "sample_index": { "type": "integer", "minimum": 0 },
+        "logical_calls": { "type": "integer", "minimum": 1 },
+        "elements": { "type": "integer", "minimum": 2 },
+        "bytes": { "type": "integer", "minimum": 8 },
+        "host_crossings": { "type": "integer", "minimum": 1 },
+        "elapsed_ns": { "type": "number", "exclusiveMinimum": 0 },
+        "ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },
+        "ns_per_element": { "type": "number", "exclusiveMinimum": 0 },
+        "full_hash": { "type": "string", "pattern": "^fnv1a32:[0-9a-f]{8}$" }
+      }
+    },
+    "process_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract", "profile_id", "profile_sha256", "measurement_level",
+        "process_run", "sizes", "samples", "provenance"
+      ],
+      "properties": {
+        "contract": { "const": "phase57_array_process_result.v1" },
+        "profile_id": { "type": "string", "minLength": 1 },
+        "profile_sha256": { "$ref": "#/$defs/sha256" },
+        "measurement_level": { "enum": ["diagnostic", "formal"] },
+        "process_run": { "type": "integer", "minimum": 1 },
+        "sizes": { "const": [1, 4, 16, 64, 256, 1024] },
+        "samples": { "type": "array", "minItems": 54, "items": { "$ref": "#/$defs/sample" } },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "engine_version", "platform", "puerts_script_sha256",
+            "puerts_runtime_sha256", "avidscript_wasm_sha256",
+            "avidscript_backend", "avidscript_execution_mode"
+          ],
+          "properties": {
+            "engine_version": { "type": "string", "minLength": 1 },
+            "platform": { "type": "string", "minLength": 1 },
+            "puerts_script_sha256": { "$ref": "#/$defs/sha256" },
+            "puerts_runtime_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_wasm_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_backend": { "const": "wasmtime" },
+            "avidscript_execution_mode": { "enum": ["interpreter", "jit"] }
+          }
+        }
+      }
+    },
+    "statistic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane", "size", "logical_calls", "elements", "bytes",
+        "host_crossings", "p50_ns_per_logical_call", "p95_ns_per_logical_call",
+        "p50_ns_per_element", "full_hash"
+      ],
+      "properties": {
+        "lane": { "$ref": "#/$defs/sample/properties/lane" },
+        "size": { "$ref": "#/$defs/sample/properties/size" },
+        "logical_calls": { "type": "integer", "minimum": 1 },
+        "elements": { "type": "integer", "minimum": 2 },
+        "bytes": { "type": "integer", "minimum": 8 },
+        "host_crossings": { "type": "integer", "minimum": 1 },
+        "p50_ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },
+        "p95_ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },
+        "p50_ns_per_element": { "type": "number", "exclusiveMinimum": 0 },
+        "full_hash": { "type": "string", "pattern": "^fnv1a32:[0-9a-f]{8}$" }
+      }
+    }
+  }
+}

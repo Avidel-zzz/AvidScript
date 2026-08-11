@@ -2,6 +2,7 @@
 #include "AvidScriptWasmRuntimePrivate.h"
 
 #include "AvidScriptSceneComponentBinding.h"
+#include "AvidScriptValueCapability.h"
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "UObject/UnrealType.h"
@@ -2098,6 +2099,149 @@ int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayStoreImport(
 			MoveTemp(Error));
 		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleValueArrayRangeImport(
+	const bool bReadFromCapability,
+	const int32 Token,
+	const int32 CapabilityIndex,
+	const uint32 GuestArrayReference,
+	const int32 GuestIndex,
+	const int32 ElementCount)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = Token;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	const TCHAR* ImportName = bReadFromCapability
+		? TEXT("avid_value_array_read_range")
+		: TEXT("avid_value_array_write_range");
+	auto FailRange = [this, HostImportStartSeconds, ImportName](FString Error)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			ImportName,
+			MoveTemp(Error));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	};
+
+	FAvidScriptArrayValueView Value;
+	FString Error;
+	if (!ArrayValueHeap.Resolve(
+			static_cast<uint32>(Token),
+			FString(),
+			Value,
+			Error))
+	{
+		return FailRange(MoveTemp(Error));
+	}
+	if (GuestArrayReference == 0
+		|| FAvidScriptValueCapability::IsToken(GuestArrayReference)
+		|| CapabilityIndex < 0
+		|| GuestIndex < 0
+		|| ElementCount < 0
+		|| ElementCount > FAvidScriptArrayValueHeap::MaxElements
+		|| static_cast<int64>(CapabilityIndex) + ElementCount > Value.ElementCount)
+	{
+		return FailRange(
+			TEXT("array_value_range_invalid: the capability or guest range is outside the supported bounds."));
+	}
+
+	IAvidScriptVmGuestMemory* GuestMemory =
+		VmBackend == nullptr ? nullptr : VmBackend->GetGuestMemory();
+	int32 GuestElementCount = 0;
+	if (GuestMemory == nullptr
+		|| !GuestMemory->ReadBytes(
+			GuestArrayReference,
+			MakeArrayView(
+				reinterpret_cast<uint8*>(&GuestElementCount),
+				sizeof(GuestElementCount)),
+			Error))
+	{
+		return FailRange(
+			Error.IsEmpty()
+				? TEXT("guest_memory_invalid: the linear array length header is unavailable.")
+				: MoveTemp(Error));
+	}
+	if (GuestElementCount < 0
+		|| static_cast<int64>(GuestIndex) + ElementCount > GuestElementCount)
+	{
+		return FailRange(
+			TEXT("array_value_range_invalid: the guest linear array range is out of bounds."));
+	}
+
+	const uint64 PayloadAlignment = static_cast<uint64>(
+		FMath::Max(4, Value.ElementAlignment));
+	const uint64 PayloadOffset = Align(
+		static_cast<uint64>(sizeof(int32)),
+		PayloadAlignment);
+	const uint64 ByteCount = static_cast<uint64>(ElementCount)
+		* static_cast<uint64>(Value.ElementStride);
+	const uint64 GuestByteAddress = static_cast<uint64>(GuestArrayReference)
+		+ PayloadOffset
+		+ static_cast<uint64>(GuestIndex)
+			* static_cast<uint64>(Value.ElementStride);
+	constexpr uint64 GuestAddressSpaceSize = static_cast<uint64>(MAX_uint32) + 1u;
+	if (ByteCount > FAvidScriptArrayValueHeap::MaxValueBytes
+		|| GuestByteAddress >= GuestAddressSpaceSize
+		|| GuestByteAddress + ByteCount > GuestAddressSpaceSize)
+	{
+		return FailRange(
+			TEXT("guest_memory_invalid: the linear array payload range overflows the guest address space."));
+	}
+
+	if (ByteCount > 0)
+	{
+		if (bReadFromCapability)
+		{
+			TArrayView<uint8> OutputBytes;
+			if (!GuestMemory->BorrowMutableBytes(
+					static_cast<uint32>(GuestByteAddress),
+					static_cast<uint32>(ByteCount),
+					static_cast<uint32>(PayloadAlignment),
+					OutputBytes,
+					Error)
+				|| !ArrayValueHeap.ReadRange(
+					static_cast<uint32>(Token),
+					CapabilityIndex,
+					ElementCount,
+					OutputBytes,
+					Error))
+			{
+				return FailRange(
+					Error.IsEmpty()
+						? TEXT("guest_memory_invalid: the linear array output range is unavailable.")
+						: MoveTemp(Error));
+			}
+		}
+		else
+		{
+			TConstArrayView<uint8> InputBytes;
+			if (!GuestMemory->BorrowReadOnlyBytes(
+					static_cast<uint32>(GuestByteAddress),
+					static_cast<uint32>(ByteCount),
+					static_cast<uint32>(PayloadAlignment),
+					InputBytes,
+					Error)
+				|| !ArrayValueHeap.WriteRange(
+					static_cast<uint32>(Token),
+					CapabilityIndex,
+					ElementCount,
+					InputBytes,
+					Error))
+			{
+				return FailRange(
+					Error.IsEmpty()
+						? TEXT("guest_memory_invalid: the linear array input range is unavailable.")
+						: MoveTemp(Error));
+			}
+		}
 	}
 
 	LastHostImportResult = 1;
@@ -5274,6 +5418,18 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 			Call.IntArgs[0],
 			Call.IntArgs[1],
 			Call.InputBytes);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ValueArrayReadRange:
+	case EAvidScriptHostBindingId::ValueArrayWriteRange:
+	{
+		const int32 Value = HandleValueArrayRangeImport(
+			Call.BindingId == EAvidScriptHostBindingId::ValueArrayReadRange,
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.GuestAddress,
+			Call.IntArgs[2],
+			Call.IntArgs[3]);
 		return Finish(Value, Value != 0);
 	}
 	case EAvidScriptHostBindingId::ValueRelease:

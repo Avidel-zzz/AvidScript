@@ -19,9 +19,17 @@ public static class ArrayRoundtripScript
         int[] result = self.IntArrayRoundTrip(input, ref inOut, out int[] output);
         if (result.Length == 3)
         {
-            result[0] = result[0] + 1;
+            int[] local = new int[] { 0, 0, 0 };
+            if (AvidScriptArray.Snapshot(result, 0, local, 0, result.Length))
+            {
+                local[0] = local[0] + 1;
+                if (AvidScriptArray.Flush(local, 0, result, 0, local.Length)
+                    && result[0] == local[0])
+                {
+                    self.ReadableIntArray = result;
+                }
+            }
         }
-        self.ReadableIntArray = result;
         AvidScriptValue.Release(inOut);
         AvidScriptValue.Release(output);
         AvidScriptValue.Release(result);

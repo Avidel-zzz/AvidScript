@@ -3,6 +3,7 @@
 #include "AvidScriptVmBackend.h"
 #include "AvidScriptVmExportTable.h"
 #include "AvidScriptVmResultFixtureBuilder.h"
+#include "AvidScriptVmStaticHostImports.h"
 
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -307,6 +308,41 @@ bool FAvidScriptVmAbiSignatureContractTest::RunTest(const FString& Parameters)
 		Signature,
 		Error));
 	TestFalse(TEXT("parse failures retain details"), Error.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmArrayRangeImportContractTest,
+	"AvidScript.Architecture.VM.ArrayRangeImportContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmArrayRangeImportContractTest::RunTest(const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& ReadRange =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ValueArrayReadRange);
+	const FAvidScriptVmStaticHostImport& WriteRange =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ValueArrayWriteRange);
+	TestEqual(
+		TEXT("Array range read uses the shared import name"),
+		FString(UTF8_TO_TCHAR(ReadRange.ImportName)),
+		FString(TEXT("avid_value_array_read_range")));
+	TestEqual(
+		TEXT("Array range write uses the shared import name"),
+		FString(UTF8_TO_TCHAR(WriteRange.ImportName)),
+		FString(TEXT("avid_value_array_write_range")));
+	TestEqual(
+		TEXT("Array range read carries five i32 parameters"),
+		FString(UTF8_TO_TCHAR(ReadRange.Signature)),
+		FString(TEXT("(iiiii)i")));
+	TestEqual(
+		TEXT("Array range write carries five i32 parameters"),
+		FString(UTF8_TO_TCHAR(WriteRange.Signature)),
+		FString(TEXT("(iiiii)i")));
+	TestFalse(
+		TEXT("Array range imports are not exposed through the legacy env module"),
+		ReadRange.bSupportsEnvCompatibility || WriteRange.bSupportsEnvCompatibility);
 	return true;
 }
 

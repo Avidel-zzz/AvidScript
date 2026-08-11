@@ -789,9 +789,30 @@ bool ValidateBindingPackageManifest(
 		DeclaredImport.Signature = MoveTemp(Signature);
 		DeclaredImports.Add(ImportKey, MoveTemp(DeclaredImport));
 	}
+	const TConstArrayView<FAvidScriptValueCapabilityImportSpec>
+		ValueCapabilitySpecs = FAvidScriptValueCapability::GetArrayImportSpecs();
+	const bool bHasLegacyValueCapabilities =
+		SeenValueCapabilities.Num()
+			== FAvidScriptValueCapability::LegacyArrayImportCount
+		&& [&SeenValueCapabilities, ValueCapabilitySpecs]()
+		{
+			for (int32 Index = 0;
+				Index < FAvidScriptValueCapability::LegacyArrayImportCount;
+				++Index)
+			{
+				if (!SeenValueCapabilities.Contains(
+						ValueCapabilitySpecs[Index].StableId))
+				{
+					return false;
+				}
+			}
+			return true;
+		}();
+	const bool bHasCurrentValueCapabilities =
+		SeenValueCapabilities.Num() == ValueCapabilitySpecs.Num();
 	if (!SeenValueCapabilities.IsEmpty()
-		&& SeenValueCapabilities.Num()
-			!= FAvidScriptValueCapability::GetArrayImportSpecs().Num())
+		&& !bHasLegacyValueCapabilities
+		&& !bHasCurrentValueCapabilities)
 	{
 		SetManifestLoadFailure(
 			OutResult,

@@ -46,6 +46,9 @@ public:
 	int32 ReflectBatchAdd(int32 Seed, int32 Count) const;
 
 	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
+	TArray<int32> ReflectInt32ArrayRoundtrip(const TArray<int32>& Values) const;
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
 	void RegisterPuertsCallbacks(
 		int32 LaneId,
 		FJsObject WorkloadRunner,
@@ -53,6 +56,11 @@ public:
 		FJsObject EmptyCallback,
 		FJsObject TickCallback,
 		FJsObject GetCallbackChecksum);
+
+	UFUNCTION(BlueprintCallable, Category = "AvidScript|Performance")
+	void RegisterPuertsArrayCallbacks(
+		FJsObject WorkloadRunner,
+		FJsObject GetFullHash);
 
 	UFUNCTION(BlueprintPure, Category = "AvidScript|Performance")
 	FString GetControlledWasmBase64() const;
@@ -97,6 +105,9 @@ public:
 	void RunPuertsEmptyCallback(int32 LaneId, int32 Token) const;
 	void RunPuertsTickCallback(int32 LaneId, float DeltaSeconds) const;
 	int32 GetPuertsCallbackChecksum(int32 LaneId) const;
+	bool HasPuertsArrayCallbacks() const;
+	void RunPuertsArrayWorkload(int32 Size, int32 LogicalCalls, int32 Seed);
+	FString GetPuertsArrayFullHash() const;
 	void ResetOperationCounts(int32 ActiveWorkloadId);
 	uint64 GetOperationCallCount(int32 WorkloadId) const;
 
@@ -113,6 +124,8 @@ private:
 	FJsObject StaticEmptyCallback;
 	FJsObject StaticTickCallback;
 	FJsObject StaticGetCallbackChecksum;
+	FJsObject PuertsArrayWorkloadRunner;
+	FJsObject PuertsArrayGetFullHash;
 	FJsObject ControlledWasmRunner;
 	FString ControlledWasmBase64;
 	FString ControlledWasmSha256;
@@ -121,6 +134,7 @@ private:
 	FString ControlledAdapterArtifactWasmSha256;
 	bool bHasReflectionCallbacks = false;
 	bool bHasStaticCallbacks = false;
+	bool bHasPuertsArrayCallbacks = false;
 	bool bHasControlledWasmRunner = false;
 	uint32 NativeCallbackChecksum = 0;
 	int32 ActiveOperationWorkloadId = INDEX_NONE;

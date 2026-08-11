@@ -1,0 +1,59 @@
+{
+  "contract": "phase57_array_profile.v1",
+  "profile_id": "phase57_array_diagnostic",
+  "measurement_level": "diagnostic",
+  "process_runs": 1,
+  "warmup_samples": 2,
+  "timed_samples": 5,
+  "seed": 5711003,
+  "sizes": [1, 4, 16, 64, 256, 1024],
+  "logical_calls_by_size": {
+    "1": 256,
+    "4": 128,
+    "16": 64,
+    "64": 16,
+    "256": 4,
+    "1024": 1
+  },
+  "lanes": [
+    {
+      "lane_id": "puerts_v8_reflection_tarray",
+      "runtime": "puerts_v8",
+      "path": "reflection",
+      "representation": "ue_tarray_int32",
+      "allocation_policy": "input_and_return_tarray_allocation_in_timed_region",
+      "headline_eligible": true
+    },
+    {
+      "lane_id": "avidscript_wasmtime_element",
+      "runtime": "avidscript_wasmtime",
+      "path": "element_load_store",
+      "representation": "array_value_capability_int32",
+      "allocation_policy": "capability_and_guest_array_reused_outside_timed_region",
+      "headline_eligible": false
+    },
+    {
+      "lane_id": "avidscript_wasmtime_bulk",
+      "runtime": "avidscript_wasmtime",
+      "path": "range_read_write",
+      "representation": "array_value_capability_int32",
+      "allocation_policy": "capability_and_guest_array_reused_outside_timed_region",
+      "headline_eligible": true
+    }
+  ],
+  "headline": {
+    "shape": "int32",
+    "comparison": "avidscript_wasmtime_bulk_vs_puerts_v8_reflection_tarray",
+    "required_sizes": [1, 4, 16, 64, 256, 1024]
+  },
+  "internal_gate": {
+    "classification": "diagnostic_only",
+    "ratio": "avidscript_wasmtime_bulk_over_avidscript_wasmtime_element",
+    "minimum_size": 64,
+    "maximum": 0.80
+  },
+  "alternate_js_representations": {
+    "arraybuffer": "diagnostic_only",
+    "typedarray": "diagnostic_only"
+  }
+}

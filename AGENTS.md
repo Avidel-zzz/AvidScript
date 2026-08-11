@@ -89,6 +89,12 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-11 P57.11C 首版数组 benchmark 的静态合同把普通 JS `Array` 误认成 Puerts 的 UE `TArray` wrapper；contract smoke 通过，但真实 commandlet 在 `N=1` 返回空数组并被 full-hash oracle 拒绝。Prevention：Puerts container headline 必须使用固定版本公开的 `UE.NewArray(UE.Builtin*)` 与 `Num/Get/Add` API，并在任何计时数据发布前先通过每个 size 的真实 marshal/full-hash correctness。
+- 2026-08-11 P57.11C 调查上述失败时再次猜测 Puerts checkout 存在 `README.md`、`doc` 与 `unreal` 路径，使并行搜索整体失败。Prevention：第三方 checkout 也适用路径索引规则；先枚举仓库根或 `rg --files`，只把已确认存在的目录交给并行搜索。
+- 2026-08-11 P57.11C Gate 准备时把可能返回非零的 UE/dotnet 进程探测与内存、Git 读取放入同一个 `Promise.all`，再次丢失了其余有效输出。Prevention：进程、内容匹配和可选文件探测必须各自独立执行并显式处理“无结果”；只有合同保证 exit 0 的确定性读取才允许组成并行组。
+- 2026-08-11 P57.11C 开始时再次按概念名猜测了不存在的工具、脚本和源码路径。Prevention：读取任何非刚创建的文件前，必须先对已确认父目录执行 `rg --files <parent>`，再逐字使用命中路径；不确定路径不得与确定性读取放入同一个并行失败域。
+- 2026-08-11 P57.11C 首版 C# 数组夹具使用了当前 Guest lowerer 尚不支持的运行时长度 `new int[result.Length]`。Prevention：新增 C# 语法形态前先从 `Tools/AvidScript.GuestIr` 定位并核对 operation lowerer；当前数组分配只使用受支持的常量维度或初始化器，动态分配另立语言能力阶段。
+- 2026-08-11 P57.11C 首版 VM range import 校验直接引用了 Bindings 层的 heap 常量，形成 `AvidScriptVM -> AvidScriptBindings` 反向依赖。Prevention：VM 只能依赖自身 ABI catalog 或中立 contract owner；中立 owner 建立前，跨层上限必须在 VM catalog 以带来源说明的 ABI 常量表达，禁止包含或引用 Bindings 实现类型。
 - 2026-08-11 P57.11B3 首版 Runtime value-capability 去重把 `TSet::Add` 当作 `bool` 拼入校验表达式，UE5.8 实际返回 `FSetElementId`，导致集中增量编译失败。Prevention：需要“检查后插入”的 UE `TSet` 逻辑固定先用 `Contains` 形成布尔条件，校验通过后再单独调用 `Add`；容器 API 返回类型不能按 STL 习惯推断。
 
 - 2026-08-02 P57.11B1 在 canonical 主工程构建之后又构建隔离 benchmark 工程，后者刷新了源码版 UE 的全局 `UnrealEditor.version/modules BuildId`；主工程 DLL 虽已存在，旧 manifest 仍被 Editor 判为 out-of-date，Automation 在发现测试前退出。Prevention：使用同一源码引擎完成任何隔离工程 target build 后，启动 canonical Automation 前必须再执行一次主工程 no-clean 增量 target build，并核对主工程 `UnrealEditor.modules` 的 `BuildId` 与引擎一致；禁止通过清理 Editor target 修复 metadata 漂移。

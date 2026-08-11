@@ -524,6 +524,79 @@ int32_t ValueArrayStore(
 		ByteCount);
 }
 
+int32_t DispatchValueArrayRange(
+	wasm_exec_env_t ExecEnv,
+	const EAvidScriptHostBindingId BindingId,
+	const int32_t Token,
+	const int32_t CapabilityIndex,
+	const int32_t GuestArrayReference,
+	const int32_t GuestIndex,
+	const int32_t ElementCount)
+{
+	const char* ImportName = StaticImportName(BindingId);
+	if (CapabilityIndex < 0
+		|| GuestArrayReference <= 0
+		|| GuestIndex < 0
+		|| ElementCount < 0
+		|| ElementCount > 4096)
+	{
+		Fail(
+			ExecEnv,
+			GetBridge(ExecEnv),
+			ImportName,
+			TEXT("An array range argument is outside the supported range."));
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = BindingId;
+	Call.IntArgs[0] = Token;
+	Call.IntArgs[1] = CapabilityIndex;
+	Call.GuestAddress = static_cast<uint32>(GuestArrayReference);
+	Call.IntArgs[2] = GuestIndex;
+	Call.IntArgs[3] = ElementCount;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ValueArrayReadRange(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t CapabilityIndex,
+	int32_t GuestArrayReference,
+	int32_t GuestIndex,
+	int32_t ElementCount)
+{
+	return DispatchValueArrayRange(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueArrayReadRange,
+		Token,
+		CapabilityIndex,
+		GuestArrayReference,
+		GuestIndex,
+		ElementCount);
+}
+
+int32_t ValueArrayWriteRange(
+	wasm_exec_env_t ExecEnv,
+	int32_t Token,
+	int32_t CapabilityIndex,
+	int32_t GuestArrayReference,
+	int32_t GuestIndex,
+	int32_t ElementCount)
+{
+	return DispatchValueArrayRange(
+		ExecEnv,
+		EAvidScriptHostBindingId::ValueArrayWriteRange,
+		Token,
+		CapabilityIndex,
+		GuestArrayReference,
+		GuestIndex,
+		ElementCount);
+}
+
 int32_t ValueRelease(wasm_exec_env_t ExecEnv, int32_t Token)
 {
 	return DispatchI32(
@@ -575,6 +648,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ValueArrayLength: return reinterpret_cast<void*>(ValueArrayLength);
 	case EAvidScriptHostBindingId::ValueArrayLoad: return reinterpret_cast<void*>(ValueArrayLoad);
 	case EAvidScriptHostBindingId::ValueArrayStore: return reinterpret_cast<void*>(ValueArrayStore);
+	case EAvidScriptHostBindingId::ValueArrayReadRange: return reinterpret_cast<void*>(ValueArrayReadRange);
+	case EAvidScriptHostBindingId::ValueArrayWriteRange: return reinterpret_cast<void*>(ValueArrayWriteRange);
 	case EAvidScriptHostBindingId::ValueRelease: return reinterpret_cast<void*>(ValueRelease);
 	default: return nullptr;
 	}

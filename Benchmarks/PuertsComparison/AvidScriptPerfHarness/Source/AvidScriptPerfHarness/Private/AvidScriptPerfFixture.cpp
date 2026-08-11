@@ -65,6 +65,17 @@ int32 AAvidScriptPerfFixture::ReflectBatchAdd(const int32 Seed, const int32 Coun
 	return NativeBatchAdd(Seed, Count);
 }
 
+TArray<int32> AAvidScriptPerfFixture::ReflectInt32ArrayRoundtrip(
+	const TArray<int32>& Values) const
+{
+	TArray<int32> Result = Values;
+	for (int32 Index = 0; Index < Result.Num(); ++Index)
+	{
+		Result[Index] = PerfFixtureMixInt32(Result[Index] ^ Index);
+	}
+	return Result;
+}
+
 void AAvidScriptPerfFixture::RegisterPuertsCallbacks(
 	const int32 LaneId,
 	FJsObject WorkloadRunner,
@@ -91,6 +102,15 @@ void AAvidScriptPerfFixture::RegisterPuertsCallbacks(
 		StaticGetCallbackChecksum = MoveTemp(GetCallbackChecksum);
 		bHasStaticCallbacks = true;
 	}
+}
+
+void AAvidScriptPerfFixture::RegisterPuertsArrayCallbacks(
+	FJsObject WorkloadRunner,
+	FJsObject GetFullHash)
+{
+	PuertsArrayWorkloadRunner = MoveTemp(WorkloadRunner);
+	PuertsArrayGetFullHash = MoveTemp(GetFullHash);
+	bHasPuertsArrayCallbacks = true;
 }
 
 FString AAvidScriptPerfFixture::GetControlledWasmBase64() const
@@ -312,6 +332,24 @@ int32 AAvidScriptPerfFixture::GetPuertsCallbackChecksum(const int32 LaneId) cons
 		? ReflectionGetCallbackChecksum
 		: StaticGetCallbackChecksum;
 	return Callback.Func<int32>();
+}
+
+bool AAvidScriptPerfFixture::HasPuertsArrayCallbacks() const
+{
+	return bHasPuertsArrayCallbacks;
+}
+
+void AAvidScriptPerfFixture::RunPuertsArrayWorkload(
+	const int32 Size,
+	const int32 LogicalCalls,
+	const int32 Seed)
+{
+	PuertsArrayWorkloadRunner.Action(this, Size, LogicalCalls, Seed);
+}
+
+FString AAvidScriptPerfFixture::GetPuertsArrayFullHash() const
+{
+	return PuertsArrayGetFullHash.Func<FString>();
 }
 
 void AAvidScriptPerfFixture::ResetOperationCounts(const int32 ActiveWorkloadId)

@@ -2285,6 +2285,45 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				ArrayIndex));
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
+
+		Lines.Append({
+			TEXT("public static class AvidScriptArray"),
+			TEXT("{")
+		});
+		TSet<FString> ArraySignatures;
+		for (int32 ArrayIndex = 0; ArrayIndex < ArrayTypes.Num(); ++ArrayIndex)
+		{
+			FString ArrayType;
+			if (!ResolveArrayCSharpType(
+					*ArrayTypes[ArrayIndex],
+					TypesById,
+					ArrayType,
+					OutErrorSource)
+				|| ArraySignatures.Contains(ArrayType))
+			{
+				OutErrorCategory = TEXT("csharp_type_collision");
+				OutErrorSource = ArrayType.IsEmpty()
+					? ArrayTypes[ArrayIndex]->StableId
+					: ArrayType;
+				return false;
+			}
+			ArraySignatures.Add(ArrayType);
+			if (ArrayIndex > 0)
+			{
+				Lines.Add(TEXT(""));
+			}
+			Lines.Add(FString::Printf(
+				TEXT("    public static bool Snapshot(%s hostArray, int hostIndex, %s localArray, int localIndex, int count) => AvidScriptNative.ReadArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
+				*ArrayType,
+				*ArrayType,
+				ArrayIndex));
+			Lines.Add(FString::Printf(
+				TEXT("    public static bool Flush(%s localArray, int localIndex, %s hostArray, int hostIndex, int count) => AvidScriptNative.WriteArrayRange%04d(hostArray, hostIndex, localArray, localIndex, count) != 0;"),
+				*ArrayType,
+				*ArrayType,
+				ArrayIndex));
+		}
+		Lines.Append({ TEXT("}"), TEXT("") });
 	}
 
 	Lines.Add(TEXT("internal static class AvidScriptNative"));
@@ -2318,6 +2357,20 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			FString::Printf(
 				TEXT("    internal static extern int ReleaseArray%04d(%s value);"),
 				ArrayIndex,
+				*ArrayType),
+			TEXT(""),
+			TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_array_read_range\")]"),
+			FString::Printf(
+				TEXT("    internal static extern int ReadArrayRange%04d(%s hostArray, int hostIndex, %s localArray, int localIndex, int count);"),
+				ArrayIndex,
+				*ArrayType,
+				*ArrayType),
+			TEXT(""),
+			TEXT("    [DllImport(\"avidscript\", EntryPoint = \"avid_value_array_write_range\")]"),
+			FString::Printf(
+				TEXT("    internal static extern int WriteArrayRange%04d(%s hostArray, int hostIndex, %s localArray, int localIndex, int count);"),
+				ArrayIndex,
+				*ArrayType,
 				*ArrayType)
 		});
 	}

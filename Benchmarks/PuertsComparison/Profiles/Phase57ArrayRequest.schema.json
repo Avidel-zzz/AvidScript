@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/Phase57ArrayRequest.schema.json",
+  "title": "AvidScript Phase 57 Array Benchmark Process Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract", "profile_id", "profile_sha256", "measurement_level",
+    "process_run", "warmup_samples", "timed_samples", "seed", "sizes",
+    "logical_calls_by_size", "lane_order", "puerts_script_sha256",
+    "puerts_runtime_sha256", "avidscript_wasm_path", "avidscript_wasm_sha256"
+  ],
+  "properties": {
+    "contract": { "const": "phase57_array_request.v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "measurement_level": { "enum": ["diagnostic", "formal"] },
+    "process_run": { "type": "integer", "minimum": 1 },
+    "warmup_samples": { "type": "integer", "minimum": 1 },
+    "timed_samples": { "type": "integer", "minimum": 3 },
+    "seed": { "type": "integer" },
+    "sizes": { "const": [1, 4, 16, 64, 256, 1024] },
+    "logical_calls_by_size": { "$ref": "Phase57ArrayProfile.schema.json#/properties/logical_calls_by_size" },
+    "lane_order": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "puerts_v8_reflection_tarray",
+          "avidscript_wasmtime_element",
+          "avidscript_wasmtime_bulk"
+        ]
+      }
+    },
+    "puerts_script_sha256": { "$ref": "#/$defs/sha256" },
+    "puerts_runtime_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_wasm_path": { "type": "string", "minLength": 1 },
+    "avidscript_wasm_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

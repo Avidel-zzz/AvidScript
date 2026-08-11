@@ -1128,6 +1128,8 @@ bool FAvidScriptCSharpArrayUFunctionEndToEndTest::RunTest(
 		TEXT("avid_value_array_length"),
 		TEXT("avid_value_array_load"),
 		TEXT("avid_value_array_store"),
+		TEXT("avid_value_array_read_range"),
+		TEXT("avid_value_array_write_range"),
 		TEXT("avid_value_release") })
 	{
 		const FString RequiredImportName(RequiredImport);

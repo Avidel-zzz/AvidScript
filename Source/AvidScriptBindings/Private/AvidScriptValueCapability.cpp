@@ -30,6 +30,18 @@ const FAvidScriptValueCapabilityImportSpec GArrayImportSpecs[] = {
 		TEXT("avidscript"),
 		TEXT("avid_value_release"),
 		TEXT("(i)i")
+	},
+	{
+		TEXT("avidscript.value_array_read_range.v1"),
+		TEXT("avidscript"),
+		TEXT("avid_value_array_read_range"),
+		TEXT("(iiiii)i")
+	},
+	{
+		TEXT("avidscript.value_array_write_range.v1"),
+		TEXT("avidscript"),
+		TEXT("avid_value_array_write_range"),
+		TEXT("(iiiii)i")
 	}
 };
 }

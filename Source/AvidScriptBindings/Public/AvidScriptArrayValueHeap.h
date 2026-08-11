@@ -56,9 +56,21 @@ public:
 		int32 ElementIndex,
 		TArrayView<uint8> OutBytes,
 		FString& OutError) const;
+	bool ReadRange(
+		uint32 Token,
+		int32 ElementIndex,
+		int32 ElementCount,
+		TArrayView<uint8> OutBytes,
+		FString& OutError) const;
 	bool WriteElement(
 		uint32 Token,
 		int32 ElementIndex,
+		TConstArrayView<uint8> Bytes,
+		FString& OutError);
+	bool WriteRange(
+		uint32 Token,
+		int32 ElementIndex,
+		int32 ElementCount,
 		TConstArrayView<uint8> Bytes,
 		FString& OutError);
 	bool ReleaseValue(uint32 Token, FString& OutError);

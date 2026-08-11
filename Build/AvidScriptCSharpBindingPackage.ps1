@@ -421,6 +421,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         'avidscript.value_array_load.v1' = @('avid_value_array_load', '(iiii)i')
         'avidscript.value_array_store.v1' = @('avid_value_array_store', '(iiii)i')
         'avidscript.value_release.v1' = @('avid_value_release', '(i)i')
+        'avidscript.value_array_read_range.v1' = @('avid_value_array_read_range', '(iiiii)i')
+        'avidscript.value_array_write_range.v1' = @('avid_value_array_write_range', '(iiiii)i')
     }
     foreach ($Import in @($Manifest.required_imports)) {
         $Ordinal = 0

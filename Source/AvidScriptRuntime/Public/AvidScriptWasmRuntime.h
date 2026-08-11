@@ -308,6 +308,13 @@ public:
 	int32 HandleValueArrayLengthImport(int32 Token);
 	int32 HandleValueArrayLoadImport(int32 Token, int32 ElementIndex, TArrayView<uint8> OutBytes);
 	int32 HandleValueArrayStoreImport(int32 Token, int32 ElementIndex, TConstArrayView<uint8> Bytes);
+	int32 HandleValueArrayRangeImport(
+		bool bReadFromCapability,
+		int32 Token,
+		int32 CapabilityIndex,
+		uint32 GuestArrayReference,
+		int32 GuestIndex,
+		int32 ElementCount);
 	int32 HandleValueReleaseImport(int32 Token);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);

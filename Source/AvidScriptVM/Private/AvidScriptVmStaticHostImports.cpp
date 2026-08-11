@@ -3,6 +3,7 @@
 namespace
 {
 constexpr int32 StaticImportMaxTransformBatchCount = 256;
+constexpr int32 StaticImportMaxArrayElementCount = 4096;
 constexpr uint32 StaticImportTransformBatchInputCellsPerItem = 2;
 constexpr uint32 StaticImportTransformBatchOutputFloatsPerItem = 9;
 
@@ -30,6 +31,8 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ValueArrayLength, "avid_value_array_length", "(i)i", false },
 	{ EAvidScriptHostBindingId::ValueArrayLoad, "avid_value_array_load", "(iiii)i", false },
 	{ EAvidScriptHostBindingId::ValueArrayStore, "avid_value_array_store", "(iiii)i", false },
+	{ EAvidScriptHostBindingId::ValueArrayReadRange, "avid_value_array_read_range", "(iiiii)i", false },
+	{ EAvidScriptHostBindingId::ValueArrayWriteRange, "avid_value_array_write_range", "(iiiii)i", false },
 	{ EAvidScriptHostBindingId::ValueRelease, "avid_value_release", "(i)i", false }
 };
 
@@ -318,6 +321,30 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[0] = Token;
 		Call.IntArgs[1] = ElementIndex;
 		Call.IntArgs[2] = ByteCount;
+		break;
+	}
+	case EAvidScriptHostBindingId::ValueArrayReadRange:
+	case EAvidScriptHostBindingId::ValueArrayWriteRange:
+	{
+		const int32 CapabilityIndex = Arguments[1].I32;
+		const int32 GuestArrayReference = Arguments[2].I32;
+		const int32 GuestIndex = Arguments[3].I32;
+		const int32 ElementCount = Arguments[4].I32;
+		if (CapabilityIndex < 0
+			|| GuestArrayReference <= 0
+			|| GuestIndex < 0
+			|| ElementCount < 0
+			|| ElementCount > StaticImportMaxArrayElementCount)
+		{
+			return FailStaticCall(
+				OutFailureDetails,
+				TEXT("value_array_range_invalid: an array range argument is outside the supported range."));
+		}
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.IntArgs[1] = CapabilityIndex;
+		Call.GuestAddress = static_cast<uint32>(GuestArrayReference);
+		Call.IntArgs[2] = GuestIndex;
+		Call.IntArgs[3] = ElementCount;
 		break;
 	}
 	case EAvidScriptHostBindingId::ActorGetTransformBatch:

@@ -1,5 +1,6 @@
 #include "AvidScriptPerfRunCommandlet.h"
 
+#include "AvidScriptPerfArrayRunner.h"
 #include "AvidScriptPerfRunner.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -21,6 +22,28 @@ int32 UAvidScriptPerfRunCommandlet::Main(const FString& Params)
 
 int32 UAvidScriptPerfRunCommandlet::RunFromCommandLine(const TCHAR* CommandLine)
 {
+	FString ArrayRequestPath;
+	FString ArrayResultPath;
+	if (FParse::Value(CommandLine, TEXT("AvidScriptPerfArrayRequest="), ArrayRequestPath))
+	{
+		if (!FParse::Value(CommandLine, TEXT("AvidScriptPerfArrayResult="), ArrayResultPath))
+		{
+			UE_LOG(LogTemp, Error, TEXT("ASP57A2001 -AvidScriptPerfArrayResult is required"));
+			return 2;
+		}
+		FString ArrayError;
+		if (!FAvidScriptPerfArrayRunner::RunFromFiles(
+				ArrayRequestPath,
+				ArrayResultPath,
+				ArrayError))
+		{
+			UE_LOG(LogTemp, Error, TEXT("ASP57A2002 array benchmark failed: %s"), *ArrayError);
+			return 3;
+		}
+		UE_LOG(LogTemp, Display, TEXT("ASP57A2000 array benchmark result published: %s"), *ArrayResultPath);
+		return 0;
+	}
+
 	FString RequestPath;
 	FString ResultPath;
 	if (!FParse::Value(CommandLine, TEXT("AvidScriptPerfRequest="), RequestPath) ||

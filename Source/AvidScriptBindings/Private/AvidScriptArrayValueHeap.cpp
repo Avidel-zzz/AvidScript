@@ -20,6 +20,23 @@ bool IsValidArrayLayout(
 		&& static_cast<uint32>(ByteCount) <= FAvidScriptArrayValueHeap::MaxValueBytes
 		&& static_cast<int64>(ElementCount) * ElementStride == ByteCount;
 }
+
+bool IsValidArrayRange(
+	const int32 ElementIndex,
+	const int32 ElementCount,
+	const int32 AvailableElements,
+	const int32 ElementStride,
+	const int32 ByteCount)
+{
+	const int64 EndIndex = static_cast<int64>(ElementIndex) + ElementCount;
+	const int64 RequiredBytes = static_cast<int64>(ElementCount) * ElementStride;
+	return ElementIndex >= 0
+		&& ElementCount >= 0
+		&& EndIndex <= AvailableElements
+		&& RequiredBytes >= 0
+		&& RequiredBytes <= FAvidScriptArrayValueHeap::MaxValueBytes
+		&& RequiredBytes == ByteCount;
+}
 }
 
 bool FAvidScriptArrayValueHeap::Reserve(
@@ -187,6 +204,38 @@ bool FAvidScriptArrayValueHeap::ReadElement(
 	return true;
 }
 
+bool FAvidScriptArrayValueHeap::ReadRange(
+	const uint32 Token,
+	const int32 ElementIndex,
+	const int32 ElementCount,
+	const TArrayView<uint8> OutBytes,
+	FString& OutError) const
+{
+	FAvidScriptArrayValueView Value;
+	if (!Resolve(Token, FString(), Value, OutError)
+		|| !IsValidArrayRange(
+			ElementIndex,
+			ElementCount,
+			Value.ElementCount,
+			Value.ElementStride,
+			OutBytes.Num()))
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("array_value_range_invalid: the requested array range or byte width is invalid.");
+		}
+		return false;
+	}
+	if (!OutBytes.IsEmpty())
+	{
+		FMemory::Memcpy(
+			OutBytes.GetData(),
+			Value.Bytes.GetData() + ElementIndex * Value.ElementStride,
+			OutBytes.Num());
+	}
+	return true;
+}
+
 bool FAvidScriptArrayValueHeap::WriteElement(
 	const uint32 Token,
 	const int32 ElementIndex,
@@ -211,6 +260,40 @@ bool FAvidScriptArrayValueHeap::WriteElement(
 		Slot->Bytes.GetData() + ElementIndex * Slot->ElementStride,
 		Bytes.GetData(),
 		Bytes.Num());
+	return true;
+}
+
+bool FAvidScriptArrayValueHeap::WriteRange(
+	const uint32 Token,
+	const int32 ElementIndex,
+	const int32 ElementCount,
+	const TConstArrayView<uint8> Bytes,
+	FString& OutError)
+{
+	OutError.Reset();
+	int32 SlotIndex = INDEX_NONE;
+	FSlot* Slot = nullptr;
+	if (!ResolveSlot(Token, SlotIndex, Slot)
+		|| Slot == nullptr
+		|| !Slot->bOccupied
+		|| Slot->bReserved
+		|| !IsValidArrayRange(
+			ElementIndex,
+			ElementCount,
+			Slot->ElementCount,
+			Slot->ElementStride,
+			Bytes.Num()))
+	{
+		OutError = TEXT("array_value_range_invalid: the requested array range or byte width is invalid.");
+		return false;
+	}
+	if (!Bytes.IsEmpty())
+	{
+		FMemory::Memcpy(
+			Slot->Bytes.GetData() + ElementIndex * Slot->ElementStride,
+			Bytes.GetData(),
+			Bytes.Num());
+	}
 	return true;
 }
 

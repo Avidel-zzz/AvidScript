@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/Phase57ArrayProfile.schema.json",
+  "title": "AvidScript Phase 57 Array Benchmark Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract", "profile_id", "measurement_level", "process_runs",
+    "warmup_samples", "timed_samples", "seed", "sizes",
+    "logical_calls_by_size", "lanes", "headline", "internal_gate",
+    "alternate_js_representations"
+  ],
+  "properties": {
+    "contract": { "const": "phase57_array_profile.v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "measurement_level": { "enum": ["diagnostic", "formal"] },
+    "process_runs": { "type": "integer", "minimum": 1 },
+    "warmup_samples": { "type": "integer", "minimum": 1 },
+    "timed_samples": { "type": "integer", "minimum": 3, "not": { "multipleOf": 2 } },
+    "seed": { "type": "integer" },
+    "sizes": {
+      "const": [1, 4, 16, 64, 256, 1024]
+    },
+    "logical_calls_by_size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["1", "4", "16", "64", "256", "1024"],
+      "properties": {
+        "1": { "type": "integer", "minimum": 1 },
+        "4": { "type": "integer", "minimum": 1 },
+        "16": { "type": "integer", "minimum": 1 },
+        "64": { "type": "integer", "minimum": 1 },
+        "256": { "type": "integer", "minimum": 1 },
+        "1024": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/lane" }
+    },
+    "headline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "comparison", "required_sizes"],
+      "properties": {
+        "shape": { "const": "int32" },
+        "comparison": { "const": "avidscript_wasmtime_bulk_vs_puerts_v8_reflection_tarray" },
+        "required_sizes": { "const": [1, 4, 16, 64, 256, 1024] }
+      }
+    },
+    "internal_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "ratio", "minimum_size", "maximum"],
+      "properties": {
+        "classification": { "const": "diagnostic_only" },
+        "ratio": { "const": "avidscript_wasmtime_bulk_over_avidscript_wasmtime_element" },
+        "minimum_size": { "const": 64 },
+        "maximum": { "const": 0.8 }
+      }
+    },
+    "alternate_js_representations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["arraybuffer", "typedarray"],
+      "properties": {
+        "arraybuffer": { "const": "diagnostic_only" },
+        "typedarray": { "const": "diagnostic_only" }
+      }
+    }
+  },
+  "$defs": {
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id", "runtime", "path", "representation",
+        "allocation_policy", "headline_eligible"
+      ],
+      "properties": {
+        "lane_id": {
+          "enum": [
+            "puerts_v8_reflection_tarray",
+            "avidscript_wasmtime_element",
+            "avidscript_wasmtime_bulk"
+          ]
+        },
+        "runtime": { "enum": ["puerts_v8", "avidscript_wasmtime"] },
+        "path": { "enum": ["reflection", "element_load_store", "range_read_write"] },
+        "representation": { "enum": ["ue_tarray_int32", "array_value_capability_int32"] },
+        "allocation_policy": { "type": "string", "minLength": 1 },
+        "headline_eligible": { "type": "boolean" }
+      }
+    }
+  }
+}

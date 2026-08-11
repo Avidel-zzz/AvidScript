@@ -1638,9 +1638,9 @@ bool FAvidScriptEditorCSharpBindingEmitterGameplayProfileTest::RunTest(const FSt
 	if (ManifestObject.IsValid())
 	{
 		TestEqual(
-			TEXT("Gameplay manifest declares 371 reflected imports and three shared capabilities"),
+			TEXT("Gameplay manifest declares 371 reflected imports and eight shared imports"),
 			ManifestObject->GetArrayField(TEXT("required_imports")).Num(),
-			377);
+			379);
 	}
 
 	const FString OutputRoot = MakePackageTestRoot();
@@ -2481,19 +2481,66 @@ bool FAvidScriptEditorCSharpBindingEmitterArrayTest::RunTest(
 	TestTrue(
 		TEXT("Generated facade imports the shared value release service"),
 		Source.Contains(TEXT("EntryPoint = \"avid_value_release\"")));
+	TestTrue(
+		TEXT("Generated facade declares the typed array transfer surface"),
+		Source.Contains(TEXT("public static class AvidScriptArray")));
+	TestTrue(
+		TEXT("Generated facade exposes typed array snapshot"),
+		Source.Contains(TEXT("public static bool Snapshot(int[] hostArray, int hostIndex, int[] localArray, int localIndex, int count)")));
+	TestTrue(
+		TEXT("Generated array snapshot preserves the capability-first host ABI"),
+		Source.Contains(TEXT("AvidScriptNative.ReadArrayRange0000(hostArray, hostIndex, localArray, localIndex, count)")));
+	TestTrue(
+		TEXT("Generated facade exposes typed array flush"),
+		Source.Contains(TEXT("public static bool Flush(int[] localArray, int localIndex, int[] hostArray, int hostIndex, int count)")));
+	TestTrue(
+		TEXT("Generated array flush reorders its public surface to the capability-first host ABI"),
+		Source.Contains(TEXT("AvidScriptNative.WriteArrayRange0000(hostArray, hostIndex, localArray, localIndex, count)")));
+	TestTrue(
+		TEXT("Generated facade imports the shared array range reader"),
+		Source.Contains(TEXT("EntryPoint = \"avid_value_array_read_range\"")));
+	TestTrue(
+		TEXT("Generated facade imports the shared array range writer"),
+		Source.Contains(TEXT("EntryPoint = \"avid_value_array_write_range\"")));
 	TSharedPtr<FJsonObject> ManifestObject;
 	if (TestTrue(TEXT("Array package manifest parses"), ParseJsonObject(Manifest, ManifestObject))
 		&& ManifestObject.IsValid())
 	{
+		const TArray<TSharedPtr<FJsonValue>>& RequiredImports =
+			ManifestObject->GetArrayField(TEXT("required_imports"));
 		TestTrue(
 			TEXT("Array package manifest authorizes the shared release import"),
-			ManifestObject->GetArrayField(TEXT("required_imports")).ContainsByPredicate(
+			RequiredImports.ContainsByPredicate(
 				[](const TSharedPtr<FJsonValue>& Value)
 				{
 					const TSharedPtr<FJsonObject> Import = Value->AsObject();
 					return Import.IsValid()
 						&& Import->GetStringField(TEXT("name")) == TEXT("avid_value_release")
 						&& Import->GetStringField(TEXT("signature")) == TEXT("(i)i");
+				}));
+		TestTrue(
+			TEXT("Array package manifest authorizes the shared range reader"),
+			RequiredImports.ContainsByPredicate(
+				[](const TSharedPtr<FJsonValue>& Value)
+				{
+					const TSharedPtr<FJsonObject> Import = Value->AsObject();
+					return Import.IsValid()
+						&& Import->GetStringField(TEXT("stable_id")) == TEXT("avidscript.value_array_read_range.v1")
+						&& Import->GetStringField(TEXT("module")) == TEXT("avidscript")
+						&& Import->GetStringField(TEXT("name")) == TEXT("avid_value_array_read_range")
+						&& Import->GetStringField(TEXT("signature")) == TEXT("(iiiii)i");
+				}));
+		TestTrue(
+			TEXT("Array package manifest authorizes the shared range writer"),
+			RequiredImports.ContainsByPredicate(
+				[](const TSharedPtr<FJsonValue>& Value)
+				{
+					const TSharedPtr<FJsonObject> Import = Value->AsObject();
+					return Import.IsValid()
+						&& Import->GetStringField(TEXT("stable_id")) == TEXT("avidscript.value_array_write_range.v1")
+						&& Import->GetStringField(TEXT("module")) == TEXT("avidscript")
+						&& Import->GetStringField(TEXT("name")) == TEXT("avid_value_array_write_range")
+						&& Import->GetStringField(TEXT("signature")) == TEXT("(iiiii)i");
 				}));
 	}
 
