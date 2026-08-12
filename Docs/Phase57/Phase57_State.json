@@ -7,14 +7,14 @@
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Superpowers/Specs/2026-08-12-phase57-compiler-managed-array-region-design.md",
-    "version": 5,
-    "sha256": "a090722b212b7ac310751d8bf256faf5ec5174f47ae1ba18bab89d26187d9f80",
-    "revision_reason": "P57.11D froze ordinary C# array region lowering, bounded one-region allocation, alias/call/return barriers, AvidExport, and the four-lane compiler provenance benchmark"
+    "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
+    "version": 6,
+    "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
+    "revision_reason": "P57.12A froze explicit self dynamic-multicast selection, generated AvidEvent contracts, typed delegate exports, prepared codecs, and session-owned transactional subscriptions"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region_Plan.md",
-    "closeout": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md"
+    "plan": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription_Plan.md",
+    "closeout": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription.md"
   },
   "batches": [
     {
@@ -118,6 +118,12 @@
       "status": "Completed",
       "evidence": "Ordinary C# T[] Length/index load/store now lower to bounded compiler-managed regions with alias/call/return barriers and no new host ABI; AvidExport provides stable custom exports; formal Phase57Array v2 completed 5 processes and 2520 full-hash-correct samples, compiler-region/Puerts P50 ratio 0.01098-0.05723 and N>=64 internal gate passed; Guest IR 35/35, Semantic 63/63, C# Guest 82/82, Wasm backend 15/15, no-clean UE5.8 builds, full Automation 341/341, and clean architecture gate passed.",
       "completed_at_utc": "2026-08-12T14:25:10.6400000Z"
+    },
+    {
+      "id": "P57.12A",
+      "status": "Completed",
+      "evidence": "Profile schema 8 and descriptor schema 11 now project explicit self dynamic multicast delegates into generated AvidEvent C# contracts and typed WASM exports; prepared codecs and a session-owned subscription owner provide missing-handler elision, transactional replacement, HostContext rebind, borrowed object handles, non-fatal reentrancy and teardown without per-event wrappers; Semantic 67/67, C# Guest 86/86, prepared semantic 13/13, semantic cache 25/25, UE5.8 no-clean build, delegate Automation 2/2 and full Automation 348/348 passed.",
+      "completed_at_utc": "2026-08-12T16:47:13.7131773Z"
     }
   ],
   "debt": [
@@ -137,8 +143,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.11D review closed ordinary C# array region lowering, bounded allocation, alias/call/return barriers, three-import compiler artifact provenance, AvidExport semantic projection, runtime-owned crossing counters, formal Puerts comparison boundaries, final full Automation, no-clean builds, and clean architecture gate.",
-    "completed_at_utc": "2026-08-12T14:25:10.6400000Z"
+    "evidence": "Centralized P57.12A review closed profile/descriptor canonical identity, generated facade and Roslyn projection, Guest export ABI, prepared codec ownership, missing-handler elision, transactional source replacement, HostContext rebind, borrowed object lifetime, reentrant dispatch and real UE multicast teardown.",
+    "completed_at_utc": "2026-08-12T16:47:13.7131773Z"
   },
   "budgets": {
     "ubt": 2,
@@ -146,25 +152,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 2,
-    "automation": 2,
-    "full_gate": 3
+    "ubt": 7,
+    "automation": 4,
+    "full_gate": 2
   },
   "freeze": {
-    "source_commit": "3c809cc5fa47fe424a9db033bf769613a1f88640",
-    "source_tree": "06053434dea7e772e9a42abf06696fdaf4370c16",
+    "source_commit": "54a573cb028543b01df73665757cad9833c5f00d",
+    "source_tree": "b252d392fd4e0df7d1fb021f8ce476ba05da7901",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region_Evidence.json",
-    "at_utc": "2026-08-12T14:25:10.6400000Z"
+    "review_evidence": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription_Evidence.json",
+    "at_utc": "2026-08-12T16:47:13.7131773Z"
   },
   "gate": {
     "report_path": "external:C:/tmp/AvidScript_P57_11D_Architecture_5fa6bbe.log",
     "report_sha256": "1330131de711c5617fc2ba852665a07d2b00c25d317577b5493f05d336fc0ca7",
-    "run_id": "P57.11D-clean-architecture-final",
+    "run_id": "P57.12A-clean-architecture-final",
     "verified_commit": "5fa6bbe4c3a76b71205f6e789eabff12b9202c57",
     "verified_tree": "66b7336bee25cd401495464d168e8d8957d685ff",
     "attestation_parent": "2a606c4f993f3d833495d6f538ebcd468f70a60c",
-    "attested_at_utc": "2026-08-12T14:25:10.6400000Z"
+    "attested_at_utc": "2026-08-12T16:47:13.7131773Z"
   },
   "protected_dirty": [
     {
@@ -186,7 +192,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "plan P57.12 delegate/event subscription, latent continuation, RPC/Blueprint/interface dispatch, FText, and a C#-only playable game demo closure",
-  "revision": 20,
-  "updated_at_utc": "2026-08-12T14:25:10.6400000Z"
+  "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
+  "revision": 21,
+  "updated_at_utc": "2026-08-12T16:47:13.7131773Z"
 }

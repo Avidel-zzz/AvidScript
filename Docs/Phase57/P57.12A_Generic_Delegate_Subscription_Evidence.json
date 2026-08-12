@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.12A",
+  "evidence_class": "implementation",
+  "captured_at_utc": "2026-08-12T16:47:13.7131773Z",
+  "candidate": {
+    "interface_freeze_commit": "d531a95",
+    "implementation_commit": "7fda6b5d1a1e8eb7ffed9e96884563e85f5e7e17",
+    "implementation_tree": "36ba04e4a9f865135114c4e08f00365eb9a808f4",
+    "final_source_commit": "54a573cb028543b01df73665757cad9833c5f00d",
+    "final_source_tree": "b252d392fd4e0df7d1fb021f8ce476ba05da7901",
+    "dirty": false,
+    "note": "final source adds replacement, reentrancy, teardown coverage and fixes reusable dynamic bridge ABI-shape comparison"
+  },
+  "environment": {
+    "ue_version": "5.8.0-0+UE5",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit"
+  },
+  "contracts": {
+    "profile_schema": 8,
+    "descriptor_schema": 11,
+    "semantic_schema": 9,
+    "semantic_version": "1.9",
+    "source_scope": "self",
+    "delegate_kind": "dynamic_multicast",
+    "selection": "explicit_include_events",
+    "handler_attribute": "AvidEvent",
+    "export_prefix": "avid_on_delegate_",
+    "maximum_abi_cells": 8,
+    "function_name_special_cases": 0,
+    "per_event_native_wrappers": 0
+  },
+  "runtime": {
+    "prepared_at_load": true,
+    "missing_guest_handler_subscribed": false,
+    "transactional_prepare_commit": true,
+    "failed_candidate_preserves_active": true,
+    "host_context_rebind": true,
+    "end_play_unbind": true,
+    "unload_unbind": true,
+    "reentrant_callback_policy": "drop_non_fatal",
+    "object_parameter_ownership": "borrowed_handle_released_after_callback"
+  },
+  "verification": {
+    "csharp_semantic_tests": "67/67 passed",
+    "csharp_guest_tests": "86/86 passed",
+    "prepared_semantic_tests": "13/13 passed",
+    "semantic_cache_entry_tests": "25/25 passed",
+    "canonical_no_clean_build": "4 actions; Result: Succeeded; no Editor target clean",
+    "focused_delegate_automation": "2 found; 2 performed; 2 succeeded; 0 failed; queue empty, TestExit, RequestExitWithStatus 0, and process exit 0 observed",
+    "full_avidscript_automation": "348 found; 348 performed; 348 succeeded; 0 failed; queue empty, TestExit, RequestExitWithStatus 0, and process exit 0 observed",
+    "architecture_check": "pending clean candidate attestation"
+  },
+  "log_sha256": {
+    "canonical_no_clean_build": "d97bee266a82e8731c744409255d5f4d1a385b47c31c2a1db3a2e422e90466b9",
+    "focused_delegate_automation": "0f7ab03672600c6f80256fa43ef3800e6af5955ccfd22c3f57b107aaf0beb278",
+    "full_avidscript_automation": "dd7fd8b2693d03468d8bc8079a17f18f9e81e981896a9b0e6f8f2e3b6def497d",
+    "architecture_check": "pending"
+  },
+  "performance": {
+    "new_measurement": false,
+    "claim": "no new performance result; existing P57.11D, P57.11B1 and P56 formal evidence remains authoritative"
+  },
+  "known_boundaries": {
+    "arbitrary_uobject_event_source": false,
+    "single_cast_delegate": false,
+    "event_add_syntax": false,
+    "lambda_or_closure": false,
+    "string_or_array_event_parameters": false,
+    "latent_rpc_interface_ftext": false,
+    "cook_shipping_mobile": false,
+    "pure_wasmtime_v8_p95_leadership": "P57-D06 remains Fixing"
+  },
+  "protected_dirty_paths_excluded": 3
+}
