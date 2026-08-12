@@ -11,6 +11,8 @@ internal static class SemanticCallableTests
         ArrayAndEnumTypeShapesAreProjected();
         DuplicateExportNamesFailClosed();
         MissingExportEntryPointFailsClosed();
+        AvidExportSupportsCapabilityParameters();
+        MixedExportAttributesFailClosed();
         GameplayCallbacksAreProjectedAndRooted();
         InvalidGameplayCallbackShapesFailClosed();
         GameplayCallbacksAreScopedToTheScriptHost();
@@ -18,7 +20,70 @@ internal static class SemanticCallableTests
         DataLaneMetadataIsProjectedForMethodsAndAccessors();
         BufferedWriteMetadataRequiresExecutableGeneratedExtern();
         InvalidDataLaneMetadataFailsClosed();
-        return 11;
+        return 13;
+    }
+
+    private static void AvidExportSupportsCapabilityParameters()
+    {
+        const string source = """
+            using System;
+
+            namespace AvidScript;
+
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class AvidExportAttribute : Attribute
+            {
+                public AvidExportAttribute(string entryPoint) { }
+            }
+
+            public static class Script
+            {
+                [AvidExport("avid_on_event")]
+                public static void OnEvent(int[] values, float logicalCalls) { }
+            }
+            """;
+        const string sourceId = "Scripts/AvidExportArray.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        SemanticCallable export = document.Callables.Single(callable =>
+            callable.Export?.Name == "avid_on_event");
+        Assert(document.Succeeded
+            && export.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:int32[]", "type:float32" }),
+            "AvidExport should retain capability parameters without CLR unmanaged ABI restrictions");
+    }
+
+    private static void MixedExportAttributesFailClosed()
+    {
+        const string source = """
+            using System;
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            [AttributeUsage(AttributeTargets.Method)]
+            public sealed class AvidExportAttribute : Attribute
+            {
+                public AvidExportAttribute(string entryPoint) { }
+            }
+
+            public static class Script
+            {
+                [AvidExport("avid_on_tick")]
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
+                public static void Tick(float deltaSeconds) { }
+            }
+            """;
+        const string sourceId = "Scripts/MixedExportAttributes.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+
+        SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
+
+        Assert(!document.Succeeded
+            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5005"),
+            "mixed export attributes should fail closed with ASCS5005");
     }
 
     private static void DataLaneMetadataIsProjectedForMethodsAndAccessors()

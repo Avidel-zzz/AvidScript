@@ -1,5 +1,5 @@
 {
-  "contract": "phase57_array_profile.v1",
+  "contract": "phase57_array_profile.v2",
   "profile_id": "phase57_array_diagnostic",
   "measurement_level": "diagnostic",
   "process_runs": 1,
@@ -38,17 +38,25 @@
       "path": "range_read_write",
       "representation": "array_value_capability_int32",
       "allocation_policy": "capability_and_guest_array_reused_outside_timed_region",
+      "headline_eligible": false
+    },
+    {
+      "lane_id": "avidscript_wasmtime_compiler_region",
+      "runtime": "avidscript_wasmtime",
+      "path": "csharp_compiler_managed_region",
+      "representation": "array_value_capability_int32",
+      "allocation_policy": "capability_outside_timed_region_and_compiler_region_per_export",
       "headline_eligible": true
     }
   ],
   "headline": {
     "shape": "int32",
-    "comparison": "avidscript_wasmtime_bulk_vs_puerts_v8_reflection_tarray",
+    "comparison": "avidscript_wasmtime_compiler_region_vs_puerts_v8_reflection_tarray",
     "required_sizes": [1, 4, 16, 64, 256, 1024]
   },
   "internal_gate": {
     "classification": "diagnostic_only",
-    "ratio": "avidscript_wasmtime_bulk_over_avidscript_wasmtime_element",
+    "ratio": "avidscript_wasmtime_compiler_region_over_avidscript_wasmtime_element",
     "minimum_size": 64,
     "maximum": 0.80
   },

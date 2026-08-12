@@ -10,7 +10,7 @@
     "correctness"
   ],
   "properties": {
-    "contract": { "const": "phase57_array_result.v1" },
+    "contract": { "const": "phase57_array_result.v2" },
     "profile_id": { "type": "string", "minLength": 1 },
     "profile_sha256": { "$ref": "#/$defs/sha256" },
     "measurement_level": { "enum": ["diagnostic", "formal"] },
@@ -22,7 +22,7 @@
     },
     "statistics": {
       "type": "array",
-      "minItems": 18,
+      "minItems": 24,
       "items": { "$ref": "#/$defs/statistic" }
     },
     "headline": {
@@ -32,10 +32,10 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["size", "avidscript_bulk_over_puerts_reflection"],
+        "required": ["size", "avidscript_compiler_region_over_puerts_reflection"],
         "properties": {
           "size": { "enum": [1, 4, 16, 64, 256, 1024] },
-          "avidscript_bulk_over_puerts_reflection": { "type": "number", "exclusiveMinimum": 0 }
+          "avidscript_compiler_region_over_puerts_reflection": { "type": "number", "exclusiveMinimum": 0 }
         }
       }
     },
@@ -55,10 +55,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["size", "bulk_over_element", "passed"],
+            "required": ["size", "compiler_region_over_element", "passed"],
             "properties": {
               "size": { "enum": [64, 256, 1024] },
-              "bulk_over_element": { "type": "number", "exclusiveMinimum": 0 },
+              "compiler_region_over_element": { "type": "number", "exclusiveMinimum": 0 },
               "passed": { "type": "boolean" }
             }
           }
@@ -83,7 +83,7 @@
       "additionalProperties": false,
       "required": [
         "lane", "size", "sample_index", "logical_calls", "elements",
-        "bytes", "host_crossings", "elapsed_ns", "ns_per_logical_call",
+        "bytes", "host_transfer_bytes", "host_crossings", "elapsed_ns", "ns_per_logical_call",
         "ns_per_element", "full_hash"
       ],
       "properties": {
@@ -91,7 +91,8 @@
           "enum": [
             "puerts_v8_reflection_tarray",
             "avidscript_wasmtime_element",
-            "avidscript_wasmtime_bulk"
+            "avidscript_wasmtime_bulk",
+            "avidscript_wasmtime_compiler_region"
           ]
         },
         "size": { "enum": [1, 4, 16, 64, 256, 1024] },
@@ -99,6 +100,7 @@
         "logical_calls": { "type": "integer", "minimum": 1 },
         "elements": { "type": "integer", "minimum": 2 },
         "bytes": { "type": "integer", "minimum": 8 },
+        "host_transfer_bytes": { "type": "integer", "minimum": 8 },
         "host_crossings": { "type": "integer", "minimum": 1 },
         "elapsed_ns": { "type": "number", "exclusiveMinimum": 0 },
         "ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },
@@ -114,19 +116,24 @@
         "process_run", "sizes", "samples", "provenance"
       ],
       "properties": {
-        "contract": { "const": "phase57_array_process_result.v1" },
+        "contract": { "const": "phase57_array_process_result.v2" },
         "profile_id": { "type": "string", "minLength": 1 },
         "profile_sha256": { "$ref": "#/$defs/sha256" },
         "measurement_level": { "enum": ["diagnostic", "formal"] },
         "process_run": { "type": "integer", "minimum": 1 },
         "sizes": { "const": [1, 4, 16, 64, 256, 1024] },
-        "samples": { "type": "array", "minItems": 54, "items": { "$ref": "#/$defs/sample" } },
+        "samples": { "type": "array", "minItems": 72, "items": { "$ref": "#/$defs/sample" } },
         "provenance": {
           "type": "object",
           "additionalProperties": false,
           "required": [
             "engine_version", "platform", "puerts_script_sha256",
             "puerts_runtime_sha256", "avidscript_wasm_sha256",
+            "avidscript_compiler_wasm_sha256",
+            "avidscript_compiler_source_sha256",
+            "avidscript_compiler_reference_sha256",
+            "avidscript_compiler_guest_ir_sha256",
+            "avidscript_compiler_inspection_sha256",
             "avidscript_backend", "avidscript_execution_mode"
           ],
           "properties": {
@@ -135,6 +142,11 @@
             "puerts_script_sha256": { "$ref": "#/$defs/sha256" },
             "puerts_runtime_sha256": { "$ref": "#/$defs/sha256" },
             "avidscript_wasm_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_compiler_wasm_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_compiler_source_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_compiler_reference_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_compiler_guest_ir_sha256": { "$ref": "#/$defs/sha256" },
+            "avidscript_compiler_inspection_sha256": { "$ref": "#/$defs/sha256" },
             "avidscript_backend": { "const": "wasmtime" },
             "avidscript_execution_mode": { "enum": ["interpreter", "jit"] }
           }
@@ -145,7 +157,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "lane", "size", "logical_calls", "elements", "bytes",
+        "lane", "size", "logical_calls", "elements", "bytes", "host_transfer_bytes",
         "host_crossings", "p50_ns_per_logical_call", "p95_ns_per_logical_call",
         "p50_ns_per_element", "full_hash"
       ],
@@ -155,6 +167,7 @@
         "logical_calls": { "type": "integer", "minimum": 1 },
         "elements": { "type": "integer", "minimum": 2 },
         "bytes": { "type": "integer", "minimum": 8 },
+        "host_transfer_bytes": { "type": "integer", "minimum": 8 },
         "host_crossings": { "type": "integer", "minimum": 1 },
         "p50_ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },
         "p95_ns_per_logical_call": { "type": "number", "exclusiveMinimum": 0 },

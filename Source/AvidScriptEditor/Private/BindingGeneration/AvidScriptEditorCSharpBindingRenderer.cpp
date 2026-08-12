@@ -1907,6 +1907,19 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("namespace AvidScript;"),
 		TEXT("")
 	};
+	Lines.Append({
+		TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]"),
+		TEXT("public sealed class AvidExportAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    public AvidExportAttribute(string entryPoint)"),
+		TEXT("    {"),
+		TEXT("        EntryPoint = entryPoint;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public string EntryPoint { get; }"),
+		TEXT("}"),
+		TEXT("")
+	});
 	FAvidScriptEditorCSharpStateContractRenderer::AppendReferenceSurface(Lines);
 	Lines.Append({
 		TEXT("internal static class AvidScriptBindingPackage"),

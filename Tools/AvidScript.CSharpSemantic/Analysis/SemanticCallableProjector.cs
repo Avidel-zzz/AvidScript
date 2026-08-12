@@ -16,6 +16,8 @@ internal static class SemanticCallableProjector
         "global::System.Runtime.InteropServices.DllImportAttribute";
     private const string UnmanagedCallersOnlyAttributeName =
         "global::System.Runtime.InteropServices.UnmanagedCallersOnlyAttribute";
+    private const string AvidExportAttributeName =
+        "global::AvidScript.AvidExportAttribute";
     private const string DataLaneAttributeName =
         "global::AvidScript.AvidScriptDataLaneAttribute";
 
@@ -164,18 +166,31 @@ internal static class SemanticCallableProjector
         ICollection<SemanticDiagnostic> diagnostics,
         SemanticCompilationUnit unit)
     {
-        AttributeData? attribute = FindAttribute(method, UnmanagedCallersOnlyAttributeName);
-        if (attribute is null)
+        AttributeData? unmanagedAttribute = FindAttribute(method, UnmanagedCallersOnlyAttributeName);
+        AttributeData? avidAttribute = FindAttribute(method, AvidExportAttributeName);
+        if (unmanagedAttribute is null && avidAttribute is null)
         {
             return null;
         }
 
-        string? name = GetNamedString(attribute, "EntryPoint");
+        if (unmanagedAttribute is not null && avidAttribute is not null)
+        {
+            diagnostics.Add(CreateDiagnostic(
+                "ASCS5005",
+                "A callable must use either AvidExport or UnmanagedCallersOnly, not both.",
+                method,
+                unit));
+            return null;
+        }
+
+        string? name = avidAttribute is not null
+            ? avidAttribute.ConstructorArguments.FirstOrDefault().Value as string
+            : GetNamedString(unmanagedAttribute!, "EntryPoint");
         if (string.IsNullOrWhiteSpace(name))
         {
             diagnostics.Add(CreateDiagnostic(
                 "ASCS5002",
-                "UnmanagedCallersOnly requires a constant non-empty EntryPoint for AvidScript exports.",
+                "AvidScript exports require a constant non-empty entry-point name.",
                 method,
                 unit));
             return null;

@@ -206,6 +206,11 @@ public:
 	bool ReadStateBytes(uint32 GuestAddress, TArrayView<uint8> OutBytes, FString& OutError) const;
 	bool WriteStateBytes(uint32 GuestAddress, TConstArrayView<uint8> Bytes, FString& OutError);
 #if WITH_DEV_AUTOMATION_TESTS
+	bool InvokeI32PairExportHotForTesting(
+		const FString& ExportName,
+		int32 FirstArgument,
+		int32 SecondArgument,
+		FAvidScriptWasmSmokeResult& OutFailure);
 	void SetStateWriteFailuresForTesting(TConstArrayView<int32> InWriteAttempts);
 	void ClearStateWriteFailureForTesting();
 	void BeginTypedCallbackEpochForTesting() { BeginTypedCallbackEpoch(); }
@@ -573,6 +578,8 @@ private:
 	bool bGameplayEventExportLookupAttempted = false;
 	bool bHasBegunPlay = false;
 #if WITH_DEV_AUTOMATION_TESTS
+	FAvidScriptCachedVmExport TestingI32PairExport;
+	FString TestingI32PairExportName;
 	int32 StateWriteAttemptCount = 0;
 	TArray<int32> StateWriteFailureAttempts;
 #endif

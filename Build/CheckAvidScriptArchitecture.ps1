@@ -2838,6 +2838,23 @@ foreach ($RequiredBoundedArrayRegionContract in @(
         Add-Violation "bounded Wasm array region compiler is missing $RequiredBoundedArrayRegionContract"
     }
 }
+foreach ($RequiredAvidExportContract in @(
+    'AvidExportAttributeName',
+    'global::AvidScript.AvidExportAttribute',
+    'A callable must use either AvidExport or UnmanagedCallersOnly, not both.')) {
+    if (-not $SemanticCallableProjectorSource.Contains($RequiredAvidExportContract)) {
+        Add-Violation "AvidExport semantic projection is missing $RequiredAvidExportContract"
+    }
+}
+$WasmRuntimeHeaderForTesting = Read-RequiredFile 'Source/AvidScriptRuntime/Public/AvidScriptWasmRuntime.h'
+foreach ($RequiredBenchmarkExportContract in @(
+    'InvokeI32PairExportHotForTesting',
+    'TestingI32PairExport',
+    'TestingI32PairExportName')) {
+    if (-not $WasmRuntimeHeaderForTesting.Contains($RequiredBenchmarkExportContract)) {
+        Add-Violation "benchmark-only prepared export path is missing $RequiredBenchmarkExportContract"
+    }
+}
 $WasmCompileCallSlice = Get-SourceSlice `
     $WasmFunctionCompilerSource `
     'private void CompileCall(' `

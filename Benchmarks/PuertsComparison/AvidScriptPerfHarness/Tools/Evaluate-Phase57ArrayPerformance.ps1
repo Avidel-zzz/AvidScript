@@ -19,7 +19,8 @@ $expectedSizes = @(1, 4, 16, 64, 256, 1024)
 $expectedLanes = @(
     'puerts_v8_reflection_tarray',
     'avidscript_wasmtime_element',
-    'avidscript_wasmtime_bulk'
+    'avidscript_wasmtime_bulk',
+    'avidscript_wasmtime_compiler_region'
 )
 
 function Read-JsonFile {
@@ -70,7 +71,7 @@ $resolvedProfilePath = (Resolve-Path -LiteralPath $ProfilePath).Path
 $profile = Read-JsonFile -Path $resolvedProfilePath
 $profileSha256 = (Get-FileHash -LiteralPath $resolvedProfilePath -Algorithm SHA256).Hash.ToLowerInvariant()
 
-Assert-True ([string]$profile.contract -ceq 'phase57_array_profile.v1') `
+Assert-True ([string]$profile.contract -ceq 'phase57_array_profile.v2') `
     'Phase57Array profile contract mismatch.'
 Assert-ExactSequence @($profile.sizes) $expectedSizes 'profile sizes'
 Assert-ExactSequence @($profile.headline.required_sizes) $expectedSizes 'headline sizes'
@@ -90,7 +91,7 @@ $allSamples = @()
 $seenRuns = [Collections.Generic.HashSet[int]]::new()
 foreach ($path in $ProcessResultPaths) {
     $result = Read-JsonFile -Path $path
-    Assert-True ([string]$result.contract -ceq 'phase57_array_process_result.v1') `
+    Assert-True ([string]$result.contract -ceq 'phase57_array_process_result.v2') `
         "Process result contract mismatch: $path"
     Assert-True ([string]$result.profile_id -ceq [string]$profile.profile_id -and
         [string]$result.profile_sha256 -ceq $profileSha256 -and
@@ -106,7 +107,12 @@ foreach ($path in $ProcessResultPaths) {
     foreach ($digestName in @(
         'puerts_script_sha256',
         'puerts_runtime_sha256',
-        'avidscript_wasm_sha256')) {
+        'avidscript_wasm_sha256',
+        'avidscript_compiler_wasm_sha256',
+        'avidscript_compiler_source_sha256',
+        'avidscript_compiler_reference_sha256',
+        'avidscript_compiler_guest_ir_sha256',
+        'avidscript_compiler_inspection_sha256')) {
         Assert-True ([string]$result.provenance.$digestName -cmatch '^[0-9a-f]{64}$') `
             "Invalid provenance digest: $digestName"
     }
@@ -125,13 +131,22 @@ foreach ($path in $ProcessResultPaths) {
             $logicalCalls
         } elseif ($lane -ceq 'avidscript_wasmtime_element') {
             $expectedElements
-        } else {
+        } elseif ($lane -ceq 'avidscript_wasmtime_bulk') {
             $logicalCalls * 2
+        } else {
+            4
         }
         Assert-True ([int64]$sample.elements -eq $expectedElements -and
             [int64]$sample.bytes -eq $expectedElements * 4 -and
             [int64]$sample.host_crossings -eq $expectedCrossings) `
             "Counter contract mismatch lane=$lane N=$size"
+        $expectedTransferBytes = if ($lane -ceq 'avidscript_wasmtime_compiler_region') {
+            $size * 2 * 4
+        } else {
+            $expectedElements * 4
+        }
+        Assert-True ([int64]$sample.host_transfer_bytes -eq $expectedTransferBytes) `
+            "Host transfer byte mismatch lane=$lane N=$size"
         Assert-True ([double]$sample.elapsed_ns -gt 0 -and
             [double]$sample.ns_per_logical_call -gt 0 -and
             [double]$sample.ns_per_element -gt 0) `
@@ -146,6 +161,7 @@ foreach ($path in $ProcessResultPaths) {
             logical_calls = $logicalCalls
             elements = [int64]$sample.elements
             bytes = [int64]$sample.bytes
+            host_transfer_bytes = [int64]$sample.host_transfer_bytes
             host_crossings = [int64]$sample.host_crossings
             elapsed_ns = [double]$sample.elapsed_ns
             ns_per_logical_call = [double]$sample.ns_per_logical_call
@@ -182,6 +198,7 @@ foreach ($size in $expectedSizes) {
             logical_calls = [int64]$rows[0].logical_calls
             elements = [int64]$rows[0].elements
             bytes = [int64]$rows[0].bytes
+            host_transfer_bytes = [int64]$rows[0].host_transfer_bytes
             host_crossings = [int64]$rows[0].host_crossings
             p50_ns_per_logical_call = Get-Percentile @($rows.ns_per_logical_call) 0.50
             p95_ns_per_logical_call = Get-Percentile @($rows.ns_per_logical_call) 0.95
@@ -200,20 +217,20 @@ foreach ($size in $expectedSizes) {
     $element = $statistics | Where-Object {
         $_.lane -ceq 'avidscript_wasmtime_element' -and $_.size -eq $size
     }
-    $bulk = $statistics | Where-Object {
-        $_.lane -ceq 'avidscript_wasmtime_bulk' -and $_.size -eq $size
+    $compilerRegion = $statistics | Where-Object {
+        $_.lane -ceq 'avidscript_wasmtime_compiler_region' -and $_.size -eq $size
     }
     $headline += [pscustomobject]@{
         size = $size
-        avidscript_bulk_over_puerts_reflection =
-            [double]$bulk.p50_ns_per_logical_call / [double]$puerts.p50_ns_per_logical_call
+        avidscript_compiler_region_over_puerts_reflection =
+            [double]$compilerRegion.p50_ns_per_logical_call / [double]$puerts.p50_ns_per_logical_call
     }
     if ($size -ge 64) {
-        $ratio = [double]$bulk.p50_ns_per_logical_call /
+        $ratio = [double]$compilerRegion.p50_ns_per_logical_call /
             [double]$element.p50_ns_per_logical_call
         $gateRows += [pscustomobject]@{
             size = $size
-            bulk_over_element = $ratio
+            compiler_region_over_element = $ratio
             passed = $ratio -le [double]$profile.internal_gate.maximum
         }
     }
@@ -222,7 +239,7 @@ $gatePassed = @($gateRows | Where-Object { -not $_.passed }).Count -eq 0
 $correctnessPassed = $mismatches.Count -eq 0
 
 $aggregate = [ordered]@{
-    contract = 'phase57_array_result.v1'
+    contract = 'phase57_array_result.v2'
     profile_id = [string]$profile.profile_id
     profile_sha256 = $profileSha256
     measurement_level = [string]$profile.measurement_level
@@ -249,7 +266,7 @@ if (-not $correctnessPassed) {
     throw "Phase57Array full-hash correctness failed: $($mismatches -join '; ')"
 }
 if ($RequireInternalGate -and -not $gatePassed) {
-    throw 'Phase57Array internal bulk/element diagnostic gate failed.'
+    throw 'Phase57Array internal compiler-region/element diagnostic gate failed.'
 }
 
 [pscustomobject]@{

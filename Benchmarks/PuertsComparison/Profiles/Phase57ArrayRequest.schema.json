@@ -8,10 +8,13 @@
     "contract", "profile_id", "profile_sha256", "measurement_level",
     "process_run", "warmup_samples", "timed_samples", "seed", "sizes",
     "logical_calls_by_size", "lane_order", "puerts_script_sha256",
-    "puerts_runtime_sha256", "avidscript_wasm_path", "avidscript_wasm_sha256"
+    "puerts_runtime_sha256", "avidscript_wasm_path", "avidscript_wasm_sha256",
+    "avidscript_compiler_wasm_path", "avidscript_compiler_wasm_sha256",
+    "avidscript_compiler_source_sha256", "avidscript_compiler_reference_sha256",
+    "avidscript_compiler_guest_ir_sha256", "avidscript_compiler_inspection_sha256"
   ],
   "properties": {
-    "contract": { "const": "phase57_array_request.v1" },
+    "contract": { "const": "phase57_array_request.v2" },
     "profile_id": { "type": "string", "minLength": 1 },
     "profile_sha256": { "$ref": "#/$defs/sha256" },
     "measurement_level": { "enum": ["diagnostic", "formal"] },
@@ -23,21 +26,28 @@
     "logical_calls_by_size": { "$ref": "Phase57ArrayProfile.schema.json#/properties/logical_calls_by_size" },
     "lane_order": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 4,
+      "maxItems": 4,
       "uniqueItems": true,
       "items": {
         "enum": [
           "puerts_v8_reflection_tarray",
           "avidscript_wasmtime_element",
-          "avidscript_wasmtime_bulk"
+          "avidscript_wasmtime_bulk",
+          "avidscript_wasmtime_compiler_region"
         ]
       }
     },
     "puerts_script_sha256": { "$ref": "#/$defs/sha256" },
     "puerts_runtime_sha256": { "$ref": "#/$defs/sha256" },
     "avidscript_wasm_path": { "type": "string", "minLength": 1 },
-    "avidscript_wasm_sha256": { "$ref": "#/$defs/sha256" }
+    "avidscript_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_compiler_wasm_path": { "type": "string", "minLength": 1 },
+    "avidscript_compiler_wasm_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_compiler_source_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_compiler_reference_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_compiler_guest_ir_sha256": { "$ref": "#/$defs/sha256" },
+    "avidscript_compiler_inspection_sha256": { "$ref": "#/$defs/sha256" }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }

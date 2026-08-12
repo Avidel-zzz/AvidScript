@@ -38,6 +38,7 @@ namespace
 	const FString PuertsLane(TEXT("puerts_v8_reflection_tarray"));
 	const FString ElementLane(TEXT("avidscript_wasmtime_element"));
 	const FString BulkLane(TEXT("avidscript_wasmtime_bulk"));
+	const FString CompilerRegionLane(TEXT("avidscript_wasmtime_compiler_region"));
 
 	uint32 Phase57ArrayMix(const uint32 Value)
 	{
@@ -122,6 +123,12 @@ namespace
 		FString PuertsRuntimeSha256;
 		FString AvidScriptWasmPath;
 		FString AvidScriptWasmSha256;
+		FString AvidScriptCompilerWasmPath;
+		FString AvidScriptCompilerWasmSha256;
+		FString AvidScriptCompilerSourceSha256;
+		FString AvidScriptCompilerReferenceSha256;
+		FString AvidScriptCompilerGuestIrSha256;
+		FString AvidScriptCompilerInspectionSha256;
 	};
 
 	bool ReadRequiredString(
@@ -158,14 +165,20 @@ namespace
 		}
 		FString Contract;
 		if (!ReadRequiredString(Root, TEXT("contract"), Contract, OutError) ||
-			Contract != TEXT("phase57_array_request.v1") ||
+			Contract != TEXT("phase57_array_request.v2") ||
 			!ReadRequiredString(Root, TEXT("profile_id"), OutRequest.ProfileId, OutError) ||
 			!ReadRequiredString(Root, TEXT("profile_sha256"), OutRequest.ProfileSha256, OutError) ||
 			!ReadRequiredString(Root, TEXT("measurement_level"), OutRequest.MeasurementLevel, OutError) ||
 			!ReadRequiredString(Root, TEXT("puerts_script_sha256"), OutRequest.PuertsScriptSha256, OutError) ||
 			!ReadRequiredString(Root, TEXT("puerts_runtime_sha256"), OutRequest.PuertsRuntimeSha256, OutError) ||
 			!ReadRequiredString(Root, TEXT("avidscript_wasm_path"), OutRequest.AvidScriptWasmPath, OutError) ||
-			!ReadRequiredString(Root, TEXT("avidscript_wasm_sha256"), OutRequest.AvidScriptWasmSha256, OutError))
+			!ReadRequiredString(Root, TEXT("avidscript_wasm_sha256"), OutRequest.AvidScriptWasmSha256, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_wasm_path"), OutRequest.AvidScriptCompilerWasmPath, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_wasm_sha256"), OutRequest.AvidScriptCompilerWasmSha256, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_source_sha256"), OutRequest.AvidScriptCompilerSourceSha256, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_reference_sha256"), OutRequest.AvidScriptCompilerReferenceSha256, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_guest_ir_sha256"), OutRequest.AvidScriptCompilerGuestIrSha256, OutError) ||
+			!ReadRequiredString(Root, TEXT("avidscript_compiler_inspection_sha256"), OutRequest.AvidScriptCompilerInspectionSha256, OutError))
 		{
 			if (OutError.IsEmpty())
 			{
@@ -221,16 +234,17 @@ namespace
 		}
 
 		const TArray<TSharedPtr<FJsonValue>>* LaneOrder = nullptr;
-		if (!Root->TryGetArrayField(TEXT("lane_order"), LaneOrder) || LaneOrder->Num() != 3)
+		if (!Root->TryGetArrayField(TEXT("lane_order"), LaneOrder) || LaneOrder->Num() != 4)
 		{
-			OutError = TEXT("Phase57Array request must contain three lanes");
+			OutError = TEXT("Phase57Array request must contain four lanes");
 			return false;
 		}
 		TSet<FString> SeenLanes;
 		for (const TSharedPtr<FJsonValue>& LaneValue : *LaneOrder)
 		{
 			const FString Lane = LaneValue->AsString();
-			if ((Lane != PuertsLane && Lane != ElementLane && Lane != BulkLane) || SeenLanes.Contains(Lane))
+			if ((Lane != PuertsLane && Lane != ElementLane && Lane != BulkLane &&
+				 Lane != CompilerRegionLane) || SeenLanes.Contains(Lane))
 			{
 				OutError = TEXT("Phase57Array lane_order is invalid");
 				return false;
@@ -305,6 +319,7 @@ namespace
 		int32 LogicalCalls = 0;
 		uint64 Elements = 0;
 		uint64 Bytes = 0;
+		uint64 HostTransferBytes = 0;
 		uint64 HostCrossings = 0;
 		double ElapsedNs = 0.0;
 		FString FullHash;
@@ -367,23 +382,37 @@ namespace
 			}
 		};
 
-		const int32 Header[] = { static_cast<int32>(Token), LogicalCalls };
-		if (!Runtime.WriteStateBytes(
-				ArrayTokenAddress,
-				MakeArrayView(
-					reinterpret_cast<const uint8*>(Header),
-					sizeof(Header)),
-				OutError))
+		if (Lane != CompilerRegionLane)
 		{
-			ReleaseToken();
-			return false;
+			const int32 Header[] = { static_cast<int32>(Token), LogicalCalls };
+			if (!Runtime.WriteStateBytes(
+					ArrayTokenAddress,
+					MakeArrayView(
+						reinterpret_cast<const uint8*>(Header),
+						sizeof(Header)),
+					OutError))
+			{
+				ReleaseToken();
+				return false;
+			}
 		}
 
 		FAvidScriptWasmSmokeResult Failure;
-		const int32 EventId = Lane == ElementLane ? 0 : 1;
+		const int32 HostImportsBefore = Runtime.GetHostImportCallCountForTesting();
 		const double StartSeconds = FPlatformTime::Seconds();
-		const bool bDispatched = Runtime.DispatchEventHot(EventId, static_cast<float>(Size), Failure);
+		const bool bDispatched = Lane == CompilerRegionLane
+			? Runtime.InvokeI32PairExportHotForTesting(
+				TEXT("phase57_array_run"),
+				static_cast<int32>(Token),
+				LogicalCalls,
+				Failure)
+			: Runtime.DispatchEventHot(
+				Lane == ElementLane ? 0 : 1,
+				static_cast<float>(Size),
+				Failure);
 		const double ElapsedNs = (FPlatformTime::Seconds() - StartSeconds) * 1.0e9;
+		const int32 ObservedHostImports =
+			Runtime.GetHostImportCallCountForTesting() - HostImportsBefore;
 		if (!bDispatched)
 		{
 			OutError = FString::Printf(
@@ -394,10 +423,10 @@ namespace
 		}
 
 		uint32 GuestHash = 0;
-		if (!Runtime.ReadStateBytes(
-				FullHashAddress,
-				MakeArrayView(reinterpret_cast<uint8*>(&GuestHash), sizeof(GuestHash)),
-				OutError))
+		if (Lane != CompilerRegionLane && !Runtime.ReadStateBytes(
+			FullHashAddress,
+			MakeArrayView(reinterpret_cast<uint8*>(&GuestHash), sizeof(GuestHash)),
+			OutError))
 		{
 			ReleaseToken();
 			return false;
@@ -415,6 +444,10 @@ namespace
 		{
 			ReleaseToken();
 			return false;
+		}
+		if (Lane == CompilerRegionLane)
+		{
+			GuestHash = HashValues(ActualValues);
 		}
 		ReleaseToken();
 		if (ActualValues != ExpectedValues || GuestHash != ExpectedHash)
@@ -434,9 +467,24 @@ namespace
 		OutSample.LogicalCalls = LogicalCalls;
 		OutSample.Elements = static_cast<uint64>(LogicalCalls) * Size * 2u;
 		OutSample.Bytes = OutSample.Elements * ArrayElementBytes;
-		OutSample.HostCrossings = Lane == ElementLane
+		OutSample.HostTransferBytes = Lane == CompilerRegionLane
+			? static_cast<uint64>(Size) * 2u * ArrayElementBytes
+			: OutSample.Bytes;
+		const uint64 ExpectedHostCrossings = Lane == ElementLane
 			? static_cast<uint64>(LogicalCalls) * Size * 2u
-			: static_cast<uint64>(LogicalCalls) * 2u;
+			: Lane == CompilerRegionLane ? 4u : static_cast<uint64>(LogicalCalls) * 2u;
+		if (ObservedHostImports < 0 ||
+			static_cast<uint64>(ObservedHostImports) != ExpectedHostCrossings)
+		{
+			OutError = FString::Printf(
+				TEXT("Phase57Array host crossing mismatch lane=%s N=%d expected=%llu actual=%d"),
+				*Lane,
+				Size,
+				ExpectedHostCrossings,
+				ObservedHostImports);
+			return false;
+		}
+		OutSample.HostCrossings = ExpectedHostCrossings;
 		OutSample.ElapsedNs = FMath::Max(ElapsedNs, 1.0);
 		OutSample.FullHash = FormatHash(GuestHash);
 		return true;
@@ -449,7 +497,7 @@ namespace
 		FString& OutError)
 	{
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
-		Root->SetStringField(TEXT("contract"), TEXT("phase57_array_process_result.v1"));
+		Root->SetStringField(TEXT("contract"), TEXT("phase57_array_process_result.v2"));
 		Root->SetStringField(TEXT("profile_id"), Request.ProfileId);
 		Root->SetStringField(TEXT("profile_sha256"), Request.ProfileSha256);
 		Root->SetStringField(TEXT("measurement_level"), Request.MeasurementLevel);
@@ -472,6 +520,9 @@ namespace
 			JsonSample->SetNumberField(TEXT("logical_calls"), Sample.LogicalCalls);
 			JsonSample->SetNumberField(TEXT("elements"), static_cast<double>(Sample.Elements));
 			JsonSample->SetNumberField(TEXT("bytes"), static_cast<double>(Sample.Bytes));
+			JsonSample->SetNumberField(
+				TEXT("host_transfer_bytes"),
+				static_cast<double>(Sample.HostTransferBytes));
 			JsonSample->SetNumberField(TEXT("host_crossings"), static_cast<double>(Sample.HostCrossings));
 			JsonSample->SetNumberField(TEXT("elapsed_ns"), Sample.ElapsedNs);
 			JsonSample->SetNumberField(
@@ -491,6 +542,11 @@ namespace
 		Provenance->SetStringField(TEXT("puerts_script_sha256"), Request.PuertsScriptSha256);
 		Provenance->SetStringField(TEXT("puerts_runtime_sha256"), Request.PuertsRuntimeSha256);
 		Provenance->SetStringField(TEXT("avidscript_wasm_sha256"), Request.AvidScriptWasmSha256);
+		Provenance->SetStringField(TEXT("avidscript_compiler_wasm_sha256"), Request.AvidScriptCompilerWasmSha256);
+		Provenance->SetStringField(TEXT("avidscript_compiler_source_sha256"), Request.AvidScriptCompilerSourceSha256);
+		Provenance->SetStringField(TEXT("avidscript_compiler_reference_sha256"), Request.AvidScriptCompilerReferenceSha256);
+		Provenance->SetStringField(TEXT("avidscript_compiler_guest_ir_sha256"), Request.AvidScriptCompilerGuestIrSha256);
+		Provenance->SetStringField(TEXT("avidscript_compiler_inspection_sha256"), Request.AvidScriptCompilerInspectionSha256);
 		Provenance->SetStringField(TEXT("avidscript_backend"), TEXT("wasmtime"));
 		Provenance->SetStringField(TEXT("avidscript_execution_mode"), TEXT("jit"));
 		Root->SetObjectField(TEXT("provenance"), Provenance);
@@ -543,12 +599,15 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 	FString ActualScriptSha256;
 	FString ActualPuertsRuntimeSha256;
 	FString ActualWasmSha256;
+	FString ActualCompilerWasmSha256;
 	if (!GetPhase57ArrayFileSha256(ScriptPath, ActualScriptSha256, OutError) ||
 		!GetPhase57ArrayFileSha256(PuertsRuntimePath, ActualPuertsRuntimeSha256, OutError) ||
 		!GetPhase57ArrayFileSha256(Request.AvidScriptWasmPath, ActualWasmSha256, OutError) ||
+		!GetPhase57ArrayFileSha256(Request.AvidScriptCompilerWasmPath, ActualCompilerWasmSha256, OutError) ||
 		ActualScriptSha256 != Request.PuertsScriptSha256 ||
 		ActualPuertsRuntimeSha256 != Request.PuertsRuntimeSha256 ||
-		ActualWasmSha256 != Request.AvidScriptWasmSha256)
+		ActualWasmSha256 != Request.AvidScriptWasmSha256 ||
+		ActualCompilerWasmSha256 != Request.AvidScriptCompilerWasmSha256)
 	{
 		if (OutError.IsEmpty())
 		{
@@ -601,9 +660,17 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 	}
 
 	TArray<uint8> WasmBytes;
+	TArray<uint8> CompilerWasmBytes;
 	if (!FFileHelper::LoadFileToArray(WasmBytes, *Request.AvidScriptWasmPath))
 	{
 		OutError = TEXT("Phase57Array Wasm kernel could not be loaded");
+		PuertsEnvironment.Reset();
+		DestroyWorld();
+		return false;
+	}
+	if (!FFileHelper::LoadFileToArray(CompilerWasmBytes, *Request.AvidScriptCompilerWasmPath))
+	{
+		OutError = TEXT("Phase57Array compiler-managed Wasm could not be loaded");
 		PuertsEnvironment.Reset();
 		DestroyWorld();
 		return false;
@@ -614,13 +681,20 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
 	Selection.bAllowFallback = false;
 	FAvidScriptWasmRuntimeInstance Runtime(Selection);
+	FAvidScriptWasmRuntimeInstance CompilerRuntime(Selection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
 	if (!Runtime.LoadModule(
 			WasmBytes.GetData(),
 			WasmBytes.Num(),
 			TEXT("phase57_array_kernel"),
 			RuntimeResult) ||
-		!Runtime.BeginPlay(RuntimeResult))
+		!Runtime.BeginPlay(RuntimeResult) ||
+		!CompilerRuntime.LoadModule(
+			CompilerWasmBytes.GetData(),
+			CompilerWasmBytes.Num(),
+			TEXT("phase57_array_compiler_region"),
+			RuntimeResult) ||
+		!CompilerRuntime.BeginPlay(RuntimeResult))
 	{
 		OutError = FString::Printf(
 			TEXT("Phase57Array AvidScript Wasmtime initialization failed: %s"),
@@ -657,6 +731,7 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 							*ExpectedHash,
 							*FullHash);
 						Runtime.Unload();
+						CompilerRuntime.Unload();
 						PuertsEnvironment.Reset();
 						DestroyWorld();
 						return false;
@@ -667,12 +742,13 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 					Sample.LogicalCalls = LogicalCalls;
 					Sample.Elements = static_cast<uint64>(LogicalCalls) * Size * 2u;
 					Sample.Bytes = Sample.Elements * ArrayElementBytes;
+					Sample.HostTransferBytes = Sample.Bytes;
 					Sample.HostCrossings = LogicalCalls;
 					Sample.ElapsedNs = FMath::Max(ElapsedNs, 1.0);
 					Sample.FullHash = FullHash;
 				}
 				else if (!RunAvidScriptSample(
-					Runtime,
+					Lane == CompilerRegionLane ? CompilerRuntime : Runtime,
 					Lane,
 					Size,
 					LogicalCalls,
@@ -682,6 +758,7 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 					OutError))
 				{
 					Runtime.Unload();
+					CompilerRuntime.Unload();
 					PuertsEnvironment.Reset();
 					DestroyWorld();
 					return false;
@@ -696,7 +773,9 @@ bool FAvidScriptPerfArrayRunner::RunFromFiles(
 
 	FAvidScriptWasmSmokeResult EndResult;
 	Runtime.EndPlay(EndResult);
+	CompilerRuntime.EndPlay(EndResult);
 	Runtime.Unload();
+	CompilerRuntime.Unload();
 	PuertsEnvironment.Reset();
 	DestroyWorld();
 	return WriteProcessResult(ResultPath, Request, Samples, OutError);

@@ -1336,6 +1336,59 @@ bool FAvidScriptWasmRuntimeInstance::DispatchEventHot(
 		EAvidScriptWasmResultDetail::HotFailureOnly);
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+bool FAvidScriptWasmRuntimeInstance::InvokeI32PairExportHotForTesting(
+	const FString& ExportName,
+	const int32 FirstArgument,
+	const int32 SecondArgument,
+	FAvidScriptWasmSmokeResult& OutFailure)
+{
+	if (!IsLoaded() || ExportName.IsEmpty())
+	{
+		CaptureSnapshot(OutFailure);
+		SetFailure(
+			OutFailure,
+			ModuleId,
+			ExportName,
+			TEXT("invalid_state"),
+			TEXT("Testing export invocation requires a loaded runtime and a non-empty export name."),
+			TEXT("load a module and provide one explicit export name before invoking it"));
+		return false;
+	}
+
+	if (TestingI32PairExportName != ExportName)
+	{
+		TestingI32PairExport = {};
+		TestingI32PairExportName = ExportName;
+	}
+	const uint32 Arguments[] = {
+		static_cast<uint32>(FirstArgument),
+		static_cast<uint32>(SecondArgument)
+	};
+	BeginTypedCallbackEpoch();
+	FAvidScriptVmError Error;
+	const bool bCalled = InvokeVmExport(
+		VmBackend.Get(),
+		TestingI32PairExport,
+		ExportName,
+		UE_ARRAY_COUNT(Arguments),
+		Arguments,
+		Error);
+	EndTypedCallbackEpoch();
+	if (!bCalled)
+	{
+		CaptureSnapshot(OutFailure);
+		SetFailureFromVmError(
+			OutFailure,
+			ModuleId,
+			ExportName,
+			Error,
+			DebugMap.Get());
+	}
+	return bCalled;
+}
+#endif
+
 bool FAvidScriptWasmRuntimeInstance::DispatchEvent(
 	const int32 EventId,
 	const float Value,
@@ -1820,6 +1873,10 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	TimerExport = {};
 	EventExport = {};
 	GameplayEventExport = {};
+#if WITH_DEV_AUTOMATION_TESTS
+	TestingI32PairExport = {};
+	TestingI32PairExportName.Reset();
+#endif
 	bGameplayEventExportLookupAttempted = false;
 	ModuleId.Empty();
 	bHasBegunPlay = false;

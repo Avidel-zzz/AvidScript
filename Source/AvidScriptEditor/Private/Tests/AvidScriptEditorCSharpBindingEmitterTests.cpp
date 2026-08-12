@@ -175,6 +175,8 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade imports timer cancellation"), FirstSource.Contains(TEXT("EntryPoint = \"timer_cancel\"")));
 	TestFalse(TEXT("Raw handle constructor is not public"), FirstSource.Contains(TEXT("public AActor(int slot, int generation)")));
 	TestTrue(TEXT("Native imports use the generated module"), FirstSource.Contains(TEXT("[DllImport(\"avidscript\"")));
+	TestTrue(TEXT("Generated facade declares AvidExport"), FirstSource.Contains(TEXT("public sealed class AvidExportAttribute : Attribute")));
+	TestTrue(TEXT("AvidExport targets one method"), FirstSource.Contains(TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]")));
 	TestTrue(TEXT("Generated facade declares AvidStateMode"), FirstSource.Contains(TEXT("public enum AvidStateMode")));
 	TestTrue(TEXT("Generated facade declares compatible state mode"), FirstSource.Contains(TEXT("Compatible = 0")));
 	TestTrue(TEXT("Generated facade declares explicit state mode"), FirstSource.Contains(TEXT("Explicit = 1")));

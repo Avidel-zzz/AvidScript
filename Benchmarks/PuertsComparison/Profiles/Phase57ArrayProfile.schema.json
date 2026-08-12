@@ -11,7 +11,7 @@
     "alternate_js_representations"
   ],
   "properties": {
-    "contract": { "const": "phase57_array_profile.v1" },
+    "contract": { "const": "phase57_array_profile.v2" },
     "profile_id": { "type": "string", "minLength": 1 },
     "measurement_level": { "enum": ["diagnostic", "formal"] },
     "process_runs": { "type": "integer", "minimum": 1 },
@@ -36,8 +36,8 @@
     },
     "lanes": {
       "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
+      "minItems": 4,
+      "maxItems": 4,
       "items": { "$ref": "#/$defs/lane" }
     },
     "headline": {
@@ -46,7 +46,7 @@
       "required": ["shape", "comparison", "required_sizes"],
       "properties": {
         "shape": { "const": "int32" },
-        "comparison": { "const": "avidscript_wasmtime_bulk_vs_puerts_v8_reflection_tarray" },
+        "comparison": { "const": "avidscript_wasmtime_compiler_region_vs_puerts_v8_reflection_tarray" },
         "required_sizes": { "const": [1, 4, 16, 64, 256, 1024] }
       }
     },
@@ -56,7 +56,7 @@
       "required": ["classification", "ratio", "minimum_size", "maximum"],
       "properties": {
         "classification": { "const": "diagnostic_only" },
-        "ratio": { "const": "avidscript_wasmtime_bulk_over_avidscript_wasmtime_element" },
+        "ratio": { "const": "avidscript_wasmtime_compiler_region_over_avidscript_wasmtime_element" },
         "minimum_size": { "const": 64 },
         "maximum": { "const": 0.8 }
       }
@@ -84,11 +84,12 @@
           "enum": [
             "puerts_v8_reflection_tarray",
             "avidscript_wasmtime_element",
-            "avidscript_wasmtime_bulk"
+            "avidscript_wasmtime_bulk",
+            "avidscript_wasmtime_compiler_region"
           ]
         },
         "runtime": { "enum": ["puerts_v8", "avidscript_wasmtime"] },
-        "path": { "enum": ["reflection", "element_load_store", "range_read_write"] },
+        "path": { "enum": ["reflection", "element_load_store", "range_read_write", "csharp_compiler_managed_region"] },
         "representation": { "enum": ["ue_tarray_int32", "array_value_capability_int32"] },
         "allocation_policy": { "type": "string", "minLength": 1 },
         "headline_eligible": { "type": "boolean" }
