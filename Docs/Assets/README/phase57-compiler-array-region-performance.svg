@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560"
+     role="img" aria-labelledby="title description">
+  <title id="title">Phase 57.11D 编译器托管数组区域相对 Puerts TArray 的加速</title>
+  <desc id="description">
+    五进程正式测试中，AvidScript compiler region 相对 Puerts V8 TArray Reflection 的
+    P50 加速为 17.47 到 91.11 倍。横轴为对数刻度，越高越好。
+  </desc>
+  <style>
+    .title { fill: #f0f6fc; font: 700 25px "Segoe UI", Arial, sans-serif; }
+    .subtitle { fill: #9da7b1; font: 14px "Segoe UI", Arial, sans-serif; }
+    .label { fill: #e6edf3; font: 600 14px "Segoe UI", Arial, sans-serif; }
+    .value { fill: #26c596; font: 700 13px "Segoe UI", Arial, sans-serif; }
+    .axis { fill: #9da7b1; font: 11px "Segoe UI", Arial, sans-serif; }
+    .footer { fill: #8b949e; font: 12px "Segoe UI", Arial, sans-serif; }
+    .grid { stroke: #30363d; stroke-width: 1; }
+    .bar { fill: #26c596; }
+    .base { fill: #25303a; }
+  </style>
+
+  <rect width="960" height="560" rx="8" fill="#0d1117"/>
+  <text class="title" x="36" y="42">Phase 57.11D Compiler-Managed Array Region</text>
+  <text class="subtitle" x="36" y="67">相对 Puerts V8 UE TArray Reflection 的 P50 加速，对数刻度，越高越好</text>
+
+  <line class="grid" x1="220" y1="92" x2="220" y2="490"/>
+  <line class="grid" x1="315" y1="92" x2="315" y2="490"/>
+  <line class="grid" x1="410" y1="92" x2="410" y2="490"/>
+  <line class="grid" x1="505" y1="92" x2="505" y2="490"/>
+  <line class="grid" x1="600" y1="92" x2="600" y2="490"/>
+  <line class="grid" x1="695" y1="92" x2="695" y2="490"/>
+  <line class="grid" x1="790" y1="92" x2="790" y2="490"/>
+  <line class="grid" x1="885" y1="92" x2="885" y2="490"/>
+
+  <text class="axis" x="220" y="510" text-anchor="middle">1x</text>
+  <text class="axis" x="315" y="510" text-anchor="middle">2x</text>
+  <text class="axis" x="410" y="510" text-anchor="middle">4x</text>
+  <text class="axis" x="505" y="510" text-anchor="middle">8x</text>
+  <text class="axis" x="600" y="510" text-anchor="middle">16x</text>
+  <text class="axis" x="695" y="510" text-anchor="middle">32x</text>
+  <text class="axis" x="790" y="510" text-anchor="middle">64x</text>
+  <text class="axis" x="885" y="510" text-anchor="middle">128x</text>
+
+  <text class="label" x="36" y="128">N = 1</text>
+  <rect class="base" x="220" y="108" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="108" width="619" height="24" rx="3"/>
+  <text class="value" x="847" y="125">91.11x</text>
+
+  <text class="label" x="36" y="196">N = 4</text>
+  <rect class="base" x="220" y="176" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="176" width="551" height="24" rx="3"/>
+  <text class="value" x="779" y="193">55.79x</text>
+
+  <text class="label" x="36" y="264">N = 16</text>
+  <rect class="base" x="220" y="244" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="244" width="465" height="24" rx="3"/>
+  <text class="value" x="693" y="261">29.64x</text>
+
+  <text class="label" x="36" y="332">N = 64</text>
+  <rect class="base" x="220" y="312" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="312" width="411" height="24" rx="3"/>
+  <text class="value" x="639" y="329">20.04x</text>
+
+  <text class="label" x="36" y="400">N = 256</text>
+  <rect class="base" x="220" y="380" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="380" width="392" height="24" rx="3"/>
+  <text class="value" x="620" y="397">17.47x</text>
+
+  <text class="label" x="36" y="468">N = 1024</text>
+  <rect class="base" x="220" y="448" width="665" height="24" rx="3"/>
+  <rect class="bar" x="220" y="448" width="393" height="24" rx="3"/>
+  <text class="value" x="621" y="465">17.58x</text>
+
+  <text class="footer" x="36" y="540">
+    5 processes x 21 timed samples | 2520 samples | full-hash correct | UE5.8 Win64 Development
+  </text>
+</svg>

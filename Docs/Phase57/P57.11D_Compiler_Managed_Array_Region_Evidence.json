@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.11D",
+  "evidence_class": "formal",
+  "captured_at_utc": "2026-08-12T14:25:10.6400000Z",
+  "candidate": {
+    "implementation_commit": "2a606c4f993f3d833495d6f538ebcd468f70a60c",
+    "implementation_tree": "c2fb4ac6b72b085d1b83b90a93984dd901fc6215",
+    "final_source_commit": "3c809cc5fa47fe424a9db033bf769613a1f88640",
+    "final_source_tree": "06053434dea7e772e9a42abf06696fdaf4370c16",
+    "dirty": false,
+    "note": "formal benchmark is bound to the implementation candidate; later commits only calibrate contracts, register architecture input, and refresh the generated facade golden fixture"
+  },
+  "environment": {
+    "ue_version": "5.8.0-0+UE5",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit",
+    "puerts_runtime": "V8"
+  },
+  "compiler_region": {
+    "guest_ir_ops": ["array_region_load", "array_region_store"],
+    "maximum_active_regions_per_function": 1,
+    "maximum_elements": 4096,
+    "maximum_payload_bytes": 1048576,
+    "host_imports": [
+      "avid_value_array_length",
+      "avid_value_array_read_range",
+      "avid_value_array_write_range"
+    ],
+    "host_crossings_per_export": 3,
+    "barriers": ["non_array_call", "different_capability", "return"],
+    "local_positive_array_path_unchanged": true,
+    "explicit_snapshot_flush_compatible": true,
+    "function_name_special_cases": 0,
+    "new_host_abi_imports": 0
+  },
+  "csharp_export": {
+    "attribute": "AvidExport",
+    "semantic_export_name": "phase57_array_run",
+    "conflicts_with_unmanaged_callers_only": true,
+    "semantic_conflict_diagnostic": "ASCS5005"
+  },
+  "performance": {
+    "contract": "phase57_array_result.v2",
+    "measurement_level": "formal",
+    "process_runs": 5,
+    "warmup_samples_per_process": 8,
+    "timed_samples_per_process": 21,
+    "total_timed_samples": 2520,
+    "sizes": [1, 4, 16, 64, 256, 1024],
+    "correctness": "all lanes, sizes, processes, and samples matched the full FNV-1a final-array hash",
+    "internal_gate": "compiler_region_over_element <= 0.80 for N >= 64",
+    "internal_gate_passed": true,
+    "headline_semantics": "one compiler-managed C# export with held capability versus repeated Puerts UE TArray reflection roundtrips; allocation and residency policies are intentionally explicit",
+    "rows": [
+      { "size": 1, "puerts_p50_ns": 914.172233, "compiler_region_p50_ns": 10.034000, "compiler_region_over_puerts": 0.01097605, "speedup": 91.10746 },
+      { "size": 4, "puerts_p50_ns": 1119.628905, "compiler_region_p50_ns": 20.068001, "compiler_region_over_puerts": 0.01792380, "speedup": 55.79175 },
+      { "size": 16, "puerts_p50_ns": 1833.886927, "compiler_region_p50_ns": 61.863830, "compiler_region_over_puerts": 0.03373372, "speedup": 29.64393 },
+      { "size": 64, "puerts_p50_ns": 4913.279554, "compiler_region_p50_ns": 245.119736, "compiler_region_over_puerts": 0.04988923, "speedup": 20.04441 },
+      { "size": 256, "puerts_p50_ns": 16532.023437, "compiler_region_p50_ns": 946.078217, "compiler_region_over_puerts": 0.05722701, "speedup": 17.47427 },
+      { "size": 1024, "puerts_p50_ns": 65368.716605, "compiler_region_p50_ns": 3718.771040, "compiler_region_over_puerts": 0.05688915, "speedup": 17.57804 }
+    ],
+    "internal_gate_rows": [
+      { "size": 64, "compiler_region_over_element": 0.01197863, "passed": true },
+      { "size": 256, "compiler_region_over_element": 0.01161445, "passed": true },
+      { "size": 1024, "compiler_region_over_element": 0.01137587, "passed": true }
+    ],
+    "profile_sha256": "bbc218d166083e9774c82d2560150c76d0047f7cd2a1b967b582cc6f4dc01116",
+    "aggregate_sha256": "2feda9183ee3145605b1e2bc043f934ba3cd9a32be017db1cf5aeac5df5ddfe6",
+    "compiler_wasm_sha256": "cdbc6d59f4213c5d4cdc8b694550efa7e4608504220d26de64ed8e70cf7a2323",
+    "compiler_guest_ir_sha256": "5c99d66eab1624585610da34fefc46316f6c49908b7531abeeaa6f882b39c419",
+    "compiler_inspection_sha256": "1e67f96ecfc9b2c4bfa48ba6cffa4a9731fae7b30ec938d3bfcc42ca5d1e9601",
+    "puerts_runtime_sha256": "6eacc2c95a6b3fd84ae51aa829560df4db34af6e07e43a17a6c98e80722bcddd"
+  },
+  "verification": {
+    "guest_ir_tests": "35/35 passed",
+    "csharp_semantic_tests": "63/63 passed",
+    "csharp_guest_tests": "82/82 passed",
+    "wasm_backend_tests": "15/15 passed",
+    "array_benchmark_contracts": "passed",
+    "array_formal": "5 processes; 2520 timed samples; correctness and internal gate passed",
+    "clean_sidecar_build": "72 actions; Result: Succeeded; no Editor target clean",
+    "canonical_no_clean_build": "38 actions; Result: Succeeded",
+    "focused_fname_automation": "1 found; 1 performed; 1 succeeded; 0 failed",
+    "full_avidscript_automation": "341 found; 341 performed; 341 succeeded; 0 failed; queue empty, TestExit, RequestExitWithStatus 0, and process exit 0 observed",
+    "architecture_check": "clean candidate 5fa6bbe4c3a76b71205f6e789eabff12b9202c57 / 66b7336bee25cd401495464d168e8d8957d685ff passed",
+    "architecture_checker_sha256": "624da23945a4b22d09ee44b09141d3e0b4bedcffe872a27ec0c62169411d56bb"
+  },
+  "log_sha256": {
+    "clean_sidecar_build": "1f9c2c72ba528019ef6e901e5593edd173d945a1e26b33e8fbd38b271a9aad2c",
+    "canonical_no_clean_build": "de94f97ce0c33b3abc261da1aa5c9093dfc4653cae471d0ea8431d99c30cdf1f",
+    "focused_fname_automation": "713a0a91189a5c644187247b82275ebf0d7e69fcb9f2bcb0febb2c319bacde7c",
+    "full_avidscript_automation": "39792d499fbd8809a35b4773fbaec2ff63a788507bf716748356a71f0b7afc29",
+    "architecture_check": "1330131de711c5617fc2ba852665a07d2b00c25d317577b5493f05d336fc0ca7"
+  },
+  "known_boundaries": {
+    "array_shapes": "one-dimensional fixed-width elements only",
+    "nested_containers": false,
+    "tset_tmap": false,
+    "delegate_latent_rpc_ftext": false,
+    "cook_shipping_mobile": false,
+    "pure_wasmtime_v8_p95_leadership": "P57-D06 remains Fixing"
+  },
+  "protected_dirty_paths_excluded": 3
+}

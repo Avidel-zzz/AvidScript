@@ -7,14 +7,14 @@
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Superpowers/Specs/2026-08-11-phase57-array-bulk-transfer-design.md",
-    "version": 4,
-    "sha256": "ff62117557740a592862ce30543c8b57796467d4cfb4ccfbe747ca79d379b48a",
-    "revision_reason": "P57.11C froze the six-import range ABI, bounded guest-memory transfer, explicit C# Snapshot/Flush surface, and the dedicated Puerts TArray performance protocol"
+    "path": "Docs/Superpowers/Specs/2026-08-12-phase57-compiler-managed-array-region-design.md",
+    "version": 5,
+    "sha256": "a090722b212b7ac310751d8bf256faf5ec5174f47ae1ba18bab89d26187d9f80",
+    "revision_reason": "P57.11D froze ordinary C# array region lowering, bounded one-region allocation, alias/call/return barriers, AvidExport, and the four-lane compiler provenance benchmark"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.11C_Array_Bulk_Transfer_Plan.md",
-    "closeout": "Docs/Phase57/P57.11C_Array_Bulk_Transfer.md"
+    "plan": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region_Plan.md",
+    "closeout": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region.md"
   },
   "batches": [
     {
@@ -112,6 +112,12 @@
       "status": "Completed",
       "evidence": "Six-import bounded range ABI and generated C# Snapshot/Flush now reduce N element host crossings to one without API-name special cases; WAMR and Wasmtime produced [11,1,2] and drained live arrays to zero; Guest IR 35/35, Wasm backend 15/15, C# Guest 81/81, full Automation 346/346, Phase57Array formal 1890/1890 full-hash samples and internal gate passed; bulk/Puerts TArray P50 ratio ranges from 0.71449 at N=1 to 0.01905 at N=1024; clean bba11da/02354375 architecture gate passed.",
       "completed_at_utc": "2026-08-11T14:28:46.8901123Z"
+    },
+    {
+      "id": "P57.11D",
+      "status": "Completed",
+      "evidence": "Ordinary C# T[] Length/index load/store now lower to bounded compiler-managed regions with alias/call/return barriers and no new host ABI; AvidExport provides stable custom exports; formal Phase57Array v2 completed 5 processes and 2520 full-hash-correct samples, compiler-region/Puerts P50 ratio 0.01098-0.05723 and N>=64 internal gate passed; Guest IR 35/35, Semantic 63/63, C# Guest 82/82, Wasm backend 15/15, no-clean UE5.8 builds, full Automation 341/341, and clean architecture gate passed.",
+      "completed_at_utc": "2026-08-12T14:25:10.6400000Z"
     }
   ],
   "debt": [
@@ -131,8 +137,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.11C review closed exact six-import authorization, legacy four-import compatibility, bounded aligned range transfer, WAMR/Wasmtime C# bulk parity, real Puerts UE.NewArray TArray correctness, full-hash performance provenance, and honest allocation/semantic boundaries; final full Automation, formal array benchmark, and clean architecture gate passed.",
-    "completed_at_utc": "2026-08-11T14:28:46.8901123Z"
+    "evidence": "Centralized P57.11D review closed ordinary C# array region lowering, bounded allocation, alias/call/return barriers, three-import compiler artifact provenance, AvidExport semantic projection, runtime-owned crossing counters, formal Puerts comparison boundaries, final full Automation, no-clean builds, and clean architecture gate.",
+    "completed_at_utc": "2026-08-12T14:25:10.6400000Z"
   },
   "budgets": {
     "ubt": 2,
@@ -145,20 +151,20 @@
     "full_gate": 3
   },
   "freeze": {
-    "source_commit": "bba11da0cdb93a97ab434824ac0517256704ec3e",
-    "source_tree": "02354375b1938360b41bae9782f276251520d678",
+    "source_commit": "3c809cc5fa47fe424a9db033bf769613a1f88640",
+    "source_tree": "06053434dea7e772e9a42abf06696fdaf4370c16",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.11C_Array_Bulk_Transfer_Evidence.json",
-    "at_utc": "2026-08-11T14:28:46.8901123Z"
+    "review_evidence": "Docs/Phase57/P57.11D_Compiler_Managed_Array_Region_Evidence.json",
+    "at_utc": "2026-08-12T14:25:10.6400000Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_11C_Architecture_bba11da.log",
-    "report_sha256": "b0f1557e82d45cf4f357d6ae2948a14afb16220e22c08cf775d79e1b96ffc28d",
-    "run_id": "P57.11C-clean-architecture-final",
-    "verified_commit": "bba11da0cdb93a97ab434824ac0517256704ec3e",
-    "verified_tree": "02354375b1938360b41bae9782f276251520d678",
-    "attestation_parent": "e79f05d96cb8fd5971f61ca9832847e2f429e45f",
-    "attested_at_utc": "2026-08-11T14:28:46.8901123Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_11D_Architecture_5fa6bbe.log",
+    "report_sha256": "1330131de711c5617fc2ba852665a07d2b00c25d317577b5493f05d336fc0ca7",
+    "run_id": "P57.11D-clean-architecture-final",
+    "verified_commit": "5fa6bbe4c3a76b71205f6e789eabff12b9202c57",
+    "verified_tree": "66b7336bee25cd401495464d168e8d8957d685ff",
+    "attestation_parent": "2a606c4f993f3d833495d6f538ebcd468f70a60c",
+    "attested_at_utc": "2026-08-12T14:25:10.6400000Z"
   },
   "protected_dirty": [
     {
@@ -180,7 +186,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "plan P57.11D bounded Guest allocator and compiler-managed array access regions, then extend string elements, nested containers, TSet/TMap, and independent delegate/latent/RPC semantics",
-  "revision": 19,
-  "updated_at_utc": "2026-08-11T14:28:46.8901123Z"
+  "next_action": "plan P57.12 delegate/event subscription, latent continuation, RPC/Blueprint/interface dispatch, FText, and a C#-only playable game demo closure",
+  "revision": 20,
+  "updated_at_utc": "2026-08-12T14:25:10.6400000Z"
 }
