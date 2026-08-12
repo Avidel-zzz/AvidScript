@@ -9,11 +9,16 @@ namespace AvidScript.WasmBackend;
 
 internal sealed class WasmFunctionCompiler
 {
+    private const int MaxArrayRegionElements = 4096;
+    private const int MaxArrayRegionBytes = 1024 * 1024;
+
     private readonly GuestModule module;
     private readonly GuestFunction function;
     private readonly WasmModuleLayout moduleLayout;
     private readonly WasmFunctionFrameLayout frame;
     private readonly bool hasArrayAccess;
+    private readonly bool hasArrayRegion;
+    private readonly bool hasArrayRegionWrites;
     private readonly IReadOnlyDictionary<string, GuestRegister> registers;
     private readonly IReadOnlyDictionary<string, GuestGlobal> globals;
     private readonly IReadOnlyDictionary<string, GuestDataSegment> dataSegments;
@@ -24,6 +29,13 @@ internal sealed class WasmFunctionCompiler
     private uint frameBaseLocalIndex;
     private uint frameEndLocalIndex;
     private uint arrayAddressLocalIndex;
+    private uint activeArrayTokenLocalIndex;
+    private uint arrayRegionAddressLocalIndex;
+    private uint arrayRegionLengthLocalIndex;
+    private uint arrayRegionDirtyLocalIndex;
+    private uint arrayRegionEndLocalIndex;
+    private uint arrayRegionRequiredPagesLocalIndex;
+    private uint arrayRegionCurrentPagesLocalIndex;
 
     public WasmFunctionCompiler(
         GuestModule module,
@@ -34,9 +46,16 @@ internal sealed class WasmFunctionCompiler
         this.function = function;
         this.moduleLayout = moduleLayout;
         frame = WasmFunctionFrameLayout.Create(function, moduleLayout);
-        hasArrayAccess = function.Blocks
+        GuestInstruction[] arrayInstructions = function.Blocks
             .SelectMany(block => block.Instructions)
-            .Any(instruction => instruction.Op is "array_load" or "array_store");
+            .Where(instruction => instruction.Op is "array_load" or "array_store"
+                or "array_region_load" or "array_region_store")
+            .ToArray();
+        hasArrayAccess = arrayInstructions.Length != 0;
+        hasArrayRegion = arrayInstructions.Any(instruction =>
+            instruction.Op is "array_region_load" or "array_region_store");
+        hasArrayRegionWrites = arrayInstructions.Any(instruction =>
+            instruction.Op == "array_region_store");
         registers = function.Parameters
             .Concat(function.Locals)
             .ToDictionary(register => register.Id, StringComparer.Ordinal);
@@ -105,19 +124,34 @@ internal sealed class WasmFunctionCompiler
 
         pcLocalIndex = checked(firstLocalIndex + (uint)locals.Count);
         locals.Add(WasmValueType.I32);
-        if (frame.FrameSize > 0)
+        uint nextLocalIndex = checked(pcLocalIndex + 1);
+        if (HasRuntimeFrame)
         {
-            frameBaseLocalIndex = checked(pcLocalIndex + 1);
-            frameEndLocalIndex = checked(pcLocalIndex + 2);
+            frameBaseLocalIndex = nextLocalIndex++;
+            frameEndLocalIndex = nextLocalIndex++;
             locals.Add(WasmValueType.I32);
             locals.Add(WasmValueType.I32);
         }
 
         if (hasArrayAccess)
         {
-            arrayAddressLocalIndex = checked(
-                pcLocalIndex + (frame.FrameSize > 0 ? 3u : 1u));
+            arrayAddressLocalIndex = nextLocalIndex++;
             locals.Add(WasmValueType.I32);
+        }
+
+        if (hasArrayRegion)
+        {
+            activeArrayTokenLocalIndex = nextLocalIndex++;
+            arrayRegionAddressLocalIndex = nextLocalIndex++;
+            arrayRegionLengthLocalIndex = nextLocalIndex++;
+            arrayRegionDirtyLocalIndex = nextLocalIndex++;
+            arrayRegionEndLocalIndex = nextLocalIndex++;
+            arrayRegionRequiredPagesLocalIndex = nextLocalIndex++;
+            arrayRegionCurrentPagesLocalIndex = nextLocalIndex++;
+            for (int index = 0; index < 7; ++index)
+            {
+                locals.Add(WasmValueType.I32);
+            }
         }
 
         localIndices = indices;
@@ -152,7 +186,7 @@ internal sealed class WasmFunctionCompiler
 
     private void WriteFramePrologue(WasmBinaryWriter body)
     {
-        if (frame.FrameSize == 0)
+        if (!HasRuntimeFrame)
         {
             return;
         }
@@ -249,11 +283,17 @@ internal sealed class WasmFunctionCompiler
             case "array_load":
                 CompileArrayLoad(body, instruction);
                 break;
+            case "array_region_load":
+                CompileArrayRegionLoad(body, instruction);
+                break;
             case "array_length":
                 CompileArrayLength(body, instruction);
                 break;
             case "array_store":
                 CompileArrayStore(body, instruction);
+                break;
+            case "array_region_store":
+                CompileArrayRegionStore(body, instruction);
                 break;
             case "indirect_load":
                 CompileIndirectLoad(body, instruction);
@@ -363,6 +403,7 @@ internal sealed class WasmFunctionCompiler
 
     private void CompileCall(WasmBinaryWriter body, GuestInstruction instruction)
     {
+        FlushArrayRegion(body);
         bool usesSRet = functions.TryGetValue(instruction.TargetId!, out GuestFunction? target)
             && moduleLayout.UsesSRet(target);
         if (usesSRet)
@@ -557,12 +598,28 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x0b);
     }
 
-    private void CompileLinearArrayLoad(
+    private void CompileArrayRegionLoad(
         WasmBinaryWriter body,
         GuestInstruction instruction)
     {
+        string arrayId = instruction.OperandIds[0];
+        WriteArrayCapabilityCondition(body, arrayId);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        EnsureArrayRegion(body, arrayId, moduleLayout.Types[instruction.TargetId!]);
+        CompileLinearArrayLoad(body, instruction, arrayRegionAddressLocalIndex);
+        body.WriteByte(0x05);
+        CompileLinearArrayLoad(body, instruction);
+        body.WriteByte(0x0b);
+    }
+
+    private void CompileLinearArrayLoad(
+        WasmBinaryWriter body,
+        GuestInstruction instruction,
+        uint? arrayLocalIndex = null)
+    {
         GuestType elementType = moduleLayout.Types[instruction.TargetId!];
-        WriteArrayElementAddress(body, instruction);
+        WriteArrayElementAddress(body, instruction, arrayLocalIndex);
         if (moduleLayout.IsMemoryType(elementType.Id))
         {
             WasmMemoryEmitter.WriteCopy(
@@ -619,8 +676,20 @@ internal sealed class WasmFunctionCompiler
         WriteArrayCapabilityCondition(body, arrayId);
         body.WriteByte(0x04);
         body.WriteByte(0x40);
-        WriteLocalGet(body, localIndices[arrayId]);
-        WriteIntrinsicCall(body, GuestArrayCapabilityIntrinsics.LengthImportId);
+        if (hasArrayRegion)
+        {
+            GuestType arrayType = GetValueType(arrayId);
+            EnsureArrayRegion(
+                body,
+                arrayId,
+                moduleLayout.Types[arrayType.ElementTypeId!]);
+            WriteLocalGet(body, arrayRegionLengthLocalIndex);
+        }
+        else
+        {
+            WriteLocalGet(body, localIndices[arrayId]);
+            WriteIntrinsicCall(body, GuestArrayCapabilityIntrinsics.LengthImportId);
+        }
         WriteResult(body, instruction);
         body.WriteByte(0x05);
         CompileLinearArrayLength(body, instruction);
@@ -654,13 +723,31 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x0b);
     }
 
-    private void CompileLinearArrayStore(
+    private void CompileArrayRegionStore(
         WasmBinaryWriter body,
         GuestInstruction instruction)
     {
+        string arrayId = instruction.OperandIds[0];
+        WriteArrayCapabilityCondition(body, arrayId);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        EnsureArrayRegion(body, arrayId, moduleLayout.Types[instruction.TargetId!]);
+        CompileLinearArrayStore(body, instruction, arrayRegionAddressLocalIndex);
+        WriteI32Constant(body, 1);
+        WriteLocalSet(body, arrayRegionDirtyLocalIndex);
+        body.WriteByte(0x05);
+        CompileLinearArrayStore(body, instruction);
+        body.WriteByte(0x0b);
+    }
+
+    private void CompileLinearArrayStore(
+        WasmBinaryWriter body,
+        GuestInstruction instruction,
+        uint? arrayLocalIndex = null)
+    {
         GuestType elementType = moduleLayout.Types[instruction.TargetId!];
         string valueId = instruction.OperandIds[2];
-        WriteArrayElementAddress(body, instruction);
+        WriteArrayElementAddress(body, instruction, arrayLocalIndex);
         if (moduleLayout.IsMemoryType(elementType.Id))
         {
             WasmMemoryEmitter.WriteCopy(
@@ -726,6 +813,156 @@ internal sealed class WasmFunctionCompiler
         body.WriteByte(0x48);
     }
 
+    private void EnsureArrayRegion(
+        WasmBinaryWriter body,
+        string arrayId,
+        GuestType elementType)
+    {
+        WriteLocalGet(body, activeArrayTokenLocalIndex);
+        WriteLocalGet(body, localIndices[arrayId]);
+        body.WriteByte(0x47);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+
+        FlushArrayRegion(body);
+
+        WriteLocalGet(body, localIndices[arrayId]);
+        WriteIntrinsicCall(body, GuestArrayCapabilityIntrinsics.LengthImportId);
+        WriteLocalTee(body, arrayRegionLengthLocalIndex);
+        WriteI32Constant(body, MaxArrayRegionElements);
+        body.WriteByte(0x4b);
+        WriteTrapWhenTrue(body);
+
+        WriteLocalGet(body, frameEndLocalIndex);
+        WriteLocalSet(body, arrayRegionAddressLocalIndex);
+        WriteLocalGet(body, arrayRegionAddressLocalIndex);
+        WriteI32Constant(body, GetArrayPayloadOffset(elementType));
+        body.WriteByte(0x6a);
+        WriteLocalGet(body, arrayRegionLengthLocalIndex);
+        int elementStride = GetArrayElementStride(elementType);
+        WriteI32Constant(body, MaxArrayRegionBytes / elementStride);
+        body.WriteByte(0x4b);
+        WriteTrapWhenTrue(body);
+        WriteLocalGet(body, arrayRegionLengthLocalIndex);
+        WriteI32Constant(body, elementStride);
+        body.WriteByte(0x6c);
+        body.WriteByte(0x6a);
+        WriteLocalTee(body, arrayRegionEndLocalIndex);
+        WriteLocalGet(body, arrayRegionAddressLocalIndex);
+        body.WriteByte(0x49);
+        WriteTrapWhenTrue(body);
+
+        WriteLocalGet(body, arrayRegionEndLocalIndex);
+        WriteI32Constant(body, 65535);
+        body.WriteByte(0x6a);
+        WriteLocalTee(body, arrayRegionRequiredPagesLocalIndex);
+        WriteLocalGet(body, arrayRegionEndLocalIndex);
+        body.WriteByte(0x49);
+        WriteTrapWhenTrue(body);
+        WriteLocalGet(body, arrayRegionRequiredPagesLocalIndex);
+        WriteI32Constant(body, 16);
+        body.WriteByte(0x76);
+        WriteLocalSet(body, arrayRegionRequiredPagesLocalIndex);
+
+        body.WriteByte(0x3f);
+        body.WriteByte(0x00);
+        WriteLocalTee(body, arrayRegionCurrentPagesLocalIndex);
+        WriteLocalGet(body, arrayRegionRequiredPagesLocalIndex);
+        body.WriteByte(0x49);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        WriteLocalGet(body, arrayRegionRequiredPagesLocalIndex);
+        WriteLocalGet(body, arrayRegionCurrentPagesLocalIndex);
+        body.WriteByte(0x6b);
+        body.WriteByte(0x40);
+        body.WriteByte(0x00);
+        WriteI32Constant(body, -1);
+        body.WriteByte(0x46);
+        WriteTrapWhenTrue(body);
+        body.WriteByte(0x0b);
+
+        WriteLocalGet(body, arrayRegionEndLocalIndex);
+        WriteGlobalSet(body, 0);
+        WriteLocalGet(body, arrayRegionAddressLocalIndex);
+        WriteLocalGet(body, arrayRegionLengthLocalIndex);
+        WasmMemoryEmitter.WriteStore(body, moduleLayout.Types["type:int32"]);
+
+        WriteLocalGet(body, localIndices[arrayId]);
+        WriteI32Constant(body, 0);
+        WriteLocalGet(body, arrayRegionAddressLocalIndex);
+        WriteI32Constant(body, 0);
+        WriteLocalGet(body, arrayRegionLengthLocalIndex);
+        WriteIntrinsicCall(body, GuestArrayCapabilityIntrinsics.ReadRangeImportId);
+        WriteTrapWhenHostReturnsZero(body);
+
+        WriteLocalGet(body, localIndices[arrayId]);
+        WriteLocalSet(body, activeArrayTokenLocalIndex);
+        WriteI32Constant(body, 0);
+        WriteLocalSet(body, arrayRegionDirtyLocalIndex);
+        body.WriteByte(0x0b);
+    }
+
+    private void FlushArrayRegion(WasmBinaryWriter body)
+    {
+        if (!hasArrayRegion)
+        {
+            return;
+        }
+
+        WriteLocalGet(body, activeArrayTokenLocalIndex);
+        WriteI32Constant(body, 0);
+        body.WriteByte(0x47);
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        if (hasArrayRegionWrites)
+        {
+            WriteLocalGet(body, arrayRegionDirtyLocalIndex);
+            body.WriteByte(0x04);
+            body.WriteByte(0x40);
+            WriteLocalGet(body, activeArrayTokenLocalIndex);
+            WriteI32Constant(body, 0);
+            WriteLocalGet(body, arrayRegionAddressLocalIndex);
+            WriteI32Constant(body, 0);
+            WriteLocalGet(body, arrayRegionLengthLocalIndex);
+            WriteIntrinsicCall(body, GuestArrayCapabilityIntrinsics.WriteRangeImportId);
+            WriteTrapWhenHostReturnsZero(body);
+            body.WriteByte(0x0b);
+        }
+        WriteI32Constant(body, 0);
+        WriteLocalSet(body, activeArrayTokenLocalIndex);
+        WriteI32Constant(body, 0);
+        WriteLocalSet(body, arrayRegionDirtyLocalIndex);
+        WriteLocalGet(body, frameEndLocalIndex);
+        WriteGlobalSet(body, 0);
+        body.WriteByte(0x0b);
+    }
+
+    private static int GetArrayPayloadOffset(GuestType elementType)
+    {
+        return (4 + elementType.Alignment - 1) & -elementType.Alignment;
+    }
+
+    private static int GetArrayElementStride(GuestType elementType)
+    {
+        int stride = checked(
+            (elementType.Size + elementType.Alignment - 1) & -elementType.Alignment);
+        if (stride <= 0 || stride > MaxArrayRegionBytes)
+        {
+            throw new InvalidOperationException(
+                $"Array region element '{elementType.Id}' exceeds the bounded payload.");
+        }
+
+        return stride;
+    }
+
+    private static void WriteTrapWhenTrue(WasmBinaryWriter body)
+    {
+        body.WriteByte(0x04);
+        body.WriteByte(0x40);
+        body.WriteByte(0x00);
+        body.WriteByte(0x0b);
+    }
+
     private void WriteArrayElementScratchAddress(WasmBinaryWriter body)
     {
         if (frame.ArrayElementScratchOffset is not int offset)
@@ -759,7 +996,8 @@ internal sealed class WasmFunctionCompiler
 
     private void WriteArrayElementAddress(
         WasmBinaryWriter body,
-        GuestInstruction instruction)
+        GuestInstruction instruction,
+        uint? arrayLocalIndex = null)
     {
         string arrayId = instruction.OperandIds[0];
         string indexId = instruction.OperandIds[1];
@@ -767,7 +1005,7 @@ internal sealed class WasmFunctionCompiler
         GuestType elementType = moduleLayout.Types[instruction.TargetId!];
         WasmMemoryEmitter.WriteArrayElementAddress(
             body,
-            writer => WriteLocalGet(writer, localIndices[arrayId]),
+            writer => WriteLocalGet(writer, arrayLocalIndex ?? localIndices[arrayId]),
             writer => WriteLocalGet(writer, localIndices[indexId]),
             arrayType,
             elementType);
@@ -841,6 +1079,7 @@ internal sealed class WasmFunctionCompiler
 
     private void CompileReturn(WasmBinaryWriter body, GuestTerminator terminator)
     {
+        FlushArrayRegion(body);
         if (moduleLayout.UsesSRet(function))
         {
             WasmMemoryEmitter.WriteCopy(
@@ -861,7 +1100,7 @@ internal sealed class WasmFunctionCompiler
 
     private void RestoreFrame(WasmBinaryWriter body)
     {
-        if (frame.FrameSize > 0)
+        if (HasRuntimeFrame)
         {
             WriteLocalGet(body, frameBaseLocalIndex);
             WriteGlobalSet(body, 0);
@@ -913,7 +1152,7 @@ internal sealed class WasmFunctionCompiler
 
     private void WriteFrameAddress(WasmBinaryWriter body, string valueId)
     {
-        if (frame.FrameSize == 0 || !frame.HasSlot(valueId))
+        if (!HasRuntimeFrame || !frame.HasSlot(valueId))
         {
             throw new InvalidOperationException(
                 $"Value '{valueId}' has no addressable frame slot.");
@@ -932,6 +1171,8 @@ internal sealed class WasmFunctionCompiler
     {
         return moduleLayout.Types[registers[valueId].TypeId];
     }
+
+    private bool HasRuntimeFrame => frame.FrameSize > 0 || hasArrayRegion;
 
     private bool IsMemoryValue(string valueId)
     {

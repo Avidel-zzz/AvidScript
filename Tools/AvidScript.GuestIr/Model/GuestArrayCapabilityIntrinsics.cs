@@ -12,4 +12,10 @@ public static class GuestArrayCapabilityIntrinsics
 
     public const string StoreImportId = "import:intrinsic:avid_value_array_store";
     public const string StoreImportName = "avid_value_array_store";
+
+    public const string ReadRangeImportId = "import:intrinsic:avid_value_array_read_range";
+    public const string ReadRangeImportName = "avid_value_array_read_range";
+
+    public const string WriteRangeImportId = "import:intrinsic:avid_value_array_write_range";
+    public const string WriteRangeImportName = "avid_value_array_write_range";
 }

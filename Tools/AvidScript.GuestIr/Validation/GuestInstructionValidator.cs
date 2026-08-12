@@ -70,6 +70,7 @@ internal static class GuestInstructionValidator
                     context, function, instruction, result, operands);
                 break;
             case "array_load":
+            case "array_region_load":
                 GuestArrayInstructionValidator.ValidateLoad(
                     context, function, instruction, result, operands);
                 break;
@@ -78,6 +79,7 @@ internal static class GuestInstructionValidator
                     context, function, instruction, result, operands);
                 break;
             case "array_store":
+            case "array_region_store":
                 GuestArrayInstructionValidator.ValidateStore(
                     context, function, instruction, result, operands);
                 break;

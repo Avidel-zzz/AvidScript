@@ -96,7 +96,7 @@ internal static class CSharpOperationLowerer
         }
 
         instructions.Add(new GuestInstruction(
-            "array_load",
+            "array_region_load",
             result.Id,
             new[] { array.Id, index.Id },
             elementType.Id,
@@ -232,7 +232,7 @@ internal static class CSharpOperationLowerer
             }
 
             instructions.Add(new GuestInstruction(
-                "array_store",
+                "array_region_store",
                 null,
                 new[] { array.Id, index.Id, elementValue.Id },
                 elementType.Id,

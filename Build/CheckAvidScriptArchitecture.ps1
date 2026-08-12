@@ -2609,6 +2609,8 @@ $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowe
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
+$GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
+$WasmFunctionCompilerSource = Read-RequiredFile 'Tools/AvidScript.WasmBackend/Codegen/WasmFunctionCompiler.cs'
 $CSharpBuildScriptSource = Read-RequiredFile 'Build/BuildCSharpActorLifecycle.ps1'
 foreach ($RequiredPreparedBuildContract in @(
     'AvidScriptCSharpSemanticCache.ps1',
@@ -2808,6 +2810,50 @@ if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
     -not $CSharpBuildScriptSource.Contains('UsedRuntimeBindingImports')) {
     Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
 }
+foreach ($RequiredCompilerManagedArrayContract in @(
+    '"array_region_load"',
+    '"array_region_store"')) {
+    if (-not $CSharpOperationLowererSource.Contains($RequiredCompilerManagedArrayContract) -or
+        -not $GuestInstructionValidatorSource.Contains($RequiredCompilerManagedArrayContract) -or
+        -not $WasmFunctionCompilerSource.Contains($RequiredCompilerManagedArrayContract)) {
+        Add-Violation "compiler-managed C# array regions are missing $RequiredCompilerManagedArrayContract"
+    }
+}
+foreach ($RequiredArrayRegionImport in @(
+    @{ Abi = 'avid_value_array_length'; Constant = 'GuestArrayCapabilityIntrinsics.LengthImportName' },
+    @{ Abi = 'avid_value_array_read_range'; Constant = 'GuestArrayCapabilityIntrinsics.ReadRangeImportName' },
+    @{ Abi = 'avid_value_array_write_range'; Constant = 'GuestArrayCapabilityIntrinsics.WriteRangeImportName' })) {
+    if (-not $GuestArrayCapabilityIntrinsicsSource.Contains($RequiredArrayRegionImport.Abi) -or
+        -not $CSharpGuestLowererSource.Contains($RequiredArrayRegionImport.Constant)) {
+        Add-Violation "compiler-managed array region import reuse is missing $($RequiredArrayRegionImport.Abi)"
+    }
+}
+foreach ($RequiredBoundedArrayRegionContract in @(
+    'MaxArrayRegionElements = 4096',
+    'MaxArrayRegionBytes = 1024 * 1024',
+    'EnsureArrayRegion(body',
+    'GetArrayElementStride',
+    'WriteTrapWhenHostReturnsZero')) {
+    if (-not $WasmFunctionCompilerSource.Contains($RequiredBoundedArrayRegionContract)) {
+        Add-Violation "bounded Wasm array region compiler is missing $RequiredBoundedArrayRegionContract"
+    }
+}
+$WasmCompileCallSlice = Get-SourceSlice `
+    $WasmFunctionCompilerSource `
+    'private void CompileCall(' `
+    'private void CompileLocalLoad('
+Test-RequiredTokenSequence `
+    $WasmCompileCallSlice `
+    @('FlushArrayRegion(body);', 'body.WriteByte(0x10);') `
+    'Wasm calls must flush compiler-managed array regions before dispatch'
+$WasmCompileReturnSlice = Get-SourceSlice `
+    $WasmFunctionCompilerSource `
+    'private void CompileReturn(' `
+    'private void RestoreFrame('
+Test-RequiredTokenSequence `
+    $WasmCompileReturnSlice `
+    @('FlushArrayRegion(body);', 'RestoreFrame(body);', 'body.WriteByte(0x0f);') `
+    'Wasm returns must flush compiler-managed array regions before restoring the frame'
 foreach ($RequiredDualPackageContract in @(
     'binding_authorization',
     'RuntimeBindingPackagePath',

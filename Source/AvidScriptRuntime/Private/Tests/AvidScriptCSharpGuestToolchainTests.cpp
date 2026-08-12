@@ -1126,8 +1126,6 @@ bool FAvidScriptCSharpArrayUFunctionEndToEndTest::RunTest(
 	}
 	for (const TCHAR* RequiredImport : {
 		TEXT("avid_value_array_length"),
-		TEXT("avid_value_array_load"),
-		TEXT("avid_value_array_store"),
 		TEXT("avid_value_array_read_range"),
 		TEXT("avid_value_array_write_range"),
 		TEXT("avid_value_release") })
@@ -1137,6 +1135,18 @@ bool FAvidScriptCSharpArrayUFunctionEndToEndTest::RunTest(
 			TEXT("P57.11B3 Guest IR contains ") + RequiredImportName,
 			ImportNames.Contains(RequiredImportName));
 	}
+	TestFalse(
+		TEXT("P57.11D Guest IR removes the element load import"),
+		ImportNames.Contains(TEXT("avid_value_array_load")));
+	TestFalse(
+		TEXT("P57.11D Guest IR removes the element store import"),
+		ImportNames.Contains(TEXT("avid_value_array_store")));
+	TestTrue(
+		TEXT("P57.11D Guest IR contains compiler-managed array loads"),
+		GuestIrJson.Contains(TEXT("\"op\": \"array_region_load\"")));
+	TestTrue(
+		TEXT("P57.11D Guest IR contains compiler-managed array stores"),
+		GuestIrJson.Contains(TEXT("\"op\": \"array_region_store\"")));
 
 	FAvidScriptWasmReloadManifest Manifest;
 	TArray<uint8> Bytecode;
@@ -1244,6 +1254,12 @@ bool FAvidScriptCSharpArrayUFunctionEndToEndTest::RunTest(
 			AddError(AvidScriptRuntimeLaneLabel(Lane, *TickResult.ErrorMessage));
 			continue;
 		}
+		TestEqual(
+			*AvidScriptRuntimeLaneLabel(
+				Lane,
+				TEXT("compiler-managed array region host crossings")),
+			TickResult.HostImportCallCount,
+			9);
 		TestTrue(
 			*AvidScriptRuntimeLaneLabel(Lane, TEXT("Tick array property reads")),
 			ReadCSharpIntArrayProperty(*FixtureObject, Values));

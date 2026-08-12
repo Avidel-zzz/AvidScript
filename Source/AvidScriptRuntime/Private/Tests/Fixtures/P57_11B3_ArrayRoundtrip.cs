@@ -19,15 +19,15 @@ public static class ArrayRoundtripScript
         int[] result = self.IntArrayRoundTrip(input, ref inOut, out int[] output);
         if (result.Length == 3)
         {
-            int[] local = new int[] { 0, 0, 0 };
-            if (AvidScriptArray.Snapshot(result, 0, local, 0, result.Length))
+            int sum = 0;
+            for (int index = 0; index < result.Length; ++index)
             {
-                local[0] = local[0] + 1;
-                if (AvidScriptArray.Flush(local, 0, result, 0, local.Length)
-                    && result[0] == local[0])
-                {
-                    self.ReadableIntArray = result;
-                }
+                sum = sum + result[index];
+            }
+            result[0] = result[0] + 1;
+            if (sum == 13 && result[0] == 11)
+            {
+                self.ReadableIntArray = result;
             }
         }
         AvidScriptValue.Release(inOut);

@@ -254,7 +254,8 @@ public static class CSharpGuestLowerer
             .SelectMany(function => function.Blocks)
             .SelectMany(block => block.Instructions)
             .Select(instruction => instruction.Op)
-            .Where(op => op is "array_length" or "array_load" or "array_store")
+            .Where(op => op is "array_length" or "array_load" or "array_store"
+                or "array_region_load" or "array_region_store")
             .ToHashSet(StringComparer.Ordinal);
         if (operations.Count == 0)
         {
@@ -269,7 +270,9 @@ public static class CSharpGuestLowerer
         }
 
         List<GuestImport> result = imports.ToList();
-        if (operations.Contains("array_length"))
+        bool hasRegionAccess = operations.Contains("array_region_load")
+            || operations.Contains("array_region_store");
+        if (operations.Contains("array_length") || hasRegionAccess)
         {
             result.Add(new GuestImport(
                 GuestArrayCapabilityIntrinsics.LengthImportId,
@@ -303,6 +306,40 @@ public static class CSharpGuestLowerer
                 GuestArrayCapabilityIntrinsics.Module,
                 GuestArrayCapabilityIntrinsics.StoreImportName,
                 accessParameters,
+                CSharpGuestIds.Int32TypeId));
+        }
+
+        if (hasRegionAccess)
+        {
+            result.Add(new GuestImport(
+                GuestArrayCapabilityIntrinsics.ReadRangeImportId,
+                GuestArrayCapabilityIntrinsics.Module,
+                GuestArrayCapabilityIntrinsics.ReadRangeImportName,
+                new[]
+                {
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.AddressTypeId,
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.Int32TypeId,
+                },
+                CSharpGuestIds.Int32TypeId));
+        }
+
+        if (operations.Contains("array_region_store"))
+        {
+            result.Add(new GuestImport(
+                GuestArrayCapabilityIntrinsics.WriteRangeImportId,
+                GuestArrayCapabilityIntrinsics.Module,
+                GuestArrayCapabilityIntrinsics.WriteRangeImportName,
+                new[]
+                {
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.AddressTypeId,
+                    CSharpGuestIds.Int32TypeId,
+                    CSharpGuestIds.Int32TypeId,
+                },
                 CSharpGuestIds.Int32TypeId));
         }
 

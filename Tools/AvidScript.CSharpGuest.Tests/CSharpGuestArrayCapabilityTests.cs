@@ -11,8 +11,9 @@ internal static class CSharpGuestArrayCapabilityTests
     public static int Run()
     {
         ReachableArrayOperationsInjectCapabilityImports();
+        ReadOnlyArrayRegionsDoNotInjectWriteRange();
         UnreachableArrayOperationsDoNotInjectCapabilityImports();
-        return 2;
+        return 3;
     }
 
     private static void ReachableArrayOperationsInjectCapabilityImports()
@@ -40,27 +41,55 @@ internal static class CSharpGuestArrayCapabilityTests
             .Where(import => import.Module == GuestArrayCapabilityIntrinsics.Module)
             .ToArray();
 
-        Assert(instructions.Count(instruction => instruction.Op == "array_load") == 1
-            && instructions.Count(instruction => instruction.Op == "array_store") == 1
+        Assert(instructions.Count(instruction => instruction.Op == "array_region_load") == 1
+            && instructions.Count(instruction => instruction.Op == "array_region_store") == 1
             && instructions.Count(instruction => instruction.Op == "array_length") == 1,
-            "one-dimensional C# array reads, writes, and Length should lower to typed Guest IR");
+            "one-dimensional C# array reads and writes should lower to managed regions with typed Length");
         Assert(arrayImports.Select(import => import.Name).SequenceEqual(new[]
             {
                 GuestArrayCapabilityIntrinsics.LengthImportName,
-                GuestArrayCapabilityIntrinsics.LoadImportName,
-                GuestArrayCapabilityIntrinsics.StoreImportName,
+                GuestArrayCapabilityIntrinsics.ReadRangeImportName,
+                GuestArrayCapabilityIntrinsics.WriteRangeImportName,
             }),
-            "reachable array instructions should inject the three stable avidscript imports");
+            "reachable region instructions should inject only the existing length and range imports");
         Assert(arrayImports[0].ParameterTypeIds.Count == 1
-            && arrayImports.Skip(1).All(import => import.ParameterTypeIds.Count == 4)
+            && arrayImports.Skip(1).All(import => import.ParameterTypeIds.Count == 5)
             && arrayImports.All(import => import.ReturnTypeId == "type:int32"),
-            "array capability imports should retain the frozen (i)i and (iiii)i signatures");
+            "array capability imports should retain the frozen (i)i and (iiiii)i signatures");
 
         WasmCompilationResult wasm = WasmModuleCompiler.Compile(module);
         WasmArtifactInfo artifact = WasmArtifactInspector.Inspect(wasm.Bytes);
         Assert(wasm.Succeeded
             && artifact.Imports.Count(import => import.Module == "avidscript") == 3,
             "array capability Guest IR should compile to WASM with all static imports");
+    }
+
+    private static void ReadOnlyArrayRegionsDoNotInjectWriteRange()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "guest_array_read")]
+                public static int Main()
+                {
+                    int[] values = new[] { 3, 5, 8 };
+                    return values[1];
+                }
+            }
+            """;
+        GuestModule module = Lower(source);
+        GuestImport[] arrayImports = module.Imports
+            .Where(import => import.Module == GuestArrayCapabilityIntrinsics.Module)
+            .ToArray();
+
+        Assert(arrayImports.Select(import => import.Name).SequenceEqual(new[]
+            {
+                GuestArrayCapabilityIntrinsics.LengthImportName,
+                GuestArrayCapabilityIntrinsics.ReadRangeImportName,
+            }),
+            "read-only array regions should not authorize or call the write-range import");
     }
 
     private static void UnreachableArrayOperationsDoNotInjectCapabilityImports()
@@ -86,13 +115,16 @@ internal static class CSharpGuestArrayCapabilityTests
                 .SelectMany(function => function.Blocks)
                 .SelectMany(block => block.Instructions)
                 .All(instruction => instruction.Op is not
-                    ("array_length" or "array_load" or "array_store")),
+                    ("array_length" or "array_load" or "array_store"
+                        or "array_region_load" or "array_region_store")),
             "unreachable array operations should stay outside the lowered function closure");
         Assert(module.Imports.All(import =>
                 import.Id is not
                     (GuestArrayCapabilityIntrinsics.LengthImportId
                         or GuestArrayCapabilityIntrinsics.LoadImportId
-                        or GuestArrayCapabilityIntrinsics.StoreImportId)),
+                        or GuestArrayCapabilityIntrinsics.StoreImportId
+                        or GuestArrayCapabilityIntrinsics.ReadRangeImportId
+                        or GuestArrayCapabilityIntrinsics.WriteRangeImportId)),
             "unreachable array operations should not inject capability imports");
     }
 

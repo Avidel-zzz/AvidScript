@@ -1879,3 +1879,22 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.11B3 end-to-end profile used the convenient UObject emitter fixture as `binding_profile.self_class_path`; profile validation correctly rejected it with `self_class_not_actor` before producing the C# report.
 - Prevention: profile-driven lifecycle fixtures select an `AActor`-derived self class before source or report paths are added. UObject fixtures remain valid for descriptor and codec unit boundaries, but do not serve as project profile owners.
+### 2026-08-12: every probe path must come from repository enumeration
+
+- Mistake: the first P57.11D exploration guessed a nonexistent `Scripts` directory and then guessed `GuestArrayCapabilityIntrinsics.cs` from its type name. Both read-only probes failed before returning the intended evidence.
+- Prevention: before any multi-path search or file read, obtain directories with `Get-ChildItem` and exact files with `rg --files` or `rg -l`. Never place an unverified path in a parallel probe; a path inferred from a symbol or class name is not verified.
+
+### 2026-08-12: shared .NET dependency builds are sequential
+
+- Mistake: the first P57.11D .NET gate launched Guest IR, C# Guest, and Wasm backend test projects in parallel. They share `AvidScript.GuestIr/obj/Release`, so one compiler lost the output DLL write race. The wrapper also checked only PowerShell Job state instead of each reported child exit code and incorrectly returned process exit `0`.
+- Prevention: repository .NET test projects that share references run sequentially unless each process has isolated `BaseIntermediateOutputPath` and `OutputPath`. Gate wrappers collect every child `ExitCode` and fail when any value is nonzero; a completed PowerShell Job does not prove its command passed.
+
+### 2026-08-12: benchmark generated modules are restored before canonical gates
+
+- Mistake: P57.11C's benchmark publication left the canonical project's `Source/AvidScriptGeneratedBindings` dependent on `AvidScriptPerfHarness`. The later no-clean target warned about the undeclared plugin, and P57.11D Automation then stopped before test discovery because Windows could not resolve `UnrealEditor-AvidScriptPerfHarness.dll` from the canonical loader paths.
+- Prevention: any benchmark that emits the project-level generated module owns a mandatory finally-step: regenerate the module from the latest full EngineGameplay descriptor, run one canonical no-clean target build, and cold-start the canonical Editor before reporting benchmark completion. A benchmark DLL existing in its plugin directory does not make it a canonical project dependency.
+
+### 2026-08-12: Unreal ExecCmds uses comma-separated commands
+
+- Mistake: the first generated-module recovery command lost a quoted descriptor path, and the second used a semicolon between `GenerateBindings` and `Quit`; UE treated the semicolon as part of the descriptor filename.
+- Prevention: stage descriptor inputs at a verified no-space temporary path and separate `-ExecCmds` commands with commas. Before waiting on Editor shutdown, verify the log contains the complete parsed `Cmd:` line and the expected success marker.
