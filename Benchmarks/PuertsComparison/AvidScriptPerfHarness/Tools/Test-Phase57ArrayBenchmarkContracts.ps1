@@ -124,7 +124,7 @@ try {
             } elseif ($lane -ceq 'avidscript_wasmtime_bulk') {
                 $logicalCalls * 2
             } else {
-                4
+                3
             }
             $nsPerCall = if ($lane -ceq 'puerts_v8_reflection_tarray') {
                 1200.0

@@ -472,7 +472,7 @@ namespace
 			: OutSample.Bytes;
 		const uint64 ExpectedHostCrossings = Lane == ElementLane
 			? static_cast<uint64>(LogicalCalls) * Size * 2u
-			: Lane == CompilerRegionLane ? 4u : static_cast<uint64>(LogicalCalls) * 2u;
+			: Lane == CompilerRegionLane ? 3u : static_cast<uint64>(LogicalCalls) * 2u;
 		if (ObservedHostImports < 0 ||
 			static_cast<uint64>(ObservedHostImports) != ExpectedHostCrossings)
 		{

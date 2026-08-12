@@ -1898,3 +1898,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first generated-module recovery command lost a quoted descriptor path, and the second used a semicolon between `GenerateBindings` and `Quit`; UE treated the semicolon as part of the descriptor filename.
 - Prevention: stage descriptor inputs at a verified no-space temporary path and separate `-ExecCmds` commands with commas. Before waiting on Editor shutdown, verify the log contains the complete parsed `Cmd:` line and the expected success marker.
+
+### 2026-08-12: benchmark crossing contracts follow observed counters
+
+- Mistake: the first P57.11D compiler-region benchmark froze four host crossings from the intended load/store sequence, but the generated export reused the explicit array length and the runtime counter correctly observed only three. The runner rejected the valid execution before producing samples.
+- Prevention: a new benchmark lane first records one diagnostic run from the runtime-owned crossing counter. Freeze that observed value in the runner, evaluator, and synthetic contract together only after correctness and import inspection agree; never infer the count from a conceptual lowering diagram alone.

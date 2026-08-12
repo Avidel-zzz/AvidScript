@@ -134,7 +134,7 @@ foreach ($path in $ProcessResultPaths) {
         } elseif ($lane -ceq 'avidscript_wasmtime_bulk') {
             $logicalCalls * 2
         } else {
-            4
+            3
         }
         Assert-True ([int64]$sample.elements -eq $expectedElements -and
             [int64]$sample.bytes -eq $expectedElements * 4 -and
