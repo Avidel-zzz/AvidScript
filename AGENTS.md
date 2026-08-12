@@ -1903,3 +1903,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.11D compiler-region benchmark froze four host crossings from the intended load/store sequence, but the generated export reused the explicit array length and the runtime counter correctly observed only three. The runner rejected the valid execution before producing samples.
 - Prevention: a new benchmark lane first records one diagnostic run from the runtime-owned crossing counter. Freeze that observed value in the runner, evaluator, and synthetic contract together only after correctness and import inspection agree; never infer the count from a conceptual lowering diagram alone.
+
+### 2026-08-12: long-running gates use one waitable invocation
+
+- Mistake: P57.11D twice launched a build or Automation process through an outer command with a one-second timeout. The tool terminated the launcher, discarded its final exit code, and in one case stopped Editor before an evidence log was created.
+- Prevention: build, benchmark, and Automation commands always receive a timeout longer than their expected wall time and stay in one waitable tool session until completion. Never use a short timeout as a background-process launcher; a process timestamp or disappearance is not substitute evidence for the command exit code and final log markers.
