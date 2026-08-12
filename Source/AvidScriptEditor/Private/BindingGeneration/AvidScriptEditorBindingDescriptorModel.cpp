@@ -216,6 +216,38 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		Writer->WriteArrayEnd();
 	}
 
+	if (Package.SchemaVersion >= 11)
+	{
+		Writer->WriteArrayStart(TEXT("delegate_events"));
+		for (const FAvidScriptBindingDelegateEventModel& Event :
+			Package.DelegateEvents)
+		{
+			Writer->WriteObjectStart();
+			Writer->WriteValue(TEXT("stable_id"), Event.StableId);
+			Writer->WriteValue(
+				TEXT("canonical_identity"),
+				Event.CanonicalIdentity);
+			Writer->WriteValue(TEXT("ordinal"), Event.Ordinal);
+			Writer->WriteValue(TEXT("owner_class"), Event.OwnerClass);
+			Writer->WriteValue(TEXT("ue_member"), Event.UeMember);
+			Writer->WriteValue(TEXT("script_name"), Event.ScriptName);
+			Writer->WriteValue(TEXT("delegate_kind"), Event.DelegateKind);
+			Writer->WriteValue(TEXT("source_mode"), Event.SourceMode);
+			Writer->WriteValue(TEXT("export_name"), Event.ExportName);
+			Writer->WriteArrayStart(TEXT("parameters"));
+			for (const FAvidScriptBindingValueModel& Parameter :
+				Event.Parameters)
+			{
+				Writer->WriteObjectStart();
+				WriteDescriptorModelBindingValue(Writer, Parameter);
+				Writer->WriteObjectEnd();
+			}
+			Writer->WriteArrayEnd();
+			Writer->WriteObjectEnd();
+		}
+		Writer->WriteArrayEnd();
+	}
+
 	Writer->WriteArrayStart(TEXT("bindings"));
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{

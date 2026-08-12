@@ -78,6 +78,20 @@ struct FAvidScriptBindingFunctionModel
 	FAvidScriptBindingHostImportModel HostImport;
 };
 
+struct FAvidScriptBindingDelegateEventModel
+{
+	FString StableId;
+	FString CanonicalIdentity;
+	int32 Ordinal = INDEX_NONE;
+	FString OwnerClass;
+	FString UeMember;
+	FString ScriptName;
+	FString DelegateKind = TEXT("multicast");
+	FString SourceMode = TEXT("self");
+	FString ExportName;
+	TArray<FAvidScriptBindingValueModel> Parameters;
+};
+
 struct FAvidScriptBindingClassReferenceModel
 {
 	FString StableId;
@@ -118,6 +132,7 @@ struct FAvidScriptBindingPackageModel
 	TArray<int32> ActiveObjectTypeOrdinals;
 	TArray<FAvidScriptBindingTypeModel> Types;
 	TArray<FAvidScriptBindingFunctionModel> Bindings;
+	TArray<FAvidScriptBindingDelegateEventModel> DelegateEvents;
 	TArray<FAvidScriptBindingClassReferenceModel> ClassReferences;
 	TArray<FAvidScriptBindingObjectFactoryModel> ObjectFactories;
 };
@@ -202,6 +217,20 @@ public:
 		const FString& PropertyName,
 		const FString& CanonicalValueType,
 		const FString& BlueprintSetterFunction);
+
+	static FString MakeDelegateEventCanonicalIdentity(
+		const FString& OwnerClass,
+		const FString& DelegatePropertyName,
+		const FString& DelegateKind,
+		const FString& SourceMode,
+		TConstArrayView<FAvidScriptBindingValueModel> Parameters);
+
+	static FString MakeDelegateEventStableId(
+		const FString& OwnerClass,
+		const FString& DelegatePropertyName,
+		const FString& DelegateKind,
+		const FString& SourceMode,
+		TConstArrayView<FAvidScriptBindingValueModel> Parameters);
 
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);
