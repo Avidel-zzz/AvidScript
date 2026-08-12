@@ -21,6 +21,42 @@ bool IsLowerSha256(const FString& Value)
 	}
 	return true;
 }
+
+bool HaveCompatibleDelegateParameters(
+	const UFunction& Left,
+	const UFunction& Right)
+{
+	constexpr EPropertyFlags CallingConventionFlags =
+		CPF_Parm
+		| CPF_OutParm
+		| CPF_ReturnParm
+		| CPF_ReferenceParm
+		| CPF_ConstParm;
+	TFieldIterator<FProperty> LeftParameter(&Left);
+	TFieldIterator<FProperty> RightParameter(&Right);
+	while (LeftParameter && LeftParameter->HasAnyPropertyFlags(CPF_Parm))
+	{
+		if (!RightParameter
+			|| !RightParameter->HasAnyPropertyFlags(CPF_Parm))
+		{
+			return false;
+		}
+		const FProperty& LeftProperty = **LeftParameter;
+		const FProperty& RightProperty = **RightParameter;
+		if (!LeftProperty.SameType(&RightProperty)
+			|| LeftProperty.GetSize() != RightProperty.GetSize()
+			|| LeftProperty.ArrayDim != RightProperty.ArrayDim
+			|| (LeftProperty.GetPropertyFlags() & CallingConventionFlags)
+				!= (RightProperty.GetPropertyFlags() & CallingConventionFlags))
+		{
+			return false;
+		}
+		++LeftParameter;
+		++RightParameter;
+	}
+	return !RightParameter
+		|| !RightParameter->HasAnyPropertyFlags(CPF_Parm);
+}
 } // namespace
 
 void UAvidScriptDelegateBridge::Initialize(
@@ -83,7 +119,10 @@ bool PrepareAvidScriptDelegateBridgeFunction(
 		FunctionName,
 		EIncludeSuperFlag::ExcludeSuper))
 	{
-		if (!Existing->IsSignatureCompatibleWith(&SignatureFunction))
+		// Duplicating a delegate signature into the bridge class can relink its
+		// parameter offsets. The ProcessEvent bridge consumes the original native
+		// parameter block, so collision safety is defined by ABI shape, not offsets.
+		if (!HaveCompatibleDelegateParameters(*Existing, SignatureFunction))
 		{
 			OutError = TEXT("delegate_bridge_signature_collision");
 			return false;

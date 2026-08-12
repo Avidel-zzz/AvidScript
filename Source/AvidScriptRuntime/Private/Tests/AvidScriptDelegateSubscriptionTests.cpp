@@ -99,16 +99,80 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("Real UE multicast broadcast invokes one prepared guest export"),
 		Session.GetLiveEventCallbackCount(),
 		1);
+
+	UObject* const InvalidSource = NewObject<UAvidScriptDelegateBridge>();
+	TestFalse(
+		TEXT("An incompatible candidate source is rejected"),
+		Session.PrepareDelegateSubscriptionsForTesting(
+			InvalidSource,
+			MakeArrayView(&Event, 1),
+			Error));
+	TestEqual(
+		TEXT("Rejected candidate preparation preserves the active subscription"),
+		Session.GetDelegateSubscriptionCountForTesting(),
+		1);
+	Source->Broadcast(Source, 18, 2.75f);
+	TestEqual(
+		TEXT("The preserved active subscription still reaches the guest"),
+		Session.GetLiveEventCallbackCount(),
+		2);
+
+	UAvidScriptRuntimeDelegateTestObject* const ReplacementSource =
+		NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	Error.Reset();
+	const bool bPreparedReplacement =
+		Session.PrepareDelegateSubscriptionsForTesting(
+			ReplacementSource,
+			MakeArrayView(&Event, 1),
+			Error);
+	TestTrue(
+		*FString::Printf(
+			TEXT("A compatible replacement source prepares (error=%s)"),
+			Error.IsEmpty() ? TEXT("<none>") : *Error),
+		bPreparedReplacement);
+	Session.CommitDelegateSubscriptionsForTesting();
+	Source->Broadcast(Source, 19, 3.0f);
+	TestEqual(
+		TEXT("Commit removes the previous source subscription"),
+		Session.GetLiveEventCallbackCount(),
+		2);
+	ReplacementSource->Broadcast(ReplacementSource, 20, 3.25f);
+	TestEqual(
+		TEXT("Commit activates the replacement source subscription"),
+		Session.GetLiveEventCallbackCount(),
+		3);
+
+	Session.SetLiveExecutionObserverForTesting(
+		[ReplacementSource]()
+		{
+			ReplacementSource->Broadcast(ReplacementSource, 21, 3.5f);
+		});
+	FAvidScriptWasmSmokeResult TickResult;
+	TestTrue(TEXT("Tick completes after a reentrant delegate broadcast"), Session.Tick(0.016f, TickResult));
+	TestEqual(
+		TEXT("Reentrant delegate broadcast is dropped without entering the guest"),
+		Session.GetLiveEventCallbackCount(),
+		3);
+	TestEqual(
+		TEXT("Reentrant delegate broadcast does not fault the runtime"),
+		Session.GetLiveLifecycleState(),
+		EAvidScriptLifecycleState::Running);
+	ReplacementSource->Broadcast(ReplacementSource, 22, 3.75f);
+	TestEqual(
+		TEXT("The subscription remains usable after the reentrant broadcast"),
+		Session.GetLiveEventCallbackCount(),
+		4);
+
 	Session.UnbindDelegateSubscriptionsForTesting();
 	TestEqual(
 		TEXT("Explicit teardown removes the subscription"),
 		Session.GetDelegateSubscriptionCountForTesting(),
 		0);
-	Source->Broadcast(Source, 19, 3.5f);
+	ReplacementSource->Broadcast(ReplacementSource, 23, 4.0f);
 	TestEqual(
 		TEXT("Broadcast after teardown does not re-enter the guest"),
 		Session.GetLiveEventCallbackCount(),
-		1);
+		4);
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(TEXT("Session stops cleanly"), Session.StopAndUnload(StopResult));
 	return true;

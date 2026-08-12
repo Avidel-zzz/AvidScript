@@ -1925,3 +1925,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: P57.12A initially called a full Automation run successful from process exit 0 and Queue Empty before counting the per-test results; the log actually contained four `Result={Fail}` completions.
 - Prevention: a UE Automation gate passes only after parsing every `Test Completed` record and proving `found = completed = Result{Success}`, `Result{Fail}=0`, Queue Empty, TestExit, RequestExitWithStatus 0, and process exit 0. Never infer suite success from the exit markers alone.
+
+### 2026-08-13: use Git-native shortstat for commit totals
+
+- Mistake: P57.12A attempted to feed a calculated hashtable expression to PowerShell `Measure-Object -Property`, which rejected the expression and discarded an otherwise valid identity-read group.
+- Prevention: use `git show --shortstat` for commit-level file and line totals. Custom PowerShell aggregation must first materialize typed objects and named properties; it may not be grouped with required identity reads until independently proven exit 0.
+
+### 2026-08-13: event replacement fixtures must use concrete UObject classes
+
+- Mistake: the first P57.12A replacement-lifecycle fixture used `NewObject<UObject>()` as an incompatible source, but `UObject` is abstract and UE raised an ensure before the intended type check.
+- Prevention: negative UObject fixtures must use a known concrete reflected class that is intentionally incompatible with the expected source class. A failed assertion is not attributed to the target contract until the log is checked for engine ensures.
+
+### 2026-08-13: dynamic bridge compatibility is an ABI-shape check
+
+- Mistake: the first reusable delegate bridge collision check called `UFunction::IsSignatureCompatibleWith`; after the duplicated function was linked into the bridge class, its parameter offsets differed from the original delegate signature and a valid second preparation was rejected.
+- Prevention: cached dynamic bridge functions compare parameter type, size, array dimension, and calling-convention property flags while deliberately ignoring class-relative offsets. Stable-ID collisions still fail closed on any ABI-shape difference.
