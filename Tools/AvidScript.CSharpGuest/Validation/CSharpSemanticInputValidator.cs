@@ -42,6 +42,7 @@ internal static class CSharpSemanticInputValidator
             || document.Methods is null
             || document.ControlFlowGraphs is null
             || document.GameplayEventCallbacks is null
+            || document.DelegateEventCallbacks is null
             || document.Diagnostics is null
             || string.IsNullOrWhiteSpace(document.Language)
             || string.IsNullOrWhiteSpace(document.SemanticVersion)
@@ -58,6 +59,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateSymbols(document.Symbols)
             && ValidateCallables(document.SchemaVersion, document.Callables)
             && ValidateGameplayEventCallbacks(document)
+            && ValidateDelegateEventCallbacks(document)
             && ValidateMethods(document.Methods)
             && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
@@ -174,6 +176,7 @@ internal static class CSharpSemanticInputValidator
             StringComparer.Ordinal);
         HashSet<string> callbackIds = document.GameplayEventCallbacks
             .Select(callback => callback.MethodSymbolId)
+            .Concat(document.DelegateEventCallbacks.Select(callback => callback.MethodSymbolId))
             .ToHashSet(StringComparer.Ordinal);
         string[] expectedRootIds = document.Callables
             .Where(callable => callable.Export is not null)
@@ -268,6 +271,56 @@ internal static class CSharpSemanticInputValidator
             && Unique(document.GameplayEventCallbacks.Select(callback => callback.MethodSymbolId));
     }
 
+    private static bool ValidateDelegateEventCallbacks(SemanticDocument document)
+    {
+        if (document.SchemaVersion < 9)
+        {
+            return document.DelegateEventCallbacks.Count == 0;
+        }
+
+        Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId,
+            StringComparer.Ordinal);
+        Dictionary<string, SemanticSymbol> symbolsById = document.Symbols.ToDictionary(
+            symbol => symbol.Id,
+            StringComparer.Ordinal);
+        return document.DelegateEventCallbacks.All(callback => callback is not null
+                && IsSha256(callback.SubscriptionId)
+                && string.Equals(
+                    callback.ExportName,
+                    "avid_on_delegate_" + callback.SubscriptionId[..16],
+                    StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(callback.Name)
+                && !string.IsNullOrWhiteSpace(callback.MethodSymbolId)
+                && IsValidCallbackSpan(callback.Span, callback.Name, document.Source.Length)
+                && callablesById.TryGetValue(callback.MethodSymbolId, out SemanticCallable? callable)
+                && callable.HasBody
+                && callable.IsStatic
+                && !callable.IsConstructor
+                && callable.Import is null
+                && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
+                && callable.Parameters.All(parameter => parameter.RefKind == "none")
+                && symbolsById.TryGetValue(callback.MethodSymbolId, out SemanticSymbol? symbol)
+                && string.Equals(symbol.Kind, "method", StringComparison.Ordinal)
+                && string.Equals(symbol.Name, callback.Name, StringComparison.Ordinal)
+                && symbol.IsStatic
+                && string.Equals(symbol.Accessibility, "public", StringComparison.Ordinal)
+                && string.Equals(symbol.TypeId, "type:void", StringComparison.Ordinal)
+                && string.Equals(
+                    symbol.ContainingSymbolId,
+                    "symbol:" + callable.ContainingTypeId,
+                    StringComparison.Ordinal)
+                && Contains(symbol.Span, callback.Span))
+            && document.DelegateEventCallbacks
+                .Select(callback => callback.SubscriptionId)
+                .SequenceEqual(document.DelegateEventCallbacks
+                    .Select(callback => callback.SubscriptionId)
+                    .OrderBy(subscriptionId => subscriptionId, StringComparer.Ordinal))
+            && Unique(document.DelegateEventCallbacks.Select(callback => callback.SubscriptionId))
+            && Unique(document.DelegateEventCallbacks.Select(callback => callback.ExportName))
+            && Unique(document.DelegateEventCallbacks.Select(callback => callback.MethodSymbolId));
+    }
+
     private static bool ParametersMatch(
         IReadOnlyList<SemanticCallableParameter> parameters,
         IReadOnlyList<string> expectedTypeIds)
@@ -308,6 +361,7 @@ internal static class CSharpSemanticInputValidator
             (5, "1.5") => true,
             (6, "1.6") => true,
             (7, "1.7") => true,
+            (8, "1.8") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -316,6 +370,13 @@ internal static class CSharpSemanticInputValidator
     private static bool IsOrdinalSorted(IReadOnlyList<string> values)
     {
         return values.SequenceEqual(values.OrderBy(value => value, StringComparer.Ordinal));
+    }
+
+    private static bool IsSha256(string value)
+    {
+        return value is not null
+            && value.Length == 64
+            && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
     }
 
     private static bool ValidateMethods(IReadOnlyList<SemanticMethodBody> methods)

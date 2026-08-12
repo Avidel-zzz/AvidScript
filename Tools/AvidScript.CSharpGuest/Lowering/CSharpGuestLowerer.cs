@@ -73,6 +73,15 @@ public static class CSharpGuestLowerer
         {
             functions.Add(gameplayEvents.Function);
         }
+        CSharpDelegateEventLoweringResult? delegateEvents = CSharpDelegateEventLowerer.Lower(
+            document,
+            guestTypes,
+            functions,
+            diagnostics);
+        if (delegateEvents is not null)
+        {
+            functions.AddRange(delegateEvents.Functions);
+        }
         imports = AppendArrayCapabilityImports(
             imports,
             functions,
@@ -83,6 +92,10 @@ public static class CSharpGuestLowerer
         if (gameplayEvents is not null)
         {
             exports.Add(gameplayEvents.Export);
+        }
+        if (delegateEvents is not null)
+        {
+            exports.AddRange(delegateEvents.Exports);
         }
         if (diagnostics.Count != 0)
         {

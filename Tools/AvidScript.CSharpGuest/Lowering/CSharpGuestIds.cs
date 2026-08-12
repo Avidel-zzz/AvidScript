@@ -41,4 +41,18 @@ internal static class CSharpGuestIds
         $"block:synthetic:gameplay_event:call:{eventType}";
 
     public const string GameplayEventReturnBlockId = "block:synthetic:gameplay_event:return";
+
+    public const string DelegateEventFunctionPrefix = "function:synthetic:delegate_event:";
+
+    public static string DelegateEventFunction(string subscriptionId) =>
+        DelegateEventFunctionPrefix + subscriptionId;
+
+    public static string DelegateEventParameter(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:parameter:{ordinal}";
+
+    public static string DelegateEventAggregate(string subscriptionId, int ordinal) =>
+        $"value:delegate_event:{subscriptionId}:aggregate:{ordinal}";
+
+    public static string DelegateEventBlock(string subscriptionId) =>
+        $"block:synthetic:delegate_event:{subscriptionId}";
 }

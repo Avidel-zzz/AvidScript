@@ -1202,6 +1202,348 @@ bool BuildAvidScriptRuntimeValuePlan(
 	return OutPlan.ArgumentWidth > 0 || OutPlan.Kind == EAvidScriptRuntimeBindingKind::Void;
 }
 
+struct FAvidScriptPreparedDelegateCodec
+{
+	FString StableId;
+	TArray<FAvidScriptRuntimeBindingValuePlan> Parameters;
+	uint32 ParameterCellCount = 0;
+};
+
+struct FAvidScriptPreparedDelegateEventCell
+{
+	uint32 EventOrdinal = MAX_uint32;
+	FString StableId;
+	FString ExportName;
+	UClass* ExpectedSourceClass = nullptr;
+	FMulticastDelegateProperty* DelegateProperty = nullptr;
+	UFunction* SignatureFunction = nullptr;
+	FAvidScriptPreparedDelegateCodec Codec;
+};
+
+bool IsAvidScriptPreparedDelegateValueSupported(
+	const FAvidScriptRuntimeBindingValuePlan& Plan)
+{
+	if (Plan.Direction != EAvidScriptRuntimeBindingDirection::Value
+		&& Plan.Direction != EAvidScriptRuntimeBindingDirection::ConstRef)
+	{
+		return false;
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Name
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::String
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Array
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Void)
+	{
+		return false;
+	}
+	if (Plan.Kind != EAvidScriptRuntimeBindingKind::StructWire)
+	{
+		return true;
+	}
+	return !Plan.Children.IsEmpty()
+		&& !Plan.Children.ContainsByPredicate(
+			[](const FAvidScriptRuntimeBindingValuePlan& Child)
+			{
+				return !IsAvidScriptPreparedDelegateValueSupported(Child);
+			});
+}
+
+bool CountAvidScriptPreparedDelegateValueCells(
+	const FAvidScriptRuntimeBindingValuePlan& Plan,
+	uint32& InOutCellCount)
+{
+	uint32 AddedCells = 0;
+	switch (Plan.Kind)
+	{
+	case EAvidScriptRuntimeBindingKind::Bool:
+	case EAvidScriptRuntimeBindingKind::Int8:
+	case EAvidScriptRuntimeBindingKind::UInt8:
+	case EAvidScriptRuntimeBindingKind::Int16:
+	case EAvidScriptRuntimeBindingKind::UInt16:
+	case EAvidScriptRuntimeBindingKind::Int32:
+	case EAvidScriptRuntimeBindingKind::UInt32:
+	case EAvidScriptRuntimeBindingKind::Float:
+	case EAvidScriptRuntimeBindingKind::Enum:
+		AddedCells = 1;
+		break;
+	case EAvidScriptRuntimeBindingKind::Int64:
+	case EAvidScriptRuntimeBindingKind::UInt64:
+	case EAvidScriptRuntimeBindingKind::Double:
+	case EAvidScriptRuntimeBindingKind::Object:
+		AddedCells = 2;
+		break;
+	case EAvidScriptRuntimeBindingKind::Vector:
+	case EAvidScriptRuntimeBindingKind::Rotator:
+		AddedCells = 3;
+		break;
+	case EAvidScriptRuntimeBindingKind::Transform:
+		AddedCells = 9;
+		break;
+	case EAvidScriptRuntimeBindingKind::StructWire:
+		for (const FAvidScriptRuntimeBindingValuePlan& Child : Plan.Children)
+		{
+			if (!CountAvidScriptPreparedDelegateValueCells(Child, InOutCellCount))
+			{
+				return false;
+			}
+		}
+		return true;
+	default:
+		return false;
+	}
+
+	if (AddedCells > FAvidScriptVmCallFrame::MaxCells - InOutCellCount)
+	{
+		return false;
+	}
+	InOutCellCount += AddedCells;
+	return true;
+}
+
+template <typename TValue>
+bool AppendAvidScriptPreparedDelegateCells(
+	const TValue& Value,
+	FAvidScriptVmCallFrame& OutFrame)
+{
+	static_assert(sizeof(TValue) % sizeof(uint32) == 0);
+	constexpr uint32 CellCount = sizeof(TValue) / sizeof(uint32);
+	if (CellCount > FAvidScriptVmCallFrame::MaxCells - OutFrame.CellCount)
+	{
+		return false;
+	}
+	FMemory::Memcpy(
+		OutFrame.Cells + OutFrame.CellCount,
+		&Value,
+		sizeof(TValue));
+	OutFrame.CellCount += CellCount;
+	return true;
+}
+
+bool EncodeAvidScriptPreparedDelegateValue(
+	const FAvidScriptRuntimeBindingValuePlan& Plan,
+	const void* Container,
+	const FAvidScriptBindingInvocationContext& InvocationContext,
+	FAvidScriptVmCallFrame& OutFrame,
+	TArray<FAvidScriptObjectHandle>& OutBorrowedHandles,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	if (Container == nullptr || Plan.Property == nullptr)
+	{
+		OutErrorCategory = TEXT("delegate_event_parameters_invalid");
+		OutErrorDetails = TEXT("The native delegate parameter frame does not match the prepared codec.");
+		return false;
+	}
+	const void* Value = Plan.Property->ContainerPtrToValuePtr<void>(Container);
+	if (Value == nullptr)
+	{
+		OutErrorCategory = TEXT("delegate_event_parameters_invalid");
+		OutErrorDetails = TEXT("A prepared delegate parameter has no native value address.");
+		return false;
+	}
+
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::StructWire)
+	{
+		for (const FAvidScriptRuntimeBindingValuePlan& Child : Plan.Children)
+		{
+			if (!EncodeAvidScriptPreparedDelegateValue(
+					Child,
+					Value,
+					InvocationContext,
+					OutFrame,
+					OutBorrowedHandles,
+					OutErrorCategory,
+					OutErrorDetails))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Bool)
+	{
+		const uint32 Stored = CastFieldChecked<FBoolProperty>(Plan.Property)
+			->GetPropertyValue(Value) ? 1u : 0u;
+		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Float)
+	{
+		const float Stored = CastFieldChecked<FFloatProperty>(Plan.Property)
+			->GetPropertyValue(Value);
+		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Double)
+	{
+		const double Stored = CastFieldChecked<FDoubleProperty>(Plan.Property)
+			->GetPropertyValue(Value);
+		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Object)
+	{
+		UObject* Object = CastFieldChecked<FObjectPropertyBase>(Plan.Property)
+			->GetObjectPropertyValue(Value);
+		FAvidScriptObjectHandle Handle;
+		if (Object != nullptr)
+		{
+			if (Plan.ObjectClass == nullptr || !Object->IsA(Plan.ObjectClass))
+			{
+				OutErrorCategory = TEXT("delegate_event_object_type_mismatch");
+				OutErrorDetails = TEXT("A delegate UObject parameter no longer satisfies its prepared class contract.");
+				return false;
+			}
+			if (InvocationContext.ObjectRegistry == nullptr)
+			{
+				OutErrorCategory = TEXT("delegate_event_object_registry_missing");
+				OutErrorDetails = TEXT("A delegate UObject parameter requires the active session object registry.");
+				return false;
+			}
+			FAvidScriptObjectHandleResult BorrowResult;
+			Handle = InvocationContext.ObjectRegistry->AcquireBorrowedObject(
+				Object,
+				BorrowResult,
+				false);
+			if (!Handle.IsValid())
+			{
+				OutErrorCategory = TEXT("delegate_event_object_borrow_failed");
+				OutErrorDetails = BorrowResult.ErrorMessage;
+				return false;
+			}
+			OutBorrowedHandles.Add(Handle);
+		}
+		return AppendAvidScriptPreparedDelegateCells(Handle, OutFrame);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Vector
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Rotator
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Transform)
+	{
+		float Components[9] = {};
+		uint32 ComponentCount = 0;
+		if (Plan.Kind == EAvidScriptRuntimeBindingKind::Vector)
+		{
+			const FVector& Stored = *static_cast<const FVector*>(Value);
+			Components[0] = static_cast<float>(Stored.X);
+			Components[1] = static_cast<float>(Stored.Y);
+			Components[2] = static_cast<float>(Stored.Z);
+			ComponentCount = 3;
+		}
+		else if (Plan.Kind == EAvidScriptRuntimeBindingKind::Rotator)
+		{
+			const FRotator& Stored = *static_cast<const FRotator*>(Value);
+			Components[0] = static_cast<float>(Stored.Pitch);
+			Components[1] = static_cast<float>(Stored.Yaw);
+			Components[2] = static_cast<float>(Stored.Roll);
+			ComponentCount = 3;
+		}
+		else
+		{
+			const FTransform& Stored = *static_cast<const FTransform*>(Value);
+			const FVector Translation = Stored.GetTranslation();
+			const FRotator Rotation = Stored.Rotator();
+			const FVector Scale = Stored.GetScale3D();
+			Components[0] = static_cast<float>(Translation.X);
+			Components[1] = static_cast<float>(Translation.Y);
+			Components[2] = static_cast<float>(Translation.Z);
+			Components[3] = static_cast<float>(Rotation.Pitch);
+			Components[4] = static_cast<float>(Rotation.Yaw);
+			Components[5] = static_cast<float>(Rotation.Roll);
+			Components[6] = static_cast<float>(Scale.X);
+			Components[7] = static_cast<float>(Scale.Y);
+			Components[8] = static_cast<float>(Scale.Z);
+			ComponentCount = 9;
+		}
+		for (uint32 Index = 0; Index < ComponentCount; ++Index)
+		{
+			if (!AppendAvidScriptPreparedDelegateCells(Components[Index], OutFrame))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	const FNumericProperty* Numeric = CastField<FNumericProperty>(Plan.Property);
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Enum)
+	{
+		if (const FEnumProperty* Enum = CastField<FEnumProperty>(Plan.Property))
+		{
+			Numeric = Enum->GetUnderlyingProperty();
+		}
+	}
+	if (Numeric == nullptr)
+	{
+		OutErrorCategory = TEXT("delegate_event_codec_invalid");
+		OutErrorDetails = TEXT("A prepared delegate numeric codec no longer has a numeric property.");
+		return false;
+	}
+
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::Int64)
+	{
+		const int64 Stored = Numeric->GetSignedIntPropertyValue(Value);
+		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+	}
+	if (Plan.Kind == EAvidScriptRuntimeBindingKind::UInt64)
+	{
+		const uint64 Stored = Numeric->GetUnsignedIntPropertyValue(Value);
+		return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+	}
+	const bool bSigned = Plan.Kind == EAvidScriptRuntimeBindingKind::Int8
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Int16
+		|| Plan.Kind == EAvidScriptRuntimeBindingKind::Int32;
+	const uint32 Stored = bSigned
+		? static_cast<uint32>(Numeric->GetSignedIntPropertyValue(Value))
+		: static_cast<uint32>(Numeric->GetUnsignedIntPropertyValue(Value));
+	return AppendAvidScriptPreparedDelegateCells(Stored, OutFrame);
+}
+
+bool EncodeAvidScriptPreparedDelegateEvent(
+	const void* ImmutableCodecIdentity,
+	const void* NativeParameters,
+	const FAvidScriptBindingInvocationContext& InvocationContext,
+	FAvidScriptVmCallFrame& OutFrame,
+	TArray<FAvidScriptObjectHandle>& OutBorrowedHandles,
+	FString& OutErrorCategory,
+	FString& OutErrorDetails)
+{
+	OutFrame = FAvidScriptVmCallFrame();
+	OutBorrowedHandles.Reset();
+	OutErrorCategory.Reset();
+	OutErrorDetails.Reset();
+	const FAvidScriptPreparedDelegateCodec* Codec =
+		static_cast<const FAvidScriptPreparedDelegateCodec*>(ImmutableCodecIdentity);
+	if (Codec == nullptr
+		|| Codec->ParameterCellCount > FAvidScriptVmCallFrame::MaxCells
+		|| (NativeParameters == nullptr && !Codec->Parameters.IsEmpty()))
+	{
+		OutErrorCategory = TEXT("delegate_event_codec_invalid");
+		OutErrorDetails = TEXT("The prepared delegate codec or native parameter frame is unavailable.");
+		return false;
+	}
+
+	for (const FAvidScriptRuntimeBindingValuePlan& Parameter : Codec->Parameters)
+	{
+		if (!EncodeAvidScriptPreparedDelegateValue(
+				Parameter,
+				NativeParameters,
+				InvocationContext,
+				OutFrame,
+				OutBorrowedHandles,
+				OutErrorCategory,
+				OutErrorDetails))
+		{
+			OutFrame = FAvidScriptVmCallFrame();
+			return false;
+		}
+	}
+	if (OutFrame.CellCount != Codec->ParameterCellCount)
+	{
+		OutFrame = FAvidScriptVmCallFrame();
+		OutErrorCategory = TEXT("delegate_event_codec_invalid");
+		OutErrorDetails = TEXT("The prepared delegate codec produced an unexpected VM cell count.");
+		return false;
+	}
+	return true;
+}
+
 bool ResolveAvidScriptLifecycleWorld(
 	const FAvidScriptBindingInvocationContext& Context,
 	const FString& Source,
@@ -1831,6 +2173,8 @@ struct FAvidScriptBindingPackage::FImpl
 	TArray<TUniquePtr<
 		UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>>
 		PreparedDynamicCells;
+	TArray<TUniquePtr<FAvidScriptPreparedDelegateEventCell>>
+		PreparedDelegateEventCells;
 	TArray<UClass*> ObjectTypePlans;
 	UClass* ExpectedSelfClass = nullptr;
 	TArray<FClassReferencePlan> ClassReferencePlans;
@@ -2193,6 +2537,21 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			}
 		}
 	}
+	for (const FAvidScriptBindingDelegateEventModel& Event : Model.DelegateEvents)
+	{
+		if (const FAvidScriptBindingTypeModel* OwnerType =
+			DeclaredTypesByClassPath.FindRef(Event.OwnerClass))
+		{
+			RequireObjectType(OwnerType->StableId);
+		}
+		for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
+		{
+			if (Parameter.Kind == TEXT("object_handle"))
+			{
+				RequireObjectType(Parameter.TypeId);
+			}
+		}
+	}
 	while (!PendingObjectTypeIds.IsEmpty())
 	{
 		const FString TypeId = PendingObjectTypeIds.Pop(EAllowShrinking::No);
@@ -2505,6 +2864,160 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.ResultObjectTypeOrdinal = *ResultOrdinal;
 		Plan.Ownership = Factory.Ownership;
 		Plan.Registration = Factory.Registration;
+	}
+
+	Package->Impl->PreparedDelegateEventCells.Reserve(Model.DelegateEvents.Num());
+	for (const FAvidScriptBindingDelegateEventModel& Event : Model.DelegateEvents)
+	{
+		UClass* OwnerClass = LoadClass(Event.OwnerClass);
+		if (OwnerClass == nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_class_missing"),
+				Event.OwnerClass,
+				TEXT("The delegate owner class is unavailable in this runtime build."));
+			return false;
+		}
+
+		++Package->Impl->Instrumentation.ReflectedNameLookupCount;
+		FMulticastDelegateProperty* DelegateProperty =
+			FindFProperty<FMulticastDelegateProperty>(
+				OwnerClass,
+				FName(*Event.UeMember));
+		UFunction* SignatureFunction = DelegateProperty == nullptr
+			? nullptr
+			: DelegateProperty->SignatureFunction;
+		if (DelegateProperty == nullptr
+			|| DelegateProperty->GetOwnerStruct() != OwnerClass
+			|| !DelegateProperty->HasAnyPropertyFlags(CPF_BlueprintAssignable)
+			|| SignatureFunction == nullptr
+			|| !SignatureFunction->HasAllFunctionFlags(
+				FUNC_Delegate | FUNC_MulticastDelegate))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_property_missing"),
+				Event.OwnerClass + TEXT(".") + Event.UeMember,
+				TEXT("The reflected property is missing or no longer satisfies the dynamic multicast delegate contract."));
+			return false;
+		}
+		if (SignatureFunction->GetReturnProperty() != nullptr)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_return_unsupported"),
+				Event.CanonicalIdentity,
+				TEXT("P57.12A delegate events cannot expose return values."));
+			return false;
+		}
+
+		TArray<FProperty*> ReflectedParameters;
+		for (TFieldIterator<FProperty> It(SignatureFunction); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (Property->HasAnyPropertyFlags(CPF_Parm)
+				&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				ReflectedParameters.Add(Property);
+			}
+		}
+		if (ReflectedParameters.Num() != Event.Parameters.Num())
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_parameter_count_mismatch"),
+				Event.CanonicalIdentity,
+				TEXT("The reflected delegate parameter count changed since descriptor generation."));
+			return false;
+		}
+
+		TUniquePtr<FAvidScriptPreparedDelegateEventCell> Cell =
+			MakeUnique<FAvidScriptPreparedDelegateEventCell>();
+		Cell->EventOrdinal = static_cast<uint32>(Event.Ordinal);
+		Cell->StableId = Event.StableId;
+		Cell->ExportName = Event.ExportName;
+		Cell->ExpectedSourceClass = OwnerClass;
+		Cell->DelegateProperty = DelegateProperty;
+		Cell->SignatureFunction = SignatureFunction;
+		Cell->Codec.StableId = Event.StableId;
+		Cell->Codec.Parameters.Reserve(Event.Parameters.Num());
+		for (int32 Index = 0; Index < Event.Parameters.Num(); ++Index)
+		{
+			FProperty* Property = ReflectedParameters[Index];
+			const FAvidScriptBindingValueModel& Parameter = Event.Parameters[Index];
+			if (Property->GetName() != Parameter.Name
+				|| GetAvidScriptRuntimePropertyDirection(Property)
+					!= Parameter.Direction)
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_parameter_contract_mismatch"),
+					Event.CanonicalIdentity + TEXT(":") + Parameter.Name,
+					TEXT("A reflected delegate parameter name or direction changed since descriptor generation."));
+				return false;
+			}
+
+			FAvidScriptRuntimeBindingValuePlan ValuePlan;
+			FString Details;
+			if (!BuildAvidScriptRuntimeValuePlan(
+					Property,
+					Parameter,
+					DeclaredTypesById,
+					0,
+					ValuePlan,
+					Details))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_parameter_contract_mismatch"),
+					Event.CanonicalIdentity + TEXT(":") + Parameter.Name,
+					Details);
+				return false;
+			}
+			if (!IsAvidScriptPreparedDelegateValueSupported(ValuePlan))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_parameter_unsupported"),
+					Event.CanonicalIdentity + TEXT(":") + Parameter.Name,
+					TEXT("P57.12A delegate events support only value/const-ref fixed-width parameters; string, array, ref and out values fail closed."));
+				return false;
+			}
+			if (!CountAvidScriptPreparedDelegateValueCells(
+					ValuePlan,
+					Cell->Codec.ParameterCellCount))
+			{
+				SetAvidScriptBindingLoadFailure(
+					OutResult,
+					TEXT("binding_delegate_cell_limit_exceeded"),
+					Event.CanonicalIdentity,
+					FString::Printf(
+						TEXT("The flattened delegate payload exceeds the fixed %u-cell VM call-frame capacity."),
+						FAvidScriptVmCallFrame::MaxCells));
+				return false;
+			}
+			Cell->Codec.Parameters.Add(MoveTemp(ValuePlan));
+		}
+
+		const FString ExpectedIdentity =
+			FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity(
+				OwnerClass->GetPathName(),
+				DelegateProperty->GetName(),
+				TEXT("multicast"),
+				TEXT("self"),
+				Event.Parameters);
+		if (Event.CanonicalIdentity != ExpectedIdentity
+			|| Event.StableId != FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_delegate_identity_mismatch"),
+				Event.CanonicalIdentity,
+				TEXT("The delegate descriptor no longer matches the active reflection snapshot."));
+			return false;
+		}
+		Package->Impl->PreparedDelegateEventCells.Add(MoveTemp(Cell));
 	}
 
 	const int32 LifecycleBindingCount = bHasLifecycleClassReferences
@@ -3579,6 +4092,44 @@ bool FAvidScriptBindingPackage::BuildPreparedDynamicBindings(
 			InvokePreparedDynamicReflection;
 		Binding.bRequiresGuestMemory = Program.bRequiresGuestMemory;
 		Binding.bStatic = Program.bStatic;
+	}
+	return true;
+}
+
+bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
+	TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
+	FString& OutError) const
+{
+	OutEvents.Reset();
+	OutError.Reset();
+	OutEvents.Reserve(Impl->PreparedDelegateEventCells.Num());
+	for (const TUniquePtr<FAvidScriptPreparedDelegateEventCell>& Cell :
+		Impl->PreparedDelegateEventCells)
+	{
+		if (!Cell.IsValid()
+			|| Cell->EventOrdinal == MAX_uint32
+			|| Cell->StableId.IsEmpty()
+			|| Cell->ExportName.IsEmpty()
+			|| Cell->ExpectedSourceClass == nullptr
+			|| Cell->DelegateProperty == nullptr
+			|| Cell->SignatureFunction == nullptr
+			|| Cell->Codec.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
+		{
+			OutEvents.Reset();
+			OutError = TEXT("The binding package contains an invalid prepared delegate event.");
+			return false;
+		}
+
+		FAvidScriptPreparedDelegateEvent& Event = OutEvents.AddDefaulted_GetRef();
+		Event.EventOrdinal = Cell->EventOrdinal;
+		Event.StableId = Cell->StableId;
+		Event.ExportName = Cell->ExportName;
+		Event.ExpectedSourceClass = Cell->ExpectedSourceClass;
+		Event.DelegateProperty = Cell->DelegateProperty;
+		Event.SignatureFunction = Cell->SignatureFunction;
+		Event.ParameterCellCount = Cell->Codec.ParameterCellCount;
+		Event.ImmutableCodecIdentity = &Cell->Codec;
+		Event.Encode = &EncodeAvidScriptPreparedDelegateEvent;
 	}
 	return true;
 }

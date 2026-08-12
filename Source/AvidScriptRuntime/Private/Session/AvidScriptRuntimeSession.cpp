@@ -7,6 +7,7 @@
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
+#include "Session/AvidScriptSessionDelegateSubscriptions.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -101,6 +102,8 @@ void SetSessionExecutionFailure(
 
 FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 	: ObjectOwnership(MakeUnique<FAvidScriptSessionObjectOwnership>())
+	, DelegateSubscriptions(
+		MakeUnique<FAvidScriptSessionDelegateSubscriptions>(*this))
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
@@ -330,6 +333,14 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 		return;
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	const bool bDelegateSourceChanged =
+		HostContext.ObjectRegistry != InHostContext.ObjectRegistry
+		|| HostContext.OwnerHandle != InHostContext.OwnerHandle;
+	if (bDelegateSourceChanged)
+	{
+		DelegateSubscriptions->UnbindActive();
+		DelegateSubscriptions->DiscardPrepared();
+	}
 	if (HostContext.ObjectRegistry != nullptr
 		&& HostContext.ObjectRegistry != InHostContext.ObjectRegistry)
 	{
@@ -353,6 +364,35 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
+		if (bDelegateSourceChanged
+			&& LiveRuntime->GetLifecycleState()
+				== EAvidScriptLifecycleState::Running)
+		{
+			TArray<FAvidScriptPreparedDelegateEvent> Events;
+			FString Error;
+			UObject* Source = nullptr;
+			if (HostContext.ObjectRegistry != nullptr)
+			{
+				FAvidScriptObjectHandleResult ResolveResult;
+				Source = HostContext.ObjectRegistry->ResolveObject(
+					HostContext.OwnerHandle,
+					ResolveResult,
+					false);
+			}
+			if (!LiveRuntime->BuildPreparedDelegateEvents(Events, Error)
+				|| (!Events.IsEmpty()
+					&& !DelegateSubscriptions->Prepare(Source, Events, Error)))
+			{
+				UE_LOG(
+					LogAvidScriptRuntimeSession,
+					Warning,
+					TEXT("AvidScript delegate rebind rejected after host context change: %s"),
+					Error.IsEmpty() ? TEXT("delegate_source_unavailable") : *Error);
+				return;
+			}
+			DelegateSubscriptions->CommitPrepared();
+			DelegateSubscriptions->SetDispatchEnabled(true);
+		}
 	}
 }
 
@@ -367,6 +407,8 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 		return;
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	DelegateSubscriptions->UnbindActive();
+	DelegateSubscriptions->DiscardPrepared();
 	if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -544,6 +586,26 @@ bool FAvidScriptRuntimeSession::DispatchGameplayEventHot(
 	return EventRouter->DispatchHot(Event, OutFailure);
 }
 
+bool FAvidScriptRuntimeSession::DispatchPreparedDelegateEvent(
+	const FAvidScriptPreparedDelegateEvent& Event,
+	const void* NativeParameters,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	if (IsOperationActive())
+	{
+		SetSessionExecutionFailure(
+			GetLiveModuleId(),
+			*Event.ExportName,
+			TEXT("delegate event dispatch was requested while another guest call or Runtime mutation is active"),
+			OutResult);
+		return false;
+	}
+	TGuardValue<int32> GuestCallGuard(
+		ActiveGuestCallDepth,
+		ActiveGuestCallDepth + 1);
+	return EventRouter->Dispatch(Event, NativeParameters, OutResult);
+}
+
 bool FAvidScriptRuntimeSession::CaptureLiveSnapshot(
 	FAvidScriptWasmSmokeResult& OutResult) const
 {
@@ -571,6 +633,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 			OutResult);
 		return false;
 	}
+	DelegateSubscriptions->UnbindActive();
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	if (!IsLiveLoaded())
 	{
@@ -607,6 +670,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	bool bSucceeded = true;
 	FAvidScriptWasmSmokeResult EndPlayFailure;
+	DelegateSubscriptions->UnbindActive();
+	DelegateSubscriptions->DiscardPrepared();
 	Scheduler->Detach();
 	if (LiveRuntime)
 	{
@@ -711,6 +776,31 @@ FAvidScriptRuntimeSessionTestSnapshot FAvidScriptRuntimeSession::GetTestSnapshot
 	Snapshot.LiveRuntimeIdentity = LiveRuntime.Get();
 	Snapshot.bSchedulerAttached = LiveRuntime.IsValid() && Scheduler->IsAttachedTo(LiveRuntime.Get());
 	return Snapshot;
+}
+
+bool FAvidScriptRuntimeSession::PrepareDelegateSubscriptionsForTesting(
+	UObject* Source,
+	const TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
+	FString& OutError)
+{
+	return DelegateSubscriptions->Prepare(Source, Events, OutError);
+}
+
+void FAvidScriptRuntimeSession::CommitDelegateSubscriptionsForTesting()
+{
+	DelegateSubscriptions->CommitPrepared();
+	DelegateSubscriptions->SetDispatchEnabled(true);
+}
+
+void FAvidScriptRuntimeSession::UnbindDelegateSubscriptionsForTesting()
+{
+	DelegateSubscriptions->UnbindActive();
+	DelegateSubscriptions->DiscardPrepared();
+}
+
+int32 FAvidScriptRuntimeSession::GetDelegateSubscriptionCountForTesting() const
+{
+	return DelegateSubscriptions->NumActive();
 }
 #endif
 
@@ -928,6 +1018,50 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			TEXT("rebuild and validate the candidate before activation"));
 		return false;
 	}
+	TArray<FAvidScriptPreparedDelegateEvent> CandidateDelegateEvents;
+	FString DelegatePrepareError;
+	DelegateSubscriptions->DiscardPrepared();
+	if (!CandidateRuntime->BuildPreparedDelegateEvents(
+			CandidateDelegateEvents,
+			DelegatePrepareError))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<delegate_events>"),
+			TEXT("delegate_subscription_prepare_failed"),
+			DelegatePrepareError.IsEmpty()
+				? TEXT("the candidate delegate event plans could not be prepared")
+				: DelegatePrepareError,
+			TEXT("regenerate the schema 11 descriptor and keep the previous runtime active"));
+		CandidateRuntime->Unload();
+		return false;
+	}
+	UObject* CandidateDelegateSource = nullptr;
+	if (!CandidateDelegateEvents.IsEmpty())
+	{
+		if (HostContext.ObjectRegistry != nullptr)
+		{
+			FAvidScriptObjectHandleResult ResolveResult;
+			CandidateDelegateSource = HostContext.ObjectRegistry->ResolveObject(
+				HostContext.OwnerHandle,
+				ResolveResult,
+				false);
+		}
+		if (!DelegateSubscriptions->Prepare(
+				CandidateDelegateSource,
+				CandidateDelegateEvents,
+				DelegatePrepareError))
+		{
+			SetReloadFailure(
+				OutResult,
+				TEXT("<delegate_events>"),
+				TEXT("delegate_subscription_prepare_failed"),
+				DelegatePrepareError,
+				TEXT("bind the script to a compatible live self object before activation"));
+			CandidateRuntime->Unload();
+			return false;
+		}
+	}
 	const int32 BorrowedHandleCheckpoint = ObjectOwnership->GetBorrowedHandleCount();
 	const auto RollbackBorrowedHandles = [this, BorrowedHandleCheckpoint]() -> bool
 	{
@@ -1000,6 +1134,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			&& bHostEffectsRolledBack
 			&& bBorrowedHandlesRolledBack;
 		CandidateRuntime->SetHostContext(HostContext);
+		DelegateSubscriptions->DiscardPrepared();
 		CandidateRuntime->Unload();
 		return false;
 	}
@@ -1018,6 +1153,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				CommitResult.ErrorDetails,
 				TEXT("keep the previous runtime active and report the candidate transaction state"));
 			CandidateRuntime->SetHostContext(HostContext);
+			DelegateSubscriptions->DiscardPrepared();
 			CandidateRuntime->Unload();
 			return false;
 		}
@@ -1028,6 +1164,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 
 	if (LiveRuntime)
 	{
+		DelegateSubscriptions->SetDispatchEnabled(false);
+		DelegateSubscriptions->UnbindActive();
 		Scheduler->Detach();
 		LiveRuntime->Unload();
 		LiveRuntime.Reset();
@@ -1038,5 +1176,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;
+	DelegateSubscriptions->CommitPrepared();
+	DelegateSubscriptions->SetDispatchEnabled(true);
 	return true;
 }

@@ -60,7 +60,8 @@ public static class CSharpGuestDebugMapProjector
                 throw new InvalidDataException($"ASDEBUG1002: Guest function identity '{function.Id}' is invalid or duplicated.");
             }
 
-            if (SourceLessGeneratedFunctionIds.Contains(function.Id))
+            if (SourceLessGeneratedFunctionIds.Contains(function.Id)
+                || function.Id.StartsWith(CSharpGuestIds.DelegateEventFunctionPrefix, StringComparison.Ordinal))
             {
                 continue;
             }

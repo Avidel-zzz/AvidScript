@@ -8,6 +8,7 @@
 #include "AvidScriptObjectLifecycleBinding.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptFrontendReport.h"
 
 #include "Dom/JsonObject.h"
@@ -1162,6 +1163,95 @@ bool FAvidScriptEditorCSharpBindingSliceServiceObjectFactoryTest::RunTest(
 		TEXT("Factory runtime package publishes type, factory, and attachment imports"),
 		LoadedSlice->GetVmPackage().Imports.Num(),
 		6);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpBindingSliceDelegateEventTest,
+	"AvidScript.Editor.CSharpBindingSlice.DelegateEvents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpBindingSliceDelegateEventTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OutputRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptGeneratedBindingsTests"),
+		TEXT("P57_12A_DelegateEventSlice")));
+	const FString OwnerPath =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.delegate_event_slice");
+	Profile.SelfClassPath = OwnerPath;
+	Profile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnScriptSignal") });
+
+	FAvidScriptCSharpBindingEmitResult AuthorizationPackage;
+	if (!TestTrue(
+			TEXT("Delegate event authorization package publishes"),
+			FAvidScriptEditorCSharpBindingEmitter::PublishProfile(
+				Profile,
+				OutputRoot,
+				AuthorizationPackage)))
+	{
+		AddError(AuthorizationPackage.ErrorMessage);
+		return false;
+	}
+	TArray<FAvidScriptFrontendBindingImport> ManifestImports;
+	if (!TestTrue(
+			TEXT("Delegate event authorization manifest reads"),
+			ReadAvidScriptBindingSliceTestManifestImports(
+				AuthorizationPackage.ManifestPath,
+				ManifestImports)))
+	{
+		return false;
+	}
+	const FAvidScriptFrontendBindingPackage Provenance =
+		MakeAvidScriptBindingSliceTestProvenance(
+			AuthorizationPackage,
+			ManifestImports);
+	FAvidScriptCSharpBindingEmitResult SlicePackage;
+	FAvidScriptEditorCSharpBindingSliceResult SliceResult;
+	if (!TestTrue(
+			TEXT("Delegate event runtime slice publishes"),
+			FAvidScriptEditorCSharpBindingSliceService::Publish(
+				AuthorizationPackage.DescriptorPath,
+				Provenance,
+				OutputRoot,
+				SlicePackage,
+				SliceResult)))
+	{
+		AddError(SliceResult.ErrorMessage);
+		return false;
+	}
+
+	FString SliceJson;
+	FAvidScriptBindingPackageModel SliceModel;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Delegate event slice reads"),
+			FFileHelper::LoadFileToString(
+				SliceJson,
+				*SlicePackage.DescriptorPath))
+		|| !TestTrue(
+			TEXT("Delegate event slice parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				SliceJson,
+				SliceModel,
+				ParseCategory,
+				ParseSource)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Delegate event slice preserves schema 11"), SliceModel.SchemaVersion, 11);
+	TestEqual(TEXT("Delegate event slice preserves event table"), SliceModel.DelegateEvents.Num(), 1);
+	TestTrue(
+		TEXT("Delegate event slice preserves parameter object type"),
+		SliceModel.Types.ContainsByPredicate(
+			[](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CanonicalType == TEXT("object:/Script/Engine.Actor");
+			}));
 	return true;
 }
 

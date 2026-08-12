@@ -9,7 +9,8 @@ internal static class SemanticReachabilityProjector
     public static SemanticReachability Project(
         IReadOnlyList<SemanticCallable> callables,
         IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs,
-        IReadOnlyList<SemanticGameplayEventCallback> gameplayEventCallbacks)
+        IReadOnlyList<SemanticGameplayEventCallback> gameplayEventCallbacks,
+        IReadOnlyList<SemanticDelegateEventCallback> delegateEventCallbacks)
     {
         Dictionary<string, SemanticCallable> callablesById = callables.ToDictionary(
             callable => callable.MethodSymbolId,
@@ -20,6 +21,7 @@ internal static class SemanticReachabilityProjector
             .ToArray();
         string[] rootIds = exportRootIds
             .Concat(gameplayEventCallbacks.Select(callback => callback.MethodSymbolId))
+            .Concat(delegateEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
@@ -82,7 +84,9 @@ internal static class SemanticReachabilityProjector
 
         string[] reachableIds = reachable.OrderBy(id => id, StringComparer.Ordinal).ToArray();
         return new SemanticReachability(
-            gameplayEventCallbacks.Count == 0 ? "export_roots" : "entrypoint_roots",
+            gameplayEventCallbacks.Count == 0 && delegateEventCallbacks.Count == 0
+                ? "export_roots"
+                : "entrypoint_roots",
             rootIds,
             reachableIds,
             BuildReachableImports(reachableIds, callablesById));

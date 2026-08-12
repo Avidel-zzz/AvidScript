@@ -1349,6 +1349,144 @@ bool HasAvidScriptSceneComponentFactories(
 		});
 }
 
+bool ResolveDelegateEventContractType(
+	const FAvidScriptBindingValueModel& Value,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	FString& OutType,
+	FString& OutErrorSource)
+{
+	FString CSharpType;
+	if (!ResolveCSharpType(
+			Value,
+			TypesByCanonical,
+			TypesById,
+			CSharpType,
+			OutErrorSource))
+	{
+		return false;
+	}
+	static const TMap<FString, FString> SystemTypes = {
+		{ TEXT("bool"), TEXT("Boolean") },
+		{ TEXT("float"), TEXT("Single") },
+		{ TEXT("double"), TEXT("Double") },
+		{ TEXT("sbyte"), TEXT("SByte") },
+		{ TEXT("byte"), TEXT("Byte") },
+		{ TEXT("short"), TEXT("Int16") },
+		{ TEXT("ushort"), TEXT("UInt16") },
+		{ TEXT("int"), TEXT("Int32") },
+		{ TEXT("uint"), TEXT("UInt32") },
+		{ TEXT("long"), TEXT("Int64") },
+		{ TEXT("ulong"), TEXT("UInt64") }
+	};
+	if (const FString* SystemType = SystemTypes.Find(CSharpType))
+	{
+		OutType = TEXT("global::System.") + *SystemType;
+		return true;
+	}
+	if (CSharpType.IsEmpty()
+		|| CSharpType.Contains(TEXT("["))
+		|| CSharpType.Contains(TEXT(".")))
+	{
+		OutErrorSource = Value.TypeId;
+		return false;
+	}
+	OutType = TEXT("global::AvidScript.") + CSharpType;
+	return true;
+}
+
+bool AppendDelegateEventReferenceSurface(
+	const FAvidScriptBindingPackageModel& Package,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
+	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesById,
+	TArray<FString>& Lines,
+	FString& OutErrorCategory,
+	FString& OutErrorSource)
+{
+	if (Package.DelegateEvents.IsEmpty())
+	{
+		return true;
+	}
+	if (Package.SchemaVersion < 11)
+	{
+		OutErrorCategory = TEXT("descriptor_contract_invalid");
+		OutErrorSource = TEXT("delegate_events");
+		return false;
+	}
+	Lines.Append({
+		TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]"),
+		TEXT("public sealed class AvidEventAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    public AvidEventAttribute(string subscriptionId)"),
+		TEXT("    {"),
+		TEXT("        SubscriptionId = subscriptionId;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public string SubscriptionId { get; }"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]"),
+		TEXT("internal sealed class AvidEventContractAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    internal AvidEventContractAttribute(string subscriptionId, string parameterTypes)"),
+		TEXT("    {"),
+		TEXT("        SubscriptionId = subscriptionId;"),
+		TEXT("        ParameterTypes = parameterTypes;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    internal string SubscriptionId { get; }"),
+		TEXT("    internal string ParameterTypes { get; }"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public static class AvidEvents"),
+		TEXT("{")
+	});
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Package.DelegateEvents)
+	{
+		if (FindRenderedType(
+				TypesByCanonical,
+				TEXT("object:") + Event.OwnerClass) == nullptr)
+		{
+			OutErrorCategory = TEXT("descriptor_contract_invalid");
+			OutErrorSource = Event.OwnerClass;
+			return false;
+		}
+		TArray<FString> ParameterTypes;
+		for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
+		{
+			if (Parameter.Direction != TEXT("value"))
+			{
+				OutErrorCategory = TEXT("descriptor_contract_invalid");
+				OutErrorSource = Event.CanonicalIdentity;
+				return false;
+			}
+			FString ParameterType;
+			if (!ResolveDelegateEventContractType(
+					Parameter,
+					TypesByCanonical,
+					TypesById,
+					ParameterType,
+					OutErrorSource))
+			{
+				OutErrorCategory = TEXT("delegate_event_type_unsupported");
+				return false;
+			}
+			ParameterTypes.Add(MoveTemp(ParameterType));
+		}
+		Lines.Add(FString::Printf(
+			TEXT("    [AvidEventContract(\"%s\", \"%s\")]"),
+			*EscapeCSharpString(Event.StableId),
+			*EscapeCSharpString(FString::Join(ParameterTypes, TEXT(";")))));
+		Lines.Add(FString::Printf(
+			TEXT("    public const string %s = \"%s\";"),
+			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
+			*EscapeCSharpString(Event.StableId)));
+	}
+	Lines.Append({ TEXT("}"), TEXT("") });
+	return true;
+}
+
 } // namespace
 
 int32 FAvidScriptEditorCSharpBindingRenderer::GetLifecycleImportCount(
@@ -1567,6 +1705,15 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			CSharpTypeNames.Add(Name);
 			bDescriptorHasActorProxy |= Type.Kind == TEXT("object_handle") && Name == TEXT("AActor");
 		}
+	}
+	if (!Package.DelegateEvents.IsEmpty()
+		&& (CSharpTypeNames.Contains(TEXT("AvidEventAttribute"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEventContractAttribute"))
+			|| CSharpTypeNames.Contains(TEXT("AvidEvents"))))
+	{
+		OutErrorCategory = TEXT("csharp_type_collision");
+		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEvents");
+		return false;
 	}
 	if (Package.SchemaVersion >= 9
 		&& !FAvidScriptBindingDescriptorLayout::ValidateTypeGraph(
@@ -1920,6 +2067,16 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("}"),
 		TEXT("")
 	});
+	if (!AppendDelegateEventReferenceSurface(
+			Package,
+			TypesByCanonical,
+			TypesById,
+			Lines,
+			OutErrorCategory,
+			OutErrorSource))
+	{
+		return false;
+	}
 	FAvidScriptEditorCSharpStateContractRenderer::AppendReferenceSurface(Lines);
 	Lines.Append({
 		TEXT("internal static class AvidScriptBindingPackage"),
@@ -2469,6 +2626,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 	Writer->WriteValue(TEXT("package_name"), Package.PackageName);
 	Writer->WriteValue(TEXT("package_hash"), Package.PackageHash);
 	Writer->WriteValue(TEXT("descriptor_schema_version"), Package.SchemaVersion);
+	if (Package.SchemaVersion >= 11)
+	{
+		Writer->WriteValue(
+			TEXT("delegate_event_count"),
+			Package.DelegateEvents.Num());
+	}
 	Writer->WriteValue(TEXT("class_reference_count"), Package.ClassReferences.Num());
 	if (Package.SchemaVersion >= 7)
 	{

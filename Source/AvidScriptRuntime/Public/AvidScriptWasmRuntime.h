@@ -199,6 +199,13 @@ public:
 	bool DispatchGameplayEventHot(
 		const FAvidScriptGameplayEvent& Event,
 		FAvidScriptWasmSmokeResult& OutFailure);
+	bool BuildPreparedDelegateEvents(
+		TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
+		FString& OutError);
+	bool DispatchPreparedDelegateEvent(
+		const FAvidScriptPreparedDelegateEvent& Event,
+		const void* NativeParameters,
+		FAvidScriptWasmSmokeResult& OutResult);
 	void CaptureSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	FAvidScriptWasmHotSnapshot GetHotSnapshot() const;
 	void Unload();
@@ -213,6 +220,12 @@ public:
 		FAvidScriptWasmSmokeResult& OutFailure);
 	void SetStateWriteFailuresForTesting(TConstArrayView<int32> InWriteAttempts);
 	void ClearStateWriteFailureForTesting();
+	bool PrepareDelegateEventExportsForTesting(
+		TArray<FAvidScriptPreparedDelegateEvent>& InOutEvents,
+		FString& OutError)
+	{
+		return PrepareDelegateEventExports(InOutEvents, OutError);
+	}
 	void BeginTypedCallbackEpochForTesting() { BeginTypedCallbackEpoch(); }
 	void EndTypedCallbackEpochForTesting() { EndTypedCallbackEpoch(); }
 	void SetBindingPackageForTesting(
@@ -564,6 +577,9 @@ private:
 	void ResetHostImportState();
 	void CopyHostImportStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
 	void CopyObservableStateToResult(FAvidScriptWasmSmokeResult& OutResult) const;
+	bool PrepareDelegateEventExports(
+		TArray<FAvidScriptPreparedDelegateEvent>& InOutEvents,
+		FString& OutError);
 
 	TUniquePtr<IAvidScriptVmBackend> VmBackend;
 	FAvidScriptVmBackendSelection BackendSelection;
@@ -574,6 +590,7 @@ private:
 	FAvidScriptCachedVmExport TimerExport;
 	FAvidScriptCachedVmExport EventExport;
 	FAvidScriptCachedVmExport GameplayEventExport;
+	TMap<FString, FAvidScriptCachedVmExport> DelegateEventExports;
 
 	bool bGameplayEventExportLookupAttempted = false;
 	bool bHasBegunPlay = false;

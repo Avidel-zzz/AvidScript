@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-12 P57.12A Gate 首次按此前引擎输出版本推断 bundled dotnet 路径为 `10.0.203\win-x64`，实际目录是 `10.0\win-x64`；修正后又忽略仓库 `global.json` 固定要求用户级 SDK 8.0.416，造成两次环境级失败。Prevention：任何阶段 Gate 使用 dotnet 前必须先分别枚举候选 `dotnet.exe` 与执行 `--list-sdks`，选择同时满足字面路径和 `global.json` pin 的宿主；禁止根据 `dotnet --version` 输出反推安装目录，也不得把环境解析失败计为产品测试失败。
+
 - 2026-08-11 P57.11C 文档收尾校验再次把“预期可能无匹配”的 README 旧值搜索与确定性 JSON/status 读取放入同一并行组，令无匹配 exit 1 吞掉其余输出。Prevention：从本记录起，任何用于证明“零命中”的 `rg` 都必须独立调用；并行编排只接受已经证明必定 exit 0 的命令，不再把无匹配搜索视为普通只读检查。
 - 2026-08-11 P57.11C 收尾时把 clean worktree 的 CRLF checkout 文件 SHA 当成正式 benchmark profile SHA，而 runner 实际绑定的是主工作区 LF 字节，两个 hash 不同。Prevention：benchmark evidence 的 profile/result identity 必须直接读取正式 aggregate 内记录的 `profile_sha256`，再与 runner 当时使用的字面 profile 文件复核；clean candidate 文件 hash 只用于该 candidate 自身，不跨 checkout 代填 provenance。
 - 2026-08-11 P57.11C 首版数组 benchmark 的静态合同把普通 JS `Array` 误认成 Puerts 的 UE `TArray` wrapper；contract smoke 通过，但真实 commandlet 在 `N=1` 返回空数组并被 full-hash oracle 拒绝。Prevention：Puerts container headline 必须使用固定版本公开的 `UE.NewArray(UE.Builtin*)` 与 `Num/Get/Add` API，并在任何计时数据发布前先通过每个 size 的真实 marshal/full-hash correctness。
@@ -1908,3 +1910,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: P57.11D twice launched a build or Automation process through an outer command with a one-second timeout. The tool terminated the launcher, discarded its final exit code, and in one case stopped Editor before an evidence log was created.
 - Prevention: build, benchmark, and Automation commands always receive a timeout longer than their expected wall time and stay in one waitable tool session until completion. Never use a short timeout as a background-process launcher; a process timestamp or disappearance is not substitute evidence for the command exit code and final log markers.
+
+### 2026-08-13: index source paths before reading concept-named files
+
+- Mistake: P57.12A review guessed an `AvidScriptObjectHandle.h` path even though the handle is declared in `AvidScriptObjectRegistry.h`, causing an avoidable read-only command failure.
+- Prevention: before reading any source file that was not already listed in the current turn, enumerate its confirmed parent with `rg --files` or locate the symbol with `rg -n`; use the exact returned path and never infer filenames from type names.
+
+### 2026-08-13: validation pathspecs exclude protected local edits
+
+- Mistake: P57.12A passed the whole `Source` tree to `git diff --check`, so a protected pre-existing reload-file change appeared as phase validation noise.
+- Prevention: every scoped diff, whitespace gate, staging command, and candidate file list must use explicit Git pathspec exclusions for all protected local files; broad directory validation is not an acceptable substitute for an owned-file allowlist.
+
+### 2026-08-13: TestExit zero does not prove every Automation test passed
+
+- Mistake: P57.12A initially called a full Automation run successful from process exit 0 and Queue Empty before counting the per-test results; the log actually contained four `Result={Fail}` completions.
+- Prevention: a UE Automation gate passes only after parsing every `Test Completed` record and proving `found = completed = Result{Success}`, `Result{Fail}=0`, Queue Empty, TestExit, RequestExitWithStatus 0, and process exit 0. Never infer suite success from the exit markers alone.

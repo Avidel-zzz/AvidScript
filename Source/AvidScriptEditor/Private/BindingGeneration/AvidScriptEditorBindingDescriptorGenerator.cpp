@@ -1,6 +1,7 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptEditorBindingDelegateEventSelectionResolver.h"
 #include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
 #include "AvidScriptHash.h"
@@ -8,8 +9,10 @@
 #include "BindingGeneration/AvidScriptEditorBindingReloadEffectPolicy.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
+#include "BindingGeneration/AvidScriptEditorReflectedDelegateEventPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
+#include "BindingGeneration/AvidScriptEditorCSharpSyntax.h"
 #include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Misc/EngineVersion.h"
@@ -28,6 +31,7 @@ constexpr const TCHAR* NativeDirectGeneratorVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("55.1.0");
 constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
 constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
+constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -48,6 +52,19 @@ struct FResolvedBindingDescriptor
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
+	int32 Ordinal = INDEX_NONE;
+};
+
+struct FResolvedDelegateEventDescriptor
+{
+	FAvidScriptReflectedDelegateEventSelection Selection;
+	UClass* OwnerClass = nullptr;
+	FMulticastDelegateProperty* Property = nullptr;
+	FAvidScriptProjectedDelegateEvent Projection;
+	FString ScriptName;
+	FString CanonicalIdentity;
+	FString StableId;
+	FString ExportName;
 	int32 Ordinal = INDEX_NONE;
 };
 
@@ -265,6 +282,13 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 				: FString());
 }
 
+FString MakeDelegateEventSelectionKey(
+	const FAvidScriptReflectedDelegateEventSelection& Selection)
+{
+	return TEXT("delegate_event:") + Selection.OwnerClassPath + TEXT(".")
+		+ Selection.EventName.ToString();
+}
+
 void AddProjectedTypeAndChildren(
 	const FAvidScriptProjectedBindingType& Type,
 	TMap<FString, FAvidScriptProjectedBindingType>& TypesByCanonicalName)
@@ -396,6 +420,7 @@ bool GenerateBindingDescriptor(
 	const TSet<FString>& GeneratedNativeFunctionKeys,
 	const TSet<FString>& GeneratedNativePropertyKeys,
 	const TArray<FAvidScriptReflectedPropertySelection>& PropertySelections,
+	const TArray<FAvidScriptReflectedDelegateEventSelection>& DelegateEventSelections,
 	const TArray<FAvidScriptProjectBindingClassSpec>& ClassReferences,
 	const TArray<FAvidScriptProjectObjectFactorySpec>& ObjectFactories,
 	UClass* RequestedSelfClass,
@@ -412,11 +437,12 @@ bool GenerateBindingDescriptor(
 	}
 	if (FunctionSelections.IsEmpty()
 		&& PropertySelections.IsEmpty()
+		&& DelegateEventSelections.IsEmpty()
 		&& ClassReferences.IsEmpty()
 		&& ObjectFactories.IsEmpty()
 		&& RequestedSelfClass == nullptr)
 	{
-		SetFailure(OutResult, TEXT("selection_empty"), PackageName, TEXT("Select at least one reflected function, readable property, or class reference for the binding package."));
+		SetFailure(OutResult, TEXT("selection_empty"), PackageName, TEXT("Select at least one reflected function, readable property, delegate event, or class reference for the binding package."));
 		return false;
 	}
 
@@ -785,6 +811,166 @@ bool GenerateBindingDescriptor(
 		Bindings.Add(MoveTemp(Binding));
 	}
 
+	TArray<FAvidScriptReflectedDelegateEventSelection> SortedDelegateEventSelections =
+		DelegateEventSelections;
+	SortedDelegateEventSelections.Sort([](
+		const FAvidScriptReflectedDelegateEventSelection& Left,
+		const FAvidScriptReflectedDelegateEventSelection& Right)
+	{
+		return MakeDelegateEventSelectionKey(Left).Compare(
+			MakeDelegateEventSelectionKey(Right),
+			ESearchCase::CaseSensitive) < 0;
+	});
+	TArray<FResolvedDelegateEventDescriptor> DelegateEvents;
+	for (const FAvidScriptReflectedDelegateEventSelection& Selection :
+		SortedDelegateEventSelections)
+	{
+		const FString SelectionKey = MakeDelegateEventSelectionKey(Selection);
+		if (SeenSelections.Contains(SelectionKey))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("duplicate_selection"),
+				SelectionKey,
+				TEXT("Keep each reflected delegate event selection exactly once."));
+			return false;
+		}
+		SeenSelections.Add(SelectionKey);
+
+		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
+		FProperty* Property = OwnerClass == nullptr
+			? nullptr
+			: FindFProperty<FProperty>(OwnerClass, Selection.EventName);
+		FMulticastDelegateProperty* DelegateProperty =
+			CastField<FMulticastDelegateProperty>(Property);
+		if (OwnerClass == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("class_missing"),
+				Selection.OwnerClassPath,
+				TEXT("Use a loaded reflected UClass path from the active UE5.8 build."));
+			return false;
+		}
+		if (DelegateProperty == nullptr)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("delegate_event_property_required"),
+				SelectionKey,
+				TEXT("Select a dynamic multicast delegate property."));
+			return false;
+		}
+		if (Property->GetOwnerStruct() != OwnerClass)
+		{
+			SetFailure(
+				OutResult,
+				TEXT("delegate_event_owner_mismatch"),
+				SelectionKey,
+				TEXT("Select the reflected declaring class for the delegate event."));
+			return false;
+		}
+
+		FResolvedDelegateEventDescriptor Event;
+		Event.Selection = Selection;
+		Event.OwnerClass = OwnerClass;
+		Event.Property = DelegateProperty;
+		FString PolicyCategory;
+		FString PolicySource;
+		if (!FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
+				DelegateProperty,
+				Event.Projection,
+				PolicyCategory,
+				PolicySource))
+		{
+			SetFailure(
+				OutResult,
+				PolicyCategory,
+				PolicySource,
+				TEXT("Use a value-only supported signature of at most eight ABI cells."));
+			return false;
+		}
+		TArray<FAvidScriptBindingValueModel> ParameterModels;
+		ParameterModels.Reserve(Event.Projection.Parameters.Num());
+		for (FAvidScriptProjectedBindingValue& Parameter :
+			Event.Projection.Parameters)
+		{
+			FinalizeType(Parameter.Type);
+			ParameterModels.Add(MakeBindingValueModel(Parameter));
+		}
+		Event.ScriptName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(
+			DelegateProperty->GetAuthoredName());
+		if (Event.ScriptName.StartsWith(TEXT("@")))
+		{
+			Event.ScriptName = TEXT("Event_") + Event.ScriptName.Mid(1);
+		}
+		if (Event.ScriptName.IsEmpty())
+		{
+			SetFailure(
+				OutResult,
+				TEXT("delegate_event_script_name_invalid"),
+				SelectionKey,
+				TEXT("Use a delegate property name that maps to a C# identifier."));
+			return false;
+		}
+		Event.CanonicalIdentity =
+			FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity(
+				OwnerClass->GetPathName(),
+				DelegateProperty->GetName(),
+				TEXT("multicast"),
+				TEXT("self"),
+				ParameterModels);
+		Event.StableId = FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
+			OwnerClass->GetPathName(),
+			DelegateProperty->GetName(),
+			TEXT("multicast"),
+			TEXT("self"),
+			ParameterModels);
+		Event.ExportName = TEXT("avid_on_delegate_") + Event.StableId.Left(16);
+		DelegateEvents.Add(MoveTemp(Event));
+	}
+
+	DelegateEvents.Sort([](
+		const FResolvedDelegateEventDescriptor& Left,
+		const FResolvedDelegateEventDescriptor& Right)
+	{
+		return Left.CanonicalIdentity.Compare(
+			Right.CanonicalIdentity,
+			ESearchCase::CaseSensitive) < 0;
+	});
+	TMap<FString, int32> EventScriptNameCounts;
+	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+	{
+		++EventScriptNameCounts.FindOrAdd(Event.ScriptName);
+	}
+	TSet<FString> PublishedEventScriptNames;
+	for (int32 Index = 0; Index < DelegateEvents.Num(); ++Index)
+	{
+		FResolvedDelegateEventDescriptor& Event = DelegateEvents[Index];
+		if (EventScriptNameCounts.FindRef(Event.ScriptName) > 1)
+		{
+			Event.ScriptName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(
+				FString(Event.OwnerClass->GetPrefixCPP())
+					+ Event.OwnerClass->GetName())
+				+ TEXT("_") + Event.ScriptName;
+		}
+		if (PublishedEventScriptNames.Contains(Event.ScriptName))
+		{
+			Event.ScriptName += TEXT("_") + Event.StableId.Left(8);
+		}
+		if (PublishedEventScriptNames.Contains(Event.ScriptName))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("delegate_event_script_name_collision"),
+				Event.ScriptName,
+				TEXT("Rename the delegate property to produce a unique C# event constant."));
+			return false;
+		}
+		PublishedEventScriptNames.Add(Event.ScriptName);
+		Event.Ordinal = Index;
+	}
+
 	Bindings.Sort([](const FResolvedBindingDescriptor& Left, const FResolvedBindingDescriptor& Right)
 	{
 		return Left.CanonicalIdentity.Compare(Right.CanonicalIdentity, ESearchCase::CaseSensitive) < 0;
@@ -811,6 +997,28 @@ bool GenerateBindingDescriptor(
 			AddProjectedTypeAndChildren(Binding.Projection.ReturnValue.Type, TypesByCanonicalName);
 		}
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
+		{
+			AddProjectedTypeAndChildren(Parameter.Type, TypesByCanonicalName);
+		}
+	}
+	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+	{
+		if (Event.StableId.IsEmpty() || SeenStableIds.Contains(Event.StableId))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("duplicate_stable_id"),
+				Event.CanonicalIdentity,
+				TEXT("Resolve the delegate event canonical identity collision."));
+			return false;
+		}
+		SeenStableIds.Add(Event.StableId);
+		FAvidScriptProjectedBindingType OwnerType =
+			FAvidScriptEditorReflectedTypePolicy::MakeObjectType(Event.OwnerClass);
+		FinalizeType(OwnerType);
+		AddProjectedTypeAndChildren(OwnerType, TypesByCanonicalName);
+		for (const FAvidScriptProjectedBindingValue& Parameter :
+			Event.Projection.Parameters)
 		{
 			AddProjectedTypeAndChildren(Parameter.Type, TypesByCanonicalName);
 		}
@@ -864,7 +1072,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 10;
 	}
-	Package.GeneratorVersion = bHasArrayTypes
+	if (!DelegateEvents.IsEmpty())
+	{
+		Package.SchemaVersion = 11;
+	}
+	Package.GeneratorVersion = !DelegateEvents.IsEmpty()
+		? DelegateEventGeneratorVersion
+		: bHasArrayTypes
 		? ArrayGeneratorVersion
 		: bHasStructWireTypes
 		? StructWireGeneratorVersion
@@ -931,6 +1145,25 @@ bool GenerateBindingDescriptor(
 		BindingModel.HostImport.Signature = Binding.Projection.AbiSignature;
 		Package.Bindings.Add(MoveTemp(BindingModel));
 	}
+	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+	{
+		FAvidScriptBindingDelegateEventModel EventModel;
+		EventModel.StableId = Event.StableId;
+		EventModel.CanonicalIdentity = Event.CanonicalIdentity;
+		EventModel.Ordinal = Event.Ordinal;
+		EventModel.OwnerClass = Event.OwnerClass->GetPathName();
+		EventModel.UeMember = Event.Property->GetName();
+		EventModel.ScriptName = Event.ScriptName;
+		EventModel.DelegateKind = TEXT("multicast");
+		EventModel.SourceMode = TEXT("self");
+		EventModel.ExportName = Event.ExportName;
+		for (const FAvidScriptProjectedBindingValue& Parameter :
+			Event.Projection.Parameters)
+		{
+			EventModel.Parameters.Add(MakeBindingValueModel(Parameter));
+		}
+		Package.DelegateEvents.Add(MoveTemp(EventModel));
+	}
 
 	TSet<FString> ClassReferenceStableIds;
 	TSet<FString> ClassReferenceScriptNames;
@@ -977,12 +1210,51 @@ bool GenerateBindingDescriptor(
 	}
 
 	const bool bPureStaticPackage = Package.ClassReferences.IsEmpty()
+		&& DelegateEvents.IsEmpty()
 		&& Bindings.ContainsByPredicate([](const FResolvedBindingDescriptor& Binding)
 		{
 			return Binding.Function == nullptr
 				|| !Binding.Function->HasAnyFunctionFlags(FUNC_Static);
 		}) == false;
 	UClass* SelfClass = RequestedSelfClass;
+	const bool bHasRequestedSelfClass = SelfClass != nullptr;
+	if (!DelegateEvents.IsEmpty())
+	{
+		for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+		{
+			if (!Event.OwnerClass->IsChildOf(AActor::StaticClass()))
+			{
+				SetFailure(
+					OutResult,
+					TEXT("delegate_event_owner_not_actor"),
+					Event.OwnerClass->GetPathName(),
+					TEXT("P57.12A self delegate events require an AActor-derived declaring class."));
+				return false;
+			}
+			if (SelfClass == nullptr)
+			{
+				SelfClass = Event.OwnerClass;
+			}
+			else if (!SelfClass->IsChildOf(Event.OwnerClass))
+			{
+				if (!bHasRequestedSelfClass
+					&& Event.OwnerClass->IsChildOf(SelfClass))
+				{
+					SelfClass = Event.OwnerClass;
+				}
+				else
+				{
+					SetFailure(
+						OutResult,
+						TEXT("delegate_event_self_type_mismatch"),
+						SelfClass->GetPathName() + TEXT(" -> ")
+							+ Event.OwnerClass->GetPathName(),
+						TEXT("Use one Actor Self type derived from every selected delegate event owner."));
+					return false;
+				}
+			}
+		}
+	}
 	if (SelfClass == nullptr && bUseDefaultActorSelf && !bPureStaticPackage)
 	{
 		SelfClass = AActor::StaticClass();
@@ -1002,6 +1274,15 @@ bool GenerateBindingDescriptor(
 				HandleClasses);
 		}
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)
+		{
+			AddProjectedObjectHandleClasses(Parameter.Type, HandleClasses);
+		}
+	}
+	for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
+	{
+		HandleClasses.AddUnique(Event.OwnerClass);
+		for (const FAvidScriptProjectedBindingValue& Parameter :
+			Event.Projection.Parameters)
 		{
 			AddProjectedObjectHandleClasses(Parameter.Type, HandleClasses);
 		}
@@ -1252,6 +1533,7 @@ bool GenerateBindingDescriptor(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Bindings.Num();
+	OutResult.DelegateEventCount = DelegateEvents.Num();
 	OutResult.TypeCount = Package.Types.Num();
 	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
 	OutResult.ObjectFactoryCount = Package.ObjectFactories.Num();
@@ -1295,6 +1577,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateWithObjectFactories(
 		{},
 		{},
 		PropertySelections,
+		{},
 		ClassReferences,
 		ObjectFactories,
 		nullptr,
@@ -1355,10 +1638,12 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 				{
 					return Rule.bDiscoverReadableProperties
 						|| !Rule.IncludeProperties.IsEmpty()
-						|| !Rule.WritableProperties.IsEmpty();
+						|| !Rule.WritableProperties.IsEmpty()
+						|| !Rule.IncludeEvents.IsEmpty();
 				});
 		const bool bHasNonFunctionSurface =
 			!Profile.ExplicitProperties.IsEmpty()
+			|| !Profile.ExplicitDelegateEvents.IsEmpty()
 			|| bHasClassPropertySurface
 			|| !Profile.SelfClassPath.IsEmpty()
 			|| !ClassReferences.IsEmpty()
@@ -1421,6 +1706,48 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		OutSelectionResult.RejectedWritablePropertyCount = PropertyResult.RejectedWritablePropertyCount;
 		OutSelectionResult.Issues.Append(PropertyResult.Issues);
 	}
+	TArray<FAvidScriptReflectedDelegateEventSelection> DelegateEventSelections;
+	const bool bRequestsDelegateEvents = !Profile.ExplicitDelegateEvents.IsEmpty()
+		|| Profile.Classes.ContainsByPredicate(
+			[](const FAvidScriptReflectedClassSelection& Rule)
+			{
+				return !Rule.IncludeEvents.IsEmpty();
+			});
+	if (bRequestsDelegateEvents)
+	{
+		FAvidScriptBindingSelectionResolveResult EventResult;
+		if (!FAvidScriptEditorBindingDelegateEventSelectionResolver::Resolve(
+				Profile,
+				DelegateEventSelections,
+				EventResult))
+		{
+			OutSelectionResult.bSucceeded = false;
+			OutSelectionResult.CandidateDelegateEventCount =
+				EventResult.CandidateDelegateEventCount;
+			OutSelectionResult.AcceptedDelegateEventCount =
+				EventResult.AcceptedDelegateEventCount;
+			OutSelectionResult.RejectedDelegateEventCount =
+				EventResult.RejectedDelegateEventCount;
+			OutSelectionResult.Issues.Append(EventResult.Issues);
+			OutSelectionResult.ErrorCategory = EventResult.ErrorCategory;
+			OutSelectionResult.ErrorSource = EventResult.ErrorSource;
+			OutSelectionResult.NextAction = EventResult.NextAction;
+			OutSelectionResult.ErrorMessage = EventResult.ErrorMessage;
+			SetFailure(
+				OutResult,
+				EventResult.ErrorCategory,
+				EventResult.ErrorSource,
+				EventResult.NextAction);
+			return false;
+		}
+		OutSelectionResult.CandidateDelegateEventCount =
+			EventResult.CandidateDelegateEventCount;
+		OutSelectionResult.AcceptedDelegateEventCount =
+			EventResult.AcceptedDelegateEventCount;
+		OutSelectionResult.RejectedDelegateEventCount =
+			EventResult.RejectedDelegateEventCount;
+		OutSelectionResult.Issues.Append(EventResult.Issues);
+	}
 	OutSelectionResult.bSucceeded = true;
 	TSet<FString> NativeDirectFunctionKeys;
 	TSet<FString> GeneratedNativeFunctionKeys;
@@ -1467,6 +1794,7 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		GeneratedNativeFunctionKeys,
 		GeneratedNativePropertyKeys,
 		PropertySelections,
+		DelegateEventSelections,
 		ClassReferences,
 		ObjectFactories,
 		SelfClass,

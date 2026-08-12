@@ -204,6 +204,18 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 			RequiredTypeIds.Add(Parameter.TypeId);
 		}
 	}
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		SliceModel.DelegateEvents)
+	{
+		RequiredTypeIds.Add(
+			FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+				TEXT("object:") + Event.OwnerClass,
+				{}));
+		for (const FAvidScriptBindingValueModel& Parameter : Event.Parameters)
+		{
+			RequiredTypeIds.Add(Parameter.TypeId);
+		}
+	}
 
 	TArray<FString> PendingTypeIds = RequiredTypeIds.Array();
 	while (!PendingTypeIds.IsEmpty())
@@ -235,7 +247,6 @@ bool BuildAvidScriptCSharpBindingSliceTypeClosure(
 			}
 		}
 	}
-
 	SliceModel.Types.Reset();
 	for (const FAvidScriptBindingTypeModel& Type : AuthorizationModel.Types)
 	{
@@ -715,6 +726,14 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			Rule.GeneratedNativeProperties.AddUnique(FName(*Binding.UeMember));
 		}
 	}
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		AuthorizationModel.DelegateEvents)
+	{
+		FAvidScriptReflectedClassSelection& Rule =
+			SpecializedClassRules.FindOrAdd(Event.OwnerClass);
+		Rule.OwnerClassPath = Event.OwnerClass;
+		Rule.IncludeEvents.AddUnique(FName(*Event.UeMember));
+	}
 	for (FAvidScriptReflectedPropertySelection& Selection : PropertySelections)
 	{
 		if (FAvidScriptReflectedClassSelection* Rule =
@@ -859,6 +878,16 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 			TEXT("slice_object_factory_mismatch"),
 			AuthorizationModel.PackageName,
 			TEXT("preserve the complete authorization object factory table in the runtime slice"));
+		return false;
+	}
+	if (SliceModel.DelegateEvents.Num()
+		!= AuthorizationModel.DelegateEvents.Num())
+	{
+		SetAvidScriptCSharpBindingSliceFailure(
+			OutResult,
+			TEXT("slice_delegate_event_mismatch"),
+			AuthorizationModel.PackageName,
+			TEXT("preserve the complete authorization delegate event table in the runtime slice"));
 		return false;
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : SliceModel.Bindings)

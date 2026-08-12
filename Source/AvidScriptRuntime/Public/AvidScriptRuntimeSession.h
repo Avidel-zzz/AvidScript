@@ -6,6 +6,7 @@
 class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
+class FAvidScriptSessionDelegateSubscriptions;
 class IAvidScriptBindingHostEffectJournal;
 struct FAvidScriptRuntimeArtifact;
 
@@ -70,6 +71,10 @@ public:
 	bool DispatchGameplayEventHot(
 		const FAvidScriptGameplayEvent& Event,
 		FAvidScriptWasmSmokeResult& OutFailure);
+	bool DispatchPreparedDelegateEvent(
+		const FAvidScriptPreparedDelegateEvent& Event,
+		const void* NativeParameters,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool CaptureLiveSnapshot(FAvidScriptWasmSmokeResult& OutResult) const;
 	bool EndPlayLive(FAvidScriptWasmSmokeResult& OutResult);
 	void SetHostContext(const FAvidScriptWasmHostContext& InHostContext);
@@ -113,6 +118,13 @@ public:
 		LiveExecutionObserverForTesting = MoveTemp(InObserver);
 	}
 	FAvidScriptRuntimeSessionTestSnapshot GetTestSnapshot() const;
+	bool PrepareDelegateSubscriptionsForTesting(
+		UObject* Source,
+		TConstArrayView<FAvidScriptPreparedDelegateEvent> Events,
+		FString& OutError);
+	void CommitDelegateSubscriptionsForTesting();
+	void UnbindDelegateSubscriptionsForTesting();
+	int32 GetDelegateSubscriptionCountForTesting() const;
 #endif
 
 private:
@@ -135,6 +147,7 @@ private:
 		FAvidScriptWasmReloadResult& OutResult);
 
 	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
+	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;

@@ -1279,11 +1279,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v11 above the current maximum identifies its header field"),
+		TEXT("Schema v12 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 11);
+			Root->SetNumberField(TEXT("schema_version"), 12);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -3199,6 +3199,102 @@ bool FAvidScriptEditorBindingDescriptorStructWireTest::RunTest(const FString& Pa
 	TestTrue(
 		TEXT("Fixed-array field uses a stable diagnostic"),
 		Result.ErrorSource.EndsWith(TEXT(".Values:fixed_array:Values[2]")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorDelegateEventDescriptorTest,
+	"AvidScript.Editor.BindingDescriptor.DelegateEventSchema11",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorDelegateEventDescriptorTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.delegate_event");
+	Profile.SelfClassPath = OwnerPath;
+	Profile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnScriptSignal") });
+
+	FString Json;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	TestTrue(
+		TEXT("Supported multicast delegate event generates"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			Json,
+			SelectionResult,
+			GenerateResult));
+	TestEqual(
+		TEXT("One delegate event is accepted"),
+		SelectionResult.AcceptedDelegateEventCount,
+		1);
+	TestEqual(
+		TEXT("Generator reports one delegate event"),
+		GenerateResult.DelegateEventCount,
+		1);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	TestTrue(
+		TEXT("Delegate event descriptor parses"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			Json,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+	TestEqual(TEXT("Delegate event activates schema 11"), Package.SchemaVersion, 11);
+	TestEqual(TEXT("Descriptor publishes one event"), Package.DelegateEvents.Num(), 1);
+	if (Package.DelegateEvents.Num() == 1)
+	{
+		const FAvidScriptBindingDelegateEventModel& Event =
+			Package.DelegateEvents[0];
+		TestEqual(TEXT("Event owner is canonical"), Event.OwnerClass, OwnerPath);
+		TestEqual(TEXT("Event member is retained"), Event.UeMember, FString(TEXT("OnScriptSignal")));
+		TestEqual(TEXT("Event script name is retained"), Event.ScriptName, FString(TEXT("OnScriptSignal")));
+		TestEqual(TEXT("Event source is self"), Event.SourceMode, FString(TEXT("self")));
+		TestEqual(TEXT("Event has three parameters"), Event.Parameters.Num(), 3);
+		TestEqual(
+			TEXT("Event export derives from stable id"),
+			Event.ExportName,
+			TEXT("avid_on_delegate_") + Event.StableId.Left(16));
+	}
+	TestTrue(
+		TEXT("Event parameter object type enters the type graph"),
+		Package.Types.ContainsByPredicate(
+			[](const FAvidScriptBindingTypeModel& Type)
+			{
+				return Type.CanonicalType == TEXT("object:/Script/Engine.Actor");
+			}));
+
+	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnStringSignal");
+	TestFalse(
+		TEXT("String delegate event is rejected"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			Json,
+			SelectionResult,
+			GenerateResult));
+	TestEqual(
+		TEXT("String rejection category is stable"),
+		GenerateResult.ErrorCategory,
+		FString(TEXT("delegate_event_type_unsupported")));
+
+	Profile.ExplicitDelegateEvents[0].EventName = TEXT("OnLargeSignal");
+	TestFalse(
+		TEXT("Delegate event over eight cells is rejected"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			Profile,
+			Json,
+			SelectionResult,
+			GenerateResult));
+	TestEqual(
+		TEXT("Oversized event category is stable"),
+		GenerateResult.ErrorCategory,
+		FString(TEXT("delegate_event_abi_cells_exceeded")));
 	return true;
 }
 

@@ -13,6 +13,7 @@
 class UClass;
 class UFunction;
 class FProperty;
+class FMulticastDelegateProperty;
 class UWorld;
 class IAvidScriptObjectOwnershipDomain;
 class FAvidScriptUtf8ValueHeap;
@@ -212,6 +213,29 @@ struct FAvidScriptPreparedDynamicBinding
 	bool bStatic = false;
 };
 
+using FAvidScriptPreparedDelegateEncode =
+	bool (*)(
+		const void* ImmutableCodecIdentity,
+		const void* NativeParameters,
+		const FAvidScriptBindingInvocationContext& InvocationContext,
+		FAvidScriptVmCallFrame& OutFrame,
+		TArray<FAvidScriptObjectHandle>& OutBorrowedHandles,
+		FString& OutErrorCategory,
+		FString& OutErrorDetails);
+
+struct FAvidScriptPreparedDelegateEvent
+{
+	uint32 EventOrdinal = MAX_uint32;
+	FString StableId;
+	FString ExportName;
+	UClass* ExpectedSourceClass = nullptr;
+	FMulticastDelegateProperty* DelegateProperty = nullptr;
+	UFunction* SignatureFunction = nullptr;
+	uint32 ParameterCellCount = 0;
+	const void* ImmutableCodecIdentity = nullptr;
+	FAvidScriptPreparedDelegateEncode Encode = nullptr;
+};
+
 enum class EAvidScriptPreparedHostEffectMode : uint8
 {
 	Rejected,
@@ -283,6 +307,9 @@ public:
 		FString& OutError) const;
 	bool BuildPreparedDynamicBindings(
 		TArray<FAvidScriptPreparedDynamicBinding>& OutBindings,
+		FString& OutError) const;
+	bool BuildPreparedDelegateEvents(
+		TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
 		FString& OutError) const;
 	bool InvokePreparedReflectionI32Pair(
 		const FAvidScriptPreparedReflectionBinding& Binding,

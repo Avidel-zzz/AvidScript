@@ -74,8 +74,10 @@ bool ValidateCanonicalDescriptor(
 
 	TArray<FAvidScriptReflectedFunctionSelection> FunctionSelections;
 	TArray<FAvidScriptReflectedPropertySelection> PropertySelections;
+	TArray<FAvidScriptReflectedDelegateEventSelection> DelegateEventSelections;
 	FunctionSelections.Reserve(Package.Bindings.Num());
 	PropertySelections.Reserve(Package.Bindings.Num());
+	DelegateEventSelections.Reserve(Package.DelegateEvents.Num());
 	TSet<FString> WritablePropertyKeys;
 	TMap<FString, FAvidScriptReflectedClassSelection> SpecializedClassRules;
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
@@ -110,6 +112,13 @@ bool ValidateCanonicalDescriptor(
 			Rule.OwnerClassPath = Binding.OwnerClass;
 			Rule.GeneratedNativeProperties.AddUnique(FName(*Binding.UeMember));
 		}
+	}
+	for (const FAvidScriptBindingDelegateEventModel& Event : Package.DelegateEvents)
+	{
+		DelegateEventSelections.Add({
+			Event.OwnerClass,
+			FName(*Event.UeMember)
+		});
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
@@ -218,6 +227,7 @@ bool ValidateCanonicalDescriptor(
 	Profile.PackageName = Package.PackageName;
 	Profile.ExplicitFunctions = MoveTemp(FunctionSelections);
 	Profile.ExplicitProperties = MoveTemp(PropertySelections);
+	Profile.ExplicitDelegateEvents = MoveTemp(DelegateEventSelections);
 	SpecializedClassRules.GenerateValueArray(Profile.Classes);
 	if (!Package.SelfTypeId.IsEmpty())
 	{
@@ -406,6 +416,7 @@ bool EmitAvidScriptCSharpBindingDescriptor(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = Package.Bindings.Num();
+	OutResult.DelegateEventCount = Package.DelegateEvents.Num();
 	OutResult.TypeCount = Package.Types.Num();
 	OutResult.ClassReferenceCount = Package.ClassReferences.Num();
 	OutResult.ObjectFactoryCount = Package.ObjectFactories.Num();

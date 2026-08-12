@@ -100,6 +100,44 @@ struct FAvidScriptStructWireFixedArrayTestType
 	int32 Values[2]{};
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FAvidScriptEditorDelegateSignal,
+	AActor*, SourceActor,
+	int32, Count,
+	float, Scale);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FAvidScriptEditorDelegateStringSignal,
+	FString, Message);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_NineParams(
+	FAvidScriptEditorDelegateLargeSignal,
+	int32, Value0,
+	int32, Value1,
+	int32, Value2,
+	int32, Value3,
+	int32, Value4,
+	int32, Value5,
+	int32, Value6,
+	int32, Value7,
+	int32, Value8);
+
+UCLASS()
+class AAvidScriptEditorDelegateEventTestActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorDelegateSignal OnScriptSignal;
+
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorDelegateStringSignal OnStringSignal;
+
+	UPROPERTY(BlueprintAssignable)
+	FAvidScriptEditorDelegateLargeSignal OnLargeSignal;
+};
+
 UCLASS()
 class UAvidScriptCSharpBindingEmitterTestObject : public UObject
 {

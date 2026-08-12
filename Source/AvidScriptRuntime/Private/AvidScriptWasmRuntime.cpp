@@ -1511,6 +1511,194 @@ bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEventHot(
 		EAvidScriptWasmResultDetail::HotFailureOnly);
 }
 
+bool FAvidScriptWasmRuntimeInstance::BuildPreparedDelegateEvents(
+	TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
+	FString& OutError)
+{
+	OutEvents.Reset();
+	OutError.Reset();
+	if (!BindingPackage.IsValid())
+	{
+		return true;
+	}
+	if (!BindingPackage->BuildPreparedDelegateEvents(OutEvents, OutError))
+	{
+		return false;
+	}
+	return PrepareDelegateEventExports(OutEvents, OutError);
+}
+
+bool FAvidScriptWasmRuntimeInstance::PrepareDelegateEventExports(
+	TArray<FAvidScriptPreparedDelegateEvent>& InOutEvents,
+	FString& OutError)
+{
+	OutError.Reset();
+	DelegateEventExports.Reset();
+	if (!IsLoaded() || VmBackend == nullptr)
+	{
+		OutError = TEXT("delegate_runtime_unavailable");
+		return false;
+	}
+
+	TArray<FAvidScriptPreparedDelegateEvent> ImplementedEvents;
+	ImplementedEvents.Reserve(InOutEvents.Num());
+	for (const FAvidScriptPreparedDelegateEvent& Event : InOutEvents)
+	{
+		FAvidScriptVmExportHandle Handle;
+		FAvidScriptVmError ResolveError;
+		if (!VmBackend->ResolveExport(Event.ExportName, Handle, ResolveError))
+		{
+			if (ResolveError.Category == TEXT("missing_export"))
+			{
+				continue;
+			}
+			OutError = FString::Printf(
+				TEXT("delegate_export_resolve_failed | export=%s | category=%s | details=%s"),
+				*Event.ExportName,
+				ResolveError.Category.IsEmpty() ? TEXT("vm_error") : *ResolveError.Category,
+				ResolveError.Details.IsEmpty() ? TEXT("<none>") : *ResolveError.Details);
+			DelegateEventExports.Reset();
+			return false;
+		}
+
+		FAvidScriptCachedVmExport CachedExport;
+		if (!AvidScriptWasmRuntimePrivate::CacheResolvedVmExport(
+				*VmBackend,
+				Handle,
+				Event.ParameterCellCount,
+				CachedExport,
+				ResolveError))
+		{
+			OutError = FString::Printf(
+				TEXT("delegate_export_prepare_failed | export=%s | category=%s | details=%s"),
+				*Event.ExportName,
+				ResolveError.Category.IsEmpty() ? TEXT("vm_error") : *ResolveError.Category,
+				ResolveError.Details.IsEmpty() ? TEXT("<none>") : *ResolveError.Details);
+			DelegateEventExports.Reset();
+			return false;
+		}
+		DelegateEventExports.Add(Event.StableId, MoveTemp(CachedExport));
+		ImplementedEvents.Add(Event);
+	}
+
+	InOutEvents = MoveTemp(ImplementedEvents);
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
+	const FAvidScriptPreparedDelegateEvent& Event,
+	const void* NativeParameters,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	CaptureSnapshot(OutResult);
+	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			Event.ExportName,
+			TEXT("invalid_state"),
+			TEXT("Delegate events require an active runtime between BeginPlay and EndPlay"),
+			TEXT("broadcast generated delegate events only while the AvidScript session is Running"));
+		return false;
+	}
+	if (Event.StableId.IsEmpty()
+		|| Event.ExportName.IsEmpty()
+		|| Event.ImmutableCodecIdentity == nullptr
+		|| Event.Encode == nullptr
+		|| Event.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			Event.ExportName,
+			TEXT("invalid_argument"),
+			TEXT("The prepared delegate event plan is invalid"),
+			TEXT("rebuild the schema 11 binding package before dispatch"));
+		return false;
+	}
+
+	FAvidScriptVmCallFrame Frame;
+	TArray<FAvidScriptObjectHandle> BorrowedHandles;
+	FString EncodeCategory;
+	FString EncodeDetails;
+	const auto ReleaseBorrows = [this, &BorrowedHandles]()
+	{
+		if (HostContext.ObjectRegistry == nullptr)
+		{
+			return;
+		}
+		for (int32 Index = BorrowedHandles.Num() - 1; Index >= 0; --Index)
+		{
+			FAvidScriptObjectHandleResult ReleaseResult;
+			HostContext.ObjectRegistry->ReleaseBorrowedHandle(
+				BorrowedHandles[Index],
+				ReleaseResult,
+				false);
+		}
+		BorrowedHandles.Reset();
+	};
+	if (!Event.Encode(
+			Event.ImmutableCodecIdentity,
+			NativeParameters,
+			BindingInvocationContext,
+			Frame,
+			BorrowedHandles,
+			EncodeCategory,
+			EncodeDetails)
+		|| Frame.CellCount != Event.ParameterCellCount)
+	{
+		ReleaseBorrows();
+		SetFailure(
+			OutResult,
+			ModuleId,
+			Event.ExportName,
+			EncodeCategory.IsEmpty()
+				? TEXT("delegate_parameter_encode_failed")
+				: *EncodeCategory,
+			EncodeDetails.IsEmpty()
+				? TEXT("The prepared delegate codec rejected the native parameter frame")
+				: *EncodeDetails,
+			TEXT("verify that the broadcast values still satisfy the generated event contract"));
+		return false;
+	}
+
+	FAvidScriptCachedVmExport& CachedExport =
+		DelegateEventExports.FindOrAdd(Event.StableId);
+	const double EventStartSeconds = FPlatformTime::Seconds();
+	BeginTypedCallbackEpoch();
+	FAvidScriptVmError EventError;
+	const bool bCalled = InvokeVmExport(
+		VmBackend.Get(),
+		CachedExport,
+		Event.ExportName,
+		Frame.CellCount,
+		Frame.Cells,
+		EventError);
+	EndTypedCallbackEpoch();
+	ReleaseBorrows();
+	Metrics.EventCallbackCallMs = MeasureElapsedMs(EventStartSeconds);
+	if (!bCalled)
+	{
+		SetFailureFromVmError(
+			OutResult,
+			ModuleId,
+			Event.ExportName,
+			EventError,
+			DebugMap.Get());
+		OutResult.Metrics = Metrics;
+		CopyObservableStateToResult(OutResult);
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
+		return false;
+	}
+
+	++EventCallbackCount;
+	OutResult.Metrics = Metrics;
+	CopyObservableStateToResult(OutResult);
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult,
@@ -1873,6 +2061,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	TimerExport = {};
 	EventExport = {};
 	GameplayEventExport = {};
+	DelegateEventExports.Reset();
 #if WITH_DEV_AUTOMATION_TESTS
 	TestingI32PairExport = {};
 	TestingI32PairExportName.Reset();

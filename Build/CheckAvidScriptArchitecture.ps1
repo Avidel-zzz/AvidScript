@@ -2044,7 +2044,11 @@ $GeneratedBindingImportLiterals = @(
     [regex]::Matches($BindingDescriptorGeneratorSource, 'TEXT\("(?<name>avid_[a-z0-9_]*)"\)')
     | ForEach-Object { $_.Groups['name'].Value }
     | Sort-Object -Unique)
-$ExpectedGeneratedBindingImportPrefixes = @('avid_s1_', 'avid_ue_')
+$ExpectedGeneratedBindingImportPrefixes = @(
+    'avid_on_delegate_',
+    'avid_s1_',
+    'avid_ue_'
+)
 $UnexpectedGeneratedBindingImportPrefixes = @(
     $GeneratedBindingImportLiterals | Where-Object { $ExpectedGeneratedBindingImportPrefixes -cnotcontains $_ })
 $MissingGeneratedBindingImportPrefixes = @(
@@ -2052,7 +2056,7 @@ $MissingGeneratedBindingImportPrefixes = @(
 if ($UnexpectedGeneratedBindingImportPrefixes.Count -gt 0 -or
     $MissingGeneratedBindingImportPrefixes.Count -gt 0 -or
     $GeneratedBindingImportLiterals.Count -ne $ExpectedGeneratedBindingImportPrefixes.Count) {
-    Add-Violation ('reflected project imports must use only descriptor-derived avid_ue_<stable-id> and avid_s1_<content-hash> namespaces' `
+    Add-Violation ('reflected project symbols must use only descriptor-derived avid_ue_, avid_s1_, and avid_on_delegate_ namespaces' `
         + " | missing=$($MissingGeneratedBindingImportPrefixes -join ',')" `
         + " | unexpected=$($UnexpectedGeneratedBindingImportPrefixes -join ',')")
 }
@@ -2778,15 +2782,16 @@ if ($CSharpSemanticCacheSource -match 'Get-Content\s+-Raw\s+-LiteralPath\s+\$Sou
 foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'SemanticStateContractProjector.Project',
-    'SemanticGameplayEventProjector.Project'
+    'SemanticGameplayEventProjector.Project',
+    'SemanticDelegateEventProjector.Project'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 8',
-    'CurrentSemanticVersion = "1.8"'
+    'CurrentSchemaVersion = 9',
+    'CurrentSemanticVersion = "1.9"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"

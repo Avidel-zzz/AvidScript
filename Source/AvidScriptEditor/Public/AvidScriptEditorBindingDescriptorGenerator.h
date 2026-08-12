@@ -8,6 +8,7 @@ struct FAvidScriptBindingDescriptorGenerateResult
 {
 	bool bSucceeded = false;
 	int32 BindingCount = 0;
+	int32 DelegateEventCount = 0;
 	int32 TypeCount = 0;
 	int32 ClassReferenceCount = 0;
 	int32 ObjectFactoryCount = 0;

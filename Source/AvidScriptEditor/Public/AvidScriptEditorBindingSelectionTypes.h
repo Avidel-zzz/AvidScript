@@ -15,6 +15,12 @@ struct FAvidScriptReflectedPropertySelection
 	bool bWritable = false;
 };
 
+struct FAvidScriptReflectedDelegateEventSelection
+{
+	FString OwnerClassPath;
+	FName EventName;
+};
+
 struct FAvidScriptReflectedClassSelection
 {
 	FString OwnerClassPath;
@@ -26,6 +32,8 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> ExcludeProperties;
 	TArray<FName> WritableProperties;
 	TArray<FName> GeneratedNativeProperties;
+	TArray<FName> IncludeEvents;
+	TArray<FName> ExcludeEvents;
 	bool bDiscoverReadableProperties = false;
 };
 
@@ -35,8 +43,10 @@ struct FAvidScriptBindingSelectionProfile
 	TArray<FAvidScriptReflectedClassSelection> Classes;
 	TArray<FAvidScriptReflectedFunctionSelection> ExplicitFunctions;
 	TArray<FAvidScriptReflectedPropertySelection> ExplicitProperties;
+	TArray<FAvidScriptReflectedDelegateEventSelection> ExplicitDelegateEvents;
 	bool bStrictExplicitFunctions = true;
 	bool bStrictExplicitProperties = true;
+	bool bStrictExplicitDelegateEvents = true;
 	FString SelfClassPath;
 };
 
@@ -46,6 +56,7 @@ struct FAvidScriptBindingSelectionIssue
 	FString OwnerClassPath;
 	FName FunctionName;
 	FName PropertyName;
+	FName DelegateEventName;
 	FString MemberKind = TEXT("function");
 	FString Category;
 	FString Source;
@@ -63,6 +74,9 @@ struct FAvidScriptBindingSelectionResolveResult
 	int32 CandidateWritablePropertyCount = 0;
 	int32 AcceptedWritablePropertyCount = 0;
 	int32 RejectedWritablePropertyCount = 0;
+	int32 CandidateDelegateEventCount = 0;
+	int32 AcceptedDelegateEventCount = 0;
+	int32 RejectedDelegateEventCount = 0;
 	TArray<FAvidScriptBindingSelectionIssue> Issues;
 	FString ErrorCategory;
 	FString ErrorSource;

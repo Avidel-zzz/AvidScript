@@ -9,7 +9,8 @@ internal static class Program
             int count = SemanticCompilationTests.Run() + SemanticOperationTests.Run() +
                 SemanticControlFlowTests.Run() + SemanticInstanceStateTests.Run() +
                 SemanticCallableTests.Run() + SemanticReachabilityTests.Run() +
-                SemanticCliTests.Run() + SemanticStateContractTests.Run();
+                SemanticCliTests.Run() + SemanticStateContractTests.Run() +
+                SemanticDelegateEventTests.Run();
             Console.WriteLine($"AvidScript.CSharpSemantic.Tests: {count}/{count} passed");
             return 0;
         }

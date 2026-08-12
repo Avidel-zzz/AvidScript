@@ -2575,4 +2575,79 @@ bool FAvidScriptEditorCSharpBindingEmitterArrayTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorDelegateEventFacadeTest,
+	"AvidScript.Editor.CSharpBindingEmitter.DelegateEventFacade",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.delegate_event_facade");
+	Profile.SelfClassPath = OwnerPath;
+	Profile.ExplicitDelegateEvents.Add({ OwnerPath, TEXT("OnScriptSignal") });
+
+	FString DescriptorJson;
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult Result;
+	if (!TestTrue(
+			TEXT("Delegate event facade emits"),
+			FAvidScriptEditorCSharpBindingEmitter::EmitProfile(
+				Profile,
+				DescriptorJson,
+				ReferenceSource,
+				ManifestJson,
+				Result)))
+	{
+		AddError(Result.ErrorMessage);
+		return false;
+	}
+	TestEqual(
+		TEXT("Emitter reports one delegate event"),
+		Result.DelegateEventCount,
+		1);
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Emitted delegate event descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource))
+		|| Package.DelegateEvents.Num() != 1)
+	{
+		return false;
+	}
+	const FAvidScriptBindingDelegateEventModel& Event = Package.DelegateEvents[0];
+	TestTrue(
+		TEXT("Facade declares public event attribute"),
+		ReferenceSource.Contains(
+			TEXT("public sealed class AvidEventAttribute : Attribute")));
+	TestTrue(
+		TEXT("Facade declares internal event contract attribute"),
+		ReferenceSource.Contains(
+			TEXT("internal sealed class AvidEventContractAttribute : Attribute")));
+	TestTrue(
+		TEXT("Facade publishes event constants"),
+		ReferenceSource.Contains(TEXT("public static class AvidEvents")));
+	TestTrue(
+		TEXT("Facade contract uses fully-qualified parameter types"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("[AvidEventContract(\"%s\", \"global::AvidScript.AActor;global::System.Int32;global::System.Single\")]"),
+			*Event.StableId)));
+	TestTrue(
+		TEXT("Facade constant carries the stable subscription id"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("public const string OnScriptSignal = \"%s\";"),
+			*Event.StableId)));
+	return true;
+}
+
 #endif

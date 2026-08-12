@@ -78,3 +78,23 @@ bool FAvidScriptRuntimeEventRouter::DispatchHot(
 	}
 	return Runtime->DispatchGameplayEventHot(Event, OutFailure);
 }
+
+bool FAvidScriptRuntimeEventRouter::Dispatch(
+	const FAvidScriptPreparedDelegateEvent& Event,
+	const void* NativeParameters,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	FAvidScriptWasmRuntimeInstance* Runtime = Scheduler.GetActiveRuntime();
+	if (Runtime == nullptr)
+	{
+		SetEventRouterStateFailure(
+			Scheduler,
+			*Event.ExportName,
+			OutResult);
+		return false;
+	}
+	return Runtime->DispatchPreparedDelegateEvent(
+		Event,
+		NativeParameters,
+		OutResult);
+}

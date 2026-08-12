@@ -17,6 +17,7 @@ constexpr const TCHAR* ProjectBindingProfileResolverVersion = TEXT("51.1.0");
 constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectProfileResolverVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeProfileResolverVersion = TEXT("54.6.0");
+constexpr const TCHAR* DelegateEventProfileResolverVersion = TEXT("57.12A.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -128,7 +129,9 @@ bool NormalizeClassRule(
 		|| !NormalizeNames(Rule.IncludeProperties, Rule.OwnerClassPath, TEXT("include_properties"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeProperties, Rule.OwnerClassPath, TEXT("exclude_properties"), OutResult)
 		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult)
-		|| !NormalizeNames(Rule.GeneratedNativeProperties, Rule.OwnerClassPath, TEXT("generated_native_properties"), OutResult))
+		|| !NormalizeNames(Rule.GeneratedNativeProperties, Rule.OwnerClassPath, TEXT("generated_native_properties"), OutResult)
+		|| !NormalizeNames(Rule.IncludeEvents, Rule.OwnerClassPath, TEXT("include_events"), OutResult)
+		|| !NormalizeNames(Rule.ExcludeEvents, Rule.OwnerClassPath, TEXT("exclude_events"), OutResult))
 	{
 		return false;
 	}
@@ -218,6 +221,18 @@ bool NormalizeClassRule(
 				TEXT("generated_native_property_not_selected"),
 				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
 				TEXT("Add generated native properties to include_properties before granting S1 generation."));
+			return false;
+		}
+	}
+	for (const FName Name : Rule.IncludeEvents)
+	{
+		if (Rule.ExcludeEvents.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("member_filter_conflict"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Remove delegate events that appear in both include and exclude filters."));
 			return false;
 		}
 	}
@@ -343,6 +358,7 @@ void AppendRuleIdentity(
 	const bool bIncludeNativeDirectFunctions,
 	const bool bIncludeGeneratedNativeFunctions,
 	const bool bIncludeGeneratedNativeProperties,
+	const bool bIncludeDelegateEvents,
 	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
@@ -376,6 +392,11 @@ void AppendRuleIdentity(
 	if (bIncludeGeneratedNativeProperties)
 	{
 		Identity += TEXT("|gnp=") + JoinNames(Rule.GeneratedNativeProperties);
+	}
+	if (bIncludeDelegateEvents)
+	{
+		Identity += TEXT("|ie=") + JoinNames(Rule.IncludeEvents)
+			+ TEXT("|ee=") + JoinNames(Rule.ExcludeEvents);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -903,9 +924,17 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 		{
 			return !Rule.GeneratedNativeProperties.IsEmpty();
 		});
+	const bool bHasDelegateEvents = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.IncludeEvents.IsEmpty()
+				|| !Rule.ExcludeEvents.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(bHasGeneratedNativeFunctions || bHasGeneratedNativeProperties
+		+ FString(bHasDelegateEvents
+			? DelegateEventProfileResolverVersion
+			: bHasGeneratedNativeFunctions || bHasGeneratedNativeProperties
 			? GeneratedNativeProfileResolverVersion
 			: bHasNativeDirectFunctions
 			? NativeDirectProfileResolverVersion
@@ -931,6 +960,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			bHasNativeDirectFunctions,
 			bHasGeneratedNativeFunctions,
 			bHasGeneratedNativeProperties,
+			bHasDelegateEvents,
 			Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)

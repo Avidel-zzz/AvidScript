@@ -19,6 +19,10 @@ public:
 	bool DispatchHot(
 		const FAvidScriptGameplayEvent& Event,
 		FAvidScriptWasmSmokeResult& OutFailure);
+	bool Dispatch(
+		const FAvidScriptPreparedDelegateEvent& Event,
+		const void* NativeParameters,
+		FAvidScriptWasmSmokeResult& OutResult);
 
 private:
 	FAvidScriptRuntimeScheduler& Scheduler;

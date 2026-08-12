@@ -66,6 +66,8 @@ public static class SemanticAnalyzer
         SemanticCallableProjection callableProjection = SemanticCallableProjector.Project(context, typeRegistry);
         SemanticGameplayEventProjection gameplayEventProjection =
             SemanticGameplayEventProjector.Project(context, callableProjection.Callables);
+        SemanticDelegateEventProjection delegateEventProjection =
+            SemanticDelegateEventProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
@@ -74,6 +76,7 @@ public static class SemanticAnalyzer
             .Concat(callableProjection.Diagnostics)
             .Concat(stateContractProjection.Diagnostics)
             .Concat(gameplayEventProjection.Diagnostics)
+            .Concat(delegateEventProjection.Diagnostics)
             .GroupBy(diagnostic =>
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
@@ -98,7 +101,8 @@ public static class SemanticAnalyzer
         SemanticReachability reachability = SemanticReachabilityProjector.Project(
             callableProjection.Callables,
             controlFlowGraphs,
-            gameplayEventProjection.Callbacks);
+            gameplayEventProjection.Callbacks,
+            delegateEventProjection.Callbacks);
 
         return new SemanticDocument(
             SemanticContract.CurrentSchemaVersion,
@@ -117,6 +121,7 @@ public static class SemanticAnalyzer
         {
             StateContracts = stateContractProjection.Contracts,
             GameplayEventCallbacks = gameplayEventProjection.Callbacks,
+            DelegateEventCallbacks = delegateEventProjection.Callbacks,
         };
     }
 

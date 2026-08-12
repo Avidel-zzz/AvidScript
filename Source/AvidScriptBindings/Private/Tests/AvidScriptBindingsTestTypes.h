@@ -25,6 +25,43 @@ struct FAvidScriptBindingsNestedStruct
 };
 
 USTRUCT(BlueprintType)
+struct FAvidScriptBindingsDelegatePayload
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	bool bEnabled = false;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	EAvidScriptBindingsStructMode Mode =
+		EAvidScriptBindingsStructMode::Primary;
+
+	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
+	FAvidScriptBindingsNestedStruct Nested;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FAvidScriptBindingsPreparedDelegate,
+	UObject*,
+	Target,
+	FAvidScriptBindingsDelegatePayload,
+	Payload,
+	int64,
+	Sequence);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FAvidScriptBindingsPreparedWideDelegate,
+	double,
+	Precision,
+	int64,
+	Token);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FAvidScriptBindingsUnsupportedDelegate,
+	const FString&,
+	Text);
+
+USTRUCT(BlueprintType)
 struct FAvidScriptBindingsRecursiveStruct
 {
 	GENERATED_BODY()
@@ -52,6 +89,15 @@ class UAvidScriptBindingsTestObject : public UObject
     GENERATED_BODY()
 
 public:
+	UPROPERTY(BlueprintAssignable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsPreparedDelegate PreparedDelegate;
+
+	UPROPERTY(BlueprintAssignable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsPreparedWideDelegate PreparedWideDelegate;
+
+	UPROPERTY(BlueprintAssignable, Category = "AvidScript|Tests")
+	FAvidScriptBindingsUnsupportedDelegate UnsupportedDelegate;
+
 	UPROPERTY(BlueprintReadWrite, Category = "AvidScript|Tests")
 	int32 FastPathInt32Property = 0;
 

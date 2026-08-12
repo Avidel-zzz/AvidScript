@@ -4,6 +4,7 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBuildService.h"
 #include "AvidScriptEditorCSharpProfileService.h"
+#include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "AvidScriptEditorGeneratedBindingService.h"
 #include "BindingGeneration/AvidScriptEditorCSharpBindingArtifact.h"
 #include "CSharpBuild/AvidScriptEditorCSharpBuildPipeline.h"
@@ -1348,6 +1349,82 @@ bool FAvidScriptEditorCSharpProfileServiceGeneratedNativePropertyTest::RunTest(
 		TEXT("Generated property empty value category is stable"),
 		EmptyResult.ErrorCategory,
 		FString(TEXT("binding_profile_array_value_invalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpProfileServiceDelegateEventSchemaTest,
+	"AvidScript.Editor.CSharpProfileService.DelegateEventSchema8",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpProfileServiceDelegateEventSchemaTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(
+			GetAvidScriptCSharpProfileServiceTestRoot(),
+			TEXT("DelegateEventSchema8")));
+	TestTrue(
+		TEXT("Delegate event profile root can be created"),
+		IFileManager::Get().MakeDirectory(*TestRoot, true));
+	const FString SourcePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("DelegateEvent.cs")));
+	TestTrue(
+		TEXT("Delegate event profile source can be written"),
+		FFileHelper::SaveStringToFile(
+			TEXT("public static class DelegateEventScript { }\n"),
+			*SourcePath));
+	const FString OwnerPath =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass()->GetPathName();
+	const FString ProfilePath = NormalizeAvidScriptCSharpProfileTestPath(
+		FPaths::Combine(TestRoot, TEXT("delegate_event.csharp-profile.json")));
+	const FString ProfileText = FString::Printf(
+		TEXT("{\n")
+		TEXT("  \"schema_version\": 8,\n")
+		TEXT("  \"language\": \"csharp\",\n")
+		TEXT("  \"source_path\": \"%s\",\n")
+		TEXT("  \"binding_profile\": {\n")
+		TEXT("    \"package_name\": \"avidscript.test.profile.delegate_event\",\n")
+		TEXT("    \"self_class_path\": \"%s\",\n")
+		TEXT("    \"classes\": [{\n")
+		TEXT("      \"class_path\": \"%s\",\n")
+		TEXT("      \"include_events\": [\"OnScriptSignal\"],\n")
+		TEXT("      \"exclude_events\": []\n")
+		TEXT("    }]\n")
+		TEXT("  }\n")
+		TEXT("}\n"),
+		*SourcePath,
+		*OwnerPath,
+		*OwnerPath);
+	TestTrue(
+		TEXT("Delegate event profile can be written"),
+		FFileHelper::SaveStringToFile(ProfileText, *ProfilePath));
+
+	FAvidScriptEditorCSharpProfileLoadResult Result;
+	if (!TestTrue(
+			TEXT("Schema 8 delegate event profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				Result)))
+	{
+		AddError(Result.ErrorMessage);
+		return false;
+	}
+	TestEqual(TEXT("Profile retains schema 8"), Result.SchemaVersion, 8);
+	TestEqual(
+		TEXT("Profile retains one class rule"),
+		Result.ResolvedBindingSelection.Classes.Num(),
+		1);
+	if (Result.ResolvedBindingSelection.Classes.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Profile retains included delegate event"),
+			Result.ResolvedBindingSelection.Classes[0].IncludeEvents,
+			TArray<FName>({ FName(TEXT("OnScriptSignal")) }));
+		TestTrue(
+			TEXT("Profile retains empty delegate event exclusion"),
+			Result.ResolvedBindingSelection.Classes[0].ExcludeEvents.IsEmpty());
+	}
 	return true;
 }
 
