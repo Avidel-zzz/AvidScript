@@ -55,13 +55,13 @@
     "canonical_no_clean_build": "4 actions; Result: Succeeded; no Editor target clean",
     "focused_delegate_automation": "2 found; 2 performed; 2 succeeded; 0 failed; queue empty, TestExit, RequestExitWithStatus 0, and process exit 0 observed",
     "full_avidscript_automation": "348 found; 348 performed; 348 succeeded; 0 failed; queue empty, TestExit, RequestExitWithStatus 0, and process exit 0 observed",
-    "architecture_check": "pending clean candidate attestation"
+    "architecture_check": "clean candidate de8d949c02aabfb9e44352a6c80c40eb16b384d4 / 34992c342d156256eb31ab4110484477fa037365 passed"
   },
   "log_sha256": {
     "canonical_no_clean_build": "d97bee266a82e8731c744409255d5f4d1a385b47c31c2a1db3a2e422e90466b9",
     "focused_delegate_automation": "0f7ab03672600c6f80256fa43ef3800e6af5955ccfd22c3f57b107aaf0beb278",
     "full_avidscript_automation": "dd7fd8b2693d03468d8bc8079a17f18f9e81e981896a9b0e6f8f2e3b6def497d",
-    "architecture_check": "pending"
+    "architecture_check": "cb8834649b70374d51473b82885361a53c76c6e9b25d08e0be721be1f0b75dd3"
   },
   "performance": {
     "new_measurement": false,

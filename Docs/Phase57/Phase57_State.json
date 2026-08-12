@@ -164,12 +164,12 @@
     "at_utc": "2026-08-12T16:47:13.7131773Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_11D_Architecture_5fa6bbe.log",
-    "report_sha256": "1330131de711c5617fc2ba852665a07d2b00c25d317577b5493f05d336fc0ca7",
+    "report_path": "external:C:/tmp/AvidScript_P57_12A_Architecture_de8d949.log",
+    "report_sha256": "cb8834649b70374d51473b82885361a53c76c6e9b25d08e0be721be1f0b75dd3",
     "run_id": "P57.12A-clean-architecture-final",
-    "verified_commit": "5fa6bbe4c3a76b71205f6e789eabff12b9202c57",
-    "verified_tree": "66b7336bee25cd401495464d168e8d8957d685ff",
-    "attestation_parent": "2a606c4f993f3d833495d6f538ebcd468f70a60c",
+    "verified_commit": "de8d949c02aabfb9e44352a6c80c40eb16b384d4",
+    "verified_tree": "34992c342d156256eb31ab4110484477fa037365",
+    "attestation_parent": "de8d949c02aabfb9e44352a6c80c40eb16b384d4",
     "attested_at_utc": "2026-08-12T16:47:13.7131773Z"
   },
   "protected_dirty": [
