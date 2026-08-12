@@ -2602,6 +2602,7 @@ foreach ($RequiredClassReferenceOrdinalContract in @(
     }
 }
 $SemanticAnalyzerSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAnalyzer.cs'
+$SemanticCallableProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticCallableProjector.cs'
 $SemanticContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticContract.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
