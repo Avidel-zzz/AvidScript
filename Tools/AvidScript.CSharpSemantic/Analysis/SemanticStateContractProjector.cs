@@ -128,6 +128,16 @@ internal static class SemanticStateContractProjector
                 diagnostics);
             bool participates = disposition == "persist" ||
                 (policy == CompatiblePolicy && disposition == "implicit");
+            if (participates
+                && attributes.Subscription is not null
+                && SymbolEqualityComparer.Default.Equals(field.Type, attributes.Subscription))
+            {
+                diagnostics.Add(CreateFieldDiagnostic(
+                    "ASSTATE1005",
+                    "AvidSubscription is a runtime capability and must be marked AvidTransient.",
+                    context,
+                    field));
+            }
             if (aliases.Length > 0 && !participates)
             {
                 diagnostics.Add(CreateDiagnostic(
@@ -251,11 +261,28 @@ internal static class SemanticStateContractProjector
                 : SemanticSpanFactory.Create(context.SourceText, syntaxReference.Span));
     }
 
+    private static SemanticDiagnostic CreateFieldDiagnostic(
+        string code,
+        string message,
+        SemanticCompilationContext context,
+        IFieldSymbol field)
+    {
+        SyntaxReference? syntaxReference = field.DeclaringSyntaxReferences.FirstOrDefault();
+        return new SemanticDiagnostic(
+            code,
+            "error",
+            message,
+            syntaxReference is null
+                ? SemanticSpanFactory.Empty
+                : SemanticSpanFactory.Create(context.SourceText, syntaxReference.Span));
+    }
+
     private sealed record StateContractAttributes(
         INamedTypeSymbol? Contract,
         INamedTypeSymbol? Persist,
         INamedTypeSymbol? Transient,
-        INamedTypeSymbol? Alias)
+        INamedTypeSymbol? Alias,
+        INamedTypeSymbol? Subscription)
     {
         public static StateContractAttributes Create(Compilation compilation)
         {
@@ -263,7 +290,8 @@ internal static class SemanticStateContractProjector
                 compilation.GetTypeByMetadataName("AvidScript.AvidStateContractAttribute"),
                 compilation.GetTypeByMetadataName("AvidScript.AvidPersistAttribute"),
                 compilation.GetTypeByMetadataName("AvidScript.AvidTransientAttribute"),
-                compilation.GetTypeByMetadataName("AvidScript.AvidStateAliasAttribute"));
+                compilation.GetTypeByMetadataName("AvidScript.AvidStateAliasAttribute"),
+                compilation.GetTypeByMetadataName("AvidScript.AvidSubscription"));
         }
     }
 }

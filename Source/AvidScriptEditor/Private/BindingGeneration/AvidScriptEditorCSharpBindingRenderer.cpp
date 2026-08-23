@@ -1438,6 +1438,19 @@ bool AppendDelegateEventReferenceSurface(
 		TEXT("    internal string ParameterTypes { get; }"),
 		TEXT("}"),
 		TEXT(""),
+		TEXT("public readonly struct AvidSubscription"),
+		TEXT("{"),
+		TEXT("    private readonly long Token;"),
+		TEXT(""),
+		TEXT("    internal AvidSubscription(long token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token > 0;"),
+		TEXT("    public bool Cancel() => AvidScriptRuntimeNative.EventUnsubscribe(Token) != 0;"),
+		TEXT("}"),
+		TEXT(""),
 		TEXT("public static class AvidEvents"),
 		TEXT("{")
 	});
@@ -1482,6 +1495,27 @@ bool AppendDelegateEventReferenceSurface(
 			TEXT("    public const string %s = \"%s\";"),
 			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
 			*EscapeCSharpString(Event.StableId)));
+	}
+	Lines.Append({
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public static class AvidSubscriptions"),
+		TEXT("{")
+	});
+	for (const FAvidScriptBindingDelegateEventModel& Event :
+		Package.DelegateEvents)
+	{
+		const FAvidScriptBindingTypeModel* OwnerType = FindRenderedType(
+			TypesByCanonical,
+			TEXT("object:") + Event.OwnerClass);
+		check(OwnerType != nullptr);
+		Lines.Add(FString::Printf(
+			TEXT("    public static AvidSubscription %s(%s source)"),
+			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(Event.ScriptName),
+			*FAvidScriptEditorCSharpSyntax::MakeIdentifier(OwnerType->CppType)));
+		Lines.Add(FString::Printf(
+			TEXT("        => new(AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, %d));"),
+			Event.Ordinal));
 	}
 	Lines.Append({ TEXT("}"), TEXT("") });
 	return true;
@@ -1709,10 +1743,12 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 	if (!Package.DelegateEvents.IsEmpty()
 		&& (CSharpTypeNames.Contains(TEXT("AvidEventAttribute"))
 			|| CSharpTypeNames.Contains(TEXT("AvidEventContractAttribute"))
-			|| CSharpTypeNames.Contains(TEXT("AvidEvents"))))
+			|| CSharpTypeNames.Contains(TEXT("AvidEvents"))
+			|| CSharpTypeNames.Contains(TEXT("AvidSubscription"))
+			|| CSharpTypeNames.Contains(TEXT("AvidSubscriptions"))))
 	{
 		OutErrorCategory = TEXT("csharp_type_collision");
-		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEvents");
+		OutErrorSource = TEXT("AvidEventAttribute|AvidEventContractAttribute|AvidEvents|AvidSubscription|AvidSubscriptions");
 		return false;
 	}
 	if (Package.SchemaVersion >= 9
@@ -2404,21 +2440,40 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 			});
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
-
+	}
+	if (SelfType != nullptr
+		|| bHasLifecycleBindings
+		|| !Package.DelegateEvents.IsEmpty())
+	{
+		Lines.Append({
+			TEXT("internal static class AvidScriptRuntimeNative"),
+			TEXT("{")
+		});
 		if (SelfType != nullptr || bHasLifecycleBindings)
 		{
 			Lines.Append({
-				TEXT("internal static class AvidScriptRuntimeNative"),
-				TEXT("{"),
 				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
 				TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
 				TEXT(""),
 				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
-				TEXT("    internal static extern int TimerCancel(int timerHandle);"),
-				TEXT("}"),
-				TEXT("")
+				TEXT("    internal static extern int TimerCancel(int timerHandle);")
 			});
 		}
+		if (!Package.DelegateEvents.IsEmpty())
+		{
+			if (SelfType != nullptr || bHasLifecycleBindings)
+			{
+				Lines.Add(TEXT(""));
+			}
+			Lines.Append({
+				TEXT("    [DllImport(\"env\", EntryPoint = \"event_subscribe\")]"),
+				TEXT("    internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"),
+				TEXT(""),
+				TEXT("    [DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"),
+				TEXT("    internal static extern int EventUnsubscribe(long subscriptionToken);")
+			});
+		}
+		Lines.Append({ TEXT("}"), TEXT("") });
 	}
 
 	if (!ArrayTypes.IsEmpty())

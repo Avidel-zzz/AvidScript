@@ -101,14 +101,14 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		1);
 
 	UObject* const InvalidSource = NewObject<UAvidScriptDelegateBridge>();
-	TestFalse(
-		TEXT("An incompatible candidate source is rejected"),
+	TestTrue(
+		TEXT("An incompatible self source still prepares the arbitrary-source catalog"),
 		Session.PrepareDelegateSubscriptionsForTesting(
 			InvalidSource,
 			MakeArrayView(&Event, 1),
 			Error));
 	TestEqual(
-		TEXT("Rejected candidate preparation preserves the active subscription"),
+		TEXT("Catalog preparation does not mutate the active subscription"),
 		Session.GetDelegateSubscriptionCountForTesting(),
 		1);
 	Source->Broadcast(Source, 18, 2.75f);
@@ -163,16 +163,60 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		Session.GetLiveEventCallbackCount(),
 		4);
 
+	UAvidScriptRuntimeDelegateTestObject* const ExplicitSource =
+		NewObject<UAvidScriptRuntimeDelegateTestObject>();
+	Error.Reset();
+	const int64 ExplicitToken = Session.SubscribeDelegateForTesting(
+		*ExplicitSource,
+		Event.EventOrdinal,
+		Error);
+	TestTrue(
+		*FString::Printf(
+			TEXT("An arbitrary compatible source receives an opaque token (error=%s)"),
+			Error.IsEmpty() ? TEXT("<none>") : *Error),
+		ExplicitToken > 0);
+	TestEqual(
+		TEXT("Explicit subscription is tracked beside the automatic self subscription"),
+		Session.GetDelegateSubscriptionCountForTesting(),
+		2);
+	ExplicitSource->Broadcast(ExplicitSource, 23, 4.0f);
+	TestEqual(
+		TEXT("Arbitrary-source broadcast reaches the prepared guest export"),
+		Session.GetLiveEventCallbackCount(),
+		5);
+	TestTrue(
+		TEXT("Explicit cancellation removes the token-owned subscription"),
+		Session.UnsubscribeDelegateForTesting(ExplicitToken, Error));
+	TestEqual(
+		TEXT("Cancellation preserves the automatic self subscription"),
+		Session.GetDelegateSubscriptionCountForTesting(),
+		1);
+	ExplicitSource->Broadcast(ExplicitSource, 24, 4.25f);
+	TestEqual(
+		TEXT("Cancelled source no longer reaches the guest"),
+		Session.GetLiveEventCallbackCount(),
+		5);
+	TestFalse(
+		TEXT("A stale token is rejected without affecting the session"),
+		Session.UnsubscribeDelegateForTesting(ExplicitToken, Error));
+	TestEqual(
+		TEXT("An incompatible arbitrary source cannot subscribe"),
+		Session.SubscribeDelegateForTesting(
+			*InvalidSource,
+			Event.EventOrdinal,
+			Error),
+		static_cast<int64>(0));
+
 	Session.UnbindDelegateSubscriptionsForTesting();
 	TestEqual(
 		TEXT("Explicit teardown removes the subscription"),
 		Session.GetDelegateSubscriptionCountForTesting(),
 		0);
-	ReplacementSource->Broadcast(ReplacementSource, 23, 4.0f);
+	ReplacementSource->Broadcast(ReplacementSource, 25, 4.5f);
 	TestEqual(
 		TEXT("Broadcast after teardown does not re-enter the guest"),
 		Session.GetLiveEventCallbackCount(),
-		4);
+		5);
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(TEXT("Session stops cleanly"), Session.StopAndUnload(StopResult));
 	return true;

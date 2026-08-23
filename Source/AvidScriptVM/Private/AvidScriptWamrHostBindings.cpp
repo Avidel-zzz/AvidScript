@@ -621,6 +621,42 @@ int32_t TimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle)
 	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::TimerCancel, StaticImportName(EAvidScriptHostBindingId::TimerCancel), TimerHandle);
 }
 
+int64_t EventSubscribe(
+	wasm_exec_env_t ExecEnv,
+	int32_t Slot,
+	int32_t Generation,
+	int32_t EventOrdinal)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::EventSubscribe;
+	Call.IntArgs[0] = Slot;
+	Call.IntArgs[1] = Generation;
+	Call.IntArgs[2] = EventOrdinal;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::EventSubscribe),
+		Call,
+		Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
+int32_t EventUnsubscribe(wasm_exec_env_t ExecEnv, int64_t SubscriptionToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::EventUnsubscribe;
+	Call.Int64Args[0] = SubscriptionToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::EventUnsubscribe),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 {
 	switch (BindingId)
@@ -643,6 +679,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::OwnerGetHandle: return reinterpret_cast<void*>(OwnerGetHandle);
 	case EAvidScriptHostBindingId::TimerSetOnce: return reinterpret_cast<void*>(TimerSetOnce);
 	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
+	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
+	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);
 	case EAvidScriptHostBindingId::DataLaneSubmit: return reinterpret_cast<void*>(DataLaneSubmit);
 	case EAvidScriptHostBindingId::ValueArrayLength: return reinterpret_cast<void*>(ValueArrayLength);

@@ -125,6 +125,13 @@ public:
 	void CommitDelegateSubscriptionsForTesting();
 	void UnbindDelegateSubscriptionsForTesting();
 	int32 GetDelegateSubscriptionCountForTesting() const;
+	int64 SubscribeDelegateForTesting(
+		UObject& Source,
+		uint32 EventOrdinal,
+		FString& OutError);
+	bool UnsubscribeDelegateForTesting(
+		int64 SubscriptionToken,
+		FString& OutError);
 #endif
 
 private:

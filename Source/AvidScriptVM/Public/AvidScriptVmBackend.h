@@ -129,6 +129,8 @@ enum class EAvidScriptHostBindingId : uint16
 	OwnerGetHandle,
 	TimerSetOnce,
 	TimerCancel,
+	EventSubscribe,
+	EventUnsubscribe,
 	DataLaneGetEpoch,
 	DataLaneSubmit,
 	ValueArrayLength,
@@ -253,6 +255,7 @@ struct FAvidScriptHostCall
 {
 	EAvidScriptHostBindingId BindingId = EAvidScriptHostBindingId::Invalid;
 	int32 IntArgs[4] = {};
+	int64 Int64Args[2] = {};
 	float FloatArgs[4] = {};
 	uint32 GuestAddress = 0;
 

@@ -333,34 +333,41 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 		return;
 	}
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
+	FAvidScriptWasmHostContext NextHostContext = InHostContext;
+	NextHostContext.ObjectOwnership = ObjectOwnership.Get();
+	NextHostContext.HostEffectJournal = nullptr;
+	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
+	if (NextHostContext.ObjectRegistry != nullptr
+		&& NextHostContext.OwnerHandle.IsValid())
+	{
+		FAvidScriptObjectHandleResult ResolveResult;
+		if (const UObject* Owner = NextHostContext.ObjectRegistry->ResolveObject(
+				NextHostContext.OwnerHandle,
+				ResolveResult,
+				false))
+		{
+			if (UWorld* const OwnerWorld = Owner->GetWorld())
+			{
+				NextHostContext.World = OwnerWorld;
+			}
+		}
+	}
+
 	const bool bDelegateSourceChanged =
-		HostContext.ObjectRegistry != InHostContext.ObjectRegistry
-		|| HostContext.OwnerHandle != InHostContext.OwnerHandle;
+		HostContext.ObjectRegistry != NextHostContext.ObjectRegistry
+		|| HostContext.OwnerHandle != NextHostContext.OwnerHandle
+		|| HostContext.World != NextHostContext.World;
 	if (bDelegateSourceChanged)
 	{
 		DelegateSubscriptions->UnbindActive();
 		DelegateSubscriptions->DiscardPrepared();
 	}
 	if (HostContext.ObjectRegistry != nullptr
-		&& HostContext.ObjectRegistry != InHostContext.ObjectRegistry)
+		&& HostContext.ObjectRegistry != NextHostContext.ObjectRegistry)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
-	HostContext = InHostContext;
-	HostContext.ObjectOwnership = ObjectOwnership.Get();
-	HostContext.HostEffectJournal = nullptr;
-	if (!HostContext.World.IsValid()
-		&& HostContext.ObjectRegistry != nullptr
-		&& HostContext.OwnerHandle.IsValid())
-	{
-		FAvidScriptObjectHandleResult ResolveResult;
-		if (const AActor* Owner = HostContext.ObjectRegistry->ResolveObject<AActor>(
-			HostContext.OwnerHandle,
-			ResolveResult))
-		{
-			HostContext.World = Owner->GetWorld();
-		}
-	}
+	HostContext = MoveTemp(NextHostContext);
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
@@ -801,6 +808,21 @@ void FAvidScriptRuntimeSession::UnbindDelegateSubscriptionsForTesting()
 int32 FAvidScriptRuntimeSession::GetDelegateSubscriptionCountForTesting() const
 {
 	return DelegateSubscriptions->NumActive();
+}
+
+int64 FAvidScriptRuntimeSession::SubscribeDelegateForTesting(
+	UObject& Source,
+	const uint32 EventOrdinal,
+	FString& OutError)
+{
+	return DelegateSubscriptions->Subscribe(Source, EventOrdinal, OutError);
+}
+
+bool FAvidScriptRuntimeSession::UnsubscribeDelegateForTesting(
+	const int64 SubscriptionToken,
+	FString& OutError)
+{
+	return DelegateSubscriptions->Unsubscribe(SubscriptionToken, OutError);
 }
 #endif
 

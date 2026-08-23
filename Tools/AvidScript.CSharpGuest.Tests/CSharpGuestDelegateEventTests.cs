@@ -4,6 +4,7 @@ using AvidScript.CSharpFrontend;
 using AvidScript.CSharpGuest;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
+using AvidScript.WasmBackend;
 
 internal static class CSharpGuestDelegateEventTests
 {
@@ -18,7 +19,8 @@ internal static class CSharpGuestDelegateEventTests
         AbiCellLimitFailsClosed();
         UnsupportedNestedTypesFailClosed();
         TamperedCallbackMetadataFailsClosed();
-        return 4;
+        ExplicitSubscriptionFacadeLowersSharedI64Imports();
+        return 5;
     }
 
     private static void FixedLayoutsProduceTypedExports()
@@ -175,6 +177,118 @@ internal static class CSharpGuestDelegateEventTests
             && result.Module is null
             && result.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCG1001"),
             "guest input validation should reject tampered delegate callback identities");
+    }
+
+    private static void ExplicitSubscriptionFacadeLowersSharedI64Imports()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidTransient]
+                private static AvidSubscription subscription;
+
+                public static void BeginPlay()
+                {
+                    subscription = AvidSubscriptions.OnSignal(UE.Self);
+                }
+
+                public static void EndPlay()
+                {
+                    subscription.Cancel();
+                }
+            }
+            """;
+        const string generatedSource = """
+            using System;
+            using System.Runtime.InteropServices;
+
+            namespace AvidScript;
+
+            [AttributeUsage(AttributeTargets.Field)]
+            public sealed class AvidTransientAttribute : Attribute { }
+
+            public readonly struct AActor
+            {
+                internal readonly int Slot;
+                internal readonly int Generation;
+                internal AActor(int slot, int generation)
+                {
+                    Slot = slot;
+                    Generation = generation;
+                }
+                internal int AvidScriptSlot => Slot;
+                internal int AvidScriptGeneration => Generation;
+            }
+
+            public readonly struct AvidSubscription
+            {
+                private readonly long Token;
+                internal AvidSubscription(long token) { Token = token; }
+                public bool IsValid => Token > 0;
+                public bool Cancel() => AvidScriptRuntimeNative.EventUnsubscribe(Token) != 0;
+            }
+
+            public static class AvidSubscriptions
+            {
+                public static AvidSubscription OnSignal(AActor source)
+                    => new(AvidScriptRuntimeNative.EventSubscribe(
+                        source.AvidScriptSlot,
+                        source.AvidScriptGeneration,
+                        7));
+            }
+
+            public static class UE
+            {
+                public static AActor Self
+                {
+                    get
+                    {
+                        long packedHandle = OwnerGetHandle();
+                        return new((int)packedHandle, (int)(packedHandle >> 32));
+                    }
+                }
+
+                [DllImport("avidscript", EntryPoint = "avid_owner_get_handle")]
+                private static extern long OwnerGetHandle();
+            }
+
+            internal static class AvidScriptRuntimeNative
+            {
+                [DllImport("env", EntryPoint = "event_subscribe")]
+                internal static extern long EventSubscribe(
+                    int slot,
+                    int generation,
+                    int eventOrdinal);
+
+                [DllImport("env", EntryPoint = "event_unsubscribe")]
+                internal static extern int EventUnsubscribe(long subscriptionToken);
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, generatedSource);
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("explicit event subscription produced no Guest module");
+        GuestImport subscribe = module.Imports.Single(import => import.Name == "event_subscribe");
+        GuestImport unsubscribe = module.Imports.Single(import => import.Name == "event_unsubscribe");
+
+        Assert(result.Succeeded && GuestModuleValidator.Validate(module).Succeeded,
+            "generated explicit subscription facade should lower to valid Guest IR");
+        Assert(subscribe.Module == "env"
+            && subscribe.ParameterTypeIds.SequenceEqual(new[]
+                { "type:int32", "type:int32", "type:int32" })
+            && subscribe.ReturnTypeId == "type:int64",
+            "event subscribe should retain the shared (i32,i32,i32)->i64 ABI");
+        Assert(unsubscribe.Module == "env"
+            && unsubscribe.ParameterTypeIds.SequenceEqual(new[] { "type:int64" })
+            && unsubscribe.ReturnTypeId == "type:int32",
+            "event unsubscribe should retain the shared i64->i32 ABI");
+        Assert(WasmModuleCompiler.Compile(module).Succeeded,
+            "explicit subscription Guest IR should compile into WASM");
     }
 
     private static SemanticDocument Analyze(string source, string generatedSource)

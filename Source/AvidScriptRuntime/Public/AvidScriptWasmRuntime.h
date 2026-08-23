@@ -17,6 +17,18 @@
 class FAvidScriptWasmDebugMap;
 class UWorld;
 
+class AVIDSCRIPTRUNTIME_API IAvidScriptEventSubscriptionHost
+{
+public:
+	virtual ~IAvidScriptEventSubscriptionHost() = default;
+
+	virtual int64 Subscribe(
+		UObject& Source,
+		uint32 EventOrdinal,
+		FString& OutError) = 0;
+	virtual bool Unsubscribe(int64 SubscriptionToken, FString& OutError) = 0;
+};
+
 struct FAvidScriptWasmRuntimeMetrics
 {
 	double RuntimeInitMs = 0.0;
@@ -104,6 +116,7 @@ struct FAvidScriptWasmHostContext
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
+	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 	FAvidScriptBindingInvocationInstrumentation* BindingInvocationInstrumentation = nullptr;
@@ -336,6 +349,8 @@ public:
 	int32 HandleValueReleaseImport(int32 Token);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
+	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
+	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
 	int32 HandleActorSetLocationImport(int32 Slot, int32 Generation, const FVector& Location);
 	int32 HandleActorAddLocationOffsetImport(int32 Slot, int32 Generation, const FVector& Offset);

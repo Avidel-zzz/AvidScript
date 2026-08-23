@@ -2647,6 +2647,102 @@ bool FAvidScriptEditorDelegateEventFacadeTest::RunTest(
 		ReferenceSource.Contains(FString::Printf(
 			TEXT("public const string OnScriptSignal = \"%s\";"),
 			*Event.StableId)));
+	TestTrue(
+		TEXT("Facade declares an opaque readonly subscription token"),
+		ReferenceSource.Contains(TEXT("public readonly struct AvidSubscription"))
+		&& ReferenceSource.Contains(TEXT("private readonly long Token;"))
+		&& ReferenceSource.Contains(TEXT("internal AvidSubscription(long token)")));
+	TestTrue(
+		TEXT("Subscription exposes validity and cancellation"),
+		ReferenceSource.Contains(TEXT("public bool IsValid => Token > 0;"))
+		&& ReferenceSource.Contains(TEXT("public bool Cancel() => AvidScriptRuntimeNative.EventUnsubscribe(Token) != 0;")));
+	TestTrue(
+		TEXT("Facade publishes typed subscription methods"),
+		ReferenceSource.Contains(TEXT("public static class AvidSubscriptions")));
+	const UClass* OwnerClass =
+		AAvidScriptEditorDelegateEventTestActor::StaticClass();
+	const FString ExpectedOwnerProxy =
+		FString(OwnerClass->GetPrefixCPP()) + OwnerClass->GetName();
+	TestTrue(
+		TEXT("Subscription method requires the descriptor owner proxy"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("public static AvidSubscription OnScriptSignal(%s source)"),
+			*ExpectedOwnerProxy)));
+	TestTrue(
+		TEXT("Subscription method forwards the object handle and descriptor ordinal"),
+		ReferenceSource.Contains(FString::Printf(
+			TEXT("AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, %d)"),
+			Event.Ordinal)));
+	TestTrue(
+		TEXT("Facade declares the shared event subscription imports"),
+		ReferenceSource.Contains(TEXT("[DllImport(\"env\", EntryPoint = \"event_subscribe\")]"))
+		&& ReferenceSource.Contains(TEXT("internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"))
+		&& ReferenceSource.Contains(TEXT("[DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"))
+		&& ReferenceSource.Contains(TEXT("internal static extern int EventUnsubscribe(long subscriptionToken);")));
+
+	FAvidScriptBindingPackageModel NonSequentialOrdinalPackage = Package;
+	NonSequentialOrdinalPackage.DelegateEvents[0].Ordinal = 37;
+	FString NonSequentialOrdinalSource;
+	FString RenderErrorCategory;
+	FString RenderErrorSource;
+	if (!TestTrue(
+			TEXT("Facade renders a descriptor-provided event ordinal"),
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				NonSequentialOrdinalPackage,
+				Result.DescriptorHash,
+				NonSequentialOrdinalSource,
+				RenderErrorCategory,
+				RenderErrorSource)))
+	{
+		AddError(RenderErrorCategory + TEXT(": ") + RenderErrorSource);
+		return false;
+	}
+	TestTrue(
+		TEXT("Facade does not derive the event ordinal from array position"),
+		NonSequentialOrdinalSource.Contains(TEXT(
+			"AvidScriptRuntimeNative.EventSubscribe(source.AvidScriptSlot, source.AvidScriptGeneration, 37)")));
+
+	const TArray<FString> ReservedTypeNames = {
+		TEXT("AvidSubscription"),
+		TEXT("AvidSubscriptions")
+	};
+	for (const FString& ReservedTypeName : ReservedTypeNames)
+	{
+		FAvidScriptBindingPackageModel CollisionPackage = Package;
+		FAvidScriptBindingTypeModel* CollisionOwnerType =
+			CollisionPackage.Types.FindByPredicate(
+				[&OwnerPath](const FAvidScriptBindingTypeModel& Type)
+				{
+					return Type.CanonicalType == TEXT("object:") + OwnerPath;
+				});
+		if (!TestNotNull(
+				TEXT("Collision fixture retains its event owner type"),
+				CollisionOwnerType))
+		{
+			return false;
+		}
+		CollisionOwnerType->CppType = ReservedTypeName;
+		FString CollisionSource;
+		FString CollisionErrorCategory;
+		FString CollisionErrorSource;
+		TestFalse(
+			*FString::Printf(
+				TEXT("Facade rejects reserved type %s"),
+				*ReservedTypeName),
+			FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
+				CollisionPackage,
+				Result.DescriptorHash,
+				CollisionSource,
+				CollisionErrorCategory,
+				CollisionErrorSource));
+		TestEqual(
+			TEXT("Reserved event facade type collision reports a stable category"),
+			CollisionErrorCategory,
+			FString(TEXT("csharp_type_collision")));
+		TestTrue(
+			TEXT("Reserved event facade type collision identifies the protected surface"),
+			CollisionErrorSource.Contains(ReservedTypeName));
+	}
 	return true;
 }
 

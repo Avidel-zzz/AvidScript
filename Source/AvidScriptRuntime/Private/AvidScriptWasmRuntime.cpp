@@ -3442,6 +3442,117 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
 	return LastHostImportResult;
 }
 
+int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
+	const int32 Slot,
+	const int32 Generation,
+	const int32 EventOrdinal)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = EventOrdinal;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	const auto Fail = [this, HostImportStartSeconds](const FString& Details)
+	{
+		if (Details.StartsWith(TEXT("delegate_bridge_"))
+			|| Details == TEXT("delegate_prepared_plan_invalid"))
+		{
+			SetPendingHostImportFailure(
+				TEXT("env"),
+				TEXT("event_subscribe"),
+				Details);
+		}
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	};
+	if (!IsLoaded()
+		|| HostContext.ObjectRegistry == nullptr
+		|| HostContext.EventSubscriptions == nullptr
+		|| HostContext.World.IsStale()
+		|| HostContext.World.Get() == nullptr)
+	{
+		return Fail(TEXT("delegate_subscription_context_unavailable"));
+	}
+	if (Slot <= 0 || Generation <= 0 || EventOrdinal < 0)
+	{
+		return Fail(TEXT("delegate_subscription_argument_invalid"));
+	}
+
+	const FAvidScriptObjectHandle SourceHandle{
+		static_cast<uint32>(Slot),
+		static_cast<uint32>(Generation)
+	};
+	FAvidScriptObjectHandleResult ResolveResult;
+	UObject* const Source = HostContext.ObjectRegistry->ResolveObject(
+		SourceHandle,
+		ResolveResult,
+		false);
+	if (Source == nullptr)
+	{
+		return Fail(
+			ResolveResult.ErrorCategory.IsEmpty()
+				? TEXT("delegate_source_handle_invalid")
+				: ResolveResult.ErrorCategory);
+	}
+	if (SourceHandle != HostContext.OwnerHandle
+		&& (HostContext.ObjectOwnership == nullptr
+			|| !HostContext.ObjectOwnership->HasCapability(
+				SourceHandle,
+				Source)))
+	{
+		return Fail(TEXT("delegate_source_capability_denied"));
+	}
+	if (Source->GetWorld() == nullptr
+		|| Source->GetWorld() != HostContext.World.Get())
+	{
+		return Fail(TEXT("delegate_source_world_mismatch"));
+	}
+
+	FString SubscribeError;
+	const int64 SubscriptionToken = HostContext.EventSubscriptions->Subscribe(
+		*Source,
+		static_cast<uint32>(EventOrdinal),
+		SubscribeError);
+	if (SubscriptionToken <= 0)
+	{
+		return Fail(
+			SubscribeError.IsEmpty()
+				? TEXT("delegate_subscription_rejected")
+				: SubscribeError);
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return SubscriptionToken;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleEventUnsubscribeImport(
+	const int64 SubscriptionToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = SubscriptionToken;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	if (!IsLoaded() || HostContext.EventSubscriptions == nullptr)
+	{
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FString UnsubscribeError;
+	if (!HostContext.EventSubscriptions->Unsubscribe(
+			SubscriptionToken,
+			UnsubscribeError))
+	{
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
+}
+
 void FAvidScriptWasmRuntimeInstance::CollectDueTimers(float DeltaSeconds)
 {
 	DueTimerScratch.Reset();
@@ -5692,6 +5803,19 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleTimerCancelImport(Call.IntArgs[0]);
 		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::EventSubscribe:
+	{
+		const int64 Value = HandleEventSubscribeImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.IntArgs[2]);
+		return FinishI64(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::EventUnsubscribe:
+	{
+		const int32 Value = HandleEventUnsubscribeImport(Call.Int64Args[0]);
+		return Finish(Value, true);
 	}
 	case EAvidScriptHostBindingId::ActorGetLocation:
 	{

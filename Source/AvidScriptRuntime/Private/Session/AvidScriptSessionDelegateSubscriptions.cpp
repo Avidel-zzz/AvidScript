@@ -10,37 +10,123 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptDelegateSubscriptions, Log, All);
 
 namespace
 {
+constexpr int32 AvidScriptMaximumExplicitDelegateSubscriptions = 4096;
+
 struct FAvidScriptDelegateSubscriptionEntry
 {
 	FAvidScriptPreparedDelegateEvent Event;
 	TWeakObjectPtr<UObject> Source;
 	TStrongObjectPtr<UAvidScriptDelegateBridge> Bridge;
 	FScriptDelegate Delegate;
-	uint64 Token = 0;
+	uint64 BridgeToken = 0;
+	int64 GuestToken = 0;
 	bool bBound = false;
 };
+
+bool IsPreparedEventValid(const FAvidScriptPreparedDelegateEvent& Event)
+{
+	return Event.EventOrdinal < static_cast<uint32>(MAX_int32)
+		&& Event.ExpectedSourceClass != nullptr
+		&& Event.DelegateProperty != nullptr
+		&& Event.SignatureFunction != nullptr
+		&& Event.ImmutableCodecIdentity != nullptr
+		&& Event.Encode != nullptr
+		&& Event.ParameterCellCount <= FAvidScriptVmCallFrame::MaxCells;
+}
+
+bool InitializeEntry(
+	IAvidScriptDelegateBridgeSink& Sink,
+	UObject& Source,
+	const FAvidScriptPreparedDelegateEvent& Event,
+	const uint64 BridgeToken,
+	const int64 GuestToken,
+	FAvidScriptDelegateSubscriptionEntry& OutEntry,
+	FString& OutError)
+{
+	if (!IsPreparedEventValid(Event))
+	{
+		OutError = TEXT("delegate_prepared_plan_invalid");
+		return false;
+	}
+	if (!Source.IsA(Event.ExpectedSourceClass))
+	{
+		OutError = TEXT("delegate_source_type_mismatch");
+		return false;
+	}
+
+	UFunction* BridgeFunction = nullptr;
+	if (!PrepareAvidScriptDelegateBridgeFunction(
+			Event.StableId,
+			*Event.SignatureFunction,
+			BridgeFunction,
+			OutError))
+	{
+		return false;
+	}
+
+	OutEntry = FAvidScriptDelegateSubscriptionEntry();
+	OutEntry.Event = Event;
+	OutEntry.Source = &Source;
+	OutEntry.BridgeToken = BridgeToken;
+	OutEntry.GuestToken = GuestToken;
+	OutEntry.Bridge.Reset(NewObject<UAvidScriptDelegateBridge>(
+		GetTransientPackage(),
+		NAME_None,
+		RF_Transient));
+	if (!OutEntry.Bridge.IsValid())
+	{
+		OutError = TEXT("delegate_bridge_allocation_failed");
+		return false;
+	}
+	OutEntry.Bridge->Initialize(Sink, BridgeToken, *BridgeFunction);
+	OutEntry.Delegate.BindUFunction(
+		OutEntry.Bridge.Get(),
+		BridgeFunction->GetFName());
+	if (!OutEntry.Delegate.IsBound())
+	{
+		OutError = TEXT("delegate_bridge_bind_failed");
+		OutEntry.Bridge->Deactivate();
+		return false;
+	}
+	return true;
+}
+
+void UnbindEntry(FAvidScriptDelegateSubscriptionEntry& Entry)
+{
+	if (Entry.bBound
+		&& Entry.Event.DelegateProperty != nullptr
+		&& Entry.Source.IsValid())
+	{
+		Entry.Event.DelegateProperty->RemoveDelegate(
+			Entry.Delegate,
+			Entry.Source.Get());
+	}
+	Entry.bBound = false;
+	if (Entry.Bridge.IsValid())
+	{
+		Entry.Bridge->Deactivate();
+	}
+}
 
 void UnbindEntries(TArray<FAvidScriptDelegateSubscriptionEntry>& Entries)
 {
 	check(IsInGameThread());
 	for (int32 Index = Entries.Num() - 1; Index >= 0; --Index)
 	{
-		FAvidScriptDelegateSubscriptionEntry& Entry = Entries[Index];
-		if (Entry.bBound
-			&& Entry.Event.DelegateProperty != nullptr
-			&& Entry.Source.IsValid())
-		{
-			Entry.Event.DelegateProperty->RemoveDelegate(
-				Entry.Delegate,
-				Entry.Source.Get());
-		}
-		Entry.bBound = false;
-		if (Entry.Bridge.IsValid())
-		{
-			Entry.Bridge->Deactivate();
-		}
+		UnbindEntry(Entries[Index]);
 	}
 	Entries.Reset();
+}
+
+int32 CountExplicitEntries(
+	TConstArrayView<FAvidScriptDelegateSubscriptionEntry> Entries)
+{
+	int32 Count = 0;
+	for (const FAvidScriptDelegateSubscriptionEntry& Entry : Entries)
+	{
+		Count += Entry.GuestToken != 0 ? 1 : 0;
+	}
+	return Count;
 }
 } // namespace
 
@@ -54,8 +140,77 @@ struct FAvidScriptSessionDelegateSubscriptions::FImpl
 	FAvidScriptRuntimeSession& Session;
 	TArray<FAvidScriptDelegateSubscriptionEntry> Active;
 	TArray<FAvidScriptDelegateSubscriptionEntry> Prepared;
-	uint32 Generation = 1;
+	TMap<uint32, FAvidScriptPreparedDelegateEvent> ActiveCatalog;
+	TMap<uint32, FAvidScriptPreparedDelegateEvent> PreparedCatalog;
+	TMap<uint64, int32> ActiveBridgeIndices;
+	uint64 NextBridgeToken = 1;
+	uint64 NextGuestToken = 1;
+	bool bPreparing = false;
 	bool bDispatchEnabled = false;
+
+	uint64 AllocateBridgeToken()
+	{
+		for (int32 Attempt = 0;
+			Attempt <= Active.Num() + Prepared.Num();
+			++Attempt)
+		{
+			const uint64 Token = NextBridgeToken++;
+			if (Token != 0
+				&& !Active.ContainsByPredicate(
+					[Token](const FAvidScriptDelegateSubscriptionEntry& Entry)
+					{
+						return Entry.BridgeToken == Token;
+					})
+				&& !Prepared.ContainsByPredicate(
+					[Token](const FAvidScriptDelegateSubscriptionEntry& Entry)
+					{
+						return Entry.BridgeToken == Token;
+					}))
+			{
+				return Token;
+			}
+		}
+		return 0;
+	}
+
+	int64 AllocateGuestToken()
+	{
+		for (int32 Attempt = 0;
+			Attempt <= Active.Num() + Prepared.Num();
+			++Attempt)
+		{
+			if (NextGuestToken == 0
+				|| NextGuestToken > static_cast<uint64>(MAX_int64))
+			{
+				NextGuestToken = 1;
+			}
+			const int64 Token = static_cast<int64>(NextGuestToken++);
+			if (!Active.ContainsByPredicate(
+					[Token](const FAvidScriptDelegateSubscriptionEntry& Entry)
+					{
+						return Entry.GuestToken == Token;
+					})
+				&& !Prepared.ContainsByPredicate(
+					[Token](const FAvidScriptDelegateSubscriptionEntry& Entry)
+					{
+						return Entry.GuestToken == Token;
+					}))
+			{
+				return Token;
+			}
+		}
+		return 0;
+	}
+
+	void RebuildActiveBridgeIndices()
+	{
+		ActiveBridgeIndices.Reset();
+		ActiveBridgeIndices.Reserve(Active.Num());
+		for (int32 Index = 0; Index < Active.Num(); ++Index)
+		{
+			ActiveBridgeIndices.Add(Active[Index].BridgeToken, Index);
+		}
+	}
 };
 
 FAvidScriptSessionDelegateSubscriptions::
@@ -80,6 +235,7 @@ bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 	check(IsInGameThread());
 	DiscardPrepared();
 	OutError.Reset();
+	Impl->bPreparing = true;
 	if (Events.IsEmpty())
 	{
 		return true;
@@ -92,53 +248,32 @@ bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 
 	for (const FAvidScriptPreparedDelegateEvent& Event : Events)
 	{
-		if (Event.EventOrdinal >= static_cast<uint32>(MAX_int32)
-			|| Event.ExpectedSourceClass == nullptr
-			|| !Source->IsA(Event.ExpectedSourceClass)
-			|| Event.DelegateProperty == nullptr
-			|| Event.SignatureFunction == nullptr
-			|| Event.ImmutableCodecIdentity == nullptr
-			|| Event.Encode == nullptr
-			|| Event.ParameterCellCount > FAvidScriptVmCallFrame::MaxCells)
+		if (!IsPreparedEventValid(Event)
+			|| Impl->PreparedCatalog.Contains(Event.EventOrdinal))
 		{
 			OutError = TEXT("delegate_prepared_plan_invalid");
 			DiscardPrepared();
 			return false;
 		}
-
-		UFunction* BridgeFunction = nullptr;
-		if (!PrepareAvidScriptDelegateBridgeFunction(
-				Event.StableId,
-				*Event.SignatureFunction,
-				BridgeFunction,
-				OutError))
+		Impl->PreparedCatalog.Add(Event.EventOrdinal, Event);
+		if (!Source->IsA(Event.ExpectedSourceClass))
 		{
-			DiscardPrepared();
-			return false;
+			continue;
 		}
 
 		FAvidScriptDelegateSubscriptionEntry& Entry =
 			Impl->Prepared.AddDefaulted_GetRef();
-		Entry.Event = Event;
-		Entry.Source = Source;
-		Entry.Token =
-			(static_cast<uint64>(Impl->Generation) << 32)
-			| static_cast<uint64>(Event.EventOrdinal + 1);
-		Entry.Bridge.Reset(NewObject<UAvidScriptDelegateBridge>(
-			GetTransientPackage(),
-			NAME_None,
-			RF_Transient));
-		if (!Entry.Bridge.IsValid())
+		const uint64 BridgeToken = Impl->AllocateBridgeToken();
+		if (BridgeToken == 0
+			|| !InitializeEntry(
+				*this,
+				*Source,
+				Event,
+				BridgeToken,
+				0,
+				Entry,
+				OutError))
 		{
-			OutError = TEXT("delegate_bridge_allocation_failed");
-			DiscardPrepared();
-			return false;
-		}
-		Entry.Bridge->Initialize(*this, Entry.Token, *BridgeFunction);
-		Entry.Delegate.BindUFunction(Entry.Bridge.Get(), BridgeFunction->GetFName());
-		if (!Entry.Delegate.IsBound())
-		{
-			OutError = TEXT("delegate_bridge_bind_failed");
 			DiscardPrepared();
 			return false;
 		}
@@ -151,6 +286,8 @@ void FAvidScriptSessionDelegateSubscriptions::CommitPrepared()
 	check(IsInGameThread());
 	UnbindEntries(Impl->Active);
 	Impl->Active = MoveTemp(Impl->Prepared);
+	Impl->ActiveCatalog = MoveTemp(Impl->PreparedCatalog);
+	Impl->RebuildActiveBridgeIndices();
 	for (FAvidScriptDelegateSubscriptionEntry& Entry : Impl->Active)
 	{
 		UObject* const Source = Entry.Source.Get();
@@ -160,22 +297,22 @@ void FAvidScriptSessionDelegateSubscriptions::CommitPrepared()
 			Source);
 		Entry.bBound = true;
 	}
-	++Impl->Generation;
-	if (Impl->Generation == 0)
-	{
-		Impl->Generation = 1;
-	}
+	Impl->bPreparing = false;
 }
 
 void FAvidScriptSessionDelegateSubscriptions::DiscardPrepared()
 {
 	UnbindEntries(Impl->Prepared);
+	Impl->PreparedCatalog.Reset();
+	Impl->bPreparing = false;
 }
 
 void FAvidScriptSessionDelegateSubscriptions::UnbindActive()
 {
 	Impl->bDispatchEnabled = false;
 	UnbindEntries(Impl->Active);
+	Impl->ActiveCatalog.Reset();
+	Impl->ActiveBridgeIndices.Reset();
 }
 
 int32 FAvidScriptSessionDelegateSubscriptions::NumActive() const
@@ -194,6 +331,108 @@ void FAvidScriptSessionDelegateSubscriptions::SetDispatchEnabled(
 	Impl->bDispatchEnabled = bEnabled;
 }
 
+int64 FAvidScriptSessionDelegateSubscriptions::Subscribe(
+	UObject& Source,
+	const uint32 EventOrdinal,
+	FString& OutError)
+{
+	check(IsInGameThread());
+	OutError.Reset();
+	TArray<FAvidScriptDelegateSubscriptionEntry>& Entries =
+		Impl->bPreparing ? Impl->Prepared : Impl->Active;
+	const TMap<uint32, FAvidScriptPreparedDelegateEvent>& Catalog =
+		Impl->bPreparing ? Impl->PreparedCatalog : Impl->ActiveCatalog;
+	if (!Impl->bPreparing && !Impl->bDispatchEnabled)
+	{
+		OutError = TEXT("delegate_session_inactive");
+		return 0;
+	}
+	if (CountExplicitEntries(Entries)
+		>= AvidScriptMaximumExplicitDelegateSubscriptions)
+	{
+		OutError = TEXT("delegate_subscription_limit_reached");
+		return 0;
+	}
+	const FAvidScriptPreparedDelegateEvent* Event = Catalog.Find(EventOrdinal);
+	if (Event == nullptr)
+	{
+		OutError = TEXT("delegate_event_unavailable");
+		return 0;
+	}
+
+	const int64 GuestToken = Impl->AllocateGuestToken();
+	if (GuestToken <= 0)
+	{
+		OutError = TEXT("delegate_subscription_token_exhausted");
+		return 0;
+	}
+
+	FAvidScriptDelegateSubscriptionEntry Entry;
+	const uint64 BridgeToken = Impl->AllocateBridgeToken();
+	if (BridgeToken == 0
+		|| !InitializeEntry(
+			*this,
+			Source,
+			*Event,
+			BridgeToken,
+			GuestToken,
+			Entry,
+			OutError))
+	{
+		return 0;
+	}
+	if (!Impl->bPreparing)
+	{
+		Event->DelegateProperty->AddDelegate(Entry.Delegate, &Source);
+		Entry.bBound = true;
+	}
+	Entries.Add(MoveTemp(Entry));
+	if (!Impl->bPreparing)
+	{
+		Impl->ActiveBridgeIndices.Add(BridgeToken, Entries.Num() - 1);
+	}
+	return GuestToken;
+}
+
+bool FAvidScriptSessionDelegateSubscriptions::Unsubscribe(
+	const int64 SubscriptionToken,
+	FString& OutError)
+{
+	check(IsInGameThread());
+	OutError.Reset();
+	if (SubscriptionToken <= 0)
+	{
+		OutError = TEXT("delegate_subscription_token_invalid");
+		return false;
+	}
+	TArray<FAvidScriptDelegateSubscriptionEntry>& Entries =
+		Impl->bPreparing ? Impl->Prepared : Impl->Active;
+	const int32 Index = Entries.IndexOfByPredicate(
+		[SubscriptionToken](
+			const FAvidScriptDelegateSubscriptionEntry& Entry)
+		{
+			return Entry.GuestToken == SubscriptionToken;
+		});
+	if (Index == INDEX_NONE)
+	{
+		OutError = TEXT("delegate_subscription_token_stale");
+		return false;
+	}
+	const uint64 RemovedBridgeToken = Entries[Index].BridgeToken;
+	UnbindEntry(Entries[Index]);
+	Entries.RemoveAtSwap(Index, 1, EAllowShrinking::No);
+	if (!Impl->bPreparing)
+	{
+		Impl->ActiveBridgeIndices.Remove(RemovedBridgeToken);
+		if (Entries.IsValidIndex(Index))
+		{
+			Impl->ActiveBridgeIndices.FindOrAdd(
+				Entries[Index].BridgeToken) = Index;
+		}
+	}
+	return true;
+}
+
 void FAvidScriptSessionDelegateSubscriptions::
 	HandleAvidScriptDelegateBroadcast(
 		const uint64 SubscriptionToken,
@@ -204,21 +443,20 @@ void FAvidScriptSessionDelegateSubscriptions::
 	{
 		return;
 	}
-	const FAvidScriptDelegateSubscriptionEntry* const Entry =
-		Impl->Active.FindByPredicate(
-			[SubscriptionToken](
-				const FAvidScriptDelegateSubscriptionEntry& Candidate)
-			{
-				return Candidate.Token == SubscriptionToken;
-			});
-	if (Entry == nullptr)
+	const int32* const EntryIndex =
+		Impl->ActiveBridgeIndices.Find(SubscriptionToken);
+	if (EntryIndex == nullptr
+		|| !Impl->Active.IsValidIndex(*EntryIndex)
+		|| Impl->Active[*EntryIndex].BridgeToken != SubscriptionToken)
 	{
 		return;
 	}
+	const FAvidScriptPreparedDelegateEvent Event =
+		Impl->Active[*EntryIndex].Event;
 
 	FAvidScriptWasmSmokeResult Result;
 	if (!Impl->Session.DispatchPreparedDelegateEvent(
-			Entry->Event,
+			Event,
 			Parameters,
 			Result)
 		&& Result.ErrorCategory != TEXT("reentrant_operation"))
@@ -227,8 +465,8 @@ void FAvidScriptSessionDelegateSubscriptions::
 			LogAvidScriptDelegateSubscriptions,
 			Warning,
 			TEXT("AvidScript delegate callback failed | event=%s | export=%s | category=%s | details=%s"),
-			*Entry->Event.StableId,
-			*Entry->Event.ExportName,
+			*Event.StableId,
+			*Event.ExportName,
 			Result.ErrorCategory.IsEmpty() ? TEXT("unknown") : *Result.ErrorCategory,
 			Result.ErrorMessage.IsEmpty() ? TEXT("<none>") : *Result.ErrorMessage);
 	}

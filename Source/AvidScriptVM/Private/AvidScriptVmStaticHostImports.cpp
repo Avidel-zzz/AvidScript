@@ -26,6 +26,8 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::OwnerGetHandle, "avid_owner_get_handle", "()I", false },
 	{ EAvidScriptHostBindingId::TimerSetOnce, "timer_set_once", "(fi)i", true },
 	{ EAvidScriptHostBindingId::TimerCancel, "timer_cancel", "(i)i", true },
+	{ EAvidScriptHostBindingId::EventSubscribe, "event_subscribe", "(iii)I", true },
+	{ EAvidScriptHostBindingId::EventUnsubscribe, "event_unsubscribe", "(I)i", true },
 	{ EAvidScriptHostBindingId::DataLaneGetEpoch, "avid_data_lane_epoch", "()I", false },
 	{ EAvidScriptHostBindingId::DataLaneSubmit, "avid_data_lane_submit", "(ii)i", false },
 	{ EAvidScriptHostBindingId::ValueArrayLength, "avid_value_array_length", "(i)i", false },
@@ -222,6 +224,14 @@ bool InvokeAvidScriptVmStaticHostImport(
 	case EAvidScriptHostBindingId::TimerSetOnce:
 		Call.FloatArgs[0] = Arguments[0].F32;
 		Call.IntArgs[0] = Arguments[1].I32;
+		break;
+	case EAvidScriptHostBindingId::EventSubscribe:
+		Call.IntArgs[0] = Arguments[0].I32;
+		Call.IntArgs[1] = Arguments[1].I32;
+		Call.IntArgs[2] = Arguments[2].I32;
+		break;
+	case EAvidScriptHostBindingId::EventUnsubscribe:
+		Call.Int64Args[0] = Arguments[0].I64;
 		break;
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	case EAvidScriptHostBindingId::OwnerGetGeneration:

@@ -31,5 +31,11 @@ public:
 	virtual bool Owns(
 		const FAvidScriptObjectHandle& Handle,
 		const UObject* ExpectedObject = nullptr) const = 0;
+	virtual bool HasCapability(
+		const FAvidScriptObjectHandle& Handle,
+		const UObject* ExpectedObject = nullptr) const
+	{
+		return Owns(Handle, ExpectedObject);
+	}
 	virtual void Cleanup(FAvidScriptObjectRegistry& Registry) = 0;
 };

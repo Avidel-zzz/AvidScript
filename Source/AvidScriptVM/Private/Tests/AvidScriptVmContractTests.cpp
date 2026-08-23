@@ -347,6 +347,39 @@ bool FAvidScriptVmArrayRangeImportContractTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmEventSubscriptionImportContractTest,
+	"AvidScript.Architecture.VM.EventSubscriptionImportContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmEventSubscriptionImportContractTest::RunTest(
+	const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Subscribe =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::EventSubscribe);
+	const FAvidScriptVmStaticHostImport& Unsubscribe =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::EventUnsubscribe);
+	TestEqual(
+		TEXT("Event subscribe uses the generated facade import name"),
+		FString(UTF8_TO_TCHAR(Subscribe.ImportName)),
+		FString(TEXT("event_subscribe")));
+	TestEqual(
+		TEXT("Event subscribe returns an opaque i64 token"),
+		FString(UTF8_TO_TCHAR(Subscribe.Signature)),
+		FString(TEXT("(iii)I")));
+	TestEqual(
+		TEXT("Event unsubscribe consumes the full i64 token"),
+		FString(UTF8_TO_TCHAR(Unsubscribe.Signature)),
+		FString(TEXT("(I)i")));
+	TestTrue(
+		TEXT("C#/LDC env compatibility remains available on both event imports"),
+		Subscribe.bSupportsEnvCompatibility
+			&& Unsubscribe.bSupportsEnvCompatibility);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptVmBackendInstanceHandleContractTest,
 	"AvidScript.Architecture.VM.BackendInstanceHandleContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

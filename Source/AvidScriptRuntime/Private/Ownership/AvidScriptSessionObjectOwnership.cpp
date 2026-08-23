@@ -215,6 +215,24 @@ bool FAvidScriptSessionObjectOwnership::Owns(
 			|| OwnedObjects[*OwnedObjectIndex].ObjectKey == TObjectKey<UObject>(ExpectedObject));
 }
 
+bool FAvidScriptSessionObjectOwnership::HasCapability(
+	const FAvidScriptObjectHandle& Handle,
+	const UObject* ExpectedObject) const
+{
+	if (Owns(Handle, ExpectedObject))
+	{
+		return true;
+	}
+	const int32* const BorrowedObjectIndex =
+		HandleToBorrowedIndex.Find(Handle.ToUInt64());
+	return BorrowedObjectIndex != nullptr
+		&& BorrowedObjects.IsValidIndex(*BorrowedObjectIndex)
+		&& BorrowedObjects[*BorrowedObjectIndex].Handle == Handle
+		&& (ExpectedObject == nullptr
+			|| BorrowedObjects[*BorrowedObjectIndex].ObjectKey
+				== TObjectKey<UObject>(ExpectedObject));
+}
+
 void FAvidScriptSessionObjectOwnership::Cleanup(FAvidScriptObjectRegistry& Registry)
 {
 	if (BoundRegistry != nullptr && BoundRegistry != &Registry)

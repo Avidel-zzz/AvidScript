@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-23 P57.12B 首轮 C# Guest Gate 在新增 WASM 编译断言后漏加 `using AvidScript.WasmBackend`，测试项目在执行前以 CS0103 停止。Prevention：测试复用另一文件中的工具类型时，先读取原调用点顶部 namespace 与目标 `.csproj` 引用；集中 Gate 前的 owned-path 审查必须逐个解析新增外部类型的 namespace，不能只确认项目引用存在。
+- 2026-08-23 P57.12B 并行代理在生成式 C# 写集完成后自行启动了 no-clean Editor 构建，早于阶段集成与统一 Gate；虽然提前发现 `TArray::CountByPredicate` 不存在，但仍造成一次可避免的碎片化构建。Prevention：实现代理任务必须逐字写明“禁止构建、Automation 与 benchmark，只提交 diff 和静态风险”；阶段构建命令只由主线在集中修复结束后发起一次，代理若发现疑似编译风险只返回文件/行号与建议探针。
 - 2026-08-12 P57.12A Gate 首次按此前引擎输出版本推断 bundled dotnet 路径为 `10.0.203\win-x64`，实际目录是 `10.0\win-x64`；修正后又忽略仓库 `global.json` 固定要求用户级 SDK 8.0.416，造成两次环境级失败。Prevention：任何阶段 Gate 使用 dotnet 前必须先分别枚举候选 `dotnet.exe` 与执行 `--list-sdks`，选择同时满足字面路径和 `global.json` pin 的宿主；禁止根据 `dotnet --version` 输出反推安装目录，也不得把环境解析失败计为产品测试失败。
 
 - 2026-08-11 P57.11C 文档收尾校验再次把“预期可能无匹配”的 README 旧值搜索与确定性 JSON/status 读取放入同一并行组，令无匹配 exit 1 吞掉其余输出。Prevention：从本记录起，任何用于证明“零命中”的 `rg` 都必须独立调用；并行编排只接受已经证明必定 exit 0 的命令，不再把无匹配搜索视为普通只读检查。

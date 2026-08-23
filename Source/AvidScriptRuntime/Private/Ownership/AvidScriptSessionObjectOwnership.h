@@ -33,6 +33,9 @@ public:
 	virtual bool Owns(
 		const FAvidScriptObjectHandle& Handle,
 		const UObject* ExpectedObject = nullptr) const override;
+	virtual bool HasCapability(
+		const FAvidScriptObjectHandle& Handle,
+		const UObject* ExpectedObject = nullptr) const override;
 	virtual void Cleanup(FAvidScriptObjectRegistry& Registry) override;
 
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;

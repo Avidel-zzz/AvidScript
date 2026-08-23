@@ -14,8 +14,9 @@ internal static class SemanticStateContractTests
         CanonicalFacadeAttributesAreRequired();
         DuplicateAndConflictingAttributesFailClosed();
         InvalidAliasesAndVersionsFailClosed();
+        SubscriptionCapabilitiesMustBeTransient();
         StateContractSerializationIsDeterministic();
-        return 7;
+        return 8;
     }
 
     private static void CompatibleContractsPreserveImplicitPersistAndTransientFields()
@@ -217,6 +218,39 @@ internal static class SemanticStateContractTests
         Assert(first.SequenceEqual(second), "state contract serialization should be byte-for-byte deterministic");
     }
 
+    private static void SubscriptionCapabilitiesMustBeTransient()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class CompatibleScript
+            {
+                private static AvidSubscription InvalidImplicit;
+                [AvidTransient]
+                private static AvidSubscription ValidTransient;
+            }
+
+            [AvidStateContract(AvidStateMode.Explicit)]
+            public static class ExplicitScript
+            {
+                [AvidPersist]
+                private static AvidSubscription InvalidPersisted;
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/SubscriptionState.cs");
+
+        Assert(!document.Succeeded
+            && document.Diagnostics.Count(diagnostic => diagnostic.Code == "ASSTATE1005") == 2,
+            "implicit-compatible and explicitly persisted subscription tokens should fail closed");
+        SemanticStateContract compatible = FindContract(
+            document,
+            "global::Game.CompatibleScript");
+        AssertField(compatible, "ValidTransient", "transient");
+    }
+
     private static SemanticDocument Analyze(string source, string sourceId)
     {
         string hash = FrontendAnalyzer.Analyze(source, sourceId).Source.Sha256;
@@ -305,6 +339,11 @@ internal static class SemanticStateContractTests
             }
 
             public string FormerName { get; }
+        }
+
+        public readonly struct AvidSubscription
+        {
+            private readonly long Token;
         }
         """;
 }
