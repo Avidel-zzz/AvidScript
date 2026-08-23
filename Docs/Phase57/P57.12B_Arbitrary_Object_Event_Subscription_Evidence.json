@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "phase": 57,
+  "batch": "P57.12B",
+  "evidence_class": "implementation",
+  "captured_at_utc": "2026-08-23T07:40:55.4730420Z",
+  "candidate": {
+    "implementation_commit": "446eee55c48e7f6a373f3ce9fe5542be73dbe4f6",
+    "architecture_contract_commit": "eca16871d17951b996503c847975deb7559ea38c",
+    "final_source_tree": "b9aaa71d0e5c3632b67761221bf4c916aaa1eeec",
+    "dirty": false,
+    "note": "architecture candidate contains implementation plus static import and generic facade allowlist alignment"
+  },
+  "environment": {
+    "ue_version": "5.8 source build",
+    "target": "AvidTPSTemplateEditor",
+    "platform": "Win64",
+    "configuration": "Development",
+    "csharp_sdk": "8.0.416",
+    "wasmtime_version": "45.0.0",
+    "wasmtime_backend": "cranelift_jit"
+  },
+  "contracts": {
+    "delegate_kind": "dynamic_multicast",
+    "selection": "explicit_include_events",
+    "source_scope": "session_capability",
+    "subscription_facade": "AvidSubscriptions",
+    "subscription_token": "AvidSubscription/i64",
+    "subscribe_import": "env.event_subscribe/(iii)I",
+    "unsubscribe_import": "env.event_unsubscribe/(I)i",
+    "maximum_abi_cells": 8,
+    "function_name_special_cases": 0,
+    "per_event_native_wrappers": 0
+  },
+  "runtime": {
+    "current_registry_validation": true,
+    "owned_or_borrowed_capability_required": true,
+    "same_world_required": true,
+    "expected_owner_class_required": true,
+    "transactional_prepare_commit": true,
+    "failed_candidate_preserves_active_token": true,
+    "successful_reload_invalidates_old_token": true,
+    "explicit_cancel": true,
+    "end_play_unbind": true,
+    "unload_unbind": true,
+    "callback_self_cancel_safe": true,
+    "hot_bridge_lookup": "uint64 token hash index"
+  },
+  "verification": {
+    "csharp_semantic_tests": "68/68 passed",
+    "csharp_guest_tests": "87/87 passed",
+    "canonical_no_clean_build": "18 actions; Result: Succeeded; no Editor target clean",
+    "full_avidscript_automation": "350 found; 350 performed; 350 succeeded; 0 failed; queue empty, TestExit, and RequestExitWithStatus 0 observed",
+    "architecture_check": "clean candidate eca16871d17951b996503c847975deb7559ea38c / b9aaa71d0e5c3632b67761221bf4c916aaa1eeec passed"
+  },
+  "log_sha256": {
+    "full_avidscript_automation": "5d7ff8b991e87f9958c61b341070733ff11b2f770fc18014c77383fd3ba5e6f3",
+    "architecture_check": "b2d2382fd2a88c5f9770ac60f5d555a84f89db8a8b162bac40fafa77519fb0b2"
+  },
+  "performance": {
+    "new_measurement": false,
+    "claim": "no new performance result; existing P57.11D, P57.11B1 and P56 formal evidence remains authoritative"
+  },
+  "known_boundaries": {
+    "all_ue_dynamic_multicast_events": false,
+    "single_cast_delegate": false,
+    "event_add_syntax": false,
+    "lambda_or_closure": false,
+    "string_or_array_event_parameters": false,
+    "latent_rpc_interface_ftext": false,
+    "cook_shipping_mobile": false,
+    "pure_wasmtime_v8_p95_leadership": "P57-D06 remains Fixing"
+  },
+  "protected_dirty_paths_excluded": 3
+}

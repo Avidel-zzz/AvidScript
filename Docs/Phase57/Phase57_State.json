@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "P57.12A froze explicit self dynamic-multicast selection, generated AvidEvent contracts, typed delegate exports, prepared codecs, and session-owned transactional subscriptions"
+    "revision_reason": "P57.12B extends the generated dynamic-multicast contract to session-capability UObject sources with opaque i64 tokens, explicit cancellation, transactional candidate subscriptions, and deterministic teardown"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription_Plan.md",
-    "closeout": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription.md"
+    "plan": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription_Plan.md",
+    "closeout": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription.md"
   },
   "batches": [
     {
@@ -124,6 +124,12 @@
       "status": "Completed",
       "evidence": "Profile schema 8 and descriptor schema 11 now project explicit self dynamic multicast delegates into generated AvidEvent C# contracts and typed WASM exports; prepared codecs and a session-owned subscription owner provide missing-handler elision, transactional replacement, HostContext rebind, borrowed object handles, non-fatal reentrancy and teardown without per-event wrappers; Semantic 67/67, C# Guest 86/86, prepared semantic 13/13, semantic cache 25/25, UE5.8 no-clean build, delegate Automation 2/2 and full Automation 348/348 passed.",
       "completed_at_utc": "2026-08-12T16:47:13.7131773Z"
+    },
+    {
+      "id": "P57.12B",
+      "status": "Completed",
+      "evidence": "Generated AvidSubscriptions and opaque i64 AvidSubscription tokens now bind Profile-authorized dynamic multicast events on any compatible current-session owned/borrowed UObject capability; registry, world, owner type, stale handle, candidate transaction, explicit cancel, callback self-cancel and teardown are enforced without per-event wrappers; Semantic 68/68, C# Guest 87/87, UE5.8 no-clean 18-action build, full Automation 350/350 and clean eca1687/b9aaa71 architecture gate passed.",
+      "completed_at_utc": "2026-08-23T07:40:55.4730420Z"
     }
   ],
   "debt": [
@@ -143,8 +149,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.12A review closed profile/descriptor canonical identity, generated facade and Roslyn projection, Guest export ABI, prepared codec ownership, missing-handler elision, transactional source replacement, HostContext rebind, borrowed object lifetime, reentrant dispatch and real UE multicast teardown.",
-    "completed_at_utc": "2026-08-12T16:47:13.7131773Z"
+    "evidence": "Centralized P57.12B review closed i64 token identity, current-session capability authorization, normalized HostContext world, stale/type/world rejection, candidate prepare/commit behavior, successful reload invalidation, failed reload preservation, callback self-cancel safety, generated transient-state enforcement and WAMR/Wasmtime import parity.",
+    "completed_at_utc": "2026-08-23T07:40:55.4730420Z"
   },
   "budgets": {
     "ubt": 2,
@@ -152,25 +158,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 7,
-    "automation": 4,
-    "full_gate": 2
+    "ubt": 9,
+    "automation": 5,
+    "full_gate": 3
   },
   "freeze": {
-    "source_commit": "54a573cb028543b01df73665757cad9833c5f00d",
-    "source_tree": "b252d392fd4e0df7d1fb021f8ce476ba05da7901",
+    "source_commit": "eca16871d17951b996503c847975deb7559ea38c",
+    "source_tree": "b9aaa71d0e5c3632b67761221bf4c916aaa1eeec",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12A_Generic_Delegate_Subscription_Evidence.json",
-    "at_utc": "2026-08-12T16:47:13.7131773Z"
+    "review_evidence": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription_Evidence.json",
+    "at_utc": "2026-08-23T07:40:55.4730420Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12A_Architecture_de8d949.log",
-    "report_sha256": "cb8834649b70374d51473b82885361a53c76c6e9b25d08e0be721be1f0b75dd3",
-    "run_id": "P57.12A-clean-architecture-final",
-    "verified_commit": "de8d949c02aabfb9e44352a6c80c40eb16b384d4",
-    "verified_tree": "34992c342d156256eb31ab4110484477fa037365",
-    "attestation_parent": "de8d949c02aabfb9e44352a6c80c40eb16b384d4",
-    "attested_at_utc": "2026-08-12T16:47:13.7131773Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12B_Architecture_eca1687.log",
+    "report_sha256": "b2d2382fd2a88c5f9770ac60f5d555a84f89db8a8b162bac40fafa77519fb0b2",
+    "run_id": "P57.12B-clean-architecture-final",
+    "verified_commit": "eca16871d17951b996503c847975deb7559ea38c",
+    "verified_tree": "b9aaa71d0e5c3632b67761221bf4c916aaa1eeec",
+    "attestation_parent": "eca16871d17951b996503c847975deb7559ea38c",
+    "attested_at_utc": "2026-08-23T07:40:55.4730420Z"
   },
   "protected_dirty": [
     {
@@ -193,6 +199,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 21,
-  "updated_at_utc": "2026-08-12T16:47:13.7131773Z"
+  "revision": 22,
+  "updated_at_utc": "2026-08-23T07:40:55.4730420Z"
 }

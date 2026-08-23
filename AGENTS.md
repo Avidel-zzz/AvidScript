@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-23 P57.12B 首次 clean-candidate 架构门禁发现新增 `event_subscribe` / `event_unsubscribe` 后，static host catalog、renderer fixed import 与 framework facade struct 的 checker 白名单未同步，产生 4 项合同漂移。Prevention：新增任何共享 Host ABI 或框架级生成类型时，接口冻结清单必须同时覆盖 VM catalog、兼容性标记、renderer import、reserved/generated type 与 `CheckAvidScriptArchitecture.ps1` allowlist；集中 Gate 前执行 checker parser，但正式架构证据仍只在精确 clean candidate 上运行。
 - 2026-08-23 P57.12B 首轮 C# Guest Gate 在新增 WASM 编译断言后漏加 `using AvidScript.WasmBackend`，测试项目在执行前以 CS0103 停止。Prevention：测试复用另一文件中的工具类型时，先读取原调用点顶部 namespace 与目标 `.csproj` 引用；集中 Gate 前的 owned-path 审查必须逐个解析新增外部类型的 namespace，不能只确认项目引用存在。
 - 2026-08-23 P57.12B 并行代理在生成式 C# 写集完成后自行启动了 no-clean Editor 构建，早于阶段集成与统一 Gate；虽然提前发现 `TArray::CountByPredicate` 不存在，但仍造成一次可避免的碎片化构建。Prevention：实现代理任务必须逐字写明“禁止构建、Automation 与 benchmark，只提交 diff 和静态风险”；阶段构建命令只由主线在集中修复结束后发起一次，代理若发现疑似编译风险只返回文件/行号与建议探针。
 - 2026-08-12 P57.12A Gate 首次按此前引擎输出版本推断 bundled dotnet 路径为 `10.0.203\win-x64`，实际目录是 `10.0\win-x64`；修正后又忽略仓库 `global.json` 固定要求用户级 SDK 8.0.416，造成两次环境级失败。Prevention：任何阶段 Gate 使用 dotnet 前必须先分别枚举候选 `dotnet.exe` 与执行 `--list-sdks`，选择同时满足字面路径和 `global.json` pin 的宿主；禁止根据 `dotnet --version` 输出反推安装目录，也不得把环境解析失败计为产品测试失败。

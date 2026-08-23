@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12A" src="https://img.shields.io/badge/Status-Phase%2057.12A-159957">
-  <img alt="Automation 348/348" src="https://img.shields.io/badge/Automation-348%2F348-26A269">
+  <img alt="Phase 57.12B" src="https://img.shields.io/badge/Status-Phase%2057.12B-159957">
+  <img alt="Automation 350/350" src="https://img.shields.io/badge/Automation-350%2F350-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -32,7 +32,7 @@
 - **C# 游戏逻辑，WASM 运行边界**：Roslyn 语义前端生成 AvidScript Guest IR，
   再输出 WebAssembly；PC 主后端使用 Wasmtime Cranelift。
 - **接入 UE 生命周期与事件**：脚本可以响应 `BeginPlay`、`Tick`、`EndPlay`、Timer、
-  Gameplay Event、Overlap 与 Profile 授权的动态多播委托，并使用 Actor、Component、递归固定宽度 `USTRUCT`、
+  Gameplay Event、Overlap，并订阅 Session 授权的任意兼容 UObject 动态多播事件；同时使用 Actor、Component、递归固定宽度 `USTRUCT`、
   `FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型。
 - **性能结论可复核**：同机、同 workload 对比 Puerts V8；候选 commit、profile、
   进程样本、P50/P95 和未达门禁均进入机器可读 evidence。
@@ -151,30 +151,45 @@ AvidScriptValue.Release(result);
 
 ### UE 动态多播事件
 
-Profile 通过 `include_events` 显式授权脚本宿主 `self` 上的动态多播委托。生成的 facade
-提供稳定的 `AvidEvents` 常量；C# 只需声明静态、强类型 handler：
+Profile 通过 `include_events` 显式授权动态多播委托。生成的 facade 提供稳定的 `AvidEvents`
+常量、强类型 `AvidSubscriptions` 入口和不透明订阅 token：
 
 ```csharp
 public static class PickupScript
 {
+    [AvidTransient]
+    private static AvidSubscription _subscription;
+
+    public static void BeginPlay()
+    {
+        _subscription = AvidSubscriptions.OnPickedUp(UE.Self);
+    }
+
     [AvidEvent(AvidEvents.OnPickedUp)]
     public static void OnPickedUp(AActor instigator, int itemId, float value)
     {
         UE.Self.ApplyPickup(itemId, value);
     }
+
+    public static void StopListening()
+    {
+        _subscription.Cancel();
+        _subscription = default;
+    }
 }
 ```
 
 Roslyn 前端会校验事件身份、返回类型与参数签名，并生成确定性的
-`avid_on_delegate_<stable-id>` WASM export。运行时只订阅 Guest 实际实现的 handler；加载失败、
-热重载替换、宿主切换与 `EndPlay` 都由 Session 事务式管理，不需要在 C# 中手写解绑逻辑。
+`avid_on_delegate_<stable-id>` WASM export。订阅源可以是当前 Runtime Session 已持有或借用的任意
+兼容 UObject handle；Runtime 统一校验 registry、capability、world 与 owner class。脚本可显式取消，
+加载失败、热重载替换、宿主切换与 `EndPlay` 仍由 Session 事务式管理并最终自动解绑。
 
 ## 当前能力
 
 | 领域 | 已实现 |
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由 |
-| UE 事件订阅 | Profile 显式授权的 `self` 动态多播委托；生成式 `[AvidEvent]`、typed WASM export、事务式热重载与自动解绑 |
+| UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
@@ -423,7 +438,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 还不是完整 UE API 类型系统，只覆盖 descriptor 可表达且 ABI 已实现的类型；
 - 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
 - 一维 `TArray<T>` 已支持首批固定元素类型；nested array、字符串元素、`TSet`、`TMap` 尚未支持；
-- 动态多播事件当前只支持 `self` 作为源并要求 Profile 显式授权；任意 UObject 源、单播委托、C# `event +=`、lambda/closure 尚未支持；
+- 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
 - latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
@@ -434,7 +449,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 扩展任意 UObject 事件源与显式订阅 token，然后实现 latent continuation、RPC、interface dispatch 与 `FText` 等 UE 调用语义；
+1. 实现 latent/async continuation、world teardown、RPC、interface dispatch 与 `FText` 等 UE 调用语义；
 2. 用 C# 完成真实小型游戏 Demo，固化生命周期、对象创建、事件和热重载工作流；
 3. 扩展 string element、nested array、`TSet`/`TMap`，继续压缩 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -450,11 +465,11 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前 Phase 57.12A 完整 AvidScript Automation 为 **348/348 通过**，另有 Semantic
-`67/67`、C# Guest `86/86`、prepared semantic `13/13`、semantic cache entry `25/25`
-与 delegate lifecycle 聚焦 `2/2`。本阶段没有新增性能 benchmark，性能表继续引用已冻结的
+当前 Phase 57.12B 完整 AvidScript Automation 为 **350/350 通过**，另有 Semantic
+`68/68`、C# Guest `87/87`，以及 UE5.8 no-clean Editor build 与 clean-candidate 架构门禁通过。
+本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12A 中文报告](Docs/Phase57/P57.12A_Generic_Delegate_Subscription.md)。
+[P57.12B 中文报告](Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription.md)。
 
 工程规则：
 
