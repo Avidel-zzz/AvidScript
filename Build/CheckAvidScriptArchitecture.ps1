@@ -1933,6 +1933,8 @@ $CanonicalStaticImportNames = @(
     'avid_owner_get_handle',
     'timer_set_once',
     'timer_cancel',
+    'event_subscribe',
+    'event_unsubscribe',
     'avid_data_lane_epoch',
     'avid_data_lane_submit',
     'avid_value_array_length',
@@ -2228,6 +2230,8 @@ $AllowedFixedRendererImports = @(
     'avid_object_type_is_a',
     'timer_set_once',
     'timer_cancel',
+    'event_subscribe',
+    'event_unsubscribe',
     'avid_value_array_read_range',
     'avid_value_array_write_range',
     'avid_value_release'
@@ -2255,7 +2259,8 @@ $AllowedLiteralFacadeStructs = @(
     'FRotator',
     'FTransform',
     'InputEvent',
-    'TSubclassOfAActor'
+    'TSubclassOfAActor',
+    'AvidSubscription'
 )
 $LiteralFacadeStructs = @(
     [regex]::Matches(
