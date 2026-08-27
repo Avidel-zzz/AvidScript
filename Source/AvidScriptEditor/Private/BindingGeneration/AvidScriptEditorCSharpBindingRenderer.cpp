@@ -1349,6 +1349,45 @@ bool HasAvidScriptSceneComponentFactories(
 		});
 }
 
+void AppendContinuationReferenceSurface(TArray<FString>& Lines)
+{
+	Lines.Append({
+		TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]"),
+		TEXT("public sealed class AvidContinuationAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    public AvidContinuationAttribute(int callbackId)"),
+		TEXT("    {"),
+		TEXT("        CallbackId = callbackId;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public int CallbackId { get; }"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public readonly struct AvidContinuation"),
+		TEXT("{"),
+		TEXT("    private readonly long Token;"),
+		TEXT(""),
+		TEXT("    internal AvidContinuation(long token)"),
+		TEXT("    {"),
+		TEXT("        Token = token;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsValid => Token != 0;"),
+		TEXT("    public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public static class AvidContinuations"),
+		TEXT("{"),
+		TEXT("    public static AvidContinuation Delay(float delaySeconds, int callbackId)"),
+		TEXT("        => new(AvidScriptRuntimeNative.ContinuationDelay(delaySeconds, callbackId));"),
+		TEXT(""),
+		TEXT("    public static AvidContinuation NextTick(int callbackId)"),
+		TEXT("        => new(AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId));"),
+		TEXT("}"),
+		TEXT("")
+	});
+}
+
 bool ResolveDelegateEventContractType(
 	const FAvidScriptBindingValueModel& Value,
 	const TMap<FString, const FAvidScriptBindingTypeModel*>& TypesByCanonical,
@@ -2103,6 +2142,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("}"),
 		TEXT("")
 	});
+	AppendContinuationReferenceSurface(Lines);
 	if (!AppendDelegateEventReferenceSurface(
 			Package,
 			TypesByCanonical,
@@ -2441,40 +2481,38 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		}
 		Lines.Append({ TEXT("}"), TEXT("") });
 	}
-	if (SelfType != nullptr
-		|| bHasLifecycleBindings
-		|| !Package.DelegateEvents.IsEmpty())
+	Lines.Append({
+		TEXT("internal static class AvidScriptRuntimeNative"),
+		TEXT("{"),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_delay\")]"),
+		TEXT("    internal static extern long ContinuationDelay(float delaySeconds, int callbackId);"),
+		TEXT(""),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_cancel\")]"),
+		TEXT("    internal static extern int ContinuationCancel(long continuationToken);")
+	});
+	if (SelfType != nullptr || bHasLifecycleBindings)
 	{
 		Lines.Append({
-			TEXT("internal static class AvidScriptRuntimeNative"),
-			TEXT("{")
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
+			TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
+			TEXT("    internal static extern int TimerCancel(int timerHandle);")
 		});
-		if (SelfType != nullptr || bHasLifecycleBindings)
-		{
-			Lines.Append({
-				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_set_once\")]"),
-				TEXT("    internal static extern int TimerSetOnce(float delaySeconds, int callbackId);"),
-				TEXT(""),
-				TEXT("    [DllImport(\"env\", EntryPoint = \"timer_cancel\")]"),
-				TEXT("    internal static extern int TimerCancel(int timerHandle);")
-			});
-		}
-		if (!Package.DelegateEvents.IsEmpty())
-		{
-			if (SelfType != nullptr || bHasLifecycleBindings)
-			{
-				Lines.Add(TEXT(""));
-			}
-			Lines.Append({
-				TEXT("    [DllImport(\"env\", EntryPoint = \"event_subscribe\")]"),
-				TEXT("    internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"),
-				TEXT(""),
-				TEXT("    [DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"),
-				TEXT("    internal static extern int EventUnsubscribe(long subscriptionToken);")
-			});
-		}
-		Lines.Append({ TEXT("}"), TEXT("") });
 	}
+	if (!Package.DelegateEvents.IsEmpty())
+	{
+		Lines.Append({
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"event_subscribe\")]"),
+			TEXT("    internal static extern long EventSubscribe(int slot, int generation, int eventOrdinal);"),
+			TEXT(""),
+			TEXT("    [DllImport(\"env\", EntryPoint = \"event_unsubscribe\")]"),
+			TEXT("    internal static extern int EventUnsubscribe(long subscriptionToken);")
+		});
+	}
+	Lines.Append({ TEXT("}"), TEXT("") });
 
 	if (!ArrayTypes.IsEmpty())
 	{

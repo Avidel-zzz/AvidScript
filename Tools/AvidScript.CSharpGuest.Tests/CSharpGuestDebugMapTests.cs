@@ -14,8 +14,72 @@ internal static class CSharpGuestDebugMapTests
         RealSemanticFunctionsProjectToDeterministicWasmIndices();
         NonMethodGuestFunctionsRetainIndexSpaceWithoutFakeSourceLocations();
         GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation();
+        GeneratedContinuationRouterRetainsIndexSpaceWithoutFakeSourceLocation();
         ReversedSameLineSpanFailsClosed();
-        return 4;
+        return 5;
+    }
+
+    private static void GeneratedContinuationRouterRetainsIndexSpaceWithoutFakeSourceLocation()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                private static int CallbackId;
+                private static long Token;
+                private static float Status;
+
+                [AvidContinuation(1)]
+                public static void Resume() { }
+            }
+            """;
+        const string facade = """
+            using System;
+
+            namespace AvidScript;
+
+            [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+            public sealed class AvidContinuationAttribute : Attribute
+            {
+                public AvidContinuationAttribute(int callbackId) { }
+            }
+            """;
+        const string sourceId = "Scripts/ContinuationDebugMap.cs";
+        FrontendDocument frontend = FrontendAnalyzer.Analyze(source, sourceId);
+        SemanticDocument semantic = SemanticAnalyzer.Analyze(
+            source,
+            sourceId,
+            frontend.Source.Sha256,
+            new[] { new SemanticReferenceSource(facade, "generated://AvidScript.Continuation.cs", true) });
+        Assert(semantic.Succeeded, "continuation debug-map source should analyze successfully");
+
+        CSharpGuestLoweringResult lowering = CSharpGuestLowerer.Lower(semantic, new string('c', 64));
+        GuestModule module = lowering.Module
+            ?? throw new InvalidOperationException(
+                "continuation debug-map source should lower successfully: "
+                + string.Join(" | ", lowering.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        const string routerId = "function:synthetic:continuation";
+        Assert(module.Functions.Any(function => function.Id == routerId),
+            "continuation callbacks should synthesize the continuation router");
+
+        string guestIrSha256 = Convert.ToHexString(
+            SHA256.HashData(GuestIrSerializer.Serialize(module))).ToLowerInvariant();
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            semantic,
+            module,
+            guestIrSha256,
+            new string('e', 64));
+
+        Assert(debugMap.DefinedFunctionCount == module.Functions.Count,
+            "continuation routers should retain the complete WASM function index range");
+        Assert(debugMap.Functions.All(function =>
+                function.GuestFunctionId != routerId),
+            "the generated continuation router must not publish a fake C# source location");
+        Assert(debugMap.Functions.Count == module.Functions.Count - 1,
+            "only the generated continuation router should be omitted from the source map");
     }
 
     private static void GeneratedGameplayRouterRetainsIndexSpaceWithoutFakeSourceLocation()

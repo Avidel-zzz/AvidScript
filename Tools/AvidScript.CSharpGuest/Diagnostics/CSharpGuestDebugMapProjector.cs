@@ -13,6 +13,7 @@ public static class CSharpGuestDebugMapProjector
     private static readonly HashSet<string> SourceLessGeneratedFunctionIds = new(StringComparer.Ordinal)
     {
         CSharpGuestIds.GameplayEventFunctionId,
+        CSharpGuestIds.ContinuationFunctionId,
     };
 
     public static CSharpGuestDebugMap Project(

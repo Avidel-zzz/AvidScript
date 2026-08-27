@@ -16,6 +16,39 @@ public sealed class AvidExportAttribute : Attribute
     public string EntryPoint { get; }
 }
 
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class AvidContinuationAttribute : Attribute
+{
+    public AvidContinuationAttribute(int callbackId)
+    {
+        CallbackId = callbackId;
+    }
+
+    public int CallbackId { get; }
+}
+
+public readonly struct AvidContinuation
+{
+    private readonly long Token;
+
+    internal AvidContinuation(long token)
+    {
+        Token = token;
+    }
+
+    public bool IsValid => Token != 0;
+    public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;
+}
+
+public static class AvidContinuations
+{
+    public static AvidContinuation Delay(float delaySeconds, int callbackId)
+        => new(AvidScriptRuntimeNative.ContinuationDelay(delaySeconds, callbackId));
+
+    public static AvidContinuation NextTick(int callbackId)
+        => new(AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId));
+}
+
 public enum AvidStateMode
 {
     Compatible = 0,
@@ -200,6 +233,12 @@ public static class UE
 
 internal static class AvidScriptRuntimeNative
 {
+    [DllImport("env", EntryPoint = "continuation_delay")]
+    internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_cancel")]
+    internal static extern int ContinuationCancel(long continuationToken);
+
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
 

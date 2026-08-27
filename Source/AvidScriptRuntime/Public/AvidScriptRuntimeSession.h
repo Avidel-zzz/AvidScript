@@ -7,6 +7,7 @@ class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
 class FAvidScriptSessionDelegateSubscriptions;
+class FAvidScriptSessionContinuations;
 class IAvidScriptBindingHostEffectJournal;
 struct FAvidScriptRuntimeArtifact;
 
@@ -17,6 +18,7 @@ struct AVIDSCRIPTRUNTIME_API FAvidScriptRuntimeSessionSnapshot
 	FString ModuleId;
 	int32 TickCallCount = 0;
 	int32 PendingTimerCount = 0;
+	int32 PendingContinuationCount = 0;
 	int32 TimerCallbackCount = 0;
 	int32 EventCallbackCount = 0;
 	int32 SuccessfulReloadCount = 0;
@@ -86,6 +88,7 @@ public:
 	FString GetLiveModuleId() const;
 	int32 GetLiveTickCallCount() const;
 	int32 GetLivePendingTimerCount() const;
+	int32 GetLivePendingContinuationCount() const;
 	int32 GetLiveTimerCallbackCount() const;
 	int32 GetLiveEventCallbackCount() const;
 	EAvidScriptLifecycleState GetLiveLifecycleState() const;
@@ -125,6 +128,7 @@ public:
 	void CommitDelegateSubscriptionsForTesting();
 	void UnbindDelegateSubscriptionsForTesting();
 	int32 GetDelegateSubscriptionCountForTesting() const;
+	int32 GetPreparedContinuationCountForTesting() const;
 	int64 SubscribeDelegateForTesting(
 		UObject& Source,
 		uint32 EventOrdinal,
@@ -152,9 +156,11 @@ private:
 		const FAvidScriptWasmReloadManifest& Manifest,
 		bool bUseHostEffectTransaction,
 		FAvidScriptWasmReloadResult& OutResult);
+	bool PumpReadyContinuations(FAvidScriptWasmSmokeResult& OutResult);
 
 	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
 	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;
+	TSharedPtr<FAvidScriptSessionContinuations> Continuations;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;
 	TUniquePtr<FAvidScriptRuntimeEventRouter> EventRouter;

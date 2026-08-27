@@ -34,7 +34,9 @@ param(
     [Parameter(Mandatory = $true)][string]$StateSchemaPath,
     [Parameter(Mandatory = $true)][string]$WasmPath,
     [Parameter(Mandatory = $true)][string]$InspectionPath,
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [ValidateSet("enabled", "disabled")]
+    [string]$DataLaneFusion = "enabled"
 )
 $ErrorActionPreference = "Stop"
 '@

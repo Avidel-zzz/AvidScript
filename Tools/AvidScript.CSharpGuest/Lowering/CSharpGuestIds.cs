@@ -4,10 +4,13 @@ internal static class CSharpGuestIds
 {
     public const string AddressTypeId = "type:address";
     public const string Int32TypeId = "type:int32";
+    public const string Int64TypeId = "type:int64";
     public const string ArrayLengthPropertyId =
         "symbol:property:global::System.Array.Length:int32";
     public const string GameplayEventExportName = "avid_on_gameplay_event";
     public const string GameplayEventFunctionId = "function:synthetic:gameplay_event";
+    public const string ContinuationExportName = "avid_on_continuation";
+    public const string ContinuationFunctionId = "function:synthetic:continuation";
 
     public static string Function(string methodSymbolId) => $"function:{methodSymbolId}";
 
@@ -41,6 +44,20 @@ internal static class CSharpGuestIds
         $"block:synthetic:gameplay_event:call:{eventType}";
 
     public const string GameplayEventReturnBlockId = "block:synthetic:gameplay_event:return";
+
+    public static string ContinuationParameter(string name) =>
+        $"value:continuation:parameter:{name}";
+
+    public static string ContinuationLocal(int callbackId, string name) =>
+        $"value:continuation:{callbackId}:{name}";
+
+    public static string ContinuationCheckBlock(int callbackId) =>
+        $"block:synthetic:continuation:check:{callbackId}";
+
+    public static string ContinuationCallBlock(int callbackId) =>
+        $"block:synthetic:continuation:call:{callbackId}";
+
+    public const string ContinuationReturnBlockId = "block:synthetic:continuation:return";
 
     public const string DelegateEventFunctionPrefix = "function:synthetic:delegate_event:";
 

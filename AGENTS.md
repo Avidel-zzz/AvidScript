@@ -1943,3 +1943,53 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first reusable delegate bridge collision check called `UFunction::IsSignatureCompatibleWith`; after the duplicated function was linked into the bridge class, its parameter offsets differed from the original delegate signature and a valid second preparation was rejected.
 - Prevention: cached dynamic bridge functions compare parameter type, size, array dimension, and calling-convention property flags while deliberately ignoring class-relative offsets. Stable-ID collisions still fail closed on any ABI-shape difference.
+
+### 2026-08-26: resume with the authoritative phase status command
+
+- Mistake: after resuming P57.12C work, the first project commands inspected Git and repository guidance before running the required `Build/InvokePhaseWorkflow.ps1 status -Phase 57` checkpoint.
+- Prevention: after every resume, reconnect, or context compaction, the first command executed in the plugin repository is the authoritative phase workflow status command. Git identity, dirty-state, and source probes follow only after that checkpoint succeeds.
+
+### 2026-08-26: enumerate source paths before every targeted read
+
+- Mistake: the first continuation-lowering probe inferred a nonexistent `GuestControlFlow.cs` filename from a concept name and paired it with an invalid search pattern.
+- Prevention: obtain each unfamiliar source path from `rg --files` or a symbol-producing `rg -n` result before reading it. Concept names, class names, and remembered paths are not path evidence.
+
+### 2026-08-26: continuation ownership is a Session transaction boundary
+
+- Mistake: the first P57.12C1 draft placed continuation ownership inside each Runtime instance and began implementation before checking candidate-lane, guest-depth, and teardown-fence requirements together.
+- Prevention: cross-producer asynchronous work is owned by the Runtime Session. The Runtime only forwards host ABI calls and invokes guest exports; active/prepared lanes, activation identity, cancellation, delivery fencing, and deferred teardown are designed and reviewed as one Session transaction before implementation begins.
+
+### 2026-08-26: keep repository probes to one PowerShell statement
+
+- Mistake: one P57.12C source read joined two `Get-Content` statements with a semicolon even though the repository shell contract requires one logical command per invocation.
+- Prevention: read one file or one verified slice per shell invocation. When multiple independent reads are needed, issue separate tool calls; do not join PowerShell statements with semicolons or command-chain operators.
+
+### 2026-08-26: verify UE container APIs and endpoint lifetime before tests
+
+- Mistake: the first continuation owner draft used a nonexistent `TArray::CountByPredicate` helper, and its transaction test invoked a prepared endpoint reference after `DiscardPrepared` had released the endpoint.
+- Prevention: verify unfamiliar UE container methods against engine headers or established repository use before writing them. Raw host endpoint references are valid only while their Runtime HostContext owns that lane; tests must not call them after discard, and production swaps retain retired endpoints until the old Runtime has explicitly rebound or unloaded.
+
+### 2026-08-26: enumerate the Tools root before selecting test projects
+
+- Mistake: the first centralized .NET gate probe guessed a nonexistent `Tools/AvidScript.GuestWasm.Tests` directory instead of enumerating the actual test projects.
+- Prevention: discover repository test projects with `rg --files Tools | rg 'Tests.*\.csproj$'` before constructing any test command. Never infer a test-project directory from a compiler or artifact name.
+
+### 2026-08-26: test public artifacts across assembly boundaries
+
+- Mistake: the first continuation debug-map regression referenced the internal `CSharpGuestIds` helper from the separate test assembly, causing a compile failure before the behavior could be exercised.
+- Prevention: cross-assembly tests use public contracts or protocol literals already exposed by serialized artifacts. Internal implementation helpers are referenced only when the production assembly explicitly grants test visibility.
+
+### 2026-08-26: synthetic-router fixtures declare their complete ABI type set
+
+- Mistake: the first source-less continuation-router debug fixture declared only a callback attribute, so its semantic type registry lacked the `i64` and `f32` primitives required by the generated router ABI.
+- Prevention: isolated synthetic-function fixtures explicitly exercise every implicit ABI type before lowering. A semantic success result alone does not prove that the type registry is sufficient for generated Guest functions.
+
+### 2026-08-26: read fixture constants before updating exact assertions
+
+- Mistake: the first schema-10 BuildIntegration update guessed the ActorLifecycle continuation callback id instead of reading its declared constant and wrote `1001` where the source contract uses `9`.
+- Prevention: exact fixture IDs, counts, and signatures are copied only from the current source or generated artifact after a successful build. Remembered or illustrative values are never promoted into acceptance assertions.
+
+### 2026-08-26: architecture evidence runs from a clean candidate tree
+
+- Mistake: the first P57.12C1 architecture check was launched in the implementation worktree even though its evidence contract intentionally rejects dirty architecture inputs.
+- Prevention: implementation-time checks use scoped source and contract tests. The evidence architecture checker runs only after the candidate commit exists, from a detached clean worktree at that exact commit.

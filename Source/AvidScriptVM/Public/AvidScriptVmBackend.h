@@ -138,7 +138,9 @@ enum class EAvidScriptHostBindingId : uint16
 	ValueArrayStore,
 	ValueArrayReadRange,
 	ValueArrayWriteRange,
-	ValueRelease
+	ValueRelease,
+	ContinuationDelay,
+	ContinuationCancel
 };
 
 struct FAvidScriptVmStackFrame

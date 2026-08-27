@@ -4,6 +4,7 @@
 
 #include "AvidScriptRuntimeEventRouter.h"
 #include "AvidScriptRuntimeScheduler.h"
+#include "Continuation/AvidScriptSessionContinuations.h"
 #include "GameFramework/Actor.h"
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
@@ -104,6 +105,7 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 	: ObjectOwnership(MakeUnique<FAvidScriptSessionObjectOwnership>())
 	, DelegateSubscriptions(
 		MakeUnique<FAvidScriptSessionDelegateSubscriptions>(*this))
+	, Continuations(MakeShared<FAvidScriptSessionContinuations>())
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
 {
@@ -115,6 +117,7 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 
 FAvidScriptRuntimeSession::~FAvidScriptRuntimeSession()
 {
+	check(IsInGameThread());
 	checkf(!IsOperationActive(), TEXT("AvidScript RuntimeSession cannot be destroyed during an active guest call or mutation."));
 	UnloadLive();
 }
@@ -337,6 +340,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	NextHostContext.ObjectOwnership = ObjectOwnership.Get();
 	NextHostContext.HostEffectJournal = nullptr;
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
+	NextHostContext.Continuations = HostContext.Continuations;
 	if (NextHostContext.ObjectRegistry != nullptr
 		&& NextHostContext.OwnerHandle.IsValid())
 	{
@@ -361,6 +365,13 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	{
 		DelegateSubscriptions->UnbindActive();
 		DelegateSubscriptions->DiscardPrepared();
+		NextHostContext.Continuations = LiveRuntime
+			? &Continuations->ResetActive(NextHostContext.World.Get())
+			: nullptr;
+		if (!LiveRuntime)
+		{
+			Continuations->Teardown();
+		}
 	}
 	if (HostContext.ObjectRegistry != nullptr
 		&& HostContext.ObjectRegistry != NextHostContext.ObjectRegistry)
@@ -371,6 +382,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	if (LiveRuntime)
 	{
 		LiveRuntime->SetHostContext(HostContext);
+		Continuations->ReleaseRetiredEndpoint();
 		if (bDelegateSourceChanged
 			&& LiveRuntime->GetLifecycleState()
 				== EAvidScriptLifecycleState::Running)
@@ -416,6 +428,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	DelegateSubscriptions->UnbindActive();
 	DelegateSubscriptions->DiscardPrepared();
+	Continuations->Teardown();
 	if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -424,6 +437,7 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	if (LiveRuntime)
 	{
 		LiveRuntime->ClearHostContext();
+		Continuations->ReleaseRetiredEndpoint();
 	}
 }
 
@@ -449,7 +463,8 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 		Observer();
 	}
 #endif
-	return Scheduler->Tick(DeltaSeconds, OutResult);
+	return Scheduler->Tick(DeltaSeconds, OutResult)
+		&& PumpReadyContinuations(OutResult);
 }
 
 bool FAvidScriptRuntimeSession::DispatchEvent(
@@ -487,9 +502,10 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 	}
 #endif
 	return Scheduler->Tick(
-		DeltaSeconds,
-		OutResult,
-		EAvidScriptWasmResultDetail::FailureOnly);
+			DeltaSeconds,
+			OutResult,
+			EAvidScriptWasmResultDetail::FailureOnly)
+		&& PumpReadyContinuations(OutResult);
 }
 
 bool FAvidScriptRuntimeSession::TickHot(
@@ -516,7 +532,30 @@ bool FAvidScriptRuntimeSession::TickHot(
 		Observer();
 	}
 #endif
-	return Scheduler->TickHot(DeltaSeconds, OutFailure);
+	return Scheduler->TickHot(DeltaSeconds, OutFailure)
+		&& PumpReadyContinuations(OutFailure);
+}
+
+bool FAvidScriptRuntimeSession::PumpReadyContinuations(
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Continuations->DrainReady(Completions);
+	for (const FAvidScriptContinuationCompletion& Completion : Completions)
+	{
+		if (!LiveRuntime || !LiveRuntime->DispatchContinuation(Completion, OutResult))
+		{
+			Continuations->Teardown();
+			HostContext.Continuations = nullptr;
+			if (LiveRuntime)
+			{
+				LiveRuntime->SetHostContext(HostContext);
+			}
+			Continuations->ReleaseRetiredEndpoint();
+			return false;
+		}
+	}
+	return true;
 }
 
 bool FAvidScriptRuntimeSession::DispatchEventLive(
@@ -641,6 +680,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 		return false;
 	}
 	DelegateSubscriptions->UnbindActive();
+	Continuations->Teardown();
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	if (!IsLiveLoaded())
 	{
@@ -656,6 +696,9 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 	}
 
 	const bool bSucceeded = LiveRuntime->EndPlay(OutResult);
+	HostContext.Continuations = nullptr;
+	LiveRuntime->SetHostContext(HostContext);
+	Continuations->ReleaseRetiredEndpoint();
 	if (bSucceeded && HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -679,6 +722,7 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	FAvidScriptWasmSmokeResult EndPlayFailure;
 	DelegateSubscriptions->UnbindActive();
 	DelegateSubscriptions->DiscardPrepared();
+	Continuations->Teardown();
 	Scheduler->Detach();
 	if (LiveRuntime)
 	{
@@ -698,6 +742,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 		OutResult = FAvidScriptWasmSmokeResult();
 		OutResult.bUnloaded = true;
 	}
+	Continuations->ReleaseRetiredEndpoint();
+	HostContext.Continuations = nullptr;
 	if (HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
@@ -734,6 +780,11 @@ int32 FAvidScriptRuntimeSession::GetLivePendingTimerCount() const
 	return Scheduler->GetPendingTimerCount();
 }
 
+int32 FAvidScriptRuntimeSession::GetLivePendingContinuationCount() const
+{
+	return Continuations->GetActiveCount();
+}
+
 int32 FAvidScriptRuntimeSession::GetLiveTimerCallbackCount() const
 {
 	return Scheduler->GetTimerCallbackCount();
@@ -766,6 +817,7 @@ FAvidScriptRuntimeSessionSnapshot FAvidScriptRuntimeSession::GetSnapshot() const
 	Snapshot.ModuleId = GetLiveModuleId();
 	Snapshot.TickCallCount = GetLiveTickCallCount();
 	Snapshot.PendingTimerCount = GetLivePendingTimerCount();
+	Snapshot.PendingContinuationCount = GetLivePendingContinuationCount();
 	Snapshot.TimerCallbackCount = GetLiveTimerCallbackCount();
 	Snapshot.EventCallbackCount = GetLiveEventCallbackCount();
 	Snapshot.SuccessfulReloadCount = SuccessfulReloadCount;
@@ -808,6 +860,11 @@ void FAvidScriptRuntimeSession::UnbindDelegateSubscriptionsForTesting()
 int32 FAvidScriptRuntimeSession::GetDelegateSubscriptionCountForTesting() const
 {
 	return DelegateSubscriptions->NumActive();
+}
+
+int32 FAvidScriptRuntimeSession::GetPreparedContinuationCountForTesting() const
+{
+	return Continuations->GetPreparedCount();
 }
 
 int64 FAvidScriptRuntimeSession::SubscribeDelegateForTesting(
@@ -1110,13 +1167,17 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		}
 		return bRolledBack;
 	};
+	IAvidScriptContinuationHost& PreparedContinuationHost =
+		Continuations->BeginPrepared(HostContext.World.Get());
+	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
+	CandidateHostContext.Continuations = &PreparedContinuationHost;
+	CandidateRuntime->SetHostContext(CandidateHostContext);
 
 	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;
 	if (bUseHostEffectTransaction)
 	{
 		HostEffectTransaction.Emplace();
 		OutResult.bHostEffectTransactionAttempted = true;
-		FAvidScriptWasmHostContext CandidateHostContext = HostContext;
 		CandidateHostContext.HostEffectJournal = &HostEffectTransaction.GetValue();
 		CandidateRuntime->SetHostContext(CandidateHostContext);
 	}
@@ -1156,6 +1217,42 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			&& bHostEffectsRolledBack
 			&& bBorrowedHandlesRolledBack;
 		CandidateRuntime->SetHostContext(HostContext);
+		Continuations->DiscardPrepared();
+		DelegateSubscriptions->DiscardPrepared();
+		CandidateRuntime->Unload();
+		return false;
+	}
+
+	FString ContinuationCommitError;
+	if (!Continuations->ValidatePreparedCommit(ContinuationCommitError))
+	{
+		bool bHostEffectsRolledBack = true;
+		if (bUseHostEffectTransaction)
+		{
+			OutResult.bHostEffectRollbackAttempted = true;
+			FAvidScriptObjectRegistry EmptyRegistry;
+			FAvidScriptObjectRegistry& RollbackRegistry = HostContext.ObjectRegistry != nullptr
+				? *HostContext.ObjectRegistry
+				: EmptyRegistry;
+			FAvidScriptHostEffectTransactionResult RollbackResult;
+			bHostEffectsRolledBack = HostEffectTransaction->Rollback(
+				RollbackRegistry,
+				RollbackResult);
+			CopyHostEffectResult(RollbackResult, OutResult);
+		}
+		const bool bBorrowedHandlesRolledBack = RollbackBorrowedHandles();
+		OutResult.bHostEffectRollbackSucceeded =
+			bUseHostEffectTransaction
+			&& bHostEffectsRolledBack
+			&& bBorrowedHandlesRolledBack;
+		SetReloadFailure(
+			OutResult,
+			TEXT("<continuations>"),
+			TEXT("continuation_prepare_failed"),
+			ContinuationCommitError,
+			TEXT("keep the previous Runtime active and discard candidate continuations"));
+		CandidateRuntime->SetHostContext(HostContext);
+		Continuations->DiscardPrepared();
 		DelegateSubscriptions->DiscardPrepared();
 		CandidateRuntime->Unload();
 		return false;
@@ -1175,14 +1272,17 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				CommitResult.ErrorDetails,
 				TEXT("keep the previous runtime active and report the candidate transaction state"));
 			CandidateRuntime->SetHostContext(HostContext);
+			Continuations->DiscardPrepared();
 			DelegateSubscriptions->DiscardPrepared();
 			CandidateRuntime->Unload();
 			return false;
 		}
 		OutResult.bHostEffectTransactionCommitted = true;
 		CopyHostEffectResult(CommitResult, OutResult);
-		CandidateRuntime->SetHostContext(HostContext);
+		CandidateHostContext.HostEffectJournal = nullptr;
+		CandidateRuntime->SetHostContext(CandidateHostContext);
 	}
+	Continuations->CommitPrepared();
 
 	if (LiveRuntime)
 	{
@@ -1193,11 +1293,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		LiveRuntime.Reset();
 		LiveManifest = FAvidScriptWasmReloadManifest();
 	}
+	Continuations->ReleaseRetiredEndpoint();
 
 	OutResult.RuntimeResult = BeginPlayResult;
 	LiveRuntime = MoveTemp(CandidateRuntime);
 	Scheduler->Attach(*LiveRuntime);
 	LiveManifest = Manifest;
+	HostContext.Continuations = CandidateHostContext.Continuations;
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
 	return true;

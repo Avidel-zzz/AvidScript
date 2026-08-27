@@ -621,6 +621,37 @@ int32_t TimerCancel(wasm_exec_env_t ExecEnv, int32_t TimerHandle)
 	return DispatchI32(ExecEnv, EAvidScriptHostBindingId::TimerCancel, StaticImportName(EAvidScriptHostBindingId::TimerCancel), TimerHandle);
 }
 
+int64_t ContinuationDelay(wasm_exec_env_t ExecEnv, float DelaySeconds, int32_t CallbackId)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationDelay;
+	Call.FloatArgs[0] = DelaySeconds;
+	Call.IntArgs[0] = CallbackId;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationDelay),
+		Call,
+		Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
+int32_t ContinuationCancel(wasm_exec_env_t ExecEnv, int64_t ContinuationToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationCancel;
+	Call.Int64Args[0] = ContinuationToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationCancel),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 int64_t EventSubscribe(
 	wasm_exec_env_t ExecEnv,
 	int32_t Slot,
@@ -679,6 +710,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::OwnerGetHandle: return reinterpret_cast<void*>(OwnerGetHandle);
 	case EAvidScriptHostBindingId::TimerSetOnce: return reinterpret_cast<void*>(TimerSetOnce);
 	case EAvidScriptHostBindingId::TimerCancel: return reinterpret_cast<void*>(TimerCancel);
+	case EAvidScriptHostBindingId::ContinuationDelay: return reinterpret_cast<void*>(ContinuationDelay);
+	case EAvidScriptHostBindingId::ContinuationCancel: return reinterpret_cast<void*>(ContinuationCancel);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);

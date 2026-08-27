@@ -92,6 +92,7 @@ const FString AvidScriptGameplayEventExportName(
 	TEXT("avid_on_gameplay_event"));
 const FString AvidScriptEndPlayExportName(TEXT("avid_on_end_play"));
 const FString AvidScriptTimerExportName(TEXT("avid_on_timer"));
+const FString AvidScriptContinuationExportName(TEXT("avid_on_continuation"));
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
@@ -1013,6 +1014,11 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 			CachedExport = &TimerExport;
 			ExpectedParameterCellCount = 2;
 		}
+		else if (RequiredExport == AvidScriptContinuationExportName)
+		{
+			CachedExport = &ContinuationExport;
+			ExpectedParameterCellCount = 4;
+		}
 		else if (RequiredExport == AvidScriptEventExportName)
 		{
 			CachedExport = &EventExport;
@@ -1699,6 +1705,56 @@ bool FAvidScriptWasmRuntimeInstance::DispatchPreparedDelegateEvent(
 	return true;
 }
 
+bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
+	const FAvidScriptContinuationCompletion& Completion,
+	FAvidScriptWasmSmokeResult& OutResult)
+{
+	CaptureSnapshot(OutResult);
+	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			AvidScriptContinuationExportName,
+			TEXT("invalid_state"),
+			TEXT("Continuations require an active runtime between BeginPlay and EndPlay"),
+			TEXT("deliver continuation completions only through the active Runtime Session"));
+		return false;
+	}
+
+	uint32 Args[4] = {
+		static_cast<uint32>(Completion.CallbackId),
+		0,
+		0,
+		static_cast<uint32>(Completion.Status)
+	};
+	static_assert(sizeof(Completion.Token) == sizeof(uint32) * 2);
+	FMemory::Memcpy(&Args[1], &Completion.Token, sizeof(Completion.Token));
+	BeginTypedCallbackEpoch();
+	FAvidScriptVmError Error;
+	const bool bCalled = InvokeVmExport(
+		VmBackend.Get(),
+		ContinuationExport,
+		AvidScriptContinuationExportName,
+		UE_ARRAY_COUNT(Args),
+		Args,
+		Error);
+	EndTypedCallbackEpoch();
+	if (!bCalled)
+	{
+		SetFailureFromVmError(
+			OutResult,
+			ModuleId,
+			AvidScriptContinuationExportName,
+			Error,
+			DebugMap.Get());
+		FAvidScriptLifecycleTransitionResult LifecycleResult;
+		LifecycleState.MarkFaulted(LifecycleResult);
+		return false;
+	}
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::DispatchGameplayEvent(
 	const FAvidScriptGameplayEvent& Event,
 	FAvidScriptWasmSmokeResult& OutResult,
@@ -2059,6 +2115,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	TickExport = {};
 	EndPlayExport = {};
 	TimerExport = {};
+	ContinuationExport = {};
 	EventExport = {};
 	GameplayEventExport = {};
 	DelegateEventExports.Reset();
@@ -3438,6 +3495,37 @@ int32 FAvidScriptWasmRuntimeInstance::HandleTimerCancelImport(int32 TimerHandle)
 		CompactTimerHeapIfNeeded();
 	}
 
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayImport(
+	const float DelaySeconds,
+	const int32 CallbackId)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = CallbackId;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	const int64 Token = HostContext.Continuations != nullptr
+		? HostContext.Continuations->ScheduleDelay(DelaySeconds, CallbackId)
+		: 0;
+	LastHostImportResult = Token != 0 ? 1 : 0;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Token;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelImport(
+	const int64 ContinuationToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = HostContext.Continuations != nullptr
+		&& HostContext.Continuations->Cancel(ContinuationToken)
+		? 1
+		: 0;
+	++HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return LastHostImportResult;
 }
@@ -5803,6 +5891,18 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleTimerCancelImport(Call.IntArgs[0]);
 		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ContinuationDelay:
+	{
+		const int64 Value = HandleContinuationDelayImport(
+			Call.FloatArgs[0],
+			Call.IntArgs[0]);
+		return FinishI64(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationCancel:
+	{
+		const int32 Value = HandleContinuationCancelImport(Call.Int64Args[0]);
+		return Finish(Value, true);
 	}
 	case EAvidScriptHostBindingId::EventSubscribe:
 	{

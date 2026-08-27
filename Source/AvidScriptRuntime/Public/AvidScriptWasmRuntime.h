@@ -2,6 +2,7 @@
 
 #include "AvidScriptGameplayEvent.h"
 #include "AvidScriptDataBridgeTypes.h"
+#include "AvidScriptContinuation.h"
 #include "AvidScriptWasmDiagnostics.h"
 #include "AvidScriptBindingInvocation.h"
 #include "AvidScriptLifecycleState.h"
@@ -117,6 +118,7 @@ struct FAvidScriptWasmHostContext
 	EAvidScriptActorWritePolicy ActorWritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
+	IAvidScriptContinuationHost* Continuations = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 	FAvidScriptBindingInvocationInstrumentation* BindingInvocationInstrumentation = nullptr;
@@ -209,6 +211,9 @@ public:
 	bool DispatchEvent(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchEventHot(int32 EventId, float Value, FAvidScriptWasmSmokeResult& OutFailure);
 	bool DispatchGameplayEvent(const FAvidScriptGameplayEvent& Event, FAvidScriptWasmSmokeResult& OutResult);
+	bool DispatchContinuation(
+		const FAvidScriptContinuationCompletion& Completion,
+		FAvidScriptWasmSmokeResult& OutResult);
 	bool DispatchGameplayEventHot(
 		const FAvidScriptGameplayEvent& Event,
 		FAvidScriptWasmSmokeResult& OutFailure);
@@ -349,6 +354,8 @@ public:
 	int32 HandleValueReleaseImport(int32 Token);
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
+	int64 HandleContinuationDelayImport(float DelaySeconds, int32 CallbackId);
+	int32 HandleContinuationCancelImport(int64 ContinuationToken);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
@@ -603,6 +610,7 @@ private:
 	FAvidScriptCachedVmExport TickExport;
 	FAvidScriptCachedVmExport EndPlayExport;
 	FAvidScriptCachedVmExport TimerExport;
+	FAvidScriptCachedVmExport ContinuationExport;
 	FAvidScriptCachedVmExport EventExport;
 	FAvidScriptCachedVmExport GameplayEventExport;
 	TMap<FString, FAvidScriptCachedVmExport> DelegateEventExports;

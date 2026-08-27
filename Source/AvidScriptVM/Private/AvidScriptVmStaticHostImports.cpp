@@ -35,11 +35,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ValueArrayStore, "avid_value_array_store", "(iiii)i", false },
 	{ EAvidScriptHostBindingId::ValueArrayReadRange, "avid_value_array_read_range", "(iiiii)i", false },
 	{ EAvidScriptHostBindingId::ValueArrayWriteRange, "avid_value_array_write_range", "(iiiii)i", false },
-	{ EAvidScriptHostBindingId::ValueRelease, "avid_value_release", "(i)i", false }
+	{ EAvidScriptHostBindingId::ValueRelease, "avid_value_release", "(i)i", false },
+	{ EAvidScriptHostBindingId::ContinuationDelay, "continuation_delay", "(fi)I", true },
+	{ EAvidScriptHostBindingId::ContinuationCancel, "continuation_cancel", "(I)i", true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ValueRelease),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationCancel),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -222,6 +224,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.FloatArgs[2] = Arguments[4].F32;
 		break;
 	case EAvidScriptHostBindingId::TimerSetOnce:
+	case EAvidScriptHostBindingId::ContinuationDelay:
 		Call.FloatArgs[0] = Arguments[0].F32;
 		Call.IntArgs[0] = Arguments[1].I32;
 		break;
@@ -231,6 +234,7 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[2] = Arguments[2].I32;
 		break;
 	case EAvidScriptHostBindingId::EventUnsubscribe:
+	case EAvidScriptHostBindingId::ContinuationCancel:
 		Call.Int64Args[0] = Arguments[0].I64;
 		break;
 	case EAvidScriptHostBindingId::OwnerGetSlot:

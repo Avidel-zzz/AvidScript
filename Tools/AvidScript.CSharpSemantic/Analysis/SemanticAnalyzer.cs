@@ -68,6 +68,8 @@ public static class SemanticAnalyzer
             SemanticGameplayEventProjector.Project(context, callableProjection.Callables);
         SemanticDelegateEventProjection delegateEventProjection =
             SemanticDelegateEventProjector.Project(context);
+        SemanticContinuationProjection continuationProjection =
+            SemanticContinuationProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
         SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
@@ -77,6 +79,7 @@ public static class SemanticAnalyzer
             .Concat(stateContractProjection.Diagnostics)
             .Concat(gameplayEventProjection.Diagnostics)
             .Concat(delegateEventProjection.Diagnostics)
+            .Concat(continuationProjection.Diagnostics)
             .GroupBy(diagnostic =>
                 (diagnostic.Code, diagnostic.Severity, diagnostic.Span.Start, diagnostic.Span.Length))
             .Select(group => group.First())
@@ -89,20 +92,27 @@ public static class SemanticAnalyzer
             .GetDiagnostics()
             .Select(diagnostic => ProjectDiagnostic(diagnostic, context))
             .OrderBy(diagnostic => diagnostic.Span.Start)
+            .ThenBy(diagnostic => diagnostic.Span.Length)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
+            .ThenBy(diagnostic => diagnostic.Severity, StringComparer.Ordinal)
+            .ThenBy(diagnostic => diagnostic.Message, StringComparer.Ordinal)
             .ToArray();
         IReadOnlyList<SemanticDiagnostic> diagnostics = compilerDiagnostics
             .Concat(supportDiagnostics)
             .Concat(controlFlowProjection.Diagnostics)
             .OrderBy(diagnostic => diagnostic.Span.Start)
+            .ThenBy(diagnostic => diagnostic.Span.Length)
             .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
+            .ThenBy(diagnostic => diagnostic.Severity, StringComparer.Ordinal)
+            .ThenBy(diagnostic => diagnostic.Message, StringComparer.Ordinal)
             .ToArray();
         bool succeeded = diagnostics.All(diagnostic => diagnostic.Severity != "error");
         SemanticReachability reachability = SemanticReachabilityProjector.Project(
             callableProjection.Callables,
             controlFlowGraphs,
             gameplayEventProjection.Callbacks,
-            delegateEventProjection.Callbacks);
+            delegateEventProjection.Callbacks,
+            continuationProjection.Callbacks);
 
         return new SemanticDocument(
             SemanticContract.CurrentSchemaVersion,
@@ -122,6 +132,7 @@ public static class SemanticAnalyzer
             StateContracts = stateContractProjection.Contracts,
             GameplayEventCallbacks = gameplayEventProjection.Callbacks,
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
+            ContinuationCallbacks = continuationProjection.Callbacks,
         };
     }
 

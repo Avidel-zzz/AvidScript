@@ -253,6 +253,8 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 	WriteIntrinsic(Writer, TEXT("avidscript"), TEXT("avid_owner_get_handle"), TEXT("()I"), TEXT("host_context"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_generation"), TEXT("()i"), TEXT("host_context"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_slot"), TEXT("()i"), TEXT("host_context"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_cancel"), TEXT("(I)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_delay"), TEXT("(fi)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("timer_set_once"), TEXT("(fi)i"), TEXT("runtime_service"));
 	Writer->WriteArrayEnd();
@@ -266,7 +268,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = ResolvedBindings.Num();
-	OutResult.IntrinsicCount = 5;
+	OutResult.IntrinsicCount = 7;
 	return true;
 }
 
@@ -345,6 +347,8 @@ bool FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
 	}
 	SupportedImports.Add(TEXT("env.owner_get_generation"));
 	SupportedImports.Add(TEXT("env.owner_get_slot"));
+	SupportedImports.Add(TEXT("env.continuation_cancel"));
+	SupportedImports.Add(TEXT("env.continuation_delay"));
 	SupportedImports.Add(TEXT("env.timer_cancel"));
 	SupportedImports.Add(TEXT("env.timer_set_once"));
 	SupportedImports.Add(TEXT("avidscript.avid_owner_get_handle"));

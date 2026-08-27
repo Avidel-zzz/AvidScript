@@ -82,6 +82,15 @@ public static class CSharpGuestLowerer
         {
             functions.AddRange(delegateEvents.Functions);
         }
+        CSharpContinuationLoweringResult? continuations = CSharpContinuationLowerer.Lower(
+            document,
+            guestTypes,
+            functions,
+            diagnostics);
+        if (continuations is not null)
+        {
+            functions.Add(continuations.Function);
+        }
         imports = AppendArrayCapabilityImports(
             imports,
             functions,
@@ -96,6 +105,10 @@ public static class CSharpGuestLowerer
         if (delegateEvents is not null)
         {
             exports.AddRange(delegateEvents.Exports);
+        }
+        if (continuations is not null)
+        {
+            exports.Add(continuations.Export);
         }
         if (diagnostics.Count != 0)
         {

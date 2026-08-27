@@ -243,6 +243,7 @@ bool FAvidScriptSessionDelegateSubscriptions::Prepare(
 	if (!IsValid(Source))
 	{
 		OutError = TEXT("delegate_source_unavailable");
+		DiscardPrepared();
 		return false;
 	}
 

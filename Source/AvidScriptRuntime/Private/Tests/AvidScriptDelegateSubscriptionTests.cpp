@@ -141,6 +141,18 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 		TEXT("Commit activates the replacement source subscription"),
 		Session.GetLiveEventCallbackCount(),
 		3);
+	Error.Reset();
+	TestFalse(
+		TEXT("A null prepared source is rejected without leaving prepared mode active"),
+		Session.PrepareDelegateSubscriptionsForTesting(
+			nullptr,
+			MakeArrayView(&Event, 1),
+			Error));
+	ReplacementSource->Broadcast(ReplacementSource, 20, 3.5f);
+	TestEqual(
+		TEXT("Failed preparation preserves active delegate dispatch"),
+		Session.GetLiveEventCallbackCount(),
+		4);
 
 	Session.SetLiveExecutionObserverForTesting(
 		[ReplacementSource]()
@@ -152,7 +164,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Reentrant delegate broadcast is dropped without entering the guest"),
 		Session.GetLiveEventCallbackCount(),
-		3);
+		4);
 	TestEqual(
 		TEXT("Reentrant delegate broadcast does not fault the runtime"),
 		Session.GetLiveLifecycleState(),
@@ -161,7 +173,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("The subscription remains usable after the reentrant broadcast"),
 		Session.GetLiveEventCallbackCount(),
-		4);
+		5);
 
 	UAvidScriptRuntimeDelegateTestObject* const ExplicitSource =
 		NewObject<UAvidScriptRuntimeDelegateTestObject>();
@@ -183,7 +195,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Arbitrary-source broadcast reaches the prepared guest export"),
 		Session.GetLiveEventCallbackCount(),
-		5);
+		6);
 	TestTrue(
 		TEXT("Explicit cancellation removes the token-owned subscription"),
 		Session.UnsubscribeDelegateForTesting(ExplicitToken, Error));
@@ -195,7 +207,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Cancelled source no longer reaches the guest"),
 		Session.GetLiveEventCallbackCount(),
-		5);
+		6);
 	TestFalse(
 		TEXT("A stale token is rejected without affecting the session"),
 		Session.UnsubscribeDelegateForTesting(ExplicitToken, Error));
@@ -216,7 +228,7 @@ bool FAvidScriptDelegateBridgeLifecycleTest::RunTest(const FString& Parameters)
 	TestEqual(
 		TEXT("Broadcast after teardown does not re-enter the guest"),
 		Session.GetLiveEventCallbackCount(),
-		5);
+		6);
 	FAvidScriptWasmSmokeResult StopResult;
 	TestTrue(TEXT("Session stops cleanly"), Session.StopAndUnload(StopResult));
 	return true;

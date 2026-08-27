@@ -1933,6 +1933,8 @@ $CanonicalStaticImportNames = @(
     'avid_owner_get_handle',
     'timer_set_once',
     'timer_cancel',
+    'continuation_delay',
+    'continuation_cancel',
     'event_subscribe',
     'event_unsubscribe',
     'avid_data_lane_epoch',
@@ -2230,6 +2232,8 @@ $AllowedFixedRendererImports = @(
     'avid_object_type_is_a',
     'timer_set_once',
     'timer_cancel',
+    'continuation_delay',
+    'continuation_cancel',
     'event_subscribe',
     'event_unsubscribe',
     'avid_value_array_read_range',
@@ -2260,7 +2264,8 @@ $AllowedLiteralFacadeStructs = @(
     'FTransform',
     'InputEvent',
     'TSubclassOfAActor',
-    'AvidSubscription'
+    'AvidSubscription',
+    'AvidContinuation'
 )
 $LiteralFacadeStructs = @(
     [regex]::Matches(
@@ -2788,15 +2793,16 @@ foreach ($RequiredReachabilityContract in @(
     'SemanticReachabilityProjector.Project',
     'SemanticStateContractProjector.Project',
     'SemanticGameplayEventProjector.Project',
-    'SemanticDelegateEventProjector.Project'
+    'SemanticDelegateEventProjector.Project',
+    'SemanticContinuationProjector.Project'
 )) {
     if (-not $SemanticAnalyzerSource.Contains($RequiredReachabilityContract)) {
         Add-Violation "C# Semantic analyzer is missing reachability contract $RequiredReachabilityContract"
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 9',
-    'CurrentSemanticVersion = "1.9"'
+    'CurrentSchemaVersion = 10',
+    'CurrentSemanticVersion = "1.10"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
@@ -2808,6 +2814,7 @@ foreach ($RequiredReachabilityProjection in @(
     'all_callables_compatibility',
     'AssociatedSymbolId',
     'gameplayEventCallbacks',
+    'continuationCallbacks',
     'QueuePropertyAccessors',
     'PropertyAccess.Write',
     'PropertyAccess.ReadWrite'

@@ -176,6 +176,12 @@ public static class UE
 
 internal static class AvidScriptRuntimeNative
 {
+    [DllImport("env", EntryPoint = "continuation_delay")]
+    internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_cancel")]
+    internal static extern int ContinuationCancel(long continuationToken);
+
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
 

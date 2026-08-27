@@ -14,7 +14,7 @@ internal static class SemanticStateContractTests
         CanonicalFacadeAttributesAreRequired();
         DuplicateAndConflictingAttributesFailClosed();
         InvalidAliasesAndVersionsFailClosed();
-        SubscriptionCapabilitiesMustBeTransient();
+        RuntimeCapabilitiesMustBeTransient();
         StateContractSerializationIsDeterministic();
         return 8;
     }
@@ -218,7 +218,7 @@ internal static class SemanticStateContractTests
         Assert(first.SequenceEqual(second), "state contract serialization should be byte-for-byte deterministic");
     }
 
-    private static void SubscriptionCapabilitiesMustBeTransient()
+    private static void RuntimeCapabilitiesMustBeTransient()
     {
         const string source = """
             using AvidScript;
@@ -228,8 +228,11 @@ internal static class SemanticStateContractTests
             public static class CompatibleScript
             {
                 private static AvidSubscription InvalidImplicit;
+                private static AvidContinuation InvalidContinuationImplicit;
                 [AvidTransient]
                 private static AvidSubscription ValidTransient;
+                [AvidTransient]
+                private static AvidContinuation ValidContinuationTransient;
             }
 
             [AvidStateContract(AvidStateMode.Explicit)]
@@ -237,18 +240,21 @@ internal static class SemanticStateContractTests
             {
                 [AvidPersist]
                 private static AvidSubscription InvalidPersisted;
+                [AvidPersist]
+                private static AvidContinuation InvalidContinuationPersisted;
             }
             """;
 
         SemanticDocument document = Analyze(source, "Scripts/SubscriptionState.cs");
 
         Assert(!document.Succeeded
-            && document.Diagnostics.Count(diagnostic => diagnostic.Code == "ASSTATE1005") == 2,
-            "implicit-compatible and explicitly persisted subscription tokens should fail closed");
+            && document.Diagnostics.Count(diagnostic => diagnostic.Code == "ASSTATE1005") == 4,
+            "implicit-compatible and explicitly persisted runtime capability tokens should fail closed");
         SemanticStateContract compatible = FindContract(
             document,
             "global::Game.CompatibleScript");
         AssertField(compatible, "ValidTransient", "transient");
+        AssertField(compatible, "ValidContinuationTransient", "transient");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)
@@ -342,6 +348,11 @@ internal static class SemanticStateContractTests
         }
 
         public readonly struct AvidSubscription
+        {
+            private readonly long Token;
+        }
+
+        public readonly struct AvidContinuation
         {
             private readonly long Token;
         }

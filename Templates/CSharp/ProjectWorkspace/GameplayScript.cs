@@ -6,9 +6,13 @@ namespace AvidScript;
 public static class GameplayScript
 {
     private const float RotationSpeedDegreesPerSecond = 90.0f;
+    private const int DelayedBeginPlay = 1;
 
     [AvidPersist]
     private static float TotalRotationDegrees;
+
+    [AvidTransient]
+    private static AvidContinuation PendingBeginPlay;
 
     public static int Main() => 0;
 
@@ -16,6 +20,13 @@ public static class GameplayScript
     public static void BeginPlay()
     {
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
+        PendingBeginPlay = AvidContinuations.Delay(0.25f, DelayedBeginPlay);
+    }
+
+    [AvidContinuation(DelayedBeginPlay)]
+    public static void OnDelayedBeginPlay()
+    {
+        UE.Self.SetActorScale3D(new FVector(1.05f, 1.0f, 1.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]

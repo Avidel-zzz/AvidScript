@@ -1,9 +1,11 @@
+using System;
 using System.Runtime.InteropServices;
 
 namespace AvidScript;
 
 public static class ActorLifecycleScript
 {
+    private const int DeferredBeginPlay = 9;
     private static float ElapsedSeconds;
     private static AActor ActiveOverlapActor;
     private static bool HasActiveOverlap;
@@ -23,6 +25,13 @@ public static class ActorLifecycleScript
         FVector rootLocation = UE.Self.GetRootComponent().GetWorldLocation();
         UE.Self.GetRootComponent().SetWorldLocation(rootLocation);
         UE.SetTimer(0.05f, 7);
+        AvidContinuations.Delay(0.04f, DeferredBeginPlay);
+    }
+
+    [AvidContinuation(DeferredBeginPlay)]
+    public static void OnDeferredBeginPlay()
+    {
+        UE.Self.AddActorWorldOffset(new FVector(0.0f, 40.0f, 0.0f));
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -101,6 +110,43 @@ public static class ActorLifecycleScript
         UE.Self.SetActorLocation(FVector.Zero);
         UE.Self.SetActorRotation(FRotator.Zero);
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
+    }
+}
+
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class AvidContinuationAttribute : Attribute
+{
+    public AvidContinuationAttribute(int callbackId)
+    {
+        CallbackId = callbackId;
+    }
+
+    public int CallbackId { get; }
+}
+
+public readonly struct AvidContinuation
+{
+    private readonly long Token;
+
+    internal AvidContinuation(long token)
+    {
+        Token = token;
+    }
+
+    public bool IsValid => Token != 0;
+    public bool Cancel() => Native.ContinuationCancel(Token) != 0;
+}
+
+public static class AvidContinuations
+{
+    public static AvidContinuation Delay(float delaySeconds, int callbackId)
+    {
+        return new AvidContinuation(Native.ContinuationDelay(delaySeconds, callbackId));
+    }
+
+    public static AvidContinuation NextTick(int callbackId)
+    {
+        return new AvidContinuation(Native.ContinuationDelay(0.0f, callbackId));
     }
 }
 
@@ -338,4 +384,10 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "timer_cancel")]
     internal static extern int TimerCancel(int timerHandle);
+
+    [DllImport("env", EntryPoint = "continuation_delay")]
+    internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_cancel")]
+    internal static extern int ContinuationCancel(long continuationToken);
 }

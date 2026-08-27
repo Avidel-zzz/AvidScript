@@ -138,6 +138,16 @@ internal static class SemanticStateContractProjector
                     context,
                     field));
             }
+            if (participates
+                && attributes.Continuation is not null
+                && SymbolEqualityComparer.Default.Equals(field.Type, attributes.Continuation))
+            {
+                diagnostics.Add(CreateFieldDiagnostic(
+                    "ASSTATE1005",
+                    "AvidContinuation is a runtime capability and must be marked AvidTransient.",
+                    context,
+                    field));
+            }
             if (aliases.Length > 0 && !participates)
             {
                 diagnostics.Add(CreateDiagnostic(
@@ -282,7 +292,8 @@ internal static class SemanticStateContractProjector
         INamedTypeSymbol? Persist,
         INamedTypeSymbol? Transient,
         INamedTypeSymbol? Alias,
-        INamedTypeSymbol? Subscription)
+        INamedTypeSymbol? Subscription,
+        INamedTypeSymbol? Continuation)
     {
         public static StateContractAttributes Create(Compilation compilation)
         {
@@ -291,7 +302,8 @@ internal static class SemanticStateContractProjector
                 compilation.GetTypeByMetadataName("AvidScript.AvidPersistAttribute"),
                 compilation.GetTypeByMetadataName("AvidScript.AvidTransientAttribute"),
                 compilation.GetTypeByMetadataName("AvidScript.AvidStateAliasAttribute"),
-                compilation.GetTypeByMetadataName("AvidScript.AvidSubscription"));
+                compilation.GetTypeByMetadataName("AvidScript.AvidSubscription"),
+                compilation.GetTypeByMetadataName("AvidScript.AvidContinuation"));
         }
     }
 }

@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains five host intrinsics"), FirstResult.IntrinsicCount, 5);
+	TestEqual(TEXT("Default schema contains seven host intrinsics"), FirstResult.IntrinsicCount, 7);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -39,7 +39,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
-	TestEqual(TEXT("Schema serializes five intrinsic objects"), Intrinsics.Num(), 5);
+	TestEqual(TEXT("Schema serializes seven intrinsic objects"), Intrinsics.Num(), 7);
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
@@ -87,6 +87,14 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 		CountIntrinsic(TEXT("env"), TEXT("owner_get_slot"), TEXT("()i")),
 		1);
 	TestEqual(
+		TEXT("Schema contains continuation cancellation intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_cancel"), TEXT("(I)i")),
+		1);
+	TestEqual(
+		TEXT("Schema contains continuation delay intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_delay"), TEXT("(fi)I")),
+		1);
+	TestEqual(
 		TEXT("Schema retains legacy Timer cancel intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i")),
 		1);
@@ -115,6 +123,8 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Schema includes USceneComponent return type"), FirstJson.Contains(TEXT("USceneComponent")));
 	TestTrue(TEXT("Schema includes owner generation intrinsic"), FirstJson.Contains(TEXT("owner_get_generation")) && FirstJson.Contains(TEXT("()i")));
 	TestTrue(TEXT("Schema includes owner slot intrinsic"), FirstJson.Contains(TEXT("owner_get_slot")));
+	TestTrue(TEXT("Schema includes continuation delay intrinsic"), FirstJson.Contains(TEXT("continuation_delay")) && FirstJson.Contains(TEXT("(fi)I")));
+	TestTrue(TEXT("Schema includes continuation cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel")) && FirstJson.Contains(TEXT("(I)i")));
 	TestTrue(TEXT("Schema includes set-once Timer intrinsic"), FirstJson.Contains(TEXT("timer_set_once")) && FirstJson.Contains(TEXT("(fi)i")));
 	TestTrue(TEXT("Schema includes Timer cancel intrinsic"), FirstJson.Contains(TEXT("timer_cancel")) && FirstJson.Contains(TEXT("(i)i")));
 
