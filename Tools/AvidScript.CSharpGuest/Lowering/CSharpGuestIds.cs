@@ -11,6 +11,12 @@ internal static class CSharpGuestIds
     public const string GameplayEventFunctionId = "function:synthetic:gameplay_event";
     public const string ContinuationExportName = "avid_on_continuation";
     public const string ContinuationFunctionId = "function:synthetic:continuation";
+    public const string ContinuationV2ExportName = "avid_on_continuation_v2";
+    public const string ContinuationV2FunctionId = "function:synthetic:continuation_v2";
+    public const string ContinuationStatusTypeId =
+        "type:global::AvidScript.AvidContinuationStatus";
+    public const string LoadedObjectTypeId =
+        "type:global::AvidScript.AvidLoadedObject";
 
     public static string Function(string methodSymbolId) => $"function:{methodSymbolId}";
 
@@ -45,19 +51,24 @@ internal static class CSharpGuestIds
 
     public const string GameplayEventReturnBlockId = "block:synthetic:gameplay_event:return";
 
-    public static string ContinuationParameter(string name) =>
-        $"value:continuation:parameter:{name}";
+    public static string ContinuationParameter(bool version2, string name) =>
+        $"value:{ContinuationPrefix(version2)}:parameter:{name}";
 
-    public static string ContinuationLocal(int callbackId, string name) =>
-        $"value:continuation:{callbackId}:{name}";
+    public static string ContinuationLocal(bool version2, int callbackId, string name) =>
+        $"value:{ContinuationPrefix(version2)}:{callbackId}:{name}";
 
-    public static string ContinuationCheckBlock(int callbackId) =>
-        $"block:synthetic:continuation:check:{callbackId}";
+    public static string ContinuationCheckBlock(bool version2, int callbackId) =>
+        $"block:synthetic:{ContinuationPrefix(version2)}:check:{callbackId}";
 
-    public static string ContinuationCallBlock(int callbackId) =>
-        $"block:synthetic:continuation:call:{callbackId}";
+    public static string ContinuationCallBlock(bool version2, int callbackId) =>
+        $"block:synthetic:{ContinuationPrefix(version2)}:call:{callbackId}";
 
     public const string ContinuationReturnBlockId = "block:synthetic:continuation:return";
+    public const string ContinuationV2ReturnBlockId = "block:synthetic:continuation_v2:return";
+
+    public static string ContinuationReturnBlock(bool version2) => version2
+        ? ContinuationV2ReturnBlockId
+        : ContinuationReturnBlockId;
 
     public const string DelegateEventFunctionPrefix = "function:synthetic:delegate_event:";
 
@@ -72,4 +83,8 @@ internal static class CSharpGuestIds
 
     public static string DelegateEventBlock(string subscriptionId) =>
         $"block:synthetic:delegate_event:{subscriptionId}";
+
+    private static string ContinuationPrefix(bool version2) => version2
+        ? "continuation_v2"
+        : "continuation";
 }

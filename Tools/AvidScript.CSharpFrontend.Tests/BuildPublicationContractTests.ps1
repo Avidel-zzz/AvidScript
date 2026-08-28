@@ -88,13 +88,29 @@ Assert-Condition (
     "seed build invocation counts differ"
 Assert-Condition ((Get-Content -Raw -LiteralPath $SeedManifest).IndexOf("build_reuse", [System.StringComparison]::Ordinal) -lt 0) "seed manifest leaked build_reuse"
 $SeedGuestIr = Join-Path $SeedRoot "actor_lifecycle.guestir.json"
+$SeedSemantic = Join-Path $SeedRoot "actor_lifecycle.csharp.semantic.json"
 $SeedDebugMap = Join-Path $SeedRoot "actor_lifecycle.csharp.debug.json"
 $SeedStateSchema = Join-Path $SeedRoot "actor_lifecycle.state.json"
 $SeedWasm = Join-Path $SeedRoot "actor_lifecycle.wasm"
 Assert-Condition (Test-Path -LiteralPath $SeedGuestIr -PathType Leaf) "seed Guest IR is missing"
+Assert-Condition (Test-Path -LiteralPath $SeedSemantic -PathType Leaf) "seed semantic artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedDebugMap -PathType Leaf) "seed C# debug map is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedStateSchema -PathType Leaf) "seed state schema is missing"
 Assert-Condition (Test-Path -LiteralPath $SeedWasm -PathType Leaf) "seed WASM is missing"
+$SeedSemanticJson = Get-Content -Raw -LiteralPath $SeedSemantic | ConvertFrom-Json
+$SeedGuestIrJson = Get-Content -Raw -LiteralPath $SeedGuestIr | ConvertFrom-Json
+Assert-Condition (
+    [int]$SeedReportJson.semantic.schema_version -eq 11 -and
+    [string]$SeedReportJson.semantic.version -ceq "1.11" -and
+    [int]$SeedSemanticJson.schema_version -eq 11 -and
+    [string]$SeedSemanticJson.semantic_version -ceq "1.11") `
+    "seed publication semantic contract is not 11/1.11"
+Assert-Condition (@($SeedGuestIrJson.imports | Where-Object {
+    [string]$_.module -ceq "env" -and [string]$_.name -ceq "continuation_load_object"
+}).Count -eq 1) "seed publication Guest IR omits continuation_load_object"
+Assert-Condition (@($SeedGuestIrJson.exports | Where-Object {
+    [string]$_.name -ceq "avid_on_continuation_v2"
+}).Count -eq 1) "seed publication Guest IR omits avid_on_continuation_v2"
 $SeedStateSchemaJson = Get-Content -Raw -LiteralPath $SeedStateSchema | ConvertFrom-Json
 Assert-Condition ($SeedStateSchemaJson.schema_version -eq 2 -and
     $SeedStateSchemaJson.policy -eq "compatible" -and

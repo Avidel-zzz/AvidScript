@@ -366,15 +366,17 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 		DelegateSubscriptions->UnbindActive();
 		DelegateSubscriptions->DiscardPrepared();
 		NextHostContext.Continuations = LiveRuntime
-			? &Continuations->ResetActive(NextHostContext.World.Get())
+			? &Continuations->ResetActive(
+				NextHostContext.World.Get(),
+				NextHostContext.ObjectRegistry,
+				ObjectOwnership.Get())
 			: nullptr;
 		if (!LiveRuntime)
 		{
 			Continuations->Teardown();
 		}
 	}
-	if (HostContext.ObjectRegistry != nullptr
-		&& HostContext.ObjectRegistry != NextHostContext.ObjectRegistry)
+	if (bDelegateSourceChanged && HostContext.ObjectRegistry != nullptr)
 	{
 		ObjectOwnership->Cleanup(*HostContext.ObjectRegistry);
 	}
@@ -543,7 +545,12 @@ bool FAvidScriptRuntimeSession::PumpReadyContinuations(
 	Continuations->DrainReady(Completions);
 	for (const FAvidScriptContinuationCompletion& Completion : Completions)
 	{
-		if (!LiveRuntime || !LiveRuntime->DispatchContinuation(Completion, OutResult))
+		const bool bDispatched = LiveRuntime
+			&& LiveRuntime->DispatchContinuation(Completion, OutResult);
+		const bool bFinalized = Continuations->FinalizeDispatched(
+			Completion.Token,
+			bDispatched);
+		if (!bDispatched || !bFinalized)
 		{
 			Continuations->Teardown();
 			HostContext.Continuations = nullptr;
@@ -1168,7 +1175,10 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		return bRolledBack;
 	};
 	IAvidScriptContinuationHost& PreparedContinuationHost =
-		Continuations->BeginPrepared(HostContext.World.Get());
+		Continuations->BeginPrepared(
+			HostContext.World.Get(),
+			HostContext.ObjectRegistry,
+			ObjectOwnership.Get());
 	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
 	CandidateRuntime->SetHostContext(CandidateHostContext);

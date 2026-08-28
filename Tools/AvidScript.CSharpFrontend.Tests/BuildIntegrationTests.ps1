@@ -973,28 +973,32 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 10) "semantic artifact schema version is not 10"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.10") "semantic artifact version is not 1.10"
+Assert-Condition ($SemanticJson.schema_version -eq 11) "semantic artifact schema version is not 11"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.11") "semantic artifact version is not 1.11"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
-Assert-Condition (@($SemanticJson.callables).Count -eq 63) "ActorLifecycle semantic callable count is not 63"
+Assert-Condition (@($SemanticJson.callables).Count -eq 70) "ActorLifecycle semantic callable count is not 70"
 $ActorMatchesCallables = @($SemanticJson.callables | Where-Object {
     [string]$_.method_symbol_id -ceq "symbol:method:global::AvidScript.AActor.Matches(global::AvidScript.AActor):bool"
 })
 Assert-Condition ($ActorMatchesCallables.Count -eq 1) "ActorLifecycle semantic artifact is missing the AActor.Matches helper"
-Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 16) "ActorLifecycle semantic import count is not 16"
+Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 17) "ActorLifecycle semantic import count is not 17"
 Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.export }).Count -eq 5) "ActorLifecycle semantic export count is not 5"
 $ContinuationCallbacks = @($SemanticJson.continuation_callbacks)
-Assert-Condition ($ContinuationCallbacks.Count -eq 1) "ActorLifecycle does not expose one continuation callback"
-Assert-Condition ([int]$ContinuationCallbacks[0].callback_id -eq 9) "ActorLifecycle continuation callback id differs"
+Assert-Condition ($ContinuationCallbacks.Count -eq 2) "ActorLifecycle does not expose two continuation callbacks"
+Assert-Condition ((@($ContinuationCallbacks.callback_id) -join ',') -ceq '9,10') "ActorLifecycle continuation callback ids differ"
+Assert-Condition ((@($ContinuationCallbacks.payload_kind) -join ',') -ceq 'none,object') "ActorLifecycle continuation callback payload kinds differ"
 $GameplayCallbacks = @($SemanticJson.gameplay_event_callbacks)
 Assert-Condition ($GameplayCallbacks.Count -eq 4) "ActorLifecycle does not expose four natural gameplay callbacks"
 Assert-Condition ((@($GameplayCallbacks.event_type) -join ',') -ceq '1,2,3,4') "ActorLifecycle gameplay callback event types differ"
 Assert-Condition ((@($GameplayCallbacks.name) -join ',') -ceq 'OnBeginOverlap,OnEndOverlap,OnHit,OnInput') "ActorLifecycle gameplay callback names differ"
 Assert-Condition ($SemanticJson.reachability.mode -eq "entrypoint_roots") "ActorLifecycle semantic reachability is not entrypoint-rooted"
-Assert-Condition (@($SemanticJson.reachability.root_callable_ids).Count -eq 10) "ActorLifecycle reachability root count is not 10"
-Assert-Condition (@($SemanticJson.reachability.reachable_imports).Count -lt 16) "ActorLifecycle reachability did not remove unused imports"
+Assert-Condition (@($SemanticJson.reachability.root_callable_ids).Count -eq 11) "ActorLifecycle reachability root count is not 11"
+Assert-Condition (@($SemanticJson.reachability.reachable_imports).Count -lt 17) "ActorLifecycle reachability did not remove unused imports"
+Assert-Condition (@($SemanticJson.reachability.reachable_imports | Where-Object {
+    [string]$_.module -ceq 'env' -and [string]$_.name -ceq 'continuation_load_object'
+}).Count -eq 1) "ActorLifecycle reachability omits continuation_load_object"
 Assert-Condition ($NormalJson.semantic.source_sha256 -eq $FrontendJson.source.sha256) "report semantic source hash differs"
 Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.sha256) "report semantic frontend hash differs"
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"
@@ -1016,6 +1020,15 @@ $DebugMapSha256 = Get-Sha256Hex $NormalDebugMapPath
 $WasmSha256 = Get-Sha256Hex $NormalWasmPath
 Assert-Condition ($GuestIrJson.schema_version -eq 2 -and $GuestIrJson.ir_version -eq "1.1" -and $GuestIrJson.succeeded) "Guest IR contract is invalid"
 Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "Guest IR semantic provenance hash differs"
+Assert-Condition (@($GuestIrJson.imports | Where-Object {
+    [string]$_.module -ceq 'env' -and [string]$_.name -ceq 'continuation_load_object'
+}).Count -eq 1) "Guest IR does not import continuation_load_object exactly once"
+Assert-Condition (@($GuestIrJson.exports | Where-Object {
+    [string]$_.name -ceq 'avid_on_continuation_v2'
+}).Count -eq 1) "Guest IR does not export avid_on_continuation_v2 exactly once"
+Assert-Condition (@($GuestIrJson.exports | Where-Object {
+    [string]$_.name -ceq 'avid_on_continuation'
+}).Count -eq 0) "Schema 11 Guest IR retained the legacy continuation export"
 Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
 Assert-Condition ($DebugMapJson.source.id -eq $NormalJson.source.file -and $DebugMapJson.source.sha256 -eq $FrontendJson.source.sha256) "C# debug map source identity differs"
@@ -1046,7 +1059,8 @@ Assert-Condition ($NormalJson.wasm.sha256 -eq $WasmSha256) "report WASM artifact
 Assert-Condition (
     @($NormalJson.observed_exports).Count -eq 7 -and
     $NormalJson.observed_exports -contains "avid_on_gameplay_event" -and
-    $NormalJson.observed_exports -contains "avid_on_continuation") `
+    $NormalJson.observed_exports -contains "avid_on_continuation_v2" -and
+    $NormalJson.observed_exports -notcontains "avid_on_continuation") `
     "report does not expose all seven direct ABI exports"
 $ManifestJson = Get-Content -Raw -LiteralPath $NormalManifest | ConvertFrom-Json
 Assert-Condition ($ManifestJson.source.sha256 -eq $FrontendJson.source.sha256) "manifest/frontend source hashes differ"

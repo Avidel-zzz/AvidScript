@@ -7,12 +7,16 @@ public static class GameplayScript
 {
     private const float RotationSpeedDegreesPerSecond = 90.0f;
     private const int DelayedBeginPlay = 1;
+    private const int DefaultMeshLoaded = 2;
 
     [AvidPersist]
     private static float TotalRotationDegrees;
 
     [AvidTransient]
     private static AvidContinuation PendingBeginPlay;
+
+    [AvidTransient]
+    private static AvidContinuation PendingDefaultMesh;
 
     public static int Main() => 0;
 
@@ -21,12 +25,26 @@ public static class GameplayScript
     {
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
         PendingBeginPlay = AvidContinuations.Delay(0.25f, DelayedBeginPlay);
+        PendingDefaultMesh = AvidAssets.LoadObjectAsync(
+            "/Engine/EngineMeshes/Cube.Cube",
+            DefaultMeshLoaded);
     }
 
     [AvidContinuation(DelayedBeginPlay)]
     public static void OnDelayedBeginPlay()
     {
         UE.Self.SetActorScale3D(new FVector(1.05f, 1.0f, 1.0f));
+    }
+
+    [AvidContinuation(DefaultMeshLoaded)]
+    public static void OnDefaultMeshLoaded(
+        AvidContinuationStatus status,
+        AvidLoadedObject loadedObject)
+    {
+        if (status == AvidContinuationStatus.Completed && loadedObject.IsValid)
+        {
+            UE.Self.SetActorScale3D(new FVector(1.05f, 1.05f, 1.05f));
+        }
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]

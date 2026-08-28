@@ -1,12 +1,47 @@
 #include "Continuation/AvidScriptSessionContinuations.h"
 
+#include "Continuation/AvidScriptAsyncObjectLoader.h"
+#include "Containers/StringConv.h"
 #include "Engine/World.h"
+#include "Misc/PackageName.h"
+#include "Ownership/AvidScriptSessionObjectOwnership.h"
+#include "UObject/SoftObjectPath.h"
 
 #include <atomic>
 
 namespace
 {
 std::atomic<uint32> GAvidScriptContinuationGeneration{1};
+
+bool TryMakeAsyncObjectPath(
+	const FString& ObjectPath,
+	FSoftObjectPath& OutObjectPath)
+{
+	OutObjectPath.Reset();
+	if (ObjectPath.IsEmpty()
+		|| FCString::Strlen(*ObjectPath) != ObjectPath.Len())
+	{
+		return false;
+	}
+
+	const FTCHARToUTF8 Utf8Path(*ObjectPath);
+	if (Utf8Path.Length() <= 0 || Utf8Path.Length() > 1024)
+	{
+		return false;
+	}
+
+	FSoftObjectPath Candidate(ObjectPath);
+	const FString LongPackageName = Candidate.GetLongPackageName();
+	if (Candidate.IsNull()
+		|| !Candidate.IsValid()
+		|| !FPackageName::IsValidLongPackageName(LongPackageName))
+	{
+		return false;
+	}
+
+	OutObjectPath = MoveTemp(Candidate);
+	return true;
+}
 }
 
 FAvidScriptContinuationHostEndpoint::FAvidScriptContinuationHostEndpoint(
@@ -33,6 +68,20 @@ int64 FAvidScriptContinuationHostEndpoint::ScheduleDelay(
 		: 0;
 }
 
+int64 FAvidScriptContinuationHostEndpoint::ScheduleObjectLoad(
+	FString ObjectPath,
+	const int32 CallbackId)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		? PinnedOwner->ScheduleObjectLoad(
+			Lane,
+			ActivationSerial,
+			MoveTemp(ObjectPath),
+			CallbackId)
+		: 0;
+}
+
 bool FAvidScriptContinuationHostEndpoint::Cancel(const int64 Token)
 {
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
@@ -51,6 +100,14 @@ void FAvidScriptContinuationHostEndpoint::PromoteToActive()
 	Lane = EAvidScriptContinuationLane::Active;
 }
 
+FAvidScriptSessionContinuations::FAvidScriptSessionContinuations(
+	TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader)
+	: AsyncObjectLoader(InAsyncObjectLoader
+		? MoveTemp(InAsyncObjectLoader)
+		: CreateAvidScriptAsyncObjectLoader())
+{
+}
+
 FAvidScriptSessionContinuations::~FAvidScriptSessionContinuations()
 {
 	check(IsInGameThread());
@@ -58,12 +115,16 @@ FAvidScriptSessionContinuations::~FAvidScriptSessionContinuations()
 }
 
 IAvidScriptContinuationHost& FAvidScriptSessionContinuations::BeginPrepared(
-	UWorld* World)
+	UWorld* World,
+	FAvidScriptObjectRegistry* ObjectRegistry,
+	FAvidScriptSessionObjectOwnership* ObjectOwnership)
 {
 	check(IsInGameThread());
 	DiscardPrepared();
 	bTearingDown = false;
 	PreparedWorld = World;
+	PreparedObjectRegistry = ObjectRegistry;
+	PreparedObjectOwnership = ObjectOwnership;
 	const uint64 ActivationSerial = NextActivationSerial++;
 	PreparedEndpoint = MakeShared<FAvidScriptContinuationHostEndpoint>(
 		TWeakPtr<FAvidScriptSessionContinuations>(AsShared()),
@@ -81,19 +142,6 @@ bool FAvidScriptSessionContinuations::ValidatePreparedCommit(
 		OutError = TEXT("continuation_prepared_lane_missing");
 		return false;
 	}
-	const uint64 PreparedActivation = PreparedEndpoint->GetActivationSerial();
-	const bool bHasPreparedReady = ReadyCompletions.ContainsByPredicate(
-		[PreparedActivation](const FReadyCompletion& Ready)
-		{
-			return Ready.Lane == EAvidScriptContinuationLane::Prepared
-				&& Ready.ActivationSerial == PreparedActivation;
-		});
-	if (bHasPreparedReady
-		&& (!PreparedWorld.IsValid() || PreparedWorld->bIsTearingDown))
-	{
-		OutError = TEXT("continuation_prepared_world_unavailable");
-		return false;
-	}
 
 	for (const FSlot& Slot : Slots)
 	{
@@ -103,11 +151,14 @@ bool FAvidScriptSessionContinuations::ValidatePreparedCommit(
 		{
 			continue;
 		}
-		UWorld* const World = Slot.Entry->World.Get();
-		if (World == nullptr || World->bIsTearingDown)
+		if (Slot.Entry->ProducerKind == EProducerKind::Timer)
 		{
-			OutError = TEXT("continuation_prepared_world_unavailable");
-			return false;
+			UWorld* const World = Slot.Entry->World.Get();
+			if (World == nullptr || World->bIsTearingDown)
+			{
+				OutError = TEXT("continuation_prepared_world_unavailable");
+				return false;
+			}
 		}
 	}
 	return true;
@@ -148,7 +199,11 @@ void FAvidScriptSessionContinuations::CommitPrepared()
 	PreparedEndpoint->PromoteToActive();
 	ActiveEndpoint = MoveTemp(PreparedEndpoint);
 	ActiveWorld = PreparedWorld;
+	ActiveObjectRegistry = PreparedObjectRegistry;
+	ActiveObjectOwnership = PreparedObjectOwnership;
 	PreparedWorld.Reset();
+	PreparedObjectRegistry = nullptr;
+	PreparedObjectOwnership = nullptr;
 }
 
 void FAvidScriptSessionContinuations::ReleaseRetiredEndpoint()
@@ -162,6 +217,8 @@ void FAvidScriptSessionContinuations::DiscardPrepared()
 	if (!PreparedEndpoint)
 	{
 		PreparedWorld.Reset();
+		PreparedObjectRegistry = nullptr;
+		PreparedObjectOwnership = nullptr;
 		return;
 	}
 	const uint64 ActivationSerial = PreparedEndpoint->GetActivationSerial();
@@ -170,10 +227,14 @@ void FAvidScriptSessionContinuations::DiscardPrepared()
 	RemoveReady(EAvidScriptContinuationLane::Prepared, ActivationSerial);
 	PreparedEndpoint.Reset();
 	PreparedWorld.Reset();
+	PreparedObjectRegistry = nullptr;
+	PreparedObjectOwnership = nullptr;
 }
 
 IAvidScriptContinuationHost& FAvidScriptSessionContinuations::ResetActive(
-	UWorld* World)
+	UWorld* World,
+	FAvidScriptObjectRegistry* ObjectRegistry,
+	FAvidScriptSessionObjectOwnership* ObjectOwnership)
 {
 	check(IsInGameThread());
 	DiscardPrepared();
@@ -185,8 +246,11 @@ IAvidScriptContinuationHost& FAvidScriptSessionContinuations::ResetActive(
 		RemoveReady(EAvidScriptContinuationLane::Active, ActivationSerial);
 		RetiredEndpoint = MoveTemp(ActiveEndpoint);
 	}
+	ClearRetainedLoadedObjects();
 	bTearingDown = false;
 	ActiveWorld = World;
+	ActiveObjectRegistry = ObjectRegistry;
+	ActiveObjectOwnership = ObjectOwnership;
 	ActiveEndpoint = MakeShared<FAvidScriptContinuationHostEndpoint>(
 		TWeakPtr<FAvidScriptSessionContinuations>(AsShared()),
 		EAvidScriptContinuationLane::Active,
@@ -208,7 +272,10 @@ void FAvidScriptSessionContinuations::Teardown()
 		RetiredEndpoint = MoveTemp(ActiveEndpoint);
 	}
 	ActiveWorld.Reset();
+	ActiveObjectRegistry = nullptr;
+	ActiveObjectOwnership = nullptr;
 	ReadyCompletions.Reset();
+	ClearRetainedLoadedObjects();
 }
 
 void FAvidScriptSessionContinuations::DrainReady(
@@ -237,7 +304,7 @@ void FAvidScriptSessionContinuations::DrainReady(
 	}
 	if (SelectedIndex != INDEX_NONE)
 	{
-		const FAvidScriptContinuationCompletion Completion =
+		FAvidScriptContinuationCompletion Completion =
 			ReadyCompletions[SelectedIndex].Completion;
 		ReadyCompletions.RemoveAtSwap(
 			SelectedIndex,
@@ -250,10 +317,119 @@ void FAvidScriptSessionContinuations::DrainReady(
 			&& Slots[SlotIndex].Generation == Generation
 			&& Slots[SlotIndex].Entry.IsSet())
 		{
-			ReleaseSlot(SlotIndex);
+			FEntry& Entry = Slots[SlotIndex].Entry.GetValue();
+			if (Entry.bDispatching)
+			{
+				return;
+			}
+
+			Entry.bDispatching = true;
+			if (ActiveObjectRegistry != nullptr
+				&& ActiveObjectOwnership != nullptr)
+			{
+				Entry.BorrowedHandleCheckpoint =
+					ActiveObjectOwnership->GetBorrowedHandleCount();
+				Entry.bHasBorrowedHandleCheckpoint = true;
+			}
+
+			UObject* const LoadedObject = Entry.LoadedObject.Get();
+			if (Completion.Status == EAvidScriptContinuationStatus::Completed
+				&& Entry.ProducerKind == EProducerKind::AsyncObjectLoad)
+			{
+				const bool bRetentionLimitReached = IsValid(LoadedObject)
+					&& !RetainedLoadedObjectKeys.Contains(
+						TObjectKey<UObject>(LoadedObject))
+					&& RetainedLoadedObjects.Num()
+						>= MaximumRetainedLoadedObjects;
+				FAvidScriptObjectHandleResult BorrowResult;
+				if (!IsValid(LoadedObject)
+					|| bRetentionLimitReached
+					|| ActiveObjectRegistry == nullptr
+					|| ActiveObjectOwnership == nullptr
+					|| !ActiveObjectOwnership->Borrow(
+						*ActiveObjectRegistry,
+						*LoadedObject,
+						BorrowResult)
+					|| !BorrowResult.Handle.IsValid())
+				{
+					Completion.Status = EAvidScriptContinuationStatus::Failed;
+					Entry.LoadedObject.Reset();
+				}
+				else
+				{
+					Completion.ObjectSlot = static_cast<int32>(
+						BorrowResult.Handle.Slot);
+					Completion.ObjectGeneration = static_cast<int32>(
+						BorrowResult.Handle.Generation);
+					Entry.bDispatchHasObjectResult = true;
+				}
+			}
 			OutCompletions.Add(Completion);
 		}
 	}
+}
+
+bool FAvidScriptSessionContinuations::FinalizeDispatched(
+	const int64 Token,
+	const bool bSucceeded)
+{
+	check(IsInGameThread());
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(Token, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| !Slot.Entry->bDispatching)
+	{
+		return false;
+	}
+
+	FEntry& Entry = Slot.Entry.GetValue();
+	bool bFinalized = true;
+	if (!bSucceeded
+		&& Entry.bHasBorrowedHandleCheckpoint
+		&& ActiveObjectRegistry != nullptr
+		&& ActiveObjectOwnership != nullptr)
+	{
+		FString RollbackError;
+		bFinalized = ActiveObjectOwnership->RollbackBorrowedHandles(
+			*ActiveObjectRegistry,
+			Entry.BorrowedHandleCheckpoint,
+			RollbackError);
+	}
+	else if (!bSucceeded && Entry.bHasBorrowedHandleCheckpoint)
+	{
+		bFinalized = false;
+	}
+
+	UObject* const LoadedObject = Entry.LoadedObject.Get();
+	if (bSucceeded
+		&& Entry.bDispatchHasObjectResult
+		&& IsValid(LoadedObject))
+	{
+		const TObjectKey<UObject> ObjectKey(LoadedObject);
+		if (!RetainedLoadedObjectKeys.Contains(ObjectKey))
+		{
+			if (RetainedLoadedObjects.Num() >= MaximumRetainedLoadedObjects)
+			{
+				bFinalized = false;
+			}
+			else
+			{
+				RetainedLoadedObjects.Emplace(LoadedObject);
+				RetainedLoadedObjectKeys.Add(ObjectKey);
+			}
+		}
+	}
+
+	ReleaseSlot(SlotIndex);
+	return bFinalized;
 }
 
 int32 FAvidScriptSessionContinuations::GetActiveCount() const
@@ -325,6 +501,7 @@ int64 FAvidScriptSessionContinuations::ScheduleDelay(
 	Entry.RegistrationSerial = NextRegistrationSerial++;
 	Entry.CallbackId = CallbackId;
 	Entry.World = World;
+	Entry.ProducerKind = EProducerKind::Timer;
 	const int64 Token = AllocateEntry(MoveTemp(Entry));
 	if (Token == 0)
 	{
@@ -359,6 +536,89 @@ int64 FAvidScriptSessionContinuations::ScheduleDelay(
 	return Token;
 }
 
+int64 FAvidScriptSessionContinuations::ScheduleObjectLoad(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	FString ObjectPath,
+	const int32 CallbackId)
+{
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| CallbackId <= 0
+		|| OccupiedSlotCount >= MaximumPendingContinuations
+		|| !AsyncObjectLoader)
+	{
+		return 0;
+	}
+
+	FAvidScriptObjectRegistry* const ObjectRegistry =
+		Lane == EAvidScriptContinuationLane::Active
+			? ActiveObjectRegistry
+			: PreparedObjectRegistry;
+	FAvidScriptSessionObjectOwnership* const ObjectOwnership =
+		Lane == EAvidScriptContinuationLane::Active
+			? ActiveObjectOwnership
+			: PreparedObjectOwnership;
+	FSoftObjectPath SoftObjectPath;
+	if (ObjectRegistry == nullptr
+		|| ObjectOwnership == nullptr
+		|| !TryMakeAsyncObjectPath(ObjectPath, SoftObjectPath))
+	{
+		return 0;
+	}
+
+	FEntry Entry;
+	Entry.Lane = Lane;
+	Entry.ActivationSerial = ActivationSerial;
+	Entry.RegistrationSerial = NextRegistrationSerial++;
+	Entry.CallbackId = CallbackId;
+	Entry.ProducerKind = EProducerKind::AsyncObjectLoad;
+	const int64 Token = AllocateEntry(MoveTemp(Entry));
+	if (Token == 0)
+	{
+		return 0;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	check(UnpackToken(Token, SlotIndex, Generation));
+	const TWeakPtr<FAvidScriptSessionContinuations> WeakOwner(AsShared());
+	TSharedPtr<IAvidScriptAsyncObjectLoadHandle> LoadHandle =
+		AsyncObjectLoader->RequestAsyncLoad(
+			SoftObjectPath,
+			[WeakOwner, Token](UObject* LoadedObject)
+			{
+				if (const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+						WeakOwner.Pin())
+				{
+					Owner->HandleObjectLoadCompletion(Token, LoadedObject);
+				}
+			});
+	const bool bEntryStillValid =
+		Slots.IsValidIndex(static_cast<int32>(SlotIndex))
+		&& Slots[SlotIndex].Generation == Generation
+		&& Slots[SlotIndex].Entry.IsSet();
+	if (!LoadHandle)
+	{
+		if (bEntryStillValid)
+		{
+			RemoveReadyToken(Token);
+			ReleaseSlot(SlotIndex);
+		}
+		return 0;
+	}
+
+	if (bEntryStillValid)
+	{
+		Slots[SlotIndex].Entry->AsyncLoadHandle = MoveTemp(LoadHandle);
+		return Token;
+	}
+
+	LoadHandle->Cancel();
+	return 0;
+}
+
 bool FAvidScriptSessionContinuations::Cancel(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
@@ -379,14 +639,12 @@ bool FAvidScriptSessionContinuations::Cancel(
 	if (Slot.Generation != Generation
 		|| !Slot.Entry.IsSet()
 		|| Slot.Entry->Lane != Lane
-		|| Slot.Entry->ActivationSerial != ActivationSerial)
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->bDispatching)
 	{
 		return false;
 	}
-	if (UWorld* const World = Slot.Entry->World.Get())
-	{
-		World->GetTimerManager().ClearTimer(Slot.Entry->TimerHandle);
-	}
+	CancelEntryProducer(Slot.Entry.GetValue());
 	RemoveReadyToken(Token);
 	ReleaseSlot(SlotIndex);
 	return true;
@@ -497,16 +755,91 @@ void FAvidScriptSessionContinuations::HandleTimerCompletion(const int64 Token)
 	}
 	Entry.bReady = true;
 	Entry.TimerHandle.Invalidate();
+	FAvidScriptContinuationCompletion Completion;
+	Completion.CallbackId = Entry.CallbackId;
+	Completion.Token = Entry.Token;
+	Completion.Status = EAvidScriptContinuationStatus::Completed;
+	Completion.RegistrationSerial = Entry.RegistrationSerial;
 	ReadyCompletions.Add(FReadyCompletion{
 		Entry.Lane,
 		Entry.ActivationSerial,
-		FAvidScriptContinuationCompletion{
-			Entry.CallbackId,
-			Entry.Token,
-			EAvidScriptContinuationStatus::Completed,
-			Entry.RegistrationSerial
-		}
+		Completion
 	});
+}
+
+void FAvidScriptSessionContinuations::HandleObjectLoadCompletion(
+	const int64 Token,
+	UObject* LoadedObject)
+{
+	if (!IsInGameThread() || bTearingDown)
+	{
+		return;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(Token, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation || !Slot.Entry.IsSet())
+	{
+		return;
+	}
+
+	FEntry& Entry = Slot.Entry.GetValue();
+	if (Entry.ProducerKind != EProducerKind::AsyncObjectLoad
+		|| Entry.bReady
+		|| Entry.bDispatching)
+	{
+		return;
+	}
+	if (!MatchesCurrentEndpoint(Entry.Lane, Entry.ActivationSerial))
+	{
+		ReleaseSlot(SlotIndex);
+		return;
+	}
+
+	Entry.bReady = true;
+	if (IsValid(LoadedObject))
+	{
+		Entry.LoadedObject.Reset(LoadedObject);
+	}
+
+	FAvidScriptContinuationCompletion Completion;
+	Completion.CallbackId = Entry.CallbackId;
+	Completion.Token = Entry.Token;
+	Completion.Status = IsValid(LoadedObject)
+		? EAvidScriptContinuationStatus::Completed
+		: EAvidScriptContinuationStatus::Failed;
+	Completion.RegistrationSerial = Entry.RegistrationSerial;
+	ReadyCompletions.Add(FReadyCompletion{
+		Entry.Lane,
+		Entry.ActivationSerial,
+		Completion
+	});
+}
+
+void FAvidScriptSessionContinuations::CancelEntryProducer(FEntry& Entry)
+{
+	if (Entry.ProducerKind == EProducerKind::Timer)
+	{
+		if (UWorld* const World = Entry.World.Get())
+		{
+			World->GetTimerManager().ClearTimer(Entry.TimerHandle);
+		}
+		Entry.TimerHandle.Invalidate();
+		return;
+	}
+
+	if (!Entry.bReady && Entry.AsyncLoadHandle)
+	{
+		Entry.AsyncLoadHandle->Cancel();
+	}
+	Entry.AsyncLoadHandle.Reset();
 }
 
 void FAvidScriptSessionContinuations::CancelLane(
@@ -522,10 +855,7 @@ void FAvidScriptSessionContinuations::CancelLane(
 		{
 			continue;
 		}
-		if (UWorld* const World = Slot.Entry->World.Get())
-		{
-			World->GetTimerManager().ClearTimer(Slot.Entry->TimerHandle);
-		}
+		CancelEntryProducer(Slot.Entry.GetValue());
 		ReleaseSlot(static_cast<uint32>(SlotIndex));
 	}
 }
@@ -547,6 +877,12 @@ void FAvidScriptSessionContinuations::RemoveReadyToken(const int64 Token)
 	{
 		return Ready.Completion.Token == Token;
 	});
+}
+
+void FAvidScriptSessionContinuations::ClearRetainedLoadedObjects()
+{
+	RetainedLoadedObjectKeys.Reset();
+	RetainedLoadedObjects.Reset();
 }
 
 bool FAvidScriptSessionContinuations::MatchesCurrentEndpoint(

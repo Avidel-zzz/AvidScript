@@ -355,6 +355,9 @@ public:
 	int32 HandleTimerSetOnceImport(float DelaySeconds, int32 CallbackId);
 	int32 HandleTimerCancelImport(int32 TimerHandle);
 	int64 HandleContinuationDelayImport(float DelaySeconds, int32 CallbackId);
+	int64 HandleContinuationLoadObjectImport(
+		int32 Utf8ValueReference,
+		int32 CallbackId);
 	int32 HandleContinuationCancelImport(int64 ContinuationToken);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
@@ -611,6 +614,7 @@ private:
 	FAvidScriptCachedVmExport EndPlayExport;
 	FAvidScriptCachedVmExport TimerExport;
 	FAvidScriptCachedVmExport ContinuationExport;
+	FAvidScriptCachedVmExport ContinuationV2Export;
 	FAvidScriptCachedVmExport EventExport;
 	FAvidScriptCachedVmExport GameplayEventExport;
 	TMap<FString, FAvidScriptCachedVmExport> DelegateEventExports;

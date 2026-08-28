@@ -833,6 +833,11 @@ bool FAvidScriptEditorCSharpTypedProjectApiTest::RunTest(const FString& Paramete
 		&& FacadeSource.Contains(FString::Printf(
 			TEXT("ObjectTypeIsA(value.Slot, value.Generation, %d)"),
 			ProjectileType->ObjectTypeOrdinal)));
+	TestTrue(
+		TEXT("Typed project API facade casts loaded objects through the same type graph"),
+		FacadeSource.Contains(TEXT("public static AActor TryCast(AvidLoadedObject value)"))
+		&& FacadeSource.Contains(TEXT("public static AAvidScriptTypedTestActor TryCast(AvidLoadedObject value)"))
+		&& FacadeSource.Contains(TEXT("public static AAvidScriptTypedTestProjectile TryCast(AvidLoadedObject value)")));
 	TestFalse(
 		TEXT("Typed project API facade excludes the reversed instance checked cast"),
 		FacadeSource.Contains(TEXT("public AAvidScriptTypedTestActor TryCast()"))

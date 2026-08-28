@@ -7,6 +7,12 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpSemanticInputValidator
 {
+    private static readonly string[] ObjectContinuationParameterTypeIds =
+    {
+        "type:global::AvidScript.AvidContinuationStatus",
+        "type:global::AvidScript.AvidLoadedObject",
+    };
+
     private sealed record GameplayCallbackContract(
         string Name,
         IReadOnlyList<string> ParameterTypeIds);
@@ -348,7 +354,7 @@ internal static class CSharpSemanticInputValidator
                 && !callable.IsConstructor
                 && callable.Import is null
                 && string.Equals(callable.ReturnTypeId, "type:void", StringComparison.Ordinal)
-                && callable.Parameters.Count == 0
+                && ContinuationParametersMatch(document.SchemaVersion, callback, callable)
                 && symbolsById.TryGetValue(callback.MethodSymbolId, out SemanticSymbol? symbol)
                 && string.Equals(symbol.Kind, "method", StringComparison.Ordinal)
                 && string.Equals(symbol.Name, callback.Name, StringComparison.Ordinal)
@@ -370,6 +376,27 @@ internal static class CSharpSemanticInputValidator
                 .Distinct()
                 .Count() == document.ContinuationCallbacks.Count
             && Unique(document.ContinuationCallbacks.Select(callback => callback.MethodSymbolId));
+    }
+
+    private static bool ContinuationParametersMatch(
+        int schemaVersion,
+        SemanticContinuationCallback callback,
+        SemanticCallable callable)
+    {
+        if (schemaVersion == 10)
+        {
+            return callback.PayloadKind == SemanticContinuationCallback.NonePayloadKind
+                && callable.Parameters.Count == 0;
+        }
+
+        return callback.PayloadKind switch
+        {
+            SemanticContinuationCallback.NonePayloadKind => callable.Parameters.Count == 0,
+            SemanticContinuationCallback.ObjectPayloadKind => ParametersMatch(
+                callable.Parameters,
+                ObjectContinuationParameterTypeIds),
+            _ => false,
+        };
     }
 
     private static bool ParametersMatch(
@@ -414,6 +441,7 @@ internal static class CSharpSemanticInputValidator
             (7, "1.7") => true,
             (8, "1.8") => true,
             (9, "1.9") => true,
+            (10, "1.10") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

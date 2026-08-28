@@ -207,6 +207,13 @@ $PreparedSemanticPath = Resolve-ProjectArtifactPath ([string]$PreparedReportJson
 $PreparedDebugMapPath = Resolve-ProjectArtifactPath ([string]$PreparedReportJson.artifacts.debug_map_file)
 Assert-Condition (Test-Path -LiteralPath $PreparedFrontendPath -PathType Leaf) "prepared frontend artifact is missing"
 Assert-Condition (Test-Path -LiteralPath $PreparedSemanticPath -PathType Leaf) "prepared semantic artifact is missing"
+$PreparedSemanticModel = Get-Content -Raw -LiteralPath $PreparedSemanticPath | ConvertFrom-Json
+Assert-Condition (
+    [int]$PreparedReportJson.semantic.schema_version -eq 11 -and
+    [string]$PreparedReportJson.semantic.version -ceq "1.11" -and
+    [int]$PreparedSemanticModel.schema_version -eq 11 -and
+    [string]$PreparedSemanticModel.semantic_version -ceq "1.11") `
+    "prepared semantic contract is not 11/1.11"
 Assert-Condition (Test-Path -LiteralPath $PreparedDebugMapPath -PathType Leaf) "prepared C# debug map artifact is missing"
 $PreparedDebugMap = Get-Content -Raw -LiteralPath $PreparedDebugMapPath | ConvertFrom-Json
 $PreparedManifest = Get-Content -Raw -LiteralPath $ManifestPath | ConvertFrom-Json

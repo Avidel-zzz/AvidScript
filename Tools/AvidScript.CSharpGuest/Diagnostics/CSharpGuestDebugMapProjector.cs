@@ -14,6 +14,7 @@ public static class CSharpGuestDebugMapProjector
     {
         CSharpGuestIds.GameplayEventFunctionId,
         CSharpGuestIds.ContinuationFunctionId,
+        CSharpGuestIds.ContinuationV2FunctionId,
     };
 
     public static CSharpGuestDebugMap Project(

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
@@ -17,6 +18,13 @@ internal static class SemanticContinuationProjector
         "global::AvidScript.AvidContinuationAttribute";
     private const string ContinuationsTypeName =
         "global::AvidScript.AvidContinuations";
+    private const string AssetsTypeName =
+        "global::AvidScript.AvidAssets";
+    private const string ContinuationStatusTypeName =
+        "global::AvidScript.AvidContinuationStatus";
+    private const string LoadedObjectTypeName =
+        "global::AvidScript.AvidLoadedObject";
+    private const int MaximumAssetPathUtf8Bytes = 1024;
 
     public static SemanticContinuationProjection Project(SemanticCompilationContext context)
     {
@@ -66,10 +74,11 @@ internal static class SemanticContinuationProjector
                 valid = false;
             }
 
+            string? payloadKind = GetPayloadKind(method);
             if (method.DeclaredAccessibility != Accessibility.Public
                 || !method.IsStatic
                 || !method.ReturnsVoid
-                || method.Parameters.Length != 0
+                || payloadKind is null
                 || method.IsGenericMethod
                 || method.ContainingType.IsGenericType
                 || method.IsAbstract
@@ -78,7 +87,7 @@ internal static class SemanticContinuationProjector
             {
                 diagnostics.Add(Error(
                     "ASCS5303",
-                    $"Continuation handler '{method.Name}' must be public static concrete non-generic void with zero parameters.",
+                    $"Continuation handler '{method.Name}' must be public static concrete non-generic void with either zero parameters or exact (AvidContinuationStatus, AvidLoadedObject) parameters.",
                     span));
                 valid = false;
             }
@@ -89,7 +98,10 @@ internal static class SemanticContinuationProjector
                     callbackId!.Value,
                     method.Name,
                     SemanticSymbolProjector.GetSymbolId(method),
-                    span));
+                    span)
+                {
+                    PayloadKind = payloadKind!,
+                });
             }
         }
 
@@ -111,19 +123,29 @@ internal static class SemanticContinuationProjector
             }
         }
 
-        IReadOnlySet<int> declaredCallbackIds = callbacks
-            .Select(callback => callback.CallbackId)
-            .ToHashSet();
+        IReadOnlyDictionary<int, SemanticContinuationCallback> declaredCallbacks = callbacks
+            .ToDictionary(callback => callback.CallbackId);
         foreach (InvocationExpressionSyntax invocation in context.PrimaryUnit.SyntaxTree
             .GetRoot()
             .DescendantNodes()
             .OfType<InvocationExpressionSyntax>()
             .OrderBy(node => node.SpanStart))
         {
-            if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation
-                || !IsContinuationCall(operation.TargetMethod))
+            if (semanticModel.GetOperation(invocation) is not IInvocationOperation operation)
             {
                 continue;
+            }
+
+            bool isContinuationCall = IsContinuationCall(operation.TargetMethod);
+            bool isObjectLoadCall = IsObjectLoadCall(operation.TargetMethod);
+            if (!isContinuationCall && !isObjectLoadCall)
+            {
+                continue;
+            }
+
+            if (isObjectLoadCall)
+            {
+                ValidateAssetPath(context, operation, invocation, diagnostics);
             }
 
             IArgumentOperation? callbackArgument = operation.Arguments.FirstOrDefault(argument =>
@@ -138,18 +160,37 @@ internal static class SemanticContinuationProjector
             {
                 callbackId = value;
             }
+            string ownerName = isObjectLoadCall ? "AvidAssets" : "AvidContinuations";
             if (callbackId is null || callbackId <= 0)
             {
                 diagnostics.Add(Error(
                     "ASCS5304",
-                    $"AvidContinuations.{operation.TargetMethod.Name} requires a compile-time positive callback id.",
+                    $"{ownerName}.{operation.TargetMethod.Name} requires a compile-time positive callback id.",
                     span));
             }
-            else if (!declaredCallbackIds.Contains(callbackId.Value))
+            else if (!declaredCallbacks.TryGetValue(
+                callbackId.Value,
+                out SemanticContinuationCallback? callback))
             {
                 diagnostics.Add(Error(
                     "ASCS5305",
-                    $"AvidContinuations.{operation.TargetMethod.Name} callback id '{callbackId.Value}' has no declared handler.",
+                    $"{ownerName}.{operation.TargetMethod.Name} callback id '{callbackId.Value}' has no declared handler.",
+                    span));
+            }
+            else if (isObjectLoadCall
+                && callback.PayloadKind != SemanticContinuationCallback.ObjectPayloadKind)
+            {
+                diagnostics.Add(Error(
+                    "ASCS5309",
+                    $"AvidAssets.LoadObjectAsync callback id '{callbackId.Value}' requires an object-payload continuation handler.",
+                    span));
+            }
+            else if (isContinuationCall
+                && callback.PayloadKind != SemanticContinuationCallback.NonePayloadKind)
+            {
+                diagnostics.Add(Error(
+                    "ASCS5310",
+                    $"AvidContinuations.{operation.TargetMethod.Name} callback id '{callbackId.Value}' requires a zero-parameter continuation handler.",
                     span));
             }
         }
@@ -191,6 +232,94 @@ internal static class SemanticContinuationProjector
                 method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 ContinuationsTypeName,
                 StringComparison.Ordinal);
+    }
+
+    private static bool IsObjectLoadCall(IMethodSymbol method)
+    {
+        return method.Name == "LoadObjectAsync"
+            && string.Equals(
+                method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                AssetsTypeName,
+                StringComparison.Ordinal);
+    }
+
+    private static string? GetPayloadKind(IMethodSymbol method)
+    {
+        if (method.Parameters.Length == 0)
+        {
+            return SemanticContinuationCallback.NonePayloadKind;
+        }
+
+        return method.Parameters.Length == 2
+            && method.Parameters.All(parameter => parameter.RefKind == RefKind.None)
+            && string.Equals(
+                method.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                ContinuationStatusTypeName,
+                StringComparison.Ordinal)
+            && string.Equals(
+                method.Parameters[1].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                LoadedObjectTypeName,
+                StringComparison.Ordinal)
+                ? SemanticContinuationCallback.ObjectPayloadKind
+                : null;
+    }
+
+    private static void ValidateAssetPath(
+        SemanticCompilationContext context,
+        IInvocationOperation operation,
+        InvocationExpressionSyntax invocation,
+        ICollection<SemanticDiagnostic> diagnostics)
+    {
+        IArgumentOperation? assetPathArgument = operation.Arguments.FirstOrDefault(argument =>
+            string.Equals(argument.Parameter?.Name, "assetPath", StringComparison.Ordinal));
+        SemanticSpan span = SemanticSpanFactory.Create(
+            context.PrimaryUnit.SourceText,
+            assetPathArgument?.Syntax.Span ?? invocation.Span);
+        if (assetPathArgument?.Value.ConstantValue is not { HasValue: true, Value: string assetPath }
+            || assetPath.Length == 0)
+        {
+            diagnostics.Add(Error(
+                "ASCS5306",
+                "AvidAssets.LoadObjectAsync requires a compile-time nonempty asset path.",
+                span));
+            return;
+        }
+
+        if (assetPath.IndexOf('\0') >= 0 || !IsCanonicalLookingAssetPath(assetPath))
+        {
+            diagnostics.Add(Error(
+                "ASCS5307",
+                "AvidAssets.LoadObjectAsync asset path must be canonical-looking and contain no NUL character.",
+                span));
+        }
+
+        if (Encoding.UTF8.GetByteCount(assetPath) > MaximumAssetPathUtf8Bytes)
+        {
+            diagnostics.Add(Error(
+                "ASCS5308",
+                $"AvidAssets.LoadObjectAsync asset path must not exceed {MaximumAssetPathUtf8Bytes} UTF-8 bytes.",
+                span));
+        }
+    }
+
+    private static bool IsCanonicalLookingAssetPath(string assetPath)
+    {
+        if (assetPath.Length < 4
+            || assetPath[0] != '/'
+            || assetPath[1] == '/'
+            || assetPath.IndexOf('\\') >= 0
+            || assetPath.Any(character => char.IsControl(character) || char.IsWhiteSpace(character)))
+        {
+            return false;
+        }
+
+        int lastSlash = assetPath.LastIndexOf('/');
+        int objectSeparator = assetPath.IndexOf('.', lastSlash + 1);
+        return lastSlash > 0
+            && objectSeparator > lastSlash + 1
+            && objectSeparator < assetPath.Length - 1
+            && assetPath.IndexOf('.', objectSeparator + 1) < 0
+            && !assetPath.Contains("//", StringComparison.Ordinal);
     }
 
     private static SemanticDiagnostic Error(string code, string message, SemanticSpan span)

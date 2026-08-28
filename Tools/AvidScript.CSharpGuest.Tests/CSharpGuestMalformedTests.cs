@@ -21,7 +21,7 @@ internal static class CSharpGuestMalformedTests
     private static void FutureAndMismatchedSemanticVersionsFailClosed()
     {
         SemanticDocument baseline = CSharpGuestSemanticFixture.Create();
-        SemanticDocument future = baseline with { SchemaVersion = 11, SemanticVersion = "1.11" };
+        SemanticDocument future = baseline with { SchemaVersion = 12, SemanticVersion = "1.12" };
         SemanticDocument mismatched = baseline with { SchemaVersion = 10, SemanticVersion = "1.9" };
 
         AssertRejected(future, "future semantic schemas should be rejected");

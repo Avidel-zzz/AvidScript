@@ -49,15 +49,17 @@ TArray<uint8> BuildVmContinuationImportFixture()
 	Module.Append(Header, UE_ARRAY_COUNT(Header));
 
 	TArray<uint8> Types;
-	AppendVmContractU32Leb(Types, 2);
+	AppendVmContractU32Leb(Types, 3);
 	const uint8 DelayType[] = { 0x60, 0x02, 0x7d, 0x7f, 0x01, 0x7e };
 	const uint8 CancelType[] = { 0x60, 0x01, 0x7e, 0x01, 0x7f };
+	const uint8 LoadObjectType[] = { 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7e };
 	Types.Append(DelayType, UE_ARRAY_COUNT(DelayType));
 	Types.Append(CancelType, UE_ARRAY_COUNT(CancelType));
+	Types.Append(LoadObjectType, UE_ARRAY_COUNT(LoadObjectType));
 	AppendVmContractSection(Module, 1, Types);
 
 	TArray<uint8> Imports;
-	AppendVmContractU32Leb(Imports, 2);
+	AppendVmContractU32Leb(Imports, 3);
 	AppendVmContractString(Imports, "env");
 	AppendVmContractString(Imports, "continuation_delay");
 	Imports.Add(0x00);
@@ -66,22 +68,30 @@ TArray<uint8> BuildVmContinuationImportFixture()
 	AppendVmContractString(Imports, "continuation_cancel");
 	Imports.Add(0x00);
 	AppendVmContractU32Leb(Imports, 1);
+	AppendVmContractString(Imports, "env");
+	AppendVmContractString(Imports, "continuation_load_object");
+	Imports.Add(0x00);
+	AppendVmContractU32Leb(Imports, 2);
 	AppendVmContractSection(Module, 2, Imports);
 
 	TArray<uint8> Functions;
-	AppendVmContractU32Leb(Functions, 2);
+	AppendVmContractU32Leb(Functions, 3);
 	AppendVmContractU32Leb(Functions, 0);
 	AppendVmContractU32Leb(Functions, 1);
+	AppendVmContractU32Leb(Functions, 2);
 	AppendVmContractSection(Module, 3, Functions);
 
 	TArray<uint8> Exports;
-	AppendVmContractU32Leb(Exports, 2);
+	AppendVmContractU32Leb(Exports, 3);
 	AppendVmContractString(Exports, "call_delay");
 	Exports.Add(0x00);
-	AppendVmContractU32Leb(Exports, 2);
+	AppendVmContractU32Leb(Exports, 3);
 	AppendVmContractString(Exports, "call_cancel");
 	Exports.Add(0x00);
-	AppendVmContractU32Leb(Exports, 3);
+	AppendVmContractU32Leb(Exports, 4);
+	AppendVmContractString(Exports, "call_load_object");
+	Exports.Add(0x00);
+	AppendVmContractU32Leb(Exports, 5);
 	AppendVmContractSection(Module, 7, Exports);
 
 	const uint8 DelayBody[] = {
@@ -97,12 +107,21 @@ TArray<uint8> BuildVmContinuationImportFixture()
 		0x10, 0x01,
 		0x0b
 	};
+	const uint8 LoadObjectBody[] = {
+		0x00,
+		0x20, 0x00,
+		0x20, 0x01,
+		0x10, 0x02,
+		0x0b
+	};
 	TArray<uint8> Code;
-	AppendVmContractU32Leb(Code, 2);
+	AppendVmContractU32Leb(Code, 3);
 	AppendVmContractU32Leb(Code, UE_ARRAY_COUNT(DelayBody));
 	Code.Append(DelayBody, UE_ARRAY_COUNT(DelayBody));
 	AppendVmContractU32Leb(Code, UE_ARRAY_COUNT(CancelBody));
 	Code.Append(CancelBody, UE_ARRAY_COUNT(CancelBody));
+	AppendVmContractU32Leb(Code, UE_ARRAY_COUNT(LoadObjectBody));
+	Code.Append(LoadObjectBody, UE_ARRAY_COUNT(LoadObjectBody));
 	AppendVmContractSection(Module, 10, Code);
 	return Module;
 }
@@ -489,6 +508,9 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& Cancel =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationCancel);
+	const FAvidScriptVmStaticHostImport& LoadObject =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationLoadObject);
 	TestEqual(
 		TEXT("Continuation delay uses the frozen env import name"),
 		FString(UTF8_TO_TCHAR(Delay.ImportName)),
@@ -505,12 +527,30 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 		TEXT("Continuation cancel consumes i64 and returns i32"),
 		FString(UTF8_TO_TCHAR(Cancel.Signature)),
 		FString(TEXT("(I)i")));
+	TestEqual(
+		TEXT("Continuation object load keeps the exact dense binding id"),
+		static_cast<uint16>(EAvidScriptHostBindingId::ContinuationLoadObject),
+		static_cast<uint16>(31));
+	TestEqual(
+		TEXT("Continuation object load catalog row keeps its binding id"),
+		LoadObject.BindingId,
+		EAvidScriptHostBindingId::ContinuationLoadObject);
+	TestEqual(
+		TEXT("Continuation object load uses the frozen env import name"),
+		FString(UTF8_TO_TCHAR(LoadObject.ImportName)),
+		FString(TEXT("continuation_load_object")));
+	TestEqual(
+		TEXT("Continuation object load consumes two i32 values and returns i64"),
+		FString(UTF8_TO_TCHAR(LoadObject.Signature)),
+		FString(TEXT("(ii)I")));
 	TestTrue(
-		TEXT("Both continuation imports are available through env"),
+		TEXT("All continuation imports are available through env"),
 		Delay.bSupportsEnvCompatibility
 			&& Cancel.bSupportsEnvCompatibility
+			&& LoadObject.bSupportsEnvCompatibility
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_delay"))
-			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel")));
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_load_object")));
 	return true;
 }
 
@@ -861,6 +901,11 @@ public:
 			CancelledToken = Call.Int64Args[0];
 			OutResult.ReturnValue = 1;
 			return true;
+		case EAvidScriptHostBindingId::ContinuationLoadObject:
+			ObjectPathId = Call.IntArgs[0];
+			LoadCallbackId = Call.IntArgs[1];
+			OutResult.ReturnValueI64 = LoadToken;
+			return true;
 		default:
 			OutResult.bSucceeded = false;
 			return false;
@@ -868,10 +913,64 @@ public:
 	}
 
 	static constexpr int64 ContinuationToken = 0x1122334455667788LL;
+	static constexpr int64 LoadToken = 0x123456789abcdef0LL;
 	float DelaySeconds = 0.0f;
 	int32 CallbackId = 0;
 	int64 CancelledToken = 0;
+	int32 ObjectPathId = 0;
+	int32 LoadCallbackId = 0;
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptVmContinuationLoadObjectStaticInvocationTest,
+	"AvidScript.Architecture.VM.ContinuationLoadObjectStaticInvocation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptVmContinuationLoadObjectStaticInvocationTest::RunTest(
+	const FString& Parameters)
+{
+	const FAvidScriptVmStaticHostImport& Import =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationLoadObject);
+	FAvidScriptVmAbiSignature Signature;
+	FString FailureDetails;
+	if (!TestTrue(
+			TEXT("Continuation object load catalog signature parses"),
+			ParseAvidScriptVmAbiSignature(
+				UTF8_TO_TCHAR(Import.Signature),
+				Signature,
+				FailureDetails)))
+	{
+		return false;
+	}
+
+	FAvidScriptVmStaticValue Arguments[2];
+	Arguments[0].Kind = EAvidScriptVmValueKind::I32;
+	Arguments[0].I32 = 73;
+	Arguments[1].Kind = EAvidScriptVmValueKind::I32;
+	Arguments[1].I32 = 41;
+	FAvidScriptVmContinuationHostDispatcher Dispatcher;
+	FAvidScriptNonBorrowingGuestMemory GuestMemory;
+	FAvidScriptVmStaticCallResult Result;
+	TestTrue(
+		TEXT("Static catalog invokes continuation object load"),
+		InvokeAvidScriptVmStaticHostImport(
+			Import,
+			Signature,
+			MakeArrayView(Arguments),
+			&Dispatcher,
+			GuestMemory,
+			Result,
+			FailureDetails));
+	TestEqual(TEXT("Static adapter forwards IntArgs[0]"), Dispatcher.ObjectPathId, 73);
+	TestEqual(TEXT("Static adapter forwards IntArgs[1]"), Dispatcher.LoadCallbackId, 41);
+	TestEqual(TEXT("Static invocation preserves the i64 result kind"), Result.Kind, EAvidScriptVmValueKind::I64);
+	TestEqual(
+		TEXT("Static invocation returns ReturnValueI64"),
+		Result.I64,
+		FAvidScriptVmContinuationHostDispatcher::LoadToken);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -946,12 +1045,16 @@ bool FAvidScriptWamrContinuationHostMappingTest::RunTest(const FString& Paramete
 
 	FAvidScriptVmExportHandle DelayHandle;
 	FAvidScriptVmExportHandle CancelHandle;
+	FAvidScriptVmExportHandle LoadObjectHandle;
 	TestTrue(
 		TEXT("Continuation delay export resolves"),
 		Backend->ResolveExport(TEXT("call_delay"), DelayHandle, Error));
 	TestTrue(
 		TEXT("Continuation cancel export resolves"),
 		Backend->ResolveExport(TEXT("call_cancel"), CancelHandle, Error));
+	TestTrue(
+		TEXT("Env-compatible continuation object load export resolves"),
+		Backend->ResolveExport(TEXT("call_load_object"), LoadObjectHandle, Error));
 
 	const float DelaySeconds = 0.25f;
 	FAvidScriptVmCallFrame DelayFrame;
@@ -992,6 +1095,31 @@ bool FAvidScriptWamrContinuationHostMappingTest::RunTest(const FString& Paramete
 	if (CancelResult.CellCount == 1)
 	{
 		TestEqual(TEXT("WAMR cancel returns ReturnValue"), CancelResult.Cells[0], 1u);
+	}
+
+	FAvidScriptVmCallFrame LoadObjectFrame;
+	LoadObjectFrame.CellCount = 2;
+	LoadObjectFrame.Cells[0] = 73;
+	LoadObjectFrame.Cells[1] = 41;
+	FAvidScriptVmCallResult LoadObjectResult;
+	TestTrue(
+		TEXT("WAMR env continuation object load thunk is callable"),
+		Backend->Call(
+			LoadObjectHandle,
+			LoadObjectFrame,
+			Error,
+			&LoadObjectResult));
+	TestEqual(TEXT("WAMR load maps first i32 to IntArgs[0]"), Dispatcher.ObjectPathId, 73);
+	TestEqual(TEXT("WAMR load maps second i32 to IntArgs[1]"), Dispatcher.LoadCallbackId, 41);
+	TestEqual(TEXT("WAMR load returns two i64 cells"), LoadObjectResult.CellCount, 2u);
+	if (LoadObjectResult.CellCount == 2)
+	{
+		const uint64 ReturnedToken = static_cast<uint64>(LoadObjectResult.Cells[0])
+			| (static_cast<uint64>(LoadObjectResult.Cells[1]) << 32);
+		TestEqual(
+			TEXT("WAMR load returns ReturnValueI64"),
+			ReturnedToken,
+			static_cast<uint64>(FAvidScriptVmContinuationHostDispatcher::LoadToken));
 	}
 	return true;
 }

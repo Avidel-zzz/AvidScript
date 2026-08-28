@@ -61,7 +61,7 @@ internal static class CSharpGuestDebugMapTests
             ?? throw new InvalidOperationException(
                 "continuation debug-map source should lower successfully: "
                 + string.Join(" | ", lowering.Diagnostics.Select(diagnostic => diagnostic.Message)));
-        const string routerId = "function:synthetic:continuation";
+        const string routerId = "function:synthetic:continuation_v2";
         Assert(module.Functions.Any(function => function.Id == routerId),
             "continuation callbacks should synthesize the continuation router");
 

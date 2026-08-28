@@ -1292,6 +1292,22 @@ void AppendObjectHandleProxy(
 			TEXT("    }")
 		});
 	}
+	if (ObjectTypeOrdinal != INDEX_NONE)
+	{
+		Lines.Append({
+			TEXT(""),
+			FString::Printf(TEXT("    public static %s TryCast(AvidLoadedObject value)"), *TypeName),
+			TEXT("    {"),
+			FString::Printf(
+				TEXT("        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, %d) != 0)"),
+				ObjectTypeOrdinal),
+			TEXT("        {"),
+			TEXT("            return new(value.Slot, value.Generation);"),
+			TEXT("        }"),
+			TEXT("        return default;"),
+			TEXT("    }")
+		});
+	}
 }
 
 bool IsAvidScriptActorClassReference(
@@ -1363,6 +1379,29 @@ void AppendContinuationReferenceSurface(TArray<FString>& Lines)
 		TEXT("    public int CallbackId { get; }"),
 		TEXT("}"),
 		TEXT(""),
+		TEXT("public enum AvidContinuationStatus"),
+		TEXT("{"),
+		TEXT("    Completed = 1,"),
+		TEXT("    Failed = 2,"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct AvidLoadedObject"),
+		TEXT("{"),
+		TEXT("    internal readonly int Slot;"),
+		TEXT("    internal readonly int Generation;"),
+		TEXT(""),
+		TEXT("    internal AvidLoadedObject(int slot, int generation)"),
+		TEXT("    {"),
+		TEXT("        Slot = slot;"),
+		TEXT("        Generation = generation;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public bool IsNull => Slot == 0 && Generation == 0;"),
+		TEXT("    public bool HasHandle => Slot > 0 && Generation > 0;"),
+		TEXT("    public bool IsValid => Slot > 0 && Generation > 0;"),
+		TEXT("}"),
+		TEXT(""),
 		TEXT("public readonly struct AvidContinuation"),
 		TEXT("{"),
 		TEXT("    private readonly long Token;"),
@@ -1383,6 +1422,12 @@ void AppendContinuationReferenceSurface(TArray<FString>& Lines)
 		TEXT(""),
 		TEXT("    public static AvidContinuation NextTick(int callbackId)"),
 		TEXT("        => new(AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId));"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public static class AvidAssets"),
+		TEXT("{"),
+		TEXT("    public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)"),
+		TEXT("        => new(AvidScriptRuntimeNative.ContinuationLoadObject(assetPath, callbackId));"),
 		TEXT("}"),
 		TEXT("")
 	});
@@ -2354,7 +2399,7 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 				TypeName,
 				DirectBaseTypeName,
 				Type->ObjectTypeOrdinal);
-			bNeedsObjectTypeIsA |= DirectBaseType != nullptr;
+			bNeedsObjectTypeIsA |= Type->ObjectTypeOrdinal != INDEX_NONE;
 		}
 
 		if (OwnerBindings != nullptr)
@@ -2486,6 +2531,9 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("{"),
 		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_delay\")]"),
 		TEXT("    internal static extern long ContinuationDelay(float delaySeconds, int callbackId);"),
+		TEXT(""),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_load_object\")]"),
+		TEXT("    internal static extern long ContinuationLoadObject(string assetPath, int callbackId);"),
 		TEXT(""),
 		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_cancel\")]"),
 		TEXT("    internal static extern int ContinuationCancel(long continuationToken);")

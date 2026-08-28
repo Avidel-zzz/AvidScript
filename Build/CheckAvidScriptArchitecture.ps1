@@ -1536,6 +1536,9 @@ $ActorBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidSc
 $ActorBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptActorBinding.cpp'
 $SceneComponentBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptSceneComponentBinding.h'
 $WasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
+$ContinuationOwnerHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.h'
+$ContinuationOwnerSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.cpp'
+$AsyncObjectLoaderSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptAsyncObjectLoader.cpp'
 foreach ($RequiredLifecycleBenchmarkContract in @(
     'FAvidScriptObjectLifecycleBenchmarkResult',
     'RunObjectLifecycleBenchmark',
@@ -1935,6 +1938,7 @@ $CanonicalStaticImportNames = @(
     'timer_cancel',
     'continuation_delay',
     'continuation_cancel',
+    'continuation_load_object',
     'event_subscribe',
     'event_unsubscribe',
     'avid_data_lane_epoch',
@@ -2234,6 +2238,7 @@ $AllowedFixedRendererImports = @(
     'timer_cancel',
     'continuation_delay',
     'continuation_cancel',
+    'continuation_load_object',
     'event_subscribe',
     'event_unsubscribe',
     'avid_value_array_read_range',
@@ -2265,7 +2270,8 @@ $AllowedLiteralFacadeStructs = @(
     'InputEvent',
     'TSubclassOfAActor',
     'AvidSubscription',
-    'AvidContinuation'
+    'AvidContinuation',
+    'AvidLoadedObject'
 )
 $LiteralFacadeStructs = @(
     [regex]::Matches(
@@ -2282,6 +2288,7 @@ if ($UnexpectedLiteralFacadeStructs.Count -gt 0) {
 }
 foreach ($RequiredStaticCheckedCastContract in @(
     'public static %s TryCast(%s value)',
+    'public static %s TryCast(AvidLoadedObject value)',
     'AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, %d)',
     'internal static extern int ObjectTypeIsA(int slot, int generation, int targetOrdinal);'
 )) {
@@ -2620,8 +2627,10 @@ $SemanticCallableProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpSem
 $SemanticContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticContract.cs'
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
+$SemanticContinuationSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticContinuationProjector.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
+$CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpContinuationLowerer.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
 $GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
@@ -2801,8 +2810,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 10',
-    'CurrentSemanticVersion = "1.10"'
+    'CurrentSchemaVersion = 11',
+    'CurrentSemanticVersion = "1.11"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
@@ -2827,6 +2836,79 @@ if (-not $CSharpGuestLowererSource.Contains('GetReachableCallableIds') -or
     -not $CSharpBuildScriptSource.Contains('UsedAuthorizationBindingImports') -or
     -not $CSharpBuildScriptSource.Contains('UsedRuntimeBindingImports')) {
     Add-Violation 'C# Guest and build pipeline must consume semantic binding reachability'
+}
+foreach ($RequiredAsyncContinuationFacadeContract in @(
+    'public enum AvidContinuationStatus',
+    'public readonly struct AvidLoadedObject',
+    'public static class AvidAssets',
+    'LoadObjectAsync(string assetPath, int callbackId)',
+    'ContinuationLoadObject(string assetPath, int callbackId)',
+    'TryCast(AvidLoadedObject value)'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredAsyncContinuationFacadeContract)) {
+        Add-Violation "generated C# async continuation facade is missing $RequiredAsyncContinuationFacadeContract"
+    }
+}
+foreach ($RequiredAsyncContinuationSemanticContract in @(
+    'MaximumAssetPathUtf8Bytes = 1024',
+    'LoadObjectAsync',
+    'ObjectPayloadKind',
+    'ASCS5309',
+    'ASCS5310'
+)) {
+    if (-not $SemanticContinuationSource.Contains($RequiredAsyncContinuationSemanticContract)) {
+        Add-Violation "C# Semantic async continuation projection is missing $RequiredAsyncContinuationSemanticContract"
+    }
+}
+foreach ($RequiredAsyncContinuationGuestContract in @(
+    'ContinuationV2ExportName',
+    'ObjectPayloadKind',
+    'object_slot',
+    'object_generation'
+)) {
+    if (-not $CSharpContinuationLowererSource.Contains($RequiredAsyncContinuationGuestContract)) {
+        Add-Violation "C# Guest v2 continuation lowerer is missing $RequiredAsyncContinuationGuestContract"
+    }
+}
+foreach ($RequiredAsyncContinuationRuntimeContract in @(
+    'continuation_load_object',
+    'avid_on_continuation_v2',
+    'HandleContinuationLoadObjectImport',
+    'DecodeAvidScriptUtf8ValueReference'
+)) {
+    if (-not $WasmRuntimeSource.Contains($RequiredAsyncContinuationRuntimeContract)) {
+        Add-Violation "Runtime async continuation dispatch is missing $RequiredAsyncContinuationRuntimeContract"
+    }
+}
+foreach ($RequiredAsyncContinuationOwnershipContract in @(
+    'MaximumRetainedLoadedObjects',
+    'ScheduleObjectLoad',
+    'TStrongObjectPtr<UObject>',
+    'RollbackBorrowedHandles',
+    'FinalizeDispatched'
+)) {
+    if (-not $ContinuationOwnerHeader.Contains($RequiredAsyncContinuationOwnershipContract) -and
+        -not $ContinuationOwnerSource.Contains($RequiredAsyncContinuationOwnershipContract)) {
+        Add-Violation "Session async continuation ownership is missing $RequiredAsyncContinuationOwnershipContract"
+    }
+}
+foreach ($RequiredAsyncObjectLoaderContract in @(
+    'FStreamableManager',
+    'RequestAsyncLoad',
+    'CancelHandle'
+)) {
+    if (-not $AsyncObjectLoaderSource.Contains($RequiredAsyncObjectLoaderContract)) {
+        Add-Violation "async object-loader adapter is missing $RequiredAsyncObjectLoaderContract"
+    }
+}
+foreach ($RequiredAsyncContinuationVmContract in @(
+    'ContinuationLoadObject',
+    'continuation_load_object',
+    '(ii)I'
+)) {
+    if (-not $StaticHostImportSource.Contains($RequiredAsyncContinuationVmContract)) {
+        Add-Violation "VM async continuation catalog is missing $RequiredAsyncContinuationVmContract"
+    }
 }
 foreach ($RequiredCompilerManagedArrayContract in @(
     '"array_region_load"',

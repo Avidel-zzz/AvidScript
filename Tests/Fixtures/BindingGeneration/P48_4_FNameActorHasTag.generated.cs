@@ -27,6 +27,29 @@ public sealed class AvidContinuationAttribute : Attribute
     public int CallbackId { get; }
 }
 
+public enum AvidContinuationStatus
+{
+    Completed = 1,
+    Failed = 2,
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct AvidLoadedObject
+{
+    internal readonly int Slot;
+    internal readonly int Generation;
+
+    internal AvidLoadedObject(int slot, int generation)
+    {
+        Slot = slot;
+        Generation = generation;
+    }
+
+    public bool IsNull => Slot == 0 && Generation == 0;
+    public bool HasHandle => Slot > 0 && Generation > 0;
+    public bool IsValid => Slot > 0 && Generation > 0;
+}
+
 public readonly struct AvidContinuation
 {
     private readonly long Token;
@@ -47,6 +70,12 @@ public static class AvidContinuations
 
     public static AvidContinuation NextTick(int callbackId)
         => new(AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId));
+}
+
+public static class AvidAssets
+{
+    public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)
+        => new(AvidScriptRuntimeNative.ContinuationLoadObject(assetPath, callbackId));
 }
 
 public enum AvidStateMode
@@ -172,6 +201,15 @@ public readonly struct UObject
     public bool IsNull => Slot == 0 && Generation == 0;
     public bool HasHandle => Slot > 0 && Generation > 0;
     public bool IsValid => Slot > 0 && Generation > 0;
+
+    public static UObject TryCast(AvidLoadedObject value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 0) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -198,6 +236,15 @@ public readonly struct AActor
     }
 
     public static AActor TryCast(UObject value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
+
+    public static AActor TryCast(AvidLoadedObject value)
     {
         if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)
         {
@@ -235,6 +282,9 @@ internal static class AvidScriptRuntimeNative
 {
     [DllImport("env", EntryPoint = "continuation_delay")]
     internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_load_object")]
+    internal static extern long ContinuationLoadObject(string assetPath, int callbackId);
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);

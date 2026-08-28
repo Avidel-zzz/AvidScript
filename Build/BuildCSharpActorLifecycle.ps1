@@ -1139,7 +1139,8 @@ $DirectAbiExports = @(
     "avid_on_timer",
     "avid_on_event",
     "avid_on_gameplay_event",
-    "avid_on_continuation")
+    "avid_on_continuation",
+    "avid_on_continuation_v2")
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })

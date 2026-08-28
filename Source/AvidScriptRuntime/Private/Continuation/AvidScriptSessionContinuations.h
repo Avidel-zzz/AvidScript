@@ -3,7 +3,13 @@
 #include "AvidScriptContinuation.h"
 #include "Templates/SharedPointer.h"
 #include "TimerManager.h"
+#include "UObject/ObjectKey.h"
+#include "UObject/StrongObjectPtr.h"
 
+class FAvidScriptObjectRegistry;
+class FAvidScriptSessionObjectOwnership;
+class IAvidScriptAsyncObjectLoadHandle;
+class IAvidScriptAsyncObjectLoader;
 class UWorld;
 class FAvidScriptSessionContinuations;
 
@@ -23,6 +29,7 @@ public:
 		uint64 InActivationSerial);
 
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
+	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
 
 	void Invalidate();
@@ -41,25 +48,47 @@ class FAvidScriptSessionContinuations final
 {
 public:
 	static constexpr int32 MaximumPendingContinuations = 4096;
+	static constexpr int32 MaximumRetainedLoadedObjects = 1024;
+
+	explicit FAvidScriptSessionContinuations(
+		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
 
 	~FAvidScriptSessionContinuations();
 
-	IAvidScriptContinuationHost& BeginPrepared(UWorld* World);
+	IAvidScriptContinuationHost& BeginPrepared(
+		UWorld* World,
+		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
+		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr);
 	bool ValidatePreparedCommit(FString& OutError) const;
 	void CommitPrepared();
 	void ReleaseRetiredEndpoint();
 	void DiscardPrepared();
-	IAvidScriptContinuationHost& ResetActive(UWorld* World);
+	IAvidScriptContinuationHost& ResetActive(
+		UWorld* World,
+		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
+		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr);
 	void Teardown();
 
 	void DrainReady(TArray<FAvidScriptContinuationCompletion>& OutCompletions);
+	bool FinalizeDispatched(int64 Token, bool bSucceeded);
 	int32 GetActiveCount() const;
 	int32 GetPreparedCount() const;
+#if WITH_DEV_AUTOMATION_TESTS
+	int32 GetRetainedLoadedObjectCountForTesting() const
+	{
+		return RetainedLoadedObjects.Num();
+	}
+#endif
 
 	int64 ScheduleDelay(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		float DelaySeconds,
+		int32 CallbackId);
+	int64 ScheduleObjectLoad(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		FString ObjectPath,
 		int32 CallbackId);
 	bool Cancel(
 		EAvidScriptContinuationLane Lane,
@@ -67,6 +96,12 @@ public:
 		int64 Token);
 
 private:
+	enum class EProducerKind : uint8
+	{
+		Timer,
+		AsyncObjectLoad
+	};
+
 	struct FEntry
 	{
 		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
@@ -76,7 +111,14 @@ private:
 		int64 Token = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;
+		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
+		TStrongObjectPtr<UObject> LoadedObject;
+		EProducerKind ProducerKind = EProducerKind::Timer;
+		int32 BorrowedHandleCheckpoint = 0;
 		bool bReady = false;
+		bool bDispatching = false;
+		bool bHasBorrowedHandleCheckpoint = false;
+		bool bDispatchHasObjectResult = false;
 	};
 
 	struct FSlot
@@ -98,9 +140,12 @@ private:
 	int64 AllocateEntry(FEntry&& Entry);
 	void ReleaseSlot(uint32 Slot);
 	void HandleTimerCompletion(int64 Token);
+	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
+	void CancelEntryProducer(FEntry& Entry);
 	void CancelLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReady(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReadyToken(int64 Token);
+	void ClearRetainedLoadedObjects();
 	bool MatchesCurrentEndpoint(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
@@ -109,11 +154,18 @@ private:
 	TArray<FSlot> Slots;
 	TArray<uint32> FreeSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
+	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
+	TSet<TObjectKey<UObject>> RetainedLoadedObjectKeys;
+	TSharedPtr<IAvidScriptAsyncObjectLoader> AsyncObjectLoader;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> ActiveEndpoint;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> PreparedEndpoint;
 	TSharedPtr<FAvidScriptContinuationHostEndpoint> RetiredEndpoint;
 	TWeakObjectPtr<UWorld> ActiveWorld;
 	TWeakObjectPtr<UWorld> PreparedWorld;
+	FAvidScriptObjectRegistry* ActiveObjectRegistry = nullptr;
+	FAvidScriptObjectRegistry* PreparedObjectRegistry = nullptr;
+	FAvidScriptSessionObjectOwnership* ActiveObjectOwnership = nullptr;
+	FAvidScriptSessionObjectOwnership* PreparedObjectOwnership = nullptr;
 	uint64 NextActivationSerial = 1;
 	uint64 NextRegistrationSerial = 1;
 	int32 OccupiedSlotCount = 0;

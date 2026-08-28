@@ -64,6 +64,15 @@ public readonly struct UObject
     public bool IsNull => Slot == 0 && Generation == 0;
     public bool HasHandle => Slot > 0 && Generation > 0;
     public bool IsValid => Slot > 0 && Generation > 0;
+
+    public static UObject TryCast(AvidLoadedObject value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 0) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -97,6 +106,15 @@ public readonly struct AActor
         }
         return default;
     }
+
+    public static AActor TryCast(AvidLoadedObject value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 1) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -123,6 +141,15 @@ public readonly struct AStaticMeshActor
     }
 
     public static AStaticMeshActor TryCast(AActor value)
+    {
+        if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0)
+        {
+            return new(value.Slot, value.Generation);
+        }
+        return default;
+    }
+
+    public static AStaticMeshActor TryCast(AvidLoadedObject value)
     {
         if (AvidScriptNative.ObjectTypeIsA(value.Slot, value.Generation, 2) != 0)
         {
@@ -178,6 +205,9 @@ internal static class AvidScriptRuntimeNative
 {
     [DllImport("env", EntryPoint = "continuation_delay")]
     internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_load_object")]
+    internal static extern long ContinuationLoadObject(string assetPath, int callbackId);
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);

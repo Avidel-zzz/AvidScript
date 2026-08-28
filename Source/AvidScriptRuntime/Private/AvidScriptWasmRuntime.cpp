@@ -3,8 +3,11 @@
 
 #include "AvidScriptSceneComponentBinding.h"
 #include "AvidScriptValueCapability.h"
+#include "Containers/StringConv.h"
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
+#include "Misc/PackageName.h"
+#include "UObject/SoftObjectPath.h"
 #include "UObject/UnrealType.h"
 
 
@@ -93,12 +96,121 @@ const FString AvidScriptGameplayEventExportName(
 const FString AvidScriptEndPlayExportName(TEXT("avid_on_end_play"));
 const FString AvidScriptTimerExportName(TEXT("avid_on_timer"));
 const FString AvidScriptContinuationExportName(TEXT("avid_on_continuation"));
+const FString AvidScriptContinuationV2ExportName(
+	TEXT("avid_on_continuation_v2"));
 constexpr uint32 AvidScriptWasmHeapSize = 64 * 1024;
 constexpr uint32 AvidScriptWasmErrorBufferSize = 512;
 constexpr double AvidScriptMinimumMeasuredMs = 0.0001;
 constexpr int32 AvidScriptMaximumPendingTimers = 1024;
 constexpr int32 AvidScriptTimerHeapCompactionThreshold = 64;
 constexpr int32 AvidScriptDataBridgeBudgetCheckStride = 32;
+constexpr uint32 AvidScriptMaximumAsyncObjectPathUtf8Bytes = 1024;
+
+bool DecodeAvidScriptUtf8ValueReference(
+	const uint32 ValueReference,
+	IAvidScriptVmGuestMemory* GuestMemory,
+	const FAvidScriptUtf8ValueHeap& Utf8ValueHeap,
+	FString& OutValue,
+	FString& OutError)
+{
+	OutValue.Reset();
+	OutError.Reset();
+	TConstArrayView<uint8> Utf8Bytes;
+	TArray<uint8, TInlineAllocator<256>> LinearStorage;
+	if (FAvidScriptUtf8ValueHeap::IsHeapToken(ValueReference))
+	{
+		if (!Utf8ValueHeap.Resolve(ValueReference, Utf8Bytes, OutError))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		uint8 LengthBytes[sizeof(uint32)] = {};
+		if (GuestMemory == nullptr
+			|| ValueReference > MAX_uint32 - sizeof(LengthBytes)
+			|| !GuestMemory->ReadBytes(
+				ValueReference,
+				MakeArrayView(LengthBytes),
+				OutError))
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("continuation_object_path_memory_invalid");
+			}
+			return false;
+		}
+
+		const uint32 ByteCount = static_cast<uint32>(LengthBytes[0])
+			| (static_cast<uint32>(LengthBytes[1]) << 8)
+			| (static_cast<uint32>(LengthBytes[2]) << 16)
+			| (static_cast<uint32>(LengthBytes[3]) << 24);
+		if (ByteCount == 0
+			|| ByteCount > AvidScriptMaximumAsyncObjectPathUtf8Bytes)
+		{
+			OutError = TEXT("continuation_object_path_size_invalid");
+			return false;
+		}
+
+		const uint64 PayloadAddress = static_cast<uint64>(ValueReference)
+			+ sizeof(LengthBytes);
+		const uint64 StoredSize = static_cast<uint64>(ByteCount) + 1;
+		if (PayloadAddress + StoredSize
+			> static_cast<uint64>(MAX_uint32) + 1)
+		{
+			OutError = TEXT("continuation_object_path_memory_overflow");
+			return false;
+		}
+
+		LinearStorage.SetNumUninitialized(static_cast<int32>(StoredSize));
+		if (!GuestMemory->ReadBytes(
+				static_cast<uint32>(PayloadAddress),
+				MakeArrayView(LinearStorage),
+				OutError)
+			|| LinearStorage[ByteCount] != 0)
+		{
+			if (OutError.IsEmpty())
+			{
+				OutError = TEXT("continuation_object_path_terminator_invalid");
+			}
+			return false;
+		}
+		Utf8Bytes = MakeArrayView(LinearStorage).Left(
+			static_cast<int32>(ByteCount));
+	}
+
+	bool bContainsNull = false;
+	for (const uint8 Byte : Utf8Bytes)
+	{
+		bContainsNull |= Byte == 0;
+	}
+	if (Utf8Bytes.IsEmpty()
+		|| static_cast<uint32>(Utf8Bytes.Num())
+			> AvidScriptMaximumAsyncObjectPathUtf8Bytes
+		|| bContainsNull)
+	{
+		OutError = TEXT("continuation_object_path_bytes_invalid");
+		return false;
+	}
+
+	const FUTF8ToTCHAR Converted(
+		reinterpret_cast<const ANSICHAR*>(Utf8Bytes.GetData()),
+		Utf8Bytes.Num());
+	const FTCHARToUTF8 RoundTrip(Converted.Get(), Converted.Length());
+	if (Converted.Length() <= 0
+		|| RoundTrip.Length() != Utf8Bytes.Num()
+		|| FMemory::Memcmp(
+			RoundTrip.Get(),
+			Utf8Bytes.GetData(),
+			Utf8Bytes.Num()) != 0)
+	{
+		OutError = TEXT("continuation_object_path_utf8_invalid");
+		return false;
+	}
+
+	OutValue = FString(Converted.Length(), Converted.Get());
+	return true;
+}
 
 struct FAvidScriptPreparedDataLaneWrite
 {
@@ -1019,6 +1131,11 @@ bool FAvidScriptWasmRuntimeInstance::ValidateRequiredExports(
 			CachedExport = &ContinuationExport;
 			ExpectedParameterCellCount = 4;
 		}
+		else if (RequiredExport == AvidScriptContinuationV2ExportName)
+		{
+			CachedExport = &ContinuationV2Export;
+			ExpectedParameterCellCount = 6;
+		}
 		else if (RequiredExport == AvidScriptEventExportName)
 		{
 			CachedExport = &EventExport;
@@ -1710,23 +1827,32 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	FAvidScriptWasmSmokeResult& OutResult)
 {
 	CaptureSnapshot(OutResult);
+	const bool bUseV2 = ContinuationV2Export.Handle.IsValid();
+	const FString& ExportName = bUseV2
+		? AvidScriptContinuationV2ExportName
+		: AvidScriptContinuationExportName;
 	if (!IsLoaded() || !bHasBegunPlay || bEndPlayAttempted)
 	{
 		SetFailure(
 			OutResult,
 			ModuleId,
-			AvidScriptContinuationExportName,
+			ExportName,
 			TEXT("invalid_state"),
 			TEXT("Continuations require an active runtime between BeginPlay and EndPlay"),
 			TEXT("deliver continuation completions only through the active Runtime Session"));
 		return false;
 	}
 
-	uint32 Args[4] = {
+	FAvidScriptCachedVmExport& CachedExport = bUseV2
+		? ContinuationV2Export
+		: ContinuationExport;
+	uint32 Args[6] = {
 		static_cast<uint32>(Completion.CallbackId),
 		0,
 		0,
-		static_cast<uint32>(Completion.Status)
+		static_cast<uint32>(Completion.Status),
+		static_cast<uint32>(Completion.ObjectSlot),
+		static_cast<uint32>(Completion.ObjectGeneration)
 	};
 	static_assert(sizeof(Completion.Token) == sizeof(uint32) * 2);
 	FMemory::Memcpy(&Args[1], &Completion.Token, sizeof(Completion.Token));
@@ -1734,9 +1860,9 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	FAvidScriptVmError Error;
 	const bool bCalled = InvokeVmExport(
 		VmBackend.Get(),
-		ContinuationExport,
-		AvidScriptContinuationExportName,
-		UE_ARRAY_COUNT(Args),
+		CachedExport,
+		ExportName,
+		bUseV2 ? UE_ARRAY_COUNT(Args) : 4,
 		Args,
 		Error);
 	EndTypedCallbackEpoch();
@@ -1745,7 +1871,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 		SetFailureFromVmError(
 			OutResult,
 			ModuleId,
-			AvidScriptContinuationExportName,
+			ExportName,
 			Error,
 			DebugMap.Get());
 		FAvidScriptLifecycleTransitionResult LifecycleResult;
@@ -2116,6 +2242,7 @@ void FAvidScriptWasmRuntimeInstance::Unload(FAvidScriptWasmSmokeResult& OutResul
 	EndPlayExport = {};
 	TimerExport = {};
 	ContinuationExport = {};
+	ContinuationV2Export = {};
 	EventExport = {};
 	GameplayEventExport = {};
 	DelegateEventExports.Reset();
@@ -3510,6 +3637,61 @@ int64 FAvidScriptWasmRuntimeInstance::HandleContinuationDelayImport(
 
 	const int64 Token = HostContext.Continuations != nullptr
 		? HostContext.Continuations->ScheduleDelay(DelaySeconds, CallbackId)
+		: 0;
+	LastHostImportResult = Token != 0 ? 1 : 0;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Token;
+}
+
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationLoadObjectImport(
+	const int32 Utf8ValueReference,
+	const int32 CallbackId)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = CallbackId;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+
+	FString ObjectPath;
+	FString DecodeError;
+	IAvidScriptVmGuestMemory* const GuestMemory = VmBackend
+		? VmBackend->GetGuestMemory()
+		: nullptr;
+	if (!DecodeAvidScriptUtf8ValueReference(
+			static_cast<uint32>(Utf8ValueReference),
+			GuestMemory,
+			Utf8ValueHeap,
+			ObjectPath,
+			DecodeError))
+	{
+		SetPendingHostImportFailure(
+			TEXT("env"),
+			TEXT("continuation_load_object"),
+			DecodeError.IsEmpty()
+				? TEXT("continuation_object_path_decode_failed")
+				: MoveTemp(DecodeError));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	FSoftObjectPath SoftObjectPath(ObjectPath);
+	const FString LongPackageName = SoftObjectPath.GetLongPackageName();
+	if (SoftObjectPath.IsNull()
+		|| !SoftObjectPath.IsValid()
+		|| !FPackageName::IsValidLongPackageName(LongPackageName))
+	{
+		SetPendingHostImportFailure(
+			TEXT("env"),
+			TEXT("continuation_load_object"),
+			TEXT("continuation_object_path_invalid"));
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	}
+
+	const int64 Token = HostContext.Continuations != nullptr
+		? HostContext.Continuations->ScheduleObjectLoad(
+			SoftObjectPath.ToString(),
+			CallbackId)
 		: 0;
 	LastHostImportResult = Token != 0 ? 1 : 0;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
@@ -5903,6 +6085,13 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 	{
 		const int32 Value = HandleContinuationCancelImport(Call.Int64Args[0]);
 		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationLoadObject:
+	{
+		const int64 Value = HandleContinuationLoadObjectImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1]);
+		return FinishI64(Value, !bHasPendingHostImportFailure);
 	}
 	case EAvidScriptHostBindingId::EventSubscribe:
 	{

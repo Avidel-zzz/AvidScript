@@ -173,6 +173,23 @@ function Assert-DebugArtifact {
     return $DebugMap
 }
 
+function Assert-SemanticContract {
+    param(
+        [Parameter(Mandatory = $true)]$Build,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $SemanticPath = Resolve-ProjectPath ([string]$Build.Report.artifacts.semantic_file)
+    Assert-Condition (Test-Path -LiteralPath $SemanticPath -PathType Leaf) "$Label semantic artifact is missing"
+    $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
+    Assert-Condition (
+        [int]$Build.Report.semantic.schema_version -eq 11 -and
+        [string]$Build.Report.semantic.version -ceq "1.11" -and
+        [int]$Semantic.schema_version -eq 11 -and
+        [string]$Semantic.semantic_version -ceq "1.11") `
+        "$Label semantic contract is not 11/1.11"
+}
+
 foreach ($Directory in @($RunRoot, $CacheParent)) {
     if (Test-Path -LiteralPath $Directory) {
         Remove-Item -LiteralPath $Directory -Recurse -Force
@@ -214,6 +231,7 @@ Assert-Condition (
     [int]$Cold.Report.tool_invocations.wasm_backend -eq 1) `
     "cold semantic cache invocation counts differ"
 $ColdDebugMap = Assert-DebugArtifact -Build $Cold -Label "cold semantic cache build"
+Assert-SemanticContract -Build $Cold -Label "cold semantic cache build"
 
 $Warm = Invoke-CacheBuild -Name "Warm" -SourcePath $SourcePath -AuthorizationPath $BindingPackagePath
 Assert-Condition ($Warm.ExitCode -eq 0 -and $Warm.Report.succeeded) "warm semantic cache build failed"
@@ -229,6 +247,7 @@ Assert-Condition ($Warm.Report.semantic_cache.key -ceq $Cold.Report.semantic_cac
 Assert-Condition ($Warm.Report.semantic_cache.toolchain_fingerprint -ceq $Cold.Report.semantic_cache.toolchain_fingerprint) `
     "warm cache toolchain fingerprint differs from cold fingerprint"
 $WarmDebugMap = Assert-DebugArtifact -Build $Warm -Label "warm semantic cache build"
+Assert-SemanticContract -Build $Warm -Label "warm semantic cache build"
 Assert-Condition (
     [string]$Warm.Report.debug_map.sha256 -ceq [string]$Cold.Report.debug_map.sha256 -and
     @($WarmDebugMap.functions).Count -eq @($ColdDebugMap.functions).Count) `

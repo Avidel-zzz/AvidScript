@@ -6,12 +6,16 @@ namespace AvidScript;
 public static class ActorLifecycleScript
 {
     private const int DeferredBeginPlay = 9;
+    private const int DefaultMeshLoaded = 10;
     private static float ElapsedSeconds;
     private static AActor ActiveOverlapActor;
     private static bool HasActiveOverlap;
     private static bool HasPreviousInput;
     private static int LastInputActionId;
     private static int LastInputTriggerEvent;
+
+    [AvidTransient]
+    private static AvidContinuation PendingDefaultMesh;
 
     public static int Main() => 0;
 
@@ -26,12 +30,26 @@ public static class ActorLifecycleScript
         UE.Self.GetRootComponent().SetWorldLocation(rootLocation);
         UE.SetTimer(0.05f, 7);
         AvidContinuations.Delay(0.04f, DeferredBeginPlay);
+        PendingDefaultMesh = AvidAssets.LoadObjectAsync(
+            "/Engine/EngineMeshes/Cube.Cube",
+            DefaultMeshLoaded);
     }
 
     [AvidContinuation(DeferredBeginPlay)]
     public static void OnDeferredBeginPlay()
     {
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 40.0f, 0.0f));
+    }
+
+    [AvidContinuation(DefaultMeshLoaded)]
+    public static void OnDefaultMeshLoaded(
+        AvidContinuationStatus status,
+        AvidLoadedObject loadedObject)
+    {
+        if (status == AvidContinuationStatus.Completed && loadedObject.IsValid)
+        {
+            UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 10.0f));
+        }
     }
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_tick")]
@@ -124,6 +142,34 @@ public sealed class AvidContinuationAttribute : Attribute
     public int CallbackId { get; }
 }
 
+[AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
+public sealed class AvidTransientAttribute : Attribute
+{
+}
+
+public enum AvidContinuationStatus
+{
+    Completed = 1,
+    Failed = 2,
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct AvidLoadedObject
+{
+    internal readonly int Slot;
+    internal readonly int Generation;
+
+    internal AvidLoadedObject(int slot, int generation)
+    {
+        Slot = slot;
+        Generation = generation;
+    }
+
+    public bool IsNull => Slot == 0 && Generation == 0;
+    public bool HasHandle => Slot > 0 && Generation > 0;
+    public bool IsValid => Slot > 0 && Generation > 0;
+}
+
 public readonly struct AvidContinuation
 {
     private readonly long Token;
@@ -147,6 +193,14 @@ public static class AvidContinuations
     public static AvidContinuation NextTick(int callbackId)
     {
         return new AvidContinuation(Native.ContinuationDelay(0.0f, callbackId));
+    }
+}
+
+public static class AvidAssets
+{
+    public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)
+    {
+        return new AvidContinuation(Native.ContinuationLoadObject(assetPath, callbackId));
     }
 }
 
@@ -387,6 +441,9 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "continuation_delay")]
     internal static extern long ContinuationDelay(float delaySeconds, int callbackId);
+
+    [DllImport("env", EntryPoint = "continuation_load_object")]
+    internal static extern long ContinuationLoadObject(string assetPath, int callbackId);
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);
