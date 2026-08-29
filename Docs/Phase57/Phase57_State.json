@@ -184,6 +184,12 @@
       "status": "Completed",
       "evidence": "frozen Chinese design separates Session cancellation-source tokens from continuation tokens, specifies atomic continuation_bind_cancel races and lane/reload fencing, and requires explicit IAvidScriptLatentCompletionProvider publication into bounded Session result slots under schema v13; latent ref/out and API-name payload inference remain forbidden, no unavailable API is claimed, and P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T06:32:33.3256183Z"
+    },
+    {
+      "id": "P57.12C6E",
+      "status": "Completed",
+      "evidence": "centralized C6 acceptance passed fixed .NET 232/232, UE5.8 no-clean AvidTPSTemplateEditor incremental build, full AvidScript Automation 361/361 with zero failures and clean candidate 7aa9f66/4223436d architecture gate; cancellation and completion payload remain design-only, and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T06:52:52.3900087Z"
     }
   ],
   "debt": [
@@ -203,8 +209,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C6D review freezes separate cancellation-scope identity, atomic bind/cancel precedence, lane and reload fences, explicit provider-only payload publication, bounded Session result slots and bulk codec requirements; current generated API remains completion-only and does not overclaim unimplemented cancellation or payload behavior.",
-    "completed_at_utc": "2026-08-29T06:32:33.3256183Z"
+    "evidence": "P57.12C6 centralized review confirms descriptor-derived bool, enum, UObject capability, vector/transform and fixed USTRUCT latent value lowering, while C6D cancellation and payload contracts remain design-only; fixed .NET 232/232, full Automation 361/361 and clean candidate architecture gate passed.",
+    "completed_at_utc": "2026-08-29T06:52:52.3900087Z"
   },
   "budgets": {
     "ubt": 2,
@@ -212,25 +218,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 12,
-    "automation": 8,
-    "full_gate": 3
+    "ubt": 13,
+    "automation": 9,
+    "full_gate": 4
   },
   "freeze": {
-    "source_commit": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
-    "source_tree": "ab5e3273414de465a3512fbe3415eec038f6170d",
+    "source_commit": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
+    "source_tree": "4223436d49d05cfb7754ceb4b00b47432fe7e61a",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C5_Generated_Latent_Await.md",
-    "at_utc": "2026-08-29T05:27:49.5456043Z"
+    "review_evidence": "Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md",
+    "at_utc": "2026-08-29T06:52:52.3900087Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C5_Architecture_0cbb9fe.log",
-    "report_sha256": "f620e5d2ed4457a49dc4ec082df971bfbf4cdc31fcd5a37328c3982caf155498",
-    "run_id": "P57.12C5-clean-architecture-final",
-    "verified_commit": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
-    "verified_tree": "ab5e3273414de465a3512fbe3415eec038f6170d",
-    "attestation_parent": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
-    "attested_at_utc": "2026-08-29T05:27:49.5456043Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C6E_Architecture_7aa9f66.log",
+    "report_sha256": "f80f850367ac7e9dda8da9065fa2a5e83733bc4390f4fa4e13d594778f3706b8",
+    "run_id": "P57.12C6E-clean-architecture-final",
+    "verified_commit": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
+    "verified_tree": "4223436d49d05cfb7754ceb4b00b47432fe7e61a",
+    "attestation_parent": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
+    "attested_at_utc": "2026-08-29T06:52:52.3900087Z"
   },
   "protected_dirty": [
     {
@@ -253,6 +259,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 27,
-  "updated_at_utc": "2026-08-29T06:32:33.3256183Z"
+  "revision": 28,
+  "updated_at_utc": "2026-08-29T06:52:52.3900087Z"
 }

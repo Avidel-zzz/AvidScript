@@ -558,9 +558,10 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C5 的 **361/361 通过**，固定 .NET
-完整基线为 `230/230`。P57.12C6C 当前受影响 Semantic/C# Guest 为 `175/175`、UE5.8 no-clean
-`AvidScriptEditor` `6/6` actions 与 latent typed-parameter focused Automation `1/1`。
+当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C6E 的 **361/361 通过**，固定 .NET
+完整基线为 `232/232`。UE5.8 no-clean `AvidTPSTemplateEditor` 增量构建成功，clean candidate
+`7aa9f66/4223436d` 架构门禁通过。C6 已完成 bool、enum、UObject capability、FVector/FRotator/FTransform
+与固定 USTRUCT latent value 参数链；显式取消与 completion payload 仍停留在已冻结设计，尚未暴露 API。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
 [P57.12C6 中文合同与进度](Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md)。
