@@ -162,6 +162,231 @@ public static class SemanticAsyncStateFlowAnalyzer
                 .ToArray());
     }
 
+    public static SemanticAsyncStateFlowAnalysis AnalyzeControlFlow(
+        IReadOnlyList<SemanticAsyncSegment> segments)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+
+        Dictionary<string, SemanticAsyncLocalState> locals = new(StringComparer.Ordinal);
+        List<SemanticAsyncStateFlowIssue> issues = new();
+        foreach (SemanticAsyncSegment segment in segments)
+        {
+            foreach (SemanticAsyncStatement statement in segment.Statements)
+            {
+                if (statement.TargetSymbolId is { } targetSymbolId)
+                {
+                    AddLocal(
+                        locals,
+                        issues,
+                        targetSymbolId,
+                        statement.Operation.TypeId,
+                        segment.Ordinal,
+                        statement.Operation.Span);
+                }
+                foreach (SemanticOperation operation in EnumerateOperations(statement.Operation))
+                {
+                    if (operation.Kind == SemanticAsyncMethod.LocalDeclarationOperationKind)
+                    {
+                        AddLocal(
+                            locals,
+                            issues,
+                            operation.SymbolId,
+                            operation.TypeId,
+                            segment.Ordinal,
+                            operation.Span);
+                    }
+                }
+            }
+
+            if (segment.AwaitSite is
+                { ResultSymbolId: { } resultSymbolId, ResultTypeId: { } resultTypeId } awaitSite
+                && segment.Transfer is { Kind: SemanticAsyncMethod.AwaitTransferKind } transfer)
+            {
+                AddLocal(
+                    locals,
+                    issues,
+                    resultSymbolId,
+                    resultTypeId,
+                    transfer.PrimaryTarget,
+                    awaitSite.Span);
+            }
+        }
+
+        if (segments.Select(segment => segment.Ordinal)
+            .Where(ordinal => ordinal < 0 || ordinal >= segments.Count)
+            .Any())
+        {
+            issues.Add(new SemanticAsyncStateFlowIssue(
+                string.Empty,
+                segments.FirstOrDefault()?.Span ?? new SemanticSpan(0, 0, 0, 0, 0, 0),
+                "Async CFG contains an invalid segment ordinal."));
+        }
+
+        HashSet<string> localIds = locals.Keys.ToHashSet(StringComparer.Ordinal);
+        Dictionary<int, HashSet<string>> liveIn = segments.ToDictionary(
+            segment => segment.Ordinal,
+            _ => new HashSet<string>(StringComparer.Ordinal));
+        int limit = Math.Max(1, segments.Count * (localIds.Count + 2));
+        for (int iteration = 0; iteration < limit; ++iteration)
+        {
+            bool changed = false;
+            for (int index = segments.Count - 1; index >= 0; --index)
+            {
+                SemanticAsyncSegment segment = segments[index];
+                HashSet<string> candidate = TransferControlFlowSegment(
+                    segment,
+                    liveIn,
+                    localIds,
+                    issues);
+                if (!candidate.SetEquals(liveIn[segment.Ordinal]))
+                {
+                    liveIn[segment.Ordinal] = candidate;
+                    changed = true;
+                }
+            }
+            if (!changed)
+            {
+                break;
+            }
+            if (iteration == limit - 1)
+            {
+                issues.Add(new SemanticAsyncStateFlowIssue(
+                    string.Empty,
+                    segments.First().Span,
+                    "Async CFG liveness did not converge within its bounded local lattice."));
+            }
+        }
+
+        Dictionary<int, IReadOnlyList<SemanticAsyncStateSlot>> slotsByAwait = new();
+        foreach (SemanticAsyncSegment segment in segments.Where(item => item.AwaitSite is not null))
+        {
+            if (segment.Transfer is not
+                { Kind: SemanticAsyncMethod.AwaitTransferKind } transfer
+                || !liveIn.TryGetValue(transfer.PrimaryTarget, out HashSet<string>? resumeLive))
+            {
+                issues.Add(new SemanticAsyncStateFlowIssue(
+                    string.Empty,
+                    segment.Span,
+                    "Async CFG await segment has no valid resume successor."));
+                continue;
+            }
+
+            HashSet<string> slots = Clone(resumeLive);
+            if (segment.AwaitSite!.ResultSymbolId is { } resultSymbolId)
+            {
+                slots.Remove(resultSymbolId);
+            }
+            slotsByAwait[segment.Ordinal] = slots
+                .Where(locals.ContainsKey)
+                .OrderBy(symbolId => symbolId, StringComparer.Ordinal)
+                .Select(symbolId => new SemanticAsyncStateSlot(
+                    symbolId,
+                    locals[symbolId].TypeId))
+                .ToArray();
+        }
+
+        return new SemanticAsyncStateFlowAnalysis(
+            locals.Values
+                .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
+                .ToArray(),
+            slotsByAwait,
+            issues
+                .GroupBy(issue => (issue.SymbolId, issue.Span.Start, issue.Message))
+                .Select(group => group.First())
+                .OrderBy(issue => issue.Span.Start)
+                .ThenBy(issue => issue.SymbolId, StringComparer.Ordinal)
+                .ToArray());
+    }
+
+    private static HashSet<string> TransferControlFlowSegment(
+        SemanticAsyncSegment segment,
+        IReadOnlyDictionary<int, HashSet<string>> liveIn,
+        IReadOnlySet<string> localIds,
+        ICollection<SemanticAsyncStateFlowIssue> issues)
+    {
+        SemanticAsyncControlTransfer? transfer = segment.Transfer;
+        HashSet<string> live = transfer?.Kind switch
+        {
+            SemanticAsyncMethod.ReturnTransferKind =>
+                new HashSet<string>(StringComparer.Ordinal),
+            SemanticAsyncMethod.GotoTransferKind =>
+                GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
+            SemanticAsyncMethod.BranchTransferKind => TransferValue(
+                transfer.Condition!,
+                Union(
+                    GetSuccessorLive(segment, transfer.PrimaryTarget, liveIn, issues),
+                    GetSuccessorLive(segment, transfer.SecondaryTarget, liveIn, issues)),
+                localIds),
+            SemanticAsyncMethod.AwaitTransferKind => TransferAwait(
+                segment,
+                transfer,
+                liveIn,
+                localIds,
+                issues),
+            _ => new HashSet<string>(StringComparer.Ordinal),
+        };
+
+        for (int index = segment.Statements.Count - 1; index >= 0; --index)
+        {
+            SemanticAsyncStatement statement = segment.Statements[index];
+            if (statement.TargetSymbolId is { } targetSymbolId)
+            {
+                live = Clone(live);
+                live.Remove(targetSymbolId);
+                live = TransferValue(statement.Operation, live, localIds);
+            }
+            else
+            {
+                live = TransferFlow(statement.Operation, live, localIds, FlowTargets.Method);
+            }
+        }
+        return live;
+    }
+
+    private static HashSet<string> TransferAwait(
+        SemanticAsyncSegment segment,
+        SemanticAsyncControlTransfer transfer,
+        IReadOnlyDictionary<int, HashSet<string>> liveIn,
+        IReadOnlySet<string> localIds,
+        ICollection<SemanticAsyncStateFlowIssue> issues)
+    {
+        HashSet<string> live = GetSuccessorLive(
+            segment,
+            transfer.PrimaryTarget,
+            liveIn,
+            issues);
+        if (segment.AwaitSite?.ResultSymbolId is { } resultSymbolId)
+        {
+            live.Remove(resultSymbolId);
+        }
+        if (segment.AwaitSite?.CancellationToken is { } cancellationToken)
+        {
+            live = TransferValue(cancellationToken, live, localIds);
+        }
+        for (int index = (segment.AwaitSite?.Arguments.Count ?? 0) - 1; index >= 0; --index)
+        {
+            live = TransferValue(segment.AwaitSite!.Arguments[index], live, localIds);
+        }
+        return live;
+    }
+
+    private static HashSet<string> GetSuccessorLive(
+        SemanticAsyncSegment segment,
+        int target,
+        IReadOnlyDictionary<int, HashSet<string>> liveIn,
+        ICollection<SemanticAsyncStateFlowIssue> issues)
+    {
+        if (liveIn.TryGetValue(target, out HashSet<string>? successor))
+        {
+            return Clone(successor);
+        }
+        issues.Add(new SemanticAsyncStateFlowIssue(
+            string.Empty,
+            segment.Span,
+            $"Async CFG segment {segment.Ordinal} targets missing segment {target}."));
+        return new HashSet<string>(StringComparer.Ordinal);
+    }
+
     private static HashSet<string> TransferFlow(
         SemanticOperation operation,
         HashSet<string> liveAfter,

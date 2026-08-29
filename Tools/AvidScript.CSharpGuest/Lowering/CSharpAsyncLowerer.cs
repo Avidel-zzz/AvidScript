@@ -112,6 +112,33 @@ internal static class CSharpAsyncLowerer
                 continue;
             }
 
+            if (method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering)
+            {
+                CSharpAsyncCfgLowerer.Lower(
+                    document,
+                    method,
+                    callable,
+                    guestTypes,
+                    dataPool,
+                    new CSharpAsyncAbi(
+                        delayImportId,
+                        objectLoadImportId,
+                        bindCancellationImportId,
+                        resultReadImportId,
+                        stateStoreImportId,
+                        stateReadImportId,
+                        cancelImportId,
+                        int32Type,
+                        int64Type,
+                        statusType,
+                        loadedObjectType,
+                        voidType),
+                    functions,
+                    routes,
+                    diagnostics);
+                continue;
+            }
+
             for (int index = 0; index < method.Segments.Count; ++index)
             {
                 SemanticAsyncSegment segment = method.Segments[index];
@@ -528,7 +555,7 @@ internal static class CSharpAsyncLowerer
         return new CSharpAsyncLoweringResult(functions, routes);
     }
 
-    private static bool EmitIncomingState(
+    internal static bool EmitIncomingState(
         CSharpFunctionLoweringContext context,
         SemanticAsyncStateFrame frame,
         int blockOrdinal,
@@ -628,7 +655,7 @@ internal static class CSharpAsyncLowerer
         return true;
     }
 
-    private static bool EmitOutgoingState(
+    internal static bool EmitOutgoingState(
         CSharpFunctionLoweringContext context,
         SemanticAsyncStateFrame frame,
         int blockOrdinal,
@@ -775,7 +802,7 @@ internal static class CSharpAsyncLowerer
         return true;
     }
 
-    private static bool EmitIncomingResult(
+    internal static bool EmitIncomingResult(
         CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite incoming,
         string? resultReadImportId,
@@ -928,7 +955,7 @@ internal static class CSharpAsyncLowerer
         return true;
     }
 
-    private static bool EmitProducer(
+    internal static bool EmitProducer(
         CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite awaitSite,
         string? delayImportId,

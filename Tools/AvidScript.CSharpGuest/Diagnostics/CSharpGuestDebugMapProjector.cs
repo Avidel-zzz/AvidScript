@@ -137,6 +137,29 @@ public static class CSharpGuestDebugMapProjector
         Dictionary<string, AsyncResumeDebugTarget> targets = new(StringComparer.Ordinal);
         foreach (SemanticAsyncMethod method in document.AsyncMethods)
         {
+            if (method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering)
+            {
+                foreach (SemanticAsyncSegment awaitSegment in method.Segments
+                    .Where(segment => segment.AwaitSite is not null))
+                {
+                    SemanticAsyncAwaitSite incoming = awaitSegment.AwaitSite!;
+                    int targetOrdinal = awaitSegment.Transfer?.PrimaryTarget ?? -1;
+                    SemanticAsyncSegment? targetSegment = method.Segments
+                        .SingleOrDefault(segment => segment.Ordinal == targetOrdinal);
+                    string functionId = CSharpGuestIds.AsyncResumeFunction(incoming.CallbackId);
+                    if (targetSegment is null
+                        || !targets.TryAdd(functionId, new AsyncResumeDebugTarget(
+                            method.MethodSymbolId,
+                            targetSegment.Ordinal,
+                            targetSegment.Span)))
+                    {
+                        throw new InvalidDataException(
+                            $"ASDEBUG1003: Async CFG resume function identity '{functionId}' has no unique source segment mapping.");
+                    }
+                }
+                continue;
+            }
+
             for (int index = 1; index < method.Segments.Count; ++index)
             {
                 SemanticAsyncAwaitSite? incoming = method.Segments[index - 1].AwaitSite;

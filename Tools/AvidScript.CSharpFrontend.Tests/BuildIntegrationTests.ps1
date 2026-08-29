@@ -974,7 +974,7 @@ $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
 Assert-Condition ($SemanticJson.schema_version -eq 15) "semantic artifact schema version is not 15"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.16") "semantic artifact version is not 1.16"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.17") "semantic artifact version is not 1.17"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
@@ -992,22 +992,22 @@ Assert-Condition ((@($ContinuationCallbacks.payload_kind) -join ',') -ceq 'none,
 $AsyncMethods = @($SemanticJson.async_methods)
 Assert-Condition ($AsyncMethods.Count -eq 1) "ActorLifecycle does not expose one controlled async method"
 Assert-Condition ([string]$AsyncMethods[0].export_name -ceq 'avid_on_begin_play' -and
-    [string]$AsyncMethods[0].lowering -ceq 'reentrant_zero_heap_cps' -and
-    @($AsyncMethods[0].segments).Count -eq 4) `
+    [string]$AsyncMethods[0].lowering -ceq 'continuation_cfg' -and
+    [int]$AsyncMethods[0].entry_segment_ordinal -eq 0 -and
+    @($AsyncMethods[0].segments).Count -eq 25) `
     "ActorLifecycle BeginPlay controlled async graph is invalid"
 $AsyncAwaitSites = @($AsyncMethods[0].segments | ForEach-Object { $_.await_site } | Where-Object { $null -ne $_ })
 Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1073741825,1073741826' -and
-    (@($AsyncAwaitSites.producer_kind) -join ',') -ceq 'next_tick,object_load,next_tick' -and
-    (@($AsyncAwaitSites.state_frame | ForEach-Object { @($_.slots).Count }) -join ',') -ceq '2,2,3') `
+    (@($AsyncAwaitSites.producer_kind) -join ',') -ceq 'object_load,next_tick,delay' -and
+    (@($AsyncAwaitSites.state_frame | ForEach-Object { @($_.slots).Count }) -join ',') -ceq '2,4,1') `
     "ActorLifecycle compiler-owned await sites differ"
-$AsyncGuardStatements = @($AsyncMethods[0].segments | ForEach-Object { $_.statements } | Where-Object {
-    [string]$_.operation.kind -ceq 'async_early_return_guard'
-})
-Assert-Condition ($AsyncGuardStatements.Count -eq 1 -and
-    [string]$AsyncGuardStatements[0].operation.type_id -ceq 'type:void' -and
-    @($AsyncGuardStatements[0].operation.children).Count -eq 1 -and
-    [string]$AsyncGuardStatements[0].operation.children[0].type_id -ceq 'type:bool') `
-    "ActorLifecycle async early-return guard contract differs"
+$AsyncTransfers = @($AsyncMethods[0].segments | ForEach-Object { $_.transfer })
+Assert-Condition (@($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'await' }).Count -eq 3 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'branch' }).Count -eq 4 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'goto' }).Count -eq 16 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'return' }).Count -eq 2 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'await' -and [int]$_.primary_target -lt 0 }).Count -eq 0) `
+    "ActorLifecycle continuation CFG transfer contract differs"
 $GameplayCallbacks = @($SemanticJson.gameplay_event_callbacks)
 Assert-Condition ($GameplayCallbacks.Count -eq 4) "ActorLifecycle does not expose four natural gameplay callbacks"
 Assert-Condition ((@($GameplayCallbacks.event_type) -join ',') -ceq '1,2,3,4') "ActorLifecycle gameplay callback event types differ"
@@ -1064,10 +1064,19 @@ Assert-Condition (@($GuestIrJson.functions | Where-Object {
 $BeginPlayFunctionId = [string](@($GuestIrJson.exports | Where-Object {
     [string]$_.name -ceq 'avid_on_begin_play'
 })[0].function_id)
-Assert-Condition (@($GuestIrJson.functions | Where-Object {
+$ControlledAsyncFunctions = @($GuestIrJson.functions | Where-Object {
     ([string]$_.id -ceq $BeginPlayFunctionId) -or
         ([string]$_.id -clike 'function:synthetic:async_resume:*')
-} | ForEach-Object { @($_.blocks | Where-Object { [string]$_.terminator.kind -ceq 'trap' }) }).Count -eq 6) `
+})
+Assert-Condition (@($ControlledAsyncFunctions | ForEach-Object {
+        @($_.blocks | Where-Object { [string]$_.id -clike '*:schedule_rejected' })
+    }).Count -eq 5 -and
+    @($ControlledAsyncFunctions | ForEach-Object {
+        @($_.blocks | Where-Object { [string]$_.id -clike '*:state_rejected' })
+    }).Count -eq 3 -and
+    @($ControlledAsyncFunctions | ForEach-Object {
+        @($_.blocks | Where-Object { [string]$_.terminator.kind -ceq 'trap' })
+    }).Count -eq 8) `
     "each ActorLifecycle await producer does not fail closed on state-store or scheduling rejection"
 Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"

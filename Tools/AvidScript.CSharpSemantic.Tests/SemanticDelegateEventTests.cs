@@ -42,7 +42,7 @@ internal static class SemanticDelegateEventTests
         SemanticDelegateEventCallback callback = document.DelegateEventCallbacks.Single();
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16",
+            && document.SemanticVersion == "1.17",
             "valid delegate event contracts should publish semantic schema v15");
         Assert(callback.SubscriptionId == SignalId
             && callback.ExportName == "avid_on_delegate_0123456789abcdef"

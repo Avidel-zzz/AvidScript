@@ -101,13 +101,19 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
 		TEXT("await AvidContinuations.NextTickAsync();"));
 	const int32 ObjectAwaitIndex = InitialSourceText.Find(
 		TEXT("await AvidAssets.LoadObjectAsync("));
+	const int32 AsyncLoopIndex = InitialSourceText.Find(
+		TEXT("for (int pass = 0; pass < scalePasses; ++pass)"));
+	const int32 ConditionalDelayIndex = InitialSourceText.Find(
+		TEXT("await AvidContinuations.DelayAsync(0.01f);"));
 	const int32 ObjectUseIndex = InitialSourceText.Find(
 		TEXT("HasAwaitedDefaultMesh = loadedObject.IsValid;"));
-	TestTrue(TEXT("Gameplay starter awaits next tick before object loading"),
-		NextTickAwaitIndex != INDEX_NONE
-		&& ObjectAwaitIndex > NextTickAwaitIndex);
-	TestTrue(TEXT("Gameplay starter consumes the object result in its resume segment"),
-		ObjectUseIndex > ObjectAwaitIndex);
+	TestTrue(TEXT("Gameplay starter awaits one next tick per loop iteration"),
+		ObjectAwaitIndex != INDEX_NONE
+		&& AsyncLoopIndex > ObjectAwaitIndex
+		&& NextTickAwaitIndex > AsyncLoopIndex);
+	TestTrue(TEXT("Gameplay starter supports a conditional delay continuation"),
+		ConditionalDelayIndex > NextTickAwaitIndex
+		&& ObjectUseIndex > ConditionalDelayIndex);
 	TestTrue(TEXT("Gameplay starter declares begin overlap callback"), InitialSourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Gameplay starter declares end overlap callback"), InitialSourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Gameplay starter declares hit callback"), InitialSourceText.Contains(TEXT("public static void OnHit(AActor otherActor, FVector normalImpulse)")));

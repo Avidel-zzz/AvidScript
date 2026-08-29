@@ -28,7 +28,8 @@ internal static class CSharpGuestContinuationTests
         CancellationMarkerBindsScheduledContinuation();
         AsyncStateFramesPreserveLocalsAcrossSequentialAwaits();
         StructuredAsyncFlowLowersDeterministicGuestBlocks();
-        return 14;
+        NestedAwaitCfgLowersBranchAndLoopResumes();
+        return 15;
     }
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
@@ -83,7 +84,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -521,7 +522,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -838,7 +839,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -861,6 +862,109 @@ internal static class CSharpGuestContinuationTests
         SemanticDocument legacy = document with { SemanticVersion = "1.15" };
         Assert(!CSharpGuestLowerer.Lower(legacy, SemanticHash).Succeeded,
             "semantic 1.15 artifacts must not carry semantic 1.16 structured async flow nodes");
+    }
+
+    private static void NestedAwaitCfgLowersBranchAndLoopResumes()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int movementCount = 2;
+                    for (int index = 0; index < movementCount; ++index)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        Consume(index);
+                    }
+
+                    if (ShouldDelay(movementCount))
+                    {
+                        await AvidContinuations.DelayAsync(0.1f);
+                    }
+                    Consume(movementCount);
+                }
+
+                private static bool ShouldDelay(int value) => value > 1;
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/NestedAwaitCfgGuest.cs");
+        CSharpGuestLoweringResult first = CSharpGuestLowerer.Lower(document, SemanticHash);
+        CSharpGuestLoweringResult second = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = first.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                first.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncSegment[] awaitSegments = method.Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .OrderBy(segment => segment.AwaitSite!.CallbackId)
+            .ToArray();
+        GuestFunction initial = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_begin_play").FunctionId);
+        GuestFunction loopResume = module.Functions.Single(function =>
+            function.Id == $"function:synthetic:async_resume:{awaitSegments[0].AwaitSite!.CallbackId}");
+        GuestFunction branchResume = module.Functions.Single(function =>
+            function.Id == $"function:synthetic:async_resume:{awaitSegments[1].AwaitSite!.CallbackId}");
+        string loopAwaitBlockId =
+            $"block:synthetic:async_segment:{method.MethodSymbolId}:{awaitSegments[0].Ordinal}";
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            document,
+            module,
+            SemanticHash,
+            document.Source.FrontendSha256);
+
+        Assert(first.Succeeded
+            && second.Succeeded
+            && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
+            && awaitSegments.Length == 2
+            && module.Functions.Count(function => function.Id.StartsWith(
+                "function:synthetic:async_resume:",
+                StringComparison.Ordinal)) == 2
+            && initial.Blocks.Any(block => block.Id == loopAwaitBlockId)
+            && loopResume.Blocks.Any(block => block.Id == loopAwaitBlockId)
+            && loopResume.Blocks.Any(block =>
+                block.Terminator.TargetBlockId == loopAwaitBlockId
+                || block.Terminator.FalseTargetBlockId == loopAwaitBlockId),
+            "nested loop await should lower to one callback resume function whose synchronous CFG can schedule the same site again");
+        Assert(branchResume.Blocks.Any(block => block.Id.EndsWith(
+                ":state_rejected",
+                StringComparison.Ordinal))
+            && branchResume.Blocks.Any(block => block.Terminator.Kind == "return")
+            && debugMap.Functions.Count(function => function.GuestFunctionId.StartsWith(
+                "function:synthetic:async_resume:",
+                StringComparison.Ordinal)) == 2,
+            "each nested await should restore its exact frame before branching to its source resume segment");
+        Assert(GuestIrSerializer.Serialize(module)
+                .SequenceEqual(GuestIrSerializer.Serialize(second.Module!))
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "continuation CFG lowering should remain deterministic, valid, and compilable to WASM");
+
+        SemanticAsyncSegment entrySegment = method.Segments[method.EntrySegmentOrdinal];
+        SemanticAsyncSegment[] tamperedSegments = method.Segments
+            .Select(segment => segment.Ordinal == entrySegment.Ordinal
+                ? segment with
+                {
+                    Transfer = segment.Transfer! with { PrimaryTarget = 999 },
+                }
+                : segment)
+            .ToArray();
+        SemanticDocument tampered = document with
+        {
+            AsyncMethods = new[] { method with { Segments = tamperedSegments } },
+        };
+        Assert(!CSharpGuestLowerer.Lower(tampered, SemanticHash).Succeeded,
+            "continuation CFG targets outside the current method must fail closed before Guest lowering");
     }
 
     private static void CallbacksProduceOneDeterministicSixCellV2Export()

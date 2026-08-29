@@ -139,11 +139,20 @@ internal static class SemanticReachabilityProjector
                 yield return statement.Operation;
             }
 
+            if (segment.Transfer?.Condition is { } condition)
+            {
+                yield return condition;
+            }
+
             if (segment.AwaitSite is { } awaitSite)
             {
                 foreach (SemanticOperation argument in awaitSite.Arguments)
                 {
                     yield return argument;
+                }
+                if (awaitSite.CancellationToken is { } cancellationToken)
+                {
+                    yield return cancellationToken;
                 }
             }
         }

@@ -180,6 +180,37 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
+        bool hasNestedAwait = awaits.Any(awaitExpression =>
+            !IsDirectMethodBodyAwait(declaration.Body, awaitExpression));
+        if (hasNestedAwait)
+        {
+            if (!SemanticAsyncControlFlowProjector.TryProject(
+                context,
+                semanticModel,
+                declaration.Body,
+                typeRegistry,
+                diagnostics,
+                ref nextCallbackId,
+                out SemanticAsyncControlFlowProjection? flowProjection)
+                || !TryAttachStateFrames(
+                    flowProjection!.Segments,
+                    diagnostics,
+                    isControlFlow: true,
+                    out IReadOnlyList<SemanticAsyncSegment> framedSegments))
+            {
+                return false;
+            }
+
+            projected = new SemanticAsyncMethod(
+                methodSymbolId,
+                callable!.Export!.Name,
+                SemanticAsyncMethod.ContinuationCfgLowering,
+                framedSegments,
+                declarationSpan,
+                flowProjection.EntrySegmentOrdinal);
+            return true;
+        }
+
         List<AsyncSegmentBuilder> segments = new() { new AsyncSegmentBuilder(0) };
         int structuredNodeCount = 0;
         int diagnosticsBeforeStatements = diagnostics.Count;
@@ -246,6 +277,7 @@ internal static class SemanticAsyncProjector
         if (!TryAttachStateFrames(
             projectedSegments,
             diagnostics,
+            isControlFlow: false,
             out projectedSegments))
         {
             valid = false;
@@ -265,7 +297,20 @@ internal static class SemanticAsyncProjector
         return true;
     }
 
-    private static bool TryGetDirectAwait(
+    private static bool IsDirectMethodBodyAwait(
+        BlockSyntax body,
+        AwaitExpressionSyntax awaitExpression)
+    {
+        StatementSyntax? statement = awaitExpression
+            .AncestorsAndSelf()
+            .OfType<StatementSyntax>()
+            .FirstOrDefault();
+        return statement?.Parent == body
+            && TryGetDirectAwait(statement, out AwaitExpressionSyntax? directAwait, out _)
+            && directAwait?.Span == awaitExpression.Span;
+    }
+
+    internal static bool TryGetDirectAwait(
         StatementSyntax statement,
         out AwaitExpressionSyntax? awaitExpression,
         out VariableDeclaratorSyntax? result)
@@ -290,7 +335,7 @@ internal static class SemanticAsyncProjector
         return false;
     }
 
-    private static bool TryProjectStatement(
+    internal static bool TryProjectStatement(
         SemanticCompilationContext context,
         SemanticModel semanticModel,
         StatementSyntax statement,
@@ -467,6 +512,32 @@ internal static class SemanticAsyncProjector
         ref int nextCallbackId,
         out SemanticAsyncAwaitSite? projected)
     {
+        if (!TryProjectAwaitSite(
+            context,
+            semanticModel,
+            awaitExpression,
+            result,
+            typeRegistry,
+            diagnostics,
+            nextCallbackId,
+            out projected))
+        {
+            return false;
+        }
+        ++nextCallbackId;
+        return true;
+    }
+
+    internal static bool TryProjectAwaitSite(
+        SemanticCompilationContext context,
+        SemanticModel semanticModel,
+        AwaitExpressionSyntax awaitExpression,
+        VariableDeclaratorSyntax? result,
+        SemanticTypeRegistry typeRegistry,
+        ICollection<SemanticDiagnostic> diagnostics,
+        int callbackId,
+        out SemanticAsyncAwaitSite? projected)
+    {
         projected = null;
         if (semanticModel.GetOperation(awaitExpression) is not IAwaitOperation awaitOperation
             || awaitOperation.Operation is not IInvocationOperation candidateInvocation)
@@ -583,7 +654,7 @@ internal static class SemanticAsyncProjector
         }
 
         projected = new SemanticAsyncAwaitSite(
-            nextCallbackId++,
+            callbackId,
             producer.Kind,
             producer.PayloadKind,
             projectedArguments,
@@ -874,10 +945,13 @@ internal static class SemanticAsyncProjector
     private static bool TryAttachStateFrames(
         IReadOnlyList<SemanticAsyncSegment> segments,
         ICollection<SemanticDiagnostic> diagnostics,
+        bool isControlFlow,
         out IReadOnlyList<SemanticAsyncSegment> projectedSegments)
     {
         projectedSegments = segments;
-        SemanticAsyncStateFlowAnalysis analysis = SemanticAsyncStateFlowAnalyzer.Analyze(segments);
+        SemanticAsyncStateFlowAnalysis analysis = isControlFlow
+            ? SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(segments)
+            : SemanticAsyncStateFlowAnalyzer.Analyze(segments);
         foreach (SemanticAsyncStateFlowIssue issue in analysis.Issues)
         {
             diagnostics.Add(Error("ASCS5413", issue.Message, issue.Span));

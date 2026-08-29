@@ -42,23 +42,26 @@ public static class GameplayScript
             scalePasses = 2;
         }
         FVector scaleStep = new FVector(0.025f, 0.025f, 0.025f);
-        await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
-        await AvidContinuations.NextTickAsync();
         if (!loadedObject.IsValid)
         {
             return;
         }
-        HasAwaitedDefaultMesh = loadedObject.IsValid;
         FVector loadedMeshScale = new FVector(1.0f, 1.0f, 1.0f);
         for (int pass = 0; pass < scalePasses; ++pass)
         {
+            await AvidContinuations.NextTickAsync();
             loadedMeshScale = new FVector(
                 loadedMeshScale.X + scaleStep.X,
                 loadedMeshScale.Y + scaleStep.Y,
                 loadedMeshScale.Z + scaleStep.Z);
         }
+        if (!HasAwaitedDefaultMesh)
+        {
+            await AvidContinuations.DelayAsync(0.01f);
+        }
+        HasAwaitedDefaultMesh = loadedObject.IsValid;
         UE.Self.SetActorScale3D(loadedMeshScale);
     }
 

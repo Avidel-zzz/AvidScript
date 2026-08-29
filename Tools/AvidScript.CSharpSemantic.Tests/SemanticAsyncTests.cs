@@ -14,10 +14,12 @@ internal static class SemanticAsyncTests
         EarlyReturnGuardsProjectStableControlOperations();
         CrossBoundaryLocalsPublishStateFrames();
         StructuredFlowProjectsExactStateFrames();
+        NestedAwaitsProjectContinuationCfg();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
+        ControlFlowSegmentLimitFailsClosed();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 7;
+        return 9;
     }
 
     private static void EarlyReturnGuardsProjectStableControlOperations()
@@ -49,14 +51,14 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should remain explicit under the schema-v15 semantic-1.16 contract");
+            "top-level early-return guards should remain explicit under the schema-v15 semantic-1.17 contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -249,9 +251,9 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 15 / semantic 1.16");
+            "controlled async exports should publish schema 15 / semantic 1.17");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -424,7 +426,7 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.16"
+            && document.SemanticVersion == "1.17"
             && awaitSite.StateFrame is { } stateFrame
             && stateFrame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { movementCountId })
@@ -437,6 +439,83 @@ internal static class SemanticAsyncTests
             && flow.Any(operation => operation.Kind == SemanticAsyncMethod.BreakOperationKind)
             && flow.Any(operation => operation.Kind == SemanticAsyncMethod.ContinueOperationKind),
             "structured async flow should preserve only truly live locals across await boundaries");
+    }
+
+    private static void NestedAwaitsProjectContinuationCfg()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("nested_cfg")]
+                public static async void NestedCfg()
+                {
+                    int movementCount = 2;
+                    for (int index = 0; index < movementCount; ++index)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        Consume(index);
+                    }
+
+                    if (ShouldDelay(movementCount))
+                    {
+                        await AvidContinuations.DelayAsync(0.1f);
+                    }
+                    Consume(movementCount);
+                }
+
+                private static bool ShouldDelay(int value) => value > 1;
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/NestedAwaitCfg.cs");
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncSegment[] awaitSegments = method.Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .ToArray();
+        string movementCountId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "movementCount").Id;
+        string indexId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "index").Id;
+
+        Assert(document.Succeeded
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.17"
+            && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
+            && method.EntrySegmentOrdinal >= 0
+            && method.EntrySegmentOrdinal < method.Segments.Count
+            && method.Segments.Select(segment => segment.Ordinal)
+                .SequenceEqual(Enumerable.Range(0, method.Segments.Count))
+            && method.Segments.All(segment => segment.Transfer is not null)
+            && method.Segments.Any(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.BranchTransferKind)
+            && method.Segments.Any(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.GotoTransferKind)
+            && method.Segments.Any(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.ReturnTransferKind)
+            && awaitSegments.Length == 2
+            && awaitSegments.All(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.AwaitTransferKind)
+            && awaitSegments.Select(segment => segment.AwaitSite!.CallbackId)
+                .SequenceEqual(new[] { CompilerCallbackIdStart, CompilerCallbackIdStart + 1 })
+            && awaitSegments.All(segment => segment.Transfer!.PrimaryTarget >= 0),
+            "nested branch and loop awaits should project one bounded continuation CFG with exact resume targets");
+        Assert(document.Reachability!.ReachableCallableIds.Any(id => id.Contains(
+                ".ShouldDelay(",
+                StringComparison.Ordinal)),
+            "continuation CFG branch conditions should retain their synchronous helper call graph");
+
+        SemanticAsyncStateFrame loopFrame = awaitSegments[0].AwaitSite!.StateFrame!;
+        SemanticAsyncStateFrame branchFrame = awaitSegments[1].AwaitSite!.StateFrame!;
+        Assert(loopFrame.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { indexId, movementCountId }.OrderBy(id => id, StringComparer.Ordinal))
+            && branchFrame.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { movementCountId }),
+            "CFG liveness should preserve loop control state and remove locals that are dead at a later branch await");
     }
 
     private static void NonFrozenAsyncShapesRemainFailClosed()
@@ -458,10 +537,7 @@ internal static class SemanticAsyncTests
                 [AvidExport("nested")]
                 public static async void Nested()
                 {
-                    if (true)
-                    {
-                        await AvidContinuations.NextTickAsync();
-                    }
+                    Consume(await AvidAssets.LoadObjectAsync("/Game/Valid.Valid"));
                 }
 
                 [AvidExport("arbitrary")]
@@ -469,6 +545,8 @@ internal static class SemanticAsyncTests
                 {
                     await CustomProducer.GetAsync();
                 }
+
+                private static void Consume(AvidLoadedObject value) { }
             }
 
             public static class CustomProducer
@@ -485,7 +563,7 @@ internal static class SemanticAsyncTests
             && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5402")
             && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5403")
             && document.Diagnostics.Count(diagnostic => diagnostic.Code == "ASCS3002") == 3,
-            "Task owners, nested control flow, and arbitrary awaiters should retain ASCS3002 and stable async diagnostics");
+            "Task owners, expression-nested awaits, and arbitrary awaiters should retain ASCS3002 and stable async diagnostics");
     }
 
     private static void CallbackRangesAndAwaitLimitsAreEnforced()
@@ -555,6 +633,39 @@ internal static class SemanticAsyncTests
             && module.AsyncMethods.Count == 0
             && module.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5408"),
             "one module should permit at most sixty-four controlled await sites");
+    }
+
+    private static void ControlFlowSegmentLimitFailsClosed()
+    {
+        string trailingStatements = string.Join(
+            Environment.NewLine,
+            Enumerable.Repeat("Consume();", 63));
+        string source = $$"""
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [AvidExport("oversized_cfg")]
+                public static async void OversizedControlFlow()
+                {
+                    while (ShouldContinue())
+                    {
+                        await AvidContinuations.NextTickAsync();
+                    }
+                    {{trailingStatements}}
+                }
+
+                private static bool ShouldContinue() => false;
+                private static void Consume() { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/OversizedAsyncCfg.cs");
+
+        Assert(!document.Succeeded
+            && document.AsyncMethods.Count == 0
+            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5417"),
+            "oversized controlled async CFGs should fail closed with ASCS5417 instead of throwing");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)

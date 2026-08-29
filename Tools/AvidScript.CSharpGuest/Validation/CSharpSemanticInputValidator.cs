@@ -447,7 +447,9 @@ internal static class CSharpSemanticInputValidator
             if (method is null
                 || string.IsNullOrWhiteSpace(method.MethodSymbolId)
                 || string.IsNullOrWhiteSpace(method.ExportName)
-                || method.Lowering != SemanticAsyncMethod.ReentrantZeroHeapCpsLowering
+                || method.Lowering is not (
+                    SemanticAsyncMethod.ReentrantZeroHeapCpsLowering or
+                    SemanticAsyncMethod.ContinuationCfgLowering)
                 || method.Segments is null
                 || method.Segments.Count == 0
                 || method.Segments.Any(segment => segment is null)
@@ -471,6 +473,19 @@ internal static class CSharpSemanticInputValidator
                 return false;
             }
             moduleAwaitCount += methodAwaitCount;
+
+            if (method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering)
+            {
+                if (!ValidateAsyncControlFlowMethod(
+                    document,
+                    method,
+                    symbolsById,
+                    ref expectedCallbackId))
+                {
+                    return false;
+                }
+                continue;
+            }
 
             Dictionary<string, int> localDeclarationSegments = new(StringComparer.Ordinal);
             Dictionary<string, int> resultUseSegments = new(StringComparer.Ordinal);
@@ -611,7 +626,7 @@ internal static class CSharpSemanticInputValidator
 
             SemanticAsyncStateFlowAnalysis currentStateAnalysis =
                 SemanticAsyncStateFlowAnalyzer.Analyze(method.Segments);
-            if (document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+            if (UsesExactAsyncStateFlow(document.SemanticVersion)
                 && currentStateAnalysis.Issues.Count > 0)
             {
                 return false;
@@ -621,7 +636,7 @@ internal static class CSharpSemanticInputValidator
             {
                 SemanticAsyncAwaitSite awaitSite = segment.AwaitSite!;
                 IReadOnlyList<SemanticAsyncStateSlot> expectedSlots =
-                    document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+                    UsesExactAsyncStateFlow(document.SemanticVersion)
                         ? currentStateAnalysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
                             ?? Array.Empty<SemanticAsyncStateSlot>()
                         : declarationSegments
@@ -665,6 +680,223 @@ internal static class CSharpSemanticInputValidator
         }
 
         return moduleAwaitCount <= MaximumAsyncAwaitsPerModule;
+    }
+
+    private static bool ValidateAsyncControlFlowMethod(
+        SemanticDocument document,
+        SemanticAsyncMethod method,
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
+        ref int expectedCallbackId)
+    {
+        if (document.SemanticVersion != SemanticContract.CurrentSemanticVersion
+            || method.EntrySegmentOrdinal < 0
+            || method.EntrySegmentOrdinal >= method.Segments.Count
+            || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments)
+        {
+            return false;
+        }
+
+        HashSet<int> validTargets = method.Segments
+            .Select(segment => segment.Ordinal)
+            .ToHashSet();
+        Dictionary<string, string> localTypes = new(StringComparer.Ordinal);
+        AsyncFlowValidationBudget flowBudget = new();
+        int expectedSegmentOrdinal = 0;
+        foreach (SemanticAsyncSegment segment in method.Segments)
+        {
+            if (segment.Ordinal < 0
+                || segment.Ordinal >= method.Segments.Count
+                || segment.Ordinal != expectedSegmentOrdinal++
+                || segment.Statements is null
+                || segment.Statements.Any(statement => statement is null)
+                || segment.Transfer is null
+                || !IsValidSpan(segment.Span, document.Source.Length))
+            {
+                return false;
+            }
+
+            foreach (SemanticAsyncStatement statement in segment.Statements)
+            {
+                if (statement.Operation is null
+                    || !ValidateOperation(statement.Operation)
+                    || !AllOperationsSupported(statement.Operation)
+                    || !ValidateAsyncStatement(
+                        document.SchemaVersion,
+                        document.SemanticVersion,
+                        statement,
+                        flowBudget))
+                {
+                    return false;
+                }
+
+                if (statement.TargetSymbolId is { } targetSymbolId
+                    && (!TryAddMethodLocal(
+                            symbolsById,
+                            method.MethodSymbolId,
+                            targetSymbolId,
+                            statement.Operation.TypeId,
+                            localTypes)))
+                {
+                    return false;
+                }
+                foreach (SemanticOperation declaration in EnumerateOperations(statement.Operation)
+                    .Where(operation => operation.Kind
+                        == SemanticAsyncMethod.LocalDeclarationOperationKind))
+                {
+                    if (!TryAddMethodLocal(
+                        symbolsById,
+                        method.MethodSymbolId,
+                        declaration.SymbolId,
+                        declaration.TypeId,
+                        localTypes))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            SemanticAsyncControlTransfer transfer = segment.Transfer;
+            bool validTransfer = transfer.Kind switch
+            {
+                SemanticAsyncMethod.GotoTransferKind =>
+                    segment.AwaitSite is null
+                    && transfer.Condition is null
+                    && validTargets.Contains(transfer.PrimaryTarget)
+                    && transfer.SecondaryTarget == -1,
+                SemanticAsyncMethod.BranchTransferKind =>
+                    segment.AwaitSite is null
+                    && transfer.Condition is not null
+                    && transfer.Condition.TypeId == "type:bool"
+                    && ValidateOperation(transfer.Condition)
+                    && AllOperationsSupported(transfer.Condition)
+                    && validTargets.Contains(transfer.PrimaryTarget)
+                    && validTargets.Contains(transfer.SecondaryTarget),
+                SemanticAsyncMethod.AwaitTransferKind =>
+                    segment.AwaitSite is not null
+                    && transfer.Condition is null
+                    && validTargets.Contains(transfer.PrimaryTarget)
+                    && transfer.SecondaryTarget == -1,
+                SemanticAsyncMethod.ReturnTransferKind =>
+                    segment.AwaitSite is null
+                    && transfer.Condition is null
+                    && transfer.PrimaryTarget == -1
+                    && transfer.SecondaryTarget == -1,
+                _ => false,
+            };
+            if (!validTransfer)
+            {
+                return false;
+            }
+
+            if (segment.AwaitSite is { } awaitSite)
+            {
+                if (awaitSite.CallbackId != expectedCallbackId++
+                    || !ValidateAsyncAwaitSite(
+                        awaitSite,
+                        document.Source.Length,
+                        method.MethodSymbolId,
+                        symbolsById,
+                        document,
+                        document.Callables))
+                {
+                    return false;
+                }
+                if (awaitSite.ResultSymbolId is { } resultSymbolId
+                    && !TryAddMethodLocal(
+                        symbolsById,
+                        method.MethodSymbolId,
+                        resultSymbolId,
+                        awaitSite.ResultTypeId,
+                        localTypes))
+                {
+                    return false;
+                }
+            }
+        }
+
+        HashSet<int> reachable = new();
+        Stack<int> pending = new();
+        pending.Push(method.EntrySegmentOrdinal);
+        while (pending.Count > 0)
+        {
+            int ordinal = pending.Pop();
+            if (!reachable.Add(ordinal))
+            {
+                continue;
+            }
+            SemanticAsyncControlTransfer transfer = method.Segments[ordinal].Transfer!;
+            if (transfer.PrimaryTarget >= 0)
+            {
+                pending.Push(transfer.PrimaryTarget);
+            }
+            if (transfer.SecondaryTarget >= 0)
+            {
+                pending.Push(transfer.SecondaryTarget);
+            }
+        }
+        if (reachable.Count != method.Segments.Count)
+        {
+            return false;
+        }
+
+        SemanticAsyncStateFlowAnalysis stateAnalysis =
+            SemanticAsyncStateFlowAnalyzer.AnalyzeControlFlow(method.Segments);
+        if (stateAnalysis.Issues.Count > 0)
+        {
+            return false;
+        }
+        foreach (SemanticAsyncSegment segment in method.Segments
+            .Where(item => item.AwaitSite is not null))
+        {
+            SemanticAsyncAwaitSite awaitSite = segment.AwaitSite!;
+            IReadOnlyList<SemanticAsyncStateSlot> expectedSlots =
+                stateAnalysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
+                ?? Array.Empty<SemanticAsyncStateSlot>();
+            SemanticAsyncStateFrame? frame = awaitSite.StateFrame;
+            if (expectedSlots.Count == 0)
+            {
+                if (frame is not null)
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (expectedSlots.Count > MaximumAsyncStateSlotsPerAwait
+                || frame is null
+                || frame.TypeId != $"type:synthetic:async_state:{awaitSite.CallbackId}"
+                || frame.Slots.Count != expectedSlots.Count
+                || !frame.Slots.Select(slot => (slot.SymbolId, slot.TypeId))
+                    .SequenceEqual(expectedSlots.Select(slot => (slot.SymbolId, slot.TypeId)))
+                || !Unique(frame.Slots.Select(slot => slot.SymbolId)))
+            {
+                return false;
+            }
+        }
+
+        bool hasStateFrames = method.Segments.Any(segment =>
+            segment.AwaitSite?.StateFrame is not null);
+        return !hasStateFrames
+            || HasContinuationStateImport(document.Callables, "continuation_state_store")
+                && HasContinuationStateImport(document.Callables, "continuation_state_read");
+    }
+
+    private static bool TryAddMethodLocal(
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
+        string methodSymbolId,
+        string? symbolId,
+        string? typeId,
+        IDictionary<string, string> localTypes)
+    {
+        return symbolId is not null
+            && typeId is not null
+            && IsMethodLocal(symbolsById, symbolId, methodSymbolId, typeId)
+            && localTypes.TryAdd(symbolId, typeId);
+    }
+
+    private static bool UsesExactAsyncStateFlow(string semanticVersion)
+    {
+        return semanticVersion is "1.16"
+            || semanticVersion == SemanticContract.CurrentSemanticVersion;
     }
 
     private static bool ValidateAsyncAwaitSite(
@@ -918,6 +1150,7 @@ internal static class CSharpSemanticInputValidator
             (13, "1.13") => true,
             (14, "1.14") => true,
             (15, "1.15") => true,
+            (15, "1.16") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -970,7 +1203,8 @@ internal static class CSharpSemanticInputValidator
         {
             return true;
         }
-        return semanticVersion == SemanticContract.CurrentSemanticVersion
+        return (semanticVersion is "1.16"
+                || semanticVersion == SemanticContract.CurrentSemanticVersion)
             && statement.TargetSymbolId is null
             && ValidateStructuredAsyncFlow(
                 statement.Operation,

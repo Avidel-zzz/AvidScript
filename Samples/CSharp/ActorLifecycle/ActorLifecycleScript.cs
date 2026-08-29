@@ -48,19 +48,22 @@ public static class ActorLifecycleScript
             movementPasses = 2;
         }
         FVector loadedMeshOffset = new FVector(0.0f, 0.0f, 5.0f);
-        await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
-        await AvidContinuations.NextTickAsync();
         if (!loadedObject.IsValid)
         {
             return;
         }
-        HasAwaitedDefaultMesh = loadedObject.IsValid;
         for (int pass = 0; pass < movementPasses; ++pass)
         {
+            await AvidContinuations.NextTickAsync();
             UE.Self.AddActorWorldOffset(loadedMeshOffset);
         }
+        if (!HasAwaitedDefaultMesh)
+        {
+            await AvidContinuations.DelayAsync(0.01f);
+        }
+        HasAwaitedDefaultMesh = loadedObject.IsValid;
     }
 
     [AvidContinuation(DeferredBeginPlay)]
