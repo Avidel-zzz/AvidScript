@@ -27,7 +27,8 @@ internal static class CSharpGuestContinuationTests
         AsyncOutcomeGuardBranchesBeforeNextAwait();
         CancellationMarkerBindsScheduledContinuation();
         AsyncStateFramesPreserveLocalsAcrossSequentialAwaits();
-        return 13;
+        StructuredAsyncFlowLowersDeterministicGuestBlocks();
+        return 14;
     }
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
@@ -82,7 +83,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.15"
+            && document.SemanticVersion == "1.16"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -520,7 +521,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(result.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.15"
+            && document.SemanticVersion == "1.16"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -744,6 +745,122 @@ internal static class CSharpGuestContinuationTests
             && GuestModuleValidator.Validate(module).Succeeded
             && WasmModuleCompiler.Compile(module).Succeeded,
             "compiler resume routes should preserve the v2 token and cancel rejected state attachment atomically");
+    }
+
+    private static void StructuredAsyncFlowLowersDeterministicGuestBlocks()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int count;
+                    if (ShouldRepeat())
+                    {
+                        count = 3;
+                    }
+                    else
+                    {
+                        count = 1;
+                    }
+                    int overwritten = 5;
+
+                    await AvidContinuations.NextTickAsync();
+
+                    overwritten = 10;
+                    for (int index = 0; index < count; ++index)
+                    {
+                        if (index == 1)
+                        {
+                            continue;
+                        }
+                        if (index > 2)
+                        {
+                            break;
+                        }
+                        Consume(index);
+                    }
+                    while (overwritten < 12)
+                    {
+                        ++overwritten;
+                        if (overwritten == 99)
+                        {
+                            return;
+                        }
+                        if (overwritten == 11)
+                        {
+                            break;
+                        }
+                    }
+                    do
+                    {
+                        --overwritten;
+                    }
+                    while (overwritten > 10);
+                    Consume(overwritten);
+                }
+
+                private static bool ShouldRepeat() => true;
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/StructuredAsyncGuest.cs");
+        CSharpGuestLoweringResult first = CSharpGuestLowerer.Lower(document, SemanticHash);
+        CSharpGuestLoweringResult second = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = first.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                first.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestBasicBlock[] flowBlocks = module.Functions
+            .Where(function => function.Id == module.Exports.Single(export =>
+                    export.Name == "avid_on_begin_play").FunctionId
+                || function.Id.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal))
+            .SelectMany(function => function.Blocks)
+            .Where(block => block.Id.Contains(":flow_", StringComparison.Ordinal))
+            .ToArray();
+        string countId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "count").Id;
+        string overwrittenId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "overwritten").Id;
+        SemanticAsyncStateFrame frame = document.AsyncMethods.Single()
+            .Segments[0]
+            .AwaitSite!
+            .StateFrame!;
+
+        Assert(first.Succeeded
+            && second.Succeeded
+            && document.SemanticVersion == "1.16"
+            && frame.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { countId })
+            && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
+            "structured Guest lowering should retain only locals whose pre-await value remains live");
+        Assert(flowBlocks.Any(block => block.Id.EndsWith("_if_true", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Id.EndsWith("_if_join", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Id.EndsWith("_for_condition", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Id.EndsWith("_for_increment", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Id.EndsWith("_while_condition", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Id.EndsWith("_do_condition", StringComparison.Ordinal))
+            && flowBlocks.Any(block => block.Terminator.Kind == "return")
+            && flowBlocks.Count(block => block.Terminator.Kind == "branch_if") >= 6,
+            "if/else, loops, loop transfers, and nested return should lower to deterministic Guest basic blocks");
+        Assert(GuestIrSerializer.Serialize(module)
+                .SequenceEqual(GuestIrSerializer.Serialize(second.Module!))
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "structured async flow should produce deterministic valid Guest IR and compilable WASM");
+
+        SemanticDocument legacy = document with { SemanticVersion = "1.15" };
+        Assert(!CSharpGuestLowerer.Lower(legacy, SemanticHash).Succeeded,
+            "semantic 1.15 artifacts must not carry semantic 1.16 structured async flow nodes");
     }
 
     private static void CallbacksProduceOneDeterministicSixCellV2Export()

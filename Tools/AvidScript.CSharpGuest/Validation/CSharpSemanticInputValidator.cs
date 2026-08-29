@@ -475,6 +475,7 @@ internal static class CSharpSemanticInputValidator
             Dictionary<string, int> localDeclarationSegments = new(StringComparer.Ordinal);
             Dictionary<string, int> resultUseSegments = new(StringComparer.Ordinal);
             Dictionary<string, string> stateTypeIds = new(StringComparer.Ordinal);
+            AsyncFlowValidationBudget flowBudget = new();
             for (int index = 0; index < method.Segments.Count; ++index)
             {
                 SemanticAsyncSegment segment = method.Segments[index];
@@ -495,7 +496,11 @@ internal static class CSharpSemanticInputValidator
                         || statement.Operation is null
                         || !ValidateOperation(statement.Operation)
                         || !AllOperationsSupported(statement.Operation)
-                        || !ValidateAsyncStatement(document.SchemaVersion, statement))
+                        || !ValidateAsyncStatement(
+                            document.SchemaVersion,
+                            document.SemanticVersion,
+                            statement,
+                            flowBudget))
                     {
                         return false;
                     }
@@ -514,6 +519,26 @@ internal static class CSharpSemanticInputValidator
                     if (statement.TargetSymbolId is { } stateSymbolId)
                     {
                         stateTypeIds.Add(stateSymbolId, statement.Operation.TypeId!);
+                    }
+                    foreach (SemanticOperation declaration in EnumerateOperations(statement.Operation)
+                        .Where(operation => operation.Kind
+                            == SemanticAsyncMethod.LocalDeclarationOperationKind))
+                    {
+                        if (declaration.SymbolId is not { } declarationSymbolId
+                            || declaration.TypeId is not { } declarationTypeId
+                            || !localDeclarationSegments.TryAdd(
+                                declarationSymbolId,
+                                segment.Ordinal)
+                            || resultUseSegments.ContainsKey(declarationSymbolId)
+                            || !IsMethodLocal(
+                                symbolsById,
+                                declarationSymbolId,
+                                method.MethodSymbolId,
+                                declarationTypeId))
+                        {
+                            return false;
+                        }
+                        stateTypeIds.Add(declarationSymbolId, declarationTypeId);
                     }
                 }
 
@@ -584,18 +609,32 @@ internal static class CSharpSemanticInputValidator
                 continue;
             }
 
+            SemanticAsyncStateFlowAnalysis currentStateAnalysis =
+                SemanticAsyncStateFlowAnalyzer.Analyze(method.Segments);
+            if (document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+                && currentStateAnalysis.Issues.Count > 0)
+            {
+                return false;
+            }
+
             foreach (SemanticAsyncSegment segment in method.Segments.Where(item => item.AwaitSite is not null))
             {
                 SemanticAsyncAwaitSite awaitSite = segment.AwaitSite!;
-                SemanticAsyncStateSlot[] expectedSlots = declarationSegments
-                    .Where(pair => pair.Value <= segment.Ordinal
-                        && lastUseSegments.TryGetValue(pair.Key, out int lastUse)
-                        && lastUse > segment.Ordinal)
-                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                    .Select(pair => new SemanticAsyncStateSlot(pair.Key, stateTypeIds[pair.Key]))
-                    .ToArray();
+                IReadOnlyList<SemanticAsyncStateSlot> expectedSlots =
+                    document.SemanticVersion == SemanticContract.CurrentSemanticVersion
+                        ? currentStateAnalysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
+                            ?? Array.Empty<SemanticAsyncStateSlot>()
+                        : declarationSegments
+                            .Where(pair => pair.Value <= segment.Ordinal
+                                && lastUseSegments.TryGetValue(pair.Key, out int lastUse)
+                                && lastUse > segment.Ordinal)
+                            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                            .Select(pair => new SemanticAsyncStateSlot(
+                                pair.Key,
+                                stateTypeIds[pair.Key]))
+                            .ToArray();
                 SemanticAsyncStateFrame? frame = awaitSite.StateFrame;
-                if (expectedSlots.Length == 0)
+                if (expectedSlots.Count == 0)
                 {
                     if (frame is not null)
                     {
@@ -603,11 +642,11 @@ internal static class CSharpSemanticInputValidator
                     }
                     continue;
                 }
-                if (expectedSlots.Length > MaximumAsyncStateSlotsPerAwait
+                if (expectedSlots.Count > MaximumAsyncStateSlotsPerAwait
                     || frame is null
                     || frame.TypeId != $"type:synthetic:async_state:{awaitSite.CallbackId}"
                     || frame.Slots is null
-                    || frame.Slots.Count != expectedSlots.Length
+                    || frame.Slots.Count != expectedSlots.Count
                     || !frame.Slots.Select(slot => (slot.SymbolId, slot.TypeId))
                         .SequenceEqual(expectedSlots.Select(slot => (slot.SymbolId, slot.TypeId)))
                     || !Unique(frame.Slots.Select(slot => slot.SymbolId)))
@@ -878,6 +917,7 @@ internal static class CSharpSemanticInputValidator
             (12, "1.12") => true,
             (13, "1.13") => true,
             (14, "1.14") => true,
+            (15, "1.15") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -900,31 +940,171 @@ internal static class CSharpSemanticInputValidator
 
     private static bool ValidateAsyncStatement(
         int schemaVersion,
-        SemanticAsyncStatement statement)
+        string semanticVersion,
+        SemanticAsyncStatement statement,
+        AsyncFlowValidationBudget budget)
     {
-        if (statement.Operation.Kind != SemanticAsyncMethod.EarlyReturnGuardOperationKind)
+        if (statement.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind)
+        {
+            return schemaVersion >= 14
+                && statement.TargetSymbolId is null
+                && statement.Operation.TypeId == "type:void"
+                && statement.Operation.SymbolId is null
+                && statement.Operation.OperatorKind is null
+                && !statement.Operation.IsChecked
+                && !statement.Operation.IsLifted
+                && !statement.Operation.IsPostfix
+                && !statement.Operation.IsTryCast
+                && statement.Operation.TypeArgumentIds.Count == 0
+                && statement.Operation.Constant is null
+                && statement.Operation.Conversion is null
+                && statement.Operation.InputConversion is null
+                && statement.Operation.OutputConversion is null
+                && statement.Operation.CaptureId is null
+                && statement.Operation.Children.Count == 1
+                && statement.Operation.Children[0].TypeId == "type:bool"
+                && Contains(statement.Operation.Span, statement.Operation.Children[0].Span);
+        }
+
+        if (!IsStructuredAsyncFlow(statement.Operation))
         {
             return true;
         }
-
-        return schemaVersion >= 14
+        return semanticVersion == SemanticContract.CurrentSemanticVersion
             && statement.TargetSymbolId is null
-            && statement.Operation.TypeId == "type:void"
-            && statement.Operation.SymbolId is null
-            && statement.Operation.OperatorKind is null
-            && !statement.Operation.IsChecked
-            && !statement.Operation.IsLifted
-            && !statement.Operation.IsPostfix
-            && !statement.Operation.IsTryCast
-            && statement.Operation.TypeArgumentIds.Count == 0
-            && statement.Operation.Constant is null
-            && statement.Operation.Conversion is null
-            && statement.Operation.InputConversion is null
-            && statement.Operation.OutputConversion is null
-            && statement.Operation.CaptureId is null
-            && statement.Operation.Children.Count == 1
-            && statement.Operation.Children[0].TypeId == "type:bool"
-            && Contains(statement.Operation.Span, statement.Operation.Children[0].Span);
+            && ValidateStructuredAsyncFlow(
+                statement.Operation,
+                loopDepth: 0,
+                depth: 0,
+                budget);
+    }
+
+    private static bool ValidateStructuredAsyncFlow(
+        SemanticOperation operation,
+        int loopDepth,
+        int depth,
+        AsyncFlowValidationBudget budget)
+    {
+        if (depth > SemanticAsyncMethod.MaximumStructuredFlowDepth
+            || ++budget.NodeCount > SemanticAsyncMethod.MaximumStructuredFlowNodes
+            || !HasCanonicalFlowEnvelope(operation))
+        {
+            return false;
+        }
+
+        return operation.Kind switch
+        {
+            SemanticAsyncMethod.BlockOperationKind => operation.Children.All(child =>
+                IsStructuredAsyncFlow(child)
+                    ? ValidateStructuredAsyncFlow(
+                        child,
+                        loopDepth,
+                        depth + 1,
+                        budget)
+                    : ValidateOperation(child)),
+            SemanticAsyncMethod.LocalDeclarationOperationKind =>
+                operation.SymbolId is not null
+                && operation.TypeId is not null and not "type:void"
+                && operation.Children.Count <= 1
+                && operation.Children.All(ValidateOperation),
+            SemanticAsyncMethod.IfOperationKind =>
+                operation.Children.Count is 2 or 3
+                && operation.Children[0].TypeId == "type:bool"
+                && ValidateOperation(operation.Children[0])
+                && operation.Children.Skip(1).All(child =>
+                    child.Kind == SemanticAsyncMethod.BlockOperationKind
+                    && ValidateStructuredAsyncFlow(
+                        child,
+                        loopDepth,
+                        depth + 1,
+                        budget)),
+            SemanticAsyncMethod.WhileOperationKind =>
+                operation.Children.Count == 2
+                && operation.Children[0].TypeId == "type:bool"
+                && ValidateOperation(operation.Children[0])
+                && operation.Children[1].Kind == SemanticAsyncMethod.BlockOperationKind
+                && ValidateStructuredAsyncFlow(
+                    operation.Children[1],
+                    loopDepth + 1,
+                    depth + 1,
+                    budget),
+            SemanticAsyncMethod.DoWhileOperationKind =>
+                operation.Children.Count == 2
+                && operation.Children[0].Kind == SemanticAsyncMethod.BlockOperationKind
+                && ValidateStructuredAsyncFlow(
+                    operation.Children[0],
+                    loopDepth + 1,
+                    depth + 1,
+                    budget)
+                && operation.Children[1].TypeId == "type:bool"
+                && ValidateOperation(operation.Children[1]),
+            SemanticAsyncMethod.ForOperationKind =>
+                operation.Children.Count == 4
+                && operation.Children[0].Kind == SemanticAsyncMethod.BlockOperationKind
+                && ValidateStructuredAsyncFlow(
+                    operation.Children[0],
+                    loopDepth,
+                    depth + 1,
+                    budget)
+                && operation.Children[1].TypeId == "type:bool"
+                && ValidateOperation(operation.Children[1])
+                && operation.Children[2].Kind == SemanticAsyncMethod.BlockOperationKind
+                && ValidateStructuredAsyncFlow(
+                    operation.Children[2],
+                    loopDepth,
+                    depth + 1,
+                    budget)
+                && operation.Children[3].Kind == SemanticAsyncMethod.BlockOperationKind
+                && ValidateStructuredAsyncFlow(
+                    operation.Children[3],
+                    loopDepth + 1,
+                    depth + 1,
+                    budget),
+            SemanticAsyncMethod.BreakOperationKind or
+            SemanticAsyncMethod.ContinueOperationKind =>
+                loopDepth > 0 && operation.Children.Count == 0,
+            SemanticAsyncMethod.ReturnOperationKind => operation.Children.Count == 0,
+            _ => false,
+        };
+    }
+
+    private static bool HasCanonicalFlowEnvelope(SemanticOperation operation)
+    {
+        bool localDeclaration = operation.Kind
+            == SemanticAsyncMethod.LocalDeclarationOperationKind;
+        return operation.TypeId is not null
+            && (localDeclaration || operation.TypeId == "type:void")
+            && (localDeclaration || operation.SymbolId is null)
+            && operation.OperatorKind is null
+            && !operation.IsChecked
+            && !operation.IsLifted
+            && !operation.IsPostfix
+            && !operation.IsTryCast
+            && operation.TypeArgumentIds.Count == 0
+            && operation.Constant is null
+            && operation.Conversion is null
+            && operation.InputConversion is null
+            && operation.OutputConversion is null
+            && operation.CaptureId is null;
+    }
+
+    private static bool IsStructuredAsyncFlow(SemanticOperation operation)
+    {
+        return operation.Kind is
+            SemanticAsyncMethod.BlockOperationKind or
+            SemanticAsyncMethod.LocalDeclarationOperationKind or
+            SemanticAsyncMethod.IfOperationKind or
+            SemanticAsyncMethod.WhileOperationKind or
+            SemanticAsyncMethod.DoWhileOperationKind or
+            SemanticAsyncMethod.ForOperationKind or
+            SemanticAsyncMethod.BreakOperationKind or
+            SemanticAsyncMethod.ContinueOperationKind or
+            SemanticAsyncMethod.ReturnOperationKind;
+    }
+
+    private sealed class AsyncFlowValidationBudget
+    {
+        public int NodeCount { get; set; }
     }
 
     private static bool IsOrdinalSorted(IReadOnlyList<string> values)

@@ -13,10 +13,11 @@ internal static class SemanticAsyncTests
         SequentialAwaitsProjectStableSegments();
         EarlyReturnGuardsProjectStableControlOperations();
         CrossBoundaryLocalsPublishStateFrames();
+        StructuredFlowProjectsExactStateFrames();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 6;
+        return 7;
     }
 
     private static void EarlyReturnGuardsProjectStableControlOperations()
@@ -48,14 +49,14 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.15"
+            && document.SemanticVersion == "1.16"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should remain explicit under the schema-v15 state-frame contract");
+            "top-level early-return guards should remain explicit under the schema-v15 semantic-1.16 contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -82,11 +83,17 @@ internal static class SemanticAsyncTests
                 private static void Consume() { }
             }
             """;
-        SemanticDocument invalid = Analyze(invalidSource, "Scripts/InvalidGuardedAsync.cs");
-        Assert(!invalid.Succeeded
-            && invalid.AsyncMethods.Count == 0
-            && invalid.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5410"),
-            "if/else and branch side effects should remain outside the controlled async guard profile");
+        SemanticDocument branched = Analyze(invalidSource, "Scripts/BranchedAsync.cs");
+        SemanticOperation branch = branched.AsyncMethods.Single()
+            .Segments[1]
+            .Statements.Single()
+            .Operation;
+        Assert(branched.Succeeded
+            && branch.Kind == SemanticAsyncMethod.IfOperationKind
+            && branch.Children.Count == 3
+            && branch.Children.Skip(1).All(child =>
+                child.Kind == SemanticAsyncMethod.BlockOperationKind),
+            "if/else side effects should project as explicit structured async flow");
     }
 
     private static void GeneratedLatentProducerProjectsImportIdentity()
@@ -242,9 +249,9 @@ internal static class SemanticAsyncTests
 
         Assert(document.Succeeded
             && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.15"
+            && document.SemanticVersion == "1.16"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 15 / semantic 1.15");
+            "controlled async exports should publish schema 15 / semantic 1.16");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -345,6 +352,91 @@ internal static class SemanticAsyncTests
             && sites.All(site => site.StateFrame?.TypeId
                 == $"type:synthetic:async_state:{site.CallbackId}"),
             "scalar, fixed struct, and object-handle locals should publish exact per-await state frames");
+    }
+
+    private static void StructuredFlowProjectsExactStateFrames()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("structured")]
+                public static async void Structured()
+                {
+                    int movementCount;
+                    if (ShouldDouble())
+                    {
+                        movementCount = 2;
+                    }
+                    else
+                    {
+                        movementCount = 1;
+                    }
+
+                    int overwritten = 4;
+                    await AvidContinuations.NextTickAsync();
+
+                    overwritten = 9;
+                    int total = movementCount;
+                    for (int index = 0; index < 3; ++index)
+                    {
+                        if (index == 1)
+                        {
+                            continue;
+                        }
+                        total += index;
+                    }
+                    while (total < 8)
+                    {
+                        ++total;
+                        if (total == 7)
+                        {
+                            break;
+                        }
+                    }
+                    do
+                    {
+                        --total;
+                    }
+                    while (total > 6);
+                    Consume(overwritten + total);
+                }
+
+                private static bool ShouldDouble() => true;
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/StructuredAsync.cs");
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncAwaitSite awaitSite = method.Segments[0].AwaitSite!;
+        string movementCountId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "movementCount").Id;
+        string overwrittenId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "overwritten").Id;
+        SemanticOperation[] flow = method.Segments
+            .SelectMany(segment => segment.Statements)
+            .SelectMany(statement => Enumerate(statement.Operation))
+            .ToArray();
+
+        Assert(document.Succeeded
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.16"
+            && awaitSite.StateFrame is { } stateFrame
+            && stateFrame.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { movementCountId })
+            && stateFrame.Slots.All(slot => slot.SymbolId != overwrittenId)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.LocalDeclarationOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.IfOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.ForOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.WhileOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.DoWhileOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.BreakOperationKind)
+            && flow.Any(operation => operation.Kind == SemanticAsyncMethod.ContinueOperationKind),
+            "structured async flow should preserve only truly live locals across await boundaries");
     }
 
     private static void NonFrozenAsyncShapesRemainFailClosed()

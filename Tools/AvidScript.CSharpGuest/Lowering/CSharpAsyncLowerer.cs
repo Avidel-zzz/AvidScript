@@ -192,6 +192,7 @@ internal static class CSharpAsyncLowerer
                 string activeBlockId = blockId;
                 string guardReturnBlockId = blockId + ":guard_return";
                 int guardOrdinal = 0;
+                bool activeReachable = true;
                 GuestRegister? incomingResultAccepted = null;
                 GuestRegister? incomingOutcome = null;
                 if (incoming?.StateFrame is { } incomingFrame)
@@ -272,8 +273,18 @@ internal static class CSharpAsyncLowerer
                     activeBlockId = resultAcceptedBlockId;
                     instructions = new List<GuestInstruction>();
                 }
+                CSharpAsyncControlFlowLowerer structuredFlow = new(
+                    context,
+                    segment.Ordinal,
+                    blockId,
+                    prefixBlocks);
+                int statementDiagnosticStart = diagnostics.Count;
                 foreach (SemanticAsyncStatement statement in segment.Statements)
                 {
+                    if (!activeReachable)
+                    {
+                        break;
+                    }
                     if (statement.Operation.Kind
                         == SemanticAsyncMethod.EarlyReturnGuardOperationKind)
                     {
@@ -295,6 +306,21 @@ internal static class CSharpAsyncLowerer
                         continue;
                     }
 
+                    if (CSharpAsyncControlFlowLowerer.IsStructuredFlow(statement.Operation))
+                    {
+                        if (!structuredFlow.Emit(
+                            statement.Operation,
+                            activeBlockId,
+                            instructions,
+                            out activeBlockId,
+                            out instructions,
+                            out activeReachable))
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
                     GuestRegister? value = CSharpOperationLowerer.LowerValue(
                         context,
                         statement.Operation,
@@ -312,11 +338,20 @@ internal static class CSharpAsyncLowerer
                         break;
                     }
                 }
+                if (diagnostics.Count != statementDiagnosticStart)
+                {
+                    break;
+                }
+                if (!activeReachable && segment.AwaitSite is not null)
+                {
+                    Add(diagnostics, $"Async segment {segment.Ordinal} cannot reach its await producer.");
+                    break;
+                }
 
                 GuestRegister? scheduledToken = null;
                 GuestRegister? cancellationBindingAccepted = null;
                 GuestRegister? stateStoreAccepted = null;
-                if (segment.AwaitSite is { } awaitSite)
+                if (activeReachable && segment.AwaitSite is { } awaitSite)
                 {
                     if (!EmitProducer(
                         context,
@@ -354,7 +389,11 @@ internal static class CSharpAsyncLowerer
                 }
 
                 IReadOnlyList<GuestBasicBlock> tailBlocks;
-                if (scheduledToken is not null)
+                if (!activeReachable)
+                {
+                    tailBlocks = Array.Empty<GuestBasicBlock>();
+                }
+                else if (scheduledToken is not null)
                 {
                     GuestRegister? zeroToken = context.CreateTemporary(
                         int64Type.Id,

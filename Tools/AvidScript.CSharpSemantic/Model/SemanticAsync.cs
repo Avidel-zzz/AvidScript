@@ -12,6 +12,17 @@ public sealed record SemanticAsyncMethod(
 {
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
     public const string EarlyReturnGuardOperationKind = "async_early_return_guard";
+    public const string BlockOperationKind = "async_block";
+    public const string LocalDeclarationOperationKind = "async_local_declaration";
+    public const string IfOperationKind = "async_if";
+    public const string WhileOperationKind = "async_while";
+    public const string DoWhileOperationKind = "async_do_while";
+    public const string ForOperationKind = "async_for";
+    public const string BreakOperationKind = "async_break";
+    public const string ContinueOperationKind = "async_continue";
+    public const string ReturnOperationKind = "async_return";
+    public const int MaximumStructuredFlowNodes = 256;
+    public const int MaximumStructuredFlowDepth = 8;
 }
 
 public sealed record SemanticAsyncSegment(

@@ -38,7 +38,16 @@ public static class ActorLifecycleScript
             "/Engine/EngineMeshes/Cube.Cube",
             DefaultMeshLoaded);
 
-        FVector loadedMeshOffset = new FVector(0.0f, 0.0f, 10.0f);
+        int movementPasses;
+        if (HasAwaitedDefaultMesh)
+        {
+            movementPasses = 1;
+        }
+        else
+        {
+            movementPasses = 2;
+        }
+        FVector loadedMeshOffset = new FVector(0.0f, 0.0f, 5.0f);
         await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
@@ -48,7 +57,10 @@ public static class ActorLifecycleScript
             return;
         }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
-        UE.Self.AddActorWorldOffset(loadedMeshOffset);
+        for (int pass = 0; pass < movementPasses; ++pass)
+        {
+            UE.Self.AddActorWorldOffset(loadedMeshOffset);
+        }
     }
 
     [AvidContinuation(DeferredBeginPlay)]

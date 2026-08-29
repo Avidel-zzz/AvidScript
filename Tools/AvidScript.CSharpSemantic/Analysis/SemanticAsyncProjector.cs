@@ -181,9 +181,7 @@ internal static class SemanticAsyncProjector
         }
 
         List<AsyncSegmentBuilder> segments = new() { new AsyncSegmentBuilder(0) };
-        Dictionary<string, int> localDeclarationSegments = new(StringComparer.Ordinal);
-        Dictionary<string, int> resultDeclarationSegments = new(StringComparer.Ordinal);
-        Dictionary<string, string> stateTypeIds = new(StringComparer.Ordinal);
+        int structuredNodeCount = 0;
         int diagnosticsBeforeStatements = diagnostics.Count;
         foreach (StatementSyntax statement in declaration.Body.Statements)
         {
@@ -206,16 +204,6 @@ internal static class SemanticAsyncProjector
 
                 segment.AwaitSite = awaitSite;
                 segment.Include(statement.Span);
-                if (awaitSite is
-                    { ResultSymbolId: { } resultSymbolId, ResultTypeId: { } resultTypeId })
-                {
-                    resultDeclarationSegments.Add(
-                        resultSymbolId,
-                        segment.Ordinal + 1);
-                    stateTypeIds.Add(
-                        resultSymbolId,
-                        resultTypeId);
-                }
                 segments.Add(new AsyncSegmentBuilder(segment.Ordinal + 1));
                 continue;
             }
@@ -236,6 +224,7 @@ internal static class SemanticAsyncProjector
                 statement,
                 typeRegistry,
                 diagnostics,
+                ref structuredNodeCount,
                 out SemanticAsyncStatement? projectedStatement))
             {
                 valid = false;
@@ -244,13 +233,6 @@ internal static class SemanticAsyncProjector
 
             segment.Statements.Add(projectedStatement!);
             segment.Include(statement.Span);
-            if (projectedStatement!.TargetSymbolId is not null)
-            {
-                localDeclarationSegments.Add(projectedStatement.TargetSymbolId, segment.Ordinal);
-                stateTypeIds.Add(
-                    projectedStatement.TargetSymbolId,
-                    projectedStatement.Operation.TypeId!);
-            }
         }
 
         if (diagnostics.Count != diagnosticsBeforeStatements)
@@ -263,9 +245,6 @@ internal static class SemanticAsyncProjector
             .ToArray();
         if (!TryAttachStateFrames(
             projectedSegments,
-            localDeclarationSegments,
-            resultDeclarationSegments,
-            stateTypeIds,
             diagnostics,
             out projectedSegments))
         {
@@ -317,10 +296,11 @@ internal static class SemanticAsyncProjector
         StatementSyntax statement,
         SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics,
+        ref int structuredNodeCount,
         out SemanticAsyncStatement? projected)
     {
         projected = null;
-        if (statement is IfStatementSyntax guard)
+        if (statement is IfStatementSyntax guard && IsEarlyReturnGuard(guard))
         {
             return TryProjectEarlyReturnGuard(
                 context,
@@ -347,11 +327,14 @@ internal static class SemanticAsyncProjector
         }
         else
         {
-            diagnostics.Add(Error(
-                "ASCS5402",
-                "Controlled async segments permit only expression statements and initialized single-local declarations.",
-                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, statement.Span)));
-            return false;
+            return SemanticAsyncStructuredStatementProjector.TryProject(
+                context,
+                semanticModel,
+                statement,
+                typeRegistry,
+                diagnostics,
+                ref structuredNodeCount,
+                out projected);
         }
 
         if (operation is null)
@@ -385,6 +368,19 @@ internal static class SemanticAsyncProjector
 
         projected = new SemanticAsyncStatement(semanticOperation, targetSymbolId);
         return true;
+    }
+
+    private static bool IsEarlyReturnGuard(IfStatementSyntax guard)
+    {
+        ReturnStatementSyntax? returnStatement = guard.Statement switch
+        {
+            ReturnStatementSyntax directReturn => directReturn,
+            BlockSyntax { Statements.Count: 1 } block =>
+                block.Statements[0] as ReturnStatementSyntax,
+            _ => null,
+        };
+        return guard.Else is null
+            && returnStatement is { Expression: null };
     }
 
     private static bool TryProjectEarlyReturnGuard(
@@ -846,7 +842,7 @@ internal static class SemanticAsyncProjector
             && !assetPath.Contains("//", StringComparison.Ordinal);
     }
 
-    private static bool ContainsAsyncHelperOrTask(IOperation operation)
+    internal static bool ContainsAsyncHelperOrTask(IOperation operation)
     {
         return EnumerateOperations(operation).Any(item =>
             IsTaskLike(item.Type)
@@ -877,58 +873,16 @@ internal static class SemanticAsyncProjector
 
     private static bool TryAttachStateFrames(
         IReadOnlyList<SemanticAsyncSegment> segments,
-        IReadOnlyDictionary<string, int> localDeclarationSegments,
-        IReadOnlyDictionary<string, int> resultDeclarationSegments,
-        IReadOnlyDictionary<string, string> stateTypeIds,
         ICollection<SemanticDiagnostic> diagnostics,
         out IReadOnlyList<SemanticAsyncSegment> projectedSegments)
     {
         projectedSegments = segments;
-        Dictionary<string, int> declarationSegments = localDeclarationSegments
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
-        foreach ((string symbolId, int segment) in resultDeclarationSegments)
+        SemanticAsyncStateFlowAnalysis analysis = SemanticAsyncStateFlowAnalyzer.Analyze(segments);
+        foreach (SemanticAsyncStateFlowIssue issue in analysis.Issues)
         {
-            declarationSegments.Add(symbolId, segment);
+            diagnostics.Add(Error("ASCS5413", issue.Message, issue.Span));
         }
-
-        Dictionary<string, int> lastUseSegments = new(StringComparer.Ordinal);
-        bool valid = true;
-        foreach (SemanticAsyncSegment segment in segments)
-        {
-            IEnumerable<SemanticOperation> operations = segment.Statements
-                .Select(statement => statement.Operation)
-                .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>());
-            if (segment.AwaitSite?.CancellationToken is { } cancellationToken)
-            {
-                operations = operations.Append(cancellationToken);
-            }
-            foreach (SemanticOperation operation in operations.SelectMany(EnumerateOperations))
-            {
-                if (operation.SymbolId is not { } symbolId)
-                {
-                    continue;
-                }
-
-                if (!declarationSegments.TryGetValue(symbolId, out int declarationSegment))
-                {
-                    continue;
-                }
-                if (segment.Ordinal < declarationSegment)
-                {
-                    diagnostics.Add(Error(
-                        "ASCS5413",
-                        $"Async local '{symbolId}' is used before its declaration segment.",
-                        operation.Span));
-                    valid = false;
-                    continue;
-                }
-                lastUseSegments[symbolId] = Math.Max(
-                    lastUseSegments.GetValueOrDefault(symbolId),
-                    segment.Ordinal);
-            }
-        }
-
-        if (!valid)
+        if (analysis.Issues.Count > 0)
         {
             return false;
         }
@@ -942,16 +896,10 @@ internal static class SemanticAsyncProjector
                 continue;
             }
 
-            SemanticAsyncStateSlot[] slots = declarationSegments
-                .Where(pair => pair.Value <= segment.Ordinal
-                    && lastUseSegments.TryGetValue(pair.Key, out int lastUse)
-                    && lastUse > segment.Ordinal)
-                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .Select(pair => new SemanticAsyncStateSlot(
-                    pair.Key,
-                    stateTypeIds[pair.Key]))
-                .ToArray();
-            if (slots.Length > MaximumStateSlotsPerAwait)
+            IReadOnlyList<SemanticAsyncStateSlot> slots =
+                analysis.SlotsByAwaitSegment.GetValueOrDefault(segment.Ordinal)
+                ?? Array.Empty<SemanticAsyncStateSlot>();
+            if (slots.Count > MaximumStateSlotsPerAwait)
             {
                 diagnostics.Add(Error(
                     "ASCS5414",
@@ -960,7 +908,7 @@ internal static class SemanticAsyncProjector
                 return false;
             }
 
-            SemanticAsyncStateFrame? frame = slots.Length == 0
+            SemanticAsyncStateFrame? frame = slots.Count == 0
                 ? null
                 : new SemanticAsyncStateFrame(
                     $"type:synthetic:async_state:{awaitSite.CallbackId}",
@@ -982,7 +930,7 @@ internal static class SemanticAsyncProjector
             StringComparison.Ordinal);
     }
 
-    private static bool AllOperationsSupported(SemanticOperation operation)
+    internal static bool AllOperationsSupported(SemanticOperation operation)
     {
         return operation.IsSupported && operation.Children.All(AllOperationsSupported);
     }

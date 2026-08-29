@@ -89,6 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-30 P57.12C13 读取 ActorLifecycle sample 与 ProjectWorkspace template 时，把两个独立 `Get-Content` 放入同一个多行 shell 调用，重复破坏单命令证据域；仅发生只读输出，无文件副作用。Prevention：多文件读取必须使用允许的并行工具；当前工具面没有该入口时逐文件调用，禁止用换行代替分号规避单命令规则。
+- 2026-08-30 P57.12C13 上下文恢复后先执行了 C12 Git 收尾与源码读取，随后才补跑 `Build/InvokePhaseWorkflow.ps1 status -Phase 57`，违反恢复门闩；未修改状态机或保护文件，远端提交本身有效。Prevention：每次压缩、断线或自动续跑后，首个插件仓库命令必须机械固定为当前最高 Phase 的 `status`；在其成功前禁止 Git、源码、计划和 evidence 读取。
+- 2026-08-30 P57.12C13 版本 owner 扫描再次把 `-g` 放在 `rg --` 之后，glob 被解释为路径并误扫第三方大文件。Prevention：内容检索命令固定为 `rg <options-and-globs> -F -- '<literal>' <confirmed-roots>`；发送前检查 `--` 后只存在 pattern 和已确认路径，不允许任何 option。
 - 2026-08-29 P57.12C12 收尾时仍把 `git diff --stat` 与 `git diff --check` 用分号放入同一个只读 shell 调用，重复违反了已记录的单命令单证据域规则；两步均成功且没有 Git 写入。Prevention：即使都是只读命令，status、stat、diff-check、hash 与 staged scope 也必须各占一个工具调用；提交前检查清单先机械搜索本节“分号”和“单独工具调用”。
 - 2026-08-29 P57.12C12 首轮 Semantic `15 / 1.15` 升版只更新了模型与测试，遗漏 semantic cache publisher、PreparedSemantic validator 和 architecture checker，PowerShell publication 以 `ASBI4502 -> ASBI4403` 拒绝。Prevention：任何 Semantic 升版在代码编辑前生成 owner 清单，至少逐字扫描 `Build/*.ps1`、Frontend contract、Guest compatibility reader、fixtures 与 architecture checker；旧版只允许留在明确的兼容读取分支。
 - 2026-08-29 P57.12C12 首次固定 .NET 调用把 `DOTNET_CLI_HOME` 指向仓库内 `.codex-dotnet`，产生了不应进入工作树的工具缓存；目录已由 `.gitignore` 隔离且未暂存。Prevention：所有阶段临时 .NET home、NuGet cache 与 CLI state 统一放入带阶段名的 `C:\tmp\AvidScriptDotnet*`，设置后先断言解析路径不在 repository root，再启动 dotnet。
