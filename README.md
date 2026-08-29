@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12C15" src="https://img.shields.io/badge/Status-Phase%2057.12C15-159957">
+  <img alt="Phase 57.12C16" src="https://img.shields.io/badge/Status-Phase%2057.12C16-159957">
   <img alt="Automation 365/365" src="https://img.shields.io/badge/Automation-365%2F365-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -606,14 +606,14 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C15 的 **365/365 通过**，固定 .NET
-完整基线为 `244/244`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-增量构建成功，clean candidate `d67f2d6/20bf707` 架构门禁通过。C15 已完成 integral/enum
-switch section 内直接 await、共享 case section、default fallback 与 switch/loop break/continue 目标，
-并保持 C12 状态帧及 Host ABI。
+当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C16 的 **365/365 通过**，固定 .NET
+完整基线为 `246/246`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
+目标构建成功，clean candidate `db687bb/70082e7` 架构门禁通过。C16 已完成同步一维数组
+value `foreach` 内直接 await、编译器数组/索引局部、精确状态帧活跃性以及 break/continue 目标，
+并保持既有 Host ABI 与 Session/reload 所有权边界。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12C15 中文完成报告](Docs/Phase57/P57.12C15_Switch_Await_CFG.md)。
+[P57.12C16 中文完成报告](Docs/Phase57/P57.12C16_Array_Foreach_Await.md)。
 
 工程规则：
 

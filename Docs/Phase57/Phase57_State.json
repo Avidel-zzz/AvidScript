@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; the P57.12C15 switch continuation CFG extension is frozen by documents.plan and preserves the C12 state-frame and Host ABI contracts"
+    "revision_reason": "The phase architecture remains version 6; the P57.12C16 array foreach continuation CFG extension is frozen by documents.plan and preserves the C12 state-frame and Host ABI contracts"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12C15_Switch_Await_CFG_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C15_Switch_Await_CFG.md"
+    "plan": "Docs/Phase57/P57.12C16_Array_Foreach_Await_Plan.md",
+    "closeout": "Docs/Phase57/P57.12C16_Array_Foreach_Await.md"
   },
   "batches": [
     {
@@ -244,6 +244,12 @@
       "status": "Completed",
       "evidence": "commit d67f2d6; Semantic 1.17 continuation CFG now lowers integral/enum switch dispatch, shared case sections, default fallback, section await, switch break and enclosing-loop continue into deterministic equality branches without new schema, Host imports, Runtime dispatchers or API-name wrappers. Fixed .NET 244/244, PowerShell contracts 117/117, UE5.8 no-clean Editor build, full Automation 365/365 and clean d67f2d6/20bf707 architecture gate passed. Foreach remains blocked on dynamic state ownership and P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T19:52:43.1052487Z"
+    },
+    {
+      "id": "P57.12C16",
+      "status": "Completed",
+      "evidence": "commit db687bb; Semantic schema 16/version 1.18 now lowers synchronous rank-one array value foreach, compiler-owned array/index locals, exact CFG liveness, await resume, break and continue into existing array region operations and deterministic branches without new Host imports, Runtime enumerators or API-name wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor target, full Automation 365/365 and clean db687bb/70082e7 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T23:50:29.5490261Z"
     }
   ],
   "debt": [
@@ -263,8 +269,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C15 concentrated review confirms source-ordered constant case dispatch, shared section targets, default fallback, stable local/parameter governing values, exact switch break versus enclosing-loop continue ownership, CFG selection for synchronous switch between awaits, deterministic Guest equality branches and preservation of the C12 whole-frame and Host ABI contracts. Fixed .NET 244/244, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 365/365 and clean candidate architecture gate passed. Foreach remains blocked on dynamic state ownership and P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-29T19:52:43.1052487Z"
+    "evidence": "P57.12C16 concentrated review confirms single evaluation of rank-one array collection expressions, explicit source and compiler-local identity, exact array element typing, break/continue ownership, CFG fixed-point liveness, top-level array-reference state storage, activation and Session ownership fencing, deterministic Guest lowering and fail-closed rejection of unsupported enumerator shapes. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 365/365 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-29T23:50:29.5490261Z"
   },
   "budgets": {
     "ubt": 2,
@@ -272,25 +278,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 28,
-    "automation": 31,
-    "full_gate": 12
+    "ubt": 29,
+    "automation": 32,
+    "full_gate": 13
   },
   "freeze": {
-    "source_commit": "d67f2d61faca272b20cd5a063e82ba881012073d",
-    "source_tree": "20bf707049a810e15f10cce105715012ce56929e",
+    "source_commit": "db687bb9d0cd86d703b8e6a5251f914877e99264",
+    "source_tree": "70082e77e7e61d50f159719d75458c51a550a6e0",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C15_Switch_Await_CFG.md",
-    "at_utc": "2026-08-29T19:52:43.1052487Z"
+    "review_evidence": "Docs/Phase57/P57.12C16_Array_Foreach_Await.md",
+    "at_utc": "2026-08-29T23:50:29.5490261Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C15_Architecture_d67f2d6_20260830.log",
-    "report_sha256": "d4850bb0f74c4a7814f59efa565f154d1b2c5e3c04033f8a7f7239ececd1ef0e",
-    "run_id": "P57.12C15-clean-architecture-final",
-    "verified_commit": "d67f2d61faca272b20cd5a063e82ba881012073d",
-    "verified_tree": "20bf707049a810e15f10cce105715012ce56929e",
-    "attestation_parent": "d67f2d61faca272b20cd5a063e82ba881012073d",
-    "attested_at_utc": "2026-08-29T19:52:43.1052487Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C16_Architecture_db687bb_20260830.log",
+    "report_sha256": "f27b621fa79cadf1c1edd0d4f7fa392a3b34107c03088a547159603bf8024eb4",
+    "run_id": "P57.12C16-clean-architecture-final",
+    "verified_commit": "db687bb9d0cd86d703b8e6a5251f914877e99264",
+    "verified_tree": "70082e77e7e61d50f159719d75458c51a550a6e0",
+    "attestation_parent": "db687bb9d0cd86d703b8e6a5251f914877e99264",
+    "attested_at_utc": "2026-08-29T23:50:29.5490261Z"
   },
   "protected_dirty": [
     {
@@ -313,6 +319,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 37,
-  "updated_at_utc": "2026-08-29T19:52:43.1052487Z"
+  "revision": 38,
+  "updated_at_utc": "2026-08-29T23:50:29.5490261Z"
 }

@@ -2112,3 +2112,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C16 Guest assertion called `module.Exports.Single()` while the controlled async module correctly contained both `avid_on_begin_play` and the continuation router export, so the test failed after successful product lowering.
 - Prevention: tests that inspect a business entrypoint in an async module select the exact ABI export name and then its function ID. A single-export assertion is reserved for fixtures whose contract explicitly forbids continuation, gameplay-event, or delegate router exports.
+
+### 2026-08-30: quote Git revision expressions in PowerShell
+
+- Mistake: the first P57.12C16 tree-evidence command passed `HEAD^{tree}` unquoted, so PowerShell parsed the braces and Git received an unrelated encoded argument after printing an unusable intermediate result.
+- Prevention: quote revision expressions that contain braces, for example `git rev-parse 'HEAD^{tree}'`, and treat any command that emits a Git fatal line as failed evidence even if it printed an earlier hash. Commit and tree evidence are always captured by separate commands.
