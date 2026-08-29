@@ -24,8 +24,89 @@ internal static class CSharpGuestContinuationTests
         GeneratedLatentEnumAwaitUsesUnderlyingStorage();
         GeneratedLatentAggregatesUseSharedStoragePlan();
         GeneratedLatentResultLowersTypedOutcome();
+        AsyncOutcomeGuardBranchesBeforeNextAwait();
         CancellationMarkerBindsScheduledContinuation();
-        return 11;
+        return 12;
+    }
+
+    private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    AvidOutcome<int> outcome =
+                        await UKismetSystemLibrary.WaitForScoreAsync(42);
+                    if (outcome.Cancelled)
+                    {
+                        return;
+                    }
+                    Consume(outcome.Value);
+                    await AvidContinuations.NextTickAsync();
+                    Complete();
+                }
+
+                private static void Consume(int value) { }
+                private static void Complete() { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/AsyncOutcomeGuard.cs");
+        SemanticAsyncAwaitSite providerSite = document.AsyncMethods.Single()
+            .Segments[0].AwaitSite!;
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestFunction resume = module.Functions.Single(function =>
+            function.Id == $"function:synthetic:async_resume:{providerSite.CallbackId}");
+        GuestBasicBlock guardReturn = resume.Blocks.Single(block =>
+            block.Id.EndsWith(":guard_return", StringComparison.Ordinal));
+        GuestBasicBlock guard = resume.Blocks.Single(block =>
+            block.Terminator.TargetBlockId == guardReturn.Id);
+        GuestBasicBlock continuation = resume.Blocks.Single(block =>
+            block.Id.EndsWith(":guard_0_continue", StringComparison.Ordinal));
+        GuestBasicBlock resultEntry = resume.Blocks.Single(block =>
+            block.Id == resume.EntryBlockId);
+        GuestBasicBlock resultRejected = resume.Blocks.Single(block =>
+            block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
+
+        Assert(result.Succeeded
+            && document.SchemaVersion == 14
+            && document.SemanticVersion == "1.14"
+            && guard.Terminator.Kind == "branch_if"
+            && guard.Terminator.TargetBlockId == guardReturn.Id
+            && guard.Terminator.FalseTargetBlockId == continuation.Id
+            && guardReturn.Terminator.Kind == "return",
+            "provider outcome guards should lower to a deterministic early-return branch in the resume function");
+        Assert(resultEntry.Terminator.Kind == "branch_if"
+            && resultEntry.Terminator.TargetBlockId == guard.Id
+            && resultEntry.Terminator.FalseTargetBlockId == resultRejected.Id
+            && resultRejected.Terminator.Kind == "trap"
+            && continuation.Instructions.Any(instruction =>
+                instruction.Op == "call"
+                && module.Imports.Any(import => import.Id == instruction.TargetId
+                    && import.Name == "continuation_delay"))
+            && continuation.Terminator.Kind == "branch_if"
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "the false guard path should retain ordinary work and schedule the next controlled await");
+
+        SemanticDocument legacy = document with
+        {
+            SchemaVersion = 13,
+            SemanticVersion = "1.13",
+        };
+        Assert(!CSharpGuestLowerer.Lower(legacy, SemanticHash).Succeeded,
+            "schema 13 artifacts must not smuggle schema 14 async guard operations into Guest lowering");
     }
 
     private static void GeneratedLatentResultLowersTypedOutcome()
@@ -437,8 +518,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 13
-            && document.SemanticVersion == "1.13"
+            && document.SchemaVersion == 14
+            && document.SemanticVersion == "1.14"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {

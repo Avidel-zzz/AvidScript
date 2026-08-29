@@ -307,6 +307,17 @@ internal static class SemanticAsyncProjector
         out SemanticAsyncStatement? projected)
     {
         projected = null;
+        if (statement is IfStatementSyntax guard)
+        {
+            return TryProjectEarlyReturnGuard(
+                context,
+                semanticModel,
+                guard,
+                typeRegistry,
+                diagnostics,
+                out projected);
+        }
+
         IOperation? operation;
         string? targetSymbolId = null;
         if (statement is ExpressionStatementSyntax expressionStatement)
@@ -360,6 +371,80 @@ internal static class SemanticAsyncProjector
         }
 
         projected = new SemanticAsyncStatement(semanticOperation, targetSymbolId);
+        return true;
+    }
+
+    private static bool TryProjectEarlyReturnGuard(
+        SemanticCompilationContext context,
+        SemanticModel semanticModel,
+        IfStatementSyntax guard,
+        SemanticTypeRegistry typeRegistry,
+        ICollection<SemanticDiagnostic> diagnostics,
+        out SemanticAsyncStatement? projected)
+    {
+        projected = null;
+        ReturnStatementSyntax? returnStatement = guard.Statement switch
+        {
+            ReturnStatementSyntax directReturn => directReturn,
+            BlockSyntax { Statements.Count: 1 } block =>
+                block.Statements[0] as ReturnStatementSyntax,
+            _ => null,
+        };
+        if (guard.Else is not null
+            || returnStatement is null
+            || returnStatement.Expression is not null)
+        {
+            diagnostics.Add(Error(
+                "ASCS5410",
+                "Controlled async guards must use a top-level 'if (condition) return;' without else or branch side effects.",
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, guard.Span)));
+            return false;
+        }
+
+        IOperation? conditionOperation = semanticModel.GetOperation(guard.Condition);
+        if (conditionOperation?.Type?.SpecialType != SpecialType.System_Boolean
+            || ContainsAsyncHelperOrTask(conditionOperation))
+        {
+            diagnostics.Add(Error(
+                "ASCS5410",
+                "Controlled async guard conditions must be supported synchronous bool expressions.",
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, guard.Condition.Span)));
+            return false;
+        }
+
+        int diagnosticsBeforeProjection = diagnostics.Count;
+        SemanticOperation condition = SemanticOperationProjector.ProjectAsyncStatementOperation(
+            conditionOperation,
+            context.PrimaryUnit,
+            typeRegistry,
+            diagnostics);
+        if (diagnostics.Count != diagnosticsBeforeProjection || !AllOperationsSupported(condition))
+        {
+            return false;
+        }
+
+        SemanticSpan span = SemanticSpanFactory.Create(
+            context.PrimaryUnit.SourceText,
+            guard.Span);
+        SemanticOperation operation = new(
+            Kind: SemanticAsyncMethod.EarlyReturnGuardOperationKind,
+            IsSupported: true,
+            OperatorKind: null,
+            IsChecked: false,
+            IsLifted: false,
+            IsPostfix: false,
+            IsTryCast: false,
+            TypeId: "type:void",
+            SymbolId: null,
+            TypeArgumentIds: Array.Empty<string>(),
+            Constant: null,
+            Conversion: null,
+            InputConversion: null,
+            OutputConversion: null,
+            CaptureId: null,
+            Span: span,
+            Children: new[] { condition });
+        projected = new SemanticAsyncStatement(operation, null);
         return true;
     }
 

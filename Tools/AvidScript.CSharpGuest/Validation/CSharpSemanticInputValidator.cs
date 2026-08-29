@@ -492,7 +492,8 @@ internal static class CSharpSemanticInputValidator
                     if (statement is null
                         || statement.Operation is null
                         || !ValidateOperation(statement.Operation)
-                        || !AllOperationsSupported(statement.Operation))
+                        || !AllOperationsSupported(statement.Operation)
+                        || !ValidateAsyncStatement(document.SchemaVersion, statement))
                     {
                         return false;
                     }
@@ -805,9 +806,39 @@ internal static class CSharpSemanticInputValidator
             (10, "1.10") => true,
             (11, "1.11") => true,
             (12, "1.12") => true,
+            (13, "1.13") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
+    }
+
+    private static bool ValidateAsyncStatement(
+        int schemaVersion,
+        SemanticAsyncStatement statement)
+    {
+        if (statement.Operation.Kind != SemanticAsyncMethod.EarlyReturnGuardOperationKind)
+        {
+            return true;
+        }
+
+        return schemaVersion >= 14
+            && statement.TargetSymbolId is null
+            && statement.Operation.TypeId == "type:void"
+            && statement.Operation.SymbolId is null
+            && statement.Operation.OperatorKind is null
+            && !statement.Operation.IsChecked
+            && !statement.Operation.IsLifted
+            && !statement.Operation.IsPostfix
+            && !statement.Operation.IsTryCast
+            && statement.Operation.TypeArgumentIds.Count == 0
+            && statement.Operation.Constant is null
+            && statement.Operation.Conversion is null
+            && statement.Operation.InputConversion is null
+            && statement.Operation.OutputConversion is null
+            && statement.Operation.CaptureId is null
+            && statement.Operation.Children.Count == 1
+            && statement.Operation.Children[0].TypeId == "type:bool"
+            && Contains(statement.Operation.Span, statement.Operation.Children[0].Span);
     }
 
     private static bool IsOrdinalSorted(IReadOnlyList<string> values)

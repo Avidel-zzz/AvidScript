@@ -41,6 +41,10 @@ public static class ActorLifecycleScript
         await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
+        if (!loadedObject.IsValid)
+        {
+            return;
+        }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 10.0f));
     }

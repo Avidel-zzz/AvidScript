@@ -11,11 +11,82 @@ internal static class SemanticAsyncTests
     public static int Run()
     {
         SequentialAwaitsProjectStableSegments();
+        EarlyReturnGuardsProjectStableControlOperations();
         LocalsAndObjectResultsCannotCrossTheirBoundaries();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 5;
+        return 6;
+    }
+
+    private static void EarlyReturnGuardsProjectStableControlOperations()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("guarded")]
+                public static async void Guarded()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    if (ShouldStop())
+                    {
+                        return;
+                    }
+                    await AvidContinuations.NextTickAsync();
+                }
+
+                private static bool ShouldStop() => false;
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/GuardedAsync.cs");
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncStatement guard = method.Segments[1].Statements.Single();
+
+        Assert(document.Succeeded
+            && document.SchemaVersion == 14
+            && document.SemanticVersion == "1.14"
+            && method.Segments.Count == 3
+            && guard.TargetSymbolId is null
+            && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
+            && guard.Operation.TypeId == "type:void"
+            && guard.Operation.Children.Count == 1
+            && guard.Operation.Children[0].TypeId == "type:bool",
+            "top-level early-return guards should publish one explicit schema-v14 control operation");
+
+        const string invalidSource = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("invalid_guard")]
+                public static async void InvalidGuard()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    if (ShouldStop())
+                    {
+                        Consume();
+                    }
+                    else
+                    {
+                        Consume();
+                    }
+                }
+
+                private static bool ShouldStop() => false;
+                private static void Consume() { }
+            }
+            """;
+        SemanticDocument invalid = Analyze(invalidSource, "Scripts/InvalidGuardedAsync.cs");
+        Assert(!invalid.Succeeded
+            && invalid.AsyncMethods.Count == 0
+            && invalid.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5410"),
+            "if/else and branch side effects should remain outside the controlled async guard profile");
     }
 
     private static void GeneratedLatentProducerProjectsImportIdentity()
@@ -170,10 +241,10 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 13
-            && document.SemanticVersion == "1.13"
+            && document.SchemaVersion == 14
+            && document.SemanticVersion == "1.14"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 13 / semantic 1.13");
+            "controlled async exports should publish schema 14 / semantic 1.14");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })

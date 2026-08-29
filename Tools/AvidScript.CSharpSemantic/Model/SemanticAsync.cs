@@ -11,6 +11,7 @@ public sealed record SemanticAsyncMethod(
     [property: JsonPropertyOrder(4)] SemanticSpan Span)
 {
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
+    public const string EarlyReturnGuardOperationKind = "async_early_return_guard";
 }
 
 public sealed record SemanticAsyncSegment(

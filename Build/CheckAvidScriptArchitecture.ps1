@@ -2903,8 +2903,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 13',
-    'CurrentSemanticVersion = "1.13"'
+    'CurrentSchemaVersion = 14',
+    'CurrentSemanticVersion = "1.14"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
@@ -2933,6 +2933,9 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'producer.PayloadDescriptorTypeId',
     'producer.PayloadValueType',
     'ValidateLocalLifetimes',
+    'TryProjectEarlyReturnGuard',
+    'EarlyReturnGuardOperationKind',
+    'ASCS5410',
     'ASCS5401',
     'ASCS5408'
 )) {
@@ -2945,7 +2948,8 @@ foreach ($RequiredControlledAsyncModelContract in @(
     'SemanticAsyncSegment',
     'SemanticAsyncAwaitSite',
     'SemanticOperation? CancellationToken = null',
-    'reentrant_zero_heap_cps'
+    'reentrant_zero_heap_cps',
+    'async_early_return_guard'
 )) {
     if (-not $SemanticAsyncModelSource.Contains($RequiredControlledAsyncModelContract)) {
         Add-Violation "C# Semantic controlled async model is missing $RequiredControlledAsyncModelContract"
@@ -3075,6 +3079,8 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'continuation_bind_cancel',
     'continuation_result_read',
     'EmitIncomingResult',
+    'result_accepted',
+    'result_rejected',
     'ResultSlotPayloadKind',
     'OutcomeStatusField',
     'TryBuildSingleValue',
@@ -3082,6 +3088,9 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'bitwise_and',
     'not_equals',
     'new GuestTerminator("trap"',
+    'EmitEarlyReturnGuard',
+    'guard_return',
+    'branch_if',
     'CSharpAsyncResumeRoute'
 )) {
     if (-not $CSharpAsyncLowererSource.Contains($RequiredControlledAsyncLoweringContract)) {
@@ -3113,6 +3122,16 @@ foreach ($RequiredCancellationValidationContract in @(
 )) {
     if (-not $CSharpSemanticInputValidatorSource.Contains($RequiredCancellationValidationContract)) {
         Add-Violation "C# Semantic input cancellation validation is missing $RequiredCancellationValidationContract"
+    }
+}
+foreach ($RequiredAsyncGuardValidationContract in @(
+    'ValidateAsyncStatement',
+    'EarlyReturnGuardOperationKind',
+    'schemaVersion >= 14',
+    'statement.Operation.Children[0].TypeId == "type:bool"'
+)) {
+    if (-not $CSharpSemanticInputValidatorSource.Contains($RequiredAsyncGuardValidationContract)) {
+        Add-Violation "C# Semantic input async guard validation is missing $RequiredAsyncGuardValidationContract"
     }
 }
 foreach ($RequiredLatentStoragePlanContract in @(

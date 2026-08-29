@@ -973,8 +973,8 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 13) "semantic artifact schema version is not 13"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.13") "semantic artifact version is not 1.13"
+Assert-Condition ($SemanticJson.schema_version -eq 14) "semantic artifact schema version is not 14"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.14") "semantic artifact version is not 1.14"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
@@ -999,6 +999,14 @@ $AsyncAwaitSites = @($AsyncMethods[0].segments | ForEach-Object { $_.await_site 
 Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1073741825' -and
     (@($AsyncAwaitSites.producer_kind) -join ',') -ceq 'next_tick,object_load') `
     "ActorLifecycle compiler-owned await sites differ"
+$AsyncGuardStatements = @($AsyncMethods[0].segments | ForEach-Object { $_.statements } | Where-Object {
+    [string]$_.operation.kind -ceq 'async_early_return_guard'
+})
+Assert-Condition ($AsyncGuardStatements.Count -eq 1 -and
+    [string]$AsyncGuardStatements[0].operation.type_id -ceq 'type:void' -and
+    @($AsyncGuardStatements[0].operation.children).Count -eq 1 -and
+    [string]$AsyncGuardStatements[0].operation.children[0].type_id -ceq 'type:bool') `
+    "ActorLifecycle async early-return guard contract differs"
 $GameplayCallbacks = @($SemanticJson.gameplay_event_callbacks)
 Assert-Condition ($GameplayCallbacks.Count -eq 4) "ActorLifecycle does not expose four natural gameplay callbacks"
 Assert-Condition ((@($GameplayCallbacks.event_type) -join ',') -ceq '1,2,3,4') "ActorLifecycle gameplay callback event types differ"

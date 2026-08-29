@@ -2084,3 +2084,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C9 compile-feedback command again used bare `dotnet`; PATH resolved SDK 9.0.306 and the command stopped before compilation because `global.json` pins 8.0.416.
 - Prevention: write `%USERPROFILE%\.dotnet\dotnet.exe` into the command before execution, verify `--version` is exactly 8.0.416 from the plugin cwd, and set task-local `DOTNET_CLI_HOME`, `APPDATA`, `LOCALAPPDATA`, and `NUGET_PACKAGES`. Never use a failed PATH-host probe as product evidence.
+
+### 2026-08-29: semantic version bumps audit assignments and comparisons together
+
+- Mistake: the first P57.12C11 centralized contract run updated prepared-report expectations to `14/1.14` but left three semantic-model comparisons at schema 13, so PreparedSemantic stopped after valid schema-14 artifacts were produced.
+- Prevention: every Semantic contract bump searches the full `Build` and `Tools` trees for the old schema number and version string across assignments, JSON fixtures, equality/range comparisons, diagnostics, and architecture tokens. Legacy compatibility cases are explicitly reviewed and retained; every other hit is updated before the centralized contract run.

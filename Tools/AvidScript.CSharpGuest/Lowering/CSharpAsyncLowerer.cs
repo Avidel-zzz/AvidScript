@@ -108,6 +108,13 @@ internal static class CSharpAsyncLowerer
                     break;
                 }
 
+                string functionId = index == 0
+                    ? CSharpGuestIds.Function(method.MethodSymbolId)
+                    : CSharpGuestIds.AsyncResumeFunction(incoming!.CallbackId);
+                string blockId = CSharpGuestIds.AsyncSegmentBlock(
+                    method.MethodSymbolId,
+                    segment.Ordinal);
+
                 List<GuestRegister> parameters = new();
                 GuestRegister? loadedObjectParameter = null;
                 GuestRegister? resultStatusParameter = null;
@@ -156,7 +163,11 @@ internal static class CSharpAsyncLowerer
                     break;
                 }
 
+                List<GuestBasicBlock> prefixBlocks = new();
                 List<GuestInstruction> instructions = new();
+                string activeBlockId = blockId;
+                string guardReturnBlockId = blockId + ":guard_return";
+                int guardOrdinal = 0;
                 GuestRegister? incomingResultAccepted = null;
                 GuestRegister? incomingOutcome = null;
                 if (incoming?.PayloadKind
@@ -184,8 +195,49 @@ internal static class CSharpAsyncLowerer
                     Add(diagnostics, $"Async outcome result '{incoming.ResultSymbolId}' has no compatible resume storage.");
                     break;
                 }
+                if (incomingResultAccepted is not null)
+                {
+                    string resultAcceptedBlockId = blockId + ":result_accepted";
+                    string resultRejectedBlockId = blockId + ":result_rejected";
+                    prefixBlocks.Add(new GuestBasicBlock(
+                        activeBlockId,
+                        instructions.ToArray(),
+                        new GuestTerminator(
+                            "branch_if",
+                            incomingResultAccepted.Id,
+                            resultAcceptedBlockId,
+                            resultRejectedBlockId,
+                            null)));
+                    prefixBlocks.Add(new GuestBasicBlock(
+                        resultRejectedBlockId,
+                        Array.Empty<GuestInstruction>(),
+                        new GuestTerminator("trap", null, null, null, null)));
+                    activeBlockId = resultAcceptedBlockId;
+                    instructions = new List<GuestInstruction>();
+                }
                 foreach (SemanticAsyncStatement statement in segment.Statements)
                 {
+                    if (statement.Operation.Kind
+                        == SemanticAsyncMethod.EarlyReturnGuardOperationKind)
+                    {
+                        if (!EmitEarlyReturnGuard(
+                            context,
+                            statement.Operation,
+                            segment.Ordinal,
+                            guardOrdinal++,
+                            activeBlockId,
+                            guardReturnBlockId,
+                            instructions,
+                            prefixBlocks,
+                            out string? continueBlockId))
+                        {
+                            break;
+                        }
+                        activeBlockId = continueBlockId!;
+                        instructions = new List<GuestInstruction>();
+                        continue;
+                    }
+
                     GuestRegister? value = CSharpOperationLowerer.LowerValue(
                         context,
                         statement.Operation,
@@ -229,50 +281,38 @@ internal static class CSharpAsyncLowerer
                         CSharpGuestIds.AsyncResumeFunction(awaitSite.CallbackId)));
                 }
 
-                string functionId = index == 0
-                    ? CSharpGuestIds.Function(method.MethodSymbolId)
-                    : CSharpGuestIds.AsyncResumeFunction(incoming!.CallbackId);
-                string blockId = CSharpGuestIds.AsyncSegmentBlock(
-                    method.MethodSymbolId,
-                    segment.Ordinal);
-                IReadOnlyList<GuestBasicBlock> blocks;
-                if (scheduledToken is not null || incomingResultAccepted is not null)
+                IReadOnlyList<GuestBasicBlock> tailBlocks;
+                if (scheduledToken is not null)
                 {
-                    GuestRegister? scheduleAccepted = null;
-                    if (scheduledToken is not null)
+                    GuestRegister? zeroToken = context.CreateTemporary(
+                        int64Type.Id,
+                        segment.Ordinal);
+                    GuestRegister? scheduleAccepted = context.CreateTemporary(
+                        int32Type.Id,
+                        segment.Ordinal);
+                    if (zeroToken is null || scheduleAccepted is null)
                     {
-                        GuestRegister? zeroToken = context.CreateTemporary(
-                            int64Type.Id,
-                            segment.Ordinal);
-                        scheduleAccepted = context.CreateTemporary(
-                            int32Type.Id,
-                            segment.Ordinal);
-                        if (zeroToken is null || scheduleAccepted is null)
-                        {
-                            break;
-                        }
-
-                        instructions.Add(new GuestInstruction(
-                            "constant",
-                            zeroToken.Id,
-                            Array.Empty<string>(),
-                            null,
-                            null,
-                            new GuestConstant("int64", "0")));
-                        instructions.Add(new GuestInstruction(
-                            "binary",
-                            scheduleAccepted.Id,
-                            new[] { scheduledToken.Id, zeroToken.Id },
-                            null,
-                            "not_equals",
-                            null));
+                        break;
                     }
-                    GuestRegister finalAcceptance = scheduleAccepted
-                        ?? incomingResultAccepted!;
+
+                    instructions.Add(new GuestInstruction(
+                        "constant",
+                        zeroToken.Id,
+                        Array.Empty<string>(),
+                        null,
+                        null,
+                        new GuestConstant("int64", "0")));
+                    instructions.Add(new GuestInstruction(
+                        "binary",
+                        scheduleAccepted.Id,
+                        new[] { scheduledToken.Id, zeroToken.Id },
+                        null,
+                        "not_equals",
+                        null));
+                    GuestRegister finalAcceptance = scheduleAccepted;
                     foreach (GuestRegister acceptance in new[]
                     {
-                        scheduleAccepted is null ? null : cancellationBindingAccepted,
-                        scheduleAccepted is null ? null : incomingResultAccepted,
+                        cancellationBindingAccepted,
                     }.Where(value => value is not null).Cast<GuestRegister>())
                     {
                         GuestRegister? combinedAcceptance = context.CreateTemporary(
@@ -295,12 +335,12 @@ internal static class CSharpAsyncLowerer
                             null));
                         finalAcceptance = combinedAcceptance;
                     }
-                    string acceptedBlockId = blockId + ":schedule_accepted";
-                    string rejectedBlockId = blockId + ":schedule_rejected";
-                    blocks = new[]
+                    string acceptedBlockId = activeBlockId + ":schedule_accepted";
+                    string rejectedBlockId = activeBlockId + ":schedule_rejected";
+                    tailBlocks = new[]
                     {
                         new GuestBasicBlock(
-                            blockId,
+                            activeBlockId,
                             instructions,
                             new GuestTerminator(
                                 "branch_if",
@@ -320,13 +360,24 @@ internal static class CSharpAsyncLowerer
                 }
                 else
                 {
-                    blocks = new[]
+                    tailBlocks = new[]
                     {
                         new GuestBasicBlock(
-                            blockId,
+                            activeBlockId,
                             instructions,
                             new GuestTerminator("return", null, null, null, null)),
                     };
+                }
+
+                List<GuestBasicBlock> blocks = prefixBlocks
+                    .Concat(tailBlocks)
+                    .ToList();
+                if (guardOrdinal > 0)
+                {
+                    blocks.Add(new GuestBasicBlock(
+                        guardReturnBlockId,
+                        Array.Empty<GuestInstruction>(),
+                        new GuestTerminator("return", null, null, null, null)));
                 }
 
                 functions.Add(new GuestFunction(
@@ -345,6 +396,56 @@ internal static class CSharpAsyncLowerer
         }
 
         return new CSharpAsyncLoweringResult(functions, routes);
+    }
+
+    private static bool EmitEarlyReturnGuard(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation operation,
+        int segmentOrdinal,
+        int guardOrdinal,
+        string blockId,
+        string returnBlockId,
+        List<GuestInstruction> instructions,
+        List<GuestBasicBlock> blocks,
+        out string? continueBlockId)
+    {
+        continueBlockId = null;
+        if (operation.Children.Count != 1
+            || operation.TypeId != "type:void"
+            || operation.Children[0].TypeId != "type:bool")
+        {
+            Add(context.Diagnostics, "Async early-return guard has no compatible bool condition.");
+            return false;
+        }
+
+        GuestRegister? condition = CSharpOperationLowerer.LowerValue(
+            context,
+            operation.Children[0],
+            segmentOrdinal,
+            instructions);
+        if (condition is null
+            || condition.TypeId != "type:bool"
+            || !context.TryGetGuestType(condition.TypeId, out GuestType conditionType)
+            || conditionType.Kind != "scalar"
+            || conditionType.Storage != "i32"
+            || conditionType.Size != 1
+            || conditionType.Alignment != 1)
+        {
+            Add(context.Diagnostics, "Async early-return guard did not lower to the canonical bool storage.");
+            return false;
+        }
+
+        continueBlockId = blockId + $":guard_{guardOrdinal}_continue";
+        blocks.Add(new GuestBasicBlock(
+            blockId,
+            instructions.ToArray(),
+            new GuestTerminator(
+                "branch_if",
+                condition.Id,
+                returnBlockId,
+                continueBlockId,
+                null)));
+        return true;
     }
 
     private static bool EmitIncomingResult(

@@ -183,11 +183,11 @@ function Assert-SemanticContract {
     Assert-Condition (Test-Path -LiteralPath $SemanticPath -PathType Leaf) "$Label semantic artifact is missing"
     $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
     Assert-Condition (
-        [int]$Build.Report.semantic.schema_version -eq 13 -and
-        [string]$Build.Report.semantic.version -ceq "1.13" -and
-        [int]$Semantic.schema_version -eq 13 -and
-        [string]$Semantic.semantic_version -ceq "1.13") `
-        "$Label semantic contract is not 13/1.13"
+        [int]$Build.Report.semantic.schema_version -eq 14 -and
+        [string]$Build.Report.semantic.version -ceq "1.14" -and
+        [int]$Semantic.schema_version -eq 14 -and
+        [string]$Semantic.semantic_version -ceq "1.14") `
+        "$Label semantic contract is not 14/1.14"
 }
 
 foreach ($Directory in @($RunRoot, $CacheParent)) {
