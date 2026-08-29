@@ -2720,11 +2720,14 @@ $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
 $SemanticContinuationSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticContinuationProjector.cs'
 $SemanticAsyncSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAsyncProjector.cs'
+$SemanticAsyncStructuredSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAsyncStructuredStatementProjector.cs'
+$SemanticAsyncStateFlowSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAsyncStateFlowAnalyzer.cs'
 $SemanticAsyncModelSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticAsync.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
 $CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpContinuationLowerer.cs'
 $CSharpAsyncLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncLowerer.cs'
+$CSharpAsyncControlFlowLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncControlFlowLowerer.cs'
 $CSharpOutcomeOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOutcomeOperationLowerer.cs'
 $CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpLatentStoragePlanner.cs'
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
@@ -2940,7 +2943,8 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'TryProjectEarlyReturnGuard',
     'EarlyReturnGuardOperationKind',
     'MaximumStateSlotsPerAwait = 64',
-    'lastUse > segment.Ordinal',
+    'SemanticAsyncStateFlowAnalyzer.Analyze',
+    'SlotsByAwaitSegment',
     'type:synthetic:async_state:',
     'ASCS5410',
     'ASCS5401',
@@ -2948,6 +2952,37 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
 )) {
     if (-not $SemanticAsyncSource.Contains($RequiredControlledAsyncProjectionContract)) {
         Add-Violation "C# Semantic controlled async projector is missing $RequiredControlledAsyncProjectionContract"
+    }
+}
+foreach ($RequiredStructuredAsyncProjectionContract in @(
+    'SemanticAsyncStructuredStatementProjector',
+    'MaximumStructuredFlowNodes',
+    'MaximumStructuredFlowDepth',
+    'IfStatementSyntax',
+    'WhileStatementSyntax',
+    'DoStatementSyntax',
+    'ForStatementSyntax',
+    'BreakStatementSyntax',
+    'ContinueStatementSyntax',
+    'LocalDeclarationOperationKind'
+)) {
+    if (-not $SemanticAsyncStructuredSource.Contains($RequiredStructuredAsyncProjectionContract)) {
+        Add-Violation "C# Semantic structured async projector is missing $RequiredStructuredAsyncProjectionContract"
+    }
+}
+foreach ($RequiredAsyncStateFlowContract in @(
+    'SemanticAsyncStateFlowAnalyzer',
+    'SlotsByAwaitSegment',
+    'TransferWhile',
+    'TransferDoWhile',
+    'TransferFor',
+    'TryGetDirectLocal',
+    'live.Remove(assignedLocal',
+    'Break = liveAfter',
+    'Continue = header'
+)) {
+    if (-not $SemanticAsyncStateFlowSource.Contains($RequiredAsyncStateFlowContract)) {
+        Add-Violation "C# Semantic async state-flow analyzer is missing $RequiredAsyncStateFlowContract"
     }
 }
 foreach ($RequiredControlledAsyncModelContract in @(
@@ -2959,7 +2994,17 @@ foreach ($RequiredControlledAsyncModelContract in @(
     'SemanticAsyncStateFrame',
     'SemanticAsyncStateSlot',
     'reentrant_zero_heap_cps',
-    'async_early_return_guard'
+    'async_early_return_guard',
+    'async_local_declaration',
+    'async_if',
+    'async_while',
+    'async_do_while',
+    'async_for',
+    'async_break',
+    'async_continue',
+    'async_return',
+    'MaximumStructuredFlowNodes = 256',
+    'MaximumStructuredFlowDepth = 8'
 )) {
     if (-not $SemanticAsyncModelSource.Contains($RequiredControlledAsyncModelContract)) {
         Add-Violation "C# Semantic controlled async model is missing $RequiredControlledAsyncModelContract"
@@ -3105,10 +3150,27 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'EmitEarlyReturnGuard',
     'guard_return',
     'branch_if',
+    'CSharpAsyncControlFlowLowerer',
     'CSharpAsyncResumeRoute'
 )) {
     if (-not $CSharpAsyncLowererSource.Contains($RequiredControlledAsyncLoweringContract)) {
         Add-Violation "C# Guest controlled async lowerer is missing $RequiredControlledAsyncLoweringContract"
+    }
+}
+foreach ($RequiredStructuredAsyncLoweringContract in @(
+    'CSharpAsyncControlFlowLowerer',
+    'EmitIf',
+    'EmitWhile',
+    'EmitDoWhile',
+    'EmitFor',
+    'EmitLoopTransfer',
+    'new GuestTerminator("branch"',
+    'new GuestTerminator("branch_if"',
+    'MaximumStructuredFlowNodes'
+)) {
+    if (-not $CSharpAsyncControlFlowLowererSource.Contains($RequiredStructuredAsyncLoweringContract) -and
+        -not $CSharpSemanticInputValidatorSource.Contains($RequiredStructuredAsyncLoweringContract)) {
+        Add-Violation "C# Guest structured async pipeline is missing $RequiredStructuredAsyncLoweringContract"
     }
 }
 foreach ($RequiredOutcomeLoweringContract in @(
