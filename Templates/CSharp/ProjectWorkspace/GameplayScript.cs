@@ -32,15 +32,17 @@ public static class GameplayScript
             "/Engine/EngineMeshes/Cube.Cube",
             DefaultMeshLoaded);
 
+        FVector loadedMeshScale = new FVector(1.05f, 1.05f, 1.05f);
         await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
+        await AvidContinuations.NextTickAsync();
         if (!loadedObject.IsValid)
         {
             return;
         }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
-        UE.Self.SetActorScale3D(new FVector(1.05f, 1.05f, 1.05f));
+        UE.Self.SetActorScale3D(loadedMeshScale);
     }
 
     [AvidContinuation(DelayedBeginPlay)]

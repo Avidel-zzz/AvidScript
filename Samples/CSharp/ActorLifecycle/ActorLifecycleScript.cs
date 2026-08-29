@@ -38,15 +38,17 @@ public static class ActorLifecycleScript
             "/Engine/EngineMeshes/Cube.Cube",
             DefaultMeshLoaded);
 
+        FVector loadedMeshOffset = new FVector(0.0f, 0.0f, 10.0f);
         await AvidContinuations.NextTickAsync();
         AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube");
+        await AvidContinuations.NextTickAsync();
         if (!loadedObject.IsValid)
         {
             return;
         }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
-        UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 10.0f));
+        UE.Self.AddActorWorldOffset(loadedMeshOffset);
     }
 
     [AvidContinuation(DeferredBeginPlay)]
@@ -515,4 +517,24 @@ internal static class Native
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);
+
+    [DllImport("env", EntryPoint = "continuation_result_read")]
+    internal static extern int ContinuationResultRead(
+        int bindingOrdinal,
+        int resultSlot,
+        int resultGeneration,
+        int outputAddress,
+        int byteCount);
+
+    [DllImport("env", EntryPoint = "continuation_state_store")]
+    internal static extern int ContinuationStateStore(
+        long continuationToken,
+        int inputAddress,
+        int byteCount);
+
+    [DllImport("env", EntryPoint = "continuation_state_read")]
+    internal static extern int ContinuationStateRead(
+        long continuationToken,
+        int outputAddress,
+        int byteCount);
 }

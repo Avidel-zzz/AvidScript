@@ -61,6 +61,10 @@ internal static class GuestInstructionValidator
                 GuestAggregateInstructionValidator.ValidateFieldStore(
                     context, function, instruction, result, operands);
                 break;
+            case "memory_copy":
+                GuestAggregateInstructionValidator.ValidateMemoryCopy(
+                    context, function, instruction, result, operands);
+                break;
             case "address_of":
                 GuestAggregateInstructionValidator.ValidateAddressOf(
                     context, function, instruction, result, operands, values);

@@ -26,7 +26,8 @@ internal static class CSharpGuestContinuationTests
         GeneratedLatentResultLowersTypedOutcome();
         AsyncOutcomeGuardBranchesBeforeNextAwait();
         CancellationMarkerBindsScheduledContinuation();
-        return 12;
+        AsyncStateFramesPreserveLocalsAcrossSequentialAwaits();
+        return 13;
     }
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
@@ -80,8 +81,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 14
-            && document.SemanticVersion == "1.14"
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.15"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -177,9 +178,9 @@ internal static class CSharpGuestContinuationTests
                 "type:int32", "type:int32", "type:int32", "type:address", "type:int32",
             })
             && resultReadImport.ReturnTypeId == "type:int32"
-            && resume.Parameters.Count == 3
+            && resume.Parameters.Count == 4
             && resultRead.OperandIds.Count == 5
-            && routeCall.OperandIds.Count == 3,
+            && routeCall.OperandIds.Count == 4,
             "provider-result resume should bulk-read one typed payload through the shared v2 callback route");
         Assert(resume.Blocks.SelectMany(block => block.Instructions)
                 .Count(instruction => instruction.Op == "call"
@@ -518,8 +519,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 14
-            && document.SemanticVersion == "1.14"
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.15"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -538,8 +539,8 @@ internal static class CSharpGuestContinuationTests
             && module.Imports.Count(import => import.Name == "continuation_load_object") == 1
             && resumeFunctions.Single(function => function.Id.EndsWith(
                 callbackIds[1].ToString(),
-                StringComparison.Ordinal)).Parameters.Count == 2,
-            "object await resume should consume the v2 status/object payload without a new Host ABI");
+                StringComparison.Ordinal)).Parameters.Count == 3,
+            "object await resume should consume the v2 token/status/object payload without a new callback ABI");
         Assert(module.Functions
                 .Where(function => function.Id == module.Exports.Single(export =>
                         export.Name == "avid_on_begin_play").FunctionId
@@ -646,6 +647,103 @@ internal static class CSharpGuestContinuationTests
             && module.Exports.All(export => export.Name != "avid_on_continuation")
             && WasmModuleCompiler.Compile(module).Succeeded,
             "schema 11 facade calls should preserve exactly one compiler-owned v2 continuation export in WASM");
+    }
+
+    private static void AsyncStateFramesPreserveLocalsAcrossSequentialAwaits()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int count = 7;
+                    FVector offset = new FVector(1.0f, 2.0f, 3.0f);
+                    await AvidContinuations.NextTickAsync();
+                    AvidLoadedObject loaded = await AvidAssets.LoadObjectAsync(
+                        "/Engine/EngineMeshes/Cube.Cube");
+                    await AvidContinuations.NextTickAsync();
+                    Consume(count, offset, loaded);
+                }
+
+                private static void Consume(
+                    int count,
+                    FVector offset,
+                    AvidLoadedObject loaded) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/AsyncStateFrames.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        SemanticAsyncAwaitSite[] sites = document.AsyncMethods.Single().Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .Select(segment => segment.AwaitSite!)
+            .ToArray();
+        GuestImport stateStore = module.Imports.Single(import =>
+            import.Module == "env" && import.Name == "continuation_state_store");
+        GuestImport stateRead = module.Imports.Single(import =>
+            import.Module == "env" && import.Name == "continuation_state_read");
+        GuestImport cancel = module.Imports.Single(import =>
+            import.Module == "env" && import.Name == "continuation_cancel");
+        GuestFunction[] controlledFunctions = module.Functions
+            .Where(function => function.Id == module.Exports.Single(export =>
+                    export.Name == "avid_on_begin_play").FunctionId
+                || function.Id.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal))
+            .ToArray();
+        GuestFunction router = module.Functions.Single(function =>
+            function.Id == "function:synthetic:continuation_v2");
+        string routerToken = router.Parameters.Single(parameter =>
+            parameter.Id.EndsWith(":parameter:token", StringComparison.Ordinal)).Id;
+        GuestInstruction[] routeCalls = router.Blocks
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call"
+                && instruction.TargetId?.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal) == true)
+            .ToArray();
+
+        Assert(result.Succeeded
+            && sites.Select(site => site.StateFrame?.Slots.Count)
+                .SequenceEqual(new int?[] { 2, 2, 3 })
+            && sites.All(site => module.Types.Single(type =>
+                    type.Id == site.StateFrame!.TypeId) is
+                { Kind: "struct", Storage: "memory", Size: > 0 and <= 4096 }),
+            "Roslyn live sets should become one bounded fixed-layout frame per await boundary");
+        Assert(stateStore.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int64", "type:address", "type:int32",
+            })
+            && stateRead.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int64", "type:address", "type:int32",
+            })
+            && controlledFunctions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Count(instruction => instruction.TargetId == stateStore.Id) == 3
+            && controlledFunctions.SelectMany(function => function.Blocks)
+                .SelectMany(block => block.Instructions)
+                .Count(instruction => instruction.TargetId == stateRead.Id) == 3,
+            "each suspension and resumption should cross the host boundary once for its whole frame");
+        Assert(routeCalls.Length == 3
+            && routeCalls.All(call => call.OperandIds[0] == routerToken)
+            && controlledFunctions.SelectMany(function => function.Blocks)
+                .Where(block => block.Id.EndsWith(":schedule_rejected", StringComparison.Ordinal))
+                .All(block => block.Instructions.Any(instruction =>
+                    instruction.TargetId == cancel.Id))
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "compiler resume routes should preserve the v2 token and cancel rejected state attachment atomically");
     }
 
     private static void CallbacksProduceOneDeterministicSixCellV2Export()
@@ -1103,6 +1201,18 @@ internal static class CSharpGuestContinuationTests
                 int bindingOrdinal,
                 int resultSlot,
                 int resultGeneration,
+                int destinationAddress,
+                int byteCount);
+
+            [DllImport("env", EntryPoint = "continuation_state_store")]
+            internal static extern int ContinuationStateStore(
+                long continuationToken,
+                int sourceAddress,
+                int byteCount);
+
+            [DllImport("env", EntryPoint = "continuation_state_read")]
+            internal static extern int ContinuationStateRead(
+                long continuationToken,
                 int destinationAddress,
                 int byteCount);
 

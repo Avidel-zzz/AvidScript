@@ -41,6 +41,12 @@ public:
 	bool BindCancellationSource(
 		int64 SourceToken,
 		int64 ContinuationToken) override;
+	bool StoreState(
+		int64 ContinuationToken,
+		TConstArrayView<uint8> StateBytes) override;
+	bool ReadState(
+		int64 ContinuationToken,
+		TArrayView<uint8> OutStateBytes) override;
 	bool ConsumeResult(
 		int64 ContinuationToken,
 		int32 Slot,
@@ -79,6 +85,7 @@ public:
 	static constexpr int32 MaximumResultSlots = 1024;
 	static constexpr int32 MaximumResultPayloadCells = 64;
 	static constexpr int32 MaximumFixedResultBytes = 4096;
+	static constexpr int32 MaximumStateFrameBytes = 4096;
 
 	explicit FAvidScriptSessionContinuations(
 		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
@@ -122,6 +129,17 @@ public:
 	{
 		return RetainedLoadedObjects.Num();
 	}
+	int32 GetStateFrameByteCountForTesting() const
+	{
+		int32 ByteCount = 0;
+		for (const FSlot& Slot : Slots)
+		{
+			ByteCount += Slot.Entry.IsSet()
+				? Slot.Entry->StateFrame.Num()
+				: 0;
+		}
+		return ByteCount;
+	}
 #endif
 
 	int64 ScheduleDelay(
@@ -154,6 +172,16 @@ public:
 		uint64 ActivationSerial,
 		int64 SourceToken,
 		int64 ContinuationToken);
+	bool StoreState(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 ContinuationToken,
+		TConstArrayView<uint8> StateBytes);
+	bool ReadState(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 ContinuationToken,
+		TArrayView<uint8> OutStateBytes);
 	bool BeginLatent(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -210,6 +238,7 @@ private:
 		int32 ResultSlot = 0;
 		int32 ResultGeneration = 0;
 		int32 BorrowedHandleCheckpoint = 0;
+		TArray<uint8, TInlineAllocator<128>> StateFrame;
 		bool bReady = false;
 		bool bDispatching = false;
 		bool bHasBorrowedHandleCheckpoint = false;
@@ -217,6 +246,7 @@ private:
 		bool bLatentCommitted = false;
 		bool bLatentCompletionPending = false;
 		bool bCancelledTerminalQueued = false;
+		bool bStateConsumed = false;
 	};
 
 	struct FSlot

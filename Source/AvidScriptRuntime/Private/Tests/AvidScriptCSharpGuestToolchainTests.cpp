@@ -789,7 +789,21 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 				&& RequiredImport.ImportName == TEXT("continuation_cancel");
 		});
 	TestTrue(TEXT("C# source adapter manifest requires continuation delay"), bRequiresContinuationDelay);
-	TestFalse(TEXT("C# source adapter manifest prunes unreachable continuation cancel"), bRequiresContinuationCancel);
+	TestTrue(TEXT("C# source adapter manifest retains continuation cancel for state rollback"), bRequiresContinuationCancel);
+	const bool bRequiresContinuationStateStore = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env")
+				&& RequiredImport.ImportName == TEXT("continuation_state_store");
+		});
+	const bool bRequiresContinuationStateRead = Manifest.RequiredImports.ContainsByPredicate(
+		[](const FAvidScriptWasmRequiredImport& RequiredImport)
+		{
+			return RequiredImport.ModuleName == TEXT("env")
+				&& RequiredImport.ImportName == TEXT("continuation_state_read");
+		});
+	TestTrue(TEXT("C# source adapter manifest requires continuation state store"), bRequiresContinuationStateStore);
+	TestTrue(TEXT("C# source adapter manifest requires continuation state read"), bRequiresContinuationStateRead);
 	const bool bRequiresContinuationLoadObject = Manifest.RequiredImports.ContainsByPredicate(
 		[](const FAvidScriptWasmRequiredImport& RequiredImport)
 		{

@@ -44,6 +44,15 @@ internal static class CSharpAsyncLowerer
             document,
             "env",
             "continuation_result_read");
+        string? stateStoreImportId = FindImport(
+            document,
+            "env",
+            "continuation_state_store");
+        string? stateReadImportId = FindImport(
+            document,
+            "env",
+            "continuation_state_read");
+        string? cancelImportId = FindImport(document, "env", "continuation_cancel");
         bool needsDelayImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
@@ -57,10 +66,17 @@ internal static class CSharpAsyncLowerer
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.PayloadKind
                 == SemanticContinuationCallback.ResultSlotPayloadKind);
+        bool needsStateImports = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.StateFrame is not null);
         if ((needsDelayImport && delayImportId is null)
             || (needsObjectLoadImport && objectLoadImportId is null)
             || (needsBindCancellationImport && bindCancellationImportId is null)
-            || (needsResultReadImport && resultReadImportId is null))
+            || (needsResultReadImport && resultReadImportId is null)
+            || (needsStateImports
+                && (stateStoreImportId is null
+                    || stateReadImportId is null
+                    || cancelImportId is null)))
         {
             Add(diagnostics, "The async profile is missing a required built-in continuation import.");
             return new CSharpAsyncLoweringResult(
@@ -116,10 +132,18 @@ internal static class CSharpAsyncLowerer
                     segment.Ordinal);
 
                 List<GuestRegister> parameters = new();
+                GuestRegister? continuationTokenParameter = null;
                 GuestRegister? loadedObjectParameter = null;
                 GuestRegister? resultStatusParameter = null;
                 GuestRegister? resultSlotParameter = null;
                 GuestRegister? resultGenerationParameter = null;
+                if (incoming is not null)
+                {
+                    continuationTokenParameter = new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "token"),
+                        int64Type.Id);
+                    parameters.Add(continuationTokenParameter);
+                }
                 if (incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
                 {
                     parameters.Add(new GuestRegister(
@@ -170,6 +194,39 @@ internal static class CSharpAsyncLowerer
                 int guardOrdinal = 0;
                 GuestRegister? incomingResultAccepted = null;
                 GuestRegister? incomingOutcome = null;
+                if (incoming?.StateFrame is { } incomingFrame)
+                {
+                    if (!EmitIncomingState(
+                        context,
+                        incomingFrame,
+                        incoming.CallbackId,
+                        continuationTokenParameter,
+                        stateReadImportId,
+                        int32Type,
+                        instructions,
+                        out GuestRegister? stateReadAccepted,
+                        out IReadOnlyList<GuestInstruction>? restoreInstructions))
+                    {
+                        break;
+                    }
+                    string stateAcceptedBlockId = blockId + ":state_accepted";
+                    string stateRejectedBlockId = blockId + ":state_rejected";
+                    prefixBlocks.Add(new GuestBasicBlock(
+                        activeBlockId,
+                        instructions.ToArray(),
+                        new GuestTerminator(
+                            "branch_if",
+                            stateReadAccepted!.Id,
+                            stateAcceptedBlockId,
+                            stateRejectedBlockId,
+                            null)));
+                    prefixBlocks.Add(new GuestBasicBlock(
+                        stateRejectedBlockId,
+                        Array.Empty<GuestInstruction>(),
+                        new GuestTerminator("trap", null, null, null, null)));
+                    activeBlockId = stateAcceptedBlockId;
+                    instructions = restoreInstructions!.ToList();
+                }
                 if (incoming?.PayloadKind
                     == SemanticContinuationCallback.ResultSlotPayloadKind
                     && !EmitIncomingResult(
@@ -258,6 +315,7 @@ internal static class CSharpAsyncLowerer
 
                 GuestRegister? scheduledToken = null;
                 GuestRegister? cancellationBindingAccepted = null;
+                GuestRegister? stateStoreAccepted = null;
                 if (segment.AwaitSite is { } awaitSite)
                 {
                     if (!EmitProducer(
@@ -271,6 +329,20 @@ internal static class CSharpAsyncLowerer
                         instructions,
                         out scheduledToken,
                         out cancellationBindingAccepted))
+                    {
+                        break;
+                    }
+
+                    if (awaitSite.StateFrame is { } outgoingFrame
+                        && !EmitOutgoingState(
+                            context,
+                            outgoingFrame,
+                            awaitSite.CallbackId,
+                            scheduledToken,
+                            stateStoreImportId,
+                            int32Type,
+                            instructions,
+                            out stateStoreAccepted))
                     {
                         break;
                     }
@@ -313,6 +385,7 @@ internal static class CSharpAsyncLowerer
                     foreach (GuestRegister acceptance in new[]
                     {
                         cancellationBindingAccepted,
+                        stateStoreAccepted,
                     }.Where(value => value is not null).Cast<GuestRegister>())
                     {
                         GuestRegister? combinedAcceptance = context.CreateTemporary(
@@ -337,6 +410,24 @@ internal static class CSharpAsyncLowerer
                     }
                     string acceptedBlockId = activeBlockId + ":schedule_accepted";
                     string rejectedBlockId = activeBlockId + ":schedule_rejected";
+                    List<GuestInstruction> rejectionInstructions = new();
+                    if (stateStoreAccepted is not null)
+                    {
+                        GuestRegister? cancellationIgnored = context.CreateTemporary(
+                            int32Type.Id,
+                            segment.Ordinal);
+                        if (cancellationIgnored is null)
+                        {
+                            break;
+                        }
+                        rejectionInstructions.Add(new GuestInstruction(
+                            "call",
+                            cancellationIgnored.Id,
+                            new[] { scheduledToken.Id },
+                            cancelImportId,
+                            null,
+                            null));
+                    }
                     tailBlocks = new[]
                     {
                         new GuestBasicBlock(
@@ -354,7 +445,7 @@ internal static class CSharpAsyncLowerer
                             new GuestTerminator("return", null, null, null, null)),
                         new GuestBasicBlock(
                             rejectedBlockId,
-                            Array.Empty<GuestInstruction>(),
+                            rejectionInstructions,
                             new GuestTerminator("trap", null, null, null, null)),
                     };
                 }
@@ -396,6 +487,203 @@ internal static class CSharpAsyncLowerer
         }
 
         return new CSharpAsyncLoweringResult(functions, routes);
+    }
+
+    private static bool EmitIncomingState(
+        CSharpFunctionLoweringContext context,
+        SemanticAsyncStateFrame frame,
+        int blockOrdinal,
+        GuestRegister? continuationToken,
+        string? stateReadImportId,
+        GuestType int32Type,
+        List<GuestInstruction> instructions,
+        out GuestRegister? stateReadAccepted,
+        out IReadOnlyList<GuestInstruction>? restoreInstructions)
+    {
+        stateReadAccepted = null;
+        restoreInstructions = null;
+        if (continuationToken is null
+            || stateReadImportId is null
+            || !TryGetStateFrameType(context, frame, out GuestType frameType))
+        {
+            Add(context.Diagnostics, $"Async state frame '{frame.TypeId}' has no compatible resume contract.");
+            return false;
+        }
+
+        GuestRegister? frameStorage = context.CreateTemporary(
+            frameType.Id,
+            blockOrdinal);
+        GuestRegister? byteCount = context.CreateTemporary(
+            int32Type.Id,
+            blockOrdinal);
+        if (frameStorage is null || byteCount is null)
+        {
+            return false;
+        }
+        instructions.Add(new GuestInstruction(
+            "stack_alloc",
+            frameStorage.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            null));
+        GuestRegister? frameAddress = CSharpAggregateOperationLowerer.LowerStorageAddress(
+            context,
+            frameStorage,
+            blockOrdinal,
+            instructions);
+        stateReadAccepted = context.CreateTemporary(
+            int32Type.Id,
+            blockOrdinal);
+        if (frameAddress is null || stateReadAccepted is null)
+        {
+            return false;
+        }
+        instructions.Add(new GuestInstruction(
+            "constant",
+            byteCount.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            new GuestConstant(
+                "int32",
+                frameType.Size.ToString(CultureInfo.InvariantCulture))));
+        instructions.Add(new GuestInstruction(
+            "call",
+            stateReadAccepted.Id,
+            new[] { continuationToken.Id, frameAddress.Id, byteCount.Id },
+            stateReadImportId,
+            null,
+            null));
+
+        List<GuestInstruction> restore = new();
+        for (int index = 0; index < frame.Slots.Count; ++index)
+        {
+            SemanticAsyncStateSlot slot = frame.Slots[index];
+            GuestField field = frameType.Fields[index];
+            GuestRegister? value = context.CreateTemporary(
+                slot.TypeId,
+                blockOrdinal);
+            if (value is null)
+            {
+                return false;
+            }
+            restore.Add(new GuestInstruction(
+                "field_load",
+                value.Id,
+                new[] { frameStorage.Id },
+                field.Id,
+                null,
+                null));
+            if (!CSharpOperationLowerer.StoreLocal(
+                context,
+                slot.SymbolId,
+                value,
+                blockOrdinal,
+                restore))
+            {
+                return false;
+            }
+        }
+        restoreInstructions = restore;
+        return true;
+    }
+
+    private static bool EmitOutgoingState(
+        CSharpFunctionLoweringContext context,
+        SemanticAsyncStateFrame frame,
+        int blockOrdinal,
+        GuestRegister? continuationToken,
+        string? stateStoreImportId,
+        GuestType int32Type,
+        List<GuestInstruction> instructions,
+        out GuestRegister? stateStoreAccepted)
+    {
+        stateStoreAccepted = null;
+        if (continuationToken is null
+            || stateStoreImportId is null
+            || !TryGetStateFrameType(context, frame, out GuestType frameType))
+        {
+            Add(context.Diagnostics, $"Async state frame '{frame.TypeId}' has no compatible suspend contract.");
+            return false;
+        }
+
+        GuestRegister? frameStorage = context.CreateTemporary(frameType.Id, blockOrdinal);
+        GuestRegister? byteCount = context.CreateTemporary(int32Type.Id, blockOrdinal);
+        if (frameStorage is null || byteCount is null)
+        {
+            return false;
+        }
+        instructions.Add(new GuestInstruction(
+            "stack_alloc",
+            frameStorage.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            null));
+        for (int index = 0; index < frame.Slots.Count; ++index)
+        {
+            SemanticAsyncStateSlot slot = frame.Slots[index];
+            if (!context.TryGetStorage(slot.SymbolId, out GuestRegister storage)
+                || storage.TypeId != slot.TypeId)
+            {
+                Add(context.Diagnostics, $"Async state slot '{slot.SymbolId}' has no live suspend storage.");
+                return false;
+            }
+            instructions.Add(new GuestInstruction(
+                "field_store",
+                null,
+                new[] { frameStorage.Id, storage.Id },
+                frameType.Fields[index].Id,
+                null,
+                null));
+        }
+
+        GuestRegister? frameAddress = CSharpAggregateOperationLowerer.LowerStorageAddress(
+            context,
+            frameStorage,
+            blockOrdinal,
+            instructions);
+        stateStoreAccepted = context.CreateTemporary(int32Type.Id, blockOrdinal);
+        if (frameAddress is null || stateStoreAccepted is null)
+        {
+            return false;
+        }
+        instructions.Add(new GuestInstruction(
+            "constant",
+            byteCount.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            new GuestConstant(
+                "int32",
+                frameType.Size.ToString(CultureInfo.InvariantCulture))));
+        instructions.Add(new GuestInstruction(
+            "call",
+            stateStoreAccepted.Id,
+            new[] { continuationToken.Id, frameAddress.Id, byteCount.Id },
+            stateStoreImportId,
+            null,
+            null));
+        return true;
+    }
+
+    private static bool TryGetStateFrameType(
+        CSharpFunctionLoweringContext context,
+        SemanticAsyncStateFrame frame,
+        out GuestType frameType)
+    {
+        if (!context.TryGetGuestType(frame.TypeId, out frameType)
+            || frameType.Kind != "struct"
+            || frameType.Storage != "memory"
+            || frameType.Size <= 0
+            || frameType.Size > 4096
+            || frameType.Fields.Count != frame.Slots.Count)
+        {
+            return false;
+        }
+        return frameType.Fields.Select(field => (field.Name, field.TypeId))
+            .SequenceEqual(frame.Slots.Select(slot => (slot.SymbolId, slot.TypeId)));
     }
 
     private static bool EmitEarlyReturnGuard(

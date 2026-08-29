@@ -1872,6 +1872,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	FAvidScriptContinuationResultCodecTransaction ResultTransaction;
 	bContinuationDispatchActive = true;
 	bContinuationResultConsumed = false;
+	bContinuationStateConsumed = false;
 	ActiveContinuationToken = Completion.Token;
 	ActiveContinuationStatus = Completion.Status;
 	ActiveContinuationResultSlot = Completion.ObjectSlot;
@@ -1897,6 +1898,7 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	}
 	bContinuationDispatchActive = false;
 	bContinuationResultConsumed = false;
+	bContinuationStateConsumed = false;
 	ActiveContinuationToken = 0;
 	ActiveContinuationStatus = EAvidScriptContinuationStatus::Failed;
 	ActiveContinuationResultSlot = 0;
@@ -3802,6 +3804,45 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
 			ContinuationToken)
 		? 1
 		: 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateStoreImport(
+	const int64 ContinuationToken,
+	const TConstArrayView<uint8> StateBytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = StateBytes.Num();
+	LastHostImportResult = HostContext.Continuations != nullptr
+		&& HostContext.Continuations->StoreState(ContinuationToken, StateBytes)
+		? 1
+		: 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationStateReadImport(
+	const int64 ContinuationToken,
+	const TArrayView<uint8> OutStateBytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = OutStateBytes.Num();
+	LastHostImportResult = bContinuationDispatchActive
+		&& !bContinuationStateConsumed
+		&& ContinuationToken == ActiveContinuationToken
+		&& HostContext.Continuations != nullptr
+		&& HostContext.Continuations->ReadState(
+			ContinuationToken,
+			OutStateBytes)
+		? 1
+		: 0;
+	if (LastHostImportResult != 0)
+	{
+		bContinuationStateConsumed = true;
+	}
 	++HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return LastHostImportResult;
@@ -6315,6 +6356,20 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 			Call.IntArgs[0],
 			Call.IntArgs[1],
 			Call.IntArgs[2],
+			Call.OutputBytes);
+		return Finish(Value, Value != 0);
+	}
+	case EAvidScriptHostBindingId::ContinuationStateStore:
+	{
+		const int32 Value = HandleContinuationStateStoreImport(
+			Call.Int64Args[0],
+			Call.InputBytes);
+		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationStateRead:
+	{
+		const int32 Value = HandleContinuationStateReadImport(
+			Call.Int64Args[0],
 			Call.OutputBytes);
 		return Finish(Value, Value != 0);
 	}

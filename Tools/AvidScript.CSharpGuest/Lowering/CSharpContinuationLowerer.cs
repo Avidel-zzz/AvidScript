@@ -16,7 +16,8 @@ internal static class CSharpContinuationLowerer
     private sealed record DispatchTarget(
         int CallbackId,
         string PayloadKind,
-        string FunctionId);
+        string FunctionId,
+        bool IsCompilerAsync);
 
     public static CSharpContinuationLoweringResult? Lower(
         SemanticDocument document,
@@ -124,11 +125,13 @@ internal static class CSharpContinuationLowerer
             .Select(callback => new DispatchTarget(
                 callback.CallbackId,
                 callback.PayloadKind,
-                CSharpGuestIds.Function(callback.MethodSymbolId)))
+                CSharpGuestIds.Function(callback.MethodSymbolId),
+                false))
             .Concat(asyncRoutes.Select(route => new DispatchTarget(
                 route.CallbackId,
                 route.PayloadKind,
-                route.FunctionId)))
+                route.FunctionId,
+                true)))
             .OrderBy(target => target.CallbackId)
             .ToArray();
         if (targets.GroupBy(target => target.CallbackId).Any(group => group.Count() != 1))
@@ -199,7 +202,9 @@ internal static class CSharpContinuationLowerer
                 new GuestTerminator("branch_if", condition.Id, callBlockId, falseBlockId, null)));
 
             List<GuestInstruction> callInstructions = new();
-            string[] argumentIds = Array.Empty<string>();
+            string[] argumentIds = target.IsCompilerAsync
+                ? new[] { token.Id }
+                : Array.Empty<string>();
             if (target.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
             {
                 GuestRegister callbackStatus = Local(
@@ -240,7 +245,9 @@ internal static class CSharpContinuationLowerer
                     "Generation",
                     objectGeneration!,
                     callInstructions);
-                argumentIds = new[] { callbackStatus.Id, loadedObject.Id };
+                argumentIds = target.IsCompilerAsync
+                    ? new[] { token.Id, callbackStatus.Id, loadedObject.Id }
+                    : new[] { callbackStatus.Id, loadedObject.Id };
             }
             else if (target.PayloadKind
                 == SemanticContinuationCallback.ResultSlotPayloadKind)
@@ -258,12 +265,20 @@ internal static class CSharpContinuationLowerer
                     null,
                     null,
                     null));
-                argumentIds = new[]
-                {
-                    callbackStatus.Id,
-                    objectSlot!.Id,
-                    objectGeneration!.Id,
-                };
+                argumentIds = target.IsCompilerAsync
+                    ? new[]
+                    {
+                        token.Id,
+                        callbackStatus.Id,
+                        objectSlot!.Id,
+                        objectGeneration!.Id,
+                    }
+                    : new[]
+                    {
+                        callbackStatus.Id,
+                        objectSlot!.Id,
+                        objectGeneration!.Id,
+                    };
             }
 
             callInstructions.Add(new GuestInstruction(

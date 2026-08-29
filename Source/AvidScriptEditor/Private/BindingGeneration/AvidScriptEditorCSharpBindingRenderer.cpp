@@ -2848,7 +2848,13 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("    internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);"),
 		TEXT(""),
 		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_result_read\")]"),
-		TEXT("    internal static extern int ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount);")
+		TEXT("    internal static extern int ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount);"),
+		TEXT(""),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_state_store\")]"),
+		TEXT("    internal static extern int ContinuationStateStore(long continuationToken, int inputAddress, int byteCount);"),
+		TEXT(""),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_state_read\")]"),
+		TEXT("    internal static extern int ContinuationStateRead(long continuationToken, int outputAddress, int byteCount);")
 	});
 	if (SelfType != nullptr || bHasLifecycleBindings)
 	{

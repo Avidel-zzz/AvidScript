@@ -57,6 +57,7 @@ TestResults/
 artifacts/
 coverage/
 .nuget/
+.codex-dotnet/
 Benchmarks/PuertsComparison/.cache/
 Benchmarks/PuertsComparison/Results/
 *.coverage

@@ -10,6 +10,7 @@ internal static class CSharpSemanticInputValidator
     private const int CompilerCallbackIdStart = 0x40000000;
     private const int MaximumAsyncAwaitsPerMethod = 16;
     private const int MaximumAsyncAwaitsPerModule = 64;
+    private const int MaximumAsyncStateSlotsPerAwait = 64;
 
     private static readonly string[] ObjectContinuationParameterTypeIds =
     {
@@ -473,6 +474,7 @@ internal static class CSharpSemanticInputValidator
 
             Dictionary<string, int> localDeclarationSegments = new(StringComparer.Ordinal);
             Dictionary<string, int> resultUseSegments = new(StringComparer.Ordinal);
+            Dictionary<string, string> stateTypeIds = new(StringComparer.Ordinal);
             for (int index = 0; index < method.Segments.Count; ++index)
             {
                 SemanticAsyncSegment segment = method.Segments[index];
@@ -509,6 +511,10 @@ internal static class CSharpSemanticInputValidator
                     {
                         return false;
                     }
+                    if (statement.TargetSymbolId is { } stateSymbolId)
+                    {
+                        stateTypeIds.Add(stateSymbolId, statement.Operation.TypeId!);
+                    }
                 }
 
                 if (segment.AwaitSite is { } awaitSite)
@@ -531,9 +537,17 @@ internal static class CSharpSemanticInputValidator
                     {
                         return false;
                     }
+                    if (awaitSite.ResultSymbolId is { } stateResultSymbolId)
+                    {
+                        stateTypeIds.Add(stateResultSymbolId, awaitSite.ResultTypeId!);
+                    }
                 }
             }
 
+            Dictionary<string, int> declarationSegments = localDeclarationSegments
+                .Concat(resultUseSegments)
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            Dictionary<string, int> lastUseSegments = new(StringComparer.Ordinal);
             foreach (SemanticAsyncSegment segment in method.Segments)
             {
                 IEnumerable<SemanticOperation> operations = segment.Statements
@@ -543,15 +557,71 @@ internal static class CSharpSemanticInputValidator
                 {
                     operations = operations.Append(cancellationToken);
                 }
-                if (operations.SelectMany(EnumerateOperations).Any(operation =>
-                    operation.SymbolId is { } symbolId
-                    && (localDeclarationSegments.TryGetValue(symbolId, out int declarationSegment)
-                            && declarationSegment != segment.Ordinal
-                        || resultUseSegments.TryGetValue(symbolId, out int resultSegment)
-                            && resultSegment != segment.Ordinal)))
+                foreach (SemanticOperation operation in operations.SelectMany(EnumerateOperations))
+                {
+                    if (operation.SymbolId is not { } symbolId
+                        || !declarationSegments.TryGetValue(symbolId, out int declarationSegment))
+                    {
+                        continue;
+                    }
+                    if (segment.Ordinal < declarationSegment
+                        || document.SchemaVersion < 15 && segment.Ordinal != declarationSegment)
+                    {
+                        return false;
+                    }
+                    lastUseSegments[symbolId] = Math.Max(
+                        lastUseSegments.GetValueOrDefault(symbolId),
+                        segment.Ordinal);
+                }
+            }
+
+            if (document.SchemaVersion < 15)
+            {
+                if (method.Segments.Any(segment => segment.AwaitSite?.StateFrame is not null))
                 {
                     return false;
                 }
+                continue;
+            }
+
+            foreach (SemanticAsyncSegment segment in method.Segments.Where(item => item.AwaitSite is not null))
+            {
+                SemanticAsyncAwaitSite awaitSite = segment.AwaitSite!;
+                SemanticAsyncStateSlot[] expectedSlots = declarationSegments
+                    .Where(pair => pair.Value <= segment.Ordinal
+                        && lastUseSegments.TryGetValue(pair.Key, out int lastUse)
+                        && lastUse > segment.Ordinal)
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => new SemanticAsyncStateSlot(pair.Key, stateTypeIds[pair.Key]))
+                    .ToArray();
+                SemanticAsyncStateFrame? frame = awaitSite.StateFrame;
+                if (expectedSlots.Length == 0)
+                {
+                    if (frame is not null)
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+                if (expectedSlots.Length > MaximumAsyncStateSlotsPerAwait
+                    || frame is null
+                    || frame.TypeId != $"type:synthetic:async_state:{awaitSite.CallbackId}"
+                    || frame.Slots is null
+                    || frame.Slots.Count != expectedSlots.Length
+                    || !frame.Slots.Select(slot => (slot.SymbolId, slot.TypeId))
+                        .SequenceEqual(expectedSlots.Select(slot => (slot.SymbolId, slot.TypeId)))
+                    || !Unique(frame.Slots.Select(slot => slot.SymbolId)))
+                {
+                    return false;
+                }
+            }
+
+            bool hasStateFrames = method.Segments.Any(segment => segment.AwaitSite?.StateFrame is not null);
+            if (hasStateFrames
+                && (!HasContinuationStateImport(document.Callables, "continuation_state_store")
+                    || !HasContinuationStateImport(document.Callables, "continuation_state_read")))
+            {
+                return false;
             }
         }
 
@@ -807,9 +877,25 @@ internal static class CSharpSemanticInputValidator
             (11, "1.11") => true,
             (12, "1.12") => true,
             (13, "1.13") => true,
+            (14, "1.14") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
+    }
+
+    private static bool HasContinuationStateImport(
+        IReadOnlyList<SemanticCallable> callables,
+        string name)
+    {
+        return callables.Count(callable =>
+            callable.Import is { Module: "env", Name: var importName }
+            && importName == name
+            && callable.ReturnTypeId == "type:int32"
+            && callable.Parameters.Count == 3
+            && callable.Parameters[0].TypeId == "type:int64"
+            && callable.Parameters[1].TypeId == "type:int32"
+            && callable.Parameters[2].TypeId == "type:int32"
+            && callable.Parameters.All(parameter => parameter.RefKind == "none")) == 1;
     }
 
     private static bool ValidateAsyncStatement(

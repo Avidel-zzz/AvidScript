@@ -35,6 +35,18 @@ public:
 	virtual bool BindCancellationSource(
 		int64 SourceToken,
 		int64 ContinuationToken) = 0;
+	virtual bool StoreState(
+		int64 ContinuationToken,
+		TConstArrayView<uint8> StateBytes)
+	{
+		return false;
+	}
+	virtual bool ReadState(
+		int64 ContinuationToken,
+		TArrayView<uint8> OutStateBytes)
+	{
+		return false;
+	}
 	virtual bool ConsumeResult(
 		int64 ContinuationToken,
 		int32 Slot,

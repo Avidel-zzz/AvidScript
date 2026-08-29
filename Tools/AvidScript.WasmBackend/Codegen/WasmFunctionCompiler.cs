@@ -274,6 +274,9 @@ internal sealed class WasmFunctionCompiler
             case "field_store":
                 CompileFieldStore(body, instruction);
                 break;
+            case "memory_copy":
+                CompileMemoryCopy(body, instruction);
+                break;
             case "address_of":
                 CompileAddressOf(body, instruction);
                 break;
@@ -634,6 +637,16 @@ internal sealed class WasmFunctionCompiler
             WasmMemoryEmitter.WriteLoad(body, elementType);
             WriteResult(body, instruction);
         }
+    }
+
+    private void CompileMemoryCopy(WasmBinaryWriter body, GuestInstruction instruction)
+    {
+        GuestType type = moduleLayout.Types[instruction.TargetId!];
+        WriteMemoryCopy(
+            body,
+            instruction.OperandIds[0],
+            instruction.OperandIds[1],
+            type.Size);
     }
 
     private void CompileCapabilityArrayLoad(

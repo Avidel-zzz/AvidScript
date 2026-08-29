@@ -367,6 +367,12 @@ public:
 	int32 HandleContinuationBindCancelImport(
 		int64 SourceToken,
 		int64 ContinuationToken);
+	int32 HandleContinuationStateStoreImport(
+		int64 ContinuationToken,
+		TConstArrayView<uint8> StateBytes);
+	int32 HandleContinuationStateReadImport(
+		int64 ContinuationToken,
+		TArrayView<uint8> OutStateBytes);
 	int32 HandleContinuationResultReadImport(
 		int32 BindingOrdinal,
 		int32 ResultSlot,
@@ -665,6 +671,7 @@ private:
 	FString PendingHostImportDetails;
 	bool bContinuationDispatchActive = false;
 	bool bContinuationResultConsumed = false;
+	bool bContinuationStateConsumed = false;
 	int64 ActiveContinuationToken = 0;
 	EAvidScriptContinuationStatus ActiveContinuationStatus =
 		EAvidScriptContinuationStatus::Failed;

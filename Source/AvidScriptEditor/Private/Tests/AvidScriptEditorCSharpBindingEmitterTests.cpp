@@ -253,6 +253,11 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade imports cancellation binding"),
 		FirstSource.Contains(TEXT("EntryPoint = \"continuation_bind_cancel\""))
 		&& FirstSource.Contains(TEXT("internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);")));
+	TestTrue(TEXT("Generated facade imports continuation state transfer"),
+		FirstSource.Contains(TEXT("EntryPoint = \"continuation_state_store\""))
+		&& FirstSource.Contains(TEXT("ContinuationStateStore(long continuationToken, int inputAddress, int byteCount)"))
+		&& FirstSource.Contains(TEXT("EntryPoint = \"continuation_state_read\""))
+		&& FirstSource.Contains(TEXT("ContinuationStateRead(long continuationToken, int outputAddress, int byteCount)")));
 	TestTrue(TEXT("Generated facade declares AvidStateMode"), FirstSource.Contains(TEXT("public enum AvidStateMode")));
 	TestTrue(TEXT("Generated facade declares compatible state mode"), FirstSource.Contains(TEXT("Compatible = 0")));
 	TestTrue(TEXT("Generated facade declares explicit state mode"), FirstSource.Contains(TEXT("Explicit = 1")));

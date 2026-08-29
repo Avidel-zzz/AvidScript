@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains thirteen host intrinsics"), FirstResult.IntrinsicCount, 13);
+	TestEqual(TEXT("Default schema contains fifteen host intrinsics"), FirstResult.IntrinsicCount, 15);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -39,7 +39,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
-	TestEqual(TEXT("Schema serializes thirteen intrinsic objects"), Intrinsics.Num(), 13);
+	TestEqual(TEXT("Schema serializes fifteen intrinsic objects"), Intrinsics.Num(), 15);
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
@@ -103,6 +103,14 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 		CountIntrinsic(TEXT("env"), TEXT("continuation_result_read"), TEXT("(iiiii)i")),
 		1);
 	TestEqual(
+		TEXT("Schema contains continuation state-store intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_state_store"), TEXT("(Iii)i")),
+		1);
+	TestEqual(
+		TEXT("Schema contains continuation state-read intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_state_read"), TEXT("(Iii)i")),
+		1);
+	TestEqual(
 		TEXT("Schema contains cancellation source creation intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("continuation_cancel_source_create"), TEXT("()I")),
 		1);
@@ -151,6 +159,8 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Schema includes continuation cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel")) && FirstJson.Contains(TEXT("(I)i")));
 	TestTrue(TEXT("Schema includes async object-load intrinsic"), FirstJson.Contains(TEXT("continuation_load_object")) && FirstJson.Contains(TEXT("(ii)I")));
 	TestTrue(TEXT("Schema includes bulk continuation result intrinsic"), FirstJson.Contains(TEXT("continuation_result_read")) && FirstJson.Contains(TEXT("(iiiii)i")));
+	TestTrue(TEXT("Schema includes continuation state-store intrinsic"), FirstJson.Contains(TEXT("continuation_state_store")) && FirstJson.Contains(TEXT("(Iii)i")));
+	TestTrue(TEXT("Schema includes continuation state-read intrinsic"), FirstJson.Contains(TEXT("continuation_state_read")) && FirstJson.Contains(TEXT("(Iii)i")));
 	TestTrue(TEXT("Schema includes cancellation source creation intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_create")));
 	TestTrue(TEXT("Schema includes cancellation source cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_cancel")));
 	TestTrue(TEXT("Schema includes cancellation source release intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_release")));

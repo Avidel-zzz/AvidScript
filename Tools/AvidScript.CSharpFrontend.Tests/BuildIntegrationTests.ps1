@@ -973,17 +973,17 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 14) "semantic artifact schema version is not 14"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.14") "semantic artifact version is not 1.14"
+Assert-Condition ($SemanticJson.schema_version -eq 15) "semantic artifact schema version is not 15"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.15") "semantic artifact version is not 1.15"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
-Assert-Condition (@($SemanticJson.callables).Count -eq 81) "ActorLifecycle semantic callable count is not 81"
+Assert-Condition (@($SemanticJson.callables).Count -eq 84) "ActorLifecycle semantic callable count is not 84"
 $ActorMatchesCallables = @($SemanticJson.callables | Where-Object {
     [string]$_.method_symbol_id -ceq "symbol:method:global::AvidScript.AActor.Matches(global::AvidScript.AActor):bool"
 })
 Assert-Condition ($ActorMatchesCallables.Count -eq 1) "ActorLifecycle semantic artifact is missing the AActor.Matches helper"
-Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 17) "ActorLifecycle semantic import count is not 17"
+Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.import }).Count -eq 20) "ActorLifecycle semantic import count is not 20"
 Assert-Condition (@($SemanticJson.callables | Where-Object { $null -ne $_.export }).Count -eq 5) "ActorLifecycle semantic export count is not 5"
 $ContinuationCallbacks = @($SemanticJson.continuation_callbacks)
 Assert-Condition ($ContinuationCallbacks.Count -eq 2) "ActorLifecycle does not expose two continuation callbacks"
@@ -993,11 +993,12 @@ $AsyncMethods = @($SemanticJson.async_methods)
 Assert-Condition ($AsyncMethods.Count -eq 1) "ActorLifecycle does not expose one controlled async method"
 Assert-Condition ([string]$AsyncMethods[0].export_name -ceq 'avid_on_begin_play' -and
     [string]$AsyncMethods[0].lowering -ceq 'reentrant_zero_heap_cps' -and
-    @($AsyncMethods[0].segments).Count -eq 3) `
+    @($AsyncMethods[0].segments).Count -eq 4) `
     "ActorLifecycle BeginPlay controlled async graph is invalid"
 $AsyncAwaitSites = @($AsyncMethods[0].segments | ForEach-Object { $_.await_site } | Where-Object { $null -ne $_ })
-Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1073741825' -and
-    (@($AsyncAwaitSites.producer_kind) -join ',') -ceq 'next_tick,object_load') `
+Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1073741825,1073741826' -and
+    (@($AsyncAwaitSites.producer_kind) -join ',') -ceq 'next_tick,object_load,next_tick' -and
+    (@($AsyncAwaitSites.state_frame | ForEach-Object { @($_.slots).Count }) -join ',') -ceq '1,1,2') `
     "ActorLifecycle compiler-owned await sites differ"
 $AsyncGuardStatements = @($AsyncMethods[0].segments | ForEach-Object { $_.statements } | Where-Object {
     [string]$_.operation.kind -ceq 'async_early_return_guard'
@@ -1013,10 +1014,15 @@ Assert-Condition ((@($GameplayCallbacks.event_type) -join ',') -ceq '1,2,3,4') "
 Assert-Condition ((@($GameplayCallbacks.name) -join ',') -ceq 'OnBeginOverlap,OnEndOverlap,OnHit,OnInput') "ActorLifecycle gameplay callback names differ"
 Assert-Condition ($SemanticJson.reachability.mode -eq "entrypoint_roots") "ActorLifecycle semantic reachability is not entrypoint-rooted"
 Assert-Condition (@($SemanticJson.reachability.root_callable_ids).Count -eq 11) "ActorLifecycle reachability root count is not 11"
-Assert-Condition (@($SemanticJson.reachability.reachable_imports).Count -lt 17) "ActorLifecycle reachability did not remove unused imports"
+Assert-Condition (@($SemanticJson.reachability.reachable_imports).Count -lt 20) "ActorLifecycle reachability did not remove unused imports"
 Assert-Condition (@($SemanticJson.reachability.reachable_imports | Where-Object {
     [string]$_.module -ceq 'env' -and [string]$_.name -ceq 'continuation_load_object'
 }).Count -eq 1) "ActorLifecycle reachability omits continuation_load_object"
+foreach ($StateImportName in @('continuation_state_store', 'continuation_state_read')) {
+    Assert-Condition (@($SemanticJson.callables | Where-Object {
+        [string]$_.import.module -ceq 'env' -and [string]$_.import.name -ceq $StateImportName
+    }).Count -eq 1) "ActorLifecycle semantic ABI omits $StateImportName"
+}
 Assert-Condition ($NormalJson.semantic.source_sha256 -eq $FrontendJson.source.sha256) "report semantic source hash differs"
 Assert-Condition ($NormalJson.semantic.frontend_sha256 -eq $FrontendJson.source.sha256) "report semantic frontend hash differs"
 Assert-Condition ($NormalJson.source.script_type -eq "ActorLifecycleScript") "report does not identify the AST-selected script type"
@@ -1041,6 +1047,11 @@ Assert-Condition ($GuestIrJson.provenance.semantic_sha256 -eq $SemanticSha256) "
 Assert-Condition (@($GuestIrJson.imports | Where-Object {
     [string]$_.module -ceq 'env' -and [string]$_.name -ceq 'continuation_load_object'
 }).Count -eq 1) "Guest IR does not import continuation_load_object exactly once"
+foreach ($StateImportName in @('continuation_state_store', 'continuation_state_read')) {
+    Assert-Condition (@($GuestIrJson.imports | Where-Object {
+        [string]$_.module -ceq 'env' -and [string]$_.name -ceq $StateImportName
+    }).Count -eq 1) "Guest IR does not import $StateImportName exactly once"
+}
 Assert-Condition (@($GuestIrJson.exports | Where-Object {
     [string]$_.name -ceq 'avid_on_continuation_v2'
 }).Count -eq 1) "Guest IR does not export avid_on_continuation_v2 exactly once"
@@ -1049,15 +1060,15 @@ Assert-Condition (@($GuestIrJson.exports | Where-Object {
 }).Count -eq 0) "Semantic 13 Guest IR retained the legacy continuation export"
 Assert-Condition (@($GuestIrJson.functions | Where-Object {
     [string]$_.id -clike 'function:synthetic:async_resume:*'
-}).Count -eq 2) "Guest IR does not contain two controlled async resume functions"
+}).Count -eq 3) "Guest IR does not contain three controlled async resume functions"
 $BeginPlayFunctionId = [string](@($GuestIrJson.exports | Where-Object {
     [string]$_.name -ceq 'avid_on_begin_play'
 })[0].function_id)
 Assert-Condition (@($GuestIrJson.functions | Where-Object {
     ([string]$_.id -ceq $BeginPlayFunctionId) -or
         ([string]$_.id -clike 'function:synthetic:async_resume:*')
-} | ForEach-Object { @($_.blocks | Where-Object { [string]$_.terminator.kind -ceq 'trap' }) }).Count -eq 2) `
-    "each ActorLifecycle await producer does not fail closed on scheduling rejection"
+} | ForEach-Object { @($_.blocks | Where-Object { [string]$_.terminator.kind -ceq 'trap' }) }).Count -eq 6) `
+    "each ActorLifecycle await producer does not fail closed on state-store or scheduling rejection"
 Assert-Condition ($DebugMapJson.schema_version -eq 1 -and $DebugMapJson.debug_version -eq "1.0") "C# debug map contract is invalid"
 Assert-Condition ($DebugMapJson.module_id -eq $GuestIrJson.module_id) "C# debug map module identity differs from Guest IR"
 Assert-Condition ($DebugMapJson.source.id -eq $NormalJson.source.file -and $DebugMapJson.source.sha256 -eq $FrontendJson.source.sha256) "C# debug map source identity differs"
@@ -1070,7 +1081,7 @@ Assert-Condition (@($DebugMapJson.functions | Where-Object { $_.guest_function_i
 Assert-Condition (@($DebugMapJson.functions | Where-Object {
     [string]$_.guest_function_id -clike 'function:synthetic:async_resume:*' -and
     [string]$_.method_symbol_id -clike '*#async_resume:*'
-}).Count -eq 2) "controlled async resume functions do not map to their source segments"
+}).Count -eq 3) "controlled async resume functions do not map to their source segments"
 Assert-Condition ([int]$DebugMapJson.defined_function_count -eq @($GuestIrJson.functions).Count) "generated gameplay router collapsed the debug-map function index space"
 Assert-Condition ($NormalJson.guest_ir.schema_version -eq 2 -and $NormalJson.guest_ir.version -eq "1.1") "report Guest IR contract is invalid"
 Assert-Condition ($NormalJson.guest_ir.semantic_sha256 -eq $SemanticSha256) "report Guest IR semantic hash differs"

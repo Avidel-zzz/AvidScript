@@ -146,7 +146,9 @@ enum class EAvidScriptHostBindingId : uint16
 	ContinuationCancelSourceCancel,
 	ContinuationCancelSourceRelease,
 	ContinuationBindCancel,
-	ContinuationResultRead
+	ContinuationResultRead,
+	ContinuationStateStore,
+	ContinuationStateRead
 };
 
 struct FAvidScriptVmStackFrame

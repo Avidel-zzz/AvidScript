@@ -101,6 +101,17 @@ public:
 			&& ContinuationToken == ExpectedToken;
 	}
 
+	bool StoreState(
+		const int64 ContinuationToken,
+		const TConstArrayView<uint8> StateBytes) override
+	{
+		LastStateToken = ContinuationToken;
+		StoredState.Reset();
+		StoredState.Append(StateBytes.GetData(), StateBytes.Num());
+		++StoreStateCount;
+		return ContinuationToken == ExpectedToken && !StateBytes.IsEmpty();
+	}
+
 	static constexpr int64 ExpectedToken = 0x000000010000002aLL;
 	static constexpr int64 ExpectedCancellationSourceToken =
 		static_cast<int64>(0x800000010000002bULL);
@@ -110,6 +121,8 @@ public:
 	int64 LastCancelledToken = 0;
 	int64 LastCancellationSourceToken = 0;
 	int64 LastBoundContinuationToken = 0;
+	int64 LastStateToken = 0;
+	TArray<uint8> StoredState;
 	int32 ScheduleCount = 0;
 	int32 ObjectLoadScheduleCount = 0;
 	int32 CancelCount = 0;
@@ -117,6 +130,7 @@ public:
 	int32 CancelCancellationSourceCount = 0;
 	int32 ReleaseCancellationSourceCount = 0;
 	int32 BindCancellationSourceCount = 0;
+	int32 StoreStateCount = 0;
 };
 
 struct FAvidScriptFakeAsyncLoadCancelState
@@ -428,6 +442,22 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 		Runtime.HandleContinuationCancelSourceReleaseImport(CancellationSourceToken),
 		1);
 	TestEqual(TEXT("Source release crosses the host boundary once"), Host.ReleaseCancellationSourceCount, 1);
+	const uint8 StateBytes[] = { 4, 8, 15, 16, 23, 42 };
+	TestEqual(
+		TEXT("Runtime forwards one opaque state frame"),
+		Runtime.HandleContinuationStateStoreImport(
+			Token,
+			MakeArrayView(StateBytes)),
+		1);
+	TestEqual(TEXT("State storage crosses the host boundary once"), Host.StoreStateCount, 1);
+	TestEqual(TEXT("State storage preserves the full token"), Host.LastStateToken, Token);
+	TestTrue(
+		TEXT("State storage preserves exact bytes"),
+		Host.StoredState.Num() == UE_ARRAY_COUNT(StateBytes)
+			&& FMemory::Memcmp(
+				Host.StoredState.GetData(),
+				StateBytes,
+				UE_ARRAY_COUNT(StateBytes)) == 0);
 
 	const FString ObjectPath(TEXT("/Engine/EngineMeshes/Cube.Cube"));
 	const FTCHARToUTF8 ObjectPathUtf8(*ObjectPath);
@@ -472,6 +502,94 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 		TEXT("Object path failure names the load import"),
 		FailureImport,
 		FString(TEXT("continuation_load_object")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationStateFrameTest,
+	"AvidScript.Runtime.Continuation.StateFrame",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationStateFrameTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("State-frame world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	IAvidScriptContinuationHost& Host = Owner->ResetActive(World);
+	const int64 FirstToken = Host.ScheduleDelay(0.01f, 51);
+	const int64 SecondToken = Host.ScheduleDelay(0.01f, 52);
+	const uint8 FirstState[] = { 1, 2, 3, 4 };
+	const uint8 SecondState[] = { 5, 6, 7, 8, 9, 10 };
+	TestTrue(
+		TEXT("First continuation owns one copied state frame"),
+		Host.StoreState(FirstToken, MakeArrayView(FirstState)));
+	TestTrue(
+		TEXT("Second continuation owns an isolated copied state frame"),
+		Host.StoreState(SecondToken, MakeArrayView(SecondState)));
+	TestFalse(
+		TEXT("A continuation cannot replace its attached state frame"),
+		Host.StoreState(FirstToken, MakeArrayView(FirstState)));
+	TestEqual(
+		TEXT("Both state frames are retained by their continuation entries"),
+		Owner->GetStateFrameByteCountForTesting(),
+		static_cast<int32>(
+			UE_ARRAY_COUNT(FirstState) + UE_ARRAY_COUNT(SecondState)));
+
+	AdvanceContinuationWorld(World, 0.02f);
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Registration order dispatches one completion"), Completions.Num(), 1);
+	TestEqual(TEXT("First completion preserves its token"), Completions[0].Token, FirstToken);
+	uint8 FirstOutput[UE_ARRAY_COUNT(FirstState)] = {};
+	TestTrue(
+		TEXT("Dispatch reads the exact first frame once"),
+		Host.ReadState(FirstToken, MakeArrayView(FirstOutput)));
+	TestTrue(
+		TEXT("First frame bytes round-trip exactly"),
+		FMemory::Memcmp(FirstOutput, FirstState, UE_ARRAY_COUNT(FirstState)) == 0);
+	TestFalse(
+		TEXT("First frame is consume-once"),
+		Host.ReadState(FirstToken, MakeArrayView(FirstOutput)));
+	TestTrue(TEXT("First dispatch finalizes"), Owner->FinalizeDispatched(FirstToken, true));
+
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Second completion dispatches independently"), Completions.Num(), 1);
+	TestEqual(TEXT("Second completion preserves its token"), Completions[0].Token, SecondToken);
+	uint8 SecondOutput[UE_ARRAY_COUNT(SecondState)] = {};
+	TestTrue(
+		TEXT("Dispatch reads the exact second frame once"),
+		Host.ReadState(SecondToken, MakeArrayView(SecondOutput)));
+	TestTrue(
+		TEXT("Second frame bytes round-trip exactly"),
+		FMemory::Memcmp(SecondOutput, SecondState, UE_ARRAY_COUNT(SecondState)) == 0);
+	TestTrue(TEXT("Second dispatch finalizes"), Owner->FinalizeDispatched(SecondToken, true));
+	TestEqual(
+		TEXT("Finalization reclaims all frame storage"),
+		Owner->GetStateFrameByteCountForTesting(),
+		0);
+
+	const int64 OversizedToken = Host.ScheduleDelay(10.0f, 53);
+	TArray<uint8> OversizedState;
+	OversizedState.SetNumZeroed(
+		FAvidScriptSessionContinuations::MaximumStateFrameBytes + 1);
+	TestFalse(
+		TEXT("State frames above the frozen 4 KiB bound fail closed"),
+		Host.StoreState(OversizedToken, OversizedState));
+	TestTrue(TEXT("Rejected fixture can be cancelled"), Host.Cancel(OversizedToken));
+	Owner->Teardown();
+	TestEqual(
+		TEXT("Teardown leaves no state-frame bytes"),
+		Owner->GetStateFrameByteCountForTesting(),
+		0);
+	DestroyContinuationWorld(World);
 	return true;
 }
 

@@ -137,6 +137,32 @@ bool FAvidScriptContinuationHostEndpoint::BindCancellationSource(
 			ContinuationToken);
 }
 
+bool FAvidScriptContinuationHostEndpoint::StoreState(
+	const int64 ContinuationToken,
+	const TConstArrayView<uint8> StateBytes)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->StoreState(
+			Lane,
+			ActivationSerial,
+			ContinuationToken,
+			StateBytes);
+}
+
+bool FAvidScriptContinuationHostEndpoint::ReadState(
+	const int64 ContinuationToken,
+	const TArrayView<uint8> OutStateBytes)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->ReadState(
+			Lane,
+			ActivationSerial,
+			ContinuationToken,
+			OutStateBytes);
+}
+
 bool FAvidScriptContinuationHostEndpoint::ConsumeResult(
 	const int64 ContinuationToken,
 	const int32 Slot,
@@ -1023,6 +1049,89 @@ bool FAvidScriptSessionContinuations::BindCancellationSource(
 	ContinuationSlot.Entry->CancellationSourceToken = SourceToken;
 	SourceSlot->Entry->Bindings.Add(ContinuationToken);
 	++CancellationBindingCount;
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::StoreState(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 ContinuationToken,
+	const TConstArrayView<uint8> StateBytes)
+{
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| StateBytes.IsEmpty()
+		|| StateBytes.Num() > MaximumStateFrameBytes)
+	{
+		return false;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->bDispatching
+		|| !Slot.Entry->StateFrame.IsEmpty()
+		|| Slot.Entry->bStateConsumed)
+	{
+		return false;
+	}
+
+	Slot.Entry->StateFrame.Append(StateBytes.GetData(), StateBytes.Num());
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::ReadState(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 ContinuationToken,
+	const TArrayView<uint8> OutStateBytes)
+{
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| OutStateBytes.IsEmpty()
+		|| OutStateBytes.Num() > MaximumStateFrameBytes)
+	{
+		return false;
+	}
+
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackToken(ContinuationToken, SlotIndex, Generation)
+		|| !Slots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+
+	FSlot& Slot = Slots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| !Slot.Entry->bDispatching
+		|| Slot.Entry->bStateConsumed
+		|| Slot.Entry->StateFrame.Num() != OutStateBytes.Num())
+	{
+		return false;
+	}
+
+	FMemory::Memcpy(
+		OutStateBytes.GetData(),
+		Slot.Entry->StateFrame.GetData(),
+		OutStateBytes.Num());
+	Slot.Entry->StateFrame.Reset();
+	Slot.Entry->bStateConsumed = true;
 	return true;
 }
 

@@ -89,6 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C12 收尾时仍把 `git diff --stat` 与 `git diff --check` 用分号放入同一个只读 shell 调用，重复违反了已记录的单命令单证据域规则；两步均成功且没有 Git 写入。Prevention：即使都是只读命令，status、stat、diff-check、hash 与 staged scope 也必须各占一个工具调用；提交前检查清单先机械搜索本节“分号”和“单独工具调用”。
+- 2026-08-29 P57.12C12 首轮 Semantic `15 / 1.15` 升版只更新了模型与测试，遗漏 semantic cache publisher、PreparedSemantic validator 和 architecture checker，PowerShell publication 以 `ASBI4502 -> ASBI4403` 拒绝。Prevention：任何 Semantic 升版在代码编辑前生成 owner 清单，至少逐字扫描 `Build/*.ps1`、Frontend contract、Guest compatibility reader、fixtures 与 architecture checker；旧版只允许留在明确的兼容读取分支。
+- 2026-08-29 P57.12C12 首次固定 .NET 调用把 `DOTNET_CLI_HOME` 指向仓库内 `.codex-dotnet`，产生了不应进入工作树的工具缓存；目录已由 `.gitignore` 隔离且未暂存。Prevention：所有阶段临时 .NET home、NuGet cache 与 CLI state 统一放入带阶段名的 `C:\tmp\AvidScriptDotnet*`，设置后先断言解析路径不在 repository root，再启动 dotnet。
 - 2026-08-29 P57.12C6C aggregate Guest 测试首版从独立测试程序集引用了 internal `CSharpGuestIds` 类型，虽然其成员是 public const，C# 仍以 `CS0122` 在测试执行前拒绝。Prevention：跨程序集合同测试只断言公开 Guest IR 序列化值（本例 `type:address`），internal ID helper 只在产品程序集内部使用；添加测试断言前先核对声明类型本身的可见性，不只看成员修饰符。
 - 2026-08-29 P57.12C6B 扩展 latent enum 验证时，首版补丁在 `ValidateAsyncAwaitSite` 内引用了不在该方法作用域中的 `document.TypeShapes`，读回后已在编译前修正为显式参数；随后 Semantic 测试又因直接解引用可空 `SemanticOperation.TypeId` 被 `CS8602` 拒绝。Prevention：向深层 validator 增加 descriptor/type-shape 依赖时，先读调用点与完整签名并逐层显式传参；测试断言对模型中 nullable 字段必须先用 pattern 绑定非空局部，再调用字符串方法。
 - 2026-08-29 P57.12C6A 首次 .NET 定向测试再次调用了 PATH 中的 `dotnet`，系统只有 SDK 9.0.306，因 `global.json` 固定 8.0.416 而在测试启动前失败。Prevention：AvidScript 的任何 .NET 命令在构造时就必须写为 `$env:USERPROFILE\.dotnet\dotnet.exe`，先在插件 cwd 断言 `--version` 精确为 `8.0.416`，并设置阶段本地 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA`、`NUGET_PACKAGES`；禁止先试 PATH host 再回退。环境解析失败不得计为产品测试失败。

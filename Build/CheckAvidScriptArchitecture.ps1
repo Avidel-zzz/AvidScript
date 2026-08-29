@@ -1999,6 +1999,8 @@ $CanonicalStaticImportNames = @(
     'continuation_cancel',
     'continuation_load_object',
     'continuation_result_read',
+    'continuation_state_store',
+    'continuation_state_read',
     'continuation_cancel_source_create',
     'continuation_cancel_source_cancel',
     'continuation_cancel_source_release',
@@ -2304,6 +2306,8 @@ $AllowedFixedRendererImports = @(
     'continuation_cancel',
     'continuation_load_object',
     'continuation_result_read',
+    'continuation_state_store',
+    'continuation_state_read',
     'continuation_cancel_source_create',
     'continuation_cancel_source_cancel',
     'continuation_cancel_source_release',
@@ -2903,8 +2907,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 14',
-    'CurrentSemanticVersion = "1.14"'
+    'CurrentSchemaVersion = 15',
+    'CurrentSemanticVersion = "1.15"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
@@ -2932,9 +2936,12 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'projectedCancellationToken,',
     'producer.PayloadDescriptorTypeId',
     'producer.PayloadValueType',
-    'ValidateLocalLifetimes',
+    'TryAttachStateFrames',
     'TryProjectEarlyReturnGuard',
     'EarlyReturnGuardOperationKind',
+    'MaximumStateSlotsPerAwait = 64',
+    'lastUse > segment.Ordinal',
+    'type:synthetic:async_state:',
     'ASCS5410',
     'ASCS5401',
     'ASCS5408'
@@ -2948,6 +2955,9 @@ foreach ($RequiredControlledAsyncModelContract in @(
     'SemanticAsyncSegment',
     'SemanticAsyncAwaitSite',
     'SemanticOperation? CancellationToken = null',
+    'SemanticAsyncStateFrame? StateFrame = null',
+    'SemanticAsyncStateFrame',
+    'SemanticAsyncStateSlot',
     'reentrant_zero_heap_cps',
     'async_early_return_guard'
 )) {
@@ -3078,6 +3088,10 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'continuation_load_object',
     'continuation_bind_cancel',
     'continuation_result_read',
+    'continuation_state_store',
+    'continuation_state_read',
+    'EmitIncomingState',
+    'EmitOutgoingState',
     'EmitIncomingResult',
     'result_accepted',
     'result_rejected',
@@ -3163,6 +3177,16 @@ if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncRes
 if (-not $CSharpTypeLowererSource.Contains('IsCompilerAsyncScaffoldType')) {
     Add-Violation 'C# Guest type lowering must isolate compiler-only async awaiter scaffold types'
 }
+foreach ($RequiredAsyncStateTypeContract in @(
+    'MaximumAsyncStateFrameBytes = 4096',
+    'IsStateTypeSupported',
+    'Async state frame',
+    'bounded fixed-value layout'
+)) {
+    if (-not $CSharpTypeLowererSource.Contains($RequiredAsyncStateTypeContract)) {
+        Add-Violation "C# Guest async state-frame type lowering is missing $RequiredAsyncStateTypeContract"
+    }
+}
 if (-not $CSharpGuestDebugMapProjectorSource.Contains('BuildAsyncResumeTargets')) {
     Add-Violation 'C# Guest debug maps must project async resume functions back to source segments'
 }
@@ -3186,6 +3210,19 @@ foreach ($RequiredCancellationRuntimeContract in @(
 )) {
     if (-not $WasmRuntimeSource.Contains($RequiredCancellationRuntimeContract)) {
         Add-Violation "Runtime cancellation-source dispatch is missing $RequiredCancellationRuntimeContract"
+    }
+}
+foreach ($RequiredContinuationStateRuntimeContract in @(
+    'EAvidScriptHostBindingId::ContinuationStateStore',
+    'EAvidScriptHostBindingId::ContinuationStateRead',
+    'HandleContinuationStateStoreImport',
+    'HandleContinuationStateReadImport',
+    'bContinuationDispatchActive',
+    '!bContinuationStateConsumed',
+    'ContinuationToken == ActiveContinuationToken'
+)) {
+    if (-not $WasmRuntimeSource.Contains($RequiredContinuationStateRuntimeContract)) {
+        Add-Violation "Runtime continuation state-frame dispatch is missing $RequiredContinuationStateRuntimeContract"
     }
 }
 foreach ($RequiredAsyncContinuationOwnershipContract in @(
@@ -3230,6 +3267,19 @@ foreach ($RequiredContinuationResultOwnershipContract in @(
     if (-not $ContinuationOwnerHeader.Contains($RequiredContinuationResultOwnershipContract) -and
         -not $ContinuationOwnerSource.Contains($RequiredContinuationResultOwnershipContract)) {
         Add-Violation "Session continuation result ownership is missing $RequiredContinuationResultOwnershipContract"
+    }
+}
+foreach ($RequiredContinuationStateOwnershipContract in @(
+    'MaximumStateFrameBytes = 4096',
+    'StoreState(',
+    'ReadState(',
+    'TArray<uint8, TInlineAllocator<128>> StateFrame',
+    'Slot.Entry->ContinuationToken == Entry.Token',
+    'Slot.Entry->StateFrame.Num() != OutStateBytes.Num()'
+)) {
+    if (-not $ContinuationOwnerHeader.Contains($RequiredContinuationStateOwnershipContract) -and
+        -not $ContinuationOwnerSource.Contains($RequiredContinuationStateOwnershipContract)) {
+        Add-Violation "Session continuation state-frame ownership is missing $RequiredContinuationStateOwnershipContract"
     }
 }
 foreach ($RequiredContinuationResultCodecContract in @(
@@ -3291,6 +3341,18 @@ foreach ($RequiredContinuationResultVmContract in @(
     if (-not $StaticHostImportSource.Contains($RequiredContinuationResultVmContract) -and
         -not $VmHostBindingsSource.Contains($RequiredContinuationResultVmContract)) {
         Add-Violation "VM continuation result catalog is missing $RequiredContinuationResultVmContract"
+    }
+}
+foreach ($RequiredContinuationStateVmContract in @(
+    'ContinuationStateStore',
+    'ContinuationStateRead',
+    'continuation_state_store',
+    'continuation_state_read',
+    '(Iii)i'
+)) {
+    if (-not $StaticHostImportSource.Contains($RequiredContinuationStateVmContract) -and
+        -not $VmHostBindingsSource.Contains($RequiredContinuationStateVmContract)) {
+        Add-Violation "VM continuation state-frame catalog is missing $RequiredContinuationStateVmContract"
     }
 }
 foreach ($RequiredCancellationVmContract in @(

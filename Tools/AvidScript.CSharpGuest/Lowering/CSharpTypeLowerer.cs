@@ -8,6 +8,8 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpTypeLowerer
 {
+    private const int MaximumAsyncStateFrameBytes = 4096;
+
     public static CSharpTypeLoweringResult Lower(SemanticDocument document)
     {
         List<GuestDiagnostic> diagnostics = new();
@@ -47,6 +49,37 @@ internal static class CSharpTypeLowerer
             }
         }
 
+        foreach (SemanticAsyncStateFrame frame in document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Select(segment => segment.AwaitSite?.StateFrame)
+            .Where(frame => frame is not null)
+            .Cast<SemanticAsyncStateFrame>()
+            .OrderBy(frame => frame.TypeId, StringComparer.Ordinal))
+        {
+            if (rawTypes.Any(type => type.Id == frame.TypeId)
+                || frame.Slots.Count == 0
+                || frame.Slots.Any(slot => !semanticTypes.ContainsKey(slot.TypeId))
+                || frame.Slots.Select(slot => slot.SymbolId).Distinct(StringComparer.Ordinal).Count()
+                    != frame.Slots.Count)
+            {
+                Add(diagnostics, "ASCG1020", $"Async state frame '{frame.TypeId}' is malformed.");
+                continue;
+            }
+            rawTypes.Add(new GuestType(
+                frame.TypeId,
+                "struct",
+                "memory",
+                frame.Slots.Select(slot => new GuestField(
+                    CSharpGuestIds.AsyncStateField(frame.TypeId, slot.SymbolId),
+                    slot.SymbolId,
+                    slot.TypeId,
+                    0)).ToArray(),
+                null,
+                null,
+                0,
+                1));
+        }
+
         if (diagnostics.Count != 0)
         {
             return Failure(diagnostics);
@@ -63,7 +96,56 @@ internal static class CSharpTypeLowerer
             return Failure(diagnostics);
         }
 
+        IReadOnlyDictionary<string, GuestType> laidOutTypes = layout.Types.ToDictionary(
+            type => type.Id,
+            StringComparer.Ordinal);
+        foreach (SemanticAsyncStateFrame frame in document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Select(segment => segment.AwaitSite?.StateFrame)
+            .Where(frame => frame is not null)
+            .Cast<SemanticAsyncStateFrame>())
+        {
+            if (!laidOutTypes.TryGetValue(frame.TypeId, out GuestType? frameType)
+                || frameType.Size <= 0
+                || frameType.Size > MaximumAsyncStateFrameBytes
+                || frame.Slots.Any(slot => !IsStateTypeSupported(
+                    slot.TypeId,
+                    laidOutTypes,
+                    new HashSet<string>(StringComparer.Ordinal))))
+            {
+                Add(diagnostics, "ASCG1020", $"Async state frame '{frame.TypeId}' is not a bounded fixed-value layout.");
+            }
+        }
+
+        if (diagnostics.Count != 0)
+        {
+            return Failure(diagnostics);
+        }
+
         return new CSharpTypeLoweringResult(true, layout.Types, Array.Empty<GuestDiagnostic>());
+    }
+
+    private static bool IsStateTypeSupported(
+        string typeId,
+        IReadOnlyDictionary<string, GuestType> types,
+        ISet<string> visiting)
+    {
+        if (!types.TryGetValue(typeId, out GuestType? type))
+        {
+            return false;
+        }
+        if (type.Kind is "scalar" or "enum" or "class_ref" or "factory_ref" or "object_type_ref")
+        {
+            return type.Size > 0;
+        }
+        if (type.Kind != "struct" || !visiting.Add(typeId))
+        {
+            return false;
+        }
+        bool supported = type.Size > 0
+            && type.Fields.All(field => IsStateTypeSupported(field.TypeId, types, visiting));
+        visiting.Remove(typeId);
+        return supported;
     }
 
     private static bool IsCompilerAsyncScaffoldType(

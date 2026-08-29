@@ -5,6 +5,7 @@ namespace
 constexpr int32 StaticImportMaxTransformBatchCount = 256;
 constexpr int32 StaticImportMaxArrayElementCount = 4096;
 constexpr int32 StaticImportMaxContinuationResultBytes = 4096;
+constexpr int32 StaticImportMaxContinuationStateBytes = 4096;
 constexpr uint32 StaticImportTransformBatchInputCellsPerItem = 2;
 constexpr uint32 StaticImportTransformBatchOutputFloatsPerItem = 9;
 
@@ -44,11 +45,13 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ContinuationCancelSourceCancel, "continuation_cancel_source_cancel", "(I)i", true },
 	{ EAvidScriptHostBindingId::ContinuationCancelSourceRelease, "continuation_cancel_source_release", "(I)i", true },
 	{ EAvidScriptHostBindingId::ContinuationBindCancel, "continuation_bind_cancel", "(II)i", true },
-	{ EAvidScriptHostBindingId::ContinuationResultRead, "continuation_result_read", "(iiiii)i", true }
+	{ EAvidScriptHostBindingId::ContinuationResultRead, "continuation_result_read", "(iiiii)i", true },
+	{ EAvidScriptHostBindingId::ContinuationStateStore, "continuation_state_store", "(Iii)i", true },
+	{ EAvidScriptHostBindingId::ContinuationStateRead, "continuation_state_read", "(Iii)i", true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationResultRead),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationStateRead),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -399,6 +402,63 @@ bool InvokeAvidScriptVmStaticHostImport(
 		Call.IntArgs[1] = ResultSlot;
 		Call.IntArgs[2] = ResultGeneration;
 		Call.IntArgs[3] = ByteCount;
+		Call.GuestAddress = static_cast<uint32>(GuestAddress);
+		break;
+	}
+	case EAvidScriptHostBindingId::ContinuationStateStore:
+	case EAvidScriptHostBindingId::ContinuationStateRead:
+	{
+		const int64 ContinuationToken = Arguments[0].I64;
+		const int32 GuestAddress = Arguments[1].I32;
+		const int32 ByteCount = Arguments[2].I32;
+		if (ByteCount <= 0
+			|| ByteCount > StaticImportMaxContinuationStateBytes)
+		{
+			return FailStaticCall(
+				OutFailureDetails,
+				TEXT("continuation_state_invalid: state arguments are outside the supported range."));
+		}
+		if (!ValidateGuestRange(
+				GuestAddress,
+				static_cast<uint64>(ByteCount),
+				1,
+				1,
+				TEXT("continuation state"),
+				OutFailureDetails))
+		{
+			return false;
+		}
+
+		FString MemoryError;
+		if (Import.BindingId == EAvidScriptHostBindingId::ContinuationStateStore)
+		{
+			if (!GuestMemory.BorrowReadOnlyBytes(
+					static_cast<uint32>(GuestAddress),
+					static_cast<uint32>(ByteCount),
+					1,
+					Call.InputBytes,
+					MemoryError))
+			{
+				OutFailureDetails = MemoryError.IsEmpty()
+					? TEXT("guest_memory_invalid: continuation state input borrow failed.")
+					: MoveTemp(MemoryError);
+				return false;
+			}
+		}
+		else if (!GuestMemory.BorrowMutableBytes(
+				static_cast<uint32>(GuestAddress),
+				static_cast<uint32>(ByteCount),
+				1,
+				Call.OutputBytes,
+				MemoryError))
+		{
+			OutFailureDetails = MemoryError.IsEmpty()
+				? TEXT("guest_memory_invalid: continuation state output borrow failed.")
+				: MoveTemp(MemoryError);
+			return false;
+		}
+		Call.Int64Args[0] = ContinuationToken;
+		Call.IntArgs[0] = ByteCount;
 		Call.GuestAddress = static_cast<uint32>(GuestAddress);
 		break;
 	}

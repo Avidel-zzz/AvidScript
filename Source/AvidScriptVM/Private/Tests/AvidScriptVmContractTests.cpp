@@ -526,6 +526,12 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& ResultRead =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationResultRead);
+	const FAvidScriptVmStaticHostImport& StateStore =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationStateStore);
+	const FAvidScriptVmStaticHostImport& StateRead =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationStateRead);
 	TestEqual(
 		TEXT("Continuation delay uses the frozen env import name"),
 		FString(UTF8_TO_TCHAR(Delay.ImportName)),
@@ -578,6 +584,14 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 		TEXT("Continuation result read freezes ordinal, capability and one output range"),
 		FString(UTF8_TO_TCHAR(ResultRead.Signature)),
 		FString(TEXT("(iiiii)i")));
+	TestEqual(
+		TEXT("Continuation state store freezes token and one input range"),
+		FString(UTF8_TO_TCHAR(StateStore.Signature)),
+		FString(TEXT("(Iii)i")));
+	TestEqual(
+		TEXT("Continuation state read freezes token and one output range"),
+		FString(UTF8_TO_TCHAR(StateRead.Signature)),
+		FString(TEXT("(Iii)i")));
 	TestTrue(
 		TEXT("All continuation imports are available through env"),
 		Delay.bSupportsEnvCompatibility
@@ -588,6 +602,8 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 			&& ReleaseSource.bSupportsEnvCompatibility
 			&& BindSource.bSupportsEnvCompatibility
 			&& ResultRead.bSupportsEnvCompatibility
+			&& StateStore.bSupportsEnvCompatibility
+			&& StateRead.bSupportsEnvCompatibility
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_delay"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_load_object"))
@@ -595,7 +611,9 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_cancel"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_release"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_bind_cancel"))
-			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_result_read")));
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_result_read"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_state_store"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_state_read")));
 	return true;
 }
 

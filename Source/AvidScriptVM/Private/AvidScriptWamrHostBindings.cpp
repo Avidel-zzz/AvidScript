@@ -21,6 +21,7 @@ constexpr int32 MaxTransformBatchCount = 256;
 constexpr uint32 TransformBatchInputCellsPerItem = 2;
 constexpr uint32 TransformBatchOutputFloatsPerItem = 9;
 constexpr int32 MaxContinuationResultBytes = 4096;
+constexpr int32 MaxContinuationStateBytes = 4096;
 
 const char* StaticImportName(EAvidScriptHostBindingId BindingId)
 {
@@ -787,6 +788,102 @@ int32_t ContinuationResultRead(
 		: 0;
 }
 
+int32_t ContinuationStateStore(
+	wasm_exec_env_t ExecEnv,
+	int64_t ContinuationToken,
+	int32_t InputAddress,
+	int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(
+		EAvidScriptHostBindingId::ContinuationStateStore);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (ByteCount <= 0
+		|| ByteCount > MaxContinuationStateBytes)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			TEXT("The continuation state arguments are outside the supported range."));
+		return 0;
+	}
+
+	void* NativeInput = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("continuation state input"),
+			InputAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeInput))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationStateStore;
+	Call.Int64Args[0] = ContinuationToken;
+	Call.IntArgs[0] = ByteCount;
+	Call.GuestAddress = static_cast<uint32>(InputAddress);
+	Call.InputBytes = MakeArrayView(
+		static_cast<const uint8*>(NativeInput),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ContinuationStateRead(
+	wasm_exec_env_t ExecEnv,
+	int64_t ContinuationToken,
+	int32_t OutputAddress,
+	int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(
+		EAvidScriptHostBindingId::ContinuationStateRead);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (ByteCount <= 0
+		|| ByteCount > MaxContinuationStateBytes)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			TEXT("The continuation state arguments are outside the supported range."));
+		return 0;
+	}
+
+	void* NativeOutput = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("continuation state output"),
+			OutputAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeOutput))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationStateRead;
+	Call.Int64Args[0] = ContinuationToken;
+	Call.IntArgs[0] = ByteCount;
+	Call.GuestAddress = static_cast<uint32>(OutputAddress);
+	Call.OutputBytes = MakeArrayView(
+		static_cast<uint8*>(NativeOutput),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 int64_t EventSubscribe(
 	wasm_exec_env_t ExecEnv,
 	int32_t Slot,
@@ -853,6 +950,8 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease: return reinterpret_cast<void*>(ContinuationCancelSourceRelease);
 	case EAvidScriptHostBindingId::ContinuationBindCancel: return reinterpret_cast<void*>(ContinuationBindCancel);
 	case EAvidScriptHostBindingId::ContinuationResultRead: return reinterpret_cast<void*>(ContinuationResultRead);
+	case EAvidScriptHostBindingId::ContinuationStateStore: return reinterpret_cast<void*>(ContinuationStateStore);
+	case EAvidScriptHostBindingId::ContinuationStateRead: return reinterpret_cast<void*>(ContinuationStateRead);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);

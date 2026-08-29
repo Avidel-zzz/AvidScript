@@ -442,6 +442,12 @@ internal static class AvidScriptRuntimeNative
     [DllImport("env", EntryPoint = "continuation_result_read")]
     internal static extern int ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount);
 
+    [DllImport("env", EntryPoint = "continuation_state_store")]
+    internal static extern int ContinuationStateStore(long continuationToken, int inputAddress, int byteCount);
+
+    [DllImport("env", EntryPoint = "continuation_state_read")]
+    internal static extern int ContinuationStateRead(long continuationToken, int outputAddress, int byteCount);
+
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);
 

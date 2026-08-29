@@ -12,7 +12,7 @@ internal static class SemanticAsyncTests
     {
         SequentialAwaitsProjectStableSegments();
         EarlyReturnGuardsProjectStableControlOperations();
-        LocalsAndObjectResultsCannotCrossTheirBoundaries();
+        CrossBoundaryLocalsPublishStateFrames();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
         GeneratedLatentProducerProjectsImportIdentity();
@@ -47,15 +47,15 @@ internal static class SemanticAsyncTests
         SemanticAsyncStatement guard = method.Segments[1].Statements.Single();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 14
-            && document.SemanticVersion == "1.14"
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.15"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should publish one explicit schema-v14 control operation");
+            "top-level early-return guards should remain explicit under the schema-v15 state-frame contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -241,10 +241,10 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 14
-            && document.SemanticVersion == "1.14"
+            && document.SchemaVersion == 15
+            && document.SemanticVersion == "1.15"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 14 / semantic 1.14");
+            "controlled async exports should publish schema 15 / semantic 1.15");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -295,7 +295,7 @@ internal static class SemanticAsyncTests
             "async graph serialization should be stable and precede diagnostics");
     }
 
-    private static void LocalsAndObjectResultsCannotCrossTheirBoundaries()
+    private static void CrossBoundaryLocalsPublishStateFrames()
     {
         const string source = """
             using AvidScript;
@@ -304,35 +304,47 @@ internal static class SemanticAsyncTests
 
             public static class Script
             {
-                [AvidExport("cross_local")]
-                public static async void CrossLocal()
+                [AvidExport("cross_state")]
+                public static async void CrossState()
                 {
                     int count = 1;
+                    FVector offset = new FVector(1.0f, 2.0f, 3.0f);
                     await AvidContinuations.NextTickAsync();
-                    Consume(count);
-                }
-
-                [AvidExport("cross_result")]
-                public static async void CrossResult()
-                {
                     AvidLoadedObject loaded = await AvidAssets.LoadObjectAsync("/Game/Valid.Valid");
                     await AvidContinuations.NextTickAsync();
+                    Consume(count);
+                    Consume(offset);
                     Consume(loaded);
                 }
 
                 private static void Consume(int value) { }
+                private static void Consume(FVector value) { }
                 private static void Consume(AvidLoadedObject value) { }
             }
             """;
 
         SemanticDocument document = Analyze(source, "Scripts/CrossAwaitLocals.cs");
 
-        Assert(!document.Succeeded
-            && document.AsyncMethods.Count == 0
-            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5405")
-            && document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5406")
-            && document.Diagnostics.Count(diagnostic => diagnostic.Code == "ASCS3002") == 2,
-            "ordinary locals and object results used beyond their permitted segment should fail closed");
+        SemanticAsyncAwaitSite[] sites = document.AsyncMethods.Single().Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .Select(segment => segment.AwaitSite!)
+            .ToArray();
+        string countId = document.Symbols.Single(symbol => symbol.Kind == "local" && symbol.Name == "count").Id;
+        string offsetId = document.Symbols.Single(symbol => symbol.Kind == "local" && symbol.Name == "offset").Id;
+        string loadedId = document.Symbols.Single(symbol => symbol.Kind == "local" && symbol.Name == "loaded").Id;
+
+        Assert(document.Succeeded
+            && document.AsyncMethods.Count == 1
+            && sites.Length == 3
+            && sites[0].StateFrame?.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { countId, offsetId }.OrderBy(id => id, StringComparer.Ordinal)) == true
+            && sites[1].StateFrame?.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { countId, offsetId }.OrderBy(id => id, StringComparer.Ordinal)) == true
+            && sites[2].StateFrame?.Slots.Select(slot => slot.SymbolId)
+                .SequenceEqual(new[] { countId, loadedId, offsetId }.OrderBy(id => id, StringComparer.Ordinal)) == true
+            && sites.All(site => site.StateFrame?.TypeId
+                == $"type:synthetic:async_state:{site.CallbackId}"),
+            "scalar, fixed struct, and object-handle locals should publish exact per-await state frames");
     }
 
     private static void NonFrozenAsyncShapesRemainFailClosed()

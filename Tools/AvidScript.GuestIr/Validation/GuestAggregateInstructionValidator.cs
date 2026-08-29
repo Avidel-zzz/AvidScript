@@ -68,6 +68,33 @@ internal static class GuestAggregateInstructionValidator
         }
     }
 
+    public static void ValidateMemoryCopy(
+        GuestValidationContext context,
+        GuestFunction function,
+        GuestInstruction instruction,
+        GuestRegister? result,
+        IReadOnlyList<GuestRegister?> operands)
+    {
+        GuestType? type = instruction.TargetId is { } typeId
+            && context.Types.TryGetValue(typeId, out GuestType? resolved)
+                ? resolved
+                : null;
+        if (result is not null
+            || operands.Count != 2
+            || operands[0] is null
+            || operands[1] is null
+            || type is null
+            || type.Storage != "memory"
+            || type.Size <= 0
+            || operands[0]!.TypeId != type.Id
+            || operands[1]!.TypeId != type.Id
+            || instruction.OperatorKind is not null
+            || instruction.Constant is not null)
+        {
+            Add(context, function, instruction);
+        }
+    }
+
     public static void ValidateAddressOf(
         GuestValidationContext context,
         GuestFunction function,

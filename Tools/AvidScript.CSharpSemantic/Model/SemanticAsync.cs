@@ -35,4 +35,13 @@ public sealed record SemanticAsyncAwaitSite(
     [property: JsonPropertyOrder(7)] SemanticOperation? CancellationToken = null,
     [property: JsonPropertyOrder(8)] int BindingOrdinal = -1,
     [property: JsonPropertyOrder(9)] string? PayloadDescriptorTypeId = null,
-    [property: JsonPropertyOrder(10)] string? PayloadValueTypeId = null);
+    [property: JsonPropertyOrder(10)] string? PayloadValueTypeId = null,
+    [property: JsonPropertyOrder(11)] SemanticAsyncStateFrame? StateFrame = null);
+
+public sealed record SemanticAsyncStateFrame(
+    [property: JsonPropertyOrder(0)] string TypeId,
+    [property: JsonPropertyOrder(1)] IReadOnlyList<SemanticAsyncStateSlot> Slots);
+
+public sealed record SemanticAsyncStateSlot(
+    [property: JsonPropertyOrder(0)] string SymbolId,
+    [property: JsonPropertyOrder(1)] string TypeId);

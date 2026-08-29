@@ -256,6 +256,12 @@ public static class CSharpGuestLowerer
             {
                 parameterTypeIds[3] = CSharpGuestIds.AddressTypeId;
             }
+            if (callable.Import is
+                    { Module: "env", Name: "continuation_state_store" or "continuation_state_read" }
+                && parameterTypeIds.Length == 3)
+            {
+                parameterTypeIds[1] = CSharpGuestIds.AddressTypeId;
+            }
             if (!callable.IsStatic)
             {
                 parameterTypeIds = new[] { callable.ContainingTypeId }
@@ -457,6 +463,19 @@ public static class CSharpGuestLowerer
 				.SelectMany(method => method.Segments)
 				.Any(segment => segment.AwaitSite?.PayloadKind
 					== SemanticContinuationCallback.ResultSlotPayloadKind);
+		}
+		if (import.Module == "env"
+			&& import.Name is "continuation_state_store" or "continuation_state_read")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.StateFrame is not null);
+		}
+		if (import.Module == "env" && import.Name == "continuation_cancel")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.StateFrame is not null);
 		}
 		string producerIdentity = $"binding_latent|{import.Module}|{import.Name}";
 		return document.AsyncMethods
