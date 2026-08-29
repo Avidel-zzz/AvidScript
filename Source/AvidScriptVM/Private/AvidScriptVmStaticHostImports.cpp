@@ -38,11 +38,15 @@ const FAvidScriptVmStaticHostImport GStaticHostImports[] = {
 	{ EAvidScriptHostBindingId::ValueRelease, "avid_value_release", "(i)i", false },
 	{ EAvidScriptHostBindingId::ContinuationDelay, "continuation_delay", "(fi)I", true },
 	{ EAvidScriptHostBindingId::ContinuationCancel, "continuation_cancel", "(I)i", true },
-	{ EAvidScriptHostBindingId::ContinuationLoadObject, "continuation_load_object", "(ii)I", true }
+	{ EAvidScriptHostBindingId::ContinuationLoadObject, "continuation_load_object", "(ii)I", true },
+	{ EAvidScriptHostBindingId::ContinuationCancelSourceCreate, "continuation_cancel_source_create", "()I", true },
+	{ EAvidScriptHostBindingId::ContinuationCancelSourceCancel, "continuation_cancel_source_cancel", "(I)i", true },
+	{ EAvidScriptHostBindingId::ContinuationCancelSourceRelease, "continuation_cancel_source_release", "(I)i", true },
+	{ EAvidScriptHostBindingId::ContinuationBindCancel, "continuation_bind_cancel", "(II)i", true }
 };
 
 static_assert(
-	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationLoadObject),
+	UE_ARRAY_COUNT(GStaticHostImports) == static_cast<uint16>(EAvidScriptHostBindingId::ContinuationBindCancel),
 	"Static host catalog must remain dense and ordered by binding id.");
 
 bool FailStaticCall(FString& OutFailureDetails, const TCHAR* Details)
@@ -240,12 +244,19 @@ bool InvokeAvidScriptVmStaticHostImport(
 		break;
 	case EAvidScriptHostBindingId::EventUnsubscribe:
 	case EAvidScriptHostBindingId::ContinuationCancel:
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel:
+	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease:
 		Call.Int64Args[0] = Arguments[0].I64;
+		break;
+	case EAvidScriptHostBindingId::ContinuationBindCancel:
+		Call.Int64Args[0] = Arguments[0].I64;
+		Call.Int64Args[1] = Arguments[1].I64;
 		break;
 	case EAvidScriptHostBindingId::OwnerGetSlot:
 	case EAvidScriptHostBindingId::OwnerGetGeneration:
 	case EAvidScriptHostBindingId::OwnerGetHandle:
 	case EAvidScriptHostBindingId::DataLaneGetEpoch:
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate:
 		break;
 	case EAvidScriptHostBindingId::DataLaneSubmit:
 	{

@@ -36,14 +36,22 @@ internal static class CSharpAsyncLowerer
             .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         string? delayImportId = FindImport(document, "env", "continuation_delay");
         string? objectLoadImportId = FindImport(document, "env", "continuation_load_object");
+        string? bindCancellationImportId = FindImport(
+            document,
+            "env",
+            "continuation_bind_cancel");
         bool needsDelayImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
         bool needsObjectLoadImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
+        bool needsBindCancellationImport = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.CancellationToken is not null);
         if ((needsDelayImport && delayImportId is null)
-            || (needsObjectLoadImport && objectLoadImportId is null))
+            || (needsObjectLoadImport && objectLoadImportId is null)
+            || (needsBindCancellationImport && bindCancellationImportId is null))
         {
             Add(diagnostics, "The async profile is missing a required built-in continuation import.");
             return new CSharpAsyncLoweringResult(
@@ -141,6 +149,7 @@ internal static class CSharpAsyncLowerer
                 }
 
                 GuestRegister? scheduledToken = null;
+                GuestRegister? cancellationBindingAccepted = null;
                 if (segment.AwaitSite is { } awaitSite)
                 {
                     if (!EmitProducer(
@@ -148,10 +157,12 @@ internal static class CSharpAsyncLowerer
                         awaitSite,
                         delayImportId,
                         objectLoadImportId,
+                        bindCancellationImportId,
                         int32Type,
                         int64Type,
                         instructions,
-                        out scheduledToken))
+                        out scheduledToken,
+                        out cancellationBindingAccepted))
                     {
                         break;
                     }
@@ -196,6 +207,29 @@ internal static class CSharpAsyncLowerer
                         null,
                         "not_equals",
                         null));
+                    GuestRegister finalAcceptance = scheduleAccepted;
+                    if (cancellationBindingAccepted is not null)
+                    {
+                        GuestRegister? combinedAcceptance = context.CreateTemporary(
+                            int32Type.Id,
+                            segment.Ordinal);
+                        if (combinedAcceptance is null)
+                        {
+                            break;
+                        }
+                        instructions.Add(new GuestInstruction(
+                            "binary",
+                            combinedAcceptance.Id,
+                            new[]
+                            {
+                                scheduleAccepted.Id,
+                                cancellationBindingAccepted.Id,
+                            },
+                            null,
+                            "bitwise_and",
+                            null));
+                        finalAcceptance = combinedAcceptance;
+                    }
                     string acceptedBlockId = blockId + ":schedule_accepted";
                     string rejectedBlockId = blockId + ":schedule_rejected";
                     blocks = new[]
@@ -205,7 +239,7 @@ internal static class CSharpAsyncLowerer
                             instructions,
                             new GuestTerminator(
                                 "branch_if",
-                                scheduleAccepted.Id,
+                                finalAcceptance.Id,
                                 acceptedBlockId,
                                 rejectedBlockId,
                                 null)),
@@ -253,12 +287,15 @@ internal static class CSharpAsyncLowerer
         SemanticAsyncAwaitSite awaitSite,
         string? delayImportId,
         string? objectLoadImportId,
+        string? bindCancellationImportId,
         GuestType int32Type,
         GuestType int64Type,
         List<GuestInstruction> instructions,
-        out GuestRegister? scheduledToken)
+        out GuestRegister? scheduledToken,
+        out GuestRegister? cancellationBindingAccepted)
     {
         scheduledToken = null;
+        cancellationBindingAccepted = null;
         List<string> operands = new();
         string targetId;
         switch (awaitSite.ProducerKind)
@@ -365,8 +402,37 @@ internal static class CSharpAsyncLowerer
 					{
 						return false;
 					}
-				}
+                }
 				break;
+        }
+
+        string? cancellationOperand = null;
+        if (awaitSite.CancellationToken is { } cancellationToken)
+        {
+            if (bindCancellationImportId is null
+                || !CSharpLatentStoragePlanner.TryBuildSingleValue(
+                    context.Document,
+                    cancellationToken,
+                    CSharpGuestIds.Int64TypeId,
+                    out CSharpLatentStorageArgumentPlan? cancellationPlan))
+            {
+                Add(context.Diagnostics, "Cancellation token has no valid i64 storage plan.");
+                return false;
+            }
+
+            List<string> cancellationOperands = new();
+            if (!LowerLatentArgument(
+                    context,
+                    cancellationToken,
+                    cancellationPlan,
+                    awaitSite.CallbackId,
+                    instructions,
+                    cancellationOperands)
+                || cancellationOperands.Count != 1)
+            {
+                return false;
+            }
+            cancellationOperand = cancellationOperands[0];
         }
 
         GuestRegister? callback = context.CreateTemporary(int32Type.Id, awaitSite.CallbackId);
@@ -394,6 +460,25 @@ internal static class CSharpAsyncLowerer
             null,
             null));
         scheduledToken = token;
+
+        if (cancellationOperand is not null)
+        {
+            GuestRegister? bindingAccepted = context.CreateTemporary(
+                int32Type.Id,
+                awaitSite.CallbackId);
+            if (bindingAccepted is null)
+            {
+                return false;
+            }
+            instructions.Add(new GuestInstruction(
+                "call",
+                bindingAccepted.Id,
+                new[] { cancellationOperand, token.Id },
+                bindCancellationImportId!,
+                null,
+                null));
+            cancellationBindingAccepted = bindingAccepted;
+        }
         return true;
     }
 

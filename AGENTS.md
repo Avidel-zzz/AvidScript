@@ -2052,3 +2052,23 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: P57.12C6C renamed the controlled async lowerer's semantic input from `context.Document` to `document`, but its architecture checker still required the obsolete `FindImport(context.Document` text and rejected the otherwise valid clean C6E candidate.
 - Prevention: implementation groups that change a checker-protected call shape update the matching architecture oracle in the same commit. The oracle must assert the current semantic operation and stable symbol, not a stale local variable name when the name itself is not architectural.
+
+### 2026-08-29: read Guest IR record fields before writing assertions
+
+- Mistake: the first P57.12C7 cancellation-lowering regression asserted a nonexistent `GuestInstruction.Operator` property instead of the current `OperatorKind` record field, so the test assembly failed before exercising the product path.
+- Prevention: inspect the current public Guest IR record before adding structural assertions. Test code must use exact model property names and compile in the first scoped probe.
+
+### 2026-08-29: run architecture gates with PowerShell 7
+
+- Mistake: the first P57.12C7 implementation-time architecture probe invoked `powershell.exe`, so Windows PowerShell 5.1 rejected the checker's PowerShell 7 pipeline layout before any architecture rule ran.
+- Prevention: invoke architecture and evidence scripts with the resolved `pwsh.exe` executable. Treat a parser failure as an invalid probe, never as a product or architecture result, and do not rewrite modern project scripts merely to accommodate the wrong host.
+
+### 2026-08-29: never improvise the Automation launch template
+
+- Mistake: the first P57.12C7 focused Automation attempt repeated the documented `-log` plus queued `Quit` error. It returned zero after platform validation, produced no requested evidence log, and executed no tests.
+- Prevention: before every Automation launch, copy the tracked template verbatim: `-ExecCmds="Automation RunTests <filter>"`, `-TestExit="Automation Test Queue Empty"`, and `-abslog=<new unique absolute path>`, with no queued `Quit`. Assert that the absolute log exists and contains discovery, per-test completion, Queue Empty, and TestExit before using the run as evidence.
+
+### 2026-08-29: shared facade changes enumerate every byte-for-byte golden
+
+- Mistake: P57.12C7 updated the generated cancellation facade but repeated the earlier shared-scaffold oversight: the focused emitter tests passed while the full queue found stale `FName` and `TypedProjectApi` byte-for-byte golden fixtures.
+- Prevention: every shared renderer scaffold change starts by enumerating all exact-output fixtures referenced by `AvidScriptEditorCSharpBindingEmitterTests.cpp`. Update and diff each affected golden in the implementation group before the focused gate; do not rely on one representative fixture to cover shared facade output.

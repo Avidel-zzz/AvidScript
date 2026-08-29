@@ -32,6 +32,7 @@ public enum AvidContinuationStatus
 {
     Completed = 1,
     Failed = 2,
+    Cancelled = 3,
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -62,6 +63,41 @@ public readonly struct AvidContinuation
 
     public bool IsValid => Token != 0;
     public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct AvidCancellationToken
+{
+    internal readonly long Value;
+
+    internal AvidCancellationToken(long value)
+    {
+        Value = value;
+    }
+
+    public bool IsValid => Value != 0;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct AvidCancellationSource
+{
+    private readonly long Value;
+    public readonly AvidCancellationToken Token;
+
+    private AvidCancellationSource(long value)
+    {
+        Value = value;
+        Token = new AvidCancellationToken(value);
+    }
+
+    public static AvidCancellationSource Create()
+        => new(AvidScriptRuntimeNative.ContinuationCancelSourceCreate());
+
+    public bool IsValid => Value != 0;
+    public bool Cancel()
+        => AvidScriptRuntimeNative.ContinuationCancelSourceCancel(Value) != 0;
+    public bool Release()
+        => AvidScriptRuntimeNative.ContinuationCancelSourceRelease(Value) != 0;
 }
 
 public static class AvidContinuations
@@ -303,6 +339,8 @@ public sealed class AvidLatentAttribute : Attribute
 
 public readonly struct AvidDelayAwaitable
 {
+    public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;
+
     public AvidDelayAwaiter GetAwaiter() => default;
 }
 
@@ -321,6 +359,8 @@ public readonly struct AvidDelayAwaiter : INotifyCompletion
 
 public readonly struct AvidObjectAwaitable
 {
+    public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;
+
     public AvidObjectAwaiter GetAwaiter() => default;
 }
 
@@ -345,6 +385,18 @@ internal static class AvidScriptRuntimeNative
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_create")]
+    internal static extern long ContinuationCancelSourceCreate();
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_cancel")]
+    internal static extern int ContinuationCancelSourceCancel(long sourceToken);
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_release")]
+    internal static extern int ContinuationCancelSourceRelease(long sourceToken);
+
+    [DllImport("env", EntryPoint = "continuation_bind_cancel")]
+    internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);
 
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);

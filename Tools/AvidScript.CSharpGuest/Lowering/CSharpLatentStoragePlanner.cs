@@ -29,6 +29,33 @@ internal static class CSharpLatentStoragePlanner
     private const int MaximumAggregateDepth = 8;
     private const int MaximumStorageCells = 64;
 
+    public static bool TryBuildSingleValue(
+        SemanticDocument document,
+        SemanticOperation value,
+        string storageTypeId,
+        out CSharpLatentStorageArgumentPlan argumentPlan)
+    {
+        SemanticCallableParameter storage = new(
+            0,
+            "compiler:storage",
+            "value",
+            storageTypeId,
+            "none");
+        if (TryBuild(
+                document,
+                new[] { value },
+                new[] { storage },
+                out CSharpLatentStoragePlan? plan)
+            && plan.Arguments.Count == 1)
+        {
+            argumentPlan = plan.Arguments[0];
+            return true;
+        }
+
+        argumentPlan = null!;
+        return false;
+    }
+
     public static bool TryBuild(
         SemanticDocument document,
         IReadOnlyList<SemanticOperation> arguments,

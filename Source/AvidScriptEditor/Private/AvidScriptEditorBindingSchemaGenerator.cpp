@@ -254,6 +254,10 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_generation"), TEXT("()i"), TEXT("host_context"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("owner_get_slot"), TEXT("()i"), TEXT("host_context"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_cancel"), TEXT("(I)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_cancel_source_create"), TEXT("()I"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_cancel_source_cancel"), TEXT("(I)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_cancel_source_release"), TEXT("(I)i"), TEXT("runtime_service"));
+	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_bind_cancel"), TEXT("(II)i"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_delay"), TEXT("(fi)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("continuation_load_object"), TEXT("(ii)I"), TEXT("runtime_service"));
 	WriteIntrinsic(Writer, TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i"), TEXT("runtime_service"));
@@ -269,7 +273,7 @@ bool FAvidScriptEditorBindingSchemaGenerator::Generate(
 
 	OutResult.bSucceeded = true;
 	OutResult.BindingCount = ResolvedBindings.Num();
-	OutResult.IntrinsicCount = 8;
+	OutResult.IntrinsicCount = 12;
 	return true;
 }
 
@@ -349,6 +353,10 @@ bool FAvidScriptEditorBindingSchemaGenerator::ValidateManifestImports(
 	SupportedImports.Add(TEXT("env.owner_get_generation"));
 	SupportedImports.Add(TEXT("env.owner_get_slot"));
 	SupportedImports.Add(TEXT("env.continuation_cancel"));
+	SupportedImports.Add(TEXT("env.continuation_cancel_source_create"));
+	SupportedImports.Add(TEXT("env.continuation_cancel_source_cancel"));
+	SupportedImports.Add(TEXT("env.continuation_cancel_source_release"));
+	SupportedImports.Add(TEXT("env.continuation_bind_cancel"));
 	SupportedImports.Add(TEXT("env.continuation_delay"));
 	SupportedImports.Add(TEXT("env.continuation_load_object"));
 	SupportedImports.Add(TEXT("env.timer_cancel"));

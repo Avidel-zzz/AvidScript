@@ -23,7 +23,101 @@ internal static class CSharpGuestContinuationTests
         GeneratedLatentAwaitLowersDynamicImport();
         GeneratedLatentEnumAwaitUsesUnderlyingStorage();
         GeneratedLatentAggregatesUseSharedStoragePlan();
-        return 9;
+        CancellationMarkerBindsScheduledContinuation();
+        return 10;
+    }
+
+    private static void CancellationMarkerBindsScheduledContinuation()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                private static AvidCancellationSource Cancellation;
+
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    Cancellation = AvidCancellationSource.Create();
+                    await AvidContinuations.DelayAsync(0.25f)
+                        .WithCancellation(Cancellation.Token);
+                }
+
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
+                public static void EndPlay()
+                {
+                    Cancellation.Cancel();
+                    Cancellation.Release();
+                }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/CancellationMarkerGuest.cs");
+        SemanticAsyncAwaitSite awaitSite = document.AsyncMethods.Single()
+            .Segments.Single(segment => segment.AwaitSite is not null)
+            .AwaitSite!;
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestImport delayImport = module.Imports.Single(import =>
+            import.Name == "continuation_delay");
+        GuestImport bindImport = module.Imports.Single(import =>
+            import.Name == "continuation_bind_cancel");
+        GuestImport createImport = module.Imports.Single(import =>
+            import.Name == "continuation_cancel_source_create");
+        GuestImport cancelImport = module.Imports.Single(import =>
+            import.Name == "continuation_cancel_source_cancel");
+        GuestImport releaseImport = module.Imports.Single(import =>
+            import.Name == "continuation_cancel_source_release");
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        int delayCallIndex = Array.FindIndex(instructions, instruction =>
+            instruction.Op == "call" && instruction.TargetId == delayImport.Id);
+        int bindCallIndex = Array.FindIndex(instructions, instruction =>
+            instruction.Op == "call" && instruction.TargetId == bindImport.Id);
+        int cancellationLoadIndex = Array.FindIndex(instructions, instruction =>
+            instruction.Op == "field_load");
+        GuestInstruction bindCall = instructions[bindCallIndex];
+
+        Assert(awaitSite.CancellationToken?.TypeId
+                == "type:global::AvidScript.AvidCancellationToken"
+            && result.Succeeded
+            && bindImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int64", "type:int64",
+            })
+            && bindImport.ReturnTypeId == "type:int32"
+            && createImport.ParameterTypeIds.Count == 0
+            && createImport.ReturnTypeId == "type:int64"
+            && cancelImport.ParameterTypeIds.SequenceEqual(new[] { "type:int64" })
+            && cancelImport.ReturnTypeId == "type:int32"
+            && releaseImport.ParameterTypeIds.SequenceEqual(new[] { "type:int64" })
+            && releaseImport.ReturnTypeId == "type:int32"
+            && cancellationLoadIndex >= 0
+            && delayCallIndex > cancellationLoadIndex
+            && bindCallIndex > delayCallIndex
+            && bindCall.OperandIds.Count == 2
+            && bindCall.OperandIds[1] == instructions[delayCallIndex].ResultId
+            && instructions.Any(instruction => instruction.Op == "field_load")
+            && instructions.Any(instruction =>
+                instruction.Op == "binary" && instruction.OperatorKind == "bitwise_and")
+            && instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == createImport.Id)
+            && instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == cancelImport.Id)
+            && instructions.Any(instruction =>
+                instruction.Op == "call" && instruction.TargetId == releaseImport.Id)
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "script-owned cancellation sources should create, bind, cancel, and release through compiler-owned lowering");
     }
 
     private static void GeneratedLatentAggregatesUseSharedStoragePlan()
@@ -636,6 +730,7 @@ internal static class CSharpGuestContinuationTests
         public readonly struct AvidDelayAwaitable
         {
             private readonly int Marker;
+            public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;
             public AvidDelayAwaiter GetAwaiter() => default;
         }
 
@@ -650,6 +745,7 @@ internal static class CSharpGuestContinuationTests
         public readonly struct AvidObjectAwaitable
         {
             private readonly int Marker;
+            public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;
             public AvidObjectAwaiter GetAwaiter() => default;
         }
 
@@ -677,6 +773,30 @@ internal static class CSharpGuestContinuationTests
         {
             Completed = 1,
             Failed = 2,
+            Cancelled = 3,
+        }
+
+        public readonly struct AvidCancellationToken
+        {
+            internal readonly long Value;
+            internal AvidCancellationToken(long value) { Value = value; }
+        }
+
+        public readonly struct AvidCancellationSource
+        {
+            private readonly long Value;
+            public readonly AvidCancellationToken Token;
+            private AvidCancellationSource(long value)
+            {
+                Value = value;
+                Token = new AvidCancellationToken(value);
+            }
+            public static AvidCancellationSource Create()
+                => new(AvidScriptRuntimeNative.ContinuationCancelSourceCreate());
+            public bool Cancel()
+                => AvidScriptRuntimeNative.ContinuationCancelSourceCancel(Value) != 0;
+            public bool Release()
+                => AvidScriptRuntimeNative.ContinuationCancelSourceRelease(Value) != 0;
         }
 
         public readonly struct AvidLoadedObject
@@ -763,6 +883,20 @@ internal static class CSharpGuestContinuationTests
 
             [DllImport("env", EntryPoint = "continuation_load_object")]
             internal static extern long ContinuationLoadObject(string assetPath, int callbackId);
+
+            [DllImport("env", EntryPoint = "continuation_cancel_source_create")]
+            internal static extern long ContinuationCancelSourceCreate();
+
+            [DllImport("env", EntryPoint = "continuation_cancel_source_cancel")]
+            internal static extern int ContinuationCancelSourceCancel(long sourceToken);
+
+            [DllImport("env", EntryPoint = "continuation_cancel_source_release")]
+            internal static extern int ContinuationCancelSourceRelease(long sourceToken);
+
+            [DllImport("env", EntryPoint = "continuation_bind_cancel")]
+            internal static extern int ContinuationBindCancel(
+                long sourceToken,
+                long continuationToken);
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
             internal static extern long InvokeLatent(float duration, int callbackId);

@@ -35,6 +35,12 @@ public:
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
+	int64 CreateCancellationSource() override;
+	bool CancelCancellationSource(int64 SourceToken) override;
+	bool ReleaseCancellationSource(int64 SourceToken) override;
+	bool BindCancellationSource(
+		int64 SourceToken,
+		int64 ContinuationToken) override;
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;
@@ -58,6 +64,8 @@ class FAvidScriptSessionContinuations final
 public:
 	static constexpr int32 MaximumPendingContinuations = 4096;
 	static constexpr int32 MaximumRetainedLoadedObjects = 1024;
+	static constexpr int32 MaximumCancellationSources = 1024;
+	static constexpr int32 MaximumCancellationBindings = 4096;
 
 	explicit FAvidScriptSessionContinuations(
 		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
@@ -85,6 +93,14 @@ public:
 	int32 GetActiveCount() const;
 	int32 GetPreparedCount() const;
 #if WITH_DEV_AUTOMATION_TESTS
+	int32 GetCancellationSourceCountForTesting() const
+	{
+		return OccupiedCancellationSourceCount;
+	}
+	int32 GetCancellationBindingCountForTesting() const
+	{
+		return CancellationBindingCount;
+	}
 	int32 GetRetainedLoadedObjectCountForTesting() const
 	{
 		return RetainedLoadedObjects.Num();
@@ -105,6 +121,22 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		int64 Token);
+	int64 CreateCancellationSource(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial);
+	bool CancelCancellationSource(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 SourceToken);
+	bool ReleaseCancellationSource(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 SourceToken);
+	bool BindCancellationSource(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 SourceToken,
+		int64 ContinuationToken);
 	bool BeginLatent(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -136,6 +168,7 @@ private:
 		uint64 RegistrationSerial = 0;
 		int32 CallbackId = 0;
 		int64 Token = 0;
+		int64 CancellationSourceToken = 0;
 		TWeakObjectPtr<UWorld> World;
 		FTimerHandle TimerHandle;
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
@@ -156,6 +189,24 @@ private:
 		uint32 Generation = 0;
 		TOptional<FEntry> Entry;
 	};
+	enum class ECancellationSourceState : uint8
+	{
+		Open,
+		Cancelled
+	};
+	struct FCancellationSourceEntry
+	{
+		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
+		uint64 ActivationSerial = 0;
+		int64 Token = 0;
+		ECancellationSourceState State = ECancellationSourceState::Open;
+		TSet<int64> Bindings;
+	};
+	struct FCancellationSourceSlot
+	{
+		uint32 Generation = 0;
+		TOptional<FCancellationSourceEntry> Entry;
+	};
 	struct FReadyCompletion
 	{
 		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
@@ -170,10 +221,18 @@ private:
 
 	static int64 PackToken(uint32 Slot, uint32 Generation);
 	static bool UnpackToken(int64 Token, uint32& OutSlot, uint32& OutGeneration);
+	static int64 PackCancellationSourceToken(uint32 Slot, uint32 Generation);
+	static bool UnpackCancellationSourceToken(
+		int64 Token,
+		uint32& OutSlot,
+		uint32& OutGeneration);
 	static uint32 AllocateGeneration();
 
 	int64 AllocateEntry(FEntry&& Entry);
+	int64 AllocateCancellationSource(FCancellationSourceEntry&& Entry);
 	void ReleaseSlot(uint32 Slot);
+	void ReleaseCancellationSourceSlot(uint32 Slot);
+	void UnbindEntryFromCancellationSource(FEntry& Entry);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
 	void HandleLatentCompletion(int64 Token, int32 Linkage);
@@ -182,6 +241,9 @@ private:
 	void RetireLatentProxy(FEntry& Entry);
 	void CollectRetiredLatentProxies();
 	void CancelLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
+	void ReleaseCancellationSourcesForLane(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial);
 	void InvalidateLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReady(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReadyToken(int64 Token);
@@ -192,12 +254,17 @@ private:
 	bool HasLaneEntries(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
+	bool HasLaneCancellationSources(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial) const;
 	bool IsLaneContextLive(EAvidScriptContinuationLane Lane) const;
 	bool IsEntryContextLive(const FEntry& Entry) const;
 	UWorld* GetWorldForLane(EAvidScriptContinuationLane Lane) const;
 
 	TArray<FSlot> Slots;
 	TArray<uint32> FreeSlots;
+	TArray<FCancellationSourceSlot> CancellationSourceSlots;
+	TArray<uint32> FreeCancellationSourceSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
 	TArray<FRetiredLatentProxy> RetiredLatentProxies;
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
@@ -217,6 +284,8 @@ private:
 	uint64 NextActivationSerial = 1;
 	uint64 NextRegistrationSerial = 1;
 	int32 OccupiedSlotCount = 0;
+	int32 OccupiedCancellationSourceCount = 0;
+	int32 CancellationBindingCount = 0;
 	int32 ActiveEntryCount = 0;
 	int32 PreparedEntryCount = 0;
 	bool bTearingDown = false;

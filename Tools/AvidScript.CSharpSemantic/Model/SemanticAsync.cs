@@ -30,4 +30,5 @@ public sealed record SemanticAsyncAwaitSite(
     [property: JsonPropertyOrder(3)] IReadOnlyList<SemanticOperation> Arguments,
     [property: JsonPropertyOrder(4)] string? ResultSymbolId,
     [property: JsonPropertyOrder(5)] string? ResultTypeId,
-    [property: JsonPropertyOrder(6)] SemanticSpan Span);
+    [property: JsonPropertyOrder(6)] SemanticSpan Span,
+    [property: JsonPropertyOrder(7)] SemanticOperation? CancellationToken = null);

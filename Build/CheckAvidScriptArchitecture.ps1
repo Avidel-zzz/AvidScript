@@ -1994,6 +1994,10 @@ $CanonicalStaticImportNames = @(
     'continuation_delay',
     'continuation_cancel',
     'continuation_load_object',
+    'continuation_cancel_source_create',
+    'continuation_cancel_source_cancel',
+    'continuation_cancel_source_release',
+    'continuation_bind_cancel',
     'event_subscribe',
     'event_unsubscribe',
     'avid_data_lane_epoch',
@@ -2294,6 +2298,10 @@ $AllowedFixedRendererImports = @(
     'continuation_delay',
     'continuation_cancel',
     'continuation_load_object',
+    'continuation_cancel_source_create',
+    'continuation_cancel_source_cancel',
+    'continuation_cancel_source_release',
+    'continuation_bind_cancel',
     'event_subscribe',
     'event_unsubscribe',
     'avid_value_array_read_range',
@@ -2327,6 +2335,8 @@ $AllowedLiteralFacadeStructs = @(
     'AvidSubscription',
     'AvidContinuation',
     'AvidLoadedObject',
+    'AvidCancellationToken',
+    'AvidCancellationSource',
     'AvidDelayAwaitable',
     'AvidObjectAwaitable'
 )
@@ -2896,6 +2906,9 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'DelayAsync',
     'NextTickAsync',
     'LoadObjectAsync',
+    'TryUnwrapCancellationMarker',
+    'CancellationTokenTypeName',
+    'projectedCancellationToken);',
     'ValidateLocalLifetimes',
     'ASCS5401',
     'ASCS5408'
@@ -2908,6 +2921,7 @@ foreach ($RequiredControlledAsyncModelContract in @(
     'SemanticAsyncMethod',
     'SemanticAsyncSegment',
     'SemanticAsyncAwaitSite',
+    'SemanticOperation? CancellationToken = null',
     'reentrant_zero_heap_cps'
 )) {
     if (-not $SemanticAsyncModelSource.Contains($RequiredControlledAsyncModelContract)) {
@@ -2964,7 +2978,12 @@ foreach ($RequiredControlledAsyncFacadeContract in @(
     'NextTickAsync()',
     'public readonly struct AvidObjectAwaitable',
     'public readonly struct AvidObjectAwaiter : INotifyCompletion',
-    'LoadObjectAsync(string assetPath)'
+    'LoadObjectAsync(string assetPath)',
+    'public readonly struct AvidCancellationToken',
+    'public readonly struct AvidCancellationSource',
+    'WithCancellation(AvidCancellationToken token)',
+    'ContinuationCancelSourceCreate()',
+    'ContinuationBindCancel(long sourceToken, long continuationToken)'
 )) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredControlledAsyncFacadeContract)) {
         Add-Violation "generated C# controlled async facade is missing $RequiredControlledAsyncFacadeContract"
@@ -2972,6 +2991,10 @@ foreach ($RequiredControlledAsyncFacadeContract in @(
 }
 foreach ($RequiredLatentGameplaySampleContract in @(
     'UKismetSystemLibrary.DelayAsync(0.25f)',
+    '.WithCancellation(LifetimeCancellation.Token)',
+    'LifetimeCancellation = AvidCancellationSource.Create()',
+    'LifetimeCancellation.Cancel()',
+    'LifetimeCancellation.Release()',
     'SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f))'
 )) {
     if (-not $LatentGameplaySampleSource.Contains($RequiredLatentGameplaySampleContract)) {
@@ -3026,6 +3049,10 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'LowerStorageAddress',
     'continuation_delay',
     'continuation_load_object',
+    'continuation_bind_cancel',
+    'TryBuildSingleValue',
+    'CancellationToken',
+    'bitwise_and',
     'not_equals',
     'new GuestTerminator("trap"',
     'CSharpAsyncResumeRoute'
@@ -3036,6 +3063,16 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
 }
 if (-not $CSharpSemanticInputValidatorSource.Contains('CSharpLatentStoragePlanner.TryBuild')) {
     Add-Violation 'generated latent parameters must validate the shared public-to-storage plan'
+}
+foreach ($RequiredCancellationValidationContract in @(
+    'awaitSite.CancellationToken',
+    'AvidCancellationToken',
+    'CSharpLatentStoragePlanner.TryBuildSingleValue',
+    'continuation_bind_cancel'
+)) {
+    if (-not $CSharpSemanticInputValidatorSource.Contains($RequiredCancellationValidationContract)) {
+        Add-Violation "C# Semantic input cancellation validation is missing $RequiredCancellationValidationContract"
+    }
 }
 foreach ($RequiredLatentStoragePlanContract in @(
     'MaximumAggregateDepth',
@@ -3079,6 +3116,18 @@ foreach ($RequiredAsyncContinuationRuntimeContract in @(
         Add-Violation "Runtime async continuation dispatch is missing $RequiredAsyncContinuationRuntimeContract"
     }
 }
+foreach ($RequiredCancellationRuntimeContract in @(
+    'EAvidScriptHostBindingId::ContinuationCancelSourceCreate',
+    'EAvidScriptHostBindingId::ContinuationCancelSourceCancel',
+    'EAvidScriptHostBindingId::ContinuationCancelSourceRelease',
+    'EAvidScriptHostBindingId::ContinuationBindCancel',
+    'HandleContinuationCancelSourceCreateImport',
+    'HandleContinuationBindCancelImport'
+)) {
+    if (-not $WasmRuntimeSource.Contains($RequiredCancellationRuntimeContract)) {
+        Add-Violation "Runtime cancellation-source dispatch is missing $RequiredCancellationRuntimeContract"
+    }
+}
 foreach ($RequiredAsyncContinuationOwnershipContract in @(
     'MaximumRetainedLoadedObjects',
     'ScheduleObjectLoad',
@@ -3089,6 +3138,20 @@ foreach ($RequiredAsyncContinuationOwnershipContract in @(
     if (-not $ContinuationOwnerHeader.Contains($RequiredAsyncContinuationOwnershipContract) -and
         -not $ContinuationOwnerSource.Contains($RequiredAsyncContinuationOwnershipContract)) {
         Add-Violation "Session async continuation ownership is missing $RequiredAsyncContinuationOwnershipContract"
+    }
+}
+foreach ($RequiredCancellationOwnershipContract in @(
+    'MaximumCancellationSources = 1024',
+    'MaximumCancellationBindings = 4096',
+    'CancellationSourceKindMask',
+    'CreateCancellationSource',
+    'BindCancellationSource',
+    'UnbindEntryFromCancellationSource',
+    'ReleaseCancellationSourcesForLane'
+)) {
+    if (-not $ContinuationOwnerHeader.Contains($RequiredCancellationOwnershipContract) -and
+        -not $ContinuationOwnerSource.Contains($RequiredCancellationOwnershipContract)) {
+        Add-Violation "Session cancellation-source ownership is missing $RequiredCancellationOwnershipContract"
     }
 }
 foreach ($RequiredAsyncObjectLoaderContract in @(
@@ -3107,6 +3170,18 @@ foreach ($RequiredAsyncContinuationVmContract in @(
 )) {
     if (-not $StaticHostImportSource.Contains($RequiredAsyncContinuationVmContract)) {
         Add-Violation "VM async continuation catalog is missing $RequiredAsyncContinuationVmContract"
+    }
+}
+foreach ($RequiredCancellationVmContract in @(
+    'ContinuationCancelSourceCreate',
+    'ContinuationCancelSourceCancel',
+    'ContinuationCancelSourceRelease',
+    'ContinuationBindCancel',
+    'continuation_bind_cancel',
+    '(II)i'
+)) {
+    if (-not $StaticHostImportSource.Contains($RequiredCancellationVmContract)) {
+        Add-Violation "VM cancellation-source catalog is missing $RequiredCancellationVmContract"
     }
 }
 foreach ($RequiredCompilerManagedArrayContract in @(

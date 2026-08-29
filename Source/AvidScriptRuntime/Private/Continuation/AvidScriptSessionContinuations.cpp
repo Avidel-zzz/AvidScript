@@ -14,6 +14,7 @@
 namespace
 {
 std::atomic<uint32> GAvidScriptContinuationGeneration{1};
+constexpr uint64 CancellationSourceKindMask = 0x8000000000000000ull;
 
 bool TryMakeAsyncObjectPath(
 	const FString& ObjectPath,
@@ -89,6 +90,49 @@ bool FAvidScriptContinuationHostEndpoint::Cancel(const int64 Token)
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
 	return bValid && PinnedOwner
 		&& PinnedOwner->Cancel(Lane, ActivationSerial, Token);
+}
+
+int64 FAvidScriptContinuationHostEndpoint::CreateCancellationSource()
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		? PinnedOwner->CreateCancellationSource(Lane, ActivationSerial)
+		: 0;
+}
+
+bool FAvidScriptContinuationHostEndpoint::CancelCancellationSource(
+	const int64 SourceToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->CancelCancellationSource(
+			Lane,
+			ActivationSerial,
+			SourceToken);
+}
+
+bool FAvidScriptContinuationHostEndpoint::ReleaseCancellationSource(
+	const int64 SourceToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->ReleaseCancellationSource(
+			Lane,
+			ActivationSerial,
+			SourceToken);
+}
+
+bool FAvidScriptContinuationHostEndpoint::BindCancellationSource(
+	const int64 SourceToken,
+	const int64 ContinuationToken)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->BindCancellationSource(
+			Lane,
+			ActivationSerial,
+			SourceToken,
+			ContinuationToken);
 }
 
 bool FAvidScriptContinuationHostEndpoint::BeginLatent(
@@ -176,9 +220,12 @@ bool FAvidScriptSessionContinuations::ValidatePreparedCommit(
 	}
 
 	const uint64 PreparedActivation = PreparedEndpoint->GetActivationSerial();
-	if (HasLaneEntries(
-			EAvidScriptContinuationLane::Prepared,
-			PreparedActivation)
+	if ((HasLaneEntries(
+				EAvidScriptContinuationLane::Prepared,
+				PreparedActivation)
+			|| HasLaneCancellationSources(
+				EAvidScriptContinuationLane::Prepared,
+				PreparedActivation))
 		&& !IsLaneContextLive(EAvidScriptContinuationLane::Prepared))
 	{
 		OutError = TEXT("continuation_prepared_context_unavailable");
@@ -227,6 +274,15 @@ void FAvidScriptSessionContinuations::CommitPrepared()
 	}
 
 	for (FSlot& Slot : Slots)
+	{
+		if (Slot.Entry.IsSet()
+			&& Slot.Entry->Lane == EAvidScriptContinuationLane::Prepared
+			&& Slot.Entry->ActivationSerial == PreparedActivation)
+		{
+			Slot.Entry->Lane = EAvidScriptContinuationLane::Active;
+		}
+	}
+	for (FCancellationSourceSlot& Slot : CancellationSourceSlots)
 	{
 		if (Slot.Entry.IsSet()
 			&& Slot.Entry->Lane == EAvidScriptContinuationLane::Prepared
@@ -739,6 +795,195 @@ bool FAvidScriptSessionContinuations::Cancel(
 	return true;
 }
 
+int64 FAvidScriptSessionContinuations::CreateCancellationSource(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial)
+{
+	if (!IsInGameThread()
+		|| bTearingDown
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
+		|| OccupiedCancellationSourceCount >= MaximumCancellationSources)
+	{
+		return 0;
+	}
+	if (!IsLaneContextLive(Lane))
+	{
+		InvalidateLane(Lane, ActivationSerial);
+		return 0;
+	}
+
+	FCancellationSourceEntry Entry;
+	Entry.Lane = Lane;
+	Entry.ActivationSerial = ActivationSerial;
+	return AllocateCancellationSource(MoveTemp(Entry));
+}
+
+bool FAvidScriptSessionContinuations::CancelCancellationSource(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 SourceToken)
+{
+	if (!IsInGameThread() || !MatchesCurrentEndpoint(Lane, ActivationSerial))
+	{
+		return false;
+	}
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackCancellationSourceToken(SourceToken, SlotIndex, Generation)
+		|| !CancellationSourceSlots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+	FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->State != ECancellationSourceState::Open)
+	{
+		return false;
+	}
+
+	Slot.Entry->State = ECancellationSourceState::Cancelled;
+	TArray<int64> Bindings;
+	Bindings.Reserve(Slot.Entry->Bindings.Num());
+	for (const int64 ContinuationToken : Slot.Entry->Bindings)
+	{
+		Bindings.Add(ContinuationToken);
+	}
+	Bindings.Sort();
+	for (const int64 ContinuationToken : Bindings)
+	{
+		Cancel(Lane, ActivationSerial, ContinuationToken);
+	}
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::ReleaseCancellationSource(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 SourceToken)
+{
+	if (!IsInGameThread() || !MatchesCurrentEndpoint(Lane, ActivationSerial))
+	{
+		return false;
+	}
+	uint32 SlotIndex = 0;
+	uint32 Generation = 0;
+	if (!UnpackCancellationSourceToken(SourceToken, SlotIndex, Generation)
+		|| !CancellationSourceSlots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+	FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+	if (Slot.Generation != Generation
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial)
+	{
+		return false;
+	}
+
+	TArray<int64> Bindings;
+	Bindings.Reserve(Slot.Entry->Bindings.Num());
+	for (const int64 ContinuationToken : Slot.Entry->Bindings)
+	{
+		Bindings.Add(ContinuationToken);
+	}
+	for (const int64 ContinuationToken : Bindings)
+	{
+		uint32 ContinuationSlotIndex = 0;
+		uint32 ContinuationGeneration = 0;
+		if (UnpackToken(
+				ContinuationToken,
+				ContinuationSlotIndex,
+				ContinuationGeneration)
+			&& Slots.IsValidIndex(static_cast<int32>(ContinuationSlotIndex)))
+		{
+			FSlot& ContinuationSlot = Slots[ContinuationSlotIndex];
+			if (ContinuationSlot.Generation == ContinuationGeneration
+				&& ContinuationSlot.Entry.IsSet()
+				&& ContinuationSlot.Entry->CancellationSourceToken == SourceToken)
+			{
+				ContinuationSlot.Entry->CancellationSourceToken = 0;
+				check(CancellationBindingCount > 0);
+				--CancellationBindingCount;
+			}
+		}
+	}
+	Slot.Entry->Bindings.Reset();
+	ReleaseCancellationSourceSlot(SlotIndex);
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::BindCancellationSource(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int64 SourceToken,
+	const int64 ContinuationToken)
+{
+	if (!IsInGameThread() || !MatchesCurrentEndpoint(Lane, ActivationSerial))
+	{
+		return false;
+	}
+
+	uint32 ContinuationSlotIndex = 0;
+	uint32 ContinuationGeneration = 0;
+	if (!UnpackToken(
+			ContinuationToken,
+			ContinuationSlotIndex,
+			ContinuationGeneration)
+		|| !Slots.IsValidIndex(static_cast<int32>(ContinuationSlotIndex)))
+	{
+		return false;
+	}
+	FSlot& ContinuationSlot = Slots[ContinuationSlotIndex];
+	if (ContinuationSlot.Generation != ContinuationGeneration
+		|| !ContinuationSlot.Entry.IsSet()
+		|| ContinuationSlot.Entry->Lane != Lane
+		|| ContinuationSlot.Entry->ActivationSerial != ActivationSerial
+		|| ContinuationSlot.Entry->bDispatching)
+	{
+		return false;
+	}
+
+	uint32 SourceSlotIndex = 0;
+	uint32 SourceGeneration = 0;
+	const bool bSourceTokenValid = UnpackCancellationSourceToken(
+		SourceToken,
+		SourceSlotIndex,
+		SourceGeneration)
+		&& CancellationSourceSlots.IsValidIndex(static_cast<int32>(SourceSlotIndex));
+	FCancellationSourceSlot* const SourceSlot = bSourceTokenValid
+		? &CancellationSourceSlots[SourceSlotIndex]
+		: nullptr;
+	if (SourceSlot == nullptr
+		|| SourceSlot->Generation != SourceGeneration
+		|| !SourceSlot->Entry.IsSet()
+		|| SourceSlot->Entry->Lane != Lane
+		|| SourceSlot->Entry->ActivationSerial != ActivationSerial
+		|| ContinuationSlot.Entry->CancellationSourceToken != 0)
+	{
+		Cancel(Lane, ActivationSerial, ContinuationToken);
+		return false;
+	}
+
+	if (SourceSlot->Entry->State == ECancellationSourceState::Cancelled)
+	{
+		return Cancel(Lane, ActivationSerial, ContinuationToken);
+	}
+	if (CancellationBindingCount >= MaximumCancellationBindings)
+	{
+		Cancel(Lane, ActivationSerial, ContinuationToken);
+		return false;
+	}
+
+	ContinuationSlot.Entry->CancellationSourceToken = SourceToken;
+	SourceSlot->Entry->Bindings.Add(ContinuationToken);
+	++CancellationBindingCount;
+	return true;
+}
+
 bool FAvidScriptSessionContinuations::BeginLatent(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
@@ -905,8 +1150,42 @@ bool FAvidScriptSessionContinuations::UnpackToken(
 	uint32& OutGeneration)
 {
 	const uint64 Packed = static_cast<uint64>(Token);
+	if ((Packed & CancellationSourceKindMask) != 0)
+	{
+		return false;
+	}
 	const uint32 EncodedSlot = static_cast<uint32>(Packed & 0xffffffffu);
 	OutGeneration = static_cast<uint32>(Packed >> 32);
+	if (EncodedSlot == 0 || OutGeneration == 0)
+	{
+		return false;
+	}
+	OutSlot = EncodedSlot - 1;
+	return true;
+}
+
+int64 FAvidScriptSessionContinuations::PackCancellationSourceToken(
+	const uint32 Slot,
+	const uint32 Generation)
+{
+	const uint64 Packed = CancellationSourceKindMask
+		| (static_cast<uint64>(Generation) << 32)
+		| static_cast<uint64>(Slot + 1);
+	return static_cast<int64>(Packed);
+}
+
+bool FAvidScriptSessionContinuations::UnpackCancellationSourceToken(
+	const int64 Token,
+	uint32& OutSlot,
+	uint32& OutGeneration)
+{
+	const uint64 Packed = static_cast<uint64>(Token);
+	if ((Packed & CancellationSourceKindMask) == 0)
+	{
+		return false;
+	}
+	const uint32 EncodedSlot = static_cast<uint32>(Packed & 0xffffffffu);
+	OutGeneration = static_cast<uint32>((Packed >> 32) & 0x7fffffffu);
 	if (EncodedSlot == 0 || OutGeneration == 0)
 	{
 		return false;
@@ -959,10 +1238,37 @@ int64 FAvidScriptSessionContinuations::AllocateEntry(FEntry&& Entry)
 	return Slot.Entry->Token;
 }
 
+int64 FAvidScriptSessionContinuations::AllocateCancellationSource(
+	FCancellationSourceEntry&& Entry)
+{
+	uint32 SlotIndex = 0;
+	if (!FreeCancellationSourceSlots.IsEmpty())
+	{
+		SlotIndex = FreeCancellationSourceSlots.Pop(EAllowShrinking::No);
+	}
+	else
+	{
+		SlotIndex = static_cast<uint32>(CancellationSourceSlots.AddDefaulted());
+		CancellationSourceSlots[SlotIndex].Generation = AllocateGeneration();
+	}
+
+	FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+	check(!Slot.Entry.IsSet());
+	if (Slot.Generation == 0)
+	{
+		Slot.Generation = AllocateGeneration();
+	}
+	Entry.Token = PackCancellationSourceToken(SlotIndex, Slot.Generation);
+	Slot.Entry.Emplace(MoveTemp(Entry));
+	++OccupiedCancellationSourceCount;
+	return Slot.Entry->Token;
+}
+
 void FAvidScriptSessionContinuations::ReleaseSlot(const uint32 SlotIndex)
 {
 	FSlot& Slot = Slots[SlotIndex];
 	check(Slot.Entry.IsSet());
+	UnbindEntryFromCancellationSource(Slot.Entry.GetValue());
 	int32& LaneEntryCount =
 		Slot.Entry->Lane == EAvidScriptContinuationLane::Active
 			? ActiveEntryCount
@@ -973,6 +1279,47 @@ void FAvidScriptSessionContinuations::ReleaseSlot(const uint32 SlotIndex)
 	Slot.Generation = AllocateGeneration();
 	FreeSlots.Add(SlotIndex);
 	--OccupiedSlotCount;
+}
+
+void FAvidScriptSessionContinuations::ReleaseCancellationSourceSlot(
+	const uint32 SlotIndex)
+{
+	FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+	check(Slot.Entry.IsSet());
+	check(Slot.Entry->Bindings.IsEmpty());
+	Slot.Entry.Reset();
+	Slot.Generation = AllocateGeneration();
+	FreeCancellationSourceSlots.Add(SlotIndex);
+	check(OccupiedCancellationSourceCount > 0);
+	--OccupiedCancellationSourceCount;
+}
+
+void FAvidScriptSessionContinuations::UnbindEntryFromCancellationSource(
+	FEntry& Entry)
+{
+	if (Entry.CancellationSourceToken == 0)
+	{
+		return;
+	}
+	uint32 SourceSlotIndex = 0;
+	uint32 SourceGeneration = 0;
+	if (UnpackCancellationSourceToken(
+			Entry.CancellationSourceToken,
+			SourceSlotIndex,
+			SourceGeneration)
+		&& CancellationSourceSlots.IsValidIndex(static_cast<int32>(SourceSlotIndex)))
+	{
+		FCancellationSourceSlot& SourceSlot =
+			CancellationSourceSlots[SourceSlotIndex];
+		if (SourceSlot.Generation == SourceGeneration
+			&& SourceSlot.Entry.IsSet()
+			&& SourceSlot.Entry->Bindings.Remove(Entry.Token) > 0)
+		{
+			check(CancellationBindingCount > 0);
+			--CancellationBindingCount;
+		}
+	}
+	Entry.CancellationSourceToken = 0;
 }
 
 void FAvidScriptSessionContinuations::HandleTimerCompletion(const int64 Token)
@@ -1218,6 +1565,25 @@ void FAvidScriptSessionContinuations::CancelLane(
 		CancelEntryProducer(Slot.Entry.GetValue());
 		ReleaseSlot(static_cast<uint32>(SlotIndex));
 	}
+	ReleaseCancellationSourcesForLane(Lane, ActivationSerial);
+}
+
+void FAvidScriptSessionContinuations::ReleaseCancellationSourcesForLane(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial)
+{
+	for (int32 SlotIndex = 0; SlotIndex < CancellationSourceSlots.Num(); ++SlotIndex)
+	{
+		FCancellationSourceSlot& Slot = CancellationSourceSlots[SlotIndex];
+		if (!Slot.Entry.IsSet()
+			|| Slot.Entry->Lane != Lane
+			|| Slot.Entry->ActivationSerial != ActivationSerial)
+		{
+			continue;
+		}
+		check(Slot.Entry->Bindings.IsEmpty());
+		ReleaseCancellationSourceSlot(static_cast<uint32>(SlotIndex));
+	}
 }
 
 void FAvidScriptSessionContinuations::InvalidateLane(
@@ -1284,6 +1650,23 @@ bool FAvidScriptSessionContinuations::HasLaneEntries(
 			: PreparedEntryCount;
 	return LaneEntryCount > 0
 		&& MatchesCurrentEndpoint(Lane, ActivationSerial);
+}
+
+bool FAvidScriptSessionContinuations::HasLaneCancellationSources(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial) const
+{
+	if (!MatchesCurrentEndpoint(Lane, ActivationSerial))
+	{
+		return false;
+	}
+	return CancellationSourceSlots.ContainsByPredicate(
+		[Lane, ActivationSerial](const FCancellationSourceSlot& Slot)
+		{
+			return Slot.Entry.IsSet()
+				&& Slot.Entry->Lane == Lane
+				&& Slot.Entry->ActivationSerial == ActivationSerial;
+		});
 }
 
 bool FAvidScriptSessionContinuations::IsLaneContextLive(

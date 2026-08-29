@@ -216,6 +216,8 @@ public sealed class AvidLatentAttribute : Attribute
 
 public readonly struct AvidDelayAwaitable
 {
+    public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;
+
     public AvidDelayAwaiter GetAwaiter() => default;
 }
 
@@ -234,6 +236,8 @@ public readonly struct AvidDelayAwaiter : INotifyCompletion
 
 public readonly struct AvidObjectAwaitable
 {
+    public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;
+
     public AvidObjectAwaiter GetAwaiter() => default;
 }
 
@@ -258,6 +262,18 @@ internal static class AvidScriptRuntimeNative
 
     [DllImport("env", EntryPoint = "continuation_cancel")]
     internal static extern int ContinuationCancel(long continuationToken);
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_create")]
+    internal static extern long ContinuationCancelSourceCreate();
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_cancel")]
+    internal static extern int ContinuationCancelSourceCancel(long sourceToken);
+
+    [DllImport("env", EntryPoint = "continuation_cancel_source_release")]
+    internal static extern int ContinuationCancelSourceRelease(long sourceToken);
+
+    [DllImport("env", EntryPoint = "continuation_bind_cancel")]
+    internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);
 
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);

@@ -70,14 +70,53 @@ public:
 		return Token == ExpectedToken;
 	}
 
+	int64 CreateCancellationSource() override
+	{
+		++CreateCancellationSourceCount;
+		return ExpectedCancellationSourceToken;
+	}
+
+	bool CancelCancellationSource(const int64 SourceToken) override
+	{
+		LastCancellationSourceToken = SourceToken;
+		++CancelCancellationSourceCount;
+		return SourceToken == ExpectedCancellationSourceToken;
+	}
+
+	bool ReleaseCancellationSource(const int64 SourceToken) override
+	{
+		LastCancellationSourceToken = SourceToken;
+		++ReleaseCancellationSourceCount;
+		return SourceToken == ExpectedCancellationSourceToken;
+	}
+
+	bool BindCancellationSource(
+		const int64 SourceToken,
+		const int64 ContinuationToken) override
+	{
+		LastCancellationSourceToken = SourceToken;
+		LastBoundContinuationToken = ContinuationToken;
+		++BindCancellationSourceCount;
+		return SourceToken == ExpectedCancellationSourceToken
+			&& ContinuationToken == ExpectedToken;
+	}
+
 	static constexpr int64 ExpectedToken = 0x000000010000002aLL;
+	static constexpr int64 ExpectedCancellationSourceToken =
+		static_cast<int64>(0x800000010000002bULL);
 	float LastDelaySeconds = 0.0f;
 	FString LastObjectPath;
 	int32 LastCallbackId = 0;
 	int64 LastCancelledToken = 0;
+	int64 LastCancellationSourceToken = 0;
+	int64 LastBoundContinuationToken = 0;
 	int32 ScheduleCount = 0;
 	int32 ObjectLoadScheduleCount = 0;
 	int32 CancelCount = 0;
+	int32 CreateCancellationSourceCount = 0;
+	int32 CancelCancellationSourceCount = 0;
+	int32 ReleaseCancellationSourceCount = 0;
+	int32 BindCancellationSourceCount = 0;
 };
 
 struct FAvidScriptFakeAsyncLoadCancelState
@@ -292,6 +331,36 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 		Runtime.HandleContinuationCancelImport(Token + 1),
 		0);
 
+	const int64 CancellationSourceToken =
+		Runtime.HandleContinuationCancelSourceCreateImport();
+	TestEqual(
+		TEXT("Runtime preserves the full cancellation source token"),
+		CancellationSourceToken,
+		Host.ExpectedCancellationSourceToken);
+	TestEqual(
+		TEXT("Cancellation source creation crosses the host boundary once"),
+		Host.CreateCancellationSourceCount,
+		1);
+	TestEqual(
+		TEXT("Runtime forwards source and continuation tokens to bind"),
+		Runtime.HandleContinuationBindCancelImport(
+			CancellationSourceToken,
+			Token),
+		1);
+	TestEqual(TEXT("Cancellation bind crosses the host boundary once"), Host.BindCancellationSourceCount, 1);
+	TestEqual(TEXT("Cancellation bind preserves the source token"), Host.LastCancellationSourceToken, CancellationSourceToken);
+	TestEqual(TEXT("Cancellation bind preserves the continuation token"), Host.LastBoundContinuationToken, Token);
+	TestEqual(
+		TEXT("Runtime forwards source cancellation"),
+		Runtime.HandleContinuationCancelSourceCancelImport(CancellationSourceToken),
+		1);
+	TestEqual(TEXT("Source cancellation crosses the host boundary once"), Host.CancelCancellationSourceCount, 1);
+	TestEqual(
+		TEXT("Runtime forwards source release"),
+		Runtime.HandleContinuationCancelSourceReleaseImport(CancellationSourceToken),
+		1);
+	TestEqual(TEXT("Source release crosses the host boundary once"), Host.ReleaseCancellationSourceCount, 1);
+
 	const FString ObjectPath(TEXT("/Engine/EngineMeshes/Cube.Cube"));
 	const FTCHARToUTF8 ObjectPathUtf8(*ObjectPath);
 	const uint32 ObjectPathToken = InternContinuationUtf8(
@@ -335,6 +404,94 @@ bool FAvidScriptContinuationHostBoundaryTest::RunTest(
 		TEXT("Object path failure names the load import"),
 		FailureImport,
 		FString(TEXT("continuation_load_object")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationCancellationSourceTest,
+	"AvidScript.Runtime.Continuation.CancellationSource",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationCancellationSourceTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Cancellation source world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	IAvidScriptContinuationHost& ActiveHost = Owner->ResetActive(World);
+	const int64 SourceToken = ActiveHost.CreateCancellationSource();
+	TestNotEqual(TEXT("Cancellation source returns an opaque token"), SourceToken, 0LL);
+	TestTrue(TEXT("Cancellation source uses a distinct high-bit token kind"), SourceToken < 0);
+	TestEqual(TEXT("One cancellation source is tracked"), Owner->GetCancellationSourceCountForTesting(), 1);
+
+	const int64 PendingToken = ActiveHost.ScheduleDelay(10.0f, 41);
+	const int64 ReadyToken = ActiveHost.ScheduleDelay(0.01f, 42);
+	TestTrue(TEXT("Pending continuation binds to the source"), ActiveHost.BindCancellationSource(SourceToken, PendingToken));
+	TestTrue(TEXT("Ready fixture binds to the same source"), ActiveHost.BindCancellationSource(SourceToken, ReadyToken));
+	TestEqual(TEXT("Two cancellation bindings are tracked"), Owner->GetCancellationBindingCountForTesting(), 2);
+	TestFalse(TEXT("Source tokens cannot cancel continuation slots"), ActiveHost.Cancel(SourceToken));
+	TestFalse(TEXT("Continuation tokens cannot cancel source slots"), ActiveHost.CancelCancellationSource(PendingToken));
+	AdvanceContinuationWorld(World, 0.02f);
+	TestTrue(TEXT("Source cancellation wins over pending and ready work"), ActiveHost.CancelCancellationSource(SourceToken));
+	TestFalse(TEXT("Source cancellation is idempotent"), ActiveHost.CancelCancellationSource(SourceToken));
+	TestEqual(TEXT("Source cancellation removes all cancellable work"), Owner->GetActiveCount(), 0);
+	TestEqual(TEXT("Source cancellation removes reverse bindings"), Owner->GetCancellationBindingCountForTesting(), 0);
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("A source-cancelled ready callback is suppressed"), Completions.Num(), 0);
+
+	const int64 CancelledBeforeBind = ActiveHost.ScheduleDelay(10.0f, 43);
+	TestTrue(
+		TEXT("Binding to an already cancelled source synchronously handles the producer"),
+		ActiveHost.BindCancellationSource(SourceToken, CancelledBeforeBind));
+	TestEqual(TEXT("Cancel-before-bind leaves no producer"), Owner->GetActiveCount(), 0);
+	const int64 InvalidBindToken = ActiveHost.ScheduleDelay(10.0f, 44);
+	TestFalse(
+		TEXT("Binding to an invalid source fails closed"),
+		ActiveHost.BindCancellationSource(0, InvalidBindToken));
+	TestEqual(TEXT("A failed bind leaves no orphan producer"), Owner->GetActiveCount(), 0);
+	TestTrue(TEXT("The cancelled source can be released"), ActiveHost.ReleaseCancellationSource(SourceToken));
+	TestFalse(TEXT("Released source tokens are stale"), ActiveHost.ReleaseCancellationSource(SourceToken));
+	TestEqual(TEXT("Released source slots are reclaimed"), Owner->GetCancellationSourceCountForTesting(), 0);
+
+	const int64 DispatchSource = ActiveHost.CreateCancellationSource();
+	const int64 DispatchToken = ActiveHost.ScheduleDelay(0.01f, 45);
+	TestTrue(TEXT("Dispatch fixture binds"), ActiveHost.BindCancellationSource(DispatchSource, DispatchToken));
+	AdvanceContinuationWorld(World, 0.02f);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Dispatch fixture reaches the safe pump"), Completions.Num(), 1);
+	TestTrue(TEXT("Source can enter cancelled state during dispatch"), ActiveHost.CancelCancellationSource(DispatchSource));
+	TestEqual(TEXT("Dispatching completion wins the cancellation race"), Owner->GetActiveCount(), 1);
+	TestEqual(TEXT("Dispatching binding remains until finalization"), Owner->GetCancellationBindingCountForTesting(), 1);
+	TestTrue(TEXT("Dispatching completion finalizes"), Owner->FinalizeDispatched(DispatchToken, true));
+	TestEqual(TEXT("Finalization detaches the source binding"), Owner->GetCancellationBindingCountForTesting(), 0);
+	TestTrue(TEXT("Dispatch source releases after finalization"), ActiveHost.ReleaseCancellationSource(DispatchSource));
+
+	const int64 ActiveSource = ActiveHost.CreateCancellationSource();
+	const int64 ActiveToken = ActiveHost.ScheduleDelay(10.0f, 46);
+	IAvidScriptContinuationHost& PreparedHost = Owner->BeginPrepared(World);
+	const int64 PreparedSource = PreparedHost.CreateCancellationSource();
+	TestFalse(
+		TEXT("Prepared source cannot bind an active continuation"),
+		ActiveHost.BindCancellationSource(PreparedSource, ActiveToken));
+	TestEqual(TEXT("Cross-lane bind failure cancels only its active producer"), Owner->GetActiveCount(), 0);
+	TestEqual(TEXT("Prepared source remains isolated"), Owner->GetCancellationSourceCountForTesting(), 2);
+	Owner->DiscardPrepared();
+	TestEqual(TEXT("Discarding prepared state invalidates its source"), Owner->GetCancellationSourceCountForTesting(), 1);
+	TestFalse(TEXT("Discarded source token is stale"), ActiveHost.CancelCancellationSource(PreparedSource));
+	TestTrue(TEXT("Active source survives candidate discard"), ActiveHost.ReleaseCancellationSource(ActiveSource));
+
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown leaves no cancellation sources"), Owner->GetCancellationSourceCountForTesting(), 0);
+	TestEqual(TEXT("Teardown leaves no cancellation bindings"), Owner->GetCancellationBindingCountForTesting(), 0);
+	DestroyContinuationWorld(World);
 	return true;
 }
 

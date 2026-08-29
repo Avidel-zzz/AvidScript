@@ -3713,6 +3713,64 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelImport(
 	return LastHostImportResult;
 }
 
+int64 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCreateImport()
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	const int64 Token = HostContext.Continuations != nullptr
+		? HostContext.Continuations->CreateCancellationSource()
+		: 0;
+	LastHostImportResult = Token != 0 ? 1 : 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return Token;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceCancelImport(
+	const int64 SourceToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = HostContext.Continuations != nullptr
+		&& HostContext.Continuations->CancelCancellationSource(SourceToken)
+		? 1
+		: 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationCancelSourceReleaseImport(
+	const int64 SourceToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = HostContext.Continuations != nullptr
+		&& HostContext.Continuations->ReleaseCancellationSource(SourceToken)
+		? 1
+		: 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
+	const int64 SourceToken,
+	const int64 ContinuationToken)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = 0;
+	LastHostImportResult = HostContext.Continuations != nullptr
+		&& HostContext.Continuations->BindCancellationSource(
+			SourceToken,
+			ContinuationToken)
+		? 1
+		: 0;
+	++HostImportCallCount;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return LastHostImportResult;
+}
+
 int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
 	const int32 Slot,
 	const int32 Generation,
@@ -6093,6 +6151,30 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 			Call.IntArgs[0],
 			Call.IntArgs[1]);
 		return FinishI64(Value, !bHasPendingHostImportFailure);
+	}
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate:
+	{
+		const int64 Value = HandleContinuationCancelSourceCreateImport();
+		return FinishI64(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel:
+	{
+		const int32 Value = HandleContinuationCancelSourceCancelImport(
+			Call.Int64Args[0]);
+		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease:
+	{
+		const int32 Value = HandleContinuationCancelSourceReleaseImport(
+			Call.Int64Args[0]);
+		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationBindCancel:
+	{
+		const int32 Value = HandleContinuationBindCancelImport(
+			Call.Int64Args[0],
+			Call.Int64Args[1]);
+		return Finish(Value, true);
 	}
 	case EAvidScriptHostBindingId::EventSubscribe:
 	{

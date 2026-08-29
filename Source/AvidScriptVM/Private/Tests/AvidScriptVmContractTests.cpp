@@ -511,6 +511,18 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& LoadObject =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationLoadObject);
+	const FAvidScriptVmStaticHostImport& CreateSource =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationCancelSourceCreate);
+	const FAvidScriptVmStaticHostImport& CancelSource =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationCancelSourceCancel);
+	const FAvidScriptVmStaticHostImport& ReleaseSource =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationCancelSourceRelease);
+	const FAvidScriptVmStaticHostImport& BindSource =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationBindCancel);
 	TestEqual(
 		TEXT("Continuation delay uses the frozen env import name"),
 		FString(UTF8_TO_TCHAR(Delay.ImportName)),
@@ -543,14 +555,38 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 		TEXT("Continuation object load consumes two i32 values and returns i64"),
 		FString(UTF8_TO_TCHAR(LoadObject.Signature)),
 		FString(TEXT("(ii)I")));
+	TestEqual(
+		TEXT("Cancellation source creation returns an opaque i64 token"),
+		FString(UTF8_TO_TCHAR(CreateSource.Signature)),
+		FString(TEXT("()I")));
+	TestEqual(
+		TEXT("Cancellation source cancel consumes i64 and returns i32"),
+		FString(UTF8_TO_TCHAR(CancelSource.Signature)),
+		FString(TEXT("(I)i")));
+	TestEqual(
+		TEXT("Cancellation source release consumes i64 and returns i32"),
+		FString(UTF8_TO_TCHAR(ReleaseSource.Signature)),
+		FString(TEXT("(I)i")));
+	TestEqual(
+		TEXT("Cancellation bind consumes source and continuation i64 tokens"),
+		FString(UTF8_TO_TCHAR(BindSource.Signature)),
+		FString(TEXT("(II)i")));
 	TestTrue(
 		TEXT("All continuation imports are available through env"),
 		Delay.bSupportsEnvCompatibility
 			&& Cancel.bSupportsEnvCompatibility
 			&& LoadObject.bSupportsEnvCompatibility
+			&& CreateSource.bSupportsEnvCompatibility
+			&& CancelSource.bSupportsEnvCompatibility
+			&& ReleaseSource.bSupportsEnvCompatibility
+			&& BindSource.bSupportsEnvCompatibility
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_delay"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel"))
-			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_load_object")));
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_load_object"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_create"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_cancel"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_release"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_bind_cancel")));
 	return true;
 }
 

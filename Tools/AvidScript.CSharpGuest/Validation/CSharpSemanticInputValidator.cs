@@ -531,6 +531,10 @@ internal static class CSharpSemanticInputValidator
                 IEnumerable<SemanticOperation> operations = segment.Statements
                     .Select(statement => statement.Operation)
                     .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>());
+                if (segment.AwaitSite?.CancellationToken is { } cancellationToken)
+                {
+                    operations = operations.Append(cancellationToken);
+                }
                 if (operations.SelectMany(EnumerateOperations).Any(operation =>
                     operation.SymbolId is { } symbolId
                     && (localDeclarationSegments.TryGetValue(symbolId, out int declarationSegment)
@@ -560,6 +564,23 @@ internal static class CSharpSemanticInputValidator
             || awaitSite.Arguments.Any(argument => argument is null
                 || !ValidateOperation(argument)
                 || !AllOperationsSupported(argument))
+            || awaitSite.CancellationToken is { } cancellationToken
+                && (!ValidateOperation(cancellationToken)
+                    || !AllOperationsSupported(cancellationToken)
+                    || cancellationToken.TypeId
+                        != "type:global::AvidScript.AvidCancellationToken"
+                    || !CSharpLatentStoragePlanner.TryBuildSingleValue(
+                        document,
+                        cancellationToken,
+                        "type:int64",
+                        out _)
+                    || callables.Count(callable =>
+                        callable.Import is { Module: "env", Name: "continuation_bind_cancel" }
+                        && callable.ReturnTypeId == "type:int32"
+                        && callable.Parameters.Count == 2
+                        && callable.Parameters.All(parameter =>
+                            parameter.TypeId == "type:int64"
+                            && parameter.RefKind == "none")) != 1)
             || !IsValidSpan(awaitSite.Span, sourceLength))
         {
             return false;

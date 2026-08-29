@@ -440,6 +440,12 @@ public static class CSharpGuestLowerer
 				.SelectMany(method => method.Segments)
 				.Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
 		}
+		if (import.Module == "env" && import.Name == "continuation_bind_cancel")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.CancellationToken is not null);
+		}
 		string producerIdentity = $"binding_latent|{import.Module}|{import.Name}";
 		return document.AsyncMethods
 			.SelectMany(method => method.Segments)
@@ -471,7 +477,19 @@ public static class CSharpGuestLowerer
             && callable.ReturnTypeId == "type:global::AvidScript.AvidDelayAwaitable"
             && callable.MethodSymbolId.Contains("Async(", StringComparison.Ordinal)
             && HasMatchingGeneratedLatentProducer(document, callable);
-        return builtInContinuationFacade || builtInObjectFacade || generatedLatentFacade;
+        bool cancellationMarker = callable.MethodSymbolId.Contains(
+                ".WithCancellation(",
+                StringComparison.Ordinal)
+            && callable.Parameters.Count == 1
+            && callable.Parameters[0].TypeId
+                == "type:global::AvidScript.AvidCancellationToken"
+            && callable.ContainingTypeId is
+                "type:global::AvidScript.AvidDelayAwaitable" or
+                "type:global::AvidScript.AvidObjectAwaitable";
+        return builtInContinuationFacade
+            || builtInObjectFacade
+            || generatedLatentFacade
+            || cancellationMarker;
     }
 
     private static bool HasMatchingGeneratedLatentProducer(

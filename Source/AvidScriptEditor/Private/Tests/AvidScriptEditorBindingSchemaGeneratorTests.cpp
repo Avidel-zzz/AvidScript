@@ -21,7 +21,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Default reflection schema generates"), FAvidScriptEditorBindingSchemaGenerator::GenerateDefault(FirstJson, FirstResult));
 	TestTrue(TEXT("Generation result succeeds"), FirstResult.bSucceeded);
 	TestEqual(TEXT("Default schema contains ten reflected bindings"), FirstResult.BindingCount, 10);
-	TestEqual(TEXT("Default schema contains eight host intrinsics"), FirstResult.IntrinsicCount, 8);
+	TestEqual(TEXT("Default schema contains twelve host intrinsics"), FirstResult.IntrinsicCount, 12);
 
 	FString SecondJson;
 	FAvidScriptBindingSchemaGenerateResult SecondResult;
@@ -39,7 +39,7 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Schema version is one"), Root->GetIntegerField(TEXT("schema_version")), 1);
 	TestEqual(TEXT("Schema source is UE reflection"), Root->GetStringField(TEXT("source")), FString(TEXT("ue_reflection")));
 	const TArray<TSharedPtr<FJsonValue>>& Intrinsics = Root->GetArrayField(TEXT("intrinsics"));
-	TestEqual(TEXT("Schema serializes eight intrinsic objects"), Intrinsics.Num(), 8);
+	TestEqual(TEXT("Schema serializes twelve intrinsic objects"), Intrinsics.Num(), 12);
 	const auto CountIntrinsic = [&Intrinsics](
 		const FString& Module,
 		const FString& Name,
@@ -99,6 +99,22 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 		CountIntrinsic(TEXT("env"), TEXT("continuation_load_object"), TEXT("(ii)I")),
 		1);
 	TestEqual(
+		TEXT("Schema contains cancellation source creation intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_cancel_source_create"), TEXT("()I")),
+		1);
+	TestEqual(
+		TEXT("Schema contains cancellation source cancel intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_cancel_source_cancel"), TEXT("(I)i")),
+		1);
+	TestEqual(
+		TEXT("Schema contains cancellation source release intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_cancel_source_release"), TEXT("(I)i")),
+		1);
+	TestEqual(
+		TEXT("Schema contains cancellation binding intrinsic"),
+		CountIntrinsic(TEXT("env"), TEXT("continuation_bind_cancel"), TEXT("(II)i")),
+		1);
+	TestEqual(
 		TEXT("Schema retains legacy Timer cancel intrinsic"),
 		CountIntrinsic(TEXT("env"), TEXT("timer_cancel"), TEXT("(i)i")),
 		1);
@@ -116,9 +132,9 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 		CountText(TEXT("\"avid_owner_get_handle\"")),
 		1);
 	TestEqual(
-		TEXT("Schema text contains one packed owner ABI signature"),
+		TEXT("Schema text contains packed owner and cancellation source i64 signatures"),
 		CountText(TEXT("\"()I\"")),
-		1);
+		2);
 	TestTrue(TEXT("Schema includes actor location import"), FirstJson.Contains(TEXT("actor_get_location")));
 	TestTrue(TEXT("Schema includes actor root component import"), FirstJson.Contains(TEXT("actor_get_root_component")));
 	TestTrue(TEXT("Schema includes SceneComponent world location import"), FirstJson.Contains(TEXT("scene_component_get_world_location")));
@@ -130,6 +146,10 @@ bool FAvidScriptEditorBindingSchemaDefaultReflectionSmokeTest::RunTest(const FSt
 	TestTrue(TEXT("Schema includes continuation delay intrinsic"), FirstJson.Contains(TEXT("continuation_delay")) && FirstJson.Contains(TEXT("(fi)I")));
 	TestTrue(TEXT("Schema includes continuation cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel")) && FirstJson.Contains(TEXT("(I)i")));
 	TestTrue(TEXT("Schema includes async object-load intrinsic"), FirstJson.Contains(TEXT("continuation_load_object")) && FirstJson.Contains(TEXT("(ii)I")));
+	TestTrue(TEXT("Schema includes cancellation source creation intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_create")));
+	TestTrue(TEXT("Schema includes cancellation source cancel intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_cancel")));
+	TestTrue(TEXT("Schema includes cancellation source release intrinsic"), FirstJson.Contains(TEXT("continuation_cancel_source_release")));
+	TestTrue(TEXT("Schema includes cancellation binding intrinsic"), FirstJson.Contains(TEXT("continuation_bind_cancel")) && FirstJson.Contains(TEXT("(II)i")));
 	TestTrue(TEXT("Schema includes set-once Timer intrinsic"), FirstJson.Contains(TEXT("timer_set_once")) && FirstJson.Contains(TEXT("(fi)i")));
 	TestTrue(TEXT("Schema includes Timer cancel intrinsic"), FirstJson.Contains(TEXT("timer_cancel")) && FirstJson.Contains(TEXT("(i)i")));
 

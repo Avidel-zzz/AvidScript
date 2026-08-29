@@ -183,7 +183,8 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Generated facade declares continuation completion status"),
 		FirstSource.Contains(TEXT("public enum AvidContinuationStatus"))
 		&& FirstSource.Contains(TEXT("Completed = 1"))
-		&& FirstSource.Contains(TEXT("Failed = 2")));
+		&& FirstSource.Contains(TEXT("Failed = 2"))
+		&& FirstSource.Contains(TEXT("Cancelled = 3")));
 	TestTrue(TEXT("Generated facade declares the generic loaded-object handle"),
 		FirstSource.Contains(TEXT("public readonly struct AvidLoadedObject"))
 		&& FirstSource.Contains(TEXT("internal AvidLoadedObject(int slot, int generation)"))
@@ -194,11 +195,13 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 		FirstSource.Contains(TEXT("using System.Runtime.CompilerServices;")));
 	TestTrue(TEXT("Generated facade declares the non-generic delay await pattern"),
 		FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaitable"))
+		&& FirstSource.Contains(TEXT("public AvidDelayAwaitable WithCancellation(AvidCancellationToken token) => default;"))
 		&& FirstSource.Contains(TEXT("public AvidDelayAwaiter GetAwaiter() => default;"))
 		&& FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaiter : INotifyCompletion"))
 		&& FirstSource.Contains(TEXT("public void GetResult()")));
 	TestTrue(TEXT("Generated facade declares the non-generic object await pattern"),
 		FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaitable"))
+		&& FirstSource.Contains(TEXT("public AvidObjectAwaitable WithCancellation(AvidCancellationToken token) => default;"))
 		&& FirstSource.Contains(TEXT("public AvidObjectAwaiter GetAwaiter() => default;"))
 		&& FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaiter : INotifyCompletion"))
 		&& FirstSource.Contains(TEXT("public AvidLoadedObject GetResult() => default;")));
@@ -209,6 +212,16 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Continuation token storage remains private"), FirstSource.Contains(TEXT("private readonly long Token;")));
 	TestTrue(TEXT("Continuation validity rejects only the zero token"), FirstSource.Contains(TEXT("public bool IsValid => Token != 0;")));
 	TestTrue(TEXT("Continuation cancellation uses the continuation service"), FirstSource.Contains(TEXT("public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;")));
+	TestTrue(TEXT("Generated facade declares an opaque cancellation token"),
+		FirstSource.Contains(TEXT("public readonly struct AvidCancellationToken"))
+		&& FirstSource.Contains(TEXT("internal readonly long Value;"))
+		&& FirstSource.Contains(TEXT("public bool IsValid => Value != 0;")));
+	TestTrue(TEXT("Generated facade declares a cancellation source"),
+		FirstSource.Contains(TEXT("public readonly struct AvidCancellationSource"))
+		&& FirstSource.Contains(TEXT("public readonly AvidCancellationToken Token;"))
+		&& FirstSource.Contains(TEXT("public static AvidCancellationSource Create()"))
+		&& FirstSource.Contains(TEXT("public bool Cancel()"))
+		&& FirstSource.Contains(TEXT("public bool Release()")));
 	TestTrue(TEXT("Generated facade exposes delayed continuations"), FirstSource.Contains(TEXT("public static AvidContinuation Delay(float delaySeconds, int callbackId)")));
 	TestTrue(TEXT("Generated facade exposes stubbed async delays"),
 		FirstSource.Contains(TEXT("public static AvidDelayAwaitable DelayAsync(float delaySeconds)\n        => default;")));
@@ -229,6 +242,17 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 	TestTrue(TEXT("Async object-load import returns a long token"), FirstSource.Contains(TEXT("internal static extern long ContinuationLoadObject(string assetPath, int callbackId);")));
 	TestTrue(TEXT("Generated facade imports continuation cancellation"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel\"")));
 	TestTrue(TEXT("Continuation cancellation import consumes a long token"), FirstSource.Contains(TEXT("internal static extern int ContinuationCancel(long continuationToken);")));
+	TestTrue(TEXT("Generated facade imports cancellation source creation"),
+		FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel_source_create\""))
+		&& FirstSource.Contains(TEXT("internal static extern long ContinuationCancelSourceCreate();")));
+	TestTrue(TEXT("Generated facade imports cancellation source control"),
+		FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel_source_cancel\""))
+		&& FirstSource.Contains(TEXT("internal static extern int ContinuationCancelSourceCancel(long sourceToken);"))
+		&& FirstSource.Contains(TEXT("EntryPoint = \"continuation_cancel_source_release\""))
+		&& FirstSource.Contains(TEXT("internal static extern int ContinuationCancelSourceRelease(long sourceToken);")));
+	TestTrue(TEXT("Generated facade imports cancellation binding"),
+		FirstSource.Contains(TEXT("EntryPoint = \"continuation_bind_cancel\""))
+		&& FirstSource.Contains(TEXT("internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);")));
 	TestTrue(TEXT("Generated facade declares AvidStateMode"), FirstSource.Contains(TEXT("public enum AvidStateMode")));
 	TestTrue(TEXT("Generated facade declares compatible state mode"), FirstSource.Contains(TEXT("Compatible = 0")));
 	TestTrue(TEXT("Generated facade declares explicit state mode"), FirstSource.Contains(TEXT("Explicit = 1")));

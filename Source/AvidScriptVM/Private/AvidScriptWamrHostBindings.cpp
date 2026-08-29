@@ -668,6 +668,73 @@ int64_t ContinuationLoadObject(wasm_exec_env_t ExecEnv, int32_t ObjectPathId, in
 		: 0;
 }
 
+int64_t ContinuationCancelSourceCreate(wasm_exec_env_t ExecEnv)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationCancelSourceCreate;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationCancelSourceCreate),
+		Call,
+		Result)
+		? Result.ReturnValueI64
+		: 0;
+}
+
+int32_t ContinuationCancelSourceCancel(
+	wasm_exec_env_t ExecEnv,
+	int64_t SourceToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationCancelSourceCancel;
+	Call.Int64Args[0] = SourceToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationCancelSourceCancel),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ContinuationCancelSourceRelease(
+	wasm_exec_env_t ExecEnv,
+	int64_t SourceToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationCancelSourceRelease;
+	Call.Int64Args[0] = SourceToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationCancelSourceRelease),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
+int32_t ContinuationBindCancel(
+	wasm_exec_env_t ExecEnv,
+	int64_t SourceToken,
+	int64_t ContinuationToken)
+{
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationBindCancel;
+	Call.Int64Args[0] = SourceToken;
+	Call.Int64Args[1] = ContinuationToken;
+	FAvidScriptHostCallResult Result;
+	return Dispatch(
+		ExecEnv,
+		StaticImportName(EAvidScriptHostBindingId::ContinuationBindCancel),
+		Call,
+		Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 int64_t EventSubscribe(
 	wasm_exec_env_t ExecEnv,
 	int32_t Slot,
@@ -729,6 +796,10 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationDelay: return reinterpret_cast<void*>(ContinuationDelay);
 	case EAvidScriptHostBindingId::ContinuationCancel: return reinterpret_cast<void*>(ContinuationCancel);
 	case EAvidScriptHostBindingId::ContinuationLoadObject: return reinterpret_cast<void*>(ContinuationLoadObject);
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCreate: return reinterpret_cast<void*>(ContinuationCancelSourceCreate);
+	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel: return reinterpret_cast<void*>(ContinuationCancelSourceCancel);
+	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease: return reinterpret_cast<void*>(ContinuationCancelSourceRelease);
+	case EAvidScriptHostBindingId::ContinuationBindCancel: return reinterpret_cast<void*>(ContinuationBindCancel);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);

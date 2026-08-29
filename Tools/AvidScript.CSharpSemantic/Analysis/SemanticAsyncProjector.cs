@@ -22,6 +22,12 @@ internal static class SemanticAsyncProjector
         "global::AvidScript.AvidAssets";
     private const string LoadedObjectTypeName =
         "global::AvidScript.AvidLoadedObject";
+    private const string CancellationTokenTypeName =
+        "global::AvidScript.AvidCancellationToken";
+    private const string DelayAwaitableTypeName =
+        "global::AvidScript.AvidDelayAwaitable";
+    private const string ObjectAwaitableTypeName =
+        "global::AvidScript.AvidObjectAwaitable";
     private const string LatentAttributeName =
         "global::AvidScript.AvidLatentAttribute";
     private const string BindingLatentProducerPrefix = "binding_latent|";
@@ -362,13 +368,25 @@ internal static class SemanticAsyncProjector
     {
         projected = null;
         if (semanticModel.GetOperation(awaitExpression) is not IAwaitOperation awaitOperation
-            || awaitOperation.Operation is not IInvocationOperation invocation)
+            || awaitOperation.Operation is not IInvocationOperation candidateInvocation)
         {
             diagnostics.Add(Error(
                 "ASCS5403",
                 "Controlled await requires a direct built-in or generated latent producer invocation.",
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
             return false;
+        }
+
+        IInvocationOperation invocation = candidateInvocation;
+        IOperation? cancellationTokenOperation = null;
+        if (TryUnwrapCancellationMarker(
+                context,
+                candidateInvocation,
+                out IInvocationOperation? wrappedProducer,
+                out IOperation? tokenOperation))
+        {
+            invocation = wrappedProducer!;
+            cancellationTokenOperation = tokenOperation;
         }
 
         string? producerKind = GetProducerKind(context, invocation.TargetMethod);
@@ -435,6 +453,7 @@ internal static class SemanticAsyncProjector
         }
 
         List<SemanticOperation> projectedArguments = new(arguments.Length);
+        SemanticOperation? projectedCancellationToken = null;
         int diagnosticsBeforeProjection = diagnostics.Count;
         foreach (IArgumentOperation argument in arguments)
         {
@@ -444,8 +463,18 @@ internal static class SemanticAsyncProjector
                 typeRegistry,
                 diagnostics));
         }
+        if (cancellationTokenOperation is not null)
+        {
+            projectedCancellationToken = SemanticOperationProjector.ProjectAsyncStatementOperation(
+                cancellationTokenOperation,
+                context.PrimaryUnit,
+                typeRegistry,
+                diagnostics);
+        }
         if (diagnostics.Count != diagnosticsBeforeProjection
-            || projectedArguments.Any(argument => !AllOperationsSupported(argument)))
+            || projectedArguments.Any(argument => !AllOperationsSupported(argument))
+            || projectedCancellationToken is not null
+                && !AllOperationsSupported(projectedCancellationToken))
         {
             return false;
         }
@@ -457,8 +486,58 @@ internal static class SemanticAsyncProjector
             projectedArguments,
             resultSymbolId,
             resultTypeId,
-            SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span));
+            SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span),
+            projectedCancellationToken);
         return true;
+    }
+
+    private static bool TryUnwrapCancellationMarker(
+        SemanticCompilationContext context,
+        IInvocationOperation marker,
+        out IInvocationOperation? producer,
+        out IOperation? cancellationToken)
+    {
+        producer = null;
+        cancellationToken = null;
+        IMethodSymbol method = marker.TargetMethod;
+        string owner = method.ContainingType.ToDisplayString(
+            SymbolDisplayFormat.FullyQualifiedFormat);
+        bool generatedReferenceMethod = method.DeclaringSyntaxReferences.Length == 1
+            && method.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree;
+        bool validContract = generatedReferenceMethod
+            && !method.IsStatic
+            && method.Name == "WithCancellation"
+            && method.Arity == 0
+            && !method.ContainingType.IsGenericType
+            && owner is DelayAwaitableTypeName or ObjectAwaitableTypeName
+            && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == owner
+            && method.Parameters.Length == 1
+            && method.Parameters[0].RefKind == RefKind.None
+            && method.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                == CancellationTokenTypeName
+            && marker.Arguments.Length == 1;
+        if (!validContract
+            || UnwrapTransparentOperation(marker.Instance) is not IInvocationOperation wrappedProducer)
+        {
+            return false;
+        }
+
+        producer = wrappedProducer;
+        cancellationToken = marker.Arguments[0].Value;
+        return true;
+    }
+
+    private static IOperation? UnwrapTransparentOperation(IOperation? operation)
+    {
+        while (operation is IConversionOperation { IsImplicit: true } conversion)
+        {
+            operation = conversion.Operand;
+        }
+        while (operation is IParenthesizedOperation parenthesized)
+        {
+            operation = parenthesized.Operand;
+        }
+        return operation;
     }
 
     private static string? GetProducerKind(
@@ -625,6 +704,10 @@ internal static class SemanticAsyncProjector
             IEnumerable<SemanticOperation> operations = segment.Statements
                 .Select(statement => statement.Operation)
                 .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>());
+            if (segment.AwaitSite?.CancellationToken is { } cancellationToken)
+            {
+                operations = operations.Append(cancellationToken);
+            }
             foreach (SemanticOperation operation in operations.SelectMany(EnumerateOperations))
             {
                 if (operation.SymbolId is not { } symbolId)

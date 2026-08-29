@@ -360,6 +360,12 @@ public:
 		int32 Utf8ValueReference,
 		int32 CallbackId);
 	int32 HandleContinuationCancelImport(int64 ContinuationToken);
+	int64 HandleContinuationCancelSourceCreateImport();
+	int32 HandleContinuationCancelSourceCancelImport(int64 SourceToken);
+	int32 HandleContinuationCancelSourceReleaseImport(int64 SourceToken);
+	int32 HandleContinuationBindCancelImport(
+		int64 SourceToken,
+		int64 ContinuationToken);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
