@@ -1233,6 +1233,7 @@ $BindingRuntimeIntegrationTestsSource = Read-RequiredFile 'Source/AvidScriptEdit
 $BidirectionalPropertiesSampleSource = Read-RequiredFile 'Samples/CSharp/BidirectionalProperties/BidirectionalProperties.cs'
 $LatentGameplaySampleSource = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplayScript.cs'
 $LatentGameplayProfile = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplay.csharp-profile.json'
+$LatentCancellationPayloadDesign = Read-RequiredFile 'Docs/Phase57/P57.12C6D_Cancellation_And_Payload_Design.md'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -3046,6 +3047,17 @@ foreach ($RequiredLatentStoragePlanContract in @(
     'CSharpLatentStorageCellKind.Address')) {
     if (-not $CSharpLatentStoragePlannerSource.Contains($RequiredLatentStoragePlanContract)) {
         Add-Violation "generated latent storage planner is missing $RequiredLatentStoragePlanContract"
+    }
+}
+foreach ($RequiredLatentCancellationPayloadContract in @(
+    'continuation_bind_cancel',
+    'Pending -> Ready -> Dispatching -> Terminal',
+    'IAvidScriptLatentCompletionProvider',
+    '"provider_id"',
+    'Session-owned result slot',
+    'P57-D06-ControlledLeadership')) {
+    if (-not $LatentCancellationPayloadDesign.Contains($RequiredLatentCancellationPayloadContract)) {
+        Add-Violation "latent cancellation/payload design is missing $RequiredLatentCancellationPayloadContract"
     }
 }
 if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes')) {

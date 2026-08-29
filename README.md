@@ -257,6 +257,10 @@ P57.12C6C 进一步支持 UObject capability、FVector/FRotator/FTransform 和�
 参数。共享 storage planner 根据 type graph 选择递归字段展开或 `in` address，validator 与 lowerer
 使用同一份计划；深度、cell 数与叶子类型均有上限，string/array 仍保持 fail closed。
 
+脚本显式取消与 completion payload 的架构合同已在 P57.12C6D 冻结，但尚未暴露为可用 API。当前
+`await FooAsync()` 仍只支持宿主生命周期取消与 completion-only 恢复；后续实现会使用独立 Session
+cancellation source 和显式 provider result slot，不会从 latent `ref/out` 或函数名称猜测结果。
+
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及多个顶层直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
 `FooAsync(...)`。普通 local 不能跨越下一 await；跨暂停状态需显式放入静态字段。旧 callback API、schema 10/11 Guest 与

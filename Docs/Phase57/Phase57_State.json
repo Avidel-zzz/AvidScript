@@ -178,6 +178,12 @@
       "status": "Completed",
       "evidence": "shared immutable latent storage plans now map one typed public aggregate argument to direct, recursive field, or in-address import cells with depth/cell bounds and exact source/storage identities; UObject capability, FVector and recursive struct-wire project through Reflection, Semantic validation, Guest IR and WASM without API-name branches or latent Runtime codecs; fixed .NET Semantic/C# Guest 175/175, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T06:25:32.0374363Z"
+    },
+    {
+      "id": "P57.12C6D",
+      "status": "Completed",
+      "evidence": "frozen Chinese design separates Session cancellation-source tokens from continuation tokens, specifies atomic continuation_bind_cancel races and lane/reload fencing, and requires explicit IAvidScriptLatentCompletionProvider publication into bounded Session result slots under schema v13; latent ref/out and API-name payload inference remain forbidden, no unavailable API is claimed, and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T06:32:33.3256183Z"
     }
   ],
   "debt": [
@@ -197,8 +203,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C6C review confirms validator and lowerer share one bounded immutable storage plan; object capability fields, expanded fixed structs and exact in-address struct-wire values compose with existing Runtime codecs without API-name branches, while variable ownership and completion payload surfaces remain fail closed.",
-    "completed_at_utc": "2026-08-29T06:25:32.0374363Z"
+    "evidence": "P57.12C6D review freezes separate cancellation-scope identity, atomic bind/cancel precedence, lane and reload fences, explicit provider-only payload publication, bounded Session result slots and bulk codec requirements; current generated API remains completion-only and does not overclaim unimplemented cancellation or payload behavior.",
+    "completed_at_utc": "2026-08-29T06:32:33.3256183Z"
   },
   "budgets": {
     "ubt": 2,
@@ -247,6 +253,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 26,
-  "updated_at_utc": "2026-08-29T06:25:32.0374363Z"
+  "revision": 27,
+  "updated_at_utc": "2026-08-29T06:32:33.3256183Z"
 }
