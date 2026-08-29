@@ -188,6 +188,15 @@ internal static class CSharpOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (CSharpOutcomeOperationLowerer.TryLowerProperty(
+                context,
+                operation,
+                blockOrdinal,
+                instructions,
+                out GuestRegister? outcomeProperty))
+        {
+            return outcomeProperty;
+        }
         if (!string.Equals(
                 operation.SymbolId,
                 CSharpGuestIds.ArrayLengthPropertyId,

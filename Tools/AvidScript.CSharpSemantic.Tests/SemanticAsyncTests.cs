@@ -170,10 +170,10 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 12
-            && document.SemanticVersion == "1.12"
+            && document.SchemaVersion == 13
+            && document.SemanticVersion == "1.13"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 12 / semantic 1.12");
+            "controlled async exports should publish schema 13 / semantic 1.13");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -451,6 +451,19 @@ internal static class SemanticAsyncTests
             public void UnsafeOnCompleted(Action continuation) { }
         }
 
+        public readonly struct AvidDelayAwaitable
+        {
+            public AvidDelayAwaiter GetAwaiter() => default;
+        }
+
+        public readonly struct AvidDelayAwaiter : ICriticalNotifyCompletion
+        {
+            public bool IsCompleted => false;
+            public void GetResult() { }
+            public void OnCompleted(Action continuation) { }
+            public void UnsafeOnCompleted(Action continuation) { }
+        }
+
         public readonly struct AvidObjectAwaitable
         {
             public AvidObjectAwaiter GetAwaiter() => default;
@@ -470,8 +483,8 @@ internal static class SemanticAsyncTests
         {
             public static AvidContinuation Delay(float delaySeconds, int callbackId) => default;
             public static AvidContinuation NextTick(int callbackId) => default;
-            public static AvidVoidAwaitable DelayAsync(float delaySeconds) => default;
-            public static AvidVoidAwaitable NextTickAsync() => default;
+            public static AvidDelayAwaitable DelayAsync(float delaySeconds) => default;
+            public static AvidDelayAwaitable NextTickAsync() => default;
         }
 
         public static class AvidAssets
@@ -483,23 +496,23 @@ internal static class SemanticAsyncTests
         public static class UKismetSystemLibrary
         {
             [AvidLatent("avidscript", "avid_ue_latent_test")]
-            public static AvidVoidAwaitable DelayAsync(float Duration) => default;
+            public static AvidDelayAwaitable DelayAsync(float Duration) => default;
 
             [AvidLatent("avidscript", "avid_ue_latent_bool_test")]
-            public static AvidVoidAwaitable WaitForFlagAsync(bool bExpected) => default;
+            public static AvidDelayAwaitable WaitForFlagAsync(bool bExpected) => default;
 
             [AvidLatent("avidscript", "avid_ue_latent_enum_test")]
-            public static AvidVoidAwaitable WaitForModeAsync(
+            public static AvidDelayAwaitable WaitForModeAsync(
                 EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;
 
             [AvidLatent("avidscript", "avid_ue_latent_object_test")]
-            public static AvidVoidAwaitable WaitForTargetAsync(UObject Target) => default;
+            public static AvidDelayAwaitable WaitForTargetAsync(UObject Target) => default;
 
             [AvidLatent("avidscript", "avid_ue_latent_vector_test")]
-            public static AvidVoidAwaitable WaitForLocationAsync(FVector Location) => default;
+            public static AvidDelayAwaitable WaitForLocationAsync(FVector Location) => default;
 
             [AvidLatent("avidscript", "avid_ue_latent_wire_test")]
-            public static AvidVoidAwaitable WaitForSettingsAsync(
+            public static AvidDelayAwaitable WaitForSettingsAsync(
                 FAvidScriptStructWireRootTestType Settings) => default;
         }
 

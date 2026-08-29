@@ -1,5 +1,7 @@
 #include "Continuation/AvidScriptSessionContinuations.h"
 
+#include "AvidScriptArrayValueHeap.h"
+#include "AvidScriptUtf8ValueHeap.h"
 #include "Continuation/AvidScriptAsyncObjectLoader.h"
 #include "Containers/StringConv.h"
 #include "Engine/LatentActionManager.h"
@@ -133,6 +135,25 @@ bool FAvidScriptContinuationHostEndpoint::BindCancellationSource(
 			ActivationSerial,
 			SourceToken,
 			ContinuationToken);
+}
+
+bool FAvidScriptContinuationHostEndpoint::ConsumeResult(
+	const int64 ContinuationToken,
+	const int32 Slot,
+	const int32 Generation,
+	const FString& ExpectedTypeId,
+	FAvidScriptBindingLatentCompletionPayload& OutPayload)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->ConsumeResult(
+			Lane,
+			ActivationSerial,
+			ContinuationToken,
+			Slot,
+			Generation,
+			ExpectedTypeId,
+			OutPayload);
 }
 
 bool FAvidScriptContinuationHostEndpoint::BeginLatent(
@@ -1190,13 +1211,15 @@ bool FAvidScriptSessionContinuations::AbortLatent(
 bool FAvidScriptSessionContinuations::ConsumeResult(
 	const EAvidScriptContinuationLane Lane,
 	const uint64 ActivationSerial,
+	const int64 ContinuationToken,
 	const int32 SlotNumber,
 	const int32 Generation,
 	const FString& ExpectedTypeId,
-	TArray<uint64>& OutAbiCells)
+	FAvidScriptBindingLatentCompletionPayload& OutPayload)
 {
-	OutAbiCells.Reset();
+	OutPayload = FAvidScriptBindingLatentCompletionPayload();
 	if (!IsInGameThread()
+		|| ContinuationToken == 0
 		|| SlotNumber <= 0
 		|| Generation <= 0
 		|| ExpectedTypeId.IsEmpty()
@@ -1214,31 +1237,37 @@ bool FAvidScriptSessionContinuations::ConsumeResult(
 		|| !Slot.Entry.IsSet()
 		|| Slot.Entry->Lane != Lane
 		|| Slot.Entry->ActivationSerial != ActivationSerial
-		|| Slot.Entry->TypeId != ExpectedTypeId)
+		|| Slot.Entry->ContinuationToken != ContinuationToken
+		|| Slot.Entry->Payload.TypeId != ExpectedTypeId)
 	{
 		return false;
 	}
 
-	const int64 ContinuationToken = Slot.Entry->ContinuationToken;
-	OutAbiCells = MoveTemp(Slot.Entry->AbiCells);
 	uint32 ContinuationSlotIndex = 0;
 	uint32 ContinuationGeneration = 0;
-	if (UnpackToken(
+	if (!UnpackToken(
 			ContinuationToken,
 			ContinuationSlotIndex,
 			ContinuationGeneration)
-		&& Slots.IsValidIndex(static_cast<int32>(ContinuationSlotIndex)))
+		|| !Slots.IsValidIndex(static_cast<int32>(ContinuationSlotIndex)))
 	{
-		FSlot& ContinuationSlot = Slots[ContinuationSlotIndex];
-		if (ContinuationSlot.Generation == ContinuationGeneration
-			&& ContinuationSlot.Entry.IsSet()
-			&& ContinuationSlot.Entry->ResultSlot == SlotNumber
-			&& ContinuationSlot.Entry->ResultGeneration == Generation)
-		{
-			ContinuationSlot.Entry->ResultSlot = 0;
-			ContinuationSlot.Entry->ResultGeneration = 0;
-		}
+		return false;
 	}
+	FSlot& ContinuationSlot = Slots[ContinuationSlotIndex];
+	if (ContinuationSlot.Generation != ContinuationGeneration
+		|| !ContinuationSlot.Entry.IsSet()
+		|| ContinuationSlot.Entry->Lane != Lane
+		|| ContinuationSlot.Entry->ActivationSerial != ActivationSerial
+		|| !ContinuationSlot.Entry->bDispatching
+		|| ContinuationSlot.Entry->ResultSlot != SlotNumber
+		|| ContinuationSlot.Entry->ResultGeneration != Generation)
+	{
+		return false;
+	}
+
+	OutPayload = MoveTemp(Slot.Entry->Payload);
+	ContinuationSlot.Entry->ResultSlot = 0;
+	ContinuationSlot.Entry->ResultGeneration = 0;
 	ReleaseResultSlot(SlotIndex);
 	return true;
 }
@@ -1380,9 +1409,47 @@ bool FAvidScriptSessionContinuations::AllocateResult(
 	OutSlot = 0;
 	OutGeneration = 0;
 	if (OccupiedResultSlotCount >= MaximumResultSlots
-		|| Entry.TypeId.IsEmpty()
-		|| Entry.AbiCells.IsEmpty()
-		|| Entry.AbiCells.Num() > MaximumResultPayloadCells)
+		|| Entry.Payload.TypeId.IsEmpty())
+	{
+		return false;
+	}
+
+	const FAvidScriptBindingLatentCompletionPayload& Payload = Entry.Payload;
+	bool bPayloadValid = false;
+	switch (Payload.Kind)
+	{
+	case EAvidScriptBindingLatentPayloadKind::AbiCells:
+		bPayloadValid = !Payload.AbiCells.IsEmpty()
+			&& Payload.AbiCells.Num() <= MaximumResultPayloadCells;
+		break;
+	case EAvidScriptBindingLatentPayloadKind::FixedWire:
+		bPayloadValid = !Payload.Bytes.IsEmpty()
+			&& Payload.Bytes.Num() <= MaximumFixedResultBytes;
+		break;
+	case EAvidScriptBindingLatentPayloadKind::Object:
+		bPayloadValid = Payload.ObjectValue.IsValid();
+		break;
+	case EAvidScriptBindingLatentPayloadKind::Utf8:
+		bPayloadValid = Payload.Bytes.Num()
+			<= static_cast<int32>(FAvidScriptUtf8ValueHeap::MaxValueBytes);
+		break;
+	case EAvidScriptBindingLatentPayloadKind::Array:
+	{
+		const int64 ExpectedBytes = static_cast<int64>(Payload.ElementCount)
+			* static_cast<int64>(Payload.ElementStride);
+		bPayloadValid = !Payload.ElementTypeId.IsEmpty()
+			&& Payload.ElementCount >= 0
+			&& Payload.ElementCount <= FAvidScriptArrayValueHeap::MaxElements
+			&& Payload.ElementStride > 0
+			&& Payload.ElementAlignment > 0
+			&& ExpectedBytes == Payload.Bytes.Num()
+			&& ExpectedBytes <= FAvidScriptArrayValueHeap::MaxValueBytes;
+		break;
+	}
+	default:
+		break;
+	}
+	if (!bPayloadValid)
 	{
 		return false;
 	}
@@ -1667,8 +1734,7 @@ void FAvidScriptSessionContinuations::QueueLatentCompletion(FEntry& Entry)
 		Result.Lane = Entry.Lane;
 		Result.ActivationSerial = Entry.ActivationSerial;
 		Result.ContinuationToken = Entry.Token;
-		Result.TypeId = MoveTemp(Payload.TypeId);
-		Result.AbiCells = MoveTemp(Payload.AbiCells);
+		Result.Payload = MoveTemp(Payload);
 		if (!bPayloadReady
 			|| !AllocateResult(
 				MoveTemp(Result),

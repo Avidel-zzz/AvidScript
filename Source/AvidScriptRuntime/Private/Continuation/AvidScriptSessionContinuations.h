@@ -41,6 +41,12 @@ public:
 	bool BindCancellationSource(
 		int64 SourceToken,
 		int64 ContinuationToken) override;
+	bool ConsumeResult(
+		int64 ContinuationToken,
+		int32 Slot,
+		int32 Generation,
+		const FString& ExpectedTypeId,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload) override;
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;
@@ -72,6 +78,7 @@ public:
 	static constexpr int32 MaximumCancellationBindings = 4096;
 	static constexpr int32 MaximumResultSlots = 1024;
 	static constexpr int32 MaximumResultPayloadCells = 64;
+	static constexpr int32 MaximumFixedResultBytes = 4096;
 
 	explicit FAvidScriptSessionContinuations(
 		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
@@ -169,10 +176,11 @@ public:
 	bool ConsumeResult(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
+		int64 ContinuationToken,
 		int32 Slot,
 		int32 Generation,
 		const FString& ExpectedTypeId,
-		TArray<uint64>& OutAbiCells);
+		FAvidScriptBindingLatentCompletionPayload& OutPayload);
 
 private:
 	friend class UAvidScriptLatentCallbackProxy;
@@ -238,8 +246,7 @@ private:
 		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
 		uint64 ActivationSerial = 0;
 		int64 ContinuationToken = 0;
-		FString TypeId;
-		TArray<uint64> AbiCells;
+		FAvidScriptBindingLatentCompletionPayload Payload;
 	};
 	struct FResultSlot
 	{

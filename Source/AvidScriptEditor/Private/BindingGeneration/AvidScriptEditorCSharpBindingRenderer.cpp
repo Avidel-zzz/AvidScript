@@ -509,11 +509,34 @@ bool RenderMethod(
 		&& Binding.GeneratedShape == TEXT("vector_value");
 	const bool bLatent =
 		Binding.DispatchMode == TEXT("latent_process_event");
-	if (bLatent && Binding.Completion.Mode == TEXT("provider"))
+	const bool bProviderLatent =
+		bLatent && Binding.Completion.Mode == TEXT("provider");
+	FString LatentPayloadCSharpType;
+	if (bProviderLatent)
 	{
-		OutErrorCategory = TEXT("latent_completion_payload_guest_unsupported");
-		OutErrorSource = Binding.CanonicalIdentity;
-		return false;
+		const FAvidScriptBindingTypeModel* PayloadType =
+			FindRenderedTypeById(TypesById, Binding.Completion.PayloadTypeId);
+		FAvidScriptBindingValueModel PayloadValue;
+		if (PayloadType != nullptr)
+		{
+			PayloadValue.CanonicalType = PayloadType->CanonicalType;
+			PayloadValue.TypeId = PayloadType->StableId;
+			PayloadValue.Kind = PayloadType->Kind;
+			PayloadValue.CppType = PayloadType->CppType;
+			PayloadValue.AbiTypes = PayloadType->AbiTypes;
+		}
+		if (PayloadType == nullptr
+			|| !ResolveCSharpType(
+				PayloadValue,
+				TypesByCanonical,
+				TypesById,
+				LatentPayloadCSharpType,
+				OutErrorSource))
+		{
+			OutErrorCategory = TEXT("latent_completion_payload_type_unsupported");
+			OutErrorSource = Binding.CanonicalIdentity;
+			return false;
+		}
 	}
 	if (bLatent
 		&& (!Binding.bStatic
@@ -694,13 +717,25 @@ bool RenderMethod(
 		NativeParameters.Add(TEXT("int callbackId"));
 		const FString MethodName =
 			FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding.ScriptName);
-		OutMethod.MethodLines.Append({
-			FString::Printf(
+		const FString LatentAttribute = bProviderLatent
+			? FString::Printf(
+				TEXT("    [AvidLatent(\"%s\", \"%s\", %d, \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name),
+				Binding.Ordinal,
+				*EscapeCSharpString(Binding.Completion.PayloadTypeId))
+			: FString::Printf(
 				TEXT("    [AvidLatent(\"%s\", \"%s\")]"),
 				*EscapeCSharpString(Binding.HostImport.Module),
-				*EscapeCSharpString(Binding.HostImport.Name)),
+				*EscapeCSharpString(Binding.HostImport.Name));
+		const FString AwaitableType = bProviderLatent
+			? TEXT("AvidOutcomeAwaitable<") + LatentPayloadCSharpType + TEXT(">")
+			: TEXT("AvidDelayAwaitable");
+		OutMethod.MethodLines.Append({
+			LatentAttribute,
 			FString::Printf(
-				TEXT("    public static AvidDelayAwaitable %s(%s) => default;"),
+				TEXT("    public static %s %s(%s) => default;"),
+				*AwaitableType,
 				*MethodName,
 				*FString::Join(PublicParameters, TEXT(", ")))
 		});
@@ -1494,8 +1529,18 @@ void AppendAsyncAwaitableReferenceSurface(TArray<FString>& Lines)
 		TEXT("        ImportName = importName;"),
 		TEXT("    }"),
 		TEXT(""),
+		TEXT("    public AvidLatentAttribute(string module, string importName, int bindingOrdinal, string payloadTypeId)"),
+		TEXT("    {"),
+		TEXT("        Module = module;"),
+		TEXT("        ImportName = importName;"),
+		TEXT("        BindingOrdinal = bindingOrdinal;"),
+		TEXT("        PayloadTypeId = payloadTypeId;"),
+		TEXT("    }"),
+		TEXT(""),
 		TEXT("    public string Module { get; }"),
 		TEXT("    public string ImportName { get; }"),
+		TEXT("    public int BindingOrdinal { get; } = -1;"),
+		TEXT("    public string PayloadTypeId { get; } = string.Empty;"),
 		TEXT("}"),
 		TEXT(""),
 		TEXT("public readonly struct AvidDelayAwaitable"),
@@ -1534,6 +1579,35 @@ void AppendAsyncAwaitableReferenceSurface(TArray<FString>& Lines)
 		TEXT("    }"),
 		TEXT(""),
 		TEXT("    public AvidLoadedObject GetResult() => default;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("[StructLayout(LayoutKind.Sequential)]"),
+		TEXT("public readonly struct AvidOutcome<T>"),
+		TEXT("{"),
+		TEXT("    private readonly AvidContinuationStatus StatusValue;"),
+		TEXT("    private readonly T ResultValue;"),
+		TEXT(""),
+		TEXT("    public AvidContinuationStatus Status => StatusValue;"),
+		TEXT("    public T Value => ResultValue;"),
+		TEXT("    public bool Succeeded => StatusValue == AvidContinuationStatus.Completed;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public readonly struct AvidOutcomeAwaitable<T>"),
+		TEXT("{"),
+		TEXT("    public AvidOutcomeAwaitable<T> WithCancellation(AvidCancellationToken token) => default;"),
+		TEXT(""),
+		TEXT("    public AvidOutcomeAwaiter<T> GetAwaiter() => default;"),
+		TEXT("}"),
+		TEXT(""),
+		TEXT("public readonly struct AvidOutcomeAwaiter<T> : INotifyCompletion"),
+		TEXT("{"),
+		TEXT("    public bool IsCompleted => false;"),
+		TEXT(""),
+		TEXT("    public void OnCompleted(Action continuation)"),
+		TEXT("    {"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public AvidOutcome<T> GetResult() => default;"),
 		TEXT("}"),
 		TEXT("")
 	});
@@ -2769,7 +2843,10 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitReferenceSource(
 		TEXT("    internal static extern int ContinuationCancelSourceRelease(long sourceToken);"),
 		TEXT(""),
 		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_bind_cancel\")]"),
-		TEXT("    internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);")
+		TEXT("    internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);"),
+		TEXT(""),
+		TEXT("    [DllImport(\"env\", EntryPoint = \"continuation_result_read\")]"),
+		TEXT("    internal static extern int ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount);")
 	});
 	if (SelfType != nullptr || bHasLifecycleBindings)
 	{

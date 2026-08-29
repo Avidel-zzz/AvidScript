@@ -333,8 +333,18 @@ public sealed class AvidLatentAttribute : Attribute
         ImportName = importName;
     }
 
+    public AvidLatentAttribute(string module, string importName, int bindingOrdinal, string payloadTypeId)
+    {
+        Module = module;
+        ImportName = importName;
+        BindingOrdinal = bindingOrdinal;
+        PayloadTypeId = payloadTypeId;
+    }
+
     public string Module { get; }
     public string ImportName { get; }
+    public int BindingOrdinal { get; } = -1;
+    public string PayloadTypeId { get; } = string.Empty;
 }
 
 public readonly struct AvidDelayAwaitable
@@ -375,6 +385,35 @@ public readonly struct AvidObjectAwaiter : INotifyCompletion
     public AvidLoadedObject GetResult() => default;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+public readonly struct AvidOutcome<T>
+{
+    private readonly AvidContinuationStatus StatusValue;
+    private readonly T ResultValue;
+
+    public AvidContinuationStatus Status => StatusValue;
+    public T Value => ResultValue;
+    public bool Succeeded => StatusValue == AvidContinuationStatus.Completed;
+}
+
+public readonly struct AvidOutcomeAwaitable<T>
+{
+    public AvidOutcomeAwaitable<T> WithCancellation(AvidCancellationToken token) => default;
+
+    public AvidOutcomeAwaiter<T> GetAwaiter() => default;
+}
+
+public readonly struct AvidOutcomeAwaiter<T> : INotifyCompletion
+{
+    public bool IsCompleted => false;
+
+    public void OnCompleted(Action continuation)
+    {
+    }
+
+    public AvidOutcome<T> GetResult() => default;
+}
+
 internal static class AvidScriptRuntimeNative
 {
     [DllImport("env", EntryPoint = "continuation_delay")]
@@ -397,6 +436,9 @@ internal static class AvidScriptRuntimeNative
 
     [DllImport("env", EntryPoint = "continuation_bind_cancel")]
     internal static extern int ContinuationBindCancel(long sourceToken, long continuationToken);
+
+    [DllImport("env", EntryPoint = "continuation_result_read")]
+    internal static extern int ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount);
 
     [DllImport("env", EntryPoint = "timer_set_once")]
     internal static extern int TimerSetOnce(float delaySeconds, int callbackId);

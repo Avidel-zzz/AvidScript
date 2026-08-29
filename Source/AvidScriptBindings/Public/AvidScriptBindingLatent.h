@@ -2,13 +2,31 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SharedPointer.h"
+#include "UObject/StrongObjectPtr.h"
 
 class UObject;
+
+enum class EAvidScriptBindingLatentPayloadKind : uint8
+{
+	AbiCells,
+	FixedWire,
+	Object,
+	Utf8,
+	Array
+};
 
 struct FAvidScriptBindingLatentCompletionPayload
 {
 	FString TypeId;
+	EAvidScriptBindingLatentPayloadKind Kind =
+		EAvidScriptBindingLatentPayloadKind::AbiCells;
 	TArray<uint64> AbiCells;
+	TArray<uint8> Bytes;
+	TStrongObjectPtr<UObject> ObjectValue;
+	FString ElementTypeId;
+	int32 ElementCount = 0;
+	int32 ElementStride = 0;
+	int32 ElementAlignment = 1;
 };
 
 class IAvidScriptLatentCompletionProvider

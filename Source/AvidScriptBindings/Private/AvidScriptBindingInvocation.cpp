@@ -2289,6 +2289,7 @@ struct FAvidScriptBindingPackage::FImpl
 	int32 DescriptorSchemaVersion = 0;
 	FAvidScriptVmBindingPackage VmPackage;
 	TArray<FAvidScriptRuntimeBindingInvocationPlan> Plans;
+	TArray<TOptional<FAvidScriptBindingTypeModel>> LatentResultTypes;
 	TArray<TUniquePtr<
 		UE::AvidScript::BindingPrivate::FPreparedDynamicInvocationCell>>
 		PreparedDynamicCells;
@@ -2511,6 +2512,27 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 	Package->Impl->DescriptorSchemaVersion = Model.SchemaVersion;
 	Package->Impl->VmPackage.PackageName = Model.PackageName;
 	Package->Impl->VmPackage.PackageHash = Model.PackageHash;
+	Package->Impl->LatentResultTypes.SetNum(Model.Bindings.Num());
+	for (const FAvidScriptBindingFunctionModel& Binding : Model.Bindings)
+	{
+		if (Binding.Completion.Mode != TEXT("provider"))
+		{
+			continue;
+		}
+		const FAvidScriptBindingTypeModel* const PayloadType =
+			DeclaredTypesById.FindRef(Binding.Completion.PayloadTypeId);
+		if (PayloadType == nullptr
+			|| !Package->Impl->LatentResultTypes.IsValidIndex(Binding.Ordinal))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_latent_completion_type_missing"),
+				Binding.CanonicalIdentity,
+				TEXT("The provider result type is not available at its frozen binding ordinal."));
+			return false;
+		}
+		Package->Impl->LatentResultTypes[Binding.Ordinal].Emplace(*PayloadType);
+	}
 	int32 ObjectTypeCount = 0;
 	for (const FAvidScriptBindingTypeModel& Type : Model.Types)
 	{
@@ -4595,6 +4617,20 @@ bool FAvidScriptBindingPackage::TryFindFunctionOrdinal(
 		OutOrdinal = static_cast<uint32>(Index);
 	}
 	return OutOrdinal != MAX_uint32;
+}
+
+bool FAvidScriptBindingPackage::TryGetLatentCompletionResultType(
+	const uint32 Ordinal,
+	const FAvidScriptBindingTypeModel*& OutType) const
+{
+	OutType = nullptr;
+	if (!Impl->LatentResultTypes.IsValidIndex(static_cast<int32>(Ordinal))
+		|| !Impl->LatentResultTypes[Ordinal].IsSet())
+	{
+		return false;
+	}
+	OutType = &Impl->LatentResultTypes[Ordinal].GetValue();
+	return true;
 }
 
 int32 FAvidScriptBindingPackage::GetRequiredScratchSize() const

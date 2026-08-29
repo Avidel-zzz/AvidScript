@@ -31,4 +31,7 @@ public sealed record SemanticAsyncAwaitSite(
     [property: JsonPropertyOrder(4)] string? ResultSymbolId,
     [property: JsonPropertyOrder(5)] string? ResultTypeId,
     [property: JsonPropertyOrder(6)] SemanticSpan Span,
-    [property: JsonPropertyOrder(7)] SemanticOperation? CancellationToken = null);
+    [property: JsonPropertyOrder(7)] SemanticOperation? CancellationToken = null,
+    [property: JsonPropertyOrder(8)] int BindingOrdinal = -1,
+    [property: JsonPropertyOrder(9)] string? PayloadDescriptorTypeId = null,
+    [property: JsonPropertyOrder(10)] string? PayloadValueTypeId = null);

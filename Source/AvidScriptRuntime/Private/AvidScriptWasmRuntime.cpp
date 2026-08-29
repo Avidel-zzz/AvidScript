@@ -1,9 +1,11 @@
 #include "AvidScriptWasmRuntime.h"
 #include "AvidScriptWasmRuntimePrivate.h"
 
+#include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptSceneComponentBinding.h"
 #include "AvidScriptValueCapability.h"
 #include "Containers/StringConv.h"
+#include "Continuation/AvidScriptContinuationResultCodec.h"
 #include "DataBridge/AvidScriptCommandBuffer.h"
 #include "Diagnostics/AvidScriptWasmDebugMap.h"
 #include "Misc/PackageName.h"
@@ -1856,6 +1858,25 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 	};
 	static_assert(sizeof(Completion.Token) == sizeof(uint32) * 2);
 	FMemory::Memcpy(&Args[1], &Completion.Token, sizeof(Completion.Token));
+	if (bContinuationDispatchActive)
+	{
+		SetFailure(
+			OutResult,
+			ModuleId,
+			ExportName,
+			TEXT("continuation_dispatch_reentrant"),
+			TEXT("A continuation callback cannot be nested inside another continuation callback."),
+			TEXT("queue nested work through a new continuation"));
+		return false;
+	}
+	FAvidScriptContinuationResultCodecTransaction ResultTransaction;
+	bContinuationDispatchActive = true;
+	bContinuationResultConsumed = false;
+	ActiveContinuationToken = Completion.Token;
+	ActiveContinuationStatus = Completion.Status;
+	ActiveContinuationResultSlot = Completion.ObjectSlot;
+	ActiveContinuationResultGeneration = Completion.ObjectGeneration;
+	ActiveContinuationResultTransaction = &ResultTransaction;
 	BeginTypedCallbackEpoch();
 	FAvidScriptVmError Error;
 	const bool bCalled = InvokeVmExport(
@@ -1866,6 +1887,21 @@ bool FAvidScriptWasmRuntimeInstance::DispatchContinuation(
 		Args,
 		Error);
 	EndTypedCallbackEpoch();
+	if (bCalled)
+	{
+		ResultTransaction.Commit();
+	}
+	else
+	{
+		ResultTransaction.Rollback(Utf8ValueHeap, ArrayValueHeap);
+	}
+	bContinuationDispatchActive = false;
+	bContinuationResultConsumed = false;
+	ActiveContinuationToken = 0;
+	ActiveContinuationStatus = EAvidScriptContinuationStatus::Failed;
+	ActiveContinuationResultSlot = 0;
+	ActiveContinuationResultGeneration = 0;
+	ActiveContinuationResultTransaction = nullptr;
 	if (!bCalled)
 	{
 		SetFailureFromVmError(
@@ -3769,6 +3805,102 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationBindCancelImport(
 	++HostImportCallCount;
 	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
 	return LastHostImportResult;
+}
+
+int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
+	const int32 BindingOrdinal,
+	const int32 ResultSlot,
+	const int32 ResultGeneration,
+	TArrayView<uint8> OutBytes)
+{
+	const double HostImportStartSeconds = FPlatformTime::Seconds();
+	LastHostImportInput = BindingOrdinal;
+	LastHostImportResult = 0;
+	++HostImportCallCount;
+	const auto Fail = [this, HostImportStartSeconds](const FString& Details)
+	{
+		SetPendingHostImportFailure(
+			TEXT("avidscript"),
+			TEXT("continuation_result_read"),
+			Details);
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 0;
+	};
+
+	const FAvidScriptBindingTypeModel* ResultType = nullptr;
+	if (!bContinuationDispatchActive
+		|| bContinuationResultConsumed
+		|| ActiveContinuationToken == 0
+		|| ActiveContinuationResultTransaction == nullptr
+		|| !BindingPackage.IsValid()
+		|| BindingOrdinal < 0
+		|| !BindingPackage->TryGetLatentCompletionResultType(
+			static_cast<uint32>(BindingOrdinal),
+			ResultType)
+		|| ResultType == nullptr
+		|| ResultType->Size <= 0
+		|| OutBytes.Num() != ResultType->Size)
+	{
+		return Fail(TEXT("continuation_result_dispatch_contract_mismatch"));
+	}
+
+	if (ActiveContinuationStatus == EAvidScriptContinuationStatus::Failed)
+	{
+		if (ResultSlot != 0
+			|| ResultGeneration != 0
+			|| ActiveContinuationResultSlot != 0
+			|| ActiveContinuationResultGeneration != 0)
+		{
+			return Fail(TEXT("continuation_result_failed_capability_invalid"));
+		}
+		FMemory::Memzero(OutBytes.GetData(), OutBytes.Num());
+		bContinuationResultConsumed = true;
+		LastHostImportResult = 1;
+		Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+		return 1;
+	}
+	if (ActiveContinuationStatus != EAvidScriptContinuationStatus::Completed
+		|| ResultSlot <= 0
+		|| ResultGeneration <= 0
+		|| ResultSlot != ActiveContinuationResultSlot
+		|| ResultGeneration != ActiveContinuationResultGeneration
+		|| HostContext.Continuations == nullptr)
+	{
+		return Fail(TEXT("continuation_result_capability_invalid"));
+	}
+
+	FAvidScriptBindingLatentCompletionPayload Payload;
+	if (!HostContext.Continuations->ConsumeResult(
+			ActiveContinuationToken,
+			ResultSlot,
+			ResultGeneration,
+			ResultType->StableId,
+			Payload))
+	{
+		return Fail(TEXT("continuation_result_capability_stale"));
+	}
+	bContinuationResultConsumed = true;
+	FString CodecError;
+	if (!FAvidScriptContinuationResultCodec::Encode(
+			Payload,
+			*ResultType,
+			*BindingPackage,
+			HostContext.ObjectRegistry,
+			HostContext.ObjectOwnership,
+			Utf8ValueHeap,
+			ArrayValueHeap,
+			OutBytes,
+			*ActiveContinuationResultTransaction,
+			CodecError))
+	{
+		return Fail(CodecError.IsEmpty()
+			? TEXT("continuation_result_codec_failed")
+			: CodecError);
+	}
+
+	LastHostImportResult = 1;
+	Metrics.HostImportCallMs = MeasureElapsedMs(HostImportStartSeconds);
+	return 1;
 }
 
 int64 FAvidScriptWasmRuntimeInstance::HandleEventSubscribeImport(
@@ -6175,6 +6307,15 @@ bool FAvidScriptWasmRuntimeInstance::DispatchHostCall(
 			Call.Int64Args[0],
 			Call.Int64Args[1]);
 		return Finish(Value, true);
+	}
+	case EAvidScriptHostBindingId::ContinuationResultRead:
+	{
+		const int32 Value = HandleContinuationResultReadImport(
+			Call.IntArgs[0],
+			Call.IntArgs[1],
+			Call.IntArgs[2],
+			Call.OutputBytes);
+		return Finish(Value, Value != 0);
 	}
 	case EAvidScriptHostBindingId::EventSubscribe:
 	{

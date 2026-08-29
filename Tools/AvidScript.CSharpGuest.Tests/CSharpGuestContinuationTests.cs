@@ -23,8 +23,91 @@ internal static class CSharpGuestContinuationTests
         GeneratedLatentAwaitLowersDynamicImport();
         GeneratedLatentEnumAwaitUsesUnderlyingStorage();
         GeneratedLatentAggregatesUseSharedStoragePlan();
+        GeneratedLatentResultLowersTypedOutcome();
         CancellationMarkerBindsScheduledContinuation();
-        return 10;
+        return 11;
+    }
+
+    private static void GeneratedLatentResultLowersTypedOutcome()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    AvidOutcome<int> outcome =
+                        await UKismetSystemLibrary.WaitForScoreAsync(42);
+                    Consume(outcome.Succeeded, outcome.Value);
+                }
+
+                private static void Consume(bool succeeded, int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentResultGuest.cs");
+        SemanticAsyncAwaitSite awaitSite = document.AsyncMethods.Single()
+            .Segments.Single(segment => segment.AwaitSite is not null)
+            .AwaitSite!;
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestImport latentImport = module.Imports.Single(import =>
+            import.Module == "avidscript" && import.Name == "avid_ue_latent_score_test");
+        GuestImport resultReadImport = module.Imports.Single(import =>
+            import.Module == "env" && import.Name == "continuation_result_read");
+        GuestFunction resume = module.Functions.Single(function =>
+            function.Id == $"function:synthetic:async_resume:{awaitSite.CallbackId}");
+        GuestFunction router = module.Functions.Single(function =>
+            function.Id == "function:synthetic:continuation_v2");
+        GuestInstruction resultRead = resume.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(instruction => instruction.Op == "call"
+                && instruction.TargetId == resultReadImport.Id);
+        GuestInstruction routeCall = router.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(instruction => instruction.Op == "call"
+                && instruction.TargetId == resume.Id);
+        GuestType outcomeType = module.Types.Single(type => type.Id == awaitSite.ResultTypeId);
+
+        Assert(result.Succeeded
+            && awaitSite.PayloadKind == SemanticContinuationCallback.ResultSlotPayloadKind
+            && awaitSite.BindingOrdinal == 7
+            && awaitSite.PayloadDescriptorTypeId == new string('1', 64)
+            && awaitSite.PayloadValueTypeId == "type:int32"
+            && awaitSite.ResultSymbolId is not null
+            && outcomeType.Kind == "struct"
+            && outcomeType.Fields.Count == 2,
+            "generated latent results should freeze the descriptor ordinal and closed AvidOutcome payload type");
+        Assert(latentImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int32", "type:int32",
+            })
+            && latentImport.ReturnTypeId == "type:int64"
+            && resultReadImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int32", "type:int32", "type:int32", "type:address", "type:int32",
+            })
+            && resultReadImport.ReturnTypeId == "type:int32"
+            && resume.Parameters.Count == 3
+            && resultRead.OperandIds.Count == 5
+            && routeCall.OperandIds.Count == 3,
+            "provider-result resume should bulk-read one typed payload through the shared v2 callback route");
+        Assert(resume.Blocks.SelectMany(block => block.Instructions)
+                .Count(instruction => instruction.Op == "call"
+                    && instruction.TargetId == resultReadImport.Id) == 1
+            && resume.Blocks.SelectMany(block => block.Instructions)
+                .Count(instruction => instruction.Op == "field_load") >= 2
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "typed outcome consumption should validate and compile to WASM without a per-API result import");
     }
 
     private static void CancellationMarkerBindsScheduledContinuation()
@@ -354,8 +437,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 12
-            && document.SemanticVersion == "1.12"
+            && document.SchemaVersion == 13
+            && document.SemanticVersion == "1.13"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -715,6 +798,11 @@ internal static class CSharpGuestContinuationTests
         public sealed class AvidLatentAttribute : Attribute
         {
             public AvidLatentAttribute(string module, string importName) { }
+            public AvidLatentAttribute(
+                string module,
+                string importName,
+                int bindingOrdinal,
+                string payloadTypeId) { }
         }
 
         [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
@@ -755,6 +843,28 @@ internal static class CSharpGuestContinuationTests
             public bool IsCompleted => false;
             public void OnCompleted(Action continuation) { }
             public AvidLoadedObject GetResult() => default;
+        }
+
+        public readonly struct AvidOutcome<T>
+        {
+            public AvidContinuationStatus Status => default;
+            public T Value => default;
+            public bool Succeeded => false;
+        }
+
+        public readonly struct AvidOutcomeAwaitable<T>
+        {
+            private readonly int Marker;
+            public AvidOutcomeAwaitable<T> WithCancellation(AvidCancellationToken token) => default;
+            public AvidOutcomeAwaiter<T> GetAwaiter() => default;
+        }
+
+        public readonly struct AvidOutcomeAwaiter<T> : INotifyCompletion
+        {
+            private readonly int Marker;
+            public bool IsCompleted => false;
+            public void OnCompleted(Action continuation) { }
+            public AvidOutcome<T> GetResult() => default;
         }
 
         public static class AvidContinuations
@@ -839,6 +949,13 @@ internal static class CSharpGuestContinuationTests
             [AvidLatent("avidscript", "avid_ue_latent_wire_test")]
             public static AvidDelayAwaitable WaitForSettingsAsync(
                 FAvidScriptStructWireRootTestType Settings) => default;
+
+            [AvidLatent(
+                "avidscript",
+                "avid_ue_latent_score_test",
+                7,
+                "1111111111111111111111111111111111111111111111111111111111111111")]
+            public static AvidOutcomeAwaitable<int> WaitForScoreAsync(int Expected) => default;
         }
 
         public enum EAvidScriptCSharpEmitterTestMode : int
@@ -898,6 +1015,14 @@ internal static class CSharpGuestContinuationTests
                 long sourceToken,
                 long continuationToken);
 
+            [DllImport("env", EntryPoint = "continuation_result_read")]
+            internal static extern int ContinuationResultRead(
+                int bindingOrdinal,
+                int resultSlot,
+                int resultGeneration,
+                int destinationAddress,
+                int byteCount);
+
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
             internal static extern long InvokeLatent(float duration, int callbackId);
 
@@ -917,6 +1042,9 @@ internal static class CSharpGuestContinuationTests
             internal static extern long InvokeWireLatent(
                 in FAvidScriptStructWireRootTestType settings,
                 int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_score_test")]
+            internal static extern long InvokeScoreLatent(int expected, int callbackId);
         }
         """;
 

@@ -523,6 +523,9 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 	const FAvidScriptVmStaticHostImport& BindSource =
 		GetAvidScriptVmStaticHostImport(
 			EAvidScriptHostBindingId::ContinuationBindCancel);
+	const FAvidScriptVmStaticHostImport& ResultRead =
+		GetAvidScriptVmStaticHostImport(
+			EAvidScriptHostBindingId::ContinuationResultRead);
 	TestEqual(
 		TEXT("Continuation delay uses the frozen env import name"),
 		FString(UTF8_TO_TCHAR(Delay.ImportName)),
@@ -571,6 +574,10 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 		TEXT("Cancellation bind consumes source and continuation i64 tokens"),
 		FString(UTF8_TO_TCHAR(BindSource.Signature)),
 		FString(TEXT("(II)i")));
+	TestEqual(
+		TEXT("Continuation result read freezes ordinal, capability and one output range"),
+		FString(UTF8_TO_TCHAR(ResultRead.Signature)),
+		FString(TEXT("(iiiii)i")));
 	TestTrue(
 		TEXT("All continuation imports are available through env"),
 		Delay.bSupportsEnvCompatibility
@@ -580,13 +587,15 @@ bool FAvidScriptVmContinuationImportContractTest::RunTest(
 			&& CancelSource.bSupportsEnvCompatibility
 			&& ReleaseSource.bSupportsEnvCompatibility
 			&& BindSource.bSupportsEnvCompatibility
+			&& ResultRead.bSupportsEnvCompatibility
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_delay"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_load_object"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_create"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_cancel"))
 			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_cancel_source_release"))
-			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_bind_cancel")));
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_bind_cancel"))
+			&& IsAvidScriptVmStaticHostImport(TEXT("env"), TEXT("continuation_result_read")));
 	return true;
 }
 

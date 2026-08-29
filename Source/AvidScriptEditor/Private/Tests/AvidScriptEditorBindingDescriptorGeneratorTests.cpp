@@ -1139,21 +1139,47 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 			DescriptorJson,
 			RuntimePackage,
 			LoadResult));
+	if (RuntimePackage.IsValid() && Package.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingTypeModel* FrozenResultType = nullptr;
+		TestTrue(
+			TEXT("Runtime freezes the provider result type at the binding ordinal"),
+			RuntimePackage->TryGetLatentCompletionResultType(
+				static_cast<uint32>(Package.Bindings[0].Ordinal),
+				FrozenResultType));
+		TestTrue(
+			TEXT("Frozen provider result type is exact"),
+			FrozenResultType != nullptr
+				&& FrozenResultType->StableId == PayloadTypeId
+				&& FrozenResultType->CanonicalType == TEXT("scalar:i32"));
+	}
 
 	FString ReferenceSource;
 	FString ManifestJson;
 	FAvidScriptCSharpBindingEmitResult EmitResult;
-	TestFalse(
-		TEXT("C8 does not expose an unimplemented Guest payload facade"),
+	TestTrue(
+		TEXT("C9 exposes the provider result through the generated Guest facade"),
 		FAvidScriptEditorCSharpBindingEmitter::Emit(
 			DescriptorJson,
 			ReferenceSource,
 			ManifestJson,
 			EmitResult));
-	TestEqual(
-		TEXT("Guest payload boundary fails with a stable category"),
-		EmitResult.ErrorCategory,
-		FString(TEXT("latent_completion_payload_guest_unsupported")));
+	TestTrue(
+		TEXT("Provider facade returns a typed outcome awaitable"),
+		ReferenceSource.Contains(
+			TEXT("public static AvidOutcomeAwaitable<int> WaitForScoreAsync(int Score) => default;")));
+	TestTrue(
+		TEXT("Provider facade freezes ordinal and payload identity in compiler metadata"),
+		ReferenceSource.Contains(
+			TEXT("[AvidLatent(\"avidscript\", \"avid_ue_"))
+			&& ReferenceSource.Contains(
+				FString::Printf(TEXT(", 0, \"%s\")]"), *PayloadTypeId)));
+	TestTrue(
+		TEXT("Reference surface includes typed outcomes and one bulk result import"),
+		ReferenceSource.Contains(TEXT("public readonly struct AvidOutcome<T>"))
+			&& ReferenceSource.Contains(TEXT("EntryPoint = \"continuation_result_read\""))
+			&& ReferenceSource.Contains(
+				TEXT("ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount)")));
 
 	TestTrue(
 		TEXT("Provider unregisters cleanly"),
@@ -1733,11 +1759,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v13 above the current maximum identifies its header field"),
+		TEXT("Schema v14 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 13);
+			Root->SetNumberField(TEXT("schema_version"), 14);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),

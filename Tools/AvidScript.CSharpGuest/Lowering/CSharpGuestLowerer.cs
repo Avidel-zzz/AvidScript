@@ -251,6 +251,11 @@ public static class CSharpGuestLowerer
                 .OrderBy(parameter => parameter.Ordinal)
                 .Select(CSharpAbiTypeMapper.ParameterType)
                 .ToArray();
+            if (callable.Import is { Module: "env", Name: "continuation_result_read" }
+                && parameterTypeIds.Length == 5)
+            {
+                parameterTypeIds[3] = CSharpGuestIds.AddressTypeId;
+            }
             if (!callable.IsStatic)
             {
                 parameterTypeIds = new[] { callable.ContainingTypeId }
@@ -446,6 +451,13 @@ public static class CSharpGuestLowerer
 				.SelectMany(method => method.Segments)
 				.Any(segment => segment.AwaitSite?.CancellationToken is not null);
 		}
+		if (import.Module == "env" && import.Name == "continuation_result_read")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.PayloadKind
+					== SemanticContinuationCallback.ResultSlotPayloadKind);
+		}
 		string producerIdentity = $"binding_latent|{import.Module}|{import.Name}";
 		return document.AsyncMethods
 			.SelectMany(method => method.Segments)
@@ -474,7 +486,10 @@ public static class CSharpGuestLowerer
         bool generatedLatentFacade = callable.IsStatic
             && callable.Import is null
             && callable.Export is null
-            && callable.ReturnTypeId == "type:global::AvidScript.AvidDelayAwaitable"
+            && (callable.ReturnTypeId == "type:global::AvidScript.AvidDelayAwaitable"
+                || callable.ReturnTypeId.StartsWith(
+                    "type:global::AvidScript.AvidOutcomeAwaitable<",
+                    StringComparison.Ordinal))
             && callable.MethodSymbolId.Contains("Async(", StringComparison.Ordinal)
             && HasMatchingGeneratedLatentProducer(document, callable);
         bool cancellationMarker = callable.MethodSymbolId.Contains(
@@ -483,13 +498,21 @@ public static class CSharpGuestLowerer
             && callable.Parameters.Count == 1
             && callable.Parameters[0].TypeId
                 == "type:global::AvidScript.AvidCancellationToken"
-            && callable.ContainingTypeId is
-                "type:global::AvidScript.AvidDelayAwaitable" or
-                "type:global::AvidScript.AvidObjectAwaitable";
+            && (callable.ContainingTypeId is
+                    "type:global::AvidScript.AvidDelayAwaitable" or
+                    "type:global::AvidScript.AvidObjectAwaitable"
+                || callable.ContainingTypeId.StartsWith(
+                    "type:global::AvidScript.AvidOutcomeAwaitable<",
+                    StringComparison.Ordinal));
+        bool generatedOutcomeScaffold = callable.ContainingTypeId is
+            "type:global::AvidScript.AvidOutcome<T>" or
+            "type:global::AvidScript.AvidOutcomeAwaitable<T>" or
+            "type:global::AvidScript.AvidOutcomeAwaiter<T>";
         return builtInContinuationFacade
             || builtInObjectFacade
             || generatedLatentFacade
-            || cancellationMarker;
+            || cancellationMarker
+            || generatedOutcomeScaffold;
     }
 
     private static bool HasMatchingGeneratedLatentProducer(
@@ -501,7 +524,12 @@ public static class CSharpGuestLowerer
             .Where(segment => segment.AwaitSite is not null)
             .Select(segment => segment.AwaitSite!))
         {
+            bool providerFacade = facade.ReturnTypeId.StartsWith(
+                "type:global::AvidScript.AvidOutcomeAwaitable<",
+                StringComparison.Ordinal);
             if (!awaitSite.ProducerKind.StartsWith("binding_latent|", StringComparison.Ordinal)
+                || providerFacade != (awaitSite.PayloadKind
+                    == SemanticContinuationCallback.ResultSlotPayloadKind)
                 || !facade.Parameters.Select(parameter => parameter.TypeId)
                     .SequenceEqual(awaitSite.Arguments.Select(argument => argument.TypeId)))
             {

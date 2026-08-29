@@ -1196,39 +1196,59 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 			EAvidScriptContinuationStatus::Completed);
 		TestTrue(TEXT("Provider completion carries a result slot"), Completion.ObjectSlot > 0);
 		TestTrue(TEXT("Provider completion carries a result generation"), Completion.ObjectGeneration > 0);
-		TArray<uint64> Cells;
+		FAvidScriptBindingLatentCompletionPayload Payload;
+		TestFalse(
+			TEXT("A different continuation token cannot consume the result slot"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				ActiveHost.GetActivationSerial(),
+				Completion.Token ^ (static_cast<int64>(1) << 32),
+				Completion.ObjectSlot,
+				Completion.ObjectGeneration,
+				Provider->GetPayloadTypeId(),
+				Payload));
 		TestFalse(
 			TEXT("Wrong payload type cannot consume the slot"),
 			Owner->ConsumeResult(
 				EAvidScriptContinuationLane::Active,
 				ActiveHost.GetActivationSerial(),
+				Completion.Token,
 				Completion.ObjectSlot,
 				Completion.ObjectGeneration,
 				FString::ChrN(64, TEXT('2')),
-				Cells));
+				Payload));
 		TestTrue(
 			TEXT("Exact payload type consumes the slot once"),
 			Owner->ConsumeResult(
 				EAvidScriptContinuationLane::Active,
 				ActiveHost.GetActivationSerial(),
+				Completion.Token,
 				Completion.ObjectSlot,
 				Completion.ObjectGeneration,
 				Provider->GetPayloadTypeId(),
-				Cells));
-		TestEqual(TEXT("One payload cell is returned"), Cells.Num(), 1);
-		if (Cells.Num() == 1)
+				Payload));
+		TestEqual(
+			TEXT("Consumed payload retains the ABI-cell kind"),
+			Payload.Kind,
+			EAvidScriptBindingLatentPayloadKind::AbiCells);
+		TestEqual(TEXT("One payload cell is returned"), Payload.AbiCells.Num(), 1);
+		if (Payload.AbiCells.Num() == 1)
 		{
-			TestEqual(TEXT("Payload cell preserves i32 bits"), static_cast<int32>(Cells[0]), 42);
+			TestEqual(
+				TEXT("Payload cell preserves i32 bits"),
+				static_cast<int32>(Payload.AbiCells[0]),
+				42);
 		}
 		TestFalse(
 			TEXT("Consumed result capability is stale"),
 			Owner->ConsumeResult(
 				EAvidScriptContinuationLane::Active,
 				ActiveHost.GetActivationSerial(),
+				Completion.Token,
 				Completion.ObjectSlot,
 				Completion.ObjectGeneration,
 				Provider->GetPayloadTypeId(),
-				Cells));
+				Payload));
 		TestTrue(
 			TEXT("Consumed provider completion finalizes"),
 			Owner->FinalizeDispatched(Completion.Token, true));
@@ -1265,16 +1285,17 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 	TestEqual(TEXT("Promoted provider completion drains"), Completions.Num(), 1);
 	if (Completions.Num() == 1)
 	{
-		TArray<uint64> Cells;
+		FAvidScriptBindingLatentCompletionPayload Payload;
 		TestTrue(
 			TEXT("Promoted result consumes on the active lane"),
 			Owner->ConsumeResult(
 				EAvidScriptContinuationLane::Active,
 				PreparedHost.GetActivationSerial(),
+				Completions[0].Token,
 				Completions[0].ObjectSlot,
 				Completions[0].ObjectGeneration,
 				Provider->GetPayloadTypeId(),
-				Cells));
+				Payload));
 		TestTrue(
 			TEXT("Promoted provider completion finalizes"),
 			Owner->FinalizeDispatched(Completions[0].Token, true));

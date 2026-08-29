@@ -40,6 +40,12 @@ internal static class CSharpGuestIds
     public static string AsyncResumeParameter(int callbackId, string name) =>
         $"value:async_resume:{callbackId}:parameter:{name}";
 
+    public static string OutcomeStatusField(string outcomeTypeId) =>
+        $"field:synthetic:outcome:{outcomeTypeId}:status";
+
+    public static string OutcomeValueField(string outcomeTypeId) =>
+        $"field:synthetic:outcome:{outcomeTypeId}:value";
+
     public static string Temporary(string methodSymbolId, int blockOrdinal, int ordinal) =>
         $"value:temp:{methodSymbolId}:{blockOrdinal}:{ordinal}";
 

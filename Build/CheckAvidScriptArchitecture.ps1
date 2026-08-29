@@ -1580,6 +1580,8 @@ $SceneComponentBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Publ
 $WasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
 $ContinuationOwnerHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.h'
 $ContinuationOwnerSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptSessionContinuations.cpp'
+$ContinuationResultCodecHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptContinuationResultCodec.h'
+$ContinuationResultCodecSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptContinuationResultCodec.cpp'
 $AsyncObjectLoaderSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Continuation/AvidScriptAsyncObjectLoader.cpp'
 foreach ($RequiredLifecycleBenchmarkContract in @(
     'FAvidScriptObjectLifecycleBenchmarkResult',
@@ -1662,10 +1664,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..12) {
+foreach ($RequiredDescriptorSchemaVersion in 2..13) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v12 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v13 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1713,8 +1715,9 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 9') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 10') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 11') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 12')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v12 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 12') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 13')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v13 typed object packages'
 }
 foreach ($RequiredDelegateEventManifestContract in @(
     'delegate_event_count',
@@ -1994,6 +1997,7 @@ $CanonicalStaticImportNames = @(
     'continuation_delay',
     'continuation_cancel',
     'continuation_load_object',
+    'continuation_result_read',
     'continuation_cancel_source_create',
     'continuation_cancel_source_cancel',
     'continuation_cancel_source_release',
@@ -2298,6 +2302,7 @@ $AllowedFixedRendererImports = @(
     'continuation_delay',
     'continuation_cancel',
     'continuation_load_object',
+    'continuation_result_read',
     'continuation_cancel_source_create',
     'continuation_cancel_source_cancel',
     'continuation_cancel_source_release',
@@ -2308,6 +2313,19 @@ $AllowedFixedRendererImports = @(
     'avid_value_array_write_range',
     'avid_value_release'
 )
+foreach ($RequiredGeneratedOutcomeFacadeContract in @(
+    'AvidLatentAttribute(string module, string importName, int bindingOrdinal, string payloadTypeId)',
+    'Binding.Completion.PayloadTypeId',
+    'AvidOutcomeAwaitable<',
+    'public readonly struct AvidOutcome<T>',
+    'public readonly struct AvidOutcomeAwaitable<T>',
+    'public readonly struct AvidOutcomeAwaiter<T>',
+    'ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount)'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredGeneratedOutcomeFacadeContract)) {
+        Add-Violation "generated C# outcome facade is missing $RequiredGeneratedOutcomeFacadeContract"
+    }
+}
 $FixedRendererImports = @(
     [regex]::Matches(
         $CSharpBindingRendererSource,
@@ -2701,6 +2719,7 @@ $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowe
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
 $CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpContinuationLowerer.cs'
 $CSharpAsyncLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncLowerer.cs'
+$CSharpOutcomeOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpOutcomeOperationLowerer.cs'
 $CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpLatentStoragePlanner.cs'
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
@@ -2882,8 +2901,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 12',
-    'CurrentSemanticVersion = "1.12"'
+    'CurrentSchemaVersion = 13',
+    'CurrentSemanticVersion = "1.13"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
@@ -2908,7 +2927,9 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'LoadObjectAsync',
     'TryUnwrapCancellationMarker',
     'CancellationTokenTypeName',
-    'projectedCancellationToken);',
+    'projectedCancellationToken,',
+    'producer.PayloadDescriptorTypeId',
+    'producer.PayloadValueType',
     'ValidateLocalLifetimes',
     'ASCS5401',
     'ASCS5408'
@@ -3050,6 +3071,10 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'continuation_delay',
     'continuation_load_object',
     'continuation_bind_cancel',
+    'continuation_result_read',
+    'EmitIncomingResult',
+    'ResultSlotPayloadKind',
+    'OutcomeStatusField',
     'TryBuildSingleValue',
     'CancellationToken',
     'bitwise_and',
@@ -3059,6 +3084,19 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
 )) {
     if (-not $CSharpAsyncLowererSource.Contains($RequiredControlledAsyncLoweringContract)) {
         Add-Violation "C# Guest controlled async lowerer is missing $RequiredControlledAsyncLoweringContract"
+    }
+}
+foreach ($RequiredOutcomeLoweringContract in @(
+    'CSharpOutcomeOperationLowerer',
+    'OutcomeStatusField',
+    'OutcomeValueField',
+    'property?.Name is not ("Status" or "Value" or "Succeeded")',
+    '"field_load"',
+    '"equals"'
+)) {
+    if (-not $CSharpOutcomeOperationLowererSource.Contains($RequiredOutcomeLoweringContract) -and
+        -not $CSharpOperationLowererSource.Contains($RequiredOutcomeLoweringContract)) {
+        Add-Violation "C# Guest outcome lowering is missing $RequiredOutcomeLoweringContract"
     }
 }
 if (-not $CSharpSemanticInputValidatorSource.Contains('CSharpLatentStoragePlanner.TryBuild')) {
@@ -3154,6 +3192,53 @@ foreach ($RequiredCancellationOwnershipContract in @(
         Add-Violation "Session cancellation-source ownership is missing $RequiredCancellationOwnershipContract"
     }
 }
+foreach ($RequiredContinuationResultOwnershipContract in @(
+    'MaximumResultSlots = 1024',
+    'MaximumFixedResultBytes = 4096',
+    'ConsumeResult(',
+    'ExpectedTypeId',
+    'AllocateResult(',
+    'ReleaseResultSlot(',
+    'Entry.ResultSlot',
+    'Slot.Entry->ContinuationToken == Entry.Token'
+)) {
+    if (-not $ContinuationOwnerHeader.Contains($RequiredContinuationResultOwnershipContract) -and
+        -not $ContinuationOwnerSource.Contains($RequiredContinuationResultOwnershipContract)) {
+        Add-Violation "Session continuation result ownership is missing $RequiredContinuationResultOwnershipContract"
+    }
+}
+foreach ($RequiredContinuationResultCodecContract in @(
+    'FAvidScriptContinuationResultCodecTransaction',
+    'CreatedUtf8Tokens',
+    'CreatedArrayTokens',
+    'EAvidScriptBindingLatentPayloadKind::AbiCells',
+    'EAvidScriptBindingLatentPayloadKind::FixedWire',
+    'EAvidScriptBindingLatentPayloadKind::Object',
+    'EAvidScriptBindingLatentPayloadKind::Utf8',
+    'EAvidScriptBindingLatentPayloadKind::Array',
+    'ObjectOwnership->Borrow(',
+    'Transaction.CreatedUtf8Tokens.Add(Token)',
+    'Transaction.CreatedArrayTokens.Add(Token)',
+    'continuation_result_descriptor_mismatch'
+)) {
+    if (-not $ContinuationResultCodecHeader.Contains($RequiredContinuationResultCodecContract) -and
+        -not $ContinuationResultCodecSource.Contains($RequiredContinuationResultCodecContract)) {
+        Add-Violation "continuation result codec is missing $RequiredContinuationResultCodecContract"
+    }
+}
+foreach ($RequiredContinuationResultRuntimeContract in @(
+    'HandleContinuationResultReadImport',
+    'bContinuationResultConsumed',
+    'TryGetLatentCompletionResultType',
+    'HostContext.Continuations->ConsumeResult(',
+    'FAvidScriptContinuationResultCodec::Encode(',
+    'ResultTransaction.Rollback(Utf8ValueHeap, ArrayValueHeap)',
+    'ResultTransaction.Commit()'
+)) {
+    if (-not $WasmRuntimeSource.Contains($RequiredContinuationResultRuntimeContract)) {
+        Add-Violation "Runtime continuation result dispatch is missing $RequiredContinuationResultRuntimeContract"
+    }
+}
 foreach ($RequiredAsyncObjectLoaderContract in @(
     'FStreamableManager',
     'RequestAsyncLoad',
@@ -3170,6 +3255,16 @@ foreach ($RequiredAsyncContinuationVmContract in @(
 )) {
     if (-not $StaticHostImportSource.Contains($RequiredAsyncContinuationVmContract)) {
         Add-Violation "VM async continuation catalog is missing $RequiredAsyncContinuationVmContract"
+    }
+}
+foreach ($RequiredContinuationResultVmContract in @(
+    'ContinuationResultRead',
+    'continuation_result_read',
+    '(iiiii)i'
+)) {
+    if (-not $StaticHostImportSource.Contains($RequiredContinuationResultVmContract) -and
+        -not $VmHostBindingsSource.Contains($RequiredContinuationResultVmContract)) {
+        Add-Violation "VM continuation result catalog is missing $RequiredContinuationResultVmContract"
     }
 }
 foreach ($RequiredCancellationVmContract in @(

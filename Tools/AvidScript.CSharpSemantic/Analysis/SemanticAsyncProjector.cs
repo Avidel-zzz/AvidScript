@@ -35,6 +35,13 @@ internal static class SemanticAsyncProjector
     private const int MaximumAwaitsPerModule = 64;
     private const int MaximumAssetPathUtf8Bytes = 1024;
 
+    private sealed record ProducerContract(
+        string Kind,
+        string PayloadKind,
+        int BindingOrdinal = -1,
+        string? PayloadDescriptorTypeId = null,
+        ITypeSymbol? PayloadValueType = null);
+
     public static SemanticAsyncProjection Project(
         SemanticCompilationContext context,
         SemanticTypeRegistry typeRegistry,
@@ -389,16 +396,11 @@ internal static class SemanticAsyncProjector
             cancellationTokenOperation = tokenOperation;
         }
 
-        string? producerKind = GetProducerKind(context, invocation.TargetMethod);
-        string? payloadKind = producerKind == "object_load"
-            ? SemanticContinuationCallback.ObjectPayloadKind
-            : producerKind is null
-                ? null
-                : SemanticContinuationCallback.NonePayloadKind;
-        if (producerKind is null
+        ProducerContract? producer = GetProducerContract(context, invocation.TargetMethod);
+        if (producer is null
             || invocation.TargetMethod.IsAsync
             || IsTaskLike(invocation.TargetMethod.ReturnType)
-            || !HasExpectedAwaitResult(producerKind, awaitOperation.Type))
+            || !HasExpectedAwaitResult(producer, awaitOperation.Type))
         {
             diagnostics.Add(Error(
                 "ASCS5403",
@@ -410,9 +412,9 @@ internal static class SemanticAsyncProjector
         IArgumentOperation[] arguments = invocation.Arguments
             .OrderBy(argument => argument.Parameter?.Ordinal ?? int.MaxValue)
             .ToArray();
-        int expectedArgumentCount = producerKind == "next_tick"
+        int expectedArgumentCount = producer.Kind == "next_tick"
             ? 0
-            : producerKind.StartsWith(BindingLatentProducerPrefix, StringComparison.Ordinal)
+            : producer.Kind.StartsWith(BindingLatentProducerPrefix, StringComparison.Ordinal)
                 ? invocation.TargetMethod.Parameters.Length
                 : 1;
         if (arguments.Length != expectedArgumentCount)
@@ -424,7 +426,7 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
-        if (producerKind == "object_load" && !ValidateAssetPath(arguments[0], out string? pathError))
+        if (producer.Kind == "object_load" && !ValidateAssetPath(arguments[0], out string? pathError))
         {
             diagnostics.Add(Error(
                 "ASCS5404",
@@ -437,19 +439,26 @@ internal static class SemanticAsyncProjector
         string? resultTypeId = null;
         if (result is not null)
         {
-            if (producerKind != "object_load"
-                || semanticModel.GetDeclaredSymbol(result) is not ILocalSymbol local
-                || !IsLoadedObject(local.Type))
+            if (semanticModel.GetDeclaredSymbol(result) is not ILocalSymbol local
+                || producer.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
+                    && !IsLoadedObject(local.Type)
+                || producer.PayloadKind == SemanticContinuationCallback.ResultSlotPayloadKind
+                    && !IsOutcomeOf(local.Type, producer.PayloadValueType)
+                || producer.PayloadKind == SemanticContinuationCallback.NonePayloadKind)
             {
                 diagnostics.Add(Error(
                     "ASCS5404",
-                    "Only LoadObjectAsync may initialize a single AvidLoadedObject result local.",
+                    "The controlled await result local must exactly match its producer payload contract.",
                     SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, result.Span)));
                 return false;
             }
 
             resultSymbolId = SemanticSymbolProjector.GetSymbolId(local);
             resultTypeId = typeRegistry.Register(local.Type);
+        }
+        else if (producer.PayloadKind == SemanticContinuationCallback.ResultSlotPayloadKind)
+        {
+            resultTypeId = typeRegistry.Register(awaitOperation.Type!);
         }
 
         List<SemanticOperation> projectedArguments = new(arguments.Length);
@@ -481,13 +490,18 @@ internal static class SemanticAsyncProjector
 
         projected = new SemanticAsyncAwaitSite(
             nextCallbackId++,
-            producerKind,
-            payloadKind!,
+            producer.Kind,
+            producer.PayloadKind,
             projectedArguments,
             resultSymbolId,
             resultTypeId,
             SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span),
-            projectedCancellationToken);
+            projectedCancellationToken,
+            producer.BindingOrdinal,
+            producer.PayloadDescriptorTypeId,
+            producer.PayloadValueType is null
+                ? null
+                : typeRegistry.Register(producer.PayloadValueType));
         return true;
     }
 
@@ -504,13 +518,14 @@ internal static class SemanticAsyncProjector
             SymbolDisplayFormat.FullyQualifiedFormat);
         bool generatedReferenceMethod = method.DeclaringSyntaxReferences.Length == 1
             && method.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree;
+        bool supportedOwner = owner is DelayAwaitableTypeName or ObjectAwaitableTypeName
+            || IsAvidGenericType(method.ContainingType, "AvidOutcomeAwaitable", out _);
         bool validContract = generatedReferenceMethod
             && !method.IsStatic
             && method.Name == "WithCancellation"
             && method.Arity == 0
-            && !method.ContainingType.IsGenericType
-            && owner is DelayAwaitableTypeName or ObjectAwaitableTypeName
-            && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == owner
+            && supportedOwner
+            && SymbolEqualityComparer.Default.Equals(method.ReturnType, method.ContainingType)
             && method.Parameters.Length == 1
             && method.Parameters[0].RefKind == RefKind.None
             && method.Parameters[0].Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
@@ -540,7 +555,7 @@ internal static class SemanticAsyncProjector
         return operation;
     }
 
-    private static string? GetProducerKind(
+    private static ProducerContract? GetProducerContract(
         SemanticCompilationContext context,
         IMethodSymbol method)
     {
@@ -557,12 +572,24 @@ internal static class SemanticAsyncProjector
         {
             bool generatedReferenceMethod = method.DeclaringSyntaxReferences.Length == 1
                 && method.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree;
-            string? module = latentAttribute.ConstructorArguments.Length == 2
+            int argumentCount = latentAttribute.ConstructorArguments.Length;
+            string? module = argumentCount is 2 or 4
                 ? latentAttribute.ConstructorArguments[0].Value as string
                 : null;
-            string? importName = latentAttribute.ConstructorArguments.Length == 2
+            string? importName = argumentCount is 2 or 4
                 ? latentAttribute.ConstructorArguments[1].Value as string
                 : null;
+            int bindingOrdinal = argumentCount == 4
+                && latentAttribute.ConstructorArguments[2].Value is int ordinal
+                    ? ordinal
+                    : -1;
+            string? payloadDescriptorTypeId = argumentCount == 4
+                ? latentAttribute.ConstructorArguments[3].Value as string
+                : null;
+            ITypeSymbol? payloadValueType = argumentCount == 4
+                && IsAvidGenericType(method.ReturnType, "AvidOutcomeAwaitable", out ITypeSymbol? valueType)
+                    ? valueType
+                    : null;
             bool valid = generatedReferenceMethod
                 && method.Arity == 0
                 && !method.ContainingType.IsGenericType
@@ -570,10 +597,27 @@ internal static class SemanticAsyncProjector
                 && !string.IsNullOrWhiteSpace(module)
                 && !string.IsNullOrWhiteSpace(importName)
                 && !module.Contains("|", StringComparison.Ordinal)
-                && !importName.Contains("|", StringComparison.Ordinal);
-            return valid
-                ? $"{BindingLatentProducerPrefix}{module}|{importName}"
-                : null;
+                && !importName.Contains("|", StringComparison.Ordinal)
+                && (argumentCount == 2
+                    && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                        == DelayAwaitableTypeName
+                    || argumentCount == 4
+                        && bindingOrdinal >= 0
+                        && IsLowerSha256(payloadDescriptorTypeId)
+                        && payloadValueType is not null);
+            if (!valid)
+            {
+                return null;
+            }
+            string kind = $"{BindingLatentProducerPrefix}{module}|{importName}";
+            return argumentCount == 4
+                ? new ProducerContract(
+                    kind,
+                    SemanticContinuationCallback.ResultSlotPayloadKind,
+                    bindingOrdinal,
+                    payloadDescriptorTypeId,
+                    payloadValueType)
+                : new ProducerContract(kind, SemanticContinuationCallback.NonePayloadKind);
         }
 
         if (owner == ContinuationsTypeName
@@ -586,7 +630,7 @@ internal static class SemanticAsyncProjector
             && !method.Parameters[0].IsParams
             && method.Parameters[0].Type.SpecialType == SpecialType.System_Single)
         {
-            return "delay";
+            return new ProducerContract("delay", SemanticContinuationCallback.NonePayloadKind);
         }
 
         if (owner == ContinuationsTypeName
@@ -595,7 +639,7 @@ internal static class SemanticAsyncProjector
             && !method.ContainingType.IsGenericType
             && method.Parameters.Length == 0)
         {
-            return "next_tick";
+            return new ProducerContract("next_tick", SemanticContinuationCallback.NonePayloadKind);
         }
 
         return owner == AssetsTypeName
@@ -607,15 +651,56 @@ internal static class SemanticAsyncProjector
             && !method.Parameters[0].IsOptional
             && !method.Parameters[0].IsParams
             && method.Parameters[0].Type.SpecialType == SpecialType.System_String
-                ? "object_load"
+                ? new ProducerContract(
+                    "object_load",
+                    SemanticContinuationCallback.ObjectPayloadKind)
                 : null;
     }
 
-    private static bool HasExpectedAwaitResult(string producerKind, ITypeSymbol? resultType)
+    private static bool HasExpectedAwaitResult(
+        ProducerContract producer,
+        ITypeSymbol? resultType)
     {
-        return producerKind == "object_load"
-            ? resultType is not null && IsLoadedObject(resultType)
-            : resultType?.SpecialType == SpecialType.System_Void;
+        return producer.PayloadKind switch
+        {
+            SemanticContinuationCallback.ObjectPayloadKind =>
+                resultType is not null && IsLoadedObject(resultType),
+            SemanticContinuationCallback.ResultSlotPayloadKind =>
+                IsOutcomeOf(resultType, producer.PayloadValueType),
+            _ => resultType?.SpecialType == SpecialType.System_Void,
+        };
+    }
+
+    private static bool IsOutcomeOf(ITypeSymbol? type, ITypeSymbol? valueType)
+    {
+        return IsAvidGenericType(type, "AvidOutcome", out ITypeSymbol? argument)
+            && valueType is not null
+            && SymbolEqualityComparer.Default.Equals(argument, valueType);
+    }
+
+    private static bool IsAvidGenericType(
+        ITypeSymbol? type,
+        string name,
+        out ITypeSymbol? argument)
+    {
+        argument = null;
+        if (type is not INamedTypeSymbol named
+            || !named.IsGenericType
+            || named.Arity != 1
+            || named.Name != name
+            || named.ContainingNamespace.ToDisplayString() != "AvidScript")
+        {
+            return false;
+        }
+        argument = named.TypeArguments[0];
+        return true;
+    }
+
+    private static bool IsLowerSha256(string? value)
+    {
+        return value is { Length: 64 }
+            && value.All(character => character is >= '0' and <= '9'
+                or >= 'a' and <= 'f');
     }
 
     private static bool ValidateAssetPath(IArgumentOperation argument, out string? error)

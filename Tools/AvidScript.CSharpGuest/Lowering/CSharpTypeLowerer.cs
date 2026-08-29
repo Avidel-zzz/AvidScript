@@ -70,6 +70,20 @@ internal static class CSharpTypeLowerer
         SemanticDocument document,
         SemanticType type)
     {
+        if (type.Kind == "type_parameter"
+            || type.CanonicalName is
+                "global::AvidScript.AvidOutcome<T>" or
+                "global::AvidScript.AvidOutcomeAwaitable<T>" or
+                "global::AvidScript.AvidOutcomeAwaiter<T>"
+            || type.CanonicalName.StartsWith(
+                "global::AvidScript.AvidOutcomeAwaitable<",
+                StringComparison.Ordinal)
+            || type.CanonicalName.StartsWith(
+                "global::AvidScript.AvidOutcomeAwaiter<",
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
         if (type.Kind != "delegate"
             || type.CanonicalName != "global::System.Action")
         {
@@ -77,9 +91,13 @@ internal static class CSharpTypeLowerer
         }
 
         HashSet<string> scaffoldCallables = document.Callables
-            .Where(callable => callable.ContainingTypeId is
-                    "type:global::AvidScript.AvidDelayAwaiter" or
-                    "type:global::AvidScript.AvidObjectAwaiter"
+            .Where(callable =>
+                (callable.ContainingTypeId is
+                        "type:global::AvidScript.AvidDelayAwaiter" or
+                        "type:global::AvidScript.AvidObjectAwaiter"
+                    || callable.ContainingTypeId.StartsWith(
+                        "type:global::AvidScript.AvidOutcomeAwaiter<",
+                        StringComparison.Ordinal))
                 && callable.MethodSymbolId.Contains(".OnCompleted(", StringComparison.Ordinal)
                 && callable.Parameters.Count == 1
                 && callable.Parameters[0].TypeId == type.Id)
@@ -112,6 +130,42 @@ internal static class CSharpTypeLowerer
         if (TryLowerIntrinsic(type, out GuestType? intrinsic))
         {
             return intrinsic;
+        }
+
+        if (type.Kind == "struct"
+            && shapes.TryGetValue(type.Id, out SemanticTypeShape? outcomeShape)
+            && outcomeShape.GenericArgumentTypeId is { } outcomeValueTypeId)
+        {
+            if (!type.CanonicalName.StartsWith(
+                    "global::AvidScript.AvidOutcome<",
+                    StringComparison.Ordinal)
+                || !semanticTypes.ContainsKey(outcomeValueTypeId)
+                || !semanticTypes.ContainsKey(CSharpGuestIds.ContinuationStatusTypeId))
+            {
+                Add(diagnostics, "ASCG1003", $"Outcome '{type.Id}' has an invalid generic payload shape.");
+                return null;
+            }
+            return new GuestType(
+                type.Id,
+                "struct",
+                "memory",
+                new[]
+                {
+                    new GuestField(
+                        CSharpGuestIds.OutcomeStatusField(type.Id),
+                        "Status",
+                        CSharpGuestIds.ContinuationStatusTypeId,
+                        0),
+                    new GuestField(
+                        CSharpGuestIds.OutcomeValueField(type.Id),
+                        "Value",
+                        outcomeValueTypeId,
+                        0),
+                },
+                null,
+                null,
+                0,
+                1);
         }
 
         if (CSharpObjectCapabilityPolicy.TryGetKind(type.CanonicalName, out CSharpObjectCapabilityKind capabilityKind))

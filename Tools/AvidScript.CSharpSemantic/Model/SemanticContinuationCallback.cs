@@ -10,6 +10,7 @@ public sealed record SemanticContinuationCallback(
 {
     public const string NonePayloadKind = "none";
     public const string ObjectPayloadKind = "object";
+    public const string ResultSlotPayloadKind = "result_slot";
 
     [JsonPropertyOrder(3)]
     public string PayloadKind { get; init; } = NonePayloadKind;

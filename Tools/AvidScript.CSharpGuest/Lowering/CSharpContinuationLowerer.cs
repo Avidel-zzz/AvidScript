@@ -67,6 +67,8 @@ internal static class CSharpContinuationLowerer
                 callback.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
             || asyncRoutes.Any(route =>
                 route.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind);
+        bool hasResultSlotPayload = asyncRoutes.Any(route =>
+            route.PayloadKind == SemanticContinuationCallback.ResultSlotPayloadKind);
         GuestType? continuationStatusType = null;
         GuestType? loadedObjectType = null;
         if (hasObjectPayload
@@ -78,6 +80,18 @@ internal static class CSharpContinuationLowerer
                     out loadedObjectType)))
         {
             Add(diagnostics, "The semantic artifact does not contain the required continuation object-payload layouts.");
+            return null;
+        }
+        if (hasResultSlotPayload
+            && continuationStatusType is null
+            && (!guestTypes.TryGetValue(
+                    CSharpGuestIds.ContinuationStatusTypeId,
+                    out continuationStatusType)
+                || continuationStatusType.Kind != "enum"
+                || continuationStatusType.Storage != "i32"
+                || continuationStatusType.UnderlyingTypeId != int32Type.Id))
+        {
+            Add(diagnostics, "The semantic artifact does not contain the required continuation result status layout.");
             return null;
         }
 
@@ -97,7 +111,8 @@ internal static class CSharpContinuationLowerer
             if (route.CallbackId <= 0
                 || route.PayloadKind is not (
                     SemanticContinuationCallback.NonePayloadKind or
-                    SemanticContinuationCallback.ObjectPayloadKind)
+                    SemanticContinuationCallback.ObjectPayloadKind or
+                    SemanticContinuationCallback.ResultSlotPayloadKind)
                 || !loweredFunctionIds.Contains(route.FunctionId))
             {
                 Add(diagnostics, $"Async continuation callback '{route.CallbackId}' has no compatible lowered resume function.");
@@ -226,6 +241,29 @@ internal static class CSharpContinuationLowerer
                     objectGeneration!,
                     callInstructions);
                 argumentIds = new[] { callbackStatus.Id, loadedObject.Id };
+            }
+            else if (target.PayloadKind
+                == SemanticContinuationCallback.ResultSlotPayloadKind)
+            {
+                GuestRegister callbackStatus = Local(
+                    version2,
+                    target.CallbackId,
+                    "status",
+                    continuationStatusType!.Id,
+                    locals);
+                callInstructions.Add(new GuestInstruction(
+                    "convert",
+                    callbackStatus.Id,
+                    new[] { status.Id },
+                    null,
+                    null,
+                    null));
+                argumentIds = new[]
+                {
+                    callbackStatus.Id,
+                    objectSlot!.Id,
+                    objectGeneration!.Id,
+                };
             }
 
             callInstructions.Add(new GuestInstruction(

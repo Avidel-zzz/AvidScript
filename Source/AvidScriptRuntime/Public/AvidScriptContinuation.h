@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptBindingLatent.h"
 #include "CoreMinimal.h"
 
 enum class EAvidScriptContinuationStatus : int32
@@ -34,4 +35,13 @@ public:
 	virtual bool BindCancellationSource(
 		int64 SourceToken,
 		int64 ContinuationToken) = 0;
+	virtual bool ConsumeResult(
+		int64 ContinuationToken,
+		int32 Slot,
+		int32 Generation,
+		const FString& ExpectedTypeId,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload)
+	{
+		return false;
+	}
 };

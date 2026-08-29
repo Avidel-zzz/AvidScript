@@ -29,6 +29,18 @@ internal sealed class SemanticTypeRegistry
         {
             shapes.TryAdd(id, new SemanticTypeShape(id, null, Register(underlying)));
         }
+        else if (type is INamedTypeSymbol named
+            && named.IsGenericType
+            && named.Arity == 1
+            && named.Name == "AvidOutcome"
+            && named.ContainingNamespace.ToDisplayString() == "AvidScript")
+        {
+            shapes.TryAdd(id, new SemanticTypeShape(
+                id,
+                null,
+                null,
+                Register(named.TypeArguments[0])));
+        }
         return id;
     }
 

@@ -40,6 +40,10 @@ internal static class CSharpAsyncLowerer
             document,
             "env",
             "continuation_bind_cancel");
+        string? resultReadImportId = FindImport(
+            document,
+            "env",
+            "continuation_result_read");
         bool needsDelayImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
@@ -49,9 +53,14 @@ internal static class CSharpAsyncLowerer
         bool needsBindCancellationImport = document.AsyncMethods
             .SelectMany(method => method.Segments)
             .Any(segment => segment.AwaitSite?.CancellationToken is not null);
+        bool needsResultReadImport = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.PayloadKind
+                == SemanticContinuationCallback.ResultSlotPayloadKind);
         if ((needsDelayImport && delayImportId is null)
             || (needsObjectLoadImport && objectLoadImportId is null)
-            || (needsBindCancellationImport && bindCancellationImportId is null))
+            || (needsBindCancellationImport && bindCancellationImportId is null)
+            || (needsResultReadImport && resultReadImportId is null))
         {
             Add(diagnostics, "The async profile is missing a required built-in continuation import.");
             return new CSharpAsyncLoweringResult(
@@ -101,6 +110,9 @@ internal static class CSharpAsyncLowerer
 
                 List<GuestRegister> parameters = new();
                 GuestRegister? loadedObjectParameter = null;
+                GuestRegister? resultStatusParameter = null;
+                GuestRegister? resultSlotParameter = null;
+                GuestRegister? resultGenerationParameter = null;
                 if (incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
                 {
                     parameters.Add(new GuestRegister(
@@ -111,6 +123,22 @@ internal static class CSharpAsyncLowerer
                         loadedObjectType.Id);
                     parameters.Add(loadedObjectParameter);
                 }
+                else if (incoming?.PayloadKind
+                    == SemanticContinuationCallback.ResultSlotPayloadKind)
+                {
+                    resultStatusParameter = new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "status"),
+                        statusType.Id);
+                    resultSlotParameter = new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "result_slot"),
+                        int32Type.Id);
+                    resultGenerationParameter = new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "result_generation"),
+                        int32Type.Id);
+                    parameters.Add(resultStatusParameter);
+                    parameters.Add(resultSlotParameter);
+                    parameters.Add(resultGenerationParameter);
+                }
 
                 CSharpFunctionLoweringContext context = new(
                     document,
@@ -120,6 +148,7 @@ internal static class CSharpAsyncLowerer
                     Array.Empty<GuestRegister>(),
                     diagnostics);
                 if (incoming?.ResultSymbolId is not null
+                    && incoming.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
                     && (loadedObjectParameter is null
                         || !context.TryBindStorage(incoming.ResultSymbolId, loadedObjectParameter)))
                 {
@@ -128,6 +157,33 @@ internal static class CSharpAsyncLowerer
                 }
 
                 List<GuestInstruction> instructions = new();
+                GuestRegister? incomingResultAccepted = null;
+                GuestRegister? incomingOutcome = null;
+                if (incoming?.PayloadKind
+                    == SemanticContinuationCallback.ResultSlotPayloadKind
+                    && !EmitIncomingResult(
+                        context,
+                        incoming,
+                        resultReadImportId,
+                        resultStatusParameter,
+                        resultSlotParameter,
+                        resultGenerationParameter,
+                        int32Type,
+                        instructions,
+                        out incomingResultAccepted,
+                        out incomingOutcome))
+                {
+                    break;
+                }
+                if (incoming?.PayloadKind
+                        == SemanticContinuationCallback.ResultSlotPayloadKind
+                    && incoming.ResultSymbolId is not null
+                    && (incomingOutcome is null
+                        || !context.TryBindStorage(incoming.ResultSymbolId, incomingOutcome)))
+                {
+                    Add(diagnostics, $"Async outcome result '{incoming.ResultSymbolId}' has no compatible resume storage.");
+                    break;
+                }
                 foreach (SemanticAsyncStatement statement in segment.Statements)
                 {
                     GuestRegister? value = CSharpOperationLowerer.LowerValue(
@@ -180,35 +236,44 @@ internal static class CSharpAsyncLowerer
                     method.MethodSymbolId,
                     segment.Ordinal);
                 IReadOnlyList<GuestBasicBlock> blocks;
-                if (scheduledToken is not null)
+                if (scheduledToken is not null || incomingResultAccepted is not null)
                 {
-                    GuestRegister? zeroToken = context.CreateTemporary(
-                        int64Type.Id,
-                        segment.Ordinal);
-                    GuestRegister? scheduleAccepted = context.CreateTemporary(
-                        int32Type.Id,
-                        segment.Ordinal);
-                    if (zeroToken is null || scheduleAccepted is null)
+                    GuestRegister? scheduleAccepted = null;
+                    if (scheduledToken is not null)
                     {
-                        break;
-                    }
+                        GuestRegister? zeroToken = context.CreateTemporary(
+                            int64Type.Id,
+                            segment.Ordinal);
+                        scheduleAccepted = context.CreateTemporary(
+                            int32Type.Id,
+                            segment.Ordinal);
+                        if (zeroToken is null || scheduleAccepted is null)
+                        {
+                            break;
+                        }
 
-                    instructions.Add(new GuestInstruction(
-                        "constant",
-                        zeroToken.Id,
-                        Array.Empty<string>(),
-                        null,
-                        null,
-                        new GuestConstant("int64", "0")));
-                    instructions.Add(new GuestInstruction(
-                        "binary",
-                        scheduleAccepted.Id,
-                        new[] { scheduledToken.Id, zeroToken.Id },
-                        null,
-                        "not_equals",
-                        null));
-                    GuestRegister finalAcceptance = scheduleAccepted;
-                    if (cancellationBindingAccepted is not null)
+                        instructions.Add(new GuestInstruction(
+                            "constant",
+                            zeroToken.Id,
+                            Array.Empty<string>(),
+                            null,
+                            null,
+                            new GuestConstant("int64", "0")));
+                        instructions.Add(new GuestInstruction(
+                            "binary",
+                            scheduleAccepted.Id,
+                            new[] { scheduledToken.Id, zeroToken.Id },
+                            null,
+                            "not_equals",
+                            null));
+                    }
+                    GuestRegister finalAcceptance = scheduleAccepted
+                        ?? incomingResultAccepted!;
+                    foreach (GuestRegister acceptance in new[]
+                    {
+                        scheduleAccepted is null ? null : cancellationBindingAccepted,
+                        scheduleAccepted is null ? null : incomingResultAccepted,
+                    }.Where(value => value is not null).Cast<GuestRegister>())
                     {
                         GuestRegister? combinedAcceptance = context.CreateTemporary(
                             int32Type.Id,
@@ -222,8 +287,8 @@ internal static class CSharpAsyncLowerer
                             combinedAcceptance.Id,
                             new[]
                             {
-                                scheduleAccepted.Id,
-                                cancellationBindingAccepted.Id,
+                                finalAcceptance.Id,
+                                acceptance.Id,
                             },
                             null,
                             "bitwise_and",
@@ -280,6 +345,159 @@ internal static class CSharpAsyncLowerer
         }
 
         return new CSharpAsyncLoweringResult(functions, routes);
+    }
+
+    private static bool EmitIncomingResult(
+        CSharpFunctionLoweringContext context,
+        SemanticAsyncAwaitSite incoming,
+        string? resultReadImportId,
+        GuestRegister? status,
+        GuestRegister? resultSlot,
+        GuestRegister? resultGeneration,
+        GuestType int32Type,
+        List<GuestInstruction> instructions,
+        out GuestRegister? resultReadAccepted,
+        out GuestRegister? outcome)
+    {
+        resultReadAccepted = null;
+        outcome = null;
+        if (resultReadImportId is null
+            || status is null
+            || resultSlot is null
+            || resultGeneration is null
+            || incoming.BindingOrdinal < 0
+            || incoming.ResultTypeId is null
+            || incoming.PayloadValueTypeId is null
+            || !context.TryGetGuestType(incoming.ResultTypeId, out GuestType outcomeType)
+            || !context.TryGetGuestType(incoming.PayloadValueTypeId, out GuestType payloadType)
+            || outcomeType.Kind != "struct"
+            || outcomeType.Fields.SingleOrDefault(field =>
+                field.Id == CSharpGuestIds.OutcomeStatusField(outcomeType.Id)) is not { } statusField
+            || outcomeType.Fields.SingleOrDefault(field =>
+                field.Id == CSharpGuestIds.OutcomeValueField(outcomeType.Id)) is not { } valueField
+            || statusField.TypeId != status.TypeId
+            || valueField.TypeId != payloadType.Id
+            || payloadType.Size <= 0)
+        {
+            Add(context.Diagnostics, "Incoming provider result has no compatible frozen Guest layout.");
+            return false;
+        }
+
+        outcome = context.CreateTemporary(outcomeType.Id, incoming.CallbackId);
+        GuestRegister? payloadStorage = context.CreateTemporary(
+            payloadType.Id,
+            incoming.CallbackId);
+        GuestRegister? bindingOrdinal = context.CreateTemporary(
+            int32Type.Id,
+            incoming.CallbackId);
+        GuestRegister? byteCount = context.CreateTemporary(
+            int32Type.Id,
+            incoming.CallbackId);
+        if (outcome is null
+            || payloadStorage is null
+            || bindingOrdinal is null
+            || byteCount is null)
+        {
+            return false;
+        }
+
+        instructions.Add(new GuestInstruction(
+            "stack_alloc",
+            outcome.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            null));
+        instructions.Add(new GuestInstruction(
+            "field_store",
+            null,
+            new[] { outcome.Id, status.Id },
+            statusField.Id,
+            null,
+            null));
+        if (payloadType.Kind == "struct")
+        {
+            instructions.Add(new GuestInstruction(
+                "stack_alloc",
+                payloadStorage.Id,
+                Array.Empty<string>(),
+                null,
+                null,
+                null));
+        }
+        GuestRegister? payloadAddress =
+            CSharpAggregateOperationLowerer.LowerStorageAddress(
+                context,
+                payloadStorage,
+                incoming.CallbackId,
+                instructions);
+        resultReadAccepted = context.CreateTemporary(
+            int32Type.Id,
+            incoming.CallbackId);
+        if (payloadAddress is null || resultReadAccepted is null)
+        {
+            return false;
+        }
+        instructions.Add(new GuestInstruction(
+            "constant",
+            bindingOrdinal.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            new GuestConstant(
+                "int32",
+                incoming.BindingOrdinal.ToString(CultureInfo.InvariantCulture))));
+        instructions.Add(new GuestInstruction(
+            "constant",
+            byteCount.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            new GuestConstant(
+                "int32",
+                payloadType.Size.ToString(CultureInfo.InvariantCulture))));
+        instructions.Add(new GuestInstruction(
+            "call",
+            resultReadAccepted.Id,
+            new[]
+            {
+                bindingOrdinal.Id,
+                resultSlot.Id,
+                resultGeneration.Id,
+                payloadAddress.Id,
+                byteCount.Id,
+            },
+            resultReadImportId,
+            null,
+            null));
+
+        GuestRegister payloadValue = payloadStorage;
+        if (payloadType.Kind != "struct")
+        {
+            GuestRegister? loadedPayload = context.CreateTemporary(
+                payloadType.Id,
+                incoming.CallbackId);
+            if (loadedPayload is null)
+            {
+                return false;
+            }
+            instructions.Add(new GuestInstruction(
+                "local_load",
+                loadedPayload.Id,
+                Array.Empty<string>(),
+                payloadStorage.Id,
+                null,
+                null));
+            payloadValue = loadedPayload;
+        }
+        instructions.Add(new GuestInstruction(
+            "field_store",
+            null,
+            new[] { outcome.Id, payloadValue.Id },
+            valueField.Id,
+            null,
+            null));
+        return true;
     }
 
     private static bool EmitProducer(

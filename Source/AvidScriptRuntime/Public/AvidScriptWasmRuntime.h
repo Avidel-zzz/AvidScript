@@ -137,6 +137,7 @@ struct FAvidScriptWasmTimerEntry
 struct FAvidScriptPreparedGeneratedHostCall;
 struct FAvidScriptPreparedReflectionHostCall;
 struct FAvidScriptPreparedDynamicHostCall;
+struct FAvidScriptContinuationResultCodecTransaction;
 
 struct FAvidScriptSelfCapability
 {
@@ -366,6 +367,11 @@ public:
 	int32 HandleContinuationBindCancelImport(
 		int64 SourceToken,
 		int64 ContinuationToken);
+	int32 HandleContinuationResultReadImport(
+		int32 BindingOrdinal,
+		int32 ResultSlot,
+		int32 ResultGeneration,
+		TArrayView<uint8> OutBytes);
 	int64 HandleEventSubscribeImport(int32 Slot, int32 Generation, int32 EventOrdinal);
 	int32 HandleEventUnsubscribeImport(int64 SubscriptionToken);
 	int32 HandleActorGetLocationImport(int32 Slot, int32 Generation, FVector& OutLocation);
@@ -657,6 +663,15 @@ private:
 	FString PendingHostImportModuleName;
 	FString PendingHostImportName;
 	FString PendingHostImportDetails;
+	bool bContinuationDispatchActive = false;
+	bool bContinuationResultConsumed = false;
+	int64 ActiveContinuationToken = 0;
+	EAvidScriptContinuationStatus ActiveContinuationStatus =
+		EAvidScriptContinuationStatus::Failed;
+	int32 ActiveContinuationResultSlot = 0;
+	int32 ActiveContinuationResultGeneration = 0;
+	FAvidScriptContinuationResultCodecTransaction*
+		ActiveContinuationResultTransaction = nullptr;
 	FString ModuleId;
 	FAvidScriptWasmSmokeResult CachedEndPlayResult;
 	FAvidScriptWasmHostContext HostContext;

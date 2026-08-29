@@ -19,6 +19,7 @@ class IAvidScriptObjectOwnershipDomain;
 class FAvidScriptUtf8ValueHeap;
 class FAvidScriptArrayValueHeap;
 class IAvidScriptBindingLatentHost;
+struct FAvidScriptBindingTypeModel;
 
 enum class EAvidScriptBindingFastPathKind : uint8
 {
@@ -352,6 +353,9 @@ public:
 		const UClass& OwnerClass,
 		FName FunctionName,
 		uint32& OutOrdinal) const;
+	bool TryGetLatentCompletionResultType(
+		uint32 Ordinal,
+		const FAvidScriptBindingTypeModel*& OutType) const;
 	int32 GetRequiredScratchSize() const;
 	int32 GetObjectTypeCount() const;
 	bool TryResolveObjectType(uint32 Ordinal, UClass*& OutClass) const;

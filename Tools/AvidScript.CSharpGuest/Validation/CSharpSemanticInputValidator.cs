@@ -96,7 +96,14 @@ internal static class CSharpSemanticInputValidator
 
     private static bool ValidateTypeShapes(IReadOnlyList<SemanticTypeShape> shapes)
     {
-        return shapes.All(shape => shape is not null && !string.IsNullOrWhiteSpace(shape.TypeId))
+        return shapes.All(shape => shape is not null
+                && !string.IsNullOrWhiteSpace(shape.TypeId)
+                && new[]
+                {
+                    shape.ElementTypeId,
+                    shape.EnumUnderlyingTypeId,
+                    shape.GenericArgumentTypeId,
+                }.Count(value => value is not null) <= 1)
             && Unique(shapes.Select(shape => shape.TypeId));
     }
 
@@ -610,11 +617,7 @@ internal static class CSharpSemanticInputValidator
 			string[] identity = awaitSite.ProducerKind.Split('|');
 			if (identity.Length != 3
 				|| string.IsNullOrWhiteSpace(identity[1])
-				|| string.IsNullOrWhiteSpace(identity[2])
-				|| awaitSite.PayloadKind
-					!= SemanticContinuationCallback.NonePayloadKind
-				|| awaitSite.ResultSymbolId is not null
-				|| awaitSite.ResultTypeId is not null)
+				|| string.IsNullOrWhiteSpace(identity[2]))
 			{
 				return false;
 			}
@@ -627,12 +630,52 @@ internal static class CSharpSemanticInputValidator
 				&& callable.Parameters.Count >= awaitSite.Arguments.Count + 1
 				&& callable.Parameters[^1].TypeId == "type:int32"
 				&& callable.Parameters[^1].RefKind == "none").ToArray();
-			return imports.Length == 1
-				&& CSharpLatentStoragePlanner.TryBuild(
+			if (imports.Length != 1
+				|| !CSharpLatentStoragePlanner.TryBuild(
 					document,
 					awaitSite.Arguments,
 					imports[0].Parameters.Take(imports[0].Parameters.Count - 1).ToArray(),
-					out _);
+					out _))
+			{
+				return false;
+			}
+
+			if (awaitSite.PayloadKind == SemanticContinuationCallback.NonePayloadKind)
+			{
+				return awaitSite.ResultSymbolId is null
+					&& awaitSite.ResultTypeId is null
+					&& awaitSite.BindingOrdinal == -1
+					&& awaitSite.PayloadDescriptorTypeId is null
+					&& awaitSite.PayloadValueTypeId is null;
+			}
+			if (document.SchemaVersion < 13
+				|| awaitSite.PayloadKind
+					!= SemanticContinuationCallback.ResultSlotPayloadKind
+				|| awaitSite.BindingOrdinal < 0
+				|| awaitSite.PayloadDescriptorTypeId is null
+				|| !IsSha256(awaitSite.PayloadDescriptorTypeId)
+				|| string.IsNullOrWhiteSpace(awaitSite.PayloadValueTypeId)
+				|| string.IsNullOrWhiteSpace(awaitSite.ResultTypeId)
+				|| !document.Types.Any(type => type.Id == awaitSite.PayloadValueTypeId)
+				|| !document.TypeShapes.Any(shape =>
+					shape.TypeId == awaitSite.ResultTypeId
+					&& shape.GenericArgumentTypeId == awaitSite.PayloadValueTypeId)
+				|| callables.Count(callable =>
+					callable.Import is { Module: "env", Name: "continuation_result_read" }
+					&& callable.ReturnTypeId == "type:int32"
+					&& callable.Parameters.Count == 5
+					&& callable.Parameters.All(parameter =>
+						parameter.TypeId == "type:int32"
+						&& parameter.RefKind == "none")) != 1)
+			{
+				return false;
+			}
+			return awaitSite.ResultSymbolId is null
+				|| IsMethodLocal(
+					symbolsById,
+					awaitSite.ResultSymbolId,
+					methodSymbolId,
+					awaitSite.ResultTypeId);
 		}
 
         if (awaitSite.ProducerKind != "object_load"
@@ -761,6 +804,7 @@ internal static class CSharpSemanticInputValidator
             (9, "1.9") => true,
             (10, "1.10") => true,
             (11, "1.11") => true,
+            (12, "1.12") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

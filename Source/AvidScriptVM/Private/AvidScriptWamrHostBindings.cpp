@@ -20,6 +20,7 @@ constexpr const char* CompatibilityModuleName = "env";
 constexpr int32 MaxTransformBatchCount = 256;
 constexpr uint32 TransformBatchInputCellsPerItem = 2;
 constexpr uint32 TransformBatchOutputFloatsPerItem = 9;
+constexpr int32 MaxContinuationResultBytes = 4096;
 
 const char* StaticImportName(EAvidScriptHostBindingId BindingId)
 {
@@ -735,6 +736,57 @@ int32_t ContinuationBindCancel(
 		: 0;
 }
 
+int32_t ContinuationResultRead(
+	wasm_exec_env_t ExecEnv,
+	int32_t BindingOrdinal,
+	int32_t ResultSlot,
+	int32_t ResultGeneration,
+	int32_t OutputAddress,
+	int32_t ByteCount)
+{
+	const char* ImportName = StaticImportName(
+		EAvidScriptHostBindingId::ContinuationResultRead);
+	IAvidScriptWamrHostBridge* Bridge = GetBridge(ExecEnv);
+	if (ByteCount <= 0 || ByteCount > MaxContinuationResultBytes)
+	{
+		Fail(
+			ExecEnv,
+			Bridge,
+			ImportName,
+			TEXT("The continuation result byte count is outside the supported range."));
+		return 0;
+	}
+
+	void* NativeOutput = nullptr;
+	if (!TranslateGuestRange(
+			ExecEnv,
+			ImportName,
+			TEXT("continuation result output"),
+			OutputAddress,
+			static_cast<uint32>(ByteCount),
+			1,
+			1,
+			NativeOutput))
+	{
+		return 0;
+	}
+
+	FAvidScriptHostCall Call;
+	Call.BindingId = EAvidScriptHostBindingId::ContinuationResultRead;
+	Call.IntArgs[0] = BindingOrdinal;
+	Call.IntArgs[1] = ResultSlot;
+	Call.IntArgs[2] = ResultGeneration;
+	Call.IntArgs[3] = ByteCount;
+	Call.GuestAddress = static_cast<uint32>(OutputAddress);
+	Call.OutputBytes = MakeArrayView(
+		static_cast<uint8*>(NativeOutput),
+		ByteCount);
+	FAvidScriptHostCallResult Result;
+	return Dispatch(ExecEnv, ImportName, Call, Result)
+		? Result.ReturnValue
+		: 0;
+}
+
 int64_t EventSubscribe(
 	wasm_exec_env_t ExecEnv,
 	int32_t Slot,
@@ -800,6 +852,7 @@ void* GetWamrStaticHostFunction(EAvidScriptHostBindingId BindingId)
 	case EAvidScriptHostBindingId::ContinuationCancelSourceCancel: return reinterpret_cast<void*>(ContinuationCancelSourceCancel);
 	case EAvidScriptHostBindingId::ContinuationCancelSourceRelease: return reinterpret_cast<void*>(ContinuationCancelSourceRelease);
 	case EAvidScriptHostBindingId::ContinuationBindCancel: return reinterpret_cast<void*>(ContinuationBindCancel);
+	case EAvidScriptHostBindingId::ContinuationResultRead: return reinterpret_cast<void*>(ContinuationResultRead);
 	case EAvidScriptHostBindingId::EventSubscribe: return reinterpret_cast<void*>(EventSubscribe);
 	case EAvidScriptHostBindingId::EventUnsubscribe: return reinterpret_cast<void*>(EventUnsubscribe);
 	case EAvidScriptHostBindingId::DataLaneGetEpoch: return reinterpret_cast<void*>(DataLaneGetEpoch);

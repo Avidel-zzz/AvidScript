@@ -973,8 +973,8 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 12) "semantic artifact schema version is not 12"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.12") "semantic artifact version is not 1.12"
+Assert-Condition ($SemanticJson.schema_version -eq 13) "semantic artifact schema version is not 13"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.13") "semantic artifact version is not 1.13"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
@@ -1038,7 +1038,7 @@ Assert-Condition (@($GuestIrJson.exports | Where-Object {
 }).Count -eq 1) "Guest IR does not export avid_on_continuation_v2 exactly once"
 Assert-Condition (@($GuestIrJson.exports | Where-Object {
     [string]$_.name -ceq 'avid_on_continuation'
-}).Count -eq 0) "Semantic 12 Guest IR retained the legacy continuation export"
+}).Count -eq 0) "Semantic 13 Guest IR retained the legacy continuation export"
 Assert-Condition (@($GuestIrJson.functions | Where-Object {
     [string]$_.id -clike 'function:synthetic:async_resume:*'
 }).Count -eq 2) "Guest IR does not contain two controlled async resume functions"
