@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; the P57.12C13 structured async control-flow extension is frozen by documents.plan and preserves the C12 state-frame and Host ABI contracts"
+    "revision_reason": "The phase architecture remains version 6; the P57.12C14 continuation CFG extension is frozen by documents.plan and preserves the C12 state-frame and Host ABI contracts"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12C13_Structured_Async_Control_Flow_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C13_Structured_Async_Control_Flow.md"
+    "plan": "Docs/Phase57/P57.12C14_Nested_Await_Continuation_CFG_Plan.md",
+    "closeout": "Docs/Phase57/P57.12C14_Nested_Await_Continuation_CFG.md"
   },
   "batches": [
     {
@@ -232,6 +232,12 @@
       "status": "Completed",
       "evidence": "commits fe1df60 and dad046f; Semantic 1.16 structured async projection, exact backward liveness and Guest basic-block lowering now cover local reassignment, if/else, while, do/while, for, break, continue and return between top-level awaits without new Host imports, API-name wrappers or a Runtime AST interpreter. Fixed .NET 239/239, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean dad046f/8e0936f architecture gate passed. Nested await remains fail closed and P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T18:05:07.3056952Z"
+    },
+    {
+      "id": "P57.12C14",
+      "status": "Completed",
+      "evidence": "commit 1e65134; Semantic 1.17 continuation CFG, exact CFG fixed-point liveness and Guest synchronous-reachability lowering now cover direct await inside if/else, while, do/while and for bodies with break, continue and return, without new Host imports, API-name wrappers, CLR Task Runtime or a Runtime AST interpreter. Fixed .NET 242/242, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean 1e65134/52d33e5 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T19:12:04.1945116Z"
     }
   ],
   "debt": [
@@ -251,8 +257,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C13 concentrated review confirms method-wide node/depth budgets, exact backward liveness across assignment, branch, loop and control-transfer edges, await-result definition semantics, deterministic Guest basic blocks and preservation of the C12 whole-frame ABI. Fixed .NET 239/239, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 365/365 and clean candidate architecture gate passed. Nested await remains fail closed and P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-29T18:05:07.3056952Z"
+    "evidence": "P57.12C14 concentrated review confirms bounded deterministic continuation CFGs, exact fixed-point liveness across branch and loop resume edges, await-result definition semantics, synchronous reachability projection, stable callback program-counter identity and preservation of the C12 whole-frame and Host ABI contracts. The segment-limit fail-closed path was hardened after review and is covered by final Semantic 82/82. Fixed .NET 242/242, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 365/365 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-29T19:12:04.1945116Z"
   },
   "budgets": {
     "ubt": 2,
@@ -260,25 +266,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 25,
-    "automation": 27,
-    "full_gate": 10
+    "ubt": 27,
+    "automation": 30,
+    "full_gate": 11
   },
   "freeze": {
-    "source_commit": "dad046f771877356a97c6c2549c372eb2d502bd1",
-    "source_tree": "8e0936fc1cce50cd385152084efb3df776861105",
+    "source_commit": "1e651347dd4e6b1993cd730afced88ab1e6fa451",
+    "source_tree": "52d33e5b68282f876d25d1f2100ec6b9a9a8b3ea",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C13_Structured_Async_Control_Flow.md",
-    "at_utc": "2026-08-29T18:05:07.3056952Z"
+    "review_evidence": "Docs/Phase57/P57.12C14_Nested_Await_Continuation_CFG.md",
+    "at_utc": "2026-08-29T19:12:04.1945116Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C13_Architecture_dad046f_20260830.log",
-    "report_sha256": "d6dd5f1162e471cc4a709e616d1f67d2adf43d7d5fceed48a2db03c40d452609",
-    "run_id": "P57.12C13-clean-architecture-final",
-    "verified_commit": "dad046f771877356a97c6c2549c372eb2d502bd1",
-    "verified_tree": "8e0936fc1cce50cd385152084efb3df776861105",
-    "attestation_parent": "dad046f771877356a97c6c2549c372eb2d502bd1",
-    "attested_at_utc": "2026-08-29T18:05:07.3056952Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C14_Architecture_1e65134_20260830.log",
+    "report_sha256": "106dfb15ae25936b5a637fabca7c8dceb457567b0251dac1f317162e14deac94",
+    "run_id": "P57.12C14-clean-architecture-final",
+    "verified_commit": "1e651347dd4e6b1993cd730afced88ab1e6fa451",
+    "verified_tree": "52d33e5b68282f876d25d1f2100ec6b9a9a8b3ea",
+    "attestation_parent": "1e651347dd4e6b1993cd730afced88ab1e6fa451",
+    "attested_at_utc": "2026-08-29T19:12:04.1945116Z"
   },
   "protected_dirty": [
     {
@@ -301,6 +307,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 35,
-  "updated_at_utc": "2026-08-29T18:05:07.3056952Z"
+  "revision": 36,
+  "updated_at_utc": "2026-08-29T19:12:04.1945116Z"
 }

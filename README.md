@@ -10,7 +10,7 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12C13" src="https://img.shields.io/badge/Status-Phase%2057.12C13-159957">
+  <img alt="Phase 57.12C14" src="https://img.shields.io/badge/Status-Phase%2057.12C14-159957">
   <img alt="Automation 365/365" src="https://img.shields.io/badge/Automation-365%2F365-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
@@ -221,22 +221,23 @@ UE 游戏逻辑：
 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
 public static async void BeginPlay()
 {
-    int movementCount;
-    if (UE.Self.IsActorTickEnabled())
+    AvidLoadedObject mesh = await AvidAssets.LoadObjectAsync(
+        "/Engine/EngineMeshes/Cube.Cube");
+    if (!mesh.IsValid)
     {
-        movementCount = 2;
+        return;
     }
-    else
-    {
-        movementCount = 1;
-    }
-
-    await AvidContinuations.NextTickAsync();
 
     FVector step = new FVector(10.0f, 0.0f, 0.0f);
-    for (int index = 0; index < movementCount; ++index)
+    for (int pass = 0; pass < 2; ++pass)
     {
+        await AvidContinuations.NextTickAsync();
         UE.Self.AddActorWorldOffset(step);
+    }
+
+    if (UE.Self.IsActorTickEnabled())
+    {
+        await AvidContinuations.DelayAsync(0.01f);
     }
 }
 ```
@@ -279,7 +280,12 @@ P57.12C13 已把 await 之间的局部声明与重赋值、`if/else`、`while`�
 `break`、`continue` 和 `return` lowering 为确定性 WASM 基本块。逆向活跃性会处理分支合流、
 循环不动点和控制转移，只有真正跨 await 活跃的 local 才进入状态帧；循环回边不产生 Host 往返。
 
-当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及多个顶层直接
+P57.12C14 进一步加入显式 continuation CFG。受支持的 `if/else` 与循环体现在可以直接包含 await；
+resume callback 就是恢复程序计数器，Guest 为每个入口物化同步可达基本块，循环中的同一 await
+可以在每轮重新调度。CFG 固定点活跃性只保存恢复路径真正需要的 local，没有新增 Host import、
+Runtime AST 解释器或按 API 名称分支。
+
+当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及在受支持控制流中的直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
 `FooAsync(...)`。旧 callback API、旧 Semantic 产物与
 `avid_on_continuation_v2` 继续兼容。
@@ -295,7 +301,7 @@ trap 会回滚本次借出的对象 capability。
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
-| 受控 async/await | 多个顺序 await、固定布局 local 跨 await、局部重赋值、`if/else`、`for`/`while`/`do`、`break`/`continue`/`return`、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
+| 受控 async/await | 多个顺序 await、分支/循环内部 await、固定布局 local 跨 await、局部重赋值、`if/else`、`for`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
@@ -398,7 +404,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 正式性能候选：
 [`4c10239`](https://github.com/Avidel-zzz/AvidScript/commit/4c1023989596bba112de345b5533546655559df7)；
 当前功能候选：
-[`dad046f`](https://github.com/Avidel-zzz/AvidScript/commit/dad046f771877356a97c6c2549c372eb2d502bd1)。
+[`1e65134`](https://github.com/Avidel-zzz/AvidScript/commit/1e651347dd4e6b1993cd730afced88ab1e6fa451)。
 
 ## 架构
 
@@ -536,7 +542,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [PlayablePickup](Samples/CSharp/PlayablePickup/README.md) | Overlap、Gameplay Event、持久状态与热重载 |
 | [ComponentGameplay](Samples/CSharp/ComponentGameplay/ComponentGameplay.cs) | 创建/查询组件、Attach、Tick 调用与 EndPlay 释放 |
 | [BidirectionalProperties](Samples/CSharp/BidirectionalProperties/README.md) | C# 与 UE 属性双向读写 |
-| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | async `BeginPlay`、跨三个 await 的 FVector/对象 local、`Tick` / `EndPlay`、Timer Continuation 与异步对象加载 |
+| [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | async `BeginPlay`、循环/分支内部 await、跨三个 await 的 FVector/对象 local、`Tick` / `EndPlay`、Timer Continuation 与异步对象加载 |
 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | Reflection 生成 `UKismetSystemLibrary.DelayAsync`，在 `BeginPlay` 中等待后恢复 UE 游戏逻辑 |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
@@ -547,7 +553,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
 - 一维 `TArray<T>` 已支持首批固定元素类型；nested array、字符串元素、`TSet`、`TMap` 尚未支持；
 - 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
-- 受控 `async/await` 已支持顶层顺序等待、typed outcome、固定布局 local 状态帧、await 之间的分支/循环/控制转移与宿主 activation 失效抑制；await 仍必须位于方法体顶层，分支或循环内部 await、`switch`、`foreach`、string/array 等动态布局 local、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
+- 受控 `async/await` 已支持顺序等待、分支/循环内部的直接 await、typed outcome、固定布局 local 状态帧、控制转移与宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，条件表达式与 `for` header 中的 await、`switch`、`foreach`、string/array 等动态布局 local、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
   latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
@@ -560,7 +566,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 在现有 bounded state frame 上扩展受控 async 的重赋值、分支合流、循环与 helper 调用链，并为动态布局值建立独立所有权合同；
+1. 在现有 continuation CFG 与 bounded state frame 上扩展 `switch`、`foreach`、helper 调用链，并为动态布局值建立独立所有权合同；
 2. 用 C# 完成真实小型游戏 Demo，固化生命周期、对象创建、事件和热重载工作流；
 3. 扩展 string element、nested array、`TSet`/`TMap`，继续压缩 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -576,13 +582,13 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C13 的 **365/365 通过**，固定 .NET
-完整基线为 `239/239`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-增量构建成功，clean candidate `dad046f/8e0936f` 架构门禁通过。C13 已完成 await 之间的
-结构化分支、循环、局部重赋值与控制转移，并以精确逆向活跃性保持 C12 状态帧 ABI。
+当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C14 的 **365/365 通过**，固定 .NET
+完整基线为 `242/242`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
+增量构建成功，clean candidate `1e65134/52d33e5` 架构门禁通过。C14 已完成分支与循环内部
+直接 await 的 continuation CFG、恢复入口物化与精确 CFG 活跃性，并保持 C12 状态帧及 Host ABI。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12C13 中文完成报告](Docs/Phase57/P57.12C13_Structured_Async_Control_Flow.md)。
+[P57.12C14 中文完成报告](Docs/Phase57/P57.12C14_Nested_Await_Continuation_CFG.md)。
 
 工程规则：
 
