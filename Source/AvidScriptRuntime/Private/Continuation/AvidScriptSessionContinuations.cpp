@@ -148,6 +148,21 @@ bool FAvidScriptContinuationHostEndpoint::BeginLatent(
 			OutReservation);
 }
 
+bool FAvidScriptContinuationHostEndpoint::BeginLatentWithCompletion(
+	const int32 CallbackId,
+	const FAvidScriptBindingLatentCompletionContract& Completion,
+	FAvidScriptBindingLatentReservation& OutReservation)
+{
+	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
+	return bValid && PinnedOwner
+		&& PinnedOwner->BeginLatentWithCompletion(
+			Lane,
+			ActivationSerial,
+			CallbackId,
+			Completion,
+			OutReservation);
+}
+
 bool FAvidScriptContinuationHostEndpoint::CommitLatent(const int64 Token)
 {
 	const TSharedPtr<FAvidScriptSessionContinuations> PinnedOwner = Owner.Pin();
@@ -283,6 +298,15 @@ void FAvidScriptSessionContinuations::CommitPrepared()
 		}
 	}
 	for (FCancellationSourceSlot& Slot : CancellationSourceSlots)
+	{
+		if (Slot.Entry.IsSet()
+			&& Slot.Entry->Lane == EAvidScriptContinuationLane::Prepared
+			&& Slot.Entry->ActivationSerial == PreparedActivation)
+		{
+			Slot.Entry->Lane = EAvidScriptContinuationLane::Active;
+		}
+	}
+	for (FResultSlot& Slot : ResultSlots)
 	{
 		if (Slot.Entry.IsSet()
 			&& Slot.Entry->Lane == EAvidScriptContinuationLane::Prepared
@@ -990,10 +1014,37 @@ bool FAvidScriptSessionContinuations::BeginLatent(
 	const int32 CallbackId,
 	FAvidScriptBindingLatentReservation& OutReservation)
 {
+	FAvidScriptBindingLatentCompletionContract Completion;
+	return BeginLatentWithCompletion(
+		Lane,
+		ActivationSerial,
+		CallbackId,
+		Completion,
+		OutReservation);
+}
+
+bool FAvidScriptSessionContinuations::BeginLatentWithCompletion(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int32 CallbackId,
+	const FAvidScriptBindingLatentCompletionContract& Completion,
+	FAvidScriptBindingLatentReservation& OutReservation)
+{
 	OutReservation = {};
+	const bool bNoneCompletion = Completion.Mode == TEXT("none")
+		&& Completion.ProviderId.IsEmpty()
+		&& Completion.PayloadTypeId.IsEmpty()
+		&& !Completion.Provider.IsValid();
+	const bool bProviderCompletion = Completion.IsProvider()
+		&& Completion.StatusPolicy == TEXT("abandon_on_cancel")
+		&& Completion.bCancellable
+		&& Completion.Provider->GetProviderId() == Completion.ProviderId
+		&& Completion.Provider->GetPayloadTypeId()
+			== Completion.PayloadTypeId;
 	if (!IsInGameThread()
 		|| bTearingDown
 		|| CallbackId < 0
+		|| (!bNoneCompletion && !bProviderCompletion)
 		|| !MatchesCurrentEndpoint(Lane, ActivationSerial)
 		|| OccupiedSlotCount >= MaximumPendingContinuations)
 	{
@@ -1013,6 +1064,7 @@ bool FAvidScriptSessionContinuations::BeginLatent(
 	Entry.CallbackId = CallbackId;
 	Entry.World = GetWorldForLane(Lane);
 	Entry.ProducerKind = EProducerKind::LatentAction;
+	Entry.LatentCompletion = Completion;
 	const int64 Token = AllocateEntry(MoveTemp(Entry));
 	if (Token == 0)
 	{
@@ -1132,6 +1184,62 @@ bool FAvidScriptSessionContinuations::AbortLatent(
 	CancelEntryProducer(Slot.Entry.GetValue());
 	RemoveReadyToken(Token);
 	ReleaseSlot(SlotIndex);
+	return true;
+}
+
+bool FAvidScriptSessionContinuations::ConsumeResult(
+	const EAvidScriptContinuationLane Lane,
+	const uint64 ActivationSerial,
+	const int32 SlotNumber,
+	const int32 Generation,
+	const FString& ExpectedTypeId,
+	TArray<uint64>& OutAbiCells)
+{
+	OutAbiCells.Reset();
+	if (!IsInGameThread()
+		|| SlotNumber <= 0
+		|| Generation <= 0
+		|| ExpectedTypeId.IsEmpty()
+		|| !MatchesCurrentEndpoint(Lane, ActivationSerial))
+	{
+		return false;
+	}
+	const uint32 SlotIndex = static_cast<uint32>(SlotNumber - 1);
+	if (!ResultSlots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		return false;
+	}
+	FResultSlot& Slot = ResultSlots[SlotIndex];
+	if (Slot.Generation != static_cast<uint32>(Generation)
+		|| !Slot.Entry.IsSet()
+		|| Slot.Entry->Lane != Lane
+		|| Slot.Entry->ActivationSerial != ActivationSerial
+		|| Slot.Entry->TypeId != ExpectedTypeId)
+	{
+		return false;
+	}
+
+	const int64 ContinuationToken = Slot.Entry->ContinuationToken;
+	OutAbiCells = MoveTemp(Slot.Entry->AbiCells);
+	uint32 ContinuationSlotIndex = 0;
+	uint32 ContinuationGeneration = 0;
+	if (UnpackToken(
+			ContinuationToken,
+			ContinuationSlotIndex,
+			ContinuationGeneration)
+		&& Slots.IsValidIndex(static_cast<int32>(ContinuationSlotIndex)))
+	{
+		FSlot& ContinuationSlot = Slots[ContinuationSlotIndex];
+		if (ContinuationSlot.Generation == ContinuationGeneration
+			&& ContinuationSlot.Entry.IsSet()
+			&& ContinuationSlot.Entry->ResultSlot == SlotNumber
+			&& ContinuationSlot.Entry->ResultGeneration == Generation)
+		{
+			ContinuationSlot.Entry->ResultSlot = 0;
+			ContinuationSlot.Entry->ResultGeneration = 0;
+		}
+	}
+	ReleaseResultSlot(SlotIndex);
 	return true;
 }
 
@@ -1264,10 +1372,49 @@ int64 FAvidScriptSessionContinuations::AllocateCancellationSource(
 	return Slot.Entry->Token;
 }
 
+bool FAvidScriptSessionContinuations::AllocateResult(
+	FResultEntry&& Entry,
+	int32& OutSlot,
+	int32& OutGeneration)
+{
+	OutSlot = 0;
+	OutGeneration = 0;
+	if (OccupiedResultSlotCount >= MaximumResultSlots
+		|| Entry.TypeId.IsEmpty()
+		|| Entry.AbiCells.IsEmpty()
+		|| Entry.AbiCells.Num() > MaximumResultPayloadCells)
+	{
+		return false;
+	}
+
+	uint32 SlotIndex = 0;
+	if (!FreeResultSlots.IsEmpty())
+	{
+		SlotIndex = FreeResultSlots.Pop(EAllowShrinking::No);
+	}
+	else
+	{
+		SlotIndex = static_cast<uint32>(ResultSlots.AddDefaulted());
+		ResultSlots[SlotIndex].Generation = AllocateGeneration();
+	}
+	FResultSlot& Slot = ResultSlots[SlotIndex];
+	check(!Slot.Entry.IsSet());
+	if (Slot.Generation == 0)
+	{
+		Slot.Generation = AllocateGeneration();
+	}
+	Slot.Entry.Emplace(MoveTemp(Entry));
+	++OccupiedResultSlotCount;
+	OutSlot = static_cast<int32>(SlotIndex + 1);
+	OutGeneration = static_cast<int32>(Slot.Generation);
+	return true;
+}
+
 void FAvidScriptSessionContinuations::ReleaseSlot(const uint32 SlotIndex)
 {
 	FSlot& Slot = Slots[SlotIndex];
 	check(Slot.Entry.IsSet());
+	ReleaseEntryResult(Slot.Entry.GetValue());
 	UnbindEntryFromCancellationSource(Slot.Entry.GetValue());
 	int32& LaneEntryCount =
 		Slot.Entry->Lane == EAvidScriptContinuationLane::Active
@@ -1292,6 +1439,41 @@ void FAvidScriptSessionContinuations::ReleaseCancellationSourceSlot(
 	FreeCancellationSourceSlots.Add(SlotIndex);
 	check(OccupiedCancellationSourceCount > 0);
 	--OccupiedCancellationSourceCount;
+}
+
+void FAvidScriptSessionContinuations::ReleaseResultSlot(
+	const uint32 SlotIndex)
+{
+	FResultSlot& Slot = ResultSlots[SlotIndex];
+	check(Slot.Entry.IsSet());
+	Slot.Entry.Reset();
+	Slot.Generation = AllocateGeneration();
+	FreeResultSlots.Add(SlotIndex);
+	check(OccupiedResultSlotCount > 0);
+	--OccupiedResultSlotCount;
+}
+
+void FAvidScriptSessionContinuations::ReleaseEntryResult(FEntry& Entry)
+{
+	if (Entry.ResultSlot <= 0 || Entry.ResultGeneration <= 0)
+	{
+		Entry.ResultSlot = 0;
+		Entry.ResultGeneration = 0;
+		return;
+	}
+	const uint32 SlotIndex = static_cast<uint32>(Entry.ResultSlot - 1);
+	if (ResultSlots.IsValidIndex(static_cast<int32>(SlotIndex)))
+	{
+		FResultSlot& Slot = ResultSlots[SlotIndex];
+		if (Slot.Generation == static_cast<uint32>(Entry.ResultGeneration)
+			&& Slot.Entry.IsSet()
+			&& Slot.Entry->ContinuationToken == Entry.Token)
+		{
+			ReleaseResultSlot(SlotIndex);
+		}
+	}
+	Entry.ResultSlot = 0;
+	Entry.ResultGeneration = 0;
 }
 
 void FAvidScriptSessionContinuations::UnbindEntryFromCancellationSource(
@@ -1466,13 +1648,48 @@ void FAvidScriptSessionContinuations::QueueLatentCompletion(FEntry& Entry)
 {
 	check(Entry.ProducerKind == EProducerKind::LatentAction);
 	check(!Entry.bReady && !Entry.bDispatching);
-	Entry.bReady = true;
-	Entry.bLatentCompletionPending = false;
 	FAvidScriptContinuationCompletion Completion;
 	Completion.CallbackId = Entry.CallbackId;
 	Completion.Token = Entry.Token;
 	Completion.Status = EAvidScriptContinuationStatus::Completed;
 	Completion.RegistrationSerial = Entry.RegistrationSerial;
+	if (Entry.LatentCompletion.IsProvider())
+	{
+		FAvidScriptBindingLatentCompletionPayload Payload;
+		const UObject* const CallbackTarget = Entry.LatentProxy.Get();
+		const bool bPayloadReady = IsValid(CallbackTarget)
+			&& Entry.LatentCompletion.Provider->ConsumePayload(
+				Entry.LatentProxy.Get(),
+				1,
+				Payload)
+			&& Payload.TypeId == Entry.LatentCompletion.PayloadTypeId;
+		FResultEntry Result;
+		Result.Lane = Entry.Lane;
+		Result.ActivationSerial = Entry.ActivationSerial;
+		Result.ContinuationToken = Entry.Token;
+		Result.TypeId = MoveTemp(Payload.TypeId);
+		Result.AbiCells = MoveTemp(Payload.AbiCells);
+		if (!bPayloadReady
+			|| !AllocateResult(
+				MoveTemp(Result),
+				Entry.ResultSlot,
+				Entry.ResultGeneration))
+		{
+			Entry.LatentCompletion.Provider->AbandonPayload(
+				Entry.LatentProxy.Get(),
+				1);
+			Completion.Status = EAvidScriptContinuationStatus::Failed;
+			Entry.ResultSlot = 0;
+			Entry.ResultGeneration = 0;
+		}
+		else
+		{
+			Completion.ObjectSlot = Entry.ResultSlot;
+			Completion.ObjectGeneration = Entry.ResultGeneration;
+		}
+	}
+	Entry.bReady = true;
+	Entry.bLatentCompletionPending = false;
 	ReadyCompletions.Add(FReadyCompletion{
 		Entry.Lane,
 		Entry.ActivationSerial,
@@ -1493,6 +1710,14 @@ void FAvidScriptSessionContinuations::CancelEntryProducer(FEntry& Entry)
 	}
 	if (Entry.ProducerKind == EProducerKind::LatentAction)
 	{
+		if (Entry.LatentCompletion.IsProvider()
+			&& Entry.LatentProxy.IsValid()
+			&& Entry.ResultSlot == 0)
+		{
+			Entry.LatentCompletion.Provider->AbandonPayload(
+				Entry.LatentProxy.Get(),
+				1);
+		}
 		RetireLatentProxy(Entry);
 		return;
 	}

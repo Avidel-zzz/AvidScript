@@ -4,6 +4,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptBindingLatent.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
@@ -19,6 +20,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
+#include "Misc/ScopeExit.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -212,6 +214,51 @@ FAvidScriptBindingPackageModel MakeV7CanonicalSerializerPackage()
 		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Package);
 	return Package;
 }
+
+class FAvidScriptDescriptorLatentProvider final
+	: public IAvidScriptLatentCompletionProvider
+{
+public:
+	FAvidScriptDescriptorLatentProvider(
+		FString InFunctionPath,
+		FString InPayloadTypeId)
+		: FunctionPath(MoveTemp(InFunctionPath))
+		, PayloadTypeId(MoveTemp(InPayloadTypeId))
+	{
+	}
+
+	FString GetProviderId() const override
+	{
+		return TEXT("avidscript.test.score.v1");
+	}
+
+	FString GetFunctionPath() const override
+	{
+		return FunctionPath;
+	}
+
+	FString GetPayloadTypeId() const override
+	{
+		return PayloadTypeId;
+	}
+
+	bool ConsumePayload(
+		UObject* CallbackTarget,
+		int32 UUID,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload) override
+	{
+		OutPayload = {};
+		return false;
+	}
+
+	void AbandonPayload(UObject* CallbackTarget, int32 UUID) override
+	{
+	}
+
+private:
+	FString FunctionPath;
+	FString PayloadTypeId;
+};
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -993,6 +1040,133 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			DescriptorJson,
 			RuntimePackage,
 			LoadResult));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorLatentV13Test,
+	"AvidScript.Editor.BindingDescriptor.LatentV13",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
+	const FString& Parameters)
+{
+	UFunction* const Function =
+		UAvidScriptEditorLatentFunctionLibraryTestObject::StaticClass()
+			->FindFunctionByName(TEXT("WaitForScore"));
+	if (!TestNotNull(TEXT("Provider latent function resolves"), Function))
+	{
+		return false;
+	}
+	const FString PayloadTypeId =
+		FAvidScriptBindingDescriptorIdentity::MakeTypeStableId(
+			TEXT("scalar:i32"),
+			{});
+	const TSharedRef<FAvidScriptDescriptorLatentProvider> Provider =
+		MakeShared<FAvidScriptDescriptorLatentProvider>(
+			Function->GetPathName(),
+			PayloadTypeId);
+	FString RegistryError;
+	bool bRegistered =
+		FAvidScriptLatentCompletionProviderRegistry::Register(
+			Provider,
+			RegistryError);
+	if (!TestTrue(TEXT("Explicit completion provider registers"), bRegistered))
+	{
+		AddError(RegistryError);
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		if (bRegistered)
+		{
+			FAvidScriptLatentCompletionProviderRegistry::Unregister(Provider);
+		}
+	};
+
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+		TEXT("Registered provider raises its latent descriptor to v13"),
+		FAvidScriptEditorBindingDescriptorGenerator::Generate(
+			TEXT("avidscript.test.latent_v13"),
+			{
+				{
+					TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+					TEXT("WaitForScore")
+				}
+			},
+			DescriptorJson,
+			GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+		TEXT("Provider descriptor parses through schema v13"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Package,
+			ParseCategory,
+			ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	TestEqual(TEXT("Provider latent package uses schema v13"), Package.SchemaVersion, 13);
+	TestEqual(TEXT("Provider latent package has one binding"), Package.Bindings.Num(), 1);
+	if (Package.Bindings.Num() == 1)
+	{
+		const FAvidScriptBindingLatentCompletionModel& Completion =
+			Package.Bindings[0].Completion;
+		TestEqual(TEXT("Completion mode is explicit provider"), Completion.Mode, FString(TEXT("provider")));
+		TestEqual(TEXT("Provider identity is frozen"), Completion.ProviderId, Provider->GetProviderId());
+		TestEqual(TEXT("Payload type identity is frozen"), Completion.PayloadTypeId, PayloadTypeId);
+		TestEqual(TEXT("Cancellation policy is frozen"), Completion.StatusPolicy, FString(TEXT("abandon_on_cancel")));
+		TestTrue(TEXT("Provider latent call is cancellable"), Completion.bCancellable);
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Runtime validates provider, UFunction, and payload identities"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			RuntimePackage,
+			LoadResult));
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestFalse(
+		TEXT("C8 does not expose an unimplemented Guest payload facade"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestEqual(
+		TEXT("Guest payload boundary fails with a stable category"),
+		EmitResult.ErrorCategory,
+		FString(TEXT("latent_completion_payload_guest_unsupported")));
+
+	TestTrue(
+		TEXT("Provider unregisters cleanly"),
+		FAvidScriptLatentCompletionProviderRegistry::Unregister(Provider));
+	bRegistered = false;
+	TSharedPtr<const FAvidScriptBindingPackage> MissingProviderPackage;
+	FAvidScriptBindingPackageLoadResult MissingProviderResult;
+	TestFalse(
+		TEXT("Runtime rejects a descriptor after provider removal"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			MissingProviderPackage,
+			MissingProviderResult));
 	return true;
 }
 

@@ -54,6 +54,15 @@ struct FAvidScriptBindingHostImportModel
 	FString Signature;
 };
 
+struct FAvidScriptBindingLatentCompletionModel
+{
+	FString Mode = TEXT("none");
+	FString ProviderId;
+	FString PayloadTypeId;
+	FString StatusPolicy = TEXT("abandon_on_cancel");
+	bool bCancellable = false;
+};
+
 struct FAvidScriptBindingFunctionModel
 {
 	FString StableId;
@@ -67,6 +76,7 @@ struct FAvidScriptBindingFunctionModel
 	FString DispatchMode;
 	FString LatentInfoParameter;
 	FString WorldContextParameter;
+	FAvidScriptBindingLatentCompletionModel Completion;
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString GeneratedImportName;

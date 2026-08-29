@@ -44,6 +44,10 @@ public:
 	bool BeginLatent(
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation) override;
+	bool BeginLatentWithCompletion(
+		int32 CallbackId,
+		const FAvidScriptBindingLatentCompletionContract& Completion,
+		FAvidScriptBindingLatentReservation& OutReservation) override;
 	bool CommitLatent(int64 Token) override;
 	bool AbortLatent(int64 Token) override;
 
@@ -66,6 +70,8 @@ public:
 	static constexpr int32 MaximumRetainedLoadedObjects = 1024;
 	static constexpr int32 MaximumCancellationSources = 1024;
 	static constexpr int32 MaximumCancellationBindings = 4096;
+	static constexpr int32 MaximumResultSlots = 1024;
+	static constexpr int32 MaximumResultPayloadCells = 64;
 
 	explicit FAvidScriptSessionContinuations(
 		TSharedPtr<IAvidScriptAsyncObjectLoader> InAsyncObjectLoader = nullptr);
@@ -100,6 +106,10 @@ public:
 	int32 GetCancellationBindingCountForTesting() const
 	{
 		return CancellationBindingCount;
+	}
+	int32 GetResultSlotCountForTesting() const
+	{
+		return OccupiedResultSlotCount;
 	}
 	int32 GetRetainedLoadedObjectCountForTesting() const
 	{
@@ -142,6 +152,12 @@ public:
 		uint64 ActivationSerial,
 		int32 CallbackId,
 		FAvidScriptBindingLatentReservation& OutReservation);
+	bool BeginLatentWithCompletion(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int32 CallbackId,
+		const FAvidScriptBindingLatentCompletionContract& Completion,
+		FAvidScriptBindingLatentReservation& OutReservation);
 	bool CommitLatent(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
@@ -150,6 +166,13 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		int64 Token);
+	bool ConsumeResult(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int32 Slot,
+		int32 Generation,
+		const FString& ExpectedTypeId,
+		TArray<uint64>& OutAbiCells);
 
 private:
 	friend class UAvidScriptLatentCallbackProxy;
@@ -174,7 +197,10 @@ private:
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
 		TStrongObjectPtr<UObject> LoadedObject;
 		TStrongObjectPtr<UAvidScriptLatentCallbackProxy> LatentProxy;
+		FAvidScriptBindingLatentCompletionContract LatentCompletion;
 		EProducerKind ProducerKind = EProducerKind::Timer;
+		int32 ResultSlot = 0;
+		int32 ResultGeneration = 0;
 		int32 BorrowedHandleCheckpoint = 0;
 		bool bReady = false;
 		bool bDispatching = false;
@@ -207,6 +233,19 @@ private:
 		uint32 Generation = 0;
 		TOptional<FCancellationSourceEntry> Entry;
 	};
+	struct FResultEntry
+	{
+		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
+		uint64 ActivationSerial = 0;
+		int64 ContinuationToken = 0;
+		FString TypeId;
+		TArray<uint64> AbiCells;
+	};
+	struct FResultSlot
+	{
+		uint32 Generation = 0;
+		TOptional<FResultEntry> Entry;
+	};
 	struct FReadyCompletion
 	{
 		EAvidScriptContinuationLane Lane = EAvidScriptContinuationLane::Prepared;
@@ -230,8 +269,14 @@ private:
 
 	int64 AllocateEntry(FEntry&& Entry);
 	int64 AllocateCancellationSource(FCancellationSourceEntry&& Entry);
+	bool AllocateResult(
+		FResultEntry&& Entry,
+		int32& OutSlot,
+		int32& OutGeneration);
 	void ReleaseSlot(uint32 Slot);
 	void ReleaseCancellationSourceSlot(uint32 Slot);
+	void ReleaseResultSlot(uint32 Slot);
+	void ReleaseEntryResult(FEntry& Entry);
 	void UnbindEntryFromCancellationSource(FEntry& Entry);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
@@ -265,6 +310,8 @@ private:
 	TArray<uint32> FreeSlots;
 	TArray<FCancellationSourceSlot> CancellationSourceSlots;
 	TArray<uint32> FreeCancellationSourceSlots;
+	TArray<FResultSlot> ResultSlots;
+	TArray<uint32> FreeResultSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
 	TArray<FRetiredLatentProxy> RetiredLatentProxies;
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
@@ -286,6 +333,7 @@ private:
 	int32 OccupiedSlotCount = 0;
 	int32 OccupiedCancellationSourceCount = 0;
 	int32 CancellationBindingCount = 0;
+	int32 OccupiedResultSlotCount = 0;
 	int32 ActiveEntryCount = 0;
 	int32 PreparedEntryCount = 0;
 	bool bTearingDown = false;

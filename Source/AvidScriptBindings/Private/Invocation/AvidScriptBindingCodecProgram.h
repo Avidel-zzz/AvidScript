@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptBindingLatent.h"
 #include "AvidScriptBindingFastPath.h"
 #include "AvidScriptArrayValueHeap.h"
 #include "AvidScriptBindingInvocationKind.h"
@@ -127,6 +128,7 @@ struct FInvocationCodecProgram
 	FProperty* ReflectedProperty = nullptr;
 	FStructProperty* LatentInfoProperty = nullptr;
 	FObjectPropertyBase* WorldContextProperty = nullptr;
+	FAvidScriptBindingLatentCompletionContract LatentCompletion;
 	FString DebugPath;
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;

@@ -1,6 +1,7 @@
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 
 #include "AvidScriptBindingDescriptor.h"
+#include "AvidScriptBindingLatent.h"
 #include "AvidScriptEditorBindingDelegateEventSelectionResolver.h"
 #include "AvidScriptEditorBindingPropertySelectionResolver.h"
 #include "AvidScriptEditorBindingSelectionResolver.h"
@@ -33,6 +34,7 @@ constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
 constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
 constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
 constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
+constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C8.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -51,6 +53,10 @@ struct FResolvedBindingDescriptor
 	FString DispatchMode = TEXT("cached_process_event");
 	FString LatentInfoParameter;
 	FString WorldContextParameter;
+	FString CompletionMode = TEXT("none");
+	FString CompletionProviderId;
+	FString CompletionPayloadTypeId;
+	FString CompletionStatusPolicy = TEXT("abandon_on_cancel");
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
@@ -121,7 +127,10 @@ FString MakeCanonicalIdentity(
 	const FAvidScriptProjectedFunction& Projection,
 	const FString& DispatchMode,
 	const FString& LatentInfoParameter = FString(),
-	const FString& WorldContextParameter = FString())
+	const FString& WorldContextParameter = FString(),
+	const FString& CompletionMode = TEXT("none"),
+	const FString& CompletionProviderId = FString(),
+	const FString& CompletionPayloadTypeId = FString())
 {
 	FString Identity = OwnerClass->GetPathName()
 		+ TEXT("::")
@@ -142,6 +151,14 @@ FString MakeCanonicalIdentity(
 	{
 		Identity += TEXT("|latent_info=") + LatentInfoParameter
 			+ TEXT("|world_context=") + WorldContextParameter;
+		if (CompletionMode == TEXT("provider"))
+		{
+			Identity += TEXT("|completion=provider|provider_id=")
+				+ CompletionProviderId
+				+ TEXT("|payload_type_id=")
+				+ CompletionPayloadTypeId
+				+ TEXT("|status_policy=abandon_on_cancel|cancellable=1");
+		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 		Identity,
@@ -517,6 +534,19 @@ bool GenerateBindingDescriptor(
 		Binding.UeMember = Function->GetName();
 		Binding.LatentInfoParameter = LatentContract.LatentInfoParameter;
 		Binding.WorldContextParameter = LatentContract.WorldContextParameter;
+		if (LatentContract.bLatent)
+		{
+			const TSharedPtr<IAvidScriptLatentCompletionProvider> Provider =
+				FAvidScriptLatentCompletionProviderRegistry::FindByFunctionPath(
+					Function->GetPathName());
+			if (Provider.IsValid())
+			{
+				Binding.CompletionMode = TEXT("provider");
+				Binding.CompletionProviderId = Provider->GetProviderId();
+				Binding.CompletionPayloadTypeId =
+					Provider->GetPayloadTypeId();
+			}
+		}
 		FString ProjectionErrorSource;
 		const bool bProjected = LatentContract.bLatent
 			? FAvidScriptEditorReflectedTypePolicy::ProjectLatentFunction(
@@ -564,7 +594,10 @@ bool GenerateBindingDescriptor(
 			Binding.Projection,
 			TEXT("cached_process_event"),
 			Binding.LatentInfoParameter,
-			Binding.WorldContextParameter);
+			Binding.WorldContextParameter,
+			Binding.CompletionMode,
+			Binding.CompletionProviderId,
+			Binding.CompletionPayloadTypeId);
 		if (bGeneratedNative)
 		{
 			FString EligibilityCategory;
@@ -617,7 +650,10 @@ bool GenerateBindingDescriptor(
 				Binding.Projection,
 				Binding.DispatchMode,
 				Binding.LatentInfoParameter,
-				Binding.WorldContextParameter);
+				Binding.WorldContextParameter,
+				Binding.CompletionMode,
+				Binding.CompletionProviderId,
+				Binding.CompletionPayloadTypeId);
 		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		if (!bGeneratedNative)
@@ -1063,6 +1099,24 @@ bool GenerateBindingDescriptor(
 	{
 		return Left.CanonicalType.Compare(Right.CanonicalType, ESearchCase::CaseSensitive) < 0;
 	});
+	for (const FResolvedBindingDescriptor& Binding : Bindings)
+	{
+		if (Binding.CompletionMode == TEXT("provider")
+			&& !Types.ContainsByPredicate(
+				[&Binding](const FAvidScriptProjectedBindingType& Type)
+				{
+					return Type.StableId
+						== Binding.CompletionPayloadTypeId;
+				}))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("latent_completion_payload_type_missing"),
+				Binding.Function->GetPathName(),
+				TEXT("Register a payload type identity present in the selected descriptor type graph."));
+			return false;
+		}
+	}
 
 	FAvidScriptBindingPackageModel Package;
 	const bool bHasWritableProperties = Bindings.ContainsByPredicate(
@@ -1096,6 +1150,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.DispatchMode == TEXT("latent_process_event");
 		});
+	const bool bHasLatentPayloadBindings = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.CompletionMode == TEXT("provider");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1118,7 +1177,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 12;
 	}
-	Package.GeneratorVersion = bHasLatentBindings
+	if (bHasLatentPayloadBindings)
+	{
+		Package.SchemaVersion = 13;
+	}
+	Package.GeneratorVersion = bHasLatentPayloadBindings
+		? LatentPayloadGeneratorVersion
+		: bHasLatentBindings
 		? LatentGeneratorVersion
 		: !DelegateEvents.IsEmpty()
 		? DelegateEventGeneratorVersion
@@ -1171,6 +1236,18 @@ bool GenerateBindingDescriptor(
 		BindingModel.DispatchMode = Binding.DispatchMode;
 		BindingModel.LatentInfoParameter = Binding.LatentInfoParameter;
 		BindingModel.WorldContextParameter = Binding.WorldContextParameter;
+		if (Package.SchemaVersion >= 13
+			&& Binding.DispatchMode == TEXT("latent_process_event"))
+		{
+			BindingModel.Completion.Mode = Binding.CompletionMode;
+			BindingModel.Completion.ProviderId =
+				Binding.CompletionProviderId;
+			BindingModel.Completion.PayloadTypeId =
+				Binding.CompletionPayloadTypeId;
+			BindingModel.Completion.StatusPolicy =
+				Binding.CompletionStatusPolicy;
+			BindingModel.Completion.bCancellable = true;
+		}
 		BindingModel.GeneratedShape = Binding.GeneratedShape;
 		BindingModel.GeneratedReceiverMode = Binding.GeneratedReceiverMode;
 		BindingModel.GeneratedImportName = Binding.ImportName;

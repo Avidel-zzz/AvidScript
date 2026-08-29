@@ -717,6 +717,48 @@ bool ParseAvidScriptBindingFunction(
 			return false;
 		}
 	}
+	if (SchemaVersion >= 13
+		&& OutBinding.DispatchMode == TEXT("latent_process_event"))
+	{
+		const TSharedPtr<FJsonObject>* Completion = nullptr;
+		if (!Object->TryGetObjectField(TEXT("completion"), Completion)
+			|| Completion == nullptr
+			|| !Completion->IsValid()
+			|| !ReadAvidScriptBindingRequiredString(
+				*Completion,
+				TEXT("mode"),
+				OutBinding.Completion.Mode,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				*Completion,
+				TEXT("provider_id"),
+				OutBinding.Completion.ProviderId,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				*Completion,
+				TEXT("payload_type_id"),
+				OutBinding.Completion.PayloadTypeId,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredString(
+				*Completion,
+				TEXT("status_policy"),
+				OutBinding.Completion.StatusPolicy,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredBool(
+				*Completion,
+				TEXT("cancellable"),
+				OutBinding.Completion.bCancellable,
+				OutErrorSource))
+		{
+			OutErrorSource = TEXT("completion");
+			return false;
+		}
+	}
+	else if (Object->HasField(TEXT("completion")))
+	{
+		OutErrorSource = TEXT("completion");
+		return false;
+	}
 
 	if (SchemaVersion == 2)
 	{
@@ -1618,6 +1660,19 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		{
 			Key += TEXT("|latent_info=") + Binding.LatentInfoParameter
 				+ TEXT("|world_context=") + Binding.WorldContextParameter;
+			if (Package.SchemaVersion >= 13)
+			{
+				Key += TEXT("|completion=") + Binding.Completion.Mode
+					+ TEXT("|provider_id=") + Binding.Completion.ProviderId
+					+ TEXT("|payload_type_id=")
+					+ Binding.Completion.PayloadTypeId
+					+ TEXT("|status_policy=")
+					+ Binding.Completion.StatusPolicy
+					+ TEXT("|cancellable=")
+					+ (Binding.Completion.bCancellable
+						? TEXT("1")
+						: TEXT("0"));
+			}
 		}
 		SelectionKeys.Add(MoveTemp(Key));
 	}
@@ -1643,7 +1698,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 11
+	FString Identity(Package.SchemaVersion >= 13
+		? TEXT("descriptor_selection_v13")
+		: Package.SchemaVersion >= 11
 		? TEXT("descriptor_selection_v11")
 		: Package.SchemaVersion >= 9
 		? TEXT("descriptor_selection_v9")
@@ -1799,7 +1856,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 11
+	FString Identity(Package.SchemaVersion >= 13
+		? TEXT("descriptor_package_v13")
+		: Package.SchemaVersion >= 11
 		? TEXT("descriptor_package_v11")
 		: Package.SchemaVersion >= 9
 		? TEXT("descriptor_package_v9")
@@ -1906,6 +1965,31 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 				Identity,
 				TEXT("world_context_parameter"),
 				Binding.WorldContextParameter);
+			if (Package.SchemaVersion >= 13)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("completion_mode"),
+					Binding.Completion.Mode);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("completion_provider"),
+					Binding.Completion.ProviderId);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("completion_payload_type"),
+					Binding.Completion.PayloadTypeId);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("completion_status_policy"),
+					Binding.Completion.StatusPolicy);
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("completion_cancellable"),
+					Binding.Completion.bCancellable
+						? TEXT("1")
+						: TEXT("0"));
+			}
 		}
 		if (Binding.DispatchMode == TEXT("generated_native_s1"))
 		{
@@ -2071,7 +2155,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 9
 			&& OutPackage.SchemaVersion != 10
 			&& OutPackage.SchemaVersion != 11
-			&& OutPackage.SchemaVersion != 12)
+			&& OutPackage.SchemaVersion != 12
+			&& OutPackage.SchemaVersion != 13)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2095,7 +2180,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 9
 				&& OutPackage.SchemaVersion != 10
 				&& OutPackage.SchemaVersion != 11
-				&& OutPackage.SchemaVersion != 12)
+				&& OutPackage.SchemaVersion != 12
+				&& OutPackage.SchemaVersion != 13)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -2313,6 +2399,27 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 		const bool bLatentBinding =
 			Binding.BindingKind == TEXT("function")
 			&& Binding.DispatchMode == TEXT("latent_process_event");
+		const bool bCompletionValid = OutPackage.SchemaVersion < 13
+			? Binding.Completion.Mode == TEXT("none")
+				&& Binding.Completion.ProviderId.IsEmpty()
+				&& Binding.Completion.PayloadTypeId.IsEmpty()
+				&& !Binding.Completion.bCancellable
+			: !bLatentBinding
+				? Binding.Completion.Mode == TEXT("none")
+					&& Binding.Completion.ProviderId.IsEmpty()
+					&& Binding.Completion.PayloadTypeId.IsEmpty()
+					&& !Binding.Completion.bCancellable
+				: Binding.Completion.StatusPolicy == TEXT("abandon_on_cancel")
+					&& Binding.Completion.bCancellable
+					&& ((Binding.Completion.Mode == TEXT("none")
+							&& Binding.Completion.ProviderId.IsEmpty()
+							&& Binding.Completion.PayloadTypeId.IsEmpty())
+						|| (Binding.Completion.Mode == TEXT("provider")
+							&& !Binding.Completion.ProviderId.IsEmpty()
+							&& IsAvidScriptBindingLowerSha256(
+								Binding.Completion.PayloadTypeId)
+							&& TypeIds.Contains(
+								Binding.Completion.PayloadTypeId)));
 		FString ExpectedLatentSignature;
 		if (bLatentBinding)
 		{
@@ -2336,6 +2443,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					: FString(),
 				Binding.UeFunction);
 		if (!bParsedBinding
+			|| !bCompletionValid
 			|| Binding.Ordinal != Index
 			|| (Binding.BindingKind == TEXT("function")
 				&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(

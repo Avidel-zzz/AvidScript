@@ -415,6 +415,7 @@ struct FAvidScriptRuntimeLatentContract
 {
 	FStructProperty* LatentInfoProperty = nullptr;
 	FObjectPropertyBase* WorldContextProperty = nullptr;
+	FAvidScriptBindingLatentCompletionContract Completion;
 };
 
 bool ResolveAvidScriptRuntimeLatentContract(
@@ -464,6 +465,28 @@ bool ResolveAvidScriptRuntimeLatentContract(
 					OutContract.WorldContextProperty->PropertyClass))))
 	{
 		return false;
+	}
+	if (Binding.Completion.Mode == TEXT("provider"))
+	{
+		const TSharedPtr<IAvidScriptLatentCompletionProvider> Provider =
+			FAvidScriptLatentCompletionProviderRegistry::FindByProviderId(
+				Binding.Completion.ProviderId);
+		if (!Provider.IsValid()
+			|| Provider->GetFunctionPath() != Function->GetPathName()
+			|| Provider->GetPayloadTypeId()
+				!= Binding.Completion.PayloadTypeId)
+		{
+			return false;
+		}
+		OutContract.Completion.Mode = Binding.Completion.Mode;
+		OutContract.Completion.ProviderId = Binding.Completion.ProviderId;
+		OutContract.Completion.PayloadTypeId =
+			Binding.Completion.PayloadTypeId;
+		OutContract.Completion.StatusPolicy =
+			Binding.Completion.StatusPolicy;
+		OutContract.Completion.bCancellable =
+			Binding.Completion.bCancellable;
+		OutContract.Completion.Provider = Provider;
 	}
 
 	for (TFieldIterator<FProperty> It(Function); It; ++It)
@@ -1153,6 +1176,14 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 	{
 		Identity += TEXT("|latent_info=") + Binding.LatentInfoParameter
 			+ TEXT("|world_context=") + Binding.WorldContextParameter;
+		if (Binding.Completion.Mode == TEXT("provider"))
+		{
+			Identity += TEXT("|completion=provider|provider_id=")
+				+ Binding.Completion.ProviderId
+				+ TEXT("|payload_type_id=")
+				+ Binding.Completion.PayloadTypeId
+				+ TEXT("|status_policy=abandon_on_cancel|cancellable=1");
+		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 		Identity,
@@ -3541,6 +3572,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.bLatent = bLatentBinding;
 		Plan.LatentInfoProperty = LatentContract.LatentInfoProperty;
 		Plan.WorldContextProperty = LatentContract.WorldContextProperty;
+		Plan.LatentCompletion = LatentContract.Completion;
 		Plan.ReloadEffect = Binding.ReloadEffect;
 		Plan.bRequiresWriteAccess = Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
 		Plan.FrameSize = Function->GetStructureSize();

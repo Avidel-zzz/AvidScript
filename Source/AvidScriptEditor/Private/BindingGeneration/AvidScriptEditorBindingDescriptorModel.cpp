@@ -281,6 +281,24 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			Writer->WriteValue(
 				TEXT("world_context_parameter"),
 				Binding.WorldContextParameter);
+			if (Package.SchemaVersion >= 13)
+			{
+				Writer->WriteObjectStart(TEXT("completion"));
+				Writer->WriteValue(TEXT("mode"), Binding.Completion.Mode);
+				Writer->WriteValue(
+					TEXT("provider_id"),
+					Binding.Completion.ProviderId);
+				Writer->WriteValue(
+					TEXT("payload_type_id"),
+					Binding.Completion.PayloadTypeId);
+				Writer->WriteValue(
+					TEXT("status_policy"),
+					Binding.Completion.StatusPolicy);
+				Writer->WriteValue(
+					TEXT("cancellable"),
+					Binding.Completion.bCancellable);
+				Writer->WriteObjectEnd();
+			}
 		}
 		if (Binding.DispatchMode == TEXT("generated_native_s1"))
 		{

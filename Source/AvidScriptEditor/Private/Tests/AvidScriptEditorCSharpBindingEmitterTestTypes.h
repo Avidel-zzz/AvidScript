@@ -404,6 +404,20 @@ public:
 	UFUNCTION(
 		BlueprintCallable,
 		Category = "AvidScript|Tests",
+		meta = (Latent, LatentInfo = "LatentInfo", WorldContext = "WorldContextObject"))
+	static void WaitForScore(
+		UObject* WorldContextObject,
+		int32 Score,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)Score;
+		(void)LatentInfo;
+	}
+
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
 		meta = (
 			Latent,
 			LatentInfo = "LatentInfo",

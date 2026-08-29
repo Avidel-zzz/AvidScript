@@ -201,6 +201,74 @@ public:
 	bool bReturnHandle = true;
 };
 
+class FAvidScriptTestLatentCompletionProvider final
+	: public IAvidScriptLatentCompletionProvider
+{
+public:
+	FString GetProviderId() const override
+	{
+		return TEXT("avidscript.runtime.test.i32.v1");
+	}
+
+	FString GetFunctionPath() const override
+	{
+		return TEXT("/Script/AvidScriptRuntime.TestLatentPayload");
+	}
+
+	FString GetPayloadTypeId() const override
+	{
+		return FString::ChrN(64, TEXT('1'));
+	}
+
+	void Publish(UObject* CallbackTarget, const int32 UUID, const int32 Value)
+	{
+		PendingTarget = CallbackTarget;
+		PendingUUID = UUID;
+		PendingValue = Value;
+	}
+
+	bool ConsumePayload(
+		UObject* CallbackTarget,
+		const int32 UUID,
+		FAvidScriptBindingLatentCompletionPayload& OutPayload) override
+	{
+		OutPayload = {};
+		if (PendingTarget.Get() != CallbackTarget
+			|| PendingUUID != UUID
+			|| !PendingValue.IsSet())
+		{
+			return false;
+		}
+		OutPayload.TypeId = GetPayloadTypeId();
+		OutPayload.AbiCells.Add(
+			static_cast<uint64>(static_cast<int64>(PendingValue.GetValue())));
+		PendingTarget.Reset();
+		PendingUUID = INDEX_NONE;
+		PendingValue.Reset();
+		++ConsumeCount;
+		return true;
+	}
+
+	void AbandonPayload(UObject* CallbackTarget, const int32 UUID) override
+	{
+		if (PendingTarget.Get() == CallbackTarget && PendingUUID == UUID)
+		{
+			PendingTarget.Reset();
+			PendingUUID = INDEX_NONE;
+			PendingValue.Reset();
+			++AbandonCount;
+		}
+	}
+
+	int32 ConsumeCount = 0;
+	int32 AbandonCount = 0;
+
+private:
+	TWeakObjectPtr<UObject> PendingTarget;
+	TOptional<int32> PendingValue;
+	int32 PendingUUID = INDEX_NONE;
+};
+
 uint32 InternContinuationUtf8(
 	FAvidScriptWasmRuntimeInstance& Runtime,
 	const TConstArrayView<uint8> Bytes)
@@ -1067,6 +1135,169 @@ bool FAvidScriptContinuationLatentProducerTest::RunTest(
 	TestEqual(TEXT("Late latent completion stays suppressed"), Completions.Num(), 0);
 
 	Owner->Teardown();
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationLatentResultSlotTest,
+	"AvidScript.Runtime.Continuation.LatentResultSlot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+		TEXT("Latent result world is created"),
+		CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& ActiveHost =
+		Owner->ResetActive(World);
+	const TSharedRef<FAvidScriptTestLatentCompletionProvider> Provider =
+		MakeShared<FAvidScriptTestLatentCompletionProvider>();
+	FAvidScriptBindingLatentCompletionContract Contract;
+	Contract.Mode = TEXT("provider");
+	Contract.ProviderId = Provider->GetProviderId();
+	Contract.PayloadTypeId = Provider->GetPayloadTypeId();
+	Contract.StatusPolicy = TEXT("abandon_on_cancel");
+	Contract.bCancellable = true;
+	Contract.Provider = Provider;
+
+	FAvidScriptBindingLatentReservation Completed;
+	TestTrue(
+		TEXT("Provider latent reservation allocates"),
+		ActiveHost.BeginLatentWithCompletion(401, Contract, Completed));
+	Provider->Publish(Completed.CallbackTarget, Completed.UUID, 42);
+	TestTrue(
+		TEXT("Provider may publish before synchronous completion"),
+		TriggerLatentReservationSynchronously(Completed));
+	TestTrue(
+		TEXT("Provider latent reservation commits"),
+		ActiveHost.CommitLatent(Completed.Token));
+	TestEqual(
+		TEXT("Committed provider result owns one bounded slot"),
+		Owner->GetResultSlotCountForTesting(),
+		1);
+
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Provider completion drains once"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		const FAvidScriptContinuationCompletion& Completion = Completions[0];
+		TestEqual(
+			TEXT("Provider completion reports success"),
+			Completion.Status,
+			EAvidScriptContinuationStatus::Completed);
+		TestTrue(TEXT("Provider completion carries a result slot"), Completion.ObjectSlot > 0);
+		TestTrue(TEXT("Provider completion carries a result generation"), Completion.ObjectGeneration > 0);
+		TArray<uint64> Cells;
+		TestFalse(
+			TEXT("Wrong payload type cannot consume the slot"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				ActiveHost.GetActivationSerial(),
+				Completion.ObjectSlot,
+				Completion.ObjectGeneration,
+				FString::ChrN(64, TEXT('2')),
+				Cells));
+		TestTrue(
+			TEXT("Exact payload type consumes the slot once"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				ActiveHost.GetActivationSerial(),
+				Completion.ObjectSlot,
+				Completion.ObjectGeneration,
+				Provider->GetPayloadTypeId(),
+				Cells));
+		TestEqual(TEXT("One payload cell is returned"), Cells.Num(), 1);
+		if (Cells.Num() == 1)
+		{
+			TestEqual(TEXT("Payload cell preserves i32 bits"), static_cast<int32>(Cells[0]), 42);
+		}
+		TestFalse(
+			TEXT("Consumed result capability is stale"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				ActiveHost.GetActivationSerial(),
+				Completion.ObjectSlot,
+				Completion.ObjectGeneration,
+				Provider->GetPayloadTypeId(),
+				Cells));
+		TestTrue(
+			TEXT("Consumed provider completion finalizes"),
+			Owner->FinalizeDispatched(Completion.Token, true));
+	}
+	TestEqual(TEXT("Consumed result slot is reclaimed"), Owner->GetResultSlotCountForTesting(), 0);
+
+	FAvidScriptBindingLatentReservation Cancelled;
+	TestTrue(
+		TEXT("Cancellable provider latent reserves"),
+		ActiveHost.BeginLatentWithCompletion(402, Contract, Cancelled));
+	Provider->Publish(Cancelled.CallbackTarget, Cancelled.UUID, 7);
+	RegisterTestLatentAction(World, Cancelled);
+	TestTrue(TEXT("Cancellable provider latent commits"), ActiveHost.CommitLatent(Cancelled.Token));
+	TestTrue(TEXT("Cancellation wins before provider completion"), ActiveHost.Cancel(Cancelled.Token));
+	TestEqual(TEXT("Cancellation abandons provider state"), Provider->AbandonCount, 1);
+	TestEqual(TEXT("Cancellation leaves no result slot"), Owner->GetResultSlotCountForTesting(), 0);
+
+	FAvidScriptContinuationHostEndpoint& PreparedHost =
+		Owner->BeginPrepared(World);
+	FAvidScriptBindingLatentReservation Prepared;
+	TestTrue(
+		TEXT("Prepared provider latent reserves"),
+		PreparedHost.BeginLatentWithCompletion(403, Contract, Prepared));
+	Provider->Publish(Prepared.CallbackTarget, Prepared.UUID, 99);
+	TestTrue(
+		TEXT("Prepared provider can complete before commit"),
+		TriggerLatentReservationSynchronously(Prepared));
+	TestTrue(TEXT("Prepared provider latent commits"), PreparedHost.CommitLatent(Prepared.Token));
+	TestEqual(TEXT("Prepared completion owns one result slot"), Owner->GetResultSlotCountForTesting(), 1);
+	FString CommitError;
+	TestTrue(TEXT("Prepared provider lane validates"), Owner->ValidatePreparedCommit(CommitError));
+	Owner->CommitPrepared();
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Promoted provider completion drains"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		TArray<uint64> Cells;
+		TestTrue(
+			TEXT("Promoted result consumes on the active lane"),
+			Owner->ConsumeResult(
+				EAvidScriptContinuationLane::Active,
+				PreparedHost.GetActivationSerial(),
+				Completions[0].ObjectSlot,
+				Completions[0].ObjectGeneration,
+				Provider->GetPayloadTypeId(),
+				Cells));
+		TestTrue(
+			TEXT("Promoted provider completion finalizes"),
+			Owner->FinalizeDispatched(Completions[0].Token, true));
+	}
+	TestEqual(TEXT("Promoted result slot is reclaimed"), Owner->GetResultSlotCountForTesting(), 0);
+
+	FAvidScriptContinuationHostEndpoint& DiscardedHost =
+		Owner->BeginPrepared(World);
+	FAvidScriptBindingLatentReservation Discarded;
+	TestTrue(
+		TEXT("Discarded provider latent reserves"),
+		DiscardedHost.BeginLatentWithCompletion(404, Contract, Discarded));
+	Provider->Publish(Discarded.CallbackTarget, Discarded.UUID, 5);
+	TestTrue(
+		TEXT("Discarded provider completes before commit"),
+		TriggerLatentReservationSynchronously(Discarded));
+	TestTrue(TEXT("Discarded provider latent commits"), DiscardedHost.CommitLatent(Discarded.Token));
+	TestEqual(TEXT("Discard candidate owns a result slot"), Owner->GetResultSlotCountForTesting(), 1);
+	Owner->DiscardPrepared();
+	TestEqual(TEXT("Discard reclaims its result slot"), Owner->GetResultSlotCountForTesting(), 0);
+
+	Owner->Teardown();
+	TestEqual(TEXT("Teardown leaves no result slots"), Owner->GetResultSlotCountForTesting(), 0);
 	DestroyContinuationWorld(World);
 	return true;
 }

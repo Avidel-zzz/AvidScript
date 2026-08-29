@@ -658,9 +658,15 @@ bool InvokePreparedDynamicReflection(
 		FAvidScriptBindingLatentReservation Reservation;
 		const int32 CallbackId = static_cast<int32>(
 			Arguments[Program->CallbackIdArgumentOffset]);
-		if (!InvocationContext.LatentHost->BeginLatent(
+		const bool bReserved = Program->LatentCompletion.IsProvider()
+			? InvocationContext.LatentHost->BeginLatentWithCompletion(
 				CallbackId,
+				Program->LatentCompletion,
 				Reservation)
+			: InvocationContext.LatentHost->BeginLatent(
+				CallbackId,
+				Reservation);
+		if (!bReserved
 			|| !Reservation.IsValid())
 		{
 			SetDispatchFailure(

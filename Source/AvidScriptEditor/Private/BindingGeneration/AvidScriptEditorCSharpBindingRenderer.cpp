@@ -509,6 +509,12 @@ bool RenderMethod(
 		&& Binding.GeneratedShape == TEXT("vector_value");
 	const bool bLatent =
 		Binding.DispatchMode == TEXT("latent_process_event");
+	if (bLatent && Binding.Completion.Mode == TEXT("provider"))
+	{
+		OutErrorCategory = TEXT("latent_completion_payload_guest_unsupported");
+		OutErrorSource = Binding.CanonicalIdentity;
+		return false;
+	}
 	if (bLatent
 		&& (!Binding.bStatic
 			|| Binding.ReturnValue.CanonicalType != TEXT("void")

@@ -2072,3 +2072,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: P57.12C7 updated the generated cancellation facade but repeated the earlier shared-scaffold oversight: the focused emitter tests passed while the full queue found stale `FName` and `TypedProjectApi` byte-for-byte golden fixtures.
 - Prevention: every shared renderer scaffold change starts by enumerating all exact-output fixtures referenced by `AvidScriptEditorCSharpBindingEmitterTests.cpp`. Update and diff each affected golden in the implementation group before the focused gate; do not rely on one representative fixture to cover shared facade output.
+
+### 2026-08-29: use UE string factories for repeated characters
+
+- Mistake: the first P57.12C8 result-slot fixture used `FString(64, TEXT('1'))`, but UE5.8 has no count-and-character constructor; the resulting parser cascade also made a later `ConsumeResult` call appear to have the wrong arity.
+- Prevention: use `FString::ChrN(Count, Character)` for repeated-character fixtures. When one syntax error produces downstream overload noise, fix the earliest diagnostic before changing any apparently affected API signature.
