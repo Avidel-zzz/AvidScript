@@ -298,6 +298,8 @@ bool IsLatentStorageCompatible(
 {
 	return PublicType == StorageType
 		|| (Value.CanonicalType == TEXT("scalar:bool")
+			&& StorageType == TEXT("int"))
+		|| (Value.Kind == TEXT("enum")
 			&& StorageType == TEXT("int"));
 }
 
@@ -522,7 +524,6 @@ bool RenderMethod(
 				|| Parameter.Direction != TEXT("value")
 				|| Parameter.AbiTypes.Num() != 1
 				|| !IsLatentStorageCompatible(Parameter, PublicType, StorageType)
-				|| Parameter.Kind == TEXT("enum")
 				|| Parameter.Kind == TEXT("object_handle")
 				|| Parameter.Kind == TEXT("struct")
 				|| Parameter.Kind == TEXT("struct_wire")

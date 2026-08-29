@@ -432,7 +432,12 @@ internal static class CSharpAsyncLowerer
         {
             return value;
         }
-        if (argument.TypeId != "type:bool" || storageTypeId != "type:int32")
+        bool hasBooleanStorageAdaptation = argument.TypeId == "type:bool"
+            && storageTypeId == "type:int32";
+        bool hasEnumStorageAdaptation = context.Document.TypeShapes.Any(shape =>
+            shape.TypeId == argument.TypeId
+            && shape.EnumUnderlyingTypeId == storageTypeId);
+        if (!hasBooleanStorageAdaptation && !hasEnumStorageAdaptation)
         {
             Add(context.Diagnostics,
                 $"Latent argument type '{argument.TypeId}' has no storage adaptation to '{storageTypeId}'.");

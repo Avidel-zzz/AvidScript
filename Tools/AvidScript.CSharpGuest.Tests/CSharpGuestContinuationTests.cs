@@ -21,7 +21,64 @@ internal static class CSharpGuestContinuationTests
         TamperedCallbackMetadataFailsClosed();
         AsyncAwaitLowersZeroHeapResumeSegments();
         GeneratedLatentAwaitLowersDynamicImport();
-        return 7;
+        GeneratedLatentEnumAwaitUsesUnderlyingStorage();
+        return 8;
+    }
+
+    private static void GeneratedLatentEnumAwaitUsesUnderlyingStorage()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    await UKismetSystemLibrary.WaitForModeAsync();
+                }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentEnumGuest.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("generated latent enum await produced no Guest module");
+        GuestImport latentImport = module.Imports.Single(import =>
+            import.Module == "avidscript" && import.Name == "avid_ue_latent_enum_test");
+        GuestFunction beginPlay = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_begin_play").FunctionId);
+        GuestInstruction producerCall = beginPlay.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(instruction => instruction.Op == "call"
+                && instruction.TargetId == latentImport.Id);
+        GuestInstruction storageConversion = beginPlay.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(instruction => instruction.Op == "convert"
+                && instruction.ResultId == producerCall.OperandIds[0]);
+        GuestRegister[] registers = beginPlay.Parameters.Concat(beginPlay.Locals).ToArray();
+        GuestRegister sourceRegister = registers.Single(register =>
+            register.Id == storageConversion.OperandIds[0]);
+        GuestRegister storageRegister = registers.Single(register =>
+            register.Id == storageConversion.ResultId);
+
+        Assert(result.Succeeded
+            && latentImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int32",
+                "type:int32",
+            })
+            && sourceRegister.TypeId.EndsWith(
+                "EAvidScriptCSharpEmitterTestMode",
+                StringComparison.Ordinal)
+            && storageRegister.TypeId == "type:int32"
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "generated latent enum defaults should lower through the declared enum underlying storage");
     }
 
     private static void GeneratedLatentAwaitLowersDynamicImport()
@@ -580,6 +637,16 @@ internal static class CSharpGuestContinuationTests
 
             [AvidLatent("avidscript", "avid_ue_latent_bool_test")]
             public static AvidDelayAwaitable WaitForFlagAsync(bool bExpected) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_enum_test")]
+            public static AvidDelayAwaitable WaitForModeAsync(
+                EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;
+        }
+
+        public enum EAvidScriptCSharpEmitterTestMode : int
+        {
+            Primary,
+            Secondary,
         }
 
         internal static class AvidScriptRuntimeNative
@@ -598,6 +665,9 @@ internal static class CSharpGuestContinuationTests
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_bool_test")]
             internal static extern long InvokeBooleanLatent(int expected, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_enum_test")]
+            internal static extern long InvokeEnumLatent(int mode, int callbackId);
         }
         """;
 

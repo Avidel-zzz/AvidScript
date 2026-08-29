@@ -166,6 +166,12 @@
       "status": "Completed",
       "evidence": "generated latent bool value parameters preserve public C# bool while using explicit i32 import storage; Semantic authorization and Guest lowering accept only the bool-to-i32 adaptation, and a reflected project UFUNCTION proves the chain has no API-name wrapper; fixed .NET Semantic/C# Guest 173/173, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T05:48:46.6850600Z"
+    },
+    {
+      "id": "P57.12C6B",
+      "status": "Completed",
+      "evidence": "generated latent enum value parameters retain nominal C# enum identity and defaults while Semantic TypeShape authorization and Guest conversion target the exact i32 import storage; a reflected project WaitForMode UFUNCTION and omitted default argument complete Reflection-to-WASM coverage without API-name branches; fixed .NET Semantic/C# Guest 174/174, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T06:03:04.7176705Z"
     }
   ],
   "debt": [
@@ -185,8 +191,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C6A review confirms reflected project latent bool methods retain public bool identity, import i32 storage, validate the sole authorized mismatch and emit an explicit Guest convert without latent API-name branches; cancellation and completion payload boundaries remain fail closed and documented.",
-    "completed_at_utc": "2026-08-29T05:48:46.6850600Z"
+    "evidence": "P57.12C6B review confirms enum latent methods retain nominal C# identity and generated defaults while only a matching Semantic enum underlying TypeShape may adapt to import storage; bool remains the sole scalar special adaptation, and unsupported payload/cancellation surfaces stay fail closed.",
+    "completed_at_utc": "2026-08-29T06:03:04.7176705Z"
   },
   "budgets": {
     "ubt": 2,
@@ -194,8 +200,8 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 10,
-    "automation": 6,
+    "ubt": 11,
+    "automation": 7,
     "full_gate": 3
   },
   "freeze": {
@@ -235,6 +241,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 24,
-  "updated_at_utc": "2026-08-29T05:48:46.6850600Z"
+  "revision": 25,
+  "updated_at_utc": "2026-08-29T06:03:04.7176705Z"
 }

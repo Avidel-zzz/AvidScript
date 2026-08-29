@@ -511,6 +511,7 @@ internal static class CSharpSemanticInputValidator
 							document.Source.Length,
 							method.MethodSymbolId,
 							symbolsById,
+							document.TypeShapes,
 							document.Callables))
                     {
                         return false;
@@ -550,6 +551,7 @@ internal static class CSharpSemanticInputValidator
         int sourceLength,
         string methodSymbolId,
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
+        IReadOnlyList<SemanticTypeShape> typeShapes,
         IReadOnlyList<SemanticCallable> callables)
     {
         if (awaitSite is null
@@ -606,6 +608,7 @@ internal static class CSharpSemanticInputValidator
 				&& callable.Parameters[^1].RefKind == "none").ToArray();
 			return imports.Length == 1
 				&& LatentStorageParametersMatch(
+					typeShapes,
 					imports[0].Parameters,
 					awaitSite.Arguments);
 		}
@@ -632,6 +635,7 @@ internal static class CSharpSemanticInputValidator
     }
 
     private static bool LatentStorageParametersMatch(
+        IReadOnlyList<SemanticTypeShape> typeShapes,
         IReadOnlyList<SemanticCallableParameter> importParameters,
         IReadOnlyList<SemanticOperation> arguments)
     {
@@ -642,7 +646,9 @@ internal static class CSharpSemanticInputValidator
             if (parameter.RefKind != "none"
                 || (parameter.TypeId != argumentTypeId
                     && !(argumentTypeId == "type:bool"
-                        && parameter.TypeId == "type:int32")))
+                        && parameter.TypeId == "type:int32")
+                    && !typeShapes.Any(shape => shape.TypeId == argumentTypeId
+                        && shape.EnumUnderlyingTypeId == parameter.TypeId)))
             {
                 return false;
             }

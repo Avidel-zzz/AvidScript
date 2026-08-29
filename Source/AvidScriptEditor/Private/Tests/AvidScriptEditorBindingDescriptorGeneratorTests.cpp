@@ -729,6 +729,10 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
 			TEXT("WaitForFlag")
 		},
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+			TEXT("WaitForMode")
+		},
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("Delay") },
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("DelayUntilNextFrame") }
 	};
@@ -795,7 +799,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TamperedRuntimePackage,
 			TamperedLoadResult));
 	TestEqual(TEXT("Latent package alone raises schema to v12"), Package.SchemaVersion, 12);
-	TestEqual(TEXT("All reflected latent producers are published"), Package.Bindings.Num(), 3);
+	TestEqual(TEXT("All reflected latent producers are published"), Package.Bindings.Num(), 4);
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		TestEqual(
@@ -845,6 +849,11 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		{
 			return Binding.UeFunction == TEXT("WaitForFlag");
 		});
+	const FAvidScriptBindingFunctionModel* WaitForMode = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("WaitForMode");
+		});
 	if (TestNotNull(TEXT("Delay binding resolves"), Delay))
 	{
 		TestEqual(TEXT("Delay ABI appends callback and returns token"), Delay->HostImport.Signature, FString(TEXT("(fi)I")));
@@ -863,6 +872,17 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 				TEXT("Boolean latent parameter keeps public bool identity"),
 				WaitForFlag->Parameters[0].CanonicalType,
 				FString(TEXT("scalar:bool")));
+		}
+	}
+	if (TestNotNull(TEXT("Enum latent binding resolves"), WaitForMode))
+	{
+		TestEqual(TEXT("Enum latent ABI stores enum as i32"), WaitForMode->HostImport.Signature, FString(TEXT("(ii)I")));
+		TestEqual(TEXT("Enum latent exposes one public parameter"), WaitForMode->Parameters.Num(), 1);
+		if (WaitForMode->Parameters.Num() == 1)
+		{
+			TestEqual(TEXT("Enum latent parameter keeps enum kind"), WaitForMode->Parameters[0].Kind, FString(TEXT("enum")));
+			TestTrue(TEXT("Enum latent parameter keeps its default"), WaitForMode->Parameters[0].bHasDefault);
+			TestEqual(TEXT("Enum latent parameter default is canonical"), WaitForMode->Parameters[0].DefaultValue, FString(TEXT("Primary")));
 		}
 	}
 
@@ -897,6 +917,9 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		TestTrue(
 			TEXT("Boolean latent native import uses i32 storage"),
 			ReferenceSource.Contains(TEXT("int p0, int callbackId")));
+		TestTrue(
+			TEXT("Enum latent is exposed with a typed default"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForModeAsync(EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;")));
 		TestTrue(
 			TEXT("Native latent import returns an i64 token"),
 			ReferenceSource.Contains(TEXT("internal static extern long Invoke")));

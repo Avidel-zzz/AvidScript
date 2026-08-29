@@ -3018,6 +3018,7 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'binding_latent|',
     'FindImport(context.Document',
     'LowerLatentArgument',
+    'hasEnumStorageAdaptation',
     'continuation_delay',
     'continuation_load_object',
     'not_equals',
@@ -3030,6 +3031,9 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
 }
 if (-not $CSharpSemanticInputValidatorSource.Contains('LatentStorageParametersMatch')) {
     Add-Violation 'generated latent bool parameters must validate public-to-storage ABI adaptation'
+}
+if (-not $CSharpSemanticInputValidatorSource.Contains('shape.EnumUnderlyingTypeId == parameter.TypeId')) {
+    Add-Violation 'generated latent enum parameters must match their declared underlying storage'
 }
 if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes')) {
     Add-Violation 'C# Guest continuation v2 router must merge compiler-owned async resume routes'

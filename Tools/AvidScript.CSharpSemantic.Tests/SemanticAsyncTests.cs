@@ -32,6 +32,7 @@ internal static class SemanticAsyncTests
                 {
                     await UKismetSystemLibrary.DelayAsync(0.125f);
                     await UKismetSystemLibrary.WaitForFlagAsync(true);
+                    await UKismetSystemLibrary.WaitForModeAsync();
                 }
             }
             """;
@@ -45,10 +46,14 @@ internal static class SemanticAsyncTests
             site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_test");
         SemanticAsyncAwaitSite boolSite = sites.Single(site =>
             site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_bool_test");
+        SemanticAsyncAwaitSite enumSite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_enum_test");
         SemanticCallable delayImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_test" });
         SemanticCallable boolImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_bool_test" });
+        SemanticCallable enumImport = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_enum_test" });
 
         Assert(document.Succeeded
             && delaySite.CallbackId == CompilerCallbackIdStart
@@ -67,6 +72,17 @@ internal static class SemanticAsyncTests
             && boolImport.Parameters.Select(parameter => parameter.TypeId)
                 .SequenceEqual(new[] { "type:int32", "type:int32" }),
             "generated boolean latent producers should preserve public bool and import i32 storage identities");
+        Assert(enumSite.CallbackId == CompilerCallbackIdStart + 2
+            && enumSite.PayloadKind == "none"
+            && enumSite.Arguments.Count == 1
+            && enumSite.Arguments[0].TypeId is { } enumArgumentTypeId
+            && enumArgumentTypeId.EndsWith(
+                "EAvidScriptCSharpEmitterTestMode",
+                StringComparison.Ordinal)
+            && enumImport.ReturnTypeId == "type:int64"
+            && enumImport.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:int32", "type:int32" }),
+            "generated enum latent producers should materialize the default enum and retain i32 import storage");
     }
 
     private static void SequentialAwaitsProjectStableSegments()
@@ -437,6 +453,16 @@ internal static class SemanticAsyncTests
 
             [AvidLatent("avidscript", "avid_ue_latent_bool_test")]
             public static AvidVoidAwaitable WaitForFlagAsync(bool bExpected) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_enum_test")]
+            public static AvidVoidAwaitable WaitForModeAsync(
+                EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;
+        }
+
+        public enum EAvidScriptCSharpEmitterTestMode : int
+        {
+            Primary,
+            Secondary,
         }
 
         internal static class AvidScriptNative
@@ -446,6 +472,9 @@ internal static class SemanticAsyncTests
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_bool_test")]
             internal static extern long InvokeBooleanLatent(int expected, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_enum_test")]
+            internal static extern long InvokeEnumLatent(int mode, int callbackId);
         }
         """;
 

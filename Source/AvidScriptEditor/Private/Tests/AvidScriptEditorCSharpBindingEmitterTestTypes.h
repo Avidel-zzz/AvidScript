@@ -400,6 +400,24 @@ public:
 		(void)bExpected;
 		(void)LatentInfo;
 	}
+
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
+		meta = (
+			Latent,
+			LatentInfo = "LatentInfo",
+			WorldContext = "WorldContextObject",
+			CPP_Default_Mode = "Primary"))
+	static void WaitForMode(
+		UObject* WorldContextObject,
+		EAvidScriptCSharpEmitterTestMode Mode,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)Mode;
+		(void)LatentInfo;
+	}
 };
 
 UCLASS()
