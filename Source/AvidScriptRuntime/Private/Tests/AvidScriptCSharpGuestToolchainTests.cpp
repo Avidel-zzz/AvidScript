@@ -412,7 +412,7 @@ bool FAvidScriptCSharpSampleShapeSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Sample presents typed GetRootComponent"), SourceText.Contains(TEXT("public USceneComponent GetRootComponent()")) && SourceText.Contains(TEXT("actor_get_root_component")));
 	TestTrue(TEXT("Sample presents component world location read"), SourceText.Contains(TEXT("public FVector GetWorldLocation()")) && SourceText.Contains(TEXT("scene_component_get_world_location")));
 	TestTrue(TEXT("Sample presents component world location write"), SourceText.Contains(TEXT("public bool SetWorldLocation(FVector location)")) && SourceText.Contains(TEXT("scene_component_set_world_location")));
-	TestTrue(TEXT("Sample uses root component chain"), SourceText.Contains(TEXT("UE.Self.GetRootComponent().GetWorldLocation()")) && SourceText.Contains(TEXT("UE.Self.GetRootComponent().SetWorldLocation(rootLocation)")));
+	TestTrue(TEXT("Sample uses root component chain"), SourceText.Contains(TEXT("UE.Self.GetRootComponent().GetWorldLocation()")) && SourceText.Contains(TEXT("UE.Self.GetRootComponent().SetWorldLocation(")));
 	TestTrue(TEXT("Sample declares UE.Self"), SourceText.Contains(TEXT("public static class UE")) && SourceText.Contains(TEXT("public static AActor Self")));
 	TestTrue(TEXT("Sample presents UE.SetTimer"), SourceText.Contains(TEXT("public static int SetTimer(float delaySeconds, int callbackId)")));
 	TestTrue(TEXT("Sample presents UE.CancelTimer"), SourceText.Contains(TEXT("public static bool CancelTimer(int timerHandle)")));
@@ -885,7 +885,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 
 	TestTrue(TEXT("C# source adapter artifact loads"), ReloadResult.bSucceeded);
 	TestEqual(TEXT("C# BeginPlay registers one live Timer"), Session.GetLivePendingTimerCount(), 1);
-	TestEqual(TEXT("C# BeginPlay registers delay and object-load continuations"), Session.GetLivePendingContinuationCount(), 2);
+	TestEqual(TEXT("C# BeginPlay registers callback and async continuations"), Session.GetLivePendingContinuationCount(), 3);
 
 	FAvidScriptWasmReloadManifest RejectedManifest = Manifest;
 	RejectedManifest.ModuleId = TEXT("csharp_timer_rejected_reload");
@@ -893,7 +893,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestFalse(TEXT("Reload missing an export is rejected"), Session.ReloadModule(Bytecode.GetData(), Bytecode.Num(), RejectedManifest, ReloadResult));
 	TestTrue(TEXT("Rejected reload preserves live runtime"), ReloadResult.bRollbackPreservedLiveRuntime);
 	TestEqual(TEXT("Rejected reload preserves old Timer"), Session.GetLivePendingTimerCount(), 1);
-	TestEqual(TEXT("Rejected reload preserves both active continuations"), Session.GetLivePendingContinuationCount(), 2);
+	TestEqual(TEXT("Rejected reload preserves all active continuations"), Session.GetLivePendingContinuationCount(), 3);
 	TestTrue(TEXT("C# BeginPlay source moves actor"), Actor->GetActorLocation().Equals(FVector(100.0, 200.0, 300.0), 0.01));
 	TestTrue(TEXT("C# BeginPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 	TestTrue(TEXT("C# BeginPlay source resets actor scale"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.01));
@@ -909,7 +909,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestAvidScriptRuntimeLaneIdentity(*this, Lane, TickResult);
 
 	TestTrue(TEXT("C# first Tick resumes the UE continuation after normal Tick"), Actor->GetActorLocation().Equals(FVector(102.0, 240.0, 300.0), 0.01));
-	TestEqual(TEXT("The first safe pump leaves only the object-load continuation"), Session.GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("The first safe pump leaves object-load and async NextTick continuations"), Session.GetLivePendingContinuationCount(), 2);
 	TestTrue(TEXT("C# first Tick source rotates actor"), Actor->GetActorRotation().Equals(FRotator(0.0, 1.5, 0.0), 0.01));
 	TestTrue(TEXT("C# first Tick source scales actor"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.01), 0.01));
 
@@ -922,7 +922,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	TestTrue(TEXT("C# second Tick receives the loaded-object result"), Actor->GetActorLocation().Equals(FVector(104.0, 240.0, 310.0), 0.01));
-	TestEqual(TEXT("Delivered object result leaves no pending continuation"), Session.GetLivePendingContinuationCount(), 0);
+	TestEqual(TEXT("Delivered callback object result leaves the async NextTick continuation"), Session.GetLivePendingContinuationCount(), 1);
 	TestTrue(TEXT("C# second Tick source preserves rotation state"), Actor->GetActorRotation().Equals(FRotator(0.0, 3.0, 0.0), 0.01));
 	TestTrue(TEXT("C# second Tick source preserves scale state"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.02), 0.01));
 	TestEqual(TEXT("C# source adapter tick count increments"), Session.GetLiveTickCallCount(), 2);
@@ -939,6 +939,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("C# Timer callback id"), ThirdTickResult.LastTimerCallbackId, 7);
 	TestTrue(TEXT("C# Timer callback reports a handle"), ThirdTickResult.LastTimerHandle > 0);
 	TestEqual(TEXT("Fired one-shot Timer leaves no pending Timer"), Session.GetLivePendingTimerCount(), 0);
+	TestEqual(TEXT("Async NextTick resumes and schedules its object await"), Session.GetLivePendingContinuationCount(), 1);
 
 	FAvidScriptWasmSmokeResult EventResult;
 	TestTrue(TEXT("C# gameplay event dispatch succeeds"), Session.DispatchEventLive(3, 25.0f, EventResult));
@@ -1066,7 +1067,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 		}
 	}
 	TestEqual(TEXT("Reloaded runtime owns one fresh Timer"), Session.GetLivePendingTimerCount(), 1);
-	TestEqual(TEXT("Reloaded runtime owns fresh delay and object-load continuations"), Session.GetLivePendingContinuationCount(), 2);
+	TestEqual(TEXT("Reloaded runtime owns fresh callback and async continuations"), Session.GetLivePendingContinuationCount(), 3);
 	TestEqual(TEXT("Reloaded runtime callback count starts fresh"), Session.GetLiveTimerCallbackCount(), 0);
 	TestEqual(TEXT("Reloaded runtime event count starts fresh"), Session.GetLiveEventCallbackCount(), 0);
 	TypedEvent.Type = EAvidScriptGameplayEventType::BeginOverlap;
@@ -1103,7 +1104,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	TestEqual(TEXT("Successful reload fires only the fresh Timer"), Session.GetLiveTimerCallbackCount(), 1);
 	TestEqual(TEXT("Successful reload does not retain old pending Timer"), Session.GetLivePendingTimerCount(), 0);
 	TestTrue(TEXT("Reloaded object and Timer callbacks each have one movement effect"), Actor->GetActorLocation().Equals(FVector(106.0, 200.0, 360.0), 0.01));
-	TestEqual(TEXT("Session Tick does not advance the UE TimerManager producer"), Session.GetLivePendingContinuationCount(), 1);
+	TestEqual(TEXT("Session Tick does not advance delay or async NextTick TimerManager producers"), Session.GetLivePendingContinuationCount(), 2);
 
 	FAvidScriptWasmSmokeResult EndPlayResult;
 	if (!Session.EndPlayLive(EndPlayResult))
@@ -1114,7 +1115,7 @@ bool FAvidScriptCSharpSourceAdapterArtifactLifecycleSmokeTest::RunTest(const FSt
 	}
 
 	TestEqual(TEXT("EndPlay result preserves Timer callback count"), EndPlayResult.TimerCallbackCount, 1);
-	TestEqual(TEXT("EndPlay cancels the outstanding continuation"), Session.GetLivePendingContinuationCount(), 0);
+	TestEqual(TEXT("EndPlay cancels the outstanding continuations"), Session.GetLivePendingContinuationCount(), 0);
 	TestTrue(TEXT("C# EndPlay source moves actor"), Actor->GetActorLocation().Equals(FVector::ZeroVector, 0.01));
 	TestTrue(TEXT("C# EndPlay source resets actor rotation"), Actor->GetActorRotation().Equals(FRotator::ZeroRotator, 0.01));
 	TestTrue(TEXT("C# EndPlay source resets actor scale"), Actor->GetActorScale3D().Equals(FVector(1.0, 1.0, 1.0), 0.01));

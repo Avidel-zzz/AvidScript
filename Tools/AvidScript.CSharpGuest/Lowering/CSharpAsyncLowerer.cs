@@ -1,0 +1,372 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using AvidScript.CSharpSemantic;
+using AvidScript.GuestIr;
+
+namespace AvidScript.CSharpGuest;
+
+internal sealed record CSharpAsyncResumeRoute(
+    int CallbackId,
+    string PayloadKind,
+    string FunctionId);
+
+internal sealed record CSharpAsyncLoweringResult(
+    IReadOnlyList<GuestFunction> Functions,
+    IReadOnlyList<CSharpAsyncResumeRoute> ResumeRoutes);
+
+internal static class CSharpAsyncLowerer
+{
+    public static CSharpAsyncLoweringResult Lower(
+        SemanticDocument document,
+        IReadOnlyDictionary<string, GuestType> guestTypes,
+        CSharpGuestDataPool dataPool,
+        List<GuestDiagnostic> diagnostics)
+    {
+        if (document.AsyncMethods.Count == 0)
+        {
+            return new CSharpAsyncLoweringResult(
+                Array.Empty<GuestFunction>(),
+                Array.Empty<CSharpAsyncResumeRoute>());
+        }
+
+        Dictionary<string, SemanticCallable> callables = document.Callables
+            .GroupBy(callable => callable.MethodSymbolId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
+        string? delayImportId = FindImport(document, "env", "continuation_delay");
+        string? objectLoadImportId = FindImport(document, "env", "continuation_load_object");
+        if (delayImportId is null || objectLoadImportId is null)
+        {
+            Add(diagnostics, "The async profile requires the continuation delay and object-load imports.");
+            return new CSharpAsyncLoweringResult(
+                Array.Empty<GuestFunction>(),
+                Array.Empty<CSharpAsyncResumeRoute>());
+        }
+
+        if (!guestTypes.TryGetValue("type:void", out GuestType? voidType)
+            || !guestTypes.TryGetValue(CSharpGuestIds.Int32TypeId, out GuestType? int32Type)
+            || !guestTypes.TryGetValue(CSharpGuestIds.Int64TypeId, out GuestType? int64Type)
+            || !guestTypes.TryGetValue(CSharpGuestIds.ContinuationStatusTypeId, out GuestType? statusType)
+            || !guestTypes.TryGetValue(CSharpGuestIds.LoadedObjectTypeId, out GuestType? loadedObjectType))
+        {
+            Add(diagnostics, "The async profile requires canonical void, integer, status, and loaded-object types.");
+            return new CSharpAsyncLoweringResult(
+                Array.Empty<GuestFunction>(),
+                Array.Empty<CSharpAsyncResumeRoute>());
+        }
+
+        List<GuestFunction> functions = new();
+        List<CSharpAsyncResumeRoute> routes = new();
+        foreach (SemanticAsyncMethod method in document.AsyncMethods
+            .OrderBy(item => item.MethodSymbolId, StringComparer.Ordinal))
+        {
+            if (!callables.TryGetValue(method.MethodSymbolId, out SemanticCallable? callable)
+                || callable.Parameters.Count != 0
+                || !callable.IsStatic
+                || callable.ReturnTypeId != voidType.Id
+                || callable.Export?.Name != method.ExportName
+                || method.Segments.Count == 0)
+            {
+                Add(diagnostics, $"Async method '{method.MethodSymbolId}' has no compatible exported callable.");
+                continue;
+            }
+
+            for (int index = 0; index < method.Segments.Count; ++index)
+            {
+                SemanticAsyncSegment segment = method.Segments[index];
+                SemanticAsyncAwaitSite? incoming = index == 0
+                    ? null
+                    : method.Segments[index - 1].AwaitSite;
+                if (index > 0 && incoming is null)
+                {
+                    Add(diagnostics, $"Async method '{method.MethodSymbolId}' has a disconnected segment {segment.Ordinal}.");
+                    break;
+                }
+
+                List<GuestRegister> parameters = new();
+                GuestRegister? loadedObjectParameter = null;
+                if (incoming?.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
+                {
+                    parameters.Add(new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "status"),
+                        statusType.Id));
+                    loadedObjectParameter = new GuestRegister(
+                        CSharpGuestIds.AsyncResumeParameter(incoming.CallbackId, "loaded_object"),
+                        loadedObjectType.Id);
+                    parameters.Add(loadedObjectParameter);
+                }
+
+                CSharpFunctionLoweringContext context = new(
+                    document,
+                    callable,
+                    guestTypes,
+                    dataPool,
+                    Array.Empty<GuestRegister>(),
+                    diagnostics);
+                if (incoming?.ResultSymbolId is not null
+                    && (loadedObjectParameter is null
+                        || !context.TryBindStorage(incoming.ResultSymbolId, loadedObjectParameter)))
+                {
+                    Add(diagnostics, $"Async object result '{incoming.ResultSymbolId}' has no compatible resume storage.");
+                    break;
+                }
+
+                List<GuestInstruction> instructions = new();
+                foreach (SemanticAsyncStatement statement in segment.Statements)
+                {
+                    GuestRegister? value = CSharpOperationLowerer.LowerValue(
+                        context,
+                        statement.Operation,
+                        segment.Ordinal,
+                        instructions);
+                    if (statement.TargetSymbolId is not null
+                        && (value is null
+                            || !CSharpOperationLowerer.StoreLocal(
+                                context,
+                                statement.TargetSymbolId,
+                                value,
+                                segment.Ordinal,
+                                instructions)))
+                    {
+                        break;
+                    }
+                }
+
+                GuestRegister? scheduledToken = null;
+                if (segment.AwaitSite is { } awaitSite)
+                {
+                    if (!EmitProducer(
+                        context,
+                        awaitSite,
+                        delayImportId,
+                        objectLoadImportId,
+                        int32Type,
+                        int64Type,
+                        instructions,
+                        out scheduledToken))
+                    {
+                        break;
+                    }
+
+                    routes.Add(new CSharpAsyncResumeRoute(
+                        awaitSite.CallbackId,
+                        awaitSite.PayloadKind,
+                        CSharpGuestIds.AsyncResumeFunction(awaitSite.CallbackId)));
+                }
+
+                string functionId = index == 0
+                    ? CSharpGuestIds.Function(method.MethodSymbolId)
+                    : CSharpGuestIds.AsyncResumeFunction(incoming!.CallbackId);
+                string blockId = CSharpGuestIds.AsyncSegmentBlock(
+                    method.MethodSymbolId,
+                    segment.Ordinal);
+                IReadOnlyList<GuestBasicBlock> blocks;
+                if (scheduledToken is not null)
+                {
+                    GuestRegister? zeroToken = context.CreateTemporary(
+                        int64Type.Id,
+                        segment.Ordinal);
+                    GuestRegister? scheduleAccepted = context.CreateTemporary(
+                        int32Type.Id,
+                        segment.Ordinal);
+                    if (zeroToken is null || scheduleAccepted is null)
+                    {
+                        break;
+                    }
+
+                    instructions.Add(new GuestInstruction(
+                        "constant",
+                        zeroToken.Id,
+                        Array.Empty<string>(),
+                        null,
+                        null,
+                        new GuestConstant("int64", "0")));
+                    instructions.Add(new GuestInstruction(
+                        "binary",
+                        scheduleAccepted.Id,
+                        new[] { scheduledToken.Id, zeroToken.Id },
+                        null,
+                        "not_equals",
+                        null));
+                    string acceptedBlockId = blockId + ":schedule_accepted";
+                    string rejectedBlockId = blockId + ":schedule_rejected";
+                    blocks = new[]
+                    {
+                        new GuestBasicBlock(
+                            blockId,
+                            instructions,
+                            new GuestTerminator(
+                                "branch_if",
+                                scheduleAccepted.Id,
+                                acceptedBlockId,
+                                rejectedBlockId,
+                                null)),
+                        new GuestBasicBlock(
+                            acceptedBlockId,
+                            Array.Empty<GuestInstruction>(),
+                            new GuestTerminator("return", null, null, null, null)),
+                        new GuestBasicBlock(
+                            rejectedBlockId,
+                            Array.Empty<GuestInstruction>(),
+                            new GuestTerminator("trap", null, null, null, null)),
+                    };
+                }
+                else
+                {
+                    blocks = new[]
+                    {
+                        new GuestBasicBlock(
+                            blockId,
+                            instructions,
+                            new GuestTerminator("return", null, null, null, null)),
+                    };
+                }
+
+                functions.Add(new GuestFunction(
+                    functionId,
+                    parameters,
+                    context.Locals,
+                    voidType.Id,
+                    blockId,
+                    blocks));
+            }
+        }
+
+        if (routes.GroupBy(route => route.CallbackId).Any(group => group.Count() != 1))
+        {
+            Add(diagnostics, "Async resume callback ids are duplicated.");
+        }
+
+        return new CSharpAsyncLoweringResult(functions, routes);
+    }
+
+    private static bool EmitProducer(
+        CSharpFunctionLoweringContext context,
+        SemanticAsyncAwaitSite awaitSite,
+        string delayImportId,
+        string objectLoadImportId,
+        GuestType int32Type,
+        GuestType int64Type,
+        List<GuestInstruction> instructions,
+        out GuestRegister? scheduledToken)
+    {
+        scheduledToken = null;
+        List<string> operands = new();
+        string targetId;
+        switch (awaitSite.ProducerKind)
+        {
+            case "delay":
+                if (awaitSite.Arguments.Count != 1)
+                {
+                    Add(context.Diagnostics, "DelayAsync await site must contain one delay argument.");
+                    return false;
+                }
+
+                GuestRegister? delay = CSharpOperationLowerer.LowerValue(
+                    context,
+                    awaitSite.Arguments[0],
+                    awaitSite.CallbackId,
+                    instructions);
+                if (delay is null)
+                {
+                    return false;
+                }
+                operands.Add(delay.Id);
+                targetId = delayImportId;
+                break;
+            case "next_tick":
+                if (awaitSite.Arguments.Count != 0
+                    || !context.TryGetGuestType("type:float32", out GuestType floatType))
+                {
+                    Add(context.Diagnostics, "NextTickAsync await site has an invalid delay ABI.");
+                    return false;
+                }
+
+                GuestRegister? zero = context.CreateTemporary(floatType.Id, awaitSite.CallbackId);
+                if (zero is null)
+                {
+                    return false;
+                }
+                instructions.Add(new GuestInstruction(
+                    "constant",
+                    zero.Id,
+                    Array.Empty<string>(),
+                    null,
+                    null,
+                    new GuestConstant("float32", "0")));
+                operands.Add(zero.Id);
+                targetId = delayImportId;
+                break;
+            case "object_load":
+                if (awaitSite.Arguments.Count != 1)
+                {
+                    Add(context.Diagnostics, "LoadObjectAsync await site must contain one asset-path argument.");
+                    return false;
+                }
+
+                GuestRegister? path = CSharpOperationLowerer.LowerValue(
+                    context,
+                    awaitSite.Arguments[0],
+                    awaitSite.CallbackId,
+                    instructions);
+                if (path is null)
+                {
+                    return false;
+                }
+                operands.Add(path.Id);
+                targetId = objectLoadImportId;
+                break;
+            default:
+                Add(context.Diagnostics, $"Unknown async producer kind '{awaitSite.ProducerKind}'.");
+                return false;
+        }
+
+        GuestRegister? callback = context.CreateTemporary(int32Type.Id, awaitSite.CallbackId);
+        GuestRegister? token = context.CreateTemporary(int64Type.Id, awaitSite.CallbackId);
+        if (callback is null || token is null)
+        {
+            return false;
+        }
+
+        instructions.Add(new GuestInstruction(
+            "constant",
+            callback.Id,
+            Array.Empty<string>(),
+            null,
+            null,
+            new GuestConstant(
+                "int32",
+                awaitSite.CallbackId.ToString(CultureInfo.InvariantCulture))));
+        operands.Add(callback.Id);
+        instructions.Add(new GuestInstruction(
+            "call",
+            token.Id,
+            operands,
+            targetId,
+            null,
+            null));
+        scheduledToken = token;
+        return true;
+    }
+
+    private static string? FindImport(
+        SemanticDocument document,
+        string module,
+        string name)
+    {
+        SemanticCallable[] matches = document.Callables
+            .Where(callable => callable.Import is { } import
+                && import.Module == module
+                && import.Name == name)
+            .ToArray();
+        return matches.Length == 1
+            ? CSharpGuestIds.Import(matches[0].MethodSymbolId)
+            : null;
+    }
+
+    private static void Add(List<GuestDiagnostic> diagnostics, string message)
+    {
+        diagnostics.Add(new GuestDiagnostic("ASCG1010", "error", message, null));
+    }
+}

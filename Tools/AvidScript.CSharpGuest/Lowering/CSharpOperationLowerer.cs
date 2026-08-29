@@ -8,6 +8,39 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpOperationLowerer
 {
+    public static bool StoreLocal(
+        CSharpFunctionLoweringContext context,
+        string? symbolId,
+        GuestRegister value,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (!context.TryGetStorage(symbolId, out GuestRegister storage)
+            || !string.Equals(storage.TypeId, value.TypeId, StringComparison.Ordinal)
+            || !context.TryGetGuestType(storage.TypeId, out GuestType type))
+        {
+            context.Add("ASCG1010", $"Async segment {blockOrdinal} local '{symbolId}' has incompatible storage.");
+            return false;
+        }
+
+        instructions.Add(type.Storage == "memory"
+            ? new GuestInstruction(
+                "memory_copy",
+                null,
+                new[] { storage.Id, value.Id },
+                storage.TypeId,
+                null,
+                null)
+            : new GuestInstruction(
+                "local_store",
+                null,
+                new[] { value.Id },
+                storage.Id,
+                null,
+                null));
+        return true;
+    }
+
     public static GuestRegister? LowerValue(
         CSharpFunctionLoweringContext context,
         SemanticOperation operation,

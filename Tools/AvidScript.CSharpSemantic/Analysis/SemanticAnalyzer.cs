@@ -72,9 +72,17 @@ public static class SemanticAnalyzer
             SemanticContinuationProjector.Project(context);
         SemanticSupportProjection supportProjection = SemanticSupportPolicy.ProjectDocument(context);
         SemanticOperationProjection operationProjection = SemanticOperationProjector.Project(context, typeRegistry);
-        SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(context, typeRegistry);
+        SemanticAsyncProjection asyncProjection = SemanticAsyncProjector.Project(
+            context,
+            typeRegistry,
+            callableProjection.Callables);
+        SemanticControlFlowProjection controlFlowProjection = SemanticControlFlowProjector.Project(
+            context,
+            typeRegistry,
+            asyncProjection.ControlledMethodSymbolIds);
         IReadOnlyList<SemanticDiagnostic> supportDiagnostics = supportProjection.Diagnostics
             .Concat(operationProjection.Diagnostics)
+            .Concat(asyncProjection.Diagnostics)
             .Concat(callableProjection.Diagnostics)
             .Concat(stateContractProjection.Diagnostics)
             .Concat(gameplayEventProjection.Diagnostics)
@@ -112,7 +120,8 @@ public static class SemanticAnalyzer
             controlFlowGraphs,
             gameplayEventProjection.Callbacks,
             delegateEventProjection.Callbacks,
-            continuationProjection.Callbacks);
+            continuationProjection.Callbacks,
+            asyncProjection.Methods);
 
         return new SemanticDocument(
             SemanticContract.CurrentSchemaVersion,
@@ -133,6 +142,7 @@ public static class SemanticAnalyzer
             GameplayEventCallbacks = gameplayEventProjection.Callbacks,
             DelegateEventCallbacks = delegateEventProjection.Callbacks,
             ContinuationCallbacks = continuationProjection.Callbacks,
+            AsyncMethods = asyncProjection.Methods,
         };
     }
 

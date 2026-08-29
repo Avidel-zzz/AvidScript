@@ -17,7 +17,7 @@ public sealed record SemanticDocument(
     [property: JsonPropertyOrder(9)] IReadOnlyList<SemanticMethodBody> Methods,
     [property: JsonPropertyOrder(10)] IReadOnlyList<SemanticControlFlowGraph> ControlFlowGraphs,
     [property: JsonPropertyOrder(11)] SemanticReachability? Reachability,
-    [property: JsonPropertyOrder(16)] IReadOnlyList<SemanticDiagnostic> Diagnostics)
+    [property: JsonPropertyOrder(17)] IReadOnlyList<SemanticDiagnostic> Diagnostics)
 {
     [JsonPropertyOrder(12)]
     public IReadOnlyList<SemanticStateContract> StateContracts { get; init; } =
@@ -34,4 +34,8 @@ public sealed record SemanticDocument(
     [JsonPropertyOrder(15)]
     public IReadOnlyList<SemanticContinuationCallback> ContinuationCallbacks { get; init; } =
         Array.Empty<SemanticContinuationCallback>();
+
+    [JsonPropertyOrder(16)]
+    public IReadOnlyList<SemanticAsyncMethod> AsyncMethods { get; init; } =
+        Array.Empty<SemanticAsyncMethod>();
 }

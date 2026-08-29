@@ -107,6 +107,19 @@ internal sealed class CSharpFunctionLoweringContext
         return false;
     }
 
+    public bool TryBindStorage(string? symbolId, GuestRegister register)
+    {
+        if (symbolId is null
+            || !storageBySymbol.TryGetValue(symbolId, out GuestRegister? existing)
+            || !string.Equals(existing.TypeId, register.TypeId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        storageBySymbol[symbolId] = register;
+        return true;
+    }
+
     public bool TryGetGlobal(string? symbolId, out string globalId)
     {
         if (symbolId is not null && globalBySymbol.TryGetValue(symbolId, out string? found))

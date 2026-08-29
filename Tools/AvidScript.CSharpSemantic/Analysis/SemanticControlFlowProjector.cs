@@ -16,7 +16,8 @@ internal static class SemanticControlFlowProjector
 {
     public static SemanticControlFlowProjection Project(
         SemanticCompilationContext context,
-        SemanticTypeRegistry typeRegistry)
+        SemanticTypeRegistry typeRegistry,
+        IReadOnlySet<string> controlledAsyncMethodIds)
     {
         List<SemanticDiagnostic> diagnostics = new();
         List<SemanticControlFlowGraph> graphs = new();
@@ -48,6 +49,12 @@ internal static class SemanticControlFlowProjector
                 body.Declaration.Span);
             if (body.Method.IsAsync)
             {
+                if (controlledAsyncMethodIds.Contains(
+                    SemanticSymbolProjector.GetSymbolId(body.Method)))
+                {
+                    continue;
+                }
+
                 diagnostics.Add(CreateDiagnostic(
                     "ASCS3002",
                     "Async control flow is not supported by the current AvidScript semantic profile.",

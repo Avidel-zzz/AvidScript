@@ -45,6 +45,15 @@ internal static class SemanticOperationProjector
         return ProjectOperation(operation, unit, typeRegistry, diagnostics: null, captureRegistry);
     }
 
+    internal static SemanticOperation ProjectAsyncStatementOperation(
+        IOperation operation,
+        SemanticCompilationUnit unit,
+        SemanticTypeRegistry typeRegistry,
+        ICollection<SemanticDiagnostic> diagnostics)
+    {
+        return ProjectOperation(operation, unit, typeRegistry, diagnostics);
+    }
+
     private static SemanticOperation ProjectOperation(
         IOperation operation,
         SemanticCompilationUnit unit,
@@ -117,6 +126,7 @@ internal static class SemanticOperationProjector
             IEventReferenceOperation => ("event_reference", true),
             IMethodReferenceOperation => ("method_reference", true),
             IInvocationOperation => ("invocation", true),
+            IAwaitOperation => ("await", true),
             IObjectCreationOperation => ("object_creation", true),
             IReturnOperation => ("return", true),
             IBinaryOperation binary => ("binary", IsKnownOperatorKind(binary)),

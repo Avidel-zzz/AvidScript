@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace AvidScript;
@@ -11,6 +12,9 @@ public static class ActorLifecycleScript
     private static AActor ActiveOverlapActor;
     private static bool HasActiveOverlap;
     private static bool HasPreviousInput;
+
+    [AvidTransient]
+    private static bool HasAwaitedDefaultMesh;
     private static int LastInputActionId;
     private static int LastInputTriggerEvent;
 
@@ -20,19 +24,25 @@ public static class ActorLifecycleScript
     public static int Main() => 0;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
-    public static void BeginPlay()
+    public static async void BeginPlay()
     {
         UE.Self.SetActorLocation(new FVector(100.0f, 200.0f, 300.0f));
         UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 0.0f));
         UE.Self.SetActorRotation(FRotator.Zero);
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
-        FVector rootLocation = UE.Self.GetRootComponent().GetWorldLocation();
-        UE.Self.GetRootComponent().SetWorldLocation(rootLocation);
+        UE.Self.GetRootComponent().SetWorldLocation(
+            UE.Self.GetRootComponent().GetWorldLocation());
         UE.SetTimer(0.05f, 7);
         AvidContinuations.Delay(0.04f, DeferredBeginPlay);
         PendingDefaultMesh = AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube",
             DefaultMeshLoaded);
+
+        await AvidContinuations.NextTickAsync();
+        AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
+            "/Engine/EngineMeshes/Cube.Cube");
+        HasAwaitedDefaultMesh = loadedObject.IsValid;
+        UE.Self.AddActorWorldOffset(new FVector(0.0f, 0.0f, 10.0f));
     }
 
     [AvidContinuation(DeferredBeginPlay)]
@@ -125,6 +135,11 @@ public static class ActorLifecycleScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
+        if (HasAwaitedDefaultMesh)
+        {
+            HasAwaitedDefaultMesh = false;
+        }
+
         UE.Self.SetActorLocation(FVector.Zero);
         UE.Self.SetActorRotation(FRotator.Zero);
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
@@ -190,14 +205,29 @@ public static class AvidContinuations
         return new AvidContinuation(Native.ContinuationDelay(delaySeconds, callbackId));
     }
 
+    public static AvidDelayAwaitable DelayAsync(float delaySeconds)
+    {
+        return default;
+    }
+
     public static AvidContinuation NextTick(int callbackId)
     {
         return new AvidContinuation(Native.ContinuationDelay(0.0f, callbackId));
+    }
+
+    public static AvidDelayAwaitable NextTickAsync()
+    {
+        return default;
     }
 }
 
 public static class AvidAssets
 {
+    public static AvidObjectAwaitable LoadObjectAsync(string assetPath)
+    {
+        return default;
+    }
+
     public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)
     {
         return new AvidContinuation(Native.ContinuationLoadObject(assetPath, callbackId));
@@ -393,6 +423,40 @@ public static class Actor
     {
         return UE.Self.AddActorWorldOffset(new FVector(x, y, z));
     }
+}
+
+public readonly struct AvidDelayAwaitable
+{
+    public AvidDelayAwaiter GetAwaiter() => default;
+}
+
+public readonly struct AvidDelayAwaiter : INotifyCompletion
+{
+    public bool IsCompleted => false;
+
+    public void OnCompleted(Action continuation)
+    {
+    }
+
+    public void GetResult()
+    {
+    }
+}
+
+public readonly struct AvidObjectAwaitable
+{
+    public AvidObjectAwaiter GetAwaiter() => default;
+}
+
+public readonly struct AvidObjectAwaiter : INotifyCompletion
+{
+    public bool IsCompleted => false;
+
+    public void OnCompleted(Action continuation)
+    {
+    }
+
+    public AvidLoadedObject GetResult() => default;
 }
 
 internal static class Native

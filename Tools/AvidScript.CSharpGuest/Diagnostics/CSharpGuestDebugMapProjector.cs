@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using AvidScript.CSharpSemantic;
@@ -50,6 +51,7 @@ public static class CSharpGuestDebugMapProjector
             document.Symbols,
             symbol => symbol.Id,
             "symbol");
+        Dictionary<string, AsyncResumeDebugTarget> asyncResumeTargets = BuildAsyncResumeTargets(document);
         HashSet<string> functionIds = new(StringComparer.Ordinal);
         HashSet<string> methodIds = new(StringComparer.Ordinal);
         List<CSharpGuestDebugFunction> functions = new(module.Functions.Count);
@@ -68,6 +70,20 @@ public static class CSharpGuestDebugMapProjector
                 continue;
             }
 
+            int functionIndex = checked(module.Imports.Count + ordinal);
+            if (asyncResumeTargets.TryGetValue(function.Id, out AsyncResumeDebugTarget? resumeTarget))
+            {
+                AddAsyncResumeFunction(
+                    functions,
+                    methodIds,
+                    callables,
+                    symbols,
+                    functionIndex,
+                    function.Id,
+                    resumeTarget);
+                continue;
+            }
+
             string methodId = function.Id[FunctionPrefix.Length..];
             if (!methodIds.Add(methodId)
                 || !callables.TryGetValue(methodId, out SemanticCallable? callable)
@@ -77,7 +93,6 @@ public static class CSharpGuestDebugMapProjector
                 throw new InvalidDataException($"ASDEBUG1003: Guest function '{function.Id}' has no unique source method mapping.");
             }
 
-            int functionIndex = checked(module.Imports.Count + ordinal);
             if (methodSymbol.Kind != "method")
             {
                 continue;
@@ -114,6 +129,78 @@ public static class CSharpGuestDebugMapProjector
                 module.Provenance.SemanticSha256,
                 guestIrSha256),
             functions);
+    }
+
+    private static Dictionary<string, AsyncResumeDebugTarget> BuildAsyncResumeTargets(
+        SemanticDocument document)
+    {
+        Dictionary<string, AsyncResumeDebugTarget> targets = new(StringComparer.Ordinal);
+        foreach (SemanticAsyncMethod method in document.AsyncMethods)
+        {
+            for (int index = 1; index < method.Segments.Count; ++index)
+            {
+                SemanticAsyncAwaitSite? incoming = method.Segments[index - 1].AwaitSite;
+                if (incoming is null)
+                {
+                    throw new InvalidDataException(
+                        $"ASDEBUG1003: Async method '{method.MethodSymbolId}' has a disconnected resume segment.");
+                }
+
+                string functionId = CSharpGuestIds.AsyncResumeFunction(incoming.CallbackId);
+                if (!targets.TryAdd(functionId, new AsyncResumeDebugTarget(
+                    method.MethodSymbolId,
+                    method.Segments[index].Ordinal,
+                    method.Segments[index].Span)))
+                {
+                    throw new InvalidDataException(
+                        $"ASDEBUG1002: Async resume function identity '{functionId}' is duplicated.");
+                }
+            }
+        }
+        return targets;
+    }
+
+    private static void AddAsyncResumeFunction(
+        ICollection<CSharpGuestDebugFunction> functions,
+        ISet<string> methodIds,
+        IReadOnlyDictionary<string, SemanticCallable> callables,
+        IReadOnlyDictionary<string, SemanticSymbol> symbols,
+        int functionIndex,
+        string functionId,
+        AsyncResumeDebugTarget target)
+    {
+        if (!callables.TryGetValue(target.MethodSymbolId, out SemanticCallable? callable)
+            || !callable.HasBody
+            || !symbols.TryGetValue(target.MethodSymbolId, out SemanticSymbol? methodSymbol)
+            || methodSymbol.Kind != "method"
+            || methodSymbol.ContainingSymbolId is null
+            || !symbols.TryGetValue(methodSymbol.ContainingSymbolId, out SemanticSymbol? ownerSymbol)
+            || ownerSymbol.Kind != "type"
+            || !IsValidSpan(target.Span))
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1003: Guest async resume function '{functionId}' has no unique source segment mapping.");
+        }
+
+        string debugMethodId = string.Concat(
+            target.MethodSymbolId,
+            "#async_resume:",
+            target.SegmentOrdinal.ToString(CultureInfo.InvariantCulture));
+        if (!methodIds.Add(debugMethodId))
+        {
+            throw new InvalidDataException(
+                $"ASDEBUG1003: Guest async resume function '{functionId}' has a duplicated debug identity.");
+        }
+
+        string ownerName = ownerSymbol.Signature.StartsWith("global::", StringComparison.Ordinal)
+            ? ownerSymbol.Signature[8..]
+            : ownerSymbol.Signature;
+        functions.Add(new CSharpGuestDebugFunction(
+            functionIndex,
+            functionId,
+            debugMethodId,
+            $"{ownerName}.{methodSymbol.Signature} [async resume {target.SegmentOrdinal}]",
+            target.Span));
     }
 
     private static Dictionary<string, T> UniqueBy<T>(
@@ -167,4 +254,9 @@ public static class CSharpGuestDebugMapProjector
             && span.EndColumn >= 0
             && (span.EndLine > span.Line || span.EndColumn >= span.Column);
     }
+
+    private sealed record AsyncResumeDebugTarget(
+        string MethodSymbolId,
+        int SegmentOrdinal,
+        SemanticSpan Span);
 }

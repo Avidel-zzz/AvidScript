@@ -24,6 +24,7 @@ internal static class SemanticContinuationProjector
         "global::AvidScript.AvidContinuationStatus";
     private const string LoadedObjectTypeName =
         "global::AvidScript.AvidLoadedObject";
+    internal const int CompilerCallbackIdStart = 0x40000000;
     private const int MaximumAssetPathUtf8Bytes = 1024;
 
     public static SemanticContinuationProjection Project(SemanticCompilationContext context)
@@ -62,6 +63,14 @@ internal static class SemanticContinuationProjector
                 diagnostics.Add(Error(
                     "ASCS5301",
                     $"Continuation handler '{method.Name}' must declare a positive constant callback id.",
+                    span));
+                valid = false;
+            }
+            else if (callbackId >= CompilerCallbackIdStart)
+            {
+                diagnostics.Add(Error(
+                    "ASCS5409",
+                    $"Continuation callback id '{callbackId.Value}' is reserved for compiler-owned async continuations.",
                     span));
                 valid = false;
             }
@@ -228,6 +237,9 @@ internal static class SemanticContinuationProjector
     private static bool IsContinuationCall(IMethodSymbol method)
     {
         return method.Name is "Delay" or "NextTick"
+            && method.Parameters.Any(parameter =>
+                parameter.Name == "callbackId"
+                && parameter.Type.SpecialType == SpecialType.System_Int32)
             && string.Equals(
                 method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 ContinuationsTypeName,
@@ -237,6 +249,9 @@ internal static class SemanticContinuationProjector
     private static bool IsObjectLoadCall(IMethodSymbol method)
     {
         return method.Name == "LoadObjectAsync"
+            && method.Parameters.Any(parameter =>
+                parameter.Name == "callbackId"
+                && parameter.Type.SpecialType == SpecialType.System_Int32)
             && string.Equals(
                 method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 AssetsTypeName,

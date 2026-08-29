@@ -7,6 +7,10 @@ namespace AvidScript.CSharpGuest;
 
 internal static class CSharpSemanticInputValidator
 {
+    private const int CompilerCallbackIdStart = 0x40000000;
+    private const int MaximumAsyncAwaitsPerMethod = 16;
+    private const int MaximumAsyncAwaitsPerModule = 64;
+
     private static readonly string[] ObjectContinuationParameterTypeIds =
     {
         "type:global::AvidScript.AvidContinuationStatus",
@@ -50,6 +54,7 @@ internal static class CSharpSemanticInputValidator
             || document.GameplayEventCallbacks is null
             || document.DelegateEventCallbacks is null
             || document.ContinuationCallbacks is null
+            || document.AsyncMethods is null
             || document.Diagnostics is null
             || string.IsNullOrWhiteSpace(document.Language)
             || string.IsNullOrWhiteSpace(document.SemanticVersion)
@@ -68,6 +73,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateGameplayEventCallbacks(document)
             && ValidateDelegateEventCallbacks(document)
             && ValidateContinuationCallbacks(document)
+            && ValidateAsyncMethods(document)
             && ValidateMethods(document.Methods)
             && ValidateReachability(document)
             && ValidateGraphs(document.ControlFlowGraphs)
@@ -215,6 +221,26 @@ internal static class CSharpSemanticInputValidator
             return false;
         }
 
+        if (document.SchemaVersion >= 12
+            && document.AsyncMethods
+                .SelectMany(method => method.Segments)
+                .SelectMany(segment => segment.Statements
+                    .Select(statement => statement.Operation)
+                    .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>()))
+                .SelectMany(EnumerateOperations)
+                .SelectMany(operation => new[]
+                {
+                    operation.SymbolId,
+                    operation.Conversion?.MethodSymbolId,
+                    operation.InputConversion?.MethodSymbolId,
+                    operation.OutputConversion?.MethodSymbolId,
+                })
+                .Where(id => id is not null && callablesById.ContainsKey(id))
+                .Any(id => !reachableIds.Contains(id!)))
+        {
+            return false;
+        }
+
         SemanticReachableImport[] expectedImports = reachability.ReachableCallableIds
             .Select(id => callablesById[id])
             .Where(callable => callable.Import is not null)
@@ -345,6 +371,7 @@ internal static class CSharpSemanticInputValidator
             StringComparer.Ordinal);
         return document.ContinuationCallbacks.All(callback => callback is not null
                 && callback.CallbackId > 0
+                && (document.SchemaVersion < 12 || callback.CallbackId < CompilerCallbackIdStart)
                 && !string.IsNullOrWhiteSpace(callback.Name)
                 && !string.IsNullOrWhiteSpace(callback.MethodSymbolId)
                 && IsValidCallbackSpan(callback.Span, callback.Name, document.Source.Length)
@@ -376,6 +403,240 @@ internal static class CSharpSemanticInputValidator
                 .Distinct()
                 .Count() == document.ContinuationCallbacks.Count
             && Unique(document.ContinuationCallbacks.Select(callback => callback.MethodSymbolId));
+    }
+
+    private static bool ValidateAsyncMethods(SemanticDocument document)
+    {
+        if (document.SchemaVersion < 12)
+        {
+            return document.AsyncMethods.Count == 0;
+        }
+
+        if (document.AsyncMethods.Any(method => method is null)
+            || !Unique(document.AsyncMethods.Select(method => method.MethodSymbolId))
+            || !Unique(document.AsyncMethods.Select(method => method.ExportName))
+            || !document.AsyncMethods.Select(method => method.Span.Start)
+                .SequenceEqual(document.AsyncMethods
+                    .Select(method => method.Span.Start)
+                    .OrderBy(start => start)))
+        {
+            return false;
+        }
+
+        Dictionary<string, SemanticCallable> callablesById = document.Callables.ToDictionary(
+            callable => callable.MethodSymbolId,
+            StringComparer.Ordinal);
+        Dictionary<string, SemanticSymbol> symbolsById = document.Symbols.ToDictionary(
+            symbol => symbol.Id,
+            StringComparer.Ordinal);
+        HashSet<string> graphMethodIds = document.ControlFlowGraphs
+            .Select(graph => graph.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        int expectedCallbackId = CompilerCallbackIdStart;
+        int moduleAwaitCount = 0;
+        foreach (SemanticAsyncMethod method in document.AsyncMethods)
+        {
+            if (method is null
+                || string.IsNullOrWhiteSpace(method.MethodSymbolId)
+                || string.IsNullOrWhiteSpace(method.ExportName)
+                || method.Lowering != SemanticAsyncMethod.ReentrantZeroHeapCpsLowering
+                || method.Segments is null
+                || method.Segments.Count == 0
+                || method.Segments.Any(segment => segment is null)
+                || !IsValidSpan(method.Span, document.Source.Length)
+                || graphMethodIds.Contains(method.MethodSymbolId)
+                || !callablesById.TryGetValue(method.MethodSymbolId, out SemanticCallable? callable)
+                || !callable.HasBody
+                || !callable.IsStatic
+                || callable.IsConstructor
+                || callable.Import is not null
+                || callable.Parameters.Count != 0
+                || callable.ReturnTypeId != "type:void"
+                || callable.Export?.Name != method.ExportName)
+            {
+                return false;
+            }
+
+            int methodAwaitCount = method.Segments.Count(segment => segment.AwaitSite is not null);
+            if (methodAwaitCount > MaximumAsyncAwaitsPerMethod)
+            {
+                return false;
+            }
+            moduleAwaitCount += methodAwaitCount;
+
+            Dictionary<string, int> localDeclarationSegments = new(StringComparer.Ordinal);
+            Dictionary<string, int> resultUseSegments = new(StringComparer.Ordinal);
+            for (int index = 0; index < method.Segments.Count; ++index)
+            {
+                SemanticAsyncSegment segment = method.Segments[index];
+                bool requiresAwaitSite = index < method.Segments.Count - 1;
+                if (segment is null
+                    || segment.Ordinal != index
+                    || segment.Statements is null
+                    || segment.Statements.Any(statement => statement is null)
+                    || !IsValidSpan(segment.Span, document.Source.Length)
+                    || (segment.AwaitSite is not null) != requiresAwaitSite)
+                {
+                    return false;
+                }
+
+                foreach (SemanticAsyncStatement statement in segment.Statements)
+                {
+                    if (statement is null
+                        || statement.Operation is null
+                        || !ValidateOperation(statement.Operation)
+                        || !AllOperationsSupported(statement.Operation))
+                    {
+                        return false;
+                    }
+
+                    if (statement.TargetSymbolId is { } targetSymbolId
+                        && (!localDeclarationSegments.TryAdd(targetSymbolId, segment.Ordinal)
+                            || resultUseSegments.ContainsKey(targetSymbolId)
+                            || !IsMethodLocal(
+                                symbolsById,
+                                targetSymbolId,
+                                method.MethodSymbolId,
+                                statement.Operation.TypeId)))
+                    {
+                        return false;
+                    }
+                }
+
+                if (segment.AwaitSite is { } awaitSite)
+                {
+                    if (awaitSite.CallbackId != expectedCallbackId++
+                        || !ValidateAsyncAwaitSite(
+                            awaitSite,
+                            document.Source.Length,
+                            method.MethodSymbolId,
+                            symbolsById))
+                    {
+                        return false;
+                    }
+
+                    if (awaitSite.ResultSymbolId is { } resultSymbolId
+                        && (!resultUseSegments.TryAdd(resultSymbolId, segment.Ordinal + 1)
+                            || localDeclarationSegments.ContainsKey(resultSymbolId)))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            foreach (SemanticAsyncSegment segment in method.Segments)
+            {
+                IEnumerable<SemanticOperation> operations = segment.Statements
+                    .Select(statement => statement.Operation)
+                    .Concat(segment.AwaitSite?.Arguments ?? Array.Empty<SemanticOperation>());
+                if (operations.SelectMany(EnumerateOperations).Any(operation =>
+                    operation.SymbolId is { } symbolId
+                    && (localDeclarationSegments.TryGetValue(symbolId, out int declarationSegment)
+                            && declarationSegment != segment.Ordinal
+                        || resultUseSegments.TryGetValue(symbolId, out int resultSegment)
+                            && resultSegment != segment.Ordinal)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return moduleAwaitCount <= MaximumAsyncAwaitsPerModule;
+    }
+
+    private static bool ValidateAsyncAwaitSite(
+        SemanticAsyncAwaitSite awaitSite,
+        int sourceLength,
+        string methodSymbolId,
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById)
+    {
+        if (awaitSite is null
+            || awaitSite.CallbackId < CompilerCallbackIdStart
+            || awaitSite.Arguments is null
+            || awaitSite.Arguments.Any(argument => argument is null
+                || !ValidateOperation(argument)
+                || !AllOperationsSupported(argument))
+            || !IsValidSpan(awaitSite.Span, sourceLength))
+        {
+            return false;
+        }
+
+        if (awaitSite.ProducerKind == "delay")
+        {
+            return awaitSite.PayloadKind == SemanticContinuationCallback.NonePayloadKind
+                && awaitSite.Arguments.Count == 1
+                && awaitSite.Arguments[0].TypeId == "type:float32"
+                && awaitSite.ResultSymbolId is null
+                && awaitSite.ResultTypeId is null;
+        }
+
+        if (awaitSite.ProducerKind == "next_tick")
+        {
+            return awaitSite.PayloadKind == SemanticContinuationCallback.NonePayloadKind
+                && awaitSite.Arguments.Count == 0
+                && awaitSite.ResultSymbolId is null
+                && awaitSite.ResultTypeId is null;
+        }
+
+        if (awaitSite.ProducerKind != "object_load"
+            || awaitSite.PayloadKind != SemanticContinuationCallback.ObjectPayloadKind
+            || awaitSite.Arguments.Count != 1
+            || !IsValidAssetPathConstant(awaitSite.Arguments[0]))
+        {
+            return false;
+        }
+
+        if (awaitSite.ResultSymbolId is null || awaitSite.ResultTypeId is null)
+        {
+            return awaitSite.ResultSymbolId is null && awaitSite.ResultTypeId is null;
+        }
+
+        return awaitSite.ResultTypeId == "type:global::AvidScript.AvidLoadedObject"
+            && IsMethodLocal(
+                symbolsById,
+                awaitSite.ResultSymbolId,
+                methodSymbolId,
+                awaitSite.ResultTypeId);
+    }
+
+    private static bool IsMethodLocal(
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
+        string symbolId,
+        string methodSymbolId,
+        string? expectedTypeId)
+    {
+        return symbolsById.TryGetValue(symbolId, out SemanticSymbol? symbol)
+            && symbol.Kind == "local"
+            && symbol.ContainingSymbolId == methodSymbolId
+            && !string.IsNullOrWhiteSpace(symbol.TypeId)
+            && (expectedTypeId is null || symbol.TypeId == expectedTypeId);
+    }
+
+    private static bool IsValidAssetPathConstant(SemanticOperation operation)
+    {
+        string? assetPath = operation.TypeId == "type:string"
+            && operation.Constant is { Kind: "string" } constant
+            ? constant.Value
+            : null;
+        if (string.IsNullOrEmpty(assetPath)
+            || assetPath[0] != '/'
+            || assetPath.Length < 4
+            || assetPath[1] == '/'
+            || assetPath.IndexOf('\\') >= 0
+            || assetPath.IndexOf('\0') >= 0
+            || assetPath.Any(character => char.IsControl(character) || char.IsWhiteSpace(character))
+            || assetPath.Contains("//", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        int lastSlash = assetPath.LastIndexOf('/');
+        int objectSeparator = assetPath.IndexOf('.', lastSlash + 1);
+        return lastSlash > 0
+            && objectSeparator > lastSlash + 1
+            && objectSeparator < assetPath.Length - 1
+            && assetPath.IndexOf('.', objectSeparator + 1) < 0
+            && System.Text.Encoding.UTF8.GetByteCount(assetPath) <= 1024;
     }
 
     private static bool ContinuationParametersMatch(
@@ -442,6 +703,7 @@ internal static class CSharpSemanticInputValidator
             (8, "1.8") => true,
             (9, "1.9") => true,
             (10, "1.10") => true,
+            (11, "1.11") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };
@@ -524,6 +786,35 @@ internal static class CSharpSemanticInputValidator
             && (operation.InputConversion is null || !string.IsNullOrWhiteSpace(operation.InputConversion.Kind))
             && (operation.OutputConversion is null || !string.IsNullOrWhiteSpace(operation.OutputConversion.Kind))
             && operation.Children.All(ValidateOperation);
+    }
+
+    private static bool AllOperationsSupported(SemanticOperation operation)
+    {
+        return operation.IsSupported && operation.Children.All(AllOperationsSupported);
+    }
+
+    private static IEnumerable<SemanticOperation> EnumerateOperations(SemanticOperation operation)
+    {
+        yield return operation;
+        foreach (SemanticOperation child in operation.Children)
+        {
+            foreach (SemanticOperation descendant in EnumerateOperations(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private static bool IsValidSpan(SemanticSpan span, int sourceLength)
+    {
+        return span is not null
+            && span.Start >= 0
+            && span.Length >= 0
+            && span.End <= sourceLength
+            && span.Line >= 0
+            && span.Column >= 0
+            && span.EndLine >= span.Line
+            && span.EndColumn >= 0;
     }
 
     private static bool ValidateEdge(SemanticControlFlowEdge edge)

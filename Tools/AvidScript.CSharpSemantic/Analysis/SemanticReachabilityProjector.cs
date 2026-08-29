@@ -11,7 +11,8 @@ internal static class SemanticReachabilityProjector
         IReadOnlyList<SemanticControlFlowGraph> controlFlowGraphs,
         IReadOnlyList<SemanticGameplayEventCallback> gameplayEventCallbacks,
         IReadOnlyList<SemanticDelegateEventCallback> delegateEventCallbacks,
-        IReadOnlyList<SemanticContinuationCallback> continuationCallbacks)
+        IReadOnlyList<SemanticContinuationCallback> continuationCallbacks,
+        IReadOnlyList<SemanticAsyncMethod> asyncMethods)
     {
         Dictionary<string, SemanticCallable> callablesById = callables.ToDictionary(
             callable => callable.MethodSymbolId,
@@ -40,6 +41,9 @@ internal static class SemanticReachabilityProjector
         Dictionary<string, SemanticControlFlowGraph> graphsByMethodId = controlFlowGraphs.ToDictionary(
             graph => graph.MethodSymbolId,
             StringComparer.Ordinal);
+        Dictionary<string, SemanticAsyncMethod> asyncMethodsById = asyncMethods.ToDictionary(
+            method => method.MethodSymbolId,
+            StringComparer.Ordinal);
         Dictionary<string, AssociatedAccessorTargets> accessorsByAssociatedSymbolId = callables
             .Where(callable => callable.AssociatedSymbolId is not null)
             .GroupBy(callable => callable.AssociatedSymbolId!, StringComparer.Ordinal)
@@ -64,23 +68,39 @@ internal static class SemanticReachabilityProjector
         {
             string current = pending.Min!;
             pending.Remove(current);
-            if (!reachable.Add(current)
-                || !graphsByMethodId.TryGetValue(current, out SemanticControlFlowGraph? graph))
+            if (!reachable.Add(current))
             {
                 continue;
             }
 
-            foreach (SemanticOperation operation in graph.Blocks
-                .Where(block => block.IsReachable)
-                .SelectMany(EnumerateBlockOperations))
+            if (graphsByMethodId.TryGetValue(current, out SemanticControlFlowGraph? graph))
             {
-                QueueOperationTargets(
-                    operation,
-                    PropertyAccess.Read,
-                    callablesById,
-                    accessorsByAssociatedSymbolId,
-                    reachable,
-                    pending);
+                foreach (SemanticOperation operation in graph.Blocks
+                    .Where(block => block.IsReachable)
+                    .SelectMany(EnumerateBlockOperations))
+                {
+                    QueueOperationTargets(
+                        operation,
+                        PropertyAccess.Read,
+                        callablesById,
+                        accessorsByAssociatedSymbolId,
+                        reachable,
+                        pending);
+                }
+            }
+
+            if (asyncMethodsById.TryGetValue(current, out SemanticAsyncMethod? asyncMethod))
+            {
+                foreach (SemanticOperation operation in EnumerateAsyncOperations(asyncMethod))
+                {
+                    QueueOperationTargets(
+                        operation,
+                        PropertyAccess.Read,
+                        callablesById,
+                        accessorsByAssociatedSymbolId,
+                        reachable,
+                        pending);
+                }
             }
         }
 
@@ -106,6 +126,26 @@ internal static class SemanticReachabilityProjector
         if (block.BranchValue is not null)
         {
             yield return block.BranchValue;
+        }
+    }
+
+    private static IEnumerable<SemanticOperation> EnumerateAsyncOperations(
+        SemanticAsyncMethod method)
+    {
+        foreach (SemanticAsyncSegment segment in method.Segments)
+        {
+            foreach (SemanticAsyncStatement statement in segment.Statements)
+            {
+                yield return statement.Operation;
+            }
+
+            if (segment.AwaitSite is { } awaitSite)
+            {
+                foreach (SemanticOperation argument in awaitSite.Arguments)
+                {
+                    yield return argument;
+                }
+            }
         }
     }
 

@@ -2271,7 +2271,9 @@ $AllowedLiteralFacadeStructs = @(
     'TSubclassOfAActor',
     'AvidSubscription',
     'AvidContinuation',
-    'AvidLoadedObject'
+    'AvidLoadedObject',
+    'AvidDelayAwaitable',
+    'AvidObjectAwaitable'
 )
 $LiteralFacadeStructs = @(
     [regex]::Matches(
@@ -2628,9 +2630,13 @@ $SemanticContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Mod
 $SemanticReachabilitySource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticReachabilityProjector.cs'
 $SemanticGameplayEventSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticGameplayEventProjector.cs'
 $SemanticContinuationSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticContinuationProjector.cs'
+$SemanticAsyncSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Analysis/SemanticAsyncProjector.cs'
+$SemanticAsyncModelSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticAsync.cs'
 $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
 $CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpContinuationLowerer.cs'
+$CSharpAsyncLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncLowerer.cs'
+$CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
 $GuestArrayCapabilityIntrinsicsSource = Read-RequiredFile 'Tools/AvidScript.GuestIr/Model/GuestArrayCapabilityIntrinsics.cs'
@@ -2810,11 +2816,52 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 11',
-    'CurrentSemanticVersion = "1.11"'
+    'CurrentSchemaVersion = 12',
+    'CurrentSemanticVersion = "1.12"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"
+    }
+}
+foreach ($RequiredControlledAsyncSemanticContract in @(
+    'SemanticAsyncProjector.Project',
+    'AsyncMethods = asyncProjection.Methods'
+)) {
+    if (-not $SemanticAnalyzerSource.Contains($RequiredControlledAsyncSemanticContract)) {
+        Add-Violation "C# Semantic analyzer is missing controlled async contract $RequiredControlledAsyncSemanticContract"
+    }
+}
+foreach ($RequiredControlledAsyncProjectionContract in @(
+    'MaximumAwaitsPerMethod = 16',
+    'MaximumAwaitsPerModule = 64',
+    'CompilerCallbackIdStart',
+    'DelayAsync',
+    'NextTickAsync',
+    'LoadObjectAsync',
+    'ValidateLocalLifetimes',
+    'ASCS5401',
+    'ASCS5408'
+)) {
+    if (-not $SemanticAsyncSource.Contains($RequiredControlledAsyncProjectionContract)) {
+        Add-Violation "C# Semantic controlled async projector is missing $RequiredControlledAsyncProjectionContract"
+    }
+}
+foreach ($RequiredControlledAsyncModelContract in @(
+    'SemanticAsyncMethod',
+    'SemanticAsyncSegment',
+    'SemanticAsyncAwaitSite',
+    'reentrant_zero_heap_cps'
+)) {
+    if (-not $SemanticAsyncModelSource.Contains($RequiredControlledAsyncModelContract)) {
+        Add-Violation "C# Semantic controlled async model is missing $RequiredControlledAsyncModelContract"
+    }
+}
+foreach ($RequiredControlledAsyncReachabilityContract in @(
+    'IReadOnlyList<SemanticAsyncMethod> asyncMethods',
+    'EnumerateAsyncOperations'
+)) {
+    if (-not $SemanticReachabilitySource.Contains($RequiredControlledAsyncReachabilityContract)) {
+        Add-Violation "C# Semantic reachability is missing async segment contract $RequiredControlledAsyncReachabilityContract"
     }
 }
 foreach ($RequiredReachabilityProjection in @(
@@ -2849,6 +2896,19 @@ foreach ($RequiredAsyncContinuationFacadeContract in @(
         Add-Violation "generated C# async continuation facade is missing $RequiredAsyncContinuationFacadeContract"
     }
 }
+foreach ($RequiredControlledAsyncFacadeContract in @(
+    'public readonly struct AvidDelayAwaitable',
+    'public readonly struct AvidDelayAwaiter : INotifyCompletion',
+    'DelayAsync(float delaySeconds)',
+    'NextTickAsync()',
+    'public readonly struct AvidObjectAwaitable',
+    'public readonly struct AvidObjectAwaiter : INotifyCompletion',
+    'LoadObjectAsync(string assetPath)'
+)) {
+    if (-not $CSharpBindingRendererSource.Contains($RequiredControlledAsyncFacadeContract)) {
+        Add-Violation "generated C# controlled async facade is missing $RequiredControlledAsyncFacadeContract"
+    }
+}
 foreach ($RequiredAsyncContinuationSemanticContract in @(
     'MaximumAssetPathUtf8Bytes = 1024',
     'LoadObjectAsync',
@@ -2869,6 +2929,35 @@ foreach ($RequiredAsyncContinuationGuestContract in @(
     if (-not $CSharpContinuationLowererSource.Contains($RequiredAsyncContinuationGuestContract)) {
         Add-Violation "C# Guest v2 continuation lowerer is missing $RequiredAsyncContinuationGuestContract"
     }
+}
+foreach ($RequiredControlledAsyncGuestContract in @(
+    'CSharpAsyncLowerer.Lower',
+    'asyncMethods.ResumeRoutes'
+)) {
+    if (-not $CSharpGuestLowererSource.Contains($RequiredControlledAsyncGuestContract)) {
+        Add-Violation "C# Guest entry pipeline is missing controlled async contract $RequiredControlledAsyncGuestContract"
+    }
+}
+foreach ($RequiredControlledAsyncLoweringContract in @(
+    'CSharpGuestIds.AsyncResumeFunction',
+    'continuation_delay',
+    'continuation_load_object',
+    'not_equals',
+    'new GuestTerminator("trap"',
+    'CSharpAsyncResumeRoute'
+)) {
+    if (-not $CSharpAsyncLowererSource.Contains($RequiredControlledAsyncLoweringContract)) {
+        Add-Violation "C# Guest controlled async lowerer is missing $RequiredControlledAsyncLoweringContract"
+    }
+}
+if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes')) {
+    Add-Violation 'C# Guest continuation v2 router must merge compiler-owned async resume routes'
+}
+if (-not $CSharpTypeLowererSource.Contains('IsCompilerAsyncScaffoldType')) {
+    Add-Violation 'C# Guest type lowering must isolate compiler-only async awaiter scaffold types'
+}
+if (-not $CSharpGuestDebugMapProjectorSource.Contains('BuildAsyncResumeTargets')) {
+    Add-Violation 'C# Guest debug maps must project async resume functions back to source segments'
 }
 foreach ($RequiredAsyncContinuationRuntimeContract in @(
     'continuation_load_object',

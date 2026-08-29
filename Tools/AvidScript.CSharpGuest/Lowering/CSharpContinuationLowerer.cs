@@ -13,13 +13,19 @@ internal sealed record CSharpContinuationLoweringResult(
 
 internal static class CSharpContinuationLowerer
 {
+    private sealed record DispatchTarget(
+        int CallbackId,
+        string PayloadKind,
+        string FunctionId);
+
     public static CSharpContinuationLoweringResult? Lower(
         SemanticDocument document,
         IReadOnlyDictionary<string, GuestType> guestTypes,
         IReadOnlyList<GuestFunction> loweredFunctions,
+        IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes,
         List<GuestDiagnostic> diagnostics)
     {
-        if (document.ContinuationCallbacks.Count == 0)
+        if (document.ContinuationCallbacks.Count == 0 && asyncRoutes.Count == 0)
         {
             return null;
         }
@@ -58,7 +64,9 @@ internal static class CSharpContinuationLowerer
             .OrderBy(callback => callback.CallbackId)
             .ToArray();
         bool hasObjectPayload = callbacks.Any(callback =>
-            callback.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind);
+                callback.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
+            || asyncRoutes.Any(route =>
+                route.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind);
         GuestType? continuationStatusType = null;
         GuestType? loadedObjectType = null;
         if (hasObjectPayload
@@ -84,6 +92,36 @@ internal static class CSharpContinuationLowerer
             }
         }
 
+        foreach (CSharpAsyncResumeRoute route in asyncRoutes)
+        {
+            if (route.CallbackId <= 0
+                || route.PayloadKind is not (
+                    SemanticContinuationCallback.NonePayloadKind or
+                    SemanticContinuationCallback.ObjectPayloadKind)
+                || !loweredFunctionIds.Contains(route.FunctionId))
+            {
+                Add(diagnostics, $"Async continuation callback '{route.CallbackId}' has no compatible lowered resume function.");
+                return null;
+            }
+        }
+
+        DispatchTarget[] targets = callbacks
+            .Select(callback => new DispatchTarget(
+                callback.CallbackId,
+                callback.PayloadKind,
+                CSharpGuestIds.Function(callback.MethodSymbolId)))
+            .Concat(asyncRoutes.Select(route => new DispatchTarget(
+                route.CallbackId,
+                route.PayloadKind,
+                route.FunctionId)))
+            .OrderBy(target => target.CallbackId)
+            .ToArray();
+        if (targets.GroupBy(target => target.CallbackId).Any(group => group.Count() != 1))
+        {
+            Add(diagnostics, "Continuation callback identities overlap between explicit and compiler-generated routes.");
+            return null;
+        }
+
         GuestRegister callbackId = Parameter(version2, "callback_id", int32Type.Id);
         GuestRegister token = Parameter(version2, "token", int64Type.Id);
         GuestRegister status = Parameter(version2, "status", int32Type.Id);
@@ -102,23 +140,23 @@ internal static class CSharpContinuationLowerer
 
         List<GuestRegister> locals = new();
         List<GuestBasicBlock> blocks = new();
-        for (int index = 0; index < callbacks.Length; ++index)
+        for (int index = 0; index < targets.Length; ++index)
         {
-            SemanticContinuationCallback callback = callbacks[index];
-            string checkBlockId = CSharpGuestIds.ContinuationCheckBlock(version2, callback.CallbackId);
-            string callBlockId = CSharpGuestIds.ContinuationCallBlock(version2, callback.CallbackId);
-            string falseBlockId = index + 1 < callbacks.Length
-                ? CSharpGuestIds.ContinuationCheckBlock(version2, callbacks[index + 1].CallbackId)
+            DispatchTarget target = targets[index];
+            string checkBlockId = CSharpGuestIds.ContinuationCheckBlock(version2, target.CallbackId);
+            string callBlockId = CSharpGuestIds.ContinuationCallBlock(version2, target.CallbackId);
+            string falseBlockId = index + 1 < targets.Length
+                ? CSharpGuestIds.ContinuationCheckBlock(version2, targets[index + 1].CallbackId)
                 : CSharpGuestIds.ContinuationReturnBlock(version2);
             GuestRegister callbackConstant = Local(
                 version2,
-                callback.CallbackId,
+                target.CallbackId,
                 "callback_id_constant",
                 int32Type.Id,
                 locals);
             GuestRegister condition = Local(
                 version2,
-                callback.CallbackId,
+                target.CallbackId,
                 "callback_id_matches",
                 int32Type.Id,
                 locals);
@@ -134,7 +172,7 @@ internal static class CSharpContinuationLowerer
                         null,
                         new GuestConstant(
                             "int32",
-                            callback.CallbackId.ToString(CultureInfo.InvariantCulture))),
+                            target.CallbackId.ToString(CultureInfo.InvariantCulture))),
                     new(
                         "binary",
                         condition.Id,
@@ -147,11 +185,11 @@ internal static class CSharpContinuationLowerer
 
             List<GuestInstruction> callInstructions = new();
             string[] argumentIds = Array.Empty<string>();
-            if (callback.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
+            if (target.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind)
             {
                 GuestRegister callbackStatus = Local(
                     version2,
-                    callback.CallbackId,
+                    target.CallbackId,
                     "status",
                     continuationStatusType!.Id,
                     locals);
@@ -164,7 +202,7 @@ internal static class CSharpContinuationLowerer
                     null));
                 GuestRegister loadedObject = Local(
                     version2,
-                    callback.CallbackId,
+                    target.CallbackId,
                     "loaded_object",
                     loadedObjectType!.Id,
                     locals);
@@ -194,7 +232,7 @@ internal static class CSharpContinuationLowerer
                 "call",
                 null,
                 argumentIds,
-                CSharpGuestIds.Function(callback.MethodSymbolId),
+                target.FunctionId,
                 null,
                 null));
             blocks.Add(new GuestBasicBlock(
@@ -212,7 +250,7 @@ internal static class CSharpContinuationLowerer
             parameters,
             locals,
             voidType.Id,
-            CSharpGuestIds.ContinuationCheckBlock(version2, callbacks[0].CallbackId),
+            CSharpGuestIds.ContinuationCheckBlock(version2, targets[0].CallbackId),
             blocks);
         return new CSharpContinuationLoweringResult(
             function,

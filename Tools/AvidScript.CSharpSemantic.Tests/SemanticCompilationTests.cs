@@ -32,11 +32,19 @@ internal static class SemanticCompilationTests
         Assert(document.Source.Sha256 == frontend.Source.Sha256, "semantic source hash should match frontend");
         Assert(document.Source.FrontendSha256 == frontend.Source.Sha256, "semantic artifact should retain frontend source hash");
         Assert(document.Diagnostics.All(diagnostic => diagnostic.Severity != "error"), "ActorLifecycle should have no semantic errors");
-        Assert(document.ControlFlowGraphs.Count == document.Methods.Count,
-            "every ActorLifecycle executable method body should have a CFG");
+        HashSet<string> asyncMethodIds = document.AsyncMethods
+            .Select(method => method.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert(document.ControlFlowGraphs.Count + document.AsyncMethods.Count == document.Methods.Count,
+            "every ActorLifecycle executable method body should have a CFG or controlled async segment graph");
         Assert(document.ControlFlowGraphs.Select(graph => graph.MethodSymbolId)
-            .SequenceEqual(document.Methods.Select(method => method.MethodSymbolId)),
-            "ActorLifecycle CFGs should align one-to-one with sorted executable method bodies");
+            .SequenceEqual(document.Methods
+                .Where(method => !asyncMethodIds.Contains(method.MethodSymbolId))
+                .Select(method => method.MethodSymbolId)),
+            "ActorLifecycle CFGs should align with the sorted synchronous executable bodies");
+        Assert(document.AsyncMethods.Count == 1
+            && document.AsyncMethods[0].ExportName == "avid_on_begin_play",
+            "ActorLifecycle BeginPlay should publish one controlled async segment graph");
 
         SemanticType floatType = FindType(document.Types, "type:float32");
         Assert(floatType.CanonicalName == "float32" && floatType.IsValueType, "float should use canonical float32 identity");

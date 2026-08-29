@@ -19,7 +19,113 @@ internal static class CSharpGuestContinuationTests
         SchemaTenRetainsLegacyRouterAndDefaultPayload();
         ExplicitExportConflictFailsClosed();
         TamperedCallbackMetadataFailsClosed();
-        return 5;
+        AsyncAwaitLowersZeroHeapResumeSegments();
+        return 6;
+    }
+
+    private static void AsyncAwaitLowersZeroHeapResumeSegments()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    AvidLoadedObject loaded = await AvidAssets.LoadObjectAsync(
+                        "/Engine/EngineMeshes/Cube.Cube");
+                    Consume(loaded);
+                    await AvidContinuations.DelayAsync(0.25f);
+                }
+
+                private static void Consume(AvidLoadedObject loaded) { }
+            }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/AsyncAwaitGuest.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("async await source produced no Guest module");
+        SemanticAsyncMethod asyncMethod = document.AsyncMethods.Single();
+        int[] callbackIds = asyncMethod.Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .Select(segment => segment.AwaitSite!.CallbackId)
+            .ToArray();
+        GuestFunction[] resumeFunctions = module.Functions
+            .Where(function => function.Id.StartsWith(
+                "function:synthetic:async_resume:",
+                StringComparison.Ordinal))
+            .OrderBy(function => function.Id, StringComparer.Ordinal)
+            .ToArray();
+        GuestFunction router = module.Functions.Single(function =>
+            function.Id == "function:synthetic:continuation_v2");
+        CSharpGuestDebugMap debugMap = CSharpGuestDebugMapProjector.Project(
+            document,
+            module,
+            SemanticHash,
+            document.Source.FrontendSha256);
+        CSharpGuestDebugFunction[] resumeDebugFunctions = debugMap.Functions
+            .Where(function => function.GuestFunctionId.StartsWith(
+                "function:synthetic:async_resume:",
+                StringComparison.Ordinal))
+            .OrderBy(function => function.WasmFunctionIndex)
+            .ToArray();
+        string[] routeTargets = router.Blocks
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call"
+                && instruction.TargetId?.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal) == true)
+            .Select(instruction => instruction.TargetId!)
+            .ToArray();
+
+        Assert(result.Succeeded
+            && document.SchemaVersion == 12
+            && document.SemanticVersion == "1.12"
+            && asyncMethod.Lowering == "reentrant_zero_heap_cps"
+            && callbackIds.SequenceEqual(new[]
+            {
+                0x40000000,
+                0x40000001,
+                0x40000002,
+            }),
+            "semantic async methods should publish deterministic compiler-owned await sites");
+        Assert(module.Exports.Any(export => export.Name == "avid_on_begin_play")
+            && module.Exports.Any(export => export.Name == "avid_on_continuation_v2")
+            && resumeFunctions.Length == 3
+            && routeTargets.SequenceEqual(callbackIds.Select(id =>
+                $"function:synthetic:async_resume:{id}")),
+            "async await should lower to one exported entry and deterministic resume routes");
+        Assert(module.Imports.Count(import => import.Name == "continuation_delay") == 1
+            && module.Imports.Count(import => import.Name == "continuation_load_object") == 1
+            && resumeFunctions.Single(function => function.Id.EndsWith(
+                callbackIds[1].ToString(),
+                StringComparison.Ordinal)).Parameters.Count == 2,
+            "object await resume should consume the v2 status/object payload without a new Host ABI");
+        Assert(module.Functions
+                .Where(function => function.Id == module.Exports.Single(export =>
+                        export.Name == "avid_on_begin_play").FunctionId
+                    || function.Id.StartsWith(
+                        "function:synthetic:async_resume:",
+                        StringComparison.Ordinal))
+                .SelectMany(function => function.Blocks)
+                .Count(block => block.Terminator.Kind == "trap") == 3,
+            "each await producer should trap immediately when the Session rejects scheduling");
+        Assert(resumeDebugFunctions.Length == 3
+            && resumeDebugFunctions.Select(function => function.MethodSymbolId).Distinct().Count() == 3
+            && resumeDebugFunctions.All(function => function.MethodSymbolId.Contains(
+                "#async_resume:",
+                StringComparison.Ordinal))
+            && resumeDebugFunctions.Select(function => function.Span)
+                .SequenceEqual(asyncMethod.Segments.Skip(1).Select(segment => segment.Span)),
+            "each generated resume function should map back to its source async segment");
+        Assert(GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "zero-heap async Guest IR should validate and compile to WASM");
     }
 
     private static void FacadeCallsLowerSharedContinuationImports()
@@ -324,6 +430,7 @@ internal static class CSharpGuestContinuationTests
 
     private const string ContinuationFacade = """
         using System;
+        using System.Runtime.CompilerServices;
         using System.Runtime.InteropServices;
 
         namespace AvidScript;
@@ -344,6 +451,34 @@ internal static class CSharpGuestContinuationTests
             public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;
         }
 
+        public readonly struct AvidDelayAwaitable
+        {
+            private readonly int Marker;
+            public AvidDelayAwaiter GetAwaiter() => default;
+        }
+
+        public readonly struct AvidDelayAwaiter : INotifyCompletion
+        {
+            private readonly int Marker;
+            public bool IsCompleted => false;
+            public void OnCompleted(Action continuation) { }
+            public void GetResult() { }
+        }
+
+        public readonly struct AvidObjectAwaitable
+        {
+            private readonly int Marker;
+            public AvidObjectAwaiter GetAwaiter() => default;
+        }
+
+        public readonly struct AvidObjectAwaiter : INotifyCompletion
+        {
+            private readonly int Marker;
+            public bool IsCompleted => false;
+            public void OnCompleted(Action continuation) { }
+            public AvidLoadedObject GetResult() => default;
+        }
+
         public static class AvidContinuations
         {
             public static AvidContinuation Delay(float delaySeconds, int callbackId)
@@ -351,6 +486,9 @@ internal static class CSharpGuestContinuationTests
 
             public static AvidContinuation NextTick(int callbackId)
                 => Delay(0.0f, callbackId);
+
+            public static AvidDelayAwaitable DelayAsync(float delaySeconds) => default;
+            public static AvidDelayAwaitable NextTickAsync() => default;
         }
 
         public enum AvidContinuationStatus : int
@@ -374,6 +512,8 @@ internal static class CSharpGuestContinuationTests
         {
             public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)
                 => new(AvidScriptRuntimeNative.ContinuationLoadObject(assetPath, callbackId));
+
+            public static AvidObjectAwaitable LoadObjectAsync(string assetPath) => default;
         }
 
         internal static class AvidScriptRuntimeNative

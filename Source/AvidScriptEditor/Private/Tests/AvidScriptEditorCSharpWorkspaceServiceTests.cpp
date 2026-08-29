@@ -95,6 +95,19 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
     const FString ProfileText = ReadAvidScriptWorkspaceTestText(*this, First.ProfilePath);
     TestFalse(TEXT("Profile has no unresolved tokens"), ProfileText.Contains(TEXT("{{")));
 	const FString InitialSourceText = ReadAvidScriptWorkspaceTestText(*this, First.SourcePath);
+	TestTrue(TEXT("Gameplay starter exports a zero-parameter async BeginPlay"),
+		InitialSourceText.Contains(TEXT("public static async void BeginPlay()")));
+	const int32 NextTickAwaitIndex = InitialSourceText.Find(
+		TEXT("await AvidContinuations.NextTickAsync();"));
+	const int32 ObjectAwaitIndex = InitialSourceText.Find(
+		TEXT("await AvidAssets.LoadObjectAsync("));
+	const int32 ObjectUseIndex = InitialSourceText.Find(
+		TEXT("HasAwaitedDefaultMesh = loadedObject.IsValid;"));
+	TestTrue(TEXT("Gameplay starter awaits next tick before object loading"),
+		NextTickAwaitIndex != INDEX_NONE
+		&& ObjectAwaitIndex > NextTickAwaitIndex);
+	TestTrue(TEXT("Gameplay starter consumes the object result in its resume segment"),
+		ObjectUseIndex > ObjectAwaitIndex);
 	TestTrue(TEXT("Gameplay starter declares begin overlap callback"), InitialSourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Gameplay starter declares end overlap callback"), InitialSourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Gameplay starter declares hit callback"), InitialSourceText.Contains(TEXT("public static void OnHit(AActor otherActor, FVector normalImpulse)")));

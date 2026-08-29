@@ -190,16 +190,37 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 		&& FirstSource.Contains(TEXT("public bool IsNull => Slot == 0 && Generation == 0;"))
 		&& FirstSource.Contains(TEXT("public bool HasHandle => Slot > 0 && Generation > 0;"))
 		&& FirstSource.Contains(TEXT("public bool IsValid => Slot > 0 && Generation > 0;")));
+	TestTrue(TEXT("Generated facade imports the C# await completion contract"),
+		FirstSource.Contains(TEXT("using System.Runtime.CompilerServices;")));
+	TestTrue(TEXT("Generated facade declares the non-generic delay await pattern"),
+		FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaitable"))
+		&& FirstSource.Contains(TEXT("public AvidDelayAwaiter GetAwaiter() => default;"))
+		&& FirstSource.Contains(TEXT("public readonly struct AvidDelayAwaiter : INotifyCompletion"))
+		&& FirstSource.Contains(TEXT("public void GetResult()")));
+	TestTrue(TEXT("Generated facade declares the non-generic object await pattern"),
+		FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaitable"))
+		&& FirstSource.Contains(TEXT("public AvidObjectAwaiter GetAwaiter() => default;"))
+		&& FirstSource.Contains(TEXT("public readonly struct AvidObjectAwaiter : INotifyCompletion"))
+		&& FirstSource.Contains(TEXT("public AvidLoadedObject GetResult() => default;")));
+	TestTrue(TEXT("Generated awaiter stubs never complete or invoke CLR continuations"),
+		FirstSource.Contains(TEXT("public bool IsCompleted => false;"))
+		&& FirstSource.Contains(TEXT("public void OnCompleted(Action continuation)\n    {\n    }")));
 	TestTrue(TEXT("Generated facade declares an opaque continuation token"), FirstSource.Contains(TEXT("public readonly struct AvidContinuation")));
 	TestTrue(TEXT("Continuation token storage remains private"), FirstSource.Contains(TEXT("private readonly long Token;")));
 	TestTrue(TEXT("Continuation validity rejects only the zero token"), FirstSource.Contains(TEXT("public bool IsValid => Token != 0;")));
 	TestTrue(TEXT("Continuation cancellation uses the continuation service"), FirstSource.Contains(TEXT("public bool Cancel() => AvidScriptRuntimeNative.ContinuationCancel(Token) != 0;")));
 	TestTrue(TEXT("Generated facade exposes delayed continuations"), FirstSource.Contains(TEXT("public static AvidContinuation Delay(float delaySeconds, int callbackId)")));
+	TestTrue(TEXT("Generated facade exposes stubbed async delays"),
+		FirstSource.Contains(TEXT("public static AvidDelayAwaitable DelayAsync(float delaySeconds)\n        => default;")));
 	TestTrue(TEXT("Generated facade exposes next-tick continuations"), FirstSource.Contains(TEXT("public static AvidContinuation NextTick(int callbackId)")));
+	TestTrue(TEXT("Generated facade exposes stubbed async next-tick scheduling"),
+		FirstSource.Contains(TEXT("public static AvidDelayAwaitable NextTickAsync()\n        => default;")));
 	TestTrue(TEXT("Generated facade exposes async object loading"),
 		FirstSource.Contains(TEXT("public static class AvidAssets"))
 		&& FirstSource.Contains(TEXT("public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId)"))
 		&& FirstSource.Contains(TEXT("AvidScriptRuntimeNative.ContinuationLoadObject(assetPath, callbackId)")));
+	TestTrue(TEXT("Generated facade exposes stubbed awaitable object loading"),
+		FirstSource.Contains(TEXT("public static AvidObjectAwaitable LoadObjectAsync(string assetPath)\n        => default;")));
 	TestTrue(TEXT("Delay calls the continuation delay import"), FirstSource.Contains(TEXT("AvidScriptRuntimeNative.ContinuationDelay(delaySeconds, callbackId)")));
 	TestTrue(TEXT("NextTick uses zero-delay continuation scheduling"), FirstSource.Contains(TEXT("AvidScriptRuntimeNative.ContinuationDelay(0.0f, callbackId)")));
 	TestTrue(TEXT("Generated facade imports continuation delay"), FirstSource.Contains(TEXT("EntryPoint = \"continuation_delay\"")));
@@ -244,9 +265,14 @@ bool FAvidScriptEditorCSharpBindingEmitterDeterminismTest::RunTest(const FString
 			EmptyPackageErrorSource));
 	TestFalse(TEXT("Empty package state contract surface is present"), ExtractStateContractSurface(EmptyPackageSource).IsEmpty());
 	TestTrue(TEXT("Empty package facade preserves continuation scheduling"), EmptyPackageSource.Contains(TEXT("public static class AvidContinuations")));
+	TestTrue(TEXT("Empty package facade preserves delay awaitables"),
+		EmptyPackageSource.Contains(TEXT("public readonly struct AvidDelayAwaiter : INotifyCompletion"))
+		&& EmptyPackageSource.Contains(TEXT("public static AvidDelayAwaitable NextTickAsync()")));
 	TestTrue(TEXT("Empty package facade preserves continuation imports"), EmptyPackageSource.Contains(TEXT("EntryPoint = \"continuation_delay\"")));
 	TestTrue(TEXT("Empty package facade preserves async object loading"),
 		EmptyPackageSource.Contains(TEXT("public static class AvidAssets"))
+		&& EmptyPackageSource.Contains(TEXT("public readonly struct AvidObjectAwaiter : INotifyCompletion"))
+		&& EmptyPackageSource.Contains(TEXT("public static AvidObjectAwaitable LoadObjectAsync(string assetPath)"))
 		&& EmptyPackageSource.Contains(TEXT("EntryPoint = \"continuation_load_object\"")));
 	TestEqual(
 		TEXT("Empty and reflected packages emit the identical state contract surface"),

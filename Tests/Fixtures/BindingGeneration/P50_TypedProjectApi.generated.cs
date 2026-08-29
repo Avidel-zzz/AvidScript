@@ -201,6 +201,40 @@ public static class UE
     private static extern long OwnerGetHandle();
 }
 
+public readonly struct AvidDelayAwaitable
+{
+    public AvidDelayAwaiter GetAwaiter() => default;
+}
+
+public readonly struct AvidDelayAwaiter : INotifyCompletion
+{
+    public bool IsCompleted => false;
+
+    public void OnCompleted(Action continuation)
+    {
+    }
+
+    public void GetResult()
+    {
+    }
+}
+
+public readonly struct AvidObjectAwaitable
+{
+    public AvidObjectAwaiter GetAwaiter() => default;
+}
+
+public readonly struct AvidObjectAwaiter : INotifyCompletion
+{
+    public bool IsCompleted => false;
+
+    public void OnCompleted(Action continuation)
+    {
+    }
+
+    public AvidLoadedObject GetResult() => default;
+}
+
 internal static class AvidScriptRuntimeNative
 {
     [DllImport("env", EntryPoint = "continuation_delay")]

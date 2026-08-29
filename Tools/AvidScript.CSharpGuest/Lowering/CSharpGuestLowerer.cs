@@ -43,6 +43,12 @@ public static class CSharpGuestLowerer
             guestTypes,
             dataPool,
             diagnostics).ToList();
+        CSharpAsyncLoweringResult asyncMethods = CSharpAsyncLowerer.Lower(
+            document,
+            guestTypes,
+            dataPool,
+            diagnostics);
+        functions.AddRange(asyncMethods.Functions);
         if (enableDataLaneFusion)
         {
             CSharpDataLaneFusionResult fusion = CSharpDataLaneFusionPass.Run(
@@ -86,6 +92,7 @@ public static class CSharpGuestLowerer
             document,
             guestTypes,
             functions,
+            asyncMethods.ResumeRoutes,
             diagnostics);
         if (continuations is not null)
         {
@@ -236,7 +243,8 @@ public static class CSharpGuestLowerer
         foreach (SemanticCallable callable in document.Callables
             .Where(callable => callable.Import is not null
                 && (reachableCallableIds is null
-                    || reachableCallableIds.Contains(callable.MethodSymbolId)))
+                    || reachableCallableIds.Contains(callable.MethodSymbolId)
+                    || IsRequiredAsyncImport(document, callable)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
         {
             string[] parameterTypeIds = callable.Parameters
@@ -388,6 +396,9 @@ public static class CSharpGuestLowerer
                 && !CSharpClassReferencePolicy.IsIntrinsicConstructor(callable)
                 && !CSharpClassReferencePolicy.IsIntrinsicUpcast(document, callable)
                 && !CSharpObjectCapabilityPolicy.IsIntrinsicConstructor(callable)
+                && !document.AsyncMethods.Any(method =>
+                    method.MethodSymbolId == callable.MethodSymbolId)
+                && !IsAsyncFacadeIntrinsic(document, callable)
                 && (reachableCallableIds is null
                     || reachableCallableIds.Contains(callable.MethodSymbolId)))
             .OrderBy(callable => callable.MethodSymbolId, StringComparer.Ordinal))
@@ -407,6 +418,33 @@ public static class CSharpGuestLowerer
         }
 
         return functions.ToArray();
+    }
+
+    private static bool IsRequiredAsyncImport(
+        SemanticDocument document,
+        SemanticCallable callable)
+    {
+        return document.AsyncMethods.Count != 0
+            && callable.Import is { Module: "env" } import
+            && import.Name is "continuation_delay" or "continuation_load_object";
+    }
+
+    private static bool IsAsyncFacadeIntrinsic(
+        SemanticDocument document,
+        SemanticCallable callable)
+    {
+        if (document.AsyncMethods.Count == 0)
+        {
+            return false;
+        }
+
+        return callable.ContainingTypeId is
+                "type:global::AvidScript.AvidContinuations" or
+                "type:global::AvidScript.AvidAssets"
+            && (callable.MethodSymbolId.Contains(".DelayAsync(", StringComparison.Ordinal)
+                || callable.MethodSymbolId.Contains(".NextTickAsync(", StringComparison.Ordinal)
+                || callable.MethodSymbolId.Contains(".LoadObjectAsync(", StringComparison.Ordinal)
+                    && callable.Parameters.Count == 1);
     }
 
     private static GuestExport[] LowerExports(

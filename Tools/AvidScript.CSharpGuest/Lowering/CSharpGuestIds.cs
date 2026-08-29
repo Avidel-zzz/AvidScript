@@ -17,6 +17,7 @@ internal static class CSharpGuestIds
         "type:global::AvidScript.AvidContinuationStatus";
     public const string LoadedObjectTypeId =
         "type:global::AvidScript.AvidLoadedObject";
+    public const string AsyncResumeFunctionPrefix = "function:synthetic:async_resume:";
 
     public static string Function(string methodSymbolId) => $"function:{methodSymbolId}";
 
@@ -29,6 +30,15 @@ internal static class CSharpGuestIds
     public static string This(string methodSymbolId) => $"value:this:{methodSymbolId}";
 
     public static string Local(string symbolId) => $"value:local:{symbolId}";
+
+    public static string AsyncResumeFunction(int callbackId) =>
+        $"{AsyncResumeFunctionPrefix}{callbackId}";
+
+    public static string AsyncSegmentBlock(string methodSymbolId, int ordinal) =>
+        $"block:synthetic:async_segment:{methodSymbolId}:{ordinal}";
+
+    public static string AsyncResumeParameter(int callbackId, string name) =>
+        $"value:async_resume:{callbackId}:parameter:{name}";
 
     public static string Temporary(string methodSymbolId, int blockOrdinal, int ordinal) =>
         $"value:temp:{methodSymbolId}:{blockOrdinal}:{ordinal}";

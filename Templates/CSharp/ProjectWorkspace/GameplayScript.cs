@@ -18,16 +18,25 @@ public static class GameplayScript
     [AvidTransient]
     private static AvidContinuation PendingDefaultMesh;
 
+    [AvidTransient]
+    private static bool HasAwaitedDefaultMesh;
+
     public static int Main() => 0;
 
     [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
-    public static void BeginPlay()
+    public static async void BeginPlay()
     {
         UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
         PendingBeginPlay = AvidContinuations.Delay(0.25f, DelayedBeginPlay);
         PendingDefaultMesh = AvidAssets.LoadObjectAsync(
             "/Engine/EngineMeshes/Cube.Cube",
             DefaultMeshLoaded);
+
+        await AvidContinuations.NextTickAsync();
+        AvidLoadedObject loadedObject = await AvidAssets.LoadObjectAsync(
+            "/Engine/EngineMeshes/Cube.Cube");
+        HasAwaitedDefaultMesh = loadedObject.IsValid;
+        UE.Self.SetActorScale3D(new FVector(1.05f, 1.05f, 1.05f));
     }
 
     [AvidContinuation(DelayedBeginPlay)]
@@ -91,5 +100,9 @@ public static class GameplayScript
     [UnmanagedCallersOnly(EntryPoint = "avid_on_end_play")]
     public static void EndPlay()
     {
+        if (HasAwaitedDefaultMesh)
+        {
+            HasAwaitedDefaultMesh = false;
+        }
     }
 }

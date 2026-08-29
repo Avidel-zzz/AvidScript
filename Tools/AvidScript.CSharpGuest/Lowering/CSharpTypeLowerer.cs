@@ -29,6 +29,11 @@ internal static class CSharpTypeLowerer
         };
         foreach (SemanticType type in document.Types.OrderBy(type => type.Id, StringComparer.Ordinal))
         {
+            if (IsCompilerAsyncScaffoldType(document, type))
+            {
+                continue;
+            }
+
             GuestType? lowered = LowerType(
                 type,
                 document.Symbols,
@@ -59,6 +64,41 @@ internal static class CSharpTypeLowerer
         }
 
         return new CSharpTypeLoweringResult(true, layout.Types, Array.Empty<GuestDiagnostic>());
+    }
+
+    private static bool IsCompilerAsyncScaffoldType(
+        SemanticDocument document,
+        SemanticType type)
+    {
+        if (type.Kind != "delegate"
+            || type.CanonicalName != "global::System.Action")
+        {
+            return false;
+        }
+
+        HashSet<string> scaffoldCallables = document.Callables
+            .Where(callable => callable.ContainingTypeId is
+                    "type:global::AvidScript.AvidDelayAwaiter" or
+                    "type:global::AvidScript.AvidObjectAwaiter"
+                && callable.MethodSymbolId.Contains(".OnCompleted(", StringComparison.Ordinal)
+                && callable.Parameters.Count == 1
+                && callable.Parameters[0].TypeId == type.Id)
+            .Select(callable => callable.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (scaffoldCallables.Count == 0)
+        {
+            return false;
+        }
+
+        bool usedByOtherCallable = document.Callables.Any(callable =>
+            (callable.ReturnTypeId == type.Id
+                || callable.Parameters.Any(parameter => parameter.TypeId == type.Id))
+            && !scaffoldCallables.Contains(callable.MethodSymbolId));
+        bool usedByOtherSymbol = document.Symbols.Any(symbol =>
+            symbol.TypeId == type.Id
+            && (symbol.ContainingSymbolId is null
+                || !scaffoldCallables.Contains(symbol.ContainingSymbolId)));
+        return !usedByOtherCallable && !usedByOtherSymbol;
     }
 
     private static GuestType? LowerType(

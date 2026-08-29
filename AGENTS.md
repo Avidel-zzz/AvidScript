@@ -89,6 +89,11 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C3 首版 PowerShell async Guest IR 断言把嵌套 `Where-Object` 的成员访问和 `-or` 写在同一未分组表达式中，脚本在产品断言前以 missing closing parenthesis 解析失败。Prevention：复杂 PowerShell pipeline 身份先提取到具名标量，布尔两侧各自加括号；更新 `.ps1` 后先做 parser 级执行，再进入耗时构建合同。
+- 2026-08-29 P57.12C3 在 `AGENTS.md` 已多次要求先索引路径后，版本残留检索仍写入不存在的 `Tools/AvidScript.CSharpGuestIr`，实际项目名为 `Tools/AvidScript.GuestIr`，导致该次组合检索非零退出。Prevention：检索范围也必须来自本轮 `rg --files` 的逐字命中；多目录版本扫描前先验证每个字面目录，禁止从命名空间概念推导工程目录名。
+- 2026-08-29 P57.12C3 首次同步 Semantic schema 时把多个脚本塞进同一个大补丁，并假设 `AvidScriptCSharpSemanticCache.ps1` 的 `schema_version` 与 `semantic_version` 相邻；实际文件结构不同，首个上下文不匹配导致整组修改未落盘。Prevention：跨文件机械版本升级先对每个 owner 读取精确上下文，再按文件或同构小组分别 `apply_patch`；任一消费端结构未经确认时不得放进原子大补丁。
+- 2026-08-29 P57.12C3 探索 Roslyn async CFG 时尝试在当前 .NET 9 PowerShell 宿主中 `Add-Type` 引用仓库固定 .NET 8.0.416 Roslyn，程序集版本不兼容且探针未编译。Prevention：Roslyn/CFG 探针必须加入或复用仓库测试项目，并由 `%USERPROFILE%\.dotnet\dotnet.exe` 按 `global.json` 执行；禁止在不同 major runtime 的 PowerShell `Add-Type` 中混装 SDK Roslyn。
+- 2026-08-29 P57.12C3 已有 `rg` 证据规则后仍再次猜测不存在的 `Tools/AvidScript.CSharpSemantic/Analysis/SemanticCompilationContext.cs`；实际定义位于 `SemanticCompilationFactory.cs`。Prevention：任何类型 owner 都先执行 `rg -l 'class|record <Type>' <confirmed-root> -g '*.cs'`，下一条读取逐字复制唯一命中；AGENTS 中已记录过的具体错误必须在阶段启动检查清单中机械检索，不能只依赖记忆。
 - 2026-08-28 P57.12C2 首次从暂存树创建 clean candidate 时把 `$tree` 通过管道传给 `git commit-tree`，但该命令要求 tree object 作为位置参数，导致临时 commit 创建失败、worktree 回落到旧 HEAD。Prevention：候选命令固定为 `$tree = git write-tree; $candidate = git commit-tree $tree -p HEAD -m <message>`，创建 worktree 后必须同时断言 `git rev-parse HEAD` 等于 candidate 且 `git status --porcelain` 为空，再运行架构门禁。
 - 2026-08-28 P57.12C2 首轮完整队列修正后仍有 `SourceAdapterArtifactLifecycleSmoke` 一项失败：`FlushAsyncLoading` 加手动 `UWorld::Tick` 不能在同一个同步 Automation test 内驱动 `FStreamableDelegateDelayHelper` 的全局 `FTickableGameObject` 下一帧回调。Prevention：真实 Streamable 同步 oracle 先显式预加载目标资产，并用 scope guard 临时设置 `s.StreamableDelegateDelayFrames=0`、测试退出恢复原值；不要把 world tick 当作所有 engine-global tickable 的替代品。
 - 2026-08-28 P57.12C2 首轮完整 Automation 在 `AsyncObjectProducer` fixture 直接调用 `NewObject<UObject>`，UE5.8 因抽象基类实例化触发 ensure 并以 255 退出。Prevention：Runtime Automation 需要通用对象时必须复用 `AvidScriptObjectRegistryTestTypes.h` 中的具体 `UAvidScriptObjectRegistryTestObject`，新增 `NewObject<T>` 前先检查 `T::StaticClass()->HasAnyClassFlags(CLASS_Abstract)` 或复制同模块既有 fixture 类型。
@@ -2001,3 +2006,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C1 architecture check was launched in the implementation worktree even though its evidence contract intentionally rejects dirty architecture inputs.
 - Prevention: implementation-time checks use scoped source and contract tests. The evidence architecture checker runs only after the candidate commit exists, from a detached clean worktree at that exact commit.
+
+### 2026-08-29: sample async changes update Runtime lifecycle oracles
+
+- Mistake: P57.12C3 changed ActorLifecycle `BeginPlay` from the C2 callback shape to a controlled async chain, but the first full Automation run still expected two initial continuations and the old root-location source spelling. The suite completed with 355 successes and two failures even though the process exit code was zero.
+- Prevention: whenever a canonical sample changes scheduling or generated source shape, update both toolchain artifact tests and `AvidScriptCSharpGuestToolchainTests.cpp` in the same implementation group. Count every compiler-owned await site in pending-lifecycle assertions, validate the resulting delivery order, and parse all per-test Automation results before declaring the gate green.
+
+### 2026-08-29: framework awaitables belong in the facade architecture allowlist
+
+- Mistake: the first P57.12C3 clean candidate gate treated `AvidDelayAwaitable` and `AvidObjectAwaitable` as hard-coded project UObject wrappers because the literal facade-struct allowlist was not updated with the renderer change.
+- Prevention: renderer changes that add framework-owned value or awaitable scaffolds update the exact architecture allowlist in the same implementation group. Keep the allowlist narrow and explicit; do not relax the descriptor-derived wrapper rule or add project-specific reflected types.
+
+### 2026-08-29: quote Git revision expressions in PowerShell
+
+- Mistake: the first P57.12C3 candidate identity read passed `HEAD^{tree}` unquoted, so PowerShell parsed the braces as a script block and rejected the `git rev-parse` invocation.
+- Prevention: Git revision expressions containing braces, carets, colons, or wildcard-like characters are passed as one single-quoted argument in PowerShell, for example `git rev-parse 'HEAD^{tree}'`. A failed identity read is rerun correctly before commit or push.
