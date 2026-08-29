@@ -216,6 +216,7 @@ private:
 		bool bDispatchHasObjectResult = false;
 		bool bLatentCommitted = false;
 		bool bLatentCompletionPending = false;
+		bool bCancelledTerminalQueued = false;
 	};
 
 	struct FSlot
@@ -285,6 +286,7 @@ private:
 	void ReleaseResultSlot(uint32 Slot);
 	void ReleaseEntryResult(FEntry& Entry);
 	void UnbindEntryFromCancellationSource(FEntry& Entry);
+	bool CancelEntry(uint32 SlotIndex, bool bDeliverTerminal);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
 	void HandleLatentCompletion(int64 Token, int32 Linkage);

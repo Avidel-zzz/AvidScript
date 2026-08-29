@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
@@ -30,7 +29,7 @@ internal static class CSharpOutcomeOperationLowerer
 
         SemanticSymbol? property = context.Document.Symbols.SingleOrDefault(symbol =>
             symbol.Id == operation.SymbolId && symbol.Kind == "property");
-        if (property?.Name is not ("Status" or "Value" or "Succeeded"))
+        if (property?.Name is not ("Status" or "Value" or "Succeeded" or "Failed" or "Cancelled"))
         {
             return false;
         }
@@ -63,9 +62,9 @@ internal static class CSharpOutcomeOperationLowerer
         }
 
         GuestRegister? status = context.CreateTemporary(statusField.TypeId, blockOrdinal);
-        GuestRegister? completed = context.CreateTemporary(statusField.TypeId, blockOrdinal);
+        GuestRegister? expectedStatus = context.CreateTemporary(statusField.TypeId, blockOrdinal);
         result = context.CreateTemporary(operation.TypeId, blockOrdinal);
-        if (status is null || completed is null || result is null)
+        if (status is null || expectedStatus is null || result is null)
         {
             result = null;
             return true;
@@ -79,17 +78,24 @@ internal static class CSharpOutcomeOperationLowerer
             null));
         instructions.Add(new GuestInstruction(
             "constant",
-            completed.Id,
+            expectedStatus.Id,
             Array.Empty<string>(),
             null,
             null,
             new GuestConstant(
                 "int32",
-                ((int)1).ToString(CultureInfo.InvariantCulture))));
+                property.Name switch
+                {
+                    "Succeeded" => "1",
+                    "Failed" => "2",
+                    "Cancelled" => "3",
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported outcome status property '{property.Name}'."),
+                })));
         instructions.Add(new GuestInstruction(
             "binary",
             result.Id,
-            new[] { status.Id, completed.Id },
+            new[] { status.Id, expectedStatus.Id },
             null,
             "equals",
             null));

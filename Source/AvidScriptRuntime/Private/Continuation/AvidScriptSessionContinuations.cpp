@@ -834,10 +834,7 @@ bool FAvidScriptSessionContinuations::Cancel(
 	{
 		return false;
 	}
-	CancelEntryProducer(Slot.Entry.GetValue());
-	RemoveReadyToken(Token);
-	ReleaseSlot(SlotIndex);
-	return true;
+	return CancelEntry(SlotIndex, true);
 }
 
 int64 FAvidScriptSessionContinuations::CreateCancellationSource(
@@ -1009,7 +1006,7 @@ bool FAvidScriptSessionContinuations::BindCancellationSource(
 		|| SourceSlot->Entry->ActivationSerial != ActivationSerial
 		|| ContinuationSlot.Entry->CancellationSourceToken != 0)
 	{
-		Cancel(Lane, ActivationSerial, ContinuationToken);
+		CancelEntry(ContinuationSlotIndex, false);
 		return false;
 	}
 
@@ -1057,7 +1054,8 @@ bool FAvidScriptSessionContinuations::BeginLatentWithCompletion(
 		&& Completion.PayloadTypeId.IsEmpty()
 		&& !Completion.Provider.IsValid();
 	const bool bProviderCompletion = Completion.IsProvider()
-		&& Completion.StatusPolicy == TEXT("abandon_on_cancel")
+		&& (Completion.StatusPolicy == TEXT("abandon_on_cancel")
+			|| Completion.StatusPolicy == TEXT("resume_outcome_on_cancel"))
 		&& Completion.bCancellable
 		&& Completion.Provider->GetProviderId() == Completion.ProviderId
 		&& Completion.Provider->GetPayloadTypeId()
@@ -1571,6 +1569,50 @@ void FAvidScriptSessionContinuations::UnbindEntryFromCancellationSource(
 	Entry.CancellationSourceToken = 0;
 }
 
+bool FAvidScriptSessionContinuations::CancelEntry(
+	const uint32 SlotIndex,
+	const bool bDeliverTerminal)
+{
+	check(IsInGameThread());
+	if (!Slots.IsValidIndex(static_cast<int32>(SlotIndex))
+		|| !Slots[SlotIndex].Entry.IsSet())
+	{
+		return false;
+	}
+
+	FEntry& Entry = Slots[SlotIndex].Entry.GetValue();
+	if (Entry.bDispatching || Entry.bCancelledTerminalQueued)
+	{
+		return false;
+	}
+
+	const bool bResumeOutcome = bDeliverTerminal
+		&& Entry.LatentCompletion.ResumesOutcomeOnCancel();
+	CancelEntryProducer(Entry);
+	RemoveReadyToken(Entry.Token);
+	if (!bResumeOutcome)
+	{
+		ReleaseSlot(SlotIndex);
+		return true;
+	}
+
+	ReleaseEntryResult(Entry);
+	UnbindEntryFromCancellationSource(Entry);
+	Entry.bReady = true;
+	Entry.bCancelledTerminalQueued = true;
+	FAvidScriptContinuationCompletion Completion;
+	Completion.CallbackId = Entry.CallbackId;
+	Completion.Token = Entry.Token;
+	Completion.Status = EAvidScriptContinuationStatus::Cancelled;
+	Completion.RegistrationSerial = Entry.RegistrationSerial;
+	ReadyCompletions.Add(FReadyCompletion{
+		Entry.Lane,
+		Entry.ActivationSerial,
+		Completion
+	});
+	return true;
+}
+
 void FAvidScriptSessionContinuations::HandleTimerCompletion(const int64 Token)
 {
 	if (!IsInGameThread() || bTearingDown)
@@ -1777,6 +1819,7 @@ void FAvidScriptSessionContinuations::CancelEntryProducer(FEntry& Entry)
 	if (Entry.ProducerKind == EProducerKind::LatentAction)
 	{
 		if (Entry.LatentCompletion.IsProvider()
+			&& !Entry.bReady
 			&& Entry.LatentProxy.IsValid()
 			&& Entry.ResultSlot == 0)
 		{

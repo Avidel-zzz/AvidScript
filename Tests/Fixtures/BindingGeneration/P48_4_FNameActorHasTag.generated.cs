@@ -394,6 +394,8 @@ public readonly struct AvidOutcome<T>
     public AvidContinuationStatus Status => StatusValue;
     public T Value => ResultValue;
     public bool Succeeded => StatusValue == AvidContinuationStatus.Completed;
+    public bool Failed => StatusValue == AvidContinuationStatus.Failed;
+    public bool Cancelled => StatusValue == AvidContinuationStatus.Cancelled;
 }
 
 public readonly struct AvidOutcomeAwaitable<T>

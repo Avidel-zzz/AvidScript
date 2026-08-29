@@ -34,7 +34,7 @@ constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
 constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
 constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
 constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
-constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C8.0");
+constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -130,7 +130,8 @@ FString MakeCanonicalIdentity(
 	const FString& WorldContextParameter = FString(),
 	const FString& CompletionMode = TEXT("none"),
 	const FString& CompletionProviderId = FString(),
-	const FString& CompletionPayloadTypeId = FString())
+	const FString& CompletionPayloadTypeId = FString(),
+	const FString& CompletionStatusPolicy = TEXT("abandon_on_cancel"))
 {
 	FString Identity = OwnerClass->GetPathName()
 		+ TEXT("::")
@@ -157,7 +158,9 @@ FString MakeCanonicalIdentity(
 				+ CompletionProviderId
 				+ TEXT("|payload_type_id=")
 				+ CompletionPayloadTypeId
-				+ TEXT("|status_policy=abandon_on_cancel|cancellable=1");
+				+ TEXT("|status_policy=")
+				+ CompletionStatusPolicy
+				+ TEXT("|cancellable=1");
 		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
@@ -545,6 +548,8 @@ bool GenerateBindingDescriptor(
 				Binding.CompletionProviderId = Provider->GetProviderId();
 				Binding.CompletionPayloadTypeId =
 					Provider->GetPayloadTypeId();
+				Binding.CompletionStatusPolicy =
+					TEXT("resume_outcome_on_cancel");
 			}
 		}
 		FString ProjectionErrorSource;
@@ -597,7 +602,8 @@ bool GenerateBindingDescriptor(
 			Binding.WorldContextParameter,
 			Binding.CompletionMode,
 			Binding.CompletionProviderId,
-			Binding.CompletionPayloadTypeId);
+			Binding.CompletionPayloadTypeId,
+			Binding.CompletionStatusPolicy);
 		if (bGeneratedNative)
 		{
 			FString EligibilityCategory;
@@ -653,7 +659,8 @@ bool GenerateBindingDescriptor(
 				Binding.WorldContextParameter,
 				Binding.CompletionMode,
 				Binding.CompletionProviderId,
-				Binding.CompletionPayloadTypeId);
+				Binding.CompletionPayloadTypeId,
+				Binding.CompletionStatusPolicy);
 		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		if (!bGeneratedNative)
@@ -1179,7 +1186,7 @@ bool GenerateBindingDescriptor(
 	}
 	if (bHasLatentPayloadBindings)
 	{
-		Package.SchemaVersion = 13;
+		Package.SchemaVersion = 14;
 	}
 	Package.GeneratorVersion = bHasLatentPayloadBindings
 		? LatentPayloadGeneratorVersion

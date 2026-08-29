@@ -74,6 +74,13 @@ struct FAvidScriptBindingLatentCompletionContract
 			&& !PayloadTypeId.IsEmpty()
 			&& Provider.IsValid();
 	}
+
+	bool ResumesOutcomeOnCancel() const
+	{
+		return IsProvider()
+			&& StatusPolicy == TEXT("resume_outcome_on_cancel")
+			&& bCancellable;
+	}
 };
 
 struct FAvidScriptBindingLatentReservation

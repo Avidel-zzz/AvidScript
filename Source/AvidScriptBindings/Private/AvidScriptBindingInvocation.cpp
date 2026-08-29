@@ -1182,7 +1182,9 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 				+ Binding.Completion.ProviderId
 				+ TEXT("|payload_type_id=")
 				+ Binding.Completion.PayloadTypeId
-				+ TEXT("|status_policy=abandon_on_cancel|cancellable=1");
+				+ TEXT("|status_policy=")
+				+ Binding.Completion.StatusPolicy
+				+ TEXT("|cancellable=1");
 		}
 	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(

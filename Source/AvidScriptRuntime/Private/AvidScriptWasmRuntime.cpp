@@ -3844,14 +3844,15 @@ int32 FAvidScriptWasmRuntimeInstance::HandleContinuationResultReadImport(
 		return Fail(TEXT("continuation_result_dispatch_contract_mismatch"));
 	}
 
-	if (ActiveContinuationStatus == EAvidScriptContinuationStatus::Failed)
+	if (ActiveContinuationStatus == EAvidScriptContinuationStatus::Failed
+		|| ActiveContinuationStatus == EAvidScriptContinuationStatus::Cancelled)
 	{
 		if (ResultSlot != 0
 			|| ResultGeneration != 0
 			|| ActiveContinuationResultSlot != 0
 			|| ActiveContinuationResultGeneration != 0)
 		{
-			return Fail(TEXT("continuation_result_failed_capability_invalid"));
+			return Fail(TEXT("continuation_result_terminal_capability_invalid"));
 		}
 		FMemory::Memzero(OutBytes.GetData(), OutBytes.Num());
 		bContinuationResultConsumed = true;

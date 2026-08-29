@@ -1698,7 +1698,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 13
+	FString Identity(Package.SchemaVersion >= 14
+		? TEXT("descriptor_selection_v14")
+		: Package.SchemaVersion >= 13
 		? TEXT("descriptor_selection_v13")
 		: Package.SchemaVersion >= 11
 		? TEXT("descriptor_selection_v11")
@@ -1856,7 +1858,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 13
+	FString Identity(Package.SchemaVersion >= 14
+		? TEXT("descriptor_package_v14")
+		: Package.SchemaVersion >= 13
 		? TEXT("descriptor_package_v13")
 		: Package.SchemaVersion >= 11
 		? TEXT("descriptor_package_v11")
@@ -2156,7 +2160,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 10
 			&& OutPackage.SchemaVersion != 11
 			&& OutPackage.SchemaVersion != 12
-			&& OutPackage.SchemaVersion != 13)
+			&& OutPackage.SchemaVersion != 13
+			&& OutPackage.SchemaVersion != 14)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2181,7 +2186,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 10
 				&& OutPackage.SchemaVersion != 11
 				&& OutPackage.SchemaVersion != 12
-				&& OutPackage.SchemaVersion != 13)
+				&& OutPackage.SchemaVersion != 13
+				&& OutPackage.SchemaVersion != 14)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -2409,12 +2415,17 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 					&& Binding.Completion.ProviderId.IsEmpty()
 					&& Binding.Completion.PayloadTypeId.IsEmpty()
 					&& !Binding.Completion.bCancellable
-				: Binding.Completion.StatusPolicy == TEXT("abandon_on_cancel")
-					&& Binding.Completion.bCancellable
+				: Binding.Completion.bCancellable
 					&& ((Binding.Completion.Mode == TEXT("none")
+							&& Binding.Completion.StatusPolicy
+								== TEXT("abandon_on_cancel")
 							&& Binding.Completion.ProviderId.IsEmpty()
 							&& Binding.Completion.PayloadTypeId.IsEmpty())
 						|| (Binding.Completion.Mode == TEXT("provider")
+							&& Binding.Completion.StatusPolicy
+								== (OutPackage.SchemaVersion >= 14
+									? TEXT("resume_outcome_on_cancel")
+									: TEXT("abandon_on_cancel"))
 							&& !Binding.Completion.ProviderId.IsEmpty()
 							&& IsAvidScriptBindingLowerSha256(
 								Binding.Completion.PayloadTypeId)

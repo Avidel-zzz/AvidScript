@@ -1590,6 +1590,8 @@ void AppendAsyncAwaitableReferenceSurface(TArray<FString>& Lines)
 		TEXT("    public AvidContinuationStatus Status => StatusValue;"),
 		TEXT("    public T Value => ResultValue;"),
 		TEXT("    public bool Succeeded => StatusValue == AvidContinuationStatus.Completed;"),
+		TEXT("    public bool Failed => StatusValue == AvidContinuationStatus.Failed;"),
+		TEXT("    public bool Cancelled => StatusValue == AvidContinuationStatus.Cancelled;"),
 		TEXT("}"),
 		TEXT(""),
 		TEXT("public readonly struct AvidOutcomeAwaitable<T>"),

@@ -1664,10 +1664,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..13) {
+foreach ($RequiredDescriptorSchemaVersion in 2..14) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v13 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v14 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1716,8 +1716,9 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 10') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 11') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 12') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 13')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v13 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 13') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 14')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v14 typed object packages'
 }
 foreach ($RequiredDelegateEventManifestContract in @(
     'delegate_event_count',
@@ -2320,6 +2321,7 @@ foreach ($RequiredGeneratedOutcomeFacadeContract in @(
     'public readonly struct AvidOutcome<T>',
     'public readonly struct AvidOutcomeAwaitable<T>',
     'public readonly struct AvidOutcomeAwaiter<T>',
+	'public bool Cancelled => StatusValue == AvidContinuationStatus.Cancelled;',
     'ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount)'
 )) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredGeneratedOutcomeFacadeContract)) {
@@ -3089,8 +3091,9 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
 foreach ($RequiredOutcomeLoweringContract in @(
     'CSharpOutcomeOperationLowerer',
     'OutcomeStatusField',
+	'"Cancelled" => "3"',
     'OutcomeValueField',
-    'property?.Name is not ("Status" or "Value" or "Succeeded")',
+    'property?.Name is not ("Status" or "Value" or "Succeeded" or "Failed" or "Cancelled")',
     '"field_load"',
     '"equals"'
 )) {
@@ -3185,6 +3188,9 @@ foreach ($RequiredCancellationOwnershipContract in @(
     'CreateCancellationSource',
     'BindCancellationSource',
     'UnbindEntryFromCancellationSource',
+	'CancelEntry(uint32 SlotIndex, bool bDeliverTerminal)',
+	'Entry.LatentCompletion.ResumesOutcomeOnCancel()',
+	'EAvidScriptContinuationStatus::Cancelled',
     'ReleaseCancellationSourcesForLane'
 )) {
     if (-not $ContinuationOwnerHeader.Contains($RequiredCancellationOwnershipContract) -and
@@ -3230,6 +3236,7 @@ foreach ($RequiredContinuationResultRuntimeContract in @(
     'HandleContinuationResultReadImport',
     'bContinuationResultConsumed',
     'TryGetLatentCompletionResultType',
+	'ActiveContinuationStatus == EAvidScriptContinuationStatus::Cancelled',
     'HostContext.Continuations->ConsumeResult(',
     'FAvidScriptContinuationResultCodec::Encode(',
     'ResultTransaction.Rollback(Utf8ValueHeap, ArrayValueHeap)',

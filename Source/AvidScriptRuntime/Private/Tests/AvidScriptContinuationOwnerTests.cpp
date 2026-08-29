@@ -1265,13 +1265,57 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 	TestTrue(TEXT("Cancellation wins before provider completion"), ActiveHost.Cancel(Cancelled.Token));
 	TestEqual(TEXT("Cancellation abandons provider state"), Provider->AbandonCount, 1);
 	TestEqual(TEXT("Cancellation leaves no result slot"), Owner->GetResultSlotCountForTesting(), 0);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Legacy cancellation policy remains non-resuming"), Completions.Num(), 0);
+
+	FAvidScriptBindingLatentCompletionContract ResumingContract = Contract;
+	ResumingContract.StatusPolicy = TEXT("resume_outcome_on_cancel");
+	FAvidScriptBindingLatentReservation ResumedCancellation;
+	TestTrue(
+		TEXT("Outcome cancellation reservation allocates"),
+		ActiveHost.BeginLatentWithCompletion(
+			403,
+			ResumingContract,
+			ResumedCancellation));
+	Provider->Publish(
+		ResumedCancellation.CallbackTarget,
+		ResumedCancellation.UUID,
+		8);
+	RegisterTestLatentAction(World, ResumedCancellation);
+	TestTrue(
+		TEXT("Outcome cancellation latent commits"),
+		ActiveHost.CommitLatent(ResumedCancellation.Token));
+	TestTrue(
+		TEXT("Outcome cancellation queues its terminal callback"),
+		ActiveHost.Cancel(ResumedCancellation.Token));
+	TestFalse(
+		TEXT("Outcome cancellation is consume-once"),
+		ActiveHost.Cancel(ResumedCancellation.Token));
+	TestEqual(
+		TEXT("Outcome cancellation abandons provider payload"),
+		Provider->AbandonCount,
+		2);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Outcome cancellation drains once"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		TestEqual(
+			TEXT("Outcome cancellation reports Cancelled"),
+			Completions[0].Status,
+			EAvidScriptContinuationStatus::Cancelled);
+		TestEqual(TEXT("Cancelled outcome has no result slot"), Completions[0].ObjectSlot, 0);
+		TestEqual(TEXT("Cancelled outcome has no result generation"), Completions[0].ObjectGeneration, 0);
+		TestTrue(
+			TEXT("Cancelled outcome dispatch finalizes"),
+			Owner->FinalizeDispatched(Completions[0].Token, true));
+	}
 
 	FAvidScriptContinuationHostEndpoint& PreparedHost =
 		Owner->BeginPrepared(World);
 	FAvidScriptBindingLatentReservation Prepared;
 	TestTrue(
 		TEXT("Prepared provider latent reserves"),
-		PreparedHost.BeginLatentWithCompletion(403, Contract, Prepared));
+		PreparedHost.BeginLatentWithCompletion(404, Contract, Prepared));
 	Provider->Publish(Prepared.CallbackTarget, Prepared.UUID, 99);
 	TestTrue(
 		TEXT("Prepared provider can complete before commit"),
@@ -1307,7 +1351,7 @@ bool FAvidScriptContinuationLatentResultSlotTest::RunTest(
 	FAvidScriptBindingLatentReservation Discarded;
 	TestTrue(
 		TEXT("Discarded provider latent reserves"),
-		DiscardedHost.BeginLatentWithCompletion(404, Contract, Discarded));
+		DiscardedHost.BeginLatentWithCompletion(405, Contract, Discarded));
 	Provider->Publish(Discarded.CallbackTarget, Discarded.UUID, 5);
 	TestTrue(
 		TEXT("Discarded provider completes before commit"),

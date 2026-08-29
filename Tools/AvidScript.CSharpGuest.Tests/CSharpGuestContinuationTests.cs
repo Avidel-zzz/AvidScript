@@ -43,10 +43,10 @@ internal static class CSharpGuestContinuationTests
                 {
                     AvidOutcome<int> outcome =
                         await UKismetSystemLibrary.WaitForScoreAsync(42);
-                    Consume(outcome.Succeeded, outcome.Value);
+                    Consume(outcome.Succeeded, outcome.Cancelled, outcome.Value);
                 }
 
-                private static void Consume(bool succeeded, int value) { }
+                private static void Consume(bool succeeded, bool cancelled, int value) { }
             }
             """;
 
@@ -850,6 +850,8 @@ internal static class CSharpGuestContinuationTests
             public AvidContinuationStatus Status => default;
             public T Value => default;
             public bool Succeeded => false;
+            public bool Failed => false;
+            public bool Cancelled => false;
         }
 
         public readonly struct AvidOutcomeAwaitable<T>

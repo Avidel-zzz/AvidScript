@@ -1044,11 +1044,11 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAvidScriptEditorBindingDescriptorLatentV13Test,
-	"AvidScript.Editor.BindingDescriptor.LatentV13",
+	FAvidScriptEditorBindingDescriptorLatentV14Test,
+	"AvidScript.Editor.BindingDescriptor.LatentV14",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
+bool FAvidScriptEditorBindingDescriptorLatentV14Test::RunTest(
 	const FString& Parameters)
 {
 	UFunction* const Function =
@@ -1087,7 +1087,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 	FString DescriptorJson;
 	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
 	if (!TestTrue(
-		TEXT("Registered provider raises its latent descriptor to v13"),
+		TEXT("Registered provider raises its latent descriptor to v14"),
 		FAvidScriptEditorBindingDescriptorGenerator::Generate(
 			TEXT("avidscript.test.latent_v13"),
 			{
@@ -1108,7 +1108,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 	FString ParseCategory;
 	FString ParseSource;
 	if (!TestTrue(
-		TEXT("Provider descriptor parses through schema v13"),
+		TEXT("Provider descriptor parses through schema v14"),
 		FAvidScriptBindingDescriptorParser::Parse(
 			DescriptorJson,
 			Package,
@@ -1118,7 +1118,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 		AddError(ParseCategory + TEXT(": ") + ParseSource);
 		return false;
 	}
-	TestEqual(TEXT("Provider latent package uses schema v13"), Package.SchemaVersion, 13);
+	TestEqual(TEXT("Provider latent package uses schema v14"), Package.SchemaVersion, 14);
 	TestEqual(TEXT("Provider latent package has one binding"), Package.Bindings.Num(), 1);
 	if (Package.Bindings.Num() == 1)
 	{
@@ -1127,7 +1127,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 		TestEqual(TEXT("Completion mode is explicit provider"), Completion.Mode, FString(TEXT("provider")));
 		TestEqual(TEXT("Provider identity is frozen"), Completion.ProviderId, Provider->GetProviderId());
 		TestEqual(TEXT("Payload type identity is frozen"), Completion.PayloadTypeId, PayloadTypeId);
-		TestEqual(TEXT("Cancellation policy is frozen"), Completion.StatusPolicy, FString(TEXT("abandon_on_cancel")));
+		TestEqual(TEXT("Cancellation policy is frozen"), Completion.StatusPolicy, FString(TEXT("resume_outcome_on_cancel")));
 		TestTrue(TEXT("Provider latent call is cancellable"), Completion.bCancellable);
 	}
 
@@ -1177,6 +1177,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV13Test::RunTest(
 	TestTrue(
 		TEXT("Reference surface includes typed outcomes and one bulk result import"),
 		ReferenceSource.Contains(TEXT("public readonly struct AvidOutcome<T>"))
+			&& ReferenceSource.Contains(TEXT("public bool Cancelled => StatusValue == AvidContinuationStatus.Cancelled;"))
 			&& ReferenceSource.Contains(TEXT("EntryPoint = \"continuation_result_read\""))
 			&& ReferenceSource.Contains(
 				TEXT("ContinuationResultRead(int bindingOrdinal, int resultSlot, int resultGeneration, int outputAddress, int byteCount)")));
@@ -1759,11 +1760,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v14 above the current maximum identifies its header field"),
+		TEXT("Schema v15 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 14);
+			Root->SetNumberField(TEXT("schema_version"), 15);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
