@@ -369,7 +369,8 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 			? &Continuations->ResetActive(
 				NextHostContext.World.Get(),
 				NextHostContext.ObjectRegistry,
-				ObjectOwnership.Get())
+				ObjectOwnership.Get(),
+				NextHostContext.OwnerHandle)
 			: nullptr;
 		if (!LiveRuntime)
 		{
@@ -1178,7 +1179,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		Continuations->BeginPrepared(
 			HostContext.World.Get(),
 			HostContext.ObjectRegistry,
-			ObjectOwnership.Get());
+			ObjectOwnership.Get(),
+			HostContext.OwnerHandle);
 	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
 	CandidateRuntime->SetHostContext(CandidateHostContext);

@@ -396,6 +396,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptAsyncObjectContinuationTest::RunTest(
 	const FString& Parameters)
 {
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Async object continuation world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
 	const TSharedPtr<FAvidScriptFakeAsyncObjectLoader> Loader =
 		MakeShared<FAvidScriptFakeAsyncObjectLoader>();
 	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
@@ -403,7 +410,7 @@ bool FAvidScriptAsyncObjectContinuationTest::RunTest(
 	FAvidScriptObjectRegistry Registry;
 	FAvidScriptSessionObjectOwnership Ownership;
 	IAvidScriptContinuationHost& InitialHost = Owner->ResetActive(
-		nullptr,
+		World,
 		&Registry,
 		&Ownership);
 	const FString ObjectPath(TEXT("/Engine/EngineMeshes/Cube.Cube"));
@@ -442,7 +449,7 @@ bool FAvidScriptAsyncObjectContinuationTest::RunTest(
 	TestEqual(TEXT("Successful dispatch leaves one borrowed capability"), Ownership.GetBorrowedHandleCount(), 1);
 
 	IAvidScriptContinuationHost& ReloadedHost = Owner->BeginPrepared(
-		nullptr,
+		World,
 		&Registry,
 		&Ownership);
 	const int64 ReloadedToken = ReloadedHost.ScheduleObjectLoad(ObjectPath, 102);
@@ -501,7 +508,7 @@ bool FAvidScriptAsyncObjectContinuationTest::RunTest(
 	TestEqual(TEXT("A late completion after cancellation is suppressed"), Completions.Num(), 0);
 
 	IAvidScriptContinuationHost& DiscardedHost = Owner->BeginPrepared(
-		nullptr,
+		World,
 		&Registry,
 		&Ownership);
 	const int64 DiscardedToken = DiscardedHost.ScheduleObjectLoad(ObjectPath, 106);
@@ -532,6 +539,183 @@ bool FAvidScriptAsyncObjectContinuationTest::RunTest(
 	TestEqual(TEXT("The returned synchronous producer handle is cancelled once"), Loader->Requests[SynchronousRequestIndex]->CancelState->CancelCount, 1);
 
 	Ownership.Cleanup(Registry);
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationActivationLivenessTest,
+	"AvidScript.Runtime.Continuation.ActivationLiveness",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationActivationLivenessTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Activation liveness world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+	{
+		const TSharedPtr<FAvidScriptSessionContinuations> HeadlessOwner =
+			MakeShared<FAvidScriptSessionContinuations>();
+		HeadlessOwner->BeginPrepared(nullptr);
+		FString HeadlessCommitError;
+		TestTrue(
+			TEXT("A headless activation without continuation entries can commit"),
+			HeadlessOwner->ValidatePreparedCommit(HeadlessCommitError));
+		HeadlessOwner->CommitPrepared();
+		HeadlessOwner->Teardown();
+	}
+
+	const FString ObjectPath(TEXT("/Engine/EngineMeshes/Cube.Cube"));
+	const TSharedPtr<FAvidScriptFakeAsyncObjectLoader> Loader =
+		MakeShared<FAvidScriptFakeAsyncObjectLoader>();
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>(Loader);
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptSessionObjectOwnership Ownership;
+	UObject* const FirstOwner =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle FirstOwnerHandle = Registry.RegisterObject(
+		FirstOwner,
+		RegisterResult,
+		false);
+	TestTrue(TEXT("First activation owner registers"), FirstOwnerHandle.IsValid());
+
+	IAvidScriptContinuationHost& FirstHost = Owner->ResetActive(
+		World,
+		&Registry,
+		&Ownership,
+		FirstOwnerHandle);
+	const int64 ReadyTimerToken = FirstHost.ScheduleDelay(0.01f, 201);
+	const int64 PendingLoadToken = FirstHost.ScheduleObjectLoad(ObjectPath, 202);
+	const int32 PendingLoadIndex = Loader->Requests.Num() - 1;
+	TestNotEqual(TEXT("Ready-timer fixture receives a token"), ReadyTimerToken, 0LL);
+	TestNotEqual(TEXT("Pending-load fixture receives a token"), PendingLoadToken, 0LL);
+	AdvanceContinuationWorld(World, 0.02f);
+
+	FAvidScriptObjectHandleResult ReleaseResult;
+	TestTrue(
+		TEXT("Owner generation can be invalidated before dispatch"),
+		Registry.ReleaseHandle(FirstOwnerHandle, ReleaseResult, false));
+	TArray<FAvidScriptContinuationCompletion> Completions;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Invalid owner suppresses a ready timer"), Completions.Num(), 0);
+	TestEqual(TEXT("Invalid owner cancels all active entries"), Owner->GetActiveCount(), 0);
+	TestEqual(
+		TEXT("Invalid owner cancels a pending load exactly once"),
+		Loader->Requests[PendingLoadIndex]->CancelState->CancelCount,
+		1);
+	TestEqual(
+		TEXT("A stale endpoint cannot schedule after owner invalidation"),
+		FirstHost.ScheduleDelay(0.0f, 203),
+		0LL);
+	Loader->Complete(PendingLoadIndex, FirstOwner);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Late completion after owner invalidation is suppressed"), Completions.Num(), 0);
+
+	UObject* const SecondOwner =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle SecondOwnerHandle = Registry.RegisterObject(
+		SecondOwner,
+		RegisterResult,
+		false);
+	IAvidScriptContinuationHost& SecondHost = Owner->ResetActive(
+		World,
+		&Registry,
+		&Ownership,
+		SecondOwnerHandle);
+	const int64 ReboundLoadToken = SecondHost.ScheduleObjectLoad(ObjectPath, 204);
+	const int32 ReboundLoadIndex = Loader->Requests.Num() - 1;
+	TestNotEqual(TEXT("Rebind fixture receives a token"), ReboundLoadToken, 0LL);
+
+	UObject* const ThirdOwner =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle ThirdOwnerHandle = Registry.RegisterObject(
+		ThirdOwner,
+		RegisterResult,
+		false);
+	IAvidScriptContinuationHost& ThirdHost = Owner->ResetActive(
+		World,
+		&Registry,
+		&Ownership,
+		ThirdOwnerHandle);
+	TestEqual(
+		TEXT("HostContext rebind cancels the old producer exactly once"),
+		Loader->Requests[ReboundLoadIndex]->CancelState->CancelCount,
+		1);
+	TestEqual(
+		TEXT("The retired endpoint rejects new work"),
+		SecondHost.ScheduleDelay(0.0f, 205),
+		0LL);
+
+	IAvidScriptContinuationHost& PreparedHost = Owner->BeginPrepared(
+		World,
+		&Registry,
+		&Ownership,
+		ThirdOwnerHandle);
+	const int64 PreparedLoadToken =
+		PreparedHost.ScheduleObjectLoad(ObjectPath, 206);
+	const int32 PreparedLoadIndex = Loader->Requests.Num() - 1;
+	TestNotEqual(TEXT("Prepared fixture receives a token"), PreparedLoadToken, 0LL);
+	TestTrue(
+		TEXT("Prepared owner generation can be invalidated"),
+		Registry.ReleaseHandle(ThirdOwnerHandle, ReleaseResult, false));
+	FString CommitError;
+	TestFalse(
+		TEXT("Prepared commit rejects a dead activation"),
+		Owner->ValidatePreparedCommit(CommitError));
+	TestEqual(
+		TEXT("Prepared rejection reports the liveness fence"),
+		CommitError,
+		FString(TEXT("continuation_prepared_context_unavailable")));
+	Owner->DiscardPrepared();
+	TestEqual(
+		TEXT("Prepared rejection cancels its producer exactly once"),
+		Loader->Requests[PreparedLoadIndex]->CancelState->CancelCount,
+		1);
+	Loader->Complete(PreparedLoadIndex, ThirdOwner);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Late prepared completion never reaches Guest"), Completions.Num(), 0);
+
+	UObject* const WorldFenceOwner =
+		NewObject<UAvidScriptObjectRegistryTestObject>(GetTransientPackage());
+	const FAvidScriptObjectHandle WorldFenceHandle = Registry.RegisterObject(
+		WorldFenceOwner,
+		RegisterResult,
+		false);
+	IAvidScriptContinuationHost& WorldFenceHost = Owner->ResetActive(
+		World,
+		&Registry,
+		&Ownership,
+		WorldFenceHandle);
+	const int64 WorldLoadToken =
+		WorldFenceHost.ScheduleObjectLoad(ObjectPath, 207);
+	const int32 WorldLoadIndex = Loader->Requests.Num() - 1;
+	TestNotEqual(TEXT("World teardown fixture receives a token"), WorldLoadToken, 0LL);
+	World->bIsTearingDown = true;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("World teardown suppresses dispatch"), Completions.Num(), 0);
+	TestEqual(
+		TEXT("World teardown cancels a pending producer exactly once"),
+		Loader->Requests[WorldLoadIndex]->CancelState->CancelCount,
+		1);
+	TestEqual(
+		TEXT("World teardown rejects new scheduling"),
+		WorldFenceHost.ScheduleDelay(0.0f, 208),
+		0LL);
+	World->bIsTearingDown = false;
+	Loader->Complete(WorldLoadIndex, WorldFenceOwner);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Late world-teardown completion is suppressed"), Completions.Num(), 0);
+
+	Owner->Teardown();
+	Ownership.Cleanup(Registry);
+	DestroyContinuationWorld(World);
 	return true;
 }
 

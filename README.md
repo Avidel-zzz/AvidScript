@@ -10,8 +10,8 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12C3" src="https://img.shields.io/badge/Status-Phase%2057.12C3-159957">
-  <img alt="Automation 357/357" src="https://img.shields.io/badge/Automation-357%2F357-26A269">
+  <img alt="Phase 57.12C4" src="https://img.shields.io/badge/Status-Phase%2057.12C4-159957">
+  <img alt="Automation 358/358" src="https://img.shields.io/badge/Automation-358%2F358-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
@@ -235,15 +235,17 @@ public static async void BeginPlay()
 await；跨暂停状态需显式放入静态字段。旧 callback API、schema 10/11 Guest 与
 `avid_on_continuation_v2` 继续兼容。
 
-取消、候选回滚、`EndPlay` 与 Session teardown 会抑制尚未分发的恢复并取消异步 handle。成功对象结果
-沿用 Session 强引用与 generational capability；callback trap 会回滚本次借出的对象 capability。
+取消、候选回滚、`EndPlay` 与 Session teardown 会抑制尚未分发的恢复并取消异步 handle。Continuation
+还会在调度、生产者完成、候选提交和 Guest 分发前检查 owner generation 与 World teardown；失效 activation
+会整 lane 关闭，并抑制已经迟到的回调。成功对象结果沿用 Session 强引用与 generational capability；callback
+trap 会回滚本次借出的对象 capability。
 
 ## 当前能力
 
 | 领域 | 已实现 |
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
-| 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、状态与对象结果、生成式 callback 与 async CPS dispatcher、不透明 token/cancel、Session active/prepared 事务与 teardown |
+| 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、状态与对象结果、生成式 callback 与 async CPS dispatcher、不透明 token/cancel、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、零 Guest 堆 CPS segment、稳定 resume debug map、调度拒绝 trap；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
@@ -495,7 +497,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
 - 一维 `TArray<T>` 已支持首批固定元素类型；nested array、字符串元素、`TSet`、`TMap` 尚未支持；
 - 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
-- 受控 `async/await` 已支持顶层顺序等待与紧邻对象结果；尚未支持 local spill、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级；
+- 受控 `async/await` 已支持顶层顺序等待、紧邻对象结果与宿主 activation 失效抑制；尚未支持 local spill、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级；后续 bounded spill 必须同时提供 Guest frame reset 握手；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
@@ -507,7 +509,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 为受控 async 增加 bounded spill frame、结构化取消与显式重入策略，并继续推进资源批量/进度接口、latent、RPC、interface dispatch 与 `FText`；
+1. 为受控 async 增加带 reset 握手的 bounded spill frame、显式重入策略与生成式 latent await，并继续推进资源批量/进度接口、RPC、interface dispatch 与 `FText`；
 2. 用 C# 完成真实小型游戏 Demo，固化生命周期、对象创建、事件和热重载工作流；
 3. 扩展 string element、nested array、`TSet`/`TMap`，继续压缩 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -523,11 +525,11 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前 Phase 57.12C3 完整 AvidScript Automation 为 **357/357 通过**，另有固定 .NET 工具链
+当前 Phase 57.12C4 完整 AvidScript Automation 为 **358/358 通过**，另有固定 .NET 工具链
 `228/228`、PowerShell 构建与工作流合同 `117/117`，以及 UE5.8 no-clean Editor build 通过。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12C3 中文报告](Docs/Phase57/P57.12C3_Controlled_Async_Await.md)。
+[P57.12C4 中文报告](Docs/Phase57/P57.12C4_Activation_Liveness_Fence.md)。
 
 工程规则：
 

@@ -89,6 +89,12 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C4 阶段启动再次把 `agent_type=explorer` 与 `fork_context=true` 同时传给并行代理，虽然同类错误已记录在本文件，工具仍在执行前拒绝。Prevention：每个阶段首次委派前必须按 `spawn`、`agent_type`、`fork_context` 机械检索本节既有记录；explorer 使用独立上下文，完整历史 fork 则省略角色覆盖，禁止依赖记忆跳过启动检查。
+- 2026-08-29 P57.12C4 首次 latent 多文件补丁根据印象填写了一个已读文件的返回行，精确上下文不匹配导致整组补丁未落盘。Prevention：跨 owner 修改先逐文件读取精确锚点，再按 owner-local 小补丁落盘并立即 readback；未经逐字确认的文件不得加入同一个原子补丁。
+- 2026-08-29 P57.12C4 Automation 包装再次先组合删除固定日志，随后单独删除也被安全策略拒绝。Prevention：每轮启动前直接分配从未使用的时间戳 `-abslog` 和 stdout 日志，不删除、不覆盖旧证据；日志清理由人工或独立维护阶段处理。
+- 2026-08-29 P57.12C4 一次 `rg` 搜索把 Windows 路径通配符 `Build/*.ps1` 与 `Private/*.h` 直接作为搜索根，ripgrep 将其视为不存在的字面路径。Prevention：先对已确认父目录执行 `rg --files`，再把命中的字面文件或目录交给内容搜索；shell glob 不得作为 Windows `rg` 路径发现机制。
+- 2026-08-29 P57.12C4 收尾时把 `git diff --stat` 与 `git status --short` 用分号串进同一个 shell 调用，混合输出同时带入受保护改动和换行警告。Prevention：面向用户证据的 Git 状态、diff、hash 与提交范围分别调用，禁止用 `;`、`&&` 或嵌套 shell 拼接；只在单个原子工具本身需要的脚本块内聚合结构化计算。
+- 2026-08-29 P57.12C4 首版 liveness fence 在 `ValidatePreparedCommit` 无条件要求有效 World，使不创建任何 Continuation 的纯 VM/headless Session 以 `continuation_prepared_context_unavailable` 被拒绝，完整 Automation 出现 4 项级联失败。Prevention：liveness 是 continuation entry 的资源合同，不是所有 Runtime 的启动前置条件；prepared commit 与 active pump 只在对应 activation 已持有 entry 时检查 owner/World，并保留显式 headless-empty commit 回归用例。
 - 2026-08-29 P57.12C3 首版 PowerShell async Guest IR 断言把嵌套 `Where-Object` 的成员访问和 `-or` 写在同一未分组表达式中，脚本在产品断言前以 missing closing parenthesis 解析失败。Prevention：复杂 PowerShell pipeline 身份先提取到具名标量，布尔两侧各自加括号；更新 `.ps1` 后先做 parser 级执行，再进入耗时构建合同。
 - 2026-08-29 P57.12C3 在 `AGENTS.md` 已多次要求先索引路径后，版本残留检索仍写入不存在的 `Tools/AvidScript.CSharpGuestIr`，实际项目名为 `Tools/AvidScript.GuestIr`，导致该次组合检索非零退出。Prevention：检索范围也必须来自本轮 `rg --files` 的逐字命中；多目录版本扫描前先验证每个字面目录，禁止从命名空间概念推导工程目录名。
 - 2026-08-29 P57.12C3 首次同步 Semantic schema 时把多个脚本塞进同一个大补丁，并假设 `AvidScriptCSharpSemanticCache.ps1` 的 `schema_version` 与 `semantic_version` 相邻；实际文件结构不同，首个上下文不匹配导致整组修改未落盘。Prevention：跨文件机械版本升级先对每个 owner 读取精确上下文，再按文件或同构小组分别 `apply_patch`；任一消费端结构未经确认时不得放进原子大补丁。

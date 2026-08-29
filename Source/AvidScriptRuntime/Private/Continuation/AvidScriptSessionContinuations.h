@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AvidScriptContinuation.h"
+#include "AvidScriptObjectRegistry.h"
 #include "Templates/SharedPointer.h"
 #include "TimerManager.h"
 #include "UObject/ObjectKey.h"
@@ -58,7 +59,8 @@ public:
 	IAvidScriptContinuationHost& BeginPrepared(
 		UWorld* World,
 		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
-		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr);
+		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr,
+		FAvidScriptObjectHandle OwnerHandle = {});
 	bool ValidatePreparedCommit(FString& OutError) const;
 	void CommitPrepared();
 	void ReleaseRetiredEndpoint();
@@ -66,7 +68,8 @@ public:
 	IAvidScriptContinuationHost& ResetActive(
 		UWorld* World,
 		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
-		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr);
+		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr,
+		FAvidScriptObjectHandle OwnerHandle = {});
 	void Teardown();
 
 	void DrainReady(TArray<FAvidScriptContinuationCompletion>& OutCompletions);
@@ -143,12 +146,18 @@ private:
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
 	void CancelEntryProducer(FEntry& Entry);
 	void CancelLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
+	void InvalidateLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReady(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReadyToken(int64 Token);
 	void ClearRetainedLoadedObjects();
 	bool MatchesCurrentEndpoint(
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial) const;
+	bool HasLaneEntries(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial) const;
+	bool IsLaneContextLive(EAvidScriptContinuationLane Lane) const;
+	bool IsEntryContextLive(const FEntry& Entry) const;
 	UWorld* GetWorldForLane(EAvidScriptContinuationLane Lane) const;
 
 	TArray<FSlot> Slots;
@@ -166,8 +175,12 @@ private:
 	FAvidScriptObjectRegistry* PreparedObjectRegistry = nullptr;
 	FAvidScriptSessionObjectOwnership* ActiveObjectOwnership = nullptr;
 	FAvidScriptSessionObjectOwnership* PreparedObjectOwnership = nullptr;
+	FAvidScriptObjectHandle ActiveOwnerHandle;
+	FAvidScriptObjectHandle PreparedOwnerHandle;
 	uint64 NextActivationSerial = 1;
 	uint64 NextRegistrationSerial = 1;
 	int32 OccupiedSlotCount = 0;
+	int32 ActiveEntryCount = 0;
+	int32 PreparedEntryCount = 0;
 	bool bTearingDown = false;
 };
