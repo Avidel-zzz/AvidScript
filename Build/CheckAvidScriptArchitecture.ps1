@@ -2954,6 +2954,7 @@ foreach ($RequiredAsyncContinuationFacadeContract in @(
 }
 foreach ($RequiredControlledAsyncFacadeContract in @(
     'public sealed class AvidLatentAttribute',
+    'IsLatentStorageCompatible',
     'public readonly struct AvidDelayAwaitable',
     'public readonly struct AvidDelayAwaiter : INotifyCompletion',
     'DelayAsync(float delaySeconds)',
@@ -3016,6 +3017,7 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'CSharpGuestIds.AsyncResumeFunction',
     'binding_latent|',
     'FindImport(context.Document',
+    'LowerLatentArgument',
     'continuation_delay',
     'continuation_load_object',
     'not_equals',
@@ -3025,6 +3027,9 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     if (-not $CSharpAsyncLowererSource.Contains($RequiredControlledAsyncLoweringContract)) {
         Add-Violation "C# Guest controlled async lowerer is missing $RequiredControlledAsyncLoweringContract"
     }
+}
+if (-not $CSharpSemanticInputValidatorSource.Contains('LatentStorageParametersMatch')) {
+    Add-Violation 'generated latent bool parameters must validate public-to-storage ABI adaptation'
 }
 if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes')) {
     Add-Violation 'C# Guest continuation v2 router must merge compiler-owned async resume routes'

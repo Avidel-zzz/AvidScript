@@ -334,21 +334,23 @@ internal static class CSharpAsyncLowerer
 					return false;
 				}
 				string[] identity = awaitSite.ProducerKind.Split('|');
-				string? latentImportId = identity.Length == 3
-					? FindImport(context.Document, identity[1], identity[2])
+                SemanticCallable? latentImport = identity.Length == 3
+                    ? FindImportCallable(context.Document, identity[1], identity[2])
 					: null;
 				if (identity.Length != 3
-					|| latentImportId is null)
+					|| latentImport is null)
 				{
 					Add(context.Diagnostics, $"Latent async producer '{awaitSite.ProducerKind}' has no unique import.");
 					return false;
 				}
-				targetId = latentImportId;
-				foreach (SemanticOperation argument in awaitSite.Arguments)
+				targetId = CSharpGuestIds.Import(latentImport.MethodSymbolId);
+				for (int index = 0; index < awaitSite.Arguments.Count; ++index)
 				{
-					GuestRegister? value = CSharpOperationLowerer.LowerValue(
+					SemanticOperation argument = awaitSite.Arguments[index];
+					GuestRegister? value = LowerLatentArgument(
 						context,
 						argument,
+						latentImport.Parameters[index].TypeId,
 						awaitSite.CallbackId,
 						instructions);
 					if (value is null)
@@ -393,14 +395,58 @@ internal static class CSharpAsyncLowerer
         string module,
         string name)
     {
+        SemanticCallable? callable = FindImportCallable(document, module, name);
+        return callable is null
+            ? null
+            : CSharpGuestIds.Import(callable.MethodSymbolId);
+    }
+
+    private static SemanticCallable? FindImportCallable(
+        SemanticDocument document,
+        string module,
+        string name)
+    {
         SemanticCallable[] matches = document.Callables
             .Where(callable => callable.Import is { } import
                 && import.Module == module
                 && import.Name == name)
             .ToArray();
         return matches.Length == 1
-            ? CSharpGuestIds.Import(matches[0].MethodSymbolId)
+            ? matches[0]
             : null;
+    }
+
+    private static GuestRegister? LowerLatentArgument(
+        CSharpFunctionLoweringContext context,
+        SemanticOperation argument,
+        string storageTypeId,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? value = CSharpOperationLowerer.LowerValue(
+            context,
+            argument,
+            blockOrdinal,
+            instructions);
+        if (value is null || value.TypeId == storageTypeId)
+        {
+            return value;
+        }
+        if (argument.TypeId != "type:bool" || storageTypeId != "type:int32")
+        {
+            Add(context.Diagnostics,
+                $"Latent argument type '{argument.TypeId}' has no storage adaptation to '{storageTypeId}'.");
+            return null;
+        }
+
+        GuestRegister? storage = context.CreateTemporary(storageTypeId, blockOrdinal);
+        if (storage is null)
+        {
+            return null;
+        }
+        instructions.Add(new GuestInstruction(
+            "convert", storage.Id, new[] { value.Id }, null, null, null));
+        return storage;
     }
 
     private static void Add(List<GuestDiagnostic> diagnostics, string message)

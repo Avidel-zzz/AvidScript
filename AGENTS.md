@@ -89,6 +89,9 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C6A 首次 .NET 定向测试再次调用了 PATH 中的 `dotnet`，系统只有 SDK 9.0.306，因 `global.json` 固定 8.0.416 而在测试启动前失败。Prevention：AvidScript 的任何 .NET 命令在构造时就必须写为 `$env:USERPROFILE\.dotnet\dotnet.exe`，先在插件 cwd 断言 `--version` 精确为 `8.0.416`，并设置阶段本地 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA`、`NUGET_PACKAGES`；禁止先试 PATH host 再回退。环境解析失败不得计为产品测试失败。
+- 2026-08-29 P57.12C6A 搜索固定 SDK 记录时把 `--glob` 过滤参数放在 ripgrep 的 `--` 之后，导致选项被解释为文件路径并产生无意义错误。Prevention：ripgrep 调用顺序固定为 `rg <options-and-globs> -- '<literal>' <confirmed-path>`；`--` 之后只允许 pattern 与路径，不再追加任何选项。
+- 2026-08-29 P57.12C6A 只读定位 `LowerLiteral` 时，在刚记录“括号、引号密集文本必须使用 `rg -F`”后立即再次组合了带 C# 引号的正则，重复触发 `unclosed group`。Prevention：本项目后续所有源码定位默认先用单个 `rg -F -- '<literal>' <confirmed-file>`；只有确实需要模式匹配且无法用多个字面检索表达时才使用 regex，并先在独立 parser 探针验证。已记录的错误若在同一阶段重复，必须视为流程回归而不是普通命令失误。
 - 2026-08-29 P57.12C5 attestation 暂存时，在已有 P57.12C4 明确禁止后仍把 `git add` 与 `git diff --cached --check` 用分号放入同一个 shell 调用；两步都成功且暂存范围未污染，但证据域再次被不必要地串联。Prevention：Git 写操作、staged name-status、staged diff-check、status、hash、commit 各占一个独立工具调用；执行前机械检索本节“分号”和“Git 状态”记录，任何提交收尾命令不得以脚本块便利为由合并。
 - 2026-08-29 P57.12C5 closeout 手工把 `Phase57_State.json.next_action` 写成 C6 自由文本，遗漏状态机规定：存在 `Important` 且 `Open/Fixing` 的 P57-D06 时，下一动作必须精确为对应 `debt-update ... Verified` 命令，`status` 以 ASPW1023 拒绝。Prevention：阶段状态改动后必须立即运行 `InvokePhaseWorkflow.ps1 status -Phase <id>`；`next_action` 一律由 `Get-AvidScriptPhaseNextAction` 规则导出，不手写产品路线，后续功能目标写入 closeout 的“下一组”而非机器状态字段。
 - 2026-08-29 P57.12C5 clean candidate 创建时直接把 `HEAD^{tree}` 作为 PowerShell native argument，花括号被 shell 解释并向 `git rev-parse` 注入了异常 encoded command 文本；detached worktree 已正确落在 `0cbb9fe`，但首次 tree 输出无效。Prevention：PowerShell 下统一使用 `git show -s --format=%T HEAD` 获取 tree，禁止把 revision peel 的花括号语法直接交给 shell；运行 Gate 前仍必须在 candidate 内独立核对 HEAD、tree 与 `status --porcelain`。

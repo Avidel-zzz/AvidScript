@@ -37,7 +37,7 @@ internal static class CSharpGuestContinuationTests
                 [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
                 public static async void BeginPlay()
                 {
-                    await UKismetSystemLibrary.DelayAsync(0.125f);
+                    await UKismetSystemLibrary.WaitForFlagAsync(true);
                 }
             }
             """;
@@ -47,7 +47,7 @@ internal static class CSharpGuestContinuationTests
         GuestModule module = result.Module
             ?? throw new InvalidOperationException("generated latent await produced no Guest module");
         GuestImport latentImport = module.Imports.Single(import =>
-            import.Module == "avidscript" && import.Name == "avid_ue_latent_test");
+            import.Module == "avidscript" && import.Name == "avid_ue_latent_bool_test");
         GuestFunction beginPlay = module.Functions.Single(function =>
             function.Id == module.Exports.Single(export =>
                 export.Name == "avid_on_begin_play").FunctionId);
@@ -59,11 +59,13 @@ internal static class CSharpGuestContinuationTests
         Assert(result.Succeeded
             && latentImport.ParameterTypeIds.SequenceEqual(new[]
             {
-                "type:float32",
+                "type:int32",
                 "type:int32",
             })
             && latentImport.ReturnTypeId == "type:int64"
             && producerCall.OperandIds.Count == 2
+            && beginPlay.Blocks.SelectMany(block => block.Instructions)
+                .Any(instruction => instruction.Op == "convert")
             && module.Imports.All(import => import.Name != "continuation_delay"
                 && import.Name != "continuation_load_object"),
             "generated latent await should use only its descriptor-driven dynamic import and compiler callback");
@@ -575,6 +577,9 @@ internal static class CSharpGuestContinuationTests
         {
             [AvidLatent("avidscript", "avid_ue_latent_test")]
             public static AvidDelayAwaitable DelayAsync(float Duration) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_bool_test")]
+            public static AvidDelayAwaitable WaitForFlagAsync(bool bExpected) => default;
         }
 
         internal static class AvidScriptRuntimeNative
@@ -590,6 +595,9 @@ internal static class CSharpGuestContinuationTests
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
             internal static extern long InvokeLatent(float duration, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_bool_test")]
+            internal static extern long InvokeBooleanLatent(int expected, int callbackId);
         }
         """;
 

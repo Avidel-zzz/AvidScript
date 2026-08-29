@@ -291,6 +291,16 @@ bool ResolveStorageType(
 	return ResolveCSharpType(Value, TypesByCanonical, TypesById, OutType, OutErrorSource);
 }
 
+bool IsLatentStorageCompatible(
+	const FAvidScriptBindingValueModel& Value,
+	const FString& PublicType,
+	const FString& StorageType)
+{
+	return PublicType == StorageType
+		|| (Value.CanonicalType == TEXT("scalar:bool")
+			&& StorageType == TEXT("int"));
+}
+
 bool ResolveComponents(
 	const FAvidScriptBindingValueModel& Value,
 	TArray<FCSharpComponent>& OutComponents,
@@ -511,13 +521,12 @@ bool RenderMethod(
 					OutErrorSource)
 				|| Parameter.Direction != TEXT("value")
 				|| Parameter.AbiTypes.Num() != 1
-				|| PublicType != StorageType
+				|| !IsLatentStorageCompatible(Parameter, PublicType, StorageType)
 				|| Parameter.Kind == TEXT("enum")
 				|| Parameter.Kind == TEXT("object_handle")
 				|| Parameter.Kind == TEXT("struct")
 				|| Parameter.Kind == TEXT("struct_wire")
-				|| Parameter.Kind == TEXT("array")
-				|| Parameter.CanonicalType == TEXT("scalar:bool"))
+				|| Parameter.Kind == TEXT("array"))
 			{
 				OutErrorCategory = TEXT("latent_csharp_shape_unsupported");
 				OutErrorSource = Binding.CanonicalIdentity + TEXT(":") + Parameter.Name;

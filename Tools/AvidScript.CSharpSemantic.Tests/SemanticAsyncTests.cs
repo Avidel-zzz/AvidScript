@@ -31,27 +31,42 @@ internal static class SemanticAsyncTests
                 public static async void BeginPlay()
                 {
                     await UKismetSystemLibrary.DelayAsync(0.125f);
+                    await UKismetSystemLibrary.WaitForFlagAsync(true);
                 }
             }
             """;
 
         SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentAsync.cs");
-        SemanticAsyncAwaitSite site = document.AsyncMethods.Single()
-            .Segments.Single(segment => segment.AwaitSite is not null)
-            .AwaitSite!;
-        SemanticCallable import = document.Callables.Single(callable =>
+        SemanticAsyncAwaitSite[] sites = document.AsyncMethods.Single()
+            .Segments.Where(segment => segment.AwaitSite is not null)
+            .Select(segment => segment.AwaitSite!)
+            .ToArray();
+        SemanticAsyncAwaitSite delaySite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_test");
+        SemanticAsyncAwaitSite boolSite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_bool_test");
+        SemanticCallable delayImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_test" });
+        SemanticCallable boolImport = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_bool_test" });
 
         Assert(document.Succeeded
-            && site.CallbackId == CompilerCallbackIdStart
-            && site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_test"
-            && site.PayloadKind == "none"
-            && site.Arguments.Count == 1
-            && site.Arguments[0].TypeId == "type:float32"
-            && import.ReturnTypeId == "type:int64"
-            && import.Parameters.Select(parameter => parameter.TypeId)
+            && delaySite.CallbackId == CompilerCallbackIdStart
+            && delaySite.PayloadKind == "none"
+            && delaySite.Arguments.Count == 1
+            && delaySite.Arguments[0].TypeId == "type:float32"
+            && delayImport.ReturnTypeId == "type:int64"
+            && delayImport.Parameters.Select(parameter => parameter.TypeId)
                 .SequenceEqual(new[] { "type:float32", "type:int32" }),
             "generated latent markers should project a generic import identity and compiler callback ABI");
+        Assert(boolSite.CallbackId == CompilerCallbackIdStart + 1
+            && boolSite.PayloadKind == "none"
+            && boolSite.Arguments.Count == 1
+            && boolSite.Arguments[0].TypeId == "type:bool"
+            && boolImport.ReturnTypeId == "type:int64"
+            && boolImport.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:int32", "type:int32" }),
+            "generated boolean latent producers should preserve public bool and import i32 storage identities");
     }
 
     private static void SequentialAwaitsProjectStableSegments()
@@ -419,12 +434,18 @@ internal static class SemanticAsyncTests
         {
             [AvidLatent("avidscript", "avid_ue_latent_test")]
             public static AvidVoidAwaitable DelayAsync(float Duration) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_bool_test")]
+            public static AvidVoidAwaitable WaitForFlagAsync(bool bExpected) => default;
         }
 
         internal static class AvidScriptNative
         {
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
             internal static extern long InvokeLatent(float duration, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_bool_test")]
+            internal static extern long InvokeBooleanLatent(int expected, int callbackId);
         }
         """;
 

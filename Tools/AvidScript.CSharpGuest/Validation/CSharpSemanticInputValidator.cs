@@ -605,9 +605,9 @@ internal static class CSharpSemanticInputValidator
 				&& callable.Parameters[^1].TypeId == "type:int32"
 				&& callable.Parameters[^1].RefKind == "none").ToArray();
 			return imports.Length == 1
-				&& imports[0].Parameters.Take(awaitSite.Arguments.Count)
-					.Select(parameter => parameter.TypeId)
-					.SequenceEqual(awaitSite.Arguments.Select(argument => argument.TypeId));
+				&& LatentStorageParametersMatch(
+					imports[0].Parameters,
+					awaitSite.Arguments);
 		}
 
         if (awaitSite.ProducerKind != "object_load"
@@ -629,6 +629,25 @@ internal static class CSharpSemanticInputValidator
                 awaitSite.ResultSymbolId,
                 methodSymbolId,
                 awaitSite.ResultTypeId);
+    }
+
+    private static bool LatentStorageParametersMatch(
+        IReadOnlyList<SemanticCallableParameter> importParameters,
+        IReadOnlyList<SemanticOperation> arguments)
+    {
+        for (int index = 0; index < arguments.Count; ++index)
+        {
+            SemanticCallableParameter parameter = importParameters[index];
+            string? argumentTypeId = arguments[index].TypeId;
+            if (parameter.RefKind != "none"
+                || (parameter.TypeId != argumentTypeId
+                    && !(argumentTypeId == "type:bool"
+                        && parameter.TypeId == "type:int32")))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static bool IsMethodLocal(

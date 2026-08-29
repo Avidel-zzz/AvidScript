@@ -725,6 +725,10 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 	const FString& Parameters)
 {
 	const TArray<FAvidScriptReflectedFunctionSelection> Selections = {
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+			TEXT("WaitForFlag")
+		},
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("Delay") },
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("DelayUntilNextFrame") }
 	};
@@ -791,7 +795,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TamperedRuntimePackage,
 			TamperedLoadResult));
 	TestEqual(TEXT("Latent package alone raises schema to v12"), Package.SchemaVersion, 12);
-	TestEqual(TEXT("Both reflected latent producers are published"), Package.Bindings.Num(), 2);
+	TestEqual(TEXT("All reflected latent producers are published"), Package.Bindings.Num(), 3);
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		TestEqual(
@@ -836,6 +840,11 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		{
 			return Binding.UeFunction == TEXT("DelayUntilNextFrame");
 		});
+	const FAvidScriptBindingFunctionModel* WaitForFlag = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("WaitForFlag");
+		});
 	if (TestNotNull(TEXT("Delay binding resolves"), Delay))
 	{
 		TestEqual(TEXT("Delay ABI appends callback and returns token"), Delay->HostImport.Signature, FString(TEXT("(fi)I")));
@@ -843,6 +852,18 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 	if (TestNotNull(TEXT("Next-frame binding resolves"), NextFrame))
 	{
 		TestEqual(TEXT("Next-frame ABI is callback to token"), NextFrame->HostImport.Signature, FString(TEXT("(i)I")));
+	}
+	if (TestNotNull(TEXT("Boolean latent binding resolves"), WaitForFlag))
+	{
+		TestEqual(TEXT("Boolean latent ABI stores bool as i32"), WaitForFlag->HostImport.Signature, FString(TEXT("(ii)I")));
+		TestEqual(TEXT("Boolean latent exposes one public parameter"), WaitForFlag->Parameters.Num(), 1);
+		if (WaitForFlag->Parameters.Num() == 1)
+		{
+			TestEqual(
+				TEXT("Boolean latent parameter keeps public bool identity"),
+				WaitForFlag->Parameters[0].CanonicalType,
+				FString(TEXT("scalar:bool")));
+		}
 	}
 
 	FString ReferenceSource;
@@ -870,6 +891,12 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		TestTrue(
 			TEXT("Delay is exposed as an awaitable method"),
 			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable DelayAsync(float Duration) => default;")));
+		TestTrue(
+			TEXT("Boolean latent is exposed as a typed awaitable method"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForFlagAsync(bool bExpected) => default;")));
+		TestTrue(
+			TEXT("Boolean latent native import uses i32 storage"),
+			ReferenceSource.Contains(TEXT("int p0, int callbackId")));
 		TestTrue(
 			TEXT("Native latent import returns an i64 token"),
 			ReferenceSource.Contains(TEXT("internal static extern long Invoke")));

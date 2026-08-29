@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/LatentActionManager.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 #include "UObject/Object.h"
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
@@ -376,6 +378,27 @@ public:
 	static bool HasValue(UAvidScriptCSharpBindingEmitterStaticOwnerTestObject* Value)
 	{
 		return Value != nullptr;
+	}
+};
+
+UCLASS()
+class UAvidScriptEditorLatentFunctionLibraryTestObject : public UBlueprintFunctionLibrary
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
+		meta = (Latent, LatentInfo = "LatentInfo", WorldContext = "WorldContextObject"))
+	static void WaitForFlag(
+		UObject* WorldContextObject,
+		bool bExpected,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)bExpected;
+		(void)LatentInfo;
 	}
 };
 

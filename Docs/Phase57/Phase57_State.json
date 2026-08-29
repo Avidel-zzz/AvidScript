@@ -14,7 +14,7 @@
   },
   "documents": {
     "plan": "Docs/Phase57/P57.12C1_Deterministic_Continuation_Core_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C5_Generated_Latent_Await.md"
+    "closeout": "Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md"
   },
   "batches": [
     {
@@ -160,6 +160,12 @@
       "status": "Completed",
       "evidence": "commits 6ea57db and 0cbb9fe; descriptor schema v12, generic reflected completion-only latent policy, Session reservation/commit/abort transaction, real FLatentActionManager bridge, generated C# FooAsync facade and dynamic Guest import completed without API-name wrappers; fixed .NET 230/230, UE5.8 no-clean build, focused latent 2/2, corrective 3/3, full Automation 361/361 and clean 0cbb9fe/ab5e327 architecture gate passed. P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T05:27:49.5456043Z"
+    },
+    {
+      "id": "P57.12C6A",
+      "status": "Completed",
+      "evidence": "generated latent bool value parameters preserve public C# bool while using explicit i32 import storage; Semantic authorization and Guest lowering accept only the bool-to-i32 adaptation, and a reflected project UFUNCTION proves the chain has no API-name wrapper; fixed .NET Semantic/C# Guest 173/173, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T05:48:46.6850600Z"
     }
   ],
   "debt": [
@@ -179,8 +185,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.12C5 review closed latent metadata eligibility, hidden WorldContext/FLatentActionInfo injection, schema v12 identity, per-token callback proxy ownership, reservation/commit/abort behavior, synchronous completion, candidate discard, teardown suppression, generated AvidLatent provenance and dynamic Guest import selection without API-name wrappers.",
-    "completed_at_utc": "2026-08-29T05:27:49.5456043Z"
+    "evidence": "P57.12C6A review confirms reflected project latent bool methods retain public bool identity, import i32 storage, validate the sole authorized mismatch and emit an explicit Guest convert without latent API-name branches; cancellation and completion payload boundaries remain fail closed and documented.",
+    "completed_at_utc": "2026-08-29T05:48:46.6850600Z"
   },
   "budgets": {
     "ubt": 2,
@@ -188,8 +194,8 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 9,
-    "automation": 5,
+    "ubt": 10,
+    "automation": 6,
     "full_gate": 3
   },
   "freeze": {
@@ -229,6 +235,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 23,
-  "updated_at_utc": "2026-08-29T05:27:49.5456043Z"
+  "revision": 24,
+  "updated_at_utc": "2026-08-29T05:48:46.6850600Z"
 }
