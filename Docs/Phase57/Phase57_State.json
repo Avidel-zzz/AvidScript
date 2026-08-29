@@ -14,7 +14,7 @@
   },
   "documents": {
     "plan": "Docs/Phase57/P57.12C1_Deterministic_Continuation_Core_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C7_Explicit_Cancellation_Source.md"
+    "closeout": "Docs/Phase57/P57.12C8_Latent_Provider_Result_Slot.md"
   },
   "batches": [
     {
@@ -196,6 +196,12 @@
       "status": "Completed",
       "evidence": "commit adb9f94; Session-owned explicit cancellation sources, kind-separated i64 tokens, atomic continuation_bind_cancel, active/prepared lane fencing, generated AvidCancellationSource facade and real BeginPlay/EndPlay C# lifecycle completed without API-name wrappers; fixed .NET 233/233, UE5.8 no-clean Editor build 19/19 actions, continuation focused Automation 7/7, full Automation executed 362 tests with 360 successes and two stale emitter goldens, corrective complete emitter group 14/14, and clean adb9f94/0cfa530 architecture gate passed. Completion payload remains P57.12C8 and P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T07:54:21.8947090Z"
+    },
+    {
+      "id": "P57.12C8",
+      "status": "Completed",
+      "evidence": "commit ae46036; descriptor schema v13, exact-path IAvidScriptLatentCompletionProvider registry, Runtime provider identity revalidation and bounded Session-owned typed result slots completed without API-name wrappers; cancellation, prepared promotion/discard, stale capability rejection, consume-once and teardown reclamation are enforced. UE5.8 no-clean build passed after one fixture-only correction, focused LatentV13/LatentResultSlot 2/2 and direct LatentV12/LatentProducer 2/2 passed, and clean ae46036/44caa5a architecture gate passed. Guest bulk read and AvidOutcome<T> remain P57.12C9; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T08:29:07.8371878Z"
     }
   ],
   "debt": [
@@ -215,8 +221,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C7 review confirms cancellation-source ownership, token-kind isolation, atomic source binding, prepared-lane promotion/discard, source fan-out, dispatch race policy, generated facade authorization and schedule-order fail-closed behavior. Fixed .NET 233/233, UE5.8 no-clean build, focused 7/7, initial full 360/362 plus corrective emitter 14/14, and clean candidate architecture gate passed. Completion payload remains unimplemented and P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-29T07:54:21.8947090Z"
+    "evidence": "P57.12C8 review confirms exact-path provider registration, schema v13 canonical identity, Runtime provider/type revalidation, bounded Session result capability ownership, publish-before-ready, consume-once, cancel/abort/discard/reload/teardown reclamation and prepared-lane promotion. UE5.8 no-clean build, focused 2/2, direct compatibility 2/2 and clean candidate architecture gate passed. Guest payload consumption remains intentionally fail-closed until P57.12C9, and P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-29T08:29:07.8371878Z"
   },
   "budgets": {
     "ubt": 2,
@@ -224,25 +230,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 14,
-    "automation": 12,
+    "ubt": 16,
+    "automation": 14,
     "full_gate": 5
   },
   "freeze": {
-    "source_commit": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
-    "source_tree": "0cfa5300b81489bfbfb29b9eeb65afa9bde63cc2",
+    "source_commit": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
+    "source_tree": "44caa5a24a1d861215fed3058d4c58164007b699",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C7_Explicit_Cancellation_Source.md",
-    "at_utc": "2026-08-29T07:54:21.8947090Z"
+    "review_evidence": "Docs/Phase57/P57.12C8_Latent_Provider_Result_Slot.md",
+    "at_utc": "2026-08-29T08:29:07.8371878Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C7_Architecture_adb9f94.log",
-    "report_sha256": "dc567a2930966c3978723f8999010c3fd116547b69a8a58c6b390f6e27ab5fdf",
-    "run_id": "P57.12C7-clean-architecture-final",
-    "verified_commit": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
-    "verified_tree": "0cfa5300b81489bfbfb29b9eeb65afa9bde63cc2",
-    "attestation_parent": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
-    "attested_at_utc": "2026-08-29T07:54:21.8947090Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C8_Architecture_ae46036.log",
+    "report_sha256": "ca482df0ab72bcd4c4311966cb786dab1d0d1a4932207d2da089ef10f8c3b3a5",
+    "run_id": "P57.12C8-clean-architecture-final",
+    "verified_commit": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
+    "verified_tree": "44caa5a24a1d861215fed3058d4c58164007b699",
+    "attestation_parent": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
+    "attested_at_utc": "2026-08-29T08:29:07.8371878Z"
   },
   "protected_dirty": [
     {
@@ -265,6 +271,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 29,
-  "updated_at_utc": "2026-08-29T07:54:21.8947090Z"
+  "revision": 30,
+  "updated_at_utc": "2026-08-29T08:29:07.8371878Z"
 }
