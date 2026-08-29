@@ -9,12 +9,39 @@
 #include "Containers/StringConv.h"
 #include "CoreGlobals.h"
 #include "Engine/Engine.h"
+#include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "UObject/SoftObjectPath.h"
 
 namespace
 {
+class FAvidScriptTestPendingLatentAction final : public FPendingLatentAction
+{
+public:
+	explicit FAvidScriptTestPendingLatentAction(
+		const FAvidScriptBindingLatentReservation& Reservation)
+		: ExecutionFunction(Reservation.ExecutionFunction)
+		, Linkage(Reservation.Linkage)
+		, CallbackTarget(Reservation.CallbackTarget)
+	{
+	}
+
+	virtual void UpdateOperation(FLatentResponse& Response) override
+	{
+		Response.FinishAndTriggerIf(
+			true,
+			ExecutionFunction,
+			Linkage,
+			CallbackTarget);
+	}
+
+private:
+	FName ExecutionFunction;
+	int32 Linkage = INDEX_NONE;
+	FWeakObjectPtr CallbackTarget;
+};
+
 class FAvidScriptContinuationHostSpy final : public IAvidScriptContinuationHost
 {
 public:
@@ -156,6 +183,39 @@ uint32 InternContinuationUtf8(
 		return 0;
 	}
 	return Token;
+}
+
+void RegisterTestLatentAction(
+	UWorld* World,
+	const FAvidScriptBindingLatentReservation& Reservation)
+{
+	World->GetLatentActionManager().AddNewAction(
+		Reservation.CallbackTarget,
+		Reservation.UUID,
+		new FAvidScriptTestPendingLatentAction(Reservation));
+}
+
+bool TriggerLatentReservationSynchronously(
+	const FAvidScriptBindingLatentReservation& Reservation)
+{
+	if (!Reservation.IsValid())
+	{
+		return false;
+	}
+	UFunction* const Callback =
+		Reservation.CallbackTarget->FindFunction(Reservation.ExecutionFunction);
+	if (Callback == nullptr)
+	{
+		return false;
+	}
+	struct FCallbackParameters
+	{
+		int32 Linkage = 0;
+	};
+	FCallbackParameters Parameters;
+	Parameters.Linkage = Reservation.Linkage;
+	Reservation.CallbackTarget->ProcessEvent(Callback, &Parameters);
+	return true;
 }
 
 bool CreateContinuationWorld(UWorld*& OutWorld)
@@ -715,6 +775,141 @@ bool FAvidScriptContinuationActivationLivenessTest::RunTest(
 
 	Owner->Teardown();
 	Ownership.Cleanup(Registry);
+	DestroyContinuationWorld(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptContinuationLatentProducerTest,
+	"AvidScript.Runtime.Continuation.LatentProducer",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptContinuationLatentProducerTest::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Latent producer world is created"),
+			CreateContinuationWorld(World)))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FAvidScriptSessionContinuations> Owner =
+		MakeShared<FAvidScriptSessionContinuations>();
+	FAvidScriptContinuationHostEndpoint& ActiveHost =
+		Owner->ResetActive(World);
+	TArray<FAvidScriptContinuationCompletion> Completions;
+
+	FAvidScriptBindingLatentReservation MissingAction;
+	TestTrue(
+		TEXT("A latent reservation can be allocated"),
+		ActiveHost.BeginLatent(301, MissingAction));
+	TestTrue(TEXT("The latent reservation is complete"), MissingAction.IsValid());
+	TestFalse(
+		TEXT("A reservation without a registered action cannot commit"),
+		ActiveHost.CommitLatent(MissingAction.Token));
+	TestTrue(
+		TEXT("An uncommitted reservation can be aborted"),
+		ActiveHost.AbortLatent(MissingAction.Token));
+
+	FAvidScriptBindingLatentReservation Synchronous;
+	TestTrue(
+		TEXT("A synchronous latent reservation can be allocated"),
+		ActiveHost.BeginLatent(302, Synchronous));
+	TestTrue(
+		TEXT("A synchronous callback can complete before commit"),
+		TriggerLatentReservationSynchronously(Synchronous));
+	TestTrue(
+		TEXT("A synchronously completed reservation commits"),
+		ActiveHost.CommitLatent(Synchronous.Token));
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Synchronous completion queues once"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		TestEqual(TEXT("Synchronous callback id is preserved"), Completions[0].CallbackId, 302);
+		TestTrue(
+			TEXT("Synchronous completion finalizes"),
+			Owner->FinalizeDispatched(Completions[0].Token, true));
+	}
+
+	FAvidScriptBindingLatentReservation Cancelled;
+	FAvidScriptBindingLatentReservation Completed;
+	TestTrue(TEXT("First concurrent latent reserves"), ActiveHost.BeginLatent(303, Cancelled));
+	TestTrue(TEXT("Second concurrent latent reserves"), ActiveHost.BeginLatent(304, Completed));
+	TestNotEqual(
+		TEXT("Concurrent awaits use distinct callback targets"),
+		Cancelled.CallbackTarget,
+		Completed.CallbackTarget);
+	RegisterTestLatentAction(World, Cancelled);
+	RegisterTestLatentAction(World, Completed);
+	TestTrue(TEXT("First concurrent latent commits"), ActiveHost.CommitLatent(Cancelled.Token));
+	TestTrue(TEXT("Second concurrent latent commits"), ActiveHost.CommitLatent(Completed.Token));
+	TestTrue(TEXT("One concurrent latent can cancel independently"), ActiveHost.Cancel(Cancelled.Token));
+	AdvanceContinuationWorld(World, 0.01f);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Only the uncancelled latent completes"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		TestEqual(TEXT("Uncancelled callback id is preserved"), Completions[0].CallbackId, 304);
+		TestTrue(
+			TEXT("Uncancelled latent finalizes"),
+			Owner->FinalizeDispatched(Completions[0].Token, true));
+	}
+	TestEqual(
+		TEXT("Cancelled proxy owns no remaining action"),
+		World->GetLatentActionManager().GetNumActionsForObject(Cancelled.CallbackTarget),
+		0);
+
+	FAvidScriptContinuationHostEndpoint& PreparedHost =
+		Owner->BeginPrepared(World);
+	FAvidScriptBindingLatentReservation Promoted;
+	TestTrue(TEXT("Prepared latent reserves"), PreparedHost.BeginLatent(305, Promoted));
+	RegisterTestLatentAction(World, Promoted);
+	TestTrue(TEXT("Prepared latent commits"), PreparedHost.CommitLatent(Promoted.Token));
+	FString CommitError;
+	TestTrue(
+		TEXT("A committed prepared latent validates"),
+		Owner->ValidatePreparedCommit(CommitError));
+	Owner->CommitPrepared();
+	AdvanceContinuationWorld(World, 0.01f);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Promoted latent completes on the active lane"), Completions.Num(), 1);
+	if (Completions.Num() == 1)
+	{
+		TestEqual(TEXT("Promoted callback id is preserved"), Completions[0].CallbackId, 305);
+		TestTrue(
+			TEXT("Promoted latent finalizes"),
+			Owner->FinalizeDispatched(Completions[0].Token, true));
+	}
+
+	FAvidScriptContinuationHostEndpoint& DiscardedHost =
+		Owner->BeginPrepared(World);
+	FAvidScriptBindingLatentReservation Discarded;
+	TestTrue(TEXT("Discarded latent reserves"), DiscardedHost.BeginLatent(306, Discarded));
+	RegisterTestLatentAction(World, Discarded);
+	TestTrue(TEXT("Discarded latent commits"), DiscardedHost.CommitLatent(Discarded.Token));
+	Owner->DiscardPrepared();
+	AdvanceContinuationWorld(World, 0.01f);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Discarded latent never reaches Guest"), Completions.Num(), 0);
+
+	FAvidScriptContinuationHostEndpoint& WorldFenceHost =
+		Owner->ResetActive(World);
+	FAvidScriptBindingLatentReservation WorldFence;
+	TestTrue(TEXT("World-fenced latent reserves"), WorldFenceHost.BeginLatent(307, WorldFence));
+	RegisterTestLatentAction(World, WorldFence);
+	TestTrue(TEXT("World-fenced latent commits"), WorldFenceHost.CommitLatent(WorldFence.Token));
+	World->bIsTearingDown = true;
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("World teardown cancels latent dispatch"), Completions.Num(), 0);
+	TestEqual(TEXT("World teardown clears the latent entry"), Owner->GetActiveCount(), 0);
+	World->bIsTearingDown = false;
+	AdvanceContinuationWorld(World, 0.01f);
+	Owner->DrainReady(Completions);
+	TestEqual(TEXT("Late latent completion stays suppressed"), Completions.Num(), 0);
+
+	Owner->Teardown();
 	DestroyContinuationWorld(World);
 	return true;
 }

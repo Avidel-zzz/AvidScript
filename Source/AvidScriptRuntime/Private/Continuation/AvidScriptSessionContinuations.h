@@ -1,7 +1,9 @@
 #pragma once
 
+#include "AvidScriptBindingLatent.h"
 #include "AvidScriptContinuation.h"
 #include "AvidScriptObjectRegistry.h"
+#include "Continuation/AvidScriptLatentCallbackProxy.h"
 #include "Templates/SharedPointer.h"
 #include "TimerManager.h"
 #include "UObject/ObjectKey.h"
@@ -22,6 +24,7 @@ enum class EAvidScriptContinuationLane : uint8
 
 class FAvidScriptContinuationHostEndpoint final
 	: public IAvidScriptContinuationHost
+	, public IAvidScriptBindingLatentHost
 {
 public:
 	FAvidScriptContinuationHostEndpoint(
@@ -32,6 +35,11 @@ public:
 	int64 ScheduleDelay(float DelaySeconds, int32 CallbackId) override;
 	int64 ScheduleObjectLoad(FString ObjectPath, int32 CallbackId) override;
 	bool Cancel(int64 Token) override;
+	bool BeginLatent(
+		int32 CallbackId,
+		FAvidScriptBindingLatentReservation& OutReservation) override;
+	bool CommitLatent(int64 Token) override;
+	bool AbortLatent(int64 Token) override;
 
 	void Invalidate();
 	void PromoteToActive();
@@ -56,7 +64,7 @@ public:
 
 	~FAvidScriptSessionContinuations();
 
-	IAvidScriptContinuationHost& BeginPrepared(
+	FAvidScriptContinuationHostEndpoint& BeginPrepared(
 		UWorld* World,
 		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
 		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr,
@@ -65,7 +73,7 @@ public:
 	void CommitPrepared();
 	void ReleaseRetiredEndpoint();
 	void DiscardPrepared();
-	IAvidScriptContinuationHost& ResetActive(
+	FAvidScriptContinuationHostEndpoint& ResetActive(
 		UWorld* World,
 		FAvidScriptObjectRegistry* ObjectRegistry = nullptr,
 		FAvidScriptSessionObjectOwnership* ObjectOwnership = nullptr,
@@ -97,12 +105,28 @@ public:
 		EAvidScriptContinuationLane Lane,
 		uint64 ActivationSerial,
 		int64 Token);
+	bool BeginLatent(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int32 CallbackId,
+		FAvidScriptBindingLatentReservation& OutReservation);
+	bool CommitLatent(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 Token);
+	bool AbortLatent(
+		EAvidScriptContinuationLane Lane,
+		uint64 ActivationSerial,
+		int64 Token);
 
 private:
+	friend class UAvidScriptLatentCallbackProxy;
+
 	enum class EProducerKind : uint8
 	{
 		Timer,
-		AsyncObjectLoad
+		AsyncObjectLoad,
+		LatentAction
 	};
 
 	struct FEntry
@@ -116,12 +140,15 @@ private:
 		FTimerHandle TimerHandle;
 		TSharedPtr<IAvidScriptAsyncObjectLoadHandle> AsyncLoadHandle;
 		TStrongObjectPtr<UObject> LoadedObject;
+		TStrongObjectPtr<UAvidScriptLatentCallbackProxy> LatentProxy;
 		EProducerKind ProducerKind = EProducerKind::Timer;
 		int32 BorrowedHandleCheckpoint = 0;
 		bool bReady = false;
 		bool bDispatching = false;
 		bool bHasBorrowedHandleCheckpoint = false;
 		bool bDispatchHasObjectResult = false;
+		bool bLatentCommitted = false;
+		bool bLatentCompletionPending = false;
 	};
 
 	struct FSlot
@@ -135,6 +162,11 @@ private:
 		uint64 ActivationSerial = 0;
 		FAvidScriptContinuationCompletion Completion;
 	};
+	struct FRetiredLatentProxy
+	{
+		TWeakObjectPtr<UWorld> World;
+		TStrongObjectPtr<UAvidScriptLatentCallbackProxy> Proxy;
+	};
 
 	static int64 PackToken(uint32 Slot, uint32 Generation);
 	static bool UnpackToken(int64 Token, uint32& OutSlot, uint32& OutGeneration);
@@ -144,7 +176,11 @@ private:
 	void ReleaseSlot(uint32 Slot);
 	void HandleTimerCompletion(int64 Token);
 	void HandleObjectLoadCompletion(int64 Token, UObject* LoadedObject);
+	void HandleLatentCompletion(int64 Token, int32 Linkage);
+	void QueueLatentCompletion(FEntry& Entry);
 	void CancelEntryProducer(FEntry& Entry);
+	void RetireLatentProxy(FEntry& Entry);
+	void CollectRetiredLatentProxies();
 	void CancelLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void InvalidateLane(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
 	void RemoveReady(EAvidScriptContinuationLane Lane, uint64 ActivationSerial);
@@ -163,6 +199,7 @@ private:
 	TArray<FSlot> Slots;
 	TArray<uint32> FreeSlots;
 	TArray<FReadyCompletion> ReadyCompletions;
+	TArray<FRetiredLatentProxy> RetiredLatentProxies;
 	TArray<TStrongObjectPtr<UObject>> RetainedLoadedObjects;
 	TSet<TObjectKey<UObject>> RetainedLoadedObjectKeys;
 	TSharedPtr<IAvidScriptAsyncObjectLoader> AsyncObjectLoader;

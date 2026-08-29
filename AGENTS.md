@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C5A 首版跨模块 latent reservation 与纯虚 host interface 在 header-only 声明上添加了 `AVIDSCRIPTBINDINGS_API`，MSVC 将隐式构造/析构与 inline `IsValid` 视为 `dllimport` 外部符号，C++ 编译通过但 Runtime 链接出现 4 个 LNK2019。Prevention：无状态、无 out-of-line 成员、仅靠纯虚调用的窄接口保持 header-only 且不导出 vtable；只有确实在 owner module 提供 out-of-line 定义的类型才加模块 API 宏，跨模块新接口的集中构建必须同时检查 compile 与 link 结果。
 - 2026-08-29 P57.12C4 阶段启动再次把 `agent_type=explorer` 与 `fork_context=true` 同时传给并行代理，虽然同类错误已记录在本文件，工具仍在执行前拒绝。Prevention：每个阶段首次委派前必须按 `spawn`、`agent_type`、`fork_context` 机械检索本节既有记录；explorer 使用独立上下文，完整历史 fork 则省略角色覆盖，禁止依赖记忆跳过启动检查。
 - 2026-08-29 P57.12C4 首次 latent 多文件补丁根据印象填写了一个已读文件的返回行，精确上下文不匹配导致整组补丁未落盘。Prevention：跨 owner 修改先逐文件读取精确锚点，再按 owner-local 小补丁落盘并立即 readback；未经逐字确认的文件不得加入同一个原子补丁。
 - 2026-08-29 P57.12C4 Automation 包装再次先组合删除固定日志，随后单独删除也被安全策略拒绝。Prevention：每轮启动前直接分配从未使用的时间戳 `-abslog` 和 stdout 日志，不删除、不覆盖旧证据；日志清理由人工或独立维护阶段处理。
