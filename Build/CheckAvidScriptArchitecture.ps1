@@ -3019,7 +3019,7 @@ foreach ($RequiredControlledAsyncGuestContract in @(
 foreach ($RequiredControlledAsyncLoweringContract in @(
     'CSharpGuestIds.AsyncResumeFunction',
     'binding_latent|',
-    'FindImport(context.Document',
+    'FindImport(document',
     'LowerLatentArgument',
     'CSharpLatentStoragePlanner.TryBuild',
     'LowerFieldPath',

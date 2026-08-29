@@ -2042,3 +2042,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C3 candidate identity read passed `HEAD^{tree}` unquoted, so PowerShell parsed the braces as a script block and rejected the `git rev-parse` invocation.
 - Prevention: Git revision expressions containing braces, carets, colons, or wildcard-like characters are passed as one single-quoted argument in PowerShell, for example `git rev-parse 'HEAD^{tree}'`. A failed identity read is rerun correctly before commit or push.
+
+### 2026-08-29: create isolated .NET directories before resolving them
+
+- Mistake: the first P57.12C6E Wasm Backend rerun assigned `APPDATA`, `LOCALAPPDATA`, and `NUGET_PACKAGES` from `Resolve-Path` calls for task-local directories that had not been created, so NuGet received null paths and the test process never started.
+- Prevention: create every task-local .NET state directory with `New-Item -ItemType Directory -Force` and verify each path before assigning environment variables. `Resolve-Path` validates an existing path; it never creates one.
+
+### 2026-08-29: update architecture oracles with production refactors
+
+- Mistake: P57.12C6C renamed the controlled async lowerer's semantic input from `context.Document` to `document`, but its architecture checker still required the obsolete `FindImport(context.Document` text and rejected the otherwise valid clean C6E candidate.
+- Prevention: implementation groups that change a checker-protected call shape update the matching architecture oracle in the same commit. The oracle must assert the current semantic operation and stable symbol, not a stale local variable name when the name itself is not architectural.
