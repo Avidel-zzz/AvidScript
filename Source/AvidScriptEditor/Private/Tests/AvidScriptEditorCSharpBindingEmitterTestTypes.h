@@ -380,6 +380,23 @@ public:
 };
 
 UCLASS()
+class UAvidScriptEditorLatentCallbackTestObject : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION()
+	void OnLatentCompleted(int32 Linkage)
+	{
+		LastLinkage = Linkage;
+		++CompletionCount;
+	}
+
+	int32 CompletionCount = 0;
+	int32 LastLinkage = INDEX_NONE;
+};
+
+UCLASS()
 class AAvidScriptBindingRuntimeProcessEventTestActor : public AActor
 {
 	GENERATED_BODY()

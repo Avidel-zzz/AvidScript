@@ -10,13 +10,14 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12C4" src="https://img.shields.io/badge/Status-Phase%2057.12C4-159957">
-  <img alt="Automation 358/358" src="https://img.shields.io/badge/Automation-358%2F358-26A269">
+  <img alt="Phase 57.12C5" src="https://img.shields.io/badge/Status-Phase%2057.12C5-159957">
+  <img alt="Automation 361/361" src="https://img.shields.io/badge/Automation-361%2F361-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
 将 C# 编译为轻量 WASM Guest，通过生成式 Binding 接入 `BeginPlay`、`Tick`、
-  Timer、受控 `async/await`、异步对象加载、Overlap、动态多播事件、普通 `UFUNCTION` 与 `UPROPERTY`，在 UE 中编写真实游戏逻辑。
+Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overlap、动态多播事件、
+普通 `UFUNCTION` 与 `UPROPERTY`，在 UE 中编写真实游戏逻辑。
 
 </div>
 
@@ -230,9 +231,22 @@ public static async void BeginPlay()
 }
 ```
 
+P57.12C5 进一步从 UE Reflection 识别满足 completion-only 合同的 latent `UFUNCTION`，生成
+`FooAsync` facade。下面的 `DelayAsync` 来自 `UKismetSystemLibrary.Delay`，不需要手写 VM wrapper：
+
+```csharp
+[UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+public static async void BeginPlay()
+{
+    UE.Self.SetActorScale3D(new FVector(1.0f, 1.0f, 1.0f));
+    await UKismetSystemLibrary.DelayAsync(0.25f);
+    UE.Self.SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f));
+}
+```
+
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及多个顶层直接
-`DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)`。普通 local 不能跨越下一
-await；跨暂停状态需显式放入静态字段。旧 callback API、schema 10/11 Guest 与
+`DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
+`FooAsync(...)`。普通 local 不能跨越下一 await；跨暂停状态需显式放入静态字段。旧 callback API、schema 10/11 Guest 与
 `avid_on_continuation_v2` 继续兼容。
 
 取消、候选回滚、`EndPlay` 与 Session teardown 会抑制尚未分发的恢复并取消异步 handle。Continuation
@@ -245,8 +259,8 @@ trap 会回滚本次借出的对象 capability。
 | 领域 | 已实现 |
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
-| 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、状态与对象结果、生成式 callback 与 async CPS dispatcher、不透明 token/cancel、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
-| 受控 async/await | 多个顺序 await、零 Guest 堆 CPS segment、稳定 resume debug map、调度拒绝 trap；不依赖 CLR `Task` Runtime |
+| 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、completion-only UE latent producer、状态与对象结果、生成式 callback 与 async CPS dispatcher、不透明 token/cancel、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
+| 受控 async/await | 多个顺序 await、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、调度拒绝 trap；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
@@ -488,6 +502,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [ComponentGameplay](Samples/CSharp/ComponentGameplay/ComponentGameplay.cs) | 创建/查询组件、Attach、Tick 调用与 EndPlay 释放 |
 | [BidirectionalProperties](Samples/CSharp/BidirectionalProperties/README.md) | C# 与 UE 属性双向读写 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | async `BeginPlay`、`Tick` / `EndPlay`、NextTick、UE TimerManager Continuation 与异步对象加载 |
+| [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | Reflection 生成 `UKismetSystemLibrary.DelayAsync`，在 `BeginPlay` 中等待后恢复 UE 游戏逻辑 |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
 
@@ -499,7 +514,8 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
 - 受控 `async/await` 已支持顶层顺序等待、紧邻对象结果与宿主 activation 失效抑制；尚未支持 local spill、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级；后续 bounded spill 必须同时提供 Guest frame reset 握手；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
-- latent、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+- completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
+  latent、复杂类型、completion payload、取消句柄映射、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
@@ -509,7 +525,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 为受控 async 增加带 reset 握手的 bounded spill frame、显式重入策略与生成式 latent await，并继续推进资源批量/进度接口、RPC、interface dispatch 与 `FText`；
+1. 扩展生成式 latent facade 的对象/结构体等类型覆盖与取消/payload 合同，并为受控 async 增加带 reset 握手的 bounded spill frame 和显式重入策略；
 2. 用 C# 完成真实小型游戏 Demo，固化生命周期、对象创建、事件和热重载工作流；
 3. 扩展 string element、nested array、`TSet`/`TMap`，继续压缩 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。
@@ -525,11 +541,11 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前 Phase 57.12C4 完整 AvidScript Automation 为 **358/358 通过**，另有固定 .NET 工具链
-`228/228`、PowerShell 构建与工作流合同 `117/117`，以及 UE5.8 no-clean Editor build 通过。
+当前 Phase 57.12C5 完整 AvidScript Automation 为 **361/361 通过**，另有固定 .NET 工具链
+`230/230`，以及 UE5.8 no-clean Editor build 通过。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12C4 中文报告](Docs/Phase57/P57.12C4_Activation_Liveness_Fence.md)。
+[P57.12C5 中文报告](Docs/Phase57/P57.12C5_Generated_Latent_Await.md)。
 
 工程规则：
 

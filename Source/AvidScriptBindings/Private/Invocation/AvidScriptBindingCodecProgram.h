@@ -11,6 +11,8 @@
 #include "CoreMinimal.h"
 
 class FProperty;
+class FObjectPropertyBase;
+class FStructProperty;
 class UClass;
 class UFunction;
 class UObject;
@@ -123,9 +125,12 @@ struct FInvocationCodecProgram
 	UClass* OwnerClass = nullptr;
 	UFunction* Function = nullptr;
 	FProperty* ReflectedProperty = nullptr;
+	FStructProperty* LatentInfoProperty = nullptr;
+	FObjectPropertyBase* WorldContextProperty = nullptr;
 	FString DebugPath;
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
+	bool bLatent = false;
 	EAvidScriptBindingReloadEffect ReloadEffect =
 		EAvidScriptBindingReloadEffect::Unsupported;
 	bool bRequiresGuestMemory = false;
@@ -133,6 +138,7 @@ struct FInvocationCodecProgram
 	int32 FrameAlignment = 1;
 	int32 RequiredScratchSize = 0;
 	int32 ExpectedArgumentCount = 0;
+	int32 CallbackIdArgumentOffset = INDEX_NONE;
 	TArray<FValueCodecProgram> Parameters;
 	FValueCodecProgram ReturnValue;
 	FFastPathPlan FastPath;

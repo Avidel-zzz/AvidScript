@@ -32,6 +32,7 @@ constexpr const TCHAR* GeneratedNativeGeneratorVersion = TEXT("55.1.0");
 constexpr const TCHAR* StructWireGeneratorVersion = TEXT("57.11B1.0");
 constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
 constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
+constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -48,6 +49,8 @@ struct FResolvedBindingDescriptor
 	FString StableId;
 	FString ImportName;
 	FString DispatchMode = TEXT("cached_process_event");
+	FString LatentInfoParameter;
+	FString WorldContextParameter;
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
@@ -116,7 +119,9 @@ FString MakeCanonicalIdentity(
 	const UClass* OwnerClass,
 	const UFunction* Function,
 	const FAvidScriptProjectedFunction& Projection,
-	const FString& DispatchMode)
+	const FString& DispatchMode,
+	const FString& LatentInfoParameter = FString(),
+	const FString& WorldContextParameter = FString())
 {
 	FString Identity = OwnerClass->GetPathName()
 		+ TEXT("::")
@@ -133,6 +138,11 @@ FString MakeCanonicalIdentity(
 			+ Parameter.Type.CanonicalType;
 	}
 	Identity += TEXT(")");
+	if (DispatchMode == TEXT("latent_process_event"))
+	{
+		Identity += TEXT("|latent_info=") + LatentInfoParameter
+			+ TEXT("|world_context=") + WorldContextParameter;
+	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 		Identity,
 		DispatchMode);
@@ -487,14 +497,16 @@ bool GenerateBindingDescriptor(
 			return false;
 		}
 
+		FAvidScriptEditorLatentFunctionContract LatentContract;
 		FString FunctionPolicyCategory;
 		FString FunctionPolicySource;
 		if (!FAvidScriptEditorReflectedFunctionPolicy::Evaluate(
 			Function,
 			FunctionPolicyCategory,
-			FunctionPolicySource))
+			FunctionPolicySource,
+			&LatentContract))
 		{
-			SetFailure(OutResult, FunctionPolicyCategory, FunctionPolicySource, TEXT("Select a public script-callable, non-latent runtime UFunction."));
+			SetFailure(OutResult, FunctionPolicyCategory, FunctionPolicySource, TEXT("Select a supported public script-callable runtime UFunction."));
 			return false;
 		}
 
@@ -503,12 +515,23 @@ bool GenerateBindingDescriptor(
 		Binding.OwnerClass = OwnerClass;
 		Binding.Function = Function;
 		Binding.UeMember = Function->GetName();
+		Binding.LatentInfoParameter = LatentContract.LatentInfoParameter;
+		Binding.WorldContextParameter = LatentContract.WorldContextParameter;
 		FString ProjectionErrorSource;
-		if (!FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
-			Function,
-			Function->HasAnyFunctionFlags(FUNC_Static),
-			Binding.Projection,
-			ProjectionErrorSource))
+		const bool bProjected = LatentContract.bLatent
+			? FAvidScriptEditorReflectedTypePolicy::ProjectLatentFunction(
+				Function,
+				Function->HasAnyFunctionFlags(FUNC_Static),
+				Binding.LatentInfoParameter,
+				Binding.WorldContextParameter,
+				Binding.Projection,
+				ProjectionErrorSource)
+			: FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
+				Function,
+				Function->HasAnyFunctionFlags(FUNC_Static),
+				Binding.Projection,
+				ProjectionErrorSource);
+		if (!bProjected)
 		{
 			SetFailure(
 				OutResult,
@@ -523,10 +546,14 @@ bool GenerateBindingDescriptor(
 		{
 			FinalizeType(Parameter.Type);
 		}
-		Binding.ScriptName = GetDescriptorScriptFunctionName(Function);
+		Binding.ScriptName = GetDescriptorScriptFunctionName(Function)
+			+ (LatentContract.bLatent ? FString(TEXT("Async")) : FString());
 		const bool bGeneratedNative =
-			GeneratedNativeFunctionKeys.Contains(SelectionKey);
-		Binding.DispatchMode = bGeneratedNative
+			!LatentContract.bLatent
+			&& GeneratedNativeFunctionKeys.Contains(SelectionKey);
+		Binding.DispatchMode = LatentContract.bLatent
+			? FString(TEXT("latent_process_event"))
+			: bGeneratedNative
 			? FString(TEXT("generated_native_s1"))
 			: NativeDirectFunctionKeys.Contains(SelectionKey)
 				? FString(TEXT("qualified_native_direct"))
@@ -535,7 +562,9 @@ bool GenerateBindingDescriptor(
 			OwnerClass,
 			Function,
 			Binding.Projection,
-			TEXT("cached_process_event"));
+			TEXT("cached_process_event"),
+			Binding.LatentInfoParameter,
+			Binding.WorldContextParameter);
 		if (bGeneratedNative)
 		{
 			FString EligibilityCategory;
@@ -586,14 +615,18 @@ bool GenerateBindingDescriptor(
 				OwnerClass,
 				Function,
 				Binding.Projection,
-				Binding.DispatchMode);
+				Binding.DispatchMode,
+				Binding.LatentInfoParameter,
+				Binding.WorldContextParameter);
 		}
 		Binding.StableId = HashSha256(Binding.CanonicalIdentity);
 		if (!bGeneratedNative)
 		{
 			Binding.ImportName = TEXT("avid_ue_") + Binding.StableId.Left(16);
 		}
-		Binding.ReloadEffect = FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
+		Binding.ReloadEffect = LatentContract.bLatent
+			? EAvidScriptBindingReloadEffect::ContinuationProducer
+			: FAvidScriptEditorBindingReloadEffectPolicy::Classify(*Function);
 		Bindings.Add(MoveTemp(Binding));
 	}
 
@@ -1058,6 +1091,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Type.Kind == TEXT("array");
 		});
+	const bool bHasLatentBindings = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.DispatchMode == TEXT("latent_process_event");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1076,7 +1114,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 11;
 	}
-	Package.GeneratorVersion = !DelegateEvents.IsEmpty()
+	if (bHasLatentBindings)
+	{
+		Package.SchemaVersion = 12;
+	}
+	Package.GeneratorVersion = bHasLatentBindings
+		? LatentGeneratorVersion
+		: !DelegateEvents.IsEmpty()
 		? DelegateEventGeneratorVersion
 		: bHasArrayTypes
 		? ArrayGeneratorVersion
@@ -1125,6 +1169,8 @@ bool GenerateBindingDescriptor(
 			: Binding.Function->GetName();
 		BindingModel.ScriptName = Binding.ScriptName;
 		BindingModel.DispatchMode = Binding.DispatchMode;
+		BindingModel.LatentInfoParameter = Binding.LatentInfoParameter;
+		BindingModel.WorldContextParameter = Binding.WorldContextParameter;
 		BindingModel.GeneratedShape = Binding.GeneratedShape;
 		BindingModel.GeneratedReceiverMode = Binding.GeneratedReceiverMode;
 		BindingModel.GeneratedImportName = Binding.ImportName;

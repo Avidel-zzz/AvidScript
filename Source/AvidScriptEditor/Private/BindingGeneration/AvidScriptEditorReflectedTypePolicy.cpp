@@ -226,6 +226,47 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 	bool bIsStatic,
 	FAvidScriptProjectedFunction& OutProjection,
 	FString& OutErrorSource)
+
+{
+	return ProjectFunctionInternal(
+		Function,
+		bIsStatic,
+		{},
+		false,
+		OutProjection,
+		OutErrorSource);
+}
+
+bool FAvidScriptEditorReflectedTypePolicy::ProjectLatentFunction(
+	const UFunction* Function,
+	const bool bIsStatic,
+	const FString& LatentInfoParameter,
+	const FString& WorldContextParameter,
+	FAvidScriptProjectedFunction& OutProjection,
+	FString& OutErrorSource)
+{
+	TSet<FName> ExcludedParameters;
+	ExcludedParameters.Add(FName(*LatentInfoParameter));
+	if (!WorldContextParameter.IsEmpty())
+	{
+		ExcludedParameters.Add(FName(*WorldContextParameter));
+	}
+	return ProjectFunctionInternal(
+		Function,
+		bIsStatic,
+		ExcludedParameters,
+		true,
+		OutProjection,
+		OutErrorSource);
+}
+
+bool FAvidScriptEditorReflectedTypePolicy::ProjectFunctionInternal(
+	const UFunction* Function,
+	const bool bIsStatic,
+	const TSet<FName>& ExcludedParameters,
+	const bool bLatent,
+	FAvidScriptProjectedFunction& OutProjection,
+	FString& OutErrorSource)
 {
 	OutProjection = FAvidScriptProjectedFunction();
 	OutErrorSource.Empty();
@@ -257,6 +298,10 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 	{
 		const FProperty* Property = *It;
 		if (!Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		{
+			continue;
+		}
+		if (ExcludedParameters.Contains(Property->GetFName()))
 		{
 			continue;
 		}
@@ -296,6 +341,13 @@ bool FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
 	for (const FAvidScriptProjectedBindingValue& Parameter : OutProjection.Parameters)
 	{
 		AppendAbiTypes(Parameter, AbiTypes);
+	}
+	if (bLatent)
+	{
+		AbiTypes.Add(TEXT("i"));
+		OutProjection.AbiSignature = TEXT("(")
+			+ FString::Join(AbiTypes, TEXT("")) + TEXT(")I");
+		return true;
 	}
 	if (!OutProjection.ReturnValue.Type.bVoid)
 	{

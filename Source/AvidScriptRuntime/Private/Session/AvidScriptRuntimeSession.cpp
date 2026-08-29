@@ -341,6 +341,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	NextHostContext.HostEffectJournal = nullptr;
 	NextHostContext.EventSubscriptions = DelegateSubscriptions.Get();
 	NextHostContext.Continuations = HostContext.Continuations;
+	NextHostContext.LatentHost = HostContext.LatentHost;
 	if (NextHostContext.ObjectRegistry != nullptr
 		&& NextHostContext.OwnerHandle.IsValid())
 	{
@@ -365,13 +366,22 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	{
 		DelegateSubscriptions->UnbindActive();
 		DelegateSubscriptions->DiscardPrepared();
-		NextHostContext.Continuations = LiveRuntime
-			? &Continuations->ResetActive(
-				NextHostContext.World.Get(),
-				NextHostContext.ObjectRegistry,
-				ObjectOwnership.Get(),
-				NextHostContext.OwnerHandle)
-			: nullptr;
+		if (LiveRuntime)
+		{
+			FAvidScriptContinuationHostEndpoint& ActiveContinuationHost =
+				Continuations->ResetActive(
+					NextHostContext.World.Get(),
+					NextHostContext.ObjectRegistry,
+					ObjectOwnership.Get(),
+					NextHostContext.OwnerHandle);
+			NextHostContext.Continuations = &ActiveContinuationHost;
+			NextHostContext.LatentHost = &ActiveContinuationHost;
+		}
+		else
+		{
+			NextHostContext.Continuations = nullptr;
+			NextHostContext.LatentHost = nullptr;
+		}
 		if (!LiveRuntime)
 		{
 			Continuations->Teardown();
@@ -1175,7 +1185,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		}
 		return bRolledBack;
 	};
-	IAvidScriptContinuationHost& PreparedContinuationHost =
+	FAvidScriptContinuationHostEndpoint& PreparedContinuationHost =
 		Continuations->BeginPrepared(
 			HostContext.World.Get(),
 			HostContext.ObjectRegistry,
@@ -1183,6 +1193,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			HostContext.OwnerHandle);
 	FAvidScriptWasmHostContext CandidateHostContext = HostContext;
 	CandidateHostContext.Continuations = &PreparedContinuationHost;
+	CandidateHostContext.LatentHost = &PreparedContinuationHost;
 	CandidateRuntime->SetHostContext(CandidateHostContext);
 
 	TOptional<FAvidScriptHostEffectTransaction> HostEffectTransaction;

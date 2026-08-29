@@ -20,7 +20,56 @@ internal static class CSharpGuestContinuationTests
         ExplicitExportConflictFailsClosed();
         TamperedCallbackMetadataFailsClosed();
         AsyncAwaitLowersZeroHeapResumeSegments();
-        return 6;
+        GeneratedLatentAwaitLowersDynamicImport();
+        return 7;
+    }
+
+    private static void GeneratedLatentAwaitLowersDynamicImport()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    await UKismetSystemLibrary.DelayAsync(0.125f);
+                }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentGuest.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException("generated latent await produced no Guest module");
+        GuestImport latentImport = module.Imports.Single(import =>
+            import.Module == "avidscript" && import.Name == "avid_ue_latent_test");
+        GuestFunction beginPlay = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_begin_play").FunctionId);
+        GuestInstruction producerCall = beginPlay.Blocks
+            .SelectMany(block => block.Instructions)
+            .Single(instruction => instruction.Op == "call"
+                && instruction.TargetId == latentImport.Id);
+
+        Assert(result.Succeeded
+            && latentImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:float32",
+                "type:int32",
+            })
+            && latentImport.ReturnTypeId == "type:int64"
+            && producerCall.OperandIds.Count == 2
+            && module.Imports.All(import => import.Name != "continuation_delay"
+                && import.Name != "continuation_load_object"),
+            "generated latent await should use only its descriptor-driven dynamic import and compiler callback");
+        Assert(GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "generated latent await Guest IR should validate and compile to WASM");
     }
 
     private static void AsyncAwaitLowersZeroHeapResumeSegments()
@@ -441,6 +490,12 @@ internal static class CSharpGuestContinuationTests
             public AvidContinuationAttribute(int callbackId) { }
         }
 
+        [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+        public sealed class AvidLatentAttribute : Attribute
+        {
+            public AvidLatentAttribute(string module, string importName) { }
+        }
+
         [AttributeUsage(AttributeTargets.Field, Inherited = false, AllowMultiple = false)]
         public sealed class AvidTransientAttribute : Attribute { }
 
@@ -516,6 +571,12 @@ internal static class CSharpGuestContinuationTests
             public static AvidObjectAwaitable LoadObjectAsync(string assetPath) => default;
         }
 
+        public static class UKismetSystemLibrary
+        {
+            [AvidLatent("avidscript", "avid_ue_latent_test")]
+            public static AvidDelayAwaitable DelayAsync(float Duration) => default;
+        }
+
         internal static class AvidScriptRuntimeNative
         {
             [DllImport("env", EntryPoint = "continuation_delay")]
@@ -526,6 +587,9 @@ internal static class CSharpGuestContinuationTests
 
             [DllImport("env", EntryPoint = "continuation_load_object")]
             internal static extern long ContinuationLoadObject(string assetPath, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
+            internal static extern long InvokeLatent(float duration, int callbackId);
         }
         """;
 

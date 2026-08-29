@@ -700,6 +700,23 @@ bool ParseAvidScriptBindingFunction(
 			return false;
 		}
 	}
+	if (SchemaVersion >= 12
+		&& OutBinding.DispatchMode == TEXT("latent_process_event"))
+	{
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("latent_info_parameter"),
+				OutBinding.LatentInfoParameter,
+				OutErrorSource)
+			|| !ReadAvidScriptBindingRequiredStringAllowEmpty(
+				Object,
+				TEXT("world_context_parameter"),
+				OutBinding.WorldContextParameter,
+				OutErrorSource))
+		{
+			return false;
+		}
+	}
 
 	if (SchemaVersion == 2)
 	{
@@ -1453,7 +1470,9 @@ bool FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(
 	return DispatchMode == TEXT("cached_process_event")
 		|| (SchemaVersion >= 8
 			&& (DispatchMode == TEXT("qualified_native_direct")
-				|| DispatchMode == TEXT("generated_native_s1")));
+				|| DispatchMode == TEXT("generated_native_s1")))
+		|| (SchemaVersion >= 12
+			&& DispatchMode == TEXT("latent_process_event"));
 }
 
 bool IsAvidScriptBindingLowerHex(const FString& Value)
@@ -1593,6 +1612,12 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 					+ TEXT("|receiver=") + Binding.GeneratedReceiverMode
 					+ TEXT("|import=") + Binding.GeneratedImportName;
 			}
+		}
+		if (Package.SchemaVersion >= 12
+			&& Binding.DispatchMode == TEXT("latent_process_event"))
+		{
+			Key += TEXT("|latent_info=") + Binding.LatentInfoParameter
+				+ TEXT("|world_context=") + Binding.WorldContextParameter;
 		}
 		SelectionKeys.Add(MoveTemp(Key));
 	}
@@ -1870,6 +1895,18 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("member"), Binding.UeMember);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("script_name"), Binding.ScriptName);
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("dispatch"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 12
+			&& Binding.DispatchMode == TEXT("latent_process_event"))
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("latent_info_parameter"),
+				Binding.LatentInfoParameter);
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("world_context_parameter"),
+				Binding.WorldContextParameter);
+		}
 		if (Binding.DispatchMode == TEXT("generated_native_s1"))
 		{
 			AppendAvidScriptBindingIdentityField(
@@ -2033,7 +2070,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 8
 			&& OutPackage.SchemaVersion != 9
 			&& OutPackage.SchemaVersion != 10
-			&& OutPackage.SchemaVersion != 11)
+			&& OutPackage.SchemaVersion != 11
+			&& OutPackage.SchemaVersion != 12)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2056,7 +2094,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 8
 				&& OutPackage.SchemaVersion != 9
 				&& OutPackage.SchemaVersion != 10
-				&& OutPackage.SchemaVersion != 11)
+				&& OutPackage.SchemaVersion != 11
+				&& OutPackage.SchemaVersion != 12)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -2271,6 +2310,19 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				|| (Binding.BindingKind == TEXT("property_set")
 					&& Binding.GeneratedShape == TEXT("property_i32_set")))
 			&& Binding.GeneratedReceiverMode == TEXT("self_bound");
+		const bool bLatentBinding =
+			Binding.BindingKind == TEXT("function")
+			&& Binding.DispatchMode == TEXT("latent_process_event");
+		FString ExpectedLatentSignature;
+		if (bLatentBinding)
+		{
+			FString LatentParameters = Binding.bStatic ? FString() : FString(TEXT("ii"));
+			for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
+			{
+				LatentParameters += FString::Join(Parameter.AbiTypes, TEXT(""));
+			}
+			ExpectedLatentSignature = TEXT("(") + LatentParameters + TEXT("i)I");
+		}
 		const FString ExpectedPropertyGetIdentity =
 			Binding.OwnerClass
 			+ TEXT("::property_get:") + Binding.UeMember
@@ -2296,6 +2348,30 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 								FString(),
 								TEXT("qualified_native_direct")),
 							ESearchCase::CaseSensitive))
+					|| (bLatentBinding
+						&& (Binding.ReloadEffect
+								!= EAvidScriptBindingReloadEffect::ContinuationProducer
+							|| Binding.bConst
+							|| Binding.ReturnValue.CanonicalType != TEXT("void")
+							|| Binding.LatentInfoParameter.IsEmpty()
+							|| Binding.LatentInfoParameter
+								== Binding.WorldContextParameter
+							|| !Binding.ScriptName.EndsWith(
+								TEXT("Async"),
+								ESearchCase::CaseSensitive)
+							|| Binding.Parameters.ContainsByPredicate(
+								[](const FAvidScriptBindingValueModel& Parameter)
+								{
+									return Parameter.Direction == TEXT("ref")
+										|| Parameter.Direction == TEXT("out");
+								})
+							|| Binding.HostImport.Signature
+								!= ExpectedLatentSignature))
+					|| (!bLatentBinding
+						&& (!Binding.LatentInfoParameter.IsEmpty()
+							|| !Binding.WorldContextParameter.IsEmpty()
+							|| Binding.ReloadEffect
+								== EAvidScriptBindingReloadEffect::ContinuationProducer))
 					|| bGeneratedProperty))
 			|| (Binding.BindingKind == TEXT("property_get")
 				&& Binding.DispatchMode != TEXT("cached_property_get")

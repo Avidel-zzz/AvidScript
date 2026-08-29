@@ -2,6 +2,7 @@
 
 #include "AvidScriptBindingDescriptor.h"
 #include "AvidScriptBindingInvocation.h"
+#include "AvidScriptBindingLatent.h"
 #include "AvidScriptComponent.h"
 #include "AvidScriptEditorBindingDescriptorGenerator.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
@@ -18,6 +19,7 @@
 #include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
+#include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/ProjectileMovementComponent.h"
@@ -29,9 +31,80 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "UObject/UnrealType.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace
 {
+
+class FAvidScriptEditorLatentTestHost final
+	: public IAvidScriptBindingLatentHost
+{
+public:
+	explicit FAvidScriptEditorLatentTestHost(UWorld& InWorld)
+		: World(&InWorld)
+		, CallbackTarget(
+			NewObject<UAvidScriptEditorLatentCallbackTestObject>(
+				GetTransientPackage()))
+	{
+	}
+
+	bool BeginLatent(
+		const int32 CallbackId,
+		FAvidScriptBindingLatentReservation& OutReservation) override
+	{
+		OutReservation = {};
+		if (CallbackId < 0 || !CallbackTarget.IsValid() || bReserved)
+		{
+			return false;
+		}
+		bReserved = true;
+		OutReservation.Token = 9001;
+		OutReservation.CallbackTarget = CallbackTarget.Get();
+		OutReservation.ExecutionFunction = GET_FUNCTION_NAME_CHECKED(
+			UAvidScriptEditorLatentCallbackTestObject,
+			OnLatentCompleted);
+		OutReservation.UUID = 1;
+		OutReservation.Linkage = 0;
+		return true;
+	}
+
+	bool CommitLatent(const int64 Token) override
+	{
+		bObservedRegisteredAction = Token == 9001
+			&& World != nullptr
+			&& World->GetLatentActionManager().GetNumActionsForObject(
+				CallbackTarget.Get()) == 1;
+		bCommitted = bAllowCommit && bObservedRegisteredAction;
+		return bCommitted;
+	}
+
+	bool AbortLatent(const int64 Token) override
+	{
+		if (Token != 9001 || World == nullptr || !CallbackTarget.IsValid())
+		{
+			return false;
+		}
+		++AbortCount;
+		World->GetLatentActionManager().RemoveActionsForObject(
+			CallbackTarget.Get());
+		return true;
+	}
+
+	UAvidScriptEditorLatentCallbackTestObject* GetCallbackTarget() const
+	{
+		return CallbackTarget.Get();
+	}
+
+	bool bReserved = false;
+	bool bAllowCommit = true;
+	bool bObservedRegisteredAction = false;
+	bool bCommitted = false;
+	int32 AbortCount = 0;
+
+private:
+	UWorld* World = nullptr;
+	TStrongObjectPtr<UAvidScriptEditorLatentCallbackTestObject> CallbackTarget;
+};
 
 uint64 MakeAvidScriptBindingRuntimeF32Cell(float Value)
 {
@@ -5577,6 +5650,147 @@ bool FAvidScriptEditorPreparedReflectionPropertyRuntimeTest::RunTest(
 		Instrumentation.SemanticProcessEventCount,
 		0ull);
 	Runtime.Unload();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingLatentProcessEventTest,
+	"AvidScript.Editor.BindingRuntime.LatentProcessEvent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingLatentProcessEventTest::RunTest(
+	const FString& Parameters)
+{
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Delay latent descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.latent_process_event"),
+				{
+					{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("Delay") }
+				},
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!FAvidScriptBindingDescriptorParser::Parse(
+			DescriptorJson,
+			Descriptor,
+			ParseCategory,
+			ParseSource)
+		|| !FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			Package,
+			LoadResult)
+		|| Descriptor.Bindings.Num() != 1)
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource
+			+ TEXT(" ") + LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Latent integration world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+
+	FAvidScriptEditorLatentTestHost LatentHost(*World);
+	FAvidScriptBindingInvocationContext InvocationContext;
+	InvocationContext.World = World;
+	InvocationContext.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	InvocationContext.LatentHost = &LatentHost;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	uint64 Arguments[] = {
+		MakeAvidScriptBindingRuntimeF32Cell(0.01f),
+		77
+	};
+	FAvidScriptDynamicHostCall Call;
+	Call.BindingOrdinal = Descriptor.Bindings[0].Ordinal;
+	Call.Arguments = MakeArrayView(Arguments);
+	FAvidScriptDynamicHostCallResult Result;
+	if (!TestTrue(
+			TEXT("Generic latent ProcessEvent reserves and commits"),
+			Package->Dispatch(
+				Call,
+				InvocationContext,
+				Scratch,
+				Result)))
+	{
+		AddError(Result.Details);
+		return false;
+	}
+	TestTrue(TEXT("Latent host observed a committed action"), LatentHost.bCommitted);
+	TestEqual(TEXT("Latent import returns the reserved i64 token"), Result.ReturnValueI64, 9001ll);
+	TestEqual(TEXT("Successful registration does not abort"), LatentHost.AbortCount, 0);
+	TestEqual(
+		TEXT("Delay action is owned by the per-token callback target"),
+		World->GetLatentActionManager().GetNumActionsForObject(
+			LatentHost.GetCallbackTarget()),
+		1);
+
+	++GFrameCounter;
+	World->Tick(ELevelTick::LEVELTICK_All, 0.02f);
+	TestEqual(
+		TEXT("Real latent manager resumes the reserved callback target"),
+		LatentHost.GetCallbackTarget()->CompletionCount,
+		1);
+	TestEqual(
+		TEXT("Real latent manager preserves the reserved linkage"),
+		LatentHost.GetCallbackTarget()->LastLinkage,
+		0);
+
+	FAvidScriptEditorLatentTestHost RejectingHost(*World);
+	RejectingHost.bAllowCommit = false;
+	InvocationContext.LatentHost = &RejectingHost;
+	FAvidScriptDynamicHostCallResult RejectedResult;
+	TestFalse(
+		TEXT("Rejected latent commit fails the host call"),
+		Package->Dispatch(
+			Call,
+			InvocationContext,
+			Scratch,
+			RejectedResult));
+	TestTrue(
+		TEXT("Rejected host observed the action before refusing commit"),
+		RejectingHost.bObservedRegisteredAction);
+	TestEqual(
+		TEXT("Rejected latent commit aborts exactly once"),
+		RejectingHost.AbortCount,
+		1);
+	TestEqual(
+		TEXT("Abort schedules the uncommitted latent action for removal"),
+		World->GetLatentActionManager().GetNumActionsForObject(
+			RejectingHost.GetCallbackTarget()),
+		1);
+	++GFrameCounter;
+	World->Tick(ELevelTick::LEVELTICK_All, 0.02f);
+	TestEqual(
+		TEXT("Next latent-manager pass removes the aborted action"),
+		World->GetLatentActionManager().GetNumActionsForObject(
+			RejectingHost.GetCallbackTarget()),
+		0);
+	TestEqual(
+		TEXT("Aborted latent action never invokes its callback"),
+		RejectingHost.GetCallbackTarget()->CompletionCount,
+		0);
 	return true;
 }
 

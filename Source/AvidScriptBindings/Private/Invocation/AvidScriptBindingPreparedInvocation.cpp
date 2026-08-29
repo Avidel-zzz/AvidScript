@@ -1,5 +1,8 @@
 #include "Invocation/AvidScriptBindingPreparedInvocation.h"
 
+#include "AvidScriptBindingLatent.h"
+#include "Engine/LatentActionManager.h"
+#include "Engine/World.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
@@ -632,6 +635,81 @@ bool InvokePreparedDynamicReflection(
 				Details);
 			return false;
 		}
+	}
+
+	if (Program->bLatent)
+	{
+		if (Program->LatentInfoProperty == nullptr
+			|| Program->CallbackIdArgumentOffset < 0
+			|| !Arguments.IsValidIndex(Program->CallbackIdArgumentOffset)
+			|| Program->ReturnValue.Kind != EValueCodecKind::Void
+			|| !OutputTargets.IsEmpty()
+			|| InvocationContext.LatentHost == nullptr
+			|| !InvocationContext.World.IsValid())
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_latent_context_invalid"),
+				Program->DebugPath,
+				TEXT("The latent invocation has no live continuation host, world, or immutable hidden-parameter plan."));
+			return false;
+		}
+
+		FAvidScriptBindingLatentReservation Reservation;
+		const int32 CallbackId = static_cast<int32>(
+			Arguments[Program->CallbackIdArgumentOffset]);
+		if (!InvocationContext.LatentHost->BeginLatent(
+				CallbackId,
+				Reservation)
+			|| !Reservation.IsValid())
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_latent_reservation_failed"),
+				Program->DebugPath,
+				TEXT("The session could not reserve a continuation token for the latent action."));
+			return false;
+		}
+
+		bool bLatentCommitted = false;
+		ON_SCOPE_EXIT
+		{
+			if (!bLatentCommitted)
+			{
+				InvocationContext.LatentHost->AbortLatent(Reservation.Token);
+			}
+		};
+		FLatentActionInfo LatentInfo;
+		LatentInfo.CallbackTarget = Reservation.CallbackTarget;
+		LatentInfo.ExecutionFunction = Reservation.ExecutionFunction;
+		LatentInfo.UUID = Reservation.UUID;
+		LatentInfo.Linkage = Reservation.Linkage;
+		*Program->LatentInfoProperty
+			->ContainerPtrToValuePtr<FLatentActionInfo>(Frame) = LatentInfo;
+		if (Program->WorldContextProperty != nullptr)
+		{
+			Program->WorldContextProperty->SetObjectPropertyValue_InContainer(
+				Frame,
+				InvocationContext.World.Get());
+		}
+
+		Receiver.ProcessEvent(Program->Function, Frame);
+		if (!InvocationContext.LatentHost->CommitLatent(Reservation.Token))
+		{
+			SetDispatchFailure(
+				OutResult,
+				TEXT("binding_latent_registration_failed"),
+				Program->DebugPath,
+				TEXT("ProcessEvent did not register or synchronously complete the reserved latent action."));
+			return false;
+		}
+
+		bLatentCommitted = true;
+		bOutputCommitted = true;
+		OutResult.bSucceeded = true;
+		OutResult.ReturnValue = 1;
+		OutResult.ReturnValueI64 = Reservation.Token;
+		return true;
 	}
 
 	for (FGuestOutputTarget& Target : OutputTargets)

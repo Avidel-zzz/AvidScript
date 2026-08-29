@@ -65,6 +65,8 @@ struct FAvidScriptBindingFunctionModel
 	FString UeFunction;
 	FString ScriptName;
 	FString DispatchMode;
+	FString LatentInfoParameter;
+	FString WorldContextParameter;
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString GeneratedImportName;

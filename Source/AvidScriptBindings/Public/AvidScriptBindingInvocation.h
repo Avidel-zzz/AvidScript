@@ -18,6 +18,7 @@ class UWorld;
 class IAvidScriptObjectOwnershipDomain;
 class FAvidScriptUtf8ValueHeap;
 class FAvidScriptArrayValueHeap;
+class IAvidScriptBindingLatentHost;
 
 enum class EAvidScriptBindingFastPathKind : uint8
 {
@@ -105,6 +106,7 @@ struct FAvidScriptBindingInvocationContext
 	TWeakObjectPtr<UWorld> World;
 	EAvidScriptActorWritePolicy WritePolicy = EAvidScriptActorWritePolicy::ReadOnly;
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
+	IAvidScriptBindingLatentHost* LatentHost = nullptr;
 	EAvidScriptBindingInvocationPolicy InvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 	// Optional caller-owned counters. The owner must outlive every dispatch using this context.
@@ -284,6 +286,7 @@ public:
 	const FString& GetPackageName() const;
 	const FString& GetPackageHash() const;
 	int32 GetDescriptorSchemaVersion() const;
+	int32 GetDelegateEventCount() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
 	bool TryGetFastPathKind(

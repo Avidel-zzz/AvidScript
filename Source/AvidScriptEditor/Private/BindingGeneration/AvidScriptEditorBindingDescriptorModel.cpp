@@ -272,6 +272,16 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		}
 		Writer->WriteValue(TEXT("script_name"), Binding.ScriptName);
 		Writer->WriteValue(TEXT("dispatch_mode"), Binding.DispatchMode);
+		if (Package.SchemaVersion >= 12
+			&& Binding.DispatchMode == TEXT("latent_process_event"))
+		{
+			Writer->WriteValue(
+				TEXT("latent_info_parameter"),
+				Binding.LatentInfoParameter);
+			Writer->WriteValue(
+				TEXT("world_context_parameter"),
+				Binding.WorldContextParameter);
+		}
 		if (Binding.DispatchMode == TEXT("generated_native_s1"))
 		{
 			Writer->WriteValue(TEXT("generated_shape"), Binding.GeneratedShape);

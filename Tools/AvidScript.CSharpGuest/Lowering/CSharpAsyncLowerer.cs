@@ -36,9 +36,16 @@ internal static class CSharpAsyncLowerer
             .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         string? delayImportId = FindImport(document, "env", "continuation_delay");
         string? objectLoadImportId = FindImport(document, "env", "continuation_load_object");
-        if (delayImportId is null || objectLoadImportId is null)
+        bool needsDelayImport = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
+        bool needsObjectLoadImport = document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
+        if ((needsDelayImport && delayImportId is null)
+            || (needsObjectLoadImport && objectLoadImportId is null))
         {
-            Add(diagnostics, "The async profile requires the continuation delay and object-load imports.");
+            Add(diagnostics, "The async profile is missing a required built-in continuation import.");
             return new CSharpAsyncLoweringResult(
                 Array.Empty<GuestFunction>(),
                 Array.Empty<CSharpAsyncResumeRoute>());
@@ -244,8 +251,8 @@ internal static class CSharpAsyncLowerer
     private static bool EmitProducer(
         CSharpFunctionLoweringContext context,
         SemanticAsyncAwaitSite awaitSite,
-        string delayImportId,
-        string objectLoadImportId,
+        string? delayImportId,
+        string? objectLoadImportId,
         GuestType int32Type,
         GuestType int64Type,
         List<GuestInstruction> instructions,
@@ -257,7 +264,7 @@ internal static class CSharpAsyncLowerer
         switch (awaitSite.ProducerKind)
         {
             case "delay":
-                if (awaitSite.Arguments.Count != 1)
+                if (awaitSite.Arguments.Count != 1 || delayImportId is null)
                 {
                     Add(context.Diagnostics, "DelayAsync await site must contain one delay argument.");
                     return false;
@@ -276,7 +283,8 @@ internal static class CSharpAsyncLowerer
                 targetId = delayImportId;
                 break;
             case "next_tick":
-                if (awaitSite.Arguments.Count != 0
+                if (delayImportId is null
+                    || awaitSite.Arguments.Count != 0
                     || !context.TryGetGuestType("type:float32", out GuestType floatType))
                 {
                     Add(context.Diagnostics, "NextTickAsync await site has an invalid delay ABI.");
@@ -299,7 +307,7 @@ internal static class CSharpAsyncLowerer
                 targetId = delayImportId;
                 break;
             case "object_load":
-                if (awaitSite.Arguments.Count != 1)
+                if (awaitSite.Arguments.Count != 1 || objectLoadImportId is null)
                 {
                     Add(context.Diagnostics, "LoadObjectAsync await site must contain one asset-path argument.");
                     return false;
@@ -318,8 +326,38 @@ internal static class CSharpAsyncLowerer
                 targetId = objectLoadImportId;
                 break;
             default:
-                Add(context.Diagnostics, $"Unknown async producer kind '{awaitSite.ProducerKind}'.");
-                return false;
+				if (!awaitSite.ProducerKind.StartsWith(
+						"binding_latent|",
+						StringComparison.Ordinal))
+				{
+					Add(context.Diagnostics, $"Unknown async producer kind '{awaitSite.ProducerKind}'.");
+					return false;
+				}
+				string[] identity = awaitSite.ProducerKind.Split('|');
+				string? latentImportId = identity.Length == 3
+					? FindImport(context.Document, identity[1], identity[2])
+					: null;
+				if (identity.Length != 3
+					|| latentImportId is null)
+				{
+					Add(context.Diagnostics, $"Latent async producer '{awaitSite.ProducerKind}' has no unique import.");
+					return false;
+				}
+				targetId = latentImportId;
+				foreach (SemanticOperation argument in awaitSite.Arguments)
+				{
+					GuestRegister? value = CSharpOperationLowerer.LowerValue(
+						context,
+						argument,
+						awaitSite.CallbackId,
+						instructions);
+					if (value is null)
+					{
+						return false;
+					}
+					operands.Add(value.Id);
+				}
+				break;
         }
 
         GuestRegister? callback = context.CreateTemporary(int32Type.Id, awaitSite.CallbackId);

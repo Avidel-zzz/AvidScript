@@ -10,6 +10,7 @@
 #include "AvidScriptSceneAttachmentBinding.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
+#include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/EngineVersion.h"
@@ -408,6 +409,84 @@ bool IsAvidScriptRuntimeFunctionAllowed(const UFunction* Function)
 			| FUNC_NetResponse)
 		&& !Function->HasMetaData(TEXT("Latent"))
 		&& !Function->HasMetaData(TEXT("CustomThunk"));
+}
+
+struct FAvidScriptRuntimeLatentContract
+{
+	FStructProperty* LatentInfoProperty = nullptr;
+	FObjectPropertyBase* WorldContextProperty = nullptr;
+};
+
+bool ResolveAvidScriptRuntimeLatentContract(
+	UFunction* Function,
+	const FAvidScriptBindingFunctionModel& Binding,
+	FAvidScriptRuntimeLatentContract& OutContract)
+{
+	OutContract = {};
+	if (Function == nullptr
+		|| !Function->HasAnyFunctionFlags(FUNC_BlueprintCallable | FUNC_BlueprintPure)
+		|| Function->HasAnyFunctionFlags(
+			FUNC_EditorOnly
+			| FUNC_Delegate
+			| FUNC_MulticastDelegate
+			| FUNC_NetRequest
+			| FUNC_NetResponse)
+		|| !Function->HasMetaData(TEXT("Latent"))
+		|| Function->HasMetaData(TEXT("CustomThunk"))
+		|| Function->GetReturnProperty() != nullptr
+		|| Binding.LatentInfoParameter.IsEmpty()
+		|| Function->GetMetaData(TEXT("LatentInfo"))
+			!= Binding.LatentInfoParameter
+		|| Function->GetMetaData(TEXT("WorldContext"))
+			!= Binding.WorldContextParameter)
+	{
+		return false;
+	}
+
+	OutContract.LatentInfoProperty = FindFProperty<FStructProperty>(
+		Function,
+		FName(*Binding.LatentInfoParameter));
+	OutContract.WorldContextProperty = Binding.WorldContextParameter.IsEmpty()
+		? nullptr
+		: FindFProperty<FObjectPropertyBase>(
+			Function,
+			FName(*Binding.WorldContextParameter));
+	if (OutContract.LatentInfoProperty == nullptr
+		|| OutContract.LatentInfoProperty->Struct
+			!= FLatentActionInfo::StaticStruct()
+		|| !OutContract.LatentInfoProperty->HasAnyPropertyFlags(CPF_Parm)
+		|| OutContract.LatentInfoProperty->HasAnyPropertyFlags(CPF_ReturnParm)
+		|| (!Binding.WorldContextParameter.IsEmpty()
+			&& (OutContract.WorldContextProperty == nullptr
+				|| !OutContract.WorldContextProperty->HasAnyPropertyFlags(CPF_Parm)
+				|| OutContract.WorldContextProperty->HasAnyPropertyFlags(CPF_ReturnParm)
+				|| !UWorld::StaticClass()->IsChildOf(
+					OutContract.WorldContextProperty->PropertyClass))))
+	{
+		return false;
+	}
+
+	for (TFieldIterator<FProperty> It(Function); It; ++It)
+	{
+		FProperty* Property = *It;
+		if (!Property->HasAnyPropertyFlags(CPF_Parm)
+			|| Property->HasAnyPropertyFlags(CPF_ReturnParm)
+			|| Property == OutContract.LatentInfoProperty
+			|| Property == OutContract.WorldContextProperty)
+		{
+			continue;
+		}
+		const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
+		if (Property->HasAnyPropertyFlags(CPF_OutParm | CPF_ReferenceParm)
+			|| CastField<FDelegateProperty>(Property) != nullptr
+			|| CastField<FMulticastDelegateProperty>(Property) != nullptr
+			|| (StructProperty != nullptr
+				&& StructProperty->Struct == FLatentActionInfo::StaticStruct()))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 bool IsAvidScriptRuntimePropertyReadable(const FProperty* Property)
@@ -1039,6 +1118,10 @@ FString MakeAvidScriptRuntimeExpectedSignature(const FAvidScriptBindingFunctionM
 			Parameters += FString::Join(Parameter.AbiTypes, TEXT(""));
 		}
 	}
+	if (Binding.DispatchMode == TEXT("latent_process_event"))
+	{
+		return TEXT("(") + Parameters + TEXT("i)I");
+	}
 	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
 	{
 		Parameters += TEXT("i");
@@ -1066,6 +1149,11 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 			+ Parameter.CanonicalType;
 	}
 	Identity += TEXT(")");
+	if (Binding.DispatchMode == TEXT("latent_process_event"))
+	{
+		Identity += TEXT("|latent_info=") + Binding.LatentInfoParameter
+			+ TEXT("|world_context=") + Binding.WorldContextParameter;
+	}
 	return FAvidScriptBindingDescriptorIdentity::MakeFunctionCanonicalIdentity(
 		Identity,
 		Binding.DispatchMode,
@@ -3370,7 +3458,16 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 
 		++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 		UFunction* Function = OwnerClass->FindFunctionByName(FName(*Binding.UeFunction));
-		if (!IsAvidScriptRuntimeFunctionAllowed(Function))
+		const bool bLatentBinding =
+			Binding.DispatchMode == TEXT("latent_process_event");
+		FAvidScriptRuntimeLatentContract LatentContract;
+		const bool bFunctionAllowed = bLatentBinding
+			? ResolveAvidScriptRuntimeLatentContract(
+				Function,
+				Binding,
+				LatentContract)
+			: IsAvidScriptRuntimeFunctionAllowed(Function);
+		if (!bFunctionAllowed)
 		{
 			SetAvidScriptBindingLoadFailure(
 				OutResult,
@@ -3392,6 +3489,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		}
 		const bool bRuntimeReadOnly = Function->HasAnyFunctionFlags(FUNC_Const | FUNC_BlueprintPure);
 		if ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::None && !bRuntimeReadOnly)
+			|| (bLatentBinding
+				&& Binding.ReloadEffect
+					!= EAvidScriptBindingReloadEffect::ContinuationProducer)
+			|| (!bLatentBinding
+				&& Binding.ReloadEffect
+					== EAvidScriptBindingReloadEffect::ContinuationProducer)
 			|| ((Binding.ReloadEffect == EAvidScriptBindingReloadEffect::ActorTransform
 					|| Binding.ReloadEffect == EAvidScriptBindingReloadEffect::SceneComponentTransform)
 				&& bRuntimeReadOnly))
@@ -3411,6 +3514,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			if (Property->HasAnyPropertyFlags(CPF_Parm)
 				&& !Property->HasAnyPropertyFlags(CPF_ReturnParm))
 			{
+				if (bLatentBinding
+					&& (Property == LatentContract.LatentInfoProperty
+						|| Property == LatentContract.WorldContextProperty))
+				{
+					continue;
+				}
 				ReflectedParameters.Add(Property);
 			}
 		}
@@ -3429,6 +3538,9 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.Function = Function;
 		Plan.DebugPath = Function->GetPathName();
 		Plan.bStatic = Binding.bStatic;
+		Plan.bLatent = bLatentBinding;
+		Plan.LatentInfoProperty = LatentContract.LatentInfoProperty;
+		Plan.WorldContextProperty = LatentContract.WorldContextProperty;
 		Plan.ReloadEffect = Binding.ReloadEffect;
 		Plan.bRequiresWriteAccess = Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
 		Plan.FrameSize = Function->GetStructureSize();
@@ -3485,6 +3597,11 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::StructWire
 				|| ValuePlan.Kind == EAvidScriptRuntimeBindingKind::Array;
 			Plan.Parameters.Add(MoveTemp(ValuePlan));
+		}
+		if (bLatentBinding)
+		{
+			Plan.CallbackIdArgumentOffset = ArgumentOffset;
+			++ArgumentOffset;
 		}
 
 		FProperty* ReturnProperty = Function->GetReturnProperty();
@@ -3560,7 +3677,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			GetAvidScriptFastPathValueKind(Plan.ReturnValue.Kind),
 			false
 		};
-		if (UE::AvidScript::BindingPrivate::TryBuildFastPath(
+		if (!bLatentBinding
+			&& UE::AvidScript::BindingPrivate::TryBuildFastPath(
 			FastPathSpec,
 			Plan.FastPath))
 		{
@@ -3771,6 +3889,11 @@ const FString& FAvidScriptBindingPackage::GetPackageHash() const
 int32 FAvidScriptBindingPackage::GetDescriptorSchemaVersion() const
 {
 	return Impl->DescriptorSchemaVersion;
+}
+
+int32 FAvidScriptBindingPackage::GetDelegateEventCount() const
+{
+	return Impl->PreparedDelegateEventCells.Num();
 }
 
 const FAvidScriptVmBindingPackage& FAvidScriptBindingPackage::GetVmPackage() const

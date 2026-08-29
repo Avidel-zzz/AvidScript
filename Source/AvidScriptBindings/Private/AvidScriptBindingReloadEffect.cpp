@@ -12,6 +12,8 @@ const TCHAR* LexToString(const EAvidScriptBindingReloadEffect Effect)
 		return TEXT("scene_component_transform");
 	case EAvidScriptBindingReloadEffect::ReflectedProperty:
 		return TEXT("reflected_property");
+	case EAvidScriptBindingReloadEffect::ContinuationProducer:
+		return TEXT("continuation_producer");
 	case EAvidScriptBindingReloadEffect::Unsupported:
 		return TEXT("unsupported");
 	default:
@@ -41,6 +43,11 @@ bool TryParseAvidScriptBindingReloadEffect(
 	if (Value == TEXT("reflected_property"))
 	{
 		OutEffect = EAvidScriptBindingReloadEffect::ReflectedProperty;
+		return true;
+	}
+	if (Value == TEXT("continuation_producer"))
+	{
+		OutEffect = EAvidScriptBindingReloadEffect::ContinuationProducer;
 		return true;
 	}
 	if (Value == TEXT("unsupported"))

@@ -565,7 +565,9 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 7
 			&& DescriptorSchemaVersion != 8
 			&& DescriptorSchemaVersion != 9
-			&& DescriptorSchemaVersion != 10)
+			&& DescriptorSchemaVersion != 10
+			&& DescriptorSchemaVersion != 11
+			&& DescriptorSchemaVersion != 12)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -612,6 +614,34 @@ bool ValidateBindingPackageManifest(
 			OutResult,
 			TEXT("binding_package_invalid"),
 			TEXT("package.json object_factory_count requires descriptor schema v7 or newer"),
+			TEXT("republish the binding package with matching schema provenance"));
+		return false;
+	}
+	if (DescriptorSchemaVersion >= 11)
+	{
+		int32 DelegateEventCount = INDEX_NONE;
+		if (!TryGetInt32Field(
+				*PackageObject,
+				TEXT("delegate_event_count"),
+				DelegateEventCount)
+			|| DelegateEventCount < 0
+			|| DelegateEventCount
+				!= Manifest.BindingPackage->GetDelegateEventCount())
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_invalid"),
+				TEXT("package.json delegate_event_count does not match descriptor"),
+				TEXT("republish the current binding package"));
+			return false;
+		}
+	}
+	else if (PackageObject->HasField(TEXT("delegate_event_count")))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json delegate_event_count requires descriptor schema v11 or newer"),
 			TEXT("republish the binding package with matching schema provenance"));
 		return false;
 	}

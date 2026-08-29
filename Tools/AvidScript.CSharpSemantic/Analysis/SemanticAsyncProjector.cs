@@ -22,6 +22,9 @@ internal static class SemanticAsyncProjector
         "global::AvidScript.AvidAssets";
     private const string LoadedObjectTypeName =
         "global::AvidScript.AvidLoadedObject";
+    private const string LatentAttributeName =
+        "global::AvidScript.AvidLatentAttribute";
+    private const string BindingLatentProducerPrefix = "binding_latent|";
     private const int MaximumAwaitsPerMethod = 16;
     private const int MaximumAwaitsPerModule = 64;
     private const int MaximumAssetPathUtf8Bytes = 1024;
@@ -363,12 +366,12 @@ internal static class SemanticAsyncProjector
         {
             diagnostics.Add(Error(
                 "ASCS5403",
-                "Controlled await requires a direct DelayAsync, NextTickAsync, or LoadObjectAsync invocation.",
+                "Controlled await requires a direct built-in or generated latent producer invocation.",
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
             return false;
         }
 
-        string? producerKind = GetProducerKind(invocation.TargetMethod);
+        string? producerKind = GetProducerKind(context, invocation.TargetMethod);
         string? payloadKind = producerKind == "object_load"
             ? SemanticContinuationCallback.ObjectPayloadKind
             : producerKind is null
@@ -381,7 +384,7 @@ internal static class SemanticAsyncProjector
         {
             diagnostics.Add(Error(
                 "ASCS5403",
-                "Controlled await requires the exact DelayAsync(float), NextTickAsync(), or LoadObjectAsync(string) producer contract.",
+                "Controlled await requires an exact built-in or generated latent producer contract.",
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, awaitExpression.Span)));
             return false;
         }
@@ -389,7 +392,11 @@ internal static class SemanticAsyncProjector
         IArgumentOperation[] arguments = invocation.Arguments
             .OrderBy(argument => argument.Parameter?.Ordinal ?? int.MaxValue)
             .ToArray();
-        int expectedArgumentCount = producerKind == "next_tick" ? 0 : 1;
+        int expectedArgumentCount = producerKind == "next_tick"
+            ? 0
+            : producerKind.StartsWith(BindingLatentProducerPrefix, StringComparison.Ordinal)
+                ? invocation.TargetMethod.Parameters.Length
+                : 1;
         if (arguments.Length != expectedArgumentCount)
         {
             diagnostics.Add(Error(
@@ -454,12 +461,40 @@ internal static class SemanticAsyncProjector
         return true;
     }
 
-    private static string? GetProducerKind(IMethodSymbol method)
+    private static string? GetProducerKind(
+        SemanticCompilationContext context,
+        IMethodSymbol method)
     {
         string owner = method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         if (!method.IsStatic)
         {
             return null;
+        }
+
+        AttributeData? latentAttribute = method.GetAttributes().SingleOrDefault(attribute =>
+            attribute.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                == LatentAttributeName);
+        if (latentAttribute is not null)
+        {
+            bool generatedReferenceMethod = method.DeclaringSyntaxReferences.Length == 1
+                && method.DeclaringSyntaxReferences[0].SyntaxTree != context.PrimaryUnit.SyntaxTree;
+            string? module = latentAttribute.ConstructorArguments.Length == 2
+                ? latentAttribute.ConstructorArguments[0].Value as string
+                : null;
+            string? importName = latentAttribute.ConstructorArguments.Length == 2
+                ? latentAttribute.ConstructorArguments[1].Value as string
+                : null;
+            bool valid = generatedReferenceMethod
+                && method.Arity == 0
+                && !method.ContainingType.IsGenericType
+                && method.Parameters.All(parameter => parameter.RefKind == RefKind.None)
+                && !string.IsNullOrWhiteSpace(module)
+                && !string.IsNullOrWhiteSpace(importName)
+                && !module.Contains("|", StringComparison.Ordinal)
+                && !importName.Contains("|", StringComparison.Ordinal);
+            return valid
+                ? $"{BindingLatentProducerPrefix}{module}|{importName}"
+                : null;
         }
 
         if (owner == ContinuationsTypeName

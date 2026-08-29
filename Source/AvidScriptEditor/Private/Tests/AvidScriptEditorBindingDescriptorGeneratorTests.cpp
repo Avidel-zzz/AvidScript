@@ -717,6 +717,176 @@ bool FAvidScriptEditorBindingDescriptorGeneratedNativePropertyTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorLatentV12Test,
+	"AvidScript.Editor.BindingDescriptor.LatentV12",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
+	const FString& Parameters)
+{
+	const TArray<FAvidScriptReflectedFunctionSelection> Selections = {
+		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("Delay") },
+		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("DelayUntilNextFrame") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Generic reflected latent descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.latent_v12"),
+				Selections,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ") + GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Latent descriptor parses through the shared v12 contract"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	TSharedPtr<FJsonObject> TamperedRoot;
+	TestTrue(
+		TEXT("Latent descriptor JSON can be cloned for tamper validation"),
+		ParseDescriptor(DescriptorJson, TamperedRoot));
+	if (TamperedRoot.IsValid())
+	{
+		TamperedRoot->GetArrayField(TEXT("bindings"))[0]
+			->AsObject()
+			->SetStringField(
+				TEXT("latent_info_parameter"),
+				TEXT("WrongLatentInfo"));
+	}
+	FString TamperedDescriptor;
+	TestTrue(
+		TEXT("Tampered latent descriptor JSON serializes"),
+		SerializeDescriptor(TamperedRoot, TamperedDescriptor));
+	FAvidScriptBindingPackageModel TamperedPackage;
+	FString TamperedCategory;
+	FString TamperedSource;
+	TestTrue(
+		TEXT("Structural parser accepts the well-formed tampered descriptor"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			TamperedDescriptor,
+			TamperedPackage,
+			TamperedCategory,
+			TamperedSource));
+	TSharedPtr<const FAvidScriptBindingPackage> TamperedRuntimePackage;
+	FAvidScriptBindingPackageLoadResult TamperedLoadResult;
+	TestFalse(
+		TEXT("Runtime rejects hidden latent identity drift against active reflection"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			TamperedDescriptor,
+			TamperedRuntimePackage,
+			TamperedLoadResult));
+	TestEqual(TEXT("Latent package alone raises schema to v12"), Package.SchemaVersion, 12);
+	TestEqual(TEXT("Both reflected latent producers are published"), Package.Bindings.Num(), 2);
+	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+	{
+		TestEqual(
+			TEXT("Latent dispatch remains generic ProcessEvent"),
+			Binding.DispatchMode,
+			FString(TEXT("latent_process_event")));
+		TestEqual(
+			TEXT("Latent info metadata is frozen"),
+			Binding.LatentInfoParameter,
+			FString(TEXT("LatentInfo")));
+		TestEqual(
+			TEXT("World context metadata is frozen"),
+			Binding.WorldContextParameter,
+			FString(TEXT("WorldContextObject")));
+		TestTrue(
+			TEXT("C# latent surface uses the Async suffix"),
+			Binding.ScriptName.EndsWith(TEXT("Async")));
+		TestEqual(
+			TEXT("Latent producer has continuation reload semantics"),
+			Binding.ReloadEffect,
+			EAvidScriptBindingReloadEffect::ContinuationProducer);
+		TestEqual(
+			TEXT("Completion-only latent has no reflected return value"),
+			Binding.ReturnValue.CanonicalType,
+			FString(TEXT("void")));
+		TestFalse(
+			TEXT("Hidden latent info is absent from public parameters"),
+			Binding.Parameters.ContainsByPredicate(
+				[](const FAvidScriptBindingValueModel& Parameter)
+				{
+					return Parameter.Name == TEXT("LatentInfo")
+						|| Parameter.Name == TEXT("WorldContextObject");
+				}));
+	}
+	const FAvidScriptBindingFunctionModel* Delay = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("Delay");
+		});
+	const FAvidScriptBindingFunctionModel* NextFrame = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("DelayUntilNextFrame");
+		});
+	if (TestNotNull(TEXT("Delay binding resolves"), Delay))
+	{
+		TestEqual(TEXT("Delay ABI appends callback and returns token"), Delay->HostImport.Signature, FString(TEXT("(fi)I")));
+	}
+	if (TestNotNull(TEXT("Next-frame binding resolves"), NextFrame))
+	{
+		TestEqual(TEXT("Next-frame ABI is callback to token"), NextFrame->HostImport.Signature, FString(TEXT("(i)I")));
+	}
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	const bool bEmitted = FAvidScriptEditorCSharpBindingEmitter::Emit(
+		DescriptorJson,
+		ReferenceSource,
+		ManifestJson,
+		EmitResult);
+	if (!TestTrue(
+			TEXT("Latent descriptor emits the generated C# facade"),
+			bEmitted))
+	{
+		AddError(EmitResult.ErrorCategory + TEXT(": ")
+			+ EmitResult.ErrorSource + TEXT(" | ")
+			+ EmitResult.ErrorMessage);
+		return false;
+	}
+	else
+	{
+		TestTrue(
+			TEXT("Facade publishes a generated latent marker"),
+			ReferenceSource.Contains(TEXT("[AvidLatent(\"avidscript\", \"avid_ue_")));
+		TestTrue(
+			TEXT("Delay is exposed as an awaitable method"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable DelayAsync(float Duration) => default;")));
+		TestTrue(
+			TEXT("Native latent import returns an i64 token"),
+			ReferenceSource.Contains(TEXT("internal static extern long Invoke")));
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Runtime independently validates the active latent reflection snapshot"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			RuntimePackage,
+			LoadResult));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorV7CanonicalSerializerTest,
 	"AvidScript.Editor.BindingDescriptor.V7CanonicalSerializer",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -1279,11 +1449,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v12 above the current maximum identifies its header field"),
+		TEXT("Schema v13 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 12);
+			Root->SetNumberField(TEXT("schema_version"), 13);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),

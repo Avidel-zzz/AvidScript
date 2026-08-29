@@ -77,18 +77,32 @@ bool EvaluateFunction(
 	FString& OutCategory,
 	FString& OutSource)
 {
-	if (!FAvidScriptEditorReflectedFunctionPolicy::Evaluate(Function, OutCategory, OutSource))
+	FAvidScriptEditorLatentFunctionContract LatentContract;
+	if (!FAvidScriptEditorReflectedFunctionPolicy::Evaluate(
+		Function,
+		OutCategory,
+		OutSource,
+		&LatentContract))
 	{
 		return false;
 	}
 
 	FAvidScriptProjectedFunction Projection;
 	FString ProjectionErrorSource;
-	if (!FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
-		Function,
-		Function->HasAnyFunctionFlags(FUNC_Static),
-		Projection,
-		ProjectionErrorSource))
+	const bool bProjected = LatentContract.bLatent
+		? FAvidScriptEditorReflectedTypePolicy::ProjectLatentFunction(
+			Function,
+			Function->HasAnyFunctionFlags(FUNC_Static),
+			LatentContract.LatentInfoParameter,
+			LatentContract.WorldContextParameter,
+			Projection,
+			ProjectionErrorSource)
+		: FAvidScriptEditorReflectedTypePolicy::ProjectFunction(
+			Function,
+			Function->HasAnyFunctionFlags(FUNC_Static),
+			Projection,
+			ProjectionErrorSource);
+	if (!bProjected)
 	{
 		OutCategory = TEXT("unsupported_property");
 		OutSource = ProjectionErrorSource;

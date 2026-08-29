@@ -338,7 +338,9 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 7 -and
         $DescriptorSchemaVersion -ne 8 -and
         $DescriptorSchemaVersion -ne 9 -and
-        $DescriptorSchemaVersion -ne 10) -or
+        $DescriptorSchemaVersion -ne 10 -and
+        $DescriptorSchemaVersion -ne 11 -and
+        $DescriptorSchemaVersion -ne 12) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
@@ -362,6 +364,21 @@ function Resolve-AvidScriptCSharpBindingPackage {
     elseif ($null -ne $Manifest.PSObject.Properties['object_factory_count']) {
         throw "Binding package object_factory_count requires descriptor schema v7 or newer."
     }
+	if ($DescriptorSchemaVersion -ge 11) {
+		$ManifestDelegateEventCount = 0
+		$DescriptorDelegateEventProperty =
+			$Descriptor.PSObject.Properties['delegate_events']
+		if ($null -eq $DescriptorDelegateEventProperty -or
+			-not (Try-GetAvidScriptBindingJsonInt32 `
+				-Value $Manifest.delegate_event_count `
+				-ParsedValue ([ref]$ManifestDelegateEventCount)) -or
+			$ManifestDelegateEventCount -ne @($DescriptorDelegateEventProperty.Value).Count) {
+			throw "Binding package delegate_event_count does not match descriptor delegate_events."
+		}
+	}
+	elseif ($null -ne $Manifest.PSObject.Properties['delegate_event_count']) {
+		throw "Binding package delegate_event_count requires descriptor schema v11 or newer."
+	}
 
     $HasActiveObjectTypeOrdinals = $false
     $ActiveObjectTypeOrdinals = @()

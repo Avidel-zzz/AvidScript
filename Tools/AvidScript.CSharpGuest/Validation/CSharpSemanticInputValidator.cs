@@ -506,11 +506,12 @@ internal static class CSharpSemanticInputValidator
                 if (segment.AwaitSite is { } awaitSite)
                 {
                     if (awaitSite.CallbackId != expectedCallbackId++
-                        || !ValidateAsyncAwaitSite(
-                            awaitSite,
-                            document.Source.Length,
-                            method.MethodSymbolId,
-                            symbolsById))
+						|| !ValidateAsyncAwaitSite(
+							awaitSite,
+							document.Source.Length,
+							method.MethodSymbolId,
+							symbolsById,
+							document.Callables))
                     {
                         return false;
                     }
@@ -548,7 +549,8 @@ internal static class CSharpSemanticInputValidator
         SemanticAsyncAwaitSite awaitSite,
         int sourceLength,
         string methodSymbolId,
-        IReadOnlyDictionary<string, SemanticSymbol> symbolsById)
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
+        IReadOnlyList<SemanticCallable> callables)
     {
         if (awaitSite is null
             || awaitSite.CallbackId < CompilerCallbackIdStart
@@ -577,6 +579,36 @@ internal static class CSharpSemanticInputValidator
                 && awaitSite.ResultSymbolId is null
                 && awaitSite.ResultTypeId is null;
         }
+
+		if (awaitSite.ProducerKind.StartsWith(
+			"binding_latent|",
+			StringComparison.Ordinal))
+		{
+			string[] identity = awaitSite.ProducerKind.Split('|');
+			if (identity.Length != 3
+				|| string.IsNullOrWhiteSpace(identity[1])
+				|| string.IsNullOrWhiteSpace(identity[2])
+				|| awaitSite.PayloadKind
+					!= SemanticContinuationCallback.NonePayloadKind
+				|| awaitSite.ResultSymbolId is not null
+				|| awaitSite.ResultTypeId is not null)
+			{
+				return false;
+			}
+
+			SemanticCallable[] imports = callables.Where(callable =>
+				callable.Import is { } import
+				&& import.Module == identity[1]
+				&& import.Name == identity[2]
+				&& callable.ReturnTypeId == "type:int64"
+				&& callable.Parameters.Count == awaitSite.Arguments.Count + 1
+				&& callable.Parameters[^1].TypeId == "type:int32"
+				&& callable.Parameters[^1].RefKind == "none").ToArray();
+			return imports.Length == 1
+				&& imports[0].Parameters.Take(awaitSite.Arguments.Count)
+					.Select(parameter => parameter.TypeId)
+					.SequenceEqual(awaitSite.Arguments.Select(argument => argument.TypeId));
+		}
 
         if (awaitSite.ProducerKind != "object_load"
             || awaitSite.PayloadKind != SemanticContinuationCallback.ObjectPayloadKind

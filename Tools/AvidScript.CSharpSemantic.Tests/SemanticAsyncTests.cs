@@ -14,7 +14,44 @@ internal static class SemanticAsyncTests
         LocalsAndObjectResultsCannotCrossTheirBoundaries();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
-        return 4;
+        GeneratedLatentProducerProjectsImportIdentity();
+        return 5;
+    }
+
+    private static void GeneratedLatentProducerProjectsImportIdentity()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    await UKismetSystemLibrary.DelayAsync(0.125f);
+                }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentAsync.cs");
+        SemanticAsyncAwaitSite site = document.AsyncMethods.Single()
+            .Segments.Single(segment => segment.AwaitSite is not null)
+            .AwaitSite!;
+        SemanticCallable import = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_test" });
+
+        Assert(document.Succeeded
+            && site.CallbackId == CompilerCallbackIdStart
+            && site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_test"
+            && site.PayloadKind == "none"
+            && site.Arguments.Count == 1
+            && site.Arguments[0].TypeId == "type:float32"
+            && import.ReturnTypeId == "type:int64"
+            && import.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:float32", "type:int32" }),
+            "generated latent markers should project a generic import identity and compiler callback ABI");
     }
 
     private static void SequentialAwaitsProjectStableSegments()
@@ -312,6 +349,7 @@ internal static class SemanticAsyncTests
     private const string AsyncFacade = """
         using System;
         using System.Runtime.CompilerServices;
+        using System.Runtime.InteropServices;
 
         namespace AvidScript;
 
@@ -325,6 +363,12 @@ internal static class SemanticAsyncTests
         public sealed class AvidContinuationAttribute : Attribute
         {
             public AvidContinuationAttribute(int callbackId) { }
+        }
+
+        [AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+        public sealed class AvidLatentAttribute : Attribute
+        {
+            public AvidLatentAttribute(string module, string importName) { }
         }
 
         public readonly struct AvidContinuation { }
@@ -369,6 +413,18 @@ internal static class SemanticAsyncTests
         {
             public static AvidContinuation LoadObjectAsync(string assetPath, int callbackId) => default;
             public static AvidObjectAwaitable LoadObjectAsync(string assetPath) => default;
+        }
+
+        public static class UKismetSystemLibrary
+        {
+            [AvidLatent("avidscript", "avid_ue_latent_test")]
+            public static AvidVoidAwaitable DelayAsync(float Duration) => default;
+        }
+
+        internal static class AvidScriptNative
+        {
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_test")]
+            internal static extern long InvokeLatent(float duration, int callbackId);
         }
         """;
 

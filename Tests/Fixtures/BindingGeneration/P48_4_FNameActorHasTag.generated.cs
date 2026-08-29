@@ -288,6 +288,19 @@ public static class UE
     private static extern long OwnerGetHandle();
 }
 
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class AvidLatentAttribute : Attribute
+{
+    public AvidLatentAttribute(string module, string importName)
+    {
+        Module = module;
+        ImportName = importName;
+    }
+
+    public string Module { get; }
+    public string ImportName { get; }
+}
+
 public readonly struct AvidDelayAwaitable
 {
     public AvidDelayAwaiter GetAwaiter() => default;

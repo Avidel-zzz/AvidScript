@@ -1056,11 +1056,13 @@ $EditorBindingDescriptorIdentityHeader = Read-RequiredFile 'Source/AvidScriptEdi
 $EditorBindingDescriptorIdentitySource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.cpp'
 $BindingDescriptorHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingDescriptor.h'
 $BindingDescriptorSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingDescriptor.cpp'
+$BindingLatentHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingLatent.h'
 $ObjectFactoryPolicyHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectFactoryPolicy.h'
 $ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectLifecycleBinding.h'
 $ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
 $BindingInvocationHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingInvocation.h'
 $BindingInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingInvocation.cpp'
+$BindingPreparedInvocationSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Invocation/AvidScriptBindingPreparedInvocation.cpp'
 $ObjectTypeBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectTypeBinding.cpp'
 $ObjectRegistryHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectRegistry.h'
 $ObjectRegistrySource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectRegistry.cpp'
@@ -1101,6 +1103,43 @@ if (-not $PropertySelectionResolverHeader.Contains('FAvidScriptEditorBindingProp
 if (-not $ReflectedFunctionPolicySource.Contains('FAvidScriptEditorReflectedFunctionPolicy::Evaluate') -or
     $BindingDescriptorGeneratorSource -match 'bool\s+IsFunctionAllowed\s*\(') {
     Add-Violation 'reflected function eligibility must remain in the shared function policy'
+}
+foreach ($RequiredLatentBindingContract in @(
+    'FAvidScriptEditorLatentFunctionContract',
+    'FLatentActionInfo::StaticStruct()',
+    'latent_completion_shape_unsupported',
+    'ProjectLatentFunction',
+    'LatentInfoParameter',
+    'WorldContextParameter',
+    'LatentGeneratorVersion',
+    'TEXT("latent_process_event")',
+    'EAvidScriptBindingReloadEffect::ContinuationProducer',
+    'Package.SchemaVersion = 12'
+)) {
+    if (-not $ReflectedFunctionPolicySource.Contains($RequiredLatentBindingContract) -and
+        -not $BindingSelectionResolverSource.Contains($RequiredLatentBindingContract) -and
+        -not $ReflectedTypePolicyHeader.Contains($RequiredLatentBindingContract) -and
+        -not $ReflectedTypePolicySource.Contains($RequiredLatentBindingContract) -and
+        -not $BindingDescriptorHeader.Contains($RequiredLatentBindingContract) -and
+        -not $BindingDescriptorGeneratorSource.Contains($RequiredLatentBindingContract)) {
+        Add-Violation "schema v12 reflected latent generation is missing $RequiredLatentBindingContract"
+    }
+}
+foreach ($RequiredLatentRuntimeContract in @(
+    'IAvidScriptBindingLatentHost',
+    'FAvidScriptBindingLatentReservation',
+    'ResolveAvidScriptRuntimeLatentContract',
+    'CallbackIdArgumentOffset',
+    'BeginLatent(',
+    'CommitLatent(',
+    'AbortLatent(',
+    'ReturnValueI64 = Reservation.Token'
+)) {
+    if (-not $BindingLatentHeader.Contains($RequiredLatentRuntimeContract) -and
+        -not $BindingInvocationSource.Contains($RequiredLatentRuntimeContract) -and
+        -not $BindingPreparedInvocationSource.Contains($RequiredLatentRuntimeContract)) {
+        Add-Violation "generic latent invocation transaction is missing $RequiredLatentRuntimeContract"
+    }
 }
 if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable') -or
     -not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable') -or
@@ -1192,6 +1231,8 @@ $CSharpOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/
 $CSharpCallOperationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpCallOperationLowerer.cs'
 $BindingRuntimeIntegrationTestsSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorBindingRuntimeIntegrationTests.cpp'
 $BidirectionalPropertiesSampleSource = Read-RequiredFile 'Samples/CSharp/BidirectionalProperties/BidirectionalProperties.cs'
+$LatentGameplaySampleSource = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplayScript.cs'
+$LatentGameplayProfile = Read-RequiredFile 'Samples/CSharp/LatentGameplay/LatentGameplay.csharp-profile.json'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
 $CSharpLiveReloadServiceSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpLiveReloadService.cpp'
@@ -1620,10 +1661,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..10) {
+foreach ($RequiredDescriptorSchemaVersion in 2..12) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v10 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v12 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1669,8 +1710,21 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 7') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 8') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 9') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 10')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v10 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 10') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 11') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 12')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v12 typed object packages'
+}
+foreach ($RequiredDelegateEventManifestContract in @(
+    'delegate_event_count',
+    'GetDelegateEventCount()',
+    'DescriptorSchemaVersion >= 11'
+)) {
+    if (-not $CSharpBindingPackageSource.Contains($RequiredDelegateEventManifestContract) -and
+        -not $RuntimeReloadSource.Contains($RequiredDelegateEventManifestContract) -and
+        -not $BindingInvocationHeader.Contains($RequiredDelegateEventManifestContract)) {
+        Add-Violation "schema v11-v12 manifest provenance is missing $RequiredDelegateEventManifestContract"
+    }
 }
 foreach ($RequiredRuntimeManifestImportContract in @(
     'avidscript.owner_get_handle.v1',
@@ -2835,6 +2889,8 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'MaximumAwaitsPerMethod = 16',
     'MaximumAwaitsPerModule = 64',
     'CompilerCallbackIdStart',
+    'AvidLatentAttribute',
+    'binding_latent|',
     'DelayAsync',
     'NextTickAsync',
     'LoadObjectAsync',
@@ -2897,6 +2953,7 @@ foreach ($RequiredAsyncContinuationFacadeContract in @(
     }
 }
 foreach ($RequiredControlledAsyncFacadeContract in @(
+    'public sealed class AvidLatentAttribute',
     'public readonly struct AvidDelayAwaitable',
     'public readonly struct AvidDelayAwaiter : INotifyCompletion',
     'DelayAsync(float delaySeconds)',
@@ -2907,6 +2964,23 @@ foreach ($RequiredControlledAsyncFacadeContract in @(
 )) {
     if (-not $CSharpBindingRendererSource.Contains($RequiredControlledAsyncFacadeContract)) {
         Add-Violation "generated C# controlled async facade is missing $RequiredControlledAsyncFacadeContract"
+    }
+}
+foreach ($RequiredLatentGameplaySampleContract in @(
+    'UKismetSystemLibrary.DelayAsync(0.25f)',
+    'SetActorScale3D(new FVector(1.25f, 1.25f, 1.25f))'
+)) {
+    if (-not $LatentGameplaySampleSource.Contains($RequiredLatentGameplaySampleContract)) {
+        Add-Violation "LatentGameplay sample is missing generated latent await contract $RequiredLatentGameplaySampleContract"
+    }
+}
+foreach ($RequiredLatentGameplayProfileContract in @(
+    '"class_path": "/Script/Engine.KismetSystemLibrary"',
+    '"Delay"',
+    '"SetActorScale3D"'
+)) {
+    if (-not $LatentGameplayProfile.Contains($RequiredLatentGameplayProfileContract)) {
+        Add-Violation "LatentGameplay profile is missing reflected binding authorization $RequiredLatentGameplayProfileContract"
     }
 }
 foreach ($RequiredAsyncContinuationSemanticContract in @(
@@ -2940,6 +3014,8 @@ foreach ($RequiredControlledAsyncGuestContract in @(
 }
 foreach ($RequiredControlledAsyncLoweringContract in @(
     'CSharpGuestIds.AsyncResumeFunction',
+    'binding_latent|',
+    'FindImport(context.Document',
     'continuation_delay',
     'continuation_load_object',
     'not_equals',

@@ -119,6 +119,7 @@ struct FAvidScriptWasmHostContext
 	IAvidScriptBindingHostEffectJournal* HostEffectJournal = nullptr;
 	IAvidScriptEventSubscriptionHost* EventSubscriptions = nullptr;
 	IAvidScriptContinuationHost* Continuations = nullptr;
+	IAvidScriptBindingLatentHost* LatentHost = nullptr;
 	EAvidScriptBindingInvocationPolicy BindingInvocationPolicy =
 		EAvidScriptBindingInvocationPolicy::SemanticProcessEvent;
 	FAvidScriptBindingInvocationInstrumentation* BindingInvocationInstrumentation = nullptr;

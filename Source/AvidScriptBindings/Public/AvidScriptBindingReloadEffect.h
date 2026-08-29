@@ -12,6 +12,7 @@ enum class EAvidScriptBindingReloadEffect : uint8
 	ActorTransform,
 	SceneComponentTransform,
 	ReflectedProperty,
+	ContinuationProducer,
 	Unsupported
 };
 

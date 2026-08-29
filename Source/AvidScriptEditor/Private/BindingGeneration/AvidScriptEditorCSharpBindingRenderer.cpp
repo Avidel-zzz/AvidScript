@@ -422,6 +422,10 @@ FString MakeExpectedAbiSignature(const FAvidScriptBindingFunctionModel& Binding)
 			Parameters += FString::Join(Parameter.AbiTypes, TEXT(""));
 		}
 	}
+	if (Binding.DispatchMode == TEXT("latent_process_event"))
+	{
+		return TEXT("(") + Parameters + TEXT("i)I");
+	}
 	if (Binding.ReturnValue.CanonicalType != TEXT("void"))
 	{
 		Parameters += TEXT("i");
@@ -456,6 +460,18 @@ bool RenderMethod(
 	const bool bGeneratedVectorValue =
 		Binding.DispatchMode == TEXT("generated_native_s1")
 		&& Binding.GeneratedShape == TEXT("vector_value");
+	const bool bLatent =
+		Binding.DispatchMode == TEXT("latent_process_event");
+	if (bLatent
+		&& (!Binding.bStatic
+			|| Binding.ReturnValue.CanonicalType != TEXT("void")
+			|| Binding.ReloadEffect
+				!= EAvidScriptBindingReloadEffect::ContinuationProducer))
+	{
+		OutErrorCategory = TEXT("latent_csharp_shape_unsupported");
+		OutErrorSource = Binding.CanonicalIdentity;
+		return false;
+	}
 
 	TArray<FString> PublicParameters;
 	TArray<FString> NativeParameters;
@@ -484,6 +500,30 @@ bool RenderMethod(
 			return false;
 		}
 		const FString PublicName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(Parameter.Name);
+		if (bLatent)
+		{
+			FString StorageType;
+			if (!ResolveStorageType(
+					Parameter,
+					TypesByCanonical,
+					TypesById,
+					StorageType,
+					OutErrorSource)
+				|| Parameter.Direction != TEXT("value")
+				|| Parameter.AbiTypes.Num() != 1
+				|| PublicType != StorageType
+				|| Parameter.Kind == TEXT("enum")
+				|| Parameter.Kind == TEXT("object_handle")
+				|| Parameter.Kind == TEXT("struct")
+				|| Parameter.Kind == TEXT("struct_wire")
+				|| Parameter.Kind == TEXT("array")
+				|| Parameter.CanonicalType == TEXT("scalar:bool"))
+			{
+				OutErrorCategory = TEXT("latent_csharp_shape_unsupported");
+				OutErrorSource = Binding.CanonicalIdentity + TEXT(":") + Parameter.Name;
+				return false;
+			}
+		}
 		FString Modifier;
 		if (Parameter.Direction == TEXT("out")) { Modifier = TEXT("out "); }
 		else if (Parameter.Direction == TEXT("ref")) { Modifier = TEXT("ref "); }
@@ -600,6 +640,35 @@ bool RenderMethod(
 		NativeParameters.Insert(TEXT("int selfSlot"), 0);
 		NativeArguments.Insert(TEXT("this.Generation"), 0);
 		NativeArguments.Insert(TEXT("this.Slot"), 0);
+	}
+	if (bLatent)
+	{
+		NativeParameters.Add(TEXT("int callbackId"));
+		const FString MethodName =
+			FAvidScriptEditorCSharpSyntax::MakeIdentifier(Binding.ScriptName);
+		OutMethod.MethodLines.Append({
+			FString::Printf(
+				TEXT("    [AvidLatent(\"%s\", \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name)),
+			FString::Printf(
+				TEXT("    public static AvidDelayAwaitable %s(%s) => default;"),
+				*MethodName,
+				*FString::Join(PublicParameters, TEXT(", ")))
+		});
+		OutMethod.NativeLines.Append({
+			FString::Printf(
+				TEXT("    [DllImport(\"%s\", EntryPoint = \"%s\")]"),
+				*EscapeCSharpString(Binding.HostImport.Module),
+				*EscapeCSharpString(Binding.HostImport.Name)),
+			FString::Printf(
+				TEXT("    internal static extern long %s(%s);"),
+				*MakeNativeMethodName(Binding.Ordinal),
+				*FString::Join(NativeParameters, TEXT(", ")))
+		});
+		OutMethod.SignatureKey = MethodName + TEXT("(")
+			+ FString::Join(SignatureParameterTypes, TEXT(",")) + TEXT(")");
+		return true;
 	}
 
 	if (Binding.ReturnValue.CanonicalType != TEXT("void")
@@ -1368,6 +1437,19 @@ bool HasAvidScriptSceneComponentFactories(
 void AppendAsyncAwaitableReferenceSurface(TArray<FString>& Lines)
 {
 	Lines.Append({
+		TEXT("[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]"),
+		TEXT("public sealed class AvidLatentAttribute : Attribute"),
+		TEXT("{"),
+		TEXT("    public AvidLatentAttribute(string module, string importName)"),
+		TEXT("    {"),
+		TEXT("        Module = module;"),
+		TEXT("        ImportName = importName;"),
+		TEXT("    }"),
+		TEXT(""),
+		TEXT("    public string Module { get; }"),
+		TEXT("    public string ImportName { get; }"),
+		TEXT("}"),
+		TEXT(""),
 		TEXT("public readonly struct AvidDelayAwaitable"),
 		TEXT("{"),
 		TEXT("    public AvidDelayAwaiter GetAwaiter() => default;"),

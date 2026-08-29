@@ -424,9 +424,26 @@ public static class CSharpGuestLowerer
         SemanticDocument document,
         SemanticCallable callable)
     {
-        return document.AsyncMethods.Count != 0
-            && callable.Import is { Module: "env" } import
-            && import.Name is "continuation_delay" or "continuation_load_object";
+		if (document.AsyncMethods.Count == 0 || callable.Import is not { } import)
+		{
+			return false;
+		}
+		if (import.Module == "env" && import.Name == "continuation_delay")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.ProducerKind is "delay" or "next_tick");
+		}
+		if (import.Module == "env" && import.Name == "continuation_load_object")
+		{
+			return document.AsyncMethods
+				.SelectMany(method => method.Segments)
+				.Any(segment => segment.AwaitSite?.ProducerKind == "object_load");
+		}
+		string producerIdentity = $"binding_latent|{import.Module}|{import.Name}";
+		return document.AsyncMethods
+			.SelectMany(method => method.Segments)
+			.Any(segment => segment.AwaitSite?.ProducerKind == producerIdentity);
     }
 
     private static bool IsAsyncFacadeIntrinsic(
@@ -438,13 +455,55 @@ public static class CSharpGuestLowerer
             return false;
         }
 
-        return callable.ContainingTypeId is
-                "type:global::AvidScript.AvidContinuations" or
-                "type:global::AvidScript.AvidAssets"
-            && (callable.MethodSymbolId.Contains(".DelayAsync(", StringComparison.Ordinal)
-                || callable.MethodSymbolId.Contains(".NextTickAsync(", StringComparison.Ordinal)
-                || callable.MethodSymbolId.Contains(".LoadObjectAsync(", StringComparison.Ordinal)
-                    && callable.Parameters.Count == 1);
+        bool builtInContinuationFacade = callable.ContainingTypeId
+                == "type:global::AvidScript.AvidContinuations"
+            && ((callable.MethodSymbolId.Contains(".DelayAsync(", StringComparison.Ordinal)
+                    && callable.Parameters.Count == 1)
+                || (callable.MethodSymbolId.Contains(".NextTickAsync(", StringComparison.Ordinal)
+                    && callable.Parameters.Count == 0));
+        bool builtInObjectFacade = callable.ContainingTypeId
+                == "type:global::AvidScript.AvidAssets"
+            && callable.MethodSymbolId.Contains(".LoadObjectAsync(", StringComparison.Ordinal)
+            && callable.Parameters.Count == 1;
+        bool generatedLatentFacade = callable.IsStatic
+            && callable.Import is null
+            && callable.Export is null
+            && callable.ReturnTypeId == "type:global::AvidScript.AvidDelayAwaitable"
+            && callable.MethodSymbolId.Contains("Async(", StringComparison.Ordinal)
+            && HasMatchingGeneratedLatentProducer(document, callable);
+        return builtInContinuationFacade || builtInObjectFacade || generatedLatentFacade;
+    }
+
+    private static bool HasMatchingGeneratedLatentProducer(
+        SemanticDocument document,
+        SemanticCallable facade)
+    {
+        foreach (SemanticAsyncAwaitSite awaitSite in document.AsyncMethods
+            .SelectMany(method => method.Segments)
+            .Where(segment => segment.AwaitSite is not null)
+            .Select(segment => segment.AwaitSite!))
+        {
+            if (!awaitSite.ProducerKind.StartsWith("binding_latent|", StringComparison.Ordinal)
+                || !facade.Parameters.Select(parameter => parameter.TypeId)
+                    .SequenceEqual(awaitSite.Arguments.Select(argument => argument.TypeId)))
+            {
+                continue;
+            }
+
+            string[] identity = awaitSite.ProducerKind.Split('|');
+            if (identity.Length == 3
+                && document.Callables.Any(candidate =>
+                    candidate.Import is { } import
+                    && import.Module == identity[1]
+                    && import.Name == identity[2]
+                    && candidate.ReturnTypeId == "type:int64"
+                    && candidate.Parameters.Count == facade.Parameters.Count + 1
+                    && candidate.Parameters[^1].TypeId == "type:int32"))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static GuestExport[] LowerExports(
