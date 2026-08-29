@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
@@ -10,7 +11,8 @@ namespace AvidScript.CSharpSemantic;
 
 internal sealed record SemanticAsyncControlFlowProjection(
     IReadOnlyList<SemanticAsyncSegment> Segments,
-    int EntrySegmentOrdinal);
+    int EntrySegmentOrdinal,
+    IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals);
 
 internal static class SemanticAsyncControlFlowProjector
 {
@@ -18,6 +20,7 @@ internal static class SemanticAsyncControlFlowProjector
         SemanticCompilationContext context,
         SemanticModel semanticModel,
         BlockSyntax body,
+        string methodSymbolId,
         SemanticTypeRegistry typeRegistry,
         ICollection<SemanticDiagnostic> diagnostics,
         ref int nextCallbackId,
@@ -26,6 +29,7 @@ internal static class SemanticAsyncControlFlowProjector
         Builder builder = new(
             context,
             semanticModel,
+            methodSymbolId,
             typeRegistry,
             diagnostics);
         if (!builder.TryBuild(body, ref nextCallbackId, out projected))
@@ -40,20 +44,24 @@ internal static class SemanticAsyncControlFlowProjector
     {
         private readonly SemanticCompilationContext context;
         private readonly SemanticModel semanticModel;
+        private readonly string methodSymbolId;
         private readonly SemanticTypeRegistry typeRegistry;
         private readonly ICollection<SemanticDiagnostic> diagnostics;
         private readonly List<DraftSegment> drafts = new();
+        private readonly List<SemanticAsyncCompilerLocal> compilerLocals = new();
         private int structuredNodeCount;
         private bool failed;
 
         public Builder(
             SemanticCompilationContext context,
             SemanticModel semanticModel,
+            string methodSymbolId,
             SemanticTypeRegistry typeRegistry,
             ICollection<SemanticDiagnostic> diagnostics)
         {
             this.context = context;
             this.semanticModel = semanticModel;
+            this.methodSymbolId = methodSymbolId;
             this.typeRegistry = typeRegistry;
             this.diagnostics = diagnostics;
         }
@@ -129,7 +137,10 @@ internal static class SemanticAsyncControlFlowProjector
 
             projected = new SemanticAsyncControlFlowProjection(
                 segments,
-                ordinalByDraft[entry]);
+                ordinalByDraft[entry],
+                compilerLocals
+                    .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
+                    .ToArray());
             return true;
         }
 
@@ -216,6 +227,15 @@ internal static class SemanticAsyncControlFlowProjector
 
                 case ForStatementSyntax loop:
                     return BuildFor(loop, successor, targets, depth);
+
+                case ForEachStatementSyntax loop:
+                    return BuildForEach(loop, successor, targets, depth);
+
+                case ForEachVariableStatementSyntax loop:
+                    return Reject(
+                        "Controlled async foreach does not support deconstruction variables.",
+                        loop.Span,
+                        "ASCS5419");
 
                 case SwitchStatementSyntax switchStatement:
                     return BuildSwitch(switchStatement, successor, targets, depth);
@@ -511,6 +531,164 @@ internal static class SemanticAsyncControlFlowProjector
                 }
             }
             return entry;
+        }
+
+        private int BuildForEach(
+            ForEachStatementSyntax loop,
+            int successor,
+            LoopTargets outerTargets,
+            int depth)
+        {
+            if (!loop.AwaitKeyword.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.None)
+                || loop.Type is RefTypeSyntax
+                || loop.Expression.DescendantNodesAndSelf().OfType<AwaitExpressionSyntax>().Any())
+            {
+                return Reject(
+                    "Controlled async foreach requires a synchronous value iterator over a one-dimensional array.",
+                    loop.Span,
+                    "ASCS5419");
+            }
+
+            ITypeSymbol? collectionType = semanticModel.GetTypeInfo(loop.Expression).Type;
+            if (collectionType is not IArrayTypeSymbol { Rank: 1 } arrayType
+                || semanticModel.GetDeclaredSymbol(loop) is not ILocalSymbol itemSymbol
+                || !SymbolEqualityComparer.Default.Equals(itemSymbol.Type, arrayType.ElementType))
+            {
+                return Reject(
+                    "Controlled async foreach supports one-dimensional arrays with an exact value element type only.",
+                    loop.Span,
+                    "ASCS5419");
+            }
+            if (!TryProjectValue(loop.Expression, out SemanticOperation? collection))
+            {
+                return -1;
+            }
+
+            string arrayTypeId = typeRegistry.Register(arrayType);
+            string elementTypeId = typeRegistry.Register(arrayType.ElementType);
+            string itemSymbolId = SemanticSymbolProjector.GetSymbolId(itemSymbol);
+            string localPrefix = $"symbol:compiler_local:{methodSymbolId}:foreach:{loop.SpanStart}";
+            string arraySymbolId = localPrefix + ":array";
+            string indexSymbolId = localPrefix + ":index";
+            SemanticSpan loopSpan = SemanticSpanFactory.Create(
+                context.PrimaryUnit.SourceText,
+                loop.Span);
+            compilerLocals.Add(new SemanticAsyncCompilerLocal(
+                arraySymbolId,
+                $"<foreach_array_{loop.SpanStart}>",
+                arrayTypeId,
+                loopSpan));
+            compilerLocals.Add(new SemanticAsyncCompilerLocal(
+                indexSymbolId,
+                $"<foreach_index_{loop.SpanStart}>",
+                "type:int32",
+                loopSpan));
+
+            SemanticOperation arrayReference = CreateValueOperation(
+                "local_reference",
+                arrayTypeId,
+                arraySymbolId,
+                loop.Expression.Span);
+            SemanticOperation indexReference = CreateValueOperation(
+                "local_reference",
+                "type:int32",
+                indexSymbolId,
+                loop.Identifier.Span);
+            SemanticOperation length = CreateValueOperation(
+                "property_reference",
+                "type:int32",
+                SemanticIntrinsicIds.ArrayLengthPropertyId,
+                loop.Expression.Span,
+                new[] { arrayReference });
+            SemanticOperation condition = CreateValueOperation(
+                "binary",
+                "type:bool",
+                null,
+                loop.Expression.Span,
+                new[] { indexReference, length },
+                operatorKind: "less_than");
+
+            int conditionDraft = AddDraft(
+                loop.Expression.Span,
+                Array.Empty<SemanticAsyncStatement>(),
+                null,
+                new DraftTransfer(SemanticAsyncMethod.ReturnTransferKind, null, -1, -1));
+            if (conditionDraft < 0)
+            {
+                return -1;
+            }
+
+            SemanticOperation increment = CreateValueOperation(
+                "increment_or_decrement",
+                "type:int32",
+                null,
+                loop.Identifier.Span,
+                new[] { indexReference },
+                operatorKind: "increment");
+            int incrementDraft = AddDraft(
+                loop.Identifier.Span,
+                new[] { new SemanticAsyncStatement(increment, null) },
+                null,
+                new DraftTransfer(
+                    SemanticAsyncMethod.GotoTransferKind,
+                    null,
+                    conditionDraft,
+                    -1));
+            if (incrementDraft < 0)
+            {
+                return -1;
+            }
+
+            int body = BuildStatement(
+                loop.Statement,
+                incrementDraft,
+                new LoopTargets(successor, incrementDraft),
+                depth + 1);
+            if (body < 0)
+            {
+                return -1;
+            }
+            SemanticOperation element = CreateValueOperation(
+                "array_element_reference",
+                elementTypeId,
+                null,
+                loop.Identifier.Span,
+                new[] { arrayReference, indexReference });
+            int itemDraft = AddDraft(
+                loop.Identifier.Span,
+                new[] { new SemanticAsyncStatement(element, itemSymbolId) },
+                null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, body, -1));
+            if (itemDraft < 0)
+            {
+                return -1;
+            }
+            drafts[conditionDraft].Transfer = new DraftTransfer(
+                SemanticAsyncMethod.BranchTransferKind,
+                condition,
+                itemDraft,
+                successor);
+
+            SemanticOperation zero = CreateValueOperation(
+                "literal",
+                "type:int32",
+                null,
+                loop.ForEachKeyword.Span,
+                constant: new SemanticConstant("int32", "0"));
+            int indexDraft = AddDraft(
+                loop.ForEachKeyword.Span,
+                new[] { new SemanticAsyncStatement(zero, indexSymbolId) },
+                null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, conditionDraft, -1));
+            if (indexDraft < 0)
+            {
+                return -1;
+            }
+            return AddDraft(
+                loop.ForEachKeyword.Span,
+                new[] { new SemanticAsyncStatement(collection!, arraySymbolId) },
+                null,
+                new DraftTransfer(SemanticAsyncMethod.GotoTransferKind, null, indexDraft, -1));
         }
 
         private int BuildSwitch(
@@ -926,6 +1104,35 @@ internal static class SemanticAsyncControlFlowProjector
                 null,
                 SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, span),
                 children);
+        }
+
+        private SemanticOperation CreateValueOperation(
+            string kind,
+            string typeId,
+            string? symbolId,
+            TextSpan span,
+            IReadOnlyList<SemanticOperation>? children = null,
+            string? operatorKind = null,
+            SemanticConstant? constant = null)
+        {
+            return new SemanticOperation(
+                kind,
+                true,
+                operatorKind,
+                false,
+                false,
+                false,
+                false,
+                typeId,
+                symbolId,
+                Array.Empty<string>(),
+                constant,
+                null,
+                null,
+                null,
+                null,
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, span),
+                children ?? Array.Empty<SemanticOperation>());
         }
 
         private SemanticDiagnostic Error(string code, string message, TextSpan span)

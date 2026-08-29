@@ -111,7 +111,8 @@ internal static class CSharpTypeLowerer
                 || frame.Slots.Any(slot => !IsStateTypeSupported(
                     slot.TypeId,
                     laidOutTypes,
-                    new HashSet<string>(StringComparer.Ordinal))))
+                    new HashSet<string>(StringComparer.Ordinal),
+                    allowReference: true)))
             {
                 Add(diagnostics, "ASCG1020", $"Async state frame '{frame.TypeId}' is not a bounded fixed-value layout.");
             }
@@ -128,7 +129,8 @@ internal static class CSharpTypeLowerer
     private static bool IsStateTypeSupported(
         string typeId,
         IReadOnlyDictionary<string, GuestType> types,
-        ISet<string> visiting)
+        ISet<string> visiting,
+        bool allowReference)
     {
         if (!types.TryGetValue(typeId, out GuestType? type))
         {
@@ -138,12 +140,24 @@ internal static class CSharpTypeLowerer
         {
             return type.Size > 0;
         }
+        if (type.Kind == "array")
+        {
+            return allowReference
+                && type.Storage == "i32"
+                && type.Size == 4
+                && type.Alignment == 4
+                && type.ElementTypeId is not null;
+        }
         if (type.Kind != "struct" || !visiting.Add(typeId))
         {
             return false;
         }
         bool supported = type.Size > 0
-            && type.Fields.All(field => IsStateTypeSupported(field.TypeId, types, visiting));
+            && type.Fields.All(field => IsStateTypeSupported(
+                field.TypeId,
+                types,
+                visiting,
+                allowReference: false));
         visiting.Remove(typeId);
         return supported;
     }
@@ -330,8 +344,8 @@ internal static class CSharpTypeLowerer
                     Array.Empty<GuestField>(),
                     arrayShape.ElementTypeId,
                     null,
-                    0,
-                    1);
+                    4,
+                    4);
             case "class":
             case "interface":
                 return null;

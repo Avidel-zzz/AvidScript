@@ -189,6 +189,7 @@ internal static class SemanticAsyncProjector
                 context,
                 semanticModel,
                 declaration.Body,
+                methodSymbolId,
                 typeRegistry,
                 diagnostics,
                 ref nextCallbackId,
@@ -208,7 +209,10 @@ internal static class SemanticAsyncProjector
                 SemanticAsyncMethod.ContinuationCfgLowering,
                 framedSegments,
                 declarationSpan,
-                flowProjection.EntrySegmentOrdinal);
+                flowProjection.EntrySegmentOrdinal)
+            {
+                CompilerLocals = flowProjection.CompilerLocals,
+            };
             return true;
         }
 

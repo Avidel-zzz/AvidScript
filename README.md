@@ -303,6 +303,11 @@ P57.12C15 在同一 CFG 上加入 integral/enum `switch`。常量 case 按源码
 `break`、外层循环 `continue` 和 `return` 均保留 C# 控制流语义。governing value 首批要求是
 local/parameter 读取，避免用隐藏 Host 状态掩盖副作用或所有权问题。
 
+P57.12C16 进一步支持一维数组的 `foreach` 循环体直接 await。Semantic schema `16 / 1.18`
+显式发布编译器数组引用与索引，集合表达式只求值一次；Guest 状态帧只保存 4 字节引用值，循环
+继续使用 `array_length`、`array_region_load` 和普通 branch，不复制整个数组，也不新增 Host import。
+正数线性内存引用受 activation 栅栏保护，负数 UE 数组 capability 继续服从 Session/reload 所有权。
+
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及在受支持控制流中的直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
 `FooAsync(...)`。旧 callback API、旧 Semantic 产物与
@@ -319,13 +324,13 @@ trap 会回滚本次借出的对象 capability。
 | --- | --- |
 | C# 生命周期 | `BeginPlay`、`Tick`、`EndPlay`、Timer、Gameplay Event、Overlap 路由、受控 `async void` 导出 |
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
-| 受控 async/await | 多个顺序 await、分支/循环/switch section 内部 await、固定布局 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
+| 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
 | 变长字符串 | Session-owned UTF-8 capability heap；跨调用 intern；reload/跨 Runtime 失效；多输出原子发布 |
-| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、编译器托管 region、兼容 Snapshot/Flush 与显式 Release |
+| 通用数组 | schema v10 一维 `TArray<T>` -> C# `T[]`；函数全方向、属性读写、编译器托管 region、Snapshot/Flush、显式 Release，以及 schema v16 数组引用跨 await 与 foreach CFG |
 | UObject / Actor | typed `UE.Self`、generational handle、异步加载结果 `TryCast`、`SpawnActor`、`DestroyActor`、`IsA`、checked cast |
 | Component | descriptor 驱动工厂、typed `FindComponent`、Attach/Detach、显式 `Release` |
 | 对象安全 | Session 所有权、World 隔离、失效句柄检测、UObject GC 强引用、Component 回收 |
@@ -562,6 +567,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [BidirectionalProperties](Samples/CSharp/BidirectionalProperties/README.md) | C# 与 UE 属性双向读写 |
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | async `BeginPlay`、循环/switch section 内部 await、跨三个 await 的 FVector/对象 local、`Tick` / `EndPlay`、Timer Continuation 与异步对象加载 |
 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | Reflection 生成 `UKismetSystemLibrary.DelayAsync`，在 `BeginPlay` 中等待后恢复 UE 游戏逻辑 |
+| [AsyncArrayForeach](Samples/CSharp/AsyncArrayForeach/README.md) | 一维数组 foreach 中逐 Tick await，并在恢复后继续调用 UE Actor API |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
 
@@ -571,7 +577,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 固定宽度递归 `USTRUCT` 已支持，但其字段中暂不接受 `FName`、`FString` 与容器；
 - 一维 `TArray<T>` 已支持首批固定元素类型；nested array、字符串元素、`TSet`、`TMap` 尚未支持；
 - 动态多播事件支持当前 Session 授权的任意兼容 UObject 源，但仍要求 Profile 显式授权；单播委托、C# `event +=`、lambda/closure 尚未支持；
-- 受控 `async/await` 已支持顺序等待、分支/循环/integral 或 enum switch section 内的直接 await、typed outcome、固定布局 local 状态帧、控制转移与宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，switch governing value 首批须为 local/parameter 读取，条件表达式与 `for` header 中的 await、pattern/string switch、`goto case/default`、`foreach`、string/array 等动态布局 local、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
+- 受控 `async/await` 已支持顺序等待、分支/循环/integral 或 enum switch section、一维数组 value foreach 内的直接 await、typed outcome、固定布局 local 与数组引用状态帧、控制转移和宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，switch governing value 首批须为 local/parameter 读取，foreach 首批须为同步一维数组与精确元素类型；条件表达式与 header 中的 await、pattern/string switch、`goto case/default`、非数组 enumerator、元素转换、解构、ref/await foreach、string element、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
   latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
@@ -584,7 +590,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 ## 路线图
 
-1. 在现有 continuation CFG 与 bounded state frame 上扩展 `foreach`、helper 调用链，并为动态布局值建立独立所有权合同；
+1. 在现有 continuation CFG 与数组引用状态合同上扩展 helper 调用链、异常/`finally` 语义与更多动态容器；
 2. 用 C# 完成真实小型游戏 Demo，固化生命周期、对象创建、事件和热重载工作流；
 3. 扩展 string element、nested array、`TSet`/`TMap`，继续压缩 Wasmtime P95 尾延迟；
 4. 完成 Cook、Shipping、包体、故障隔离以及 Android/iOS AOT 适配。

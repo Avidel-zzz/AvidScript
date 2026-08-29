@@ -447,6 +447,7 @@ internal static class CSharpSemanticInputValidator
             if (method is null
                 || string.IsNullOrWhiteSpace(method.MethodSymbolId)
                 || string.IsNullOrWhiteSpace(method.ExportName)
+                || method.CompilerLocals is null
                 || method.Lowering is not (
                     SemanticAsyncMethod.ReentrantZeroHeapCpsLowering or
                     SemanticAsyncMethod.ContinuationCfgLowering)
@@ -691,11 +692,14 @@ internal static class CSharpSemanticInputValidator
         if (document.SemanticVersion != SemanticContract.CurrentSemanticVersion
             || method.EntrySegmentOrdinal < 0
             || method.EntrySegmentOrdinal >= method.Segments.Count
-            || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments)
+            || method.Segments.Count > SemanticAsyncMethod.MaximumControlFlowSegments
+            || !ValidateCompilerLocals(document, method, symbolsById))
         {
             return false;
         }
 
+        IReadOnlyDictionary<string, SemanticAsyncCompilerLocal> compilerLocalsById =
+            method.CompilerLocals.ToDictionary(local => local.SymbolId, StringComparer.Ordinal);
         HashSet<int> validTargets = method.Segments
             .Select(segment => segment.Ordinal)
             .ToHashSet();
@@ -732,10 +736,11 @@ internal static class CSharpSemanticInputValidator
                 if (statement.TargetSymbolId is { } targetSymbolId
                     && (!TryAddMethodLocal(
                             symbolsById,
-                            method.MethodSymbolId,
-                            targetSymbolId,
-                            statement.Operation.TypeId,
-                            localTypes)))
+                        method.MethodSymbolId,
+                        targetSymbolId,
+                        statement.Operation.TypeId,
+                        compilerLocalsById,
+                        localTypes)))
                 {
                     return false;
                 }
@@ -748,6 +753,7 @@ internal static class CSharpSemanticInputValidator
                         method.MethodSymbolId,
                         declaration.SymbolId,
                         declaration.TypeId,
+                        compilerLocalsById,
                         localTypes))
                     {
                         return false;
@@ -807,6 +813,7 @@ internal static class CSharpSemanticInputValidator
                         method.MethodSymbolId,
                         resultSymbolId,
                         awaitSite.ResultTypeId,
+                        compilerLocalsById,
                         localTypes))
                 {
                     return false;
@@ -885,12 +892,41 @@ internal static class CSharpSemanticInputValidator
         string methodSymbolId,
         string? symbolId,
         string? typeId,
+        IReadOnlyDictionary<string, SemanticAsyncCompilerLocal> compilerLocalsById,
         IDictionary<string, string> localTypes)
     {
         return symbolId is not null
             && typeId is not null
-            && IsMethodLocal(symbolsById, symbolId, methodSymbolId, typeId)
+            && (IsMethodLocal(symbolsById, symbolId, methodSymbolId, typeId)
+                || compilerLocalsById.TryGetValue(symbolId, out SemanticAsyncCompilerLocal? local)
+                    && local.TypeId == typeId)
             && localTypes.TryAdd(symbolId, typeId);
+    }
+
+    private static bool ValidateCompilerLocals(
+        SemanticDocument document,
+        SemanticAsyncMethod method,
+        IReadOnlyDictionary<string, SemanticSymbol> symbolsById)
+    {
+        if (document.SchemaVersion < 16)
+        {
+            return method.CompilerLocals.Count == 0;
+        }
+        string prefix = $"symbol:compiler_local:{method.MethodSymbolId}:foreach:";
+        return method.CompilerLocals.Count <= SemanticAsyncMethod.MaximumControlFlowSegments * 2
+            && method.CompilerLocals.All(local => local is not null
+                && local.SymbolId.StartsWith(prefix, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(local.Name)
+                && document.Types.Any(type => type.Id == local.TypeId)
+                && IsValidSpan(local.Span, document.Source.Length)
+                && Contains(method.Span, local.Span)
+                && !symbolsById.ContainsKey(local.SymbolId))
+            && Unique(method.CompilerLocals.Select(local => local.SymbolId))
+            && Unique(method.CompilerLocals.Select(local => local.Name))
+            && method.CompilerLocals.Select(local => local.SymbolId)
+                .SequenceEqual(method.CompilerLocals
+                    .Select(local => local.SymbolId)
+                    .OrderBy(id => id, StringComparer.Ordinal));
     }
 
     private static bool UsesExactAsyncStateFlow(string semanticVersion)
@@ -1151,6 +1187,7 @@ internal static class CSharpSemanticInputValidator
             (14, "1.14") => true,
             (15, "1.15") => true,
             (15, "1.16") => true,
+            (15, "1.17") => true,
             (SemanticContract.CurrentSchemaVersion, SemanticContract.CurrentSemanticVersion) => true,
             _ => false,
         };

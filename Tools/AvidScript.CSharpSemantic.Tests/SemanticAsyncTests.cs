@@ -16,11 +16,12 @@ internal static class SemanticAsyncTests
         StructuredFlowProjectsExactStateFrames();
         NestedAwaitsProjectContinuationCfg();
         SwitchAwaitsProjectContinuationCfg();
+        ArrayForeachAwaitsProjectCompilerState();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
         ControlFlowSegmentLimitFailsClosed();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 10;
+        return 11;
     }
 
     private static void EarlyReturnGuardsProjectStableControlOperations()
@@ -51,15 +52,15 @@ internal static class SemanticAsyncTests
         SemanticAsyncStatement guard = method.Segments[1].Statements.Single();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && method.Segments.Count == 3
             && guard.TargetSymbolId is null
             && guard.Operation.Kind == SemanticAsyncMethod.EarlyReturnGuardOperationKind
             && guard.Operation.TypeId == "type:void"
             && guard.Operation.Children.Count == 1
             && guard.Operation.Children[0].TypeId == "type:bool",
-            "top-level early-return guards should remain explicit under the schema-v15 semantic-1.17 contract");
+            "top-level early-return guards should remain explicit under the schema-v16 semantic-1.18 contract");
 
         const string invalidSource = """
             using AvidScript;
@@ -251,10 +252,10 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && document.AsyncMethods.Count == 2,
-            "controlled async exports should publish schema 15 / semantic 1.17");
+            "controlled async exports should publish schema 16 / semantic 1.18");
         Assert(beginPlay.Lowering == "reentrant_zero_heap_cps"
             && beginPlay.Segments.Select(segment => segment.Ordinal)
                 .SequenceEqual(new[] { 0, 1, 2, 3 })
@@ -426,8 +427,8 @@ internal static class SemanticAsyncTests
             .ToArray();
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && awaitSite.StateFrame is { } stateFrame
             && stateFrame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { movementCountId })
@@ -484,8 +485,8 @@ internal static class SemanticAsyncTests
             symbol.Kind == "local" && symbol.Name == "index").Id;
 
         Assert(document.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
             && method.EntrySegmentOrdinal >= 0
             && method.EntrySegmentOrdinal < method.Segments.Count
@@ -678,6 +679,101 @@ internal static class SemanticAsyncTests
                     segment.AwaitSite is not null)
                 .AwaitSite!.StateFrame!.Slots.Any(),
             "switch break should exit the switch while continue retains the enclosing loop target across await");
+    }
+
+    private static void ArrayForeachAwaitsProjectCompilerState()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [AvidExport("foreach_cfg")]
+                public static async void ForeachCfg()
+                {
+                    int[] values = new[] { 2, 3, 5 };
+                    int total = 0;
+                    foreach (int value in values)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        total += value;
+                    }
+                    Consume(total);
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/ArrayForeachAwait.cs");
+        SemanticAsyncMethod method = document.AsyncMethods.SingleOrDefault()
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                document.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Code}@{diagnostic.Span.Start}: {diagnostic.Message}")));
+        SemanticAsyncAwaitSite awaitSite = method.Segments.Single(segment =>
+            segment.AwaitSite is not null).AwaitSite!;
+        SemanticOperation[] operations = method.Segments
+            .SelectMany(segment => segment.Statements.Select(statement => statement.Operation)
+                .Concat(segment.Transfer?.Condition is { } condition
+                    ? new[] { condition }
+                    : Array.Empty<SemanticOperation>()))
+            .SelectMany(Enumerate)
+            .ToArray();
+        SemanticAsyncCompilerLocal arrayLocal = method.CompilerLocals.Single(local =>
+            local.Name.StartsWith("<foreach_array_", StringComparison.Ordinal));
+        SemanticAsyncCompilerLocal indexLocal = method.CompilerLocals.Single(local =>
+            local.Name.StartsWith("<foreach_index_", StringComparison.Ordinal));
+
+        Assert(document.Succeeded
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
+            && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
+            && method.CompilerLocals.Count == 2
+            && arrayLocal.TypeId == "type:int32[]"
+            && indexLocal.TypeId == "type:int32"
+            && awaitSite.StateFrame!.Slots.Any(slot =>
+                slot.SymbolId == arrayLocal.SymbolId && slot.TypeId == arrayLocal.TypeId)
+            && awaitSite.StateFrame.Slots.Any(slot =>
+                slot.SymbolId == indexLocal.SymbolId && slot.TypeId == indexLocal.TypeId)
+            && operations.Any(operation => operation is
+                {
+                    Kind: "property_reference",
+                    SymbolId: SemanticIntrinsicIds.ArrayLengthPropertyId,
+                })
+            && operations.Any(operation => operation.Kind == "array_element_reference")
+            && operations.Any(operation => operation is
+                {
+                    Kind: "increment_or_decrement",
+                    OperatorKind: "increment",
+                }),
+            "array foreach with await should publish deterministic compiler locals and exact resumable CFG state");
+
+        const string conversionSource = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [AvidExport("converted_foreach")]
+                public static async void ConvertedForeach()
+                {
+                    int[] values = new[] { 1 };
+                    foreach (long value in values)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                    }
+                }
+            }
+            """;
+        SemanticDocument converted = Analyze(
+            conversionSource,
+            "Scripts/ConvertedArrayForeachAwait.cs");
+        Assert(!converted.Succeeded
+            && converted.AsyncMethods.Count == 0
+            && converted.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5419"),
+            "foreach element conversions should remain fail-closed until conversion state is frozen");
     }
 
     private static void NonFrozenAsyncShapesRemainFailClosed()

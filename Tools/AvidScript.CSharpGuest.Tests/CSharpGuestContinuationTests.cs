@@ -30,7 +30,8 @@ internal static class CSharpGuestContinuationTests
         StructuredAsyncFlowLowersDeterministicGuestBlocks();
         NestedAwaitCfgLowersBranchAndLoopResumes();
         SwitchAwaitCfgLowersDeterministicDispatch();
-        return 16;
+        ArrayForeachAwaitLowersDynamicState();
+        return 17;
     }
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
@@ -84,8 +85,8 @@ internal static class CSharpGuestContinuationTests
             block.Id.EndsWith(":result_rejected", StringComparison.Ordinal));
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && guard.Terminator.Kind == "branch_if"
             && guard.Terminator.TargetBlockId == guardReturn.Id
             && guard.Terminator.FalseTargetBlockId == continuation.Id
@@ -522,8 +523,8 @@ internal static class CSharpGuestContinuationTests
             .ToArray();
 
         Assert(result.Succeeded
-            && document.SchemaVersion == 15
-            && document.SemanticVersion == "1.17"
+            && document.SchemaVersion == 16
+            && document.SemanticVersion == "1.18"
             && asyncMethod.Lowering == "reentrant_zero_heap_cps"
             && callbackIds.SequenceEqual(new[]
             {
@@ -840,7 +841,7 @@ internal static class CSharpGuestContinuationTests
 
         Assert(first.Succeeded
             && second.Succeeded
-            && document.SemanticVersion == "1.17"
+            && document.SemanticVersion == "1.18"
             && frame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { countId })
             && frame.Slots.All(slot => slot.SymbolId != overwrittenId),
@@ -1059,6 +1060,95 @@ internal static class CSharpGuestContinuationTests
         };
         Assert(!CSharpGuestLowerer.Lower(tampered, SemanticHash).Succeeded,
             "switch CFG branch transfers without canonical conditions must fail closed");
+    }
+
+    private static void ArrayForeachAwaitLowersDynamicState()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int[] values = new[] { 2, 3, 5 };
+                    int total = 0;
+                    foreach (int value in values)
+                    {
+                        await AvidContinuations.NextTickAsync();
+                        total += value;
+                    }
+                    Consume(total);
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/ArrayForeachAwaitGuest.cs");
+        CSharpGuestLoweringResult first = CSharpGuestLowerer.Lower(document, SemanticHash);
+        CSharpGuestLoweringResult second = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = first.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                first.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncCompilerLocal arrayLocal = method.CompilerLocals.Single(local =>
+            local.Name.StartsWith("<foreach_array_", StringComparison.Ordinal));
+        SemanticAsyncCompilerLocal indexLocal = method.CompilerLocals.Single(local =>
+            local.Name.StartsWith("<foreach_index_", StringComparison.Ordinal));
+        SemanticAsyncStateFrame frame = method.Segments.Single(segment =>
+            segment.AwaitSite is not null).AwaitSite!.StateFrame!;
+        GuestType arrayType = module.Types.Single(type => type.Id == arrayLocal.TypeId);
+        string beginPlayFunctionId = module.Exports.Single(export =>
+            export.Name == "avid_on_begin_play").FunctionId;
+        GuestInstruction[] instructions = module.Functions
+            .Where(function => function.Id == beginPlayFunctionId
+                || function.Id.StartsWith(
+                    "function:synthetic:async_resume:",
+                    StringComparison.Ordinal))
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+
+        Assert(first.Succeeded
+            && second.Succeeded
+            && arrayType.Kind == "array"
+            && arrayType.Storage == "i32"
+            && arrayType.Size == 4
+            && arrayType.Alignment == 4
+            && frame.Slots.Any(slot => slot.SymbolId == arrayLocal.SymbolId)
+            && frame.Slots.Any(slot => slot.SymbolId == indexLocal.SymbolId)
+            && instructions.Any(instruction => instruction.Op == "array_length")
+            && instructions.Any(instruction => instruction.Op == "array_region_load")
+            && instructions.Any(instruction => instruction.Op == "field_store"
+                && instruction.TargetId?.Contains(arrayLocal.SymbolId, StringComparison.Ordinal) == true)
+            && GuestIrSerializer.Serialize(module)
+                .SequenceEqual(GuestIrSerializer.Serialize(second.Module!))
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "array foreach await should lower a four-byte dynamic reference, exact state, and compilable WASM loop");
+
+        SemanticAsyncCompilerLocal tamperedLocal = arrayLocal with { TypeId = "type:float32" };
+        SemanticDocument tampered = document with
+        {
+            AsyncMethods = new[]
+            {
+                method with
+                {
+                    CompilerLocals = method.CompilerLocals
+                        .Select(local => local.SymbolId == arrayLocal.SymbolId ? tamperedLocal : local)
+                        .OrderBy(local => local.SymbolId, StringComparer.Ordinal)
+                        .ToArray(),
+                },
+            },
+        };
+        Assert(!CSharpGuestLowerer.Lower(tampered, SemanticHash).Succeeded,
+            "tampered foreach compiler-local type identities must fail closed before Guest lowering");
     }
 
     private static void CallbacksProduceOneDeterministicSixCellV2Export()

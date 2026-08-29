@@ -48,8 +48,8 @@ internal static class SemanticInstanceStateTests
         const string readId = "symbol:method:global::Game.Counter.Read():int32";
 
         Assert(document.Succeeded, "supported instance state should pass semantic analysis");
-        Assert(document.SchemaVersion == 15 && document.SemanticVersion == "1.17",
-            "current artifacts should use schema v15 / semantic version 1.17");
+        Assert(document.SchemaVersion == 16 && document.SemanticVersion == "1.18",
+            "current artifacts should use schema v16 / semantic version 1.18");
         SemanticSymbol field = document.Symbols.Single(symbol => symbol.Id == fieldId);
         Assert(!field.IsStatic && field.ContainingSymbolId == typeSymbolId,
             "instance fields should retain their containing type identity");

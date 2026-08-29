@@ -24,7 +24,8 @@ internal sealed class CSharpFunctionLoweringContext
         IReadOnlyDictionary<string, GuestType> guestTypes,
         CSharpGuestDataPool dataPool,
         IReadOnlyList<GuestRegister> parameters,
-        List<GuestDiagnostic> diagnostics)
+        List<GuestDiagnostic> diagnostics,
+        IReadOnlyList<SemanticAsyncCompilerLocal>? compilerLocals = null)
     {
         Document = document;
         Callable = callable;
@@ -57,6 +58,20 @@ internal sealed class CSharpFunctionLoweringContext
 
             GuestRegister register = new(CSharpGuestIds.Local(symbol.Id), symbol.TypeId);
             storageBySymbol.Add(symbol.Id, register);
+            locals.Add(register);
+        }
+
+        foreach (SemanticAsyncCompilerLocal local in compilerLocals
+            ?? Array.Empty<SemanticAsyncCompilerLocal>())
+        {
+            if (!guestTypes.ContainsKey(local.TypeId)
+                || storageBySymbol.ContainsKey(local.SymbolId))
+            {
+                Add("ASCG1004", $"Compiler local '{local.SymbolId}' has no unique Guest value type.");
+                continue;
+            }
+            GuestRegister register = new(CSharpGuestIds.Local(local.SymbolId), local.TypeId);
+            storageBySymbol.Add(local.SymbolId, register);
             locals.Add(register);
         }
 

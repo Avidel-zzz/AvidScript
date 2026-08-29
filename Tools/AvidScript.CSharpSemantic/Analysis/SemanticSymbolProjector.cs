@@ -19,7 +19,13 @@ internal static class SemanticSymbolProjector
             SemanticModel semanticModel = context.Compilation.GetSemanticModel(
                 unit.SyntaxTree,
                 ignoreAccessibility: false);
-            ProjectUnit(unit.SyntaxTree.GetRoot(), semanticModel, unit.SourceText, symbols, typeRegistry);
+            ProjectUnit(
+                unit.SyntaxTree.GetRoot(),
+                semanticModel,
+                unit.SourceText,
+                symbols,
+                typeRegistry,
+                unit.SyntaxTree == context.PrimaryUnit.SyntaxTree);
         }
 
         return symbols.Values.OrderBy(symbol => symbol.Id, StringComparer.Ordinal).ToArray();
@@ -30,7 +36,8 @@ internal static class SemanticSymbolProjector
         SemanticModel semanticModel,
         SourceText sourceText,
         IDictionary<string, SemanticSymbol> symbols,
-        SemanticTypeRegistry typeRegistry)
+        SemanticTypeRegistry typeRegistry,
+        bool projectForeachLocals)
     {
         foreach (MemberDeclarationSyntax declaration in root.DescendantNodes().OfType<MemberDeclarationSyntax>())
         {
@@ -96,6 +103,17 @@ internal static class SemanticSymbolProjector
             if (local is not null)
             {
                 AddSymbol(symbols, local, variable, sourceText, typeRegistry);
+            }
+        }
+
+        foreach (ForEachStatementSyntax loop in projectForeachLocals
+            ? root.DescendantNodes().OfType<ForEachStatementSyntax>()
+            : Enumerable.Empty<ForEachStatementSyntax>())
+        {
+            ILocalSymbol? local = semanticModel.GetDeclaredSymbol(loop) as ILocalSymbol;
+            if (local is not null)
+            {
+                AddSymbol(symbols, local, loop, sourceText, typeRegistry);
             }
         }
 

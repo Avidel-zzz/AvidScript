@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/AsyncArrayForeach/AsyncArrayForeachScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_async_array_foreach",
+  "artifact_stem": "profile_async_array_foreach",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_async_array_foreach",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_async_array_foreach/profile_async_array_foreach.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_async_array_foreach/profile_async_array_foreach.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.async_array_foreach",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "SetActorScale3D"
+        ]
+      }
+    ]
+  }
+}

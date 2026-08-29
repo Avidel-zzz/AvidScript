@@ -2097,3 +2097,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C11 centralized contract run updated prepared-report expectations to `14/1.14` but left three semantic-model comparisons at schema 13, so PreparedSemantic stopped after valid schema-14 artifacts were produced.
 - Prevention: every Semantic contract bump searches the full `Build` and `Tools` trees for the old schema number and version string across assignments, JSON fixtures, equality/range comparisons, diagnostics, and architecture tokens. Legacy compatibility cases are explicitly reviewed and retained; every other hit is updated before the centralized contract run.
+
+### 2026-08-30: inspect Roslyn syntax node APIs before freezing guards
+
+- Mistake: the first P57.12C16 compile probe assumed `ForEachStatementSyntax` exposed `RefKindKeyword`; Roslyn represents `ref` and `ref readonly` foreach declarations with `RefTypeSyntax`, so compilation stopped at the guard. The follow-up compile then found that `CSharpGuestIds` reused the new semantic intrinsic ID without importing its namespace.
+- Prevention: when adding syntax-specific policy, inspect the pinned Roslyn node API or an existing operation fixture before naming token properties. Foreach guards use `AwaitKeyword` for async iteration and `Type is RefTypeSyntax` for ref iteration. When moving an ID across assemblies, verify the project reference and explicit namespace import at the consumer; the pinned .NET 8.0.416 project compile remains the required blocking probe.
+
+### 2026-08-30: new local-declaration syntax must update the symbol projector
+
+- Mistake: the first P57.12C16 Semantic projection created a valid foreach CFG, but `SemanticSymbolProjector` only collected `VariableDeclaratorSyntax` and pattern designations. The source foreach item therefore existed in CFG operations but not in `document.Symbols`, and the Guest input validator correctly rejected the artifact. The first fix collected foreach locals from every projection unit; after constraining that owner, full operation projection still exposed `System.Collections.IEnumerable`, and `SemanticTypeRegistry` incorrectly classified every Roslyn `SpecialType` as a Guest primitive.
+- Prevention: every newly supported C# construct that declares a source local must be added to the symbol projection inventory before CFG lowering, with the same primary-unit ownership boundary as its compiler. Reference units provide API symbols but not private method-local implementation types. Roslyn `SpecialType` is not synonymous with a Guest scalar: only the explicit intrinsic whitelist is `primitive`, while object/interface/struct kinds retain their real `TypeKind`. Tests must assert both the source `SemanticSymbol` and any separate compiler-hidden local contract; compiler locals must never conceal a missing source symbol.
+
+### 2026-08-30: async Guest tests select exports by ABI name
+
+- Mistake: the first P57.12C16 Guest assertion called `module.Exports.Single()` while the controlled async module correctly contained both `avid_on_begin_play` and the continuation router export, so the test failed after successful product lowering.
+- Prevention: tests that inspect a business entrypoint in an async module select the exact ABI export name and then its function ID. A single-export assertion is reserved for fixtures whose contract explicitly forbids continuation, gameplay-event, or delegate router exports.

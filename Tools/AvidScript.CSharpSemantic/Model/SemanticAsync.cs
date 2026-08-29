@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -11,6 +12,10 @@ public sealed record SemanticAsyncMethod(
     [property: JsonPropertyOrder(4)] SemanticSpan Span,
     [property: JsonPropertyOrder(5)] int EntrySegmentOrdinal = 0)
 {
+    [JsonPropertyOrder(6)]
+    public IReadOnlyList<SemanticAsyncCompilerLocal> CompilerLocals { get; init; } =
+        Array.Empty<SemanticAsyncCompilerLocal>();
+
     public const string ReentrantZeroHeapCpsLowering = "reentrant_zero_heap_cps";
     public const string ContinuationCfgLowering = "continuation_cfg";
     public const string GotoTransferKind = "goto";
@@ -31,6 +36,12 @@ public sealed record SemanticAsyncMethod(
     public const int MaximumStructuredFlowDepth = 8;
     public const int MaximumControlFlowSegments = 64;
 }
+
+public sealed record SemanticAsyncCompilerLocal(
+    [property: JsonPropertyOrder(0)] string SymbolId,
+    [property: JsonPropertyOrder(1)] string Name,
+    [property: JsonPropertyOrder(2)] string TypeId,
+    [property: JsonPropertyOrder(3)] SemanticSpan Span);
 
 public sealed record SemanticAsyncSegment(
     [property: JsonPropertyOrder(0)] int Ordinal,

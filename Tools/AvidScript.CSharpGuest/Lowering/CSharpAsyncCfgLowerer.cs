@@ -150,7 +150,8 @@ internal static class CSharpAsyncCfgLowerer
             guestTypes,
             dataPool,
             Array.Empty<GuestRegister>(),
-            diagnostics);
+            diagnostics,
+            method.CompilerLocals);
         if (incoming?.ResultSymbolId is not null
             && incoming.PayloadKind == SemanticContinuationCallback.ObjectPayloadKind
             && (loadedObject is null

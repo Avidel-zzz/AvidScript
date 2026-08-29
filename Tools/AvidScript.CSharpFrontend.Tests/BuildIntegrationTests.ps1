@@ -973,8 +973,8 @@ Assert-Condition ($FrontendJson.source.sha256 -eq $NormalJson.source.sha256) "re
 $NormalSemanticPath = Resolve-ArtifactPath $NormalJson.artifacts.semantic_file
 Assert-Condition (Test-Path -LiteralPath $NormalSemanticPath -PathType Leaf) "valid source semantic artifact is missing"
 $SemanticJson = Get-Content -Raw -LiteralPath $NormalSemanticPath | ConvertFrom-Json
-Assert-Condition ($SemanticJson.schema_version -eq 15) "semantic artifact schema version is not 15"
-Assert-Condition ($SemanticJson.semantic_version -eq "1.17") "semantic artifact version is not 1.17"
+Assert-Condition ($SemanticJson.schema_version -eq 16) "semantic artifact schema version is not 16"
+Assert-Condition ($SemanticJson.semantic_version -eq "1.18") "semantic artifact version is not 1.18"
 Assert-Condition ($SemanticJson.succeeded) "valid source semantic artifact reports failure"
 Assert-Condition ($SemanticJson.source.sha256 -eq $FrontendJson.source.sha256) "semantic/frontend source hashes differ"
 Assert-Condition ($SemanticJson.source.frontend_sha256 -eq $FrontendJson.source.sha256) "semantic artifact did not preserve the frontend source hash"
