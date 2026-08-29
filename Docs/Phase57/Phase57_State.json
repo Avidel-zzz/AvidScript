@@ -14,7 +14,7 @@
   },
   "documents": {
     "plan": "Docs/Phase57/P57.12C1_Deterministic_Continuation_Core_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C8_Latent_Provider_Result_Slot.md"
+    "closeout": "Docs/Phase57/P57.12C9_Typed_Latent_Outcome.md"
   },
   "batches": [
     {
@@ -202,6 +202,12 @@
       "status": "Completed",
       "evidence": "commit ae46036; descriptor schema v13, exact-path IAvidScriptLatentCompletionProvider registry, Runtime provider identity revalidation and bounded Session-owned typed result slots completed without API-name wrappers; cancellation, prepared promotion/discard, stale capability rejection, consume-once and teardown reclamation are enforced. UE5.8 no-clean build passed after one fixture-only correction, focused LatentV13/LatentResultSlot 2/2 and direct LatentV12/LatentProducer 2/2 passed, and clean ae46036/44caa5a architecture gate passed. Guest bulk read and AvidOutcome<T> remain P57.12C9; P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T08:29:07.8371878Z"
+    },
+    {
+      "id": "P57.12C9",
+      "status": "Completed",
+      "evidence": "commit 4f846c8; typed latent payload codec, consume-once continuation_result_read import, exact ordinal/type identity, generated AvidOutcomeAwaitable<T>/AvidOutcome<T> and compiler-owned outcome lowering complete the registered provider result path without API-name wrappers. Fixed .NET 184/184, PowerShell contracts 117/117, UE5.8 no-clean Editor build 4/4 actions, full AvidScript Automation 364/364 and clean 4f846c8/4ed5838 architecture gate passed. Cancellation remains non-resuming and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T09:57:56.7428207Z"
     }
   ],
   "debt": [
@@ -221,8 +227,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C8 review confirms exact-path provider registration, schema v13 canonical identity, Runtime provider/type revalidation, bounded Session result capability ownership, publish-before-ready, consume-once, cancel/abort/discard/reload/teardown reclamation and prepared-lane promotion. UE5.8 no-clean build, focused 2/2, direct compatibility 2/2 and clean candidate architecture gate passed. Guest payload consumption remains intentionally fail-closed until P57.12C9, and P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-29T08:29:07.8371878Z"
+    "evidence": "P57.12C9 review confirms descriptor schema 13 exact provider result identity, Session consume-once slots, transactional scalar/fixed-wire/object/UTF-8/array codecs, one-read Runtime callback semantics, generated AvidOutcomeAwaitable<T>/AvidOutcome<T> and compiler-owned Guest lowering. Fixed .NET 184/184, PowerShell contracts 117/117, UE5.8 no-clean Editor build, full Automation 364/364 and clean candidate architecture gate passed. Cancellation remains non-resuming and P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-29T09:57:56.7428207Z"
   },
   "budgets": {
     "ubt": 2,
@@ -230,25 +236,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 16,
-    "automation": 14,
-    "full_gate": 5
+    "ubt": 20,
+    "automation": 19,
+    "full_gate": 6
   },
   "freeze": {
-    "source_commit": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
-    "source_tree": "44caa5a24a1d861215fed3058d4c58164007b699",
+    "source_commit": "4f846c8b8df585665761cf04de179e7564064e83",
+    "source_tree": "4ed5838b8ead1b8c22cea596b00f4b7f5d069e95",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C8_Latent_Provider_Result_Slot.md",
-    "at_utc": "2026-08-29T08:29:07.8371878Z"
+    "review_evidence": "Docs/Phase57/P57.12C9_Typed_Latent_Outcome.md",
+    "at_utc": "2026-08-29T09:57:56.7428207Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C8_Architecture_ae46036.log",
-    "report_sha256": "ca482df0ab72bcd4c4311966cb786dab1d0d1a4932207d2da089ef10f8c3b3a5",
-    "run_id": "P57.12C8-clean-architecture-final",
-    "verified_commit": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
-    "verified_tree": "44caa5a24a1d861215fed3058d4c58164007b699",
-    "attestation_parent": "ae4603693e7d60261b367b84e2f92b78a9982c3a",
-    "attested_at_utc": "2026-08-29T08:29:07.8371878Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C9_Architecture_4f846c8.log",
+    "report_sha256": "0d50540592a9a4d19db02ecba5997d83a3c537d6bb3fc20c8a150d97d495181b",
+    "run_id": "P57.12C9-clean-architecture-final",
+    "verified_commit": "4f846c8b8df585665761cf04de179e7564064e83",
+    "verified_tree": "4ed5838b8ead1b8c22cea596b00f4b7f5d069e95",
+    "attestation_parent": "4f846c8b8df585665761cf04de179e7564064e83",
+    "attested_at_utc": "2026-08-29T09:57:56.7428207Z"
   },
   "protected_dirty": [
     {
@@ -271,6 +277,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 30,
-  "updated_at_utc": "2026-08-29T08:29:07.8371878Z"
+  "revision": 31,
+  "updated_at_utc": "2026-08-29T09:57:56.7428207Z"
 }
