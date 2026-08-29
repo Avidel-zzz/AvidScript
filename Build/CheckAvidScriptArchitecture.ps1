@@ -2690,6 +2690,7 @@ $CSharpGuestLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowe
 $CSharpGameplayEventLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGameplayEventLowerer.cs'
 $CSharpContinuationLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpContinuationLowerer.cs'
 $CSharpAsyncLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpAsyncLowerer.cs'
+$CSharpLatentStoragePlannerSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpLatentStoragePlanner.cs'
 $CSharpTypeLowererSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpTypeLowerer.cs'
 $CSharpSemanticInputValidatorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Validation/CSharpSemanticInputValidator.cs'
 $CSharpGuestDebugMapProjectorSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Diagnostics/CSharpGuestDebugMapProjector.cs'
@@ -2955,6 +2956,7 @@ foreach ($RequiredAsyncContinuationFacadeContract in @(
 foreach ($RequiredControlledAsyncFacadeContract in @(
     'public sealed class AvidLatentAttribute',
     'IsLatentStorageCompatible',
+    'IsLatentParameterShapeSupported',
     'public readonly struct AvidDelayAwaitable',
     'public readonly struct AvidDelayAwaiter : INotifyCompletion',
     'DelayAsync(float delaySeconds)',
@@ -3018,7 +3020,9 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
     'binding_latent|',
     'FindImport(context.Document',
     'LowerLatentArgument',
-    'hasEnumStorageAdaptation',
+    'CSharpLatentStoragePlanner.TryBuild',
+    'LowerFieldPath',
+    'LowerStorageAddress',
     'continuation_delay',
     'continuation_load_object',
     'not_equals',
@@ -3029,11 +3033,20 @@ foreach ($RequiredControlledAsyncLoweringContract in @(
         Add-Violation "C# Guest controlled async lowerer is missing $RequiredControlledAsyncLoweringContract"
     }
 }
-if (-not $CSharpSemanticInputValidatorSource.Contains('LatentStorageParametersMatch')) {
-    Add-Violation 'generated latent bool parameters must validate public-to-storage ABI adaptation'
+if (-not $CSharpSemanticInputValidatorSource.Contains('CSharpLatentStoragePlanner.TryBuild')) {
+    Add-Violation 'generated latent parameters must validate the shared public-to-storage plan'
 }
-if (-not $CSharpSemanticInputValidatorSource.Contains('shape.EnumUnderlyingTypeId == parameter.TypeId')) {
-    Add-Violation 'generated latent enum parameters must match their declared underlying storage'
+foreach ($RequiredLatentStoragePlanContract in @(
+    'MaximumAggregateDepth',
+    'MaximumStorageCells',
+    'EnumUnderlyingTypeId',
+    'nextParameter.RefKind == "in"',
+    'TryCollectAggregateLeaves',
+    'CSharpLatentStorageCellKind.Field',
+    'CSharpLatentStorageCellKind.Address')) {
+    if (-not $CSharpLatentStoragePlannerSource.Contains($RequiredLatentStoragePlanContract)) {
+        Add-Violation "generated latent storage planner is missing $RequiredLatentStoragePlanContract"
+    }
 }
 if (-not $CSharpContinuationLowererSource.Contains('IReadOnlyList<CSharpAsyncResumeRoute> asyncRoutes')) {
     Add-Violation 'C# Guest continuation v2 router must merge compiler-owned async resume routes'

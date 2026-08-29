@@ -418,6 +418,48 @@ public:
 		(void)Mode;
 		(void)LatentInfo;
 	}
+
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
+		meta = (Latent, LatentInfo = "LatentInfo", WorldContext = "WorldContextObject"))
+	static void WaitForTarget(
+		UObject* WorldContextObject,
+		UObject* Target,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)Target;
+		(void)LatentInfo;
+	}
+
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
+		meta = (Latent, LatentInfo = "LatentInfo", WorldContext = "WorldContextObject"))
+	static void WaitForLocation(
+		UObject* WorldContextObject,
+		FVector Location,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)Location;
+		(void)LatentInfo;
+	}
+
+	UFUNCTION(
+		BlueprintCallable,
+		Category = "AvidScript|Tests",
+		meta = (Latent, LatentInfo = "LatentInfo", WorldContext = "WorldContextObject"))
+	static void WaitForSettings(
+		UObject* WorldContextObject,
+		FAvidScriptStructWireRootTestType Settings,
+		FLatentActionInfo LatentInfo)
+	{
+		(void)WorldContextObject;
+		(void)Settings;
+		(void)LatentInfo;
+	}
 };
 
 UCLASS()

@@ -511,7 +511,7 @@ internal static class CSharpSemanticInputValidator
 							document.Source.Length,
 							method.MethodSymbolId,
 							symbolsById,
-							document.TypeShapes,
+							document,
 							document.Callables))
                     {
                         return false;
@@ -551,7 +551,7 @@ internal static class CSharpSemanticInputValidator
         int sourceLength,
         string methodSymbolId,
         IReadOnlyDictionary<string, SemanticSymbol> symbolsById,
-        IReadOnlyList<SemanticTypeShape> typeShapes,
+        SemanticDocument document,
         IReadOnlyList<SemanticCallable> callables)
     {
         if (awaitSite is null
@@ -603,14 +603,15 @@ internal static class CSharpSemanticInputValidator
 				&& import.Module == identity[1]
 				&& import.Name == identity[2]
 				&& callable.ReturnTypeId == "type:int64"
-				&& callable.Parameters.Count == awaitSite.Arguments.Count + 1
+				&& callable.Parameters.Count >= awaitSite.Arguments.Count + 1
 				&& callable.Parameters[^1].TypeId == "type:int32"
 				&& callable.Parameters[^1].RefKind == "none").ToArray();
 			return imports.Length == 1
-				&& LatentStorageParametersMatch(
-					typeShapes,
-					imports[0].Parameters,
-					awaitSite.Arguments);
+				&& CSharpLatentStoragePlanner.TryBuild(
+					document,
+					awaitSite.Arguments,
+					imports[0].Parameters.Take(imports[0].Parameters.Count - 1).ToArray(),
+					out _);
 		}
 
         if (awaitSite.ProducerKind != "object_load"
@@ -632,28 +633,6 @@ internal static class CSharpSemanticInputValidator
                 awaitSite.ResultSymbolId,
                 methodSymbolId,
                 awaitSite.ResultTypeId);
-    }
-
-    private static bool LatentStorageParametersMatch(
-        IReadOnlyList<SemanticTypeShape> typeShapes,
-        IReadOnlyList<SemanticCallableParameter> importParameters,
-        IReadOnlyList<SemanticOperation> arguments)
-    {
-        for (int index = 0; index < arguments.Count; ++index)
-        {
-            SemanticCallableParameter parameter = importParameters[index];
-            string? argumentTypeId = arguments[index].TypeId;
-            if (parameter.RefKind != "none"
-                || (parameter.TypeId != argumentTypeId
-                    && !(argumentTypeId == "type:bool"
-                        && parameter.TypeId == "type:int32")
-                    && !typeShapes.Any(shape => shape.TypeId == argumentTypeId
-                        && shape.EnumUnderlyingTypeId == parameter.TypeId)))
-            {
-                return false;
-            }
-        }
-        return true;
     }
 
     private static bool IsMethodLocal(

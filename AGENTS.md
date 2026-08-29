@@ -89,6 +89,7 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-29 P57.12C6C aggregate Guest 测试首版从独立测试程序集引用了 internal `CSharpGuestIds` 类型，虽然其成员是 public const，C# 仍以 `CS0122` 在测试执行前拒绝。Prevention：跨程序集合同测试只断言公开 Guest IR 序列化值（本例 `type:address`），internal ID helper 只在产品程序集内部使用；添加测试断言前先核对声明类型本身的可见性，不只看成员修饰符。
 - 2026-08-29 P57.12C6B 扩展 latent enum 验证时，首版补丁在 `ValidateAsyncAwaitSite` 内引用了不在该方法作用域中的 `document.TypeShapes`，读回后已在编译前修正为显式参数；随后 Semantic 测试又因直接解引用可空 `SemanticOperation.TypeId` 被 `CS8602` 拒绝。Prevention：向深层 validator 增加 descriptor/type-shape 依赖时，先读调用点与完整签名并逐层显式传参；测试断言对模型中 nullable 字段必须先用 pattern 绑定非空局部，再调用字符串方法。
 - 2026-08-29 P57.12C6A 首次 .NET 定向测试再次调用了 PATH 中的 `dotnet`，系统只有 SDK 9.0.306，因 `global.json` 固定 8.0.416 而在测试启动前失败。Prevention：AvidScript 的任何 .NET 命令在构造时就必须写为 `$env:USERPROFILE\.dotnet\dotnet.exe`，先在插件 cwd 断言 `--version` 精确为 `8.0.416`，并设置阶段本地 `DOTNET_CLI_HOME`、`APPDATA`、`LOCALAPPDATA`、`NUGET_PACKAGES`；禁止先试 PATH host 再回退。环境解析失败不得计为产品测试失败。
 - 2026-08-29 P57.12C6A 搜索固定 SDK 记录时把 `--glob` 过滤参数放在 ripgrep 的 `--` 之后，导致选项被解释为文件路径并产生无意义错误。Prevention：ripgrep 调用顺序固定为 `rg <options-and-globs> -- '<literal>' <confirmed-path>`；`--` 之后只允许 pattern 与路径，不再追加任何选项。

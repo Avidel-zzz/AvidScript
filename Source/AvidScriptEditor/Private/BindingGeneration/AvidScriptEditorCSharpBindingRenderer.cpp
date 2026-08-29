@@ -306,6 +306,41 @@ bool IsLatentStorageCompatible(
 bool ResolveComponents(
 	const FAvidScriptBindingValueModel& Value,
 	TArray<FCSharpComponent>& OutComponents,
+	FString& OutErrorSource);
+
+bool IsLatentParameterShapeSupported(
+	const FAvidScriptBindingValueModel& Value,
+	const FString& PublicType,
+	const FString& StorageType)
+{
+	if (Value.Direction != TEXT("value"))
+	{
+		return false;
+	}
+	if (Value.Kind == TEXT("scalar") || Value.Kind == TEXT("enum"))
+	{
+		return Value.AbiTypes.Num() == 1
+			&& IsLatentStorageCompatible(Value, PublicType, StorageType);
+	}
+	if (Value.Kind == TEXT("object_handle"))
+	{
+		return Value.AbiTypes == TArray<FString>{ TEXT("i"), TEXT("i") };
+	}
+	if (Value.Kind == TEXT("struct"))
+	{
+		TArray<FCSharpComponent> Components;
+		FString ErrorSource;
+		return ResolveComponents(Value, Components, ErrorSource)
+			&& Components.Num() == Value.AbiTypes.Num();
+	}
+	return Value.Kind == TEXT("struct_wire")
+		&& Value.AbiTypes == TArray<FString>{ TEXT("i") }
+		&& PublicType == StorageType;
+}
+
+bool ResolveComponents(
+	const FAvidScriptBindingValueModel& Value,
+	TArray<FCSharpComponent>& OutComponents,
 	FString& OutErrorSource)
 {
 	OutComponents.Reset();
@@ -521,13 +556,10 @@ bool RenderMethod(
 					TypesById,
 					StorageType,
 					OutErrorSource)
-				|| Parameter.Direction != TEXT("value")
-				|| Parameter.AbiTypes.Num() != 1
-				|| !IsLatentStorageCompatible(Parameter, PublicType, StorageType)
-				|| Parameter.Kind == TEXT("object_handle")
-				|| Parameter.Kind == TEXT("struct")
-				|| Parameter.Kind == TEXT("struct_wire")
-				|| Parameter.Kind == TEXT("array"))
+				|| !IsLatentParameterShapeSupported(
+					Parameter,
+					PublicType,
+					StorageType))
 			{
 				OutErrorCategory = TEXT("latent_csharp_shape_unsupported");
 				OutErrorSource = Binding.CanonicalIdentity + TEXT(":") + Parameter.Name;

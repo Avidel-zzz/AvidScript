@@ -733,6 +733,18 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
 			TEXT("WaitForMode")
 		},
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+			TEXT("WaitForTarget")
+		},
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+			TEXT("WaitForLocation")
+		},
+		{
+			TEXT("/Script/AvidScriptEditor.AvidScriptEditorLatentFunctionLibraryTestObject"),
+			TEXT("WaitForSettings")
+		},
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("Delay") },
 		{ TEXT("/Script/Engine.KismetSystemLibrary"), TEXT("DelayUntilNextFrame") }
 	};
@@ -799,7 +811,7 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TamperedRuntimePackage,
 			TamperedLoadResult));
 	TestEqual(TEXT("Latent package alone raises schema to v12"), Package.SchemaVersion, 12);
-	TestEqual(TEXT("All reflected latent producers are published"), Package.Bindings.Num(), 4);
+	TestEqual(TEXT("All reflected latent producers are published"), Package.Bindings.Num(), 7);
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
 	{
 		TestEqual(
@@ -854,6 +866,21 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		{
 			return Binding.UeFunction == TEXT("WaitForMode");
 		});
+	const FAvidScriptBindingFunctionModel* WaitForTarget = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("WaitForTarget");
+		});
+	const FAvidScriptBindingFunctionModel* WaitForLocation = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("WaitForLocation");
+		});
+	const FAvidScriptBindingFunctionModel* WaitForSettings = Package.Bindings.FindByPredicate(
+		[](const FAvidScriptBindingFunctionModel& Binding)
+		{
+			return Binding.UeFunction == TEXT("WaitForSettings");
+		});
 	if (TestNotNull(TEXT("Delay binding resolves"), Delay))
 	{
 		TestEqual(TEXT("Delay ABI appends callback and returns token"), Delay->HostImport.Signature, FString(TEXT("(fi)I")));
@@ -884,6 +911,21 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 			TestTrue(TEXT("Enum latent parameter keeps its default"), WaitForMode->Parameters[0].bHasDefault);
 			TestEqual(TEXT("Enum latent parameter default is canonical"), WaitForMode->Parameters[0].DefaultValue, FString(TEXT("Primary")));
 		}
+	}
+	if (TestNotNull(TEXT("Object latent binding resolves"), WaitForTarget))
+	{
+		TestEqual(TEXT("Object latent ABI flattens capability cells"), WaitForTarget->HostImport.Signature, FString(TEXT("(iii)I")));
+		TestEqual(TEXT("Object latent exposes one typed parameter"), WaitForTarget->Parameters.Num(), 1);
+	}
+	if (TestNotNull(TEXT("Vector latent binding resolves"), WaitForLocation))
+	{
+		TestEqual(TEXT("Vector latent ABI flattens components"), WaitForLocation->HostImport.Signature, FString(TEXT("(fffi)I")));
+		TestEqual(TEXT("Vector latent exposes one typed parameter"), WaitForLocation->Parameters.Num(), 1);
+	}
+	if (TestNotNull(TEXT("Struct-wire latent binding resolves"), WaitForSettings))
+	{
+		TestEqual(TEXT("Struct-wire latent ABI passes one address"), WaitForSettings->HostImport.Signature, FString(TEXT("(ii)I")));
+		TestEqual(TEXT("Struct-wire latent exposes one typed parameter"), WaitForSettings->Parameters.Num(), 1);
 	}
 
 	FString ReferenceSource;
@@ -920,6 +962,24 @@ bool FAvidScriptEditorBindingDescriptorLatentV12Test::RunTest(
 		TestTrue(
 			TEXT("Enum latent is exposed with a typed default"),
 			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForModeAsync(EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;")));
+		TestTrue(
+			TEXT("Object latent is exposed with a typed capability"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForTargetAsync(UObject Target) => default;")));
+		TestTrue(
+			TEXT("Object latent native import flattens capability cells"),
+			ReferenceSource.Contains(TEXT("int p0Slot, int p0Generation, int callbackId")));
+		TestTrue(
+			TEXT("Vector latent is exposed with a typed value"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForLocationAsync(FVector Location) => default;")));
+		TestTrue(
+			TEXT("Vector latent native import flattens components"),
+			ReferenceSource.Contains(TEXT("float p0X, float p0Y, float p0Z, int callbackId")));
+		TestTrue(
+			TEXT("Struct-wire latent is exposed with a typed value"),
+			ReferenceSource.Contains(TEXT("public static AvidDelayAwaitable WaitForSettingsAsync(FAvidScriptStructWireRootTestType Settings) => default;")));
+		TestTrue(
+			TEXT("Struct-wire latent native import uses an address"),
+			ReferenceSource.Contains(TEXT("in FAvidScriptStructWireRootTestType p0_Settings, int callbackId")));
 		TestTrue(
 			TEXT("Native latent import returns an i64 token"),
 			ReferenceSource.Contains(TEXT("internal static extern long Invoke")));

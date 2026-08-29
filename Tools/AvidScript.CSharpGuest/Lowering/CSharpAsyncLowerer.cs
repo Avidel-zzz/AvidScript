@@ -344,20 +344,27 @@ internal static class CSharpAsyncLowerer
 					return false;
 				}
 				targetId = CSharpGuestIds.Import(latentImport.MethodSymbolId);
+				if (!CSharpLatentStoragePlanner.TryBuild(
+						context.Document,
+						awaitSite.Arguments,
+						latentImport.Parameters.Take(latentImport.Parameters.Count - 1).ToArray(),
+						out CSharpLatentStoragePlan? storagePlan))
+				{
+					Add(context.Diagnostics, $"Latent async producer '{awaitSite.ProducerKind}' has no valid storage plan.");
+					return false;
+				}
 				for (int index = 0; index < awaitSite.Arguments.Count; ++index)
 				{
-					SemanticOperation argument = awaitSite.Arguments[index];
-					GuestRegister? value = LowerLatentArgument(
+					if (!LowerLatentArgument(
 						context,
-						argument,
-						latentImport.Parameters[index].TypeId,
+						awaitSite.Arguments[index],
+						storagePlan.Arguments[index],
 						awaitSite.CallbackId,
-						instructions);
-					if (value is null)
+						instructions,
+						operands))
 					{
 						return false;
 					}
-					operands.Add(value.Id);
 				}
 				break;
         }
@@ -416,35 +423,81 @@ internal static class CSharpAsyncLowerer
             : null;
     }
 
-    private static GuestRegister? LowerLatentArgument(
+    private static bool LowerLatentArgument(
         CSharpFunctionLoweringContext context,
         SemanticOperation argument,
-        string storageTypeId,
+        CSharpLatentStorageArgumentPlan plan,
         int blockOrdinal,
-        List<GuestInstruction> instructions)
+        List<GuestInstruction> instructions,
+        List<string> operands)
     {
-        GuestRegister? value = CSharpOperationLowerer.LowerValue(
+        GuestRegister? root = CSharpOperationLowerer.LowerValue(
             context,
             argument,
             blockOrdinal,
             instructions);
-        if (value is null || value.TypeId == storageTypeId)
+        if (root is null)
+        {
+            return false;
+        }
+
+        foreach (CSharpLatentStorageCell cell in plan.Cells)
+        {
+            GuestRegister? value = cell.Kind switch
+            {
+                CSharpLatentStorageCellKind.Direct => root,
+                CSharpLatentStorageCellKind.Field =>
+                    CSharpAggregateOperationLowerer.LowerFieldPath(
+                        context,
+                        root,
+                        cell.FieldPath,
+                        blockOrdinal,
+                        instructions),
+                CSharpLatentStorageCellKind.Address =>
+                    CSharpAggregateOperationLowerer.LowerStorageAddress(
+                        context,
+                        root,
+                        blockOrdinal,
+                        instructions),
+                _ => null,
+            };
+            if (value is null)
+            {
+                return false;
+            }
+            GuestRegister? storage = AdaptLatentStorage(
+                context,
+                value,
+                cell,
+                blockOrdinal,
+                instructions);
+            if (storage is null)
+            {
+                return false;
+            }
+            operands.Add(storage.Id);
+        }
+        return true;
+    }
+
+    private static GuestRegister? AdaptLatentStorage(
+        CSharpFunctionLoweringContext context,
+        GuestRegister value,
+        CSharpLatentStorageCell cell,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (value.TypeId != cell.SourceTypeId)
+        {
+            Add(context.Diagnostics,
+                $"Latent storage plan expected '{cell.SourceTypeId}' but lowered '{value.TypeId}'.");
+            return null;
+        }
+        if (value.TypeId == cell.StorageTypeId)
         {
             return value;
         }
-        bool hasBooleanStorageAdaptation = argument.TypeId == "type:bool"
-            && storageTypeId == "type:int32";
-        bool hasEnumStorageAdaptation = context.Document.TypeShapes.Any(shape =>
-            shape.TypeId == argument.TypeId
-            && shape.EnumUnderlyingTypeId == storageTypeId);
-        if (!hasBooleanStorageAdaptation && !hasEnumStorageAdaptation)
-        {
-            Add(context.Diagnostics,
-                $"Latent argument type '{argument.TypeId}' has no storage adaptation to '{storageTypeId}'.");
-            return null;
-        }
-
-        GuestRegister? storage = context.CreateTemporary(storageTypeId, blockOrdinal);
+        GuestRegister? storage = context.CreateTemporary(cell.StorageTypeId, blockOrdinal);
         if (storage is null)
         {
             return null;

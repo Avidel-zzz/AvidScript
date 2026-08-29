@@ -22,7 +22,75 @@ internal static class CSharpGuestContinuationTests
         AsyncAwaitLowersZeroHeapResumeSegments();
         GeneratedLatentAwaitLowersDynamicImport();
         GeneratedLatentEnumAwaitUsesUnderlyingStorage();
-        return 8;
+        GeneratedLatentAggregatesUseSharedStoragePlan();
+        return 9;
+    }
+
+    private static void GeneratedLatentAggregatesUseSharedStoragePlan()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    await UKismetSystemLibrary.WaitForTargetAsync(default);
+                    await UKismetSystemLibrary.WaitForLocationAsync(
+                        new FVector(1.0f, 2.0f, 3.0f));
+                    await UKismetSystemLibrary.WaitForSettingsAsync(default);
+                }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/GeneratedLatentAggregateGuest.cs");
+        CSharpGuestLoweringResult result = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = result.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                result.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        GuestInstruction[] instructions = module.Functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .ToArray();
+        GuestImport objectImport = module.Imports.Single(import =>
+            import.Name == "avid_ue_latent_object_test");
+        GuestImport vectorImport = module.Imports.Single(import =>
+            import.Name == "avid_ue_latent_vector_test");
+        GuestImport wireImport = module.Imports.Single(import =>
+            import.Name == "avid_ue_latent_wire_test");
+        GuestInstruction objectCall = instructions.Single(instruction =>
+            instruction.Op == "call" && instruction.TargetId == objectImport.Id);
+        GuestInstruction vectorCall = instructions.Single(instruction =>
+            instruction.Op == "call" && instruction.TargetId == vectorImport.Id);
+        GuestInstruction wireCall = instructions.Single(instruction =>
+            instruction.Op == "call" && instruction.TargetId == wireImport.Id);
+
+        Assert(result.Succeeded
+            && objectImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:int32", "type:int32", "type:int32",
+            })
+            && vectorImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:float32", "type:float32", "type:float32", "type:int32",
+            })
+            && wireImport.ParameterTypeIds.SequenceEqual(new[]
+            {
+                "type:address", "type:int32",
+            })
+            && objectCall.OperandIds.Count == 3
+            && vectorCall.OperandIds.Count == 4
+            && wireCall.OperandIds.Count == 2
+            && instructions.Count(instruction => instruction.Op == "field_load") >= 5
+            && instructions.Any(instruction => instruction.Op == "address_of")
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "generated latent aggregates should share recursive field and address storage plans");
     }
 
     private static void GeneratedLatentEnumAwaitUsesUnderlyingStorage()
@@ -641,12 +709,48 @@ internal static class CSharpGuestContinuationTests
             [AvidLatent("avidscript", "avid_ue_latent_enum_test")]
             public static AvidDelayAwaitable WaitForModeAsync(
                 EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_object_test")]
+            public static AvidDelayAwaitable WaitForTargetAsync(UObject Target) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_vector_test")]
+            public static AvidDelayAwaitable WaitForLocationAsync(FVector Location) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_wire_test")]
+            public static AvidDelayAwaitable WaitForSettingsAsync(
+                FAvidScriptStructWireRootTestType Settings) => default;
         }
 
         public enum EAvidScriptCSharpEmitterTestMode : int
         {
             Primary,
             Secondary,
+        }
+
+        public readonly struct UObject
+        {
+            private readonly int Slot;
+            private readonly int Generation;
+            internal int AvidScriptSlot => Slot;
+            internal int AvidScriptGeneration => Generation;
+        }
+
+        public readonly struct FVector
+        {
+            public readonly float X;
+            public readonly float Y;
+            public readonly float Z;
+            public FVector(float x, float y, float z)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+            }
+        }
+
+        public struct FAvidScriptStructWireRootTestType
+        {
+            public int Count;
         }
 
         internal static class AvidScriptRuntimeNative
@@ -668,6 +772,17 @@ internal static class CSharpGuestContinuationTests
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_enum_test")]
             internal static extern long InvokeEnumLatent(int mode, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_object_test")]
+            internal static extern long InvokeObjectLatent(int slot, int generation, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_vector_test")]
+            internal static extern long InvokeVectorLatent(float x, float y, float z, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_wire_test")]
+            internal static extern long InvokeWireLatent(
+                in FAvidScriptStructWireRootTestType settings,
+                int callbackId);
         }
         """;
 

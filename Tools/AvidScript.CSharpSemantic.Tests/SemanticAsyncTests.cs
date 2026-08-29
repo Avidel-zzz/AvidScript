@@ -33,6 +33,9 @@ internal static class SemanticAsyncTests
                     await UKismetSystemLibrary.DelayAsync(0.125f);
                     await UKismetSystemLibrary.WaitForFlagAsync(true);
                     await UKismetSystemLibrary.WaitForModeAsync();
+                    await UKismetSystemLibrary.WaitForTargetAsync(default);
+                    await UKismetSystemLibrary.WaitForLocationAsync(new FVector(1.0f, 2.0f, 3.0f));
+                    await UKismetSystemLibrary.WaitForSettingsAsync(default);
                 }
             }
             """;
@@ -48,12 +51,24 @@ internal static class SemanticAsyncTests
             site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_bool_test");
         SemanticAsyncAwaitSite enumSite = sites.Single(site =>
             site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_enum_test");
+        SemanticAsyncAwaitSite objectSite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_object_test");
+        SemanticAsyncAwaitSite vectorSite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_vector_test");
+        SemanticAsyncAwaitSite wireSite = sites.Single(site =>
+            site.ProducerKind == "binding_latent|avidscript|avid_ue_latent_wire_test");
         SemanticCallable delayImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_test" });
         SemanticCallable boolImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_bool_test" });
         SemanticCallable enumImport = document.Callables.Single(callable =>
             callable.Import is { Module: "avidscript", Name: "avid_ue_latent_enum_test" });
+        SemanticCallable objectImport = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_object_test" });
+        SemanticCallable vectorImport = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_vector_test" });
+        SemanticCallable wireImport = document.Callables.Single(callable =>
+            callable.Import is { Module: "avidscript", Name: "avid_ue_latent_wire_test" });
 
         Assert(document.Succeeded
             && delaySite.CallbackId == CompilerCallbackIdStart
@@ -83,6 +98,25 @@ internal static class SemanticAsyncTests
             && enumImport.Parameters.Select(parameter => parameter.TypeId)
                 .SequenceEqual(new[] { "type:int32", "type:int32" }),
             "generated enum latent producers should materialize the default enum and retain i32 import storage");
+        Assert(objectSite.CallbackId == CompilerCallbackIdStart + 3
+            && objectSite.Arguments.Count == 1
+            && objectSite.Arguments[0].TypeId?.EndsWith("UObject", StringComparison.Ordinal) == true
+            && objectImport.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:int32", "type:int32", "type:int32" }),
+            "generated object latent producers should retain one public capability and two import cells");
+        Assert(vectorSite.CallbackId == CompilerCallbackIdStart + 4
+            && vectorSite.Arguments.Count == 1
+            && vectorSite.Arguments[0].TypeId?.EndsWith("FVector", StringComparison.Ordinal) == true
+            && vectorImport.Parameters.Select(parameter => parameter.TypeId)
+                .SequenceEqual(new[] { "type:float32", "type:float32", "type:float32", "type:int32" }),
+            "generated vector latent producers should retain one public value and three import cells");
+        Assert(wireSite.CallbackId == CompilerCallbackIdStart + 5
+            && wireSite.Arguments.Count == 1
+            && wireImport.Parameters.Count == 2
+            && wireImport.Parameters[0].RefKind == "in"
+            && wireImport.Parameters[0].TypeId == wireSite.Arguments[0].TypeId
+            && wireImport.Parameters[1].TypeId == "type:int32",
+            "generated struct-wire latent producers should retain one public value and one address import");
     }
 
     private static void SequentialAwaitsProjectStableSegments()
@@ -457,12 +491,48 @@ internal static class SemanticAsyncTests
             [AvidLatent("avidscript", "avid_ue_latent_enum_test")]
             public static AvidVoidAwaitable WaitForModeAsync(
                 EAvidScriptCSharpEmitterTestMode Mode = EAvidScriptCSharpEmitterTestMode.Primary) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_object_test")]
+            public static AvidVoidAwaitable WaitForTargetAsync(UObject Target) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_vector_test")]
+            public static AvidVoidAwaitable WaitForLocationAsync(FVector Location) => default;
+
+            [AvidLatent("avidscript", "avid_ue_latent_wire_test")]
+            public static AvidVoidAwaitable WaitForSettingsAsync(
+                FAvidScriptStructWireRootTestType Settings) => default;
         }
 
         public enum EAvidScriptCSharpEmitterTestMode : int
         {
             Primary,
             Secondary,
+        }
+
+        public readonly struct UObject
+        {
+            private readonly int Slot;
+            private readonly int Generation;
+            internal int AvidScriptSlot => Slot;
+            internal int AvidScriptGeneration => Generation;
+        }
+
+        public readonly struct FVector
+        {
+            public readonly float X;
+            public readonly float Y;
+            public readonly float Z;
+            public FVector(float x, float y, float z)
+            {
+                X = x;
+                Y = y;
+                Z = z;
+            }
+        }
+
+        public struct FAvidScriptStructWireRootTestType
+        {
+            public int Count;
         }
 
         internal static class AvidScriptNative
@@ -475,6 +545,17 @@ internal static class SemanticAsyncTests
 
             [DllImport("avidscript", EntryPoint = "avid_ue_latent_enum_test")]
             internal static extern long InvokeEnumLatent(int mode, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_object_test")]
+            internal static extern long InvokeObjectLatent(int slot, int generation, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_vector_test")]
+            internal static extern long InvokeVectorLatent(float x, float y, float z, int callbackId);
+
+            [DllImport("avidscript", EntryPoint = "avid_ue_latent_wire_test")]
+            internal static extern long InvokeWireLatent(
+                in FAvidScriptStructWireRootTestType settings,
+                int callbackId);
         }
         """;
 

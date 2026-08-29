@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using AvidScript.CSharpSemantic;
 using AvidScript.GuestIr;
 
@@ -172,6 +173,64 @@ internal static class CSharpAggregateOperationLowerer
         }
 
         return context.ThisRegister;
+    }
+
+    public static GuestRegister? LowerFieldPath(
+        CSharpFunctionLoweringContext context,
+        GuestRegister aggregate,
+        IReadOnlyList<string> fieldPath,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister current = aggregate;
+        foreach (string fieldId in fieldPath)
+        {
+            if (!context.TryGetGuestType(current.TypeId, out GuestType aggregateType)
+                || aggregateType.Kind != "struct"
+                || aggregateType.Fields.SingleOrDefault(field => field.Id == fieldId)
+                    is not { } field)
+            {
+                context.Add("ASCG1004", $"Block {blockOrdinal} aggregate field path is not present in '{current.TypeId}'.");
+                return null;
+            }
+            GuestRegister? value = context.CreateTemporary(field.TypeId, blockOrdinal);
+            if (value is null)
+            {
+                return null;
+            }
+            instructions.Add(new GuestInstruction(
+                "field_load",
+                value.Id,
+                new[] { current.Id },
+                field.Id,
+                null,
+                null));
+            current = value;
+        }
+        return current;
+    }
+
+    public static GuestRegister? LowerStorageAddress(
+        CSharpFunctionLoweringContext context,
+        GuestRegister storage,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        GuestRegister? address = context.CreateTemporary(
+            CSharpGuestIds.AddressTypeId,
+            blockOrdinal);
+        if (address is null)
+        {
+            return null;
+        }
+        instructions.Add(new GuestInstruction(
+            "address_of",
+            address.Id,
+            Array.Empty<string>(),
+            storage.Id,
+            null,
+            null));
+        return address;
     }
 
     private static GuestRegister? Malformed(

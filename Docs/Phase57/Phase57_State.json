@@ -172,6 +172,12 @@
       "status": "Completed",
       "evidence": "generated latent enum value parameters retain nominal C# enum identity and defaults while Semantic TypeShape authorization and Guest conversion target the exact i32 import storage; a reflected project WaitForMode UFUNCTION and omitted default argument complete Reflection-to-WASM coverage without API-name branches; fixed .NET Semantic/C# Guest 174/174, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T06:03:04.7176705Z"
+    },
+    {
+      "id": "P57.12C6C",
+      "status": "Completed",
+      "evidence": "shared immutable latent storage plans now map one typed public aggregate argument to direct, recursive field, or in-address import cells with depth/cell bounds and exact source/storage identities; UObject capability, FVector and recursive struct-wire project through Reflection, Semantic validation, Guest IR and WASM without API-name branches or latent Runtime codecs; fixed .NET Semantic/C# Guest 175/175, UE5.8 no-clean AvidScriptEditor 6/6 actions and focused LatentV12 Automation 1/1 passed. Full Automation and clean architecture remain centralized at C6E; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T06:25:32.0374363Z"
     }
   ],
   "debt": [
@@ -191,8 +197,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C6B review confirms enum latent methods retain nominal C# identity and generated defaults while only a matching Semantic enum underlying TypeShape may adapt to import storage; bool remains the sole scalar special adaptation, and unsupported payload/cancellation surfaces stay fail closed.",
-    "completed_at_utc": "2026-08-29T06:03:04.7176705Z"
+    "evidence": "P57.12C6C review confirms validator and lowerer share one bounded immutable storage plan; object capability fields, expanded fixed structs and exact in-address struct-wire values compose with existing Runtime codecs without API-name branches, while variable ownership and completion payload surfaces remain fail closed.",
+    "completed_at_utc": "2026-08-29T06:25:32.0374363Z"
   },
   "budgets": {
     "ubt": 2,
@@ -200,8 +206,8 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 11,
-    "automation": 7,
+    "ubt": 12,
+    "automation": 8,
     "full_gate": 3
   },
   "freeze": {
@@ -241,6 +247,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 25,
-  "updated_at_utc": "2026-08-29T06:03:04.7176705Z"
+  "revision": 26,
+  "updated_at_utc": "2026-08-29T06:25:32.0374363Z"
 }

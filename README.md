@@ -253,6 +253,10 @@ P57.12C6B 同样支持 enum value 参数与 enum 默认值。C# 保留强类型 
 TypeShape 授权 underlying storage，Guest 发出零额外 WASM 指令的同存储转换；缺少或不匹配的 TypeShape
 会在生成物进入 Runtime 前失败。
 
+P57.12C6C 进一步支持 UObject capability、FVector/FRotator/FTransform 和已授权固定 USTRUCT value
+参数。共享 storage planner 根据 type graph 选择递归字段展开或 `in` address，validator 与 lowerer
+使用同一份计划；深度、cell 数与叶子类型均有上限，string/array 仍保持 fail closed。
+
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及多个顶层直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
 `FooAsync(...)`。普通 local 不能跨越下一 await；跨暂停状态需显式放入静态字段。旧 callback API、schema 10/11 Guest 与
@@ -551,8 +555,8 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
 当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C5 的 **361/361 通过**，固定 .NET
-完整基线为 `230/230`。P57.12C6B 当前受影响 Semantic/C# Guest 为 `174/174`、UE5.8 no-clean
-`AvidScriptEditor` `6/6` actions 与 latent bool/enum focused Automation `1/1`。
+完整基线为 `230/230`。P57.12C6C 当前受影响 Semantic/C# Guest 为 `175/175`、UE5.8 no-clean
+`AvidScriptEditor` `6/6` actions 与 latent typed-parameter focused Automation `1/1`。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
 [P57.12C6 中文合同与进度](Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md)。
