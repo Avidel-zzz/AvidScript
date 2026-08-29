@@ -14,7 +14,7 @@
   },
   "documents": {
     "plan": "Docs/Phase57/P57.12C1_Deterministic_Continuation_Core_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md"
+    "closeout": "Docs/Phase57/P57.12C7_Explicit_Cancellation_Source.md"
   },
   "batches": [
     {
@@ -190,6 +190,12 @@
       "status": "Completed",
       "evidence": "centralized C6 acceptance passed fixed .NET 232/232, UE5.8 no-clean AvidTPSTemplateEditor incremental build, full AvidScript Automation 361/361 with zero failures and clean candidate 7aa9f66/4223436d architecture gate; cancellation and completion payload remain design-only, and P57-D06 remains Fixing.",
       "completed_at_utc": "2026-08-29T06:52:52.3900087Z"
+    },
+    {
+      "id": "P57.12C7",
+      "status": "Completed",
+      "evidence": "commit adb9f94; Session-owned explicit cancellation sources, kind-separated i64 tokens, atomic continuation_bind_cancel, active/prepared lane fencing, generated AvidCancellationSource facade and real BeginPlay/EndPlay C# lifecycle completed without API-name wrappers; fixed .NET 233/233, UE5.8 no-clean Editor build 19/19 actions, continuation focused Automation 7/7, full Automation executed 362 tests with 360 successes and two stale emitter goldens, corrective complete emitter group 14/14, and clean adb9f94/0cfa530 architecture gate passed. Completion payload remains P57.12C8 and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T07:54:21.8947090Z"
     }
   ],
   "debt": [
@@ -209,8 +215,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C6 centralized review confirms descriptor-derived bool, enum, UObject capability, vector/transform and fixed USTRUCT latent value lowering, while C6D cancellation and payload contracts remain design-only; fixed .NET 232/232, full Automation 361/361 and clean candidate architecture gate passed.",
-    "completed_at_utc": "2026-08-29T06:52:52.3900087Z"
+    "evidence": "P57.12C7 review confirms cancellation-source ownership, token-kind isolation, atomic source binding, prepared-lane promotion/discard, source fan-out, dispatch race policy, generated facade authorization and schedule-order fail-closed behavior. Fixed .NET 233/233, UE5.8 no-clean build, focused 7/7, initial full 360/362 plus corrective emitter 14/14, and clean candidate architecture gate passed. Completion payload remains unimplemented and P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-29T07:54:21.8947090Z"
   },
   "budgets": {
     "ubt": 2,
@@ -218,25 +224,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 13,
-    "automation": 9,
-    "full_gate": 4
+    "ubt": 14,
+    "automation": 12,
+    "full_gate": 5
   },
   "freeze": {
-    "source_commit": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
-    "source_tree": "4223436d49d05cfb7754ceb4b00b47432fe7e61a",
+    "source_commit": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
+    "source_tree": "0cfa5300b81489bfbfb29b9eeb65afa9bde63cc2",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C6_Latent_Type_And_Cancellation_Contract.md",
-    "at_utc": "2026-08-29T06:52:52.3900087Z"
+    "review_evidence": "Docs/Phase57/P57.12C7_Explicit_Cancellation_Source.md",
+    "at_utc": "2026-08-29T07:54:21.8947090Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C6E_Architecture_7aa9f66.log",
-    "report_sha256": "f80f850367ac7e9dda8da9065fa2a5e83733bc4390f4fa4e13d594778f3706b8",
-    "run_id": "P57.12C6E-clean-architecture-final",
-    "verified_commit": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
-    "verified_tree": "4223436d49d05cfb7754ceb4b00b47432fe7e61a",
-    "attestation_parent": "7aa9f66c283385b70bbfdab793cdcbbf590f68c7",
-    "attested_at_utc": "2026-08-29T06:52:52.3900087Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C7_Architecture_adb9f94.log",
+    "report_sha256": "dc567a2930966c3978723f8999010c3fd116547b69a8a58c6b390f6e27ab5fdf",
+    "run_id": "P57.12C7-clean-architecture-final",
+    "verified_commit": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
+    "verified_tree": "0cfa5300b81489bfbfb29b9eeb65afa9bde63cc2",
+    "attestation_parent": "adb9f942f7954cb243489a412c7f5ce75d7c1bbf",
+    "attested_at_utc": "2026-08-29T07:54:21.8947090Z"
   },
   "protected_dirty": [
     {
@@ -259,6 +265,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 28,
-  "updated_at_utc": "2026-08-29T06:52:52.3900087Z"
+  "revision": 29,
+  "updated_at_utc": "2026-08-29T07:54:21.8947090Z"
 }
