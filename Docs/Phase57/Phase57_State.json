@@ -13,8 +13,8 @@
     "revision_reason": "P57.12B extends the generated dynamic-multicast contract to session-capability UObject sources with opaque i64 tokens, explicit cancellation, transactional candidate subscriptions, and deterministic teardown"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription_Plan.md",
-    "closeout": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription.md"
+    "plan": "Docs/Phase57/P57.12C1_Deterministic_Continuation_Core_Plan.md",
+    "closeout": "Docs/Phase57/P57.12C5_Generated_Latent_Await.md"
   },
   "batches": [
     {
@@ -130,6 +130,36 @@
       "status": "Completed",
       "evidence": "Generated AvidSubscriptions and opaque i64 AvidSubscription tokens now bind Profile-authorized dynamic multicast events on any compatible current-session owned/borrowed UObject capability; registry, world, owner type, stale handle, candidate transaction, explicit cancel, callback self-cancel and teardown are enforced without per-event wrappers; Semantic 68/68, C# Guest 87/87, UE5.8 no-clean 18-action build, full Automation 350/350 and clean eca1687/b9aaa71 architecture gate passed.",
       "completed_at_utc": "2026-08-23T07:40:55.4730420Z"
+    },
+    {
+      "id": "P57.12C1",
+      "status": "Completed",
+      "evidence": "commit e2cc4ab; Session-owned deterministic Delay/NextTick continuation core, generational tokens, explicit cancel, active/prepared transaction and teardown completed; fixed .NET and no-clean UE5.8 build passed, full Automation 355/355 and clean e2cc4ab/4c5baae architecture gate passed.",
+      "completed_at_utc": "2026-08-27T16:10:02.0000000Z"
+    },
+    {
+      "id": "P57.12C2",
+      "status": "Completed",
+      "evidence": "commit 6d732f3; generic FStreamableManager async object producer, continuation result/status ABI, current-session object capability publication, candidate rollback and teardown completed; fixed .NET 223/223, no-clean UE5.8 build, full Automation 357/357 and clean architecture gate passed.",
+      "completed_at_utc": "2026-08-28T13:48:46.0000000Z"
+    },
+    {
+      "id": "P57.12C3",
+      "status": "Completed",
+      "evidence": "commit 73f5251; Roslyn semantic and Guest lowering now compile controlled C# async void exports into zero-spill CPS segments for Delay, NextTick and object loading; fixed .NET 228/228, no-clean UE5.8 build, full Automation 357/357 and clean architecture gate passed.",
+      "completed_at_utc": "2026-08-29T02:53:52.0000000Z"
+    },
+    {
+      "id": "P57.12C4",
+      "status": "Completed",
+      "evidence": "commit e5a6a7b; continuation activation liveness is fenced at scheduling, producer completion, prepared commit and Guest dispatch, with whole-lane invalidation on owner generation or World teardown; no-clean UE5.8 build, focused 5/5, full Automation 358/358 and clean architecture gate passed.",
+      "completed_at_utc": "2026-08-29T03:47:26.0000000Z"
+    },
+    {
+      "id": "P57.12C5",
+      "status": "Completed",
+      "evidence": "commits 6ea57db and 0cbb9fe; descriptor schema v12, generic reflected completion-only latent policy, Session reservation/commit/abort transaction, real FLatentActionManager bridge, generated C# FooAsync facade and dynamic Guest import completed without API-name wrappers; fixed .NET 230/230, UE5.8 no-clean build, focused latent 2/2, corrective 3/3, full Automation 361/361 and clean 0cbb9fe/ab5e327 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T05:27:49.5456043Z"
     }
   ],
   "debt": [
@@ -149,8 +179,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "Centralized P57.12B review closed i64 token identity, current-session capability authorization, normalized HostContext world, stale/type/world rejection, candidate prepare/commit behavior, successful reload invalidation, failed reload preservation, callback self-cancel safety, generated transient-state enforcement and WAMR/Wasmtime import parity.",
-    "completed_at_utc": "2026-08-23T07:40:55.4730420Z"
+    "evidence": "Centralized P57.12C5 review closed latent metadata eligibility, hidden WorldContext/FLatentActionInfo injection, schema v12 identity, per-token callback proxy ownership, reservation/commit/abort behavior, synchronous completion, candidate discard, teardown suppression, generated AvidLatent provenance and dynamic Guest import selection without API-name wrappers.",
+    "completed_at_utc": "2026-08-29T05:27:49.5456043Z"
   },
   "budgets": {
     "ubt": 2,
@@ -163,20 +193,20 @@
     "full_gate": 3
   },
   "freeze": {
-    "source_commit": "eca16871d17951b996503c847975deb7559ea38c",
-    "source_tree": "b9aaa71d0e5c3632b67761221bf4c916aaa1eeec",
+    "source_commit": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
+    "source_tree": "ab5e3273414de465a3512fbe3415eec038f6170d",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12B_Arbitrary_Object_Event_Subscription_Evidence.json",
-    "at_utc": "2026-08-23T07:40:55.4730420Z"
+    "review_evidence": "Docs/Phase57/P57.12C5_Generated_Latent_Await.md",
+    "at_utc": "2026-08-29T05:27:49.5456043Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12B_Architecture_eca1687.log",
-    "report_sha256": "b2d2382fd2a88c5f9770ac60f5d555a84f89db8a8b162bac40fafa77519fb0b2",
-    "run_id": "P57.12B-clean-architecture-final",
-    "verified_commit": "eca16871d17951b996503c847975deb7559ea38c",
-    "verified_tree": "b9aaa71d0e5c3632b67761221bf4c916aaa1eeec",
-    "attestation_parent": "eca16871d17951b996503c847975deb7559ea38c",
-    "attested_at_utc": "2026-08-23T07:40:55.4730420Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12C5_Architecture_0cbb9fe.log",
+    "report_sha256": "f620e5d2ed4457a49dc4ec082df971bfbf4cdc31fcd5a37328c3982caf155498",
+    "run_id": "P57.12C5-clean-architecture-final",
+    "verified_commit": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
+    "verified_tree": "ab5e3273414de465a3512fbe3415eec038f6170d",
+    "attestation_parent": "0cbb9fe6c2819ed6bf020cdbd1cfae5c4095b986",
+    "attested_at_utc": "2026-08-29T05:27:49.5456043Z"
   },
   "protected_dirty": [
     {
@@ -199,6 +229,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 22,
-  "updated_at_utc": "2026-08-23T07:40:55.4730420Z"
+  "revision": 23,
+  "updated_at_utc": "2026-08-29T05:27:49.5456043Z"
 }
