@@ -29,7 +29,8 @@ internal static class CSharpGuestContinuationTests
         AsyncStateFramesPreserveLocalsAcrossSequentialAwaits();
         StructuredAsyncFlowLowersDeterministicGuestBlocks();
         NestedAwaitCfgLowersBranchAndLoopResumes();
-        return 15;
+        SwitchAwaitCfgLowersDeterministicDispatch();
+        return 16;
     }
 
     private static void AsyncOutcomeGuardBranchesBeforeNextAwait()
@@ -965,6 +966,99 @@ internal static class CSharpGuestContinuationTests
         };
         Assert(!CSharpGuestLowerer.Lower(tampered, SemanticHash).Succeeded,
             "continuation CFG targets outside the current method must fail closed before Guest lowering");
+    }
+
+    private static void SwitchAwaitCfgLowersDeterministicDispatch()
+    {
+        const string source = """
+            using System.Runtime.InteropServices;
+            using AvidScript;
+
+            namespace Game;
+
+            public static class Script
+            {
+                [UnmanagedCallersOnly(EntryPoint = "avid_on_begin_play")]
+                public static async void BeginPlay()
+                {
+                    int mode = 2;
+                    switch (mode)
+                    {
+                        case 0:
+                            return;
+                        case 1:
+                            await AvidContinuations.NextTickAsync();
+                            break;
+                        case 2:
+                        case 3:
+                            await AvidContinuations.DelayAsync(0.01f);
+                            break;
+                        default:
+                            Consume(-1);
+                            break;
+                    }
+                    Consume(mode);
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/SwitchAwaitCfgGuest.cs");
+        CSharpGuestLoweringResult first = CSharpGuestLowerer.Lower(document, SemanticHash);
+        CSharpGuestLoweringResult second = CSharpGuestLowerer.Lower(document, SemanticHash);
+        GuestModule module = first.Module
+            ?? throw new InvalidOperationException(string.Join(
+                " | ",
+                first.Diagnostics.Select(diagnostic => diagnostic.Message)));
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        GuestFunction initial = module.Functions.Single(function =>
+            function.Id == module.Exports.Single(export =>
+                export.Name == "avid_on_begin_play").FunctionId);
+        SemanticAsyncSegment[] awaitSegments = method.Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .OrderBy(segment => segment.AwaitSite!.CallbackId)
+            .ToArray();
+        string modeId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "mode").Id;
+
+        Assert(first.Succeeded
+            && second.Succeeded
+            && awaitSegments.Length == 2
+            && awaitSegments.All(segment => segment.AwaitSite!.StateFrame!.Slots.Any(slot =>
+                slot.SymbolId == modeId))
+            && initial.Blocks.Count(block =>
+                block.Terminator.Kind == "branch_if"
+                && block.Instructions.Any(instruction =>
+                    instruction.Op == "binary" && instruction.OperatorKind == "equals")) == 4
+            && initial.Blocks.SelectMany(block => block.Instructions).Count(instruction =>
+                instruction.Op == "binary" && instruction.OperatorKind == "equals") == 4
+            && module.Functions.Count(function => function.Id.StartsWith(
+                "function:synthetic:async_resume:",
+                StringComparison.Ordinal)) == 2,
+            "switch await should lower source-ordered case dispatch and one resume function per await site");
+        Assert(GuestIrSerializer.Serialize(module)
+                .SequenceEqual(GuestIrSerializer.Serialize(second.Module!))
+            && GuestModuleValidator.Validate(module).Succeeded
+            && WasmModuleCompiler.Compile(module).Succeeded,
+            "switch continuation CFG should remain deterministic, valid, and compilable to WASM");
+
+        SemanticAsyncSegment branch = method.Segments.First(segment =>
+            segment.Transfer?.Kind == SemanticAsyncMethod.BranchTransferKind);
+        SemanticAsyncSegment[] tamperedSegments = method.Segments
+            .Select(segment => segment.Ordinal == branch.Ordinal
+                ? segment with
+                {
+                    Transfer = segment.Transfer! with { Condition = null },
+                }
+                : segment)
+            .ToArray();
+        SemanticDocument tampered = document with
+        {
+            AsyncMethods = new[] { method with { Segments = tamperedSegments } },
+        };
+        Assert(!CSharpGuestLowerer.Lower(tampered, SemanticHash).Succeeded,
+            "switch CFG branch transfers without canonical conditions must fail closed");
     }
 
     private static void CallbacksProduceOneDeterministicSixCellV2Export()

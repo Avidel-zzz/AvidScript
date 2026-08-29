@@ -57,9 +57,15 @@ public static class GameplayScript
                 loadedMeshScale.Y + scaleStep.Y,
                 loadedMeshScale.Z + scaleStep.Z);
         }
-        if (!HasAwaitedDefaultMesh)
+        switch (scalePasses)
         {
-            await AvidContinuations.DelayAsync(0.01f);
+            case 1:
+                break;
+            case 2:
+                await AvidContinuations.DelayAsync(0.01f);
+                break;
+            default:
+                return;
         }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
         UE.Self.SetActorScale3D(loadedMeshScale);

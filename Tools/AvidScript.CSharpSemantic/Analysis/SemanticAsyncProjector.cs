@@ -180,9 +180,10 @@ internal static class SemanticAsyncProjector
             return false;
         }
 
-        bool hasNestedAwait = awaits.Any(awaitExpression =>
-            !IsDirectMethodBodyAwait(declaration.Body, awaitExpression));
-        if (hasNestedAwait)
+        bool requiresControlFlowCfg = awaits.Any(awaitExpression =>
+                !IsDirectMethodBodyAwait(declaration.Body, awaitExpression))
+            || declaration.Body.DescendantNodes().OfType<SwitchStatementSyntax>().Any();
+        if (requiresControlFlowCfg)
         {
             if (!SemanticAsyncControlFlowProjector.TryProject(
                 context,

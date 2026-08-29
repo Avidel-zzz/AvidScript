@@ -2944,6 +2944,7 @@ foreach ($RequiredControlledAsyncProjectionContract in @(
     'TryAttachStateFrames',
     'TryProjectEarlyReturnGuard',
     'EarlyReturnGuardOperationKind',
+    'requiresControlFlowCfg',
     'MaximumStateSlotsPerAwait = 64',
     'SemanticAsyncStateFlowAnalyzer.Analyze',
     'SlotsByAwaitSegment',
@@ -2983,6 +2984,10 @@ foreach ($RequiredAsyncCfgProjectionContract in @(
     'CollectReachable',
     'callbackByDraft',
     'TryProjectAwaitSite',
+    'SwitchStatementSyntax',
+    'CaseSwitchLabelSyntax',
+    'BuildSwitch',
+    'ASCS5418',
     'ASCS5417'
 )) {
     if (-not $SemanticAsyncCfgSource.Contains($RequiredAsyncCfgProjectionContract)) {

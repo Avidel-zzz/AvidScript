@@ -59,9 +59,15 @@ public static class ActorLifecycleScript
             await AvidContinuations.NextTickAsync();
             UE.Self.AddActorWorldOffset(loadedMeshOffset);
         }
-        if (!HasAwaitedDefaultMesh)
+        switch (movementPasses)
         {
-            await AvidContinuations.DelayAsync(0.01f);
+            case 1:
+                break;
+            case 2:
+                await AvidContinuations.DelayAsync(0.01f);
+                break;
+            default:
+                return;
         }
         HasAwaitedDefaultMesh = loadedObject.IsValid;
     }

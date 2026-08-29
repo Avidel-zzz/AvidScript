@@ -103,6 +103,8 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
 		TEXT("await AvidAssets.LoadObjectAsync("));
 	const int32 AsyncLoopIndex = InitialSourceText.Find(
 		TEXT("for (int pass = 0; pass < scalePasses; ++pass)"));
+	const int32 SwitchAwaitIndex = InitialSourceText.Find(
+		TEXT("switch (scalePasses)"));
 	const int32 ConditionalDelayIndex = InitialSourceText.Find(
 		TEXT("await AvidContinuations.DelayAsync(0.01f);"));
 	const int32 ObjectUseIndex = InitialSourceText.Find(
@@ -111,8 +113,9 @@ bool FAvidScriptEditorCSharpWorkspaceCreateRefreshTest::RunTest(const FString& P
 		ObjectAwaitIndex != INDEX_NONE
 		&& AsyncLoopIndex > ObjectAwaitIndex
 		&& NextTickAwaitIndex > AsyncLoopIndex);
-	TestTrue(TEXT("Gameplay starter supports a conditional delay continuation"),
-		ConditionalDelayIndex > NextTickAwaitIndex
+	TestTrue(TEXT("Gameplay starter supports a switch-section delay continuation"),
+		SwitchAwaitIndex > NextTickAwaitIndex
+		&& ConditionalDelayIndex > SwitchAwaitIndex
 		&& ObjectUseIndex > ConditionalDelayIndex);
 	TestTrue(TEXT("Gameplay starter declares begin overlap callback"), InitialSourceText.Contains(TEXT("public static void OnBeginOverlap(AActor otherActor, FVector location)")));
 	TestTrue(TEXT("Gameplay starter declares end overlap callback"), InitialSourceText.Contains(TEXT("public static void OnEndOverlap(AActor otherActor, FVector location)")));

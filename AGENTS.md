@@ -89,6 +89,8 @@ Plugins/AvidScript/Docs
 
 ## Build And Verification Workflow
 
+- 2026-08-30 P57.12C15 更新 sample/template/workspace fixture 时，凭印象把模板局部名写成 sample 的 `movementPasses`，并使用了不匹配真实格式的 C++ 断言锚点，导致三文件 `apply_patch` 被原子拒绝；没有部分写入。Prevention：跨 sample/template/fixture 的同步修改必须先分别读取每个 owner 的精确局部名与断言格式，再按文件或连续 owner 小补丁落盘；不得假设示例与模板变量命名相同。
+- 2026-08-30 P57.12C15 启动时，在刚完成 C14 收尾后把 `AGENTS.md` 与 C14 计划的两个 `Get-Content` 用分号放入同一只读 shell 调用，重复违反单命令单证据域；仅产生截断输出，没有文件副作用。Prevention：每次阶段切换后，把首轮读取清单逐项展开为独立工具调用；发送 `exec_command` 前机械扫描顶层 `;`、`&&`、`||`，命中即拆分，不因“同属架构读取”而合并。
 - 2026-08-30 P57.12C13 读取 ActorLifecycle sample 与 ProjectWorkspace template 时，把两个独立 `Get-Content` 放入同一个多行 shell 调用，重复破坏单命令证据域；仅发生只读输出，无文件副作用。Prevention：多文件读取必须使用允许的并行工具；当前工具面没有该入口时逐文件调用，禁止用换行代替分号规避单命令规则。
 - 2026-08-30 P57.12C13 上下文恢复后先执行了 C12 Git 收尾与源码读取，随后才补跑 `Build/InvokePhaseWorkflow.ps1 status -Phase 57`，违反恢复门闩；未修改状态机或保护文件，远端提交本身有效。Prevention：每次压缩、断线或自动续跑后，首个插件仓库命令必须机械固定为当前最高 Phase 的 `status`；在其成功前禁止 Git、源码、计划和 evidence 读取。
 - 2026-08-30 P57.12C13 版本 owner 扫描再次把 `-g` 放在 `rg --` 之后，glob 被解释为路径并误扫第三方大文件。Prevention：内容检索命令固定为 `rg <options-and-globs> -F -- '<literal>' <confirmed-roots>`；发送前检查 `--` 后只存在 pattern 和已确认路径，不允许任何 option。

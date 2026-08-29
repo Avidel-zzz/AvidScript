@@ -994,7 +994,7 @@ Assert-Condition ($AsyncMethods.Count -eq 1) "ActorLifecycle does not expose one
 Assert-Condition ([string]$AsyncMethods[0].export_name -ceq 'avid_on_begin_play' -and
     [string]$AsyncMethods[0].lowering -ceq 'continuation_cfg' -and
     [int]$AsyncMethods[0].entry_segment_ordinal -eq 0 -and
-    @($AsyncMethods[0].segments).Count -eq 25) `
+    @($AsyncMethods[0].segments).Count -eq 29) `
     "ActorLifecycle BeginPlay controlled async graph is invalid"
 $AsyncAwaitSites = @($AsyncMethods[0].segments | ForEach-Object { $_.await_site } | Where-Object { $null -ne $_ })
 Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1073741825,1073741826' -and
@@ -1003,9 +1003,9 @@ Assert-Condition ((@($AsyncAwaitSites.callback_id) -join ',') -ceq '1073741824,1
     "ActorLifecycle compiler-owned await sites differ"
 $AsyncTransfers = @($AsyncMethods[0].segments | ForEach-Object { $_.transfer })
 Assert-Condition (@($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'await' }).Count -eq 3 -and
-    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'branch' }).Count -eq 4 -and
-    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'goto' }).Count -eq 16 -and
-    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'return' }).Count -eq 2 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'branch' }).Count -eq 5 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'goto' }).Count -eq 18 -and
+    @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'return' }).Count -eq 3 -and
     @($AsyncTransfers | Where-Object { [string]$_.kind -ceq 'await' -and [int]$_.primary_target -lt 0 }).Count -eq 0) `
     "ActorLifecycle continuation CFG transfer contract differs"
 $GameplayCallbacks = @($SemanticJson.gameplay_event_callbacks)

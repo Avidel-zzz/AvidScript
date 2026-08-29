@@ -15,11 +15,12 @@ internal static class SemanticAsyncTests
         CrossBoundaryLocalsPublishStateFrames();
         StructuredFlowProjectsExactStateFrames();
         NestedAwaitsProjectContinuationCfg();
+        SwitchAwaitsProjectContinuationCfg();
         NonFrozenAsyncShapesRemainFailClosed();
         CallbackRangesAndAwaitLimitsAreEnforced();
         ControlFlowSegmentLimitFailsClosed();
         GeneratedLatentProducerProjectsImportIdentity();
-        return 9;
+        return 10;
     }
 
     private static void EarlyReturnGuardsProjectStableControlOperations()
@@ -516,6 +517,167 @@ internal static class SemanticAsyncTests
             && branchFrame.Slots.Select(slot => slot.SymbolId)
                 .SequenceEqual(new[] { movementCountId }),
             "CFG liveness should preserve loop control state and remove locals that are dead at a later branch await");
+    }
+
+    private static void SwitchAwaitsProjectContinuationCfg()
+    {
+        const string source = """
+            using AvidScript;
+
+            namespace Game;
+
+            public enum Mode
+            {
+                Stop,
+                Tick,
+                Delay,
+                AlsoDelay,
+            }
+
+            public static class Script
+            {
+                [AvidExport("switch_cfg")]
+                public static async void SwitchCfg()
+                {
+                    Mode mode = Mode.Delay;
+                    switch (mode)
+                    {
+                        case Mode.Stop:
+                            return;
+                        case Mode.Tick:
+                            await AvidContinuations.NextTickAsync();
+                            break;
+                        case Mode.Delay:
+                        case Mode.AlsoDelay:
+                            await AvidContinuations.DelayAsync(0.01f);
+                            break;
+                        default:
+                            await AvidContinuations.NextTickAsync();
+                            break;
+                    }
+                    Consume((int)mode);
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+
+        SemanticDocument document = Analyze(source, "Scripts/SwitchAwaitCfg.cs");
+        SemanticAsyncMethod method = document.AsyncMethods.Single();
+        SemanticAsyncSegment[] awaitSegments = method.Segments
+            .Where(segment => segment.AwaitSite is not null)
+            .OrderBy(segment => segment.AwaitSite!.CallbackId)
+            .ToArray();
+        string modeId = document.Symbols.Single(symbol =>
+            symbol.Kind == "local" && symbol.Name == "mode").Id;
+
+        Assert(document.Succeeded
+            && method.Lowering == SemanticAsyncMethod.ContinuationCfgLowering
+            && awaitSegments.Length == 3
+            && method.Segments.Count(segment => segment.Transfer?.Kind
+                == SemanticAsyncMethod.BranchTransferKind) == 4
+            && awaitSegments.All(segment => segment.AwaitSite!.StateFrame!.Slots.Any(slot =>
+                slot.SymbolId == modeId))
+            && method.Segments.Where(segment => segment.Transfer?.Kind
+                    == SemanticAsyncMethod.BranchTransferKind)
+                .All(segment => segment.Transfer!.Condition is
+                {
+                    Kind: "binary",
+                    OperatorKind: "equals",
+                    TypeId: "type:bool",
+                }),
+            "enum switch sections should project deterministic equality dispatch and exact await state frames");
+
+        const string unstableSource = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [AvidExport("unstable_switch")]
+                public static async void UnstableSwitch()
+                {
+                    switch (SelectMode())
+                    {
+                        case 1:
+                            await AvidContinuations.NextTickAsync();
+                            break;
+                    }
+                }
+
+                private static int SelectMode() => 1;
+            }
+            """;
+        SemanticDocument unstable = Analyze(unstableSource, "Scripts/UnstableSwitchAwait.cs");
+        Assert(!unstable.Succeeded
+            && unstable.AsyncMethods.Count == 0
+            && unstable.Diagnostics.Any(diagnostic => diagnostic.Code == "ASCS5418"),
+            "side-effecting switch governing expressions should fail closed until hidden spill locals are frozen");
+
+        const string synchronousSwitchSource = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [AvidExport("synchronous_switch")]
+                public static async void SynchronousSwitch()
+                {
+                    await AvidContinuations.NextTickAsync();
+                    int mode = 1;
+                    switch (mode)
+                    {
+                        case 1:
+                            Consume(mode);
+                            break;
+                        default:
+                            return;
+                    }
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+        SemanticDocument synchronousSwitch = Analyze(
+            synchronousSwitchSource,
+            "Scripts/SynchronousSwitchCfg.cs");
+        Assert(synchronousSwitch.Succeeded
+            && synchronousSwitch.AsyncMethods.Single().Lowering
+                == SemanticAsyncMethod.ContinuationCfgLowering,
+            "controlled async methods containing synchronous switch dispatch should select continuation CFG lowering");
+
+        const string loopSwitchSource = """
+            using AvidScript;
+            namespace Game;
+            public static class Script
+            {
+                [AvidExport("loop_switch")]
+                public static async void LoopSwitch()
+                {
+                    int mode = 0;
+                    while (mode < 2)
+                    {
+                        switch (mode)
+                        {
+                            case 0:
+                                ++mode;
+                                await AvidContinuations.NextTickAsync();
+                                continue;
+                            default:
+                                break;
+                        }
+                        break;
+                    }
+                    Consume(mode);
+                }
+
+                private static void Consume(int value) { }
+            }
+            """;
+        SemanticDocument loopSwitch = Analyze(loopSwitchSource, "Scripts/LoopSwitchCfg.cs");
+        Assert(loopSwitch.Succeeded
+            && loopSwitch.AsyncMethods.Single().Segments.Single(segment =>
+                    segment.AwaitSite is not null)
+                .AwaitSite!.StateFrame!.Slots.Any(),
+            "switch break should exit the switch while continue retains the enclosing loop target across await");
     }
 
     private static void NonFrozenAsyncShapesRemainFailClosed()

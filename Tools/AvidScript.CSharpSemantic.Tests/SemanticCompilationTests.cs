@@ -28,7 +28,12 @@ internal static class SemanticCompilationTests
 
         SemanticDocument document = SemanticAnalyzer.Analyze(source, sourceId, frontend.Source.Sha256);
 
-        Assert(document.Succeeded, "ActorLifecycle semantic analysis should succeed");
+        Assert(
+            document.Succeeded,
+            "ActorLifecycle semantic analysis should succeed: " + string.Join(
+                " | ",
+                document.Diagnostics.Select(diagnostic =>
+                    $"{diagnostic.Code}: {diagnostic.Message}")));
         Assert(document.Source.Sha256 == frontend.Source.Sha256, "semantic source hash should match frontend");
         Assert(document.Source.FrontendSha256 == frontend.Source.Sha256, "semantic artifact should retain frontend source hash");
         Assert(document.Diagnostics.All(diagnostic => diagnostic.Severity != "error"), "ActorLifecycle should have no semantic errors");

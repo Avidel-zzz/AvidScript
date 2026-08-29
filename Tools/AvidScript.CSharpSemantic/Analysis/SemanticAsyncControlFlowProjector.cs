@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 
 namespace AvidScript.CSharpSemantic;
@@ -216,6 +217,9 @@ internal static class SemanticAsyncControlFlowProjector
                 case ForStatementSyntax loop:
                     return BuildFor(loop, successor, targets, depth);
 
+                case SwitchStatementSyntax switchStatement:
+                    return BuildSwitch(switchStatement, successor, targets, depth);
+
                 case BreakStatementSyntax:
                     if (targets.BreakTarget < 0)
                     {
@@ -244,6 +248,12 @@ internal static class SemanticAsyncControlFlowProjector
                             null,
                             -1,
                             -1));
+
+                case GotoStatementSyntax gotoStatement:
+                    return Reject(
+                        "Controlled async switch does not support goto case, goto default, or labels.",
+                        gotoStatement.Span,
+                        "ASCS5418");
 
                 case EmptyStatementSyntax:
                     return AddGoto(statement.Span, successor);
@@ -503,6 +513,152 @@ internal static class SemanticAsyncControlFlowProjector
             return entry;
         }
 
+        private int BuildSwitch(
+            SwitchStatementSyntax switchStatement,
+            int successor,
+            LoopTargets outerTargets,
+            int depth)
+        {
+            if (!TryProjectSwitchValue(
+                switchStatement.Expression,
+                out SemanticOperation? governingValue))
+            {
+                return -1;
+            }
+
+            List<SwitchCaseTarget> cases = new();
+            int defaultTarget = successor;
+            bool hasDefault = false;
+            foreach (SwitchSectionSyntax section in switchStatement.Sections)
+            {
+                int sectionEntry = BuildSequence(
+                    section.Statements,
+                    successor,
+                    new LoopTargets(successor, outerTargets.ContinueTarget),
+                    depth + 1);
+                if (sectionEntry < 0)
+                {
+                    return -1;
+                }
+
+                foreach (SwitchLabelSyntax label in section.Labels)
+                {
+                    switch (label)
+                    {
+                        case CaseSwitchLabelSyntax caseLabel:
+                            if (!semanticModel.GetConstantValue(caseLabel.Value).HasValue
+                                || !TryProjectValue(caseLabel.Value, out SemanticOperation? caseValue)
+                                || !string.Equals(
+                                    governingValue!.TypeId,
+                                    caseValue!.TypeId,
+                                    StringComparison.Ordinal))
+                            {
+                                return Reject(
+                                    "Controlled async switch case labels must be compatible compile-time constants.",
+                                    caseLabel.Span,
+                                    "ASCS5418");
+                            }
+                            cases.Add(new SwitchCaseTarget(
+                                caseLabel,
+                                caseValue!,
+                                sectionEntry));
+                            break;
+
+                        case DefaultSwitchLabelSyntax defaultLabel:
+                            if (hasDefault)
+                            {
+                                return Reject(
+                                    "Controlled async switch permits one default label.",
+                                    defaultLabel.Span,
+                                    "ASCS5418");
+                            }
+                            hasDefault = true;
+                            defaultTarget = sectionEntry;
+                            break;
+
+                        default:
+                            return Reject(
+                                "Controlled async switch supports constant case labels and default only.",
+                                label.Span,
+                                "ASCS5418");
+                    }
+                }
+            }
+
+            int dispatchEntry = defaultTarget;
+            for (int index = cases.Count - 1; index >= 0; --index)
+            {
+                SwitchCaseTarget item = cases[index];
+                SemanticOperation condition = CreateEquality(
+                    governingValue!,
+                    item.Value,
+                    item.Label.Span);
+                dispatchEntry = AddDraft(
+                    item.Label.Span,
+                    Array.Empty<SemanticAsyncStatement>(),
+                    null,
+                    new DraftTransfer(
+                        SemanticAsyncMethod.BranchTransferKind,
+                        condition,
+                        item.SectionTarget,
+                        dispatchEntry));
+                if (dispatchEntry < 0)
+                {
+                    return -1;
+                }
+            }
+            return dispatchEntry;
+        }
+
+        private bool TryProjectSwitchValue(
+            ExpressionSyntax expression,
+            out SemanticOperation? projected)
+        {
+            IOperation? operation = semanticModel.GetOperation(expression);
+            ITypeSymbol? type = semanticModel.GetTypeInfo(expression).Type;
+            if (!IsStableSwitchRead(operation) || !IsSupportedSwitchType(type))
+            {
+                diagnostics.Add(Error(
+                    "ASCS5418",
+                    "Controlled async switch requires an integral or enum local/parameter governing value.",
+                    expression.Span));
+                projected = null;
+                failed = true;
+                return false;
+            }
+            return TryProjectValue(expression, out projected);
+        }
+
+        private static bool IsStableSwitchRead(IOperation? operation)
+        {
+            return operation switch
+            {
+                ILocalReferenceOperation => true,
+                IParameterReferenceOperation => true,
+                IConversionOperation conversion => IsStableSwitchRead(conversion.Operand),
+                IParenthesizedOperation parenthesized => IsStableSwitchRead(parenthesized.Operand),
+                _ => false,
+            };
+        }
+
+        private static bool IsSupportedSwitchType(ITypeSymbol? type)
+        {
+            if (type?.TypeKind == TypeKind.Enum)
+            {
+                return true;
+            }
+            return type?.SpecialType is
+                SpecialType.System_SByte or
+                SpecialType.System_Byte or
+                SpecialType.System_Int16 or
+                SpecialType.System_UInt16 or
+                SpecialType.System_Int32 or
+                SpecialType.System_UInt32 or
+                SpecialType.System_Int64 or
+                SpecialType.System_UInt64 or
+                SpecialType.System_Char;
+        }
+
         private bool TryProjectForDeclaration(
             VariableDeclarationSyntax declaration,
             out SemanticAsyncStatement? projected)
@@ -720,6 +876,31 @@ internal static class SemanticAsyncControlFlowProjector
                 Array.Empty<SemanticOperation>());
         }
 
+        private SemanticOperation CreateEquality(
+            SemanticOperation left,
+            SemanticOperation right,
+            TextSpan span)
+        {
+            return new SemanticOperation(
+                "binary",
+                true,
+                "equals",
+                false,
+                false,
+                false,
+                false,
+                "type:bool",
+                null,
+                Array.Empty<string>(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                SemanticSpanFactory.Create(context.PrimaryUnit.SourceText, span),
+                new[] { left, right });
+        }
+
         private SemanticOperation CreateFlowOperation(
             string kind,
             TextSpan span,
@@ -795,6 +976,11 @@ internal static class SemanticAsyncControlFlowProjector
         SemanticOperation? Condition,
         int PrimaryTarget,
         int SecondaryTarget);
+
+    private sealed record SwitchCaseTarget(
+        CaseSwitchLabelSyntax Label,
+        SemanticOperation Value,
+        int SectionTarget);
 
     private sealed record LoopTargets(int BreakTarget, int ContinueTarget)
     {
