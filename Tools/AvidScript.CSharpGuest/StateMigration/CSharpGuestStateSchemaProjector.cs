@@ -38,6 +38,27 @@ public static class CSharpGuestStateSchemaProjector
             .ToArray();
         if (ownerTypeIds.Length != 1)
         {
+            HashSet<string> ueTypeIds = document.UeTypeDeclarations
+                .Select(declaration => declaration.TypeId)
+                .ToHashSet(StringComparer.Ordinal);
+            bool hasPrimarySourceMutableState = document.Symbols.Any(symbol =>
+                symbol.Kind == "field"
+                && symbol.IsStatic
+                && !symbol.IsConst
+                && !symbol.IsReadonly
+                && !symbol.IsExecutableReferenceSource);
+            if (ownerTypeIds.Length > 1
+                && ownerTypeIds.All(ueTypeIds.Contains)
+                && !hasPrimarySourceMutableState)
+            {
+                return new CSharpGuestStateSchema(
+                    2,
+                    "host_snapshot",
+                    "implicit",
+                    1,
+                    module.ModuleId,
+                    Array.Empty<CSharpGuestStateSlot>());
+            }
             throw new InvalidDataException(
                 $"State schema requires exactly one exported script owner, found {ownerTypeIds.Length}.");
         }

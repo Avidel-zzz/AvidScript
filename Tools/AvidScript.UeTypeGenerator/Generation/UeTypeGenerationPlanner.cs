@@ -41,17 +41,17 @@ internal static class UeTypeGenerationPlanner
             symbol => symbol.Id,
             StringComparer.Ordinal);
         UeCppTypeMapper typeMapper = new(document.Types, document.TypeShapes, scriptCppNames);
+        IReadOnlyDictionary<string, SemanticUePropertyRuntimePlan> propertyPlans =
+            SemanticUeTypeRuntimeContract.BuildPropertyPlans(document).ToDictionary(
+                plan => plan.PropertySymbolId,
+                StringComparer.Ordinal);
         List<UeTypeManifestEntry> result = new(document.UeTypeDeclarations.Count);
 
         for (int typeOrdinal = 0; typeOrdinal < document.UeTypeDeclarations.Count; ++typeOrdinal)
         {
             SemanticUeTypeDeclaration declaration = document.UeTypeDeclarations[typeOrdinal];
-            Dictionary<string, int> memberOrdinals = declaration.Properties
-                .Select(property => property.SymbolId)
-                .Concat(declaration.Functions.Select(function => function.MethodSymbolId))
-                .OrderBy(id => id, StringComparer.Ordinal)
-                .Select((id, ordinal) => new { id, ordinal })
-                .ToDictionary(item => item.id, item => item.ordinal, StringComparer.Ordinal);
+            IReadOnlyDictionary<string, int> memberOrdinals =
+                SemanticUeTypeRuntimeContract.BuildMemberOrdinals(declaration);
             UePropertyManifestEntry[] properties = declaration.Properties.Select(property =>
                 new UePropertyManifestEntry(
                     memberOrdinals[property.SymbolId],
@@ -60,7 +60,9 @@ internal static class UeTypeGenerationPlanner
                     typeMapper.MapProperty(property.TypeId),
                     property.Flags,
                     property.Category,
-                    property.ReplicatedUsing)).ToArray();
+                    property.ReplicatedUsing,
+                    propertyPlans[property.SymbolId].GetterImportName,
+                    propertyPlans[property.SymbolId].SetterImportName)).ToArray();
             UeFunctionManifestEntry[] functions = declaration.Functions.Select(function =>
                 PlanFunction(
                     declaration,

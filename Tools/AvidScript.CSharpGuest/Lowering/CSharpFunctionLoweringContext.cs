@@ -12,6 +12,8 @@ internal sealed class CSharpFunctionLoweringContext
     private readonly Dictionary<string, GuestRegister> storageBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> globalBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SemanticCallable> callablesBySymbol;
+    private readonly IReadOnlyDictionary<string, CSharpUePropertyAccessPlan> uePropertyPlans;
+    private readonly IReadOnlyDictionary<string, SemanticUeTypeDeclaration> ueTypesById;
     private readonly Dictionary<string, SemanticCallableParameter> parametersBySymbol = new(StringComparer.Ordinal);
     private readonly Dictionary<string, GuestRegister> capturesById = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CaptureAddressTarget> captureAddressTargetsById = new(StringComparer.Ordinal);
@@ -35,6 +37,10 @@ internal sealed class CSharpFunctionLoweringContext
         callablesBySymbol = document.Callables
             .GroupBy(item => item.MethodSymbolId, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        uePropertyPlans = CSharpUePropertyAccessPlan.Build(document);
+        ueTypesById = document.UeTypeDeclarations.ToDictionary(
+            declaration => declaration.TypeId,
+            StringComparer.Ordinal);
         ThisRegister = callable.IsStatic ? null : parameters[0];
 
         foreach (SemanticCallableParameter parameter in callable.Parameters)
@@ -256,6 +262,15 @@ internal sealed class CSharpFunctionLoweringContext
 
     public bool TryGetPropertyGetter(string? propertySymbolId, out SemanticCallable callable, out string targetId)
     {
+        if (propertySymbolId is not null
+            && uePropertyPlans.TryGetValue(propertySymbolId, out CSharpUePropertyAccessPlan? plan)
+            && plan.Getter is not null)
+        {
+            callable = plan.Getter;
+            targetId = CSharpGuestIds.Import(callable.MethodSymbolId);
+            return true;
+        }
+
         SemanticCallable[] matches = callablesBySymbol.Values
             .Where(item => string.Equals(item.AssociatedSymbolId, propertySymbolId, StringComparison.Ordinal)
                 && !string.Equals(item.ReturnTypeId, "type:void", StringComparison.Ordinal)
@@ -278,6 +293,15 @@ internal sealed class CSharpFunctionLoweringContext
 
     public bool TryGetPropertySetter(string? propertySymbolId, out SemanticCallable callable, out string targetId)
     {
+        if (propertySymbolId is not null
+            && uePropertyPlans.TryGetValue(propertySymbolId, out CSharpUePropertyAccessPlan? plan)
+            && plan.Setter is not null)
+        {
+            callable = plan.Setter;
+            targetId = CSharpGuestIds.Import(callable.MethodSymbolId);
+            return true;
+        }
+
         SemanticCallable[] matches = callablesBySymbol.Values
             .Where(item => string.Equals(item.AssociatedSymbolId, propertySymbolId, StringComparison.Ordinal)
                 && string.Equals(item.ReturnTypeId, "type:void", StringComparison.Ordinal)
@@ -297,6 +321,53 @@ internal sealed class CSharpFunctionLoweringContext
         callable = null!;
         targetId = null!;
         return false;
+    }
+
+    public bool IsUeProperty(string? propertySymbolId)
+    {
+        return propertySymbolId is not null && uePropertyPlans.ContainsKey(propertySymbolId);
+    }
+
+    public GuestRegister? NormalizeUeReceiver(
+        SemanticCallable callable,
+        GuestRegister receiver,
+        int blockOrdinal,
+        List<GuestInstruction> instructions)
+    {
+        if (string.Equals(receiver.TypeId, callable.ContainingTypeId, StringComparison.Ordinal)
+            || !ueTypesById.ContainsKey(callable.ContainingTypeId))
+        {
+            return receiver;
+        }
+
+        string currentTypeId = receiver.TypeId;
+        while (!string.Equals(currentTypeId, callable.ContainingTypeId, StringComparison.Ordinal)
+            && ueTypesById.TryGetValue(currentTypeId, out SemanticUeTypeDeclaration? declaration))
+        {
+            currentTypeId = declaration.BaseTypeId;
+        }
+        if (string.Equals(currentTypeId, callable.ContainingTypeId, StringComparison.Ordinal))
+        {
+            GuestRegister? normalized = CreateTemporary(
+                callable.ContainingTypeId,
+                blockOrdinal);
+            if (normalized is not null)
+            {
+                instructions.Add(new GuestInstruction(
+                    "convert",
+                    normalized.Id,
+                    new[] { receiver.Id },
+                    null,
+                    null,
+                    null));
+            }
+            return normalized;
+        }
+
+        Add(
+            "ASCG1004",
+            $"Block {blockOrdinal} UE receiver '{receiver.TypeId}' is not assignable to '{callable.ContainingTypeId}'.");
+        return null;
     }
 
     public bool TryGetCallTarget(string? methodSymbolId, out SemanticCallable callable, out string targetId)

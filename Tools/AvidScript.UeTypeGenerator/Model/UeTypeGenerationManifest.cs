@@ -34,7 +34,9 @@ public sealed record UePropertyManifestEntry(
     [property: JsonPropertyOrder(3)] string CppType,
     [property: JsonPropertyOrder(4)] IReadOnlyList<string> Flags,
     [property: JsonPropertyOrder(5)] string Category,
-    [property: JsonPropertyOrder(6)] string ReplicatedUsing);
+    [property: JsonPropertyOrder(6)] string ReplicatedUsing,
+    [property: JsonPropertyOrder(7)] string GetterImportName,
+    [property: JsonPropertyOrder(8)] string SetterImportName);
 
 public sealed record UeFunctionManifestEntry(
     [property: JsonPropertyOrder(0)] int MemberOrdinal,

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -57,12 +58,20 @@ internal static class UeTypeGeneratorTests
         Assert(first.Manifest.Types.SelectMany(type => type.Properties.Cast<object>().Concat(type.Functions))
             .Count() == 5,
             "the manifest should retain reflected properties, functions and lifecycle members");
-        Assert(first.Manifest.SchemaVersion == 2
-            && first.Manifest.GeneratorVersion == "1.1"
+        IReadOnlyDictionary<string, SemanticUePropertyRuntimePlan> propertyPlans =
+            SemanticUeTypeRuntimeContract.BuildPropertyPlans(
+                SemanticSerializer.Deserialize(semantic)).ToDictionary(
+                    plan => plan.PropertySymbolId,
+                    StringComparer.Ordinal);
+        Assert(first.Manifest.SchemaVersion == 3
+            && first.Manifest.GeneratorVersion == "1.2"
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
                 function.ExportName == SemanticUeTypeRuntimeContract.GetFunctionExportName(
-                    function.StableMemberId)),
-            "manifest schema 2 should map every generated thunk to the canonical UE function export");
+                    function.StableMemberId))
+            && first.Manifest.Types.SelectMany(type => type.Properties).All(property =>
+                property.GetterImportName == propertyPlans[property.StableMemberId].GetterImportName
+                && property.SetterImportName == propertyPlans[property.StableMemberId].SetterImportName),
+            "manifest schema 3 should share canonical UE function and property runtime identities");
 
         string header = Text(first, "Public/AvidScriptGeneratedTypes.h");
         string sourceText = Text(first, "Private/AvidScriptGeneratedTypes.cpp");

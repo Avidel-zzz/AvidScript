@@ -28,6 +28,8 @@
   路由与 move-only teardown registration 已完成，并通过生产 router focused Automation。
 - `P59.C2a`：UFunction canonical WASM export、Semantic reachability root、Guest 64-bit ObjectHandle
   instance ABI 与 generator manifest schema 2 映射已完成；首个实例方法已真实编译到 WASM。
+- `P59.C2b`：native UPROPERTY 的共享 type/member ordinal 计划、按需 Guest import、继承 handle
+  上转型与 generator manifest schema 3 / 1.2 已落地；原生属性仍是唯一状态 owner。
 
 ## 待完成
 

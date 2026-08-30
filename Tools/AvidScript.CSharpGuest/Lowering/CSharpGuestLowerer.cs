@@ -49,6 +49,12 @@ public static class CSharpGuestLowerer
             dataPool,
             diagnostics);
         functions.AddRange(asyncMethods.Functions);
+        imports = AppendUePropertyImports(
+            document,
+            imports,
+            functions,
+            guestTypes,
+            diagnostics);
         if (enableDataLaneFusion)
         {
             CSharpDataLaneFusionResult fusion = CSharpDataLaneFusionPass.Run(
@@ -288,6 +294,71 @@ public static class CSharpGuestLowerer
         }
 
         return imports.ToArray();
+    }
+
+    private static GuestImport[] AppendUePropertyImports(
+        SemanticDocument document,
+        IReadOnlyList<GuestImport> imports,
+        IReadOnlyList<GuestFunction> functions,
+        IReadOnlyDictionary<string, GuestType> guestTypes,
+        List<GuestDiagnostic> diagnostics)
+    {
+        HashSet<string> calledTargets = functions
+            .SelectMany(function => function.Blocks)
+            .SelectMany(block => block.Instructions)
+            .Where(instruction => instruction.Op == "call" && instruction.TargetId is not null)
+            .Select(instruction => instruction.TargetId!)
+            .ToHashSet(StringComparer.Ordinal);
+        if (calledTargets.Count == 0)
+        {
+            return imports.ToArray();
+        }
+
+        List<GuestImport> result = imports.ToList();
+        foreach (CSharpUePropertyAccessPlan plan in CSharpUePropertyAccessPlan.Build(document)
+            .Values
+            .OrderBy(plan => plan.RuntimePlan.TypeOrdinal)
+            .ThenBy(plan => plan.RuntimePlan.MemberOrdinal))
+        {
+            Append(plan.Getter);
+            Append(plan.Setter);
+        }
+        return result.ToArray();
+
+        void Append(SemanticCallable? callable)
+        {
+            if (callable is null)
+            {
+                return;
+            }
+            string importId = CSharpGuestIds.Import(callable.MethodSymbolId);
+            if (!calledTargets.Contains(importId))
+            {
+                return;
+            }
+
+            string[] parameterTypeIds = new[] { callable.ContainingTypeId }
+                .Concat(callable.Parameters
+                    .OrderBy(parameter => parameter.Ordinal)
+                    .Select(CSharpAbiTypeMapper.ParameterType))
+                .ToArray();
+            if (!guestTypes.ContainsKey(callable.ReturnTypeId)
+                || parameterTypeIds.Any(typeId => !guestTypes.ContainsKey(typeId)))
+            {
+                Add(
+                    diagnostics,
+                    "ASCG1003",
+                    $"UE property import '{callable.MethodSymbolId}' has unsupported ABI types.");
+                return;
+            }
+
+            result.Add(new GuestImport(
+                importId,
+                callable.Import!.Module,
+                callable.Import.Name,
+                parameterTypeIds,
+                callable.ReturnTypeId));
+        }
     }
 
     private static GuestImport[] AppendArrayCapabilityImports(

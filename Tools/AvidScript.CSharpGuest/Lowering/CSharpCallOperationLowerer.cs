@@ -39,6 +39,18 @@ internal static class CSharpCallOperationLowerer
         int blockOrdinal,
         List<GuestInstruction> instructions)
     {
+        if (context.IsUeProperty(operation.SymbolId))
+        {
+            GuestRegister? receiver = LowerPropertyReceiver(
+                context,
+                operation,
+                blockOrdinal,
+                instructions);
+            return receiver is null
+                ? null
+                : LowerProperty(context, operation, receiver, blockOrdinal, instructions);
+        }
+
         if (!context.TryGetPropertyGetter(operation.SymbolId, out SemanticCallable callable, out string targetId))
         {
             context.Add("ASCG1005", $"Block {blockOrdinal} property '{operation.SymbolId}' has no Guest getter.");
@@ -78,11 +90,21 @@ internal static class CSharpCallOperationLowerer
             return null;
         }
 
+        GuestRegister? normalizedReceiver = context.NormalizeUeReceiver(
+            callable,
+            receiver,
+            blockOrdinal,
+            instructions);
+        if (normalizedReceiver is null)
+        {
+            return null;
+        }
+
         return CSharpOperationLowerer.EmitCall(
             context,
             callable,
             targetId,
-            new[] { receiver.Id },
+            new[] { normalizedReceiver.Id },
             blockOrdinal,
             instructions);
     }
@@ -147,11 +169,21 @@ internal static class CSharpCallOperationLowerer
             return false;
         }
 
+        GuestRegister? normalizedReceiver = context.NormalizeUeReceiver(
+            callable,
+            receiver,
+            blockOrdinal,
+            instructions);
+        if (normalizedReceiver is null)
+        {
+            return false;
+        }
+
         CSharpOperationLowerer.EmitCall(
             context,
             callable,
             targetId,
-            new[] { receiver.Id, value.Id },
+            new[] { normalizedReceiver.Id, value.Id },
             blockOrdinal,
             instructions);
         return true;
@@ -244,6 +276,16 @@ internal static class CSharpCallOperationLowerer
             GuestRegister? receiver = CSharpOperationLowerer.LowerValue(
                 context,
                 children[0],
+                blockOrdinal,
+                instructions);
+            if (receiver is null)
+            {
+                return false;
+            }
+
+            receiver = context.NormalizeUeReceiver(
+                callable,
+                receiver,
                 blockOrdinal,
                 instructions);
             if (receiver is null)

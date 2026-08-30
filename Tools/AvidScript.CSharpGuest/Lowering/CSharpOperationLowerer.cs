@@ -870,6 +870,15 @@ internal static class CSharpOperationLowerer
             return LowerLiteral(context, operation, blockOrdinal, instructions);
         }
 
+        if (operation.Children.Count != 0 && context.IsUeProperty(operation.SymbolId))
+        {
+            return CSharpCallOperationLowerer.LowerProperty(
+                context,
+                operation,
+                blockOrdinal,
+                instructions);
+        }
+
         if (operation.Children.Count != 0)
         {
             return CSharpAggregateOperationLowerer.LowerFieldLoad(
@@ -1198,6 +1207,15 @@ internal static class CSharpOperationLowerer
         {
             if (target.Children.Count != 0)
             {
+                if (context.IsUeProperty(target.SymbolId))
+                {
+                    return CSharpCallOperationLowerer.LowerPropertySetter(
+                        context,
+                        target,
+                        value,
+                        blockOrdinal,
+                        instructions);
+                }
                 return CSharpAggregateOperationLowerer.StoreField(
                     context, target, value, blockOrdinal, instructions);
             }

@@ -634,6 +634,10 @@ $GeneratedTypeRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
+$SemanticUeRuntimeContractSource = Read-RequiredFile 'Tools/AvidScript.CSharpSemantic/Model/SemanticUeTypeRuntimeContract.cs'
+$CSharpUePropertyPlanSource = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpUePropertyAccessPlan.cs'
+$CSharpGuestLowererSourceForUeTypes = Read-RequiredFile 'Tools/AvidScript.CSharpGuest/Lowering/CSharpGuestLowerer.cs'
+$UeTypeManifestSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Model/UeTypeGenerationManifest.cs'
 foreach ($RequiredGeneratedDispatchContract in @(
     'IAvidScriptGeneratedTypeDispatchTarget',
     'FAvidScriptGeneratedTypeDispatcher',
@@ -671,14 +675,33 @@ foreach ($RequiredGeneratedRouterModuleLifecycle in @(
         Add-Violation "Runtime module does not own generated type router lifecycle: $RequiredGeneratedRouterModuleLifecycle"
     }
 }
+foreach ($RequiredUePropertyRuntimeContract in @(
+    'BuildMemberOrdinals',
+    'BuildPropertyPlans',
+    'GetterImportName',
+    'SetterImportName')) {
+    if (-not $SemanticUeRuntimeContractSource.Contains($RequiredUePropertyRuntimeContract) -and
+        -not $UeTypeManifestSource.Contains($RequiredUePropertyRuntimeContract)) {
+        Add-Violation "generated UE property runtime contract is missing $RequiredUePropertyRuntimeContract"
+    }
+}
+foreach ($RequiredUePropertyGuestContract in @(
+    'CSharpUePropertyAccessPlan.Build(document)',
+    'AppendUePropertyImports',
+    'calledTargets.Contains(importId)')) {
+    if (-not $CSharpUePropertyPlanSource.Contains($RequiredUePropertyGuestContract) -and
+        -not $CSharpGuestLowererSourceForUeTypes.Contains($RequiredUePropertyGuestContract)) {
+        Add-Violation "C# Guest UE property lowering is missing $RequiredUePropertyGuestContract"
+    }
+}
 foreach ($RequiredScriptTypeBuildContract in @(
     'Resolve-AvidScriptCSharpBindingPackage',
     'InvokeCSharpFrontend.ps1',
     'InvokeCSharpSemantic.ps1',
     'schema_version -ne 18',
     'semantic_version -cne "1.20"',
-    'schema_version -ne 2',
-    'generator_version -cne "1.1"',
+    'schema_version -ne 3',
+    'generator_version -cne "1.2"',
     'semantic_artifact_sha256',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
