@@ -291,10 +291,10 @@
       "evidence": "P57.9 controlled Wasmtime toolchain formal on clean 598fdf0/2ccfc8c: p50 geo 0.9797725739, p95 geo 1.0267275918, MAD geo 0.9238574065, p50/p95 win rate 0.6667/0.4167, correctness 0, fallback false; aggregate SHA-256 245d1d22ac45132a55b25d306f7fe02a75ebdf975e804cf9dcaea2b94d0b1979. Toolchain/profile/provenance are complete, but the unchanged leadership gate remains red.",
       "deferral_reason": "Isolated attribution follows closure of semantic, Generated S1, and prepared-export fixed costs",
       "remediation": "Keep the controlled Wasmtime profile as the reproducible baseline. Move optimization budget to Semantic/reflection boundary fusion and compile-time specialization; any further pure execution attempt must use an LLVM AOT or equivalent codegen backend and rerun the unchanged frozen suite without changing kernel bytes or thresholds.",
-      "status": "Fixing",
-      "resolution_evidence": "",
-      "target_phase": null,
-      "transfer_reason": ""
+      "status": "Transferred",
+      "resolution_evidence": "P57.13 clean candidate 9148bff/73eb948d, unchanged 12-kernel protocol, aggregate aaa2f863ecbe8497df178db321b57d134a402e9dbee6c4470ed4f10a5d4cc6ed, p50/p95 0.9799725124/1.0005782997, p50/p95 win rates 66.67/41.67 percent, correctness failures 0, fallback false; D06 remains unresolved and is transferred without changing kernels or thresholds.",
+      "target_phase": 59,
+      "transfer_reason": "Cranelift speed single-variable attribution improved p95 by about 2.55 percent but did not cross the frozen 0.95 leadership gate; isolate LLVM AOT or equivalent codegen as the next performance backend phase after P58 type-system maturity."
     }
   ],
   "review": {
@@ -348,7 +348,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 43,
-  "updated_at_utc": "2026-08-30T06:06:34.2393312Z"
+  "next_action": "freeze -Phase 57 -ReviewEvidence <text>",
+  "revision": 44,
+  "updated_at_utc": "2026-08-30T07:03:47.1938586+00:00"
 }

@@ -2263,3 +2263,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: after P57.13 attribution, the first Phase 58 lookup directly passed the not-yet-created `Docs/Phase58` directory to `rg --files`, producing a path error instead of useful roadmap evidence.
 - Prevention: future-phase discovery starts with one content query over confirmed roots such as `README.md`, `Docs`, and workflow state. Create or read a phase directory only after its exact path appears in the index or the current task explicitly creates it.
+
+### 2026-08-30: rebuild the canonical target after every isolated target build
+
+- Mistake: P57.13 repeated the recorded BuildId ordering regression. The formal isolated benchmark target refreshed the source engine's global `UnrealEditor.modules` BuildId, but the first canonical full-Automation launch ran before rebuilding the main project; the Editor therefore reported the existing `AvidTPSTemplate` module as missing and exited before test discovery.
+- Prevention: the command immediately after any isolated project target build and benchmark run, before canonical Editor or Automation startup, is the main `AvidTPSTemplateEditor` no-clean target build. Compare the canonical project and engine `UnrealEditor.modules` BuildIds byte-for-byte before launching the gate. This is a mandatory ordered step, not an optional diagnosis after failure.

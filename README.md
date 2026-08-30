@@ -505,9 +505,9 @@ Phase 56 的 Generated S1、Data-Oriented 与生命周期热路径仍是可复�
 冻结的 12-kernel controlled suite 最新使用 Wasmtime v45 Cranelift `speed` profile：
 P50 几何均值 `0.9800x`、P95 几何均值 `1.0006x`，P50/P95 kernel win rate 为
 `66.7% / 41.7%`。相对 P57.9 的 `speed_and_size` profile，P95 改善约 2.55%，P50 基本
-持平；P95 仍未达到 `0.95x` 领先门槛，因此 `P57-D06-ControlledLeadership` 保持
-`Fixing`。AvidScript 当前领先主要来自更低成本的生成式 UE 边界，而不是宣称 Wasmtime
-对 V8 的所有纯计算都绝对领先。
+持平；P95 仍未达到 `0.95x` 领先门槛，因此 `P57-D06-ControlledLeadership` 仍未解决，
+并已转移到 P59 的 LLVM AOT/等价 codegen 后端工作。AvidScript 当前领先主要来自更低
+成本的生成式 UE 边界，而不是宣称 Wasmtime 对 V8 的所有纯计算都绝对领先。
 
 正式证据与详细口径：
 
@@ -716,7 +716,8 @@ handler、`replace/before/after` 原实现链路与深拷贝重入 FIFO；D5 已
 listen server + 1 remote client 独立进程证明 BeginPlay -> RPC -> replicated property -> RepNotify -> ack。
 网络路由、复制发送和 RepNotify 触发时机仍由 UE 负责。
 最新纯执行层正式 benchmark 使用 clean `9148bff/73eb948d` 候选，12-kernel
-correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭。
+correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭，
+未解决债务已转移到 P59。阶段末完整 AvidScript Automation 为 376/376 Success。
 最新功能报告见 [P57.12D5 中文完成报告](Docs/Phase57/P57.12D5_Real_Network_Topology.md)，
 最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
