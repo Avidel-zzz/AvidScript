@@ -273,7 +273,7 @@ function Get-ProtectedDirtyContext {
         $CurrentStatus = if ($StatusByPath.ContainsKey($RelativePath)) { [string]$StatusByPath[$RelativePath] } else { '  ' }
         $ContentStable = -not [string]::IsNullOrWhiteSpace($ExpectedHash) -and $ExpectedHash -eq $CurrentHash
         $StatusStable = ([string]$Protected.status) -eq $CurrentStatus
-        $OmittedFromCleanCandidate = $IsCleanDetachedCandidate -and -not $FileExists
+        $RepresentedByCleanCandidate = $IsCleanDetachedCandidate
         $Results += [pscustomobject]@{
             Path = $RelativePath
             ExpectedStatus = [string]$Protected.status
@@ -282,8 +282,8 @@ function Get-ProtectedDirtyContext {
             CurrentSha256 = $CurrentHash
             ContentStable = $ContentStable
             StatusStable = $StatusStable
-            OmittedFromCleanCandidate = $OmittedFromCleanCandidate
-            BaselineSatisfied = ($ContentStable -and $StatusStable) -or $OmittedFromCleanCandidate
+            RepresentedByCleanCandidate = $RepresentedByCleanCandidate
+            BaselineSatisfied = ($ContentStable -and $StatusStable) -or $RepresentedByCleanCandidate
         }
     }
 
