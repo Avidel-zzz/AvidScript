@@ -62,7 +62,18 @@ function New-BindingPackageSubset {
     $DescriptorSource = Join-Path $AuthorizationDirectory ([string]$AuthorizationManifest.files.descriptor)
     $ReferenceSource = Join-Path $AuthorizationDirectory ([string]$AuthorizationManifest.files.reference_source)
     $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
-    $SelectedBindings = @($Descriptor.bindings | Where-Object { $UeFunctions -ccontains [string]$_.ue_function })
+    $SelectedBindings = @($Descriptor.bindings | Where-Object {
+        $UeFunction = if (-not [string]::IsNullOrWhiteSpace([string]$_.ue_function)) {
+            [string]$_.ue_function
+        }
+        elseif ([string]$_.binding_kind -ceq "function") {
+            [string]$_.ue_member
+        }
+        else {
+            ""
+        }
+        $UeFunctions -ccontains $UeFunction
+    })
     Assert-Condition ($SelectedBindings.Count -eq $UeFunctions.Count) "binding subset fixture could not resolve every UE function"
 
     $SelectedStableIds = [System.Collections.Generic.HashSet[string]]::new(
@@ -70,10 +81,13 @@ function New-BindingPackageSubset {
     foreach ($Binding in $SelectedBindings) {
         [void]$SelectedStableIds.Add([string]$Binding.stable_id)
     }
-    $SelectedImports = @($AuthorizationManifest.required_imports | Where-Object {
+    $SelectedReflectedImports = @($AuthorizationManifest.required_imports | Where-Object {
         $SelectedStableIds.Contains([string]$_.stable_id)
     })
-    Assert-Condition ($SelectedImports.Count -eq $UeFunctions.Count) "binding subset fixture could not resolve every package import"
+    Assert-Condition ($SelectedReflectedImports.Count -eq $UeFunctions.Count) "binding subset fixture could not resolve every package import"
+    $SelectedImports = @($AuthorizationManifest.required_imports | Where-Object {
+        $SelectedStableIds.Contains([string]$_.stable_id) -or ([int]$_.ordinal -lt 0)
+    })
 
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     Copy-Item -LiteralPath $DescriptorSource -Destination (Join-Path $OutputDirectory ([string]$AuthorizationManifest.files.descriptor)) -Force
@@ -387,7 +401,16 @@ if ([string]::IsNullOrWhiteSpace($BindingPackagePath)) {
             $ContainsRequiredFunctions = $true
             foreach ($RequiredFunction in $RequiredAuthorizationFunctions) {
                 $AuthorizedBindings = @($CandidateDescriptor.bindings | Where-Object {
-                    [string]$_.ue_function -ceq $RequiredFunction -and
+                    $CandidateFunction = if (-not [string]::IsNullOrWhiteSpace([string]$_.ue_function)) {
+                        [string]$_.ue_function
+                    }
+                    elseif ([string]$_.binding_kind -ceq "function") {
+                        [string]$_.ue_member
+                    }
+                    else {
+                        ""
+                    }
+                    $CandidateFunction -ceq $RequiredFunction -and
                     $CandidateImportStableIds -ccontains [string]$_.stable_id
                 })
                 if ($AuthorizedBindings.Count -eq 0) {
@@ -470,13 +493,19 @@ Write-LifecycleSource `
 $RuntimeAllowedExit = $LASTEXITCODE
 Assert-Condition ($RuntimeAllowedExit -eq 0) "runtime subset build failed; actual=$RuntimeAllowedExit"
 $RuntimeAllowedJson = Get-Content -Raw -LiteralPath $RuntimeAllowedReport | ConvertFrom-Json
+$RuntimeSetPackageJson = Get-Content -Raw -LiteralPath $RuntimeSetPackagePath | ConvertFrom-Json
+$RuntimeReflectedImport = @($RuntimeSetPackageJson.required_imports | Where-Object { [int]$_.ordinal -ge 0 })
+Assert-Condition ($RuntimeReflectedImport.Count -eq 1) "runtime package did not retain exactly one reflected import"
+$ExpectedRuntimeUsedImports = @("avid_owner_get_handle", [string]$RuntimeReflectedImport[0].name) | Sort-Object
+$AuthorizationUsedImports = @($RuntimeAllowedJson.binding_authorization.used_imports.name) | Sort-Object
+$RuntimeUsedImports = @($RuntimeAllowedJson.binding_package.used_imports.name) | Sort-Object
 Assert-Condition ($RuntimeAllowedJson.binding_authorization.profile_import_count -gt 1) "authorization package was not preserved"
-Assert-Condition ($RuntimeAllowedJson.binding_authorization.used_import_count -eq 1) "authorization usage provenance is not one import"
-Assert-Condition ($RuntimeAllowedJson.binding_package.profile_import_count -eq 1) "runtime package is not the one-import subset"
-Assert-Condition ($RuntimeAllowedJson.binding_package.used_import_count -eq 1) "runtime package usage provenance is not one import"
+Assert-Condition (($AuthorizationUsedImports -join ',') -ceq ($ExpectedRuntimeUsedImports -join ',')) "authorization usage provenance differs from reflected and shared imports"
+Assert-Condition ($RuntimeAllowedJson.binding_package.profile_import_count -eq @($RuntimeSetPackageJson.required_imports).Count) "runtime package profile count differs from the reflected-plus-shared subset"
+Assert-Condition (($RuntimeUsedImports -join ',') -ceq ($ExpectedRuntimeUsedImports -join ',')) "runtime package usage provenance differs from reflected and shared imports"
 Assert-Condition ($RuntimeAllowedJson.binding_authorization.manifest_file -ne $RuntimeAllowedJson.binding_package.manifest_file) "authorization and runtime package paths were collapsed"
 $RuntimeAllowedManifestJson = Get-Content -Raw -LiteralPath $RuntimeAllowedManifest | ConvertFrom-Json
-Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq 1) "final manifest did not publish the runtime package subset"
+Assert-Condition ($RuntimeAllowedManifestJson.binding_package.profile_import_count -eq @($RuntimeSetPackageJson.required_imports).Count) "final manifest did not publish the reflected-plus-shared runtime package subset"
 
 $GuestObjectTypeMismatchRoot = Join-Path $RunRoot "GuestObjectTypeMismatch"
 New-Item -ItemType Directory -Force -Path $GuestObjectTypeMismatchRoot |
@@ -738,7 +767,7 @@ Assert-Condition ((Get-Sha256Hex $PreparedFinalSemantic) -eq (Get-Sha256Hex $Pre
 Assert-Condition (Test-Path -LiteralPath (Resolve-ArtifactPath $PreparedFinalJson.artifacts.guest_ir_file) -PathType Leaf) "prepared final did not regenerate Guest IR"
 Assert-Condition (Test-Path -LiteralPath (Resolve-ArtifactPath $PreparedFinalJson.artifacts.wasm_file) -PathType Leaf) "prepared final did not regenerate WASM"
 Assert-Condition ($PreparedFinalJson.binding_authorization.profile_import_count -gt 1) "prepared final lost complete authorization"
-Assert-Condition ($PreparedFinalJson.binding_package.profile_import_count -eq 1) "prepared final did not retain minimal runtime package"
+Assert-Condition ($PreparedFinalJson.binding_package.profile_import_count -eq @($RuntimeSetPackageJson.required_imports).Count) "prepared final did not retain the reflected-plus-shared runtime package"
 $PreparedFinalManifestRaw = Get-Content -Raw -LiteralPath $PreparedFinalManifest
 Assert-Condition ($PreparedFinalManifestRaw.IndexOf("PreparedBootstrap", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "final manifest retained a bootstrap path"
 
@@ -764,7 +793,8 @@ Assert-Condition (
 Assert-Condition (
     $LegacyPackageJson.binding_authorization.package_hash -eq $LegacyPackageJson.binding_package.package_hash) `
     "legacy single-package build changed runtime package identity"
-Assert-Condition ($LegacyPackageJson.binding_package.used_import_count -eq 1) "legacy package did not retain used-import provenance"
+$LegacyUsedImports = @($LegacyPackageJson.binding_package.used_imports.name) | Sort-Object
+Assert-Condition (($LegacyUsedImports -join ',') -ceq ($ExpectedRuntimeUsedImports -join ',')) "legacy package did not retain reflected and shared used-import provenance"
 Assert-Condition (Test-Path -LiteralPath $LegacyPackageManifest -PathType Leaf) "legacy package build did not publish a manifest"
 
 $RuntimeMismatchRoot = Join-Path $RunRoot "RuntimeMismatch"
