@@ -1,13 +1,14 @@
 # Phase 58 收口
 
-状态：产品批次、严格 Gate 与白名单恢复 attestation 已完成；关闭提交待执行。
+状态：产品批次、严格 Gate 与关闭流程恢复 attestation 已完成；关闭提交待执行。
 
 Phase 58 建立了统一复合值 capability 与递归 descriptor 类型图，覆盖 FText、
 soft/weak object、递归容器、`TSet`/`TMap` 以及 delegate ref/out transaction。
-恢复 Gate 证据绑定到 commit `f7c151885981d7fb933c603331c5e7244d901062` 与
-tree `6aa5818271b9c6e500224dfc2f52f2f6110c795d`。产品同一性检查证明其 `Source`、`Build`、
-`Tests` 子树和 `AvidScript.uplugin` blob 与已通过完整验证的 `be2b0cd` 相同；新候选的
-clean architecture、Harness audit 与 7/7 合同测试也已通过。
+恢复 Gate 证据绑定到 commit `61088f0c9c1126d91c538dac76fed0469c310b45` 与
+tree `ecc3ed262924ec4f0fd65e554e19d5ef163e21af`。范围同一性检查证明其 `Source` 子树和
+`AvidScript.uplugin` blob 与已通过完整产品验证的 `be2b0cd` 相同；`Build`/`Tools` 变化仅限
+关闭 whitespace 兼容修复及其合同。新候选的 clean architecture、Harness audit/7/7 与 PhaseWorkflow
+30/30 均已通过。
 
 ## 批次进度
 
@@ -37,11 +38,12 @@ clean architecture、Harness audit 与 7/7 合同测试也已通过。
 - 隔离环境定点回归 2/2 Success；
 - 全量 Automation 384/384 Success，0 Fail，队列完成，Exit Code 0；
 - Agent Harness audit 与 7/7 合同测试通过；
+- PhaseWorkflow 30/30 通过，不可变归档 CRLF 与普通尾空格分支均有合同覆盖；
 - 干净架构检查通过，证据 tree 与验证提交一致；
 - 详细性能与日志路径见 `P58.4_Centralized_Gate_Report.md`。
 
 ## 关闭动作
 
 最终见证提交只包含 `Docs/Phase58/Phase58_State.json` 和本 closeout，必须是新验证提交
-`f7c1518` 的直接子提交。提交并推送后执行 `close -Phase 58`，关闭证据保存在仓库外；
+`61088f0` 的直接子提交。提交并推送后执行 `close -Phase 58`，关闭证据保存在仓库外；
 3 个 protected dirty 用户文件始终不进入暂存区。
