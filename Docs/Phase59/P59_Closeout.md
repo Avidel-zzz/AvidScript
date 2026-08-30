@@ -23,10 +23,10 @@
   engine gameplay facade 发布成功并返回可消费的内容寻址路径。
 - `P59.B5`：受控 `BuildCSharpScriptTypes.ps1` 已串联 binding package、frontend、semantic 与
   UHT shell generator；4 个 C# 声明类型已通过真实 UE5.8 UHT/UBT 和反射 Automation 回读。
+- `P59.B`：状态机已标记完成；候选提交 `4c593e5` 的隔离 clean architecture gate 通过。
 
 ## 待完成
 
-- `P59.B` 批次状态收尾与集中架构证据；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 
