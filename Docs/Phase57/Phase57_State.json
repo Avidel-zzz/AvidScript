@@ -5,7 +5,7 @@
     "goal": "实现 Adaptive Semantic reflection 并清零 Phase 56 六项性能债务",
     "start_commit": "2596b5f6d98fb4c4e6417b2447eba0c4c096c2c9"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
@@ -308,9 +308,9 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 43,
-    "automation": 57,
-    "full_gate": 18
+    "ubt": 49,
+    "automation": 60,
+    "full_gate": 19
   },
   "freeze": {
     "source_commit": "b92253e5b1afcf43aeabd31718e01a803a97b796",
@@ -320,13 +320,13 @@
     "at_utc": "2026-08-30T07:05:11.9458057+00:00"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57D5_Architecture_da198b2.log",
-    "report_sha256": "9a931b626d98fb4159bca8c0523fe08129e068a0dfe5bd6c13b39e794f83f15f",
-    "run_id": "P57.12D5-clean-architecture-final",
-    "verified_commit": "da198b2c762cd67e5f5e0d3d26bcdf7d3a1bfbc8",
-    "verified_tree": "fea4893e76bdce0bdeac2cc04a64bead702bc5d1",
-    "attestation_parent": "da198b2c762cd67e5f5e0d3d26bcdf7d3a1bfbc8",
-    "attested_at_utc": "2026-08-30T06:06:34.2393312Z"
+    "report_path": "C:\\tmp\\AvidScript_Phase57_Final_Gate.json",
+    "report_sha256": "6562aa95b2fe11f79fbd51885474e40ddfaa5888ecad7ce3eebde509e814c48a",
+    "run_id": "p57-final-20260830t070732z",
+    "verified_commit": "be55f0d66cd65f05b53b5aff2105f544cc976395",
+    "verified_tree": "e33bc486c666c1771cc174ce0700a786bdd51008",
+    "attestation_parent": "be55f0d66cd65f05b53b5aff2105f544cc976395",
+    "attested_at_utc": "2026-08-30T07:08:06.5537199+00:00"
   },
   "protected_dirty": [
     {
@@ -348,7 +348,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 57 -GateReportPath <path>",
-  "revision": 45,
-  "updated_at_utc": "2026-08-30T07:05:11.9513348+00:00"
+  "next_action": "close -Phase 57",
+  "revision": 46,
+  "updated_at_utc": "2026-08-30T07:08:06.5561191+00:00"
 }
