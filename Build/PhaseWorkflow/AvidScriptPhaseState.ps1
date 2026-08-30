@@ -473,7 +473,7 @@ function Test-AvidScriptPhaseState {
     foreach ($Entry in @($State.protected_dirty)) {
         Assert-AvidScriptPropertySet $Entry @(
             'path', 'status', 'worktree_sha256', 'head_blob_sha256') 'ASPW1002' 'phase state protected dirty entry'
-        Resolve-AvidScriptRepositoryPath $RepositoryRoot ([string]$Entry.path) | Out-Null
+        Resolve-AvidScriptRepositoryPath $RepositoryRoot ([string]$Entry.path) -AllowMissing | Out-Null
         if (-not $ProtectedPaths.Add([string]$Entry.path)) {
             Throw-AvidScriptPhaseError 'ASPW1020' "duplicate protected dirty path: $($Entry.path)"
         }

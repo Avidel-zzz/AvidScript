@@ -421,6 +421,21 @@ Invoke-ContractCase 'State.RepositoryEscapeRejected' {
     Assert-Condition ($Result.Output.Contains('ASPW4003')) 'repository escape diagnostic differs'
 }
 
+Invoke-ContractCase 'State.MissingProtectedFileRemainsReadable' {
+    $Root = New-FixtureRepository 'StateMissingProtected'
+    $ProtectedPath = Join-Path $Root 'UserNotes.md'
+    Write-Utf8Text $ProtectedPath "user edit`n"
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    Remove-Item -LiteralPath $ProtectedPath -Force
+    $Status = Invoke-WorkflowCli $Root @('status', '-Phase', '91')
+    Assert-Condition ($Status.ExitCode -eq 0) `
+        "state with absent protected worktree file is unreadable: $($Status.Output)"
+    Complete-FixtureBatch $Root 'P91.1'
+    Commit-Paths $Root @('Docs/Phase91/Phase91_State.json') 'commit readable protected state'
+    Assert-CliFailurePreservesState $Root $StatePath @(
+        'freeze', '-Phase', '91', '-ReviewEvidence', 'must reject missing user file') 'ASPW4021'
+}
+
 Invoke-ContractCase 'Transitions.RevisionAndRejectedFreeze' {
     $Root = New-FixtureRepository 'TransitionRevision'
     $StatePath = Start-FixturePhase $Root
