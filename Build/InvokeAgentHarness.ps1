@@ -221,8 +221,9 @@ function Get-GitContext {
         }
     }
 
+    $BranchValue = $BranchOutput | Select-Object -Last 1
     return [pscustomobject]@{
-        Branch = ([string]($BranchOutput | Select-Object -Last 1)).Trim()
+        Branch = if ($null -eq $BranchValue) { '(detached)' } else { ([string]$BranchValue).Trim() }
         Entries = $Entries
         Lines = $StatusLines
     }
