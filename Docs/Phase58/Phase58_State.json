@@ -5,7 +5,7 @@
     "goal": "以统一复合值 capability 和递归 descriptor 类型图扩展 FText、递归容器、TSet/TMap、soft/weak pointer 与 delegate ref/out，保持既有热路径性能和通用生成式 UE API 架构",
     "start_commit": "ad422c1b5d0c4fe00f402083ca021b7fe6e7b4a5"
   },
-  "declared_stage": "gate_ready",
+  "declared_stage": "gate_attested",
   "architecture": {
     "path": "Docs/Phase58/P58.0_Universal_Value_Graph_Architecture.md",
     "version": 1,
@@ -70,7 +70,7 @@
   "invocations": {
     "ubt": 3,
     "automation": 4,
-    "full_gate": 3
+    "full_gate": 4
   },
   "freeze": {
     "source_commit": "c83518de5d6970d5cd024769a1f602c29e68c028",
@@ -80,13 +80,13 @@
     "at_utc": "2026-08-30T15:08:06.5650730+00:00"
   },
   "gate": {
-    "report_path": "",
-    "report_sha256": "",
-    "run_id": "",
-    "verified_commit": "",
-    "verified_tree": "",
-    "attestation_parent": "",
-    "attested_at_utc": null
+    "report_path": "C:\\tmp\\AvidScript\\P58Gate\\P58-f7c1518-20260830-001\\P58-Gate-Evidence.json",
+    "report_sha256": "6936c12e198365b78c5d58f2534895052d4aacaf6ea2483aaa3377e5a8a2f168",
+    "run_id": "P58-f7c1518-20260830-001",
+    "verified_commit": "f7c151885981d7fb933c603331c5e7244d901062",
+    "verified_tree": "6aa5818271b9c6e500224dfc2f52f2f6110c795d",
+    "attestation_parent": "f7c151885981d7fb933c603331c5e7244d901062",
+    "attested_at_utc": "2026-08-30T15:11:16.5954256+00:00"
   },
   "protected_dirty": [
     {
@@ -126,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "attest -Phase 58 -GateReportPath <path>",
-  "revision": 12,
-  "updated_at_utc": "2026-08-30T15:08:06.5705322+00:00"
+  "next_action": "close -Phase 58",
+  "revision": 13,
+  "updated_at_utc": "2026-08-30T15:11:16.5981661+00:00"
 }

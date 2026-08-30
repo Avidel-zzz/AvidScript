@@ -1,13 +1,13 @@
 # Phase 58 收口
 
-状态：产品批次与严格 Gate 已完成；attestation 路径白名单恢复中。
+状态：产品批次、严格 Gate 与白名单恢复 attestation 已完成；关闭提交待执行。
 
 Phase 58 建立了统一复合值 capability 与递归 descriptor 类型图，覆盖 FText、
 soft/weak object、递归容器、`TSet`/`TMap` 以及 delegate ref/out transaction。
-原严格证据绑定到 commit `be2b0cdd4988327572145f94b3bc871d58c54a90` 与
-tree `4f8632b1a26527223f305446636b167aae77e393`。干净架构检查、UE5.8 无清理构建、
-定点回归与全量 384/384 Automation 均通过。首次见证提交因包含白名单外的人读 Gate 报告
-被关闭器拒绝；当前保留全部 Git 历史，以产品路径同一的新候选重新 attestation。
+恢复 Gate 证据绑定到 commit `f7c151885981d7fb933c603331c5e7244d901062` 与
+tree `6aa5818271b9c6e500224dfc2f52f2f6110c795d`。产品同一性检查证明其 `Source`、`Build`、
+`Tests` 子树和 `AvidScript.uplugin` blob 与已通过完整验证的 `be2b0cd` 相同；新候选的
+clean architecture、Harness audit 与 7/7 合同测试也已通过。
 
 ## 批次进度
 
@@ -17,7 +17,7 @@ tree `4f8632b1a26527223f305446636b167aae77e393`。干净架构检查、UE5.8 无
   `P58.2_Recursive_Container_Implementation.md`；
 - P58.C：已完成，delegate ref/out 与真实 C# 脚本闭环，见
   `P58.3_Delegate_RefOut_Transaction_Implementation.md`；
-- P58.D：已完成严格 Gate 与 attestation，见
+- P58.D：已完成严格 Gate、产品同一性见证与恢复 attestation，见
   `P58.4_Centralized_Gate_Report.md`。
 
 ## 最终能力
@@ -40,8 +40,8 @@ tree `4f8632b1a26527223f305446636b167aae77e393`。干净架构检查、UE5.8 无
 - 干净架构检查通过，证据 tree 与验证提交一致；
 - 详细性能与日志路径见 `P58.4_Centralized_Gate_Report.md`。
 
-## 恢复与关闭动作
+## 关闭动作
 
-恢复候选需证明 `Source`、产品 `Build` 和 `Tests` 与 `be2b0cd` 完全一致，并在干净 worktree
-重跑架构与 Harness 检查。重新 attestation 后，最终见证提交只允许 Phase 58 state 和本
-closeout，必须是新验证提交的直接子提交。3 个 protected dirty 用户文件始终不进入暂存区。
+最终见证提交只包含 `Docs/Phase58/Phase58_State.json` 和本 closeout，必须是新验证提交
+`f7c1518` 的直接子提交。提交并推送后执行 `close -Phase 58`，关闭证据保存在仓库外；
+3 个 protected dirty 用户文件始终不进入暂存区。
