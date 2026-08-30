@@ -133,6 +133,14 @@
       "prevention": "人读 Gate 报告在候选冻结前定稿；attest 后、commit 前先读取并核对 Test-AvidScriptAttestationDiff allowlist，只暂存 Phase state、closeout 和标准 Gate Summary JSON。",
       "source": "observed:2026-08-30-P58-close",
       "last_observed": "2026-08-30 P58 (P58.4 人读报告误进入 attestation 提交，close 以 ASPW3032 拒绝)"
+    },
+    {
+      "id": "immutable-byte-artifacts-need-compatible-gates",
+      "tags": ["phase", "gate", "whitespace", "archive"],
+      "summary": "字节级不可变归档可能保留历史 CRLF，不能为通过文本 whitespace Gate 而格式化。",
+      "prevention": "不可变路径和 SHA-256 由 manifest/audit 锁定；隐私扫描仍覆盖其内容，git diff --check 只对该精确归档路径排除，普通文件尾空格继续 fail-closed。",
+      "source": "observed:2026-08-30-P58-close",
+      "last_observed": "2026-08-30 P58 (legacy AGENTS 无损归档的 CRLF 被整阶段 git diff --check 误拒绝)"
     }
   ]
 }

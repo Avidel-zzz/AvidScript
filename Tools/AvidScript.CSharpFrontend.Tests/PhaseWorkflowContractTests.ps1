@@ -687,6 +687,43 @@ Invoke-ContractCase 'Evidence.PrivacyBinaryClassifiedFileRejected' {
     Assert-Condition ($Diagnostic.Contains('ASPW4031')) 'privacy scan accepted a private path hidden by a diff attribute'
 }
 
+Invoke-ContractCase 'Evidence.ImmutableLegacyWhitespaceIgnored' {
+    $Root = New-FixtureRepository 'EvidenceImmutableLegacyWhitespace'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    $LegacyRelativePath = 'AgentHarness/lessons/legacy-agents-2026-08-30.md'
+    $LegacyPath = Join-Path $Root $LegacyRelativePath
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $LegacyPath)) | Out-Null
+    [System.IO.File]::WriteAllText(
+        $LegacyPath,
+        "legacy one`r`nlegacy two`r`n",
+        [System.Text.UTF8Encoding]::new($false))
+    Write-Utf8Text (Join-Path $Root '.gitattributes') "$LegacyRelativePath -text`n"
+    Commit-Paths $Root @(
+        '.gitattributes',
+        'Docs/Phase91/Phase91_State.json',
+        $LegacyRelativePath) 'add immutable legacy archive'
+    $State = Read-AvidScriptPhaseState $Root 91
+    Assert-Condition (Test-AvidScriptPhasePrivacy $Root $State) 'privacy scan rejected the byte-preserved legacy archive'
+}
+
+Invoke-ContractCase 'Evidence.OrdinaryTrailingWhitespaceRejected' {
+    $Root = New-FixtureRepository 'EvidenceOrdinaryTrailingWhitespace'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    Write-Utf8Text (Join-Path $Root 'Docs\Trailing.md') "ordinary trailing whitespace  `n"
+    Commit-Paths $Root @(
+        'Docs/Phase91/Phase91_State.json',
+        'Docs/Trailing.md') 'add ordinary trailing whitespace'
+    $State = Read-AvidScriptPhaseState $Root 91
+    $Diagnostic = ''
+    try {
+        Test-AvidScriptPhasePrivacy $Root $State | Out-Null
+    }
+    catch {
+        $Diagnostic = $_.Exception.Message
+    }
+    Assert-Condition ($Diagnostic.Contains('ASPW4032')) 'privacy scan accepted ordinary trailing whitespace'
+}
+
 Invoke-ContractCase 'Evidence.PrivacyChangeRejected' {
     $Fixture = Prepare-GateReadyFixture 'EvidencePrivacy'
     $Gate = New-ValidGateReport $Fixture 'EvidencePrivacy'

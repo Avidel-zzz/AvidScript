@@ -5,7 +5,7 @@
     "goal": "以统一复合值 capability 和递归 descriptor 类型图扩展 FText、递归容器、TSet/TMap、soft/weak pointer 与 delegate ref/out，保持既有热路径性能和通用生成式 UE API 架构",
     "start_commit": "ad422c1b5d0c4fe00f402083ca021b7fe6e7b4a5"
   },
-  "declared_stage": "gate_attested",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase58/P58.0_Universal_Value_Graph_Architecture.md",
     "version": 1,
@@ -38,8 +38,8 @@
     {
       "id": "P58.D",
       "status": "Completed",
-      "evidence": "严格 Gate 产品证据保持有效：be2b0cd 上 clean architecture、UE5.8 no-clean build、253/253 .NET、119/119 PowerShell、2/2 focused 与 384/384 full Automation 通过；关闭恢复候选仅修改流程规则、lesson、P58 文档与状态，需以产品路径同一性和新 clean architecture/Harness 证据验证。",
-      "completed_at_utc": "2026-08-30T15:06:00.1800816+00:00"
+      "evidence": "关闭恢复流程已修复：attestation allowlist 预检规则与 lesson 生效；不可变 legacy CRLF 仅从 git diff --check 精确排除、隐私扫描仍保留；普通尾空格继续 fail-closed；PhaseWorkflow 30/30、Harness 7/7、audit PASS。",
+      "completed_at_utc": "2026-08-30T15:22:41.1324542+00:00"
     }
   ],
   "debt": [
@@ -58,9 +58,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "关闭恢复集中复审：保留既有 Git 历史；新增 attestation allowlist lesson 与策略；P58 人读报告在冻结前定稿；恢复候选禁止修改 Source、产品 Build 与 Tests，并要求产品路径同一性、clean architecture 与 Harness audit 通过。",
-    "completed_at_utc": "2026-08-30T15:08:06.5650730+00:00"
+    "completed": false,
+    "evidence": "reopened: Phase close whitespace validation must exclude the immutable byte-preserved legacy archive while continuing to reject ordinary trailing whitespace.",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 2,
@@ -73,20 +73,20 @@
     "full_gate": 4
   },
   "freeze": {
-    "source_commit": "c83518de5d6970d5cd024769a1f602c29e68c028",
-    "source_tree": "10b5074173496398e7b6cf2cae8989540964532e",
-    "state_sha256": "aaaf90c2e1dd0985189429b91beb765e9a68732f70780b31c2cd9ce69a510647",
-    "review_evidence": "关闭恢复集中复审：保留既有 Git 历史；新增 attestation allowlist lesson 与策略；P58 人读报告在冻结前定稿；恢复候选禁止修改 Source、产品 Build 与 Tests，并要求产品路径同一性、clean architecture 与 Harness audit 通过。",
-    "at_utc": "2026-08-30T15:08:06.5650730+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
-    "report_path": "C:\\tmp\\AvidScript\\P58Gate\\P58-f7c1518-20260830-001\\P58-Gate-Evidence.json",
-    "report_sha256": "6936c12e198365b78c5d58f2534895052d4aacaf6ea2483aaa3377e5a8a2f168",
-    "run_id": "P58-f7c1518-20260830-001",
-    "verified_commit": "f7c151885981d7fb933c603331c5e7244d901062",
-    "verified_tree": "6aa5818271b9c6e500224dfc2f52f2f6110c795d",
-    "attestation_parent": "f7c151885981d7fb933c603331c5e7244d901062",
-    "attested_at_utc": "2026-08-30T15:11:16.5954256+00:00"
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
   },
   "protected_dirty": [
     {
@@ -126,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "close -Phase 58",
-  "revision": 13,
-  "updated_at_utc": "2026-08-30T15:11:16.5981661+00:00"
+  "next_action": "freeze -Phase 58 -ReviewEvidence <text>",
+  "revision": 15,
+  "updated_at_utc": "2026-08-30T15:22:41.1352497+00:00"
 }

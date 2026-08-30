@@ -313,7 +313,11 @@ function Test-AvidScriptPhasePrivacy {
         }
     }
 
-    $Whitespace = Invoke-AvidScriptGit $RepositoryRoot @('diff', '--check', $Range) -AllowFailure
+    # H0 preserves the legacy AGENTS archive byte-for-byte, including its original CRLF bytes.
+    # Keep scanning its added content for privacy, but do not ask Git to reinterpret CR as whitespace.
+    $Whitespace = Invoke-AvidScriptGit $RepositoryRoot @(
+        'diff', '--check', $Range, '--', '.',
+        ':(exclude)AgentHarness/lessons/legacy-agents-2026-08-30.md') -AllowFailure
     if ($Whitespace.ExitCode -ne 0) {
         Throw-AvidScriptPhaseError 'ASPW4032' 'phase commit range failed whitespace validation'
     }
