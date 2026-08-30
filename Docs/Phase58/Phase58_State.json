@@ -5,7 +5,7 @@
     "goal": "以统一复合值 capability 和递归 descriptor 类型图扩展 FText、递归容器、TSet/TMap、soft/weak pointer 与 delegate ref/out，保持既有热路径性能和通用生成式 UE API 架构",
     "start_commit": "ad422c1b5d0c4fe00f402083ca021b7fe6e7b4a5"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase58/P58.0_Universal_Value_Graph_Architecture.md",
     "version": 1,
@@ -58,9 +58,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: P58 attestation commit included a human-readable Gate report outside the close allowlist; preserve history, rebuild a docs-only candidate, and re-attest with the exact whitelist.",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "关闭恢复集中复审：保留既有 Git 历史；新增 attestation allowlist lesson 与策略；P58 人读报告在冻结前定稿；恢复候选禁止修改 Source、产品 Build 与 Tests，并要求产品路径同一性、clean architecture 与 Harness audit 通过。",
+    "completed_at_utc": "2026-08-30T15:08:06.5650730+00:00"
   },
   "budgets": {
     "ubt": 2,
@@ -73,11 +73,11 @@
     "full_gate": 3
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "c83518de5d6970d5cd024769a1f602c29e68c028",
+    "source_tree": "10b5074173496398e7b6cf2cae8989540964532e",
+    "state_sha256": "aaaf90c2e1dd0985189429b91beb765e9a68732f70780b31c2cd9ce69a510647",
+    "review_evidence": "关闭恢复集中复审：保留既有 Git 历史；新增 attestation allowlist lesson 与策略；P58 人读报告在冻结前定稿；恢复候选禁止修改 Source、产品 Build 与 Tests，并要求产品路径同一性、clean architecture 与 Harness audit 通过。",
+    "at_utc": "2026-08-30T15:08:06.5650730+00:00"
   },
   "gate": {
     "report_path": "",
@@ -126,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 58 -ReviewEvidence <text>",
-  "revision": 11,
-  "updated_at_utc": "2026-08-30T15:06:00.1825371+00:00"
+  "next_action": "attest -Phase 58 -GateReportPath <path>",
+  "revision": 12,
+  "updated_at_utc": "2026-08-30T15:08:06.5705322+00:00"
 }
