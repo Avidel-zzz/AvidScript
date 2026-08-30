@@ -26,6 +26,9 @@
 `Test-AvidScriptAttestationDiff` 允许路径；默认只允许 Phase state、closeout 和标准
 `P<Phase>_Gate_Summary.json`，不得把其他人读报告带入 attestation 提交。
 
+已关闭 Phase 的外置 close evidence 必须对后续合法提交稳定：见证提交必须是当前
+HEAD 的祖先，证据 tree 必须匹配该历史见证提交；不得要求当前 HEAD 永久停留在关闭提交。
+
 ## 实现期风险分流
 
 - Blocker：核心工具链或实现路径不可继续，立即处理。

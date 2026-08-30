@@ -164,24 +164,8 @@ function Get-PhaseContext {
         return $null
     }
 
-    $ClosedStages = @($Manifest.phase_workflow.closed_stages | ForEach-Object { ([string]$_).ToLowerInvariant() })
-    $OrderedCandidates = @($Candidates | Sort-Object Id -Descending)
-    $DeclaredOpenCandidates = @($OrderedCandidates | Where-Object { $ClosedStages -notcontains ([string]$_.State.declared_stage).ToLowerInvariant() })
-    $Selected = $null
-    $Status = $null
-    foreach ($Candidate in $DeclaredOpenCandidates) {
-        $CandidateStatus = Read-PhaseWorkflowStatus $Manifest $Candidate.Id
-        if ($ClosedStages -notcontains ([string]$CandidateStatus.effective_stage).ToLowerInvariant()) {
-            $Selected = $Candidate
-            $Status = $CandidateStatus
-            break
-        }
-    }
-
-    if ($null -eq $Selected) {
-        $Selected = $OrderedCandidates[0]
-        $Status = Read-PhaseWorkflowStatus $Manifest $Selected.Id
-    }
+    $Selected = @($Candidates | Sort-Object Id -Descending)[0]
+    $Status = Read-PhaseWorkflowStatus $Manifest $Selected.Id
 
     return [pscustomobject]@{
         Id = $Selected.Id

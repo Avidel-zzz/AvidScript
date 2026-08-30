@@ -141,6 +141,14 @@
       "prevention": "不可变路径和 SHA-256 由 manifest/audit 锁定；隐私扫描仍覆盖其内容，git diff --check 只对该精确归档路径排除，普通文件尾空格继续 fail-closed。",
       "source": "observed:2026-08-30-P58-close",
       "last_observed": "2026-08-30 P58 (legacy AGENTS 无损归档的 CRLF 被整阶段 git diff --check 误拒绝)"
+    },
+    {
+      "id": "closed-evidence-must-survive-descendants",
+      "tags": ["phase", "close", "git", "ancestry"],
+      "summary": "Phase 关闭证据绑定历史见证提交，不能要求未来 HEAD 始终等于它。",
+      "prevention": "验证 close evidence 时检查 attestation commit 是当前 HEAD 祖先，并用该历史提交重算 tree；bootstrap 只选择单调编号中最高的 Phase 并调用一次权威 status，不让较低编号的迁移遗留状态阻塞后续；合同必须在关闭后新增合法后继提交并仍返回 closed。",
+      "source": "observed:2026-08-30-P58-post-close",
+      "last_observed": "2026-08-30 P58 (bootstrap 读取已关闭 P57 时因 HEAD 已前进而误报 ASPW3045)"
     }
   ]
 }

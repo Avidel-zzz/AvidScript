@@ -71,6 +71,10 @@ $Passed++
 $Bootstrap = Invoke-HarnessJson @('bootstrap', '-Intent', '恢复当前 AvidScript Phase')
 Assert-Contract ($null -ne $Bootstrap.Phase) 'bootstrap must discover a Phase'
 Assert-Contract ($Bootstrap.Phase.phase -gt 0) 'bootstrap Phase id must be positive'
+$ExpectedLatestPhase = @(Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'Docs') -Filter 'Phase*_State.json' -File -Recurse |
+    ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json).phase.id } |
+    Measure-Object -Maximum)[0].Maximum
+Assert-Contract ($Bootstrap.Phase.phase -eq $ExpectedLatestPhase) 'bootstrap must select the highest Phase id'
 Assert-Contract ($Bootstrap.ProtectedDirty.Drift.Count -eq 0) 'protected dirty content must not drift'
 Assert-Contract ($Bootstrap.ElapsedMs -le 2000) "bootstrap exceeded 2000 ms: $($Bootstrap.ElapsedMs)"
 $Passed++

@@ -402,9 +402,12 @@ function Test-AvidScriptPhaseCloseEvidence {
     Assert-AvidScriptGitHash ([string]$Close.attestation_commit) 'close attestation commit'
     Assert-AvidScriptGitHash ([string]$Close.attestation_tree) 'close attestation tree'
     $Head = Get-AvidScriptGitCommit $RepositoryRoot
-    if ([string]$Close.attestation_commit -cne $Head -or
-        [string]$Close.attestation_tree -cne (Get-AvidScriptGitTree $RepositoryRoot $Head)) {
-        Throw-AvidScriptPhaseError 'ASPW3045' 'close evidence does not identify the current attestation commit'
+    $Ancestry = Invoke-AvidScriptGit $RepositoryRoot @(
+        'merge-base', '--is-ancestor', [string]$Close.attestation_commit, $Head) -AllowFailure
+    if ($Ancestry.ExitCode -ne 0 -or
+        [string]$Close.attestation_tree -cne (
+            Get-AvidScriptGitTree $RepositoryRoot ([string]$Close.attestation_commit))) {
+        Throw-AvidScriptPhaseError 'ASPW3045' 'close evidence attestation is not a matching ancestor of current HEAD'
     }
     if ([int]$Close.protected_dirty_count -ne @(Get-AvidScriptEffectiveProtectedDirty $State).Count) {
         Throw-AvidScriptPhaseError 'ASPW3046' 'close evidence protected dirty count differs'

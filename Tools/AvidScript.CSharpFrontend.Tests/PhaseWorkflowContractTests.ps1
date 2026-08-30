@@ -577,6 +577,11 @@ Invoke-ContractCase 'Evidence.ValidAttestAndClose' {
     Assert-Condition ([System.IO.File]::Exists($ClosePath)) 'close evidence was not written'
     $Status = Invoke-WorkflowCli $Fixture.Root @('status', '-Phase', '91', '-Json')
     Assert-Condition ($Status.Output.Contains('closed')) 'status did not derive closed stage'
+    Write-Utf8Text (Join-Path $Fixture.Root 'Docs\AfterClose.md') "# Later phase work`n"
+    Commit-Paths $Fixture.Root @('Docs/AfterClose.md') 'add legal descendant commit'
+    $DescendantStatus = Invoke-WorkflowCli $Fixture.Root @('status', '-Phase', '91', '-Json')
+    Assert-Condition ($DescendantStatus.ExitCode -eq 0) 'closed status rejected a legal descendant commit'
+    Assert-Condition ($DescendantStatus.Output.Contains('closed')) 'closed stage was not stable after a descendant commit'
     $CloseJson = Get-Content -Raw -LiteralPath $ClosePath | ConvertFrom-Json
     $CloseJson.phase_id = 92
     Write-TestJson $ClosePath $CloseJson
