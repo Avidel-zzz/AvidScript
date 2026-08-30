@@ -2247,7 +2247,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 ### 2026-08-30: run Test-Json contracts with the pinned PowerShell 7 host
 
 - Mistake: the first P57.13 performance-toolchain contract run used `powershell.exe`; Windows PowerShell 5.1 does not provide `Test-Json`, so the script stopped before validating any product contract.
-- Prevention: any repository contract or architecture script that uses `Test-Json` or PowerShell 7 syntax must run directly through `C:\Users\12159\scoop\apps\pwsh\current\pwsh.exe -NoProfile`. Do not spend a probe on Windows PowerShell 5.1 when the host requirement is already known.
+- Prevention: any repository contract or architecture script that uses `Test-Json` or PowerShell 7 syntax must run directly through `$env:USERPROFILE\scoop\apps\pwsh\current\pwsh.exe -NoProfile`. Do not spend a probe on Windows PowerShell 5.1 when the host requirement is already known.
 
 ### 2026-08-30: treat wildcard path reuse as a workflow regression
 
