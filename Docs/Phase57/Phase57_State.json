@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; P57.12D4 extends Session-owned UFunction routes with descriptor-owned before/after/replace semantics, Blueprint bytecode original execution, and bounded reentrant parameter snapshots without changing Host ABI or UE network-driver ownership"
+    "revision_reason": "The phase architecture remains version 6; P57.12D5 validates the existing generated RPC, replicated property, chained handler, continuation, Runtime Session and UE-owned NetDriver boundaries in dedicated and listen independent-process topologies without adding Host ABI or project API wrappers"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler_Plan.md",
-    "closeout": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler.md"
+    "plan": "Docs/Phase57/P57.12D5_Real_Network_Topology_Plan.md",
+    "closeout": "Docs/Phase57/P57.12D5_Real_Network_Topology.md"
   },
   "batches": [
     {
@@ -228,6 +228,12 @@
       "completed_at_utc": "2026-08-30T05:11:57.8299511Z"
     },
     {
+      "id": "P57.12D5",
+      "status": "Completed",
+      "evidence": "implementation commit da198b2 and clean tree fea4893; one production-built C# + WASM artifact completed dedicated server + 2 clients and listen server + 1 remote client independent-process NetDriver flows from BeginPlay continuation through generated Server RPC, server C# before/original RPC, Push Model replicated property, client native/C# RepNotify after handler and confirmation RPC without project API wrappers. Dedicated/listen aggregate SHA-256 values are 4789f706a8be57fc0da3f587feccc8b1a18f368e6077ac91e42dfc727fd3b053 and a9c014822197aedeb09437c8f671050ccc23716a62d3986e8a1f09da82c00d67. Fixed .NET 246/246, PowerShell contracts 117/117, parser 58/58, UE5.8 no-clean Editor build, full Automation 376/376 and clean architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-30T06:06:34.2393312Z"
+    },
+    {
       "id": "P57.2",
       "status": "Completed",
       "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
@@ -293,8 +299,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12D4 concentrated review confirms schema-18 handler-mode identity, profile-group exclusivity, canonical regeneration and slice preservation, native/Blueprint original ownership, exact before/after/replace ordering, FStructOnScope deep-copy FIFO, 64-entry overflow behavior and teardown cleanup without project API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, focused Automation 25/25 + 2/2, full Automation 375/375 and clean a361812/d74bcb5 architecture gate passed. Real multi-client acceptance and P57-D06 remain open.",
-    "completed_at_utc": "2026-08-30T05:11:57.8299511Z"
+    "evidence": "P57.12D5 concentrated review confirms command-line-only test activation, owner-only PostLogin fixture spawning, production-generated C# facade and WASM manifest, exact process ownership/cleanup, per-role atomic JSON, dedicated/listen NetDriver flow, Remote-only client RPC routing, server before/original ordering, Push Model replication, client native/after RepNotify ordering and confirmation RPC without project API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, parser 58/58, UE5.8 no-clean target, dedicated/listen 2/2 topology runs, full Automation 376/376 and clean da198b2/fea4893 architecture gate passed. Cross-machine/cook/mobile networking and P57-D06 remain open.",
+    "completed_at_utc": "2026-08-30T06:06:34.2393312Z"
   },
   "budgets": {
     "ubt": 2,
@@ -302,25 +308,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 40,
-    "automation": 50,
-    "full_gate": 17
+    "ubt": 43,
+    "automation": 57,
+    "full_gate": 18
   },
   "freeze": {
-    "source_commit": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
-    "source_tree": "d74bcb51c5927b2654f239daf6012f89a92df4de",
+    "source_commit": "da198b2c762cd67e5f5e0d3d26bcdf7d3a1bfbc8",
+    "source_tree": "fea4893e76bdce0bdeac2cc04a64bead702bc5d1",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler.md",
-    "at_utc": "2026-08-30T05:11:57.8299511Z"
+    "review_evidence": "Docs/Phase57/P57.12D5_Real_Network_Topology.md",
+    "at_utc": "2026-08-30T06:06:34.2393312Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12D4_Architecture_a361812.log",
-    "report_sha256": "e77167793559a5d8e6683f946b8c7f270c1cf2e1095b4ed8aabd3807bba47ee7",
-    "run_id": "P57.12D4-clean-architecture-final",
-    "verified_commit": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
-    "verified_tree": "d74bcb51c5927b2654f239daf6012f89a92df4de",
-    "attestation_parent": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
-    "attested_at_utc": "2026-08-30T05:11:57.8299511Z"
+    "report_path": "external:C:/tmp/AvidScript_P57D5_Architecture_da198b2.log",
+    "report_sha256": "9a931b626d98fb4159bca8c0523fe08129e068a0dfe5bd6c13b39e794f83f15f",
+    "run_id": "P57.12D5-clean-architecture-final",
+    "verified_commit": "da198b2c762cd67e5f5e0d3d26bcdf7d3a1bfbc8",
+    "verified_tree": "fea4893e76bdce0bdeac2cc04a64bead702bc5d1",
+    "attestation_parent": "da198b2c762cd67e5f5e0d3d26bcdf7d3a1bfbc8",
+    "attested_at_utc": "2026-08-30T06:06:34.2393312Z"
   },
   "protected_dirty": [
     {
@@ -343,6 +349,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 42,
-  "updated_at_utc": "2026-08-30T05:11:57.8299511Z"
+  "revision": 43,
+  "updated_at_utc": "2026-08-30T06:06:34.2393312Z"
 }

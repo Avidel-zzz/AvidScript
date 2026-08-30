@@ -2140,8 +2140,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 ### 2026-08-30: do not wrap PowerShell architecture gates in an extra cmd quoting layer
 
-- Mistake: the first P57.12D2 clean architecture launcher wrapped an already quoted PowerShell command in `cmd.exe /c`; the outer shell preserved an escape backslash and cmd rejected it before the checker started.
-- Prevention: PowerShell architecture gates run directly through the verified PowerShell 7 host with native `*>` log redirection. Do not add a second shell only to capture output; a launcher parse failure is discarded and never counted as product or gate evidence.
+- Mistake: the first P57.12D2 clean architecture launcher wrapped an already quoted PowerShell command in `cmd.exe /c`; the outer shell preserved an escape backslash and cmd rejected it before the checker started. P57.12D5 later dot-sourced the checker into the current host before `Tee-Object`; the check passed, but its final `exit 0` ended the host before the outer pipeline created the evidence log.
+- Prevention: PowerShell architecture gates run through an explicit verified PowerShell 7 child with native `*>` log redirection owned by the parent launcher, or use direct native redirection only when process exit and file creation are both verified. A launcher or log-capture failure is discarded and never counted as product or gate evidence.
 
 ### 2026-08-30: latent UFunctions are identified by metadata
 
