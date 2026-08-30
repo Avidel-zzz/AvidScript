@@ -24,6 +24,8 @@
 - `P59.B5`：受控 `BuildCSharpScriptTypes.ps1` 已串联 binding package、frontend、semantic 与
   UHT shell generator；4 个 C# 声明类型已通过真实 UE5.8 UHT/UBT 和反射 Automation 回读。
 - `P59.B`：状态机已标记完成；候选提交 `4c593e5` 的隔离 clean architecture gate 通过。
+- `P59.C1`：Runtime-owned generated type router、Session-owned instance 接口、稳定 ObjectHandle
+  路由与 move-only teardown registration 已完成，并通过生产 router focused Automation。
 
 ## 待完成
 

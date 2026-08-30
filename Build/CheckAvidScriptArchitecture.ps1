@@ -629,6 +629,9 @@ foreach ($ForbiddenGeneratedDependency in @('AvidScriptEditor', 'AvidScriptVM', 
 }
 $GeneratedDispatcherHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeDispatcher.h'
 $GeneratedDispatcherSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeDispatcher.cpp'
+$GeneratedTypeRouterHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRouter.h'
+$GeneratedTypeRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRouter.cpp'
+$RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
 foreach ($RequiredGeneratedDispatchContract in @(
@@ -643,6 +646,29 @@ foreach ($RequiredGeneratedDispatchContract in @(
 foreach ($ForbiddenGeneratedHotPath in @('FName', 'FindFunction', 'FindObject', 'StaticFindObject')) {
     if ($GeneratedDispatcherSource.Contains($ForbiddenGeneratedHotPath)) {
         Add-Violation "generated type dispatcher hot path must not use $ForbiddenGeneratedHotPath"
+    }
+}
+foreach ($RequiredGeneratedTypeRouterContract in @(
+    'IAvidScriptGeneratedTypeInstance',
+    'FAvidScriptGeneratedTypeInstanceRegistration',
+    'FAvidScriptObjectHandle',
+    'FObjectKey',
+    'ActiveDispatchDepth')) {
+    if (-not $GeneratedTypeRouterHeader.Contains($RequiredGeneratedTypeRouterContract) -and
+        -not $GeneratedTypeRouterSource.Contains($RequiredGeneratedTypeRouterContract)) {
+        Add-Violation "generated type instance router is missing $RequiredGeneratedTypeRouterContract"
+    }
+}
+foreach ($ForbiddenGeneratedTypeRouterHotPath in @('FindFunction', 'FindObject', 'StaticFindObject', 'GetName')) {
+    if ($GeneratedTypeRouterSource.Contains($ForbiddenGeneratedTypeRouterHotPath)) {
+        Add-Violation "generated type instance router hot path must not use $ForbiddenGeneratedTypeRouterHotPath"
+    }
+}
+foreach ($RequiredGeneratedRouterModuleLifecycle in @(
+    'FAvidScriptGeneratedTypeRouter::Get().Startup()',
+    'FAvidScriptGeneratedTypeRouter::Get().Shutdown()')) {
+    if (-not $RuntimeModuleSource.Contains($RequiredGeneratedRouterModuleLifecycle)) {
+        Add-Violation "Runtime module does not own generated type router lifecycle: $RequiredGeneratedRouterModuleLifecycle"
     }
 }
 foreach ($RequiredScriptTypeBuildContract in @(
