@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,5 +27,18 @@ public static class SemanticSerializer
         json.CopyTo(terminated, 0);
         terminated[^1] = (byte)'\n';
         return terminated;
+    }
+
+    public static SemanticDocument Deserialize(ReadOnlySpan<byte> artifact)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<SemanticDocument>(artifact, Options)
+                ?? throw new InvalidDataException("Semantic artifact contains JSON null.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Semantic artifact is not valid schema JSON.", exception);
+        }
     }
 }

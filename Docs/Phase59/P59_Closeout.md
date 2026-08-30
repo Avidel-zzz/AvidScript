@@ -13,10 +13,12 @@
 - 旧 LLVM AOT 方案保留为研究记录，不再作为 P59 权威目标。
 - `P59.A`：schema 18/1.20 的 UE Type Declaration Contract、generated C# 属性/标记基类、
   Guest fail-closed validator、示例与受影响构建发布链已完成。
+- `P59.B1`：严格 semantic artifact 读取与 UE type contract 校验已提升到 Semantic 公共所有者，
+  Guest 与生成器共享同一 fail-closed 信任边界。
 
 ## 待完成
 
-- `P59.B` UHT shell generator；
+- `P59.B` 确定性 manifest、UHT shell generator 与生成模块集成；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 

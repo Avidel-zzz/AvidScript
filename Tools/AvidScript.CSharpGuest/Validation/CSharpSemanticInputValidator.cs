@@ -12,49 +12,6 @@ internal static class CSharpSemanticInputValidator
     private const int MaximumAsyncAwaitsPerModule = 64;
     private const int MaximumAsyncStateSlotsPerAwait = 64;
 
-    private static readonly IReadOnlySet<string> UeTypeKinds = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "actor",
-        "actor_component",
-        "world_subsystem",
-        "game_instance_subsystem",
-    };
-
-    private static readonly IReadOnlySet<string> UeClassFlags = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "blueprintable",
-        "blueprint_type",
-        "abstract",
-        "not_placeable",
-        "transient",
-    };
-
-    private static readonly IReadOnlySet<string> UePropertyFlags = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "edit_anywhere",
-        "visible_anywhere",
-        "blueprint_read_only",
-        "blueprint_read_write",
-        "replicated",
-        "save_game",
-        "transient",
-    };
-
-    private static readonly IReadOnlySet<string> UeFunctionFlags = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "blueprint_callable",
-        "blueprint_pure",
-        "blueprint_native_event",
-        "blueprint_implementable_event",
-        "server",
-        "client",
-        "net_multicast",
-        "reliable",
-        "unreliable",
-        "lifecycle",
-        "override",
-    };
-
     private static readonly string[] ObjectContinuationParameterTypeIds =
     {
         "type:global::AvidScript.AvidContinuationStatus",
@@ -115,7 +72,7 @@ internal static class CSharpSemanticInputValidator
             && ValidateTypeShapes(document.TypeShapes)
             && ValidateSymbols(document.Symbols)
             && ValidateCallables(document.SchemaVersion, document.Callables)
-            && ValidateUeTypeDeclarations(document)
+            && SemanticUeTypeContractValidator.TryValidate(document, out _)
             && ValidateGameplayEventCallbacks(document)
             && ValidateDelegateEventCallbacks(document)
             && ValidateContinuationCallbacks(document)
@@ -128,128 +85,6 @@ internal static class CSharpSemanticInputValidator
                 && !string.IsNullOrWhiteSpace(diagnostic.Severity)
                 && diagnostic.Message is not null
                 && diagnostic.Span is not null);
-    }
-
-    private static bool ValidateUeTypeDeclarations(SemanticDocument document)
-    {
-        if (document.SchemaVersion < 18)
-        {
-            return document.UeTypeDeclarations.Count == 0;
-        }
-
-        Dictionary<string, SemanticType> types = document.Types.ToDictionary(
-            type => type.Id,
-            StringComparer.Ordinal);
-        Dictionary<string, SemanticSymbol> symbols = document.Symbols.ToDictionary(
-            symbol => symbol.Id,
-            StringComparer.Ordinal);
-        Dictionary<string, SemanticCallable> callables = document.Callables.ToDictionary(
-            callable => callable.MethodSymbolId,
-            StringComparer.Ordinal);
-        if (document.UeTypeDeclarations.Any(declaration => declaration is null)
-            || !Unique(document.UeTypeDeclarations.Select(declaration => declaration.TypeId))
-            || !Unique(document.UeTypeDeclarations.Select(declaration => declaration.SymbolId))
-            || !Unique(document.UeTypeDeclarations.Select(declaration => declaration.EngineName))
-            || !IsOrdinalSorted(document.UeTypeDeclarations.Select(declaration => declaration.SymbolId).ToArray()))
-        {
-            return false;
-        }
-
-        foreach (SemanticUeTypeDeclaration declaration in document.UeTypeDeclarations)
-        {
-            if (!types.ContainsKey(declaration.TypeId)
-                || !types.ContainsKey(declaration.BaseTypeId)
-                || !UeTypeKinds.Contains(declaration.Kind)
-                || string.IsNullOrWhiteSpace(declaration.EngineName)
-                || declaration.Flags is null
-                || declaration.Properties is null
-                || declaration.Functions is null
-                || declaration.Span is null
-                || !ValidateFlags(declaration.Flags, UeClassFlags)
-                || !symbols.TryGetValue(declaration.SymbolId, out SemanticSymbol? typeSymbol)
-                || typeSymbol.Kind != "type"
-                || typeSymbol.TypeId != declaration.TypeId
-                || !ValidateUeProperties(declaration, symbols)
-                || !ValidateUeFunctions(declaration, symbols, callables))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static bool ValidateUeProperties(
-        SemanticUeTypeDeclaration declaration,
-        IReadOnlyDictionary<string, SemanticSymbol> symbols)
-    {
-        if (declaration.Properties.Any(property => property is null)
-            || !Unique(declaration.Properties.Select(property => property.SymbolId))
-            || !IsOrdinalSorted(declaration.Properties.Select(property => property.SymbolId).ToArray()))
-        {
-            return false;
-        }
-        foreach (SemanticUePropertyDeclaration property in declaration.Properties)
-        {
-            if (string.IsNullOrWhiteSpace(property.Name)
-                || string.IsNullOrWhiteSpace(property.TypeId)
-                || property.Flags is null
-                || property.Category is null
-                || property.ReplicatedUsing is null
-                || property.Span is null
-                || !ValidateFlags(property.Flags, UePropertyFlags)
-                || property.Flags.Contains("edit_anywhere") && property.Flags.Contains("visible_anywhere")
-                || property.Flags.Contains("blueprint_read_only") && property.Flags.Contains("blueprint_read_write")
-                || property.ReplicatedUsing.Length > 0 && !property.Flags.Contains("replicated")
-                || !symbols.TryGetValue(property.SymbolId, out SemanticSymbol? symbol)
-                || symbol.Kind is not ("field" or "property")
-                || symbol.Name != property.Name
-                || symbol.TypeId != property.TypeId
-                || symbol.ContainingSymbolId != declaration.SymbolId)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static bool ValidateUeFunctions(
-        SemanticUeTypeDeclaration declaration,
-        IReadOnlyDictionary<string, SemanticSymbol> symbols,
-        IReadOnlyDictionary<string, SemanticCallable> callables)
-    {
-        if (declaration.Functions.Any(function => function is null)
-            || !Unique(declaration.Functions.Select(function => function.MethodSymbolId))
-            || !IsOrdinalSorted(declaration.Functions.Select(function => function.MethodSymbolId).ToArray()))
-        {
-            return false;
-        }
-        foreach (SemanticUeFunctionDeclaration function in declaration.Functions)
-        {
-            if (string.IsNullOrWhiteSpace(function.Name)
-                || function.Flags is null
-                || function.Category is null
-                || function.Span is null
-                || !ValidateFlags(function.Flags, UeFunctionFlags)
-                || function.Flags.Contains("blueprint_pure") && !function.Flags.Contains("blueprint_callable")
-                || !symbols.TryGetValue(function.MethodSymbolId, out SemanticSymbol? symbol)
-                || symbol.Kind != "method"
-                || symbol.Name != function.Name
-                || symbol.IsStatic
-                || symbol.ContainingSymbolId != declaration.SymbolId
-                || !callables.TryGetValue(function.MethodSymbolId, out SemanticCallable? callable)
-                || callable.IsStatic
-                || callable.ContainingTypeId != declaration.TypeId)
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static bool ValidateFlags(IReadOnlyList<string> flags, IReadOnlySet<string> allowed)
-    {
-        return flags.All(flag => !string.IsNullOrWhiteSpace(flag) && allowed.Contains(flag))
-            && Unique(flags);
     }
 
     private static bool ValidateTypes(IReadOnlyList<SemanticType> types)

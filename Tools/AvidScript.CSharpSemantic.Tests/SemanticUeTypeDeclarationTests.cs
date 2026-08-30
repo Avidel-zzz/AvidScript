@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using AvidScript.CSharpFrontend;
 using AvidScript.CSharpSemantic;
@@ -13,7 +14,9 @@ internal static class SemanticUeTypeDeclarationTests
         InvalidMemberContractsFailClosed();
         SpoofAttributesDoNotCreateUeTypes();
         SerializationIsDeterministic();
-        return 6;
+        SharedContractValidatorRejectsForgedIdentifiers();
+        SharedSerializerReadsStrictArtifacts();
+        return 8;
     }
 
     private static void ActorDeclarationsPreserveStableReflectionContract()
@@ -238,6 +241,62 @@ internal static class SemanticUeTypeDeclarationTests
             && json.IndexOf("\"ue_type_declarations\"", StringComparison.Ordinal)
                 < json.IndexOf("\"diagnostics\"", StringComparison.Ordinal),
             "UE type declarations should occupy the versioned semantic field before diagnostics");
+    }
+
+    private static void SharedContractValidatorRejectsForgedIdentifiers()
+    {
+        const string source = """
+            using AvidScript;
+            [UClass]
+            public partial class ContractActor : AvidActor { }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/ContractActor.cs");
+        SemanticUeTypeDeclaration declaration = document.UeTypeDeclarations.Single();
+        SemanticDocument forged = document with
+        {
+            UeTypeDeclarations = new[] { declaration with { EngineName = "Bad-Name" } },
+        };
+        SemanticDocument cyclic = document with
+        {
+            UeTypeDeclarations = new[] { declaration with { BaseTypeId = declaration.TypeId } },
+        };
+
+        Assert(SemanticUeTypeContractValidator.TryValidate(document, out string validError)
+            && validError.Length == 0,
+            "the shared UE type contract validator should accept canonical semantic output");
+        Assert(!SemanticUeTypeContractValidator.TryValidate(forged, out string forgedError)
+            && forgedError.Contains("malformed", StringComparison.Ordinal),
+            "the shared UE type contract validator should reject forged non-identifier engine names");
+        Assert(!SemanticUeTypeContractValidator.TryValidate(cyclic, out string cycleError)
+            && cycleError.Contains("cyclic", StringComparison.Ordinal),
+            "the shared UE type contract validator should reject forged inheritance cycles");
+    }
+
+    private static void SharedSerializerReadsStrictArtifacts()
+    {
+        const string source = """
+            using AvidScript;
+            [UClass]
+            public partial class SerializedActor : AvidActor { }
+            """;
+        SemanticDocument document = Analyze(source, "Scripts/SerializedActor.cs");
+        SemanticDocument roundTrip = SemanticSerializer.Deserialize(SemanticSerializer.Serialize(document));
+
+        Assert(roundTrip.SchemaVersion == document.SchemaVersion
+            && roundTrip.Source.Sha256 == document.Source.Sha256
+            && roundTrip.UeTypeDeclarations.Single().SymbolId == document.UeTypeDeclarations.Single().SymbolId,
+            "the shared serializer should preserve strict semantic artifact identity");
+
+        bool rejected = false;
+        try
+        {
+            SemanticSerializer.Deserialize("not-json"u8);
+        }
+        catch (InvalidDataException)
+        {
+            rejected = true;
+        }
+        Assert(rejected, "the shared serializer should reject malformed semantic artifacts");
     }
 
     private static SemanticDocument Analyze(string source, string sourceId)
