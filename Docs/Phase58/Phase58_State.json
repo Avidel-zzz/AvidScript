@@ -5,7 +5,7 @@
     "goal": "以统一复合值 capability 和递归 descriptor 类型图扩展 FText、递归容器、TSet/TMap、soft/weak pointer 与 delegate ref/out，保持既有热路径性能和通用生成式 UE API 架构",
     "start_commit": "ad422c1b5d0c4fe00f402083ca021b7fe6e7b4a5"
   },
-  "declared_stage": "implementing",
+  "declared_stage": "gate_ready",
   "architecture": {
     "path": "Docs/Phase58/P58.0_Universal_Value_Graph_Architecture.md",
     "version": 1,
@@ -58,9 +58,9 @@
     }
   ],
   "review": {
-    "completed": false,
-    "evidence": "reopened: Phase close whitespace validation must exclude the immutable byte-preserved legacy archive while continuing to reject ordinary trailing whitespace.",
-    "completed_at_utc": null
+    "completed": true,
+    "evidence": "关闭恢复集中复审：不可变 legacy 归档保持原始 byte count/SHA-256，privacy 扫描继续覆盖，whitespace 排除限制为唯一精确路径；普通尾空格合同仍 fail-closed；PhaseWorkflow 30/30、Harness 7/7 与 audit PASS。",
+    "completed_at_utc": "2026-08-30T15:23:58.3752480+00:00"
   },
   "budgets": {
     "ubt": 2,
@@ -73,11 +73,11 @@
     "full_gate": 4
   },
   "freeze": {
-    "source_commit": "",
-    "source_tree": "",
-    "state_sha256": "",
-    "review_evidence": "",
-    "at_utc": null
+    "source_commit": "466750a07a227abf37e16c8e0583d480a2a77ed0",
+    "source_tree": "1c36ce9715717f721417332e6322af2ec2b79867",
+    "state_sha256": "137e08828609e56604c1d84e7b8ab87a80d39a97ddd95aecacd6e295046d3641",
+    "review_evidence": "关闭恢复集中复审：不可变 legacy 归档保持原始 byte count/SHA-256，privacy 扫描继续覆盖，whitespace 排除限制为唯一精确路径；普通尾空格合同仍 fail-closed；PhaseWorkflow 30/30、Harness 7/7 与 audit PASS。",
+    "at_utc": "2026-08-30T15:23:58.3752480+00:00"
   },
   "gate": {
     "report_path": "",
@@ -126,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "freeze -Phase 58 -ReviewEvidence <text>",
-  "revision": 15,
-  "updated_at_utc": "2026-08-30T15:22:41.1352497+00:00"
+  "next_action": "attest -Phase 58 -GateReportPath <path>",
+  "revision": 16,
+  "updated_at_utc": "2026-08-30T15:23:58.3810597+00:00"
 }
