@@ -1,11 +1,14 @@
 #include "AvidScriptEditorModule.h"
 
 #include "AvidScriptComponent.h"
+#include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorGeneratedBindingService.h"
 #include "AvidScriptEditorResultPresentation.h"
 #include "AvidScriptEditorSourceConfig.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -189,6 +192,15 @@ void FAvidScriptEditorModule::StartupModule()
 void FAvidScriptEditorModule::ShutdownModule()
 {
 	UnregisterConsoleCommands();
+	if (PublishCSharpBindingsAssetRegistryHandle.IsValid()
+		&& FModuleManager::Get().IsModuleLoaded(TEXT("AssetRegistry")))
+	{
+		FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"))
+			.Get()
+			.OnFilesLoaded()
+			.Remove(PublishCSharpBindingsAssetRegistryHandle);
+		PublishCSharpBindingsAssetRegistryHandle.Reset();
+	}
 
 	if (CSharpLiveReloadService)
 	{
@@ -221,6 +233,13 @@ void FAvidScriptEditorModule::RegisterConsoleCommands()
 			this,
 			&FAvidScriptEditorModule::HandleGenerateBindingsConsoleCommand),
 		ECVF_Default);
+	PublishCSharpBindingsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("AvidScript.PublishCSharpBindings"),
+		TEXT("Publish the generated C# gameplay binding package. Usage: AvidScript.PublishCSharpBindings [output-root] [exit]"),
+		FConsoleCommandWithArgsDelegate::CreateRaw(
+			this,
+			&FAvidScriptEditorModule::HandlePublishCSharpBindingsConsoleCommand),
+		ECVF_Default);
 }
 
 void FAvidScriptEditorModule::UnregisterConsoleCommands()
@@ -229,6 +248,11 @@ void FAvidScriptEditorModule::UnregisterConsoleCommands()
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(GenerateBindingsConsoleCommand);
 		GenerateBindingsConsoleCommand = nullptr;
+	}
+	if (PublishCSharpBindingsConsoleCommand != nullptr)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(PublishCSharpBindingsConsoleCommand);
+		PublishCSharpBindingsConsoleCommand = nullptr;
 	}
 }
 
@@ -272,6 +296,100 @@ void FAvidScriptEditorModule::HandleGenerateBindingsConsoleCommand(
 		Result.BindingCount,
 		Result.bReusedExistingModule ? TEXT("true") : TEXT("false"),
 		*Result.OutputDirectory);
+}
+
+void FAvidScriptEditorModule::HandlePublishCSharpBindingsConsoleCommand(
+	const TArray<FString>& Arguments)
+{
+	if (Arguments.Num() > 2
+		|| Arguments.Num() == 2 && !Arguments[1].Equals(TEXT("exit"), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Error,
+			TEXT("AvidScript.PublishCSharpBindings expects [output-root] [exit]."));
+		return;
+	}
+
+	const bool bExit = Arguments.Num() == 1
+		&& Arguments[0].Equals(TEXT("exit"), ESearchCase::IgnoreCase)
+		|| Arguments.Num() == 2;
+	const bool bHasOutputRoot = !Arguments.IsEmpty()
+		&& !Arguments[0].Equals(TEXT("exit"), ESearchCase::IgnoreCase);
+	const FString OutputRoot = !bHasOutputRoot
+		? FAvidScriptEditorCSharpBindingEmitter::GetDefaultOutputRoot()
+		: NormalizeAvidScriptEditorModulePath(
+			FPaths::IsRelative(Arguments[0])
+				? FPaths::Combine(FPaths::ProjectDir(), Arguments[0])
+				: Arguments[0]);
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	if (AssetRegistryModule.Get().IsLoadingAssets())
+	{
+		if (PublishCSharpBindingsAssetRegistryHandle.IsValid())
+		{
+			UE_LOG(LogAvidScriptEditor, Error, TEXT("A C# binding publication is already queued."));
+			return;
+		}
+		PendingCSharpBindingsOutputRoot = OutputRoot;
+		bExitAfterCSharpBindingsPublish = bExit;
+		PublishCSharpBindingsAssetRegistryHandle = AssetRegistryModule.Get().OnFilesLoaded().AddRaw(
+			this,
+			&FAvidScriptEditorModule::HandleAssetRegistryReadyForCSharpBindings);
+		UE_LOG(
+			LogAvidScriptEditor,
+			Display,
+			TEXT("AvidScript.PublishCSharpBindings queued until AssetRegistry is ready."));
+		return;
+	}
+
+	const bool bSucceeded = ExecutePublishCSharpBindings(OutputRoot);
+	if (bExit)
+	{
+		FPlatformMisc::RequestExitWithStatus(true, bSucceeded ? 0 : 1);
+	}
+}
+
+void FAvidScriptEditorModule::HandleAssetRegistryReadyForCSharpBindings()
+{
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::GetModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	AssetRegistryModule.Get().OnFilesLoaded().Remove(PublishCSharpBindingsAssetRegistryHandle);
+	PublishCSharpBindingsAssetRegistryHandle.Reset();
+	const FString OutputRoot = MoveTemp(PendingCSharpBindingsOutputRoot);
+	const bool bExit = bExitAfterCSharpBindingsPublish;
+	bExitAfterCSharpBindingsPublish = false;
+	const bool bSucceeded = ExecutePublishCSharpBindings(OutputRoot);
+	if (bExit)
+	{
+		FPlatformMisc::RequestExitWithStatus(true, bSucceeded ? 0 : 1);
+	}
+}
+
+bool FAvidScriptEditorModule::ExecutePublishCSharpBindings(const FString& OutputRoot)
+{
+	FAvidScriptCSharpBindingEmitResult Result;
+	if (!FAvidScriptEditorCSharpBindingEmitter::PublishEngineGameplay(OutputRoot, Result))
+	{
+		UE_LOG(
+			LogAvidScriptEditor,
+			Error,
+			TEXT("AvidScript.PublishCSharpBindings failed. category=%s source=%s error=%s"),
+			*Result.ErrorCategory,
+			*Result.ErrorSource,
+			*Result.ErrorMessage);
+		return false;
+	}
+
+	UE_LOG(
+		LogAvidScriptEditor,
+		Display,
+		TEXT("AvidScript.PublishCSharpBindings succeeded. package=%s reused=%s reference=%s manifest=%s"),
+		*Result.PackageHash,
+		Result.bReusedExistingPackage ? TEXT("true") : TEXT("false"),
+		*Result.ReferenceSourcePath,
+		*Result.ManifestPath);
+	return true;
 }
 
 FName FAvidScriptEditorModule::GetToolMenuOwnerName()

@@ -149,6 +149,14 @@
       "prevention": "验证 close evidence 时检查 attestation commit 是当前 HEAD 祖先，并用该历史提交重算 tree；bootstrap 只选择单调编号中最高的 Phase 并调用一次权威 status，不让较低编号的迁移遗留状态阻塞后续；合同必须在关闭后新增合法后继提交并仍返回 closed。",
       "source": "observed:2026-08-30-P58-post-close",
       "last_observed": "2026-08-30 P58 (bootstrap 读取已关闭 P57 时因 HEAD 已前进而误报 ASPW3045)"
+    },
+    {
+      "id": "editor-startup-commands-defer-reflection-discovery",
+      "tags": ["ue", "editor", "asset-registry", "console-command"],
+      "summary": "依赖 AssetRegistry 或反射发现的 Editor 命令不能在启动第 0 帧同步等待。",
+      "prevention": "命令检测 readiness；未就绪时注册 OnFilesLoaded 等权威 delegate 后立即返回，headless 模式由显式参数在完成后携带状态码退出，禁止用主线程轮询等待。",
+      "source": "observed:2026-08-30-P59.B",
+      "last_observed": "2026-08-30 P59.B (PublishCSharpBindings 在 ExecCmds frame 0 同步进入 reflection publication，阻塞 AssetRegistry 进度和 Quit)"
     }
   ]
 }

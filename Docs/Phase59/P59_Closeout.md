@@ -19,10 +19,12 @@
   UHT shell source 与原子/缓存命中发布内核。
 - `P59.B3`：永久 `AvidScriptGenerated` Runtime module、单向依赖、统一 ordinal dispatcher ABI 与
   在途调用卸载 fence 已完成，并通过 UE5.8 no-clean UBT 和 focused Automation。
+- `P59.B4`：支持 AssetRegistry readiness 的 headless C# binding package 发布入口已完成，首次真实
+  engine gameplay facade 发布成功并返回可消费的内容寻址路径。
 
 ## 待完成
 
-- `P59.B` 受控生成入口、首个真实 shell UHT/UBT 与反射回读；
+- `P59.B` semantic-to-shell PowerShell 入口、首个真实 shell UHT/UBT 与反射回读；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 

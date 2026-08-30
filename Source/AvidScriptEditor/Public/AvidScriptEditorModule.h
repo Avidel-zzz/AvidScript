@@ -109,6 +109,9 @@ private:
 	void RegisterConsoleCommands();
 	void UnregisterConsoleCommands();
 	void HandleGenerateBindingsConsoleCommand(const TArray<FString>& Arguments);
+	void HandlePublishCSharpBindingsConsoleCommand(const TArray<FString>& Arguments);
+	void HandleAssetRegistryReadyForCSharpBindings();
+	bool ExecutePublishCSharpBindings(const FString& OutputRoot);
 	void RegisterMenus();
 	void HandleRunSampleCommand();
 	void HandleBindCSharpActorLifecycleReport();
@@ -123,5 +126,9 @@ private:
 	TUniquePtr<FAvidScriptEditorCommandLauncher> CommandLauncher;
 	TUniquePtr<FAvidScriptEditorCSharpLiveReloadService> CSharpLiveReloadService;
 	IConsoleObject* GenerateBindingsConsoleCommand = nullptr;
+	IConsoleObject* PublishCSharpBindingsConsoleCommand = nullptr;
+	FDelegateHandle PublishCSharpBindingsAssetRegistryHandle;
+	FString PendingCSharpBindingsOutputRoot;
+	bool bExitAfterCSharpBindingsPublish = false;
 	FDelegateHandle ToolMenusStartupCallbackHandle;
 };

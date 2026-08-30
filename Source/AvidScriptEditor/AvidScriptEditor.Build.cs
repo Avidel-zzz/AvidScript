@@ -20,6 +20,7 @@ public class AvidScriptEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new[]
 			{
+				"AssetRegistry",
 				"AvidScriptBindings",
 				"AvidScriptVM",
 				"BlueprintGraph",
