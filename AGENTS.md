@@ -2223,3 +2223,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12D4 CSharpGuest gate forwarded only `exec_command.output`, hiding the returned `session_id`; the 30-second yield was then mistaken for completion and a duplicate test process was started before the second handle was polled to 105/105.
 - Prevention: every command that may outlive its initial yield returns and records the complete tool result, including `session_id`, `exit_code`, and `chunk_id`. A yielded command is never classified from output text alone; continue only through `write_stdin` on the same handle, or inspect authoritative process/log state if that handle was genuinely lost.
+
+### 2026-08-30: do not invent PhaseWorkflow subcommands
+
+- Mistake: the P57.12D4 closeout invoked `InvokePhaseWorkflow.ps1 help` even though the script has no help command and validates `-Phase` before dispatch, producing ASPW1101 without useful evidence.
+- Prevention: inspect the command switch in `InvokePhaseWorkflow.ps1` or use the documented `status -Phase <id>` entrypoint. Unknown convenience commands are not probed against state-management scripts.

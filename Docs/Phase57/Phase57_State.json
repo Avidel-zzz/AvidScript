@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; P57.12D3 adds generated native RPC and RepNotify inbound handlers through Session-owned UFunction routes without changing the continuation, Host ABI ownership, or UE network-driver ownership model"
+    "revision_reason": "The phase architecture remains version 6; P57.12D4 extends Session-owned UFunction routes with descriptor-owned before/after/replace semantics, Blueprint bytecode original execution, and bounded reentrant parameter snapshots without changing Host ABI or UE network-driver ownership"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12D3_Inbound_Network_Handler_Plan.md",
-    "closeout": "Docs/Phase57/P57.12D3_Inbound_Network_Handler.md"
+    "plan": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler_Plan.md",
+    "closeout": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler.md"
   },
   "batches": [
     {
@@ -222,6 +222,12 @@
       "completed_at_utc": "2026-08-30T04:09:24.7065833Z"
     },
     {
+      "id": "P57.12D4",
+      "status": "Completed",
+      "evidence": "implementation commit a361812 and clean tree d74bcb5; C# profile schema 10 and descriptor schema 18 preserve explicit replace/before/after modes through canonical regeneration, authorization slices and Runtime preparation; native and Blueprint-bytecode RPC/RepNotify originals remain UE-owned, while Session-owned FStructOnScope snapshots defer reentrant callbacks through a bounded 64-entry FIFO without recursive VM entry. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor build, focused descriptor 25/25, focused Runtime.Network 2/2, full Automation 375/375 and clean architecture gate passed. Dedicated/listen multi-client acceptance remains D5 and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-30T05:11:57.8299511Z"
+    },
+    {
       "id": "P57.2",
       "status": "Completed",
       "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
@@ -287,8 +293,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12D3 concentrated review confirms schema-17 callback identity, explicit include_handlers authorization, native RPC/RepNotify eligibility, immutable prepared codecs, Session-owned object routes, Prepare/Commit atomic activation, replace semantics, trap no-double-run behavior and original thunk restoration without per-API wrappers or property polling. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, focused D3 Automation 2/2, full Automation 373/373 and clean candidate architecture gate passed. Real multi-client acceptance and P57-D06 remain open.",
-    "completed_at_utc": "2026-08-30T04:09:24.7065833Z"
+    "evidence": "P57.12D4 concentrated review confirms schema-18 handler-mode identity, profile-group exclusivity, canonical regeneration and slice preservation, native/Blueprint original ownership, exact before/after/replace ordering, FStructOnScope deep-copy FIFO, 64-entry overflow behavior and teardown cleanup without project API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, focused Automation 25/25 + 2/2, full Automation 375/375 and clean a361812/d74bcb5 architecture gate passed. Real multi-client acceptance and P57-D06 remain open.",
+    "completed_at_utc": "2026-08-30T05:11:57.8299511Z"
   },
   "budgets": {
     "ubt": 2,
@@ -296,25 +302,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 37,
-    "automation": 46,
-    "full_gate": 16
+    "ubt": 40,
+    "automation": 50,
+    "full_gate": 17
   },
   "freeze": {
-    "source_commit": "10b0c52089f40c5ffec4521c26e3f98eb11b9a99",
-    "source_tree": "8e19c0e812a33ee4ac293ef2e82ef42a381d2172",
+    "source_commit": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
+    "source_tree": "d74bcb51c5927b2654f239daf6012f89a92df4de",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12D3_Inbound_Network_Handler.md",
-    "at_utc": "2026-08-30T04:09:24.7065833Z"
+    "review_evidence": "Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler.md",
+    "at_utc": "2026-08-30T05:11:57.8299511Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12D3_Architecture_10b0c52_20260830.log",
-    "report_sha256": "b3e694d407de4747925f602603a4399dce23beaca402d8311a409041cec254f1",
-    "run_id": "P57.12D3-clean-architecture-final",
-    "verified_commit": "10b0c52089f40c5ffec4521c26e3f98eb11b9a99",
-    "verified_tree": "8e19c0e812a33ee4ac293ef2e82ef42a381d2172",
-    "attestation_parent": "10b0c52089f40c5ffec4521c26e3f98eb11b9a99",
-    "attested_at_utc": "2026-08-30T04:09:24.7065833Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12D4_Architecture_a361812.log",
+    "report_sha256": "e77167793559a5d8e6683f946b8c7f270c1cf2e1095b4ed8aabd3807bba47ee7",
+    "run_id": "P57.12D4-clean-architecture-final",
+    "verified_commit": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
+    "verified_tree": "d74bcb51c5927b2654f239daf6012f89a92df4de",
+    "attestation_parent": "a361812c9e9cdbbc8bc89a74fdba90e7078f533d",
+    "attested_at_utc": "2026-08-30T05:11:57.8299511Z"
   },
   "protected_dirty": [
     {
@@ -337,6 +343,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 41,
-  "updated_at_utc": "2026-08-30T04:09:24.7065833Z"
+  "revision": 42,
+  "updated_at_utc": "2026-08-30T05:11:57.8299511Z"
 }
