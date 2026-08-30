@@ -81,6 +81,10 @@ internal static class UhtShellRenderer
         output.AppendLine();
         output.AppendLine("#include \"Net/UnrealNetwork.h\"");
         output.AppendLine("#include \"ScriptTypes/AvidScriptGeneratedTypeDispatcher.h\"");
+        output.AppendLine("#if WITH_DEV_AUTOMATION_TESTS");
+        output.AppendLine("#include \"Misc/AutomationTest.h\"");
+        output.AppendLine("#include \"UObject/UnrealType.h\"");
+        output.AppendLine("#endif");
         output.AppendLine();
 
         foreach (UeTypeManifestEntry type in TopologicalOrder(types))
@@ -118,7 +122,61 @@ internal static class UhtShellRenderer
                 output.AppendLine();
             }
         }
+        AppendReflectionTest(output, types);
         return Normalize(output);
+    }
+
+    private static void AppendReflectionTest(
+        StringBuilder output,
+        IReadOnlyList<UeTypeManifestEntry> types)
+    {
+        if (types.Count == 0)
+        {
+            return;
+        }
+        output.AppendLine("#if WITH_DEV_AUTOMATION_TESTS");
+        output.AppendLine("IMPLEMENT_SIMPLE_AUTOMATION_TEST(");
+        output.AppendLine("    FAvidScriptGeneratedTypeReflectionTest,");
+        output.AppendLine("    \"AvidScript.GeneratedTypes.Reflection\",");
+        output.AppendLine("    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)");
+        output.AppendLine();
+        output.AppendLine("bool FAvidScriptGeneratedTypeReflectionTest::RunTest(const FString& Parameters)");
+        output.AppendLine("{");
+        output.AppendLine("    static_cast<void>(Parameters);");
+        foreach (UeTypeManifestEntry type in types.OrderBy(type => type.TypeOrdinal))
+        {
+            string label = Escape(type.EngineName);
+            output.Append("    UClass* ").Append(type.CppName).Append("Class = ")
+                .Append(type.CppName).AppendLine("::StaticClass();");
+            output.Append("    TestNotNull(TEXT(\"").Append(label).Append(" StaticClass exists\"), ")
+                .Append(type.CppName).AppendLine("Class);");
+            output.Append("    TestEqual(TEXT(\"").Append(label).Append(" reflection name\"), ")
+                .Append(type.CppName).Append("Class->GetName(), FString(TEXT(\"")
+                .Append(label).AppendLine("\")));");
+            output.Append("    TestTrue(TEXT(\"").Append(label).Append(" direct native base\"), ")
+                .Append(type.CppName).Append("Class->GetSuperClass() == ")
+                .Append(type.BaseCppName).AppendLine("::StaticClass());");
+            foreach (UePropertyManifestEntry property in type.Properties)
+            {
+                output.Append("    TestNotNull(TEXT(\"").Append(label).Append('.')
+                    .Append(Escape(property.Name)).Append(" property exists\"), FindFProperty<FProperty>(")
+                    .Append(type.CppName).Append("Class, TEXT(\"").Append(Escape(property.Name))
+                    .AppendLine("\")));");
+            }
+            foreach (UeFunctionManifestEntry function in type.Functions.Where(function =>
+                !function.Flags.Contains("lifecycle")))
+            {
+                output.Append("    TestNotNull(TEXT(\"").Append(label).Append('.')
+                    .Append(Escape(function.Name)).Append(" function exists\"), ")
+                    .Append(type.CppName).Append("Class->FindFunctionByName(TEXT(\"")
+                    .Append(Escape(function.Name)).AppendLine("\")));");
+            }
+            output.AppendLine();
+        }
+        output.AppendLine("    return true;");
+        output.AppendLine("}");
+        output.AppendLine("#endif");
+        output.AppendLine();
     }
 
     private static void AppendFunctionDeclaration(StringBuilder output, UeFunctionManifestEntry function)

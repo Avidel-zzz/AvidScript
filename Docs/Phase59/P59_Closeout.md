@@ -21,10 +21,12 @@
   在途调用卸载 fence 已完成，并通过 UE5.8 no-clean UBT 和 focused Automation。
 - `P59.B4`：支持 AssetRegistry readiness 的 headless C# binding package 发布入口已完成，首次真实
   engine gameplay facade 发布成功并返回可消费的内容寻址路径。
+- `P59.B5`：受控 `BuildCSharpScriptTypes.ps1` 已串联 binding package、frontend、semantic 与
+  UHT shell generator；4 个 C# 声明类型已通过真实 UE5.8 UHT/UBT 和反射 Automation 回读。
 
 ## 待完成
 
-- `P59.B` semantic-to-shell PowerShell 入口、首个真实 shell UHT/UBT 与反射回读；
+- `P59.B` 批次状态收尾与集中架构证据；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 

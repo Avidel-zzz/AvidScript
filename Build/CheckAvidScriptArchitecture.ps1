@@ -629,6 +629,8 @@ foreach ($ForbiddenGeneratedDependency in @('AvidScriptEditor', 'AvidScriptVM', 
 }
 $GeneratedDispatcherHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeDispatcher.h'
 $GeneratedDispatcherSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeDispatcher.cpp'
+$CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
+$UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
 foreach ($RequiredGeneratedDispatchContract in @(
     'IAvidScriptGeneratedTypeDispatchTarget',
     'FAvidScriptGeneratedTypeDispatcher',
@@ -641,6 +643,30 @@ foreach ($RequiredGeneratedDispatchContract in @(
 foreach ($ForbiddenGeneratedHotPath in @('FName', 'FindFunction', 'FindObject', 'StaticFindObject')) {
     if ($GeneratedDispatcherSource.Contains($ForbiddenGeneratedHotPath)) {
         Add-Violation "generated type dispatcher hot path must not use $ForbiddenGeneratedHotPath"
+    }
+}
+foreach ($RequiredScriptTypeBuildContract in @(
+    'Resolve-AvidScriptCSharpBindingPackage',
+    'InvokeCSharpFrontend.ps1',
+    'InvokeCSharpSemantic.ps1',
+    'schema_version -ne 18',
+    'semantic_version -cne "1.20"',
+    'semantic_artifact_sha256',
+    'Get-FileHash')) {
+    if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
+        Add-Violation "C# script type build pipeline is missing $RequiredScriptTypeBuildContract"
+    }
+}
+if ($CSharpScriptTypeBuildSource -match '(?i)(?<![A-Za-z0-9])[0-9a-f]{64}(?![A-Za-z0-9])') {
+    Add-Violation 'C# script type build pipeline must not hardcode a content-addressed binding package hash'
+}
+foreach ($RequiredGeneratedReflectionContract in @(
+    'FAvidScriptGeneratedTypeDispatcher::Invoke(',
+    'AvidScript.GeneratedTypes.Reflection',
+    'FindFProperty<FProperty>',
+    'FindFunctionByName')) {
+    if (-not $UeTypeShellRendererSource.Contains($RequiredGeneratedReflectionContract)) {
+        Add-Violation "generated UE type renderer is missing $RequiredGeneratedReflectionContract"
     }
 }
 

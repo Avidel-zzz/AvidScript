@@ -68,8 +68,10 @@ internal static class UeTypeGeneratorTests
             && header.Contains("virtual void Activate(float damageScale) override;", StringComparison.Ordinal),
             "native shell output should preserve normalized reflection and override declarations");
         Assert(sourceText.Contains("FAvidScriptGeneratedTypeDispatcher::Invoke(", StringComparison.Ordinal)
-            && sourceText.Contains("DOREPLIFETIME(AProjectile, Damage);", StringComparison.Ordinal),
-            "generated bodies should use the shared ordinal dispatcher and replication registration");
+            && sourceText.Contains("DOREPLIFETIME(AProjectile, Damage);", StringComparison.Ordinal)
+            && sourceText.Contains("AvidScript.GeneratedTypes.Reflection", StringComparison.Ordinal)
+            && sourceText.Contains("FindFProperty<FProperty>", StringComparison.Ordinal),
+            "generated bodies should use ordinal dispatch and emit a self-describing reflection probe");
     }
 
     private static void LifecycleKindsMapToNativeShells()
