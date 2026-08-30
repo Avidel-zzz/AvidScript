@@ -15,10 +15,12 @@
   Guest fail-closed validator、示例与受影响构建发布链已完成。
 - `P59.B1`：严格 semantic artifact 读取与 UE type contract 校验已提升到 Semantic 公共所有者，
   Guest 与生成器共享同一 fail-closed 信任边界。
+- `P59.B2`：独立 `AvidScript.UeTypeGenerator` 已实现内容寻址 manifest、稳定 ordinal、确定性
+  UHT shell source 与原子/缓存命中发布内核。
 
 ## 待完成
 
-- `P59.B` 确定性 manifest、UHT shell generator 与生成模块集成；
+- `P59.B` 永久生成模块、Runtime dispatcher 冷路径合同与受控 UHT/UBT 集成；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 
