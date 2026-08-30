@@ -2201,6 +2201,191 @@ bool FAvidScriptEditorBindingRuntimeReflectedVectorPropertySetTest::RunTest(cons
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeNetworkRpcTest,
+	"AvidScript.Editor.BindingRuntime.NetworkRpcAuthority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeNetworkRpcTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Runtime RPC descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.editor.network_rpc_runtime"),
+				{
+					{ OwnerPath, TEXT("ServerSubmitValue") },
+					{ OwnerPath, TEXT("ClientApplyValue") },
+					{ OwnerPath, TEXT("MulticastAnnounceValue") }
+				},
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Runtime RPC descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const auto FindOrdinal = [&Descriptor](const TCHAR* Name)
+	{
+		const FAvidScriptBindingFunctionModel* Binding =
+			Descriptor.Bindings.FindByPredicate(
+				[Name](const FAvidScriptBindingFunctionModel& Candidate)
+				{
+					return Candidate.UeFunction == Name;
+				});
+		return Binding == nullptr ? INDEX_NONE : Binding->Ordinal;
+	};
+	const int32 ServerOrdinal = FindOrdinal(TEXT("ServerSubmitValue"));
+	const int32 ClientOrdinal = FindOrdinal(TEXT("ClientApplyValue"));
+	const int32 MulticastOrdinal = FindOrdinal(TEXT("MulticastAnnounceValue"));
+	if (!TestTrue(
+			TEXT("Runtime RPC ordinals are present"),
+			ServerOrdinal != INDEX_NONE
+				&& ClientOrdinal != INDEX_NONE
+				&& MulticastOrdinal != INDEX_NONE))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime caches immutable RPC invocation plans"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("RPC integration world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptBindingRuntimeNetworkTestActor* Actor =
+		World->SpawnActor<AAvidScriptBindingRuntimeNetworkTestActor>();
+	if (!TestNotNull(TEXT("RPC integration actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle =
+		Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(TEXT("RPC integration actor registers"), RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	const auto Dispatch = [&](const int32 Ordinal, const int32 Value,
+		FAvidScriptDynamicHostCallResult& OutResult)
+	{
+		const uint64 Arguments[] = {
+			ActorHandle.Slot,
+			ActorHandle.Generation,
+			static_cast<uint64>(static_cast<uint32>(Value))
+		};
+		FAvidScriptDynamicHostCall Call;
+		Call.BindingOrdinal = Ordinal;
+		Call.Arguments = MakeArrayView(Arguments);
+		return Package->Dispatch(Call, Context, Scratch, OutResult);
+	};
+
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	TestTrue(
+		TEXT("Authority executes Server RPC through UE callspace"),
+		Dispatch(ServerOrdinal, 11, DispatchResult));
+	TestEqual(TEXT("Server implementation receives value"), Actor->LastServerValue, 11);
+	TestTrue(
+		TEXT("Authority executes Client RPC through UE callspace"),
+		Dispatch(ClientOrdinal, 22, DispatchResult));
+	TestEqual(TEXT("Client implementation receives value"), Actor->LastClientValue, 22);
+	TestTrue(
+		TEXT("Authority executes multicast RPC through UE callspace"),
+		Dispatch(MulticastOrdinal, 33, DispatchResult));
+	TestEqual(
+		TEXT("Multicast implementation receives value"),
+		Actor->LastMulticastValue,
+		33);
+
+	FAvidScriptBindingRuntimeRecordingJournal CandidateJournal(true);
+	Context.HostEffectJournal = &CandidateJournal;
+	Actor->ProcessEventCallCount = 0;
+	TestFalse(
+		TEXT("Candidate reload rejects irreversible RPC"),
+		Dispatch(ServerOrdinal, 44, DispatchResult));
+	TestTrue(
+		TEXT("Candidate RPC reports the network-specific category"),
+		DispatchResult.Details.Contains(
+			TEXT("binding_network_reload_effect_unsupported")));
+	TestEqual(
+		TEXT("Candidate RPC is rejected before ProcessEvent"),
+		Actor->ProcessEventCallCount,
+		0);
+	Context.HostEffectJournal = nullptr;
+
+	Actor->SetRole(ROLE_SimulatedProxy);
+	Actor->ProcessEventCallCount = 0;
+	TestFalse(
+		TEXT("Non-authority cannot initiate Client RPC"),
+		Dispatch(ClientOrdinal, 55, DispatchResult));
+	TestTrue(
+		TEXT("Client direction failure is explicit"),
+		DispatchResult.Details.Contains(
+			TEXT("binding_network_authority_denied")));
+	TestFalse(
+		TEXT("Non-authority cannot initiate multicast RPC"),
+		Dispatch(MulticastOrdinal, 66, DispatchResult));
+	TestFalse(
+		TEXT("Standalone non-authority Server RPC is absorbed"),
+		Dispatch(ServerOrdinal, 77, DispatchResult));
+	TestTrue(
+		TEXT("Absorbed Server RPC has a stable category"),
+		DispatchResult.Details.Contains(
+			TEXT("binding_network_call_absorbed")));
+	TestEqual(
+		TEXT("Every denied RPC fails before ProcessEvent"),
+		Actor->ProcessEventCallCount,
+		0);
+	Actor->SetRole(ROLE_Authority);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest,
 	"AvidScript.Editor.BindingRuntime.BlueprintSetterProperty",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

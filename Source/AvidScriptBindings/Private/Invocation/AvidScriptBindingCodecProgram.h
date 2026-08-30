@@ -4,6 +4,7 @@
 #include "AvidScriptBindingFastPath.h"
 #include "AvidScriptArrayValueHeap.h"
 #include "AvidScriptBindingInvocationKind.h"
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
 #include "AvidScriptObjectRegistry.h"
@@ -133,6 +134,7 @@ struct FInvocationCodecProgram
 	bool bStatic = false;
 	bool bRequiresWriteAccess = false;
 	bool bLatent = false;
+	FAvidScriptBindingNetworkContract Network;
 	EAvidScriptBindingReloadEffect ReloadEffect =
 		EAvidScriptBindingReloadEffect::Unsupported;
 	bool bRequiresGuestMemory = false;

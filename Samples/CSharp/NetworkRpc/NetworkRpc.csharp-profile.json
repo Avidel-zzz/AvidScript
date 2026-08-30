@@ -1,0 +1,33 @@
+{
+  "schema_version": 4,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/NetworkRpc/NetworkRpcScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_network_rpc",
+  "artifact_stem": "profile_network_rpc",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_rpc",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_rpc/profile_network_rpc.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_rpc/profile_network_rpc.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.network_rpc",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "HasAuthority"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+        "include_functions": [
+          "ServerSubmitValue",
+          "ClientApplyValue",
+          "MulticastAnnounceValue"
+        ]
+      }
+    ]
+  }
+}

@@ -549,3 +549,59 @@ private:
 		meta = (AllowPrivateAccess = "true"))
 	int32 GeneratedPrivateInt = 0;
 };
+
+UCLASS()
+class AAvidScriptBindingRuntimeNetworkTestActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	AAvidScriptBindingRuntimeNetworkTestActor()
+	{
+		bReplicates = true;
+	}
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "AvidScript")
+	void ServerSubmitValue(int32 Value);
+
+	UFUNCTION(Client, Unreliable, BlueprintCallable, Category = "AvidScript")
+	void ClientApplyValue(int32 Value);
+
+	UFUNCTION(NetMulticast, Reliable, BlueprintCallable, Category = "AvidScript")
+	void MulticastAnnounceValue(int32 Value);
+
+	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
+	{
+		++ProcessEventCallCount;
+		Super::ProcessEvent(Function, Parameters);
+	}
+
+	int32 LastServerValue = 0;
+	int32 LastClientValue = 0;
+	int32 LastMulticastValue = 0;
+	int32 ServerInvocationCount = 0;
+	int32 ClientInvocationCount = 0;
+	int32 MulticastInvocationCount = 0;
+	int32 ProcessEventCallCount = 0;
+};
+
+inline void AAvidScriptBindingRuntimeNetworkTestActor::ServerSubmitValue_Implementation(
+	const int32 Value)
+{
+	LastServerValue = Value;
+	++ServerInvocationCount;
+}
+
+inline void AAvidScriptBindingRuntimeNetworkTestActor::ClientApplyValue_Implementation(
+	const int32 Value)
+{
+	LastClientValue = Value;
+	++ClientInvocationCount;
+}
+
+inline void AAvidScriptBindingRuntimeNetworkTestActor::MulticastAnnounceValue_Implementation(
+	const int32 Value)
+{
+	LastMulticastValue = Value;
+	++MulticastInvocationCount;
+}

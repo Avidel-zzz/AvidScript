@@ -1760,11 +1760,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v15 above the current maximum identifies its header field"),
+		TEXT("Schema v16 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 15);
+			Root->SetNumberField(TEXT("schema_version"), 16);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2005,6 +2005,153 @@ bool FAvidScriptEditorBindingDescriptorNativeDirectAuthorizationTest::RunTest(
 			ErrorCategory,
 			FString(TEXT("descriptor_contract_invalid")));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorNetworkRpcTest,
+	"AvidScript.Editor.BindingDescriptor.NetworkRpcSchema15",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorNetworkRpcTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedFunctionSelection> Functions = {
+		{ OwnerPath, TEXT("ServerSubmitValue") },
+		{ OwnerPath, TEXT("ClientApplyValue") },
+		{ OwnerPath, TEXT("MulticastAnnounceValue") }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("RPC descriptor generates without handwritten bindings"),
+			FAvidScriptEditorBindingDescriptorGenerator::Generate(
+				TEXT("avidscript.test.network_rpc"),
+				Functions,
+				DescriptorJson,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("RPC schema 15 descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	TestEqual(TEXT("RPC package selects schema 15"), Package.SchemaVersion, 15);
+	TestEqual(
+		TEXT("RPC package records the D1 generator"),
+		Package.GeneratorVersion,
+		FString(TEXT("57.12D1.0")));
+
+	const auto FindFunction = [&Package](const TCHAR* Name)
+	{
+		return Package.Bindings.FindByPredicate(
+			[Name](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeFunction == Name;
+			});
+	};
+	const FAvidScriptBindingFunctionModel* Server =
+		FindFunction(TEXT("ServerSubmitValue"));
+	const FAvidScriptBindingFunctionModel* Client =
+		FindFunction(TEXT("ClientApplyValue"));
+	const FAvidScriptBindingFunctionModel* Multicast =
+		FindFunction(TEXT("MulticastAnnounceValue"));
+	if (!TestNotNull(TEXT("Server RPC is present"), Server)
+		|| !TestNotNull(TEXT("Client RPC is present"), Client)
+		|| !TestNotNull(TEXT("Multicast RPC is present"), Multicast))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Server mode is explicit"),
+		Server->Network.Mode,
+		EAvidScriptBindingNetworkMode::Server);
+	TestTrue(TEXT("Server reliability is explicit"), Server->Network.bReliable);
+	TestEqual(
+		TEXT("Client mode is explicit"),
+		Client->Network.Mode,
+		EAvidScriptBindingNetworkMode::Client);
+	TestFalse(TEXT("Client unreliability is explicit"), Client->Network.bReliable);
+	TestEqual(
+		TEXT("Multicast mode is explicit"),
+		Multicast->Network.Mode,
+		EAvidScriptBindingNetworkMode::Multicast);
+	TestTrue(
+		TEXT("RPC identity includes network policy"),
+		Server->CanonicalIdentity.Contains(
+			TEXT("|network_mode=server|network_reliable=1")));
+	TestTrue(
+		TEXT("All RPCs remain on UE ProcessEvent routing"),
+		Package.Bindings.ContainsByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.Network.IsNetworked()
+					&& Binding.DispatchMode != TEXT("cached_process_event");
+			}) == false);
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("RPC descriptor emits a typed C# facade"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("C# facade exposes all project RPCs"),
+		ReferenceSource.Contains(TEXT("ServerSubmitValue("))
+			&& ReferenceSource.Contains(TEXT("ClientApplyValue("))
+			&& ReferenceSource.Contains(TEXT("MulticastAnnounceValue(")));
+
+	FAvidScriptBindingPackageModel Tampered = Package;
+	FAvidScriptBindingFunctionModel* TamperedServer =
+		Tampered.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeFunction == TEXT("ServerSubmitValue");
+			});
+	check(TamperedServer != nullptr);
+	TamperedServer->Network.bReliable = false;
+	Tampered.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Tampered);
+	Tampered.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Tampered);
+	FString TamperedJson;
+	TestTrue(
+		TEXT("Canonical serializer can encode the tampered drift fixture"),
+		FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Tampered,
+			TamperedJson));
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestFalse(
+		TEXT("Runtime rejects RPC reliability drift"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			TamperedJson,
+			RuntimePackage,
+			LoadResult));
+	TestEqual(
+		TEXT("RPC drift has a stable failure category"),
+		LoadResult.ErrorCategory,
+		FString(TEXT("binding_network_contract_mismatch")));
 	return true;
 }
 

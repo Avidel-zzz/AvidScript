@@ -1,5 +1,6 @@
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "Engine/LatentActionManager.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
@@ -34,6 +35,50 @@ bool FAvidScriptEditorReflectedFunctionPolicy::Evaluate(
 		OutCategory = TEXT("function_not_allowed");
 		OutSource = Function->GetPathName();
 		return false;
+	}
+
+	FAvidScriptBindingNetworkContract Network;
+	if (!TryResolveAvidScriptBindingNetworkContract(*Function, Network))
+	{
+		OutCategory = TEXT("network_contract_invalid");
+		OutSource = Function->GetPathName();
+		return false;
+	}
+	if (Network.IsNetworked())
+	{
+		if (!IsAvidScriptBindingNetworkOwnerClass(Function->GetOwnerClass()))
+		{
+			OutCategory = TEXT("network_owner_invalid");
+			OutSource = Function->GetPathName();
+			return false;
+		}
+		if (Function->HasAnyFunctionFlags(FUNC_Static)
+			|| Function->HasMetaData(TEXT("Latent"))
+			|| Function->GetReturnProperty() != nullptr)
+		{
+			OutCategory = TEXT("network_shape_unsupported");
+			OutSource = Function->GetPathName();
+			return false;
+		}
+		for (TFieldIterator<FProperty> It(Function); It; ++It)
+		{
+			const FProperty* Property = *It;
+			if (!Property->HasAnyPropertyFlags(CPF_Parm)
+				|| Property->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				continue;
+			}
+			if (Property->HasAnyPropertyFlags(CPF_OutParm)
+				|| (Property->HasAnyPropertyFlags(CPF_ReferenceParm)
+					&& !Property->HasAnyPropertyFlags(CPF_ConstParm)))
+			{
+				OutCategory = TEXT("network_shape_unsupported");
+				OutSource = Function->GetPathName()
+					+ TEXT(":") + Property->GetName();
+				return false;
+			}
+		}
+		return true;
 	}
 	if (!Function->HasMetaData(TEXT("Latent")))
 	{

@@ -2117,3 +2117,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12C16 tree-evidence command passed `HEAD^{tree}` unquoted, so PowerShell parsed the braces and Git received an unrelated encoded argument after printing an unusable intermediate result.
 - Prevention: quote revision expressions that contain braces, for example `git rev-parse 'HEAD^{tree}'`, and treat any command that emits a Git fatal line as failed evidence even if it printed an earlier hash. Commit and tree evidence are always captured by separate commands.
+
+### 2026-08-30: self-executing .NET test projects use dotnet run
+
+- Mistake: the first P57.12D1 consolidated .NET gate invoked `dotnet test` for five repository `.Tests.csproj` files. These projects are deterministic console test runners rather than VSTest projects, so the command exited successfully without executing or reporting the expected assertions.
+- Prevention: inspect `OutputType` and `Program.Main` before selecting the test verb. AvidScript's five managed test runners use the pinned `%USERPROFILE%\.dotnet\dotnet.exe run --project <path> --configuration Release --no-restore`; evidence is valid only when each runner prints its explicit `passed/total` line and exits zero. A silent `dotnet test` success never counts as this gate.
+
+### 2026-08-30: descriptor schema bumps advance future-version fixtures
+
+- Mistake: P57.12D1 promoted descriptor schema 15 but the first full Automation run retained a legacy V8PropertySet assertion that still treated schema 15 as an unsupported future version. The product schema, parser, runtime loader, package publisher, and three new RPC tests were correct, but the stale fixture caused the queue to finish at 367/368.
+- Prevention: every descriptor schema promotion searches tests, package scripts, runtime manifest loaders, architecture ranges, and labels for the previous maximum. Compatibility cases retain old versions deliberately; every future-version mutation advances to `CurrentDescriptorSchema + 1` in the same implementation group before the full Automation gate.

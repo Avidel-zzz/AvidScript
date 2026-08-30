@@ -319,6 +319,15 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 		}
 		Writer->WriteValue(TEXT("is_static"), Binding.bStatic);
 		Writer->WriteValue(TEXT("is_const"), Binding.bConst);
+		if (Package.SchemaVersion >= 15)
+		{
+			Writer->WriteValue(
+				TEXT("network_mode"),
+				LexToString(Binding.Network.Mode));
+			Writer->WriteValue(
+				TEXT("network_reliable"),
+				Binding.Network.bReliable);
+		}
 		if (Package.SchemaVersion >= 3)
 		{
 			Writer->WriteValue(TEXT("reload_effect"), LexToString(Binding.ReloadEffect));

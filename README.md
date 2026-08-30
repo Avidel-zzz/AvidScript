@@ -10,14 +10,14 @@
   <img alt="WebAssembly" src="https://img.shields.io/badge/Target-WebAssembly-654FF0?logo=webassembly&logoColor=white">
   <img alt="Wasmtime 45" src="https://img.shields.io/badge/VM-Wasmtime%2045-2B6CB0">
   <img alt="Win64 Development" src="https://img.shields.io/badge/Platform-Win64-0078D4?logo=windows&logoColor=white">
-  <img alt="Phase 57.12C16" src="https://img.shields.io/badge/Status-Phase%2057.12C16-159957">
-  <img alt="Automation 365/365" src="https://img.shields.io/badge/Automation-365%2F365-26A269">
+  <img alt="Phase 57.12D1" src="https://img.shields.io/badge/Status-Phase%2057.12D1-159957">
+  <img alt="Automation 368/368" src="https://img.shields.io/badge/Automation-368%2F368-26A269">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/License-MIT-2E8B57"></a>
 </p>
 
 将 C# 编译为轻量 WASM Guest，通过生成式 Binding 接入 `BeginPlay`、`Tick`、
 Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overlap、动态多播事件、
-普通 `UFUNCTION` 与 `UPROPERTY`，在 UE 中编写真实游戏逻辑。
+普通 `UFUNCTION`、生成式 RPC 与 `UPROPERTY`，在 UE 中编写真实游戏逻辑。
 
 </div>
 
@@ -34,7 +34,7 @@ Timer、受控 `async/await`、UE latent UFUNCTION、异步对象加载、Overla
   再输出 WebAssembly；PC 主后端使用 Wasmtime Cranelift。
 - **接入 UE 生命周期与事件**：脚本可以响应 `BeginPlay`、`Tick`、`EndPlay`、Timer、受控 `async/await`、异步对象加载、
   Gameplay Event、Overlap，并订阅 Session 授权的任意兼容 UObject 动态多播事件；同时使用 Actor、Component、递归固定宽度 `USTRUCT`、
-  `FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型。
+  `FName`、`FString`、一维 `TArray<T>` 和常用 UE 值类型，并调用项目自定义的 Server、Client 与 NetMulticast RPC。
 - **性能结论可复核**：同机、同 workload 对比 Puerts V8；候选 commit、profile、
   进程样本、P50/P95 和未达门禁均进入机器可读 evidence。
 
@@ -308,6 +308,34 @@ P57.12C16 进一步支持一维数组的 `foreach` 循环体直接 await。Seman
 继续使用 `array_length`、`array_region_load` 和普通 branch，不复制整个数组，也不新增 Host import。
 正数线性内存引用受 activation 栅栏保护，负数 UE 数组 capability 继续服从 Session/reload 所有权。
 
+### 生成式 UE RPC
+
+P57.12D1 把项目 Reflection 中被 profile 授权的 `Server`、`Client` 与 `NetMulticast`
+`UFUNCTION` 直接投影到现有 C# facade。网络方向与可靠性进入 descriptor identity；Runtime 在调用前
+重新核对活动 UFunction flags、Actor/ActorComponent owner、authority 与 UE callspace，再由
+`ProcessEvent` 执行 UE 原生网络路由。项目 RPC 不需要手写 Host import 或按函数名称分支：
+
+```csharp
+public static void BeginPlay()
+{
+    AAvidScriptBindingRuntimeNetworkTestActor self = UE.Self;
+    AActor actor = self;
+    if (actor.HasAuthority())
+    {
+        self.ClientApplyValue(20);
+        self.MulticastAnnounceValue(30);
+    }
+    else
+    {
+        self.ServerSubmitValue(10);
+    }
+}
+```
+
+候选热重载会在 `ProcessEvent` 前拒绝 RPC，避免不可回滚的网络副作用。D1 只开放脚本主动调用
+RPC；Replicated Property、RepNotify 和 UE 收到 RPC 后分发到 C# handler 属于后续网络批次。
+完整样例见 [NetworkRpc](Samples/CSharp/NetworkRpc/README.md)。
+
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及在受支持控制流中的直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
 `FooAsync(...)`。旧 callback API、旧 Semantic 产物与
@@ -326,6 +354,7 @@ trap 会回滚本次借出的对象 capability。
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
+| UE 网络调用 | 生成式 Server、Client、NetMulticast RPC；可靠性身份、Actor/ActorComponent owner、authority/callspace 前置校验、候选热重载副作用隔离 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
@@ -568,6 +597,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [ActorLifecycle](Samples/CSharp/ActorLifecycle/ActorLifecycleScript.cs) | async `BeginPlay`、循环/switch section 内部 await、跨三个 await 的 FVector/对象 local、`Tick` / `EndPlay`、Timer Continuation 与异步对象加载 |
 | [LatentGameplay](Samples/CSharp/LatentGameplay/README.md) | Reflection 生成 `UKismetSystemLibrary.DelayAsync`，在 `BeginPlay` 中等待后恢复 UE 游戏逻辑 |
 | [AsyncArrayForeach](Samples/CSharp/AsyncArrayForeach/README.md) | 一维数组 foreach 中逐 Tick await，并在恢复后继续调用 UE Actor API |
+| [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目自定义 Server、Client、NetMulticast RPC，并按 authority 选择方向 |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
 
@@ -580,7 +610,8 @@ cmd /c Build\BuildWAMRWin64.cmd
 - 受控 `async/await` 已支持顺序等待、分支/循环/integral 或 enum switch section、一维数组 value foreach 内的直接 await、typed outcome、固定布局 local 与数组引用状态帧、控制转移和宿主 activation 失效抑制；await 仍须是直接语句或单一 local initializer，switch governing value 首批须为 local/parameter 读取，foreach 首批须为同步一维数组与精确元素类型；条件表达式与 header 中的 await、pattern/string switch、`goto case/default`、非数组 enumerator、元素转换、解构、ref/await foreach、string element、`Task` / `ValueTask`、异常传播、`try/finally`、任意 awaiter、async helper 调用链、批量加载和进度/优先级尚未支持；
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
-  latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、RPC、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+  latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
+- C# 已可主动调用满足 D1 合同的 Server、Client 与 NetMulticast UFUNCTION；Replicated Property、RepNotify、入站 RPC 到 C# handler、网络预测和回滚尚未支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
@@ -606,14 +637,14 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12C16 的 **365/365 通过**，固定 .NET
+当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D1 的 **368/368 通过**，固定 .NET
 完整基线为 `246/246`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-目标构建成功，clean candidate `db687bb/70082e7` 架构门禁通过。C16 已完成同步一维数组
-value `foreach` 内直接 await、编译器数组/索引局部、精确状态帧活跃性以及 break/continue 目标，
-并保持既有 Host ABI 与 Session/reload 所有权边界。
+目标构建成功。D1 已完成项目自定义 Server、Client 与 NetMulticast UFUNCTION 的生成式调用、
+descriptor 网络身份、活动 Reflection 复核、authority/callspace 前置校验与候选热重载副作用隔离；
+实际网络路由仍由 UE `ProcessEvent` 与 `GetFunctionCallspace` 决定。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12C16 中文完成报告](Docs/Phase57/P57.12C16_Array_Foreach_Await.md)。
+[P57.12D1 中文完成报告](Docs/Phase57/P57.12D1_Generated_RPC_Authority.md)。
 
 工程规则：
 

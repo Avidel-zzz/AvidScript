@@ -1172,6 +1172,13 @@ FString MakeAvidScriptRuntimeCanonicalIdentity(
 			+ Parameter.CanonicalType;
 	}
 	Identity += TEXT(")");
+	if (Binding.Network.IsNetworked())
+	{
+		Identity += TEXT("|network_mode=")
+			+ FString(LexToString(Binding.Network.Mode))
+			+ TEXT("|network_reliable=")
+			+ (Binding.Network.bReliable ? TEXT("1") : TEXT("0"));
+	}
 	if (Binding.DispatchMode == TEXT("latent_process_event"))
 	{
 		Identity += TEXT("|latent_info=") + Binding.LatentInfoParameter
@@ -3531,6 +3538,33 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				TEXT("The reflected function is missing or no longer satisfies runtime policy."));
 			return false;
 		}
+		FAvidScriptBindingNetworkContract RuntimeNetwork;
+		if (!TryResolveAvidScriptBindingNetworkContract(
+				*Function,
+				RuntimeNetwork)
+			|| RuntimeNetwork != Binding.Network)
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_network_contract_mismatch"),
+				Binding.CanonicalIdentity,
+				TEXT("The descriptor network mode or reliability no longer matches the active UFunction flags."));
+			return false;
+		}
+		if (RuntimeNetwork.IsNetworked()
+			&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+				|| Binding.DispatchMode != TEXT("cached_process_event")
+				|| Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Const)
+				|| Function->HasMetaData(TEXT("Latent"))
+				|| Function->GetReturnProperty() != nullptr))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_network_owner_invalid"),
+				Binding.CanonicalIdentity,
+				TEXT("AvidScript RPC bindings require a non-static Actor or ActorComponent function with cached ProcessEvent dispatch and no return value."));
+			return false;
+		}
 		if (Binding.bStatic != Function->HasAnyFunctionFlags(FUNC_Static)
 			|| Binding.bConst != Function->HasAnyFunctionFlags(FUNC_Const)
 			|| Binding.HostImport.Signature != MakeAvidScriptRuntimeExpectedSignature(Binding))
@@ -3578,6 +3612,23 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				ReflectedParameters.Add(Property);
 			}
 		}
+		if (RuntimeNetwork.IsNetworked()
+			&& ReflectedParameters.ContainsByPredicate(
+				[](const FProperty* Property)
+				{
+					return Property != nullptr
+						&& (Property->HasAnyPropertyFlags(CPF_OutParm)
+							|| (Property->HasAnyPropertyFlags(CPF_ReferenceParm)
+								&& !Property->HasAnyPropertyFlags(CPF_ConstParm)));
+				}))
+		{
+			SetAvidScriptBindingLoadFailure(
+				OutResult,
+				TEXT("binding_network_contract_mismatch"),
+				Binding.CanonicalIdentity,
+				TEXT("AvidScript RPC bindings do not support ref or out parameters."));
+			return false;
+		}
 		if (ReflectedParameters.Num() != Binding.Parameters.Num())
 		{
 			SetAvidScriptBindingLoadFailure(
@@ -3597,8 +3648,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Plan.LatentInfoProperty = LatentContract.LatentInfoProperty;
 		Plan.WorldContextProperty = LatentContract.WorldContextProperty;
 		Plan.LatentCompletion = LatentContract.Completion;
+		Plan.Network = RuntimeNetwork;
 		Plan.ReloadEffect = Binding.ReloadEffect;
-		Plan.bRequiresWriteAccess = Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
+		Plan.bRequiresWriteAccess = RuntimeNetwork.IsNetworked()
+			|| Binding.ReloadEffect != EAvidScriptBindingReloadEffect::None;
 		Plan.FrameSize = Function->GetStructureSize();
 		Plan.FrameAlignment = FMath::Max(1, Function->GetMinAlignment());
 		if (Plan.FrameSize < Function->ParmsSize

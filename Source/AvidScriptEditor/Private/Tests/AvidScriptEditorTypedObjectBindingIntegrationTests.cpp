@@ -1639,4 +1639,91 @@ bool FAvidScriptEditorCSharpComponentGameplayTest::RunTest(
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpNetworkRpcTest,
+	"AvidScript.Editor.CSharp.NetworkRpc",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpNetworkRpcTest::RunTest(const FString& Parameters)
+{
+	const FString TestRoot = MakeAvidScriptTypedObjectBindingTestPath(
+		FPaths::Combine(
+			TEXT("NetworkRpc"),
+			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+
+	const FString ProfilePath = GetAvidScriptTypedProjectApiPluginPath(
+		TEXT("Samples/CSharp/NetworkRpc/NetworkRpc.csharp-profile.json"));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Network RPC schema v4 profile parses"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = FPaths::Combine(TestRoot, TEXT("Build"));
+	BuildRequest.Config.ArtifactStem = TEXT("network_rpc");
+	BuildRequest.Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot =
+		FPaths::Combine(TestRoot, TEXT("SemanticCache/v1"));
+	BuildRequest.Config.bDisableSemanticCache = true;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Network RPC sample builds through Roslyn, Guest IR, and WASM"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				BuildRequest,
+				BuildResult)))
+	{
+		AddError(
+			BuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + BuildResult.Stdout
+			+ TEXT("\nstderr:\n") + BuildResult.Stderr);
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+			TEXT("Network RPC manifest authorizes emitted WASM"),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				Manifest,
+				Bytecode,
+				ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(
+			TEXT("Network RPC manifest owns a binding package"),
+			Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Network RPC build publishes descriptor schema 15"),
+		Manifest.BindingPackage->GetDescriptorSchemaVersion(),
+		15);
+	TestTrue(TEXT("Network RPC build emits non-empty WASM"), !Bytecode.IsEmpty());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

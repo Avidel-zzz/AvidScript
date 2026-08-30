@@ -35,6 +35,7 @@ constexpr const TCHAR* ArrayGeneratorVersion = TEXT("57.11B3.0");
 constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
 constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
 constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
+constexpr const TCHAR* NetworkGeneratorVersion = TEXT("57.12D1.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -60,6 +61,7 @@ struct FResolvedBindingDescriptor
 	FString GeneratedShape;
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
+	FAvidScriptBindingNetworkContract Network;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	int32 Ordinal = INDEX_NONE;
 };
@@ -125,6 +127,7 @@ FString MakeCanonicalIdentity(
 	const UClass* OwnerClass,
 	const UFunction* Function,
 	const FAvidScriptProjectedFunction& Projection,
+	const FAvidScriptBindingNetworkContract& Network,
 	const FString& DispatchMode,
 	const FString& LatentInfoParameter = FString(),
 	const FString& WorldContextParameter = FString(),
@@ -148,6 +151,12 @@ FString MakeCanonicalIdentity(
 			+ Parameter.Type.CanonicalType;
 	}
 	Identity += TEXT(")");
+	if (Network.IsNetworked())
+	{
+		Identity += TEXT("|network_mode=") + FString(LexToString(Network.Mode))
+			+ TEXT("|network_reliable=")
+			+ (Network.bReliable ? TEXT("1") : TEXT("0"));
+	}
 	if (DispatchMode == TEXT("latent_process_event"))
 	{
 		Identity += TEXT("|latent_info=") + LatentInfoParameter
@@ -534,6 +543,17 @@ bool GenerateBindingDescriptor(
 		Binding.Selection = Selection;
 		Binding.OwnerClass = OwnerClass;
 		Binding.Function = Function;
+		if (!TryResolveAvidScriptBindingNetworkContract(
+				*Function,
+				Binding.Network))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("network_contract_invalid"),
+				Function->GetPathName(),
+				TEXT("Regenerate reflection data after fixing the malformed UE RPC flags."));
+			return false;
+		}
 		Binding.UeMember = Function->GetName();
 		Binding.LatentInfoParameter = LatentContract.LatentInfoParameter;
 		Binding.WorldContextParameter = LatentContract.WorldContextParameter;
@@ -585,9 +605,12 @@ bool GenerateBindingDescriptor(
 			+ (LatentContract.bLatent ? FString(TEXT("Async")) : FString());
 		const bool bGeneratedNative =
 			!LatentContract.bLatent
+			&& !Binding.Network.IsNetworked()
 			&& GeneratedNativeFunctionKeys.Contains(SelectionKey);
 		Binding.DispatchMode = LatentContract.bLatent
 			? FString(TEXT("latent_process_event"))
+			: Binding.Network.IsNetworked()
+			? FString(TEXT("cached_process_event"))
 			: bGeneratedNative
 			? FString(TEXT("generated_native_s1"))
 			: NativeDirectFunctionKeys.Contains(SelectionKey)
@@ -597,6 +620,7 @@ bool GenerateBindingDescriptor(
 			OwnerClass,
 			Function,
 			Binding.Projection,
+			Binding.Network,
 			TEXT("cached_process_event"),
 			Binding.LatentInfoParameter,
 			Binding.WorldContextParameter,
@@ -654,6 +678,7 @@ bool GenerateBindingDescriptor(
 				OwnerClass,
 				Function,
 				Binding.Projection,
+				Binding.Network,
 				Binding.DispatchMode,
 				Binding.LatentInfoParameter,
 				Binding.WorldContextParameter,
@@ -1162,6 +1187,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.CompletionMode == TEXT("provider");
 		});
+	const bool bHasNetworkBindings = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.Network.IsNetworked();
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1188,7 +1218,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 14;
 	}
-	Package.GeneratorVersion = bHasLatentPayloadBindings
+	if (bHasNetworkBindings)
+	{
+		Package.SchemaVersion = 15;
+	}
+	Package.GeneratorVersion = bHasNetworkBindings
+		? NetworkGeneratorVersion
+		: bHasLatentPayloadBindings
 		? LatentPayloadGeneratorVersion
 		: bHasLatentBindings
 		? LatentGeneratorVersion
@@ -1264,6 +1300,7 @@ bool GenerateBindingDescriptor(
 		BindingModel.bConst = Binding.BindingKind == TEXT("property_get")
 			|| (Binding.Function != nullptr
 				&& Binding.Function->HasAnyFunctionFlags(FUNC_Const));
+		BindingModel.Network = Binding.Network;
 		BindingModel.ReloadEffect = Binding.ReloadEffect;
 		BindingModel.ReturnValue = MakeBindingValueModel(Binding.Projection.ReturnValue);
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)

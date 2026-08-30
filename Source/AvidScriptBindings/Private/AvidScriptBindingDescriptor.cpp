@@ -759,6 +759,33 @@ bool ParseAvidScriptBindingFunction(
 		OutErrorSource = TEXT("completion");
 		return false;
 	}
+	if (SchemaVersion >= 15)
+	{
+		FString NetworkMode;
+		if (!ReadAvidScriptBindingRequiredString(
+				Object,
+				TEXT("network_mode"),
+				NetworkMode,
+				OutErrorSource)
+			|| !TryParseAvidScriptBindingNetworkMode(
+				NetworkMode,
+				OutBinding.Network.Mode)
+			|| !ReadAvidScriptBindingRequiredBool(
+				Object,
+				TEXT("network_reliable"),
+				OutBinding.Network.bReliable,
+				OutErrorSource))
+		{
+			OutErrorSource = TEXT("network");
+			return false;
+		}
+	}
+	else if (Object->HasField(TEXT("network_mode"))
+		|| Object->HasField(TEXT("network_reliable")))
+	{
+		OutErrorSource = TEXT("network");
+		return false;
+	}
 
 	if (SchemaVersion == 2)
 	{
@@ -1698,7 +1725,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 14
+	FString Identity(Package.SchemaVersion >= 15
+		? TEXT("descriptor_selection_v15")
+		: Package.SchemaVersion >= 14
 		? TEXT("descriptor_selection_v14")
 		: Package.SchemaVersion >= 13
 		? TEXT("descriptor_selection_v13")
@@ -1716,6 +1745,20 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 	for (const FString& Key : SelectionKeys)
 	{
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("binding"), Key);
+	}
+	if (Package.SchemaVersion >= 15)
+	{
+		for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("network_mode"),
+				LexToString(Binding.Network.Mode));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("network_reliable"),
+				Binding.Network.bReliable ? TEXT("1") : TEXT("0"));
+		}
 	}
 	if (Package.SchemaVersion >= 6)
 	{
@@ -1858,7 +1901,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 14
+	FString Identity(Package.SchemaVersion >= 15
+		? TEXT("descriptor_package_v15")
+		: Package.SchemaVersion >= 14
 		? TEXT("descriptor_package_v14")
 		: Package.SchemaVersion >= 13
 		? TEXT("descriptor_package_v13")
@@ -2030,6 +2075,17 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		}
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("static"), Binding.bStatic ? TEXT("1") : TEXT("0"));
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("const"), Binding.bConst ? TEXT("1") : TEXT("0"));
+		if (Package.SchemaVersion >= 15)
+		{
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("network_mode"),
+				LexToString(Binding.Network.Mode));
+			AppendAvidScriptBindingIdentityField(
+				Identity,
+				TEXT("network_reliable"),
+				Binding.Network.bReliable ? TEXT("1") : TEXT("0"));
+		}
 		AppendAvidScriptBindingIdentityField(Identity, TEXT("reload"), LexToString(Binding.ReloadEffect));
 		AppendAvidScriptBindingValueIdentity(Identity, TEXT("return"), Binding.ReturnValue);
 		for (const FAvidScriptBindingValueModel& Parameter : Binding.Parameters)
@@ -2161,7 +2217,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 11
 			&& OutPackage.SchemaVersion != 12
 			&& OutPackage.SchemaVersion != 13
-			&& OutPackage.SchemaVersion != 14)
+			&& OutPackage.SchemaVersion != 14
+			&& OutPackage.SchemaVersion != 15)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2187,7 +2244,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 11
 				&& OutPackage.SchemaVersion != 12
 				&& OutPackage.SchemaVersion != 13
-				&& OutPackage.SchemaVersion != 14)
+				&& OutPackage.SchemaVersion != 14
+				&& OutPackage.SchemaVersion != 15)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -2431,6 +2489,27 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 								Binding.Completion.PayloadTypeId)
 							&& TypeIds.Contains(
 								Binding.Completion.PayloadTypeId)));
+		const bool bNetworked = Binding.Network.IsNetworked();
+		const bool bNetworkContractValid = OutPackage.SchemaVersion < 15
+			? !bNetworked && !Binding.Network.bReliable
+			: !bNetworked
+				? !Binding.Network.bReliable
+				: Binding.BindingKind == TEXT("function")
+					&& Binding.DispatchMode == TEXT("cached_process_event")
+					&& !Binding.bStatic
+					&& !Binding.bConst
+					&& Binding.ReloadEffect
+						== EAvidScriptBindingReloadEffect::Unsupported
+					&& Binding.ReturnValue.CanonicalType == TEXT("void")
+					&& Binding.LatentInfoParameter.IsEmpty()
+					&& Binding.WorldContextParameter.IsEmpty()
+					&& Binding.Completion.Mode == TEXT("none")
+					&& Binding.Parameters.ContainsByPredicate(
+						[](const FAvidScriptBindingValueModel& Parameter)
+						{
+							return Parameter.Direction == TEXT("ref")
+								|| Parameter.Direction == TEXT("out");
+						}) == false;
 		FString ExpectedLatentSignature;
 		if (bLatentBinding)
 		{
@@ -2455,6 +2534,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				Binding.UeFunction);
 		if (!bParsedBinding
 			|| !bCompletionValid
+			|| !bNetworkContractValid
 			|| Binding.Ordinal != Index
 			|| (Binding.BindingKind == TEXT("function")
 				&& (!FAvidScriptBindingDescriptorIdentity::IsFunctionDispatchModeSupported(

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "AvidScriptBindingReloadEffect.h"
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "CoreMinimal.h"
@@ -84,6 +85,7 @@ struct FAvidScriptBindingFunctionModel
 	FString WritePolicy = TEXT("none");
 	bool bStatic = false;
 	bool bConst = false;
+	FAvidScriptBindingNetworkContract Network;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	FAvidScriptBindingValueModel ReturnValue;
 	TArray<FAvidScriptBindingValueModel> Parameters;

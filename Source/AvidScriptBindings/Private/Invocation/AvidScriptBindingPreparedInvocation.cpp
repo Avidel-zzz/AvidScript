@@ -1,10 +1,13 @@
 #include "Invocation/AvidScriptBindingPreparedInvocation.h"
 
 #include "AvidScriptBindingLatent.h"
+#include "Components/ActorComponent.h"
 #include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Misc/ScopeExit.h"
 #include "UObject/Class.h"
+#include "UObject/Script.h"
 #include "UObject/UnrealType.h"
 
 namespace UE::AvidScript::BindingPrivate
@@ -33,6 +36,89 @@ bool IsReflectedProgram(const FInvocationCodecProgram& Program)
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyRead
 			|| Program.Kind
 				== EAvidScriptBindingInvocationKind::ReflectedPropertyWrite);
+}
+
+AActor* ResolveNetworkActor(UObject& Receiver)
+{
+	if (AActor* Actor = Cast<AActor>(&Receiver))
+	{
+		return Actor;
+	}
+	if (const UActorComponent* Component = Cast<UActorComponent>(&Receiver))
+	{
+		return Component->GetOwner();
+	}
+	return nullptr;
+}
+
+bool PreflightNetworkInvocation(
+	const FInvocationCodecProgram& Program,
+	UObject& Receiver,
+	const FAvidScriptBindingInvocationContext& InvocationContext,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (!Program.Network.IsNetworked())
+	{
+		return true;
+	}
+	if (InvocationContext.HostEffectJournal != nullptr)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_network_reload_effect_unsupported"),
+			Program.DebugPath,
+			TEXT("Candidate reload cannot issue an irreversible network RPC."));
+		return false;
+	}
+
+	AActor* Actor = ResolveNetworkActor(Receiver);
+	if (Actor == nullptr)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_network_owner_invalid"),
+			Program.DebugPath,
+			TEXT("The RPC receiver is not an Actor and has no Actor owner."));
+		return false;
+	}
+	const bool bHasAuthority = Actor->HasAuthority();
+	if ((Program.Network.Mode == EAvidScriptBindingNetworkMode::Client
+			|| Program.Network.Mode
+				== EAvidScriptBindingNetworkMode::Multicast)
+		&& !bHasAuthority)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_network_authority_denied"),
+			Program.DebugPath,
+			TEXT("Client and multicast RPCs may only be initiated by authority."));
+		return false;
+	}
+
+	const int32 Callspace = Receiver.GetFunctionCallspace(
+		Program.Function,
+		nullptr);
+	if (Callspace == FunctionCallspace::Absorbed)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_network_call_absorbed"),
+			Program.DebugPath,
+			TEXT("UE networking absorbed the RPC for the receiver's current role, ownership, or connection state."));
+		return false;
+	}
+	if (Program.Network.Mode == EAvidScriptBindingNetworkMode::Server
+		&& !bHasAuthority
+		&& (Callspace & FunctionCallspace::Remote) == 0)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_network_authority_denied"),
+			Program.DebugPath,
+			TEXT("A non-authority Server RPC requires UE Remote callspace."));
+		return false;
+	}
+	return true;
 }
 
 struct FGuestOutputRange
@@ -158,6 +244,14 @@ bool InvokePreparedDynamicReflection(
 			TEXT("binding_write_denied"),
 			Program->DebugPath,
 			TEXT("The reflected binding requires an explicitly writable host context."));
+		return false;
+	}
+	if (!PreflightNetworkInvocation(
+			*Program,
+			Receiver,
+			InvocationContext,
+			OutResult))
+	{
 		return false;
 	}
 
