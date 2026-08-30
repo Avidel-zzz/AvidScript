@@ -1,21 +1,25 @@
-# Phase 59 收口
+# Phase 59 收尾记录
 
-状态：实施中。
+> 当前状态：实现中
 
-Phase 59 目标是以 PC-first 的 LLVM AOT 候选解决 `P57-D06-ControlledLeadership`，
-不降低冻结性能门槛，不破坏现有 Wasmtime/WAMR 和移动端回退能力。
+## 目标
 
-## 批次
+建立 C# 脚本定义 UE Actor、Component、Subsystem、反射属性与函数、继承覆写和 Blueprint 子类的
+完整闭环。
 
-- P59.A：待完成，LLVM AOT 候选、artifact 身份和冻结矩阵可行性；
-- P59.B：待完成，VM backend adapter 与 host/memory/export/trap 语义；
-- P59.C：待完成，compiler sidecar、cache、Runtime selection 与 Cook；
-- P59.D：待完成，集中审查、UE Gate 和 12-kernel 领导性矩阵。
+## 已完成
 
-## 关闭条件
+- P59.1 架构已纠偏到脚本定义 UE 类型；
+- 旧 LLVM AOT 方案保留为研究记录，不再作为 P59 权威目标。
 
-- correctness failure 为 0，fallback 为 false；
-- p50/p95 几何均值和 kernel 胜率达到冻结门槛，或用真实证据明确拒绝未达标候选；
-- UE5.8 no-clean 构建、完整 Automation、干净架构 Gate 与 attestation 通过；
-- compiler 不进入 Shipping Runtime，未信任 AOT 产物 fail-closed；
-- 文档、状态、证据、Git commit/tree 和远端完全一致。
+## 待完成
+
+- `P59.A` UE Type Declaration semantic contract；
+- `P59.B` UHT shell generator；
+- `P59.C` Runtime type/instance/inheritance dispatch；
+- `P59.D` Blueprint、网络、Cook 与集中 Gate。
+
+## 最终证据
+
+阶段 Gate 完成后填写候选提交、测试计数、UBT、Automation、benchmark、人工 PIE/Blueprint 验收和
+剩余风险。实现中的局部结果不提前写成阶段已完成。

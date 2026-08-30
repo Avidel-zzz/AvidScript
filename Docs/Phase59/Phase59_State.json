@@ -2,15 +2,15 @@
   "schema_version": 1,
   "phase": {
     "id": 59,
-    "goal": "以 PC-first 的独立 LLVM AOT codegen 后端解决 P57-D06 冻结性能领导力门禁，同时保持 backend-neutral VM、受信任 artifact、UE 生命周期语义与移动端回退边界",
+    "goal": "实现 C# 定义 Actor、Component、Subsystem、UCLASS/UFUNCTION/UPROPERTY、继承、覆写与 Blueprint 子类的真实 UE 类型闭环",
     "start_commit": "4018dfb3e6c19fc3ff05b5873357c5c13225ff3a"
   },
   "declared_stage": "implementing",
   "architecture": {
-    "path": "Docs/Phase59/P59.0_LLVM_AOT_Backend_Architecture.md",
-    "version": 1,
-    "sha256": "78a0773229fa14c39c764a801a5df6d7f5f1621e0f9aafc3707fb8c38eff156f",
-    "revision_reason": "initial architecture freeze"
+    "path": "Docs/Phase59/P59.1_Script_Defined_UE_Types_Architecture.md",
+    "version": 3,
+    "sha256": "1d0f1e6d3ac2844a5d895482ee4b0593c1d97cc15e3c7999e71177028c1a941a",
+    "revision_reason": "移除 Markdown 行尾空白，保持架构语义不变并更新权威 hash"
   },
   "documents": {
     "plan": "Docs/Phase59/P59.0_Implementation_Plan.md",
@@ -51,10 +51,10 @@
       "evidence": "Inherited from P57-D06: Cranelift speed candidate p50/p95 geomean 0.9799725124/1.0005782997, p50/p95 win rates 66.67/41.67 percent, correctness failures 0, fallback false.",
       "deferral_reason": "Cranelift optimization space was exhausted without crossing the frozen 0.95 leadership gate; P59 isolates an independent LLVM AOT codegen candidate.",
       "remediation": "Evaluate WasmEdge LLVM AOT first under the unchanged 12-kernel protocol; integrate only a candidate that preserves host/artifact contracts and crosses the frozen gate, otherwise evaluate Wasmer LLVM with the same bytes and thresholds.",
-      "status": "Open",
+      "status": "Transferred",
       "resolution_evidence": "",
-      "target_phase": null,
-      "transfer_reason": ""
+      "target_phase": 65,
+      "transfer_reason": "LLVM AOT 与 Puerts/AngelScript 领导力属于跨阶段发布性能门禁，不替代 P59 脚本定义 UE 类型主线；P59 热路径仍持续执行受影响 benchmark。"
     }
   ],
   "review": {
@@ -108,7 +108,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "debt-update -Phase 59 -DebtId P59-D01-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 2,
-  "updated_at_utc": "2026-08-30T15:45:37.1962623+00:00"
+  "next_action": "batch-complete -Phase 59 -BatchId P59.A -Evidence <text>",
+  "revision": 5,
+  "updated_at_utc": "2026-08-30T16:05:47.1840482+00:00"
 }
