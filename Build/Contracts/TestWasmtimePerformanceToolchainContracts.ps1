@@ -63,7 +63,7 @@ Assert-True (@($Lock.rust.cmake_arguments) -contains 'Visual Studio 17 2022') `
     'Windows build generator drifted'
 Assert-True (@($Lock.rust.cmake_arguments) -contains '-DWASMTIME_FASTEST_RUNTIME=ON') `
     'fastest-runtime CMake profile drifted'
-Assert-True ([string]$Lock.compiler_profile.optimization -ceq 'speed_and_size') `
+Assert-True ([string]$Lock.compiler_profile.optimization -ceq 'speed') `
     'Cranelift optimization drifted'
 Assert-True ([string]$Lock.compiler_profile.register_allocator -ceq 'backtracking') `
     'Cranelift register allocator drifted'
@@ -141,7 +141,7 @@ $ApiText = Get-Content -LiteralPath (
 $RuntimeSupportText = Get-Content -LiteralPath (
     Join-Path $VmPrivateRoot 'AvidScriptWasmtimeRuntimeSupport.cpp') -Raw
 foreach ($IdentityField in @(
-    'opt=speed_and_size',
+    'opt=speed',
     'regalloc=backtracking',
     'inlining=all',
     'cpu=x86-64-v3',

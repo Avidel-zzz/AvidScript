@@ -97,9 +97,9 @@
       "additionalProperties": false,
       "required": ["id", "strategy", "optimization", "register_allocator", "inlining", "cpu", "wasm32_memory_reservation_bytes", "memory_may_move", "spectre_mitigation", "nan_canonicalization", "wasm_gc", "gc_collector"],
       "properties": {
-        "id": { "const": "cranelift-x86_64-v3-inlining-v1" },
+        "id": { "const": "cranelift-speed-x86_64-v3-inlining-v2" },
         "strategy": { "const": "cranelift" },
-        "optimization": { "const": "speed_and_size" },
+        "optimization": { "const": "speed" },
         "register_allocator": { "const": "backtracking" },
         "inlining": { "const": "all" },
         "cpu": { "const": "x86-64-v3" },

@@ -2243,3 +2243,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first D5 sample carried typed UE wrapper locals through an `async void` method only to delay one RPC, producing an `ASCG1001` GuestIR input-graph rejection and obscuring the network test objective.
 - Prevention: use Session-owned zero-heap `AvidContinuation` callbacks when no result or structured control flow is needed; reacquire `UE.Self` in the callback. Reserve `async/await` state frames for gameplay logic that genuinely needs awaited values or structured suspension.
+
+### 2026-08-30: run Test-Json contracts with the pinned PowerShell 7 host
+
+- Mistake: the first P57.13 performance-toolchain contract run used `powershell.exe`; Windows PowerShell 5.1 does not provide `Test-Json`, so the script stopped before validating any product contract.
+- Prevention: any repository contract or architecture script that uses `Test-Json` or PowerShell 7 syntax must run directly through `C:\Users\12159\scoop\apps\pwsh\current\pwsh.exe -NoProfile`. Do not spend a probe on Windows PowerShell 5.1 when the host requirement is already known.
+
+### 2026-08-30: treat wildcard path reuse as a workflow regression
+
+- Mistake: the P57.13 formal-evidence lookup passed `Docs/Phase57/P57.9*` as an `rg` path even though the repository already forbids wildcard characters in Windows path arguments; the valid exact-file query still ran, but the call produced avoidable path noise.
+- Prevention: before every repository search, mechanically scan path arguments for `*` and `?`. Use `-g` for filename filters or copy the exact path from a prior index result. Repetition of a recorded command error is classified as a workflow regression and recorded immediately.

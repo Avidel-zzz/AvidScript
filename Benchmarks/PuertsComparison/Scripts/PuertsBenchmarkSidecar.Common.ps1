@@ -608,7 +608,7 @@ function Get-SidecarWasmtimeCompilerIdentity {
     if ([string]$Lock.upstream.version -cne 'v45.0.0' -or
         [int]$Lock.patch.api_revision -ne 1 -or
         [string]$Profile.strategy -cne 'cranelift' -or
-        [string]$Profile.optimization -cne 'speed_and_size' -or
+        [string]$Profile.optimization -cne 'speed' -or
         [string]$Profile.register_allocator -cne 'backtracking' -or
         [string]$Profile.inlining -cne 'all' -or
         [string]$Profile.cpu -cne 'x86-64-v3' -or
@@ -626,7 +626,7 @@ function Get-SidecarWasmtimeCompilerIdentity {
     }
     return (
         'wasmtime-v45.0.0+avidscript.1;strategy=cranelift;' +
-        'opt=speed_and_size;regalloc=backtracking;inlining=all;' +
+        'opt=speed;regalloc=backtracking;inlining=all;' +
         'cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;' +
         'spectre=on;nan_canonicalization=off;parallel_compilation=on;' +
         'wasm_gc=on;gc_collector=drc;' +

@@ -228,7 +228,8 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	if (profile == NULL
 		|| profile->SchemaVersion != 1
 		|| profile->Strategy != AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT
-		|| profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE
+		|| (profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE
+			&& profile->Optimization != AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED)
 		|| profile->RegisterAllocator != AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING
 		|| profile->Inlining != AVIDSCRIPT_WASMTIME_ENGINE_INLINING_ALL
 		|| profile->CpuProfile != AVIDSCRIPT_WASMTIME_ENGINE_CPU_X86_64_V3
@@ -246,7 +247,9 @@ AvidScriptWasmtimeEngine* avidscript_wasmtime_engine_new_with_profile(
 	wasmtime_config_strategy_set(config, WASMTIME_STRATEGY_CRANELIFT);
 	wasmtime_config_cranelift_opt_level_set(
 		config,
-		WASMTIME_OPT_LEVEL_SPEED_AND_SIZE);
+		profile->Optimization == AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED
+			? WASMTIME_OPT_LEVEL_SPEED
+			: WASMTIME_OPT_LEVEL_SPEED_AND_SIZE);
 	wasmtime_config_cranelift_regalloc_algorithm_set(
 		config,
 		WASMTIME_REGALLOC_BACKTRACKING);

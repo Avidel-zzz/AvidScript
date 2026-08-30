@@ -857,7 +857,7 @@ bool FAvidScriptVmWasmtimeCompilerProfileTest::RunTest(
 	TestEqual(
 		TEXT("compiler profile id"),
 		DeclaredProfile.Id,
-		FString(TEXT("cranelift-x86_64-v3-inlining-v1")));
+		FString(TEXT("cranelift-speed-x86_64-v3-inlining-v2")));
 	TestEqual(
 		TEXT("compiler target triple"),
 		DeclaredProfile.TargetTriple,
@@ -972,7 +972,7 @@ bool FAvidScriptVmWasmtimeLifecycleTest::RunTest(const FString& Parameters)
 		LoadedInfo.RuntimeBuildIdentity,
 		FString::Printf(
 			TEXT("wasmtime-v45.0.0+avidscript.1;strategy=cranelift;")
-			TEXT("opt=speed_and_size;regalloc=backtracking;inlining=all;")
+			TEXT("opt=speed;regalloc=backtracking;inlining=all;")
 			TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
 			TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 			TEXT("wasm_gc=on;gc_collector=drc;")

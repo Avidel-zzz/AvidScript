@@ -11,7 +11,7 @@ constexpr uint32 WasmtimeCompilerProfileSchemaVersion = 1;
 FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 {
 	FAvidScriptWasmtimeCompilerProfile Profile;
-	Profile.Id = TEXT("cranelift-x86_64-v3-inlining-v1");
+	Profile.Id = TEXT("cranelift-speed-x86_64-v3-inlining-v2");
 	Profile.TargetTriple = TEXT("x86_64-pc-windows-msvc");
 	Profile.CpuProfile = TEXT("x86-64-v3");
 	Profile.EngineProfile.SchemaVersion =
@@ -19,7 +19,7 @@ FAvidScriptWasmtimeCompilerProfile MakeCompilerProfile()
 	Profile.EngineProfile.Strategy =
 		AVIDSCRIPT_WASMTIME_ENGINE_STRATEGY_CRANELIFT;
 	Profile.EngineProfile.Optimization =
-		AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE;
+		AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED;
 	Profile.EngineProfile.RegisterAllocator =
 		AVIDSCRIPT_WASMTIME_ENGINE_REGALLOC_BACKTRACKING;
 	Profile.EngineProfile.Inlining =
@@ -127,7 +127,7 @@ FString BuildAvidScriptWasmtimeCompilerIdentity(
 {
 	return FString::Printf(
 		TEXT("wasmtime-v%s+avidscript.1;strategy=cranelift;")
-		TEXT("opt=speed_and_size;regalloc=backtracking;inlining=all;")
+		TEXT("opt=speed;regalloc=backtracking;inlining=all;")
 		TEXT("cpu=x86-64-v3;wasm32_memory=4g_fixed;memory_may_move=0;")
 		TEXT("spectre=on;nan_canonicalization=off;parallel_compilation=on;")
 		TEXT("wasm_gc=on;gc_collector=drc;")

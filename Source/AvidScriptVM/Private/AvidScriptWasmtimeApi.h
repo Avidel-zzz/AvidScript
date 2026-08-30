@@ -25,7 +25,8 @@ typedef enum AvidScriptWasmtimeCompilerStrategy
 
 typedef enum AvidScriptWasmtimeOptimization
 {
-	AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE = 0
+	AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED_AND_SIZE = 0,
+	AVIDSCRIPT_WASMTIME_ENGINE_OPT_SPEED = 1
 } AvidScriptWasmtimeOptimization;
 
 typedef enum AvidScriptWasmtimeRegisterAllocator

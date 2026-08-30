@@ -59,9 +59,9 @@
     "license_relative_path": "LICENSE"
   },
   "compiler_profile": {
-    "id": "cranelift-x86_64-v3-inlining-v1",
+    "id": "cranelift-speed-x86_64-v3-inlining-v2",
     "strategy": "cranelift",
-    "optimization": "speed_and_size",
+    "optimization": "speed",
     "register_allocator": "backtracking",
     "inlining": "all",
     "cpu": "x86-64-v3",
