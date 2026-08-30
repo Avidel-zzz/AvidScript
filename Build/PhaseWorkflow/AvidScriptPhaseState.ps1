@@ -196,7 +196,18 @@ function Get-AvidScriptHeadContentSha256 {
 }
 
 function Get-AvidScriptProtectedDirtyBaseline {
-    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [string[]]$ExcludedPaths = @()
+    )
+
+    $Excluded = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($ExcludedPath in @($ExcludedPaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($ExcludedPath)) {
+            $Excluded.Add((ConvertTo-AvidScriptRepositoryPath $ExcludedPath)) | Out-Null
+        }
+    }
 
     $Status = Invoke-AvidScriptGit $RepositoryRoot @('status', '--porcelain=v1', '--untracked-files=all')
     $Entries = [System.Collections.Generic.List[object]]::new()
@@ -209,6 +220,9 @@ function Get-AvidScriptProtectedDirtyBaseline {
         }
 
         $RelativePath = ConvertTo-AvidScriptRepositoryPath $Line.Substring(3)
+        if ($Excluded.Contains($RelativePath)) {
+            continue
+        }
         if ($RelativePath.Contains(' -> ')) {
             Throw-AvidScriptPhaseError 'ASPW4010' 'rename entries are not supported in protected dirty baseline'
         }
@@ -731,7 +745,13 @@ function New-AvidScriptInitialPhaseState {
             attestation_parent = ''
             attested_at_utc = $null
         }
-        protected_dirty = @(Get-AvidScriptProtectedDirtyBaseline $RepositoryRoot)
+        protected_dirty = @(Get-AvidScriptProtectedDirtyBaseline `
+            -RepositoryRoot $RepositoryRoot `
+            -ExcludedPaths @(
+                $ArchitectureRelative,
+                $PlanRelative,
+                $CloseoutRelative,
+                (Get-AvidScriptPhaseStateRelativePath $Phase)))
         next_action = ''
         revision = 1
         updated_at_utc = $Now

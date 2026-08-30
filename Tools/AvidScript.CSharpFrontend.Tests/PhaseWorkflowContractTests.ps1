@@ -483,6 +483,29 @@ Invoke-ContractCase 'Transitions.ProtectedDirtyBaseline' {
         'freeze', '-Phase', '91', '-ReviewEvidence', 'reviewed') 'ASPW4023'
 }
 
+Invoke-ContractCase 'Transitions.PhaseOwnedDirtyIsNotProtected' {
+    $Root = New-FixtureRepository 'TransitionPhaseOwned'
+    Write-Utf8Text (Join-Path $Root 'Docs\Phase91\Architecture.md') "# Revised architecture`n"
+    Write-Utf8Text (Join-Path $Root 'Docs\Phase91\Plan.md') "# Revised plan`n"
+    Write-Utf8Text (Join-Path $Root 'Docs\Phase91\Closeout.md') "# Pending closeout`n"
+    Write-Utf8Text (Join-Path $Root 'UserNotes.md') "user edit`n"
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1')
+    $State = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json
+    Assert-Condition (@($State.protected_dirty).Count -eq 1) `
+        'phase-owned dirty files entered the protected baseline'
+    Assert-Condition ($State.protected_dirty[0].path -ceq 'UserNotes.md') `
+        'real user dirty file was not preserved'
+    Complete-FixtureBatch $Root 'P91.1'
+    Commit-Paths $Root @(
+        'Docs/Phase91/Architecture.md',
+        'Docs/Phase91/Plan.md',
+        'Docs/Phase91/Closeout.md',
+        'Docs/Phase91/Phase91_State.json') 'commit phase-owned files'
+    $Freeze = Invoke-WorkflowCli $Root @(
+        'freeze', '-Phase', '91', '-ReviewEvidence', 'phase-owned paths reviewed')
+    Assert-Condition ($Freeze.ExitCode -eq 0) "phase-owned freeze failed: $($Freeze.Output)"
+}
+
 Invoke-ContractCase 'Transitions.FreezeAndReopen' {
     $Fixture = Prepare-GateReadyFixture 'TransitionReopen'
     $State = Get-Content -Raw -LiteralPath $Fixture.StatePath | ConvertFrom-Json

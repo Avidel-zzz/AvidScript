@@ -207,6 +207,26 @@ function Test-AvidScriptGateEvidence {
     }
 }
 
+function Get-AvidScriptEffectiveProtectedDirty {
+    param([Parameter(Mandatory = $true)]$State)
+
+    $PhaseOwned = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::Ordinal)
+    foreach ($Path in @(
+        [string]$State.architecture.path,
+        [string]$State.documents.plan,
+        [string]$State.documents.closeout,
+        (Get-AvidScriptPhaseStateRelativePath ([int]$State.phase.id)))) {
+        if (-not [string]::IsNullOrWhiteSpace($Path)) {
+            $PhaseOwned.Add((ConvertTo-AvidScriptRepositoryPath $Path)) | Out-Null
+        }
+    }
+
+    return @($State.protected_dirty | Where-Object {
+        -not $PhaseOwned.Contains((ConvertTo-AvidScriptRepositoryPath ([string]$_.path)))
+    })
+}
+
 function Test-AvidScriptProtectedDirtyBaseline {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
@@ -225,10 +245,11 @@ function Test-AvidScriptProtectedDirtyBaseline {
         $ActualByPath[(ConvertTo-AvidScriptRepositoryPath $Line.Substring(3))] = $Line.Substring(0, 2)
     }
 
-    if ($ActualByPath.Count -ne @($State.protected_dirty).Count) {
+    $EffectiveProtectedDirty = @(Get-AvidScriptEffectiveProtectedDirty $State)
+    if ($ActualByPath.Count -ne $EffectiveProtectedDirty.Count) {
         Throw-AvidScriptPhaseError 'ASPW4021' 'worktree contains changes outside the protected dirty baseline'
     }
-    foreach ($Entry in @($State.protected_dirty)) {
+    foreach ($Entry in $EffectiveProtectedDirty) {
         if (-not $ActualByPath.ContainsKey([string]$Entry.path) -or
             [string]$ActualByPath[[string]$Entry.path] -cne [string]$Entry.status) {
             Throw-AvidScriptPhaseError 'ASPW4022' "protected dirty status changed: $($Entry.path)"
@@ -381,7 +402,7 @@ function Test-AvidScriptPhaseCloseEvidence {
         [string]$Close.attestation_tree -cne (Get-AvidScriptGitTree $RepositoryRoot $Head)) {
         Throw-AvidScriptPhaseError 'ASPW3045' 'close evidence does not identify the current attestation commit'
     }
-    if ([int]$Close.protected_dirty_count -ne @($State.protected_dirty).Count) {
+    if ([int]$Close.protected_dirty_count -ne @(Get-AvidScriptEffectiveProtectedDirty $State).Count) {
         Throw-AvidScriptPhaseError 'ASPW3046' 'close evidence protected dirty count differs'
     }
     return $Close
@@ -454,7 +475,7 @@ function Invoke-AvidScriptPhaseClose {
         attestation_commit = $Head
         attestation_tree = Get-AvidScriptGitTree $RepositoryRoot $Head
         attestation_paths = $AttestationPaths
-        protected_dirty_count = @($State.protected_dirty).Count
+        protected_dirty_count = @(Get-AvidScriptEffectiveProtectedDirty $State).Count
         privacy_passed = $true
         closed_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
     }
