@@ -58,6 +58,8 @@ artifacts/
 coverage/
 .nuget/
 .codex-dotnet/
+.agent-harness.local.json
+AgentHarness/reports/
 Benchmarks/PuertsComparison/.cache/
 Benchmarks/PuertsComparison/Results/
 *.coverage

@@ -1,0 +1,105 @@
+{
+  "$schema": "AgentHarness/schemas/manifest.schema.json",
+  "schema_version": 1,
+  "harness_version": "0.1.0",
+  "repository": {
+    "name": "AvidScript",
+    "default_branch": "main",
+    "project_relative_path": "../../AvidTPSTemplate.uproject",
+    "engine_root": "C:/UnrealEngine"
+  },
+  "entry": {
+    "path": "AGENTS.md",
+    "soft_limit_bytes": 12288,
+    "hard_limit_bytes": 16384,
+    "required_bootstrap_text": "Build/InvokeAgentHarness.ps1 bootstrap"
+  },
+  "phase_workflow": {
+    "script": "Build/InvokePhaseWorkflow.ps1",
+    "state_glob": "Docs/Phase*/Phase*_State.json",
+    "closed_stages": [
+      "closed"
+    ]
+  },
+  "toolchain": {
+    "powershell_major": 7,
+    "dotnet_host": "%USERPROFILE%/.dotnet/dotnet.exe",
+    "dotnet_sdk": "8.0.416",
+    "unreal_version": "5.8",
+    "unreal_engine_root": "C:/UnrealEngine"
+  },
+  "routing": {
+    "max_domain_policies": 6,
+    "max_lessons": 5,
+    "core_policies": [
+      {
+        "id": "repository",
+        "path": "AgentHarness/policies/repository.md"
+      },
+      {
+        "id": "phase-workflow",
+        "path": "AgentHarness/policies/phase-workflow.md"
+      },
+      {
+        "id": "safety",
+        "path": "AgentHarness/policies/safety.md"
+      },
+      {
+        "id": "verification",
+        "path": "AgentHarness/policies/verification.md"
+      }
+    ],
+    "domains": [
+      {
+        "id": "csharp-frontend",
+        "path": "AgentHarness/domains/csharp-frontend.md",
+        "keywords": ["c#", "csharp", "roslyn", "semantic", "frontend", "lowering", "guest compiler"],
+        "globs": ["Tools/AvidScript.CSharp*/*", "Tools/AvidScript.CSharp*/**/*", "Tools/AvidScript.Semantic*/*", "Tools/AvidScript.Semantic*/**/*"]
+      },
+      {
+        "id": "guest-ir",
+        "path": "AgentHarness/domains/guest-ir.md",
+        "keywords": ["guest ir", "ir", "abi", "wasm emitter", "guest memory"],
+        "globs": ["Tools/AvidScript.GuestIr/*", "Tools/AvidScript.GuestIr/**/*", "Tools/AvidScript.WasmBackend*/*", "Tools/AvidScript.WasmBackend*/**/*"]
+      },
+      {
+        "id": "bindings",
+        "path": "AgentHarness/domains/bindings.md",
+        "keywords": ["binding", "reflection", "ufunction", "uproperty", "descriptor", "schema", "ue api"],
+        "globs": ["Source/AvidScriptBindings/*", "Source/AvidScriptBindings/**/*", "Source/AvidScriptEditor/*Binding*", "Source/AvidScriptEditor/**/*Binding*"]
+      },
+      {
+        "id": "runtime",
+        "path": "AgentHarness/domains/runtime.md",
+        "keywords": ["runtime", "beginplay", "tick", "event", "lifecycle", "reload", "continuation", "objecthandle"],
+        "globs": ["Source/AvidScriptRuntime/*", "Source/AvidScriptRuntime/**/*", "Source/AvidScriptCore/*", "Source/AvidScriptCore/**/*"]
+      },
+      {
+        "id": "vm-backends",
+        "path": "AgentHarness/domains/vm-backends.md",
+        "keywords": ["vm", "wamr", "wasmtime", "wasm", "backend", "host import", "jit", "aot"],
+        "globs": ["Source/AvidScriptVM/*", "Source/AvidScriptVM/**/*", "Source/ThirdParty/*", "Source/ThirdParty/**/*"]
+      },
+      {
+        "id": "performance",
+        "path": "AgentHarness/domains/performance.md",
+        "keywords": ["performance", "benchmark", "latency", "throughput", "puerts", "angelscript", "gate", "性能"],
+        "globs": ["Benchmarks/*", "Benchmarks/**/*", "Build/*Benchmark*", "Build/**/*Benchmark*"]
+      }
+    ]
+  },
+  "lessons": {
+    "index": "AgentHarness/lessons/rules.json",
+    "legacy_path": "AgentHarness/lessons/legacy-agents-2026-08-30.md",
+    "legacy_sha256": "d72aa46f8ed3d298e4eb3de9b681c04083824bf15ce0446e33e5fdfa68e5dfe0",
+    "legacy_bytes": 580219,
+    "legacy_lines": 2280
+  },
+  "commands": {
+    "bootstrap": "pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 bootstrap -Intent <task>",
+    "context": "pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 context -Intent <task> -Paths <paths>",
+    "verify": "pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 verify -Profile Auto -Paths <paths>",
+    "lesson_query": "pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 lesson-query -Tags <tags>",
+    "audit": "pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 audit"
+  }
+}

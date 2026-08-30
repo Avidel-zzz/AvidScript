@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "legacy_source": {
+    "path": "AgentHarness/lessons/legacy-agents-2026-08-30.md",
+    "sha256": "d72aa46f8ed3d298e4eb3de9b681c04083824bf15ce0446e33e5fdfa68e5dfe0",
+    "bytes": 580219,
+    "lines": 2280
+  },
+  "rules": [
+    {
+      "id": "phase-status-after-resume",
+      "tags": ["phase", "resume", "workflow"],
+      "summary": "恢复、压缩或断线后的首个仓库动作必须读取最高未关闭 Phase 状态。",
+      "prevention": "由 bootstrap 自动发现 Phase 并调用现有 PhaseWorkflow status；在成功前不读产品代码、不改状态。",
+      "source": "legacy:2201",
+      "last_observed": "2026-08-30 Agent Harness H1 (git status ran before the newly discovered bootstrap entry)"
+    },
+    {
+      "id": "index-paths-before-read",
+      "tags": ["path", "rg", "discovery"],
+      "summary": "概念名称不能当作真实文件路径。",
+      "prevention": "先用 rg --files 建立索引，再对索引中的字面路径读取；通配符只放在 rg -g 参数。",
+      "source": "legacy:1931",
+      "last_observed": "2026-08-30 P58.C (guessed two source paths and passed a wildcard as an rg path)"
+    },
+    {
+      "id": "one-command-one-evidence-domain",
+      "tags": ["shell", "powershell", "evidence"],
+      "summary": "一个 shell 调用只承担一个逻辑动作或证据域。",
+      "prevention": "调度前拒绝用分号、&& 或 || 串联独立动作；多文件读取使用并行工具或逐项调用。",
+      "source": "legacy:1672",
+      "last_observed": "2026-08-30 Agent Harness H1 (line count and file read were joined with a PowerShell semicolon)"
+    },
+    {
+      "id": "dotnet-executable-tests-use-run",
+      "tags": ["dotnet", "tests", "evidence"],
+      "summary": "OutputType=Exe 的自带测试入口不会由 dotnet test 执行。",
+      "prevention": "先检查测试项目类型；可执行测试项目使用固定 SDK 的 dotnet run，并以退出码和 passed 汇总作为证据。",
+      "source": "observed:2026-08-30-P58.C"
+    },
+    {
+      "id": "shared-msbuild-projects-run-serially",
+      "tags": ["dotnet", "powershell", "parallelism"],
+      "summary": "并行套件编译同一 csproj 会争用 restore 和 obj，制造假的 NuGet 失败。",
+      "prevention": "只并行只读或中间目录隔离的 runner；共享 csproj、restore 或 obj 的 PowerShell 套件统一串行执行。",
+      "source": "observed:2026-08-30-P58.C",
+      "last_observed": "2026-08-30 P58.C (parallel PowerShell suites raced on one generated NuGet file; standalone rerun passed)"
+    },
+    {
+      "id": "delegated-write-sets-use-exact-files",
+      "tags": ["agents", "parallelism", "ownership"],
+      "summary": "并行代理的目录通配写集可能与主线正在编辑的文件重叠。",
+      "prevention": "委派前冻结精确文件白名单；主线不得触碰已委派文件，范围变化时先中断并重新分配 owner。",
+      "source": "observed:2026-08-30-P58.D",
+      "last_observed": "2026-08-30 P58.D (semantic contract worker received a broad test-directory write set while the main line edited one file in that directory)"
+    },
+    {
+      "id": "test-fixture-schema-version-must-match-shape",
+      "tags": ["schema", "tests", "fixtures"],
+      "summary": "最小手写 descriptor 夹具不能只提升 schema_version 而不补齐该版本字段。",
+      "prevention": "夹具继续声明其真实最小 schema；需要验证新 schema 时复用 canonical serializer 和生成器，不复制字段集合。",
+      "source": "observed:2026-08-30-P58.C"
+    },
+    {
+      "id": "protected-dirty-is-immutable",
+      "tags": ["git", "dirty", "safety"],
+      "summary": "Phase 起点记录的用户 dirty 文件不是当前任务的修复材料。",
+      "prevention": "bootstrap 比对 Phase state 中 protected_dirty 的状态与 SHA-256；漂移时停止写入并报告。",
+      "source": "legacy:1966"
+    },
+    {
+      "id": "pinned-powershell-seven",
+      "tags": ["powershell", "toolchain"],
+      "summary": "架构、Harness 和使用 Test-Json 的脚本固定运行在 PowerShell 7。",
+      "prevention": "入口先断言 PowerShell major 为 7；Windows PowerShell 5.1 只用于明确兼容性合同。",
+      "source": "legacy:2247"
+    },
+    {
+      "id": "pinned-dotnet-sdk",
+      "tags": ["dotnet", "sdk", "toolchain"],
+      "summary": "仓库 .NET 工具链由 global.json 固定为 8.0.416。",
+      "prevention": "从插件 cwd 使用 %USERPROFILE%/.dotnet/dotnet.exe，先验证 --version，临时 cache 放在仓库外。",
+      "source": "legacy:2091",
+      "last_observed": "2026-08-30 P58.B"
+    },
+    {
+      "id": "no-clean-canonical-build",
+      "tags": ["ue", "build", "buildid"],
+      "summary": "阶段验证默认使用 no-clean Editor 构建，隔离目标后恢复 canonical target。",
+      "prevention": "禁止主动清 Editor target；隔离构建结束后先重建 canonical target，再读取和比较 BuildId。",
+      "source": "legacy:2267"
+    },
+    {
+      "id": "automation-template-is-fixed",
+      "tags": ["ue", "automation", "logs"],
+      "summary": "Automation 启动模板、唯一 abslog 和结果计数不能临场拼接。",
+      "prevention": "使用受控模板；同时核对完整测试数、失败数、队列结束、进程退出码和唯一日志。",
+      "source": "legacy:2076"
+    },
+    {
+      "id": "preserve-wait-session-id",
+      "tags": ["process", "wait", "session"],
+      "summary": "长进程返回 session id 时，输出内容不能替代可等待句柄。",
+      "prevention": "编排层先保存完整工具结果及 session id，再转发用户可见输出；没有句柄不得宣称后台任务仍可验证。",
+      "source": "legacy:2222",
+      "last_observed": "2026-08-30 P58.C (stdout was forwarded before preserving exec session_id)"
+    },
+    {
+      "id": "structured-artifacts-use-parsers",
+      "tags": ["json", "schema", "artifacts"],
+      "summary": "结构化状态和证据由解析器读写，不能靠文本替换。",
+      "prevention": "JSON 使用 ConvertFrom-Json/ConvertTo-Json 或领域 parser；写回后执行 schema 与原子性检查。",
+      "source": "legacy:archive"
+    },
+    {
+      "id": "generated-ue-api-not-handwritten",
+      "tags": ["bindings", "reflection", "architecture"],
+      "summary": "通用 UE API 覆盖依赖反射、descriptor 和生成器，不逐个手写 UFunction 包装。",
+      "prevention": "新增能力进入统一 type capability、descriptor schema、codec program 和 generated facade；手写只允许稳定基础 ABI。",
+      "source": "legacy:archive"
+    },
+    {
+      "id": "git-history-is-user-owned",
+      "tags": ["git", "history", "safety"],
+      "summary": "不得通过重置、覆盖推送或 squash 丢失既有提交历史。",
+      "prevention": "未经明确要求不 rewrite、reset、rebase 或 force-push；提交前检查范围、隐私和远端分支身份。",
+      "source": "legacy:repository-policy"
+    }
+  ]
+}

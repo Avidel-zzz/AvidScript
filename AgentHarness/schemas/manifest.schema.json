@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://avidscript.dev/schemas/agent-harness-manifest-v1.json",
+  "title": "AvidScript Agent Harness Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harness_version",
+    "repository",
+    "entry",
+    "phase_workflow",
+    "toolchain",
+    "routing",
+    "lessons",
+    "commands"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "harness_version": { "type": "string", "minLength": 1 },
+    "repository": { "type": "object" },
+    "entry": {
+      "type": "object",
+      "required": ["path", "soft_limit_bytes", "hard_limit_bytes", "required_bootstrap_text"]
+    },
+    "phase_workflow": {
+      "type": "object",
+      "required": ["script", "state_glob", "closed_stages"]
+    },
+    "toolchain": { "type": "object" },
+    "routing": {
+      "type": "object",
+      "required": ["max_domain_policies", "max_lessons", "core_policies", "domains"]
+    },
+    "lessons": {
+      "type": "object",
+      "required": ["index", "legacy_path", "legacy_sha256", "legacy_bytes", "legacy_lines"]
+    },
+    "commands": { "type": "object" }
+  }
+}
