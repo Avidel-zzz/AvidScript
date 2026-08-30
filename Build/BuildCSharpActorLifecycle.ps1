@@ -665,7 +665,7 @@ if ($AllowGeneratedTypeImports) {
     }
     $GeneratedTypeManifestPath = (Resolve-Path -LiteralPath $GeneratedTypeManifestPath).Path
     $GeneratedTypeManifest = Get-Content -Raw -LiteralPath $GeneratedTypeManifestPath | ConvertFrom-Json
-    if ([int]$GeneratedTypeManifest.schema_version -ne 4 -or
+    if ([int]$GeneratedTypeManifest.schema_version -ne 5 -or
         @($GeneratedTypeManifest.types).Count -eq 0) {
         throw "Generated type import authorization manifest must use schema 4 and contain types."
     }

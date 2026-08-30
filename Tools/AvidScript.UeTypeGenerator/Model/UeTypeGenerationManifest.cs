@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using AvidScript.CSharpSemantic;
 
 namespace AvidScript.UeTypeGenerator;
 
@@ -37,7 +38,8 @@ public sealed record UePropertyManifestEntry(
     [property: JsonPropertyOrder(5)] string Category,
     [property: JsonPropertyOrder(6)] string ReplicatedUsing,
     [property: JsonPropertyOrder(7)] string GetterImportName,
-    [property: JsonPropertyOrder(8)] string SetterImportName);
+    [property: JsonPropertyOrder(8)] string SetterImportName,
+    [property: JsonPropertyOrder(9)] SemanticUePropertyInitializer? Initializer);
 
 public sealed record UeFunctionManifestEntry(
     [property: JsonPropertyOrder(0)] int MemberOrdinal,

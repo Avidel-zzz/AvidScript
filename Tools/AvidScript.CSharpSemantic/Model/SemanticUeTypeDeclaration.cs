@@ -21,7 +21,12 @@ public sealed record SemanticUePropertyDeclaration(
     [property: JsonPropertyOrder(3)] IReadOnlyList<string> Flags,
     [property: JsonPropertyOrder(4)] string Category,
     [property: JsonPropertyOrder(5)] string ReplicatedUsing,
-    [property: JsonPropertyOrder(6)] SemanticSpan Span);
+    [property: JsonPropertyOrder(6)] SemanticUePropertyInitializer? Initializer,
+    [property: JsonPropertyOrder(7)] SemanticSpan Span);
+
+public sealed record SemanticUePropertyInitializer(
+    [property: JsonPropertyOrder(0)] string Kind,
+    [property: JsonPropertyOrder(1)] string CanonicalValue);
 
 public sealed record SemanticUeFunctionDeclaration(
     [property: JsonPropertyOrder(0)] string MethodSymbolId,

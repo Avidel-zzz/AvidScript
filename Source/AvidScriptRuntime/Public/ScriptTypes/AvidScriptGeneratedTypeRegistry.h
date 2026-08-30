@@ -56,7 +56,7 @@ private:
 class AVIDSCRIPTRUNTIME_API FAvidScriptGeneratedTypeRegistry final
 {
 public:
-	static constexpr int32 ManifestSchemaVersion = 4;
+	static constexpr int32 ManifestSchemaVersion = 5;
 	static constexpr int32 MaxTypeCount = 4096;
 	static constexpr int32 MaxMemberCountPerType = 65536;
 

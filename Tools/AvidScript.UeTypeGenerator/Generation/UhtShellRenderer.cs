@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using AvidScript.CSharpSemantic;
 
 namespace AvidScript.UeTypeGenerator;
 
@@ -34,6 +35,11 @@ internal static class UhtShellRenderer
             output.AppendLine("    GENERATED_BODY()");
             output.AppendLine();
             output.AppendLine("public:");
+            if (type.Properties.Any(property => property.Initializer is not null))
+            {
+                output.Append("    ").Append(type.CppName).AppendLine("();");
+                output.AppendLine();
+            }
             foreach (UePropertyManifestEntry property in type.Properties)
             {
                 output.Append("    UPROPERTY(").Append(RenderPropertyFlags(property)).AppendLine(")");
@@ -99,6 +105,21 @@ internal static class UhtShellRenderer
 
         foreach (UeTypeManifestEntry type in TopologicalOrder(types))
         {
+            UePropertyManifestEntry[] initializedProperties = type.Properties
+                .Where(property => property.Initializer is not null)
+                .ToArray();
+            if (initializedProperties.Length > 0)
+            {
+                output.Append(type.CppName).Append("::").Append(type.CppName).AppendLine("()");
+                output.AppendLine("{");
+                foreach (UePropertyManifestEntry property in initializedProperties)
+                {
+                    output.Append("    ").Append(property.Name).Append(" = ")
+                        .Append(RenderInitializer(property.Initializer!)).AppendLine(";");
+                }
+                output.AppendLine("}");
+                output.AppendLine();
+            }
             foreach (UeFunctionManifestEntry function in type.Functions)
             {
                 if (function.Flags.Contains("blueprint_implementable_event"))
@@ -559,7 +580,36 @@ internal static class UhtShellRenderer
     private static string Escape(string value)
     {
         return value.Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("\"", "\\\"", StringComparison.Ordinal);
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal);
+    }
+
+    private static string RenderInitializer(SemanticUePropertyInitializer initializer)
+    {
+        string value = initializer.CanonicalValue;
+        return initializer.Kind switch
+        {
+            "bool" or "int32" => value,
+            "uint8" => "static_cast<uint8>(" + value + ")",
+            "int8" => "static_cast<int8>(" + value + ")",
+            "int16" => "static_cast<int16>(" + value + ")",
+            "uint16" => "static_cast<uint16>(" + value + ")",
+            "uint32" => value + "U",
+            "int64" => value + "LL",
+            "uint64" => value + "ULL",
+            "float32" => EnsureFloatingPoint(value) + "f",
+            "float64" => EnsureFloatingPoint(value),
+            "string" => "TEXT(\"" + Escape(value) + "\")",
+            _ => throw new InvalidOperationException(
+                $"Unsupported UE property initializer kind '{initializer.Kind}'."),
+        };
+    }
+
+    private static string EnsureFloatingPoint(string value)
+    {
+        return value.IndexOfAny(new[] { '.', 'E', 'e' }) >= 0 ? value : value + ".0";
     }
 
     private static string Normalize(StringBuilder output)

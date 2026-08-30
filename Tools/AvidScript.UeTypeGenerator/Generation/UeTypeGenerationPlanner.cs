@@ -64,7 +64,8 @@ internal static class UeTypeGenerationPlanner
                     property.Category,
                     property.ReplicatedUsing,
                     propertyPlans[property.SymbolId].GetterImportName,
-                    propertyPlans[property.SymbolId].SetterImportName)).ToArray();
+                    propertyPlans[property.SymbolId].SetterImportName,
+                    property.Initializer)).ToArray();
             UeFunctionManifestEntry[] functions = declaration.Functions.Select(function =>
                 PlanFunction(
                     declaration,

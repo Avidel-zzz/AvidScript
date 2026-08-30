@@ -117,11 +117,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $Semantic = Get-Content -Raw -LiteralPath $SemanticPath | ConvertFrom-Json
-if ([int]$Semantic.schema_version -ne 18 -or
-    [string]$Semantic.semantic_version -cne "1.20" -or
+if ([int]$Semantic.schema_version -ne 19 -or
+    [string]$Semantic.semantic_version -cne "1.21" -or
     -not [bool]$Semantic.succeeded -or
     @($Semantic.ue_type_declarations).Count -eq 0) {
-    throw "Semantic artifact must be a successful schema 18/1.20 document with UE type declarations."
+    throw "Semantic artifact must be a successful schema 19/1.21 document with UE type declarations."
 }
 
 $ToolHome = Join-Path $env:TEMP "AvidScriptUeTypeGenerator"
@@ -165,8 +165,8 @@ if ($LASTEXITCODE -ne 0) {
 $GeneratedManifestPath = Join-Path $OutputRoot "AvidScriptGeneratedManifest.json"
 $GeneratedManifest = Get-Content -Raw -LiteralPath $GeneratedManifestPath | ConvertFrom-Json
 $SemanticSha256 = (Get-FileHash -LiteralPath $SemanticPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ([int]$GeneratedManifest.schema_version -ne 4 -or
-    [string]$GeneratedManifest.generator_version -cne "1.3" -or
+if ([int]$GeneratedManifest.schema_version -ne 5 -or
+    [string]$GeneratedManifest.generator_version -cne "1.4" -or
     [string]$GeneratedManifest.semantic_artifact_sha256 -cne $SemanticSha256 -or
     [string]$GeneratedManifest.module_name -cne $ModuleName -or
     [string]$GeneratedManifest.unreal_version -cne $UnrealVersion -or

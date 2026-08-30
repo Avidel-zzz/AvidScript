@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 
 namespace AvidScript.CSharpSemantic;
@@ -58,10 +59,10 @@ public static class SemanticUeTypeContractValidator
         {
             return Fail("ue_type_declarations is missing.", out error);
         }
-        if (document.SchemaVersion < 18)
+        if (document.SchemaVersion < 19)
         {
             return document.UeTypeDeclarations.Count == 0
-                || Fail("Schema versions before 18 cannot contain UE type declarations.", out error);
+                || Fail("Schema versions before 19 cannot contain UE type declarations.", out error);
         }
         if (!TryIndex(document.Types, type => type.Id, "type", out Dictionary<string, SemanticType> types, out error)
             || !TryIndex(document.Symbols, symbol => symbol.Id, "symbol", out Dictionary<string, SemanticSymbol> symbols, out error)
@@ -153,6 +154,7 @@ public static class SemanticUeTypeContractValidator
                 || property.Flags.Contains("blueprint_read_only") && property.Flags.Contains("blueprint_read_write")
                 || property.ReplicatedUsing.Length > 0 && !property.Flags.Contains("replicated")
                 || property.ReplicatedUsing.Length > 0 && !IsIdentifier(property.ReplicatedUsing)
+                || !ValidateInitializer(property.Initializer, types[property.TypeId])
                 || !symbols.TryGetValue(property.SymbolId, out SemanticSymbol? symbol)
                 || symbol.Kind is not ("field" or "property")
                 || symbol.Name != property.Name
@@ -163,6 +165,39 @@ public static class SemanticUeTypeContractValidator
             }
         }
         return true;
+    }
+
+    private static bool ValidateInitializer(
+        SemanticUePropertyInitializer? initializer,
+        SemanticType propertyType)
+    {
+        if (initializer is null)
+        {
+            return true;
+        }
+        if (initializer.Kind != propertyType.CanonicalName || initializer.CanonicalValue is null)
+        {
+            return false;
+        }
+        string value = initializer.CanonicalValue;
+        return initializer.Kind switch
+        {
+            "bool" => value is "true" or "false",
+            "uint8" => byte.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _),
+            "int8" => sbyte.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out _),
+            "int16" => short.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out _),
+            "uint16" => ushort.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _),
+            "int32" => int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out _),
+            "uint32" => uint.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _),
+            "int64" => long.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out _),
+            "uint64" => ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _),
+            "float32" => float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsedFloat)
+                && float.IsFinite(parsedFloat),
+            "float64" => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDouble)
+                && double.IsFinite(parsedDouble),
+            "string" => true,
+            _ => false,
+        };
     }
 
     private static bool ValidateFunctions(

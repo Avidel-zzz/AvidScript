@@ -675,7 +675,7 @@ foreach ($ForbiddenGeneratedTypeRouterHotPath in @('FindFunction', 'FindObject',
     }
 }
 foreach ($RequiredGeneratedTypeRegistryContract in @(
-    'ManifestSchemaVersion = 4',
+    'ManifestSchemaVersion = 5',
     'BuildFromJson',
     'FindTypeByOrdinal',
     'FindTypeByStableId',
@@ -713,7 +713,8 @@ foreach ($RequiredUePropertyRuntimeContract in @(
     'BuildMemberOrdinals',
     'BuildPropertyPlans',
     'GetterImportName',
-    'SetterImportName')) {
+    'SetterImportName',
+    'SemanticUePropertyInitializer')) {
     if (-not $SemanticUeRuntimeContractSource.Contains($RequiredUePropertyRuntimeContract) -and
         -not $UeTypeManifestSource.Contains($RequiredUePropertyRuntimeContract)) {
         Add-Violation "generated UE property runtime contract is missing $RequiredUePropertyRuntimeContract"
@@ -732,10 +733,10 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'Resolve-AvidScriptCSharpBindingPackage',
     'InvokeCSharpFrontend.ps1',
     'InvokeCSharpSemantic.ps1',
-    'schema_version -ne 18',
-    'semantic_version -cne "1.20"',
-    'schema_version -ne 4',
-    'generator_version -cne "1.3"',
+    'schema_version -ne 19',
+    'semantic_version -cne "1.21"',
+    'schema_version -ne 5',
+    'generator_version -cne "1.4"',
     'semantic_artifact_sha256',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {
@@ -749,7 +750,9 @@ foreach ($RequiredGeneratedReflectionContract in @(
     'FAvidScriptGeneratedTypeDispatcher::Invoke(',
     'AvidScript.GeneratedTypes.Reflection',
     'FindFProperty<FProperty>',
-    'FindFunctionByName')) {
+    'FindFunctionByName',
+    'RenderInitializer',
+    'property.Initializer')) {
     if (-not $UeTypeShellRendererSource.Contains($RequiredGeneratedReflectionContract)) {
         Add-Violation "generated UE type renderer is missing $RequiredGeneratedReflectionContract"
     }
@@ -3402,8 +3405,8 @@ foreach ($RequiredReachabilityContract in @(
     }
 }
 foreach ($RequiredSemanticContract in @(
-    'CurrentSchemaVersion = 18',
-    'CurrentSemanticVersion = "1.20"'
+    'CurrentSchemaVersion = 19',
+    'CurrentSemanticVersion = "1.21"'
 )) {
     if (-not $SemanticContractSource.Contains($RequiredSemanticContract)) {
         Add-Violation "C# Semantic contract is missing current version token $RequiredSemanticContract"

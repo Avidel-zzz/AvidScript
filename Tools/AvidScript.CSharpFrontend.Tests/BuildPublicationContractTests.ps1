@@ -100,11 +100,11 @@ Assert-Condition (Test-Path -LiteralPath $SeedWasm -PathType Leaf) "seed WASM is
 $SeedSemanticJson = Get-Content -Raw -LiteralPath $SeedSemantic | ConvertFrom-Json
 $SeedGuestIrJson = Get-Content -Raw -LiteralPath $SeedGuestIr | ConvertFrom-Json
 Assert-Condition (
-    [int]$SeedReportJson.semantic.schema_version -eq 18 -and
-    [string]$SeedReportJson.semantic.version -ceq "1.20" -and
-    [int]$SeedSemanticJson.schema_version -eq 18 -and
-    [string]$SeedSemanticJson.semantic_version -ceq "1.20") `
-    "seed publication semantic contract is not 18/1.20"
+    [int]$SeedReportJson.semantic.schema_version -eq 19 -and
+    [string]$SeedReportJson.semantic.version -ceq "1.21" -and
+    [int]$SeedSemanticJson.schema_version -eq 19 -and
+    [string]$SeedSemanticJson.semantic_version -ceq "1.21") `
+    "seed publication semantic contract is not 19/1.21"
 Assert-Condition (@($SeedGuestIrJson.imports | Where-Object {
     [string]$_.module -ceq "env" -and [string]$_.name -ceq "continuation_load_object"
 }).Count -eq 1) "seed publication Guest IR omits continuation_load_object"

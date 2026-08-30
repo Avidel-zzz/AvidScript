@@ -70,6 +70,10 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 		DestroyGeneratedScriptWorld(World);
 		return true;
 	}
+	TestEqual(
+		TEXT("C# property initializer becomes the native instance default"),
+		Projectile->Damage,
+		25.0f);
 	const FURL Url;
 	World->InitializeActorsForPlay(Url);
 	World->BeginPlay();
@@ -87,7 +91,6 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 		DestroyGeneratedScriptWorld(World);
 		return true;
 	}
-	Projectile->Damage = 25.0f;
 	Projectile->Activate(2.0f);
 	TestEqual(TEXT("C# property get/set updates the UE float property"), Projectile->Damage, 50.0f);
 

@@ -8,7 +8,7 @@
 
 namespace
 {
-constexpr TCHAR GeneratorVersion[] = TEXT("1.3");
+constexpr TCHAR GeneratorVersion[] = TEXT("1.4");
 
 bool Fail(FString& OutError, const FString& Message)
 {

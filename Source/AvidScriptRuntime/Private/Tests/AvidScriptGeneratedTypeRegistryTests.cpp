@@ -12,8 +12,8 @@ FString BuildValidGeneratedTypeManifest()
 {
 	return FString::Printf(
 		TEXT(R"JSON({
-  "schema_version": 4,
-  "generator_version": "1.3",
+  "schema_version": 5,
+  "generator_version": "1.4",
   "module_name": "AvidScriptRuntime",
   "types": [
     {
@@ -58,7 +58,7 @@ bool FAvidScriptGeneratedTypeRegistryTest::RunTest(const FString& Parameters)
 	FString Error;
 	const FString ValidManifest = BuildValidGeneratedTypeManifest();
 	if (!TestTrue(
-		TEXT("Schema 4 manifest builds an immutable generated type registry"),
+		TEXT("Schema 5 manifest builds an immutable generated type registry"),
 		FAvidScriptGeneratedTypeRegistry::BuildFromJson(ValidManifest, Registry, Error)))
 	{
 		AddError(Error);
@@ -114,7 +114,7 @@ bool FAvidScriptGeneratedTypeRegistryTest::RunTest(const FString& Parameters)
 	TestFalse(
 		TEXT("Old manifest schemas fail closed"),
 		FAvidScriptGeneratedTypeRegistry::BuildFromJson(
-			ValidManifest.Replace(TEXT("\"schema_version\": 4"), TEXT("\"schema_version\": 3")),
+			ValidManifest.Replace(TEXT("\"schema_version\": 5"), TEXT("\"schema_version\": 4")),
 			RejectedRegistry,
 			RejectedError));
 	return true;

@@ -30,7 +30,7 @@ internal static class SemanticUeTypeDeclarationTests
             public partial class Hero : AvidActor
             {
                 [UProperty(EditAnywhere = true, BlueprintReadWrite = true, ReplicatedUsing = nameof(OnRepHealth), Category = "Combat")]
-                public float Health { get; set; }
+                public float Health { get; set; } = 100.0f;
 
                 [UFunction(BlueprintCallable = true, Category = "Combat")]
                 public virtual void ApplyDamage(float amount)
@@ -64,8 +64,8 @@ internal static class SemanticUeTypeDeclarationTests
         SemanticUeTypeDeclaration elite = FindType(document, "global::Game.EliteHero");
 
         Assert(document.Succeeded, "valid script-defined Actor inheritance should analyze successfully");
-        Assert(document.SchemaVersion == 18 && document.SemanticVersion == "1.20",
-            "UE type declarations should publish schema 18 / semantic 1.20");
+        Assert(document.SchemaVersion == 19 && document.SemanticVersion == "1.21",
+            "UE type declarations should publish schema 19 / semantic 1.21");
         Assert(hero.EngineName == "Hero" && hero.Kind == "actor",
             "Actor declarations should preserve the stable UE reflection name and actor kind");
         Assert(hero.Flags.SequenceEqual(new[] { "blueprintable", "blueprint_type" }),
@@ -78,13 +78,14 @@ internal static class SemanticUeTypeDeclarationTests
             && health.TypeId == "type:float32"
             && health.Category == "Combat"
             && health.ReplicatedUsing == "OnRepHealth"
+            && health.Initializer == new SemanticUePropertyInitializer("float32", "100")
             && health.Flags.SequenceEqual(new[]
             {
                 "edit_anywhere",
                 "blueprint_read_write",
                 "replicated",
             }),
-            "UProperty should preserve normalized access, replication and category metadata");
+            "UProperty should preserve normalized access, replication, category and initializer metadata");
         SemanticUeFunctionDeclaration applyDamage = hero.Functions.Single(function =>
             function.Name == "ApplyDamage");
         SemanticUeFunctionDeclaration beginPlay = hero.Functions.Single(function =>
@@ -177,6 +178,9 @@ internal static class SemanticUeTypeDeclarationTests
                 [UProperty(ReplicatedUsing = "MissingNotify")]
                 public int MissingNotify { get; set; }
 
+                [UProperty]
+                public int NonConstant { get; set; } = System.Environment.TickCount;
+
                 [UFunction(Server = true, Client = true, Reliable = true, Unreliable = true)]
                 public void InvalidRpc() { }
 
@@ -192,6 +196,8 @@ internal static class SemanticUeTypeDeclarationTests
             "conflicting property flags should use ASUE1103");
         Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1104"),
             "invalid RepNotify should use ASUE1104");
+        Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1105"),
+            "non-constant property initializers should fail closed with ASUE1105");
         Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1202"),
             "static UFunctions should use ASUE1202");
         Assert(document.Diagnostics.Any(diagnostic => diagnostic.Code == "ASUE1203"),

@@ -80,8 +80,8 @@ FString BuildGeneratedTypeSessionManifest()
 {
 	return FString::Printf(
 		TEXT(R"JSON({
-  "schema_version": 4,
-  "generator_version": "1.3",
+  "schema_version": 5,
+  "generator_version": "1.4",
   "module_name": "AvidScriptRuntime",
   "generation_key_sha256": "%s",
   "types": [

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -229,6 +230,11 @@ internal static class SemanticUeTypeProjector
             AddFlag(flags, GetNamedBoolean(attribute, "Replicated") || replicatedUsing.Length > 0, "replicated");
             AddFlag(flags, GetNamedBoolean(attribute, "SaveGame"), "save_game");
             AddFlag(flags, GetNamedBoolean(attribute, "Transient"), "transient");
+            SemanticUePropertyInitializer? initializer = ProjectPropertyInitializer(
+                context,
+                member,
+                valueType,
+                diagnostics);
             properties.Add(new SemanticUePropertyDeclaration(
                 SemanticSymbolProjector.GetSymbolId(member),
                 member.Name,
@@ -236,10 +242,110 @@ internal static class SemanticUeTypeProjector
                 flags,
                 GetNamedString(attribute, "Category"),
                 replicatedUsing,
+                initializer,
                 GetSymbolSpan(context, member)));
         }
 
         return properties;
+    }
+
+    private static SemanticUePropertyInitializer? ProjectPropertyInitializer(
+        SemanticCompilationContext context,
+        ISymbol member,
+        ITypeSymbol valueType,
+        ICollection<SemanticDiagnostic> diagnostics)
+    {
+        ExpressionSyntax? expression = member.DeclaringSyntaxReferences
+            .Where(reference => reference.SyntaxTree == context.PrimaryUnit.SyntaxTree)
+            .Select(reference => reference.GetSyntax())
+            .Select(node => node switch
+            {
+                PropertyDeclarationSyntax property => property.Initializer?.Value,
+                VariableDeclaratorSyntax field => field.Initializer?.Value,
+                _ => null,
+            })
+            .FirstOrDefault(node => node is not null);
+        if (expression is null)
+        {
+            return null;
+        }
+
+        SemanticModel semanticModel = context.Compilation.GetSemanticModel(expression.SyntaxTree);
+        Optional<object?> constant = semanticModel.GetConstantValue(expression);
+        if (!constant.HasValue
+            || !TryFormatInitializer(valueType, constant.Value, out SemanticUePropertyInitializer? initializer))
+        {
+            diagnostics.Add(CreateNodeDiagnostic(
+                "ASUE1105",
+                "UProperty initializers must be deterministic primitive compile-time constants.",
+                context,
+                expression));
+            return null;
+        }
+        return initializer;
+    }
+
+    private static bool TryFormatInitializer(
+        ITypeSymbol valueType,
+        object? value,
+        out SemanticUePropertyInitializer? initializer)
+    {
+        initializer = null;
+        if (value is null)
+        {
+            return false;
+        }
+
+        string kind;
+        string canonicalValue;
+        try
+        {
+            (kind, canonicalValue) = valueType.SpecialType switch
+            {
+                SpecialType.System_Boolean => ("bool", Convert.ToBoolean(value, CultureInfo.InvariantCulture) ? "true" : "false"),
+                SpecialType.System_Byte => ("uint8", Convert.ToByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_SByte => ("int8", Convert.ToSByte(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_Int16 => ("int16", Convert.ToInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_UInt16 => ("uint16", Convert.ToUInt16(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_Int32 => ("int32", Convert.ToInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_UInt32 => ("uint32", Convert.ToUInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_Int64 => ("int64", Convert.ToInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_UInt64 => ("uint64", Convert.ToUInt64(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture)),
+                SpecialType.System_Single => ("float32", FormatFloatingPoint(Convert.ToSingle(value, CultureInfo.InvariantCulture))),
+                SpecialType.System_Double => ("float64", FormatFloatingPoint(Convert.ToDouble(value, CultureInfo.InvariantCulture))),
+                SpecialType.System_String => ("string", Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty),
+                _ => (string.Empty, string.Empty),
+            };
+        }
+        catch (Exception exception) when (exception is FormatException or InvalidCastException or OverflowException)
+        {
+            return false;
+        }
+        if (kind.Length == 0)
+        {
+            return false;
+        }
+        if ((kind == "float32"
+                && (!float.TryParse(canonicalValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float floatValue)
+                    || !float.IsFinite(floatValue)))
+            || (kind == "float64"
+                && (!double.TryParse(canonicalValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double doubleValue)
+                    || !double.IsFinite(doubleValue))))
+        {
+            return false;
+        }
+        initializer = new SemanticUePropertyInitializer(kind, canonicalValue);
+        return true;
+    }
+
+    private static string FormatFloatingPoint(float value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatFloatingPoint(double value)
+    {
+        return value.ToString("R", CultureInfo.InvariantCulture);
     }
 
     private static IReadOnlyList<SemanticUeFunctionDeclaration> ProjectFunctions(

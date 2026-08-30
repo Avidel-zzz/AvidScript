@@ -27,7 +27,7 @@ internal static class UeTypeGeneratorTests
             public partial class Projectile : AvidActor
             {
                 [UProperty(EditAnywhere = true, BlueprintReadWrite = true, ReplicatedUsing = nameof(OnRepDamage), Category = "Projectile")]
-                public float Damage { get; set; }
+                public float Damage { get; set; } = 25.0f;
 
                 [UFunction(BlueprintCallable = true, Category = "Projectile")]
                 public virtual void Activate(float damageScale) { }
@@ -63,8 +63,8 @@ internal static class UeTypeGeneratorTests
                 SemanticSerializer.Deserialize(semantic)).ToDictionary(
                     plan => plan.PropertySymbolId,
                     StringComparer.Ordinal);
-        Assert(first.Manifest.SchemaVersion == 4
-            && first.Manifest.GeneratorVersion == "1.3"
+        Assert(first.Manifest.SchemaVersion == 5
+            && first.Manifest.GeneratorVersion == "1.4"
             && first.Manifest.Types.All(type =>
                 type.ClassPath == $"/Script/AvidScriptGenerated.{type.EngineName}")
             && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
@@ -72,8 +72,11 @@ internal static class UeTypeGeneratorTests
                     function.StableMemberId))
             && first.Manifest.Types.SelectMany(type => type.Properties).All(property =>
                 property.GetterImportName == propertyPlans[property.StableMemberId].GetterImportName
-                && property.SetterImportName == propertyPlans[property.StableMemberId].SetterImportName),
-            "manifest schema 4 should publish explicit class paths and canonical runtime identities");
+                && property.SetterImportName == propertyPlans[property.StableMemberId].SetterImportName)
+            && first.Manifest.Types.SelectMany(type => type.Properties)
+                .Single(property => property.Name == "Damage").Initializer
+                == new SemanticUePropertyInitializer("float32", "25"),
+            "manifest schema 5 should publish explicit class paths, runtime identities and initializers");
 
         string header = Text(first, "Public/AvidScriptGeneratedTypes.h");
         string sourceText = Text(first, "Private/AvidScriptGeneratedTypes.cpp");
@@ -81,10 +84,13 @@ internal static class UeTypeGeneratorTests
             < header.IndexOf("class AVIDSCRIPTGENERATED_API AExplosiveProjectile", StringComparison.Ordinal),
             "native shell output should place script bases before derived classes");
         Assert(header.Contains("UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing=OnRepDamage, Category=\"Projectile\")", StringComparison.Ordinal)
+            && header.Contains("AProjectile();", StringComparison.Ordinal)
             && header.Contains("virtual void Activate(float damageScale);", StringComparison.Ordinal)
             && header.Contains("virtual void Activate(float damageScale) override;", StringComparison.Ordinal),
             "native shell output should preserve normalized reflection and override declarations");
         Assert(sourceText.Contains("FAvidScriptGeneratedTypeDispatcher::Invoke(", StringComparison.Ordinal)
+            && sourceText.Contains("AProjectile::AProjectile()", StringComparison.Ordinal)
+            && sourceText.Contains("Damage = 25.0f;", StringComparison.Ordinal)
             && sourceText.Contains("DOREPLIFETIME(AProjectile, Damage);", StringComparison.Ordinal)
             && sourceText.Contains("AvidScript.GeneratedTypes.Reflection", StringComparison.Ordinal)
             && sourceText.Contains("FindFProperty<FProperty>", StringComparison.Ordinal),

@@ -157,6 +157,14 @@
       "prevention": "命令检测 readiness；未就绪时注册 OnFilesLoaded 等权威 delegate 后立即返回，headless 模式由显式参数在完成后携带状态码退出，禁止用主线程轮询等待。",
       "source": "observed:2026-08-30-P59.B",
       "last_observed": "2026-08-30 P59.B (PublishCSharpBindings 在 ExecCmds frame 0 同步进入 reflection publication，阻塞 AssetRegistry 进度和 Quit)"
+    },
+    {
+      "id": "schema-bumps-update-the-complete-contract-matrix",
+      "tags": ["schema", "runtime", "generator", "tests"],
+      "summary": "跨 Semantic、生成器和 Runtime 的 schema 升级必须一次同步所有生产者、消费者与固定测试夹具。",
+      "prevention": "实现前用 rg 建立版本 token 矩阵，至少覆盖工具常量、构建脚本、Runtime 解析器、启动 descriptor 校验、架构 Gate 和测试 JSON；完成矩阵替换后再启动首次 UE Automation。",
+      "source": "observed:2026-08-31-P59.C2c4d",
+      "last_observed": "2026-08-31 P59.C2c4d (generator 先升级到 5/1.4，Runtime Registry 与固定测试 manifest 未同步，首次 Automation 被严格门禁拒绝)"
     }
   ]
 }
