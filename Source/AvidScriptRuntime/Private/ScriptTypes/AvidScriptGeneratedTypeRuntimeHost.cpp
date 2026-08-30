@@ -205,15 +205,29 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	const FObjectKey ReceiverKey(&Receiver);
 	if (Impl->Instances.Contains(ReceiverKey))
 	{
-		OutError = TEXT("generated type instance is already active");
-		return false;
+		return true;
 	}
 	const FGeneratedTypeRuntimePackage& Package = Impl->Package.GetValue();
-	const FAvidScriptGeneratedTypePlan* const Type =
+	const FAvidScriptGeneratedTypePlan* const RequestedType =
 		Package.Registry->FindTypeByOrdinal(TypeOrdinal);
-	if (Type == nullptr || Type->Class == nullptr || !Receiver.IsA(Type->Class))
+	if (RequestedType == nullptr || RequestedType->Class == nullptr
+		|| !Receiver.IsA(RequestedType->Class))
 	{
 		OutError = TEXT("generated type instance does not satisfy the installed type ordinal");
+		return false;
+	}
+	const FAvidScriptGeneratedTypePlan* RuntimeType = nullptr;
+	for (UClass* Class = Receiver.GetClass(); Class != nullptr; Class = Class->GetSuperClass())
+	{
+		RuntimeType = Package.Registry->FindTypeByClass(Class);
+		if (RuntimeType != nullptr)
+		{
+			break;
+		}
+	}
+	if (RuntimeType == nullptr)
+	{
+		OutError = TEXT("generated type instance has no registered runtime UClass ancestry");
 		return false;
 	}
 
@@ -232,7 +246,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 		MakeUnique<FGeneratedTypeRuntimeInstance>();
 	Instance->Receiver = &Receiver;
 	Instance->ReceiverHandle = ReceiverHandle;
-	Instance->TypeOrdinal = TypeOrdinal;
+	Instance->TypeOrdinal = RuntimeType->TypeOrdinal;
 	Instance->Session = MakeUnique<FAvidScriptRuntimeSession>();
 
 	FAvidScriptWasmHostContext HostContext;
@@ -243,7 +257,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::BeginInstance(
 	if (!Instance->Session->ConfigureGeneratedTypeInstance(
 		Receiver,
 		ReceiverHandle,
-		TypeOrdinal,
+		RuntimeType->TypeOrdinal,
 		Package.Registry,
 		OutError))
 	{
@@ -280,8 +294,7 @@ bool FAvidScriptGeneratedTypeRuntimeHost::EndInstance(UObject& Receiver, FString
 		Impl->Instances.Find(ReceiverKey);
 	if (Found == nullptr || !Found->IsValid())
 	{
-		OutError = TEXT("generated type instance is not active");
-		return false;
+		return true;
 	}
 	TUniquePtr<FGeneratedTypeRuntimeInstance> Instance = MoveTemp(*Found);
 	Impl->Instances.Remove(ReceiverKey);

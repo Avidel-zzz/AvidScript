@@ -261,6 +261,10 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Runtime host records the active receiver"), Host.IsInstanceActive(*Receiver));
 	TestEqual(TEXT("Runtime host owns one Session"), Host.GetActiveInstanceCount(), 1);
 	TestEqual(TEXT("Runtime host owns one anchored ObjectHandle"), Host.GetRegisteredHandleCount(), 1);
+	TestTrue(
+		TEXT("Repeated native Super-chain activation is idempotent"),
+		Host.BeginInstance(*Receiver, 0, Error));
+	TestEqual(TEXT("Idempotent activation preserves one Session"), Host.GetActiveInstanceCount(), 1);
 
 	int32 ScriptResult = 0;
 	TestTrue(
@@ -279,6 +283,9 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Ended receiver is no longer active"), Host.IsInstanceActive(*Receiver));
 	TestEqual(TEXT("Runtime host releases the Session"), Host.GetActiveInstanceCount(), 0);
 	TestEqual(TEXT("Runtime host releases the ObjectHandle"), Host.GetRegisteredHandleCount(), 0);
+	TestTrue(
+		TEXT("Repeated native Super-chain teardown is idempotent"),
+		Host.EndInstance(*Receiver, Error));
 	TestTrue(TEXT("Inactive package can be cleared"), Host.ClearPackage(Error));
 	return true;
 }

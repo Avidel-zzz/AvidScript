@@ -54,12 +54,19 @@ internal static class UhtShellRenderer
             UeFunctionManifestEntry[] lifecycleFunctions = type.Functions
                 .Where(function => function.Flags.Contains("lifecycle"))
                 .ToArray();
-            if (lifecycleFunctions.Length > 0 || type.Kind == "world_subsystem")
+            string[] hostLifecycleNames = GetHostLifecycleNames(type.Kind);
+            if (lifecycleFunctions.Length > 0 || hostLifecycleNames.Length > 0
+                || type.Kind == "world_subsystem")
             {
                 output.AppendLine("protected:");
                 foreach (UeFunctionManifestEntry function in lifecycleFunctions)
                 {
                     output.Append("    ").AppendLine(RenderLifecycleDeclaration(type.Kind, function));
+                }
+                foreach (string lifecycleName in hostLifecycleNames.Where(name =>
+                    !lifecycleFunctions.Any(function => function.Name == name)))
+                {
+                    output.Append("    ").AppendLine(RenderLifecycleDeclaration(type.Kind, lifecycleName));
                 }
                 if (type.Kind == "world_subsystem")
                 {
@@ -81,10 +88,13 @@ internal static class UhtShellRenderer
         output.AppendLine();
         output.AppendLine("#include \"Net/UnrealNetwork.h\"");
         output.AppendLine("#include \"ScriptTypes/AvidScriptGeneratedTypeDispatcher.h\"");
+        output.AppendLine("#include \"ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h\"");
         output.AppendLine("#if WITH_DEV_AUTOMATION_TESTS");
         output.AppendLine("#include \"Misc/AutomationTest.h\"");
         output.AppendLine("#include \"UObject/UnrealType.h\"");
         output.AppendLine("#endif");
+        output.AppendLine();
+        output.AppendLine("DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptGeneratedTypes, Log, All);");
         output.AppendLine();
 
         foreach (UeTypeManifestEntry type in TopologicalOrder(types))
@@ -96,6 +106,12 @@ internal static class UhtShellRenderer
                     continue;
                 }
                 AppendFunctionDefinition(output, type, function);
+            }
+            foreach (string lifecycleName in GetHostLifecycleNames(type.Kind).Where(name =>
+                !type.Functions.Any(function =>
+                    function.Flags.Contains("lifecycle") && function.Name == name)))
+            {
+                AppendHostLifecycleDefinition(output, type, lifecycleName);
             }
             if (type.Properties.Any(property => property.Flags.Contains("replicated")))
             {
@@ -243,16 +259,69 @@ internal static class UhtShellRenderer
         {
             output.Append("    ").AppendLine(RenderSuperCall(type.Kind, function));
         }
+        if (IsActivationLifecycle(function.Name))
+        {
+            AppendBeginInstance(output, type);
+        }
         string[] arguments = function.Name == "Tick"
             ? new[] { type.Kind == "actor_component" ? "DeltaTime" : "DeltaSeconds" }
             : Array.Empty<string>();
         AppendDispatchBody(output, type, function, arguments);
+        if (IsDeactivationLifecycle(function.Name))
+        {
+            AppendEndInstance(output);
+        }
         if (dispatchBeforeSuper)
         {
             output.Append("    ").AppendLine(RenderSuperCall(type.Kind, function));
         }
         output.AppendLine("}");
         output.AppendLine();
+    }
+
+    private static void AppendHostLifecycleDefinition(
+        StringBuilder output,
+        UeTypeManifestEntry type,
+        string lifecycleName)
+    {
+        output.Append(RenderLifecycleDefinition(type, lifecycleName)).AppendLine();
+        output.AppendLine("{");
+        if (IsActivationLifecycle(lifecycleName))
+        {
+            output.Append("    ").AppendLine(RenderSuperCall(type.Kind, lifecycleName));
+            AppendBeginInstance(output, type);
+        }
+        else
+        {
+            AppendEndInstance(output);
+            output.Append("    ").AppendLine(RenderSuperCall(type.Kind, lifecycleName));
+        }
+        output.AppendLine("}");
+        output.AppendLine();
+    }
+
+    private static void AppendBeginInstance(StringBuilder output, UeTypeManifestEntry type)
+    {
+        output.AppendLine("    FString AvidScriptRuntimeError;");
+        output.AppendLine("    if (!FAvidScriptGeneratedTypeRuntimeHost::Get().BeginInstance(");
+        output.AppendLine("        *this,");
+        output.Append("        ").Append(type.TypeOrdinal).AppendLine("u,");
+        output.AppendLine("        AvidScriptRuntimeError))");
+        output.AppendLine("    {");
+        output.Append("        UE_LOG(LogAvidScriptGeneratedTypes, Error, TEXT(\"Failed to activate ")
+            .Append(Escape(type.EngineName))
+            .AppendLine(": %s\"), *AvidScriptRuntimeError);");
+        output.AppendLine("        return;");
+        output.AppendLine("    }");
+    }
+
+    private static void AppendEndInstance(StringBuilder output)
+    {
+        output.AppendLine("    FString AvidScriptRuntimeError;");
+        output.AppendLine("    if (!FAvidScriptGeneratedTypeRuntimeHost::Get().EndInstance(*this, AvidScriptRuntimeError))");
+        output.AppendLine("    {");
+        output.AppendLine("        UE_LOG(LogAvidScriptGeneratedTypes, Warning, TEXT(\"Failed to stop generated script instance: %s\"), *AvidScriptRuntimeError);");
+        output.AppendLine("    }");
     }
 
     private static void AppendDispatchBody(
@@ -291,19 +360,29 @@ internal static class UhtShellRenderer
 
     private static string RenderLifecycleDeclaration(string kind, UeFunctionManifestEntry function)
     {
-        return "virtual " + RenderLifecycleSignature(kind, function) + " override;";
+        return RenderLifecycleDeclaration(kind, function.Name);
+    }
+
+    private static string RenderLifecycleDeclaration(string kind, string lifecycleName)
+    {
+        return "virtual " + RenderLifecycleSignature(kind, lifecycleName) + " override;";
     }
 
     private static string RenderLifecycleDefinition(UeTypeManifestEntry type, UeFunctionManifestEntry function)
     {
-        string signature = RenderLifecycleSignature(type.Kind, function);
-        int nameOffset = signature.IndexOf(function.NativeName, StringComparison.Ordinal);
+        return RenderLifecycleDefinition(type, function.Name);
+    }
+
+    private static string RenderLifecycleDefinition(UeTypeManifestEntry type, string lifecycleName)
+    {
+        string signature = RenderLifecycleSignature(type.Kind, lifecycleName);
+        int nameOffset = signature.IndexOf(lifecycleName, StringComparison.Ordinal);
         return signature.Insert(nameOffset, type.CppName + "::");
     }
 
-    private static string RenderLifecycleSignature(string kind, UeFunctionManifestEntry function)
+    private static string RenderLifecycleSignature(string kind, string lifecycleName)
     {
-        return (kind, function.Name) switch
+        return (kind, lifecycleName) switch
         {
             ("actor", "BeginPlay") or ("actor_component", "BeginPlay") => "void BeginPlay()",
             ("actor", "Tick") => "void Tick(float DeltaSeconds)",
@@ -317,13 +396,18 @@ internal static class UhtShellRenderer
             ("world_subsystem", "Deinitialize") or ("game_instance_subsystem", "Deinitialize") =>
                 "void Deinitialize()",
             _ => throw new InvalidOperationException(
-                $"Unsupported lifecycle function '{kind}.{function.Name}'."),
+                $"Unsupported lifecycle function '{kind}.{lifecycleName}'."),
         };
     }
 
     private static string RenderSuperCall(string kind, UeFunctionManifestEntry function)
     {
-        return (kind, function.Name) switch
+        return RenderSuperCall(kind, function.Name);
+    }
+
+    private static string RenderSuperCall(string kind, string lifecycleName)
+    {
+        return (kind, lifecycleName) switch
         {
             ("actor", "BeginPlay") or ("actor_component", "BeginPlay") => "Super::BeginPlay();",
             ("actor", "Tick") => "Super::Tick(DeltaSeconds);",
@@ -335,9 +419,26 @@ internal static class UhtShellRenderer
             ("world_subsystem", "Deinitialize") or ("game_instance_subsystem", "Deinitialize") =>
                 "Super::Deinitialize();",
             _ => throw new InvalidOperationException(
-                $"Unsupported lifecycle function '{kind}.{function.Name}'."),
+                $"Unsupported lifecycle function '{kind}.{lifecycleName}'."),
         };
     }
+
+    private static string[] GetHostLifecycleNames(string kind)
+    {
+        return kind switch
+        {
+            "actor" or "actor_component" => new[] { "BeginPlay", "EndPlay" },
+            "world_subsystem" or "game_instance_subsystem" =>
+                new[] { "Initialize", "Deinitialize" },
+            _ => Array.Empty<string>(),
+        };
+    }
+
+    private static bool IsActivationLifecycle(string lifecycleName) =>
+        lifecycleName is "BeginPlay" or "Initialize";
+
+    private static bool IsDeactivationLifecycle(string lifecycleName) =>
+        lifecycleName is "EndPlay" or "Deinitialize";
 
     private static string RenderSignature(UeFunctionManifestEntry function, string name, bool includeVirtual)
     {

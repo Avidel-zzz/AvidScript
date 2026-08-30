@@ -38,6 +38,8 @@
   no-op 兼容 shim，对象逻辑只走 canonical export，重复 lifecycle alias 在 Guest 编译期 fail closed。
 - `P59.C2c4a`：Runtime-owned generated instance host 已落地，集中拥有 package snapshot、ObjectHandle、
   Session、route 和逆序 teardown；自动 shell 接线与正式 package 安装仍在后续小节。
+- `P59.C2c4b`：生成 Actor/Component/Subsystem shell 已自动接入 Runtime Host activation/teardown；
+  Begin/End 幂等并按 receiver 实际 UClass 解析最派生脚本类型，正式 package 安装留给 C2c4c。
 
 ## 待完成
 

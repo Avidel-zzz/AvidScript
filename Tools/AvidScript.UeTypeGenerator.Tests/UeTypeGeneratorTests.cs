@@ -120,6 +120,7 @@ internal static class UeTypeGeneratorTests
             "AvidScriptGenerated",
             "5.8");
         string header = Text(result, "Public/AvidScriptGeneratedTypes.h");
+        string sourceText = Text(result, "Private/AvidScriptGeneratedTypes.cpp");
 
         Assert(header.Contains("class AVIDSCRIPTGENERATED_API UMotionComponent : public UActorComponent", StringComparison.Ordinal)
             && header.Contains("void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)", StringComparison.Ordinal),
@@ -130,6 +131,26 @@ internal static class UeTypeGeneratorTests
             "world subsystem lifecycle should use the tickable native shell contract");
         Assert(header.Contains("class AVIDSCRIPTGENERATED_API UProfileStore : public UGameInstanceSubsystem", StringComparison.Ordinal),
             "game instance subsystem should use the native U prefix and base");
+        Assert(header.Contains("virtual void BeginPlay() override;", StringComparison.Ordinal)
+            && header.Contains("virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;", StringComparison.Ordinal)
+            && header.Contains("virtual void Deinitialize() override;", StringComparison.Ordinal),
+            "generated shells should always publish host activation and teardown hooks");
+        int initializeStart = sourceText.IndexOf("void UEncounterWorld::Initialize", StringComparison.Ordinal);
+        int initializeSuper = sourceText.IndexOf("Super::Initialize", initializeStart, StringComparison.Ordinal);
+        int initializeHost = sourceText.IndexOf("BeginInstance", initializeStart, StringComparison.Ordinal);
+        int initializeDispatch = sourceText.IndexOf("FAvidScriptGeneratedTypeDispatcher::Invoke", initializeStart, StringComparison.Ordinal);
+        int deinitializeStart = sourceText.IndexOf("void UProfileStore::Deinitialize", StringComparison.Ordinal);
+        int deinitializeDispatch = sourceText.IndexOf("FAvidScriptGeneratedTypeDispatcher::Invoke", deinitializeStart, StringComparison.Ordinal);
+        int deinitializeHost = sourceText.IndexOf("EndInstance", deinitializeStart, StringComparison.Ordinal);
+        int deinitializeSuper = sourceText.IndexOf("Super::Deinitialize", deinitializeStart, StringComparison.Ordinal);
+        Assert(sourceText.Contains("AvidScriptGeneratedTypeRuntimeHost.h", StringComparison.Ordinal)
+            && initializeStart >= 0
+            && initializeSuper < initializeHost
+            && initializeHost < initializeDispatch
+            && deinitializeStart >= 0
+            && deinitializeDispatch < deinitializeHost
+            && deinitializeHost < deinitializeSuper,
+            "native lifecycle should activate before canonical dispatch and tear down after it");
     }
 
     private static void UnsupportedTypesFailClosedBeforePublication()
