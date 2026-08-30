@@ -477,6 +477,9 @@ function Invoke-HarnessAudit {
     $LegacyPath = Join-Path $RepositoryRoot ([string]$Manifest.lessons.legacy_path)
     $LegacyItem = Get-Item -LiteralPath $LegacyPath
     $LegacyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $LegacyPath).Hash.ToLowerInvariant()
+    $LegacyAttribute = @(& git -C $RepositoryRoot check-attr text -- ([string]$Manifest.lessons.legacy_path))
+    $LegacyTextDisabled = $LASTEXITCODE -eq 0 -and ($LegacyAttribute -join [Environment]::NewLine) -match ': text: unset$'
+    Add-Check 'legacy-git-text-disabled' $LegacyTextDisabled ($LegacyAttribute -join ' ')
     Add-Check 'legacy-byte-count' ($LegacyItem.Length -eq [int64]$Manifest.lessons.legacy_bytes) "$($LegacyItem.Length)/$($Manifest.lessons.legacy_bytes) bytes"
     Add-Check 'legacy-sha256' ($LegacyHash -eq ([string]$Manifest.lessons.legacy_sha256).ToLowerInvariant()) $LegacyHash
 

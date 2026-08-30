@@ -1,4 +1,5 @@
 Tests/Fixtures/BindingGeneration/*.generated.cs text eol=lf
+AgentHarness/lessons/legacy-agents-2026-08-30.md -text
 Docs/Phase*/Phase*_State.json text eol=lf
 Docs/Phase*/P*_Gate_Summary.json text eol=lf
 Benchmarks/PuertsComparison/Config/PuertsDependency.lock.json text eol=lf
