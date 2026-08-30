@@ -302,6 +302,43 @@ Invoke-ContractCase 'State.StartAndStatus' {
     Assert-Condition ($Status.Output.Contains('P91.1')) 'status did not expose next batch'
 }
 
+Invoke-ContractCase 'State.ReplanBeforeImplementationOnly' {
+    $Root = New-FixtureRepository 'StateReplan'
+    $StatePath = Start-FixturePhase $Root 91 @('P91.1', 'P91.2')
+    Write-Utf8Text (Join-Path $Root 'Docs\Phase91\ArchitectureV2.md') "# Architecture V2`n"
+    Write-Utf8Text (Join-Path $Root 'Docs\Phase91\PlanV2.md') "# Plan V2`n"
+    $Replan = Invoke-WorkflowCli $Root @(
+        'replan', '-Phase', '91',
+        '-Goal', 'Corrected phase goal',
+        '-ArchitecturePath', 'Docs/Phase91/ArchitectureV2.md',
+        '-PlanPath', 'Docs/Phase91/PlanV2.md',
+        '-CloseoutPath', 'Docs/Phase91/CloseoutV2.md',
+        '-BatchId', 'P91.A,P91.B,P91.C',
+        '-Version', '2',
+        '-Reason', 'Correct the architecture before implementation')
+    Assert-Condition ($Replan.ExitCode -eq 0) "replan failed: $($Replan.Output)"
+    $State = Read-AvidScriptPhaseState $Root 91
+    Assert-Condition ($State.phase.goal -ceq 'Corrected phase goal') 'replan did not replace the goal'
+    Assert-Condition ($State.architecture.path -ceq 'Docs/Phase91/ArchitectureV2.md' -and
+        $State.architecture.version -eq 2 -and
+        $State.architecture.sha256 -ceq (Get-FileSha256 (Join-Path $Root 'Docs\Phase91\ArchitectureV2.md'))) `
+        'replan did not atomically replace the architecture contract'
+    Assert-Condition (@($State.batches).Count -eq 3 -and
+        @($State.batches | Where-Object { $_.status -ceq 'Pending' }).Count -eq 3) `
+        'replan did not replace batches with pending entries'
+
+    Complete-FixtureBatch $Root 'P91.A' 91
+    Assert-CliFailurePreservesState $Root $StatePath @(
+        'replan', '-Phase', '91',
+        '-Goal', 'Late rewrite',
+        '-ArchitecturePath', 'Docs/Phase91/ArchitectureV2.md',
+        '-PlanPath', 'Docs/Phase91/PlanV2.md',
+        '-CloseoutPath', 'Docs/Phase91/CloseoutV2.md',
+        '-BatchId', 'P91.X',
+        '-Version', '3',
+        '-Reason', 'Must fail after implementation') 'ASPW1113'
+}
+
 Invoke-ContractCase 'State.PwshPreservesTimestampStrings' {
     $Pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     if ($null -eq $Pwsh) {

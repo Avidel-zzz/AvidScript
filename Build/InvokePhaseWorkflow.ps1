@@ -122,6 +122,66 @@ try {
         'status' {
             Write-AvidScriptPhaseStatus (Read-AvidScriptPhaseState $RepositoryRoot $Phase) $RepositoryRoot
         }
+        'replan' {
+            foreach ($Required in @(
+                @{ Value = $Goal; Name = 'Goal' },
+                @{ Value = $ArchitecturePath; Name = 'ArchitecturePath' },
+                @{ Value = $PlanPath; Name = 'PlanPath' },
+                @{ Value = $CloseoutPath; Name = 'CloseoutPath' },
+                @{ Value = $Reason; Name = 'Reason' })) {
+                Assert-AvidScriptCliText $Required.Value $Required.Name
+            }
+            if ($Version -lt 1) {
+                Throw-AvidScriptPhaseError 'ASPW1110' 'replan requires a positive architecture version'
+            }
+            $NormalizedBatchIds = @($BatchId | ForEach-Object { $_.Split(',') } | ForEach-Object { $_.Trim() })
+            if ($NormalizedBatchIds.Count -lt 1 -or
+                @($NormalizedBatchIds | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+                Throw-AvidScriptPhaseError 'ASPW1111' 'replan requires at least one non-empty batch id'
+            }
+            $UniqueBatchIds = [System.Collections.Generic.HashSet[string]]::new(
+                [System.StringComparer]::Ordinal)
+            foreach ($NormalizedBatchId in $NormalizedBatchIds) {
+                Assert-AvidScriptIdentifier $NormalizedBatchId 'batch id'
+                if (-not $UniqueBatchIds.Add($NormalizedBatchId)) {
+                    Throw-AvidScriptPhaseError 'ASPW1112' "duplicate replan batch id: $NormalizedBatchId"
+                }
+            }
+
+            $ArchitectureFull = Resolve-AvidScriptRepositoryPath $RepositoryRoot $ArchitecturePath
+            Resolve-AvidScriptRepositoryPath $RepositoryRoot $PlanPath | Out-Null
+            Resolve-AvidScriptRepositoryPath $RepositoryRoot $CloseoutPath -AllowMissing | Out-Null
+            Update-AvidScriptPhaseState $RepositoryRoot $Phase {
+                param($State)
+                if ($State.declared_stage -cne 'implementing' -or
+                    $State.review.completed -or
+                    -not [string]::IsNullOrWhiteSpace([string]$State.freeze.source_commit) -or
+                    @($State.batches | Where-Object { $_.status -ne 'Pending' }).Count -gt 0) {
+                    Throw-AvidScriptPhaseError 'ASPW1113' `
+                        'replan is only valid before implementation batches or review have completed'
+                }
+                if ($Version -le [int]$State.architecture.version) {
+                    Throw-AvidScriptPhaseError 'ASPW1114' 'replan architecture version must increase'
+                }
+
+                $State.phase.goal = $Goal.Trim()
+                $State.architecture.path = ConvertTo-AvidScriptRepositoryPath $ArchitecturePath
+                $State.architecture.version = $Version
+                $State.architecture.sha256 = Get-AvidScriptFileSha256Hex $ArchitectureFull
+                $State.architecture.revision_reason = $Reason.Trim()
+                $State.documents.plan = ConvertTo-AvidScriptRepositoryPath $PlanPath
+                $State.documents.closeout = ConvertTo-AvidScriptRepositoryPath $CloseoutPath
+                $State.batches = @($NormalizedBatchIds | ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        id = $_
+                        status = 'Pending'
+                        evidence = ''
+                        completed_at_utc = $null
+                    }
+                })
+            } | Out-Null
+            Write-AvidScriptPhaseStatus (Read-AvidScriptPhaseState $RepositoryRoot $Phase) $RepositoryRoot
+        }
         'batch-complete' {
             Assert-AvidScriptCliText $BatchId[0] 'BatchId'
             Assert-AvidScriptCliText $Evidence 'Evidence'
