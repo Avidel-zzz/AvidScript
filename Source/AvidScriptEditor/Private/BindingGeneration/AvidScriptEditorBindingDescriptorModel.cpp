@@ -233,6 +233,18 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			Writer->WriteValue(TEXT("script_name"), Event.ScriptName);
 			Writer->WriteValue(TEXT("delegate_kind"), Event.DelegateKind);
 			Writer->WriteValue(TEXT("source_mode"), Event.SourceMode);
+			if (Package.SchemaVersion >= 17)
+			{
+				Writer->WriteValue(
+					TEXT("network_mode"),
+					LexToString(Event.Network.Mode));
+				Writer->WriteValue(
+					TEXT("network_reliable"),
+					Event.Network.bReliable);
+				Writer->WriteValue(
+					TEXT("rep_notify_property"),
+					Event.RepNotifyProperty.ToString());
+			}
 			Writer->WriteValue(TEXT("export_name"), Event.ExportName);
 			Writer->WriteArrayStart(TEXT("parameters"));
 			for (const FAvidScriptBindingValueModel& Parameter :

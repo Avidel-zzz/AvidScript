@@ -19,6 +19,7 @@ struct FAvidScriptReflectedDelegateEventSelection
 {
 	FString OwnerClassPath;
 	FName EventName;
+	FString CallbackKind = TEXT("multicast");
 };
 
 struct FAvidScriptReflectedClassSelection
@@ -34,6 +35,7 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> GeneratedNativeProperties;
 	TArray<FName> IncludeEvents;
 	TArray<FName> ExcludeEvents;
+	TArray<FName> IncludeHandlers;
 	bool bDiscoverReadableProperties = false;
 };
 

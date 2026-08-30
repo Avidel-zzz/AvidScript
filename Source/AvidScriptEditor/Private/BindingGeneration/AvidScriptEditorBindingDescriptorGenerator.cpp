@@ -37,6 +37,7 @@ constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
 constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
 constexpr const TCHAR* NetworkGeneratorVersion = TEXT("57.12D1.0");
 constexpr const TCHAR* ReplicatedPropertyGeneratorVersion = TEXT("57.12D2.0");
+constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D3.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -73,6 +74,10 @@ struct FResolvedDelegateEventDescriptor
 	FAvidScriptReflectedDelegateEventSelection Selection;
 	UClass* OwnerClass = nullptr;
 	FMulticastDelegateProperty* Property = nullptr;
+	UFunction* SignatureFunction = nullptr;
+	FProperty* RepNotifyProperty = nullptr;
+	FString CallbackKind = TEXT("multicast");
+	FAvidScriptBindingNetworkContract Network;
 	FAvidScriptProjectedDelegateEvent Projection;
 	FString ScriptName;
 	FString CanonicalIdentity;
@@ -326,7 +331,8 @@ void FinalizeType(FAvidScriptProjectedBindingType& Type)
 FString MakeDelegateEventSelectionKey(
 	const FAvidScriptReflectedDelegateEventSelection& Selection)
 {
-	return TEXT("delegate_event:") + Selection.OwnerClassPath + TEXT(".")
+	return Selection.CallbackKind + TEXT(":")
+		+ Selection.OwnerClassPath + TEXT(".")
 		+ Selection.EventName.ToString();
 }
 
@@ -984,11 +990,6 @@ bool GenerateBindingDescriptor(
 		SeenSelections.Add(SelectionKey);
 
 		UClass* OwnerClass = LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
-		FProperty* Property = OwnerClass == nullptr
-			? nullptr
-			: FindFProperty<FProperty>(OwnerClass, Selection.EventName);
-		FMulticastDelegateProperty* DelegateProperty =
-			CastField<FMulticastDelegateProperty>(Property);
 		if (OwnerClass == nullptr)
 		{
 			SetFailure(
@@ -998,43 +999,116 @@ bool GenerateBindingDescriptor(
 				TEXT("Use a loaded reflected UClass path from the active UE5.8 build."));
 			return false;
 		}
-		if (DelegateProperty == nullptr)
-		{
-			SetFailure(
-				OutResult,
-				TEXT("delegate_event_property_required"),
-				SelectionKey,
-				TEXT("Select a dynamic multicast delegate property."));
-			return false;
-		}
-		if (Property->GetOwnerStruct() != OwnerClass)
-		{
-			SetFailure(
-				OutResult,
-				TEXT("delegate_event_owner_mismatch"),
-				SelectionKey,
-				TEXT("Select the reflected declaring class for the delegate event."));
-			return false;
-		}
 
 		FResolvedDelegateEventDescriptor Event;
 		Event.Selection = Selection;
 		Event.OwnerClass = OwnerClass;
-		Event.Property = DelegateProperty;
+		Event.CallbackKind = Selection.CallbackKind;
 		FString PolicyCategory;
 		FString PolicySource;
-		if (!FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
-				DelegateProperty,
-				Event.Projection,
-				PolicyCategory,
-				PolicySource))
+		if (Selection.CallbackKind == TEXT("multicast"))
 		{
-			SetFailure(
-				OutResult,
-				PolicyCategory,
-				PolicySource,
-				TEXT("Use a value-only supported signature of at most eight ABI cells."));
-			return false;
+			FProperty* const Property = FindFProperty<FProperty>(
+				OwnerClass,
+				Selection.EventName);
+			Event.Property = CastField<FMulticastDelegateProperty>(Property);
+			if (Event.Property == nullptr
+				|| Property->GetOwnerStruct() != OwnerClass)
+			{
+				SetFailure(
+					OutResult,
+					TEXT("delegate_event_property_required"),
+					SelectionKey,
+					TEXT("Select a declared dynamic multicast delegate property."));
+				return false;
+			}
+			Event.SignatureFunction = Event.Property->SignatureFunction;
+			if (!FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
+					Event.Property,
+					Event.Projection,
+					PolicyCategory,
+					PolicySource))
+			{
+				SetFailure(
+					OutResult,
+					PolicyCategory,
+					PolicySource,
+					TEXT("Use a value-only supported signature of at most eight ABI cells."));
+				return false;
+			}
+		}
+		else
+		{
+			Event.SignatureFunction = OwnerClass->FindFunctionByName(
+				Selection.EventName,
+				EIncludeSuperFlag::ExcludeSuper);
+			if (Event.SignatureFunction == nullptr
+				|| !Event.SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				|| Event.SignatureFunction->HasAnyFunctionFlags(
+					FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
+				|| Event.SignatureFunction->HasMetaData(TEXT("Latent"))
+				|| !IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+				|| !TryResolveAvidScriptBindingNetworkContract(
+					*Event.SignatureFunction,
+					Event.Network))
+			{
+				SetFailure(
+					OutResult,
+					TEXT("function_handler_contract_invalid"),
+					SelectionKey,
+					TEXT("Select a native Actor/ActorComponent RPC or RepNotify function."));
+				return false;
+			}
+			for (TFieldIterator<FProperty> It(
+					OwnerClass,
+					EFieldIterationFlags::IncludeSuper); It; ++It)
+			{
+				FProperty* const Candidate = *It;
+				if (Candidate->HasAnyPropertyFlags(CPF_RepNotify)
+					&& Candidate->RepNotifyFunc
+						== Event.SignatureFunction->GetFName())
+				{
+					if (Event.RepNotifyProperty != nullptr)
+					{
+						SetFailure(
+							OutResult,
+							TEXT("function_handler_rep_notify_ambiguous"),
+							SelectionKey,
+							TEXT("Use one RepNotify property per generated handler."));
+						return false;
+					}
+					Event.RepNotifyProperty = Candidate;
+				}
+			}
+			const bool bKindExclusive = Event.Network.IsNetworked()
+				!= (Event.RepNotifyProperty != nullptr);
+			const FString ResolvedKind = !bKindExclusive
+				? FString()
+				: Event.Network.IsNetworked()
+				? FString(TEXT("network_rpc"))
+				: Event.RepNotifyProperty != nullptr
+				? FString(TEXT("rep_notify"))
+				: FString();
+			if (ResolvedKind.IsEmpty()
+				|| ResolvedKind != Selection.CallbackKind
+				|| !FAvidScriptEditorReflectedDelegateEventPolicy::
+					EvaluateSignatureAndProject(
+						Event.SignatureFunction,
+						Event.Projection,
+						PolicyCategory,
+						PolicySource))
+			{
+				SetFailure(
+					OutResult,
+					ResolvedKind.IsEmpty()
+						? FString(TEXT("function_handler_kind_unsupported"))
+						: ResolvedKind != Selection.CallbackKind
+						? FString(TEXT("function_handler_kind_mismatch"))
+						: PolicyCategory,
+					PolicySource.IsEmpty() ? SelectionKey : PolicySource,
+					TEXT("Use a value-only native RPC or RepNotify signature of at most eight ABI cells."));
+				return false;
+			}
 		}
 		TArray<FAvidScriptBindingValueModel> ParameterModels;
 		ParameterModels.Reserve(Event.Projection.Parameters.Num());
@@ -1045,7 +1119,10 @@ bool GenerateBindingDescriptor(
 			ParameterModels.Add(MakeBindingValueModel(Parameter));
 		}
 		Event.ScriptName = FAvidScriptEditorCSharpSyntax::MakeIdentifier(
-			DelegateProperty->GetAuthoredName());
+			Selection.CallbackKind == TEXT("multicast")
+				? Event.Property->GetAuthoredName()
+				: GetDescriptorScriptFunctionName(
+					Event.SignatureFunction));
 		if (Event.ScriptName.StartsWith(TEXT("@")))
 		{
 			Event.ScriptName = TEXT("Event_") + Event.ScriptName.Mid(1);
@@ -1054,24 +1131,32 @@ bool GenerateBindingDescriptor(
 		{
 			SetFailure(
 				OutResult,
-				TEXT("delegate_event_script_name_invalid"),
+				TEXT("callback_script_name_invalid"),
 				SelectionKey,
-				TEXT("Use a delegate property name that maps to a C# identifier."));
+				TEXT("Use a callback member name that maps to a C# identifier."));
 			return false;
 		}
 		Event.CanonicalIdentity =
 			FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity(
 				OwnerClass->GetPathName(),
-				DelegateProperty->GetName(),
-				TEXT("multicast"),
+				Selection.EventName.ToString(),
+				Event.CallbackKind,
 				TEXT("self"),
-				ParameterModels);
+				ParameterModels,
+				Event.Network,
+				Event.RepNotifyProperty == nullptr
+					? NAME_None
+					: Event.RepNotifyProperty->GetFName());
 		Event.StableId = FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 			OwnerClass->GetPathName(),
-			DelegateProperty->GetName(),
-			TEXT("multicast"),
+			Selection.EventName.ToString(),
+			Event.CallbackKind,
 			TEXT("self"),
-			ParameterModels);
+			ParameterModels,
+			Event.Network,
+			Event.RepNotifyProperty == nullptr
+				? NAME_None
+				: Event.RepNotifyProperty->GetFName());
 		Event.ExportName = TEXT("avid_on_delegate_") + Event.StableId.Left(16);
 		DelegateEvents.Add(MoveTemp(Event));
 	}
@@ -1242,6 +1327,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.PropertyReplication.IsReplicated();
 		});
+	const bool bHasInboundHandlers = DelegateEvents.ContainsByPredicate(
+		[](const FResolvedDelegateEventDescriptor& Event)
+		{
+			return Event.CallbackKind != TEXT("multicast");
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1276,7 +1366,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 16;
 	}
-	Package.GeneratorVersion = bHasReplicatedProperties
+	if (bHasInboundHandlers)
+	{
+		Package.SchemaVersion = 17;
+	}
+	Package.GeneratorVersion = bHasInboundHandlers
+		? InboundHandlerGeneratorVersion
+		: bHasReplicatedProperties
 		? ReplicatedPropertyGeneratorVersion
 		: bHasNetworkBindings
 		? NetworkGeneratorVersion
@@ -1376,10 +1472,14 @@ bool GenerateBindingDescriptor(
 		EventModel.CanonicalIdentity = Event.CanonicalIdentity;
 		EventModel.Ordinal = Event.Ordinal;
 		EventModel.OwnerClass = Event.OwnerClass->GetPathName();
-		EventModel.UeMember = Event.Property->GetName();
+		EventModel.UeMember = Event.Selection.EventName.ToString();
 		EventModel.ScriptName = Event.ScriptName;
-		EventModel.DelegateKind = TEXT("multicast");
+		EventModel.DelegateKind = Event.CallbackKind;
 		EventModel.SourceMode = TEXT("self");
+		EventModel.Network = Event.Network;
+		EventModel.RepNotifyProperty = Event.RepNotifyProperty == nullptr
+			? NAME_None
+			: Event.RepNotifyProperty->GetFName();
 		EventModel.ExportName = Event.ExportName;
 		for (const FAvidScriptProjectedBindingValue& Parameter :
 			Event.Projection.Parameters)
@@ -1446,13 +1546,16 @@ bool GenerateBindingDescriptor(
 	{
 		for (const FResolvedDelegateEventDescriptor& Event : DelegateEvents)
 		{
-			if (!Event.OwnerClass->IsChildOf(AActor::StaticClass()))
+			const bool bOwnerSupported = Event.CallbackKind == TEXT("multicast")
+				? Event.OwnerClass->IsChildOf(AActor::StaticClass())
+				: IsAvidScriptBindingNetworkOwnerClass(Event.OwnerClass);
+			if (!bOwnerSupported)
 			{
 				SetFailure(
 					OutResult,
-					TEXT("delegate_event_owner_not_actor"),
+					TEXT("callback_owner_unsupported"),
 					Event.OwnerClass->GetPathName(),
-					TEXT("P57.12A self delegate events require an AActor-derived declaring class."));
+					TEXT("Use an Actor delegate event or an Actor/ActorComponent inbound network handler."));
 				return false;
 			}
 			if (SelfClass == nullptr)
@@ -1473,7 +1576,7 @@ bool GenerateBindingDescriptor(
 						TEXT("delegate_event_self_type_mismatch"),
 						SelfClass->GetPathName() + TEXT(" -> ")
 							+ Event.OwnerClass->GetPathName(),
-						TEXT("Use one Actor Self type derived from every selected delegate event owner."));
+						TEXT("Use one Self type derived from every selected callback owner."));
 					return false;
 				}
 			}
@@ -1935,7 +2038,8 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 		|| Profile.Classes.ContainsByPredicate(
 			[](const FAvidScriptReflectedClassSelection& Rule)
 			{
-				return !Rule.IncludeEvents.IsEmpty();
+				return !Rule.IncludeEvents.IsEmpty()
+					|| !Rule.IncludeHandlers.IsEmpty();
 			});
 	if (bRequestsDelegateEvents)
 	{

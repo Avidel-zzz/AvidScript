@@ -1,0 +1,29 @@
+{
+  "schema_version": 9,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlersScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_inbound_network_handlers",
+  "artifact_stem": "profile_inbound_network_handlers",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_inbound_network_handlers",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_inbound_network_handlers/profile_inbound_network_handlers.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_inbound_network_handlers/profile_inbound_network_handlers.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.inbound_network_handlers",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+        "include_handlers": [
+          "ServerSubmitValue",
+          "OnRep_ReplicatedScore"
+        ],
+        "writable_properties": [
+          "ReplicatedScore"
+        ]
+      }
+    ]
+  }
+}

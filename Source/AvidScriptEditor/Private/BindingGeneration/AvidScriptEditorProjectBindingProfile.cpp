@@ -18,6 +18,7 @@ constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectProfileResolverVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeProfileResolverVersion = TEXT("54.6.0");
 constexpr const TCHAR* DelegateEventProfileResolverVersion = TEXT("57.12A.0");
+constexpr const TCHAR* InboundHandlerProfileResolverVersion = TEXT("57.12D3.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -131,7 +132,8 @@ bool NormalizeClassRule(
 		|| !NormalizeNames(Rule.WritableProperties, Rule.OwnerClassPath, TEXT("writable_properties"), OutResult)
 		|| !NormalizeNames(Rule.GeneratedNativeProperties, Rule.OwnerClassPath, TEXT("generated_native_properties"), OutResult)
 		|| !NormalizeNames(Rule.IncludeEvents, Rule.OwnerClassPath, TEXT("include_events"), OutResult)
-		|| !NormalizeNames(Rule.ExcludeEvents, Rule.OwnerClassPath, TEXT("exclude_events"), OutResult))
+		|| !NormalizeNames(Rule.ExcludeEvents, Rule.OwnerClassPath, TEXT("exclude_events"), OutResult)
+		|| !NormalizeNames(Rule.IncludeHandlers, Rule.OwnerClassPath, TEXT("include_handlers"), OutResult))
 	{
 		return false;
 	}
@@ -359,6 +361,7 @@ void AppendRuleIdentity(
 	const bool bIncludeGeneratedNativeFunctions,
 	const bool bIncludeGeneratedNativeProperties,
 	const bool bIncludeDelegateEvents,
+	const bool bIncludeInboundHandlers,
 	TArray<FString>& OutIdentity)
 {
 	const auto JoinNames = [](const TArray<FName>& Names)
@@ -397,6 +400,10 @@ void AppendRuleIdentity(
 	{
 		Identity += TEXT("|ie=") + JoinNames(Rule.IncludeEvents)
 			+ TEXT("|ee=") + JoinNames(Rule.ExcludeEvents);
+	}
+	if (bIncludeInboundHandlers)
+	{
+		Identity += TEXT("|ih=") + JoinNames(Rule.IncludeHandlers);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -930,9 +937,16 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			return !Rule.IncludeEvents.IsEmpty()
 				|| !Rule.ExcludeEvents.IsEmpty();
 		});
+	const bool bHasInboundHandlers = OutSelection.Classes.ContainsByPredicate(
+		[](const FAvidScriptReflectedClassSelection& Rule)
+		{
+			return !Rule.IncludeHandlers.IsEmpty();
+		});
 	Identity.Add(
 		TEXT("resolver=")
-		+ FString(bHasDelegateEvents
+		+ FString(bHasInboundHandlers
+			? InboundHandlerProfileResolverVersion
+			: bHasDelegateEvents
 			? DelegateEventProfileResolverVersion
 			: bHasGeneratedNativeFunctions || bHasGeneratedNativeProperties
 			? GeneratedNativeProfileResolverVersion
@@ -961,6 +975,7 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 			bHasGeneratedNativeFunctions,
 			bHasGeneratedNativeProperties,
 			bHasDelegateEvents,
+			bHasInboundHandlers,
 			Identity);
 	}
 	for (const FAvidScriptProjectBindingClassSpec& ClassReference : OutClassReferences)

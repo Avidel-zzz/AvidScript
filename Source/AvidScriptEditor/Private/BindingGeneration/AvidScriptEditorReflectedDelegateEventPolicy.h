@@ -3,6 +3,7 @@
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 
 class FMulticastDelegateProperty;
+class UFunction;
 
 struct FAvidScriptProjectedDelegateEvent
 {
@@ -17,6 +18,12 @@ public:
 
 	static bool EvaluateAndProject(
 		const FMulticastDelegateProperty* DelegateProperty,
+		FAvidScriptProjectedDelegateEvent& OutProjection,
+		FString& OutCategory,
+		FString& OutSource);
+
+	static bool EvaluateSignatureAndProject(
+		const UFunction* Signature,
 		FAvidScriptProjectedDelegateEvent& OutProjection,
 		FString& OutCategory,
 		FString& OutSource);

@@ -2,6 +2,7 @@
 
 #include "AvidScriptActorBinding.h"
 #include "AvidScriptBindingReloadEffect.h"
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "AvidScriptGeneratedBindingRegistry.h"
 #include "AvidScriptObjectFactoryPolicy.h"
 #include "AvidScriptObjectLifecycleBinding.h"
@@ -231,9 +232,12 @@ struct FAvidScriptPreparedDelegateEvent
 	uint32 EventOrdinal = MAX_uint32;
 	FString StableId;
 	FString ExportName;
+	FString CallbackKind = TEXT("multicast");
 	UClass* ExpectedSourceClass = nullptr;
 	FMulticastDelegateProperty* DelegateProperty = nullptr;
 	UFunction* SignatureFunction = nullptr;
+	FProperty* RepNotifyProperty = nullptr;
+	FAvidScriptBindingNetworkContract Network;
 	uint32 ParameterCellCount = 0;
 	const void* ImmutableCodecIdentity = nullptr;
 	FAvidScriptPreparedDelegateEncode Encode = nullptr;
@@ -288,6 +292,8 @@ public:
 	const FString& GetPackageHash() const;
 	int32 GetDescriptorSchemaVersion() const;
 	int32 GetDelegateEventCount() const;
+	int32 GetMulticastDelegateEventCount() const;
+	int32 GetInboundHandlerCount() const;
 	const FAvidScriptVmBindingPackage& GetVmPackage() const;
 	const FAvidScriptBindingPackageInstrumentation& GetInstrumentation() const;
 	bool TryGetFastPathKind(
@@ -314,6 +320,9 @@ public:
 		FString& OutError) const;
 	bool BuildPreparedDelegateEvents(
 		TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
+		FString& OutError) const;
+	bool BuildPreparedInboundHandlers(
+		TArray<FAvidScriptPreparedDelegateEvent>& OutHandlers,
 		FString& OutError) const;
 	bool InvokePreparedReflectionI32Pair(
 		const FAvidScriptPreparedReflectionBinding& Binding,

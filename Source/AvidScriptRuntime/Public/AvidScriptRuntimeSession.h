@@ -7,6 +7,7 @@ class FAvidScriptRuntimeEventRouter;
 class FAvidScriptRuntimeScheduler;
 class FAvidScriptSessionObjectOwnership;
 class FAvidScriptSessionDelegateSubscriptions;
+class FAvidScriptSessionInboundHandlers;
 class FAvidScriptSessionContinuations;
 class IAvidScriptBindingHostEffectJournal;
 struct FAvidScriptRuntimeArtifact;
@@ -160,6 +161,7 @@ private:
 
 	TUniquePtr<FAvidScriptSessionObjectOwnership> ObjectOwnership;
 	TUniquePtr<FAvidScriptSessionDelegateSubscriptions> DelegateSubscriptions;
+	TUniquePtr<FAvidScriptSessionInboundHandlers> InboundHandlers;
 	TSharedPtr<FAvidScriptSessionContinuations> Continuations;
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> LiveRuntime;
 	TUniquePtr<FAvidScriptRuntimeScheduler> Scheduler;

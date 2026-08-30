@@ -1337,6 +1337,7 @@ bool FAvidScriptBindingDescriptorLayout::ValidateTypeGraph(
 
 bool ParseAvidScriptBindingDelegateEvent(
 	const TSharedPtr<FJsonObject>& Object,
+	const int32 SchemaVersion,
 	FAvidScriptBindingDelegateEventModel& OutEvent,
 	FString& OutErrorSource)
 {
@@ -1368,6 +1369,34 @@ bool ParseAvidScriptBindingDelegateEvent(
 	{
 		return false;
 	}
+
+	FString NetworkMode(TEXT("none"));
+	FString RepNotifyProperty;
+	if (SchemaVersion >= 17)
+	{
+		if (!Object->TryGetStringField(TEXT("network_mode"), NetworkMode)
+			|| !TryParseAvidScriptBindingNetworkMode(
+				NetworkMode,
+				OutEvent.Network.Mode)
+			|| !Object->TryGetBoolField(
+				TEXT("network_reliable"),
+				OutEvent.Network.bReliable)
+			|| !Object->TryGetStringField(
+				TEXT("rep_notify_property"),
+				RepNotifyProperty))
+		{
+			OutErrorSource = TEXT("callback_contract");
+			return false;
+		}
+	}
+	else if (Object->HasField(TEXT("network_mode"))
+		|| Object->HasField(TEXT("network_reliable"))
+		|| Object->HasField(TEXT("rep_notify_property")))
+	{
+		OutErrorSource = TEXT("callback_contract");
+		return false;
+	}
+	OutEvent.RepNotifyProperty = FName(*RepNotifyProperty);
 
 	const TArray<TSharedPtr<FJsonValue>>* Parameters = nullptr;
 	if (!Object->TryGetArrayField(TEXT("parameters"), Parameters)
@@ -1648,7 +1677,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 	const FString& DelegatePropertyName,
 	const FString& DelegateKind,
 	const FString& SourceMode,
-	const TConstArrayView<FAvidScriptBindingValueModel> Parameters)
+	const TConstArrayView<FAvidScriptBindingValueModel> Parameters,
+	const FAvidScriptBindingNetworkContract& Network,
+	const FName RepNotifyProperty)
 {
 	FString Identity(TEXT("delegate_event"));
 	AppendAvidScriptBindingIdentityField(Identity, TEXT("owner"), OwnerClass);
@@ -1664,6 +1695,21 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventCanonicalIdentity
 		Identity,
 		TEXT("source"),
 		SourceMode);
+	if (DelegateKind != TEXT("multicast"))
+	{
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("network_mode"),
+			LexToString(Network.Mode));
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("network_reliable"),
+			Network.bReliable ? TEXT("true") : TEXT("false"));
+		AppendAvidScriptBindingIdentityField(
+			Identity,
+			TEXT("rep_notify_property"),
+			RepNotifyProperty.ToString());
+	}
 	for (const FAvidScriptBindingValueModel& Parameter : Parameters)
 	{
 		AppendAvidScriptBindingValueIdentity(
@@ -1679,14 +1725,18 @@ FString FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 	const FString& DelegatePropertyName,
 	const FString& DelegateKind,
 	const FString& SourceMode,
-	const TConstArrayView<FAvidScriptBindingValueModel> Parameters)
+	const TConstArrayView<FAvidScriptBindingValueModel> Parameters,
+	const FAvidScriptBindingNetworkContract& Network,
+	const FName RepNotifyProperty)
 {
 	return FAvidScriptHash::Sha256HexUtf8(MakeDelegateEventCanonicalIdentity(
 		OwnerClass,
 		DelegatePropertyName,
 		DelegateKind,
 		SourceMode,
-		Parameters));
+		Parameters,
+		Network,
+		RepNotifyProperty));
 }
 
 FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
@@ -1738,11 +1788,21 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		for (const FAvidScriptBindingDelegateEventModel& Event :
 			Package.DelegateEvents)
 		{
-			SelectionKeys.Add(
-				TEXT("delegate_event:")
+			FString Key = TEXT("delegate_event:")
 				+ Event.OwnerClass
 				+ TEXT(".")
-				+ Event.UeMember);
+				+ Event.UeMember;
+			if (Package.SchemaVersion >= 17)
+			{
+				Key += TEXT("|kind=") + Event.DelegateKind
+					+ TEXT("|network_mode=")
+					+ LexToString(Event.Network.Mode)
+					+ TEXT("|network_reliable=")
+					+ (Event.Network.bReliable ? TEXT("true") : TEXT("false"))
+					+ TEXT("|rep_notify_property=")
+					+ Event.RepNotifyProperty.ToString();
+			}
+			SelectionKeys.Add(MoveTemp(Key));
 		}
 	}
 	SelectionKeys.Sort([](const FString& Left, const FString& Right)
@@ -1755,7 +1815,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(
 		return FAvidScriptHash::Sha256HexUtf8(FString::Join(SelectionKeys, TEXT("\n")));
 	}
 
-	FString Identity(Package.SchemaVersion >= 16
+	FString Identity(Package.SchemaVersion >= 17
+		? TEXT("descriptor_selection_v17")
+		: Package.SchemaVersion >= 16
 		? TEXT("descriptor_selection_v16")
 		: Package.SchemaVersion >= 15
 		? TEXT("descriptor_selection_v15")
@@ -1947,7 +2009,9 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 		return FAvidScriptHash::Sha256HexUtf8(Identity);
 	}
 
-	FString Identity(Package.SchemaVersion >= 16
+	FString Identity(Package.SchemaVersion >= 17
+		? TEXT("descriptor_package_v17")
+		: Package.SchemaVersion >= 16
 		? TEXT("descriptor_package_v16")
 		: Package.SchemaVersion >= 15
 		? TEXT("descriptor_package_v15")
@@ -2178,6 +2242,21 @@ FString FAvidScriptBindingDescriptorIdentity::MakePackageHash(
 				Identity, TEXT("event_kind"), Event.DelegateKind);
 			AppendAvidScriptBindingIdentityField(
 				Identity, TEXT("event_source"), Event.SourceMode);
+			if (Package.SchemaVersion >= 17)
+			{
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_network_mode"),
+					LexToString(Event.Network.Mode));
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_network_reliable"),
+					Event.Network.bReliable ? TEXT("true") : TEXT("false"));
+				AppendAvidScriptBindingIdentityField(
+					Identity,
+					TEXT("event_rep_notify_property"),
+					Event.RepNotifyProperty.ToString());
+			}
 			AppendAvidScriptBindingIdentityField(
 				Identity, TEXT("event_export"), Event.ExportName);
 			for (const FAvidScriptBindingValueModel& Parameter :
@@ -2278,7 +2357,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 			&& OutPackage.SchemaVersion != 13
 			&& OutPackage.SchemaVersion != 14
 			&& OutPackage.SchemaVersion != 15
-			&& OutPackage.SchemaVersion != 16)
+			&& OutPackage.SchemaVersion != 16
+			&& OutPackage.SchemaVersion != 17)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("generator_version"), OutPackage.GeneratorVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("engine_version"), OutPackage.EngineVersion, OutErrorSource)
 		|| !ReadAvidScriptBindingRequiredString(Root, TEXT("source"), OutPackage.Source, OutErrorSource)
@@ -2306,7 +2386,8 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				&& OutPackage.SchemaVersion != 13
 				&& OutPackage.SchemaVersion != 14
 				&& OutPackage.SchemaVersion != 15
-				&& OutPackage.SchemaVersion != 16)
+				&& OutPackage.SchemaVersion != 16
+				&& OutPackage.SchemaVersion != 17)
 			{
 				OutErrorSource = TEXT("schema_version");
 			}
@@ -2807,6 +2888,7 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 				(*DelegateEvents)[Index].IsValid()
 					? (*DelegateEvents)[Index]->AsObject()
 					: nullptr,
+				OutPackage.SchemaVersion,
 				Event,
 				OutErrorSource);
 			const FString ExpectedIdentity =
@@ -2816,10 +2898,26 @@ bool FAvidScriptBindingDescriptorParser::Parse(
 						Event.UeMember,
 						Event.DelegateKind,
 						Event.SourceMode,
-						Event.Parameters);
+						Event.Parameters,
+						Event.Network,
+						Event.RepNotifyProperty);
+			const bool bCallbackKindValid =
+				Event.DelegateKind == TEXT("multicast")
+					? !Event.Network.IsNetworked()
+						&& !Event.Network.bReliable
+						&& Event.RepNotifyProperty.IsNone()
+					: Event.DelegateKind == TEXT("network_rpc")
+					? Event.Network.IsNetworked()
+						&& Event.RepNotifyProperty.IsNone()
+					: Event.DelegateKind == TEXT("rep_notify")
+						&& !Event.Network.IsNetworked()
+						&& !Event.Network.bReliable
+						&& !Event.RepNotifyProperty.IsNone();
 			if (!bParsed
 				|| Event.Ordinal != Index
-				|| Event.DelegateKind != TEXT("multicast")
+				|| !bCallbackKindValid
+				|| (OutPackage.SchemaVersion < 17
+					&& Event.DelegateKind != TEXT("multicast"))
 				|| Event.SourceMode != TEXT("self")
 				|| !IsAvidScriptBindingIdentifier(Event.ScriptName)
 				|| Event.CanonicalIdentity != ExpectedIdentity

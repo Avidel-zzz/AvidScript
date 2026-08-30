@@ -2142,3 +2142,53 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first P57.12D2 clean architecture launcher wrapped an already quoted PowerShell command in `cmd.exe /c`; the outer shell preserved an escape backslash and cmd rejected it before the checker started.
 - Prevention: PowerShell architecture gates run directly through the verified PowerShell 7 host with native `*>` log redirection. Do not add a second shell only to capture output; a launcher parse failure is discarded and never counted as product or gate evidence.
+
+### 2026-08-30: latent UFunctions are identified by metadata
+
+- Mistake: the first P57.12D3 handler resolver used a nonexistent `FUNC_Latent` flag while translating the frozen design into code.
+- Prevention: native function eligibility uses the current UE5.8 `EFunctionFlags` declaration and checks latent behavior through the `Latent` metadata contract. Do not invent flag constants from remembered terminology; inspect the source enum or reuse the shared reflected-function policy first.
+
+### 2026-08-30: enumerate sample files before reading them
+
+- Mistake: the first P57.12D3 sample audit guessed `avidscript.json` and `bindings.profile.json`, while repository samples use `<Name>.csharp-profile.json`; the read failed without yielding evidence.
+- Prevention: run `rg --files` for the exact sample directory, then read only returned paths. Do not use wildcard or remembered filenames as evidence paths.
+
+### 2026-08-30: keep repository reads as separate shell statements
+
+- Mistake: the first resumed P57.12D3 status probe joined `git status` and `git diff` with a semicolon despite the repository workflow rule against separator-chained shell commands.
+- Prevention: use one command per shell invocation or the orchestration layer's parallel calls for independent reads. Command separators are not used to compress evidence collection.
+
+### 2026-08-30: reuse generated C# facade attribute names
+
+- Mistake: the first P57.12D3 inbound-handler sample used a remembered `[AvidState]` attribute that does not exist; the supported explicit-state marker is `[AvidPersist]`.
+- Prevention: before adding an attribute to a readable sample, inspect the generated facade or an existing production-built sample and use that exact public contract. A sample is not accepted until the production C# pipeline compiles it.
+
+### 2026-08-30: keep PowerShell pipelines compatible with Windows PowerShell
+
+- Mistake: the first schema 17 package validator placed `|` at the start of a continuation line, which PowerShell 7 accepts but Windows PowerShell 5.1 rejects when UE launches the build script.
+- Prevention: keep the pipe token on the preceding line in scripts that UE can launch so the same file parses under both supported PowerShell hosts.
+
+### 2026-08-30: compare generated C# scalar contracts by symbols
+
+- Mistake: the shared event projector compared generated CLR type names with Roslyn display strings literally, so a valid `int` handler did not match `global::System.Int32`.
+- Prevention: generated event signatures compare Roslyn symbols with canonical CLR aliases for primitive types. Every new callback family must production-build at least one scalar handler, not only wrapper and enum parameters.
+
+### 2026-08-30: assign through a local typed wrapper
+
+- Mistake: the first inbound-handler sample assigned a property through `UE.Self.ReplicatedScore`; `UE.Self` returns a readonly value-type wrapper, so C# correctly rejected modification of that temporary with CS1612.
+- Prevention: when calling a generated setter, first store `UE.Self` in the generated typed wrapper and then assign through that local. Production-build readable samples before launching repeated UE Automation runs.
+
+### 2026-08-30: derive callback exports from validated semantic metadata
+
+- Mistake: the final Direct ABI publication gate kept only the original fixed lifecycle export allowlist, so valid generated `avid_on_delegate_*` exports were rejected after semantic and WASM compilation had succeeded.
+- Prevention: dynamic callback exports are authorized only from validated `delegate_event_callbacks`, then compared bidirectionally with required and observed exports. Do not authorize callback exports by a loose name prefix.
+
+### 2026-08-30: preserve callback kind while slicing bindings
+
+- Mistake: the first P57.12D3 automatic runtime slice copied every callback into `IncludeEvents`, which regenerated RPC and RepNotify handlers as multicast events.
+- Prevention: descriptor-to-profile reconstruction branches on the stored callback kind and sends only multicast delegates to `IncludeEvents`; function-backed callbacks go to `IncludeHandlers`. Production `BuildProfile` coverage is required for every new descriptor field that crosses authorization and runtime slices.
+
+### 2026-08-30: apply PowerShell compatibility rules to evidence commands too
+
+- Mistake: after documenting the Windows PowerShell pipeline rule, the first D3 log-summary command still piped directly from a completed `foreach` block and failed to parse.
+- Prevention: workflow evidence commands follow the same compatibility rules as repository scripts. Collect loop output in a named variable, then pipe that variable in a separate statement.

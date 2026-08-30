@@ -117,7 +117,8 @@ bool ValidateCanonicalDescriptor(
 	{
 		DelegateEventSelections.Add({
 			Event.OwnerClass,
-			FName(*Event.UeMember)
+			FName(*Event.UeMember),
+			Event.DelegateKind
 		});
 	}
 	for (const FAvidScriptBindingFunctionModel& Binding : Package.Bindings)

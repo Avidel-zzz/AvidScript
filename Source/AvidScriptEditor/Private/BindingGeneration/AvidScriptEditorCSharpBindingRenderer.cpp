@@ -1884,6 +1884,10 @@ bool AppendDelegateEventReferenceSurface(
 	for (const FAvidScriptBindingDelegateEventModel& Event :
 		Package.DelegateEvents)
 	{
+		if (Event.DelegateKind != TEXT("multicast"))
+		{
+			continue;
+		}
 		const FAvidScriptBindingTypeModel* OwnerType = FindRenderedType(
 			TypesByCanonical,
 			TEXT("object:") + Event.OwnerClass);
@@ -3090,6 +3094,20 @@ bool FAvidScriptEditorCSharpBindingRenderer::EmitManifest(
 		Writer->WriteValue(
 			TEXT("delegate_event_count"),
 			Package.DelegateEvents.Num());
+		if (Package.SchemaVersion >= 17)
+		{
+			int32 InboundHandlerCount = 0;
+			for (const FAvidScriptBindingDelegateEventModel& Event :
+				Package.DelegateEvents)
+			{
+				InboundHandlerCount += Event.DelegateKind == TEXT("multicast")
+					? 0
+					: 1;
+			}
+			Writer->WriteValue(
+				TEXT("inbound_handler_count"),
+				InboundHandlerCount);
+		}
 	}
 	Writer->WriteValue(TEXT("class_reference_count"), Package.ClassReferences.Num());
 	if (Package.SchemaVersion >= 7)

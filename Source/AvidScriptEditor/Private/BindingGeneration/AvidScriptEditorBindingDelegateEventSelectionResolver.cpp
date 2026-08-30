@@ -1,6 +1,9 @@
 #include "AvidScriptEditorBindingDelegateEventSelectionResolver.h"
 
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedDelegateEventPolicy.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "UObject/Class.h"
 #include "UObject/FieldIterator.h"
 #include "UObject/UnrealType.h"
@@ -11,8 +14,95 @@ namespace
 FString MakeEventSelectionKey(
 	const FAvidScriptReflectedDelegateEventSelection& Selection)
 {
-	return Selection.OwnerClassPath + TEXT(".")
+	return Selection.CallbackKind + TEXT(":")
+		+ Selection.OwnerClassPath + TEXT(".")
 		+ Selection.EventName.ToString();
+}
+
+bool TryResolveFunctionHandler(
+	const FAvidScriptReflectedDelegateEventSelection& Selection,
+	UClass& OwnerClass,
+	FAvidScriptReflectedDelegateEventSelection& OutSelection,
+	FString& OutCategory,
+	FString& OutSource)
+{
+	UFunction* const Function = OwnerClass.FindFunctionByName(
+		Selection.EventName,
+		EIncludeSuperFlag::ExcludeSuper);
+	if (Function == nullptr)
+	{
+		OutCategory = TEXT("function_handler_missing");
+		OutSource = MakeEventSelectionKey(Selection);
+		return false;
+	}
+	if (!Function->HasAnyFunctionFlags(FUNC_Native)
+		|| Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Delegate
+			| FUNC_MulticastDelegate)
+		|| Function->HasMetaData(TEXT("Latent"))
+		|| !IsAvidScriptBindingNetworkOwnerClass(&OwnerClass))
+	{
+		OutCategory = TEXT("function_handler_owner_or_flags_unsupported");
+		OutSource = Function->GetPathName();
+		return false;
+	}
+
+	FAvidScriptBindingNetworkContract Network;
+	if (!TryResolveAvidScriptBindingNetworkContract(*Function, Network))
+	{
+		OutCategory = TEXT("function_handler_network_contract_invalid");
+		OutSource = Function->GetPathName();
+		return false;
+	}
+	FProperty* RepNotifyProperty = nullptr;
+	for (TFieldIterator<FProperty> It(
+		&OwnerClass,
+		EFieldIterationFlags::IncludeSuper); It; ++It)
+	{
+		FProperty* const Property = *It;
+		if (Property->HasAnyPropertyFlags(CPF_RepNotify)
+			&& Property->RepNotifyFunc == Function->GetFName())
+		{
+			if (RepNotifyProperty != nullptr)
+			{
+				OutCategory = TEXT("function_handler_rep_notify_ambiguous");
+				OutSource = Function->GetPathName();
+				return false;
+			}
+			RepNotifyProperty = Property;
+		}
+	}
+	if (Network.IsNetworked() == (RepNotifyProperty != nullptr))
+	{
+		OutCategory = Network.IsNetworked()
+			? FString(TEXT("function_handler_kind_ambiguous"))
+			: FString(TEXT("function_handler_kind_unsupported"));
+		OutSource = Function->GetPathName();
+		return false;
+	}
+
+	FAvidScriptProjectedDelegateEvent Projection;
+	if (!FAvidScriptEditorReflectedDelegateEventPolicy::
+		EvaluateSignatureAndProject(
+			Function,
+			Projection,
+			OutCategory,
+			OutSource))
+	{
+		return false;
+	}
+	OutSelection = Selection;
+	const FString ResolvedKind = Network.IsNetworked()
+		? FString(TEXT("network_rpc"))
+		: FString(TEXT("rep_notify"));
+	if (Selection.CallbackKind != TEXT("function_handler")
+		&& Selection.CallbackKind != ResolvedKind)
+	{
+		OutCategory = TEXT("function_handler_kind_mismatch");
+		OutSource = Function->GetPathName();
+		return false;
+	}
+	OutSelection.CallbackKind = ResolvedKind;
+	return true;
 }
 
 void SetDelegateEventSelectionFailure(
@@ -43,7 +133,9 @@ void AddIssue(
 	Issue.bFatal = bFatal;
 	Issue.OwnerClassPath = Selection.OwnerClassPath;
 	Issue.DelegateEventName = Selection.EventName;
-	Issue.MemberKind = TEXT("delegate_event");
+	Issue.MemberKind = Selection.CallbackKind == TEXT("multicast")
+		? FString(TEXT("delegate_event"))
+		: FString(TEXT("function_handler"));
 	Issue.Category = Category;
 	Issue.Source = Source;
 	OutResult.Issues.Add(MoveTemp(Issue));
@@ -62,9 +154,6 @@ bool ResolveOne(
 	UClass* OwnerClass = Selection.OwnerClassPath.IsEmpty()
 		? nullptr
 		: LoadObject<UClass>(nullptr, *Selection.OwnerClassPath);
-	FProperty* Property = OwnerClass == nullptr
-		? nullptr
-		: FindFProperty<FProperty>(OwnerClass, Selection.EventName);
 	FString Category;
 	FString Source;
 	if (OwnerClass == nullptr)
@@ -72,45 +161,75 @@ bool ResolveOne(
 		Category = TEXT("class_missing");
 		Source = Selection.OwnerClassPath;
 	}
-	else if (Property == nullptr)
+	else if (Selection.CallbackKind != TEXT("multicast"))
 	{
-		Category = TEXT("delegate_event_missing");
-		Source = Key;
-	}
-	else if (Property->GetOwnerStruct() != OwnerClass)
-	{
-		Category = TEXT("delegate_event_owner_mismatch");
-		Source = Key;
-	}
-	else if (const FMulticastDelegateProperty* DelegateProperty =
-		CastField<FMulticastDelegateProperty>(Property))
-	{
-		FAvidScriptProjectedDelegateEvent Projection;
-		if (FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
-				DelegateProperty,
-				Projection,
+		FAvidScriptReflectedDelegateEventSelection ResolvedSelection;
+		if (TryResolveFunctionHandler(
+				Selection,
+				*OwnerClass,
+				ResolvedSelection,
 				Category,
 				Source))
 		{
-			if (SeenSelections.Contains(Key))
+			const FString ResolvedKey = MakeEventSelectionKey(ResolvedSelection);
+			if (SeenSelections.Contains(ResolvedKey))
 			{
-				Category = TEXT("duplicate_delegate_event_selection");
-				Source = Key;
+				Category = TEXT("duplicate_function_handler_selection");
+				Source = ResolvedKey;
 			}
 			else
 			{
-				SeenSelections.Add(Key);
-				OutSelections.Add(Selection);
+				SeenSelections.Add(ResolvedKey);
+				OutSelections.Add(MoveTemp(ResolvedSelection));
 				return true;
 			}
 		}
 	}
 	else
 	{
-		Category = Property->IsA<FDelegateProperty>()
-			? FString(TEXT("delegate_event_singlecast_unsupported"))
-			: FString(TEXT("delegate_event_property_required"));
-		Source = Key;
+		FProperty* const Property = FindFProperty<FProperty>(
+			OwnerClass,
+			Selection.EventName);
+		if (Property == nullptr)
+		{
+			Category = TEXT("delegate_event_missing");
+			Source = Key;
+		}
+		else if (Property->GetOwnerStruct() != OwnerClass)
+		{
+			Category = TEXT("delegate_event_owner_mismatch");
+			Source = Key;
+		}
+		else if (const FMulticastDelegateProperty* DelegateProperty =
+			CastField<FMulticastDelegateProperty>(Property))
+		{
+			FAvidScriptProjectedDelegateEvent Projection;
+			if (FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
+					DelegateProperty,
+					Projection,
+					Category,
+					Source))
+			{
+				if (SeenSelections.Contains(Key))
+				{
+					Category = TEXT("duplicate_delegate_event_selection");
+					Source = Key;
+				}
+				else
+				{
+					SeenSelections.Add(Key);
+					OutSelections.Add(Selection);
+					return true;
+				}
+			}
+		}
+		else
+		{
+			Category = Property->IsA<FDelegateProperty>()
+				? FString(TEXT("delegate_event_singlecast_unsupported"))
+				: FString(TEXT("delegate_event_property_required"));
+			Source = Key;
+		}
 	}
 
 	AddIssue(OutResult, bFatal, Selection, Category, Source);
@@ -120,7 +239,9 @@ bool ResolveOne(
 			OutResult,
 			Category,
 			Source,
-			TEXT("Select a declared dynamic multicast delegate with a supported value-only signature of at most eight ABI cells."));
+			Selection.CallbackKind == TEXT("function_handler")
+				? FString(TEXT("Select a declared native Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature."))
+				: FString(TEXT("Select a declared dynamic multicast delegate with a supported value-only signature of at most eight ABI cells.")));
 		return false;
 	}
 	return true;
@@ -189,6 +310,27 @@ bool FAvidScriptEditorBindingDelegateEventSelectionResolver::Resolve(
 			}
 			if (!ResolveOne(
 					{ Rule.OwnerClassPath, EventName },
+					true,
+					SeenSelections,
+					OutSelections,
+					OutResult))
+			{
+				OutSelections.Reset();
+				OutResult.AcceptedDelegateEventCount = 0;
+				return false;
+			}
+		}
+		TArray<FName> HandlerNames = Rule.IncludeHandlers;
+		HandlerNames.Sort([](const FName Left, const FName Right)
+		{
+			return Left.ToString().Compare(
+				Right.ToString(),
+				ESearchCase::CaseSensitive) < 0;
+		});
+		for (const FName HandlerName : HandlerNames)
+		{
+			if (!ResolveOne(
+					{ Rule.OwnerClassPath, HandlerName, TEXT("function_handler") },
 					true,
 					SeenSelections,
 					OutSelections,

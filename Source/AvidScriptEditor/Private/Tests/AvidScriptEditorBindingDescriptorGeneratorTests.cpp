@@ -7,6 +7,8 @@
 #include "AvidScriptBindingLatent.h"
 #include "AvidScriptEditorCSharpBindingEmitter.h"
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.h"
+#include "AvidScriptEditorCSharpBuildService.h"
+#include "AvidScriptEditorCSharpProfileService.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorModel.h"
 #include "BindingGeneration/AvidScriptEditorBindingDescriptorIdentity.h"
 #include "BindingGeneration/AvidScriptEditorObjectTypeGraph.h"
@@ -1760,11 +1762,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v16 above the current maximum identifies its header field"),
+		TEXT("Schema v18 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 17);
+			Root->SetNumberField(TEXT("schema_version"), 18);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2303,6 +2305,160 @@ bool FAvidScriptEditorBindingDescriptorReplicatedPropertyTest::RunTest(
 		TEXT("RepNotify identity drift is rejected by the descriptor contract"),
 		LoadResult.ErrorCategory,
 		FString(TEXT("descriptor_contract_invalid")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorInboundHandlerTest,
+	"AvidScript.Editor.BindingDescriptor.InboundHandlerSchema17",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.inbound_handlers");
+	Profile.SelfClassPath = OwnerPath;
+	FAvidScriptReflectedClassSelection& Rule =
+		Profile.Classes.AddDefaulted_GetRef();
+	Rule.OwnerClassPath = OwnerPath;
+	Rule.IncludeHandlers = {
+		TEXT("ServerSubmitValue"),
+		TEXT("OnRep_ReplicatedScore")
+	};
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("RPC and RepNotify handlers generate from one profile rule"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Inbound handler schema 17 descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	TestEqual(TEXT("Inbound handlers select schema 17"), Package.SchemaVersion, 17);
+	TestEqual(
+		TEXT("Inbound handlers select the D3 generator"),
+		Package.GeneratorVersion,
+		FString(TEXT("57.12D3.0")));
+	TestEqual(TEXT("Both callbacks are described"), Package.DelegateEvents.Num(), 2);
+
+	const FAvidScriptBindingDelegateEventModel* Rpc =
+		Package.DelegateEvents.FindByPredicate(
+			[](const FAvidScriptBindingDelegateEventModel& Event)
+			{
+				return Event.DelegateKind == TEXT("network_rpc");
+			});
+	const FAvidScriptBindingDelegateEventModel* RepNotify =
+		Package.DelegateEvents.FindByPredicate(
+			[](const FAvidScriptBindingDelegateEventModel& Event)
+			{
+				return Event.DelegateKind == TEXT("rep_notify");
+			});
+	if (!TestNotNull(TEXT("Server RPC callback is described"), Rpc)
+		|| !TestNotNull(TEXT("RepNotify callback is described"), RepNotify))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Server direction is preserved"), Rpc->Network.Mode, EAvidScriptBindingNetworkMode::Server);
+	TestTrue(TEXT("Server reliability is preserved"), Rpc->Network.bReliable);
+	TestEqual(
+		TEXT("RepNotify property identity is preserved"),
+		RepNotify->RepNotifyProperty,
+		FName(TEXT("ReplicatedScore")));
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Schema 17 emits the shared C# callback surface"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("C# exposes event constants for both inbound handlers"),
+		ReferenceSource.Contains(TEXT("ServerSubmitValue"))
+			&& ReferenceSource.Contains(TEXT("OnRep_ReplicatedScore")));
+	TestFalse(
+		TEXT("Inbound handlers do not expose guest subscription commands"),
+		ReferenceSource.Contains(TEXT("AvidSubscription ServerSubmitValue"))
+			|| ReferenceSource.Contains(TEXT("AvidSubscription OnRep_ReplicatedScore")));
+
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestTrue(
+		TEXT("Runtime prepares the schema 17 reflection snapshot"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			DescriptorJson,
+			RuntimePackage,
+			LoadResult));
+	if (!RuntimePackage.IsValid())
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Runtime separates inbound handlers from delegates"),
+		RuntimePackage->GetInboundHandlerCount(),
+		2);
+	TestEqual(
+		TEXT("Runtime does not misclassify handlers as multicast events"),
+		RuntimePackage->GetMulticastDelegateEventCount(),
+		0);
+
+	const FString SampleProfilePath = FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(
+			FPaths::ProjectPluginsDir(),
+			TEXT("AvidScript/Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlers.csharp-profile.json")));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Readable inbound handler sample profile loads"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				SampleProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Inbound handler sample builds through the production C# pipeline"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				FAvidScriptEditorCSharpProfileService::MakeBuildRequest(
+					ProfileResult),
+				BuildResult)))
+	{
+		AddError(BuildResult.ErrorMessage + TEXT("\n") + BuildResult.Stderr);
+		return false;
+	}
+	TestTrue(TEXT("Inbound handler sample publishes a VM artifact"), BuildResult.bVmArtifactPublished);
+	TestTrue(TEXT("Inbound handler VM artifact exists"), FPaths::FileExists(BuildResult.VmArtifactPath));
+	TestTrue(TEXT("Inbound handler sample publishes its Runtime manifest"), FPaths::FileExists(BuildResult.ManifestPath));
+	TestTrue(TEXT("Inbound handler sample publishes its binding package"), FPaths::FileExists(BuildResult.BindingPackagePath));
 	return true;
 }
 

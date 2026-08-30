@@ -344,7 +344,8 @@ function Resolve-AvidScriptCSharpBindingPackage {
         $DescriptorSchemaVersion -ne 13 -and
         $DescriptorSchemaVersion -ne 14 -and
         $DescriptorSchemaVersion -ne 15 -and
-        $DescriptorSchemaVersion -ne 16) -or
+        $DescriptorSchemaVersion -ne 16 -and
+        $DescriptorSchemaVersion -ne 17) -or
         $ManifestDescriptorSchemaVersion -ne $DescriptorSchemaVersion -or
         [string]$Descriptor.package_name -cne $PackageName -or
         [string]$Descriptor.package_hash -cne $PackageHash) {
@@ -378,6 +379,20 @@ function Resolve-AvidScriptCSharpBindingPackage {
 				-ParsedValue ([ref]$ManifestDelegateEventCount)) -or
 			$ManifestDelegateEventCount -ne @($DescriptorDelegateEventProperty.Value).Count) {
 			throw "Binding package delegate_event_count does not match descriptor delegate_events."
+		}
+		if ($DescriptorSchemaVersion -ge 17) {
+			$ManifestInboundHandlerCount = 0
+			$DescriptorInboundHandlerCount = @($DescriptorDelegateEventProperty.Value |
+				Where-Object { [string]$_.delegate_kind -cne 'multicast' }).Count
+			if (-not (Try-GetAvidScriptBindingJsonInt32 `
+					-Value $Manifest.inbound_handler_count `
+					-ParsedValue ([ref]$ManifestInboundHandlerCount)) -or
+				$ManifestInboundHandlerCount -ne $DescriptorInboundHandlerCount) {
+				throw "Binding package inbound_handler_count does not match descriptor callbacks."
+			}
+		}
+		elseif ($null -ne $Manifest.PSObject.Properties['inbound_handler_count']) {
+			throw "Binding package inbound_handler_count requires descriptor schema v17 or newer."
 		}
 	}
 	elseif ($null -ne $Manifest.PSObject.Properties['delegate_event_count']) {

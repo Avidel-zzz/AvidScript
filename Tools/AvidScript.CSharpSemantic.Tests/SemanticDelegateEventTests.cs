@@ -33,16 +33,23 @@ internal static class SemanticDelegateEventTests
             {
                 [AvidEvent(AvidEvents.OnSignal)]
                 public static void HandleSignal(AActor actor, Payload payload, SignalKind kind) { }
+
+                [AvidEvent(AvidEvents.OnScalar)]
+                public static void HandleScalar(int value) { }
             }
             """;
         SemanticDocument document = Analyze(source, Contracts(
             $"[AvidEventContract(\"{SignalId}\", \"global::AvidScript.AActor;global::AvidScript.Payload;global::AvidScript.SignalKind\")]\n" +
-            $"public const string OnSignal = \"{SignalId}\";"));
+            $"public const string OnSignal = \"{SignalId}\";\n" +
+            $"[AvidEventContract(\"{OtherId}\", \"global::System.Int32\")]\n" +
+            $"public const string OnScalar = \"{OtherId}\";"));
 
-        SemanticDelegateEventCallback callback = document.DelegateEventCallbacks.Single();
+        SemanticDelegateEventCallback callback = document.DelegateEventCallbacks.Single(
+            candidate => candidate.SubscriptionId == SignalId);
         Assert(document.Succeeded
             && document.SchemaVersion == 16
-            && document.SemanticVersion == "1.18",
+            && document.SemanticVersion == "1.18"
+            && document.DelegateEventCallbacks.Count == 2,
             "valid delegate event contracts should publish semantic schema v16");
         Assert(callback.SubscriptionId == SignalId
             && callback.ExportName == "avid_on_delegate_0123456789abcdef"

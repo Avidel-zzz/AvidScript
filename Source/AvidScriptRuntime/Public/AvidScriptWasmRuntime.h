@@ -222,6 +222,10 @@ public:
 	bool BuildPreparedDelegateEvents(
 		TArray<FAvidScriptPreparedDelegateEvent>& OutEvents,
 		FString& OutError);
+	bool BuildPreparedCallbacks(
+		TArray<FAvidScriptPreparedDelegateEvent>& OutDelegateEvents,
+		TArray<FAvidScriptPreparedDelegateEvent>& OutInboundHandlers,
+		FString& OutError);
 	bool DispatchPreparedDelegateEvent(
 		const FAvidScriptPreparedDelegateEvent& Event,
 		const void* NativeParameters,

@@ -27,4 +27,14 @@ public:
 	{
 		OnSignal.Broadcast(ObjectValue, IntValue, FloatValue);
 	}
+
+	UFUNCTION()
+	void NativeInboundValue(int32 Value)
+	{
+		LastNativeValue = Value;
+		++NativeInvocationCount;
+	}
+
+	int32 LastNativeValue = 0;
+	int32 NativeInvocationCount = 0;
 };

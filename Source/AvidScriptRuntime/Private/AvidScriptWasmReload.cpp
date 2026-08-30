@@ -571,7 +571,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 13
 			&& DescriptorSchemaVersion != 14
 			&& DescriptorSchemaVersion != 15
-			&& DescriptorSchemaVersion != 16)
+			&& DescriptorSchemaVersion != 16
+			&& DescriptorSchemaVersion != 17)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))
@@ -637,6 +638,34 @@ bool ValidateBindingPackageManifest(
 				TEXT("binding_package_invalid"),
 				TEXT("package.json delegate_event_count does not match descriptor"),
 				TEXT("republish the current binding package"));
+			return false;
+		}
+		if (DescriptorSchemaVersion >= 17)
+		{
+			int32 InboundHandlerCount = INDEX_NONE;
+			if (!TryGetInt32Field(
+					*PackageObject,
+					TEXT("inbound_handler_count"),
+					InboundHandlerCount)
+				|| InboundHandlerCount < 0
+				|| InboundHandlerCount
+					!= Manifest.BindingPackage->GetInboundHandlerCount())
+			{
+				SetManifestLoadFailure(
+					OutResult,
+					TEXT("binding_package_invalid"),
+					TEXT("package.json inbound_handler_count does not match descriptor"),
+					TEXT("republish the current binding package"));
+				return false;
+			}
+		}
+		else if (PackageObject->HasField(TEXT("inbound_handler_count")))
+		{
+			SetManifestLoadFailure(
+				OutResult,
+				TEXT("binding_package_invalid"),
+				TEXT("package.json inbound_handler_count requires descriptor schema v17 or newer"),
+				TEXT("republish the binding package with matching schema provenance"));
 			return false;
 		}
 	}

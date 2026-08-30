@@ -231,11 +231,38 @@ internal static class SemanticDelegateEventProjector
     {
         return parameters.Count == expectedTypes.Count
             && parameters.Select((parameter, index) => parameter.RefKind == RefKind.None
-                && string.Equals(
-                    parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    expectedTypes[index],
-                    StringComparison.Ordinal))
+                && TypeMatches(parameter.Type, expectedTypes[index]))
                 .All(matches => matches);
+    }
+
+    private static bool TypeMatches(ITypeSymbol type, string expectedType)
+    {
+        if (string.Equals(
+                type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                expectedType,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        string? specialTypeName = type.SpecialType switch
+        {
+            SpecialType.System_Boolean => "global::System.Boolean",
+            SpecialType.System_Byte => "global::System.Byte",
+            SpecialType.System_SByte => "global::System.SByte",
+            SpecialType.System_Int16 => "global::System.Int16",
+            SpecialType.System_UInt16 => "global::System.UInt16",
+            SpecialType.System_Int32 => "global::System.Int32",
+            SpecialType.System_UInt32 => "global::System.UInt32",
+            SpecialType.System_Int64 => "global::System.Int64",
+            SpecialType.System_UInt64 => "global::System.UInt64",
+            SpecialType.System_Single => "global::System.Single",
+            SpecialType.System_Double => "global::System.Double",
+            SpecialType.System_Char => "global::System.Char",
+            SpecialType.System_String => "global::System.String",
+            _ => null,
+        };
+        return string.Equals(specialTypeName, expectedType, StringComparison.Ordinal);
     }
 
     private static bool IsStableId(string value)

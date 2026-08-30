@@ -732,7 +732,14 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		FAvidScriptReflectedClassSelection& Rule =
 			SpecializedClassRules.FindOrAdd(Event.OwnerClass);
 		Rule.OwnerClassPath = Event.OwnerClass;
-		Rule.IncludeEvents.AddUnique(FName(*Event.UeMember));
+		if (Event.DelegateKind == TEXT("multicast"))
+		{
+			Rule.IncludeEvents.AddUnique(FName(*Event.UeMember));
+		}
+		else
+		{
+			Rule.IncludeHandlers.AddUnique(FName(*Event.UeMember));
+		}
 	}
 	for (FAvidScriptReflectedPropertySelection& Selection : PropertySelections)
 	{

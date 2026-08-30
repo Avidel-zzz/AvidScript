@@ -1653,6 +1653,54 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedDelegateEvents(
 	return PrepareDelegateEventExports(OutEvents, OutError);
 }
 
+bool FAvidScriptWasmRuntimeInstance::BuildPreparedCallbacks(
+	TArray<FAvidScriptPreparedDelegateEvent>& OutDelegateEvents,
+	TArray<FAvidScriptPreparedDelegateEvent>& OutInboundHandlers,
+	FString& OutError)
+{
+	OutDelegateEvents.Reset();
+	OutInboundHandlers.Reset();
+	OutError.Reset();
+	if (!BindingPackage.IsValid())
+	{
+		return true;
+	}
+	if (!BindingPackage->BuildPreparedDelegateEvents(
+			OutDelegateEvents,
+			OutError)
+		|| !BindingPackage->BuildPreparedInboundHandlers(
+			OutInboundHandlers,
+			OutError))
+	{
+		OutDelegateEvents.Reset();
+		OutInboundHandlers.Reset();
+		return false;
+	}
+
+	TArray<FAvidScriptPreparedDelegateEvent> Callbacks = OutDelegateEvents;
+	Callbacks.Append(OutInboundHandlers);
+	if (!PrepareDelegateEventExports(Callbacks, OutError))
+	{
+		OutDelegateEvents.Reset();
+		OutInboundHandlers.Reset();
+		return false;
+	}
+	OutDelegateEvents.Reset();
+	OutInboundHandlers.Reset();
+	for (FAvidScriptPreparedDelegateEvent& Callback : Callbacks)
+	{
+		if (Callback.CallbackKind == TEXT("multicast"))
+		{
+			OutDelegateEvents.Add(MoveTemp(Callback));
+		}
+		else
+		{
+			OutInboundHandlers.Add(MoveTemp(Callback));
+		}
+	}
+	return true;
+}
+
 bool FAvidScriptWasmRuntimeInstance::PrepareDelegateEventExports(
 	TArray<FAvidScriptPreparedDelegateEvent>& InOutEvents,
 	FString& OutError)

@@ -9,6 +9,7 @@
 #include "HostEffects/AvidScriptHostEffectTransaction.h"
 #include "Ownership/AvidScriptSessionObjectOwnership.h"
 #include "Session/AvidScriptSessionDelegateSubscriptions.h"
+#include "Session/AvidScriptSessionInboundHandlers.h"
 #include "StateMigration/AvidScriptRuntimeStateMigration.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -105,6 +106,7 @@ FAvidScriptRuntimeSession::FAvidScriptRuntimeSession()
 	: ObjectOwnership(MakeUnique<FAvidScriptSessionObjectOwnership>())
 	, DelegateSubscriptions(
 		MakeUnique<FAvidScriptSessionDelegateSubscriptions>(*this))
+	, InboundHandlers(MakeUnique<FAvidScriptSessionInboundHandlers>(*this))
 	, Continuations(MakeShared<FAvidScriptSessionContinuations>())
 	, Scheduler(MakeUnique<FAvidScriptRuntimeScheduler>())
 	, EventRouter(MakeUnique<FAvidScriptRuntimeEventRouter>(*Scheduler))
@@ -366,6 +368,8 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 	{
 		DelegateSubscriptions->UnbindActive();
 		DelegateSubscriptions->DiscardPrepared();
+		InboundHandlers->UnbindActive();
+		InboundHandlers->DiscardPrepared();
 		if (LiveRuntime)
 		{
 			FAvidScriptContinuationHostEndpoint& ActiveContinuationHost =
@@ -401,6 +405,7 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 				== EAvidScriptLifecycleState::Running)
 		{
 			TArray<FAvidScriptPreparedDelegateEvent> Events;
+			TArray<FAvidScriptPreparedDelegateEvent> Handlers;
 			FString Error;
 			UObject* Source = nullptr;
 			if (HostContext.ObjectRegistry != nullptr)
@@ -411,10 +416,14 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 					ResolveResult,
 					false);
 			}
-			if (!LiveRuntime->BuildPreparedDelegateEvents(Events, Error)
+			if (!LiveRuntime->BuildPreparedCallbacks(Events, Handlers, Error)
 				|| (!Events.IsEmpty()
-					&& !DelegateSubscriptions->Prepare(Source, Events, Error)))
+					&& !DelegateSubscriptions->Prepare(Source, Events, Error))
+				|| (!Handlers.IsEmpty()
+					&& !InboundHandlers->Prepare(Source, Handlers, Error)))
 			{
+				DelegateSubscriptions->DiscardPrepared();
+				InboundHandlers->DiscardPrepared();
 				UE_LOG(
 					LogAvidScriptRuntimeSession,
 					Warning,
@@ -424,6 +433,17 @@ void FAvidScriptRuntimeSession::SetHostContext(const FAvidScriptWasmHostContext&
 			}
 			DelegateSubscriptions->CommitPrepared();
 			DelegateSubscriptions->SetDispatchEnabled(true);
+			FString CommitError;
+			if (!InboundHandlers->CommitPrepared(CommitError))
+			{
+				UE_LOG(
+					LogAvidScriptRuntimeSession,
+					Error,
+					TEXT("AvidScript inbound handler rebind commit failed: %s"),
+					CommitError.IsEmpty() ? TEXT("unknown") : *CommitError);
+				return;
+			}
+			InboundHandlers->SetDispatchEnabled(true);
 		}
 	}
 }
@@ -441,6 +461,8 @@ void FAvidScriptRuntimeSession::ClearHostContext()
 	TGuardValue<bool> MutationGuard(bMutationInProgress, true);
 	DelegateSubscriptions->UnbindActive();
 	DelegateSubscriptions->DiscardPrepared();
+	InboundHandlers->UnbindActive();
+	InboundHandlers->DiscardPrepared();
 	Continuations->Teardown();
 	if (HostContext.ObjectRegistry != nullptr)
 	{
@@ -698,6 +720,7 @@ bool FAvidScriptRuntimeSession::EndPlayLive(FAvidScriptWasmSmokeResult& OutResul
 		return false;
 	}
 	DelegateSubscriptions->UnbindActive();
+	InboundHandlers->UnbindActive();
 	Continuations->Teardown();
 	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
 	if (!IsLiveLoaded())
@@ -740,6 +763,8 @@ bool FAvidScriptRuntimeSession::StopAndUnload(FAvidScriptWasmSmokeResult& OutRes
 	FAvidScriptWasmSmokeResult EndPlayFailure;
 	DelegateSubscriptions->UnbindActive();
 	DelegateSubscriptions->DiscardPrepared();
+	InboundHandlers->UnbindActive();
+	InboundHandlers->DiscardPrepared();
 	Continuations->Teardown();
 	Scheduler->Detach();
 	if (LiveRuntime)
@@ -1116,10 +1141,18 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		return false;
 	}
 	TArray<FAvidScriptPreparedDelegateEvent> CandidateDelegateEvents;
+	TArray<FAvidScriptPreparedDelegateEvent> CandidateInboundHandlers;
 	FString DelegatePrepareError;
 	DelegateSubscriptions->DiscardPrepared();
-	if (!CandidateRuntime->BuildPreparedDelegateEvents(
+	InboundHandlers->DiscardPrepared();
+	const auto DiscardPreparedCallbacks = [this]()
+	{
+		DelegateSubscriptions->DiscardPrepared();
+		InboundHandlers->DiscardPrepared();
+	};
+	if (!CandidateRuntime->BuildPreparedCallbacks(
 			CandidateDelegateEvents,
+			CandidateInboundHandlers,
 			DelegatePrepareError))
 	{
 		SetReloadFailure(
@@ -1129,12 +1162,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			DelegatePrepareError.IsEmpty()
 				? TEXT("the candidate delegate event plans could not be prepared")
 				: DelegatePrepareError,
-			TEXT("regenerate the schema 11 descriptor and keep the previous runtime active"));
+			TEXT("regenerate the callback descriptor and keep the previous runtime active"));
 		CandidateRuntime->Unload();
 		return false;
 	}
 	UObject* CandidateDelegateSource = nullptr;
-	if (!CandidateDelegateEvents.IsEmpty())
+	if (!CandidateDelegateEvents.IsEmpty()
+		|| !CandidateInboundHandlers.IsEmpty())
 	{
 		if (HostContext.ObjectRegistry != nullptr)
 		{
@@ -1147,8 +1181,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 		if (!DelegateSubscriptions->Prepare(
 				CandidateDelegateSource,
 				CandidateDelegateEvents,
+				DelegatePrepareError)
+			|| !InboundHandlers->Prepare(
+				CandidateDelegateSource,
+				CandidateInboundHandlers,
 				DelegatePrepareError))
 		{
+			DiscardPreparedCallbacks();
 			SetReloadFailure(
 				OutResult,
 				TEXT("<delegate_events>"),
@@ -1241,13 +1280,18 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			&& bBorrowedHandlesRolledBack;
 		CandidateRuntime->SetHostContext(HostContext);
 		Continuations->DiscardPrepared();
-		DelegateSubscriptions->DiscardPrepared();
+		DiscardPreparedCallbacks();
 		CandidateRuntime->Unload();
 		return false;
 	}
 
 	FString ContinuationCommitError;
-	if (!Continuations->ValidatePreparedCommit(ContinuationCommitError))
+	FString InboundCommitError;
+	const bool bContinuationCommitValid =
+		Continuations->ValidatePreparedCommit(ContinuationCommitError);
+	const bool bInboundCommitValid =
+		InboundHandlers->ValidatePreparedCommit(InboundCommitError);
+	if (!bContinuationCommitValid || !bInboundCommitValid)
 	{
 		bool bHostEffectsRolledBack = true;
 		if (bUseHostEffectTransaction)
@@ -1270,13 +1314,19 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 			&& bBorrowedHandlesRolledBack;
 		SetReloadFailure(
 			OutResult,
-			TEXT("<continuations>"),
-			TEXT("continuation_prepare_failed"),
-			ContinuationCommitError,
-			TEXT("keep the previous Runtime active and discard candidate continuations"));
+			bContinuationCommitValid
+				? TEXT("<inbound_handlers>")
+				: TEXT("<continuations>"),
+			bContinuationCommitValid
+				? TEXT("inbound_handler_prepare_failed")
+				: TEXT("continuation_prepare_failed"),
+			bContinuationCommitValid
+				? InboundCommitError
+				: ContinuationCommitError,
+			TEXT("keep the previous Runtime active and discard candidate callback state"));
 		CandidateRuntime->SetHostContext(HostContext);
 		Continuations->DiscardPrepared();
-		DelegateSubscriptions->DiscardPrepared();
+		DiscardPreparedCallbacks();
 		CandidateRuntime->Unload();
 		return false;
 	}
@@ -1296,7 +1346,7 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 				TEXT("keep the previous runtime active and report the candidate transaction state"));
 			CandidateRuntime->SetHostContext(HostContext);
 			Continuations->DiscardPrepared();
-			DelegateSubscriptions->DiscardPrepared();
+			DiscardPreparedCallbacks();
 			CandidateRuntime->Unload();
 			return false;
 		}
@@ -1311,6 +1361,8 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	{
 		DelegateSubscriptions->SetDispatchEnabled(false);
 		DelegateSubscriptions->UnbindActive();
+		InboundHandlers->SetDispatchEnabled(false);
+		InboundHandlers->UnbindActive();
 		Scheduler->Detach();
 		LiveRuntime->Unload();
 		LiveRuntime.Reset();
@@ -1325,5 +1377,13 @@ bool FAvidScriptRuntimeSession::ActivateValidatedRuntime(
 	HostContext.Continuations = CandidateHostContext.Continuations;
 	DelegateSubscriptions->CommitPrepared();
 	DelegateSubscriptions->SetDispatchEnabled(true);
+	InboundCommitError.Reset();
+	const bool bInboundCommitted =
+		InboundHandlers->CommitPrepared(InboundCommitError);
+	checkf(
+		bInboundCommitted,
+		TEXT("Validated AvidScript inbound handler commit failed: %s"),
+		InboundCommitError.IsEmpty() ? TEXT("unknown") : *InboundCommitError);
+	InboundHandlers->SetDispatchEnabled(true);
 	return true;
 }

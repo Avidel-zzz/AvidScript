@@ -1141,6 +1141,9 @@ $DirectAbiExports = @(
     "avid_on_gameplay_event",
     "avid_on_continuation",
     "avid_on_continuation_v2")
+$DirectAbiExports += @($SemanticModel.delegate_event_callbacks |
+    ForEach-Object { [string]$_.export_name })
+$DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
 $UnexpectedObservedExports = @($ObservedExports | Where-Object { $RequiredExports -notcontains $_ })

@@ -71,10 +71,38 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 		return false;
 	}
 
-	const UFunction* Signature = DelegateProperty->SignatureFunction;
+	const bool bProjected = EvaluateSignatureAndProject(
+		DelegateProperty->SignatureFunction,
+		OutProjection,
+		OutCategory,
+		OutSource);
+	if (!bProjected && OutCategory.StartsWith(TEXT("callback_")))
+	{
+		OutCategory = TEXT("delegate_event_")
+			+ OutCategory.RightChop(9);
+	}
+	return bProjected;
+}
+
+bool FAvidScriptEditorReflectedDelegateEventPolicy::
+	EvaluateSignatureAndProject(
+		const UFunction* Signature,
+		FAvidScriptProjectedDelegateEvent& OutProjection,
+		FString& OutCategory,
+		FString& OutSource)
+{
+	OutProjection = FAvidScriptProjectedDelegateEvent();
+	OutCategory.Reset();
+	OutSource.Reset();
+	if (Signature == nullptr)
+	{
+		OutCategory = TEXT("callback_signature_missing");
+		OutSource = TEXT("<null>");
+		return false;
+	}
 	if (Signature->GetReturnProperty() != nullptr)
 	{
-		OutCategory = TEXT("delegate_event_return_unsupported");
+		OutCategory = TEXT("callback_return_unsupported");
 		OutSource = Signature->GetPathName();
 		return false;
 	}
@@ -85,7 +113,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 			&& Parameter->HasAnyPropertyFlags(
 				CPF_OutParm | CPF_ReferenceParm | CPF_ReturnParm))
 		{
-			OutCategory = TEXT("delegate_event_reference_unsupported");
+			OutCategory = TEXT("callback_reference_unsupported");
 			OutSource = Signature->GetPathName() + TEXT(".")
 				+ Parameter->GetName();
 			return false;
@@ -100,7 +128,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 			FunctionProjection,
 			ProjectionError))
 	{
-		OutCategory = TEXT("delegate_event_type_unsupported");
+		OutCategory = TEXT("callback_type_unsupported");
 		OutSource = Signature->GetPathName() + TEXT(":") + ProjectionError;
 		return false;
 	}
@@ -110,14 +138,14 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 	{
 		if (Parameter.bHasDefaultValue)
 		{
-			OutCategory = TEXT("delegate_event_default_unsupported");
+			OutCategory = TEXT("callback_default_unsupported");
 			OutSource = Signature->GetPathName() + TEXT(".")
 				+ Parameter.Name;
 			return false;
 		}
 		if (Parameter.Direction != TEXT("value"))
 		{
-			OutCategory = TEXT("delegate_event_reference_unsupported");
+			OutCategory = TEXT("callback_reference_unsupported");
 			OutSource = Signature->GetPathName() + TEXT(".")
 				+ Parameter.Name;
 			return false;
@@ -125,7 +153,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 		int32 ParameterCellCount = 0;
 		if (!CountProjectedTypeCells(Parameter.Type, ParameterCellCount))
 		{
-			OutCategory = TEXT("delegate_event_type_unsupported");
+			OutCategory = TEXT("callback_type_unsupported");
 			OutSource = Signature->GetPathName() + TEXT(".")
 				+ Parameter.Name + TEXT(":") + Parameter.Type.CanonicalType;
 			return false;
@@ -133,7 +161,7 @@ bool FAvidScriptEditorReflectedDelegateEventPolicy::EvaluateAndProject(
 		OutProjection.AbiCellCount += ParameterCellCount;
 		if (OutProjection.AbiCellCount > MaxAbiCells)
 		{
-			OutCategory = TEXT("delegate_event_abi_cells_exceeded");
+			OutCategory = TEXT("callback_abi_cells_exceeded");
 			OutSource = FString::Printf(
 				TEXT("%s:%d>%d"),
 				*Signature->GetPathName(),
