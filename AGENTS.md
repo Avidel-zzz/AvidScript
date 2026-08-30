@@ -2253,3 +2253,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the P57.13 formal-evidence lookup passed `Docs/Phase57/P57.9*` as an `rg` path even though the repository already forbids wildcard characters in Windows path arguments; the valid exact-file query still ran, but the call produced avoidable path noise.
 - Prevention: before every repository search, mechanically scan path arguments for `*` and `?`. Use `-g` for filename filters or copy the exact path from a prior index result. Repetition of a recorded command error is classified as a workflow regression and recorded immediately.
+
+### 2026-08-30: restore generated toolchains before creating benchmark projects
+
+- Mistake: the first P57.13 isolated benchmark project was generated before the clean candidate restored its ignored Wasmtime performance-toolchain install. UBT cached the External ModuleRules without the include path; restoring the toolchain afterward and retrying that same attempt, including `-NoUBTMakefiles`, still left `wasmtime.h` unavailable to the compile action.
+- Prevention: for a clean benchmark candidate, run the pinned toolchain `Build` or `Verify` before `New-PuertsBenchmarkProject.ps1`. Generate the isolated project only after headers, import library, DLL, license, and managed marker are present; do not spend retries on an attempt whose first ModuleRules evaluation observed an absent toolchain.
+
+### 2026-08-30: index a future phase parent before reading its directory
+
+- Mistake: after P57.13 attribution, the first Phase 58 lookup directly passed the not-yet-created `Docs/Phase58` directory to `rg --files`, producing a path error instead of useful roadmap evidence.
+- Prevention: future-phase discovery starts with one content query over confirmed roots such as `README.md`, `Docs`, and workflow state. Create or read a phase directory only after its exact path appears in the index or the current task explicitly creates it.

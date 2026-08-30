@@ -502,9 +502,10 @@ Phase 56 的 Generated S1、Data-Oriented 与生命周期热路径仍是可复�
 
 ### Wasmtime 与 V8 纯执行层
 
-冻结的 12-kernel controlled suite 当前为：P50 几何均值 `0.9798x`、P95 几何均值
-`1.0267x`，P50/P95 kernel win rate 为 `66.7% / 41.7%`。这表示 Wasmtime P50 整体接近
-V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLeadership` 仍保持
+冻结的 12-kernel controlled suite 最新使用 Wasmtime v45 Cranelift `speed` profile：
+P50 几何均值 `0.9800x`、P95 几何均值 `1.0006x`，P50/P95 kernel win rate 为
+`66.7% / 41.7%`。相对 P57.9 的 `speed_and_size` profile，P95 改善约 2.55%，P50 基本
+持平；P95 仍未达到 `0.95x` 领先门槛，因此 `P57-D06-ControlledLeadership` 保持
 `Fixing`。AvidScript 当前领先主要来自更低成本的生成式 UE 边界，而不是宣称 Wasmtime
 对 V8 的所有纯计算都绝对领先。
 
@@ -515,6 +516,7 @@ V8，但 P95 尾延迟尚未达到 `0.95x` 领先门槛；`P57-D06-ControlledLea
 - [P57.11D 编译器托管数组区域与正式性能证据](Docs/Phase57/P57.11D_Compiler_Managed_Array_Region_Evidence.json)
 - [P57.11B2 FName/FString 与完整验收证据](Docs/Phase57/P57.11B2_Variable_Utf8_Value_Heap_Evidence.json)
 - [P57.11B1 Prepared Reflection 正式性能证据](Docs/Phase57/P57.11B1_Recursive_Fixed_Struct_Codec_Evidence.json)
+- [P57.13 Cranelift Speed 正式性能结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)
 - [P57.9 Wasmtime/V8 controlled toolchain](Docs/Phase57/P57.9_Controlled_Wasmtime_Toolchain.md)
 - [Phase 56 游戏 workload 报告](Docs/Phase56/P56.5_Fused_Call_Frame_Implementation_Report.md)
 
@@ -713,9 +715,10 @@ RPC/RepNotify 入站 C# handler、Session 对象路由与事务式 hook 生命�
 handler、`replace/before/after` 原实现链路与深拷贝重入 FIFO；D5 已用 dedicated server + 2 clients 和
 listen server + 1 remote client 独立进程证明 BeginPlay -> RPC -> replicated property -> RepNotify -> ack。
 网络路由、复制发送和 RepNotify 触发时机仍由 UE 负责。
-本阶段没有新增性能 benchmark，性能表继续引用已冻结的
-P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12D5 中文完成报告](Docs/Phase57/P57.12D5_Real_Network_Topology.md)。
+最新纯执行层正式 benchmark 使用 clean `9148bff/73eb948d` 候选，12-kernel
+correctness failure 为 0、fallback 为 false；P95 尾延迟改善但领导力门禁仍未关闭。
+最新功能报告见 [P57.12D5 中文完成报告](Docs/Phase57/P57.12D5_Real_Network_Topology.md)，
+最新性能报告见 [P57.13 中文结果](Docs/Phase57/P57.13_Cranelift_Speed_Profile.md)。
 
 工程规则：
 
