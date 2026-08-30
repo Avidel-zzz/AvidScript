@@ -1726,4 +1726,94 @@ bool FAvidScriptEditorCSharpNetworkRpcTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorCSharpReplicatedPropertyTest,
+	"AvidScript.Editor.CSharp.ReplicatedProperty",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorCSharpReplicatedPropertyTest::RunTest(
+	const FString& Parameters)
+{
+	const FString TestRoot = MakeAvidScriptTypedObjectBindingTestPath(
+		FPaths::Combine(
+			TEXT("ReplicatedProperty"),
+			FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*TestRoot, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*TestRoot, false, true);
+	};
+
+	const FString ProfilePath = GetAvidScriptTypedProjectApiPluginPath(
+		TEXT("Samples/CSharp/ReplicatedProperty/ReplicatedProperty.csharp-profile.json"));
+	FAvidScriptEditorCSharpProfileLoadResult ProfileResult;
+	if (!TestTrue(
+			TEXT("Replicated property schema v5 profile parses"),
+			FAvidScriptEditorCSharpProfileService::LoadProfile(
+				ProfilePath,
+				ProfileResult)))
+	{
+		AddError(ProfileResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptEditorCSharpBuildRequest BuildRequest =
+		FAvidScriptEditorCSharpProfileService::MakeBuildRequest(ProfileResult);
+	BuildRequest.Config.OutputRoot = FPaths::Combine(TestRoot, TEXT("Build"));
+	BuildRequest.Config.ArtifactStem = TEXT("replicated_property");
+	BuildRequest.Config.ReportPath =
+		FAvidScriptEditorCSharpBuildService::MakeReportPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.ManifestPath =
+		FAvidScriptEditorCSharpBuildService::MakeManifestPathForOutputRoot(
+			BuildRequest.Config.OutputRoot,
+			BuildRequest.Config.ArtifactStem);
+	BuildRequest.Config.SemanticCacheRoot =
+		FPaths::Combine(TestRoot, TEXT("SemanticCache/v1"));
+	BuildRequest.Config.bDisableSemanticCache = true;
+	FAvidScriptEditorCSharpBuildResult BuildResult;
+	if (!TestTrue(
+			TEXT("Replicated property sample builds through Roslyn, Guest IR, and WASM"),
+			FAvidScriptEditorCSharpBuildService::BuildProfile(
+				BuildRequest,
+				BuildResult)))
+	{
+		AddError(
+			BuildResult.ErrorMessage
+			+ TEXT("\nstdout:\n") + BuildResult.Stdout
+			+ TEXT("\nstderr:\n") + BuildResult.Stderr);
+		return false;
+	}
+
+	FAvidScriptWasmReloadManifest Manifest;
+	TArray<uint8> Bytecode;
+	FAvidScriptWasmReloadManifestLoadResult ManifestLoadResult;
+	if (!TestTrue(
+			TEXT("Replicated property manifest authorizes emitted WASM"),
+			FAvidScriptWasmReloadManifestLoader::LoadFromFile(
+				BuildResult.ManifestPath,
+				Manifest,
+				Bytecode,
+				ManifestLoadResult)))
+	{
+		AddError(ManifestLoadResult.ErrorMessage);
+		return false;
+	}
+	if (!TestTrue(
+			TEXT("Replicated property manifest owns a binding package"),
+			Manifest.BindingPackage.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Replicated property build publishes descriptor schema 16"),
+		Manifest.BindingPackage->GetDescriptorSchemaVersion(),
+		16);
+	TestTrue(
+		TEXT("Replicated property build emits non-empty WASM"),
+		!Bytecode.IsEmpty());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

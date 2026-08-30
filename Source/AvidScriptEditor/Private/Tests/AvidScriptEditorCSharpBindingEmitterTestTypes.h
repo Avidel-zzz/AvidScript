@@ -4,6 +4,7 @@
 #include "Engine/LatentActionManager.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/Object.h"
 
 #include "AvidScriptEditorCSharpBindingEmitterTestTypes.generated.h"
@@ -570,6 +571,44 @@ public:
 	UFUNCTION(NetMulticast, Reliable, BlueprintCallable, Category = "AvidScript")
 	void MulticastAnnounceValue(int32 Value);
 
+	UPROPERTY(
+		ReplicatedUsing = OnRep_ReplicatedScore,
+		BlueprintReadWrite,
+		Category = "AvidScript")
+	int32 ReplicatedScore = 0;
+
+	UFUNCTION(BlueprintSetter)
+	void SetReplicatedRoutedValue(int32 Value)
+	{
+		++ReplicatedSetterCallCount;
+		ReplicatedRoutedValue = Value + 1;
+	}
+
+	UPROPERTY(
+		Replicated,
+		BlueprintReadWrite,
+		BlueprintSetter = SetReplicatedRoutedValue,
+		Category = "AvidScript")
+	int32 ReplicatedRoutedValue = 0;
+
+	UFUNCTION()
+	void OnRep_ReplicatedScore()
+	{
+		++RepNotifyCallCount;
+	}
+
+	virtual void GetLifetimeReplicatedProps(
+		TArray<FLifetimeProperty>& OutLifetimeProps) const override
+	{
+		Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+		DOREPLIFETIME(
+			AAvidScriptBindingRuntimeNetworkTestActor,
+			ReplicatedScore);
+		DOREPLIFETIME(
+			AAvidScriptBindingRuntimeNetworkTestActor,
+			ReplicatedRoutedValue);
+	}
+
 	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
 	{
 		++ProcessEventCallCount;
@@ -582,6 +621,8 @@ public:
 	int32 ServerInvocationCount = 0;
 	int32 ClientInvocationCount = 0;
 	int32 MulticastInvocationCount = 0;
+	int32 RepNotifyCallCount = 0;
+	int32 ReplicatedSetterCallCount = 0;
 	int32 ProcessEventCallCount = 0;
 };
 

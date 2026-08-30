@@ -1,5 +1,6 @@
 #include "BindingGeneration/AvidScriptEditorReflectedPropertyPolicy.h"
 
+#include "AvidScriptBindingNetworkPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedFunctionPolicy.h"
 #include "BindingGeneration/AvidScriptEditorReflectedTypePolicy.h"
 #include "UObject/Class.h"
@@ -64,13 +65,32 @@ bool FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
 		| CPF_EditorOnly
 		| CPF_Deprecated
 		| CPF_InstancedReference
-		| CPF_ContainsInstancedReference
-		| CPF_Net;
+		| CPF_ContainsInstancedReference;
 	if (Property->HasAnyPropertyFlags(RejectedFlags))
 	{
-		OutCategory = Property->HasAnyPropertyFlags(CPF_Net)
-			? TEXT("property_write_replication_unsupported")
-			: TEXT("property_write_not_allowed");
+		OutCategory = TEXT("property_write_not_allowed");
+		OutSource = Property->GetPathName();
+		return false;
+	}
+
+	FAvidScriptBindingPropertyReplicationContract Replication;
+	if (!TryResolveAvidScriptBindingPropertyReplicationContract(
+			*Property,
+			Replication))
+	{
+		OutCategory = TEXT("property_replication_contract_invalid");
+		OutSource = Property->GetPathName();
+		return false;
+	}
+	UClass* OwnerClass = Cast<UClass>(Property->GetOwnerStruct());
+	if (Replication.IsReplicated()
+		&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+			|| (Replication.Mode
+					== EAvidScriptBindingPropertyReplicationMode::RepNotify
+				&& OwnerClass->FindFunctionByName(
+					Replication.RepNotifyFunction) == nullptr)))
+	{
+		OutCategory = TEXT("property_replication_owner_invalid");
 		OutSource = Property->GetPathName();
 		return false;
 	}
@@ -83,7 +103,6 @@ bool FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
 		return true;
 	}
 
-	UClass* OwnerClass = Cast<UClass>(Property->GetOwnerStruct());
 	UFunction* Setter = OwnerClass == nullptr
 		? nullptr
 		: OwnerClass->FindFunctionByName(FName(*BlueprintSetterName));
@@ -107,6 +126,16 @@ bool FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable(
 		|| SetterProjection.Parameters.Num() != 1)
 	{
 		OutCategory = TEXT("property_blueprint_setter_invalid");
+		OutSource = Property->GetPathName() + TEXT(":") + BlueprintSetterName;
+		return false;
+	}
+	FAvidScriptBindingNetworkContract SetterNetwork;
+	if (!TryResolveAvidScriptBindingNetworkContract(
+			*Setter,
+			SetterNetwork)
+		|| SetterNetwork.IsNetworked())
+	{
+		OutCategory = TEXT("property_blueprint_setter_network_unsupported");
 		OutSource = Property->GetPathName() + TEXT(":") + BlueprintSetterName;
 		return false;
 	}

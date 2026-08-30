@@ -529,8 +529,7 @@ bool IsAvidScriptRuntimePropertyWritable(const FProperty* Property)
 		| CPF_EditorOnly
 		| CPF_Deprecated
 		| CPF_InstancedReference
-		| CPF_ContainsInstancedReference
-		| CPF_Net;
+		| CPF_ContainsInstancedReference;
 	return IsAvidScriptRuntimePropertyReadable(Property)
 		&& !Property->HasAnyPropertyFlags(RejectedFlags);
 }
@@ -1207,9 +1206,16 @@ FString MakeAvidScriptRuntimePropertyGetCanonicalIdentity(
 	const FProperty* Property,
 	const FAvidScriptBindingFunctionModel& Binding)
 {
-	const FString BaseIdentity = OwnerClass->GetPathName()
+	FString BaseIdentity = OwnerClass->GetPathName()
 		+ TEXT("::property_get:") + Property->GetName()
 		+ TEXT("(") + Binding.ReturnValue.CanonicalType + TEXT(")");
+	if (Binding.PropertyReplication.IsReplicated())
+	{
+		BaseIdentity += TEXT("|property_replication=")
+			+ FString(LexToString(Binding.PropertyReplication.Mode))
+			+ TEXT("|rep_notify=")
+			+ Binding.PropertyReplication.RepNotifyFunction.ToString();
+	}
 	if (Binding.DispatchMode != TEXT("generated_native_s1"))
 	{
 		return BaseIdentity;
@@ -1227,12 +1233,19 @@ FString MakeAvidScriptRuntimePropertySetCanonicalIdentity(
 	const FProperty* Property,
 	const FAvidScriptBindingFunctionModel& Binding)
 {
-	const FString BaseIdentity =
+	FString BaseIdentity =
 		FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
 		OwnerClass->GetPathName(),
 		Property->GetName(),
-		Binding.Parameters[0].CanonicalType,
-		Binding.UeFunction);
+			Binding.Parameters[0].CanonicalType,
+			Binding.UeFunction);
+	if (Binding.PropertyReplication.IsReplicated())
+	{
+		BaseIdentity += TEXT("|property_replication=")
+			+ FString(LexToString(Binding.PropertyReplication.Mode))
+			+ TEXT("|rep_notify=")
+			+ Binding.PropertyReplication.RepNotifyFunction.ToString();
+	}
 	if (Binding.DispatchMode != TEXT("generated_native_s1"))
 	{
 		return BaseIdentity;
@@ -3227,15 +3240,28 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			FProperty* Property = FindFProperty<FProperty>(
 				OwnerClass,
 				FName(*Binding.UeMember));
-			if (!IsAvidScriptRuntimePropertyWritable(Property)
+			FAvidScriptBindingPropertyReplicationContract RuntimeReplication;
+			if (Property == nullptr
+				|| !TryResolveAvidScriptBindingPropertyReplicationContract(
+					*Property,
+					RuntimeReplication)
+				|| RuntimeReplication != Binding.PropertyReplication
+				|| !IsAvidScriptRuntimePropertyWritable(Property)
 				|| Property->GetOwnerStruct() != OwnerClass
+				|| (RuntimeReplication.IsReplicated()
+					&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+						|| Binding.DispatchMode == TEXT("generated_native_s1")
+						|| (RuntimeReplication.Mode
+								== EAvidScriptBindingPropertyReplicationMode::RepNotify
+							&& OwnerClass->FindFunctionByName(
+								RuntimeReplication.RepNotifyFunction) == nullptr)))
 				|| Binding.Parameters.Num() != 1)
 			{
 				SetAvidScriptBindingLoadFailure(
 					OutResult,
-					TEXT("binding_property_write_missing"),
+					TEXT("binding_property_replication_contract_mismatch"),
 					Binding.OwnerClass + TEXT(".") + Binding.UeMember,
-					TEXT("The reflected property is missing or no longer satisfies runtime write policy."));
+					TEXT("The reflected property is missing or no longer matches the runtime write and replication contract."));
 				return false;
 			}
 
@@ -3326,9 +3352,12 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Plan.OwnerClass = OwnerClass;
 			Plan.Function = BlueprintSetter;
 			Plan.ReflectedProperty = Property;
+			Plan.PropertyReplication = RuntimeReplication;
 			Plan.DebugPath = Property->GetPathName();
 			Plan.bRequiresWriteAccess = true;
-			Plan.ReloadEffect = EAvidScriptBindingReloadEffect::ReflectedProperty;
+			Plan.ReloadEffect = RuntimeReplication.IsReplicated()
+				? EAvidScriptBindingReloadEffect::Unsupported
+				: EAvidScriptBindingReloadEffect::ReflectedProperty;
 			if (BlueprintSetter != nullptr)
 			{
 				Plan.DebugPath += TEXT(":") + BlueprintSetter->GetName();
@@ -3447,8 +3476,20 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		{
 			++Package->Impl->Instrumentation.ReflectedNameLookupCount;
 			FProperty* Property = FindFProperty<FProperty>(OwnerClass, FName(*Binding.UeMember));
-			if (!IsAvidScriptRuntimePropertyReadable(Property)
-				|| Property->GetOwnerStruct() != OwnerClass)
+			FAvidScriptBindingPropertyReplicationContract RuntimeReplication;
+			if (Property == nullptr
+				|| !TryResolveAvidScriptBindingPropertyReplicationContract(
+					*Property,
+					RuntimeReplication)
+				|| RuntimeReplication != Binding.PropertyReplication
+				|| !IsAvidScriptRuntimePropertyReadable(Property)
+				|| Property->GetOwnerStruct() != OwnerClass
+				|| (RuntimeReplication.IsReplicated()
+					&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+						|| (RuntimeReplication.Mode
+								== EAvidScriptBindingPropertyReplicationMode::RepNotify
+							&& OwnerClass->FindFunctionByName(
+								RuntimeReplication.RepNotifyFunction) == nullptr))))
 			{
 				SetAvidScriptBindingLoadFailure(
 					OutResult,
@@ -3462,6 +3503,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 			Plan.Kind = EAvidScriptBindingInvocationKind::ReflectedPropertyRead;
 			Plan.OwnerClass = OwnerClass;
 			Plan.ReflectedProperty = Property;
+			Plan.PropertyReplication = RuntimeReplication;
 			Plan.DebugPath = Property->GetPathName();
 			Plan.bRequiresGuestMemory = true;
 			Plan.ExpectedArgumentCount = 3;

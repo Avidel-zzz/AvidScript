@@ -1060,6 +1060,7 @@ $BindingLatentHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidS
 $BindingNetworkHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptBindingNetworkPolicy.h'
 $BindingNetworkSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptBindingNetworkPolicy.cpp'
 $NetworkRpcPlan = Read-RequiredFile 'Docs/Phase57/P57.12D1_Generated_RPC_Authority_Plan.md'
+$ReplicatedPropertyPlan = Read-RequiredFile 'Docs/Phase57/P57.12D2_Replicated_Property_Plan.md'
 $ObjectFactoryPolicyHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectFactoryPolicy.h'
 $ObjectLifecycleBindingHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectLifecycleBinding.h'
 $ObjectLifecycleBindingSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/AvidScriptObjectLifecycleBinding.cpp'
@@ -1183,6 +1184,42 @@ foreach ($RequiredNetworkPlanContract in @(
         Add-Violation "P57.12D1 network boundary plan is missing $RequiredNetworkPlanContract"
     }
 }
+foreach ($RequiredReplicatedPropertyContract in @(
+    'FAvidScriptBindingPropertyReplicationContract',
+    'TryResolveAvidScriptBindingPropertyReplicationContract',
+    'ReplicatedPropertyGeneratorVersion',
+    'Package.SchemaVersion = 16',
+    'TEXT("property_replication")',
+    'TEXT("rep_notify")',
+    'TEXT("descriptor_selection_v16")',
+    'TEXT("descriptor_package_v16")',
+    'binding_property_replication_contract_mismatch',
+    'PreflightReplicatedPropertyWrite',
+    'binding_property_replication_authority_denied',
+    'binding_property_replication_reload_effect_unsupported',
+    'MarkPropertyDirtyFromRepIndex'
+)) {
+    if (-not $BindingNetworkHeader.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingNetworkSource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $ReflectedPropertyPolicySource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingDescriptorGeneratorSource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingDescriptorModelSource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingInvocationSource.Contains($RequiredReplicatedPropertyContract) -and
+        -not $BindingPreparedInvocationSource.Contains($RequiredReplicatedPropertyContract)) {
+        Add-Violation "schema v16 replicated property contract is missing $RequiredReplicatedPropertyContract"
+    }
+}
+foreach ($RequiredReplicatedPropertyPlanContract in @(
+    'Push Model',
+    '不把 UE 入站 RepNotify 自动分发到 C# export',
+    '不把轮询结果冒充 UE RepNotify',
+    'GetLifetimeReplicatedProps'
+)) {
+    if (-not $ReplicatedPropertyPlan.Contains($RequiredReplicatedPropertyPlanContract)) {
+        Add-Violation "P57.12D2 replicated property plan is missing $RequiredReplicatedPropertyPlanContract"
+    }
+}
 if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable') -or
     -not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateWritable') -or
     -not $ReflectedPropertyPolicySource.Contains('cached_property_set') -or
@@ -1278,6 +1315,9 @@ $LatentGameplayProfile = Read-RequiredFile 'Samples/CSharp/LatentGameplay/Latent
 $NetworkRpcSampleSource = Read-RequiredFile 'Samples/CSharp/NetworkRpc/NetworkRpcScript.cs'
 $NetworkRpcProfile = Read-RequiredFile 'Samples/CSharp/NetworkRpc/NetworkRpc.csharp-profile.json'
 $NetworkRpcSampleReadme = Read-RequiredFile 'Samples/CSharp/NetworkRpc/README.md'
+$ReplicatedPropertySampleSource = Read-RequiredFile 'Samples/CSharp/ReplicatedProperty/ReplicatedPropertyScript.cs'
+$ReplicatedPropertyProfile = Read-RequiredFile 'Samples/CSharp/ReplicatedProperty/ReplicatedProperty.csharp-profile.json'
+$ReplicatedPropertySampleReadme = Read-RequiredFile 'Samples/CSharp/ReplicatedProperty/README.md'
 $LatentCancellationPayloadDesign = Read-RequiredFile 'Docs/Phase57/P57.12C6D_Cancellation_And_Payload_Design.md'
 $CSharpAsyncBuildBackendSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildBackend.cpp'
 $CSharpAsyncBuildJobSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/CSharpLiveReload/AvidScriptEditorCSharpAsyncBuildJob.cpp'
@@ -1709,7 +1749,7 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..15) {
+foreach ($RequiredDescriptorSchemaVersion in 2..16) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
         Add-Violation "C# binding package resolver must preserve descriptor schema v2-v15 compatibility: $RequiredDescriptorSchemaToken"
@@ -1763,8 +1803,9 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 12') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 13') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 14') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 15')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v15 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 15') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 16')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v16 typed object packages'
 }
 foreach ($RequiredDelegateEventManifestContract in @(
     'delegate_event_count',
@@ -3195,6 +3236,29 @@ foreach ($RequiredNetworkRpcProfileContract in @(
 if (-not $NetworkRpcSampleReadme.Contains('脚本接收 RPC') -or
     -not $NetworkRpcSampleReadme.Contains('Replicated Property/RepNotify')) {
     Add-Violation 'NetworkRpc README must preserve the P57.12D1/D2/D3 boundary'
+}
+foreach ($RequiredReplicatedPropertySampleContract in @(
+    'actor.HasAuthority()',
+    'self.ReplicatedScore = self.ReplicatedScore + 10',
+    'self.ReplicatedRoutedValue = 20'
+)) {
+    if (-not $ReplicatedPropertySampleSource.Contains($RequiredReplicatedPropertySampleContract)) {
+        Add-Violation "ReplicatedProperty sample is missing authority-directed property use $RequiredReplicatedPropertySampleContract"
+    }
+}
+foreach ($RequiredReplicatedPropertyProfileContract in @(
+    '"self_class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor"',
+    '"HasAuthority"',
+    '"ReplicatedScore"',
+    '"ReplicatedRoutedValue"'
+)) {
+    if (-not $ReplicatedPropertyProfile.Contains($RequiredReplicatedPropertyProfileContract)) {
+        Add-Violation "ReplicatedProperty profile is missing reflected authorization $RequiredReplicatedPropertyProfileContract"
+    }
+}
+if (-not $ReplicatedPropertySampleReadme.Contains('不会伪造 OnRep') -or
+    -not $ReplicatedPropertySampleReadme.Contains('不使用 Tick 轮询')) {
+    Add-Violation 'ReplicatedProperty README must preserve native RepNotify semantics and the no-polling boundary'
 }
 foreach ($RequiredAsyncContinuationSemanticContract in @(
     'MaximumAssetPathUtf8Bytes = 1024',

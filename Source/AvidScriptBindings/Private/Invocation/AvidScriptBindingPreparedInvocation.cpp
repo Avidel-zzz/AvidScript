@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Misc/ScopeExit.h"
+#include "Net/NetPushModelHelpers.h"
 #include "UObject/Class.h"
 #include "UObject/Script.h"
 #include "UObject/UnrealType.h"
@@ -119,6 +120,63 @@ bool PreflightNetworkInvocation(
 		return false;
 	}
 	return true;
+}
+
+bool PreflightReplicatedPropertyWrite(
+	const FInvocationCodecProgram& Program,
+	UObject& Receiver,
+	const FAvidScriptBindingInvocationContext& InvocationContext,
+	FAvidScriptDynamicHostCallResult& OutResult)
+{
+	if (Program.Kind
+			!= EAvidScriptBindingInvocationKind::ReflectedPropertyWrite
+		|| !Program.PropertyReplication.IsReplicated())
+	{
+		return true;
+	}
+	if (InvocationContext.HostEffectJournal != nullptr)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_property_replication_reload_effect_unsupported"),
+			Program.DebugPath,
+			TEXT("Candidate reload cannot write irreversible replicated property state."));
+		return false;
+	}
+	AActor* Actor = ResolveNetworkActor(Receiver);
+	if (Actor == nullptr)
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_property_replication_owner_invalid"),
+			Program.DebugPath,
+			TEXT("The replicated property receiver is not an Actor and has no Actor owner."));
+		return false;
+	}
+	if (!Actor->HasAuthority())
+	{
+		SetDispatchFailure(
+			OutResult,
+			TEXT("binding_property_replication_authority_denied"),
+			Program.DebugPath,
+			TEXT("Only authority may write replicated property state."));
+		return false;
+	}
+	return true;
+}
+
+void MarkReplicatedPropertyDirty(
+	const FInvocationCodecProgram& Program,
+	UObject& Receiver)
+{
+	if (Program.PropertyReplication.IsReplicated())
+	{
+		check(Program.ReflectedProperty != nullptr);
+		UNetPushModelHelpers::MarkPropertyDirtyFromRepIndex(
+			&Receiver,
+			Program.ReflectedProperty->RepIndex,
+			Program.ReflectedProperty->GetFName());
+	}
 }
 
 struct FGuestOutputRange
@@ -247,6 +305,14 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 	if (!PreflightNetworkInvocation(
+			*Program,
+			Receiver,
+			InvocationContext,
+			OutResult))
+	{
+		return false;
+	}
+	if (!PreflightReplicatedPropertyWrite(
 			*Program,
 			Receiver,
 			InvocationContext,
@@ -456,6 +522,7 @@ bool InvokePreparedDynamicReflection(
 			Program->Parameters[0].Property->CopyCompleteValue(
 				Destination,
 				TemporaryValue);
+			MarkReplicatedPropertyDirty(*Program, Receiver);
 			OutResult.bSucceeded = true;
 			OutResult.ReturnValue = 1;
 			return true;
@@ -481,6 +548,7 @@ bool InvokePreparedDynamicReflection(
 			}
 			return false;
 		}
+		MarkReplicatedPropertyDirty(*Program, Receiver);
 		OutResult.bSucceeded = true;
 		OutResult.ReturnValue = 1;
 		return true;
@@ -516,6 +584,7 @@ bool InvokePreparedDynamicReflection(
 					: ErrorDetails);
 			return false;
 		}
+		MarkReplicatedPropertyDirty(*Program, Receiver);
 		OutResult.bSucceeded = true;
 		OutResult.ReturnValue = 1;
 		return true;
@@ -839,6 +908,7 @@ bool InvokePreparedDynamicReflection(
 		return false;
 	}
 	Receiver.ProcessEvent(Program->Function, Frame);
+	MarkReplicatedPropertyDirty(*Program, Receiver);
 
 	for (FGuestOutputTarget& Target : OutputTargets)
 	{

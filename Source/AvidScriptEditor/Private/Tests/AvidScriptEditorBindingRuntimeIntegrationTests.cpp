@@ -2386,6 +2386,199 @@ bool FAvidScriptEditorBindingRuntimeNetworkRpcTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingRuntimeReplicatedPropertyTest,
+	"AvidScript.Editor.BindingRuntime.ReplicatedPropertyAuthority",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingRuntimeReplicatedPropertyTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ OwnerPath, TEXT("ReplicatedScore"), true },
+		{ OwnerPath, TEXT("ReplicatedRoutedValue"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Runtime replicated property descriptor generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::
+				GenerateWithReadableProperties(
+					TEXT("avidscript.editor.replicated_property_runtime"),
+					{},
+					Properties,
+					DescriptorJson,
+					GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Descriptor;
+	FString ParseCategory;
+	FString ParseSource;
+	if (!TestTrue(
+			TEXT("Runtime replicated property descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Descriptor,
+				ParseCategory,
+				ParseSource)))
+	{
+		AddError(ParseCategory + TEXT(": ") + ParseSource);
+		return false;
+	}
+	const auto FindSetterOrdinal = [&Descriptor](const TCHAR* Member)
+	{
+		const FAvidScriptBindingFunctionModel* Binding =
+			Descriptor.Bindings.FindByPredicate(
+				[Member](const FAvidScriptBindingFunctionModel& Candidate)
+				{
+					return Candidate.UeMember == Member
+						&& Candidate.BindingKind == TEXT("property_set");
+				});
+		return Binding == nullptr ? INDEX_NONE : Binding->Ordinal;
+	};
+	const int32 ScoreSetterOrdinal =
+		FindSetterOrdinal(TEXT("ReplicatedScore"));
+	const int32 RoutedSetterOrdinal =
+		FindSetterOrdinal(TEXT("ReplicatedRoutedValue"));
+	if (!TestTrue(
+			TEXT("Replicated property setter ordinals are present"),
+			ScoreSetterOrdinal != INDEX_NONE
+				&& RoutedSetterOrdinal != INDEX_NONE))
+	{
+		return false;
+	}
+
+	TSharedPtr<const FAvidScriptBindingPackage> Package;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	if (!TestTrue(
+			TEXT("Runtime caches replicated property plans"),
+			FAvidScriptBindingPackage::LoadDescriptor(
+				DescriptorJson,
+				Package,
+				LoadResult)))
+	{
+		AddError(LoadResult.ErrorCategory + TEXT(": ")
+			+ LoadResult.ErrorDetails);
+		return false;
+	}
+
+	UWorld* World = nullptr;
+	if (!TestTrue(
+			TEXT("Replicated property runtime world is created"),
+			CreateAvidScriptBindingRuntimeIntegrationWorld(World)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT
+	{
+		DestroyAvidScriptBindingRuntimeIntegrationWorld(World);
+	};
+	AAvidScriptBindingRuntimeNetworkTestActor* Actor =
+		World->SpawnActor<AAvidScriptBindingRuntimeNetworkTestActor>();
+	if (!TestNotNull(TEXT("Replicated property actor spawns"), Actor))
+	{
+		return false;
+	}
+
+	FAvidScriptObjectRegistry Registry;
+	FAvidScriptObjectHandleResult RegisterResult;
+	const FAvidScriptObjectHandle ActorHandle =
+		Registry.RegisterObject(Actor, RegisterResult);
+	if (!TestTrue(
+			TEXT("Replicated property actor registers"),
+			RegisterResult.bSucceeded))
+	{
+		return false;
+	}
+	FAvidScriptBindingInvocationContext Context;
+	Context.ObjectRegistry = &Registry;
+	Context.OwnerHandle = ActorHandle;
+	Context.WritePolicy = EAvidScriptActorWritePolicy::AllowWrites;
+	TArray<uint8> Scratch;
+	Scratch.SetNumUninitialized(Package->GetRequiredScratchSize());
+	const auto DispatchSetter = [&](const int32 Ordinal, const int32 Value,
+		FAvidScriptDynamicHostCallResult& OutResult)
+	{
+		const uint64 Arguments[] = {
+			ActorHandle.Slot,
+			ActorHandle.Generation,
+			static_cast<uint64>(static_cast<uint32>(Value))
+		};
+		FAvidScriptDynamicHostCall Call;
+		Call.BindingOrdinal = Ordinal;
+		Call.Arguments = MakeArrayView(Arguments);
+		return Package->Dispatch(Call, Context, Scratch, OutResult);
+	};
+
+	FAvidScriptDynamicHostCallResult DispatchResult;
+	TestTrue(
+		TEXT("Authority writes direct replicated property"),
+		DispatchSetter(ScoreSetterOrdinal, 11, DispatchResult));
+	TestEqual(TEXT("Direct replicated value is applied"), Actor->ReplicatedScore, 11);
+	TestEqual(
+		TEXT("Authority write does not forge RepNotify"),
+		Actor->RepNotifyCallCount,
+		0);
+	TestTrue(
+		TEXT("Authority writes replicated BlueprintSetter property"),
+		DispatchSetter(RoutedSetterOrdinal, 20, DispatchResult));
+	TestEqual(
+		TEXT("Replicated BlueprintSetter transformation is preserved"),
+		Actor->ReplicatedRoutedValue,
+		21);
+	TestEqual(
+		TEXT("Replicated BlueprintSetter executes exactly once"),
+		Actor->ReplicatedSetterCallCount,
+		1);
+
+	FAvidScriptBindingRuntimeRecordingJournal CandidateJournal(true);
+	Context.HostEffectJournal = &CandidateJournal;
+	TestFalse(
+		TEXT("Candidate reload rejects replicated writes"),
+		DispatchSetter(ScoreSetterOrdinal, 30, DispatchResult));
+	TestTrue(
+		TEXT("Candidate rejection uses replication category"),
+		DispatchResult.Details.Contains(
+			TEXT("binding_property_replication_reload_effect_unsupported")));
+	TestEqual(
+		TEXT("Candidate rejection occurs before mutation"),
+		Actor->ReplicatedScore,
+		11);
+	Context.HostEffectJournal = nullptr;
+
+	Actor->SetRole(ROLE_SimulatedProxy);
+	TestFalse(
+		TEXT("Non-authority cannot write direct replicated property"),
+		DispatchSetter(ScoreSetterOrdinal, 40, DispatchResult));
+	TestTrue(
+		TEXT("Non-authority rejection uses authority category"),
+		DispatchResult.Details.Contains(
+			TEXT("binding_property_replication_authority_denied")));
+	TestFalse(
+		TEXT("Non-authority cannot invoke replicated BlueprintSetter"),
+		DispatchSetter(RoutedSetterOrdinal, 50, DispatchResult));
+	TestEqual(
+		TEXT("Denied writes preserve direct value"),
+		Actor->ReplicatedScore,
+		11);
+	TestEqual(
+		TEXT("Denied writes preserve routed value"),
+		Actor->ReplicatedRoutedValue,
+		21);
+	TestEqual(
+		TEXT("Denied routed write never enters ProcessEvent"),
+		Actor->ReplicatedSetterCallCount,
+		1);
+	Actor->SetRole(ROLE_Authority);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingRuntimeBlueprintSetterPropertyTest,
 	"AvidScript.Editor.BindingRuntime.BlueprintSetterProperty",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

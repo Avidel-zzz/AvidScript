@@ -1764,7 +1764,7 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 16);
+			Root->SetNumberField(TEXT("schema_version"), 17);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2152,6 +2152,157 @@ bool FAvidScriptEditorBindingDescriptorNetworkRpcTest::RunTest(
 		TEXT("RPC drift has a stable failure category"),
 		LoadResult.ErrorCategory,
 		FString(TEXT("binding_network_contract_mismatch")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorReplicatedPropertyTest,
+	"AvidScript.Editor.BindingDescriptor.ReplicatedPropertySchema16",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorReplicatedPropertyTest::RunTest(
+	const FString& Parameters)
+{
+	const FString OwnerPath =
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass()->GetPathName();
+	const TArray<FAvidScriptReflectedPropertySelection> Properties = {
+		{ OwnerPath, TEXT("ReplicatedScore"), true },
+		{ OwnerPath, TEXT("ReplicatedRoutedValue"), true }
+	};
+	FString DescriptorJson;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Replicated properties generate without handwritten wrappers"),
+			FAvidScriptEditorBindingDescriptorGenerator::
+				GenerateWithReadableProperties(
+					TEXT("avidscript.test.replicated_property"),
+					{},
+					Properties,
+					DescriptorJson,
+					GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Replicated property schema 16 descriptor parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	TestEqual(
+		TEXT("Replicated property package selects schema 16"),
+		Package.SchemaVersion,
+		16);
+	TestEqual(
+		TEXT("Replicated property package records the D2 generator"),
+		Package.GeneratorVersion,
+		FString(TEXT("57.12D2.0")));
+
+	const auto FindBinding = [&Package](const TCHAR* Member, const TCHAR* Kind)
+	{
+		return Package.Bindings.FindByPredicate(
+			[Member, Kind](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeMember == Member
+					&& Binding.BindingKind == Kind;
+			});
+	};
+	const FAvidScriptBindingFunctionModel* ScoreGetter =
+		FindBinding(TEXT("ReplicatedScore"), TEXT("property_get"));
+	const FAvidScriptBindingFunctionModel* ScoreSetter =
+		FindBinding(TEXT("ReplicatedScore"), TEXT("property_set"));
+	const FAvidScriptBindingFunctionModel* RoutedSetter =
+		FindBinding(TEXT("ReplicatedRoutedValue"), TEXT("property_set"));
+	if (!TestNotNull(TEXT("RepNotify getter is present"), ScoreGetter)
+		|| !TestNotNull(TEXT("RepNotify setter is present"), ScoreSetter)
+		|| !TestNotNull(TEXT("Replicated BlueprintSetter is present"), RoutedSetter))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("RepNotify mode is explicit"),
+		ScoreSetter->PropertyReplication.Mode,
+		EAvidScriptBindingPropertyReplicationMode::RepNotify);
+	TestEqual(
+		TEXT("RepNotify function is explicit"),
+		ScoreSetter->PropertyReplication.RepNotifyFunction,
+		FName(TEXT("OnRep_ReplicatedScore")));
+	TestEqual(
+		TEXT("Plain replicated mode is explicit"),
+		RoutedSetter->PropertyReplication.Mode,
+		EAvidScriptBindingPropertyReplicationMode::Replicated);
+	TestTrue(
+		TEXT("Replicated identity includes notification semantics"),
+		ScoreGetter->CanonicalIdentity.Contains(
+			TEXT("|property_replication=rep_notify|rep_notify=OnRep_ReplicatedScore")));
+	TestEqual(
+		TEXT("Replicated direct writes are not reload-reversible"),
+		ScoreSetter->ReloadEffect,
+		EAvidScriptBindingReloadEffect::Unsupported);
+	TestEqual(
+		TEXT("Replicated BlueprintSetter keeps routed dispatch"),
+		RoutedSetter->DispatchMode,
+		FString(TEXT("cached_blueprint_setter")));
+
+	FString ReferenceSource;
+	FString ManifestJson;
+	FAvidScriptCSharpBindingEmitResult EmitResult;
+	TestTrue(
+		TEXT("Replicated properties emit a typed C# facade"),
+		FAvidScriptEditorCSharpBindingEmitter::Emit(
+			DescriptorJson,
+			ReferenceSource,
+			ManifestJson,
+			EmitResult));
+	TestTrue(
+		TEXT("C# facade preserves ordinary property syntax"),
+		ReferenceSource.Contains(TEXT("ReplicatedScore"))
+			&& ReferenceSource.Contains(TEXT("ReplicatedRoutedValue")));
+
+	FAvidScriptBindingPackageModel Tampered = Package;
+	FAvidScriptBindingFunctionModel* TamperedScore =
+		Tampered.Bindings.FindByPredicate(
+			[](const FAvidScriptBindingFunctionModel& Binding)
+			{
+				return Binding.UeMember == TEXT("ReplicatedScore")
+					&& Binding.BindingKind == TEXT("property_set");
+			});
+	check(TamperedScore != nullptr);
+	TamperedScore->PropertyReplication.RepNotifyFunction =
+		TEXT("OnRep_Tampered");
+	Tampered.SelectionHash =
+		FAvidScriptBindingDescriptorIdentity::MakeSelectionHash(Tampered);
+	Tampered.PackageHash =
+		FAvidScriptBindingDescriptorIdentity::MakePackageHash(Tampered);
+	FString TamperedJson;
+	TestTrue(
+		TEXT("Canonical serializer encodes the RepNotify drift fixture"),
+		FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
+			Tampered,
+			TamperedJson));
+	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
+	FAvidScriptBindingPackageLoadResult LoadResult;
+	TestFalse(
+		TEXT("Runtime rejects RepNotify drift"),
+		FAvidScriptBindingPackage::LoadDescriptor(
+			TamperedJson,
+			RuntimePackage,
+			LoadResult));
+	TestEqual(
+		TEXT("RepNotify identity drift is rejected by the descriptor contract"),
+		LoadResult.ErrorCategory,
+		FString(TEXT("descriptor_contract_invalid")));
 	return true;
 }
 

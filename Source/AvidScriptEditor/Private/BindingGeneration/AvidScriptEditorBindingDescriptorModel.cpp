@@ -328,6 +328,15 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 				TEXT("network_reliable"),
 				Binding.Network.bReliable);
 		}
+		if (Package.SchemaVersion >= 16)
+		{
+			Writer->WriteValue(
+				TEXT("property_replication"),
+				LexToString(Binding.PropertyReplication.Mode));
+			Writer->WriteValue(
+				TEXT("rep_notify"),
+				Binding.PropertyReplication.RepNotifyFunction.ToString());
+		}
 		if (Package.SchemaVersion >= 3)
 		{
 			Writer->WriteValue(TEXT("reload_effect"), LexToString(Binding.ReloadEffect));

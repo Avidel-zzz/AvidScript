@@ -2127,3 +2127,13 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: P57.12D1 promoted descriptor schema 15 but the first full Automation run retained a legacy V8PropertySet assertion that still treated schema 15 as an unsupported future version. The product schema, parser, runtime loader, package publisher, and three new RPC tests were correct, but the stale fixture caused the queue to finish at 367/368.
 - Prevention: every descriptor schema promotion searches tests, package scripts, runtime manifest loaders, architecture ranges, and labels for the previous maximum. Compatibility cases retain old versions deliberately; every future-version mutation advances to `CurrentDescriptorSchema + 1` in the same implementation group before the full Automation gate.
+
+### 2026-08-30: initialize lazy UE replication metadata before validating RepIndex
+
+- Mistake: the first P57.12D2 full Automation run validated `FProperty::RepIndex` against `UClass::ClassReps` before calling `SetUpRuntimeReplicationData()`. UE builds that table lazily, so all three new replicated-property tests failed at descriptor generation while the existing 368 tests passed.
+- Prevention: any reflection path that treats `RepIndex` or `ClassReps` as active replication evidence calls `UClass::SetUpRuntimeReplicationData()` first, then validates the index and property identity. Default or pre-setup RepIndex values are never accepted as stable metadata.
+
+### 2026-08-30: descriptor identity tampering is rejected before Runtime reflection
+
+- Mistake: the first corrected P57.12D2 focused run changed `rep_notify` and recomputed package hashes but left the canonical binding identity unchanged, then expected the Runtime reflection mismatch category. Schema 16 correctly rejected the inconsistent descriptor earlier with `descriptor_contract_invalid`.
+- Prevention: negative tests name the validation owner they intend to exercise. Field-versus-canonical identity drift is a parser contract test; Runtime reflection drift needs a descriptor whose complete canonical identity, stable ID, import name, selection hash, and package hash are internally consistent but differ from the active UField.

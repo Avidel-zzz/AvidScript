@@ -36,6 +36,7 @@ constexpr const TCHAR* DelegateEventGeneratorVersion = TEXT("57.12A.0");
 constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
 constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
 constexpr const TCHAR* NetworkGeneratorVersion = TEXT("57.12D1.0");
+constexpr const TCHAR* ReplicatedPropertyGeneratorVersion = TEXT("57.12D2.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -62,6 +63,7 @@ struct FResolvedBindingDescriptor
 	FString GeneratedReceiverMode;
 	FString WritePolicy = TEXT("none");
 	FAvidScriptBindingNetworkContract Network;
+	FAvidScriptBindingPropertyReplicationContract PropertyReplication;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	int32 Ordinal = INDEX_NONE;
 };
@@ -750,10 +752,36 @@ bool GenerateBindingDescriptor(
 		FResolvedBindingDescriptor Binding;
 		Binding.OwnerClass = OwnerClass;
 		Binding.Property = Property;
+		if (!TryResolveAvidScriptBindingPropertyReplicationContract(
+				*Property,
+				Binding.PropertyReplication))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("property_replication_contract_invalid"),
+				Property->GetPathName(),
+				TEXT("Register the property for replication and provide a valid RepNotify function before generating bindings."));
+			return false;
+		}
+		if (Binding.PropertyReplication.IsReplicated()
+			&& (!IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+				|| (Binding.PropertyReplication.Mode
+						== EAvidScriptBindingPropertyReplicationMode::RepNotify
+					&& OwnerClass->FindFunctionByName(
+						Binding.PropertyReplication.RepNotifyFunction) == nullptr)))
+		{
+			SetFailure(
+				OutResult,
+				TEXT("property_replication_owner_invalid"),
+				Property->GetPathName(),
+				TEXT("Replicated bindings require an Actor or ActorComponent owner and a valid active RepNotify function."));
+			return false;
+		}
 		Binding.BindingKind = TEXT("property_get");
 		Binding.UeMember = Property->GetName();
 		const bool bGeneratedNative =
-			GeneratedNativePropertyKeys.Contains(SelectionKey);
+			!Binding.PropertyReplication.IsReplicated()
+			&& GeneratedNativePropertyKeys.Contains(SelectionKey);
 		if (bGeneratedNative)
 		{
 			FString EligibilityCategory;
@@ -785,9 +813,16 @@ bool GenerateBindingDescriptor(
 		FinalizeType(Binding.Projection.ReturnValue.Type);
 		Binding.Projection.AbiSignature = TEXT("(iii)i");
 		Binding.ScriptName = Property->GetAuthoredName();
-		const FString SemanticCanonicalIdentity = OwnerClass->GetPathName()
+		FString SemanticCanonicalIdentity = OwnerClass->GetPathName()
 			+ TEXT("::property_get:") + Property->GetName()
 			+ TEXT("(") + Binding.Projection.ReturnValue.Type.CanonicalType + TEXT(")");
+		if (Binding.PropertyReplication.IsReplicated())
+		{
+			SemanticCanonicalIdentity += TEXT("|property_replication=")
+				+ FString(LexToString(Binding.PropertyReplication.Mode))
+				+ TEXT("|rep_notify=")
+				+ Binding.PropertyReplication.RepNotifyFunction.ToString();
+		}
 		if (bGeneratedNative)
 		{
 			Binding.Projection.AbiSignature = TEXT("(ii)i");
@@ -837,6 +872,7 @@ bool GenerateBindingDescriptor(
 			FResolvedBindingDescriptor SetterBinding;
 			SetterBinding.OwnerClass = OwnerClass;
 			SetterBinding.Property = Property;
+			SetterBinding.PropertyReplication = Binding.PropertyReplication;
 			SetterBinding.BindingKind = TEXT("property_set");
 			SetterBinding.UeMember = Property->GetName();
 			SetterBinding.UeFunction =
@@ -861,12 +897,19 @@ bool GenerateBindingDescriptor(
 					TEXT(""))
 				+ TEXT(")i");
 			SetterBinding.ScriptName = Property->GetAuthoredName();
-			const FString SetterSemanticCanonicalIdentity =
+			FString SetterSemanticCanonicalIdentity =
 				FAvidScriptBindingDescriptorIdentity::MakePropertySetCanonicalIdentity(
 					OwnerClass->GetPathName(),
 					Property->GetName(),
 					SetterBinding.Projection.Parameters[0].Type.CanonicalType,
 					SetterBinding.UeFunction);
+			if (SetterBinding.PropertyReplication.IsReplicated())
+			{
+				SetterSemanticCanonicalIdentity += TEXT("|property_replication=")
+					+ FString(LexToString(SetterBinding.PropertyReplication.Mode))
+					+ TEXT("|rep_notify=")
+					+ SetterBinding.PropertyReplication.RepNotifyFunction.ToString();
+			}
 			if (bGeneratedNative)
 			{
 				if (SetterBinding.DispatchMode != TEXT("cached_property_set")
@@ -906,7 +949,9 @@ bool GenerateBindingDescriptor(
 					+ SetterBinding.StableId.Left(16);
 			}
 			SetterBinding.ReloadEffect =
-				EAvidScriptBindingReloadEffect::ReflectedProperty;
+				SetterBinding.PropertyReplication.IsReplicated()
+				? EAvidScriptBindingReloadEffect::Unsupported
+				: EAvidScriptBindingReloadEffect::ReflectedProperty;
 			Bindings.Add(MoveTemp(SetterBinding));
 		}
 		Bindings.Add(MoveTemp(Binding));
@@ -1192,6 +1237,11 @@ bool GenerateBindingDescriptor(
 		{
 			return Binding.Network.IsNetworked();
 		});
+	const bool bHasReplicatedProperties = Bindings.ContainsByPredicate(
+		[](const FResolvedBindingDescriptor& Binding)
+		{
+			return Binding.PropertyReplication.IsReplicated();
+		});
 	Package.SchemaVersion = bHasWritableProperties || bHasNativeDirectFunctions
 			|| bHasGeneratedNativeBindings
 		? 8
@@ -1222,7 +1272,13 @@ bool GenerateBindingDescriptor(
 	{
 		Package.SchemaVersion = 15;
 	}
-	Package.GeneratorVersion = bHasNetworkBindings
+	if (bHasReplicatedProperties)
+	{
+		Package.SchemaVersion = 16;
+	}
+	Package.GeneratorVersion = bHasReplicatedProperties
+		? ReplicatedPropertyGeneratorVersion
+		: bHasNetworkBindings
 		? NetworkGeneratorVersion
 		: bHasLatentPayloadBindings
 		? LatentPayloadGeneratorVersion
@@ -1301,6 +1357,7 @@ bool GenerateBindingDescriptor(
 			|| (Binding.Function != nullptr
 				&& Binding.Function->HasAnyFunctionFlags(FUNC_Const));
 		BindingModel.Network = Binding.Network;
+		BindingModel.PropertyReplication = Binding.PropertyReplication;
 		BindingModel.ReloadEffect = Binding.ReloadEffect;
 		BindingModel.ReturnValue = MakeBindingValueModel(Binding.Projection.ReturnValue);
 		for (const FAvidScriptProjectedBindingValue& Parameter : Binding.Projection.Parameters)

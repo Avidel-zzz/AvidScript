@@ -135,6 +135,7 @@ struct FInvocationCodecProgram
 	bool bRequiresWriteAccess = false;
 	bool bLatent = false;
 	FAvidScriptBindingNetworkContract Network;
+	FAvidScriptBindingPropertyReplicationContract PropertyReplication;
 	EAvidScriptBindingReloadEffect ReloadEffect =
 		EAvidScriptBindingReloadEffect::Unsupported;
 	bool bRequiresGuestMemory = false;

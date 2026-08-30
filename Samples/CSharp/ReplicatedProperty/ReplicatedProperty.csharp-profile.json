@@ -1,0 +1,32 @@
+{
+  "schema_version": 5,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/ReplicatedProperty/ReplicatedPropertyScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_replicated_property",
+  "artifact_stem": "profile_replicated_property",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_replicated_property",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_replicated_property/profile_replicated_property.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_replicated_property/profile_replicated_property.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.replicated_property",
+    "self_class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "HasAuthority"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
+        "writable_properties": [
+          "ReplicatedScore",
+          "ReplicatedRoutedValue"
+        ]
+      }
+    ]
+  }
+}

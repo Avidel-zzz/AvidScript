@@ -86,6 +86,7 @@ struct FAvidScriptBindingFunctionModel
 	bool bStatic = false;
 	bool bConst = false;
 	FAvidScriptBindingNetworkContract Network;
+	FAvidScriptBindingPropertyReplicationContract PropertyReplication;
 	EAvidScriptBindingReloadEffect ReloadEffect = EAvidScriptBindingReloadEffect::Unsupported;
 	FAvidScriptBindingValueModel ReturnValue;
 	TArray<FAvidScriptBindingValueModel> Parameters;
