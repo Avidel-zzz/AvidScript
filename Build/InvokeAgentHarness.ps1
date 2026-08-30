@@ -250,6 +250,10 @@ function Get-ProtectedDirtyContext {
     foreach ($Entry in $GitContext.Entries) {
         $StatusByPath[$Entry.Path] = $Entry.Status
     }
+    $IsCleanDetachedCandidate =
+        $GitContext.Branch -ceq '(detached)' -and
+        $GitContext.Entries.Count -eq 0 -and
+        [string]$PhaseContext.Status.effective_stage -in @('gate_ready', 'gate_attested')
 
     $Results = @()
     foreach ($Protected in @($PhaseContext.State.protected_dirty)) {
@@ -259,21 +263,27 @@ function Get-ProtectedDirtyContext {
         }
 
         $FullPath = Join-Path $RepositoryRoot $RelativePath
+        $FileExists = [System.IO.File]::Exists($FullPath)
         $CurrentHash = ''
-        if ([System.IO.File]::Exists($FullPath)) {
+        if ($FileExists) {
             $CurrentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FullPath).Hash.ToLowerInvariant()
         }
 
         $ExpectedHash = ([string]$Protected.worktree_sha256).ToLowerInvariant()
         $CurrentStatus = if ($StatusByPath.ContainsKey($RelativePath)) { [string]$StatusByPath[$RelativePath] } else { '  ' }
+        $ContentStable = -not [string]::IsNullOrWhiteSpace($ExpectedHash) -and $ExpectedHash -eq $CurrentHash
+        $StatusStable = ([string]$Protected.status) -eq $CurrentStatus
+        $OmittedFromCleanCandidate = $IsCleanDetachedCandidate -and -not $FileExists
         $Results += [pscustomobject]@{
             Path = $RelativePath
             ExpectedStatus = [string]$Protected.status
             CurrentStatus = $CurrentStatus
             ExpectedSha256 = $ExpectedHash
             CurrentSha256 = $CurrentHash
-            ContentStable = -not [string]::IsNullOrWhiteSpace($ExpectedHash) -and $ExpectedHash -eq $CurrentHash
-            StatusStable = ([string]$Protected.status) -eq $CurrentStatus
+            ContentStable = $ContentStable
+            StatusStable = $StatusStable
+            OmittedFromCleanCandidate = $OmittedFromCleanCandidate
+            BaselineSatisfied = ($ContentStable -and $StatusStable) -or $OmittedFromCleanCandidate
         }
     }
 
@@ -541,8 +551,8 @@ try {
                 }
                 ProtectedDirty = [pscustomobject]@{
                     Count = $ProtectedContext.Count
-                    StableCount = @($ProtectedContext | Where-Object ContentStable).Count
-                    Drift = @($ProtectedContext | Where-Object { -not $_.ContentStable })
+                    StableCount = @($ProtectedContext | Where-Object BaselineSatisfied).Count
+                    Drift = @($ProtectedContext | Where-Object { -not $_.BaselineSatisfied })
                     Items = $ProtectedContext
                 }
                 Context = $Routing
@@ -564,7 +574,7 @@ try {
                     Write-Output "Next: $($Result.Phase.next_action)"
                 }
                 Write-Output "Git: branch $($Result.Git.Branch), dirty $($Result.Git.DirtyCount)"
-                Write-Output "Protected dirty: $($Result.ProtectedDirty.StableCount)/$($Result.ProtectedDirty.Count) content-stable"
+                Write-Output "Protected dirty: $($Result.ProtectedDirty.StableCount)/$($Result.ProtectedDirty.Count) baseline-satisfied"
                 foreach ($Drift in @($Result.ProtectedDirty.Drift)) {
                     Write-Output "  DRIFT $($Drift.Path) expected=$($Drift.ExpectedSha256) current=$($Drift.CurrentSha256)"
                 }
