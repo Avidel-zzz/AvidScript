@@ -1,9 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptGeneratedTypeSessionTestTypes.h"
+#include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeDispatcher.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 
 #include "Misc/AutomationTest.h"
 #include "UObject/StrongObjectPtr.h"
@@ -200,6 +202,84 @@ bool FAvidScriptGeneratedTypeSessionTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Generated receiver route tears down explicitly"),
 		Session.ClearGeneratedTypeInstance(Error));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptGeneratedTypeRuntimeHostTest,
+	"AvidScript.Runtime.GeneratedTypes.RuntimeHost",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
+{
+	static_cast<void>(Parameters);
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	FString Error;
+	if (!TestTrue(
+		TEXT("Generated type registry builds for Runtime host"),
+		FAvidScriptGeneratedTypeRegistry::BuildFromJson(
+			BuildGeneratedTypeSessionManifest(),
+			Registry,
+			Error)))
+	{
+		AddError(Error);
+		return true;
+	}
+
+	FAvidScriptVmBackendSelection Selection;
+	Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	FAvidScriptWasmReloadManifest Manifest;
+	Manifest.ModuleId = TEXT("generated_type_runtime_host");
+	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
+	Manifest.Language = TEXT("wasm");
+	Manifest.RequiredExports = { TEXT("avid_on_begin_play") };
+	const TArray<uint8> Module = BuildGeneratedTypeSessionModule();
+	const FAvidScriptRuntimeArtifact Artifact =
+		FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Module, Selection);
+	FAvidScriptGeneratedTypeRuntimeHost& Host =
+		FAvidScriptGeneratedTypeRuntimeHost::Get();
+	if (!TestTrue(
+		TEXT("Runtime host installs one immutable generated package"),
+		Host.InstallPackage(Registry, Artifact, Error)))
+	{
+		AddError(Error);
+		return true;
+	}
+
+	TStrongObjectPtr<UAvidScriptGeneratedTypeSessionTestObject> Receiver(
+		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
+	if (!TestTrue(
+		TEXT("Runtime host creates ObjectHandle, Session and router registration"),
+		Host.BeginInstance(*Receiver, 0, Error)))
+	{
+		AddError(Error);
+		Host.ClearPackage(Error);
+		return true;
+	}
+	TestTrue(TEXT("Runtime host records the active receiver"), Host.IsInstanceActive(*Receiver));
+	TestEqual(TEXT("Runtime host owns one Session"), Host.GetActiveInstanceCount(), 1);
+	TestEqual(TEXT("Runtime host owns one anchored ObjectHandle"), Host.GetRegisteredHandleCount(), 1);
+
+	int32 ScriptResult = 0;
+	TestTrue(
+		TEXT("Runtime-owned route dispatches into the prepared Wasmtime export"),
+		FAvidScriptGeneratedTypeDispatcher::Invoke(
+			Receiver.Get(),
+			0,
+			0,
+			TConstArrayView<FAvidScriptGeneratedCallArgument>(),
+			&ScriptResult));
+	TestTrue(TEXT("Runtime-owned packed handle reaches the guest"), ScriptResult > 0);
+
+	TestTrue(
+		TEXT("Runtime host tears down Session, route and ObjectHandle"),
+		Host.EndInstance(*Receiver, Error));
+	TestFalse(TEXT("Ended receiver is no longer active"), Host.IsInstanceActive(*Receiver));
+	TestEqual(TEXT("Runtime host releases the Session"), Host.GetActiveInstanceCount(), 0);
+	TestEqual(TEXT("Runtime host releases the ObjectHandle"), Host.GetRegisteredHandleCount(), 0);
+	TestTrue(TEXT("Inactive package can be cleared"), Host.ClearPackage(Error));
 	return true;
 }
 

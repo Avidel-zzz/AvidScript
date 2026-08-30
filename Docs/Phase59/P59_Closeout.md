@@ -36,6 +36,8 @@
   Wasmtime JIT UFunction dispatch 与 reload generation replacement 已落地；首条 `(this)->int32` 已执行。
 - `P59.C2c3`：脚本定义 UClass 的 shell-driven lifecycle export 合同已落地；模块级生命周期仅保留
   no-op 兼容 shim，对象逻辑只走 canonical export，重复 lifecycle alias 在 Guest 编译期 fail closed。
+- `P59.C2c4a`：Runtime-owned generated instance host 已落地，集中拥有 package snapshot、ObjectHandle、
+  Session、route 和逆序 teardown；自动 shell 接线与正式 package 安装仍在后续小节。
 
 ## 待完成
 
