@@ -207,6 +207,9 @@ public:
 		const FString& ExportName,
 		FAvidScriptVmPreparedExportCall& OutCall,
 		FString& OutError);
+	bool SetSupplementalTypedHostImports(
+		TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+		FString& OutError);
 	bool BeginPlay(FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(float DeltaSeconds, FAvidScriptWasmSmokeResult& OutResult);
 	bool Tick(
@@ -724,6 +727,7 @@ private:
 	FAvidScriptBindingInvocationContext BindingInvocationContext;
 	TSharedPtr<const FAvidScriptBindingPackage> BindingPackage;
 	TSharedPtr<const FAvidScriptWasmDebugMap> DebugMap;
+	TArray<FAvidScriptVmTypedHostImport> SupplementalTypedHostImports;
 	TArray<FAvidScriptVmTypedHostImport> TypedHostImports;
 	TArray<TUniquePtr<FAvidScriptPreparedGeneratedHostCall>>
 		PreparedGeneratedHostCalls;

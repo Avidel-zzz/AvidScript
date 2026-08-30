@@ -14,6 +14,102 @@ enum class EGeneratedCallShape : uint8
 	ReceiverF32Void,
 };
 
+bool ResolveGeneratedFloatPropertyReceiver(
+	FAvidScriptGeneratedPropertyHostContext& Context,
+	const int64 PackedSelf,
+	UObject*& OutReceiver)
+{
+	OutReceiver = nullptr;
+	const uint64 PackedBits = static_cast<uint64>(PackedSelf);
+	const uint32 SelfSlot = static_cast<uint32>(PackedBits);
+	const uint32 SelfGeneration = static_cast<uint32>(PackedBits >> 32);
+	if (!IsInGameThread()
+		|| SelfSlot != Context.ReceiverHandle.Slot
+		|| SelfGeneration != Context.ReceiverHandle.Generation
+		|| Context.ExpectedClass == nullptr || Context.Property == nullptr)
+	{
+		return false;
+	}
+	UObject* const Receiver = Context.Receiver.Get();
+	if (Receiver == nullptr || !Receiver->IsA(Context.ExpectedClass)
+		|| Receiver->HasAnyFlags(
+			RF_ClassDefaultObject | RF_ArchetypeObject
+			| RF_BeginDestroyed | RF_FinishDestroyed))
+	{
+		return false;
+	}
+	OutReceiver = Receiver;
+	return true;
+}
+
+EAvidScriptVmTypedHostStatus GetGeneratedFloatProperty(
+	void* OpaqueContext,
+	const int64 PackedSelf,
+	float& OutValue)
+{
+	FAvidScriptGeneratedPropertyHostContext* const Context =
+		static_cast<FAvidScriptGeneratedPropertyHostContext*>(OpaqueContext);
+	UObject* Receiver = nullptr;
+	if (Context == nullptr
+		|| !ResolveGeneratedFloatPropertyReceiver(
+			*Context,
+			PackedSelf,
+			Receiver))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	OutValue = Context->Property->GetPropertyValue_InContainer(Receiver);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+EAvidScriptVmTypedHostStatus SetGeneratedFloatProperty(
+	void* OpaqueContext,
+	const int64 PackedSelf,
+	const float Value)
+{
+	FAvidScriptGeneratedPropertyHostContext* const Context =
+		static_cast<FAvidScriptGeneratedPropertyHostContext*>(OpaqueContext);
+	UObject* Receiver = nullptr;
+	if (Context == nullptr
+		|| !ResolveGeneratedFloatPropertyReceiver(
+			*Context,
+			PackedSelf,
+			Receiver))
+	{
+		return EAvidScriptVmTypedHostStatus::Rejected;
+	}
+	Context->Property->SetPropertyValue_InContainer(Receiver, Value);
+	return EAvidScriptVmTypedHostStatus::Succeeded;
+}
+
+FAvidScriptVmTypedHostImport MakeGeneratedFloatPropertyImport(
+	const FAvidScriptGeneratedMemberPlan& Member,
+	const FString& ImportName,
+	const bool bWrite,
+	FAvidScriptGeneratedPropertyHostContext& Context)
+{
+	FAvidScriptVmTypedHostImport Import;
+	Import.StableId = Member.StableMemberId
+		+ (bWrite ? TEXT(":set") : TEXT(":get"));
+	Import.ModuleName = TEXT("avidscript");
+	Import.ImportName = ImportName;
+	Import.Signature = bWrite ? TEXT("(If)") : TEXT("(I)f");
+	Import.Shape = bWrite
+		? EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set
+		: EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get;
+	Import.bSupplementalRuntimeAuthority = true;
+	Import.PreparedTarget.Context = &Context;
+	if (bWrite)
+	{
+		Import.PreparedTarget.PackedSelfPropertyF32Set = &SetGeneratedFloatProperty;
+	}
+	else
+	{
+		Import.PreparedTarget.PackedSelfPropertyF32Get = &GetGeneratedFloatProperty;
+	}
+	return Import;
+}
+
 EGeneratedCallShape ResolveCallShape(
 	const FAvidScriptGeneratedMemberPlan& Member,
 	const FAvidScriptVmPreparedExportCall& Call)
@@ -123,6 +219,49 @@ bool FAvidScriptRuntimeSession::ConfigureGeneratedTypeInstance(
 	State->Receiver = &Receiver;
 	State->ReceiverHandle = ReceiverHandle;
 	State->TypeOrdinal = TypeOrdinal;
+	for (const FAvidScriptGeneratedTypePlan& RegistryType : Registry->GetTypes())
+	{
+		for (const FAvidScriptGeneratedMemberPlan& Member : RegistryType.Members)
+		{
+			if (Member.Kind != EAvidScriptGeneratedMemberKind::Property)
+			{
+				continue;
+			}
+			FFloatProperty* const FloatProperty = CastField<FFloatProperty>(Member.Property);
+			if (FloatProperty == nullptr)
+			{
+				OutError = FString::Printf(
+					TEXT("generated property '%s' has no prepared float codec"),
+					*Member.StableMemberId);
+				return false;
+			}
+			TUniquePtr<FAvidScriptGeneratedPropertyHostContext> Context =
+				MakeUnique<FAvidScriptGeneratedPropertyHostContext>();
+			Context->Receiver = &Receiver;
+			Context->ReceiverHandle = ReceiverHandle;
+			Context->ExpectedClass = RegistryType.Class;
+			Context->Property = FloatProperty;
+			FAvidScriptGeneratedPropertyHostContext* const ContextPointer =
+				Context.Get();
+			State->PropertyContexts.Add(MoveTemp(Context));
+			if (!Member.GetterImportName.IsEmpty())
+			{
+				State->PropertyImports.Add(MakeGeneratedFloatPropertyImport(
+					Member,
+					Member.GetterImportName,
+					false,
+					*ContextPointer));
+			}
+			if (!Member.SetterImportName.IsEmpty())
+			{
+				State->PropertyImports.Add(MakeGeneratedFloatPropertyImport(
+					Member,
+					Member.SetterImportName,
+					true,
+					*ContextPointer));
+			}
+		}
+	}
 	if (!FAvidScriptGeneratedTypeRouter::Get().RegisterInstance(
 		Receiver,
 		ReceiverHandle,

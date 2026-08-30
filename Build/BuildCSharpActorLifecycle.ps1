@@ -16,6 +16,8 @@ param(
     [string]$SemanticCacheRoot = "",
     [ValidateSet("enabled", "disabled")]
     [string]$DataLaneFusion = "enabled",
+    [switch]$AllowGeneratedTypeImports,
+    [string]$GeneratedTypeManifestPath = "",
     [switch]$DisableSemanticCache
 )
 
@@ -30,6 +32,10 @@ $DefaultModuleId = "csharp_actor_lifecycle"
 $DefaultArtifactStem = "actor_lifecycle"
 $DefaultGuestCompilerPath = Join-Path $BuildDir "InvokeCSharpGuestCompiler.ps1"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
+$script:GeneratedTypeImportNames = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal)
+$script:GeneratedTypeExportNames = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal)
 . (Join-Path $BuildDir "AvidScriptCSharpSemanticCache.ps1")
 
 function Resolve-ExistingFile {
@@ -264,7 +270,8 @@ function New-BindingPackageReportValue {
 function Test-CompilerInjectedBindingImport {
     param(
         [Parameter(Mandatory = $true)][object]$Import,
-        [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports
+        [Parameter(Mandatory = $true)][bool]$AllowDataLaneImports,
+        [Parameter(Mandatory = $true)][bool]$AllowGeneratedTypeImports
     )
 
     if ([string]$Import.module -cne "avidscript" -or
@@ -282,6 +289,28 @@ function Test-CompilerInjectedBindingImport {
             $ParameterTypes[1] -ceq "type:int32" -and
             $ParameterTypes[2] -ceq "type:address" -and
             [string]$Import.return_type_id -ceq "type:int32"
+    }
+    if ($AllowGeneratedTypeImports -and
+        [string]$Import.dispatch_class -ceq "semantic") {
+        $GeneratedMatch = [System.Text.RegularExpressions.Regex]::Match(
+            [string]$Import.id,
+            '^import:method:synthetic:ue_property:([0-9]+):([0-9]+):(get|set)$',
+            [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+        if ($GeneratedMatch.Success) {
+            $ExpectedName = "avid_ue_property_$($GeneratedMatch.Groups[1].Value)_$($GeneratedMatch.Groups[2].Value)_$($GeneratedMatch.Groups[3].Value)"
+            if ([string]$Import.name -cne $ExpectedName -or
+                -not $script:GeneratedTypeImportNames.Contains($ExpectedName) -or
+                $ParameterTypes.Count -lt 1 -or
+                -not $ParameterTypes[0].StartsWith("type:global::", [System.StringComparison]::Ordinal)) {
+                return $false
+            }
+            if ($GeneratedMatch.Groups[3].Value -ceq "get") {
+                return $ParameterTypes.Count -eq 1 -and
+                    [string]$Import.return_type_id -cne "type:void"
+            }
+            return $ParameterTypes.Count -eq 2 -and
+                [string]$Import.return_type_id -ceq "type:void"
+        }
     }
     if (-not $AllowDataLaneImports -or
         [string]$Import.dispatch_class -cne "data_lane") {
@@ -306,7 +335,8 @@ function Test-BindingPackageImports {
     param(
         [AllowNull()][object]$PackageInfo,
         [AllowEmptyCollection()][object[]]$GuestImports,
-        [bool]$AllowDataLaneImports = $false
+        [bool]$AllowDataLaneImports = $false,
+        [bool]$AllowGeneratedTypeImports = $false
     )
 
     $DeclaredByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -326,7 +356,8 @@ function Test-BindingPackageImports {
         if (-not $DeclaredByKey.ContainsKey($Key) -and
             -not (Test-CompilerInjectedBindingImport `
                 -Import $Import `
-                -AllowDataLaneImports $AllowDataLaneImports)) {
+                -AllowDataLaneImports $AllowDataLaneImports `
+                -AllowGeneratedTypeImports $AllowGeneratedTypeImports)) {
             $UnexpectedImports += "$([string]$Import.module).$([string]$Import.name)"
         }
     }
@@ -627,6 +658,38 @@ if ([string]::IsNullOrWhiteSpace($SemanticCacheRoot)) {
     $SemanticCacheRoot = Join-Path $ProjectRoot "Saved\AvidScript\CSharpSemanticCache\v1"
 }
 $SemanticCacheRoot = [System.IO.Path]::GetFullPath($SemanticCacheRoot)
+if ($AllowGeneratedTypeImports) {
+    if ([string]::IsNullOrWhiteSpace($GeneratedTypeManifestPath) -or
+        -not (Test-Path -LiteralPath $GeneratedTypeManifestPath -PathType Leaf)) {
+        throw "Generated type import authorization requires a generated type manifest."
+    }
+    $GeneratedTypeManifestPath = (Resolve-Path -LiteralPath $GeneratedTypeManifestPath).Path
+    $GeneratedTypeManifest = Get-Content -Raw -LiteralPath $GeneratedTypeManifestPath | ConvertFrom-Json
+    if ([int]$GeneratedTypeManifest.schema_version -ne 4 -or
+        @($GeneratedTypeManifest.types).Count -eq 0) {
+        throw "Generated type import authorization manifest must use schema 4 and contain types."
+    }
+    foreach ($GeneratedType in @($GeneratedTypeManifest.types)) {
+        foreach ($GeneratedFunction in @($GeneratedType.functions)) {
+            $ExportName = [string]$GeneratedFunction.export_name
+            if ($ExportName -cnotmatch '^avid_ue_[0-9a-f]{32}$' -or
+                -not $script:GeneratedTypeExportNames.Add($ExportName)) {
+                throw "Generated type manifest contains an invalid or duplicate canonical export."
+            }
+        }
+        foreach ($GeneratedProperty in @($GeneratedType.properties)) {
+            foreach ($ImportName in @(
+                [string]$GeneratedProperty.getter_import_name,
+                [string]$GeneratedProperty.setter_import_name)) {
+                if (-not [string]::IsNullOrWhiteSpace($ImportName) -and
+                    ($ImportName -cnotmatch '^avid_ue_property_[0-9]+_[0-9]+_(get|set)$' -or
+                     -not $script:GeneratedTypeImportNames.Add($ImportName))) {
+                    throw "Generated type manifest contains an invalid or duplicate property import."
+                }
+            }
+        }
+    }
+}
 $FrontendArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.frontend.json"
 $SemanticArtifactPath = Join-Path $OutputRoot "$ArtifactStem.csharp.semantic.json"
 $GuestIrArtifactPath = Join-Path $OutputRoot "$ArtifactStem.guestir.json"
@@ -1063,7 +1126,8 @@ if (-not $IsDefaultSource) {
     $AuthorizationValidation = Test-BindingPackageImports `
         -PackageInfo $BindingAuthorizationInfo `
         -GuestImports @($GuestIrModel.imports) `
-        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled")
+        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
+        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports)
     $UsedAuthorizationBindingImports = @($AuthorizationValidation.UsedImports)
     if (@($AuthorizationValidation.UnexpectedImports).Count -gt 0) {
         Remove-LoadableArtifacts
@@ -1081,7 +1145,8 @@ if (-not $IsDefaultSource) {
     $RuntimeValidation = Test-BindingPackageImports `
         -PackageInfo $BindingPackageInfo `
         -GuestImports @($GuestIrModel.imports) `
-        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled")
+        -AllowDataLaneImports ($DataLaneFusion -ceq "enabled") `
+        -AllowGeneratedTypeImports ([bool]$AllowGeneratedTypeImports)
     $UsedRuntimeBindingImports = @($RuntimeValidation.UsedImports)
     $RuntimeIdentityMismatch = @()
     $RuntimeUsedByKey = [System.Collections.Generic.Dictionary[string, object]]::new(
@@ -1158,6 +1223,7 @@ $DirectAbiExports = @(
     "avid_on_continuation_v2")
 $DirectAbiExports += @($SemanticModel.delegate_event_callbacks |
     ForEach-Object { [string]$_.export_name })
+$DirectAbiExports += @($script:GeneratedTypeExportNames)
 $DirectAbiExports = @($DirectAbiExports | Sort-Object -Unique)
 $UnexpectedDeclaredExports = @($RequiredExports | Where-Object { $DirectAbiExports -notcontains $_ })
 $MissingObservedExports = @($RequiredExports | Where-Object { $ObservedExports -notcontains $_ })
@@ -1273,7 +1339,8 @@ $StateSchemaContractValid = (Test-JsonObjectHasProperties -Value $StateSchemaMod
     (Test-JsonNonEmptyString -Value $StateSchemaModel.strategy) -and
     $StateSchemaModel.strategy -eq "host_snapshot" -and
     (Test-JsonNonEmptyString -Value $StateSchemaModel.policy) -and
-    $StateSchemaModel.policy -in @("compatible", "explicit") -and
+    ($StateSchemaModel.policy -in @("compatible", "explicit") -or
+     ($StateSchemaModel.policy -eq "implicit" -and @($StateSchemaModel.slots).Count -eq 0)) -and
     (Try-GetJsonInt32 -Value $StateSchemaModel.contract_version -ParsedValue ([ref]$StateContractVersion)) -and
     $StateContractVersion -ge 1 -and
     $StateContractVersion -le 65535 -and

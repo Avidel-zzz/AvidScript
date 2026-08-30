@@ -42,6 +42,7 @@ public:
 	const FAvidScriptGeneratedTypePlan* FindTypeByOrdinal(uint32 TypeOrdinal) const;
 	const FAvidScriptGeneratedTypePlan* FindTypeByStableId(const FString& StableTypeId) const;
 	const FAvidScriptGeneratedTypePlan* FindTypeByClass(const UClass* Class) const;
+	TConstArrayView<FAvidScriptGeneratedTypePlan> GetTypes() const;
 	int32 Num() const;
 
 private:

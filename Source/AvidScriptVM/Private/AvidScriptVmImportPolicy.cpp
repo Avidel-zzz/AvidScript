@@ -34,7 +34,9 @@ bool ValidateAvidScriptVmImportContract(
 	const FAvidScriptVmBindingPackage* BindingPackage,
 	TConstArrayView<FAvidScriptVmExpectedImport> ExpectedImports,
 	bool bEnforceExpectedImports,
-	FAvidScriptVmError& OutError)
+	FAvidScriptVmError& OutError,
+	TConstArrayView<FAvidScriptVmTypedHostImport> SupplementalTypedImports,
+	TConstArrayView<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports)
 {
 	OutError.Reset();
 	if (BindingPackage != nullptr && !ValidateAvidScriptVmBindingPackage(*BindingPackage, OutError))
@@ -98,6 +100,38 @@ bool ValidateAvidScriptVmImportContract(
 				Import.ImportName));
 		}
 	}
+	for (const FAvidScriptVmTypedHostImport& Import : SupplementalTypedImports)
+	{
+		if (!Import.bSupplementalRuntimeAuthority
+			|| Import.BindingOrdinal != MAX_uint32
+			|| Import.ModuleName.IsEmpty()
+			|| Import.ImportName.IsEmpty()
+			|| !Import.PreparedTarget.IsBoundForShape(Import.Shape))
+		{
+			return SetAvidScriptVmImportPolicyError(
+				OutError,
+				TEXT("supplemental_import_authority_invalid"),
+				TEXT("supplemental typed imports require an exact prepared runtime capability"),
+				Import.ModuleName,
+				Import.ImportName);
+		}
+		AuthorizedDynamicImports.Add(MakeAvidScriptVmImportIdentityKey(
+			Import.ModuleName,
+			Import.ImportName));
+	}
+	for (const FAvidScriptVmExpectedImport& Import : RuntimeAuthorizedImports)
+	{
+		if (Import.ModuleName.IsEmpty() || Import.ImportName.IsEmpty())
+		{
+			return SetAvidScriptVmImportPolicyError(
+				OutError,
+				TEXT("runtime_import_authority_invalid"),
+				TEXT("runtime-authorized import identities cannot be empty"));
+		}
+		AuthorizedDynamicImports.Add(MakeAvidScriptVmImportIdentityKey(
+			Import.ModuleName,
+			Import.ImportName));
+	}
 
 	for (const FAvidScriptWasmFunctionImport& ActualImport : ActualLayout.FunctionImports)
 	{
@@ -105,7 +139,11 @@ bool ValidateAvidScriptVmImportContract(
 		{
 			continue;
 		}
-		if (BindingPackage == nullptr)
+		const FString IdentityKey = MakeAvidScriptVmImportIdentityKey(
+			ActualImport.ModuleName,
+			ActualImport.ImportName);
+		if (BindingPackage == nullptr
+			&& !AuthorizedDynamicImports.Contains(IdentityKey))
 		{
 			return SetAvidScriptVmImportPolicyError(
 				OutError,
@@ -117,9 +155,7 @@ bool ValidateAvidScriptVmImportContract(
 				ActualImport.ModuleName,
 				ActualImport.ImportName);
 		}
-		if (!AuthorizedDynamicImports.Contains(MakeAvidScriptVmImportIdentityKey(
-				ActualImport.ModuleName,
-				ActualImport.ImportName)))
+		if (!AuthorizedDynamicImports.Contains(IdentityKey))
 		{
 			return SetAvidScriptVmImportPolicyError(
 				OutError,

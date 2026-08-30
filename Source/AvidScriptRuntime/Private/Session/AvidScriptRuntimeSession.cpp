@@ -1047,6 +1047,23 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	FAvidScriptWasmReloadResult& OutResult) const
 {
 	const FAvidScriptWasmReloadManifest& Manifest = Artifact.Manifest;
+	TArray<FAvidScriptVmTypedHostImport> GeneratedPropertyImports;
+	if (GeneratedTypeInstance)
+	{
+		for (const FAvidScriptVmTypedHostImport& Import
+			: GeneratedTypeInstance->PropertyImports)
+		{
+			if (Manifest.RequiredImports.ContainsByPredicate(
+				[&Import](const FAvidScriptWasmRequiredImport& RequiredImport)
+				{
+					return RequiredImport.ModuleName == Import.ModuleName
+						&& RequiredImport.ImportName == Import.ImportName;
+				}))
+			{
+				GeneratedPropertyImports.Add(Import);
+			}
+		}
+	}
 	if (Artifact.VmArtifact.CanonicalWasmBytes.IsEmpty()
 		|| (Artifact.VmArtifact.ArtifactFormat !=
 				EAvidScriptVmArtifactFormat::WasmBytecode
@@ -1065,7 +1082,8 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	if (!InspectAndValidateAvidScriptWasmImportContract(
 			Artifact.VmArtifact.CanonicalWasmBytes,
 			Manifest,
-			ImportContractResult))
+			ImportContractResult,
+			GeneratedPropertyImports))
 	{
 		SetReloadFailure(
 			OutResult,
@@ -1103,6 +1121,19 @@ bool FAvidScriptRuntimeSession::BuildValidatedRuntime(
 	TUniquePtr<FAvidScriptWasmRuntimeInstance> CandidateRuntime =
 		MakeUnique<FAvidScriptWasmRuntimeInstance>(Artifact.BackendSelection);
 	FAvidScriptWasmSmokeResult RuntimeResult;
+	FString SupplementalImportError;
+	if (!CandidateRuntime->SetSupplementalTypedHostImports(
+			GeneratedPropertyImports,
+			SupplementalImportError))
+	{
+		SetReloadFailure(
+			OutResult,
+			TEXT("<generated-properties>"),
+			TEXT("generated_property_import_invalid"),
+			SupplementalImportError,
+			TEXT("rebuild the generated type package from the current registry"));
+		return false;
+	}
 
 	if (!CandidateRuntime->LoadArtifact(
 		Artifact.VmArtifact,

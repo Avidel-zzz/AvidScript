@@ -57,6 +57,7 @@ bool FAvidScriptGeneratedTypeDispatcherTest::RunTest(const FString& Parameters)
 	FGeneratedTypeInstance Competing;
 	FAvidScriptGeneratedTypeInstanceRegistration Registration;
 	FAvidScriptGeneratedTypeInstanceRegistration CompetingRegistration;
+	const int32 BaselineRouteCount = Router.GetRegisteredInstanceCountForTesting();
 	UObject* Receiver = GetTransientPackage();
 	const FAvidScriptObjectHandle ReceiverHandle{ 17, 5 };
 	int32 ArgumentValue = 41;
@@ -86,7 +87,10 @@ bool FAvidScriptGeneratedTypeDispatcherTest::RunTest(const FString& Parameters)
 	TestFalse(
 		TEXT("A receiver cannot be claimed by a competing instance"),
 		Router.RegisterInstance(*Receiver, ReceiverHandle, Competing, CompetingRegistration));
-	TestEqual(TEXT("Router owns one instance route"), Router.GetRegisteredInstanceCountForTesting(), 1);
+	TestEqual(
+		TEXT("Router adds one instance route"),
+		Router.GetRegisteredInstanceCountForTesting(),
+		BaselineRouteCount + 1);
 	Instance.RegistrationToReset = &Registration;
 
 	TestTrue(
@@ -103,7 +107,10 @@ bool FAvidScriptGeneratedTypeDispatcherTest::RunTest(const FString& Parameters)
 	Instance.RegistrationToReset = nullptr;
 	TestTrue(TEXT("Registration teardown succeeds"), Registration.Reset());
 	TestFalse(TEXT("Registration token is invalidated"), Registration.IsValid());
-	TestEqual(TEXT("Router releases the route"), Router.GetRegisteredInstanceCountForTesting(), 0);
+	TestEqual(
+		TEXT("Router restores its route baseline"),
+		Router.GetRegisteredInstanceCountForTesting(),
+		BaselineRouteCount);
 	TestFalse(
 		TEXT("Registration teardown fences subsequent dispatch"),
 		FAvidScriptGeneratedTypeDispatcher::Invoke(Receiver, 3, 7, MakeArrayView(&Argument, 1), &ResultValue));

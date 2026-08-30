@@ -235,9 +235,9 @@ bool FAvidScriptRuntimeArtifactLoader::LoadFromFile(
 	TArray<uint8> CanonicalWasmBytes;
 	if (!FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 			ManifestPath,
-			Manifest,
-			CanonicalWasmBytes,
-			OutResult.CanonicalResult))
+		Manifest,
+		CanonicalWasmBytes,
+		OutResult.CanonicalResult))
 	{
 		return false;
 	}

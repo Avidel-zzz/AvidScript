@@ -11,6 +11,8 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	SelfPropertyI32GetSet,
 	SelfPropertyI32Get,
 	SelfPropertyI32Set,
+	PackedSelfPropertyF32Get,
+	PackedSelfPropertyF32Set,
 	SelfVectorValue,
 	StableObjectRoundtrip,
 	CommandBufferSubmit,
@@ -90,6 +92,18 @@ using FAvidScriptVmPreparedSelfPropertyI32SetTarget =
 		int32 SelfGeneration,
 		int32 Value);
 
+using FAvidScriptVmPreparedPackedSelfPropertyF32GetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		float& OutValue);
+
+using FAvidScriptVmPreparedPackedSelfPropertyF32SetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		float Value);
+
 struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 {
 	void* Context = nullptr;
@@ -103,6 +117,8 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 		nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyF32GetTarget PackedSelfPropertyF32Get = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyF32SetTarget PackedSelfPropertyF32Set = nullptr;
 
 	bool IsBoundForShape(const EAvidScriptVmTypedHostShape Shape) const
 	{
@@ -127,6 +143,10 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfPropertyI32Get != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 			return SelfPropertyI32Set != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
+			return PackedSelfPropertyF32Get != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
+			return PackedSelfPropertyF32Set != nullptr;
 		default:
 			return false;
 		}
@@ -140,7 +160,9 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			|| SelfGuestAddress != nullptr
 			|| StableObjectRoundtrip != nullptr
 			|| SelfPropertyI32Get != nullptr
-			|| SelfPropertyI32Set != nullptr;
+			|| SelfPropertyI32Set != nullptr
+			|| PackedSelfPropertyF32Get != nullptr
+			|| PackedSelfPropertyF32Set != nullptr;
 	}
 };
 
@@ -205,5 +227,6 @@ struct AVIDSCRIPTVM_API FAvidScriptVmTypedHostImport
 	FString ImportName;
 	FString Signature;
 	EAvidScriptVmTypedHostShape Shape = EAvidScriptVmTypedHostShape::None;
+	bool bSupplementalRuntimeAuthority = false;
 	FAvidScriptVmPreparedTypedHostTarget PreparedTarget;
 };

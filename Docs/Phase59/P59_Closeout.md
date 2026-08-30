@@ -40,6 +40,9 @@
   Session、route 和逆序 teardown；自动 shell 接线与正式 package 安装仍在后续小节。
 - `P59.C2c4b`：生成 Actor/Component/Subsystem shell 已自动接入 Runtime Host activation/teardown；
   Begin/End 幂等并按 receiver 实际 UClass 解析最派生脚本类型，正式 package 安装留给 C2c4c。
+- `P59.C2c4c`：C# 构建链已原子发布 Runtime package descriptor，生成模块在启动时自动完成哈希验证、
+  registry/artifact 安装与 Wasmtime JIT 选择；packed ObjectHandle 的 prepared `float` UPROPERTY
+  getter/setter 已完成真实 `Damage *= 2` 闭环，C# 初始化器与其余属性 codec 留给后续小节。
 
 ## 待完成
 

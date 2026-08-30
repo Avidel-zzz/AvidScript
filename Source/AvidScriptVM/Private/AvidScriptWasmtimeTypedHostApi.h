@@ -59,6 +59,16 @@ typedef int32_t (*AvidScriptWasmtimeSelfPropertyI32SetCallback)(
 	int32_t value,
 	int32_t* out_value);
 
+typedef int32_t (*AvidScriptWasmtimeSelfPropertyF32GetCallback)(
+	void* environment,
+	int64_t packed_self,
+	float* out_value);
+
+typedef int32_t (*AvidScriptWasmtimeSelfPropertyF32SetCallback)(
+	void* environment,
+	int64_t packed_self,
+	float value);
+
 typedef int32_t (*AvidScriptWasmtimeSelfGuestAddressCallback)(
 	void* environment,
 	int32_t self_slot,
@@ -136,6 +146,24 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_s
 	const char* import_name,
 	size_t import_name_size,
 	AvidScriptWasmtimeSelfPropertyI32SetCallback callback,
+	void* environment);
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyF32GetCallback callback,
+	void* environment);
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyF32SetCallback callback,
 	void* environment);
 
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get_set(

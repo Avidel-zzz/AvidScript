@@ -98,6 +98,7 @@ Source/ThirdParty/Wasmtime/installed/
 
 # Project-specific script UHT shells are regenerated from semantic artifacts.
 Source/AvidScriptGenerated/AvidScriptGeneratedManifest.json
+Source/AvidScriptGenerated/AvidScriptGeneratedPackage.json
 Source/AvidScriptGenerated/Public/AvidScriptGeneratedTypes.h
 Source/AvidScriptGenerated/Private/AvidScriptGeneratedTypes.cpp
 

@@ -10,6 +10,7 @@ class AVIDSCRIPTRUNTIME_API FAvidScriptGeneratedTypeRuntimeHost final
 {
 public:
 	static FAvidScriptGeneratedTypeRuntimeHost& Get();
+	~FAvidScriptGeneratedTypeRuntimeHost();
 
 	bool Startup();
 	void Shutdown();
@@ -18,6 +19,9 @@ public:
 		const TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot>& Registry,
 		const FAvidScriptRuntimeArtifact& Artifact,
 		FString& OutError);
+	bool InstallPackageFromDescriptorFile(
+		const FString& DescriptorPath,
+		FString& OutError);
 	bool ClearPackage(FString& OutError);
 
 	bool BeginInstance(UObject& Receiver, uint32 TypeOrdinal, FString& OutError);
@@ -25,10 +29,12 @@ public:
 	bool IsInstanceActive(const UObject& Receiver) const;
 	int32 GetActiveInstanceCount() const;
 	int32 GetRegisteredHandleCount() const;
+#if WITH_DEV_AUTOMATION_TESTS
+	static TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> CreateIsolatedForTesting();
+#endif
 
 private:
 	FAvidScriptGeneratedTypeRuntimeHost();
-	~FAvidScriptGeneratedTypeRuntimeHost();
 	FAvidScriptGeneratedTypeRuntimeHost(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
 	FAvidScriptGeneratedTypeRuntimeHost& operator=(const FAvidScriptGeneratedTypeRuntimeHost&) = delete;
 

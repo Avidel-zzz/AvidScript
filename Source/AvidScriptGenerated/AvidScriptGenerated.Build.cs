@@ -15,6 +15,12 @@ public class AvidScriptGenerated : ModuleRules
 			}
 		);
 
-		PrivateDependencyModuleNames.Add("AvidScriptRuntime");
+		PrivateDependencyModuleNames.AddRange(
+			new[]
+			{
+				"AvidScriptRuntime",
+				"Projects"
+			}
+		);
 	}
 }

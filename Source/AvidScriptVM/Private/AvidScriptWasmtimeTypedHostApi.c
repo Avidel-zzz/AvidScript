@@ -46,6 +46,18 @@ typedef struct AvidScriptWasmtimeSelfPropertyI32SetBridge
 	void* environment;
 } AvidScriptWasmtimeSelfPropertyI32SetBridge;
 
+typedef struct AvidScriptWasmtimeSelfPropertyF32GetBridge
+{
+	AvidScriptWasmtimeSelfPropertyF32GetCallback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfPropertyF32GetBridge;
+
+typedef struct AvidScriptWasmtimeSelfPropertyF32SetBridge
+{
+	AvidScriptWasmtimeSelfPropertyF32SetCallback callback;
+	void* environment;
+} AvidScriptWasmtimeSelfPropertyF32SetBridge;
+
 typedef struct AvidScriptWasmtimeSelfGuestAddressBridge
 {
 	AvidScriptWasmtimeSelfGuestAddressCallback callback;
@@ -490,6 +502,50 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_f32_triple_gue
 	return NULL;
 }
 
+static wasm_trap_t* avidscript_wasmtime_self_property_f32_get_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfPropertyF32GetBridge* bridge =
+		(AvidScriptWasmtimeSelfPropertyF32GetBridge*)environment;
+	float value = 0.0f;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 1)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			&value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].f32 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_self_property_f32_set_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimeSelfPropertyF32SetBridge* bridge =
+		(AvidScriptWasmtimeSelfPropertyF32SetBridge*)environment;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			args_and_results[1].f32) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	return NULL;
+}
+
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get(
 	AvidScriptWasmtimeLinker* linker,
 	const char* module_name,
@@ -522,6 +578,106 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_s
 	bridge->callback = callback;
 	bridge->environment = environment;
 	return avidscript_wasmtime_linker_define_typed_i32(linker, module_name, module_name_size, import_name, import_name_size, 3, avidscript_wasmtime_self_property_i32_set_trampoline, bridge, "Could not allocate the typed self-property-i32-set function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyF32GetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfPropertyF32GetBridge* bridge =
+		(AvidScriptWasmtimeSelfPropertyF32GetBridge*)calloc(1, sizeof(*bridge));
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-property-f32-get bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	wasm_valtype_vec_new_uninitialized(&parameters, 1);
+	parameters.data[0] = wasm_valtype_new_i64();
+	wasm_valtype_vec_new_uninitialized(&results, 1);
+	results.data[0] = wasm_valtype_new_f32();
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-property-f32-get function type.");
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		avidscript_wasmtime_self_property_f32_get_trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimeSelfPropertyF32SetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimeSelfPropertyF32SetBridge* bridge =
+		(AvidScriptWasmtimeSelfPropertyF32SetBridge*)calloc(1, sizeof(*bridge));
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL)
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-property-f32-set bridge.");
+	bridge->callback = callback;
+	bridge->environment = environment;
+	wasm_valtype_vec_new_uninitialized(&parameters, 2);
+	parameters.data[0] = wasm_valtype_new_i64();
+	parameters.data[1] = wasm_valtype_new_f32();
+	wasm_valtype_vec_new_empty(&results);
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(
+			"Could not allocate the typed self-property-f32-set function type.");
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		avidscript_wasmtime_self_property_f32_set_trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
 }
 
 static AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_guest_address(

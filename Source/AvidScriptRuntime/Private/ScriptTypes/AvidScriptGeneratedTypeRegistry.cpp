@@ -275,6 +275,12 @@ const FAvidScriptGeneratedTypePlan* FAvidScriptGeneratedTypeRegistrySnapshot::Fi
 	return TypeOrdinal != nullptr ? FindTypeByOrdinal(*TypeOrdinal) : nullptr;
 }
 
+TConstArrayView<FAvidScriptGeneratedTypePlan>
+FAvidScriptGeneratedTypeRegistrySnapshot::GetTypes() const
+{
+	return Types;
+}
+
 int32 FAvidScriptGeneratedTypeRegistrySnapshot::Num() const
 {
 	return Types.Num();

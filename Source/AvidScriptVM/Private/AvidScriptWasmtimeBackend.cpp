@@ -347,7 +347,8 @@ public:
 			Config.BindingPackage,
 			TConstArrayView<FAvidScriptVmExpectedImport>(),
 			false,
-			OutError))
+			OutError,
+			Config.TypedHostImports))
 		{
 			return false;
 		}
@@ -2023,6 +2024,48 @@ private:
 		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
+	static int32 TypedPackedSelfPropertyF32GetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		float* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutValue == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyF32Get == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyF32Get(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyF32SetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		const float Value)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyF32Set == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyF32Set(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				Value);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
 	static int32 TypedSelfVectorValueCallback(
 		void* Environment,
 		int32 SelfSlot,
@@ -2089,22 +2132,25 @@ private:
 		{
 			return true;
 		}
-		if (TypedHostDispatcher == nullptr || BindingPackage == nullptr)
+		if (TypedHostDispatcher == nullptr)
 		{
 			SetWasmtimeError(
 				OutError,
 				TEXT("typed_host_config_invalid"),
-				TEXT("Typed host imports require both a dispatcher and a verified binding package."));
+				TEXT("Typed host imports require a dispatcher."));
 			return false;
 		}
 
 		TMap<FString, const FAvidScriptVmDynamicImport*> PackageImports;
-		PackageImports.Reserve(BindingPackage->Imports.Num());
-		for (const FAvidScriptVmDynamicImport& Import : BindingPackage->Imports)
+		if (BindingPackage != nullptr)
 		{
-			PackageImports.Add(
-				MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName),
-				&Import);
+			PackageImports.Reserve(BindingPackage->Imports.Num());
+			for (const FAvidScriptVmDynamicImport& Import : BindingPackage->Imports)
+			{
+				PackageImports.Add(
+					MakeWasmtimeImportIdentityKey(Import.ModuleName, Import.ImportName),
+					&Import);
+			}
 		}
 		TMap<FString, int32> ActualImportCounts;
 		ActualImportCounts.Reserve(ModuleLayout.FunctionImports.Num());
@@ -2146,6 +2192,12 @@ private:
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 				ExpectedSignature = TEXT("(iii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
+				ExpectedSignature = TEXT("(I)f");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
+				ExpectedSignature = TEXT("(If)");
+				break;
 			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 				ExpectedSignature = TEXT("(iiiii)i");
 				break;
@@ -2160,8 +2212,11 @@ private:
 				OutError.Details = TEXT("The requested typed host shape is not implemented by this backend stage.");
 				return false;
 			}
+			const bool bSupplemental = Import.bSupplementalRuntimeAuthority;
 			if (Import.StableId.IsEmpty()
-				|| Import.BindingOrdinal == MAX_uint32
+				|| (bSupplemental
+					? Import.BindingOrdinal != MAX_uint32
+					: Import.BindingOrdinal == MAX_uint32)
 				|| Import.ModuleName.IsEmpty()
 				|| Import.ImportName.IsEmpty()
 				|| Import.Signature != ExpectedSignature)
@@ -2186,7 +2241,9 @@ private:
 					? 1
 					: 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Get != nullptr ? 1 : 0)
-				+ (Import.PreparedTarget.SelfPropertyI32Set != nullptr ? 1 : 0);
+				+ (Import.PreparedTarget.SelfPropertyI32Set != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyF32Get != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyF32Set != nullptr ? 1 : 0);
 			const bool bHasPreparedContext =
 				Import.PreparedTarget.Context != nullptr;
 			const bool bRequiresPreparedTarget =
@@ -2198,10 +2255,13 @@ private:
 					== EAvidScriptVmTypedHostShape::SelfPropertyI32Get
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
+			const bool bRequiresSupplementalPreparedTarget =
+				Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set;
 			if (bHasPreparedContext != (PreparedFunctionCount == 1)
 				|| (PreparedFunctionCount == 1
 					&& !Import.PreparedTarget.IsBoundForShape(Import.Shape))
-				|| (bRequiresPreparedTarget
+				|| ((bRequiresPreparedTarget || bRequiresSupplementalPreparedTarget)
 					&& !Import.PreparedTarget.IsBoundForShape(Import.Shape)))
 			{
 				OutError.Reset();
@@ -2221,12 +2281,15 @@ private:
 				OutError.Details = TEXT("Typed host import identities must be unique and cannot replace static imports.");
 				return false;
 			}
-			const FAvidScriptVmDynamicImport* const* PackageImport = PackageImports.Find(IdentityKey);
-			if (PackageImport == nullptr
-				|| (*PackageImport)->StableId != Import.StableId
-				|| (*PackageImport)->Ordinal != Import.BindingOrdinal
-				|| (*PackageImport)->Signature != Import.Signature
-				|| ActualImportCounts.FindRef(IdentityKey) != 1)
+			const FAvidScriptVmDynamicImport* const* PackageImport =
+				PackageImports.Find(IdentityKey);
+			const bool bAuthorityMatches = bSupplemental
+				? Import.PreparedTarget.IsBoundForShape(Import.Shape)
+				: PackageImport != nullptr
+					&& (*PackageImport)->StableId == Import.StableId
+					&& (*PackageImport)->Ordinal == Import.BindingOrdinal
+					&& (*PackageImport)->Signature == Import.Signature;
+			if (!bAuthorityMatches || ActualImportCounts.FindRef(IdentityKey) != 1)
 			{
 				OutError.Reset();
 				OutError.Category = TEXT("typed_host_binding_mismatch");
@@ -2344,6 +2407,26 @@ private:
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedSelfPropertyI32SetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
+				DefineFailure = avidscript_wasmtime_linker_define_self_property_f32_get(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyF32GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
+				DefineFailure = avidscript_wasmtime_linker_define_self_property_f32_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyF32SetCallback,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::SelfVectorValue:

@@ -21,6 +21,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptWasmReload, Log, All);
 
 namespace
 {
+thread_local const FScopedAvidScriptRuntimeImportAuthority*
+	GActiveRuntimeImportAuthority = nullptr;
+
 void PrepareManifestLoadResult(
 	FAvidScriptWasmReloadManifestLoadResult& OutResult,
 	const FString& ManifestPath)
@@ -318,7 +321,9 @@ bool LoadStateMigrationManifest(
 	{
 		if (!RequireStringField(Object, TEXT("policy"), OutManifest.Policy, OutResult)
 			|| !TryGetInt32Field(Object, TEXT("contract_version"), OutManifest.ContractVersion)
-			|| (OutManifest.Policy != TEXT("compatible") && OutManifest.Policy != TEXT("explicit"))
+			|| (OutManifest.Policy != TEXT("compatible")
+				&& OutManifest.Policy != TEXT("explicit")
+				&& OutManifest.Policy != TEXT("implicit"))
 			|| OutManifest.ContractVersion < FAvidScriptWasmStateMigrationManifest::MinContractVersion
 			|| OutManifest.ContractVersion > FAvidScriptWasmStateMigrationManifest::MaxContractVersion)
 		{
@@ -343,6 +348,17 @@ bool LoadStateMigrationManifest(
 			TEXT("manifest_invalid"),
 			TEXT("state_migration slots are missing or exceed the supported slot count"),
 			TEXT("reduce persistent C# state or rebuild the script manifest"));
+		return false;
+	}
+	if (SchemaVersion == FAvidScriptWasmStateMigrationManifest::SupportedSchemaVersion
+		&& OutManifest.Policy == TEXT("implicit")
+		&& !SlotValues->IsEmpty())
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("manifest_invalid"),
+			TEXT("state_migration implicit policy is only valid for an empty schema"),
+			TEXT("rebuild persistent C# state with an explicit migration policy"));
 		return false;
 	}
 
@@ -826,12 +842,27 @@ bool ValidateBindingPackageManifest(
 			bSeenDelegateOutputWrite = true;
 			continue;
 		}
-		const FAvidScriptValueCapabilityImportSpec* ValueCapabilitySpec =
-			FAvidScriptValueCapability::GetArrayImportSpecs().FindByPredicate(
+		const auto FindValueCapability = [&StableId](
+			const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs)
+		{
+			return Specs.FindByPredicate(
 				[&StableId](const FAvidScriptValueCapabilityImportSpec& Spec)
 				{
 					return StableId == Spec.StableId;
 				});
+		};
+		const FAvidScriptValueCapabilityImportSpec* ValueCapabilitySpec =
+			FindValueCapability(FAvidScriptValueCapability::GetArrayImportSpecs());
+		if (ValueCapabilitySpec == nullptr)
+		{
+			ValueCapabilitySpec = FindValueCapability(
+				FAvidScriptValueCapability::GetCompositeImportSpecs());
+		}
+		if (ValueCapabilitySpec == nullptr)
+		{
+			ValueCapabilitySpec = FindValueCapability(
+				FAvidScriptValueCapability::GetCompositeContainerImportSpecs());
+		}
 		if (ValueCapabilitySpec != nullptr)
 		{
 			const bool bIsValidValueCapability =
@@ -883,6 +914,35 @@ bool ValidateBindingPackageManifest(
 	}
 	const TConstArrayView<FAvidScriptValueCapabilityImportSpec>
 		ValueCapabilitySpecs = FAvidScriptValueCapability::GetArrayImportSpecs();
+	const TConstArrayView<FAvidScriptValueCapabilityImportSpec>
+		CompositeCapabilitySpecs = FAvidScriptValueCapability::GetCompositeImportSpecs();
+	const TConstArrayView<FAvidScriptValueCapabilityImportSpec>
+		ContainerCapabilitySpecs =
+			FAvidScriptValueCapability::GetCompositeContainerImportSpecs();
+	const auto ContainsAllCapabilities = [&SeenValueCapabilities](
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs)
+	{
+		for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
+		{
+			if (!SeenValueCapabilities.Contains(Spec.StableId))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const auto ContainsAnyCapability = [&SeenValueCapabilities](
+		const TConstArrayView<FAvidScriptValueCapabilityImportSpec> Specs)
+	{
+		for (const FAvidScriptValueCapabilityImportSpec& Spec : Specs)
+		{
+			if (SeenValueCapabilities.Contains(Spec.StableId))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
 	const bool bHasLegacyValueCapabilities =
 		SeenValueCapabilities.Num()
 			== FAvidScriptValueCapability::LegacyArrayImportCount
@@ -901,8 +961,8 @@ bool ValidateBindingPackageManifest(
 			return true;
 		}();
 	const bool bHasCurrentValueCapabilities =
-		SeenValueCapabilities.Num() == ValueCapabilitySpecs.Num();
-	if (!SeenValueCapabilities.IsEmpty()
+		ContainsAllCapabilities(ValueCapabilitySpecs);
+	if (ContainsAnyCapability(ValueCapabilitySpecs)
 		&& !bHasLegacyValueCapabilities
 		&& !bHasCurrentValueCapabilities)
 	{
@@ -910,6 +970,28 @@ bool ValidateBindingPackageManifest(
 			OutResult,
 			TEXT("binding_package_invalid"),
 			TEXT("package.json required_imports contains an incomplete value capability set"),
+			TEXT("republish the generated binding package"));
+		return false;
+	}
+	const bool bHasCompositeOnlyCapability =
+		SeenValueCapabilities.Contains(TEXT("avidscript.value_text_to_string.v1"));
+	if (bHasCompositeOnlyCapability
+		&& !ContainsAllCapabilities(CompositeCapabilitySpecs))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json required_imports contains an incomplete composite capability set"),
+			TEXT("republish the generated binding package"));
+		return false;
+	}
+	if (ContainsAnyCapability(ContainerCapabilitySpecs)
+		&& !ContainsAllCapabilities(ContainerCapabilitySpecs))
+	{
+		SetManifestLoadFailure(
+			OutResult,
+			TEXT("binding_package_invalid"),
+			TEXT("package.json required_imports contains an incomplete container capability set"),
 			TEXT("republish the generated binding package"));
 		return false;
 	}
@@ -1118,10 +1200,32 @@ bool LoadManifestDebugMap(
 }
 } // namespace
 
+FScopedAvidScriptRuntimeImportAuthority::FScopedAvidScriptRuntimeImportAuthority(
+	const TConstArrayView<FAvidScriptVmExpectedImport> InImports)
+	: Previous(GActiveRuntimeImportAuthority)
+{
+	Imports.Append(InImports.GetData(), InImports.Num());
+	GActiveRuntimeImportAuthority = this;
+}
+
+FScopedAvidScriptRuntimeImportAuthority::~FScopedAvidScriptRuntimeImportAuthority()
+{
+	check(GActiveRuntimeImportAuthority == this);
+	GActiveRuntimeImportAuthority = Previous;
+}
+
+TConstArrayView<FAvidScriptVmExpectedImport>
+FScopedAvidScriptRuntimeImportAuthority::GetImports() const
+{
+	return Imports;
+}
+
 bool ValidateAvidScriptWasmImportContract(
 	const FAvidScriptWasmModuleLayout& WasmLayout,
 	const FAvidScriptWasmReloadManifest& Manifest,
-	FAvidScriptWasmImportContractResult& OutResult)
+	FAvidScriptWasmImportContractResult& OutResult,
+	const TConstArrayView<FAvidScriptVmTypedHostImport> SupplementalTypedImports,
+	const TConstArrayView<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports)
 {
 	OutResult = FAvidScriptWasmImportContractResult();
 	TArray<FAvidScriptVmExpectedImport> ExpectedImports;
@@ -1143,7 +1247,9 @@ bool ValidateAvidScriptWasmImportContract(
 		VmBindingPackage,
 		ExpectedImports,
 		true,
-		VmError))
+		VmError,
+		SupplementalTypedImports,
+		RuntimeAuthorizedImports))
 	{
 		return true;
 	}
@@ -1172,7 +1278,9 @@ bool ValidateAvidScriptWasmImportContract(
 bool InspectAndValidateAvidScriptWasmImportContract(
 	TConstArrayView<uint8> Bytecode,
 	const FAvidScriptWasmReloadManifest& Manifest,
-	FAvidScriptWasmImportContractResult& OutResult)
+	FAvidScriptWasmImportContractResult& OutResult,
+	const TConstArrayView<FAvidScriptVmTypedHostImport> SupplementalTypedImports,
+	const TConstArrayView<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports)
 {
 	FAvidScriptWasmModuleLayout WasmLayout;
 	FString WasmLayoutError;
@@ -1184,7 +1292,12 @@ bool InspectAndValidateAvidScriptWasmImportContract(
 		OutResult.NextAction = TEXT("rebuild the WASM module with the supported backend");
 		return false;
 	}
-	return ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, OutResult);
+	return ValidateAvidScriptWasmImportContract(
+		WasmLayout,
+		Manifest,
+		OutResult,
+		SupplementalTypedImports,
+		RuntimeAuthorizedImports);
 }
 
 FAvidScriptWasmReloadManifest FAvidScriptWasmReloadManifest::MakeSmoke(const FString& InModuleId)
@@ -1561,7 +1674,14 @@ bool FAvidScriptWasmReloadManifestLoader::LoadFromFile(
 	}
 
 	FAvidScriptWasmImportContractResult ImportContractResult;
-	if (!ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, ImportContractResult))
+	if (!ValidateAvidScriptWasmImportContract(
+			WasmLayout,
+			Manifest,
+			ImportContractResult,
+			{},
+			GActiveRuntimeImportAuthority != nullptr
+				? GActiveRuntimeImportAuthority->GetImports()
+				: TConstArrayView<FAvidScriptVmExpectedImport>()))
 	{
 		SetManifestLoadFailure(
 			OutResult,

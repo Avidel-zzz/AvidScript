@@ -528,6 +528,7 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 	PreparedDynamicHostCalls.Reset();
 	if (!BindingPackage.IsValid())
 	{
+		TypedHostImports = SupplementalTypedHostImports;
 		return true;
 	}
 	if (!BindingPackage->BuildTypedHostImports(TypedHostImports, OutError))
@@ -740,6 +741,38 @@ bool FAvidScriptWasmRuntimeInstance::BuildPreparedTypedHostImports(
 		PreparedDynamicHostCalls.Reset();
 		return false;
 	}
+	TypedHostImports.Append(SupplementalTypedHostImports);
+	return true;
+}
+
+bool FAvidScriptWasmRuntimeInstance::SetSupplementalTypedHostImports(
+	const TConstArrayView<FAvidScriptVmTypedHostImport> Imports,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (IsLoaded())
+	{
+		OutError = TEXT("supplemental typed imports must be configured before VM load");
+		return false;
+	}
+	TSet<FString> Identities;
+	for (const FAvidScriptVmTypedHostImport& Import : Imports)
+	{
+		const FString Identity = Import.ModuleName + TEXT("\n") + Import.ImportName;
+		if (!Import.bSupplementalRuntimeAuthority
+			|| Import.BindingOrdinal != MAX_uint32
+			|| Import.StableId.IsEmpty()
+			|| Import.ModuleName.IsEmpty()
+			|| Import.ImportName.IsEmpty()
+			|| !Import.PreparedTarget.IsBoundForShape(Import.Shape)
+			|| Identities.Contains(Identity))
+		{
+			OutError = TEXT("supplemental typed import authority is invalid or duplicated");
+			return false;
+		}
+		Identities.Add(Identity);
+	}
+	SupplementalTypedHostImports = Imports;
 	return true;
 }
 
@@ -994,9 +1027,17 @@ bool FAvidScriptWasmRuntimeInstance::LoadArtifactView(
 
 	BindingPackage = InBindingPackage;
 	DebugMap = InDebugMap;
-	if (BindingPackage.IsValid())
+	if (BindingPackage.IsValid() || !SupplementalTypedHostImports.IsEmpty())
 	{
-		BindingInvocationScratch.SetNumUninitialized(BindingPackage->GetRequiredScratchSize());
+		if (BindingPackage.IsValid())
+		{
+			BindingInvocationScratch.SetNumUninitialized(
+				BindingPackage->GetRequiredScratchSize());
+		}
+		else
+		{
+			BindingInvocationScratch.Reset();
+		}
 		FString TypedImportError;
 		if (!BuildPreparedTypedHostImports(TypedImportError))
 		{

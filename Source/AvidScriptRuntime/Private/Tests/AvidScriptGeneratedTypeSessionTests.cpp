@@ -1,19 +1,26 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AvidScriptGeneratedTypeSessionTestTypes.h"
+#include "AvidScriptHash.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeDispatcher.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/StrongObjectPtr.h"
 
 namespace
 {
 constexpr TCHAR GeneratedExportName[] =
 	TEXT("avid_ue_0123456789abcdef0123456789abcdef");
+constexpr TCHAR GeneratedTypeGenerationKey[] =
+	TEXT("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 
 void AppendWasmSection(
 	TArray<uint8>& Module,
@@ -76,6 +83,7 @@ FString BuildGeneratedTypeSessionManifest()
   "schema_version": 4,
   "generator_version": "1.3",
   "module_name": "AvidScriptRuntime",
+  "generation_key_sha256": "%s",
   "types": [
     {
       "type_ordinal": 0,
@@ -95,8 +103,71 @@ FString BuildGeneratedTypeSessionManifest()
     }
   ]
 })JSON"),
+		GeneratedTypeGenerationKey,
 		*UAvidScriptGeneratedTypeSessionTestObject::StaticClass()->GetPathName(),
 		GeneratedExportName);
+}
+
+bool SaveUtf8Fixture(
+	const FString& Path,
+	const FString& Text,
+	TArray<uint8>& OutBytes)
+{
+	FTCHARToUTF8 Utf8(*Text);
+	OutBytes.Reset(Utf8.Length());
+	OutBytes.Append(
+		reinterpret_cast<const uint8*>(Utf8.Get()),
+		Utf8.Length());
+	return FFileHelper::SaveArrayToFile(OutBytes, *Path);
+}
+
+FString BuildRuntimeManifestFixture(const FString& WasmSha256)
+{
+	return FString::Printf(
+		TEXT(R"JSON({
+  "schema_version": 1,
+  "module_id": "generated_type_runtime_host",
+  "abi_version": 1,
+  "language": "csharp",
+  "source": { "file": "generated-type-fixture.cs" },
+  "wasm": { "file": "generated-types.wasm", "sha256": "%s" },
+  "required_exports": ["avid_on_begin_play"],
+  "required_imports": [],
+  "toolchain": { "compiler": "avidscript-csharp-guest-wasm" }
+})JSON"),
+		*WasmSha256);
+}
+
+FString BuildPackageDescriptorFixture(
+	const FString& TypeManifestSha256,
+	const FString& RuntimeManifestSha256)
+{
+	const FString PackageId = FAvidScriptHash::Sha256HexUtf8(FString::Printf(
+		TEXT("%s\n%s\n%s"),
+		GeneratedTypeGenerationKey,
+		*TypeManifestSha256,
+		*RuntimeManifestSha256));
+	return FString::Printf(
+		TEXT(R"JSON({
+  "schema_version": 1,
+  "package_id": "%s",
+  "module_name": "AvidScriptRuntime",
+  "runtime_module_id": "generated_type_runtime_host",
+  "execution_backend": "wasmtime_jit",
+  "generation_key_sha256": "%s",
+  "type_manifest": {
+    "file": "generated-types.json",
+    "sha256": "%s"
+  },
+  "runtime_manifest": {
+    "file": "generated-types.avidscript.json",
+    "sha256": "%s"
+  }
+})JSON"),
+		*PackageId,
+		GeneratedTypeGenerationKey,
+		*TypeManifestSha256,
+		*RuntimeManifestSha256);
 }
 }
 
@@ -213,36 +284,73 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 {
 	static_cast<void>(Parameters);
-	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
 	FString Error;
+	const FString PackageRoot = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::ProjectSavedDir(),
+		TEXT("AvidScriptTests/GeneratedTypeRuntimePackage")));
+	IFileManager::Get().DeleteDirectory(*PackageRoot, false, true);
 	if (!TestTrue(
-		TEXT("Generated type registry builds for Runtime host"),
-		FAvidScriptGeneratedTypeRegistry::BuildFromJson(
-			BuildGeneratedTypeSessionManifest(),
-			Registry,
-			Error)))
+		TEXT("Generated type package fixture directory is created"),
+		IFileManager::Get().MakeDirectory(*PackageRoot, true)))
 	{
-		AddError(Error);
 		return true;
 	}
-
-	FAvidScriptVmBackendSelection Selection;
-	Selection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
-	Selection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
-	Selection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
-	FAvidScriptWasmReloadManifest Manifest;
-	Manifest.ModuleId = TEXT("generated_type_runtime_host");
-	Manifest.AbiVersion = FAvidScriptWasmReloadManifest::SupportedAbiVersion;
-	Manifest.Language = TEXT("wasm");
-	Manifest.RequiredExports = { TEXT("avid_on_begin_play") };
 	const TArray<uint8> Module = BuildGeneratedTypeSessionModule();
-	const FAvidScriptRuntimeArtifact Artifact =
-		FAvidScriptRuntimeArtifact::FromCanonicalWasm(Manifest, Module, Selection);
-	FAvidScriptGeneratedTypeRuntimeHost& Host =
-		FAvidScriptGeneratedTypeRuntimeHost::Get();
+	const FString WasmPath = FPaths::Combine(PackageRoot, TEXT("generated-types.wasm"));
+	const FString TypeManifestPath = FPaths::Combine(PackageRoot, TEXT("generated-types.json"));
+	const FString RuntimeManifestPath = FPaths::Combine(
+		PackageRoot,
+		TEXT("generated-types.avidscript.json"));
+	const FString DescriptorPath = FPaths::Combine(PackageRoot, TEXT("package.json"));
+	TestTrue(
+		TEXT("Generated type package WASM writes"),
+		FFileHelper::SaveArrayToFile(Module, *WasmPath));
+	TArray<uint8> TypeManifestBytes;
+	TArray<uint8> RuntimeManifestBytes;
+	TArray<uint8> DescriptorBytes;
+	const FString TypeManifestJson = BuildGeneratedTypeSessionManifest();
+	TestTrue(
+		TEXT("Generated type manifest writes"),
+		SaveUtf8Fixture(TypeManifestPath, TypeManifestJson, TypeManifestBytes));
+	const FString RuntimeManifestJson = BuildRuntimeManifestFixture(
+		FAvidScriptHash::Sha256Hex(Module));
+	TestTrue(
+		TEXT("Generated type Runtime manifest writes"),
+		SaveUtf8Fixture(
+			RuntimeManifestPath,
+			RuntimeManifestJson,
+			RuntimeManifestBytes));
+	const FString TypeManifestSha256 = FAvidScriptHash::Sha256Hex(TypeManifestBytes);
+	const FString RuntimeManifestSha256 = FAvidScriptHash::Sha256Hex(RuntimeManifestBytes);
+	const FString CorruptRuntimeSha256 = FString::ChrN(64, TEXT('f'));
+	TestTrue(
+		TEXT("Corrupt generated package descriptor writes"),
+		SaveUtf8Fixture(
+			DescriptorPath,
+			BuildPackageDescriptorFixture(
+				TypeManifestSha256,
+				CorruptRuntimeSha256),
+			DescriptorBytes));
+	TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> Host =
+		FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting();
+	ON_SCOPE_EXIT
+	{
+		Host->Shutdown();
+	};
+	TestFalse(
+		TEXT("Generated package descriptor rejects a Runtime manifest hash mismatch"),
+		Host->InstallPackageFromDescriptorFile(DescriptorPath, Error));
+	TestTrue(
+		TEXT("Valid generated package descriptor writes"),
+		SaveUtf8Fixture(
+			DescriptorPath,
+			BuildPackageDescriptorFixture(
+				TypeManifestSha256,
+				RuntimeManifestSha256),
+			DescriptorBytes));
 	if (!TestTrue(
-		TEXT("Runtime host installs one immutable generated package"),
-		Host.InstallPackage(Registry, Artifact, Error)))
+		TEXT("Runtime host installs a verified generated package descriptor"),
+		Host->InstallPackageFromDescriptorFile(DescriptorPath, Error)))
 	{
 		AddError(Error);
 		return true;
@@ -252,19 +360,19 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 		NewObject<UAvidScriptGeneratedTypeSessionTestObject>());
 	if (!TestTrue(
 		TEXT("Runtime host creates ObjectHandle, Session and router registration"),
-		Host.BeginInstance(*Receiver, 0, Error)))
+		Host->BeginInstance(*Receiver, 0, Error)))
 	{
 		AddError(Error);
-		Host.ClearPackage(Error);
+		Host->ClearPackage(Error);
 		return true;
 	}
-	TestTrue(TEXT("Runtime host records the active receiver"), Host.IsInstanceActive(*Receiver));
-	TestEqual(TEXT("Runtime host owns one Session"), Host.GetActiveInstanceCount(), 1);
-	TestEqual(TEXT("Runtime host owns one anchored ObjectHandle"), Host.GetRegisteredHandleCount(), 1);
+	TestTrue(TEXT("Runtime host records the active receiver"), Host->IsInstanceActive(*Receiver));
+	TestEqual(TEXT("Runtime host owns one Session"), Host->GetActiveInstanceCount(), 1);
+	TestEqual(TEXT("Runtime host owns one anchored ObjectHandle"), Host->GetRegisteredHandleCount(), 1);
 	TestTrue(
 		TEXT("Repeated native Super-chain activation is idempotent"),
-		Host.BeginInstance(*Receiver, 0, Error));
-	TestEqual(TEXT("Idempotent activation preserves one Session"), Host.GetActiveInstanceCount(), 1);
+		Host->BeginInstance(*Receiver, 0, Error));
+	TestEqual(TEXT("Idempotent activation preserves one Session"), Host->GetActiveInstanceCount(), 1);
 
 	int32 ScriptResult = 0;
 	TestTrue(
@@ -279,14 +387,14 @@ bool FAvidScriptGeneratedTypeRuntimeHostTest::RunTest(const FString& Parameters)
 
 	TestTrue(
 		TEXT("Runtime host tears down Session, route and ObjectHandle"),
-		Host.EndInstance(*Receiver, Error));
-	TestFalse(TEXT("Ended receiver is no longer active"), Host.IsInstanceActive(*Receiver));
-	TestEqual(TEXT("Runtime host releases the Session"), Host.GetActiveInstanceCount(), 0);
-	TestEqual(TEXT("Runtime host releases the ObjectHandle"), Host.GetRegisteredHandleCount(), 0);
+		Host->EndInstance(*Receiver, Error));
+	TestFalse(TEXT("Ended receiver is no longer active"), Host->IsInstanceActive(*Receiver));
+	TestEqual(TEXT("Runtime host releases the Session"), Host->GetActiveInstanceCount(), 0);
+	TestEqual(TEXT("Runtime host releases the ObjectHandle"), Host->GetRegisteredHandleCount(), 0);
 	TestTrue(
 		TEXT("Repeated native Super-chain teardown is idempotent"),
-		Host.EndInstance(*Receiver, Error));
-	TestTrue(TEXT("Inactive package can be cleared"), Host.ClearPackage(Error));
+		Host->EndInstance(*Receiver, Error));
+	TestTrue(TEXT("Inactive package can be cleared"), Host->ClearPackage(Error));
 	return true;
 }
 

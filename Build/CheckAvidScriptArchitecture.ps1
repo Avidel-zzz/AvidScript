@@ -2704,9 +2704,9 @@ $ManifestLoadImportSlice = Get-SourceSlice `
     'OutResult.ByteSize = OutBytecode.Num();' `
     'manifest loader import authorization'
 Test-RequiredTokenSequence $ManifestLoadImportSlice @(
-    'InspectAvidScriptWasmModuleLayout(',
-    'TryGetArrayField(TEXT("required_imports")',
-    'if (!ValidateAvidScriptWasmImportContract(WasmLayout, Manifest, ImportContractResult))'
+	'InspectAvidScriptWasmModuleLayout(',
+	'TryGetArrayField(TEXT("required_imports")',
+	'if (!ValidateAvidScriptWasmImportContract('
 ) 'manifest loader must inspect actual imports, parse expected imports, and apply the shared policy in order'
 
 $RuntimeSessionImportSlice = Get-SourceSlice `

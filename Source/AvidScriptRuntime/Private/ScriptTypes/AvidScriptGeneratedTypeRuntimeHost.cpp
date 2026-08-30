@@ -1,9 +1,17 @@
 #include "ScriptTypes/AvidScriptGeneratedTypeRuntimeHost.h"
 
+#include "AvidScriptHash.h"
 #include "AvidScriptObjectRegistry.h"
 #include "AvidScriptRuntimeArtifact.h"
 #include "AvidScriptRuntimeSession.h"
+#include "Dom/JsonObject.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "ScriptTypes/AvidScriptGeneratedTypeRegistry.h"
+#include "Validation/AvidScriptWasmImportPolicy.h"
 #include "UObject/ObjectKey.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAvidScriptGeneratedTypeRuntimeHost, Log, All);
@@ -23,6 +31,116 @@ struct FGeneratedTypeRuntimeInstance
 	uint32 TypeOrdinal = 0;
 	TUniquePtr<FAvidScriptRuntimeSession> Session;
 };
+
+struct FGeneratedTypePackageFile
+{
+	FString RelativePath;
+	FString Sha256;
+};
+
+FString NormalizePackagePath(const FString& Path)
+{
+	FString Normalized = FPaths::ConvertRelativePathToFull(Path);
+	FPaths::CollapseRelativeDirectories(Normalized, true);
+	FPaths::NormalizeFilename(Normalized);
+	return Normalized;
+}
+
+bool IsLowercaseSha256(const FString& Value)
+{
+	if (Value.Len() != 64)
+	{
+		return false;
+	}
+	for (const TCHAR Character : Value)
+	{
+		if (!FChar::IsDigit(Character)
+			&& (Character < TEXT('a') || Character > TEXT('f')))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+bool ReadPackageFileEntry(
+	const TSharedPtr<FJsonObject>& Root,
+	const TCHAR* FieldName,
+	FGeneratedTypePackageFile& OutEntry)
+{
+	const TSharedPtr<FJsonObject>* EntryObject = nullptr;
+	return Root.IsValid()
+		&& Root->TryGetObjectField(FieldName, EntryObject)
+		&& EntryObject != nullptr
+		&& EntryObject->IsValid()
+		&& (*EntryObject)->TryGetStringField(TEXT("file"), OutEntry.RelativePath)
+		&& (*EntryObject)->TryGetStringField(TEXT("sha256"), OutEntry.Sha256)
+		&& !OutEntry.RelativePath.IsEmpty()
+		&& FPaths::IsRelative(OutEntry.RelativePath)
+		&& IsLowercaseSha256(OutEntry.Sha256);
+}
+
+bool ResolvePackageFile(
+	const FString& DescriptorPath,
+	const FGeneratedTypePackageFile& Entry,
+	FString& OutPath,
+	FString& OutError)
+{
+	const FString ProjectRoot = NormalizePackagePath(FPaths::ProjectDir());
+	const FString DescriptorDirectory = NormalizePackagePath(FPaths::GetPath(DescriptorPath));
+	const FString DescriptorCandidate = NormalizePackagePath(
+		FPaths::Combine(DescriptorDirectory, Entry.RelativePath));
+	const FString ProjectCandidate = NormalizePackagePath(
+		FPaths::Combine(ProjectRoot, Entry.RelativePath));
+	for (const FString& Candidate : { DescriptorCandidate, ProjectCandidate })
+	{
+		if ((FPaths::IsUnderDirectory(Candidate, ProjectRoot) || Candidate == ProjectRoot)
+			&& FPaths::FileExists(Candidate))
+		{
+			OutPath = Candidate;
+			return true;
+		}
+	}
+
+	OutError = FString::Printf(
+		TEXT("generated type package file is missing or outside the project: %s"),
+		*Entry.RelativePath);
+	return false;
+}
+
+bool LoadVerifiedPackageFile(
+	const FString& Path,
+	const FString& ExpectedSha256,
+	TArray<uint8>& OutBytes,
+	FString& OutError)
+{
+	if (!FFileHelper::LoadFileToArray(OutBytes, *Path))
+	{
+		OutError = FString::Printf(
+			TEXT("generated type package file could not be read: %s"),
+			*Path);
+		return false;
+	}
+	const FString ActualSha256 = FAvidScriptHash::Sha256Hex(OutBytes);
+	if (ActualSha256 != ExpectedSha256)
+	{
+		OutError = FString::Printf(
+			TEXT("generated type package file hash mismatch: %s"),
+			*Path);
+		return false;
+	}
+	return true;
+}
+
+bool DeserializeJsonObject(
+	const TArray<uint8>& Bytes,
+	TSharedPtr<FJsonObject>& OutObject)
+{
+	FString Json;
+	FFileHelper::BufferToString(Json, Bytes.GetData(), Bytes.Num());
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	return FJsonSerializer::Deserialize(Reader, OutObject) && OutObject.IsValid();
+}
 
 bool TeardownInstance(
 	FGeneratedTypeRuntimeInstance& Instance,
@@ -89,6 +207,17 @@ FAvidScriptGeneratedTypeRuntimeHost& FAvidScriptGeneratedTypeRuntimeHost::Get()
 	static FAvidScriptGeneratedTypeRuntimeHost Host;
 	return Host;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost>
+FAvidScriptGeneratedTypeRuntimeHost::CreateIsolatedForTesting()
+{
+	TUniquePtr<FAvidScriptGeneratedTypeRuntimeHost> Host(
+		new FAvidScriptGeneratedTypeRuntimeHost());
+	Host->Startup();
+	return Host;
+}
+#endif
 
 FAvidScriptGeneratedTypeRuntimeHost::FAvidScriptGeneratedTypeRuntimeHost() = default;
 
@@ -165,6 +294,204 @@ bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackage(
 
 	Impl->Package.Emplace(FGeneratedTypeRuntimePackage{ Registry, Artifact });
 	return true;
+}
+
+bool FAvidScriptGeneratedTypeRuntimeHost::InstallPackageFromDescriptorFile(
+	const FString& DescriptorPath,
+	FString& OutError)
+{
+	OutError.Reset();
+	if (!Impl || !Impl->bStarted || !IsInGameThread())
+	{
+		OutError = TEXT("generated type package installation requires a started GameThread host");
+		return false;
+	}
+	if (!Impl->Instances.IsEmpty())
+	{
+		OutError = TEXT("generated type package replacement requires zero active instances");
+		return false;
+	}
+
+	const FString NormalizedDescriptorPath = NormalizePackagePath(DescriptorPath);
+	TArray<uint8> DescriptorBytes;
+	if (!FFileHelper::LoadFileToArray(DescriptorBytes, *NormalizedDescriptorPath))
+	{
+		OutError = FString::Printf(
+			TEXT("generated type package descriptor could not be read: %s"),
+			*NormalizedDescriptorPath);
+		return false;
+	}
+	TSharedPtr<FJsonObject> Descriptor;
+	double SchemaVersion = 0.0;
+	FString PackageId;
+	FString ModuleName;
+	FString RuntimeModuleId;
+	FString ExecutionBackend;
+	FString GenerationKey;
+	FGeneratedTypePackageFile TypeManifestEntry;
+	FGeneratedTypePackageFile RuntimeManifestEntry;
+	if (!DeserializeJsonObject(DescriptorBytes, Descriptor)
+		|| !Descriptor->TryGetNumberField(TEXT("schema_version"), SchemaVersion)
+		|| SchemaVersion != 1.0
+		|| !Descriptor->TryGetStringField(TEXT("package_id"), PackageId)
+		|| !IsLowercaseSha256(PackageId)
+		|| !Descriptor->TryGetStringField(TEXT("module_name"), ModuleName)
+		|| ModuleName.IsEmpty()
+		|| !Descriptor->TryGetStringField(TEXT("runtime_module_id"), RuntimeModuleId)
+		|| RuntimeModuleId.IsEmpty()
+		|| !Descriptor->TryGetStringField(TEXT("execution_backend"), ExecutionBackend)
+		|| ExecutionBackend != TEXT("wasmtime_jit")
+		|| !Descriptor->TryGetStringField(TEXT("generation_key_sha256"), GenerationKey)
+		|| !IsLowercaseSha256(GenerationKey)
+		|| !ReadPackageFileEntry(Descriptor, TEXT("type_manifest"), TypeManifestEntry)
+		|| !ReadPackageFileEntry(Descriptor, TEXT("runtime_manifest"), RuntimeManifestEntry))
+	{
+		OutError = TEXT("generated type package descriptor schema is invalid");
+		return false;
+	}
+	const FString ExpectedPackageId = FAvidScriptHash::Sha256HexUtf8(FString::Printf(
+		TEXT("%s\n%s\n%s"),
+		*GenerationKey,
+		*TypeManifestEntry.Sha256,
+		*RuntimeManifestEntry.Sha256));
+	if (PackageId != ExpectedPackageId)
+	{
+		OutError = TEXT("generated type package identity does not match its manifest hashes");
+		return false;
+	}
+
+	FString TypeManifestPath;
+	FString RuntimeManifestPath;
+	if (!ResolvePackageFile(
+			NormalizedDescriptorPath,
+			TypeManifestEntry,
+			TypeManifestPath,
+			OutError)
+		|| !ResolvePackageFile(
+			NormalizedDescriptorPath,
+			RuntimeManifestEntry,
+			RuntimeManifestPath,
+			OutError))
+	{
+		return false;
+	}
+
+	TArray<uint8> TypeManifestBytes;
+	TArray<uint8> RuntimeManifestBytes;
+	if (!LoadVerifiedPackageFile(
+			TypeManifestPath,
+			TypeManifestEntry.Sha256,
+			TypeManifestBytes,
+			OutError)
+		|| !LoadVerifiedPackageFile(
+			RuntimeManifestPath,
+			RuntimeManifestEntry.Sha256,
+			RuntimeManifestBytes,
+			OutError))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> TypeManifestObject;
+	double TypeSchemaVersion = 0.0;
+	FString TypeModuleName;
+	FString TypeGenerationKey;
+	if (!DeserializeJsonObject(TypeManifestBytes, TypeManifestObject)
+		|| !TypeManifestObject->TryGetNumberField(TEXT("schema_version"), TypeSchemaVersion)
+		|| TypeSchemaVersion != FAvidScriptGeneratedTypeRegistry::ManifestSchemaVersion
+		|| !TypeManifestObject->TryGetStringField(TEXT("module_name"), TypeModuleName)
+		|| TypeModuleName != ModuleName
+		|| !TypeManifestObject->TryGetStringField(
+			TEXT("generation_key_sha256"),
+			TypeGenerationKey)
+		|| TypeGenerationKey != GenerationKey)
+	{
+		OutError = TEXT("generated type manifest identity does not match its package descriptor");
+		return false;
+	}
+
+	FString TypeManifestJson;
+	FFileHelper::BufferToString(
+		TypeManifestJson,
+		TypeManifestBytes.GetData(),
+		TypeManifestBytes.Num());
+	TSharedPtr<const FAvidScriptGeneratedTypeRegistrySnapshot> Registry;
+	if (!FAvidScriptGeneratedTypeRegistry::BuildFromJson(
+		TypeManifestJson,
+		Registry,
+		OutError))
+	{
+		return false;
+	}
+	TArray<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports;
+	for (const FAvidScriptGeneratedTypePlan& Type : Registry->GetTypes())
+	{
+		for (const FAvidScriptGeneratedMemberPlan& Member : Type.Members)
+		{
+			if (Member.Kind != EAvidScriptGeneratedMemberKind::Property)
+			{
+				continue;
+			}
+			if (!Member.GetterImportName.IsEmpty())
+			{
+				RuntimeAuthorizedImports.Add({
+					TEXT("avidscript"),
+					Member.GetterImportName
+				});
+			}
+			if (!Member.SetterImportName.IsEmpty())
+			{
+				RuntimeAuthorizedImports.Add({
+					TEXT("avidscript"),
+					Member.SetterImportName
+				});
+			}
+		}
+	}
+
+	FAvidScriptRuntimeArtifact Artifact;
+	FAvidScriptRuntimeArtifactLoadResult LoadResult;
+	const FScopedAvidScriptRuntimeImportAuthority RuntimeImportAuthority(
+		RuntimeAuthorizedImports);
+	if (!FAvidScriptRuntimeArtifactLoader::LoadFromFile(
+		RuntimeManifestPath,
+		Artifact,
+		LoadResult))
+	{
+		OutError = LoadResult.CanonicalResult.ErrorMessage.IsEmpty()
+			? TEXT("generated type Runtime artifact failed to load")
+			: LoadResult.CanonicalResult.ErrorMessage;
+		return false;
+	}
+	if (Artifact.Manifest.ModuleId != RuntimeModuleId)
+	{
+		OutError = TEXT("generated type Runtime module identity does not match its package descriptor");
+		return false;
+	}
+	const bool bHasNonGeneratedImport =
+		Artifact.Manifest.RequiredImports.ContainsByPredicate(
+			[&RuntimeAuthorizedImports](
+				const FAvidScriptWasmRequiredImport& RequiredImport)
+			{
+				return !RuntimeAuthorizedImports.ContainsByPredicate(
+					[&RequiredImport](
+						const FAvidScriptVmExpectedImport& AuthorizedImport)
+					{
+						return AuthorizedImport.ModuleName == RequiredImport.ModuleName
+							&& AuthorizedImport.ImportName == RequiredImport.ImportName;
+					});
+			});
+	if (!bHasNonGeneratedImport)
+	{
+		Artifact.Manifest.BindingPackage.Reset();
+	}
+	Artifact.BackendSelection.BackendKind = EAvidScriptVmBackendKind::Wasmtime;
+	Artifact.BackendSelection.ExecutionMode = EAvidScriptVmExecutionMode::Jit;
+	Artifact.BackendSelection.ArtifactFormat = EAvidScriptVmArtifactFormat::WasmBytecode;
+	Artifact.RequestedBackend = ExecutionBackend;
+	Artifact.SelectedBackend = ExecutionBackend;
+	Artifact.ExecutionPolicy = TEXT("generated_type_package");
+	return InstallPackage(Registry, Artifact, OutError);
 }
 
 bool FAvidScriptGeneratedTypeRuntimeHost::ClearPackage(FString& OutError)

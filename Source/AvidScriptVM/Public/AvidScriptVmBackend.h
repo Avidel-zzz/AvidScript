@@ -448,7 +448,9 @@ AVIDSCRIPTVM_API bool ValidateAvidScriptVmImportContract(
 	const FAvidScriptVmBindingPackage* BindingPackage,
 	TConstArrayView<FAvidScriptVmExpectedImport> ExpectedImports,
 	bool bEnforceExpectedImports,
-	FAvidScriptVmError& OutError);
+	FAvidScriptVmError& OutError,
+	TConstArrayView<FAvidScriptVmTypedHostImport> SupplementalTypedImports = {},
+	TConstArrayView<FAvidScriptVmExpectedImport> RuntimeAuthorizedImports = {});
 
 struct FAvidScriptVmLoadConfig
 {

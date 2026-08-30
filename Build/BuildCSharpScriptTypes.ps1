@@ -5,9 +5,12 @@ param(
     [Parameter(Mandatory = $true)][string]$BindingPackageManifestPath,
     [string]$OutputRoot = "",
     [string]$ArtifactRoot = "",
+    [string]$ProjectPath = "",
     [string]$ModuleName = "AvidScriptGenerated",
+    [string]$RuntimeModuleId = "avidscript_generated",
     [string]$UnrealVersion = "5.8",
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [switch]$SkipRuntimePackage
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,8 +20,10 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PluginRoot)
 $BindingPackageFunctions = Join-Path $BuildDir "AvidScriptCSharpBindingPackage.ps1"
 $FrontendScript = Join-Path $BuildDir "InvokeCSharpFrontend.ps1"
 $SemanticScript = Join-Path $BuildDir "InvokeCSharpSemantic.ps1"
+$RuntimeBuildScript = Join-Path $BuildDir "BuildCSharpActorLifecycle.ps1"
 $GeneratorProject = Join-Path $PluginRoot "Tools\AvidScript.UeTypeGenerator\AvidScript.UeTypeGenerator.csproj"
 $GlobalJsonPath = Join-Path $PluginRoot "global.json"
+$DefaultProjectPath = Join-Path $PluginRoot "Samples\CSharp\ActorLifecycle\AvidScript.ActorLifecycle.csproj"
 $Utf8 = [System.Text.UTF8Encoding]::new($false)
 
 foreach ($RequiredFile in @(
@@ -43,10 +48,21 @@ if ([string]::IsNullOrWhiteSpace($SourceId) -or
 if ($ModuleName -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
     throw "ModuleName must be an ASCII C++ identifier."
 }
+if ([string]::IsNullOrWhiteSpace($RuntimeModuleId)) {
+    throw "RuntimeModuleId must not be empty."
+}
 
 $DotNetPath = (Resolve-Path -LiteralPath $DotNetPath).Path
 $SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
 $BindingPackageManifestPath = (Resolve-Path -LiteralPath $BindingPackageManifestPath).Path
+if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
+    $ProjectPath = $DefaultProjectPath
+}
+$ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
+if (-not $SkipRuntimePackage -and
+    -not (Test-Path -LiteralPath $RuntimeBuildScript -PathType Leaf)) {
+    throw "Formal C# runtime build script is missing: $RuntimeBuildScript"
+}
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $PluginRoot "Source\AvidScriptGenerated"
 }
@@ -72,7 +88,11 @@ $SourceSha256 = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.T
 $RunRoot = Join-Path $ArtifactRoot $SourceSha256
 $FrontendPath = Join-Path $RunRoot "script-types.frontend.json"
 $SemanticPath = Join-Path $RunRoot "script-types.semantic.json"
+$GeneratedPackagePath = Join-Path $OutputRoot "AvidScriptGeneratedPackage.json"
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
+if (Test-Path -LiteralPath $GeneratedPackagePath -PathType Leaf) {
+    Remove-Item -LiteralPath $GeneratedPackagePath -Force
+}
 
 & $FrontendScript `
     -DotNetPath $DotNetPath `
@@ -164,10 +184,81 @@ foreach ($Output in @($GeneratedManifest.outputs)) {
     }
 }
 
+$RuntimeManifestPath = ""
+$PackageId = ""
+if (-not $SkipRuntimePackage) {
+    $RuntimeOutputRoot = Join-Path $RunRoot "Runtime"
+    $RuntimeArtifactStem = "generated_types"
+    $RuntimeManifestPath = Join-Path $RuntimeOutputRoot "$RuntimeArtifactStem.avidscript.json"
+    & $RuntimeBuildScript `
+        -DotNetPath $DotNetPath `
+        -OutputRoot $RuntimeOutputRoot `
+        -Configuration $Configuration `
+        -SourcePath $SourcePath `
+        -ProjectPath $ProjectPath `
+        -ModuleId $RuntimeModuleId `
+        -ArtifactStem $RuntimeArtifactStem `
+        -ManifestPath $RuntimeManifestPath `
+        -BindingPackagePath $BindingPackageManifestPath `
+        -RuntimeBindingPackagePath $BindingPackageManifestPath `
+        -AllowGeneratedTypeImports `
+        -GeneratedTypeManifestPath $GeneratedManifestPath
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $RuntimeManifestPath -PathType Leaf)) {
+        throw "Formal C# generated type Runtime package failed with exit code $LASTEXITCODE."
+    }
+
+    $RuntimeManifest = Get-Content -Raw -LiteralPath $RuntimeManifestPath | ConvertFrom-Json
+    if ([int]$RuntimeManifest.schema_version -ne 1 -or
+        [string]$RuntimeManifest.module_id -cne $RuntimeModuleId -or
+        [string]$RuntimeManifest.language -cne "csharp" -or
+        @($RuntimeManifest.required_exports).Count -eq 0) {
+        throw "Generated type Runtime manifest identity is invalid."
+    }
+
+    $TypeManifestSha256 = (Get-FileHash -LiteralPath $GeneratedManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $RuntimeManifestSha256 = (Get-FileHash -LiteralPath $RuntimeManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $PackageIdentityBytes = [System.Text.Encoding]::UTF8.GetBytes(
+        "$($GeneratedManifest.generation_key_sha256)`n$TypeManifestSha256`n$RuntimeManifestSha256")
+    $PackageId = [System.Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData($PackageIdentityBytes)).ToLowerInvariant()
+    $TypeManifestRelativePath = [System.IO.Path]::GetRelativePath(
+        $OutputRoot,
+        $GeneratedManifestPath).Replace('\', '/')
+    $RuntimeManifestRelativePath = [System.IO.Path]::GetRelativePath(
+        $OutputRoot,
+        $RuntimeManifestPath).Replace('\', '/')
+    $PackageDescriptor = [ordered]@{
+        schema_version = 1
+        package_id = $PackageId
+        module_name = $ModuleName
+        runtime_module_id = $RuntimeModuleId
+        execution_backend = "wasmtime_jit"
+        generation_key_sha256 = [string]$GeneratedManifest.generation_key_sha256
+        type_manifest = [ordered]@{
+            file = $TypeManifestRelativePath
+            sha256 = $TypeManifestSha256
+        }
+        runtime_manifest = [ordered]@{
+            file = $RuntimeManifestRelativePath
+            sha256 = $RuntimeManifestSha256
+        }
+    }
+    $PackageJson = $PackageDescriptor | ConvertTo-Json -Depth 8
+    $PackageTempPath = "$GeneratedPackagePath.tmp"
+    [System.IO.File]::WriteAllText(
+        $PackageTempPath,
+        $PackageJson + [System.Environment]::NewLine,
+        $Utf8)
+    Move-Item -LiteralPath $PackageTempPath -Destination $GeneratedPackagePath -Force
+}
+
 Write-Host "AvidScript C# script type generation succeeded."
 Write-Host "  source_id=$SourceId"
 Write-Host "  binding_package=$($BindingPackage.PackageHash)"
 Write-Host "  semantic=$SemanticPath"
 Write-Host "  ue_types=$(@($GeneratedManifest.types).Count)"
 Write-Host "  generation_key=$($GeneratedManifest.generation_key_sha256)"
+Write-Host "  runtime_package=$(if ($SkipRuntimePackage) { 'skipped' } else { $RuntimeManifestPath })"
+Write-Host "  package_id=$(if ($SkipRuntimePackage) { 'none' } else { $PackageId })"
 Write-Host "  output=$OutputRoot"
