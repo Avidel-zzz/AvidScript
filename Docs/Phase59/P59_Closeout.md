@@ -34,6 +34,8 @@
   UClass/type/member 注册表已落地；构建时缓存 UClass/FProperty/UFunction，热路径只消费 ordinal。
 - `P59.C2c2`：Session-owned receiver route、canonical function prepared call、packed i64 ObjectHandle、
   Wasmtime JIT UFunction dispatch 与 reload generation replacement 已落地；首条 `(this)->int32` 已执行。
+- `P59.C2c3`：脚本定义 UClass 的 shell-driven lifecycle export 合同已落地；模块级生命周期仅保留
+  no-op 兼容 shim，对象逻辑只走 canonical export，重复 lifecycle alias 在 Guest 编译期 fail closed。
 
 ## 待完成
 

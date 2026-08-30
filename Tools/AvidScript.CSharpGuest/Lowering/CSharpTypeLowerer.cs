@@ -52,6 +52,23 @@ internal static class CSharpTypeLowerer
                 rawTypes.Add(lowered);
             }
         }
+        if (document.UeTypeDeclarations.Count != 0)
+        {
+            AddTypeIfMissing(rawTypes, new GuestType(
+                CSharpGuestIds.VoidTypeId,
+                "void",
+                "none",
+                Array.Empty<GuestField>(),
+                null,
+                null,
+                0,
+                1));
+            AddTypeIfMissing(rawTypes, Scalar(
+                CSharpGuestIds.Float32TypeId,
+                "f32",
+                4,
+                4));
+        }
 
         foreach (SemanticAsyncStateFrame frame in document.AsyncMethods
             .SelectMany(method => method.Segments)
@@ -443,6 +460,14 @@ internal static class CSharpTypeLowerer
             null,
             size,
             alignment);
+    }
+
+    private static void AddTypeIfMissing(ICollection<GuestType> types, GuestType requiredType)
+    {
+        if (!types.Any(type => string.Equals(type.Id, requiredType.Id, StringComparison.Ordinal)))
+        {
+            types.Add(requiredType);
+        }
     }
 
     private static CSharpTypeLoweringResult Failure(IEnumerable<GuestDiagnostic> diagnostics)

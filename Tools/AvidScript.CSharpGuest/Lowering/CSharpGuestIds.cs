@@ -5,8 +5,10 @@ namespace AvidScript.CSharpGuest;
 internal static class CSharpGuestIds
 {
     public const string AddressTypeId = "type:address";
+    public const string VoidTypeId = "type:void";
     public const string Int32TypeId = "type:int32";
     public const string Int64TypeId = "type:int64";
+    public const string Float32TypeId = "type:float32";
     public const string ArrayLengthPropertyId = SemanticIntrinsicIds.ArrayLengthPropertyId;
     public const string GameplayEventExportName = "avid_on_gameplay_event";
     public const string GameplayEventFunctionId = "function:synthetic:gameplay_event";
@@ -14,6 +16,15 @@ internal static class CSharpGuestIds
     public const string ContinuationFunctionId = "function:synthetic:continuation";
     public const string ContinuationV2ExportName = "avid_on_continuation_v2";
     public const string ContinuationV2FunctionId = "function:synthetic:continuation_v2";
+    public const string UeBeginPlayCompatibilityExportName = "avid_on_begin_play";
+    public const string UeTickCompatibilityExportName = "avid_on_tick";
+    public const string UeEndPlayCompatibilityExportName = "avid_on_end_play";
+    public const string UeBeginPlayCompatibilityFunctionId =
+        "function:synthetic:ue_lifecycle:begin_play";
+    public const string UeTickCompatibilityFunctionId =
+        "function:synthetic:ue_lifecycle:tick";
+    public const string UeEndPlayCompatibilityFunctionId =
+        "function:synthetic:ue_lifecycle:end_play";
     public const string ContinuationStatusTypeId =
         "type:global::AvidScript.AvidContinuationStatus";
     public const string LoadedObjectTypeId =

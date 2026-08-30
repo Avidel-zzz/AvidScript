@@ -112,6 +112,13 @@ public static class CSharpGuestLowerer
             diagnostics);
 
         List<GuestExport> exports = LowerExports(document, functions, diagnostics).ToList();
+        CSharpUeLifecycleCompatibilityLoweringResult? ueLifecycle =
+            CSharpUeLifecycleCompatibilityLowerer.Lower(document, exports, diagnostics);
+        if (ueLifecycle is not null)
+        {
+            functions.AddRange(ueLifecycle.Functions);
+            exports.AddRange(ueLifecycle.Exports);
+        }
         if (gameplayEvents is not null)
         {
             exports.Add(gameplayEvents.Export);
