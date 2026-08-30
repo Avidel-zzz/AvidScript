@@ -41,11 +41,12 @@ public sealed record UeFunctionManifestEntry(
     [property: JsonPropertyOrder(1)] string StableMemberId,
     [property: JsonPropertyOrder(2)] string Name,
     [property: JsonPropertyOrder(3)] string NativeName,
-    [property: JsonPropertyOrder(4)] string ReturnCppType,
-    [property: JsonPropertyOrder(5)] IReadOnlyList<UeFunctionParameterEntry> Parameters,
-    [property: JsonPropertyOrder(6)] IReadOnlyList<string> Flags,
-    [property: JsonPropertyOrder(7)] string Category,
-    [property: JsonPropertyOrder(8)] string Accessibility);
+    [property: JsonPropertyOrder(4)] string ExportName,
+    [property: JsonPropertyOrder(5)] string ReturnCppType,
+    [property: JsonPropertyOrder(6)] IReadOnlyList<UeFunctionParameterEntry> Parameters,
+    [property: JsonPropertyOrder(7)] IReadOnlyList<string> Flags,
+    [property: JsonPropertyOrder(8)] string Category,
+    [property: JsonPropertyOrder(9)] string Accessibility);
 
 public sealed record UeFunctionParameterEntry(
     [property: JsonPropertyOrder(0)] int Ordinal,

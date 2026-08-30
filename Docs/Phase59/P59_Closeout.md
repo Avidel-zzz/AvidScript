@@ -26,6 +26,8 @@
 - `P59.B`：状态机已标记完成；候选提交 `4c593e5` 的隔离 clean architecture gate 通过。
 - `P59.C1`：Runtime-owned generated type router、Session-owned instance 接口、稳定 ObjectHandle
   路由与 move-only teardown registration 已完成，并通过生产 router focused Automation。
+- `P59.C2a`：UFunction canonical WASM export、Semantic reachability root、Guest 64-bit ObjectHandle
+  instance ABI 与 generator manifest schema 2 映射已完成；首个实例方法已真实编译到 WASM。
 
 ## 待完成
 

@@ -203,10 +203,16 @@ internal static class CSharpSemanticInputValidator
             .Concat(document.DelegateEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Concat(document.ContinuationCallbacks.Select(callback => callback.MethodSymbolId))
             .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> ueTypeMethodIds = document.UeTypeDeclarations
+            .SelectMany(type => type.Functions)
+            .Where(function => !function.Flags.Contains("blueprint_implementable_event"))
+            .Select(function => function.MethodSymbolId)
+            .ToHashSet(StringComparer.Ordinal);
         string[] expectedRootIds = document.Callables
             .Where(callable => callable.Export is not null)
             .Select(callable => callable.MethodSymbolId)
             .Concat(callbackIds)
+            .Concat(ueTypeMethodIds)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();
@@ -220,7 +226,9 @@ internal static class CSharpSemanticInputValidator
             || reachability.RootCallableIds.Any(id =>
                 !reachableIds.Contains(id)
                 || !callablesById.TryGetValue(id, out SemanticCallable? callable)
-                || (callable.Export is null && !callbackIds.Contains(id)))
+                || (callable.Export is null
+                    && !callbackIds.Contains(id)
+                    && !ueTypeMethodIds.Contains(id)))
             || reachableIds.Any(id => !callablesById.ContainsKey(id))
             || (reachability.Mode is "export_roots" or "entrypoint_roots"
                 && !reachability.RootCallableIds.SequenceEqual(expectedRootIds))

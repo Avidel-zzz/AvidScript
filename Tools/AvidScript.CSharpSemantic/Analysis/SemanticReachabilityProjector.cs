@@ -12,6 +12,7 @@ internal static class SemanticReachabilityProjector
         IReadOnlyList<SemanticGameplayEventCallback> gameplayEventCallbacks,
         IReadOnlyList<SemanticDelegateEventCallback> delegateEventCallbacks,
         IReadOnlyList<SemanticContinuationCallback> continuationCallbacks,
+        IReadOnlyList<SemanticUeTypeDeclaration> ueTypeDeclarations,
         IReadOnlyList<SemanticAsyncMethod> asyncMethods)
     {
         Dictionary<string, SemanticCallable> callablesById = callables.ToDictionary(
@@ -21,10 +22,16 @@ internal static class SemanticReachabilityProjector
             .Where(callable => callable.Export is not null)
             .Select(callable => callable.MethodSymbolId)
             .ToArray();
+        string[] ueTypeRootIds = ueTypeDeclarations
+            .SelectMany(type => type.Functions)
+            .Where(function => !function.Flags.Contains("blueprint_implementable_event"))
+            .Select(function => function.MethodSymbolId)
+            .ToArray();
         string[] rootIds = exportRootIds
             .Concat(gameplayEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Concat(delegateEventCallbacks.Select(callback => callback.MethodSymbolId))
             .Concat(continuationCallbacks.Select(callback => callback.MethodSymbolId))
+            .Concat(ueTypeRootIds)
             .Distinct(StringComparer.Ordinal)
             .OrderBy(id => id, StringComparer.Ordinal)
             .ToArray();

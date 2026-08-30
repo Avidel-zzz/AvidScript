@@ -594,7 +594,30 @@ public static class CSharpGuestLowerer
             exports.Add(new GuestExport(callable.Export!.Name, functionId));
         }
 
-        return exports.ToArray();
+        HashSet<string> exportNames = exports
+            .Select(export => export.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (SemanticUeFunctionDeclaration function in document.UeTypeDeclarations
+            .SelectMany(type => type.Functions)
+            .Where(function => !function.Flags.Contains("blueprint_implementable_event"))
+            .OrderBy(function => function.MethodSymbolId, StringComparer.Ordinal))
+        {
+            string functionId = CSharpGuestIds.Function(function.MethodSymbolId);
+            string exportName = SemanticUeTypeRuntimeContract.GetFunctionExportName(function.MethodSymbolId);
+            if (!functionIds.Contains(functionId))
+            {
+                Add(diagnostics, "ASCG1002", $"UE function export '{exportName}' has no lowered function.");
+                continue;
+            }
+            if (!exportNames.Add(exportName))
+            {
+                Add(diagnostics, "ASCG1003", $"UE function export '{exportName}' is duplicated.");
+                continue;
+            }
+            exports.Add(new GuestExport(exportName, functionId));
+        }
+
+        return exports.OrderBy(export => export.Name, StringComparer.Ordinal).ToArray();
     }
 
     private static IReadOnlySet<string>? GetReachableCallableIds(SemanticDocument document)

@@ -677,6 +677,8 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'InvokeCSharpSemantic.ps1',
     'schema_version -ne 18',
     'semantic_version -cne "1.20"',
+    'schema_version -ne 2',
+    'generator_version -cne "1.1"',
     'semantic_artifact_sha256',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {

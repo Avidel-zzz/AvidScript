@@ -115,6 +115,7 @@ internal static class UeTypeGenerationPlanner
             function.MethodSymbolId,
             function.Name,
             GetNativeName(owner.Kind, function),
+            SemanticUeTypeRuntimeContract.GetFunctionExportName(function.MethodSymbolId),
             typeMapper.MapCallable(callable.ReturnTypeId),
             parameters,
             function.Flags,

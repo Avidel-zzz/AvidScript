@@ -97,6 +97,12 @@ internal static class SemanticUeTypeDeclarationTests
             "canonical lifecycle overrides should enter the UE function contract without a redundant attribute");
         Assert(overrideFunction.Flags.SequenceEqual(new[] { "blueprint_callable", "override" }),
             "script override identity should be explicit in the UE declaration contract");
+        string applyDamageExport = SemanticUeTypeRuntimeContract.GetFunctionExportName(
+            applyDamage.MethodSymbolId);
+        Assert(applyDamageExport.StartsWith("avid_ue_", StringComparison.Ordinal)
+            && applyDamageExport.Length == 40
+            && document.Reachability!.RootCallableIds.Contains(applyDamage.MethodSymbolId),
+            "script UE functions should publish one canonical WASM export identity and become reachability roots");
     }
 
     private static void ComponentAndSubsystemKindsResolveFromCanonicalRoots()

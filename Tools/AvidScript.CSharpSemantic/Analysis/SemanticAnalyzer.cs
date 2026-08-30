@@ -123,6 +123,7 @@ public static class SemanticAnalyzer
             gameplayEventProjection.Callbacks,
             delegateEventProjection.Callbacks,
             continuationProjection.Callbacks,
+            ueTypeProjection.Declarations,
             asyncProjection.Methods);
 
         return new SemanticDocument(

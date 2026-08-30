@@ -57,6 +57,12 @@ internal static class UeTypeGeneratorTests
         Assert(first.Manifest.Types.SelectMany(type => type.Properties.Cast<object>().Concat(type.Functions))
             .Count() == 5,
             "the manifest should retain reflected properties, functions and lifecycle members");
+        Assert(first.Manifest.SchemaVersion == 2
+            && first.Manifest.GeneratorVersion == "1.1"
+            && first.Manifest.Types.SelectMany(type => type.Functions).All(function =>
+                function.ExportName == SemanticUeTypeRuntimeContract.GetFunctionExportName(
+                    function.StableMemberId)),
+            "manifest schema 2 should map every generated thunk to the canonical UE function export");
 
         string header = Text(first, "Public/AvidScriptGeneratedTypes.h");
         string sourceText = Text(first, "Private/AvidScriptGeneratedTypes.cpp");

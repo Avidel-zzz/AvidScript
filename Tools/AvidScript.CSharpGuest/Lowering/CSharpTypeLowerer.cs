@@ -25,6 +25,9 @@ internal static class CSharpTypeLowerer
         Dictionary<string, SemanticType> semanticTypes = document.Types.ToDictionary(
             type => type.Id,
             StringComparer.Ordinal);
+        HashSet<string> ueTypeIds = document.UeTypeDeclarations
+            .Select(type => type.TypeId)
+            .ToHashSet(StringComparer.Ordinal);
         List<GuestType> rawTypes = new()
         {
             Scalar(CSharpGuestIds.AddressTypeId, "i32", 4, 4),
@@ -42,6 +45,7 @@ internal static class CSharpTypeLowerer
                 document.Callables,
                 shapes,
                 semanticTypes,
+                ueTypeIds,
                 diagnostics);
             if (lowered is not null)
             {
@@ -136,7 +140,7 @@ internal static class CSharpTypeLowerer
         {
             return false;
         }
-        if (type.Kind is "scalar" or "enum" or "class_ref" or "factory_ref" or "object_type_ref")
+        if (type.Kind is "scalar" or "enum" or "handle" or "class_ref" or "factory_ref" or "object_type_ref")
         {
             return type.Size > 0;
         }
@@ -221,11 +225,30 @@ internal static class CSharpTypeLowerer
         IReadOnlyList<SemanticCallable> callables,
         IReadOnlyDictionary<string, SemanticTypeShape> shapes,
         IReadOnlyDictionary<string, SemanticType> semanticTypes,
+        IReadOnlySet<string> ueTypeIds,
         List<GuestDiagnostic> diagnostics)
     {
         if (TryLowerIntrinsic(type, out GuestType? intrinsic))
         {
             return intrinsic;
+        }
+
+        if (ueTypeIds.Contains(type.Id))
+        {
+            if (type.Kind != "class" || type.IsValueType)
+            {
+                Add(diagnostics, "ASCG1003", $"Script UE type '{type.Id}' is not a reference class.");
+                return null;
+            }
+            return new GuestType(
+                type.Id,
+                "handle",
+                "i64",
+                Array.Empty<GuestField>(),
+                null,
+                null,
+                8,
+                8);
         }
 
         if (type.Kind == "struct"
