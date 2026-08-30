@@ -125,6 +125,14 @@
       "summary": "不得通过重置、覆盖推送或 squash 丢失既有提交历史。",
       "prevention": "未经明确要求不 rewrite、reset、rebase 或 force-push；提交前检查范围、隐私和远端分支身份。",
       "source": "legacy:repository-policy"
+    },
+    {
+      "id": "attestation-allowlist-before-commit",
+      "tags": ["phase", "gate", "attestation", "git"],
+      "summary": "严格 Gate 见证提交不是一般文档收尾提交，其路径受关闭器白名单限制。",
+      "prevention": "人读 Gate 报告在候选冻结前定稿；attest 后、commit 前先读取并核对 Test-AvidScriptAttestationDiff allowlist，只暂存 Phase state、closeout 和标准 Gate Summary JSON。",
+      "source": "observed:2026-08-30-P58-close",
+      "last_observed": "2026-08-30 P58 (P58.4 人读报告误进入 attestation 提交，close 以 ASPW3032 拒绝)"
     }
   ]
 }

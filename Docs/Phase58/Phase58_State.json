@@ -5,7 +5,7 @@
     "goal": "以统一复合值 capability 和递归 descriptor 类型图扩展 FText、递归容器、TSet/TMap、soft/weak pointer 与 delegate ref/out，保持既有热路径性能和通用生成式 UE API 架构",
     "start_commit": "ad422c1b5d0c4fe00f402083ca021b7fe6e7b4a5"
   },
-  "declared_stage": "gate_attested",
+  "declared_stage": "implementing",
   "architecture": {
     "path": "Docs/Phase58/P58.0_Universal_Value_Graph_Architecture.md",
     "version": 1,
@@ -38,8 +38,8 @@
     {
       "id": "P58.D",
       "status": "Completed",
-      "evidence": "工作树级集中 Gate 完成：UE5.8 no-clean Editor build Succeeded；focused Automation 6/6；full Automation 383/383 Success；benchmark gate passed；Agent Harness audit PASS；Docs/Phase58/P58.4_Centralized_Gate_Report.md",
-      "completed_at_utc": "2026-08-30T12:13:04.3698049+00:00"
+      "evidence": "严格 Gate 产品证据保持有效：be2b0cd 上 clean architecture、UE5.8 no-clean build、253/253 .NET、119/119 PowerShell、2/2 focused 与 384/384 full Automation 通过；关闭恢复候选仅修改流程规则、lesson、P58 文档与状态，需以产品路径同一性和新 clean architecture/Harness 证据验证。",
+      "completed_at_utc": "2026-08-30T15:06:00.1800816+00:00"
     }
   ],
   "debt": [
@@ -58,9 +58,9 @@
     }
   ],
   "review": {
-    "completed": true,
-    "evidence": "集中审查覆盖递归 capability、descriptor/schema、Guest lowering、VM/Runtime transaction、生命周期与安全来源授权；发现的 P58-D01 已修复并由 15/15 BuildIntegration、1/1 generated-facade focused Automation、384/384 全量 Automation 和 no-clean UE5.8 Editor build验证；Phase-owned dirty 过滤由 27/27 workflow contracts 验证。",
-    "completed_at_utc": "2026-08-30T13:13:07.6792731+00:00"
+    "completed": false,
+    "evidence": "reopened: P58 attestation commit included a human-readable Gate report outside the close allowlist; preserve history, rebuild a docs-only candidate, and re-attest with the exact whitelist.",
+    "completed_at_utc": null
   },
   "budgets": {
     "ubt": 2,
@@ -73,20 +73,20 @@
     "full_gate": 3
   },
   "freeze": {
-    "source_commit": "6571f754746a782f2a7d2408c7e2e5f503c789f9",
-    "source_tree": "8a3ef30655092ad0a07199310901a36464df3c71",
-    "state_sha256": "db494799240fc44a267763b784939c354bd32324534fa2749264a5c6923ebb57",
-    "review_evidence": "集中审查覆盖递归 capability、descriptor/schema、Guest lowering、VM/Runtime transaction、生命周期与安全来源授权；发现的 P58-D01 已修复并由 15/15 BuildIntegration、1/1 generated-facade focused Automation、384/384 全量 Automation 和 no-clean UE5.8 Editor build验证；Phase-owned dirty 过滤由 27/27 workflow contracts 验证。",
-    "at_utc": "2026-08-30T13:13:07.6792731+00:00"
+    "source_commit": "",
+    "source_tree": "",
+    "state_sha256": "",
+    "review_evidence": "",
+    "at_utc": null
   },
   "gate": {
-    "report_path": "C:\\tmp\\AvidScript\\P58Gate\\P58-be2b0cd-20260830-001\\P58-Gate-Evidence.json",
-    "report_sha256": "ec3380a3b0acedd45bae69dc7ef5babed96623eb6bcf241dab286c2e7e5e0f8e",
-    "run_id": "P58-be2b0cd-20260830-001",
-    "verified_commit": "be2b0cdd4988327572145f94b3bc871d58c54a90",
-    "verified_tree": "4f8632b1a26527223f305446636b167aae77e393",
-    "attestation_parent": "be2b0cdd4988327572145f94b3bc871d58c54a90",
-    "attested_at_utc": "2026-08-30T14:59:35.0182134+00:00"
+    "report_path": "",
+    "report_sha256": "",
+    "run_id": "",
+    "verified_commit": "",
+    "verified_tree": "",
+    "attestation_parent": "",
+    "attested_at_utc": null
   },
   "protected_dirty": [
     {
@@ -126,7 +126,7 @@
       "head_blob_sha256": "78adf726b93efd9a8736ed8152b9fd9fd293e26d2910e670d738176de0a4af49"
     }
   ],
-  "next_action": "close -Phase 58",
-  "revision": 9,
-  "updated_at_utc": "2026-08-30T14:59:35.0209020+00:00"
+  "next_action": "freeze -Phase 58 -ReviewEvidence <text>",
+  "revision": 11,
+  "updated_at_utc": "2026-08-30T15:06:00.1825371+00:00"
 }

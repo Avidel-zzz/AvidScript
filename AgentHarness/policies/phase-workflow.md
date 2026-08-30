@@ -22,6 +22,10 @@
 
 单次测试、一次构建修复或微小文档调整不单独形成碎片提交，应归入其所属小节。提交前必须确认 protected dirty 为零 staged、检查隐私与不必要生成物；push 失败时保留本地提交并优先恢复远端同步。
 
+人读 Gate 报告必须在候选冻结前定稿。`attest` 后、见证提交前必须预检
+`Test-AvidScriptAttestationDiff` 允许路径；默认只允许 Phase state、closeout 和标准
+`P<Phase>_Gate_Summary.json`，不得把其他人读报告带入 attestation 提交。
+
 ## 实现期风险分流
 
 - Blocker：核心工具链或实现路径不可继续，立即处理。
