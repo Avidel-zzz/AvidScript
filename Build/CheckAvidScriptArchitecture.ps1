@@ -612,6 +612,37 @@ foreach ($ForbiddenRuntimeVmDependency in @('WAMR', 'Wasmtime')) {
         Add-Violation "AvidScriptRuntime must not depend directly on $ForbiddenRuntimeVmDependency"
     }
 }
+if ($RuntimeBuild.Contains('"AvidScriptGenerated"')) {
+    Add-Violation 'AvidScriptRuntime must not depend on the project-specific AvidScriptGenerated module'
+}
+
+$GeneratedBuild = Read-RequiredFile 'Source/AvidScriptGenerated/AvidScriptGenerated.Build.cs'
+foreach ($RequiredGeneratedDependency in @('AvidScriptRuntime', 'Core', 'CoreUObject', 'Engine')) {
+    if (-not $GeneratedBuild.Contains('"' + $RequiredGeneratedDependency + '"')) {
+        Add-Violation "AvidScriptGenerated is missing required dependency $RequiredGeneratedDependency"
+    }
+}
+foreach ($ForbiddenGeneratedDependency in @('AvidScriptEditor', 'AvidScriptVM', 'WAMR', 'Wasmtime')) {
+    if ($GeneratedBuild.Contains('"' + $ForbiddenGeneratedDependency + '"')) {
+        Add-Violation "AvidScriptGenerated must not depend directly on $ForbiddenGeneratedDependency"
+    }
+}
+$GeneratedDispatcherHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeDispatcher.h'
+$GeneratedDispatcherSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeDispatcher.cpp'
+foreach ($RequiredGeneratedDispatchContract in @(
+    'IAvidScriptGeneratedTypeDispatchTarget',
+    'FAvidScriptGeneratedTypeDispatcher',
+    'TypeOrdinal',
+    'MemberOrdinal')) {
+    if (-not $GeneratedDispatcherHeader.Contains($RequiredGeneratedDispatchContract)) {
+        Add-Violation "generated type dispatcher contract is missing $RequiredGeneratedDispatchContract"
+    }
+}
+foreach ($ForbiddenGeneratedHotPath in @('FName', 'FindFunction', 'FindObject', 'StaticFindObject')) {
+    if ($GeneratedDispatcherSource.Contains($ForbiddenGeneratedHotPath)) {
+        Add-Violation "generated type dispatcher hot path must not use $ForbiddenGeneratedHotPath"
+    }
+}
 
 Test-SourceTreeForbiddenPattern 'Source/AvidScriptRuntime' @(
     'wasm_runtime_|wasm_export\.h',

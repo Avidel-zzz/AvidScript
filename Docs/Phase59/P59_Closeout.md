@@ -17,10 +17,12 @@
   Guest 与生成器共享同一 fail-closed 信任边界。
 - `P59.B2`：独立 `AvidScript.UeTypeGenerator` 已实现内容寻址 manifest、稳定 ordinal、确定性
   UHT shell source 与原子/缓存命中发布内核。
+- `P59.B3`：永久 `AvidScriptGenerated` Runtime module、单向依赖、统一 ordinal dispatcher ABI 与
+  在途调用卸载 fence 已完成，并通过 UE5.8 no-clean UBT 和 focused Automation。
 
 ## 待完成
 
-- `P59.B` 永久生成模块、Runtime dispatcher 冷路径合同与受控 UHT/UBT 集成；
+- `P59.B` 受控生成入口、首个真实 shell UHT/UBT 与反射回读；
 - `P59.C` Runtime type/instance/inheritance dispatch；
 - `P59.D` Blueprint、网络、Cook 与集中 Gate。
 
