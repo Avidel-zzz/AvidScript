@@ -667,7 +667,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D2 的 **371/371 通过**，固定 .NET
 完整基线为 `246/246`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-目标构建成功；D2 clean candidate 架构门禁将在实现提交后从 detached worktree 执行。D1 已完成项目自定义
+目标构建成功，clean candidate `1d12bb0/9eeb779` 架构门禁通过。D1 已完成项目自定义
 Server、Client 与 NetMulticast UFUNCTION 的生成式调用；D2 已完成 replicated property 双端读取、
 authority 写入、活动 Reflection/ClassReps 复核与 Push Model dirty。网络路由、复制发送和原生 RepNotify
 仍由 UE 负责，C# 入站 RPC/RepNotify handler 尚未实现。

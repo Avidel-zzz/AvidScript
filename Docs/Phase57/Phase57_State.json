@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; P57.12D1 adds generated UE RPC initiation and authority/callspace preflight without changing the continuation or Host ABI ownership model"
+    "revision_reason": "The phase architecture remains version 6; P57.12D2 adds generated replicated property authority and Push Model dirty contracts without changing the continuation, Host ABI ownership, or UE network-driver ownership model"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12D1_Generated_RPC_Authority_Plan.md",
-    "closeout": "Docs/Phase57/P57.12D1_Generated_RPC_Authority.md"
+    "plan": "Docs/Phase57/P57.12D2_Replicated_Property_Plan.md",
+    "closeout": "Docs/Phase57/P57.12D2_Replicated_Property.md"
   },
   "batches": [
     {
@@ -210,6 +210,12 @@
       "completed_at_utc": "2026-08-30T00:50:14.9057240+00:00"
     },
     {
+      "id": "P57.12D2",
+      "status": "Completed",
+      "evidence": "commit 1d12bb0; descriptor schema 16 and generated replicated property getter/authority-only setter now preserve property replication and RepNotify identity, revalidate active FProperty/ClassReps, mark successful writes dirty through UE5.8 Push Model, and reject non-authority or candidate reload writes without per-API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor builds, focused D2 Automation 3/3, full Automation 371/371 and clean 1d12bb0/9eeb779 architecture gate passed. Inbound C# RPC/RepNotify handlers and real multi-client transfer acceptance remain D3; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-30T01:41:35.1701461+00:00"
+    },
+    {
       "id": "P57.2",
       "status": "Completed",
       "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
@@ -275,8 +281,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12D1 concentrated review confirms schema-15 network identity, active UFunction flag revalidation, Actor/ActorComponent owner resolution, authority/callspace preflight before ProcessEvent, candidate reload side-effect rejection, generated C# facade coverage and explicit D2/D3 boundaries without per-API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 368/368 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-30T00:50:14.9078435+00:00"
+    "evidence": "P57.12D2 concentrated review confirms schema-16 property replication and RepNotify identity, lazy ClassReps initialization, active FProperty revalidation, Actor/ActorComponent authority preflight before mutation, successful-write Push Model dirty marking, candidate reload rejection, generated C# property coverage and explicit inbound-handler boundaries without per-API wrappers or polling. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 371/371 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-30T01:45:11.5487778Z"
   },
   "budgets": {
     "ubt": 2,
@@ -284,25 +290,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 31,
-    "automation": 35,
-    "full_gate": 14
+    "ubt": 34,
+    "automation": 39,
+    "full_gate": 15
   },
   "freeze": {
-    "source_commit": "bc144fae900f5d661c4530e914f9371710256bf3",
-    "source_tree": "aafbe26a8da0afad406facc4dd25048910ab315d",
+    "source_commit": "1d12bb0b2936fe499b04ebf2b210237824dcf82d",
+    "source_tree": "9eeb779fc40108994447b4d16512f97d36915df2",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12D1_Generated_RPC_Authority.md",
-    "at_utc": "2026-08-30T00:50:14.9078435+00:00"
+    "review_evidence": "Docs/Phase57/P57.12D2_Replicated_Property.md",
+    "at_utc": "2026-08-30T01:45:11.5487778Z"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12D1_Architecture_bc144fa_20260830.log",
-    "report_sha256": "fa8509041bcdfe4f8e2993b14a3f951f852e2982f7556ba994b42ee4ec4f06e7",
-    "run_id": "P57.12D1-clean-architecture-final",
-    "verified_commit": "bc144fae900f5d661c4530e914f9371710256bf3",
-    "verified_tree": "aafbe26a8da0afad406facc4dd25048910ab315d",
-    "attestation_parent": "bc144fae900f5d661c4530e914f9371710256bf3",
-    "attested_at_utc": "2026-08-30T00:50:14.9078435+00:00"
+    "report_path": "external:C:/tmp/AvidScript_P57_12D2_Architecture_1d12bb0_20260830.log",
+    "report_sha256": "c495ea573057843edf103f00487d5771255d216dbf8cfa5da8775de4715b1921",
+    "run_id": "P57.12D2-clean-architecture-final",
+    "verified_commit": "1d12bb0b2936fe499b04ebf2b210237824dcf82d",
+    "verified_tree": "9eeb779fc40108994447b4d16512f97d36915df2",
+    "attestation_parent": "1d12bb0b2936fe499b04ebf2b210237824dcf82d",
+    "attested_at_utc": "2026-08-30T01:45:11.5487778Z"
   },
   "protected_dirty": [
     {
@@ -325,6 +331,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 39,
-  "updated_at_utc": "2026-08-30T00:50:14.9078435+00:00"
+  "revision": 40,
+  "updated_at_utc": "2026-08-30T01:45:11.5487778Z"
 }

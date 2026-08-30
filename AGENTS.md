@@ -2137,3 +2137,8 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first corrected P57.12D2 focused run changed `rep_notify` and recomputed package hashes but left the canonical binding identity unchanged, then expected the Runtime reflection mismatch category. Schema 16 correctly rejected the inconsistent descriptor earlier with `descriptor_contract_invalid`.
 - Prevention: negative tests name the validation owner they intend to exercise. Field-versus-canonical identity drift is a parser contract test; Runtime reflection drift needs a descriptor whose complete canonical identity, stable ID, import name, selection hash, and package hash are internally consistent but differ from the active UField.
+
+### 2026-08-30: do not wrap PowerShell architecture gates in an extra cmd quoting layer
+
+- Mistake: the first P57.12D2 clean architecture launcher wrapped an already quoted PowerShell command in `cmd.exe /c`; the outer shell preserved an escape backslash and cmd rejected it before the checker started.
+- Prevention: PowerShell architecture gates run directly through the verified PowerShell 7 host with native `*>` log redirection. Do not add a second shell only to capture output; a launcher parse failure is discarded and never counted as product or gate evidence.
