@@ -1062,6 +1062,7 @@ $BindingNetworkSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Avi
 $NetworkRpcPlan = Read-RequiredFile 'Docs/Phase57/P57.12D1_Generated_RPC_Authority_Plan.md'
 $ReplicatedPropertyPlan = Read-RequiredFile 'Docs/Phase57/P57.12D2_Replicated_Property_Plan.md'
 $InboundHandlerPlan = Read-RequiredFile 'Docs/Phase57/P57.12D3_Inbound_Network_Handler_Plan.md'
+$InboundHandlerSelectionTypes = Read-RequiredFile 'Source/AvidScriptEditor/Public/AvidScriptEditorBindingSelectionTypes.h'
 $DelegateEventSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDelegateEventSelectionResolver.cpp'
 $FunctionHookRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.h'
 $FunctionHookRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.cpp'
@@ -1238,7 +1239,7 @@ foreach ($RequiredInboundHandlerContract in @(
     'BuildPreparedInboundHandlers',
     'BuildPreparedCallbacks'
 )) {
-    if (-not $BindingSelectionTypes.Contains($RequiredInboundHandlerContract) -and
+    if (-not $InboundHandlerSelectionTypes.Contains($RequiredInboundHandlerContract) -and
         -not $DelegateEventSelectionResolverSource.Contains($RequiredInboundHandlerContract) -and
         -not $BindingDescriptorGeneratorSource.Contains($RequiredInboundHandlerContract) -and
         -not $BindingDescriptorSource.Contains($RequiredInboundHandlerContract) -and
