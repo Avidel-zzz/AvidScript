@@ -21,11 +21,12 @@ public sealed record UeTypeManifestEntry(
     [property: JsonPropertyOrder(2)] string StableSymbolId,
     [property: JsonPropertyOrder(3)] string EngineName,
     [property: JsonPropertyOrder(4)] string CppName,
-    [property: JsonPropertyOrder(5)] string Kind,
-    [property: JsonPropertyOrder(6)] string BaseCppName,
-    [property: JsonPropertyOrder(7)] IReadOnlyList<string> Flags,
-    [property: JsonPropertyOrder(8)] IReadOnlyList<UePropertyManifestEntry> Properties,
-    [property: JsonPropertyOrder(9)] IReadOnlyList<UeFunctionManifestEntry> Functions);
+    [property: JsonPropertyOrder(5)] string ClassPath,
+    [property: JsonPropertyOrder(6)] string Kind,
+    [property: JsonPropertyOrder(7)] string BaseCppName,
+    [property: JsonPropertyOrder(8)] IReadOnlyList<string> Flags,
+    [property: JsonPropertyOrder(9)] IReadOnlyList<UePropertyManifestEntry> Properties,
+    [property: JsonPropertyOrder(10)] IReadOnlyList<UeFunctionManifestEntry> Functions);
 
 public sealed record UePropertyManifestEntry(
     [property: JsonPropertyOrder(0)] int MemberOrdinal,

@@ -9,8 +9,8 @@ namespace AvidScript.UeTypeGenerator;
 
 public static class UeTypeShellGenerator
 {
-    public const int ManifestSchemaVersion = 3;
-    public const string GeneratorVersion = "1.2";
+    public const int ManifestSchemaVersion = 4;
+    public const string GeneratorVersion = "1.3";
     public const string ManifestPath = "AvidScriptGeneratedManifest.json";
 
     public static UeTypeGenerationResult Generate(
@@ -27,7 +27,9 @@ public static class UeTypeShellGenerator
 
         byte[] artifact = semanticArtifact.ToArray();
         SemanticDocument document = SemanticSerializer.Deserialize(artifact);
-        IReadOnlyList<UeTypeManifestEntry> types = UeTypeGenerationPlanner.Plan(document);
+        IReadOnlyList<UeTypeManifestEntry> types = UeTypeGenerationPlanner.Plan(
+            document,
+            moduleName);
         string artifactHash = Hash(artifact);
         string generationKey = Hash(Encoding.UTF8.GetBytes(string.Join("\n", new[]
         {

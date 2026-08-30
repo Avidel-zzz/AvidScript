@@ -16,7 +16,9 @@ internal static class UeTypeGenerationPlanner
             ["game_instance_subsystem"] = "UGameInstanceSubsystem",
         };
 
-    public static IReadOnlyList<UeTypeManifestEntry> Plan(SemanticDocument document)
+    public static IReadOnlyList<UeTypeManifestEntry> Plan(
+        SemanticDocument document,
+        string moduleName)
     {
         if (document.SchemaVersion != SemanticContract.CurrentSchemaVersion
             || document.SemanticVersion != SemanticContract.CurrentSemanticVersion
@@ -81,6 +83,7 @@ internal static class UeTypeGenerationPlanner
                 declaration.SymbolId,
                 declaration.EngineName,
                 scriptCppNames[declaration.TypeId],
+                $"/Script/{moduleName}.{declaration.EngineName}",
                 declaration.Kind,
                 baseCppName,
                 declaration.Flags,

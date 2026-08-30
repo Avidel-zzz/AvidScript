@@ -631,6 +631,8 @@ $GeneratedDispatcherHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/
 $GeneratedDispatcherSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeDispatcher.cpp'
 $GeneratedTypeRouterHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRouter.h'
 $GeneratedTypeRouterSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRouter.cpp'
+$GeneratedTypeRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Public/ScriptTypes/AvidScriptGeneratedTypeRegistry.h'
+$GeneratedTypeRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/ScriptTypes/AvidScriptGeneratedTypeRegistry.cpp'
 $RuntimeModuleSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptRuntimeModule.cpp'
 $CSharpScriptTypeBuildSource = Read-RequiredFile 'Build/BuildCSharpScriptTypes.ps1'
 $UeTypeShellRendererSource = Read-RequiredFile 'Tools/AvidScript.UeTypeGenerator/Generation/UhtShellRenderer.cs'
@@ -668,6 +670,19 @@ foreach ($ForbiddenGeneratedTypeRouterHotPath in @('FindFunction', 'FindObject',
         Add-Violation "generated type instance router hot path must not use $ForbiddenGeneratedTypeRouterHotPath"
     }
 }
+foreach ($RequiredGeneratedTypeRegistryContract in @(
+    'ManifestSchemaVersion = 4',
+    'BuildFromJson',
+    'FindTypeByOrdinal',
+    'FindTypeByStableId',
+    'FindTypeByClass',
+    'FindFProperty<FProperty>',
+    'FindFunctionByName')) {
+    if (-not $GeneratedTypeRegistryHeader.Contains($RequiredGeneratedTypeRegistryContract) -and
+        -not $GeneratedTypeRegistrySource.Contains($RequiredGeneratedTypeRegistryContract)) {
+        Add-Violation "generated type immutable registry is missing $RequiredGeneratedTypeRegistryContract"
+    }
+}
 foreach ($RequiredGeneratedRouterModuleLifecycle in @(
     'FAvidScriptGeneratedTypeRouter::Get().Startup()',
     'FAvidScriptGeneratedTypeRouter::Get().Shutdown()')) {
@@ -700,8 +715,8 @@ foreach ($RequiredScriptTypeBuildContract in @(
     'InvokeCSharpSemantic.ps1',
     'schema_version -ne 18',
     'semantic_version -cne "1.20"',
-    'schema_version -ne 3',
-    'generator_version -cne "1.2"',
+    'schema_version -ne 4',
+    'generator_version -cne "1.3"',
     'semantic_artifact_sha256',
     'Get-FileHash')) {
     if (-not $CSharpScriptTypeBuildSource.Contains($RequiredScriptTypeBuildContract)) {

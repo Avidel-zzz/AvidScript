@@ -29,7 +29,9 @@
 - `P59.C2a`：UFunction canonical WASM export、Semantic reachability root、Guest 64-bit ObjectHandle
   instance ABI 与 generator manifest schema 2 映射已完成；首个实例方法已真实编译到 WASM。
 - `P59.C2b`：native UPROPERTY 的共享 type/member ordinal 计划、按需 Guest import、继承 handle
-  上转型与 generator manifest schema 3 / 1.2 已落地；原生属性仍是唯一状态 owner。
+  上转型已落地；原生属性仍是唯一状态 owner。
+- `P59.C2c1`：generator manifest schema 4 / 1.3、显式 `class_path` 与 Runtime 不可变
+  UClass/type/member 注册表已落地；构建时缓存 UClass/FProperty/UFunction，热路径只消费 ordinal。
 
 ## 待完成
 
