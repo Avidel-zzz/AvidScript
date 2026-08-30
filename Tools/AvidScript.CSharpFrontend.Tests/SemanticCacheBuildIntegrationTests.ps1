@@ -84,15 +84,28 @@ function New-BindingPackageSubset {
     $DescriptorSource = Join-Path $PackageDirectory ([string]$Manifest.files.descriptor)
     $ReferenceSource = Join-Path $PackageDirectory ([string]$Manifest.files.reference_source)
     $Descriptor = Get-Content -Raw -LiteralPath $DescriptorSource | ConvertFrom-Json
-    $Binding = @($Descriptor.bindings | Where-Object ue_function -eq $UeFunction | Select-Object -First 1)
+    $Binding = @(
+        $Descriptor.bindings |
+            Where-Object {
+                ([string]$_.ue_function -ceq $UeFunction) -or
+                (([string]$_.binding_kind -ceq "function") -and
+                    ([string]$_.ue_member -ceq $UeFunction))
+            } |
+            Select-Object -First 1)
     Assert-Condition ($Binding.Count -eq 1) "authorization subset could not find $UeFunction"
     $SelectedImport = @($Manifest.required_imports | Where-Object stable_id -eq ([string]$Binding[0].stable_id))
     Assert-Condition ($SelectedImport.Count -eq 1) "authorization subset could not find the import for $UeFunction"
+    $SelectedImports = @(
+        $Manifest.required_imports |
+            Where-Object {
+                ([string]$_.stable_id -ceq ([string]$Binding[0].stable_id)) -or
+                ([int]$_.ordinal -lt 0)
+            })
 
     New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
     Copy-Item -LiteralPath $DescriptorSource -Destination (Join-Path $OutputDirectory ([string]$Manifest.files.descriptor)) -Force
     Copy-Item -LiteralPath $ReferenceSource -Destination (Join-Path $OutputDirectory ([string]$Manifest.files.reference_source)) -Force
-    $Manifest.required_imports = @($SelectedImport)
+    $Manifest.required_imports = @($SelectedImports)
     $SubsetManifestPath = Join-Path $OutputDirectory "package.json"
     [System.IO.File]::WriteAllText(
         $SubsetManifestPath,
