@@ -342,13 +342,21 @@ public:
 			SetWasmtimeError(OutError, TEXT("wasm_layout_invalid"), LayoutError);
 			return false;
 		}
+		TArray<FAvidScriptVmTypedHostImport, TInlineAllocator<16>> SupplementalTypedImports;
+		for (const FAvidScriptVmTypedHostImport& Import : Config.TypedHostImports)
+		{
+			if (Import.bSupplementalRuntimeAuthority)
+			{
+				SupplementalTypedImports.Add(Import);
+			}
+		}
 		if (!ValidateAvidScriptVmImportContract(
 			ModuleLayout,
 			Config.BindingPackage,
 			TConstArrayView<FAvidScriptVmExpectedImport>(),
 			false,
 			OutError,
-			Config.TypedHostImports))
+			SupplementalTypedImports))
 		{
 			return false;
 		}
@@ -2066,6 +2074,132 @@ private:
 		return CompletePreparedTypedInvocation(*HostContext, Status);
 	}
 
+	static int32 TypedPackedSelfPropertyI32GetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		int32* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutValue == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyI32Get == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyI32Get(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyI32SetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		const int32 Value)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyI32Set == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyI32Set(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				Value);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyI64GetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		int64* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutValue == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyI64Get == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyI64Get(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyI64SetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		const int64 Value)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyI64Set == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyI64Set(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				Value);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyF64GetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		double* OutValue)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr || OutValue == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyF64Get == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyF64Get(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				*OutValue);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
+	static int32 TypedPackedSelfPropertyF64SetCallback(
+		void* Environment,
+		const int64 PackedSelf,
+		const double Value)
+	{
+		FAvidScriptWasmtimeTypedHostContext* HostContext =
+			static_cast<FAvidScriptWasmtimeTypedHostContext*>(Environment);
+		if (HostContext == nullptr
+			|| HostContext->PreparedTarget.Context == nullptr
+			|| HostContext->PreparedTarget.PackedSelfPropertyF64Set == nullptr)
+		{
+			return 1;
+		}
+		const EAvidScriptVmTypedHostStatus Status =
+			HostContext->PreparedTarget.PackedSelfPropertyF64Set(
+				HostContext->PreparedTarget.Context,
+				PackedSelf,
+				Value);
+		return CompletePreparedTypedInvocation(*HostContext, Status);
+	}
+
 	static int32 TypedSelfVectorValueCallback(
 		void* Environment,
 		int32 SelfSlot,
@@ -2192,11 +2326,29 @@ private:
 			case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 				ExpectedSignature = TEXT("(iii)i");
 				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
+				ExpectedSignature = TEXT("(I)i");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set:
+				ExpectedSignature = TEXT("(Ii)");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get:
+				ExpectedSignature = TEXT("(I)I");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set:
+				ExpectedSignature = TEXT("(II)");
+				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
 				ExpectedSignature = TEXT("(I)f");
 				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
 				ExpectedSignature = TEXT("(If)");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get:
+				ExpectedSignature = TEXT("(I)d");
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set:
+				ExpectedSignature = TEXT("(Id)");
 				break;
 			case EAvidScriptVmTypedHostShape::StableObjectRoundtrip:
 				ExpectedSignature = TEXT("(iiiii)i");
@@ -2242,8 +2394,14 @@ private:
 					: 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Get != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.SelfPropertyI32Set != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyI32Get != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyI32Set != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyI64Get != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyI64Set != nullptr ? 1 : 0)
 				+ (Import.PreparedTarget.PackedSelfPropertyF32Get != nullptr ? 1 : 0)
-				+ (Import.PreparedTarget.PackedSelfPropertyF32Set != nullptr ? 1 : 0);
+				+ (Import.PreparedTarget.PackedSelfPropertyF32Set != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyF64Get != nullptr ? 1 : 0)
+				+ (Import.PreparedTarget.PackedSelfPropertyF64Set != nullptr ? 1 : 0);
 			const bool bHasPreparedContext =
 				Import.PreparedTarget.Context != nullptr;
 			const bool bRequiresPreparedTarget =
@@ -2256,8 +2414,14 @@ private:
 				|| Import.Shape
 					== EAvidScriptVmTypedHostShape::SelfPropertyI32Set;
 			const bool bRequiresSupplementalPreparedTarget =
-				Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get
-				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set;
+				Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get
+				|| Import.Shape == EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set;
 			if (bHasPreparedContext != (PreparedFunctionCount == 1)
 				|| (PreparedFunctionCount == 1
 					&& !Import.PreparedTarget.IsBoundForShape(Import.Shape))
@@ -2409,6 +2573,46 @@ private:
 					&TypedSelfPropertyI32SetCallback,
 					HostContextPointer);
 				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_i32_get(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyI32GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_i32_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyI32SetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_i64_get(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyI64GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_i64_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyI64SetCallback,
+					HostContextPointer);
+				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
 				DefineFailure = avidscript_wasmtime_linker_define_self_property_f32_get(
 					Linker,
@@ -2417,6 +2621,26 @@ private:
 					ImportNameUtf8.Get(),
 					static_cast<size_t>(ImportNameUtf8.Length()),
 					&TypedPackedSelfPropertyF32GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_f64_get(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyF64GetCallback,
+					HostContextPointer);
+				break;
+			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set:
+				DefineFailure = avidscript_wasmtime_linker_define_packed_self_property_f64_set(
+					Linker,
+					ModuleNameUtf8.Get(),
+					static_cast<size_t>(ModuleNameUtf8.Length()),
+					ImportNameUtf8.Get(),
+					static_cast<size_t>(ImportNameUtf8.Length()),
+					&TypedPackedSelfPropertyF64SetCallback,
 					HostContextPointer);
 				break;
 			case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:

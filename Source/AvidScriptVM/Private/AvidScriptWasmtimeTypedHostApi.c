@@ -58,6 +58,42 @@ typedef struct AvidScriptWasmtimeSelfPropertyF32SetBridge
 	void* environment;
 } AvidScriptWasmtimeSelfPropertyF32SetBridge;
 
+typedef struct AvidScriptWasmtimePackedSelfPropertyI32GetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyI32GetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyI32GetBridge;
+
+typedef struct AvidScriptWasmtimePackedSelfPropertyI32SetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyI32SetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyI32SetBridge;
+
+typedef struct AvidScriptWasmtimePackedSelfPropertyI64GetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyI64GetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyI64GetBridge;
+
+typedef struct AvidScriptWasmtimePackedSelfPropertyI64SetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyI64SetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyI64SetBridge;
+
+typedef struct AvidScriptWasmtimePackedSelfPropertyF64GetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyF64GetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyF64GetBridge;
+
+typedef struct AvidScriptWasmtimePackedSelfPropertyF64SetBridge
+{
+	AvidScriptWasmtimePackedSelfPropertyF64SetCallback callback;
+	void* environment;
+} AvidScriptWasmtimePackedSelfPropertyF64SetBridge;
+
 typedef struct AvidScriptWasmtimeSelfGuestAddressBridge
 {
 	AvidScriptWasmtimeSelfGuestAddressCallback callback;
@@ -546,6 +582,129 @@ static wasm_trap_t* avidscript_wasmtime_self_property_f32_set_trampoline(
 	return NULL;
 }
 
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_i32_get_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyI32GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI32GetBridge*)environment;
+	int32_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 1)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i64, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i32 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_i32_set_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyI32SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI32SetBridge*)environment;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			args_and_results[1].i32) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_i64_get_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyI64GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI64GetBridge*)environment;
+	int64_t value = 0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 1)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i64, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].i64 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_i64_set_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyI64SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI64SetBridge*)environment;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			args_and_results[1].i64) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_f64_get_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyF64GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyF64GetBridge*)environment;
+	double value = 0.0;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 1)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(bridge->environment, args_and_results[0].i64, &value) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	args_and_results[0].f64 = value;
+	return NULL;
+}
+
+static wasm_trap_t* avidscript_wasmtime_packed_self_property_f64_set_trampoline(
+	void* environment,
+	wasmtime_caller_t* caller,
+	wasmtime_val_raw_t* args_and_results,
+	size_t count)
+{
+	AvidScriptWasmtimePackedSelfPropertyF64SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyF64SetBridge*)environment;
+	(void)caller;
+	if (bridge == NULL || bridge->callback == NULL || args_and_results == NULL)
+		return avidscript_wasmtime_typed_bridge_unavailable();
+	if (count != 2)
+		return avidscript_wasmtime_typed_raw_arity_invalid();
+	if (bridge->callback(
+			bridge->environment,
+			args_and_results[0].i64,
+			args_and_results[1].f64) != 0)
+		return avidscript_wasmtime_typed_host_failed();
+	return NULL;
+}
+
 AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_i32_get(
 	AvidScriptWasmtimeLinker* linker,
 	const char* module_name,
@@ -678,6 +837,246 @@ AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_property_f32_s
 		return avidscript_wasmtime_failure_new(error, NULL);
 	}
 	return NULL;
+}
+
+static AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_property_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	void* bridge,
+	wasm_valtype_t* result_type,
+	wasmtime_func_unchecked_callback_t trampoline,
+	const char* allocation_failure)
+{
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL || result_type == NULL)
+	{
+		free(bridge);
+		if (result_type != NULL)
+			wasm_valtype_delete(result_type);
+		return avidscript_wasmtime_local_failure(allocation_failure);
+	}
+	wasm_valtype_vec_new_uninitialized(&parameters, 1);
+	parameters.data[0] = wasm_valtype_new_i64();
+	wasm_valtype_vec_new_uninitialized(&results, 1);
+	results.data[0] = result_type;
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(allocation_failure);
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
+}
+
+static AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_property_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	void* bridge,
+	wasm_valtype_t* value_type,
+	wasmtime_func_unchecked_callback_t trampoline,
+	const char* allocation_failure)
+{
+	wasm_valtype_vec_t parameters;
+	wasm_valtype_vec_t results;
+	wasm_functype_t* function_type;
+	wasmtime_error_t* error;
+	if (bridge == NULL || value_type == NULL)
+	{
+		free(bridge);
+		if (value_type != NULL)
+			wasm_valtype_delete(value_type);
+		return avidscript_wasmtime_local_failure(allocation_failure);
+	}
+	wasm_valtype_vec_new_uninitialized(&parameters, 2);
+	parameters.data[0] = wasm_valtype_new_i64();
+	parameters.data[1] = value_type;
+	wasm_valtype_vec_new_empty(&results);
+	function_type = wasm_functype_new(&parameters, &results);
+	if (function_type == NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_local_failure(allocation_failure);
+	}
+	error = wasmtime_linker_define_func_unchecked(
+		linker->value,
+		module_name,
+		module_name_size,
+		import_name,
+		import_name_size,
+		function_type,
+		trampoline,
+		bridge,
+		avidscript_wasmtime_typed_bridge_delete);
+	wasm_functype_delete(function_type);
+	if (error != NULL)
+	{
+		free(bridge);
+		return avidscript_wasmtime_failure_new(error, NULL);
+	}
+	return NULL;
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_i32_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyI32GetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyI32GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI32GetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_get(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_i32(),
+		avidscript_wasmtime_packed_self_property_i32_get_trampoline,
+		"Could not allocate the packed self-property-i32-get bridge or function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_i32_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyI32SetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyI32SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI32SetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_set(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_i32(),
+		avidscript_wasmtime_packed_self_property_i32_set_trampoline,
+		"Could not allocate the packed self-property-i32-set bridge or function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_i64_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyI64GetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyI64GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI64GetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_get(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_i64(),
+		avidscript_wasmtime_packed_self_property_i64_get_trampoline,
+		"Could not allocate the packed self-property-i64-get bridge or function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_i64_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyI64SetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyI64SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyI64SetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_set(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_i64(),
+		avidscript_wasmtime_packed_self_property_i64_set_trampoline,
+		"Could not allocate the packed self-property-i64-set bridge or function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_f64_get(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyF64GetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyF64GetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyF64GetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_get(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_f64(),
+		avidscript_wasmtime_packed_self_property_f64_get_trampoline,
+		"Could not allocate the packed self-property-f64-get bridge or function type.");
+}
+
+AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_packed_self_property_f64_set(
+	AvidScriptWasmtimeLinker* linker,
+	const char* module_name,
+	size_t module_name_size,
+	const char* import_name,
+	size_t import_name_size,
+	AvidScriptWasmtimePackedSelfPropertyF64SetCallback callback,
+	void* environment)
+{
+	AvidScriptWasmtimePackedSelfPropertyF64SetBridge* bridge =
+		(AvidScriptWasmtimePackedSelfPropertyF64SetBridge*)calloc(1, sizeof(*bridge));
+	if (bridge != NULL)
+	{
+		bridge->callback = callback;
+		bridge->environment = environment;
+	}
+	return avidscript_wasmtime_linker_define_packed_property_set(
+		linker, module_name, module_name_size, import_name, import_name_size,
+		bridge, wasm_valtype_new_f64(),
+		avidscript_wasmtime_packed_self_property_f64_set_trampoline,
+		"Could not allocate the packed self-property-f64-set bridge or function type.");
 }
 
 static AvidScriptWasmtimeFailure* avidscript_wasmtime_linker_define_self_guest_address(

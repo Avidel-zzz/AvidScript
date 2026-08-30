@@ -11,8 +11,14 @@ enum class EAvidScriptVmTypedHostShape : uint8
 	SelfPropertyI32GetSet,
 	SelfPropertyI32Get,
 	SelfPropertyI32Set,
+	PackedSelfPropertyI32Get,
+	PackedSelfPropertyI32Set,
+	PackedSelfPropertyI64Get,
+	PackedSelfPropertyI64Set,
 	PackedSelfPropertyF32Get,
 	PackedSelfPropertyF32Set,
+	PackedSelfPropertyF64Get,
+	PackedSelfPropertyF64Set,
 	SelfVectorValue,
 	StableObjectRoundtrip,
 	CommandBufferSubmit,
@@ -104,6 +110,42 @@ using FAvidScriptVmPreparedPackedSelfPropertyF32SetTarget =
 		int64 PackedSelf,
 		float Value);
 
+using FAvidScriptVmPreparedPackedSelfPropertyI32GetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		int32& OutValue);
+
+using FAvidScriptVmPreparedPackedSelfPropertyI32SetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		int32 Value);
+
+using FAvidScriptVmPreparedPackedSelfPropertyI64GetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		int64& OutValue);
+
+using FAvidScriptVmPreparedPackedSelfPropertyI64SetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		int64 Value);
+
+using FAvidScriptVmPreparedPackedSelfPropertyF64GetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		double& OutValue);
+
+using FAvidScriptVmPreparedPackedSelfPropertyF64SetTarget =
+	EAvidScriptVmTypedHostStatus (*)(
+		void* Context,
+		int64 PackedSelf,
+		double Value);
+
 struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 {
 	void* Context = nullptr;
@@ -117,8 +159,14 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 		nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32GetTarget SelfPropertyI32Get = nullptr;
 	FAvidScriptVmPreparedSelfPropertyI32SetTarget SelfPropertyI32Set = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyI32GetTarget PackedSelfPropertyI32Get = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyI32SetTarget PackedSelfPropertyI32Set = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyI64GetTarget PackedSelfPropertyI64Get = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyI64SetTarget PackedSelfPropertyI64Set = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyF32GetTarget PackedSelfPropertyF32Get = nullptr;
 	FAvidScriptVmPreparedPackedSelfPropertyF32SetTarget PackedSelfPropertyF32Set = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyF64GetTarget PackedSelfPropertyF64Get = nullptr;
+	FAvidScriptVmPreparedPackedSelfPropertyF64SetTarget PackedSelfPropertyF64Set = nullptr;
 
 	bool IsBoundForShape(const EAvidScriptVmTypedHostShape Shape) const
 	{
@@ -143,10 +191,22 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			return SelfPropertyI32Get != nullptr;
 		case EAvidScriptVmTypedHostShape::SelfPropertyI32Set:
 			return SelfPropertyI32Set != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Get:
+			return PackedSelfPropertyI32Get != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyI32Set:
+			return PackedSelfPropertyI32Set != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Get:
+			return PackedSelfPropertyI64Get != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyI64Set:
+			return PackedSelfPropertyI64Set != nullptr;
 		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Get:
 			return PackedSelfPropertyF32Get != nullptr;
 		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF32Set:
 			return PackedSelfPropertyF32Set != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Get:
+			return PackedSelfPropertyF64Get != nullptr;
+		case EAvidScriptVmTypedHostShape::PackedSelfPropertyF64Set:
+			return PackedSelfPropertyF64Set != nullptr;
 		default:
 			return false;
 		}
@@ -161,8 +221,14 @@ struct AVIDSCRIPTVM_API FAvidScriptVmPreparedTypedHostTarget
 			|| StableObjectRoundtrip != nullptr
 			|| SelfPropertyI32Get != nullptr
 			|| SelfPropertyI32Set != nullptr
+			|| PackedSelfPropertyI32Get != nullptr
+			|| PackedSelfPropertyI32Set != nullptr
+			|| PackedSelfPropertyI64Get != nullptr
+			|| PackedSelfPropertyI64Set != nullptr
 			|| PackedSelfPropertyF32Get != nullptr
-			|| PackedSelfPropertyF32Set != nullptr;
+			|| PackedSelfPropertyF32Set != nullptr
+			|| PackedSelfPropertyF64Get != nullptr
+			|| PackedSelfPropertyF64Set != nullptr;
 	}
 };
 

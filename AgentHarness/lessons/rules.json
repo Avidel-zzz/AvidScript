@@ -165,6 +165,14 @@
       "prevention": "实现前用 rg 建立版本 token 矩阵，至少覆盖工具常量、构建脚本、Runtime 解析器、启动 descriptor 校验、架构 Gate 和测试 JSON；完成矩阵替换后再启动首次 UE Automation。",
       "source": "observed:2026-08-31-P59.C2c4d",
       "last_observed": "2026-08-31 P59.C2c4d (generator 先升级到 5/1.4，Runtime Registry 与固定测试 manifest 未同步，首次 Automation 被严格门禁拒绝)"
+    },
+    {
+      "id": "typed-import-authorities-are-partitioned-before-policy-validation",
+      "tags": ["vm", "bindings", "authority", "wasmtime"],
+      "summary": "package-backed typed imports 与 supplemental runtime imports 共享 linker，但不能共享 supplemental authority 输入。",
+      "prevention": "VM Load 冷路径先按 bSupplementalRuntimeAuthority 分类；import policy 只接收 supplemental 子集，typed linker validator 再核对完整集合与 package ordinal/signature，相关改动必须同时跑 package-backed 和 supplemental 两类用例。",
+      "source": "observed:2026-08-31-P59.C2c4e",
+      "last_observed": "2026-08-31 P59.C2c4e (Wasmtime Load 将完整 typed import 集合误传给 supplemental policy，旧 package-backed TypedHost 用例被拒绝)"
     }
   ]
 }

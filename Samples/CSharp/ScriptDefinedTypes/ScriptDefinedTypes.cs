@@ -12,10 +12,26 @@ public partial class Projectile : AvidActor
         Category = "Projectile")]
     public float Damage { get; set; } = 25.0f;
 
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public int ActivationCount { get; set; } = 1;
+
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public long AccumulatedDamage { get; set; } = 100L;
+
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public double PrecisionScale { get; set; } = 1.5;
+
+    [UProperty(BlueprintReadWrite = true, Category = "Projectile")]
+    public bool IsActive { get; set; }
+
     [UFunction(BlueprintCallable = true, Category = "Projectile")]
     public virtual void Activate(float damageScale)
     {
         Damage *= damageScale;
+        ActivationCount += 1;
+        AccumulatedDamage += 25L;
+        PrecisionScale *= 2.0;
+        IsActive = true;
     }
 
     [UFunction]

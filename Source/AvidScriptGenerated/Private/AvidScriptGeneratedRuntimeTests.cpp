@@ -74,6 +74,10 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 		TEXT("C# property initializer becomes the native instance default"),
 		Projectile->Damage,
 		25.0f);
+	TestEqual(TEXT("Generated int32 default"), Projectile->ActivationCount, 1);
+	TestEqual(TEXT("Generated int64 default"), Projectile->AccumulatedDamage, 100LL);
+	TestEqual(TEXT("Generated float64 default"), Projectile->PrecisionScale, 1.5);
+	TestFalse(TEXT("Generated bool default"), Projectile->IsActive);
 	const FURL Url;
 	World->InitializeActorsForPlay(Url);
 	World->BeginPlay();
@@ -93,6 +97,10 @@ bool FAvidScriptGeneratedCSharpPropertyInteractionTest::RunTest(
 	}
 	Projectile->Activate(2.0f);
 	TestEqual(TEXT("C# property get/set updates the UE float property"), Projectile->Damage, 50.0f);
+	TestEqual(TEXT("C# property codec updates int32"), Projectile->ActivationCount, 2);
+	TestEqual(TEXT("C# property codec updates int64"), Projectile->AccumulatedDamage, 125LL);
+	TestEqual(TEXT("C# property codec updates float64"), Projectile->PrecisionScale, 3.0);
+	TestTrue(TEXT("C# property codec updates bool"), Projectile->IsActive);
 
 	DestroyGeneratedScriptWorld(World);
 	return true;

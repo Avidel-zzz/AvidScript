@@ -46,6 +46,9 @@
 - `P59.C2c4d`：C# primitive 常量属性初始化器已进入 semantic schema 19/1.21 和 generator manifest
   5/1.4，并由生成的 UE 原生构造函数写入 CDO/实例默认状态；真实测试不再手工预置 `Damage`，已完成
   `25 -> C# Activate(2) -> 50` 的初始化与 WASM 交互闭环。
+- `P59.C2c4e`：prepared UPROPERTY 已按 WASM cell 家族扩展为表驱动 `bool/int32/int64/float/double`
+  codec；冷路径缓存 FProperty adapter，热路径只校验 packed ObjectHandle 并调用函数指针；真实 C#
+  `Activate` 已一次完成五种标量的 UE 原生状态读写。
 
 ## 待完成
 

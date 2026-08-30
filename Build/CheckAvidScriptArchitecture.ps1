@@ -694,12 +694,33 @@ foreach ($RequiredGeneratedTypeSessionContract in @(
     'PrepareNamedExportCall',
     'ReceiverHandle.Slot',
     'ReceiverHandle.Generation',
-    'FAvidScriptVmPreparedExportCall')) {
+    'FAvidScriptVmPreparedExportCall',
+    'FGeneratedPropertyCodecDescriptor',
+    'TryConfigureGeneratedScalarCodec',
+    'PackedSelfPropertyI32Get',
+    'PackedSelfPropertyI64Get',
+    'PackedSelfPropertyF32Get',
+    'PackedSelfPropertyF64Get')) {
     if (-not $GeneratedTypeSessionHeader.Contains($RequiredGeneratedTypeSessionContract) -and
         -not $GeneratedTypeSessionSource.Contains($RequiredGeneratedTypeSessionContract) -and
         -not $GeneratedTypeSessionDispatchSource.Contains($RequiredGeneratedTypeSessionContract) -and
         -not $GeneratedTypeWasmRuntimeHeader.Contains($RequiredGeneratedTypeSessionContract)) {
         Add-Violation "generated type Session dispatch is missing $RequiredGeneratedTypeSessionContract"
+    }
+}
+$GeneratedScalarHotPath = Get-SourceSlice `
+    -Source $GeneratedTypeSessionDispatchSource `
+    -StartToken 'template <typename ValueType, auto ReadMember>' `
+    -EndToken 'FAvidScriptVmTypedHostImport MakeGeneratedScalarPropertyImport' `
+    -Description 'generated scalar property hot path'
+foreach ($ForbiddenGeneratedScalarHotPath in @(
+    'CastField',
+    'FindFProperty',
+    'FindFunction',
+    'GetName',
+    'MakeUnique')) {
+    if ($GeneratedScalarHotPath.Contains($ForbiddenGeneratedScalarHotPath)) {
+        Add-Violation "generated scalar property hot path must not use $ForbiddenGeneratedScalarHotPath"
     }
 }
 foreach ($RequiredGeneratedRouterModuleLifecycle in @(
@@ -4377,7 +4398,14 @@ if ($BindingCodecProgramSource.Contains('GuestMemory.WriteBytes(')) {
 foreach ($RequiredPreparedWasmtimeContract in @(
     'SelfF32TripleToGuestVector',
     'TypedSelfF32TripleGuestVectorCallback',
-    'avidscript_wasmtime_linker_define_self_f32_triple_guest_vector'
+    'avidscript_wasmtime_linker_define_self_f32_triple_guest_vector',
+    'PackedSelfPropertyI32Get',
+    'PackedSelfPropertyI64Get',
+    'PackedSelfPropertyF32Get',
+    'PackedSelfPropertyF64Get',
+    'avidscript_wasmtime_linker_define_packed_self_property_i32_get',
+    'avidscript_wasmtime_linker_define_packed_self_property_i64_get',
+    'avidscript_wasmtime_linker_define_packed_self_property_f64_get'
 )) {
     if (-not $WasmtimeBackendSource.Contains($RequiredPreparedWasmtimeContract) -and
         -not $WasmtimeTypedHostApiSource.Contains($RequiredPreparedWasmtimeContract)) {
