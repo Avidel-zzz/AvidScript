@@ -591,6 +591,15 @@ public:
 		Category = "AvidScript")
 	int32 ReplicatedRoutedValue = 0;
 
+	UPROPERTY(
+		ReplicatedUsing = OnRep_BlueprintScore,
+		BlueprintReadWrite,
+		Category = "AvidScript")
+	int32 BlueprintScore = 0;
+
+	UFUNCTION(BlueprintNativeEvent)
+	void OnRep_BlueprintScore();
+
 	UFUNCTION()
 	void OnRep_ReplicatedScore()
 	{
@@ -607,6 +616,9 @@ public:
 		DOREPLIFETIME(
 			AAvidScriptBindingRuntimeNetworkTestActor,
 			ReplicatedRoutedValue);
+		DOREPLIFETIME(
+			AAvidScriptBindingRuntimeNetworkTestActor,
+			BlueprintScore);
 	}
 
 	virtual void ProcessEvent(UFunction* Function, void* Parameters) override
@@ -623,8 +635,14 @@ public:
 	int32 MulticastInvocationCount = 0;
 	int32 RepNotifyCallCount = 0;
 	int32 ReplicatedSetterCallCount = 0;
+	int32 BlueprintRepNotifyCallCount = 0;
 	int32 ProcessEventCallCount = 0;
 };
+
+inline void AAvidScriptBindingRuntimeNetworkTestActor::OnRep_BlueprintScore_Implementation()
+{
+	++BlueprintRepNotifyCallCount;
+}
 
 inline void AAvidScriptBindingRuntimeNetworkTestActor::ServerSubmitValue_Implementation(
 	const int32 Value)

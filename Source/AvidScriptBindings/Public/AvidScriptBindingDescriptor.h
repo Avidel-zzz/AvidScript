@@ -102,6 +102,7 @@ struct FAvidScriptBindingDelegateEventModel
 	FString UeMember;
 	FString ScriptName;
 	FString DelegateKind = TEXT("multicast");
+	FString HandlerMode = TEXT("replace");
 	FString SourceMode = TEXT("self");
 	FAvidScriptBindingNetworkContract Network;
 	FName RepNotifyProperty;
@@ -243,7 +244,8 @@ public:
 		TConstArrayView<FAvidScriptBindingValueModel> Parameters,
 		const FAvidScriptBindingNetworkContract& Network =
 			FAvidScriptBindingNetworkContract(),
-		const FName RepNotifyProperty = NAME_None);
+		const FName RepNotifyProperty = NAME_None,
+		const FString& HandlerMode = FString());
 
 	static FString MakeDelegateEventStableId(
 		const FString& OwnerClass,
@@ -253,7 +255,8 @@ public:
 		TConstArrayView<FAvidScriptBindingValueModel> Parameters,
 		const FAvidScriptBindingNetworkContract& Network =
 			FAvidScriptBindingNetworkContract(),
-		const FName RepNotifyProperty = NAME_None);
+		const FName RepNotifyProperty = NAME_None,
+		const FString& HandlerMode = FString());
 
 	static FString MakeSelectionHash(const FAvidScriptBindingPackageModel& Package);
 	static FString MakePackageHash(const FAvidScriptBindingPackageModel& Package);

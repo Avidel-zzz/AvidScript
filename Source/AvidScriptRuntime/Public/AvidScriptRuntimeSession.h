@@ -129,6 +129,14 @@ public:
 	void CommitDelegateSubscriptionsForTesting();
 	void UnbindDelegateSubscriptionsForTesting();
 	int32 GetDelegateSubscriptionCountForTesting() const;
+	bool PrepareInboundHandlersForTesting(
+		UObject* Source,
+		TConstArrayView<FAvidScriptPreparedDelegateEvent> Handlers,
+		FString& OutError);
+	bool CommitInboundHandlersForTesting(FString& OutError);
+	void UnbindInboundHandlersForTesting();
+	int32 GetInboundHandlerCountForTesting() const;
+	int32 GetDeferredInboundHandlerCountForTesting() const;
 	int32 GetPreparedContinuationCountForTesting() const;
 	int64 SubscribeDelegateForTesting(
 		UObject& Source,

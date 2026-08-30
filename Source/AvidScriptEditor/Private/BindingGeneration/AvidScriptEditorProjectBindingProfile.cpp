@@ -18,7 +18,7 @@ constexpr const TCHAR* WritablePropertyProfileResolverVersion = TEXT("52.1.0");
 constexpr const TCHAR* NativeDirectProfileResolverVersion = TEXT("54.5.0");
 constexpr const TCHAR* GeneratedNativeProfileResolverVersion = TEXT("54.6.0");
 constexpr const TCHAR* DelegateEventProfileResolverVersion = TEXT("57.12A.0");
-constexpr const TCHAR* InboundHandlerProfileResolverVersion = TEXT("57.12D3.0");
+constexpr const TCHAR* InboundHandlerProfileResolverVersion = TEXT("57.12D4.0");
 
 void SetProjectProfileFailure(
 	FAvidScriptBindingSelectionResolveResult& OutResult,
@@ -133,9 +133,35 @@ bool NormalizeClassRule(
 		|| !NormalizeNames(Rule.GeneratedNativeProperties, Rule.OwnerClassPath, TEXT("generated_native_properties"), OutResult)
 		|| !NormalizeNames(Rule.IncludeEvents, Rule.OwnerClassPath, TEXT("include_events"), OutResult)
 		|| !NormalizeNames(Rule.ExcludeEvents, Rule.OwnerClassPath, TEXT("exclude_events"), OutResult)
-		|| !NormalizeNames(Rule.IncludeHandlers, Rule.OwnerClassPath, TEXT("include_handlers"), OutResult))
+		|| !NormalizeNames(Rule.IncludeHandlers, Rule.OwnerClassPath, TEXT("include_handlers"), OutResult)
+		|| !NormalizeNames(Rule.BeforeHandlers, Rule.OwnerClassPath, TEXT("before_handlers"), OutResult)
+		|| !NormalizeNames(Rule.AfterHandlers, Rule.OwnerClassPath, TEXT("after_handlers"), OutResult))
 	{
 		return false;
+	}
+	for (const FName Name : Rule.IncludeHandlers)
+	{
+		if (Rule.BeforeHandlers.Contains(Name) || Rule.AfterHandlers.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("handler_mode_conflict"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Keep each handler in exactly one of include_handlers, before_handlers, or after_handlers."));
+			return false;
+		}
+	}
+	for (const FName Name : Rule.BeforeHandlers)
+	{
+		if (Rule.AfterHandlers.Contains(Name))
+		{
+			SetProjectProfileFailure(
+				OutResult,
+				TEXT("handler_mode_conflict"),
+				Rule.OwnerClassPath + TEXT(".") + Name.ToString(),
+				TEXT("Keep each handler in exactly one of include_handlers, before_handlers, or after_handlers."));
+			return false;
+		}
 	}
 	for (const FName Name : Rule.IncludeFunctions)
 	{
@@ -403,7 +429,9 @@ void AppendRuleIdentity(
 	}
 	if (bIncludeInboundHandlers)
 	{
-		Identity += TEXT("|ih=") + JoinNames(Rule.IncludeHandlers);
+		Identity += TEXT("|ih=") + JoinNames(Rule.IncludeHandlers)
+			+ TEXT("|bh=") + JoinNames(Rule.BeforeHandlers)
+			+ TEXT("|ah=") + JoinNames(Rule.AfterHandlers);
 	}
 	Identity += FString::Printf(
 		TEXT("|drp=%d"),
@@ -940,7 +968,9 @@ bool FAvidScriptEditorProjectBindingProfile::Resolve(
 	const bool bHasInboundHandlers = OutSelection.Classes.ContainsByPredicate(
 		[](const FAvidScriptReflectedClassSelection& Rule)
 		{
-			return !Rule.IncludeHandlers.IsEmpty();
+			return !Rule.IncludeHandlers.IsEmpty()
+				|| !Rule.BeforeHandlers.IsEmpty()
+				|| !Rule.AfterHandlers.IsEmpty();
 		});
 	Identity.Add(
 		TEXT("resolver=")

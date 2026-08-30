@@ -232,6 +232,10 @@ bool FAvidScriptEditorBindingDescriptorModelSerializer::SerializeCanonical(
 			Writer->WriteValue(TEXT("ue_member"), Event.UeMember);
 			Writer->WriteValue(TEXT("script_name"), Event.ScriptName);
 			Writer->WriteValue(TEXT("delegate_kind"), Event.DelegateKind);
+			if (Package.SchemaVersion >= 18)
+			{
+				Writer->WriteValue(TEXT("handler_mode"), Event.HandlerMode);
+			}
 			Writer->WriteValue(TEXT("source_mode"), Event.SourceMode);
 			if (Package.SchemaVersion >= 17)
 			{

@@ -736,6 +736,14 @@ bool FAvidScriptEditorCSharpBindingSliceService::Publish(
 		{
 			Rule.IncludeEvents.AddUnique(FName(*Event.UeMember));
 		}
+		else if (Event.HandlerMode == TEXT("before"))
+		{
+			Rule.BeforeHandlers.AddUnique(FName(*Event.UeMember));
+		}
+		else if (Event.HandlerMode == TEXT("after"))
+		{
+			Rule.AfterHandlers.AddUnique(FName(*Event.UeMember));
+		}
 		else
 		{
 			Rule.IncludeHandlers.AddUnique(FName(*Event.UeMember));

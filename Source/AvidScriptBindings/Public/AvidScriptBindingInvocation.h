@@ -233,6 +233,7 @@ struct FAvidScriptPreparedDelegateEvent
 	FString StableId;
 	FString ExportName;
 	FString CallbackKind = TEXT("multicast");
+	FString HandlerMode = TEXT("replace");
 	UClass* ExpectedSourceClass = nullptr;
 	FMulticastDelegateProperty* DelegateProperty = nullptr;
 	UFunction* SignatureFunction = nullptr;

@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "language": "csharp",
   "source_path": "Plugins/AvidScript/Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlersScript.cs",
   "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
@@ -16,8 +16,10 @@
     "classes": [
       {
         "class_path": "/Script/AvidScriptEditor.AvidScriptBindingRuntimeNetworkTestActor",
-        "include_handlers": [
-          "ServerSubmitValue",
+        "before_handlers": [
+          "ServerSubmitValue"
+        ],
+        "after_handlers": [
           "OnRep_ReplicatedScore"
         ],
         "writable_properties": [

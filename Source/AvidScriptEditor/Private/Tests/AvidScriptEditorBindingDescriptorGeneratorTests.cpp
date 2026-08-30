@@ -16,10 +16,15 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "Dom/JsonObject.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraphSchema_K2.h"
+#include "Engine/Blueprint.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/Texture.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/ScopeExit.h"
@@ -1762,11 +1767,11 @@ bool FAvidScriptEditorBindingDescriptorV8PropertySetTest::RunTest(const FString&
 			FString(ExpectedSource));
 	};
 	ParserRejectsWithSource(
-		TEXT("Schema v18 above the current maximum identifies its header field"),
+		TEXT("Schema v19 above the current maximum identifies its header field"),
 		TEXT("schema_version"),
 		[](TSharedPtr<FJsonObject>& Root)
 		{
-			Root->SetNumberField(TEXT("schema_version"), 18);
+			Root->SetNumberField(TEXT("schema_version"), 19);
 		});
 	ParserRejectsWithSource(
 		TEXT("Malformed package hash identifies its header field"),
@@ -2310,7 +2315,7 @@ bool FAvidScriptEditorBindingDescriptorReplicatedPropertyTest::RunTest(
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FAvidScriptEditorBindingDescriptorInboundHandlerTest,
-	"AvidScript.Editor.BindingDescriptor.InboundHandlerSchema17",
+	"AvidScript.Editor.BindingDescriptor.InboundHandlerSchema18",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
@@ -2324,10 +2329,8 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 	FAvidScriptReflectedClassSelection& Rule =
 		Profile.Classes.AddDefaulted_GetRef();
 	Rule.OwnerClassPath = OwnerPath;
-	Rule.IncludeHandlers = {
-		TEXT("ServerSubmitValue"),
-		TEXT("OnRep_ReplicatedScore")
-	};
+	Rule.BeforeHandlers = {TEXT("ServerSubmitValue")};
+	Rule.AfterHandlers = {TEXT("OnRep_ReplicatedScore")};
 
 	FString DescriptorJson;
 	FAvidScriptBindingSelectionResolveResult SelectionResult;
@@ -2349,7 +2352,7 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 	FString ErrorCategory;
 	FString ErrorSource;
 	if (!TestTrue(
-			TEXT("Inbound handler schema 17 descriptor parses"),
+			TEXT("Inbound handler schema 18 descriptor parses"),
 			FAvidScriptBindingDescriptorParser::Parse(
 				DescriptorJson,
 				Package,
@@ -2359,11 +2362,11 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
 		return false;
 	}
-	TestEqual(TEXT("Inbound handlers select schema 17"), Package.SchemaVersion, 17);
+	TestEqual(TEXT("Inbound handlers select schema 18"), Package.SchemaVersion, 18);
 	TestEqual(
-		TEXT("Inbound handlers select the D3 generator"),
+		TEXT("Inbound handlers select the D4 generator"),
 		Package.GeneratorVersion,
-		FString(TEXT("57.12D3.0")));
+		FString(TEXT("57.12D4.0")));
 	TestEqual(TEXT("Both callbacks are described"), Package.DelegateEvents.Num(), 2);
 
 	const FAvidScriptBindingDelegateEventModel* Rpc =
@@ -2385,16 +2388,18 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 	}
 	TestEqual(TEXT("Server direction is preserved"), Rpc->Network.Mode, EAvidScriptBindingNetworkMode::Server);
 	TestTrue(TEXT("Server reliability is preserved"), Rpc->Network.bReliable);
+	TestEqual(TEXT("Server before mode is preserved"), Rpc->HandlerMode, FString(TEXT("before")));
 	TestEqual(
 		TEXT("RepNotify property identity is preserved"),
 		RepNotify->RepNotifyProperty,
 		FName(TEXT("ReplicatedScore")));
+	TestEqual(TEXT("RepNotify after mode is preserved"), RepNotify->HandlerMode, FString(TEXT("after")));
 
 	FString ReferenceSource;
 	FString ManifestJson;
 	FAvidScriptCSharpBindingEmitResult EmitResult;
 	TestTrue(
-		TEXT("Schema 17 emits the shared C# callback surface"),
+		TEXT("Schema 18 emits the shared C# callback surface"),
 		FAvidScriptEditorCSharpBindingEmitter::Emit(
 			DescriptorJson,
 			ReferenceSource,
@@ -2412,7 +2417,7 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 	TSharedPtr<const FAvidScriptBindingPackage> RuntimePackage;
 	FAvidScriptBindingPackageLoadResult LoadResult;
 	TestTrue(
-		TEXT("Runtime prepares the schema 17 reflection snapshot"),
+		TEXT("Runtime prepares the schema 18 reflection snapshot"),
 		FAvidScriptBindingPackage::LoadDescriptor(
 			DescriptorJson,
 			RuntimePackage,
@@ -2430,6 +2435,36 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 		RuntimePackage->GetMulticastDelegateEventCount(),
 		0);
 
+	FString TamperedJson = DescriptorJson;
+	TamperedJson.ReplaceInline(
+		TEXT("\"handler_mode\": \"before\""),
+		TEXT("\"handler_mode\": \"sideways\""),
+		ESearchCase::CaseSensitive);
+	TestFalse(
+		TEXT("Handler mode tampering is rejected"),
+		FAvidScriptBindingDescriptorParser::Parse(
+			TamperedJson,
+			Package,
+			ErrorCategory,
+			ErrorSource));
+
+	FAvidScriptBindingSelectionProfile ConflictProfile = Profile;
+	ConflictProfile.Classes[0].IncludeHandlers.Add(TEXT("ServerSubmitValue"));
+	FString ConflictDescriptor;
+	FAvidScriptBindingSelectionResolveResult ConflictSelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult ConflictGenerateResult;
+	TestFalse(
+		TEXT("A handler cannot appear in more than one chain-mode group"),
+		FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+			ConflictProfile,
+			ConflictDescriptor,
+			ConflictSelectionResult,
+			ConflictGenerateResult));
+	TestEqual(
+		TEXT("Chain-mode conflicts use a stable category"),
+		ConflictSelectionResult.ErrorCategory,
+		FString(TEXT("handler_mode_conflict")));
+
 	const FString SampleProfilePath = FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(
 			FPaths::ProjectPluginsDir(),
@@ -2444,6 +2479,25 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 		AddError(ProfileResult.ErrorMessage);
 		return false;
 	}
+	TestEqual(
+		TEXT("Inbound handler sample uses C# profile schema 10"),
+		ProfileResult.SchemaVersion,
+		10);
+	if (!TestEqual(
+			TEXT("Inbound handler sample resolves one class rule"),
+			ProfileResult.ResolvedBindingSelection.Classes.Num(),
+			1))
+	{
+		return false;
+	}
+	TestEqual(
+		TEXT("Sample preserves one before handler"),
+		ProfileResult.ResolvedBindingSelection.Classes[0].BeforeHandlers.Num(),
+		1);
+	TestEqual(
+		TEXT("Sample preserves one after handler"),
+		ProfileResult.ResolvedBindingSelection.Classes[0].AfterHandlers.Num(),
+		1);
 	FAvidScriptEditorCSharpBuildResult BuildResult;
 	if (!TestTrue(
 			TEXT("Inbound handler sample builds through the production C# pipeline"),
@@ -2459,6 +2513,117 @@ bool FAvidScriptEditorBindingDescriptorInboundHandlerTest::RunTest(
 	TestTrue(TEXT("Inbound handler VM artifact exists"), FPaths::FileExists(BuildResult.VmArtifactPath));
 	TestTrue(TEXT("Inbound handler sample publishes its Runtime manifest"), FPaths::FileExists(BuildResult.ManifestPath));
 	TestTrue(TEXT("Inbound handler sample publishes its binding package"), FPaths::FileExists(BuildResult.BindingPackagePath));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FAvidScriptEditorBindingDescriptorBlueprintInboundHandlerTest,
+	"AvidScript.Editor.BindingDescriptor.BlueprintInboundHandlerSchema18",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FAvidScriptEditorBindingDescriptorBlueprintInboundHandlerTest::RunTest(
+	const FString& Parameters)
+{
+	const FName BlueprintName(*FString::Printf(
+		TEXT("AvidScriptInboundHandler_%s"),
+		*FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	TStrongObjectPtr<UBlueprint> Blueprint(
+		FKismetEditorUtilities::CreateBlueprint(
+			AAvidScriptBindingRuntimeNetworkTestActor::StaticClass(),
+			GetTransientPackage(),
+			BlueprintName,
+			BPTYPE_Normal,
+			TEXT("AvidScriptInboundHandlerTest")));
+	if (!TestNotNull(TEXT("Transient network Blueprint is created"), Blueprint.Get()))
+	{
+		return false;
+	}
+
+	UEdGraph* const OverrideGraph =
+		FBlueprintEditorUtils::CreateNewGraph(
+			Blueprint.Get(),
+			GET_FUNCTION_NAME_CHECKED(
+				AAvidScriptBindingRuntimeNetworkTestActor,
+				OnRep_BlueprintScore),
+			UEdGraph::StaticClass(),
+			UEdGraphSchema_K2::StaticClass());
+	FBlueprintEditorUtils::AddFunctionGraph(
+		Blueprint.Get(),
+		OverrideGraph,
+		false,
+		AAvidScriptBindingRuntimeNetworkTestActor::StaticClass());
+	FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+	UClass* const BlueprintClass = Blueprint->GeneratedClass;
+	if (!TestNotNull(TEXT("Transient network Blueprint compiles"), BlueprintClass))
+	{
+		return false;
+	}
+	UFunction* const BlueprintFunction = BlueprintClass->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeNetworkTestActor,
+			OnRep_BlueprintScore),
+		EIncludeSuperFlag::ExcludeSuper);
+	if (!TestNotNull(TEXT("Blueprint owns the RepNotify override"), BlueprintFunction))
+	{
+		return false;
+	}
+	TestFalse(
+		TEXT("Blueprint override is not native"),
+		BlueprintFunction->HasAnyFunctionFlags(FUNC_Native));
+	TestTrue(
+		TEXT("Blueprint override owns bytecode"),
+		!BlueprintFunction->Script.IsEmpty());
+
+	FAvidScriptBindingSelectionProfile Profile;
+	Profile.PackageName = TEXT("avidscript.test.blueprint_inbound_handler");
+	Profile.SelfClassPath = BlueprintClass->GetPathName();
+	FAvidScriptReflectedClassSelection& Rule =
+		Profile.Classes.AddDefaulted_GetRef();
+	Rule.OwnerClassPath = BlueprintClass->GetPathName();
+	Rule.AfterHandlers = {
+		GET_FUNCTION_NAME_CHECKED(
+			AAvidScriptBindingRuntimeNetworkTestActor,
+			OnRep_BlueprintScore)
+	};
+
+	FString DescriptorJson;
+	FAvidScriptBindingSelectionResolveResult SelectionResult;
+	FAvidScriptBindingDescriptorGenerateResult GenerateResult;
+	if (!TestTrue(
+			TEXT("Blueprint RepNotify handler generates"),
+			FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
+				Profile,
+				DescriptorJson,
+				SelectionResult,
+				GenerateResult)))
+	{
+		AddError(GenerateResult.ErrorCategory + TEXT(": ")
+			+ GenerateResult.ErrorMessage);
+		return false;
+	}
+
+	FAvidScriptBindingPackageModel Package;
+	FString ErrorCategory;
+	FString ErrorSource;
+	if (!TestTrue(
+			TEXT("Blueprint handler schema 18 parses"),
+			FAvidScriptBindingDescriptorParser::Parse(
+				DescriptorJson,
+				Package,
+				ErrorCategory,
+				ErrorSource)))
+	{
+		AddError(ErrorCategory + TEXT(": ") + ErrorSource);
+		return false;
+	}
+	if (!TestEqual(TEXT("One Blueprint handler is emitted"), Package.DelegateEvents.Num(), 1))
+	{
+		return false;
+	}
+	const FAvidScriptBindingDelegateEventModel& Event = Package.DelegateEvents[0];
+	TestEqual(TEXT("Blueprint handler keeps after mode"), Event.HandlerMode, FString(TEXT("after")));
+	TestEqual(TEXT("Blueprint handler keeps RepNotify property"), Event.RepNotifyProperty, FName(TEXT("BlueprintScore")));
+	TestEqual(TEXT("Blueprint handler owner is the generated class"), Event.OwnerClass, BlueprintClass->GetPathName());
 	return true;
 }
 

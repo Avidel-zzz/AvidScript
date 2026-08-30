@@ -1356,6 +1356,7 @@ struct FAvidScriptPreparedDelegateEventCell
 	FString StableId;
 	FString ExportName;
 	FString CallbackKind = TEXT("multicast");
+	FString HandlerMode = TEXT("replace");
 	UClass* ExpectedSourceClass = nullptr;
 	FMulticastDelegateProperty* DelegateProperty = nullptr;
 	UFunction* SignatureFunction = nullptr;
@@ -3090,7 +3091,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		const bool bNetworkRpcValid = Event.DelegateKind == TEXT("network_rpc")
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->GetOuterUClass() == OwnerClass
-			&& SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+			&& (SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				|| !SignatureFunction->Script.IsEmpty())
 			&& !SignatureFunction->HasAnyFunctionFlags(
 				FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
 			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
@@ -3102,7 +3104,8 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		const bool bRepNotifyValid = Event.DelegateKind == TEXT("rep_notify")
 			&& SignatureFunction != nullptr
 			&& SignatureFunction->GetOuterUClass() == OwnerClass
-			&& SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+			&& (SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				|| !SignatureFunction->Script.IsEmpty())
 			&& !SignatureFunction->HasAnyFunctionFlags(
 				FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
 			&& !SignatureFunction->HasMetaData(TEXT("Latent"))
@@ -3158,6 +3161,7 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 		Cell->StableId = Event.StableId;
 		Cell->ExportName = Event.ExportName;
 		Cell->CallbackKind = Event.DelegateKind;
+		Cell->HandlerMode = Event.HandlerMode;
 		Cell->ExpectedSourceClass = OwnerClass;
 		Cell->DelegateProperty = DelegateProperty;
 		Cell->SignatureFunction = SignatureFunction;
@@ -3233,7 +3237,10 @@ bool FAvidScriptBindingPackage::LoadDescriptor(
 				Network,
 				RepNotifyProperty == nullptr
 					? NAME_None
-					: RepNotifyProperty->GetFName());
+					: RepNotifyProperty->GetFName(),
+				Model.SchemaVersion >= 18
+					? Event.HandlerMode
+					: FString());
 		if (Event.CanonicalIdentity != ExpectedIdentity
 			|| Event.StableId != FAvidScriptHash::Sha256HexUtf8(ExpectedIdentity))
 		{
@@ -4491,6 +4498,7 @@ bool FAvidScriptBindingPackage::BuildPreparedDelegateEvents(
 		Event.StableId = Cell->StableId;
 		Event.ExportName = Cell->ExportName;
 		Event.CallbackKind = Cell->CallbackKind;
+		Event.HandlerMode = Cell->HandlerMode;
 		Event.ExpectedSourceClass = Cell->ExpectedSourceClass;
 		Event.DelegateProperty = Cell->DelegateProperty;
 		Event.SignatureFunction = Cell->SignatureFunction;
@@ -4524,7 +4532,12 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 					: Cell->CallbackKind == TEXT("rep_notify")
 						&& !Cell->Network.IsNetworked()
 						&& Cell->RepNotifyProperty != nullptr);
+		const bool bHandlerModeValid = Cell.IsValid()
+			&& (Cell->HandlerMode == TEXT("replace")
+				|| Cell->HandlerMode == TEXT("before")
+				|| Cell->HandlerMode == TEXT("after"));
 		if (!bKindValid
+			|| !bHandlerModeValid
 			|| Cell->EventOrdinal == MAX_uint32
 			|| Cell->StableId.IsEmpty()
 			|| Cell->ExportName.IsEmpty()
@@ -4544,6 +4557,7 @@ bool FAvidScriptBindingPackage::BuildPreparedInboundHandlers(
 		Handler.StableId = Cell->StableId;
 		Handler.ExportName = Cell->ExportName;
 		Handler.CallbackKind = Cell->CallbackKind;
+		Handler.HandlerMode = Cell->HandlerMode;
 		Handler.ExpectedSourceClass = Cell->ExpectedSourceClass;
 		Handler.SignatureFunction = Cell->SignatureFunction;
 		Handler.RepNotifyProperty = Cell->RepNotifyProperty;

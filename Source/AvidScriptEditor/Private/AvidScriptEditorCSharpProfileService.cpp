@@ -188,12 +188,13 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 			&& SchemaVersion != 6
 			&& SchemaVersion != 7
 			&& SchemaVersion != 8
-			&& SchemaVersion != 9)
+			&& SchemaVersion != 9
+			&& SchemaVersion != 10)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("profile_self_field_not_supported"),
-				TEXT("binding_profile.self_class_path requires C# profile schema_version 3 through 9."),
-				TEXT("upgrade the C# profile to schema_version 9 before declaring self_class_path"),
+				TEXT("binding_profile.self_class_path requires C# profile schema_version 3 through 10."),
+				TEXT("upgrade the C# profile to schema_version 10 before declaring self_class_path"),
 				OutResult);
 			return false;
 		}
@@ -237,7 +238,9 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("writable_properties"), ClassSelection.WritableProperties, OutResult)
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_events"), ClassSelection.IncludeEvents, OutResult)
 				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("exclude_events"), ClassSelection.ExcludeEvents, OutResult)
-				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_handlers"), ClassSelection.IncludeHandlers, OutResult))
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("include_handlers"), ClassSelection.IncludeHandlers, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("before_handlers"), ClassSelection.BeforeHandlers, OutResult)
+				|| !TryGetAvidScriptCSharpProfileNameArray(ClassObject, TEXT("after_handlers"), ClassSelection.AfterHandlers, OutResult))
 			{
 				if (OutResult.ErrorCategory.IsEmpty())
 				{
@@ -252,33 +255,47 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 			if ((ClassObject->HasField(TEXT("include_events"))
 					|| ClassObject->HasField(TEXT("exclude_events")))
 				&& SchemaVersion != 8
-				&& SchemaVersion != 9)
+				&& SchemaVersion != 9
+				&& SchemaVersion != 10)
 			{
 				SetAvidScriptCSharpProfileFailure(
 					TEXT("binding_profile_delegate_event_schema_unsupported"),
-					TEXT("binding_profile classes include_events/exclude_events requires C# profile schema_version 8 or 9."),
-					TEXT("upgrade schema_version to 9 or remove delegate event filters"),
+					TEXT("binding_profile classes include_events/exclude_events requires C# profile schema_version 8 through 10."),
+					TEXT("upgrade schema_version to 10 or remove delegate event filters"),
 					OutResult);
 				return false;
 			}
 			if (ClassObject->HasField(TEXT("include_handlers"))
-				&& SchemaVersion != 9)
+				&& SchemaVersion != 9
+				&& SchemaVersion != 10)
 			{
 				SetAvidScriptCSharpProfileFailure(
 					TEXT("binding_profile_handler_schema_unsupported"),
-					TEXT("binding_profile classes include_handlers requires C# profile schema_version 9."),
-					TEXT("upgrade schema_version to 9 or remove include_handlers"),
+					TEXT("binding_profile classes include_handlers requires C# profile schema_version 9 or 10."),
+					TEXT("upgrade schema_version to 10 or remove include_handlers"),
+					OutResult);
+				return false;
+			}
+			if ((ClassObject->HasField(TEXT("before_handlers"))
+					|| ClassObject->HasField(TEXT("after_handlers")))
+				&& SchemaVersion != 10)
+			{
+				SetAvidScriptCSharpProfileFailure(
+					TEXT("binding_profile_handler_mode_schema_unsupported"),
+					TEXT("binding_profile classes before_handlers/after_handlers requires C# profile schema_version 10."),
+					TEXT("upgrade schema_version to 10 or remove chained handler filters"),
 					OutResult);
 				return false;
 			}
 			if (ClassObject->HasField(TEXT("native_direct_functions")))
 			{
 				if (SchemaVersion != 6 && SchemaVersion != 7
-					&& SchemaVersion != 8 && SchemaVersion != 9)
+					&& SchemaVersion != 8 && SchemaVersion != 9
+					&& SchemaVersion != 10)
 				{
 					SetAvidScriptCSharpProfileFailure(
 						TEXT("binding_profile_native_direct_schema_unsupported"),
-						TEXT("binding_profile classes native_direct_functions requires C# profile schema_version 6 through 9."),
+						TEXT("binding_profile classes native_direct_functions requires C# profile schema_version 6 through 10."),
 						AvidScriptNativeDirectAuthorizationSemantics,
 						OutResult);
 					return false;
@@ -301,11 +318,11 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 			if (ClassObject->HasField(TEXT("generated_native_functions")))
 			{
 				if (SchemaVersion != 7 && SchemaVersion != 8
-					&& SchemaVersion != 9)
+					&& SchemaVersion != 9 && SchemaVersion != 10)
 				{
 					SetAvidScriptCSharpProfileFailure(
 						TEXT("binding_profile_generated_native_schema_unsupported"),
-						TEXT("binding_profile classes generated_native_functions requires C# profile schema_version 7 through 9."),
+						TEXT("binding_profile classes generated_native_functions requires C# profile schema_version 7 through 10."),
 						AvidScriptGeneratedNativeAuthorizationSemantics,
 						OutResult);
 					return false;
@@ -328,11 +345,11 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 			if (ClassObject->HasField(TEXT("generated_native_properties")))
 			{
 				if (SchemaVersion != 7 && SchemaVersion != 8
-					&& SchemaVersion != 9)
+					&& SchemaVersion != 9 && SchemaVersion != 10)
 				{
 					SetAvidScriptCSharpProfileFailure(
 						TEXT("binding_profile_generated_native_property_schema_unsupported"),
-						TEXT("binding_profile classes generated_native_properties requires C# profile schema_version 7 through 9."),
+						TEXT("binding_profile classes generated_native_properties requires C# profile schema_version 7 through 10."),
 						AvidScriptGeneratedNativePropertyAuthorizationSemantics,
 						OutResult);
 					return false;
@@ -357,12 +374,13 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 				&& SchemaVersion != 6
 				&& SchemaVersion != 7
 				&& SchemaVersion != 8
-				&& SchemaVersion != 9)
+				&& SchemaVersion != 9
+				&& SchemaVersion != 10)
 			{
 				SetAvidScriptCSharpProfileFailure(
 					TEXT("binding_profile_writable_property_schema_unsupported"),
-					TEXT("binding_profile classes writable_properties requires C# profile schema_version 5 through 9."),
-					TEXT("upgrade schema_version to 9 or remove writable_properties"),
+					TEXT("binding_profile classes writable_properties requires C# profile schema_version 5 through 10."),
+					TEXT("upgrade schema_version to 10 or remove writable_properties"),
 					OutResult);
 				return false;
 			}
@@ -439,12 +457,13 @@ bool ParseAvidScriptCSharpProjectBindingProfile(
 			&& SchemaVersion != 6
 			&& SchemaVersion != 7
 			&& SchemaVersion != 8
-			&& SchemaVersion != 9)
+			&& SchemaVersion != 9
+			&& SchemaVersion != 10)
 		{
 			SetAvidScriptCSharpProfileFailure(
 				TEXT("binding_profile_factory_schema_unsupported"),
-				TEXT("C# binding_profile object_factories requires profile schema_version 4 through 9."),
-				TEXT("upgrade the C# profile to schema_version 9 before declaring object_factories"),
+				TEXT("C# binding_profile object_factories requires profile schema_version 4 through 10."),
+				TEXT("upgrade the C# profile to schema_version 10 before declaring object_factories"),
 				OutResult);
 			return false;
 		}
@@ -847,12 +866,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			&& SchemaVersion != 6.0
 			&& SchemaVersion != 7.0
 			&& SchemaVersion != 8.0
-			&& SchemaVersion != 9.0))
+			&& SchemaVersion != 9.0
+			&& SchemaVersion != 10.0))
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_schema_unsupported"),
-			TEXT("C# profile schema_version must be an integer from 1 through 9."),
-			TEXT("update the profile JSON to schema_version 9"),
+			TEXT("C# profile schema_version must be an integer from 1 through 10."),
+			TEXT("update the profile JSON to schema_version 10"),
 			OutResult);
 		return false;
 	}
@@ -1003,12 +1023,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		&& OutResult.SchemaVersion != 7
 		&& OutResult.SchemaVersion != 8
 		&& OutResult.SchemaVersion != 9
+		&& OutResult.SchemaVersion != 10
 		&& bHasSelfClassPath)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("profile_self_field_not_supported"),
-			TEXT("binding_profile.self_class_path requires C# profile schema_version 3 through 9."),
-			TEXT("upgrade the C# profile to schema_version 9 before declaring self_class_path"),
+			TEXT("binding_profile.self_class_path requires C# profile schema_version 3 through 10."),
+			TEXT("upgrade the C# profile to schema_version 10 before declaring self_class_path"),
 			OutResult);
 		return false;
 	}
@@ -1018,12 +1039,13 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 		&& OutResult.SchemaVersion != 7
 		&& OutResult.SchemaVersion != 8
 		&& OutResult.SchemaVersion != 9
+		&& OutResult.SchemaVersion != 10
 		&& bHasObjectFactories)
 	{
 		SetAvidScriptCSharpProfileFailure(
 			TEXT("binding_profile_factory_schema_unsupported"),
-			TEXT("binding_profile.object_factories requires C# profile schema_version 4 through 9."),
-			TEXT("upgrade schema_version to 9 or remove object_factories"),
+			TEXT("binding_profile.object_factories requires C# profile schema_version 4 through 10."),
+			TEXT("upgrade schema_version to 10 or remove object_factories"),
 			OutResult);
 		return false;
 	}
@@ -1043,7 +1065,8 @@ bool FAvidScriptEditorCSharpProfileService::LoadProfile(
 			|| OutResult.SchemaVersion == 6
 			|| OutResult.SchemaVersion == 7
 			|| OutResult.SchemaVersion == 8
-			|| OutResult.SchemaVersion == 9)
+			|| OutResult.SchemaVersion == 9
+			|| OutResult.SchemaVersion == 10)
 		&& bHasBindingProfile)
 	{
 		if (!ProfileObject->TryGetObjectField(TEXT("binding_profile"), BindingProfileObject)

@@ -11,6 +11,8 @@ struct FAvidScriptInstalledFunctionRoute
 	TWeakObjectPtr<UObject> Source;
 	IAvidScriptFunctionHookSink* Sink = nullptr;
 	uint32 HandlerOrdinal = MAX_uint32;
+	EAvidScriptFunctionHookChainMode ChainMode =
+		EAvidScriptFunctionHookChainMode::Replace;
 };
 
 struct FAvidScriptInstalledFunctionHook
@@ -43,10 +45,29 @@ void InvokeAvidScriptFunctionHook(
 	{
 		if (Route.Source.Get() == Context && Route.Sink != nullptr)
 		{
-			Route.Sink->HandleAvidScriptInboundFunction(
+			if (Route.ChainMode == EAvidScriptFunctionHookChainMode::After
+				&& Hook->Original != nullptr)
+			{
+				Hook->Original(Context, Stack, RESULT_PARAM);
+			}
+			const EAvidScriptInboundFunctionDispatch Dispatch =
+				Route.Sink->HandleAvidScriptInboundFunction(
 				Route.HandlerOrdinal,
 				*Function,
 				Stack.Locals);
+			if (Route.ChainMode == EAvidScriptFunctionHookChainMode::Before
+				&& Dispatch == EAvidScriptInboundFunctionDispatch::Handled
+				&& Hook->Original != nullptr)
+			{
+				Hook->Original(Context, Stack, RESULT_PARAM);
+			}
+			else if (Route.ChainMode
+					!= EAvidScriptFunctionHookChainMode::After
+				&& Dispatch == EAvidScriptInboundFunctionDispatch::Unavailable
+				&& Hook->Original != nullptr)
+			{
+				Hook->Original(Context, Stack, RESULT_PARAM);
+			}
 			return;
 		}
 	}
@@ -67,9 +88,14 @@ bool ValidateRoutes(
 	TSet<FString> CandidateKeys;
 	for (const FAvidScriptFunctionHookRoute& Route : Routes)
 	{
+		const bool bChainModeValid =
+			Route.ChainMode == EAvidScriptFunctionHookChainMode::Replace
+			|| Route.ChainMode == EAvidScriptFunctionHookChainMode::Before
+			|| Route.ChainMode == EAvidScriptFunctionHookChainMode::After;
 		if (!IsValid(Route.Source)
 			|| !IsValid(Route.Function)
 			|| Route.HandlerOrdinal == MAX_uint32
+			|| !bChainModeValid
 			|| Route.Function->GetNativeFunc() == nullptr)
 		{
 			OutError = TEXT("function_hook_route_invalid");
@@ -181,6 +207,7 @@ bool FAvidScriptFunctionHookRegistry::ReplaceRoutes(
 		Installed.Source = Route.Source;
 		Installed.Sink = &Sink;
 		Installed.HandlerOrdinal = Route.HandlerOrdinal;
+		Installed.ChainMode = Route.ChainMode;
 	}
 	return true;
 }
@@ -209,4 +236,50 @@ int32 FAvidScriptFunctionHookRegistry::NumRoutes(
 		}
 	}
 	return Count;
+}
+
+bool FAvidScriptFunctionHookRegistry::InvokeOriginal(
+	IAvidScriptFunctionHookSink& Sink,
+	UObject& Source,
+	UFunction& Function,
+	const uint32 HandlerOrdinal,
+	void* Parameters,
+	FString& OutError)
+{
+	check(IsInGameThread());
+	OutError.Reset();
+	FAvidScriptInstalledFunctionHook* const Hook = GetHooks().Find(&Function);
+	if (Hook == nullptr
+		|| Hook->Original == nullptr
+		|| Function.GetNativeFunc() != &InvokeAvidScriptFunctionHook
+		|| (Function.ParmsSize > 0 && Parameters == nullptr))
+	{
+		OutError = TEXT("function_hook_original_unavailable");
+		return false;
+	}
+	const bool bRouteOwned = Hook->Routes.ContainsByPredicate(
+		[&Sink, &Source, HandlerOrdinal](
+			const FAvidScriptInstalledFunctionRoute& Route)
+		{
+			return Route.Source.Get() == &Source
+				&& Route.Sink == &Sink
+				&& Route.HandlerOrdinal == HandlerOrdinal;
+		});
+	if (!bRouteOwned)
+	{
+		OutError = TEXT("function_hook_original_route_stale");
+		return false;
+	}
+
+	FFrame Stack(
+		&Source,
+		&Function,
+		static_cast<uint8*>(Parameters),
+		nullptr,
+		Function.ChildProperties);
+	TGuardValue<UFunction*> NativeFunctionGuard(
+		Stack.CurrentNativeFunction,
+		&Function);
+	Hook->Original(&Source, Stack, nullptr);
+	return true;
 }

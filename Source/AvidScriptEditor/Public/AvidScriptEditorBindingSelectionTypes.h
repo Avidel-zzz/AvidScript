@@ -20,6 +20,7 @@ struct FAvidScriptReflectedDelegateEventSelection
 	FString OwnerClassPath;
 	FName EventName;
 	FString CallbackKind = TEXT("multicast");
+	FString HandlerMode = TEXT("replace");
 };
 
 struct FAvidScriptReflectedClassSelection
@@ -36,6 +37,8 @@ struct FAvidScriptReflectedClassSelection
 	TArray<FName> IncludeEvents;
 	TArray<FName> ExcludeEvents;
 	TArray<FName> IncludeHandlers;
+	TArray<FName> BeforeHandlers;
+	TArray<FName> AfterHandlers;
 	bool bDiscoverReadableProperties = false;
 };
 

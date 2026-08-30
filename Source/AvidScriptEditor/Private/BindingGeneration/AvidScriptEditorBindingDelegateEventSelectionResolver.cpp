@@ -35,11 +35,15 @@ bool TryResolveFunctionHandler(
 		OutSource = MakeEventSelectionKey(Selection);
 		return false;
 	}
-	if (!Function->HasAnyFunctionFlags(FUNC_Native)
+	if ((!Function->HasAnyFunctionFlags(FUNC_Native)
+			&& Function->Script.IsEmpty())
 		|| Function->HasAnyFunctionFlags(FUNC_Static | FUNC_Delegate
 			| FUNC_MulticastDelegate)
 		|| Function->HasMetaData(TEXT("Latent"))
-		|| !IsAvidScriptBindingNetworkOwnerClass(&OwnerClass))
+		|| !IsAvidScriptBindingNetworkOwnerClass(&OwnerClass)
+		|| (Selection.HandlerMode != TEXT("replace")
+			&& Selection.HandlerMode != TEXT("before")
+			&& Selection.HandlerMode != TEXT("after")))
 	{
 		OutCategory = TEXT("function_handler_owner_or_flags_unsupported");
 		OutSource = Function->GetPathName();
@@ -240,7 +244,7 @@ bool ResolveOne(
 			Category,
 			Source,
 			Selection.CallbackKind == TEXT("function_handler")
-				? FString(TEXT("Select a declared native Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature."))
+				? FString(TEXT("Select a declared native or Blueprint-bytecode Actor/ActorComponent RPC or RepNotify UFunction with a supported value-only signature and explicit chain mode."))
 				: FString(TEXT("Select a declared dynamic multicast delegate with a supported value-only signature of at most eight ABI cells.")));
 		return false;
 	}
@@ -277,6 +281,33 @@ bool FAvidScriptEditorBindingDelegateEventSelectionResolver::Resolve(
 	TSet<FString> SeenSelections;
 	for (const FAvidScriptReflectedClassSelection& Rule : ClassRules)
 	{
+		for (const FName HandlerName : Rule.IncludeHandlers)
+		{
+			if (Rule.BeforeHandlers.Contains(HandlerName)
+				|| Rule.AfterHandlers.Contains(HandlerName))
+			{
+				SetDelegateEventSelectionFailure(
+					OutResult,
+					TEXT("handler_mode_conflict"),
+					Rule.OwnerClassPath + TEXT(".")
+						+ HandlerName.ToString(),
+					TEXT("Keep each handler in exactly one chain-mode group."));
+				return false;
+			}
+		}
+		for (const FName HandlerName : Rule.BeforeHandlers)
+		{
+			if (Rule.AfterHandlers.Contains(HandlerName))
+			{
+				SetDelegateEventSelectionFailure(
+					OutResult,
+					TEXT("handler_mode_conflict"),
+					Rule.OwnerClassPath + TEXT(".")
+						+ HandlerName.ToString(),
+					TEXT("Keep each handler in exactly one chain-mode group."));
+				return false;
+			}
+		}
 		TArray<FName> EventNames = Rule.IncludeEvents;
 		EventNames.Sort([](const FName Left, const FName Right)
 		{
@@ -320,26 +351,43 @@ bool FAvidScriptEditorBindingDelegateEventSelectionResolver::Resolve(
 				return false;
 			}
 		}
-		TArray<FName> HandlerNames = Rule.IncludeHandlers;
-		HandlerNames.Sort([](const FName Left, const FName Right)
+		const auto ResolveHandlerGroup = [&Rule, &SeenSelections,
+			&OutSelections, &OutResult](
+			TArray<FName> HandlerNames,
+			const FString& HandlerMode)
 		{
-			return Left.ToString().Compare(
-				Right.ToString(),
-				ESearchCase::CaseSensitive) < 0;
-		});
-		for (const FName HandlerName : HandlerNames)
-		{
-			if (!ResolveOne(
-					{ Rule.OwnerClassPath, HandlerName, TEXT("function_handler") },
-					true,
-					SeenSelections,
-					OutSelections,
-					OutResult))
+			HandlerNames.Sort([](const FName Left, const FName Right)
 			{
-				OutSelections.Reset();
-				OutResult.AcceptedDelegateEventCount = 0;
-				return false;
+				return Left.ToString().Compare(
+					Right.ToString(),
+					ESearchCase::CaseSensitive) < 0;
+			});
+			for (const FName HandlerName : HandlerNames)
+			{
+				if (!ResolveOne(
+						{
+							Rule.OwnerClassPath,
+							HandlerName,
+							TEXT("function_handler"),
+							HandlerMode
+						},
+						true,
+						SeenSelections,
+						OutSelections,
+						OutResult))
+				{
+					return false;
+				}
 			}
+			return true;
+		};
+		if (!ResolveHandlerGroup(Rule.IncludeHandlers, TEXT("replace"))
+			|| !ResolveHandlerGroup(Rule.BeforeHandlers, TEXT("before"))
+			|| !ResolveHandlerGroup(Rule.AfterHandlers, TEXT("after")))
+		{
+			OutSelections.Reset();
+			OutResult.AcceptedDelegateEventCount = 0;
+			return false;
 		}
 	}
 

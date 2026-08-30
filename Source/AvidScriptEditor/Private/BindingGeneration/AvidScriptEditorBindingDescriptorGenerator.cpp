@@ -37,7 +37,7 @@ constexpr const TCHAR* LatentGeneratorVersion = TEXT("57.12C5.0");
 constexpr const TCHAR* LatentPayloadGeneratorVersion = TEXT("57.12C10.0");
 constexpr const TCHAR* NetworkGeneratorVersion = TEXT("57.12D1.0");
 constexpr const TCHAR* ReplicatedPropertyGeneratorVersion = TEXT("57.12D2.0");
-constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D3.0");
+constexpr const TCHAR* InboundHandlerGeneratorVersion = TEXT("57.12D4.0");
 
 struct FResolvedBindingDescriptor
 {
@@ -77,6 +77,7 @@ struct FResolvedDelegateEventDescriptor
 	UFunction* SignatureFunction = nullptr;
 	FProperty* RepNotifyProperty = nullptr;
 	FString CallbackKind = TEXT("multicast");
+	FString HandlerMode = TEXT("replace");
 	FAvidScriptBindingNetworkContract Network;
 	FAvidScriptProjectedDelegateEvent Projection;
 	FString ScriptName;
@@ -1004,6 +1005,7 @@ bool GenerateBindingDescriptor(
 		Event.Selection = Selection;
 		Event.OwnerClass = OwnerClass;
 		Event.CallbackKind = Selection.CallbackKind;
+		Event.HandlerMode = Selection.HandlerMode;
 		FString PolicyCategory;
 		FString PolicySource;
 		if (Selection.CallbackKind == TEXT("multicast"))
@@ -1043,11 +1045,15 @@ bool GenerateBindingDescriptor(
 				Selection.EventName,
 				EIncludeSuperFlag::ExcludeSuper);
 			if (Event.SignatureFunction == nullptr
-				|| !Event.SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+				|| (!Event.SignatureFunction->HasAnyFunctionFlags(FUNC_Native)
+					&& Event.SignatureFunction->Script.IsEmpty())
 				|| Event.SignatureFunction->HasAnyFunctionFlags(
 					FUNC_Static | FUNC_Delegate | FUNC_MulticastDelegate)
 				|| Event.SignatureFunction->HasMetaData(TEXT("Latent"))
 				|| !IsAvidScriptBindingNetworkOwnerClass(OwnerClass)
+				|| (Event.HandlerMode != TEXT("replace")
+					&& Event.HandlerMode != TEXT("before")
+					&& Event.HandlerMode != TEXT("after"))
 				|| !TryResolveAvidScriptBindingNetworkContract(
 					*Event.SignatureFunction,
 					Event.Network))
@@ -1056,7 +1062,7 @@ bool GenerateBindingDescriptor(
 					OutResult,
 					TEXT("function_handler_contract_invalid"),
 					SelectionKey,
-					TEXT("Select a native Actor/ActorComponent RPC or RepNotify function."));
+					TEXT("Select a native or Blueprint-bytecode Actor/ActorComponent RPC or RepNotify function with a valid chain mode."));
 				return false;
 			}
 			for (TFieldIterator<FProperty> It(
@@ -1106,7 +1112,7 @@ bool GenerateBindingDescriptor(
 						? FString(TEXT("function_handler_kind_mismatch"))
 						: PolicyCategory,
 					PolicySource.IsEmpty() ? SelectionKey : PolicySource,
-					TEXT("Use a value-only native RPC or RepNotify signature of at most eight ABI cells."));
+					TEXT("Use a value-only native or Blueprint-bytecode RPC or RepNotify signature of at most eight ABI cells."));
 				return false;
 			}
 		}
@@ -1146,7 +1152,10 @@ bool GenerateBindingDescriptor(
 				Event.Network,
 				Event.RepNotifyProperty == nullptr
 					? NAME_None
-					: Event.RepNotifyProperty->GetFName());
+					: Event.RepNotifyProperty->GetFName(),
+				Event.CallbackKind == TEXT("multicast")
+					? FString()
+					: Event.HandlerMode);
 		Event.StableId = FAvidScriptBindingDescriptorIdentity::MakeDelegateEventStableId(
 			OwnerClass->GetPathName(),
 			Selection.EventName.ToString(),
@@ -1156,7 +1165,10 @@ bool GenerateBindingDescriptor(
 			Event.Network,
 			Event.RepNotifyProperty == nullptr
 				? NAME_None
-				: Event.RepNotifyProperty->GetFName());
+				: Event.RepNotifyProperty->GetFName(),
+			Event.CallbackKind == TEXT("multicast")
+				? FString()
+				: Event.HandlerMode);
 		Event.ExportName = TEXT("avid_on_delegate_") + Event.StableId.Left(16);
 		DelegateEvents.Add(MoveTemp(Event));
 	}
@@ -1368,7 +1380,7 @@ bool GenerateBindingDescriptor(
 	}
 	if (bHasInboundHandlers)
 	{
-		Package.SchemaVersion = 17;
+		Package.SchemaVersion = 18;
 	}
 	Package.GeneratorVersion = bHasInboundHandlers
 		? InboundHandlerGeneratorVersion
@@ -1475,6 +1487,7 @@ bool GenerateBindingDescriptor(
 		EventModel.UeMember = Event.Selection.EventName.ToString();
 		EventModel.ScriptName = Event.ScriptName;
 		EventModel.DelegateKind = Event.CallbackKind;
+		EventModel.HandlerMode = Event.HandlerMode;
 		EventModel.SourceMode = TEXT("self");
 		EventModel.Network = Event.Network;
 		EventModel.RepNotifyProperty = Event.RepNotifyProperty == nullptr
@@ -2039,7 +2052,9 @@ bool FAvidScriptEditorBindingDescriptorGenerator::GenerateFromProfile(
 			[](const FAvidScriptReflectedClassSelection& Rule)
 			{
 				return !Rule.IncludeEvents.IsEmpty()
-					|| !Rule.IncludeHandlers.IsEmpty();
+					|| !Rule.IncludeHandlers.IsEmpty()
+					|| !Rule.BeforeHandlers.IsEmpty()
+					|| !Rule.AfterHandlers.IsEmpty();
 			});
 	if (bRequestsDelegateEvents)
 	{

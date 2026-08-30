@@ -487,19 +487,23 @@ bool FAvidScriptRuntimeSession::Tick(float DeltaSeconds, FAvidScriptWasmSmokeRes
 			OutResult);
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(
-		ActiveGuestCallDepth,
-		ActiveGuestCallDepth + 1);
-#if WITH_DEV_AUTOMATION_TESTS
-	if (LiveExecutionObserverForTesting)
+	bool bSucceeded = false;
 	{
-		TFunction<void()> Observer =
-			MoveTemp(LiveExecutionObserverForTesting);
-		Observer();
-	}
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+		if (LiveExecutionObserverForTesting)
+		{
+			TFunction<void()> Observer =
+				MoveTemp(LiveExecutionObserverForTesting);
+			Observer();
+		}
 #endif
-	return Scheduler->Tick(DeltaSeconds, OutResult)
-		&& PumpReadyContinuations(OutResult);
+		bSucceeded = Scheduler->Tick(DeltaSeconds, OutResult)
+			&& PumpReadyContinuations(OutResult);
+	}
+	return bSucceeded && InboundHandlers->PumpDeferred(OutResult);
 }
 
 bool FAvidScriptRuntimeSession::DispatchEvent(
@@ -528,19 +532,26 @@ bool FAvidScriptRuntimeSession::TickLive(float DeltaSeconds, FAvidScriptWasmSmok
 			OutResult);
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(ActiveGuestCallDepth, ActiveGuestCallDepth + 1);
-#if WITH_DEV_AUTOMATION_TESTS
-	if (LiveExecutionObserverForTesting)
+	bool bSucceeded = false;
 	{
-		TFunction<void()> Observer = MoveTemp(LiveExecutionObserverForTesting);
-		Observer();
-	}
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+		if (LiveExecutionObserverForTesting)
+		{
+			TFunction<void()> Observer =
+				MoveTemp(LiveExecutionObserverForTesting);
+			Observer();
+		}
 #endif
-	return Scheduler->Tick(
+		bSucceeded = Scheduler->Tick(
 			DeltaSeconds,
 			OutResult,
 			EAvidScriptWasmResultDetail::FailureOnly)
-		&& PumpReadyContinuations(OutResult);
+			&& PumpReadyContinuations(OutResult);
+	}
+	return bSucceeded && InboundHandlers->PumpDeferred(OutResult);
 }
 
 bool FAvidScriptRuntimeSession::TickHot(
@@ -556,19 +567,23 @@ bool FAvidScriptRuntimeSession::TickHot(
 			OutFailure);
 		return false;
 	}
-	TGuardValue<int32> GuestCallGuard(
-		ActiveGuestCallDepth,
-		ActiveGuestCallDepth + 1);
-#if WITH_DEV_AUTOMATION_TESTS
-	if (LiveExecutionObserverForTesting)
+	bool bSucceeded = false;
 	{
-		TFunction<void()> Observer =
-			MoveTemp(LiveExecutionObserverForTesting);
-		Observer();
-	}
+		TGuardValue<int32> GuestCallGuard(
+			ActiveGuestCallDepth,
+			ActiveGuestCallDepth + 1);
+#if WITH_DEV_AUTOMATION_TESTS
+		if (LiveExecutionObserverForTesting)
+		{
+			TFunction<void()> Observer =
+				MoveTemp(LiveExecutionObserverForTesting);
+			Observer();
+		}
 #endif
-	return Scheduler->TickHot(DeltaSeconds, OutFailure)
-		&& PumpReadyContinuations(OutFailure);
+		bSucceeded = Scheduler->TickHot(DeltaSeconds, OutFailure)
+			&& PumpReadyContinuations(OutFailure);
+	}
+	return bSucceeded && InboundHandlers->PumpDeferred(OutFailure);
 }
 
 bool FAvidScriptRuntimeSession::PumpReadyContinuations(
@@ -903,6 +918,38 @@ void FAvidScriptRuntimeSession::UnbindDelegateSubscriptionsForTesting()
 int32 FAvidScriptRuntimeSession::GetDelegateSubscriptionCountForTesting() const
 {
 	return DelegateSubscriptions->NumActive();
+}
+
+bool FAvidScriptRuntimeSession::PrepareInboundHandlersForTesting(
+	UObject* Source,
+	const TConstArrayView<FAvidScriptPreparedDelegateEvent> Handlers,
+	FString& OutError)
+{
+	return InboundHandlers->Prepare(Source, Handlers, OutError);
+}
+
+bool FAvidScriptRuntimeSession::CommitInboundHandlersForTesting(
+	FString& OutError)
+{
+	const bool bCommitted = InboundHandlers->CommitPrepared(OutError);
+	InboundHandlers->SetDispatchEnabled(bCommitted);
+	return bCommitted;
+}
+
+void FAvidScriptRuntimeSession::UnbindInboundHandlersForTesting()
+{
+	InboundHandlers->UnbindActive();
+	InboundHandlers->DiscardPrepared();
+}
+
+int32 FAvidScriptRuntimeSession::GetInboundHandlerCountForTesting() const
+{
+	return InboundHandlers->NumActive();
+}
+
+int32 FAvidScriptRuntimeSession::GetDeferredInboundHandlerCountForTesting() const
+{
+	return InboundHandlers->NumDeferred();
 }
 
 int32 FAvidScriptRuntimeSession::GetPreparedContinuationCountForTesting() const

@@ -2197,3 +2197,29 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the first clean D3 architecture failure was reported at the first line of a multiline short-circuit expression, so the repair targeted that first operand twice even though a later `$WasmRuntimeSource` operand had not been loaded yet.
 - Prevention: before changing a multiline architecture check, inspect every operand or use noninteractive breakpoints to identify the null value. Each contract block loads all sources it consumes before evaluation. A checker exception is discarded and never reported as gate evidence.
+
+### 2026-08-30: restore the phase-status resume latch before exploration
+
+- Mistake: the first P57.12D4 repository command after automatic goal continuation was `git status` instead of the required `InvokePhaseWorkflow.ps1 status -Phase 57`; the workflow status was run before any file edit and confirmed revision 41 with only P57-D06 open.
+- Prevention: automatic goal continuation, compaction recovery, and transport reconnect all use the same resume latch. The first plugin-repository command is always the current phase workflow status; Git and source reads follow only after it succeeds.
+
+### 2026-08-30: keep D4 architecture reads in one evidence domain each
+
+- Mistake: the first D4 audit combined related header/source and Session file reads into multi-statement shell invocations, and one broad owner search also included a guessed nonexistent `Managed` root.
+- Recurrence: after goal continuation, the D4 compile review again combined related header/source reads in a single shell command even though the rule had already been recorded.
+- Prevention: each shell invocation reads one literal file or performs one `rg` query. Before sending any repository-read command, count its `Get-Content`, `git`, and `rg` operations; if the count is greater than one, split it. New roots come only from `rg --files` or a literal parent-directory listing.
+
+### 2026-08-30: Blueprint graph tests require the BlueprintGraph module
+
+- Mistake: the first P57.12D4 no-clean build compiled UHT and C++ but failed while linking the dynamic Blueprint handler test because `UEdGraphSchema_K2` was used without declaring the Editor-only `BlueprintGraph` module dependency.
+- Prevention: when an Editor test directly instantiates a UObject type, identify its owning module from the UE5.8 source or API export before compiling. `Kismet` provides editor utilities, while `UEdGraphSchema_K2` is linked from `BlueprintGraph`; both dependencies are explicit in the Editor module only.
+
+### 2026-08-30: version new descriptor fields through every canonical round trip
+
+- Mistake: the first P57.12D4 focused descriptor run added `handler_mode` to generated canonical identities before the package schema was known, which changed legacy schema 11 multicast identities. The C# emitter also regenerated schema 18 handlers with the default `replace` mode instead of the parsed `before`/`after` mode.
+- Prevention: a descriptor field is complete only when generation, serialization, parsing, stable identity, selection/package hashes, Runtime preparation, canonical regeneration, and authorization slicing all preserve it under the same schema gate. Focused descriptor runs include the full historical descriptor prefix so compatibility breaks are caught before the full suite.
+
+### 2026-08-30: preserve exec session identifiers for every bounded wait
+
+- Mistake: the first P57.12D4 CSharpGuest gate forwarded only `exec_command.output`, hiding the returned `session_id`; the 30-second yield was then mistaken for completion and a duplicate test process was started before the second handle was polled to 105/105.
+- Prevention: every command that may outlive its initial yield returns and records the complete tool result, including `session_id`, `exit_code`, and `chunk_id`. A yielded command is never classified from output text alone; continue only through `write_stdin` on the same handle, or inspect authoritative process/log state if that handle was genuinely lost.

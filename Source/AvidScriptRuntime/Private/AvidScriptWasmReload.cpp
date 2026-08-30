@@ -572,7 +572,8 @@ bool ValidateBindingPackageManifest(
 			&& DescriptorSchemaVersion != 14
 			&& DescriptorSchemaVersion != 15
 			&& DescriptorSchemaVersion != 16
-			&& DescriptorSchemaVersion != 17)
+			&& DescriptorSchemaVersion != 17
+			&& DescriptorSchemaVersion != 18)
 		|| !PackageObject->TryGetStringField(TEXT("package_name"), PackageName)
 		|| !PackageObject->TryGetStringField(TEXT("package_hash"), PackageHash)
 		|| !PackageObject->TryGetStringField(TEXT("descriptor_sha256"), DescriptorSha256))

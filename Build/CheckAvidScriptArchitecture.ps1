@@ -1062,9 +1062,11 @@ $BindingNetworkSource = Read-RequiredFile 'Source/AvidScriptBindings/Private/Avi
 $NetworkRpcPlan = Read-RequiredFile 'Docs/Phase57/P57.12D1_Generated_RPC_Authority_Plan.md'
 $ReplicatedPropertyPlan = Read-RequiredFile 'Docs/Phase57/P57.12D2_Replicated_Property_Plan.md'
 $InboundHandlerPlan = Read-RequiredFile 'Docs/Phase57/P57.12D3_Inbound_Network_Handler_Plan.md'
+$ChainedInboundHandlerPlan = Read-RequiredFile 'Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler_Plan.md'
 $DelegateEventSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDelegateEventSelectionResolver.cpp'
 $FunctionHookRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.h'
 $FunctionHookRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.cpp'
+$InboundHandlerSessionHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptSessionInboundHandlers.h'
 $InboundHandlerSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptSessionInboundHandlers.cpp'
 $InboundHandlerWasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
 $InboundHandlerSampleProfile = Read-RequiredFile 'Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlers.csharp-profile.json'
@@ -1231,7 +1233,7 @@ foreach ($RequiredReplicatedPropertyPlanContract in @(
 foreach ($RequiredInboundHandlerContract in @(
     'IncludeHandlers',
     'InboundHandlerGeneratorVersion',
-    'Package.SchemaVersion = 17',
+	'OutPackage.SchemaVersion != 17',
     'TEXT("network_rpc")',
     'TEXT("rep_notify")',
     'TEXT("descriptor_selection_v17")',
@@ -1280,8 +1282,9 @@ foreach ($RequiredInboundHandlerPlanContract in @(
     }
 }
 foreach ($RequiredInboundHandlerSampleContract in @(
-    '"schema_version": 9',
-    '"include_handlers"',
+    '"schema_version": 10',
+    '"before_handlers"',
+    '"after_handlers"',
     'ServerSubmitValue',
     'OnRep_ReplicatedScore',
     '[AvidEvent(AvidEvents.ServerSubmitValue)]',
@@ -1289,7 +1292,7 @@ foreach ($RequiredInboundHandlerSampleContract in @(
 )) {
     if (-not $InboundHandlerSampleProfile.Contains($RequiredInboundHandlerSampleContract) -and
         -not $InboundHandlerSampleSource.Contains($RequiredInboundHandlerSampleContract)) {
-        Add-Violation "P57.12D3 C# sample is missing $RequiredInboundHandlerSampleContract"
+        Add-Violation "P57.12D4 C# sample is missing $RequiredInboundHandlerSampleContract"
     }
 }
 if (-not $ReflectedPropertyPolicySource.Contains('FAvidScriptEditorReflectedPropertyPolicy::EvaluateReadable') -or
@@ -1399,6 +1402,67 @@ $CSharpLiveReloadCompletionSource = Read-RequiredFile 'Source/AvidScriptEditor/P
 $CSharpPreparedSemanticSource = Read-RequiredFile 'Build/AvidScriptCSharpPreparedSemantic.ps1'
 $CSharpBindingPackageSource = Read-RequiredFile 'Build/AvidScriptCSharpBindingPackage.ps1'
 $CSharpSemanticCacheSource = Read-RequiredFile 'Build/AvidScriptCSharpSemanticCache.ps1'
+foreach ($RequiredChainedHandlerProfileContract in @(
+    'BeforeHandlers',
+    'AfterHandlers',
+    'HandlerMode',
+    'handler_mode_conflict'
+)) {
+    if (-not $BindingSelectionTypes.Contains($RequiredChainedHandlerProfileContract) -and
+        -not $CSharpProfileServiceSource.Contains($RequiredChainedHandlerProfileContract) -and
+        -not $ProjectBindingProfileSource.Contains($RequiredChainedHandlerProfileContract) -and
+        -not $DelegateEventSelectionResolverSource.Contains($RequiredChainedHandlerProfileContract) -and
+		-not $CSharpBindingEmitterSource.Contains($RequiredChainedHandlerProfileContract) -and
+        -not $CSharpBindingSliceSource.Contains($RequiredChainedHandlerProfileContract)) {
+        Add-Violation "P57.12D4 chained handler profile contract is missing $RequiredChainedHandlerProfileContract"
+    }
+}
+foreach ($RequiredChainedHandlerDescriptorContract in @(
+    'Package.SchemaVersion = 18',
+    'TEXT("handler_mode")',
+    'TEXT("descriptor_selection_v18")',
+    'TEXT("descriptor_package_v18")',
+    'TEXT("event_handler_mode")'
+)) {
+    if (-not $BindingDescriptorGeneratorSource.Contains($RequiredChainedHandlerDescriptorContract) -and
+        -not $BindingDescriptorModelSource.Contains($RequiredChainedHandlerDescriptorContract) -and
+        -not $BindingDescriptorSource.Contains($RequiredChainedHandlerDescriptorContract) -and
+        -not $BindingInvocationHeader.Contains($RequiredChainedHandlerDescriptorContract) -and
+        -not $BindingInvocationSource.Contains($RequiredChainedHandlerDescriptorContract)) {
+        Add-Violation "schema v18 chained handler descriptor contract is missing $RequiredChainedHandlerDescriptorContract"
+    }
+}
+foreach ($RequiredChainedHandlerRuntimeContract in @(
+    'EAvidScriptFunctionHookChainMode',
+    'EAvidScriptInboundFunctionDispatch',
+    'InvokeOriginal',
+    'FStructOnScope',
+    'MaxDeferredInboundHandlers',
+    'CopyCompleteValue_InContainer',
+    'PumpDeferred',
+    'AddReferencedObjects'
+)) {
+    if (-not $FunctionHookRegistryHeader.Contains($RequiredChainedHandlerRuntimeContract) -and
+        -not $FunctionHookRegistrySource.Contains($RequiredChainedHandlerRuntimeContract) -and
+        -not $InboundHandlerSessionHeader.Contains($RequiredChainedHandlerRuntimeContract) -and
+        -not $InboundHandlerSessionSource.Contains($RequiredChainedHandlerRuntimeContract) -and
+        -not $RuntimeSessionSource.Contains($RequiredChainedHandlerRuntimeContract)) {
+        Add-Violation "P57.12D4 chained/reentrant handler runtime is missing $RequiredChainedHandlerRuntimeContract"
+    }
+}
+foreach ($RequiredChainedHandlerPlanContract in @(
+    'before',
+    'after',
+    'replace',
+    'FStructOnScope',
+    '64',
+    'ProcessInternal',
+    'Session tick'
+)) {
+    if (-not $ChainedInboundHandlerPlan.Contains($RequiredChainedHandlerPlanContract)) {
+        Add-Violation "P57.12D4 chained inbound handler plan is missing $RequiredChainedHandlerPlanContract"
+    }
+}
 foreach ($RequiredEmitterSchemaContract in @(
     'Package.SchemaVersion < 6',
     'FAvidScriptBindingPackage::LoadDescriptor',
@@ -1821,10 +1885,10 @@ if (-not $CSharpBindingArtifactHeader.Contains('EmitterVersion = TEXT("49.3.0")'
     -not $CSharpBindingArtifactHeader.Contains('DescriptorFileName = TEXT("bindings.v5.json")')) {
     Add-Violation 'C# binding artifact must identify the P49.3 schema-v5 object lifecycle surface'
 }
-foreach ($RequiredDescriptorSchemaVersion in 2..17) {
+foreach ($RequiredDescriptorSchemaVersion in 2..18) {
     $RequiredDescriptorSchemaToken = '$DescriptorSchemaVersion -ne ' + $RequiredDescriptorSchemaVersion
     if (-not $CSharpBindingPackageSource.Contains($RequiredDescriptorSchemaToken)) {
-        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v15 compatibility: $RequiredDescriptorSchemaToken"
+        Add-Violation "C# binding package resolver must preserve descriptor schema v2-v18 compatibility: $RequiredDescriptorSchemaToken"
     }
 }
 foreach ($PackedOwnerContract in @(
@@ -1877,8 +1941,9 @@ if (-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 5') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 14') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 15') -or
 	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 16') -or
-	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 17')) {
-	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v17 typed object packages'
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 17') -or
+	-not $RuntimeReloadSource.Contains('DescriptorSchemaVersion != 18')) {
+	Add-Violation 'Runtime reload manifest loader must accept descriptor schema v5-v18 typed object packages'
 }
 foreach ($RequiredDelegateEventManifestContract in @(
     'delegate_event_count',

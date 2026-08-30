@@ -22,6 +22,7 @@ public class AvidScriptEditor : ModuleRules
 			{
 				"AvidScriptBindings",
 				"AvidScriptVM",
+				"BlueprintGraph",
 				"DirectoryWatcher",
 				"Projects",
 				"Json",
