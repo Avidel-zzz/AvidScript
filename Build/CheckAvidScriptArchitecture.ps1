@@ -1066,6 +1066,7 @@ $DelegateEventSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEdit
 $FunctionHookRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.h'
 $FunctionHookRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.cpp'
 $InboundHandlerSessionSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Session/AvidScriptSessionInboundHandlers.cpp'
+$InboundHandlerWasmRuntimeSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/AvidScriptWasmRuntime.cpp'
 $InboundHandlerSampleProfile = Read-RequiredFile 'Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlers.csharp-profile.json'
 $InboundHandlerSampleSource = Read-RequiredFile 'Samples/CSharp/InboundNetworkHandlers/InboundNetworkHandlersScript.cs'
 $ObjectFactoryPolicyHeader = Read-RequiredFile 'Source/AvidScriptBindings/Public/AvidScriptObjectFactoryPolicy.h'
@@ -1243,7 +1244,7 @@ foreach ($RequiredInboundHandlerContract in @(
         -not $BindingDescriptorSource.Contains($RequiredInboundHandlerContract) -and
         -not $BindingInvocationHeader.Contains($RequiredInboundHandlerContract) -and
         -not $BindingInvocationSource.Contains($RequiredInboundHandlerContract) -and
-        -not $WasmRuntimeSource.Contains($RequiredInboundHandlerContract)) {
+        -not $InboundHandlerWasmRuntimeSource.Contains($RequiredInboundHandlerContract)) {
         Add-Violation "schema v17 inbound handler contract is missing $RequiredInboundHandlerContract"
     }
 }

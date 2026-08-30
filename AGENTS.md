@@ -2193,7 +2193,7 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 - Mistake: after documenting the Windows PowerShell pipeline rule, the first D3 log-summary command still piped directly from a completed `foreach` block and failed to parse.
 - Prevention: workflow evidence commands follow the same compatibility rules as repository scripts. Collect loop output in a named variable, then pipe that variable in a separate statement.
 
-### 2026-08-30: avoid duplicate architecture-gate inputs
+### 2026-08-30: diagnose every operand in multiline gate failures
 
-- Mistake: the first clean D3 architecture run reused a broad binding-selection input in a later contract block; the attempted repair duplicated the same file under another variable and still aborted on a null short-circuit operand.
-- Prevention: a source file is loaded and owned by one architecture block. Later checks consume only their contract-specific sources instead of duplicating validated inputs. Any checker exception is discarded and never reported as gate evidence.
+- Mistake: the first clean D3 architecture failure was reported at the first line of a multiline short-circuit expression, so the repair targeted that first operand twice even though a later `$WasmRuntimeSource` operand had not been loaded yet.
+- Prevention: before changing a multiline architecture check, inspect every operand or use noninteractive breakpoints to identify the null value. Each contract block loads all sources it consumes before evaluation. A checker exception is discarded and never reported as gate evidence.
