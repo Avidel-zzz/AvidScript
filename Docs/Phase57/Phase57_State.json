@@ -10,11 +10,11 @@
     "path": "Docs/Superpowers/Specs/2026-08-12-phase57-generic-delegate-subscription-design.md",
     "version": 6,
     "sha256": "00fc934acc9aa02b7c2d7e824e5d8dc4cc8e34207449edd995db02c54c5d18e6",
-    "revision_reason": "The phase architecture remains version 6; the P57.12C16 array foreach continuation CFG extension is frozen by documents.plan and preserves the C12 state-frame and Host ABI contracts"
+    "revision_reason": "The phase architecture remains version 6; P57.12D1 adds generated UE RPC initiation and authority/callspace preflight without changing the continuation or Host ABI ownership model"
   },
   "documents": {
-    "plan": "Docs/Phase57/P57.12C16_Array_Foreach_Await_Plan.md",
-    "closeout": "Docs/Phase57/P57.12C16_Array_Foreach_Await.md"
+    "plan": "Docs/Phase57/P57.12D1_Generated_RPC_Authority_Plan.md",
+    "closeout": "Docs/Phase57/P57.12D1_Generated_RPC_Authority.md"
   },
   "batches": [
     {
@@ -28,54 +28,6 @@
       "status": "Completed",
       "evidence": "Adaptive plan, Wasmtime typed bridge, Runtime prepared call-site and Editor integration tests implemented; UE5.8 no-clean four-module build Result Succeeded (19 actions, 31.03s), static benchmark contracts passed.",
       "completed_at_utc": "2026-07-30T18:04:44.9305427+00:00"
-    },
-    {
-      "id": "P57.2",
-      "status": "Completed",
-      "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
-      "completed_at_utc": "2026-07-31T02:16:11.6980931+00:00"
-    },
-    {
-      "id": "P57.3",
-      "status": "Completed",
-      "evidence": "Wasmtime memory handle cache; UE5.8 AvidScriptVM 5-action build passed; Wasmtime Lifecycle 1/1 passed; clean candidate 3f9a5aa/9621f230 diagnostic 300/300 correct; Adaptive 89.5508ns vs Puerts Reflection 120.4688ns, ratio 0.74335 <= 0.80",
-      "completed_at_utc": "2026-07-31T02:52:11.4020069+00:00"
-    },
-    {
-      "id": "P57.4",
-      "status": "Completed",
-      "evidence": "Prepared generated call cell; formal 5-process P50 scalar 17.83 ns, property 33.76 ns, semantic/Puerts reflection 0.60657; 9000/9000 samples valid; clean candidate architecture check passed",
-      "completed_at_utc": "2026-07-31T14:13:48.3458040+00:00"
-    },
-    {
-      "id": "P57.5",
-      "status": "Completed",
-      "evidence": "Shape-specialized prepared export; formal 5-process paired ratio 0.9052217193 <= 0.95; 1050 observations valid; VM Automation 8/8 and clean architecture check passed",
-      "completed_at_utc": "2026-07-31T14:41:24.3403005+00:00"
-    },
-    {
-      "id": "P57.6",
-      "status": "Completed",
-      "evidence": "Frozen 12-kernel CPU0 formal attribution completed without changing kernels: p50 geomean 0.9821689140, p95 geomean 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; controlled leadership remains Fixing.",
-      "completed_at_utc": "2026-07-31T19:46:09.0000000+00:00"
-    },
-    {
-      "id": "P57.7",
-      "status": "Completed",
-      "evidence": "WasmtimeSerialized runtime consumer, canonical/execution split, compiler identity and fail-closed backend provenance completed; UE5.8 build, 24/24 Automation and clean architecture check passed.",
-      "completed_at_utc": "2026-07-31T20:16:41.0000000+00:00"
-    },
-    {
-      "id": "P57.8",
-      "status": "Completed",
-      "evidence": "Win64 Editor precompiler, 32-entry cache/attestation, transactional cwasm+manifest publication, Runtime loader/session/component integration completed; UE5.8 no-clean build passed; focused Automation 26/26; paired startup serialized/JIT ModuleLoadMs P50 ratio 0.070559 with 20/20 BeginPlay calls; clean candidate 76059e7/b85af12 architecture check passed.",
-      "completed_at_utc": "2026-08-01T00:45:12.5274341+00:00"
-    },
-    {
-      "id": "P57.9",
-      "status": "Completed",
-      "evidence": "Reproducible Wasmtime v45 performance toolchain and formal 12-kernel attribution completed; 55 toolchain assertions and 27 focused Automation passed; p50/p95 geomean 0.9797725739/1.0267275918, so P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-01T02:43:08.0000000+00:00"
     },
     {
       "id": "P57.10",
@@ -136,6 +88,48 @@
       "status": "Completed",
       "evidence": "commit e2cc4ab; Session-owned deterministic Delay/NextTick continuation core, generational tokens, explicit cancel, active/prepared transaction and teardown completed; fixed .NET and no-clean UE5.8 build passed, full Automation 355/355 and clean e2cc4ab/4c5baae architecture gate passed.",
       "completed_at_utc": "2026-08-27T16:10:02.0000000Z"
+    },
+    {
+      "id": "P57.12C10",
+      "status": "Completed",
+      "evidence": "commit 30af7fc; descriptor schema v14 freezes resume_outcome_on_cancel for provider latent results while preserving v13 abandon semantics; Session queues one Cancelled terminal callback, rejects duplicate/invalid cancellation, reclaims payload capabilities, and generated AvidOutcome<T> exposes Failed/Cancelled through compiler-owned lowering without new host imports or API-name wrappers. Fixed .NET 184/184, PowerShell contracts 117/117, UE5.8 no-clean Editor build 16/16 actions, final full AvidScript Automation 364/364 and clean 30af7fc/203d470 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T10:38:24.7896927Z"
+    },
+    {
+      "id": "P57.12C11",
+      "status": "Completed",
+      "evidence": "commit ca8a0a6; Semantic schema 14 adds exact top-level async_early_return_guard projection, Guest branch lowering and schema-13 fail-closed compatibility; provider result acceptance now gates all guard and business side effects before execution, and ActorLifecycle plus the project template exercise object-result early return without new host imports or API-name wrappers. Fixed .NET 186/186, PowerShell contracts 117/117, UE5.8 no-clean target succeeded, full AvidScript Automation 364/364 and clean ca8a0a6/df77e3e architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T11:13:44.2921234Z"
+    },
+    {
+      "id": "P57.12C12",
+      "status": "Completed",
+      "evidence": "commit 177017f; Semantic schema 15 per-await liveness frames preserve fixed-layout scalar, enum, FVector, fixed USTRUCT and object capability locals across multiple controlled awaits using one bounded bulk state store/read per boundary; Session token isolation, consume-once read, cancellation, reload, teardown and finalization reclamation complete the lifecycle without API-name wrappers. Fixed .NET 237/237, PowerShell contracts 117/117, UE5.8 no-clean Editor build, focused lifecycle 1/1, final full Automation 365/365 and clean 177017f/9abeeda architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T12:34:29.3692274Z"
+    },
+    {
+      "id": "P57.12C13",
+      "status": "Completed",
+      "evidence": "commits fe1df60 and dad046f; Semantic 1.16 structured async projection, exact backward liveness and Guest basic-block lowering now cover local reassignment, if/else, while, do/while, for, break, continue and return between top-level awaits without new Host imports, API-name wrappers or a Runtime AST interpreter. Fixed .NET 239/239, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean dad046f/8e0936f architecture gate passed. Nested await remains fail closed and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T18:05:07.3056952Z"
+    },
+    {
+      "id": "P57.12C14",
+      "status": "Completed",
+      "evidence": "commit 1e65134; Semantic 1.17 continuation CFG, exact CFG fixed-point liveness and Guest synchronous-reachability lowering now cover direct await inside if/else, while, do/while and for bodies with break, continue and return, without new Host imports, API-name wrappers, CLR Task Runtime or a Runtime AST interpreter. Fixed .NET 242/242, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean 1e65134/52d33e5 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T19:12:04.1945116Z"
+    },
+    {
+      "id": "P57.12C15",
+      "status": "Completed",
+      "evidence": "commit d67f2d6; Semantic 1.17 continuation CFG now lowers integral/enum switch dispatch, shared case sections, default fallback, section await, switch break and enclosing-loop continue into deterministic equality branches without new schema, Host imports, Runtime dispatchers or API-name wrappers. Fixed .NET 244/244, PowerShell contracts 117/117, UE5.8 no-clean Editor build, full Automation 365/365 and clean d67f2d6/20bf707 architecture gate passed. Foreach remains blocked on dynamic state ownership and P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T19:52:43.1052487Z"
+    },
+    {
+      "id": "P57.12C16",
+      "status": "Completed",
+      "evidence": "commit db687bb; Semantic schema 16/version 1.18 now lowers synchronous rank-one array value foreach, compiler-owned array/index locals, exact CFG liveness, await resume, break and continue into existing array region operations and deterministic branches without new Host imports, Runtime enumerators or API-name wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor target, full Automation 365/365 and clean db687bb/70082e7 architecture gate passed. P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-29T23:50:29.5490261Z"
     },
     {
       "id": "P57.12C2",
@@ -210,46 +204,58 @@
       "completed_at_utc": "2026-08-29T09:57:56.7428207Z"
     },
     {
-      "id": "P57.12C10",
+      "id": "P57.12D1",
       "status": "Completed",
-      "evidence": "commit 30af7fc; descriptor schema v14 freezes resume_outcome_on_cancel for provider latent results while preserving v13 abandon semantics; Session queues one Cancelled terminal callback, rejects duplicate/invalid cancellation, reclaims payload capabilities, and generated AvidOutcome<T> exposes Failed/Cancelled through compiler-owned lowering without new host imports or API-name wrappers. Fixed .NET 184/184, PowerShell contracts 117/117, UE5.8 no-clean Editor build 16/16 actions, final full AvidScript Automation 364/364 and clean 30af7fc/203d470 architecture gate passed. P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T10:38:24.7896927Z"
+      "evidence": "commit bc144fa; descriptor schema 15 and generated Server/Client/NetMulticast RPC invocation now preserve network mode/reliability identity, revalidate active UFunction flags, enforce Actor/ActorComponent ownership plus authority/callspace preflight, and reject candidate reload network side effects without per-API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor build, full Automation 368/368 and clean bc144fa/aafbe26 architecture gate passed. Replicated properties, RepNotify and inbound C# RPC handlers remain D2/D3; P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-30T00:50:14.9057240+00:00"
     },
     {
-      "id": "P57.12C11",
+      "id": "P57.2",
       "status": "Completed",
-      "evidence": "commit ca8a0a6; Semantic schema 14 adds exact top-level async_early_return_guard projection, Guest branch lowering and schema-13 fail-closed compatibility; provider result acceptance now gates all guard and business side effects before execution, and ActorLifecycle plus the project template exercise object-result early return without new host imports or API-name wrappers. Fixed .NET 186/186, PowerShell contracts 117/117, UE5.8 no-clean target succeeded, full AvidScript Automation 364/364 and clean ca8a0a6/df77e3e architecture gate passed. P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T11:13:44.2921234Z"
+      "evidence": "commit 851e393; explicit adaptive lane and unified runtime/Gate oracle; clean UE5.8 benchmark build passed; Phase56 Micro diagnostic 300/300 correct; adaptive scalar P50 112.4219 ns vs Puerts reflection 116.2891 ns (0.9667x, gate still red); Chinese report and compact SHA-bound evidence added",
+      "completed_at_utc": "2026-07-31T02:16:11.6980931+00:00"
     },
     {
-      "id": "P57.12C12",
+      "id": "P57.3",
       "status": "Completed",
-      "evidence": "commit 177017f; Semantic schema 15 per-await liveness frames preserve fixed-layout scalar, enum, FVector, fixed USTRUCT and object capability locals across multiple controlled awaits using one bounded bulk state store/read per boundary; Session token isolation, consume-once read, cancellation, reload, teardown and finalization reclamation complete the lifecycle without API-name wrappers. Fixed .NET 237/237, PowerShell contracts 117/117, UE5.8 no-clean Editor build, focused lifecycle 1/1, final full Automation 365/365 and clean 177017f/9abeeda architecture gate passed. P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T12:34:29.3692274Z"
+      "evidence": "Wasmtime memory handle cache; UE5.8 AvidScriptVM 5-action build passed; Wasmtime Lifecycle 1/1 passed; clean candidate 3f9a5aa/9621f230 diagnostic 300/300 correct; Adaptive 89.5508ns vs Puerts Reflection 120.4688ns, ratio 0.74335 <= 0.80",
+      "completed_at_utc": "2026-07-31T02:52:11.4020069+00:00"
     },
     {
-      "id": "P57.12C13",
+      "id": "P57.4",
       "status": "Completed",
-      "evidence": "commits fe1df60 and dad046f; Semantic 1.16 structured async projection, exact backward liveness and Guest basic-block lowering now cover local reassignment, if/else, while, do/while, for, break, continue and return between top-level awaits without new Host imports, API-name wrappers or a Runtime AST interpreter. Fixed .NET 239/239, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean dad046f/8e0936f architecture gate passed. Nested await remains fail closed and P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T18:05:07.3056952Z"
+      "evidence": "Prepared generated call cell; formal 5-process P50 scalar 17.83 ns, property 33.76 ns, semantic/Puerts reflection 0.60657; 9000/9000 samples valid; clean candidate architecture check passed",
+      "completed_at_utc": "2026-07-31T14:13:48.3458040+00:00"
     },
     {
-      "id": "P57.12C14",
+      "id": "P57.5",
       "status": "Completed",
-      "evidence": "commit 1e65134; Semantic 1.17 continuation CFG, exact CFG fixed-point liveness and Guest synchronous-reachability lowering now cover direct await inside if/else, while, do/while and for bodies with break, continue and return, without new Host imports, API-name wrappers, CLR Task Runtime or a Runtime AST interpreter. Fixed .NET 242/242, PowerShell contracts 117/117, UE5.8 no-clean Editor build, final full Automation 365/365 and clean 1e65134/52d33e5 architecture gate passed. P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T19:12:04.1945116Z"
+      "evidence": "Shape-specialized prepared export; formal 5-process paired ratio 0.9052217193 <= 0.95; 1050 observations valid; VM Automation 8/8 and clean architecture check passed",
+      "completed_at_utc": "2026-07-31T14:41:24.3403005+00:00"
     },
     {
-      "id": "P57.12C15",
+      "id": "P57.6",
       "status": "Completed",
-      "evidence": "commit d67f2d6; Semantic 1.17 continuation CFG now lowers integral/enum switch dispatch, shared case sections, default fallback, section await, switch break and enclosing-loop continue into deterministic equality branches without new schema, Host imports, Runtime dispatchers or API-name wrappers. Fixed .NET 244/244, PowerShell contracts 117/117, UE5.8 no-clean Editor build, full Automation 365/365 and clean d67f2d6/20bf707 architecture gate passed. Foreach remains blocked on dynamic state ownership and P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T19:52:43.1052487Z"
+      "evidence": "Frozen 12-kernel CPU0 formal attribution completed without changing kernels: p50 geomean 0.9821689140, p95 geomean 1.0430729337, p50/p95 win rate 0.6667/0.5833, correctness 0, fallback false; controlled leadership remains Fixing.",
+      "completed_at_utc": "2026-07-31T19:46:09.0000000+00:00"
     },
     {
-      "id": "P57.12C16",
+      "id": "P57.7",
       "status": "Completed",
-      "evidence": "commit db687bb; Semantic schema 16/version 1.18 now lowers synchronous rank-one array value foreach, compiler-owned array/index locals, exact CFG liveness, await resume, break and continue into existing array region operations and deterministic branches without new Host imports, Runtime enumerators or API-name wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean Editor target, full Automation 365/365 and clean db687bb/70082e7 architecture gate passed. P57-D06 remains Fixing.",
-      "completed_at_utc": "2026-08-29T23:50:29.5490261Z"
+      "evidence": "WasmtimeSerialized runtime consumer, canonical/execution split, compiler identity and fail-closed backend provenance completed; UE5.8 build, 24/24 Automation and clean architecture check passed.",
+      "completed_at_utc": "2026-07-31T20:16:41.0000000+00:00"
+    },
+    {
+      "id": "P57.8",
+      "status": "Completed",
+      "evidence": "Win64 Editor precompiler, 32-entry cache/attestation, transactional cwasm+manifest publication, Runtime loader/session/component integration completed; UE5.8 no-clean build passed; focused Automation 26/26; paired startup serialized/JIT ModuleLoadMs P50 ratio 0.070559 with 20/20 BeginPlay calls; clean candidate 76059e7/b85af12 architecture check passed.",
+      "completed_at_utc": "2026-08-01T00:45:12.5274341+00:00"
+    },
+    {
+      "id": "P57.9",
+      "status": "Completed",
+      "evidence": "Reproducible Wasmtime v45 performance toolchain and formal 12-kernel attribution completed; 55 toolchain assertions and 27 focused Automation passed; p50/p95 geomean 0.9797725739/1.0267275918, so P57-D06 remains Fixing.",
+      "completed_at_utc": "2026-08-01T02:43:08.0000000+00:00"
     }
   ],
   "debt": [
@@ -269,8 +275,8 @@
   ],
   "review": {
     "completed": true,
-    "evidence": "P57.12C16 concentrated review confirms single evaluation of rank-one array collection expressions, explicit source and compiler-local identity, exact array element typing, break/continue ownership, CFG fixed-point liveness, top-level array-reference state storage, activation and Session ownership fencing, deterministic Guest lowering and fail-closed rejection of unsupported enumerator shapes. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 365/365 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
-    "completed_at_utc": "2026-08-29T23:50:29.5490261Z"
+    "evidence": "P57.12D1 concentrated review confirms schema-15 network identity, active UFunction flag revalidation, Actor/ActorComponent owner resolution, authority/callspace preflight before ProcessEvent, candidate reload side-effect rejection, generated C# facade coverage and explicit D2/D3 boundaries without per-API wrappers. Fixed .NET 246/246, PowerShell contracts 117/117, UE5.8 no-clean target, full Automation 368/368 and clean candidate architecture gate passed. P57-D06 remains Fixing.",
+    "completed_at_utc": "2026-08-30T00:50:14.9078435+00:00"
   },
   "budgets": {
     "ubt": 2,
@@ -278,25 +284,25 @@
     "full_gate": 2
   },
   "invocations": {
-    "ubt": 29,
-    "automation": 32,
-    "full_gate": 13
+    "ubt": 31,
+    "automation": 35,
+    "full_gate": 14
   },
   "freeze": {
-    "source_commit": "db687bb9d0cd86d703b8e6a5251f914877e99264",
-    "source_tree": "70082e77e7e61d50f159719d75458c51a550a6e0",
+    "source_commit": "bc144fae900f5d661c4530e914f9371710256bf3",
+    "source_tree": "aafbe26a8da0afad406facc4dd25048910ab315d",
     "state_sha256": "",
-    "review_evidence": "Docs/Phase57/P57.12C16_Array_Foreach_Await.md",
-    "at_utc": "2026-08-29T23:50:29.5490261Z"
+    "review_evidence": "Docs/Phase57/P57.12D1_Generated_RPC_Authority.md",
+    "at_utc": "2026-08-30T00:50:14.9078435+00:00"
   },
   "gate": {
-    "report_path": "external:C:/tmp/AvidScript_P57_12C16_Architecture_db687bb_20260830.log",
-    "report_sha256": "f27b621fa79cadf1c1edd0d4f7fa392a3b34107c03088a547159603bf8024eb4",
-    "run_id": "P57.12C16-clean-architecture-final",
-    "verified_commit": "db687bb9d0cd86d703b8e6a5251f914877e99264",
-    "verified_tree": "70082e77e7e61d50f159719d75458c51a550a6e0",
-    "attestation_parent": "db687bb9d0cd86d703b8e6a5251f914877e99264",
-    "attested_at_utc": "2026-08-29T23:50:29.5490261Z"
+    "report_path": "external:C:/tmp/AvidScript_P57_12D1_Architecture_bc144fa_20260830.log",
+    "report_sha256": "fa8509041bcdfe4f8e2993b14a3f951f852e2982f7556ba994b42ee4ec4f06e7",
+    "run_id": "P57.12D1-clean-architecture-final",
+    "verified_commit": "bc144fae900f5d661c4530e914f9371710256bf3",
+    "verified_tree": "aafbe26a8da0afad406facc4dd25048910ab315d",
+    "attestation_parent": "bc144fae900f5d661c4530e914f9371710256bf3",
+    "attested_at_utc": "2026-08-30T00:50:14.9078435+00:00"
   },
   "protected_dirty": [
     {
@@ -319,6 +325,6 @@
     }
   ],
   "next_action": "debt-update -Phase 57 -DebtId P57-D06-ControlledLeadership -Status Verified -Evidence <text>",
-  "revision": 38,
-  "updated_at_utc": "2026-08-29T23:50:29.5490261Z"
+  "revision": 39,
+  "updated_at_utc": "2026-08-30T00:50:14.9078435+00:00"
 }

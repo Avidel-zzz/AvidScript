@@ -639,7 +639,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 
 当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D1 的 **368/368 通过**，固定 .NET
 完整基线为 `246/246`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-目标构建成功。D1 已完成项目自定义 Server、Client 与 NetMulticast UFUNCTION 的生成式调用、
+目标构建成功，clean candidate `bc144fa/aafbe26` 架构门禁通过。D1 已完成项目自定义 Server、Client 与 NetMulticast UFUNCTION 的生成式调用、
 descriptor 网络身份、活动 Reflection 复核、authority/callspace 前置校验与候选热重载副作用隔离；
 实际网络路由仍由 UE `ProcessEvent` 与 `GetFunctionCallspace` 决定。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
