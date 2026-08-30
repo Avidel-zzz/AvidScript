@@ -1,0 +1,43 @@
+{
+  "schema_version": 10,
+  "language": "csharp",
+  "source_path": "Plugins/AvidScript/Samples/CSharp/NetworkTopology/NetworkTopologyScript.cs",
+  "project_path": "Plugins/AvidScript/Samples/CSharp/ActorLifecycle/AvidScript.ActorLifecycle.csproj",
+  "module_id": "csharp_profile_network_topology",
+  "artifact_stem": "profile_network_topology",
+  "output_root": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_topology",
+  "report_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_topology/profile_network_topology.csharp.report.json",
+  "manifest_path": "Saved/AvidScriptCSharpGuest/Profiles/profile_network_topology/profile_network_topology.avidscript.json",
+  "build_script_path": "Plugins/AvidScript/Build/BuildCSharpActorLifecycle.ps1",
+  "configuration": "Release",
+  "binding_profile": {
+    "package_name": "avidscript.sample.network_topology",
+    "self_class_path": "/Script/AvidScriptRuntime.AvidScriptNetworkTopologyTestActor",
+    "classes": [
+      {
+        "class_path": "/Script/Engine.Actor",
+        "include_functions": [
+          "HasAuthority"
+        ]
+      },
+      {
+        "class_path": "/Script/AvidScriptRuntime.AvidScriptNetworkTopologyTestActor",
+        "include_functions": [
+          "ServerSubmitValue",
+          "ServerConfirmRepNotify",
+          "RecordScriptServerHandler",
+          "RecordScriptRepNotify"
+        ],
+        "before_handlers": [
+          "ServerSubmitValue"
+        ],
+        "after_handlers": [
+          "OnRep_ReplicatedScore"
+        ],
+        "writable_properties": [
+          "ReplicatedScore"
+        ]
+      }
+    ]
+  }
+}

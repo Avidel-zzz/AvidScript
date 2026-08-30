@@ -1063,6 +1063,14 @@ $NetworkRpcPlan = Read-RequiredFile 'Docs/Phase57/P57.12D1_Generated_RPC_Authori
 $ReplicatedPropertyPlan = Read-RequiredFile 'Docs/Phase57/P57.12D2_Replicated_Property_Plan.md'
 $InboundHandlerPlan = Read-RequiredFile 'Docs/Phase57/P57.12D3_Inbound_Network_Handler_Plan.md'
 $ChainedInboundHandlerPlan = Read-RequiredFile 'Docs/Phase57/P57.12D4_Chained_Blueprint_Inbound_Handler_Plan.md'
+$NetworkTopologyPlan = Read-RequiredFile 'Docs/Phase57/P57.12D5_Real_Network_Topology_Plan.md'
+$NetworkTopologyRunner = Read-RequiredFile 'Build/RunAvidScriptNetworkTopology.ps1'
+$NetworkTopologyHarnessSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptNetworkTopologyHarness.cpp'
+$NetworkTopologyFixtureHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptNetworkTopologyTestTypes.h'
+$NetworkTopologyFixtureSource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Tests/AvidScriptNetworkTopologyTestTypes.cpp'
+$NetworkTopologyProfile = Read-RequiredFile 'Samples/CSharp/NetworkTopology/NetworkTopology.csharp-profile.json'
+$NetworkTopologySample = Read-RequiredFile 'Samples/CSharp/NetworkTopology/NetworkTopologyScript.cs'
+$NetworkTopologyEditorTest = Read-RequiredFile 'Source/AvidScriptEditor/Private/Tests/AvidScriptEditorNetworkTopologyTests.cpp'
 $DelegateEventSelectionResolverSource = Read-RequiredFile 'Source/AvidScriptEditor/Private/BindingGeneration/AvidScriptEditorBindingDelegateEventSelectionResolver.cpp'
 $FunctionHookRegistryHeader = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.h'
 $FunctionHookRegistrySource = Read-RequiredFile 'Source/AvidScriptRuntime/Private/Network/AvidScriptFunctionHookRegistry.cpp'
@@ -1461,6 +1469,86 @@ foreach ($RequiredChainedHandlerPlanContract in @(
 )) {
     if (-not $ChainedInboundHandlerPlan.Contains($RequiredChainedHandlerPlanContract)) {
         Add-Violation "P57.12D4 chained inbound handler plan is missing $RequiredChainedHandlerPlanContract"
+    }
+}
+foreach ($RequiredNetworkTopologyHarnessContract in @(
+    'WITH_DEV_AUTOMATION_TESTS',
+    'AvidScriptNetworkTopologyRole=',
+    'OnGameModePostLoginEvent',
+    'AAvidScriptNetworkTopologyTestActor',
+    'network_topology_timeout',
+    'all_remote_clients_confirmed',
+    'rep_notify_and_ack_dispatched'
+)) {
+    if (-not $NetworkTopologyHarnessSource.Contains($RequiredNetworkTopologyHarnessContract)) {
+        Add-Violation "P57.12D5 network topology harness is missing $RequiredNetworkTopologyHarnessContract"
+    }
+}
+foreach ($RequiredNetworkTopologyRunnerContract in @(
+    "ValidateSet('All', 'Dedicated', 'Listen')",
+    'Get-FreeTcpPort',
+    'Start-Process',
+    '-WindowStyle Hidden',
+    'Stop-Process -Id',
+    'GameNetDriver.*listening',
+    "-Name 'dedicated'",
+    "-Name 'listen'",
+    'Assert-RoleResult',
+    'aggregate.json'
+)) {
+    if (-not $NetworkTopologyRunner.Contains($RequiredNetworkTopologyRunnerContract)) {
+        Add-Violation "P57.12D5 topology runner is missing $RequiredNetworkTopologyRunnerContract"
+    }
+}
+foreach ($RequiredNetworkTopologyFixtureContract in @(
+    'ServerSubmitValue',
+    'ServerConfirmRepNotify',
+    'OnRep_ReplicatedScore',
+    'RecordScriptServerHandler',
+    'RecordScriptRepNotify',
+    'ReplicatedUsing',
+    'bOnlyRelevantToOwner',
+    'DOREPLIFETIME'
+)) {
+    if (-not $NetworkTopologyFixtureHeader.Contains($RequiredNetworkTopologyFixtureContract) -and
+        -not $NetworkTopologyFixtureSource.Contains($RequiredNetworkTopologyFixtureContract)) {
+        Add-Violation "P57.12D5 replicated fixture is missing $RequiredNetworkTopologyFixtureContract"
+    }
+}
+foreach ($RequiredNetworkTopologySampleContract in @(
+    'AvidContinuation',
+    'ServerSubmitValue',
+    'AvidEvents.ServerSubmitValue',
+    'AvidEvents.OnRep_ReplicatedScore',
+    'ServerConfirmRepNotify',
+    '"before_handlers"',
+    '"after_handlers"',
+    '"writable_properties"'
+)) {
+    if (-not $NetworkTopologySample.Contains($RequiredNetworkTopologySampleContract) -and
+        -not $NetworkTopologyProfile.Contains($RequiredNetworkTopologySampleContract)) {
+        Add-Violation "P57.12D5 generated C# network sample is missing $RequiredNetworkTopologySampleContract"
+    }
+}
+foreach ($RequiredNetworkTopologyPlanContract in @(
+    'dedicated server + 2 clients',
+    'listen server + 1 remote client',
+    'UE NetDriver',
+    'Push Model',
+    'SHA-256',
+    'P57-D06-ControlledLeadership'
+)) {
+    if (-not $NetworkTopologyPlan.Contains($RequiredNetworkTopologyPlanContract)) {
+        Add-Violation "P57.12D5 topology plan is missing $RequiredNetworkTopologyPlanContract"
+    }
+}
+foreach ($RequiredNetworkTopologyBuildContract in @(
+    'AvidScript.Editor.NetworkTopology.BuildProfile',
+    'BuildProfile',
+    'NetworkTopology.csharp-profile.json'
+)) {
+    if (-not $NetworkTopologyEditorTest.Contains($RequiredNetworkTopologyBuildContract)) {
+        Add-Violation "P57.12D5 production profile test is missing $RequiredNetworkTopologyBuildContract"
     }
 }
 foreach ($RequiredEmitterSchemaContract in @(

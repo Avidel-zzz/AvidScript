@@ -212,7 +212,7 @@ Plugins/AvidScript/Docs
 - 2026-07-31 P57.2 Adaptive benchmark 共享 instrumentation 漏审：首次运行 Micro diagnostic 时，校验器错误地把 `TryResolveFusedCallbackReceiver` 的共享接收者缓存计数视为仅属于 Generated/Data lane，导致 `adaptive_native=10` 且业务结果完全正确时仍被判失败。Prevention：新增执行 lane 时必须逐项审计其复用的跨路径 instrumentation，并让 correctness oracle 明确声明允许值，不能仅检查新加的专属计数器。
 - 2026-07-31 P57.2 Adaptive correctness 首次修正范围过窄：根据第一个失败样本把 prepared-native 期望硬编码为 `ScalarAddInt32`，下一次运行才暴露 `BatchScalar` 及 gameplay 也复用相同 typed shape。Prevention：benchmark oracle 必须从 guest workload 映射和 binding eligibility 推导统一的 expected-count 函数，禁止根据首个失败 workload 名逐项放行。
 - 2026-07-31 P57.2 runtime oracle 与外部 Gate 审计不同步：修正 runner correctness 后才发现 `Evaluate-Phase54PerformanceGates.ps1` 仍只验证 adaptive scalar 且拒绝共享 receiver-cache 计数。Prevention：benchmark 计数合同变更必须同时检索并更新 runtime oracle、外部 evaluator、schema/contract test 四个 owner，阶段诊断通过不等于 Gate 口径已同步。
-- 2026-07-31 P57.3 在未提交 production 输入上运行 architecture evidence checker：`CheckAvidScriptArchitecture.ps1` 按设计要求输入与报告 Git tree 完全一致，因此只报告 dirty evidence，不能提供有意义的架构判断。Prevention：实现中先运行 scoped diff/static/build；需要 tree-bound 的 architecture checker 时，先提交拥有的改动，再在 clean candidate 上运行，不能把 dirty-input 拒绝消耗成一次架构审查。
+- 2026-07-31 P57.3 在未提交 production 输入上运行 architecture evidence checker：`CheckAvidScriptArchitecture.ps1` 按设计要求输入与报告 Git tree 完全一致，因此只报告 dirty evidence，不能提供有意义的架构判断。2026-08-30 P57.12D5 在 checker parser 通过后又复发一次，唯一结果仍是 dirty evidence 拒绝。Prevention：实现中先运行 scoped diff/static/build；需要 tree-bound 的 architecture checker 时，先提交拥有的改动，再在 clean candidate 上运行，不能把 dirty-input 拒绝消耗成一次架构审查。
 - 2026-07-31 P57.2 benchmark harness 构建 owner 假设：把仓库内 `AvidScriptPerfHarness` 源目录直接当成项目目标的常驻 module，执行 target-plus-`-Module=AvidScriptPerfHarness`；UBT 在编译前以 `Unable to find output items for module` 拒绝。Prevention：benchmark harness 必须先按其 tracked prepare/fixture 流程挂载到目标工程，再由该流程构建；`-Module` 只用于当前 `.uproject` 已启用且 action graph 可解析的模块，不能从源码目录名推断。
 - 2026-07-31 P57.2 跨 benchmark schema 指标名误用：给 P53 sidecar 加 adaptive hit 校验时，直接沿用 Phase54 aggregate 的 `logical_operation_count`，但该 process-result 合同的对应字段是 `operation_call_count`。Prevention：跨结果层新增校验前必须读取目标 schema 的 `required` 与 `properties`，逐字复用该层字段名；不能从相邻 runner、aggregate 或 phase contract 推导名称。
 - 2026-07-31 P57.1 `rg` 连字符 pattern 规则复发：检索 `-Module=...` 时再次遗漏 `--`，`rg` 在读取文件前把 pattern 解析为参数并拒绝。Prevention：发送任何 `rg` 命令前检查 pattern 首字符；以 `-` 开头时固定写成 `rg <options> -- '<pattern>' <paths>`，即使只是文档或命令示例检索也不例外。
@@ -2228,3 +2228,18 @@ cmd /c Plugins\AvidScript\Build\BuildWAMRWin64.cmd
 
 - Mistake: the P57.12D4 closeout invoked `InvokePhaseWorkflow.ps1 help` even though the script has no help command and validates `-Phase` before dispatch, producing ASPW1101 without useful evidence.
 - Prevention: inspect the command switch in `InvokePhaseWorkflow.ps1` or use the documented `status -Phase <id>` entrypoint. Unknown convenience commands are not probed against state-management scripts.
+
+### 2026-08-30: reflected C# fixture functions must be Blueprint callable
+
+- Mistake: the first P57.12D5 network fixture declared RPC and recorder methods as `UFUNCTION` but omitted `BlueprintCallable`, so the generic reflection policy correctly generated only the property facade and the readable C# sample failed semantic binding.
+- Prevention: any test function intended to prove project C# API generation must satisfy the same public Reflection policy as production project APIs. Inspect the generated C# facade after profile bootstrap; do not treat UHT reflection alone as C# callability.
+
+### 2026-08-30: every component sample must satisfy the lifecycle ABI
+
+- Mistake: the first real dedicated topology profile exported `avid_on_begin_play` but not the required `avid_on_tick`; both clients connected and server actors spawned, then each Runtime Session failed closed with `missing_export` before the RPC flow could run.
+- Prevention: production component samples export the complete required lifecycle ABI even when one callback is intentionally empty. Run the production profile and inspect Runtime role JSON before attributing a topology timeout to NetDriver or RPC routing.
+
+### 2026-08-30: keep host object locals out of unnecessary async state graphs
+
+- Mistake: the first D5 sample carried typed UE wrapper locals through an `async void` method only to delay one RPC, producing an `ASCG1001` GuestIR input-graph rejection and obscuring the network test objective.
+- Prevention: use Session-owned zero-heap `AvidContinuation` callbacks when no result or structured control flow is needed; reacquire `UE.Self` in the callback. Reserve `async/await` state frames for gameplay logic that genuinely needs awaited values or structured suspension.
