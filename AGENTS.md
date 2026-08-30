@@ -21,7 +21,7 @@ pwsh -NoProfile -File Build/InvokeAgentHarness.ps1 bootstrap -Intent "<当前任
 ## 仓库与工具链
 
 - Git 根是当前 `Plugins/AvidScript`，不是 `AvidTPSTemplate` 工程根。Git 操作从插件根执行。
-- 默认分支为 `main`。未经用户明确要求，不 commit、不 push、不 rebase、不 reset、不改写历史。
+- 默认分支为 `main`。用户已持续授权：每个可独立审查的小节完成集中验证后，立即按精确路径白名单 commit 并 push 到 `origin/main`；不等待整个 Phase 结束。该授权不包含 rebase、reset、强推或改写历史。
 - 使用源码版 Unreal Engine 5.8，引擎根固定为 `C:\UnrealEngine`。
 - .NET host 为 `%USERPROFILE%\.dotnet\dotnet.exe`，仓库 SDK 固定为 `8.0.416`。从插件 cwd 验证版本后使用；缓存与 CLI state 放在仓库外。
 - 文件发现先使用 `rg --files`，内容检索使用 `rg`。路径必须来自索引；Windows 通配符使用 `-g`，禁止猜路径。
@@ -79,7 +79,7 @@ AvidScript 是面向 UE 的 WASM-first、C#-first、PC-first 且 mobile-aware �
 3. 集成后冻结代码，执行一次集中代码与架构审查，一次列全 findings。
 4. 合并为一次集中修复；只有新 Blocker/Critical 才追加最小探针。
 5. 阶段末统一执行静态检查、受影响 .NET、no-clean UBT、Automation 和必要 benchmark。
-6. 更新中文收尾、Gate 证据和 Phase 状态，再按用户要求提交或推送。
+6. 每个架构、功能、集中修复或 Gate 小节完成集中验证后，立即白名单提交并推送；阶段末再更新中文收尾、Gate 证据和 Phase 状态。
 
 禁止把阶段拆成“小任务实现 -> 独立复审 -> 再复审”的串行链。普通问题进入阶段债务；只有崩溃、数据破坏、安全、ABI/Schema、生命周期、并发、跨平台或工具链阻塞可以打断实现。
 
