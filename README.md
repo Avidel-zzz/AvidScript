@@ -333,8 +333,8 @@ public static void BeginPlay()
 }
 ```
 
-候选热重载会在 `ProcessEvent` 前拒绝 RPC，避免不可回滚的网络副作用。D1 只开放脚本主动调用
-RPC；UE 收到 RPC 后分发到 C# handler 仍属于后续网络批次。
+候选热重载会在 `ProcessEvent` 前拒绝 RPC，避免不可回滚的网络副作用。D1 开放脚本主动调用
+RPC；D3 已进一步支持被 Profile 显式授权的 native RPC 入站 C# handler。
 完整样例见 [NetworkRpc](Samples/CSharp/NetworkRpc/README.md)。
 
 ### Replicated Property
@@ -360,8 +360,34 @@ public static void BeginPlay()
 ```
 
 replicated setter 禁止 Generated S1 与 candidate reload，direct、struct、fast-path 和 BlueprintSetter
-都在同一 authority/dirty 边界内。D2 不轮询属性变化，也尚未把入站 RepNotify 转发为 C# handler。
+都在同一 authority/dirty 边界内。D2 不轮询属性变化；D3 只在 UE 真正调用 RepNotify UFunction 时
+进入 C# handler。
 完整样例见 [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md)。
+
+### 入站 RPC 与 RepNotify Handler
+
+P57.12D3 通过 Profile schema 9 的 `include_handlers` 显式选择项目 native RPC 与 RepNotify
+`UFUNCTION`，descriptor schema 17 冻结网络/属性身份，再按 `(UFunction, UObject)` 路由到当前
+Session 的生成式 C# export：
+
+```csharp
+[AvidEvent(AvidEvents.ServerSubmitValue)]
+public static void HandleServerSubmitValue(int value)
+{
+    AAvidScriptBindingRuntimeNetworkTestActor self = UE.Self;
+    self.ReplicatedScore = value;
+}
+
+[AvidEvent(AvidEvents.OnRep_ReplicatedScore)]
+public static void HandleReplicatedScoreChanged()
+{
+}
+```
+
+首批采用 `replace` 语义：active route 命中后只执行 C# handler；export 缺失、候选未提交、对象不匹配
+或 Session 卸载时保持/恢复原生 thunk。NetDriver、RPC callspace、复制条件与 RepNotify 触发时机仍由 UE
+负责，不增加按项目 API 手写的 Host import。完整样例见
+[InboundNetworkHandlers](Samples/CSharp/InboundNetworkHandlers/README.md)。
 
 当前支持零参数、非泛型、block-bodied 的 `public static async void` 导出，以及在受支持控制流中的直接
 `DelayAsync(float)`、`NextTickAsync()`、`LoadObjectAsync(const string)` 和受支持的生成式 latent
@@ -381,7 +407,7 @@ trap 会回滚本次借出的对象 capability。
 | 确定性 Continuation | `Delay` / `NextTick`、`FStreamableManager` 异步对象加载、生成式 UE latent producer、typed outcome、显式 cancellation source、状态与对象结果、CPS dispatcher、不透明 token、Session active/prepared 事务、owner generation/World liveness 围栏与 teardown |
 | 受控 async/await | 多个顺序 await、分支/循环/switch/一维数组 foreach 内部 await、固定值与数组引用 local 跨 await、局部重赋值、`if/else`、integral/enum `switch`、`for`/`foreach`/`while`/`do`、`break`/`continue`/`return`、continuation CFG、per-await liveness frame、Reflection 生成 `FooAsync`、零 Guest 堆 CPS segment、稳定 resume debug map、store/read/schedule fail closed；不依赖 CLR `Task` Runtime |
 | UE 事件订阅 | Profile 显式授权的动态多播委托；任意 Session capability UObject 源、生成式 `[AvidEvent]` / `AvidSubscriptions`、显式 token/cancel、事务式热重载与自动解绑 |
-| UE 网络交互 | 生成式 Server、Client、NetMulticast RPC；replicated property 双端读取、authority 写入、Push Model dirty、原生 RepNotify 保留；Actor/ActorComponent owner、authority/callspace 前置校验与候选热重载副作用隔离 |
+| UE 网络交互 | 生成式 Server、Client、NetMulticast RPC；replicated property 双端读取、authority 写入与 Push Model dirty；Profile 授权的 native RPC/RepNotify 入站 C# handler；Actor/ActorComponent owner、authority/callspace 前置校验、Session 对象路由与候选热重载副作用隔离 |
 | 生成式 Binding | Profile 授权的普通 `UFUNCTION`/`UPROPERTY`、Generated S1、prepared dynamic executor、严格 fallback |
 | UE 值类型 | `FVector`、`FRotator`、`FTransform`、enum、`FName`、`FString` |
 | 自定义 USTRUCT | 递归固定宽度字段图；value/const-ref/ref/out/return 与 property get/set；对象叶 capability |
@@ -626,6 +652,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 | [AsyncArrayForeach](Samples/CSharp/AsyncArrayForeach/README.md) | 一维数组 foreach 中逐 Tick await，并在恢复后继续调用 UE Actor API |
 | [NetworkRpc](Samples/CSharp/NetworkRpc/README.md) | C# 调用项目自定义 Server、Client、NetMulticast RPC，并按 authority 选择方向 |
 | [ReplicatedProperty](Samples/CSharp/ReplicatedProperty/README.md) | C# 普通属性语法读写 replicated property，authority setter 与 Push Model dirty |
+| [InboundNetworkHandlers](Samples/CSharp/InboundNetworkHandlers/README.md) | UE 入站 RPC 与 RepNotify 直接进入生成式 C# handler，并继续调用 replicated property API |
 | [D Guest](Samples/D/ActorSetLocation/README.md) | D 到 WASM 的早期验证链路 |
 | [.avid Guest](Samples/AvidScript/ActorSetLocation/README.md) | 自研语言前端的早期原型 |
 
@@ -639,7 +666,7 @@ cmd /c Build\BuildWAMRWin64.cmd
 - soft object path 尚不会自动加入 Cook 依赖，打包项目必须显式纳入脚本所引用的资产；异步结果当前在 Session teardown 统一释放，尚无细粒度 lease/release；
 - completion-only、静态 Blueprint Function Library latent 已支持首批单 cell value 参数；instance
   latent、复杂参数/返回类型的通用 completion payload、取消句柄映射、interface dispatch 和 Blueprint 图中新声明函数尚未完整支持；
-- C# 已可主动调用满足 D1 合同的 Server、Client 与 NetMulticast UFUNCTION，并读取或在 authority 上写入满足 D2 合同的 replicated property；入站 RPC 到 C# handler、入站 RepNotify 到 C# handler、FastArray/custom delta、网络预测和回滚尚未支持；
+- C# 已可主动调用满足 D1 合同的 Server、Client 与 NetMulticast UFUNCTION，读取或在 authority 上写入满足 D2 合同的 replicated property，并接收满足 D3 合同的 native RPC/RepNotify handler；Blueprint handler、可配置 before/after 链式策略、有所有权参数的重入队列、FastArray/custom delta、网络预测和回滚尚未支持；
 - `FText` 的本地化 identity/history 语义尚未支持；
 - C# 由 Roslyn semantic/CFG lowering 编译，不提供完整 .NET Runtime；
 - 高频 `Tick` 内应优先使用已有 Generated S1 或经过 benchmark 的 prepared shape；
@@ -665,15 +692,16 @@ cmd /c Build\BuildWAMRWin64.cmd
 - UE5.8 no-clean Editor build 与 `Automation RunTests AvidScript`；
 - 同机、候选绑定的 Puerts/Wasmtime 正式性能矩阵。
 
-当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D2 的 **371/371 通过**，固定 .NET
+当前最近一次完整 AvidScript Automation 基线为 Phase 57.12D3 的 **373/373 通过**，固定 .NET
 完整基线为 `246/246`，PowerShell 合同为 `117/117`。UE5.8 no-clean `AvidTPSTemplateEditor`
-目标构建成功，clean candidate `1d12bb0/9eeb779` 架构门禁通过。D1 已完成项目自定义
+目标构建成功，clean candidate `10b0c52/8e19c0e` 架构门禁通过。D1 已完成项目自定义
 Server、Client 与 NetMulticast UFUNCTION 的生成式调用；D2 已完成 replicated property 双端读取、
-authority 写入、活动 Reflection/ClassReps 复核与 Push Model dirty。网络路由、复制发送和原生 RepNotify
-仍由 UE 负责，C# 入站 RPC/RepNotify handler 尚未实现。
+authority 写入、活动 Reflection/ClassReps 复核与 Push Model dirty；D3 已完成 Profile 授权的 native
+RPC/RepNotify 入站 C# handler、Session 对象路由与事务式 hook 生命周期。网络路由、复制发送和
+RepNotify 触发时机仍由 UE 负责；真实 dedicated/listen 多客户端验收留给 D5。
 本阶段没有新增性能 benchmark，性能表继续引用已冻结的
 P57.11D/P57.11B1/P56 正式证据。最新阶段报告见
-[P57.12D2 中文完成报告](Docs/Phase57/P57.12D2_Replicated_Property.md)。
+[P57.12D3 中文完成报告](Docs/Phase57/P57.12D3_Inbound_Network_Handler.md)。
 
 工程规则：
 
